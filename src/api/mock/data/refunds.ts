@@ -1,0 +1,91 @@
+import type { Refund } from '../../../types/refund';
+import { v4 as uuidv4 } from 'uuid';
+
+const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
+
+export const mockRefunds: Refund[] = [
+  {
+    id: 'refund-001', refundNo: 'REF-202501-0001', orderId: 'order-005', orderNo: 'ORD-202501-0006',
+    customerId: 'cust-006', customerName: '杭州万物互联', productLevel: '899',
+    orderAmount: 899, refundAmount: 899, refundReason: '产品不满足需求', refundCategory: '产品质量',
+    status: '退款已完成', applicantId: 'user-001', applicantName: '张伟',
+    approverId: 'user-005', approverName: '刘强', approvedAt: daysAgo(18),
+    refundMethod: '银行转账', refundVoucher: 'voucher-001.pdf', completedAt: daysAgo(15),
+    remark: '客户反馈功能缺失', createdAt: daysAgo(25), updatedAt: daysAgo(15),
+  },
+  {
+    id: 'refund-002', refundNo: 'REF-202501-0002', orderId: 'order-012', orderNo: 'ORD-202501-0013',
+    customerId: 'cust-013', customerName: '乌鲁木齐西域', productLevel: '代理',
+    orderAmount: 9800, refundAmount: 7840, refundReason: '预算调整，暂时不需要', refundCategory: '预算调整',
+    status: '退款申请中', applicantId: 'user-002', applicantName: '李娜',
+    remark: '客户可能后续重新购买', createdAt: daysAgo(5), updatedAt: daysAgo(3),
+  },
+  {
+    id: 'refund-003', refundNo: 'REF-202501-0003', orderId: 'order-028', orderNo: 'ORD-202501-0029',
+    customerId: 'cust-020', customerName: '广州云图教育', productLevel: '贴牌',
+    orderAmount: 29800, refundAmount: 0, refundReason: '服务不满意，交付延迟', refundCategory: '服务不满意',
+    status: '退款已拒绝', applicantId: 'user-004', applicantName: '赵敏',
+    approverId: 'user-005', approverName: '刘强', approvedAt: daysAgo(10),
+    rejectReason: '已超过退款期限，且大部分服务已交付',
+    createdAt: daysAgo(14), updatedAt: daysAgo(10),
+  },
+  {
+    id: 'refund-004', refundNo: 'REF-202501-0004', orderId: 'order-003', orderNo: 'ORD-202501-0004',
+    customerId: 'cust-003', customerName: '重庆智联教育', productLevel: '贴牌',
+    orderAmount: 29800, refundAmount: 23840, refundReason: '业务方向调整', refundCategory: '需求变更',
+    status: '退款已批准', applicantId: 'user-002', applicantName: '李娜',
+    approverId: 'user-005', approverName: '刘强', approvedAt: daysAgo(2),
+    remark: '按80%比例退款', createdAt: daysAgo(7), updatedAt: daysAgo(2),
+  },
+  {
+    id: 'refund-005', refundNo: 'REF-202501-0005', orderId: 'order-008', orderNo: 'ORD-202501-0009',
+    customerId: 'cust-008', customerName: '长沙融创智能', productLevel: '899',
+    orderAmount: 899, refundAmount: 899, refundReason: '试用后不满意', refundCategory: '产品质量',
+    status: '退款已完成', applicantId: 'user-004', applicantName: '赵敏',
+    approverId: 'user-005', approverName: '刘强', approvedAt: daysAgo(22),
+    refundMethod: '微信支付', completedAt: daysAgo(20),
+    createdAt: daysAgo(28), updatedAt: daysAgo(20),
+  },
+  {
+    id: 'refund-006', refundNo: 'REF-202501-0006', orderId: 'order-015', orderNo: 'ORD-202501-0016',
+    customerId: 'cust-016', customerName: '西安云帆信息', productLevel: '899',
+    orderAmount: 899, refundAmount: 899, refundReason: '找到替代产品', refundCategory: '其他',
+    status: '退款已完成', applicantId: 'user-001', applicantName: '张伟',
+    approverId: 'user-003', approverName: '王磊', approvedAt: daysAgo(12),
+    refundMethod: '支付宝', completedAt: daysAgo(10),
+    createdAt: daysAgo(18), updatedAt: daysAgo(10),
+  },
+  {
+    id: 'refund-007', refundNo: 'REF-202501-0007', orderId: 'order-022', orderNo: 'ORD-202501-0023',
+    customerId: 'cust-023', customerName: '沈阳北方数据', productLevel: '899',
+    orderAmount: 899, refundAmount: 0, refundReason: '功能不匹配需求', refundCategory: '需求变更',
+    status: '退款已拒绝', applicantId: 'user-001', applicantName: '张伟',
+    approverId: 'user-005', approverName: '刘强', approvedAt: daysAgo(5),
+    rejectReason: '客户提供的需求超出产品范围，建议升级代理版',
+    createdAt: daysAgo(8), updatedAt: daysAgo(5),
+  },
+  {
+    id: 'refund-008', refundNo: 'REF-202501-0008', orderId: 'order-018', orderNo: 'ORD-202501-0019',
+    customerId: 'cust-019', customerName: '海口椰城科技', productLevel: '代理',
+    orderAmount: 9800, refundAmount: 7840, refundReason: '市场变化无法继续合作', refundCategory: '预算调整',
+    status: '退款申请中', applicantId: 'user-001', applicantName: '张伟',
+    remark: '客户表示可能明年恢复合作', createdAt: daysAgo(2), updatedAt: daysAgo(1),
+  },
+  {
+    id: 'refund-009', refundNo: 'REF-202501-0009', orderId: 'order-025', orderNo: 'ORD-202501-0026',
+    customerId: 'cust-002', customerName: '上海数联信息', productLevel: '课程',
+    orderAmount: 2980, refundAmount: 2980, refundReason: '课程内容不符合预期', refundCategory: '产品质量',
+    status: '退款已批准', applicantId: 'user-002', applicantName: '李娜',
+    approverId: 'user-005', approverName: '刘强', approvedAt: daysAgo(1),
+    createdAt: daysAgo(4), updatedAt: daysAgo(1),
+  },
+  {
+    id: 'refund-010', refundNo: 'REF-202501-0010', orderId: 'order-031', orderNo: 'ORD-202501-0032',
+    customerId: 'cust-010', customerName: '福州博远信息', productLevel: '899',
+    orderAmount: 899, refundAmount: 899, refundReason: '服务响应慢', refundCategory: '服务不满意',
+    status: '退款已完成', applicantId: 'user-003', applicantName: '王磊',
+    approverId: 'user-005', approverName: '刘强', approvedAt: daysAgo(30),
+    refundMethod: '对公转账', completedAt: daysAgo(28),
+    createdAt: daysAgo(35), updatedAt: daysAgo(28),
+  },
+];

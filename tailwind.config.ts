@@ -1,0 +1,40 @@
+import type { Config } from 'tailwindcss';
+
+const config: Config = {
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  theme: {
+    extend: {
+      colors: {
+        primary: {
+          50: '#E3F2FD',
+          100: '#BBDEFB',
+          200: '#90CAF9',
+          300: '#64B5F6',
+          400: '#42A5F5',
+          500: '#2196F3',
+          600: '#1E88E5',
+          700: '#1976D2',
+          800: '#1565C0',
+          900: '#0D47A1',
+        },
+        level899: '#2196F3',
+        levelAgent: '#4CAF50',
+        levelOem: '#9C27B0',
+        levelPartner: '#FF9800',
+      },
+      spacing: {
+        sidebar: '240px',
+      },
+      fontSize: {
+        metric: '2rem',
+        'metric-sm': '1.5rem',
+      },
+    },
+  },
+  plugins: [],
+  corePlugins: {
+    preflight: false,
+  },
+};
+
+export default config;
