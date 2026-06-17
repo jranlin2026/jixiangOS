@@ -12,7 +12,7 @@ import {
 } from '@dnd-kit/core';
 import useDeliveryStore from '../../store/useDeliveryStore';
 import { deliveryApi, productApi } from '../../api';
-import { PRODUCT_LEVEL_COLOR_MAP } from '../../shared/utils/constants';
+import { DEFAULT_PRODUCT_LEVEL_CONFIGS } from '../../shared/utils/constants';
 import DeliveryColumn from './DeliveryColumn';
 import DeliveryCard from './DeliveryCard';
 import type { Delivery, DeliveryProductType } from '../../types/delivery';
@@ -41,29 +41,30 @@ const Delivery: React.FC = () => {
   const [stageMap, setStageMap] = useState<Record<string, string[]>>({});
   const { items, loading, fetchByProductType, advanceStage } = useDeliveryStore();
 
-  const fallbackProductTypes: ProductTabConfig[] = [
-    { label: '899产品', type: '899', color: PRODUCT_LEVEL_COLOR_MAP['899'] },
-    { label: '课程产品', type: '课程', color: PRODUCT_LEVEL_COLOR_MAP['课程'] },
-    { label: '代理产品', type: '代理', color: PRODUCT_LEVEL_COLOR_MAP['代理'] },
-    { label: '贴牌产品', type: '贴牌', color: PRODUCT_LEVEL_COLOR_MAP['贴牌'] },
-    { label: '合伙人', type: '合伙人', color: PRODUCT_LEVEL_COLOR_MAP['合伙人'] },
-  ];
+  const fallbackProductTypes: ProductTabConfig[] = DEFAULT_PRODUCT_LEVEL_CONFIGS.map((level) => ({
+    label: level.name.endsWith('产品') ? level.name : `${level.name}产品`,
+    type: level.name,
+    color: level.color,
+  }));
   const [productTypes, setProductTypes] = useState<ProductTabConfig[]>(fallbackProductTypes);
 
   useEffect(() => {
     const loadProductTabs = async () => {
-      const res = await productApi.getAllProducts();
-      if (res.code !== 0) return;
-      const byLevel = new Map<string, ProductTabConfig>();
-      res.data.filter((product) => product.isActive).forEach((product) => {
-        if (byLevel.has(product.level)) return;
-        byLevel.set(product.level, {
-          label: product.level.endsWith('产品') ? product.level : `${product.level}产品`,
-          type: product.level,
-          color: PRODUCT_LEVEL_COLOR_MAP[product.level] || '#2196F3',
-        });
-      });
-      const next = Array.from(byLevel.values());
+      const [productsRes, levelsRes] = await Promise.all([
+        productApi.getAllProducts(),
+        productApi.getProductLevelConfigs(),
+      ]);
+      if (levelsRes.code !== 0) return;
+      const levelsWithProducts = new Set(
+        productsRes.code === 0 ? productsRes.data.filter((product) => product.isActive).map((product) => product.level) : [],
+      );
+      const next = levelsRes.data
+        .filter((level) => level.isActive || levelsWithProducts.has(level.name))
+        .map((level) => ({
+          label: level.name.endsWith('产品') ? level.name : `${level.name}产品`,
+          type: level.name,
+          color: level.color,
+        }));
       if (next.length) {
         setProductTypes(next);
         setTabValue((current) => Math.min(current, next.length - 1));

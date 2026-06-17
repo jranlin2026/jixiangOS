@@ -1,9 +1,10 @@
 import type { Order, OrderFilters, OrderStats } from '../types/order';
+import type { Customer } from '../types/customer';
 import type { Commission, CommissionRole } from '../types/commission';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../shared/utils/constants';
+import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, PRODUCT_TO_CUSTOMER_LEVEL } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { commissionRuleApi } from './commissionRuleApi';
 import { deliveryApi } from './deliveryApi';
@@ -34,6 +35,88 @@ function getPersonByRole(order: Order, role: CommissionRole): string {
     case '销售主管': return '待分配';
     default: return order.owner;
   }
+}
+
+function getPrimaryPaymentDate(order: Order): string {
+  return order.payments?.[0]?.paidAt || order.createdAt;
+}
+
+function syncCustomerOrderStats(order: Order, allOrders: Order[]): void {
+  const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+  const customerIdx = customers.findIndex(
+    (customer) => customer.id === order.customerId
+      || customer.company === order.customerName
+      || customer.name === order.customerName,
+  );
+
+  if (customerIdx === -1) return;
+
+  const customer = customers[customerIdx];
+  const relatedOrders = allOrders.filter(
+    (item) => item.customerId === customer.id
+      || item.customerName === customer.company
+      || item.customerName === customer.name,
+  );
+  const latestOrder = relatedOrders
+    .slice()
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] || order;
+
+  customers[customerIdx] = {
+    ...customer,
+    productLevel: latestOrder.productLevel,
+    customerLevel: (PRODUCT_TO_CUSTOMER_LEVEL[latestOrder.productLevel] || customer.customerLevel) as Customer['customerLevel'],
+    orderCount: relatedOrders.length,
+    totalSpent: relatedOrders.reduce((sum, item) => sum + (Number(item.actualAmount) || 0), 0),
+    updatedAt: new Date().toISOString(),
+  };
+
+  setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
+}
+
+const ORDER_CHANGE_FIELDS: Array<{ field: keyof Order; label: string }> = [
+  { field: 'customerId', label: '客户' },
+  { field: 'customerName', label: '客户名称' },
+  { field: 'productLevel', label: '产品等级/分类' },
+  { field: 'orderType', label: '订单类型' },
+  { field: 'amount', label: '订单金额' },
+  { field: 'actualAmount', label: '实付金额' },
+  { field: 'paymentMethod', label: '支付方式' },
+  { field: 'status', label: '订单状态' },
+  { field: 'refundStatus', label: '退款状态' },
+  { field: 'owner', label: '负责人' },
+  { field: 'sourceType', label: '来源类型' },
+  { field: 'resourceOwnership', label: '资源归属' },
+  { field: 'officialPaymentChannel', label: '官方收款渠道' },
+  { field: 'isExternalTalentOrder', label: '外部达人成交' },
+  { field: 'dealScene', label: '成交场景' },
+  { field: 'proofStatus', label: '凭证状态' },
+  { field: 'collaboratorName', label: '协同人员' },
+  { field: 'collaboratorRole', label: '协同角色' },
+  { field: 'collaboratorRatio', label: '协同比例' },
+  { field: 'originalOrderId', label: '原始订单' },
+  { field: 'performanceBaseAmount', label: '业绩核算基数' },
+  { field: 'notes', label: '备注' },
+  { field: 'payments', label: '付款记录' },
+];
+
+function normalizeChangeValue(value: unknown): string | number | boolean | null {
+  if (value === undefined || value === '') return null;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'string') return value;
+  return JSON.stringify(value);
+}
+
+function buildOrderChanges(before: Order, data: Partial<Order>) {
+  return ORDER_CHANGE_FIELDS
+    .filter(({ field }) => Object.prototype.hasOwnProperty.call(data, field))
+    .map(({ field, label }) => ({
+      field: String(field),
+      label,
+      oldValue: normalizeChangeValue(before[field]),
+      newValue: normalizeChangeValue(data[field]),
+    }))
+    .filter((item) => item.oldValue !== item.newValue);
 }
 
 async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<PaginatedResponse<Order>>> {
@@ -68,6 +151,20 @@ async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<Paginate
   }
   if (filters?.endDate) {
     filtered = filtered.filter((o) => o.createdAt <= filters.endDate!);
+  }
+
+  if (filters?.sortBy === 'paymentDate') {
+    filtered.sort((a, b) => {
+      const aTime = new Date(getPrimaryPaymentDate(a)).getTime();
+      const bTime = new Date(getPrimaryPaymentDate(b)).getTime();
+      return filters.sortDirection === 'asc' ? aTime - bTime : bTime - aTime;
+    });
+  } else if (filters?.sortBy === 'createdAt') {
+    filtered.sort((a, b) => {
+      const aTime = new Date(a.createdAt).getTime();
+      const bTime = new Date(b.createdAt).getTime();
+      return filters.sortDirection === 'asc' ? aTime - bTime : bTime - aTime;
+    });
   }
 
   const page = filters?.page || 1;
@@ -128,8 +225,16 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
     orderNo,
     createdAt: now,
     updatedAt: now,
+    changeHistory: [{
+      id: `hist-${uuidv4().slice(0, 8)}`,
+      action: 'create',
+      operator: data.owner || '系统',
+      changedAt: now,
+      summary: '创建订单',
+    }],
   };
   orders.unshift(newOrder);
+  syncCustomerOrderStats(newOrder, orders);
 
   // ===== 多角色自动分佣引擎 =====
   // 根据订单制度字段匹配所有适用规则
@@ -200,8 +305,27 @@ async function updateOrder(id: string, data: Partial<Order>): Promise<ApiRespons
   const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
   const idx = orders.findIndex((o) => o.id === id);
   if (idx === -1) return createSuccessResponse(null);
-  orders[idx] = { ...orders[idx], ...data, updatedAt: new Date().toISOString() };
+  const now = new Date().toISOString();
+  const existing = orders[idx];
+  const changes = buildOrderChanges(existing, data);
+  const history = existing.changeHistory || [];
+  orders[idx] = {
+    ...existing,
+    ...data,
+    changeHistory: changes.length > 0
+      ? [{
+        id: `hist-${uuidv4().slice(0, 8)}`,
+        action: 'update',
+        operator: data.owner || existing.owner || '系统',
+        changedAt: now,
+        summary: `修改了 ${changes.map((item) => item.label).join('、')}`,
+        changes,
+      }, ...history]
+      : history,
+    updatedAt: now,
+  };
   setStorageData(STORAGE_KEYS.ORDERS, orders);
+  syncCustomerOrderStats(orders[idx], orders);
   return createSuccessResponse(orders[idx]);
 }
 
@@ -209,7 +333,10 @@ async function deleteOrder(id: string): Promise<ApiResponse<boolean>> {
   ensureInit();
   await delay(150);
   const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
-  setStorageData(STORAGE_KEYS.ORDERS, orders.filter((o) => o.id !== id));
+  const target = orders.find((o) => o.id === id);
+  const nextOrders = orders.filter((o) => o.id !== id);
+  setStorageData(STORAGE_KEYS.ORDERS, nextOrders);
+  if (target) syncCustomerOrderStats(target, nextOrders);
   return createSuccessResponse(true);
 }
 

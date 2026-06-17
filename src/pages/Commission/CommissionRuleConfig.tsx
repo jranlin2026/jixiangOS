@@ -23,6 +23,7 @@ import type {
   ResourceOwnership,
 } from '../../types/commission';
 import type { ProductLevel } from '../../types/common';
+import type { ProductLevelConfig } from '../../types/product';
 
 const ROLES: CommissionRole[] = ['销售', '线索', '客户成功', '售后', '招商主管', '销售主管'];
 const ROLE_LABELS: Record<CommissionRole, string> = {
@@ -65,7 +66,7 @@ const CommissionRuleConfig: React.FC = () => {
   const [editingRule, setEditingRule] = useState<CommissionRule | null>(null);
   const [form, setForm] = useState<RuleForm>(emptyForm);
   const [previewAmount, setPreviewAmount] = useState(9800);
-  const [productLevels, setProductLevels] = useState<string[]>([]);
+  const [productLevels, setProductLevels] = useState<ProductLevelConfig[]>([]);
 
   const preview = useMemo(() => {
     const performanceAmount = Math.round(previewAmount * ((form.performanceRate || 100) / 100) * 100) / 100;
@@ -89,9 +90,9 @@ const CommissionRuleConfig: React.FC = () => {
   useEffect(() => {
     fetchRules();
     const loadProductLevels = async () => {
-      const res = await productApi.getAllProducts();
+      const res = await productApi.getProductLevelConfigs();
       if (res.code === 0) {
-        setProductLevels(Array.from(new Set(res.data.map((product) => product.level))));
+        setProductLevels(res.data.filter((level) => level.isActive));
       }
     };
     loadProductLevels();
@@ -251,14 +252,24 @@ const CommissionRuleConfig: React.FC = () => {
                 {COMMISSION_SCENES.map((scene) => <MenuItem key={scene.value} value={scene.value}>{scene.label}</MenuItem>)}
               </Select>
             </FormControl>
-            <TextField
-              label="产品等级/分类"
-              value={form.productLevel}
-              onChange={(e) => updateForm('productLevel', e.target.value as ProductLevel | '')}
-              placeholder="留空=通用"
-              helperText={productLevels.length ? `当前：${productLevels.join('、')}` : '留空表示不限产品'}
-              fullWidth
-            />
+            <FormControl fullWidth>
+              <InputLabel>产品等级/分类</InputLabel>
+              <Select
+                value={form.productLevel}
+                label="产品等级/分类"
+                onChange={(e) => updateForm('productLevel', e.target.value as ProductLevel | '')}
+              >
+                <MenuItem value="">通用产品</MenuItem>
+                {productLevels.map((level) => (
+                  <MenuItem key={level.id} value={level.name}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: level.color }} />
+                      {level.name}
+                    </Box>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             <FormControl fullWidth>
               <InputLabel>订单类型</InputLabel>
               <Select

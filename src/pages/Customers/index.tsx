@@ -7,7 +7,7 @@ import {
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import AddIcon from '@mui/icons-material/Add';
 import useCustomerStore from '../../store/useCustomerStore';
-import { PRODUCT_LEVELS, PRODUCT_LEVEL_COLOR_MAP, CUSTOMER_LEVELS } from '../../shared/utils/constants';
+import { PRODUCT_LEVELS, getProductLevelColor, CUSTOMER_LEVELS } from '../../shared/utils/constants';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import CustomerDetail from './CustomerDetail';
@@ -131,8 +131,8 @@ const Customers: React.FC = () => {
                     label={customer.productLevel}
                     size="small"
                     sx={{
-                      bgcolor: `${PRODUCT_LEVEL_COLOR_MAP[customer.productLevel]}18`,
-                      color: PRODUCT_LEVEL_COLOR_MAP[customer.productLevel],
+                      bgcolor: `${getProductLevelColor(customer.productLevel)}18`,
+                      color: getProductLevelColor(customer.productLevel),
                       fontWeight: 600,
                     }}
                   />

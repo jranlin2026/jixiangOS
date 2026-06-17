@@ -7,9 +7,8 @@ import {
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import useUpgradeStore from '../../store/useUpgradeStore';
-import { CUSTOMER_LEVEL_COLOR_MAP, PRODUCT_LEVEL_COLOR_MAP } from '../../shared/utils/constants';
+import { CUSTOMER_LEVEL_COLOR_MAP, getProductLevelColor } from '../../shared/utils/constants';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
-import type { ProductLevel } from '../../types/common';
 import UpgradeDetail from './UpgradeDetail';
 
 const UpgradePool: React.FC = () => {
@@ -108,7 +107,7 @@ const UpgradePool: React.FC = () => {
           <TableBody>
             {items.map((opp: any) => {
               const probColor = opp.probability >= 80 ? '#4CAF50' : opp.probability >= 60 ? '#FF9800' : '#9ca3af';
-              const targetColor = PRODUCT_LEVEL_COLOR_MAP[opp.targetProduct as ProductLevel] || '#9ca3af';
+              const targetColor = getProductLevelColor(opp.targetProduct);
               const currentLevelColor = CUSTOMER_LEVEL_COLOR_MAP[opp.currentLevel] || '#9ca3af';
               return (
                 <TableRow key={opp.id} hover>

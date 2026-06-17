@@ -7,7 +7,7 @@ import {
 import type { UpgradeOpportunity } from '../../types/upgrade';
 import { upgradeApi } from '../../api';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
-import { CUSTOMER_LEVEL_COLOR_MAP, CUSTOMER_LEVEL_LABELS, PRODUCT_LEVEL_COLOR_MAP } from '../../shared/utils/constants';
+import { CUSTOMER_LEVEL_COLOR_MAP, CUSTOMER_LEVEL_LABELS, getProductLevelColor } from '../../shared/utils/constants';
 import AIScorePanel from './AIScorePanel';
 
 interface UpgradeDetailProps {
@@ -43,7 +43,7 @@ const UpgradeDetail: React.FC<UpgradeDetailProps> = ({ id, open, onClose }) => {
     onClose();
   };
 
-  const targetColor = PRODUCT_LEVEL_COLOR_MAP[opportunity.targetProduct] || '#9ca3af';
+  const targetColor = getProductLevelColor(opportunity.targetProduct);
   const currentLevelColor = CUSTOMER_LEVEL_COLOR_MAP[opportunity.currentLevel] || '#9ca3af';
 
   return (

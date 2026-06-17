@@ -46,6 +46,15 @@ export const PRODUCT_LEVEL_BG_MAP: Record<string, string> = {
   '合伙人': '#FFF3E0',
 };
 
+/** 默认产品等级/业务分类配置 */
+export const DEFAULT_PRODUCT_LEVEL_CONFIGS = [
+  { id: 'plc-001', name: '899', color: '#2196F3', isActive: true, sortOrder: 1 },
+  { id: 'plc-002', name: '课程', color: '#00BCD4', isActive: true, sortOrder: 2 },
+  { id: 'plc-003', name: '代理', color: '#4CAF50', isActive: true, sortOrder: 3 },
+  { id: 'plc-004', name: '贴牌', color: '#9C27B0', isActive: true, sortOrder: 4 },
+  { id: 'plc-005', name: '合伙人', color: '#FF9800', isActive: true, sortOrder: 5 },
+] as const;
+
 /** 客户等级颜色映射 */
 export const CUSTOMER_LEVEL_COLOR_MAP: Record<string, string> = {
   L1: '#9E9E9E',
@@ -136,6 +145,10 @@ export type OrderStatus = (typeof ORDER_STATUS)[keyof typeof ORDER_STATUS];
 /** 退款状态 */
 export const REFUND_STATUS = {
   NONE: '无',
+  TO_ASSIGN: '待分配',
+  RECOVERING: '挽回中',
+  RECOVERY_SUCCESS: '挽回成功',
+  WAITING_FINANCE: '待财务退款',
   PENDING: '退款申请中',
   APPROVED: '退款已批准',
   COMPLETED: '退款已完成',
@@ -268,12 +281,31 @@ export const STORAGE_KEYS = {
   DEPARTMENTS: `${STORAGE_PREFIX}departments`,
   ROLES: `${STORAGE_PREFIX}roles`,
   PRODUCTS: `${STORAGE_PREFIX}products`,
+  PRODUCT_LEVELS: `${STORAGE_PREFIX}product_levels`,
   REFUNDS: `${STORAGE_PREFIX}refunds`,
   UPGRADE_POOL: `${STORAGE_PREFIX}upgrade_pool`,
   COMMISSION_RULES: `${STORAGE_PREFIX}commission_rules`,
   TAGS: `${STORAGE_PREFIX}tags`,
   INITIALIZED: `${STORAGE_PREFIX}initialized`,
 } as const;
+
+/** 从配置中读取产品等级颜色；配置不存在时回退到旧常量 */
+export const getProductLevelColor = (level?: string, fallback = '#9ca3af'): string => {
+  if (!level) return fallback;
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.PRODUCT_LEVELS);
+      if (raw) {
+        const configs = JSON.parse(raw) as Array<{ name: string; color: string; isActive?: boolean }>;
+        const config = configs.find((item) => item.name === level && item.isActive !== false);
+        if (config?.color) return config.color;
+      }
+    } catch {
+      // 使用默认颜色兜底
+    }
+  }
+  return PRODUCT_LEVEL_COLOR_MAP[level] || fallback;
+};
 
 /** 分页默认值 */
 export const DEFAULT_PAGE_SIZE = 20;
@@ -327,6 +359,26 @@ export const REFUND_CATEGORIES = [
   { value: '预算调整', label: '预算调整' },
   { value: '需求变更', label: '需求变更' },
   { value: '其他', label: '其他' },
+] as const;
+
+/** 挽回动作类型 */
+export const RECOVERY_ACTION_TYPES = [
+  { value: '电话沟通', label: '电话沟通' },
+  { value: '微信沟通', label: '微信沟通' },
+  { value: '补课培训', label: '补课培训' },
+  { value: '优惠补偿', label: '优惠补偿' },
+  { value: '服务升级', label: '服务升级' },
+  { value: '专人跟进', label: '专人跟进' },
+] as const;
+
+/** 挽回方案 */
+export const RECOVERY_SOLUTIONS = [
+  { value: '补课/培训', label: '补课/培训' },
+  { value: '服务升级', label: '服务升级' },
+  { value: '专人跟进', label: '专人跟进' },
+  { value: '优惠券/补偿', label: '优惠券/补偿' },
+  { value: '换产品', label: '换产品' },
+  { value: '延长服务期', label: '延长服务期' },
 ] as const;
 
 /** 订单类型列表 — 匹配提成业务场景 */

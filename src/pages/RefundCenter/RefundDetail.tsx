@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box,
-  Typography, Chip, Divider, Stepper, Step, StepLabel,
+  Typography, Chip, Divider, Stepper, Step, StepLabel, List, ListItem, ListItemText,
 } from '@mui/material';
 import type { Refund } from '../../types/refund';
-import type { ProductLevel } from '../../types/common';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
-import { PRODUCT_LEVEL_COLOR_MAP } from '../../shared/utils/constants';
+import { getProductLevelColor } from '../../shared/utils/constants';
 import useRefundStore from '../../store/useRefundStore';
 import RefundProcessDialog from './RefundProcessDialog';
 
@@ -16,33 +15,56 @@ interface RefundDetailProps {
   onClose: () => void;
 }
 
-const statusSteps = ['退款申请中', '退款已批准', '退款已完成'];
+const statusSteps = ['待分配', '挽回中', '挽回成功', '待财务退款', '退款已批准', '退款已完成'];
 
 const getActiveStep = (status: string): number => {
   if (status === '退款已拒绝') return -1;
+  if (status === '退款申请中') return 0;
   return statusSteps.indexOf(status);
+};
+
+const getStatusColor = (status: string): 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning' => {
+  const map: Record<string, 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning'> = {
+    待分配: 'warning',
+    挽回中: 'primary',
+    挽回成功: 'success',
+    待财务退款: 'secondary',
+    退款申请中: 'warning',
+    退款已批准: 'info',
+    退款已完成: 'success',
+    退款已拒绝: 'error',
+  };
+  return map[status] || 'default';
 };
 
 const RefundDetail: React.FC<RefundDetailProps> = ({ refund, open, onClose }) => {
   const [processOpen, setProcessOpen] = useState(false);
-  const [processAction, setProcessAction] = useState<'approve' | 'reject' | 'complete'>('approve');
-  const { approve, reject, complete, fetchItems } = useRefundStore();
+  const [processAction, setProcessAction] = useState<'assign' | 'log' | 'success' | 'failed' | 'approve' | 'reject' | 'complete'>('assign');
+  const { assign, addLog, markSuccess, markFailed, approve, reject, complete } = useRefundStore();
 
   const activeStep = getActiveStep(refund.status);
-  const levelColor = PRODUCT_LEVEL_COLOR_MAP[refund.productLevel as ProductLevel] || '#9ca3af';
+  const levelColor = getProductLevelColor(refund.productLevel);
 
-  const handleAction = (action: 'approve' | 'reject' | 'complete') => {
+  const handleAction = (action: typeof processAction) => {
     setProcessAction(action);
     setProcessOpen(true);
   };
 
   const handleProcessSubmit = async (data: any) => {
-    if (processAction === 'approve') {
+    if (processAction === 'assign') {
+      await assign(refund.id, data);
+    } else if (processAction === 'log') {
+      await addLog(refund.id, data);
+    } else if (processAction === 'success') {
+      await markSuccess(refund.id, { ...data, retainedAmount: Number(data.retainedAmount) || refund.orderAmount });
+    } else if (processAction === 'failed') {
+      await markFailed(refund.id, data);
+    } else if (processAction === 'approve') {
       await approve(refund.id, 'user-005', '刘强');
     } else if (processAction === 'reject') {
       await reject(refund.id, 'user-005', '刘强', data.rejectReason || '');
     } else if (processAction === 'complete') {
-      await complete(refund.id, data.refundMethod || '银行转账', data.refundVoucher);
+      await complete(refund.id, data.refundMethod || '银行转账', data.refundVoucher, data.refundSerialNo, data.refundedAt);
     }
     setProcessOpen(false);
     onClose();
@@ -56,7 +78,7 @@ const RefundDetail: React.FC<RefundDetailProps> = ({ refund, open, onClose }) =>
             <Typography variant="h6" sx={{ fontWeight: 600 }}>{refund.refundNo}</Typography>
             <Chip label={refund.productLevel} size="small" sx={{ bgcolor: `${levelColor}18`, color: levelColor, fontWeight: 600 }} />
           </Box>
-          <Chip label={refund.status} size="small" color={refund.status === '退款已完成' ? 'success' : refund.status === '退款已拒绝' ? 'error' : refund.status === '退款已批准' ? 'info' : 'warning'} />
+          <Chip label={refund.status} size="small" color={getStatusColor(refund.status)} />
         </DialogTitle>
         <DialogContent dividers>
           {/* 退款流程时间轴 */}
@@ -119,6 +141,57 @@ const RefundDetail: React.FC<RefundDetailProps> = ({ refund, open, onClose }) =>
             </Box>
           </Box>
 
+          <Divider sx={{ my: 2 }} />
+
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="subtitle2" sx={{ mb: 1.5, color: '#6b7280' }}>挽回任务</Typography>
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1.5 }}>
+              <Typography variant="body2">负责人: {refund.recoveryTask?.assignedToName || '-'}</Typography>
+              <Typography variant="body2">角色: {refund.recoveryTask?.assignedToRole || '-'}</Typography>
+              <Typography variant="body2">优先级: {refund.recoveryTask?.priority || '-'}</Typography>
+              <Typography variant="body2">任务状态: {refund.recoveryTask?.status || '-'}</Typography>
+              <Typography variant="body2">挽回次数: {refund.recoveryTask?.attemptCount || 0}/{refund.recoveryTask?.maxAttempts || 3}</Typography>
+              <Typography variant="body2">锁定到期: {refund.recoveryTask?.lockUntil ? formatDate(refund.recoveryTask.lockUntil, 'yyyy-MM-dd HH:mm') : '-'}</Typography>
+              <Typography variant="body2">下次跟进: {refund.recoveryTask?.nextFollowUpAt ? formatDate(refund.recoveryTask.nextFollowUpAt, 'yyyy-MM-dd HH:mm') : '-'}</Typography>
+              <Typography variant="body2">成功方式: {refund.recoveryTask?.successMethod || '-'}</Typography>
+              <Typography variant="body2">失败原因: {refund.recoveryTask?.failedReason || '-'}</Typography>
+            </Box>
+          </Box>
+
+          <Divider sx={{ my: 2 }} />
+
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="subtitle2" sx={{ mb: 1.5, color: '#6b7280' }}>提成与财务联动</Typography>
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1.5 }}>
+              <Typography variant="body2">冻结提成: {formatCurrency(refund.frozenCommissionAmount || 0)}</Typography>
+              <Typography variant="body2">预计损失: {formatCurrency(refund.estimatedLossAmount || 0)}</Typography>
+              <Typography variant="body2">挽回提成: {formatCurrency(refund.recoveryCommissionAmount || 0)}</Typography>
+              <Typography variant="body2">挽回比例: {Math.round((refund.recoveryRate || 0.03) * 100)}%</Typography>
+              <Typography variant="body2">保留金额: {formatCurrency(refund.retainedAmount || 0)}</Typography>
+              <Typography variant="body2">最终退款: {refund.status === '退款已完成' ? formatCurrency(refund.refundAmount) : '-'}</Typography>
+            </Box>
+          </Box>
+
+          <Divider sx={{ my: 2 }} />
+
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="subtitle2" sx={{ mb: 1.5, color: '#6b7280' }}>挽回记录时间线</Typography>
+            {refund.recoveryLogs?.length ? (
+              <List dense sx={{ bgcolor: '#f8fafc', borderRadius: 1 }}>
+                {refund.recoveryLogs.map((log) => (
+                  <ListItem key={log.id} divider>
+                    <ListItemText
+                      primary={`${formatDate(log.createdAt, 'yyyy-MM-dd HH:mm')}  ${log.operatorName} · ${log.actionType} · ${log.result}`}
+                      secondary={log.content}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            ) : (
+              <Typography variant="body2" sx={{ color: '#9ca3af' }}>暂无挽回记录</Typography>
+            )}
+          </Box>
+
           {refund.approverName && (
             <>
               <Divider sx={{ my: 2 }} />
@@ -143,7 +216,17 @@ const RefundDetail: React.FC<RefundDetailProps> = ({ refund, open, onClose }) =>
           )}
         </DialogContent>
         <DialogActions>
-          {refund.status === '退款申请中' && (
+          {['待分配', '退款申请中'].includes(refund.status) && (
+            <Button variant="outlined" onClick={() => handleAction('assign')}>分配任务</Button>
+          )}
+          {['待分配', '挽回中'].includes(refund.status) && (
+            <>
+              <Button variant="outlined" onClick={() => handleAction('log')}>记录沟通</Button>
+              <Button color="success" variant="contained" onClick={() => handleAction('success')}>挽回成功</Button>
+              <Button color="warning" variant="outlined" onClick={() => handleAction('failed')}>挽回失败</Button>
+            </>
+          )}
+          {['待财务退款', '退款申请中'].includes(refund.status) && (
             <>
               <Button color="error" variant="outlined" onClick={() => handleAction('reject')}>驳回</Button>
               <Button color="primary" variant="contained" onClick={() => handleAction('approve')}>批准</Button>
@@ -159,6 +242,7 @@ const RefundDetail: React.FC<RefundDetailProps> = ({ refund, open, onClose }) =>
       <RefundProcessDialog
         open={processOpen}
         action={processAction}
+        refund={refund}
         onClose={() => setProcessOpen(false)}
         onSubmit={handleProcessSubmit}
       />

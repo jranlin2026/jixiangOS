@@ -114,6 +114,9 @@ export interface Commission {
   department: string;
   status: CommissionStatus;
   commissionRuleId?: ID;
+  commissionType?: 'sales' | 'cs' | 'support' | 'recovery';
+  sourceRefundId?: ID;
+  isRecoveryBonus?: boolean;
   paidAt?: Timestamp;
   createdAt: Timestamp;
   updatedAt: Timestamp;

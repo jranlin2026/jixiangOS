@@ -9,6 +9,10 @@ interface RefundStatusBadgeProps {
 
 const statusColorMap: Record<string, 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning'> = {
   '无': 'default',
+  '待分配': 'warning',
+  '挽回中': 'primary',
+  '挽回成功': 'success',
+  '待财务退款': 'secondary',
   '退款申请中': 'warning',
   '退款已批准': 'info',
   '退款已完成': 'success',

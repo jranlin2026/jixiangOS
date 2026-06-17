@@ -81,6 +81,7 @@ const useOrderStore = create<OrderState>((set, get) => ({
     try {
       await orderApi.updateOrder(id, data);
       await get().fetchItems();
+      await get().fetchStats();
     } catch (e: any) {
       set({ error: e.message, loading: false });
     }
@@ -91,6 +92,7 @@ const useOrderStore = create<OrderState>((set, get) => ({
     try {
       await orderApi.deleteOrder(id);
       await get().fetchItems();
+      await get().fetchStats();
     } catch (e: any) {
       set({ error: e.message, loading: false });
     }
@@ -104,22 +106,26 @@ const useOrderStore = create<OrderState>((set, get) => ({
         set({ error: '订单不存在', loading: false });
         return;
       }
-      await refundApi.createRefund({
+      const refundRes = await refundApi.createRefund({
         orderId: order.id,
         orderNo: order.orderNo,
         customerId: order.customerId,
         customerName: order.customerName,
         productLevel: order.productLevel,
-        orderAmount: order.amount,
+        orderAmount: order.actualAmount,
         refundAmount: refundData.refundAmount,
         refundReason: refundData.refundReason,
         refundCategory: refundData.refundCategory as any,
-        status: '退款申请中',
+        status: '待分配',
         applicantId: refundData.applicantId,
         applicantName: refundData.applicantName,
       });
+      if (refundRes.code !== 0) {
+        set({ error: refundRes.message, loading: false });
+        return;
+      }
       // 更新订单退款状态
-      await orderApi.updateOrder(orderId, { refundStatus: '退款申请中', refundAmount: refundData.refundAmount, refundReason: refundData.refundReason });
+      await orderApi.updateOrder(orderId, { refundStatus: '待分配', refundAmount: refundData.refundAmount, refundReason: refundData.refundReason });
       await get().fetchItems();
     } catch (e: any) {
       set({ error: e.message, loading: false });

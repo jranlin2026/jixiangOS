@@ -17,7 +17,24 @@ export interface OrderPayment {
   amount: number;
   paymentMethod: PaymentMethod;
   paidAt: Timestamp;
+  paymentOrderNo?: string;
+  voucherName?: string;
+  voucherPreview?: string;
   remark?: string;
+}
+
+export interface OrderChangeLog {
+  id: ID;
+  action: 'create' | 'update' | 'delete';
+  operator: string;
+  changedAt: Timestamp;
+  summary: string;
+  changes?: Array<{
+    field: string;
+    label: string;
+    oldValue?: string | number | boolean | null;
+    newValue?: string | number | boolean | null;
+  }>;
 }
 
 /** 订单 */
@@ -67,6 +84,7 @@ export interface Order {
   commissionId?: ID;
   deliveryId?: ID;
   notes?: string;
+  changeHistory?: OrderChangeLog[];
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -93,6 +111,8 @@ export interface OrderFilters {
   paymentMethod?: PaymentMethod;
   startDate?: string;
   endDate?: string;
+  sortBy?: 'createdAt' | 'paymentDate';
+  sortDirection?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;
 }

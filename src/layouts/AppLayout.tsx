@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Outlet } from 'react-router-dom';
 import { Box } from '@mui/material';
 import Sidebar from './Sidebar';
 
 const AppLayout: React.FC = () => {
-  const [sidebarWidth] = useState(240);
+  const sidebarWidth = 240;
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: '#f8f9fa' }}>
@@ -13,7 +13,7 @@ const AppLayout: React.FC = () => {
         component="main"
         sx={{
           flexGrow: 1,
-          ml: `${sidebarWidth}px`,
+          minWidth: 0,
           minHeight: '100vh',
           overflow: 'auto',
         }}

@@ -8,7 +8,7 @@ import PsychologyIcon from '@mui/icons-material/Psychology';
 import type { Customer } from '../../types/customer';
 import { customerApi } from '../../api';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
-import { PRODUCT_LEVEL_COLOR_MAP, CUSTOMER_LEVEL_LABELS } from '../../shared/utils/constants';
+import { getProductLevelColor, CUSTOMER_LEVEL_LABELS } from '../../shared/utils/constants';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 
 interface CustomerDetailProps {
@@ -48,8 +48,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({ customer, open, onClose
             label={currentCustomer.productLevel}
             size="small"
             sx={{
-              bgcolor: `${PRODUCT_LEVEL_COLOR_MAP[currentCustomer.productLevel]}18`,
-              color: PRODUCT_LEVEL_COLOR_MAP[currentCustomer.productLevel],
+              bgcolor: `${getProductLevelColor(currentCustomer.productLevel)}18`,
+              color: getProductLevelColor(currentCustomer.productLevel),
               fontWeight: 600,
             }}
           />
@@ -131,7 +131,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({ customer, open, onClose
                     sx={{
                       position: 'absolute', left: -21, top: 4,
                       width: 10, height: 10, borderRadius: '50%',
-                      bgcolor: PRODUCT_LEVEL_COLOR_MAP[milestone.productLevel] || '#2196F3',
+                      bgcolor: getProductLevelColor(milestone.productLevel, '#2196F3'),
                       border: '2px solid #fff', boxShadow: '0 0 0 2px #e5e7eb',
                     }}
                   />
@@ -140,7 +140,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({ customer, open, onClose
                   )}
                   <Box>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                      <Chip label={milestone.productLevel} size="small" sx={{ fontSize: '0.6875rem', bgcolor: `${PRODUCT_LEVEL_COLOR_MAP[milestone.productLevel]}18`, color: PRODUCT_LEVEL_COLOR_MAP[milestone.productLevel] }} />
+                      <Chip label={milestone.productLevel} size="small" sx={{ fontSize: '0.6875rem', bgcolor: `${getProductLevelColor(milestone.productLevel)}18`, color: getProductLevelColor(milestone.productLevel) }} />
                       <Typography variant="caption" sx={{ color: '#9ca3af' }}>{milestone.date}</Typography>
                     </Box>
                     <Typography variant="body2" sx={{ fontWeight: 500 }}>{milestone.title}</Typography>

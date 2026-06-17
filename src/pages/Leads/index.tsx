@@ -7,7 +7,7 @@ import {
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import AddIcon from '@mui/icons-material/Add';
 import useLeadStore from '../../store/useLeadStore';
-import { LEAD_STATUS, LEAD_SOURCES, PRODUCT_LEVEL_COLOR_MAP } from '../../shared/utils/constants';
+import { LEAD_STATUS, LEAD_SOURCES } from '../../shared/utils/constants';
 import { formatDate } from '../../shared/utils/formatters';
 import LeadDetail from './LeadDetail';
 import LeadForm from './LeadForm';

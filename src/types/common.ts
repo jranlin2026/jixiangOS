@@ -70,7 +70,16 @@ export type OrderType =
 export type PaymentMethod = '银行转账' | '支付宝' | '微信支付' | '对公转账' | '现金';
 
 /** 退款状态 — 统一来源，从 order.ts 迁移到此处 */
-export type RefundStatus = '无' | '退款申请中' | '退款已批准' | '退款已完成' | '退款已拒绝';
+export type RefundStatus =
+  | '无'
+  | '待分配'
+  | '挽回中'
+  | '挽回成功'
+  | '待财务退款'
+  | '退款申请中'
+  | '退款已批准'
+  | '退款已完成'
+  | '退款已拒绝';
 
 /** 产品等级 → 客户等级 映射 */
 export const PRODUCT_TO_CUSTOMER_LEVEL: Record<string, CustomerLevel> = {

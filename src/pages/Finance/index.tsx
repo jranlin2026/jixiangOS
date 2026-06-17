@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Box, Typography, Grid, Card, CardContent, Tabs, Tab, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Chip } from '@mui/material';
 import useFinanceStore from '../../store/useFinanceStore';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
-import { PRODUCT_LEVEL_COLOR_MAP } from '../../shared/utils/constants';
+import { getProductLevelColor } from '../../shared/utils/constants';
 import RevenueTrend from './RevenueTrend';
 import ChannelROIChart from './ChannelROI';
 import type { FinanceIncome, FinanceExpense } from '../../types/finance';
@@ -105,7 +105,7 @@ const Finance: React.FC = () => {
             </TableHead>
             <TableBody>
               {incomes.map((income) => {
-                const levelColor = PRODUCT_LEVEL_COLOR_MAP[income.productLevel] || '#9ca3af';
+                const levelColor = getProductLevelColor(income.productLevel);
                 return (
                   <TableRow key={income.id} hover>
                     <TableCell sx={{ fontWeight: 500 }}>{income.orderNo}</TableCell>

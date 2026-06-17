@@ -10,7 +10,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import useCommissionStore from '../../store/useCommissionStore';
 import useOrderStore from '../../store/useOrderStore';
-import { PRODUCT_LEVELS, PRODUCT_LEVEL_COLOR_MAP } from '../../shared/utils/constants';
+import { PRODUCT_LEVELS, getProductLevelColor } from '../../shared/utils/constants';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import CommissionStats from './CommissionStats';
 import CommissionRuleConfig from './CommissionRuleConfig';
@@ -268,7 +268,7 @@ const Commission: React.FC = () => {
               </TableHead>
               <TableBody>
                 {items.map((comm) => {
-                  const levelColor = PRODUCT_LEVEL_COLOR_MAP[comm.productLevel] || '#9ca3af';
+                  const levelColor = getProductLevelColor(comm.productLevel);
                   const roleColor = ROLE_COLORS[comm.role] || '#9ca3af';
                   const isSelectable = comm.status === '待审核' || comm.status === '待发放';
                   return (
