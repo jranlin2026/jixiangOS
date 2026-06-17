@@ -8,15 +8,16 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  IconButton,
   MenuItem,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
+import CloseIcon from '@mui/icons-material/Close';
 import useOrderStore from '../../store/useOrderStore';
 import {
   OFFICIAL_PAYMENT_CHANNELS,
-  ORDER_STATUS,
-  PROOF_STATUSES,
   RESOURCE_OWNERSHIPS,
 } from '../../shared/utils/constants';
 import { customerApi, productApi, settingsApi } from '../../api';
@@ -25,7 +26,6 @@ import type {
   CommissionRole,
   CommissionScene,
   OfficialPaymentChannel,
-  ProofStatus,
   ResourceOwnership,
 } from '../../types/commission';
 import type { Customer } from '../../types/customer';
@@ -175,18 +175,18 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   const [customerLoading, setCustomerLoading] = useState(false);
   const [voucherName, setVoucherName] = useState('');
   const [voucherPreview, setVoucherPreview] = useState('');
+  const [dealEvidenceName, setDealEvidenceName] = useState('');
+  const [dealEvidencePreview, setDealEvidencePreview] = useState('');
   const [recognitionMessage, setRecognitionMessage] = useState('');
   const [recognizing, setRecognizing] = useState(false);
 
   const [form, setForm] = useState({
     customerName: '',
-    productLevel: '899' as ProductLevel,
-    orderType: '899成交' as OrderType,
-    actualAmount: 899,
+    productLevel: '' as ProductLevel,
+    orderType: '' as OrderType,
+    actualAmount: 0,
     officialPaymentChannel: '对公银行转账' as OfficialPaymentChannel,
     resourceOwnership: '公司资源' as ResourceOwnership,
-    isExternalTalentOrder: false,
-    proofStatus: '无需凭证' as ProofStatus,
     collaboratorName: '',
     collaboratorRole: '客户成功' as CommissionRole,
     collaboratorRatio: 0,
@@ -194,7 +194,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     sourceType: '自拓',
     owner: '张伟',
     notes: '',
-    status: '待确认' as Order['status'],
     refundStatus: '无' as Order['refundStatus'],
     customerId: '',
     paymentDate: toDateTimeInputValue(new Date()),
@@ -207,6 +206,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     if (!order) {
       setVoucherName('');
       setVoucherPreview('');
+      setDealEvidenceName('');
+      setDealEvidencePreview('');
       setRecognitionMessage('');
       setCustomers([]);
       setCustomerSearch('');
@@ -242,6 +243,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     setSelectedCustomer(lockedCustomer);
     setVoucherName(primaryPayment?.voucherName || '');
     setVoucherPreview(primaryPayment?.voucherPreview || '');
+    setDealEvidenceName(order.dealEvidenceName || '');
+    setDealEvidencePreview(order.dealEvidencePreview || '');
     setRecognitionMessage('');
     setCustomers([]);
     setCustomerSearch('');
@@ -254,8 +257,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       actualAmount: order.actualAmount || order.amount,
       officialPaymentChannel: order.officialPaymentChannel || prev.officialPaymentChannel,
       resourceOwnership: order.resourceOwnership || prev.resourceOwnership,
-      isExternalTalentOrder: Boolean(order.isExternalTalentOrder),
-      proofStatus: order.proofStatus || prev.proofStatus,
       collaboratorName: order.collaboratorName || '',
       collaboratorRole: order.collaboratorRole || prev.collaboratorRole,
       collaboratorRatio: order.collaboratorRatio || 0,
@@ -263,7 +264,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       sourceType: order.sourceType || prev.sourceType,
       owner: order.owner,
       notes: order.notes || '',
-      status: order.status,
       refundStatus: order.refundStatus,
       paymentDate: toDateTimeInputValue(new Date(primaryPayment?.paidAt || order.createdAt)),
       paymentOrderNo: primaryPayment?.paymentOrderNo || '',
@@ -302,9 +302,20 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       settingsApi.fetchOrderTypeConfigs(),
     ]).then(([userRes, orderTypeRes]) => {
       if (userRes.code === 0) setUsers(userRes.data.filter((user) => user.isActive));
-      if (orderTypeRes.code === 0) setOrderTypeConfigs(orderTypeRes.data);
+      if (orderTypeRes.code === 0) {
+        const configs = orderTypeRes.data;
+        const activeTypes = configs.filter((item) => item.isActive);
+        setOrderTypeConfigs(configs);
+        if (!order) {
+          setForm((prev) => {
+            const currentExists = activeTypes.some((item) => item.name === prev.orderType);
+            if (currentExists) return prev;
+            return { ...prev, orderType: (activeTypes[0]?.name || '') as OrderType };
+          });
+        }
+      }
     });
-  }, [open]);
+  }, [open, order]);
 
   const amountMap = useMemo(
     () => Object.fromEntries(products.map((product) => [product.level, product.price])),
@@ -328,7 +339,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
 
   const orderTypeOptions = useMemo(() => {
     const activeItems = orderTypeConfigs.filter((item) => item.isActive);
-    if (form.orderType && !activeItems.some((item) => item.name === form.orderType)) {
+    if (order && form.orderType && !activeItems.some((item) => item.name === form.orderType)) {
       const current = orderTypeConfigs.find((item) => item.name === form.orderType) || {
         id: form.orderType,
         name: form.orderType,
@@ -341,7 +352,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       return [current, ...activeItems];
     }
     return activeItems;
-  }, [form.orderType, orderTypeConfigs]);
+  }, [form.orderType, order, orderTypeConfigs]);
 
   useEffect(() => {
     if (!open || order || customer) return;
@@ -376,7 +387,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   const handleChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     if (field === 'productLevel') {
-      const amt = amountMap[val] || form.actualAmount || 899;
+      const amt = amountMap[val] || form.actualAmount || 0;
       setForm({ ...form, productLevel: val as ProductLevel, actualAmount: amt });
     } else {
       setForm({ ...form, [field]: val });
@@ -385,10 +396,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
 
   const handleNumberChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [field]: Number(e.target.value) });
-  };
-
-  const handleBooleanChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    setForm({ ...form, [field]: e.target.value === 'true' });
   };
 
   const handleOwnerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -430,6 +437,26 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     reader.readAsDataURL(file);
   };
 
+  const handleDealEvidenceFile = (file?: File) => {
+    if (!file) return;
+    setDealEvidenceName(file.name);
+
+    const reader = new FileReader();
+    reader.onload = () => setDealEvidencePreview(String(reader.result || ''));
+    reader.readAsDataURL(file);
+  };
+
+  const clearVoucherFile = () => {
+    setVoucherName('');
+    setVoucherPreview('');
+    setRecognitionMessage('');
+  };
+
+  const clearDealEvidenceFile = () => {
+    setDealEvidenceName('');
+    setDealEvidencePreview('');
+  };
+
   const handleRecognizePayment = async () => {
     if (!voucherName) {
       setRecognitionMessage('请先上传付款截图');
@@ -456,7 +483,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
         paymentDate: result.paidDate,
         actualAmount: result.amount,
         paymentOrderNo: result.paymentOrderNo,
-        proofStatus: '已上传' as ProofStatus,
       });
       setRecognitionMessage(ocrText.trim()
         ? '已从付款截图识别并回填付款时间、实付金额和付款订单号，可继续手动修正。'
@@ -484,12 +510,17 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       amount: actualAmount,
       actualAmount,
       paymentMethod,
+      status: '已确认' as Order['status'],
       dealScene: dealSceneFromOrderType(form.orderType),
+      proofStatus: voucherName || voucherPreview ? '已上传' as const : '待补充' as const,
       payments: [payment],
+      isExternalTalentOrder: false,
       performanceBaseAmount: actualAmount,
       collaboratorRatio: Number(form.collaboratorRatio) || undefined,
       collaboratorName: form.collaboratorName || undefined,
       originalOrderId: form.originalOrderId || undefined,
+      dealEvidenceName: dealEvidenceName || undefined,
+      dealEvidencePreview: dealEvidencePreview || undefined,
     };
 
     if (order) {
@@ -566,11 +597,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>
             ))}
           </TextField>
-          <TextField select label="订单状态" value={form.status} onChange={handleChange('status')} fullWidth>
-            {Object.values(ORDER_STATUS).map((status) => (
-              <MenuItem key={status} value={status}>{status}</MenuItem>
-            ))}
-          </TextField>
           <TextField select label="官方收款渠道" value={form.officialPaymentChannel} onChange={handleChange('officialPaymentChannel')} fullWidth>
             {OFFICIAL_PAYMENT_CHANNELS.map((item) => (
               <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
@@ -580,15 +606,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
             {RESOURCE_OWNERSHIPS.map((item) => (
               <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
             ))}
-          </TextField>
-          <TextField select label="凭证状态" value={form.proofStatus} onChange={handleChange('proofStatus')} fullWidth>
-            {PROOF_STATUSES.map((item) => (
-              <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
-            ))}
-          </TextField>
-          <TextField select label="外部达人成交" value={String(form.isExternalTalentOrder)} onChange={handleBooleanChange('isExternalTalentOrder')} fullWidth>
-            <MenuItem value="false">否</MenuItem>
-            <MenuItem value="true">是</MenuItem>
           </TextField>
           <TextField label="实付金额" type="number" value={form.actualAmount} onChange={handleChange('actualAmount')} fullWidth />
           <TextField label="付款时间" type="datetime-local" value={form.paymentDate} onChange={handleChange('paymentDate')} fullWidth InputLabelProps={{ shrink: true }} />
@@ -627,12 +644,33 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
             </Box>
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
               {voucherPreview && (
-                <Box
-                  component="img"
-                  src={voucherPreview}
-                  alt="付款截图预览"
-                  sx={{ width: 72, height: 56, objectFit: 'cover', borderRadius: 1, border: '1px solid #e5e7eb' }}
-                />
+                <Box sx={{ position: 'relative', width: 72, height: 56 }}>
+                  <Box
+                    component="img"
+                    src={voucherPreview}
+                    alt="付款截图预览"
+                    sx={{ width: 72, height: 56, objectFit: 'cover', borderRadius: 1, border: '1px solid #e5e7eb' }}
+                  />
+                  <Tooltip title="删除截图">
+                    <IconButton
+                      size="small"
+                      onClick={clearVoucherFile}
+                      sx={{
+                        position: 'absolute',
+                        top: -8,
+                        right: -8,
+                        width: 22,
+                        height: 22,
+                        bgcolor: '#fff',
+                        border: '1px solid #e5e7eb',
+                        boxShadow: '0 1px 4px rgba(15, 23, 42, 0.18)',
+                        '&:hover': { bgcolor: '#fee2e2', color: '#dc2626' },
+                      }}
+                    >
+                      <CloseIcon sx={{ fontSize: 14 }} />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
               )}
               <Button variant="outlined" component="label">
                 上传截图
@@ -640,6 +678,69 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               </Button>
               <Button variant="contained" onClick={handleRecognizePayment} disabled={!voucherName || recognizing}>
                 {recognizing ? '识别中...' : '确认识别'}
+              </Button>
+            </Box>
+          </Box>
+          <Box
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              handleDealEvidenceFile(e.dataTransfer.files?.[0]);
+            }}
+            sx={{
+              gridColumn: '1 / -1',
+              border: '1px dashed #a5b4fc',
+              bgcolor: '#fafbff',
+              borderRadius: 1,
+              p: 2,
+              display: 'grid',
+              gridTemplateColumns: { xs: '1fr', sm: '1fr auto' },
+              gap: 2,
+              alignItems: 'center',
+            }}
+          >
+            <Box>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>成交路径截图</Typography>
+              <Typography variant="body2" sx={{ color: '#6b7280' }}>
+                拖拽聊天记录、成交确认或沟通过程截图到这里，用于留存销售成交依据。
+              </Typography>
+              {dealEvidenceName && (
+                <Typography variant="body2" sx={{ mt: 1, color: '#4f46e5' }}>{dealEvidenceName}</Typography>
+              )}
+            </Box>
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              {dealEvidencePreview && (
+                <Box sx={{ position: 'relative', width: 72, height: 56 }}>
+                  <Box
+                    component="img"
+                    src={dealEvidencePreview}
+                    alt="成交路径截图预览"
+                    sx={{ width: 72, height: 56, objectFit: 'cover', borderRadius: 1, border: '1px solid #e5e7eb' }}
+                  />
+                  <Tooltip title="删除截图">
+                    <IconButton
+                      size="small"
+                      onClick={clearDealEvidenceFile}
+                      sx={{
+                        position: 'absolute',
+                        top: -8,
+                        right: -8,
+                        width: 22,
+                        height: 22,
+                        bgcolor: '#fff',
+                        border: '1px solid #e5e7eb',
+                        boxShadow: '0 1px 4px rgba(15, 23, 42, 0.18)',
+                        '&:hover': { bgcolor: '#fee2e2', color: '#dc2626' },
+                      }}
+                    >
+                      <CloseIcon sx={{ fontSize: 14 }} />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
+              )}
+              <Button variant="outlined" component="label">
+                上传截图
+                <input hidden accept="image/*" type="file" onChange={(e) => handleDealEvidenceFile(e.target.files?.[0])} />
               </Button>
             </Box>
           </Box>

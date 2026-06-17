@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { leadApi } from '../api';
 import type { Lead, LeadFilters } from '../types/lead';
+import type { ApiResponse } from '../api/types';
 
 interface LeadState {
   items: Lead[];
@@ -11,7 +12,7 @@ interface LeadState {
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
   fetchItems: (filters?: LeadFilters) => Promise<void>;
   fetchById: (id: string) => Promise<void>;
-  create: (data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followUpRecords'>) => Promise<void>;
+  create: (data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followUpRecords'>) => Promise<ApiResponse<Lead | null>>;
   update: (id: string, data: Partial<Lead>) => Promise<void>;
   delete: (id: string) => Promise<void>;
   setFilters: (filters: LeadFilters) => void;
@@ -60,10 +61,16 @@ const useLeadStore = create<LeadState>((set, get) => ({
   create: async (data) => {
     set({ loading: true, error: null });
     try {
-      await leadApi.createLead(data);
+      const res = await leadApi.createLead(data);
+      if (res.code !== 0) {
+        set({ error: res.message, loading: false });
+        return res;
+      }
       await get().fetchItems();
+      return res;
     } catch (e: any) {
       set({ error: e.message, loading: false });
+      return { code: -1, data: null, message: e.message };
     }
   },
 

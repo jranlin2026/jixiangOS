@@ -1,4 +1,4 @@
-import type { Customer, CustomerCreateInput, CustomerFilters, AICustomerPortrait } from '../types/customer';
+import type { Customer, CustomerActivityRecord, CustomerCreateInput, CustomerFilters, AICustomerPortrait } from '../types/customer';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
@@ -25,6 +25,58 @@ function normalizeCustomer(customer: Customer): Customer {
   return growthPath.length === (customer.growthPath || []).length
     ? customer
     : { ...customer, growthPath };
+}
+
+const CUSTOMER_CHANGE_FIELDS: Array<{ field: keyof Customer; label: string }> = [
+  { field: 'name', label: '姓名' },
+  { field: 'company', label: '公司' },
+  { field: 'phone', label: '电话' },
+  { field: 'wechat', label: '微信' },
+  { field: 'email', label: '邮箱' },
+  { field: 'customerLevel', label: '客户等级' },
+  { field: 'owner', label: '销售负责人' },
+  { field: 'leadInputBy', label: '线索录入人' },
+  { field: 'leadSource', label: '线索来源' },
+  { field: 'industry', label: '行业' },
+  { field: 'city', label: '城市' },
+  { field: 'tags', label: '客户标签' },
+  { field: 'remark', label: '备注' },
+  { field: 'sourceType', label: '来源类型' },
+  { field: 'sourceName', label: '来源名称' },
+  { field: 'originalSalesTransferBy', label: '原销转人员' },
+];
+
+function formatActivityValue(value: unknown): string | number | boolean | null {
+  if (Array.isArray(value)) return value.join('、');
+  if (value === undefined || value === '') return null;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+  return String(value);
+}
+
+function buildCustomerChanges(existing: Customer, data: Partial<Customer>): CustomerActivityRecord['changes'] {
+  return CUSTOMER_CHANGE_FIELDS
+    .filter(({ field }) => Object.prototype.hasOwnProperty.call(data, field))
+    .map(({ field, label }) => {
+      const oldValue = formatActivityValue(existing[field]);
+      const newValue = formatActivityValue(data[field]);
+      return oldValue === newValue ? null : { field: String(field), label, oldValue, newValue };
+    })
+    .filter(Boolean) as CustomerActivityRecord['changes'];
+}
+
+function createActivity(data: Omit<CustomerActivityRecord, 'id' | 'createdAt'> & { createdAt?: string }): CustomerActivityRecord {
+  return {
+    ...data,
+    id: `act-${uuidv4().slice(0, 8)}`,
+    createdAt: data.createdAt || new Date().toISOString(),
+  };
+}
+
+function prependActivity(customer: Customer, activity: CustomerActivityRecord): Customer {
+  return {
+    ...customer,
+    activityRecords: [activity, ...(customer.activityRecords || [])],
+  };
 }
 
 async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<PaginatedResponse<Customer>>> {
@@ -87,6 +139,13 @@ async function createCustomer(data: CustomerCreateInput): Promise<ApiResponse<Cu
     orderCount: 0,
     growthPath: [],
     growthRecords: [],
+    activityRecords: [createActivity({
+      type: 'create',
+      title: '创建了客户',
+      operator: data.owner || data.leadInputBy || '系统',
+      content: data.remark,
+      createdAt: now,
+    })],
     createdAt: now,
     updatedAt: now,
   };
@@ -101,9 +160,64 @@ async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiR
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
   const idx = customers.findIndex((c) => c.id === id);
   if (idx === -1) return createSuccessResponse(null);
-  customers[idx] = { ...customers[idx], ...data, updatedAt: new Date().toISOString() };
+  const existing = customers[idx];
+  const now = new Date().toISOString();
+  const changes = buildCustomerChanges(existing, data);
+  const operator = data.owner || existing.owner || '系统';
+  const activityType = data.owner && data.owner !== existing.owner ? 'transfer' : 'update';
+  customers[idx] = {
+    ...existing,
+    ...data,
+    activityRecords: changes?.length
+      ? [createActivity({
+        type: activityType,
+        title: activityType === 'transfer' ? `转交客户给 ${data.owner}` : `更新了 ${changes.map((item) => item.label).join('、')}`,
+        operator,
+        changes,
+        createdAt: now,
+      }), ...(existing.activityRecords || [])]
+      : existing.activityRecords,
+    updatedAt: now,
+  };
   setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
   return createSuccessResponse(customers[idx]);
+}
+
+async function addCustomerFollowUp(
+  id: string,
+  data: { content: string; operator?: string; type?: '联系记录' | '客户行为' | '销售活动' | '跟进记录' },
+): Promise<ApiResponse<Customer | null>> {
+  ensureInit();
+  await delay(150);
+  const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+  const idx = customers.findIndex((c) => c.id === id);
+  if (idx === -1) return createSuccessResponse(null);
+  const content = data.content.trim();
+  if (!content) return createSuccessResponse(customers[idx]);
+  const now = new Date().toISOString();
+  customers[idx] = prependActivity(customers[idx], createActivity({
+    type: 'follow',
+    title: `发表了${data.type || '跟进记录'}`,
+    content,
+    operator: data.operator || customers[idx].owner || '系统',
+    createdAt: now,
+  }));
+  customers[idx].updatedAt = now;
+  setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
+  return createSuccessResponse(customers[idx]);
+}
+
+function appendCustomerActivity(
+  customerId: string,
+  activity: Omit<CustomerActivityRecord, 'id' | 'createdAt'> & { createdAt?: string },
+): Customer | null {
+  const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+  const idx = customers.findIndex((customer) => customer.id === customerId);
+  if (idx === -1) return null;
+  customers[idx] = prependActivity(customers[idx], createActivity(activity));
+  customers[idx].updatedAt = activity.createdAt || new Date().toISOString();
+  setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
+  return customers[idx];
 }
 
 async function deleteCustomer(id: string): Promise<ApiResponse<boolean>> {
@@ -138,6 +252,15 @@ async function fetchAIPortrait(customerId: string): Promise<ApiResponse<AICustom
   };
 
   customer.aiPortrait = portrait;
+  customer.activityRecords = [
+    createActivity({
+      type: 'ai',
+      title: '生成了 AI 客户画像',
+      content: portrait.aiSummary,
+      operator: customer.owner || '系统',
+    }),
+    ...(customer.activityRecords || []),
+  ];
   customer.updatedAt = new Date().toISOString();
   setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
   return createSuccessResponse(portrait);
@@ -148,6 +271,8 @@ export const customerApi = {
   fetchCustomerById,
   createCustomer,
   updateCustomer,
+  addCustomerFollowUp,
+  appendCustomerActivity,
   deleteCustomer,
   fetchAIPortrait,
 };

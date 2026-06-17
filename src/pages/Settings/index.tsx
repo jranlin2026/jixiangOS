@@ -7,6 +7,7 @@ import ProductConfigPage from './ProductConfig';
 import DepartmentManagement from './DepartmentManagement';
 import OrderTypeConfigPage from './OrderTypeConfig';
 import LifecycleStatusConfigPage from './LifecycleStatusConfig';
+import LeadSourceConfigPage from './LeadSourceConfig';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -32,8 +33,10 @@ const Settings: React.FC = () => {
       <Paper elevation={0} sx={{ border: '1px solid #f0f0f0', borderRadius: 2 }}>
         <Tabs
           value={tabValue}
-          onChange={(_, v) => setTabValue(v)}
+          onChange={(_, value) => setTabValue(value)}
           sx={{ borderBottom: '1px solid #e5e7eb', px: 2 }}
+          variant="scrollable"
+          scrollButtons="auto"
         >
           <Tab label="用户管理" />
           <Tab label="角色权限" />
@@ -42,6 +45,7 @@ const Settings: React.FC = () => {
           <Tab label="产品配置" />
           <Tab label="订单类型" />
           <Tab label="生命周期状态" />
+          <Tab label="线索来源" />
         </Tabs>
 
         <Box sx={{ p: 3 }}>
@@ -65,6 +69,9 @@ const Settings: React.FC = () => {
           </TabPanel>
           <TabPanel value={tabValue} index={6}>
             <LifecycleStatusConfigPage />
+          </TabPanel>
+          <TabPanel value={tabValue} index={7}>
+            <LeadSourceConfigPage />
           </TabPanel>
         </Box>
       </Paper>

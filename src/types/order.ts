@@ -80,6 +80,9 @@ export interface Order {
   /** 业绩核算基数，默认取 actualAmount */
   performanceBaseAmount?: number;
   commissionRuleId?: ID;
+  /** 聊天记录、成交路径或客户确认截图 */
+  dealEvidenceName?: string;
+  dealEvidencePreview?: string;
   payments: OrderPayment[];
   commissionId?: ID;
   deliveryId?: ID;

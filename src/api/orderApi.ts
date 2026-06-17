@@ -62,8 +62,11 @@ function syncCustomerOrderStats(order: Order, allOrders: Order[]): void {
     .slice()
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] || order;
   const existingGrowthPath = customer.growthPath || [];
+  const existingActivities = customer.activityRecords || [];
   const shouldAppendMilestone = relatedOrders.some((item) => item.id === order.id)
     && !existingGrowthPath.some((item) => item.orderId === order.id || item.orderNo === order.orderNo);
+  const hasOrderActivity = existingActivities.some((item) => item.relatedType === 'order' && item.relatedId === order.id && item.type === 'order');
+  const hasRefundActivity = existingActivities.some((item) => item.relatedType === 'order' && item.relatedId === order.id && item.type === 'refund');
   const nextGrowthPath = shouldAppendMilestone
     ? [
       ...existingGrowthPath,
@@ -78,6 +81,30 @@ function syncCustomerOrderStats(order: Order, allOrders: Order[]): void {
       },
     ]
     : existingGrowthPath;
+  const now = new Date().toISOString();
+  const nextActivities = [
+    ...((shouldAppendMilestone || !hasOrderActivity) ? [{
+      id: `act-${uuidv4().slice(0, 8)}`,
+      type: 'order' as const,
+      title: `创建了订单 ${order.orderNo}`,
+      content: `签约${order.productLevel}，实付${Number(order.actualAmount || order.amount).toLocaleString('zh-CN')}元`,
+      operator: order.owner || '系统',
+      relatedId: order.id,
+      relatedType: 'order' as const,
+      createdAt: order.createdAt || now,
+    }] : []),
+    ...((order.refundStatus && order.refundStatus !== '无' && !hasRefundActivity) ? [{
+      id: `act-${uuidv4().slice(0, 8)}`,
+      type: 'refund' as const,
+      title: `订单退款状态更新为 ${order.refundStatus}`,
+      content: order.refundReason || undefined,
+      operator: order.owner || '系统',
+      relatedId: order.id,
+      relatedType: 'order' as const,
+      createdAt: now,
+    }] : []),
+    ...existingActivities,
+  ];
 
   customers[customerIdx] = {
     ...customer,
@@ -85,7 +112,8 @@ function syncCustomerOrderStats(order: Order, allOrders: Order[]): void {
     orderCount: relatedOrders.length,
     totalSpent: relatedOrders.reduce((sum, item) => sum + (Number(item.actualAmount) || 0), 0),
     growthPath: nextGrowthPath,
-    updatedAt: new Date().toISOString(),
+    activityRecords: nextActivities,
+    updatedAt: now,
   };
 
   setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
@@ -154,6 +182,31 @@ function buildOrderChanges(before: Order, data: Partial<Order>) {
       newValue: normalizeChangeValue(data[field]),
     }))
     .filter((item) => item.oldValue !== item.newValue);
+}
+
+function syncCommissionRefundState(order: Order): void {
+  if (!order.refundStatus || order.refundStatus === '无') return;
+
+  const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
+  const isRefundDone = order.refundStatus === '退款已完成' || order.status === '已退款';
+  const reason = isRefundDone
+    ? '退款完成，取消未发放提成'
+    : `订单退款流程中（${order.refundStatus}），冻结未发放提成`;
+  let changed = false;
+
+  const nextCommissions = commissions.map((commission) => {
+    if (commission.orderId !== order.id || commission.status === '已发放') return commission;
+    changed = true;
+    return {
+      ...commission,
+      status: isRefundDone ? '已取消' as const : '待审核' as const,
+      auditReason: reason,
+      frozenReason: reason,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+
+  if (changed) setStorageData(STORAGE_KEYS.COMMISSIONS, nextCommissions);
 }
 
 async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<PaginatedResponse<Order>>> {
@@ -257,7 +310,7 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
   await delay(200);
   const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
   const now = new Date().toISOString();
-  const orderNo = `ORD-${now.slice(0, 7).replace('-', '')}-${String(orders.length + 1).padStart(4, '0')}`;
+  const orderNo = `ORD-${now.slice(0, 10).replace(/-/g, '')}-${String(orders.length + 1).padStart(4, '0')}`;
 
   const newOrder: Order = {
     ...data,
@@ -280,7 +333,7 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
   // 根据订单制度字段匹配所有适用规则
   const calcRes = await commissionRuleApi.calculateCommissionsForOrder(newOrder);
 
-  if (calcRes.code === 0 && calcRes.data.length > 0) {
+  if (calcRes.code === 0) {
     commissionRuleApi.clawbackBaseCommissions(newOrder, calcRes.data);
     const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
 
@@ -300,11 +353,43 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
         resourceOwnership: calc.resourceOwnership,
         proofStatus: calc.proofStatus,
         calculationNote: calc.calculationNote,
+        auditReason: calc.auditReason,
+        evidenceRequired: calc.evidenceRequired,
+        evidenceStatus: calc.evidenceStatus,
+        formulaText: calc.formulaText,
         role: calc.role,
         owner: personName,
         department: calc.departmentOverride || ROLE_DEPARTMENT_MAP[calc.role],
         status: calc.status,
         commissionRuleId: calc.ruleId,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    if (calcRes.data.length === 0) {
+      commissions.unshift({
+        id: `comm-${uuidv4().slice(0, 8)}`,
+        orderId: newOrder.id,
+        orderNo: newOrder.orderNo,
+        customerName: newOrder.customerName,
+        productLevel: newOrder.productLevel,
+        orderAmount: newOrder.actualAmount || newOrder.amount,
+        commissionRate: 0,
+        commissionAmount: 0,
+        performanceAmount: newOrder.performanceBaseAmount || newOrder.actualAmount || newOrder.amount,
+        scene: newOrder.dealScene,
+        resourceOwnership: newOrder.resourceOwnership,
+        proofStatus: newOrder.proofStatus,
+        calculationNote: '订单已付款，但当前规则配置未匹配到可用提成规则，需要财务检查产品等级、订单类型、成交场景、资源归属和收款渠道。',
+        auditReason: '规则未命中',
+        evidenceRequired: true,
+        evidenceStatus: '已齐全',
+        formulaText: '未匹配规则，暂不计算金额',
+        role: '销售',
+        owner: newOrder.salesName || newOrder.owner,
+        department: ROLE_DEPARTMENT_MAP['销售'],
+        status: '待审核',
         createdAt: now,
         updatedAt: now,
       });
@@ -367,6 +452,7 @@ async function updateOrder(id: string, data: Partial<Order>): Promise<ApiRespons
   };
   setStorageData(STORAGE_KEYS.ORDERS, orders);
   syncCustomerOrderStats(orders[idx], orders);
+  syncCommissionRefundState(orders[idx]);
   if (orders[idx].refundStatus === '退款已完成' || orders[idx].status === '已退款') {
     syncLeadLifecycleByCustomerName(orders[idx].customerName, '已退款', { orderId: orders[idx].id });
     syncOpportunityRefundedByOrderId(orders[idx].id);

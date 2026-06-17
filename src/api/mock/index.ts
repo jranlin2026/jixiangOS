@@ -16,7 +16,7 @@ import { mockUpgradePool } from './data/upgradePool';
 import { mockCommissionRules } from './data/commissionRules';
 import { mockTags } from './data/tags';
 import { initializeStorage, isStorageInitialized, markStorageInitialized } from './storage';
-import { DEFAULT_LIFECYCLE_STATUS_CONFIGS, DEFAULT_ORDER_TYPE_CONFIGS, STORAGE_KEYS } from '../../shared/utils/constants';
+import { DEFAULT_LEAD_FLOW_CONFIG, DEFAULT_LEAD_SOURCE_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, DEFAULT_ORDER_TYPE_CONFIGS, STORAGE_KEYS } from '../../shared/utils/constants';
 
 export { mockLeads } from './data/leads';
 export { mockCustomers } from './data/customers';
@@ -63,6 +63,9 @@ export function initializeMockData(): void {
   initializeStorage(STORAGE_KEYS.CUSTOMER_SUCCESS_TASKS, []);
   initializeStorage(STORAGE_KEYS.SERVICE_TICKETS, []);
   initializeStorage(STORAGE_KEYS.OPPORTUNITIES, []);
+  initializeStorage(STORAGE_KEYS.LEAD_FLOW_CONFIG, DEFAULT_LEAD_FLOW_CONFIG);
+  initializeStorage(STORAGE_KEYS.LEAD_INTAKE_RECORDS, []);
+  initializeStorage(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, DEFAULT_LEAD_SOURCE_CONFIGS);
   initializeStorage(STORAGE_KEYS.COMMISSION_RULES, mockCommissionRules);
   initializeStorage(STORAGE_KEYS.TAGS, mockTags);
 

@@ -15,9 +15,12 @@ import {
   RESOURCE_OWNERSHIPS,
 } from '../../shared/utils/constants';
 import type {
+  CommissionEvidenceType,
   CommissionRole,
   CommissionRule,
+  CommissionScenarioGroup,
   CommissionScene,
+  CommissionSettlementMode,
   OfficialPaymentChannel,
   ResourceOwnership,
 } from '../../types/commission';
@@ -26,6 +29,9 @@ import type { ProductLevelConfig } from '../../types/product';
 import type { OrderTypeConfig } from '../../types/settings';
 
 const ROLES: CommissionRole[] = ['销售', '线索', '客户成功', '售后', '招商主管', '销售主管'];
+const SCENARIO_GROUPS: CommissionScenarioGroup[] = ['新客成交', '代理转化', '升单复购', '转介绍', '退款挽回', '服务激励', '个人资源'];
+const EVIDENCE_TYPES: CommissionEvidenceType[] = ['付款截图', '成交路径截图', '聊天记录截图', '组长确认'];
+const SETTLEMENT_MODES: CommissionSettlementMode[] = ['自动结算', '人工审核', '仅计业绩'];
 const ROLE_LABELS: Record<CommissionRole, string> = {
   销售: '销售',
   线索: '线索',
@@ -54,6 +60,12 @@ const emptyForm: RuleForm = {
   collaboratorRole: '',
   requiresProof: false,
   clawbackBaseCommission: false,
+  scenarioGroup: '新客成交',
+  requiresLeaderConfirm: false,
+  evidenceTypes: [],
+  minAmount: undefined,
+  maxAmount: undefined,
+  settlementMode: '自动结算',
   description: '',
   isActive: true,
   priority: 100,
@@ -125,6 +137,7 @@ const CommissionRuleConfig: React.FC = () => {
         ...emptyForm,
         ...rule,
         paymentChannels: rule.paymentChannels || [],
+        evidenceTypes: rule.evidenceTypes || [],
       });
     } else {
       setEditingRule(null);
@@ -200,7 +213,10 @@ const CommissionRuleConfig: React.FC = () => {
                     </Typography>
                   )}
                 </TableCell>
-                <TableCell>{rule.scene || '通用'}</TableCell>
+                <TableCell>
+                  <Typography variant="body2">{rule.scene || '通用'}</Typography>
+                  <Typography variant="caption" sx={{ color: '#6b7280' }}>{rule.scenarioGroup || '未分组'}</Typography>
+                </TableCell>
                 <TableCell>
                   <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
                     <Chip label={rule.productLevel || '通用产品'} size="small" variant="outlined" />
@@ -228,6 +244,12 @@ const CommissionRuleConfig: React.FC = () => {
                 <TableCell>
                   <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
                     {rule.requiresProof && <Chip label="需凭证" size="small" color="warning" />}
+                    {rule.evidenceTypes?.map((item) => <Chip key={item} label={item} size="small" variant="outlined" />)}
+                    {rule.requiresLeaderConfirm && <Chip label="需组长确认" size="small" color="info" />}
+                    {(rule.minAmount !== undefined || rule.maxAmount !== undefined) && (
+                      <Chip label={`${rule.minAmount ?? 0}-${rule.maxAmount ?? '∞'}元`} size="small" variant="outlined" />
+                    )}
+                    {rule.settlementMode && <Chip label={rule.settlementMode} size="small" variant="outlined" />}
                     {rule.excludeExternalTalent && <Chip label="排除外部达人" size="small" />}
                     {rule.clawbackBaseCommission && <Chip label="冲销基础提成" size="small" color="error" />}
                   </Box>
@@ -270,6 +292,16 @@ const CommissionRuleConfig: React.FC = () => {
               >
                 <MenuItem value="">通用</MenuItem>
                 {COMMISSION_SCENES.map((scene) => <MenuItem key={scene.value} value={scene.value}>{scene.label}</MenuItem>)}
+              </Select>
+            </FormControl>
+            <FormControl fullWidth>
+              <InputLabel>规则分组</InputLabel>
+              <Select
+                value={form.scenarioGroup || '新客成交'}
+                label="规则分组"
+                onChange={(e) => updateForm('scenarioGroup', e.target.value as CommissionScenarioGroup)}
+              >
+                {SCENARIO_GROUPS.map((group) => <MenuItem key={group} value={group}>{group}</MenuItem>)}
               </Select>
             </FormControl>
             <FormControl fullWidth>
@@ -329,6 +361,14 @@ const CommissionRuleConfig: React.FC = () => {
             <TextField label={form.commissionType === 'fixed' ? '金额（元）' : '百分比（%）'} type="number" value={form.commissionValue} onChange={(e) => updateForm('commissionValue', Number(e.target.value))} fullWidth />
             <TextField label="业绩核算比例（%）" type="number" value={form.performanceRate || 100} onChange={(e) => updateForm('performanceRate', Number(e.target.value))} fullWidth />
             <TextField label="主角色分成（%）" type="number" value={form.splitRatio || 100} onChange={(e) => updateForm('splitRatio', Number(e.target.value))} fullWidth />
+            <TextField label="金额下限" type="number" value={form.minAmount ?? ''} onChange={(e) => updateForm('minAmount', e.target.value === '' ? undefined : Number(e.target.value))} fullWidth />
+            <TextField label="金额上限" type="number" value={form.maxAmount ?? ''} onChange={(e) => updateForm('maxAmount', e.target.value === '' ? undefined : Number(e.target.value))} fullWidth />
+            <FormControl fullWidth>
+              <InputLabel>结算方式</InputLabel>
+              <Select value={form.settlementMode || '自动结算'} label="结算方式" onChange={(e) => updateForm('settlementMode', e.target.value as CommissionSettlementMode)}>
+                {SETTLEMENT_MODES.map((mode) => <MenuItem key={mode} value={mode}>{mode}</MenuItem>)}
+              </Select>
+            </FormControl>
             <FormControl fullWidth>
               <InputLabel>协同角色</InputLabel>
               <Select value={form.collaboratorRole || ''} label="协同角色" onChange={(e) => updateForm('collaboratorRole', e.target.value as CommissionRole | '')}>
@@ -354,6 +394,25 @@ const CommissionRuleConfig: React.FC = () => {
             <FormControl fullWidth>
               <InputLabel>需要凭证</InputLabel>
               <Select value={String(Boolean(form.requiresProof))} label="需要凭证" onChange={(e) => updateForm('requiresProof', e.target.value === 'true')}>
+                <MenuItem value="false">否</MenuItem>
+                <MenuItem value="true">是</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl fullWidth>
+              <InputLabel>凭证类型</InputLabel>
+              <Select
+                multiple
+                value={form.evidenceTypes || []}
+                label="凭证类型"
+                onChange={(e) => updateForm('evidenceTypes', e.target.value as CommissionEvidenceType[])}
+                renderValue={(selected) => (selected as string[]).join('、') || '无需凭证'}
+              >
+                {EVIDENCE_TYPES.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
+              </Select>
+            </FormControl>
+            <FormControl fullWidth>
+              <InputLabel>组长确认</InputLabel>
+              <Select value={String(Boolean(form.requiresLeaderConfirm))} label="组长确认" onChange={(e) => updateForm('requiresLeaderConfirm', e.target.value === 'true')}>
                 <MenuItem value="false">否</MenuItem>
                 <MenuItem value="true">是</MenuItem>
               </Select>

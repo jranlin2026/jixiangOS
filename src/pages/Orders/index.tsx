@@ -35,10 +35,11 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import useOrderStore from '../../store/useOrderStore';
 import { customerApi, orderApi, productApi, settingsApi } from '../../api';
-import { getProductLevelColor, ORDER_STATUS, PRODUCT_LEVELS } from '../../shared/utils/constants';
+import { getProductLevelColor, PRODUCT_LEVELS } from '../../shared/utils/constants';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
 import CustomerDetail from '../Customers/CustomerDetail';
+import CustomerForm from '../Customers/CustomerForm';
 import OrderDetail from './OrderDetail';
 import OrderForm from './OrderForm';
 import OrderHistoryDialog from './OrderHistoryDialog';
@@ -60,7 +61,6 @@ const ORDER_COLUMNS: OrderColumn[] = [
   { id: 'orderType', label: '订单类型' },
   { id: 'actualAmount', label: '实付金额' },
   { id: 'paymentDate', label: '付款日期' },
-  { id: 'status', label: '状态' },
   { id: 'refundStatus', label: '退款状态' },
   { id: 'owner', label: '销售负责人' },
   { id: 'createdAt', label: '创建时间' },
@@ -72,7 +72,6 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'orderType',
   'actualAmount',
   'paymentDate',
-  'status',
   'refundStatus',
   'owner',
   'createdAt',
@@ -101,6 +100,11 @@ const Orders: React.FC = () => {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [customerFormOpen, setCustomerFormOpen] = useState(false);
+  const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
+  const [orderCustomer, setOrderCustomer] = useState<Customer | null>(null);
+  const [customerOrdersOpen, setCustomerOrdersOpen] = useState(false);
+  const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [productLevels, setProductLevels] = useState<{ name: string; color: string }[]>([]);
   const [orderTypeConfigs, setOrderTypeConfigs] = useState<OrderTypeConfig[]>([]);
   const [customerNameMap, setCustomerNameMap] = useState<Record<string, string>>({});
@@ -211,6 +215,33 @@ const Orders: React.FC = () => {
     setCustomerOpen(true);
   };
 
+  const handleEditCustomer = (customer: Customer) => {
+    setEditCustomer(customer);
+    setCustomerFormOpen(true);
+    setCustomerOpen(false);
+  };
+
+  const handleCreateOrderForCustomer = (customer: Customer) => {
+    setOrderCustomer(customer);
+    setEditingOrder(null);
+    setFormOpen(true);
+    setCustomerOpen(false);
+  };
+
+  const handleViewCustomerOrders = async (customer: Customer) => {
+    setOrderCustomer(customer);
+    const res = await orderApi.fetchOrders({ customerId: customer.id, pageSize: 100 });
+    const relatedOrders = res.code === 0
+      ? res.data.items.filter(
+        (item) => item.customerId === customer.id
+          || item.customerName === customer.company
+          || item.customerName === customer.name,
+      )
+      : [];
+    setCustomerOrders(relatedOrders);
+    setCustomerOrdersOpen(true);
+  };
+
   const productLevelOptions = productLevels.length
     ? productLevels
     : Object.values(PRODUCT_LEVELS).map((name) => ({ name, color: getProductLevelColor(name) }));
@@ -255,8 +286,6 @@ const Orders: React.FC = () => {
         return formatCurrency(order.actualAmount || order.amount);
       case 'paymentDate':
         return formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm');
-      case 'status':
-        return <Chip label={order.status} size="small" color={order.status === '已完成' ? 'success' : order.status === '待确认' ? 'warning' : 'default'} />;
       case 'refundStatus':
         return <RefundStatusBadge status={order.refundStatus} />;
       case 'owner':
@@ -314,15 +343,6 @@ const Orders: React.FC = () => {
             <MenuItem value="">全部</MenuItem>
             {orderTypeOptions.map((item) => (
               <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <FormControl size="small" sx={{ minWidth: 120 }}>
-          <InputLabel>状态</InputLabel>
-          <Select value={filters.status || ''} label="状态" onChange={(e) => handleFilterChange('status', e.target.value)}>
-            <MenuItem value="">全部</MenuItem>
-            {Object.values(ORDER_STATUS).map((status) => (
-              <MenuItem key={status} value={status}>{status}</MenuItem>
             ))}
           </Select>
         </FormControl>
@@ -391,15 +411,29 @@ const Orders: React.FC = () => {
           customer={selectedCustomer}
           open={customerOpen}
           onClose={() => setCustomerOpen(false)}
-          onEdit={() => undefined}
+          onEdit={handleEditCustomer}
+          onCreateOrder={handleCreateOrderForCustomer}
+          onViewOrders={handleViewCustomerOrders}
         />
       )}
+
+      <CustomerForm
+        key={editCustomer?.id ?? 'order-customer-edit'}
+        open={customerFormOpen}
+        customer={editCustomer}
+        onClose={() => setCustomerFormOpen(false)}
+        onSuccess={() => {
+          fetchItems({ ...filters, paymentMethod: undefined });
+          setCustomerFormOpen(false);
+        }}
+      />
 
       <OrderForm
         open={formOpen}
         order={editingOrder}
+        customer={orderCustomer}
         onClose={() => { setFormOpen(false); setEditingOrder(null); }}
-        onSuccess={() => { fetchItems({ ...filters, paymentMethod: undefined }); fetchStats(); }}
+        onSuccess={() => { fetchItems({ ...filters, paymentMethod: undefined }); fetchStats(); setOrderCustomer(null); }}
       />
       <OrderHistoryDialog
         order={selectedOrder}
@@ -430,6 +464,51 @@ const Orders: React.FC = () => {
         <DialogActions>
           <Button onClick={() => setVisibleColumnIds(DEFAULT_VISIBLE_COLUMNS)}>恢复默认</Button>
           <Button variant="contained" onClick={() => setViewSettingsOpen(false)}>完成</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={customerOrdersOpen} onClose={() => setCustomerOrdersOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>{orderCustomer?.company || orderCustomer?.name} 的订单</DialogTitle>
+        <DialogContent dividers>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>订单号</TableCell>
+                <TableCell>产品分类</TableCell>
+                <TableCell>订单类型</TableCell>
+                <TableCell>金额</TableCell>
+                <TableCell>付款日期</TableCell>
+                <TableCell>退款状态</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {customerOrders.map((order) => (
+                <TableRow key={order.id}>
+                  <TableCell>{order.orderNo}</TableCell>
+                  <TableCell>
+                    <Chip
+                      label={order.productLevel}
+                      size="small"
+                      sx={{ bgcolor: `${getProductLevelColor(order.productLevel)}18`, color: getProductLevelColor(order.productLevel), fontWeight: 600 }}
+                    />
+                  </TableCell>
+                  <TableCell>{order.orderType}</TableCell>
+                  <TableCell>{formatCurrency(order.actualAmount || order.amount)}</TableCell>
+                  <TableCell>{formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm')}</TableCell>
+                  <TableCell><RefundStatusBadge status={order.refundStatus} /></TableCell>
+                </TableRow>
+              ))}
+              {customerOrders.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={6} align="center" sx={{ py: 4, color: '#9ca3af' }}>暂无订单</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => orderCustomer && handleCreateOrderForCustomer(orderCustomer)}>新建订单</Button>
+          <Button onClick={() => setCustomerOrdersOpen(false)}>关闭</Button>
         </DialogActions>
       </Dialog>
     </Box>

@@ -291,7 +291,11 @@ export const STORAGE_KEYS = {
   CUSTOMER_SUCCESS_TASKS: `${STORAGE_PREFIX}customer_success_tasks`,
   SERVICE_TICKETS: `${STORAGE_PREFIX}service_tickets`,
   OPPORTUNITIES: `${STORAGE_PREFIX}opportunities`,
+  LEAD_FLOW_CONFIG: `${STORAGE_PREFIX}lead_flow_config`,
+  LEAD_INTAKE_RECORDS: `${STORAGE_PREFIX}lead_intake_records`,
+  LEAD_SOURCE_CONFIGS: `${STORAGE_PREFIX}lead_source_configs`,
   COMMISSION_RULES: `${STORAGE_PREFIX}commission_rules`,
+  COMMISSION_SETTLEMENT_BATCHES: `${STORAGE_PREFIX}commission_settlement_batches`,
   TAGS: `${STORAGE_PREFIX}tags`,
   INITIALIZED: `${STORAGE_PREFIX}initialized`,
 } as const;
@@ -420,6 +424,41 @@ export const DEFAULT_LIFECYCLE_STATUS_CONFIGS = [
   { id: 'lsc-003', name: '已转订单', description: '商机赢单并生成订单', color: '#4CAF50', isActive: true, sortOrder: 3, isSystem: true },
   { id: 'lsc-004', name: '已退款', description: '关联订单发生退款完成', color: '#F44336', isActive: true, sortOrder: 4, isSystem: true },
   { id: 'lsc-005', name: '已流失', description: '线索或商机输单/流失归档', color: '#607D8B', isActive: true, sortOrder: 5, isSystem: true },
+].map((item) => ({
+  ...item,
+  createdAt: '2026-06-01T00:00:00.000Z',
+  updatedAt: '2026-06-01T00:00:00.000Z',
+}));
+
+export const DEFAULT_LEAD_FLOW_CONFIG = {
+  id: 'lead-flow-global',
+  uniqueKeyMode: 'phone_or_wechat',
+  interceptionEnabled: true,
+  exemptionEnabled: true,
+  orderMatchCustomerEnabled: false,
+  autoAssignEnabled: true,
+  assignmentMode: 'round_robin',
+  participantUserIds: [],
+  dailyLimitEnabled: true,
+  dailyLimit: 200,
+  dailyRestartEnabled: false,
+  failedInboundCompensationEnabled: false,
+  inactiveMemberSkipEnabled: true,
+  lastAssignedIndex: -1,
+  updatedAt: '2026-06-01T00:00:00.000Z',
+} as const;
+
+export const DEFAULT_LEAD_SOURCE_CONFIGS = [
+  { id: 'lscfg-001', name: '官网', isActive: true, sortOrder: 1, description: '官网表单、在线咨询等自然留资' },
+  { id: 'lscfg-002', name: '抖音', isActive: true, sortOrder: 2, description: '抖音渠道线索' },
+  { id: 'lscfg-003', name: '直播', parentId: 'lscfg-002', isActive: true, sortOrder: 1, description: '抖音直播间留资' },
+  { id: 'lscfg-004', name: '视频', parentId: 'lscfg-002', isActive: true, sortOrder: 2, description: '短视频组件或私信留资' },
+  { id: 'lscfg-005', name: '广告', isActive: true, sortOrder: 3, description: '投放广告线索' },
+  { id: 'lscfg-006', name: '信息流', parentId: 'lscfg-005', isActive: true, sortOrder: 1, description: '信息流广告' },
+  { id: 'lscfg-007', name: '搜索广告', parentId: 'lscfg-005', isActive: true, sortOrder: 2, description: '搜索竞价广告' },
+  { id: 'lscfg-008', name: '转介绍', isActive: true, sortOrder: 4, description: '客户或伙伴推荐' },
+  { id: 'lscfg-009', name: '展会', isActive: true, sortOrder: 5, description: '线下活动或展会' },
+  { id: 'lscfg-010', name: '其他', isActive: true, sortOrder: 99, description: '未归类来源' },
 ].map((item) => ({
   ...item,
   createdAt: '2026-06-01T00:00:00.000Z',

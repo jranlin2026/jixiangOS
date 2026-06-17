@@ -83,10 +83,6 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
               <Typography variant="body1">{order.officialPaymentChannel || '-'}</Typography>
             </Box>
             <Box>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>订单状态</Typography>
-              <Chip label={order.status} size="small" color={order.status === '已完成' ? 'success' : 'default'} sx={{ mt: 0.5 }} />
-            </Box>
-            <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>退款状态</Typography>
               <RefundStatusBadge status={order.refundStatus} />
             </Box>
@@ -144,6 +140,26 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
                   </TableBody>
                 </Table>
               </TableContainer>
+            </>
+          )}
+
+          {(order.dealEvidenceName || order.dealEvidencePreview) && (
+            <>
+              <Divider sx={{ my: 2 }} />
+              <Box>
+                <Typography variant="subtitle2" sx={{ color: '#6b7280', mb: 1 }}>成交路径截图</Typography>
+                {order.dealEvidenceName && (
+                  <Typography variant="body2" sx={{ mb: 1, color: '#4f46e5' }}>{order.dealEvidenceName}</Typography>
+                )}
+                {order.dealEvidencePreview && (
+                  <Box
+                    component="img"
+                    src={order.dealEvidencePreview}
+                    alt="成交路径截图"
+                    sx={{ width: '100%', maxWidth: 520, maxHeight: 320, objectFit: 'contain', borderRadius: 1, border: '1px solid #e5e7eb' }}
+                  />
+                )}
+              </Box>
             </>
           )}
 

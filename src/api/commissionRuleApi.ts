@@ -1,10 +1,10 @@
 import type {
   Commission,
   CommissionCalcResult,
+  CommissionEvidenceType,
   CommissionRole,
   CommissionRule,
   OfficialPaymentChannel,
-  ProofStatus,
 } from '../types/commission';
 import type { Order } from '../types/order';
 import type { ApiResponse } from './types';
@@ -14,14 +14,19 @@ import { STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData, mockCommissionRules } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 
-const OFFICIAL_CHANNELS: OfficialPaymentChannel[] = ['企业微信转账', '企业支付宝转账', '对公银行转账', '公司自营小店'];
-
 function ensureInit(): void {
   initializeMockData();
   migrateCommissionRules();
 }
 
 function normalizeRule(rule: CommissionRule): CommissionRule {
+  const inferredLeaderConfirm = rule.requiresLeaderConfirm ?? rule.orderType === '成交线索转代理';
+  const inferredEvidenceTypes: CommissionEvidenceType[] = rule.evidenceTypes?.length
+    ? rule.evidenceTypes
+    : rule.settlementMode === '仅计业绩'
+      ? []
+      : ['付款截图', '成交路径截图'];
+
   return {
     scene: '',
     resourceOwnership: '',
@@ -30,11 +35,26 @@ function normalizeRule(rule: CommissionRule): CommissionRule {
     performanceRate: 100,
     splitRatio: 100,
     collaboratorRole: '',
-    requiresProof: false,
+    requiresProof: inferredEvidenceTypes.length > 0,
     clawbackBaseCommission: false,
+    scenarioGroup: inferScenarioGroup(rule),
+    settlementMode: '自动结算',
     description: '',
     ...rule,
+    requiresLeaderConfirm: inferredLeaderConfirm,
+    evidenceTypes: inferredEvidenceTypes,
   };
+}
+
+function inferScenarioGroup(rule: CommissionRule): CommissionRule['scenarioGroup'] {
+  const text = `${rule.name || ''}${rule.orderType || ''}${rule.scene || ''}`;
+  if (text.includes('代理') || text.includes('转代理')) return '代理转化';
+  if (text.includes('升单') || text.includes('复购')) return '升单复购';
+  if (text.includes('转介绍')) return '转介绍';
+  if (text.includes('挽回') || text.includes('退款')) return '退款挽回';
+  if (text.includes('服务') || text.includes('售后') || text.includes('客服')) return '服务激励';
+  if (text.includes('个人资源') || text.includes('自拓')) return '个人资源';
+  return '新客成交';
 }
 
 function migrateCommissionRules(): void {
@@ -42,7 +62,7 @@ function migrateCommissionRules(): void {
   const hasNewRules = rules.some((rule) => rule.scene || rule.resourceOwnership || rule.paymentChannels?.length);
 
   if (!hasNewRules) {
-    setStorageData(STORAGE_KEYS.COMMISSION_RULES, mockCommissionRules);
+    setStorageData(STORAGE_KEYS.COMMISSION_RULES, mockCommissionRules.map(normalizeRule));
     return;
   }
 
@@ -96,11 +116,14 @@ function matchesField(ruleValue: string | undefined, orderValue: string | undefi
 function matchesRule(rule: CommissionRule, order: Order): boolean {
   const normalized = normalizeRule(rule);
   const channel = order.officialPaymentChannel || mapPaymentMethodToOfficialChannel(order.paymentMethod);
+  const orderAmount = order.actualAmount || order.amount;
 
   if (!normalized.isActive) return false;
   if (normalized.excludeExternalTalent && order.isExternalTalentOrder) return false;
   if (channel === '非官方渠道') return false;
   if (normalized.paymentChannels?.length && !normalized.paymentChannels.includes(channel)) return false;
+  if (normalized.minAmount !== undefined && orderAmount < normalized.minAmount) return false;
+  if (normalized.maxAmount !== undefined && orderAmount > normalized.maxAmount) return false;
 
   return (
     matchesField(normalized.productLevel, order.productLevel) &&
@@ -131,6 +154,36 @@ function calcCommissionAmount(rule: CommissionRule, performanceAmount: number): 
   return Math.round(amount * 100) / 100;
 }
 
+function hasPaymentEvidence(order: Order): boolean {
+  return Boolean(order.payments?.some((payment) => payment.voucherName || payment.voucherPreview));
+}
+
+function hasDealEvidence(order: Order): boolean {
+  return Boolean(order.dealEvidenceName || order.dealEvidencePreview);
+}
+
+function resolveEvidenceStatus(rule: CommissionRule, order: Order): Commission['evidenceStatus'] {
+  const evidenceTypes = rule.evidenceTypes || [];
+  if (!rule.requiresProof && evidenceTypes.length === 0 && !rule.requiresLeaderConfirm) return '无需凭证';
+
+  if (evidenceTypes.includes('付款截图') && !hasPaymentEvidence(order)) return '缺付款截图';
+  if (evidenceTypes.includes('成交路径截图') && !hasDealEvidence(order)) return '缺成交路径截图';
+  if (evidenceTypes.includes('聊天记录截图') && !hasDealEvidence(order)) return '缺聊天记录截图';
+  if (rule.requiresLeaderConfirm || evidenceTypes.includes('组长确认')) return '需组长确认';
+
+  return '已齐全';
+}
+
+function buildFormulaText(rule: CommissionRule, amount: number, performanceAmount: number, splitNote?: string): string {
+  const base = rule.commissionType === 'fixed'
+    ? `固定提成 ${rule.commissionValue} 元`
+    : `业绩金额 ${performanceAmount} × ${rule.commissionValue}% = ${amount} 元`;
+  const performance = rule.performanceRate && rule.performanceRate !== 100
+    ? `，业绩按实付金额 ${rule.performanceRate}% 核算`
+    : '';
+  return [base + performance, splitNote].filter(Boolean).join('；');
+}
+
 function buildResult(
   rule: CommissionRule,
   order: Order,
@@ -139,9 +192,10 @@ function buildResult(
   ownerOverride?: string,
   splitNote?: string,
 ): CommissionCalcResult {
-  const proofStatus: ProofStatus = order.proofStatus || (rule.requiresProof ? '待补充' : '无需凭证');
   const performanceAmount = calcBaseAmount(rule, order);
-  const status = rule.requiresProof && proofStatus !== '已上传' ? '待审核' : '待发放';
+  const evidenceStatus = resolveEvidenceStatus(rule, order);
+  const needsAudit = true;
+  const status = '待审核';
   const calculationNote = [
     rule.description,
     rule.performanceRate && rule.performanceRate !== 100 ? `业绩按实付金额 ${rule.performanceRate}% 核算` : '',
@@ -161,8 +215,12 @@ function buildResult(
     ownerOverride,
     scene: order.dealScene,
     resourceOwnership: order.resourceOwnership,
-    proofStatus,
+    proofStatus: evidenceStatus === '已齐全' ? '已上传' : evidenceStatus === '无需凭证' ? '无需凭证' : '待补充',
     calculationNote,
+    auditReason: evidenceStatus === '已齐全' || evidenceStatus === '无需凭证' ? '新订单提成待财务审核' : evidenceStatus,
+    evidenceRequired: rule.requiresProof || Boolean(rule.evidenceTypes?.length) || rule.requiresLeaderConfirm,
+    evidenceStatus,
+    formulaText: buildFormulaText(rule, amount, performanceAmount, splitNote),
   };
 }
 
@@ -226,6 +284,8 @@ function clawbackBaseCommissions(order: Order, results: CommissionCalcResult[]):
       return {
         ...commission,
         status: '已取消' as const,
+        auditReason: '成交线索转代理冲销原 899 基础提成',
+        frozenReason: '成交线索转代理冲销原 899 基础提成',
         calculationNote: '成交线索转代理，按制度冲销原 899 基础提成。',
         updatedAt: new Date().toISOString(),
       };
@@ -256,7 +316,7 @@ async function calculateCommissions(
     actualAmount: orderAmount,
     paymentMethod: '对公转账',
     officialPaymentChannel: '对公银行转账',
-    status: '待确认',
+    status: '已确认',
     refundStatus: '无',
     owner: '',
     sourceType,

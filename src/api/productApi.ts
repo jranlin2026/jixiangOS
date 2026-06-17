@@ -2,7 +2,7 @@ import type { Product, ProductLevelConfig } from '../types/product';
 import type { ApiResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { PRODUCT_LEVEL_COLOR_MAP, STORAGE_KEYS } from '../shared/utils/constants';
+import { STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 import type { Delivery } from '../types/delivery';
@@ -19,30 +19,10 @@ function ensureInit(): void {
 }
 
 function ensureProductLevelConfigs(): ProductLevelConfig[] {
-  const products = getStorageData<Product[]>(STORAGE_KEYS.PRODUCTS) || [];
   const existing = getStorageData<ProductLevelConfig[]>(STORAGE_KEYS.PRODUCT_LEVELS);
-  const now = new Date().toISOString();
-  let configs = existing?.length ? existing : mockProductLevelConfigs;
-  let changed = !existing?.length;
+  const configs = existing?.length ? existing : mockProductLevelConfigs;
 
-  products.forEach((product) => {
-    if (configs.some((config) => config.name === product.level)) return;
-    configs = [
-      ...configs,
-      {
-        id: `plc-${uuidv4().slice(0, 8)}`,
-        name: product.level,
-        color: PRODUCT_LEVEL_COLOR_MAP[product.level] || '#2196F3',
-        isActive: true,
-        sortOrder: configs.length + 1,
-        createdAt: now,
-        updatedAt: now,
-      },
-    ];
-    changed = true;
-  });
-
-  if (changed) {
+  if (!existing?.length) {
     setStorageData(STORAGE_KEYS.PRODUCT_LEVELS, configs);
   }
   return [...configs].sort((a, b) => a.sortOrder - b.sortOrder);

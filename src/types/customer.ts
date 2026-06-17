@@ -23,6 +23,33 @@ export interface CustomerGrowthRecord {
   createdAt: Timestamp;
 }
 
+export type CustomerActivityType =
+  | 'create'
+  | 'update'
+  | 'transfer'
+  | 'follow'
+  | 'order'
+  | 'refund'
+  | 'ai'
+  | 'note';
+
+export interface CustomerActivityRecord {
+  id: ID;
+  type: CustomerActivityType;
+  title: string;
+  content?: string;
+  operator: string;
+  createdAt: Timestamp;
+  changes?: Array<{
+    field: string;
+    label: string;
+    oldValue?: string | number | boolean | null;
+    newValue?: string | number | boolean | null;
+  }>;
+  relatedId?: ID;
+  relatedType?: 'order' | 'refund' | 'lead' | 'opportunity';
+}
+
 /** AI 客户画像 */
 export interface AICustomerPortrait {
   riskLevel: '低' | '中' | '高';
@@ -63,6 +90,7 @@ export interface Customer {
   orderCount: number;
   growthPath: GrowthMilestone[];
   growthRecords: CustomerGrowthRecord[];
+  activityRecords?: CustomerActivityRecord[];
   aiPortrait?: AICustomerPortrait;
   tags?: string[];
   /** 线索录入人 */

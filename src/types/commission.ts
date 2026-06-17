@@ -29,6 +29,10 @@ export type OfficialPaymentChannel =
 
 export type ProofStatus = '无需凭证' | '待补充' | '已上传';
 
+export type CommissionEvidenceType = '付款截图' | '成交路径截图' | '聊天记录截图' | '组长确认';
+export type CommissionScenarioGroup = '新客成交' | '代理转化' | '升单复购' | '转介绍' | '退款挽回' | '服务激励' | '个人资源';
+export type CommissionSettlementMode = '自动结算' | '人工审核' | '仅计业绩';
+
 /** 提成规则 — 核心配置，每条规则对应一个角色的提成方式 */
 export interface CommissionRule {
   id: ID;
@@ -63,6 +67,18 @@ export interface CommissionRule {
   requiresProof?: boolean;
   /** 是否冲销该订单历史基础提成 */
   clawbackBaseCommission?: boolean;
+  /** 制度场景分组，用于规则管理和财务筛选 */
+  scenarioGroup?: CommissionScenarioGroup;
+  /** 是否需要组长以上确认 */
+  requiresLeaderConfirm?: boolean;
+  /** 需要留存的凭证类型 */
+  evidenceTypes?: CommissionEvidenceType[];
+  /** 金额区间下限，用于 450/599/898 等分档 */
+  minAmount?: number;
+  /** 金额区间上限 */
+  maxAmount?: number;
+  /** 结算方式 */
+  settlementMode?: CommissionSettlementMode;
   /** 规则说明 */
   description?: string;
   /** 是否启用 */
@@ -106,6 +122,20 @@ export interface Commission {
   proofStatus?: ProofStatus;
   /** 计算说明 */
   calculationNote?: string;
+  /** 财务审核原因或待补充原因 */
+  auditReason?: string;
+  /** 是否需要凭证 */
+  evidenceRequired?: boolean;
+  /** 凭证校验状态 */
+  evidenceStatus?: '已齐全' | '缺付款截图' | '缺成交路径截图' | '缺聊天记录截图' | '需组长确认' | '无需凭证';
+  /** 面向财务展示的公式 */
+  formulaText?: string;
+  /** 所属结算批次 */
+  batchId?: ID;
+  /** 冻结原因 */
+  frozenReason?: string;
+  /** 冲销来源提成 */
+  clawbackFromCommissionId?: ID;
   /** 提成角色 */
   role: CommissionRole;
   /** 人员姓名 */
@@ -120,6 +150,39 @@ export interface Commission {
   paidAt?: Timestamp;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+}
+
+export interface CommissionAuditIssue {
+  id: ID;
+  commissionId: ID;
+  orderId: ID;
+  orderNo: string;
+  customerName: string;
+  owner: string;
+  role: CommissionRole;
+  amount: number;
+  issueType: '缺凭证' | '需确认' | '规则冲突' | '退款冻结' | '金额异常';
+  reason: string;
+  status: CommissionStatus;
+  createdAt: Timestamp;
+}
+
+export interface CommissionSettlementBatch {
+  id: ID;
+  batchNo: string;
+  period: string;
+  totalCount: number;
+  totalAmount: number;
+  pendingReviewAmount: number;
+  pendingPayAmount: number;
+  paidAmount: number;
+  cancelledAmount: number;
+  status: '待确认' | '待发放' | '已发放';
+  generatedAt: Timestamp;
+  paidAt?: Timestamp;
+  commissionIds: ID[];
+  byOwner: Array<{ owner: string; department: string; count: number; amount: number }>;
+  byRole: Array<{ role: CommissionRole; count: number; amount: number }>;
 }
 
 /** 提成筛选参数 */
@@ -166,4 +229,8 @@ export interface CommissionCalcResult {
   resourceOwnership?: ResourceOwnership;
   proofStatus?: ProofStatus;
   calculationNote?: string;
+  auditReason?: string;
+  evidenceRequired?: boolean;
+  evidenceStatus?: Commission['evidenceStatus'];
+  formulaText?: string;
 }

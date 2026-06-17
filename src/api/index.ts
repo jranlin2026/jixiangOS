@@ -16,5 +16,6 @@ export { aiCardApi } from './aiCardApi';
 export { customerSuccessApi } from './customerSuccessApi';
 export { serviceTicketApi } from './serviceTicketApi';
 export { opportunityApi } from './opportunityApi';
+export { leadFlowApi } from './leadFlowApi';
 export { initializeMockData, resetMockData } from './mock';
 export type { ApiResponse, PaginatedResponse } from './types';

@@ -45,7 +45,7 @@ const navItems: NavItem[] = [
   { label: '客户', icon: <GroupsIcon />, path: ROUTES.CUSTOMERS },
   { label: '订单', icon: <ReceiptLongIcon />, path: ROUTES.ORDERS },
   { label: '交付', icon: <LocalShippingIcon />, path: ROUTES.DELIVERY },
-  { label: '提成', icon: <AccountBalanceWalletIcon />, path: ROUTES.COMMISSION },
+  { label: '财务结算台', icon: <AccountBalanceWalletIcon />, path: ROUTES.COMMISSION },
   { label: '财务', icon: <PaidIcon />, path: ROUTES.FINANCE },
   { label: '退款中心', icon: <RefundIcon />, path: ROUTES.REFUND_CENTER },
   { label: '升单池', icon: <UpgradePoolIcon />, path: ROUTES.UPGRADE_POOL },

@@ -1,8 +1,8 @@
-import type { User, UserRole, ProductConfig, ChannelConfig, OrderTypeConfig, LifecycleStatusConfig } from '../types/settings';
+import type { User, UserRole, ProductConfig, ChannelConfig, OrderTypeConfig, LifecycleStatusConfig, LeadSourceConfig } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, COMMISSION_RATES, DEFAULT_ORDER_TYPE_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS } from '../shared/utils/constants';
+import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, COMMISSION_RATES, DEFAULT_ORDER_TYPE_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, DEFAULT_LEAD_SOURCE_CONFIGS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 import type { Order } from '../types/order';
@@ -14,37 +14,9 @@ function ensureInit(): void {
 
 function ensureOrderTypeConfigs(): OrderTypeConfig[] {
   const existing = getStorageData<OrderTypeConfig[]>(STORAGE_KEYS.ORDER_TYPE_CONFIGS);
-  let configs: OrderTypeConfig[] = existing?.length ? existing : DEFAULT_ORDER_TYPE_CONFIGS;
-  let changed = !existing?.length;
-  const now = new Date().toISOString();
-  const usedNames = new Set<string>();
-
-  (getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).forEach((order) => {
-    if (order.orderType) usedNames.add(order.orderType);
-  });
-  (getStorageData<CommissionRule[]>(STORAGE_KEYS.COMMISSION_RULES) || []).forEach((rule) => {
-    if (rule.orderType) usedNames.add(rule.orderType);
-  });
-
-  usedNames.forEach((name) => {
-    if (configs.some((config) => config.name === name)) return;
-    configs = [
-      ...configs,
-      {
-        id: `otc-${uuidv4().slice(0, 8)}`,
-        name,
-        description: '',
-        isActive: true,
-        sortOrder: configs.length + 1,
-        createdAt: now,
-        updatedAt: now,
-      },
-    ];
-    changed = true;
-  });
-
+  const configs: OrderTypeConfig[] = existing?.length ? existing : DEFAULT_ORDER_TYPE_CONFIGS;
   const sorted = [...configs].sort((a, b) => a.sortOrder - b.sortOrder);
-  if (changed) setStorageData(STORAGE_KEYS.ORDER_TYPE_CONFIGS, sorted);
+  if (!existing?.length) setStorageData(STORAGE_KEYS.ORDER_TYPE_CONFIGS, sorted);
   return sorted;
 }
 
@@ -53,6 +25,17 @@ function ensureLifecycleStatusConfigs(): LifecycleStatusConfig[] {
   const configs = existing?.length ? existing : DEFAULT_LIFECYCLE_STATUS_CONFIGS;
   const sorted = [...configs].sort((a, b) => a.sortOrder - b.sortOrder);
   if (!existing?.length) setStorageData(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, sorted);
+  return sorted;
+}
+
+function ensureLeadSourceConfigs(): LeadSourceConfig[] {
+  const existing = getStorageData<LeadSourceConfig[]>(STORAGE_KEYS.LEAD_SOURCE_CONFIGS);
+  const configs = existing?.length ? existing : DEFAULT_LEAD_SOURCE_CONFIGS;
+  const sorted = [...configs].sort((a, b) => {
+    if ((a.parentId || '') !== (b.parentId || '')) return (a.parentId || '').localeCompare(b.parentId || '');
+    return a.sortOrder - b.sortOrder;
+  });
+  if (!existing?.length) setStorageData(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, sorted);
   return sorted;
 }
 
@@ -314,6 +297,74 @@ async function deleteLifecycleStatusConfig(id: string): Promise<ApiResponse<bool
   return createSuccessResponse(true);
 }
 
+// ---- 线索来源配置 ----
+
+async function fetchLeadSourceConfigs(): Promise<ApiResponse<LeadSourceConfig[]>> {
+  ensureInit();
+  await delay(120);
+  return createSuccessResponse(ensureLeadSourceConfigs());
+}
+
+async function createLeadSourceConfig(
+  data: Omit<LeadSourceConfig, 'id' | 'createdAt' | 'updatedAt'>,
+): Promise<ApiResponse<LeadSourceConfig | null>> {
+  ensureInit();
+  await delay(150);
+  const configs = ensureLeadSourceConfigs();
+  const name = data.name.trim();
+  if (!name) return createErrorResponse('线索来源名称不能为空');
+  if (configs.some((config) => config.parentId === data.parentId && config.name === name)) {
+    return createErrorResponse('同级线索来源已存在');
+  }
+  const now = new Date().toISOString();
+  const config: LeadSourceConfig = {
+    ...data,
+    name,
+    id: `lscfg-${uuidv4().slice(0, 8)}`,
+    createdAt: now,
+    updatedAt: now,
+  };
+  setStorageData(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, [...configs, config]);
+  return createSuccessResponse(config);
+}
+
+async function updateLeadSourceConfig(
+  id: string,
+  data: Partial<Omit<LeadSourceConfig, 'id' | 'createdAt' | 'updatedAt'>>,
+): Promise<ApiResponse<LeadSourceConfig | null>> {
+  ensureInit();
+  await delay(150);
+  const configs = ensureLeadSourceConfigs();
+  const idx = configs.findIndex((config) => config.id === id);
+  if (idx === -1) return createSuccessResponse(null);
+  const nextName = typeof data.name === 'string' ? data.name.trim() : configs[idx].name;
+  if (!nextName) return createErrorResponse('线索来源名称不能为空');
+  const parentId = data.parentId ?? configs[idx].parentId;
+  if (configs.some((config) => config.id !== id && config.parentId === parentId && config.name === nextName)) {
+    return createErrorResponse('同级线索来源已存在');
+  }
+  const next = [...configs];
+  next[idx] = {
+    ...configs[idx],
+    ...data,
+    name: nextName,
+    sortOrder: Number(data.sortOrder ?? configs[idx].sortOrder),
+    updatedAt: new Date().toISOString(),
+  };
+  setStorageData(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, next);
+  return createSuccessResponse(next[idx]);
+}
+
+async function deleteLeadSourceConfig(id: string): Promise<ApiResponse<boolean>> {
+  ensureInit();
+  await delay(150);
+  const configs = ensureLeadSourceConfigs();
+  const hasChildren = configs.some((config) => config.parentId === id);
+  if (hasChildren) return createErrorResponse('请先删除该来源下的二级来源');
+  setStorageData(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, configs.filter((config) => config.id !== id));
+  return createSuccessResponse(true);
+}
+
 export const settingsApi = {
   fetchUsers,
   createUser,
@@ -332,4 +383,8 @@ export const settingsApi = {
   createLifecycleStatusConfig,
   updateLifecycleStatusConfig,
   deleteLifecycleStatusConfig,
+  fetchLeadSourceConfigs,
+  createLeadSourceConfig,
+  updateLeadSourceConfig,
+  deleteLeadSourceConfig,
 };

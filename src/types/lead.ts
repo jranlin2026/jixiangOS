@@ -1,27 +1,16 @@
-import type { ID, Timestamp, ProductLevel } from './common';
+import type { ID, Timestamp } from './common';
 
-/** 线索来源 */
-export type LeadSource =
-  | '官网'
-  | '转介绍'
-  | '广告'
-  | '展会'
-  | '社交媒体'
-  | '电话营销'
-  | '其他';
+/** 线索来源，由系统设置维护 */
+export type LeadSource = string;
 
-/** 线索状态 */
-export type LeadStatus =
-  | '新线索'
-  | '已联系'
-  | '已验证'
-  | '方案中'
-  | '谈判中'
-  | '已成交'
-  | '已流失';
+/** 线索内部状态，录入时默认新线索，不再在表单中手动维护 */
+export type LeadStatus = '新线索' | '已联系' | '已验证' | '方案中' | '谈判中' | '已成交' | '已流失';
 
 /** 客资在系统内的生命周期状态，供线索人员查看 */
 export type LeadLifecycleStatus = string;
+
+export type LeadIntakeStatus = '入库成功' | '入库失败' | '待分配';
+export type LeadUniqueKeyMode = 'phone' | 'wechat' | 'phone_or_wechat';
 
 /** 跟进方式 */
 export type FollowUpType = '电话' | '微信' | '邮件' | '上门' | '会议' | '其他';
@@ -48,6 +37,7 @@ export interface LeadAIAnalysis {
 /** 线索 */
 export interface Lead {
   id: ID;
+  customerId?: ID;
   name: string;
   company?: string;
   phone: string;
@@ -58,6 +48,12 @@ export interface Lead {
   lifecycleStatusUpdatedAt?: Timestamp;
   opportunityId?: ID;
   orderId?: ID;
+  intakeStatus?: LeadIntakeStatus;
+  intakeFailureReason?: string;
+  inputBy?: string;
+  assignedTo?: string;
+  assignedAt?: Timestamp;
+  assignmentRuleId?: ID;
   owner: string;
   estimatedAmount?: number;
   aiAnalysis?: LeadAIAnalysis;
@@ -65,6 +61,7 @@ export interface Lead {
   sourceType?: string;
   sourceName?: string;
   sourceAccount?: string;
+  remark?: string;
   score?: number;
   wechat?: string;
   industry?: string;
@@ -73,6 +70,44 @@ export interface Lead {
   createdAt: Timestamp;
   updatedAt: Timestamp;
   followUpRecords: FollowUpRecord[];
+}
+
+export interface LeadFlowConfig {
+  id: ID;
+  uniqueKeyMode: LeadUniqueKeyMode;
+  interceptionEnabled: boolean;
+  exemptionEnabled: boolean;
+  orderMatchCustomerEnabled: boolean;
+  autoAssignEnabled: boolean;
+  assignmentMode: 'round_robin';
+  participantUserIds: ID[];
+  dailyLimitEnabled: boolean;
+  dailyLimit: number;
+  dailyRestartEnabled: boolean;
+  failedInboundCompensationEnabled: boolean;
+  inactiveMemberSkipEnabled: boolean;
+  lastAssignedIndex: number;
+  updatedAt: Timestamp;
+}
+
+export interface LeadIntakeRecord {
+  id: ID;
+  leadId?: ID;
+  customerId?: ID;
+  name: string;
+  company?: string;
+  phone?: string;
+  wechat?: string;
+  source?: LeadSource;
+  inputBy?: string;
+  assignedTo?: string;
+  status: LeadIntakeStatus;
+  matchedRule: string;
+  failureReason?: string;
+  collisionTargetType?: '客户' | '线索';
+  collisionTargetId?: ID;
+  collisionTargetName?: string;
+  createdAt: Timestamp;
 }
 
 /** 线索筛选参数 */

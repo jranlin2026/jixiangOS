@@ -39,6 +39,18 @@ export interface ChannelConfig {
   description: string;
 }
 
+/** 线索来源配置：一级来源 + 二级来源 */
+export interface LeadSourceConfig {
+  id: ID;
+  name: string;
+  parentId?: ID;
+  isActive: boolean;
+  sortOrder: number;
+  description?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
 /** 订单类型配置 */
 export interface OrderTypeConfig {
   id: ID;
