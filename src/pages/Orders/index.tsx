@@ -1,31 +1,99 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Box, Typography, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, Paper, Chip, IconButton, Button, TextField,
-  MenuItem, FormControl, InputLabel, Select, Tooltip,
+  Box,
+  Button,
+  Checkbox,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControl,
+  FormControlLabel,
+  FormGroup,
+  IconButton,
+  InputLabel,
+  MenuItem,
+  Paper,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  Tooltip,
+  Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import EditIcon from '@mui/icons-material/Edit';
+import HistoryIcon from '@mui/icons-material/History';
 import SortIcon from '@mui/icons-material/Sort';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import EditIcon from '@mui/icons-material/Edit';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import HistoryIcon from '@mui/icons-material/History';
+import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import useOrderStore from '../../store/useOrderStore';
-import { PRODUCT_LEVELS, getProductLevelColor, ORDER_STATUS, ORDER_TYPES, PAYMENT_METHODS } from '../../shared/utils/constants';
+import { customerApi, orderApi, productApi, settingsApi } from '../../api';
+import { getProductLevelColor, ORDER_STATUS, PRODUCT_LEVELS } from '../../shared/utils/constants';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
-import { customerApi, orderApi, productApi } from '../../api';
-import OrderStats from './OrderStats';
+import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
+import CustomerDetail from '../Customers/CustomerDetail';
 import OrderDetail from './OrderDetail';
 import OrderForm from './OrderForm';
 import OrderHistoryDialog from './OrderHistoryDialog';
-import CustomerDetail from '../Customers/CustomerDetail';
-import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
-import type { Order } from '../../types/order';
+import OrderStats from './OrderStats';
 import type { Customer } from '../../types/customer';
-import type { ProductLevel, OrderType, PaymentMethod } from '../../types/common';
+import type { Order } from '../../types/order';
+import type { OrderTypeConfig } from '../../types/settings';
+
+type OrderColumn = {
+  id: string;
+  label: string;
+};
+
+const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_columns';
+
+const ORDER_COLUMNS: OrderColumn[] = [
+  { id: 'customer', label: '客户' },
+  { id: 'productLevel', label: '产品等级' },
+  { id: 'orderType', label: '订单类型' },
+  { id: 'actualAmount', label: '实付金额' },
+  { id: 'paymentDate', label: '付款日期' },
+  { id: 'status', label: '状态' },
+  { id: 'refundStatus', label: '退款状态' },
+  { id: 'owner', label: '销售负责人' },
+  { id: 'createdAt', label: '创建时间' },
+];
+
+const DEFAULT_VISIBLE_COLUMNS = [
+  'customer',
+  'productLevel',
+  'orderType',
+  'actualAmount',
+  'paymentDate',
+  'status',
+  'refundStatus',
+  'owner',
+  'createdAt',
+];
+
+const readVisibleColumns = () => {
+  try {
+    const raw = localStorage.getItem(ORDER_VIEW_STORAGE_KEY);
+    if (!raw) return DEFAULT_VISIBLE_COLUMNS;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return DEFAULT_VISIBLE_COLUMNS;
+    const validIds = new Set(ORDER_COLUMNS.map((column) => column.id));
+    const filtered = parsed.filter((id) => validIds.has(id));
+    return filtered.length ? filtered : DEFAULT_VISIBLE_COLUMNS;
+  } catch {
+    return DEFAULT_VISIBLE_COLUMNS;
+  }
+};
 
 const Orders: React.FC = () => {
-  const { items, loading, filters, fetchItems, fetchStats, setFilters, delete: deleteOrder } = useOrderStore();
+  const { items, filters, fetchItems, fetchStats, setFilters, delete: deleteOrder } = useOrderStore();
   const [detailOpen, setDetailOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -34,16 +102,31 @@ const Orders: React.FC = () => {
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [productLevels, setProductLevels] = useState<{ name: string; color: string }[]>([]);
+  const [orderTypeConfigs, setOrderTypeConfigs] = useState<OrderTypeConfig[]>([]);
+  const [customerNameMap, setCustomerNameMap] = useState<Record<string, string>>({});
+  const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
+  const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(readVisibleColumns);
 
   useEffect(() => {
-    fetchItems();
+    fetchItems({ ...filters, paymentMethod: undefined });
     fetchStats();
     productApi.getProductLevelConfigs().then((res) => {
       if (res.code === 0) {
         setProductLevels(res.data.filter((level) => level.isActive).map((level) => ({ name: level.name, color: level.color })));
       }
     });
+    settingsApi.fetchOrderTypeConfigs().then((res) => {
+      if (res.code === 0) setOrderTypeConfigs(res.data);
+    });
+    customerApi.fetchCustomers({ pageSize: 1000 }).then((res) => {
+      if (res.code !== 0) return;
+      setCustomerNameMap(Object.fromEntries(res.data.items.map((customer) => [customer.id, customer.name])));
+    });
   }, [fetchItems, fetchStats]);
+
+  useEffect(() => {
+    localStorage.setItem(ORDER_VIEW_STORAGE_KEY, JSON.stringify(visibleColumnIds));
+  }, [visibleColumnIds]);
 
   const handleViewDetail = (order: Order) => {
     setSelectedOrder(order);
@@ -72,16 +155,24 @@ const Orders: React.FC = () => {
   };
 
   const handleFilterChange = (key: string, value: string) => {
-    const newFilters = { ...filters, [key]: value || undefined };
+    const newFilters = { ...filters, paymentMethod: undefined, [key]: value || undefined };
     setFilters(newFilters);
     fetchItems(newFilters);
   };
 
   const handlePaymentDateSort = () => {
     const nextDirection: 'asc' | 'desc' = filters.sortBy === 'paymentDate' && filters.sortDirection === 'desc' ? 'asc' : 'desc';
-    const newFilters = { ...filters, sortBy: 'paymentDate' as const, sortDirection: nextDirection };
+    const newFilters = { ...filters, paymentMethod: undefined, sortBy: 'paymentDate' as const, sortDirection: nextDirection };
     setFilters(newFilters);
     fetchItems(newFilters);
+  };
+
+  const handleToggleColumn = (id: string) => {
+    setVisibleColumnIds((current) => (
+      current.includes(id)
+        ? current.filter((columnId) => columnId !== id)
+        : [...current, id]
+    ));
   };
 
   const handleViewCustomer = async (order: Order) => {
@@ -126,16 +217,71 @@ const Orders: React.FC = () => {
   const selectedProductLevel = productLevelOptions.some((level) => level.name === filters.productLevel)
     ? filters.productLevel || ''
     : '';
+  const orderTypeOptions = orderTypeConfigs.filter((item) => item.isActive);
+  const selectedOrderType = orderTypeOptions.some((item) => item.name === filters.orderType)
+    ? filters.orderType || ''
+    : '';
+  const visibleColumns = useMemo(
+    () => ORDER_COLUMNS.filter((column) => visibleColumnIds.includes(column.id)),
+    [visibleColumnIds],
+  );
+
+  const renderOrderCell = (order: Order, columnId: string) => {
+    const levelColor = getProductLevelColor(order.productLevel);
+    const customerDisplayName = customerNameMap[order.customerId] || order.customerName;
+    switch (columnId) {
+      case 'customer':
+        return (
+          <Button
+            variant="text"
+            size="small"
+            onClick={() => handleViewCustomer(order)}
+            sx={{ p: 0, minWidth: 0, justifyContent: 'flex-start', textTransform: 'none', fontWeight: 500 }}
+          >
+            {customerDisplayName}
+          </Button>
+        );
+      case 'productLevel':
+        return (
+          <Chip
+            label={order.productLevel}
+            size="small"
+            sx={{ bgcolor: `${levelColor}18`, color: levelColor, fontWeight: 600 }}
+          />
+        );
+      case 'orderType':
+        return <Chip label={order.orderType} size="small" variant="outlined" />;
+      case 'actualAmount':
+        return formatCurrency(order.actualAmount || order.amount);
+      case 'paymentDate':
+        return formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm');
+      case 'status':
+        return <Chip label={order.status} size="small" color={order.status === '已完成' ? 'success' : order.status === '待确认' ? 'warning' : 'default'} />;
+      case 'refundStatus':
+        return <RefundStatusBadge status={order.refundStatus} />;
+      case 'owner':
+        return order.owner;
+      case 'createdAt':
+        return formatDate(order.createdAt);
+      default:
+        return null;
+    }
+  };
 
   return (
     <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, gap: 2 }}>
         <Typography variant="h5" sx={{ fontWeight: 600 }}>
           订单管理
         </Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateOrder}>
-          新增订单
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
+            视图设置
+          </Button>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateOrder}>
+            新增订单
+          </Button>
+        </Box>
       </Box>
 
       <OrderStats />
@@ -162,21 +308,12 @@ const Orders: React.FC = () => {
             ))}
           </Select>
         </FormControl>
-        <FormControl size="small" sx={{ minWidth: 100 }}>
-          <InputLabel>订单类型</InputLabel>
-          <Select value={filters.orderType || ''} label="订单类型" onChange={(e) => handleFilterChange('orderType', e.target.value)}>
-            <MenuItem value="">全部</MenuItem>
-            {ORDER_TYPES.map((t) => (
-              <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
         <FormControl size="small" sx={{ minWidth: 120 }}>
-          <InputLabel>支付方式</InputLabel>
-          <Select value={filters.paymentMethod || ''} label="支付方式" onChange={(e) => handleFilterChange('paymentMethod', e.target.value)}>
+          <InputLabel>订单类型</InputLabel>
+          <Select value={selectedOrderType} label="订单类型" onChange={(e) => handleFilterChange('orderType', e.target.value)}>
             <MenuItem value="">全部</MenuItem>
-            {PAYMENT_METHODS.map((m) => (
-              <MenuItem key={m.value} value={m.value}>{m.label}</MenuItem>
+            {orderTypeOptions.map((item) => (
+              <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>
             ))}
           </Select>
         </FormControl>
@@ -184,8 +321,8 @@ const Orders: React.FC = () => {
           <InputLabel>状态</InputLabel>
           <Select value={filters.status || ''} label="状态" onChange={(e) => handleFilterChange('status', e.target.value)}>
             <MenuItem value="">全部</MenuItem>
-            {Object.values(ORDER_STATUS).map((s) => (
-              <MenuItem key={s} value={s}>{s}</MenuItem>
+            {Object.values(ORDER_STATUS).map((status) => (
+              <MenuItem key={status} value={status}>{status}</MenuItem>
             ))}
           </Select>
         </FormControl>
@@ -199,16 +336,9 @@ const Orders: React.FC = () => {
           <TableHead>
             <TableRow>
               <TableCell>订单号</TableCell>
-              <TableCell>客户</TableCell>
-              <TableCell>产品等级</TableCell>
-              <TableCell>订单类型</TableCell>
-              <TableCell>金额</TableCell>
-              <TableCell>付款日期</TableCell>
-              <TableCell>支付方式</TableCell>
-              <TableCell>状态</TableCell>
-              <TableCell>退款状态</TableCell>
-              <TableCell>负责人</TableCell>
-              <TableCell>创建时间</TableCell>
+              {visibleColumns.map((column) => (
+                <TableCell key={column.id}>{column.label}</TableCell>
+              ))}
               <TableCell align="center" sx={{ width: 160 }}>操作</TableCell>
             </TableRow>
           </TableHead>
@@ -216,43 +346,11 @@ const Orders: React.FC = () => {
             {items.map((order) => {
               const levelColor = getProductLevelColor(order.productLevel);
               return (
-                <TableRow
-                  key={order.id}
-                  hover
-                  sx={{ bgcolor: `${levelColor}08` }}
-                >
+                <TableRow key={order.id} hover sx={{ bgcolor: `${levelColor}08` }}>
                   <TableCell sx={{ fontWeight: 500 }}>{order.orderNo}</TableCell>
-                  <TableCell>
-                    <Button
-                      variant="text"
-                      size="small"
-                      onClick={() => handleViewCustomer(order)}
-                      sx={{ p: 0, minWidth: 0, justifyContent: 'flex-start', textTransform: 'none', fontWeight: 500 }}
-                    >
-                      {order.customerName}
-                    </Button>
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={order.productLevel}
-                      size="small"
-                      sx={{ bgcolor: `${levelColor}18`, color: levelColor, fontWeight: 600 }}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Chip label={order.orderType} size="small" variant="outlined" />
-                  </TableCell>
-                  <TableCell>{formatCurrency(order.amount)}</TableCell>
-                  <TableCell>{formatDate(order.payments?.[0]?.paidAt || order.createdAt)}</TableCell>
-                  <TableCell>{order.paymentMethod || '-'}</TableCell>
-                  <TableCell>
-                    <Chip label={order.status} size="small" color={order.status === '已完成' ? 'success' : order.status === '待确认' ? 'warning' : 'default'} />
-                  </TableCell>
-                  <TableCell>
-                    <RefundStatusBadge status={order.refundStatus} />
-                  </TableCell>
-                  <TableCell>{order.owner}</TableCell>
-                  <TableCell>{formatDate(order.createdAt)}</TableCell>
+                  {visibleColumns.map((column) => (
+                    <TableCell key={column.id}>{renderOrderCell(order, column.id)}</TableCell>
+                  ))}
                   <TableCell align="center" sx={{ width: 160, minWidth: 160 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5 }}>
                       <Tooltip title="查看">
@@ -301,13 +399,39 @@ const Orders: React.FC = () => {
         open={formOpen}
         order={editingOrder}
         onClose={() => { setFormOpen(false); setEditingOrder(null); }}
-        onSuccess={() => { fetchItems(); fetchStats(); }}
+        onSuccess={() => { fetchItems({ ...filters, paymentMethod: undefined }); fetchStats(); }}
       />
       <OrderHistoryDialog
         order={selectedOrder}
         open={historyOpen}
         onClose={() => setHistoryOpen(false)}
       />
+      <Dialog open={viewSettingsOpen} onClose={() => setViewSettingsOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>订单列表视图设置</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ color: '#6b7280', mb: 2 }}>
+            勾选后会显示在订单管理列表中，设置会保存在当前浏览器。
+          </Typography>
+          <FormGroup sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.5 }}>
+            {ORDER_COLUMNS.map((column) => (
+              <FormControlLabel
+                key={column.id}
+                control={(
+                  <Checkbox
+                    checked={visibleColumnIds.includes(column.id)}
+                    onChange={() => handleToggleColumn(column.id)}
+                  />
+                )}
+                label={column.label}
+              />
+            ))}
+          </FormGroup>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setVisibleColumnIds(DEFAULT_VISIBLE_COLUMNS)}>恢复默认</Button>
+          <Button variant="contained" onClick={() => setViewSettingsOpen(false)}>完成</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

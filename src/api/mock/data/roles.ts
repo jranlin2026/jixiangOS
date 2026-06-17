@@ -12,6 +12,7 @@ export const mockRoles: Role[] = [
     id: 'role-002', name: '销售经理', code: 'sales_manager', departmentId: 'dept-001',
     permissions: [
       { module: '线索', actions: ['read', 'write', 'delete'] },
+      { module: '商机', actions: ['read', 'write', 'delete'] },
       { module: '客户', actions: ['read', 'write'] },
       { module: '订单', actions: ['read', 'write', 'delete'] },
       { module: '提成', actions: ['read'] },
@@ -23,6 +24,7 @@ export const mockRoles: Role[] = [
     id: 'role-003', name: '销售顾问', code: 'sales_consultant', departmentId: 'dept-001',
     permissions: [
       { module: '线索', actions: ['read', 'write'] },
+      { module: '商机', actions: ['read', 'write'] },
       { module: '客户', actions: ['read', 'write'] },
       { module: '订单', actions: ['read', 'write'] },
     ],
@@ -58,6 +60,7 @@ export const mockRoles: Role[] = [
     id: 'role-007', name: '市场专员', code: 'market_specialist', departmentId: 'dept-006',
     permissions: [
       { module: '线索', actions: ['read'] },
+      { module: '商机', actions: ['read'] },
       { module: '数据', actions: ['read'] },
       { module: '渠道', actions: ['read', 'write'] },
     ],

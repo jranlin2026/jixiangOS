@@ -17,7 +17,7 @@ async function getDepartments(filters?: DepartmentFilters): Promise<ApiResponse<
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
-    departments = departments.filter((d) => d.name.toLowerCase().includes(q) || d.code.toLowerCase().includes(q));
+    departments = departments.filter((d) => d.name.toLowerCase().includes(q) || d.code.toLowerCase().includes(q) || d.description?.toLowerCase().includes(q));
   }
   if (filters?.isActive !== undefined) {
     departments = departments.filter((d) => d.isActive === filters.isActive);

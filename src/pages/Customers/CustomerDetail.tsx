@@ -1,28 +1,43 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box,
   Typography, Chip, Divider, LinearProgress, List, ListItem, ListItemText,
 } from '@mui/material';
-import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import PsychologyIcon from '@mui/icons-material/Psychology';
 import type { Customer } from '../../types/customer';
-import { customerApi } from '../../api';
+import type { AIBusinessCard } from '../../types/aiCard';
+import { aiCardApi } from '../../api';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
-import { getProductLevelColor, CUSTOMER_LEVEL_LABELS } from '../../shared/utils/constants';
+import { getProductLevelColor } from '../../shared/utils/constants';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
+import AIBusinessCardPanel from '../../shared/components/AIBusinessCardPanel';
 
 interface CustomerDetailProps {
   customer: Customer;
   open: boolean;
   onClose: () => void;
   onEdit: (customer: Customer) => void;
+  onCreateOrder?: (customer: Customer) => void;
+  onViewOrders?: (customer: Customer) => void;
 }
 
-const CustomerDetail: React.FC<CustomerDetailProps> = ({ customer, open, onClose, onEdit }) => {
+const emptyText = (value?: string | number) => (value || value === 0 ? value : '未填写');
+
+const CustomerDetail: React.FC<CustomerDetailProps> = ({
+  customer,
+  open,
+  onClose,
+  onEdit,
+  onCreateOrder,
+  onViewOrders,
+}) => {
   const [currentCustomer, setCurrentCustomer] = useState<Customer>(customer);
+  const [aiCard, setAiCard] = useState<AIBusinessCard | null>(null);
+  const [cardLoading, setCardLoading] = useState(false);
 
   useEffect(() => {
     setCurrentCustomer(customer);
+    aiCardApi.getCard('customer', customer.id).then((res) => setAiCard(res.data));
   }, [customer]);
 
   const portrait = currentCustomer.aiPortrait;
@@ -39,57 +54,79 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({ customer, open, onClose
     return '#9ca3af';
   };
 
+  const handleGenerateCard = async () => {
+    setCardLoading(true);
+    try {
+      const res = await aiCardApi.generateCard({
+        subjectType: 'customer',
+        subjectId: currentCustomer.id,
+        name: currentCustomer.name,
+        company: currentCustomer.company,
+        phone: currentCustomer.phone,
+        email: currentCustomer.email,
+        wechat: currentCustomer.wechat,
+        industry: currentCustomer.industry,
+        city: currentCustomer.city,
+        tags: currentCustomer.tags,
+        notes: currentCustomer.remark || currentCustomer.aiPortrait?.aiSummary,
+      });
+      if (res.code === 0) setAiCard(res.data);
+    } finally {
+      setCardLoading(false);
+    }
+  };
+
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
           <Typography variant="h6" sx={{ fontWeight: 600 }}>{currentCustomer.name}</Typography>
-          <Chip
-            label={currentCustomer.productLevel}
-            size="small"
-            sx={{
-              bgcolor: `${getProductLevelColor(currentCustomer.productLevel)}18`,
-              color: getProductLevelColor(currentCustomer.productLevel),
-              fontWeight: 600,
-            }}
-          />
           <CustomerLevelBadge level={currentCustomer.customerLevel} />
         </Box>
-        <Button variant="outlined" size="small" onClick={() => onEdit(currentCustomer)}>编辑</Button>
+        <Box sx={{ display: 'flex', gap: 1, flexShrink: 0 }}>
+          <Button variant="outlined" size="small" onClick={() => onViewOrders?.(currentCustomer)}>查看订单</Button>
+          <Button variant="outlined" size="small" onClick={() => onCreateOrder?.(currentCustomer)}>新建订单</Button>
+          <Button variant="outlined" size="small" onClick={() => onEdit(currentCustomer)}>编辑</Button>
+        </Box>
       </DialogTitle>
       <DialogContent dividers>
-        {/* 基本信息 */}
         <Box sx={{ mb: 3 }}>
           <Typography variant="subtitle2" sx={{ mb: 1.5, color: '#6b7280' }}>客户信息</Typography>
-          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1 }}>
-            <Typography variant="body2">公司: {currentCustomer.company}</Typography>
-            <Typography variant="body2">电话: {currentCustomer.phone}</Typography>
-            <Typography variant="body2">邮箱: {currentCustomer.email || '未填写'}</Typography>
-            <Typography variant="body2">微信: {currentCustomer.wechat || '未填写'}</Typography>
-            <Typography variant="body2">行业: {currentCustomer.industry || '未填写'}</Typography>
-            <Typography variant="body2">城市: {currentCustomer.city || '未填写'}</Typography>
-            <Typography variant="body2">负责人: {currentCustomer.owner}</Typography>
+          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1.25 }}>
+            <Typography variant="body2">公司: {emptyText(currentCustomer.company)}</Typography>
+            <Typography variant="body2">电话: {emptyText(currentCustomer.phone)}</Typography>
+            <Typography variant="body2">邮箱: {emptyText(currentCustomer.email)}</Typography>
+            <Typography variant="body2">微信: {emptyText(currentCustomer.wechat)}</Typography>
+            <Typography variant="body2">行业: {emptyText(currentCustomer.industry)}</Typography>
+            <Typography variant="body2">城市: {emptyText(currentCustomer.city)}</Typography>
+            <Typography variant="body2">销售负责人: {emptyText(currentCustomer.owner)}</Typography>
+            <Typography variant="body2">线索录入人: {emptyText(currentCustomer.leadInputBy)}</Typography>
+            <Typography variant="body2">线索来源: {emptyText(currentCustomer.leadSource || currentCustomer.sourceType)}</Typography>
+            <Typography variant="body2">原销转人员: {emptyText(currentCustomer.originalSalesTransferBy)}</Typography>
             <Typography variant="body2">累计消费: {formatCurrency(currentCustomer.totalSpent)}</Typography>
             <Typography variant="body2">订单数: {currentCustomer.orderCount}</Typography>
-            {currentCustomer.sourceType && (
-              <Typography variant="body2">来源类型: {currentCustomer.sourceType}</Typography>
-            )}
-            {currentCustomer.score !== undefined && (
-              <Typography variant="body2">评分: {currentCustomer.score}</Typography>
-            )}
+            <Typography variant="body2">创建时间: {formatDate(currentCustomer.createdAt)}</Typography>
           </Box>
+          {currentCustomer.remark && (
+            <Box sx={{ mt: 1.5, p: 1.5, bgcolor: '#f8fafc', borderRadius: 1 }}>
+              <Typography variant="body2" sx={{ color: '#4b5563' }}>备注: {currentCustomer.remark}</Typography>
+            </Box>
+          )}
         </Box>
 
         <Divider sx={{ my: 2 }} />
 
-        {/* 客户等级变化记录 */}
+        <AIBusinessCardPanel card={aiCard} loading={cardLoading} onGenerate={handleGenerateCard} />
+
+        <Divider sx={{ my: 2 }} />
+
         {currentCustomer.growthRecords && currentCustomer.growthRecords.length > 0 && (
           <>
             <Box sx={{ mb: 3 }}>
-              <Typography variant="subtitle2" sx={{ mb: 1.5, color: '#6b7280' }}>等级变化记录</Typography>
+              <Typography variant="subtitle2" sx={{ mb: 1.5, color: '#6b7280' }}>客户等级变化记录</Typography>
               <Box sx={{ position: 'relative', pl: 3 }}>
                 {currentCustomer.growthRecords.map((record, idx) => (
-                  <Box key={idx} sx={{ position: 'relative', pb: 2 }}>
+                  <Box key={`${record.createdAt}-${idx}`} sx={{ position: 'relative', pb: 2 }}>
                     <Box
                       sx={{
                         position: 'absolute', left: -21, top: 4,
@@ -120,7 +157,6 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({ customer, open, onClose
           </>
         )}
 
-        {/* 成长路径时间轴 */}
         <Box sx={{ mb: 3 }}>
           <Typography variant="subtitle2" sx={{ mb: 1.5, color: '#6b7280' }}>成长路径</Typography>
           {currentCustomer.growthPath.length > 0 ? (
@@ -140,7 +176,15 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({ customer, open, onClose
                   )}
                   <Box>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                      <Chip label={milestone.productLevel} size="small" sx={{ fontSize: '0.6875rem', bgcolor: `${getProductLevelColor(milestone.productLevel)}18`, color: getProductLevelColor(milestone.productLevel) }} />
+                      <Chip
+                        label={milestone.productLevel}
+                        size="small"
+                        sx={{
+                          fontSize: '0.6875rem',
+                          bgcolor: `${getProductLevelColor(milestone.productLevel)}18`,
+                          color: getProductLevelColor(milestone.productLevel),
+                        }}
+                      />
                       <Typography variant="caption" sx={{ color: '#9ca3af' }}>{milestone.date}</Typography>
                     </Box>
                     <Typography variant="body2" sx={{ fontWeight: 500 }}>{milestone.title}</Typography>
@@ -150,13 +194,12 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({ customer, open, onClose
               ))}
             </Box>
           ) : (
-            <Typography variant="body2" sx={{ color: '#9ca3af' }}>暂无成长记录</Typography>
+            <Typography variant="body2" sx={{ color: '#9ca3af' }}>暂无成长记录，客户成交订单后会自动生成。</Typography>
           )}
         </Box>
 
         <Divider sx={{ my: 2 }} />
 
-        {/* AI 客户画像 */}
         <Box>
           <Typography variant="subtitle2" sx={{ mb: 1.5, color: '#6b7280', display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <PsychologyIcon fontSize="small" /> AI 客户画像
@@ -184,46 +227,10 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({ customer, open, onClose
                   </Box>
                 </Box>
               </Box>
-              {/* 扩展画像字段 */}
-              {(portrait.teamSize || portrait.accountCount || portrait.budgetLevel || portrait.activityLevel || portrait.upgradeProbability !== undefined) && (
-                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 2, mb: 2 }}>
-                  {portrait.teamSize && (
-                    <Box>
-                      <Typography variant="body2" sx={{ color: '#6b7280', mb: 0.5 }}>团队规模</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 500 }}>{portrait.teamSize}</Typography>
-                    </Box>
-                  )}
-                  {portrait.accountCount !== undefined && (
-                    <Box>
-                      <Typography variant="body2" sx={{ color: '#6b7280', mb: 0.5 }}>账号数</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 500 }}>{portrait.accountCount}</Typography>
-                    </Box>
-                  )}
-                  {portrait.budgetLevel && (
-                    <Box>
-                      <Typography variant="body2" sx={{ color: '#6b7280', mb: 0.5 }}>预算水平</Typography>
-                      <Chip label={portrait.budgetLevel} size="small" sx={{ bgcolor: `${getPotentialColor(portrait.budgetLevel)}18`, color: getPotentialColor(portrait.budgetLevel), fontWeight: 600 }} />
-                    </Box>
-                  )}
-                  {portrait.upgradeProbability !== undefined && (
-                    <Box>
-                      <Typography variant="body2" sx={{ color: '#6b7280', mb: 0.5 }}>升级概率</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 700, color: portrait.upgradeProbability >= 0.8 ? '#4CAF50' : portrait.upgradeProbability >= 0.5 ? '#FF9800' : '#9ca3af' }}>
-                        {Math.round(portrait.upgradeProbability * 100)}%
-                      </Typography>
-                    </Box>
-                  )}
-                </Box>
-              )}
               {portrait.aiSummary && (
                 <Box sx={{ mb: 2, p: 1.5, bgcolor: '#f8fafc', borderRadius: 1 }}>
                   <Typography variant="body2" sx={{ color: '#1a1a2e' }}>{portrait.aiSummary}</Typography>
                 </Box>
-              )}
-              {portrait.predictedNextPurchase && (
-                <Typography variant="body2" sx={{ mb: 1 }}>
-                  <strong>预测下次购买:</strong> {portrait.predictedNextPurchase}
-                </Typography>
               )}
               <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>关键洞察</Typography>
               <List dense>

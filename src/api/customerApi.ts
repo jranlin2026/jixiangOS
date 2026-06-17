@@ -1,8 +1,8 @@
-import type { Customer, CustomerFilters, AICustomerPortrait } from '../types/customer';
+import type { Customer, CustomerCreateInput, CustomerFilters, AICustomerPortrait } from '../types/customer';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, PRODUCT_TO_CUSTOMER_LEVEL } from '../shared/utils/constants';
+import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -10,16 +10,40 @@ function ensureInit(): void {
   initializeMockData();
 }
 
+function normalizeCustomer(customer: Customer): Customer {
+  const hasOrder = (customer.orderCount || 0) > 0 || (customer.totalSpent || 0) > 0;
+  if (hasOrder) return customer;
+
+  const growthPath = (customer.growthPath || []).filter((item) => {
+    const isLegacyAutoPurchase = !item.orderId
+      && !item.orderNo
+      && item.title.startsWith('签约')
+      && item.description.startsWith('首次购买');
+    return !isLegacyAutoPurchase;
+  });
+
+  return growthPath.length === (customer.growthPath || []).length
+    ? customer
+    : { ...customer, growthPath };
+}
+
 async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<PaginatedResponse<Customer>>> {
   ensureInit();
   await delay(200);
-  const all = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+  const raw = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+  const all = raw.map(normalizeCustomer);
+  if (JSON.stringify(raw) !== JSON.stringify(all)) {
+    setStorageData(STORAGE_KEYS.CUSTOMERS, all);
+  }
   let filtered = [...all];
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
     filtered = filtered.filter(
-      (c) => c.name.toLowerCase().includes(q) || c.company.toLowerCase().includes(q),
+      (c) => c.name.toLowerCase().includes(q)
+        || c.company.toLowerCase().includes(q)
+        || c.phone.includes(q)
+        || (c.wechat || '').toLowerCase().includes(q),
     );
   }
   if (filters?.productLevel) {
@@ -44,32 +68,24 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
 async function fetchCustomerById(id: string): Promise<ApiResponse<Customer | null>> {
   ensureInit();
   await delay(150);
-  const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+  const customers = (getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || []).map(normalizeCustomer);
   const customer = customers.find((c) => c.id === id) || null;
   return createSuccessResponse(customer);
 }
 
-async function createCustomer(data: Omit<Customer, 'id' | 'createdAt' | 'updatedAt' | 'growthPath' | 'growthRecords' | 'orderCount' | 'totalSpent' | 'customerLevel'>): Promise<ApiResponse<Customer>> {
+async function createCustomer(data: CustomerCreateInput): Promise<ApiResponse<Customer>> {
   ensureInit();
   await delay(200);
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
   const now = new Date().toISOString();
-  const customerLevel = (PRODUCT_TO_CUSTOMER_LEVEL[data.productLevel] || 'L2') as Customer['customerLevel'];
   const newCustomer: Customer = {
     ...data,
     id: `cust-${uuidv4().slice(0, 8)}`,
-    customerLevel,
+    productLevel: data.productLevel || undefined,
+    customerLevel: data.customerLevel || 'L1',
     totalSpent: 0,
     orderCount: 0,
-    growthPath: [
-      {
-        id: uuidv4(),
-        date: now.split('T')[0],
-        title: `签约${data.productLevel}产品`,
-        description: `首次购买${data.productLevel}版`,
-        productLevel: data.productLevel,
-      },
-    ],
+    growthPath: [],
     growthRecords: [],
     createdAt: now,
     updatedAt: now,
@@ -104,6 +120,7 @@ async function fetchAIPortrait(customerId: string): Promise<ApiResponse<AICustom
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
   const customer = customers.find((c) => c.id === customerId);
   if (!customer) return createSuccessResponse(null);
+  const levelText = customer.productLevel || customer.customerLevel;
 
   const portrait: AICustomerPortrait = {
     riskLevel: ['低', '中', '高'][Math.floor(Math.random() * 3)] as '低' | '中' | '高',
@@ -117,7 +134,7 @@ async function fetchAIPortrait(customerId: string): Promise<ApiResponse<AICustom
     budgetLevel: ['低', '中', '高'][Math.floor(Math.random() * 3)] as '低' | '中' | '高',
     activityLevel: ['低', '中', '高'][Math.floor(Math.random() * 3)] as '低' | '中' | '高',
     upgradeProbability: Math.round((0.3 + Math.random() * 0.6) * 100) / 100,
-    aiSummary: `客户当前为${customer.productLevel}等级，使用情况${Math.random() > 0.5 ? '良好' : '一般'}，${Math.random() > 0.5 ? '有升级潜力' : '建议加强维护'}。`,
+    aiSummary: `客户当前为${levelText}等级，使用情况${Math.random() > 0.5 ? '良好' : '一般'}，${Math.random() > 0.5 ? '有升级潜力' : '建议加强维护'}。`,
   };
 
   customer.aiPortrait = portrait;

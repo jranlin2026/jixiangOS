@@ -61,6 +61,7 @@ const ProductConfigPage: React.FC = () => {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [form, setForm] = useState<ProductForm>(emptyForm);
   const [stagesText, setStagesText] = useState(joinLines(emptyForm.deliveryStages));
+  const [levelManagerOpen, setLevelManagerOpen] = useState(false);
   const [levelFormOpen, setLevelFormOpen] = useState(false);
   const [editingLevel, setEditingLevel] = useState<ProductLevelConfig | null>(null);
   const [levelForm, setLevelForm] = useState<ProductLevelConfigForm>(emptyLevelForm);
@@ -197,6 +198,11 @@ const ProductConfigPage: React.FC = () => {
     loadData();
   };
 
+  const handleToggleLevelActive = async (level: ProductLevelConfig) => {
+    await productApi.updateProductLevelConfig(level.id, { isActive: !level.isActive });
+    loadData();
+  };
+
   const isLevelInUse = (levelName: string) => products.some((product) => product.level === levelName);
 
   const levelColorMap = levelConfigs.reduce<Record<string, string>>((acc, level) => {
@@ -241,11 +247,19 @@ const ProductConfigPage: React.FC = () => {
             维护产品等级、价格和交付阶段，订单新增时会读取启用产品。
           </Typography>
         </Box>
-        <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={() => openForm()}>
-          新增产品
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button size="small" variant="outlined" onClick={() => setLevelManagerOpen(true)}>
+            分类管理
+          </Button>
+          <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={() => openForm()}>
+            新增产品
+          </Button>
+        </Box>
       </Box>
 
+      <Dialog open={levelManagerOpen} onClose={() => setLevelManagerOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>产品等级/业务分类管理</DialogTitle>
+        <DialogContent dividers>
       <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', mb: 2 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, borderBottom: '1px solid #f0f0f0' }}>
           <Box>
@@ -291,6 +305,7 @@ const ProductConfigPage: React.FC = () => {
                     </Typography>
                   </TableCell>
                   <TableCell align="center">
+                    <Switch checked={level.isActive} size="small" onChange={() => handleToggleLevelActive(level)} />
                     <IconButton size="small" onClick={() => openLevelForm(level)} title="编辑">
                       <EditIcon fontSize="small" />
                     </IconButton>
@@ -310,6 +325,11 @@ const ProductConfigPage: React.FC = () => {
           </TableBody>
         </Table>
       </TableContainer>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setLevelManagerOpen(false)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
 
       <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0' }}>
         <Table>

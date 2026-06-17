@@ -3,6 +3,7 @@ import {
   Box, Typography, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Paper, Chip, Button, TextField,
   MenuItem, FormControl, InputLabel, Select, LinearProgress,
+  Tabs, Tab,
 } from '@mui/material';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -10,11 +11,13 @@ import useUpgradeStore from '../../store/useUpgradeStore';
 import { CUSTOMER_LEVEL_COLOR_MAP, getProductLevelColor } from '../../shared/utils/constants';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import UpgradeDetail from './UpgradeDetail';
+import CustomerSuccessTab from './CustomerSuccessTab';
 
 const UpgradePool: React.FC = () => {
   const { items, loading, filters, fetchItems, refreshAI, setFilters } = useUpgradeStore();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState(0);
 
   useEffect(() => {
     fetchItems();
@@ -45,6 +48,14 @@ const UpgradePool: React.FC = () => {
           AI 刷新评分
         </Button>
       </Box>
+
+      <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ mb: 3 }}>
+        <Tab label="升单机会" />
+        <Tab label="客户成功工作台" />
+      </Tabs>
+
+      {activeTab === 0 ? (
+        <>
 
       {/* 筛选栏 */}
       <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
@@ -153,6 +164,10 @@ const UpgradePool: React.FC = () => {
           </TableBody>
         </Table>
       </TableContainer>
+        </>
+      ) : (
+        <CustomerSuccessTab />
+      )}
 
       {selectedId && (
         <UpgradeDetail id={selectedId} open={detailOpen} onClose={() => setDetailOpen(false)} />

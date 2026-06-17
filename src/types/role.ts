@@ -11,6 +11,7 @@ export interface Role {
   id: ID;
   name: string;
   code: string;
+  description?: string;
   departmentId?: ID;
   permissions: Permission[];
   memberCount: number;

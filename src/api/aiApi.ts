@@ -10,6 +10,25 @@ function ensureInit(): void {
   initializeMockData();
 }
 
+function getBaseUrl(): string {
+  return (import.meta.env.VITE_AI_API_BASE || '/api').replace(/\/$/, '');
+}
+
+async function queryProxy(query: string): Promise<{ content: string; results?: AIResultData[] } | null> {
+  try {
+    const response = await fetch(`${getBaseUrl()}/ai/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    return payload?.data || null;
+  } catch {
+    return null;
+  }
+}
+
 /** 规则引擎 — 关键词匹配 */
 function matchScenario(query: string): AIQueryScenario {
   const q = query.toLowerCase();
@@ -182,7 +201,8 @@ async function sendQuery(sessionId: string | null, query: string): Promise<ApiRe
 
   const sessions = getStorageData<AIQuerySession[]>(STORAGE_KEYS.AI_SESSIONS) || [];
   const scenario = matchScenario(query);
-  const results = generateResults(query, scenario);
+  const proxyResult = await queryProxy(query);
+  const results = proxyResult?.results?.length ? proxyResult.results : generateResults(query, scenario);
 
   const userMessage: AIQueryMessage = {
     id: uuidv4(),
@@ -194,9 +214,9 @@ async function sendQuery(sessionId: string | null, query: string): Promise<ApiRe
   const assistantMessage: AIQueryMessage = {
     id: uuidv4(),
     role: 'assistant',
-    content: scenario === 'general'
+    content: proxyResult?.content || (scenario === 'general'
       ? `根据您的问题"${query}"，我为您分析了相关数据。`
-      : `关于"${query}"的分析结果如下：`,
+      : `关于"${query}"的分析结果如下：`),
     results,
     createdAt: new Date().toISOString(),
   };

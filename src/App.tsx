@@ -7,6 +7,7 @@ import { initializeMockData } from './api';
 
 const Dashboard = React.lazy(() => import('./pages/Dashboard'));
 const Leads = React.lazy(() => import('./pages/Leads'));
+const Opportunities = React.lazy(() => import('./pages/Opportunities'));
 const Customers = React.lazy(() => import('./pages/Customers'));
 const Orders = React.lazy(() => import('./pages/Orders'));
 const Delivery = React.lazy(() => import('./pages/Delivery'));
@@ -53,6 +54,14 @@ const App: React.FC = () => {
           element={
             <Suspense fallback={<PageLoader />}>
               <Leads />
+            </Suspense>
+          }
+        />
+        <Route
+          path={ROUTES.OPPORTUNITIES}
+          element={
+            <Suspense fallback={<PageLoader />}>
+              <Opportunities />
             </Suspense>
           }
         />

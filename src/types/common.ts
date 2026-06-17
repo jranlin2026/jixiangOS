@@ -50,21 +50,8 @@ export type ProductLevel = string;
 /** 客户等级 */
 export type CustomerLevel = 'L1' | 'L2' | 'L3' | 'L4' | 'L5';
 
-/** 订单类型 — 匹配提成业务场景 */
-export type OrderType =
-  | '899成交'
-  | '新代理'
-  | '成交线索转代理'
-  | '成交线索转新代理'
-  | '代理升单'
-  | '代理复购'
-  | '退款挽回'
-  | '转介绍成交'
-  | '新购'
-  | '续费'
-  | '升级'
-  | '增购'
-  | '试用转正';
+/** 订单类型 — 由系统设置维护，预设值仅作为初始数据 */
+export type OrderType = string;
 
 /** 支付方式 */
 export type PaymentMethod = '银行转账' | '支付宝' | '微信支付' | '对公转账' | '现金';

@@ -9,13 +9,12 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import useDepartmentStore from '../../store/useDepartmentStore';
 import { formatDate } from '../../shared/utils/formatters';
-import { v4 as uuidv4 } from 'uuid';
 
 const DepartmentManagement: React.FC = () => {
   const { items, loading, fetchItems, create, update, delete: deleteDept } = useDepartmentStore();
   const [formOpen, setFormOpen] = useState(false);
   const [editDept, setEditDept] = useState<any>(null);
-  const [form, setForm] = useState({ name: '', code: '', managerId: '', memberCount: 0, isActive: true });
+  const [form, setForm] = useState({ name: '', description: '', managerId: '', memberCount: 0, isActive: true });
 
   useEffect(() => {
     fetchItems();
@@ -23,21 +22,21 @@ const DepartmentManagement: React.FC = () => {
 
   const handleCreate = () => {
     setEditDept(null);
-    setForm({ name: '', code: '', managerId: '', memberCount: 0, isActive: true });
+    setForm({ name: '', description: '', managerId: '', memberCount: 0, isActive: true });
     setFormOpen(true);
   };
 
   const handleEdit = (dept: any) => {
     setEditDept(dept);
-    setForm({ name: dept.name, code: dept.code, managerId: dept.managerId || '', memberCount: dept.memberCount, isActive: dept.isActive });
+    setForm({ name: dept.name, description: dept.description || '', managerId: dept.managerId || '', memberCount: dept.memberCount, isActive: dept.isActive });
     setFormOpen(true);
   };
 
   const handleSubmit = async () => {
     if (editDept) {
-      await update(editDept.id, form);
+      await update(editDept.id, { ...form, code: editDept.code });
     } else {
-      await create(form);
+      await create({ ...form, code: `dept-${Date.now()}` });
     }
     setFormOpen(false);
     fetchItems();
@@ -45,6 +44,11 @@ const DepartmentManagement: React.FC = () => {
 
   const handleDelete = async (id: string) => {
     await deleteDept(id);
+    fetchItems();
+  };
+
+  const handleToggleActive = async (dept: any) => {
+    await update(dept.id, { isActive: !dept.isActive });
     fetchItems();
   };
 
@@ -62,7 +66,7 @@ const DepartmentManagement: React.FC = () => {
           <TableHead>
             <TableRow>
               <TableCell>部门名称</TableCell>
-              <TableCell>编码</TableCell>
+              <TableCell>说明</TableCell>
               <TableCell>人数</TableCell>
               <TableCell>状态</TableCell>
               <TableCell>创建时间</TableCell>
@@ -73,17 +77,18 @@ const DepartmentManagement: React.FC = () => {
             {items.map((dept: any) => (
               <TableRow key={dept.id} hover>
                 <TableCell sx={{ fontWeight: 500 }}>{dept.name}</TableCell>
-                <TableCell>{dept.code}</TableCell>
+                <TableCell>{dept.description || '-'}</TableCell>
                 <TableCell>{dept.memberCount}</TableCell>
                 <TableCell>
                   <Chip label={dept.isActive ? '启用' : '停用'} size="small" color={dept.isActive ? 'success' : 'default'} />
                 </TableCell>
                 <TableCell>{formatDate(dept.createdAt)}</TableCell>
                 <TableCell align="center">
-                  <IconButton size="small" onClick={() => handleEdit(dept)}>
+                  <Switch checked={dept.isActive} size="small" onChange={() => handleToggleActive(dept)} />
+                  <IconButton size="small" onClick={() => handleEdit(dept)} title="编辑">
                     <EditIcon fontSize="small" />
                   </IconButton>
-                  <IconButton size="small" onClick={() => handleDelete(dept.id)}>
+                  <IconButton size="small" color="error" onClick={() => handleDelete(dept.id)} title="删除">
                     <DeleteIcon fontSize="small" />
                   </IconButton>
                 </TableCell>
@@ -100,8 +105,8 @@ const DepartmentManagement: React.FC = () => {
           </Typography>
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
             <TextField label="部门名称" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required fullWidth />
-            <TextField label="编码" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} required fullWidth />
             <TextField label="人数" type="number" value={form.memberCount} onChange={(e) => setForm({ ...form, memberCount: Number(e.target.value) })} fullWidth />
+            <TextField label="说明" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} fullWidth multiline minRows={2} sx={{ gridColumn: '1 / -1' }} />
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <Switch checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} />
               <Typography variant="body2">{form.isActive ? '启用' : '停用'}</Typography>
@@ -109,7 +114,7 @@ const DepartmentManagement: React.FC = () => {
           </Box>
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 3 }}>
             <Button onClick={() => setFormOpen(false)}>取消</Button>
-            <Button variant="contained" onClick={handleSubmit} disabled={!form.name || !form.code}>
+            <Button variant="contained" onClick={handleSubmit} disabled={!form.name}>
               {editDept ? '保存' : '创建'}
             </Button>
           </Box>

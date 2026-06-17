@@ -39,6 +39,30 @@ export interface ChannelConfig {
   description: string;
 }
 
+/** 订单类型配置 */
+export interface OrderTypeConfig {
+  id: ID;
+  name: string;
+  description?: string;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+/** 线索/客户生命周期状态配置 */
+export interface LifecycleStatusConfig {
+  id: ID;
+  name: string;
+  description?: string;
+  color: string;
+  isActive: boolean;
+  sortOrder: number;
+  isSystem?: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
 /** 设置筛选 */
 export interface SettingsFilters {
   search?: string;

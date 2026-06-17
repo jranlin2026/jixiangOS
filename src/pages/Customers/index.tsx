@@ -1,30 +1,137 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Box, Typography, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, Paper, Chip, IconButton, Button, TextField,
-  MenuItem, FormControl, InputLabel, Select, Dialog,
+  Box,
+  Button,
+  Checkbox,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControl,
+  FormControlLabel,
+  FormGroup,
+  IconButton,
+  InputLabel,
+  MenuItem,
+  Paper,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  Tooltip,
+  Typography,
 } from '@mui/material';
-import VisibilityIcon from '@mui/icons-material/Visibility';
 import AddIcon from '@mui/icons-material/Add';
+import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
+import EditIcon from '@mui/icons-material/Edit';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import ViewColumnIcon from '@mui/icons-material/ViewColumn';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import useCustomerStore from '../../store/useCustomerStore';
-import { PRODUCT_LEVELS, getProductLevelColor, CUSTOMER_LEVELS } from '../../shared/utils/constants';
+import { orderApi, settingsApi } from '../../api';
+import { CUSTOMER_LEVELS, getProductLevelColor } from '../../shared/utils/constants';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import CustomerDetail from './CustomerDetail';
 import CustomerForm from './CustomerForm';
+import OrderForm from '../Orders/OrderForm';
 import type { Customer } from '../../types/customer';
-import type { CustomerLevel, ProductLevel } from '../../types/common';
+import type { Order } from '../../types/order';
+import type { User } from '../../types/settings';
+
+type CustomerColumn = {
+  id: string;
+  label: string;
+  render: (customer: Customer) => React.ReactNode;
+};
+
+const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_columns';
+
+const CUSTOMER_COLUMNS: CustomerColumn[] = [
+  { id: 'company', label: '公司', render: (customer) => customer.company || '-' },
+  { id: 'phone', label: '电话', render: (customer) => customer.phone || '-' },
+  { id: 'wechat', label: '微信', render: (customer) => customer.wechat || '-' },
+  { id: 'email', label: '邮箱', render: (customer) => customer.email || '-' },
+  {
+    id: 'customerLevel',
+    label: '客户等级',
+    render: (customer) => <CustomerLevelBadge level={customer.customerLevel} />,
+  },
+  { id: 'leadSource', label: '线索来源', render: (customer) => customer.leadSource || customer.sourceType || '-' },
+  { id: 'leadInputBy', label: '线索录入人', render: (customer) => customer.leadInputBy || '-' },
+  { id: 'industry', label: '行业', render: (customer) => customer.industry || '-' },
+  { id: 'city', label: '城市', render: (customer) => customer.city || '-' },
+  { id: 'originalSalesTransferBy', label: '原销转人员', render: (customer) => customer.originalSalesTransferBy || '-' },
+  { id: 'totalSpent', label: '累计消费', render: (customer) => formatCurrency(customer.totalSpent) },
+  { id: 'orderCount', label: '订单数', render: (customer) => customer.orderCount },
+  { id: 'owner', label: '销售负责人', render: (customer) => customer.owner || '-' },
+  { id: 'createdAt', label: '创建时间', render: (customer) => formatDate(customer.createdAt) },
+];
+
+const DEFAULT_VISIBLE_COLUMNS = [
+  'company',
+  'phone',
+  'customerLevel',
+  'leadSource',
+  'leadInputBy',
+  'industry',
+  'originalSalesTransferBy',
+  'totalSpent',
+  'orderCount',
+  'owner',
+  'createdAt',
+];
+
+const readVisibleColumns = () => {
+  try {
+    const raw = localStorage.getItem(CUSTOMER_VIEW_STORAGE_KEY);
+    if (!raw) return DEFAULT_VISIBLE_COLUMNS;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return DEFAULT_VISIBLE_COLUMNS;
+    const validIds = new Set(CUSTOMER_COLUMNS.map((column) => column.id));
+    const filtered = parsed.filter((id) => validIds.has(id));
+    return filtered.length ? filtered : DEFAULT_VISIBLE_COLUMNS;
+  } catch {
+    return DEFAULT_VISIBLE_COLUMNS;
+  }
+};
 
 const Customers: React.FC = () => {
-  const { items, loading, filters, fetchItems, setFilters } = useCustomerStore();
+  const { items, filters, fetchItems, setFilters } = useCustomerStore();
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
+  const [orderFormOpen, setOrderFormOpen] = useState(false);
+  const [orderCustomer, setOrderCustomer] = useState<Customer | null>(null);
+  const [ordersOpen, setOrdersOpen] = useState(false);
+  const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
+  const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(readVisibleColumns);
 
   useEffect(() => {
     fetchItems();
+    settingsApi.fetchUsers({ isActive: true }).then((res) => {
+      if (res.code === 0) {
+        setUsers(res.data.filter((user) => user.isActive));
+      }
+    });
   }, [fetchItems]);
+
+  useEffect(() => {
+    localStorage.setItem(CUSTOMER_VIEW_STORAGE_KEY, JSON.stringify(visibleColumnIds));
+  }, [visibleColumnIds]);
+
+  const visibleColumns = useMemo(
+    () => CUSTOMER_COLUMNS.filter((column) => visibleColumnIds.includes(column.id)),
+    [visibleColumnIds],
+  );
 
   const handleViewDetail = (customer: Customer) => {
     setSelectedCustomer(customer);
@@ -42,63 +149,79 @@ const Customers: React.FC = () => {
     setDetailOpen(false);
   };
 
+  const handleCreateOrder = (customer: Customer) => {
+    setOrderCustomer(customer);
+    setOrderFormOpen(true);
+    setDetailOpen(false);
+  };
+
+  const handleViewOrders = async (customer: Customer) => {
+    setOrderCustomer(customer);
+    const res = await orderApi.fetchOrders({ customerId: customer.id, pageSize: 100 });
+    setCustomerOrders(res.code === 0 ? res.data.items : []);
+    setOrdersOpen(true);
+  };
+
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newFilters = { ...filters, search: e.target.value };
+    const newFilters = { ...filters, search: e.target.value, productLevel: undefined };
     setFilters(newFilters);
     fetchItems(newFilters);
   };
 
   const handleFilterChange = (key: string, value: string) => {
-    const newFilters = { ...filters, [key]: value || undefined };
+    const newFilters = { ...filters, productLevel: undefined, [key]: value || undefined };
     setFilters(newFilters);
     fetchItems(newFilters);
   };
 
+  const handleToggleColumn = (id: string) => {
+    setVisibleColumnIds((current) => (
+      current.includes(id)
+        ? current.filter((columnId) => columnId !== id)
+        : [...current, id]
+    ));
+  };
+
   return (
     <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, gap: 2 }}>
         <Typography variant="h5" sx={{ fontWeight: 600 }}>
           客户管理
         </Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate}>
-          新增客户
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
+            视图设置
+          </Button>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate}>
+            新增客户
+          </Button>
+        </Box>
       </Box>
 
       <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
         <TextField
-          placeholder="搜索客户名称/公司"
+          placeholder="搜索客户姓名/公司/电话/微信"
           value={filters.search || ''}
           onChange={handleSearch}
           size="small"
-          sx={{ minWidth: 240 }}
+          sx={{ minWidth: 260 }}
         />
-        <FormControl size="small" sx={{ minWidth: 120 }}>
-          <InputLabel>产品等级</InputLabel>
-          <Select value={filters.productLevel || ''} label="产品等级" onChange={(e) => handleFilterChange('productLevel', e.target.value)}>
-            <MenuItem value="">全部</MenuItem>
-            {Object.values(PRODUCT_LEVELS).map((l) => (
-              <MenuItem key={l} value={l}>{l}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <FormControl size="small" sx={{ minWidth: 120 }}>
+        <FormControl size="small" sx={{ minWidth: 140 }}>
           <InputLabel>客户等级</InputLabel>
           <Select value={filters.customerLevel || ''} label="客户等级" onChange={(e) => handleFilterChange('customerLevel', e.target.value)}>
             <MenuItem value="">全部</MenuItem>
-            {CUSTOMER_LEVELS.map((cl) => (
-              <MenuItem key={cl.value} value={cl.value}>{cl.label}</MenuItem>
+            {CUSTOMER_LEVELS.map((level) => (
+              <MenuItem key={level.value} value={level.value}>{level.label}</MenuItem>
             ))}
           </Select>
         </FormControl>
-        <FormControl size="small" sx={{ minWidth: 120 }}>
-          <InputLabel>负责人</InputLabel>
-          <Select value={filters.owner || ''} label="负责人" onChange={(e) => handleFilterChange('owner', e.target.value)}>
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <InputLabel>销售负责人</InputLabel>
+          <Select value={filters.owner || ''} label="销售负责人" onChange={(e) => handleFilterChange('owner', e.target.value)}>
             <MenuItem value="">全部</MenuItem>
-            <MenuItem value="张伟">张伟</MenuItem>
-            <MenuItem value="李娜">李娜</MenuItem>
-            <MenuItem value="王磊">王磊</MenuItem>
-            <MenuItem value="赵敏">赵敏</MenuItem>
+            {users.map((user) => (
+              <MenuItem key={user.id} value={user.name}>{user.name}</MenuItem>
+            ))}
           </Select>
         </FormControl>
       </Box>
@@ -107,16 +230,10 @@ const Customers: React.FC = () => {
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>名称</TableCell>
-              <TableCell>公司</TableCell>
-              <TableCell>电话</TableCell>
-              <TableCell>产品等级</TableCell>
-              <TableCell>客户等级</TableCell>
-              <TableCell>行业</TableCell>
-              <TableCell>累计消费</TableCell>
-              <TableCell>订单数</TableCell>
-              <TableCell>负责人</TableCell>
-              <TableCell>创建时间</TableCell>
+              <TableCell>姓名</TableCell>
+              {visibleColumns.map((column) => (
+                <TableCell key={column.id}>{column.label}</TableCell>
+              ))}
               <TableCell align="center">操作</TableCell>
             </TableRow>
           </TableHead>
@@ -124,37 +241,38 @@ const Customers: React.FC = () => {
             {items.map((customer) => (
               <TableRow key={customer.id} hover>
                 <TableCell sx={{ fontWeight: 500 }}>{customer.name}</TableCell>
-                <TableCell>{customer.company}</TableCell>
-                <TableCell>{customer.phone}</TableCell>
-                <TableCell>
-                  <Chip
-                    label={customer.productLevel}
-                    size="small"
-                    sx={{
-                      bgcolor: `${getProductLevelColor(customer.productLevel)}18`,
-                      color: getProductLevelColor(customer.productLevel),
-                      fontWeight: 600,
-                    }}
-                  />
-                </TableCell>
-                <TableCell>
-                  <CustomerLevelBadge level={customer.customerLevel} />
-                </TableCell>
-                <TableCell>{customer.industry || '-'}</TableCell>
-                <TableCell>{formatCurrency(customer.totalSpent)}</TableCell>
-                <TableCell>{customer.orderCount}</TableCell>
-                <TableCell>{customer.owner}</TableCell>
-                <TableCell>{formatDate(customer.createdAt)}</TableCell>
+                {visibleColumns.map((column) => (
+                  <TableCell key={column.id}>{column.render(customer)}</TableCell>
+                ))}
                 <TableCell align="center">
-                  <IconButton size="small" onClick={() => handleViewDetail(customer)}>
-                    <VisibilityIcon fontSize="small" />
-                  </IconButton>
+                  <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5 }}>
+                    <Tooltip title="查看客户">
+                      <IconButton size="small" color="primary" onClick={() => handleViewDetail(customer)}>
+                        <VisibilityIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="编辑客户">
+                      <IconButton size="small" color="info" onClick={() => handleEdit(customer)}>
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="新建订单">
+                      <IconButton size="small" color="info" onClick={() => handleCreateOrder(customer)}>
+                        <AddShoppingCartIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="查看订单">
+                      <IconButton size="small" color="secondary" onClick={() => handleViewOrders(customer)}>
+                        <ReceiptLongIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
                 </TableCell>
               </TableRow>
             ))}
             {items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={11} align="center" sx={{ py: 6, color: '#9ca3af' }}>
+                <TableCell colSpan={visibleColumns.length + 2} align="center" sx={{ py: 6, color: '#9ca3af' }}>
                   暂无客户数据
                 </TableCell>
               </TableRow>
@@ -169,6 +287,8 @@ const Customers: React.FC = () => {
           open={detailOpen}
           onClose={() => setDetailOpen(false)}
           onEdit={handleEdit}
+          onCreateOrder={handleCreateOrder}
+          onViewOrders={handleViewOrders}
         />
       )}
 
@@ -177,8 +297,92 @@ const Customers: React.FC = () => {
         open={formOpen}
         onClose={() => setFormOpen(false)}
         customer={editCustomer}
-        onSuccess={() => fetchItems()}
+        onSuccess={() => fetchItems({ ...filters, productLevel: undefined })}
       />
+
+      <OrderForm
+        open={orderFormOpen}
+        customer={orderCustomer}
+        onClose={() => setOrderFormOpen(false)}
+        onSuccess={() => {
+          fetchItems({ ...filters, productLevel: undefined });
+          if (orderCustomer) handleViewOrders(orderCustomer);
+        }}
+      />
+
+      <Dialog open={viewSettingsOpen} onClose={() => setViewSettingsOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>客户列表视图设置</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ color: '#6b7280', mb: 2 }}>
+            勾选后会显示在客户管理列表中，设置会保存在当前浏览器。
+          </Typography>
+          <FormGroup sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.5 }}>
+            {CUSTOMER_COLUMNS.map((column) => (
+              <FormControlLabel
+                key={column.id}
+                control={(
+                  <Checkbox
+                    checked={visibleColumnIds.includes(column.id)}
+                    onChange={() => handleToggleColumn(column.id)}
+                  />
+                )}
+                label={column.label}
+              />
+            ))}
+          </FormGroup>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setVisibleColumnIds(DEFAULT_VISIBLE_COLUMNS)}>恢复默认</Button>
+          <Button variant="contained" onClick={() => setViewSettingsOpen(false)}>完成</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={ordersOpen} onClose={() => setOrdersOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>{orderCustomer?.company || orderCustomer?.name} 的订单</DialogTitle>
+        <DialogContent dividers>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>订单号</TableCell>
+                <TableCell>产品分类</TableCell>
+                <TableCell>订单类型</TableCell>
+                <TableCell>金额</TableCell>
+                <TableCell>付款日期</TableCell>
+                <TableCell>状态</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {customerOrders.map((order) => (
+                <TableRow key={order.id}>
+                  <TableCell>{order.orderNo}</TableCell>
+                  <TableCell>
+                    <Chip
+                      label={order.productLevel}
+                      size="small"
+                      sx={{ bgcolor: `${getProductLevelColor(order.productLevel)}18`, color: getProductLevelColor(order.productLevel), fontWeight: 600 }}
+                    />
+                  </TableCell>
+                  <TableCell>{order.orderType}</TableCell>
+                  <TableCell>{formatCurrency(order.actualAmount || order.amount)}</TableCell>
+                  <TableCell>{formatDate(order.payments?.[0]?.paidAt || order.createdAt)}</TableCell>
+                  <TableCell>{order.status}</TableCell>
+                </TableRow>
+              ))}
+              {customerOrders.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={6} align="center" sx={{ py: 4, color: '#9ca3af' }}>
+                    暂无订单
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => orderCustomer && handleCreateOrder(orderCustomer)}>新建订单</Button>
+          <Button onClick={() => setOrdersOpen(false)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

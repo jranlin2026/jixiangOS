@@ -3,6 +3,7 @@ export const ROUTES = {
   HOME: '/',
   LEADS: '/leads',
   LEAD_DETAIL: '/leads/:id',
+  OPPORTUNITIES: '/opportunities',
   CUSTOMERS: '/customers',
   CUSTOMER_DETAIL: '/customers/:id',
   ORDERS: '/orders',
@@ -282,8 +283,14 @@ export const STORAGE_KEYS = {
   ROLES: `${STORAGE_PREFIX}roles`,
   PRODUCTS: `${STORAGE_PREFIX}products`,
   PRODUCT_LEVELS: `${STORAGE_PREFIX}product_levels`,
+  ORDER_TYPE_CONFIGS: `${STORAGE_PREFIX}order_type_configs`,
+  LIFECYCLE_STATUS_CONFIGS: `${STORAGE_PREFIX}lifecycle_status_configs`,
   REFUNDS: `${STORAGE_PREFIX}refunds`,
   UPGRADE_POOL: `${STORAGE_PREFIX}upgrade_pool`,
+  AI_CARDS: `${STORAGE_PREFIX}ai_cards`,
+  CUSTOMER_SUCCESS_TASKS: `${STORAGE_PREFIX}customer_success_tasks`,
+  SERVICE_TICKETS: `${STORAGE_PREFIX}service_tickets`,
+  OPPORTUNITIES: `${STORAGE_PREFIX}opportunities`,
   COMMISSION_RULES: `${STORAGE_PREFIX}commission_rules`,
   TAGS: `${STORAGE_PREFIX}tags`,
   INITIALIZED: `${STORAGE_PREFIX}initialized`,
@@ -396,6 +403,28 @@ export const ORDER_TYPES = [
   { value: '升级', label: '升级' },
   { value: '增购', label: '增购' },
 ] as const;
+
+export const DEFAULT_ORDER_TYPE_CONFIGS = ORDER_TYPES.map((type, index) => ({
+  id: `otc-${index + 1}`,
+  name: type.value,
+  description: '',
+  isActive: true,
+  sortOrder: index + 1,
+  createdAt: '2026-06-01T00:00:00.000Z',
+  updatedAt: '2026-06-01T00:00:00.000Z',
+}));
+
+export const DEFAULT_LIFECYCLE_STATUS_CONFIGS = [
+  { id: 'lsc-001', name: '未转商机', description: '线索录入后尚未由销售确认为商机', color: '#9E9E9E', isActive: true, sortOrder: 1, isSystem: true },
+  { id: 'lsc-002', name: '商机跟进中', description: '销售已确认有效需求并进入商机推进', color: '#2196F3', isActive: true, sortOrder: 2, isSystem: true },
+  { id: 'lsc-003', name: '已转订单', description: '商机赢单并生成订单', color: '#4CAF50', isActive: true, sortOrder: 3, isSystem: true },
+  { id: 'lsc-004', name: '已退款', description: '关联订单发生退款完成', color: '#F44336', isActive: true, sortOrder: 4, isSystem: true },
+  { id: 'lsc-005', name: '已流失', description: '线索或商机输单/流失归档', color: '#607D8B', isActive: true, sortOrder: 5, isSystem: true },
+].map((item) => ({
+  ...item,
+  createdAt: '2026-06-01T00:00:00.000Z',
+  updatedAt: '2026-06-01T00:00:00.000Z',
+}));
 
 /** 支付方式列表 */
 export const PAYMENT_METHODS = [

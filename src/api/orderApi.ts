@@ -4,10 +4,11 @@ import type { Commission, CommissionRole } from '../types/commission';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, PRODUCT_TO_CUSTOMER_LEVEL } from '../shared/utils/constants';
+import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { commissionRuleApi } from './commissionRuleApi';
 import { deliveryApi } from './deliveryApi';
+import { syncLeadLifecycleByCustomerName, syncOpportunityRefundedByOrderId } from './lifecycleSync';
 import { v4 as uuidv4 } from 'uuid';
 
 function ensureInit(): void {
@@ -60,13 +61,30 @@ function syncCustomerOrderStats(order: Order, allOrders: Order[]): void {
   const latestOrder = relatedOrders
     .slice()
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] || order;
+  const existingGrowthPath = customer.growthPath || [];
+  const shouldAppendMilestone = relatedOrders.some((item) => item.id === order.id)
+    && !existingGrowthPath.some((item) => item.orderId === order.id || item.orderNo === order.orderNo);
+  const nextGrowthPath = shouldAppendMilestone
+    ? [
+      ...existingGrowthPath,
+      {
+        id: `milestone-${uuidv4().slice(0, 8)}`,
+        date: getPrimaryPaymentDate(order).slice(0, 10),
+        title: `签约${order.productLevel}产品`,
+        description: `订单${order.orderNo}，实付${Number(order.actualAmount || order.amount).toLocaleString('zh-CN')}元`,
+        productLevel: order.productLevel,
+        orderId: order.id,
+        orderNo: order.orderNo,
+      },
+    ]
+    : existingGrowthPath;
 
   customers[customerIdx] = {
     ...customer,
     productLevel: latestOrder.productLevel,
-    customerLevel: (PRODUCT_TO_CUSTOMER_LEVEL[latestOrder.productLevel] || customer.customerLevel) as Customer['customerLevel'],
     orderCount: relatedOrders.length,
     totalSpent: relatedOrders.reduce((sum, item) => sum + (Number(item.actualAmount) || 0), 0),
+    growthPath: nextGrowthPath,
     updatedAt: new Date().toISOString(),
   };
 
@@ -83,7 +101,7 @@ const ORDER_CHANGE_FIELDS: Array<{ field: keyof Order; label: string }> = [
   { field: 'paymentMethod', label: '支付方式' },
   { field: 'status', label: '订单状态' },
   { field: 'refundStatus', label: '退款状态' },
-  { field: 'owner', label: '负责人' },
+  { field: 'owner', label: '销售负责人' },
   { field: 'sourceType', label: '来源类型' },
   { field: 'resourceOwnership', label: '资源归属' },
   { field: 'officialPaymentChannel', label: '官方收款渠道' },
@@ -91,7 +109,7 @@ const ORDER_CHANGE_FIELDS: Array<{ field: keyof Order; label: string }> = [
   { field: 'dealScene', label: '成交场景' },
   { field: 'proofStatus', label: '凭证状态' },
   { field: 'collaboratorName', label: '协同人员' },
-  { field: 'collaboratorRole', label: '协同角色' },
+  { field: 'collaboratorRole', label: '提成角色' },
   { field: 'collaboratorRatio', label: '协同比例' },
   { field: 'originalOrderId', label: '原始订单' },
   { field: 'performanceBaseAmount', label: '业绩核算基数' },
@@ -99,11 +117,30 @@ const ORDER_CHANGE_FIELDS: Array<{ field: keyof Order; label: string }> = [
   { field: 'payments', label: '付款记录' },
 ];
 
+function formatPaymentChangeValue(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  if (!value.length) return null;
+
+  return value.map((payment: any, index) => {
+    const parts = [
+      `第${index + 1}笔`,
+      payment.amount !== undefined ? `金额:${payment.amount}` : '',
+      payment.paymentMethod ? `方式:${payment.paymentMethod}` : '',
+      payment.paidAt ? `日期:${String(payment.paidAt).slice(0, 10)}` : '',
+      payment.paymentOrderNo ? `单号:${payment.paymentOrderNo}` : '',
+      payment.voucherName ? `凭证:${payment.voucherName}` : '',
+    ].filter(Boolean);
+    return parts.join(' · ');
+  }).join('；');
+}
+
 function normalizeChangeValue(value: unknown): string | number | boolean | null {
   if (value === undefined || value === '') return null;
   if (value instanceof Date) return value.toISOString();
   if (typeof value === 'number' || typeof value === 'boolean') return value;
   if (typeof value === 'string') return value;
+  const paymentValue = formatPaymentChangeValue(value);
+  if (paymentValue) return paymentValue;
   return JSON.stringify(value);
 }
 
@@ -130,6 +167,9 @@ async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<Paginate
     filtered = filtered.filter(
       (o) => o.orderNo.toLowerCase().includes(q) || o.customerName.toLowerCase().includes(q),
     );
+  }
+  if (filters?.customerId) {
+    filtered = filtered.filter((o) => o.customerId === filters.customerId);
   }
   if (filters?.productLevel) {
     filtered = filtered.filter((o) => o.productLevel === filters.productLevel);
@@ -296,6 +336,7 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
   setStorageData(STORAGE_KEYS.DELIVERIES, deliveries);
 
   setStorageData(STORAGE_KEYS.ORDERS, orders);
+  syncLeadLifecycleByCustomerName(newOrder.customerName, '已转订单', { orderId: newOrder.id });
   return createSuccessResponse(newOrder);
 }
 
@@ -326,6 +367,12 @@ async function updateOrder(id: string, data: Partial<Order>): Promise<ApiRespons
   };
   setStorageData(STORAGE_KEYS.ORDERS, orders);
   syncCustomerOrderStats(orders[idx], orders);
+  if (orders[idx].refundStatus === '退款已完成' || orders[idx].status === '已退款') {
+    syncLeadLifecycleByCustomerName(orders[idx].customerName, '已退款', { orderId: orders[idx].id });
+    syncOpportunityRefundedByOrderId(orders[idx].id);
+  } else {
+    syncLeadLifecycleByCustomerName(orders[idx].customerName, '已转订单', { orderId: orders[idx].id });
+  }
   return createSuccessResponse(orders[idx]);
 }
 

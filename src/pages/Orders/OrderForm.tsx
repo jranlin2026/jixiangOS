@@ -1,77 +1,178 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Dialog, DialogTitle, DialogContent, DialogActions, Button,
-  TextField, MenuItem, Box, Typography,
+  Autocomplete,
+  Box,
+  Button,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  MenuItem,
+  TextField,
+  Typography,
 } from '@mui/material';
 import useOrderStore from '../../store/useOrderStore';
 import {
-  COMMISSION_SCENES,
   OFFICIAL_PAYMENT_CHANNELS,
   ORDER_STATUS,
-  ORDER_TYPES,
-  PAYMENT_METHODS,
   PROOF_STATUSES,
   RESOURCE_OWNERSHIPS,
 } from '../../shared/utils/constants';
-import { customerApi, productApi } from '../../api';
-import type { ProductLevel } from '../../types/common';
-import type { OrderType, PaymentMethod } from '../../types/common';
-import type { CommissionRole, CommissionScene, OfficialPaymentChannel, ProofStatus, ResourceOwnership } from '../../types/commission';
+import { customerApi, productApi, settingsApi } from '../../api';
+import type { OrderType, PaymentMethod, ProductLevel } from '../../types/common';
+import type {
+  CommissionRole,
+  CommissionScene,
+  OfficialPaymentChannel,
+  ProofStatus,
+  ResourceOwnership,
+} from '../../types/commission';
 import type { Customer } from '../../types/customer';
-import type { Product, ProductLevelConfig } from '../../types/product';
 import type { Order } from '../../types/order';
+import type { Product, ProductLevelConfig } from '../../types/product';
+import type { OrderTypeConfig, User } from '../../types/settings';
 
 interface OrderFormProps {
   open: boolean;
   onClose: () => void;
   onSuccess?: () => void;
   order?: Order | null;
+  customer?: Customer | null;
 }
 
-function toDateInputValue(value: Date): string {
-  return value.toISOString().slice(0, 10);
+function toDateTimeInputValue(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  const hours = String(value.getHours()).padStart(2, '0');
+  const minutes = String(value.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function normalizeRecognizedText(rawText: string): string {
+  return decodeURIComponent(rawText)
+    .replace(/\.[A-Za-z0-9]{2,5}$/i, '')
+    .replace(/[年月]/g, '-')
+    .replace(/[日号]/g, ' ')
+    .replace(/[：时点]/g, ':')
+    .replace(/分/g, '')
+    .replace(/[，,]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function normalizeRecognizedDate(text: string): string | null {
-  const dashed = text.match(/(20\d{2})[-_.年\/]?(\d{1,2})[-_.月\/]?(\d{1,2})/);
-  if (dashed) {
-    const [, year, month, day] = dashed;
-    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  const candidates = [
+    /(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})[\s_T-]+(\d{1,2})[:.-](\d{1,2})/,
+    /(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\s+(\d{1,2})(\d{2})\b/,
+    /(\d{1,2})[-/.](\d{1,2})[-/.](20\d{2})[\s_T-]+(\d{1,2})[:.-](\d{1,2})/,
+    /(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})/,
+  ];
+
+  for (const pattern of candidates) {
+    const match = text.match(pattern);
+    if (!match) continue;
+
+    if (pattern === candidates[2]) {
+      const [, month, day, year, hour = '00', minute = '00'] = match;
+      return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
+    }
+
+    const [, year, month, day, hour = '00', minute = '00'] = match;
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
   }
 
-  const compact = text.match(/\b(20\d{2})(\d{2})(\d{2})\b/);
+  const compact = text.match(/\b(20\d{2})(\d{2})(\d{2})(\d{2})?(\d{2})?\b/);
   if (compact) {
-    const [, year, month, day] = compact;
-    return `${year}-${month}-${day}`;
+    const [, year, month, day, hour = '00', minute = '00'] = compact;
+    return `${year}-${month}-${day}T${hour}:${minute}`;
   }
 
   return null;
 }
 
 function recognizePaymentProof(rawText: string, fallbackAmount: number) {
-  const text = decodeURIComponent(rawText).replace(/\.[^.]+$/, '');
-  const paidDate = normalizeRecognizedDate(text) || toDateInputValue(new Date());
-  const amountByLabel = text.match(/(?:金额|实付|付款|收款|支付|amount|amt|￥|¥)[^\d]*(\d{1,7}(?:\.\d{1,2})?)/i);
-  const amountCandidates = Array.from(text.matchAll(/(?:^|[^\d])(\d{2,7}(?:\.\d{1,2})?)(?:元|rmb|RMB|[^\d]|$)/g))
+  const text = normalizeRecognizedText(rawText);
+  const paidDate = normalizeRecognizedDate(text) || toDateTimeInputValue(new Date());
+  const amountByLabel = text.match(/(?:实付金额|付款金额|支付金额|收款金额|转账金额|订单金额|金额|实付|合计|amount|amt|￥|¥|RMB)[^\d]*(\d{1,9}(?:\.\d{1,2})?)/i);
+  const amountCandidates = Array.from(text.matchAll(/(?:^|[^\d])(\d{2,9}(?:\.\d{1,2})?)(?:\s*(?:元|rmb|RMB|CNY|￥|¥)|[^\d]|$)/g))
     .map((match) => Number(match[1]))
-    .filter((num) => Number.isFinite(num) && num > 0 && num !== 2026);
+    .filter((num) => Number.isFinite(num) && num > 0 && num !== 2026 && num < 10000000)
+    .sort((a, b) => b - a);
   const amount = Number(amountByLabel?.[1]) || amountCandidates[0] || fallbackAmount;
-  const orderNoByLabel = text.match(/(?:流水号|交易号|订单号|支付单号|pay|trade|txn|no)[-_:：\s]*([A-Za-z0-9-]{6,40})/i);
-  const orderNoByPrefix = text.match(/\b(?:PAY|TXN|TRADE|ORD)[-_]?[A-Za-z0-9-]{6,40}\b/i);
-  const longNumber = text.match(/\b\d{10,32}\b/);
+  const orderNoByLabel = text.match(/(?:流水号|交易号|订单号|支付单号|商户单号|凭证号|交易单号|trade|txn|no|serial)[-_:：\s]*([A-Za-z0-9-]{6,50})/i);
+  const orderNoByPrefix = text.match(/(?:^|[^A-Za-z0-9])((?:PAY|TXN|TRADE|ORD)[-_]?[A-Za-z0-9]{6,40})\b/);
+  const longNumber = text.match(/\b\d{12,32}\b/);
 
   return {
     paidDate,
     amount,
-    paymentOrderNo: orderNoByLabel?.[1] || orderNoByPrefix?.[0] || longNumber?.[0] || `PAY-${Date.now()}`,
+    paymentOrderNo: orderNoByPrefix?.[1] || orderNoByLabel?.[1] || longNumber?.[0] || `PAY-${Date.now()}`,
   };
 }
 
-const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order }) => {
+function paymentMethodFromOfficialChannel(channel: OfficialPaymentChannel): PaymentMethod {
+  if (channel === '企业微信转账') return '微信支付';
+  if (channel === '企业支付宝转账') return '支付宝';
+  if (channel === '对公银行转账') return '对公转账';
+  if (channel === '公司自营小店') return '微信支付';
+  return '银行转账';
+}
+
+function sourceTypeFromCustomer(customer?: Customer | null, fallback = '自拓'): string {
+  return customer?.leadSource || customer?.sourceType || fallback;
+}
+
+function dealSceneFromOrderType(orderType: OrderType): CommissionScene | undefined {
+  const scenes = [
+    '899成交',
+    '新代理',
+    '成交线索转代理',
+    '成交线索转新代理',
+    '代理升单',
+    '代理复购',
+    '退款挽回',
+    '转介绍成交',
+    '智能体服务',
+    '个人资源成交',
+  ];
+  return scenes.includes(orderType) ? orderType as CommissionScene : undefined;
+}
+
+function userRoleToCommissionRole(role: string): CommissionRole {
+  if (role.includes('销售经理')) return '销售主管' as CommissionRole;
+  if (role.includes('销售')) return '销售' as CommissionRole;
+  if (role.includes('运营')) return '客户成功' as CommissionRole;
+  return '销售' as CommissionRole;
+}
+
+function renderUserOptionLabel(user: User): string {
+  return `${user.name}（${user.role}）`;
+}
+
+function getCustomerDisplayName(customer?: Customer | null): string {
+  return customer?.name || '';
+}
+
+function getCustomerOptionLabel(customer: Customer): string {
+  return [
+    customer.name,
+    customer.company,
+    customer.phone,
+  ].filter(Boolean).join(' · ');
+}
+
+const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, customer }) => {
   const { create, update } = useOrderStore();
   const [products, setProducts] = useState<Product[]>([]);
   const [productLevelConfigs, setProductLevelConfigs] = useState<ProductLevelConfig[]>([]);
+  const [orderTypeConfigs, setOrderTypeConfigs] = useState<OrderTypeConfig[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [customerLoading, setCustomerLoading] = useState(false);
   const [voucherName, setVoucherName] = useState('');
   const [voucherPreview, setVoucherPreview] = useState('');
   const [recognitionMessage, setRecognitionMessage] = useState('');
@@ -81,26 +182,22 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order }
     customerName: '',
     productLevel: '899' as ProductLevel,
     orderType: '899成交' as OrderType,
-    amount: 899,
     actualAmount: 899,
-    paymentMethod: '银行转账' as PaymentMethod,
     officialPaymentChannel: '对公银行转账' as OfficialPaymentChannel,
     resourceOwnership: '公司资源' as ResourceOwnership,
     isExternalTalentOrder: false,
-    dealScene: '899成交' as CommissionScene,
     proofStatus: '无需凭证' as ProofStatus,
     collaboratorName: '',
     collaboratorRole: '客户成功' as CommissionRole,
     collaboratorRatio: 0,
     originalOrderId: '',
-    performanceBaseAmount: 0,
     sourceType: '自拓',
     owner: '张伟',
     notes: '',
     status: '待确认' as Order['status'],
     refundStatus: '无' as Order['refundStatus'],
     customerId: '',
-    paymentDate: toDateInputValue(new Date()),
+    paymentDate: toDateTimeInputValue(new Date()),
     paymentOrderNo: '',
   });
 
@@ -111,69 +208,102 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order }
       setVoucherName('');
       setVoucherPreview('');
       setRecognitionMessage('');
+      setCustomers([]);
+      setCustomerSearch('');
+      setSelectedCustomer(customer || null);
+      setForm((prev) => ({
+        ...prev,
+        customerId: customer?.id || '',
+        customerName: getCustomerDisplayName(customer),
+        owner: customer?.owner || prev.owner,
+        productLevel: customer?.productLevel || prev.productLevel,
+        sourceType: sourceTypeFromCustomer(customer, prev.sourceType),
+        paymentDate: toDateTimeInputValue(new Date()),
+      }));
       return;
     }
 
     const primaryPayment = order.payments?.[0];
+    const lockedCustomer: Customer = {
+      id: order.customerId,
+      name: order.customerName,
+      company: order.customerName,
+      phone: '',
+      customerLevel: 'L1',
+      owner: order.owner,
+      sourceType: order.sourceType,
+      totalSpent: order.actualAmount,
+      orderCount: 1,
+      growthPath: [],
+      growthRecords: [],
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+    };
+    setSelectedCustomer(lockedCustomer);
     setVoucherName(primaryPayment?.voucherName || '');
     setVoucherPreview(primaryPayment?.voucherPreview || '');
     setRecognitionMessage('');
+    setCustomers([]);
+    setCustomerSearch('');
     setForm((prev) => ({
       ...prev,
       customerName: order.customerName,
       customerId: order.customerId || '',
       productLevel: order.productLevel,
       orderType: order.orderType,
-      amount: order.amount,
-      actualAmount: order.actualAmount,
-      paymentMethod: order.paymentMethod,
+      actualAmount: order.actualAmount || order.amount,
       officialPaymentChannel: order.officialPaymentChannel || prev.officialPaymentChannel,
       resourceOwnership: order.resourceOwnership || prev.resourceOwnership,
       isExternalTalentOrder: Boolean(order.isExternalTalentOrder),
-      dealScene: order.dealScene || prev.dealScene,
       proofStatus: order.proofStatus || prev.proofStatus,
       collaboratorName: order.collaboratorName || '',
       collaboratorRole: order.collaboratorRole || prev.collaboratorRole,
       collaboratorRatio: order.collaboratorRatio || 0,
       originalOrderId: order.originalOrderId || '',
-      performanceBaseAmount: order.performanceBaseAmount || order.actualAmount || order.amount,
       sourceType: order.sourceType || prev.sourceType,
       owner: order.owner,
       notes: order.notes || '',
       status: order.status,
       refundStatus: order.refundStatus,
-      paymentDate: toDateInputValue(new Date(primaryPayment?.paidAt || order.createdAt)),
+      paymentDate: toDateTimeInputValue(new Date(primaryPayment?.paidAt || order.createdAt)),
       paymentOrderNo: primaryPayment?.paymentOrderNo || '',
     }));
-  }, [open, order]);
+  }, [open, order, customer]);
 
   useEffect(() => {
     if (!open) return;
     const loadProducts = async () => {
-      const [productRes, levelRes, customerRes] = await Promise.all([
+      const [productRes, levelRes] = await Promise.all([
         productApi.getProducts(),
         productApi.getProductLevelConfigs(),
-        customerApi.fetchCustomers({ pageSize: 1000 }),
       ]);
       const productItems = productRes.code === 0 ? productRes.data : [];
       const activeLevels = levelRes.code === 0 ? levelRes.data.filter((level) => level.isActive) : [];
       if (productRes.code === 0) setProducts(productItems);
       if (levelRes.code === 0) setProductLevelConfigs(activeLevels);
-      if (customerRes.code === 0) setCustomers(customerRes.data.items);
       setForm((prev) => {
         const currentExists = activeLevels.some((level) => level.name === prev.productLevel);
         const nextLevel = currentExists ? prev.productLevel : activeLevels[0]?.name || productItems[0]?.level || prev.productLevel;
-        const nextAmount = productItems.find((product) => product.level === nextLevel)?.price || prev.amount;
+        const nextAmount = productItems.find((product) => product.level === nextLevel)?.price || prev.actualAmount;
         return currentExists ? prev : {
           ...prev,
           productLevel: nextLevel as ProductLevel,
-          amount: nextAmount,
           actualAmount: nextAmount,
-          performanceBaseAmount: prev.performanceBaseAmount || nextAmount,
         };
       });
     };
     loadProducts();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    Promise.all([
+      settingsApi.fetchUsers({ isActive: true }),
+      settingsApi.fetchOrderTypeConfigs(),
+    ]).then(([userRes, orderTypeRes]) => {
+      if (userRes.code === 0) setUsers(userRes.data.filter((user) => user.isActive));
+      if (orderTypeRes.code === 0) setOrderTypeConfigs(orderTypeRes.data);
+    });
   }, [open]);
 
   const amountMap = useMemo(
@@ -196,11 +326,58 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order }
     [productLevelConfigs, products],
   );
 
+  const orderTypeOptions = useMemo(() => {
+    const activeItems = orderTypeConfigs.filter((item) => item.isActive);
+    if (form.orderType && !activeItems.some((item) => item.name === form.orderType)) {
+      const current = orderTypeConfigs.find((item) => item.name === form.orderType) || {
+        id: form.orderType,
+        name: form.orderType,
+        description: '',
+        isActive: true,
+        sortOrder: 0,
+        createdAt: '',
+        updatedAt: '',
+      };
+      return [current, ...activeItems];
+    }
+    return activeItems;
+  }, [form.orderType, orderTypeConfigs]);
+
+  useEffect(() => {
+    if (!open || order || customer) return;
+    const keyword = customerSearch.trim();
+    if (keyword.length < 1) {
+      setCustomers(selectedCustomer ? [selectedCustomer] : []);
+      return;
+    }
+
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      setCustomerLoading(true);
+      try {
+        const res = await customerApi.fetchCustomers({ search: keyword, pageSize: 20 });
+        if (active && res.code === 0) {
+          const nextItems = selectedCustomer && !res.data.items.some((item) => item.id === selectedCustomer.id)
+            ? [selectedCustomer, ...res.data.items]
+            : res.data.items;
+          setCustomers(nextItems);
+        }
+      } finally {
+        if (active) setCustomerLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [open, order, customer, customerSearch, selectedCustomer]);
+
   const handleChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     if (field === 'productLevel') {
-      const amt = amountMap[val] || form.amount || 899;
-      setForm({ ...form, productLevel: val as ProductLevel, amount: amt, actualAmount: amt });
+      const amt = amountMap[val] || form.actualAmount || 899;
+      setForm({ ...form, productLevel: val as ProductLevel, actualAmount: amt });
     } else {
       setForm({ ...form, [field]: val });
     }
@@ -214,14 +391,33 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order }
     setForm({ ...form, [field]: e.target.value === 'true' });
   };
 
-  const handleCustomerSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const customerId = e.target.value;
-    const customer = customers.find((item) => item.id === customerId);
+  const handleOwnerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setForm({ ...form, owner: e.target.value });
+  };
+
+  const handleCollaboratorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const collaboratorName = e.target.value;
+    const selectedUser = users.find((user) => user.name === collaboratorName);
     setForm({
       ...form,
-      customerId,
-      customerName: customer ? customer.company || customer.name : '',
+      collaboratorName,
+      collaboratorRole: selectedUser ? userRoleToCommissionRole(selectedUser.role) : form.collaboratorRole,
     });
+  };
+
+  const handleCustomerSelect = (_event: React.SyntheticEvent, selected: Customer | null) => {
+    setSelectedCustomer(selected);
+    setForm({
+      ...form,
+      customerId: selected?.id || '',
+      customerName: getCustomerDisplayName(selected),
+      owner: selected?.owner || form.owner,
+      productLevel: selected?.productLevel || form.productLevel,
+      sourceType: sourceTypeFromCustomer(selected, form.sourceType),
+    });
+    if (selected) {
+      setCustomerSearch(getCustomerOptionLabel(selected));
+    }
   };
 
   const handleVoucherFile = (file?: File) => {
@@ -247,25 +443,23 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order }
       if (voucherPreview) {
         try {
           const { recognize } = await import('tesseract.js');
-          const ocrResult = await recognize(voucherPreview, 'eng');
+          const ocrResult = await recognize(voucherPreview, 'chi_sim+eng');
           ocrText = ocrResult.data.text || '';
         } catch {
           ocrText = '';
         }
       }
 
-      const result = recognizePaymentProof(`${ocrText}\n${voucherName}`, Number(form.actualAmount) || Number(form.amount));
+      const result = recognizePaymentProof(`${ocrText}\n${voucherName}`, Number(form.actualAmount));
       setForm({
         ...form,
         paymentDate: result.paidDate,
         actualAmount: result.amount,
-        amount: form.amount || result.amount,
-        performanceBaseAmount: form.performanceBaseAmount || result.amount,
         paymentOrderNo: result.paymentOrderNo,
         proofStatus: '已上传' as ProofStatus,
       });
       setRecognitionMessage(ocrText.trim()
-        ? '已从付款截图识别并回填付款日期、实付金额和付款订单号，可继续手动修正。'
+        ? '已从付款截图识别并回填付款时间、实付金额和付款订单号，可继续手动修正。'
         : '图片文字未清晰识别，已按文件名信息回填，可继续手动修正。');
     } finally {
       setRecognizing(false);
@@ -273,10 +467,12 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order }
   };
 
   const handleSubmit = async () => {
+    const actualAmount = Number(form.actualAmount) || 0;
+    const paymentMethod = paymentMethodFromOfficialChannel(form.officialPaymentChannel);
     const payment = {
       id: order?.payments?.[0]?.id || `pay-${Date.now()}`,
-      amount: Number(form.actualAmount),
-      paymentMethod: form.paymentMethod,
+      amount: actualAmount,
+      paymentMethod,
       paidAt: form.paymentDate ? new Date(form.paymentDate).toISOString() : new Date().toISOString(),
       paymentOrderNo: form.paymentOrderNo || undefined,
       voucherName: voucherName || undefined,
@@ -285,10 +481,12 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order }
 
     const payload = {
       ...form,
-      amount: Number(form.amount),
-      actualAmount: Number(form.actualAmount),
+      amount: actualAmount,
+      actualAmount,
+      paymentMethod,
+      dealScene: dealSceneFromOrderType(form.orderType),
       payments: [payment],
-      performanceBaseAmount: Number(form.performanceBaseAmount) || Number(form.actualAmount),
+      performanceBaseAmount: actualAmount,
       collaboratorRatio: Number(form.collaboratorRatio) || undefined,
       collaboratorName: form.collaboratorName || undefined,
       originalOrderId: form.originalOrderId || undefined,
@@ -303,19 +501,56 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order }
     onClose();
   };
 
+  const customerLocked = Boolean(order || customer);
+  const canSubmit = Boolean(form.customerId && form.customerName && form.actualAmount > 0);
+
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>{order ? '编辑订单' : '新增订单'}</DialogTitle>
       <DialogContent>
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
-          <TextField select label="客户（客户中心）" value={form.customerId} onChange={handleCustomerSelect} required fullWidth>
-            <MenuItem value="">请选择客户</MenuItem>
-            {customers.map((customer) => (
-              <MenuItem key={customer.id} value={customer.id}>
-                {customer.company || customer.name}
-              </MenuItem>
-            ))}
-          </TextField>
+          {customerLocked ? (
+            <TextField
+              label="客户"
+              value={form.customerName}
+              required
+              fullWidth
+              InputProps={{ readOnly: true }}
+              helperText={customer ? '从客户中心创建订单，客户已自动带入' : '编辑订单时客户关系保持不变'}
+            />
+          ) : (
+            <Autocomplete
+              options={selectedCustomer && !customers.some((item) => item.id === selectedCustomer.id) ? [selectedCustomer, ...customers] : customers}
+              value={selectedCustomer}
+              inputValue={customerSearch}
+              onInputChange={(_event, value, reason) => {
+                if (reason === 'input' || reason === 'clear') setCustomerSearch(value);
+              }}
+              onChange={handleCustomerSelect}
+              loading={customerLoading}
+              filterOptions={(options) => options}
+              getOptionLabel={getCustomerOptionLabel}
+              isOptionEqualToValue={(option, value) => option.id === value.id}
+              noOptionsText={customerSearch.trim() ? '未找到客户' : '输入客户姓名、公司、电话或微信搜索'}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="客户（搜索选择）"
+                  required
+                  placeholder="输入客户名/公司/电话/微信"
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <>
+                        {customerLoading ? <CircularProgress color="inherit" size={18} /> : null}
+                        {params.InputProps.endAdornment}
+                      </>
+                    ),
+                  }}
+                />
+              )}
+            />
+          )}
           <TextField select label="产品等级" value={form.productLevel} onChange={handleChange('productLevel')} fullWidth>
             {productLevels.map((level) => (
               <MenuItem key={level.name} value={level.name}>
@@ -327,13 +562,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order }
             ))}
           </TextField>
           <TextField select label="订单类型" value={form.orderType} onChange={handleChange('orderType')} fullWidth>
-            {ORDER_TYPES.map((t) => (
-              <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>
-            ))}
-          </TextField>
-          <TextField select label="支付方式" value={form.paymentMethod} onChange={handleChange('paymentMethod')} fullWidth>
-            {PAYMENT_METHODS.map((m) => (
-              <MenuItem key={m.value} value={m.value}>{m.label}</MenuItem>
+            {orderTypeOptions.map((item) => (
+              <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>
             ))}
           </TextField>
           <TextField select label="订单状态" value={form.status} onChange={handleChange('status')} fullWidth>
@@ -342,32 +572,26 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order }
             ))}
           </TextField>
           <TextField select label="官方收款渠道" value={form.officialPaymentChannel} onChange={handleChange('officialPaymentChannel')} fullWidth>
-            {OFFICIAL_PAYMENT_CHANNELS.map((m) => (
-              <MenuItem key={m.value} value={m.value}>{m.label}</MenuItem>
+            {OFFICIAL_PAYMENT_CHANNELS.map((item) => (
+              <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
             ))}
           </TextField>
           <TextField select label="资源归属" value={form.resourceOwnership} onChange={handleChange('resourceOwnership')} fullWidth>
-            {RESOURCE_OWNERSHIPS.map((m) => (
-              <MenuItem key={m.value} value={m.value}>{m.label}</MenuItem>
-            ))}
-          </TextField>
-          <TextField select label="成交场景" value={form.dealScene} onChange={handleChange('dealScene')} fullWidth>
-            {COMMISSION_SCENES.map((m) => (
-              <MenuItem key={m.value} value={m.value}>{m.label}</MenuItem>
+            {RESOURCE_OWNERSHIPS.map((item) => (
+              <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
             ))}
           </TextField>
           <TextField select label="凭证状态" value={form.proofStatus} onChange={handleChange('proofStatus')} fullWidth>
-            {PROOF_STATUSES.map((m) => (
-              <MenuItem key={m.value} value={m.value}>{m.label}</MenuItem>
+            {PROOF_STATUSES.map((item) => (
+              <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
             ))}
           </TextField>
           <TextField select label="外部达人成交" value={String(form.isExternalTalentOrder)} onChange={handleBooleanChange('isExternalTalentOrder')} fullWidth>
             <MenuItem value="false">否</MenuItem>
             <MenuItem value="true">是</MenuItem>
           </TextField>
-          <TextField label="订单金额" type="number" value={form.amount} onChange={handleChange('amount')} fullWidth />
           <TextField label="实付金额" type="number" value={form.actualAmount} onChange={handleChange('actualAmount')} fullWidth />
-          <TextField label="付款日期" type="date" value={form.paymentDate} onChange={handleChange('paymentDate')} fullWidth InputLabelProps={{ shrink: true }} />
+          <TextField label="付款时间" type="datetime-local" value={form.paymentDate} onChange={handleChange('paymentDate')} fullWidth InputLabelProps={{ shrink: true }} />
           <TextField label="付款订单号" value={form.paymentOrderNo} onChange={handleChange('paymentOrderNo')} placeholder="上传截图识别后自动填写" fullWidth />
           <Box
             onDragOver={(e) => e.preventDefault()}
@@ -390,7 +614,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order }
             <Box>
               <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>付款截图提交</Typography>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>
-                拖拽截图到这里，或点击上传后确认识别，系统会回填付款日期、金额、付款订单号。
+                拖拽截图到这里，或点击上传后确认识别，系统会回填付款时间、实付金额、付款订单号。
               </Typography>
               {voucherName && (
                 <Typography variant="body2" sx={{ mt: 1, color: '#1e88e5' }}>{voucherName}</Typography>
@@ -419,27 +643,28 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order }
               </Button>
             </Box>
           </Box>
-          <TextField label="业绩核算基数" type="number" value={form.performanceBaseAmount} onChange={handleNumberChange('performanceBaseAmount')} placeholder="留空按实付金额" fullWidth />
-          <TextField select label="来源类型" value={form.sourceType} onChange={handleChange('sourceType')} fullWidth>
-            <MenuItem value="自拓">自拓</MenuItem>
-            <MenuItem value="公司资源">公司资源</MenuItem>
-            <MenuItem value="转介绍">转介绍</MenuItem>
-            <MenuItem value="渠道转介绍价">渠道转介绍价</MenuItem>
-            <MenuItem value="重新付款">重新付款</MenuItem>
-            <MenuItem value="原价挽回">原价挽回</MenuItem>
-            <MenuItem value="898-599挽回">898-599挽回</MenuItem>
-            <MenuItem value="598-450挽回">598-450挽回</MenuItem>
+          <TextField select label="销售负责人" value={form.owner} onChange={handleOwnerChange} fullWidth>
+            {form.owner && !users.some((user) => user.name === form.owner) && (
+              <MenuItem value={form.owner}>{form.owner}</MenuItem>
+            )}
+            {users.map((user) => (
+              <MenuItem key={user.id} value={user.name}>{renderUserOptionLabel(user)}</MenuItem>
+            ))}
           </TextField>
-          <TextField select label="负责人" value={form.owner} onChange={handleChange('owner')} fullWidth>
-            <MenuItem value="张伟">张伟</MenuItem>
-            <MenuItem value="李娜">李娜</MenuItem>
-            <MenuItem value="王磊">王磊</MenuItem>
-            <MenuItem value="赵敏">赵敏</MenuItem>
-          </TextField>
-          <TextField label="协同人员" value={form.collaboratorName} onChange={handleChange('collaboratorName')} placeholder="如：电商客服/成功专员姓名" fullWidth />
-          <TextField select label="协同角色" value={form.collaboratorRole} onChange={handleChange('collaboratorRole')} fullWidth>
-            {['销售', '线索', '客户成功', '售后', '招商主管', '销售主管'].map((role) => (
-              <MenuItem key={role} value={role}>{role}</MenuItem>
+          <TextField
+            select
+            label="协同人员"
+            value={form.collaboratorName}
+            onChange={handleCollaboratorChange}
+            helperText="选择人员后系统按职位自动匹配提成角色"
+            fullWidth
+          >
+            <MenuItem value="">无</MenuItem>
+            {form.collaboratorName && !users.some((user) => user.name === form.collaboratorName) && (
+              <MenuItem value={form.collaboratorName}>{form.collaboratorName}</MenuItem>
+            )}
+            {users.map((user) => (
+              <MenuItem key={user.id} value={user.name}>{renderUserOptionLabel(user)}</MenuItem>
             ))}
           </TextField>
           <TextField label="协同分成比例（%）" type="number" value={form.collaboratorRatio} onChange={handleNumberChange('collaboratorRatio')} fullWidth />
@@ -449,7 +674,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order }
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>取消</Button>
-        <Button variant="contained" onClick={handleSubmit} disabled={!form.customerName}>
+        <Button variant="contained" onClick={handleSubmit} disabled={!canSubmit}>
           {order ? '保存修改' : '创建订单'}
         </Button>
       </DialogActions>

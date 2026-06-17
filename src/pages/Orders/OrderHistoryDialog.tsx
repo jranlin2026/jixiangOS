@@ -22,9 +22,39 @@ interface OrderHistoryDialogProps {
   onClose: () => void;
 }
 
-function displayValue(value: unknown): string {
+function formatLegacyPaymentJson(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('[') && !trimmed.startsWith('{')) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    const payments = Array.isArray(parsed) ? parsed : [parsed];
+    if (!payments.some((payment) => payment && typeof payment === 'object' && 'paymentMethod' in payment)) {
+      return null;
+    }
+
+    return payments.map((payment, index) => {
+      const parts = [
+        `第${index + 1}笔`,
+        payment.amount !== undefined ? `金额:${payment.amount}` : '',
+        payment.paymentMethod ? `方式:${payment.paymentMethod}` : '',
+        payment.paidAt ? `日期:${String(payment.paidAt).slice(0, 10)}` : '',
+        payment.paymentOrderNo ? `单号:${payment.paymentOrderNo}` : '',
+        payment.voucherName ? `凭证:${payment.voucherName}` : '',
+      ].filter(Boolean);
+      return parts.join(' · ');
+    }).join('；');
+  } catch {
+    return null;
+  }
+}
+
+function displayValue(value: unknown, field?: string): string {
   if (value === null || value === undefined || value === '') return '-';
   if (typeof value === 'boolean') return value ? '是' : '否';
+  if (field === 'payments' && typeof value === 'string') {
+    return formatLegacyPaymentJson(value) || value;
+  }
   return String(value);
 }
 
@@ -80,8 +110,12 @@ const OrderHistoryDialog: React.FC<OrderHistoryDialogProps> = ({ order, open, on
                         {item.changes.map((change) => (
                           <TableRow key={`${item.id}-${change.field}`}>
                             <TableCell sx={{ width: 160 }}>{change.label}</TableCell>
-                            <TableCell>{displayValue(change.oldValue)}</TableCell>
-                            <TableCell sx={{ color: '#1d4ed8', fontWeight: 600 }}>{displayValue(change.newValue)}</TableCell>
+                            <TableCell sx={{ maxWidth: 260, whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                              {displayValue(change.oldValue, change.field)}
+                            </TableCell>
+                            <TableCell sx={{ color: '#1d4ed8', fontWeight: 600, maxWidth: 260, whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                              {displayValue(change.newValue, change.field)}
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

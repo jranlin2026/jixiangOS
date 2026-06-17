@@ -3,6 +3,7 @@ import {
   Box, Typography, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Paper, Chip, TextField,
   MenuItem, FormControl, InputLabel, Select, Card, CardContent, IconButton, Tooltip,
+  Tabs, Tab,
 } from '@mui/material';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
@@ -14,6 +15,7 @@ import { REFUND_CATEGORIES, getProductLevelColor } from '../../shared/utils/cons
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import RefundDetail from './RefundDetail';
 import RefundProcessDialog from './RefundProcessDialog';
+import ServiceTicketTab from './ServiceTicketTab';
 import type { Refund } from '../../types/refund';
 
 const RefundCenter: React.FC = () => {
@@ -33,6 +35,7 @@ const RefundCenter: React.FC = () => {
   const [detailOpen, setDetailOpen] = useState(false);
   const [processOpen, setProcessOpen] = useState(false);
   const [processAction, setProcessAction] = useState<'assign' | 'log' | 'success' | 'failed'>('assign');
+  const [activeTab, setActiveTab] = useState(0);
 
   useEffect(() => {
     fetchItems();
@@ -91,6 +94,14 @@ const RefundCenter: React.FC = () => {
       <Typography variant="h5" sx={{ fontWeight: 600, mb: 3 }}>
         退款中心
       </Typography>
+
+      <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ mb: 3 }}>
+        <Tab label="退款挽回" />
+        <Tab label="售后工单" />
+      </Tabs>
+
+      {activeTab === 0 ? (
+        <>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(7, 1fr)' }, gap: 2, mb: 3 }}>
         {[
@@ -259,6 +270,10 @@ const RefundCenter: React.FC = () => {
         onClose={() => setProcessOpen(false)}
         onSubmit={handleProcessSubmit}
       />
+        </>
+      ) : (
+        <ServiceTicketTab />
+      )}
     </Box>
   );
 };

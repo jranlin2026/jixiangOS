@@ -7,6 +7,8 @@ export interface GrowthMilestone {
   title: string;
   description: string;
   productLevel: ProductLevel;
+  orderId?: ID;
+  orderNo?: string;
 }
 
 /** 客户成长记录 */
@@ -44,12 +46,14 @@ export interface Customer {
   company: string;
   phone: string;
   email?: string;
-  productLevel: ProductLevel;
+  /** 最新成交产品分类，由订单同步；客户新增时不手动维护 */
+  productLevel?: ProductLevel;
   customerLevel: CustomerLevel;
   wechat?: string;
   industry?: string;
   city?: string;
   /** 归属销售 */
+  /** 销售负责人 */
   owner: string;
   /** 归属开始日期 */
   ownerSince?: Timestamp;
@@ -61,6 +65,14 @@ export interface Customer {
   growthRecords: CustomerGrowthRecord[];
   aiPortrait?: AICustomerPortrait;
   tags?: string[];
+  /** 线索录入人 */
+  leadInputBy?: string;
+  /** 线索来源 */
+  leadSource?: string;
+  /** 客户备注 */
+  remark?: string;
+  /** 原销转人员 */
+  originalSalesTransferBy?: string;
   sourceType?: string;
   sourceName?: string;
   sourceAccount?: string;
@@ -78,3 +90,10 @@ export interface CustomerFilters {
   page?: number;
   pageSize?: number;
 }
+
+export type CustomerCreateInput = Omit<
+  Customer,
+  'id' | 'createdAt' | 'updatedAt' | 'growthPath' | 'growthRecords' | 'orderCount' | 'totalSpent' | 'productLevel'
+> & {
+  productLevel?: ProductLevel;
+};

@@ -51,6 +51,11 @@ const ChannelConfigPage: React.FC = () => {
     loadChannels();
   };
 
+  const handleToggleActive = async (channel: ChannelConfig) => {
+    await settingsApi.updateChannelConfig(channel.id, { isActive: !channel.isActive });
+    loadChannels();
+  };
+
   const channelTypes = ['搜索引擎', '社交媒体', '展会', '转介绍', '直销'];
 
   return (
@@ -85,8 +90,9 @@ const ChannelConfigPage: React.FC = () => {
                 </TableCell>
                 <TableCell>{ch.description}</TableCell>
                 <TableCell align="center">
-                  <IconButton size="small" onClick={() => handleEdit(ch)}><EditIcon fontSize="small" /></IconButton>
-                  <IconButton size="small" onClick={() => handleDelete(ch.id)}><DeleteIcon fontSize="small" /></IconButton>
+                  <Switch checked={ch.isActive} size="small" onChange={() => handleToggleActive(ch)} />
+                  <IconButton size="small" onClick={() => handleEdit(ch)} title="编辑"><EditIcon fontSize="small" /></IconButton>
+                  <IconButton size="small" color="error" onClick={() => handleDelete(ch.id)} title="删除"><DeleteIcon fontSize="small" /></IconButton>
                 </TableCell>
               </TableRow>
             ))}

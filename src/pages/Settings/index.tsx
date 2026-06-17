@@ -5,6 +5,8 @@ import RolePermission from './RolePermission';
 import ChannelConfigPage from './ChannelConfig';
 import ProductConfigPage from './ProductConfig';
 import DepartmentManagement from './DepartmentManagement';
+import OrderTypeConfigPage from './OrderTypeConfig';
+import LifecycleStatusConfigPage from './LifecycleStatusConfig';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -38,6 +40,8 @@ const Settings: React.FC = () => {
           <Tab label="部门管理" />
           <Tab label="渠道配置" />
           <Tab label="产品配置" />
+          <Tab label="订单类型" />
+          <Tab label="生命周期状态" />
         </Tabs>
 
         <Box sx={{ p: 3 }}>
@@ -55,6 +59,12 @@ const Settings: React.FC = () => {
           </TabPanel>
           <TabPanel value={tabValue} index={4}>
             <ProductConfigPage />
+          </TabPanel>
+          <TabPanel value={tabValue} index={5}>
+            <OrderTypeConfigPage />
+          </TabPanel>
+          <TabPanel value={tabValue} index={6}>
+            <LifecycleStatusConfigPage />
           </TabPanel>
         </Box>
       </Paper>

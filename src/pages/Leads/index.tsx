@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Paper, Chip, IconButton, Button, TextField,
@@ -12,16 +13,24 @@ import { formatDate } from '../../shared/utils/formatters';
 import LeadDetail from './LeadDetail';
 import LeadForm from './LeadForm';
 import type { Lead, LeadStatus, LeadSource } from '../../types/lead';
+import { opportunityApi, settingsApi } from '../../api';
+import { ROUTES } from '../../shared/utils/constants';
+import type { LifecycleStatusConfig } from '../../types/settings';
 
 const Leads: React.FC = () => {
+  const navigate = useNavigate();
   const { items, loading, filters, fetchItems, setFilters } = useLeadStore();
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editLead, setEditLead] = useState<Lead | null>(null);
+  const [lifecycleConfigs, setLifecycleConfigs] = useState<LifecycleStatusConfig[]>([]);
 
   useEffect(() => {
     fetchItems();
+    settingsApi.fetchLifecycleStatusConfigs().then((res) => {
+      if (res.code === 0) setLifecycleConfigs(res.data);
+    });
   }, [fetchItems]);
 
   const handleViewDetail = (lead: Lead) => {
@@ -38,6 +47,14 @@ const Leads: React.FC = () => {
     setEditLead(lead);
     setFormOpen(true);
     setDetailOpen(false);
+  };
+
+  const getLifecycleColor = (status?: string) => lifecycleConfigs.find((item) => item.name === status)?.color || '#9E9E9E';
+
+  const handleCreateOpportunity = async (lead: Lead) => {
+    await opportunityApi.createFromLead(lead);
+    setDetailOpen(false);
+    navigate(ROUTES.OPPORTUNITIES);
   };
 
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -125,6 +142,7 @@ const Leads: React.FC = () => {
               <TableCell>电话</TableCell>
               <TableCell>来源</TableCell>
               <TableCell>状态</TableCell>
+              <TableCell>生命周期</TableCell>
               <TableCell>行业</TableCell>
               <TableCell>城市</TableCell>
               <TableCell>评分</TableCell>
@@ -143,6 +161,17 @@ const Leads: React.FC = () => {
                 <TableCell>{lead.source}</TableCell>
                 <TableCell>
                   <Chip label={lead.status} color={getStatusColor(lead.status)} size="small" />
+                </TableCell>
+                <TableCell>
+                  <Chip
+                    label={lead.lifecycleStatus || '未转商机'}
+                    size="small"
+                    sx={{
+                      bgcolor: `${getLifecycleColor(lead.lifecycleStatus)}18`,
+                      color: getLifecycleColor(lead.lifecycleStatus),
+                      fontWeight: 600,
+                    }}
+                  />
                 </TableCell>
                 <TableCell>{lead.industry || '-'}</TableCell>
                 <TableCell>{lead.city || '-'}</TableCell>
@@ -181,7 +210,7 @@ const Leads: React.FC = () => {
             ))}
             {items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={12} align="center" sx={{ py: 6, color: '#9ca3af' }}>
+                <TableCell colSpan={13} align="center" sx={{ py: 6, color: '#9ca3af' }}>
                   暂无线索数据
                 </TableCell>
               </TableRow>
@@ -197,6 +226,7 @@ const Leads: React.FC = () => {
           open={detailOpen}
           onClose={() => setDetailOpen(false)}
           onEdit={handleEdit}
+          onCreateOpportunity={handleCreateOpportunity}
         />
       )}
 

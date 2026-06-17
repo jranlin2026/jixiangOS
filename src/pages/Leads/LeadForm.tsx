@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button,
   TextField, MenuItem, Box,
@@ -6,6 +6,8 @@ import {
 import useLeadStore from '../../store/useLeadStore';
 import { LEAD_SOURCES, LEAD_STATUS } from '../../shared/utils/constants';
 import type { Lead } from '../../types/lead';
+import type { LifecycleStatusConfig } from '../../types/settings';
+import { settingsApi } from '../../api';
 
 const INDUSTRIES = ['互联网', '教育', '金融', '制造', '零售', '医疗', '科技', '其他'];
 const CITIES = ['北京', '上海', '广州', '深圳', '杭州', '成都', '南京', '武汉', '其他'];
@@ -20,6 +22,7 @@ interface LeadFormProps {
 const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) => {
   const { create, update } = useLeadStore();
   const isEdit = !!lead;
+  const [lifecycleConfigs, setLifecycleConfigs] = useState<LifecycleStatusConfig[]>([]);
 
   const [form, setForm] = useState({
     name: lead?.name || '',
@@ -28,6 +31,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     email: lead?.email || '',
     source: lead?.source || '官网',
     status: lead?.status || '新线索',
+    lifecycleStatus: lead?.lifecycleStatus || '未转商机',
     owner: lead?.owner || '张伟',
     estimatedAmount: lead?.estimatedAmount || 899,
     wechat: lead?.wechat || '',
@@ -36,6 +40,12 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     sourceType: lead?.sourceType || '自拓',
     tags: lead?.tags?.join(', ') || '',
   });
+
+  useEffect(() => {
+    settingsApi.fetchLifecycleStatusConfigs().then((res) => {
+      if (res.code === 0) setLifecycleConfigs(res.data.filter((item) => item.isActive));
+    });
+  }, []);
 
   const handleChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [field]: e.target.value });
@@ -78,6 +88,11 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
           <TextField select label="状态" value={form.status} onChange={handleChange('status')} fullWidth>
             {Object.values(LEAD_STATUS).map((s) => (
               <MenuItem key={s} value={s}>{s}</MenuItem>
+            ))}
+          </TextField>
+          <TextField select label="生命周期状态" value={form.lifecycleStatus} onChange={handleChange('lifecycleStatus')} fullWidth helperText="录入初始状态；转商机后由销售流程自动更新">
+            {lifecycleConfigs.map((s) => (
+              <MenuItem key={s.id} value={s.name}>{s.name}</MenuItem>
             ))}
           </TextField>
           <TextField select label="行业" value={form.industry} onChange={handleChange('industry')} fullWidth>

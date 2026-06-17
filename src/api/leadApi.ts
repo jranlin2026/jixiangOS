@@ -11,12 +11,25 @@ function ensureInit(): void {
   initializeMockData();
 }
 
+function normalizeLead(lead: Lead): Lead {
+  if (lead.lifecycleStatus) return lead;
+  return {
+    ...lead,
+    lifecycleStatus: lead.status === '已流失' ? '已流失' : lead.status === '已成交' ? '已转订单' : '未转商机',
+    lifecycleStatusUpdatedAt: lead.updatedAt,
+  };
+}
+
 /** 获取所有线索 */
 async function fetchLeads(filters?: LeadFilters): Promise<ApiResponse<PaginatedResponse<Lead>>> {
   ensureInit();
   await delay(200);
   const allLeads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
-  let filtered = [...allLeads];
+  const normalizedLeads = allLeads.map(normalizeLead);
+  if (JSON.stringify(allLeads) !== JSON.stringify(normalizedLeads)) {
+    setStorageData(STORAGE_KEYS.LEADS, normalizedLeads);
+  }
+  let filtered = [...normalizedLeads];
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
@@ -62,7 +75,7 @@ async function fetchLeadById(id: string): Promise<ApiResponse<Lead | null>> {
   ensureInit();
   await delay(150);
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
-  const lead = leads.find((l) => l.id === id) || null;
+  const lead = leads.map(normalizeLead).find((l) => l.id === id) || null;
   return createSuccessResponse(lead);
 }
 
@@ -75,6 +88,8 @@ async function createLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'f
   const newLead: Lead = {
     ...data,
     id: `lead-${uuidv4().slice(0, 8)}`,
+    lifecycleStatus: data.lifecycleStatus || '未转商机',
+    lifecycleStatusUpdatedAt: now,
     followUpRecords: [],
     createdAt: now,
     updatedAt: now,

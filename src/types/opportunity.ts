@@ -1,0 +1,44 @@
+import type { ID, Timestamp } from './common';
+
+export type OpportunityStage = '初步沟通' | '需求确认' | '方案报价' | '谈判签约' | '赢单' | '输单';
+export type OpportunityStatus = '进行中' | '已转订单' | '已退款' | '输单';
+
+export interface OpportunityFollowUp {
+  id: ID;
+  content: string;
+  createdBy: string;
+  createdAt: Timestamp;
+}
+
+export interface Opportunity {
+  id: ID;
+  leadId?: ID;
+  leadName?: string;
+  customerId?: ID;
+  customerName: string;
+  company?: string;
+  stage: OpportunityStage;
+  status: OpportunityStatus;
+  orderId?: ID;
+  orderNo?: string;
+  lifecycleStatus?: string;
+  estimatedAmount: number;
+  expectedCloseDate: string;
+  ownerName: string;
+  probability: number;
+  nextAction: string;
+  lostReason?: string;
+  productInterest?: string;
+  followUps: OpportunityFollowUp[];
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface OpportunityFilters {
+  search?: string;
+  stage?: OpportunityStage;
+  status?: OpportunityStatus;
+  ownerName?: string;
+  page?: number;
+  pageSize?: number;
+}

@@ -17,7 +17,7 @@ async function getRoles(filters?: RoleFilters): Promise<ApiResponse<Role[]>> {
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
-    roles = roles.filter((r) => r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q));
+    roles = roles.filter((r) => r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q) || r.description?.toLowerCase().includes(q));
   }
   if (filters?.departmentId) {
     roles = roles.filter((r) => r.departmentId === filters.departmentId);

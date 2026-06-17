@@ -10,8 +10,13 @@ export default defineConfig({
     },
   },
   server: {
+    host: '127.0.0.1',
     port: 3000,
+    strictPort: true,
     open: true,
+    proxy: {
+      '/api': 'http://localhost:3001',
+    },
   },
   build: {
     outDir: 'dist',

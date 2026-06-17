@@ -5,6 +5,7 @@ export interface Department {
   id: ID;
   name: string;
   code: string;
+  description?: string;
   parentId?: ID;
   managerId?: ID;
   memberCount: number;

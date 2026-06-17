@@ -104,6 +104,7 @@ export interface OrderStats {
 /** 订单筛选参数 */
 export interface OrderFilters {
   search?: string;
+  customerId?: ID;
   productLevel?: ProductLevel;
   status?: OrderStatus;
   owner?: string;

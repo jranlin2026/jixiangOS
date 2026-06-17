@@ -8,11 +8,10 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import CalculateIcon from '@mui/icons-material/Calculate';
-import { commissionRuleApi, productApi } from '../../api';
+import { commissionRuleApi, productApi, settingsApi } from '../../api';
 import {
   COMMISSION_SCENES,
   OFFICIAL_PAYMENT_CHANNELS,
-  ORDER_TYPES,
   RESOURCE_OWNERSHIPS,
 } from '../../shared/utils/constants';
 import type {
@@ -24,6 +23,7 @@ import type {
 } from '../../types/commission';
 import type { ProductLevel } from '../../types/common';
 import type { ProductLevelConfig } from '../../types/product';
+import type { OrderTypeConfig } from '../../types/settings';
 
 const ROLES: CommissionRole[] = ['销售', '线索', '客户成功', '售后', '招商主管', '销售主管'];
 const ROLE_LABELS: Record<CommissionRole, string> = {
@@ -67,6 +67,7 @@ const CommissionRuleConfig: React.FC = () => {
   const [form, setForm] = useState<RuleForm>(emptyForm);
   const [previewAmount, setPreviewAmount] = useState(9800);
   const [productLevels, setProductLevels] = useState<ProductLevelConfig[]>([]);
+  const [orderTypeConfigs, setOrderTypeConfigs] = useState<OrderTypeConfig[]>([]);
 
   const preview = useMemo(() => {
     const performanceAmount = Math.round(previewAmount * ((form.performanceRate || 100) / 100) * 100) / 100;
@@ -90,13 +91,32 @@ const CommissionRuleConfig: React.FC = () => {
   useEffect(() => {
     fetchRules();
     const loadProductLevels = async () => {
-      const res = await productApi.getProductLevelConfigs();
-      if (res.code === 0) {
-        setProductLevels(res.data.filter((level) => level.isActive));
-      }
+      const [productRes, orderTypeRes] = await Promise.all([
+        productApi.getProductLevelConfigs(),
+        settingsApi.fetchOrderTypeConfigs(),
+      ]);
+      if (productRes.code === 0) setProductLevels(productRes.data.filter((level) => level.isActive));
+      if (orderTypeRes.code === 0) setOrderTypeConfigs(orderTypeRes.data);
     };
     loadProductLevels();
   }, []);
+
+  const orderTypeOptions = useMemo(() => {
+    const activeItems = orderTypeConfigs.filter((item) => item.isActive);
+    if (form.orderType && !activeItems.some((item) => item.name === form.orderType)) {
+      const current = orderTypeConfigs.find((item) => item.name === form.orderType) || {
+        id: form.orderType,
+        name: form.orderType,
+        description: '',
+        isActive: true,
+        sortOrder: 0,
+        createdAt: '',
+        updatedAt: '',
+      };
+      return [current, ...activeItems];
+    }
+    return activeItems;
+  }, [form.orderType, orderTypeConfigs]);
 
   const handleOpenForm = (rule?: CommissionRule) => {
     if (rule) {
@@ -278,7 +298,7 @@ const CommissionRuleConfig: React.FC = () => {
                 onChange={(e) => updateForm('orderType', e.target.value)}
               >
                 <MenuItem value="">通用</MenuItem>
-                {ORDER_TYPES.map((type) => <MenuItem key={type.value} value={type.value}>{type.label}</MenuItem>)}
+                {orderTypeOptions.map((type) => <MenuItem key={type.id} value={type.name}>{type.name}</MenuItem>)}
               </Select>
             </FormControl>
             <FormControl fullWidth>

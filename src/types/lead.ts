@@ -20,6 +20,9 @@ export type LeadStatus =
   | '已成交'
   | '已流失';
 
+/** 客资在系统内的生命周期状态，供线索人员查看 */
+export type LeadLifecycleStatus = string;
+
 /** 跟进方式 */
 export type FollowUpType = '电话' | '微信' | '邮件' | '上门' | '会议' | '其他';
 
@@ -51,6 +54,10 @@ export interface Lead {
   email?: string;
   source: LeadSource;
   status: LeadStatus;
+  lifecycleStatus?: LeadLifecycleStatus;
+  lifecycleStatusUpdatedAt?: Timestamp;
+  opportunityId?: ID;
+  orderId?: ID;
   owner: string;
   estimatedAmount?: number;
   aiAnalysis?: LeadAIAnalysis;

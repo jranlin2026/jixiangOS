@@ -92,18 +92,15 @@ const UserManagement: React.FC = () => {
                   <Chip label={user.role} size="small" variant="outlined" />
                 </TableCell>
                 <TableCell>
-                  <Switch
-                    checked={user.isActive}
-                    size="small"
-                    onChange={() => handleToggleActive(user)}
-                  />
+                  <Chip label={user.isActive ? '启用' : '停用'} size="small" color={user.isActive ? 'success' : 'default'} />
                 </TableCell>
                 <TableCell>{formatDate(user.createdAt)}</TableCell>
                 <TableCell align="center">
-                  <IconButton size="small" onClick={() => handleEdit(user)}>
+                  <Switch checked={user.isActive} size="small" onChange={() => handleToggleActive(user)} />
+                  <IconButton size="small" onClick={() => handleEdit(user)} title="编辑">
                     <EditIcon fontSize="small" />
                   </IconButton>
-                  <IconButton size="small" onClick={() => handleDelete(user.id)}>
+                  <IconButton size="small" color="error" onClick={() => handleDelete(user.id)} title="删除">
                     <DeleteIcon fontSize="small" />
                   </IconButton>
                 </TableCell>

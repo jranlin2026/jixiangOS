@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { customerApi } from '../api';
-import type { Customer, CustomerFilters, AICustomerPortrait } from '../types/customer';
+import type { Customer, CustomerCreateInput, CustomerFilters, AICustomerPortrait } from '../types/customer';
 
 interface CustomerState {
   items: Customer[];
@@ -11,7 +11,7 @@ interface CustomerState {
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
   fetchItems: (filters?: CustomerFilters) => Promise<void>;
   fetchById: (id: string) => Promise<void>;
-  create: (data: Omit<Customer, 'id' | 'createdAt' | 'updatedAt' | 'growthPath' | 'growthRecords' | 'orderCount' | 'totalSpent' | 'customerLevel'>) => Promise<void>;
+  create: (data: CustomerCreateInput) => Promise<void>;
   update: (id: string, data: Partial<Customer>) => Promise<void>;
   delete: (id: string) => Promise<void>;
   fetchAIPortrait: (id: string) => Promise<AICustomerPortrait | null>;

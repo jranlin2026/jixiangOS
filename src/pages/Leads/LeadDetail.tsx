@@ -13,23 +13,28 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import CategoryIcon from '@mui/icons-material/Category';
 import type { Lead } from '../../types/lead';
-import { leadApi } from '../../api';
+import type { AIBusinessCard } from '../../types/aiCard';
+import { aiCardApi, leadApi } from '../../api';
 import { formatDate, formatRelativeTime } from '../../shared/utils/formatters';
-import { LEAD_STATUS } from '../../shared/utils/constants';
+import AIBusinessCardPanel from '../../shared/components/AIBusinessCardPanel';
 
 interface LeadDetailProps {
   lead: Lead;
   open: boolean;
   onClose: () => void;
   onEdit: (lead: Lead) => void;
+  onCreateOpportunity?: (lead: Lead) => void;
 }
 
-const LeadDetail: React.FC<LeadDetailProps> = ({ lead, open, onClose, onEdit }) => {
+const LeadDetail: React.FC<LeadDetailProps> = ({ lead, open, onClose, onEdit, onCreateOpportunity }) => {
   const [currentLead, setCurrentLead] = useState<Lead>(lead);
   const [refreshing, setRefreshing] = useState(false);
+  const [aiCard, setAiCard] = useState<AIBusinessCard | null>(null);
+  const [cardLoading, setCardLoading] = useState(false);
 
   useEffect(() => {
     setCurrentLead(lead);
+    aiCardApi.getCard('lead', lead.id).then((res) => setAiCard(res.data));
   }, [lead]);
 
   const handleRefreshAI = async () => {
@@ -44,6 +49,28 @@ const LeadDetail: React.FC<LeadDetailProps> = ({ lead, open, onClose, onEdit }) 
     }
   };
 
+  const handleGenerateCard = async () => {
+    setCardLoading(true);
+    try {
+      const res = await aiCardApi.generateCard({
+        subjectType: 'lead',
+        subjectId: currentLead.id,
+        name: currentLead.name,
+        company: currentLead.company,
+        phone: currentLead.phone,
+        email: currentLead.email,
+        wechat: currentLead.wechat,
+        industry: currentLead.industry,
+        city: currentLead.city,
+        tags: currentLead.tags,
+        notes: currentLead.followUpRecords.map((record) => record.content).join('\n'),
+      });
+      if (res.code === 0) setAiCard(res.data);
+    } finally {
+      setCardLoading(false);
+    }
+  };
+
   const ai = currentLead.aiAnalysis;
 
   return (
@@ -52,9 +79,14 @@ const LeadDetail: React.FC<LeadDetailProps> = ({ lead, open, onClose, onEdit }) 
         <Typography variant="h6" sx={{ fontWeight: 600 }}>
           {currentLead.name}
         </Typography>
-        <Button variant="outlined" size="small" onClick={() => onEdit(currentLead)}>
-          编辑
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button variant="outlined" size="small" onClick={() => onCreateOpportunity?.(currentLead)}>
+            转商机
+          </Button>
+          <Button variant="outlined" size="small" onClick={() => onEdit(currentLead)}>
+            编辑
+          </Button>
+        </Box>
       </DialogTitle>
       <DialogContent dividers>
         {/* 基本信息 */}
@@ -106,6 +138,10 @@ const LeadDetail: React.FC<LeadDetailProps> = ({ lead, open, onClose, onEdit }) 
             </Typography>
           </Box>
         </Box>
+
+        <Divider sx={{ my: 2 }} />
+
+        <AIBusinessCardPanel card={aiCard} loading={cardLoading} onGenerate={handleGenerateCard} />
 
         <Divider sx={{ my: 2 }} />
 
