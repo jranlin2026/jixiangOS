@@ -19,7 +19,7 @@ import type { Order } from '../../types/order';
 import type { User } from '../../types/settings';
 import { aiCardApi, customerApi, orderApi, settingsApi } from '../../api';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
-import { getProductLevelColor } from '../../shared/utils/constants';
+import { RESOURCE_OWNERSHIPS, getProductLevelColor, normalizeResourceOwnership } from '../../shared/utils/constants';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import AIBusinessCardPanel from '../../shared/components/AIBusinessCardPanel';
 import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
@@ -152,6 +152,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       wechat: draft.wechat,
       email: draft.email,
       leadSource: draft.leadSource,
+      sourceType: normalizeResourceOwnership(draft.sourceType as string | undefined),
       industry: draft.industry,
       city: draft.city,
       owner: draft.owner,
@@ -185,6 +186,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
 
   const renderInfoRow = (label: string, field: keyof Customer, editable = true) => {
     const isUserField = field === 'owner' || field === 'leadInputBy';
+    const isResourceField = field === 'sourceType';
     const currentValue = (draft[field] as string) || '';
     const showCurrentUserOption = isUserField && currentValue && !users.some((user) => user.name === currentValue);
     const displayValue = field === 'createdAt' && currentCustomer.createdAt
@@ -196,7 +198,19 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
         <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>{label}</Box>
         <Box sx={{ px: 1.5, py: editing && editable ? 0.5 : 1, fontSize: 13 }}>
           {editing && editable ? (
-            isUserField ? (
+            isResourceField ? (
+              <TextField
+                select
+                value={normalizeResourceOwnership(currentValue)}
+                onChange={(event) => setDraft((prev) => ({ ...prev, [field]: event.target.value }))}
+                size="small"
+                fullWidth
+              >
+                {RESOURCE_OWNERSHIPS.map((item) => (
+                  <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
+                ))}
+              </TextField>
+            ) : isUserField ? (
               <TextField
                 select
                 value={currentValue}
@@ -219,7 +233,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                 fullWidth
               />
             )
-          ) : displayValue}
+          ) : isResourceField ? normalizeResourceOwnership(displayValue ? String(displayValue) : undefined) : displayValue}
         </Box>
       </Box>
     );
@@ -432,7 +446,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
             <CustomerLevelBadge level={currentCustomer.customerLevel} />
           </Box>
           <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>
-            {currentCustomer.owner || '未分配'} 跟进 · {currentCustomer.leadSource || currentCustomer.sourceType || '未知来源'}
+            {currentCustomer.owner || '未分配'} 跟进 · {currentCustomer.leadSource || '未知来源'}
           </Typography>
         </Box>
         <IconButton
@@ -466,6 +480,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               {renderInfoRow('微信', 'wechat')}
               {renderInfoRow('邮箱', 'email')}
               {renderInfoRow('来源', 'leadSource')}
+              {renderInfoRow('资源归属', 'sourceType')}
               {renderInfoRow('行业', 'industry')}
               {renderInfoRow('城市', 'city')}
               {renderInfoRow('销售负责人', 'owner')}

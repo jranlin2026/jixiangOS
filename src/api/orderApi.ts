@@ -4,7 +4,7 @@ import type { Commission, CommissionRole } from '../types/commission';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../shared/utils/constants';
+import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { commissionRuleApi } from './commissionRuleApi';
 import { deliveryApi } from './deliveryApi';
@@ -29,7 +29,7 @@ const ROLE_DEPARTMENT_MAP: Record<CommissionRole, string> = {
 function getPersonByRole(order: Order, role: CommissionRole): string {
   switch (role) {
     case '销售': return order.salesName || order.owner;
-    case '线索': return order.resourceOwnership === '个人资源' || order.sourceType === '转介绍' ? order.owner : '系统分配';
+    case '线索': return normalizeResourceOwnership(order.resourceOwnership || order.sourceType) === '个人资源' ? order.owner : '系统分配';
     case '客户成功': return order.successName || '待分配';
     case '售后': return order.serviceName || '待分配';
     case '招商主管': return '待分配';
@@ -40,6 +40,13 @@ function getPersonByRole(order: Order, role: CommissionRole): string {
 
 function getPrimaryPaymentDate(order: Order): string {
   return order.payments?.[0]?.paidAt || order.createdAt;
+}
+
+function normalizeOrder(order: Order): Order {
+  return {
+    ...order,
+    resourceOwnership: normalizeResourceOwnership(order.resourceOwnership || order.sourceType),
+  };
 }
 
 function syncCustomerOrderStats(order: Order, allOrders: Order[]): void {
@@ -212,7 +219,9 @@ function syncCommissionRefundState(order: Order): void {
 async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<PaginatedResponse<Order>>> {
   ensureInit();
   await delay(200);
-  const all = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
+  const raw = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
+  const all = raw.map(normalizeOrder);
+  if (JSON.stringify(raw) !== JSON.stringify(all)) setStorageData(STORAGE_KEYS.ORDERS, all);
   let filtered = [...all];
 
   if (filters?.search) {
@@ -272,7 +281,9 @@ async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<Paginate
 async function fetchOrderById(id: string): Promise<ApiResponse<Order | null>> {
   ensureInit();
   await delay(150);
-  const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
+  const raw = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
+  const orders = raw.map(normalizeOrder);
+  if (JSON.stringify(raw) !== JSON.stringify(orders)) setStorageData(STORAGE_KEYS.ORDERS, orders);
   return createSuccessResponse(orders.find((o) => o.id === id) || null);
 }
 
@@ -316,6 +327,7 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
     ...data,
     id: `order-${uuidv4().slice(0, 8)}`,
     orderNo,
+    resourceOwnership: normalizeResourceOwnership(data.resourceOwnership || data.sourceType),
     createdAt: now,
     updatedAt: now,
     changeHistory: [{
@@ -428,7 +440,7 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
 async function updateOrder(id: string, data: Partial<Order>): Promise<ApiResponse<Order | null>> {
   ensureInit();
   await delay(200);
-  const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
+  const orders = (getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).map(normalizeOrder);
   const idx = orders.findIndex((o) => o.id === id);
   if (idx === -1) return createSuccessResponse(null);
   const now = new Date().toISOString();
@@ -438,6 +450,7 @@ async function updateOrder(id: string, data: Partial<Order>): Promise<ApiRespons
   orders[idx] = {
     ...existing,
     ...data,
+    resourceOwnership: normalizeResourceOwnership(data.resourceOwnership || data.sourceType || existing.resourceOwnership || existing.sourceType),
     changeHistory: changes.length > 0
       ? [{
         id: `hist-${uuidv4().slice(0, 8)}`,

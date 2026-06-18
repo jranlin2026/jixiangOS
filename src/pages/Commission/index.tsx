@@ -3,7 +3,7 @@ import {
   Box, Typography, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Paper, Chip, Button, Checkbox,
   TextField, MenuItem, FormControl, InputLabel, Select, Tab, Tabs,
-  IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Divider,
+  IconButton, Dialog, DialogContent, DialogActions, Divider,
 } from '@mui/material';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -24,6 +24,7 @@ import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
 import type { Commission, CommissionAuditIssue, CommissionRole, CommissionStatus } from '../../types/commission';
 import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 const ROLE_LABELS: Record<CommissionRole, string> = {
   销售: '销售',
@@ -561,7 +562,7 @@ const Commission: React.FC = () => {
       )}
 
       <Dialog open={Boolean(detailCommission)} onClose={() => setDetailCommission(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>计算依据</DialogTitle>
+        <DialogCloseTitle onClose={() => setDetailCommission(null)}>计算依据</DialogCloseTitle>
         <DialogContent>
           {detailCommission && (
             <Box sx={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 1.5, mt: 1 }}>
@@ -584,13 +585,10 @@ const Commission: React.FC = () => {
             </Box>
           )}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDetailCommission(null)}>关闭</Button>
-        </DialogActions>
       </Dialog>
 
       <Dialog open={orderDetailOpen} onClose={() => setOrderDetailOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>订单凭证</DialogTitle>
+        <DialogCloseTitle onClose={() => setOrderDetailOpen(false)}>订单凭证</DialogCloseTitle>
         <DialogContent>
           {orderDetail ? (
             <Box sx={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: 1.5, mt: 1 }}>
@@ -618,9 +616,6 @@ const Commission: React.FC = () => {
             <Typography variant="body2" sx={{ color: '#9ca3af', textAlign: 'center', py: 4 }}>加载中...</Typography>
           )}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOrderDetailOpen(false)}>关闭</Button>
-        </DialogActions>
       </Dialog>
 
       {selectedCustomer && (
@@ -656,7 +651,7 @@ const Commission: React.FC = () => {
       />
 
       <Dialog open={customerOrdersOpen} onClose={() => setCustomerOrdersOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>{orderCustomer?.company || orderCustomer?.name} 的订单</DialogTitle>
+        <DialogCloseTitle onClose={() => setCustomerOrdersOpen(false)}>{orderCustomer?.company || orderCustomer?.name} 的订单</DialogCloseTitle>
         <DialogContent dividers>
           <Table size="small">
             <TableHead>
@@ -696,7 +691,6 @@ const Commission: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => orderCustomer && handleCreateOrderForCustomer(orderCustomer)}>新建订单</Button>
-          <Button onClick={() => setCustomerOrdersOpen(false)}>关闭</Button>
         </DialogActions>
       </Dialog>
     </Box>

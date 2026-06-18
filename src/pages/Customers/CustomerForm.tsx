@@ -5,13 +5,13 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
-  DialogTitle,
   MenuItem,
   TextField,
 } from '@mui/material';
 import useCustomerStore from '../../store/useCustomerStore';
 import { settingsApi } from '../../api';
-import { CUSTOMER_LEVELS, LEAD_SOURCES } from '../../shared/utils/constants';
+import { CUSTOMER_LEVELS, LEAD_SOURCES, RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/utils/constants';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import type { Customer } from '../../types/customer';
 import type { User } from '../../types/settings';
 
@@ -42,6 +42,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     wechat: '',
     industry: '',
     city: '',
+    sourceType: '公司资源',
     tags: '',
     remark: '',
   });
@@ -69,10 +70,11 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       owner: fallbackOwner,
       leadInputBy: customer?.leadInputBy || fallbackOwner,
       originalSalesTransferBy: customer?.originalSalesTransferBy || '',
-      leadSource: customer?.leadSource || customer?.sourceType || '',
+      leadSource: customer?.leadSource || '',
       wechat: customer?.wechat || '',
       industry: customer?.industry || '',
       city: customer?.city || '',
+      sourceType: normalizeResourceOwnership(customer?.sourceType),
       tags: customer?.tags?.join(', ') || '',
       remark: customer?.remark || '',
     });
@@ -87,7 +89,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     const payload = {
       ...form,
       tags,
-      sourceType: form.leadSource,
+      sourceType: normalizeResourceOwnership(form.sourceType),
     };
 
     if (isEdit && customer) {
@@ -110,7 +112,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle>{isEdit ? '编辑客户' : '新增客户'}</DialogTitle>
+      <DialogCloseTitle onClose={onClose}>{isEdit ? '编辑客户' : '新增客户'}</DialogCloseTitle>
       <DialogContent>
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
           <TextField label="姓名" value={form.name} onChange={handleChange('name')} required fullWidth />
@@ -153,6 +155,11 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
               <MenuItem key={source} value={source}>{source}</MenuItem>
             ))}
           </TextField>
+          <TextField select label="资源归属" value={form.sourceType} onChange={handleChange('sourceType')} fullWidth>
+            {RESOURCE_OWNERSHIPS.map((item) => (
+              <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
+            ))}
+          </TextField>
           <TextField label="行业" value={form.industry} onChange={handleChange('industry')} fullWidth />
           <TextField label="城市" value={form.city} onChange={handleChange('city')} fullWidth />
           <TextField label="标签（逗号分隔）" value={form.tags} onChange={handleChange('tags')} fullWidth sx={{ gridColumn: '1 / -1' }} />
@@ -160,7 +167,6 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
         </Box>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>取消</Button>
         <Button variant="contained" onClick={handleSubmit} disabled={!canSubmit}>
           {isEdit ? '保存' : '创建'}
         </Button>

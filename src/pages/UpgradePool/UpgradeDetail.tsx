@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Dialog, DialogTitle, DialogContent, DialogActions, Button, Box,
+  Dialog, DialogContent, DialogActions, Button, Box,
   Typography, Chip, Divider, LinearProgress, List, ListItem, ListItemText,
   TextField,
 } from '@mui/material';
@@ -9,6 +9,7 @@ import { upgradeApi } from '../../api';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import { CUSTOMER_LEVEL_COLOR_MAP, CUSTOMER_LEVEL_LABELS, getProductLevelColor } from '../../shared/utils/constants';
 import AIScorePanel from './AIScorePanel';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 interface UpgradeDetailProps {
   id: string;
@@ -48,13 +49,13 @@ const UpgradeDetail: React.FC<UpgradeDetailProps> = ({ id, open, onClose }) => {
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <DialogCloseTitle onClose={onClose}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <Typography variant="h6" sx={{ fontWeight: 600 }}>{opportunity.customerName}</Typography>
           <Chip label={`${opportunity.currentLevel} → ${opportunity.targetLevel}`} size="small" sx={{ fontWeight: 600 }} />
         </Box>
         <Chip label={opportunity.status} size="small" color={opportunity.status === '已转化' ? 'success' : 'primary'} />
-      </DialogTitle>
+      </DialogCloseTitle>
       <DialogContent dividers>
         {/* 基本信息 */}
         <Box sx={{ mb: 3 }}>
@@ -123,7 +124,6 @@ const UpgradeDetail: React.FC<UpgradeDetailProps> = ({ id, open, onClose }) => {
         {opportunity.status === '跟进中' && (
           <Button color="success" variant="contained" onClick={handleConvert}>确认转化</Button>
         )}
-        <Button onClick={onClose}>关闭</Button>
       </DialogActions>
     </Dialog>
   );

@@ -6,7 +6,6 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
-  DialogTitle,
   FormControl,
   InputLabel,
   LinearProgress,
@@ -19,6 +18,7 @@ import {
 import type { Opportunity, OpportunityStage } from '../../types/opportunity';
 import { opportunityApi } from '../../api';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 const stages: OpportunityStage[] = ['初步沟通', '需求确认', '方案报价', '谈判签约', '赢单', '输单'];
 const activeStages: OpportunityStage[] = ['初步沟通', '需求确认', '方案报价', '谈判签约'];
@@ -39,6 +39,7 @@ const Opportunities: React.FC = () => {
   const [selected, setSelected] = useState<Opportunity | null>(null);
   const [followUp, setFollowUp] = useState('');
   const [lostReason, setLostReason] = useState('');
+  const [pendingStage, setPendingStage] = useState<OpportunityStage | null>(null);
 
   const fetchItems = async () => {
     const res = await opportunityApi.getOpportunities({ search, ownerName: ownerName || undefined, pageSize: 200 });
@@ -70,7 +71,26 @@ const Opportunities: React.FC = () => {
 
   const handleStage = async (nextStage: OpportunityStage) => {
     if (!selected) return;
+    if (selected.status === '进行中' && (nextStage === '赢单' || nextStage === '输单')) {
+      setPendingStage(nextStage);
+      return;
+    }
+    await commitStage(nextStage);
+  };
+
+  const commitStage = async (nextStage: OpportunityStage) => {
+    if (!selected) return;
     const res = await opportunityApi.updateStage(selected.id, nextStage, lostReason);
+    if (res.data) {
+      setSelected(res.data);
+      setPendingStage(null);
+      await fetchItems();
+    }
+  };
+
+  const handleReopen = async () => {
+    if (!selected) return;
+    const res = await opportunityApi.reopenOpportunity(selected.id);
     if (res.data) {
       setSelected(res.data);
       await fetchItems();
@@ -93,9 +113,9 @@ const Opportunities: React.FC = () => {
     <Box sx={{ p: 3 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, mb: 3 }}>
         <Box>
-          <Typography variant="h5" sx={{ fontWeight: 700 }}>商机管理</Typography>
+          <Typography variant="h5" sx={{ fontWeight: 700 }}>商机看板</Typography>
           <Typography variant="body2" sx={{ color: '#6b7280', mt: 0.5 }}>
-            销售确认线索有明确需求后进入商机，用来管理成交阶段、预计回款和下一步动作。
+            用于主管查看全部客户的商机漏斗；单个客户的推进进度和跟进记录已融合到客户详情与客户动态中。
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1 }}>
@@ -190,13 +210,13 @@ const Opportunities: React.FC = () => {
       <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} maxWidth="md" fullWidth>
         {selected && (
           <>
-            <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <DialogCloseTitle onClose={() => setSelected(null)}>
               <Box>
                 <Typography variant="h6" sx={{ fontWeight: 700 }}>{selected.customerName}</Typography>
                 <Typography variant="body2" sx={{ color: '#6b7280' }}>销售商机 · {selected.ownerName}</Typography>
               </Box>
               <Chip label={selected.status === '进行中' ? selected.stage : selected.status} color={selected.status === '已转订单' ? 'success' : selected.status === '已退款' || selected.status === '输单' ? 'error' : 'default'} />
-            </DialogTitle>
+            </DialogCloseTitle>
             <DialogContent dividers>
               <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 1.5, mb: 2 }}>
                 <Typography variant="body2">预计金额: {formatCurrency(selected.estimatedAmount)}</Typography>
@@ -213,6 +233,20 @@ const Opportunities: React.FC = () => {
                   </Button>
                 ))}
               </Box>
+              {selected.status === '已转订单' && (
+                <Box sx={{ p: 1.25, mb: 2, bgcolor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 1 }}>
+                  <Typography variant="body2" sx={{ color: '#166534' }}>
+                    已生成订单 {selected.orderNo || '-'}。如果刚才点错，可在下方撤回，系统会取消这笔自动生成订单并把商机恢复到进行中。
+                  </Typography>
+                </Box>
+              )}
+              {selected.status === '输单' && (
+                <Box sx={{ p: 1.25, mb: 2, bgcolor: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 1 }}>
+                  <Typography variant="body2" sx={{ color: '#9a3412' }}>
+                    该商机已标记为输单。若误操作，可在下方撤回并继续推进。
+                  </Typography>
+                </Box>
+              )}
               {selected.stage !== '输单' && (
                 <TextField label="输单原因" value={lostReason} onChange={(e) => setLostReason(e.target.value)} fullWidth size="small" sx={{ mb: 2 }} />
               )}
@@ -233,7 +267,37 @@ const Opportunities: React.FC = () => {
               </Box>
             </DialogContent>
             <DialogActions>
-              <Button onClick={() => setSelected(null)}>关闭</Button>
+              {selected.status !== '进行中' && (
+                <Button color="warning" onClick={handleReopen}>撤回到进行中</Button>
+              )}
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
+      <Dialog open={Boolean(pendingStage && selected)} onClose={() => setPendingStage(null)} maxWidth="xs" fullWidth>
+        {pendingStage && selected && (
+          <>
+            <DialogCloseTitle onClose={() => setPendingStage(null)}>{pendingStage === '赢单' ? '确认赢单并生成订单？' : '确认标记为输单？'}</DialogCloseTitle>
+            <DialogContent dividers>
+              <Typography variant="body2" sx={{ mb: 1.5 }}>
+                客户：{selected.customerName}
+              </Typography>
+              <Typography variant="body2" sx={{ mb: 1.5 }}>
+                预计金额：{formatCurrency(selected.estimatedAmount)}
+              </Typography>
+              <Typography variant="body2" sx={{ color: '#6b7280' }}>
+                {pendingStage === '赢单'
+                  ? '系统会按商机产品意向或预计金额匹配产品，并自动生成同金额订单。点错后可以从归档商机中撤回。'
+                  : '商机会移入已归档列表。点错后可以从归档商机中撤回并继续推进。'}
+              </Typography>
+              {pendingStage === '输单' && (
+                <TextField label="输单原因" value={lostReason} onChange={(e) => setLostReason(e.target.value)} fullWidth size="small" sx={{ mt: 2 }} />
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button variant="contained" color={pendingStage === '赢单' ? 'primary' : 'warning'} onClick={() => commitStage(pendingStage)}>
+                确认{pendingStage}
+              </Button>
             </DialogActions>
           </>
         )}

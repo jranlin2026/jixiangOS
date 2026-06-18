@@ -88,7 +88,7 @@ const LeadFlowConfigTab: React.FC = () => {
         />
         <FormControlLabel
           control={<Switch checked={config.exemptionEnabled} onChange={(event) => updateConfig('exemptionEnabled', event.target.checked)} />}
-          label="线索免过滤：开启后，入库成功线索自动标记为有效商机并进入分配流程"
+          label="线索免过滤：开启后，入库成功线索自动标记为有效并进入分配流程"
         />
         <FormControlLabel
           control={<Switch checked={config.orderMatchCustomerEnabled} onChange={(event) => updateConfig('orderMatchCustomerEnabled', event.target.checked)} />}
@@ -96,7 +96,7 @@ const LeadFlowConfigTab: React.FC = () => {
         />
         <FormControlLabel
           control={<Switch checked={config.autoAssignEnabled} onChange={(event) => updateConfig('autoAssignEnabled', event.target.checked)} />}
-          label="商机自动分配：按照设置规则将线索自动分配给销售成员"
+          label="线索自动分配：按照设置规则将线索自动分配给销售成员"
         />
       </Box>
 
@@ -129,7 +129,7 @@ const LeadFlowConfigTab: React.FC = () => {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
             <FormControlLabel
               control={<Checkbox checked={config.dailyLimitEnabled} onChange={(event) => updateConfig('dailyLimitEnabled', event.target.checked)} />}
-              label="每日分配的商机上限数"
+              label="每日分配的线索上限数"
             />
             <TextField
               size="small"

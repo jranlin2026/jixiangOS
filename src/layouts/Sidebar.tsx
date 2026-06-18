@@ -24,7 +24,6 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import HomeIcon from '@mui/icons-material/Home';
 import RefundIcon from '@mui/icons-material/AssignmentReturn';
 import UpgradePoolIcon from '@mui/icons-material/Pool';
-import WorkOutlineIcon from '@mui/icons-material/WorkOutline';
 import { ROUTES } from '../shared/utils/constants';
 
 interface SidebarProps {
@@ -41,7 +40,6 @@ const navItems: NavItem[] = [
   { label: '首页', icon: <HomeIcon />, path: ROUTES.HOME },
   { label: '驾驶舱', icon: <DashboardIcon />, path: ROUTES.HOME },
   { label: '线索', icon: <PeopleAltIcon />, path: ROUTES.LEADS },
-  { label: '商机', icon: <WorkOutlineIcon />, path: ROUTES.OPPORTUNITIES },
   { label: '客户', icon: <GroupsIcon />, path: ROUTES.CUSTOMERS },
   { label: '订单', icon: <ReceiptLongIcon />, path: ROUTES.ORDERS },
   { label: '交付', icon: <LocalShippingIcon />, path: ROUTES.DELIVERY },

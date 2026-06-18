@@ -6,7 +6,6 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
-  DialogTitle,
   FormControlLabel,
   IconButton,
   Paper,
@@ -25,6 +24,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import { settingsApi } from '../../api';
 import type { OrderTypeConfig } from '../../types/settings';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 type OrderTypeForm = Omit<OrderTypeConfig, 'id' | 'createdAt' | 'updatedAt'>;
 
@@ -167,7 +167,7 @@ const OrderTypeConfigPage: React.FC = () => {
       </TableContainer>
 
       <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>{editingItem ? '编辑订单类型' : '新增订单类型'}</DialogTitle>
+        <DialogCloseTitle onClose={() => setFormOpen(false)}>{editingItem ? '编辑订单类型' : '新增订单类型'}</DialogCloseTitle>
         <DialogContent>
           <Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
             <TextField
@@ -199,7 +199,6 @@ const OrderTypeConfigPage: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setFormOpen(false)}>取消</Button>
           <Button variant="contained" onClick={handleSubmit} disabled={!form.name.trim()}>
             {editingItem ? '保存' : '创建'}
           </Button>

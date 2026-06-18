@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
+  Box, Button, Chip, Dialog, DialogContent,
   FormControl, InputLabel, MenuItem, Paper, Select, Table, TableBody,
   TableCell, TableContainer, TableHead, TableRow, TextField, Typography,
 } from '@mui/material';
 import type { ServiceTicket, ServiceTicketCategory, ServiceTicketStatus } from '../../types/serviceTicket';
 import { serviceTicketApi } from '../../api';
 import { formatDate } from '../../shared/utils/formatters';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 const categories: ServiceTicketCategory[] = ['咨询', '故障', '培训', '交付问题', '退款前风险'];
 const statuses: ServiceTicketStatus[] = ['待处理', '处理中', '待客户反馈', '已解决', '已关闭'];
@@ -132,7 +133,7 @@ const ServiceTicketTab: React.FC = () => {
       <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} maxWidth="md" fullWidth>
         {selected && (
           <>
-            <DialogTitle>{selected.ticketNo} · {selected.title}</DialogTitle>
+            <DialogCloseTitle onClose={() => setSelected(null)}>{selected.ticketNo} · {selected.title}</DialogCloseTitle>
             <DialogContent dividers>
               <Typography variant="body2" sx={{ mb: 2 }}>{selected.description}</Typography>
               <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
@@ -156,9 +157,6 @@ const ServiceTicketTab: React.FC = () => {
                 <Button variant="contained" onClick={handleLog} disabled={!logContent.trim()}>添加</Button>
               </Box>
             </DialogContent>
-            <DialogActions>
-              <Button onClick={() => setSelected(null)}>关闭</Button>
-            </DialogActions>
           </>
         )}
       </Dialog>

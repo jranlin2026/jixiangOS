@@ -7,7 +7,6 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
-  DialogTitle,
   FormControl,
   FormControlLabel,
   FormGroup,
@@ -35,7 +34,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import useOrderStore from '../../store/useOrderStore';
 import { customerApi, orderApi, productApi, settingsApi } from '../../api';
-import { getProductLevelColor, PRODUCT_LEVELS } from '../../shared/utils/constants';
+import { getProductLevelColor, PRODUCT_LEVELS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
 import CustomerDetail from '../Customers/CustomerDetail';
@@ -47,19 +46,30 @@ import OrderStats from './OrderStats';
 import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
 import type { OrderTypeConfig } from '../../types/settings';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import ResizableHeaderCell, {
+  getResizableCellSx,
+  readColumnWidths,
+  resetColumnWidths,
+  resizeColumnWidths,
+  writeColumnWidths,
+  type ColumnWidthMap,
+} from '../../shared/components/ResizableTable';
 
 type OrderColumn = {
   id: string;
   label: string;
 };
 
-const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_columns';
+const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_columns_v2';
+const ORDER_WIDTH_STORAGE_KEY = 'aaos_order_table_column_widths_v1';
 
 const ORDER_COLUMNS: OrderColumn[] = [
   { id: 'customer', label: '客户' },
   { id: 'productLevel', label: '产品等级' },
   { id: 'orderType', label: '订单类型' },
   { id: 'actualAmount', label: '实付金额' },
+  { id: 'resourceOwnership', label: '资源归属' },
   { id: 'paymentDate', label: '付款日期' },
   { id: 'refundStatus', label: '退款状态' },
   { id: 'owner', label: '销售负责人' },
@@ -71,11 +81,25 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'productLevel',
   'orderType',
   'actualAmount',
+  'resourceOwnership',
   'paymentDate',
   'refundStatus',
   'owner',
   'createdAt',
 ];
+
+const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
+  orderNo: 180,
+  customer: 180,
+  productLevel: 140,
+  orderType: 140,
+  actualAmount: 140,
+  resourceOwnership: 140,
+  paymentDate: 180,
+  refundStatus: 140,
+  owner: 140,
+  createdAt: 180,
+};
 
 const readVisibleColumns = () => {
   try {
@@ -110,6 +134,7 @@ const Orders: React.FC = () => {
   const [customerNameMap, setCustomerNameMap] = useState<Record<string, string>>({});
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(readVisibleColumns);
+  const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(ORDER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
 
   useEffect(() => {
     fetchItems({ ...filters, paymentMethod: undefined });
@@ -131,6 +156,10 @@ const Orders: React.FC = () => {
   useEffect(() => {
     localStorage.setItem(ORDER_VIEW_STORAGE_KEY, JSON.stringify(visibleColumnIds));
   }, [visibleColumnIds]);
+
+  useEffect(() => {
+    writeColumnWidths(ORDER_WIDTH_STORAGE_KEY, columnWidths);
+  }, [columnWidths]);
 
   const handleViewDetail = (order: Order) => {
     setSelectedOrder(order);
@@ -177,6 +206,10 @@ const Orders: React.FC = () => {
         ? current.filter((columnId) => columnId !== id)
         : [...current, id]
     ));
+  };
+
+  const handleResizeColumn = (id: string, delta: number) => {
+    setColumnWidths((current) => resizeColumnWidths(current, id, delta));
   };
 
   const handleViewCustomer = async (order: Order) => {
@@ -256,6 +289,10 @@ const Orders: React.FC = () => {
     () => ORDER_COLUMNS.filter((column) => visibleColumnIds.includes(column.id)),
     [visibleColumnIds],
   );
+  const tableMinWidth = useMemo(
+    () => columnWidths.orderNo + visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + 160,
+    [columnWidths, visibleColumns],
+  );
 
   const renderOrderCell = (order: Order, columnId: string) => {
     const levelColor = getProductLevelColor(order.productLevel);
@@ -284,6 +321,8 @@ const Orders: React.FC = () => {
         return <Chip label={order.orderType} size="small" variant="outlined" />;
       case 'actualAmount':
         return formatCurrency(order.actualAmount || order.amount);
+      case 'resourceOwnership':
+        return normalizeResourceOwnership(order.resourceOwnership || order.sourceType);
       case 'paymentDate':
         return formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm');
       case 'refundStatus':
@@ -351,13 +390,15 @@ const Orders: React.FC = () => {
         </Button>
       </Box>
 
-      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0' }}>
-        <Table>
+      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
+        <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
           <TableHead>
             <TableRow>
-              <TableCell>订单号</TableCell>
+              <ResizableHeaderCell columnId="orderNo" width={columnWidths.orderNo} onResize={handleResizeColumn}>订单号</ResizableHeaderCell>
               {visibleColumns.map((column) => (
-                <TableCell key={column.id}>{column.label}</TableCell>
+                <ResizableHeaderCell key={column.id} columnId={column.id} width={columnWidths[column.id]} onResize={handleResizeColumn}>
+                  {column.label}
+                </ResizableHeaderCell>
               ))}
               <TableCell align="center" sx={{ width: 160 }}>操作</TableCell>
             </TableRow>
@@ -367,9 +408,9 @@ const Orders: React.FC = () => {
               const levelColor = getProductLevelColor(order.productLevel);
               return (
                 <TableRow key={order.id} hover sx={{ bgcolor: `${levelColor}08` }}>
-                  <TableCell sx={{ fontWeight: 500 }}>{order.orderNo}</TableCell>
+                  <TableCell sx={{ ...getResizableCellSx(columnWidths.orderNo), fontWeight: 500 }} title={order.orderNo}>{order.orderNo}</TableCell>
                   {visibleColumns.map((column) => (
-                    <TableCell key={column.id}>{renderOrderCell(order, column.id)}</TableCell>
+                    <TableCell key={column.id} sx={getResizableCellSx(columnWidths[column.id])}>{renderOrderCell(order, column.id)}</TableCell>
                   ))}
                   <TableCell align="center" sx={{ width: 160, minWidth: 160 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5 }}>
@@ -441,7 +482,7 @@ const Orders: React.FC = () => {
         onClose={() => setHistoryOpen(false)}
       />
       <Dialog open={viewSettingsOpen} onClose={() => setViewSettingsOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>订单列表视图设置</DialogTitle>
+        <DialogCloseTitle onClose={() => setViewSettingsOpen(false)}>订单列表视图设置</DialogCloseTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ color: '#6b7280', mb: 2 }}>
             勾选后会显示在订单管理列表中，设置会保存在当前浏览器。
@@ -462,13 +503,15 @@ const Orders: React.FC = () => {
           </FormGroup>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setVisibleColumnIds(DEFAULT_VISIBLE_COLUMNS)}>恢复默认</Button>
-          <Button variant="contained" onClick={() => setViewSettingsOpen(false)}>完成</Button>
+          <Button onClick={() => {
+            setVisibleColumnIds(DEFAULT_VISIBLE_COLUMNS);
+            setColumnWidths(resetColumnWidths(DEFAULT_COLUMN_WIDTHS));
+          }}>恢复默认</Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={customerOrdersOpen} onClose={() => setCustomerOrdersOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>{orderCustomer?.company || orderCustomer?.name} 的订单</DialogTitle>
+        <DialogCloseTitle onClose={() => setCustomerOrdersOpen(false)}>{orderCustomer?.company || orderCustomer?.name} 的订单</DialogCloseTitle>
         <DialogContent dividers>
           <Table size="small">
             <TableHead>
@@ -508,7 +551,6 @@ const Orders: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => orderCustomer && handleCreateOrderForCustomer(orderCustomer)}>新建订单</Button>
-          <Button onClick={() => setCustomerOrdersOpen(false)}>关闭</Button>
         </DialogActions>
       </Dialog>
     </Box>

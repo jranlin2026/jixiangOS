@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
+  Box, Button, Chip, Dialog, DialogContent,
   FormControl, InputLabel, MenuItem, Paper, Select, Table, TableBody,
   TableCell, TableContainer, TableHead, TableRow, TextField, Typography,
 } from '@mui/material';
 import type { CustomerSuccessTask, CustomerSuccessTaskStatus, CustomerSuccessTaskType } from '../../types/customerSuccess';
 import { customerSuccessApi } from '../../api';
 import { formatDate } from '../../shared/utils/formatters';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 const taskTypes: CustomerSuccessTaskType[] = ['续费', '升单', '风险', '回访', '服务'];
 const statuses: CustomerSuccessTaskStatus[] = ['待处理', '跟进中', '已完成', '已关闭'];
@@ -124,7 +125,7 @@ const CustomerSuccessTab: React.FC = () => {
       <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} maxWidth="sm" fullWidth>
         {selected && (
           <>
-            <DialogTitle>{selected.title}</DialogTitle>
+            <DialogCloseTitle onClose={() => setSelected(null)}>{selected.title}</DialogCloseTitle>
             <DialogContent dividers>
               <Typography variant="body2" sx={{ mb: 2 }}>{selected.description}</Typography>
               <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
@@ -145,9 +146,6 @@ const CustomerSuccessTab: React.FC = () => {
                 <Button variant="contained" onClick={handleFollowUp} disabled={!followUp.trim()}>添加</Button>
               </Box>
             </DialogContent>
-            <DialogActions>
-              <Button onClick={() => setSelected(null)}>关闭</Button>
-            </DialogActions>
           </>
         )}
       </Dialog>

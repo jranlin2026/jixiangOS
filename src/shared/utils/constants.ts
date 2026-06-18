@@ -239,6 +239,12 @@ export const RESOURCE_OWNERSHIPS = [
   { value: '个人资源', label: '个人资源' },
 ] as const;
 
+export function normalizeResourceOwnership(value?: string | null): '公司资源' | '个人资源' {
+  const text = String(value || '').trim();
+  if (text.includes('个人') || text.includes('自拓') || text.includes('转介绍')) return '个人资源';
+  return '公司资源';
+}
+
 /** 官方收款渠道 */
 export const OFFICIAL_PAYMENT_CHANNELS = [
   { value: '企业微信转账', label: '企业微信转账' },
@@ -334,8 +340,8 @@ export const PRODUCT_TO_CUSTOMER_LEVEL: Record<string, string> = {
 /** 预设提成规则 — 多角色分佣，每条规则对应一个角色 */
 export const COMMISSION_RULES = [
   // 899成交
-  { id: 'rule-001', name: '899成交-销售(公司资源)', productLevel: '899', orderType: '899成交', sourceType: '公司资源', role: '销售' as const, commissionType: 'fixed' as const, commissionValue: 120, isActive: true, priority: 10 },
-  { id: 'rule-002', name: '899成交-销售(自拓)', productLevel: '899', orderType: '899成交', sourceType: '自拓', role: '销售' as const, commissionType: 'fixed' as const, commissionValue: 200, isActive: true, priority: 11 },
+  { id: 'rule-001', name: '899成交-销售(公司资源)', productLevel: '899', orderType: '899成交', sourceType: '', resourceOwnership: '公司资源', role: '销售' as const, commissionType: 'fixed' as const, commissionValue: 120, isActive: true, priority: 10 },
+  { id: 'rule-002', name: '899成交-销售(个人资源)', productLevel: '899', orderType: '899成交', sourceType: '', resourceOwnership: '个人资源', role: '销售' as const, commissionType: 'fixed' as const, commissionValue: 200, isActive: true, priority: 11 },
   { id: 'rule-003', name: '899成交-线索', productLevel: '899', orderType: '899成交', sourceType: '', role: '线索' as const, commissionType: 'fixed' as const, commissionValue: 30, isActive: true, priority: 12 },
   // 新代理
   { id: 'rule-004', name: '新代理-销售', productLevel: '代理', orderType: '新代理', sourceType: '', role: '销售' as const, commissionType: 'percentage' as const, commissionValue: 8, isActive: true, priority: 20 },
@@ -358,8 +364,8 @@ export const COMMISSION_RULES = [
   // 续费
   { id: 'rule-017', name: '续费-客户成功', productLevel: '', orderType: '续费', sourceType: '', role: '客户成功' as const, commissionType: 'percentage' as const, commissionValue: 2, isActive: true, priority: 60 },
   // 课程
-  { id: 'rule-018', name: '课程成交-销售(公司资源)', productLevel: '课程', orderType: '新购', sourceType: '公司资源', role: '销售' as const, commissionType: 'fixed' as const, commissionValue: 200, isActive: true, priority: 70 },
-  { id: 'rule-019', name: '课程成交-销售(自拓)', productLevel: '课程', orderType: '新购', sourceType: '自拓', role: '销售' as const, commissionType: 'fixed' as const, commissionValue: 300, isActive: true, priority: 71 },
+  { id: 'rule-018', name: '课程成交-销售(公司资源)', productLevel: '课程', orderType: '新购', sourceType: '', resourceOwnership: '公司资源', role: '销售' as const, commissionType: 'fixed' as const, commissionValue: 200, isActive: true, priority: 70 },
+  { id: 'rule-019', name: '课程成交-销售(个人资源)', productLevel: '课程', orderType: '新购', sourceType: '', resourceOwnership: '个人资源', role: '销售' as const, commissionType: 'fixed' as const, commissionValue: 300, isActive: true, priority: 71 },
   { id: 'rule-020', name: '课程成交-线索', productLevel: '课程', orderType: '新购', sourceType: '', role: '线索' as const, commissionType: 'fixed' as const, commissionValue: 50, isActive: true, priority: 72 },
 ];
 
@@ -419,11 +425,11 @@ export const DEFAULT_ORDER_TYPE_CONFIGS = ORDER_TYPES.map((type, index) => ({
 }));
 
 export const DEFAULT_LIFECYCLE_STATUS_CONFIGS = [
-  { id: 'lsc-001', name: '未转商机', description: '线索录入后尚未由销售确认为商机', color: '#9E9E9E', isActive: true, sortOrder: 1, isSystem: true },
-  { id: 'lsc-002', name: '商机跟进中', description: '销售已确认有效需求并进入商机推进', color: '#2196F3', isActive: true, sortOrder: 2, isSystem: true },
-  { id: 'lsc-003', name: '已转订单', description: '商机赢单并生成订单', color: '#4CAF50', isActive: true, sortOrder: 3, isSystem: true },
+  { id: 'lsc-001', name: '待跟进', description: '线索录入后等待销售跟进', color: '#9E9E9E', isActive: true, sortOrder: 1, isSystem: true },
+  { id: 'lsc-002', name: '跟进中', description: '销售正在跟进客户需求', color: '#2196F3', isActive: true, sortOrder: 2, isSystem: true },
+  { id: 'lsc-003', name: '已转订单', description: '客户已创建订单', color: '#4CAF50', isActive: true, sortOrder: 3, isSystem: true },
   { id: 'lsc-004', name: '已退款', description: '关联订单发生退款完成', color: '#F44336', isActive: true, sortOrder: 4, isSystem: true },
-  { id: 'lsc-005', name: '已流失', description: '线索或商机输单/流失归档', color: '#607D8B', isActive: true, sortOrder: 5, isSystem: true },
+  { id: 'lsc-005', name: '已流失', description: '线索或客户流失归档', color: '#607D8B', isActive: true, sortOrder: 5, isSystem: true },
 ].map((item) => ({
   ...item,
   createdAt: '2026-06-01T00:00:00.000Z',

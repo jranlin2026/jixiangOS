@@ -7,7 +7,6 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
-  DialogTitle,
   FormControl,
   FormControlLabel,
   FormGroup,
@@ -34,7 +33,7 @@ import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import useCustomerStore from '../../store/useCustomerStore';
 import { orderApi, settingsApi } from '../../api';
-import { CUSTOMER_LEVELS, getProductLevelColor } from '../../shared/utils/constants';
+import { CUSTOMER_LEVELS, getProductLevelColor, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import CustomerDetail from './CustomerDetail';
@@ -43,6 +42,15 @@ import OrderForm from '../Orders/OrderForm';
 import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
 import type { User } from '../../types/settings';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import ResizableHeaderCell, {
+  getResizableCellSx,
+  readColumnWidths,
+  resetColumnWidths,
+  resizeColumnWidths,
+  writeColumnWidths,
+  type ColumnWidthMap,
+} from '../../shared/components/ResizableTable';
 
 type CustomerColumn = {
   id: string;
@@ -50,7 +58,8 @@ type CustomerColumn = {
   render: (customer: Customer) => React.ReactNode;
 };
 
-const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_columns';
+const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_columns_v3';
+const CUSTOMER_WIDTH_STORAGE_KEY = 'aaos_customer_table_column_widths_v1';
 
 const CUSTOMER_COLUMNS: CustomerColumn[] = [
   { id: 'company', label: '公司', render: (customer) => customer.company || '-' },
@@ -62,7 +71,8 @@ const CUSTOMER_COLUMNS: CustomerColumn[] = [
     label: '客户等级',
     render: (customer) => <CustomerLevelBadge level={customer.customerLevel} />,
   },
-  { id: 'leadSource', label: '线索来源', render: (customer) => customer.leadSource || customer.sourceType || '-' },
+  { id: 'leadSource', label: '线索来源', render: (customer) => customer.leadSource || '-' },
+  { id: 'sourceType', label: '资源归属', render: (customer) => normalizeResourceOwnership(customer.sourceType) },
   { id: 'leadInputBy', label: '线索录入人', render: (customer) => customer.leadInputBy || '-' },
   { id: 'industry', label: '行业', render: (customer) => customer.industry || '-' },
   { id: 'city', label: '城市', render: (customer) => customer.city || '-' },
@@ -78,6 +88,7 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'phone',
   'customerLevel',
   'leadSource',
+  'sourceType',
   'leadInputBy',
   'industry',
   'originalSalesTransferBy',
@@ -86,6 +97,25 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'owner',
   'createdAt',
 ];
+
+const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
+  name: 180,
+  company: 220,
+  phone: 150,
+  wechat: 150,
+  email: 180,
+  customerLevel: 130,
+  leadSource: 160,
+  sourceType: 140,
+  leadInputBy: 140,
+  industry: 140,
+  city: 120,
+  originalSalesTransferBy: 160,
+  totalSpent: 140,
+  orderCount: 120,
+  owner: 140,
+  createdAt: 180,
+};
 
 const readVisibleColumns = () => {
   try {
@@ -114,6 +144,7 @@ const Customers: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(readVisibleColumns);
+  const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(CUSTOMER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
 
   useEffect(() => {
     fetchItems();
@@ -128,9 +159,17 @@ const Customers: React.FC = () => {
     localStorage.setItem(CUSTOMER_VIEW_STORAGE_KEY, JSON.stringify(visibleColumnIds));
   }, [visibleColumnIds]);
 
+  useEffect(() => {
+    writeColumnWidths(CUSTOMER_WIDTH_STORAGE_KEY, columnWidths);
+  }, [columnWidths]);
+
   const visibleColumns = useMemo(
     () => CUSTOMER_COLUMNS.filter((column) => visibleColumnIds.includes(column.id)),
     [visibleColumnIds],
+  );
+  const tableMinWidth = useMemo(
+    () => columnWidths.name + visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + 160,
+    [columnWidths, visibleColumns],
   );
 
   const handleViewDetail = (customer: Customer) => {
@@ -182,6 +221,10 @@ const Customers: React.FC = () => {
     ));
   };
 
+  const handleResizeColumn = (id: string, delta: number) => {
+    setColumnWidths((current) => resizeColumnWidths(current, id, delta));
+  };
+
   return (
     <Box sx={{ p: 3 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, gap: 2 }}>
@@ -226,13 +269,15 @@ const Customers: React.FC = () => {
         </FormControl>
       </Box>
 
-      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0' }}>
-        <Table>
+      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
+        <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
           <TableHead>
             <TableRow>
-              <TableCell>姓名</TableCell>
+              <ResizableHeaderCell columnId="name" width={columnWidths.name} onResize={handleResizeColumn}>姓名</ResizableHeaderCell>
               {visibleColumns.map((column) => (
-                <TableCell key={column.id}>{column.label}</TableCell>
+                <ResizableHeaderCell key={column.id} columnId={column.id} width={columnWidths[column.id]} onResize={handleResizeColumn}>
+                  {column.label}
+                </ResizableHeaderCell>
               ))}
               <TableCell align="center">操作</TableCell>
             </TableRow>
@@ -240,9 +285,9 @@ const Customers: React.FC = () => {
           <TableBody>
             {items.map((customer) => (
               <TableRow key={customer.id} hover>
-                <TableCell sx={{ fontWeight: 500 }}>{customer.name}</TableCell>
+                <TableCell sx={{ ...getResizableCellSx(columnWidths.name), fontWeight: 500 }} title={customer.name}>{customer.name}</TableCell>
                 {visibleColumns.map((column) => (
-                  <TableCell key={column.id}>{column.render(customer)}</TableCell>
+                  <TableCell key={column.id} sx={getResizableCellSx(columnWidths[column.id])}>{column.render(customer)}</TableCell>
                 ))}
                 <TableCell align="center">
                   <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5 }}>
@@ -311,7 +356,7 @@ const Customers: React.FC = () => {
       />
 
       <Dialog open={viewSettingsOpen} onClose={() => setViewSettingsOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>客户列表视图设置</DialogTitle>
+        <DialogCloseTitle onClose={() => setViewSettingsOpen(false)}>客户列表视图设置</DialogCloseTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ color: '#6b7280', mb: 2 }}>
             勾选后会显示在客户管理列表中，设置会保存在当前浏览器。
@@ -332,13 +377,15 @@ const Customers: React.FC = () => {
           </FormGroup>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setVisibleColumnIds(DEFAULT_VISIBLE_COLUMNS)}>恢复默认</Button>
-          <Button variant="contained" onClick={() => setViewSettingsOpen(false)}>完成</Button>
+          <Button onClick={() => {
+            setVisibleColumnIds(DEFAULT_VISIBLE_COLUMNS);
+            setColumnWidths(resetColumnWidths(DEFAULT_COLUMN_WIDTHS));
+          }}>恢复默认</Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={ordersOpen} onClose={() => setOrdersOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>{orderCustomer?.company || orderCustomer?.name} 的订单</DialogTitle>
+        <DialogCloseTitle onClose={() => setOrdersOpen(false)}>{orderCustomer?.company || orderCustomer?.name} 的订单</DialogCloseTitle>
         <DialogContent dividers>
           <Table size="small">
             <TableHead>
@@ -380,7 +427,6 @@ const Customers: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => orderCustomer && handleCreateOrder(orderCustomer)}>新建订单</Button>
-          <Button onClick={() => setOrdersOpen(false)}>关闭</Button>
         </DialogActions>
       </Dialog>
     </Box>

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  Dialog, DialogTitle, DialogContent, DialogActions, Button, Box,
+  Dialog, DialogContent, DialogActions, Button, Box,
   Typography, Chip, Divider, Stepper, Step, StepLabel, List, ListItem, ListItemText,
 } from '@mui/material';
 import type { Refund } from '../../types/refund';
@@ -8,6 +8,7 @@ import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import { getProductLevelColor } from '../../shared/utils/constants';
 import useRefundStore from '../../store/useRefundStore';
 import RefundProcessDialog from './RefundProcessDialog';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 interface RefundDetailProps {
   refund: Refund;
@@ -73,13 +74,13 @@ const RefundDetail: React.FC<RefundDetailProps> = ({ refund, open, onClose }) =>
   return (
     <>
       <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <DialogCloseTitle onClose={onClose}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <Typography variant="h6" sx={{ fontWeight: 600 }}>{refund.refundNo}</Typography>
             <Chip label={refund.productLevel} size="small" sx={{ bgcolor: `${levelColor}18`, color: levelColor, fontWeight: 600 }} />
           </Box>
           <Chip label={refund.status} size="small" color={getStatusColor(refund.status)} />
-        </DialogTitle>
+        </DialogCloseTitle>
         <DialogContent dividers>
           {/* 退款流程时间轴 */}
           <Box sx={{ mb: 3 }}>
@@ -235,7 +236,6 @@ const RefundDetail: React.FC<RefundDetailProps> = ({ refund, open, onClose }) =>
           {refund.status === '退款已批准' && (
             <Button color="success" variant="contained" onClick={() => handleAction('complete')}>完成退款</Button>
           )}
-          <Button onClick={onClose}>关闭</Button>
         </DialogActions>
       </Dialog>
 

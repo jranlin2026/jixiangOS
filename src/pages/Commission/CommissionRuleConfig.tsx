@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box, Typography, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Paper, Chip, Button, Switch, IconButton,
-  Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, FormControl, InputLabel, Select,
+  Dialog, DialogContent, DialogActions, TextField, MenuItem, FormControl, InputLabel, Select,
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -27,6 +27,7 @@ import type {
 import type { ProductLevel } from '../../types/common';
 import type { ProductLevelConfig } from '../../types/product';
 import type { OrderTypeConfig } from '../../types/settings';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 const ROLES: CommissionRole[] = ['销售', '线索', '客户成功', '售后', '招商主管', '销售主管'];
 const SCENARIO_GROUPS: CommissionScenarioGroup[] = ['新客成交', '代理转化', '升单复购', '转介绍', '退款挽回', '服务激励', '个人资源'];
@@ -273,7 +274,7 @@ const CommissionRuleConfig: React.FC = () => {
       </TableContainer>
 
       <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>{editingRule ? '编辑提成规则' : '新增提成规则'}</DialogTitle>
+        <DialogCloseTitle onClose={() => setFormOpen(false)}>{editingRule ? '编辑提成规则' : '新增提成规则'}</DialogCloseTitle>
         <DialogContent>
           <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 2, mt: 1 }}>
             <TextField
@@ -456,7 +457,6 @@ const CommissionRuleConfig: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setFormOpen(false)}>取消</Button>
           <Button variant="contained" onClick={handleSubmit} disabled={!form.name || loading}>
             {editingRule ? '保存' : '创建'}
           </Button>

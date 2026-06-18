@@ -7,7 +7,6 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
-  DialogTitle,
   IconButton,
   MenuItem,
   TextField,
@@ -19,6 +18,7 @@ import useOrderStore from '../../store/useOrderStore';
 import {
   OFFICIAL_PAYMENT_CHANNELS,
   RESOURCE_OWNERSHIPS,
+  normalizeResourceOwnership,
 } from '../../shared/utils/constants';
 import { customerApi, productApi, settingsApi } from '../../api';
 import type { OrderType, PaymentMethod, ProductLevel } from '../../types/common';
@@ -32,6 +32,7 @@ import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
 import type { Product, ProductLevelConfig } from '../../types/product';
 import type { OrderTypeConfig, User } from '../../types/settings';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 interface OrderFormProps {
   open: boolean;
@@ -120,8 +121,12 @@ function paymentMethodFromOfficialChannel(channel: OfficialPaymentChannel): Paym
   return '银行转账';
 }
 
-function sourceTypeFromCustomer(customer?: Customer | null, fallback = '自拓'): string {
-  return customer?.leadSource || customer?.sourceType || fallback;
+function sourceTypeFromCustomer(customer?: Customer | null, fallback = ''): string {
+  return customer?.leadSource || fallback;
+}
+
+function resourceOwnershipFromCustomer(customer?: Customer | null, fallback: ResourceOwnership = '公司资源'): ResourceOwnership {
+  return normalizeResourceOwnership(customer?.sourceType || fallback);
 }
 
 function dealSceneFromOrderType(orderType: OrderType): CommissionScene | undefined {
@@ -191,7 +196,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     collaboratorRole: '客户成功' as CommissionRole,
     collaboratorRatio: 0,
     originalOrderId: '',
-    sourceType: '自拓',
+    sourceType: '',
     owner: '张伟',
     notes: '',
     refundStatus: '无' as Order['refundStatus'],
@@ -219,6 +224,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
         owner: customer?.owner || prev.owner,
         productLevel: customer?.productLevel || prev.productLevel,
         sourceType: sourceTypeFromCustomer(customer, prev.sourceType),
+        resourceOwnership: resourceOwnershipFromCustomer(customer, prev.resourceOwnership),
         paymentDate: toDateTimeInputValue(new Date()),
       }));
       return;
@@ -256,7 +262,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       orderType: order.orderType,
       actualAmount: order.actualAmount || order.amount,
       officialPaymentChannel: order.officialPaymentChannel || prev.officialPaymentChannel,
-      resourceOwnership: order.resourceOwnership || prev.resourceOwnership,
+      resourceOwnership: normalizeResourceOwnership(order.resourceOwnership || order.sourceType || prev.resourceOwnership),
       collaboratorName: order.collaboratorName || '',
       collaboratorRole: order.collaboratorRole || prev.collaboratorRole,
       collaboratorRatio: order.collaboratorRatio || 0,
@@ -421,6 +427,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       owner: selected?.owner || form.owner,
       productLevel: selected?.productLevel || form.productLevel,
       sourceType: sourceTypeFromCustomer(selected, form.sourceType),
+      resourceOwnership: resourceOwnershipFromCustomer(selected, form.resourceOwnership),
     });
     if (selected) {
       setCustomerSearch(getCustomerOptionLabel(selected));
@@ -509,6 +516,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       ...form,
       amount: actualAmount,
       actualAmount,
+      resourceOwnership: normalizeResourceOwnership(form.resourceOwnership),
       paymentMethod,
       status: '已确认' as Order['status'],
       dealScene: dealSceneFromOrderType(form.orderType),
@@ -537,7 +545,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle>{order ? '编辑订单' : '新增订单'}</DialogTitle>
+      <DialogCloseTitle onClose={onClose}>{order ? '编辑订单' : '新增订单'}</DialogCloseTitle>
       <DialogContent>
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
           {customerLocked ? (
@@ -774,7 +782,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
         </Box>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>取消</Button>
         <Button variant="contained" onClick={handleSubmit} disabled={!canSubmit}>
           {order ? '保存修改' : '创建订单'}
         </Button>

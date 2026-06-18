@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -8,7 +7,6 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
-  DialogTitle,
   FormControl,
   FormControlLabel,
   FormGroup,
@@ -33,15 +31,24 @@ import AddIcon from '@mui/icons-material/Add';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import useLeadStore from '../../store/useLeadStore';
-import { ROUTES } from '../../shared/utils/constants';
 import { formatDate } from '../../shared/utils/formatters';
+import { normalizeResourceOwnership } from '../../shared/utils/constants';
 import LeadDetail from './LeadDetail';
 import LeadForm from './LeadForm';
 import LeadIntakeTab from './LeadIntakeTab';
 import LeadFlowConfigTab from './LeadFlowConfigTab';
 import type { Lead } from '../../types/lead';
-import { opportunityApi, settingsApi } from '../../api';
+import { settingsApi } from '../../api';
 import type { LeadSourceConfig, LifecycleStatusConfig, User } from '../../types/settings';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import ResizableHeaderCell, {
+  getResizableCellSx,
+  readColumnWidths,
+  resetColumnWidths,
+  resizeColumnWidths,
+  writeColumnWidths,
+  type ColumnWidthMap,
+} from '../../shared/components/ResizableTable';
 
 type LeadColumn = {
   id: string;
@@ -49,7 +56,14 @@ type LeadColumn = {
   render: (lead: Lead) => React.ReactNode;
 };
 
-const LEAD_VIEW_STORAGE_KEY = 'aaos_lead_table_columns';
+const LEAD_VIEW_STORAGE_KEY = 'aaos_lead_table_columns_v2';
+const LEAD_WIDTH_STORAGE_KEY = 'aaos_lead_table_column_widths_v1';
+
+const formatLifecycleStatus = (status?: string) => {
+  if (!status || status === '未转商机') return '待跟进';
+  if (status === '商机跟进中') return '跟进中';
+  return status;
+};
 
 const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] => {
   const getLifecycleColor = (status?: string) => lifecycleConfigs.find((item) => item.name === status)?.color || '#9E9E9E';
@@ -59,6 +73,7 @@ const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] =
     { id: 'wechat', label: '微信', render: (lead) => lead.wechat || '-' },
     { id: 'email', label: '邮箱', render: (lead) => lead.email || '-' },
     { id: 'source', label: '来源', render: (lead) => lead.source },
+    { id: 'sourceType', label: '资源归属', render: (lead) => normalizeResourceOwnership(lead.sourceType) },
     {
       id: 'intakeStatus',
       label: '入库状态',
@@ -75,7 +90,7 @@ const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] =
       label: '生命周期',
       render: (lead) => (
         <Chip
-          label={lead.lifecycleStatus || '未转商机'}
+          label={formatLifecycleStatus(lead.lifecycleStatus)}
           size="small"
           sx={{
             bgcolor: `${getLifecycleColor(lead.lifecycleStatus)}18`,
@@ -88,7 +103,7 @@ const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] =
     { id: 'industry', label: '行业', render: (lead) => lead.industry || '-' },
     { id: 'city', label: '城市', render: (lead) => lead.city || '-' },
     { id: 'assignedTo', label: '分配销售', render: (lead) => lead.assignedTo || lead.owner || '-' },
-    { id: 'inputBy', label: '录入人', render: (lead) => lead.inputBy || '-' },
+    { id: 'inputBy', label: '线索录入人', render: (lead) => lead.inputBy || '-' },
     { id: 'score', label: '评分', render: (lead) => lead.score ?? '-' },
     {
       id: 'aiProbability',
@@ -104,12 +119,32 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'phone',
   'wechat',
   'source',
+  'sourceType',
   'intakeStatus',
   'lifecycleStatus',
   'assignedTo',
   'inputBy',
   'createdAt',
 ];
+
+const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
+  name: 180,
+  company: 220,
+  phone: 150,
+  wechat: 150,
+  email: 180,
+  source: 160,
+  sourceType: 140,
+  intakeStatus: 140,
+  lifecycleStatus: 140,
+  industry: 140,
+  city: 120,
+  assignedTo: 140,
+  inputBy: 140,
+  score: 100,
+  aiProbability: 140,
+  createdAt: 180,
+};
 
 const readVisibleColumns = (columns: LeadColumn[]) => {
   try {
@@ -126,7 +161,6 @@ const readVisibleColumns = (columns: LeadColumn[]) => {
 };
 
 const Leads: React.FC = () => {
-  const navigate = useNavigate();
   const { items, filters, fetchItems, setFilters } = useLeadStore();
   const [activeTab, setActiveTab] = useState(0);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
@@ -140,9 +174,14 @@ const Leads: React.FC = () => {
 
   const columns = useMemo(() => buildColumns(lifecycleConfigs), [lifecycleConfigs]);
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(() => readVisibleColumns(buildColumns([])));
+  const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(LEAD_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
   const visibleColumns = useMemo(
     () => columns.filter((column) => visibleColumnIds.includes(column.id)),
     [columns, visibleColumnIds],
+  );
+  const tableMinWidth = useMemo(
+    () => columnWidths.name + visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + 120,
+    [columnWidths, visibleColumns],
   );
 
   useEffect(() => {
@@ -162,6 +201,10 @@ const Leads: React.FC = () => {
     localStorage.setItem(LEAD_VIEW_STORAGE_KEY, JSON.stringify(visibleColumnIds));
   }, [visibleColumnIds]);
 
+  useEffect(() => {
+    writeColumnWidths(LEAD_WIDTH_STORAGE_KEY, columnWidths);
+  }, [columnWidths]);
+
   const salesUsers = users.filter((user) => user.role === '销售' || user.role === '销售经理');
 
   const handleViewDetail = (lead: Lead) => {
@@ -178,12 +221,6 @@ const Leads: React.FC = () => {
     setEditLead(lead);
     setFormOpen(true);
     setDetailOpen(false);
-  };
-
-  const handleCreateOpportunity = async (lead: Lead) => {
-    await opportunityApi.createFromLead(lead);
-    setDetailOpen(false);
-    navigate(ROUTES.OPPORTUNITIES);
   };
 
   const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -204,6 +241,10 @@ const Leads: React.FC = () => {
         ? current.filter((columnId) => columnId !== id)
         : [...current, id]
     ));
+  };
+
+  const handleResizeColumn = (id: string, delta: number) => {
+    setColumnWidths((current) => resizeColumnWidths(current, id, delta));
   };
 
   return (
@@ -261,13 +302,15 @@ const Leads: React.FC = () => {
             </FormControl>
           </Box>
 
-          <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0' }}>
-            <Table>
+          <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
+            <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
               <TableHead>
                 <TableRow>
-                  <TableCell>姓名</TableCell>
+                  <ResizableHeaderCell columnId="name" width={columnWidths.name} onResize={handleResizeColumn}>姓名</ResizableHeaderCell>
                   {visibleColumns.map((column) => (
-                    <TableCell key={column.id}>{column.label}</TableCell>
+                    <ResizableHeaderCell key={column.id} columnId={column.id} width={columnWidths[column.id]} onResize={handleResizeColumn}>
+                      {column.label}
+                    </ResizableHeaderCell>
                   ))}
                   <TableCell align="center">操作</TableCell>
                 </TableRow>
@@ -275,9 +318,9 @@ const Leads: React.FC = () => {
               <TableBody>
                 {items.map((lead) => (
                   <TableRow key={lead.id} hover>
-                    <TableCell sx={{ fontWeight: 600 }}>{lead.name}</TableCell>
+                    <TableCell sx={{ ...getResizableCellSx(columnWidths.name), fontWeight: 600 }} title={lead.name}>{lead.name}</TableCell>
                     {visibleColumns.map((column) => (
-                      <TableCell key={column.id}>{column.render(lead)}</TableCell>
+                      <TableCell key={column.id} sx={getResizableCellSx(columnWidths[column.id])}>{column.render(lead)}</TableCell>
                     ))}
                     <TableCell align="center">
                       <Tooltip title="查看线索">
@@ -310,7 +353,6 @@ const Leads: React.FC = () => {
           open={detailOpen}
           onClose={() => setDetailOpen(false)}
           onEdit={handleEdit}
-          onCreateOpportunity={handleCreateOpportunity}
         />
       )}
 
@@ -323,7 +365,7 @@ const Leads: React.FC = () => {
       />
 
       <Dialog open={viewSettingsOpen} onClose={() => setViewSettingsOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>线索列表视图设置</DialogTitle>
+        <DialogCloseTitle onClose={() => setViewSettingsOpen(false)}>线索列表视图设置</DialogCloseTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ color: '#6b7280', mb: 2 }}>
             勾选后会显示在线索列表中，设置会保存在当前浏览器。
@@ -339,8 +381,10 @@ const Leads: React.FC = () => {
           </FormGroup>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setVisibleColumnIds(DEFAULT_VISIBLE_COLUMNS)}>恢复默认</Button>
-          <Button variant="contained" onClick={() => setViewSettingsOpen(false)}>完成</Button>
+          <Button onClick={() => {
+            setVisibleColumnIds(DEFAULT_VISIBLE_COLUMNS);
+            setColumnWidths(resetColumnWidths(DEFAULT_COLUMN_WIDTHS));
+          }}>恢复默认</Button>
         </DialogActions>
       </Dialog>
     </Box>

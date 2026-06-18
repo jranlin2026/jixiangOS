@@ -10,6 +10,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import { settingsApi } from '../../api';
 import type { User, UserRole } from '../../types/settings';
 import { formatDate } from '../../shared/utils/formatters';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -111,10 +112,8 @@ const UserManagement: React.FC = () => {
       </TableContainer>
 
       <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="sm" fullWidth>
-        <Box sx={{ p: 3 }}>
-          <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
-            {editUser ? '编辑用户' : '新增用户'}
-          </Typography>
+        <DialogCloseTitle onClose={() => setFormOpen(false)}>{editUser ? '编辑用户' : '新增用户'}</DialogCloseTitle>
+        <Box sx={{ p: 3, pt: 1 }}>
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
             <TextField label="姓名" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required fullWidth />
             <TextField label="邮箱" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required fullWidth />
@@ -126,7 +125,6 @@ const UserManagement: React.FC = () => {
             </TextField>
           </Box>
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 3 }}>
-            <Button onClick={() => setFormOpen(false)}>取消</Button>
             <Button variant="contained" onClick={handleSubmit} disabled={!form.name || !form.email}>
               {editUser ? '保存' : '创建'}
             </Button>

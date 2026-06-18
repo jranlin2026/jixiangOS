@@ -8,6 +8,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { settingsApi } from '../../api';
 import type { ChannelConfig } from '../../types/settings';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 const ChannelConfigPage: React.FC = () => {
   const [channels, setChannels] = useState<ChannelConfig[]>([]);
@@ -101,10 +102,8 @@ const ChannelConfigPage: React.FC = () => {
       </TableContainer>
 
       <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="sm" fullWidth>
-        <Box sx={{ p: 3 }}>
-          <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
-            {editChannel ? '编辑渠道' : '新增渠道'}
-          </Typography>
+        <DialogCloseTitle onClose={() => setFormOpen(false)}>{editChannel ? '编辑渠道' : '新增渠道'}</DialogCloseTitle>
+        <Box sx={{ p: 3, pt: 1 }}>
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
             <TextField label="渠道名称" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required fullWidth />
             <TextField select label="渠道类型" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} fullWidth>
@@ -116,7 +115,6 @@ const ChannelConfigPage: React.FC = () => {
             <TextField label="描述" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} fullWidth />
           </Box>
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 3 }}>
-            <Button onClick={() => setFormOpen(false)}>取消</Button>
             <Button variant="contained" onClick={handleSubmit} disabled={!form.name}>
               {editChannel ? '保存' : '创建'}
             </Button>

@@ -2,6 +2,7 @@ import React from 'react';
 import { Outlet } from 'react-router-dom';
 import { Box } from '@mui/material';
 import Sidebar from './Sidebar';
+import GlobalTableColumnResizer from '../shared/components/GlobalTableColumnResizer';
 
 const AppLayout: React.FC = () => {
   const sidebarWidth = 240;
@@ -9,6 +10,7 @@ const AppLayout: React.FC = () => {
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: '#f8f9fa' }}>
       <Sidebar width={sidebarWidth} />
+      <GlobalTableColumnResizer />
       <Box
         component="main"
         sx={{

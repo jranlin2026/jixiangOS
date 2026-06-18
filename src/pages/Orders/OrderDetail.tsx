@@ -6,7 +6,6 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
-  DialogTitle,
   Divider,
   MenuItem,
   Table,
@@ -22,7 +21,9 @@ import useOrderStore from '../../store/useOrderStore';
 import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
 import { getProductLevelColor, REFUND_CATEGORIES } from '../../shared/utils/constants';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
+import { normalizeResourceOwnership } from '../../shared/utils/constants';
 import type { Order } from '../../types/order';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 interface OrderDetailProps {
   order: Order;
@@ -61,13 +62,13 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
   return (
     <>
       <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-        <DialogTitle>
+        <DialogCloseTitle onClose={onClose}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Typography variant="h6" sx={{ fontWeight: 600 }}>{order.orderNo}</Typography>
             <Chip label={order.productLevel} size="small" sx={{ bgcolor: `${levelColor}18`, color: levelColor, fontWeight: 600 }} />
             <Chip label={order.orderType} size="small" variant="outlined" />
           </Box>
-        </DialogTitle>
+        </DialogCloseTitle>
         <DialogContent dividers>
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 2 }}>
             <Box>
@@ -99,8 +100,8 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
               <Typography variant="body1">{order.serviceName || '-'}</Typography>
             </Box>
             <Box>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>来源类型</Typography>
-              <Typography variant="body1">{order.sourceType || '-'}</Typography>
+              <Typography variant="body2" sx={{ color: '#6b7280' }}>资源归属</Typography>
+              <Typography variant="body1">{normalizeResourceOwnership(order.resourceOwnership || order.sourceType)}</Typography>
             </Box>
             <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>销售负责人</Typography>
@@ -188,12 +189,11 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
           {order.refundStatus === '无' && order.actualAmount > 0 && (
             <Button color="warning" variant="outlined" onClick={() => setRefundOpen(true)}>发起退款申请</Button>
           )}
-          <Button onClick={onClose}>关闭</Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={refundOpen} onClose={() => setRefundOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>发起退款申请</DialogTitle>
+        <DialogCloseTitle onClose={() => setRefundOpen(false)}>发起退款申请</DialogCloseTitle>
         <DialogContent>
           <Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
             <Typography variant="body2" sx={{ color: '#6b7280' }}>
@@ -217,7 +217,6 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setRefundOpen(false)}>取消</Button>
           <Button variant="contained" color="warning" onClick={handleApplyRefund} disabled={!refundReason || refundAmount <= 0 || refundAmount > order.actualAmount}>
             提交申请
           </Button>

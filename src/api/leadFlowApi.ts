@@ -4,7 +4,7 @@ import type { User } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { DEFAULT_LEAD_FLOW_CONFIG, DEFAULT_PAGE_SIZE, STORAGE_KEYS } from '../shared/utils/constants';
+import { DEFAULT_LEAD_FLOW_CONFIG, DEFAULT_PAGE_SIZE, STORAGE_KEYS, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -144,7 +144,7 @@ function upsertCustomerFromLead(lead: Lead): Customer {
     leadInputBy: lead.inputBy,
     leadSource: lead.source,
     remark: lead.remark,
-    sourceType: lead.sourceType,
+    sourceType: normalizeResourceOwnership(lead.sourceType),
     sourceName: lead.sourceName,
     sourceAccount: lead.sourceAccount,
     score: lead.score,
@@ -172,7 +172,7 @@ function upsertCustomerFromLead(lead: Lead): Customer {
     leadInputBy: lead.inputBy,
     leadSource: lead.source,
     remark: lead.remark,
-    sourceType: lead.sourceType,
+    sourceType: normalizeResourceOwnership(lead.sourceType),
     sourceName: lead.sourceName,
     sourceAccount: lead.sourceAccount,
     score: lead.score,
@@ -291,7 +291,8 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
     assignedAt: assignment.assignedAt,
     assignmentRuleId: assignment.assignmentRuleId,
     intakeStatus: assignment.status,
-    lifecycleStatus: data.lifecycleStatus || '未转商机',
+    lifecycleStatus: data.lifecycleStatus || '待跟进',
+    sourceType: normalizeResourceOwnership(data.sourceType),
     lifecycleStatusUpdatedAt: now,
     followUpRecords: [],
     createdAt: now,

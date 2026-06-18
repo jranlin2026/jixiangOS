@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Dialog, DialogTitle, DialogContent, DialogActions, Button,
+  Dialog, DialogContent, DialogActions, Button,
   TextField, MenuItem, Box, Typography,
 } from '@mui/material';
 import { PAYMENT_METHODS, RECOVERY_ACTION_TYPES, RECOVERY_SOLUTIONS } from '../../shared/utils/constants';
 import type { RecoveryRole, Refund } from '../../types/refund';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 interface RefundProcessDialogProps {
   open: boolean;
@@ -100,7 +101,7 @@ const RefundProcessDialog: React.FC<RefundProcessDialogProps> = ({ open, action,
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>{titles[action]}</DialogTitle>
+      <DialogCloseTitle onClose={onClose}>{titles[action]}</DialogCloseTitle>
       <DialogContent>
         {action === 'assign' && (
           <Box sx={{ mt: 1, display: 'grid', gap: 2 }}>
@@ -211,7 +212,6 @@ const RefundProcessDialog: React.FC<RefundProcessDialogProps> = ({ open, action,
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>取消</Button>
         <Button
           variant="contained"
           color={action === 'reject' ? 'error' : action === 'complete' ? 'success' : 'primary'}

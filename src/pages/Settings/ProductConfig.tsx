@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Box, Typography, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Paper, Chip, Button, IconButton, Dialog,
-  DialogTitle, DialogContent, DialogActions, TextField,
+  DialogContent, DialogActions, TextField,
   Switch, FormControlLabel, MenuItem,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
@@ -19,6 +19,7 @@ import {
   DELIVERY_STAGES_OEM,
   getProductLevelColor,
 } from '../../shared/utils/constants';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 type ProductForm = Omit<Product, 'id' | 'createdAt' | 'updatedAt'>;
 type ProductLevelConfigForm = Omit<ProductLevelConfig, 'id' | 'createdAt' | 'updatedAt'>;
@@ -258,7 +259,7 @@ const ProductConfigPage: React.FC = () => {
       </Box>
 
       <Dialog open={levelManagerOpen} onClose={() => setLevelManagerOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>产品等级/业务分类管理</DialogTitle>
+        <DialogCloseTitle onClose={() => setLevelManagerOpen(false)}>产品等级/业务分类管理</DialogCloseTitle>
         <DialogContent dividers>
       <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', mb: 2 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, borderBottom: '1px solid #f0f0f0' }}>
@@ -326,9 +327,6 @@ const ProductConfigPage: React.FC = () => {
         </Table>
       </TableContainer>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setLevelManagerOpen(false)}>关闭</Button>
-        </DialogActions>
       </Dialog>
 
       <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0' }}>
@@ -386,7 +384,7 @@ const ProductConfigPage: React.FC = () => {
       </TableContainer>
 
       <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>{editingProduct ? '编辑产品' : '新增产品'}</DialogTitle>
+        <DialogCloseTitle onClose={() => setFormOpen(false)}>{editingProduct ? '编辑产品' : '新增产品'}</DialogCloseTitle>
         <DialogContent>
           <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 2, mt: 1 }}>
             <TextField label="产品名称" value={form.name} onChange={(e) => updateForm('name', e.target.value)} fullWidth required />
@@ -434,7 +432,6 @@ const ProductConfigPage: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setFormOpen(false)}>取消</Button>
           <Button variant="contained" onClick={handleSubmit} disabled={!form.name || loading}>
             {editingProduct ? '保存' : '创建'}
           </Button>
@@ -442,7 +439,7 @@ const ProductConfigPage: React.FC = () => {
       </Dialog>
 
       <Dialog open={levelFormOpen} onClose={() => setLevelFormOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>{editingLevel ? '编辑产品等级' : '新增产品等级'}</DialogTitle>
+        <DialogCloseTitle onClose={() => setLevelFormOpen(false)}>{editingLevel ? '编辑产品等级' : '新增产品等级'}</DialogCloseTitle>
         <DialogContent>
           <Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
             <TextField
@@ -500,7 +497,6 @@ const ProductConfigPage: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setLevelFormOpen(false)}>取消</Button>
           <Button variant="contained" onClick={handleLevelSubmit} disabled={!levelForm.name.trim()}>
             {editingLevel ? '保存' : '创建'}
           </Button>

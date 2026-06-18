@@ -4,7 +4,6 @@ import {
   Chip,
   Dialog,
   DialogContent,
-  DialogTitle,
   Divider,
   Table,
   TableBody,
@@ -15,6 +14,7 @@ import {
 } from '@mui/material';
 import { formatDate } from '../../shared/utils/formatters';
 import type { Order } from '../../types/order';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 interface OrderHistoryDialogProps {
   order: Order | null;
@@ -63,7 +63,7 @@ const OrderHistoryDialog: React.FC<OrderHistoryDialogProps> = ({ order, open, on
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle>订单修改记录</DialogTitle>
+      <DialogCloseTitle onClose={onClose}>订单修改记录</DialogCloseTitle>
       <DialogContent>
         <Box sx={{ mb: 2, color: '#6b7280' }}>
           <Typography variant="body2">

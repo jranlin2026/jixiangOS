@@ -6,7 +6,6 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
-  DialogTitle,
   FormControlLabel,
   IconButton,
   Paper,
@@ -25,6 +24,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import { settingsApi } from '../../api';
 import type { LifecycleStatusConfig } from '../../types/settings';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 type LifecycleForm = Omit<LifecycleStatusConfig, 'id' | 'createdAt' | 'updatedAt'>;
 
@@ -108,7 +108,7 @@ const LifecycleStatusConfigPage: React.FC = () => {
         <Box>
           <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>生命周期状态配置</Typography>
           <Typography variant="body2" sx={{ color: '#6b7280', mt: 0.5 }}>
-            维护线索人员可查看的用户流转状态；销售推进商机、订单和退款时会自动更新。
+            维护线索人员可查看的用户流转状态；订单和退款等业务动作会自动更新。
           </Typography>
         </Box>
         <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={() => openForm()}>
@@ -152,7 +152,7 @@ const LifecycleStatusConfigPage: React.FC = () => {
       </TableContainer>
 
       <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>{editingItem ? '编辑生命周期状态' : '新增生命周期状态'}</DialogTitle>
+        <DialogCloseTitle onClose={() => setFormOpen(false)}>{editingItem ? '编辑生命周期状态' : '新增生命周期状态'}</DialogCloseTitle>
         <DialogContent>
           <Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
             <TextField label="状态名称" value={form.name} onChange={(e) => updateForm('name', e.target.value)} required fullWidth />
@@ -163,7 +163,6 @@ const LifecycleStatusConfigPage: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setFormOpen(false)}>取消</Button>
           <Button variant="contained" onClick={handleSubmit} disabled={!form.name.trim()}>保存</Button>
         </DialogActions>
       </Dialog>

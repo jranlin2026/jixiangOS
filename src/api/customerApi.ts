@@ -2,7 +2,7 @@ import type { Customer, CustomerActivityRecord, CustomerCreateInput, CustomerFil
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../shared/utils/constants';
+import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -11,10 +11,14 @@ function ensureInit(): void {
 }
 
 function normalizeCustomer(customer: Customer): Customer {
+  const normalized = {
+    ...customer,
+    sourceType: normalizeResourceOwnership(customer.sourceType),
+  };
   const hasOrder = (customer.orderCount || 0) > 0 || (customer.totalSpent || 0) > 0;
-  if (hasOrder) return customer;
+  if (hasOrder) return normalized;
 
-  const growthPath = (customer.growthPath || []).filter((item) => {
+  const growthPath = (normalized.growthPath || []).filter((item) => {
     const isLegacyAutoPurchase = !item.orderId
       && !item.orderNo
       && item.title.startsWith('签约')
@@ -22,9 +26,9 @@ function normalizeCustomer(customer: Customer): Customer {
     return !isLegacyAutoPurchase;
   });
 
-  return growthPath.length === (customer.growthPath || []).length
-    ? customer
-    : { ...customer, growthPath };
+  return growthPath.length === (normalized.growthPath || []).length
+    ? normalized
+    : { ...normalized, growthPath };
 }
 
 const CUSTOMER_CHANGE_FIELDS: Array<{ field: keyof Customer; label: string }> = [
@@ -41,7 +45,7 @@ const CUSTOMER_CHANGE_FIELDS: Array<{ field: keyof Customer; label: string }> = 
   { field: 'city', label: '城市' },
   { field: 'tags', label: '客户标签' },
   { field: 'remark', label: '备注' },
-  { field: 'sourceType', label: '来源类型' },
+  { field: 'sourceType', label: '资源归属' },
   { field: 'sourceName', label: '来源名称' },
   { field: 'originalSalesTransferBy', label: '原销转人员' },
 ];

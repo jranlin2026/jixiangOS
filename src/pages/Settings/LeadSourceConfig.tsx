@@ -6,7 +6,6 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
-  DialogTitle,
   FormControl,
   IconButton,
   InputLabel,
@@ -28,6 +27,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import { settingsApi } from '../../api';
 import type { LeadSourceConfig } from '../../types/settings';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 const emptyForm = { name: '', parentId: '', isActive: true, sortOrder: 1, description: '' };
 
@@ -160,7 +160,7 @@ const LeadSourceConfigPage: React.FC = () => {
       </TableContainer>
 
       <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{editing ? '编辑线索来源' : '新增线索来源'}</DialogTitle>
+        <DialogCloseTitle onClose={() => setFormOpen(false)}>{editing ? '编辑线索来源' : '新增线索来源'}</DialogCloseTitle>
         <DialogContent>
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
             <TextField label="来源名称" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required fullWidth />
@@ -182,7 +182,6 @@ const LeadSourceConfigPage: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setFormOpen(false)}>取消</Button>
           <Button variant="contained" onClick={handleSubmit} disabled={!form.name.trim()}>保存</Button>
         </DialogActions>
       </Dialog>

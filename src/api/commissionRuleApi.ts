@@ -10,7 +10,7 @@ import type { Order } from '../types/order';
 import type { ApiResponse } from './types';
 import { createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { STORAGE_KEYS } from '../shared/utils/constants';
+import { STORAGE_KEYS, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData, mockCommissionRules } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -29,7 +29,6 @@ function normalizeRule(rule: CommissionRule): CommissionRule {
 
   return {
     scene: '',
-    resourceOwnership: '',
     paymentChannels: [],
     excludeExternalTalent: true,
     performanceRate: 100,
@@ -41,6 +40,7 @@ function normalizeRule(rule: CommissionRule): CommissionRule {
     settlementMode: '自动结算',
     description: '',
     ...rule,
+    resourceOwnership: rule.resourceOwnership ? normalizeResourceOwnership(rule.resourceOwnership) : '',
     requiresLeaderConfirm: inferredLeaderConfirm,
     evidenceTypes: inferredEvidenceTypes,
   };
@@ -320,7 +320,7 @@ async function calculateCommissions(
     refundStatus: '无',
     owner: '',
     sourceType,
-    resourceOwnership: sourceType === '自拓' ? '个人资源' : '公司资源',
+    resourceOwnership: normalizeResourceOwnership(sourceType),
     dealScene: orderType as Order['dealScene'],
     proofStatus: '已上传',
     payments: [],

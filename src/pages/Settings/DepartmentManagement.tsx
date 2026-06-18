@@ -9,6 +9,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import useDepartmentStore from '../../store/useDepartmentStore';
 import { formatDate } from '../../shared/utils/formatters';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 const DepartmentManagement: React.FC = () => {
   const { items, loading, fetchItems, create, update, delete: deleteDept } = useDepartmentStore();
@@ -99,10 +100,8 @@ const DepartmentManagement: React.FC = () => {
       </TableContainer>
 
       <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="sm" fullWidth>
-        <Box sx={{ p: 3 }}>
-          <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
-            {editDept ? '编辑部门' : '新增部门'}
-          </Typography>
+        <DialogCloseTitle onClose={() => setFormOpen(false)}>{editDept ? '编辑部门' : '新增部门'}</DialogCloseTitle>
+        <Box sx={{ p: 3, pt: 1 }}>
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
             <TextField label="部门名称" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required fullWidth />
             <TextField label="人数" type="number" value={form.memberCount} onChange={(e) => setForm({ ...form, memberCount: Number(e.target.value) })} fullWidth />
@@ -113,7 +112,6 @@ const DepartmentManagement: React.FC = () => {
             </Box>
           </Box>
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 3 }}>
-            <Button onClick={() => setFormOpen(false)}>取消</Button>
             <Button variant="contained" onClick={handleSubmit} disabled={!form.name}>
               {editDept ? '保存' : '创建'}
             </Button>

@@ -22,6 +22,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import useRoleStore from '../../store/useRoleStore';
 import type { Permission, Role } from '../../types/role';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 type RoleForm = {
   name: string;
@@ -365,8 +366,8 @@ const RolePermission: React.FC = () => {
       </TableContainer>
 
       <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="md" fullWidth>
-        <Box sx={{ p: 3 }}>
-          <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>{editRole ? '编辑角色' : '新增角色'}</Typography>
+        <DialogCloseTitle onClose={() => setFormOpen(false)}>{editRole ? '编辑角色' : '新增角色'}</DialogCloseTitle>
+        <Box sx={{ p: 3, pt: 1 }}>
           <Box sx={{ display: 'grid', gap: 2 }}>
             <TextField label="角色名称" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required fullWidth />
             <TextField label="说明" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} fullWidth multiline minRows={2} />
@@ -455,7 +456,6 @@ const RolePermission: React.FC = () => {
             </Box>
           </Box>
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 3 }}>
-            <Button onClick={() => setFormOpen(false)}>取消</Button>
             <Button
               variant="contained"
               onClick={handleSubmit}

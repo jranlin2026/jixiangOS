@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Dialog, DialogTitle, DialogContent, DialogActions, Button, Box,
+  Dialog, DialogContent, Button, Box,
   Typography, Chip, Divider, LinearProgress, List, ListItem, ListItemText,
   IconButton,
 } from '@mui/material';
@@ -17,16 +17,17 @@ import type { AIBusinessCard } from '../../types/aiCard';
 import { aiCardApi, leadApi } from '../../api';
 import { formatDate, formatRelativeTime } from '../../shared/utils/formatters';
 import AIBusinessCardPanel from '../../shared/components/AIBusinessCardPanel';
+import { normalizeResourceOwnership } from '../../shared/utils/constants';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 interface LeadDetailProps {
   lead: Lead;
   open: boolean;
   onClose: () => void;
   onEdit: (lead: Lead) => void;
-  onCreateOpportunity?: (lead: Lead) => void;
 }
 
-const LeadDetail: React.FC<LeadDetailProps> = ({ lead, open, onClose, onEdit, onCreateOpportunity }) => {
+const LeadDetail: React.FC<LeadDetailProps> = ({ lead, open, onClose, onEdit }) => {
   const [currentLead, setCurrentLead] = useState<Lead>(lead);
   const [refreshing, setRefreshing] = useState(false);
   const [aiCard, setAiCard] = useState<AIBusinessCard | null>(null);
@@ -75,19 +76,16 @@ const LeadDetail: React.FC<LeadDetailProps> = ({ lead, open, onClose, onEdit, on
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <DialogCloseTitle onClose={onClose}>
         <Typography variant="h6" sx={{ fontWeight: 600 }}>
           {currentLead.name}
         </Typography>
         <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button variant="outlined" size="small" onClick={() => onCreateOpportunity?.(currentLead)}>
-            转商机
-          </Button>
           <Button variant="outlined" size="small" onClick={() => onEdit(currentLead)}>
             编辑
           </Button>
         </Box>
-      </DialogTitle>
+      </DialogCloseTitle>
       <DialogContent dividers>
         {/* 基本信息 */}
         <Box sx={{ mb: 3 }}>
@@ -126,7 +124,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({ lead, open, onClose, onEdit, on
               <Typography variant="body2" sx={{ color: '#6b7280' }}>微信: {currentLead.wechat}</Typography>
             )}
             {currentLead.sourceType && (
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>来源类型: {currentLead.sourceType}</Typography>
+              <Typography variant="body2" sx={{ color: '#6b7280' }}>资源归属: {normalizeResourceOwnership(currentLead.sourceType)}</Typography>
             )}
             {currentLead.score !== undefined && (
               <Typography variant="body2" sx={{ color: '#6b7280' }}>评分: {currentLead.score}</Typography>
@@ -246,9 +244,6 @@ const LeadDetail: React.FC<LeadDetailProps> = ({ lead, open, onClose, onEdit, on
           )}
         </Box>
       </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>关闭</Button>
-      </DialogActions>
     </Dialog>
   );
 };

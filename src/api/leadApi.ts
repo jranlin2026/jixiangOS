@@ -2,7 +2,7 @@ import type { Lead, LeadFilters, FollowUpRecord, LeadAIAnalysis } from '../types
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../shared/utils/constants';
+import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 import { leadFlowApi } from './leadFlowApi';
@@ -19,6 +19,7 @@ function normalizeLead(lead: Lead): Lead {
     intakeStatus: lead.intakeStatus || '入库成功',
     inputBy: lead.inputBy || lead.owner,
     assignedTo: lead.assignedTo || lead.owner,
+    sourceType: normalizeResourceOwnership(lead.sourceType),
   };
 }
 
