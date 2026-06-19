@@ -4,11 +4,11 @@ import type { Order } from '../types/order';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
+import { LIFECYCLE_STATUS_CODES, STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 import { getCurrentOperatorName, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
-import { claimFromPublicPool, hydrateCustomerLifecycle, releaseToPublicPool } from './lifecycleSync';
+import { claimFromPublicPool, hydrateCustomerLifecycle, releaseToPublicPool, setLeadLifecycle } from './lifecycleSync';
 
 function ensureInit(): void {
   initializeMockData();
@@ -374,11 +374,15 @@ async function addCustomerFollowUp(
     createdAt: now,
   }));
   if (customers[idx].lifecycleStatusCode === 'pending_followup') {
-    customers[idx].lifecycleStatusCode = 'following';
+    customers[idx].lifecycleStatusCode = LIFECYCLE_STATUS_CODES.FOLLOWING;
     customers[idx].lifecycleStatusUpdatedAt = now;
   }
   customers[idx].updatedAt = now;
   setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
+  setLeadLifecycle(findLeadIdByCustomer(customers[idx]), LIFECYCLE_STATUS_CODES.FOLLOWING, {
+    reason: content,
+    operator: getCurrentOperatorName(data.operator || customers[idx].owner),
+  });
   return createSuccessResponse(customers[idx]);
 }
 
@@ -395,6 +399,15 @@ function appendCustomerActivity(
   return customers[idx];
 }
 
+function findLeadIdByCustomer(customer: Customer): string | undefined {
+  const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
+  return leads.find((lead) => (
+    lead.customerId === customer.id
+    || (lead.phone && customer.phone && lead.phone === customer.phone)
+    || (lead.wechat && customer.wechat && lead.wechat === customer.wechat)
+  ))?.id;
+}
+
 async function releaseCustomerToPublicPool(id: string, reason: string): Promise<ApiResponse<Customer | null>> {
   ensureInit();
   await delay(150);
@@ -403,6 +416,7 @@ async function releaseCustomerToPublicPool(id: string, reason: string): Promise<
   if (!customer) return createSuccessResponse(null);
   const operator = getCurrentOperatorName(customer.owner);
   releaseToPublicPool({ customerId: id }, reason, operator);
+  setLeadLifecycle(findLeadIdByCustomer(customer), LIFECYCLE_STATUS_CODES.PUBLIC_POOL, { reason, operator });
   const updated = appendCustomerActivity(id, {
     type: 'transfer',
     title: '释放到公海',
@@ -420,6 +434,10 @@ async function claimCustomerFromPublicPool(id: string, userName: string): Promis
   if (!customer) return createSuccessResponse(null);
   const operator = getCurrentOperatorName(userName);
   claimFromPublicPool({ customerId: id }, userName);
+  setLeadLifecycle(findLeadIdByCustomer(customer), LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP, {
+    reason: 'claim_from_public_pool',
+    operator,
+  });
   const updated = appendCustomerActivity(id, {
     type: 'transfer',
     title: '重新领取公海客户',

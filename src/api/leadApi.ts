@@ -1,8 +1,9 @@
 import type { Lead, LeadFilters, FollowUpRecord, LeadAIAnalysis } from '../types/lead';
+import type { Customer } from '../types/customer';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { LIFECYCLE_STATUS_CODES, STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
+import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 import { leadFlowApi } from './leadFlowApi';
@@ -58,24 +59,31 @@ function buildLeadChanges(before: Lead, data: Partial<Lead>) {
     .filter((item) => item.oldValue !== item.newValue);
 }
 
+function findLinkedCustomer(lead: Lead): Customer | undefined {
+  const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+  return customers.find((customer) => (
+    (lead.customerId && customer.id === lead.customerId)
+    || (lead.phone && customer.phone && lead.phone === customer.phone)
+    || (lead.wechat && customer.wechat && lead.wechat === customer.wechat)
+  ));
+}
+
 function normalizeLead(lead: Lead): Lead {
-  const normalized = hydrateLeadLifecycle({
+  const linkedCustomer = findLinkedCustomer(lead);
+  const customerLifecycleCode = linkedCustomer?.lifecycleStatusCode;
+  const customerLifecycleUpdatedAt = linkedCustomer?.lifecycleStatusUpdatedAt;
+  return hydrateLeadLifecycle({
     ...lead,
+    ...(customerLifecycleCode ? {
+      customerId: lead.customerId || linkedCustomer?.id,
+      lifecycleStatusCode: customerLifecycleCode,
+      lifecycleStatusUpdatedAt: customerLifecycleUpdatedAt || lead.lifecycleStatusUpdatedAt,
+    } : {}),
     intakeStatus: lead.intakeStatus || '入库成功',
     inputBy: lead.inputBy || lead.owner,
     assignedTo: lead.assignedTo || lead.owner,
     sourceType: normalizeResourceOwnership(lead.sourceType),
   });
-  if (normalized.lifecycleStatusCode === LIFECYCLE_STATUS_CODES.PUBLIC_POOL) {
-    return {
-      ...normalized,
-      owner: normalized.owner === '公海' ? '待分配' : normalized.owner,
-      assignedTo: normalized.assignedTo,
-      lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP,
-      lifecycleStatus: '待跟进',
-    };
-  }
-  return normalized;
 }
 
 async function fetchLeads(filters?: LeadFilters): Promise<ApiResponse<PaginatedResponse<Lead>>> {
@@ -123,7 +131,11 @@ async function fetchLeadById(id: string): Promise<ApiResponse<Lead | null>> {
   ensureInit();
   await delay(150);
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
-  const lead = leads.map(normalizeLead).find((item) => item.id === id) || null;
+  const normalizedLeads = leads.map(normalizeLead);
+  if (JSON.stringify(leads) !== JSON.stringify(normalizedLeads)) {
+    setStorageData(STORAGE_KEYS.LEADS, normalizedLeads);
+  }
+  const lead = normalizedLeads.find((item) => item.id === id) || null;
   return createSuccessResponse(lead);
 }
 
