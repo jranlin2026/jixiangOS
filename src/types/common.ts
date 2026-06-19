@@ -47,8 +47,8 @@ export interface DateRange {
 /** 产品等级/业务分类 — 由产品配置维护，预设值仅作为初始数据 */
 export type ProductLevel = string;
 
-/** 客户等级 */
-export type CustomerLevel = 'L1' | 'L2' | 'L3' | 'L4' | 'L5';
+/** 客户等级 — 由系统设置维护，预设值仅作为初始数据 */
+export type CustomerLevel = string;
 
 /** 订单类型 — 由系统设置维护，预设值仅作为初始数据 */
 export type OrderType = string;

@@ -128,17 +128,17 @@ const PERMISSION_TREE: PermissionNode[] = [
       {
         label: '组织权限',
         children: [
-          { label: '用户管理' },
+          { label: '员工&部门' },
           { label: '角色权限' },
-          { label: '部门管理' },
         ],
       },
       {
         label: '业务配置',
         children: [
-          { label: '渠道配置' },
           { label: '产品配置' },
           { label: '订单类型配置' },
+          { label: '生命周期状态' },
+          { label: '线索来源' },
         ],
       },
     ],
@@ -188,6 +188,14 @@ const getPermissionAliasMap = () => {
   PERMISSION_TREE
     .filter((category) => category.label !== '全部')
     .forEach((category) => walk(category, []));
+
+  const employeeDepartmentKey = '系统设置/组织权限/员工&部门';
+  [
+    '用户管理',
+    '部门管理',
+    '系统设置/组织权限/用户管理',
+    '系统设置/组织权限/部门管理',
+  ].forEach((legacyKey) => aliases.set(legacyKey, [employeeDepartmentKey]));
 
   return aliases;
 };

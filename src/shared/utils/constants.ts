@@ -83,6 +83,19 @@ export const CUSTOMER_LEVELS = [
   { value: 'L5', label: 'L5-合伙人', color: '#FF9800' },
 ] as const;
 
+/** 默认客户等级配置 */
+export const DEFAULT_CUSTOMER_LEVEL_CONFIGS = CUSTOMER_LEVELS.map((level, index) => ({
+  id: `clc-${index + 1}`,
+  value: level.value,
+  label: level.label,
+  color: level.color,
+  description: '',
+  isActive: true,
+  sortOrder: index + 1,
+  createdAt: '2026-06-01T00:00:00.000Z',
+  updatedAt: '2026-06-01T00:00:00.000Z',
+}));
+
 /** 提成比例 */
 export const COMMISSION_RATES: Record<string, number> = {
   '899': 0.10,
@@ -283,12 +296,12 @@ export const STORAGE_KEYS = {
   COMMISSIONS: `${STORAGE_PREFIX}commissions`,
   FINANCE: `${STORAGE_PREFIX}finance`,
   USERS: `${STORAGE_PREFIX}users`,
-  CHANNELS: `${STORAGE_PREFIX}channels`,
   AI_SESSIONS: `${STORAGE_PREFIX}ai_sessions`,
   DEPARTMENTS: `${STORAGE_PREFIX}departments`,
   ROLES: `${STORAGE_PREFIX}roles`,
   PRODUCTS: `${STORAGE_PREFIX}products`,
   PRODUCT_LEVELS: `${STORAGE_PREFIX}product_levels`,
+  CUSTOMER_LEVEL_CONFIGS: `${STORAGE_PREFIX}customer_level_configs`,
   ORDER_TYPE_CONFIGS: `${STORAGE_PREFIX}order_type_configs`,
   LIFECYCLE_STATUS_CONFIGS: `${STORAGE_PREFIX}lifecycle_status_configs`,
   REFUNDS: `${STORAGE_PREFIX}refunds`,
@@ -322,6 +335,23 @@ export const getProductLevelColor = (level?: string, fallback = '#9ca3af'): stri
     }
   }
   return PRODUCT_LEVEL_COLOR_MAP[level] || fallback;
+};
+
+export const getCustomerLevelConfig = (level?: string) => {
+  if (!level) return undefined;
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS);
+      if (raw) {
+        const configs = JSON.parse(raw) as Array<{ value: string; label: string; color: string; isActive?: boolean }>;
+        const config = configs.find((item) => item.value === level && item.isActive !== false);
+        if (config) return config;
+      }
+    } catch {
+      // 使用默认客户等级兜底
+    }
+  }
+  return DEFAULT_CUSTOMER_LEVEL_CONFIGS.find((item) => item.value === level);
 };
 
 /** 分页默认值 */

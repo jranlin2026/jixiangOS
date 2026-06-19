@@ -46,7 +46,6 @@ const CUSTOMER_CHANGE_FIELDS: Array<{ field: keyof Customer; label: string }> = 
   { field: 'company', label: '公司' },
   { field: 'phone', label: '电话' },
   { field: 'wechat', label: '微信' },
-  { field: 'email', label: '邮箱' },
   { field: 'customerLevel', label: '客户等级' },
   { field: 'owner', label: '销售负责人' },
   { field: 'leadInputBy', label: '线索录入人' },
@@ -67,7 +66,6 @@ const CUSTOMER_TO_LEAD_FIELDS: Array<{
 }> = [
   { customerField: 'name', leadField: 'name', label: '姓名' },
   { customerField: 'company', leadField: 'company', label: '公司' },
-  { customerField: 'email', leadField: 'email', label: '邮箱' },
   { customerField: 'sourceType', leadField: 'sourceType', label: '资源归属' },
   { customerField: 'leadSource', leadField: 'source', label: '线索来源' },
   { customerField: 'sourceName', leadField: 'sourceName', label: '线索来源明细' },

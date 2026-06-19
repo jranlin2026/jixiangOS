@@ -62,7 +62,6 @@ export const mockRoles: Role[] = [
       { module: '线索', actions: ['read'] },
       { module: '商机', actions: ['read'] },
       { module: '数据', actions: ['read'] },
-      { module: '渠道', actions: ['read', 'write'] },
     ],
     memberCount: 3, isActive: true, createdAt: daysAgo(180), updatedAt: daysAgo(9),
   },

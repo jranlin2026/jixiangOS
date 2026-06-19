@@ -170,6 +170,10 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     onClose();
   };
 
+  const missingContact = !form.phone.trim() && !form.wechat.trim();
+  const showContactError = !isEdit && !!form.name.trim() && missingContact;
+  const canSubmit = !!form.name.trim() && !missingContact && !!form.source && !!form.inputBy;
+
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogCloseTitle onClose={onClose}>{isEdit ? '编辑线索资料' : '新增线索入库'}</DialogCloseTitle>
@@ -186,16 +190,18 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
             label="手机号"
             value={form.phone}
             onChange={handleChange('phone')}
+            error={showContactError}
             fullWidth
-            helperText={isEdit ? '唯一识别字段，入库后不可修改' : '手机号或微信至少填写一项'}
+            helperText={isEdit ? '唯一识别字段，入库后不可修改' : showContactError ? '手机号或微信至少填写一项' : ''}
             InputProps={{ readOnly: isEdit }}
           />
           <TextField
             label="微信"
             value={form.wechat}
             onChange={handleChange('wechat')}
+            error={showContactError}
             fullWidth
-            helperText={isEdit ? '唯一识别字段，入库后不可修改' : '用于查重和客户同步'}
+            helperText={isEdit ? '唯一识别字段，入库后不可修改' : showContactError ? '手机号或微信至少填写一项' : '用于查重和客户同步'}
             InputProps={{ readOnly: isEdit }}
           />
           <TextField select label="资源归属" value={form.sourceType} onChange={handleChange('sourceType')} fullWidth>
@@ -237,7 +243,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
         </Box>
       </DialogContent>
       <DialogActions>
-        <Button variant="contained" onClick={handleSubmit} disabled={!form.name || (!form.phone && !form.wechat) || !form.source || !form.inputBy}>
+        <Button variant="contained" onClick={handleSubmit} disabled={!canSubmit}>
           {isEdit ? '保存' : '入库'}
         </Button>
       </DialogActions>

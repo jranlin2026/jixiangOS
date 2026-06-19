@@ -41,16 +41,6 @@ export interface ProductConfig {
   isActive: boolean;
 }
 
-/** 渠道配置 */
-export interface ChannelConfig {
-  id: ID;
-  name: string;
-  type: string;
-  budget: number;
-  isActive: boolean;
-  description: string;
-}
-
 /** 线索来源配置：一级来源 + 二级来源 */
 export interface LeadSourceConfig {
   id: ID;
@@ -84,6 +74,19 @@ export interface LifecycleStatusConfig {
   isActive: boolean;
   sortOrder: number;
   isSystem?: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+/** 客户等级配置 */
+export interface CustomerLevelConfig {
+  id: ID;
+  value: string;
+  label: string;
+  color: string;
+  description?: string;
+  isActive: boolean;
+  sortOrder: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

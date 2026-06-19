@@ -13,7 +13,7 @@ import { settingsApi } from '../../api';
 import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import type { Customer } from '../../types/customer';
-import type { LeadSourceConfig, User } from '../../types/settings';
+import type { CustomerLevelConfig, LeadSourceConfig, User } from '../../types/settings';
 
 const CURRENT_USER_STORAGE_KEY = 'aaos_current_user';
 
@@ -50,6 +50,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   const isEdit = !!customer;
   const [users, setUsers] = useState<User[]>([]);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
+  const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
 
   const parentSources = useMemo(
     () => sourceConfigs.filter((item) => !item.parentId && item.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
@@ -80,6 +81,16 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   }), [childSources, parentSources]);
 
   const defaultOwner = useMemo(() => getCurrentUserName(users) || users[0]?.name || '', [users]);
+  const customerLevelOptions = useMemo(() => {
+    const activeConfigs = customerLevelConfigs.filter((item) => item.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
+    const options = activeConfigs.length
+      ? activeConfigs.map((item) => ({ value: item.value, label: item.label, color: item.color }))
+      : CUSTOMER_LEVELS;
+    if (customer?.customerLevel && !options.some((item) => item.value === customer.customerLevel)) {
+      return [{ value: customer.customerLevel, label: customer.customerLevel, color: '#9E9E9E' }, ...options];
+    }
+    return options;
+  }, [customer?.customerLevel, customerLevelConfigs]);
 
   const [form, setForm] = useState({
     name: '',
@@ -95,7 +106,6 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     owner: '',
     customerLevel: 'L1' as Customer['customerLevel'],
     originalSalesTransferBy: '',
-    email: '',
     tags: '',
     remark: '',
   });
@@ -108,6 +118,9 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     });
     settingsApi.fetchLeadSourceConfigs().then((res) => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
+    });
+    settingsApi.fetchCustomerLevelConfigs().then((res) => {
+      if (res.code === 0) setCustomerLevelConfigs(res.data);
     });
   }, [open]);
 
@@ -130,7 +143,6 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       owner: fallbackOwner,
       customerLevel: customer?.customerLevel || 'L1',
       originalSalesTransferBy: customer?.originalSalesTransferBy || '',
-      email: customer?.email || '',
       tags: customer?.tags?.join(', ') || '',
       remark: customer?.remark || '',
     });
@@ -232,15 +244,19 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
             {userOptions}
           </TextField>
           <TextField select label="客户等级" value={form.customerLevel} onChange={handleChange('customerLevel')} fullWidth>
-            {CUSTOMER_LEVELS.map((level) => (
-              <MenuItem key={level.value} value={level.value}>{level.label}</MenuItem>
+            {customerLevelOptions.map((level) => (
+              <MenuItem key={level.value} value={level.value}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: level.color }} />
+                  {level.label}
+                </Box>
+              </MenuItem>
             ))}
           </TextField>
           <TextField select label="原销转人员" value={form.originalSalesTransferBy} onChange={handleChange('originalSalesTransferBy')} fullWidth>
             <MenuItem value="">无</MenuItem>
             {userOptions}
           </TextField>
-          <TextField label="邮箱" value={form.email} onChange={handleChange('email')} fullWidth sx={{ gridColumn: '1 / -1' }} />
           <TextField label="标签（逗号分隔）" value={form.tags} onChange={handleChange('tags')} fullWidth sx={{ gridColumn: '1 / -1' }} />
           <TextField label="备注" value={form.remark} onChange={handleChange('remark')} fullWidth multiline minRows={3} sx={{ gridColumn: '1 / -1' }} />
         </Box>

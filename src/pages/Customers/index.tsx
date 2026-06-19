@@ -45,7 +45,7 @@ import CustomerForm from './CustomerForm';
 import OrderForm from '../Orders/OrderForm';
 import type { Customer, CustomerFilters } from '../../types/customer';
 import type { Order } from '../../types/order';
-import type { LifecycleStatusConfig, User } from '../../types/settings';
+import type { CustomerLevelConfig, LifecycleStatusConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import PermissionGate from '../../shared/auth/PermissionGate';
 import { PERMISSION_KEYS } from '../../shared/utils/permissions';
@@ -80,7 +80,6 @@ const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[]): Custom
   { id: 'company', label: '公司', render: (customer) => customer.company || '-' },
   { id: 'phone', label: '电话', render: (customer) => customer.phone || '-' },
   { id: 'wechat', label: '微信', render: (customer) => customer.wechat || '-' },
-  { id: 'email', label: '邮箱', render: (customer) => customer.email || '-' },
   {
     id: 'lifecycleStatus',
     label: '生命周期',
@@ -134,7 +133,6 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   company: 220,
   phone: 150,
   wechat: 150,
-  email: 180,
   lifecycleStatus: 140,
   customerLevel: 130,
   leadSource: 160,
@@ -175,11 +173,18 @@ const Customers: React.FC = () => {
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [lifecycleConfigs, setLifecycleConfigs] = useState<LifecycleStatusConfig[]>([]);
+  const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [customerScope, setCustomerScope] = useState<CustomerScope>('active');
   const [releaseTarget, setReleaseTarget] = useState<Customer | null>(null);
   const [releaseReason, setReleaseReason] = useState('');
   const columns = useMemo(() => buildCustomerColumns(lifecycleConfigs), [lifecycleConfigs]);
+  const customerLevelOptions = useMemo(() => {
+    const activeConfigs = customerLevelConfigs.filter((item) => item.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
+    return activeConfigs.length
+      ? activeConfigs.map((item) => ({ value: item.value, label: item.label, color: item.color }))
+      : CUSTOMER_LEVELS;
+  }, [customerLevelConfigs]);
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(() => readVisibleColumns(buildCustomerColumns([])));
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(CUSTOMER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
 
@@ -192,6 +197,9 @@ const Customers: React.FC = () => {
     });
     settingsApi.fetchLifecycleStatusConfigs().then((res) => {
       if (res.code === 0) setLifecycleConfigs(res.data);
+    });
+    settingsApi.fetchCustomerLevelConfigs().then((res) => {
+      if (res.code === 0) setCustomerLevelConfigs(res.data);
     });
   }, [fetchItems]);
 
@@ -362,8 +370,13 @@ const Customers: React.FC = () => {
           <InputLabel>客户等级</InputLabel>
           <Select value={filters.customerLevel || ''} label="客户等级" onChange={(e) => handleFilterChange('customerLevel', e.target.value)}>
             <MenuItem value="">全部</MenuItem>
-            {CUSTOMER_LEVELS.map((level) => (
-              <MenuItem key={level.value} value={level.value}>{level.label}</MenuItem>
+            {customerLevelOptions.map((level) => (
+              <MenuItem key={level.value} value={level.value}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: level.color }} />
+                  {level.label}
+                </Box>
+              </MenuItem>
             ))}
           </Select>
         </FormControl>

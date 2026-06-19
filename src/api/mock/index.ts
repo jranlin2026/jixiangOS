@@ -6,7 +6,6 @@ import { mockDeliveries } from './data/deliveries';
 import { mockCommissions } from './data/commissions';
 import { mockFinanceDailyRecords, mockChannelROI } from './data/finance';
 import { mockUsers } from './data/users';
-import { mockChannels } from './data/channels';
 import { mockDepartments } from './data/departments';
 import { mockRoles } from './data/roles';
 import { mockProducts } from './data/products';
@@ -25,7 +24,6 @@ export { mockDeliveries } from './data/deliveries';
 export { mockCommissions } from './data/commissions';
 export { mockFinanceDailyRecords, mockChannelROI } from './data/finance';
 export { mockUsers } from './data/users';
-export { mockChannels } from './data/channels';
 export { mockDepartments } from './data/departments';
 export { mockRoles } from './data/roles';
 export { mockProducts } from './data/products';
@@ -49,7 +47,6 @@ export function initializeMockData(): void {
     channelROI: mockChannelROI,
   });
   initializeStorage(STORAGE_KEYS.USERS, mockUsers);
-  initializeStorage(STORAGE_KEYS.CHANNELS, mockChannels);
   initializeStorage(STORAGE_KEYS.AI_SESSIONS, []);
   initializeStorage(STORAGE_KEYS.DEPARTMENTS, mockDepartments);
   initializeStorage(STORAGE_KEYS.ROLES, mockRoles);

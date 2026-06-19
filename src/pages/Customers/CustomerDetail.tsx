@@ -18,10 +18,10 @@ import useCustomerStore from '../../store/useCustomerStore';
 import type { Customer, CustomerActivityRecord } from '../../types/customer';
 import type { AIBusinessCard } from '../../types/aiCard';
 import type { Order } from '../../types/order';
-import type { LeadSourceConfig, User } from '../../types/settings';
+import type { CustomerLevelConfig, LeadSourceConfig, User } from '../../types/settings';
 import { aiCardApi, customerApi, orderApi, settingsApi } from '../../api';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
-import { RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, getProductLevelColor, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
+import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, getProductLevelColor, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import AIBusinessCardPanel from '../../shared/components/AIBusinessCardPanel';
 import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
@@ -77,6 +77,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const [contracts, setContracts] = useState<ContractFile[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
+  const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
   const [releaseDialogOpen, setReleaseDialogOpen] = useState(false);
   const [releaseReason, setReleaseReason] = useState('');
   const { addFollowUp } = useCustomerStore();
@@ -106,6 +107,9 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     });
     settingsApi.fetchLeadSourceConfigs().then((res) => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
+    });
+    settingsApi.fetchCustomerLevelConfigs().then((res) => {
+      if (res.code === 0) setCustomerLevelConfigs(res.data);
     });
     orderApi.fetchOrders({ pageSize: 1000 }).then((res) => {
       if (res.code !== 0) return;
@@ -168,6 +172,16 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const selectedSourceKey = sourceOptions.find((option) => (
     option.parentName === String(draft.leadSource || '') && option.childName === String(draft.sourceName || '')
   ))?.key || '';
+  const customerLevelOptions = useMemo(() => {
+    const activeConfigs = customerLevelConfigs.filter((item) => item.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
+    const options = activeConfigs.length
+      ? activeConfigs.map((item) => ({ value: item.value, label: item.label, color: item.color }))
+      : CUSTOMER_LEVELS;
+    if (currentCustomer.customerLevel && !options.some((item) => item.value === currentCustomer.customerLevel)) {
+      return [{ value: currentCustomer.customerLevel, label: currentCustomer.customerLevel, color: '#9E9E9E' }, ...options];
+    }
+    return options;
+  }, [currentCustomer.customerLevel, customerLevelConfigs]);
 
   const handleSourceSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const option = sourceOptions.find((item) => item.key === event.target.value);
@@ -198,7 +212,6 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
         name: currentCustomer.name,
         company: currentCustomer.company,
         phone: currentCustomer.phone,
-        email: currentCustomer.email,
         wechat: currentCustomer.wechat,
         industry: currentCustomer.industry,
         city: currentCustomer.city,
@@ -223,7 +236,6 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     const payload: Partial<Customer> = {
       name: draft.name,
       company: draft.company,
-      email: draft.email,
       leadSource: draft.leadSource,
       sourceName: draft.sourceName,
       sourceType: normalizeResourceOwnership(draft.sourceType as string | undefined),
@@ -231,6 +243,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       city: draft.city,
       owner: draft.owner,
       leadInputBy: draft.leadInputBy,
+      customerLevel: draft.customerLevel,
+      originalSalesTransferBy: draft.originalSalesTransferBy,
       remark: draft.remark,
     };
     const res = await customerApi.updateCustomer(currentCustomer.id, payload);
@@ -296,8 +310,9 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   };
 
   const renderInfoRow = (label: string, field: keyof Customer, editable = true) => {
-    const isUserField = field === 'owner' || field === 'leadInputBy';
+    const isUserField = field === 'owner' || field === 'leadInputBy' || field === 'originalSalesTransferBy';
     const isResourceField = field === 'sourceType';
+    const isCustomerLevelField = field === 'customerLevel';
     const currentValue = (draft[field] as string) || '';
     const showCurrentUserOption = isUserField && currentValue && !users.some((user) => user.name === currentValue);
     const displayValue = field === 'createdAt' && currentCustomer.createdAt
@@ -329,10 +344,28 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                 size="small"
                 fullWidth
               >
+                {field === 'originalSalesTransferBy' && <MenuItem value="">无</MenuItem>}
                 {showCurrentUserOption && <MenuItem value={currentValue}>{currentValue}</MenuItem>}
                 {users.map((user) => (
                   <MenuItem key={user.id} value={user.name}>
                     {user.name}（{user.role}）
+                  </MenuItem>
+                ))}
+              </TextField>
+            ) : isCustomerLevelField ? (
+              <TextField
+                select
+                value={currentValue}
+                onChange={(event) => setDraft((prev) => ({ ...prev, [field]: event.target.value }))}
+                size="small"
+                fullWidth
+              >
+                {customerLevelOptions.map((level) => (
+                  <MenuItem key={level.value} value={level.value}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: level.color }} />
+                      {level.label}
+                    </Box>
                   </MenuItem>
                 ))}
               </TextField>
@@ -344,7 +377,9 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                 fullWidth
               />
             )
-          ) : isResourceField ? normalizeResourceOwnership(displayValue ? String(displayValue) : undefined) : displayValue}
+          ) : isResourceField ? normalizeResourceOwnership(displayValue ? String(displayValue) : undefined) : isCustomerLevelField ? (
+            <CustomerLevelBadge level={String(currentCustomer.customerLevel || '')} />
+          ) : displayValue}
         </Box>
       </Box>
     );
@@ -637,7 +672,6 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               {renderInfoRow('公司', 'company')}
               {renderInfoRow('手机', 'phone', false)}
               {renderInfoRow('微信', 'wechat', false)}
-              {renderInfoRow('邮箱', 'email')}
               {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={{ bgcolor: `${lifecycleConfig.color}18`, color: lifecycleConfig.color, fontWeight: 600 }} />)}
               {renderSourceRow()}
               {renderInfoRow('资源归属', 'sourceType')}
@@ -645,6 +679,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               {renderInfoRow('城市', 'city')}
               {renderInfoRow('销售负责人', 'owner')}
               {renderInfoRow('线索录入人', 'leadInputBy')}
+              {renderInfoRow('客户等级', 'customerLevel')}
+              {renderInfoRow('原销转人员', 'originalSalesTransferBy')}
               {renderInfoRow('累计消费', 'totalSpent', false)}
               {renderInfoRow('订单数', 'orderCount', false)}
               {renderInfoRow('创建时间', 'createdAt', false)}

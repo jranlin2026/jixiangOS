@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Paper, Tab, Tabs, Typography } from '@mui/material';
-import UserManagement from './UserManagement';
 import RolePermission from './RolePermission';
-import ChannelConfigPage from './ChannelConfig';
 import ProductConfigPage from './ProductConfig';
-import DepartmentManagement from './DepartmentManagement';
+import EmployeeDepartmentManagement from './EmployeeDepartmentManagement';
+import CustomerLevelConfigPage from './CustomerLevelConfig';
 import OrderTypeConfigPage from './OrderTypeConfig';
 import LifecycleStatusConfigPage from './LifecycleStatusConfig';
 import LeadSourceConfigPage from './LeadSourceConfig';
@@ -28,11 +27,10 @@ const Settings: React.FC = () => {
   const currentUser = useAuthStore((state) => state.currentUser);
 
   const tabs = useMemo(() => ([
-    { label: '用户管理', permissionKey: PERMISSION_KEYS.SETTINGS_USERS, component: <UserManagement /> },
+    { label: '员工&部门', permissionKey: PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS, component: <EmployeeDepartmentManagement /> },
     { label: '角色权限', permissionKey: PERMISSION_KEYS.SETTINGS_ROLES, component: <RolePermission /> },
-    { label: '部门管理', permissionKey: PERMISSION_KEYS.SETTINGS_DEPARTMENTS, component: <DepartmentManagement /> },
-    { label: '渠道配置', permissionKey: PERMISSION_KEYS.SETTINGS_CHANNELS, component: <ChannelConfigPage /> },
     { label: '产品配置', permissionKey: PERMISSION_KEYS.SETTINGS_PRODUCTS, component: <ProductConfigPage /> },
+    { label: '客户等级', permissionKey: PERMISSION_KEYS.SETTINGS, component: <CustomerLevelConfigPage /> },
     { label: '订单类型', permissionKey: PERMISSION_KEYS.SETTINGS_ORDER_TYPES, component: <OrderTypeConfigPage /> },
     { label: '生命周期状态', permissionKey: PERMISSION_KEYS.SETTINGS_LIFECYCLE, component: <LifecycleStatusConfigPage /> },
     { label: '线索来源', permissionKey: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, component: <LeadSourceConfigPage /> },

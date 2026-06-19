@@ -1,8 +1,8 @@
-import type { User, UserRole, ProductConfig, ChannelConfig, OrderTypeConfig, LifecycleStatusConfig, LeadSourceConfig, LifecycleStatusCode } from '../types/settings';
+import type { User, UserRole, ProductConfig, OrderTypeConfig, LifecycleStatusConfig, LeadSourceConfig, LifecycleStatusCode, CustomerLevelConfig } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, COMMISSION_RATES, DEFAULT_ORDER_TYPE_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, DEFAULT_LEAD_SOURCE_CONFIGS, normalizeLifecycleStatusCode } from '../shared/utils/constants';
+import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, COMMISSION_RATES, DEFAULT_ORDER_TYPE_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, DEFAULT_LEAD_SOURCE_CONFIGS, DEFAULT_CUSTOMER_LEVEL_CONFIGS, normalizeLifecycleStatusCode } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 import type { Order } from '../types/order';
@@ -50,6 +50,14 @@ function ensureLifecycleStatusConfigs(): LifecycleStatusConfig[] {
     };
   }).sort((a, b) => a.sortOrder - b.sortOrder);
   if (JSON.stringify(existing || []) !== JSON.stringify(sorted)) setStorageData(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, sorted);
+  return sorted;
+}
+
+function ensureCustomerLevelConfigs(): CustomerLevelConfig[] {
+  const existing = getStorageData<CustomerLevelConfig[]>(STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS);
+  const configs = existing?.length ? existing : DEFAULT_CUSTOMER_LEVEL_CONFIGS;
+  const sorted = [...configs].sort((a, b) => a.sortOrder - b.sortOrder);
+  if (!existing?.length) setStorageData(STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS, sorted);
   return sorted;
 }
 
@@ -179,44 +187,6 @@ async function fetchProductConfigs(): Promise<ApiResponse<ProductConfig[]>> {
     { id: 'prod-004', name: '合伙人版', level: '合伙人', price: 450000, commissionRate: COMMISSION_RATES['合伙人'], description: '战略合伙版，深度合作模式', isActive: true },
   ];
   return createSuccessResponse(configs);
-}
-
-// ---- 渠道配置 ----
-
-async function fetchChannelConfigs(): Promise<ApiResponse<ChannelConfig[]>> {
-  ensureInit();
-  await delay(150);
-  const channels = getStorageData<ChannelConfig[]>(STORAGE_KEYS.CHANNELS) || [];
-  return createSuccessResponse(channels);
-}
-
-async function createChannelConfig(data: Omit<ChannelConfig, 'id'>): Promise<ApiResponse<ChannelConfig>> {
-  ensureInit();
-  await delay(200);
-  const channels = getStorageData<ChannelConfig[]>(STORAGE_KEYS.CHANNELS) || [];
-  const newChannel: ChannelConfig = { ...data, id: uuidv4() };
-  channels.push(newChannel);
-  setStorageData(STORAGE_KEYS.CHANNELS, channels);
-  return createSuccessResponse(newChannel);
-}
-
-async function updateChannelConfig(id: string, data: Partial<ChannelConfig>): Promise<ApiResponse<ChannelConfig | null>> {
-  ensureInit();
-  await delay(200);
-  const channels = getStorageData<ChannelConfig[]>(STORAGE_KEYS.CHANNELS) || [];
-  const idx = channels.findIndex((c) => c.id === id);
-  if (idx === -1) return createSuccessResponse(null);
-  channels[idx] = { ...channels[idx], ...data };
-  setStorageData(STORAGE_KEYS.CHANNELS, channels);
-  return createSuccessResponse(channels[idx]);
-}
-
-async function deleteChannelConfig(id: string): Promise<ApiResponse<boolean>> {
-  ensureInit();
-  await delay(150);
-  const channels = getStorageData<ChannelConfig[]>(STORAGE_KEYS.CHANNELS) || [];
-  setStorageData(STORAGE_KEYS.CHANNELS, channels.filter((c) => c.id !== id));
-  return createSuccessResponse(true);
 }
 
 // ---- 订单类型配置 ----
@@ -357,6 +327,80 @@ async function deleteLifecycleStatusConfig(id: string): Promise<ApiResponse<bool
   return createSuccessResponse(true);
 }
 
+// ---- 客户等级配置 ----
+
+async function fetchCustomerLevelConfigs(): Promise<ApiResponse<CustomerLevelConfig[]>> {
+  ensureInit();
+  await delay(120);
+  return createSuccessResponse(ensureCustomerLevelConfigs());
+}
+
+async function createCustomerLevelConfig(
+  data: Omit<CustomerLevelConfig, 'id' | 'createdAt' | 'updatedAt'>,
+): Promise<ApiResponse<CustomerLevelConfig | null>> {
+  ensureInit();
+  await delay(150);
+  const configs = ensureCustomerLevelConfigs();
+  const value = data.value.trim();
+  const label = data.label.trim();
+  if (!value) return createErrorResponse('客户等级编码不能为空');
+  if (!label) return createErrorResponse('客户等级名称不能为空');
+  if (configs.some((config) => config.value === value)) return createErrorResponse('客户等级编码已存在');
+  const now = new Date().toISOString();
+  const config: CustomerLevelConfig = {
+    ...data,
+    value,
+    label,
+    id: `clc-${uuidv4().slice(0, 8)}`,
+    createdAt: now,
+    updatedAt: now,
+  };
+  setStorageData(STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS, [...configs, config].sort((a, b) => a.sortOrder - b.sortOrder));
+  return createSuccessResponse(config);
+}
+
+async function updateCustomerLevelConfig(
+  id: string,
+  data: Partial<Omit<CustomerLevelConfig, 'id' | 'createdAt' | 'updatedAt'>>,
+): Promise<ApiResponse<CustomerLevelConfig | null>> {
+  ensureInit();
+  await delay(150);
+  const configs = ensureCustomerLevelConfigs();
+  const idx = configs.findIndex((config) => config.id === id);
+  if (idx === -1) return createSuccessResponse(null);
+  const nextValue = typeof data.value === 'string' ? data.value.trim() : configs[idx].value;
+  const nextLabel = typeof data.label === 'string' ? data.label.trim() : configs[idx].label;
+  if (!nextValue) return createErrorResponse('客户等级编码不能为空');
+  if (!nextLabel) return createErrorResponse('客户等级名称不能为空');
+  if (configs.some((config) => config.id !== id && config.value === nextValue)) return createErrorResponse('客户等级编码已存在');
+  const next = [...configs];
+  next[idx] = {
+    ...configs[idx],
+    ...data,
+    value: nextValue,
+    label: nextLabel,
+    color: data.color || configs[idx].color,
+    sortOrder: Number(data.sortOrder ?? configs[idx].sortOrder),
+    updatedAt: new Date().toISOString(),
+  };
+  setStorageData(STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS, next.sort((a, b) => a.sortOrder - b.sortOrder));
+  return createSuccessResponse(next[idx]);
+}
+
+async function deleteCustomerLevelConfig(id: string): Promise<ApiResponse<boolean>> {
+  ensureInit();
+  await delay(150);
+  const configs = ensureCustomerLevelConfigs();
+  const target = configs.find((config) => config.id === id);
+  if (!target) return createSuccessResponse(false);
+  const customers = getStorageData<Array<{ customerLevel?: string }>>(STORAGE_KEYS.CUSTOMERS) || [];
+  if (customers.some((customer) => customer.customerLevel === target.value)) {
+    return createErrorResponse('已有客户使用该等级，不能删除');
+  }
+  setStorageData(STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS, configs.filter((config) => config.id !== id));
+  return createSuccessResponse(true);
+}
+
 // ---- 线索来源配置 ----
 
 async function fetchLeadSourceConfigs(): Promise<ApiResponse<LeadSourceConfig[]>> {
@@ -432,10 +476,6 @@ export const settingsApi = {
   deleteUser,
   resetUserPassword,
   fetchProductConfigs,
-  fetchChannelConfigs,
-  createChannelConfig,
-  updateChannelConfig,
-  deleteChannelConfig,
   fetchOrderTypeConfigs,
   createOrderTypeConfig,
   updateOrderTypeConfig,
@@ -444,6 +484,10 @@ export const settingsApi = {
   createLifecycleStatusConfig,
   updateLifecycleStatusConfig,
   deleteLifecycleStatusConfig,
+  fetchCustomerLevelConfigs,
+  createCustomerLevelConfig,
+  updateCustomerLevelConfig,
+  deleteCustomerLevelConfig,
   fetchLeadSourceConfigs,
   createLeadSourceConfig,
   updateLeadSourceConfig,
