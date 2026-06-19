@@ -288,14 +288,14 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       if (productRes.code === 0) setProducts(productItems);
       if (levelRes.code === 0) setProductLevelConfigs(activeLevels);
       setForm((prev) => {
-        const currentExists = activeLevels.some((level) => level.name === prev.productLevel);
-        const nextLevel = currentExists ? prev.productLevel : activeLevels[0]?.name || productItems[0]?.level || prev.productLevel;
+        if (prev.productLevel) return prev;
+        const nextLevel = activeLevels[0]?.name || productItems[0]?.level || prev.productLevel;
         const nextAmount = productItems.find((product) => product.level === nextLevel)?.price || prev.actualAmount;
-        return currentExists ? prev : {
+        return nextLevel ? {
           ...prev,
           productLevel: nextLevel as ProductLevel,
           actualAmount: nextAmount,
-        };
+        } : prev;
       });
     };
     loadProducts();
@@ -328,8 +328,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     [products],
   );
 
-  const productLevels = useMemo(
-    () => productLevelConfigs.length
+  const productLevels = useMemo(() => {
+    const configuredLevels = productLevelConfigs.length
       ? productLevelConfigs
       : Array.from(new Set(products.map((product) => product.level))).map((level, index) => ({
         id: level,
@@ -339,9 +339,22 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
         sortOrder: index + 1,
         createdAt: '',
         updatedAt: '',
-      })),
-    [productLevelConfigs, products],
-  );
+      }));
+
+    if (form.productLevel && !configuredLevels.some((level) => level.name === form.productLevel)) {
+      return [{
+        id: form.productLevel,
+        name: form.productLevel,
+        color: '#607D8B',
+        isActive: true,
+        sortOrder: 0,
+        createdAt: '',
+        updatedAt: '',
+      }, ...configuredLevels];
+    }
+
+    return configuredLevels;
+  }, [form.productLevel, productLevelConfigs, products]);
 
   const orderTypeOptions = useMemo(() => {
     const activeItems = orderTypeConfigs.filter((item) => item.isActive);
@@ -510,7 +523,9 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       paymentOrderNo: form.paymentOrderNo || undefined,
       voucherName: voucherName || undefined,
       voucherPreview: voucherPreview || undefined,
+      remark: order?.payments?.[0]?.remark,
     };
+    const payments = order?.payments?.length ? [payment, ...order.payments.slice(1)] : [payment];
 
     const payload = {
       ...form,
@@ -518,12 +533,12 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       actualAmount,
       resourceOwnership: normalizeResourceOwnership(form.resourceOwnership),
       paymentMethod,
-      status: '已确认' as Order['status'],
+      status: order?.status || '已确认' as Order['status'],
       dealScene: dealSceneFromOrderType(form.orderType),
-      proofStatus: voucherName || voucherPreview ? '已上传' as const : '待补充' as const,
-      payments: [payment],
-      isExternalTalentOrder: false,
-      performanceBaseAmount: actualAmount,
+      proofStatus: voucherName || voucherPreview ? '已上传' as const : order?.proofStatus || '待补充' as const,
+      payments,
+      isExternalTalentOrder: order?.isExternalTalentOrder || false,
+      performanceBaseAmount: order?.performanceBaseAmount ?? actualAmount,
       collaboratorRatio: Number(form.collaboratorRatio) || undefined,
       collaboratorName: form.collaboratorName || undefined,
       originalOrderId: form.originalOrderId || undefined,

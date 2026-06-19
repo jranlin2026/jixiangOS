@@ -20,6 +20,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Tooltip,
@@ -35,10 +36,9 @@ import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import useOrderStore from '../../store/useOrderStore';
 import { customerApi, orderApi, productApi, settingsApi } from '../../api';
 import { getProductLevelColor, PRODUCT_LEVELS, normalizeResourceOwnership } from '../../shared/utils/constants';
-import { formatCurrency, formatDate } from '../../shared/utils/formatters';
+import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
 import CustomerDetail from '../Customers/CustomerDetail';
-import CustomerForm from '../Customers/CustomerForm';
 import OrderDetail from './OrderDetail';
 import OrderForm from './OrderForm';
 import OrderHistoryDialog from './OrderHistoryDialog';
@@ -116,7 +116,7 @@ const readVisibleColumns = () => {
 };
 
 const Orders: React.FC = () => {
-  const { items, filters, fetchItems, fetchStats, setFilters, delete: deleteOrder } = useOrderStore();
+  const { items, filters, pagination, fetchItems, fetchStats, setFilters, delete: deleteOrder } = useOrderStore();
   const [detailOpen, setDetailOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -124,8 +124,6 @@ const Orders: React.FC = () => {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [customerFormOpen, setCustomerFormOpen] = useState(false);
-  const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
   const [orderCustomer, setOrderCustomer] = useState<Customer | null>(null);
   const [customerOrdersOpen, setCustomerOrdersOpen] = useState(false);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
@@ -188,14 +186,27 @@ const Orders: React.FC = () => {
   };
 
   const handleFilterChange = (key: string, value: string) => {
-    const newFilters = { ...filters, paymentMethod: undefined, [key]: value || undefined };
+    const newFilters = { ...filters, paymentMethod: undefined, [key]: value || undefined, page: 1, pageSize: pagination.pageSize || 10 };
     setFilters(newFilters);
     fetchItems(newFilters);
   };
 
   const handlePaymentDateSort = () => {
     const nextDirection: 'asc' | 'desc' = filters.sortBy === 'paymentDate' && filters.sortDirection === 'desc' ? 'asc' : 'desc';
-    const newFilters = { ...filters, paymentMethod: undefined, sortBy: 'paymentDate' as const, sortDirection: nextDirection };
+    const newFilters = { ...filters, paymentMethod: undefined, sortBy: 'paymentDate' as const, sortDirection: nextDirection, page: 1, pageSize: pagination.pageSize || 10 };
+    setFilters(newFilters);
+    fetchItems(newFilters);
+  };
+
+  const handlePageChange = (_: React.MouseEvent<HTMLButtonElement> | null, page: number) => {
+    const newFilters = { ...filters, page: page + 1, pageSize: pagination.pageSize || 10 };
+    setFilters(newFilters);
+    fetchItems(newFilters);
+  };
+
+  const handleRowsPerPageChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const pageSize = Number(event.target.value);
+    const newFilters = { ...filters, page: 1, pageSize };
     setFilters(newFilters);
     fetchItems(newFilters);
   };
@@ -246,12 +257,6 @@ const Orders: React.FC = () => {
       totalSpent: relatedOrders.reduce((sum, item) => sum + (Number(item.actualAmount) || 0), 0),
     });
     setCustomerOpen(true);
-  };
-
-  const handleEditCustomer = (customer: Customer) => {
-    setEditCustomer(customer);
-    setCustomerFormOpen(true);
-    setCustomerOpen(false);
   };
 
   const handleCreateOrderForCustomer = (customer: Customer) => {
@@ -442,6 +447,23 @@ const Orders: React.FC = () => {
           </TableBody>
         </Table>
       </TableContainer>
+      <TablePagination
+        component="div"
+        count={pagination.total}
+        page={Math.max((pagination.page || 1) - 1, 0)}
+        rowsPerPage={pagination.pageSize || 10}
+        rowsPerPageOptions={[10, 20, 50, 100]}
+        onPageChange={handlePageChange}
+        onRowsPerPageChange={handleRowsPerPageChange}
+        labelRowsPerPage="每页条数"
+        labelDisplayedRows={formatPaginationRows}
+        sx={{
+          border: '1px solid #f0f0f0',
+          borderTop: 0,
+          bgcolor: '#fff',
+          '& .MuiTablePagination-toolbar': { minHeight: 48 },
+        }}
+      />
 
       {selectedOrder && (
         <OrderDetail order={selectedOrder} open={detailOpen} onClose={() => setDetailOpen(false)} />
@@ -452,22 +474,14 @@ const Orders: React.FC = () => {
           customer={selectedCustomer}
           open={customerOpen}
           onClose={() => setCustomerOpen(false)}
-          onEdit={handleEditCustomer}
           onCreateOrder={handleCreateOrderForCustomer}
           onViewOrders={handleViewCustomerOrders}
+          onUpdated={(updated) => {
+            setSelectedCustomer(updated);
+            fetchItems({ ...filters, paymentMethod: undefined });
+          }}
         />
       )}
-
-      <CustomerForm
-        key={editCustomer?.id ?? 'order-customer-edit'}
-        open={customerFormOpen}
-        customer={editCustomer}
-        onClose={() => setCustomerFormOpen(false)}
-        onSuccess={() => {
-          fetchItems({ ...filters, paymentMethod: undefined });
-          setCustomerFormOpen(false);
-        }}
-      />
 
       <OrderForm
         open={formOpen}

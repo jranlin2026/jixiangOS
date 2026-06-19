@@ -77,6 +77,10 @@ function countAssignedToday(userName: string): number {
   return records.filter((record) => record.createdAt.slice(0, 10) === today && record.assignedTo === userName).length;
 }
 
+function formatLeadSourceText(lead: Partial<Lead>): string | undefined {
+  return [lead.source, lead.sourceName].filter(Boolean).join('-') || undefined;
+}
+
 function assignLeadOwner(config: LeadFlowConfig, fallbackOwner?: string): { owner: string; assignedTo?: string; assignedAt?: string; assignmentRuleId?: string; status: '入库成功' | '待分配'; reason: string; nextIndex: number } {
   if (!config.autoAssignEnabled) {
     if (fallbackOwner && fallbackOwner !== '待分配') {
@@ -249,7 +253,7 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
       company: data.company,
       phone: data.phone,
       wechat: data.wechat,
-      source: data.source,
+      source: formatLeadSourceText(data),
       inputBy: data.inputBy,
       status: '入库失败',
       matchedRule: ruleName,
@@ -268,7 +272,7 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
       company: data.company,
       phone: data.phone,
       wechat: data.wechat,
-      source: data.source,
+      source: formatLeadSourceText(data),
       inputBy: data.inputBy,
       status: '入库失败',
       matchedRule: ruleName,
@@ -311,7 +315,7 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
     company: leadWithCustomer.company,
     phone: leadWithCustomer.phone,
     wechat: leadWithCustomer.wechat,
-    source: leadWithCustomer.source,
+    source: formatLeadSourceText(leadWithCustomer),
     inputBy: leadWithCustomer.inputBy,
     assignedTo: leadWithCustomer.assignedTo,
     status: assignment.status,
@@ -334,12 +338,29 @@ async function manualAssignLead(leadId: string, userName: string): Promise<ApiRe
   const idx = leads.findIndex((lead) => lead.id === leadId);
   if (idx === -1) return createSuccessResponse(null);
   const now = new Date().toISOString();
+  const beforeAssignee = leads[idx].assignedTo || leads[idx].owner || '';
+  const changed = beforeAssignee !== userName;
   leads[idx] = {
     ...leads[idx],
     owner: userName,
     assignedTo: userName,
-    assignedAt: now,
+    assignedAt: changed ? now : leads[idx].assignedAt,
     intakeStatus: '入库成功',
+    changeHistory: changed
+      ? [{
+        id: `hist-${uuidv4().slice(0, 8)}`,
+        action: 'update',
+        operator: userName,
+        changedAt: now,
+        summary: '修改了分配销售',
+        changes: [{
+          field: 'assignedTo',
+          label: '分配销售',
+          oldValue: beforeAssignee || null,
+          newValue: userName,
+        }],
+      }, ...(leads[idx].changeHistory || [])]
+      : leads[idx].changeHistory,
     updatedAt: now,
   };
   setStorageData(STORAGE_KEYS.LEADS, leads);

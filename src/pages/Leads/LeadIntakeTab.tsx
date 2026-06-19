@@ -12,31 +12,56 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography,
 } from '@mui/material';
 import { leadFlowApi } from '../../api';
 import type { LeadIntakeRecord } from '../../types/lead';
-import { formatDate } from '../../shared/utils/formatters';
+import { formatDate, formatPaginationRows } from '../../shared/utils/formatters';
+import type { PaginatedResponse } from '../../api/types';
 
 const LeadIntakeTab: React.FC = () => {
   const [items, setItems] = useState<LeadIntakeRecord[]>([]);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
+  const [pagination, setPagination] = useState<PaginatedResponse<LeadIntakeRecord>['pagination']>({
+    page: 1,
+    pageSize: 10,
+    total: 0,
+    totalPages: 0,
+  });
 
-  const fetchData = async (nextSearch = search, nextStatus = status) => {
+  const fetchData = async (
+    nextSearch = search,
+    nextStatus = status,
+    nextPage = pagination.page,
+    nextPageSize = pagination.pageSize,
+  ) => {
     const res = await leadFlowApi.fetchIntakeRecords({
       search: nextSearch || undefined,
       status: nextStatus || undefined,
-      pageSize: 100,
+      page: nextPage,
+      pageSize: nextPageSize,
     });
-    if (res.code === 0) setItems(res.data.items);
+    if (res.code === 0) {
+      setItems(res.data.items);
+      setPagination(res.data.pagination);
+    }
   };
 
   useEffect(() => {
-    fetchData();
+    fetchData(search, status, 1, 10);
   }, []);
+
+  const handlePageChange = (_: React.MouseEvent<HTMLButtonElement> | null, page: number) => {
+    fetchData(search, status, page + 1, pagination.pageSize);
+  };
+
+  const handleRowsPerPageChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    fetchData(search, status, 1, Number(event.target.value));
+  };
 
   return (
     <Box>
@@ -47,7 +72,7 @@ const LeadIntakeTab: React.FC = () => {
           value={search}
           onChange={(event) => {
             setSearch(event.target.value);
-            fetchData(event.target.value, status);
+            fetchData(event.target.value, status, 1, pagination.pageSize);
           }}
           sx={{ minWidth: 260 }}
         />
@@ -58,7 +83,7 @@ const LeadIntakeTab: React.FC = () => {
             label="入库状态"
             onChange={(event) => {
               setStatus(event.target.value);
-              fetchData(search, event.target.value);
+              fetchData(search, event.target.value, 1, pagination.pageSize);
             }}
           >
             <MenuItem value="">全部</MenuItem>
@@ -88,13 +113,17 @@ const LeadIntakeTab: React.FC = () => {
               <TableRow key={record.id} hover>
                 <TableCell>
                   <Typography variant="body2" sx={{ fontWeight: 600 }}>{record.name}</Typography>
-                  <Typography variant="caption" sx={{ color: '#6b7280' }}>{record.company || '-'}</Typography>
+                  {record.company && (
+                    <Typography variant="caption" sx={{ color: '#6b7280' }}>{record.company}</Typography>
+                  )}
                 </TableCell>
                 <TableCell>
-                  <Typography variant="body2">{record.phone || '-'}</Typography>
-                  <Typography variant="caption" sx={{ color: '#6b7280' }}>{record.wechat || '-'}</Typography>
+                  <Typography variant="body2">{record.phone || record.wechat || '未填写'}</Typography>
+                  {record.phone && record.wechat && (
+                    <Typography variant="caption" sx={{ color: '#6b7280' }}>{record.wechat}</Typography>
+                  )}
                 </TableCell>
-                <TableCell>{record.source || '-'}</TableCell>
+                <TableCell>{record.source || '未填写'}</TableCell>
                 <TableCell>
                   <Chip
                     label={record.status}
@@ -102,10 +131,10 @@ const LeadIntakeTab: React.FC = () => {
                     color={record.status === '入库失败' ? 'error' : record.status === '待分配' ? 'warning' : 'success'}
                   />
                 </TableCell>
-                <TableCell>{record.assignedTo || '-'}</TableCell>
-                <TableCell>{record.matchedRule}</TableCell>
+                <TableCell>{record.assignedTo || (record.status === '待分配' ? '待分配' : '未分配')}</TableCell>
+                <TableCell>{record.matchedRule || '系统规则'}</TableCell>
                 <TableCell>
-                  {record.failureReason || record.collisionTargetName || '-'}
+                  {record.failureReason || record.collisionTargetName || (record.status === '入库成功' ? '正常入库' : '等待分配')}
                 </TableCell>
                 <TableCell>{formatDate(record.createdAt)}</TableCell>
               </TableRow>
@@ -120,6 +149,23 @@ const LeadIntakeTab: React.FC = () => {
           </TableBody>
         </Table>
       </TableContainer>
+      <TablePagination
+        component="div"
+        count={pagination.total}
+        page={Math.max((pagination.page || 1) - 1, 0)}
+        rowsPerPage={pagination.pageSize || 10}
+        rowsPerPageOptions={[10, 20, 50, 100]}
+        onPageChange={handlePageChange}
+        onRowsPerPageChange={handleRowsPerPageChange}
+        labelRowsPerPage="每页条数"
+        labelDisplayedRows={formatPaginationRows}
+        sx={{
+          border: '1px solid #f0f0f0',
+          borderTop: 0,
+          bgcolor: '#fff',
+          '& .MuiTablePagination-toolbar': { minHeight: 48 },
+        }}
+      />
     </Box>
   );
 };

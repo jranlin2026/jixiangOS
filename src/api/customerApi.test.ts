@@ -1,0 +1,152 @@
+import assert from 'node:assert/strict';
+import { customerApi } from './customerApi';
+import { STORAGE_KEYS } from '../shared/utils/constants';
+import type { Customer } from '../types/customer';
+import type { Lead } from '../types/lead';
+import type { Order } from '../types/order';
+
+const storage = (() => {
+  const values = new Map<string, string>();
+  return {
+    get length() {
+      return values.size;
+    },
+    key: (index: number) => Array.from(values.keys())[index] ?? null,
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+    clear: () => values.clear(),
+  };
+})();
+
+Object.defineProperty(globalThis, 'localStorage', {
+  value: storage,
+  configurable: true,
+});
+
+const now = '2026-06-18T12:00:00.000Z';
+
+const customer: Customer = {
+  id: 'cust-test',
+  name: '测试客户',
+  company: '测试公司',
+  phone: '13900000000',
+  wechat: 'wx-test',
+  email: '',
+  customerLevel: 'L1',
+  owner: '王磊',
+  totalSpent: 0,
+  orderCount: 0,
+  growthPath: [],
+  growthRecords: [],
+  activityRecords: [],
+  leadInputBy: '张伟',
+  leadSource: '直播部',
+  sourceName: '抖音02',
+  sourceType: '公司资源',
+  industry: '制造业',
+  city: '深圳',
+  remark: '',
+  createdAt: now,
+  updatedAt: now,
+};
+
+const legacyCustomer: Customer = {
+  ...customer,
+  id: 'cust-legacy',
+  name: '旧来源客户',
+  phone: '13800000000',
+  wechat: 'wx-legacy',
+  leadSource: undefined,
+  sourceName: '老客户推荐',
+  sourceType: '转介绍',
+};
+
+const lead: Lead = {
+  id: 'lead-test',
+  customerId: 'cust-test',
+  name: '测试客户',
+  company: '测试公司',
+  phone: '13900000000',
+  wechat: 'wx-test',
+  source: '直播部',
+  sourceName: '抖音02',
+  sourceType: '公司资源',
+  status: '新线索',
+  lifecycleStatus: '待跟进',
+  intakeStatus: '入库成功',
+  inputBy: '张伟',
+  assignedTo: '王磊',
+  owner: '王磊',
+  industry: '制造业',
+  city: '深圳',
+  createdAt: now,
+  updatedAt: now,
+  followUpRecords: [],
+};
+
+const order: Order = {
+  id: 'order-test',
+  orderNo: 'ORD-TEST-0001',
+  customerId: 'cust-test',
+  customerName: '测试公司',
+  productLevel: '899',
+  orderType: '新购',
+  amount: 899,
+  actualAmount: 899,
+  paymentMethod: '对公转账',
+  status: '已确认',
+  refundStatus: '无',
+  owner: '王磊',
+  sourceType: '公司资源',
+  resourceOwnership: '公司资源',
+  payments: [{
+    id: 'pay-test',
+    amount: 899,
+    paymentMethod: '对公转账',
+    paidAt: now,
+  }],
+  createdAt: now,
+  updatedAt: now,
+};
+
+storage.clear();
+storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([customer, legacyCustomer]));
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([lead]));
+storage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify([order]));
+
+const listRes = await customerApi.fetchCustomers({ pageSize: 10 });
+const normalizedCustomer = listRes.data.items.find((item) => item.id === 'cust-test');
+const normalizedLegacy = listRes.data.items.find((item) => item.id === 'cust-legacy');
+assert.equal(normalizedCustomer?.totalSpent, 899);
+assert.equal(normalizedCustomer?.orderCount, 1);
+assert.equal(normalizedCustomer?.productLevel, '899');
+assert.equal(normalizedCustomer?.growthPath?.[0]?.orderNo, 'ORD-TEST-0001');
+const secondListRes = await customerApi.fetchCustomers({ pageSize: 10 });
+const secondNormalizedCustomer = secondListRes.data.items.find((item) => item.id === 'cust-test');
+assert.equal(secondNormalizedCustomer?.growthPath?.filter((item) => item.orderNo === 'ORD-TEST-0001').length, 1);
+assert.equal(secondNormalizedCustomer?.activityRecords?.filter((item) => item.relatedId === 'order-test' && item.type === 'order').length, 1);
+assert.equal(normalizedLegacy?.leadSource, '转介绍');
+assert.equal(normalizedLegacy?.sourceType, '个人资源');
+
+const res = await customerApi.updateCustomer('cust-test', {
+  owner: '李娜',
+  industry: '智能制造',
+  city: '广州',
+  remark: '客户资料已完善',
+});
+
+assert.equal(res.code, 0);
+assert.ok(res.data);
+
+const updatedLeads = JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]') as Lead[];
+const updatedLead = updatedLeads.find((item) => item.id === 'lead-test');
+assert.ok(updatedLead);
+assert.equal(updatedLead.assignedTo, '李娜');
+assert.equal(updatedLead.owner, '李娜');
+assert.equal(updatedLead.industry, '智能制造');
+assert.equal(updatedLead.city, '广州');
+assert.equal(updatedLead.remark, '客户资料已完善');
+assert.equal(updatedLead.changeHistory?.[0]?.summary, '客户资料同步：行业、城市、分配销售、备注');
+assert.deepEqual(updatedLead.changeHistory?.[0]?.changes?.map((item) => item.field), ['industry', 'city', 'assignedTo', 'remark']);

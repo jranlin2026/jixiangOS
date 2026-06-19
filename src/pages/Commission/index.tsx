@@ -18,7 +18,6 @@ import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import CommissionStats from './CommissionStats';
 import CommissionRuleConfig from './CommissionRuleConfig';
 import CustomerDetail from '../Customers/CustomerDetail';
-import CustomerForm from '../Customers/CustomerForm';
 import OrderForm from '../Orders/OrderForm';
 import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
 import type { Commission, CommissionAuditIssue, CommissionRole, CommissionStatus } from '../../types/commission';
@@ -97,8 +96,6 @@ const Commission: React.FC = () => {
   const [orderDetailOpen, setOrderDetailOpen] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [customerFormOpen, setCustomerFormOpen] = useState(false);
-  const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
   const [orderFormOpen, setOrderFormOpen] = useState(false);
   const [orderCustomer, setOrderCustomer] = useState<Customer | null>(null);
   const [customerOrdersOpen, setCustomerOrdersOpen] = useState(false);
@@ -188,12 +185,6 @@ const Commission: React.FC = () => {
     if (!customer) return;
     setSelectedCustomer(await hydrateCustomerStats(customer));
     setCustomerOpen(true);
-  };
-
-  const handleEditCustomer = (customer: Customer) => {
-    setEditCustomer(customer);
-    setCustomerFormOpen(true);
-    setCustomerOpen(false);
   };
 
   const handleCreateOrderForCustomer = (customer: Customer) => {
@@ -623,19 +614,10 @@ const Commission: React.FC = () => {
           customer={selectedCustomer}
           open={customerOpen}
           onClose={() => setCustomerOpen(false)}
-          onEdit={handleEditCustomer}
           onCreateOrder={handleCreateOrderForCustomer}
           onViewOrders={handleViewCustomerOrders}
         />
       )}
-
-      <CustomerForm
-        key={editCustomer?.id ?? 'commission-customer-edit'}
-        open={customerFormOpen}
-        customer={editCustomer}
-        onClose={() => setCustomerFormOpen(false)}
-        onSuccess={() => setCustomerFormOpen(false)}
-      />
 
       <OrderForm
         open={orderFormOpen}

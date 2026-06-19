@@ -20,6 +20,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Tooltip,
@@ -27,14 +28,13 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
-import EditIcon from '@mui/icons-material/Edit';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import useCustomerStore from '../../store/useCustomerStore';
 import { orderApi, settingsApi } from '../../api';
 import { CUSTOMER_LEVELS, getProductLevelColor, normalizeResourceOwnership } from '../../shared/utils/constants';
-import { formatCurrency, formatDate } from '../../shared/utils/formatters';
+import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import CustomerDetail from './CustomerDetail';
 import CustomerForm from './CustomerForm';
@@ -60,6 +60,7 @@ type CustomerColumn = {
 
 const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_columns_v3';
 const CUSTOMER_WIDTH_STORAGE_KEY = 'aaos_customer_table_column_widths_v1';
+const formatCustomerSource = (customer: Customer) => [customer.leadSource, customer.sourceName].filter(Boolean).join('-') || '-';
 
 const CUSTOMER_COLUMNS: CustomerColumn[] = [
   { id: 'company', label: '公司', render: (customer) => customer.company || '-' },
@@ -71,7 +72,7 @@ const CUSTOMER_COLUMNS: CustomerColumn[] = [
     label: '客户等级',
     render: (customer) => <CustomerLevelBadge level={customer.customerLevel} />,
   },
-  { id: 'leadSource', label: '线索来源', render: (customer) => customer.leadSource || '-' },
+  { id: 'leadSource', label: '线索来源', render: (customer) => formatCustomerSource(customer) },
   { id: 'sourceType', label: '资源归属', render: (customer) => normalizeResourceOwnership(customer.sourceType) },
   { id: 'leadInputBy', label: '线索录入人', render: (customer) => customer.leadInputBy || '-' },
   { id: 'industry', label: '行业', render: (customer) => customer.industry || '-' },
@@ -132,11 +133,10 @@ const readVisibleColumns = () => {
 };
 
 const Customers: React.FC = () => {
-  const { items, filters, fetchItems, setFilters } = useCustomerStore();
+  const { items, filters, pagination, fetchItems, setFilters } = useCustomerStore();
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
-  const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
   const [orderFormOpen, setOrderFormOpen] = useState(false);
   const [orderCustomer, setOrderCustomer] = useState<Customer | null>(null);
   const [ordersOpen, setOrdersOpen] = useState(false);
@@ -178,14 +178,7 @@ const Customers: React.FC = () => {
   };
 
   const handleCreate = () => {
-    setEditCustomer(null);
     setFormOpen(true);
-  };
-
-  const handleEdit = (customer: Customer) => {
-    setEditCustomer(customer);
-    setFormOpen(true);
-    setDetailOpen(false);
   };
 
   const handleCreateOrder = (customer: Customer) => {
@@ -202,13 +195,26 @@ const Customers: React.FC = () => {
   };
 
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newFilters = { ...filters, search: e.target.value, productLevel: undefined };
+    const newFilters = { ...filters, search: e.target.value, productLevel: undefined, page: 1, pageSize: pagination.pageSize || 10 };
     setFilters(newFilters);
     fetchItems(newFilters);
   };
 
   const handleFilterChange = (key: string, value: string) => {
-    const newFilters = { ...filters, productLevel: undefined, [key]: value || undefined };
+    const newFilters = { ...filters, productLevel: undefined, [key]: value || undefined, page: 1, pageSize: pagination.pageSize || 10 };
+    setFilters(newFilters);
+    fetchItems(newFilters);
+  };
+
+  const handlePageChange = (_: React.MouseEvent<HTMLButtonElement> | null, page: number) => {
+    const newFilters = { ...filters, page: page + 1, pageSize: pagination.pageSize || 10 };
+    setFilters(newFilters);
+    fetchItems(newFilters);
+  };
+
+  const handleRowsPerPageChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const pageSize = Number(event.target.value);
+    const newFilters = { ...filters, page: 1, pageSize };
     setFilters(newFilters);
     fetchItems(newFilters);
   };
@@ -296,11 +302,6 @@ const Customers: React.FC = () => {
                         <VisibilityIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
-                    <Tooltip title="编辑客户">
-                      <IconButton size="small" color="info" onClick={() => handleEdit(customer)}>
-                        <EditIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
                     <Tooltip title="新建订单">
                       <IconButton size="small" color="info" onClick={() => handleCreateOrder(customer)}>
                         <AddShoppingCartIcon fontSize="small" />
@@ -325,23 +326,42 @@ const Customers: React.FC = () => {
           </TableBody>
         </Table>
       </TableContainer>
+      <TablePagination
+        component="div"
+        count={pagination.total}
+        page={Math.max((pagination.page || 1) - 1, 0)}
+        rowsPerPage={pagination.pageSize || 10}
+        rowsPerPageOptions={[10, 20, 50, 100]}
+        onPageChange={handlePageChange}
+        onRowsPerPageChange={handleRowsPerPageChange}
+        labelRowsPerPage="每页条数"
+        labelDisplayedRows={formatPaginationRows}
+        sx={{
+          border: '1px solid #f0f0f0',
+          borderTop: 0,
+          bgcolor: '#fff',
+          '& .MuiTablePagination-toolbar': { minHeight: 48 },
+        }}
+      />
 
       {selectedCustomer && (
         <CustomerDetail
           customer={selectedCustomer}
           open={detailOpen}
           onClose={() => setDetailOpen(false)}
-          onEdit={handleEdit}
           onCreateOrder={handleCreateOrder}
           onViewOrders={handleViewOrders}
+          onUpdated={(updated) => {
+            setSelectedCustomer(updated);
+            fetchItems({ ...filters, productLevel: undefined });
+          }}
         />
       )}
 
       <CustomerForm
-        key={editCustomer?.id ?? 'new'}
+        key="new"
         open={formOpen}
         onClose={() => setFormOpen(false)}
-        customer={editCustomer}
         onSuccess={() => fetchItems({ ...filters, productLevel: undefined })}
       />
 

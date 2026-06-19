@@ -16,7 +16,7 @@ import useCustomerStore from '../../store/useCustomerStore';
 import type { Customer, CustomerActivityRecord } from '../../types/customer';
 import type { AIBusinessCard } from '../../types/aiCard';
 import type { Order } from '../../types/order';
-import type { User } from '../../types/settings';
+import type { LeadSourceConfig, User } from '../../types/settings';
 import { aiCardApi, customerApi, orderApi, settingsApi } from '../../api';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import { RESOURCE_OWNERSHIPS, getProductLevelColor, normalizeResourceOwnership } from '../../shared/utils/constants';
@@ -28,9 +28,9 @@ interface CustomerDetailProps {
   customer: Customer;
   open: boolean;
   onClose: () => void;
-  onEdit: (customer: Customer) => void;
   onCreateOrder?: (customer: Customer) => void;
   onViewOrders?: (customer: Customer) => void;
+  onUpdated?: (customer: Customer) => void;
 }
 
 interface ContractFile {
@@ -42,15 +42,24 @@ interface ContractFile {
   uploadedAt: string;
 }
 
+type SourceOption = {
+  key: string;
+  label: string;
+  parentName: string;
+  childName: string;
+  parentId: string;
+};
+
 const emptyText = (value?: string | number) => (value || value === 0 ? value : '未填写');
+const formatCustomerSource = (customer: Customer) => [customer.leadSource, customer.sourceName].filter(Boolean).join('-') || '未填写';
 const contractKey = (customerId: string) => `aaos_customer_contracts_${customerId}`;
 
 const CustomerDetail: React.FC<CustomerDetailProps> = ({
   customer,
   open,
   onClose,
-  onEdit: _onEdit,
   onCreateOrder,
+  onUpdated,
 }) => {
   const [currentCustomer, setCurrentCustomer] = useState<Customer>(customer);
   const [aiCard, setAiCard] = useState<AIBusinessCard | null>(null);
@@ -62,6 +71,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const [orders, setOrders] = useState<Order[]>([]);
   const [contracts, setContracts] = useState<ContractFile[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const { addFollowUp } = useCustomerStore();
 
   useEffect(() => {
@@ -84,6 +94,9 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
         setUsers(res.data.filter((user) => user.isActive));
       }
     });
+    settingsApi.fetchLeadSourceConfigs().then((res) => {
+      if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
+    });
     orderApi.fetchOrders({ pageSize: 1000 }).then((res) => {
       if (res.code !== 0) return;
       setOrders(res.data.items.filter((item) => (
@@ -99,6 +112,58 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     ))
   ), [currentCustomer.activityRecords]);
+
+  const parentSources = useMemo(
+    () => sourceConfigs.filter((item) => !item.parentId).sort((a, b) => a.sortOrder - b.sortOrder),
+    [sourceConfigs],
+  );
+  const childSources = useMemo(
+    () => sourceConfigs.filter((item) => item.parentId).sort((a, b) => a.sortOrder - b.sortOrder),
+    [sourceConfigs],
+  );
+  const sourceOptions = useMemo<SourceOption[]>(() => {
+    const draftLeadSource = String(draft.leadSource || '');
+    const draftSourceName = String(draft.sourceName || '');
+    const options = parentSources.flatMap((parent) => {
+      const children = childSources.filter((child) => child.parentId === parent.id);
+      if (!children.length) {
+        return [{
+          key: parent.id,
+          label: parent.name,
+          parentName: parent.name,
+          childName: '',
+          parentId: parent.id,
+        }];
+      }
+      return children.map((child) => ({
+        key: `${parent.id}:${child.id}`,
+        label: `${parent.name}-${child.name}`,
+        parentName: parent.name,
+        childName: child.name,
+        parentId: parent.id,
+      }));
+    });
+    if (draftLeadSource && !options.some((option) => option.parentName === draftLeadSource && option.childName === draftSourceName)) {
+      options.unshift({
+        key: `current:${draftLeadSource}:${draftSourceName}`,
+        label: [draftLeadSource, draftSourceName].filter(Boolean).join('-'),
+        parentName: draftLeadSource,
+        childName: draftSourceName,
+        parentId: 'current',
+      });
+    }
+    return options;
+  }, [childSources, draft.leadSource, draft.sourceName, parentSources]);
+
+  const selectedSourceKey = sourceOptions.find((option) => (
+    option.parentName === String(draft.leadSource || '') && option.childName === String(draft.sourceName || '')
+  ))?.key || '';
+
+  const handleSourceSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const option = sourceOptions.find((item) => item.key === event.target.value);
+    if (!option) return;
+    setDraft((prev) => ({ ...prev, leadSource: option.parentName, sourceName: option.childName }));
+  };
 
   const getActivityColor = (type: CustomerActivityRecord['type']) => {
     if (type === 'follow') return '#16a34a';
@@ -148,10 +213,9 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     const payload: Partial<Customer> = {
       name: draft.name,
       company: draft.company,
-      phone: draft.phone,
-      wechat: draft.wechat,
       email: draft.email,
       leadSource: draft.leadSource,
+      sourceName: draft.sourceName,
       sourceType: normalizeResourceOwnership(draft.sourceType as string | undefined),
       industry: draft.industry,
       city: draft.city,
@@ -164,6 +228,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       setCurrentCustomer(res.data);
       setDraft(res.data);
       setEditing(false);
+      onUpdated?.(res.data);
     }
   };
 
@@ -238,6 +303,36 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       </Box>
     );
   };
+
+  const renderSourceRow = () => (
+    <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
+      <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>来源</Box>
+      <Box sx={{ px: 1.5, py: editing ? 0.5 : 1, fontSize: 13 }}>
+        {editing ? (
+          <TextField select value={selectedSourceKey} onChange={handleSourceSelect} size="small" fullWidth>
+            {parentSources.flatMap((parent) => {
+              const options = sourceOptions.filter((option) => option.parentId === parent.id);
+              return [
+                <MenuItem key={`${parent.id}-group`} disabled sx={{ fontWeight: 700, color: 'text.primary' }}>
+                  {parent.name}
+                </MenuItem>,
+                ...options.map((option) => (
+                  <MenuItem key={option.key} value={option.key} sx={{ pl: 4 }}>
+                    {option.label}
+                  </MenuItem>
+                )),
+              ];
+            })}
+            {sourceOptions.some((option) => option.parentId === 'current') && (
+              <MenuItem value={selectedSourceKey}>{formatCustomerSource(currentCustomer)}</MenuItem>
+            )}
+          </TextField>
+        ) : (
+          emptyText(formatCustomerSource(currentCustomer))
+        )}
+      </Box>
+    </Box>
+  );
 
   const renderRemarkRow = () => (
     <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', minHeight: 72 }}>
@@ -446,7 +541,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
             <CustomerLevelBadge level={currentCustomer.customerLevel} />
           </Box>
           <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>
-            {currentCustomer.owner || '未分配'} 跟进 · {currentCustomer.leadSource || '未知来源'}
+            {currentCustomer.owner || '未分配'} 跟进 · {formatCustomerSource(currentCustomer)}
           </Typography>
         </Box>
         <IconButton
@@ -476,10 +571,10 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
             <Box>
               {renderInfoRow('客户全名', 'name')}
               {renderInfoRow('公司', 'company')}
-              {renderInfoRow('手机', 'phone')}
-              {renderInfoRow('微信', 'wechat')}
+              {renderInfoRow('手机', 'phone', false)}
+              {renderInfoRow('微信', 'wechat', false)}
               {renderInfoRow('邮箱', 'email')}
-              {renderInfoRow('来源', 'leadSource')}
+              {renderSourceRow()}
               {renderInfoRow('资源归属', 'sourceType')}
               {renderInfoRow('行业', 'industry')}
               {renderInfoRow('城市', 'city')}

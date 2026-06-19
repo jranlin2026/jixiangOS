@@ -21,6 +21,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   Tabs,
   TextField,
@@ -31,8 +32,8 @@ import AddIcon from '@mui/icons-material/Add';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import useLeadStore from '../../store/useLeadStore';
-import { formatDate } from '../../shared/utils/formatters';
 import { normalizeResourceOwnership } from '../../shared/utils/constants';
+import { formatPaginationRows } from '../../shared/utils/formatters';
 import LeadDetail from './LeadDetail';
 import LeadForm from './LeadForm';
 import LeadIntakeTab from './LeadIntakeTab';
@@ -56,8 +57,8 @@ type LeadColumn = {
   render: (lead: Lead) => React.ReactNode;
 };
 
-const LEAD_VIEW_STORAGE_KEY = 'aaos_lead_table_columns_v2';
-const LEAD_WIDTH_STORAGE_KEY = 'aaos_lead_table_column_widths_v1';
+const LEAD_VIEW_STORAGE_KEY = 'aaos_lead_table_columns_v4';
+const LEAD_WIDTH_STORAGE_KEY = 'aaos_lead_table_column_widths_v3';
 
 const formatLifecycleStatus = (status?: string) => {
   if (!status || status === '未转商机') return '待跟进';
@@ -71,9 +72,14 @@ const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] =
     { id: 'company', label: '公司', render: (lead) => lead.company || '-' },
     { id: 'phone', label: '手机号', render: (lead) => lead.phone || '-' },
     { id: 'wechat', label: '微信', render: (lead) => lead.wechat || '-' },
-    { id: 'email', label: '邮箱', render: (lead) => lead.email || '-' },
-    { id: 'source', label: '来源', render: (lead) => lead.source },
     { id: 'sourceType', label: '资源归属', render: (lead) => normalizeResourceOwnership(lead.sourceType) },
+    { id: 'source', label: '线索来源', render: (lead) => [lead.source, lead.sourceName].filter(Boolean).join('-') || '-' },
+    { id: 'industry', label: '行业', render: (lead) => lead.industry || '-' },
+    { id: 'city', label: '城市', render: (lead) => lead.city || '-' },
+    { id: 'inputBy', label: '线索录入人', render: (lead) => lead.inputBy || '-' },
+    { id: 'assignedTo', label: '分配销售', render: (lead) => lead.assignedTo || lead.owner || '-' },
+    { id: 'tags', label: '标签', render: (lead) => lead.tags?.join(', ') || '-' },
+    { id: 'remark', label: '备注', render: (lead) => lead.remark || '-' },
     {
       id: 'intakeStatus',
       label: '入库状态',
@@ -100,17 +106,6 @@ const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] =
         />
       ),
     },
-    { id: 'industry', label: '行业', render: (lead) => lead.industry || '-' },
-    { id: 'city', label: '城市', render: (lead) => lead.city || '-' },
-    { id: 'assignedTo', label: '分配销售', render: (lead) => lead.assignedTo || lead.owner || '-' },
-    { id: 'inputBy', label: '线索录入人', render: (lead) => lead.inputBy || '-' },
-    { id: 'score', label: '评分', render: (lead) => lead.score ?? '-' },
-    {
-      id: 'aiProbability',
-      label: 'AI升级概率',
-      render: (lead) => (lead.aiAnalysis ? `${Math.round(lead.aiAnalysis.upgradeProbability * 100)}%` : '-'),
-    },
-    { id: 'createdAt', label: '创建时间', render: (lead) => formatDate(lead.createdAt) },
   ];
 };
 
@@ -118,13 +113,16 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'company',
   'phone',
   'wechat',
-  'source',
   'sourceType',
+  'source',
+  'industry',
+  'city',
+  'inputBy',
+  'assignedTo',
+  'tags',
+  'remark',
   'intakeStatus',
   'lifecycleStatus',
-  'assignedTo',
-  'inputBy',
-  'createdAt',
 ];
 
 const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
@@ -132,18 +130,16 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   company: 220,
   phone: 150,
   wechat: 150,
-  email: 180,
-  source: 160,
   sourceType: 140,
-  intakeStatus: 140,
-  lifecycleStatus: 140,
+  source: 180,
   industry: 140,
   city: 120,
-  assignedTo: 140,
   inputBy: 140,
-  score: 100,
-  aiProbability: 140,
-  createdAt: 180,
+  assignedTo: 140,
+  tags: 180,
+  remark: 260,
+  intakeStatus: 140,
+  lifecycleStatus: 140,
 };
 
 const readVisibleColumns = (columns: LeadColumn[]) => {
@@ -161,12 +157,11 @@ const readVisibleColumns = (columns: LeadColumn[]) => {
 };
 
 const Leads: React.FC = () => {
-  const { items, filters, fetchItems, setFilters } = useLeadStore();
+  const { items, filters, pagination, fetchItems, setFilters } = useLeadStore();
   const [activeTab, setActiveTab] = useState(0);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
-  const [editLead, setEditLead] = useState<Lead | null>(null);
   const [lifecycleConfigs, setLifecycleConfigs] = useState<LifecycleStatusConfig[]>([]);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -213,24 +208,30 @@ const Leads: React.FC = () => {
   };
 
   const handleCreate = () => {
-    setEditLead(null);
     setFormOpen(true);
-  };
-
-  const handleEdit = (lead: Lead) => {
-    setEditLead(lead);
-    setFormOpen(true);
-    setDetailOpen(false);
   };
 
   const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const newFilters = { ...filters, search: event.target.value };
+    const newFilters = { ...filters, search: event.target.value, page: 1, pageSize: pagination.pageSize || 10 };
     setFilters(newFilters);
     fetchItems(newFilters);
   };
 
   const handleFilterChange = (key: string, value: string) => {
-    const newFilters = { ...filters, [key]: value || undefined };
+    const newFilters = { ...filters, [key]: value || undefined, page: 1, pageSize: pagination.pageSize || 10 };
+    setFilters(newFilters);
+    fetchItems(newFilters);
+  };
+
+  const handlePageChange = (_: React.MouseEvent<HTMLButtonElement> | null, page: number) => {
+    const newFilters = { ...filters, page: page + 1, pageSize: pagination.pageSize || 10 };
+    setFilters(newFilters);
+    fetchItems(newFilters);
+  };
+
+  const handleRowsPerPageChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const pageSize = Number(event.target.value);
+    const newFilters = { ...filters, page: 1, pageSize };
     setFilters(newFilters);
     fetchItems(newFilters);
   };
@@ -341,6 +342,23 @@ const Leads: React.FC = () => {
               </TableBody>
             </Table>
           </TableContainer>
+          <TablePagination
+            component="div"
+            count={pagination.total}
+            page={Math.max((pagination.page || 1) - 1, 0)}
+            rowsPerPage={pagination.pageSize || 10}
+            rowsPerPageOptions={[10, 20, 50, 100]}
+            onPageChange={handlePageChange}
+            onRowsPerPageChange={handleRowsPerPageChange}
+            labelRowsPerPage="每页条数"
+            labelDisplayedRows={formatPaginationRows}
+            sx={{
+              border: '1px solid #f0f0f0',
+              borderTop: 0,
+              bgcolor: '#fff',
+              '& .MuiTablePagination-toolbar': { minHeight: 48 },
+            }}
+          />
         </>
       )}
 
@@ -352,15 +370,17 @@ const Leads: React.FC = () => {
           lead={selectedLead}
           open={detailOpen}
           onClose={() => setDetailOpen(false)}
-          onEdit={handleEdit}
+          onUpdated={(updated) => {
+            setSelectedLead(updated);
+            fetchItems(filters);
+          }}
         />
       )}
 
       <LeadForm
-        key={editLead?.id ?? 'new'}
+        key="new"
         open={formOpen}
         onClose={() => setFormOpen(false)}
-        lead={editLead}
         onSuccess={() => fetchItems()}
       />
 

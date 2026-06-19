@@ -10,10 +10,10 @@ import {
 } from '@mui/material';
 import useCustomerStore from '../../store/useCustomerStore';
 import { settingsApi } from '../../api';
-import { CUSTOMER_LEVELS, LEAD_SOURCES, RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/utils/constants';
+import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import type { Customer } from '../../types/customer';
-import type { User } from '../../types/settings';
+import type { LeadSourceConfig, User } from '../../types/settings';
 
 interface CustomerFormProps {
   open: boolean;
@@ -22,10 +22,19 @@ interface CustomerFormProps {
   onSuccess?: () => void;
 }
 
+type SourceOption = {
+  key: string;
+  label: string;
+  parentName: string;
+  childName: string;
+  parentId: string;
+};
+
 const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, onSuccess }) => {
   const { create, update } = useCustomerStore();
   const isEdit = !!customer;
   const [users, setUsers] = useState<User[]>([]);
+  const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
 
   const defaultOwner = useMemo(() => users[0]?.name || '张伟', [users]);
 
@@ -39,6 +48,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     leadInputBy: '张伟',
     originalSalesTransferBy: '',
     leadSource: '',
+    sourceName: '',
     wechat: '',
     industry: '',
     city: '',
@@ -54,6 +64,9 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       if (res.code === 0) {
         setUsers(res.data.filter((user) => user.isActive));
       }
+    });
+    settingsApi.fetchLeadSourceConfigs().then((res) => {
+      if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
     });
   }, [open]);
 
@@ -71,6 +84,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       leadInputBy: customer?.leadInputBy || fallbackOwner,
       originalSalesTransferBy: customer?.originalSalesTransferBy || '',
       leadSource: customer?.leadSource || '',
+      sourceName: customer?.sourceName || '',
       wechat: customer?.wechat || '',
       industry: customer?.industry || '',
       city: customer?.city || '',
@@ -82,6 +96,45 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
 
   const handleChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [field]: e.target.value });
+  };
+
+  const parentSources = useMemo(
+    () => sourceConfigs.filter((item) => !item.parentId).sort((a, b) => a.sortOrder - b.sortOrder),
+    [sourceConfigs],
+  );
+  const childSources = useMemo(
+    () => sourceConfigs.filter((item) => item.parentId).sort((a, b) => a.sortOrder - b.sortOrder),
+    [sourceConfigs],
+  );
+  const sourceOptions = useMemo<SourceOption[]>(() => parentSources.flatMap((parent) => {
+    const children = childSources.filter((child) => child.parentId === parent.id);
+    if (!children.length) {
+      return [{
+        key: parent.id,
+        label: parent.name,
+        parentName: parent.name,
+        childName: '',
+        parentId: parent.id,
+      }];
+    }
+    return children.map((child) => ({
+      key: `${parent.id}:${child.id}`,
+      label: `${parent.name}-${child.name}`,
+      parentName: parent.name,
+      childName: child.name,
+      parentId: parent.id,
+    }));
+  }), [childSources, parentSources]);
+  const selectedSourceKey = sourceOptions.find((option) => (
+    option.parentName === form.leadSource && option.childName === form.sourceName
+  ))?.key || '';
+  const handleSourceSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const option = sourceOptions.find((item) => item.key === event.target.value);
+    setForm({
+      ...form,
+      leadSource: option?.parentName || '',
+      sourceName: option?.childName || '',
+    });
   };
 
   const handleSubmit = async () => {
@@ -149,11 +202,21 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
             <MenuItem value="">无</MenuItem>
             {userOptions}
           </TextField>
-          <TextField select label="线索来源" value={form.leadSource} onChange={handleChange('leadSource')} fullWidth>
+          <TextField select label="线索来源" value={selectedSourceKey} onChange={handleSourceSelect} fullWidth>
             <MenuItem value="">请选择</MenuItem>
-            {Object.values(LEAD_SOURCES).map((source) => (
-              <MenuItem key={source} value={source}>{source}</MenuItem>
-            ))}
+            {parentSources.flatMap((parent) => {
+              const options = sourceOptions.filter((option) => option.parentId === parent.id);
+              return [
+                <MenuItem key={`${parent.id}-group`} disabled sx={{ fontWeight: 700, color: 'text.primary' }}>
+                  {parent.name}
+                </MenuItem>,
+                ...options.map((option) => (
+                  <MenuItem key={option.key} value={option.key} sx={{ pl: 4 }}>
+                    {option.label}
+                  </MenuItem>
+                )),
+              ];
+            })}
           </TextField>
           <TextField select label="资源归属" value={form.sourceType} onChange={handleChange('sourceType')} fullWidth>
             {RESOURCE_OWNERSHIPS.map((item) => (

@@ -11,6 +11,51 @@ function ensureInit(): void {
   initializeMockData();
 }
 
+const LEAD_CHANGE_FIELDS: Array<{ field: keyof Lead; label: string }> = [
+  { field: 'name', label: '姓名' },
+  { field: 'company', label: '公司' },
+  { field: 'sourceType', label: '资源归属' },
+  { field: 'source', label: '线索来源' },
+  { field: 'sourceName', label: '线索来源明细' },
+  { field: 'industry', label: '行业' },
+  { field: 'city', label: '城市' },
+  { field: 'inputBy', label: '线索录入人' },
+  { field: 'assignedTo', label: '分配销售' },
+  { field: 'tags', label: '标签' },
+  { field: 'remark', label: '备注' },
+  { field: 'intakeStatus', label: '入库状态' },
+  { field: 'lifecycleStatus', label: '生命周期' },
+];
+
+function normalizeChangeValue(value: unknown): string | number | boolean | null {
+  if (value === undefined || value === '') return null;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.filter(Boolean).join('、') || null;
+  return JSON.stringify(value);
+}
+
+function buildLeadChanges(before: Lead, data: Partial<Lead>) {
+  return LEAD_CHANGE_FIELDS
+    .filter(({ field }) => Object.prototype.hasOwnProperty.call(data, field))
+    .map(({ field, label }) => {
+      const oldValue = field === 'sourceType'
+        ? normalizeResourceOwnership(before[field] as string | undefined)
+        : before[field];
+      const newValue = field === 'sourceType'
+        ? normalizeResourceOwnership(data[field] as string | undefined)
+        : data[field];
+      return {
+        field: String(field),
+        label,
+        oldValue: normalizeChangeValue(oldValue),
+        newValue: normalizeChangeValue(newValue),
+      };
+    })
+    .filter((item) => item.oldValue !== item.newValue);
+}
+
 function normalizeLead(lead: Lead): Lead {
   return {
     ...lead,
@@ -88,7 +133,28 @@ async function updateLead(id: string, data: Partial<Lead>): Promise<ApiResponse<
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
   const idx = leads.findIndex((lead) => lead.id === id);
   if (idx === -1) return createSuccessResponse(null);
-  leads[idx] = { ...leads[idx], ...data, updatedAt: new Date().toISOString() };
+  const now = new Date().toISOString();
+  const existing = normalizeLead(leads[idx]);
+  const changes = buildLeadChanges(existing, data);
+  const history = existing.changeHistory || [];
+  const assignedChanged = changes.some((item) => item.field === 'assignedTo');
+  leads[idx] = {
+    ...existing,
+    ...data,
+    sourceType: normalizeResourceOwnership(data.sourceType || existing.sourceType),
+    assignedAt: assignedChanged ? now : data.assignedAt || existing.assignedAt,
+    changeHistory: changes.length > 0
+      ? [{
+        id: `hist-${uuidv4().slice(0, 8)}`,
+        action: 'update',
+        operator: data.assignedTo || data.owner || existing.assignedTo || existing.owner || existing.inputBy || '系统',
+        changedAt: now,
+        summary: `修改了${changes.map((item) => item.label).join('、')}`,
+        changes,
+      }, ...history]
+      : history,
+    updatedAt: now,
+  };
   setStorageData(STORAGE_KEYS.LEADS, leads);
   leadFlowApi.syncCustomerByLead(leads[idx]);
   return createSuccessResponse(leads[idx]);

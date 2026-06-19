@@ -34,6 +34,20 @@ export interface LeadAIAnalysis {
   analyzedAt: Timestamp;
 }
 
+export interface LeadChangeLog {
+  id: ID;
+  action: 'create' | 'update' | 'delete';
+  operator: string;
+  changedAt: Timestamp;
+  summary: string;
+  changes?: Array<{
+    field: string;
+    label: string;
+    oldValue?: string | number | boolean | null;
+    newValue?: string | number | boolean | null;
+  }>;
+}
+
 /** 线索 */
 export interface Lead {
   id: ID;
@@ -67,6 +81,7 @@ export interface Lead {
   industry?: string;
   city?: string;
   estimatedProductId?: ID;
+  changeHistory?: LeadChangeLog[];
   createdAt: Timestamp;
   updatedAt: Timestamp;
   followUpRecords: FollowUpRecord[];

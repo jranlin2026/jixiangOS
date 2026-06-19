@@ -121,6 +121,19 @@ export const formatNumber = (value: number): string => {
   return value.toLocaleString('zh-CN');
 };
 
+export const formatPaginationRows = ({
+  from,
+  to,
+  count,
+}: {
+  from: number;
+  to: number;
+  count: number;
+}): string => {
+  if (count === 0) return '0 / 共 0 条';
+  return `${from}-${to} / 共 ${count} 条`;
+};
+
 /**
  * 截断文本
  * @param text 原始文本

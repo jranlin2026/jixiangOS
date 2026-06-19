@@ -22,7 +22,7 @@ interface OrderState {
   reset: () => void;
 }
 
-const defaultPagination = { page: 1, pageSize: 20, total: 0, totalPages: 0 };
+const defaultPagination = { page: 1, pageSize: 10, total: 0, totalPages: 0 };
 
 const useOrderStore = create<OrderState>((set, get) => ({
   items: [],
@@ -30,7 +30,7 @@ const useOrderStore = create<OrderState>((set, get) => ({
   stats: null,
   loading: false,
   error: null,
-  filters: {},
+  filters: { page: 1, pageSize: 10 },
   pagination: defaultPagination,
 
   fetchItems: async (filters?: OrderFilters) => {
@@ -40,6 +40,8 @@ const useOrderStore = create<OrderState>((set, get) => ({
       const res = await orderApi.fetchOrders(f);
       if (res.code === 0) {
         set({ items: res.data.items, pagination: res.data.pagination, loading: false });
+      } else {
+        set({ error: res.message, loading: false });
       }
     } catch (e: any) {
       set({ error: e.message, loading: false });
@@ -52,6 +54,8 @@ const useOrderStore = create<OrderState>((set, get) => ({
       const res = await orderApi.fetchOrderById(id);
       if (res.code === 0) {
         set({ current: res.data, loading: false });
+      } else {
+        set({ error: res.message, loading: false });
       }
     } catch (e: any) {
       set({ error: e.message, loading: false });
@@ -124,16 +128,20 @@ const useOrderStore = create<OrderState>((set, get) => ({
         set({ error: refundRes.message, loading: false });
         return;
       }
-      // 更新订单退款状态
-      await orderApi.updateOrder(orderId, { refundStatus: '待分配', refundAmount: refundData.refundAmount, refundReason: refundData.refundReason });
+      await orderApi.updateOrder(orderId, {
+        refundStatus: '待分配' as RefundStatus,
+        refundAmount: refundData.refundAmount,
+        refundReason: refundData.refundReason,
+      });
       await get().fetchItems();
+      await get().fetchStats();
     } catch (e: any) {
       set({ error: e.message, loading: false });
     }
   },
 
   setFilters: (filters) => set({ filters }),
-  reset: () => set({ items: [], current: null, stats: null, loading: false, error: null, filters: {}, pagination: defaultPagination }),
+  reset: () => set({ items: [], current: null, stats: null, loading: false, error: null, filters: { page: 1, pageSize: 10 }, pagination: defaultPagination }),
 }));
 
 export default useOrderStore;

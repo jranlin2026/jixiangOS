@@ -325,7 +325,7 @@ export const getProductLevelColor = (level?: string, fallback = '#9ca3af'): stri
 };
 
 /** 分页默认值 */
-export const DEFAULT_PAGE_SIZE = 20;
+export const DEFAULT_PAGE_SIZE = 10;
 export const DEFAULT_PAGE = 1;
 
 /** 产品等级 → 客户等级映射 */

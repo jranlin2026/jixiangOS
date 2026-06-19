@@ -148,8 +148,6 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
       ...form,
       sourceType: normalizeResourceOwnership(form.sourceType),
       status: lead?.status || '新线索',
-      email: lead?.email || '',
-      estimatedAmount: lead?.estimatedAmount || 0,
       tags,
     };
     setSubmitError('');
@@ -183,8 +181,22 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
           )}
           <TextField label="姓名" value={form.name} onChange={handleChange('name')} required fullWidth />
           <TextField label="公司" value={form.company} onChange={handleChange('company')} fullWidth />
-          <TextField label="手机号" value={form.phone} onChange={handleChange('phone')} fullWidth helperText="手机号或微信至少填写一项" />
-          <TextField label="微信" value={form.wechat} onChange={handleChange('wechat')} fullWidth helperText="用于查重和客户同步" />
+          <TextField
+            label="手机号"
+            value={form.phone}
+            onChange={handleChange('phone')}
+            fullWidth
+            helperText={isEdit ? '唯一识别字段，入库后不可修改' : '手机号或微信至少填写一项'}
+            InputProps={{ readOnly: isEdit }}
+          />
+          <TextField
+            label="微信"
+            value={form.wechat}
+            onChange={handleChange('wechat')}
+            fullWidth
+            helperText={isEdit ? '唯一识别字段，入库后不可修改' : '用于查重和客户同步'}
+            InputProps={{ readOnly: isEdit }}
+          />
           <TextField select label="资源归属" value={form.sourceType} onChange={handleChange('sourceType')} fullWidth>
             {RESOURCE_OWNERSHIPS.map((item) => (
               <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
@@ -224,7 +236,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
         </Box>
       </DialogContent>
       <DialogActions>
-        <Button variant="contained" onClick={handleSubmit} disabled={!form.name || (!form.phone && !form.wechat)}>
+        <Button variant="contained" onClick={handleSubmit} disabled={!form.name || (!form.phone && !form.wechat) || !form.source || !form.inputBy}>
           {isEdit ? '保存' : '入库'}
         </Button>
       </DialogActions>

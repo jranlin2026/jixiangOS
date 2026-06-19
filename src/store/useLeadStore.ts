@@ -19,14 +19,14 @@ interface LeadState {
   reset: () => void;
 }
 
-const defaultPagination = { page: 1, pageSize: 20, total: 0, totalPages: 0 };
+const defaultPagination = { page: 1, pageSize: 10, total: 0, totalPages: 0 };
 
 const useLeadStore = create<LeadState>((set, get) => ({
   items: [],
   current: null,
   loading: false,
   error: null,
-  filters: {},
+  filters: { page: 1, pageSize: 10 },
   pagination: defaultPagination,
 
   fetchItems: async (filters?: LeadFilters) => {
@@ -95,7 +95,7 @@ const useLeadStore = create<LeadState>((set, get) => ({
   },
 
   setFilters: (filters) => set({ filters }),
-  reset: () => set({ items: [], current: null, loading: false, error: null, filters: {}, pagination: defaultPagination }),
+  reset: () => set({ items: [], current: null, loading: false, error: null, filters: { page: 1, pageSize: 10 }, pagination: defaultPagination }),
 }));
 
 export default useLeadStore;

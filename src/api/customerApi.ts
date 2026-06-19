@@ -1,4 +1,6 @@
 import type { Customer, CustomerActivityRecord, CustomerCreateInput, CustomerFilters, AICustomerPortrait } from '../types/customer';
+import type { Lead, LeadChangeLog } from '../types/lead';
+import type { Order } from '../types/order';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
@@ -11,9 +13,15 @@ function ensureInit(): void {
 }
 
 function normalizeCustomer(customer: Customer): Customer {
+  const legacySourceType = customer.sourceType;
+  const normalizedSourceType = normalizeResourceOwnership(legacySourceType);
+  const legacyLeadSource = legacySourceType && legacySourceType !== '公司资源' && legacySourceType !== '个人资源' && legacySourceType !== '自拓'
+    ? legacySourceType
+    : undefined;
   const normalized = {
     ...customer,
-    sourceType: normalizeResourceOwnership(customer.sourceType),
+    leadSource: customer.leadSource || legacyLeadSource,
+    sourceType: normalizedSourceType,
   };
   const hasOrder = (customer.orderCount || 0) > 0 || (customer.totalSpent || 0) > 0;
   if (hasOrder) return normalized;
@@ -50,6 +58,27 @@ const CUSTOMER_CHANGE_FIELDS: Array<{ field: keyof Customer; label: string }> = 
   { field: 'originalSalesTransferBy', label: '原销转人员' },
 ];
 
+const CUSTOMER_TO_LEAD_FIELDS: Array<{
+  customerField: keyof Customer;
+  leadField: keyof Lead;
+  label: string;
+}> = [
+  { customerField: 'name', leadField: 'name', label: '姓名' },
+  { customerField: 'company', leadField: 'company', label: '公司' },
+  { customerField: 'email', leadField: 'email', label: '邮箱' },
+  { customerField: 'sourceType', leadField: 'sourceType', label: '资源归属' },
+  { customerField: 'leadSource', leadField: 'source', label: '线索来源' },
+  { customerField: 'sourceName', leadField: 'sourceName', label: '线索来源明细' },
+  { customerField: 'sourceAccount', leadField: 'sourceAccount', label: '来源账号' },
+  { customerField: 'industry', leadField: 'industry', label: '行业' },
+  { customerField: 'city', leadField: 'city', label: '城市' },
+  { customerField: 'owner', leadField: 'assignedTo', label: '分配销售' },
+  { customerField: 'leadInputBy', leadField: 'inputBy', label: '线索录入人' },
+  { customerField: 'tags', leadField: 'tags', label: '标签' },
+  { customerField: 'remark', leadField: 'remark', label: '备注' },
+  { customerField: 'score', leadField: 'score', label: '线索评分' },
+];
+
 function formatActivityValue(value: unknown): string | number | boolean | null {
   if (Array.isArray(value)) return value.join('、');
   if (value === undefined || value === '') return null;
@@ -68,6 +97,65 @@ function buildCustomerChanges(existing: Customer, data: Partial<Customer>): Cust
     .filter(Boolean) as CustomerActivityRecord['changes'];
 }
 
+function syncLeadsByCustomer(customer: Customer, now: string): void {
+  const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
+  let changed = false;
+  const nextLeads = leads.map((lead) => {
+    const matchedById = Boolean(lead.customerId && lead.customerId === customer.id);
+    const matchedByPhone = Boolean(customer.phone && lead.phone === customer.phone);
+    const matchedByWechat = Boolean(customer.wechat && lead.wechat && lead.wechat === customer.wechat);
+    if (!matchedById && !matchedByPhone && !matchedByWechat) return lead;
+
+    const patch: Partial<Lead> = {
+      customerId: customer.id,
+      owner: customer.owner,
+      sourceType: normalizeResourceOwnership(customer.sourceType),
+    };
+    const fieldChanges: NonNullable<LeadChangeLog['changes']> = [];
+
+    CUSTOMER_TO_LEAD_FIELDS.forEach(({ customerField, leadField, label }) => {
+      const rawValue = customer[customerField] as Lead[keyof Lead] | undefined;
+      const nextValue = leadField === 'sourceType'
+        ? normalizeResourceOwnership(rawValue as string | undefined)
+        : rawValue;
+      const oldValue = leadField === 'sourceType'
+        ? normalizeResourceOwnership(lead[leadField] as string | undefined)
+        : lead[leadField];
+      const formattedOld = formatActivityValue(oldValue);
+      const formattedNext = formatActivityValue(nextValue);
+      if (formattedOld === formattedNext) return;
+      (patch as Record<string, unknown>)[leadField] = nextValue;
+      fieldChanges.push({
+        field: String(leadField),
+        label,
+        oldValue: formattedOld,
+        newValue: formattedNext,
+      });
+    });
+
+    if (!fieldChanges.length && lead.customerId === customer.id && lead.owner === customer.owner) return lead;
+    changed = true;
+    return {
+      ...lead,
+      ...patch,
+      assignedAt: fieldChanges.some((item) => item.field === 'assignedTo') ? now : lead.assignedAt,
+      changeHistory: fieldChanges.length
+        ? [{
+          id: `hist-${uuidv4().slice(0, 8)}`,
+          action: 'update',
+          operator: customer.owner || '系统',
+          changedAt: now,
+          summary: `客户资料同步：${fieldChanges.map((item) => item.label).join('、')}`,
+          changes: fieldChanges,
+        }, ...(lead.changeHistory || [])]
+        : lead.changeHistory,
+      updatedAt: now,
+    };
+  });
+
+  if (changed) setStorageData(STORAGE_KEYS.LEADS, nextLeads);
+}
+
 function createActivity(data: Omit<CustomerActivityRecord, 'id' | 'createdAt'> & { createdAt?: string }): CustomerActivityRecord {
   return {
     ...data,
@@ -83,11 +171,79 @@ function prependActivity(customer: Customer, activity: CustomerActivityRecord): 
   };
 }
 
+function isRelatedOrder(customer: Customer, order: Order): boolean {
+  return Boolean(
+    order.customerId === customer.id
+      || order.customerName === customer.company
+      || order.customerName === customer.name,
+  );
+}
+
+function reconcileCustomerOrderStats(customers: Customer[]): Customer[] {
+  const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
+  let changed = false;
+
+  const nextCustomers = customers.map((customer) => {
+    const relatedOrders = orders.filter((order) => isRelatedOrder(customer, order));
+    if (!relatedOrders.length) return customer;
+    const orderCount = relatedOrders.length;
+    const totalSpent = relatedOrders.reduce((sum, order) => sum + (Number(order.actualAmount) || 0), 0);
+    const latestOrder = relatedOrders
+      .slice()
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+    const growthPath = [...(customer.growthPath || [])];
+    const activityRecords = [...(customer.activityRecords || [])];
+
+    relatedOrders.forEach((order) => {
+      const hasMilestone = growthPath.some((item) => item.orderId === order.id || item.orderNo === order.orderNo);
+      if (!hasMilestone) {
+        growthPath.push({
+          id: `milestone-${uuidv4().slice(0, 8)}`,
+          date: (order.payments?.[0]?.paidAt || order.createdAt).slice(0, 10),
+          title: `签约${order.productLevel}产品`,
+          description: `订单${order.orderNo}，实付${Number(order.actualAmount || order.amount).toLocaleString('zh-CN')}元`,
+          productLevel: order.productLevel,
+          orderId: order.id,
+          orderNo: order.orderNo,
+        });
+      }
+
+      const hasActivity = activityRecords.some((item) => item.relatedType === 'order' && item.relatedId === order.id && item.type === 'order');
+      if (!hasActivity) {
+        activityRecords.unshift({
+          id: `act-${uuidv4().slice(0, 8)}`,
+          type: 'order',
+          title: `创建了订单 ${order.orderNo}`,
+          content: `签约${order.productLevel}，实付${Number(order.actualAmount || order.amount).toLocaleString('zh-CN')}元`,
+          operator: order.owner || '系统',
+          relatedId: order.id,
+          relatedType: 'order',
+          createdAt: order.createdAt,
+        });
+      }
+    });
+
+    const nextCustomer = {
+      ...customer,
+      productLevel: latestOrder?.productLevel || customer.productLevel,
+      orderCount,
+      totalSpent,
+      growthPath,
+      activityRecords,
+    };
+    if (JSON.stringify(nextCustomer) !== JSON.stringify(customer)) changed = true;
+    return nextCustomer;
+  });
+
+  if (changed) setStorageData(STORAGE_KEYS.CUSTOMERS, nextCustomers);
+  return nextCustomers;
+}
+
 async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<PaginatedResponse<Customer>>> {
   ensureInit();
   await delay(200);
   const raw = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
-  const all = raw.map(normalizeCustomer);
+  const all = reconcileCustomerOrderStats(raw.map(normalizeCustomer));
   if (JSON.stringify(raw) !== JSON.stringify(all)) {
     setStorageData(STORAGE_KEYS.CUSTOMERS, all);
   }
@@ -124,7 +280,7 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
 async function fetchCustomerById(id: string): Promise<ApiResponse<Customer | null>> {
   ensureInit();
   await delay(150);
-  const customers = (getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || []).map(normalizeCustomer);
+  const customers = reconcileCustomerOrderStats((getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || []).map(normalizeCustomer));
   const customer = customers.find((c) => c.id === id) || null;
   return createSuccessResponse(customer);
 }
@@ -172,6 +328,7 @@ async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiR
   customers[idx] = {
     ...existing,
     ...data,
+    sourceType: normalizeResourceOwnership(data.sourceType || existing.sourceType),
     activityRecords: changes?.length
       ? [createActivity({
         type: activityType,
@@ -184,6 +341,7 @@ async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiR
     updatedAt: now,
   };
   setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
+  syncLeadsByCustomer(customers[idx], now);
   return createSuccessResponse(customers[idx]);
 }
 
