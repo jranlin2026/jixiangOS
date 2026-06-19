@@ -15,6 +15,8 @@ import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import type { Customer } from '../../types/customer';
 import type { LeadSourceConfig, User } from '../../types/settings';
 
+const CURRENT_USER_STORAGE_KEY = 'aaos_current_user';
+
 interface CustomerFormProps {
   open: boolean;
   onClose: () => void;
@@ -30,80 +32,31 @@ type SourceOption = {
   parentId: string;
 };
 
+function getCurrentUserName(users: User[]): string {
+  try {
+    const raw = localStorage.getItem(CURRENT_USER_STORAGE_KEY);
+    if (raw) {
+      const current = JSON.parse(raw) as Partial<User>;
+      if (current.name) return current.name;
+    }
+  } catch {
+    // fallback below
+  }
+  return users.find((user) => user.isActive)?.name || '';
+}
+
 const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, onSuccess }) => {
   const { create, update } = useCustomerStore();
   const isEdit = !!customer;
   const [users, setUsers] = useState<User[]>([]);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
 
-  const defaultOwner = useMemo(() => users[0]?.name || '张伟', [users]);
-
-  const [form, setForm] = useState({
-    name: '',
-    company: '',
-    phone: '',
-    email: '',
-    customerLevel: 'L1' as Customer['customerLevel'],
-    owner: '张伟',
-    leadInputBy: '张伟',
-    originalSalesTransferBy: '',
-    leadSource: '',
-    sourceName: '',
-    wechat: '',
-    industry: '',
-    city: '',
-    sourceType: '公司资源',
-    tags: '',
-    remark: '',
-  });
-
-  useEffect(() => {
-    if (!open) return;
-
-    settingsApi.fetchUsers({ isActive: true }).then((res) => {
-      if (res.code === 0) {
-        setUsers(res.data.filter((user) => user.isActive));
-      }
-    });
-    settingsApi.fetchLeadSourceConfigs().then((res) => {
-      if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
-    });
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-
-    const fallbackOwner = customer?.owner || defaultOwner;
-    setForm({
-      name: customer?.name || '',
-      company: customer?.company || '',
-      phone: customer?.phone || '',
-      email: customer?.email || '',
-      customerLevel: customer?.customerLevel || 'L1',
-      owner: fallbackOwner,
-      leadInputBy: customer?.leadInputBy || fallbackOwner,
-      originalSalesTransferBy: customer?.originalSalesTransferBy || '',
-      leadSource: customer?.leadSource || '',
-      sourceName: customer?.sourceName || '',
-      wechat: customer?.wechat || '',
-      industry: customer?.industry || '',
-      city: customer?.city || '',
-      sourceType: normalizeResourceOwnership(customer?.sourceType),
-      tags: customer?.tags?.join(', ') || '',
-      remark: customer?.remark || '',
-    });
-  }, [open, customer, defaultOwner]);
-
-  const handleChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    setForm({ ...form, [field]: e.target.value });
-  };
-
   const parentSources = useMemo(
-    () => sourceConfigs.filter((item) => !item.parentId).sort((a, b) => a.sortOrder - b.sortOrder),
+    () => sourceConfigs.filter((item) => !item.parentId && item.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
     [sourceConfigs],
   );
   const childSources = useMemo(
-    () => sourceConfigs.filter((item) => item.parentId).sort((a, b) => a.sortOrder - b.sortOrder),
+    () => sourceConfigs.filter((item) => item.parentId && item.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
     [sourceConfigs],
   );
   const sourceOptions = useMemo<SourceOption[]>(() => parentSources.flatMap((parent) => {
@@ -125,9 +78,72 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       parentId: parent.id,
     }));
   }), [childSources, parentSources]);
+
+  const defaultOwner = useMemo(() => getCurrentUserName(users) || users[0]?.name || '', [users]);
+
+  const [form, setForm] = useState({
+    name: '',
+    company: '',
+    phone: '',
+    wechat: '',
+    sourceType: '公司资源',
+    leadSource: '',
+    sourceName: '',
+    industry: '',
+    city: '',
+    leadInputBy: '',
+    owner: '',
+    customerLevel: 'L1' as Customer['customerLevel'],
+    originalSalesTransferBy: '',
+    email: '',
+    tags: '',
+    remark: '',
+  });
+
+  useEffect(() => {
+    if (!open) return;
+
+    settingsApi.fetchUsers({ isActive: true }).then((res) => {
+      if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
+    });
+    settingsApi.fetchLeadSourceConfigs().then((res) => {
+      if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
+    });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const defaultSourceOption = sourceOptions[0];
+    const fallbackOwner = customer?.owner || defaultOwner;
+    setForm({
+      name: customer?.name || '',
+      company: customer?.company || '',
+      phone: customer?.phone || '',
+      wechat: customer?.wechat || '',
+      sourceType: normalizeResourceOwnership(customer?.sourceType),
+      leadSource: customer?.leadSource || defaultSourceOption?.parentName || '',
+      sourceName: customer?.sourceName || defaultSourceOption?.childName || '',
+      industry: customer?.industry || '',
+      city: customer?.city || '',
+      leadInputBy: customer?.leadInputBy || defaultOwner,
+      owner: fallbackOwner,
+      customerLevel: customer?.customerLevel || 'L1',
+      originalSalesTransferBy: customer?.originalSalesTransferBy || '',
+      email: customer?.email || '',
+      tags: customer?.tags?.join(', ') || '',
+      remark: customer?.remark || '',
+    });
+  }, [open, customer, defaultOwner, sourceOptions]);
+
   const selectedSourceKey = sourceOptions.find((option) => (
-    option.parentName === form.leadSource && option.childName === form.sourceName
+    option.parentName === form.leadSource && option.childName === (form.sourceName || '')
   ))?.key || '';
+
+  const handleChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setForm({ ...form, [field]: e.target.value });
+  };
+
   const handleSourceSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const option = sourceOptions.find((item) => item.key === event.target.value);
     setForm({
@@ -161,49 +177,38 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   ));
   const missingContact = !form.phone.trim() && !form.wechat.trim();
   const showContactError = !!form.name.trim() && missingContact;
-  const canSubmit = !!form.name.trim() && !missingContact && !!form.owner;
+  const canSubmit = !!form.name.trim() && !missingContact && !!form.owner && !!form.leadInputBy && !!form.leadSource;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogCloseTitle onClose={onClose}>{isEdit ? '编辑客户' : '新增客户'}</DialogCloseTitle>
+      <DialogCloseTitle onClose={onClose}>{isEdit ? '编辑客户资料' : '新增客户'}</DialogCloseTitle>
       <DialogContent>
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
           <TextField label="姓名" value={form.name} onChange={handleChange('name')} required fullWidth />
           <TextField label="公司" value={form.company} onChange={handleChange('company')} fullWidth />
           <TextField
-            label="电话"
+            label="手机号"
             value={form.phone}
             onChange={handleChange('phone')}
             error={showContactError}
-            helperText={showContactError ? '电话和微信至少填写一个' : ''}
+            helperText={showContactError ? '手机号或微信至少填写一项' : ''}
             fullWidth
           />
-          <TextField label="邮箱" value={form.email} onChange={handleChange('email')} fullWidth />
           <TextField
             label="微信"
             value={form.wechat}
             onChange={handleChange('wechat')}
             error={showContactError}
-            helperText={showContactError ? '电话和微信至少填写一个' : ''}
+            helperText={showContactError ? '手机号或微信至少填写一项' : '用于查重和线索同步'}
             fullWidth
           />
-          <TextField select label="客户等级" value={form.customerLevel} onChange={handleChange('customerLevel')} fullWidth>
-            {CUSTOMER_LEVELS.map((level) => (
-              <MenuItem key={level.value} value={level.value}>{level.label}</MenuItem>
+          <TextField select label="资源归属" value={form.sourceType} onChange={handleChange('sourceType')} fullWidth>
+            {RESOURCE_OWNERSHIPS.map((item) => (
+              <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
             ))}
           </TextField>
-          <TextField select label="销售负责人" value={form.owner} onChange={handleChange('owner')} required fullWidth>
-            {userOptions}
-          </TextField>
-          <TextField select label="线索录入人" value={form.leadInputBy} onChange={handleChange('leadInputBy')} fullWidth>
-            {userOptions}
-          </TextField>
-          <TextField select label="原销转人员" value={form.originalSalesTransferBy} onChange={handleChange('originalSalesTransferBy')} fullWidth>
-            <MenuItem value="">无</MenuItem>
-            {userOptions}
-          </TextField>
-          <TextField select label="线索来源" value={selectedSourceKey} onChange={handleSourceSelect} fullWidth>
-            <MenuItem value="">请选择</MenuItem>
+          <TextField select label="线索来源" value={selectedSourceKey} onChange={handleSourceSelect} required fullWidth>
+            <MenuItem value="" disabled>请选择线索来源</MenuItem>
             {parentSources.flatMap((parent) => {
               const options = sourceOptions.filter((option) => option.parentId === parent.id);
               return [
@@ -218,13 +223,24 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
               ];
             })}
           </TextField>
-          <TextField select label="资源归属" value={form.sourceType} onChange={handleChange('sourceType')} fullWidth>
-            {RESOURCE_OWNERSHIPS.map((item) => (
-              <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
-            ))}
-          </TextField>
           <TextField label="行业" value={form.industry} onChange={handleChange('industry')} fullWidth />
           <TextField label="城市" value={form.city} onChange={handleChange('city')} fullWidth />
+          <TextField select label="线索录入人" value={form.leadInputBy} onChange={handleChange('leadInputBy')} required fullWidth helperText="默认当前登录人员">
+            {userOptions}
+          </TextField>
+          <TextField select label="分配销售" value={form.owner} onChange={handleChange('owner')} required fullWidth>
+            {userOptions}
+          </TextField>
+          <TextField select label="客户等级" value={form.customerLevel} onChange={handleChange('customerLevel')} fullWidth>
+            {CUSTOMER_LEVELS.map((level) => (
+              <MenuItem key={level.value} value={level.value}>{level.label}</MenuItem>
+            ))}
+          </TextField>
+          <TextField select label="原销转人员" value={form.originalSalesTransferBy} onChange={handleChange('originalSalesTransferBy')} fullWidth>
+            <MenuItem value="">无</MenuItem>
+            {userOptions}
+          </TextField>
+          <TextField label="邮箱" value={form.email} onChange={handleChange('email')} fullWidth sx={{ gridColumn: '1 / -1' }} />
           <TextField label="标签（逗号分隔）" value={form.tags} onChange={handleChange('tags')} fullWidth sx={{ gridColumn: '1 / -1' }} />
           <TextField label="备注" value={form.remark} onChange={handleChange('remark')} fullWidth multiline minRows={3} sx={{ gridColumn: '1 / -1' }} />
         </Box>
