@@ -23,6 +23,7 @@ import { leadApi, leadFlowApi, settingsApi } from '../../api';
 import { formatDate } from '../../shared/utils/formatters';
 import { RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import useAuthStore from '../../store/useAuthStore';
+import { canEditLeadProfile } from './leadDetailRules';
 
 interface LeadDetailProps {
   lead: Lead;
@@ -185,6 +186,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   const lifecycleCode = normalizeLifecycleStatusCode(currentLead.lifecycleStatusCode || currentLead.lifecycleStatus || currentLead.status);
   const lifecycleConfig = getLifecycleConfigByCode(lifecycleCode);
   const canClaimLead = !currentLead.customerId;
+  const canEditProfile = canEditLeadProfile(currentLead);
 
   const handleDraftChange = (field: keyof LeadDraft) => (event: React.ChangeEvent<HTMLInputElement>) => {
     setDraft((prev) => ({ ...prev, [field]: event.target.value }));
@@ -197,6 +199,10 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   };
 
   const handleSaveProfile = async () => {
+    if (!canEditProfile) {
+      setEditing(false);
+      return;
+    }
     const tags = draft.tagsText.split(',').map((tag) => tag.trim()).filter(Boolean);
     const payload: Partial<Lead> = {
       name: draft.name,
@@ -414,14 +420,14 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
                     领取为客户
                   </Button>
                 )}
-                {editing ? (
+                {editing && canEditProfile ? (
                   <>
                     <Button size="small" onClick={() => { setDraft(toDraft(currentLead)); setEditing(false); }}>取消</Button>
                     <Button size="small" variant="contained" onClick={handleSaveProfile}>保存</Button>
                   </>
-                ) : (
+                ) : canEditProfile ? (
                   <Button size="small" variant="outlined" onClick={() => setEditing(true)}>编辑资料</Button>
-                )}
+                ) : null}
               </Box>
             </Box>
             <Box>

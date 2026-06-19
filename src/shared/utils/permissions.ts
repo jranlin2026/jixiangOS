@@ -15,6 +15,7 @@ export const PERMISSION_KEYS = {
   CUSTOMER_CREATE_ORDER: '客户/新建客户订单',
   CUSTOMER_VIEW_ORDERS: '客户/查看客户订单',
   ORDERS: '订单',
+  ORDER_REVIEW: '订单/订单审核台',
   ORDER_CREATE: '订单/新增订单',
   ORDER_EDIT: '订单/编辑订单',
   ORDER_DELETE: '订单/删除订单',

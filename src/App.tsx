@@ -96,6 +96,10 @@ const App: React.FC = () => {
                 </Suspense>
               )}
             />
+            <Route
+              path={ROUTES.ORDER_REVIEW}
+              element={<Navigate to={`${ROUTES.ORDERS}?tab=review`} replace />}
+            />
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.DELIVERY} />}>
             <Route path={ROUTES.DELIVERY} element={<Suspense fallback={<PageLoader />}><Delivery /></Suspense>} />

@@ -496,7 +496,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Typography variant="subtitle2" sx={{ color: '#64748b' }}>共 {orders.length} 笔订单</Typography>
-        <Button variant="contained" size="small" onClick={() => onCreateOrder?.(currentCustomer)}>新建订单</Button>
+        <Button variant="contained" size="small" onClick={() => onCreateOrder?.(currentCustomer)}>提交订单申请</Button>
       </Box>
       <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb' }}>
         <Table size="small">

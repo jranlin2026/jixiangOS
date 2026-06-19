@@ -9,6 +9,7 @@ import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 import { getCurrentOperatorName, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
 import { claimFromPublicPool, hydrateCustomerLifecycle, releaseToPublicPool, setLeadLifecycle } from './lifecycleSync';
+import { filterVisibleCustomers } from '../shared/utils/dataVisibility';
 
 function ensureInit(): void {
   initializeMockData();
@@ -247,7 +248,7 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
   if (JSON.stringify(raw) !== JSON.stringify(all)) {
     setStorageData(STORAGE_KEYS.CUSTOMERS, all);
   }
-  let filtered = [...all];
+  let filtered = filterVisibleCustomers(all);
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
@@ -286,7 +287,7 @@ async function fetchCustomerById(id: string): Promise<ApiResponse<Customer | nul
   ensureInit();
   await delay(150);
   const customers = reconcileCustomerOrderStats((getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || []).map(normalizeCustomer));
-  const customer = customers.find((c) => c.id === id) || null;
+  const customer = filterVisibleCustomers(customers).find((c) => c.id === id) || null;
   return createSuccessResponse(customer);
 }
 

@@ -15,6 +15,8 @@ import {
   MenuItem,
   Paper,
   Select,
+  Snackbar,
+  Tab,
   Table,
   TableBody,
   TableCell,
@@ -25,6 +27,8 @@ import {
   TextField,
   Tooltip,
   Typography,
+  Alert,
+  Tabs,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -33,6 +37,7 @@ import HistoryIcon from '@mui/icons-material/History';
 import SortIcon from '@mui/icons-material/Sort';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
+import { useSearchParams } from 'react-router-dom';
 import useOrderStore from '../../store/useOrderStore';
 import { customerApi, orderApi, productApi, settingsApi } from '../../api';
 import { getProductLevelColor, PRODUCT_LEVELS, normalizeResourceOwnership } from '../../shared/utils/constants';
@@ -43,12 +48,14 @@ import OrderDetail from './OrderDetail';
 import OrderForm from './OrderForm';
 import OrderHistoryDialog from './OrderHistoryDialog';
 import OrderStats from './OrderStats';
+import OrderReview from '../OrderReview';
 import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
-import type { OrderTypeConfig } from '../../types/settings';
+import type { OrderTypeConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import PermissionGate from '../../shared/auth/PermissionGate';
 import { PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { filterUsersByCurrentDataScope } from '../../shared/utils/dataVisibility';
 import ResizableHeaderCell, {
   getResizableCellSx,
   readColumnWidths,
@@ -119,6 +126,9 @@ const readVisibleColumns = () => {
 
 const Orders: React.FC = () => {
   const { items, filters, pagination, fetchItems, fetchStats, setFilters, delete: deleteOrder } = useOrderStore();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') === 'review' ? 'review' : 'list';
+  const orderIdParam = searchParams.get('orderId');
   const [detailOpen, setDetailOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -131,10 +141,12 @@ const Orders: React.FC = () => {
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [productLevels, setProductLevels] = useState<{ name: string; color: string }[]>([]);
   const [orderTypeConfigs, setOrderTypeConfigs] = useState<OrderTypeConfig[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [customerNameMap, setCustomerNameMap] = useState<Record<string, string>>({});
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(readVisibleColumns);
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(ORDER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
+  const [orderLookupMessage, setOrderLookupMessage] = useState('');
 
   useEffect(() => {
     fetchItems({ ...filters, paymentMethod: undefined });
@@ -146,6 +158,9 @@ const Orders: React.FC = () => {
     });
     settingsApi.fetchOrderTypeConfigs().then((res) => {
       if (res.code === 0) setOrderTypeConfigs(res.data);
+    });
+    settingsApi.fetchUsers({ isActive: true }).then((res) => {
+      if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
     });
     customerApi.fetchCustomers({ pageSize: 1000 }).then((res) => {
       if (res.code !== 0) return;
@@ -161,9 +176,48 @@ const Orders: React.FC = () => {
     writeColumnWidths(ORDER_WIDTH_STORAGE_KEY, columnWidths);
   }, [columnWidths]);
 
+  useEffect(() => {
+    if (!orderIdParam || activeTab !== 'list') return;
+    let active = true;
+    orderApi.fetchOrderById(orderIdParam).then((res) => {
+      if (!active) return;
+      if (res.code === 0 && res.data) {
+        setSelectedOrder(res.data);
+        setDetailOpen(true);
+      } else {
+        setOrderLookupMessage('未找到该正式订单，或当前账号无权查看。');
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [activeTab, orderIdParam]);
+
   const handleViewDetail = (order: Order) => {
     setSelectedOrder(order);
     setDetailOpen(true);
+  };
+
+  const handleTabChange = (_event: React.SyntheticEvent, value: 'list' | 'review') => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (value === 'review') {
+      nextParams.set('tab', 'review');
+      nextParams.delete('orderId');
+    } else if (nextParams.has('orderId')) {
+      nextParams.set('tab', 'list');
+    } else {
+      nextParams.delete('tab');
+    }
+    setSearchParams(nextParams, { replace: true });
+  };
+
+  const handleCloseDetail = () => {
+    setDetailOpen(false);
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextParams.has('orderId')) {
+      nextParams.delete('orderId');
+      setSearchParams(nextParams, { replace: true });
+    }
   };
 
   const handleCreateOrder = () => {
@@ -296,6 +350,7 @@ const Orders: React.FC = () => {
     () => ORDER_COLUMNS.filter((column) => visibleColumnIds.includes(column.id)),
     [visibleColumnIds],
   );
+  const visibleOwnerUsers = useMemo(() => filterUsersByCurrentDataScope(users), [users]);
   const tableMinWidth = useMemo(
     () => columnWidths.orderNo + visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + 160,
     [columnWidths, visibleColumns],
@@ -350,133 +405,155 @@ const Orders: React.FC = () => {
           订单管理
         </Typography>
         <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
-            视图设置
-          </Button>
+          {activeTab === 'list' && (
+            <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
+              视图设置
+            </Button>
+          )}
           <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_CREATE} action="write">
             <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateOrder}>
-              新增订单
+              提交订单申请
             </Button>
           </PermissionGate>
         </Box>
       </Box>
 
-      <OrderStats />
+      <Tabs value={activeTab} onChange={handleTabChange} sx={{ mb: 2, borderBottom: '1px solid #e5e7eb' }}>
+        <Tab value="list" label="订单列表" />
+        <Tab value="review" label="订单审核台" />
+      </Tabs>
 
-      <Box sx={{ display: 'flex', gap: 2, my: 3, flexWrap: 'wrap' }}>
-        <TextField
-          placeholder="搜索订单号/客户名"
-          value={filters.search || ''}
-          onChange={(e) => handleFilterChange('search', e.target.value)}
-          size="small"
-          sx={{ minWidth: 240 }}
-        />
-        <FormControl size="small" sx={{ minWidth: 120 }}>
-          <InputLabel>产品等级</InputLabel>
-          <Select value={selectedProductLevel} label="产品等级" onChange={(e) => handleFilterChange('productLevel', e.target.value)}>
-            <MenuItem value="">全部</MenuItem>
-            {productLevelOptions.map((level) => (
-              <MenuItem key={level.name} value={level.name}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: level.color }} />
-                  {level.name}
-                </Box>
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <FormControl size="small" sx={{ minWidth: 120 }}>
-          <InputLabel>订单类型</InputLabel>
-          <Select value={selectedOrderType} label="订单类型" onChange={(e) => handleFilterChange('orderType', e.target.value)}>
-            <MenuItem value="">全部</MenuItem>
-            {orderTypeOptions.map((item) => (
-              <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <Button variant="outlined" startIcon={<SortIcon />} onClick={handlePaymentDateSort}>
-          付款日期{filters.sortBy === 'paymentDate' && filters.sortDirection === 'asc' ? '升序' : '降序'}
-        </Button>
-      </Box>
+      {activeTab === 'list' ? (
+        <>
+          <OrderStats />
 
-      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
-        <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
-          <TableHead>
-            <TableRow>
-              <ResizableHeaderCell columnId="orderNo" width={columnWidths.orderNo} onResize={handleResizeColumn}>订单号</ResizableHeaderCell>
-              {visibleColumns.map((column) => (
-                <ResizableHeaderCell key={column.id} columnId={column.id} width={columnWidths[column.id]} onResize={handleResizeColumn}>
-                  {column.label}
-                </ResizableHeaderCell>
-              ))}
-              <TableCell align="center" sx={{ width: 160 }}>操作</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {items.map((order) => {
-              const levelColor = getProductLevelColor(order.productLevel);
-              return (
-                <TableRow key={order.id} hover sx={{ bgcolor: `${levelColor}08` }}>
-                  <TableCell sx={{ ...getResizableCellSx(columnWidths.orderNo), fontWeight: 500 }} title={order.orderNo}>{order.orderNo}</TableCell>
-                  {visibleColumns.map((column) => (
-                    <TableCell key={column.id} sx={getResizableCellSx(columnWidths[column.id])}>{renderOrderCell(order, column.id)}</TableCell>
-                  ))}
-                  <TableCell align="center" sx={{ width: 160, minWidth: 160 }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5 }}>
-                      <Tooltip title="查看">
-                        <IconButton size="small" color="primary" aria-label="查看" onClick={() => handleViewDetail(order)}>
-                          <VisibilityIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_EDIT} action="write">
-                        <Tooltip title="编辑">
-                          <IconButton size="small" color="info" aria-label="编辑" onClick={() => handleEditOrder(order)}>
-                            <EditIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </PermissionGate>
-                      <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_HISTORY}>
-                        <Tooltip title="修改记录">
-                          <IconButton size="small" color="secondary" aria-label="修改记录" onClick={() => handleViewHistory(order)}>
-                            <HistoryIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </PermissionGate>
-                      <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_DELETE} action="delete">
-                        <Tooltip title="删除">
-                          <IconButton size="small" color="error" aria-label="删除" onClick={() => handleDeleteOrder(order)}>
-                            <DeleteOutlineIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </PermissionGate>
+          <Box sx={{ display: 'flex', gap: 2, my: 3, flexWrap: 'wrap' }}>
+            <TextField
+              placeholder="搜索订单号/客户名"
+              value={filters.search || ''}
+              onChange={(e) => handleFilterChange('search', e.target.value)}
+              size="small"
+              sx={{ minWidth: 240 }}
+            />
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel>产品等级</InputLabel>
+              <Select value={selectedProductLevel} label="产品等级" onChange={(e) => handleFilterChange('productLevel', e.target.value)}>
+                <MenuItem value="">全部</MenuItem>
+                {productLevelOptions.map((level) => (
+                  <MenuItem key={level.name} value={level.name}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: level.color }} />
+                      {level.name}
                     </Box>
-                  </TableCell>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel>订单类型</InputLabel>
+              <Select value={selectedOrderType} label="订单类型" onChange={(e) => handleFilterChange('orderType', e.target.value)}>
+                <MenuItem value="">全部</MenuItem>
+                {orderTypeOptions.map((item) => (
+                  <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" sx={{ minWidth: 150 }}>
+              <InputLabel>销售负责人</InputLabel>
+              <Select value={filters.owner || ''} label="销售负责人" onChange={(e) => handleFilterChange('owner', e.target.value)}>
+                <MenuItem value="">全部</MenuItem>
+                {visibleOwnerUsers.map((user) => (
+                  <MenuItem key={user.id} value={user.name}>{user.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Button variant="outlined" startIcon={<SortIcon />} onClick={handlePaymentDateSort}>
+              付款日期{filters.sortBy === 'paymentDate' && filters.sortDirection === 'asc' ? '升序' : '降序'}
+            </Button>
+          </Box>
+
+          <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
+            <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
+              <TableHead>
+                <TableRow>
+                  <ResizableHeaderCell columnId="orderNo" width={columnWidths.orderNo} onResize={handleResizeColumn}>订单号</ResizableHeaderCell>
+                  {visibleColumns.map((column) => (
+                    <ResizableHeaderCell key={column.id} columnId={column.id} width={columnWidths[column.id]} onResize={handleResizeColumn}>
+                      {column.label}
+                    </ResizableHeaderCell>
+                  ))}
+                  <TableCell align="center" sx={{ width: 160 }}>操作</TableCell>
                 </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </TableContainer>
-      <TablePagination
-        component="div"
-        count={pagination.total}
-        page={Math.max((pagination.page || 1) - 1, 0)}
-        rowsPerPage={pagination.pageSize || 10}
-        rowsPerPageOptions={[10, 20, 50, 100]}
-        onPageChange={handlePageChange}
-        onRowsPerPageChange={handleRowsPerPageChange}
-        labelRowsPerPage="每页条数"
-        labelDisplayedRows={formatPaginationRows}
-        sx={{
-          border: '1px solid #f0f0f0',
-          borderTop: 0,
-          bgcolor: '#fff',
-          '& .MuiTablePagination-toolbar': { minHeight: 48 },
-        }}
-      />
+              </TableHead>
+              <TableBody>
+                {items.map((order) => {
+                  const levelColor = getProductLevelColor(order.productLevel);
+                  return (
+                    <TableRow key={order.id} hover sx={{ bgcolor: `${levelColor}08` }}>
+                      <TableCell sx={{ ...getResizableCellSx(columnWidths.orderNo), fontWeight: 500 }} title={order.orderNo}>{order.orderNo}</TableCell>
+                      {visibleColumns.map((column) => (
+                        <TableCell key={column.id} sx={getResizableCellSx(columnWidths[column.id])}>{renderOrderCell(order, column.id)}</TableCell>
+                      ))}
+                      <TableCell align="center" sx={{ width: 160, minWidth: 160 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5 }}>
+                          <Tooltip title="查看">
+                            <IconButton size="small" color="primary" aria-label="查看" onClick={() => handleViewDetail(order)}>
+                              <VisibilityIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_EDIT} action="write">
+                            <Tooltip title="编辑">
+                              <IconButton size="small" color="info" aria-label="编辑" onClick={() => handleEditOrder(order)}>
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </PermissionGate>
+                          <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_HISTORY}>
+                            <Tooltip title="修改记录">
+                              <IconButton size="small" color="secondary" aria-label="修改记录" onClick={() => handleViewHistory(order)}>
+                                <HistoryIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </PermissionGate>
+                          <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_DELETE} action="delete">
+                            <Tooltip title="删除">
+                              <IconButton size="small" color="error" aria-label="删除" onClick={() => handleDeleteOrder(order)}>
+                                <DeleteOutlineIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </PermissionGate>
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          <TablePagination
+            component="div"
+            count={pagination.total}
+            page={Math.max((pagination.page || 1) - 1, 0)}
+            rowsPerPage={pagination.pageSize || 10}
+            rowsPerPageOptions={[10, 20, 50, 100]}
+            onPageChange={handlePageChange}
+            onRowsPerPageChange={handleRowsPerPageChange}
+            labelRowsPerPage="每页条数"
+            labelDisplayedRows={formatPaginationRows}
+            sx={{
+              border: '1px solid #f0f0f0',
+              borderTop: 0,
+              bgcolor: '#fff',
+              '& .MuiTablePagination-toolbar': { minHeight: 48 },
+            }}
+          />
+        </>
+      ) : (
+        <OrderReview embedded />
+      )}
 
       {selectedOrder && (
-        <OrderDetail order={selectedOrder} open={detailOpen} onClose={() => setDetailOpen(false)} />
+        <OrderDetail order={selectedOrder} open={detailOpen} onClose={handleCloseDetail} />
       )}
 
       {selectedCustomer && (
@@ -498,13 +575,33 @@ const Orders: React.FC = () => {
         order={editingOrder}
         customer={orderCustomer}
         onClose={() => { setFormOpen(false); setEditingOrder(null); }}
-        onSuccess={() => { fetchItems({ ...filters, paymentMethod: undefined }); fetchStats(); setOrderCustomer(null); }}
+        onSuccess={(application) => {
+          fetchItems({ ...filters, paymentMethod: undefined });
+          fetchStats();
+          setOrderCustomer(null);
+          if (application) {
+            const nextParams = new URLSearchParams(searchParams);
+            nextParams.set('tab', 'review');
+            nextParams.delete('orderId');
+            setSearchParams(nextParams, { replace: true });
+          }
+        }}
       />
       <OrderHistoryDialog
         order={selectedOrder}
         open={historyOpen}
         onClose={() => setHistoryOpen(false)}
       />
+      <Snackbar
+        open={Boolean(orderLookupMessage)}
+        autoHideDuration={3000}
+        onClose={() => setOrderLookupMessage('')}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert severity="warning" variant="filled" onClose={() => setOrderLookupMessage('')}>
+          {orderLookupMessage}
+        </Alert>
+      </Snackbar>
       <Dialog open={viewSettingsOpen} onClose={() => setViewSettingsOpen(false)} maxWidth="xs" fullWidth>
         <DialogCloseTitle onClose={() => setViewSettingsOpen(false)}>订单列表视图设置</DialogCloseTitle>
         <DialogContent dividers>
@@ -575,7 +672,7 @@ const Orders: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_CREATE} action="write">
-            <Button onClick={() => orderCustomer && handleCreateOrderForCustomer(orderCustomer)}>新建订单</Button>
+            <Button onClick={() => orderCustomer && handleCreateOrderForCustomer(orderCustomer)}>提交订单申请</Button>
           </PermissionGate>
         </DialogActions>
       </Dialog>

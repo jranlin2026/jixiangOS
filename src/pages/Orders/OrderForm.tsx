@@ -20,7 +20,7 @@ import {
   RESOURCE_OWNERSHIPS,
   normalizeResourceOwnership,
 } from '../../shared/utils/constants';
-import { customerApi, productApi, settingsApi } from '../../api';
+import { customerApi, orderReviewApi, productApi, settingsApi } from '../../api';
 import type { OrderType, PaymentMethod, ProductLevel } from '../../types/common';
 import type {
   CommissionRole,
@@ -29,7 +29,7 @@ import type {
   ResourceOwnership,
 } from '../../types/commission';
 import type { Customer } from '../../types/customer';
-import type { Order } from '../../types/order';
+import type { Order, OrderApplication } from '../../types/order';
 import type { Product, ProductLevelConfig } from '../../types/product';
 import type { OrderTypeConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
@@ -37,8 +37,9 @@ import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 interface OrderFormProps {
   open: boolean;
   onClose: () => void;
-  onSuccess?: () => void;
+  onSuccess?: (application?: OrderApplication) => void;
   order?: Order | null;
+  application?: OrderApplication | null;
   customer?: Customer | null;
 }
 
@@ -168,8 +169,8 @@ function getCustomerOptionLabel(customer: Customer): string {
   ].filter(Boolean).join(' · ');
 }
 
-const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, customer }) => {
-  const { create, update } = useOrderStore();
+const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, application, customer }) => {
+  const { update } = useOrderStore();
   const [products, setProducts] = useState<Product[]>([]);
   const [productLevelConfigs, setProductLevelConfigs] = useState<ProductLevelConfig[]>([]);
   const [orderTypeConfigs, setOrderTypeConfigs] = useState<OrderTypeConfig[]>([]);
@@ -208,7 +209,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   useEffect(() => {
     if (!open) return;
 
-    if (!order) {
+    if (!order && !application) {
       setVoucherName('');
       setVoucherPreview('');
       setDealEvidenceName('');
@@ -230,51 +231,53 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       return;
     }
 
-    const primaryPayment = order.payments?.[0];
+    const sourceOrder = order || application?.orderData;
+    if (!sourceOrder) return;
+    const primaryPayment = sourceOrder.payments?.[0];
     const lockedCustomer: Customer = {
-      id: order.customerId,
-      name: order.customerName,
-      company: order.customerName,
+      id: sourceOrder.customerId,
+      name: sourceOrder.customerName,
+      company: sourceOrder.customerName,
       phone: '',
       customerLevel: 'L1',
-      owner: order.owner,
-      sourceType: order.sourceType,
-      totalSpent: order.actualAmount,
+      owner: sourceOrder.owner,
+      sourceType: sourceOrder.sourceType,
+      totalSpent: sourceOrder.actualAmount,
       orderCount: 1,
       growthPath: [],
       growthRecords: [],
-      createdAt: order.createdAt,
-      updatedAt: order.updatedAt,
+      createdAt: order?.createdAt || application?.createdAt || '',
+      updatedAt: order?.updatedAt || application?.updatedAt || '',
     };
     setSelectedCustomer(lockedCustomer);
     setVoucherName(primaryPayment?.voucherName || '');
     setVoucherPreview(primaryPayment?.voucherPreview || '');
-    setDealEvidenceName(order.dealEvidenceName || '');
-    setDealEvidencePreview(order.dealEvidencePreview || '');
+    setDealEvidenceName(sourceOrder.dealEvidenceName || '');
+    setDealEvidencePreview(sourceOrder.dealEvidencePreview || '');
     setRecognitionMessage('');
     setCustomers([]);
     setCustomerSearch('');
     setForm((prev) => ({
       ...prev,
-      customerName: order.customerName,
-      customerId: order.customerId || '',
-      productLevel: order.productLevel,
-      orderType: order.orderType,
-      actualAmount: order.actualAmount || order.amount,
-      officialPaymentChannel: order.officialPaymentChannel || prev.officialPaymentChannel,
-      resourceOwnership: normalizeResourceOwnership(order.resourceOwnership || order.sourceType || prev.resourceOwnership),
-      collaboratorName: order.collaboratorName || '',
-      collaboratorRole: order.collaboratorRole || prev.collaboratorRole,
-      collaboratorRatio: order.collaboratorRatio || 0,
-      originalOrderId: order.originalOrderId || '',
-      sourceType: order.sourceType || prev.sourceType,
-      owner: order.owner,
-      notes: order.notes || '',
-      refundStatus: order.refundStatus,
-      paymentDate: toDateTimeInputValue(new Date(primaryPayment?.paidAt || order.createdAt)),
+      customerName: sourceOrder.customerName,
+      customerId: sourceOrder.customerId || '',
+      productLevel: sourceOrder.productLevel,
+      orderType: sourceOrder.orderType,
+      actualAmount: sourceOrder.actualAmount || sourceOrder.amount,
+      officialPaymentChannel: sourceOrder.officialPaymentChannel || prev.officialPaymentChannel,
+      resourceOwnership: normalizeResourceOwnership(sourceOrder.resourceOwnership || sourceOrder.sourceType || prev.resourceOwnership),
+      collaboratorName: sourceOrder.collaboratorName || '',
+      collaboratorRole: sourceOrder.collaboratorRole || prev.collaboratorRole,
+      collaboratorRatio: sourceOrder.collaboratorRatio || 0,
+      originalOrderId: sourceOrder.originalOrderId || '',
+      sourceType: sourceOrder.sourceType || prev.sourceType,
+      owner: sourceOrder.owner,
+      notes: sourceOrder.notes || '',
+      refundStatus: sourceOrder.refundStatus,
+      paymentDate: toDateTimeInputValue(new Date(primaryPayment?.paidAt || order?.createdAt || application?.createdAt || new Date())),
       paymentOrderNo: primaryPayment?.paymentOrderNo || '',
     }));
-  }, [open, order, customer]);
+  }, [open, order, application, customer]);
 
   useEffect(() => {
     if (!open) return;
@@ -374,7 +377,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   }, [form.orderType, order, orderTypeConfigs]);
 
   useEffect(() => {
-    if (!open || order || customer) return;
+    if (!open || order || application || customer) return;
     const keyword = customerSearch.trim();
     if (keyword.length < 1) {
       setCustomers(selectedCustomer ? [selectedCustomer] : []);
@@ -401,7 +404,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       active = false;
       window.clearTimeout(timer);
     };
-  }, [open, order, customer, customerSearch, selectedCustomer]);
+  }, [open, order, application, customer, customerSearch, selectedCustomer]);
 
   const handleChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -546,22 +549,36 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       dealEvidencePreview: dealEvidencePreview || undefined,
     };
 
+    let submittedApplication: OrderApplication | undefined;
     if (order) {
       await update(order.id, payload);
+    } else if (application) {
+      const res = await orderReviewApi.updateReturnedOrderApplication(application.id, payload);
+      submittedApplication = res.data || undefined;
     } else {
-      await create(payload);
+      const res = await orderReviewApi.submitOrderApplication(payload);
+      submittedApplication = res.data;
     }
-    onSuccess?.();
+    onSuccess?.(submittedApplication);
     onClose();
   };
 
-  const customerLocked = Boolean(order || customer);
+  const customerLocked = Boolean(order || application || customer);
   const canSubmit = Boolean(form.customerId && form.customerName && form.actualAmount > 0);
+  const formTitle = order ? '编辑订单' : application ? '修改订单申请' : '提交订单申请';
+  const actionText = order ? '保存修改' : application ? '重新提交审核' : '提交审核';
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogCloseTitle onClose={onClose}>{order ? '编辑订单' : '新增订单'}</DialogCloseTitle>
+      <DialogCloseTitle onClose={onClose}>{formTitle}</DialogCloseTitle>
       <DialogContent>
+        {!order && (
+          <Typography variant="body2" sx={{ mb: 2, color: '#1d4ed8', bgcolor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 1, px: 1.5, py: 1 }}>
+            {application
+              ? '修改后会重新进入财务审核，审核通过后才生成正式订单、提成和交付记录。'
+              : '提交后会进入订单审核台，财务审核通过后才生成正式订单、提成和交付记录。'}
+          </Typography>
+        )}
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
           {customerLocked ? (
             <TextField
@@ -798,7 +815,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       </DialogContent>
       <DialogActions>
         <Button variant="contained" onClick={handleSubmit} disabled={!canSubmit}>
-          {order ? '保存修改' : '创建订单'}
+          {actionText}
         </Button>
       </DialogActions>
     </Dialog>

@@ -11,6 +11,7 @@ import { deliveryApi } from './deliveryApi';
 import { syncLifecycleByOrder, syncOpportunityRefundedByOrderId } from './lifecycleSync';
 import { v4 as uuidv4 } from 'uuid';
 import { getCurrentOperatorName, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
+import { filterVisibleOrders } from '../shared/utils/dataVisibility';
 
 function ensureInit(): void {
   initializeMockData();
@@ -223,7 +224,7 @@ async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<Paginate
   const raw = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
   const all = raw.map(normalizeOrder);
   if (JSON.stringify(raw) !== JSON.stringify(all)) setStorageData(STORAGE_KEYS.ORDERS, all);
-  let filtered = [...all];
+  let filtered = filterVisibleOrders(all);
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
@@ -285,13 +286,13 @@ async function fetchOrderById(id: string): Promise<ApiResponse<Order | null>> {
   const raw = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
   const orders = raw.map(normalizeOrder);
   if (JSON.stringify(raw) !== JSON.stringify(orders)) setStorageData(STORAGE_KEYS.ORDERS, orders);
-  return createSuccessResponse(orders.find((o) => o.id === id) || null);
+  return createSuccessResponse(filterVisibleOrders(orders).find((o) => o.id === id) || null);
 }
 
 async function fetchOrderStats(): Promise<ApiResponse<OrderStats>> {
   ensureInit();
   await delay(200);
-  const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
+  const orders = filterVisibleOrders((getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).map(normalizeOrder));
   const now = new Date();
   const today = now.toISOString().split('T')[0];
   const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;

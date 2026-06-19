@@ -154,6 +154,29 @@ function cancelCommissions(refund: Refund): void {
   }));
 }
 
+function markPaidRefundExceptions(refund: Refund): void {
+  const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
+  const paidStatus = '已发放';
+  const reason = `已发放后退款：${refund.refundNo}，需财务人工处理`;
+  let changed = false;
+
+  const nextCommissions = commissions.map((commission) => {
+    if ((commission.orderId !== refund.orderId && commission.orderNo !== refund.orderNo) || commission.isRecoveryBonus) return commission;
+    if (commission.status !== paidStatus) return commission;
+    changed = true;
+    return {
+      ...commission,
+      auditReason: reason,
+      frozenReason: reason,
+      calculationNote: `${commission.calculationNote || ''} ${reason}`.trim(),
+      sourceRefundId: refund.id,
+      updatedAt: nowIso(),
+    };
+  });
+
+  if (changed) setStorageData(STORAGE_KEYS.COMMISSIONS, nextCommissions);
+}
+
 function createRecoveryCommission(refund: Refund, operatorId: string, operatorName: string): number {
   const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
   const exists = commissions.some((commission) => commission.sourceRefundId === refund.id && commission.isRecoveryBonus);
@@ -554,6 +577,7 @@ async function completeRefund(id: string, refundMethod: string, refundVoucher?: 
     updatedAt: now,
   };
   cancelCommissions(refund);
+  markPaidRefundExceptions(refund);
   updateOrderAfterRefund(refund);
   writeFinanceExpense(refund, refundMethod, paidAt);
   refunds[idx] = refund;

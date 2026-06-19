@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { leadFlowApi } from './leadFlowApi';
 import { getCurrentOperatorName } from '../shared/utils/currentOperator';
 import { hydrateLeadLifecycle, setCustomerLifecycle } from './lifecycleSync';
+import { filterVisibleLeads } from '../shared/utils/dataVisibility';
 
 function ensureInit(): void {
   initializeMockData();
@@ -94,7 +95,7 @@ async function fetchLeads(filters?: LeadFilters): Promise<ApiResponse<PaginatedR
   if (JSON.stringify(allLeads) !== JSON.stringify(normalizedLeads)) {
     setStorageData(STORAGE_KEYS.LEADS, normalizedLeads);
   }
-  let filtered = [...normalizedLeads];
+  let filtered = filterVisibleLeads(normalizedLeads);
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
@@ -135,7 +136,7 @@ async function fetchLeadById(id: string): Promise<ApiResponse<Lead | null>> {
   if (JSON.stringify(leads) !== JSON.stringify(normalizedLeads)) {
     setStorageData(STORAGE_KEYS.LEADS, normalizedLeads);
   }
-  const lead = normalizedLeads.find((item) => item.id === id) || null;
+  const lead = filterVisibleLeads(normalizedLeads).find((item) => item.id === id) || null;
   return createSuccessResponse(lead);
 }
 

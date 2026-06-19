@@ -37,6 +37,17 @@ export interface OrderChangeLog {
   }>;
 }
 
+export type OrderApplicationStatus = '待财务审核' | '退回修改' | '已入库' | '已驳回';
+
+export interface OrderApplicationReviewLog {
+  id: ID;
+  action: 'submit' | 'resubmit' | 'approve' | 'return' | 'reject';
+  operatorId?: ID;
+  operatorName: string;
+  reason?: string;
+  createdAt: Timestamp;
+}
+
 /** 订单 */
 export interface Order {
   id: ID;
@@ -92,6 +103,25 @@ export interface Order {
   updatedAt: Timestamp;
 }
 
+export interface OrderApplication {
+  id: ID;
+  applicationNo: string;
+  status: OrderApplicationStatus;
+  orderData: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'orderNo'>;
+  applicantId?: ID;
+  applicantName: string;
+  submittedAt: Timestamp;
+  reviewerId?: ID;
+  reviewerName?: string;
+  reviewedAt?: Timestamp;
+  reason?: string;
+  orderId?: ID;
+  orderNo?: string;
+  reviewLogs: OrderApplicationReviewLog[];
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
 /** 订单统计 */
 export interface OrderStats {
   todayAmount: number;
@@ -117,6 +147,17 @@ export interface OrderFilters {
   endDate?: string;
   sortBy?: 'createdAt' | 'paymentDate';
   sortDirection?: 'asc' | 'desc';
+  page?: number;
+  pageSize?: number;
+}
+
+export interface OrderApplicationFilters {
+  search?: string;
+  status?: OrderApplicationStatus;
+  applicantName?: string;
+  reviewerName?: string;
+  startDate?: string;
+  endDate?: string;
   page?: number;
   pageSize?: number;
 }

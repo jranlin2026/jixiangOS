@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -37,19 +38,20 @@ import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import useCustomerStore from '../../store/useCustomerStore';
 import { customerApi, orderApi, settingsApi } from '../../api';
-import { CUSTOMER_LEVELS, getLifecycleConfigByCode, getProductLevelColor, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
+import { CUSTOMER_LEVELS, ROUTES, getLifecycleConfigByCode, getProductLevelColor, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import CustomerDetail from './CustomerDetail';
 import CustomerForm from './CustomerForm';
 import OrderForm from '../Orders/OrderForm';
 import type { Customer, CustomerFilters } from '../../types/customer';
-import type { Order } from '../../types/order';
+import type { Order, OrderApplication } from '../../types/order';
 import type { CustomerLevelConfig, LifecycleStatusConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import PermissionGate from '../../shared/auth/PermissionGate';
 import { PERMISSION_KEYS } from '../../shared/utils/permissions';
 import useAuthStore from '../../store/useAuthStore';
+import { filterUsersByCurrentDataScope } from '../../shared/utils/dataVisibility';
 import ResizableHeaderCell, {
   getResizableCellSx,
   readColumnWidths,
@@ -162,6 +164,7 @@ const readVisibleColumns = (columns: CustomerColumn[]) => {
 };
 
 const Customers: React.FC = () => {
+  const navigate = useNavigate();
   const { items, filters, pagination, fetchItems, setFilters } = useCustomerStore();
   const currentUser = useAuthStore((state) => state.currentUser);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -169,6 +172,7 @@ const Customers: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [orderFormOpen, setOrderFormOpen] = useState(false);
   const [orderCustomer, setOrderCustomer] = useState<Customer | null>(null);
+  const [submittedOrderApplication, setSubmittedOrderApplication] = useState<OrderApplication | null>(null);
   const [ordersOpen, setOrdersOpen] = useState(false);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -215,6 +219,7 @@ const Customers: React.FC = () => {
     () => columns.filter((column) => visibleColumnIds.includes(column.id)),
     [columns, visibleColumnIds],
   );
+  const visibleOwnerUsers = useMemo(() => filterUsersByCurrentDataScope(users), [users]);
   const tableMinWidth = useMemo(
     () => columnWidths.name + visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + 160,
     [columnWidths, visibleColumns],
@@ -384,7 +389,7 @@ const Customers: React.FC = () => {
           <InputLabel>销售负责人</InputLabel>
           <Select value={filters.owner || ''} label="销售负责人" onChange={(e) => handleFilterChange('owner', e.target.value)}>
             <MenuItem value="">全部</MenuItem>
-            {users.map((user) => (
+            {visibleOwnerUsers.map((user) => (
               <MenuItem key={user.id} value={user.name}>{user.name}</MenuItem>
             ))}
           </Select>
@@ -432,7 +437,7 @@ const Customers: React.FC = () => {
                       </IconButton>
                     </Tooltip>
                     <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE_ORDER} action="write">
-                      <Tooltip title="新建订单">
+                      <Tooltip title="提交订单申请">
                         <IconButton size="small" color="info" onClick={() => handleCreateOrder(customer)}>
                           <AddShoppingCartIcon fontSize="small" />
                         </IconButton>
@@ -515,11 +520,46 @@ const Customers: React.FC = () => {
         open={orderFormOpen}
         customer={orderCustomer}
         onClose={() => setOrderFormOpen(false)}
-        onSuccess={() => {
+        onSuccess={(application) => {
           fetchItems({ ...filters, productLevel: undefined });
-          if (orderCustomer) handleViewOrders(orderCustomer);
+          if (application) setSubmittedOrderApplication(application);
         }}
       />
+
+      <Dialog
+        open={Boolean(submittedOrderApplication)}
+        onClose={() => setSubmittedOrderApplication(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogCloseTitle onClose={() => setSubmittedOrderApplication(null)}>订单申请已提交</DialogCloseTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ color: '#374151', mb: 2 }}>
+            该订单已进入财务审核，审核通过后才会生成正式订单、提成和交付记录。
+          </Typography>
+          {submittedOrderApplication && (
+            <Box sx={{ display: 'grid', gap: 1, bgcolor: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5 }}>
+              <Typography variant="body2">申请编号：{submittedOrderApplication.applicationNo}</Typography>
+              <Typography variant="body2">客户：{submittedOrderApplication.orderData.customerName}</Typography>
+              <Typography variant="body2">订单类型：{submittedOrderApplication.orderData.orderType}</Typography>
+              <Typography variant="body2">实付金额：{formatCurrency(submittedOrderApplication.orderData.actualAmount || submittedOrderApplication.orderData.amount)}</Typography>
+              <Typography variant="body2">当前状态：{submittedOrderApplication.status}</Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSubmittedOrderApplication(null)}>知道了</Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              setSubmittedOrderApplication(null);
+              navigate(`${ROUTES.ORDERS}?tab=review`);
+            }}
+          >
+            查看审核进度
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={Boolean(releaseTarget)} onClose={() => setReleaseTarget(null)} maxWidth="xs" fullWidth>
         <DialogCloseTitle onClose={() => setReleaseTarget(null)}>放弃到公海</DialogCloseTitle>
@@ -613,9 +653,9 @@ const Customers: React.FC = () => {
             </TableBody>
           </Table>
         </DialogContent>
-        <DialogActions>
+        <DialogActions sx={{ display: 'none' }}>
           <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE_ORDER} action="write">
-            <Button onClick={() => orderCustomer && handleCreateOrder(orderCustomer)}>新建订单</Button>
+            <Button onClick={() => orderCustomer && handleCreateOrder(orderCustomer)}>提交订单申请</Button>
           </PermissionGate>
         </DialogActions>
       </Dialog>

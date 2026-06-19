@@ -65,6 +65,7 @@ const PERMISSION_TREE: PermissionNode[] = [
     label: '订单',
     children: [
       { label: '订单管理' },
+      { label: '订单审核台' },
       { label: '新增订单' },
       { label: '编辑订单' },
       { label: '删除订单' },

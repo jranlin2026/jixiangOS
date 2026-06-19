@@ -29,6 +29,8 @@ import {
   Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import DownloadIcon from '@mui/icons-material/Download';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
@@ -37,16 +39,18 @@ import { getLifecycleConfigByCode, normalizeLifecycleStatusCode, normalizeResour
 import { formatPaginationRows } from '../../shared/utils/formatters';
 import LeadDetail from './LeadDetail';
 import LeadForm from './LeadForm';
+import LeadBulkImportDialog from './LeadBulkImportDialog';
 import LeadIntakeTab from './LeadIntakeTab';
 import LeadFlowConfigTab from './LeadFlowConfigTab';
 import type { Lead } from '../../types/lead';
-import { leadFlowApi, settingsApi } from '../../api';
+import { leadBulkImportApi, leadFlowApi, settingsApi } from '../../api';
 import type { LeadSourceConfig, LifecycleStatusConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import PermissionGate from '../../shared/auth/PermissionGate';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { isSalesRoleName } from '../../shared/utils/roles';
+import { filterUsersByCurrentDataScope } from '../../shared/utils/dataVisibility';
 import ResizableHeaderCell, {
   getResizableCellSx,
   readColumnWidths,
@@ -147,6 +151,8 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   lifecycleStatus: 140,
 };
 
+const LEAD_TEMPLATE_FILE_NAME = '\u7ebf\u7d22\u6279\u91cf\u5165\u5e93\u6a21\u677f.xlsx';
+
 const readVisibleColumns = (columns: LeadColumn[]) => {
   try {
     const raw = localStorage.getItem(LEAD_VIEW_STORAGE_KEY);
@@ -168,6 +174,7 @@ const Leads: React.FC = () => {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [lifecycleConfigs, setLifecycleConfigs] = useState<LifecycleStatusConfig[]>([]);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -206,7 +213,7 @@ const Leads: React.FC = () => {
     writeColumnWidths(LEAD_WIDTH_STORAGE_KEY, columnWidths);
   }, [columnWidths]);
 
-  const salesUsers = users.filter((user) => isSalesRoleName(user.role));
+  const salesUsers = filterUsersByCurrentDataScope(users).filter((user) => isSalesRoleName(user.role));
   const canManageLeadFlow = hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG, 'write');
 
   const handleViewDetail = (lead: Lead) => {
@@ -233,6 +240,21 @@ const Leads: React.FC = () => {
 
   const handleCreate = () => {
     setFormOpen(true);
+  };
+
+  const handleDownloadTemplate = () => {
+    const workbook = leadBulkImportApi.createTemplateWorkbook();
+    const blob = new Blob([workbook], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = LEAD_TEMPLATE_FILE_NAME;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   };
 
   const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -283,11 +305,19 @@ const Leads: React.FC = () => {
             <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
               视图设置
             </Button>
+            <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleDownloadTemplate}>
+              {'\u4e0b\u8f7dExcel\u6a21\u677f'}
+            </Button>
             {activeTab === 0 && (
               <PermissionGate permissionKey={PERMISSION_KEYS.LEADS_CREATE} action="write">
-                <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate}>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Button variant="outlined" startIcon={<UploadFileIcon />} onClick={() => setBulkImportOpen(true)}>
+                    {'\u6279\u91cf\u5165\u5e93'}
+                  </Button>
+                  <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate}>
                   新增线索入库
-                </Button>
+                  </Button>
+                </Box>
               </PermissionGate>
             )}
           </Box>
@@ -430,6 +460,12 @@ const Leads: React.FC = () => {
         open={formOpen}
         onClose={() => setFormOpen(false)}
         onSuccess={() => fetchItems(filters)}
+      />
+
+      <LeadBulkImportDialog
+        open={bulkImportOpen}
+        onClose={() => setBulkImportOpen(false)}
+        onImported={() => fetchItems(filters)}
       />
 
       <Dialog open={viewSettingsOpen} onClose={() => setViewSettingsOpen(false)} maxWidth="xs" fullWidth>
