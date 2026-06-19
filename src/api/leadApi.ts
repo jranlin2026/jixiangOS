@@ -2,10 +2,12 @@ import type { Lead, LeadFilters, FollowUpRecord, LeadAIAnalysis } from '../types
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
+import { LIFECYCLE_STATUS_CODES, STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 import { leadFlowApi } from './leadFlowApi';
+import { getCurrentOperatorName } from '../shared/utils/currentOperator';
+import { hydrateLeadLifecycle, setCustomerLifecycle } from './lifecycleSync';
 
 function ensureInit(): void {
   initializeMockData();
@@ -57,15 +59,23 @@ function buildLeadChanges(before: Lead, data: Partial<Lead>) {
 }
 
 function normalizeLead(lead: Lead): Lead {
-  return {
+  const normalized = hydrateLeadLifecycle({
     ...lead,
-    lifecycleStatus: lead.lifecycleStatus || (lead.status === '已流失' ? '已流失' : lead.status === '已成交' ? '已转订单' : '未转商机'),
-    lifecycleStatusUpdatedAt: lead.lifecycleStatusUpdatedAt || lead.updatedAt,
     intakeStatus: lead.intakeStatus || '入库成功',
     inputBy: lead.inputBy || lead.owner,
     assignedTo: lead.assignedTo || lead.owner,
     sourceType: normalizeResourceOwnership(lead.sourceType),
-  };
+  });
+  if (normalized.lifecycleStatusCode === LIFECYCLE_STATUS_CODES.PUBLIC_POOL) {
+    return {
+      ...normalized,
+      owner: normalized.owner === '公海' ? '待分配' : normalized.owner,
+      assignedTo: normalized.assignedTo,
+      lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP,
+      lifecycleStatus: '待跟进',
+    };
+  }
+  return normalized;
 }
 
 async function fetchLeads(filters?: LeadFilters): Promise<ApiResponse<PaginatedResponse<Lead>>> {
@@ -92,6 +102,7 @@ async function fetchLeads(filters?: LeadFilters): Promise<ApiResponse<PaginatedR
   }
   if (filters?.source) filtered = filtered.filter((lead) => lead.source === filters.source);
   if (filters?.status) filtered = filtered.filter((lead) => lead.status === filters.status);
+  if (filters?.lifecycleStatusCode) filtered = filtered.filter((lead) => lead.lifecycleStatusCode === filters.lifecycleStatusCode);
   if (filters?.owner) filtered = filtered.filter((lead) => lead.owner === filters.owner || lead.assignedTo === filters.owner);
   if (filters?.startDate) filtered = filtered.filter((lead) => lead.createdAt >= filters.startDate!);
   if (filters?.endDate) filtered = filtered.filter((lead) => lead.createdAt <= filters.endDate!);
@@ -138,6 +149,7 @@ async function updateLead(id: string, data: Partial<Lead>): Promise<ApiResponse<
   const changes = buildLeadChanges(existing, data);
   const history = existing.changeHistory || [];
   const assignedChanged = changes.some((item) => item.field === 'assignedTo');
+  const operator = getCurrentOperatorName(existing.inputBy || existing.owner);
   leads[idx] = {
     ...existing,
     ...data,
@@ -147,7 +159,7 @@ async function updateLead(id: string, data: Partial<Lead>): Promise<ApiResponse<
       ? [{
         id: `hist-${uuidv4().slice(0, 8)}`,
         action: 'update',
-        operator: data.assignedTo || data.owner || existing.assignedTo || existing.owner || existing.inputBy || '系统',
+        operator,
         changedAt: now,
         summary: `修改了${changes.map((item) => item.label).join('、')}`,
         changes,
@@ -179,11 +191,18 @@ async function addFollowUpRecord(
   if (!lead) return createSuccessResponse(null);
   const newRecord: FollowUpRecord = {
     ...record,
+    createdBy: getCurrentOperatorName(record.createdBy),
     id: uuidv4(),
     leadId,
     createdAt: new Date().toISOString(),
   };
   lead.followUpRecords.unshift(newRecord);
+  if (lead.lifecycleStatusCode === 'pending_followup' || !lead.lifecycleStatusCode) {
+    lead.lifecycleStatusCode = 'following';
+    lead.lifecycleStatus = '跟进中';
+    lead.lifecycleStatusUpdatedAt = newRecord.createdAt;
+    if (lead.customerId) setCustomerLifecycle(lead.customerId, 'following');
+  }
   lead.updatedAt = new Date().toISOString();
   setStorageData(STORAGE_KEYS.LEADS, leads);
   return createSuccessResponse(newRecord);

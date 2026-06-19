@@ -20,6 +20,7 @@ import {
 import { leadFlowApi, settingsApi } from '../../api';
 import type { LeadFlowConfig, LeadUniqueKeyMode } from '../../types/lead';
 import type { User } from '../../types/settings';
+import { isSalesRoleName } from '../../shared/utils/roles';
 
 const LeadFlowConfigTab: React.FC = () => {
   const [config, setConfig] = useState<LeadFlowConfig | null>(null);
@@ -32,7 +33,7 @@ const LeadFlowConfigTab: React.FC = () => {
     });
     settingsApi.fetchUsers({ isActive: true }).then((res) => {
       if (res.code === 0) {
-        setSalesUsers(res.data.filter((user) => user.isActive && (user.role === '销售' || user.role === '销售经理')));
+        setSalesUsers(res.data.filter((user) => user.isActive && isSalesRoleName(user.role)));
       }
     });
   }, []);

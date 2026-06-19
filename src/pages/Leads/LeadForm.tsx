@@ -15,6 +15,7 @@ import type { LeadSourceConfig, User } from '../../types/settings';
 import { settingsApi } from '../../api';
 import { RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import { isSalesRoleName } from '../../shared/utils/roles';
 
 const CURRENT_USER_STORAGE_KEY = 'aaos_current_user';
 
@@ -124,7 +125,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     });
   }, [open, lead, sourceOptions, users]);
 
-  const salesUsers = users.filter((user) => user.role === '销售' || user.role === '销售经理');
+  const salesUsers = users.filter((user) => isSalesRoleName(user.role));
   const selectedSourceKey = sourceOptions.find((option) => (
     option.parentName === form.source && option.childName === (form.sourceName || '')
   ))?.key || '';

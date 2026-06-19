@@ -7,6 +7,8 @@ import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
+import { getCurrentOperatorName, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
+import { claimFromPublicPool, hydrateCustomerLifecycle, releaseToPublicPool } from './lifecycleSync';
 
 function ensureInit(): void {
   initializeMockData();
@@ -18,11 +20,11 @@ function normalizeCustomer(customer: Customer): Customer {
   const legacyLeadSource = legacySourceType && legacySourceType !== '公司资源' && legacySourceType !== '个人资源' && legacySourceType !== '自拓'
     ? legacySourceType
     : undefined;
-  const normalized = {
+  const normalized = hydrateCustomerLifecycle({
     ...customer,
     leadSource: customer.leadSource || legacyLeadSource,
     sourceType: normalizedSourceType,
-  };
+  });
   const hasOrder = (customer.orderCount || 0) > 0 || (customer.totalSpent || 0) > 0;
   if (hasOrder) return normalized;
 
@@ -97,7 +99,7 @@ function buildCustomerChanges(existing: Customer, data: Partial<Customer>): Cust
     .filter(Boolean) as CustomerActivityRecord['changes'];
 }
 
-function syncLeadsByCustomer(customer: Customer, now: string): void {
+function syncLeadsByCustomer(customer: Customer, now: string, operator = SYSTEM_OPERATOR): void {
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
   let changed = false;
   const nextLeads = leads.map((lead) => {
@@ -143,7 +145,7 @@ function syncLeadsByCustomer(customer: Customer, now: string): void {
         ? [{
           id: `hist-${uuidv4().slice(0, 8)}`,
           action: 'update',
-          operator: customer.owner || '系统',
+          operator,
           changedAt: now,
           summary: `客户资料同步：${fieldChanges.map((item) => item.label).join('、')}`,
           changes: fieldChanges,
@@ -215,7 +217,7 @@ function reconcileCustomerOrderStats(customers: Customer[]): Customer[] {
           type: 'order',
           title: `创建了订单 ${order.orderNo}`,
           content: `签约${order.productLevel}，实付${Number(order.actualAmount || order.amount).toLocaleString('zh-CN')}元`,
-          operator: order.owner || '系统',
+          operator: SYSTEM_OPERATOR,
           relatedId: order.id,
           relatedType: 'order',
           createdAt: order.createdAt,
@@ -267,6 +269,11 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
   if (filters?.owner) {
     filtered = filtered.filter((c) => c.owner === filters.owner);
   }
+  if (filters?.lifecycleStatusCode) {
+    filtered = filtered.filter((c) => c.lifecycleStatusCode === filters.lifecycleStatusCode);
+  } else {
+    filtered = filtered.filter((c) => c.lifecycleStatusCode !== 'public_pool');
+  }
 
   const page = filters?.page || 1;
   const pageSize = filters?.pageSize || DEFAULT_PAGE_SIZE;
@@ -295,6 +302,8 @@ async function createCustomer(data: CustomerCreateInput): Promise<ApiResponse<Cu
     id: `cust-${uuidv4().slice(0, 8)}`,
     productLevel: data.productLevel || undefined,
     customerLevel: data.customerLevel || 'L1',
+    lifecycleStatusCode: data.lifecycleStatusCode || 'pending_followup',
+    lifecycleStatusUpdatedAt: now,
     totalSpent: 0,
     orderCount: 0,
     growthPath: [],
@@ -302,7 +311,7 @@ async function createCustomer(data: CustomerCreateInput): Promise<ApiResponse<Cu
     activityRecords: [createActivity({
       type: 'create',
       title: '创建了客户',
-      operator: data.owner || data.leadInputBy || '系统',
+      operator: getCurrentOperatorName(data.owner || data.leadInputBy),
       content: data.remark,
       createdAt: now,
     })],
@@ -323,7 +332,7 @@ async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiR
   const existing = customers[idx];
   const now = new Date().toISOString();
   const changes = buildCustomerChanges(existing, data);
-  const operator = data.owner || existing.owner || '系统';
+  const operator = getCurrentOperatorName(existing.owner);
   const activityType = data.owner && data.owner !== existing.owner ? 'transfer' : 'update';
   customers[idx] = {
     ...existing,
@@ -341,7 +350,7 @@ async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiR
     updatedAt: now,
   };
   setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
-  syncLeadsByCustomer(customers[idx], now);
+  syncLeadsByCustomer(customers[idx], now, operator);
   return createSuccessResponse(customers[idx]);
 }
 
@@ -361,9 +370,13 @@ async function addCustomerFollowUp(
     type: 'follow',
     title: `发表了${data.type || '跟进记录'}`,
     content,
-    operator: data.operator || customers[idx].owner || '系统',
+    operator: getCurrentOperatorName(data.operator || customers[idx].owner),
     createdAt: now,
   }));
+  if (customers[idx].lifecycleStatusCode === 'pending_followup') {
+    customers[idx].lifecycleStatusCode = 'following';
+    customers[idx].lifecycleStatusUpdatedAt = now;
+  }
   customers[idx].updatedAt = now;
   setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
   return createSuccessResponse(customers[idx]);
@@ -380,6 +393,40 @@ function appendCustomerActivity(
   customers[idx].updatedAt = activity.createdAt || new Date().toISOString();
   setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
   return customers[idx];
+}
+
+async function releaseCustomerToPublicPool(id: string, reason: string): Promise<ApiResponse<Customer | null>> {
+  ensureInit();
+  await delay(150);
+  const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+  const customer = customers.find((item) => item.id === id);
+  if (!customer) return createSuccessResponse(null);
+  const operator = getCurrentOperatorName(customer.owner);
+  releaseToPublicPool({ customerId: id }, reason, operator);
+  const updated = appendCustomerActivity(id, {
+    type: 'transfer',
+    title: '释放到公海',
+    content: reason || '销售放弃跟进，客户进入公海池',
+    operator,
+  });
+  return createSuccessResponse(updated ? hydrateCustomerLifecycle(updated) : null);
+}
+
+async function claimCustomerFromPublicPool(id: string, userName: string): Promise<ApiResponse<Customer | null>> {
+  ensureInit();
+  await delay(150);
+  const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+  const customer = customers.find((item) => item.id === id);
+  if (!customer) return createSuccessResponse(null);
+  const operator = getCurrentOperatorName(userName);
+  claimFromPublicPool({ customerId: id }, userName);
+  const updated = appendCustomerActivity(id, {
+    type: 'transfer',
+    title: '重新领取公海客户',
+    content: `${userName} 领取客户继续跟进`,
+    operator,
+  });
+  return createSuccessResponse(updated ? hydrateCustomerLifecycle(updated) : null);
 }
 
 async function deleteCustomer(id: string): Promise<ApiResponse<boolean>> {
@@ -419,7 +466,7 @@ async function fetchAIPortrait(customerId: string): Promise<ApiResponse<AICustom
       type: 'ai',
       title: '生成了 AI 客户画像',
       content: portrait.aiSummary,
-      operator: customer.owner || '系统',
+      operator: getCurrentOperatorName(customer.owner),
     }),
     ...(customer.activityRecords || []),
   ];
@@ -435,6 +482,8 @@ export const customerApi = {
   updateCustomer,
   addCustomerFollowUp,
   appendCustomerActivity,
+  releaseCustomerToPublicPool,
+  claimCustomerFromPublicPool,
   deleteCustomer,
   fetchAIPortrait,
 };

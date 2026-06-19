@@ -48,7 +48,6 @@ const ServiceTicketTab: React.FC = () => {
     if (!selected || !logContent.trim()) return;
     const res = await serviceTicketApi.addLog(selected.id, {
       content: logContent.trim(),
-      operatorName: '当前用户',
       nextFollowUpAt: nextFollowUpAt || undefined,
     });
     if (res.data) {

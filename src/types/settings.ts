@@ -1,18 +1,30 @@
 import type { ID, Timestamp } from './common';
 
 /** 用户角色 */
-export type UserRole = '超级管理员' | '管理员' | '销售经理' | '销售' | '运营' | '财务';
+export type UserRole = string;
+
+export type LifecycleStatusCode =
+  | 'pending_followup'
+  | 'following'
+  | 'ordered'
+  | 'refunded'
+  | 'public_pool';
 
 /** 用户 */
 export interface User {
   id: ID;
   name: string;
+  account?: string;
   email: string;
   phone: string;
   role: UserRole;
   avatar?: string;
   departmentId?: ID;
   roleId?: ID;
+  passwordHash?: string;
+  passwordSalt?: string;
+  passwordUpdatedAt?: Timestamp;
+  lastLoginAt?: Timestamp;
   isActive: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -65,6 +77,7 @@ export interface OrderTypeConfig {
 /** 线索/客户生命周期状态配置 */
 export interface LifecycleStatusConfig {
   id: ID;
+  code: LifecycleStatusCode;
   name: string;
   description?: string;
   color: string;

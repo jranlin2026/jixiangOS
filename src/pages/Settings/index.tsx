@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Box, Typography, Tabs, Tab, Paper } from '@mui/material';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Box, Paper, Tab, Tabs, Typography } from '@mui/material';
 import UserManagement from './UserManagement';
 import RolePermission from './RolePermission';
 import ChannelConfigPage from './ChannelConfig';
@@ -8,6 +8,8 @@ import DepartmentManagement from './DepartmentManagement';
 import OrderTypeConfigPage from './OrderTypeConfig';
 import LifecycleStatusConfigPage from './LifecycleStatusConfig';
 import LeadSourceConfigPage from './LeadSourceConfig';
+import useAuthStore from '../../store/useAuthStore';
+import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -23,6 +25,22 @@ const TabPanel: React.FC<TabPanelProps> = ({ children, value, index }) => (
 
 const Settings: React.FC = () => {
   const [tabValue, setTabValue] = useState(0);
+  const currentUser = useAuthStore((state) => state.currentUser);
+
+  const tabs = useMemo(() => ([
+    { label: '用户管理', permissionKey: PERMISSION_KEYS.SETTINGS_USERS, component: <UserManagement /> },
+    { label: '角色权限', permissionKey: PERMISSION_KEYS.SETTINGS_ROLES, component: <RolePermission /> },
+    { label: '部门管理', permissionKey: PERMISSION_KEYS.SETTINGS_DEPARTMENTS, component: <DepartmentManagement /> },
+    { label: '渠道配置', permissionKey: PERMISSION_KEYS.SETTINGS_CHANNELS, component: <ChannelConfigPage /> },
+    { label: '产品配置', permissionKey: PERMISSION_KEYS.SETTINGS_PRODUCTS, component: <ProductConfigPage /> },
+    { label: '订单类型', permissionKey: PERMISSION_KEYS.SETTINGS_ORDER_TYPES, component: <OrderTypeConfigPage /> },
+    { label: '生命周期状态', permissionKey: PERMISSION_KEYS.SETTINGS_LIFECYCLE, component: <LifecycleStatusConfigPage /> },
+    { label: '线索来源', permissionKey: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, component: <LeadSourceConfigPage /> },
+  ].filter((tab) => hasPermission(currentUser, tab.permissionKey))), [currentUser]);
+
+  useEffect(() => {
+    if (tabValue >= tabs.length) setTabValue(0);
+  }, [tabValue, tabs.length]);
 
   return (
     <Box sx={{ p: 3 }}>
@@ -32,47 +50,25 @@ const Settings: React.FC = () => {
 
       <Paper elevation={0} sx={{ border: '1px solid #f0f0f0', borderRadius: 2 }}>
         <Tabs
-          value={tabValue}
+          value={tabs.length ? tabValue : false}
           onChange={(_, value) => setTabValue(value)}
           sx={{ borderBottom: '1px solid #e5e7eb', px: 2 }}
           variant="scrollable"
           scrollButtons="auto"
         >
-          <Tab label="用户管理" />
-          <Tab label="角色权限" />
-          <Tab label="部门管理" />
-          <Tab label="渠道配置" />
-          <Tab label="产品配置" />
-          <Tab label="订单类型" />
-          <Tab label="生命周期状态" />
-          <Tab label="线索来源" />
+          {tabs.map((tab) => <Tab key={tab.label} label={tab.label} />)}
         </Tabs>
 
         <Box sx={{ p: 3 }}>
-          <TabPanel value={tabValue} index={0}>
-            <UserManagement />
-          </TabPanel>
-          <TabPanel value={tabValue} index={1}>
-            <RolePermission />
-          </TabPanel>
-          <TabPanel value={tabValue} index={2}>
-            <DepartmentManagement />
-          </TabPanel>
-          <TabPanel value={tabValue} index={3}>
-            <ChannelConfigPage />
-          </TabPanel>
-          <TabPanel value={tabValue} index={4}>
-            <ProductConfigPage />
-          </TabPanel>
-          <TabPanel value={tabValue} index={5}>
-            <OrderTypeConfigPage />
-          </TabPanel>
-          <TabPanel value={tabValue} index={6}>
-            <LifecycleStatusConfigPage />
-          </TabPanel>
-          <TabPanel value={tabValue} index={7}>
-            <LeadSourceConfigPage />
-          </TabPanel>
+          {tabs.length === 0 ? (
+            <Box sx={{ py: 6, textAlign: 'center', color: '#6b7280' }}>当前账号没有系统设置权限</Box>
+          ) : (
+            tabs.map((tab, index) => (
+              <TabPanel key={tab.label} value={tabValue} index={index}>
+                {tab.component}
+              </TabPanel>
+            ))
+          )}
         </Box>
       </Paper>
     </Box>

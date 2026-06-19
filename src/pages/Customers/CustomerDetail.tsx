@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Dialog, DialogTitle, DialogContent, Button, Box,
+  Dialog, DialogTitle, DialogContent, DialogActions, Button, Box,
   Typography, Chip,
   TextField, Paper, Tabs, Tab, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, IconButton, Tooltip, MenuItem,
@@ -12,6 +12,8 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
+import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import useCustomerStore from '../../store/useCustomerStore';
 import type { Customer, CustomerActivityRecord } from '../../types/customer';
 import type { AIBusinessCard } from '../../types/aiCard';
@@ -19,10 +21,12 @@ import type { Order } from '../../types/order';
 import type { LeadSourceConfig, User } from '../../types/settings';
 import { aiCardApi, customerApi, orderApi, settingsApi } from '../../api';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
-import { RESOURCE_OWNERSHIPS, getProductLevelColor, normalizeResourceOwnership } from '../../shared/utils/constants';
+import { RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, getProductLevelColor, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import AIBusinessCardPanel from '../../shared/components/AIBusinessCardPanel';
 import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
+import useAuthStore from '../../store/useAuthStore';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 interface CustomerDetailProps {
   customer: Customer;
@@ -61,6 +65,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   onCreateOrder,
   onUpdated,
 }) => {
+  const currentUser = useAuthStore((state) => state.currentUser);
   const [currentCustomer, setCurrentCustomer] = useState<Customer>(customer);
   const [aiCard, setAiCard] = useState<AIBusinessCard | null>(null);
   const [cardLoading, setCardLoading] = useState(false);
@@ -72,7 +77,12 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const [contracts, setContracts] = useState<ContractFile[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
+  const [releaseDialogOpen, setReleaseDialogOpen] = useState(false);
+  const [releaseReason, setReleaseReason] = useState('');
   const { addFollowUp } = useCustomerStore();
+  const lifecycleCode = normalizeLifecycleStatusCode(currentCustomer.lifecycleStatusCode);
+  const lifecycleConfig = getLifecycleConfigByCode(lifecycleCode);
+  const isPublicPoolCustomer = lifecycleCode === 'public_pool';
 
   useEffect(() => {
     setCurrentCustomer(customer);
@@ -204,7 +214,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const handleAddFollowUp = async () => {
     const content = followNote.trim();
     if (!content) return;
-    const updated = await addFollowUp(currentCustomer.id, content, currentCustomer.owner);
+    const updated = await addFollowUp(currentCustomer.id, content);
     if (updated) setCurrentCustomer(updated);
     setFollowNote('');
   };
@@ -230,6 +240,42 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       setEditing(false);
       onUpdated?.(res.data);
     }
+  };
+
+  const handleClaimCurrentCustomer = async () => {
+    const userName = currentUser?.name || currentUser?.account || '';
+    if (!userName) {
+      window.alert('当前登录用户无效，请重新登录后再领取客户');
+      return;
+    }
+    const res = await customerApi.claimCustomerFromPublicPool(currentCustomer.id, userName);
+    const updatedCustomer = res.data;
+    if (res.code !== 0 || !updatedCustomer) {
+      window.alert(res.message || '领取失败');
+      return;
+    }
+    setCurrentCustomer(updatedCustomer);
+    setDraft(updatedCustomer);
+    onUpdated?.(updatedCustomer);
+  };
+
+  const handleReleaseCurrentCustomer = () => {
+    setReleaseReason('');
+    setReleaseDialogOpen(true);
+  };
+
+  const handleConfirmReleaseCurrentCustomer = async () => {
+    const res = await customerApi.releaseCustomerToPublicPool(currentCustomer.id, releaseReason.trim() || '销售放弃跟进');
+    const releasedCustomer = res.data as Customer;
+    if (res.code !== 0 || !releasedCustomer) {
+      window.alert(res.message || '释放到公海失败');
+      return;
+    }
+    setCurrentCustomer(releasedCustomer);
+    setDraft(releasedCustomer);
+    setReleaseDialogOpen(false);
+    setReleaseReason('');
+    onUpdated?.(releasedCustomer);
   };
 
   const handleContractUpload = (file?: File) => {
@@ -331,6 +377,13 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
           emptyText(formatCustomerSource(currentCustomer))
         )}
       </Box>
+    </Box>
+  );
+
+  const renderStatusRow = (label: string, value: React.ReactNode) => (
+    <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
+      <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>{label}</Box>
+      <Box sx={{ px: 1.5, py: 1, fontSize: 13 }}>{value}</Box>
     </Box>
   );
 
@@ -533,12 +586,14 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   );
 
   return (
+    <>
     <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
       <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, pr: 6 }}>
         <Box sx={{ minWidth: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>{currentCustomer.name}</Typography>
             <CustomerLevelBadge level={currentCustomer.customerLevel} />
+            <Chip label={lifecycleConfig.name} size="small" sx={{ bgcolor: `${lifecycleConfig.color}18`, color: lifecycleConfig.color, fontWeight: 600 }} />
           </Box>
           <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>
             {currentCustomer.owner || '未分配'} 跟进 · {formatCustomerSource(currentCustomer)}
@@ -558,6 +613,15 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
             <Box sx={{ p: 2, borderBottom: '1px solid #eef2f7', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Typography variant="subtitle2" sx={{ color: '#2196F3', fontWeight: 700 }}>资料</Typography>
               <Box sx={{ display: 'flex', gap: 1 }}>
+                {isPublicPoolCustomer ? (
+                  <Button size="small" variant="contained" startIcon={<PersonAddAltIcon />} onClick={handleClaimCurrentCustomer}>
+                    重新领取
+                  </Button>
+                ) : (
+                  <Button size="small" color="warning" variant="outlined" startIcon={<ExitToAppIcon />} onClick={handleReleaseCurrentCustomer}>
+                    放弃到公海
+                  </Button>
+                )}
                 {editing ? (
                   <>
                     <Button size="small" onClick={() => { setDraft(currentCustomer); setEditing(false); }}>取消</Button>
@@ -574,6 +638,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               {renderInfoRow('手机', 'phone', false)}
               {renderInfoRow('微信', 'wechat', false)}
               {renderInfoRow('邮箱', 'email')}
+              {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={{ bgcolor: `${lifecycleConfig.color}18`, color: lifecycleConfig.color, fontWeight: 600 }} />)}
               {renderSourceRow()}
               {renderInfoRow('资源归属', 'sourceType')}
               {renderInfoRow('行业', 'industry')}
@@ -606,6 +671,28 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
         </Box>
       </DialogContent>
     </Dialog>
+    <Dialog open={releaseDialogOpen} onClose={() => setReleaseDialogOpen(false)} maxWidth="xs" fullWidth>
+      <DialogCloseTitle onClose={() => setReleaseDialogOpen(false)}>放弃到公海</DialogCloseTitle>
+      <DialogContent dividers>
+        <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
+          客户将从默认客户列表移入公海池，释放销售归属，后续可在“公海池”重新领取。
+        </Typography>
+        <TextField
+          label="放弃原因"
+          value={releaseReason}
+          onChange={(event) => setReleaseReason(event.target.value)}
+          placeholder="例如：客户暂无意向、联系不上、预算不匹配"
+          multiline
+          minRows={3}
+          fullWidth
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setReleaseDialogOpen(false)}>取消</Button>
+        <Button color="warning" variant="contained" onClick={handleConfirmReleaseCurrentCustomer}>确认放弃</Button>
+      </DialogActions>
+    </Dialog>
+    </>
   );
 };
 

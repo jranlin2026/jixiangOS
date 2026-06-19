@@ -5,6 +5,7 @@ import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, PRODUCT_TO_CUSTOMER_LEVEL } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
+import { getCurrentOperatorName } from '../shared/utils/currentOperator';
 
 function ensureInit(): void {
   initializeMockData();
@@ -71,7 +72,7 @@ async function refreshOpportunities(): Promise<ApiResponse<UpgradeOpportunity[]>
   return createSuccessResponse(opportunities);
 }
 
-async function addFollowUp(opportunityId: string, content: string, createdBy: string): Promise<ApiResponse<UpgradeFollowUp | null>> {
+async function addFollowUp(opportunityId: string, content: string, createdBy?: string): Promise<ApiResponse<UpgradeFollowUp | null>> {
   ensureInit();
   await delay(200);
   const opportunities = getStorageData<UpgradeOpportunity[]>(STORAGE_KEYS.UPGRADE_POOL) || [];
@@ -81,7 +82,7 @@ async function addFollowUp(opportunityId: string, content: string, createdBy: st
   const record: UpgradeFollowUp = {
     id: uuidv4(),
     content,
-    createdBy,
+    createdBy: getCurrentOperatorName(createdBy),
     createdAt: new Date().toISOString(),
   };
   opp.followUpRecords.unshift(record);

@@ -424,17 +424,53 @@ export const DEFAULT_ORDER_TYPE_CONFIGS = ORDER_TYPES.map((type, index) => ({
   updatedAt: '2026-06-01T00:00:00.000Z',
 }));
 
+export const LIFECYCLE_STATUS_CODES = {
+  PENDING_FOLLOWUP: 'pending_followup',
+  FOLLOWING: 'following',
+  ORDERED: 'ordered',
+  REFUNDED: 'refunded',
+  PUBLIC_POOL: 'public_pool',
+} as const;
+
+export type LifecycleStatusCode = (typeof LIFECYCLE_STATUS_CODES)[keyof typeof LIFECYCLE_STATUS_CODES];
+
 export const DEFAULT_LIFECYCLE_STATUS_CONFIGS = [
-  { id: 'lsc-001', name: '待跟进', description: '线索录入后等待销售跟进', color: '#9E9E9E', isActive: true, sortOrder: 1, isSystem: true },
-  { id: 'lsc-002', name: '跟进中', description: '销售正在跟进客户需求', color: '#2196F3', isActive: true, sortOrder: 2, isSystem: true },
-  { id: 'lsc-003', name: '已转订单', description: '客户已创建订单', color: '#4CAF50', isActive: true, sortOrder: 3, isSystem: true },
-  { id: 'lsc-004', name: '已退款', description: '关联订单发生退款完成', color: '#F44336', isActive: true, sortOrder: 4, isSystem: true },
-  { id: 'lsc-005', name: '已流失', description: '线索或客户流失归档', color: '#607D8B', isActive: true, sortOrder: 5, isSystem: true },
+  { id: 'lsc-001', code: LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP, name: '待跟进', description: '线索入库或领取后等待销售开始跟进', color: '#9E9E9E', isActive: true, sortOrder: 1, isSystem: true },
+  { id: 'lsc-002', code: LIFECYCLE_STATUS_CODES.FOLLOWING, name: '跟进中', description: '销售正在跟进客户需求', color: '#2196F3', isActive: true, sortOrder: 2, isSystem: true },
+  { id: 'lsc-003', code: LIFECYCLE_STATUS_CODES.ORDERED, name: '已转订单', description: '客户已创建或确认订单', color: '#4CAF50', isActive: true, sortOrder: 3, isSystem: true },
+  { id: 'lsc-004', code: LIFECYCLE_STATUS_CODES.REFUNDED, name: '已退款', description: '关联订单退款已完成', color: '#F44336', isActive: true, sortOrder: 4, isSystem: true },
+  { id: 'lsc-005', code: LIFECYCLE_STATUS_CODES.PUBLIC_POOL, name: '流失公海', description: '销售放弃后释放归属并进入公海', color: '#607D8B', isActive: true, sortOrder: 5, isSystem: true },
 ].map((item) => ({
   ...item,
   createdAt: '2026-06-01T00:00:00.000Z',
   updatedAt: '2026-06-01T00:00:00.000Z',
 }));
+
+export function normalizeLifecycleStatusCode(value?: string | null): LifecycleStatusCode {
+  const text = String(value || '').trim();
+  if (Object.values(LIFECYCLE_STATUS_CODES).includes(text as LifecycleStatusCode)) return text as LifecycleStatusCode;
+  if (!text || text === '未转商机' || text === '新线索' || text === '待分配' || text === '待跟进') return LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP;
+  if (text === '商机跟进中' || text === '进行中' || text === '已联系' || text === '已验证' || text === '方案中' || text === '谈判中' || text === '跟进中') return LIFECYCLE_STATUS_CODES.FOLLOWING;
+  if (text === '已成交' || text === '赢单' || text === '已转订单') return LIFECYCLE_STATUS_CODES.ORDERED;
+  if (text === '已退款' || text === '退款已完成') return LIFECYCLE_STATUS_CODES.REFUNDED;
+  if (text === '已流失' || text === '输单' || text === '流失公海' || text === '公海待领取') return LIFECYCLE_STATUS_CODES.PUBLIC_POOL;
+  return LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP;
+}
+
+export function getLifecycleConfigByCode(code?: string) {
+  const normalizedCode = normalizeLifecycleStatusCode(code);
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS);
+    const configs = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(configs)) {
+      const configured = configs.find((item) => item?.code === normalizedCode);
+      if (configured) return configured;
+    }
+  } catch {
+    // Fall through to defaults when localStorage is unavailable or corrupted.
+  }
+  return DEFAULT_LIFECYCLE_STATUS_CONFIGS.find((item) => item.code === normalizedCode) || DEFAULT_LIFECYCLE_STATUS_CONFIGS[0];
+}
 
 export const DEFAULT_LEAD_FLOW_CONFIG = {
   id: 'lead-flow-global',

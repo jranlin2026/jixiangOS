@@ -15,6 +15,8 @@ import {
   MenuItem,
   Paper,
   Select,
+  Tab,
+  Tabs,
   Table,
   TableBody,
   TableCell,
@@ -31,18 +33,23 @@ import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
+import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import useCustomerStore from '../../store/useCustomerStore';
-import { orderApi, settingsApi } from '../../api';
-import { CUSTOMER_LEVELS, getProductLevelColor, normalizeResourceOwnership } from '../../shared/utils/constants';
+import { customerApi, orderApi, settingsApi } from '../../api';
+import { CUSTOMER_LEVELS, getLifecycleConfigByCode, getProductLevelColor, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import CustomerDetail from './CustomerDetail';
 import CustomerForm from './CustomerForm';
 import OrderForm from '../Orders/OrderForm';
-import type { Customer } from '../../types/customer';
+import type { Customer, CustomerFilters } from '../../types/customer';
 import type { Order } from '../../types/order';
-import type { User } from '../../types/settings';
+import type { LifecycleStatusConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import PermissionGate from '../../shared/auth/PermissionGate';
+import { PERMISSION_KEYS } from '../../shared/utils/permissions';
+import useAuthStore from '../../store/useAuthStore';
 import ResizableHeaderCell, {
   getResizableCellSx,
   readColumnWidths,
@@ -58,15 +65,36 @@ type CustomerColumn = {
   render: (customer: Customer) => React.ReactNode;
 };
 
+type CustomerScope = 'active' | 'public_pool';
+
 const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_columns_v3';
 const CUSTOMER_WIDTH_STORAGE_KEY = 'aaos_customer_table_column_widths_v1';
 const formatCustomerSource = (customer: Customer) => [customer.leadSource, customer.sourceName].filter(Boolean).join('-') || '-';
 
-const CUSTOMER_COLUMNS: CustomerColumn[] = [
+const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[]): CustomerColumn[] => {
+  const getLifecycleConfig = (customer: Customer) => {
+    const code = normalizeLifecycleStatusCode(customer.lifecycleStatusCode);
+    return lifecycleConfigs.find((item) => item.code === code) || getLifecycleConfigByCode(code);
+  };
+  return [
   { id: 'company', label: '公司', render: (customer) => customer.company || '-' },
   { id: 'phone', label: '电话', render: (customer) => customer.phone || '-' },
   { id: 'wechat', label: '微信', render: (customer) => customer.wechat || '-' },
   { id: 'email', label: '邮箱', render: (customer) => customer.email || '-' },
+  {
+    id: 'lifecycleStatus',
+    label: '生命周期',
+    render: (customer) => {
+      const config = getLifecycleConfig(customer);
+      return (
+        <Chip
+          label={config.name}
+          size="small"
+          sx={{ bgcolor: `${config.color}18`, color: config.color, fontWeight: 600 }}
+        />
+      );
+    },
+  },
   {
     id: 'customerLevel',
     label: '客户等级',
@@ -82,11 +110,13 @@ const CUSTOMER_COLUMNS: CustomerColumn[] = [
   { id: 'orderCount', label: '订单数', render: (customer) => customer.orderCount },
   { id: 'owner', label: '销售负责人', render: (customer) => customer.owner || '-' },
   { id: 'createdAt', label: '创建时间', render: (customer) => formatDate(customer.createdAt) },
-];
+  ];
+};
 
 const DEFAULT_VISIBLE_COLUMNS = [
   'company',
   'phone',
+  'lifecycleStatus',
   'customerLevel',
   'leadSource',
   'sourceType',
@@ -105,6 +135,7 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   phone: 150,
   wechat: 150,
   email: 180,
+  lifecycleStatus: 140,
   customerLevel: 130,
   leadSource: 160,
   sourceType: 140,
@@ -118,13 +149,13 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   createdAt: 180,
 };
 
-const readVisibleColumns = () => {
+const readVisibleColumns = (columns: CustomerColumn[]) => {
   try {
     const raw = localStorage.getItem(CUSTOMER_VIEW_STORAGE_KEY);
     if (!raw) return DEFAULT_VISIBLE_COLUMNS;
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return DEFAULT_VISIBLE_COLUMNS;
-    const validIds = new Set(CUSTOMER_COLUMNS.map((column) => column.id));
+    const validIds = new Set(columns.map((column) => column.id));
     const filtered = parsed.filter((id) => validIds.has(id));
     return filtered.length ? filtered : DEFAULT_VISIBLE_COLUMNS;
   } catch {
@@ -134,6 +165,7 @@ const readVisibleColumns = () => {
 
 const Customers: React.FC = () => {
   const { items, filters, pagination, fetchItems, setFilters } = useCustomerStore();
+  const currentUser = useAuthStore((state) => state.currentUser);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -142,8 +174,13 @@ const Customers: React.FC = () => {
   const [ordersOpen, setOrdersOpen] = useState(false);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [lifecycleConfigs, setLifecycleConfigs] = useState<LifecycleStatusConfig[]>([]);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
-  const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(readVisibleColumns);
+  const [customerScope, setCustomerScope] = useState<CustomerScope>('active');
+  const [releaseTarget, setReleaseTarget] = useState<Customer | null>(null);
+  const [releaseReason, setReleaseReason] = useState('');
+  const columns = useMemo(() => buildCustomerColumns(lifecycleConfigs), [lifecycleConfigs]);
+  const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(() => readVisibleColumns(buildCustomerColumns([])));
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(CUSTOMER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
 
   useEffect(() => {
@@ -152,6 +189,9 @@ const Customers: React.FC = () => {
       if (res.code === 0) {
         setUsers(res.data.filter((user) => user.isActive));
       }
+    });
+    settingsApi.fetchLifecycleStatusConfigs().then((res) => {
+      if (res.code === 0) setLifecycleConfigs(res.data);
     });
   }, [fetchItems]);
 
@@ -164,8 +204,8 @@ const Customers: React.FC = () => {
   }, [columnWidths]);
 
   const visibleColumns = useMemo(
-    () => CUSTOMER_COLUMNS.filter((column) => visibleColumnIds.includes(column.id)),
-    [visibleColumnIds],
+    () => columns.filter((column) => visibleColumnIds.includes(column.id)),
+    [columns, visibleColumnIds],
   );
   const tableMinWidth = useMemo(
     () => columnWidths.name + visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + 160,
@@ -175,6 +215,59 @@ const Customers: React.FC = () => {
   const handleViewDetail = (customer: Customer) => {
     setSelectedCustomer(customer);
     setDetailOpen(true);
+  };
+
+  const getCurrentUserName = () => currentUser?.name || currentUser?.account || '';
+
+  const isPublicPoolCustomer = (customer: Customer) => normalizeLifecycleStatusCode(customer.lifecycleStatusCode) === 'public_pool';
+
+  const scopedFilters = (baseFilters: CustomerFilters = filters, scope: CustomerScope = customerScope): CustomerFilters => ({
+    ...baseFilters,
+    productLevel: undefined,
+    lifecycleStatusCode: scope === 'public_pool' ? 'public_pool' : undefined,
+  });
+
+  const handleScopeChange = (_: React.SyntheticEvent, value: CustomerScope) => {
+    setCustomerScope(value);
+    const nextFilters = scopedFilters({ ...filters, page: 1, pageSize: pagination.pageSize || 10 }, value);
+    setFilters(nextFilters);
+    fetchItems(nextFilters);
+  };
+
+  const handleClaimCustomer = async (customer: Customer) => {
+    const userName = getCurrentUserName();
+    if (!userName) {
+      window.alert('当前登录用户无效，请重新登录后再领取客户');
+      return;
+    }
+    const res = await customerApi.claimCustomerFromPublicPool(customer.id, userName);
+    if (res.code !== 0 || !res.data) {
+      window.alert(res.message || '领取失败');
+      return;
+    }
+    setSelectedCustomer((current) => (current?.id === customer.id ? res.data : current));
+    fetchItems(scopedFilters());
+  };
+
+  const handleReleaseCustomer = (customer: Customer) => {
+    setReleaseTarget(customer);
+    setReleaseReason('');
+  };
+
+  const handleConfirmReleaseCustomer = async () => {
+    if (!releaseTarget) return;
+    const res = await customerApi.releaseCustomerToPublicPool(releaseTarget.id, releaseReason.trim() || '销售放弃跟进');
+    if (res.code !== 0 || !res.data) {
+      window.alert(res.message || '释放到公海失败');
+      return;
+    }
+    setSelectedCustomer((current) => (current?.id === releaseTarget.id ? res.data : current));
+    setReleaseTarget(null);
+    setReleaseReason('');
+    setCustomerScope('public_pool');
+    const nextFilters = scopedFilters({ ...filters, page: 1, pageSize: pagination.pageSize || 10 }, 'public_pool');
+    setFilters(nextFilters);
+    fetchItems(nextFilters);
   };
 
   const handleCreate = () => {
@@ -201,6 +294,9 @@ const Customers: React.FC = () => {
   };
 
   const handleFilterChange = (key: string, value: string) => {
+    if (key === 'lifecycleStatusCode') {
+      setCustomerScope(value === 'public_pool' ? 'public_pool' : 'active');
+    }
     const newFilters = { ...filters, productLevel: undefined, [key]: value || undefined, page: 1, pageSize: pagination.pageSize || 10 };
     setFilters(newFilters);
     fetchItems(newFilters);
@@ -241,11 +337,18 @@ const Customers: React.FC = () => {
           <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
             视图设置
           </Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate}>
-            新增客户
-          </Button>
+          <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE} action="write">
+            <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate}>
+              新增客户
+            </Button>
+          </PermissionGate>
         </Box>
       </Box>
+
+      <Tabs value={customerScope} onChange={handleScopeChange} sx={{ mb: 2 }}>
+        <Tab value="active" label="客户列表" />
+        <Tab value="public_pool" label="公海池" />
+      </Tabs>
 
       <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
         <TextField
@@ -270,6 +373,19 @@ const Customers: React.FC = () => {
             <MenuItem value="">全部</MenuItem>
             {users.map((user) => (
               <MenuItem key={user.id} value={user.name}>{user.name}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 140 }}>
+          <InputLabel>生命周期</InputLabel>
+          <Select
+            value={filters.lifecycleStatusCode || ''}
+            label="生命周期"
+            onChange={(e) => handleFilterChange('lifecycleStatusCode', e.target.value)}
+          >
+            <MenuItem value="">默认客户</MenuItem>
+            {lifecycleConfigs.map((status) => (
+              <MenuItem key={status.code} value={status.code}>{status.name}</MenuItem>
             ))}
           </Select>
         </FormControl>
@@ -302,16 +418,33 @@ const Customers: React.FC = () => {
                         <VisibilityIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
-                    <Tooltip title="新建订单">
-                      <IconButton size="small" color="info" onClick={() => handleCreateOrder(customer)}>
-                        <AddShoppingCartIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="查看订单">
-                      <IconButton size="small" color="secondary" onClick={() => handleViewOrders(customer)}>
-                        <ReceiptLongIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
+                    <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE_ORDER} action="write">
+                      <Tooltip title="新建订单">
+                        <IconButton size="small" color="info" onClick={() => handleCreateOrder(customer)}>
+                          <AddShoppingCartIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </PermissionGate>
+                    <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_VIEW_ORDERS}>
+                      <Tooltip title="查看订单">
+                        <IconButton size="small" color="secondary" onClick={() => handleViewOrders(customer)}>
+                          <ReceiptLongIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </PermissionGate>
+                    {isPublicPoolCustomer(customer) ? (
+                      <Tooltip title="重新领取公海客户">
+                        <IconButton size="small" color="primary" onClick={() => handleClaimCustomer(customer)}>
+                          <PersonAddAltIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    ) : (
+                      <Tooltip title="放弃到公海">
+                        <IconButton size="small" color="warning" onClick={() => handleReleaseCustomer(customer)}>
+                          <ExitToAppIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                   </Box>
                 </TableCell>
               </TableRow>
@@ -375,6 +508,28 @@ const Customers: React.FC = () => {
         }}
       />
 
+      <Dialog open={Boolean(releaseTarget)} onClose={() => setReleaseTarget(null)} maxWidth="xs" fullWidth>
+        <DialogCloseTitle onClose={() => setReleaseTarget(null)}>放弃到公海</DialogCloseTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
+            客户将从默认客户列表移入公海池，释放销售归属，后续可在“公海池”重新领取。
+          </Typography>
+          <TextField
+            label="放弃原因"
+            value={releaseReason}
+            onChange={(event) => setReleaseReason(event.target.value)}
+            placeholder="例如：客户暂无意向、联系不上、预算不匹配"
+            multiline
+            minRows={3}
+            fullWidth
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setReleaseTarget(null)}>取消</Button>
+          <Button color="warning" variant="contained" onClick={handleConfirmReleaseCustomer}>确认放弃</Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog open={viewSettingsOpen} onClose={() => setViewSettingsOpen(false)} maxWidth="xs" fullWidth>
         <DialogCloseTitle onClose={() => setViewSettingsOpen(false)}>客户列表视图设置</DialogCloseTitle>
         <DialogContent dividers>
@@ -382,7 +537,7 @@ const Customers: React.FC = () => {
             勾选后会显示在客户管理列表中，设置会保存在当前浏览器。
           </Typography>
           <FormGroup sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.5 }}>
-            {CUSTOMER_COLUMNS.map((column) => (
+            {columns.map((column) => (
               <FormControlLabel
                 key={column.id}
                 control={(
@@ -446,7 +601,9 @@ const Customers: React.FC = () => {
           </Table>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => orderCustomer && handleCreateOrder(orderCustomer)}>新建订单</Button>
+          <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE_ORDER} action="write">
+            <Button onClick={() => orderCustomer && handleCreateOrder(orderCustomer)}>新建订单</Button>
+          </PermissionGate>
         </DialogActions>
       </Dialog>
     </Box>

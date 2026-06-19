@@ -4,9 +4,12 @@ import type { User } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { DEFAULT_LEAD_FLOW_CONFIG, DEFAULT_PAGE_SIZE, STORAGE_KEYS, normalizeResourceOwnership } from '../shared/utils/constants';
+import { DEFAULT_LEAD_FLOW_CONFIG, DEFAULT_PAGE_SIZE, LIFECYCLE_STATUS_CODES, STORAGE_KEYS, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
+import { isSalesRoleName } from '../shared/utils/roles';
+import { getCurrentOperatorName, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
+import { hydrateLeadLifecycle } from './lifecycleSync';
 
 function ensureInit(): void {
   initializeMockData();
@@ -29,7 +32,7 @@ function normalizeText(value?: string): string {
 
 function getActiveSalesUsers(): User[] {
   const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
-  return users.filter((user) => user.isActive && (user.role === '销售' || user.role === '销售经理'));
+  return users.filter((user) => user.isActive && isSalesRoleName(user.role));
 }
 
 function getConfiguredParticipants(config: LeadFlowConfig): User[] {
@@ -129,6 +132,8 @@ function upsertCustomerFromLead(lead: Lead): Customer {
     industry: lead.industry,
     city: lead.city,
     owner: lead.owner,
+    lifecycleStatusCode: lead.lifecycleStatusCode || LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP,
+    lifecycleStatusUpdatedAt: lead.lifecycleStatusUpdatedAt || now,
     customerLevel: 'L1',
     totalSpent: 0,
     orderCount: 0,
@@ -139,7 +144,7 @@ function upsertCustomerFromLead(lead: Lead): Customer {
       type: 'create',
       title: '线索入库创建客户',
       content: lead.remark,
-      operator: lead.inputBy || lead.owner || '系统',
+      operator: SYSTEM_OPERATOR,
       relatedId: lead.id,
       relatedType: 'lead',
       createdAt: now,
@@ -172,6 +177,8 @@ function upsertCustomerFromLead(lead: Lead): Customer {
     industry: lead.industry,
     city: lead.city,
     owner: lead.owner,
+    lifecycleStatusCode: lead.lifecycleStatusCode || customers[idx].lifecycleStatusCode || LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP,
+    lifecycleStatusUpdatedAt: lead.lifecycleStatusUpdatedAt || customers[idx].lifecycleStatusUpdatedAt || now,
     tags: lead.tags,
     leadInputBy: lead.inputBy,
     leadSource: lead.source,
@@ -185,7 +192,7 @@ function upsertCustomerFromLead(lead: Lead): Customer {
       type: 'update',
       title: '线索资料同步更新客户',
       content: lead.remark,
-      operator: lead.inputBy || lead.owner || '系统',
+      operator: getCurrentOperatorName(SYSTEM_OPERATOR),
       relatedId: lead.id,
       relatedType: 'lead',
       createdAt: now,
@@ -295,35 +302,34 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
     assignedAt: assignment.assignedAt,
     assignmentRuleId: assignment.assignmentRuleId,
     intakeStatus: assignment.status,
-    lifecycleStatus: data.lifecycleStatus || '待跟进',
+    lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP,
+    lifecycleStatus: '待跟进',
     sourceType: normalizeResourceOwnership(data.sourceType),
     lifecycleStatusUpdatedAt: now,
     followUpRecords: [],
     createdAt: now,
     updatedAt: now,
   };
-  const customer = upsertCustomerFromLead(lead);
-  const leadWithCustomer = { ...lead, customerId: customer.id };
+  const leadWithLifecycle = hydrateLeadLifecycle(lead);
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
-  setStorageData(STORAGE_KEYS.LEADS, [leadWithCustomer, ...leads]);
+  setStorageData(STORAGE_KEYS.LEADS, [leadWithLifecycle, ...leads]);
   setStorageData(STORAGE_KEYS.LEAD_FLOW_CONFIG, { ...config, lastAssignedIndex: assignment.nextIndex, updatedAt: now });
   appendIntakeRecord({
     id: `intake-${uuidv4().slice(0, 8)}`,
-    leadId: leadWithCustomer.id,
-    customerId: customer.id,
-    name: leadWithCustomer.name,
-    company: leadWithCustomer.company,
-    phone: leadWithCustomer.phone,
-    wechat: leadWithCustomer.wechat,
-    source: formatLeadSourceText(leadWithCustomer),
-    inputBy: leadWithCustomer.inputBy,
-    assignedTo: leadWithCustomer.assignedTo,
+    leadId: leadWithLifecycle.id,
+    name: leadWithLifecycle.name,
+    company: leadWithLifecycle.company,
+    phone: leadWithLifecycle.phone,
+    wechat: leadWithLifecycle.wechat,
+    source: formatLeadSourceText(leadWithLifecycle),
+    inputBy: leadWithLifecycle.inputBy,
+    assignedTo: leadWithLifecycle.assignedTo,
     status: assignment.status,
     matchedRule: assignment.reason,
     failureReason: assignment.status === '待分配' ? assignment.reason : undefined,
     createdAt: now,
   });
-  return { lead: leadWithCustomer, message: assignment.status === '待分配' ? assignment.reason : '入库成功' };
+  return { lead: leadWithLifecycle, message: assignment.status === '待分配' ? assignment.reason : '入库成功' };
 }
 
 function syncCustomerByLead(lead: Lead): void {
@@ -340,17 +346,21 @@ async function manualAssignLead(leadId: string, userName: string): Promise<ApiRe
   const now = new Date().toISOString();
   const beforeAssignee = leads[idx].assignedTo || leads[idx].owner || '';
   const changed = beforeAssignee !== userName;
-  leads[idx] = {
+  const operator = getCurrentOperatorName(leads[idx].inputBy || leads[idx].owner);
+  let nextLead = hydrateLeadLifecycle({
     ...leads[idx],
     owner: userName,
     assignedTo: userName,
     assignedAt: changed ? now : leads[idx].assignedAt,
     intakeStatus: '入库成功',
+    lifecycleStatusCode: LIFECYCLE_STATUS_CODES.FOLLOWING,
+    lifecycleStatus: '跟进中',
+    lifecycleStatusUpdatedAt: changed ? now : leads[idx].lifecycleStatusUpdatedAt,
     changeHistory: changed
       ? [{
         id: `hist-${uuidv4().slice(0, 8)}`,
         action: 'update',
-        operator: userName,
+        operator,
         changedAt: now,
         summary: '修改了分配销售',
         changes: [{
@@ -362,7 +372,12 @@ async function manualAssignLead(leadId: string, userName: string): Promise<ApiRe
       }, ...(leads[idx].changeHistory || [])]
       : leads[idx].changeHistory,
     updatedAt: now,
-  };
+  });
+  if (!nextLead.customerId) {
+    const customer = upsertCustomerFromLead(nextLead);
+    nextLead = { ...nextLead, customerId: customer.id };
+  }
+  leads[idx] = nextLead;
   setStorageData(STORAGE_KEYS.LEADS, leads);
   syncCustomerByLead(leads[idx]);
   return createSuccessResponse(leads[idx]);

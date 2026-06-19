@@ -14,7 +14,7 @@ import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
-import { syncLeadLifecycleByCustomerName, syncOpportunityRefundedByOrderId } from './lifecycleSync';
+import { syncLifecycleByOrder, syncOpportunityRefundedByOrderId } from './lifecycleSync';
 import { v4 as uuidv4 } from 'uuid';
 
 const DEFAULT_RECOVERY_RATE = 0.03;
@@ -208,7 +208,7 @@ function updateOrderAfterRefund(refund: Refund): void {
     updatedAt: nowIso(),
   };
   setStorageData(STORAGE_KEYS.ORDERS, orders);
-  syncLeadLifecycleByCustomerName(orders[idx].customerName, '已退款', { orderId: orders[idx].id });
+  syncLifecycleByOrder(orders[idx], 'refunded');
   syncOpportunityRefundedByOrderId(orders[idx].id);
 }
 

@@ -47,6 +47,8 @@ import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
 import type { OrderTypeConfig } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import PermissionGate from '../../shared/auth/PermissionGate';
+import { PERMISSION_KEYS } from '../../shared/utils/permissions';
 import ResizableHeaderCell, {
   getResizableCellSx,
   readColumnWidths,
@@ -351,9 +353,11 @@ const Orders: React.FC = () => {
           <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
             视图设置
           </Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateOrder}>
-            新增订单
-          </Button>
+          <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_CREATE} action="write">
+            <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateOrder}>
+              新增订单
+            </Button>
+          </PermissionGate>
         </Box>
       </Box>
 
@@ -424,21 +428,27 @@ const Orders: React.FC = () => {
                           <VisibilityIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
-                      <Tooltip title="编辑">
-                        <IconButton size="small" color="info" aria-label="编辑" onClick={() => handleEditOrder(order)}>
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="修改记录">
-                        <IconButton size="small" color="secondary" aria-label="修改记录" onClick={() => handleViewHistory(order)}>
-                          <HistoryIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="删除">
-                        <IconButton size="small" color="error" aria-label="删除" onClick={() => handleDeleteOrder(order)}>
-                          <DeleteOutlineIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
+                      <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_EDIT} action="write">
+                        <Tooltip title="编辑">
+                          <IconButton size="small" color="info" aria-label="编辑" onClick={() => handleEditOrder(order)}>
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </PermissionGate>
+                      <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_HISTORY}>
+                        <Tooltip title="修改记录">
+                          <IconButton size="small" color="secondary" aria-label="修改记录" onClick={() => handleViewHistory(order)}>
+                            <HistoryIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </PermissionGate>
+                      <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_DELETE} action="delete">
+                        <Tooltip title="删除">
+                          <IconButton size="small" color="error" aria-label="删除" onClick={() => handleDeleteOrder(order)}>
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </PermissionGate>
                     </Box>
                   </TableCell>
                 </TableRow>
@@ -564,7 +574,9 @@ const Orders: React.FC = () => {
           </Table>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => orderCustomer && handleCreateOrderForCustomer(orderCustomer)}>新建订单</Button>
+          <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_CREATE} action="write">
+            <Button onClick={() => orderCustomer && handleCreateOrderForCustomer(orderCustomer)}>新建订单</Button>
+          </PermissionGate>
         </DialogActions>
       </Dialog>
     </Box>

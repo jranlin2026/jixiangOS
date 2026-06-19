@@ -15,6 +15,7 @@ import { getStorageData, setStorageData } from './mock/storage';
 import { DEFAULT_PAGE_SIZE, STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
+import { getCurrentOperatorName } from '../shared/utils/currentOperator';
 
 function ensureInit(): void {
   initializeMockData();
@@ -171,7 +172,7 @@ async function updateStatus(id: string, status: CustomerSuccessTaskStatus): Prom
   return createSuccessResponse(task);
 }
 
-async function addFollowUp(id: string, content: string, createdBy = '当前用户'): Promise<ApiResponse<CustomerSuccessTask | null>> {
+async function addFollowUp(id: string, content: string, createdBy = getCurrentOperatorName()): Promise<ApiResponse<CustomerSuccessTask | null>> {
   ensureInit();
   await delay(100);
   const tasks = getStorageData<CustomerSuccessTask[]>(STORAGE_KEYS.CUSTOMER_SUCCESS_TASKS) || [];

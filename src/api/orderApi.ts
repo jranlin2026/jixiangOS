@@ -8,8 +8,9 @@ import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../
 import { initializeMockData } from './mock';
 import { commissionRuleApi } from './commissionRuleApi';
 import { deliveryApi } from './deliveryApi';
-import { syncLeadLifecycleByCustomerName, syncOpportunityRefundedByOrderId } from './lifecycleSync';
+import { syncLifecycleByOrder, syncOpportunityRefundedByOrderId } from './lifecycleSync';
 import { v4 as uuidv4 } from 'uuid';
+import { getCurrentOperatorName, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
 
 function ensureInit(): void {
   initializeMockData();
@@ -49,7 +50,7 @@ function normalizeOrder(order: Order): Order {
   };
 }
 
-function syncCustomerOrderStats(order: Order, allOrders: Order[]): void {
+function syncCustomerOrderStats(order: Order, allOrders: Order[], operator = SYSTEM_OPERATOR): void {
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
   const customerIdx = customers.findIndex(
     (customer) => customer.id === order.customerId
@@ -95,7 +96,7 @@ function syncCustomerOrderStats(order: Order, allOrders: Order[]): void {
       type: 'order' as const,
       title: `创建了订单 ${order.orderNo}`,
       content: `签约${order.productLevel}，实付${Number(order.actualAmount || order.amount).toLocaleString('zh-CN')}元`,
-      operator: order.owner || '系统',
+      operator,
       relatedId: order.id,
       relatedType: 'order' as const,
       createdAt: order.createdAt || now,
@@ -105,7 +106,7 @@ function syncCustomerOrderStats(order: Order, allOrders: Order[]): void {
       type: 'refund' as const,
       title: `订单退款状态更新为 ${order.refundStatus}`,
       content: order.refundReason || undefined,
-      operator: order.owner || '系统',
+      operator,
       relatedId: order.id,
       relatedType: 'order' as const,
       createdAt: now,
@@ -321,6 +322,7 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
   await delay(200);
   const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
   const now = new Date().toISOString();
+  const operator = getCurrentOperatorName(data.owner);
   const orderNo = `ORD-${now.slice(0, 10).replace(/-/g, '')}-${String(orders.length + 1).padStart(4, '0')}`;
 
   const newOrder: Order = {
@@ -333,13 +335,13 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
     changeHistory: [{
       id: `hist-${uuidv4().slice(0, 8)}`,
       action: 'create',
-      operator: data.owner || '系统',
+      operator,
       changedAt: now,
       summary: '创建订单',
     }],
   };
   orders.unshift(newOrder);
-  syncCustomerOrderStats(newOrder, orders);
+  syncCustomerOrderStats(newOrder, orders, operator);
 
   // ===== 多角色自动分佣引擎 =====
   // 根据订单制度字段匹配所有适用规则
@@ -433,7 +435,7 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
   setStorageData(STORAGE_KEYS.DELIVERIES, deliveries);
 
   setStorageData(STORAGE_KEYS.ORDERS, orders);
-  syncLeadLifecycleByCustomerName(newOrder.customerName, '已转订单', { orderId: newOrder.id });
+  syncLifecycleByOrder(newOrder, 'ordered');
   return createSuccessResponse(newOrder);
 }
 
@@ -447,6 +449,7 @@ async function updateOrder(id: string, data: Partial<Order>): Promise<ApiRespons
   const existing = orders[idx];
   const changes = buildOrderChanges(existing, data);
   const history = existing.changeHistory || [];
+  const operator = getCurrentOperatorName(existing.owner);
   orders[idx] = {
     ...existing,
     ...data,
@@ -455,7 +458,7 @@ async function updateOrder(id: string, data: Partial<Order>): Promise<ApiRespons
       ? [{
         id: `hist-${uuidv4().slice(0, 8)}`,
         action: 'update',
-        operator: data.owner || existing.owner || '系统',
+        operator,
         changedAt: now,
         summary: `修改了 ${changes.map((item) => item.label).join('、')}`,
         changes,
@@ -464,13 +467,13 @@ async function updateOrder(id: string, data: Partial<Order>): Promise<ApiRespons
     updatedAt: now,
   };
   setStorageData(STORAGE_KEYS.ORDERS, orders);
-  syncCustomerOrderStats(orders[idx], orders);
+  syncCustomerOrderStats(orders[idx], orders, operator);
   syncCommissionRefundState(orders[idx]);
   if (orders[idx].refundStatus === '退款已完成' || orders[idx].status === '已退款') {
-    syncLeadLifecycleByCustomerName(orders[idx].customerName, '已退款', { orderId: orders[idx].id });
+    syncLifecycleByOrder(orders[idx], 'refunded');
     syncOpportunityRefundedByOrderId(orders[idx].id);
   } else {
-    syncLeadLifecycleByCustomerName(orders[idx].customerName, '已转订单', { orderId: orders[idx].id });
+    syncLifecycleByOrder(orders[idx], 'ordered');
   }
   return createSuccessResponse(orders[idx]);
 }

@@ -31,17 +31,22 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import useLeadStore from '../../store/useLeadStore';
-import { normalizeResourceOwnership } from '../../shared/utils/constants';
+import { getLifecycleConfigByCode, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatPaginationRows } from '../../shared/utils/formatters';
 import LeadDetail from './LeadDetail';
 import LeadForm from './LeadForm';
 import LeadIntakeTab from './LeadIntakeTab';
 import LeadFlowConfigTab from './LeadFlowConfigTab';
 import type { Lead } from '../../types/lead';
-import { settingsApi } from '../../api';
+import { leadFlowApi, settingsApi } from '../../api';
 import type { LeadSourceConfig, LifecycleStatusConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import PermissionGate from '../../shared/auth/PermissionGate';
+import useAuthStore from '../../store/useAuthStore';
+import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { isSalesRoleName } from '../../shared/utils/roles';
 import ResizableHeaderCell, {
   getResizableCellSx,
   readColumnWidths,
@@ -60,14 +65,11 @@ type LeadColumn = {
 const LEAD_VIEW_STORAGE_KEY = 'aaos_lead_table_columns_v4';
 const LEAD_WIDTH_STORAGE_KEY = 'aaos_lead_table_column_widths_v3';
 
-const formatLifecycleStatus = (status?: string) => {
-  if (!status || status === '未转商机') return '待跟进';
-  if (status === '商机跟进中') return '跟进中';
-  return status;
-};
-
 const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] => {
-  const getLifecycleColor = (status?: string) => lifecycleConfigs.find((item) => item.name === status)?.color || '#9E9E9E';
+  const getLifecycleConfig = (lead: Lead) => {
+    const code = normalizeLifecycleStatusCode(lead.lifecycleStatusCode || lead.lifecycleStatus || lead.status);
+    return lifecycleConfigs.find((item) => item.code === code) || getLifecycleConfigByCode(code);
+  };
   return [
     { id: 'company', label: '公司', render: (lead) => lead.company || '-' },
     { id: 'phone', label: '手机号', render: (lead) => lead.phone || '-' },
@@ -94,17 +96,20 @@ const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] =
     {
       id: 'lifecycleStatus',
       label: '生命周期',
-      render: (lead) => (
-        <Chip
-          label={formatLifecycleStatus(lead.lifecycleStatus)}
-          size="small"
-          sx={{
-            bgcolor: `${getLifecycleColor(lead.lifecycleStatus)}18`,
-            color: getLifecycleColor(lead.lifecycleStatus),
-            fontWeight: 600,
-          }}
-        />
-      ),
+      render: (lead) => {
+        const config = getLifecycleConfig(lead);
+        return (
+          <Chip
+            label={config.name}
+            size="small"
+            sx={{
+              bgcolor: `${config.color}18`,
+              color: config.color,
+              fontWeight: 600,
+            }}
+          />
+        );
+      },
     },
   ];
 };
@@ -158,6 +163,7 @@ const readVisibleColumns = (columns: LeadColumn[]) => {
 
 const Leads: React.FC = () => {
   const { items, filters, pagination, fetchItems, setFilters } = useLeadStore();
+  const currentUser = useAuthStore((state) => state.currentUser);
   const [activeTab, setActiveTab] = useState(0);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -200,11 +206,29 @@ const Leads: React.FC = () => {
     writeColumnWidths(LEAD_WIDTH_STORAGE_KEY, columnWidths);
   }, [columnWidths]);
 
-  const salesUsers = users.filter((user) => user.role === '销售' || user.role === '销售经理');
+  const salesUsers = users.filter((user) => isSalesRoleName(user.role));
+  const canManageLeadFlow = hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG, 'write');
 
   const handleViewDetail = (lead: Lead) => {
     setSelectedLead(lead);
     setDetailOpen(true);
+  };
+
+  const getCurrentUserName = () => currentUser?.name || currentUser?.account || '';
+
+  const handleClaimLead = async (lead: Lead) => {
+    const userName = getCurrentUserName();
+    if (!userName) {
+      window.alert('当前登录用户无效，请重新登录后再领取线索');
+      return;
+    }
+    const res = await leadFlowApi.manualAssignLead(lead.id, userName);
+    if (res.code !== 0 || !res.data) {
+      window.alert(res.message || '领取失败');
+      return;
+    }
+    setSelectedLead((current) => (current?.id === lead.id ? res.data : current));
+    fetchItems(filters);
   };
 
   const handleCreate = () => {
@@ -259,9 +283,13 @@ const Leads: React.FC = () => {
             <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
               视图设置
             </Button>
-            <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate}>
-              新增线索入库
-            </Button>
+            {activeTab === 0 && (
+              <PermissionGate permissionKey={PERMISSION_KEYS.LEADS_CREATE} action="write">
+                <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate}>
+                  新增线索入库
+                </Button>
+              </PermissionGate>
+            )}
           </Box>
         )}
       </Box>
@@ -269,7 +297,7 @@ const Leads: React.FC = () => {
       <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ mb: 3 }}>
         <Tab label="线索列表" />
         <Tab label="入库情况" />
-        <Tab label="流转配置" />
+        <Tab label="流转配置" disabled={!canManageLeadFlow} />
       </Tabs>
 
       {activeTab === 0 && (
@@ -288,6 +316,19 @@ const Leads: React.FC = () => {
                 <MenuItem value="">全部</MenuItem>
                 {sourceConfigs.map((source) => (
                   <MenuItem key={source.id} value={source.name}>{source.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" sx={{ minWidth: 140 }}>
+              <InputLabel>生命周期</InputLabel>
+              <Select
+                value={filters.lifecycleStatusCode || ''}
+                label="生命周期"
+                onChange={(event) => handleFilterChange('lifecycleStatusCode', event.target.value)}
+              >
+                <MenuItem value="">全部</MenuItem>
+                {lifecycleConfigs.filter((status) => status.code !== 'public_pool').map((status) => (
+                  <MenuItem key={status.code} value={status.code}>{status.name}</MenuItem>
                 ))}
               </Select>
             </FormControl>
@@ -329,6 +370,13 @@ const Leads: React.FC = () => {
                           <VisibilityIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
+                      {!lead.customerId && (
+                        <Tooltip title="领取并加入客户">
+                          <IconButton size="small" color="primary" onClick={() => handleClaimLead(lead)}>
+                            <PersonAddAltIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -363,7 +411,7 @@ const Leads: React.FC = () => {
       )}
 
       {activeTab === 1 && <LeadIntakeTab />}
-      {activeTab === 2 && <LeadFlowConfigTab />}
+      {activeTab === 2 && canManageLeadFlow && <LeadFlowConfigTab />}
 
       {selectedLead && (
         <LeadDetail
@@ -381,7 +429,7 @@ const Leads: React.FC = () => {
         key="new"
         open={formOpen}
         onClose={() => setFormOpen(false)}
-        onSuccess={() => fetchItems()}
+        onSuccess={() => fetchItems(filters)}
       />
 
       <Dialog open={viewSettingsOpen} onClose={() => setViewSettingsOpen(false)} maxWidth="xs" fullWidth>

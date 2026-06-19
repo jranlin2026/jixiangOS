@@ -6,6 +6,7 @@ export { commissionApi } from './commissionApi';
 export { financeApi } from './financeApi';
 export { aiApi } from './aiApi';
 export { settingsApi } from './settingsApi';
+export { authApi } from './authApi';
 export { departmentApi } from './departmentApi';
 export { roleApi } from './roleApi';
 export { productApi } from './productApi';

@@ -1,15 +1,24 @@
-import type { User, UserRole, ProductConfig, ChannelConfig, OrderTypeConfig, LifecycleStatusConfig, LeadSourceConfig } from '../types/settings';
+import type { User, UserRole, ProductConfig, ChannelConfig, OrderTypeConfig, LifecycleStatusConfig, LeadSourceConfig, LifecycleStatusCode } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, COMMISSION_RATES, DEFAULT_ORDER_TYPE_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, DEFAULT_LEAD_SOURCE_CONFIGS } from '../shared/utils/constants';
+import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, COMMISSION_RATES, DEFAULT_ORDER_TYPE_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, DEFAULT_LEAD_SOURCE_CONFIGS, normalizeLifecycleStatusCode } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 import type { Order } from '../types/order';
 import type { CommissionRule } from '../types/commission';
+import { authApi } from './authApi';
+import { DEFAULT_USER_PASSWORD, ensureAdminUser, ensureUniqueAccount, normalizeAccount } from '../shared/utils/auth';
 
 function ensureInit(): void {
   initializeMockData();
+}
+
+function ensureUsersWithAuth(): User[] {
+  ensureInit();
+  const users = ensureAdminUser(getStorageData<User[]>(STORAGE_KEYS.USERS) || []);
+  setStorageData(STORAGE_KEYS.USERS, users);
+  return users;
 }
 
 function ensureOrderTypeConfigs(): OrderTypeConfig[] {
@@ -22,9 +31,25 @@ function ensureOrderTypeConfigs(): OrderTypeConfig[] {
 
 function ensureLifecycleStatusConfigs(): LifecycleStatusConfig[] {
   const existing = getStorageData<LifecycleStatusConfig[]>(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS);
-  const configs = existing?.length ? existing : DEFAULT_LIFECYCLE_STATUS_CONFIGS;
-  const sorted = [...configs].sort((a, b) => a.sortOrder - b.sortOrder);
-  if (!existing?.length) setStorageData(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, sorted);
+  const existingByCode = new Map<LifecycleStatusCode, LifecycleStatusConfig>();
+  (existing || []).forEach((item) => {
+    existingByCode.set(normalizeLifecycleStatusCode(item.code || item.name), item);
+  });
+  const sorted = DEFAULT_LIFECYCLE_STATUS_CONFIGS.map((defaultConfig) => {
+    const existingConfig = existingByCode.get(defaultConfig.code);
+    const canKeepExistingName = existingConfig?.code === defaultConfig.code;
+    return {
+      ...defaultConfig,
+      ...(existingConfig || {}),
+      id: defaultConfig.id,
+      code: defaultConfig.code,
+      name: canKeepExistingName ? existingConfig.name : defaultConfig.name,
+      sortOrder: canKeepExistingName ? Number(existingConfig.sortOrder) : defaultConfig.sortOrder,
+      isSystem: true,
+      isActive: true,
+    };
+  }).sort((a, b) => a.sortOrder - b.sortOrder);
+  if (JSON.stringify(existing || []) !== JSON.stringify(sorted)) setStorageData(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, sorted);
   return sorted;
 }
 
@@ -59,13 +84,17 @@ function replaceOrderTypeReferences(oldName: string, newName: string): void {
 // ---- 用户管理 ----
 
 async function fetchUsers(filters?: { search?: string; role?: UserRole; isActive?: boolean }): Promise<ApiResponse<User[]>> {
-  ensureInit();
   await delay(200);
-  let users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
+  let users = ensureUsersWithAuth();
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
-    users = users.filter((u) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
+    users = users.filter((u) => (
+      u.name.toLowerCase().includes(q)
+      || u.email.toLowerCase().includes(q)
+      || normalizeAccount(u.account).includes(q)
+      || normalizeAccount(u.phone).includes(q)
+    ));
   }
   if (filters?.role) {
     users = users.filter((u) => u.role === filters.role);
@@ -77,34 +106,65 @@ async function fetchUsers(filters?: { search?: string; role?: UserRole; isActive
   return createSuccessResponse(users);
 }
 
-async function createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedAt'>): Promise<ApiResponse<User>> {
-  ensureInit();
+async function createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'passwordHash' | 'passwordSalt' | 'passwordUpdatedAt'> & { password?: string }): Promise<ApiResponse<User | null>> {
   await delay(200);
-  const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
+  const users = ensureUsersWithAuth();
   const now = new Date().toISOString();
-  const newUser: User = { ...data, id: `user-${uuidv4().slice(0, 8)}`, createdAt: now, updatedAt: now };
+  const account = normalizeAccount(data.account || data.email || data.phone);
+  if (!account) return createErrorResponse('账号不能为空');
+  if (!ensureUniqueAccount(users, account)) return createErrorResponse('账号已存在');
+  const id = `user-${uuidv4().slice(0, 8)}`;
+  const passwordFields = authApi.createUserPasswordFields(id, account, data.password || DEFAULT_USER_PASSWORD);
+  const newUser: User = {
+    ...data,
+    id,
+    account,
+    ...passwordFields,
+    createdAt: now,
+    updatedAt: now,
+  };
   users.push(newUser);
   setStorageData(STORAGE_KEYS.USERS, users);
   return createSuccessResponse(newUser);
 }
 
 async function updateUser(id: string, data: Partial<User>): Promise<ApiResponse<User | null>> {
-  ensureInit();
   await delay(200);
-  const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
+  const users = ensureUsersWithAuth();
   const idx = users.findIndex((u) => u.id === id);
   if (idx === -1) return createSuccessResponse(null);
-  users[idx] = { ...users[idx], ...data, updatedAt: new Date().toISOString() };
+  const nextAccount = data.account !== undefined ? normalizeAccount(data.account) : users[idx].account;
+  if (!nextAccount) return createErrorResponse('账号不能为空');
+  if (!ensureUniqueAccount(users, nextAccount, id)) return createErrorResponse('账号已存在');
+  const safeData = { ...data, account: nextAccount };
+  delete safeData.passwordHash;
+  delete safeData.passwordSalt;
+  delete safeData.passwordUpdatedAt;
+  users[idx] = { ...users[idx], ...safeData, updatedAt: new Date().toISOString() };
   setStorageData(STORAGE_KEYS.USERS, users);
   return createSuccessResponse(users[idx]);
 }
 
 async function deleteUser(id: string): Promise<ApiResponse<boolean>> {
-  ensureInit();
   await delay(150);
-  const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
+  const users = ensureUsersWithAuth();
   setStorageData(STORAGE_KEYS.USERS, users.filter((u) => u.id !== id));
   return createSuccessResponse(true);
+}
+
+async function resetUserPassword(id: string, password: string): Promise<ApiResponse<User | null>> {
+  await delay(150);
+  const users = ensureUsersWithAuth();
+  const idx = users.findIndex((u) => u.id === id);
+  if (idx === -1) return createSuccessResponse(null);
+  if (!password || password.length < 6) return createErrorResponse('密码至少 6 位');
+  users[idx] = {
+    ...users[idx],
+    ...authApi.createUserPasswordFields(id, users[idx].account || users[idx].email, password),
+    updatedAt: new Date().toISOString(),
+  };
+  setStorageData(STORAGE_KEYS.USERS, users);
+  return createSuccessResponse(users[idx]);
 }
 
 // ---- 产品配置 ----
@@ -370,6 +430,7 @@ export const settingsApi = {
   createUser,
   updateUser,
   deleteUser,
+  resetUserPassword,
   fetchProductConfigs,
   fetchChannelConfigs,
   createChannelConfig,

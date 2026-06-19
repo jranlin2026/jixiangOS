@@ -1,0 +1,90 @@
+import type { User } from '../../types/settings';
+import type { UserWithAuth } from '../../types/auth';
+import { normalizeUserRoleName } from './roles';
+
+export const AUTH_SESSION_STORAGE_KEY = 'aaos_auth_session';
+export const DEFAULT_ADMIN_ACCOUNT = 'admin';
+export const DEFAULT_ADMIN_PASSWORD = 'Admin@123456';
+export const DEFAULT_USER_PASSWORD = 'Aaos@123456';
+
+const ADMIN_USER_ID = 'user-admin';
+
+export function normalizeAccount(value?: string): string {
+  return String(value || '').trim().toLowerCase();
+}
+
+export function createPasswordSalt(seed: string): string {
+  return `aaos-${normalizeAccount(seed) || 'user'}-salt`;
+}
+
+export function hashPassword(password: string, salt: string): string {
+  const text = `${salt}:${password}`;
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `mock-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+export function verifyPassword(password: string, salt?: string, hash?: string): boolean {
+  if (!salt || !hash) return false;
+  return hashPassword(password, salt) === hash;
+}
+
+export function deriveAccount(user: Pick<User, 'account' | 'email' | 'phone' | 'name' | 'id'>): string {
+  const existing = normalizeAccount(user.account);
+  if (existing) return existing;
+  const emailPrefix = normalizeAccount(user.email).split('@')[0];
+  if (emailPrefix) return emailPrefix;
+  const phone = normalizeAccount(user.phone);
+  if (phone) return phone;
+  return normalizeAccount(user.name) || user.id;
+}
+
+export function withAuthDefaults(user: User, index = 0): UserWithAuth {
+  const account = deriveAccount(user);
+  const salt = user.passwordSalt || createPasswordSalt(`${user.id}-${account}`);
+  const passwordHash = user.passwordHash || hashPassword(DEFAULT_USER_PASSWORD, salt);
+
+  return {
+    ...user,
+    role: normalizeUserRoleName(user.role),
+    account,
+    passwordSalt: salt,
+    passwordHash,
+    passwordUpdatedAt: user.passwordUpdatedAt || user.createdAt,
+  };
+}
+
+export function ensureAdminUser(users: User[]): UserWithAuth[] {
+  const now = new Date().toISOString();
+  const normalizedUsers = users.map(withAuthDefaults);
+  const hasAdmin = normalizedUsers.some((user) => normalizeAccount(user.account) === DEFAULT_ADMIN_ACCOUNT);
+  if (hasAdmin) return normalizedUsers;
+
+  const salt = createPasswordSalt(ADMIN_USER_ID);
+  return [
+    {
+      id: ADMIN_USER_ID,
+      name: '系统管理员',
+      account: DEFAULT_ADMIN_ACCOUNT,
+      email: 'admin@company.com',
+      phone: '',
+      role: '超级管理员' as User['role'],
+      roleId: 'role-001',
+      isActive: true,
+      passwordSalt: salt,
+      passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD, salt),
+      passwordUpdatedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    },
+    ...normalizedUsers,
+  ].map(withAuthDefaults);
+}
+
+export function ensureUniqueAccount(users: User[], account: string, ignoreUserId?: string): boolean {
+  const normalized = normalizeAccount(account);
+  return !users.some((user) => user.id !== ignoreUserId && normalizeAccount(user.account) === normalized);
+}

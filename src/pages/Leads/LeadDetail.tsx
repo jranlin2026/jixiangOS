@@ -16,11 +16,13 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import HistoryIcon from '@mui/icons-material/History';
+import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import type { Lead } from '../../types/lead';
 import type { LeadSourceConfig, User } from '../../types/settings';
-import { leadApi, settingsApi } from '../../api';
+import { leadApi, leadFlowApi, settingsApi } from '../../api';
 import { formatDate } from '../../shared/utils/formatters';
-import { RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/utils/constants';
+import { RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
+import useAuthStore from '../../store/useAuthStore';
 
 interface LeadDetailProps {
   lead: Lead;
@@ -67,12 +69,6 @@ const formatHistoryValue = (value: unknown) => {
   return String(value);
 };
 
-const formatLifecycleStatus = (status?: string) => {
-  if (!status || status === '未转商机') return '待跟进';
-  if (status === '商机跟进中') return '跟进中';
-  return status;
-};
-
 const toDraft = (lead: Lead): LeadDraft => ({
   name: lead.name || '',
   company: lead.company || '',
@@ -116,6 +112,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   onClose,
   onUpdated,
 }) => {
+  const currentUser = useAuthStore((state) => state.currentUser);
   const [currentLead, setCurrentLead] = useState<Lead>(lead);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<LeadDraft>(() => toDraft(lead));
@@ -185,6 +182,9 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   ))?.key || '';
 
   const followerName = currentLead.assignedTo || currentLead.owner || '待分配';
+  const lifecycleCode = normalizeLifecycleStatusCode(currentLead.lifecycleStatusCode || currentLead.lifecycleStatus || currentLead.status);
+  const lifecycleConfig = getLifecycleConfigByCode(lifecycleCode);
+  const canClaimLead = !currentLead.customerId;
 
   const handleDraftChange = (field: keyof LeadDraft) => (event: React.ChangeEvent<HTMLInputElement>) => {
     setDraft((prev) => ({ ...prev, [field]: event.target.value }));
@@ -221,6 +221,22 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
     }
   };
 
+  const handleClaimCurrentLead = async () => {
+    const userName = currentUser?.name || currentUser?.account || '';
+    if (!userName) {
+      window.alert('当前登录用户无效，请重新登录后再领取线索');
+      return;
+    }
+    const res = await leadFlowApi.manualAssignLead(currentLead.id, userName);
+    if (res.code !== 0 || !res.data) {
+      window.alert(res.message || '领取失败');
+      return;
+    }
+    setCurrentLead(res.data);
+    setDraft(toDraft(res.data));
+    onUpdated?.(res.data);
+  };
+
   const historyItems = useMemo<HistoryEntry[]>(() => {
     const createdBy = currentLead.inputBy || currentLead.owner || '未填写';
     const changeHistoryEntries: HistoryEntry[] = (currentLead.changeHistory || []).map((item) => ({
@@ -252,7 +268,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
     if (currentLead.updatedAt && currentLead.updatedAt !== currentLead.createdAt && changeHistoryEntries.length === 0) {
       entries.unshift({
         title: '更新线索资料',
-        operator: followerName,
+        operator: '系统',
         time: currentLead.updatedAt,
         content: '线索资料发生更新',
       });
@@ -263,12 +279,12 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
         title: '生命周期变更',
         operator: '系统',
         time: currentLead.lifecycleStatusUpdatedAt || currentLead.updatedAt,
-        content: `当前状态：${formatLifecycleStatus(currentLead.lifecycleStatus)}`,
+        content: `当前状态：${lifecycleConfig.name}`,
       });
     }
 
     return [...changeHistoryEntries, ...entries];
-  }, [currentLead, followerName]);
+  }, [currentLead, followerName, lifecycleConfig.name]);
 
   const renderReadOnlyRow = (label: string, value?: string | number) => (
     <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
@@ -371,12 +387,13 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   );
 
   return (
+    <>
     <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
       <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, pr: 6 }}>
         <Box sx={{ minWidth: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>{currentLead.name}</Typography>
-            <Chip label={formatLifecycleStatus(currentLead.lifecycleStatus)} size="small" variant="outlined" />
+            <Chip label={lifecycleConfig.name} size="small" sx={{ bgcolor: `${lifecycleConfig.color}18`, color: lifecycleConfig.color, fontWeight: 600 }} />
           </Box>
           <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>
             {followerName} 跟进 · {formatSource(currentLead)}
@@ -392,6 +409,11 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
             <Box sx={{ p: 2, borderBottom: '1px solid #eef2f7', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Typography variant="subtitle2" sx={{ color: '#2196F3', fontWeight: 700 }}>资料</Typography>
               <Box sx={{ display: 'flex', gap: 1 }}>
+                {canClaimLead && (
+                  <Button size="small" variant="contained" startIcon={<PersonAddAltIcon />} onClick={handleClaimCurrentLead}>
+                    领取为客户
+                  </Button>
+                )}
                 {editing ? (
                   <>
                     <Button size="small" onClick={() => { setDraft(toDraft(currentLead)); setEditing(false); }}>取消</Button>
@@ -421,7 +443,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
                   color={currentLead.intakeStatus === '待分配' ? 'warning' : currentLead.intakeStatus === '入库失败' ? 'error' : 'success'}
                 />
               ))}
-              {renderStatusRow('生命周期', <Chip label={formatLifecycleStatus(currentLead.lifecycleStatus)} size="small" variant="outlined" />)}
+              {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={{ bgcolor: `${lifecycleConfig.color}18`, color: lifecycleConfig.color, fontWeight: 600 }} />)}
               {renderStatusRow('创建时间', formatDate(currentLead.createdAt, 'yyyy-MM-dd HH:mm'))}
               {renderStatusRow('更新时间', formatDate(currentLead.updatedAt, 'yyyy-MM-dd HH:mm'))}
               {renderRemarkRow()}
@@ -439,6 +461,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
         </Box>
       </DialogContent>
     </Dialog>
+    </>
   );
 };
 

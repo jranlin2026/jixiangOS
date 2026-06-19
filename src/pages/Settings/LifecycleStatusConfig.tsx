@@ -19,8 +19,6 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
-import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import { settingsApi } from '../../api';
 import type { LifecycleStatusConfig } from '../../types/settings';
@@ -29,12 +27,13 @@ import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 type LifecycleForm = Omit<LifecycleStatusConfig, 'id' | 'createdAt' | 'updatedAt'>;
 
 const emptyForm: LifecycleForm = {
+  code: 'pending_followup',
   name: '',
   description: '',
   color: '#2196F3',
   isActive: true,
   sortOrder: 100,
-  isSystem: false,
+  isSystem: true,
 };
 
 const LifecycleStatusConfigPage: React.FC = () => {
@@ -52,21 +51,17 @@ const LifecycleStatusConfigPage: React.FC = () => {
     loadData();
   }, []);
 
-  const openForm = (item?: LifecycleStatusConfig) => {
-    if (item) {
-      setEditingItem(item);
-      setForm({
-        name: item.name,
-        description: item.description || '',
-        color: item.color,
-        isActive: item.isActive,
-        sortOrder: item.sortOrder,
-        isSystem: item.isSystem,
-      });
-    } else {
-      setEditingItem(null);
-      setForm(emptyForm);
-    }
+  const openForm = (item: LifecycleStatusConfig) => {
+    setEditingItem(item);
+    setForm({
+      code: item.code,
+      name: item.name,
+      description: item.description || '',
+      color: item.color,
+      isActive: item.isActive,
+      sortOrder: item.sortOrder,
+      isSystem: true,
+    });
     setFormOpen(true);
   };
 
@@ -75,10 +70,9 @@ const LifecycleStatusConfigPage: React.FC = () => {
   };
 
   const handleSubmit = async () => {
-    const payload = { ...form, name: form.name.trim(), sortOrder: Number(form.sortOrder) };
-    const res = editingItem
-      ? await settingsApi.updateLifecycleStatusConfig(editingItem.id, payload)
-      : await settingsApi.createLifecycleStatusConfig(payload);
+    if (!editingItem) return;
+    const payload = { ...form, name: form.name.trim(), sortOrder: Number(form.sortOrder), isSystem: true };
+    const res = await settingsApi.updateLifecycleStatusConfig(editingItem.id, payload);
     if (res.code !== 0) {
       window.alert(res.message);
       return;
@@ -92,35 +86,23 @@ const LifecycleStatusConfigPage: React.FC = () => {
     loadData();
   };
 
-  const handleDelete = async (item: LifecycleStatusConfig) => {
-    if (!window.confirm(`确定删除状态“${item.name}”吗？`)) return;
-    const res = await settingsApi.deleteLifecycleStatusConfig(item.id);
-    if (res.code !== 0) {
-      window.alert(res.message);
-      return;
-    }
-    loadData();
-  };
-
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Box>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>生命周期状态配置</Typography>
-          <Typography variant="body2" sx={{ color: '#6b7280', mt: 0.5 }}>
-            维护线索人员可查看的用户流转状态；订单和退款等业务动作会自动更新。
-          </Typography>
-        </Box>
-        <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={() => openForm()}>
-          新增状态
-        </Button>
+      <Box sx={{ mb: 2 }}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+          生命周期状态配置
+        </Typography>
+        <Typography variant="body2" sx={{ color: '#6b7280', mt: 0.5 }}>
+          生命周期是线索、客户、订单、退款共用的主状态。系统固定 5 个状态，只允许维护显示名称、颜色和排序。
+        </Typography>
       </Box>
 
       <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0' }}>
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>状态</TableCell>
+              <TableCell>状态码</TableCell>
+              <TableCell>状态名称</TableCell>
               <TableCell>说明</TableCell>
               <TableCell>颜色</TableCell>
               <TableCell>启用</TableCell>
@@ -131,7 +113,10 @@ const LifecycleStatusConfigPage: React.FC = () => {
           <TableBody>
             {items.map((item) => (
               <TableRow key={item.id} hover>
-                <TableCell><Chip label={item.name} size="small" sx={{ bgcolor: `${item.color}18`, color: item.color, fontWeight: 600 }} /></TableCell>
+                <TableCell sx={{ color: '#6b7280' }}>{item.code}</TableCell>
+                <TableCell>
+                  <Chip label={item.name} size="small" sx={{ bgcolor: `${item.color}18`, color: item.color, fontWeight: 600 }} />
+                </TableCell>
                 <TableCell>{item.description || '-'}</TableCell>
                 <TableCell>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -139,11 +124,14 @@ const LifecycleStatusConfigPage: React.FC = () => {
                     <Typography variant="body2">{item.color}</Typography>
                   </Box>
                 </TableCell>
-                <TableCell><Switch checked={item.isActive} size="small" onChange={() => handleToggleActive(item)} /></TableCell>
+                <TableCell>
+                  <Switch checked={item.isActive} size="small" onChange={() => handleToggleActive(item)} />
+                </TableCell>
                 <TableCell>{item.sortOrder}</TableCell>
                 <TableCell align="center">
-                  <IconButton size="small" onClick={() => openForm(item)}><EditIcon fontSize="small" /></IconButton>
-                  <IconButton size="small" color="error" onClick={() => handleDelete(item)} disabled={item.isSystem}><DeleteIcon fontSize="small" /></IconButton>
+                  <IconButton size="small" onClick={() => openForm(item)} aria-label="编辑生命周期状态">
+                    <EditIcon fontSize="small" />
+                  </IconButton>
                 </TableCell>
               </TableRow>
             ))}
@@ -152,9 +140,10 @@ const LifecycleStatusConfigPage: React.FC = () => {
       </TableContainer>
 
       <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="xs" fullWidth>
-        <DialogCloseTitle onClose={() => setFormOpen(false)}>{editingItem ? '编辑生命周期状态' : '新增生命周期状态'}</DialogCloseTitle>
+        <DialogCloseTitle onClose={() => setFormOpen(false)}>编辑生命周期状态</DialogCloseTitle>
         <DialogContent>
           <Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
+            <TextField label="状态码" value={form.code} disabled fullWidth />
             <TextField label="状态名称" value={form.name} onChange={(e) => updateForm('name', e.target.value)} required fullWidth />
             <TextField label="说明" value={form.description} onChange={(e) => updateForm('description', e.target.value)} multiline minRows={2} fullWidth />
             <TextField label="颜色" type="color" value={form.color} onChange={(e) => updateForm('color', e.target.value)} fullWidth />
@@ -163,7 +152,9 @@ const LifecycleStatusConfigPage: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button variant="contained" onClick={handleSubmit} disabled={!form.name.trim()}>保存</Button>
+          <Button variant="contained" onClick={handleSubmit} disabled={!form.name.trim()}>
+            保存
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

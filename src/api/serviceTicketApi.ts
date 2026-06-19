@@ -12,6 +12,7 @@ import { getStorageData, setStorageData } from './mock/storage';
 import { DEFAULT_PAGE_SIZE, STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
+import { getCurrentOperatorName } from '../shared/utils/currentOperator';
 
 function ensureInit(): void {
   initializeMockData();
@@ -109,14 +110,17 @@ async function updateStatus(id: string, status: ServiceTicketStatus): Promise<Ap
   return createSuccessResponse(ticket);
 }
 
-async function addLog(id: string, data: Omit<ServiceTicketLog, 'id' | 'createdAt'>): Promise<ApiResponse<ServiceTicket | null>> {
+async function addLog(
+  id: string,
+  data: Omit<ServiceTicketLog, 'id' | 'createdAt' | 'operatorName'> & { operatorName?: string },
+): Promise<ApiResponse<ServiceTicket | null>> {
   ensureInit();
   await delay(100);
   const tickets = getStorageData<ServiceTicket[]>(STORAGE_KEYS.SERVICE_TICKETS) || [];
   const ticket = tickets.find((item) => item.id === id);
   if (!ticket) return createSuccessResponse(null);
   const now = new Date().toISOString();
-  ticket.logs.unshift({ ...data, id: uuidv4(), createdAt: now });
+  ticket.logs.unshift({ ...data, operatorName: getCurrentOperatorName(data.operatorName), id: uuidv4(), createdAt: now });
   ticket.status = ticket.status === '待处理' ? '处理中' : ticket.status;
   ticket.updatedAt = now;
   setStorageData(STORAGE_KEYS.SERVICE_TICKETS, tickets);

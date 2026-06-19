@@ -1,4 +1,5 @@
 import type { ID, Timestamp, ProductLevel, CustomerLevel } from './common';
+import type { LifecycleStatusCode } from './settings';
 
 /** 成长里程碑 */
 export interface GrowthMilestone {
@@ -76,6 +77,11 @@ export interface Customer {
   /** 最新成交产品分类，由订单同步；客户新增时不手动维护 */
   productLevel?: ProductLevel;
   customerLevel: CustomerLevel;
+  lifecycleStatusCode?: LifecycleStatusCode;
+  lifecycleStatusUpdatedAt?: Timestamp;
+  publicPoolAt?: Timestamp;
+  releasedBy?: string;
+  releaseReason?: string;
   wechat?: string;
   industry?: string;
   city?: string;
@@ -114,6 +120,7 @@ export interface CustomerFilters {
   search?: string;
   productLevel?: ProductLevel;
   customerLevel?: CustomerLevel;
+  lifecycleStatusCode?: LifecycleStatusCode;
   owner?: string;
   page?: number;
   pageSize?: number;

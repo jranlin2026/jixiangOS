@@ -1,4 +1,5 @@
 import type { ID, Timestamp } from './common';
+import type { LifecycleStatusCode } from './settings';
 
 /** 线索来源，由系统设置维护 */
 export type LeadSource = string;
@@ -58,6 +59,7 @@ export interface Lead {
   email?: string;
   source: LeadSource;
   status: LeadStatus;
+  lifecycleStatusCode?: LifecycleStatusCode;
   lifecycleStatus?: LeadLifecycleStatus;
   lifecycleStatusUpdatedAt?: Timestamp;
   opportunityId?: ID;
@@ -130,6 +132,7 @@ export interface LeadFilters {
   search?: string;
   source?: LeadSource;
   status?: LeadStatus;
+  lifecycleStatusCode?: LifecycleStatusCode;
   owner?: string;
   startDate?: string;
   endDate?: string;

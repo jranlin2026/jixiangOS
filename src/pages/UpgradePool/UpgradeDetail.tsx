@@ -33,7 +33,7 @@ const UpgradeDetail: React.FC<UpgradeDetailProps> = ({ id, open, onClose }) => {
 
   const handleAddFollowUp = async () => {
     if (!followUpContent.trim()) return;
-    await upgradeApi.addFollowUp(id, followUpContent, '当前用户');
+    await upgradeApi.addFollowUp(id, followUpContent);
     setFollowUpContent('');
     const res = await upgradeApi.getOpportunityById(id);
     if (res.code === 0) setOpportunity(res.data);

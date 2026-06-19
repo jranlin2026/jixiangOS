@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { leadApi } from './leadApi';
 import { STORAGE_KEYS } from '../shared/utils/constants';
+import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import type { Lead } from '../types/lead';
 
 const storage = (() => {
@@ -47,6 +48,23 @@ storage.clear();
 storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
 storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([lead]));
 storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
+  id: 'user-admin',
+  name: '系统管理员',
+  account: 'admin',
+  email: 'admin@company.com',
+  phone: '',
+  role: '超级管理员',
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+}]));
+storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({
+  userId: 'user-admin',
+  token: 'test-token',
+  remember: true,
+  createdAt: now,
+}));
 
 const res = await leadApi.updateLead('lead-test', { assignedTo: '李娜', owner: '李娜' });
 assert.equal(res.code, 0);
@@ -65,7 +83,7 @@ assert.equal(updated.assignedTo, '李娜');
 assert.equal(updated.owner, '李娜');
 assert.equal(updated.changeHistory?.length, 1);
 assert.equal(updated.changeHistory?.[0].action, 'update');
-assert.equal(updated.changeHistory?.[0].operator, '李娜');
+assert.equal(updated.changeHistory?.[0].operator, '系统管理员');
 assert.match(updated.changeHistory?.[0].summary || '', /分配销售/);
 assert.deepEqual(updated.changeHistory?.[0].changes?.find((item) => item.field === 'assignedTo'), {
   field: 'assignedTo',
