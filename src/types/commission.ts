@@ -4,7 +4,8 @@ import type { ID, Timestamp, ProductLevel } from './common';
 export type CommissionRole = '销售' | '线索' | '客户成功' | '售后' | '招商主管' | '销售主管';
 
 /** 提成状态 — 含审核流程 */
-export type CommissionStatus = '待审核' | '待发放' | '已发放' | '已取消';
+export type CommissionStatus = '待确认' | '待发放' | '已发放' | '已取消';
+export type LegacyCommissionStatus = CommissionStatus | '待审核';
 
 export type CommissionScene =
   | '899成交'
@@ -63,7 +64,7 @@ export interface CommissionRule {
   splitRatio?: number;
   /** 协同角色，存在时生成协同提成记录 */
   collaboratorRole?: CommissionRole | '';
-  /** 是否要求凭证；缺凭证时提成进入待审核 */
+  /** 是否要求凭证；缺凭证时提成进入待确认 */
   requiresProof?: boolean;
   /** 是否冲销该订单历史基础提成 */
   clawbackBaseCommission?: boolean;
@@ -94,7 +95,7 @@ export interface CommissionBatch {
   period: string;
   totalCount: number;
   totalAmount: number;
-  status: '待审核' | '待发放' | '已发放' | '已取消';
+  status: '待确认' | '待发放' | '已发放' | '已取消';
   approvedBy?: string;
   paidAt?: Timestamp;
   commissionIds: ID[];
@@ -144,6 +145,11 @@ export interface Commission {
   department: string;
   status: CommissionStatus;
   commissionRuleId?: ID;
+  sourceType?: '自动规则' | '人工新增';
+  isManualAdjusted?: boolean;
+  adjustReason?: string;
+  adjustedBy?: string;
+  adjustedAt?: Timestamp;
   commissionType?: 'sales' | 'cs' | 'support' | 'recovery';
   sourceRefundId?: ID;
   isRecoveryBonus?: boolean;
@@ -200,6 +206,19 @@ export interface CommissionFilters {
   pageSize?: number;
 }
 
+export interface CommissionAdjustmentInput {
+  id?: ID;
+  orderId: ID;
+  role: CommissionRole;
+  owner: string;
+  department?: string;
+  commissionAmount: number;
+  commissionRate?: number;
+  performanceAmount?: number;
+  calculationNote?: string;
+  commissionRuleId?: ID;
+}
+
 /** 提成统计 */
 export interface CommissionStats {
   monthPending: number;
@@ -207,7 +226,7 @@ export interface CommissionStats {
   monthTotal: number;
   /** 按角色统计 */
   byRole: Record<CommissionRole, number>;
-  /** 待审核金额 */
+  /** 待确认金额 */
   pendingReview: number;
   /** 提成占营收比例 */
   revenueRatio: number;

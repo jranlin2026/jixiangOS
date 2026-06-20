@@ -31,7 +31,7 @@ const ROLE_DEPARTMENT_MAP: Record<CommissionRole, string> = {
 function getPersonByRole(order: Order, role: CommissionRole): string {
   switch (role) {
     case '销售': return order.salesName || order.owner;
-    case '线索': return normalizeResourceOwnership(order.resourceOwnership || order.sourceType) === '个人资源' ? order.owner : '系统分配';
+    case '线索': return order.leadContributorName || order.leadInputBy || '';
     case '客户成功': return order.successName || '待分配';
     case '售后': return order.serviceName || '待分配';
     case '招商主管': return '待分配';
@@ -139,6 +139,8 @@ const ORDER_CHANGE_FIELDS: Array<{ field: keyof Order; label: string }> = [
   { field: 'status', label: '订单状态' },
   { field: 'refundStatus', label: '退款状态' },
   { field: 'owner', label: '销售负责人' },
+  { field: 'leadInputBy', label: '线索贡献人' },
+  { field: 'leadContributorName', label: '线索贡献人' },
   { field: 'sourceType', label: '来源类型' },
   { field: 'resourceOwnership', label: '资源归属' },
   { field: 'officialPaymentChannel', label: '官方收款渠道' },
@@ -208,7 +210,7 @@ function syncCommissionRefundState(order: Order): void {
     changed = true;
     return {
       ...commission,
-      status: isRefundDone ? '已取消' as const : '待审核' as const,
+      status: isRefundDone ? '已取消' as const : '待确认' as const,
       auditReason: reason,
       frozenReason: reason,
       updatedAt: new Date().toISOString(),
@@ -354,6 +356,7 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
 
     for (const calc of calcRes.data) {
       const personName = calc.ownerOverride || getPersonByRole(newOrder, calc.role);
+      if (calc.role === '线索' && !personName) continue;
       commissions.unshift({
         id: `comm-${uuidv4().slice(0, 8)}`,
         orderId: newOrder.id,
@@ -377,6 +380,7 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
         department: calc.departmentOverride || ROLE_DEPARTMENT_MAP[calc.role],
         status: calc.status,
         commissionRuleId: calc.ruleId,
+        sourceType: '自动规则',
         createdAt: now,
         updatedAt: now,
       });
@@ -404,7 +408,8 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
         role: '销售',
         owner: newOrder.salesName || newOrder.owner,
         department: ROLE_DEPARTMENT_MAP['销售'],
-        status: '待审核',
+        status: '待确认',
+        sourceType: '自动规则',
         createdAt: now,
         updatedAt: now,
       });

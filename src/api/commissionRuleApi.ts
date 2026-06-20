@@ -195,7 +195,7 @@ function buildResult(
   const performanceAmount = calcBaseAmount(rule, order);
   const evidenceStatus = resolveEvidenceStatus(rule, order);
   const needsAudit = true;
-  const status = '待审核';
+  const status = '待确认';
   const calculationNote = [
     rule.description,
     rule.performanceRate && rule.performanceRate !== 100 ? `业绩按实付金额 ${rule.performanceRate}% 核算` : '',

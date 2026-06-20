@@ -6,13 +6,16 @@ import {
   IconButton, Dialog, DialogContent, DialogActions, Divider,
 } from '@mui/material';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import EditIcon from '@mui/icons-material/Edit';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import PaymentsIcon from '@mui/icons-material/Payments';
 import useCommissionStore from '../../store/useCommissionStore';
 import useOrderStore from '../../store/useOrderStore';
-import { customerApi, orderApi } from '../../api';
+import { commissionApi, customerApi, orderApi } from '../../api';
 import { getProductLevelColor } from '../../shared/utils/constants';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import CommissionStats from './CommissionStats';
@@ -20,7 +23,7 @@ import CommissionRuleConfig from './CommissionRuleConfig';
 import CustomerDetail from '../Customers/CustomerDetail';
 import OrderForm from '../Orders/OrderForm';
 import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
-import type { Commission, CommissionAuditIssue, CommissionRole, CommissionStatus } from '../../types/commission';
+import type { Commission, CommissionAdjustmentInput, CommissionAuditIssue, CommissionRole, CommissionStatus } from '../../types/commission';
 import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
@@ -44,13 +47,13 @@ const ROLE_COLORS: Record<CommissionRole, string> = {
 };
 
 const DEPARTMENTS = ['全部', '销售部', '市场部', '客户成功部', '售后服务部', '招商部'];
-const STATUS_OPTIONS: CommissionStatus[] = ['待审核', '待发放', '已发放', '已取消'];
+const STATUS_OPTIONS: CommissionStatus[] = ['待确认', '待发放', '已发放', '已取消'];
 
 function getStatusColor(status: string): 'default' | 'success' | 'error' | 'warning' | 'info' {
   switch (status) {
     case '已发放': return 'success';
     case '已取消': return 'error';
-    case '待审核': return 'info';
+    case '待确认': return 'info';
     case '待发放': return 'warning';
     default: return 'default';
   }
@@ -100,13 +103,24 @@ const Commission: React.FC = () => {
   const [orderCustomer, setOrderCustomer] = useState<Customer | null>(null);
   const [customerOrdersOpen, setCustomerOrdersOpen] = useState(false);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
+  const [splitDialogOpen, setSplitDialogOpen] = useState(false);
+  const [splitOrderId, setSplitOrderId] = useState('');
+  const [splitRows, setSplitRows] = useState<CommissionAdjustmentInput[]>([]);
+  const [splitReason, setSplitReason] = useState('');
+  const [splitSaving, setSplitSaving] = useState(false);
   const { current: orderDetail, fetchById: fetchOrderById } = useOrderStore();
 
+  const refreshCommissionData = async () => {
+    await Promise.all([
+      fetchItems(),
+      fetchStats(),
+      fetchAuditIssues(),
+      fetchBatches(),
+    ]);
+  };
+
   useEffect(() => {
-    fetchItems();
-    fetchStats();
-    fetchAuditIssues();
-    fetchBatches();
+    refreshCommissionData();
   }, [fetchAuditIssues, fetchBatches, fetchItems, fetchStats]);
 
   const exceptionItems = useMemo(() => items.filter((commission) => {
@@ -140,6 +154,73 @@ const Commission: React.FC = () => {
       next.delete(id);
       return next;
     });
+  };
+
+  const handleOpenSplitDialog = async (orderId: string) => {
+    const res = await commissionApi.fetchCommissionsByOrder(orderId);
+    if (res.code !== 0) return;
+    setSplitOrderId(orderId);
+    setSplitRows(res.data.map((item) => ({
+      id: item.id,
+      orderId: item.orderId,
+      role: item.role,
+      owner: item.owner,
+      department: item.department,
+      commissionAmount: item.commissionAmount,
+      commissionRate: item.commissionRate,
+      performanceAmount: item.performanceAmount || item.orderAmount,
+      calculationNote: item.calculationNote || item.formulaText || '',
+      commissionRuleId: item.commissionRuleId,
+    })));
+    setSplitReason('');
+    setSplitDialogOpen(true);
+  };
+
+  const updateSplitRow = <K extends keyof CommissionAdjustmentInput>(index: number, key: K, value: CommissionAdjustmentInput[K]) => {
+    setSplitRows((prev) => prev.map((row, rowIndex) => (
+      rowIndex === index ? { ...row, [key]: value } : row
+    )));
+  };
+
+  const handleAddSplitRow = () => {
+    setSplitRows((prev) => [
+      ...prev,
+      {
+        orderId: splitOrderId,
+        role: '客户成功',
+        owner: '',
+        department: '客户成功部',
+        commissionAmount: 0,
+        commissionRate: 0,
+        performanceAmount: prev[0]?.performanceAmount || 0,
+        calculationNote: '财务人工新增分账',
+      },
+    ]);
+  };
+
+  const handleRemoveSplitRow = (index: number) => {
+    setSplitRows((prev) => prev.filter((_, rowIndex) => rowIndex !== index));
+  };
+
+  const handleSaveSplitRows = async () => {
+    setSplitSaving(true);
+    try {
+      const res = await commissionApi.saveOrderCommissionAdjustments(splitOrderId, splitRows, splitReason);
+      if (res.code === 0) {
+        setSplitDialogOpen(false);
+        await refreshCommissionData();
+      }
+    } finally {
+      setSplitSaving(false);
+    }
+  };
+
+  const handleConfirmOrderSplit = async (orderId: string, reason = '确认分账') => {
+    const res = await commissionApi.confirmOrderCommissions(orderId, reason);
+    if (res.code === 0) {
+      setSelected(new Set());
+      await refreshCommissionData();
+    }
   };
 
   const handleViewOrder = async (orderId: string) => {
@@ -217,12 +298,12 @@ const Commission: React.FC = () => {
   };
 
   const handleSelectAll = () => {
-    const selectableIds = items.filter((c) => c.status === '待审核' || c.status === '待发放').map((c) => c.id);
+    const selectableIds = items.filter((c) => c.status === '待确认' || c.status === '待发放').map((c) => c.id);
     setSelected(selected.size === selectableIds.length ? new Set() : new Set(selectableIds));
   };
 
   const handleBatchApprove = async () => {
-    const ids = Array.from(selected).filter((id) => items.find((c) => c.id === id)?.status === '待审核');
+    const ids = Array.from(selected).filter((id) => items.find((c) => c.id === id)?.status === '待确认');
     await batchApprove(ids);
     setSelected(new Set());
   };
@@ -283,7 +364,7 @@ const Commission: React.FC = () => {
               <TableCell padding="checkbox">
                 <Checkbox
                   indeterminate={selected.size > 0 && selected.size < rows.length}
-                  checked={rows.length > 0 && selected.size === rows.filter((c) => c.status === '待审核' || c.status === '待发放').length}
+                  checked={rows.length > 0 && selected.size === rows.filter((c) => c.status === '待确认' || c.status === '待发放').length}
                   onChange={handleSelectAll}
                 />
               </TableCell>
@@ -304,7 +385,7 @@ const Commission: React.FC = () => {
           {rows.map((comm) => {
             const levelColor = getProductLevelColor(comm.productLevel);
             const roleColor = ROLE_COLORS[comm.role] || '#9ca3af';
-            const isSelectable = comm.status === '待审核' || comm.status === '待发放';
+            const isSelectable = comm.status === '待确认' || comm.status === '待发放';
             return (
               <TableRow key={comm.id} hover>
                 {withSelection && (
@@ -336,15 +417,20 @@ const Commission: React.FC = () => {
                 <TableCell><Chip label={comm.status} size="small" color={getStatusColor(comm.status)} /></TableCell>
                 <TableCell align="center">
                   <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
-                    {comm.status === '待审核' && (
+                    {comm.status === '待确认' && (
                       <>
-                        <IconButton size="small" color="info" onClick={() => handleStatus(comm.id, '待发放')} title="审核通过">
+                        <IconButton size="small" color="info" onClick={() => handleConfirmOrderSplit(comm.orderId)} title="确认分账">
                           <CheckCircleIcon fontSize="small" />
                         </IconButton>
                         <IconButton size="small" color="error" onClick={() => handleStatus(comm.id, '已取消')} title="取消提成">
                           <CancelIcon fontSize="small" />
                         </IconButton>
                       </>
+                    )}
+                    {comm.status === '待确认' && (
+                      <IconButton size="small" color="primary" onClick={() => handleOpenSplitDialog(comm.orderId)} title="调整分账">
+                        <EditIcon fontSize="small" />
+                      </IconButton>
                     )}
                     {comm.status === '待发放' && (
                       <Button size="small" variant="outlined" onClick={() => handleStatus(comm.id, '已发放')}>发放</Button>
@@ -408,8 +494,11 @@ const Commission: React.FC = () => {
               <TableCell><Chip label={issue.status} size="small" color={getStatusColor(issue.status)} /></TableCell>
               <TableCell align="center">
                 <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center' }}>
-                  {issue.status === '待审核' && (
-                    <Button size="small" variant="contained" onClick={() => handleStatus(issue.commissionId, '待发放')}>通过</Button>
+                  {issue.status === '待确认' && (
+                    <Button size="small" variant="contained" onClick={() => handleConfirmOrderSplit(issue.orderId)}>确认</Button>
+                  )}
+                  {issue.status === '待确认' && (
+                    <Button size="small" variant="outlined" onClick={() => handleOpenSplitDialog(issue.orderId)}>调整分账</Button>
                   )}
                   {issue.status !== '已取消' && (
                     <Button size="small" color="error" onClick={() => handleStatus(issue.commissionId, '已取消')}>取消</Button>
@@ -421,7 +510,7 @@ const Commission: React.FC = () => {
           {rows.length === 0 && (
             <TableRow>
               <TableCell colSpan={8} align="center" sx={{ py: 5, color: '#9ca3af' }}>
-                当前没有待审核或异常问题
+                当前没有待确认或异常问题
               </TableCell>
             </TableRow>
           )}
@@ -453,7 +542,7 @@ const Commission: React.FC = () => {
               <TableCell>月份</TableCell>
               <TableCell>记录数</TableCell>
               <TableCell>应发</TableCell>
-              <TableCell>待审</TableCell>
+              <TableCell>待确认</TableCell>
               <TableCell>待发</TableCell>
               <TableCell>已发</TableCell>
               <TableCell>冲销/取消</TableCell>
@@ -499,12 +588,12 @@ const Commission: React.FC = () => {
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 700 }}>财务结算工作台</Typography>
           <Typography variant="body2" sx={{ color: '#6b7280', mt: 0.5 }}>
-            订单付款后自动核算提成，财务在这里处理审核、冲销和月度发放。
+            订单入库后自动生成分账草稿，财务在这里确认提成、处理冲销并进行月度发放。
           </Typography>
         </Box>
         {selected.size > 0 && tabValue === 0 && (
           <Box sx={{ display: 'flex', gap: 1 }}>
-            <Button size="small" variant="outlined" color="info" onClick={handleBatchApprove}>批量审核 ({selected.size})</Button>
+            <Button size="small" variant="outlined" color="info" onClick={handleBatchApprove}>批量确认 ({selected.size})</Button>
             <Button size="small" variant="contained" onClick={handleBatchPay}>批量发放 ({selected.size})</Button>
           </Box>
         )}
@@ -512,7 +601,7 @@ const Commission: React.FC = () => {
 
       <Tabs value={tabValue} onChange={(_, value) => setTabValue(value)} sx={{ mb: 3, borderBottom: '1px solid #e5e7eb' }}>
         <Tab label="提成记录" />
-        <Tab label="待审核" />
+        <Tab label="提成确认" />
         <Tab label="月度结算" />
         <Tab label="规则配置" />
         <Tab label="异常/冲销记录" />
@@ -529,9 +618,9 @@ const Commission: React.FC = () => {
       {tabValue === 1 && (
         <>
           <Box sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap' }}>
-            <SummaryTile label="待处理问题" value={`${auditIssues.length} 条`} hint="缺截图、需确认、冻结和冲销" />
-            <SummaryTile label="待审金额" value={formatCurrency(auditIssues.reduce((sum, item) => sum + item.amount, 0))} />
-            <SummaryTile label="本月待审" value={formatCurrency(stats?.pendingReview || 0)} />
+            <SummaryTile label="待确认事项" value={`${auditIssues.length} 条`} hint="缺截图、需调整、冻结和冲销" />
+            <SummaryTile label="待确认金额" value={formatCurrency(auditIssues.reduce((sum, item) => sum + item.amount, 0))} />
+            <SummaryTile label="本月待确认" value={formatCurrency(stats?.pendingReview || 0)} />
           </Box>
           {renderToolbar()}
           {renderAuditTable(auditIssues)}
@@ -567,7 +656,7 @@ const Commission: React.FC = () => {
               <Typography variant="body2">{detailCommission.resourceOwnership || '-'}</Typography>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>公式</Typography>
               <Typography variant="body2">{detailCommission.formulaText || '-'}</Typography>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>审核原因</Typography>
+              <Typography variant="body2" sx={{ color: '#6b7280' }}>确认/异常原因</Typography>
               <Typography variant="body2">{detailCommission.auditReason || detailCommission.frozenReason || '-'}</Typography>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>计算说明</Typography>
               <Typography variant="body2">{detailCommission.calculationNote || '-'}</Typography>
@@ -607,6 +696,111 @@ const Commission: React.FC = () => {
             <Typography variant="body2" sx={{ color: '#9ca3af', textAlign: 'center', py: 4 }}>加载中...</Typography>
           )}
         </DialogContent>
+      </Dialog>
+
+      <Dialog open={splitDialogOpen} onClose={() => setSplitDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogCloseTitle onClose={() => setSplitDialogOpen(false)}>调整订单分账</DialogCloseTitle>
+        <DialogContent dividers>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>角色</TableCell>
+                <TableCell>人员</TableCell>
+                <TableCell>部门</TableCell>
+                <TableCell>业绩金额</TableCell>
+                <TableCell>提成金额</TableCell>
+                <TableCell>说明</TableCell>
+                <TableCell align="center">操作</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {splitRows.map((row, index) => (
+                <TableRow key={row.id || `new-${index}`}>
+                  <TableCell sx={{ minWidth: 120 }}>
+                    <Select
+                      size="small"
+                      value={row.role}
+                      onChange={(e) => updateSplitRow(index, 'role', e.target.value as CommissionRole)}
+                      fullWidth
+                    >
+                      {Object.entries(ROLE_LABELS).map(([key, label]) => (
+                        <MenuItem key={key} value={key}>{label}</MenuItem>
+                      ))}
+                    </Select>
+                  </TableCell>
+                  <TableCell sx={{ minWidth: 140 }}>
+                    <TextField
+                      size="small"
+                      value={row.owner}
+                      onChange={(e) => updateSplitRow(index, 'owner', e.target.value)}
+                      fullWidth
+                    />
+                  </TableCell>
+                  <TableCell sx={{ minWidth: 140 }}>
+                    <TextField
+                      size="small"
+                      value={row.department || ''}
+                      onChange={(e) => updateSplitRow(index, 'department', e.target.value)}
+                      fullWidth
+                    />
+                  </TableCell>
+                  <TableCell sx={{ minWidth: 120 }}>
+                    <TextField
+                      size="small"
+                      type="number"
+                      value={row.performanceAmount || 0}
+                      onChange={(e) => updateSplitRow(index, 'performanceAmount', Number(e.target.value))}
+                      fullWidth
+                    />
+                  </TableCell>
+                  <TableCell sx={{ minWidth: 120 }}>
+                    <TextField
+                      size="small"
+                      type="number"
+                      value={row.commissionAmount}
+                      onChange={(e) => updateSplitRow(index, 'commissionAmount', Number(e.target.value))}
+                      fullWidth
+                    />
+                  </TableCell>
+                  <TableCell sx={{ minWidth: 180 }}>
+                    <TextField
+                      size="small"
+                      value={row.calculationNote || ''}
+                      onChange={(e) => updateSplitRow(index, 'calculationNote', e.target.value)}
+                      fullWidth
+                    />
+                  </TableCell>
+                  <TableCell align="center">
+                    <IconButton size="small" color="error" onClick={() => handleRemoveSplitRow(index)}>
+                      <DeleteOutlineIcon fontSize="small" />
+                    </IconButton>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2, gap: 2 }}>
+            <Button startIcon={<AddIcon />} onClick={handleAddSplitRow}>新增分账行</Button>
+            <TextField
+              label="调整原因"
+              value={splitReason}
+              onChange={(e) => setSplitReason(e.target.value)}
+              size="small"
+              required
+              sx={{ minWidth: 320 }}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSplitDialogOpen(false)}>取消</Button>
+          <Button
+            variant="contained"
+            onClick={handleSaveSplitRows}
+            disabled={splitSaving || !splitReason.trim() || splitRows.length === 0 || splitRows.some((row) => !row.owner.trim())}
+          >
+            保存调整
+          </Button>
+        </DialogActions>
       </Dialog>
 
       {selectedCustomer && (

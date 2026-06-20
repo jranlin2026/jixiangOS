@@ -67,6 +67,9 @@ export interface Order {
   owner: string;
   salesId?: ID;
   salesName?: string;
+  /** 成交时的线索贡献人快照，用于线索分成，不随客户转交变化 */
+  leadInputBy?: string;
+  leadContributorName?: string;
   successId?: ID;
   successName?: string;
   serviceId?: ID;

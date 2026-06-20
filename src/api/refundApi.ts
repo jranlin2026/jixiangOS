@@ -117,7 +117,7 @@ function freezeCommissions(refund: Refund): number {
     frozenAmount += commission.commissionAmount;
     return {
       ...commission,
-      status: '待审核' as const,
+      status: '待确认' as const,
       calculationNote: `${commission.calculationNote || ''} 退款申请 ${refund.refundNo} 已冻结，待挽回/退款结果确认。`.trim(),
       sourceRefundId: refund.id,
       updatedAt: nowIso(),
@@ -203,7 +203,7 @@ function createRecoveryCommission(refund: Refund, operatorId: string, operatorNa
     role: role === '客户成功' ? '客户成功' : role === '售后' ? '售后' : '销售',
     owner: operatorName,
     department,
-    status: '待审核',
+    status: '待确认',
     commissionType: 'recovery',
     sourceRefundId: refund.id,
     isRecoveryBonus: true,

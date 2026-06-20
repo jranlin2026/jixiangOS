@@ -27,7 +27,7 @@ const CommissionStats: React.FC = () => {
   if (!stats) return null;
 
   const mainItems = [
-    { label: '本月待审核', value: formatCurrency(stats.pendingReview || stats.monthPending), color: '#2196F3' },
+    { label: '本月待确认', value: formatCurrency(stats.pendingReview || stats.monthPending), color: '#2196F3' },
     { label: '本月待发放', value: formatCurrency(stats.monthPending), color: '#FF9800' },
     { label: '本月已发放', value: formatCurrency(stats.monthPaid), color: '#4CAF50' },
     { label: '本月提成总额', value: formatCurrency(stats.monthTotal), color: '#1a1a2e' },

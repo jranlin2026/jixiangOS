@@ -108,6 +108,10 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
               <Typography variant="body1">{order.owner}</Typography>
             </Box>
             <Box>
+              <Typography variant="body2" sx={{ color: '#6b7280' }}>线索贡献人</Typography>
+              <Typography variant="body1">{order.leadContributorName || order.leadInputBy || '-'}</Typography>
+            </Box>
+            <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>创建时间</Typography>
               <Typography variant="body1">{formatDate(order.createdAt, 'yyyy-MM-dd HH:mm')}</Typography>
             </Box>
