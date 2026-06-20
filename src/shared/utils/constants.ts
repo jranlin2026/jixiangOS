@@ -316,6 +316,7 @@ export const STORAGE_KEYS = {
   LEAD_INTAKE_RECORDS: `${STORAGE_PREFIX}lead_intake_records`,
   LEAD_SOURCE_CONFIGS: `${STORAGE_PREFIX}lead_source_configs`,
   COMMISSION_RULES: `${STORAGE_PREFIX}commission_rules`,
+  COMMISSION_ROLE_CONFIGS: `${STORAGE_PREFIX}commission_role_configs`,
   COMMISSION_SETTLEMENT_BATCHES: `${STORAGE_PREFIX}commission_settlement_batches`,
   TAGS: `${STORAGE_PREFIX}tags`,
   INITIALIZED: `${STORAGE_PREFIX}initialized`,

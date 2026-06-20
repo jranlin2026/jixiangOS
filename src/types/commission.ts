@@ -1,7 +1,42 @@
 import type { ID, Timestamp, ProductLevel } from './common';
 
-/** 提成角色枚举 — 对应需求文档中的6个角色 */
-export type CommissionRole = '销售' | '线索' | '客户成功' | '售后' | '招商主管' | '销售主管';
+/** 提成角色是分账业务口径，不等同于系统权限角色 */
+export type CommissionRole = string;
+
+export type CommissionRolePersonSource =
+  | 'sales_owner'
+  | 'lead_contributor'
+  | 'customer_success'
+  | 'after_sales'
+  | 'manual';
+
+export interface CommissionRoleConfig {
+  id: ID;
+  name: CommissionRole;
+  code: string;
+  /** @deprecated 人员匹配改为系统内置规则，保留字段仅兼容历史数据 */
+  personSource?: CommissionRolePersonSource;
+  isActive: boolean;
+  sortOrder: number;
+  description?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface CommissionRoleConfigInput {
+  name: CommissionRole;
+  code: string;
+  /** @deprecated 人员匹配改为系统内置规则，保留字段仅兼容历史数据 */
+  personSource?: CommissionRolePersonSource;
+  isActive: boolean;
+  sortOrder: number;
+  description?: string;
+}
+
+export interface CommissionRoleConfigFilters {
+  search?: string;
+  isActive?: boolean;
+}
 
 /** 提成状态 — 含审核流程 */
 export type CommissionStatus = '待确认' | '待发放' | '已发放' | '已取消';
@@ -38,6 +73,10 @@ export type CommissionSettlementMode = '自动结算' | '人工审核' | '仅计
 export interface CommissionRule {
   id: ID;
   name: string;
+  /** 简化 IF/DO 规则组 ID，同一组内每个提成角色一条底层规则 */
+  ruleGroupId?: ID;
+  /** 简化 IF/DO 规则组名称 */
+  ruleGroupName?: string;
   /** 产品等级，空=通用 */
   productLevel: ProductLevel | '';
   /** 订单类型，空=通用 */
@@ -87,6 +126,23 @@ export interface CommissionRule {
   /** 优先级，越小越优先 */
   priority: number;
 }
+
+export interface SimpleCommissionRulePayout {
+  role: CommissionRole;
+  commissionType: 'fixed' | 'percentage';
+  commissionValue: number;
+}
+
+export interface SimpleCommissionRuleGroup {
+  id: ID;
+  name: string;
+  orderType: string;
+  resourceOwnership: ResourceOwnership;
+  isActive: boolean;
+  payouts: SimpleCommissionRulePayout[];
+}
+
+export type SimpleCommissionRuleGroupInput = Omit<SimpleCommissionRuleGroup, 'id'>;
 
 /** 提成批次 */
 export interface CommissionBatch {
@@ -142,7 +198,10 @@ export interface Commission {
   /** 人员姓名 */
   owner: string;
   /** 部门 */
+  ownerId?: ID;
   department: string;
+  departmentId?: ID;
+  paymentDate?: Timestamp;
   status: CommissionStatus;
   commissionRuleId?: ID;
   sourceType?: '自动规则' | '人工新增';
@@ -197,8 +256,10 @@ export interface CommissionFilters {
   productLevel?: ProductLevel;
   status?: CommissionStatus;
   owner?: string;
+  ownerId?: ID;
   role?: CommissionRole;
   department?: string;
+  departmentId?: ID;
   startDate?: string;
   endDate?: string;
   month?: string;
@@ -210,8 +271,11 @@ export interface CommissionAdjustmentInput {
   id?: ID;
   orderId: ID;
   role: CommissionRole;
-  owner: string;
+  owner?: string;
+  ownerId?: ID;
   department?: string;
+  departmentId?: ID;
+  paymentDate?: Timestamp;
   commissionAmount: number;
   commissionRate?: number;
   performanceAmount?: number;

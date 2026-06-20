@@ -8,6 +8,8 @@ import type {
   CommissionStatus,
 } from '../types/commission';
 import type { Order } from '../types/order';
+import type { User } from '../types/settings';
+import type { Department } from '../types/department';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
@@ -29,9 +31,37 @@ const ROLE_DEPARTMENT_MAP: Record<Commission['role'], string> = {
   '销售主管': '销售部',
 };
 
+const PENDING_ASSIGN_TEXT = '\u5f85\u5206\u914d';
+
+function getActiveUsers(): User[] {
+  return (getStorageData<User[]>(STORAGE_KEYS.USERS) || []).filter((user) => user.isActive);
+}
+
+function getActiveDepartments(): Department[] {
+  return (getStorageData<Department[]>(STORAGE_KEYS.DEPARTMENTS) || []).filter((department) => department.isActive);
+}
+
+function findUserByIdOrName(idOrName?: string, fallbackName?: string): User | undefined {
+  const users = getActiveUsers();
+  const values = [idOrName, fallbackName].filter(Boolean) as string[];
+  return users.find((user) => values.includes(user.id) || values.includes(user.name));
+}
+
+function getDepartmentByUser(user?: User): Department | undefined {
+  if (!user?.departmentId) return undefined;
+  return getActiveDepartments().find((department) => department.id === user.departmentId);
+}
+
+function getCommissionPaymentDate(commission: Commission, order?: Order): string {
+  return commission.paymentDate || order?.payments?.[0]?.paidAt || order?.createdAt || commission.createdAt;
+}
+
 function normalizeCommission(c: Commission): Commission {
   const normalizedStatus = (String(c.status) === '待审核' ? '待确认' : c.status) as CommissionStatus;
   const evidenceStatus = c.evidenceStatus || '无需凭证';
+  const order = getOrderById(c.orderId);
+  const ownerUser = findUserByIdOrName(c.ownerId, c.owner);
+  const ownerDepartment = getDepartmentByUser(ownerUser);
   return {
     ...c,
     status: normalizedStatus,
@@ -40,6 +70,10 @@ function normalizeCommission(c: Commission): Commission {
     proofStatus: c.proofStatus || '无需凭证',
     resourceOwnership: c.resourceOwnership || '公司资源',
     scene: c.scene || (c.productLevel === '899' ? '899成交' : '新代理'),
+    owner: c.owner || ownerUser?.name || PENDING_ASSIGN_TEXT,
+    ownerId: c.ownerId || ownerUser?.id,
+    departmentId: c.departmentId || ownerDepartment?.id,
+    paymentDate: getCommissionPaymentDate(c, order),
     evidenceStatus,
     evidenceRequired: c.evidenceRequired ?? evidenceStatus !== '无需凭证',
     formulaText: c.formulaText || (
@@ -89,13 +123,21 @@ function applyFilters(commissions: Commission[], filters?: CommissionFilters): C
   if (filters?.productLevel) filtered = filtered.filter((c) => c.productLevel === filters.productLevel);
   if (filters?.status) filtered = filtered.filter((c) => c.status === filters.status);
   if (filters?.owner) filtered = filtered.filter((c) => c.owner === filters.owner);
+  if (filters?.ownerId) filtered = filtered.filter((c) => c.ownerId === filters.ownerId || c.owner === findUserByIdOrName(filters.ownerId)?.name);
   if (filters?.role) filtered = filtered.filter((c) => c.role === filters.role);
   if (filters?.department) filtered = filtered.filter((c) => c.department === filters.department);
+  if (filters?.departmentId) filtered = filtered.filter((c) => c.departmentId === filters.departmentId);
   if (filters?.month) {
-    filtered = filtered.filter((c) => c.createdAt.startsWith(filters.month!));
+    filtered = filtered.filter((c) => (c.paymentDate || c.createdAt).startsWith(filters.month!));
   }
-  if (filters?.startDate) filtered = filtered.filter((c) => c.createdAt >= filters.startDate!);
-  if (filters?.endDate) filtered = filtered.filter((c) => c.createdAt <= filters.endDate!);
+  const startDate = filters?.startDate
+    ? filters.startDate.length === 10 ? `${filters.startDate}T00:00:00.000Z` : filters.startDate
+    : '';
+  const endDate = filters?.endDate
+    ? filters.endDate.length === 10 ? `${filters.endDate}T23:59:59.999Z` : filters.endDate
+    : '';
+  if (startDate) filtered = filtered.filter((c) => (c.paymentDate || c.createdAt) >= startDate);
+  if (endDate) filtered = filtered.filter((c) => (c.paymentDate || c.createdAt) <= endDate);
 
   return filtered;
 }
@@ -120,9 +162,19 @@ async function fetchCommissionsByOrder(orderId: string): Promise<ApiResponse<Com
   return createSuccessResponse(getOrderCommissions(orderId));
 }
 
+function resolveAdjustmentUser(input: CommissionAdjustmentInput): { user?: User; department?: Department; error?: string } {
+  if (!input.ownerId) {
+    return { error: '\u8bf7\u9009\u62e9\u7cfb\u7edf\u5458\u5de5\u4f5c\u4e3a\u5206\u6da6\u4eba\u5458' };
+  }
+  const user = getActiveUsers().find((item) => item.id === input.ownerId && item.isActive);
+  if (!user) return { error: '\u5206\u6da6\u4eba\u5458\u4e0d\u5b58\u5728\u6216\u5df2\u505c\u7528' };
+  return { user, department: getDepartmentByUser(user) };
+}
+
 function buildAdjustedCommission(
   order: Order,
   input: CommissionAdjustmentInput,
+  assignee: { user: User; department?: Department },
   existing: Commission | undefined,
   adjustReason: string,
   operator: string,
@@ -153,8 +205,11 @@ function buildAdjustedCommission(
       ? `业绩金额 ${performanceAmount} × ${Math.round(input.commissionRate * 100)}% = ${amount} 元`
       : `人工确认 ${amount} 元`,
     role: input.role,
-    owner: input.owner,
-    department: input.department || existing?.department || ROLE_DEPARTMENT_MAP[input.role],
+    owner: assignee.user.name,
+    ownerId: assignee.user.id,
+    department: assignee.department?.name || existing?.department || ROLE_DEPARTMENT_MAP[input.role] || '',
+    departmentId: assignee.department?.id,
+    paymentDate: input.paymentDate || existing?.paymentDate || order.payments?.[0]?.paidAt || order.createdAt,
     status: '待确认',
     commissionRuleId: input.commissionRuleId || existing?.commissionRuleId,
     sourceType,
@@ -180,6 +235,10 @@ async function saveOrderCommissionAdjustments(
   if (!order) return createErrorResponse('订单不存在', 404);
   if (!rows.length) return createErrorResponse('至少保留一条分账记录');
 
+  const resolvedRows = rows.map((row) => ({ row, resolved: resolveAdjustmentUser(row) }));
+  const invalidRow = resolvedRows.find((item) => item.resolved.error || !item.resolved.user);
+  if (invalidRow) return createErrorResponse(invalidRow.resolved.error || '\u5206\u6da6\u4eba\u5458\u4e0d\u53ef\u7528');
+
   const now = new Date().toISOString();
   const operator = getCurrentOperatorName('财务');
   const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
@@ -188,9 +247,10 @@ async function saveOrderCommissionAdjustments(
       .filter((commission) => commission.orderId === orderId)
       .map((commission) => [commission.id, normalizeCommission(commission)]),
   );
-  const adjustedRows = rows.map((row) => buildAdjustedCommission(
+  const adjustedRows = resolvedRows.map(({ row, resolved }) => buildAdjustedCommission(
     order,
     row,
+    { user: resolved.user!, department: resolved.department },
     row.id ? existingById.get(row.id) : undefined,
     reason,
     operator,
@@ -235,7 +295,7 @@ async function fetchCommissionStats(): Promise<ApiResponse<CommissionStats>> {
   const normalizedCommissions = getAllCommissions();
   const now = new Date();
   const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-  const monthCommissions = normalizedCommissions.filter((c) => c.createdAt >= monthStart);
+  const monthCommissions = normalizedCommissions.filter((c) => (c.paymentDate || c.createdAt) >= monthStart);
   const byRole = normalizedCommissions.reduce((acc, c) => {
     acc[c.role] = (acc[c.role] || 0) + c.commissionAmount;
     return acc;

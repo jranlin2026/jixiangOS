@@ -152,9 +152,10 @@ assert.equal(typeof (commissionApi as any).confirmOrderCommissions, 'function');
 seed();
 const directOrderId = await approveOrder('cust-direct', 'Direct Customer');
 let directCommissions = ((await (commissionApi as any).fetchCommissionsByOrder(directOrderId)).data || []) as Commission[];
-assert.deepEqual(directCommissions.map((item) => item.role), [zh.salesRole]);
-assert.equal(directCommissions[0].status, zh.pendingConfirm);
-assert.equal(directCommissions[0].owner, 'Sales A');
+assert.deepEqual(directCommissions.map((item) => item.role).sort(), [zh.leadRole, zh.salesRole].sort());
+assert.equal(directCommissions.find((item) => item.role === zh.salesRole)?.owner, 'Sales A');
+assert.equal(directCommissions.find((item) => item.role === zh.leadRole)?.owner, '待分配');
+assert.equal(directCommissions.every((item) => item.status === zh.pendingConfirm), true);
 
 const leadOrderId = await approveOrder('cust-lead', 'Lead Customer', 'Lead A');
 let leadCommissions = ((await (commissionApi as any).fetchCommissionsByOrder(leadOrderId)).data || []) as Commission[];
@@ -171,8 +172,7 @@ const adjustedRows = [
   {
     orderId: leadOrderId,
     role: zh.successRole,
-    owner: 'Success A',
-    department: zh.successDept,
+    ownerId: 'user-success',
     commissionAmount: 50,
     commissionRate: 0,
     performanceAmount: 899,

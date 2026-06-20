@@ -20,10 +20,11 @@ import {
   RESOURCE_OWNERSHIPS,
   normalizeResourceOwnership,
 } from '../../shared/utils/constants';
-import { customerApi, orderReviewApi, productApi, settingsApi } from '../../api';
+import { commissionRuleApi, customerApi, orderReviewApi, productApi, settingsApi } from '../../api';
 import type { OrderType, PaymentMethod, ProductLevel } from '../../types/common';
 import type {
   CommissionRole,
+  CommissionRoleConfig,
   CommissionScene,
   OfficialPaymentChannel,
   ResourceOwnership,
@@ -146,13 +147,6 @@ function dealSceneFromOrderType(orderType: OrderType): CommissionScene | undefin
   return scenes.includes(orderType) ? orderType as CommissionScene : undefined;
 }
 
-function userRoleToCommissionRole(role: string): CommissionRole {
-  if (role.includes('销售经理')) return '销售主管' as CommissionRole;
-  if (role.includes('销售')) return '销售' as CommissionRole;
-  if (role.includes('运营')) return '客户成功' as CommissionRole;
-  return '销售' as CommissionRole;
-}
-
 function renderUserOptionLabel(user: User): string {
   return `${user.name}（${user.role}）`;
 }
@@ -175,6 +169,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   const [productLevelConfigs, setProductLevelConfigs] = useState<ProductLevelConfig[]>([]);
   const [orderTypeConfigs, setOrderTypeConfigs] = useState<OrderTypeConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [commissionRoleConfigs, setCommissionRoleConfigs] = useState<CommissionRoleConfig[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [customerSearch, setCustomerSearch] = useState('');
@@ -312,8 +307,16 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     Promise.all([
       settingsApi.fetchUsers({ isActive: true }),
       settingsApi.fetchOrderTypeConfigs(),
-    ]).then(([userRes, orderTypeRes]) => {
+      commissionRuleApi.getCommissionRoleConfigs({ isActive: true }),
+    ]).then(([userRes, orderTypeRes, commissionRoleRes]) => {
       if (userRes.code === 0) setUsers(userRes.data.filter((user) => user.isActive));
+      if (commissionRoleRes.code === 0) {
+        setCommissionRoleConfigs(commissionRoleRes.data);
+        setForm((prev) => {
+          if (prev.collaboratorRole && commissionRoleRes.data.some((item) => item.name === prev.collaboratorRole)) return prev;
+          return { ...prev, collaboratorRole: commissionRoleRes.data[0]?.name || prev.collaboratorRole };
+        });
+      }
       if (orderTypeRes.code === 0) {
         const configs = orderTypeRes.data;
         const activeTypes = configs.filter((item) => item.isActive);
@@ -429,11 +432,9 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
 
   const handleCollaboratorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const collaboratorName = e.target.value;
-    const selectedUser = users.find((user) => user.name === collaboratorName);
     setForm({
       ...form,
       collaboratorName,
-      collaboratorRole: selectedUser ? userRoleToCommissionRole(selectedUser.role) : form.collaboratorRole,
     });
   };
 
@@ -803,7 +804,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
             label="协同人员"
             value={form.collaboratorName}
             onChange={handleCollaboratorChange}
-            helperText="选择人员后系统按职位自动匹配提成角色"
+            helperText="协同人员是实际分账人员，提成角色需单独选择"
             fullWidth
           >
             <MenuItem value="">无</MenuItem>
@@ -812,6 +813,21 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
             )}
             {users.map((user) => (
               <MenuItem key={user.id} value={user.name}>{renderUserOptionLabel(user)}</MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            select
+            label="协同提成角色"
+            value={form.collaboratorRole}
+            onChange={handleChange('collaboratorRole')}
+            helperText="此角色仅用于分账，不影响系统权限角色"
+            fullWidth
+          >
+            {form.collaboratorRole && !commissionRoleConfigs.some((item) => item.name === form.collaboratorRole) && (
+              <MenuItem value={form.collaboratorRole}>{form.collaboratorRole}（已停用）</MenuItem>
+            )}
+            {commissionRoleConfigs.map((item) => (
+              <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>
             ))}
           </TextField>
           <TextField label="协同分成比例（%）" type="number" value={form.collaboratorRatio} onChange={handleNumberChange('collaboratorRatio')} fullWidth />

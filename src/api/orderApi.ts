@@ -27,19 +27,6 @@ const ROLE_DEPARTMENT_MAP: Record<CommissionRole, string> = {
   '销售主管': '销售部',
 };
 
-/** 角色 → 从订单中取人员姓名 */
-function getPersonByRole(order: Order, role: CommissionRole): string {
-  switch (role) {
-    case '销售': return order.salesName || order.owner;
-    case '线索': return order.leadContributorName || order.leadInputBy || '';
-    case '客户成功': return order.successName || '待分配';
-    case '售后': return order.serviceName || '待分配';
-    case '招商主管': return '待分配';
-    case '销售主管': return '待分配';
-    default: return order.owner;
-  }
-}
-
 function getPrimaryPaymentDate(order: Order): string {
   return order.payments?.[0]?.paidAt || order.createdAt;
 }
@@ -345,6 +332,7 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
   };
   orders.unshift(newOrder);
   syncCustomerOrderStats(newOrder, orders, operator);
+  const commissionPaymentDate = newOrder.payments?.[0]?.paidAt || newOrder.createdAt;
 
   // ===== 多角色自动分佣引擎 =====
   // 根据订单制度字段匹配所有适用规则
@@ -355,8 +343,9 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
     const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
 
     for (const calc of calcRes.data) {
-      const personName = calc.ownerOverride || getPersonByRole(newOrder, calc.role);
-      if (calc.role === '线索' && !personName) continue;
+      const assignee = commissionRuleApi.resolveCommissionRoleAssignee(newOrder, calc.role);
+      const resolvedPersonName = calc.ownerOverride || assignee.owner;
+      const personName = calc.ownerOverride || commissionRuleApi.resolveCommissionRoleOwner(newOrder, calc.role) || '待分配';
       commissions.unshift({
         id: `comm-${uuidv4().slice(0, 8)}`,
         orderId: newOrder.id,
@@ -376,8 +365,11 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
         evidenceStatus: calc.evidenceStatus,
         formulaText: calc.formulaText,
         role: calc.role,
-        owner: personName,
-        department: calc.departmentOverride || ROLE_DEPARTMENT_MAP[calc.role],
+        owner: resolvedPersonName,
+        ownerId: calc.ownerOverride ? undefined : assignee.ownerId,
+        department: calc.departmentOverride || assignee.department || ROLE_DEPARTMENT_MAP[calc.role],
+        departmentId: calc.departmentOverride ? undefined : assignee.departmentId,
+        paymentDate: commissionPaymentDate,
         status: calc.status,
         commissionRuleId: calc.ruleId,
         sourceType: '自动规则',
@@ -387,6 +379,7 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
     }
 
     if (calcRes.data.length === 0) {
+      const salesAssignee = commissionRuleApi.resolveCommissionRoleAssignee(newOrder, '销售');
       commissions.unshift({
         id: `comm-${uuidv4().slice(0, 8)}`,
         orderId: newOrder.id,
@@ -406,7 +399,10 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
         evidenceStatus: '已齐全',
         formulaText: '未匹配规则，暂不计算金额',
         role: '销售',
-        owner: newOrder.salesName || newOrder.owner,
+        owner: salesAssignee.owner || newOrder.salesName || newOrder.owner,
+        ownerId: salesAssignee.ownerId,
+        departmentId: salesAssignee.departmentId,
+        paymentDate: commissionPaymentDate,
         department: ROLE_DEPARTMENT_MAP['销售'],
         status: '待确认',
         sourceType: '自动规则',

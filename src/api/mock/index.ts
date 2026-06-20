@@ -64,6 +64,7 @@ export function initializeMockData(): void {
   initializeStorage(STORAGE_KEYS.LEAD_INTAKE_RECORDS, []);
   initializeStorage(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, DEFAULT_LEAD_SOURCE_CONFIGS);
   initializeStorage(STORAGE_KEYS.COMMISSION_RULES, mockCommissionRules);
+  initializeStorage(STORAGE_KEYS.COMMISSION_ROLE_CONFIGS, []);
   initializeStorage(STORAGE_KEYS.TAGS, mockTags);
 
   markStorageInitialized();

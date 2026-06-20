@@ -15,7 +15,7 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import PaymentsIcon from '@mui/icons-material/Payments';
 import useCommissionStore from '../../store/useCommissionStore';
 import useOrderStore from '../../store/useOrderStore';
-import { commissionApi, customerApi, orderApi } from '../../api';
+import { commissionApi, commissionRuleApi, customerApi, departmentApi, orderApi, settingsApi } from '../../api';
 import { getProductLevelColor } from '../../shared/utils/constants';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import CommissionStats from './CommissionStats';
@@ -23,9 +23,11 @@ import CommissionRuleConfig from './CommissionRuleConfig';
 import CustomerDetail from '../Customers/CustomerDetail';
 import OrderForm from '../Orders/OrderForm';
 import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
-import type { Commission, CommissionAdjustmentInput, CommissionAuditIssue, CommissionRole, CommissionStatus } from '../../types/commission';
+import type { Commission, CommissionAdjustmentInput, CommissionAuditIssue, CommissionRole, CommissionRoleConfig, CommissionStatus } from '../../types/commission';
 import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
+import type { User } from '../../types/settings';
+import type { Department } from '../../types/department';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 const ROLE_LABELS: Record<CommissionRole, string> = {
@@ -89,11 +91,14 @@ const Commission: React.FC = () => {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [tabValue, setTabValue] = useState(0);
   const [localFilters, setLocalFilters] = useState({
-    month: new Date().toISOString().slice(0, 7),
+    month: '',
     role: '' as CommissionRole | '',
+    ownerId: '',
     department: '',
     status: '' as CommissionStatus | '',
     search: '',
+    startDate: '',
+    endDate: '',
   });
   const [detailCommission, setDetailCommission] = useState<Commission | null>(null);
   const [orderDetailOpen, setOrderDetailOpen] = useState(false);
@@ -108,7 +113,23 @@ const Commission: React.FC = () => {
   const [splitRows, setSplitRows] = useState<CommissionAdjustmentInput[]>([]);
   const [splitReason, setSplitReason] = useState('');
   const [splitSaving, setSplitSaving] = useState(false);
+  const [commissionRoleConfigs, setCommissionRoleConfigs] = useState<CommissionRoleConfig[]>([]);
+  const [employees, setEmployees] = useState<User[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const { current: orderDetail, fetchById: fetchOrderById } = useOrderStore();
+
+  const activeEmployees = useMemo(() => employees.filter((item) => item.isActive), [employees]);
+  const activeRoleConfigs = useMemo(() => commissionRoleConfigs.filter((item) => item.isActive), [commissionRoleConfigs]);
+  const getDepartmentName = (departmentId?: string) => departments.find((item) => item.id === departmentId)?.name || '';
+
+  const roleOptionsForSplit = (currentRole: CommissionRole) => {
+    const options = activeRoleConfigs.slice();
+    if (currentRole && !options.some((item) => item.name === currentRole)) {
+      const current = commissionRoleConfigs.find((item) => item.name === currentRole);
+      return current ? [current, ...options] : [{ id: currentRole, name: currentRole, code: currentRole, isActive: false, sortOrder: 999, createdAt: '', updatedAt: '' }, ...options];
+    }
+    return options;
+  };
 
   const refreshCommissionData = async () => {
     await Promise.all([
@@ -119,8 +140,20 @@ const Commission: React.FC = () => {
     ]);
   };
 
+  const fetchSettlementOptions = async () => {
+    const [rolesRes, usersRes, departmentsRes] = await Promise.all([
+      commissionRuleApi.getCommissionRoleConfigs(),
+      settingsApi.fetchUsers({ isActive: true }),
+      departmentApi.getDepartments({ isActive: true }),
+    ]);
+    if (rolesRes.code === 0) setCommissionRoleConfigs(rolesRes.data);
+    if (usersRes.code === 0) setEmployees(usersRes.data);
+    if (departmentsRes.code === 0) setDepartments(departmentsRes.data);
+  };
+
   useEffect(() => {
     refreshCommissionData();
+    fetchSettlementOptions();
   }, [fetchAuditIssues, fetchBatches, fetchItems, fetchStats]);
 
   const exceptionItems = useMemo(() => items.filter((commission) => {
@@ -140,8 +173,11 @@ const Commission: React.FC = () => {
     if (newFilters.search) apiFilters.search = newFilters.search;
     if (newFilters.status) apiFilters.status = newFilters.status;
     if (newFilters.role) apiFilters.role = newFilters.role;
+    if (newFilters.ownerId) apiFilters.ownerId = newFilters.ownerId;
     if (newFilters.department && newFilters.department !== '全部') apiFilters.department = newFilters.department;
     if (newFilters.month) apiFilters.month = newFilters.month;
+    if (newFilters.startDate) apiFilters.startDate = newFilters.startDate;
+    if (newFilters.endDate) apiFilters.endDate = newFilters.endDate;
     setFilters(apiFilters);
     fetchItems(apiFilters);
     fetchAuditIssues(apiFilters);
@@ -160,18 +196,24 @@ const Commission: React.FC = () => {
     const res = await commissionApi.fetchCommissionsByOrder(orderId);
     if (res.code !== 0) return;
     setSplitOrderId(orderId);
-    setSplitRows(res.data.map((item) => ({
-      id: item.id,
-      orderId: item.orderId,
-      role: item.role,
-      owner: item.owner,
-      department: item.department,
-      commissionAmount: item.commissionAmount,
-      commissionRate: item.commissionRate,
-      performanceAmount: item.performanceAmount || item.orderAmount,
-      calculationNote: item.calculationNote || item.formulaText || '',
-      commissionRuleId: item.commissionRuleId,
-    })));
+    setSplitRows(res.data.map((item) => {
+      const employee = activeEmployees.find((user) => user.id === item.ownerId || user.name === item.owner);
+      return {
+        id: item.id,
+        orderId: item.orderId,
+        role: item.role,
+        owner: employee?.name || '',
+        ownerId: employee?.id || '',
+        department: employee ? getDepartmentName(employee.departmentId) : '',
+        departmentId: employee?.departmentId || '',
+        paymentDate: item.paymentDate,
+        commissionAmount: item.commissionAmount,
+        commissionRate: item.commissionRate,
+        performanceAmount: item.performanceAmount || item.orderAmount,
+        calculationNote: item.calculationNote || item.formulaText || '',
+        commissionRuleId: item.commissionRuleId,
+      };
+    }));
     setSplitReason('');
     setSplitDialogOpen(true);
   };
@@ -182,14 +224,31 @@ const Commission: React.FC = () => {
     )));
   };
 
+  const handleSplitOwnerChange = (index: number, ownerId: string) => {
+    const employee = activeEmployees.find((item) => item.id === ownerId);
+    setSplitRows((prev) => prev.map((row, rowIndex) => (
+      rowIndex === index
+        ? {
+          ...row,
+          ownerId,
+          owner: employee?.name || '',
+          departmentId: employee?.departmentId || '',
+          department: getDepartmentName(employee?.departmentId),
+        }
+        : row
+    )));
+  };
+
   const handleAddSplitRow = () => {
     setSplitRows((prev) => [
       ...prev,
       {
         orderId: splitOrderId,
-        role: '客户成功',
+        role: activeRoleConfigs[0]?.name || '客户成功',
         owner: '',
-        department: '客户成功部',
+        ownerId: '',
+        department: '',
+        departmentId: '',
         commissionAmount: 0,
         commissionRate: 0,
         performanceAmount: prev[0]?.performanceAmount || 0,
@@ -336,15 +395,41 @@ const Commission: React.FC = () => {
         <InputLabel>角色</InputLabel>
         <Select value={localFilters.role} label="角色" onChange={(e) => handleFilterChange('role', e.target.value)}>
           <MenuItem value="">全部</MenuItem>
-          {Object.entries(ROLE_LABELS).map(([k, v]) => <MenuItem key={k} value={k}>{v}</MenuItem>)}
+          {activeRoleConfigs.map((role) => <MenuItem key={role.id} value={role.name}>{role.name}</MenuItem>)}
         </Select>
       </FormControl>
       <FormControl size="small" sx={{ minWidth: 140 }}>
         <InputLabel>部门</InputLabel>
         <Select value={localFilters.department} label="部门" onChange={(e) => handleFilterChange('department', e.target.value)}>
-          {DEPARTMENTS.map((d) => <MenuItem key={d} value={d === '全部' ? '' : d}>{d}</MenuItem>)}
+          <MenuItem value="">全部</MenuItem>
+          {departments.map((d) => <MenuItem key={d.id} value={d.name}>{d.name}</MenuItem>)}
         </Select>
       </FormControl>
+      <FormControl size="small" sx={{ minWidth: 130 }}>
+        <InputLabel>人员</InputLabel>
+        <Select value={localFilters.ownerId} label="人员" onChange={(e) => handleFilterChange('ownerId', e.target.value)}>
+          <MenuItem value="">全部</MenuItem>
+          {activeEmployees.map((employee) => <MenuItem key={employee.id} value={employee.id}>{employee.name}</MenuItem>)}
+        </Select>
+      </FormControl>
+      <TextField
+        label="付款开始"
+        type="date"
+        value={localFilters.startDate}
+        onChange={(e) => handleFilterChange('startDate', e.target.value)}
+        size="small"
+        sx={{ minWidth: 150 }}
+        InputLabelProps={{ shrink: true }}
+      />
+      <TextField
+        label="付款结束"
+        type="date"
+        value={localFilters.endDate}
+        onChange={(e) => handleFilterChange('endDate', e.target.value)}
+        size="small"
+        sx={{ minWidth: 150 }}
+        InputLabelProps={{ shrink: true }}
+      />
       <FormControl size="small" sx={{ minWidth: 130 }}>
         <InputLabel>状态</InputLabel>
         <Select value={localFilters.status} label="状态" onChange={(e) => handleFilterChange('status', e.target.value)}>
@@ -723,24 +808,31 @@ const Commission: React.FC = () => {
                       onChange={(e) => updateSplitRow(index, 'role', e.target.value as CommissionRole)}
                       fullWidth
                     >
-                      {Object.entries(ROLE_LABELS).map(([key, label]) => (
-                        <MenuItem key={key} value={key}>{label}</MenuItem>
+                      {roleOptionsForSplit(row.role).map((role) => (
+                        <MenuItem key={role.id} value={role.name}>{role.name}{role.isActive ? '' : '（已停用）'}</MenuItem>
+                      ))}
+                    </Select>
+                  </TableCell>
+                  <TableCell sx={{ minWidth: 140 }}>
+                    <Select
+                      size="small"
+                      value={row.ownerId || ''}
+                      onChange={(e) => handleSplitOwnerChange(index, e.target.value)}
+                      fullWidth
+                      displayEmpty
+                    >
+                      <MenuItem value="">选择员工</MenuItem>
+                      {activeEmployees.map((employee) => (
+                        <MenuItem key={employee.id} value={employee.id}>{employee.name}</MenuItem>
                       ))}
                     </Select>
                   </TableCell>
                   <TableCell sx={{ minWidth: 140 }}>
                     <TextField
                       size="small"
-                      value={row.owner}
-                      onChange={(e) => updateSplitRow(index, 'owner', e.target.value)}
-                      fullWidth
-                    />
-                  </TableCell>
-                  <TableCell sx={{ minWidth: 140 }}>
-                    <TextField
-                      size="small"
                       value={row.department || ''}
-                      onChange={(e) => updateSplitRow(index, 'department', e.target.value)}
+                      placeholder="选择人员后自动带出"
+                      InputProps={{ readOnly: true }}
                       fullWidth
                     />
                   </TableCell>
@@ -796,7 +888,7 @@ const Commission: React.FC = () => {
           <Button
             variant="contained"
             onClick={handleSaveSplitRows}
-            disabled={splitSaving || !splitReason.trim() || splitRows.length === 0 || splitRows.some((row) => !row.owner.trim())}
+            disabled={splitSaving || !splitReason.trim() || splitRows.length === 0 || splitRows.some((row) => !row.ownerId)}
           >
             保存调整
           </Button>
