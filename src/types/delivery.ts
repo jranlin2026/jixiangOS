@@ -1,12 +1,13 @@
-import type { ID, Timestamp, ProductLevel } from './common';
+import type { ID, ProductLevel, Timestamp } from './common';
 
-/** 交付阶段 */
 export type DeliveryStage = string;
 
-/** 交付产品类型/业务分类 */
 export type DeliveryProductType = ProductLevel;
 
-/** 交付子任务记录 */
+export type DeliveryOverallStatus = '全部' | '待开始' | '交付中' | '超期' | '阻塞' | '待验收' | '已完成';
+
+export type DeliveryPriority = 'low' | 'normal' | 'high' | 'urgent';
+
 export interface DeliveryRecord {
   id: ID;
   content: string;
@@ -15,20 +16,18 @@ export interface DeliveryRecord {
   createdAt: Timestamp;
 }
 
-/** 交付子任务 */
 export interface DeliveryTask {
   id: ID;
   title: string;
   description: string;
   assigneeId?: ID;
   assigneeName?: string;
-  status: '待开始' | '进行中' | '已完成' | '已跳过';
+  status: string;
   dueDate?: string;
   completedAt?: Timestamp;
   records: DeliveryRecord[];
 }
 
-/** 交付 */
 export interface Delivery {
   id: ID;
   orderId: ID;
@@ -40,15 +39,67 @@ export interface Delivery {
   stages: DeliveryStage[];
   tasks: DeliveryTask[];
   owner: string;
+  ownerId?: ID;
+  salesOwner?: string;
+  salesOwnerId?: ID;
+  orderAmount?: number;
+  paymentDate?: string;
+  orderType?: string;
+  status?: Exclude<DeliveryOverallStatus, '全部'>;
+  priority?: DeliveryPriority;
+  plannedCompletedAt?: string;
+  actualCompletedAt?: Timestamp;
+  blockedReason?: string;
+  progressPercent?: number;
   notes?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
 
-/** 交付筛选参数 */
 export interface DeliveryFilters {
   productType?: DeliveryProductType;
   stage?: DeliveryStage;
   owner?: string;
+  ownerId?: ID;
+  salesOwner?: string;
+  status?: DeliveryOverallStatus;
+  priority?: DeliveryPriority | '';
+  paymentStart?: string;
+  paymentEnd?: string;
+  plannedStart?: string;
+  plannedEnd?: string;
   search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface DeliveryListResponse {
+  items: Delivery[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export type DeliveryStatusCounts = Record<DeliveryOverallStatus, number>;
+
+export interface DeliveryStageCount {
+  stage: string;
+  count: number;
+}
+
+export interface DeliveryOwnerWorkload {
+  owner: string;
+  ownerId?: ID;
+  total: number;
+  overdue: number;
+  blocked: number;
+  completed: number;
+}
+
+export interface DeliveryStats {
+  total: number;
+  statusCounts: DeliveryStatusCounts;
+  stageCounts: DeliveryStageCount[];
+  ownerWorkload: DeliveryOwnerWorkload[];
+  overdueCount: number;
 }

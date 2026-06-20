@@ -18,7 +18,7 @@ import { formatDate } from '../utils/formatters';
 interface AIBusinessCardPanelProps {
   card: AIBusinessCard | null;
   loading: boolean;
-  onGenerate: () => void;
+  onGenerate?: () => void;
 }
 
 const SectionList: React.FC<{ title: string; items: string[] }> = ({ title, items }) => (
@@ -40,9 +40,11 @@ const AIBusinessCardPanel: React.FC<AIBusinessCardPanelProps> = ({ card, loading
       <Typography variant="subtitle2" sx={{ color: '#6b7280', display: 'flex', alignItems: 'center', gap: 0.5 }}>
         <AutoAwesomeIcon fontSize="small" /> AI 名片
       </Typography>
-      <Button variant="outlined" size="small" onClick={onGenerate} disabled={loading} startIcon={<AutoAwesomeIcon />}>
-        {card ? '重新生成' : '一键生成 AI 名片'}
-      </Button>
+      {onGenerate && (
+        <Button variant="outlined" size="small" onClick={onGenerate} disabled={loading} startIcon={<AutoAwesomeIcon />}>
+          {card ? '重新生成' : '一键生成 AI 名片'}
+        </Button>
+      )}
     </Box>
 
     {!card ? (

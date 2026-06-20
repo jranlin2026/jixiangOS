@@ -21,11 +21,9 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import PaidIcon from '@mui/icons-material/Paid';
-import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import SettingsIcon from '@mui/icons-material/Settings';
 import HomeIcon from '@mui/icons-material/Home';
-import RefundIcon from '@mui/icons-material/AssignmentReturn';
 import UpgradePoolIcon from '@mui/icons-material/Pool';
 import LogoutIcon from '@mui/icons-material/Logout';
 import { ROUTES } from '../shared/utils/constants';
@@ -41,20 +39,31 @@ interface NavItem {
   icon: React.ReactElement;
   path: string;
   permissionKey: string;
+  permissionKeys?: string[];
 }
 
 const navItems: NavItem[] = [
   { label: '首页', icon: <HomeIcon />, path: ROUTES.HOME, permissionKey: PERMISSION_KEYS.HOME },
-  { label: '驾驶舱', icon: <DashboardIcon />, path: ROUTES.HOME, permissionKey: PERMISSION_KEYS.DASHBOARD },
+  { label: '驾驶舱', icon: <DashboardIcon />, path: ROUTES.DASHBOARD, permissionKey: PERMISSION_KEYS.DASHBOARD },
   { label: '线索', icon: <PeopleAltIcon />, path: ROUTES.LEADS, permissionKey: PERMISSION_KEYS.LEADS },
   { label: '客户', icon: <GroupsIcon />, path: ROUTES.CUSTOMERS, permissionKey: PERMISSION_KEYS.CUSTOMERS },
   { label: '订单', icon: <ReceiptLongIcon />, path: ROUTES.ORDERS, permissionKey: PERMISSION_KEYS.ORDERS },
   { label: '交付', icon: <LocalShippingIcon />, path: ROUTES.DELIVERY, permissionKey: PERMISSION_KEYS.DELIVERY },
+  {
+    label: '财务中心',
+    icon: <PaidIcon />,
+    path: ROUTES.FINANCE,
+    permissionKey: PERMISSION_KEYS.FINANCE,
+    permissionKeys: [PERMISSION_KEYS.FINANCE, PERMISSION_KEYS.COMMISSION, PERMISSION_KEYS.REFUND_CENTER],
+  },
   { label: '财务结算台', icon: <AccountBalanceWalletIcon />, path: ROUTES.COMMISSION, permissionKey: PERMISSION_KEYS.COMMISSION },
-  { label: '财务', icon: <PaidIcon />, path: ROUTES.FINANCE, permissionKey: PERMISSION_KEYS.FINANCE },
-  { label: '退款中心', icon: <RefundIcon />, path: ROUTES.REFUND_CENTER, permissionKey: PERMISSION_KEYS.REFUND_CENTER },
-  { label: '升单池', icon: <UpgradePoolIcon />, path: ROUTES.UPGRADE_POOL, permissionKey: PERMISSION_KEYS.UPGRADE_POOL },
-  { label: '升单分析', icon: <TrendingUpIcon />, path: ROUTES.UPGRADE_ANALYSIS, permissionKey: PERMISSION_KEYS.UPGRADE_ANALYSIS },
+  {
+    label: '升单中心',
+    icon: <UpgradePoolIcon />,
+    path: ROUTES.UPGRADE_CENTER,
+    permissionKey: PERMISSION_KEYS.UPGRADE_POOL,
+    permissionKeys: [PERMISSION_KEYS.UPGRADE_POOL, PERMISSION_KEYS.UPGRADE_ANALYSIS],
+  },
   { label: 'AI助手', icon: <SmartToyIcon />, path: ROUTES.AI_ASSISTANT, permissionKey: PERMISSION_KEYS.AI_ASSISTANT },
   { label: '设置', icon: <SettingsIcon />, path: ROUTES.SETTINGS, permissionKey: PERMISSION_KEYS.SETTINGS },
 ];
@@ -63,7 +72,9 @@ const Sidebar: React.FC<SidebarProps> = ({ width }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentUser, logout } = useAuthStore();
-  const visibleNavItems = navItems.filter((item) => hasPermission(currentUser, item.permissionKey));
+  const visibleNavItems = navItems.filter((item) => (
+    item.permissionKeys || [item.permissionKey]
+  ).some((permissionKey) => hasPermission(currentUser, permissionKey)));
 
   const handleLogout = async () => {
     await logout();
@@ -112,7 +123,9 @@ const Sidebar: React.FC<SidebarProps> = ({ width }) => {
 
         <List sx={{ px: 1.5, py: 1, flex: 1, overflowY: 'auto' }}>
           {visibleNavItems.map((item) => {
-            const isActive = location.pathname === item.path;
+            const isActive = location.pathname === item.path
+              || (item.path === ROUTES.FINANCE && [ROUTES.REFUND_CENTER as string].includes(location.pathname))
+              || (item.path === ROUTES.UPGRADE_CENTER && [ROUTES.UPGRADE_POOL as string, ROUTES.UPGRADE_ANALYSIS as string].includes(location.pathname));
             return (
               <ListItem key={`${item.label}-${item.path}`} disablePadding sx={{ mb: 0.25 }}>
                 <ListItemButton

@@ -42,7 +42,7 @@ import PaymentsIcon from '@mui/icons-material/Payments';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
-import { commissionApi, commissionRuleApi, departmentApi, orderApi, settingsApi } from '../../api';
+import { commissionApi, commissionRuleApi, customerApi, departmentApi, orderApi, settingsApi } from '../../api';
 import { getProductLevelColor, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
@@ -54,6 +54,8 @@ import ResizableHeaderCell, {
   type ColumnWidthMap,
 } from '../../shared/components/ResizableTable';
 import CommissionRuleConfig from './CommissionRuleConfig';
+import OrderDetail from '../Orders/OrderDetail';
+import CustomerDetail from '../Customers/CustomerDetail';
 import type {
   Commission,
   CommissionAdjustmentInput,
@@ -66,6 +68,7 @@ import type {
   MonthlyCommissionPayout,
 } from '../../types/commission';
 import type { Department } from '../../types/department';
+import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
 import type { User } from '../../types/settings';
 
@@ -205,8 +208,13 @@ function getPayoutStatusColor(status: MonthlyCommissionPayout['status']): 'defau
   return 'default';
 }
 
-const Commission: React.FC = () => {
-  const [tabValue, setTabValue] = useState(0);
+interface CommissionProps {
+  embedded?: boolean;
+  initialTab?: 0 | 1 | 2;
+}
+
+const Commission: React.FC<CommissionProps> = ({ embedded = false, initialTab = 0 }) => {
+  const [tabValue, setTabValue] = useState(initialTab);
   const [orderRows, setOrderRows] = useState<CommissionOrderSummary[]>([]);
   const [orderLoading, setOrderLoading] = useState(false);
   const [orderPagination, setOrderPagination] = useState({ page: 1, pageSize: 10, total: 0 });
@@ -244,6 +252,7 @@ const Commission: React.FC = () => {
   const [splitSaving, setSplitSaving] = useState(false);
   const [summaryDetail, setSummaryDetail] = useState<CommissionOrderSummary | null>(null);
   const [orderDetail, setOrderDetail] = useState<Order | null>(null);
+  const [customerDetail, setCustomerDetail] = useState<Customer | null>(null);
 
   const activeEmployees = useMemo(() => employees.filter((item) => item.isActive), [employees]);
   const activeRoleConfigs = useMemo(() => commissionRoleConfigs.filter((item) => item.isActive), [commissionRoleConfigs]);
@@ -340,8 +349,18 @@ const Commission: React.FC = () => {
 
   useEffect(() => {
     fetchOrderSummaries();
-    fetchOrderStatusCounts();
   }, [orderFilters, orderPagination.page, orderPagination.pageSize]);
+
+  useEffect(() => {
+    fetchOrderStatusCounts();
+  }, [
+    orderFilters.search,
+    orderFilters.ownerId,
+    orderFilters.role,
+    orderFilters.month,
+    orderFilters.startDate,
+    orderFilters.endDate,
+  ]);
 
   useEffect(() => {
     localStorage.setItem(ORDER_SPLIT_VIEW_STORAGE_KEY, JSON.stringify(orderSplitViewConfig));
@@ -520,9 +539,49 @@ const Commission: React.FC = () => {
   const renderOrderSplitCell = (summary: CommissionOrderSummary, columnId: OrderSplitColumnId) => {
     switch (columnId) {
       case 'orderNo':
-        return <Typography variant="body2" sx={{ fontWeight: 700 }}>{summary.orderNo}</Typography>;
+        return (
+          <Button
+            variant="text"
+            size="small"
+            onClick={() => viewOrder(summary)}
+            sx={{
+              minWidth: 0,
+              maxWidth: '100%',
+              p: 0,
+              fontWeight: 700,
+              lineHeight: 1.4,
+              textAlign: 'left',
+              textTransform: 'none',
+              justifyContent: 'flex-start',
+            }}
+          >
+            <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {summary.orderNo}
+            </Box>
+          </Button>
+        );
       case 'customerName':
-        return summary.customerName || '-';
+        return summary.customerName ? (
+          <Button
+            variant="text"
+            size="small"
+            onClick={() => viewCustomer(summary)}
+            sx={{
+              minWidth: 0,
+              maxWidth: '100%',
+              p: 0,
+              fontWeight: 500,
+              lineHeight: 1.4,
+              textAlign: 'left',
+              textTransform: 'none',
+              justifyContent: 'flex-start',
+            }}
+          >
+            <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {summary.customerName}
+            </Box>
+          </Button>
+        ) : '-';
       case 'productLevel':
         return (
           <Chip
@@ -654,6 +713,43 @@ const Commission: React.FC = () => {
   const viewOrder = async (summary: CommissionOrderSummary) => {
     const res = await orderApi.fetchOrderById(summary.orderId);
     if (res.code === 0) setOrderDetail(res.data);
+  };
+
+  const viewCustomer = async (summary: CommissionOrderSummary) => {
+    const orderRes = await orderApi.fetchOrderById(summary.orderId);
+    const order = orderRes.code === 0 ? orderRes.data : null;
+    let customer: Customer | null = null;
+
+    if (order?.customerId) {
+      const customerRes = await customerApi.fetchCustomerById(order.customerId);
+      if (customerRes.code === 0) customer = customerRes.data;
+    }
+
+    if (!customer) {
+      const customerRes = await customerApi.fetchCustomers({ search: summary.customerName, pageSize: 20 });
+      if (customerRes.code === 0) {
+        customer = customerRes.data.items.find(
+          (item) => item.company === summary.customerName || item.name === summary.customerName,
+        ) || customerRes.data.items[0] || null;
+      }
+    }
+
+    if (!customer) return;
+
+    const ordersRes = await orderApi.fetchOrders({ customerId: customer.id, pageSize: 100 });
+    const relatedOrders = ordersRes.code === 0
+      ? ordersRes.data.items.filter(
+        (item) => item.customerId === customer!.id
+          || item.customerName === customer!.company
+          || item.customerName === customer!.name,
+      )
+      : [];
+
+    setCustomerDetail({
+      ...customer,
+      orderCount: relatedOrders.length,
+      totalSpent: relatedOrders.reduce((sum, item) => sum + (Number(item.actualAmount) || 0), 0),
+    });
   };
 
   const generateMonthlyBatch = async () => {
@@ -1003,26 +1099,37 @@ const Commission: React.FC = () => {
   );
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2, gap: 2 }}>
-        <Box>
-          <Typography variant="h5" sx={{ fontWeight: 700 }}>财务结算台</Typography>
-          <Typography variant="body2" sx={{ color: '#6b7280', mt: 0.5 }}>
-            订单入库后自动生成分账，财务按订单确认，再按月份给人员发放。
-          </Typography>
-        </Box>
-        {tabValue === 0 && (
+    <Box sx={{ p: embedded ? 0 : 3 }}>
+      {!embedded && (
+        <>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2, gap: 2 }}>
+            <Box>
+              <Typography variant="h5" sx={{ fontWeight: 700 }}>财务结算台</Typography>
+              <Typography variant="body2" sx={{ color: '#6b7280', mt: 0.5 }}>
+                订单入库后自动生成分账，财务按订单确认，再按月份给人员发放。
+              </Typography>
+            </Box>
+            {tabValue === 0 && (
+              <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setOrderSplitViewOpen(true)}>
+                视图设置
+              </Button>
+            )}
+          </Box>
+
+          <Tabs value={tabValue} onChange={(_event, value) => setTabValue(value)} sx={{ mb: 3, borderBottom: '1px solid #e5e7eb' }}>
+            <Tab label="订单分账台" />
+            <Tab label="月度发放" />
+            <Tab label="规则配置" />
+          </Tabs>
+        </>
+      )}
+      {embedded && tabValue === 0 && (
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
           <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setOrderSplitViewOpen(true)}>
             视图设置
           </Button>
-        )}
-      </Box>
-
-      <Tabs value={tabValue} onChange={(_event, value) => setTabValue(value)} sx={{ mb: 3, borderBottom: '1px solid #e5e7eb' }}>
-        <Tab label="订单分账台" />
-        <Tab label="月度发放" />
-        <Tab label="规则配置" />
-      </Tabs>
+        </Box>
+      )}
 
       {tabValue === 0 && (
         <>
@@ -1281,27 +1388,18 @@ const Commission: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={Boolean(orderDetail)} onClose={() => setOrderDetail(null)} maxWidth="sm" fullWidth>
-        <DialogCloseTitle onClose={() => setOrderDetail(null)}>订单资料</DialogCloseTitle>
-        <DialogContent dividers>
-          {orderDetail && (
-            <Box sx={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: 1.25 }}>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>订单号</Typography>
-              <Typography variant="body2" sx={{ fontWeight: 700 }}>{orderDetail.orderNo}</Typography>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>客户</Typography>
-              <Typography variant="body2">{orderDetail.customerName}</Typography>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>类型</Typography>
-              <Typography variant="body2">{orderDetail.orderType}</Typography>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>实付</Typography>
-              <Typography variant="body2">{formatCurrency(orderDetail.actualAmount || orderDetail.amount)}</Typography>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>付款日期</Typography>
-              <Typography variant="body2">{formatDate(orderDetail.payments?.[0]?.paidAt || orderDetail.createdAt, 'yyyy-MM-dd HH:mm')}</Typography>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>收款渠道</Typography>
-              <Typography variant="body2">{orderDetail.officialPaymentChannel || orderDetail.paymentMethod}</Typography>
-            </Box>
-          )}
-        </DialogContent>
-      </Dialog>
+      {orderDetail && (
+        <OrderDetail order={orderDetail} open={Boolean(orderDetail)} onClose={() => setOrderDetail(null)} />
+      )}
+
+      {customerDetail && (
+        <CustomerDetail
+          customer={customerDetail}
+          open={Boolean(customerDetail)}
+          onClose={() => setCustomerDetail(null)}
+          readOnly
+        />
+      )}
     </Box>
   );
 };

@@ -1,12 +1,14 @@
 import { create } from 'zustand';
 import { aiApi } from '../api';
-import type { AIQuerySession, AIQueryMessage } from '../types/ai';
+import type { AIAssistantWorkbench, AIQueryMessage, AIQuerySession } from '../types/ai';
 
 interface AIState {
   sessions: AIQuerySession[];
   currentSession: AIQuerySession | null;
+  workbench: AIAssistantWorkbench | null;
   loading: boolean;
   error: string | null;
+  fetchWorkbench: () => Promise<void>;
   fetchSessions: () => Promise<void>;
   fetchSessionById: (id: string) => Promise<void>;
   sendQuery: (sessionId: string | null, query: string) => Promise<AIQueryMessage | null>;
@@ -17,8 +19,20 @@ interface AIState {
 const useAIStore = create<AIState>((set, get) => ({
   sessions: [],
   currentSession: null,
+  workbench: null,
   loading: false,
   error: null,
+
+  fetchWorkbench: async () => {
+    try {
+      const res = await aiApi.fetchAssistantWorkbench();
+      if (res.code === 0) {
+        set({ workbench: res.data });
+      }
+    } catch (e: any) {
+      set({ error: e.message });
+    }
+  },
 
   fetchSessions: async () => {
     set({ loading: true, error: null });
@@ -50,6 +64,7 @@ const useAIStore = create<AIState>((set, get) => ({
       const res = await aiApi.sendQuery(sessionId, query);
       if (res.code === 0) {
         await get().fetchSessions();
+        await get().fetchWorkbench();
         const sessions = get().sessions;
         const targetSession = sessionId
           ? sessions.find((s) => s.id === sessionId)
@@ -77,7 +92,7 @@ const useAIStore = create<AIState>((set, get) => ({
     } catch { /* ignore */ }
   },
 
-  reset: () => set({ sessions: [], currentSession: null, loading: false, error: null }),
+  reset: () => set({ sessions: [], currentSession: null, workbench: null, loading: false, error: null }),
 }));
 
 export default useAIStore;

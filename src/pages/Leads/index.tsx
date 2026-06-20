@@ -53,6 +53,7 @@ import ResizableHeaderCell, {
   writeColumnWidths,
   type ColumnWidthMap,
 } from '../../shared/components/ResizableTable';
+import useAppFeedback from '../../shared/hooks/useAppFeedback';
 
 type LeadColumn = {
   id: string;
@@ -216,6 +217,7 @@ const Leads: React.FC = () => {
   const columns = useMemo(() => buildColumns(lifecycleConfigs), [lifecycleConfigs]);
   const [viewConfig, setViewConfig] = useState<LeadViewConfig>(() => readLeadViewConfig(buildColumns([])));
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(LEAD_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
+  const { alert, dialog: feedbackDialog } = useAppFeedback();
   const orderedColumns = useMemo(() => {
     const columnMap = new Map(columns.map((column) => [column.id, column]));
     const ordered = viewConfig.columnOrder
@@ -269,12 +271,12 @@ const Leads: React.FC = () => {
   const handleClaimLead = async (lead: Lead) => {
     const userName = getCurrentUserName();
     if (!userName) {
-      window.alert('当前登录用户无效，请重新登录后再领取线索');
+      alert('当前登录用户无效，请重新登录后再领取线索');
       return;
     }
     const res = await leadFlowApi.manualAssignLead(lead.id, userName);
     if (res.code !== 0 || !res.data) {
-      window.alert(res.message || '领取失败');
+      alert(res.message || '领取失败');
       return;
     }
     setSelectedLead((current) => (current?.id === lead.id ? res.data : current));
@@ -590,6 +592,7 @@ const Leads: React.FC = () => {
         onFrozenColumnCountChange={handleFrozenColumnCountChange}
         onReset={handleResetViewConfig}
       />
+      {feedbackDialog}
     </Box>
   );
 };

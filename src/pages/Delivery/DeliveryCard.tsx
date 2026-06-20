@@ -35,7 +35,7 @@ const DeliveryCard: React.FC<DeliveryCardProps> = ({ delivery, color, isDragging
 
   // 计算子任务进度
   const totalTasks = delivery.tasks?.length || 0;
-  const completedTasks = delivery.tasks?.filter((t) => t.status === '已完成').length || 0;
+  const completedTasks = delivery.tasks?.filter((t) => t.status === '已完成' || Boolean(t.completedAt)).length || 0;
   const taskProgress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
   return (

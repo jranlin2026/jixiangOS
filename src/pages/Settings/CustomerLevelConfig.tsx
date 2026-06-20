@@ -25,6 +25,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import { settingsApi } from '../../api';
 import type { CustomerLevelConfig } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import useAppFeedback from '../../shared/hooks/useAppFeedback';
 
 type CustomerLevelForm = Omit<CustomerLevelConfig, 'id' | 'createdAt' | 'updatedAt'>;
 
@@ -42,6 +43,7 @@ const CustomerLevelConfigPage: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<CustomerLevelConfig | null>(null);
   const [form, setForm] = useState<CustomerLevelForm>(emptyForm);
+  const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
 
   const loadData = async () => {
     const res = await settingsApi.fetchCustomerLevelConfigs();
@@ -80,7 +82,7 @@ const CustomerLevelConfigPage: React.FC = () => {
       ? await settingsApi.updateCustomerLevelConfig(editingItem.id, payload)
       : await settingsApi.createCustomerLevelConfig(payload);
     if (res.code !== 0) {
-      window.alert(res.message);
+      alert(res.message);
       return;
     }
     setFormOpen(false);
@@ -93,10 +95,10 @@ const CustomerLevelConfigPage: React.FC = () => {
   };
 
   const handleDelete = async (item: CustomerLevelConfig) => {
-    if (!window.confirm(`确定删除客户等级“${item.label}”吗？`)) return;
+    if (!await confirm(`确定删除客户等级“${item.label}”吗？`, '删除客户等级')) return;
     const res = await settingsApi.deleteCustomerLevelConfig(item.id);
     if (res.code !== 0) {
-      window.alert(res.message);
+      alert(res.message);
       return;
     }
     loadData();
@@ -188,6 +190,7 @@ const CustomerLevelConfigPage: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+      {feedbackDialog}
     </Box>
   );
 };

@@ -45,15 +45,28 @@ function getActiveDepartments(): Department[] {
   return (getStorageData<Department[]>(STORAGE_KEYS.DEPARTMENTS) || []).filter((department) => department.isActive);
 }
 
-function findUserByIdOrName(idOrName?: string, fallbackName?: string): User | undefined {
-  const users = getActiveUsers();
+type CommissionNormalizeContext = {
+  ordersById: Map<string, Order>;
+  users: User[];
+  departments: Department[];
+};
+
+function createCommissionNormalizeContext(): CommissionNormalizeContext {
+  return {
+    ordersById: new Map(getOrders().map((order) => [order.id, order])),
+    users: getActiveUsers(),
+    departments: getActiveDepartments(),
+  };
+}
+
+function findUserByIdOrName(idOrName?: string, fallbackName?: string, users = getActiveUsers()): User | undefined {
   const values = [idOrName, fallbackName].filter(Boolean) as string[];
   return users.find((user) => values.includes(user.id) || values.includes(user.name));
 }
 
-function getDepartmentByUser(user?: User): Department | undefined {
+function getDepartmentByUser(user?: User, departments = getActiveDepartments()): Department | undefined {
   if (!user?.departmentId) return undefined;
-  return getActiveDepartments().find((department) => department.id === user.departmentId);
+  return departments.find((department) => department.id === user.departmentId);
 }
 
 function getCommissionPaymentDate(commission: Commission, order?: Order): string {
@@ -79,12 +92,12 @@ function isPendingAssignment(commission: Commission): boolean {
   return commission.owner === PENDING_ASSIGN_TEXT || !commission.ownerId;
 }
 
-function normalizeCommission(c: Commission): Commission {
+function normalizeCommission(c: Commission, context = createCommissionNormalizeContext()): Commission {
   const normalizedStatus = (String(c.status) === '待审核' ? '待确认' : c.status) as CommissionStatus;
   const evidenceStatus = c.evidenceStatus || '无需凭证';
-  const order = getOrderById(c.orderId);
-  const ownerUser = findUserByIdOrName(c.ownerId, c.owner);
-  const ownerDepartment = getDepartmentByUser(ownerUser);
+  const order = context.ordersById.get(c.orderId);
+  const ownerUser = findUserByIdOrName(c.ownerId, c.owner, context.users);
+  const ownerDepartment = getDepartmentByUser(ownerUser, context.departments);
   return {
     ...c,
     status: normalizedStatus,
@@ -108,8 +121,9 @@ function normalizeCommission(c: Commission): Commission {
 }
 
 function getAllCommissions(): Commission[] {
+  const context = createCommissionNormalizeContext();
   return (getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [])
-    .map(normalizeCommission)
+    .map((commission) => normalizeCommission(commission, context))
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
@@ -194,15 +208,19 @@ function deriveOrderSummaryStatus(commissions: Commission[]): CommissionOrderSum
 }
 
 function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrderSummary[] {
+  const ordersById = new Map(getOrders().map((order) => [order.id, order]));
+  const roleOrder = ['线索', '销售', '客户成功', '售后', '招商主管', '销售主管'];
   const orderMap = new Map<string, Commission[]>();
   commissions.forEach((commission) => {
-    orderMap.set(commission.orderId, [...(orderMap.get(commission.orderId) || []), commission]);
+    const rows = orderMap.get(commission.orderId) || [];
+    rows.push(commission);
+    orderMap.set(commission.orderId, rows);
   });
 
   return Array.from(orderMap.entries()).map(([orderId, rows]) => {
-    const sortedRows = getOrderCommissions(orderId).length ? getOrderCommissions(orderId) : rows;
+    const sortedRows = rows.slice().sort((a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role));
     const first = sortedRows[0];
-    const order = getOrderById(orderId);
+    const order = ordersById.get(orderId);
     const paymentDate = getCommissionPaymentDate(first, order);
     const orderAmount = order?.actualAmount || order?.amount || first.orderAmount;
     return {
@@ -669,7 +687,10 @@ async function paySettlementBatch(batchId: string): Promise<ApiResponse<Commissi
   ));
   saveCommissions(nextCommissions);
 
-  const refreshed = buildPaymentDateSettlementBatch(batches[batchIdx].period, nextCommissions.map(normalizeCommission));
+  const refreshed = buildPaymentDateSettlementBatch(
+    batches[batchIdx].period,
+    nextCommissions.map((commission) => normalizeCommission(commission)),
+  );
   batches[batchIdx] = {
     ...refreshed,
     id: batches[batchIdx].id,

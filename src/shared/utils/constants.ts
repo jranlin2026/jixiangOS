@@ -1,6 +1,7 @@
 /** 路由路径常量 */
 export const ROUTES = {
   HOME: '/',
+  DASHBOARD: '/dashboard',
   LEADS: '/leads',
   LEAD_DETAIL: '/leads/:id',
   OPPORTUNITIES: '/opportunities',
@@ -12,6 +13,7 @@ export const ROUTES = {
   DELIVERY: '/delivery',
   COMMISSION: '/commission',
   FINANCE: '/finance',
+  UPGRADE_CENTER: '/upgrade-center',
   UPGRADE_ANALYSIS: '/upgrade-analysis',
   AI_ASSISTANT: '/ai-assistant',
   SETTINGS: '/settings',

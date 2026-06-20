@@ -38,6 +38,7 @@ import type { Department } from '../../types/department';
 import type { Role } from '../../types/role';
 import type { User, UserRole } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { DEFAULT_USER_PASSWORD } from '../../shared/utils/auth';
 import { DEFAULT_USER_ROLE, normalizeUserRoleName } from '../../shared/utils/roles';
 
@@ -116,6 +117,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const [resetUser, setResetUser] = useState<User | null>(null);
   const [resetPassword, setResetPassword] = useState(DEFAULT_USER_PASSWORD);
   const [error, setError] = useState('');
+  const { confirm, dialog: feedbackDialog } = useAppFeedback();
 
   useEffect(() => {
     fetchItems();
@@ -243,7 +245,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
       setError('内置管理员账号不能删除');
       return;
     }
-    if (!window.confirm(`确认删除员工 ${user.name} 吗？`)) return;
+    if (!await confirm(`确认删除员工 ${user.name} 吗？`, '删除员工')) return;
     await settingsApi.deleteUser(user.id);
     clearSelection();
     await loadUsers();
@@ -327,7 +329,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
       setError('请先移走该部门下的员工和子部门，再删除部门');
       return;
     }
-    if (!window.confirm(`确认删除部门 ${selectedDepartment.name} 吗？`)) return;
+    if (!await confirm(`确认删除部门 ${selectedDepartment.name} 吗？`, '删除部门')) return;
     await deleteDepartment(selectedDepartment.id);
     setSelectedDepartmentId(ALL_DEPARTMENTS);
     await fetchItems();
@@ -651,6 +653,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
         </DialogActions>
       </Dialog>
       <Divider />
+      {feedbackDialog}
     </Box>
   );
 };

@@ -62,6 +62,7 @@ import ResizableHeaderCell, {
   writeColumnWidths,
   type ColumnWidthMap,
 } from '../../shared/components/ResizableTable';
+import useAppFeedback from '../../shared/hooks/useAppFeedback';
 
 type OrderColumn = {
   id: string;
@@ -176,11 +177,11 @@ const Orders: React.FC = () => {
   const [productLevels, setProductLevels] = useState<{ name: string; color: string }[]>([]);
   const [orderTypeConfigs, setOrderTypeConfigs] = useState<OrderTypeConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [customerNameMap, setCustomerNameMap] = useState<Record<string, string>>({});
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [viewConfig, setViewConfig] = useState<OrderViewConfig>(readOrderViewConfig);
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(ORDER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
   const [orderLookupMessage, setOrderLookupMessage] = useState('');
+  const { confirm, dialog: feedbackDialog } = useAppFeedback();
 
   useEffect(() => {
     fetchItems({ ...filters, paymentMethod: undefined });
@@ -195,10 +196,6 @@ const Orders: React.FC = () => {
     });
     settingsApi.fetchUsers({ isActive: true }).then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
-    });
-    customerApi.fetchCustomers({ pageSize: 1000 }).then((res) => {
-      if (res.code !== 0) return;
-      setCustomerNameMap(Object.fromEntries(res.data.items.map((customer) => [customer.id, customer.name])));
     });
   }, [fetchItems, fetchStats]);
 
@@ -270,7 +267,7 @@ const Orders: React.FC = () => {
   };
 
   const handleDeleteOrder = async (order: Order) => {
-    const confirmed = window.confirm(`确认删除订单 ${order.orderNo} 吗？删除后该订单将从订单管理中移除。`);
+    const confirmed = await confirm(`确认删除订单 ${order.orderNo} 吗？删除后该订单将从订单管理中移除。`, '删除订单');
     if (!confirmed) return;
     await deleteOrder(order.id);
   };
@@ -380,7 +377,7 @@ const Orders: React.FC = () => {
     }
 
     if (!customer) {
-      const res = await customerApi.fetchCustomers({ search: order.customerName, pageSize: 1000 });
+      const res = await customerApi.fetchCustomers({ search: order.customerName, pageSize: 20 });
       if (res.code === 0) {
         customer = res.data.items.find(
           (item) => item.company === order.customerName || item.name === order.customerName,
@@ -390,9 +387,9 @@ const Orders: React.FC = () => {
 
     if (!customer) return;
 
-    const allOrdersRes = await orderApi.fetchOrders({ pageSize: 1000 });
-    const relatedOrders = allOrdersRes.code === 0
-      ? allOrdersRes.data.items.filter(
+    const ordersRes = await orderApi.fetchOrders({ customerId: customer.id, pageSize: 100 });
+    const relatedOrders = ordersRes.code === 0
+      ? ordersRes.data.items.filter(
         (item) => item.customerId === customer!.id
           || item.customerName === customer!.company
           || item.customerName === customer!.name,
@@ -460,7 +457,7 @@ const Orders: React.FC = () => {
 
   const renderOrderCell = (order: Order, columnId: string) => {
     const levelColor = getProductLevelColor(order.productLevel);
-    const customerDisplayName = customerNameMap[order.customerId] || order.customerName;
+    const customerDisplayName = order.customerName;
     switch (columnId) {
       case 'customer':
         return (
@@ -598,7 +595,27 @@ const Orders: React.FC = () => {
                   const levelColor = getProductLevelColor(order.productLevel);
                   return (
                     <TableRow key={order.id} hover sx={{ bgcolor: `${levelColor}08` }}>
-                      <TableCell sx={{ ...getResizableCellSx(columnWidths.orderNo), ...getFrozenColumnSx(0), fontWeight: 500 }} title={order.orderNo}>{order.orderNo}</TableCell>
+                      <TableCell sx={{ ...getResizableCellSx(columnWidths.orderNo), ...getFrozenColumnSx(0), fontWeight: 500 }} title={order.orderNo}>
+                        <Button
+                          variant="text"
+                          size="small"
+                          onClick={() => handleViewDetail(order)}
+                          sx={{
+                            minWidth: 0,
+                            maxWidth: '100%',
+                            p: 0,
+                            fontWeight: 700,
+                            lineHeight: 1.4,
+                            textAlign: 'left',
+                            textTransform: 'none',
+                            justifyContent: 'flex-start',
+                          }}
+                        >
+                          <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {order.orderNo}
+                          </Box>
+                        </Button>
+                      </TableCell>
                       {visibleColumns.map((column, columnIndex) => (
                         <TableCell key={column.id} sx={{ ...getResizableCellSx(columnWidths[column.id]), ...getFrozenColumnSx(columnIndex + 1) }}>{renderOrderCell(order, column.id)}</TableCell>
                       ))}
@@ -675,6 +692,7 @@ const Orders: React.FC = () => {
             setSelectedCustomer(updated);
             fetchItems({ ...filters, paymentMethod: undefined });
           }}
+          readOnly
         />
       )}
 
@@ -771,6 +789,7 @@ const Orders: React.FC = () => {
           </PermissionGate>
         </DialogActions>
       </Dialog>
+      {feedbackDialog}
     </Box>
   );
 };

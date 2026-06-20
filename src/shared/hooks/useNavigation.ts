@@ -9,24 +9,28 @@ export function useNavigation() {
   const navigate = useNavigate();
 
   const goToHome = useCallback(() => navigate(ROUTES.HOME), [navigate]);
+  const goToDashboard = useCallback(() => navigate(ROUTES.DASHBOARD), [navigate]);
   const goToLeads = useCallback(() => navigate(ROUTES.LEADS), [navigate]);
   const goToCustomers = useCallback(() => navigate(ROUTES.CUSTOMERS), [navigate]);
   const goToOrders = useCallback(() => navigate(ROUTES.ORDERS), [navigate]);
   const goToDelivery = useCallback(() => navigate(ROUTES.DELIVERY), [navigate]);
   const goToCommission = useCallback(() => navigate(ROUTES.COMMISSION), [navigate]);
   const goToFinance = useCallback(() => navigate(ROUTES.FINANCE), [navigate]);
+  const goToUpgradeCenter = useCallback(() => navigate(ROUTES.UPGRADE_CENTER), [navigate]);
   const goToUpgradeAnalysis = useCallback(() => navigate(ROUTES.UPGRADE_ANALYSIS), [navigate]);
   const goToAIAssistant = useCallback(() => navigate(ROUTES.AI_ASSISTANT), [navigate]);
   const goToSettings = useCallback(() => navigate(ROUTES.SETTINGS), [navigate]);
 
   return {
     goToHome,
+    goToDashboard,
     goToLeads,
     goToCustomers,
     goToOrders,
     goToDelivery,
     goToCommission,
     goToFinance,
+    goToUpgradeCenter,
     goToUpgradeAnalysis,
     goToAIAssistant,
     goToSettings,

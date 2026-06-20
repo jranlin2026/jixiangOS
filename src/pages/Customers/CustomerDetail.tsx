@@ -27,6 +27,7 @@ import AIBusinessCardPanel from '../../shared/components/AIBusinessCardPanel';
 import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
 import useAuthStore from '../../store/useAuthStore';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import useAppFeedback from '../../shared/hooks/useAppFeedback';
 
 interface CustomerDetailProps {
   customer: Customer;
@@ -35,6 +36,7 @@ interface CustomerDetailProps {
   onCreateOrder?: (customer: Customer) => void;
   onViewOrders?: (customer: Customer) => void;
   onUpdated?: (customer: Customer) => void;
+  readOnly?: boolean;
 }
 
 interface ContractFile {
@@ -64,8 +66,10 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   onClose,
   onCreateOrder,
   onUpdated,
+  readOnly = false,
 }) => {
   const currentUser = useAuthStore((state) => state.currentUser);
+  const { alert, dialog: feedbackDialog } = useAppFeedback();
   const [currentCustomer, setCurrentCustomer] = useState<Customer>(customer);
   const [aiCard, setAiCard] = useState<AIBusinessCard | null>(null);
   const [cardLoading, setCardLoading] = useState(false);
@@ -99,6 +103,10 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   }, [customer]);
 
   useEffect(() => {
+    if (readOnly) setEditing(false);
+  }, [readOnly]);
+
+  useEffect(() => {
     if (!open) return;
     settingsApi.fetchUsers({ isActive: true }).then((res) => {
       if (res.code === 0) {
@@ -111,7 +119,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     settingsApi.fetchCustomerLevelConfigs().then((res) => {
       if (res.code === 0) setCustomerLevelConfigs(res.data);
     });
-    orderApi.fetchOrders({ pageSize: 1000 }).then((res) => {
+    orderApi.fetchOrders({ customerId: currentCustomer.id, pageSize: 100 }).then((res) => {
       if (res.code !== 0) return;
       setOrders(res.data.items.filter((item) => (
         item.customerId === currentCustomer.id
@@ -225,6 +233,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   };
 
   const handleAddFollowUp = async () => {
+    if (readOnly) return;
     const content = followNote.trim();
     if (!content) return;
     const updated = await addFollowUp(currentCustomer.id, content);
@@ -233,6 +242,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   };
 
   const handleSaveProfile = async () => {
+    if (readOnly) return;
     const payload: Partial<Customer> = {
       name: draft.name,
       company: draft.company,
@@ -259,15 +269,16 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   };
 
   const handleClaimCurrentCustomer = async () => {
+    if (readOnly) return;
     const userName = currentUser?.name || currentUser?.account || '';
     if (!userName) {
-      window.alert('当前登录用户无效，请重新登录后再领取客户');
+      alert('当前登录用户无效，请重新登录后再领取客户');
       return;
     }
     const res = await customerApi.claimCustomerFromPublicPool(currentCustomer.id, userName);
     const updatedCustomer = res.data;
     if (res.code !== 0 || !updatedCustomer) {
-      window.alert(res.message || '领取失败');
+      alert(res.message || '领取失败');
       return;
     }
     setCurrentCustomer(updatedCustomer);
@@ -276,15 +287,17 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   };
 
   const handleReleaseCurrentCustomer = () => {
+    if (readOnly) return;
     setReleaseReason('');
     setReleaseDialogOpen(true);
   };
 
   const handleConfirmReleaseCurrentCustomer = async () => {
+    if (readOnly) return;
     const res = await customerApi.releaseCustomerToPublicPool(currentCustomer.id, releaseReason.trim() || '销售放弃跟进');
     const releasedCustomer = res.data as Customer;
     if (res.code !== 0 || !releasedCustomer) {
-      window.alert(res.message || '释放到公海失败');
+      alert(res.message || '释放到公海失败');
       return;
     }
     setCurrentCustomer(releasedCustomer);
@@ -295,6 +308,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   };
 
   const handleContractUpload = (file?: File) => {
+    if (readOnly) return;
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
@@ -468,19 +482,21 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
 
   const renderActivityTab = () => (
     <Box>
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr auto' }, gap: 1, mb: 2 }}>
-        <TextField
-          value={followNote}
-          onChange={(event) => setFollowNote(event.target.value)}
-          placeholder="添加跟进记录，1000字以内"
-          multiline
-          minRows={2}
-          fullWidth
-        />
-        <Button variant="contained" onClick={handleAddFollowUp} disabled={!followNote.trim()} sx={{ alignSelf: 'stretch' }}>
-          发表
-        </Button>
-      </Box>
+      {!readOnly && (
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr auto' }, gap: 1, mb: 2 }}>
+          <TextField
+            value={followNote}
+            onChange={(event) => setFollowNote(event.target.value)}
+            placeholder="添加跟进记录，1000字以内"
+            multiline
+            minRows={2}
+            fullWidth
+          />
+          <Button variant="contained" onClick={handleAddFollowUp} disabled={!followNote.trim()} sx={{ alignSelf: 'stretch' }}>
+            发表
+          </Button>
+        </Box>
+      )}
       {activityRecords.length > 0 ? (
         <Box sx={{ position: 'relative', pl: 3 }}>
           {activityRecords.map((record, idx) => (
@@ -521,7 +537,9 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Typography variant="subtitle2" sx={{ color: '#64748b' }}>共 {orders.length} 笔订单</Typography>
-        <Button variant="contained" size="small" onClick={() => onCreateOrder?.(currentCustomer)}>提交订单申请</Button>
+        {!readOnly && onCreateOrder && (
+          <Button variant="contained" size="small" onClick={() => onCreateOrder(currentCustomer)}>提交订单申请</Button>
+        )}
       </Box>
       <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb' }}>
         <Table size="small">
@@ -585,28 +603,30 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   );
 
   const renderAITab = () => (
-    <AIBusinessCardPanel card={aiCard} loading={cardLoading} onGenerate={handleGenerateCard} />
+    <AIBusinessCardPanel card={aiCard} loading={cardLoading} onGenerate={readOnly ? undefined : handleGenerateCard} />
   );
 
   const renderContractsTab = () => (
     <Box>
-      <Box
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={(event) => {
-          event.preventDefault();
-          handleContractUpload(event.dataTransfer.files?.[0]);
-        }}
-        sx={{ border: '1px dashed #90caf9', bgcolor: '#f8fbff', borderRadius: 1, p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 2 }}
-      >
-        <Box>
-          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>上传电子合同</Typography>
-          <Typography variant="body2" sx={{ color: '#64748b' }}>支持 PDF、Word、图片等文件，拖拽到这里或点击上传。</Typography>
+      {!readOnly && (
+        <Box
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+            handleContractUpload(event.dataTransfer.files?.[0]);
+          }}
+          sx={{ border: '1px dashed #90caf9', bgcolor: '#f8fbff', borderRadius: 1, p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 2 }}
+        >
+          <Box>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>上传电子合同</Typography>
+            <Typography variant="body2" sx={{ color: '#64748b' }}>支持 PDF、Word、图片等文件，拖拽到这里或点击上传。</Typography>
+          </Box>
+          <Button variant="outlined" component="label" startIcon={<UploadFileIcon />}>
+            上传合同
+            <input hidden type="file" accept=".pdf,.doc,.docx,image/*" onChange={(event) => handleContractUpload(event.target.files?.[0])} />
+          </Button>
         </Box>
-        <Button variant="outlined" component="label" startIcon={<UploadFileIcon />}>
-          上传合同
-          <input hidden type="file" accept=".pdf,.doc,.docx,image/*" onChange={(event) => handleContractUpload(event.target.files?.[0])} />
-        </Button>
-      </Box>
+      )}
       <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb' }}>
         <Table size="small">
           <TableHead>
@@ -672,25 +692,27 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
           <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', alignSelf: 'start' }}>
             <Box sx={{ p: 2, borderBottom: '1px solid #eef2f7', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Typography variant="subtitle2" sx={{ color: '#2196F3', fontWeight: 700 }}>资料</Typography>
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                {isPublicPoolCustomer ? (
-                  <Button size="small" variant="contained" startIcon={<PersonAddAltIcon />} onClick={handleClaimCurrentCustomer}>
-                    重新领取
-                  </Button>
-                ) : (
-                  <Button size="small" color="warning" variant="outlined" startIcon={<ExitToAppIcon />} onClick={handleReleaseCurrentCustomer}>
-                    放弃到公海
-                  </Button>
-                )}
-                {editing ? (
-                  <>
-                    <Button size="small" onClick={() => { setDraft(currentCustomer); setEditing(false); }}>取消</Button>
-                    <Button size="small" variant="contained" onClick={handleSaveProfile}>保存</Button>
-                  </>
-                ) : (
-                  <Button size="small" variant="outlined" onClick={() => setEditing(true)}>编辑资料</Button>
-                )}
-              </Box>
+              {!readOnly && (
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  {isPublicPoolCustomer ? (
+                    <Button size="small" variant="contained" startIcon={<PersonAddAltIcon />} onClick={handleClaimCurrentCustomer}>
+                      重新领取
+                    </Button>
+                  ) : (
+                    <Button size="small" color="warning" variant="outlined" startIcon={<ExitToAppIcon />} onClick={handleReleaseCurrentCustomer}>
+                      放弃到公海
+                    </Button>
+                  )}
+                  {editing ? (
+                    <>
+                      <Button size="small" onClick={() => { setDraft(currentCustomer); setEditing(false); }}>取消</Button>
+                      <Button size="small" variant="contained" onClick={handleSaveProfile}>保存</Button>
+                    </>
+                  ) : (
+                    <Button size="small" variant="outlined" onClick={() => setEditing(true)}>编辑资料</Button>
+                  )}
+                </Box>
+              )}
             </Box>
             <Box>
               {renderInfoRow('客户全名', 'name')}
@@ -754,6 +776,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
         <Button color="warning" variant="contained" onClick={handleConfirmReleaseCurrentCustomer}>确认放弃</Button>
       </DialogActions>
     </Dialog>
+    {feedbackDialog}
     </>
   );
 };

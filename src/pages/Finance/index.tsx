@@ -1,27 +1,70 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Box, Typography, Grid, Card, CardContent, Tabs, Tab, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination, TableRow, Paper, Chip } from '@mui/material';
-import useFinanceStore from '../../store/useFinanceStore';
+import { useSearchParams } from 'react-router-dom';
+import {
+  Box,
+  Card,
+  CardContent,
+  Chip,
+  Grid,
+  Paper,
+  Tab,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TablePagination,
+  TableRow,
+  Tabs,
+  Typography,
+} from '@mui/material';
+import { commissionApi, financeApi, orderReviewApi, ORDER_APPLICATION_STATUSES, refundApi } from '../../api';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import { getProductLevelColor } from '../../shared/utils/constants';
 import RevenueTrend from './RevenueTrend';
 import ChannelROIChart from './ChannelROI';
-import type { FinanceIncome, FinanceExpense } from '../../types/finance';
+import Commission from '../Commission';
+import RefundCenter from '../RefundCenter';
+import type { FinanceExpense, FinanceIncome } from '../../types/finance';
 
-interface TabPanelProps {
-  children?: React.ReactNode;
-  value: number;
-  index: number;
+type FinanceTab = 'overview' | 'settlement' | 'payout' | 'refund' | 'flow' | 'rules';
+
+interface FinanceOverview {
+  pendingOrderApplications: number;
+  pendingSplitOrders: number;
+  pendingPayoutOrders: number;
+  exceptionSplitOrders: number;
+  waitingRefunds: number;
+  frozenCommissionAmount: number;
 }
 
-const TabPanel: React.FC<TabPanelProps> = ({ children, value, index }) => (
-  <Box sx={{ display: value === index ? 'block' : 'none', mt: 2 }}>
-    {children}
-  </Box>
-);
+const FINANCE_TABS: Array<{ value: FinanceTab; label: string }> = [
+  { value: 'overview', label: '财务总览' },
+  { value: 'settlement', label: '订单分账' },
+  { value: 'payout', label: '月度发放' },
+  { value: 'refund', label: '退款付款' },
+  { value: 'flow', label: '收支流水' },
+  { value: 'rules', label: '规则配置' },
+];
+
+const VALID_TABS = new Set(FINANCE_TABS.map((item) => item.value));
+
+function getTabFromSearch(value: string | null): FinanceTab {
+  return value && VALID_TABS.has(value as FinanceTab) ? (value as FinanceTab) : 'overview';
+}
 
 const Finance: React.FC = () => {
-  const { stats, fetchStats, fetchDailyRecords, fetchChannelROI } = useFinanceStore();
-  const [tabValue, setTabValue] = useState(0);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = getTabFromSearch(searchParams.get('tab'));
+  const [stats, setStats] = useState<Awaited<ReturnType<typeof financeApi.fetchFinanceStats>>['data'] | null>(null);
+  const [overview, setOverview] = useState<FinanceOverview>({
+    pendingOrderApplications: 0,
+    pendingSplitOrders: 0,
+    pendingPayoutOrders: 0,
+    exceptionSplitOrders: 0,
+    waitingRefunds: 0,
+    frozenCommissionAmount: 0,
+  });
   const [incomes, setIncomes] = useState<FinanceIncome[]>([]);
   const [expenses, setExpenses] = useState<FinanceExpense[]>([]);
   const [incomePage, setIncomePage] = useState(0);
@@ -30,34 +73,47 @@ const Finance: React.FC = () => {
   const [expenseRowsPerPage, setExpenseRowsPerPage] = useState(10);
 
   useEffect(() => {
-    fetchStats();
-    fetchDailyRecords();
-    fetchChannelROI();
-  }, [fetchStats, fetchDailyRecords, fetchChannelROI]);
+    let mounted = true;
+    Promise.all([
+      financeApi.fetchFinanceStats(),
+      orderReviewApi.fetchOrderApplications({ status: ORDER_APPLICATION_STATUSES.PENDING_REVIEW, pageSize: 1 }),
+      commissionApi.fetchCommissionOrderSummaryStatusCounts({ status: '全部', pageSize: 1 }),
+      refundApi.getRefundStats(),
+    ]).then(([statsRes, applicationsRes, splitCountsRes, refundStatsRes]) => {
+      if (!mounted) return;
+      if (statsRes.code === 0 && statsRes.data) setStats(statsRes.data);
+      setOverview({
+        pendingOrderApplications: applicationsRes.data?.pagination.total || 0,
+        pendingSplitOrders: splitCountsRes.data?.待确认 || 0,
+        pendingPayoutOrders: splitCountsRes.data?.待发放 || 0,
+        exceptionSplitOrders: splitCountsRes.data?.异常 || 0,
+        waitingRefunds: refundStatsRes.data?.waitingFinance || 0,
+        frozenCommissionAmount: refundStatsRes.data?.frozenCommissionAmount || 0,
+      });
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
-  // 懒加载收入/支出明细
   useEffect(() => {
-    if (tabValue === 1) {
-      import('../../api').then(({ financeApi }) => {
-        financeApi.fetchIncomes().then((res) => {
-          if (res.code === 0 && res.data) {
-            setIncomes(res.data);
-            setIncomePage(0);
-          }
-        });
-      });
-    }
-    if (tabValue === 2) {
-      import('../../api').then(({ financeApi }) => {
-        financeApi.fetchExpenses().then((res) => {
-          if (res.code === 0 && res.data) {
-            setExpenses(res.data);
-            setExpensePage(0);
-          }
-        });
-      });
-    }
-  }, [tabValue]);
+    if (activeTab !== 'flow') return;
+    let mounted = true;
+    Promise.all([financeApi.fetchIncomes(), financeApi.fetchExpenses()]).then(([incomeRes, expenseRes]) => {
+      if (!mounted) return;
+      if (incomeRes.code === 0 && incomeRes.data) {
+        setIncomes(incomeRes.data);
+        setIncomePage(0);
+      }
+      if (expenseRes.code === 0 && expenseRes.data) {
+        setExpenses(expenseRes.data);
+        setExpensePage(0);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [activeTab]);
 
   const pagedIncomes = useMemo(
     () => incomes.slice(incomePage * incomeRowsPerPage, incomePage * incomeRowsPerPage + incomeRowsPerPage),
@@ -69,48 +125,65 @@ const Finance: React.FC = () => {
   );
 
   const statCards = stats ? [
-    { label: '总收入', value: formatCurrency(stats.totalRevenue), color: '#2196F3' },
-    { label: '总成本', value: formatCurrency(stats.totalCost), color: '#FF9800' },
-    { label: '净利润', value: formatCurrency(stats.totalProfit), color: '#4CAF50' },
-    { label: '退款金额', value: formatCurrency(stats.totalRefund), color: '#F44336' },
-    { label: '订单数', value: String(stats.totalOrders), color: '#9C27B0' },
-    { label: '客单价', value: formatCurrency(stats.avgOrderValue), color: '#00BCD4' },
+    { label: '总收入', value: formatCurrency(stats.totalRevenue), color: '#2563eb' },
+    { label: '总成本', value: formatCurrency(stats.totalCost), color: '#f59e0b' },
+    { label: '净利润', value: formatCurrency(stats.totalProfit), color: '#16a34a' },
+    { label: '退款金额', value: formatCurrency(stats.totalRefund), color: '#ef4444' },
+    { label: '订单数', value: String(stats.totalOrders), color: '#7c3aed' },
+    { label: '客单价', value: formatCurrency(stats.avgOrderValue), color: '#0891b2' },
   ] : [];
 
-  return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h5" sx={{ fontWeight: 600, mb: 3 }}>
-        财务中心
-      </Typography>
+  const taskCards = [
+    { label: '待审核订单', value: overview.pendingOrderApplications, tone: '#2563eb' },
+    { label: '待确认分账', value: overview.pendingSplitOrders, tone: '#f97316' },
+    { label: '待发放订单', value: overview.pendingPayoutOrders, tone: '#16a34a' },
+    { label: '异常分账', value: overview.exceptionSplitOrders, tone: '#dc2626' },
+    { label: '待财务退款', value: overview.waitingRefunds, tone: '#be123c' },
+    { label: '冻结提成', value: formatCurrency(overview.frozenCommissionAmount), tone: '#6b7280' },
+  ];
 
+  const handleTabChange = (_: React.SyntheticEvent, value: FinanceTab) => {
+    setSearchParams(value === 'overview' ? {} : { tab: value });
+  };
+
+  const renderOverview = () => (
+    <>
       <Grid container spacing={2} sx={{ mb: 3 }}>
         {statCards.map((card) => (
-          <Grid item xs={2} key={card.label}>
-            <Card elevation={0} sx={{ border: '1px solid #f0f0f0' }}>
+          <Grid item xs={12} sm={6} md={4} lg={2} key={card.label}>
+            <Card elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 2 }}>
               <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-                <Typography variant="body2" sx={{ color: '#6b7280', mb: 0.5, fontSize: '0.75rem' }}>{card.label}</Typography>
-                <Typography variant="h6" sx={{ fontWeight: 700, color: card.color, fontSize: '1.125rem' }}>{card.value}</Typography>
+                <Typography variant="body2" sx={{ color: '#6b7280', mb: 0.5 }}>{card.label}</Typography>
+                <Typography variant="h6" sx={{ fontWeight: 700, color: card.color }}>{card.value}</Typography>
               </CardContent>
             </Card>
           </Grid>
         ))}
       </Grid>
 
-      <Tabs value={tabValue} onChange={(_, v) => setTabValue(v)} sx={{ borderBottom: '1px solid #e5e7eb' }}>
-        <Tab label="趋势分析" />
-        <Tab label="收入明细" />
-        <Tab label="支出明细" />
-      </Tabs>
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        {taskCards.map((card) => (
+          <Grid item xs={12} sm={6} md={4} lg={2} key={card.label}>
+            <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 2, p: 2 }}>
+              <Typography variant="body2" sx={{ color: '#6b7280', mb: 0.5 }}>{card.label}</Typography>
+              <Typography variant="h6" sx={{ fontWeight: 700, color: card.tone }}>{card.value}</Typography>
+            </Paper>
+          </Grid>
+        ))}
+      </Grid>
 
-      <TabPanel value={tabValue} index={0}>
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 3 }}>
-          <RevenueTrend />
-          <ChannelROIChart />
-        </Box>
-      </TabPanel>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 3 }}>
+        <RevenueTrend />
+        <ChannelROIChart />
+      </Box>
+    </>
+  );
 
-      <TabPanel value={tabValue} index={1}>
-        <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0' }}>
+  const renderFlow = () => (
+    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '1fr 1fr' }, gap: 3 }}>
+      <Box>
+        <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>收入明细</Typography>
+        <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb' }}>
           <Table>
             <TableHead>
               <TableRow>
@@ -127,7 +200,7 @@ const Finance: React.FC = () => {
                 const levelColor = getProductLevelColor(income.productLevel);
                 return (
                   <TableRow key={income.id} hover>
-                    <TableCell sx={{ fontWeight: 500 }}>{income.orderNo}</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>{income.orderNo}</TableCell>
                     <TableCell>{income.customerName}</TableCell>
                     <TableCell>
                       <Chip label={income.productLevel} size="small" sx={{ bgcolor: `${levelColor}18`, color: levelColor, fontWeight: 600 }} />
@@ -159,17 +232,13 @@ const Finance: React.FC = () => {
           }}
           labelRowsPerPage="每页条数"
           labelDisplayedRows={formatPaginationRows}
-          sx={{
-            border: '1px solid #f0f0f0',
-            borderTop: 0,
-            bgcolor: '#fff',
-            '& .MuiTablePagination-toolbar': { minHeight: 48 },
-          }}
+          sx={{ border: '1px solid #e5e7eb', borderTop: 0, bgcolor: '#fff' }}
         />
-      </TabPanel>
+      </Box>
 
-      <TabPanel value={tabValue} index={2}>
-        <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0' }}>
+      <Box>
+        <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>支出明细</Typography>
+        <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb' }}>
           <Table>
             <TableHead>
               <TableRow>
@@ -183,10 +252,8 @@ const Finance: React.FC = () => {
             <TableBody>
               {pagedExpenses.map((expense) => (
                 <TableRow key={expense.id} hover>
-                  <TableCell>
-                    <Chip label={expense.category} size="small" variant="outlined" />
-                  </TableCell>
-                  <TableCell sx={{ fontWeight: 600, color: '#F44336' }}>{formatCurrency(expense.amount)}</TableCell>
+                  <TableCell><Chip label={expense.category} size="small" variant="outlined" /></TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: '#ef4444' }}>{formatCurrency(expense.amount)}</TableCell>
                   <TableCell>{expense.description}</TableCell>
                   <TableCell>{expense.approvedBy || '-'}</TableCell>
                   <TableCell>{expense.paidAt ? formatDate(expense.paidAt, 'yyyy-MM-dd') : '-'}</TableCell>
@@ -213,14 +280,35 @@ const Finance: React.FC = () => {
           }}
           labelRowsPerPage="每页条数"
           labelDisplayedRows={formatPaginationRows}
-          sx={{
-            border: '1px solid #f0f0f0',
-            borderTop: 0,
-            bgcolor: '#fff',
-            '& .MuiTablePagination-toolbar': { minHeight: 48 },
-          }}
+          sx={{ border: '1px solid #e5e7eb', borderTop: 0, bgcolor: '#fff' }}
         />
-      </TabPanel>
+      </Box>
+    </Box>
+  );
+
+  return (
+    <Box sx={{ p: 3 }}>
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h5" sx={{ fontWeight: 700, color: '#111827' }}>
+          财务中心
+        </Typography>
+        <Typography variant="body2" sx={{ color: '#6b7280', mt: 0.75 }}>
+          汇总财务总览、退款付款和收支流水；财务结算台保留独立入口，也可从这里进入。
+        </Typography>
+      </Box>
+
+      <Tabs value={activeTab} onChange={handleTabChange} sx={{ borderBottom: '1px solid #e5e7eb', mb: 3 }}>
+        {FINANCE_TABS.map((tab) => (
+          <Tab key={tab.value} value={tab.value} label={tab.label} />
+        ))}
+      </Tabs>
+
+      {activeTab === 'overview' && renderOverview()}
+      {activeTab === 'settlement' && <Commission key="finance-settlement" embedded initialTab={0} />}
+      {activeTab === 'payout' && <Commission key="finance-payout" embedded initialTab={1} />}
+      {activeTab === 'refund' && <RefundCenter embedded />}
+      {activeTab === 'flow' && renderFlow()}
+      {activeTab === 'rules' && <Commission key="finance-rules" embedded initialTab={2} />}
     </Box>
   );
 };

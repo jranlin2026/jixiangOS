@@ -6,6 +6,7 @@ export { deliveryApi } from './deliveryApi';
 export { commissionApi } from './commissionApi';
 export { financeApi } from './financeApi';
 export { aiApi } from './aiApi';
+export { dashboardApi } from './dashboardApi';
 export { settingsApi } from './settingsApi';
 export { authApi } from './authApi';
 export { departmentApi } from './departmentApi';

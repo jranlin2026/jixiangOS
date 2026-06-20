@@ -24,6 +24,7 @@ import { formatDate } from '../../shared/utils/formatters';
 import { RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import useAuthStore from '../../store/useAuthStore';
 import { canEditLeadProfile } from './leadDetailRules';
+import useAppFeedback from '../../shared/hooks/useAppFeedback';
 
 interface LeadDetailProps {
   lead: Lead;
@@ -118,6 +119,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   onUpdated,
 }) => {
   const currentUser = useAuthStore((state) => state.currentUser);
+  const { alert, dialog: feedbackDialog } = useAppFeedback();
   const [currentLead, setCurrentLead] = useState<Lead>(lead);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<LeadDraft>(() => toDraft(lead));
@@ -245,12 +247,12 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   const handleClaimCurrentLead = async () => {
     const userName = currentUser?.name || currentUser?.account || '';
     if (!userName) {
-      window.alert('当前登录用户无效，请重新登录后再领取线索');
+      alert('当前登录用户无效，请重新登录后再领取线索');
       return;
     }
     const res = await leadFlowApi.manualAssignLead(currentLead.id, userName);
     if (res.code !== 0 || !res.data) {
-      window.alert(res.message || '领取失败');
+      alert(res.message || '领取失败');
       return;
     }
     setCurrentLead(res.data);
@@ -493,6 +495,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
         </Box>
       </DialogContent>
     </Dialog>
+    {feedbackDialog}
     </>
   );
 };

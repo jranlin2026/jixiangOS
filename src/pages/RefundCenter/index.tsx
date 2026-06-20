@@ -54,7 +54,11 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   createdAt: 180,
 };
 
-const RefundCenter: React.FC = () => {
+interface RefundCenterProps {
+  embedded?: boolean;
+}
+
+const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false }) => {
   const {
     items,
     stats,
@@ -233,11 +237,14 @@ const RefundCenter: React.FC = () => {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ p: embedded ? 0 : 3 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, gap: 2 }}>
-        <Typography variant="h5" sx={{ fontWeight: 600 }}>
-          退款中心
-        </Typography>
+        {!embedded && (
+          <Typography variant="h5" sx={{ fontWeight: 600 }}>
+            退款中心
+          </Typography>
+        )}
+        <Box sx={{ flex: 1 }} />
         {activeTab === 0 && (
           <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
             视图设置

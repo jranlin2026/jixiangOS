@@ -23,6 +23,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import { settingsApi } from '../../api';
 import type { LifecycleStatusConfig } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import useAppFeedback from '../../shared/hooks/useAppFeedback';
 
 type LifecycleForm = Omit<LifecycleStatusConfig, 'id' | 'createdAt' | 'updatedAt'>;
 
@@ -41,6 +42,7 @@ const LifecycleStatusConfigPage: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<LifecycleStatusConfig | null>(null);
   const [form, setForm] = useState<LifecycleForm>(emptyForm);
+  const { alert, dialog: feedbackDialog } = useAppFeedback();
 
   const loadData = async () => {
     const res = await settingsApi.fetchLifecycleStatusConfigs();
@@ -74,7 +76,7 @@ const LifecycleStatusConfigPage: React.FC = () => {
     const payload = { ...form, name: form.name.trim(), sortOrder: Number(form.sortOrder), isSystem: true };
     const res = await settingsApi.updateLifecycleStatusConfig(editingItem.id, payload);
     if (res.code !== 0) {
-      window.alert(res.message);
+      alert(res.message);
       return;
     }
     setFormOpen(false);
@@ -157,6 +159,7 @@ const LifecycleStatusConfigPage: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+      {feedbackDialog}
     </Box>
   );
 };

@@ -41,6 +41,7 @@ export const PERMISSION_KEYS = {
 const SUPER_ADMIN_NAMES = new Set(['超级管理员', 'super_admin']);
 
 const MODULE_ALIASES: Record<string, string[]> = {
+  财务: ['财务', '提成', '财务结算台', '退款中心'],
   财务结算台: ['提成', '财务结算台'],
   提成: ['提成', '财务结算台'],
   升单池: ['升单', '升单池'],

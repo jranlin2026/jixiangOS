@@ -8,18 +8,17 @@ import ProtectedRoute from './shared/auth/ProtectedRoute';
 import { PERMISSION_KEYS } from './shared/utils/permissions';
 import useAuthStore from './store/useAuthStore';
 
-const Dashboard = React.lazy(() => import('./pages/Dashboard'));
+const HomeWorkbench = React.lazy(() => import('./pages/Dashboard'));
+const BusinessCockpit = React.lazy(() => import('./pages/Dashboard/BusinessCockpit'));
 const Leads = React.lazy(() => import('./pages/Leads'));
 const Customers = React.lazy(() => import('./pages/Customers'));
 const Orders = React.lazy(() => import('./pages/Orders'));
 const Delivery = React.lazy(() => import('./pages/Delivery'));
 const Commission = React.lazy(() => import('./pages/Commission'));
 const Finance = React.lazy(() => import('./pages/Finance'));
-const UpgradeAnalysis = React.lazy(() => import('./pages/UpgradeAnalysis'));
+const UpgradeCenter = React.lazy(() => import('./pages/UpgradePool'));
 const AIAssistant = React.lazy(() => import('./pages/AIAssistant'));
 const Settings = React.lazy(() => import('./pages/Settings'));
-const RefundCenter = React.lazy(() => import('./pages/RefundCenter'));
-const UpgradePool = React.lazy(() => import('./pages/UpgradePool'));
 const Login = React.lazy(() => import('./pages/Login'));
 const NoPermission = React.lazy(() => import('./pages/NoPermission'));
 
@@ -62,7 +61,17 @@ const App: React.FC = () => {
               index
               element={(
                 <Suspense fallback={<PageLoader />}>
-                  <Dashboard />
+                  <HomeWorkbench />
+                </Suspense>
+              )}
+            />
+          </Route>
+          <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.DASHBOARD} />}>
+            <Route
+              path={ROUTES.DASHBOARD}
+              element={(
+                <Suspense fallback={<PageLoader />}>
+                  <BusinessCockpit />
                 </Suspense>
               )}
             />
@@ -111,7 +120,7 @@ const App: React.FC = () => {
             <Route path={ROUTES.FINANCE} element={<Suspense fallback={<PageLoader />}><Finance /></Suspense>} />
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.UPGRADE_ANALYSIS} />}>
-            <Route path={ROUTES.UPGRADE_ANALYSIS} element={<Suspense fallback={<PageLoader />}><UpgradeAnalysis /></Suspense>} />
+            <Route path={ROUTES.UPGRADE_ANALYSIS} element={<Navigate to={`${ROUTES.UPGRADE_CENTER}?tab=analysis`} replace />} />
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.AI_ASSISTANT} />}>
             <Route path={ROUTES.AI_ASSISTANT} element={<Suspense fallback={<PageLoader />}><AIAssistant /></Suspense>} />
@@ -120,10 +129,11 @@ const App: React.FC = () => {
             <Route path={ROUTES.SETTINGS} element={<Suspense fallback={<PageLoader />}><Settings /></Suspense>} />
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.REFUND_CENTER} />}>
-            <Route path={ROUTES.REFUND_CENTER} element={<Suspense fallback={<PageLoader />}><RefundCenter /></Suspense>} />
+            <Route path={ROUTES.REFUND_CENTER} element={<Navigate to={`${ROUTES.FINANCE}?tab=refund`} replace />} />
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.UPGRADE_POOL} />}>
-            <Route path={ROUTES.UPGRADE_POOL} element={<Suspense fallback={<PageLoader />}><UpgradePool /></Suspense>} />
+            <Route path={ROUTES.UPGRADE_POOL} element={<Navigate to={`${ROUTES.UPGRADE_CENTER}?tab=pool`} replace />} />
+            <Route path={ROUTES.UPGRADE_CENTER} element={<Suspense fallback={<PageLoader />}><UpgradeCenter /></Suspense>} />
           </Route>
           <Route
             path="/no-permission"

@@ -20,6 +20,7 @@ import {
   getProductLevelColor,
 } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import useAppFeedback from '../../shared/hooks/useAppFeedback';
 
 type ProductForm = Omit<Product, 'id' | 'createdAt' | 'updatedAt'>;
 type ProductLevelConfigForm = Omit<ProductLevelConfig, 'id' | 'createdAt' | 'updatedAt'>;
@@ -66,6 +67,7 @@ const ProductConfigPage: React.FC = () => {
   const [levelFormOpen, setLevelFormOpen] = useState(false);
   const [editingLevel, setEditingLevel] = useState<ProductLevelConfig | null>(null);
   const [levelForm, setLevelForm] = useState<ProductLevelConfigForm>(emptyLevelForm);
+  const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
 
   useEffect(() => {
     loadData();
@@ -171,7 +173,7 @@ const ProductConfigPage: React.FC = () => {
       ? await productApi.updateProductLevelConfig(editingLevel.id, payload)
       : await productApi.createProductLevelConfig(payload);
     if (res.code !== 0) {
-      window.alert(res.message);
+      alert(res.message);
       return;
     }
     setLevelFormOpen(false);
@@ -184,16 +186,16 @@ const ProductConfigPage: React.FC = () => {
   };
 
   const handleDelete = async (product: Product) => {
-    if (!window.confirm(`确定删除产品「${product.name}」吗？`)) return;
+    if (!await confirm(`确定删除产品「${product.name}」吗？`, '删除产品')) return;
     await productApi.deleteProduct(product.id);
     loadData();
   };
 
   const handleDeleteLevel = async (level: ProductLevelConfig) => {
-    if (!window.confirm(`确定删除等级「${level.name}」吗？`)) return;
+    if (!await confirm(`确定删除等级「${level.name}」吗？`, '删除产品等级')) return;
     const res = await productApi.deleteProductLevelConfig(level.id);
     if (res.code !== 0) {
-      window.alert(res.message);
+      alert(res.message);
       return;
     }
     loadData();
@@ -502,6 +504,7 @@ const ProductConfigPage: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+      {feedbackDialog}
     </Box>
   );
 };

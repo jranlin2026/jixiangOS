@@ -58,6 +58,7 @@ import ResizableHeaderCell, {
   writeColumnWidths,
   type ColumnWidthMap,
 } from '../../shared/components/ResizableTable';
+import useAppFeedback from '../../shared/hooks/useAppFeedback';
 
 type CustomerColumn = {
   id: string;
@@ -219,6 +220,7 @@ const Customers: React.FC = () => {
   const [customerScope, setCustomerScope] = useState<CustomerScope>('active');
   const [releaseTarget, setReleaseTarget] = useState<Customer | null>(null);
   const [releaseReason, setReleaseReason] = useState('');
+  const { alert, dialog: feedbackDialog } = useAppFeedback();
   const columns = useMemo(() => buildCustomerColumns(lifecycleConfigs), [lifecycleConfigs]);
   const customerLevelOptions = useMemo(() => {
     const activeConfigs = customerLevelConfigs.filter((item) => item.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
@@ -297,12 +299,12 @@ const Customers: React.FC = () => {
   const handleClaimCustomer = async (customer: Customer) => {
     const userName = getCurrentUserName();
     if (!userName) {
-      window.alert('当前登录用户无效，请重新登录后再领取客户');
+      alert('当前登录用户无效，请重新登录后再领取客户');
       return;
     }
     const res = await customerApi.claimCustomerFromPublicPool(customer.id, userName);
     if (res.code !== 0 || !res.data) {
-      window.alert(res.message || '领取失败');
+      alert(res.message || '领取失败');
       return;
     }
     setSelectedCustomer((current) => (current?.id === customer.id ? res.data : current));
@@ -318,7 +320,7 @@ const Customers: React.FC = () => {
     if (!releaseTarget) return;
     const res = await customerApi.releaseCustomerToPublicPool(releaseTarget.id, releaseReason.trim() || '销售放弃跟进');
     if (res.code !== 0 || !res.data) {
-      window.alert(res.message || '释放到公海失败');
+      alert(res.message || '释放到公海失败');
       return;
     }
     setSelectedCustomer((current) => (current?.id === releaseTarget.id ? res.data : current));
@@ -757,6 +759,7 @@ const Customers: React.FC = () => {
           </PermissionGate>
         </DialogActions>
       </Dialog>
+      {feedbackDialog}
     </Box>
   );
 };

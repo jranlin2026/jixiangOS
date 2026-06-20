@@ -25,6 +25,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import { settingsApi } from '../../api';
 import type { OrderTypeConfig } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import useAppFeedback from '../../shared/hooks/useAppFeedback';
 
 type OrderTypeForm = Omit<OrderTypeConfig, 'id' | 'createdAt' | 'updatedAt'>;
 
@@ -41,6 +42,7 @@ const OrderTypeConfigPage: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<OrderTypeConfig | null>(null);
   const [form, setForm] = useState<OrderTypeForm>(emptyForm);
+  const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
 
   const loadData = async () => {
     setLoading(true);
@@ -86,7 +88,7 @@ const OrderTypeConfigPage: React.FC = () => {
       ? await settingsApi.updateOrderTypeConfig(editingItem.id, payload)
       : await settingsApi.createOrderTypeConfig(payload);
     if (res.code !== 0) {
-      window.alert(res.message);
+      alert(res.message);
       return;
     }
     setFormOpen(false);
@@ -99,10 +101,10 @@ const OrderTypeConfigPage: React.FC = () => {
   };
 
   const handleDelete = async (item: OrderTypeConfig) => {
-    if (!window.confirm(`确定删除订单类型“${item.name}”吗？`)) return;
+    if (!await confirm(`确定删除订单类型“${item.name}”吗？`, '删除订单类型')) return;
     const res = await settingsApi.deleteOrderTypeConfig(item.id);
     if (res.code !== 0) {
-      window.alert(res.message);
+      alert(res.message);
       return;
     }
     loadData();
@@ -204,6 +206,7 @@ const OrderTypeConfigPage: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+      {feedbackDialog}
     </Box>
   );
 };
