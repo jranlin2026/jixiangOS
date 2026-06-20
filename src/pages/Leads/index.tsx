@@ -2,14 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Button,
-  Checkbox,
   Chip,
-  Dialog,
-  DialogActions,
-  DialogContent,
   FormControl,
-  FormControlLabel,
-  FormGroup,
   IconButton,
   InputLabel,
   MenuItem,
@@ -45,7 +39,7 @@ import LeadFlowConfigTab from './LeadFlowConfigTab';
 import type { Lead } from '../../types/lead';
 import { leadBulkImportApi, leadFlowApi, settingsApi } from '../../api';
 import type { LeadSourceConfig, LifecycleStatusConfig, User } from '../../types/settings';
-import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import PermissionGate from '../../shared/auth/PermissionGate';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
@@ -66,8 +60,15 @@ type LeadColumn = {
   render: (lead: Lead) => React.ReactNode;
 };
 
-const LEAD_VIEW_STORAGE_KEY = 'aaos_lead_table_columns_v4';
-const LEAD_WIDTH_STORAGE_KEY = 'aaos_lead_table_column_widths_v3';
+type LeadViewConfig = {
+  visibleColumnIds: string[];
+  columnOrder: string[];
+  frozenColumnCount: number;
+};
+
+const LEAD_VIEW_STORAGE_KEY = 'aaos_lead_table_view_v6';
+const LEAD_WIDTH_STORAGE_KEY = 'aaos_lead_table_column_widths_v4';
+const LEAD_ACTION_COLUMN_WIDTH = 120;
 
 const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] => {
   const getLifecycleConfig = (lead: Lead) => {
@@ -83,6 +84,7 @@ const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] =
     { id: 'industry', label: '行业', render: (lead) => lead.industry || '-' },
     { id: 'city', label: '城市', render: (lead) => lead.city || '-' },
     { id: 'inputBy', label: '线索录入人', render: (lead) => lead.inputBy || '-' },
+    { id: 'leadContributorName', label: '线索贡献人', render: (lead) => lead.leadContributorName || '-' },
     { id: 'assignedTo', label: '分配销售', render: (lead) => lead.assignedTo || lead.owner || '-' },
     { id: 'tags', label: '标签', render: (lead) => lead.tags?.join(', ') || '-' },
     { id: 'remark', label: '备注', render: (lead) => lead.remark || '-' },
@@ -127,6 +129,7 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'industry',
   'city',
   'inputBy',
+  'leadContributorName',
   'assignedTo',
   'tags',
   'remark',
@@ -144,6 +147,7 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   industry: 140,
   city: 120,
   inputBy: 140,
+  leadContributorName: 140,
   assignedTo: 140,
   tags: 180,
   remark: 260,
@@ -153,17 +157,46 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
 
 const LEAD_TEMPLATE_FILE_NAME = '\u7ebf\u7d22\u6279\u91cf\u5165\u5e93\u6a21\u677f.xlsx';
 
-const readVisibleColumns = (columns: LeadColumn[]) => {
+const getDefaultLeadViewConfig = (columns: LeadColumn[]): LeadViewConfig => ({
+  visibleColumnIds: DEFAULT_VISIBLE_COLUMNS.filter((id) => columns.some((column) => column.id === id)),
+  columnOrder: columns.map((column) => column.id),
+  frozenColumnCount: 0,
+});
+
+const normalizeLeadViewConfig = (value: unknown, columns: LeadColumn[]): LeadViewConfig => {
+  const validIds = new Set(columns.map((column) => column.id));
+  const defaultConfig = getDefaultLeadViewConfig(columns);
+  if (Array.isArray(value)) {
+    const visibleColumnIds = value.filter((id): id is string => typeof id === 'string' && validIds.has(id));
+    return { ...defaultConfig, visibleColumnIds: visibleColumnIds.length ? visibleColumnIds : defaultConfig.visibleColumnIds };
+  }
+  if (!value || typeof value !== 'object') return defaultConfig;
+  const config = value as Partial<LeadViewConfig>;
+  const visibleColumnIds = Array.isArray(config.visibleColumnIds)
+    ? config.visibleColumnIds.filter((id): id is string => typeof id === 'string' && validIds.has(id))
+    : defaultConfig.visibleColumnIds;
+  const configuredOrder = Array.isArray(config.columnOrder)
+    ? config.columnOrder.filter((id): id is string => typeof id === 'string' && validIds.has(id))
+    : [];
+  const missingOrderIds = columns.map((column) => column.id).filter((id) => !configuredOrder.includes(id));
+  const frozenColumnCount = Number.isFinite(config.frozenColumnCount)
+    ? Math.max(0, Math.min(Number(config.frozenColumnCount), visibleColumnIds.length + 1))
+    : defaultConfig.frozenColumnCount;
+  return {
+    visibleColumnIds: visibleColumnIds.length ? visibleColumnIds : defaultConfig.visibleColumnIds,
+    columnOrder: [...configuredOrder, ...missingOrderIds],
+    frozenColumnCount,
+  };
+};
+
+const readLeadViewConfig = (columns: LeadColumn[]) => {
   try {
     const raw = localStorage.getItem(LEAD_VIEW_STORAGE_KEY);
-    if (!raw) return DEFAULT_VISIBLE_COLUMNS;
+    if (!raw) return getDefaultLeadViewConfig(columns);
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return DEFAULT_VISIBLE_COLUMNS;
-    const validIds = new Set(columns.map((column) => column.id));
-    const filtered = parsed.filter((id) => validIds.has(id));
-    return filtered.length ? filtered : DEFAULT_VISIBLE_COLUMNS;
+    return normalizeLeadViewConfig(parsed, columns);
   } catch {
-    return DEFAULT_VISIBLE_COLUMNS;
+    return getDefaultLeadViewConfig(columns);
   }
 };
 
@@ -181,14 +214,24 @@ const Leads: React.FC = () => {
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
 
   const columns = useMemo(() => buildColumns(lifecycleConfigs), [lifecycleConfigs]);
-  const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(() => readVisibleColumns(buildColumns([])));
+  const [viewConfig, setViewConfig] = useState<LeadViewConfig>(() => readLeadViewConfig(buildColumns([])));
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(LEAD_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
+  const orderedColumns = useMemo(() => {
+    const columnMap = new Map(columns.map((column) => [column.id, column]));
+    const ordered = viewConfig.columnOrder
+      .map((columnId) => columnMap.get(columnId))
+      .filter((column): column is LeadColumn => Boolean(column));
+    const missing = columns.filter((column) => !viewConfig.columnOrder.includes(column.id));
+    return [...ordered, ...missing];
+  }, [columns, viewConfig.columnOrder]);
+  const visibleColumnIds = viewConfig.visibleColumnIds;
   const visibleColumns = useMemo(
-    () => columns.filter((column) => visibleColumnIds.includes(column.id)),
-    [columns, visibleColumnIds],
+    () => orderedColumns.filter((column) => visibleColumnIds.includes(column.id)),
+    [orderedColumns, visibleColumnIds],
   );
+  const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length + 1);
   const tableMinWidth = useMemo(
-    () => columnWidths.name + visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + 120,
+    () => columnWidths.name + visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + LEAD_ACTION_COLUMN_WIDTH,
     [columnWidths, visibleColumns],
   );
 
@@ -206,8 +249,8 @@ const Leads: React.FC = () => {
   }, [fetchItems]);
 
   useEffect(() => {
-    localStorage.setItem(LEAD_VIEW_STORAGE_KEY, JSON.stringify(visibleColumnIds));
-  }, [visibleColumnIds]);
+    localStorage.setItem(LEAD_VIEW_STORAGE_KEY, JSON.stringify(viewConfig));
+  }, [viewConfig]);
 
   useEffect(() => {
     writeColumnWidths(LEAD_WIDTH_STORAGE_KEY, columnWidths);
@@ -283,15 +326,73 @@ const Leads: React.FC = () => {
   };
 
   const handleToggleColumn = (id: string) => {
-    setVisibleColumnIds((current) => (
-      current.includes(id)
-        ? current.filter((columnId) => columnId !== id)
-        : [...current, id]
-    ));
+    setViewConfig((current) => {
+      const visibleColumnIds = current.visibleColumnIds.includes(id)
+        ? current.visibleColumnIds.filter((columnId) => columnId !== id)
+        : [...current.visibleColumnIds, id];
+      if (!visibleColumnIds.length) return current;
+      return {
+        ...current,
+        visibleColumnIds,
+        frozenColumnCount: Math.min(current.frozenColumnCount, visibleColumnIds.length + 1),
+      };
+    });
+  };
+
+  const handleReorderColumn = (sourceColumnId: string, targetColumnId: string) => {
+    setViewConfig((current) => {
+      const columnOrder = current.columnOrder.length ? current.columnOrder : columns.map((column) => column.id);
+      const sourceIndex = columnOrder.indexOf(sourceColumnId);
+      const targetIndex = columnOrder.indexOf(targetColumnId);
+      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return current;
+      const nextOrder = [...columnOrder];
+      const [movedColumnId] = nextOrder.splice(sourceIndex, 1);
+      nextOrder.splice(targetIndex, 0, movedColumnId);
+      return { ...current, columnOrder: nextOrder };
+    });
+  };
+
+  const handleFrozenColumnCountChange = (value: number) => {
+    setViewConfig((current) => ({
+      ...current,
+      frozenColumnCount: Math.max(0, Math.min(value, current.visibleColumnIds.length + 1)),
+    }));
+  };
+
+  const handleResetViewConfig = () => {
+    setViewConfig(getDefaultLeadViewConfig(columns));
+    setColumnWidths(resetColumnWidths(DEFAULT_COLUMN_WIDTHS));
   };
 
   const handleResizeColumn = (id: string, delta: number) => {
     setColumnWidths((current) => resizeColumnWidths(current, id, delta));
+  };
+
+  const getFrozenLeft = (columnIndex: number) => {
+    const widths = [columnWidths.name, ...visibleColumns.map((column) => columnWidths[column.id] || DEFAULT_COLUMN_WIDTHS[column.id] || 120)];
+    return widths.slice(0, columnIndex).reduce((sum, width) => sum + width, 0);
+  };
+
+  const getFrozenColumnSx = (columnIndex: number, isHeader = false) => (
+    columnIndex < frozenColumnCount
+      ? {
+          position: 'sticky' as const,
+          left: getFrozenLeft(columnIndex),
+          zIndex: isHeader ? 5 : 3,
+          bgcolor: isHeader ? '#f8fafc' : '#fff',
+          boxShadow: '1px 0 0 #e5e7eb',
+        }
+      : {}
+  );
+
+  const actionColumnSx = {
+    position: 'sticky' as const,
+    right: 0,
+    zIndex: 4,
+    width: LEAD_ACTION_COLUMN_WIDTH,
+    minWidth: LEAD_ACTION_COLUMN_WIDTH,
+    bgcolor: '#fff',
+    boxShadow: '-1px 0 0 #e5e7eb',
   };
 
   return (
@@ -378,23 +479,29 @@ const Leads: React.FC = () => {
             <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
               <TableHead>
                 <TableRow>
-                  <ResizableHeaderCell columnId="name" width={columnWidths.name} onResize={handleResizeColumn}>姓名</ResizableHeaderCell>
-                  {visibleColumns.map((column) => (
-                    <ResizableHeaderCell key={column.id} columnId={column.id} width={columnWidths[column.id]} onResize={handleResizeColumn}>
+                  <ResizableHeaderCell columnId="name" width={columnWidths.name} onResize={handleResizeColumn} sx={getFrozenColumnSx(0, true)}>姓名</ResizableHeaderCell>
+                  {visibleColumns.map((column, columnIndex) => (
+                    <ResizableHeaderCell
+                      key={column.id}
+                      columnId={column.id}
+                      width={columnWidths[column.id]}
+                      onResize={handleResizeColumn}
+                      sx={getFrozenColumnSx(columnIndex + 1, true)}
+                    >
                       {column.label}
                     </ResizableHeaderCell>
                   ))}
-                  <TableCell align="center">操作</TableCell>
+                  <TableCell align="center" sx={{ ...actionColumnSx, zIndex: 5, bgcolor: '#f8fafc' }}>操作</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {items.map((lead) => (
                   <TableRow key={lead.id} hover>
-                    <TableCell sx={{ ...getResizableCellSx(columnWidths.name), fontWeight: 600 }} title={lead.name}>{lead.name}</TableCell>
-                    {visibleColumns.map((column) => (
-                      <TableCell key={column.id} sx={getResizableCellSx(columnWidths[column.id])}>{column.render(lead)}</TableCell>
+                    <TableCell sx={{ ...getResizableCellSx(columnWidths.name), ...getFrozenColumnSx(0), fontWeight: 600 }} title={lead.name}>{lead.name}</TableCell>
+                    {visibleColumns.map((column, columnIndex) => (
+                      <TableCell key={column.id} sx={{ ...getResizableCellSx(columnWidths[column.id]), ...getFrozenColumnSx(columnIndex + 1) }}>{column.render(lead)}</TableCell>
                     ))}
-                    <TableCell align="center">
+                    <TableCell align="center" sx={actionColumnSx}>
                       <Tooltip title="查看线索">
                         <IconButton size="small" onClick={() => handleViewDetail(lead)}>
                           <VisibilityIcon fontSize="small" />
@@ -468,29 +575,21 @@ const Leads: React.FC = () => {
         onImported={() => fetchItems(filters)}
       />
 
-      <Dialog open={viewSettingsOpen} onClose={() => setViewSettingsOpen(false)} maxWidth="xs" fullWidth>
-        <DialogCloseTitle onClose={() => setViewSettingsOpen(false)}>线索列表视图设置</DialogCloseTitle>
-        <DialogContent dividers>
-          <Typography variant="body2" sx={{ color: '#6b7280', mb: 2 }}>
-            勾选后会显示在线索列表中，设置会保存在当前浏览器。
-          </Typography>
-          <FormGroup sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.5 }}>
-            {columns.map((column) => (
-              <FormControlLabel
-                key={column.id}
-                control={<Checkbox checked={visibleColumnIds.includes(column.id)} onChange={() => handleToggleColumn(column.id)} />}
-                label={column.label}
-              />
-            ))}
-          </FormGroup>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => {
-            setVisibleColumnIds(DEFAULT_VISIBLE_COLUMNS);
-            setColumnWidths(resetColumnWidths(DEFAULT_COLUMN_WIDTHS));
-          }}>恢复默认</Button>
-        </DialogActions>
-      </Dialog>
+      <TableViewSettingsDialog
+        open={viewSettingsOpen}
+        title="线索列表视图设置"
+        description="勾选后会显示在线索列表中，设置会保存在当前浏览器。"
+        columns={columns}
+        visibleColumnIds={visibleColumnIds}
+        columnOrder={viewConfig.columnOrder}
+        frozenColumnCount={viewConfig.frozenColumnCount}
+        maxFrozenColumnCount={visibleColumns.length + 1}
+        onClose={() => setViewSettingsOpen(false)}
+        onToggleColumn={handleToggleColumn}
+        onReorderColumn={handleReorderColumn}
+        onFrozenColumnCountChange={handleFrozenColumnCountChange}
+        onReset={handleResetViewConfig}
+      />
     </Box>
   );
 };

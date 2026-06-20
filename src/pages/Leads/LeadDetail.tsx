@@ -41,6 +41,8 @@ type LeadDraft = {
   industry: string;
   city: string;
   inputBy: string;
+  leadContributorId: string;
+  leadContributorName: string;
   assignedTo: string;
   remark: string;
   tagsText: string;
@@ -79,6 +81,8 @@ const toDraft = (lead: Lead): LeadDraft => ({
   industry: lead.industry || '',
   city: lead.city || '',
   inputBy: lead.inputBy || '',
+  leadContributorId: lead.leadContributorId || '',
+  leadContributorName: lead.leadContributorName || '',
   assignedTo: lead.assignedTo || lead.owner || '',
   remark: lead.remark || '',
   tagsText: lead.tags?.join(', ') || '',
@@ -198,6 +202,15 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
     setDraft((prev) => ({ ...prev, source: option.parentName, sourceName: option.childName }));
   };
 
+  const handleContributorSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const user = users.find((item) => item.id === event.target.value);
+    setDraft((prev) => ({
+      ...prev,
+      leadContributorId: user?.id || '',
+      leadContributorName: user?.name || '',
+    }));
+  };
+
   const handleSaveProfile = async () => {
     if (!canEditProfile) {
       setEditing(false);
@@ -213,6 +226,8 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
       industry: draft.industry,
       city: draft.city,
       inputBy: draft.inputBy,
+      leadContributorId: draft.leadContributorId,
+      leadContributorName: draft.leadContributorName,
       assignedTo: draft.assignedTo,
       owner: draft.assignedTo || currentLead.owner,
       remark: draft.remark,
@@ -301,6 +316,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
 
   const renderInfoRow = (label: string, field: keyof LeadDraft, editable = true) => {
     const isResourceField = field === 'sourceType';
+    const isContributorField = field === 'leadContributorName';
     const isUserField = field === 'inputBy' || field === 'assignedTo';
     const currentValue = draft[field] || '';
     const showCurrentUserOption = isUserField && currentValue && !users.some((user) => user.name === currentValue);
@@ -321,6 +337,15 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
               <TextField select value={normalizeResourceOwnership(currentValue)} onChange={handleDraftChange(field)} size="small" fullWidth>
                 {RESOURCE_OWNERSHIPS.map((item) => (
                   <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
+                ))}
+              </TextField>
+            ) : isContributorField ? (
+              <TextField select value={draft.leadContributorId} onChange={handleContributorSelect} size="small" fullWidth>
+                <MenuItem value="">无</MenuItem>
+                {users.map((user) => (
+                  <MenuItem key={user.id} value={user.id}>
+                    {user.name}（{user.role}）
+                  </MenuItem>
                 ))}
               </TextField>
             ) : isUserField ? (
@@ -440,6 +465,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
               {renderInfoRow('行业', 'industry')}
               {renderInfoRow('城市', 'city')}
               {renderInfoRow('线索录入人', 'inputBy')}
+              {renderInfoRow('线索贡献人', 'leadContributorName')}
               {renderInfoRow('分配销售', 'assignedTo')}
               {renderInfoRow('标签', 'tagsText')}
               {renderStatusRow('入库状态', (

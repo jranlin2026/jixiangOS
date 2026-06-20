@@ -451,7 +451,7 @@ const CommissionRuleConfig: React.FC = () => {
             <TableHead>
               <TableRow sx={{ bgcolor: '#fafafa' }}>
                 <TableCell sx={{ fontWeight: 600 }}>角色名称</TableCell>
-                <TableCell sx={{ fontWeight: 600 }}>角色编码</TableCell>
+                <TableCell sx={{ fontWeight: 600 }}>角色说明</TableCell>
                 <TableCell sx={{ fontWeight: 600 }}>排序</TableCell>
                 <TableCell sx={{ fontWeight: 600 }}>状态</TableCell>
                 <TableCell align="center" sx={{ fontWeight: 600 }}>操作</TableCell>
@@ -460,15 +460,12 @@ const CommissionRuleConfig: React.FC = () => {
             <TableBody>
               {roleConfigs.map((config) => (
                 <TableRow key={config.id} hover>
-                  <TableCell sx={{ fontWeight: 500 }}>
+                  <TableCell sx={{ fontWeight: 500, minWidth: 140 }}>
                     {config.name}
-                    {config.description && (
-                      <Typography variant="caption" sx={{ display: 'block', color: '#6b7280', mt: 0.25 }}>
-                        {config.description}
-                      </Typography>
-                    )}
                   </TableCell>
-                  <TableCell>{config.code}</TableCell>
+                  <TableCell sx={{ color: config.description ? '#4b5563' : '#9ca3af', minWidth: 260 }}>
+                    {config.description || '-'}
+                  </TableCell>
                   <TableCell>{config.sortOrder}</TableCell>
                   <TableCell>
                     <Chip

@@ -2,7 +2,7 @@ import type { Order, OrderFilters, OrderStats } from '../types/order';
 import type { Customer } from '../types/customer';
 import type { Commission, CommissionRole } from '../types/commission';
 import type { ApiResponse, PaginatedResponse } from './types';
-import { createSuccessResponse, delay } from './types';
+import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
@@ -36,6 +36,29 @@ function normalizeOrder(order: Order): Order {
     ...order,
     resourceOwnership: normalizeResourceOwnership(order.resourceOwnership || order.sourceType),
   };
+}
+
+function enrichOrderDataFromCustomer(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'orderNo'>): Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'orderNo'> {
+  if (!data.customerId) return data;
+  const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+  const customer = customers.find((item) => item.id === data.customerId);
+  if (!customer) return data;
+  return {
+    ...data,
+    sourceType: customer.leadSource || data.sourceType,
+    leadSource: customer.leadSource || data.leadSource,
+    leadInputBy: customer.leadInputBy || data.leadInputBy,
+    leadContributorId: customer.leadContributorId || data.leadContributorId,
+    leadContributorName: customer.leadContributorName || data.leadContributorName,
+    resourceOwnership: normalizeResourceOwnership(customer.sourceType || data.resourceOwnership || data.sourceType),
+  };
+}
+
+function validateOrderAttribution(data: Pick<Order, 'resourceOwnership' | 'sourceType' | 'leadContributorId' | 'leadContributorName'>): string | null {
+  if (normalizeResourceOwnership(data.resourceOwnership || data.sourceType) === '个人资源' && !data.leadContributorId && !data.leadContributorName) {
+    return '个人资源必须填写线索贡献人';
+  }
+  return null;
 }
 
 function syncCustomerOrderStats(order: Order, allOrders: Order[], operator = SYSTEM_OPERATOR): void {
@@ -310,16 +333,19 @@ async function fetchOrderStats(): Promise<ApiResponse<OrderStats>> {
 async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'orderNo'>): Promise<ApiResponse<Order>> {
   ensureInit();
   await delay(200);
+  const orderData = enrichOrderDataFromCustomer(data);
+  const validationError = validateOrderAttribution(orderData);
+  if (validationError) return createErrorResponse(validationError);
   const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
   const now = new Date().toISOString();
-  const operator = getCurrentOperatorName(data.owner);
+  const operator = getCurrentOperatorName(orderData.owner);
   const orderNo = `ORD-${now.slice(0, 10).replace(/-/g, '')}-${String(orders.length + 1).padStart(4, '0')}`;
 
   const newOrder: Order = {
-    ...data,
+    ...orderData,
     id: `order-${uuidv4().slice(0, 8)}`,
     orderNo,
-    resourceOwnership: normalizeResourceOwnership(data.resourceOwnership || data.sourceType),
+    resourceOwnership: normalizeResourceOwnership(orderData.resourceOwnership || orderData.sourceType),
     createdAt: now,
     updatedAt: now,
     changeHistory: [{

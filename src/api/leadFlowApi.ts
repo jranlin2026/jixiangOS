@@ -30,6 +30,17 @@ function normalizeText(value?: string): string {
   return (value || '').trim().toLowerCase();
 }
 
+function isPersonalResource(value?: string): boolean {
+  return normalizeResourceOwnership(value) === '个人资源';
+}
+
+function validateAttribution(data: Partial<Lead>): string | null {
+  if (isPersonalResource(data.sourceType) && !data.leadContributorName && !data.leadContributorId) {
+    return '个人资源必须填写线索贡献人';
+  }
+  return null;
+}
+
 function getActiveSalesUsers(): User[] {
   const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
   return users.filter((user) => user.isActive && isSalesRoleName(user.role));
@@ -151,6 +162,8 @@ function upsertCustomerFromLead(lead: Lead): Customer {
     }],
     tags: lead.tags,
     leadInputBy: lead.inputBy,
+    leadContributorId: lead.leadContributorId,
+    leadContributorName: lead.leadContributorName,
     leadSource: lead.source,
     remark: lead.remark,
     sourceType: normalizeResourceOwnership(lead.sourceType),
@@ -181,6 +194,8 @@ function upsertCustomerFromLead(lead: Lead): Customer {
     lifecycleStatusUpdatedAt: lead.lifecycleStatusUpdatedAt || customers[idx].lifecycleStatusUpdatedAt || now,
     tags: lead.tags,
     leadInputBy: lead.inputBy,
+    leadContributorId: lead.leadContributorId,
+    leadContributorName: lead.leadContributorName,
     leadSource: lead.source,
     remark: lead.remark,
     sourceType: normalizeResourceOwnership(lead.sourceType),
@@ -251,7 +266,7 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
   const config = ensureLeadFlowConfig();
   const now = new Date().toISOString();
   const ruleName = config.uniqueKeyMode === 'phone' ? '手机号唯一' : config.uniqueKeyMode === 'wechat' ? '微信唯一' : '手机号和微信二选一';
-  const validationError = validateUniqueInput(config, data);
+  const validationError = validateAttribution(data) || validateUniqueInput(config, data);
 
   if (validationError) {
     appendIntakeRecord({
@@ -311,25 +326,30 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
     updatedAt: now,
   };
   const leadWithLifecycle = hydrateLeadLifecycle(lead);
+  const linkedCustomer = upsertCustomerFromLead(leadWithLifecycle);
+  const storedLead = {
+    ...leadWithLifecycle,
+    customerId: linkedCustomer.id,
+  };
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
-  setStorageData(STORAGE_KEYS.LEADS, [leadWithLifecycle, ...leads]);
+  setStorageData(STORAGE_KEYS.LEADS, [storedLead, ...leads]);
   setStorageData(STORAGE_KEYS.LEAD_FLOW_CONFIG, { ...config, lastAssignedIndex: assignment.nextIndex, updatedAt: now });
   appendIntakeRecord({
     id: `intake-${uuidv4().slice(0, 8)}`,
-    leadId: leadWithLifecycle.id,
-    name: leadWithLifecycle.name,
-    company: leadWithLifecycle.company,
-    phone: leadWithLifecycle.phone,
-    wechat: leadWithLifecycle.wechat,
-    source: formatLeadSourceText(leadWithLifecycle),
-    inputBy: leadWithLifecycle.inputBy,
-    assignedTo: leadWithLifecycle.assignedTo,
+    leadId: storedLead.id,
+    name: storedLead.name,
+    company: storedLead.company,
+    phone: storedLead.phone,
+    wechat: storedLead.wechat,
+    source: formatLeadSourceText(storedLead),
+    inputBy: storedLead.inputBy,
+    assignedTo: storedLead.assignedTo,
     status: assignment.status,
     matchedRule: assignment.reason,
     failureReason: assignment.status === '待分配' ? assignment.reason : undefined,
     createdAt: now,
   });
-  return { lead: leadWithLifecycle, message: assignment.status === '待分配' ? assignment.reason : '入库成功' };
+  return { lead: storedLead, message: assignment.status === '待分配' ? assignment.reason : '入库成功' };
 }
 
 function syncCustomerByLead(lead: Lead): void {

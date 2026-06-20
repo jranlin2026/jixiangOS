@@ -3,14 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Button,
-  Checkbox,
   Chip,
   Dialog,
   DialogActions,
   DialogContent,
   FormControl,
-  FormControlLabel,
-  FormGroup,
   IconButton,
   InputLabel,
   MenuItem,
@@ -48,6 +45,7 @@ import type { Customer, CustomerFilters } from '../../types/customer';
 import type { Order, OrderApplication } from '../../types/order';
 import type { CustomerLevelConfig, LifecycleStatusConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import PermissionGate from '../../shared/auth/PermissionGate';
 import { PERMISSION_KEYS } from '../../shared/utils/permissions';
 import useAuthStore from '../../store/useAuthStore';
@@ -69,8 +67,15 @@ type CustomerColumn = {
 
 type CustomerScope = 'active' | 'public_pool';
 
-const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_columns_v3';
-const CUSTOMER_WIDTH_STORAGE_KEY = 'aaos_customer_table_column_widths_v1';
+type CustomerViewConfig = {
+  visibleColumnIds: string[];
+  columnOrder: string[];
+  frozenColumnCount: number;
+};
+
+const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_view_v5';
+const CUSTOMER_WIDTH_STORAGE_KEY = 'aaos_customer_table_column_widths_v2';
+const CUSTOMER_ACTION_COLUMN_WIDTH = 160;
 const formatCustomerSource = (customer: Customer) => [customer.leadSource, customer.sourceName].filter(Boolean).join('-') || '-';
 
 const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[]): CustomerColumn[] => {
@@ -104,6 +109,7 @@ const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[]): Custom
   { id: 'leadSource', label: '线索来源', render: (customer) => formatCustomerSource(customer) },
   { id: 'sourceType', label: '资源归属', render: (customer) => normalizeResourceOwnership(customer.sourceType) },
   { id: 'leadInputBy', label: '线索录入人', render: (customer) => customer.leadInputBy || '-' },
+  { id: 'leadContributorName', label: '线索贡献人', render: (customer) => customer.leadContributorName || '-' },
   { id: 'industry', label: '行业', render: (customer) => customer.industry || '-' },
   { id: 'city', label: '城市', render: (customer) => customer.city || '-' },
   { id: 'originalSalesTransferBy', label: '原销转人员', render: (customer) => customer.originalSalesTransferBy || '-' },
@@ -122,6 +128,7 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'leadSource',
   'sourceType',
   'leadInputBy',
+  'leadContributorName',
   'industry',
   'originalSalesTransferBy',
   'totalSpent',
@@ -140,6 +147,7 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   leadSource: 160,
   sourceType: 140,
   leadInputBy: 140,
+  leadContributorName: 140,
   industry: 140,
   city: 120,
   originalSalesTransferBy: 160,
@@ -149,17 +157,46 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   createdAt: 180,
 };
 
-const readVisibleColumns = (columns: CustomerColumn[]) => {
+const getDefaultCustomerViewConfig = (columns: CustomerColumn[]): CustomerViewConfig => ({
+  visibleColumnIds: DEFAULT_VISIBLE_COLUMNS.filter((id) => columns.some((column) => column.id === id)),
+  columnOrder: columns.map((column) => column.id),
+  frozenColumnCount: 0,
+});
+
+const normalizeCustomerViewConfig = (value: unknown, columns: CustomerColumn[]): CustomerViewConfig => {
+  const validIds = new Set(columns.map((column) => column.id));
+  const defaultConfig = getDefaultCustomerViewConfig(columns);
+  if (Array.isArray(value)) {
+    const visibleColumnIds = value.filter((id): id is string => typeof id === 'string' && validIds.has(id));
+    return { ...defaultConfig, visibleColumnIds: visibleColumnIds.length ? visibleColumnIds : defaultConfig.visibleColumnIds };
+  }
+  if (!value || typeof value !== 'object') return defaultConfig;
+  const config = value as Partial<CustomerViewConfig>;
+  const visibleColumnIds = Array.isArray(config.visibleColumnIds)
+    ? config.visibleColumnIds.filter((id): id is string => typeof id === 'string' && validIds.has(id))
+    : defaultConfig.visibleColumnIds;
+  const configuredOrder = Array.isArray(config.columnOrder)
+    ? config.columnOrder.filter((id): id is string => typeof id === 'string' && validIds.has(id))
+    : [];
+  const missingOrderIds = columns.map((column) => column.id).filter((id) => !configuredOrder.includes(id));
+  const frozenColumnCount = Number.isFinite(config.frozenColumnCount)
+    ? Math.max(0, Math.min(Number(config.frozenColumnCount), visibleColumnIds.length + 1))
+    : defaultConfig.frozenColumnCount;
+  return {
+    visibleColumnIds: visibleColumnIds.length ? visibleColumnIds : defaultConfig.visibleColumnIds,
+    columnOrder: [...configuredOrder, ...missingOrderIds],
+    frozenColumnCount,
+  };
+};
+
+const readCustomerViewConfig = (columns: CustomerColumn[]) => {
   try {
     const raw = localStorage.getItem(CUSTOMER_VIEW_STORAGE_KEY);
-    if (!raw) return DEFAULT_VISIBLE_COLUMNS;
+    if (!raw) return getDefaultCustomerViewConfig(columns);
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return DEFAULT_VISIBLE_COLUMNS;
-    const validIds = new Set(columns.map((column) => column.id));
-    const filtered = parsed.filter((id) => validIds.has(id));
-    return filtered.length ? filtered : DEFAULT_VISIBLE_COLUMNS;
+    return normalizeCustomerViewConfig(parsed, columns);
   } catch {
-    return DEFAULT_VISIBLE_COLUMNS;
+    return getDefaultCustomerViewConfig(columns);
   }
 };
 
@@ -189,7 +226,7 @@ const Customers: React.FC = () => {
       ? activeConfigs.map((item) => ({ value: item.value, label: item.label, color: item.color }))
       : CUSTOMER_LEVELS;
   }, [customerLevelConfigs]);
-  const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(() => readVisibleColumns(buildCustomerColumns([])));
+  const [viewConfig, setViewConfig] = useState<CustomerViewConfig>(() => readCustomerViewConfig(buildCustomerColumns([])));
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(CUSTOMER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
 
   useEffect(() => {
@@ -208,20 +245,30 @@ const Customers: React.FC = () => {
   }, [fetchItems]);
 
   useEffect(() => {
-    localStorage.setItem(CUSTOMER_VIEW_STORAGE_KEY, JSON.stringify(visibleColumnIds));
-  }, [visibleColumnIds]);
+    localStorage.setItem(CUSTOMER_VIEW_STORAGE_KEY, JSON.stringify(viewConfig));
+  }, [viewConfig]);
 
   useEffect(() => {
     writeColumnWidths(CUSTOMER_WIDTH_STORAGE_KEY, columnWidths);
   }, [columnWidths]);
 
+  const orderedColumns = useMemo(() => {
+    const columnMap = new Map(columns.map((column) => [column.id, column]));
+    const ordered = viewConfig.columnOrder
+      .map((columnId) => columnMap.get(columnId))
+      .filter((column): column is CustomerColumn => Boolean(column));
+    const missing = columns.filter((column) => !viewConfig.columnOrder.includes(column.id));
+    return [...ordered, ...missing];
+  }, [columns, viewConfig.columnOrder]);
+  const visibleColumnIds = viewConfig.visibleColumnIds;
   const visibleColumns = useMemo(
-    () => columns.filter((column) => visibleColumnIds.includes(column.id)),
-    [columns, visibleColumnIds],
+    () => orderedColumns.filter((column) => visibleColumnIds.includes(column.id)),
+    [orderedColumns, visibleColumnIds],
   );
+  const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length + 1);
   const visibleOwnerUsers = useMemo(() => filterUsersByCurrentDataScope(users), [users]);
   const tableMinWidth = useMemo(
-    () => columnWidths.name + visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + 160,
+    () => columnWidths.name + visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + CUSTOMER_ACTION_COLUMN_WIDTH,
     [columnWidths, visibleColumns],
   );
 
@@ -329,15 +376,73 @@ const Customers: React.FC = () => {
   };
 
   const handleToggleColumn = (id: string) => {
-    setVisibleColumnIds((current) => (
-      current.includes(id)
-        ? current.filter((columnId) => columnId !== id)
-        : [...current, id]
-    ));
+    setViewConfig((current) => {
+      const visibleColumnIds = current.visibleColumnIds.includes(id)
+        ? current.visibleColumnIds.filter((columnId) => columnId !== id)
+        : [...current.visibleColumnIds, id];
+      if (!visibleColumnIds.length) return current;
+      return {
+        ...current,
+        visibleColumnIds,
+        frozenColumnCount: Math.min(current.frozenColumnCount, visibleColumnIds.length + 1),
+      };
+    });
+  };
+
+  const handleReorderColumn = (sourceColumnId: string, targetColumnId: string) => {
+    setViewConfig((current) => {
+      const columnOrder = current.columnOrder.length ? current.columnOrder : columns.map((column) => column.id);
+      const sourceIndex = columnOrder.indexOf(sourceColumnId);
+      const targetIndex = columnOrder.indexOf(targetColumnId);
+      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return current;
+      const nextOrder = [...columnOrder];
+      const [movedColumnId] = nextOrder.splice(sourceIndex, 1);
+      nextOrder.splice(targetIndex, 0, movedColumnId);
+      return { ...current, columnOrder: nextOrder };
+    });
+  };
+
+  const handleFrozenColumnCountChange = (value: number) => {
+    setViewConfig((current) => ({
+      ...current,
+      frozenColumnCount: Math.max(0, Math.min(value, current.visibleColumnIds.length + 1)),
+    }));
+  };
+
+  const handleResetViewConfig = () => {
+    setViewConfig(getDefaultCustomerViewConfig(columns));
+    setColumnWidths(resetColumnWidths(DEFAULT_COLUMN_WIDTHS));
   };
 
   const handleResizeColumn = (id: string, delta: number) => {
     setColumnWidths((current) => resizeColumnWidths(current, id, delta));
+  };
+
+  const getFrozenLeft = (columnIndex: number) => {
+    const widths = [columnWidths.name, ...visibleColumns.map((column) => columnWidths[column.id] || DEFAULT_COLUMN_WIDTHS[column.id] || 120)];
+    return widths.slice(0, columnIndex).reduce((sum, width) => sum + width, 0);
+  };
+
+  const getFrozenColumnSx = (columnIndex: number, isHeader = false) => (
+    columnIndex < frozenColumnCount
+      ? {
+          position: 'sticky' as const,
+          left: getFrozenLeft(columnIndex),
+          zIndex: isHeader ? 5 : 3,
+          bgcolor: isHeader ? '#f8fafc' : '#fff',
+          boxShadow: '1px 0 0 #e5e7eb',
+        }
+      : {}
+  );
+
+  const actionColumnSx = {
+    position: 'sticky' as const,
+    right: 0,
+    zIndex: 4,
+    width: CUSTOMER_ACTION_COLUMN_WIDTH,
+    minWidth: CUSTOMER_ACTION_COLUMN_WIDTH,
+    bgcolor: '#fff',
+    boxShadow: '-1px 0 0 #e5e7eb',
   };
 
   return (
@@ -413,23 +518,29 @@ const Customers: React.FC = () => {
         <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
           <TableHead>
             <TableRow>
-              <ResizableHeaderCell columnId="name" width={columnWidths.name} onResize={handleResizeColumn}>姓名</ResizableHeaderCell>
-              {visibleColumns.map((column) => (
-                <ResizableHeaderCell key={column.id} columnId={column.id} width={columnWidths[column.id]} onResize={handleResizeColumn}>
+              <ResizableHeaderCell columnId="name" width={columnWidths.name} onResize={handleResizeColumn} sx={getFrozenColumnSx(0, true)}>姓名</ResizableHeaderCell>
+              {visibleColumns.map((column, columnIndex) => (
+                <ResizableHeaderCell
+                  key={column.id}
+                  columnId={column.id}
+                  width={columnWidths[column.id]}
+                  onResize={handleResizeColumn}
+                  sx={getFrozenColumnSx(columnIndex + 1, true)}
+                >
                   {column.label}
                 </ResizableHeaderCell>
               ))}
-              <TableCell align="center">操作</TableCell>
+              <TableCell align="center" sx={{ ...actionColumnSx, zIndex: 5, bgcolor: '#f8fafc' }}>操作</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {items.map((customer) => (
               <TableRow key={customer.id} hover>
-                <TableCell sx={{ ...getResizableCellSx(columnWidths.name), fontWeight: 500 }} title={customer.name}>{customer.name}</TableCell>
-                {visibleColumns.map((column) => (
-                  <TableCell key={column.id} sx={getResizableCellSx(columnWidths[column.id])}>{column.render(customer)}</TableCell>
+                <TableCell sx={{ ...getResizableCellSx(columnWidths.name), ...getFrozenColumnSx(0), fontWeight: 500 }} title={customer.name}>{customer.name}</TableCell>
+                {visibleColumns.map((column, columnIndex) => (
+                  <TableCell key={column.id} sx={{ ...getResizableCellSx(columnWidths[column.id]), ...getFrozenColumnSx(columnIndex + 1) }}>{column.render(customer)}</TableCell>
                 ))}
-                <TableCell align="center">
+                <TableCell align="center" sx={actionColumnSx}>
                   <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5 }}>
                     <Tooltip title="查看客户">
                       <IconButton size="small" color="primary" onClick={() => handleViewDetail(customer)}>
@@ -583,34 +694,21 @@ const Customers: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={viewSettingsOpen} onClose={() => setViewSettingsOpen(false)} maxWidth="xs" fullWidth>
-        <DialogCloseTitle onClose={() => setViewSettingsOpen(false)}>客户列表视图设置</DialogCloseTitle>
-        <DialogContent dividers>
-          <Typography variant="body2" sx={{ color: '#6b7280', mb: 2 }}>
-            勾选后会显示在客户管理列表中，设置会保存在当前浏览器。
-          </Typography>
-          <FormGroup sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.5 }}>
-            {columns.map((column) => (
-              <FormControlLabel
-                key={column.id}
-                control={(
-                  <Checkbox
-                    checked={visibleColumnIds.includes(column.id)}
-                    onChange={() => handleToggleColumn(column.id)}
-                  />
-                )}
-                label={column.label}
-              />
-            ))}
-          </FormGroup>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => {
-            setVisibleColumnIds(DEFAULT_VISIBLE_COLUMNS);
-            setColumnWidths(resetColumnWidths(DEFAULT_COLUMN_WIDTHS));
-          }}>恢复默认</Button>
-        </DialogActions>
-      </Dialog>
+      <TableViewSettingsDialog
+        open={viewSettingsOpen}
+        title="客户列表视图设置"
+        description="勾选后会显示在客户管理列表中，设置会保存在当前浏览器。"
+        columns={columns}
+        visibleColumnIds={visibleColumnIds}
+        columnOrder={viewConfig.columnOrder}
+        frozenColumnCount={viewConfig.frozenColumnCount}
+        maxFrozenColumnCount={visibleColumns.length + 1}
+        onClose={() => setViewSettingsOpen(false)}
+        onToggleColumn={handleToggleColumn}
+        onReorderColumn={handleReorderColumn}
+        onFrozenColumnCountChange={handleFrozenColumnCountChange}
+        onReset={handleResetViewConfig}
+      />
 
       <Dialog open={ordersOpen} onClose={() => setOrdersOpen(false)} maxWidth="md" fullWidth>
         <DialogCloseTitle onClose={() => setOrdersOpen(false)}>{orderCustomer?.company || orderCustomer?.name} 的订单</DialogCloseTitle>

@@ -142,6 +142,7 @@ assert.equal(typeof (commissionApi as any).fetchCommissionOrderSummaries, 'funct
 assert.equal(typeof (commissionApi as any).fetchMonthlyCommissionPayouts, 'function');
 assert.equal(typeof (commissionApi as any).payMonthlyOwnerCommissions, 'function');
 assert.equal(typeof (commissionApi as any).payMonthlyCommissionBatch, 'function');
+assert.equal(typeof (commissionApi as any).fetchCommissionOrderSummaryStatusCounts, 'function');
 
 const summariesRes = await (commissionApi as any).fetchCommissionOrderSummaries({ pageSize: 20 });
 assert.equal(summariesRes.code, 0);
@@ -150,9 +151,25 @@ const orderA = summariesRes.data.items.find((item: any) => item.orderId === 'ord
 const orderB = summariesRes.data.items.find((item: any) => item.orderId === 'order-b');
 assert.equal(orderA.status, '\u5f85\u786e\u8ba4');
 assert.equal(orderA.totalCommissionAmount, 130);
+assert.equal(orderA.resourceOwnership, zh.companyResource);
+assert.equal(orderA.refundStatus, zh.none);
+assert.equal(orderA.salesOwner, 'Sales A');
+assert.equal(orderA.officialPaymentChannel, zh.officialChannel);
+assert.equal(orderA.createdAt, now);
 assert.deepEqual(orderA.splitSummary.map((item: any) => `${item.role}:${item.amount}`).sort(), [`${zh.salesRole}:100`, `${zh.leadRole}:30`].sort());
 assert.equal(orderB.status, '\u5f85\u5904\u7406');
 assert.equal(orderB.pendingAssignCount, 1);
+
+const statusCountsRes = await (commissionApi as any).fetchCommissionOrderSummaryStatusCounts({ pageSize: 20 });
+assert.equal(statusCountsRes.code, 0);
+assert.deepEqual(statusCountsRes.data, {
+  '\u5168\u90e8': 2,
+  '\u5f85\u5904\u7406': 1,
+  '\u5f85\u786e\u8ba4': 1,
+  '\u5f85\u53d1\u653e': 0,
+  '\u5df2\u53d1\u653e': 0,
+  '\u5f02\u5e38': 0,
+});
 
 const confirmRes = await commissionApi.confirmOrderCommissions('order-a', 'order summary confirm');
 assert.equal(confirmRes.code, 0);

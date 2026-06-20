@@ -72,7 +72,7 @@ function seed(userId = 'user-finance') {
   storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({ userId, token: `token-${userId}`, remember: true, createdAt: now }));
   storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([
     { id: 'cust-direct', name: 'Direct Customer', company: 'Direct Customer', phone: '13900000001', customerLevel: 'L1', owner: 'Sales A', totalSpent: 0, orderCount: 0, growthPath: [], growthRecords: [], sourceType: zh.companyResource, createdAt: now, updatedAt: now },
-    { id: 'cust-lead', name: 'Lead Customer', company: 'Lead Customer', phone: '13900000002', customerLevel: 'L1', owner: 'Sales A', leadInputBy: 'Lead A', totalSpent: 0, orderCount: 0, growthPath: [], growthRecords: [], sourceType: zh.companyResource, createdAt: now, updatedAt: now },
+    { id: 'cust-lead', name: 'Lead Customer', company: 'Lead Customer', phone: '13900000002', customerLevel: 'L1', owner: 'Sales A', leadInputBy: 'Sales A', leadContributorId: 'user-lead', leadContributorName: 'Lead A', totalSpent: 0, orderCount: 0, growthPath: [], growthRecords: [], sourceType: zh.companyResource, createdAt: now, updatedAt: now },
   ]));
   storage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify([]));
   storage.setItem(STORAGE_KEYS.ORDER_APPLICATIONS, JSON.stringify([]));
@@ -152,9 +152,8 @@ assert.equal(typeof (commissionApi as any).confirmOrderCommissions, 'function');
 seed();
 const directOrderId = await approveOrder('cust-direct', 'Direct Customer');
 let directCommissions = ((await (commissionApi as any).fetchCommissionsByOrder(directOrderId)).data || []) as Commission[];
-assert.deepEqual(directCommissions.map((item) => item.role).sort(), [zh.leadRole, zh.salesRole].sort());
+assert.deepEqual(directCommissions.map((item) => item.role).sort(), [zh.salesRole].sort());
 assert.equal(directCommissions.find((item) => item.role === zh.salesRole)?.owner, 'Sales A');
-assert.equal(directCommissions.find((item) => item.role === zh.leadRole)?.owner, '待分配');
 assert.equal(directCommissions.every((item) => item.status === zh.pendingConfirm), true);
 
 const leadOrderId = await approveOrder('cust-lead', 'Lead Customer', 'Lead A');

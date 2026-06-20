@@ -66,7 +66,11 @@ export interface Lead {
   orderId?: ID;
   intakeStatus?: LeadIntakeStatus;
   intakeFailureReason?: string;
+  /** 线索录入人：操作留痕，不等同于贡献人 */
   inputBy?: string;
+  /** 线索贡献人：资源归属和线索分成依据 */
+  leadContributorId?: ID;
+  leadContributorName?: string;
   assignedTo?: string;
   assignedAt?: Timestamp;
   assignmentRuleId?: ID;

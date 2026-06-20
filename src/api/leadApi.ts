@@ -1,7 +1,7 @@
 import type { Lead, LeadFilters, FollowUpRecord, LeadAIAnalysis } from '../types/lead';
 import type { Customer } from '../types/customer';
 import type { ApiResponse, PaginatedResponse } from './types';
-import { createSuccessResponse, delay } from './types';
+import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
@@ -15,6 +15,17 @@ function ensureInit(): void {
   initializeMockData();
 }
 
+function isPersonalResource(value?: string): boolean {
+  return normalizeResourceOwnership(value) === '个人资源';
+}
+
+function validateLeadAttribution(data: Partial<Lead>): string | null {
+  if (isPersonalResource(data.sourceType) && !data.leadContributorName && !data.leadContributorId) {
+    return '个人资源必须填写线索贡献人';
+  }
+  return null;
+}
+
 const LEAD_CHANGE_FIELDS: Array<{ field: keyof Lead; label: string }> = [
   { field: 'name', label: '姓名' },
   { field: 'company', label: '公司' },
@@ -24,6 +35,7 @@ const LEAD_CHANGE_FIELDS: Array<{ field: keyof Lead; label: string }> = [
   { field: 'industry', label: '行业' },
   { field: 'city', label: '城市' },
   { field: 'inputBy', label: '线索录入人' },
+  { field: 'leadContributorName', label: '线索贡献人' },
   { field: 'assignedTo', label: '分配销售' },
   { field: 'tags', label: '标签' },
   { field: 'remark', label: '备注' },
@@ -159,14 +171,19 @@ async function updateLead(id: string, data: Partial<Lead>): Promise<ApiResponse<
   if (idx === -1) return createSuccessResponse(null);
   const now = new Date().toISOString();
   const existing = normalizeLead(leads[idx]);
+  const merged = {
+    ...existing,
+    ...data,
+    sourceType: normalizeResourceOwnership(data.sourceType || existing.sourceType),
+  };
+  const validationError = validateLeadAttribution(merged);
+  if (validationError) return createErrorResponse(validationError);
   const changes = buildLeadChanges(existing, data);
   const history = existing.changeHistory || [];
   const assignedChanged = changes.some((item) => item.field === 'assignedTo');
   const operator = getCurrentOperatorName(existing.inputBy || existing.owner);
   leads[idx] = {
-    ...existing,
-    ...data,
-    sourceType: normalizeResourceOwnership(data.sourceType || existing.sourceType),
+    ...merged,
     assignedAt: assignedChanged ? now : data.assignedAt || existing.assignedAt,
     changeHistory: changes.length > 0
       ? [{

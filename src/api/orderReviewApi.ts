@@ -6,12 +6,13 @@ import type {
   OrderApplicationStatus,
 } from '../types/order';
 import type { AuthSession } from '../types/auth';
+import type { Customer } from '../types/customer';
 import type { Role } from '../types/role';
 import type { User } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { DEFAULT_PAGE_SIZE, STORAGE_KEYS } from '../shared/utils/constants';
+import { DEFAULT_PAGE_SIZE, STORAGE_KEYS, normalizeResourceOwnership } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { getCurrentDataVisibilityScope } from '../shared/utils/dataVisibility';
 import { normalizeUserRoleName } from '../shared/utils/roles';
@@ -75,6 +76,22 @@ function getStoredApplications(): OrderApplication[] {
 
 function saveApplications(applications: OrderApplication[]): void {
   setStorageData(STORAGE_KEYS.ORDER_APPLICATIONS, applications);
+}
+
+function enrichOrderDataFromCustomer(data: OrderApplicationInput): OrderApplicationInput {
+  if (!data.customerId) return data;
+  const customers = readJson<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+  const customer = customers.find((item) => item.id === data.customerId);
+  if (!customer) return data;
+  return {
+    ...data,
+    sourceType: customer.leadSource || data.sourceType,
+    leadSource: customer.leadSource || data.leadSource,
+    leadInputBy: customer.leadInputBy || data.leadInputBy,
+    leadContributorId: customer.leadContributorId || data.leadContributorId,
+    leadContributorName: customer.leadContributorName || data.leadContributorName,
+    resourceOwnership: normalizeResourceOwnership(customer.sourceType || data.resourceOwnership || data.sourceType),
+  };
 }
 
 function currentOperator(fallbackName?: string): { id?: string; name: string } {
@@ -149,11 +166,12 @@ async function submitOrderApplication(data: OrderApplicationInput): Promise<ApiR
   const applications = getStoredApplications();
   const now = new Date().toISOString();
   const operator = currentOperator(data.owner);
+  const orderData = enrichOrderDataFromCustomer(data);
   const application: OrderApplication = {
     id: `oa-${uuidv4().slice(0, 8)}`,
     applicationNo: `OAPP-${now.slice(0, 10).replace(/-/g, '')}-${String(applications.length + 1).padStart(4, '0')}`,
     status: STATUS_PENDING_REVIEW,
-    orderData: data,
+    orderData,
     applicantId: operator.id,
     applicantName: operator.name,
     submittedAt: now,
@@ -185,7 +203,7 @@ async function updateReturnedOrderApplication(id: string, data: OrderApplication
   applications[idx] = {
     ...applications[idx],
     status: STATUS_PENDING_REVIEW,
-    orderData: data,
+    orderData: enrichOrderDataFromCustomer(data),
     reason: undefined,
     submittedAt: now,
     reviewedAt: undefined,
@@ -207,7 +225,8 @@ async function approveOrderApplication(id: string): Promise<ApiResponse<OrderApp
   if (idx === -1) return createSuccessResponse(null);
   if (applications[idx].status !== STATUS_PENDING_REVIEW) return createErrorResponse('只有待财务审核的订单申请可以入库');
 
-  const created = await orderApi.createOrder(applications[idx].orderData);
+  const orderData = enrichOrderDataFromCustomer(applications[idx].orderData);
+  const created = await orderApi.createOrder(orderData);
   if (created.code !== 0) return createErrorResponse(created.message);
 
   const now = new Date().toISOString();
@@ -215,6 +234,7 @@ async function approveOrderApplication(id: string): Promise<ApiResponse<OrderApp
   applications[idx] = {
     ...applications[idx],
     status: STATUS_APPROVED,
+    orderData,
     reviewerId: reviewer.id,
     reviewerName: reviewer.name,
     reviewedAt: now,

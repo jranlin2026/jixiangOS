@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { Box, Typography, Grid, Card, CardContent, Tabs, Tab, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Chip } from '@mui/material';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Box, Typography, Grid, Card, CardContent, Tabs, Tab, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination, TableRow, Paper, Chip } from '@mui/material';
 import useFinanceStore from '../../store/useFinanceStore';
-import { formatCurrency, formatDate } from '../../shared/utils/formatters';
+import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import { getProductLevelColor } from '../../shared/utils/constants';
 import RevenueTrend from './RevenueTrend';
 import ChannelROIChart from './ChannelROI';
@@ -24,6 +24,10 @@ const Finance: React.FC = () => {
   const [tabValue, setTabValue] = useState(0);
   const [incomes, setIncomes] = useState<FinanceIncome[]>([]);
   const [expenses, setExpenses] = useState<FinanceExpense[]>([]);
+  const [incomePage, setIncomePage] = useState(0);
+  const [incomeRowsPerPage, setIncomeRowsPerPage] = useState(10);
+  const [expensePage, setExpensePage] = useState(0);
+  const [expenseRowsPerPage, setExpenseRowsPerPage] = useState(10);
 
   useEffect(() => {
     fetchStats();
@@ -36,18 +40,33 @@ const Finance: React.FC = () => {
     if (tabValue === 1) {
       import('../../api').then(({ financeApi }) => {
         financeApi.fetchIncomes().then((res) => {
-          if (res.code === 0 && res.data) setIncomes(res.data);
+          if (res.code === 0 && res.data) {
+            setIncomes(res.data);
+            setIncomePage(0);
+          }
         });
       });
     }
     if (tabValue === 2) {
       import('../../api').then(({ financeApi }) => {
         financeApi.fetchExpenses().then((res) => {
-          if (res.code === 0 && res.data) setExpenses(res.data);
+          if (res.code === 0 && res.data) {
+            setExpenses(res.data);
+            setExpensePage(0);
+          }
         });
       });
     }
   }, [tabValue]);
+
+  const pagedIncomes = useMemo(
+    () => incomes.slice(incomePage * incomeRowsPerPage, incomePage * incomeRowsPerPage + incomeRowsPerPage),
+    [incomePage, incomeRowsPerPage, incomes],
+  );
+  const pagedExpenses = useMemo(
+    () => expenses.slice(expensePage * expenseRowsPerPage, expensePage * expenseRowsPerPage + expenseRowsPerPage),
+    [expensePage, expenseRowsPerPage, expenses],
+  );
 
   const statCards = stats ? [
     { label: '总收入', value: formatCurrency(stats.totalRevenue), color: '#2196F3' },
@@ -104,7 +123,7 @@ const Finance: React.FC = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {incomes.map((income) => {
+              {pagedIncomes.map((income) => {
                 const levelColor = getProductLevelColor(income.productLevel);
                 return (
                   <TableRow key={income.id} hover>
@@ -127,6 +146,26 @@ const Finance: React.FC = () => {
             </TableBody>
           </Table>
         </TableContainer>
+        <TablePagination
+          component="div"
+          count={incomes.length}
+          page={incomePage}
+          rowsPerPage={incomeRowsPerPage}
+          rowsPerPageOptions={[10, 20, 50, 100]}
+          onPageChange={(_, page) => setIncomePage(page)}
+          onRowsPerPageChange={(event) => {
+            setIncomeRowsPerPage(Number(event.target.value));
+            setIncomePage(0);
+          }}
+          labelRowsPerPage="每页条数"
+          labelDisplayedRows={formatPaginationRows}
+          sx={{
+            border: '1px solid #f0f0f0',
+            borderTop: 0,
+            bgcolor: '#fff',
+            '& .MuiTablePagination-toolbar': { minHeight: 48 },
+          }}
+        />
       </TabPanel>
 
       <TabPanel value={tabValue} index={2}>
@@ -142,7 +181,7 @@ const Finance: React.FC = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {expenses.map((expense) => (
+              {pagedExpenses.map((expense) => (
                 <TableRow key={expense.id} hover>
                   <TableCell>
                     <Chip label={expense.category} size="small" variant="outlined" />
@@ -161,6 +200,26 @@ const Finance: React.FC = () => {
             </TableBody>
           </Table>
         </TableContainer>
+        <TablePagination
+          component="div"
+          count={expenses.length}
+          page={expensePage}
+          rowsPerPage={expenseRowsPerPage}
+          rowsPerPageOptions={[10, 20, 50, 100]}
+          onPageChange={(_, page) => setExpensePage(page)}
+          onRowsPerPageChange={(event) => {
+            setExpenseRowsPerPage(Number(event.target.value));
+            setExpensePage(0);
+          }}
+          labelRowsPerPage="每页条数"
+          labelDisplayedRows={formatPaginationRows}
+          sx={{
+            border: '1px solid #f0f0f0',
+            borderTop: 0,
+            bgcolor: '#fff',
+            '& .MuiTablePagination-toolbar': { minHeight: 48 },
+          }}
+        />
       </TabPanel>
     </Box>
   );

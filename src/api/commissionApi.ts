@@ -5,6 +5,7 @@ import type {
   CommissionFilters,
   CommissionOrderSummary,
   CommissionOrderSummaryFilters,
+  CommissionOrderSummaryStatusCounts,
   CommissionSettlementBatch,
   MonthlyCommissionPayout,
   CommissionStats,
@@ -212,6 +213,14 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
       orderType: order?.orderType || first.scene || '',
       paymentDate,
       orderAmount,
+      resourceOwnership: order?.resourceOwnership || first.resourceOwnership,
+      refundStatus: order?.refundStatus,
+      salesOwner: order?.salesName || order?.owner || '',
+      salesId: order?.salesId,
+      salesName: order?.salesName,
+      sourceType: order?.sourceType,
+      officialPaymentChannel: order?.officialPaymentChannel,
+      createdAt: order?.createdAt || first.createdAt,
       totalCommissionAmount: Math.round(sortedRows.reduce((sumValue, item) => sumValue + item.commissionAmount, 0) * 100) / 100,
       pendingAssignCount: sortedRows.filter(isPendingAssignment).length,
       exceptionCount: sortedRows.filter(isCommissionException).length,
@@ -254,6 +263,25 @@ async function fetchCommissionOrderSummaries(filters?: CommissionOrderSummaryFil
   const totalPages = Math.ceil(total / pageSize);
   const items = filtered.slice((page - 1) * pageSize, page * pageSize);
   return createSuccessResponse({ items, pagination: { page, pageSize, total, totalPages } });
+}
+
+async function fetchCommissionOrderSummaryStatusCounts(filters?: CommissionOrderSummaryFilters): Promise<ApiResponse<CommissionOrderSummaryStatusCounts>> {
+  ensureInit();
+  await delay(120);
+  const summaries = buildCommissionOrderSummaries(getAllCommissions());
+  const filtered = applyOrderSummaryFilters(summaries, { ...filters, status: '全部' });
+  const counts: CommissionOrderSummaryStatusCounts = {
+    全部: filtered.length,
+    待处理: 0,
+    待确认: 0,
+    待发放: 0,
+    已发放: 0,
+    异常: 0,
+  };
+  filtered.forEach((summary) => {
+    counts[summary.status] += 1;
+  });
+  return createSuccessResponse(counts);
 }
 
 function resolveAdjustmentUser(input: CommissionAdjustmentInput): { user?: User; department?: Department; error?: string } {
@@ -768,6 +796,7 @@ export const commissionApi = {
   fetchCommissions,
   fetchCommissionsByOrder,
   fetchCommissionOrderSummaries,
+  fetchCommissionOrderSummaryStatusCounts,
   fetchMonthlyCommissionPayouts,
   fetchCommissionStats,
   fetchCommissionAuditIssues,

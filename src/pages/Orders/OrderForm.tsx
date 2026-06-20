@@ -194,6 +194,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     originalOrderId: '',
     sourceType: '',
     leadInputBy: '',
+    leadContributorId: '',
+    leadContributorName: '',
     owner: '张伟',
     notes: '',
     refundStatus: '无' as Order['refundStatus'],
@@ -222,6 +224,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
         productLevel: customer?.productLevel || prev.productLevel,
         sourceType: sourceTypeFromCustomer(customer, prev.sourceType),
         leadInputBy: customer?.leadInputBy || prev.leadInputBy,
+        leadContributorId: customer?.leadContributorId || prev.leadContributorId,
+        leadContributorName: customer?.leadContributorName || prev.leadContributorName,
         resourceOwnership: resourceOwnershipFromCustomer(customer, prev.resourceOwnership),
         paymentDate: toDateTimeInputValue(new Date()),
       }));
@@ -268,7 +272,9 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       collaboratorRatio: sourceOrder.collaboratorRatio || 0,
       originalOrderId: sourceOrder.originalOrderId || '',
       sourceType: sourceOrder.sourceType || prev.sourceType,
-      leadInputBy: sourceOrder.leadInputBy || sourceOrder.leadContributorName || prev.leadInputBy,
+      leadInputBy: sourceOrder.leadInputBy || prev.leadInputBy,
+      leadContributorId: sourceOrder.leadContributorId || prev.leadContributorId,
+      leadContributorName: sourceOrder.leadContributorName || prev.leadContributorName,
       owner: sourceOrder.owner,
       notes: sourceOrder.notes || '',
       refundStatus: sourceOrder.refundStatus,
@@ -448,6 +454,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       productLevel: selected?.productLevel || form.productLevel,
       sourceType: sourceTypeFromCustomer(selected, form.sourceType),
       leadInputBy: selected?.leadInputBy || '',
+      leadContributorId: selected?.leadContributorId || '',
+      leadContributorName: selected?.leadContributorName || '',
       resourceOwnership: resourceOwnershipFromCustomer(selected, form.resourceOwnership),
     });
     if (selected) {
@@ -550,7 +558,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       collaboratorRatio: Number(form.collaboratorRatio) || undefined,
       collaboratorName: form.collaboratorName || undefined,
       leadInputBy: form.leadInputBy || undefined,
-      leadContributorName: form.leadInputBy || undefined,
+      leadContributorId: form.leadContributorId || undefined,
+      leadContributorName: form.leadContributorName || undefined,
       originalOrderId: form.originalOrderId || undefined,
       dealEvidenceName: dealEvidenceName || undefined,
       dealEvidencePreview: dealEvidencePreview || undefined,
@@ -649,11 +658,13 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
             ))}
           </TextField>
-          <TextField select label="资源归属" value={form.resourceOwnership} onChange={handleChange('resourceOwnership')} fullWidth>
+          <TextField select label="资源归属" value={form.resourceOwnership} onChange={handleChange('resourceOwnership')} fullWidth disabled={!!form.customerId}>
             {RESOURCE_OWNERSHIPS.map((item) => (
               <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
             ))}
           </TextField>
+          <TextField label="线索录入人" value={form.leadInputBy || '-'} fullWidth InputProps={{ readOnly: true }} />
+          <TextField label="线索贡献人" value={form.leadContributorName || '-'} fullWidth InputProps={{ readOnly: true }} />
           <TextField label="实付金额" type="number" value={form.actualAmount} onChange={handleChange('actualAmount')} fullWidth />
           <TextField label="付款时间" type="datetime-local" value={form.paymentDate} onChange={handleChange('paymentDate')} fullWidth InputLabelProps={{ shrink: true }} />
           <TextField label="付款订单号" value={form.paymentOrderNo} onChange={handleChange('paymentOrderNo')} placeholder="上传截图识别后自动填写" fullWidth />

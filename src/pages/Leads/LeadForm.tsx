@@ -85,6 +85,8 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     sourceName: '',
     owner: '待分配',
     inputBy: '',
+    leadContributorId: '',
+    leadContributorName: '',
     industry: '',
     city: '',
     sourceType: '公司资源',
@@ -117,6 +119,8 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
       sourceName: defaultSourceName,
       owner: lead?.owner || '待分配',
       inputBy: defaultInputBy,
+      leadContributorId: lead?.leadContributorId || '',
+      leadContributorName: lead?.leadContributorName || '',
       industry: lead?.industry || '',
       city: lead?.city || '',
       sourceType: normalizeResourceOwnership(lead?.sourceType),
@@ -132,6 +136,15 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
 
   const handleChange = (field: string) => (event: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [field]: event.target.value });
+  };
+
+  const handleContributorSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const user = users.find((item) => item.id === event.target.value);
+    setForm({
+      ...form,
+      leadContributorId: user?.id || '',
+      leadContributorName: user?.name || '',
+    });
   };
 
   const handleSourceSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -171,8 +184,9 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
   };
 
   const missingContact = !form.phone.trim() && !form.wechat.trim();
+  const missingContributor = normalizeResourceOwnership(form.sourceType) === '个人资源' && !form.leadContributorName;
   const showContactError = !isEdit && !!form.name.trim() && missingContact;
-  const canSubmit = !!form.name.trim() && !missingContact && !!form.source && !!form.inputBy;
+  const canSubmit = !!form.name.trim() && !missingContact && !missingContributor && !!form.source && !!form.inputBy;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
@@ -230,6 +244,21 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
           <TextField select label="线索录入人" value={form.inputBy} onChange={handleChange('inputBy')} fullWidth helperText="默认当前登录人员">
             {users.map((user) => (
               <MenuItem key={user.id} value={user.name}>{user.name}</MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            select
+            label="线索贡献人"
+            value={form.leadContributorId}
+            onChange={handleContributorSelect}
+            fullWidth
+            required={normalizeResourceOwnership(form.sourceType) === '个人资源'}
+            helperText={missingContributor ? '个人资源必须填写线索贡献人' : '用于线索分成归属，可与录入人不同'}
+            error={missingContributor}
+          >
+            <MenuItem value="">无</MenuItem>
+            {users.map((user) => (
+              <MenuItem key={user.id} value={user.id}>{user.name}</MenuItem>
             ))}
           </TextField>
           <TextField select label="分配销售" value={form.owner} onChange={handleChange('owner')} fullWidth helperText="开启自动分配时会按流转规则覆盖">

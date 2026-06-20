@@ -243,6 +243,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       city: draft.city,
       owner: draft.owner,
       leadInputBy: draft.leadInputBy,
+      leadContributorId: draft.leadContributorId,
+      leadContributorName: draft.leadContributorName,
       customerLevel: draft.customerLevel,
       originalSalesTransferBy: draft.originalSalesTransferBy,
       remark: draft.remark,
@@ -311,6 +313,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
 
   const renderInfoRow = (label: string, field: keyof Customer, editable = true) => {
     const isUserField = field === 'owner' || field === 'leadInputBy' || field === 'originalSalesTransferBy';
+    const isContributorField = field === 'leadContributorName';
     const isResourceField = field === 'sourceType';
     const isCustomerLevelField = field === 'customerLevel';
     const currentValue = (draft[field] as string) || '';
@@ -334,6 +337,28 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               >
                 {RESOURCE_OWNERSHIPS.map((item) => (
                   <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
+                ))}
+              </TextField>
+            ) : isContributorField ? (
+              <TextField
+                select
+                value={(draft.leadContributorId as string) || ''}
+                onChange={(event) => {
+                  const user = users.find((item) => item.id === event.target.value);
+                  setDraft((prev) => ({
+                    ...prev,
+                    leadContributorId: user?.id || '',
+                    leadContributorName: user?.name || '',
+                  }));
+                }}
+                size="small"
+                fullWidth
+              >
+                <MenuItem value="">无</MenuItem>
+                {users.map((user) => (
+                  <MenuItem key={user.id} value={user.id}>
+                    {user.name}（{user.role}）
+                  </MenuItem>
                 ))}
               </TextField>
             ) : isUserField ? (
@@ -679,6 +704,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               {renderInfoRow('城市', 'city')}
               {renderInfoRow('销售负责人', 'owner')}
               {renderInfoRow('线索录入人', 'leadInputBy')}
+              {renderInfoRow('线索贡献人', 'leadContributorName')}
               {renderInfoRow('客户等级', 'customerLevel')}
               {renderInfoRow('原销转人员', 'originalSalesTransferBy')}
               {renderInfoRow('累计消费', 'totalSpent', false)}

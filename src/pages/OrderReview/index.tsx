@@ -31,7 +31,7 @@ import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { canReviewOrderApplications, orderReviewApi, ORDER_APPLICATION_STATUSES } from '../../api';
 import type { OrderApplication, OrderApplicationFilters, OrderApplicationStatus } from '../../types/order';
-import { formatCurrency } from '../../shared/utils/formatters';
+import { formatCurrency, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import OrderForm from '../Orders/OrderForm';
 import { ROUTES } from '../../shared/utils/constants';
@@ -209,8 +209,8 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
         )}
       </Box>
 
-      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0' }}>
-        <Table>
+      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
+        <Table sx={{ minWidth: 1180 }}>
           <TableHead>
             <TableRow>
               <TableCell>申请编号</TableCell>
@@ -223,7 +223,20 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
               <TableCell>提交时间</TableCell>
               <TableCell>审核人</TableCell>
               <TableCell>原因</TableCell>
-              <TableCell align="center" sx={{ width: 260 }}>操作</TableCell>
+              <TableCell
+                align="center"
+                sx={{
+                  position: 'sticky',
+                  right: 0,
+                  zIndex: 5,
+                  width: 260,
+                  minWidth: 260,
+                  bgcolor: '#f8fafc',
+                  boxShadow: '-1px 0 0 #e5e7eb',
+                }}
+              >
+                操作
+              </TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -259,7 +272,18 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
                       <Typography variant="body2" noWrap>{application.reason || '-'}</Typography>
                     </Tooltip>
                   </TableCell>
-                  <TableCell align="center">
+                  <TableCell
+                    align="center"
+                    sx={{
+                      position: 'sticky',
+                      right: 0,
+                      zIndex: 4,
+                      width: 260,
+                      minWidth: 260,
+                      bgcolor: '#fff',
+                      boxShadow: '-1px 0 0 #e5e7eb',
+                    }}
+                  >
                     <Box sx={{ display: 'flex', gap: 0.75, justifyContent: 'center', flexWrap: 'wrap' }}>
                       {canFinanceOperate && (
                         <>
@@ -305,10 +329,17 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
         count={pagination.total}
         page={Math.max((pagination.page || 1) - 1, 0)}
         rowsPerPage={pagination.pageSize || 10}
-        rowsPerPageOptions={[10, 20, 50]}
+        rowsPerPageOptions={[10, 20, 50, 100]}
         onPageChange={handlePageChange}
         onRowsPerPageChange={handleRowsPerPageChange}
         labelRowsPerPage="每页条数"
+        labelDisplayedRows={formatPaginationRows}
+        sx={{
+          border: '1px solid #f0f0f0',
+          borderTop: 0,
+          bgcolor: '#fff',
+          '& .MuiTablePagination-toolbar': { minHeight: 48 },
+        }}
       />
 
       <OrderForm

@@ -276,6 +276,14 @@ export interface CommissionOrderSummary {
   orderType: string;
   paymentDate: Timestamp;
   orderAmount: number;
+  resourceOwnership?: ResourceOwnership | '';
+  refundStatus?: string;
+  salesOwner?: string;
+  salesId?: ID;
+  salesName?: string;
+  sourceType?: string;
+  officialPaymentChannel?: OfficialPaymentChannel;
+  createdAt?: Timestamp;
   totalCommissionAmount: number;
   pendingAssignCount: number;
   exceptionCount: number;
@@ -295,6 +303,8 @@ export interface CommissionOrderSummaryFilters {
   page?: number;
   pageSize?: number;
 }
+
+export type CommissionOrderSummaryStatusCounts = Record<CommissionOrderSummaryStatus | '全部', number>;
 
 export interface MonthlyCommissionPayout {
   period: string;

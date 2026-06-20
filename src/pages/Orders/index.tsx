@@ -2,14 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Button,
-  Checkbox,
   Chip,
   Dialog,
   DialogActions,
   DialogContent,
   FormControl,
-  FormControlLabel,
-  FormGroup,
   IconButton,
   InputLabel,
   MenuItem,
@@ -53,6 +50,7 @@ import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
 import type { OrderTypeConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import PermissionGate from '../../shared/auth/PermissionGate';
 import { PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { filterUsersByCurrentDataScope } from '../../shared/utils/dataVisibility';
@@ -70,8 +68,15 @@ type OrderColumn = {
   label: string;
 };
 
-const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_columns_v2';
+type OrderViewConfig = {
+  visibleColumnIds: string[];
+  columnOrder: string[];
+  frozenColumnCount: number;
+};
+
+const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_view_v3';
 const ORDER_WIDTH_STORAGE_KEY = 'aaos_order_table_column_widths_v1';
+const ORDER_ACTION_COLUMN_WIDTH = 160;
 
 const ORDER_COLUMNS: OrderColumn[] = [
   { id: 'customer', label: '客户' },
@@ -110,17 +115,46 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   createdAt: 180,
 };
 
-const readVisibleColumns = () => {
+const getDefaultOrderViewConfig = (): OrderViewConfig => ({
+  visibleColumnIds: DEFAULT_VISIBLE_COLUMNS.filter((id) => ORDER_COLUMNS.some((column) => column.id === id)),
+  columnOrder: ORDER_COLUMNS.map((column) => column.id),
+  frozenColumnCount: 0,
+});
+
+const normalizeOrderViewConfig = (value: unknown): OrderViewConfig => {
+  const validIds = new Set(ORDER_COLUMNS.map((column) => column.id));
+  const defaultConfig = getDefaultOrderViewConfig();
+  if (Array.isArray(value)) {
+    const visibleColumnIds = value.filter((id): id is string => typeof id === 'string' && validIds.has(id));
+    return { ...defaultConfig, visibleColumnIds: visibleColumnIds.length ? visibleColumnIds : defaultConfig.visibleColumnIds };
+  }
+  if (!value || typeof value !== 'object') return defaultConfig;
+  const config = value as Partial<OrderViewConfig>;
+  const visibleColumnIds = Array.isArray(config.visibleColumnIds)
+    ? config.visibleColumnIds.filter((id): id is string => typeof id === 'string' && validIds.has(id))
+    : defaultConfig.visibleColumnIds;
+  const configuredOrder = Array.isArray(config.columnOrder)
+    ? config.columnOrder.filter((id): id is string => typeof id === 'string' && validIds.has(id))
+    : [];
+  const missingOrderIds = ORDER_COLUMNS.map((column) => column.id).filter((id) => !configuredOrder.includes(id));
+  const frozenColumnCount = Number.isFinite(config.frozenColumnCount)
+    ? Math.max(0, Math.min(Number(config.frozenColumnCount), visibleColumnIds.length + 1))
+    : defaultConfig.frozenColumnCount;
+  return {
+    visibleColumnIds: visibleColumnIds.length ? visibleColumnIds : defaultConfig.visibleColumnIds,
+    columnOrder: [...configuredOrder, ...missingOrderIds],
+    frozenColumnCount,
+  };
+};
+
+const readOrderViewConfig = () => {
   try {
     const raw = localStorage.getItem(ORDER_VIEW_STORAGE_KEY);
-    if (!raw) return DEFAULT_VISIBLE_COLUMNS;
+    if (!raw) return getDefaultOrderViewConfig();
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return DEFAULT_VISIBLE_COLUMNS;
-    const validIds = new Set(ORDER_COLUMNS.map((column) => column.id));
-    const filtered = parsed.filter((id) => validIds.has(id));
-    return filtered.length ? filtered : DEFAULT_VISIBLE_COLUMNS;
+    return normalizeOrderViewConfig(parsed);
   } catch {
-    return DEFAULT_VISIBLE_COLUMNS;
+    return getDefaultOrderViewConfig();
   }
 };
 
@@ -144,7 +178,7 @@ const Orders: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [customerNameMap, setCustomerNameMap] = useState<Record<string, string>>({});
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
-  const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(readVisibleColumns);
+  const [viewConfig, setViewConfig] = useState<OrderViewConfig>(readOrderViewConfig);
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(ORDER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
   const [orderLookupMessage, setOrderLookupMessage] = useState('');
 
@@ -169,8 +203,8 @@ const Orders: React.FC = () => {
   }, [fetchItems, fetchStats]);
 
   useEffect(() => {
-    localStorage.setItem(ORDER_VIEW_STORAGE_KEY, JSON.stringify(visibleColumnIds));
-  }, [visibleColumnIds]);
+    localStorage.setItem(ORDER_VIEW_STORAGE_KEY, JSON.stringify(viewConfig));
+  }, [viewConfig]);
 
   useEffect(() => {
     writeColumnWidths(ORDER_WIDTH_STORAGE_KEY, columnWidths);
@@ -268,15 +302,73 @@ const Orders: React.FC = () => {
   };
 
   const handleToggleColumn = (id: string) => {
-    setVisibleColumnIds((current) => (
-      current.includes(id)
-        ? current.filter((columnId) => columnId !== id)
-        : [...current, id]
-    ));
+    setViewConfig((current) => {
+      const visibleColumnIds = current.visibleColumnIds.includes(id)
+        ? current.visibleColumnIds.filter((columnId) => columnId !== id)
+        : [...current.visibleColumnIds, id];
+      if (!visibleColumnIds.length) return current;
+      return {
+        ...current,
+        visibleColumnIds,
+        frozenColumnCount: Math.min(current.frozenColumnCount, visibleColumnIds.length + 1),
+      };
+    });
+  };
+
+  const handleReorderColumn = (sourceColumnId: string, targetColumnId: string) => {
+    setViewConfig((current) => {
+      const columnOrder = current.columnOrder.length ? current.columnOrder : ORDER_COLUMNS.map((column) => column.id);
+      const sourceIndex = columnOrder.indexOf(sourceColumnId);
+      const targetIndex = columnOrder.indexOf(targetColumnId);
+      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return current;
+      const nextOrder = [...columnOrder];
+      const [movedColumnId] = nextOrder.splice(sourceIndex, 1);
+      nextOrder.splice(targetIndex, 0, movedColumnId);
+      return { ...current, columnOrder: nextOrder };
+    });
+  };
+
+  const handleFrozenColumnCountChange = (value: number) => {
+    setViewConfig((current) => ({
+      ...current,
+      frozenColumnCount: Math.max(0, Math.min(value, current.visibleColumnIds.length + 1)),
+    }));
+  };
+
+  const handleResetViewConfig = () => {
+    setViewConfig(getDefaultOrderViewConfig());
+    setColumnWidths(resetColumnWidths(DEFAULT_COLUMN_WIDTHS));
   };
 
   const handleResizeColumn = (id: string, delta: number) => {
     setColumnWidths((current) => resizeColumnWidths(current, id, delta));
+  };
+
+  const getFrozenLeft = (columnIndex: number) => {
+    const widths = [columnWidths.orderNo, ...visibleColumns.map((column) => columnWidths[column.id] || DEFAULT_COLUMN_WIDTHS[column.id] || 120)];
+    return widths.slice(0, columnIndex).reduce((sum, width) => sum + width, 0);
+  };
+
+  const getFrozenColumnSx = (columnIndex: number, isHeader = false) => (
+    columnIndex < frozenColumnCount
+      ? {
+          position: 'sticky' as const,
+          left: getFrozenLeft(columnIndex),
+          zIndex: isHeader ? 5 : 3,
+          bgcolor: isHeader ? '#f8fafc' : '#fff',
+          boxShadow: '1px 0 0 #e5e7eb',
+        }
+      : {}
+  );
+
+  const actionColumnSx = {
+    position: 'sticky' as const,
+    right: 0,
+    zIndex: 4,
+    width: ORDER_ACTION_COLUMN_WIDTH,
+    minWidth: ORDER_ACTION_COLUMN_WIDTH,
+    bgcolor: '#fff',
+    boxShadow: '-1px 0 0 #e5e7eb',
   };
 
   const handleViewCustomer = async (order: Order) => {
@@ -346,13 +438,23 @@ const Orders: React.FC = () => {
   const selectedOrderType = orderTypeOptions.some((item) => item.name === filters.orderType)
     ? filters.orderType || ''
     : '';
+  const orderedColumns = useMemo(() => {
+    const columnMap = new Map(ORDER_COLUMNS.map((column) => [column.id, column]));
+    const ordered = viewConfig.columnOrder
+      .map((columnId) => columnMap.get(columnId))
+      .filter((column): column is OrderColumn => Boolean(column));
+    const missing = ORDER_COLUMNS.filter((column) => !viewConfig.columnOrder.includes(column.id));
+    return [...ordered, ...missing];
+  }, [viewConfig.columnOrder]);
+  const visibleColumnIds = viewConfig.visibleColumnIds;
   const visibleColumns = useMemo(
-    () => ORDER_COLUMNS.filter((column) => visibleColumnIds.includes(column.id)),
-    [visibleColumnIds],
+    () => orderedColumns.filter((column) => visibleColumnIds.includes(column.id)),
+    [orderedColumns, visibleColumnIds],
   );
+  const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length + 1);
   const visibleOwnerUsers = useMemo(() => filterUsersByCurrentDataScope(users), [users]);
   const tableMinWidth = useMemo(
-    () => columnWidths.orderNo + visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + 160,
+    () => columnWidths.orderNo + visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + ORDER_ACTION_COLUMN_WIDTH,
     [columnWidths, visibleColumns],
   );
 
@@ -476,13 +578,19 @@ const Orders: React.FC = () => {
             <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
               <TableHead>
                 <TableRow>
-                  <ResizableHeaderCell columnId="orderNo" width={columnWidths.orderNo} onResize={handleResizeColumn}>订单号</ResizableHeaderCell>
-                  {visibleColumns.map((column) => (
-                    <ResizableHeaderCell key={column.id} columnId={column.id} width={columnWidths[column.id]} onResize={handleResizeColumn}>
+                  <ResizableHeaderCell columnId="orderNo" width={columnWidths.orderNo} onResize={handleResizeColumn} sx={getFrozenColumnSx(0, true)}>订单号</ResizableHeaderCell>
+                  {visibleColumns.map((column, columnIndex) => (
+                    <ResizableHeaderCell
+                      key={column.id}
+                      columnId={column.id}
+                      width={columnWidths[column.id]}
+                      onResize={handleResizeColumn}
+                      sx={getFrozenColumnSx(columnIndex + 1, true)}
+                    >
                       {column.label}
                     </ResizableHeaderCell>
                   ))}
-                  <TableCell align="center" sx={{ width: 160 }}>操作</TableCell>
+                  <TableCell align="center" sx={{ ...actionColumnSx, zIndex: 5, bgcolor: '#f8fafc' }}>操作</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -490,11 +598,11 @@ const Orders: React.FC = () => {
                   const levelColor = getProductLevelColor(order.productLevel);
                   return (
                     <TableRow key={order.id} hover sx={{ bgcolor: `${levelColor}08` }}>
-                      <TableCell sx={{ ...getResizableCellSx(columnWidths.orderNo), fontWeight: 500 }} title={order.orderNo}>{order.orderNo}</TableCell>
-                      {visibleColumns.map((column) => (
-                        <TableCell key={column.id} sx={getResizableCellSx(columnWidths[column.id])}>{renderOrderCell(order, column.id)}</TableCell>
+                      <TableCell sx={{ ...getResizableCellSx(columnWidths.orderNo), ...getFrozenColumnSx(0), fontWeight: 500 }} title={order.orderNo}>{order.orderNo}</TableCell>
+                      {visibleColumns.map((column, columnIndex) => (
+                        <TableCell key={column.id} sx={{ ...getResizableCellSx(columnWidths[column.id]), ...getFrozenColumnSx(columnIndex + 1) }}>{renderOrderCell(order, column.id)}</TableCell>
                       ))}
-                      <TableCell align="center" sx={{ width: 160, minWidth: 160 }}>
+                      <TableCell align="center" sx={actionColumnSx}>
                         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5 }}>
                           <Tooltip title="查看">
                             <IconButton size="small" color="primary" aria-label="查看" onClick={() => handleViewDetail(order)}>
@@ -602,34 +710,21 @@ const Orders: React.FC = () => {
           {orderLookupMessage}
         </Alert>
       </Snackbar>
-      <Dialog open={viewSettingsOpen} onClose={() => setViewSettingsOpen(false)} maxWidth="xs" fullWidth>
-        <DialogCloseTitle onClose={() => setViewSettingsOpen(false)}>订单列表视图设置</DialogCloseTitle>
-        <DialogContent dividers>
-          <Typography variant="body2" sx={{ color: '#6b7280', mb: 2 }}>
-            勾选后会显示在订单管理列表中，设置会保存在当前浏览器。
-          </Typography>
-          <FormGroup sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.5 }}>
-            {ORDER_COLUMNS.map((column) => (
-              <FormControlLabel
-                key={column.id}
-                control={(
-                  <Checkbox
-                    checked={visibleColumnIds.includes(column.id)}
-                    onChange={() => handleToggleColumn(column.id)}
-                  />
-                )}
-                label={column.label}
-              />
-            ))}
-          </FormGroup>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => {
-            setVisibleColumnIds(DEFAULT_VISIBLE_COLUMNS);
-            setColumnWidths(resetColumnWidths(DEFAULT_COLUMN_WIDTHS));
-          }}>恢复默认</Button>
-        </DialogActions>
-      </Dialog>
+      <TableViewSettingsDialog
+        open={viewSettingsOpen}
+        title="订单列表视图设置"
+        description="勾选后会显示在订单管理列表中，设置会保存在当前浏览器。"
+        columns={ORDER_COLUMNS}
+        visibleColumnIds={visibleColumnIds}
+        columnOrder={viewConfig.columnOrder}
+        frozenColumnCount={viewConfig.frozenColumnCount}
+        maxFrozenColumnCount={visibleColumns.length + 1}
+        onClose={() => setViewSettingsOpen(false)}
+        onToggleColumn={handleToggleColumn}
+        onReorderColumn={handleReorderColumn}
+        onFrozenColumnCountChange={handleFrozenColumnCountChange}
+        onReset={handleResetViewConfig}
+      />
 
       <Dialog open={customerOrdersOpen} onClose={() => setCustomerOrdersOpen(false)} maxWidth="md" fullWidth>
         <DialogCloseTitle onClose={() => setCustomerOrdersOpen(false)}>{orderCustomer?.company || orderCustomer?.name} 的订单</DialogCloseTitle>

@@ -106,8 +106,8 @@ const records = JSON.parse(storage.getItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS) || 
 assert.equal(records[0]?.source, 'Live-Douyin02');
 
 const customersAfterIntake = JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]');
-assert.equal(customersAfterIntake.length, customerCountBeforeIntake);
-assert.equal(customersAfterIntake.some((item: any) => item.phone === '13900000002'), false);
+assert.equal(customersAfterIntake.length, customerCountBeforeIntake + 1);
+assert.equal(customersAfterIntake.some((item: any) => item.phone === '13900000002'), true);
 
 const claimRes = await leadFlowApi.manualAssignLead(intake.lead!.id, 'Li');
 assert.equal(claimRes.code, 0);

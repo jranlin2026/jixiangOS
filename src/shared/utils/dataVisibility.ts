@@ -149,18 +149,22 @@ export function filterUsersByCurrentDataScope(users: User[]): User[] {
   return users.filter((user) => hasVisibleId(scope, user.id) || hasVisibleName(scope, user.name));
 }
 
-export function canViewCustomer(customer: Pick<Customer, 'owner' | 'lifecycleStatusCode'>, scope = getCurrentDataVisibilityScope()): boolean {
+export function canViewCustomer(customer: Pick<Customer, 'owner' | 'lifecycleStatusCode' | 'leadContributorId' | 'leadContributorName'>, scope = getCurrentDataVisibilityScope()): boolean {
   if (scope.unrestricted) return true;
   const lifecycleCode = normalizeLifecycleStatusCode(customer.lifecycleStatusCode);
   if (lifecycleCode === LIFECYCLE_STATUS_CODES.PUBLIC_POOL) return scope.canViewPublicPool;
-  return hasVisibleName(scope, customer.owner);
+  return hasVisibleName(scope, customer.owner)
+    || hasVisibleName(scope, customer.leadContributorName)
+    || hasVisibleId(scope, customer.leadContributorId);
 }
 
-export function canViewLead(lead: Pick<Lead, 'inputBy' | 'assignedTo' | 'owner'>, scope = getCurrentDataVisibilityScope()): boolean {
+export function canViewLead(lead: Pick<Lead, 'inputBy' | 'assignedTo' | 'owner' | 'leadContributorId' | 'leadContributorName'>, scope = getCurrentDataVisibilityScope()): boolean {
   if (scope.unrestricted) return true;
   return hasVisibleName(scope, lead.inputBy)
     || hasVisibleName(scope, lead.assignedTo)
-    || hasVisibleName(scope, lead.owner);
+    || hasVisibleName(scope, lead.owner)
+    || hasVisibleName(scope, lead.leadContributorName)
+    || hasVisibleId(scope, lead.leadContributorId);
 }
 
 export function canViewOrder(order: Pick<Order, 'owner' | 'salesName' | 'salesId'>, scope = getCurrentDataVisibilityScope()): boolean {
@@ -170,12 +174,12 @@ export function canViewOrder(order: Pick<Order, 'owner' | 'salesName' | 'salesId
     || hasVisibleId(scope, order.salesId);
 }
 
-export function filterVisibleCustomers<T extends Pick<Customer, 'owner' | 'lifecycleStatusCode'>>(items: T[], scope = getCurrentDataVisibilityScope()): T[] {
+export function filterVisibleCustomers<T extends Pick<Customer, 'owner' | 'lifecycleStatusCode' | 'leadContributorId' | 'leadContributorName'>>(items: T[], scope = getCurrentDataVisibilityScope()): T[] {
   if (scope.unrestricted) return items;
   return items.filter((item) => canViewCustomer(item, scope));
 }
 
-export function filterVisibleLeads<T extends Pick<Lead, 'inputBy' | 'assignedTo' | 'owner'>>(items: T[], scope = getCurrentDataVisibilityScope()): T[] {
+export function filterVisibleLeads<T extends Pick<Lead, 'inputBy' | 'assignedTo' | 'owner' | 'leadContributorId' | 'leadContributorName'>>(items: T[], scope = getCurrentDataVisibilityScope()): T[] {
   if (scope.unrestricted) return items;
   return items.filter((item) => canViewLead(item, scope));
 }

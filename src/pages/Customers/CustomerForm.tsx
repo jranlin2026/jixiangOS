@@ -103,6 +103,8 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     industry: '',
     city: '',
     leadInputBy: '',
+    leadContributorId: '',
+    leadContributorName: '',
     owner: '',
     customerLevel: 'L1' as Customer['customerLevel'],
     originalSalesTransferBy: '',
@@ -140,6 +142,8 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       industry: customer?.industry || '',
       city: customer?.city || '',
       leadInputBy: customer?.leadInputBy || defaultOwner,
+      leadContributorId: customer?.leadContributorId || '',
+      leadContributorName: customer?.leadContributorName || '',
       owner: fallbackOwner,
       customerLevel: customer?.customerLevel || 'L1',
       originalSalesTransferBy: customer?.originalSalesTransferBy || '',
@@ -154,6 +158,15 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
 
   const handleChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [field]: e.target.value });
+  };
+
+  const handleContributorSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const user = users.find((item) => item.id === e.target.value);
+    setForm({
+      ...form,
+      leadContributorId: user?.id || '',
+      leadContributorName: user?.name || '',
+    });
   };
 
   const handleSourceSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -188,8 +201,9 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     </MenuItem>
   ));
   const missingContact = !form.phone.trim() && !form.wechat.trim();
+  const missingContributor = normalizeResourceOwnership(form.sourceType) === '个人资源' && !form.leadContributorName;
   const showContactError = !!form.name.trim() && missingContact;
-  const canSubmit = !!form.name.trim() && !missingContact && !!form.owner && !!form.leadInputBy && !!form.leadSource;
+  const canSubmit = !!form.name.trim() && !missingContact && !missingContributor && !!form.owner && !!form.leadInputBy && !!form.leadSource;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
@@ -239,6 +253,23 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
           <TextField label="城市" value={form.city} onChange={handleChange('city')} fullWidth />
           <TextField select label="线索录入人" value={form.leadInputBy} onChange={handleChange('leadInputBy')} required fullWidth helperText="默认当前登录人员">
             {userOptions}
+          </TextField>
+          <TextField
+            select
+            label="线索贡献人"
+            value={form.leadContributorId}
+            onChange={handleContributorSelect}
+            required={normalizeResourceOwnership(form.sourceType) === '个人资源'}
+            fullWidth
+            helperText={missingContributor ? '个人资源必须填写线索贡献人' : '用于线索分成归属，可与录入人不同'}
+            error={missingContributor}
+          >
+            <MenuItem value="">无</MenuItem>
+            {users.map((user) => (
+              <MenuItem key={user.id} value={user.id}>
+                {user.name}（{user.role}）
+              </MenuItem>
+            ))}
           </TextField>
           <TextField select label="分配销售" value={form.owner} onChange={handleChange('owner')} required fullWidth>
             {userOptions}

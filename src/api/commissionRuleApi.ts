@@ -451,13 +451,13 @@ function resolveCommissionRoleOwner(order: Order, role: CommissionRole): string 
   const config = getCommissionRoleConfigByName(role);
   const source = config?.personSource;
   if (source === 'sales_owner') return order.salesName || order.owner || '';
-  if (source === 'lead_contributor') return order.leadContributorName || order.leadInputBy || '';
+  if (source === 'lead_contributor') return order.leadContributorName || '';
   if (source === 'customer_success') return order.successName || '';
   if (source === 'after_sales') return order.serviceName || '';
   if (source === 'manual') return '';
 
   if (role === '销售') return order.salesName || order.owner || '';
-  if (role === '线索') return order.leadContributorName || order.leadInputBy || '';
+  if (role === '线索') return order.leadContributorName || '';
   if (role === '客户成功') return order.successName || '';
   if (role === '售后') return order.serviceName || '';
   return order.owner || '';
@@ -474,7 +474,7 @@ function resolveCommissionRoleAssignee(order: Order, role: CommissionRole): Comm
   }
 
   if (roleName === ROLE_MATCH_TEXT.lead) {
-    return buildAssignee(findUser(users, (order as any).leadContributorId || (order as any).leadInputById, order.leadContributorName || order.leadInputBy), departments, order.leadContributorName || order.leadInputBy, fallbackDepartment);
+    return buildAssignee(findUser(users, (order as any).leadContributorId, order.leadContributorName), departments, order.leadContributorName, fallbackDepartment);
   }
 
   if (roleName === ROLE_MATCH_TEXT.customerSuccess) {
@@ -542,12 +542,17 @@ function matchesField(ruleValue: string | undefined, orderValue: string | undefi
   return !ruleValue || ruleValue === orderValue;
 }
 
+function hasLeadContributor(order: Order): boolean {
+  return Boolean(order.leadContributorName || (order as any).leadContributorId);
+}
+
 function matchesRule(rule: CommissionRule, order: Order): boolean {
   const normalized = normalizeRule(rule);
   const channel = order.officialPaymentChannel || mapPaymentMethodToOfficialChannel(order.paymentMethod);
   const orderAmount = order.actualAmount || order.amount;
 
   if (!normalized.isActive) return false;
+  if (normalized.role === ROLE_MATCH_TEXT.lead && !hasLeadContributor(order)) return false;
   if (normalized.excludeExternalTalent && order.isExternalTalentOrder) return false;
   if (channel === '非官方渠道') return false;
   if (normalized.paymentChannels?.length && !normalized.paymentChannels.includes(channel)) return false;

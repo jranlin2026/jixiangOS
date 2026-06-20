@@ -101,6 +101,9 @@ export interface Customer {
   tags?: string[];
   /** 线索录入人 */
   leadInputBy?: string;
+  /** 线索贡献人：资源归属和线索分成依据 */
+  leadContributorId?: ID;
+  leadContributorName?: string;
   /** 线索来源 */
   leadSource?: string;
   /** 客户备注 */

@@ -2,7 +2,7 @@ import type { Customer, CustomerActivityRecord, CustomerCreateInput, CustomerFil
 import type { Lead, LeadChangeLog } from '../types/lead';
 import type { Order } from '../types/order';
 import type { ApiResponse, PaginatedResponse } from './types';
-import { createSuccessResponse, delay } from './types';
+import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
 import { LIFECYCLE_STATUS_CODES, STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
@@ -13,6 +13,17 @@ import { filterVisibleCustomers } from '../shared/utils/dataVisibility';
 
 function ensureInit(): void {
   initializeMockData();
+}
+
+function isPersonalResource(value?: string): boolean {
+  return normalizeResourceOwnership(value) === '个人资源';
+}
+
+function validateCustomerAttribution(data: Partial<Customer>): string | null {
+  if (isPersonalResource(data.sourceType) && !data.leadContributorName && !data.leadContributorId) {
+    return '个人资源必须填写线索贡献人';
+  }
+  return null;
 }
 
 function normalizeCustomer(customer: Customer): Customer {
@@ -50,6 +61,7 @@ const CUSTOMER_CHANGE_FIELDS: Array<{ field: keyof Customer; label: string }> = 
   { field: 'customerLevel', label: '客户等级' },
   { field: 'owner', label: '销售负责人' },
   { field: 'leadInputBy', label: '线索录入人' },
+  { field: 'leadContributorName', label: '线索贡献人' },
   { field: 'leadSource', label: '线索来源' },
   { field: 'industry', label: '行业' },
   { field: 'city', label: '城市' },
@@ -75,6 +87,8 @@ const CUSTOMER_TO_LEAD_FIELDS: Array<{
   { customerField: 'city', leadField: 'city', label: '城市' },
   { customerField: 'owner', leadField: 'assignedTo', label: '分配销售' },
   { customerField: 'leadInputBy', leadField: 'inputBy', label: '线索录入人' },
+  { customerField: 'leadContributorId', leadField: 'leadContributorId', label: '线索贡献人' },
+  { customerField: 'leadContributorName', leadField: 'leadContributorName', label: '线索贡献人' },
   { customerField: 'tags', leadField: 'tags', label: '标签' },
   { customerField: 'remark', leadField: 'remark', label: '备注' },
   { customerField: 'score', leadField: 'score', label: '线索评分' },
@@ -294,6 +308,8 @@ async function fetchCustomerById(id: string): Promise<ApiResponse<Customer | nul
 async function createCustomer(data: CustomerCreateInput): Promise<ApiResponse<Customer>> {
   ensureInit();
   await delay(200);
+  const validationError = validateCustomerAttribution(data);
+  if (validationError) return createErrorResponse(validationError);
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
   const now = new Date().toISOString();
   const newCustomer: Customer = {
@@ -330,13 +346,14 @@ async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiR
   if (idx === -1) return createSuccessResponse(null);
   const existing = customers[idx];
   const now = new Date().toISOString();
+  const merged = { ...existing, ...data, sourceType: normalizeResourceOwnership(data.sourceType || existing.sourceType) };
+  const validationError = validateCustomerAttribution(merged);
+  if (validationError) return createErrorResponse(validationError);
   const changes = buildCustomerChanges(existing, data);
   const operator = getCurrentOperatorName(existing.owner);
   const activityType = data.owner && data.owner !== existing.owner ? 'transfer' : 'update';
   customers[idx] = {
-    ...existing,
-    ...data,
-    sourceType: normalizeResourceOwnership(data.sourceType || existing.sourceType),
+    ...merged,
     activityRecords: changes?.length
       ? [createActivity({
         type: activityType,

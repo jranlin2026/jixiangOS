@@ -19,6 +19,7 @@ const TEXT = {
   industry: '\u884c\u4e1a',
   city: '\u57ce\u5e02',
   inputBy: '\u7ebf\u7d22\u5f55\u5165\u4eba',
+  leadContributor: '\u7ebf\u7d22\u8d21\u732e\u4eba',
   owner: '\u5206\u914d\u9500\u552e',
   tags: '\u6807\u7b7e',
   remark: '\u5907\u6ce8',
@@ -29,6 +30,8 @@ const TEXT = {
   sourceRequired: '\u7ebf\u7d22\u6765\u6e90\u4e0d\u80fd\u4e3a\u7a7a',
   sourceMissing: '\u7ebf\u7d22\u6765\u6e90\u4e0d\u5b58\u5728',
   inputUserMissing: '\u7ebf\u7d22\u5f55\u5165\u4eba\u4e0d\u5b58\u5728',
+  leadContributorMissing: '\u7ebf\u7d22\u8d21\u732e\u4eba\u4e0d\u5b58\u5728',
+  leadContributorRequired: '\u4e2a\u4eba\u8d44\u6e90\u5fc5\u987b\u586b\u5199\u7ebf\u7d22\u8d21\u732e\u4eba',
   ownerMissing: '\u5206\u914d\u9500\u552e\u4e0d\u5b58\u5728',
   templateSheet: '\u7ebf\u7d22\u6279\u91cf\u5165\u5e93\u6a21\u677f',
   exampleName: '\u5f20\u4e09',
@@ -50,6 +53,7 @@ export const LEAD_BULK_IMPORT_HEADERS = [
   TEXT.industry,
   TEXT.city,
   TEXT.inputBy,
+  TEXT.leadContributor,
   TEXT.owner,
   TEXT.tags,
   TEXT.remark,
@@ -157,13 +161,16 @@ function validateRow(row: CleanRow) {
   const salesUsers = users.filter((user) => isSalesRoleName(user.role));
   const sourceOptions = buildSourceOptions();
   const sourceValue = data[TEXT.source];
+  const sourceType = normalizeResourceOwnership(data[TEXT.sourceType] || TEXT.companyResource);
   const inputByValue = data[TEXT.inputBy];
+  const contributorValue = data[TEXT.leadContributor];
   const ownerValue = data[TEXT.owner];
 
   const sourceOption = sourceValue
     ? sourceOptions.find((option) => option.label.trim().toLowerCase() === sourceValue.trim().toLowerCase())
     : undefined;
   const inputUser = inputByValue ? findByName(users, inputByValue) : undefined;
+  const contributorUser = contributorValue ? findByName(users, contributorValue) : undefined;
   const ownerUser = ownerValue && ownerValue !== TEXT.toAssign ? findByName(salesUsers, ownerValue) : undefined;
   const inputBy = inputByValue ? inputUser?.name : getCurrentOperatorName(users[0]?.name || '');
   const owner = ownerValue ? (ownerValue === TEXT.toAssign ? TEXT.toAssign : ownerUser?.name) : TEXT.toAssign;
@@ -173,6 +180,8 @@ function validateRow(row: CleanRow) {
   if (!sourceValue) errors.push(TEXT.sourceRequired);
   if (sourceValue && !sourceOption) errors.push(`${TEXT.sourceMissing}\uff1a${sourceValue}`);
   if (inputByValue && !inputUser) errors.push(`${TEXT.inputUserMissing}\uff1a${inputByValue}`);
+  if (contributorValue && !contributorUser) errors.push(`${TEXT.leadContributorMissing}\uff1a${contributorValue}`);
+  if (sourceType === '\u4e2a\u4eba\u8d44\u6e90' && !contributorUser) errors.push(TEXT.leadContributorRequired);
   if (ownerValue && ownerValue !== TEXT.toAssign && !ownerUser) errors.push(`${TEXT.ownerMissing}\uff1a${ownerValue}`);
 
   if (errors.length) {
@@ -186,10 +195,12 @@ function validateRow(row: CleanRow) {
     wechat: data[TEXT.wechat],
     source: sourceOption?.source || sourceValue,
     sourceName: sourceOption?.sourceName || '',
-    sourceType: normalizeResourceOwnership(data[TEXT.sourceType] || TEXT.companyResource),
+    sourceType,
     status: LEAD_STATUS.NEW,
     owner: owner || TEXT.toAssign,
     inputBy,
+    leadContributorId: contributorUser?.id,
+    leadContributorName: contributorUser?.name,
     industry: data[TEXT.industry],
     city: data[TEXT.city],
     tags: parseTags(data[TEXT.tags]),
@@ -211,6 +222,7 @@ function createTemplateWorkbook(): ArrayBuffer {
       TEXT.exampleSource,
       TEXT.exampleIndustry,
       TEXT.exampleCity,
+      '',
       '',
       '',
       TEXT.exampleTags,
