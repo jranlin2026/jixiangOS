@@ -3,7 +3,10 @@ import type {
   CommissionAdjustmentInput,
   CommissionAuditIssue,
   CommissionFilters,
+  CommissionOrderSummary,
+  CommissionOrderSummaryFilters,
   CommissionSettlementBatch,
+  MonthlyCommissionPayout,
   CommissionStats,
   CommissionStatus,
 } from '../types/commission';
@@ -54,6 +57,25 @@ function getDepartmentByUser(user?: User): Department | undefined {
 
 function getCommissionPaymentDate(commission: Commission, order?: Order): string {
   return commission.paymentDate || order?.payments?.[0]?.paidAt || order?.createdAt || commission.createdAt;
+}
+
+function normalizeDateRange(start?: string, end?: string): { startDate: string; endDate: string } {
+  const startDate = start ? (start.length === 10 ? `${start}T00:00:00.000Z` : start) : '';
+  const endDate = end ? (end.length === 10 ? `${end}T23:59:59.999Z` : end) : '';
+  return { startDate, endDate };
+}
+
+function isCommissionException(commission: Commission): boolean {
+  const note = `${commission.auditReason || ''}${commission.frozenReason || ''}${commission.calculationNote || ''}`;
+  return commission.status === '已取消'
+    || Boolean(commission.frozenReason)
+    || note.includes('冲销')
+    || note.includes('退款')
+    || note.includes('冻结');
+}
+
+function isPendingAssignment(commission: Commission): boolean {
+  return commission.owner === PENDING_ASSIGN_TEXT || !commission.ownerId;
 }
 
 function normalizeCommission(c: Commission): Commission {
@@ -160,6 +182,78 @@ async function fetchCommissionsByOrder(orderId: string): Promise<ApiResponse<Com
   ensureInit();
   await delay(120);
   return createSuccessResponse(getOrderCommissions(orderId));
+}
+
+function deriveOrderSummaryStatus(commissions: Commission[]): CommissionOrderSummary['status'] {
+  if (commissions.some(isCommissionException)) return '异常';
+  if (commissions.some(isPendingAssignment)) return '待处理';
+  if (commissions.every((commission) => commission.status === '已发放')) return '已发放';
+  if (commissions.every((commission) => commission.status === '待发放' || commission.status === '已发放')) return '待发放';
+  return '待确认';
+}
+
+function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrderSummary[] {
+  const orderMap = new Map<string, Commission[]>();
+  commissions.forEach((commission) => {
+    orderMap.set(commission.orderId, [...(orderMap.get(commission.orderId) || []), commission]);
+  });
+
+  return Array.from(orderMap.entries()).map(([orderId, rows]) => {
+    const sortedRows = getOrderCommissions(orderId).length ? getOrderCommissions(orderId) : rows;
+    const first = sortedRows[0];
+    const order = getOrderById(orderId);
+    const paymentDate = getCommissionPaymentDate(first, order);
+    const orderAmount = order?.actualAmount || order?.amount || first.orderAmount;
+    return {
+      orderId,
+      orderNo: first.orderNo,
+      customerName: first.customerName,
+      productLevel: first.productLevel,
+      orderType: order?.orderType || first.scene || '',
+      paymentDate,
+      orderAmount,
+      totalCommissionAmount: Math.round(sortedRows.reduce((sumValue, item) => sumValue + item.commissionAmount, 0) * 100) / 100,
+      pendingAssignCount: sortedRows.filter(isPendingAssignment).length,
+      exceptionCount: sortedRows.filter(isCommissionException).length,
+      status: deriveOrderSummaryStatus(sortedRows),
+      splitSummary: sortedRows.map((item) => ({
+        role: item.role,
+        amount: item.commissionAmount,
+        owner: item.owner,
+        ownerId: item.ownerId,
+        status: item.status,
+      })),
+      commissions: sortedRows,
+    };
+  }).sort((a, b) => new Date(b.paymentDate || '').getTime() - new Date(a.paymentDate || '').getTime());
+}
+
+function applyOrderSummaryFilters(summaries: CommissionOrderSummary[], filters?: CommissionOrderSummaryFilters): CommissionOrderSummary[] {
+  let filtered = [...summaries];
+  if (filters?.search) {
+    const q = filters.search.toLowerCase();
+    filtered = filtered.filter((item) => item.orderNo.toLowerCase().includes(q) || item.customerName.toLowerCase().includes(q));
+  }
+  if (filters?.status && filters.status !== '全部') filtered = filtered.filter((item) => item.status === filters.status);
+  if (filters?.ownerId) filtered = filtered.filter((item) => item.commissions.some((commission) => commission.ownerId === filters.ownerId));
+  if (filters?.role) filtered = filtered.filter((item) => item.commissions.some((commission) => commission.role === filters.role));
+  if (filters?.month) filtered = filtered.filter((item) => item.paymentDate.startsWith(filters.month!));
+  const { startDate, endDate } = normalizeDateRange(filters?.startDate, filters?.endDate);
+  if (startDate) filtered = filtered.filter((item) => item.paymentDate >= startDate);
+  if (endDate) filtered = filtered.filter((item) => item.paymentDate <= endDate);
+  return filtered;
+}
+
+async function fetchCommissionOrderSummaries(filters?: CommissionOrderSummaryFilters): Promise<ApiResponse<PaginatedResponse<CommissionOrderSummary>>> {
+  ensureInit();
+  await delay(160);
+  const filtered = applyOrderSummaryFilters(buildCommissionOrderSummaries(getAllCommissions()), filters);
+  const page = filters?.page || 1;
+  const pageSize = filters?.pageSize || DEFAULT_PAGE_SIZE;
+  const total = filtered.length;
+  const totalPages = Math.ceil(total / pageSize);
+  const items = filtered.slice((page - 1) * pageSize, page * pageSize);
+  return createSuccessResponse({ items, pagination: { page, pageSize, total, totalPages } });
 }
 
 function resolveAdjustmentUser(input: CommissionAdjustmentInput): { user?: User; department?: Department; error?: string } {
@@ -471,10 +565,52 @@ function buildSettlementBatch(period: string, commissions: Commission[]): Commis
   };
 }
 
+function buildPaymentDateSettlementBatch(period: string, commissions: Commission[]): CommissionSettlementBatch {
+  const periodCommissions = commissions.filter((commission) => (commission.paymentDate || commission.createdAt).startsWith(period));
+  const settleCommissions = periodCommissions.filter((commission) => commission.status !== '已取消' && commission.status !== '待确认');
+  const byOwnerMap = new Map<string, { owner: string; department: string; count: number; amount: number }>();
+  const byRoleMap = new Map<string, { role: Commission['role']; count: number; amount: number }>();
+
+  settleCommissions.forEach((commission) => {
+    const ownerKey = commission.ownerId || `${commission.owner}-${commission.department}`;
+    const ownerItem = byOwnerMap.get(ownerKey) || { owner: commission.owner, department: commission.department, count: 0, amount: 0 };
+    ownerItem.count += 1;
+    ownerItem.amount += commission.commissionAmount;
+    byOwnerMap.set(ownerKey, ownerItem);
+
+    const roleItem = byRoleMap.get(commission.role) || { role: commission.role, count: 0, amount: 0 };
+    roleItem.count += 1;
+    roleItem.amount += commission.commissionAmount;
+    byRoleMap.set(commission.role, roleItem);
+  });
+
+  const pendingReviewAmount = sum(periodCommissions, '待确认');
+  const pendingPayAmount = sum(settleCommissions, '待发放');
+  const paidAmount = sum(settleCommissions, '已发放');
+  const totalAmount = settleCommissions.reduce((total, commission) => total + commission.commissionAmount, 0);
+
+  return {
+    id: `batch-${uuidv4().slice(0, 8)}`,
+    batchNo: `COM-${period.replace('-', '')}-${String(Date.now()).slice(-4)}`,
+    period,
+    totalCount: settleCommissions.length,
+    totalAmount,
+    pendingReviewAmount,
+    pendingPayAmount,
+    paidAmount,
+    cancelledAmount: sum(periodCommissions, '已取消'),
+    status: pendingReviewAmount > 0 ? '待确认' : paidAmount >= totalAmount && totalAmount > 0 ? '已发放' : '待发放',
+    generatedAt: new Date().toISOString(),
+    commissionIds: settleCommissions.map((commission) => commission.id),
+    byOwner: Array.from(byOwnerMap.values()).map((item) => ({ ...item, amount: Math.round(item.amount * 100) / 100 })),
+    byRole: Array.from(byRoleMap.values()).map((item) => ({ ...item, amount: Math.round(item.amount * 100) / 100 })),
+  };
+}
+
 async function generateSettlementBatch(period: string): Promise<ApiResponse<CommissionSettlementBatch>> {
   ensureInit();
   await delay(250);
-  const batch = buildSettlementBatch(period, getAllCommissions());
+  const batch = buildPaymentDateSettlementBatch(period, getAllCommissions());
   const batches = getStoredBatches().filter((item) => item.period !== period);
   setStorageData(STORAGE_KEYS.COMMISSION_SETTLEMENT_BATCHES, [batch, ...batches]);
 
@@ -505,7 +641,7 @@ async function paySettlementBatch(batchId: string): Promise<ApiResponse<Commissi
   ));
   saveCommissions(nextCommissions);
 
-  const refreshed = buildSettlementBatch(batches[batchIdx].period, nextCommissions.map(normalizeCommission));
+  const refreshed = buildPaymentDateSettlementBatch(batches[batchIdx].period, nextCommissions.map(normalizeCommission));
   batches[batchIdx] = {
     ...refreshed,
     id: batches[batchIdx].id,
@@ -515,6 +651,108 @@ async function paySettlementBatch(batchId: string): Promise<ApiResponse<Commissi
   setStorageData(STORAGE_KEYS.COMMISSION_SETTLEMENT_BATCHES, batches);
 
   return createSuccessResponse(batches[batchIdx]);
+}
+
+function getMonthlyPayoutCommissions(period: string): Commission[] {
+  return getAllCommissions().filter((commission) => {
+    const paymentDate = commission.paymentDate || commission.createdAt;
+    return paymentDate.startsWith(period)
+      && (commission.status === '待发放' || commission.status === '已发放' || commission.status === '已取消' || isCommissionException(commission));
+  });
+}
+
+function buildMonthlyPayouts(period: string): MonthlyCommissionPayout[] {
+  const payoutRows = getMonthlyPayoutCommissions(period);
+  const map = new Map<string, Commission[]>();
+  payoutRows.forEach((commission) => {
+    const key = commission.ownerId || `name:${commission.owner}`;
+    map.set(key, [...(map.get(key) || []), commission]);
+  });
+
+  return Array.from(map.entries()).map(([key, rows]) => {
+    const first = rows[0];
+    const pendingPayAmount = rows
+      .filter((commission) => commission.status === '待发放')
+      .reduce((sumValue, commission) => sumValue + commission.commissionAmount, 0);
+    const paidAmount = rows
+      .filter((commission) => commission.status === '已发放')
+      .reduce((sumValue, commission) => sumValue + commission.commissionAmount, 0);
+    const exceptionAmount = rows
+      .filter((commission) => commission.status === '已取消' || isCommissionException(commission))
+      .reduce((sumValue, commission) => sumValue + commission.commissionAmount, 0);
+    const orderCount = new Set(rows.map((commission) => commission.orderId)).size;
+    const status: MonthlyCommissionPayout['status'] = exceptionAmount > 0
+      ? '异常'
+      : pendingPayAmount > 0
+        ? '待发放'
+        : paidAmount > 0
+          ? '已发放'
+          : '无应发';
+    return {
+      period,
+      owner: first.owner,
+      ownerId: first.ownerId || (key.startsWith('name:') ? undefined : key),
+      department: first.department,
+      departmentId: first.departmentId,
+      orderCount,
+      pendingPayAmount: Math.round(pendingPayAmount * 100) / 100,
+      paidAmount: Math.round(paidAmount * 100) / 100,
+      exceptionAmount: Math.round(exceptionAmount * 100) / 100,
+      totalAmount: Math.round((pendingPayAmount + paidAmount) * 100) / 100,
+      status,
+      commissions: rows,
+    };
+  }).sort((a, b) => b.pendingPayAmount - a.pendingPayAmount || a.owner.localeCompare(b.owner, 'zh-CN'));
+}
+
+async function fetchMonthlyCommissionPayouts(period: string): Promise<ApiResponse<MonthlyCommissionPayout[]>> {
+  ensureInit();
+  await delay(160);
+  if (!period) return createErrorResponse('请选择结算月份');
+  return createSuccessResponse(buildMonthlyPayouts(period));
+}
+
+async function payMonthlyOwnerCommissions(period: string, ownerId: string): Promise<ApiResponse<MonthlyCommissionPayout[]>> {
+  ensureInit();
+  await delay(180);
+  if (!period) return createErrorResponse('请选择结算月份');
+  if (!ownerId) return createErrorResponse('请选择发放人员');
+  const now = new Date().toISOString();
+  const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
+  let changed = false;
+  const next = commissions.map((commission) => {
+    const normalized = normalizeCommission(commission);
+    if ((normalized.paymentDate || normalized.createdAt).startsWith(period)
+      && normalized.ownerId === ownerId
+      && normalized.status === '待发放') {
+      changed = true;
+      return { ...commission, status: '已发放' as const, paidAt: now, updatedAt: now };
+    }
+    return commission;
+  });
+  if (!changed) return createErrorResponse('该人员没有待发放提成');
+  saveCommissions(next);
+  return createSuccessResponse(buildMonthlyPayouts(period));
+}
+
+async function payMonthlyCommissionBatch(period: string): Promise<ApiResponse<MonthlyCommissionPayout[]>> {
+  ensureInit();
+  await delay(220);
+  if (!period) return createErrorResponse('请选择结算月份');
+  await generateSettlementBatch(period);
+  const now = new Date().toISOString();
+  const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
+  let changed = false;
+  const next = commissions.map((commission) => {
+    const normalized = normalizeCommission(commission);
+    if ((normalized.paymentDate || normalized.createdAt).startsWith(period) && normalized.status === '待发放') {
+      changed = true;
+      return { ...commission, status: '已发放' as const, paidAt: now, updatedAt: now };
+    }
+    return commission;
+  });
+  if (changed) saveCommissions(next);
+  return createSuccessResponse(buildMonthlyPayouts(period));
 }
 
 async function fetchCommissionDetail(id: string): Promise<ApiResponse<{ commission: Commission; order?: Order } | null>> {
@@ -529,11 +767,15 @@ async function fetchCommissionDetail(id: string): Promise<ApiResponse<{ commissi
 export const commissionApi = {
   fetchCommissions,
   fetchCommissionsByOrder,
+  fetchCommissionOrderSummaries,
+  fetchMonthlyCommissionPayouts,
   fetchCommissionStats,
   fetchCommissionAuditIssues,
   fetchSettlementBatches,
   generateSettlementBatch,
   paySettlementBatch,
+  payMonthlyOwnerCommissions,
+  payMonthlyCommissionBatch,
   fetchCommissionDetail,
   saveOrderCommissionAdjustments,
   confirmOrderCommissions,

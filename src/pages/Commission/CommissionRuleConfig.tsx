@@ -46,14 +46,6 @@ const RESOURCE_OPTIONS: Array<{ value: ResourceOwnership; label: string }> = [
   { value: '个人资源', label: '个人资源' },
 ];
 
-const PERSON_SOURCE_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: 'sales_owner', label: '销售负责人' },
-  { value: 'lead_contributor', label: '线索贡献人' },
-  { value: 'customer_success', label: '客户成功' },
-  { value: 'after_sales', label: '售后人员' },
-  { value: 'manual', label: '手动指定' },
-];
-
 const emptyPayout: SimpleCommissionRulePayout = {
   role: '销售',
   commissionType: 'percentage',
@@ -88,10 +80,6 @@ function cloneRuleForm(form: SimpleCommissionRuleGroupInput): SimpleCommissionRu
     ...form,
     payouts: form.payouts.map((payout) => ({ ...payout })),
   };
-}
-
-function getPersonSourceLabel(value: string): string {
-  return PERSON_SOURCE_OPTIONS.find((item) => item.value === value)?.label || value;
 }
 
 const CommissionRuleConfig: React.FC = () => {

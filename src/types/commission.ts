@@ -41,6 +41,7 @@ export interface CommissionRoleConfigFilters {
 /** 提成状态 — 含审核流程 */
 export type CommissionStatus = '待确认' | '待发放' | '已发放' | '已取消';
 export type LegacyCommissionStatus = CommissionStatus | '待审核';
+export type CommissionOrderSummaryStatus = '待处理' | '待确认' | '待发放' | '已发放' | '异常';
 
 export type CommissionScene =
   | '899成交'
@@ -265,6 +266,49 @@ export interface CommissionFilters {
   month?: string;
   page?: number;
   pageSize?: number;
+}
+
+export interface CommissionOrderSummary {
+  orderId: ID;
+  orderNo: string;
+  customerName: string;
+  productLevel: ProductLevel;
+  orderType: string;
+  paymentDate: Timestamp;
+  orderAmount: number;
+  totalCommissionAmount: number;
+  pendingAssignCount: number;
+  exceptionCount: number;
+  status: CommissionOrderSummaryStatus;
+  splitSummary: Array<{ role: CommissionRole; amount: number; owner: string; ownerId?: ID; status: CommissionStatus }>;
+  commissions: Commission[];
+}
+
+export interface CommissionOrderSummaryFilters {
+  search?: string;
+  status?: CommissionOrderSummaryStatus | '全部';
+  ownerId?: ID;
+  role?: CommissionRole;
+  startDate?: string;
+  endDate?: string;
+  month?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface MonthlyCommissionPayout {
+  period: string;
+  owner: string;
+  ownerId?: ID;
+  department: string;
+  departmentId?: ID;
+  orderCount: number;
+  pendingPayAmount: number;
+  paidAmount: number;
+  exceptionAmount: number;
+  totalAmount: number;
+  status: '待发放' | '已发放' | '异常' | '无应发';
+  commissions: Commission[];
 }
 
 export interface CommissionAdjustmentInput {
