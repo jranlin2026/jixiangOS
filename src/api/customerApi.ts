@@ -7,9 +7,11 @@ import { getStorageData, setStorageData } from './mock/storage';
 import { LIFECYCLE_STATUS_CODES, STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
-import { getCurrentOperatorName, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
+import { getCurrentOperatorName, getCurrentOperatorUser, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
 import { claimFromPublicPool, hydrateCustomerLifecycle, releaseToPublicPool, setLeadLifecycle } from './lifecycleSync';
 import { filterVisibleCustomers } from '../shared/utils/dataVisibility';
+import { applyContactEditLock } from '../shared/utils/contactEditLock';
+import { isSuperAdminRoleName } from '../shared/utils/roles';
 
 function ensureInit(): void {
   initializeMockData();
@@ -77,6 +79,8 @@ const CUSTOMER_TO_LEAD_FIELDS: Array<{
   leadField: keyof Lead;
   label: string;
 }> = [
+  { customerField: 'phone', leadField: 'phone', label: '鎵嬫満鍙?' },
+  { customerField: 'wechat', leadField: 'wechat', label: '寰俊' },
   { customerField: 'name', leadField: 'name', label: '姓名' },
   { customerField: 'company', leadField: 'company', label: '公司' },
   { customerField: 'sourceType', leadField: 'sourceType', label: '资源归属' },
@@ -346,12 +350,15 @@ async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiR
   if (idx === -1) return createSuccessResponse(null);
   const existing = customers[idx];
   const now = new Date().toISOString();
-  const merged = { ...existing, ...data, sourceType: normalizeResourceOwnership(data.sourceType || existing.sourceType) };
+  const safeData = applyContactEditLock<Customer>(existing, data, {
+    canEditLockedContact: isSuperAdminRoleName(getCurrentOperatorUser()?.role),
+  });
+  const merged = { ...existing, ...safeData, sourceType: normalizeResourceOwnership(safeData.sourceType || existing.sourceType) };
   const validationError = validateCustomerAttribution(merged);
   if (validationError) return createErrorResponse(validationError);
-  const changes = buildCustomerChanges(existing, data);
+  const changes = buildCustomerChanges(existing, safeData);
   const operator = getCurrentOperatorName(existing.owner);
-  const activityType = data.owner && data.owner !== existing.owner ? 'transfer' : 'update';
+  const activityType = safeData.owner && safeData.owner !== existing.owner ? 'transfer' : 'update';
   customers[idx] = {
     ...merged,
     activityRecords: changes?.length

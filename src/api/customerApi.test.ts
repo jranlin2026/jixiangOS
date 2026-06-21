@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { customerApi } from './customerApi';
 import { STORAGE_KEYS } from '../shared/utils/constants';
+import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import type { Customer } from '../types/customer';
 import type { Lead } from '../types/lead';
 import type { Order } from '../types/order';
@@ -62,6 +63,14 @@ const legacyCustomer: Customer = {
   sourceType: '转介绍',
 };
 
+const blankContactCustomer: Customer = {
+  ...customer,
+  id: 'cust-blank-contact',
+  name: 'Blank Contact Customer',
+  phone: '',
+  wechat: '',
+};
+
 const lead: Lead = {
   id: 'lead-test',
   customerId: 'cust-test',
@@ -112,10 +121,9 @@ const order: Order = {
 
 storage.clear();
 storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
-storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([customer, legacyCustomer]));
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([customer, legacyCustomer, blankContactCustomer]));
 storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([lead]));
 storage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify([order]));
-
 const listRes = await customerApi.fetchCustomers({ pageSize: 10 });
 const normalizedCustomer = listRes.data.items.find((item) => item.id === 'cust-test');
 const normalizedLegacy = listRes.data.items.find((item) => item.id === 'cust-legacy');
@@ -150,3 +158,57 @@ assert.equal(updatedLead.city, '广州');
 assert.equal(updatedLead.remark, '客户资料已完善');
 assert.equal(updatedLead.changeHistory?.[0]?.summary, '客户资料同步：行业、城市、分配销售、备注');
 assert.deepEqual(updatedLead.changeHistory?.[0]?.changes?.map((item) => item.field), ['industry', 'city', 'assignedTo', 'remark']);
+
+storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
+  id: 'user-sales',
+  name: 'Sales User',
+  account: 'sales',
+  email: 'sales@company.com',
+  phone: '',
+  role: '\u9500\u552e\u987e\u95ee',
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+}]));
+storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({
+  userId: 'user-sales',
+  token: 'test-token',
+  remember: true,
+  createdAt: now,
+}));
+
+const completedCustomerContactRes = await customerApi.updateCustomer('cust-blank-contact', {
+  phone: '13811112222',
+  wechat: 'customer_wx_001',
+});
+assert.equal(completedCustomerContactRes.code, 0);
+assert.equal(completedCustomerContactRes.data?.phone, '13811112222');
+assert.equal(completedCustomerContactRes.data?.wechat, 'customer_wx_001');
+
+const lockedCustomerContactRes = await customerApi.updateCustomer('cust-blank-contact', {
+  phone: '13833334444',
+  wechat: 'customer_wx_002',
+});
+assert.equal(lockedCustomerContactRes.code, 0);
+assert.equal(lockedCustomerContactRes.data?.phone, '13811112222');
+assert.equal(lockedCustomerContactRes.data?.wechat, 'customer_wx_001');
+
+storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
+  id: 'user-sales',
+  name: 'System Admin',
+  account: 'admin',
+  email: 'admin@company.com',
+  phone: '',
+  role: '\u8d85\u7ea7\u7ba1\u7406\u5458',
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+}]));
+
+const superAdminCustomerContactRes = await customerApi.updateCustomer('cust-blank-contact', {
+  phone: '13855556666',
+  wechat: 'customer_wx_super',
+});
+assert.equal(superAdminCustomerContactRes.code, 0);
+assert.equal(superAdminCustomerContactRes.data?.phone, '13855556666');
+assert.equal(superAdminCustomerContactRes.data?.wechat, 'customer_wx_super');

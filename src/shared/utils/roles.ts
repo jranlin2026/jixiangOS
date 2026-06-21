@@ -12,6 +12,10 @@ export function normalizeUserRoleName(role?: string): string {
   return LEGACY_ROLE_NAME_MAP[trimmed] || trimmed || DEFAULT_USER_ROLE;
 }
 
+export function isSuperAdminRoleName(role?: string): boolean {
+  return normalizeUserRoleName(role) === '\u8d85\u7ea7\u7ba1\u7406\u5458';
+}
+
 export function isSalesRoleName(role?: string): boolean {
   const normalized = normalizeUserRoleName(role);
   return normalized === '销售顾问' || normalized === '销售经理';

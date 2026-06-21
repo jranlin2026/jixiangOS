@@ -28,6 +28,8 @@ import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
 import useAuthStore from '../../store/useAuthStore';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import { canCompleteContactField } from '../../shared/utils/contactEditLock';
+import { isSuperAdminRoleName } from '../../shared/utils/roles';
 
 interface CustomerDetailProps {
   customer: Customer;
@@ -88,6 +90,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const lifecycleCode = normalizeLifecycleStatusCode(currentCustomer.lifecycleStatusCode);
   const lifecycleConfig = getLifecycleConfigByCode(lifecycleCode);
   const isPublicPoolCustomer = lifecycleCode === 'public_pool';
+  const canEditLockedContact = isSuperAdminRoleName(currentUser?.role);
 
   useEffect(() => {
     setCurrentCustomer(customer);
@@ -246,6 +249,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     const payload: Partial<Customer> = {
       name: draft.name,
       company: draft.company,
+      phone: canEditLockedContact || canCompleteContactField(currentCustomer.phone) ? String(draft.phone || '').trim() : currentCustomer.phone,
+      wechat: canEditLockedContact || canCompleteContactField(currentCustomer.wechat) ? String(draft.wechat || '').trim() : currentCustomer.wechat,
       leadSource: draft.leadSource,
       sourceName: draft.sourceName,
       sourceType: normalizeResourceOwnership(draft.sourceType as string | undefined),
@@ -717,8 +722,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
             <Box>
               {renderInfoRow('客户全名', 'name')}
               {renderInfoRow('公司', 'company')}
-              {renderInfoRow('手机', 'phone', false)}
-              {renderInfoRow('微信', 'wechat', false)}
+              {renderInfoRow('手机', 'phone', canEditLockedContact || canCompleteContactField(currentCustomer.phone))}
+              {renderInfoRow('微信', 'wechat', canEditLockedContact || canCompleteContactField(currentCustomer.wechat))}
               {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={{ bgcolor: `${lifecycleConfig.color}18`, color: lifecycleConfig.color, fontWeight: 600 }} />)}
               {renderSourceRow()}
               {renderInfoRow('资源归属', 'sourceType')}

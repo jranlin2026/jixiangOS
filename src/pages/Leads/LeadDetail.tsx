@@ -26,7 +26,8 @@ import useAuthStore from '../../store/useAuthStore';
 import { canEditLeadProfile } from './leadDetailRules';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
-import { isSalesRoleName } from '../../shared/utils/roles';
+import { isSalesRoleName, isSuperAdminRoleName } from '../../shared/utils/roles';
+import { canCompleteContactField } from '../../shared/utils/contactEditLock';
 
 interface LeadDetailProps {
   lead: Lead;
@@ -38,6 +39,8 @@ interface LeadDetailProps {
 type LeadDraft = {
   name: string;
   company: string;
+  phone: string;
+  wechat: string;
   source: string;
   sourceName: string;
   sourceType: string;
@@ -78,6 +81,8 @@ const formatHistoryValue = (value: unknown) => {
 const toDraft = (lead: Lead): LeadDraft => ({
   name: lead.name || '',
   company: lead.company || '',
+  phone: lead.phone || '',
+  wechat: lead.wechat || '',
   source: lead.source || '',
   sourceName: lead.sourceName || '',
   sourceType: normalizeResourceOwnership(lead.sourceType),
@@ -199,6 +204,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   const canEditProfile = canEditLeadProfile(currentLead);
   const canAssignLead = !currentLead.customerId && hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG, 'write');
   const salesUsers = users.filter((user) => isSalesRoleName(user.role));
+  const canEditLockedContact = isSuperAdminRoleName(currentUser?.role);
 
   const handleDraftChange = (field: keyof LeadDraft) => (event: React.ChangeEvent<HTMLInputElement>) => {
     setDraft((prev) => ({ ...prev, [field]: event.target.value }));
@@ -228,6 +234,8 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
     const payload: Partial<Lead> = {
       name: draft.name,
       company: draft.company,
+      phone: canEditLockedContact || canCompleteContactField(currentLead.phone) ? draft.phone.trim() : currentLead.phone,
+      wechat: canEditLockedContact || canCompleteContactField(currentLead.wechat) ? draft.wechat.trim() : currentLead.wechat,
       source: draft.source,
       sourceName: draft.sourceName,
       sourceType: normalizeResourceOwnership(draft.sourceType),
@@ -493,8 +501,8 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
             <Box>
               {renderInfoRow('姓名', 'name')}
               {renderInfoRow('公司', 'company')}
-              {renderReadOnlyRow('手机号', currentLead.phone)}
-              {renderReadOnlyRow('微信', currentLead.wechat)}
+              {renderInfoRow('手机号', 'phone', canEditLockedContact || canCompleteContactField(currentLead.phone))}
+              {renderInfoRow('微信', 'wechat', canEditLockedContact || canCompleteContactField(currentLead.wechat))}
               {renderInfoRow('资源归属', 'sourceType')}
               {renderSourceRow()}
               {renderInfoRow('行业', 'industry')}

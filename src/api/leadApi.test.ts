@@ -44,9 +44,17 @@ const lead: Lead = {
   followUpRecords: [],
 };
 
+const blankContactLead: Lead = {
+  ...lead,
+  id: 'lead-blank-contact',
+  name: 'Blank Contact Lead',
+  phone: '',
+  wechat: '',
+};
+
 storage.clear();
 storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
-storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([lead]));
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([lead, blankContactLead]));
 storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
 storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
   id: 'user-admin',
@@ -91,6 +99,54 @@ assert.deepEqual(updated.changeHistory?.[0].changes?.find((item) => item.field =
   oldValue: '王磊',
   newValue: '李娜',
 });
+
+storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
+  id: 'user-admin',
+  name: 'System Admin',
+  account: 'admin',
+  email: 'admin@company.com',
+  phone: '',
+  role: '\u9500\u552e\u987e\u95ee',
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+}]));
+
+const completedContactRes = await leadApi.updateLead('lead-blank-contact', {
+  phone: '13911112222',
+  wechat: 'lead_wx_001',
+});
+assert.equal(completedContactRes.code, 0);
+assert.equal(completedContactRes.data?.phone, '13911112222');
+assert.equal(completedContactRes.data?.wechat, 'lead_wx_001');
+
+const lockedContactRes = await leadApi.updateLead('lead-blank-contact', {
+  phone: '13933334444',
+  wechat: 'lead_wx_002',
+});
+assert.equal(lockedContactRes.code, 0);
+assert.equal(lockedContactRes.data?.phone, '13911112222');
+assert.equal(lockedContactRes.data?.wechat, 'lead_wx_001');
+
+storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
+  id: 'user-admin',
+  name: 'System Admin',
+  account: 'admin',
+  email: 'admin@company.com',
+  phone: '',
+  role: '\u8d85\u7ea7\u7ba1\u7406\u5458',
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+}]));
+
+const superAdminContactRes = await leadApi.updateLead('lead-blank-contact', {
+  phone: '13955556666',
+  wechat: 'lead_wx_super',
+});
+assert.equal(superAdminContactRes.code, 0);
+assert.equal(superAdminContactRes.data?.phone, '13955556666');
+assert.equal(superAdminContactRes.data?.wechat, 'lead_wx_super');
 
 const createRes = await leadApi.createLead({
   name: '无隐藏字段线索',

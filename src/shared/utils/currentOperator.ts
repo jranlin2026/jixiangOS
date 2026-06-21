@@ -35,3 +35,10 @@ export function getCurrentOperatorName(fallback = SYSTEM_OPERATOR): string {
   return cleanName(currentUser?.name) || safeFallback;
 }
 
+export function getCurrentOperatorUser(): User | null {
+  const session = readLocalStorageJson<AuthSession>(AUTH_SESSION_STORAGE_KEY);
+  if (!isSessionValid(session)) return null;
+
+  const users = readLocalStorageJson<User[]>(STORAGE_KEYS.USERS) || [];
+  return users.find((user) => user.id === session.userId) || null;
+}

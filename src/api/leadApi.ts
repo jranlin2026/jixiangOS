@@ -7,9 +7,11 @@ import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 import { leadFlowApi } from './leadFlowApi';
-import { getCurrentOperatorName } from '../shared/utils/currentOperator';
+import { getCurrentOperatorName, getCurrentOperatorUser } from '../shared/utils/currentOperator';
 import { hydrateLeadLifecycle, setCustomerLifecycle } from './lifecycleSync';
 import { filterVisibleLeads } from '../shared/utils/dataVisibility';
+import { applyContactEditLock } from '../shared/utils/contactEditLock';
+import { isSuperAdminRoleName } from '../shared/utils/roles';
 
 function ensureInit(): void {
   initializeMockData();
@@ -171,14 +173,17 @@ async function updateLead(id: string, data: Partial<Lead>): Promise<ApiResponse<
   if (idx === -1) return createSuccessResponse(null);
   const now = new Date().toISOString();
   const existing = normalizeLead(leads[idx]);
+  const safeData = applyContactEditLock<Lead>(existing, data, {
+    canEditLockedContact: isSuperAdminRoleName(getCurrentOperatorUser()?.role),
+  });
   const merged = {
     ...existing,
-    ...data,
-    sourceType: normalizeResourceOwnership(data.sourceType || existing.sourceType),
+    ...safeData,
+    sourceType: normalizeResourceOwnership(safeData.sourceType || existing.sourceType),
   };
   const validationError = validateLeadAttribution(merged);
   if (validationError) return createErrorResponse(validationError);
-  const changes = buildLeadChanges(existing, data);
+  const changes = buildLeadChanges(existing, safeData);
   const history = existing.changeHistory || [];
   const assignedChanged = changes.some((item) => item.field === 'assignedTo');
   const operator = getCurrentOperatorName(existing.inputBy || existing.owner);
