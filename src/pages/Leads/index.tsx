@@ -40,13 +40,13 @@ import LeadForm from './LeadForm';
 import LeadBulkImportDialog from './LeadBulkImportDialog';
 import LeadIntakeTab from './LeadIntakeTab';
 import type { Lead } from '../../types/lead';
-import { leadBulkImportApi, leadFlowApi, settingsApi } from '../../api';
+import { leadBulkImportApi, leadFlowApi, roleApi, settingsApi } from '../../api';
 import type { LeadSourceConfig, LifecycleStatusConfig, User } from '../../types/settings';
+import type { Role } from '../../types/role';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import PermissionGate from '../../shared/auth/PermissionGate';
 import useAuthStore from '../../store/useAuthStore';
-import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
-import { isSalesRoleName } from '../../shared/utils/roles';
+import { canReceiveLead, hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { filterUsersByCurrentDataScope } from '../../shared/utils/dataVisibility';
 import ResizableHeaderCell, {
   getResizableCellSx,
@@ -245,6 +245,7 @@ const Leads: React.FC = () => {
   const [lifecycleConfigs, setLifecycleConfigs] = useState<LifecycleStatusConfig[]>([]);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [assignLead, setAssignLead] = useState<Lead | null>(null);
   const [assignSalesName, setAssignSalesName] = useState('');
@@ -280,6 +281,9 @@ const Leads: React.FC = () => {
     settingsApi.fetchUsers({ isActive: true }).then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
     });
+    roleApi.getRoles({ isActive: true }).then((res) => {
+      if (res.code === 0) setRoles(res.data);
+    });
     settingsApi.fetchLeadSourceConfigs().then((res) => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive && !item.parentId));
     });
@@ -293,7 +297,7 @@ const Leads: React.FC = () => {
     writeColumnWidths(LEAD_WIDTH_STORAGE_KEY, columnWidths);
   }, [columnWidths]);
 
-  const salesUsers = filterUsersByCurrentDataScope(users).filter((user) => isSalesRoleName(user.role));
+  const salesUsers = filterUsersByCurrentDataScope(users).filter((user) => canReceiveLead(user, roles));
   const canAssignLeads = hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG, 'write');
 
   const handleViewDetail = (lead: Lead) => {
@@ -666,7 +670,7 @@ const Leads: React.FC = () => {
           >
             {salesUsers.map((user) => (
               <MenuItem key={user.id} value={user.name}>
-                {user.name}（{user.role}）
+                {user.name}（{user.positionName || '未设置职位'}）
               </MenuItem>
             ))}
           </TextField>

@@ -27,9 +27,12 @@ const useRoleStore = create<RoleState>((set, get) => ({
       const res = await roleApi.getRoles(filters);
       if (res.code === 0) {
         set({ items: res.data, loading: false });
+      } else {
+        throw new Error(res.message || '获取角色失败');
       }
     } catch (e: any) {
       set({ error: e.message, loading: false });
+      throw e;
     }
   },
 
@@ -39,39 +42,48 @@ const useRoleStore = create<RoleState>((set, get) => ({
       const res = await roleApi.getRoleById(id);
       if (res.code === 0) {
         set({ current: res.data, loading: false });
+      } else {
+        throw new Error(res.message || '获取角色失败');
       }
     } catch (e: any) {
       set({ error: e.message, loading: false });
+      throw e;
     }
   },
 
   create: async (data) => {
     set({ loading: true, error: null });
     try {
-      await roleApi.createRole(data);
+      const res = await roleApi.createRole(data);
+      if (res.code !== 0) throw new Error(res.message || '创建角色失败');
       await get().fetchItems();
     } catch (e: any) {
       set({ error: e.message, loading: false });
+      throw e;
     }
   },
 
   update: async (id, data) => {
     set({ loading: true, error: null });
     try {
-      await roleApi.updateRole(id, data);
+      const res = await roleApi.updateRole(id, data);
+      if (res.code !== 0) throw new Error(res.message || '更新角色失败');
       await get().fetchItems();
     } catch (e: any) {
       set({ error: e.message, loading: false });
+      throw e;
     }
   },
 
   delete: async (id) => {
     set({ loading: true, error: null });
     try {
-      await roleApi.deleteRole(id);
+      const res = await roleApi.deleteRole(id);
+      if (res.code !== 0) throw new Error(res.message || '删除角色失败');
       await get().fetchItems();
     } catch (e: any) {
       set({ error: e.message, loading: false });
+      throw e;
     }
   },
 

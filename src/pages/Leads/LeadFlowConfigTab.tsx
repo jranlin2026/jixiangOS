@@ -17,10 +17,10 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { leadFlowApi, settingsApi } from '../../api';
+import { leadFlowApi, roleApi, settingsApi } from '../../api';
 import type { LeadFlowConfig, LeadUniqueKeyMode } from '../../types/lead';
 import type { User } from '../../types/settings';
-import { isSalesRoleName } from '../../shared/utils/roles';
+import { canReceiveLead } from '../../shared/utils/permissions';
 
 const LeadFlowConfigTab: React.FC = () => {
   const [config, setConfig] = useState<LeadFlowConfig | null>(null);
@@ -31,9 +31,12 @@ const LeadFlowConfigTab: React.FC = () => {
     leadFlowApi.fetchLeadFlowConfig().then((res) => {
       if (res.code === 0) setConfig(res.data);
     });
-    settingsApi.fetchUsers({ isActive: true }).then((res) => {
-      if (res.code === 0) {
-        setSalesUsers(res.data.filter((user) => user.isActive && isSalesRoleName(user.role)));
+    Promise.all([
+      settingsApi.fetchUsers({ isActive: true }),
+      roleApi.getRoles({ isActive: true }),
+    ]).then(([usersRes, rolesRes]) => {
+      if (usersRes.code === 0 && rolesRes.code === 0) {
+        setSalesUsers(usersRes.data.filter((user) => canReceiveLead(user, rolesRes.data)));
       }
     });
   }, []);

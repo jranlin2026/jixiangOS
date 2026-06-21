@@ -1,19 +1,24 @@
 import type { Department, DepartmentFilters } from '../types/department';
 import type { ApiResponse } from './types';
-import { createSuccessResponse, delay } from './types';
+import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
+import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
+import type { User } from '../types/settings';
+import type { Position } from '../types/position';
+import type { Role } from '../types/role';
 
 function ensureInit(): void {
   initializeMockData();
+  ensureOrganizationConfigData();
 }
 
 async function getDepartments(filters?: DepartmentFilters): Promise<ApiResponse<Department[]>> {
   ensureInit();
   await delay(200);
-  let departments = getStorageData<Department[]>(STORAGE_KEYS.DEPARTMENTS) || [];
+  let departments = ensureOrganizationConfigData().departments;
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
@@ -29,14 +34,14 @@ async function getDepartments(filters?: DepartmentFilters): Promise<ApiResponse<
 async function getDepartmentById(id: string): Promise<ApiResponse<Department | null>> {
   ensureInit();
   await delay(150);
-  const departments = getStorageData<Department[]>(STORAGE_KEYS.DEPARTMENTS) || [];
+  const departments = ensureOrganizationConfigData().departments;
   return createSuccessResponse(departments.find((d) => d.id === id) || null);
 }
 
 async function createDepartment(data: Omit<Department, 'id' | 'createdAt' | 'updatedAt'>): Promise<ApiResponse<Department>> {
   ensureInit();
   await delay(200);
-  const departments = getStorageData<Department[]>(STORAGE_KEYS.DEPARTMENTS) || [];
+  const departments = ensureOrganizationConfigData().departments;
   const now = new Date().toISOString();
   const newDept: Department = {
     ...data,
@@ -52,7 +57,7 @@ async function createDepartment(data: Omit<Department, 'id' | 'createdAt' | 'upd
 async function updateDepartment(id: string, data: Partial<Department>): Promise<ApiResponse<Department | null>> {
   ensureInit();
   await delay(200);
-  const departments = getStorageData<Department[]>(STORAGE_KEYS.DEPARTMENTS) || [];
+  const departments = ensureOrganizationConfigData().departments;
   const idx = departments.findIndex((d) => d.id === id);
   if (idx === -1) return createSuccessResponse(null);
   departments[idx] = { ...departments[idx], ...data, updatedAt: new Date().toISOString() };
@@ -63,7 +68,15 @@ async function updateDepartment(id: string, data: Partial<Department>): Promise<
 async function deleteDepartment(id: string): Promise<ApiResponse<boolean>> {
   ensureInit();
   await delay(150);
-  const departments = getStorageData<Department[]>(STORAGE_KEYS.DEPARTMENTS) || [];
+  const { departments, positions, roles } = ensureOrganizationConfigData();
+  const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
+  const hasUsers = users.some((user) => user.departmentId === id);
+  const hasPositions = positions.some((position: Position) => position.departmentId === id);
+  const hasRoles = roles.some((role: Role) => role.departmentId === id);
+  const hasChildren = departments.some((department) => department.parentId === id);
+  if (hasUsers || hasPositions || hasRoles || hasChildren) {
+    return createErrorResponse('该部门已有员工、职位、角色或子部门引用，不能删除，请改为停用');
+  }
   setStorageData(STORAGE_KEYS.DEPARTMENTS, departments.filter((d) => d.id !== id));
   return createSuccessResponse(true);
 }

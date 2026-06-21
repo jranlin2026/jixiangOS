@@ -20,6 +20,8 @@ export interface User {
   role: UserRole;
   avatar?: string;
   departmentId?: ID;
+  positionId?: ID;
+  positionName?: string;
   roleId?: ID;
   passwordHash?: string;
   passwordSalt?: string;

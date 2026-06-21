@@ -19,15 +19,15 @@ import HistoryIcon from '@mui/icons-material/History';
 import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import type { Lead } from '../../types/lead';
 import type { LeadSourceConfig, User } from '../../types/settings';
-import { leadApi, leadFlowApi, settingsApi } from '../../api';
+import { leadApi, leadFlowApi, roleApi, settingsApi } from '../../api';
 import { formatDate } from '../../shared/utils/formatters';
 import { RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import useAuthStore from '../../store/useAuthStore';
 import { canEditLeadProfile } from './leadDetailRules';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
-import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
-import { isSalesRoleName, isSuperAdminRoleName } from '../../shared/utils/roles';
+import { canReceiveLead, hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { canCompleteContactField } from '../../shared/utils/contactEditLock';
+import type { Role } from '../../types/role';
 
 interface LeadDetailProps {
   lead: Lead;
@@ -132,6 +132,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   const [draft, setDraft] = useState<LeadDraft>(() => toDraft(lead));
   const [activeTab, setActiveTab] = useState(0);
   const [users, setUsers] = useState<User[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignSalesName, setAssignSalesName] = useState('');
@@ -147,6 +148,9 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
     if (!open) return;
     settingsApi.fetchUsers({ isActive: true }).then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
+    });
+    roleApi.getRoles({ isActive: true }).then((res) => {
+      if (res.code === 0) setRoles(res.data);
     });
     settingsApi.fetchLeadSourceConfigs().then((res) => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
@@ -203,8 +207,8 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   const canClaimLead = !currentLead.customerId;
   const canEditProfile = canEditLeadProfile(currentLead);
   const canAssignLead = !currentLead.customerId && hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG, 'write');
-  const salesUsers = users.filter((user) => isSalesRoleName(user.role));
-  const canEditLockedContact = isSuperAdminRoleName(currentUser?.role);
+  const salesUsers = users.filter((user) => canReceiveLead(user, roles));
+  const canEditLockedContact = isSuperAdmin(currentUser);
 
   const handleDraftChange = (field: keyof LeadDraft) => (event: React.ChangeEvent<HTMLInputElement>) => {
     setDraft((prev) => ({ ...prev, [field]: event.target.value }));
@@ -382,7 +386,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
                 <MenuItem value="">无</MenuItem>
                 {users.map((user) => (
                   <MenuItem key={user.id} value={user.id}>
-                    {user.name}（{user.role}）
+                    {user.name}（{user.positionName || '未设置职位'}）
                   </MenuItem>
                 ))}
               </TextField>
@@ -392,7 +396,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
                 {field === 'assignedTo' && <MenuItem value="待分配">待分配</MenuItem>}
                 {users.map((user) => (
                   <MenuItem key={user.id} value={user.name}>
-                    {user.name}（{user.role}）
+                    {user.name}（{user.positionName || '未设置职位'}）
                   </MenuItem>
                 ))}
               </TextField>
@@ -553,7 +557,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
         >
           {salesUsers.map((user) => (
             <MenuItem key={user.id} value={user.name}>
-              {user.name}（{user.role}）
+              {user.name}（{user.positionName || '未设置职位'}）
             </MenuItem>
           ))}
         </TextField>

@@ -1,19 +1,22 @@
 import type { Role, RoleFilters } from '../types/role';
 import type { ApiResponse } from './types';
-import { createSuccessResponse, delay } from './types';
+import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
+import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
+import type { User } from '../types/settings';
 
 function ensureInit(): void {
   initializeMockData();
+  ensureOrganizationConfigData();
 }
 
 async function getRoles(filters?: RoleFilters): Promise<ApiResponse<Role[]>> {
   ensureInit();
   await delay(200);
-  let roles = getStorageData<Role[]>(STORAGE_KEYS.ROLES) || [];
+  let roles = ensureOrganizationConfigData().roles;
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
@@ -32,14 +35,14 @@ async function getRoles(filters?: RoleFilters): Promise<ApiResponse<Role[]>> {
 async function getRoleById(id: string): Promise<ApiResponse<Role | null>> {
   ensureInit();
   await delay(150);
-  const roles = getStorageData<Role[]>(STORAGE_KEYS.ROLES) || [];
+  const roles: Role[] = [...ensureOrganizationConfigData().roles];
   return createSuccessResponse(roles.find((r) => r.id === id) || null);
 }
 
 async function createRole(data: Omit<Role, 'id' | 'createdAt' | 'updatedAt'>): Promise<ApiResponse<Role>> {
   ensureInit();
   await delay(200);
-  const roles = getStorageData<Role[]>(STORAGE_KEYS.ROLES) || [];
+  const roles: Role[] = [...ensureOrganizationConfigData().roles];
   const now = new Date().toISOString();
   const newRole: Role = {
     ...data,
@@ -55,9 +58,12 @@ async function createRole(data: Omit<Role, 'id' | 'createdAt' | 'updatedAt'>): P
 async function updateRole(id: string, data: Partial<Role>): Promise<ApiResponse<Role | null>> {
   ensureInit();
   await delay(200);
-  const roles = getStorageData<Role[]>(STORAGE_KEYS.ROLES) || [];
+  const roles = ensureOrganizationConfigData().roles;
   const idx = roles.findIndex((r) => r.id === id);
   if (idx === -1) return createSuccessResponse(null);
+  if (roles[idx].code === 'super_admin' && data.isActive === false) {
+    return createErrorResponse('超级管理员角色不能停用');
+  }
   roles[idx] = { ...roles[idx], ...data, updatedAt: new Date().toISOString() };
   setStorageData(STORAGE_KEYS.ROLES, roles);
   return createSuccessResponse(roles[idx]);
@@ -66,7 +72,13 @@ async function updateRole(id: string, data: Partial<Role>): Promise<ApiResponse<
 async function deleteRole(id: string): Promise<ApiResponse<boolean>> {
   ensureInit();
   await delay(150);
-  const roles = getStorageData<Role[]>(STORAGE_KEYS.ROLES) || [];
+  const roles = ensureOrganizationConfigData().roles;
+  const role = roles.find((r) => r.id === id);
+  if (role?.code === 'super_admin') return createErrorResponse('超级管理员角色不能删除');
+  const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
+  if (users.some((user) => user.roleId === id || user.role === role?.name)) {
+    return createErrorResponse('已有员工使用该角色，不能删除，请改为停用');
+  }
   setStorageData(STORAGE_KEYS.ROLES, roles.filter((r) => r.id !== id));
   return createSuccessResponse(true);
 }

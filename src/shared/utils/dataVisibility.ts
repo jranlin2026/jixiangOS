@@ -7,7 +7,8 @@ import type { Role } from '../../types/role';
 import type { User } from '../../types/settings';
 import { AUTH_SESSION_STORAGE_KEY } from './auth';
 import { LIFECYCLE_STATUS_CODES, STORAGE_KEYS, normalizeLifecycleStatusCode } from './constants';
-import { isSalesRoleName, normalizeUserRoleName } from './roles';
+import { canReceiveLead, getUserRole, isSalesManagerForDataScope, isSuperAdminUser } from './permissions';
+import { ensureOrganizationConfigData } from './organizationConfig';
 
 export interface DataVisibilityScope {
   unrestricted: boolean;
@@ -38,41 +39,13 @@ function isSessionValid(session: AuthSession | null): session is AuthSession {
   return new Date(session.expiresAt).getTime() > Date.now();
 }
 
-function getRole(user: User, roles: Role[]): Role | undefined {
-  const normalizedRole = normalizeUserRoleName(user.role);
-  return roles.find((role) => (
-    role.isActive
-    && (
-      role.id === user.roleId
-      || role.name === normalizedRole
-      || role.name === user.role
-    )
-  ));
-}
-
 function getRoleCode(user: User, roles: Role[]): string {
-  const role = getRole(user, roles);
+  const role = getUserRole(user, roles);
   return cleanText(role?.code || user.role).toLowerCase();
 }
 
-function isSuperAdminRole(user: User, roles: Role[]): boolean {
-  const role = getRole(user, roles);
-  const roleCode = getRoleCode(user, roles);
-  if (roleCode === 'super_admin') return true;
-  const normalized = normalizeUserRoleName(user.role);
-  if (normalized === '瓒呯骇绠＄悊鍛?' || normalized === 'super_admin') return true;
-  return Boolean(role?.permissions?.some((permission) => cleanText(permission.module) === '全部' && permission.actions.includes('admin')));
-}
-
-function isSalesManagerRole(user: User, roles: Role[]): boolean {
-  const roleCode = getRoleCode(user, roles);
-  const normalized = normalizeUserRoleName(user.role);
-  return roleCode === 'sales_manager' || normalized === '閿€鍞粡鐞?';
-}
-
 function isSalesDataRole(user: User, roles: Role[]): boolean {
-  const roleCode = getRoleCode(user, roles);
-  return roleCode === 'sales_consultant' || roleCode === 'sales_manager' || isSalesRoleName(user.role);
+  return canReceiveLead(user, roles);
 }
 
 function unique<T>(values: T[]): T[] {
@@ -93,12 +66,12 @@ export function getCurrentDataVisibilityScope(): DataVisibilityScope {
   if (!isSessionValid(session)) return unrestrictedScope();
 
   const users = readLocalStorageJson<User[]>(STORAGE_KEYS.USERS) || [];
-  const roles = readLocalStorageJson<Role[]>(STORAGE_KEYS.ROLES) || [];
+  const roles = ensureOrganizationConfigData().roles;
   const currentUser = users.find((user) => user.id === session.userId && user.isActive);
   if (!currentUser) return unrestrictedScope();
 
   const roleCode = getRoleCode(currentUser, roles);
-  if (isSuperAdminRole(currentUser, roles)) {
+  if (isSuperAdminUser(currentUser, roles)) {
     return {
       unrestricted: true,
       currentUser,
@@ -111,7 +84,7 @@ export function getCurrentDataVisibilityScope(): DataVisibilityScope {
 
   const activeUsers = users.filter((user) => user.isActive);
   let visibleUsers: User[] = [currentUser];
-  if (isSalesManagerRole(currentUser, roles) && currentUser.departmentId) {
+  if (isSalesManagerForDataScope(currentUser, roles) && currentUser.departmentId) {
     visibleUsers = activeUsers.filter((user) => (
       user.departmentId === currentUser.departmentId
       && isSalesDataRole(user, roles)

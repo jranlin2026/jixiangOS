@@ -10,6 +10,8 @@ export interface AuthenticatedUser {
   phone: string;
   role: UserRole;
   roleId?: string;
+  positionId?: string;
+  positionName?: string;
   avatar?: string;
   departmentId?: string;
   permissions: Permission[];

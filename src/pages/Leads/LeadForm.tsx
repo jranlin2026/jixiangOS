@@ -12,10 +12,11 @@ import {
 import useLeadStore from '../../store/useLeadStore';
 import type { Lead } from '../../types/lead';
 import type { LeadSourceConfig, User } from '../../types/settings';
-import { settingsApi } from '../../api';
+import { roleApi, settingsApi } from '../../api';
 import { RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
-import { isSalesRoleName } from '../../shared/utils/roles';
+import { canReceiveLead } from '../../shared/utils/permissions';
+import type { Role } from '../../types/role';
 
 const CURRENT_USER_STORAGE_KEY = 'aaos_current_user';
 
@@ -44,6 +45,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
   const isEdit = Boolean(lead);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
   const [submitError, setSubmitError] = useState('');
 
   const parentSources = useMemo(
@@ -101,6 +103,9 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     settingsApi.fetchUsers({ isActive: true }).then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
     });
+    roleApi.getRoles({ isActive: true }).then((res) => {
+      if (res.code === 0) setRoles(res.data);
+    });
   }, []);
 
   useEffect(() => {
@@ -129,7 +134,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     });
   }, [open, lead, sourceOptions, users]);
 
-  const salesUsers = users.filter((user) => isSalesRoleName(user.role));
+  const salesUsers = users.filter((user) => canReceiveLead(user, roles));
   const selectedSourceKey = sourceOptions.find((option) => (
     option.parentName === form.source && option.childName === (form.sourceName || '')
   ))?.key || '';
@@ -258,13 +263,13 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
           >
             <MenuItem value="">无</MenuItem>
             {users.map((user) => (
-              <MenuItem key={user.id} value={user.id}>{user.name}</MenuItem>
+              <MenuItem key={user.id} value={user.id}>{user.name}（{user.positionName || '未设置职位'}）</MenuItem>
             ))}
           </TextField>
           <TextField select label="分配销售" value={form.owner} onChange={handleChange('owner')} fullWidth helperText="开启自动分配时会按流转规则覆盖">
             <MenuItem value="待分配">待分配</MenuItem>
             {salesUsers.map((user) => (
-              <MenuItem key={user.id} value={user.name}>{user.name}</MenuItem>
+              <MenuItem key={user.id} value={user.name}>{user.name}（{user.positionName || '未设置职位'}）</MenuItem>
             ))}
           </TextField>
           <TextField label="标签（逗号分隔）" value={form.tags} onChange={handleChange('tags')} fullWidth sx={{ gridColumn: '1 / -1' }} />

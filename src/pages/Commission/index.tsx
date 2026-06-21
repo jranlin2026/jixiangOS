@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Box,
   Button,
@@ -25,8 +25,6 @@ import {
   TableRow,
   Tabs,
   TextField,
-  ToggleButton,
-  ToggleButtonGroup,
   Tooltip,
   Typography,
 } from '@mui/material';
@@ -211,10 +209,18 @@ function getPayoutStatusColor(status: MonthlyCommissionPayout['status']): 'defau
 interface CommissionProps {
   embedded?: boolean;
   initialTab?: 0 | 1 | 2;
+  hideEmbeddedOrderSplitViewButton?: boolean;
+  orderSplitViewTrigger?: number;
 }
 
-const Commission: React.FC<CommissionProps> = ({ embedded = false, initialTab = 0 }) => {
+const Commission: React.FC<CommissionProps> = ({
+  embedded = false,
+  initialTab = 0,
+  hideEmbeddedOrderSplitViewButton = false,
+  orderSplitViewTrigger = 0,
+}) => {
   const [tabValue, setTabValue] = useState(initialTab);
+  const lastOrderSplitViewTriggerRef = useRef(orderSplitViewTrigger);
   const [orderRows, setOrderRows] = useState<CommissionOrderSummary[]>([]);
   const [orderLoading, setOrderLoading] = useState(false);
   const [orderPagination, setOrderPagination] = useState({ page: 1, pageSize: 10, total: 0 });
@@ -373,6 +379,13 @@ const Commission: React.FC<CommissionProps> = ({ embedded = false, initialTab = 
   useEffect(() => {
     fetchMonthlyPayouts(payoutPeriod);
   }, [payoutPeriod]);
+
+  useEffect(() => {
+    if (orderSplitViewTrigger <= 0) return;
+    if (lastOrderSplitViewTriggerRef.current === orderSplitViewTrigger) return;
+    lastOrderSplitViewTriggerRef.current = orderSplitViewTrigger;
+    setOrderSplitViewOpen(true);
+  }, [orderSplitViewTrigger]);
 
   const updateOrderFilter = (key: keyof typeof orderFilters, value: string) => {
     setOrderPagination((prev) => ({ ...prev, page: 1 }));
@@ -785,50 +798,36 @@ const Commission: React.FC<CommissionProps> = ({ embedded = false, initialTab = 
   };
 
   const renderOrderStatusBar = () => (
-    <Box sx={{ mb: 2 }}>
-      <ToggleButtonGroup
-        exclusive
-        size="small"
-        value={orderFilters.status}
-        onChange={(_event, value) => value && updateOrderFilter('status', value)}
-        sx={{
-          bgcolor: '#fff',
-          border: '1px solid #e5e7eb',
-          borderRadius: 1,
-          overflow: 'hidden',
-          '& .MuiToggleButton-root': {
-            border: 0,
-            borderRight: '1px solid #e5e7eb',
-            px: 1.5,
-            minHeight: 40,
-            color: '#374151',
-            '&:last-of-type': { borderRight: 0 },
-            '&.Mui-selected': {
-              bgcolor: '#eef2f7',
-              color: '#111827',
-              fontWeight: 700,
-            },
-          },
-        }}
-      >
+    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 2 }}>
         {ORDER_STATUS_OPTIONS.map((item) => {
+          const selected = orderFilters.status === item.value;
           const count = orderStatusCounts[item.value] || 0;
           const highlight = item.important && count > 0;
           return (
-            <ToggleButton key={item.value} value={item.value}>
-              <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
-                <span>{item.label}</span>
-                <Chip
-                  label={count}
-                  size="small"
-                  color={highlight ? (item.value === '异常' ? 'error' : 'warning') : 'default'}
-                  sx={{ height: 20, minWidth: 24, '& .MuiChip-label': { px: 0.75 } }}
-                />
-              </Stack>
-            </ToggleButton>
+            <Button
+              key={item.value}
+              variant={selected ? 'contained' : 'outlined'}
+              color={item.important ? 'error' : 'primary'}
+              onClick={() => updateOrderFilter('status', item.value)}
+              sx={{ borderRadius: 1.5 }}
+            >
+              {item.label}
+              <Chip
+                label={count}
+                size="small"
+                color={highlight && !selected ? (item.value === '异常' ? 'error' : 'warning') : 'default'}
+                sx={{
+                  ml: 1,
+                  height: 22,
+                  minWidth: 24,
+                  bgcolor: selected ? 'rgba(255,255,255,0.24)' : '#eef2f7',
+                  color: selected ? '#fff' : undefined,
+                  '& .MuiChip-label': { px: 0.75 },
+                }}
+              />
+            </Button>
           );
         })}
-      </ToggleButtonGroup>
     </Box>
   );
 
@@ -1123,7 +1122,7 @@ const Commission: React.FC<CommissionProps> = ({ embedded = false, initialTab = 
           </Tabs>
         </>
       )}
-      {embedded && tabValue === 0 && (
+      {embedded && tabValue === 0 && !hideEmbeddedOrderSplitViewButton && (
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
           <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setOrderSplitViewOpen(true)}>
             视图设置

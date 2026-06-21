@@ -32,9 +32,11 @@ import KeyIcon from '@mui/icons-material/Key';
 import SearchIcon from '@mui/icons-material/Search';
 import SubdirectoryArrowRightIcon from '@mui/icons-material/SubdirectoryArrowRight';
 import useDepartmentStore from '../../store/useDepartmentStore';
+import usePositionStore from '../../store/usePositionStore';
 import { settingsApi } from '../../api';
 import { roleApi } from '../../api';
 import type { Department } from '../../types/department';
+import type { Position } from '../../types/position';
 import type { Role } from '../../types/role';
 import type { User, UserRole } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
@@ -48,6 +50,7 @@ type UserForm = {
   email: string;
   phone: string;
   role: UserRole;
+  positionId: string;
   departmentId: string;
   isActive: boolean;
   password: string;
@@ -70,6 +73,7 @@ const emptyUserForm: UserForm = {
   email: '',
   phone: '',
   role: DEFAULT_USER_ROLE,
+  positionId: '',
   departmentId: '',
   isActive: true,
   password: DEFAULT_USER_PASSWORD,
@@ -101,6 +105,7 @@ function collectDepartmentIds(departments: Department[], departmentId: string): 
 
 const EmployeeDepartmentManagement: React.FC = () => {
   const { items: departments, fetchItems, create, update, delete: deleteDepartment } = useDepartmentStore();
+  const { items: positions, fetchItems: fetchPositions } = usePositionStore();
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState(ALL_DEPARTMENTS);
@@ -121,9 +126,10 @@ const EmployeeDepartmentManagement: React.FC = () => {
 
   useEffect(() => {
     fetchItems();
+    fetchPositions();
     loadUsers();
     loadRoles();
-  }, [fetchItems]);
+  }, [fetchItems, fetchPositions]);
 
   const loadUsers = async () => {
     const res = await settingsApi.fetchUsers();
@@ -136,9 +142,12 @@ const EmployeeDepartmentManagement: React.FC = () => {
   };
 
   const activeDepartments = useMemo(() => departments.filter((department) => department.isActive), [departments]);
+  const activePositions = useMemo(() => positions.filter((position) => position.isActive), [positions]);
   const departmentByParent = useMemo(() => buildDepartmentTree(activeDepartments), [activeDepartments]);
   const selectedDepartment = activeDepartments.find((department) => department.id === selectedDepartmentId) || null;
   const roleOptions = roles.length ? roles : [{ id: 'fallback-sales', name: DEFAULT_USER_ROLE }] as Role[];
+  const positionOptions = activePositions.length ? activePositions : [{ id: 'fallback-position', name: DEFAULT_USER_ROLE, code: 'sales_consultant', sortOrder: 1, isActive: true, createdAt: '', updatedAt: '' }] as Position[];
+  const userFormPositionOptions = positionOptions.filter((position) => !userForm.departmentId || position.departmentId === userForm.departmentId);
 
   const departmentIdsInScope = useMemo(() => (
     selectedDepartment ? collectDepartmentIds(activeDepartments, selectedDepartment.id) : activeDepartments.map((department) => department.id)
@@ -157,6 +166,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
         return user.name.toLowerCase().includes(q)
           || (user.account || '').toLowerCase().includes(q)
           || (user.phone || '').includes(q)
+          || (user.positionName || '').toLowerCase().includes(q)
           || normalizeUserRoleName(user.role).toLowerCase().includes(q)
           || (department?.name || '').toLowerCase().includes(q);
       })
@@ -167,6 +177,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const selectedDepartmentUserCount = filteredUsers.length;
 
   const resolveRoleId = (roleName: string) => roles.find((role) => role.name === roleName)?.id || '';
+  const getPositionName = (user: User) => user.positionName || positions.find((position) => position.id === user.positionId)?.name || '-';
   const getDepartmentName = (departmentId?: string) => activeDepartments.find((department) => department.id === departmentId)?.name || '-';
 
   const clearSelection = () => setSelectedUserIds([]);
@@ -174,10 +185,13 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const openCreateUser = () => {
     setError('');
     setEditingUser(null);
+    const departmentId = selectedDepartment?.id || activeDepartments[0]?.id || '';
+    const firstPosition = positionOptions.find((position) => position.departmentId === departmentId) || positionOptions[0];
     setUserForm({
       ...emptyUserForm,
       role: roleOptions[0]?.name || DEFAULT_USER_ROLE,
-      departmentId: selectedDepartment?.id || activeDepartments[0]?.id || '',
+      positionId: firstPosition?.id || '',
+      departmentId: firstPosition?.departmentId || departmentId,
     });
     setUserFormOpen(true);
   };
@@ -191,6 +205,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
       email: user.email || '',
       phone: user.phone || '',
       role: normalizeUserRoleName(user.role),
+      positionId: user.positionId || '',
       departmentId: user.departmentId || '',
       isActive: user.isActive,
       password: '',
@@ -215,6 +230,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
       phone: userForm.phone.trim(),
       role: userForm.role,
       roleId: resolveRoleId(userForm.role),
+      positionId: userForm.positionId || undefined,
       departmentId: userForm.departmentId || undefined,
       isActive: userForm.isActive,
       password: userForm.password,
@@ -356,6 +372,25 @@ const EmployeeDepartmentManagement: React.FC = () => {
     await fetchItems();
   };
 
+  const handlePositionChange = (positionId: string) => {
+    const position = positions.find((item) => item.id === positionId);
+    setUserForm({
+      ...userForm,
+      positionId,
+      departmentId: position?.departmentId || userForm.departmentId,
+    });
+  };
+
+  const handleDepartmentChange = (departmentId: string) => {
+    const currentPosition = positions.find((item) => item.id === userForm.positionId);
+    const nextPositionId = currentPosition?.departmentId === departmentId ? userForm.positionId : '';
+    setUserForm({
+      ...userForm,
+      departmentId,
+      positionId: nextPositionId,
+    });
+  };
+
   const toggleUserSelected = (id: string) => {
     setSelectedUserIds((current) => (
       current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
@@ -405,7 +440,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
     <Box sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', minHeight: 620, bgcolor: '#fff' }}>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '300px minmax(0, 1fr)' }, minHeight: 620 }}>
         <Box sx={{ borderRight: { md: '1px solid #e5e7eb' }, bgcolor: '#fbfcfe', p: 2 }}>
-          <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+          <Box sx={{ mb: 2 }}>
             <TextField
               size="small"
               placeholder="搜索员工、部门"
@@ -420,11 +455,6 @@ const EmployeeDepartmentManagement: React.FC = () => {
                 ),
               }}
             />
-            <Tooltip title="新增部门">
-              <IconButton sx={{ border: '1px solid #e5e7eb', borderRadius: 1 }} onClick={() => openCreateDepartment('')}>
-                <AddIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
           </Box>
 
           <Box
@@ -461,15 +491,9 @@ const EmployeeDepartmentManagement: React.FC = () => {
               {selectedDepartment?.name || '全部部门'}({selectedDepartmentUserCount}人)
             </Typography>
             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              <Button size="small" onClick={() => openCreateDepartment(selectedDepartment?.id || '')} startIcon={<SubdirectoryArrowRightIcon />}>
-                添加子部门
-              </Button>
-              <Button size="small" onClick={openEditDepartment} disabled={!selectedDepartment} startIcon={<EditIcon />}>
-                编辑部门
-              </Button>
-              <Button size="small" color="error" onClick={handleDeleteDepartment} disabled={!selectedDepartment} startIcon={<DeleteIcon />}>
-                删除部门
-              </Button>
+              <Typography variant="body2" sx={{ color: '#64748b' }}>
+                部门维护请到“部门管理”，这里仅用于筛选员工账号。
+              </Typography>
             </Box>
           </Box>
 
@@ -498,7 +522,8 @@ const EmployeeDepartmentManagement: React.FC = () => {
                       />
                     </TableCell>
                     <TableCell>姓名</TableCell>
-                    <TableCell>职务</TableCell>
+                    <TableCell>职位</TableCell>
+                    <TableCell>角色</TableCell>
                     <TableCell>部门</TableCell>
                     <TableCell>账号</TableCell>
                     <TableCell>手机号</TableCell>
@@ -513,6 +538,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
                         <Checkbox checked={selectedUserIds.includes(user.id)} onChange={() => toggleUserSelected(user.id)} />
                       </TableCell>
                       <TableCell sx={{ fontWeight: 500 }}>{user.name}</TableCell>
+                      <TableCell>{getPositionName(user)}</TableCell>
                       <TableCell>{normalizeUserRoleName(user.role)}</TableCell>
                       <TableCell>{getDepartmentName(user.departmentId)}</TableCell>
                       <TableCell>{user.account || '-'}</TableCell>
@@ -542,7 +568,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
                   ))}
                   {filteredUsers.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={8} align="center" sx={{ py: 6, color: '#94a3b8' }}>
+                      <TableCell colSpan={9} align="center" sx={{ py: 6, color: '#94a3b8' }}>
                         暂无员工数据
                       </TableCell>
                     </TableRow>
@@ -562,11 +588,15 @@ const EmployeeDepartmentManagement: React.FC = () => {
             <TextField label="登录账号" value={userForm.account} onChange={(event) => setUserForm({ ...userForm, account: event.target.value })} required fullWidth />
             <TextField label="手机号" value={userForm.phone} onChange={(event) => setUserForm({ ...userForm, phone: event.target.value })} fullWidth />
             <TextField label="邮箱" value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} fullWidth />
-            <TextField select label="部门" value={userForm.departmentId} onChange={(event) => setUserForm({ ...userForm, departmentId: event.target.value })} fullWidth>
+            <TextField select label="部门" value={userForm.departmentId} onChange={(event) => handleDepartmentChange(event.target.value)} fullWidth>
               <MenuItem value="">未分配</MenuItem>
               {activeDepartments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
             </TextField>
-            <TextField select label="职务" value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value as UserRole })} fullWidth>
+            <TextField select label="职位" value={userForm.positionId} onChange={(event) => handlePositionChange(event.target.value)} fullWidth>
+              <MenuItem value="">未设置</MenuItem>
+              {userFormPositionOptions.map((position) => <MenuItem key={position.id} value={position.id}>{position.name}</MenuItem>)}
+            </TextField>
+            <TextField select label="角色" value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value as UserRole })} fullWidth>
               {roleOptions.map((role) => <MenuItem key={role.id} value={role.name}>{role.name}</MenuItem>)}
             </TextField>
             {!editingUser && (

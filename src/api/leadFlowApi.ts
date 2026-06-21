@@ -7,9 +7,10 @@ import { getStorageData, setStorageData } from './mock/storage';
 import { DEFAULT_LEAD_FLOW_CONFIG, DEFAULT_PAGE_SIZE, LIFECYCLE_STATUS_CODES, STORAGE_KEYS, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
-import { isSalesRoleName } from '../shared/utils/roles';
 import { getCurrentOperatorName, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
 import { hydrateLeadLifecycle } from './lifecycleSync';
+import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
+import { canReceiveLead } from '../shared/utils/permissions';
 
 function ensureInit(): void {
   initializeMockData();
@@ -43,7 +44,8 @@ function validateAttribution(data: Partial<Lead>): string | null {
 
 function getActiveSalesUsers(): User[] {
   const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
-  return users.filter((user) => user.isActive && isSalesRoleName(user.role));
+  const { roles } = ensureOrganizationConfigData();
+  return users.filter((user) => canReceiveLead(user, roles));
 }
 
 function getConfiguredParticipants(config: LeadFlowConfig): User[] {

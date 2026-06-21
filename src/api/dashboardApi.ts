@@ -216,7 +216,7 @@ async function fetchHomeWorkbench(): Promise<ApiResponse<HomeWorkbenchData>> {
   pushIfAllowed(quickActions, PERMISSION_KEYS.CUSTOMERS, { id: 'customer', label: '新增客户', path: ROUTES.CUSTOMERS, icon: 'customer' });
   pushIfAllowed(quickActions, PERMISSION_KEYS.ORDERS, { id: 'order', label: '提交订单申请', path: ROUTES.ORDERS, icon: 'order' });
   pushIfAllowed(quickActions, PERMISSION_KEYS.ORDERS, { id: 'review', label: '订单审核台', path: `${ROUTES.ORDERS}?tab=review`, icon: 'review' });
-  pushIfAllowed(quickActions, PERMISSION_KEYS.COMMISSION, { id: 'commission', label: '分账处理', path: ROUTES.COMMISSION, icon: 'commission' });
+  pushIfAllowed(quickActions, PERMISSION_KEYS.COMMISSION, { id: 'commission', label: '分账处理', path: `${ROUTES.FINANCE}?tab=settlement`, icon: 'commission' });
   pushIfAllowed(quickActions, PERMISSION_KEYS.REFUND_CENTER, { id: 'refund', label: '退款处理', path: ROUTES.REFUND_CENTER, icon: 'refund' });
   pushIfAllowed(quickActions, PERMISSION_KEYS.DELIVERY, { id: 'delivery', label: '交付推进', path: ROUTES.DELIVERY, icon: 'delivery' });
   pushIfAllowed(quickActions, PERMISSION_KEYS.AI_ASSISTANT, { id: 'ai', label: 'AI助手', path: ROUTES.AI_ASSISTANT, icon: 'ai' });
@@ -230,7 +230,7 @@ async function fetchHomeWorkbench(): Promise<ApiResponse<HomeWorkbenchData>> {
       makeTask('following-customers', '跟进中客户', followingCustomers.length, ROUTES.CUSTOMERS, 'primary', '需要持续推进的客户'),
       makeTask('returned-orders', '退回订单申请', returnedApplications.length, `${ROUTES.ORDERS}?tab=review`, 'error', '销售需要修改后重新提交'),
       makeTask('pending-review', '待审核订单', pendingApplications.length, `${ROUTES.ORDERS}?tab=review`, 'warning', '财务待处理的订单申请'),
-      makeTask('pending-commission', '待处理分账', pendingCommissions.length, ROUTES.COMMISSION, 'info', '待确认或待分配的分账记录'),
+      makeTask('pending-commission', '待处理分账', pendingCommissions.length, `${ROUTES.FINANCE}?tab=settlement`, 'info', '待确认或待分配的分账记录'),
       makeTask('pending-refund', '退款/挽回任务', pendingRefunds.length, ROUTES.REFUND_CENTER, 'error', '仍在流转中的退款任务'),
       makeTask('delivery', '交付进行中', activeDeliveries.length, ROUTES.DELIVERY, 'primary', '未完成的交付单'),
       makeTask('upgrade', '升单机会', pendingOpportunities.length, ROUTES.UPGRADE_POOL, 'success', '可继续跟进的升单机会'),
@@ -299,7 +299,7 @@ async function fetchBusinessCockpit(range?: DashboardDateRange): Promise<ApiResp
     productRevenue: rankByName(orders.map((item) => ({ name: item.productLevel, amount: item.actualAmount || item.amount }))),
     riskTasks: [
       { id: 'review', title: '待审核订单', count: pendingApplications, path: `${ROUTES.ORDERS}?tab=review`, tone: 'warning' },
-      { id: 'commission', title: '待处理分账', count: pendingCommissions, path: ROUTES.COMMISSION, tone: 'info' },
+      { id: 'commission', title: '待处理分账', count: pendingCommissions, path: `${ROUTES.FINANCE}?tab=settlement`, tone: 'info' },
       { id: 'refund', title: '退款流转中', count: refunds.filter((item) => item.status !== '退款已完成' && item.status !== '退款已拒绝').length, path: ROUTES.REFUND_CENTER, tone: 'error' },
       { id: 'returned', title: '退回订单申请', count: applications.filter((item) => item.status === '退回修改').length, path: `${ROUTES.ORDERS}?tab=review`, tone: 'error' },
     ],

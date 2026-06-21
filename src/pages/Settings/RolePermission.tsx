@@ -34,6 +34,7 @@ type RoleForm = {
 
 type PermissionNode = {
   label: string;
+  key?: string;
   children?: PermissionNode[];
 };
 
@@ -46,6 +47,8 @@ const PERMISSION_TREE: PermissionNode[] = [
     children: [
       { label: '线索池' },
       { label: '线索分配' },
+      { label: '接收/领取线索', key: 'leads.receive' },
+      { label: '分配线索', key: 'leads.assign' },
       { label: '线索跟进' },
       { label: '线索转客户' },
     ],
@@ -129,8 +132,11 @@ const PERMISSION_TREE: PermissionNode[] = [
       {
         label: '组织权限',
         children: [
-          { label: '员工&部门' },
+          { label: '员工账号' },
+          { label: '部门管理' },
+          { label: '职位管理' },
           { label: '角色权限' },
+          { label: '账号回收站' },
         ],
       },
       {
@@ -159,7 +165,7 @@ const getNodeKey = (path: string[]) => path.join('/');
 
 const collectLeafKeys = (node: PermissionNode, path: string[] = []): string[] => {
   const currentPath = [...path, node.label];
-  if (!node.children?.length) return [getNodeKey(currentPath)];
+  if (!node.children?.length) return [node.key || getNodeKey(currentPath)];
   return node.children.flatMap((child) => collectLeafKeys(child, currentPath));
 };
 
@@ -183,6 +189,7 @@ const getPermissionAliasMap = () => {
     const selectableKeys = getSelectableNodeKeys(node, path);
     aliases.set(getNodeKey(currentPath), selectableKeys);
     aliases.set(node.label, selectableKeys);
+    if (node.key) aliases.set(node.key, [node.key]);
     node.children?.forEach((child) => walk(child, currentPath));
   };
 
@@ -190,13 +197,13 @@ const getPermissionAliasMap = () => {
     .filter((category) => category.label !== '全部')
     .forEach((category) => walk(category, []));
 
-  const employeeDepartmentKey = '系统设置/组织权限/员工&部门';
+  const employeeKey = '系统设置/组织权限/员工账号';
+  const departmentKey = '系统设置/组织权限/部门管理';
   [
     '用户管理',
-    '部门管理',
     '系统设置/组织权限/用户管理',
-    '系统设置/组织权限/部门管理',
-  ].forEach((legacyKey) => aliases.set(legacyKey, [employeeDepartmentKey]));
+    '系统设置/组织权限/员工&部门',
+  ].forEach((legacyKey) => aliases.set(legacyKey, [employeeKey, departmentKey]));
 
   return aliases;
 };
@@ -249,18 +256,21 @@ const RolePermission: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [editRole, setEditRole] = useState<Role | null>(null);
   const [form, setForm] = useState<RoleForm>(emptyForm);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     fetchItems();
   }, [fetchItems]);
 
   const handleCreate = () => {
+    setError('');
     setEditRole(null);
     setForm(emptyForm);
     setFormOpen(true);
   };
 
   const handleEdit = (role: Role) => {
+    setError('');
     setEditRole(role);
     setForm({
       name: role.name,
@@ -273,19 +283,25 @@ const RolePermission: React.FC = () => {
   };
 
   const handleSubmit = async () => {
+    setError('');
     if (!form.name) return;
     const permissions = toPermissions(normalizePermissionKeys(form.permissions));
     if (!permissions.length) return;
 
-    if (editRole) {
-      await update(editRole.id, { ...form, permissions, code: editRole.code });
-    } else {
-      await create({
-        ...form,
-        permissions,
-        code: `role-${Date.now()}`,
-        memberCount: 0,
-      });
+    try {
+      if (editRole) {
+        await update(editRole.id, { ...form, permissions, code: editRole.code });
+      } else {
+        await create({
+          ...form,
+          permissions,
+          code: `role-${Date.now()}`,
+          memberCount: 0,
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '保存失败');
+      return;
     }
     setFormOpen(false);
     setEditRole(null);
@@ -310,12 +326,22 @@ const RolePermission: React.FC = () => {
   };
 
   const handleToggleActive = async (role: Role) => {
-    await update(role.id, { isActive: !role.isActive });
+    setError('');
+    try {
+      await update(role.id, { isActive: !role.isActive });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '状态修改失败');
+    }
     fetchItems();
   };
 
   const handleDelete = async (role: Role) => {
-    await deleteRole(role.id);
+    setError('');
+    try {
+      await deleteRole(role.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除失败');
+    }
     fetchItems();
   };
 
@@ -327,6 +353,7 @@ const RolePermission: React.FC = () => {
           新增角色
         </Button>
       </Box>
+      {error && <Typography variant="body2" sx={{ color: '#d32f2f', mb: 1 }}>{error}</Typography>}
 
       <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0' }}>
         <Table>
@@ -360,11 +387,11 @@ const RolePermission: React.FC = () => {
                   <Chip label={role.isActive ? '启用' : '停用'} size="small" color={role.isActive ? 'success' : 'default'} />
                 </TableCell>
                 <TableCell align="center">
-                  <Switch checked={role.isActive} size="small" onChange={() => handleToggleActive(role)} />
+                  <Switch checked={role.isActive} size="small" onChange={() => handleToggleActive(role)} disabled={role.code === 'super_admin'} />
                   <IconButton size="small" onClick={() => handleEdit(role)} title="编辑">
                     <EditIcon fontSize="small" />
                   </IconButton>
-                  <IconButton size="small" color="error" onClick={() => handleDelete(role)} title="删除">
+                  <IconButton size="small" color="error" onClick={() => handleDelete(role)} title="删除" disabled={role.code === 'super_admin'}>
                     <DeleteIcon fontSize="small" />
                   </IconButton>
                 </TableCell>

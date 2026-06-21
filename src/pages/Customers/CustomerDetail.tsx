@@ -376,7 +376,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                 <MenuItem value="">无</MenuItem>
                 {users.map((user) => (
                   <MenuItem key={user.id} value={user.id}>
-                    {user.name}（{user.role}）
+                    {user.name}（{user.positionName || '未设置职位'}）
                   </MenuItem>
                 ))}
               </TextField>
@@ -392,7 +392,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                 {showCurrentUserOption && <MenuItem value={currentValue}>{currentValue}</MenuItem>}
                 {users.map((user) => (
                   <MenuItem key={user.id} value={user.name}>
-                    {user.name}（{user.role}）
+                    {user.name}（{user.positionName || '未设置职位'}）
                   </MenuItem>
                 ))}
               </TextField>

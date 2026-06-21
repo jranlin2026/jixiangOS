@@ -9,16 +9,37 @@ import type { Order } from '../types/order';
 import type { CommissionRule } from '../types/commission';
 import { authApi } from './authApi';
 import { DEFAULT_USER_PASSWORD, ensureAdminUser, ensureUniqueAccount, normalizeAccount } from '../shared/utils/auth';
+import { ensureOrganizationConfigData, migrateUsersWithOrganization, resolvePositionForUser, resolveRoleForUser } from '../shared/utils/organizationConfig';
+import { DEFAULT_USER_ROLE } from '../shared/utils/roles';
 
 function ensureInit(): void {
   initializeMockData();
+  ensureOrganizationConfigData();
 }
 
 function ensureUsersWithAuth(): User[] {
   ensureInit();
-  const users = ensureAdminUser(getStorageData<User[]>(STORAGE_KEYS.USERS) || []);
+  const users = migrateUsersWithOrganization(ensureAdminUser(getStorageData<User[]>(STORAGE_KEYS.USERS) || []));
   setStorageData(STORAGE_KEYS.USERS, users);
   return users;
+}
+
+function withResolvedUserOrganization<T extends Partial<User>>(data: T): T {
+  const { roles, positions } = ensureOrganizationConfigData();
+  const role = resolveRoleForUser({ role: data.role || DEFAULT_USER_ROLE, roleId: data.roleId }, roles);
+  const position = resolvePositionForUser({
+    role: data.role || role?.name || DEFAULT_USER_ROLE,
+    positionId: data.positionId,
+    positionName: data.positionName,
+  }, positions);
+  return {
+    ...data,
+    role: role?.name || data.role,
+    roleId: role?.id || data.roleId,
+    positionId: position?.id || data.positionId,
+    positionName: position?.name || data.positionName,
+    departmentId: data.departmentId || position?.departmentId,
+  };
 }
 
 function ensureOrderTypeConfigs(): OrderTypeConfig[] {
@@ -123,8 +144,9 @@ async function createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'p
   if (!ensureUniqueAccount(users, account)) return createErrorResponse('账号已存在');
   const id = `user-${uuidv4().slice(0, 8)}`;
   const passwordFields = authApi.createUserPasswordFields(id, account, data.password || DEFAULT_USER_PASSWORD);
+  const resolvedData = withResolvedUserOrganization(data);
   const newUser: User = {
-    ...data,
+    ...resolvedData,
     id,
     account,
     ...passwordFields,
@@ -144,7 +166,7 @@ async function updateUser(id: string, data: Partial<User>): Promise<ApiResponse<
   const nextAccount = data.account !== undefined ? normalizeAccount(data.account) : users[idx].account;
   if (!nextAccount) return createErrorResponse('账号不能为空');
   if (!ensureUniqueAccount(users, nextAccount, id)) return createErrorResponse('账号已存在');
-  const safeData = { ...data, account: nextAccount };
+  const safeData = withResolvedUserOrganization({ ...users[idx], ...data, account: nextAccount });
   delete safeData.passwordHash;
   delete safeData.passwordSalt;
   delete safeData.passwordUpdatedAt;

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Box,
+  Button,
   Card,
   CardContent,
   Chip,
@@ -18,6 +19,7 @@ import {
   Tabs,
   Typography,
 } from '@mui/material';
+import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import { commissionApi, financeApi, orderReviewApi, ORDER_APPLICATION_STATUSES, refundApi } from '../../api';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import { getProductLevelColor } from '../../shared/utils/constants';
@@ -71,6 +73,7 @@ const Finance: React.FC = () => {
   const [incomeRowsPerPage, setIncomeRowsPerPage] = useState(10);
   const [expensePage, setExpensePage] = useState(0);
   const [expenseRowsPerPage, setExpenseRowsPerPage] = useState(10);
+  const [settlementViewSettingsTrigger, setSettlementViewSettingsTrigger] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -288,23 +291,42 @@ const Finance: React.FC = () => {
 
   return (
     <Box sx={{ p: 3 }}>
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h5" sx={{ fontWeight: 700, color: '#111827' }}>
-          财务中心
-        </Typography>
-        <Typography variant="body2" sx={{ color: '#6b7280', mt: 0.75 }}>
-          汇总财务总览、退款付款和收支流水；财务结算台保留独立入口，也可从这里进入。
-        </Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, mb: 3 }}>
+        <Box>
+          <Typography variant="h5" sx={{ fontWeight: 700, color: '#111827' }}>
+            财务中心
+          </Typography>
+          <Typography variant="body2" sx={{ color: '#6b7280', mt: 0.75 }}>
+            汇总财务总览、订单分账、退款付款和收支流水，财务相关工作统一在这里处理。
+          </Typography>
+        </Box>
+        {activeTab === 'settlement' && (
+          <Button
+            variant="outlined"
+            startIcon={<ViewColumnIcon />}
+            onClick={() => setSettlementViewSettingsTrigger((value) => value + 1)}
+          >
+            视图设置
+          </Button>
+        )}
       </Box>
 
-      <Tabs value={activeTab} onChange={handleTabChange} sx={{ borderBottom: '1px solid #e5e7eb', mb: 3 }}>
+      <Tabs value={activeTab} onChange={handleTabChange} sx={{ borderBottom: '1px solid #e5e7eb', mb: activeTab === 'settlement' ? 2.5 : 3 }}>
         {FINANCE_TABS.map((tab) => (
           <Tab key={tab.value} value={tab.value} label={tab.label} />
         ))}
       </Tabs>
 
       {activeTab === 'overview' && renderOverview()}
-      {activeTab === 'settlement' && <Commission key="finance-settlement" embedded initialTab={0} />}
+      {activeTab === 'settlement' && (
+        <Commission
+          key="finance-settlement"
+          embedded
+          initialTab={0}
+          hideEmbeddedOrderSplitViewButton
+          orderSplitViewTrigger={settlementViewSettingsTrigger}
+        />
+      )}
       {activeTab === 'payout' && <Commission key="finance-payout" embedded initialTab={1} />}
       {activeTab === 'refund' && <RefundCenter embedded />}
       {activeTab === 'flow' && renderFlow()}

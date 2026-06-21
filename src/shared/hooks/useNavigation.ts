@@ -14,7 +14,7 @@ export function useNavigation() {
   const goToCustomers = useCallback(() => navigate(ROUTES.CUSTOMERS), [navigate]);
   const goToOrders = useCallback(() => navigate(ROUTES.ORDERS), [navigate]);
   const goToDelivery = useCallback(() => navigate(ROUTES.DELIVERY), [navigate]);
-  const goToCommission = useCallback(() => navigate(ROUTES.COMMISSION), [navigate]);
+  const goToCommission = useCallback(() => navigate(`${ROUTES.FINANCE}?tab=settlement`), [navigate]);
   const goToFinance = useCallback(() => navigate(ROUTES.FINANCE), [navigate]);
   const goToUpgradeCenter = useCallback(() => navigate(ROUTES.UPGRADE_CENTER), [navigate]);
   const goToUpgradeAnalysis = useCallback(() => navigate(ROUTES.UPGRADE_ANALYSIS), [navigate]);

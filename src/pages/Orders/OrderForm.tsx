@@ -148,7 +148,7 @@ function dealSceneFromOrderType(orderType: OrderType): CommissionScene | undefin
 }
 
 function renderUserOptionLabel(user: User): string {
-  return `${user.name}（${user.role}）`;
+  return `${user.name}（${user.positionName || '未设置职位'}）`;
 }
 
 function getCustomerDisplayName(customer?: Customer | null): string {

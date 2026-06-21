@@ -197,7 +197,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
 
   const userOptions = users.map((user) => (
     <MenuItem key={user.id} value={user.name}>
-      {user.name}（{user.role}）
+      {user.name}（{user.positionName || '未设置职位'}）
     </MenuItem>
   ));
   const missingContact = !form.phone.trim() && !form.wechat.trim();
@@ -267,7 +267,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
             <MenuItem value="">无</MenuItem>
             {users.map((user) => (
               <MenuItem key={user.id} value={user.id}>
-                {user.name}（{user.role}）
+                {user.name}（{user.positionName || '未设置职位'}）
               </MenuItem>
             ))}
           </TextField>

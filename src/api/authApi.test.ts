@@ -39,7 +39,7 @@ assert.equal(currentUser.data?.account, 'admin');
 
 const roles = await roleApi.getRoles({ isActive: true });
 assert.equal(roles.code, 0);
-assert.equal(roles.data.length, 7);
+assert.equal(roles.data.length, 8);
 const roleNames = new Set(roles.data.map((role) => role.name));
 
 const existingUsers = await settingsApi.fetchUsers();

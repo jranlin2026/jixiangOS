@@ -15,13 +15,15 @@ import type { AuthenticatedUser, AuthSession, LoginPayload, UserWithAuth } from 
 import type { Role } from '../types/role';
 import type { User } from '../types/settings';
 import { v4 as uuidv4 } from 'uuid';
+import { ensureOrganizationConfigData, migrateUsersWithOrganization } from '../shared/utils/organizationConfig';
 
 function ensureAuthData(): { users: UserWithAuth[]; roles: Role[] } {
   initializeMockData();
   const storedUsers = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
-  const users = ensureAdminUser(storedUsers);
+  ensureOrganizationConfigData();
+  const users = migrateUsersWithOrganization(ensureAdminUser(storedUsers)) as UserWithAuth[];
   setStorageData(STORAGE_KEYS.USERS, users);
-  const roles = getStorageData<Role[]>(STORAGE_KEYS.ROLES) || [];
+  const roles = ensureOrganizationConfigData().roles;
   return { users, roles };
 }
 

@@ -25,7 +25,7 @@ const actions: QuickActionItem[] = [
   { label: '新增订单', icon: <ReceiptIcon />, path: ROUTES.ORDERS, color: '#FF9800', bgColor: '#FFF3E0' },
   { label: '代理升级', icon: <TrendingUpIcon />, path: ROUTES.UPGRADE_ANALYSIS, color: '#9C27B0', bgColor: '#F3E5F5' },
   { label: '退款统计', icon: <RefundIcon />, path: ROUTES.ORDERS, color: '#F44336', bgColor: '#FFEBEE' },
-  { label: '提成统计', icon: <AccountBalanceWalletIcon />, path: ROUTES.COMMISSION, color: '#00BCD4', bgColor: '#E0F7FA' },
+  { label: '提成统计', icon: <AccountBalanceWalletIcon />, path: `${ROUTES.FINANCE}?tab=settlement`, color: '#00BCD4', bgColor: '#E0F7FA' },
   { label: '客户画像', icon: <PsychologyIcon />, path: ROUTES.CUSTOMERS, color: '#9C27B0', bgColor: '#F3E5F5' },
   { label: '经营分析', icon: <AnalyticsIcon />, path: ROUTES.FINANCE, color: '#FF9800', bgColor: '#FFF3E0' },
 ];

@@ -27,9 +27,12 @@ const useDepartmentStore = create<DepartmentState>((set, get) => ({
       const res = await departmentApi.getDepartments(filters);
       if (res.code === 0) {
         set({ items: res.data, loading: false });
+      } else {
+        throw new Error(res.message || '获取部门失败');
       }
     } catch (e: any) {
       set({ error: e.message, loading: false });
+      throw e;
     }
   },
 
@@ -39,39 +42,48 @@ const useDepartmentStore = create<DepartmentState>((set, get) => ({
       const res = await departmentApi.getDepartmentById(id);
       if (res.code === 0) {
         set({ current: res.data, loading: false });
+      } else {
+        throw new Error(res.message || '获取部门失败');
       }
     } catch (e: any) {
       set({ error: e.message, loading: false });
+      throw e;
     }
   },
 
   create: async (data) => {
     set({ loading: true, error: null });
     try {
-      await departmentApi.createDepartment(data);
+      const res = await departmentApi.createDepartment(data);
+      if (res.code !== 0) throw new Error(res.message || '创建部门失败');
       await get().fetchItems();
     } catch (e: any) {
       set({ error: e.message, loading: false });
+      throw e;
     }
   },
 
   update: async (id, data) => {
     set({ loading: true, error: null });
     try {
-      await departmentApi.updateDepartment(id, data);
+      const res = await departmentApi.updateDepartment(id, data);
+      if (res.code !== 0) throw new Error(res.message || '更新部门失败');
       await get().fetchItems();
     } catch (e: any) {
       set({ error: e.message, loading: false });
+      throw e;
     }
   },
 
   delete: async (id) => {
     set({ loading: true, error: null });
     try {
-      await departmentApi.deleteDepartment(id);
+      const res = await departmentApi.deleteDepartment(id);
+      if (res.code !== 0) throw new Error(res.message || '删除部门失败');
       await get().fetchItems();
     } catch (e: any) {
       set({ error: e.message, loading: false });
+      throw e;
     }
   },
 

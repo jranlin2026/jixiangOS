@@ -226,7 +226,7 @@ function buildWorkbench(data: AssistantData): AIAssistantWorkbench {
       title: '分账存在待确认或待分配',
       content: `当前有 ${pendingCommissionRows.length} 条分账需要财务确认，建议先处理待分配人员和异常分账。`,
       tone: 'error',
-      path: ROUTES.COMMISSION,
+      path: `${ROUTES.FINANCE}?tab=settlement`,
     });
   }
   if (activeRefundRows.length > 0) {
@@ -304,7 +304,7 @@ function buildWorkbench(data: AssistantData): AIAssistantWorkbench {
         count: pendingCommissionRows.length,
         priority: pendingCommissionRows.length > 0 ? 'high' : 'low',
         module: '财务结算',
-        path: ROUTES.COMMISSION,
+        path: `${ROUTES.FINANCE}?tab=settlement`,
         actionLabel: '处理分账',
       }),
       makeTask({
@@ -561,7 +561,7 @@ function buildCommissionResults(data: AssistantData): AIResultData[] {
         amount: formatCurrency(item.amount),
       })),
       actions: [
-        { label: '处理订单分账', path: ROUTES.COMMISSION, variant: 'contained' },
+        { label: '处理订单分账', path: `${ROUTES.FINANCE}?tab=settlement`, variant: 'contained' },
         { label: '查看月度发放', path: `${ROUTES.FINANCE}?tab=payout`, variant: 'outlined' },
       ],
     },
