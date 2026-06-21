@@ -72,9 +72,11 @@ type CustomerViewConfig = {
   visibleColumnIds: string[];
   columnOrder: string[];
   frozenColumnCount: number;
+  schemaVersion: number;
 };
 
-const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_view_v5';
+const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_view_v6';
+const CUSTOMER_VIEW_SCHEMA_VERSION = 6;
 const CUSTOMER_WIDTH_STORAGE_KEY = 'aaos_customer_table_column_widths_v2';
 const CUSTOMER_ACTION_COLUMN_WIDTH = 160;
 const formatCustomerSource = (customer: Customer) => [customer.leadSource, customer.sourceName].filter(Boolean).join('-') || '-';
@@ -85,8 +87,9 @@ const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[]): Custom
     return lifecycleConfigs.find((item) => item.code === code) || getLifecycleConfigByCode(code);
   };
   return [
+  { id: 'name', label: '姓名', render: (customer) => customer.name || '-' },
   { id: 'company', label: '公司', render: (customer) => customer.company || '-' },
-  { id: 'phone', label: '电话', render: (customer) => customer.phone || '-' },
+  { id: 'phone', label: '手机号', render: (customer) => customer.phone || '-' },
   { id: 'wechat', label: '微信', render: (customer) => customer.wechat || '-' },
   {
     id: 'lifecycleStatus',
@@ -122,6 +125,7 @@ const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[]): Custom
 };
 
 const DEFAULT_VISIBLE_COLUMNS = [
+  'name',
   'company',
   'phone',
   'lifecycleStatus',
@@ -162,6 +166,7 @@ const getDefaultCustomerViewConfig = (columns: CustomerColumn[]): CustomerViewCo
   visibleColumnIds: DEFAULT_VISIBLE_COLUMNS.filter((id) => columns.some((column) => column.id === id)),
   columnOrder: columns.map((column) => column.id),
   frozenColumnCount: 0,
+  schemaVersion: CUSTOMER_VIEW_SCHEMA_VERSION,
 });
 
 const normalizeCustomerViewConfig = (value: unknown, columns: CustomerColumn[]): CustomerViewConfig => {
@@ -173,6 +178,7 @@ const normalizeCustomerViewConfig = (value: unknown, columns: CustomerColumn[]):
   }
   if (!value || typeof value !== 'object') return defaultConfig;
   const config = value as Partial<CustomerViewConfig>;
+  if (config.schemaVersion !== CUSTOMER_VIEW_SCHEMA_VERSION) return defaultConfig;
   const visibleColumnIds = Array.isArray(config.visibleColumnIds)
     ? config.visibleColumnIds.filter((id): id is string => typeof id === 'string' && validIds.has(id))
     : defaultConfig.visibleColumnIds;
@@ -181,12 +187,13 @@ const normalizeCustomerViewConfig = (value: unknown, columns: CustomerColumn[]):
     : [];
   const missingOrderIds = columns.map((column) => column.id).filter((id) => !configuredOrder.includes(id));
   const frozenColumnCount = Number.isFinite(config.frozenColumnCount)
-    ? Math.max(0, Math.min(Number(config.frozenColumnCount), visibleColumnIds.length + 1))
+    ? Math.max(0, Math.min(Number(config.frozenColumnCount), visibleColumnIds.length))
     : defaultConfig.frozenColumnCount;
   return {
     visibleColumnIds: visibleColumnIds.length ? visibleColumnIds : defaultConfig.visibleColumnIds,
     columnOrder: [...configuredOrder, ...missingOrderIds],
     frozenColumnCount,
+    schemaVersion: CUSTOMER_VIEW_SCHEMA_VERSION,
   };
 };
 
@@ -267,10 +274,10 @@ const Customers: React.FC = () => {
     () => orderedColumns.filter((column) => visibleColumnIds.includes(column.id)),
     [orderedColumns, visibleColumnIds],
   );
-  const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length + 1);
+  const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length);
   const visibleOwnerUsers = useMemo(() => filterUsersByCurrentDataScope(users), [users]);
   const tableMinWidth = useMemo(
-    () => columnWidths.name + visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + CUSTOMER_ACTION_COLUMN_WIDTH,
+    () => visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + CUSTOMER_ACTION_COLUMN_WIDTH,
     [columnWidths, visibleColumns],
   );
 
@@ -386,7 +393,7 @@ const Customers: React.FC = () => {
       return {
         ...current,
         visibleColumnIds,
-        frozenColumnCount: Math.min(current.frozenColumnCount, visibleColumnIds.length + 1),
+        frozenColumnCount: Math.min(current.frozenColumnCount, visibleColumnIds.length),
       };
     });
   };
@@ -407,7 +414,7 @@ const Customers: React.FC = () => {
   const handleFrozenColumnCountChange = (value: number) => {
     setViewConfig((current) => ({
       ...current,
-      frozenColumnCount: Math.max(0, Math.min(value, current.visibleColumnIds.length + 1)),
+      frozenColumnCount: Math.max(0, Math.min(value, current.visibleColumnIds.length)),
     }));
   };
 
@@ -421,7 +428,7 @@ const Customers: React.FC = () => {
   };
 
   const getFrozenLeft = (columnIndex: number) => {
-    const widths = [columnWidths.name, ...visibleColumns.map((column) => columnWidths[column.id] || DEFAULT_COLUMN_WIDTHS[column.id] || 120)];
+    const widths = visibleColumns.map((column) => columnWidths[column.id] || DEFAULT_COLUMN_WIDTHS[column.id] || 120);
     return widths.slice(0, columnIndex).reduce((sum, width) => sum + width, 0);
   };
 
@@ -520,14 +527,13 @@ const Customers: React.FC = () => {
         <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
           <TableHead>
             <TableRow>
-              <ResizableHeaderCell columnId="name" width={columnWidths.name} onResize={handleResizeColumn} sx={getFrozenColumnSx(0, true)}>姓名</ResizableHeaderCell>
               {visibleColumns.map((column, columnIndex) => (
                 <ResizableHeaderCell
                   key={column.id}
                   columnId={column.id}
                   width={columnWidths[column.id]}
                   onResize={handleResizeColumn}
-                  sx={getFrozenColumnSx(columnIndex + 1, true)}
+                  sx={getFrozenColumnSx(columnIndex, true)}
                 >
                   {column.label}
                 </ResizableHeaderCell>
@@ -538,9 +544,18 @@ const Customers: React.FC = () => {
           <TableBody>
             {items.map((customer) => (
               <TableRow key={customer.id} hover>
-                <TableCell sx={{ ...getResizableCellSx(columnWidths.name), ...getFrozenColumnSx(0), fontWeight: 500 }} title={customer.name}>{customer.name}</TableCell>
                 {visibleColumns.map((column, columnIndex) => (
-                  <TableCell key={column.id} sx={{ ...getResizableCellSx(columnWidths[column.id]), ...getFrozenColumnSx(columnIndex + 1) }}>{column.render(customer)}</TableCell>
+                  <TableCell
+                    key={column.id}
+                    sx={{
+                      ...getResizableCellSx(columnWidths[column.id]),
+                      ...getFrozenColumnSx(columnIndex),
+                      ...(column.id === 'name' ? { fontWeight: 500 } : {}),
+                    }}
+                    title={column.id === 'name' ? customer.name : undefined}
+                  >
+                    {column.render(customer)}
+                  </TableCell>
                 ))}
                 <TableCell align="center" sx={actionColumnSx}>
                   <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5 }}>
@@ -582,7 +597,7 @@ const Customers: React.FC = () => {
             ))}
             {items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={visibleColumns.length + 2} align="center" sx={{ py: 6, color: '#9ca3af' }}>
+                <TableCell colSpan={visibleColumns.length + 1} align="center" sx={{ py: 6, color: '#9ca3af' }}>
                   暂无客户数据
                 </TableCell>
               </TableRow>
@@ -704,7 +719,7 @@ const Customers: React.FC = () => {
         visibleColumnIds={visibleColumnIds}
         columnOrder={viewConfig.columnOrder}
         frozenColumnCount={viewConfig.frozenColumnCount}
-        maxFrozenColumnCount={visibleColumns.length + 1}
+        maxFrozenColumnCount={visibleColumns.length}
         onClose={() => setViewSettingsOpen(false)}
         onToggleColumn={handleToggleColumn}
         onReorderColumn={handleReorderColumn}

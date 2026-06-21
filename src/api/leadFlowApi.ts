@@ -95,18 +95,18 @@ function formatLeadSourceText(lead: Partial<Lead>): string | undefined {
   return [lead.source, lead.sourceName].filter(Boolean).join('-') || undefined;
 }
 
-function assignLeadOwner(config: LeadFlowConfig, fallbackOwner?: string): { owner: string; assignedTo?: string; assignedAt?: string; assignmentRuleId?: string; status: '入库成功' | '待分配'; reason: string; nextIndex: number } {
+function assignLeadOwner(config: LeadFlowConfig, fallbackOwner?: string): { owner: string; assignedTo?: string; assignedAt?: string; assignmentRuleId?: string; assignmentStatus: '待分配' | '已分配待领取'; reason: string; nextIndex: number } {
   if (!config.autoAssignEnabled) {
     if (fallbackOwner && fallbackOwner !== '待分配') {
       const now = new Date().toISOString();
-      return { owner: fallbackOwner, assignedTo: fallbackOwner, assignedAt: now, status: '入库成功', reason: '手动指定销售', nextIndex: config.lastAssignedIndex };
+      return { owner: fallbackOwner, assignedTo: fallbackOwner, assignedAt: now, assignmentStatus: '已分配待领取', reason: '手动指定销售', nextIndex: config.lastAssignedIndex };
     }
-    return { owner: '待分配', status: '待分配', reason: '商机自动分配未开启', nextIndex: config.lastAssignedIndex };
+    return { owner: '待分配', assignmentStatus: '待分配', reason: '线索自动分配未开启', nextIndex: config.lastAssignedIndex };
   }
 
   const participants = getConfiguredParticipants(config);
   if (!participants.length) {
-    return { owner: '待分配', status: '待分配', reason: '暂无可分配销售成员', nextIndex: config.lastAssignedIndex };
+    return { owner: '待分配', assignmentStatus: '待分配', reason: '暂无可分配销售成员', nextIndex: config.lastAssignedIndex };
   }
 
   for (let step = 1; step <= participants.length; step += 1) {
@@ -119,13 +119,13 @@ function assignLeadOwner(config: LeadFlowConfig, fallbackOwner?: string): { owne
       assignedTo: user.name,
       assignedAt: now,
       assignmentRuleId: config.id,
-      status: '入库成功',
+      assignmentStatus: '已分配待领取',
       reason: '顺序平均分配',
       nextIndex: index,
     };
   }
 
-  return { owner: '待分配', status: '待分配', reason: '今日分配上限已达', nextIndex: config.lastAssignedIndex };
+  return { owner: '待分配', assignmentStatus: '待分配', reason: '今日分配上限已达', nextIndex: config.lastAssignedIndex };
 }
 
 function upsertCustomerFromLead(lead: Lead): Customer {
@@ -316,7 +316,7 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
     assignedTo: assignment.assignedTo,
     assignedAt: assignment.assignedAt,
     assignmentRuleId: assignment.assignmentRuleId,
-    intakeStatus: assignment.status,
+    intakeStatus: '入库成功',
     lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP,
     lifecycleStatus: '待跟进',
     sourceType: normalizeResourceOwnership(data.sourceType),
@@ -326,11 +326,7 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
     updatedAt: now,
   };
   const leadWithLifecycle = hydrateLeadLifecycle(lead);
-  const linkedCustomer = upsertCustomerFromLead(leadWithLifecycle);
-  const storedLead = {
-    ...leadWithLifecycle,
-    customerId: linkedCustomer.id,
-  };
+  const storedLead = leadWithLifecycle;
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
   setStorageData(STORAGE_KEYS.LEADS, [storedLead, ...leads]);
   setStorageData(STORAGE_KEYS.LEAD_FLOW_CONFIG, { ...config, lastAssignedIndex: assignment.nextIndex, updatedAt: now });
@@ -344,12 +340,11 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
     source: formatLeadSourceText(storedLead),
     inputBy: storedLead.inputBy,
     assignedTo: storedLead.assignedTo,
-    status: assignment.status,
+    status: '入库成功',
     matchedRule: assignment.reason,
-    failureReason: assignment.status === '待分配' ? assignment.reason : undefined,
     createdAt: now,
   });
-  return { lead: storedLead, message: assignment.status === '待分配' ? assignment.reason : '入库成功' };
+  return { lead: storedLead, message: '入库成功' };
 }
 
 function syncCustomerByLead(lead: Lead): void {
@@ -373,8 +368,8 @@ async function manualAssignLead(leadId: string, userName: string): Promise<ApiRe
     assignedTo: userName,
     assignedAt: changed ? now : leads[idx].assignedAt,
     intakeStatus: '入库成功',
-    lifecycleStatusCode: LIFECYCLE_STATUS_CODES.FOLLOWING,
-    lifecycleStatus: '跟进中',
+    lifecycleStatusCode: leads[idx].lifecycleStatusCode || LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP,
+    lifecycleStatus: leads[idx].lifecycleStatus || '待跟进',
     lifecycleStatusUpdatedAt: changed ? now : leads[idx].lifecycleStatusUpdatedAt,
     changeHistory: changed
       ? [{
@@ -393,10 +388,60 @@ async function manualAssignLead(leadId: string, userName: string): Promise<ApiRe
       : leads[idx].changeHistory,
     updatedAt: now,
   });
-  if (!nextLead.customerId) {
-    const customer = upsertCustomerFromLead(nextLead);
-    nextLead = { ...nextLead, customerId: customer.id };
-  }
+  leads[idx] = nextLead;
+  setStorageData(STORAGE_KEYS.LEADS, leads);
+  if (leads[idx].customerId) syncCustomerByLead(leads[idx]);
+  return createSuccessResponse(leads[idx]);
+}
+
+async function claimLeadAsCustomer(leadId: string, userName: string): Promise<ApiResponse<Lead | null>> {
+  ensureInit();
+  await delay(150);
+  const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
+  const idx = leads.findIndex((lead) => lead.id === leadId);
+  if (idx === -1) return createSuccessResponse(null);
+  const now = new Date().toISOString();
+  const beforeAssignee = leads[idx].assignedTo || leads[idx].owner || '';
+  const changed = beforeAssignee !== userName;
+  const operator = getCurrentOperatorName(leads[idx].inputBy || leads[idx].owner);
+  let nextLead = hydrateLeadLifecycle({
+    ...leads[idx],
+    owner: userName,
+    assignedTo: userName,
+    assignedAt: changed || !leads[idx].assignedAt ? now : leads[idx].assignedAt,
+    intakeStatus: '入库成功',
+    lifecycleStatusCode: LIFECYCLE_STATUS_CODES.FOLLOWING,
+    lifecycleStatus: '跟进中',
+    lifecycleStatusUpdatedAt: now,
+    changeHistory: [({
+      id: `hist-${uuidv4().slice(0, 8)}`,
+      action: 'update' as const,
+      operator,
+      changedAt: now,
+      summary: changed ? '领取线索并开始跟进' : '开始跟进线索',
+      changes: changed
+        ? [{
+            field: 'assignedTo',
+            label: '分配销售',
+            oldValue: beforeAssignee || null,
+            newValue: userName,
+          }, {
+            field: 'lifecycleStatus',
+            label: '生命周期',
+            oldValue: leads[idx].lifecycleStatus || '待跟进',
+            newValue: '跟进中',
+          }]
+        : [{
+            field: 'lifecycleStatus',
+            label: '生命周期',
+            oldValue: leads[idx].lifecycleStatus || '待跟进',
+            newValue: '跟进中',
+          }],
+    }), ...(leads[idx].changeHistory || [])],
+    updatedAt: now,
+  });
+  const customer = upsertCustomerFromLead(nextLead);
+  nextLead = { ...nextLead, customerId: customer.id };
   leads[idx] = nextLead;
   setStorageData(STORAGE_KEYS.LEADS, leads);
   syncCustomerByLead(leads[idx]);
@@ -410,4 +455,5 @@ export const leadFlowApi = {
   intakeLead,
   syncCustomerByLead,
   manualAssignLead,
+  claimLeadAsCustomer,
 };

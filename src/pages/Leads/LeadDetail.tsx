@@ -25,6 +25,8 @@ import { RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, normalizeLifecycleStatus
 import useAuthStore from '../../store/useAuthStore';
 import { canEditLeadProfile } from './leadDetailRules';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { isSalesRoleName } from '../../shared/utils/roles';
 
 interface LeadDetailProps {
   lead: Lead;
@@ -126,6 +128,8 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   const [activeTab, setActiveTab] = useState(0);
   const [users, setUsers] = useState<User[]>([]);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [assignSalesName, setAssignSalesName] = useState('');
 
   useEffect(() => {
     setCurrentLead(lead);
@@ -193,6 +197,8 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   const lifecycleConfig = getLifecycleConfigByCode(lifecycleCode);
   const canClaimLead = !currentLead.customerId;
   const canEditProfile = canEditLeadProfile(currentLead);
+  const canAssignLead = !currentLead.customerId && hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG, 'write');
+  const salesUsers = users.filter((user) => isSalesRoleName(user.role));
 
   const handleDraftChange = (field: keyof LeadDraft) => (event: React.ChangeEvent<HTMLInputElement>) => {
     setDraft((prev) => ({ ...prev, [field]: event.target.value }));
@@ -250,13 +256,35 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
       alert('当前登录用户无效，请重新登录后再领取线索');
       return;
     }
-    const res = await leadFlowApi.manualAssignLead(currentLead.id, userName);
+    const res = await leadFlowApi.claimLeadAsCustomer(currentLead.id, userName);
     if (res.code !== 0 || !res.data) {
       alert(res.message || '领取失败');
       return;
     }
     setCurrentLead(res.data);
     setDraft(toDraft(res.data));
+    onUpdated?.(res.data);
+  };
+
+  const handleOpenAssign = () => {
+    const currentAssignee = currentLead.assignedTo || currentLead.owner || '';
+    setAssignSalesName(currentAssignee === '待分配' ? '' : currentAssignee);
+    setAssignOpen(true);
+  };
+
+  const handleAssignLead = async () => {
+    if (!assignSalesName) {
+      alert('请选择要分配的销售');
+      return;
+    }
+    const res = await leadFlowApi.manualAssignLead(currentLead.id, assignSalesName);
+    if (res.code !== 0 || !res.data) {
+      alert(res.message || '分配失败');
+      return;
+    }
+    setCurrentLead(res.data);
+    setDraft(toDraft(res.data));
+    setAssignOpen(false);
     onUpdated?.(res.data);
   };
 
@@ -444,7 +472,12 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
               <Box sx={{ display: 'flex', gap: 1 }}>
                 {canClaimLead && (
                   <Button size="small" variant="contained" startIcon={<PersonAddAltIcon />} onClick={handleClaimCurrentLead}>
-                    领取为客户
+                    开始跟进
+                  </Button>
+                )}
+                {canAssignLead && (
+                  <Button size="small" variant="outlined" onClick={handleOpenAssign}>
+                    分配销售
                   </Button>
                 )}
                 {editing && canEditProfile ? (
@@ -492,6 +525,32 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
               {activeTab === 0 && <HistoryList items={historyItems} />}
             </Box>
           </Paper>
+        </Box>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={assignOpen} onClose={() => setAssignOpen(false)} maxWidth="xs" fullWidth>
+      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pr: 6 }}>
+        分配销售
+        <IconButton aria-label="关闭" onClick={() => setAssignOpen(false)} sx={{ position: 'absolute', right: 12, top: 12 }}>
+          <CloseIcon fontSize="small" />
+        </IconButton>
+      </DialogTitle>
+      <DialogContent dividers>
+        <TextField
+          select
+          label="分配销售"
+          value={assignSalesName}
+          onChange={(event) => setAssignSalesName(event.target.value)}
+          fullWidth
+        >
+          {salesUsers.map((user) => (
+            <MenuItem key={user.id} value={user.name}>
+              {user.name}（{user.role}）
+            </MenuItem>
+          ))}
+        </TextField>
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
+          <Button variant="contained" onClick={handleAssignLead}>保存</Button>
         </Box>
       </DialogContent>
     </Dialog>

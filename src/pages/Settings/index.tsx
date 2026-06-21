@@ -7,6 +7,8 @@ import CustomerLevelConfigPage from './CustomerLevelConfig';
 import OrderTypeConfigPage from './OrderTypeConfig';
 import LifecycleStatusConfigPage from './LifecycleStatusConfig';
 import LeadSourceConfigPage from './LeadSourceConfig';
+import DataMaintenance from './DataMaintenance';
+import LeadFlowConfigTab from '../Leads/LeadFlowConfigTab';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 
@@ -34,6 +36,8 @@ const Settings: React.FC = () => {
     { label: '订单类型', permissionKey: PERMISSION_KEYS.SETTINGS_ORDER_TYPES, component: <OrderTypeConfigPage /> },
     { label: '生命周期状态', permissionKey: PERMISSION_KEYS.SETTINGS_LIFECYCLE, component: <LifecycleStatusConfigPage /> },
     { label: '线索来源', permissionKey: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, component: <LeadSourceConfigPage /> },
+    { label: '线索流转配置', permissionKey: PERMISSION_KEYS.LEADS_FLOW_CONFIG, component: <LeadFlowConfigTab /> },
+    { label: '数据维护', permissionKey: PERMISSION_KEYS.SETTINGS, component: <DataMaintenance /> },
   ].filter((tab) => hasPermission(currentUser, tab.permissionKey))), [currentUser]);
 
   useEffect(() => {

@@ -73,13 +73,16 @@ type OrderViewConfig = {
   visibleColumnIds: string[];
   columnOrder: string[];
   frozenColumnCount: number;
+  schemaVersion: number;
 };
 
-const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_view_v3';
+const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_view_v4';
+const ORDER_VIEW_SCHEMA_VERSION = 4;
 const ORDER_WIDTH_STORAGE_KEY = 'aaos_order_table_column_widths_v1';
 const ORDER_ACTION_COLUMN_WIDTH = 160;
 
 const ORDER_COLUMNS: OrderColumn[] = [
+  { id: 'orderNo', label: '订单号' },
   { id: 'customer', label: '客户' },
   { id: 'productLevel', label: '产品等级' },
   { id: 'orderType', label: '订单类型' },
@@ -92,6 +95,7 @@ const ORDER_COLUMNS: OrderColumn[] = [
 ];
 
 const DEFAULT_VISIBLE_COLUMNS = [
+  'orderNo',
   'customer',
   'productLevel',
   'orderType',
@@ -120,6 +124,7 @@ const getDefaultOrderViewConfig = (): OrderViewConfig => ({
   visibleColumnIds: DEFAULT_VISIBLE_COLUMNS.filter((id) => ORDER_COLUMNS.some((column) => column.id === id)),
   columnOrder: ORDER_COLUMNS.map((column) => column.id),
   frozenColumnCount: 0,
+  schemaVersion: ORDER_VIEW_SCHEMA_VERSION,
 });
 
 const normalizeOrderViewConfig = (value: unknown): OrderViewConfig => {
@@ -131,6 +136,7 @@ const normalizeOrderViewConfig = (value: unknown): OrderViewConfig => {
   }
   if (!value || typeof value !== 'object') return defaultConfig;
   const config = value as Partial<OrderViewConfig>;
+  if (config.schemaVersion !== ORDER_VIEW_SCHEMA_VERSION) return defaultConfig;
   const visibleColumnIds = Array.isArray(config.visibleColumnIds)
     ? config.visibleColumnIds.filter((id): id is string => typeof id === 'string' && validIds.has(id))
     : defaultConfig.visibleColumnIds;
@@ -139,12 +145,13 @@ const normalizeOrderViewConfig = (value: unknown): OrderViewConfig => {
     : [];
   const missingOrderIds = ORDER_COLUMNS.map((column) => column.id).filter((id) => !configuredOrder.includes(id));
   const frozenColumnCount = Number.isFinite(config.frozenColumnCount)
-    ? Math.max(0, Math.min(Number(config.frozenColumnCount), visibleColumnIds.length + 1))
+    ? Math.max(0, Math.min(Number(config.frozenColumnCount), visibleColumnIds.length))
     : defaultConfig.frozenColumnCount;
   return {
     visibleColumnIds: visibleColumnIds.length ? visibleColumnIds : defaultConfig.visibleColumnIds,
     columnOrder: [...configuredOrder, ...missingOrderIds],
     frozenColumnCount,
+    schemaVersion: ORDER_VIEW_SCHEMA_VERSION,
   };
 };
 
@@ -307,7 +314,7 @@ const Orders: React.FC = () => {
       return {
         ...current,
         visibleColumnIds,
-        frozenColumnCount: Math.min(current.frozenColumnCount, visibleColumnIds.length + 1),
+        frozenColumnCount: Math.min(current.frozenColumnCount, visibleColumnIds.length),
       };
     });
   };
@@ -328,7 +335,7 @@ const Orders: React.FC = () => {
   const handleFrozenColumnCountChange = (value: number) => {
     setViewConfig((current) => ({
       ...current,
-      frozenColumnCount: Math.max(0, Math.min(value, current.visibleColumnIds.length + 1)),
+      frozenColumnCount: Math.max(0, Math.min(value, current.visibleColumnIds.length)),
     }));
   };
 
@@ -342,7 +349,7 @@ const Orders: React.FC = () => {
   };
 
   const getFrozenLeft = (columnIndex: number) => {
-    const widths = [columnWidths.orderNo, ...visibleColumns.map((column) => columnWidths[column.id] || DEFAULT_COLUMN_WIDTHS[column.id] || 120)];
+    const widths = visibleColumns.map((column) => columnWidths[column.id] || DEFAULT_COLUMN_WIDTHS[column.id] || 120);
     return widths.slice(0, columnIndex).reduce((sum, width) => sum + width, 0);
   };
 
@@ -448,10 +455,10 @@ const Orders: React.FC = () => {
     () => orderedColumns.filter((column) => visibleColumnIds.includes(column.id)),
     [orderedColumns, visibleColumnIds],
   );
-  const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length + 1);
+  const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length);
   const visibleOwnerUsers = useMemo(() => filterUsersByCurrentDataScope(users), [users]);
   const tableMinWidth = useMemo(
-    () => columnWidths.orderNo + visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + ORDER_ACTION_COLUMN_WIDTH,
+    () => visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + ORDER_ACTION_COLUMN_WIDTH,
     [columnWidths, visibleColumns],
   );
 
@@ -459,6 +466,28 @@ const Orders: React.FC = () => {
     const levelColor = getProductLevelColor(order.productLevel);
     const customerDisplayName = order.customerName;
     switch (columnId) {
+      case 'orderNo':
+        return (
+          <Button
+            variant="text"
+            size="small"
+            onClick={() => handleViewDetail(order)}
+            sx={{
+              minWidth: 0,
+              maxWidth: '100%',
+              p: 0,
+              fontWeight: 700,
+              lineHeight: 1.4,
+              textAlign: 'left',
+              textTransform: 'none',
+              justifyContent: 'flex-start',
+            }}
+          >
+            <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {order.orderNo}
+            </Box>
+          </Button>
+        );
       case 'customer':
         return (
           <Button
@@ -575,14 +604,13 @@ const Orders: React.FC = () => {
             <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
               <TableHead>
                 <TableRow>
-                  <ResizableHeaderCell columnId="orderNo" width={columnWidths.orderNo} onResize={handleResizeColumn} sx={getFrozenColumnSx(0, true)}>订单号</ResizableHeaderCell>
                   {visibleColumns.map((column, columnIndex) => (
                     <ResizableHeaderCell
                       key={column.id}
                       columnId={column.id}
                       width={columnWidths[column.id]}
                       onResize={handleResizeColumn}
-                      sx={getFrozenColumnSx(columnIndex + 1, true)}
+                      sx={getFrozenColumnSx(columnIndex, true)}
                     >
                       {column.label}
                     </ResizableHeaderCell>
@@ -595,29 +623,18 @@ const Orders: React.FC = () => {
                   const levelColor = getProductLevelColor(order.productLevel);
                   return (
                     <TableRow key={order.id} hover sx={{ bgcolor: `${levelColor}08` }}>
-                      <TableCell sx={{ ...getResizableCellSx(columnWidths.orderNo), ...getFrozenColumnSx(0), fontWeight: 500 }} title={order.orderNo}>
-                        <Button
-                          variant="text"
-                          size="small"
-                          onClick={() => handleViewDetail(order)}
-                          sx={{
-                            minWidth: 0,
-                            maxWidth: '100%',
-                            p: 0,
-                            fontWeight: 700,
-                            lineHeight: 1.4,
-                            textAlign: 'left',
-                            textTransform: 'none',
-                            justifyContent: 'flex-start',
-                          }}
-                        >
-                          <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {order.orderNo}
-                          </Box>
-                        </Button>
-                      </TableCell>
                       {visibleColumns.map((column, columnIndex) => (
-                        <TableCell key={column.id} sx={{ ...getResizableCellSx(columnWidths[column.id]), ...getFrozenColumnSx(columnIndex + 1) }}>{renderOrderCell(order, column.id)}</TableCell>
+                        <TableCell
+                          key={column.id}
+                          sx={{
+                            ...getResizableCellSx(columnWidths[column.id]),
+                            ...getFrozenColumnSx(columnIndex),
+                            ...(column.id === 'orderNo' ? { fontWeight: 500 } : {}),
+                          }}
+                          title={column.id === 'orderNo' ? order.orderNo : undefined}
+                        >
+                          {renderOrderCell(order, column.id)}
+                        </TableCell>
                       ))}
                       <TableCell align="center" sx={actionColumnSx}>
                         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5 }}>
@@ -736,7 +753,7 @@ const Orders: React.FC = () => {
         visibleColumnIds={visibleColumnIds}
         columnOrder={viewConfig.columnOrder}
         frozenColumnCount={viewConfig.frozenColumnCount}
-        maxFrozenColumnCount={visibleColumns.length + 1}
+        maxFrozenColumnCount={visibleColumns.length}
         onClose={() => setViewSettingsOpen(false)}
         onToggleColumn={handleToggleColumn}
         onReorderColumn={handleReorderColumn}

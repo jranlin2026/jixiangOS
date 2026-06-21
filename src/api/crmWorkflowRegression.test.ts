@@ -81,7 +81,7 @@ function intakeLead(name: string, phone: string) {
 seed();
 
 const lostLead = intakeLead('33333', '13333000001');
-const lostClaim = await leadFlowApi.manualAssignLead(lostLead.id, 'Sales A');
+const lostClaim = await leadFlowApi.claimLeadAsCustomer(lostLead.id, 'Sales A');
 assert.equal(lostClaim.code, 0);
 assert.equal(lostClaim.data?.lifecycleStatusCode, 'following');
 assert.ok(lostClaim.data?.customerId);
@@ -115,7 +115,7 @@ assert.equal(followedLeadAfter.code, 0);
 assert.equal(followedLeadAfter.data?.lifecycleStatusCode, 'following');
 
 const orderedLead = intakeLead('11111', '13333000002');
-const orderedClaim = await leadFlowApi.manualAssignLead(orderedLead.id, 'Sales B');
+const orderedClaim = await leadFlowApi.claimLeadAsCustomer(orderedLead.id, 'Sales B');
 assert.equal(orderedClaim.code, 0);
 assert.equal(orderedClaim.data?.lifecycleStatusCode, 'following');
 assert.ok(orderedClaim.data?.customerId);

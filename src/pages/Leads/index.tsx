@@ -9,6 +9,9 @@ import {
   MenuItem,
   Paper,
   Select,
+  Dialog,
+  DialogActions,
+  DialogContent,
   Tab,
   Table,
   TableBody,
@@ -28,6 +31,7 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
+import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
 import useLeadStore from '../../store/useLeadStore';
 import { getLifecycleConfigByCode, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatPaginationRows } from '../../shared/utils/formatters';
@@ -35,7 +39,6 @@ import LeadDetail from './LeadDetail';
 import LeadForm from './LeadForm';
 import LeadBulkImportDialog from './LeadBulkImportDialog';
 import LeadIntakeTab from './LeadIntakeTab';
-import LeadFlowConfigTab from './LeadFlowConfigTab';
 import type { Lead } from '../../types/lead';
 import { leadBulkImportApi, leadFlowApi, settingsApi } from '../../api';
 import type { LeadSourceConfig, LifecycleStatusConfig, User } from '../../types/settings';
@@ -54,6 +57,7 @@ import ResizableHeaderCell, {
   type ColumnWidthMap,
 } from '../../shared/components/ResizableTable';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 type LeadColumn = {
   id: string;
@@ -65,11 +69,25 @@ type LeadViewConfig = {
   visibleColumnIds: string[];
   columnOrder: string[];
   frozenColumnCount: number;
+  schemaVersion: number;
 };
 
-const LEAD_VIEW_STORAGE_KEY = 'aaos_lead_table_view_v6';
+const LEAD_VIEW_STORAGE_KEY = 'aaos_lead_table_view_v9';
+const LEAD_VIEW_SCHEMA_VERSION = 9;
 const LEAD_WIDTH_STORAGE_KEY = 'aaos_lead_table_column_widths_v4';
-const LEAD_ACTION_COLUMN_WIDTH = 120;
+const LEAD_ACTION_COLUMN_WIDTH = 150;
+
+const getAssignedSalesName = (lead: Lead) => {
+  const name = lead.assignedTo || lead.owner || '';
+  return name && name !== '待分配' ? name : '';
+};
+
+const getLeadAssignmentStatus = (lead: Lead) => {
+  if (lead.customerId) return { label: '已领取跟进', color: 'success' as const };
+  return getAssignedSalesName(lead)
+    ? { label: '已分配待领取', color: 'info' as const }
+    : { label: '待分配', color: 'warning' as const };
+};
 
 const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] => {
   const getLifecycleConfig = (lead: Lead) => {
@@ -77,6 +95,7 @@ const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] =
     return lifecycleConfigs.find((item) => item.code === code) || getLifecycleConfigByCode(code);
   };
   return [
+    { id: 'name', label: '姓名', render: (lead) => lead.name || '-' },
     { id: 'company', label: '公司', render: (lead) => lead.company || '-' },
     { id: 'phone', label: '手机号', render: (lead) => lead.phone || '-' },
     { id: 'wechat', label: '微信', render: (lead) => lead.wechat || '-' },
@@ -87,6 +106,14 @@ const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] =
     { id: 'inputBy', label: '线索录入人', render: (lead) => lead.inputBy || '-' },
     { id: 'leadContributorName', label: '线索贡献人', render: (lead) => lead.leadContributorName || '-' },
     { id: 'assignedTo', label: '分配销售', render: (lead) => lead.assignedTo || lead.owner || '-' },
+    {
+      id: 'assignmentStatus',
+      label: '分配状态',
+      render: (lead) => {
+        const status = getLeadAssignmentStatus(lead);
+        return <Chip label={status.label} size="small" color={status.color} />;
+      },
+    },
     { id: 'tags', label: '标签', render: (lead) => lead.tags?.join(', ') || '-' },
     { id: 'remark', label: '备注', render: (lead) => lead.remark || '-' },
     {
@@ -96,7 +123,7 @@ const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] =
         <Chip
           label={lead.intakeStatus || '入库成功'}
           size="small"
-          color={lead.intakeStatus === '待分配' ? 'warning' : lead.intakeStatus === '入库失败' ? 'error' : 'success'}
+          color={lead.intakeStatus === '入库失败' ? 'error' : 'success'}
         />
       ),
     },
@@ -122,6 +149,7 @@ const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] =
 };
 
 const DEFAULT_VISIBLE_COLUMNS = [
+  'name',
   'company',
   'phone',
   'wechat',
@@ -132,6 +160,7 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'inputBy',
   'leadContributorName',
   'assignedTo',
+  'assignmentStatus',
   'tags',
   'remark',
   'intakeStatus',
@@ -150,6 +179,7 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   inputBy: 140,
   leadContributorName: 140,
   assignedTo: 140,
+  assignmentStatus: 150,
   tags: 180,
   remark: 260,
   intakeStatus: 140,
@@ -162,6 +192,7 @@ const getDefaultLeadViewConfig = (columns: LeadColumn[]): LeadViewConfig => ({
   visibleColumnIds: DEFAULT_VISIBLE_COLUMNS.filter((id) => columns.some((column) => column.id === id)),
   columnOrder: columns.map((column) => column.id),
   frozenColumnCount: 0,
+  schemaVersion: LEAD_VIEW_SCHEMA_VERSION,
 });
 
 const normalizeLeadViewConfig = (value: unknown, columns: LeadColumn[]): LeadViewConfig => {
@@ -173,6 +204,7 @@ const normalizeLeadViewConfig = (value: unknown, columns: LeadColumn[]): LeadVie
   }
   if (!value || typeof value !== 'object') return defaultConfig;
   const config = value as Partial<LeadViewConfig>;
+  if (config.schemaVersion !== LEAD_VIEW_SCHEMA_VERSION) return defaultConfig;
   const visibleColumnIds = Array.isArray(config.visibleColumnIds)
     ? config.visibleColumnIds.filter((id): id is string => typeof id === 'string' && validIds.has(id))
     : defaultConfig.visibleColumnIds;
@@ -181,12 +213,13 @@ const normalizeLeadViewConfig = (value: unknown, columns: LeadColumn[]): LeadVie
     : [];
   const missingOrderIds = columns.map((column) => column.id).filter((id) => !configuredOrder.includes(id));
   const frozenColumnCount = Number.isFinite(config.frozenColumnCount)
-    ? Math.max(0, Math.min(Number(config.frozenColumnCount), visibleColumnIds.length + 1))
+    ? Math.max(0, Math.min(Number(config.frozenColumnCount), visibleColumnIds.length))
     : defaultConfig.frozenColumnCount;
   return {
     visibleColumnIds: visibleColumnIds.length ? visibleColumnIds : defaultConfig.visibleColumnIds,
     columnOrder: [...configuredOrder, ...missingOrderIds],
     frozenColumnCount,
+    schemaVersion: LEAD_VIEW_SCHEMA_VERSION,
   };
 };
 
@@ -213,6 +246,8 @@ const Leads: React.FC = () => {
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
+  const [assignLead, setAssignLead] = useState<Lead | null>(null);
+  const [assignSalesName, setAssignSalesName] = useState('');
 
   const columns = useMemo(() => buildColumns(lifecycleConfigs), [lifecycleConfigs]);
   const [viewConfig, setViewConfig] = useState<LeadViewConfig>(() => readLeadViewConfig(buildColumns([])));
@@ -231,9 +266,9 @@ const Leads: React.FC = () => {
     () => orderedColumns.filter((column) => visibleColumnIds.includes(column.id)),
     [orderedColumns, visibleColumnIds],
   );
-  const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length + 1);
+  const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length);
   const tableMinWidth = useMemo(
-    () => columnWidths.name + visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + LEAD_ACTION_COLUMN_WIDTH,
+    () => visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + LEAD_ACTION_COLUMN_WIDTH,
     [columnWidths, visibleColumns],
   );
 
@@ -259,7 +294,7 @@ const Leads: React.FC = () => {
   }, [columnWidths]);
 
   const salesUsers = filterUsersByCurrentDataScope(users).filter((user) => isSalesRoleName(user.role));
-  const canManageLeadFlow = hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG, 'write');
+  const canAssignLeads = hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG, 'write');
 
   const handleViewDetail = (lead: Lead) => {
     setSelectedLead(lead);
@@ -268,18 +303,40 @@ const Leads: React.FC = () => {
 
   const getCurrentUserName = () => currentUser?.name || currentUser?.account || '';
 
-  const handleClaimLead = async (lead: Lead) => {
+  const handleStartFollow = async (lead: Lead) => {
     const userName = getCurrentUserName();
     if (!userName) {
       alert('当前登录用户无效，请重新登录后再领取线索');
       return;
     }
-    const res = await leadFlowApi.manualAssignLead(lead.id, userName);
+    const res = await leadFlowApi.claimLeadAsCustomer(lead.id, userName);
     if (res.code !== 0 || !res.data) {
       alert(res.message || '领取失败');
       return;
     }
     setSelectedLead((current) => (current?.id === lead.id ? res.data : current));
+    fetchItems(filters);
+  };
+
+  const handleOpenAssign = (lead: Lead) => {
+    setAssignLead(lead);
+    setAssignSalesName(getAssignedSalesName(lead));
+  };
+
+  const handleAssignLead = async () => {
+    if (!assignLead) return;
+    if (!assignSalesName) {
+      alert('请选择要分配的销售');
+      return;
+    }
+    const res = await leadFlowApi.manualAssignLead(assignLead.id, assignSalesName);
+    if (res.code !== 0 || !res.data) {
+      alert(res.message || '分配失败');
+      return;
+    }
+    setSelectedLead((current) => (current?.id === assignLead.id ? res.data : current));
+    setAssignLead(null);
+    setAssignSalesName('');
     fetchItems(filters);
   };
 
@@ -336,7 +393,7 @@ const Leads: React.FC = () => {
       return {
         ...current,
         visibleColumnIds,
-        frozenColumnCount: Math.min(current.frozenColumnCount, visibleColumnIds.length + 1),
+        frozenColumnCount: Math.min(current.frozenColumnCount, visibleColumnIds.length),
       };
     });
   };
@@ -357,7 +414,7 @@ const Leads: React.FC = () => {
   const handleFrozenColumnCountChange = (value: number) => {
     setViewConfig((current) => ({
       ...current,
-      frozenColumnCount: Math.max(0, Math.min(value, current.visibleColumnIds.length + 1)),
+      frozenColumnCount: Math.max(0, Math.min(value, current.visibleColumnIds.length)),
     }));
   };
 
@@ -371,7 +428,7 @@ const Leads: React.FC = () => {
   };
 
   const getFrozenLeft = (columnIndex: number) => {
-    const widths = [columnWidths.name, ...visibleColumns.map((column) => columnWidths[column.id] || DEFAULT_COLUMN_WIDTHS[column.id] || 120)];
+    const widths = visibleColumns.map((column) => columnWidths[column.id] || DEFAULT_COLUMN_WIDTHS[column.id] || 120);
     return widths.slice(0, columnIndex).reduce((sum, width) => sum + width, 0);
   };
 
@@ -430,7 +487,6 @@ const Leads: React.FC = () => {
       <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ mb: 3 }}>
         <Tab label="线索列表" />
         <Tab label="入库情况" />
-        <Tab label="流转配置" disabled={!canManageLeadFlow} />
       </Tabs>
 
       {activeTab === 0 && (
@@ -481,14 +537,13 @@ const Leads: React.FC = () => {
             <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
               <TableHead>
                 <TableRow>
-                  <ResizableHeaderCell columnId="name" width={columnWidths.name} onResize={handleResizeColumn} sx={getFrozenColumnSx(0, true)}>姓名</ResizableHeaderCell>
                   {visibleColumns.map((column, columnIndex) => (
                     <ResizableHeaderCell
                       key={column.id}
                       columnId={column.id}
                       width={columnWidths[column.id]}
                       onResize={handleResizeColumn}
-                      sx={getFrozenColumnSx(columnIndex + 1, true)}
+                      sx={getFrozenColumnSx(columnIndex, true)}
                     >
                       {column.label}
                     </ResizableHeaderCell>
@@ -499,9 +554,18 @@ const Leads: React.FC = () => {
               <TableBody>
                 {items.map((lead) => (
                   <TableRow key={lead.id} hover>
-                    <TableCell sx={{ ...getResizableCellSx(columnWidths.name), ...getFrozenColumnSx(0), fontWeight: 600 }} title={lead.name}>{lead.name}</TableCell>
                     {visibleColumns.map((column, columnIndex) => (
-                      <TableCell key={column.id} sx={{ ...getResizableCellSx(columnWidths[column.id]), ...getFrozenColumnSx(columnIndex + 1) }}>{column.render(lead)}</TableCell>
+                      <TableCell
+                        key={column.id}
+                        sx={{
+                          ...getResizableCellSx(columnWidths[column.id]),
+                          ...getFrozenColumnSx(columnIndex),
+                          ...(column.id === 'name' ? { fontWeight: 600 } : {}),
+                        }}
+                        title={column.id === 'name' ? lead.name : undefined}
+                      >
+                        {column.render(lead)}
+                      </TableCell>
                     ))}
                     <TableCell align="center" sx={actionColumnSx}>
                       <Tooltip title="查看线索">
@@ -509,10 +573,24 @@ const Leads: React.FC = () => {
                           <VisibilityIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
-                      {!lead.customerId && (
-                        <Tooltip title="领取并加入客户">
-                          <IconButton size="small" color="primary" onClick={() => handleClaimLead(lead)}>
+                      {!lead.customerId && !getAssignedSalesName(lead) && (
+                        <Tooltip title="领取并开始跟进">
+                          <IconButton size="small" color="primary" onClick={() => handleStartFollow(lead)}>
                             <PersonAddAltIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      {!lead.customerId && getAssignedSalesName(lead) && (
+                        <Tooltip title="开始跟进并加入客户">
+                          <IconButton size="small" color="primary" onClick={() => handleStartFollow(lead)}>
+                            <PersonAddAltIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      {!lead.customerId && canAssignLeads && (
+                        <Tooltip title="分配销售">
+                          <IconButton size="small" color="info" onClick={() => handleOpenAssign(lead)}>
+                            <AssignmentIndIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       )}
@@ -521,7 +599,7 @@ const Leads: React.FC = () => {
                 ))}
                 {items.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={visibleColumns.length + 2} align="center" sx={{ py: 6, color: '#9ca3af' }}>
+                    <TableCell colSpan={visibleColumns.length + 1} align="center" sx={{ py: 6, color: '#9ca3af' }}>
                       暂无线索数据
                     </TableCell>
                   </TableRow>
@@ -550,7 +628,6 @@ const Leads: React.FC = () => {
       )}
 
       {activeTab === 1 && <LeadIntakeTab />}
-      {activeTab === 2 && canManageLeadFlow && <LeadFlowConfigTab />}
 
       {selectedLead && (
         <LeadDetail
@@ -577,6 +654,28 @@ const Leads: React.FC = () => {
         onImported={() => fetchItems(filters)}
       />
 
+      <Dialog open={Boolean(assignLead)} onClose={() => setAssignLead(null)} maxWidth="xs" fullWidth>
+        <DialogCloseTitle onClose={() => setAssignLead(null)}>分配销售</DialogCloseTitle>
+        <DialogContent dividers>
+          <TextField
+            select
+            label="分配销售"
+            value={assignSalesName}
+            onChange={(event) => setAssignSalesName(event.target.value)}
+            fullWidth
+          >
+            {salesUsers.map((user) => (
+              <MenuItem key={user.id} value={user.name}>
+                {user.name}（{user.role}）
+              </MenuItem>
+            ))}
+          </TextField>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="contained" onClick={handleAssignLead}>保存</Button>
+        </DialogActions>
+      </Dialog>
+
       <TableViewSettingsDialog
         open={viewSettingsOpen}
         title="线索列表视图设置"
@@ -585,7 +684,7 @@ const Leads: React.FC = () => {
         visibleColumnIds={visibleColumnIds}
         columnOrder={viewConfig.columnOrder}
         frozenColumnCount={viewConfig.frozenColumnCount}
-        maxFrozenColumnCount={visibleColumns.length + 1}
+        maxFrozenColumnCount={visibleColumns.length}
         onClose={() => setViewSettingsOpen(false)}
         onToggleColumn={handleToggleColumn}
         onReorderColumn={handleReorderColumn}

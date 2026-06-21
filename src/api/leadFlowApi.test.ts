@@ -72,7 +72,8 @@ assert.equal(res.code, 0);
 assert.ok(res.data);
 assert.equal(res.data?.assignedTo, 'Li');
 assert.equal(res.data?.owner, 'Li');
-assert.equal(res.data?.lifecycleStatusCode, 'following');
+assert.equal(res.data?.lifecycleStatusCode, 'pending_followup');
+assert.equal(res.data?.customerId, undefined);
 assert.equal(res.data?.changeHistory?.[0].operator, 'System Admin');
 assert.deepEqual(res.data?.changeHistory?.[0].changes?.[0], {
   field: 'assignedTo',
@@ -106,10 +107,18 @@ const records = JSON.parse(storage.getItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS) || 
 assert.equal(records[0]?.source, 'Live-Douyin02');
 
 const customersAfterIntake = JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]');
-assert.equal(customersAfterIntake.length, customerCountBeforeIntake + 1);
-assert.equal(customersAfterIntake.some((item: any) => item.phone === '13900000002'), true);
+assert.equal(customersAfterIntake.length, customerCountBeforeIntake);
+assert.equal(customersAfterIntake.some((item: any) => item.phone === '13900000002'), false);
 
-const claimRes = await leadFlowApi.manualAssignLead(intake.lead!.id, 'Li');
+const assignRes = await leadFlowApi.manualAssignLead(intake.lead!.id, 'Li');
+assert.equal(assignRes.code, 0);
+assert.equal(assignRes.data?.lifecycleStatusCode, 'pending_followup');
+assert.equal(assignRes.data?.customerId, undefined);
+
+const customersAfterAssign = JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]');
+assert.equal(customersAfterAssign.length, customerCountBeforeIntake);
+
+const claimRes = await leadFlowApi.claimLeadAsCustomer(intake.lead!.id, 'Li');
 assert.equal(claimRes.code, 0);
 assert.equal(claimRes.data?.lifecycleStatusCode, 'following');
 assert.ok(claimRes.data?.customerId);

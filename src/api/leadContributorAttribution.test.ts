@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { commissionApi, customerApi, leadApi, orderReviewApi } from './index';
+import { commissionApi, customerApi, leadApi, leadFlowApi, orderReviewApi } from './index';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import type { Commission, CommissionRule } from '../types/commission';
@@ -164,6 +164,10 @@ const validLead = await leadApi.createLead({
 assert.equal(validLead.code, 0);
 assert.equal((validLead.data as Lead).inputBy, 'Sales A');
 assert.equal((validLead.data as any).leadContributorName, 'Lead A');
+
+const claimedLead = await leadFlowApi.claimLeadAsCustomer((validLead.data as Lead).id, 'Sales A');
+assert.equal(claimedLead.code, 0);
+assert.ok(claimedLead.data?.customerId);
 
 const storedCustomer = (JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]') as Customer[])
   .find((item) => item.phone === '13900000002');
