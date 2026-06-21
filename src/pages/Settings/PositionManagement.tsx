@@ -31,21 +31,22 @@ import type { Position } from '../../types/position';
 
 type PositionForm = {
   name: string;
-  code: string;
   departmentId: string;
   description: string;
   sortOrder: number;
-  isActive: boolean;
 };
 
 const emptyForm: PositionForm = {
   name: '',
-  code: '',
   departmentId: '',
   description: '',
   sortOrder: 1,
-  isActive: true,
 };
+
+function makePositionCode(name: string) {
+  const normalized = name.trim().replace(/\s+/g, '_').toLowerCase();
+  return normalized || `position_${Date.now()}`;
+}
 
 const PositionManagement: React.FC = () => {
   const { items: positions, fetchItems, create, update, delete: deletePosition } = usePositionStore();
@@ -54,7 +55,7 @@ const PositionManagement: React.FC = () => {
   const [editing, setEditing] = useState<Position | null>(null);
   const [form, setForm] = useState<PositionForm>(emptyForm);
   const [error, setError] = useState('');
-  const { confirm, dialog } = useAppFeedback();
+  const { alert, confirm, dialog } = useAppFeedback();
 
   useEffect(() => {
     fetchItems();
@@ -80,11 +81,9 @@ const PositionManagement: React.FC = () => {
     setEditing(position);
     setForm({
       name: position.name,
-      code: position.code,
       departmentId: position.departmentId || '',
       description: position.description || '',
       sortOrder: position.sortOrder,
-      isActive: position.isActive,
     });
     setFormOpen(true);
   };
@@ -95,17 +94,13 @@ const PositionManagement: React.FC = () => {
       setError('职位名称不能为空');
       return;
     }
-    if (!form.code.trim()) {
-      setError('职位编码不能为空');
-      return;
-    }
     const payload = {
       name: form.name.trim(),
-      code: form.code.trim(),
+      code: editing?.code || makePositionCode(form.name),
       departmentId: form.departmentId || undefined,
       description: form.description.trim(),
       sortOrder: Number(form.sortOrder || positions.length + 1),
-      isActive: form.isActive,
+      isActive: editing?.isActive ?? true,
     };
     try {
       if (editing) {
@@ -122,11 +117,27 @@ const PositionManagement: React.FC = () => {
 
   const handleDelete = async (position: Position) => {
     setError('');
-    if (!await confirm(`确认删除职位 ${position.name} 吗？已有员工使用时会被系统拦截。`, '删除职位')) return;
+    const confirmed = await confirm(
+      `确认删除职位 ${position.name} 吗？已有启用员工使用时会被系统拦截。`,
+      '删除职位',
+    );
+    if (!confirmed) return;
+
     try {
       await deletePosition(position.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除失败');
+      const message = err instanceof Error ? err.message : '删除失败';
+      setError(message);
+      await alert(message, '删除职位失败');
+    }
+  };
+
+  const handleToggleActive = async (position: Position) => {
+    setError('');
+    try {
+      await update(position.id, { isActive: !position.isActive });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '更新状态失败');
     }
   };
 
@@ -145,15 +156,14 @@ const PositionManagement: React.FC = () => {
       {error && <Typography variant="body2" sx={{ color: '#d32f2f', mb: 1 }}>{error}</Typography>}
 
       <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #eef2f7' }}>
-        <Table sx={{ minWidth: 880, tableLayout: 'fixed' }}>
+        <Table sx={{ minWidth: 840, tableLayout: 'fixed' }}>
           <TableHead>
             <TableRow sx={{ bgcolor: '#f8fafc' }}>
               <TableCell>职位名称</TableCell>
-              <TableCell>职位编码</TableCell>
               <TableCell>所属部门</TableCell>
               <TableCell>排序</TableCell>
-              <TableCell>状态</TableCell>
               <TableCell>说明</TableCell>
+              <TableCell>状态</TableCell>
               <TableCell align="center">操作</TableCell>
             </TableRow>
           </TableHead>
@@ -161,14 +171,16 @@ const PositionManagement: React.FC = () => {
             {positions.map((position) => (
               <TableRow key={position.id} hover>
                 <TableCell sx={{ fontWeight: 600 }}>{position.name}</TableCell>
-                <TableCell>{position.code}</TableCell>
                 <TableCell>{departmentName(position.departmentId)}</TableCell>
                 <TableCell>{position.sortOrder}</TableCell>
+                <TableCell>{position.description || '-'}</TableCell>
                 <TableCell>
                   <Chip label={position.isActive ? '启用' : '停用'} size="small" color={position.isActive ? 'success' : 'default'} />
                 </TableCell>
-                <TableCell>{position.description || '-'}</TableCell>
                 <TableCell align="center">
+                  <Tooltip title={position.isActive ? '停用职位' : '启用职位'}>
+                    <Switch size="small" checked={position.isActive} onChange={() => handleToggleActive(position)} />
+                  </Tooltip>
                   <Tooltip title="编辑职位">
                     <IconButton size="small" onClick={() => openEdit(position)}>
                       <EditIcon fontSize="small" />
@@ -191,17 +203,12 @@ const PositionManagement: React.FC = () => {
         <DialogContent dividers>
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
             <TextField label="职位名称" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required fullWidth />
-            <TextField label="职位编码" value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })} required fullWidth />
             <TextField select label="所属部门" value={form.departmentId} onChange={(event) => setForm({ ...form, departmentId: event.target.value })} fullWidth>
               <MenuItem value="">未分配</MenuItem>
               {activeDepartments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
             </TextField>
             <TextField label="排序" type="number" value={form.sortOrder} onChange={(event) => setForm({ ...form, sortOrder: Number(event.target.value) })} fullWidth />
             <TextField label="说明" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} fullWidth multiline minRows={2} sx={{ gridColumn: '1 / -1' }} />
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Switch checked={form.isActive} onChange={(event) => setForm({ ...form, isActive: event.target.checked })} />
-              <Typography variant="body2">{form.isActive ? '启用' : '停用'}</Typography>
-            </Box>
           </Box>
         </DialogContent>
         <DialogActions>

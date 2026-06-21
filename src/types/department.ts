@@ -9,6 +9,7 @@ export interface Department {
   parentId?: ID;
   managerId?: ID;
   memberCount: number;
+  sortOrder?: number;
   isActive: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;

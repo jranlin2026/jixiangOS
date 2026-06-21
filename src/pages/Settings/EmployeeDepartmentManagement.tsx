@@ -7,9 +7,9 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
-  Divider,
   IconButton,
   InputAdornment,
+  Menu,
   MenuItem,
   Paper,
   Switch,
@@ -24,24 +24,31 @@ import {
   Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import ApartmentIcon from '@mui/icons-material/Apartment';
 import BusinessIcon from '@mui/icons-material/Business';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FolderIcon from '@mui/icons-material/Folder';
 import KeyIcon from '@mui/icons-material/Key';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
 import SearchIcon from '@mui/icons-material/Search';
-import SubdirectoryArrowRightIcon from '@mui/icons-material/SubdirectoryArrowRight';
 import useDepartmentStore from '../../store/useDepartmentStore';
 import usePositionStore from '../../store/usePositionStore';
-import { settingsApi } from '../../api';
-import { roleApi } from '../../api';
+import { departmentApi, roleApi, settingsApi } from '../../api';
 import type { Department } from '../../types/department';
 import type { Position } from '../../types/position';
 import type { Role } from '../../types/role';
-import type { User, UserRole } from '../../types/settings';
+import type { OrganizationProfile, User, UserRole } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { DEFAULT_USER_PASSWORD } from '../../shared/utils/auth';
+import {
+  getDepartmentAncestorIds,
+  getDepartmentDescendantIds,
+  isDepartmentDescendantOf,
+} from '../../shared/utils/organizationConfig';
 import { DEFAULT_USER_ROLE, normalizeUserRoleName } from '../../shared/utils/roles';
 
 type UserForm = {
@@ -58,14 +65,10 @@ type UserForm = {
 
 type DepartmentForm = {
   name: string;
-  code: string;
-  description: string;
   parentId: string;
-  managerId: string;
-  isActive: boolean;
 };
 
-const ALL_DEPARTMENTS = '__all__';
+const COMPANY_ROOT = '__company_root__';
 
 const emptyUserForm: UserForm = {
   name: '',
@@ -81,11 +84,7 @@ const emptyUserForm: UserForm = {
 
 const emptyDepartmentForm: DepartmentForm = {
   name: '',
-  code: '',
-  description: '',
   parentId: '',
-  managerId: '',
-  isActive: true,
 };
 
 function buildDepartmentTree(departments: Department[]) {
@@ -94,21 +93,24 @@ function buildDepartmentTree(departments: Department[]) {
     const key = department.parentId || '';
     byParent.set(key, [...(byParent.get(key) || []), department]);
   });
-  byParent.forEach((items) => items.sort((a, b) => a.name.localeCompare(b.name)));
+  byParent.forEach((items) => items.sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || a.name.localeCompare(b.name)));
   return byParent;
 }
 
-function collectDepartmentIds(departments: Department[], departmentId: string): string[] {
-  const children = departments.filter((department) => department.parentId === departmentId);
-  return [departmentId, ...children.flatMap((child) => collectDepartmentIds(departments, child.id))];
+function makeDepartmentCode(name: string) {
+  const suffix = Date.now().toString(36);
+  const base = name.trim().replace(/\s+/g, '_').slice(0, 24) || 'department';
+  return `${base}_${suffix}`;
 }
 
 const EmployeeDepartmentManagement: React.FC = () => {
-  const { items: departments, fetchItems, create, update, delete: deleteDepartment } = useDepartmentStore();
+  const { items: departments, fetchItems } = useDepartmentStore();
   const { items: positions, fetchItems: fetchPositions } = usePositionStore();
+  const [organizationProfile, setOrganizationProfile] = useState<OrganizationProfile>({ companyName: '福建极享信息科技有限公司' });
+  const [companyExpanded, setCompanyExpanded] = useState(true);
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
-  const [selectedDepartmentId, setSelectedDepartmentId] = useState(ALL_DEPARTMENTS);
+  const [selectedNodeId, setSelectedNodeId] = useState(COMPANY_ROOT);
   const [search, setSearch] = useState('');
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [userFormOpen, setUserFormOpen] = useState(false);
@@ -117,18 +119,23 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const [departmentFormOpen, setDepartmentFormOpen] = useState(false);
   const [editingDepartment, setEditingDepartment] = useState<Department | null>(null);
   const [departmentForm, setDepartmentForm] = useState<DepartmentForm>(emptyDepartmentForm);
+  const [companyDialogOpen, setCompanyDialogOpen] = useState(false);
+  const [companyNameDraft, setCompanyNameDraft] = useState('');
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveDepartmentId, setMoveDepartmentId] = useState('');
   const [resetUser, setResetUser] = useState<User | null>(null);
   const [resetPassword, setResetPassword] = useState(DEFAULT_USER_PASSWORD);
   const [error, setError] = useState('');
-  const { confirm, dialog: feedbackDialog } = useAppFeedback();
+  const [menuDepartment, setMenuDepartment] = useState<Department | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
 
   useEffect(() => {
     fetchItems();
     fetchPositions();
     loadUsers();
     loadRoles();
+    loadOrganizationProfile();
   }, [fetchItems, fetchPositions]);
 
   const loadUsers = async () => {
@@ -141,24 +148,58 @@ const EmployeeDepartmentManagement: React.FC = () => {
     if (res.code === 0) setRoles(res.data.filter((role) => role.isActive));
   };
 
+  const loadOrganizationProfile = async () => {
+    const res = await settingsApi.fetchOrganizationProfile();
+    if (res.code === 0) {
+      setOrganizationProfile(res.data);
+      setCompanyNameDraft(res.data.companyName);
+    }
+  };
+
   const activeDepartments = useMemo(() => departments.filter((department) => department.isActive), [departments]);
   const activePositions = useMemo(() => positions.filter((position) => position.isActive), [positions]);
   const departmentByParent = useMemo(() => buildDepartmentTree(activeDepartments), [activeDepartments]);
-  const selectedDepartment = activeDepartments.find((department) => department.id === selectedDepartmentId) || null;
-  const roleOptions = roles.length ? roles : [{ id: 'fallback-sales', name: DEFAULT_USER_ROLE }] as Role[];
-  const positionOptions = activePositions.length ? activePositions : [{ id: 'fallback-position', name: DEFAULT_USER_ROLE, code: 'sales_consultant', sortOrder: 1, isActive: true, createdAt: '', updatedAt: '' }] as Position[];
-  const userFormPositionOptions = positionOptions.filter((position) => !userForm.departmentId || position.departmentId === userForm.departmentId);
-
-  const departmentIdsInScope = useMemo(() => (
-    selectedDepartment ? collectDepartmentIds(activeDepartments, selectedDepartment.id) : activeDepartments.map((department) => department.id)
+  const selectedDepartment = activeDepartments.find((department) => department.id === selectedNodeId) || null;
+  const roleOptions = roles.length ? roles : [{ id: 'fallback-role', name: DEFAULT_USER_ROLE }] as Role[];
+  const selectedScopeIds = useMemo(() => (
+    selectedDepartment
+      ? [selectedDepartment.id, ...getDepartmentDescendantIds(activeDepartments, selectedDepartment.id)]
+      : activeDepartments.map((department) => department.id)
   ), [activeDepartments, selectedDepartment]);
+
+  const positionOptionsForDepartment = (departmentId?: string) => {
+    const allowedDepartmentIds = new Set(getDepartmentAncestorIds(activeDepartments, departmentId));
+    return activePositions.filter((position) => !position.departmentId || allowedDepartmentIds.has(position.departmentId));
+  };
+
+  const userFormPositionOptions = useMemo(
+    () => positionOptionsForDepartment(userForm.departmentId),
+    [activeDepartments, activePositions, userForm.departmentId],
+  );
+
+  const filteredTreeDepartments = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return activeDepartments;
+    const matchedIds = new Set<string>();
+    activeDepartments.forEach((department) => {
+      const matched = department.name.toLowerCase().includes(q)
+        || users.some((user) => user.departmentId === department.id && user.name.toLowerCase().includes(q));
+      if (!matched) return;
+      matchedIds.add(department.id);
+      getDepartmentAncestorIds(activeDepartments, department.id).forEach((id) => matchedIds.add(id));
+      getDepartmentDescendantIds(activeDepartments, department.id).forEach((id) => matchedIds.add(id));
+    });
+    return activeDepartments.filter((department) => matchedIds.has(department.id));
+  }, [activeDepartments, search, users]);
+
+  const treeByParent = useMemo(() => buildDepartmentTree(filteredTreeDepartments), [filteredTreeDepartments]);
 
   const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase();
     return users
       .filter((user) => (
-        selectedDepartmentId === ALL_DEPARTMENTS
-        || (user.departmentId && departmentIdsInScope.includes(user.departmentId))
+        selectedNodeId === COMPANY_ROOT
+        || (user.departmentId && selectedScopeIds.includes(user.departmentId))
       ))
       .filter((user) => {
         if (!q) return true;
@@ -171,27 +212,27 @@ const EmployeeDepartmentManagement: React.FC = () => {
           || (department?.name || '').toLowerCase().includes(q);
       })
       .sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.name.localeCompare(b.name));
-  }, [activeDepartments, departmentIdsInScope, search, selectedDepartmentId, users]);
+  }, [activeDepartments, search, selectedNodeId, selectedScopeIds, users]);
 
   const selectedUsers = users.filter((user) => selectedUserIds.includes(user.id));
+  const selectedTitle = selectedDepartment?.name || organizationProfile.companyName;
   const selectedDepartmentUserCount = filteredUsers.length;
 
   const resolveRoleId = (roleName: string) => roles.find((role) => role.name === roleName)?.id || '';
   const getPositionName = (user: User) => user.positionName || positions.find((position) => position.id === user.positionId)?.name || '-';
   const getDepartmentName = (departmentId?: string) => activeDepartments.find((department) => department.id === departmentId)?.name || '-';
-
   const clearSelection = () => setSelectedUserIds([]);
 
   const openCreateUser = () => {
     setError('');
     setEditingUser(null);
     const departmentId = selectedDepartment?.id || activeDepartments[0]?.id || '';
-    const firstPosition = positionOptions.find((position) => position.departmentId === departmentId) || positionOptions[0];
+    const firstPosition = positionOptionsForDepartment(departmentId)[0];
     setUserForm({
       ...emptyUserForm,
       role: roleOptions[0]?.name || DEFAULT_USER_ROLE,
       positionId: firstPosition?.id || '',
-      departmentId: firstPosition?.departmentId || departmentId,
+      departmentId,
     });
     setUserFormOpen(true);
   };
@@ -199,13 +240,14 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const openEditUser = (user: User) => {
     setError('');
     setEditingUser(user);
+    const allowedPositions = positionOptionsForDepartment(user.departmentId);
     setUserForm({
       name: user.name,
       account: user.account || '',
       email: user.email || '',
       phone: user.phone || '',
       role: normalizeUserRoleName(user.role),
-      positionId: user.positionId || '',
+      positionId: allowedPositions.some((position) => position.id === user.positionId) ? user.positionId || '' : '',
       departmentId: user.departmentId || '',
       isActive: user.isActive,
       password: '',
@@ -249,20 +291,24 @@ const EmployeeDepartmentManagement: React.FC = () => {
 
   const handleToggleUserActive = async (user: User) => {
     if (user.account === 'admin' && user.isActive) {
-      setError('内置管理员账号不能停用');
+      await alert('内置管理员账号不能停用', '提示');
       return;
     }
     await settingsApi.updateUser(user.id, { isActive: !user.isActive });
     await loadUsers();
   };
 
-  const handleDeleteUser = async (user: User) => {
+  const handleLeaveUser = async (user: User) => {
     if (user.account === 'admin') {
-      setError('内置管理员账号不能删除');
+      await alert('内置管理员账号不能办理离职', '提示');
       return;
     }
-    if (!await confirm(`确认删除员工 ${user.name} 吗？`, '删除员工')) return;
-    await settingsApi.deleteUser(user.id);
+    if (!await confirm(`确认为员工 ${user.name} 办理离职吗？离职后账号不能登录，会移入账号回收站，历史业务数据会保留。`, '办理离职')) return;
+    const res = await settingsApi.leaveUser(user.id);
+    if (res.code !== 0) {
+      await alert(res.message || '办理离职失败', '办理离职失败');
+      return;
+    }
     clearSelection();
     await loadUsers();
   };
@@ -287,67 +333,59 @@ const EmployeeDepartmentManagement: React.FC = () => {
     setResetUser(null);
   };
 
-  const openCreateDepartment = (parentId = selectedDepartment?.id || '') => {
+  const openCreateDepartment = (parentId = selectedDepartment?.id || COMPANY_ROOT) => {
     setError('');
     setEditingDepartment(null);
-    setDepartmentForm({
-      ...emptyDepartmentForm,
-      parentId,
-      code: `dept-${Date.now()}`,
-    });
+    setDepartmentForm({ ...emptyDepartmentForm, parentId });
     setDepartmentFormOpen(true);
   };
 
-  const openEditDepartment = () => {
-    if (!selectedDepartment) return;
+  const openEditDepartment = (department = selectedDepartment) => {
+    if (!department) return;
     setError('');
-    setEditingDepartment(selectedDepartment);
+    setEditingDepartment(department);
     setDepartmentForm({
-      name: selectedDepartment.name,
-      code: selectedDepartment.code,
-      description: selectedDepartment.description || '',
-      parentId: selectedDepartment.parentId || '',
-      managerId: selectedDepartment.managerId || '',
-      isActive: selectedDepartment.isActive,
+      name: department.name,
+      parentId: department.parentId || COMPANY_ROOT,
     });
     setDepartmentFormOpen(true);
   };
 
   const handleSaveDepartment = async () => {
     setError('');
-    if (!departmentForm.name.trim()) {
+    const name = departmentForm.name.trim();
+    if (!name) {
       setError('部门名称不能为空');
       return;
     }
     const payload = {
-      name: departmentForm.name.trim(),
-      code: departmentForm.code.trim() || `dept-${Date.now()}`,
-      description: departmentForm.description.trim(),
-      parentId: departmentForm.parentId || undefined,
-      managerId: departmentForm.managerId || undefined,
+      name,
+      code: editingDepartment?.code || makeDepartmentCode(name),
+      parentId: departmentForm.parentId && departmentForm.parentId !== COMPANY_ROOT ? departmentForm.parentId : undefined,
       memberCount: users.filter((user) => user.departmentId === editingDepartment?.id).length,
-      isActive: departmentForm.isActive,
+      isActive: editingDepartment?.isActive ?? true,
     };
-    if (editingDepartment) {
-      await update(editingDepartment.id, payload);
-    } else {
-      await create(payload);
+    const res = editingDepartment
+      ? await departmentApi.updateDepartment(editingDepartment.id, payload)
+      : await departmentApi.createDepartment(payload);
+    if (res.code !== 0) {
+      setError(res.message || '保存部门失败');
+      return;
     }
     setDepartmentFormOpen(false);
     await fetchItems();
+    if (!editingDepartment && res.data?.id) setSelectedNodeId(res.data.id);
   };
 
-  const handleDeleteDepartment = async () => {
-    if (!selectedDepartment) return;
-    const hasChildren = activeDepartments.some((department) => department.parentId === selectedDepartment.id);
-    const hasUsers = users.some((user) => user.departmentId === selectedDepartment.id);
-    if (hasChildren || hasUsers) {
-      setError('请先移走该部门下的员工和子部门，再删除部门');
+  const handleDeleteDepartment = async (department = selectedDepartment) => {
+    if (!department) return;
+    if (!await confirm(`确认删除部门 ${department.name} 吗？`, '删除部门')) return;
+    const res = await departmentApi.deleteDepartment(department.id);
+    if (res.code !== 0) {
+      await alert(res.message || '部门存在员工、子部门、职位或角色引用，不能删除', '删除失败');
       return;
     }
-    if (!await confirm(`确认删除部门 ${selectedDepartment.name} 吗？`, '删除部门')) return;
-    await deleteDepartment(selectedDepartment.id);
-    setSelectedDepartmentId(ALL_DEPARTMENTS);
+    setSelectedNodeId(COMPANY_ROOT);
     await fetchItems();
   };
 
@@ -373,22 +411,27 @@ const EmployeeDepartmentManagement: React.FC = () => {
   };
 
   const handlePositionChange = (positionId: string) => {
-    const position = positions.find((item) => item.id === positionId);
-    setUserForm({
-      ...userForm,
-      positionId,
-      departmentId: position?.departmentId || userForm.departmentId,
-    });
+    setUserForm({ ...userForm, positionId });
   };
 
   const handleDepartmentChange = (departmentId: string) => {
-    const currentPosition = positions.find((item) => item.id === userForm.positionId);
-    const nextPositionId = currentPosition?.departmentId === departmentId ? userForm.positionId : '';
+    const allowedPositions = positionOptionsForDepartment(departmentId);
+    const canKeepPosition = allowedPositions.some((position) => position.id === userForm.positionId);
     setUserForm({
       ...userForm,
       departmentId,
-      positionId: nextPositionId,
+      positionId: canKeepPosition ? userForm.positionId : '',
     });
+  };
+
+  const handleSaveCompanyName = async () => {
+    const res = await settingsApi.updateOrganizationProfile({ companyName: companyNameDraft });
+    if (res.code !== 0) {
+      setError(res.message || '保存公司名称失败');
+      return;
+    }
+    setOrganizationProfile(res.data!);
+    setCompanyDialogOpen(false);
   };
 
   const toggleUserSelected = (id: string) => {
@@ -401,46 +444,103 @@ const EmployeeDepartmentManagement: React.FC = () => {
     setSelectedUserIds(checked ? filteredUsers.map((user) => user.id) : []);
   };
 
+  const openNodeMenu = (event: React.MouseEvent<HTMLElement>, department: Department) => {
+    event.stopPropagation();
+    setMenuDepartment(department);
+    setMenuAnchor(event.currentTarget);
+  };
+
+  const closeNodeMenu = () => {
+    setMenuAnchor(null);
+    setMenuDepartment(null);
+  };
+
+  const selectNode = (id: string) => {
+    setSelectedNodeId(id);
+    clearSelection();
+  };
+
+  const getSiblings = (department: Department) => activeDepartments
+    .filter((item) => (item.parentId || '') === (department.parentId || ''))
+    .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || a.name.localeCompare(b.name));
+
+  const getSiblingIndex = (department: Department | null) => {
+    if (!department) return -1;
+    return getSiblings(department).findIndex((item) => item.id === department.id);
+  };
+
+  const canMoveDepartment = (department: Department | null, direction: 'up' | 'down') => {
+    if (!department) return false;
+    const siblings = getSiblings(department);
+    const index = siblings.findIndex((item) => item.id === department.id);
+    return direction === 'up' ? index > 0 : index >= 0 && index < siblings.length - 1;
+  };
+
+  const handleMoveDepartment = async (department: Department, direction: 'up' | 'down') => {
+    const siblings = getSiblings(department);
+    const index = siblings.findIndex((item) => item.id === department.id);
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    const target = siblings[targetIndex];
+    if (!target) return;
+    const currentOrder = Number(department.sortOrder || index + 1);
+    const targetOrder = Number(target.sortOrder || targetIndex + 1);
+    await Promise.all([
+      departmentApi.updateDepartment(department.id, { sortOrder: targetOrder }),
+      departmentApi.updateDepartment(target.id, { sortOrder: currentOrder }),
+    ]);
+    await fetchItems();
+  };
+
   const renderDepartmentRows = (parentId = '', depth = 0): React.ReactNode => (
-    (departmentByParent.get(parentId) || []).map((department) => (
-      <React.Fragment key={department.id}>
-        <Box
-          onClick={() => {
-            setSelectedDepartmentId(department.id);
-            clearSelection();
-          }}
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 1,
-            minHeight: 36,
-            pl: 1 + depth * 2,
-            pr: 1,
-            cursor: 'pointer',
-            bgcolor: selectedDepartmentId === department.id ? '#eef2ff' : 'transparent',
-            color: selectedDepartmentId === department.id ? '#1d4ed8' : '#111827',
-            borderRadius: 0.75,
-            '&:hover': { bgcolor: selectedDepartmentId === department.id ? '#eef2ff' : '#f8fafc' },
-          }}
-        >
-          <FolderIcon sx={{ fontSize: 20, color: '#7394c4' }} />
-          <Typography variant="body2" sx={{ flex: 1, fontWeight: selectedDepartmentId === department.id ? 600 : 400 }}>
-            {department.name}
-          </Typography>
-          <Typography variant="caption" sx={{ color: '#94a3b8' }}>
-            {users.filter((user) => user.departmentId === department.id).length}
-          </Typography>
-        </Box>
-        {renderDepartmentRows(department.id, depth + 1)}
-      </React.Fragment>
-    ))
+    (treeByParent.get(parentId) || []).map((department) => {
+      const directCount = users.filter((user) => user.departmentId === department.id).length;
+      const selected = selectedNodeId === department.id;
+      return (
+        <React.Fragment key={department.id}>
+          <Box
+            onClick={() => selectNode(department.id)}
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+              minHeight: 38,
+              pl: 1 + depth * 2,
+              pr: 0.5,
+              cursor: 'pointer',
+              bgcolor: selected ? '#eef2ff' : 'transparent',
+              color: selected ? '#1d4ed8' : '#111827',
+              borderRadius: 0.75,
+              '&:hover': { bgcolor: selected ? '#eef2ff' : '#f8fafc' },
+            }}
+          >
+            <FolderIcon sx={{ fontSize: 20, color: '#7394c4' }} />
+            <Typography variant="body2" sx={{ flex: 1, fontWeight: selected ? 700 : 500 }}>
+              {department.name}
+            </Typography>
+            <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+              {directCount}
+            </Typography>
+            <IconButton size="small" onClick={(event) => openNodeMenu(event, department)}>
+              <MoreVertIcon fontSize="small" />
+            </IconButton>
+          </Box>
+          {renderDepartmentRows(department.id, depth + 1)}
+        </React.Fragment>
+      );
+    })
   );
+
+  const departmentParentOptions = activeDepartments.filter((department) => {
+    if (!editingDepartment) return true;
+    if (department.id === editingDepartment.id) return false;
+    return !isDepartmentDescendantOf(activeDepartments, department.id, editingDepartment.id);
+  });
 
   return (
     <Box sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', minHeight: 620, bgcolor: '#fff' }}>
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '300px minmax(0, 1fr)' }, minHeight: 620 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '320px minmax(0, 1fr)' }, minHeight: 620 }}>
         <Box sx={{ borderRight: { md: '1px solid #e5e7eb' }, bgcolor: '#fbfcfe', p: 2 }}>
-          <Box sx={{ mb: 2 }}>
+          <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
             <TextField
               size="small"
               placeholder="搜索员工、部门"
@@ -455,45 +555,84 @@ const EmployeeDepartmentManagement: React.FC = () => {
                 ),
               }}
             />
+            <Tooltip title="在公司下添加部门">
+              <IconButton
+                onClick={() => openCreateDepartment(COMPANY_ROOT)}
+                sx={{ width: 40, height: 40, border: '1px solid #dbe4f0', borderRadius: 1 }}
+              >
+                <AddIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </Box>
 
           <Box
-            onClick={() => {
-              setSelectedDepartmentId(ALL_DEPARTMENTS);
-              clearSelection();
-            }}
+            onClick={() => selectNode(COMPANY_ROOT)}
             sx={{
               display: 'flex',
               alignItems: 'center',
               gap: 1,
-              minHeight: 38,
+              minHeight: 40,
               px: 1,
               mb: 0.5,
               borderRadius: 0.75,
               cursor: 'pointer',
-              bgcolor: selectedDepartmentId === ALL_DEPARTMENTS ? '#eef2ff' : 'transparent',
-              color: selectedDepartmentId === ALL_DEPARTMENTS ? '#1d4ed8' : '#111827',
-              '&:hover': { bgcolor: selectedDepartmentId === ALL_DEPARTMENTS ? '#eef2ff' : '#f8fafc' },
+              bgcolor: selectedNodeId === COMPANY_ROOT ? '#eef2ff' : 'transparent',
+              color: selectedNodeId === COMPANY_ROOT ? '#1d4ed8' : '#111827',
+              '&:hover': { bgcolor: selectedNodeId === COMPANY_ROOT ? '#eef2ff' : '#f8fafc' },
             }}
           >
             <BusinessIcon sx={{ fontSize: 20, color: '#7394c4' }} />
-            <Typography variant="body2" sx={{ flex: 1, fontWeight: selectedDepartmentId === ALL_DEPARTMENTS ? 700 : 600 }}>
-              全部部门
+            <Typography variant="body2" sx={{ flex: 1, fontWeight: selectedNodeId === COMPANY_ROOT ? 700 : 600 }}>
+              {organizationProfile.companyName}
             </Typography>
             <Typography variant="caption" sx={{ color: '#94a3b8' }}>{users.length}</Typography>
+            <Tooltip title="编辑公司名称">
+              <IconButton
+                size="small"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setCompanyExpanded((current) => !current);
+                }}
+              >
+                {companyExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
           </Box>
-          {renderDepartmentRows()}
+          {companyExpanded && renderDepartmentRows()}
         </Box>
 
         <Box sx={{ minWidth: 0 }}>
           <Box sx={{ px: 3, py: 2, borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
-            <Typography variant="h6" sx={{ fontWeight: 700 }}>
-              {selectedDepartment?.name || '全部部门'}({selectedDepartmentUserCount}人)
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              <Typography variant="body2" sx={{ color: '#64748b' }}>
-                部门维护请到“部门管理”，这里仅用于筛选员工账号。
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <ApartmentIcon sx={{ color: '#64748b' }} />
+              <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                {selectedTitle}({selectedDepartmentUserCount}人)
               </Typography>
+              {!selectedDepartment && (
+                <Tooltip title="编辑公司名称">
+                  <IconButton
+                    size="small"
+                    onClick={() => {
+                      setCompanyNameDraft(organizationProfile.companyName);
+                      setCompanyDialogOpen(true);
+                    }}
+                    sx={{ color: '#64748b' }}
+                  >
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Box>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <Button variant="text" onClick={() => openCreateDepartment(selectedDepartment?.id || COMPANY_ROOT)}>
+                {selectedDepartment ? '添加子部门' : '添加部门'}
+              </Button>
+              {selectedDepartment && (
+                <>
+                  <Button variant="text" onClick={() => openEditDepartment()}>编辑部门</Button>
+                  <Button variant="text" color="error" onClick={() => handleDeleteDepartment()}>删除部门</Button>
+                </>
+              )}
             </Box>
           </Box>
 
@@ -511,7 +650,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
             </Box>
 
             <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #eef2f7' }}>
-              <Table sx={{ tableLayout: 'fixed', minWidth: 860 }}>
+              <Table sx={{ tableLayout: 'fixed', minWidth: 900 }}>
                 <TableHead>
                   <TableRow sx={{ bgcolor: '#f1f5f9' }}>
                     <TableCell padding="checkbox">
@@ -558,8 +697,8 @@ const EmployeeDepartmentManagement: React.FC = () => {
                             <KeyIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
-                        <Tooltip title="删除">
-                          <IconButton size="small" color="error" onClick={() => handleDeleteUser(user)}>
+                        <Tooltip title="办理离职">
+                          <IconButton size="small" color="error" onClick={() => handleLeaveUser(user)}>
                             <DeleteIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
@@ -580,6 +719,32 @@ const EmployeeDepartmentManagement: React.FC = () => {
         </Box>
       </Box>
 
+      <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={closeNodeMenu}>
+        <MenuItem onClick={() => { if (menuDepartment) openEditDepartment(menuDepartment); closeNodeMenu(); }}>编辑部门</MenuItem>
+        <MenuItem onClick={() => { if (menuDepartment) openCreateDepartment(menuDepartment.id); closeNodeMenu(); }}>添加子部门</MenuItem>
+        <MenuItem sx={{ color: '#d32f2f' }} onClick={() => { const department = menuDepartment; closeNodeMenu(); if (department) handleDeleteDepartment(department); }}>删除部门</MenuItem>
+        <MenuItem
+          disabled={!canMoveDepartment(menuDepartment, 'up')}
+          onClick={() => {
+            const department = menuDepartment;
+            closeNodeMenu();
+            if (department) handleMoveDepartment(department, 'up');
+          }}
+        >
+          上移
+        </MenuItem>
+        <MenuItem
+          disabled={!canMoveDepartment(menuDepartment, 'down')}
+          onClick={() => {
+            const department = menuDepartment;
+            closeNodeMenu();
+            if (department) handleMoveDepartment(department, 'down');
+          }}
+        >
+          下移
+        </MenuItem>
+      </Menu>
+
       <Dialog open={userFormOpen} onClose={() => setUserFormOpen(false)} maxWidth="sm" fullWidth>
         <DialogCloseTitle onClose={() => setUserFormOpen(false)}>{editingUser ? '编辑员工' : '创建员工'}</DialogCloseTitle>
         <DialogContent dividers>
@@ -594,9 +759,14 @@ const EmployeeDepartmentManagement: React.FC = () => {
             </TextField>
             <TextField select label="职位" value={userForm.positionId} onChange={(event) => handlePositionChange(event.target.value)} fullWidth>
               <MenuItem value="">未设置</MenuItem>
-              {userFormPositionOptions.map((position) => <MenuItem key={position.id} value={position.id}>{position.name}</MenuItem>)}
+              {userFormPositionOptions.map((position) => (
+                <MenuItem key={position.id} value={position.id}>
+                  {position.name}
+                  {position.departmentId ? `（${getDepartmentName(position.departmentId)}）` : ''}
+                </MenuItem>
+              ))}
             </TextField>
-            <TextField select label="角色" value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value as UserRole })} fullWidth>
+            <TextField select label="角色权限" value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value as UserRole })} fullWidth>
               {roleOptions.map((role) => <MenuItem key={role.id} value={role.name}>{role.name}</MenuItem>)}
             </TextField>
             {!editingUser && (
@@ -620,31 +790,31 @@ const EmployeeDepartmentManagement: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={departmentFormOpen} onClose={() => setDepartmentFormOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={departmentFormOpen} onClose={() => setDepartmentFormOpen(false)} maxWidth="xs" fullWidth>
         <DialogCloseTitle onClose={() => setDepartmentFormOpen(false)}>{editingDepartment ? '编辑部门' : '新增部门'}</DialogCloseTitle>
         <DialogContent dividers>
-          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+          <Box sx={{ display: 'grid', gap: 2 }}>
             <TextField label="部门名称" value={departmentForm.name} onChange={(event) => setDepartmentForm({ ...departmentForm, name: event.target.value })} required fullWidth />
-            <TextField label="部门编码" value={departmentForm.code} onChange={(event) => setDepartmentForm({ ...departmentForm, code: event.target.value })} fullWidth />
-            <TextField select label="上级部门" value={departmentForm.parentId} onChange={(event) => setDepartmentForm({ ...departmentForm, parentId: event.target.value })} fullWidth>
-              <MenuItem value="">无</MenuItem>
-              {activeDepartments
-                .filter((department) => department.id !== editingDepartment?.id)
-                .map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
+            <TextField select label="所属部门" value={departmentForm.parentId} onChange={(event) => setDepartmentForm({ ...departmentForm, parentId: event.target.value })} fullWidth>
+              <MenuItem value={COMPANY_ROOT}>{organizationProfile.companyName}</MenuItem>
+              {departmentParentOptions.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
             </TextField>
-            <TextField select label="部门负责人" value={departmentForm.managerId} onChange={(event) => setDepartmentForm({ ...departmentForm, managerId: event.target.value })} fullWidth>
-              <MenuItem value="">未设置</MenuItem>
-              {users.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}</MenuItem>)}
-            </TextField>
-            <TextField label="说明" value={departmentForm.description} onChange={(event) => setDepartmentForm({ ...departmentForm, description: event.target.value })} fullWidth multiline minRows={2} sx={{ gridColumn: '1 / -1' }} />
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Switch checked={departmentForm.isActive} onChange={(event) => setDepartmentForm({ ...departmentForm, isActive: event.target.checked })} />
-              <Typography variant="body2">{departmentForm.isActive ? '启用' : '停用'}</Typography>
-            </Box>
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button variant="contained" onClick={handleSaveDepartment}>保存</Button>
+          <Button variant="outlined" onClick={() => setDepartmentFormOpen(false)}>取消</Button>
+          <Button variant="contained" onClick={handleSaveDepartment}>确定</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={companyDialogOpen} onClose={() => setCompanyDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogCloseTitle onClose={() => setCompanyDialogOpen(false)}>编辑公司名称</DialogCloseTitle>
+        <DialogContent dividers>
+          <TextField label="公司名称" value={companyNameDraft} onChange={(event) => setCompanyNameDraft(event.target.value)} required fullWidth />
+        </DialogContent>
+        <DialogActions>
+          <Button variant="outlined" onClick={() => setCompanyDialogOpen(false)}>取消</Button>
+          <Button variant="contained" onClick={handleSaveCompanyName}>确定</Button>
         </DialogActions>
       </Dialog>
 
@@ -652,7 +822,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
         <DialogCloseTitle onClose={() => setMoveOpen(false)}>移动员工</DialogCloseTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
-            已选择 {selectedUserIds.length} 名员工，选择目标部门后会统一更新所属部门。
+            已选择 {selectedUserIds.length} 名员工，选择目标部门后会统一更新所属部门。职位如果不适用于新部门，需要在员工资料里重新选择。
           </Typography>
           <TextField select label="目标部门" value={moveDepartmentId} onChange={(event) => setMoveDepartmentId(event.target.value)} fullWidth>
             {activeDepartments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
@@ -682,7 +852,6 @@ const EmployeeDepartmentManagement: React.FC = () => {
           <Button variant="contained" onClick={handleResetPassword}>确认重置</Button>
         </DialogActions>
       </Dialog>
-      <Divider />
       {feedbackDialog}
     </Box>
   );

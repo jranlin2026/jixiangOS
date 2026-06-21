@@ -14,8 +14,7 @@ import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import type { Customer } from '../../types/customer';
 import type { CustomerLevelConfig, LeadSourceConfig, User } from '../../types/settings';
-
-const CURRENT_USER_STORAGE_KEY = 'aaos_current_user';
+import { applyCurrentLeadInputBy, getCurrentLeadInputName } from '../../shared/utils/leadInputAttribution';
 
 interface CustomerFormProps {
   open: boolean;
@@ -31,19 +30,6 @@ type SourceOption = {
   childName: string;
   parentId: string;
 };
-
-function getCurrentUserName(users: User[]): string {
-  try {
-    const raw = localStorage.getItem(CURRENT_USER_STORAGE_KEY);
-    if (raw) {
-      const current = JSON.parse(raw) as Partial<User>;
-      if (current.name) return current.name;
-    }
-  } catch {
-    // fallback below
-  }
-  return users.find((user) => user.isActive)?.name || '';
-}
 
 const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, onSuccess }) => {
   const { create, update } = useCustomerStore();
@@ -80,7 +66,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     }));
   }), [childSources, parentSources]);
 
-  const defaultOwner = useMemo(() => getCurrentUserName(users) || users[0]?.name || '', [users]);
+  const defaultOwner = useMemo(() => getCurrentLeadInputName(users[0]?.name || ''), [users]);
   const customerLevelOptions = useMemo(() => {
     const activeConfigs = customerLevelConfigs.filter((item) => item.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
     const options = activeConfigs.length
@@ -189,7 +175,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     if (isEdit && customer) {
       await update(customer.id, payload);
     } else {
-      await create(payload);
+      await create(applyCurrentLeadInputBy(payload, 'leadInputBy'));
     }
     onSuccess?.();
     onClose();
@@ -251,9 +237,11 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
           </TextField>
           <TextField label="行业" value={form.industry} onChange={handleChange('industry')} fullWidth />
           <TextField label="城市" value={form.city} onChange={handleChange('city')} fullWidth />
-          <TextField select label="线索录入人" value={form.leadInputBy} onChange={handleChange('leadInputBy')} required fullWidth helperText="默认当前登录人员">
-            {userOptions}
-          </TextField>
+          {isEdit && (
+            <TextField select label="线索录入人" value={form.leadInputBy} onChange={handleChange('leadInputBy')} required fullWidth helperText="默认当前登录人员">
+              {userOptions}
+            </TextField>
+          )}
           <TextField
             select
             label="线索贡献人"

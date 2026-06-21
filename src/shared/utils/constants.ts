@@ -305,6 +305,7 @@ export const STORAGE_KEYS = {
   POSITIONS: `${STORAGE_PREFIX}positions`,
   ROLES: `${STORAGE_PREFIX}roles`,
   ORGANIZATION_SCHEMA_VERSION: `${STORAGE_PREFIX}organization_schema_version`,
+  ORGANIZATION_PROFILE: `${STORAGE_PREFIX}organization_profile`,
   PRODUCTS: `${STORAGE_PREFIX}products`,
   PRODUCT_LEVELS: `${STORAGE_PREFIX}product_levels`,
   CUSTOMER_LEVEL_CONFIGS: `${STORAGE_PREFIX}customer_level_configs`,

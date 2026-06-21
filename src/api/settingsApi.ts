@@ -1,4 +1,4 @@
-import type { User, UserRole, ProductConfig, OrderTypeConfig, LifecycleStatusConfig, LeadSourceConfig, LifecycleStatusCode, CustomerLevelConfig } from '../types/settings';
+import type { User, UserRole, ProductConfig, OrderTypeConfig, LifecycleStatusConfig, LeadSourceConfig, LifecycleStatusCode, CustomerLevelConfig, OrganizationProfile, EmploymentStatus } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
@@ -9,8 +9,9 @@ import type { Order } from '../types/order';
 import type { CommissionRule } from '../types/commission';
 import { authApi } from './authApi';
 import { DEFAULT_USER_PASSWORD, ensureAdminUser, ensureUniqueAccount, normalizeAccount } from '../shared/utils/auth';
-import { ensureOrganizationConfigData, migrateUsersWithOrganization, resolvePositionForUser, resolveRoleForUser } from '../shared/utils/organizationConfig';
+import { DEFAULT_ORGANIZATION_PROFILE, ensureOrganizationConfigData, getOrganizationProfile, migrateUsersWithOrganization, resolvePositionForUser, resolveRoleForUser } from '../shared/utils/organizationConfig';
 import { DEFAULT_USER_ROLE } from '../shared/utils/roles';
+import { getCurrentOperatorName } from '../shared/utils/currentOperator';
 
 function ensureInit(): void {
   initializeMockData();
@@ -22,6 +23,26 @@ function ensureUsersWithAuth(): User[] {
   const users = migrateUsersWithOrganization(ensureAdminUser(getStorageData<User[]>(STORAGE_KEYS.USERS) || []));
   setStorageData(STORAGE_KEYS.USERS, users);
   return users;
+}
+
+async function fetchOrganizationProfile(): Promise<ApiResponse<OrganizationProfile>> {
+  ensureInit();
+  await delay(80);
+  return createSuccessResponse(getOrganizationProfile());
+}
+
+async function updateOrganizationProfile(data: Partial<OrganizationProfile>): Promise<ApiResponse<OrganizationProfile | null>> {
+  ensureInit();
+  await delay(120);
+  const companyName = String(data.companyName || '').trim();
+  if (!companyName) return createErrorResponse('公司名称不能为空');
+  const profile: OrganizationProfile = {
+    ...DEFAULT_ORGANIZATION_PROFILE,
+    ...getOrganizationProfile(),
+    companyName,
+  };
+  setStorageData(STORAGE_KEYS.ORGANIZATION_PROFILE, profile);
+  return createSuccessResponse(profile);
 }
 
 function withResolvedUserOrganization<T extends Partial<User>>(data: T): T {
@@ -112,9 +133,21 @@ function replaceOrderTypeReferences(oldName: string, newName: string): void {
 
 // ---- 用户管理 ----
 
-async function fetchUsers(filters?: { search?: string; role?: UserRole; isActive?: boolean }): Promise<ApiResponse<User[]>> {
+type UserFilters = {
+  search?: string;
+  role?: UserRole;
+  isActive?: boolean;
+  employmentStatus?: EmploymentStatus | 'all';
+};
+
+function isAdminUser(user: Pick<User, 'account'>): boolean {
+  return normalizeAccount(user.account) === 'admin';
+}
+
+async function fetchUsers(filters?: UserFilters): Promise<ApiResponse<User[]>> {
   await delay(200);
   let users = ensureUsersWithAuth();
+  const employmentStatus = filters?.employmentStatus || 'active';
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
@@ -130,6 +163,9 @@ async function fetchUsers(filters?: { search?: string; role?: UserRole; isActive
   }
   if (filters?.isActive !== undefined) {
     users = users.filter((u) => u.isActive === filters.isActive);
+  }
+  if (employmentStatus !== 'all') {
+    users = users.filter((u) => (u.employmentStatus || 'active') === employmentStatus);
   }
 
   return createSuccessResponse(users);
@@ -149,6 +185,9 @@ async function createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'p
     ...resolvedData,
     id,
     account,
+    employmentStatus: data.employmentStatus || 'active',
+    leftAt: data.employmentStatus === 'left' ? data.leftAt || now : undefined,
+    leftBy: data.employmentStatus === 'left' ? data.leftBy : undefined,
     ...passwordFields,
     createdAt: now,
     updatedAt: now,
@@ -175,9 +214,53 @@ async function updateUser(id: string, data: Partial<User>): Promise<ApiResponse<
   return createSuccessResponse(users[idx]);
 }
 
+async function leaveUser(id: string): Promise<ApiResponse<User | null>> {
+  await delay(150);
+  const users = ensureUsersWithAuth();
+  const idx = users.findIndex((u) => u.id === id);
+  if (idx === -1) return createSuccessResponse(null);
+  if (isAdminUser(users[idx])) return createErrorResponse('内置管理员账号不能办理离职');
+  const now = new Date().toISOString();
+  users[idx] = {
+    ...users[idx],
+    isActive: false,
+    employmentStatus: 'left',
+    leftAt: now,
+    leftBy: getCurrentOperatorName('系统'),
+    updatedAt: now,
+  };
+  setStorageData(STORAGE_KEYS.USERS, users);
+  return createSuccessResponse(users[idx]);
+}
+
+async function restoreUser(id: string): Promise<ApiResponse<User | null>> {
+  await delay(150);
+  const users = ensureUsersWithAuth();
+  const idx = users.findIndex((u) => u.id === id);
+  if (idx === -1) return createSuccessResponse(null);
+  const now = new Date().toISOString();
+  const restored: User = {
+    ...users[idx],
+    isActive: true,
+    employmentStatus: 'active',
+    updatedAt: now,
+  };
+  delete restored.leftAt;
+  delete restored.leftBy;
+  users[idx] = restored;
+  setStorageData(STORAGE_KEYS.USERS, users);
+  return createSuccessResponse(users[idx]);
+}
+
 async function deleteUser(id: string): Promise<ApiResponse<boolean>> {
   await delay(150);
   const users = ensureUsersWithAuth();
+  const target = users.find((u) => u.id === id);
+  if (!target) return createSuccessResponse(false);
+  if (isAdminUser(target)) return createErrorResponse('内置管理员账号不能删除');
+  if ((target.employmentStatus || 'active') !== 'left') {
+    return createErrorResponse('请先办理离职，再到账号回收站永久删除');
+  }
   setStorageData(STORAGE_KEYS.USERS, users.filter((u) => u.id !== id));
   return createSuccessResponse(true);
 }
@@ -492,9 +575,13 @@ async function deleteLeadSourceConfig(id: string): Promise<ApiResponse<boolean>>
 }
 
 export const settingsApi = {
+  fetchOrganizationProfile,
+  updateOrganizationProfile,
   fetchUsers,
   createUser,
   updateUser,
+  leaveUser,
+  restoreUser,
   deleteUser,
   resetUserPassword,
   fetchProductConfigs,

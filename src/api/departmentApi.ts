@@ -5,7 +5,7 @@ import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
-import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
+import { ensureOrganizationConfigData, getDepartmentDescendantIds, isDepartmentDescendantOf, sortDepartments } from '../shared/utils/organizationConfig';
 import type { User } from '../types/settings';
 import type { Position } from '../types/position';
 import type { Role } from '../types/role';
@@ -28,7 +28,7 @@ async function getDepartments(filters?: DepartmentFilters): Promise<ApiResponse<
     departments = departments.filter((d) => d.isActive === filters.isActive);
   }
 
-  return createSuccessResponse(departments);
+  return createSuccessResponse(sortDepartments(departments));
 }
 
 async function getDepartmentById(id: string): Promise<ApiResponse<Department | null>> {
@@ -42,15 +42,19 @@ async function createDepartment(data: Omit<Department, 'id' | 'createdAt' | 'upd
   ensureInit();
   await delay(200);
   const departments = ensureOrganizationConfigData().departments;
+  if (data.parentId && !departments.some((department) => department.id === data.parentId)) {
+    return createErrorResponse('上级部门不存在');
+  }
   const now = new Date().toISOString();
+  const siblingCount = departments.filter((department) => (department.parentId || '') === (data.parentId || '')).length;
   const newDept: Department = {
     ...data,
     id: `dept-${uuidv4().slice(0, 8)}`,
+    sortOrder: Number(data.sortOrder || siblingCount + 1),
     createdAt: now,
     updatedAt: now,
   };
-  departments.push(newDept);
-  setStorageData(STORAGE_KEYS.DEPARTMENTS, departments);
+  setStorageData(STORAGE_KEYS.DEPARTMENTS, sortDepartments([...departments, newDept]));
   return createSuccessResponse(newDept);
 }
 
@@ -60,8 +64,13 @@ async function updateDepartment(id: string, data: Partial<Department>): Promise<
   const departments = ensureOrganizationConfigData().departments;
   const idx = departments.findIndex((d) => d.id === id);
   if (idx === -1) return createSuccessResponse(null);
+  if (data.parentId) {
+    if (data.parentId === id) return createErrorResponse('上级部门不能选择自己');
+    if (isDepartmentDescendantOf(departments, data.parentId, id)) return createErrorResponse('上级部门不能选择当前部门的下级部门');
+    if (!departments.some((department) => department.id === data.parentId)) return createErrorResponse('上级部门不存在');
+  }
   departments[idx] = { ...departments[idx], ...data, updatedAt: new Date().toISOString() };
-  setStorageData(STORAGE_KEYS.DEPARTMENTS, departments);
+  setStorageData(STORAGE_KEYS.DEPARTMENTS, sortDepartments(departments));
   return createSuccessResponse(departments[idx]);
 }
 
@@ -70,7 +79,12 @@ async function deleteDepartment(id: string): Promise<ApiResponse<boolean>> {
   await delay(150);
   const { departments, positions, roles } = ensureOrganizationConfigData();
   const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
-  const hasUsers = users.some((user) => user.departmentId === id);
+  const scopedDepartmentIds = [id, ...getDepartmentDescendantIds(departments, id)];
+  const hasUsers = users.some((user) => (
+    (user.employmentStatus || 'active') !== 'left'
+    && user.departmentId
+    && scopedDepartmentIds.includes(user.departmentId)
+  ));
   const hasPositions = positions.some((position: Position) => position.departmentId === id);
   const hasRoles = roles.some((role: Role) => role.departmentId === id);
   const hasChildren = departments.some((department) => department.parentId === id);

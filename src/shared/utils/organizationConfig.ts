@@ -1,7 +1,7 @@
 import type { Department } from '../../types/department';
 import type { Position } from '../../types/position';
 import type { Role } from '../../types/role';
-import type { User } from '../../types/settings';
+import type { OrganizationProfile, User } from '../../types/settings';
 import { STORAGE_KEYS } from './constants';
 import { normalizeUserRoleName } from './roles';
 import { getStorageData, setStorageData } from '../../api/mock/storage';
@@ -10,6 +10,9 @@ const now = '2026-06-01T00:00:00.000Z';
 const ORGANIZATION_SCHEMA_VERSION = 2;
 const LEADS_RECEIVE_PERMISSION = 'leads.receive';
 const LEADS_ASSIGN_PERMISSION = 'leads.assign';
+export const DEFAULT_ORGANIZATION_PROFILE: OrganizationProfile = {
+  companyName: '福建极享信息科技有限公司',
+};
 
 export const DEFAULT_DEPARTMENTS: Department[] = [
   { id: 'dept-general', name: '总经办', code: 'GENERAL', memberCount: 0, isActive: true, createdAt: now, updatedAt: now },
@@ -247,6 +250,56 @@ function sortPositions(positions: Position[]): Position[] {
   return [...positions].sort((a, b) => Number(a.sortOrder) - Number(b.sortOrder) || a.name.localeCompare(b.name));
 }
 
+export function sortDepartments(departments: Department[]): Department[] {
+  return [...departments].sort((a, b) => {
+    if ((a.parentId || '') !== (b.parentId || '')) return (a.parentId || '').localeCompare(b.parentId || '');
+    return Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || a.name.localeCompare(b.name);
+  });
+}
+
+function normalizeDepartmentSortOrders(departments: Department[]): Department[] {
+  const byParent = new Map<string, Department[]>();
+  departments.forEach((department, index) => {
+    const key = department.parentId || '';
+    const item = { ...department, sortOrder: Number(department.sortOrder || index + 1) };
+    byParent.set(key, [...(byParent.get(key) || []), item]);
+  });
+  return Array.from(byParent.values()).flatMap((siblings) => (
+    [...siblings]
+      .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || a.name.localeCompare(b.name))
+      .map((department, index) => ({ ...department, sortOrder: index + 1 }))
+  ));
+}
+
+export function getDepartmentAncestorIds(departments: Department[], departmentId?: string): string[] {
+  const ancestors: string[] = [];
+  let current = departments.find((department) => department.id === departmentId);
+  const visited = new Set<string>();
+  while (current && !visited.has(current.id)) {
+    ancestors.push(current.id);
+    visited.add(current.id);
+    current = current.parentId ? departments.find((department) => department.id === current?.parentId) : undefined;
+  }
+  return ancestors;
+}
+
+export function getDepartmentDescendantIds(departments: Department[], departmentId: string): string[] {
+  const children = departments.filter((department) => department.parentId === departmentId);
+  return children.flatMap((department) => [department.id, ...getDepartmentDescendantIds(departments, department.id)]);
+}
+
+export function isDepartmentDescendantOf(departments: Department[], childId: string, parentId: string): boolean {
+  return getDepartmentAncestorIds(departments, childId).includes(parentId);
+}
+
+export function getOrganizationProfile(): OrganizationProfile {
+  const existing = getStorageData<OrganizationProfile>(STORAGE_KEYS.ORGANIZATION_PROFILE);
+  const companyName = String(existing?.companyName || '').trim() || DEFAULT_ORGANIZATION_PROFILE.companyName;
+  const profile = { ...DEFAULT_ORGANIZATION_PROFILE, ...existing, companyName };
+  setStorageData(STORAGE_KEYS.ORGANIZATION_PROFILE, profile);
+  return profile;
+}
+
 export function ensureOrganizationConfigData() {
   const storedVersion = Number(getStorageData<number>(STORAGE_KEYS.ORGANIZATION_SCHEMA_VERSION) || 0);
   const existingDepartments = getStorageData<Department[]>(STORAGE_KEYS.DEPARTMENTS);
@@ -293,7 +346,7 @@ export function ensureOrganizationConfigData() {
     }))
     : { items: mergeByCode(existingRoles, DEFAULT_ROLES), idMap: {} };
 
-  const departments = departmentResult.items;
+  const departments = sortDepartments(normalizeDepartmentSortOrders(departmentResult.items));
   const positions = sortPositions(positionResult.items.map((position) => ({
     ...position,
     departmentId: position.departmentId ? departmentResult.idMap[position.departmentId] || position.departmentId : position.departmentId,
@@ -307,6 +360,7 @@ export function ensureOrganizationConfigData() {
   setStorageData(STORAGE_KEYS.ROLES, roles);
   setStorageData(STORAGE_KEYS.POSITIONS, positions);
   setStorageData(STORAGE_KEYS.ORGANIZATION_SCHEMA_VERSION, ORGANIZATION_SCHEMA_VERSION);
+  getOrganizationProfile();
 
   return {
     departments,
@@ -353,6 +407,7 @@ export function migrateUsersWithOrganization(users: User[]): User[] {
       positionId: position?.id || user.positionId,
       positionName: position?.name || user.positionName,
       departmentId: hasValidDepartment ? departmentId : position?.departmentId,
+      employmentStatus: user.employmentStatus || 'active',
     };
   });
 }

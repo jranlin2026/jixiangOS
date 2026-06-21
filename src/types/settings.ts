@@ -2,6 +2,7 @@ import type { ID, Timestamp } from './common';
 
 /** 用户角色 */
 export type UserRole = string;
+export type EmploymentStatus = 'active' | 'left';
 
 export type LifecycleStatusCode =
   | 'pending_followup'
@@ -28,8 +29,15 @@ export interface User {
   passwordUpdatedAt?: Timestamp;
   lastLoginAt?: Timestamp;
   isActive: boolean;
+  employmentStatus?: EmploymentStatus;
+  leftAt?: Timestamp;
+  leftBy?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+}
+
+export interface OrganizationProfile {
+  companyName: string;
 }
 
 /** 产品配置 */
@@ -98,4 +106,5 @@ export interface SettingsFilters {
   search?: string;
   role?: UserRole;
   isActive?: boolean;
+  employmentStatus?: EmploymentStatus | 'all';
 }

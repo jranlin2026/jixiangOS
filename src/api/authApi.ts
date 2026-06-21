@@ -59,6 +59,7 @@ async function login(payload: LoginPayload): Promise<ApiResponse<AuthenticatedUs
   ));
 
   if (!user) return createErrorResponse('账号不存在');
+  if ((user.employmentStatus || 'active') === 'left') return createErrorResponse('账号已离职，请联系管理员');
   if (!user.isActive) return createErrorResponse('账号已停用，请联系管理员');
   if (!verifyPassword(payload.password, user.passwordSalt, user.passwordHash)) {
     return createErrorResponse('账号或密码错误');
@@ -81,7 +82,7 @@ async function getCurrentUser(): Promise<ApiResponse<AuthenticatedUser | null>> 
   }
 
   const { users, roles } = ensureAuthData();
-  const user = users.find((item) => item.id === session.userId && item.isActive);
+  const user = users.find((item) => item.id === session.userId && item.isActive && (item.employmentStatus || 'active') !== 'left');
   if (!user) {
     removeStorageData(AUTH_SESSION_STORAGE_KEY);
     return createSuccessResponse(null);

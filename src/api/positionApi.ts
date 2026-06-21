@@ -1,10 +1,12 @@
 import type { Position, PositionFilters } from '../types/position';
+import type { User } from '../types/settings';
 import type { ApiResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
-import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
+import { ensureOrganizationConfigData, getDepartmentAncestorIds, migrateUsersWithOrganization } from '../shared/utils/organizationConfig';
+import { ensureAdminUser } from '../shared/utils/auth';
 import { v4 as uuidv4 } from 'uuid';
 
 function ensureInit(): Position[] {
@@ -42,6 +44,17 @@ async function getPositionById(id: string): Promise<ApiResponse<Position | null>
   await delay(120);
   const positions = ensureInit();
   return createSuccessResponse(positions.find((position) => position.id === id) || null);
+}
+
+async function getPositionsForDepartment(departmentId?: string): Promise<ApiResponse<Position[]>> {
+  await delay(120);
+  const { departments, positions } = ensureOrganizationConfigData();
+  const allowedDepartmentIds = new Set(getDepartmentAncestorIds(departments, departmentId));
+  const matched = positions
+    .filter((position) => position.isActive)
+    .filter((position) => !position.departmentId || allowedDepartmentIds.has(position.departmentId))
+    .sort((a, b) => Number(a.sortOrder) - Number(b.sortOrder) || a.name.localeCompare(b.name));
+  return createSuccessResponse(matched);
 }
 
 async function createPosition(data: Omit<Position, 'id' | 'createdAt' | 'updatedAt'>): Promise<ApiResponse<Position | null>> {
@@ -94,10 +107,12 @@ async function updatePosition(id: string, data: Partial<Position>): Promise<ApiR
 async function deletePosition(id: string): Promise<ApiResponse<boolean>> {
   await delay(120);
   const positions = ensureInit();
-  const position = positions.find((item) => item.id === id);
-  const users = getStorageData<Array<{ positionId?: string; positionName?: string }>>(STORAGE_KEYS.USERS) || [];
-  if (users.some((user) => user.positionId === id || (position?.name && user.positionName === position.name))) {
-    return createErrorResponse('已有员工使用该职位，不能删除，请改为停用');
+  const users = migrateUsersWithOrganization(ensureAdminUser(getStorageData<User[]>(STORAGE_KEYS.USERS) || []));
+  setStorageData(STORAGE_KEYS.USERS, users);
+  const activeUsers = users.filter((user) => (user.employmentStatus || 'active') !== 'left' && user.positionId === id);
+  if (activeUsers.length > 0) {
+    const names = activeUsers.map((user) => user.name).filter(Boolean).join('、');
+    return createErrorResponse(`已有启用员工正在使用该职位：${names || `${activeUsers.length}人`}，请先调整员工职位或停用员工`);
   }
   setStorageData(STORAGE_KEYS.POSITIONS, positions.filter((position) => position.id !== id));
   return createSuccessResponse(true);
@@ -106,6 +121,7 @@ async function deletePosition(id: string): Promise<ApiResponse<boolean>> {
 export const positionApi = {
   getPositions,
   getPositionById,
+  getPositionsForDepartment,
   createPosition,
   updatePosition,
   deletePosition,

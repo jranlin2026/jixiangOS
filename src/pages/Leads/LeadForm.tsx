@@ -17,27 +17,13 @@ import { RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/ut
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import { canReceiveLead } from '../../shared/utils/permissions';
 import type { Role } from '../../types/role';
-
-const CURRENT_USER_STORAGE_KEY = 'aaos_current_user';
+import { applyCurrentLeadInputBy, getCurrentLeadInputName } from '../../shared/utils/leadInputAttribution';
 
 interface LeadFormProps {
   open: boolean;
   onClose: () => void;
   lead?: Lead | null;
   onSuccess?: () => void;
-}
-
-function getCurrentUserName(users: User[]): string {
-  try {
-    const raw = localStorage.getItem(CURRENT_USER_STORAGE_KEY);
-    if (raw) {
-      const current = JSON.parse(raw) as Partial<User>;
-      if (current.name) return current.name;
-    }
-  } catch {
-    // fallback below
-  }
-  return users.find((user) => user.isActive)?.name || '';
 }
 
 const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) => {
@@ -113,7 +99,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     const defaultSourceOption = sourceOptions[0];
     const defaultSource = lead?.source || defaultSourceOption?.parentName || '';
     const defaultSourceName = lead?.sourceName || defaultSourceOption?.childName || '';
-    const defaultInputBy = lead?.inputBy || getCurrentUserName(users);
+    const defaultInputBy = lead?.inputBy || getCurrentLeadInputName(users.find((user) => user.isActive)?.name || '');
     setSubmitError('');
     setForm({
       name: lead?.name || '',
@@ -178,7 +164,8 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
       return;
     }
 
-    const res = await create(payload);
+    const createPayload = applyCurrentLeadInputBy(payload, 'inputBy');
+    const res = await create(createPayload);
     if (res.code !== 0) {
       setSubmitError(res.message || '入库失败');
       onSuccess?.();
@@ -246,11 +233,13 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
           </TextField>
           <TextField label="行业" value={form.industry} onChange={handleChange('industry')} fullWidth />
           <TextField label="城市" value={form.city} onChange={handleChange('city')} fullWidth />
-          <TextField select label="线索录入人" value={form.inputBy} onChange={handleChange('inputBy')} fullWidth helperText="默认当前登录人员">
-            {users.map((user) => (
-              <MenuItem key={user.id} value={user.name}>{user.name}</MenuItem>
-            ))}
-          </TextField>
+          {isEdit && (
+            <TextField select label="线索录入人" value={form.inputBy} onChange={handleChange('inputBy')} fullWidth helperText="默认当前登录人员">
+              {users.map((user) => (
+                <MenuItem key={user.id} value={user.name}>{user.name}</MenuItem>
+              ))}
+            </TextField>
+          )}
           <TextField
             select
             label="线索贡献人"

@@ -4,7 +4,6 @@ import { Box, Paper, Tab, Tabs, Typography } from '@mui/material';
 import RolePermission from './RolePermission';
 import ProductConfigPage from './ProductConfig';
 import EmployeeDepartmentManagement from './EmployeeDepartmentManagement';
-import DepartmentManagement from './DepartmentManagement';
 import PositionManagement from './PositionManagement';
 import AccountRecycleBin from './AccountRecycleBin';
 import CustomerLevelConfigPage from './CustomerLevelConfig';
@@ -25,6 +24,7 @@ interface TabPanelProps {
 type SettingsTabConfig = {
   label: string;
   permissionKey: string;
+  permissionKeys?: string[];
   component: React.ReactNode;
 };
 
@@ -53,8 +53,7 @@ const Settings: React.FC = () => {
       label: '组织架构',
       description: '员工账号、部门、职位和角色权限',
       tabs: [
-        { label: '员工账号', permissionKey: PERMISSION_KEYS.SETTINGS_USERS, component: <EmployeeDepartmentManagement /> },
-        { label: '部门管理', permissionKey: PERMISSION_KEYS.SETTINGS_DEPARTMENTS, component: <DepartmentManagement /> },
+        { label: '员工&部门', permissionKey: PERMISSION_KEYS.SETTINGS_USERS, permissionKeys: [PERMISSION_KEYS.SETTINGS_USERS, PERMISSION_KEYS.SETTINGS_DEPARTMENTS], component: <EmployeeDepartmentManagement /> },
         { label: '职位管理', permissionKey: PERMISSION_KEYS.SETTINGS_POSITIONS, component: <PositionManagement /> },
         { label: '角色权限', permissionKey: PERMISSION_KEYS.SETTINGS_ROLES, component: <RolePermission /> },
         { label: '账号回收站', permissionKey: PERMISSION_KEYS.SETTINGS_USERS, component: <AccountRecycleBin /> },
@@ -90,7 +89,10 @@ const Settings: React.FC = () => {
     },
   ]).map((group) => ({
     ...group,
-    tabs: group.tabs.filter((tab) => hasPermission(currentUser, tab.permissionKey)),
+    tabs: group.tabs.filter((tab: SettingsTabConfig) => {
+      const permissionKeys = tab.permissionKeys || [tab.permissionKey];
+      return permissionKeys.some((permissionKey: string) => hasPermission(currentUser, permissionKey));
+    }),
   })).filter((group) => group.tabs.length > 0), [currentUser]);
 
   const activeGroup = groups.find((group) => group.key === requestedGroupKey) || groups[0];
