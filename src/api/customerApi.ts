@@ -12,6 +12,7 @@ import { claimFromPublicPool, hydrateCustomerLifecycle, releaseToPublicPool, set
 import { filterVisibleCustomers } from '../shared/utils/dataVisibility';
 import { applyContactEditLock } from '../shared/utils/contactEditLock';
 import { isSuperAdminRoleName } from '../shared/utils/roles';
+import { getPhoneNumberError, normalizePhoneForComparison, normalizePhoneForStorage } from '../shared/utils/phoneNumber';
 
 function ensureInit(): void {
   initializeMockData();
@@ -25,6 +26,8 @@ function validateCustomerAttribution(data: Partial<Customer>): string | null {
   if (isPersonalResource(data.sourceType) && !data.leadContributorName && !data.leadContributorId) {
     return '个人资源必须填写线索贡献人';
   }
+  const phoneError = getPhoneNumberError(data.phone);
+  if (phoneError) return phoneError;
   return null;
 }
 
@@ -36,6 +39,7 @@ function normalizeCustomer(customer: Customer): Customer {
     : undefined;
   const normalized = hydrateCustomerLifecycle({
     ...customer,
+    phone: normalizePhoneForStorage(customer.phone),
     leadSource: customer.leadSource || legacyLeadSource,
     sourceType: normalizedSourceType,
   });
@@ -121,7 +125,7 @@ function syncLeadsByCustomer(customer: Customer, now: string, operator = SYSTEM_
   let changed = false;
   const nextLeads = leads.map((lead) => {
     const matchedById = Boolean(lead.customerId && lead.customerId === customer.id);
-    const matchedByPhone = Boolean(customer.phone && lead.phone === customer.phone);
+    const matchedByPhone = Boolean(customer.phone && lead.phone && normalizePhoneForComparison(lead.phone) === normalizePhoneForComparison(customer.phone));
     const matchedByWechat = Boolean(customer.wechat && lead.wechat && lead.wechat === customer.wechat);
     if (!matchedById && !matchedByPhone && !matchedByWechat) return lead;
 
@@ -312,12 +316,13 @@ async function fetchCustomerById(id: string): Promise<ApiResponse<Customer | nul
 async function createCustomer(data: CustomerCreateInput): Promise<ApiResponse<Customer>> {
   ensureInit();
   await delay(200);
-  const validationError = validateCustomerAttribution(data);
+  const normalizedData = { ...data, phone: normalizePhoneForStorage(data.phone) };
+  const validationError = validateCustomerAttribution(normalizedData);
   if (validationError) return createErrorResponse(validationError);
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
   const now = new Date().toISOString();
   const newCustomer: Customer = {
-    ...data,
+    ...normalizedData,
     id: `cust-${uuidv4().slice(0, 8)}`,
     productLevel: data.productLevel || undefined,
     customerLevel: data.customerLevel || 'L1',
@@ -353,6 +358,9 @@ async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiR
   const safeData = applyContactEditLock<Customer>(existing, data, {
     canEditLockedContact: isSuperAdminRoleName(getCurrentOperatorUser()?.role),
   });
+  if (Object.prototype.hasOwnProperty.call(safeData, 'phone')) {
+    safeData.phone = normalizePhoneForStorage(safeData.phone);
+  }
   const merged = { ...existing, ...safeData, sourceType: normalizeResourceOwnership(safeData.sourceType || existing.sourceType) };
   const validationError = validateCustomerAttribution(merged);
   if (validationError) return createErrorResponse(validationError);
@@ -426,7 +434,7 @@ function findLeadIdByCustomer(customer: Customer): string | undefined {
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
   return leads.find((lead) => (
     lead.customerId === customer.id
-    || (lead.phone && customer.phone && lead.phone === customer.phone)
+    || (lead.phone && customer.phone && normalizePhoneForComparison(lead.phone) === normalizePhoneForComparison(customer.phone))
     || (lead.wechat && customer.wechat && lead.wechat === customer.wechat)
   ))?.id;
 }

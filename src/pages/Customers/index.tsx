@@ -40,6 +40,7 @@ import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/u
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import CustomerDetail from './CustomerDetail';
 import CustomerForm from './CustomerForm';
+import { formatPhoneForDisplay } from '../../shared/utils/phoneNumber';
 import OrderForm from '../Orders/OrderForm';
 import type { Customer, CustomerFilters } from '../../types/customer';
 import type { Order, OrderApplication } from '../../types/order';
@@ -89,7 +90,7 @@ const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[]): Custom
   return [
   { id: 'name', label: '姓名', render: (customer) => customer.name || '-' },
   { id: 'company', label: '公司', render: (customer) => customer.company || '-' },
-  { id: 'phone', label: '手机号', render: (customer) => customer.phone || '-' },
+  { id: 'phone', label: '手机号', render: (customer) => formatPhoneForDisplay(customer.phone) || '-' },
   { id: 'wechat', label: '微信', render: (customer) => customer.wechat || '-' },
   {
     id: 'lifecycleStatus',

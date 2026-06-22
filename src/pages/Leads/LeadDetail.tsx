@@ -28,6 +28,8 @@ import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { canReceiveLead, hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { canCompleteContactField } from '../../shared/utils/contactEditLock';
 import type { Role } from '../../types/role';
+import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
+import { formatPhoneForDisplay, getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
 
 interface LeadDetailProps {
   lead: Lead;
@@ -235,10 +237,18 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
       return;
     }
     const tags = draft.tagsText.split(',').map((tag) => tag.trim()).filter(Boolean);
+    const nextPhone = canEditLockedContact || canCompleteContactField(currentLead.phone)
+      ? normalizePhoneForStorage(draft.phone)
+      : currentLead.phone;
+    const phoneError = getPhoneNumberError(nextPhone);
+    if (phoneError) {
+      alert(phoneError);
+      return;
+    }
     const payload: Partial<Lead> = {
       name: draft.name,
       company: draft.company,
-      phone: canEditLockedContact || canCompleteContactField(currentLead.phone) ? draft.phone.trim() : currentLead.phone,
+      phone: nextPhone,
       wechat: canEditLockedContact || canCompleteContactField(currentLead.wechat) ? draft.wechat.trim() : currentLead.wechat,
       source: draft.source,
       sourceName: draft.sourceName,
@@ -368,6 +378,8 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
         ? currentLead.tags?.join('、')
         : field === 'assignedTo'
           ? followerName
+          : field === 'phone'
+            ? formatPhoneForDisplay(currentLead.phone)
           : (currentLead[field as keyof Lead] as string | undefined);
 
     return (
@@ -400,6 +412,13 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
                   </MenuItem>
                 ))}
               </TextField>
+            ) : field === 'phone' ? (
+              <PhoneNumberInput
+                value={currentValue}
+                onChange={(value) => setDraft((prev) => ({ ...prev, [field]: value }))}
+                size="small"
+                fullWidth
+              />
             ) : (
               <TextField value={currentValue} onChange={handleDraftChange(field)} size="small" fullWidth />
             )

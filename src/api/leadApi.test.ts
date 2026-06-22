@@ -117,7 +117,7 @@ const completedContactRes = await leadApi.updateLead('lead-blank-contact', {
   wechat: 'lead_wx_001',
 });
 assert.equal(completedContactRes.code, 0);
-assert.equal(completedContactRes.data?.phone, '13911112222');
+assert.equal(completedContactRes.data?.phone, '+8613911112222');
 assert.equal(completedContactRes.data?.wechat, 'lead_wx_001');
 
 const lockedContactRes = await leadApi.updateLead('lead-blank-contact', {
@@ -125,7 +125,7 @@ const lockedContactRes = await leadApi.updateLead('lead-blank-contact', {
   wechat: 'lead_wx_002',
 });
 assert.equal(lockedContactRes.code, 0);
-assert.equal(lockedContactRes.data?.phone, '13911112222');
+assert.equal(lockedContactRes.data?.phone, '+8613911112222');
 assert.equal(lockedContactRes.data?.wechat, 'lead_wx_001');
 
 storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
@@ -145,7 +145,7 @@ const superAdminContactRes = await leadApi.updateLead('lead-blank-contact', {
   wechat: 'lead_wx_super',
 });
 assert.equal(superAdminContactRes.code, 0);
-assert.equal(superAdminContactRes.data?.phone, '13955556666');
+assert.equal(superAdminContactRes.data?.phone, '+8613955556666');
 assert.equal(superAdminContactRes.data?.wechat, 'lead_wx_super');
 
 const createRes = await leadApi.createLead({
@@ -167,5 +167,6 @@ const createRes = await leadApi.createLead({
 
 assert.equal(createRes.code, 0);
 assert.ok(createRes.data);
+assert.equal(createRes.data?.phone, '+8613900009999');
 assert.equal(createRes.data?.email, undefined);
 assert.equal(createRes.data?.estimatedAmount, undefined);

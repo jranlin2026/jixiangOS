@@ -27,9 +27,11 @@ import AIBusinessCardPanel from '../../shared/components/AIBusinessCardPanel';
 import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
 import useAuthStore from '../../store/useAuthStore';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { canCompleteContactField } from '../../shared/utils/contactEditLock';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
+import { formatPhoneForDisplay, getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
 
 interface CustomerDetailProps {
   customer: Customer;
@@ -246,10 +248,18 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
 
   const handleSaveProfile = async () => {
     if (readOnly) return;
+    const nextPhone = canEditLockedContact || canCompleteContactField(currentCustomer.phone)
+      ? normalizePhoneForStorage(String(draft.phone || ''))
+      : currentCustomer.phone;
+    const phoneError = getPhoneNumberError(nextPhone);
+    if (phoneError) {
+      alert(phoneError);
+      return;
+    }
     const payload: Partial<Customer> = {
       name: draft.name,
       company: draft.company,
-      phone: canEditLockedContact || canCompleteContactField(currentCustomer.phone) ? String(draft.phone || '').trim() : currentCustomer.phone,
+      phone: nextPhone,
       wechat: canEditLockedContact || canCompleteContactField(currentCustomer.wechat) ? String(draft.wechat || '').trim() : currentCustomer.wechat,
       leadSource: draft.leadSource,
       sourceName: draft.sourceName,
@@ -339,6 +349,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     const showCurrentUserOption = isUserField && currentValue && !users.some((user) => user.name === currentValue);
     const displayValue = field === 'createdAt' && currentCustomer.createdAt
       ? formatDate(currentCustomer.createdAt, 'yyyy-MM-dd HH:mm')
+      : field === 'phone'
+        ? formatPhoneForDisplay(currentCustomer.phone)
       : emptyText(currentCustomer[field] as string | number);
 
     return (
@@ -413,6 +425,13 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                   </MenuItem>
                 ))}
               </TextField>
+            ) : field === 'phone' ? (
+              <PhoneNumberInput
+                value={currentValue}
+                onChange={(value) => setDraft((prev) => ({ ...prev, [field]: value }))}
+                size="small"
+                fullWidth
+              />
             ) : (
               <TextField
                 value={currentValue}

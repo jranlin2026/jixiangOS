@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { leadFlowApi } from './leadFlowApi';
 import { leadApi } from './leadApi';
 import { LEAD_STATUS, STORAGE_KEYS } from '../shared/utils/constants';
@@ -23,6 +25,17 @@ Object.defineProperty(globalThis, 'localStorage', {
   value: storage,
   configurable: true,
 });
+
+const flowConfigSource = readFileSync(join(process.cwd(), 'src', 'pages', 'Leads', 'LeadFlowConfigTab.tsx'), 'utf8');
+assert.match(flowConfigSource, /phone_or_wechat/);
+assert.doesNotMatch(flowConfigSource, /value="phone"/);
+assert.doesNotMatch(flowConfigSource, /value="wechat"/);
+assert.doesNotMatch(flowConfigSource, /exemptionEnabled|orderMatchCustomerEnabled|dailyRestartEnabled|failedInboundCompensationEnabled|inactiveMemberSkipEnabled/);
+assert.match(flowConfigSource, /participantDialogOpen/);
+assert.match(flowConfigSource, /添加成员/);
+assert.match(flowConfigSource, /getParticipantLabel/);
+assert.match(flowConfigSource, /\$\{user\.name\}（\$\{roleLabel\}）/);
+assert.doesNotMatch(flowConfigSource, /salesUsers\.map\(\(user\) => \(\s*<FormControlLabel/);
 
 const now = '2026-06-18T12:00:00.000Z';
 const lead: Lead = {
@@ -67,6 +80,22 @@ storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({
   createdAt: now,
 }));
 
+storage.setItem(STORAGE_KEYS.LEAD_FLOW_CONFIG, JSON.stringify({
+  id: 'lead-flow-global',
+  uniqueKeyMode: 'phone',
+  interceptionEnabled: true,
+  autoAssignEnabled: true,
+  assignmentMode: 'round_robin',
+  participantUserIds: [],
+  dailyLimitEnabled: true,
+  dailyLimit: 200,
+  lastAssignedIndex: -1,
+  updatedAt: now,
+}));
+const migratedFlowConfig = await leadFlowApi.fetchLeadFlowConfig();
+assert.equal(migratedFlowConfig.data.uniqueKeyMode, 'phone_or_wechat');
+assert.equal(JSON.parse(storage.getItem(STORAGE_KEYS.LEAD_FLOW_CONFIG) || '{}').uniqueKeyMode, 'phone_or_wechat');
+
 const res = await leadFlowApi.manualAssignLead('lead-flow-test', 'Li');
 assert.equal(res.code, 0);
 assert.ok(res.data);
@@ -102,13 +131,14 @@ const intake = leadFlowApi.intakeLead({
 });
 assert.ok(intake.lead);
 assert.equal(intake.lead?.lifecycleStatusCode, 'pending_followup');
+assert.equal(intake.lead?.phone, '+8613900000002');
 
 const records = JSON.parse(storage.getItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS) || '[]');
 assert.equal(records[0]?.source, 'Live-Douyin02');
 
 const customersAfterIntake = JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]');
 assert.equal(customersAfterIntake.length, customerCountBeforeIntake);
-assert.equal(customersAfterIntake.some((item: any) => item.phone === '13900000002'), false);
+assert.equal(customersAfterIntake.some((item: any) => item.phone === '+8613900000002'), false);
 
 const assignRes = await leadFlowApi.manualAssignLead(intake.lead!.id, 'Li');
 assert.equal(assignRes.code, 0);
@@ -125,7 +155,7 @@ assert.ok(claimRes.data?.customerId);
 
 const customersAfterClaim = JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]');
 assert.equal(customersAfterClaim.length, customerCountBeforeIntake + 1);
-const claimedCustomer = customersAfterClaim.find((item: any) => item.phone === '13900000002');
+const claimedCustomer = customersAfterClaim.find((item: any) => item.phone === '+8613900000002');
 assert.equal(claimedCustomer?.lifecycleStatusCode, 'following');
 assert.equal(claimedCustomer?.owner, 'Li');
 
@@ -159,3 +189,130 @@ assert.match(duplicateCustomerPhone.message, /手机号已存在于客户库/);
 const failedRecords = JSON.parse(storage.getItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS) || '[]');
 assert.equal(failedRecords[0]?.status, '入库失败');
 assert.match(failedRecords[0]?.failureReason || '', /手机号已存在于客户库/);
+
+const createLeadInput = (
+  name: string,
+  overrides: Partial<Parameters<typeof leadFlowApi.intakeLead>[0]> = {},
+): Parameters<typeof leadFlowApi.intakeLead>[0] => ({
+  name,
+  company: `${name} Company`,
+  phone: '',
+  wechat: '',
+  source: 'Live',
+  sourceName: 'Douyin02',
+  sourceType: 'company',
+  status: LEAD_STATUS.NEW,
+  inputBy: 'InputUser',
+  owner: 'InputUser',
+  industry: '',
+  city: '',
+  tags: [],
+  remark: '',
+  ...overrides,
+});
+
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([{
+  id: 'customer-wechat',
+  name: 'Existing Wechat Customer',
+  company: 'Existing Company',
+  phone: '',
+  wechat: 'wx-existing',
+  owner: 'Sales A',
+  lifecycleStatusCode: 'following',
+  customerLevel: 'L1',
+  totalSpent: 0,
+  orderCount: 0,
+  growthPath: [],
+  growthRecords: [],
+  activityRecords: [],
+  tags: [],
+  createdAt: now,
+  updatedAt: now,
+}]));
+storage.setItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS, JSON.stringify([]));
+const duplicateWechat = leadFlowApi.intakeLead(createLeadInput('Duplicate Wechat', { wechat: 'wx-existing' }));
+assert.equal(duplicateWechat.lead, null);
+assert.equal(JSON.parse(storage.getItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS) || '[]')[0]?.collisionTargetId, 'customer-wechat');
+
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS, JSON.stringify([]));
+const missingContact = leadFlowApi.intakeLead(createLeadInput('Missing Contact'));
+assert.equal(missingContact.lead, null);
+assert.ok(JSON.parse(storage.getItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS) || '[]')[0]?.failureReason);
+
+const salesUsers = [
+  {
+    id: 'user-sales-a',
+    name: 'Sales A',
+    account: 'sales-a',
+    email: 'sales-a@company.com',
+    phone: '',
+    role: 'Sales Consultant',
+    roleId: 'role-sales-consultant',
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+  {
+    id: 'user-sales-b',
+    name: 'Sales B',
+    account: 'sales-b',
+    email: 'sales-b@company.com',
+    phone: '',
+    role: 'Sales Consultant',
+    roleId: 'role-sales-consultant',
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+];
+
+storage.setItem(STORAGE_KEYS.USERS, JSON.stringify(salesUsers));
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEAD_FLOW_CONFIG, JSON.stringify({
+  id: 'lead-flow-global',
+  uniqueKeyMode: 'phone_or_wechat',
+  interceptionEnabled: true,
+  autoAssignEnabled: true,
+  assignmentMode: 'round_robin',
+  participantUserIds: ['user-sales-a', 'user-sales-b'],
+  dailyLimitEnabled: false,
+  dailyLimit: 200,
+  lastAssignedIndex: -1,
+  updatedAt: now,
+}));
+const roundRobinFirst = leadFlowApi.intakeLead(createLeadInput('Round Robin First', { phone: '13900001001' }));
+const roundRobinSecond = leadFlowApi.intakeLead(createLeadInput('Round Robin Second', { phone: '13900001002' }));
+assert.equal(roundRobinFirst.lead?.assignedTo, 'Sales A');
+assert.equal(roundRobinSecond.lead?.assignedTo, 'Sales B');
+
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS, JSON.stringify([{
+  id: 'intake-existing',
+  name: 'Already Assigned',
+  phone: '13900001003',
+  inputBy: 'InputUser',
+  assignedTo: 'Sales A',
+  status: '入库成功',
+  matchedRule: 'round_robin',
+  createdAt: new Date().toISOString(),
+}]));
+storage.setItem(STORAGE_KEYS.LEAD_FLOW_CONFIG, JSON.stringify({
+  id: 'lead-flow-global',
+  uniqueKeyMode: 'phone_or_wechat',
+  interceptionEnabled: true,
+  autoAssignEnabled: true,
+  assignmentMode: 'round_robin',
+  participantUserIds: ['user-sales-a', 'user-sales-b'],
+  dailyLimitEnabled: true,
+  dailyLimit: 1,
+  lastAssignedIndex: -1,
+  updatedAt: now,
+}));
+const skippedByDailyLimit = leadFlowApi.intakeLead(createLeadInput('Daily Limit Skip', { phone: '13900001004' }));
+assert.equal(skippedByDailyLimit.lead?.assignedTo, 'Sales B');

@@ -5,7 +5,7 @@ import { normalizeUserRoleName } from './roles';
 export const AUTH_SESSION_STORAGE_KEY = 'aaos_auth_session';
 export const DEFAULT_ADMIN_ACCOUNT = 'admin';
 export const DEFAULT_ADMIN_PASSWORD = 'Admin@123456';
-export const DEFAULT_USER_PASSWORD = 'Aaos@123456';
+export const DEFAULT_USER_PASSWORD = '1234567';
 
 const ADMIN_USER_ID = 'user-admin';
 

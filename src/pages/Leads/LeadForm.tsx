@@ -15,9 +15,11 @@ import type { LeadSourceConfig, User } from '../../types/settings';
 import { roleApi, settingsApi } from '../../api';
 import { RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
 import { canReceiveLead } from '../../shared/utils/permissions';
 import type { Role } from '../../types/role';
 import { applyCurrentLeadInputBy, getCurrentLeadInputName } from '../../shared/utils/leadInputAttribution';
+import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
 
 interface LeadFormProps {
   open: boolean;
@@ -151,6 +153,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     const tags = form.tags ? form.tags.split(',').map((tag) => tag.trim()).filter(Boolean) : [];
     const payload = {
       ...form,
+      phone: normalizePhoneForStorage(form.phone),
       sourceType: normalizeResourceOwnership(form.sourceType),
       status: lead?.status || '新线索',
       tags,
@@ -176,9 +179,10 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
   };
 
   const missingContact = !form.phone.trim() && !form.wechat.trim();
+  const phoneError = getPhoneNumberError(form.phone);
   const missingContributor = normalizeResourceOwnership(form.sourceType) === '个人资源' && !form.leadContributorName;
   const showContactError = !isEdit && !!form.name.trim() && missingContact;
-  const canSubmit = !!form.name.trim() && !missingContact && !missingContributor && !!form.source && !!form.inputBy;
+  const canSubmit = !!form.name.trim() && !missingContact && !phoneError && !missingContributor && !!form.source && !!form.inputBy;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
@@ -192,14 +196,15 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
           )}
           <TextField label="姓名" value={form.name} onChange={handleChange('name')} required fullWidth />
           <TextField label="公司" value={form.company} onChange={handleChange('company')} fullWidth />
-          <TextField
+          <PhoneNumberInput
             label="手机号"
             value={form.phone}
-            onChange={handleChange('phone')}
+            onChange={(value) => setForm({ ...form, phone: value })}
             error={showContactError}
             fullWidth
+            size="small"
             helperText={isEdit ? '唯一识别字段，入库后不可修改' : showContactError ? '手机号或微信至少填写一项' : ''}
-            InputProps={{ readOnly: isEdit }}
+            readOnly={isEdit}
           />
           <TextField
             label="微信"

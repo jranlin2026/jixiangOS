@@ -11,19 +11,52 @@ import { getCurrentOperatorName, SYSTEM_OPERATOR } from '../shared/utils/current
 import { hydrateLeadLifecycle } from './lifecycleSync';
 import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
 import { canReceiveLead } from '../shared/utils/permissions';
+import { getPhoneNumberError, normalizePhoneForComparison, normalizePhoneForStorage } from '../shared/utils/phoneNumber';
 
 function ensureInit(): void {
   initializeMockData();
   ensureLeadFlowConfig();
 }
 
+type StoredLeadFlowConfig = Partial<LeadFlowConfig> & Record<string, unknown>;
+
+const OFFICIAL_UNIQUE_KEY_MODE: LeadFlowConfig['uniqueKeyMode'] = 'phone_or_wechat';
+
+function toBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function toNumber(value: unknown, fallback: number): number {
+  const next = Number(value);
+  return Number.isFinite(next) ? next : fallback;
+}
+
+function normalizeLeadFlowConfig(input?: StoredLeadFlowConfig | null): LeadFlowConfig {
+  const merged = { ...DEFAULT_LEAD_FLOW_CONFIG, ...(input || {}) } as StoredLeadFlowConfig;
+  return {
+    id: typeof merged.id === 'string' && merged.id.trim() ? merged.id : DEFAULT_LEAD_FLOW_CONFIG.id,
+    uniqueKeyMode: OFFICIAL_UNIQUE_KEY_MODE,
+    interceptionEnabled: toBoolean(merged.interceptionEnabled, DEFAULT_LEAD_FLOW_CONFIG.interceptionEnabled),
+    autoAssignEnabled: toBoolean(merged.autoAssignEnabled, DEFAULT_LEAD_FLOW_CONFIG.autoAssignEnabled),
+    assignmentMode: 'round_robin',
+    participantUserIds: Array.isArray(merged.participantUserIds)
+      ? merged.participantUserIds.filter((id): id is string => typeof id === 'string')
+      : [...DEFAULT_LEAD_FLOW_CONFIG.participantUserIds],
+    dailyLimitEnabled: toBoolean(merged.dailyLimitEnabled, DEFAULT_LEAD_FLOW_CONFIG.dailyLimitEnabled),
+    dailyLimit: Math.max(0, toNumber(merged.dailyLimit, DEFAULT_LEAD_FLOW_CONFIG.dailyLimit)),
+    lastAssignedIndex: toNumber(merged.lastAssignedIndex, DEFAULT_LEAD_FLOW_CONFIG.lastAssignedIndex),
+    updatedAt: typeof merged.updatedAt === 'string' && merged.updatedAt
+      ? merged.updatedAt
+      : DEFAULT_LEAD_FLOW_CONFIG.updatedAt,
+  };
+}
+
 function ensureLeadFlowConfig(): LeadFlowConfig {
-  const existing = getStorageData<LeadFlowConfig>(STORAGE_KEYS.LEAD_FLOW_CONFIG);
-  const config = {
-    ...DEFAULT_LEAD_FLOW_CONFIG,
-    ...(existing || {}),
-  } as LeadFlowConfig;
-  if (!existing) setStorageData(STORAGE_KEYS.LEAD_FLOW_CONFIG, config);
+  const existing = getStorageData<StoredLeadFlowConfig>(STORAGE_KEYS.LEAD_FLOW_CONFIG);
+  const config = normalizeLeadFlowConfig(existing);
+  if (!existing || JSON.stringify(existing) !== JSON.stringify(config)) {
+    setStorageData(STORAGE_KEYS.LEAD_FLOW_CONFIG, config);
+  }
   return config;
 }
 
@@ -56,15 +89,15 @@ function getConfiguredParticipants(config: LeadFlowConfig): User[] {
 }
 
 function findCollision(data: Partial<Lead>, excludeLeadId?: string) {
-  const phone = normalizeText(data.phone);
+  const phone = normalizePhoneForComparison(data.phone);
   const wechat = normalizeText(data.wechat);
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
   const leads = (getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || []).filter((lead) => lead.id !== excludeLeadId);
 
   if (phone) {
-    const customer = customers.find((item) => normalizeText(item.phone) === phone);
+    const customer = customers.find((item) => normalizePhoneForComparison(item.phone) === phone);
     if (customer) return { type: '客户' as const, id: customer.id, name: customer.name, field: '手机号' };
-    const lead = leads.find((item) => item.intakeStatus !== '入库失败' && normalizeText(item.phone) === phone);
+    const lead = leads.find((item) => item.intakeStatus !== '入库失败' && normalizePhoneForComparison(item.phone) === phone);
     if (lead) return { type: '线索' as const, id: lead.id, name: lead.name, field: '手机号' };
   }
 
@@ -78,12 +111,11 @@ function findCollision(data: Partial<Lead>, excludeLeadId?: string) {
   return null;
 }
 
-function validateUniqueInput(config: LeadFlowConfig, data: Partial<Lead>): string | null {
+function validateUniqueInput(data: Partial<Lead>): string | null {
   const hasPhone = Boolean(normalizeText(data.phone));
   const hasWechat = Boolean(normalizeText(data.wechat));
-  if (config.uniqueKeyMode === 'phone' && !hasPhone) return '手机号为必填唯一标识';
-  if (config.uniqueKeyMode === 'wechat' && !hasWechat) return '微信为必填唯一标识';
-  if (config.uniqueKeyMode === 'phone_or_wechat' && !hasPhone && !hasWechat) return '手机号和微信至少填写一项';
+  if (!hasPhone && !hasWechat) return '手机号和微信至少填写一项';
+  if (hasPhone) return getPhoneNumberError(data.phone) || null;
   return null;
 }
 
@@ -235,7 +267,7 @@ async function updateLeadFlowConfig(data: Partial<LeadFlowConfig>): Promise<ApiR
   ensureInit();
   await delay(150);
   const current = ensureLeadFlowConfig();
-  const next = { ...current, ...data, updatedAt: new Date().toISOString() };
+  const next = normalizeLeadFlowConfig({ ...current, ...data, updatedAt: new Date().toISOString() });
   setStorageData(STORAGE_KEYS.LEAD_FLOW_CONFIG, next);
   return createSuccessResponse(next);
 }
@@ -267,18 +299,19 @@ async function fetchIntakeRecords(filters?: { status?: string; search?: string; 
 function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followUpRecords'>): { lead: Lead | null; message: string } {
   const config = ensureLeadFlowConfig();
   const now = new Date().toISOString();
-  const ruleName = config.uniqueKeyMode === 'phone' ? '手机号唯一' : config.uniqueKeyMode === 'wechat' ? '微信唯一' : '手机号和微信二选一';
-  const validationError = validateAttribution(data) || validateUniqueInput(config, data);
+  const ruleName = '手机号和微信二选一';
+  const normalizedData = { ...data, phone: normalizePhoneForStorage(data.phone) };
+  const validationError = validateAttribution(normalizedData) || validateUniqueInput(normalizedData);
 
   if (validationError) {
     appendIntakeRecord({
       id: `intake-${uuidv4().slice(0, 8)}`,
-      name: data.name,
-      company: data.company,
-      phone: data.phone,
-      wechat: data.wechat,
-      source: formatLeadSourceText(data),
-      inputBy: data.inputBy,
+      name: normalizedData.name,
+      company: normalizedData.company,
+      phone: normalizedData.phone,
+      wechat: normalizedData.wechat,
+      source: formatLeadSourceText(normalizedData),
+      inputBy: normalizedData.inputBy,
       status: '入库失败',
       matchedRule: ruleName,
       failureReason: validationError,
@@ -287,17 +320,17 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
     return { lead: null, message: validationError };
   }
 
-  const collision = config.interceptionEnabled ? findCollision(data) : null;
+  const collision = config.interceptionEnabled ? findCollision(normalizedData) : null;
   if (collision) {
     const failureReason = `${collision.field}已存在于${collision.type}库：${collision.name}`;
     appendIntakeRecord({
       id: `intake-${uuidv4().slice(0, 8)}`,
-      name: data.name,
-      company: data.company,
-      phone: data.phone,
-      wechat: data.wechat,
-      source: formatLeadSourceText(data),
-      inputBy: data.inputBy,
+      name: normalizedData.name,
+      company: normalizedData.company,
+      phone: normalizedData.phone,
+      wechat: normalizedData.wechat,
+      source: formatLeadSourceText(normalizedData),
+      inputBy: normalizedData.inputBy,
       status: '入库失败',
       matchedRule: ruleName,
       failureReason,
@@ -309,10 +342,10 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
     return { lead: null, message: failureReason };
   }
 
-  const assignment = assignLeadOwner(config, data.owner);
+  const assignment = assignLeadOwner(config, normalizedData.owner);
   const leadId = `lead-${uuidv4().slice(0, 8)}`;
   const lead: Lead = {
-    ...data,
+    ...normalizedData,
     id: leadId,
     owner: assignment.owner,
     assignedTo: assignment.assignedTo,

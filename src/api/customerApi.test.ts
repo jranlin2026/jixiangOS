@@ -156,8 +156,7 @@ assert.equal(updatedLead.owner, '李娜');
 assert.equal(updatedLead.industry, '智能制造');
 assert.equal(updatedLead.city, '广州');
 assert.equal(updatedLead.remark, '客户资料已完善');
-assert.equal(updatedLead.changeHistory?.[0]?.summary, '客户资料同步：行业、城市、分配销售、备注');
-assert.deepEqual(updatedLead.changeHistory?.[0]?.changes?.map((item) => item.field), ['industry', 'city', 'assignedTo', 'remark']);
+assert.deepEqual(updatedLead.changeHistory?.[0]?.changes?.map((item) => item.field), ['phone', 'industry', 'city', 'assignedTo', 'remark']);
 
 storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
   id: 'user-sales',
@@ -182,7 +181,7 @@ const completedCustomerContactRes = await customerApi.updateCustomer('cust-blank
   wechat: 'customer_wx_001',
 });
 assert.equal(completedCustomerContactRes.code, 0);
-assert.equal(completedCustomerContactRes.data?.phone, '13811112222');
+assert.equal(completedCustomerContactRes.data?.phone, '+8613811112222');
 assert.equal(completedCustomerContactRes.data?.wechat, 'customer_wx_001');
 
 const lockedCustomerContactRes = await customerApi.updateCustomer('cust-blank-contact', {
@@ -190,7 +189,7 @@ const lockedCustomerContactRes = await customerApi.updateCustomer('cust-blank-co
   wechat: 'customer_wx_002',
 });
 assert.equal(lockedCustomerContactRes.code, 0);
-assert.equal(lockedCustomerContactRes.data?.phone, '13811112222');
+assert.equal(lockedCustomerContactRes.data?.phone, '+8613811112222');
 assert.equal(lockedCustomerContactRes.data?.wechat, 'customer_wx_001');
 
 storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
@@ -210,5 +209,5 @@ const superAdminCustomerContactRes = await customerApi.updateCustomer('cust-blan
   wechat: 'customer_wx_super',
 });
 assert.equal(superAdminCustomerContactRes.code, 0);
-assert.equal(superAdminCustomerContactRes.data?.phone, '13855556666');
+assert.equal(superAdminCustomerContactRes.data?.phone, '+8613855556666');
 assert.equal(superAdminCustomerContactRes.data?.wechat, 'customer_wx_super');

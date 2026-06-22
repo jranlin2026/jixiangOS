@@ -11,7 +11,7 @@ export type LeadStatus = '新线索' | '已联系' | '已验证' | '方案中' |
 export type LeadLifecycleStatus = string;
 
 export type LeadIntakeStatus = '入库成功' | '入库失败' | '待分配';
-export type LeadUniqueKeyMode = 'phone' | 'wechat' | 'phone_or_wechat';
+export type LeadUniqueKeyMode = 'phone_or_wechat';
 
 /** 跟进方式 */
 export type FollowUpType = '电话' | '微信' | '邮件' | '上门' | '会议' | '其他';
@@ -97,16 +97,11 @@ export interface LeadFlowConfig {
   id: ID;
   uniqueKeyMode: LeadUniqueKeyMode;
   interceptionEnabled: boolean;
-  exemptionEnabled: boolean;
-  orderMatchCustomerEnabled: boolean;
   autoAssignEnabled: boolean;
   assignmentMode: 'round_robin';
   participantUserIds: ID[];
   dailyLimitEnabled: boolean;
   dailyLimit: number;
-  dailyRestartEnabled: boolean;
-  failedInboundCompensationEnabled: boolean;
-  inactiveMemberSkipEnabled: boolean;
   lastAssignedIndex: number;
   updatedAt: Timestamp;
 }

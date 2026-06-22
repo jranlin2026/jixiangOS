@@ -28,6 +28,7 @@ import ApartmentIcon from '@mui/icons-material/Apartment';
 import BusinessIcon from '@mui/icons-material/Business';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
+import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FolderIcon from '@mui/icons-material/Folder';
@@ -35,10 +36,8 @@ import KeyIcon from '@mui/icons-material/Key';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import SearchIcon from '@mui/icons-material/Search';
 import useDepartmentStore from '../../store/useDepartmentStore';
-import usePositionStore from '../../store/usePositionStore';
 import { departmentApi, roleApi, settingsApi } from '../../api';
 import type { Department } from '../../types/department';
-import type { Position } from '../../types/position';
 import type { Role } from '../../types/role';
 import type { OrganizationProfile, User, UserRole } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
@@ -57,7 +56,7 @@ type UserForm = {
   email: string;
   phone: string;
   role: UserRole;
-  positionId: string;
+  positionName: string;
   departmentId: string;
   isActive: boolean;
   password: string;
@@ -76,7 +75,7 @@ const emptyUserForm: UserForm = {
   email: '',
   phone: '',
   role: DEFAULT_USER_ROLE,
-  positionId: '',
+  positionName: '',
   departmentId: '',
   isActive: true,
   password: DEFAULT_USER_PASSWORD,
@@ -105,7 +104,6 @@ function makeDepartmentCode(name: string) {
 
 const EmployeeDepartmentManagement: React.FC = () => {
   const { items: departments, fetchItems } = useDepartmentStore();
-  const { items: positions, fetchItems: fetchPositions } = usePositionStore();
   const [organizationProfile, setOrganizationProfile] = useState<OrganizationProfile>({ companyName: '福建极享信息科技有限公司' });
   const [companyExpanded, setCompanyExpanded] = useState(true);
   const [users, setUsers] = useState<User[]>([]);
@@ -132,11 +130,10 @@ const EmployeeDepartmentManagement: React.FC = () => {
 
   useEffect(() => {
     fetchItems();
-    fetchPositions();
     loadUsers();
     loadRoles();
     loadOrganizationProfile();
-  }, [fetchItems, fetchPositions]);
+  }, [fetchItems]);
 
   const loadUsers = async () => {
     const res = await settingsApi.fetchUsers();
@@ -157,7 +154,6 @@ const EmployeeDepartmentManagement: React.FC = () => {
   };
 
   const activeDepartments = useMemo(() => departments.filter((department) => department.isActive), [departments]);
-  const activePositions = useMemo(() => positions.filter((position) => position.isActive), [positions]);
   const departmentByParent = useMemo(() => buildDepartmentTree(activeDepartments), [activeDepartments]);
   const selectedDepartment = activeDepartments.find((department) => department.id === selectedNodeId) || null;
   const roleOptions = roles.length ? roles : [{ id: 'fallback-role', name: DEFAULT_USER_ROLE }] as Role[];
@@ -166,16 +162,6 @@ const EmployeeDepartmentManagement: React.FC = () => {
       ? [selectedDepartment.id, ...getDepartmentDescendantIds(activeDepartments, selectedDepartment.id)]
       : activeDepartments.map((department) => department.id)
   ), [activeDepartments, selectedDepartment]);
-
-  const positionOptionsForDepartment = (departmentId?: string) => {
-    const allowedDepartmentIds = new Set(getDepartmentAncestorIds(activeDepartments, departmentId));
-    return activePositions.filter((position) => !position.departmentId || allowedDepartmentIds.has(position.departmentId));
-  };
-
-  const userFormPositionOptions = useMemo(
-    () => positionOptionsForDepartment(userForm.departmentId),
-    [activeDepartments, activePositions, userForm.departmentId],
-  );
 
   const filteredTreeDepartments = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -219,7 +205,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const selectedDepartmentUserCount = filteredUsers.length;
 
   const resolveRoleId = (roleName: string) => roles.find((role) => role.name === roleName)?.id || '';
-  const getPositionName = (user: User) => user.positionName || positions.find((position) => position.id === user.positionId)?.name || '-';
+  const getPositionName = (user: User) => user.positionName || '-';
   const getDepartmentName = (departmentId?: string) => activeDepartments.find((department) => department.id === departmentId)?.name || '-';
   const clearSelection = () => setSelectedUserIds([]);
 
@@ -227,11 +213,9 @@ const EmployeeDepartmentManagement: React.FC = () => {
     setError('');
     setEditingUser(null);
     const departmentId = selectedDepartment?.id || activeDepartments[0]?.id || '';
-    const firstPosition = positionOptionsForDepartment(departmentId)[0];
     setUserForm({
       ...emptyUserForm,
       role: roleOptions[0]?.name || DEFAULT_USER_ROLE,
-      positionId: firstPosition?.id || '',
       departmentId,
     });
     setUserFormOpen(true);
@@ -240,14 +224,13 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const openEditUser = (user: User) => {
     setError('');
     setEditingUser(user);
-    const allowedPositions = positionOptionsForDepartment(user.departmentId);
     setUserForm({
       name: user.name,
       account: user.account || '',
       email: user.email || '',
       phone: user.phone || '',
       role: normalizeUserRoleName(user.role),
-      positionId: allowedPositions.some((position) => position.id === user.positionId) ? user.positionId || '' : '',
+      positionName: user.positionName || '',
       departmentId: user.departmentId || '',
       isActive: user.isActive,
       password: '',
@@ -272,7 +255,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
       phone: userForm.phone.trim(),
       role: userForm.role,
       roleId: resolveRoleId(userForm.role),
-      positionId: userForm.positionId || undefined,
+      positionName: userForm.positionName.trim() || undefined,
       departmentId: userForm.departmentId || undefined,
       isActive: userForm.isActive,
       password: userForm.password,
@@ -382,7 +365,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
     if (!await confirm(`确认删除部门 ${department.name} 吗？`, '删除部门')) return;
     const res = await departmentApi.deleteDepartment(department.id);
     if (res.code !== 0) {
-      await alert(res.message || '部门存在员工、子部门、职位或角色引用，不能删除', '删除失败');
+      await alert(res.message || '部门存在员工或子部门引用，不能删除', '删除失败');
       return;
     }
     setSelectedNodeId(COMPANY_ROOT);
@@ -394,6 +377,25 @@ const EmployeeDepartmentManagement: React.FC = () => {
     await Promise.all(targets.map((user) => settingsApi.updateUser(user.id, { isActive })));
     clearSelection();
     await loadUsers();
+  };
+
+  const handleBatchLeave = async () => {
+    const targets = selectedUsers.filter((user) => user.account !== 'admin');
+    const skippedAdminCount = selectedUsers.length - targets.length;
+    if (!targets.length) {
+      await alert('内置管理员账号不能办理离职', '提示');
+      return;
+    }
+    const skipText = skippedAdminCount ? `，已自动跳过 ${skippedAdminCount} 个内置管理员账号` : '';
+    if (!await confirm(`确认为选中的 ${targets.length} 名员工办理离职吗？离职后账号不能登录，会移入账号回收站，历史业务数据会保留${skipText}。`, '批量办理离职')) return;
+
+    const results = await Promise.all(targets.map((user) => settingsApi.leaveUser(user.id)));
+    const failed = results.filter((res) => res.code !== 0);
+    clearSelection();
+    await loadUsers();
+    if (failed.length > 0) {
+      await alert(`有 ${failed.length} 名员工办理离职失败，请刷新后重试。`, '批量办理离职失败');
+    }
   };
 
   const handleOpenMove = () => {
@@ -410,17 +412,10 @@ const EmployeeDepartmentManagement: React.FC = () => {
     await fetchItems();
   };
 
-  const handlePositionChange = (positionId: string) => {
-    setUserForm({ ...userForm, positionId });
-  };
-
   const handleDepartmentChange = (departmentId: string) => {
-    const allowedPositions = positionOptionsForDepartment(departmentId);
-    const canKeepPosition = allowedPositions.some((position) => position.id === userForm.positionId);
     setUserForm({
       ...userForm,
       departmentId,
-      positionId: canKeepPosition ? userForm.positionId : '',
     });
   };
 
@@ -647,6 +642,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
               <Button variant="outlined" onClick={handleOpenMove} disabled={!selectedUserIds.length}>移动</Button>
               <Button variant="outlined" onClick={() => handleBatchActive(false)} disabled={!selectedUserIds.length}>禁用</Button>
               <Button variant="outlined" onClick={() => handleBatchActive(true)} disabled={!selectedUserIds.length}>解禁</Button>
+              <Button variant="outlined" color="warning" startIcon={<ExitToAppIcon />} onClick={handleBatchLeave} disabled={!selectedUserIds.length}>办理离职</Button>
             </Box>
 
             <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #eef2f7' }}>
@@ -698,8 +694,8 @@ const EmployeeDepartmentManagement: React.FC = () => {
                           </IconButton>
                         </Tooltip>
                         <Tooltip title="办理离职">
-                          <IconButton size="small" color="error" onClick={() => handleLeaveUser(user)}>
-                            <DeleteIcon fontSize="small" />
+                          <IconButton size="small" color="warning" onClick={() => handleLeaveUser(user)}>
+                            <ExitToAppIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       </TableCell>
@@ -757,15 +753,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
               <MenuItem value="">未分配</MenuItem>
               {activeDepartments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
             </TextField>
-            <TextField select label="职位" value={userForm.positionId} onChange={(event) => handlePositionChange(event.target.value)} fullWidth>
-              <MenuItem value="">未设置</MenuItem>
-              {userFormPositionOptions.map((position) => (
-                <MenuItem key={position.id} value={position.id}>
-                  {position.name}
-                  {position.departmentId ? `（${getDepartmentName(position.departmentId)}）` : ''}
-                </MenuItem>
-              ))}
-            </TextField>
+            <TextField label="职位" value={userForm.positionName} onChange={(event) => setUserForm({ ...userForm, positionName: event.target.value })} fullWidth />
             <TextField select label="角色权限" value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value as UserRole })} fullWidth>
               {roleOptions.map((role) => <MenuItem key={role.id} value={role.name}>{role.name}</MenuItem>)}
             </TextField>
@@ -822,7 +810,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
         <DialogCloseTitle onClose={() => setMoveOpen(false)}>移动员工</DialogCloseTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
-            已选择 {selectedUserIds.length} 名员工，选择目标部门后会统一更新所属部门。职位如果不适用于新部门，需要在员工资料里重新选择。
+            已选择 {selectedUserIds.length} 名员工，选择目标部门后会统一更新所属部门。职位是员工资料中的文本字段，不会随部门自动变更。
           </Typography>
           <TextField select label="目标部门" value={moveDepartmentId} onChange={(event) => setMoveDepartmentId(event.target.value)} fullWidth>
             {activeDepartments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}

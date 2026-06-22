@@ -10,7 +10,6 @@ export { dashboardApi } from './dashboardApi';
 export { settingsApi } from './settingsApi';
 export { authApi } from './authApi';
 export { departmentApi } from './departmentApi';
-export { positionApi } from './positionApi';
 export { roleApi } from './roleApi';
 export { productApi } from './productApi';
 export { refundApi } from './refundApi';

@@ -12,6 +12,7 @@ import { hydrateLeadLifecycle, setCustomerLifecycle } from './lifecycleSync';
 import { filterVisibleLeads } from '../shared/utils/dataVisibility';
 import { applyContactEditLock } from '../shared/utils/contactEditLock';
 import { isSuperAdminRoleName } from '../shared/utils/roles';
+import { getPhoneNumberError, normalizePhoneForComparison, normalizePhoneForStorage } from '../shared/utils/phoneNumber';
 
 function ensureInit(): void {
   initializeMockData();
@@ -25,6 +26,8 @@ function validateLeadAttribution(data: Partial<Lead>): string | null {
   if (isPersonalResource(data.sourceType) && !data.leadContributorName && !data.leadContributorId) {
     return '个人资源必须填写线索贡献人';
   }
+  const phoneError = getPhoneNumberError(data.phone);
+  if (phoneError) return phoneError;
   return null;
 }
 
@@ -78,7 +81,7 @@ function findLinkedCustomer(lead: Lead): Customer | undefined {
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
   return customers.find((customer) => (
     (lead.customerId && customer.id === lead.customerId)
-    || (lead.phone && customer.phone && lead.phone === customer.phone)
+    || (lead.phone && customer.phone && normalizePhoneForComparison(lead.phone) === normalizePhoneForComparison(customer.phone))
     || (lead.wechat && customer.wechat && lead.wechat === customer.wechat)
   ));
 }
@@ -89,6 +92,7 @@ function normalizeLead(lead: Lead): Lead {
   const customerLifecycleUpdatedAt = linkedCustomer?.lifecycleStatusUpdatedAt;
   return hydrateLeadLifecycle({
     ...lead,
+    phone: normalizePhoneForStorage(lead.phone),
     ...(customerLifecycleCode ? {
       customerId: lead.customerId || linkedCustomer?.id,
       lifecycleStatusCode: customerLifecycleCode,
@@ -176,6 +180,9 @@ async function updateLead(id: string, data: Partial<Lead>): Promise<ApiResponse<
   const safeData = applyContactEditLock<Lead>(existing, data, {
     canEditLockedContact: isSuperAdminRoleName(getCurrentOperatorUser()?.role),
   });
+  if (Object.prototype.hasOwnProperty.call(safeData, 'phone')) {
+    safeData.phone = normalizePhoneForStorage(safeData.phone);
+  }
   const merged = {
     ...existing,
     ...safeData,

@@ -119,8 +119,12 @@ assert.equal(migratedUsers.data.find((user) => user.id === 'legacy-user')?.emplo
 const settingsDir = join(process.cwd(), 'src', 'pages', 'Settings');
 const employeeSource = readFileSync(join(settingsDir, 'EmployeeDepartmentManagement.tsx'), 'utf8');
 const recycleSource = readFileSync(join(settingsDir, 'AccountRecycleBin.tsx'), 'utf8');
+const settingsSource = readFileSync(join(settingsDir, 'index.tsx'), 'utf8');
 
 assert.match(employeeSource, /办理离职/);
+assert.match(employeeSource, /handleBatchLeave/);
+assert.match(employeeSource, />办理离职</);
 assert.doesNotMatch(employeeSource, /删除员工/);
 assert.match(recycleSource, /永久删除/);
 assert.match(recycleSource, /离职时间/);
+assert.match(settingsSource, /value === index \? children : null/);

@@ -26,8 +26,6 @@ import EditIcon from '@mui/icons-material/Edit';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import useDepartmentStore from '../../store/useDepartmentStore';
-import usePositionStore from '../../store/usePositionStore';
-import useRoleStore from '../../store/useRoleStore';
 import { settingsApi } from '../../api';
 import type { Department } from '../../types/department';
 import type { User } from '../../types/settings';
@@ -52,8 +50,6 @@ const emptyForm: DepartmentForm = {
 
 const DepartmentManagement: React.FC = () => {
   const { items: departments, fetchItems, create, update, delete: deleteDepartment } = useDepartmentStore();
-  const { items: positions, fetchItems: fetchPositions } = usePositionStore();
-  const { items: roles, fetchItems: fetchRoles } = useRoleStore();
   const [users, setUsers] = useState<User[]>([]);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Department | null>(null);
@@ -63,15 +59,13 @@ const DepartmentManagement: React.FC = () => {
 
   const load = async () => {
     await fetchItems();
-    await fetchPositions();
-    await fetchRoles();
     const res = await settingsApi.fetchUsers();
     if (res.code === 0) setUsers(res.data);
   };
 
   useEffect(() => {
     load();
-  }, [fetchItems, fetchPositions, fetchRoles]);
+  }, [fetchItems]);
 
   const userName = (userId?: string) => users.find((user) => user.id === userId)?.name || '-';
   const parentName = (parentId?: string) => departments.find((department) => department.id === parentId)?.name || '-';
@@ -131,10 +125,8 @@ const DepartmentManagement: React.FC = () => {
     setError('');
     const hasChildren = departments.some((item) => item.parentId === department.id);
     const hasUsers = users.some((user) => user.departmentId === department.id);
-    const hasPositions = positions.some((position) => position.departmentId === department.id);
-    const hasRoles = roles.some((role) => role.departmentId === department.id);
-    if (hasChildren || hasUsers || hasPositions || hasRoles) {
-      setError('请先移走该部门下的员工、职位、角色和子部门，再删除部门');
+    if (hasChildren || hasUsers) {
+      setError('请先移走该部门下的员工和子部门，再删除部门');
       return;
     }
     if (!await confirm(`确认删除部门 ${department.name} 吗？`, '删除部门')) return;

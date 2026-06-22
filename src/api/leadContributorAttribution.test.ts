@@ -170,7 +170,7 @@ assert.equal(claimedLead.code, 0);
 assert.ok(claimedLead.data?.customerId);
 
 const storedCustomer = (JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]') as Customer[])
-  .find((item) => item.phone === '13900000002');
+  .find((item) => item.phone === '+8613900000002');
 assert.equal(storedCustomer?.leadInputBy, 'Sales A');
 assert.equal((storedCustomer as any)?.leadContributorId, 'user-lead');
 assert.equal((storedCustomer as any)?.leadContributorName, 'Lead A');

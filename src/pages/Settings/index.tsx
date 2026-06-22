@@ -4,7 +4,6 @@ import { Box, Paper, Tab, Tabs, Typography } from '@mui/material';
 import RolePermission from './RolePermission';
 import ProductConfigPage from './ProductConfig';
 import EmployeeDepartmentManagement from './EmployeeDepartmentManagement';
-import PositionManagement from './PositionManagement';
 import AccountRecycleBin from './AccountRecycleBin';
 import CustomerLevelConfigPage from './CustomerLevelConfig';
 import OrderTypeConfigPage from './OrderTypeConfig';
@@ -37,7 +36,7 @@ type SettingsGroupConfig = {
 
 const TabPanel: React.FC<TabPanelProps> = ({ children, value, index }) => (
   <Box sx={{ display: value === index ? 'block' : 'none', pt: 3 }}>
-    {children}
+    {value === index ? children : null}
   </Box>
 );
 
@@ -51,12 +50,15 @@ const Settings: React.FC = () => {
     {
       key: 'organization',
       label: '组织架构',
-      description: '员工账号、部门、职位和角色权限',
+      description: '员工账号、部门和角色权限',
       tabs: [
-        { label: '员工&部门', permissionKey: PERMISSION_KEYS.SETTINGS_USERS, permissionKeys: [PERMISSION_KEYS.SETTINGS_USERS, PERMISSION_KEYS.SETTINGS_DEPARTMENTS], component: <EmployeeDepartmentManagement /> },
-        { label: '职位管理', permissionKey: PERMISSION_KEYS.SETTINGS_POSITIONS, component: <PositionManagement /> },
+        {
+          label: '员工&部门',
+          permissionKey: PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS,
+          component: <EmployeeDepartmentManagement />,
+        },
         { label: '角色权限', permissionKey: PERMISSION_KEYS.SETTINGS_ROLES, component: <RolePermission /> },
-        { label: '账号回收站', permissionKey: PERMISSION_KEYS.SETTINGS_USERS, component: <AccountRecycleBin /> },
+        { label: '账号回收站', permissionKey: PERMISSION_KEYS.SETTINGS_ACCOUNT_RECYCLE, component: <AccountRecycleBin /> },
       ],
     },
     {
@@ -65,7 +67,7 @@ const Settings: React.FC = () => {
       description: '产品配置和订单类型配置',
       tabs: [
         { label: '产品配置', permissionKey: PERMISSION_KEYS.SETTINGS_PRODUCTS, component: <ProductConfigPage /> },
-        { label: '订单类型配置', permissionKey: PERMISSION_KEYS.SETTINGS_ORDER_TYPES, component: <OrderTypeConfigPage /> },
+        { label: '订单类型', permissionKey: PERMISSION_KEYS.SETTINGS_ORDER_TYPES, component: <OrderTypeConfigPage /> },
       ],
     },
     {
@@ -73,10 +75,10 @@ const Settings: React.FC = () => {
       label: '客户管理',
       description: '客户等级、客户生命周期、线索来源和流转规则',
       tabs: [
-        { label: '客户等级', permissionKey: PERMISSION_KEYS.SETTINGS, component: <CustomerLevelConfigPage /> },
-        { label: '客户生命周期配置', permissionKey: PERMISSION_KEYS.SETTINGS_LIFECYCLE, component: <LifecycleStatusConfigPage /> },
-        { label: '线索来源配置', permissionKey: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, component: <LeadSourceConfigPage /> },
-        { label: '线索流转配置', permissionKey: PERMISSION_KEYS.LEADS_FLOW_CONFIG, component: <LeadFlowConfigTab /> },
+        { label: '客户等级', permissionKey: PERMISSION_KEYS.SETTINGS_CUSTOMER_LEVELS, component: <CustomerLevelConfigPage /> },
+        { label: '客户生命周期', permissionKey: PERMISSION_KEYS.SETTINGS_LIFECYCLE, component: <LifecycleStatusConfigPage /> },
+        { label: '线索来源', permissionKey: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, component: <LeadSourceConfigPage /> },
+        { label: '线索流转', permissionKey: PERMISSION_KEYS.SETTINGS_LEAD_FLOW, component: <LeadFlowConfigTab /> },
       ],
     },
     {
@@ -84,7 +86,7 @@ const Settings: React.FC = () => {
       label: '系统维护',
       description: '测试数据和系统维护工具',
       tabs: [
-        { label: '数据维护', permissionKey: PERMISSION_KEYS.SETTINGS, component: <DataMaintenance /> },
+        { label: '数据维护', permissionKey: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, component: <DataMaintenance /> },
       ],
     },
   ]).map((group) => ({

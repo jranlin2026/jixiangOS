@@ -114,6 +114,8 @@ const App: React.FC = () => {
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.FINANCE} />}>
             <Route path={ROUTES.FINANCE} element={<Suspense fallback={<PageLoader />}><Finance /></Suspense>} />
+          </Route>
+          <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.FINANCE_SETTLEMENT} />}>
             <Route path={ROUTES.COMMISSION} element={<Navigate to={`${ROUTES.FINANCE}?tab=settlement`} replace />} />
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.UPGRADE_ANALYSIS} />}>
@@ -125,10 +127,10 @@ const App: React.FC = () => {
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.SETTINGS} />}>
             <Route path={ROUTES.SETTINGS} element={<Suspense fallback={<PageLoader />}><Settings /></Suspense>} />
           </Route>
-          <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.REFUND_CENTER} />}>
+          <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.FINANCE_REFUND} />}>
             <Route path={ROUTES.REFUND_CENTER} element={<Navigate to={`${ROUTES.FINANCE}?tab=refund`} replace />} />
           </Route>
-          <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.UPGRADE_POOL} />}>
+          <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.UPGRADE_CENTER, PERMISSION_KEYS.UPGRADE_POOL, PERMISSION_KEYS.UPGRADE_ANALYSIS]} />}>
             <Route path={ROUTES.UPGRADE_POOL} element={<Navigate to={`${ROUTES.UPGRADE_CENTER}?tab=pool`} replace />} />
             <Route path={ROUTES.UPGRADE_CENTER} element={<Suspense fallback={<PageLoader />}><UpgradeCenter /></Suspense>} />
           </Route>

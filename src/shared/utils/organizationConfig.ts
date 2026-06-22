@@ -3,13 +3,13 @@ import type { Position } from '../../types/position';
 import type { Role } from '../../types/role';
 import type { OrganizationProfile, User } from '../../types/settings';
 import { STORAGE_KEYS } from './constants';
+import { CAPABILITY_KEYS, PERMISSION_KEYS, sanitizeRolePermissions } from './permissions';
 import { normalizeUserRoleName } from './roles';
 import { getStorageData, setStorageData } from '../../api/mock/storage';
 
 const now = '2026-06-01T00:00:00.000Z';
-const ORGANIZATION_SCHEMA_VERSION = 2;
-const LEADS_RECEIVE_PERMISSION = 'leads.receive';
-const LEADS_ASSIGN_PERMISSION = 'leads.assign';
+const ORGANIZATION_SCHEMA_VERSION = 3;
+
 export const DEFAULT_ORGANIZATION_PROFILE: OrganizationProfile = {
   companyName: '福建极享信息科技有限公司',
 };
@@ -31,7 +31,7 @@ export const DEFAULT_POSITIONS: Position[] = [
   { id: 'pos-sales-consultant', name: '销售顾问', code: 'sales_consultant', departmentId: 'dept-sales', description: '客户跟进和成交转化', sortOrder: 4, isActive: true, createdAt: now, updatedAt: now },
   { id: 'pos-customer-success', name: '客户成功', code: 'customer_success', departmentId: 'dept-success', description: '客户运营、续费和复购', sortOrder: 5, isActive: true, createdAt: now, updatedAt: now },
   { id: 'pos-delivery-engineer', name: '交付工程师', code: 'delivery_engineer', departmentId: 'dept-delivery', description: '项目部署和服务交付', sortOrder: 6, isActive: true, createdAt: now, updatedAt: now },
-  { id: 'pos-finance-specialist', name: '财务专员', code: 'finance_specialist', departmentId: 'dept-finance', description: '收款、退款、结算和提成', sortOrder: 7, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'pos-finance-specialist', name: '财务专员', code: 'finance_specialist', departmentId: 'dept-finance', description: '收款、退款、结算和分账', sortOrder: 7, isActive: true, createdAt: now, updatedAt: now },
   { id: 'pos-ops-admin', name: '运营管理员', code: 'ops_admin', departmentId: 'dept-ops', description: '系统运营和业务配置', sortOrder: 8, isActive: true, createdAt: now, updatedAt: now },
 ];
 
@@ -53,13 +53,16 @@ export const DEFAULT_ROLES: Role[] = [
     code: 'sales_manager',
     departmentId: 'dept-sales',
     permissions: [
-      { module: '线索', actions: ['read', 'write', 'delete'] },
-      { module: LEADS_RECEIVE_PERMISSION, actions: ['read'] },
-      { module: LEADS_ASSIGN_PERMISSION, actions: ['read'] },
-      { module: '客户', actions: ['read', 'write'] },
-      { module: '订单', actions: ['read', 'write', 'delete'] },
-      { module: '提成', actions: ['read'] },
-      { module: '驾驶舱', actions: ['read'] },
+      { module: PERMISSION_KEYS.LEADS, actions: ['read', 'write', 'delete'] },
+      { module: CAPABILITY_KEYS.LEADS_RECEIVE, actions: ['read'] },
+      { module: CAPABILITY_KEYS.LEADS_ASSIGN, actions: ['read'] },
+      { module: PERMISSION_KEYS.CUSTOMERS, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read', 'write', 'delete'] },
+      { module: PERMISSION_KEYS.ORDER_CREATE, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.ORDER_EDIT, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.ORDER_DELETE, actions: ['read', 'delete'] },
+      { module: PERMISSION_KEYS.ORDER_HISTORY, actions: ['read'] },
+      { module: PERMISSION_KEYS.DASHBOARD, actions: ['read'] },
     ],
     memberCount: 0,
     isActive: true,
@@ -72,10 +75,12 @@ export const DEFAULT_ROLES: Role[] = [
     code: 'sales_consultant',
     departmentId: 'dept-sales',
     permissions: [
-      { module: '线索', actions: ['read', 'write'] },
-      { module: LEADS_RECEIVE_PERMISSION, actions: ['read'] },
-      { module: '客户', actions: ['read', 'write'] },
-      { module: '订单', actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.LEADS, actions: ['read', 'write'] },
+      { module: CAPABILITY_KEYS.LEADS_RECEIVE, actions: ['read'] },
+      { module: PERMISSION_KEYS.CUSTOMERS, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.ORDER_CREATE, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.ORDER_EDIT, actions: ['read', 'write'] },
     ],
     memberCount: 0,
     isActive: true,
@@ -88,8 +93,8 @@ export const DEFAULT_ROLES: Role[] = [
     code: 'market_specialist',
     departmentId: 'dept-market',
     permissions: [
-      { module: '线索', actions: ['read', 'write'] },
-      { module: '驾驶舱', actions: ['read'] },
+      { module: PERMISSION_KEYS.LEADS, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.DASHBOARD, actions: ['read'] },
     ],
     memberCount: 0,
     isActive: true,
@@ -102,9 +107,9 @@ export const DEFAULT_ROLES: Role[] = [
     code: 'customer_success',
     departmentId: 'dept-success',
     permissions: [
-      { module: '客户', actions: ['read', 'write'] },
-      { module: '订单', actions: ['read'] },
-      { module: '升单', actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.CUSTOMERS, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read'] },
+      { module: PERMISSION_KEYS.UPGRADE_CENTER, actions: ['read', 'write'] },
     ],
     memberCount: 0,
     isActive: true,
@@ -117,8 +122,8 @@ export const DEFAULT_ROLES: Role[] = [
     code: 'delivery_engineer',
     departmentId: 'dept-delivery',
     permissions: [
-      { module: '交付', actions: ['read', 'write'] },
-      { module: '订单', actions: ['read'] },
+      { module: PERMISSION_KEYS.DELIVERY, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read'] },
     ],
     memberCount: 0,
     isActive: true,
@@ -131,10 +136,13 @@ export const DEFAULT_ROLES: Role[] = [
     code: 'finance_specialist',
     departmentId: 'dept-finance',
     permissions: [
-      { module: '财务', actions: ['read', 'write'] },
-      { module: '提成', actions: ['read', 'write'] },
-      { module: '订单', actions: ['read'] },
-      { module: '退款中心', actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.FINANCE_OVERVIEW, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.FINANCE_SETTLEMENT, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.FINANCE_PAYOUT, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.FINANCE_REFUND, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.FINANCE_FLOW, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.FINANCE_RULES, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.ORDERS, actions: ['read'] },
     ],
     memberCount: 0,
     isActive: true,
@@ -147,9 +155,14 @@ export const DEFAULT_ROLES: Role[] = [
     code: 'ops_admin',
     departmentId: 'dept-ops',
     permissions: [
-      { module: '驾驶舱', actions: ['read'] },
-      { module: 'AI助手', actions: ['read', 'write'] },
-      { module: '系统设置/业务配置', actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.DASHBOARD, actions: ['read'] },
+      { module: PERMISSION_KEYS.AI_ASSISTANT, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.SETTINGS_PRODUCTS, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.SETTINGS_ORDER_TYPES, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.SETTINGS_CUSTOMER_LEVELS, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.SETTINGS_LIFECYCLE, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.SETTINGS_LEAD_FLOW, actions: ['read', 'write'] },
     ],
     memberCount: 0,
     isActive: true,
@@ -157,21 +170,6 @@ export const DEFAULT_ROLES: Role[] = [
     updatedAt: now,
   },
 ];
-
-const POSITION_CODE_BY_ROLE_NAME: Record<string, string> = {
-  超级管理员: 'general_manager',
-  'Super Admin': 'general_manager',
-  销售经理: 'sales_manager',
-  'Sales Manager': 'sales_manager',
-  销售顾问: 'sales_consultant',
-  'Sales Consultant': 'sales_consultant',
-  市场专员: 'market_specialist',
-  客户成功: 'customer_success',
-  交付工程师: 'delivery_engineer',
-  财务专员: 'finance_specialist',
-  运营专员: 'ops_admin',
-  运营管理员: 'ops_admin',
-};
 
 const ROLE_CODE_BY_NAME: Record<string, string> = {
   超级管理员: 'super_admin',
@@ -206,7 +204,7 @@ function mergePermissions(existing: Role['permissions'] = [], required: Role['pe
     }
     found.actions = Array.from(new Set([...(found.actions || []), ...permission.actions]));
   });
-  return merged;
+  return sanitizeRolePermissions(merged);
 }
 
 function mergeDefaultItems<T extends { code: string; id: string; name: string }>(
@@ -236,14 +234,8 @@ function mergeDefaultItems<T extends { code: string; id: string; name: string }>
   return { items: next, idMap };
 }
 
-function mergeByCode<T extends { code: string; id: string }>(existing: T[] | null | undefined, defaults: T[]): T[] {
-  if (!existing?.length) return defaults;
-  const next = [...existing];
-  const existingKeys = new Set(existing.flatMap((item) => [item.id, normalizeCode(item.code)]));
-  defaults.forEach((item) => {
-    if (!existingKeys.has(item.id) && !existingKeys.has(normalizeCode(item.code))) next.push(item);
-  });
-  return next;
+function keepExistingOrDefaults<T>(existing: T[] | null | undefined, defaults: T[]): T[] {
+  return existing ?? defaults;
 }
 
 function sortPositions(positions: Position[]): Position[] {
@@ -316,7 +308,7 @@ export function ensureOrganizationConfigData() {
       createdAt: current.createdAt || seed.createdAt,
       updatedAt: new Date().toISOString(),
     }))
-    : { items: mergeByCode(existingDepartments, DEFAULT_DEPARTMENTS), idMap: {} };
+    : { items: keepExistingOrDefaults(existingDepartments, DEFAULT_DEPARTMENTS), idMap: {} };
 
   const positionResult = storedVersion < ORGANIZATION_SCHEMA_VERSION
     ? mergeDefaultItems(existingPositions, DEFAULT_POSITIONS, (current, seed) => ({
@@ -330,7 +322,7 @@ export function ensureOrganizationConfigData() {
       createdAt: current.createdAt || seed.createdAt,
       updatedAt: new Date().toISOString(),
     }))
-    : { items: sortPositions(mergeByCode(existingPositions, DEFAULT_POSITIONS)), idMap: {} };
+    : { items: sortPositions(keepExistingOrDefaults(existingPositions, DEFAULT_POSITIONS)), idMap: {} };
 
   const rolesResult = storedVersion < ORGANIZATION_SCHEMA_VERSION
     ? mergeDefaultItems(existingRoles, DEFAULT_ROLES, (current, seed) => ({
@@ -344,7 +336,7 @@ export function ensureOrganizationConfigData() {
       createdAt: current.createdAt || seed.createdAt,
       updatedAt: new Date().toISOString(),
     }))
-    : { items: mergeByCode(existingRoles, DEFAULT_ROLES), idMap: {} };
+    : { items: keepExistingOrDefaults(existingRoles, DEFAULT_ROLES), idMap: {} };
 
   const departments = sortDepartments(normalizeDepartmentSortOrders(departmentResult.items));
   const positions = sortPositions(positionResult.items.map((position) => ({
@@ -354,6 +346,7 @@ export function ensureOrganizationConfigData() {
   const roles = rolesResult.items.map((role) => ({
     ...role,
     departmentId: role.departmentId ? departmentResult.idMap[role.departmentId] || role.departmentId : role.departmentId,
+    permissions: sanitizeRolePermissions(role.permissions),
   }));
 
   setStorageData(STORAGE_KEYS.DEPARTMENTS, departments);
@@ -380,33 +373,24 @@ export function resolveRoleForUser(user: Pick<User, 'role' | 'roleId'>, roles = 
   return roles.find((role) => role.id === user.roleId || role.name === normalizedRole || normalizeCode(role.code) === roleCode);
 }
 
-export function resolvePositionForUser(
-  user: Pick<User, 'role' | 'positionId' | 'positionName'>,
-  positions = ensureOrganizationConfigData().positions,
-): Position | undefined {
-  const byExisting = positions.find((position) => position.id === user.positionId || position.name === user.positionName);
-  if (byExisting) return byExisting;
-  const positionCode = POSITION_CODE_BY_ROLE_NAME[normalizeUserRoleName(user.role)] || 'sales_consultant';
-  return positions.find((position) => position.code === positionCode) || positions[0];
-}
-
 export function migrateUsersWithOrganization(users: User[]): User[] {
-  const { departments, roles, positions, idMaps } = ensureOrganizationConfigData();
+  const { departments, roles, idMaps } = ensureOrganizationConfigData();
   return users.map((user) => {
     const normalizedRole = normalizeUserRoleName(user.role);
     const roleId = user.roleId ? idMaps.roles[user.roleId] || user.roleId : user.roleId;
-    const positionId = user.positionId ? idMaps.positions[user.positionId] || user.positionId : user.positionId;
     const departmentId = user.departmentId ? idMaps.departments[user.departmentId] || user.departmentId : user.departmentId;
     const role = resolveRoleForUser({ role: normalizedRole, roleId }, roles);
-    const position = resolvePositionForUser({ ...user, role: role?.name || normalizedRole, positionId }, positions);
     const hasValidDepartment = Boolean(departmentId && departments.some((department) => department.id === departmentId));
+    const positionName = user.positionId
+      ? undefined
+      : (typeof user.positionName === 'string' ? user.positionName.trim() || undefined : user.positionName);
     return {
       ...user,
       role: role?.name || normalizedRole,
       roleId: role?.id || user.roleId,
-      positionId: position?.id || user.positionId,
-      positionName: position?.name || user.positionName,
-      departmentId: hasValidDepartment ? departmentId : position?.departmentId,
+      positionId: undefined,
+      positionName,
+      departmentId: hasValidDepartment ? departmentId : undefined,
       employmentStatus: user.employmentStatus || 'active',
     };
   });

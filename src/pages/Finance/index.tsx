@@ -28,6 +28,8 @@ import ChannelROIChart from './ChannelROI';
 import Commission from '../Commission';
 import RefundCenter from '../RefundCenter';
 import type { FinanceExpense, FinanceIncome } from '../../types/finance';
+import useAuthStore from '../../store/useAuthStore';
+import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 
 type FinanceTab = 'overview' | 'settlement' | 'payout' | 'refund' | 'flow' | 'rules';
 
@@ -40,13 +42,13 @@ interface FinanceOverview {
   frozenCommissionAmount: number;
 }
 
-const FINANCE_TABS: Array<{ value: FinanceTab; label: string }> = [
-  { value: 'overview', label: '财务总览' },
-  { value: 'settlement', label: '订单分账' },
-  { value: 'payout', label: '月度发放' },
-  { value: 'refund', label: '退款付款' },
-  { value: 'flow', label: '收支流水' },
-  { value: 'rules', label: '规则配置' },
+const FINANCE_TABS: Array<{ value: FinanceTab; label: string; permissionKey: string }> = [
+  { value: 'overview', label: '财务总览', permissionKey: PERMISSION_KEYS.FINANCE_OVERVIEW },
+  { value: 'settlement', label: '订单分账', permissionKey: PERMISSION_KEYS.FINANCE_SETTLEMENT },
+  { value: 'payout', label: '月度发放', permissionKey: PERMISSION_KEYS.FINANCE_PAYOUT },
+  { value: 'refund', label: '退款付款', permissionKey: PERMISSION_KEYS.FINANCE_REFUND },
+  { value: 'flow', label: '收支流水', permissionKey: PERMISSION_KEYS.FINANCE_FLOW },
+  { value: 'rules', label: '规则配置', permissionKey: PERMISSION_KEYS.FINANCE_RULES },
 ];
 
 const VALID_TABS = new Set(FINANCE_TABS.map((item) => item.value));
@@ -57,7 +59,8 @@ function getTabFromSearch(value: string | null): FinanceTab {
 
 const Finance: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = getTabFromSearch(searchParams.get('tab'));
+  const requestedTab = getTabFromSearch(searchParams.get('tab'));
+  const currentUser = useAuthStore((state) => state.currentUser);
   const [stats, setStats] = useState<Awaited<ReturnType<typeof financeApi.fetchFinanceStats>>['data'] | null>(null);
   const [overview, setOverview] = useState<FinanceOverview>({
     pendingOrderApplications: 0,
@@ -74,6 +77,14 @@ const Finance: React.FC = () => {
   const [expensePage, setExpensePage] = useState(0);
   const [expenseRowsPerPage, setExpenseRowsPerPage] = useState(10);
   const [settlementViewSettingsTrigger, setSettlementViewSettingsTrigger] = useState(0);
+
+  const visibleFinanceTabs = useMemo(
+    () => FINANCE_TABS.filter((tab) => hasPermission(currentUser, tab.permissionKey)),
+    [currentUser],
+  );
+  const activeTab = visibleFinanceTabs.some((tab) => tab.value === requestedTab)
+    ? requestedTab
+    : (visibleFinanceTabs[0]?.value || 'overview');
 
   useEffect(() => {
     let mounted = true;
@@ -148,6 +159,19 @@ const Finance: React.FC = () => {
   const handleTabChange = (_: React.SyntheticEvent, value: FinanceTab) => {
     setSearchParams(value === 'overview' ? {} : { tab: value });
   };
+
+  if (!visibleFinanceTabs.length) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Typography variant="h5" sx={{ fontWeight: 700, color: '#111827', mb: 2 }}>
+          财务中心
+        </Typography>
+        <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', p: 4, textAlign: 'center', color: '#6b7280' }}>
+          当前账号没有财务中心权限
+        </Paper>
+      </Box>
+    );
+  }
 
   const renderOverview = () => (
     <>
@@ -312,7 +336,7 @@ const Finance: React.FC = () => {
       </Box>
 
       <Tabs value={activeTab} onChange={handleTabChange} sx={{ borderBottom: '1px solid #e5e7eb', mb: activeTab === 'settlement' ? 2.5 : 3 }}>
-        {FINANCE_TABS.map((tab) => (
+        {visibleFinanceTabs.map((tab) => (
           <Tab key={tab.value} value={tab.value} label={tab.label} />
         ))}
       </Tabs>

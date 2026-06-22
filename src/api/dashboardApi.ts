@@ -216,8 +216,8 @@ async function fetchHomeWorkbench(): Promise<ApiResponse<HomeWorkbenchData>> {
   pushIfAllowed(quickActions, PERMISSION_KEYS.CUSTOMERS, { id: 'customer', label: '新增客户', path: ROUTES.CUSTOMERS, icon: 'customer' });
   pushIfAllowed(quickActions, PERMISSION_KEYS.ORDERS, { id: 'order', label: '提交订单申请', path: ROUTES.ORDERS, icon: 'order' });
   pushIfAllowed(quickActions, PERMISSION_KEYS.ORDERS, { id: 'review', label: '订单审核台', path: `${ROUTES.ORDERS}?tab=review`, icon: 'review' });
-  pushIfAllowed(quickActions, PERMISSION_KEYS.COMMISSION, { id: 'commission', label: '分账处理', path: `${ROUTES.FINANCE}?tab=settlement`, icon: 'commission' });
-  pushIfAllowed(quickActions, PERMISSION_KEYS.REFUND_CENTER, { id: 'refund', label: '退款处理', path: ROUTES.REFUND_CENTER, icon: 'refund' });
+  pushIfAllowed(quickActions, PERMISSION_KEYS.FINANCE_SETTLEMENT, { id: 'commission', label: '分账处理', path: `${ROUTES.FINANCE}?tab=settlement`, icon: 'commission' });
+  pushIfAllowed(quickActions, PERMISSION_KEYS.FINANCE_REFUND, { id: 'refund', label: '退款处理', path: ROUTES.REFUND_CENTER, icon: 'refund' });
   pushIfAllowed(quickActions, PERMISSION_KEYS.DELIVERY, { id: 'delivery', label: '交付推进', path: ROUTES.DELIVERY, icon: 'delivery' });
   pushIfAllowed(quickActions, PERMISSION_KEYS.AI_ASSISTANT, { id: 'ai', label: 'AI助手', path: ROUTES.AI_ASSISTANT, icon: 'ai' });
 

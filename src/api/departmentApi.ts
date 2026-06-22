@@ -7,7 +7,6 @@ import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 import { ensureOrganizationConfigData, getDepartmentDescendantIds, isDepartmentDescendantOf, sortDepartments } from '../shared/utils/organizationConfig';
 import type { User } from '../types/settings';
-import type { Position } from '../types/position';
 import type { Role } from '../types/role';
 
 function ensureInit(): void {
@@ -77,7 +76,7 @@ async function updateDepartment(id: string, data: Partial<Department>): Promise<
 async function deleteDepartment(id: string): Promise<ApiResponse<boolean>> {
   ensureInit();
   await delay(150);
-  const { departments, positions, roles } = ensureOrganizationConfigData();
+  const { departments, roles } = ensureOrganizationConfigData();
   const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
   const scopedDepartmentIds = [id, ...getDepartmentDescendantIds(departments, id)];
   const hasUsers = users.some((user) => (
@@ -85,12 +84,14 @@ async function deleteDepartment(id: string): Promise<ApiResponse<boolean>> {
     && user.departmentId
     && scopedDepartmentIds.includes(user.departmentId)
   ));
-  const hasPositions = positions.some((position: Position) => position.departmentId === id);
-  const hasRoles = roles.some((role: Role) => role.departmentId === id);
   const hasChildren = departments.some((department) => department.parentId === id);
-  if (hasUsers || hasPositions || hasRoles || hasChildren) {
-    return createErrorResponse('该部门已有员工、职位、角色或子部门引用，不能删除，请改为停用');
+  if (hasUsers || hasChildren) {
+    return createErrorResponse('该部门已有员工或子部门引用，不能删除，请改为停用');
   }
+  const nextRoles = roles.map((role: Role) => (
+    role.departmentId === id ? { ...role, departmentId: undefined, updatedAt: new Date().toISOString() } : role
+  ));
+  setStorageData(STORAGE_KEYS.ROLES, nextRoles);
   setStorageData(STORAGE_KEYS.DEPARTMENTS, departments.filter((d) => d.id !== id));
   return createSuccessResponse(true);
 }

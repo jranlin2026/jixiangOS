@@ -25,6 +25,8 @@ Object.defineProperty(globalThis, 'localStorage', {
 
 storage.clear();
 
+assert.equal(DEFAULT_USER_PASSWORD, '1234567');
+
 const badLogin = await authApi.login({ account: 'admin', password: 'bad-password', remember: true });
 assert.notEqual(badLogin.code, 0);
 

@@ -23,6 +23,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import useRoleStore from '../../store/useRoleStore';
 import type { Permission, Role } from '../../types/role';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import { CAPABILITY_KEYS, PERMISSION_KEYS } from '../../shared/utils/permissions';
 
 type RoleForm = {
   name: string;
@@ -40,119 +41,116 @@ type PermissionNode = {
 
 const PERMISSION_TREE: PermissionNode[] = [
   { label: '全部' },
-  { label: '首页' },
-  { label: '驾驶舱' },
+  { label: '首页', key: PERMISSION_KEYS.HOME },
+  { label: '驾驶舱', key: PERMISSION_KEYS.DASHBOARD },
   {
     label: '线索',
     children: [
-      { label: '线索池' },
-      { label: '线索分配' },
-      { label: '接收/领取线索', key: 'leads.receive' },
-      { label: '分配线索', key: 'leads.assign' },
-      { label: '线索跟进' },
-      { label: '线索转客户' },
+      { label: '新建线索', key: PERMISSION_KEYS.LEADS_CREATE },
+      { label: '分配线索', key: PERMISSION_KEYS.LEADS_FLOW_CONFIG },
+      { label: '接收/领取线索', key: CAPABILITY_KEYS.LEADS_RECEIVE },
+      { label: '分配线索能力', key: CAPABILITY_KEYS.LEADS_ASSIGN },
+      { label: '线索跟进', key: PERMISSION_KEYS.LEADS_FOLLOW },
+      { label: '线索转客户', key: PERMISSION_KEYS.LEADS_CONVERT },
     ],
   },
   {
     label: '客户',
     children: [
-      { label: '客户管理' },
-      { label: '客户详情' },
-      { label: '客户画像' },
-      { label: 'AI名片' },
-      { label: '新建客户订单' },
-      { label: '查看客户订单' },
+      { label: '新建客户', key: PERMISSION_KEYS.CUSTOMER_CREATE },
+      { label: '客户详情', key: PERMISSION_KEYS.CUSTOMER_DETAIL },
+      { label: '客户画像', key: PERMISSION_KEYS.CUSTOMER_PROFILE },
+      { label: 'AI名片', key: PERMISSION_KEYS.CUSTOMER_AI_CARD },
+      { label: '新建客户订单', key: PERMISSION_KEYS.CUSTOMER_CREATE_ORDER },
+      { label: '查看客户订单', key: PERMISSION_KEYS.CUSTOMER_VIEW_ORDERS },
     ],
   },
   {
     label: '订单',
     children: [
-      { label: '订单管理' },
-      { label: '订单审核台' },
-      { label: '新增订单' },
-      { label: '编辑订单' },
-      { label: '删除订单' },
-      { label: '订单修改记录' },
-      { label: '付款截图识别' },
+      { label: '订单列表', key: PERMISSION_KEYS.ORDER_MANAGE },
+      { label: '订单审核台', key: PERMISSION_KEYS.ORDER_REVIEW },
+      { label: '新增订单', key: PERMISSION_KEYS.ORDER_CREATE },
+      { label: '编辑订单', key: PERMISSION_KEYS.ORDER_EDIT },
+      { label: '删除订单', key: PERMISSION_KEYS.ORDER_DELETE },
+      { label: '订单修改记录', key: PERMISSION_KEYS.ORDER_HISTORY },
+      { label: '付款截图识别', key: PERMISSION_KEYS.ORDER_PAYMENT_SCREENSHOT },
     ],
   },
   {
     label: '交付',
     children: [
-      { label: '交付中心' },
-      { label: '移动交付卡片' },
-      { label: '交付阶段配置' },
+      { label: '交付中心', key: PERMISSION_KEYS.DELIVERY_CENTER },
+      { label: '移动交付卡片', key: PERMISSION_KEYS.DELIVERY_MOVE_CARD },
+      { label: '交付阶段配置', key: PERMISSION_KEYS.DELIVERY_STAGE_CONFIG },
     ],
   },
   {
-    label: '提成',
+    label: '财务中心',
     children: [
-      { label: '提成中心' },
-      { label: '提成规则配置' },
-      { label: '提成计算' },
-      { label: '提成审核' },
+      { label: '财务总览', key: PERMISSION_KEYS.FINANCE_OVERVIEW },
+      { label: '订单分账', key: PERMISSION_KEYS.FINANCE_SETTLEMENT },
+      { label: '月度发放', key: PERMISSION_KEYS.FINANCE_PAYOUT },
+      { label: '退款付款', key: PERMISSION_KEYS.FINANCE_REFUND },
+      { label: '收支流水', key: PERMISSION_KEYS.FINANCE_FLOW },
+      { label: '规则配置', key: PERMISSION_KEYS.FINANCE_RULES },
     ],
   },
   {
-    label: '财务',
+    label: '升单中心',
     children: [
-      { label: '财务看板' },
-      { label: '收款记录' },
-      { label: '支出记录' },
-    ],
-  },
-  {
-    label: '退款中心',
-    children: [
-      { label: '退款列表' },
-      { label: '退款详情' },
-      { label: '分配挽回人' },
-      { label: '挽回沟通' },
-      { label: '退款审批' },
-    ],
-  },
-  {
-    label: '升单',
-    children: [
-      { label: '升单池' },
-      { label: '升单分析' },
+      { label: '机会池', key: PERMISSION_KEYS.UPGRADE_POOL },
+      { label: '客户成功', key: PERMISSION_KEYS.UPGRADE_CUSTOMER_SUCCESS },
+      { label: '升单分析', key: PERMISSION_KEYS.UPGRADE_ANALYSIS },
+      { label: '行动任务', key: PERMISSION_KEYS.UPGRADE_TASKS },
     ],
   },
   {
     label: 'AI助手',
     children: [
-      { label: 'AI对话' },
-      { label: '运营建议' },
-      { label: '数据分析' },
+      { label: 'AI对话', key: PERMISSION_KEYS.AI_CHAT },
+      { label: '运营建议', key: PERMISSION_KEYS.AI_SUGGESTIONS },
+      { label: '数据分析', key: PERMISSION_KEYS.AI_ANALYTICS },
     ],
   },
   {
     label: '系统设置',
     children: [
       {
-        label: '组织权限',
+        label: '组织架构',
         children: [
-          { label: '员工账号' },
-          { label: '部门管理' },
-          { label: '职位管理' },
-          { label: '角色权限' },
-          { label: '账号回收站' },
+          { label: '员工&部门', key: PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS },
+          { label: '角色权限', key: PERMISSION_KEYS.SETTINGS_ROLES },
+          { label: '账号回收站', key: PERMISSION_KEYS.SETTINGS_ACCOUNT_RECYCLE },
         ],
       },
       {
-        label: '业务配置',
+        label: '产品设置',
         children: [
-          { label: '产品配置' },
-          { label: '订单类型配置' },
-          { label: '生命周期状态' },
-          { label: '线索来源' },
+          { label: '产品配置', key: PERMISSION_KEYS.SETTINGS_PRODUCTS },
+          { label: '订单类型', key: PERMISSION_KEYS.SETTINGS_ORDER_TYPES },
+        ],
+      },
+      {
+        label: '客户管理',
+        children: [
+          { label: '客户等级', key: PERMISSION_KEYS.SETTINGS_CUSTOMER_LEVELS },
+          { label: '客户生命周期', key: PERMISSION_KEYS.SETTINGS_LIFECYCLE },
+          { label: '线索来源', key: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES },
+          { label: '线索流转', key: PERMISSION_KEYS.SETTINGS_LEAD_FLOW },
+        ],
+      },
+      {
+        label: '系统维护',
+        children: [
+          { label: '数据维护', key: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE },
         ],
       },
     ],
   },
 ];
 
-const defaultPermission: Permission = { module: '首页', actions: ['read'] };
+const defaultPermission: Permission = { module: PERMISSION_KEYS.HOME, actions: ['read'] };
 const emptyForm: RoleForm = {
   name: '',
   description: '',
@@ -197,13 +195,13 @@ const getPermissionAliasMap = () => {
     .filter((category) => category.label !== '全部')
     .forEach((category) => walk(category, []));
 
-  const employeeKey = '系统设置/组织权限/员工账号';
-  const departmentKey = '系统设置/组织权限/部门管理';
   [
     '用户管理',
     '系统设置/组织权限/用户管理',
     '系统设置/组织权限/员工&部门',
-  ].forEach((legacyKey) => aliases.set(legacyKey, [employeeKey, departmentKey]));
+    '系统设置/组织架构/员工账号',
+    '系统设置/组织架构/部门管理',
+  ].forEach((legacyKey) => aliases.set(legacyKey, [PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS]));
 
   return aliases;
 };
@@ -416,9 +414,9 @@ const RolePermission: React.FC = () => {
                 <Table size="small" stickyHeader>
                   <TableHead>
                     <TableRow>
-                      <TableCell sx={{ width: 150, bgcolor: '#f8fafc', fontWeight: 600 }}>分类</TableCell>
-                      <TableCell sx={{ width: 210, bgcolor: '#f8fafc', fontWeight: 600 }}>一级分类</TableCell>
-                      <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 600 }}>二级分类（三级分类）</TableCell>
+                      <TableCell sx={{ width: 150, bgcolor: '#f8fafc', fontWeight: 600 }}>模块</TableCell>
+                      <TableCell sx={{ width: 210, bgcolor: '#f8fafc', fontWeight: 600 }}>分组</TableCell>
+                      <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 600 }}>功能权限</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>

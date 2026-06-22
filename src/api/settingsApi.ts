@@ -9,7 +9,7 @@ import type { Order } from '../types/order';
 import type { CommissionRule } from '../types/commission';
 import { authApi } from './authApi';
 import { DEFAULT_USER_PASSWORD, ensureAdminUser, ensureUniqueAccount, normalizeAccount } from '../shared/utils/auth';
-import { DEFAULT_ORGANIZATION_PROFILE, ensureOrganizationConfigData, getOrganizationProfile, migrateUsersWithOrganization, resolvePositionForUser, resolveRoleForUser } from '../shared/utils/organizationConfig';
+import { DEFAULT_ORGANIZATION_PROFILE, ensureOrganizationConfigData, getOrganizationProfile, migrateUsersWithOrganization, resolveRoleForUser } from '../shared/utils/organizationConfig';
 import { DEFAULT_USER_ROLE } from '../shared/utils/roles';
 import { getCurrentOperatorName } from '../shared/utils/currentOperator';
 
@@ -46,20 +46,15 @@ async function updateOrganizationProfile(data: Partial<OrganizationProfile>): Pr
 }
 
 function withResolvedUserOrganization<T extends Partial<User>>(data: T): T {
-  const { roles, positions } = ensureOrganizationConfigData();
+  const { roles } = ensureOrganizationConfigData();
   const role = resolveRoleForUser({ role: data.role || DEFAULT_USER_ROLE, roleId: data.roleId }, roles);
-  const position = resolvePositionForUser({
-    role: data.role || role?.name || DEFAULT_USER_ROLE,
-    positionId: data.positionId,
-    positionName: data.positionName,
-  }, positions);
+  const positionName = typeof data.positionName === 'string' ? data.positionName.trim() || undefined : data.positionName;
   return {
     ...data,
     role: role?.name || data.role,
     roleId: role?.id || data.roleId,
-    positionId: position?.id || data.positionId,
-    positionName: position?.name || data.positionName,
-    departmentId: data.departmentId || position?.departmentId,
+    positionId: undefined,
+    positionName,
   };
 }
 

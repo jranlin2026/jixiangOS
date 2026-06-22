@@ -6,10 +6,11 @@ import { hasPermission } from '../utils/permissions';
 
 interface ProtectedRouteProps {
   permissionKey?: string;
+  permissionKeys?: string[];
   action?: string;
 }
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ permissionKey, action = 'read' }) => {
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ permissionKey, permissionKeys, action = 'read' }) => {
   const location = useLocation();
   const { currentUser, loading, initialized } = useAuthStore();
 
@@ -25,7 +26,8 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ permissionKey, action =
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
-  if (permissionKey && !hasPermission(currentUser, permissionKey, action)) {
+  const requiredPermissionKeys = permissionKeys || (permissionKey ? [permissionKey] : []);
+  if (requiredPermissionKeys.length && !requiredPermissionKeys.some((key) => hasPermission(currentUser, key, action))) {
     return <Navigate to="/no-permission" replace />;
   }
 

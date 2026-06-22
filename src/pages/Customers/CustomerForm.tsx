@@ -12,9 +12,11 @@ import useCustomerStore from '../../store/useCustomerStore';
 import { settingsApi } from '../../api';
 import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
 import type { Customer } from '../../types/customer';
 import type { CustomerLevelConfig, LeadSourceConfig, User } from '../../types/settings';
 import { applyCurrentLeadInputBy, getCurrentLeadInputName } from '../../shared/utils/leadInputAttribution';
+import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
 
 interface CustomerFormProps {
   open: boolean;
@@ -168,6 +170,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     const tags = form.tags ? form.tags.split(',').map((tag) => tag.trim()).filter(Boolean) : [];
     const payload = {
       ...form,
+      phone: normalizePhoneForStorage(form.phone),
       tags,
       sourceType: normalizeResourceOwnership(form.sourceType),
     };
@@ -187,9 +190,10 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     </MenuItem>
   ));
   const missingContact = !form.phone.trim() && !form.wechat.trim();
+  const phoneError = getPhoneNumberError(form.phone);
   const missingContributor = normalizeResourceOwnership(form.sourceType) === '个人资源' && !form.leadContributorName;
   const showContactError = !!form.name.trim() && missingContact;
-  const canSubmit = !!form.name.trim() && !missingContact && !missingContributor && !!form.owner && !!form.leadInputBy && !!form.leadSource;
+  const canSubmit = !!form.name.trim() && !missingContact && !phoneError && !missingContributor && !!form.owner && !!form.leadInputBy && !!form.leadSource;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
@@ -198,13 +202,14 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
           <TextField label="姓名" value={form.name} onChange={handleChange('name')} required fullWidth />
           <TextField label="公司" value={form.company} onChange={handleChange('company')} fullWidth />
-          <TextField
+          <PhoneNumberInput
             label="手机号"
             value={form.phone}
-            onChange={handleChange('phone')}
+            onChange={(value) => setForm({ ...form, phone: value })}
             error={showContactError}
             helperText={showContactError ? '手机号或微信至少填写一项' : ''}
             fullWidth
+            size="small"
           />
           <TextField
             label="微信"
