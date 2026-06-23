@@ -31,10 +31,12 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { canReviewOrderApplications, orderReviewApi, ORDER_APPLICATION_STATUSES } from '../../api';
+import { canReviewOrderApplications, customerApi, orderApi, orderReviewApi, ORDER_APPLICATION_STATUSES } from '../../api';
 import type { OrderApplication, OrderApplicationFilters, OrderApplicationStatus } from '../../types/order';
+import type { Customer } from '../../types/customer';
 import { formatCurrency, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import CustomerDetail from '../Customers/CustomerDetail';
 import OrderForm from '../Orders/OrderForm';
 import { ROUTES } from '../../shared/utils/constants';
 import { getCurrentOperatorUser } from '../../shared/utils/currentOperator';
@@ -82,6 +84,8 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
   const [reviewAction, setReviewAction] = useState<ReviewAction>(null);
   const [reviewReason, setReviewReason] = useState('');
   const [approvedApplication, setApprovedApplication] = useState<OrderApplication | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [customerOpen, setCustomerOpen] = useState(false);
   const reviewer = useMemo(() => canReviewOrderApplications(), []);
   const currentUser = useMemo(() => getCurrentOperatorUser(), []);
   const navigate = useNavigate();
@@ -165,6 +169,43 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
   const viewFormalOrder = (application?: OrderApplication | null) => {
     if (!application?.orderId) return;
     navigate(`${ROUTES.ORDERS}?tab=list&orderId=${encodeURIComponent(application.orderId)}`);
+  };
+
+  const handleViewCustomer = async (application: OrderApplication) => {
+    const { customerId, customerName } = application.orderData;
+    let customer: Customer | null = null;
+
+    if (customerId) {
+      const res = await customerApi.fetchCustomerById(customerId);
+      if (res.code === 0) customer = res.data;
+    }
+
+    if (!customer) {
+      const res = await customerApi.fetchCustomers({ search: customerName, pageSize: 20 });
+      if (res.code === 0) {
+        customer = res.data.items.find(
+          (item) => item.company === customerName || item.name === customerName,
+        ) || res.data.items[0] || null;
+      }
+    }
+
+    if (!customer) return;
+
+    const ordersRes = await orderApi.fetchOrders({ customerId: customer.id, pageSize: 100 });
+    const relatedOrders = ordersRes.code === 0
+      ? ordersRes.data.items.filter(
+        (item) => item.customerId === customer!.id
+          || item.customerName === customer!.company
+          || item.customerName === customer!.name,
+      )
+      : [];
+
+    setSelectedCustomer({
+      ...customer,
+      orderCount: relatedOrders.length,
+      totalSpent: relatedOrders.reduce((sum, item) => sum + (Number(item.actualAmount) || 0), 0),
+    });
+    setCustomerOpen(true);
   };
 
   const isCurrentUserApplicant = (application: OrderApplication) => (
@@ -270,7 +311,16 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
                   <TableCell>
                     <Chip label={application.status} size="small" color={statusColor[application.status]} variant="outlined" />
                   </TableCell>
-                  <TableCell>{application.orderData.customerName}</TableCell>
+                  <TableCell>
+                    <Button
+                      variant="text"
+                      size="small"
+                      onClick={() => handleViewCustomer(application)}
+                      sx={{ p: 0, minWidth: 0, justifyContent: 'flex-start', textTransform: 'none', fontWeight: 500 }}
+                    >
+                      {application.orderData.customerName}
+                    </Button>
+                  </TableCell>
                   <TableCell>{application.orderData.productLevel} / {application.orderData.orderType}</TableCell>
                   <TableCell>{formatCurrency(application.orderData.actualAmount || application.orderData.amount)}</TableCell>
                   <TableCell>{application.applicantName}</TableCell>
@@ -370,6 +420,15 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
           loadItems();
         }}
       />
+      {selectedCustomer && (
+        <CustomerDetail
+          customer={selectedCustomer}
+          open={customerOpen}
+          onClose={() => setCustomerOpen(false)}
+          onUpdated={(updated) => setSelectedCustomer(updated)}
+          readOnly
+        />
+      )}
 
       <Dialog open={Boolean(reviewAction)} onClose={closeReviewDialog} maxWidth="xs" fullWidth>
         <DialogCloseTitle onClose={closeReviewDialog}>

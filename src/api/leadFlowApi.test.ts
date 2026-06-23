@@ -244,6 +244,18 @@ assert.ok(JSON.parse(storage.getItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS) || '[]')[
 
 const salesUsers = [
   {
+    id: 'user-market',
+    name: 'Market A',
+    account: 'market-a',
+    email: 'market-a@company.com',
+    phone: '',
+    role: 'Market Specialist',
+    roleId: 'role-market-specialist',
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+  {
     id: 'user-sales-a',
     name: 'Sales A',
     account: 'sales-a',
@@ -270,6 +282,24 @@ const salesUsers = [
 ];
 
 storage.setItem(STORAGE_KEYS.USERS, JSON.stringify(salesUsers));
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEAD_FLOW_CONFIG, JSON.stringify({
+  id: 'lead-flow-global',
+  uniqueKeyMode: 'phone_or_wechat',
+  interceptionEnabled: true,
+  autoAssignEnabled: true,
+  assignmentMode: 'round_robin',
+  participantUserIds: [],
+  dailyLimitEnabled: false,
+  dailyLimit: 200,
+  lastAssignedIndex: -1,
+  updatedAt: now,
+}));
+const defaultParticipantFallback = leadFlowApi.intakeLead(createLeadInput('Default Participant Fallback', { phone: '13900001000' }));
+assert.equal(defaultParticipantFallback.lead?.assignedTo, 'Sales A');
+
 storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
 storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
 storage.setItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS, JSON.stringify([]));

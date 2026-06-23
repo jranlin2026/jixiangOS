@@ -40,8 +40,8 @@ type IntakeColumn = {
   render: (record: LeadIntakeRecord) => React.ReactNode;
 };
 
-const INTAKE_VIEW_STORAGE_KEY = 'aaos_lead_intake_table_view_v1';
-const INTAKE_WIDTH_STORAGE_KEY = 'aaos_lead_intake_table_widths_v1';
+const INTAKE_VIEW_STORAGE_KEY = 'aaos_lead_intake_table_view_v2';
+const INTAKE_WIDTH_STORAGE_KEY = 'aaos_lead_intake_table_widths_v2';
 
 const INTAKE_COLUMNS: IntakeColumn[] = [
   {
@@ -69,6 +69,7 @@ const INTAKE_COLUMNS: IntakeColumn[] = [
     ),
   },
   { id: 'source', label: '来源', render: (record) => record.source || '未填写' },
+  { id: 'inputBy', label: '线索录入人', render: (record) => record.inputBy || '-' },
   {
     id: 'status',
     label: '状态',
@@ -96,6 +97,7 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   customer: 220,
   contact: 180,
   source: 150,
+  inputBy: 140,
   status: 130,
   assignedTo: 140,
   matchedRule: 160,

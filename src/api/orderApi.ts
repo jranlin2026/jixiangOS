@@ -149,7 +149,7 @@ const ORDER_CHANGE_FIELDS: Array<{ field: keyof Order; label: string }> = [
   { field: 'status', label: '订单状态' },
   { field: 'refundStatus', label: '退款状态' },
   { field: 'owner', label: '销售负责人' },
-  { field: 'leadInputBy', label: '线索贡献人' },
+  { field: 'leadInputBy', label: '线索录入人' },
   { field: 'leadContributorName', label: '线索贡献人' },
   { field: 'sourceType', label: '来源类型' },
   { field: 'resourceOwnership', label: '资源归属' },

@@ -8,7 +8,7 @@ import { normalizeUserRoleName } from './roles';
 import { getStorageData, setStorageData } from '../../api/mock/storage';
 
 const now = '2026-06-01T00:00:00.000Z';
-const ORGANIZATION_SCHEMA_VERSION = 4;
+const ORGANIZATION_SCHEMA_VERSION = 5;
 const DATA_SCOPE_DOMAINS: DataScopeDomain[] = ['leads', 'customers', 'orders', 'orderApplications'];
 const DATA_SCOPE_LEVELS: DataScopeLevel[] = ['self', 'department', 'all'];
 
@@ -98,7 +98,9 @@ export const DEFAULT_ROLES: Role[] = [
     code: 'market_specialist',
     departmentId: 'dept-market',
     permissions: [
-      { module: PERMISSION_KEYS.LEADS, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.LEADS_DETAIL, actions: ['read'] },
+      { module: PERMISSION_KEYS.LEADS_CREATE, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.LEADS_INTAKE_STATUS, actions: ['read'] },
       { module: PERMISSION_KEYS.DASHBOARD, actions: ['read'] },
     ],
     dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' },
@@ -245,6 +247,19 @@ function mergePermissions(existing: Role['permissions'] = [], required: Role['pe
   return sanitizeRolePermissions(merged);
 }
 
+function stripLeadSalesAssignmentPermissions(permissions: Role['permissions'] = []): Role['permissions'] {
+  const blocked = new Set<string>([
+    PERMISSION_KEYS.LEADS,
+    PERMISSION_KEYS.LEADS_LIST,
+    PERMISSION_KEYS.LEADS_FOLLOW,
+    PERMISSION_KEYS.LEADS_FLOW_CONFIG,
+    PERMISSION_KEYS.LEADS_CONVERT,
+    CAPABILITY_KEYS.LEADS_RECEIVE,
+    CAPABILITY_KEYS.LEADS_ASSIGN,
+  ]);
+  return permissions.filter((permission) => !blocked.has(permission.module));
+}
+
 function mergeDefaultItems<T extends { code: string; id: string; name: string }>(
   existing: T[] | null | undefined,
   defaults: T[],
@@ -369,7 +384,14 @@ export function ensureOrganizationConfigData() {
       code: seed.code,
       name: seed.name,
       departmentId: departmentResult.idMap[current.departmentId || ''] || seed.departmentId,
-      permissions: seed.code === 'super_admin' ? seed.permissions : mergePermissions(current.permissions, seed.permissions),
+      permissions: seed.code === 'super_admin'
+        ? seed.permissions
+        : mergePermissions(
+          seed.code === 'market_specialist'
+            ? stripLeadSalesAssignmentPermissions(current.permissions)
+            : current.permissions,
+          seed.permissions,
+        ),
       isActive: seed.code === 'super_admin' ? true : (current.isActive ?? seed.isActive),
       createdAt: current.createdAt || seed.createdAt,
       updatedAt: new Date().toISOString(),

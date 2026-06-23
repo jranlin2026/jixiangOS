@@ -34,6 +34,7 @@ import type { Order, OrderApplication } from '../../types/order';
 import type { Product, ProductLevelConfig } from '../../types/product';
 import type { OrderTypeConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import { recognizePaymentProof as recognizePaymentProofFromOcr } from '../../shared/utils/paymentProofRecognition';
 
 interface OrderFormProps {
   open: boolean;
@@ -507,13 +508,17 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
         try {
           const { recognize } = await import('tesseract.js');
           const ocrResult = await recognize(voucherPreview, 'chi_sim+eng');
-          ocrText = ocrResult.data.text || '';
+          const englishOcrResult = await recognize(voucherPreview, 'eng').catch(() => null);
+          ocrText = [
+            ocrResult.data.text || '',
+            englishOcrResult?.data.text || '',
+          ].filter(Boolean).join('\n');
         } catch {
           ocrText = '';
         }
       }
 
-      const result = recognizePaymentProof(`${ocrText}\n${voucherName}`, Number(form.actualAmount));
+      const result = recognizePaymentProofFromOcr(`${ocrText}\n${voucherName}`, Number(form.actualAmount));
       setForm({
         ...form,
         paymentDate: result.paidDate,

@@ -294,8 +294,22 @@ export function isSuperAdminUser(user: Pick<User, 'role' | 'roleId' | 'isActive'
   return hasRolePermission(user, roles, ALL_PERMISSION_KEY, 'admin') || getUserRole(user, roles)?.code === 'super_admin';
 }
 
+function roleHasDirectPermission(role: Role | undefined, permissionKeys: string[], action = 'read'): boolean {
+  if (!role?.isActive) return false;
+  if (role.code === 'super_admin') return true;
+  const requestedKeys = permissionKeys.map(normalizePermissionKey);
+  return role.permissions.some((permission) => (
+    actionAllowed(permission.actions || [], action)
+    && requestedKeys.includes(normalizePermissionKey(permission.module))
+  ));
+}
+
 export function canReceiveLead(user: Pick<User, 'role' | 'roleId' | 'isActive'>, roles: Role[]): boolean {
-  return hasRolePermission(user, roles, CAPABILITY_KEYS.LEADS_RECEIVE, 'read');
+  if (!user.isActive) return false;
+  return roleHasDirectPermission(getUserRole(user, roles), [
+    CAPABILITY_KEYS.LEADS_RECEIVE,
+    PERMISSION_KEYS.LEADS_FOLLOW,
+  ]);
 }
 
 export function resolveUserPermissions(user: User, roles: Role[]): Permission[] {

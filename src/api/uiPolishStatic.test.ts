@@ -40,7 +40,10 @@ const customersPageSource = readFileSync(join(projectRoot, 'src/pages/Customers/
 const customerDetailSource = readFileSync(join(projectRoot, 'src/pages/Customers/CustomerDetail.tsx'), 'utf8');
 const leadsPageSource = readFileSync(join(projectRoot, 'src/pages/Leads/index.tsx'), 'utf8');
 const leadDetailSource = readFileSync(join(projectRoot, 'src/pages/Leads/LeadDetail.tsx'), 'utf8');
+const leadIntakeSource = readFileSync(join(projectRoot, 'src/pages/Leads/LeadIntakeTab.tsx'), 'utf8');
+const orderApiSource = readFileSync(join(projectRoot, 'src/api/orderApi.ts'), 'utf8');
 const ordersPageSource = readFileSync(join(projectRoot, 'src/pages/Orders/index.tsx'), 'utf8');
+const orderDetailSource = readFileSync(join(projectRoot, 'src/pages/Orders/OrderDetail.tsx'), 'utf8');
 const orderReviewSource = readFileSync(join(projectRoot, 'src/pages/OrderReview/index.tsx'), 'utf8');
 const rolePermissionSource = readFileSync(join(projectRoot, 'src/pages/Settings/RolePermission.tsx'), 'utf8');
 
@@ -80,14 +83,49 @@ assert.match(
   'Lead intake tab must be controlled by 入库情况 permission.',
 );
 assert.match(
+  leadIntakeSource,
+  /label:\s*'线索录入人'/,
+  'Lead intake records table must show who entered the lead.',
+);
+assert.match(
   orderReviewSource,
   /<IconButton[\s\S]*openApproveDialog/,
   'Order review action column should use compact icon buttons for review operations.',
 );
 assert.match(
+  orderReviewSource,
+  /CustomerDetail/,
+  'Order review customer column should open customer detail like the order list.',
+);
+assert.match(
+  orderReviewSource,
+  /handleViewCustomer/,
+  'Order review should resolve and open customer records from the customer column.',
+);
+assert.match(
+  orderReviewSource,
+  /onClick=\{\(\) => handleViewCustomer\(application\)\}/,
+  'Order review customer names must be clickable.',
+);
+assert.match(
   ordersPageSource,
   /if\s*\(\s*activeTab\s*!==\s*'list'\s*\)\s*return;[\s\S]*fetchItems\(\{\s*\.\.\.filters,\s*paymentMethod:\s*undefined\s*\}\)/,
   'Order list must refresh when returning from the review tab after an approval creates a formal order.',
+);
+assert.match(
+  orderApiSource,
+  /field:\s*'leadInputBy',\s*label:\s*'线索录入人'/,
+  'Order change history must label leadInputBy as lead input person.',
+);
+assert.match(
+  orderDetailSource,
+  /线索录入人[\s\S]*order\.leadInputBy[\s\S]*线索贡献人[\s\S]*order\.leadContributorName/,
+  'Order detail must show lead input person and lead contributor as separate fields.',
+);
+assert.doesNotMatch(
+  orderDetailSource,
+  /leadContributorName\s*\|\|\s*order\.leadInputBy/,
+  'Order detail must not label lead input person as lead contributor.',
 );
 assert.doesNotMatch(
   orderReviewSource,
