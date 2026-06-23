@@ -74,7 +74,7 @@ function scopeLabel(): string {
 }
 
 function filterApplications(applications: OrderApplication[]): OrderApplication[] {
-  const scope = getCurrentDataVisibilityScope();
+  const scope = getCurrentDataVisibilityScope('orderApplications');
   if (scope.unrestricted) return applications;
   return applications.filter((item) => (
     scope.visibleUserNames.includes(item.applicantName)

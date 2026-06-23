@@ -4,6 +4,7 @@ import { leadApi } from './leadApi';
 import { orderApi } from './orderApi';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
+import { PERMISSION_KEYS } from '../shared/utils/permissions';
 
 const storage = (() => {
   const values = new Map<string, string>();
@@ -31,24 +32,30 @@ const users = [
   { id: 'user-sales-b', name: 'Sales B', account: 'sales_b', email: 'b@test.local', phone: '', role: 'Sales Consultant', roleId: 'role-sales', departmentId: 'dept-sales', isActive: true, createdAt: now, updatedAt: now },
   { id: 'user-sales-other', name: 'Other Sales', account: 'sales_other', email: 'other@test.local', phone: '', role: 'Sales Consultant', roleId: 'role-sales', departmentId: 'dept-other', isActive: true, createdAt: now, updatedAt: now },
   { id: 'user-manager', name: 'Sales Manager', account: 'manager', email: 'manager@test.local', phone: '', role: 'Sales Manager', roleId: 'role-manager', departmentId: 'dept-sales', isActive: true, createdAt: now, updatedAt: now },
+  { id: 'user-finance', name: 'Finance A', account: 'finance', email: 'finance@test.local', phone: '', role: 'Finance Specialist', roleId: 'role-finance', departmentId: 'dept-finance', isActive: true, createdAt: now, updatedAt: now },
+  { id: 'user-aa', name: 'AA User', account: 'aa', email: 'aa@test.local', phone: '', role: 'AA', roleId: 'role-aa', departmentId: 'dept-finance', isActive: true, createdAt: now, updatedAt: now },
   { id: 'user-admin', name: 'Admin', account: 'admin', email: 'admin@test.local', phone: '', role: 'Super Admin', roleId: 'role-admin', departmentId: 'dept-admin', isActive: true, createdAt: now, updatedAt: now },
 ];
 
 const roles = [
-  { id: 'role-sales', name: 'Sales Consultant', code: 'sales_consultant', permissions: [], memberCount: 3, isActive: true, createdAt: now, updatedAt: now },
-  { id: 'role-manager', name: 'Sales Manager', code: 'sales_manager', permissions: [], memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'role-sales', name: 'Sales Consultant', code: 'sales_consultant', permissions: [{ module: PERMISSION_KEYS.LEADS, actions: ['read'] }], dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' }, memberCount: 3, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'role-manager', name: 'Sales Manager', code: 'sales_manager', permissions: [{ module: PERMISSION_KEYS.LEADS, actions: ['read'] }], dataScopes: { leads: 'department', customers: 'department', orders: 'department', orderApplications: 'department' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'role-finance', name: 'Finance Specialist', code: 'finance_specialist', permissions: [{ module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read'] }], dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'role-aa', name: 'AA', code: 'role-aa', permissions: [{ module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read'] }], dataScopes: { leads: 'self', customers: 'self', orders: 'all', orderApplications: 'all' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
   { id: 'role-admin', name: 'Super Admin', code: 'super_admin', permissions: [{ module: '\u5168\u90e8', actions: ['admin'] }], memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
 ];
 
 const departments = [
   { id: 'dept-sales', name: 'Sales', code: 'SALES', managerId: 'user-manager', memberCount: 3, isActive: true, createdAt: now, updatedAt: now },
   { id: 'dept-other', name: 'Other', code: 'OTHER', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'dept-finance', name: 'Finance', code: 'FINANCE', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
   { id: 'dept-admin', name: 'Admin', code: 'ADMIN', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
 ];
 
 function resetData(userId: string) {
   storage.clear();
   storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
+  storage.setItem(STORAGE_KEYS.ORGANIZATION_SCHEMA_VERSION, '3');
   storage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
   storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(roles));
   storage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify(departments));
@@ -113,6 +120,22 @@ assert.deepEqual(managerScope.orders, ['order-a', 'order-b']);
 assert.equal(managerScope.stats.monthCount, 2);
 assert.equal(managerScope.stats.monthAmount, 300);
 assert.equal((await customerApi.fetchCustomerById('cust-other')).data, null);
+
+resetData('user-finance');
+const financeScope = await idsForCurrentUser();
+assert.deepEqual(financeScope.customers, []);
+assert.deepEqual(financeScope.leads, []);
+assert.deepEqual(financeScope.orders, []);
+assert.equal(financeScope.stats.monthCount, 0);
+assert.equal(financeScope.stats.monthAmount, 0);
+
+resetData('user-aa');
+const aaScope = await idsForCurrentUser();
+assert.deepEqual(aaScope.customers, []);
+assert.deepEqual(aaScope.leads, []);
+assert.deepEqual(aaScope.orders, ['order-a', 'order-b', 'order-other']);
+assert.equal(aaScope.stats.monthCount, 3);
+assert.equal(aaScope.stats.monthAmount, 600);
 
 resetData('user-admin');
 const adminScope = await idsForCurrentUser();

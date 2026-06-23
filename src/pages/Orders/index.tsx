@@ -53,7 +53,7 @@ import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import PermissionGate from '../../shared/auth/PermissionGate';
 import { PERMISSION_KEYS } from '../../shared/utils/permissions';
-import { filterUsersByCurrentDataScope } from '../../shared/utils/dataVisibility';
+import { filterOrderUsersByCurrentDataScope } from '../../shared/utils/dataVisibility';
 import ResizableHeaderCell, {
   getResizableCellSx,
   readColumnWidths,
@@ -191,8 +191,6 @@ const Orders: React.FC = () => {
   const { confirm, dialog: feedbackDialog } = useAppFeedback();
 
   useEffect(() => {
-    fetchItems({ ...filters, paymentMethod: undefined });
-    fetchStats();
     productApi.getProductLevelConfigs().then((res) => {
       if (res.code === 0) {
         setProductLevels(res.data.filter((level) => level.isActive).map((level) => ({ name: level.name, color: level.color })));
@@ -204,7 +202,13 @@ const Orders: React.FC = () => {
     settingsApi.fetchUsers({ isActive: true }).then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
     });
-  }, [fetchItems, fetchStats]);
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'list') return;
+    fetchItems({ ...filters, paymentMethod: undefined });
+    fetchStats();
+  }, [activeTab, fetchItems, fetchStats]);
 
   useEffect(() => {
     localStorage.setItem(ORDER_VIEW_STORAGE_KEY, JSON.stringify(viewConfig));
@@ -456,7 +460,7 @@ const Orders: React.FC = () => {
     [orderedColumns, visibleColumnIds],
   );
   const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length);
-  const visibleOwnerUsers = useMemo(() => filterUsersByCurrentDataScope(users), [users]);
+  const visibleOwnerUsers = useMemo(() => filterOrderUsersByCurrentDataScope(users), [users]);
   const tableMinWidth = useMemo(
     () => visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + ORDER_ACTION_COLUMN_WIDTH,
     [columnWidths, visibleColumns],

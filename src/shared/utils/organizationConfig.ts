@@ -1,6 +1,6 @@
 import type { Department } from '../../types/department';
 import type { Position } from '../../types/position';
-import type { Role } from '../../types/role';
+import type { DataScopeDomain, DataScopeLevel, Role, RoleDataScopes } from '../../types/role';
 import type { OrganizationProfile, User } from '../../types/settings';
 import { STORAGE_KEYS } from './constants';
 import { CAPABILITY_KEYS, PERMISSION_KEYS, sanitizeRolePermissions } from './permissions';
@@ -8,7 +8,9 @@ import { normalizeUserRoleName } from './roles';
 import { getStorageData, setStorageData } from '../../api/mock/storage';
 
 const now = '2026-06-01T00:00:00.000Z';
-const ORGANIZATION_SCHEMA_VERSION = 3;
+const ORGANIZATION_SCHEMA_VERSION = 4;
+const DATA_SCOPE_DOMAINS: DataScopeDomain[] = ['leads', 'customers', 'orders', 'orderApplications'];
+const DATA_SCOPE_LEVELS: DataScopeLevel[] = ['self', 'department', 'all'];
 
 export const DEFAULT_ORGANIZATION_PROFILE: OrganizationProfile = {
   companyName: '福建极享信息科技有限公司',
@@ -42,6 +44,7 @@ export const DEFAULT_ROLES: Role[] = [
     code: 'super_admin',
     departmentId: 'dept-general',
     permissions: [{ module: '全部', actions: ['read', 'write', 'delete', 'admin'] }],
+    dataScopes: { leads: 'all', customers: 'all', orders: 'all', orderApplications: 'all' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -64,6 +67,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.ORDER_HISTORY, actions: ['read'] },
       { module: PERMISSION_KEYS.DASHBOARD, actions: ['read'] },
     ],
+    dataScopes: { leads: 'department', customers: 'department', orders: 'department', orderApplications: 'department' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -82,6 +86,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.ORDER_CREATE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_EDIT, actions: ['read', 'write'] },
     ],
+    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -96,6 +101,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.LEADS, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.DASHBOARD, actions: ['read'] },
     ],
+    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -111,6 +117,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read'] },
       { module: PERMISSION_KEYS.UPGRADE_CENTER, actions: ['read', 'write'] },
     ],
+    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -125,6 +132,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.DELIVERY, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read'] },
     ],
+    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -144,6 +152,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.FINANCE_RULES, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDERS, actions: ['read'] },
     ],
+    dataScopes: { leads: 'self', customers: 'self', orders: 'all', orderApplications: 'all' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -164,6 +173,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.SETTINGS_LEAD_FLOW, actions: ['read', 'write'] },
     ],
+    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -192,6 +202,34 @@ const ROLE_CODE_BY_NAME: Record<string, string> = {
 
 function normalizeCode(value?: string): string {
   return String(value || '').trim().toLowerCase();
+}
+
+function isDataScopeLevel(value: unknown): value is DataScopeLevel {
+  return DATA_SCOPE_LEVELS.includes(value as DataScopeLevel);
+}
+
+function defaultRoleDataScopes(code?: string): Required<Record<DataScopeDomain, DataScopeLevel>> {
+  const normalizedCode = normalizeCode(code);
+  if (normalizedCode === 'super_admin') {
+    return { leads: 'all', customers: 'all', orders: 'all', orderApplications: 'all' };
+  }
+  if (normalizedCode === 'sales_manager') {
+    return { leads: 'department', customers: 'department', orders: 'department', orderApplications: 'department' };
+  }
+  if (normalizedCode === 'finance_specialist') {
+    return { leads: 'self', customers: 'self', orders: 'all', orderApplications: 'all' };
+  }
+  return { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' };
+}
+
+export function normalizeRoleDataScopes(role: Pick<Role, 'code'> & { dataScopes?: RoleDataScopes }): Required<Record<DataScopeDomain, DataScopeLevel>> {
+  const defaults = defaultRoleDataScopes(role.code);
+  if (normalizeCode(role.code) === 'super_admin') return defaults;
+  return DATA_SCOPE_DOMAINS.reduce((acc, domain) => {
+    const value = role.dataScopes?.[domain];
+    acc[domain] = isDataScopeLevel(value) ? value : defaults[domain];
+    return acc;
+  }, { ...defaults });
 }
 
 function mergePermissions(existing: Role['permissions'] = [], required: Role['permissions'] = []): Role['permissions'] {
@@ -347,6 +385,7 @@ export function ensureOrganizationConfigData() {
     ...role,
     departmentId: role.departmentId ? departmentResult.idMap[role.departmentId] || role.departmentId : role.departmentId,
     permissions: sanitizeRolePermissions(role.permissions),
+    dataScopes: normalizeRoleDataScopes(role),
   }));
 
   setStorageData(STORAGE_KEYS.DEPARTMENTS, departments);

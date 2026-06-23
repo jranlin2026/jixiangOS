@@ -299,7 +299,16 @@ const Leads: React.FC = () => {
   }, [columnWidths]);
 
   const salesUsers = filterUsersByCurrentDataScope(users).filter((user) => canReceiveLead(user, roles));
-  const canAssignLeads = hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG, 'write');
+  const canViewLeadList = hasPermission(currentUser, PERMISSION_KEYS.LEADS_LIST);
+  const canViewLeadIntake = hasPermission(currentUser, PERMISSION_KEYS.LEADS_INTAKE_STATUS);
+  const canViewLeadDetail = hasPermission(currentUser, PERMISSION_KEYS.LEADS_DETAIL);
+  const canStartFollowLead = hasPermission(currentUser, PERMISSION_KEYS.LEADS_FOLLOW);
+  const canAssignLeads = hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG);
+
+  useEffect(() => {
+    if (activeTab === 0 && !canViewLeadList && canViewLeadIntake) setActiveTab(1);
+    if (activeTab === 1 && !canViewLeadIntake && canViewLeadList) setActiveTab(0);
+  }, [activeTab, canViewLeadIntake, canViewLeadList]);
 
   const handleViewDetail = (lead: Lead) => {
     setSelectedLead(lead);
@@ -465,7 +474,7 @@ const Leads: React.FC = () => {
         <Typography variant="h5" sx={{ fontWeight: 600 }}>
           线索管理
         </Typography>
-        {activeTab === 0 && (
+        {activeTab === 0 && canViewLeadList && (
           <Box sx={{ display: 'flex', gap: 1 }}>
             <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
               视图设置
@@ -474,7 +483,7 @@ const Leads: React.FC = () => {
               {'\u4e0b\u8f7dExcel\u6a21\u677f'}
             </Button>
             {activeTab === 0 && (
-              <PermissionGate permissionKey={PERMISSION_KEYS.LEADS_CREATE} action="write">
+              <PermissionGate permissionKey={PERMISSION_KEYS.LEADS_CREATE}>
                 <Box sx={{ display: 'flex', gap: 1 }}>
                   <Button variant="outlined" startIcon={<UploadFileIcon />} onClick={() => setBulkImportOpen(true)}>
                     {'\u6279\u91cf\u5165\u5e93'}
@@ -490,11 +499,11 @@ const Leads: React.FC = () => {
       </Box>
 
       <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ mb: 3 }}>
-        <Tab label="线索列表" />
-        <Tab label="入库情况" />
+        {canViewLeadList && <Tab label="线索列表" value={0} />}
+        {canViewLeadIntake && <Tab label="入库情况" value={1} />}
       </Tabs>
 
-      {activeTab === 0 && (
+      {activeTab === 0 && canViewLeadList && (
         <>
           <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
             <TextField
@@ -573,19 +582,21 @@ const Leads: React.FC = () => {
                       </TableCell>
                     ))}
                     <TableCell align="center" sx={actionColumnSx}>
-                      <Tooltip title="查看线索">
-                        <IconButton size="small" onClick={() => handleViewDetail(lead)}>
-                          <VisibilityIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      {!lead.customerId && !getAssignedSalesName(lead) && (
+                      {canViewLeadDetail && (
+                        <Tooltip title="查看线索">
+                          <IconButton size="small" onClick={() => handleViewDetail(lead)}>
+                            <VisibilityIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      {!lead.customerId && canStartFollowLead && !getAssignedSalesName(lead) && (
                         <Tooltip title="领取并开始跟进">
                           <IconButton size="small" color="primary" onClick={() => handleStartFollow(lead)}>
                             <PersonAddAltIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       )}
-                      {!lead.customerId && getAssignedSalesName(lead) && (
+                      {!lead.customerId && canStartFollowLead && getAssignedSalesName(lead) && (
                         <Tooltip title="开始跟进并加入客户">
                           <IconButton size="small" color="primary" onClick={() => handleStartFollow(lead)}>
                             <PersonAddAltIcon fontSize="small" />
@@ -632,7 +643,12 @@ const Leads: React.FC = () => {
         </>
       )}
 
-      {activeTab === 1 && <LeadIntakeTab />}
+      {activeTab === 1 && canViewLeadIntake && <LeadIntakeTab />}
+      {!canViewLeadList && !canViewLeadIntake && (
+        <Typography variant="body2" sx={{ color: '#6b7280', py: 4, textAlign: 'center' }}>
+          暂无可访问的线索板块
+        </Typography>
+      )}
 
       {selectedLead && (
         <LeadDetail

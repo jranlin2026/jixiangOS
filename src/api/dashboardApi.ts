@@ -32,7 +32,6 @@ import {
   getCurrentDataVisibilityScope,
 } from '../shared/utils/dataVisibility';
 import { hasPermission, PERMISSION_KEYS, resolveUserPermissions } from '../shared/utils/permissions';
-import { canReviewOrderApplications } from './orderReviewApi';
 import { formatCurrency } from '../shared/utils/formatters';
 
 function ensureInit(): void {
@@ -90,8 +89,8 @@ function scopeLabel(): string {
 }
 
 function filterApplications(applications: OrderApplication[]): OrderApplication[] {
-  if (canReviewOrderApplications()) return applications;
-  const scope = getCurrentDataVisibilityScope();
+  const scope = getCurrentDataVisibilityScope('orderApplications');
+  if (scope.unrestricted) return applications;
   return applications.filter((item) => (
     scope.visibleUserNames.includes(item.applicantName)
     || scope.visibleUserIds.includes(item.applicantId || '')

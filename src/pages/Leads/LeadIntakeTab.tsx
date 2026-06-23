@@ -87,7 +87,7 @@ const INTAKE_COLUMNS: IntakeColumn[] = [
     label: '原因/对撞对象',
     render: (record) => record.failureReason || record.collisionTargetName || (record.status === '入库成功' ? '正常入库' : '等待分配'),
   },
-  { id: 'createdAt', label: '录入时间', render: (record) => formatDate(record.createdAt) },
+  { id: 'createdAt', label: '录入时间', render: (record) => formatDate(record.createdAt, 'yyyy-MM-dd HH:mm:ss') },
 ];
 
 const DEFAULT_VISIBLE_COLUMNS = INTAKE_COLUMNS.map((column) => column.id);

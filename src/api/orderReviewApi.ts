@@ -16,6 +16,7 @@ import { DEFAULT_PAGE_SIZE, STORAGE_KEYS, normalizeResourceOwnership } from '../
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { getCurrentDataVisibilityScope } from '../shared/utils/dataVisibility';
 import { normalizeUserRoleName } from '../shared/utils/roles';
+import { PERMISSION_KEYS, roleHasPermission } from '../shared/utils/permissions';
 import { initializeMockData } from './mock';
 import { orderApi } from './orderApi';
 import { v4 as uuidv4 } from 'uuid';
@@ -53,21 +54,8 @@ function getRole(user?: User): Role | undefined {
   return roles.find((role) => role.isActive && (role.id === user.roleId || role.name === normalizedRole || role.name === user.role));
 }
 
-function isFinanceReviewer(): boolean {
-  const user = getCurrentUser();
-  const role = getRole(user);
-  const roleText = `${role?.code || ''} ${role?.name || ''} ${user?.role || ''}`.toLowerCase();
-  if (roleText.includes('finance') || roleText.includes('财务')) return true;
-  return Boolean(role?.permissions?.some((permission) => (
-    permission.module === '全部'
-    || permission.module.includes('财务')
-    || permission.module.includes('订单审核')
-  )));
-}
-
 export function canReviewOrderApplications(): boolean {
-  const scope = getCurrentDataVisibilityScope();
-  return scope.unrestricted || isFinanceReviewer();
+  return roleHasPermission(getRole(getCurrentUser()), PERMISSION_KEYS.ORDER_REVIEW, 'read');
 }
 
 function getStoredApplications(): OrderApplication[] {
@@ -115,12 +103,16 @@ function buildLog(action: OrderApplicationReviewLog['action'], reason?: string):
 }
 
 function filterVisibleApplications(applications: OrderApplication[]): OrderApplication[] {
-  if (canReviewOrderApplications()) return applications;
-  const scope = getCurrentDataVisibilityScope();
+  const scope = getCurrentDataVisibilityScope('orderApplications');
+  if (scope.unrestricted) return applications;
   return applications.filter((application) => (
     scope.visibleUserNames.includes(application.applicantName)
     || scope.visibleUserIds.includes(application.applicantId || '')
   ));
+}
+
+function canAccessApplication(application: OrderApplication): boolean {
+  return filterVisibleApplications([application]).length > 0;
 }
 
 function applyFilters(applications: OrderApplication[], filters?: OrderApplicationFilters): OrderApplication[] {
@@ -223,6 +215,7 @@ async function approveOrderApplication(id: string): Promise<ApiResponse<OrderApp
   const applications = getStoredApplications();
   const idx = applications.findIndex((item) => item.id === id);
   if (idx === -1) return createSuccessResponse(null);
+  if (!canAccessApplication(applications[idx])) return createErrorResponse('无权操作该订单申请', 403);
   if (applications[idx].status !== STATUS_PENDING_REVIEW) return createErrorResponse('只有待财务审核的订单申请可以入库');
 
   const orderData = enrichOrderDataFromCustomer(applications[idx].orderData);
@@ -254,6 +247,7 @@ async function returnOrderApplication(id: string, reason: string): Promise<ApiRe
   const applications = getStoredApplications();
   const idx = applications.findIndex((item) => item.id === id);
   if (idx === -1) return createSuccessResponse(null);
+  if (!canAccessApplication(applications[idx])) return createErrorResponse('无权操作该订单申请', 403);
   if (applications[idx].status !== STATUS_PENDING_REVIEW) return createErrorResponse('只有待财务审核的订单申请可以退回');
   const now = new Date().toISOString();
   const reviewer = currentOperator();
@@ -278,6 +272,7 @@ async function rejectOrderApplication(id: string, reason: string): Promise<ApiRe
   const applications = getStoredApplications();
   const idx = applications.findIndex((item) => item.id === id);
   if (idx === -1) return createSuccessResponse(null);
+  if (!canAccessApplication(applications[idx])) return createErrorResponse('无权操作该订单申请', 403);
   if (applications[idx].status !== STATUS_PENDING_REVIEW) return createErrorResponse('只有待财务审核的订单申请可以驳回');
   const now = new Date().toISOString();
   const reviewer = currentOperator();

@@ -4,6 +4,7 @@ import { orderReviewApi } from './orderReviewApi';
 import { refundApi } from './refundApi';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
+import { PERMISSION_KEYS } from '../shared/utils/permissions';
 import type { Commission } from '../types/commission';
 
 const storage = (() => {
@@ -188,3 +189,33 @@ assert.equal(completeRefundRes.code, 0);
 const commissionsAfterRefund = JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as Commission[];
 assert.equal(commissionsAfterRefund.every((commission) => commission.status === zh.paid), true);
 assert.equal(commissionsAfterRefund.some((commission) => `${commission.auditReason || ''}${commission.calculationNote || ''}`.includes(zh.refundException)), true);
+
+seed('user-sales');
+storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([
+  { id: 'role-sales', name: zh.sales, code: 'sales_consultant', permissions: [], memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'role-finance', name: zh.finance, code: 'finance_specialist', permissions: [], memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+]));
+const permissionReviewSubmit = await orderReviewApi.submitOrderApplication(orderPayload);
+assert.equal(permissionReviewSubmit.code, 0);
+
+const salesWithoutPermissionApprove = await orderReviewApi.approveOrderApplication(permissionReviewSubmit.data.id);
+assert.equal(salesWithoutPermissionApprove.code, 403);
+
+storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({ userId: 'user-finance', token: 'token-user-finance', remember: true, createdAt: now }));
+const financeWithoutPermissionApprove = await orderReviewApi.approveOrderApplication(permissionReviewSubmit.data.id);
+assert.equal(financeWithoutPermissionApprove.code, 403);
+
+storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([
+  { id: 'role-sales', name: zh.sales, code: 'sales_consultant', permissions: [], memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'role-finance', name: zh.finance, code: 'finance_specialist', permissions: [{ module: PERMISSION_KEYS.ORDER_REVIEW, actions: ['read'] }], dataScopes: { orderApplications: 'self' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+]));
+assert.deepEqual((await orderReviewApi.fetchOrderApplications({ pageSize: 20 })).data.items.map((item) => item.id), []);
+
+storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([
+  { id: 'role-sales', name: zh.sales, code: 'sales_consultant', permissions: [], memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'role-finance', name: zh.finance, code: 'finance_specialist', permissions: [{ module: PERMISSION_KEYS.ORDER_REVIEW, actions: ['read'] }], dataScopes: { orderApplications: 'all', orders: 'all' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+]));
+assert.deepEqual((await orderReviewApi.fetchOrderApplications({ pageSize: 20 })).data.items.map((item) => item.id), [permissionReviewSubmit.data.id]);
+const financeWithPermissionApprove = await orderReviewApi.approveOrderApplication(permissionReviewSubmit.data.id);
+assert.equal(financeWithPermissionApprove.code, 0);
+assert.equal(financeWithPermissionApprove.data?.status, zh.approved);

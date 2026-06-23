@@ -30,6 +30,7 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { ROUTES } from '../shared/utils/constants';
 import { hasPermission, PERMISSION_KEYS } from '../shared/utils/permissions';
+import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
 import useAuthStore from '../store/useAuthStore';
 
 interface SidebarProps {
@@ -123,6 +124,11 @@ const Sidebar: React.FC<SidebarProps> = ({ width }) => {
   const { currentUser, logout } = useAuthStore();
   const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({});
   const currentFullPath = `${location.pathname}${location.search}`;
+  const currentDepartmentName = useMemo(() => {
+    if (!currentUser?.departmentId) return '';
+    return ensureOrganizationConfigData().departments.find((department) => department.id === currentUser.departmentId)?.name || '';
+  }, [currentUser?.departmentId]);
+  const currentUserMeta = currentDepartmentName ? `${currentUser?.role || ''} · ${currentDepartmentName}` : currentUser?.role;
   const visibleNavItems = useMemo(() => navItems.map((item) => ({
     ...item,
     children: item.children?.filter((child) => (
@@ -268,8 +274,12 @@ const Sidebar: React.FC<SidebarProps> = ({ width }) => {
               <Typography variant="body2" sx={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {currentUser.name}
               </Typography>
-              <Typography variant="caption" sx={{ color: '#6b7280' }}>
-                {currentUser.role}
+              <Typography
+                variant="caption"
+                sx={{ color: '#6b7280', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                title={currentUserMeta}
+              >
+                {currentUserMeta}
               </Typography>
             </Box>
             <Tooltip title="退出登录">

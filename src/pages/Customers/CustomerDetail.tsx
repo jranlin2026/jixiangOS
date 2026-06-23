@@ -32,6 +32,8 @@ import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { canCompleteContactField } from '../../shared/utils/contactEditLock';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import { formatPhoneForDisplay, getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
+import PermissionGate from '../../shared/auth/PermissionGate';
+import { PERMISSION_KEYS } from '../../shared/utils/permissions';
 
 interface CustomerDetailProps {
   customer: Customer;
@@ -92,6 +94,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const lifecycleCode = normalizeLifecycleStatusCode(currentCustomer.lifecycleStatusCode);
   const lifecycleConfig = getLifecycleConfigByCode(lifecycleCode);
   const isPublicPoolCustomer = lifecycleCode === 'public_pool';
+  const canCreateOrderForCurrentCustomer = !isPublicPoolCustomer;
   const canEditLockedContact = isSuperAdminRoleName(currentUser?.role);
 
   useEffect(() => {
@@ -561,8 +564,10 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Typography variant="subtitle2" sx={{ color: '#64748b' }}>共 {orders.length} 笔订单</Typography>
-        {!readOnly && onCreateOrder && (
+        {!readOnly && onCreateOrder && canCreateOrderForCurrentCustomer && (
+          <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE_ORDER}>
           <Button variant="contained" size="small" onClick={() => onCreateOrder(currentCustomer)}>提交订单申请</Button>
+          </PermissionGate>
         )}
       </Box>
       <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb' }}>

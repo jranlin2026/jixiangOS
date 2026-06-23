@@ -290,6 +290,7 @@ const Customers: React.FC = () => {
   const getCurrentUserName = () => currentUser?.name || currentUser?.account || '';
 
   const isPublicPoolCustomer = (customer: Customer) => normalizeLifecycleStatusCode(customer.lifecycleStatusCode) === 'public_pool';
+  const canCreateOrderForCustomer = (customer: Customer) => !isPublicPoolCustomer(customer);
 
   const scopedFilters = (baseFilters: CustomerFilters = filters, scope: CustomerScope = customerScope): CustomerFilters => ({
     ...baseFilters,
@@ -345,6 +346,10 @@ const Customers: React.FC = () => {
   };
 
   const handleCreateOrder = (customer: Customer) => {
+    if (!canCreateOrderForCustomer(customer)) {
+      alert('公海客户需要先领取后才能提交订单申请');
+      return;
+    }
     setOrderCustomer(customer);
     setOrderFormOpen(true);
     setDetailOpen(false);
@@ -565,13 +570,15 @@ const Customers: React.FC = () => {
                         <VisibilityIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
-                    <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE_ORDER} action="write">
+                    {canCreateOrderForCustomer(customer) && (
+                    <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE_ORDER}>
                       <Tooltip title="提交订单申请">
                         <IconButton size="small" color="info" onClick={() => handleCreateOrder(customer)}>
                           <AddShoppingCartIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
                     </PermissionGate>
+                    )}
                     <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_VIEW_ORDERS}>
                       <Tooltip title="查看订单">
                         <IconButton size="small" color="secondary" onClick={() => handleViewOrders(customer)}>
@@ -770,9 +777,11 @@ const Customers: React.FC = () => {
           </Table>
         </DialogContent>
         <DialogActions sx={{ display: 'none' }}>
-          <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE_ORDER} action="write">
+          {orderCustomer && canCreateOrderForCustomer(orderCustomer) && (
+          <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE_ORDER}>
             <Button onClick={() => orderCustomer && handleCreateOrder(orderCustomer)}>提交订单申请</Button>
           </PermissionGate>
+          )}
         </DialogActions>
       </Dialog>
       {feedbackDialog}

@@ -8,22 +8,26 @@ import {
   IconButton,
   Paper,
   Switch,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
+  Tabs,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import useRoleStore from '../../store/useRoleStore';
-import type { Permission, Role } from '../../types/role';
+import type { DataScopeDomain, DataScopeLevel, Permission, Role, RoleDataScopes } from '../../types/role';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
-import { CAPABILITY_KEYS, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { CAPABILITY_KEYS, PERMISSION_KEYS, getDefaultPermissionActions } from '../../shared/utils/permissions';
 
 type RoleForm = {
   name: string;
@@ -31,6 +35,7 @@ type RoleForm = {
   departmentId: string;
   isActive: boolean;
   permissions: Permission[];
+  dataScopes: RoleDataScopes;
 };
 
 type PermissionNode = {
@@ -46,12 +51,16 @@ const PERMISSION_TREE: PermissionNode[] = [
   {
     label: '线索',
     children: [
-      { label: '新建线索', key: PERMISSION_KEYS.LEADS_CREATE },
-      { label: '分配线索', key: PERMISSION_KEYS.LEADS_FLOW_CONFIG },
-      { label: '接收/领取线索', key: CAPABILITY_KEYS.LEADS_RECEIVE },
-      { label: '分配线索能力', key: CAPABILITY_KEYS.LEADS_ASSIGN },
-      { label: '线索跟进', key: PERMISSION_KEYS.LEADS_FOLLOW },
-      { label: '线索转客户', key: PERMISSION_KEYS.LEADS_CONVERT },
+      {
+        label: '线索列表',
+        children: [
+          { label: '查看线索资料', key: PERMISSION_KEYS.LEADS_DETAIL },
+          { label: '新建线索', key: PERMISSION_KEYS.LEADS_CREATE },
+          { label: '开始跟进并加入客户', key: PERMISSION_KEYS.LEADS_FOLLOW },
+          { label: '分配销售', key: PERMISSION_KEYS.LEADS_FLOW_CONFIG },
+        ],
+      },
+      { label: '入库情况', key: PERMISSION_KEYS.LEADS_INTAKE_STATUS },
     ],
   },
   {
@@ -69,7 +78,7 @@ const PERMISSION_TREE: PermissionNode[] = [
     label: '订单',
     children: [
       { label: '订单列表', key: PERMISSION_KEYS.ORDER_MANAGE },
-      { label: '订单审核台', key: PERMISSION_KEYS.ORDER_REVIEW },
+      { label: '订单审核操作', key: PERMISSION_KEYS.ORDER_REVIEW },
       { label: '新增订单', key: PERMISSION_KEYS.ORDER_CREATE },
       { label: '编辑订单', key: PERMISSION_KEYS.ORDER_EDIT },
       { label: '删除订单', key: PERMISSION_KEYS.ORDER_DELETE },
@@ -151,13 +160,33 @@ const PERMISSION_TREE: PermissionNode[] = [
 ];
 
 const defaultPermission: Permission = { module: PERMISSION_KEYS.HOME, actions: ['read'] };
+const defaultDataScopes: Record<DataScopeDomain, DataScopeLevel> = {
+  leads: 'self',
+  customers: 'self',
+  orders: 'self',
+  orderApplications: 'self',
+};
 const emptyForm: RoleForm = {
   name: '',
   description: '',
   departmentId: '',
   isActive: true,
   permissions: [defaultPermission],
+  dataScopes: defaultDataScopes,
 };
+
+const dataScopeOptions: Array<{ value: DataScopeLevel; label: string }> = [
+  { value: 'self', label: '本人' },
+  { value: 'department', label: '本部门' },
+  { value: 'all', label: '全部' },
+];
+
+const dataScopeRows: Array<{ domain: DataScopeDomain; label: string; description: string; permissionKeys: string[] }> = [
+  { domain: 'leads', label: '线索数据', description: '控制线索列表、入库情况和线索统计的数据范围', permissionKeys: [PERMISSION_KEYS.LEADS_LIST, PERMISSION_KEYS.LEADS_DETAIL, PERMISSION_KEYS.LEADS_CREATE, PERMISSION_KEYS.LEADS_FOLLOW, PERMISSION_KEYS.LEADS_FLOW_CONFIG, PERMISSION_KEYS.LEADS_INTAKE_STATUS] },
+  { domain: 'customers', label: '客户数据', description: '控制客户列表、客户详情和客户统计的数据范围', permissionKeys: [PERMISSION_KEYS.CUSTOMER_CREATE, PERMISSION_KEYS.CUSTOMER_DETAIL, PERMISSION_KEYS.CUSTOMER_PROFILE, PERMISSION_KEYS.CUSTOMER_AI_CARD, PERMISSION_KEYS.CUSTOMER_CREATE_ORDER, PERMISSION_KEYS.CUSTOMER_VIEW_ORDERS] },
+  { domain: 'orders', label: '订单数据', description: '控制正式订单列表、订单筛选和订单统计的数据范围', permissionKeys: [PERMISSION_KEYS.ORDER_MANAGE, PERMISSION_KEYS.ORDER_CREATE, PERMISSION_KEYS.ORDER_EDIT, PERMISSION_KEYS.ORDER_DELETE, PERMISSION_KEYS.ORDER_HISTORY, PERMISSION_KEYS.ORDER_PAYMENT_SCREENSHOT] },
+  { domain: 'orderApplications', label: '订单审核台数据', description: '控制订单审核台能看到哪些订单申请；审核操作仍由订单审核操作权限控制', permissionKeys: [PERMISSION_KEYS.ORDER_REVIEW, PERMISSION_KEYS.ORDER_MANAGE, PERMISSION_KEYS.ORDER_CREATE] },
+];
 
 const getNodeKey = (path: string[]) => path.join('/');
 
@@ -203,11 +232,27 @@ const getPermissionAliasMap = () => {
     '系统设置/组织架构/部门管理',
   ].forEach((legacyKey) => aliases.set(legacyKey, [PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS]));
 
+  [
+    '线索/新建线索',
+  ].forEach((legacyKey) => aliases.set(legacyKey, [PERMISSION_KEYS.LEADS_CREATE]));
+  [
+    '线索/分配线索',
+    '线索/分配线索能力',
+    CAPABILITY_KEYS.LEADS_ASSIGN,
+  ].forEach((legacyKey) => aliases.set(legacyKey, [PERMISSION_KEYS.LEADS_FLOW_CONFIG]));
+  [
+    '线索/接收/领取线索',
+    '线索/线索跟进',
+    '线索/线索转客户',
+    CAPABILITY_KEYS.LEADS_RECEIVE,
+    PERMISSION_KEYS.LEADS_CONVERT,
+  ].forEach((legacyKey) => aliases.set(legacyKey, [PERMISSION_KEYS.LEADS_FOLLOW]));
+
   return aliases;
 };
 
 const toPermissions = (keys: Set<string>): Permission[] => (
-  Array.from(keys).sort().map((module) => ({ module, actions: ['read'] }))
+  Array.from(keys).sort().map((module) => ({ module, actions: getDefaultPermissionActions(module) }))
 );
 
 const normalizePermissionKeys = (permissions: Permission[]) => {
@@ -249,11 +294,24 @@ const getLeafPermissionLabels = (permissions: Permission[]) => {
   return Array.from(selected).filter((key) => leafKeys.includes(key));
 };
 
+const normalizeDataScopes = (value?: RoleDataScopes, code?: string): RoleDataScopes => {
+  if (code === 'super_admin') {
+    return { leads: 'all', customers: 'all', orders: 'all', orderApplications: 'all' };
+  }
+  return { ...defaultDataScopes, ...(value || {}) };
+};
+
+const hasAnyPermissionKey = (permissions: Permission[], keys: string[]) => {
+  const selected = normalizePermissionKeys(permissions);
+  return keys.some((key) => selected.has(key));
+};
+
 const RolePermission: React.FC = () => {
   const { items, fetchItems, create, update, delete: deleteRole } = useRoleStore();
   const [formOpen, setFormOpen] = useState(false);
   const [editRole, setEditRole] = useState<Role | null>(null);
   const [form, setForm] = useState<RoleForm>(emptyForm);
+  const [formTab, setFormTab] = useState<'permissions' | 'dataScopes'>('permissions');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -263,7 +321,8 @@ const RolePermission: React.FC = () => {
   const handleCreate = () => {
     setError('');
     setEditRole(null);
-    setForm(emptyForm);
+    setForm({ ...emptyForm, dataScopes: defaultDataScopes });
+    setFormTab('permissions');
     setFormOpen(true);
   };
 
@@ -276,7 +335,9 @@ const RolePermission: React.FC = () => {
       departmentId: role.departmentId || '',
       isActive: role.isActive,
       permissions: role.permissions.length ? role.permissions : [defaultPermission],
+      dataScopes: normalizeDataScopes(role.dataScopes, role.code),
     });
+    setFormTab('permissions');
     setFormOpen(true);
   };
 
@@ -284,15 +345,17 @@ const RolePermission: React.FC = () => {
     setError('');
     if (!form.name) return;
     const permissions = toPermissions(normalizePermissionKeys(form.permissions));
+    const dataScopes = normalizeDataScopes(form.dataScopes, editRole?.code);
     if (!permissions.length) return;
 
     try {
       if (editRole) {
-        await update(editRole.id, { ...form, permissions, code: editRole.code });
+        await update(editRole.id, { ...form, permissions, dataScopes, code: editRole.code });
       } else {
         await create({
           ...form,
           permissions,
+          dataScopes,
           code: `role-${Date.now()}`,
           memberCount: 0,
         });
@@ -303,7 +366,7 @@ const RolePermission: React.FC = () => {
     }
     setFormOpen(false);
     setEditRole(null);
-    setForm(emptyForm);
+    setForm({ ...emptyForm, dataScopes: defaultDataScopes });
     fetchItems();
   };
 
@@ -321,6 +384,17 @@ const RolePermission: React.FC = () => {
       });
       return { ...prev, permissions: toPermissions(nextKeys) };
     });
+  };
+
+  const handleDataScopeChange = (domain: DataScopeDomain, value: DataScopeLevel | null) => {
+    if (!value) return;
+    setForm((prev) => ({
+      ...prev,
+      dataScopes: {
+        ...prev.dataScopes,
+        [domain]: value,
+      },
+    }));
   };
 
   const handleToggleActive = async (role: Role) => {
@@ -405,6 +479,11 @@ const RolePermission: React.FC = () => {
           <Box sx={{ display: 'grid', gap: 2 }}>
             <TextField label="角色名称" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required fullWidth />
             <TextField label="说明" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} fullWidth multiline minRows={2} />
+            <Tabs value={formTab} onChange={(_event, value) => setFormTab(value)} sx={{ minHeight: 36, borderBottom: '1px solid #e5e7eb' }}>
+              <Tab value="permissions" label="功能权限" sx={{ minHeight: 36 }} />
+              <Tab value="dataScopes" label="数据范围" sx={{ minHeight: 36 }} />
+            </Tabs>
+            {formTab === 'permissions' && (
             <Box sx={{ display: 'grid', gap: 1.5 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>权限配置</Typography>
@@ -484,6 +563,52 @@ const RolePermission: React.FC = () => {
                 </Table>
               </TableContainer>
             </Box>
+            )}
+            {formTab === 'dataScopes' && (
+              <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb' }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ width: 180, bgcolor: '#f8fafc', fontWeight: 600 }}>数据类型</TableCell>
+                      <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 600 }}>说明</TableCell>
+                      <TableCell sx={{ width: 260, bgcolor: '#f8fafc', fontWeight: 600 }}>数据范围</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {dataScopeRows.map((row) => {
+                      const disabled = editRole?.code === 'super_admin' || !hasAnyPermissionKey(form.permissions, row.permissionKeys);
+                      const value = editRole?.code === 'super_admin' ? 'all' : (form.dataScopes[row.domain] || defaultDataScopes[row.domain]);
+                      return (
+                        <TableRow key={row.domain} hover>
+                          <TableCell sx={{ fontWeight: 500 }}>{row.label}</TableCell>
+                          <TableCell>
+                            <Typography variant="body2">{row.description}</Typography>
+                            {disabled && editRole?.code !== 'super_admin' && (
+                              <Typography variant="caption" sx={{ color: '#9ca3af' }}>需先勾选对应功能权限</Typography>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <ToggleButtonGroup
+                              exclusive
+                              size="small"
+                              value={value}
+                              disabled={disabled}
+                              onChange={(_event, nextValue) => handleDataScopeChange(row.domain, nextValue)}
+                            >
+                              {dataScopeOptions.map((option) => (
+                                <ToggleButton key={option.value} value={option.value} sx={{ px: 2 }}>
+                                  {option.label}
+                                </ToggleButton>
+                              ))}
+                            </ToggleButtonGroup>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <Switch checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} />
               <Typography variant="body2">{form.isActive ? '启用' : '停用'}</Typography>

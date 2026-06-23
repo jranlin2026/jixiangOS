@@ -206,9 +206,9 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   const followerName = currentLead.assignedTo || currentLead.owner || '待分配';
   const lifecycleCode = normalizeLifecycleStatusCode(currentLead.lifecycleStatusCode || currentLead.lifecycleStatus || currentLead.status);
   const lifecycleConfig = getLifecycleConfigByCode(lifecycleCode);
-  const canClaimLead = !currentLead.customerId;
+  const canClaimLead = !currentLead.customerId && hasPermission(currentUser, PERMISSION_KEYS.LEADS_FOLLOW);
   const canEditProfile = canEditLeadProfile(currentLead);
-  const canAssignLead = !currentLead.customerId && hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG, 'write');
+  const canAssignLead = !currentLead.customerId && hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG);
   const salesUsers = users.filter((user) => canReceiveLead(user, roles));
   const canEditLockedContact = isSuperAdmin(currentUser);
 

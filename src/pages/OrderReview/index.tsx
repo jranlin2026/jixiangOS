@@ -7,6 +7,7 @@ import {
   DialogActions,
   DialogContent,
   FormControl,
+  IconButton,
   InputLabel,
   MenuItem,
   Paper,
@@ -27,6 +28,7 @@ import ReplayIcon from '@mui/icons-material/Replay';
 import BlockIcon from '@mui/icons-material/Block';
 import EditIcon from '@mui/icons-material/Edit';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { canReviewOrderApplications, orderReviewApi, ORDER_APPLICATION_STATUSES } from '../../api';
@@ -35,6 +37,7 @@ import { formatCurrency, formatPaginationRows } from '../../shared/utils/formatt
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import OrderForm from '../Orders/OrderForm';
 import { ROUTES } from '../../shared/utils/constants';
+import { getCurrentOperatorUser } from '../../shared/utils/currentOperator';
 
 type ReviewAction = {
   type: 'approve' | 'return' | 'reject';
@@ -57,7 +60,7 @@ const reviewActionText: Record<OrderApplication['reviewLogs'][number]['action'],
   resubmit: '重新提交',
   approve: '审核入库',
   return: '退回修改',
-  reject: '驳回申请',
+  reject: '驳回终止',
 };
 
 function formatDate(value?: string) {
@@ -80,6 +83,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
   const [reviewReason, setReviewReason] = useState('');
   const [approvedApplication, setApprovedApplication] = useState<OrderApplication | null>(null);
   const reviewer = useMemo(() => canReviewOrderApplications(), []);
+  const currentUser = useMemo(() => getCurrentOperatorUser(), []);
   const navigate = useNavigate();
 
   const loadItems = async (nextFilters = filters) => {
@@ -163,6 +167,11 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
     navigate(`${ROUTES.ORDERS}?tab=list&orderId=${encodeURIComponent(application.orderId)}`);
   };
 
+  const isCurrentUserApplicant = (application: OrderApplication) => (
+    Boolean(currentUser?.id && application.applicantId === currentUser.id)
+    || Boolean(currentUser?.name && !application.applicantId && application.applicantName === currentUser.name)
+  );
+
   const reload = () => loadItems(filters);
 
   return (
@@ -229,8 +238,8 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
                   position: 'sticky',
                   right: 0,
                   zIndex: 5,
-                  width: 260,
-                  minWidth: 260,
+                  width: 148,
+                  minWidth: 148,
                   bgcolor: '#f8fafc',
                   boxShadow: '-1px 0 0 #e5e7eb',
                 }}
@@ -242,7 +251,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
           <TableBody>
             {items.map((application) => {
               const canFinanceOperate = reviewer && application.status === ORDER_APPLICATION_STATUSES.PENDING_REVIEW;
-              const canResubmit = !reviewer && application.status === ORDER_APPLICATION_STATUSES.RETURNED;
+              const canResubmit = application.status === ORDER_APPLICATION_STATUSES.RETURNED && (!reviewer || isCurrentUserApplicant(application));
               const canViewFormalOrder = application.status === ORDER_APPLICATION_STATUSES.APPROVED && Boolean(application.orderId);
               return (
                 <TableRow key={application.id} hover>
@@ -278,35 +287,45 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
                       position: 'sticky',
                       right: 0,
                       zIndex: 4,
-                      width: 260,
-                      minWidth: 260,
+                      width: 148,
+                      minWidth: 148,
                       bgcolor: '#fff',
                       boxShadow: '-1px 0 0 #e5e7eb',
                     }}
                   >
-                    <Box sx={{ display: 'flex', gap: 0.75, justifyContent: 'center', flexWrap: 'wrap' }}>
+                    <Box sx={{ display: 'flex', gap: 0.25, justifyContent: 'center', flexWrap: 'wrap' }}>
                       {canFinanceOperate && (
                         <>
-                          <Button size="small" variant="contained" startIcon={<CheckCircleOutlineIcon />} onClick={() => openApproveDialog(application)}>
-                            入库
-                          </Button>
-                          <Button size="small" variant="outlined" startIcon={<ReplayIcon />} onClick={() => openReturnDialog(application)}>
-                            退回
-                          </Button>
-                          <Button size="small" color="error" variant="outlined" startIcon={<BlockIcon />} onClick={() => openRejectDialog(application)}>
-                            驳回
-                          </Button>
+                          <Tooltip title="入库">
+                            <IconButton aria-label="入库" size="small" color="primary" onClick={() => openApproveDialog(application)}>
+                              <CheckCircleOutlineIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="退回修改">
+                            <IconButton aria-label="退回修改" size="small" color="info" onClick={() => openReturnDialog(application)}>
+                              <ReplayIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="驳回终止">
+                            <IconButton aria-label="驳回终止" size="small" color="error" onClick={() => openRejectDialog(application)}>
+                              <BlockIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
                         </>
                       )}
                       {canResubmit && (
-                        <Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => setEditingApplication(application)}>
-                          修改提交
-                        </Button>
+                        <Tooltip title="修改提交">
+                          <IconButton aria-label="修改提交" size="small" color="primary" onClick={() => setEditingApplication(application)}>
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
                       )}
                       {canViewFormalOrder && (
-                        <Button size="small" variant="outlined" onClick={() => viewFormalOrder(application)}>
-                          查看正式订单
-                        </Button>
+                        <Tooltip title="查看正式订单">
+                          <IconButton aria-label="查看正式订单" size="small" color="primary" onClick={() => viewFormalOrder(application)}>
+                            <VisibilityIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
                       )}
                     </Box>
                   </TableCell>
@@ -354,7 +373,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
 
       <Dialog open={Boolean(reviewAction)} onClose={closeReviewDialog} maxWidth="xs" fullWidth>
         <DialogCloseTitle onClose={closeReviewDialog}>
-          {reviewAction?.type === 'approve' ? '确认订单入库' : reviewAction?.type === 'return' ? '退回修改' : '驳回申请'}
+          {reviewAction?.type === 'approve' ? '确认订单入库' : reviewAction?.type === 'return' ? '退回修改' : '驳回终止'}
         </DialogCloseTitle>
         <DialogContent dividers>
           {reviewAction && (
@@ -401,7 +420,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
             onClick={submitReviewAction}
             disabled={(reviewAction?.type === 'return' || reviewAction?.type === 'reject') && !reviewReason.trim()}
           >
-            {reviewAction?.type === 'approve' ? '确认入库' : reviewAction?.type === 'return' ? '确认退回' : '确认驳回'}
+            {reviewAction?.type === 'approve' ? '确认入库' : reviewAction?.type === 'return' ? '确认退回修改' : '确认驳回终止'}
           </Button>
         </DialogActions>
       </Dialog>

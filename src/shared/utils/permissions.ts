@@ -13,9 +13,12 @@ export const PERMISSION_KEYS = {
   DASHBOARD: '驾驶舱',
 
   LEADS: '线索',
-  LEADS_CREATE: '线索/新建线索',
-  LEADS_FLOW_CONFIG: '线索/分配线索',
-  LEADS_FOLLOW: '线索/线索跟进',
+  LEADS_LIST: '线索/线索列表',
+  LEADS_DETAIL: '线索/线索列表/查看线索资料',
+  LEADS_CREATE: '线索/线索列表/新建线索',
+  LEADS_FOLLOW: '线索/线索列表/开始跟进并加入客户',
+  LEADS_FLOW_CONFIG: '线索/线索列表/分配销售',
+  LEADS_INTAKE_STATUS: '线索/入库情况',
   LEADS_CONVERT: '线索/线索转客户',
 
   CUSTOMERS: '客户',
@@ -85,18 +88,36 @@ const PERMISSION_GRANT_TREE: Record<string, string[]> = {
   [PERMISSION_KEYS.DASHBOARD]: [PERMISSION_KEYS.DASHBOARD],
 
   [PERMISSION_KEYS.LEADS]: [
+    PERMISSION_KEYS.LEADS_LIST,
+    PERMISSION_KEYS.LEADS_DETAIL,
     PERMISSION_KEYS.LEADS_CREATE,
+    PERMISSION_KEYS.LEADS_FOLLOW,
     PERMISSION_KEYS.LEADS_FLOW_CONFIG,
+    PERMISSION_KEYS.LEADS_INTAKE_STATUS,
     CAPABILITY_KEYS.LEADS_RECEIVE,
     CAPABILITY_KEYS.LEADS_ASSIGN,
-    PERMISSION_KEYS.LEADS_FOLLOW,
     PERMISSION_KEYS.LEADS_CONVERT,
   ],
+  [PERMISSION_KEYS.LEADS_LIST]: [
+    PERMISSION_KEYS.LEADS_DETAIL,
+    PERMISSION_KEYS.LEADS_CREATE,
+    PERMISSION_KEYS.LEADS_FOLLOW,
+    PERMISSION_KEYS.LEADS_FLOW_CONFIG,
+  ],
+  [PERMISSION_KEYS.LEADS_DETAIL]: [PERMISSION_KEYS.LEADS_DETAIL],
   [PERMISSION_KEYS.LEADS_CREATE]: [PERMISSION_KEYS.LEADS_CREATE],
-  [PERMISSION_KEYS.LEADS_FLOW_CONFIG]: [PERMISSION_KEYS.LEADS_FLOW_CONFIG],
+  [PERMISSION_KEYS.LEADS_FOLLOW]: [
+    PERMISSION_KEYS.LEADS_FOLLOW,
+    CAPABILITY_KEYS.LEADS_RECEIVE,
+    PERMISSION_KEYS.LEADS_CONVERT,
+  ],
+  [PERMISSION_KEYS.LEADS_FLOW_CONFIG]: [
+    PERMISSION_KEYS.LEADS_FLOW_CONFIG,
+    CAPABILITY_KEYS.LEADS_ASSIGN,
+  ],
+  [PERMISSION_KEYS.LEADS_INTAKE_STATUS]: [PERMISSION_KEYS.LEADS_INTAKE_STATUS],
   [CAPABILITY_KEYS.LEADS_RECEIVE]: [CAPABILITY_KEYS.LEADS_RECEIVE],
   [CAPABILITY_KEYS.LEADS_ASSIGN]: [CAPABILITY_KEYS.LEADS_ASSIGN],
-  [PERMISSION_KEYS.LEADS_FOLLOW]: [PERMISSION_KEYS.LEADS_FOLLOW],
   [PERMISSION_KEYS.LEADS_CONVERT]: [PERMISSION_KEYS.LEADS_CONVERT],
 
   [PERMISSION_KEYS.CUSTOMERS]: [
@@ -203,6 +224,15 @@ const PERMISSION_GRANTS_BY_NORMALIZED = new Map<string, string[]>(
   Object.entries(PERMISSION_GRANT_TREE).map(([module, grants]) => [normalizePermissionKey(module), grants]),
 );
 
+const WRITE_ACTION_PERMISSION_KEYS = [
+  PERMISSION_KEYS.ORDER_CREATE,
+  PERMISSION_KEYS.ORDER_EDIT,
+];
+
+const DELETE_ACTION_PERMISSION_KEYS = [
+  PERMISSION_KEYS.ORDER_DELETE,
+];
+
 const ROLE_CODE_BY_USER_ROLE: Record<string, string> = {
   超级管理员: 'super_admin',
   管理员: 'super_admin',
@@ -246,7 +276,7 @@ export function roleHasPermission(role: Role | undefined, permissionKey: string,
   const requestedKeys = expandPermissionGrants(permissionKey);
   if (!requestedKeys.length) return false;
   return role.permissions.some((permission) => {
-    if (!actionAllowed(permission.actions || [], action)) return false;
+    if (!actionAllowed(getDefaultPermissionActions(permission.module, permission.actions || []), action)) return false;
     const grantedKeys = expandPermissionGrants(permission.module);
     if (grantedKeys.includes(ALL_PERMISSION_KEY)) return true;
     return grantedKeys.some((granted) => requestedKeys.some((requested) => (
@@ -262,10 +292,6 @@ export function hasRolePermission(user: Pick<User, 'role' | 'roleId' | 'isActive
 
 export function isSuperAdminUser(user: Pick<User, 'role' | 'roleId' | 'isActive'>, roles: Role[]): boolean {
   return hasRolePermission(user, roles, ALL_PERMISSION_KEY, 'admin') || getUserRole(user, roles)?.code === 'super_admin';
-}
-
-export function isSalesManagerForDataScope(user: Pick<User, 'role' | 'roleId' | 'isActive'>, roles: Role[]): boolean {
-  return getUserRole(user, roles)?.code === 'sales_manager';
 }
 
 export function canReceiveLead(user: Pick<User, 'role' | 'roleId' | 'isActive'>, roles: Role[]): boolean {
@@ -311,6 +337,19 @@ function actionAllowed(actions: string[], requestedAction: string): boolean {
   return actions.includes(requestedAction);
 }
 
+const permissionKeyMatches = (module: string, keys: string[]) => {
+  const normalized = normalizePermissionKey(module);
+  return keys.some((key) => normalizePermissionKey(key) === normalized);
+};
+
+export function getDefaultPermissionActions(module: string, actions: string[] = ['read']): string[] {
+  const next = new Set(actions.length ? actions : ['read']);
+  next.add('read');
+  if (permissionKeyMatches(module, WRITE_ACTION_PERMISSION_KEYS)) next.add('write');
+  if (permissionKeyMatches(module, DELETE_ACTION_PERMISSION_KEYS)) next.add('delete');
+  return Array.from(next);
+}
+
 function expandPermissionGrants(module: string): string[] {
   const normalized = normalizePermissionKey(module);
   if (normalized === ALL_PERMISSION_KEY) return [ALL_PERMISSION_KEY];
@@ -329,9 +368,10 @@ export function sanitizeRolePermissions(permissions: Permission[] = []): Permiss
 
   permissions.forEach((permission) => {
     const modules = getSanitizedPermissionModules(permission.module);
+    const permissionActions = getDefaultPermissionActions(permission.module, permission.actions || []);
     modules.forEach((module) => {
       const actions = merged.get(module) || new Set<string>();
-      (permission.actions || []).forEach((action) => actions.add(action));
+      permissionActions.forEach((action) => actions.add(action));
       merged.set(module, actions);
     });
   });

@@ -5,7 +5,7 @@ import { authApi, roleApi, settingsApi } from './index';
 import { DEFAULT_USER_PASSWORD } from '../shared/utils/auth';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { DEFAULT_ROLES } from '../shared/utils/organizationConfig';
-import { hasPermission, PERMISSION_KEYS, roleHasPermission, sanitizeRolePermissions, toAuthenticatedUser } from '../shared/utils/permissions';
+import { CAPABILITY_KEYS, hasPermission, PERMISSION_KEYS, roleHasPermission, sanitizeRolePermissions, toAuthenticatedUser } from '../shared/utils/permissions';
 import type { Role } from '../types/role';
 
 const appSource = readFileSync(join(process.cwd(), 'src', 'App.tsx'), 'utf8');
@@ -27,6 +27,13 @@ assert.match(rolePermissionSource, /规则配置/);
 assert.match(rolePermissionSource, /客户等级/);
 assert.match(rolePermissionSource, /线索流转/);
 assert.match(rolePermissionSource, /数据维护/);
+assert.match(rolePermissionSource, /label:\s*'线索列表'/);
+assert.match(rolePermissionSource, /label:\s*'入库情况'/);
+assert.match(rolePermissionSource, /label:\s*'查看线索资料'/);
+assert.match(rolePermissionSource, /label:\s*'新建线索'/);
+assert.match(rolePermissionSource, /label:\s*'开始跟进并加入客户'/);
+assert.match(rolePermissionSource, /label:\s*'分配销售'/);
+assert.doesNotMatch(rolePermissionSource, /label:\s*'接收\/领取线索'|label:\s*'分配线索能力'|label:\s*'线索跟进'|label:\s*'线索转客户'/);
 
 const storage = (() => {
   const values = new Map<string, string>();
@@ -115,6 +122,61 @@ const customerChildRole: Role = {
   permissions: [{ module: PERMISSION_KEYS.CUSTOMER_CREATE, actions: ['read'] }],
 };
 assert.equal(roleHasPermission(customerChildRole, PERMISSION_KEYS.CUSTOMERS), true);
+
+const leadFollowRole: Role = {
+  ...legacyOpportunityRole,
+  id: 'role-lead-follow',
+  code: 'lead_follow',
+  permissions: [{ module: PERMISSION_KEYS.LEADS_FOLLOW, actions: ['read'] }],
+};
+assert.equal(roleHasPermission(leadFollowRole, PERMISSION_KEYS.LEADS), true);
+assert.equal(roleHasPermission(leadFollowRole, PERMISSION_KEYS.LEADS_FOLLOW), true);
+assert.equal(roleHasPermission(leadFollowRole, CAPABILITY_KEYS.LEADS_RECEIVE), true);
+assert.equal(roleHasPermission(leadFollowRole, PERMISSION_KEYS.LEADS_CONVERT), true);
+
+const leadAssignRole: Role = {
+  ...legacyOpportunityRole,
+  id: 'role-lead-assign',
+  code: 'lead_assign',
+  permissions: [{ module: PERMISSION_KEYS.LEADS_FLOW_CONFIG, actions: ['read'] }],
+};
+assert.equal(roleHasPermission(leadAssignRole, PERMISSION_KEYS.LEADS), true);
+assert.equal(roleHasPermission(leadAssignRole, CAPABILITY_KEYS.LEADS_ASSIGN), true);
+
+const orderActionRole: Role = {
+  ...legacyOpportunityRole,
+  id: 'role-order-actions',
+  code: 'order_actions',
+  permissions: [
+    { module: PERMISSION_KEYS.ORDER_EDIT, actions: ['read'] },
+    { module: PERMISSION_KEYS.ORDER_DELETE, actions: ['read'] },
+  ],
+};
+assert.equal(roleHasPermission(orderActionRole, PERMISSION_KEYS.ORDER_EDIT, 'write'), true);
+assert.equal(roleHasPermission(orderActionRole, PERMISSION_KEYS.ORDER_DELETE, 'delete'), true);
+assert.deepEqual(
+  sanitizeRolePermissions(orderActionRole.permissions).filter((permission) => (
+    permission.module === PERMISSION_KEYS.ORDER_EDIT || permission.module === PERMISSION_KEYS.ORDER_DELETE
+  )),
+  [
+    { module: PERMISSION_KEYS.ORDER_EDIT, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.ORDER_DELETE, actions: ['read', 'delete'] },
+  ],
+);
+
+const orderReadOnlyPermissions = sanitizeRolePermissions([{ module: PERMISSION_KEYS.ORDERS, actions: ['read'] }]);
+assert.equal(
+  orderReadOnlyPermissions.find((permission) => permission.module === PERMISSION_KEYS.ORDER_EDIT)?.actions.includes('write'),
+  false,
+);
+assert.equal(
+  hasPermission({ role: 'Order Reader', isActive: true, permissions: orderReadOnlyPermissions }, PERMISSION_KEYS.ORDER_EDIT, 'write'),
+  false,
+);
+assert.equal(
+  hasPermission({ role: 'Order Reader', isActive: true, permissions: orderReadOnlyPermissions }, PERMISSION_KEYS.ORDER_DELETE, 'delete'),
+  false,
+);
 
 storage.clear();
 const now = '2026-06-22T00:00:00.000Z';

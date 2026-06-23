@@ -5,7 +5,7 @@ import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
-import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
+import { ensureOrganizationConfigData, normalizeRoleDataScopes } from '../shared/utils/organizationConfig';
 import type { User } from '../types/settings';
 
 function ensureInit(): void {
@@ -46,6 +46,7 @@ async function createRole(data: Omit<Role, 'id' | 'createdAt' | 'updatedAt'>): P
   const now = new Date().toISOString();
   const newRole: Role = {
     ...data,
+    dataScopes: normalizeRoleDataScopes(data),
     id: `role-${uuidv4().slice(0, 8)}`,
     createdAt: now,
     updatedAt: now,
@@ -64,7 +65,12 @@ async function updateRole(id: string, data: Partial<Role>): Promise<ApiResponse<
   if (roles[idx].code === 'super_admin' && data.isActive === false) {
     return createErrorResponse('超级管理员角色不能停用');
   }
-  roles[idx] = { ...roles[idx], ...data, updatedAt: new Date().toISOString() };
+  const nextRole = { ...roles[idx], ...data };
+  roles[idx] = {
+    ...nextRole,
+    dataScopes: normalizeRoleDataScopes(nextRole),
+    updatedAt: new Date().toISOString(),
+  };
   setStorageData(STORAGE_KEYS.ROLES, roles);
   return createSuccessResponse(roles[idx]);
 }
