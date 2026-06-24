@@ -16,6 +16,12 @@ import type { Role } from '../types/role';
 import type { User } from '../types/settings';
 import { v4 as uuidv4 } from 'uuid';
 import { ensureOrganizationConfigData, migrateUsersWithOrganization } from '../shared/utils/organizationConfig';
+import {
+  backendRequest,
+  clearBackendToken,
+  shouldUseBackendApi,
+  writeBackendToken,
+} from './backendClient';
 
 function ensureAuthData(): { users: UserWithAuth[]; roles: Role[] } {
   initializeMockData();
@@ -49,6 +55,16 @@ function isExpired(session: AuthSession): boolean {
 }
 
 async function login(payload: LoginPayload): Promise<ApiResponse<AuthenticatedUser | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<{ token: string; user: AuthenticatedUser }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code);
+    writeBackendToken(response.data.token);
+    return createSuccessResponse(response.data.user);
+  }
+
   await delay(200);
   const { users, roles } = ensureAuthData();
   const account = normalizeAccount(payload.account);
@@ -74,6 +90,10 @@ async function login(payload: LoginPayload): Promise<ApiResponse<AuthenticatedUs
 }
 
 async function getCurrentUser(): Promise<ApiResponse<AuthenticatedUser | null>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<AuthenticatedUser | null>('/auth/me');
+  }
+
   await delay(80);
   const session = readSession();
   if (!session || isExpired(session)) {
@@ -92,6 +112,12 @@ async function getCurrentUser(): Promise<ApiResponse<AuthenticatedUser | null>> 
 }
 
 async function logout(): Promise<ApiResponse<boolean>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<boolean>('/auth/logout', { method: 'POST' });
+    clearBackendToken();
+    return response;
+  }
+
   await delay(50);
   removeStorageData(AUTH_SESSION_STORAGE_KEY);
   return createSuccessResponse(true);

@@ -1,0 +1,105 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Department {
+  id          String   @id @db.VarChar(64)
+  name        String   @db.VarChar(100)
+  code        String   @unique @db.VarChar(64)
+  memberCount Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("departments")
+}
+
+model Position {
+  id           String   @id @db.VarChar(64)
+  name         String   @db.VarChar(100)
+  code         String   @unique @db.VarChar(64)
+  departmentId String?  @db.VarChar(64)
+  description  String?  @db.VarChar(500)
+  sortOrder    Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([departmentId])
+  @@map("positions")
+}
+
+model Role {
+  id           String   @id @db.VarChar(64)
+  name         String   @db.VarChar(100)
+  code         String   @unique @db.VarChar(64)
+  description  String?  @db.VarChar(500)
+  departmentId String?  @db.VarChar(64)
+  permissions  Json
+  dataScopes   Json?
+  memberCount  Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([departmentId])
+  @@map("roles")
+}
+
+model User {
+  id                String    @id @db.VarChar(64)
+  name              String    @db.VarChar(100)
+  account           String?   @unique @db.VarChar(100)
+  email             String    @unique @db.VarChar(200)
+  phone             String    @db.VarChar(50)
+  role              String    @db.VarChar(100)
+  avatar            String?   @db.VarChar(500)
+  departmentId      String?   @db.VarChar(64)
+  positionId        String?   @db.VarChar(64)
+  positionName      String?   @db.VarChar(100)
+  roleId            String?   @db.VarChar(64)
+  passwordHash      String?   @db.VarChar(100)
+  passwordSalt      String?   @db.VarChar(100)
+  passwordUpdatedAt DateTime?
+  lastLoginAt       DateTime?
+  isActive          Boolean   @default(true)
+  employmentStatus  String    @default("active") @db.VarChar(20)
+  leftAt            DateTime?
+  leftBy            String?   @db.VarChar(100)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  sessions AuthSession[]
+
+  @@index([departmentId])
+  @@index([roleId])
+  @@map("users")
+}
+
+model AuthSession {
+  id        String    @id @db.VarChar(64)
+  token     String    @unique @db.VarChar(120)
+  userId    String    @db.VarChar(64)
+  remember  Boolean   @default(false)
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("auth_sessions")
+}
+
+model AppStorage {
+  key       String   @id @db.VarChar(120)
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("app_storage")
+}

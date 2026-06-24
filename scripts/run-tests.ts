@@ -3,7 +3,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 const projectRoot = process.cwd();
-const testRoots = ['src/api'];
+const testRoots = ['src/api', 'server'];
 
 const collectTests = (dir: string): string[] => {
   const entries = readdirSync(dir);

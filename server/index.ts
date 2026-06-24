@@ -2,12 +2,19 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import OpenAI from 'openai';
+import { prisma, checkDatabaseConnection } from './db/client';
+import { createAuthService } from './services/authService';
+import { createSettingsService } from './services/settingsService';
+import { createStorageService } from './services/storageService';
 
 dotenv.config();
 
 const app = express();
 const port = Number(process.env.AI_PROXY_PORT || 3001);
 const model = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+const authService = createAuthService(prisma);
+const settingsService = createSettingsService(prisma);
+const storageService = createStorageService(prisma);
 
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
@@ -37,8 +44,71 @@ function jsonFromText<T>(text: string): T | null {
   }
 }
 
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, hasOpenAIKey: Boolean(process.env.OPENAI_API_KEY), model });
+function bearerToken(req: express.Request): string | undefined {
+  const header = req.headers.authorization || '';
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match?.[1];
+}
+
+app.get('/api/health', async (_req, res) => {
+  const database = await checkDatabaseConnection();
+  res.json({ ok: true, database, hasOpenAIKey: Boolean(process.env.OPENAI_API_KEY), model });
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  const result = await authService.login({
+    account: String(req.body?.account || ''),
+    password: String(req.body?.password || ''),
+    remember: Boolean(req.body?.remember),
+  });
+  res.status(result.code === 0 ? 200 : 401).json(result);
+});
+
+app.get('/api/auth/me', async (req, res) => {
+  res.json(await authService.getCurrentUser(bearerToken(req)));
+});
+
+app.post('/api/auth/logout', async (req, res) => {
+  res.json(await authService.logout(bearerToken(req)));
+});
+
+app.get('/api/settings/users', async (_req, res) => {
+  res.json(await settingsService.listUsers());
+});
+
+app.get('/api/settings/roles', async (_req, res) => {
+  res.json(await settingsService.listRoles());
+});
+
+app.get('/api/settings/departments', async (_req, res) => {
+  res.json(await settingsService.listDepartments());
+});
+
+app.get('/api/settings/positions', async (_req, res) => {
+  res.json(await settingsService.listPositions());
+});
+
+app.get('/api/storage', async (_req, res) => {
+  res.json(await storageService.list());
+});
+
+app.get('/api/storage/:key', async (req, res) => {
+  const result = await storageService.get(req.params.key);
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.put('/api/storage/:key', async (req, res) => {
+  const result = await storageService.set(req.params.key, req.body?.value);
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.delete('/api/storage/:key', async (req, res) => {
+  const result = await storageService.remove(req.params.key);
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.delete('/api/storage', async (_req, res) => {
+  res.json(await storageService.clearPrefix());
 });
 
 app.post('/api/ai/query', async (req, res) => {

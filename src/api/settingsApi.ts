@@ -12,6 +12,7 @@ import { DEFAULT_USER_PASSWORD, ensureAdminUser, ensureUniqueAccount, normalizeA
 import { DEFAULT_ORGANIZATION_PROFILE, ensureOrganizationConfigData, getOrganizationProfile, migrateUsersWithOrganization, resolveRoleForUser } from '../shared/utils/organizationConfig';
 import { DEFAULT_USER_ROLE } from '../shared/utils/roles';
 import { getCurrentOperatorName } from '../shared/utils/currentOperator';
+import { backendRequest, shouldUseBackendApi } from './backendClient';
 
 function ensureInit(): void {
   initializeMockData();
@@ -140,6 +141,29 @@ function isAdminUser(user: Pick<User, 'account'>): boolean {
 }
 
 async function fetchUsers(filters?: UserFilters): Promise<ApiResponse<User[]>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<User[]>('/settings/users');
+    if (response.code !== 0) return response;
+    let users = response.data;
+    const employmentStatus = filters?.employmentStatus || 'active';
+
+    if (filters?.search) {
+      const q = filters.search.toLowerCase();
+      users = users.filter((u) => (
+        u.name.toLowerCase().includes(q)
+        || u.email.toLowerCase().includes(q)
+        || normalizeAccount(u.account).includes(q)
+        || normalizeAccount(u.phone).includes(q)
+      ));
+    }
+    if (filters?.role) users = users.filter((u) => u.role === filters.role);
+    if (filters?.isActive !== undefined) users = users.filter((u) => u.isActive === filters.isActive);
+    if (employmentStatus !== 'all') {
+      users = users.filter((u) => (u.employmentStatus || 'active') === employmentStatus);
+    }
+    return createSuccessResponse(users);
+  }
+
   await delay(200);
   let users = ensureUsersWithAuth();
   const employmentStatus = filters?.employmentStatus || 'active';

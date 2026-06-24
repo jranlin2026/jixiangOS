@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ensureOrganizationConfigData, getDepartmentDescendantIds, isDepartmentDescendantOf, sortDepartments } from '../shared/utils/organizationConfig';
 import type { User } from '../types/settings';
 import type { Role } from '../types/role';
+import { backendRequest, shouldUseBackendApi } from './backendClient';
 
 function ensureInit(): void {
   initializeMockData();
@@ -15,6 +16,20 @@ function ensureInit(): void {
 }
 
 async function getDepartments(filters?: DepartmentFilters): Promise<ApiResponse<Department[]>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Department[]>('/settings/departments');
+    if (response.code !== 0) return response;
+    let departments = response.data;
+
+    if (filters?.search) {
+      const q = filters.search.toLowerCase();
+      departments = departments.filter((d) => d.name.toLowerCase().includes(q) || d.code.toLowerCase().includes(q) || d.description?.toLowerCase().includes(q));
+    }
+    if (filters?.isActive !== undefined) departments = departments.filter((d) => d.isActive === filters.isActive);
+
+    return createSuccessResponse(sortDepartments(departments));
+  }
+
   ensureInit();
   await delay(200);
   let departments = ensureOrganizationConfigData().departments;

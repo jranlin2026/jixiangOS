@@ -7,6 +7,7 @@ import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 import { ensureOrganizationConfigData, normalizeRoleDataScopes } from '../shared/utils/organizationConfig';
 import type { User } from '../types/settings';
+import { backendRequest, shouldUseBackendApi } from './backendClient';
 
 function ensureInit(): void {
   initializeMockData();
@@ -14,6 +15,21 @@ function ensureInit(): void {
 }
 
 async function getRoles(filters?: RoleFilters): Promise<ApiResponse<Role[]>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Role[]>('/settings/roles');
+    if (response.code !== 0) return response;
+    let roles = response.data;
+
+    if (filters?.search) {
+      const q = filters.search.toLowerCase();
+      roles = roles.filter((r) => r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q) || r.description?.toLowerCase().includes(q));
+    }
+    if (filters?.departmentId) roles = roles.filter((r) => r.departmentId === filters.departmentId);
+    if (filters?.isActive !== undefined) roles = roles.filter((r) => r.isActive === filters.isActive);
+
+    return createSuccessResponse(roles);
+  }
+
   ensureInit();
   await delay(200);
   let roles = ensureOrganizationConfigData().roles;
