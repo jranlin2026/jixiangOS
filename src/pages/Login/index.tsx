@@ -11,7 +11,6 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
@@ -62,15 +61,21 @@ const Login: React.FC = () => {
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <Box sx={{ width: 38, height: 38, borderRadius: 2, bgcolor: '#2196F3', display: 'grid', placeItems: 'center', fontWeight: 800 }}>
-            AI
+          <Box
+            component="img"
+            src="/jixiang-os-logo.png"
+            alt="极享OS"
+            sx={{ width: 46, height: 46, borderRadius: 2, objectFit: 'contain' }}
+          />
+          <Box>
+            <Typography variant="h6" sx={{ fontWeight: 800, lineHeight: 1.1 }}>极享OS</Typography>
+            <Typography variant="body2" sx={{ color: '#cbd5e1', mt: 0.25 }}>AI企业运营系统</Typography>
           </Box>
-          <Typography variant="h6" sx={{ fontWeight: 700 }}>AI智能体运营</Typography>
         </Box>
 
         <Box sx={{ maxWidth: 520 }}>
           <Typography variant="h3" sx={{ fontWeight: 700, mb: 2, letterSpacing: 0 }}>
-            内部运营管理系统
+            AI企业运营系统
           </Typography>
           <Typography variant="body1" sx={{ color: '#cbd5e1', lineHeight: 1.9 }}>
             线索、客户、订单、交付、财务和系统配置统一管理。登录后将根据角色权限展示对应模块和操作。
@@ -85,12 +90,15 @@ const Login: React.FC = () => {
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', p: { xs: 2, md: 6 } }}>
         <Paper elevation={0} sx={{ width: '100%', maxWidth: 430, p: { xs: 3, md: 4 }, border: '1px solid #e5e7eb', borderRadius: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 3 }}>
-            <Box sx={{ width: 38, height: 38, borderRadius: 2, bgcolor: '#E3F2FD', color: '#1976D2', display: 'grid', placeItems: 'center' }}>
-              <LockOutlinedIcon fontSize="small" />
-            </Box>
+            <Box
+              component="img"
+              src="/jixiang-os-logo.png"
+              alt="极享OS"
+              sx={{ width: 42, height: 42, borderRadius: 2, objectFit: 'contain' }}
+            />
             <Box>
-              <Typography variant="h5" sx={{ fontWeight: 700 }}>账号登录</Typography>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>请输入账号和密码进入系统</Typography>
+              <Typography variant="h5" sx={{ fontWeight: 800 }}>极享OS</Typography>
+              <Typography variant="body2" sx={{ color: '#6b7280' }}>AI企业运营系统</Typography>
             </Box>
           </Box>
 

@@ -151,6 +151,28 @@ function seed() {
       createdAt: now,
       updatedAt: now,
     } as any,
+    {
+      id: 'order-d',
+      orderNo: 'ORD-D',
+      customerId: 'cust-d',
+      customerName: 'Customer D',
+      productLevel: zh.product,
+      orderType: zh.orderType,
+      amount: 1299,
+      actualAmount: 1299,
+      paymentMethod: zh.bankTransfer,
+      officialPaymentChannel: zh.officialChannel,
+      status: zh.confirmed,
+      refundStatus: zh.none,
+      owner: 'Sales A',
+      sourceType: zh.companyResource,
+      resourceOwnership: zh.companyResource,
+      dealScene: zh.orderType,
+      proofStatus: '\u5df2\u4e0a\u4f20',
+      payments: [{ id: 'pay-d', amount: 1299, paidAt: '2026-05-27T10:00:00.000Z', method: zh.bankTransfer }],
+      createdAt: now,
+      updatedAt: now,
+    } as any,
   ];
   storage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
   storage.setItem(STORAGE_KEYS.COMMISSIONS, JSON.stringify([
@@ -169,8 +191,10 @@ assert.equal(typeof (commissionApi as any).fetchMonthlyCommissionPayouts, 'funct
 assert.equal(typeof (commissionApi as any).payMonthlyOwnerCommissions, 'function');
 assert.equal(typeof (commissionApi as any).payMonthlyCommissionBatch, 'function');
 assert.equal(typeof (commissionApi as any).fetchCommissionOrderSummaryStatusCounts, 'function');
+assert.equal(typeof (commissionApi as any).fetchCreatableCommissionOrders, 'function');
 assert.equal(typeof (commissionApi as any).startCommissionChargeback, 'function');
 assert.equal(typeof (commissionApi as any).completeCommissionChargeback, 'function');
+assert.equal(typeof (commissionApi as any).deleteOrderCommissions, 'function');
 
 const deleteNoCommissionOrder = await orderApi.deleteOrder('order-c');
 assert.equal(deleteNoCommissionOrder.code, 0);
@@ -210,6 +234,81 @@ assert.deepEqual(statusCountsRes.data, {
   '\u5df2\u51b2\u9500': 0,
 });
 
+const creatableOrdersRes = await (commissionApi as any).fetchCreatableCommissionOrders({ pageSize: 20 });
+assert.equal(creatableOrdersRes.code, 0);
+assert.deepEqual(
+  creatableOrdersRes.data.items.map((item: any) => item.orderId),
+  ['order-d'],
+);
+assert.equal(creatableOrdersRes.data.items[0].orderNo, 'ORD-D');
+assert.equal(creatableOrdersRes.data.items[0].customerName, 'Customer D');
+
+const createManualSplitRes = await (commissionApi as any).saveOrderCommissionAdjustments('order-d', [{
+  orderId: 'order-d',
+  role: zh.salesRole,
+  ownerId: 'user-sales',
+  commissionAmount: 88,
+  commissionRate: 0,
+  performanceAmount: 899,
+  calculationNote: 'Manual first split',
+}], 'Create manual split for missing order');
+assert.equal(createManualSplitRes.code, 0);
+assert.equal((createManualSplitRes.data as Commission[]).length, 1);
+assert.equal((createManualSplitRes.data as Commission[])[0].sourceType, '\u4eba\u5de5\u65b0\u589e');
+const creatableAfterManualCreate = await (commissionApi as any).fetchCreatableCommissionOrders({ pageSize: 20 });
+assert.equal(
+  creatableAfterManualCreate.data.items.some((item: any) => item.orderId === 'order-d'),
+  false,
+);
+
+const removePendingConfirmLineRes = await (commissionApi as any).saveOrderCommissionAdjustments('order-a', [
+  {
+    id: 'comm-a-sales',
+    orderId: 'order-a',
+    role: zh.salesRole,
+    ownerId: 'user-sales',
+    commissionAmount: 100,
+    commissionRate: 0,
+    performanceAmount: 9800,
+    calculationNote: 'Keep sales only',
+  },
+], 'Remove pending lead split');
+assert.equal(removePendingConfirmLineRes.code, 0);
+assert.deepEqual(
+  (removePendingConfirmLineRes.data as Commission[]).map((item) => item.id),
+  ['comm-a-sales'],
+);
+
+const removePendingPayLineRes = await (commissionApi as any).saveOrderCommissionAdjustments('order-b', [
+  {
+    id: 'comm-b-success',
+    orderId: 'order-b',
+    role: zh.successRole,
+    ownerId: 'user-lead',
+    commissionAmount: 50,
+    commissionRate: 0,
+    performanceAmount: 19800,
+    calculationNote: 'Try removing payable sales line',
+  },
+], 'Try removing payable split');
+assert.notEqual(removePendingPayLineRes.code, 0);
+assert.match(removePendingPayLineRes.message || '', /待确认/);
+
+const deletePendingOrderSplitRes = await (commissionApi as any).deleteOrderCommissions('order-a', 'Delete pending order split');
+assert.equal(deletePendingOrderSplitRes.code, 0);
+assert.equal(deletePendingOrderSplitRes.data, true);
+assert.deepEqual(((await commissionApi.fetchCommissionsByOrder('order-a')).data || []).map((item: Commission) => item.id), []);
+let deleteLogs = ((await (commissionApi as any).fetchCommissionOperationLogs('order-a')).data || []);
+assert.ok(
+  deleteLogs.some((item: any) => item.action === '删除分账' && item.reason === 'Delete pending order split'),
+  '删除整笔订单分账后应写入操作历史',
+);
+const deleteLockedOrderSplitRes = await (commissionApi as any).deleteOrderCommissions('order-b', 'Try deleting payable split');
+assert.notEqual(deleteLockedOrderSplitRes.code, 0);
+assert.match(deleteLockedOrderSplitRes.message || '', /待确认/);
+assert.equal(((await commissionApi.fetchCommissionsByOrder('order-b')).data || []).length, 2);
+
+seed();
 const confirmRes = await commissionApi.confirmOrderCommissions('order-a', 'order summary confirm');
 assert.equal(confirmRes.code, 0);
 const confirmedSummaries = await (commissionApi as any).fetchCommissionOrderSummaries({ status: '\u5f85\u53d1\u653e', pageSize: 20 });

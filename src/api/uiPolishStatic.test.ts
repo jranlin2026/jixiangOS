@@ -48,9 +48,26 @@ const orderReviewSource = readFileSync(join(projectRoot, 'src/pages/OrderReview/
 const rolePermissionSource = readFileSync(join(projectRoot, 'src/pages/Settings/RolePermission.tsx'), 'utf8');
 const commissionSource = readFileSync(join(projectRoot, 'src/pages/Commission/index.tsx'), 'utf8');
 const financeSource = readFileSync(join(projectRoot, 'src/pages/Finance/index.tsx'), 'utf8');
+const refundCenterSource = readFileSync(join(projectRoot, 'src/pages/RefundCenter/index.tsx'), 'utf8');
 const detailSplitEditorSource = commissionSource.slice(
   commissionSource.indexOf('const renderDetailSplitEditor'),
   commissionSource.indexOf('const renderSettlementDetailActions'),
+);
+const orderToolbarSource = commissionSource.slice(
+  commissionSource.indexOf('const renderOrderToolbar'),
+  commissionSource.indexOf('const renderOrderSplitTable'),
+);
+const commissionHeaderSource = commissionSource.slice(
+  commissionSource.indexOf('<Box sx={{ display: \'flex\', justifyContent: \'space-between\''),
+  commissionSource.indexOf('<Tabs value={tabValue}'),
+);
+const refundCenterHeaderSource = refundCenterSource.slice(
+  refundCenterSource.indexOf('{!embedded && ('),
+  refundCenterSource.indexOf('<Tabs value={activeTab}'),
+);
+const createOrderSplitDialogSource = commissionSource.slice(
+  commissionSource.indexOf('<Dialog open={createSplitOpen}'),
+  commissionSource.indexOf('<Dialog open={Boolean(deleteSummary)}'),
 );
 
 assert.match(
@@ -212,6 +229,71 @@ assert.match(
   commissionSource,
   /aria-label="调整分账"/,
   'Order split table should expose an icon-only entry for adjusting split details.',
+);
+assert.match(
+  commissionSource,
+  /aria-label="删除订单分账"/,
+  'Order split table should expose an icon-only entry for deleting a pending order split.',
+);
+assert.match(
+  commissionSource,
+  /deleteOrderCommissions/,
+  'Order split delete action should call the order-level delete API.',
+);
+assert.match(
+  commissionSource,
+  /新建订单分账/,
+  'Order split workspace should expose a clear create-order-split entry point.',
+);
+assert.doesNotMatch(
+  orderToolbarSource,
+  /新建订单分账/,
+  'Create-order-split action should live beside the view settings button, not inside the filter toolbar.',
+);
+assert.match(
+  commissionHeaderSource,
+  /视图设置[\s\S]*新建订单分账|新建订单分账[\s\S]*视图设置/,
+  'Order split header actions should place 新建订单分账 beside 视图设置.',
+);
+assert.match(
+  financeSource,
+  /视图设置[\s\S]*新建订单分账|新建订单分账[\s\S]*视图设置/,
+  'Finance settlement header should place 新建订单分账 beside 视图设置.',
+);
+assert.match(
+  financeSource,
+  /orderSplitCreateTrigger/,
+  'Finance settlement header should trigger the embedded order-split create dialog.',
+);
+assert.match(
+  refundCenterHeaderSource,
+  /\{!embedded && \([\s\S]*视图设置/,
+  'Refund workspace should keep its internal view settings button only for standalone use.',
+);
+assert.match(
+  financeSource,
+  /activeTab === 'refund'[\s\S]*视图设置/,
+  'Finance refund header should place 视图设置 in the same top-right header action area.',
+);
+assert.match(
+  financeSource,
+  /refundViewSettingsTrigger/,
+  'Finance refund header should trigger the embedded refund table view settings dialog.',
+);
+assert.match(
+  commissionSource,
+  /fetchCreatableCommissionOrders/,
+  'Create-order-split dialog should load orders that can receive a first manual split.',
+);
+assert.match(
+  createOrderSplitDialogSource,
+  /<InputLabel shrink>\s*选择订单\s*<\/InputLabel>/,
+  'Create-order-split order selector should shrink its label when displayEmpty shows placeholder text.',
+);
+assert.match(
+  commissionSource,
+  /删除此条未确认分账/,
+  'Split editor delete action should make the pending-only deletion rule explicit.',
 );
 assert.doesNotMatch(
   commissionSource,

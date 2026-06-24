@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Box, Typography, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Paper, Chip, TextField,
@@ -56,9 +56,11 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
 
 interface RefundCenterProps {
   embedded?: boolean;
+  refundViewSettingsTrigger?: number;
 }
 
-const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false }) => {
+const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundViewSettingsTrigger = 0 }) => {
+  const lastRefundViewSettingsTriggerRef = useRef(refundViewSettingsTrigger);
   const {
     items,
     stats,
@@ -84,6 +86,14 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false }) => {
     fetchItems();
     fetchStats();
   }, [fetchItems, fetchStats]);
+
+  useEffect(() => {
+    if (refundViewSettingsTrigger <= 0) return;
+    if (lastRefundViewSettingsTriggerRef.current === refundViewSettingsTrigger) return;
+    lastRefundViewSettingsTriggerRef.current = refundViewSettingsTrigger;
+    setActiveTab(0);
+    setViewSettingsOpen(true);
+  }, [refundViewSettingsTrigger]);
 
   const handleViewDetail = (refund: Refund) => {
     setSelectedRefund(refund);
@@ -238,19 +248,19 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false }) => {
 
   return (
     <Box sx={{ p: embedded ? 0 : 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, gap: 2 }}>
-        {!embedded && (
+      {!embedded && (
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, gap: 2 }}>
           <Typography variant="h5" sx={{ fontWeight: 600 }}>
             退款中心
           </Typography>
-        )}
-        <Box sx={{ flex: 1 }} />
-        {activeTab === 0 && (
-          <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
-            视图设置
-          </Button>
-        )}
-      </Box>
+          <Box sx={{ flex: 1 }} />
+          {activeTab === 0 && (
+            <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
+              视图设置
+            </Button>
+          )}
+        </Box>
+      )}
 
       <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ mb: 3 }}>
         <Tab label="退款挽回" />

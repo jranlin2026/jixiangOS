@@ -19,6 +19,7 @@ import {
   Tabs,
   Typography,
 } from '@mui/material';
+import AddIcon from '@mui/icons-material/Add';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import { commissionApi, financeApi, orderReviewApi, ORDER_APPLICATION_STATUSES, refundApi } from '../../api';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
@@ -77,6 +78,8 @@ const Finance: React.FC = () => {
   const [expensePage, setExpensePage] = useState(0);
   const [expenseRowsPerPage, setExpenseRowsPerPage] = useState(10);
   const [settlementViewSettingsTrigger, setSettlementViewSettingsTrigger] = useState(0);
+  const [settlementCreateSplitTrigger, setSettlementCreateSplitTrigger] = useState(0);
+  const [refundViewSettingsTrigger, setRefundViewSettingsTrigger] = useState(0);
 
   const visibleFinanceTabs = useMemo(
     () => FINANCE_TABS.filter((tab) => hasPermission(currentUser, tab.permissionKey)),
@@ -324,14 +327,29 @@ const Finance: React.FC = () => {
             汇总财务总览、订单分账、退款付款和收支流水，财务相关工作统一在这里处理。
           </Typography>
         </Box>
-        {activeTab === 'settlement' && (
-          <Button
-            variant="outlined"
-            startIcon={<ViewColumnIcon />}
-            onClick={() => setSettlementViewSettingsTrigger((value) => value + 1)}
-          >
-            视图设置
-          </Button>
+        {(activeTab === 'settlement' || activeTab === 'refund') && (
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, flexWrap: 'wrap' }}>
+            <Button
+              variant="outlined"
+              startIcon={<ViewColumnIcon />}
+              onClick={() => (
+                activeTab === 'settlement'
+                  ? setSettlementViewSettingsTrigger((value) => value + 1)
+                  : setRefundViewSettingsTrigger((value) => value + 1)
+              )}
+            >
+              视图设置
+            </Button>
+            {activeTab === 'settlement' && (
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={() => setSettlementCreateSplitTrigger((value) => value + 1)}
+              >
+                新建订单分账
+              </Button>
+            )}
+          </Box>
         )}
       </Box>
 
@@ -349,10 +367,11 @@ const Finance: React.FC = () => {
           initialTab={0}
           hideEmbeddedOrderSplitViewButton
           orderSplitViewTrigger={settlementViewSettingsTrigger}
+          orderSplitCreateTrigger={settlementCreateSplitTrigger}
         />
       )}
       {activeTab === 'payout' && <Commission key="finance-payout" embedded initialTab={1} />}
-      {activeTab === 'refund' && <RefundCenter embedded />}
+      {activeTab === 'refund' && <RefundCenter embedded refundViewSettingsTrigger={refundViewSettingsTrigger} />}
       {activeTab === 'flow' && renderFlow()}
       {activeTab === 'rules' && <Commission key="finance-rules" embedded initialTab={2} />}
     </Box>

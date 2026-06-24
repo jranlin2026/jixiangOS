@@ -2,6 +2,7 @@ import type {
   Commission,
   CommissionAdjustmentInput,
   CommissionAuditIssue,
+  CommissionCreatableOrderSummary,
   CommissionFilters,
   CommissionOrderSummary,
   CommissionOrderSummaryFilters,
@@ -385,6 +386,69 @@ async function fetchCommissionOrderSummaryStatusCounts(filters?: CommissionOrder
   return createSuccessResponse(counts);
 }
 
+function hasEffectiveCommission(commissions: Commission[]): boolean {
+  return commissions.some((commission) => {
+    const status = normalizeCommission(commission).status;
+    return !['已撤回', '已冲销', '已取消'].includes(status);
+  });
+}
+
+function isCreatableCommissionOrder(order: Order, commissions: Commission[]): boolean {
+  const refundStatus = order.refundStatus || '无';
+  const orderStatus = order.status || '';
+  return orderStatus === '已确认'
+    && refundStatus !== '退款已完成'
+    && !hasEffectiveCommission(commissions);
+}
+
+function mapCreatableOrder(order: Order): CommissionCreatableOrderSummary {
+  return {
+    orderId: order.id,
+    orderNo: order.orderNo,
+    customerName: order.customerName,
+    productLevel: order.productLevel,
+    orderType: order.orderType,
+    paymentDate: order.payments?.[0]?.paidAt || order.createdAt,
+    orderAmount: order.actualAmount || order.amount,
+    resourceOwnership: order.resourceOwnership,
+    salesOwner: order.salesName || order.owner,
+  };
+}
+
+async function fetchCreatableCommissionOrders(
+  filters?: Pick<CommissionOrderSummaryFilters, 'search' | 'page' | 'pageSize'>,
+): Promise<ApiResponse<PaginatedResponse<CommissionCreatableOrderSummary>>> {
+  ensureInit();
+  await delay(140);
+  const commissionsByOrderId = new Map<string, Commission[]>();
+  getAllCommissions().forEach((commission) => {
+    const rows = commissionsByOrderId.get(commission.orderId) || [];
+    rows.push(commission);
+    commissionsByOrderId.set(commission.orderId, rows);
+  });
+
+  let filtered = getOrders()
+    .filter((order) => isCreatableCommissionOrder(order, commissionsByOrderId.get(order.id) || []))
+    .map(mapCreatableOrder);
+
+  const q = filters?.search?.trim().toLowerCase();
+  if (q) {
+    filtered = filtered.filter((order) => (
+      order.orderNo.toLowerCase().includes(q)
+      || order.customerName.toLowerCase().includes(q)
+    ));
+  }
+
+  filtered.sort((a, b) => new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime());
+  const page = filters?.page || 1;
+  const pageSize = filters?.pageSize || DEFAULT_PAGE_SIZE;
+  const total = filtered.length;
+  const totalPages = Math.ceil(total / pageSize);
+  const items = filtered.slice((page - 1) * pageSize, page * pageSize);
+
+  return createSuccessResponse({ items, pagination: { page, pageSize, total, totalPages } });
+}
+
 function resolveAdjustmentUser(input: CommissionAdjustmentInput): { user?: User; department?: Department; error?: string } {
   if (!input.ownerId) {
     return { error: '\u8bf7\u9009\u62e9\u7cfb\u7edf\u5458\u5de5\u4f5c\u4e3a\u5206\u6da6\u4eba\u5458' };
@@ -470,6 +534,12 @@ async function saveOrderCommissionAdjustments(
       .filter((commission) => commission.orderId === orderId)
       .map((commission) => [commission.id, normalizeCommission(commission)]),
   );
+  const submittedIds = new Set(rows.map((row) => row.id).filter(Boolean));
+  const removedLockedRow = Array.from(existingById.values()).find((commission) => (
+    !submittedIds.has(commission.id) && commission.status !== '待确认'
+  ));
+  if (removedLockedRow) return createErrorResponse('只能删除待确认阶段的分账记录，已进入发放或冲销链路的分账请使用撤回/冲销流程');
+
   const adjustedRows = resolvedRows.map(({ row, resolved }) => buildAdjustedCommission(
     order,
     row,
@@ -486,6 +556,30 @@ async function saveOrderCommissionAdjustments(
   saveCommissions(next);
   appendCommissionOperationLog(order, '调整分账', reason, adjustedRows, operator, now);
   return createSuccessResponse(getOrderCommissions(orderId));
+}
+
+async function deleteOrderCommissions(orderId: string, reason: string): Promise<ApiResponse<boolean>> {
+  ensureInit();
+  await delay(160);
+  const normalizedReason = reason.trim();
+  if (!normalizedReason) return createErrorResponse('删除订单分账必须填写原因');
+  const order = getOrderById(orderId);
+  if (!order) return createErrorResponse('订单不存在', 404);
+
+  const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
+  const orderCommissions = commissions
+    .filter((commission) => commission.orderId === orderId)
+    .map((commission) => normalizeCommission(commission));
+  if (!orderCommissions.length) return createErrorResponse('该订单没有可删除的分账记录');
+
+  const lockedCommission = orderCommissions.find((commission) => commission.status !== '待确认');
+  if (lockedCommission) return createErrorResponse('只能删除待确认阶段的订单分账，已进入发放或冲销链路的分账请使用撤回/冲销流程');
+
+  const now = new Date().toISOString();
+  const operator = getCurrentOperatorName('财务');
+  saveCommissions(commissions.filter((commission) => commission.orderId !== orderId));
+  appendCommissionOperationLog(order, '删除分账', normalizedReason, orderCommissions, operator, now);
+  return createSuccessResponse(true);
 }
 
 async function confirmOrderCommissions(orderId: string, reason?: string): Promise<ApiResponse<Commission[]>> {
@@ -1055,6 +1149,7 @@ export const commissionApi = {
   fetchCommissionsByOrder,
   fetchCommissionOrderSummaries,
   fetchCommissionOrderSummaryStatusCounts,
+  fetchCreatableCommissionOrders,
   fetchMonthlyCommissionPayouts,
   fetchCommissionStats,
   fetchCommissionAuditIssues,
@@ -1066,6 +1161,7 @@ export const commissionApi = {
   payMonthlyCommissionBatch,
   fetchCommissionDetail,
   saveOrderCommissionAdjustments,
+  deleteOrderCommissions,
   confirmOrderCommissions,
   withdrawOrderCommissions,
   startCommissionChargeback,

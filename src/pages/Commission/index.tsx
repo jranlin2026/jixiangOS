@@ -58,6 +58,7 @@ import type {
   Commission,
   CommissionAdjustmentInput,
   CommissionChargebackMethod,
+  CommissionCreatableOrderSummary,
   CommissionOrderSummary,
   CommissionOrderSummaryFilters,
   CommissionOrderSummaryStatus,
@@ -244,6 +245,7 @@ interface CommissionProps {
   initialTab?: 0 | 1 | 2;
   hideEmbeddedOrderSplitViewButton?: boolean;
   orderSplitViewTrigger?: number;
+  orderSplitCreateTrigger?: number;
 }
 
 type PayoutConfirmAction =
@@ -256,9 +258,11 @@ const Commission: React.FC<CommissionProps> = ({
   initialTab = 0,
   hideEmbeddedOrderSplitViewButton = false,
   orderSplitViewTrigger = 0,
+  orderSplitCreateTrigger = 0,
 }) => {
   const [tabValue, setTabValue] = useState(initialTab);
   const lastOrderSplitViewTriggerRef = useRef(orderSplitViewTrigger);
+  const lastOrderSplitCreateTriggerRef = useRef(orderSplitCreateTrigger);
   const [orderRows, setOrderRows] = useState<CommissionOrderSummary[]>([]);
   const [orderLoading, setOrderLoading] = useState(false);
   const [orderPagination, setOrderPagination] = useState({ page: 1, pageSize: 10, total: 0 });
@@ -290,12 +294,20 @@ const Commission: React.FC<CommissionProps> = ({
   const [commissionRoleConfigs, setCommissionRoleConfigs] = useState<CommissionRoleConfig[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [createSplitOpen, setCreateSplitOpen] = useState(false);
+  const [creatableOrderRows, setCreatableOrderRows] = useState<CommissionCreatableOrderSummary[]>([]);
+  const [creatableOrderLoading, setCreatableOrderLoading] = useState(false);
+  const [creatableOrderSearch, setCreatableOrderSearch] = useState('');
+  const [selectedCreatableOrderId, setSelectedCreatableOrderId] = useState('');
 
   const [splitOrderId, setSplitOrderId] = useState('');
   const [splitRows, setSplitRows] = useState<CommissionAdjustmentInput[]>([]);
   const [splitReason, setSplitReason] = useState('');
   const [splitSaving, setSplitSaving] = useState(false);
   const [summaryDetail, setSummaryDetail] = useState<CommissionOrderSummary | null>(null);
+  const [deleteSummary, setDeleteSummary] = useState<CommissionOrderSummary | null>(null);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [detailEditMode, setDetailEditMode] = useState(false);
   const [detailActionLoading, setDetailActionLoading] = useState(false);
   const [detailActionReason, setDetailActionReason] = useState('');
@@ -307,6 +319,9 @@ const Commission: React.FC<CommissionProps> = ({
 
   const activeEmployees = useMemo(() => employees.filter((item) => item.isActive), [employees]);
   const activeRoleConfigs = useMemo(() => commissionRoleConfigs.filter((item) => item.isActive), [commissionRoleConfigs]);
+  const selectedCreatableOrder = useMemo(() => (
+    creatableOrderRows.find((order) => order.orderId === selectedCreatableOrderId) || null
+  ), [creatableOrderRows, selectedCreatableOrderId]);
   const monthlyPayoutSummary = useMemo(() => payoutRows.reduce((summary, row) => ({
     orderCount: summary.orderCount + row.orderCount,
     totalAmount: summary.totalAmount + row.totalAmount,
@@ -412,6 +427,25 @@ const Commission: React.FC<CommissionProps> = ({
     if (res.code === 0) setOrderStatusCounts(res.data);
   };
 
+  const fetchCreatableOrders = async (search = creatableOrderSearch) => {
+    setCreatableOrderLoading(true);
+    try {
+      const res = await commissionApi.fetchCreatableCommissionOrders({
+        search: search || undefined,
+        page: 1,
+        pageSize: 50,
+      });
+      if (res.code === 0) {
+        setCreatableOrderRows(res.data.items);
+        setSelectedCreatableOrderId((current) => (
+          current && res.data.items.some((order) => order.orderId === current) ? current : ''
+        ));
+      }
+    } finally {
+      setCreatableOrderLoading(false);
+    }
+  };
+
   const fetchMonthlyPayouts = async (period = payoutPeriod) => {
     if (!period) return;
     setPayoutLoading(true);
@@ -459,11 +493,23 @@ const Commission: React.FC<CommissionProps> = ({
   }, [payoutPeriod]);
 
   useEffect(() => {
+    if (!createSplitOpen) return;
+    fetchCreatableOrders(creatableOrderSearch);
+  }, [createSplitOpen, creatableOrderSearch]);
+
+  useEffect(() => {
     if (orderSplitViewTrigger <= 0) return;
     if (lastOrderSplitViewTriggerRef.current === orderSplitViewTrigger) return;
     lastOrderSplitViewTriggerRef.current = orderSplitViewTrigger;
     setOrderSplitViewOpen(true);
   }, [orderSplitViewTrigger]);
+
+  useEffect(() => {
+    if (orderSplitCreateTrigger <= 0) return;
+    if (lastOrderSplitCreateTriggerRef.current === orderSplitCreateTrigger) return;
+    lastOrderSplitCreateTriggerRef.current = orderSplitCreateTrigger;
+    openCreateSplitDialog();
+  }, [orderSplitCreateTrigger]);
 
   const updateOrderFilter = (key: keyof typeof orderFilters, value: string) => {
     setOrderPagination((prev) => ({ ...prev, page: 1 }));
@@ -573,6 +619,45 @@ const Commission: React.FC<CommissionProps> = ({
     setOrderSplitColumnWidths(resetColumnWidths(DEFAULT_ORDER_SPLIT_COLUMN_WIDTHS));
   };
 
+  const buildNewSplitRow = (orderId: string, orderAmount: number): CommissionAdjustmentInput => ({
+    orderId,
+    role: activeRoleConfigs[0]?.name || '销售',
+    owner: '',
+    ownerId: '',
+    department: '',
+    departmentId: '',
+    commissionAmount: 0,
+    commissionRate: 0,
+    performanceAmount: orderAmount,
+    calculationNote: '财务人工新增分账',
+  });
+
+  const openCreateSplitDialog = () => {
+    setCreateSplitOpen(true);
+    setCreatableOrderSearch('');
+    setSelectedCreatableOrderId('');
+    setSplitOrderId('');
+    setSplitRows([]);
+    setSplitReason('');
+  };
+
+  const closeCreateSplitDialog = () => {
+    setCreateSplitOpen(false);
+    setCreatableOrderSearch('');
+    setSelectedCreatableOrderId('');
+    setSplitOrderId('');
+    setSplitRows([]);
+    setSplitReason('');
+  };
+
+  const handleSelectCreatableOrder = (orderId: string) => {
+    const order = creatableOrderRows.find((item) => item.orderId === orderId);
+    setSelectedCreatableOrderId(orderId);
+    setSplitOrderId(orderId);
+    setSplitReason('');
+    setSplitRows(order ? [buildNewSplitRow(order.orderId, order.orderAmount)] : []);
+  };
+
   const resetSettlementDetailForms = () => {
     setDetailEditMode(false);
     setDetailActionReason('');
@@ -591,6 +676,21 @@ const Commission: React.FC<CommissionProps> = ({
     if (summary.status === '已冲销') return '冲销已完成，只能查看留痕';
     if (summary.status === '已撤回') return '提成已撤回，只能查看留痕';
     return '调整分账';
+  };
+
+  const canDeleteOrderSplitSummary = (summary: CommissionOrderSummary) => (
+    !summary.sourceOrderDeleted
+    && ['待处理', '待确认'].includes(summary.status)
+    && summary.commissions.length > 0
+    && summary.commissions.every((commission) => commission.status === '待确认')
+  );
+
+  const getDeleteOrderSplitDisabledReason = (summary: CommissionOrderSummary) => {
+    if (summary.sourceOrderDeleted) return '源订单已删除，只能查看明细和历史';
+    if (!summary.commissions.length) return '该订单没有可删除的分账';
+    if (!['待处理', '待确认'].includes(summary.status)) return '已进入发放或冲销链路，请使用撤回/冲销流程';
+    if (!summary.commissions.every((commission) => commission.status === '待确认')) return '仅待确认阶段的分账可直接删除';
+    return '删除订单分账';
   };
 
   const loadOperationLogs = async (orderId: string) => {
@@ -842,21 +942,19 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const handleAddSplitRow = () => {
+    const orderAmount = selectedCreatableOrder?.orderAmount || splitRows[0]?.performanceAmount || summaryDetail?.orderAmount || 0;
     setSplitRows((prev) => [
       ...prev,
-      {
-        orderId: splitOrderId,
-        role: activeRoleConfigs[0]?.name || '销售',
-        owner: '',
-        ownerId: '',
-        department: '',
-        departmentId: '',
-        commissionAmount: 0,
-        commissionRate: 0,
-        performanceAmount: prev[0]?.performanceAmount || summaryDetail?.orderAmount || 0,
-        calculationNote: '财务人工新增分账',
-      },
+      buildNewSplitRow(splitOrderId, orderAmount),
     ]);
+  };
+
+  const canDeleteSplitRow = (row: CommissionAdjustmentInput) => {
+    if (createSplitOpen) return true;
+    if (splitRows.length <= 1) return false;
+    if (!row.id) return true;
+    const existing = summaryDetail?.commissions.find((commission) => commission.id === row.id);
+    return !existing || existing.status === '待确认';
   };
 
   const handleSaveSplitRows = async () => {
@@ -865,11 +963,43 @@ const Commission: React.FC<CommissionProps> = ({
       const res = await commissionApi.saveOrderCommissionAdjustments(splitOrderId, splitRows, splitReason);
       if (res.code === 0) {
         setDetailEditMode(false);
+        if (createSplitOpen) closeCreateSplitDialog();
         await refreshAll();
         if (summaryDetail) await reloadSettlementDetail(splitOrderId);
       }
     } finally {
       setSplitSaving(false);
+    }
+  };
+
+  const openDeleteOrderSplitDialog = (summary: CommissionOrderSummary) => {
+    setDeleteSummary(summary);
+    setDeleteReason('');
+  };
+
+  const closeDeleteOrderSplitDialog = () => {
+    if (deleteLoading) return;
+    setDeleteSummary(null);
+    setDeleteReason('');
+  };
+
+  const confirmDeleteOrderSplit = async () => {
+    if (!deleteSummary || !deleteReason.trim()) return;
+    const deletingOrderId = deleteSummary.orderId;
+    setDeleteLoading(true);
+    try {
+      const res = await commissionApi.deleteOrderCommissions(deletingOrderId, deleteReason);
+      if (res.code === 0) {
+        setDeleteSummary(null);
+        setDeleteReason('');
+        if (summaryDetail?.orderId === deletingOrderId) {
+          setSummaryDetail(null);
+          resetSettlementDetailForms();
+        }
+        await refreshAll();
+      }
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -1455,8 +1585,8 @@ const Commission: React.FC<CommissionProps> = ({
                     right: 0,
                     zIndex: 4,
                     bgcolor: '#fff',
-                    width: 118,
-                    minWidth: 118,
+                    width: 150,
+                    minWidth: 150,
                     boxShadow: '-1px 0 0 #e5e7eb',
                   }}
                 >
@@ -1476,6 +1606,19 @@ const Commission: React.FC<CommissionProps> = ({
                           aria-label="调整分账"
                         >
                           <EditIcon fontSize="small" />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                    <Tooltip title={getDeleteOrderSplitDisabledReason(summary)}>
+                      <span>
+                        <IconButton
+                          size="small"
+                          color="error"
+                          disabled={!canDeleteOrderSplitSummary(summary)}
+                          onClick={() => openDeleteOrderSplitDialog(summary)}
+                          aria-label="删除订单分账"
+                        >
+                          <DeleteOutlineIcon fontSize="small" />
                         </IconButton>
                       </span>
                     </Tooltip>
@@ -1547,12 +1690,12 @@ const Commission: React.FC<CommissionProps> = ({
               <Typography variant="subtitle2" sx={{ color: '#111827', fontWeight: 800 }}>
                 分账人员 {index + 1}
               </Typography>
-              <Tooltip title="删除此人分账">
+              <Tooltip title={canDeleteSplitRow(row) ? '删除此条未确认分账' : '仅待确认阶段的分账可直接删除'}>
                 <span>
                   <IconButton
                     size="small"
                     color="error"
-                    disabled={splitRows.length <= 1}
+                    disabled={!canDeleteSplitRow(row)}
                     onClick={() => setSplitRows((prev) => prev.filter((_, rowIndex) => rowIndex !== index))}
                     aria-label="删除分账人员"
                     sx={{ width: 32, height: 32 }}
@@ -1678,13 +1821,15 @@ const Commission: React.FC<CommissionProps> = ({
         />
       </Stack>
       <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
-        <Button onClick={() => setDetailEditMode(false)}>取消编辑</Button>
+        <Button onClick={() => (createSplitOpen ? closeCreateSplitDialog() : setDetailEditMode(false))}>
+          {createSplitOpen ? '取消新建' : '取消编辑'}
+        </Button>
         <Button
           variant="contained"
           disabled={splitSaving || !splitReason.trim() || splitRows.length === 0 || splitRows.some((row) => !row.ownerId)}
           onClick={handleSaveSplitRows}
         >
-          {splitSaving ? '保存中...' : '保存调整'}
+          {splitSaving ? '保存中...' : createSplitOpen ? '保存分账' : '保存调整'}
         </Button>
       </Stack>
     </Stack>
@@ -1904,9 +2049,14 @@ const Commission: React.FC<CommissionProps> = ({
               </Typography>
             </Box>
             {tabValue === 0 && (
-              <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setOrderSplitViewOpen(true)}>
-                视图设置
-              </Button>
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setOrderSplitViewOpen(true)}>
+                  视图设置
+                </Button>
+                <Button variant="contained" startIcon={<AddIcon />} onClick={openCreateSplitDialog}>
+                  新建订单分账
+                </Button>
+              </Stack>
             )}
           </Box>
 
@@ -1919,9 +2069,14 @@ const Commission: React.FC<CommissionProps> = ({
       )}
       {embedded && tabValue === 0 && !hideEmbeddedOrderSplitViewButton && (
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setOrderSplitViewOpen(true)}>
             视图设置
           </Button>
+            <Button variant="contained" startIcon={<AddIcon />} onClick={openCreateSplitDialog}>
+              新建订单分账
+            </Button>
+          </Stack>
         </Box>
       )}
 
@@ -1936,6 +2091,118 @@ const Commission: React.FC<CommissionProps> = ({
       {tabValue === 1 && renderMonthlyPayout()}
 
       {tabValue === 2 && <CommissionRuleConfig />}
+
+      <Dialog open={createSplitOpen} onClose={closeCreateSplitDialog} maxWidth="lg" fullWidth>
+        <DialogCloseTitle onClose={closeCreateSplitDialog}>新建订单分账</DialogCloseTitle>
+        <DialogContent dividers sx={{ bgcolor: '#f8fafc' }}>
+          <Stack spacing={2}>
+            <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, p: 2 }}>
+              <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} sx={{ alignItems: { xs: 'stretch', md: 'center' } }}>
+                <TextField
+                  label="搜索可新建分账订单"
+                  placeholder="订单号/客户"
+                  value={creatableOrderSearch}
+                  onChange={(event) => setCreatableOrderSearch(event.target.value)}
+                  size="small"
+                  sx={{ minWidth: { xs: 'auto', md: 260 } }}
+                />
+                <FormControl size="small" sx={{ minWidth: { xs: 'auto', md: 360 }, flex: 1 }}>
+                  <InputLabel shrink>选择订单</InputLabel>
+                  <Select
+                    value={selectedCreatableOrderId}
+                    label="选择订单"
+                    onChange={(event) => handleSelectCreatableOrder(event.target.value)}
+                    displayEmpty
+                    renderValue={(value) => {
+                      if (!value) return creatableOrderLoading ? '加载中...' : '选择一笔未生成分账的已确认订单';
+                      const order = creatableOrderRows.find((item) => item.orderId === value);
+                      return order ? `${order.orderNo} / ${order.customerName} / ${formatCurrency(order.orderAmount)}` : '选择订单';
+                    }}
+                  >
+                    {creatableOrderRows.map((order) => (
+                      <MenuItem key={order.orderId} value={order.orderId}>
+                        {order.orderNo} / {order.customerName} / {formatCurrency(order.orderAmount)}
+                      </MenuItem>
+                    ))}
+                    {!creatableOrderRows.length && (
+                      <MenuItem value="" disabled>
+                        {creatableOrderLoading ? '加载中...' : '暂无可新建分账的订单'}
+                      </MenuItem>
+                    )}
+                  </Select>
+                </FormControl>
+                <Button variant="outlined" onClick={() => fetchCreatableOrders()} disabled={creatableOrderLoading}>
+                  刷新
+                </Button>
+              </Stack>
+              <Typography variant="caption" sx={{ display: 'block', color: '#64748b', mt: 1 }}>
+                仅显示已确认、未退款完成、且当前没有有效分账的订单。
+              </Typography>
+            </Paper>
+
+            {selectedCreatableOrder ? (
+              <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, p: 2 }}>
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 1, mb: 2 }}>
+                  {[
+                    { label: '订单号', value: selectedCreatableOrder.orderNo },
+                    { label: '客户', value: selectedCreatableOrder.customerName },
+                    { label: '实付金额', value: formatCurrency(selectedCreatableOrder.orderAmount) },
+                    { label: '付款日期', value: formatDate(selectedCreatableOrder.paymentDate, 'yyyy-MM-dd HH:mm') },
+                  ].map((item) => (
+                    <Box key={item.label} sx={{ bgcolor: '#fff', border: '1px solid #e5e7eb', borderRadius: 1, px: 1.25, py: 1 }}>
+                      <Typography variant="caption" sx={{ color: '#64748b' }}>{item.label}</Typography>
+                      <Typography variant="body2" sx={{ color: '#111827', fontWeight: 800, overflowWrap: 'anywhere' }}>{item.value}</Typography>
+                    </Box>
+                  ))}
+                </Box>
+                {renderDetailSplitEditor()}
+              </Paper>
+            ) : (
+              <Paper elevation={0} sx={{ border: '1px dashed #cbd5e1', borderRadius: 1, p: 3, textAlign: 'center', color: '#64748b' }}>
+                <Typography variant="body2">先选择一笔订单，再填写分账人员和金额。</Typography>
+              </Paper>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeCreateSplitDialog}>关闭</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteSummary)} onClose={closeDeleteOrderSplitDialog} maxWidth="sm" fullWidth>
+        <DialogCloseTitle onClose={closeDeleteOrderSplitDialog}>删除订单分账</DialogCloseTitle>
+        <DialogContent dividers>
+          {deleteSummary && (
+            <Stack spacing={2}>
+              <Typography variant="body2" sx={{ color: '#374151', lineHeight: 1.8 }}>
+                将删除 {deleteSummary.orderNo} / {deleteSummary.customerName} 的全部待确认分账记录。
+                删除后，该订单会重新出现在“新建订单分账”可选范围内。
+              </Typography>
+              <TextField
+                label="删除原因"
+                value={deleteReason}
+                onChange={(event) => setDeleteReason(event.target.value)}
+                required
+                fullWidth
+                multiline
+                minRows={2}
+                autoFocus
+              />
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeDeleteOrderSplitDialog} disabled={deleteLoading}>取消</Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={confirmDeleteOrderSplit}
+            disabled={deleteLoading || !deleteReason.trim()}
+          >
+            {deleteLoading ? '删除中...' : '确认删除'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={Boolean(summaryDetail)} onClose={() => { setSummaryDetail(null); resetSettlementDetailForms(); }} maxWidth="xl" fullWidth>
         <DialogCloseTitle onClose={() => { setSummaryDetail(null); resetSettlementDetailForms(); }}>订单分账处理</DialogCloseTitle>

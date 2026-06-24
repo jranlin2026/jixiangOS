@@ -162,26 +162,27 @@ const Sidebar: React.FC<SidebarProps> = ({ width }) => {
       }}
     >
       <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <Box sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 1.5, height: 64 }}>
+        <Box sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 1.5, height: 72 }}>
           <Box
+            component="img"
+            src="/jixiang-os-logo.png"
+            alt="极享OS"
             sx={{
-              width: 32,
-              height: 32,
+              width: 38,
+              height: 38,
               borderRadius: 2,
-              bgcolor: '#2196F3',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff',
-              fontWeight: 700,
-              fontSize: '0.875rem',
+              objectFit: 'contain',
+              flexShrink: 0,
             }}
-          >
-            AI
+          />
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#1a1a2e', fontSize: '1rem', lineHeight: 1.1 }}>
+              极享OS
+            </Typography>
+            <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem', lineHeight: 1.3 }}>
+              AI企业运营系统
+            </Typography>
           </Box>
-          <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#1a1a2e', fontSize: '0.9375rem' }}>
-            AI智能体运营
-          </Typography>
         </Box>
 
         <Divider sx={{ borderColor: '#f0f0f0' }} />
