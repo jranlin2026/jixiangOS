@@ -16,7 +16,9 @@ const leadRows: any[] = [
 ];
 
 const upserts: any[] = [];
+const businessUpserts: any[] = [];
 let deletedWhere: any = null;
+let businessDeletedWhere: any = null;
 let appStorageUpserted = false;
 
 const prisma = {
@@ -37,6 +39,23 @@ const prisma = {
     },
     deleteMany: async (input: any) => {
       deletedWhere = input.where;
+      return { count: 0 };
+    },
+  },
+  businessRecord: {
+    findMany: async ({ where }: any) => (where.domain === STORAGE_KEYS.CUSTOMERS ? [
+      {
+        data: { id: 'customer-1', name: '客户A', createdAt: '2026-06-24T00:00:00.000Z' },
+        createdAt: new Date('2026-06-24T00:00:00.000Z'),
+        eventAt: new Date('2026-06-24T00:00:00.000Z'),
+      },
+    ] : []),
+    upsert: async (input: any) => {
+      businessUpserts.push(input);
+      return input.create;
+    },
+    deleteMany: async (input: any) => {
+      businessDeletedWhere = input.where;
       return { count: 0 };
     },
   },
@@ -64,3 +83,17 @@ assert.equal(upserts[0].where.id, 'lead-a');
 assert.equal(upserts[0].create.name, 'A线索');
 assert.equal(deletedWhere.id.notIn.length, 2);
 assert.equal(appStorageUpserted, false);
+
+const customersResult = await service.get(STORAGE_KEYS.CUSTOMERS);
+assert.equal(customersResult.code, 0);
+assert.deepEqual((customersResult.data as any[]).map((item) => item.id), ['customer-1']);
+
+const nextCustomers = [
+  { id: 'customer-a', name: '客户A', company: 'A公司', owner: '销售A', totalSpent: 1200, createdAt: '2026-06-24T01:00:00.000Z', updatedAt: '2026-06-24T01:00:00.000Z' },
+];
+await service.set(STORAGE_KEYS.CUSTOMERS, nextCustomers);
+assert.equal(businessUpserts.length, 1);
+assert.equal(businessUpserts[0].where.domain_recordId.domain, STORAGE_KEYS.CUSTOMERS);
+assert.equal(businessUpserts[0].create.title, '客户A');
+assert.equal(String(businessUpserts[0].create.amount), '1200');
+assert.equal(businessDeletedWhere.domain, STORAGE_KEYS.CUSTOMERS);

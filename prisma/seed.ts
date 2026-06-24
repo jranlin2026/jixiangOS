@@ -72,6 +72,65 @@ async function upsertLeadRecords(leads: unknown[]) {
   }
 }
 
+function storageRecordId(domain: string, item: Record<string, any>, index: number): string {
+  return String(item.id || item.orderNo || item.refundNo || item.applicationNo || `${domain}-${index}`);
+}
+
+function storageBusinessId(domain: string, recordId: string): string {
+  return `${domain}:${recordId}`.slice(0, 160);
+}
+
+function storageAmount(item: Record<string, any>): number | null {
+  const value = item.actualAmount ?? item.amount ?? item.totalSpent ?? item.refundAmount ?? item.commissionAmount ?? item.estimatedAmount ?? item.price;
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : null;
+}
+
+function storageTitle(domain: string, item: Record<string, any>): string | null {
+  return item.name || item.customerName || item.orderNo || item.refundNo || item.applicationNo || item.title || item.subjectName || item.level || domain;
+}
+
+function storageOwner(item: Record<string, any>): string | null {
+  return item.owner || item.ownerName || item.salesName || item.applicantName || item.createdBy || item.operator || null;
+}
+
+async function upsertBusinessRecords(domain: string, value: unknown) {
+  if (!Array.isArray(value)) return;
+  const recordIds: string[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const item = value[index] as Record<string, any>;
+    const recordId = storageRecordId(domain, item, index);
+    recordIds.push(recordId);
+    await prisma.businessRecord.upsert({
+      where: { domain_recordId: { domain, recordId } },
+      update: {
+        title: storageTitle(domain, item),
+        status: item.status || null,
+        owner: storageOwner(item),
+        customerId: item.customerId || null,
+        orderId: item.orderId || null,
+        amount: storageAmount(item),
+        eventAt: item.updatedAt || item.createdAt ? parseDate(item.updatedAt || item.createdAt) : null,
+        data: item as Prisma.InputJsonValue,
+      },
+      create: {
+        id: storageBusinessId(domain, recordId),
+        domain,
+        recordId,
+        title: storageTitle(domain, item),
+        status: item.status || null,
+        owner: storageOwner(item),
+        customerId: item.customerId || null,
+        orderId: item.orderId || null,
+        amount: storageAmount(item),
+        eventAt: item.updatedAt || item.createdAt ? parseDate(item.updatedAt || item.createdAt) : null,
+        data: item as Prisma.InputJsonValue,
+      },
+    });
+  }
+  await prisma.businessRecord.deleteMany({ where: { domain, recordId: { notIn: recordIds } } });
+}
+
 async function main() {
   for (const department of DEFAULT_DEPARTMENTS) {
     await prisma.department.upsert({
@@ -232,6 +291,24 @@ async function main() {
     { key: STORAGE_KEYS.COMMISSION_ROLE_CONFIGS, value: [] },
     { key: STORAGE_KEYS.TAGS, value: mockTags },
   ];
+  const businessDomains = new Set<string>([
+    STORAGE_KEYS.CUSTOMERS,
+    STORAGE_KEYS.ORDERS,
+    STORAGE_KEYS.ORDER_APPLICATIONS,
+    STORAGE_KEYS.DELIVERIES,
+    STORAGE_KEYS.COMMISSIONS,
+    STORAGE_KEYS.COMMISSION_OPERATION_LOGS,
+    STORAGE_KEYS.COMMISSION_SETTLEMENT_BATCHES,
+    STORAGE_KEYS.REFUNDS,
+    STORAGE_KEYS.UPGRADE_POOL,
+    STORAGE_KEYS.OPPORTUNITIES,
+    STORAGE_KEYS.CUSTOMER_SUCCESS_TASKS,
+    STORAGE_KEYS.SERVICE_TICKETS,
+    STORAGE_KEYS.AI_CARDS,
+    STORAGE_KEYS.AI_SESSIONS,
+    STORAGE_KEYS.PRODUCTS,
+    STORAGE_KEYS.TAGS,
+  ]);
 
   for (const item of storageSeeds) {
     const existing = await prisma.appStorage.findUnique({ where: { key: item.key } });
@@ -245,6 +322,12 @@ async function main() {
   const existingLeadsStorage = await prisma.appStorage.findUnique({ where: { key: STORAGE_KEYS.LEADS } });
   const leadSeedValue = Array.isArray(existingLeadsStorage?.value) ? existingLeadsStorage.value : mockLeads;
   await upsertLeadRecords(leadSeedValue);
+
+  for (const item of storageSeeds) {
+    if (!businessDomains.has(item.key)) continue;
+    const existing = await prisma.appStorage.findUnique({ where: { key: item.key } });
+    await upsertBusinessRecords(item.key, existing?.value ?? item.value);
+  }
 }
 
 main()

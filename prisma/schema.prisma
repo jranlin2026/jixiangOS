@@ -128,3 +128,28 @@ model LeadRecord {
   @@index([createdAt])
   @@map("lead_records")
 }
+
+model BusinessRecord {
+  id         String   @id @db.VarChar(160)
+  domain     String   @db.VarChar(80)
+  recordId   String   @db.VarChar(80)
+  title      String?  @db.VarChar(240)
+  status     String?  @db.VarChar(80)
+  owner      String?  @db.VarChar(120)
+  customerId String?  @db.VarChar(80)
+  orderId    String?  @db.VarChar(80)
+  amount     Decimal? @db.Decimal(14, 2)
+  eventAt    DateTime?
+  data       Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([domain, recordId])
+  @@index([domain])
+  @@index([status])
+  @@index([owner])
+  @@index([customerId])
+  @@index([orderId])
+  @@index([eventAt])
+  @@map("business_records")
+}
