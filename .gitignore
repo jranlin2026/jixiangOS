@@ -6,5 +6,6 @@ vite.config.d.ts
 vite.config.d.ts.map
 .env
 .env.*
+backups/
 .DS_Store
 Thumbs.db

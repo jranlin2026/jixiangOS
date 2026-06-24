@@ -36,6 +36,24 @@ React/Vite 前端
 
 ## 本机启动
 
+推荐使用一键启动脚本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\start-local-stack.ps1
+```
+
+也可以双击：
+
+```text
+scripts\start-local-stack.cmd
+```
+
+如果没有管理员权限，无法注册 Windows 服务或计划任务。可把下面这个文件放到当前用户启动目录，实现登录 Windows 后自动启动：
+
+```text
+%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\JixiangOS Local Stack.cmd
+```
+
 如果重启电脑后 MySQL 没有自动运行，先执行：
 
 ```powershell
@@ -91,6 +109,22 @@ npm.cmd run db:generate
 npm.cmd run db:push
 npm.cmd run db:seed
 ```
+
+## 数据库备份
+
+手动备份：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\mysql\backup-local.ps1
+```
+
+备份文件会输出到：
+
+```text
+backups/
+```
+
+`backups/` 已加入 `.gitignore`，不会上传到 GitHub。
 
 ## 验证共享业务数据
 
