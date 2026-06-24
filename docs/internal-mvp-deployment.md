@@ -13,6 +13,7 @@
 - 初始化种子数据已写入。
 - 登录、角色、用户、部门、岗位已接后端 MySQL。
 - 线索、客户、订单、交付、财务、退款、分账等业务数据已接入 MySQL 共享存储 `app_storage`。
+- 线索数据已升级到结构化表 `lead_records`，`aaos_leads` 读写由后端兼容转发到该表。
 - 前端 `.env` 已开启 `VITE_USE_BACKEND_API=true`。
 
 ## 当前架构
@@ -30,9 +31,10 @@ React/Vite 前端
 说明：
 
 - `users`、`roles`、`departments`、`positions` 是结构化 MySQL 表。
-- 业务模块数据先集中存入 `app_storage`，每个 `aaos_*` key 保存一个业务域 JSON。
+- 线索数据存入 `lead_records`，保留完整 JSON 快照，同时提取姓名、手机号、来源、状态、负责人等索引字段。
+- 其余业务模块数据暂时集中存入 `app_storage`，每个 `aaos_*` key 保存一个业务域 JSON。
 - 这是第二阶段 MVP 的过渡架构，优先解决多人共享、统一持久化和数据不再丢失的问题。
-- 后续可以继续把高频核心域拆成结构化表，例如 `leads`、`customers`、`orders`、`commissions`。
+- 后续可以继续把高频核心域拆成结构化表，例如 `customers`、`orders`、`commissions`。
 
 ## 本机启动
 

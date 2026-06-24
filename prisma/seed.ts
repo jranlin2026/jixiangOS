@@ -24,6 +24,54 @@ import {
 
 const prisma = new PrismaClient();
 
+function parseDate(value: unknown): Date {
+  const date = new Date(String(value || ''));
+  return Number.isNaN(date.getTime()) ? new Date() : date;
+}
+
+async function upsertLeadRecords(leads: unknown[]) {
+  for (const item of leads) {
+    const lead = item as Record<string, any>;
+    if (!lead?.id) continue;
+    await prisma.leadRecord.upsert({
+      where: { id: String(lead.id) },
+      update: {
+        name: String(lead.name || ''),
+        company: lead.company || null,
+        phone: lead.phone || null,
+        wechat: lead.wechat || null,
+        source: lead.source || null,
+        status: lead.status || null,
+        lifecycleStatusCode: lead.lifecycleStatusCode || null,
+        owner: lead.owner || null,
+        assignedTo: lead.assignedTo || null,
+        inputBy: lead.inputBy || null,
+        leadContributorId: lead.leadContributorId || null,
+        data: lead as Prisma.InputJsonValue,
+        createdAt: parseDate(lead.createdAt),
+        updatedAt: parseDate(lead.updatedAt || lead.createdAt),
+      },
+      create: {
+        id: String(lead.id),
+        name: String(lead.name || ''),
+        company: lead.company || null,
+        phone: lead.phone || null,
+        wechat: lead.wechat || null,
+        source: lead.source || null,
+        status: lead.status || null,
+        lifecycleStatusCode: lead.lifecycleStatusCode || null,
+        owner: lead.owner || null,
+        assignedTo: lead.assignedTo || null,
+        inputBy: lead.inputBy || null,
+        leadContributorId: lead.leadContributorId || null,
+        data: lead as Prisma.InputJsonValue,
+        createdAt: parseDate(lead.createdAt),
+        updatedAt: parseDate(lead.updatedAt || lead.createdAt),
+      },
+    });
+  }
+}
+
 async function main() {
   for (const department of DEFAULT_DEPARTMENTS) {
     await prisma.department.upsert({
@@ -186,12 +234,17 @@ async function main() {
   ];
 
   for (const item of storageSeeds) {
+    const existing = await prisma.appStorage.findUnique({ where: { key: item.key } });
     await prisma.appStorage.upsert({
       where: { key: item.key },
-      update: { value: item.value as unknown as Prisma.InputJsonValue },
+      update: existing ? {} : { value: item.value as unknown as Prisma.InputJsonValue },
       create: { key: item.key, value: item.value as unknown as Prisma.InputJsonValue },
     });
   }
+
+  const existingLeadsStorage = await prisma.appStorage.findUnique({ where: { key: STORAGE_KEYS.LEADS } });
+  const leadSeedValue = Array.isArray(existingLeadsStorage?.value) ? existingLeadsStorage.value : mockLeads;
+  await upsertLeadRecords(leadSeedValue);
 }
 
 main()
