@@ -20,6 +20,7 @@ export const BUSINESS_DATA_STORAGE_KEYS: BusinessDataStorageKey[] = [
   { key: STORAGE_KEYS.DELIVERIES, label: '交付', description: '订单交付进度和交付记录' },
   { key: STORAGE_KEYS.REFUNDS, label: '退款', description: '退款中心申请与处理记录' },
   { key: STORAGE_KEYS.COMMISSIONS, label: '提成', description: '订单提成、分账与结算明细' },
+  { key: STORAGE_KEYS.COMMISSION_OPERATION_LOGS, label: '分账操作历史', description: '订单分账调整、确认、取消和发放操作记录' },
   { key: STORAGE_KEYS.COMMISSION_SETTLEMENT_BATCHES, label: '提成结算批次', description: '财务结算台批次记录' },
   { key: STORAGE_KEYS.UPGRADE_POOL, label: '升单池', description: '升单机会与升单跟进数据' },
   { key: STORAGE_KEYS.OPPORTUNITIES, label: '商机兼容数据', description: '旧商机兼容缓存' },

@@ -148,6 +148,7 @@ async function approveOrder(customerId: string, customerName: string, leadInputB
 assert.equal(typeof (commissionApi as any).fetchCommissionsByOrder, 'function');
 assert.equal(typeof (commissionApi as any).saveOrderCommissionAdjustments, 'function');
 assert.equal(typeof (commissionApi as any).confirmOrderCommissions, 'function');
+assert.equal(typeof (commissionApi as any).fetchCommissionOperationLogs, 'function');
 
 seed();
 const directOrderId = await approveOrder('cust-direct', 'Direct Customer');
@@ -185,6 +186,19 @@ assert.equal(leadCommissions.length, 2);
 assert.equal(leadCommissions.every((item) => item.status === zh.pendingConfirm), true);
 assert.equal(leadCommissions.every((item) => item.isManualAdjusted), true);
 assert.equal(leadCommissions.every((item) => item.adjustReason === 'Finance adjusted split'), true);
+let operationLogs = ((await (commissionApi as any).fetchCommissionOperationLogs(leadOrderId)).data || []);
+assert.ok(
+  operationLogs.some((item: any) => item.action === '调整分账' && item.reason === 'Finance adjusted split'),
+  '调整分账后应写入订单分账操作历史',
+);
+const adjustLog = operationLogs.find((item: any) => item.action === '调整分账' && item.reason === 'Finance adjusted split');
+assert.ok(Array.isArray(adjustLog?.splitSnapshot), '调整分账历史应记录每个角色的分账快照');
+assert.deepEqual(
+  adjustLog.splitSnapshot
+    .map((item: any) => `${item.role}:${item.owner}:${item.commissionAmount}`)
+    .sort(),
+  [`${zh.salesRole}:Sales A:100`, `${zh.successRole}:Success A:50`].sort(),
+);
 
 const batchBeforeConfirm = await commissionApi.generateSettlementBatch('2026-06');
 assert.equal(batchBeforeConfirm.data.totalCount, 0);
@@ -193,6 +207,11 @@ assert.equal(batchBeforeConfirm.data.totalAmount, 0);
 const confirmRes = await (commissionApi as any).confirmOrderCommissions(leadOrderId, 'Confirmed by finance');
 assert.equal(confirmRes.code, 0);
 assert.equal((confirmRes.data as Commission[]).every((item) => item.status === zh.pendingPay), true);
+operationLogs = ((await (commissionApi as any).fetchCommissionOperationLogs(leadOrderId)).data || []);
+assert.ok(
+  operationLogs.some((item: any) => item.action === '确认分账' && item.reason === 'Confirmed by finance'),
+  '确认分账后应写入订单分账操作历史',
+);
 
 const batchAfterConfirm = await commissionApi.generateSettlementBatch('2026-06');
 assert.equal(batchAfterConfirm.data.totalCount, 2);

@@ -37,6 +37,8 @@ const zh = {
   pendingPay: '\u5f85\u53d1\u653e',
   paid: '\u5df2\u53d1\u653e',
   cancelled: '\u5df2\u53d6\u6d88',
+  withdrawn: '\u5df2\u64a4\u56de',
+  chargebackPending: '\u5f85\u51b2\u9500',
   refundException: '\u5df2\u53d1\u653e\u540e\u9000\u6b3e',
   confirmed: '\u5df2\u786e\u8ba4',
   none: '\u65e0',
@@ -187,8 +189,35 @@ const completeRefundRes = await refundApi.completeRefund(refundRes.data.id, zh.b
 assert.equal(completeRefundRes.code, 0);
 
 const commissionsAfterRefund = JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as Commission[];
-assert.equal(commissionsAfterRefund.every((commission) => commission.status === zh.paid), true);
+assert.equal(commissionsAfterRefund.every((commission) => commission.status === zh.chargebackPending), true);
 assert.equal(commissionsAfterRefund.some((commission) => `${commission.auditReason || ''}${commission.calculationNote || ''}`.includes(zh.refundException)), true);
+
+seed();
+const unpaidSubmitRes = await orderReviewApi.submitOrderApplication(orderPayload);
+storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({ userId: 'user-finance', token: 'token-user-finance', remember: true, createdAt: now }));
+const unpaidApproveRes = await orderReviewApi.approveOrderApplication(unpaidSubmitRes.data.id);
+assert.equal(unpaidApproveRes.code, 0);
+const unpaidOrders = await orderApi.fetchOrders({ pageSize: 20 });
+const unpaidRefundRes = await refundApi.createRefund({
+  orderId: unpaidApproveRes.data!.orderId!,
+  orderNo: unpaidApproveRes.data!.orderNo!,
+  customerId: unpaidOrders.data.items[0].customerId,
+  customerName: unpaidOrders.data.items[0].customerName,
+  productLevel: unpaidOrders.data.items[0].productLevel,
+  orderAmount: unpaidOrders.data.items[0].actualAmount,
+  refundAmount: unpaidOrders.data.items[0].actualAmount,
+  refundReason: 'Customer refund before payout',
+  refundCategory: '\u5176\u4ed6' as any,
+  status: '\u5f85\u5206\u914d' as any,
+  applicantId: 'user-sales',
+  applicantName: 'Sales A',
+});
+assert.equal(unpaidRefundRes.code, 0);
+const unpaidCompleteRefundRes = await refundApi.completeRefund(unpaidRefundRes.data.id, zh.bankTransfer);
+assert.equal(unpaidCompleteRefundRes.code, 0);
+const unpaidCommissionsAfterRefund = JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as Commission[];
+assert.equal(unpaidCommissionsAfterRefund.length > 0, true);
+assert.equal(unpaidCommissionsAfterRefund.every((commission) => commission.status === zh.withdrawn), true);
 
 seed('user-sales');
 storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([

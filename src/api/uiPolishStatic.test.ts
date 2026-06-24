@@ -46,6 +46,12 @@ const ordersPageSource = readFileSync(join(projectRoot, 'src/pages/Orders/index.
 const orderDetailSource = readFileSync(join(projectRoot, 'src/pages/Orders/OrderDetail.tsx'), 'utf8');
 const orderReviewSource = readFileSync(join(projectRoot, 'src/pages/OrderReview/index.tsx'), 'utf8');
 const rolePermissionSource = readFileSync(join(projectRoot, 'src/pages/Settings/RolePermission.tsx'), 'utf8');
+const commissionSource = readFileSync(join(projectRoot, 'src/pages/Commission/index.tsx'), 'utf8');
+const financeSource = readFileSync(join(projectRoot, 'src/pages/Finance/index.tsx'), 'utf8');
+const detailSplitEditorSource = commissionSource.slice(
+  commissionSource.indexOf('const renderDetailSplitEditor'),
+  commissionSource.indexOf('const renderSettlementDetailActions'),
+);
 
 assert.match(
   customersPageSource,
@@ -151,4 +157,129 @@ assert.match(
   orderReviewSource,
   /驳回终止/,
   'Reject action should be named 驳回终止 to explain that the application is closed.',
+);
+assert.match(
+  commissionSource,
+  /renderPayoutCommissionDetail/,
+  'Monthly payout expanded details must use a responsive detail renderer instead of a nested wide table.',
+);
+assert.doesNotMatch(
+  commissionSource,
+  /<TableCell colSpan=\{11\}[\s\S]*?<Table size="small">[\s\S]*?备注\/原因/,
+  'Monthly payout expanded details must not render as a nested table inside the horizontally scrollable employee table.',
+);
+assert.match(
+  commissionSource,
+  /renderSplitSummaryCard/,
+  'Order split detail dialog should render each commission as a readable summary card.',
+);
+assert.match(
+  commissionSource,
+  /detail-card-\$\{index\}/,
+  'Order split adjustment editor should add people as editable cards instead of table rows.',
+);
+assert.match(
+  commissionSource,
+  /formatEmployeeDisplayName/,
+  'Commission personnel labels should be formatted through a single employee display helper.',
+);
+assert.match(
+  commissionSource,
+  /\$\{name\}（\$\{role\}）/,
+  'Commission personnel labels should show employee name plus system permission role, such as 张伟（销售专员）.',
+);
+assert.doesNotMatch(
+  detailSplitEditorSource,
+  /<TableContainer|<Table\b|<TableRow/,
+  'Order split adjustment editor should not render as a table.',
+);
+assert.match(
+  commissionSource,
+  /sourceOrderDeleted/,
+  'Order split table should identify commission records whose source order has been deleted.',
+);
+assert.match(
+  commissionSource,
+  /源订单已删除/,
+  'Order split table should show a source-order-deleted badge or disabled-action reason.',
+);
+assert.match(
+  commissionSource,
+  /aria-label="查看分账"/,
+  'Order split table should expose an icon-only entry for viewing split details.',
+);
+assert.match(
+  commissionSource,
+  /aria-label="调整分账"/,
+  'Order split table should expose an icon-only entry for adjusting split details.',
+);
+assert.doesNotMatch(
+  commissionSource,
+  /查看\/处理/,
+  'Order split table should not use the broad 查看/处理 text button.',
+);
+assert.match(
+  commissionSource,
+  /确认冲销完成/,
+  'Order split detail workspace should expose a chargeback completion action.',
+);
+assert.match(
+  commissionSource,
+  /chargebackMethod/,
+  'Order split detail workspace should collect chargeback handling method.',
+);
+assert.doesNotMatch(
+  commissionSource,
+  /justifyContent="center"[\s\S]*?<EditIcon[\s\S]*?<CheckCircleIcon[\s\S]*?<CancelIcon[\s\S]*?<HistoryIcon/,
+  'Order split table row should not show edit, confirm, withdraw, and history as separate icon buttons.',
+);
+assert.doesNotMatch(
+  commissionSource,
+  /summaryDetail && \(\s*<Table size="small">/,
+  'Order split detail dialog should not use a wide table for split details.',
+);
+assert.match(
+  financeSource,
+  /value:\s*'payout',\s*label:\s*'员工提成月报'/,
+  'Finance payout tab should use the employee monthly commission report wording.',
+);
+assert.match(
+  commissionSource,
+  /RefundStatusBadge/,
+  'Commission order split should reuse the order list refund status badge.',
+);
+assert.match(
+  commissionSource,
+  /case 'orderType':[\s\S]*<Chip label=\{summary\.orderType/,
+  'Commission order split should render order type like the order list chip.',
+);
+assert.match(
+  commissionSource,
+  /case 'paymentDate':[\s\S]*formatDate\(summary\.paymentDate,\s*'yyyy-MM-dd HH:mm'\)/,
+  'Commission order split should render payment date with the same minute precision as the order list.',
+);
+assert.match(
+  commissionSource,
+  /renderOperationLogCard/,
+  'Commission operation history should use compact summary cards.',
+);
+assert.match(
+  commissionSource,
+  /splitSnapshot/,
+  'Commission operation history should render per-role split snapshots when available.',
+);
+assert.doesNotMatch(
+  commissionSource,
+  /分账条数/,
+  'Commission operation history should avoid system-oriented aggregate labels.',
+);
+assert.match(
+  commissionSource,
+  /本次分账结果|本次记录/,
+  'Commission operation history should explain what the split was changed to.',
+);
+assert.doesNotMatch(
+  commissionSource,
+  /open=\{Boolean\(operationHistorySummary\)\}[\s\S]*?<Table size="small">[\s\S]*?log\.summary/,
+  'Commission operation history should not use a cramped multi-column table.',
 );

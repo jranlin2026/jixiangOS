@@ -37,7 +37,7 @@ interface FinanceOverview {
   pendingOrderApplications: number;
   pendingSplitOrders: number;
   pendingPayoutOrders: number;
-  exceptionSplitOrders: number;
+  chargebackSplitOrders: number;
   waitingRefunds: number;
   frozenCommissionAmount: number;
 }
@@ -45,7 +45,7 @@ interface FinanceOverview {
 const FINANCE_TABS: Array<{ value: FinanceTab; label: string; permissionKey: string }> = [
   { value: 'overview', label: '财务总览', permissionKey: PERMISSION_KEYS.FINANCE_OVERVIEW },
   { value: 'settlement', label: '订单分账', permissionKey: PERMISSION_KEYS.FINANCE_SETTLEMENT },
-  { value: 'payout', label: '月度发放', permissionKey: PERMISSION_KEYS.FINANCE_PAYOUT },
+  { value: 'payout', label: '员工提成月报', permissionKey: PERMISSION_KEYS.FINANCE_PAYOUT },
   { value: 'refund', label: '退款付款', permissionKey: PERMISSION_KEYS.FINANCE_REFUND },
   { value: 'flow', label: '收支流水', permissionKey: PERMISSION_KEYS.FINANCE_FLOW },
   { value: 'rules', label: '规则配置', permissionKey: PERMISSION_KEYS.FINANCE_RULES },
@@ -66,7 +66,7 @@ const Finance: React.FC = () => {
     pendingOrderApplications: 0,
     pendingSplitOrders: 0,
     pendingPayoutOrders: 0,
-    exceptionSplitOrders: 0,
+    chargebackSplitOrders: 0,
     waitingRefunds: 0,
     frozenCommissionAmount: 0,
   });
@@ -100,7 +100,7 @@ const Finance: React.FC = () => {
         pendingOrderApplications: applicationsRes.data?.pagination.total || 0,
         pendingSplitOrders: splitCountsRes.data?.待确认 || 0,
         pendingPayoutOrders: splitCountsRes.data?.待发放 || 0,
-        exceptionSplitOrders: splitCountsRes.data?.异常 || 0,
+        chargebackSplitOrders: splitCountsRes.data?.待冲销 || 0,
         waitingRefunds: refundStatsRes.data?.waitingFinance || 0,
         frozenCommissionAmount: refundStatsRes.data?.frozenCommissionAmount || 0,
       });
@@ -151,7 +151,7 @@ const Finance: React.FC = () => {
     { label: '待审核订单', value: overview.pendingOrderApplications, tone: '#2563eb' },
     { label: '待确认分账', value: overview.pendingSplitOrders, tone: '#f97316' },
     { label: '待发放订单', value: overview.pendingPayoutOrders, tone: '#16a34a' },
-    { label: '异常分账', value: overview.exceptionSplitOrders, tone: '#dc2626' },
+    { label: '待冲销分账', value: overview.chargebackSplitOrders, tone: '#dc2626' },
     { label: '待财务退款', value: overview.waitingRefunds, tone: '#be123c' },
     { label: '冻结提成', value: formatCurrency(overview.frozenCommissionAmount), tone: '#6b7280' },
   ];

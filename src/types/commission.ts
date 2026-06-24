@@ -39,9 +39,9 @@ export interface CommissionRoleConfigFilters {
 }
 
 /** 提成状态 — 含审核流程 */
-export type CommissionStatus = '待确认' | '待发放' | '已发放' | '已取消';
-export type LegacyCommissionStatus = CommissionStatus | '待审核';
-export type CommissionOrderSummaryStatus = '待处理' | '待确认' | '待发放' | '已发放' | '异常';
+export type CommissionStatus = '待确认' | '待发放' | '已发放' | '已取消' | '已撤回' | '待冲销' | '已冲销';
+export type LegacyCommissionStatus = CommissionStatus | '待审核' | '异常';
+export type CommissionOrderSummaryStatus = '待处理' | '待确认' | '待发放' | '已发放' | '已撤回' | '待冲销' | '已冲销';
 
 export type CommissionScene =
   | '899成交'
@@ -152,7 +152,7 @@ export interface CommissionBatch {
   period: string;
   totalCount: number;
   totalAmount: number;
-  status: '待确认' | '待发放' | '已发放' | '已取消';
+  status: '待确认' | '待发放' | '已发放' | '已取消' | '已撤回' | '待冲销';
   approvedBy?: string;
   paidAt?: Timestamp;
   commissionIds: ID[];
@@ -214,8 +214,47 @@ export interface Commission {
   sourceRefundId?: ID;
   isRecoveryBonus?: boolean;
   paidAt?: Timestamp;
+  chargebackMethod?: CommissionChargebackMethod;
+  chargebackAmount?: number;
+  chargebackReason?: string;
+  chargebackHandledBy?: string;
+  chargebackHandledAt?: Timestamp;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+}
+
+export type CommissionChargebackMethod = '线下追回' | '下月提成抵扣' | '财务确认无需追回';
+
+export interface CommissionChargebackCompleteInput {
+  method: CommissionChargebackMethod;
+  amount: number;
+  reason: string;
+}
+
+export type CommissionOperationAction = '调整分账' | '确认分账' | '撤回提成' | '发起冲销' | '退款待冲销' | '冲销处理完成' | '发放提成';
+
+export interface CommissionOperationSplitSnapshot {
+  role: CommissionRole;
+  owner: string;
+  ownerId?: ID;
+  department?: string;
+  commissionAmount: number;
+  status: CommissionStatus;
+}
+
+export interface CommissionOperationLog {
+  id: ID;
+  orderId: ID;
+  orderNo: string;
+  customerName: string;
+  action: CommissionOperationAction;
+  operator: string;
+  operatedAt: Timestamp;
+  reason?: string;
+  summary: string;
+  commissionCount?: number;
+  totalCommissionAmount?: number;
+  splitSnapshot?: CommissionOperationSplitSnapshot[];
 }
 
 export interface CommissionAuditIssue {
@@ -284,6 +323,7 @@ export interface CommissionOrderSummary {
   sourceType?: string;
   officialPaymentChannel?: OfficialPaymentChannel;
   createdAt?: Timestamp;
+  sourceOrderDeleted?: boolean;
   totalCommissionAmount: number;
   pendingAssignCount: number;
   exceptionCount: number;
@@ -313,11 +353,14 @@ export interface MonthlyCommissionPayout {
   department: string;
   departmentId?: ID;
   orderCount: number;
+  pendingConfirmAmount: number;
   pendingPayAmount: number;
   paidAmount: number;
   exceptionAmount: number;
+  withdrawnAmount: number;
+  chargebackAmount: number;
   totalAmount: number;
-  status: '待发放' | '已发放' | '异常' | '无应发';
+  status: '待确认' | '待发放' | '已发放' | '待冲销' | '无应发';
   commissions: Commission[];
 }
 

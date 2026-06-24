@@ -224,7 +224,7 @@ function buildWorkbench(data: AssistantData): AIAssistantWorkbench {
     insights.push({
       id: 'commission-backlog',
       title: '分账存在待确认或待分配',
-      content: `当前有 ${pendingCommissionRows.length} 条分账需要财务确认，建议先处理待分配人员和异常分账。`,
+      content: `当前有 ${pendingCommissionRows.length} 条分账需要财务确认，建议先处理待分配人员和待冲销分账。`,
       tone: 'error',
       path: `${ROUTES.FINANCE}?tab=settlement`,
     });
@@ -320,7 +320,7 @@ function buildWorkbench(data: AssistantData): AIAssistantWorkbench {
       makeTask({
         id: 'refund',
         title: '退款付款/挽回',
-        description: '退款未闭环会影响收入、客户状态和提成异常。',
+        description: '退款未闭环会影响收入、客户状态和提成撤回/冲销。',
         count: activeRefundRows.length,
         priority: activeRefundRows.length > 0 ? 'high' : 'low',
         module: '财务中心',
@@ -450,7 +450,7 @@ function buildRefundResults(data: AssistantData): AIResultData[] {
       suggestions: [
         '先处理已批准但未付款的退款，避免财务状态不一致。',
         '挽回中任务需要明确下一次跟进时间和责任人。',
-        '已发放提成后发生退款的订单，要进入异常分账处理，不自动扣回。',
+        '已发放提成后发生退款的订单，要进入待冲销处理，不自动扣回。',
       ],
     },
   ];

@@ -188,7 +188,7 @@ const Orders: React.FC = () => {
   const [viewConfig, setViewConfig] = useState<OrderViewConfig>(readOrderViewConfig);
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(ORDER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
   const [orderLookupMessage, setOrderLookupMessage] = useState('');
-  const { confirm, dialog: feedbackDialog } = useAppFeedback();
+  const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
 
   useEffect(() => {
     productApi.getProductLevelConfigs().then((res) => {
@@ -280,7 +280,11 @@ const Orders: React.FC = () => {
   const handleDeleteOrder = async (order: Order) => {
     const confirmed = await confirm(`确认删除订单 ${order.orderNo} 吗？删除后该订单将从订单管理中移除。`, '删除订单');
     if (!confirmed) return;
-    await deleteOrder(order.id);
+    try {
+      await deleteOrder(order.id);
+    } catch (error) {
+      await alert(error instanceof Error ? error.message : '删除订单失败', '删除失败');
+    }
   };
 
   const handleFilterChange = (key: string, value: string) => {

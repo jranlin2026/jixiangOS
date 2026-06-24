@@ -525,6 +525,21 @@ async function deleteOrder(id: string): Promise<ApiResponse<boolean>> {
   await delay(150);
   const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
   const target = orders.find((o) => o.id === id);
+  const relatedCommissions = (getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [])
+    .filter((commission) => commission.orderId === id);
+  const hasPaidOrChargeback = relatedCommissions.some((commission) => (
+    commission.status === '已发放' || commission.status === '待冲销'
+  ));
+  if (hasPaidOrChargeback) {
+    return createErrorResponse('该订单已有已发放提成，需先完成冲销处理后才能删除');
+  }
+  const hasActiveCommission = relatedCommissions.some((commission) => (
+    commission.status !== '已撤回' && String(commission.status) !== '已取消'
+    && commission.status !== '已冲销'
+  ));
+  if (hasActiveCommission) {
+    return createErrorResponse('该订单已有分账记录，不能直接删除。请先到财务中心处理提成撤回/冲销。');
+  }
   const nextOrders = orders.filter((o) => o.id !== id);
   setStorageData(STORAGE_KEYS.ORDERS, nextOrders);
   if (target) syncCustomerOrderStats(target, nextOrders);

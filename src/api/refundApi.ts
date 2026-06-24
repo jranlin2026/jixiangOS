@@ -7,7 +7,7 @@ import type {
   RefundStats,
 } from '../types/refund';
 import type { Order } from '../types/order';
-import type { Commission } from '../types/commission';
+import type { Commission, CommissionOperationLog } from '../types/commission';
 import type { FinanceExpense, FinanceDailyRecord, ChannelROI, FinanceIncome } from '../types/finance';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
@@ -108,6 +108,28 @@ function saveRefunds(refunds: Refund[]): void {
   setStorageData(STORAGE_KEYS.REFUNDS, refunds);
 }
 
+function appendRefundCommissionOperationLog(refund: Refund, action: CommissionOperationLog['action'], reason: string, commissions: Commission[]): void {
+  if (!commissions.length) return;
+  const logs = getStorageData<CommissionOperationLog[]>(STORAGE_KEYS.COMMISSION_OPERATION_LOGS) || [];
+  const totalCommissionAmount = Math.round(
+    commissions.reduce((sum, commission) => sum + Number(commission.commissionAmount || 0), 0) * 100,
+  ) / 100;
+  const operatedAt = nowIso();
+  setStorageData(STORAGE_KEYS.COMMISSION_OPERATION_LOGS, [{
+    id: `comm-log-${uuidv4().slice(0, 8)}`,
+    orderId: refund.orderId,
+    orderNo: refund.orderNo,
+    customerName: refund.customerName,
+    action,
+    operator: refund.approverName || '财务',
+    operatedAt,
+    reason,
+    summary: `${action}，${commissions.length} 条分账，合计 ${totalCommissionAmount} 元，原因：${reason}`,
+    commissionCount: commissions.length,
+    totalCommissionAmount,
+  }, ...logs]);
+}
+
 function freezeCommissions(refund: Refund): number {
   const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
   let frozenAmount = 0;
@@ -142,39 +164,52 @@ function releaseCommissions(refund: Refund): void {
 
 function cancelCommissions(refund: Refund): void {
   const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
+  const withdrawnCommissions: Commission[] = [];
   setStorageData(STORAGE_KEYS.COMMISSIONS, commissions.map((commission) => {
     if ((commission.orderId !== refund.orderId && commission.orderNo !== refund.orderNo) || commission.isRecoveryBonus) return commission;
-    return {
+    if (commission.status === '已发放') return commission;
+    const nextCommission = {
       ...commission,
-      status: commission.status === '已发放' ? commission.status : '已取消',
-      calculationNote: `${commission.calculationNote || ''} 退款完成，未发放提成取消。`.trim(),
+      status: '已撤回' as const,
+      auditReason: `订单退款：${refund.refundNo}`,
+      calculationNote: `${commission.calculationNote || ''} 退款完成，未发放提成已撤回。`.trim(),
       sourceRefundId: refund.id,
       updatedAt: nowIso(),
     };
+    withdrawnCommissions.push(nextCommission);
+    return nextCommission;
   }));
+  appendRefundCommissionOperationLog(refund, '撤回提成', `订单退款：${refund.refundNo}`, withdrawnCommissions);
 }
 
-function markPaidRefundExceptions(refund: Refund): void {
+function markPaidRefundChargebacks(refund: Refund): void {
   const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
   const paidStatus = '已发放';
-  const reason = `已发放后退款：${refund.refundNo}，需财务人工处理`;
-  let changed = false;
+  const reason = `已发放后退款：${refund.refundNo}，需财务人工冲销/追回`;
+  const chargebackCommissions: Commission[] = [];
 
   const nextCommissions = commissions.map((commission) => {
     if ((commission.orderId !== refund.orderId && commission.orderNo !== refund.orderNo) || commission.isRecoveryBonus) return commission;
     if (commission.status !== paidStatus) return commission;
-    changed = true;
-    return {
+    const nextCommission = {
       ...commission,
+      status: '待冲销' as const,
       auditReason: reason,
       frozenReason: reason,
       calculationNote: `${commission.calculationNote || ''} ${reason}`.trim(),
       sourceRefundId: refund.id,
       updatedAt: nowIso(),
     };
+    chargebackCommissions.push(nextCommission);
+    return nextCommission;
   });
 
-  if (changed) setStorageData(STORAGE_KEYS.COMMISSIONS, nextCommissions);
+  setStorageData(STORAGE_KEYS.COMMISSIONS, nextCommissions);
+  appendRefundCommissionOperationLog(refund, '退款待冲销', reason, chargebackCommissions);
+}
+
+function markPaidRefundExceptions(refund: Refund): void {
+  markPaidRefundChargebacks(refund);
 }
 
 function createRecoveryCommission(refund: Refund, operatorId: string, operatorName: string): number {

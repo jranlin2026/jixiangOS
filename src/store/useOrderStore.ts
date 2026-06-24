@@ -94,11 +94,13 @@ const useOrderStore = create<OrderState>((set, get) => ({
   delete: async (id) => {
     set({ loading: true, error: null });
     try {
-      await orderApi.deleteOrder(id);
+      const res = await orderApi.deleteOrder(id);
+      if (res.code !== 0) throw new Error(res.message || '删除订单失败');
       await get().fetchItems();
       await get().fetchStats();
     } catch (e: any) {
       set({ error: e.message, loading: false });
+      throw e;
     }
   },
 

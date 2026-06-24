@@ -231,6 +231,8 @@ export const COMMISSION_STATUS = {
   PENDING: '待发放',
   PAID: '已发放',
   CANCELLED: '已取消',
+  WITHDRAWN: '已撤回',
+  CHARGEBACK_PENDING: '待冲销',
 } as const;
 
 export type CommissionStatus = (typeof COMMISSION_STATUS)[keyof typeof COMMISSION_STATUS];
@@ -298,6 +300,7 @@ export const STORAGE_KEYS = {
   ORDER_APPLICATIONS: `${STORAGE_PREFIX}order_applications`,
   DELIVERIES: `${STORAGE_PREFIX}deliveries`,
   COMMISSIONS: `${STORAGE_PREFIX}commissions`,
+  COMMISSION_OPERATION_LOGS: `${STORAGE_PREFIX}commission_operation_logs`,
   FINANCE: `${STORAGE_PREFIX}finance`,
   USERS: `${STORAGE_PREFIX}users`,
   AI_SESSIONS: `${STORAGE_PREFIX}ai_sessions`,
