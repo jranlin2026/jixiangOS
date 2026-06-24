@@ -57,7 +57,7 @@ const AIBusinessCardPanel: React.FC<AIBusinessCardPanelProps> = ({ card, loading
       <Box sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 1.5, bgcolor: '#fff' }}>
         {card.isFallback && (
           <Alert severity="info" sx={{ mb: 1.5 }}>
-            当前为本地兜底名片；配置 OPENAI_API_KEY 并启动本地代理后可生成联网结果。
+            当前为本地兜底名片；在系统设置中配置 DeepSeek API Key 后可生成 AI 结果。
           </Alert>
         )}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 1 }}>

@@ -29,7 +29,7 @@ import useAuthStore from '../../store/useAuthStore';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
-import { canCompleteContactField } from '../../shared/utils/contactEditLock';
+import { canCompleteContactField, canCompletePhoneField } from '../../shared/utils/contactEditLock';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import { formatPhoneForDisplay, getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
 import PermissionGate from '../../shared/auth/PermissionGate';
@@ -82,6 +82,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const [followNote, setFollowNote] = useState('');
   const [activeTab, setActiveTab] = useState(0);
   const [editing, setEditing] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
   const [draft, setDraft] = useState<Partial<Customer>>({});
   const [orders, setOrders] = useState<Order[]>([]);
   const [contracts, setContracts] = useState<ContractFile[]>([]);
@@ -250,8 +251,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   };
 
   const handleSaveProfile = async () => {
-    if (readOnly) return;
-    const nextPhone = canEditLockedContact || canCompleteContactField(currentCustomer.phone)
+    if (readOnly || profileSaving) return;
+    const nextPhone = canEditLockedContact || canCompletePhoneField(currentCustomer.phone)
       ? normalizePhoneForStorage(String(draft.phone || ''))
       : currentCustomer.phone;
     const phoneError = getPhoneNumberError(nextPhone);
@@ -277,12 +278,21 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       originalSalesTransferBy: draft.originalSalesTransferBy,
       remark: draft.remark,
     };
-    const res = await customerApi.updateCustomer(currentCustomer.id, payload);
-    if (res.code === 0 && res.data) {
+    setProfileSaving(true);
+    try {
+      const res = await customerApi.updateCustomer(currentCustomer.id, payload);
+      if (res.code !== 0 || !res.data) {
+        await alert(res.message || '客户资料保存失败，请检查必填项后再试', '保存失败');
+        return;
+      }
       setCurrentCustomer(res.data);
       setDraft(res.data);
       setEditing(false);
       onUpdated?.(res.data);
+    } catch (error) {
+      await alert(error instanceof Error ? error.message : '客户资料保存失败，请稍后重试', '保存失败');
+    } finally {
+      setProfileSaving(false);
     }
   };
 
@@ -734,8 +744,10 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                   )}
                   {editing ? (
                     <>
-                      <Button size="small" onClick={() => { setDraft(currentCustomer); setEditing(false); }}>取消</Button>
-                      <Button size="small" variant="contained" onClick={handleSaveProfile}>保存</Button>
+                      <Button size="small" disabled={profileSaving} onClick={() => { setDraft(currentCustomer); setEditing(false); }}>取消</Button>
+                      <Button size="small" variant="contained" disabled={profileSaving} onClick={handleSaveProfile} sx={{ minWidth: 76 }}>
+                        {profileSaving ? '保存中' : '保存'}
+                      </Button>
                     </>
                   ) : (
                     <Button size="small" variant="outlined" onClick={() => setEditing(true)}>编辑资料</Button>
@@ -746,7 +758,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
             <Box>
               {renderInfoRow('客户全名', 'name')}
               {renderInfoRow('公司', 'company')}
-              {renderInfoRow('手机', 'phone', canEditLockedContact || canCompleteContactField(currentCustomer.phone))}
+              {renderInfoRow('手机', 'phone', canEditLockedContact || canCompletePhoneField(currentCustomer.phone))}
               {renderInfoRow('微信', 'wechat', canEditLockedContact || canCompleteContactField(currentCustomer.wechat))}
               {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={{ bgcolor: `${lifecycleConfig.color}18`, color: lifecycleConfig.color, fontWeight: 600 }} />)}
               {renderSourceRow()}

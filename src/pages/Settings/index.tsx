@@ -10,6 +10,7 @@ import OrderTypeConfigPage from './OrderTypeConfig';
 import LifecycleStatusConfigPage from './LifecycleStatusConfig';
 import LeadSourceConfigPage from './LeadSourceConfig';
 import DataMaintenance from './DataMaintenance';
+import AIProviderConfig from './AIProviderConfig';
 import LeadFlowConfigTab from '../Leads/LeadFlowConfigTab';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
@@ -86,6 +87,7 @@ const Settings: React.FC = () => {
       label: '系统维护',
       description: '测试数据和系统维护工具',
       tabs: [
+        { label: 'AI大脑', permissionKey: PERMISSION_KEYS.SETTINGS_AI_CONFIG, component: <AIProviderConfig /> },
         { label: '数据维护', permissionKey: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, component: <DataMaintenance /> },
       ],
     },

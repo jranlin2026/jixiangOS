@@ -15,8 +15,9 @@ import type { Refund } from '../types/refund';
 import type { Commission } from '../types/commission';
 import type { UpgradeOpportunity } from '../types/upgrade';
 import type { ApiResponse } from './types';
-import { createSuccessResponse, delay } from './types';
+import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
+import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { ROUTES, STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import {
@@ -641,6 +642,72 @@ function assistantContent(scenario: AIQueryScenario, query: string): string {
   return `关于“${query}”，我按当前系统数据做了结构化分析。`;
 }
 
+function writeQuerySession(sessionId: string | null, query: string, assistantMessage: AIQueryMessage): void {
+  const sessions = getStorageData<AIQuerySession[]>(STORAGE_KEYS.AI_SESSIONS) || [];
+  const now = new Date().toISOString();
+  const userMessage: AIQueryMessage = {
+    id: uuidv4(),
+    role: 'user',
+    content: query,
+    createdAt: now,
+  };
+
+  if (sessionId) {
+    const session = sessions.find((item) => item.id === sessionId);
+    if (session) {
+      session.messages.push(userMessage, assistantMessage);
+      session.updatedAt = new Date().toISOString();
+      setStorageData(STORAGE_KEYS.AI_SESSIONS, sessions);
+      return;
+    }
+  }
+
+  const newSession: AIQuerySession = {
+    id: uuidv4(),
+    title: query.slice(0, 20) + (query.length > 20 ? '...' : ''),
+    messages: [userMessage, assistantMessage],
+    createdAt: now,
+    updatedAt: now,
+  };
+  sessions.unshift(newSession);
+  setStorageData(STORAGE_KEYS.AI_SESSIONS, sessions);
+}
+
+async function sendBackendQuery(sessionId: string | null, query: string): Promise<ApiResponse<AIQueryMessage>> {
+  const data = getAssistantData();
+  const workbench = buildWorkbench(data);
+  const scenario = matchScenario(query);
+  const referenceResults = generateResults(query, data, workbench, scenario);
+  const response = await backendRequest<{ content: string; results?: AIResultData[] }>('/ai/query', {
+    method: 'POST',
+    body: JSON.stringify({
+      query,
+      context: {
+        provider: 'jixiang-os',
+        scopeLabel: workbench.scopeLabel,
+        generatedAt: workbench.generatedAt,
+        metrics: workbench.metrics,
+        tasks: workbench.tasks,
+        insights: workbench.insights,
+        referenceResults,
+      },
+    }),
+  });
+  if (response.code !== 0 || !response.data) {
+    return createErrorResponse(response.message || 'AI助手请求失败');
+  }
+
+  const assistantMessage: AIQueryMessage = {
+    id: uuidv4(),
+    role: 'assistant',
+    content: response.data.content,
+    results: response.data.results?.length ? response.data.results : referenceResults,
+    createdAt: new Date().toISOString(),
+  };
+  writeQuerySession(sessionId, query, assistantMessage);
+  return createSuccessResponse(assistantMessage);
+}
+
 async function fetchAssistantWorkbench(): Promise<ApiResponse<AIAssistantWorkbench>> {
   ensureInit();
   await delay(120);
@@ -649,21 +716,14 @@ async function fetchAssistantWorkbench(): Promise<ApiResponse<AIAssistantWorkben
 
 async function sendQuery(sessionId: string | null, query: string): Promise<ApiResponse<AIQueryMessage>> {
   ensureInit();
+  if (shouldUseBackendApi()) return sendBackendQuery(sessionId, query);
+
   await delay(350);
 
-  const sessions = getStorageData<AIQuerySession[]>(STORAGE_KEYS.AI_SESSIONS) || [];
   const data = getAssistantData();
   const workbench = buildWorkbench(data);
   const scenario = matchScenario(query);
   const results = generateResults(query, data, workbench, scenario);
-  const now = new Date().toISOString();
-
-  const userMessage: AIQueryMessage = {
-    id: uuidv4(),
-    role: 'user',
-    content: query,
-    createdAt: now,
-  };
 
   const assistantMessage: AIQueryMessage = {
     id: uuidv4(),
@@ -673,25 +733,7 @@ async function sendQuery(sessionId: string | null, query: string): Promise<ApiRe
     createdAt: new Date().toISOString(),
   };
 
-  if (sessionId) {
-    const session = sessions.find((item) => item.id === sessionId);
-    if (session) {
-      session.messages.push(userMessage, assistantMessage);
-      session.updatedAt = new Date().toISOString();
-      setStorageData(STORAGE_KEYS.AI_SESSIONS, sessions);
-    }
-  } else {
-    const newSession: AIQuerySession = {
-      id: uuidv4(),
-      title: query.slice(0, 20) + (query.length > 20 ? '...' : ''),
-      messages: [userMessage, assistantMessage],
-      createdAt: now,
-      updatedAt: now,
-    };
-    sessions.unshift(newSession);
-    setStorageData(STORAGE_KEYS.AI_SESSIONS, sessions);
-  }
-
+  writeQuerySession(sessionId, query, assistantMessage);
   return createSuccessResponse(assistantMessage);
 }
 

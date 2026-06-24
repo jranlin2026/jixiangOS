@@ -104,6 +104,19 @@ model AppStorage {
   @@map("app_storage")
 }
 
+model AiProviderConfig {
+  id        String   @id @default("default") @db.VarChar(32)
+  provider  String   @default("deepseek") @db.VarChar(40)
+  apiKey    String   @db.Text
+  baseUrl   String   @default("https://api.deepseek.com") @db.VarChar(255)
+  model     String   @default("deepseek-chat") @db.VarChar(100)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("ai_provider_configs")
+}
+
 model LeadRecord {
   id                  String   @id @db.VarChar(64)
   name                String   @db.VarChar(120)

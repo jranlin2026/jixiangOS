@@ -1,9 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import OpenAI from 'openai';
 import { prisma, checkDatabaseConnection } from './db/client';
 import { createAuthService } from './services/authService';
+import { createAiConfigService } from './services/aiConfigService';
 import { createSettingsService } from './services/settingsService';
 import { createStorageService } from './services/storageService';
 
@@ -11,18 +11,18 @@ dotenv.config();
 
 const app = express();
 const port = Number(process.env.AI_PROXY_PORT || 3001);
-const model = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
 const authService = createAuthService(prisma);
+const aiConfigService = createAiConfigService(prisma as any);
 const settingsService = createSettingsService(prisma);
 const storageService = createStorageService(prisma);
 
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
-function getClient(): OpenAI | null {
-  if (!process.env.OPENAI_API_KEY) return null;
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-}
+type DeepSeekMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+};
 
 function jsonFromText<T>(text: string): T | null {
   const trimmed = text.trim();
@@ -50,9 +50,40 @@ function bearerToken(req: express.Request): string | undefined {
   return match?.[1];
 }
 
+async function callDeepSeek(messages: DeepSeekMessage[], options: { temperature?: number } = {}): Promise<string> {
+  const config = await aiConfigService.getRuntimeConfig();
+  if (!config.enabled) throw new Error('DeepSeek AI is disabled');
+  if (!config.apiKey) throw new Error('DeepSeek API Key is not configured');
+
+  const response = await fetch(`${config.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: config.model,
+      messages,
+      temperature: options.temperature ?? 0.2,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || `DeepSeek request failed with HTTP ${response.status}`);
+  }
+  return String(payload?.choices?.[0]?.message?.content || '');
+}
+
 app.get('/api/health', async (_req, res) => {
   const database = await checkDatabaseConnection();
-  res.json({ ok: true, database, hasOpenAIKey: Boolean(process.env.OPENAI_API_KEY), model });
+  const aiConfig = await aiConfigService.getPublicConfig();
+  res.json({
+    ok: true,
+    database,
+    aiProvider: aiConfig.data?.provider,
+    hasAIKey: Boolean(aiConfig.data?.hasApiKey),
+    model: aiConfig.data?.model,
+  });
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -88,6 +119,27 @@ app.get('/api/settings/positions', async (_req, res) => {
   res.json(await settingsService.listPositions());
 });
 
+app.get('/api/ai/config', async (_req, res) => {
+  res.json(await aiConfigService.getPublicConfig());
+});
+
+app.put('/api/ai/config', async (req, res) => {
+  const result = await aiConfigService.saveConfig(req.body || {});
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.post('/api/ai/config/test', async (_req, res) => {
+  try {
+    const text = await callDeepSeek([
+      { role: 'system', content: '你是极享OS的AI连接测试助手，只返回一句简短中文。' },
+      { role: 'user', content: '请回复：DeepSeek连接正常' },
+    ], { temperature: 0 });
+    res.json({ code: 0, data: { ok: true, response: text || 'DeepSeek连接正常' }, message: 'success' });
+  } catch (error) {
+    res.status(500).json({ code: -1, data: null, message: error instanceof Error ? error.message : 'DeepSeek request failed' });
+  }
+});
+
 app.get('/api/storage', async (_req, res) => {
   res.json(await storageService.list());
 });
@@ -112,47 +164,43 @@ app.delete('/api/storage', async (_req, res) => {
 });
 
 app.post('/api/ai/query', async (req, res) => {
-  const client = getClient();
-  if (!client) {
-    res.status(503).json({ code: -1, message: 'OPENAI_API_KEY is not configured' });
-    return;
-  }
-
   const query = String(req.body?.query || '').trim();
+  const context = req.body?.context || null;
   if (!query) {
     res.status(400).json({ code: -1, message: 'query is required' });
     return;
   }
 
   try {
-    const response = await client.responses.create({
-      model,
-      input: [
-        {
-          role: 'system',
-          content: '你是销售型公司内部管理系统的经营分析助手。请用中文给出简洁结论和可执行建议。',
-        },
-        {
-          role: 'user',
-          content: `问题：${query}\n请返回 JSON：{"content":"简短回答","results":[{"type":"TEXT","title":"标题","content":"内容"},{"type":"SUGGESTION","title":"建议","content":"说明","suggestions":["建议1"]}]}`,
-        },
-      ],
-    } as any);
-    const text = (response as any).output_text || '';
+    const text = await callDeepSeek([
+      {
+        role: 'system',
+        content: '你是极享OS的AI企业运营助手。你必须基于用户传入的极享OS业务数据摘要回答，不要编造系统里没有的数据。请用中文给出简洁结论和可执行建议，只返回严格 JSON，不要 Markdown。',
+      },
+      {
+        role: 'user',
+        content: `问题：${query}
+当前极享OS业务数据摘要：
+${JSON.stringify(context || {}, null, 2)}
+
+请返回 JSON：
+{
+  "content": "直接回答用户问题的一段话",
+  "results": [
+    {"type":"TEXT","title":"关键结论","content":"基于数据的判断"},
+    {"type":"SUGGESTION","title":"下一步动作","content":"说明","suggestions":["建议1","建议2"]}
+  ]
+}`,
+      },
+    ]);
     const parsed = jsonFromText<{ content: string; results: unknown[] }>(text);
     res.json({ code: 0, data: parsed || { content: text, results: [{ type: 'TEXT', title: 'AI 分析', content: text }] }, message: 'success' });
   } catch (error) {
-    res.status(500).json({ code: -1, message: error instanceof Error ? error.message : 'OpenAI request failed' });
+    res.status(500).json({ code: -1, message: error instanceof Error ? error.message : 'DeepSeek request failed' });
   }
 });
 
 app.post('/api/ai/business-card', async (req, res) => {
-  const client = getClient();
-  if (!client) {
-    res.status(503).json({ code: -1, message: 'OPENAI_API_KEY is not configured' });
-    return;
-  }
-
   const input = req.body || {};
   if (!input.name || !input.subjectId || !input.subjectType) {
     res.status(400).json({ code: -1, message: 'name, subjectId and subjectType are required' });
@@ -160,17 +208,14 @@ app.post('/api/ai/business-card', async (req, res) => {
   }
 
   try {
-    const response = await client.responses.create({
-      model,
-      tools: [{ type: 'web_search_preview' }],
-      input: [
-        {
-          role: 'system',
-          content: '你是销售情报助手。只返回严格 JSON，不要 Markdown。互联网信息不足时明确说明，并给出销售可用推断。',
-        },
-        {
-          role: 'user',
-          content: `请为销售生成AI客户名片。客户资料：${JSON.stringify(input)}。
+    const text = await callDeepSeek([
+      {
+        role: 'system',
+        content: '你是销售情报助手。只返回严格 JSON，不要 Markdown。外部信息不足时明确说明，并给出销售可用推断。',
+      },
+      {
+        role: 'user',
+        content: `请为销售生成AI客户名片。客户资料：${JSON.stringify(input)}。
 返回 JSON 字段：
 {
   "externalSummary": "外部信息摘要",
@@ -178,13 +223,11 @@ app.post('/api/ai/business-card', async (req, res) => {
   "matchedProducts": ["匹配产品"],
   "talkTracks": ["沟通话术"],
   "riskAlerts": ["风险提醒"],
-  "sources": [{"title":"来源标题","url":"https://...","summary":"摘要"}]
+  "sources": [{"title":"来源标题","url":"local://crm","summary":"摘要"}]
 }`,
-        },
-      ],
-    } as any);
+      },
+    ]);
 
-    const text = (response as any).output_text || '';
     const parsed = jsonFromText<any>(text) || {};
     res.json({
       code: 0,
@@ -210,7 +253,7 @@ app.post('/api/ai/business-card', async (req, res) => {
       message: 'success',
     });
   } catch (error) {
-    res.status(500).json({ code: -1, message: error instanceof Error ? error.message : 'OpenAI request failed' });
+    res.status(500).json({ code: -1, message: error instanceof Error ? error.message : 'DeepSeek request failed' });
   }
 });
 

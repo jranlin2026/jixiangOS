@@ -69,6 +69,10 @@ const createOrderSplitDialogSource = commissionSource.slice(
   commissionSource.indexOf('<Dialog open={createSplitOpen}'),
   commissionSource.indexOf('<Dialog open={Boolean(deleteSummary)}'),
 );
+const customerSaveProfileSource = customerDetailSource.slice(
+  customerDetailSource.indexOf('const handleSaveProfile'),
+  customerDetailSource.indexOf('const handleClaimCurrentCustomer'),
+);
 
 assert.match(
   customersPageSource,
@@ -79,6 +83,11 @@ assert.match(
   customerDetailSource,
   /canCreateOrderForCurrentCustomer/,
   'Customer detail must gate submit-order actions behind a public-pool status check.',
+);
+assert.match(
+  customerSaveProfileSource,
+  /res\.code\s*!==\s*0[\s\S]*res\.message/,
+  'Customer detail save must surface update failures instead of making the save button feel unresponsive.',
 );
 assert.doesNotMatch(
   `${customersPageSource}\n${customerDetailSource}`,

@@ -71,6 +71,14 @@ const blankContactCustomer: Customer = {
   wechat: '',
 };
 
+const invalidContactCustomer: Customer = {
+  ...customer,
+  id: 'cust-invalid-contact',
+  name: 'Invalid Contact Customer',
+  phone: '12100019019',
+  wechat: 'invalid_contact_wx',
+};
+
 const lead: Lead = {
   id: 'lead-test',
   customerId: 'cust-test',
@@ -121,7 +129,7 @@ const order: Order = {
 
 storage.clear();
 storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
-storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([customer, legacyCustomer, blankContactCustomer]));
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([customer, legacyCustomer, blankContactCustomer, invalidContactCustomer]));
 storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([lead]));
 storage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify([order]));
 const listRes = await customerApi.fetchCustomers({ pageSize: 10 });
@@ -191,6 +199,14 @@ const lockedCustomerContactRes = await customerApi.updateCustomer('cust-blank-co
 assert.equal(lockedCustomerContactRes.code, 0);
 assert.equal(lockedCustomerContactRes.data?.phone, '+8613811112222');
 assert.equal(lockedCustomerContactRes.data?.wechat, 'customer_wx_001');
+
+const correctedInvalidContactRes = await customerApi.updateCustomer('cust-invalid-contact', {
+  phone: '13328951873',
+  wechat: 'invalid_contact_wx_002',
+});
+assert.equal(correctedInvalidContactRes.code, 0);
+assert.equal(correctedInvalidContactRes.data?.phone, '+8613328951873');
+assert.equal(correctedInvalidContactRes.data?.wechat, 'invalid_contact_wx');
 
 storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
   id: 'user-sales',

@@ -34,7 +34,6 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "mysql2": "^3.22.5",
-    "openai": "^6.43.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.23.0",
