@@ -17,6 +17,7 @@ import type { Customer } from '../../types/customer';
 import type { CustomerLevelConfig, LeadSourceConfig, User } from '../../types/settings';
 import { applyCurrentLeadInputBy, getCurrentLeadInputName } from '../../shared/utils/leadInputAttribution';
 import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
+import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution';
 
 interface CustomerFormProps {
   open: boolean;
@@ -148,6 +149,14 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     setForm({ ...form, [field]: e.target.value });
   };
 
+  const handlePhoneChange = (value: string) => {
+    setForm((current) => ({
+      ...current,
+      phone: value,
+      city: completeCityFromPhone(current.city, value),
+    }));
+  };
+
   const handleContributorSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const user = users.find((item) => item.id === e.target.value);
     setForm({
@@ -171,6 +180,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     const payload = {
       ...form,
       phone: normalizePhoneForStorage(form.phone),
+      city: completeCityFromPhone(form.city, form.phone),
       tags,
       sourceType: normalizeResourceOwnership(form.sourceType),
     };
@@ -205,7 +215,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
           <PhoneNumberInput
             label="手机号"
             value={form.phone}
-            onChange={(value) => setForm({ ...form, phone: value })}
+            onChange={handlePhoneChange}
             error={showContactError}
             helperText={showContactError ? '手机号或微信至少填写一项' : ''}
             fullWidth

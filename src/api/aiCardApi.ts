@@ -15,7 +15,7 @@ function getBaseUrl(): string {
 }
 
 function buildFallbackCard(input: AIBusinessCardInput): AIBusinessCard {
-  const product = input.industry === '教育' ? '29800贴牌' : input.company ? '9800代理' : '899智能体';
+  const product = input.industry?.includes('教育') ? '29800贴牌方案' : input.company ? '9800代理方案' : '899智能体体验课';
   const summaryTarget = input.company ? `${input.name} / ${input.company}` : input.name;
   return {
     id: `card-${uuidv4().slice(0, 8)}`,
@@ -28,25 +28,32 @@ function buildFallbackCard(input: AIBusinessCardInput): AIBusinessCard {
     wechat: input.wechat,
     industry: input.industry,
     city: input.city,
-    externalSummary: `暂未连接到真实联网搜索，已基于系统内资料生成 ${summaryTarget} 的销售名片。建议销售先确认客户业务规模、当前获客渠道和AI应用预算。`,
-    demandInsights: [
-      input.industry ? `${input.industry}行业客户通常关注获客效率、交付稳定性和案例背书` : '客户行业信息不足，首轮沟通应优先补齐业务场景',
-      input.company ? '客户具备组织型采购可能，可重点确认决策链和预算周期' : '当前缺少公司信息，建议先补充企业主体和岗位角色',
-      ...(input.tags || []).slice(0, 1).map((tag) => `已有标签"${tag}"可作为破冰切入点`),
+    externalSummary: `暂未获得 DeepSeek 联网情报，已基于系统内资料生成 ${summaryTarget} 的客户情报码片。建议销售先确认客户业务规模、当前获客渠道、AI应用预算和决策链路。`,
+    publicFacts: [
+      input.company ? `系统内记录公司：${input.company}` : '系统内暂未记录公司名称',
+      input.city ? `系统内记录城市：${input.city}` : '系统内暂未记录城市',
+      input.industry ? `系统内记录行业：${input.industry}` : '系统内暂未记录行业',
     ],
-    matchedProducts: [product, 'AI运营实战课程'],
+    demandInsights: [
+      input.industry ? `${input.industry}客户通常会关注获客效率、交付稳定性和案例背书。` : '行业信息不足，首轮沟通应先补齐业务场景。',
+      input.company ? '客户具备组织型采购可能，建议确认决策人、预算周期和当前替代方案。' : '缺少企业主体信息，建议先确认公司/门店/个人IP定位。',
+    ],
+    matchedProducts: [product, 'AI运营实战课'],
     talkTracks: [
-      '先用客户当前业务场景开场，确认他们最想提升的是获客、转化还是交付效率',
-      `结合${product}说明投入产出，并准备同类型客户案例`,
-      '约定下一步动作：演示、方案、报价或内部决策人会议',
+      '微信开场：我看您这边可能在关注AI获客或企业运营效率，想先了解下您现在主要卡在获客、转化还是交付？',
+      '电话开场：您好，我是极享OS这边，想快速确认一下您现在做AI工具/运营系统，是想自己用，还是做客户交付？',
+      `产品切入：如果您现在需要快速验证，可以先从${product}切入，再根据业务规模升级。`,
+      '下一步：建议约一次15分钟演示，把客户当前业务流程和可落地的AI场景对齐。',
     ],
     riskAlerts: [
-      input.phone ? '可直接电话触达，但仍需补齐微信/公司等二次触达信息' : '缺少电话，触达稳定性较弱',
-      'AI推断结果需销售复核，不能替代客户真实需求确认',
+      '当前为本地兜底判断，缺少公开网页证据。',
+      input.phone ? '可电话触达，但仍建议补齐微信、公司和来源备注。' : '缺少电话，触达稳定性较弱。',
     ],
     sources: [
       { title: '系统内客户/线索资料', url: `local://${input.subjectType}/${input.subjectId}`, summary: '来自当前CRM本地数据' },
     ],
+    searchQueries: [],
+    confidence: 0.35,
     isFallback: true,
     generatedAt: new Date().toISOString(),
   };
@@ -85,7 +92,7 @@ async function generateCard(input: AIBusinessCardInput): Promise<ApiResponse<AIB
 
   const nextCards = [normalized, ...cards.filter((item) => !(item.subjectType === input.subjectType && item.subjectId === input.subjectId))];
   setStorageData(STORAGE_KEYS.AI_CARDS, nextCards);
-  return createSuccessResponse(normalized, normalized.isFallback ? '已生成本地兜底AI名片' : '已生成AI名片');
+  return createSuccessResponse(normalized, normalized.isFallback ? '已生成本地兜底AI名片' : '已生成AI联网情报名片');
 }
 
 async function getCard(subjectType: AIBusinessCard['subjectType'], subjectId: string): Promise<ApiResponse<AIBusinessCard | null>> {

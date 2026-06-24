@@ -20,11 +20,14 @@ export interface AIBusinessCard {
   industry?: string;
   city?: string;
   externalSummary: string;
+  publicFacts?: string[];
   demandInsights: string[];
   matchedProducts: string[];
   talkTracks: string[];
   riskAlerts: string[];
   sources: AIBusinessCardSource[];
+  searchQueries?: string[];
+  confidence?: number;
   isFallback: boolean;
   generatedAt: Timestamp;
 }

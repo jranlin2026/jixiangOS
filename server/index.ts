@@ -6,6 +6,11 @@ import { createAuthService } from './services/authService';
 import { createAiConfigService } from './services/aiConfigService';
 import { createSettingsService } from './services/settingsService';
 import { createStorageService } from './services/storageService';
+import {
+  buildCustomerIntelPrompt,
+  searchPublicCustomerIntel,
+  type PublicSearchResult,
+} from './services/publicCustomerIntelService';
 
 dotenv.config();
 
@@ -201,6 +206,62 @@ ${JSON.stringify(context || {}, null, 2)}
 });
 
 app.post('/api/ai/business-card', async (req, res) => {
+  const input = req.body || {};
+  if (!input.name || !input.subjectId || !input.subjectType) {
+    res.status(400).json({ code: -1, message: 'name, subjectId and subjectType are required' });
+    return;
+  }
+
+  try {
+    const { queries, results } = await searchPublicCustomerIntel(input);
+    const prompt = buildCustomerIntelPrompt(input, queries, results);
+    const text = await callDeepSeek([
+      {
+        role: 'system',
+        content: '你是极享OS的销售情报助手。只返回严格 JSON，不要 Markdown。必须区分公开事实和AI推断，不得编造隐私身份信息。',
+      },
+      {
+        role: 'user',
+        content: prompt,
+      },
+    ]);
+
+    const parsed = jsonFromText<any>(text) || {};
+    const sourceResults = Array.isArray(parsed.sources) && parsed.sources.length
+      ? parsed.sources
+      : results.map((item: PublicSearchResult) => ({ title: item.title, url: item.url, summary: item.snippet }));
+    res.json({
+      code: 0,
+      data: {
+        subjectType: input.subjectType,
+        subjectId: input.subjectId,
+        subjectName: input.name,
+        company: input.company,
+        phone: input.phone,
+        email: input.email,
+        wechat: input.wechat,
+        industry: input.industry,
+        city: input.city,
+        externalSummary: parsed.externalSummary || text || '未获得有效外部信息摘要',
+        publicFacts: Array.isArray(parsed.publicFacts) ? parsed.publicFacts : [],
+        demandInsights: Array.isArray(parsed.demandInsights) ? parsed.demandInsights : [],
+        matchedProducts: Array.isArray(parsed.matchedProducts) ? parsed.matchedProducts : [],
+        talkTracks: Array.isArray(parsed.talkTracks) ? parsed.talkTracks : [],
+        riskAlerts: Array.isArray(parsed.riskAlerts) ? parsed.riskAlerts : [],
+        sources: sourceResults,
+        searchQueries: queries,
+        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : (results.length ? 0.62 : 0.42),
+        isFallback: false,
+        generatedAt: new Date().toISOString(),
+      },
+      message: 'success',
+    });
+  } catch (error) {
+    res.status(500).json({ code: -1, message: error instanceof Error ? error.message : 'DeepSeek request failed' });
+  }
+});
+
+app.post('/api/ai/business-card-legacy', async (req, res) => {
   const input = req.body || {};
   if (!input.name || !input.subjectId || !input.subjectType) {
     res.status(400).json({ code: -1, message: 'name, subjectId and subjectType are required' });

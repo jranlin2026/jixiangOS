@@ -32,6 +32,7 @@ import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { canCompleteContactField, canCompletePhoneField } from '../../shared/utils/contactEditLock';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import { formatPhoneForDisplay, getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
+import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution';
 import PermissionGate from '../../shared/auth/PermissionGate';
 import { PERMISSION_KEYS } from '../../shared/utils/permissions';
 
@@ -206,6 +207,14 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     setDraft((prev) => ({ ...prev, leadSource: option.parentName, sourceName: option.childName }));
   };
 
+  const handlePhoneChange = (value: string) => {
+    setDraft((prev) => ({
+      ...prev,
+      phone: value,
+      city: completeCityFromPhone(String(prev.city || ''), value),
+    }));
+  };
+
   const getActivityColor = (type: CustomerActivityRecord['type']) => {
     if (type === 'follow') return '#16a34a';
     if (type === 'order') return '#2563eb';
@@ -255,6 +264,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     const nextPhone = canEditLockedContact || canCompletePhoneField(currentCustomer.phone)
       ? normalizePhoneForStorage(String(draft.phone || ''))
       : currentCustomer.phone;
+    const nextCity = completeCityFromPhone(String(draft.city || ''), nextPhone);
     const phoneError = getPhoneNumberError(nextPhone);
     if (phoneError) {
       alert(phoneError);
@@ -269,7 +279,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       sourceName: draft.sourceName,
       sourceType: normalizeResourceOwnership(draft.sourceType as string | undefined),
       industry: draft.industry,
-      city: draft.city,
+      city: nextCity,
       owner: draft.owner,
       leadInputBy: draft.leadInputBy,
       leadContributorId: draft.leadContributorId,
@@ -441,7 +451,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
             ) : field === 'phone' ? (
               <PhoneNumberInput
                 value={currentValue}
-                onChange={(value) => setDraft((prev) => ({ ...prev, [field]: value }))}
+                onChange={handlePhoneChange}
                 size="small"
                 fullWidth
               />
