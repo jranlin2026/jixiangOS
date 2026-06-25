@@ -1,8 +1,10 @@
 import type { User, UserRole, ProductConfig, OrderTypeConfig, LifecycleStatusConfig, LeadSourceConfig, LifecycleStatusCode, CustomerLevelConfig, OrganizationProfile, EmploymentStatus } from '../types/settings';
+import type { Customer, CustomerActivityRecord } from '../types/customer';
+import type { Lead, LeadChangeLog } from '../types/lead';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, COMMISSION_RATES, DEFAULT_ORDER_TYPE_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, DEFAULT_LEAD_SOURCE_CONFIGS, DEFAULT_CUSTOMER_LEVEL_CONFIGS, normalizeLifecycleStatusCode } from '../shared/utils/constants';
+import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, COMMISSION_RATES, DEFAULT_ORDER_TYPE_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, DEFAULT_LEAD_SOURCE_CONFIGS, DEFAULT_CUSTOMER_LEVEL_CONFIGS, LIFECYCLE_STATUS_CODES, normalizeLifecycleStatusCode } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 import type { Order } from '../types/order';
@@ -136,8 +138,142 @@ type UserFilters = {
   employmentStatus?: EmploymentStatus | 'all';
 };
 
+export type LeaveUserCustomerHandoff = {
+  customerAction?: 'transfer' | 'public_pool';
+  targetUserId?: string;
+  reason?: string;
+};
+
 function isAdminUser(user: Pick<User, 'account'>): boolean {
   return normalizeAccount(user.account) === 'admin';
+}
+
+function createHandoffActivity(
+  leavingUser: User,
+  nextOwner: string,
+  reason: string,
+  now: string,
+): CustomerActivityRecord {
+  return {
+    id: `act-${uuidv4().slice(0, 8)}`,
+    type: 'transfer',
+    title: nextOwner === '公海' ? '离职客户释放到公海' : `离职客户交接给${nextOwner}`,
+    content: reason || `原负责人${leavingUser.name}办理离职，客户归属已更新`,
+    operator: getCurrentOperatorName('系统'),
+    createdAt: now,
+    changes: [{
+      field: 'owner',
+      label: '销售负责人',
+      oldValue: leavingUser.name,
+      newValue: nextOwner,
+    }],
+  };
+}
+
+function createLeadHandoffLog(
+  leavingUser: User,
+  nextOwner: string,
+  reason: string,
+  now: string,
+): LeadChangeLog {
+  return {
+    id: `hist-${uuidv4().slice(0, 8)}`,
+    action: 'update',
+    operator: getCurrentOperatorName('系统'),
+    changedAt: now,
+    summary: reason || `离职交接：${leavingUser.name} -> ${nextOwner}`,
+    changes: [
+      { field: 'owner', label: '负责人', oldValue: leavingUser.name, newValue: nextOwner },
+      { field: 'assignedTo', label: '分配销售', oldValue: leavingUser.name, newValue: nextOwner },
+    ],
+  };
+}
+
+function applyLeavingUserCustomerHandoff(
+  leavingUser: User,
+  users: User[],
+  handoff: LeaveUserCustomerHandoff = {},
+): ApiResponse<null> {
+  const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+  const ownedCustomers = customers.filter((customer) => customer.owner === leavingUser.name);
+  if (!ownedCustomers.length) return createSuccessResponse(null);
+
+  if (!handoff.customerAction) {
+    return createErrorResponse(`该员工名下还有 ${ownedCustomers.length} 个客户，请先选择客户交接方式`);
+  }
+
+  const now = new Date().toISOString();
+  let nextOwner = '公海';
+  let targetUser: User | undefined;
+  if (handoff.customerAction === 'transfer') {
+    targetUser = users.find((user) => user.id === handoff.targetUserId && user.id !== leavingUser.id && user.isActive);
+    if (!targetUser) return createErrorResponse('请选择一个在职员工作为客户接收人');
+    nextOwner = targetUser.name;
+  }
+
+  const ownedCustomerIds = new Set(ownedCustomers.map((customer) => customer.id));
+  const reason = handoff.reason?.trim()
+    || (handoff.customerAction === 'public_pool'
+      ? `${leavingUser.name}离职，客户释放到公海`
+      : `${leavingUser.name}离职，客户交接给${nextOwner}`);
+
+  const nextCustomers = customers.map((customer) => {
+    if (customer.owner !== leavingUser.name) return customer;
+    const activity = createHandoffActivity(leavingUser, nextOwner, reason, now);
+    if (handoff.customerAction === 'public_pool') {
+      return {
+        ...customer,
+        owner: '公海',
+        lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL,
+        lifecycleStatusUpdatedAt: now,
+        publicPoolAt: now,
+        releasedBy: leavingUser.name,
+        releaseReason: reason,
+        activityRecords: [activity, ...(customer.activityRecords || [])],
+        updatedAt: now,
+      };
+    }
+    return {
+      ...customer,
+      owner: nextOwner,
+      ownerSince: now,
+      originalSalesTransferBy: leavingUser.name,
+      activityRecords: [activity, ...(customer.activityRecords || [])],
+      updatedAt: now,
+    };
+  });
+  setStorageData(STORAGE_KEYS.CUSTOMERS, nextCustomers);
+
+  const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
+  const nextLeads = leads.map((lead) => {
+    const shouldUpdate = lead.owner === leavingUser.name
+      || lead.assignedTo === leavingUser.name
+      || Boolean(lead.customerId && ownedCustomerIds.has(lead.customerId));
+    if (!shouldUpdate) return lead;
+    const log = createLeadHandoffLog(leavingUser, nextOwner, reason, now);
+    if (handoff.customerAction === 'public_pool') {
+      return {
+        ...lead,
+        owner: '公海',
+        assignedTo: undefined,
+        lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL,
+        lifecycleStatusUpdatedAt: now,
+        changeHistory: [log, ...(lead.changeHistory || [])],
+        updatedAt: now,
+      };
+    }
+    return {
+      ...lead,
+      owner: nextOwner,
+      assignedTo: nextOwner,
+      assignedAt: now,
+      changeHistory: [log, ...(lead.changeHistory || [])],
+      updatedAt: now,
+    };
+  });
+  setStorageData(STORAGE_KEYS.LEADS, nextLeads);
+
+  return createSuccessResponse(null);
 }
 
 async function fetchUsers(filters?: UserFilters): Promise<ApiResponse<User[]>> {
@@ -233,12 +369,14 @@ async function updateUser(id: string, data: Partial<User>): Promise<ApiResponse<
   return createSuccessResponse(users[idx]);
 }
 
-async function leaveUser(id: string): Promise<ApiResponse<User | null>> {
+async function leaveUser(id: string, handoff?: LeaveUserCustomerHandoff): Promise<ApiResponse<User | null>> {
   await delay(150);
   const users = ensureUsersWithAuth();
   const idx = users.findIndex((u) => u.id === id);
   if (idx === -1) return createSuccessResponse(null);
   if (isAdminUser(users[idx])) return createErrorResponse('内置管理员账号不能办理离职');
+  const handoffResult = applyLeavingUserCustomerHandoff(users[idx], users, handoff);
+  if (handoffResult.code !== 0) return createErrorResponse(handoffResult.message || '请先完成客户交接');
   const now = new Date().toISOString();
   users[idx] = {
     ...users[idx],

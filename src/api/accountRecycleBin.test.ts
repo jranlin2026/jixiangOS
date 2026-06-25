@@ -36,6 +36,15 @@ const recycleDepartment = await departmentApi.createDepartment({
 assert.equal(recycleDepartment.code, 0);
 assert.ok(recycleDepartment.data);
 
+const receiverDepartment = await departmentApi.createDepartment({
+  name: 'Handoff Receiver Department',
+  code: 'HANDOFF_RECEIVER_TEST',
+  memberCount: 0,
+  isActive: true,
+});
+assert.equal(receiverDepartment.code, 0);
+assert.ok(receiverDepartment.data);
+
 const created = await settingsApi.createUser({
   name: 'Lifecycle Sales',
   account: 'lifecycle_sales',
@@ -52,14 +61,77 @@ assert.equal(created.code, 0);
 assert.ok(created.data);
 assert.equal(created.data.employmentStatus, 'active');
 
+const receiver = await settingsApi.createUser({
+  name: 'Handoff Receiver',
+  account: 'handoff_receiver',
+  email: 'handoff_receiver@company.com',
+  phone: '13900007777',
+  departmentId: receiverDepartment.data.id,
+  role: 'Sales Consultant',
+  roleId: 'role-sales-consultant',
+  isActive: true,
+  password: DEFAULT_USER_PASSWORD,
+});
+assert.equal(receiver.code, 0);
+assert.ok(receiver.data);
+
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([{
+  id: 'cust-leave-transfer',
+  name: '离职交接客户',
+  company: '离职交接客户公司',
+  phone: '13900008888',
+  customerLevel: 'L1',
+  owner: 'Lifecycle Sales',
+  totalSpent: 0,
+  orderCount: 0,
+  growthPath: [],
+  growthRecords: [],
+  activityRecords: [],
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+}]));
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([{
+  id: 'lead-leave-transfer',
+  customerId: 'cust-leave-transfer',
+  name: '离职交接线索',
+  company: '离职交接客户公司',
+  phone: '13900008888',
+  source: '官网',
+  status: '已联系',
+  inputBy: 'Lifecycle Sales',
+  assignedTo: 'Lifecycle Sales',
+  owner: 'Lifecycle Sales',
+  followUpRecords: [],
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+}]));
+
 const activeBeforeLeave = await settingsApi.fetchUsers();
 assert.ok(activeBeforeLeave.data.some((user) => user.id === created.data!.id));
 
-const leaveRes = await settingsApi.leaveUser(created.data!.id);
+const leaveWithoutHandoffRes = await settingsApi.leaveUser(created.data!.id);
+assert.notEqual(leaveWithoutHandoffRes.code, 0);
+assert.match(leaveWithoutHandoffRes.message || '', /客户交接/);
+
+const leaveRes = await settingsApi.leaveUser(created.data!.id, {
+  customerAction: 'transfer',
+  targetUserId: receiver.data!.id,
+  reason: '员工离职交接',
+});
 assert.equal(leaveRes.code, 0);
 assert.equal(leaveRes.data?.employmentStatus, 'left');
 assert.equal(leaveRes.data?.isActive, false);
 assert.ok(leaveRes.data?.leftAt);
+
+const transferredCustomers = JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]');
+assert.equal(transferredCustomers[0].owner, 'Handoff Receiver');
+assert.equal(transferredCustomers[0].originalSalesTransferBy, 'Lifecycle Sales');
+assert.equal(transferredCustomers[0].activityRecords[0].type, 'transfer');
+assert.match(transferredCustomers[0].activityRecords[0].content, /员工离职交接/);
+
+const transferredLeads = JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]');
+assert.equal(transferredLeads[0].owner, 'Handoff Receiver');
+assert.equal(transferredLeads[0].assignedTo, 'Handoff Receiver');
 
 const leftLogin = await authApi.login({ account: 'lifecycle_sales', password: DEFAULT_USER_PASSWORD, remember: false });
 assert.notEqual(leftLogin.code, 0);
@@ -82,8 +154,32 @@ assert.equal(restoreRes.data?.leftAt, undefined);
 const leftAfterRestore = await settingsApi.fetchUsers({ employmentStatus: 'left' });
 assert.equal(leftAfterRestore.data.some((user) => user.id === created.data!.id), false);
 
-const leaveAgainRes = await settingsApi.leaveUser(created.data!.id);
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([{
+  id: 'cust-leave-public',
+  name: '离职入公海客户',
+  company: '离职入公海客户公司',
+  phone: '13900009999',
+  customerLevel: 'L1',
+  owner: 'Lifecycle Sales',
+  totalSpent: 0,
+  orderCount: 0,
+  growthPath: [],
+  growthRecords: [],
+  activityRecords: [],
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+}]));
+
+const leaveAgainRes = await settingsApi.leaveUser(created.data!.id, {
+  customerAction: 'public_pool',
+  reason: '离职客户统一释放到公海',
+});
 assert.equal(leaveAgainRes.code, 0);
+const publicPoolCustomers = JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]');
+assert.equal(publicPoolCustomers[0].owner, '公海');
+assert.equal(publicPoolCustomers[0].lifecycleStatusCode, 'public_pool');
+assert.equal(publicPoolCustomers[0].releasedBy, 'Lifecycle Sales');
+assert.match(publicPoolCustomers[0].activityRecords[0].content, /统一释放到公海/);
 const deleteRes = await settingsApi.deleteUser(created.data!.id);
 assert.equal(deleteRes.code, 0);
 const allUsersAfterDelete = await settingsApi.fetchUsers({ employmentStatus: 'all' });

@@ -7,11 +7,14 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
+  FormControlLabel,
   IconButton,
   InputAdornment,
   Menu,
   MenuItem,
   Paper,
+  Radio,
+  RadioGroup,
   Switch,
   Table,
   TableBody,
@@ -40,9 +43,12 @@ import { departmentApi, roleApi, settingsApi } from '../../api';
 import type { Department } from '../../types/department';
 import type { Role } from '../../types/role';
 import type { OrganizationProfile, User, UserRole } from '../../types/settings';
+import type { Customer } from '../../types/customer';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { DEFAULT_USER_PASSWORD } from '../../shared/utils/auth';
+import { STORAGE_KEYS } from '../../shared/utils/constants';
+import { getStorageData } from '../../api/mock/storage';
 import {
   getDepartmentAncestorIds,
   getDepartmentDescendantIds,
@@ -121,6 +127,11 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const [companyNameDraft, setCompanyNameDraft] = useState('');
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveDepartmentId, setMoveDepartmentId] = useState('');
+  const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
+  const [leaveTargets, setLeaveTargets] = useState<User[]>([]);
+  const [leaveAction, setLeaveAction] = useState<'transfer' | 'public_pool'>('transfer');
+  const [leaveReceiverId, setLeaveReceiverId] = useState('');
+  const [leaveReason, setLeaveReason] = useState('');
   const [resetUser, setResetUser] = useState<User | null>(null);
   const [resetPassword, setResetPassword] = useState(DEFAULT_USER_PASSWORD);
   const [error, setError] = useState('');
@@ -203,11 +214,33 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const selectedUsers = users.filter((user) => selectedUserIds.includes(user.id));
   const selectedTitle = selectedDepartment?.name || organizationProfile.companyName;
   const selectedDepartmentUserCount = filteredUsers.length;
+  const leaveTargetIds = leaveTargets.map((user) => user.id);
+  const leaveTargetNames = leaveTargets.map((user) => user.name);
+  const leaveOwnedCustomers = useMemo(() => {
+    const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+    return customers.filter((customer) => leaveTargetNames.includes(customer.owner));
+  }, [leaveTargetNames.join('|')]);
+  const leaveReceiverOptions = users.filter((user) => (
+    user.isActive && !leaveTargetIds.includes(user.id) && user.account !== 'admin'
+  ));
 
   const resolveRoleId = (roleName: string) => roles.find((role) => role.name === roleName)?.id || '';
   const getPositionName = (user: User) => user.positionName || '-';
   const getDepartmentName = (departmentId?: string) => activeDepartments.find((department) => department.id === departmentId)?.name || '-';
   const clearSelection = () => setSelectedUserIds([]);
+  const countOwnedCustomers = (targets: User[]) => {
+    const targetNames = targets.map((user) => user.name);
+    const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+    return customers.filter((customer) => targetNames.includes(customer.owner)).length;
+  };
+
+  const openLeaveHandoffDialog = (targets: User[]) => {
+    setLeaveTargets(targets);
+    setLeaveAction('transfer');
+    setLeaveReceiverId(users.find((user) => user.isActive && !targets.some((target) => target.id === user.id) && user.account !== 'admin')?.id || '');
+    setLeaveReason(targets.length === 1 ? `${targets[0].name}离职客户交接` : '批量离职客户交接');
+    setLeaveDialogOpen(true);
+  };
 
   const openCreateUser = () => {
     setError('');
@@ -282,6 +315,10 @@ const EmployeeDepartmentManagement: React.FC = () => {
   };
 
   const handleLeaveUser = async (user: User) => {
+    if (user.account !== 'admin' && countOwnedCustomers([user]) > 0) {
+      openLeaveHandoffDialog([user]);
+      return;
+    }
     if (user.account === 'admin') {
       await alert('内置管理员账号不能办理离职', '提示');
       return;
@@ -382,6 +419,10 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const handleBatchLeave = async () => {
     const targets = selectedUsers.filter((user) => user.account !== 'admin');
     const skippedAdminCount = selectedUsers.length - targets.length;
+    if (targets.length && countOwnedCustomers(targets) > 0) {
+      openLeaveHandoffDialog(targets);
+      return;
+    }
     if (!targets.length) {
       await alert('内置管理员账号不能办理离职', '提示');
       return;
@@ -396,6 +437,28 @@ const EmployeeDepartmentManagement: React.FC = () => {
     if (failed.length > 0) {
       await alert(`有 ${failed.length} 名员工办理离职失败，请刷新后重试。`, '批量办理离职失败');
     }
+  };
+
+  const handleConfirmLeaveHandoff = async () => {
+    if (!leaveTargets.length) return;
+    if (leaveAction === 'transfer' && !leaveReceiverId) {
+      await alert('请选择客户接收人', '客户交接');
+      return;
+    }
+    const results = await Promise.all(leaveTargets.map((user) => settingsApi.leaveUser(user.id, {
+      customerAction: leaveAction,
+      targetUserId: leaveAction === 'transfer' ? leaveReceiverId : undefined,
+      reason: leaveReason.trim() || undefined,
+    })));
+    const failed = results.filter((res) => res.code !== 0);
+    if (failed.length > 0) {
+      await alert(failed[0].message || `有 ${failed.length} 名员工办理离职失败`, '办理离职失败');
+      return;
+    }
+    setLeaveDialogOpen(false);
+    setLeaveTargets([]);
+    clearSelection();
+    await loadUsers();
   };
 
   const handleOpenMove = () => {
@@ -818,6 +881,52 @@ const EmployeeDepartmentManagement: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button variant="contained" onClick={handleMoveUsers} disabled={!moveDepartmentId}>确认移动</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={leaveDialogOpen} onClose={() => setLeaveDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogCloseTitle onClose={() => setLeaveDialogOpen(false)}>离职客户交接</DialogCloseTitle>
+        <DialogContent dividers>
+          <Box sx={{ display: 'grid', gap: 2 }}>
+            <Typography variant="body2" sx={{ color: '#475569' }}>
+              {leaveTargets.map((user) => user.name).join('、')} 名下还有 {leaveOwnedCustomers.length} 个客户。办理离职前必须处理客户归属，避免客户挂在离职人员名下无人跟进。
+            </Typography>
+            <RadioGroup value={leaveAction} onChange={(event) => setLeaveAction(event.target.value as 'transfer' | 'public_pool')}>
+              <FormControlLabel value="transfer" control={<Radio />} label="转交给其他在职员工" />
+              <FormControlLabel value="public_pool" control={<Radio />} label="释放到公海，等待重新领取" />
+            </RadioGroup>
+            {leaveAction === 'transfer' && (
+              <TextField
+                select
+                label="客户接收人"
+                value={leaveReceiverId}
+                onChange={(event) => setLeaveReceiverId(event.target.value)}
+                fullWidth
+                helperText="客户、关联线索负责人会同步更新为该员工"
+              >
+                {leaveReceiverOptions.map((user) => (
+                  <MenuItem key={user.id} value={user.id}>
+                    {user.name}（{user.positionName || user.role || '员工'}）
+                  </MenuItem>
+                ))}
+              </TextField>
+            )}
+            <TextField
+              label="交接说明"
+              value={leaveReason}
+              onChange={(event) => setLeaveReason(event.target.value)}
+              fullWidth
+              multiline
+              minRows={2}
+              helperText="会写入客户动态，方便后续追溯"
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="outlined" onClick={() => setLeaveDialogOpen(false)}>取消</Button>
+          <Button variant="contained" color="warning" onClick={handleConfirmLeaveHandoff}>
+            确认交接并办理离职
+          </Button>
         </DialogActions>
       </Dialog>
 
