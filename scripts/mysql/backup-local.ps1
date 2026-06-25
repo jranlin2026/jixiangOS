@@ -2,7 +2,12 @@ $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $backupDir = Join-Path $root 'backups'
-$mysqlDump = 'C:\Program Files\MySQL\MySQL Server 8.4\bin\mysqldump.exe'
+$portableMysqlDump = Join-Path $env:USERPROFILE '.jixiang-os\mysql\mysql-8.4.10-winx64\bin\mysqldump.exe'
+$mysqlDump = if (Test-Path -LiteralPath $portableMysqlDump) {
+  $portableMysqlDump
+} else {
+  'C:\Program Files\MySQL\MySQL Server 8.4\bin\mysqldump.exe'
+}
 $database = 'jixiang_os'
 $user = 'jixiang_os'
 $password = 'jixiang_os_dev'

@@ -1,5 +1,8 @@
 node_modules/
 dist/
+.tools/
+pnpm-lock.yaml
+pnpm-workspace.yaml
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts

@@ -54,6 +54,53 @@ function isExpired(session: AuthSession): boolean {
   return Boolean(session.expiresAt && new Date(session.expiresAt).getTime() <= Date.now());
 }
 
+function cacheBackendAuthenticatedUser(user: AuthenticatedUser, token?: string, remember = true): void {
+  const now = new Date().toISOString();
+  setStorageData(AUTH_SESSION_STORAGE_KEY, {
+    userId: user.id,
+    token: token || `backend-${user.id}`,
+    remember,
+    createdAt: now,
+    expiresAt: remember ? undefined : new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
+  });
+
+  const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
+  const cachedUser: User = {
+    ...(users.find((item) => item.id === user.id) || {}),
+    id: user.id,
+    name: user.name,
+    account: user.account,
+    email: user.email,
+    phone: user.phone,
+    role: user.role,
+    roleId: user.roleId,
+    departmentId: user.departmentId,
+    positionId: user.positionId,
+    positionName: user.positionName,
+    avatar: user.avatar,
+    isActive: user.isActive,
+    lastLoginAt: user.lastLoginAt,
+    employmentStatus: 'active',
+    createdAt: users.find((item) => item.id === user.id)?.createdAt || now,
+    updatedAt: now,
+  };
+  setStorageData(STORAGE_KEYS.USERS, [cachedUser, ...users.filter((item) => item.id !== user.id)]);
+
+  const roles = getStorageData<Role[]>(STORAGE_KEYS.ROLES) || [];
+  const cachedRole: Role = {
+    ...(roles.find((item) => item.id === user.roleId || item.name === user.role) || {}),
+    id: user.roleId || `role-${user.role}`,
+    name: user.role,
+    code: roles.find((item) => item.id === user.roleId || item.name === user.role)?.code || '',
+    permissions: user.permissions,
+    memberCount: roles.find((item) => item.id === user.roleId || item.name === user.role)?.memberCount || 0,
+    isActive: true,
+    createdAt: roles.find((item) => item.id === user.roleId || item.name === user.role)?.createdAt || now,
+    updatedAt: now,
+  };
+  setStorageData(STORAGE_KEYS.ROLES, [cachedRole, ...roles.filter((item) => item.id !== cachedRole.id && item.name !== cachedRole.name)]);
+}
+
 async function login(payload: LoginPayload): Promise<ApiResponse<AuthenticatedUser | null>> {
   if (shouldUseBackendApi()) {
     const response = await backendRequest<{ token: string; user: AuthenticatedUser }>('/auth/login', {
@@ -62,6 +109,7 @@ async function login(payload: LoginPayload): Promise<ApiResponse<AuthenticatedUs
     });
     if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code);
     writeBackendToken(response.data.token);
+    cacheBackendAuthenticatedUser(response.data.user, response.data.token, payload.remember);
     return createSuccessResponse(response.data.user);
   }
 
@@ -91,7 +139,9 @@ async function login(payload: LoginPayload): Promise<ApiResponse<AuthenticatedUs
 
 async function getCurrentUser(): Promise<ApiResponse<AuthenticatedUser | null>> {
   if (shouldUseBackendApi()) {
-    return backendRequest<AuthenticatedUser | null>('/auth/me');
+    const response = await backendRequest<AuthenticatedUser | null>('/auth/me');
+    if (response.code === 0 && response.data) cacheBackendAuthenticatedUser(response.data);
+    return response;
   }
 
   await delay(80);

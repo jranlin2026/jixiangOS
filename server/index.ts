@@ -112,12 +112,77 @@ app.get('/api/settings/users', async (_req, res) => {
   res.json(await settingsService.listUsers());
 });
 
+app.post('/api/settings/users/leave-customer-count', async (req, res) => {
+  const result = await settingsService.countLeaveOwnedCustomers(req.body?.userIds || []);
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.post('/api/settings/users', async (req, res) => {
+  const result = await settingsService.createUser(req.body || {});
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.put('/api/settings/users/:id', async (req, res) => {
+  const result = await settingsService.updateUser(req.params.id, req.body || {});
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.post('/api/settings/users/:id/leave', async (req, res) => {
+  const result = await settingsService.leaveUser(req.params.id, req.body || {});
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.post('/api/settings/users/:id/restore', async (req, res) => {
+  const result = await settingsService.restoreUser(req.params.id);
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.delete('/api/settings/users/:id', async (req, res) => {
+  const result = await settingsService.deleteUser(req.params.id);
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.post('/api/settings/users/:id/reset-password', async (req, res) => {
+  const result = await settingsService.resetUserPassword(req.params.id, String(req.body?.password || ''));
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
 app.get('/api/settings/roles', async (_req, res) => {
   res.json(await settingsService.listRoles());
 });
 
+app.post('/api/settings/roles', async (req, res) => {
+  const result = await settingsService.createRole(req.body || {});
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.put('/api/settings/roles/:id', async (req, res) => {
+  const result = await settingsService.updateRole(req.params.id, req.body || {});
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.delete('/api/settings/roles/:id', async (req, res) => {
+  const result = await settingsService.deleteRole(req.params.id);
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
 app.get('/api/settings/departments', async (_req, res) => {
   res.json(await settingsService.listDepartments());
+});
+
+app.post('/api/settings/departments', async (req, res) => {
+  const result = await settingsService.createDepartment(req.body || {});
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.put('/api/settings/departments/:id', async (req, res) => {
+  const result = await settingsService.updateDepartment(req.params.id, req.body || {});
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.delete('/api/settings/departments/:id', async (req, res) => {
+  const result = await settingsService.deleteDepartment(req.params.id);
+  res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
 app.get('/api/settings/positions', async (_req, res) => {

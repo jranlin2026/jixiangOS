@@ -53,6 +53,13 @@ async function getDepartmentById(id: string): Promise<ApiResponse<Department | n
 }
 
 async function createDepartment(data: Omit<Department, 'id' | 'createdAt' | 'updatedAt'>): Promise<ApiResponse<Department>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<Department>('/settings/departments', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   ensureInit();
   await delay(200);
   const departments = ensureOrganizationConfigData().departments;
@@ -73,6 +80,13 @@ async function createDepartment(data: Omit<Department, 'id' | 'createdAt' | 'upd
 }
 
 async function updateDepartment(id: string, data: Partial<Department>): Promise<ApiResponse<Department | null>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<Department | null>(`/settings/departments/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
   ensureInit();
   await delay(200);
   const departments = ensureOrganizationConfigData().departments;
@@ -89,6 +103,12 @@ async function updateDepartment(id: string, data: Partial<Department>): Promise<
 }
 
 async function deleteDepartment(id: string): Promise<ApiResponse<boolean>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<boolean>(`/settings/departments/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  }
+
   ensureInit();
   await delay(150);
   const { departments, roles } = ensureOrganizationConfigData();

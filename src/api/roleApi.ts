@@ -56,6 +56,13 @@ async function getRoleById(id: string): Promise<ApiResponse<Role | null>> {
 }
 
 async function createRole(data: Omit<Role, 'id' | 'createdAt' | 'updatedAt'>): Promise<ApiResponse<Role>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<Role>('/settings/roles', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   ensureInit();
   await delay(200);
   const roles: Role[] = [...ensureOrganizationConfigData().roles];
@@ -73,6 +80,13 @@ async function createRole(data: Omit<Role, 'id' | 'createdAt' | 'updatedAt'>): P
 }
 
 async function updateRole(id: string, data: Partial<Role>): Promise<ApiResponse<Role | null>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<Role | null>(`/settings/roles/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
   ensureInit();
   await delay(200);
   const roles = ensureOrganizationConfigData().roles;
@@ -92,6 +106,12 @@ async function updateRole(id: string, data: Partial<Role>): Promise<ApiResponse<
 }
 
 async function deleteRole(id: string): Promise<ApiResponse<boolean>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<boolean>(`/settings/roles/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  }
+
   ensureInit();
   await delay(150);
   const roles = ensureOrganizationConfigData().roles;

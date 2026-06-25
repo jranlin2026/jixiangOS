@@ -11,11 +11,16 @@ model Department {
   id          String   @id @db.VarChar(64)
   name        String   @db.VarChar(100)
   code        String   @unique @db.VarChar(64)
+  description String?  @db.VarChar(500)
+  parentId    String?  @db.VarChar(64)
+  managerId   String?  @db.VarChar(64)
   memberCount Int      @default(0)
+  sortOrder   Int      @default(0)
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  @@index([parentId])
   @@map("departments")
 }
 

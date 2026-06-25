@@ -109,6 +109,10 @@ storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([{
 const activeBeforeLeave = await settingsApi.fetchUsers();
 assert.ok(activeBeforeLeave.data.some((user) => user.id === created.data!.id));
 
+const leaveOwnedCustomerCount = await settingsApi.countLeaveOwnedCustomers([created.data!.id]);
+assert.equal(leaveOwnedCustomerCount.code, 0);
+assert.equal(leaveOwnedCustomerCount.data, 1);
+
 const leaveWithoutHandoffRes = await settingsApi.leaveUser(created.data!.id);
 assert.notEqual(leaveWithoutHandoffRes.code, 0);
 assert.match(leaveWithoutHandoffRes.message || '', /客户交接/);

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { orderApi } from './orderApi';
-import { orderReviewApi } from './orderReviewApi';
+import { canReviewOrderApplications, orderReviewApi } from './orderReviewApi';
 import { refundApi } from './refundApi';
+import { authApi } from './authApi';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { PERMISSION_KEYS } from '../shared/utils/permissions';
@@ -248,3 +249,39 @@ assert.deepEqual((await orderReviewApi.fetchOrderApplications({ pageSize: 20 }))
 const financeWithPermissionApprove = await orderReviewApi.approveOrderApplication(permissionReviewSubmit.data.id);
 assert.equal(financeWithPermissionApprove.code, 0);
 assert.equal(financeWithPermissionApprove.data?.status, zh.approved);
+
+storage.clear();
+process.env.VITE_USE_BACKEND_API = 'true';
+process.env.VITE_AI_API_BASE = 'http://127.0.0.1:3001/api';
+const originalFetch = globalThis.fetch;
+globalThis.fetch = (async (url: string) => {
+  if (String(url).endsWith('/auth/me')) {
+    return new Response(JSON.stringify({
+      code: 0,
+      data: {
+        id: 'user-admin',
+        name: '系统管理员',
+        account: 'admin',
+        email: 'admin@company.com',
+        phone: '',
+        role: '超级管理员',
+        roleId: 'role-super-admin',
+        departmentId: 'dept-general',
+        isActive: true,
+        permissions: [{ module: zh.all, actions: ['admin'] }],
+      },
+      message: 'success',
+    }), { status: 200 });
+  }
+  return new Response(JSON.stringify({ code: -1, data: null, message: 'unexpected request' }), { status: 404 });
+}) as typeof fetch;
+
+try {
+  const backendCurrentUser = await authApi.getCurrentUser();
+  assert.equal(backendCurrentUser.code, 0);
+  assert.equal(canReviewOrderApplications(), true);
+} finally {
+  globalThis.fetch = originalFetch;
+  delete process.env.VITE_USE_BACKEND_API;
+  delete process.env.VITE_AI_API_BASE;
+}

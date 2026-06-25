@@ -327,6 +327,13 @@ async function fetchUsers(filters?: UserFilters): Promise<ApiResponse<User[]>> {
 }
 
 async function createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'passwordHash' | 'passwordSalt' | 'passwordUpdatedAt'> & { password?: string }): Promise<ApiResponse<User | null>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<User | null>('/settings/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   await delay(200);
   const users = ensureUsersWithAuth();
   const now = new Date().toISOString();
@@ -353,6 +360,13 @@ async function createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'p
 }
 
 async function updateUser(id: string, data: Partial<User>): Promise<ApiResponse<User | null>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<User | null>(`/settings/users/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
   await delay(200);
   const users = ensureUsersWithAuth();
   const idx = users.findIndex((u) => u.id === id);
@@ -370,6 +384,13 @@ async function updateUser(id: string, data: Partial<User>): Promise<ApiResponse<
 }
 
 async function leaveUser(id: string, handoff?: LeaveUserCustomerHandoff): Promise<ApiResponse<User | null>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<User | null>(`/settings/users/${encodeURIComponent(id)}/leave`, {
+      method: 'POST',
+      body: JSON.stringify(handoff || {}),
+    });
+  }
+
   await delay(150);
   const users = ensureUsersWithAuth();
   const idx = users.findIndex((u) => u.id === id);
@@ -390,7 +411,28 @@ async function leaveUser(id: string, handoff?: LeaveUserCustomerHandoff): Promis
   return createSuccessResponse(users[idx]);
 }
 
+async function countLeaveOwnedCustomers(userIds: string[]): Promise<ApiResponse<number>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<number>('/settings/users/leave-customer-count', {
+      method: 'POST',
+      body: JSON.stringify({ userIds }),
+    });
+  }
+
+  await delay(80);
+  const targetIds = new Set(userIds);
+  const targetNames = new Set(ensureUsersWithAuth().filter((user) => targetIds.has(user.id)).map((user) => user.name));
+  const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+  return createSuccessResponse(customers.filter((customer) => targetNames.has(customer.owner)).length);
+}
+
 async function restoreUser(id: string): Promise<ApiResponse<User | null>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<User | null>(`/settings/users/${encodeURIComponent(id)}/restore`, {
+      method: 'POST',
+    });
+  }
+
   await delay(150);
   const users = ensureUsersWithAuth();
   const idx = users.findIndex((u) => u.id === id);
@@ -410,6 +452,12 @@ async function restoreUser(id: string): Promise<ApiResponse<User | null>> {
 }
 
 async function deleteUser(id: string): Promise<ApiResponse<boolean>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<boolean>(`/settings/users/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  }
+
   await delay(150);
   const users = ensureUsersWithAuth();
   const target = users.find((u) => u.id === id);
@@ -423,6 +471,13 @@ async function deleteUser(id: string): Promise<ApiResponse<boolean>> {
 }
 
 async function resetUserPassword(id: string, password: string): Promise<ApiResponse<User | null>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<User | null>(`/settings/users/${encodeURIComponent(id)}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    });
+  }
+
   await delay(150);
   const users = ensureUsersWithAuth();
   const idx = users.findIndex((u) => u.id === id);
@@ -738,6 +793,7 @@ export const settingsApi = {
   createUser,
   updateUser,
   leaveUser,
+  countLeaveOwnedCustomers,
   restoreUser,
   deleteUser,
   resetUserPassword,

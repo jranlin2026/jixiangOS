@@ -43,12 +43,9 @@ import { departmentApi, roleApi, settingsApi } from '../../api';
 import type { Department } from '../../types/department';
 import type { Role } from '../../types/role';
 import type { OrganizationProfile, User, UserRole } from '../../types/settings';
-import type { Customer } from '../../types/customer';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { DEFAULT_USER_PASSWORD } from '../../shared/utils/auth';
-import { STORAGE_KEYS } from '../../shared/utils/constants';
-import { getStorageData } from '../../api/mock/storage';
 import {
   getDepartmentAncestorIds,
   getDepartmentDescendantIds,
@@ -129,6 +126,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const [moveDepartmentId, setMoveDepartmentId] = useState('');
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
   const [leaveTargets, setLeaveTargets] = useState<User[]>([]);
+  const [leaveOwnedCustomerCount, setLeaveOwnedCustomerCount] = useState(0);
   const [leaveAction, setLeaveAction] = useState<'transfer' | 'public_pool'>('transfer');
   const [leaveReceiverId, setLeaveReceiverId] = useState('');
   const [leaveReason, setLeaveReason] = useState('');
@@ -215,11 +213,6 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const selectedTitle = selectedDepartment?.name || organizationProfile.companyName;
   const selectedDepartmentUserCount = filteredUsers.length;
   const leaveTargetIds = leaveTargets.map((user) => user.id);
-  const leaveTargetNames = leaveTargets.map((user) => user.name);
-  const leaveOwnedCustomers = useMemo(() => {
-    const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
-    return customers.filter((customer) => leaveTargetNames.includes(customer.owner));
-  }, [leaveTargetNames.join('|')]);
   const leaveReceiverOptions = users.filter((user) => (
     user.isActive && !leaveTargetIds.includes(user.id) && user.account !== 'admin'
   ));
@@ -228,18 +221,29 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const getPositionName = (user: User) => user.positionName || '-';
   const getDepartmentName = (departmentId?: string) => activeDepartments.find((department) => department.id === departmentId)?.name || '-';
   const clearSelection = () => setSelectedUserIds([]);
-  const countOwnedCustomers = (targets: User[]) => {
-    const targetNames = targets.map((user) => user.name);
-    const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
-    return customers.filter((customer) => targetNames.includes(customer.owner)).length;
+
+  const countOwnedCustomers = async (targets: User[]) => {
+    const res = await settingsApi.countLeaveOwnedCustomers(targets.map((user) => user.id));
+    if (res.code !== 0) {
+      await alert(res.message || '客户归属检查失败，请刷新后重试', '客户归属检查失败');
+      return null;
+    }
+    return res.data || 0;
   };
 
-  const openLeaveHandoffDialog = (targets: User[]) => {
+  const openLeaveHandoffDialog = (targets: User[], ownedCustomerCount: number) => {
     setLeaveTargets(targets);
+    setLeaveOwnedCustomerCount(ownedCustomerCount);
     setLeaveAction('transfer');
     setLeaveReceiverId(users.find((user) => user.isActive && !targets.some((target) => target.id === user.id) && user.account !== 'admin')?.id || '');
     setLeaveReason(targets.length === 1 ? `${targets[0].name}离职客户交接` : '批量离职客户交接');
     setLeaveDialogOpen(true);
+  };
+
+  const closeLeaveHandoffDialog = () => {
+    setLeaveDialogOpen(false);
+    setLeaveTargets([]);
+    setLeaveOwnedCustomerCount(0);
   };
 
   const openCreateUser = () => {
@@ -315,17 +319,23 @@ const EmployeeDepartmentManagement: React.FC = () => {
   };
 
   const handleLeaveUser = async (user: User) => {
-    if (user.account !== 'admin' && countOwnedCustomers([user]) > 0) {
-      openLeaveHandoffDialog([user]);
-      return;
-    }
     if (user.account === 'admin') {
       await alert('内置管理员账号不能办理离职', '提示');
+      return;
+    }
+    const ownedCustomerCount = await countOwnedCustomers([user]);
+    if (ownedCustomerCount === null) return;
+    if (ownedCustomerCount > 0) {
+      openLeaveHandoffDialog([user], ownedCustomerCount);
       return;
     }
     if (!await confirm(`确认为员工 ${user.name} 办理离职吗？离职后账号不能登录，会移入账号回收站，历史业务数据会保留。`, '办理离职')) return;
     const res = await settingsApi.leaveUser(user.id);
     if (res.code !== 0) {
+      if ((res.message || '').includes('客户')) {
+        openLeaveHandoffDialog([user], Math.max(1, ownedCustomerCount));
+        return;
+      }
       await alert(res.message || '办理离职失败', '办理离职失败');
       return;
     }
@@ -419,12 +429,14 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const handleBatchLeave = async () => {
     const targets = selectedUsers.filter((user) => user.account !== 'admin');
     const skippedAdminCount = selectedUsers.length - targets.length;
-    if (targets.length && countOwnedCustomers(targets) > 0) {
-      openLeaveHandoffDialog(targets);
-      return;
-    }
     if (!targets.length) {
       await alert('内置管理员账号不能办理离职', '提示');
+      return;
+    }
+    const ownedCustomerCount = await countOwnedCustomers(targets);
+    if (ownedCustomerCount === null) return;
+    if (ownedCustomerCount > 0) {
+      openLeaveHandoffDialog(targets, ownedCustomerCount);
       return;
     }
     const skipText = skippedAdminCount ? `，已自动跳过 ${skippedAdminCount} 个内置管理员账号` : '';
@@ -455,8 +467,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
       await alert(failed[0].message || `有 ${failed.length} 名员工办理离职失败`, '办理离职失败');
       return;
     }
-    setLeaveDialogOpen(false);
-    setLeaveTargets([]);
+    closeLeaveHandoffDialog();
     clearSelection();
     await loadUsers();
   };
@@ -884,12 +895,12 @@ const EmployeeDepartmentManagement: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={leaveDialogOpen} onClose={() => setLeaveDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogCloseTitle onClose={() => setLeaveDialogOpen(false)}>离职客户交接</DialogCloseTitle>
+      <Dialog open={leaveDialogOpen} onClose={closeLeaveHandoffDialog} maxWidth="sm" fullWidth>
+        <DialogCloseTitle onClose={closeLeaveHandoffDialog}>离职客户交接</DialogCloseTitle>
         <DialogContent dividers>
           <Box sx={{ display: 'grid', gap: 2 }}>
             <Typography variant="body2" sx={{ color: '#475569' }}>
-              {leaveTargets.map((user) => user.name).join('、')} 名下还有 {leaveOwnedCustomers.length} 个客户。办理离职前必须处理客户归属，避免客户挂在离职人员名下无人跟进。
+              {leaveTargets.map((user) => user.name).join('、')} 名下还有 {leaveOwnedCustomerCount} 个客户。办理离职前必须处理客户归属，避免客户挂在离职人员名下无人跟进。
             </Typography>
             <RadioGroup value={leaveAction} onChange={(event) => setLeaveAction(event.target.value as 'transfer' | 'public_pool')}>
               <FormControlLabel value="transfer" control={<Radio />} label="转交给其他在职员工" />
@@ -923,7 +934,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button variant="outlined" onClick={() => setLeaveDialogOpen(false)}>取消</Button>
+          <Button variant="outlined" onClick={closeLeaveHandoffDialog}>取消</Button>
           <Button variant="contained" color="warning" onClick={handleConfirmLeaveHandoff}>
             确认交接并办理离职
           </Button>
