@@ -10,7 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Order } from '../types/order';
 import type { CommissionRule } from '../types/commission';
 import { authApi } from './authApi';
-import { DEFAULT_USER_PASSWORD, ensureAdminUser, ensureUniqueAccount, normalizeAccount } from '../shared/utils/auth';
+import { ensureAdminUser, ensureUniqueAccount, getDefaultUserPassword, normalizeAccount } from '../shared/utils/auth';
 import { DEFAULT_ORGANIZATION_PROFILE, ensureOrganizationConfigData, getOrganizationProfile, migrateUsersWithOrganization, resolveRoleForUser } from '../shared/utils/organizationConfig';
 import { DEFAULT_USER_ROLE } from '../shared/utils/roles';
 import { getCurrentOperatorName } from '../shared/utils/currentOperator';
@@ -341,7 +341,7 @@ async function createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'p
   if (!account) return createErrorResponse('账号不能为空');
   if (!ensureUniqueAccount(users, account)) return createErrorResponse('账号已存在');
   const id = `user-${uuidv4().slice(0, 8)}`;
-  const passwordFields = authApi.createUserPasswordFields(id, account, data.password || DEFAULT_USER_PASSWORD);
+  const passwordFields = authApi.createUserPasswordFields(id, account, data.password || getDefaultUserPassword());
   const resolvedData = withResolvedUserOrganization(data);
   const newUser: User = {
     ...resolvedData,

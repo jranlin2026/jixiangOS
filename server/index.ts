@@ -2,10 +2,12 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { prisma, checkDatabaseConnection } from './db/client';
+import { createRequireAuth, bearerToken } from './middleware/auth';
 import { createAuthService } from './services/authService';
 import { createAiConfigService } from './services/aiConfigService';
 import { createSettingsService } from './services/settingsService';
 import { createStorageService } from './services/storageService';
+import { PERMISSION_KEYS } from '../src/shared/utils/permissions';
 import {
   buildCustomerIntelPrompt,
   searchPublicCustomerIntel,
@@ -16,18 +18,57 @@ dotenv.config();
 
 const app = express();
 const port = Number(process.env.AI_PROXY_PORT || 3001);
+const isProduction = process.env.NODE_ENV === 'production';
+const configuredCorsOrigins = String(process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const developmentCorsOrigins = [
+  'http://127.0.0.1:3000',
+  'http://localhost:3000',
+  'http://127.0.0.1:3002',
+  'http://localhost:3002',
+];
+const allowedCorsOrigins = configuredCorsOrigins.length
+  ? configuredCorsOrigins
+  : (isProduction ? [] : developmentCorsOrigins);
 const authService = createAuthService(prisma);
 const aiConfigService = createAiConfigService(prisma as any);
 const settingsService = createSettingsService(prisma);
 const storageService = createStorageService(prisma);
+const requireOrganizationAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS);
+const requireRoleAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_ROLES);
+const requireAiConfigAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_AI_CONFIG);
+const requireDataMaintenanceAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE);
+const requireAiChatAccess = createRequireAuth(authService, PERMISSION_KEYS.AI_CHAT);
+const requireCustomerAiCardAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_AI_CARD);
 
-app.use(cors());
+app.set('trust proxy', 1);
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  next();
+});
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedCorsOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error('Origin is not allowed by CORS'));
+  },
+  credentials: true,
+}));
 app.use(express.json({ limit: '1mb' }));
 
 type DeepSeekMessage = {
   role: 'system' | 'user' | 'assistant';
   content: string;
 };
+
+function routeParam(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] || '' : value || '';
+}
 
 function jsonFromText<T>(text: string): T | null {
   const trimmed = text.trim();
@@ -47,12 +88,6 @@ function jsonFromText<T>(text: string): T | null {
     }
     return null;
   }
-}
-
-function bearerToken(req: express.Request): string | undefined {
-  const header = req.headers.authorization || '';
-  const match = header.match(/^Bearer\s+(.+)$/i);
-  return match?.[1];
 }
 
 async function callDeepSeek(messages: DeepSeekMessage[], options: { temperature?: number } = {}): Promise<string> {
@@ -108,97 +143,97 @@ app.post('/api/auth/logout', async (req, res) => {
   res.json(await authService.logout(bearerToken(req)));
 });
 
-app.get('/api/settings/users', async (_req, res) => {
+app.get('/api/settings/users', requireOrganizationAccess, async (_req, res) => {
   res.json(await settingsService.listUsers());
 });
 
-app.post('/api/settings/users/leave-customer-count', async (req, res) => {
+app.post('/api/settings/users/leave-customer-count', requireOrganizationAccess, async (req, res) => {
   const result = await settingsService.countLeaveOwnedCustomers(req.body?.userIds || []);
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.post('/api/settings/users', async (req, res) => {
+app.post('/api/settings/users', requireOrganizationAccess, async (req, res) => {
   const result = await settingsService.createUser(req.body || {});
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.put('/api/settings/users/:id', async (req, res) => {
-  const result = await settingsService.updateUser(req.params.id, req.body || {});
+app.put('/api/settings/users/:id', requireOrganizationAccess, async (req, res) => {
+  const result = await settingsService.updateUser(routeParam(req.params.id), req.body || {});
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.post('/api/settings/users/:id/leave', async (req, res) => {
-  const result = await settingsService.leaveUser(req.params.id, req.body || {});
+app.post('/api/settings/users/:id/leave', requireOrganizationAccess, async (req, res) => {
+  const result = await settingsService.leaveUser(routeParam(req.params.id), req.body || {});
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.post('/api/settings/users/:id/restore', async (req, res) => {
-  const result = await settingsService.restoreUser(req.params.id);
+app.post('/api/settings/users/:id/restore', requireOrganizationAccess, async (req, res) => {
+  const result = await settingsService.restoreUser(routeParam(req.params.id));
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.delete('/api/settings/users/:id', async (req, res) => {
-  const result = await settingsService.deleteUser(req.params.id);
+app.delete('/api/settings/users/:id', requireOrganizationAccess, async (req, res) => {
+  const result = await settingsService.deleteUser(routeParam(req.params.id));
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.post('/api/settings/users/:id/reset-password', async (req, res) => {
-  const result = await settingsService.resetUserPassword(req.params.id, String(req.body?.password || ''));
+app.post('/api/settings/users/:id/reset-password', requireOrganizationAccess, async (req, res) => {
+  const result = await settingsService.resetUserPassword(routeParam(req.params.id), String(req.body?.password || ''));
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.get('/api/settings/roles', async (_req, res) => {
+app.get('/api/settings/roles', requireRoleAccess, async (_req, res) => {
   res.json(await settingsService.listRoles());
 });
 
-app.post('/api/settings/roles', async (req, res) => {
+app.post('/api/settings/roles', requireRoleAccess, async (req, res) => {
   const result = await settingsService.createRole(req.body || {});
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.put('/api/settings/roles/:id', async (req, res) => {
-  const result = await settingsService.updateRole(req.params.id, req.body || {});
+app.put('/api/settings/roles/:id', requireRoleAccess, async (req, res) => {
+  const result = await settingsService.updateRole(routeParam(req.params.id), req.body || {});
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.delete('/api/settings/roles/:id', async (req, res) => {
-  const result = await settingsService.deleteRole(req.params.id);
+app.delete('/api/settings/roles/:id', requireRoleAccess, async (req, res) => {
+  const result = await settingsService.deleteRole(routeParam(req.params.id));
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.get('/api/settings/departments', async (_req, res) => {
+app.get('/api/settings/departments', requireOrganizationAccess, async (_req, res) => {
   res.json(await settingsService.listDepartments());
 });
 
-app.post('/api/settings/departments', async (req, res) => {
+app.post('/api/settings/departments', requireOrganizationAccess, async (req, res) => {
   const result = await settingsService.createDepartment(req.body || {});
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.put('/api/settings/departments/:id', async (req, res) => {
-  const result = await settingsService.updateDepartment(req.params.id, req.body || {});
+app.put('/api/settings/departments/:id', requireOrganizationAccess, async (req, res) => {
+  const result = await settingsService.updateDepartment(routeParam(req.params.id), req.body || {});
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.delete('/api/settings/departments/:id', async (req, res) => {
-  const result = await settingsService.deleteDepartment(req.params.id);
+app.delete('/api/settings/departments/:id', requireOrganizationAccess, async (req, res) => {
+  const result = await settingsService.deleteDepartment(routeParam(req.params.id));
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.get('/api/settings/positions', async (_req, res) => {
+app.get('/api/settings/positions', requireOrganizationAccess, async (_req, res) => {
   res.json(await settingsService.listPositions());
 });
 
-app.get('/api/ai/config', async (_req, res) => {
+app.get('/api/ai/config', requireAiConfigAccess, async (_req, res) => {
   res.json(await aiConfigService.getPublicConfig());
 });
 
-app.put('/api/ai/config', async (req, res) => {
+app.put('/api/ai/config', requireAiConfigAccess, async (req, res) => {
   const result = await aiConfigService.saveConfig(req.body || {});
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.post('/api/ai/config/test', async (_req, res) => {
+app.post('/api/ai/config/test', requireAiConfigAccess, async (_req, res) => {
   try {
     const text = await callDeepSeek([
       { role: 'system', content: '你是极享OS的AI连接测试助手，只返回一句简短中文。' },
@@ -210,30 +245,30 @@ app.post('/api/ai/config/test', async (_req, res) => {
   }
 });
 
-app.get('/api/storage', async (_req, res) => {
+app.get('/api/storage', requireDataMaintenanceAccess, async (_req, res) => {
   res.json(await storageService.list());
 });
 
-app.get('/api/storage/:key', async (req, res) => {
-  const result = await storageService.get(req.params.key);
+app.get('/api/storage/:key', requireDataMaintenanceAccess, async (req, res) => {
+  const result = await storageService.get(routeParam(req.params.key));
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.put('/api/storage/:key', async (req, res) => {
-  const result = await storageService.set(req.params.key, req.body?.value);
+app.put('/api/storage/:key', requireDataMaintenanceAccess, async (req, res) => {
+  const result = await storageService.set(routeParam(req.params.key), req.body?.value);
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.delete('/api/storage/:key', async (req, res) => {
-  const result = await storageService.remove(req.params.key);
+app.delete('/api/storage/:key', requireDataMaintenanceAccess, async (req, res) => {
+  const result = await storageService.remove(routeParam(req.params.key));
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.delete('/api/storage', async (_req, res) => {
+app.delete('/api/storage', requireDataMaintenanceAccess, async (_req, res) => {
   res.json(await storageService.clearPrefix());
 });
 
-app.post('/api/ai/query', async (req, res) => {
+app.post('/api/ai/query', requireAiChatAccess, async (req, res) => {
   const query = String(req.body?.query || '').trim();
   const context = req.body?.context || null;
   if (!query) {
@@ -270,7 +305,7 @@ ${JSON.stringify(context || {}, null, 2)}
   }
 });
 
-app.post('/api/ai/business-card', async (req, res) => {
+app.post('/api/ai/business-card', requireCustomerAiCardAccess, async (req, res) => {
   const input = req.body || {};
   if (!input.name || !input.subjectId || !input.subjectType) {
     res.status(400).json({ code: -1, message: 'name, subjectId and subjectType are required' });
@@ -326,7 +361,7 @@ app.post('/api/ai/business-card', async (req, res) => {
   }
 });
 
-app.post('/api/ai/business-card-legacy', async (req, res) => {
+app.post('/api/ai/business-card-legacy', requireCustomerAiCardAccess, async (req, res) => {
   const input = req.body || {};
   if (!input.name || !input.subjectId || !input.subjectType) {
     res.status(400).json({ code: -1, message: 'name, subjectId and subjectType are required' });

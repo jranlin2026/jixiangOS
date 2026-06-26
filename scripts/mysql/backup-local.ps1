@@ -8,9 +8,9 @@ $mysqlDump = if (Test-Path -LiteralPath $portableMysqlDump) {
 } else {
   'C:\Program Files\MySQL\MySQL Server 8.4\bin\mysqldump.exe'
 }
-$database = 'jixiang_os'
-$user = 'jixiang_os'
-$password = 'jixiang_os_dev'
+$database = if ($env:JIXIANG_MYSQL_DATABASE) { $env:JIXIANG_MYSQL_DATABASE } else { 'jixiang_os' }
+$user = if ($env:JIXIANG_MYSQL_USER) { $env:JIXIANG_MYSQL_USER } else { 'jixiang_os' }
+$password = if ($env:JIXIANG_MYSQL_PASSWORD) { $env:JIXIANG_MYSQL_PASSWORD } else { 'jixiang_os_dev' }
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $output = Join-Path $backupDir "$database-$timestamp.sql"
 

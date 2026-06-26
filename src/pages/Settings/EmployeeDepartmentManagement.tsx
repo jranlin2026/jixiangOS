@@ -45,7 +45,6 @@ import type { Role } from '../../types/role';
 import type { OrganizationProfile, User, UserRole } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
-import { DEFAULT_USER_PASSWORD } from '../../shared/utils/auth';
 import {
   getDepartmentAncestorIds,
   getDepartmentDescendantIds,
@@ -81,7 +80,7 @@ const emptyUserForm: UserForm = {
   positionName: '',
   departmentId: '',
   isActive: true,
-  password: DEFAULT_USER_PASSWORD,
+  password: '',
 };
 
 const emptyDepartmentForm: DepartmentForm = {
@@ -131,7 +130,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const [leaveReceiverId, setLeaveReceiverId] = useState('');
   const [leaveReason, setLeaveReason] = useState('');
   const [resetUser, setResetUser] = useState<User | null>(null);
-  const [resetPassword, setResetPassword] = useState(DEFAULT_USER_PASSWORD);
+  const [resetPassword, setResetPassword] = useState('');
   const [error, setError] = useState('');
   const [menuDepartment, setMenuDepartment] = useState<Department | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
@@ -357,7 +356,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const openResetPassword = (user: User) => {
     setError('');
     setResetUser(user);
-    setResetPassword(DEFAULT_USER_PASSWORD);
+    setResetPassword('');
   };
 
   const handleResetPassword = async () => {

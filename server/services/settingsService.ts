@@ -8,8 +8,8 @@ import {
   mapPrismaUser,
 } from '../db/prismaMappers';
 import {
-  DEFAULT_USER_PASSWORD,
   createPasswordSalt,
+  getDefaultUserPassword,
   hashPassword,
   normalizeAccount,
 } from '../../src/shared/utils/auth';
@@ -235,7 +235,7 @@ export function createSettingsService(prisma: SettingsPrisma) {
       if (existing.some((user) => normalizeAccount(user.account || undefined) === account)) return failure('账号已存在');
       const now = new Date();
       const id = compactId('user');
-      const password = String(data.password || DEFAULT_USER_PASSWORD);
+      const password = String(data.password || getDefaultUserPassword());
       const passwordSalt = createPasswordSalt(`${id}-${account}`);
       const row = await prisma.user.create({
         data: {

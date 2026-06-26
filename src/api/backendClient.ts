@@ -28,6 +28,15 @@ export function clearBackendToken(): void {
   localStorage.removeItem(BACKEND_SESSION_KEY);
 }
 
+function jsonContentType(response: Response): boolean {
+  return (response.headers.get('content-type') || '').toLowerCase().includes('application/json');
+}
+
+function jsonLikeText(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed.startsWith('{') || trimmed.startsWith('[');
+}
+
 export async function backendRequest<T>(path: string, init: RequestInit = {}): Promise<ApiResponse<T>> {
   const token = readBackendToken();
   const headers = new Headers(init.headers);
@@ -38,8 +47,30 @@ export async function backendRequest<T>(path: string, init: RequestInit = {}): P
     ...init,
     headers,
   });
-  const data = await response.json() as ApiResponse<T>;
-  return data;
+  const text = await response.text();
+  let data: ApiResponse<T> | null = null;
+
+  if (text && (jsonContentType(response) || jsonLikeText(text))) {
+    try {
+      data = JSON.parse(text) as ApiResponse<T>;
+    } catch {
+      data = null;
+    }
+  }
+
+  if (data) {
+    if (response.status === 401) clearBackendToken();
+    return data;
+  }
+
+  if (response.status === 401) clearBackendToken();
+  return {
+    code: response.status || -1,
+    data: null as T,
+    message: text && !text.trim().startsWith('<')
+      ? text
+      : `Backend request failed with HTTP ${response.status}`,
+  };
 }
 
 let storageHydratedAt = 0;
