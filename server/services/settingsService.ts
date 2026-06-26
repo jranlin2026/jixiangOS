@@ -54,6 +54,26 @@ export function createSettingsService(prisma: SettingsPrisma) {
     customerOwners(row)[0] || null
   );
 
+  const leadOwners = (row: { owner?: string | null; assignedTo?: string | null; data: unknown }): string[] => {
+    const lead = asRecord(row.data);
+    const owners = [
+      nullableText(row.owner),
+      nullableText(row.assignedTo),
+      nullableText(lead.owner),
+      nullableText(lead.assignedTo),
+    ].filter((owner): owner is string => Boolean(owner));
+    return [...new Set(owners)];
+  };
+
+  const leadBelongsToLeavingUser = (
+    row: { owner?: string | null; assignedTo?: string | null; data: unknown },
+    leavingUserName: string,
+    ownedCustomerIds = new Set<string>(),
+  ): boolean => (
+    leadOwners(row).includes(leavingUserName)
+    || Boolean(asRecord(row.data).customerId && ownedCustomerIds.has(String(asRecord(row.data).customerId)))
+  );
+
   const findOwnedCustomerRowsByNames = async (names: string[]) => {
     const ownerNames = new Set(names.map((name) => name.trim()).filter(Boolean));
     if (!ownerNames.size) return [];
@@ -70,10 +90,19 @@ export function createSettingsService(prisma: SettingsPrisma) {
     if (!leavingUser) return success(null);
 
     const ownedCustomerRows = await findOwnedCustomerRowsByNames([leavingUser.name]);
-    if (!ownedCustomerRows.length) return success(null);
+    const ownedCustomerIds = new Set<string>(
+      ownedCustomerRows.map((row) => String(asRecord(row.data).id || row.recordId)),
+    );
+    const allLeadRows = await prisma.leadRecord.findMany();
+    const leadRows = allLeadRows.filter((row) => leadBelongsToLeavingUser(row, leavingUser.name, ownedCustomerIds));
+    if (!ownedCustomerRows.length && !leadRows.length) return success(null);
 
     if (!handoff.customerAction) {
-      return failure(`该员工名下还有 ${ownedCustomerRows.length} 个客户，请先选择客户交接方式`);
+      const parts = [
+        ownedCustomerRows.length ? `${ownedCustomerRows.length} 个客户` : '',
+        leadRows.length ? `${leadRows.length} 条线索` : '',
+      ].filter(Boolean).join('、');
+      return failure(`该员工名下还有 ${parts}，请先选择业务交接方式`);
     }
 
     let nextOwner = '公海';
@@ -91,11 +120,9 @@ export function createSettingsService(prisma: SettingsPrisma) {
       || (handoff.customerAction === 'public_pool'
         ? `${leavingUser.name}离职，客户释放到公海`
         : `${leavingUser.name}离职，客户交接给${nextOwner}`);
-    const ownedCustomerIds = new Set<string>();
 
     for (const row of ownedCustomerRows) {
       const customer = asRecord(row.data);
-      ownedCustomerIds.add(String(customer.id || row.recordId));
       const activity = {
         id: `act-${randomUUID().slice(0, 8)}`,
         type: 'transfer',
@@ -141,13 +168,6 @@ export function createSettingsService(prisma: SettingsPrisma) {
         },
       });
     }
-
-    const allLeadRows = await prisma.leadRecord.findMany();
-    const leadRows = allLeadRows.filter((row) => (
-      row.owner === leavingUser.name
-      || row.assignedTo === leavingUser.name
-      || Boolean(asRecord(row.data).customerId && ownedCustomerIds.has(String(asRecord(row.data).customerId)))
-    ));
 
     for (const row of leadRows) {
       const lead = asRecord(row.data);
@@ -225,7 +245,14 @@ export function createSettingsService(prisma: SettingsPrisma) {
         .filter((user) => targetIds.has(user.id))
         .map((user) => user.name);
       const rows = await findOwnedCustomerRowsByNames(targetNames);
-      return success(rows.length);
+      const ownedCustomerIds = new Set(rows.map((row) => String(asRecord(row.data).id || row.recordId)));
+      const ownerNames = new Set(targetNames.map((name) => name.trim()).filter(Boolean));
+      const leadRows = await prisma.leadRecord.findMany();
+      const ownedLeadRows = leadRows.filter((row) => (
+        leadOwners(row).some((owner) => ownerNames.has(owner))
+        || Boolean(asRecord(row.data).customerId && ownedCustomerIds.has(String(asRecord(row.data).customerId)))
+      ));
+      return success(rows.length + ownedLeadRows.length);
     },
 
     async createUser(data: Record<string, any>) {

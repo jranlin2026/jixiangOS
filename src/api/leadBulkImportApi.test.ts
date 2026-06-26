@@ -137,6 +137,26 @@ assert.deepEqual(LEAD_BULK_IMPORT_HEADERS, [
   H.remark,
 ]);
 
+const templateBuffer = await leadBulkImportApi.createTemplateWorkbook();
+const templateWorkbook = new ExcelJS.Workbook();
+await templateWorkbook.xlsx.load(templateBuffer);
+const templateSheet = templateWorkbook.getWorksheet('\u7ebf\u7d22\u6279\u91cf\u5165\u5e93\u6a21\u677f');
+const optionsSheet = templateWorkbook.getWorksheet('\u5b57\u6bb5\u9009\u9879');
+assert.ok(templateSheet);
+assert.ok(optionsSheet);
+assert.deepEqual(
+  LEAD_BULK_IMPORT_HEADERS.map((_, index) => templateSheet!.getCell(1, index + 1).value),
+  [...LEAD_BULK_IMPORT_HEADERS],
+);
+assert.equal(optionsSheet!.state, 'hidden');
+assert.equal(optionsSheet!.getCell('B2').value, zh.official);
+assert.equal(optionsSheet!.getCell('B3').value, zh.douyin);
+assert.equal(optionsSheet!.getCell('B4').value, `${zh.douyin}-${zh.live}`);
+assert.equal(optionsSheet!.getCell('E2').value, '\u5f85\u5206\u914d');
+assert.equal(optionsSheet!.getCell('E3').value, zh.zhangWei);
+assert.equal(templateSheet!.getCell('F2').dataValidation?.type, 'list');
+assert.equal(templateSheet!.getCell('K2').dataValidation?.type, 'list');
+
 const result = await leadBulkImportApi.importWorkbook(await workbookBuffer([
   {
     [H.name]: zh.newLead,
@@ -207,3 +227,22 @@ assert.equal(intakeRecords.length, 2);
 assert.equal(intakeRecords.some((record: any) => record.name === zh.newLead && record.status === zh.successStatus), true);
 assert.equal(intakeRecords.some((record: any) => record.name === zh.duplicateCustomer && record.status === zh.failedStatus), true);
 assert.equal(intakeRecords.some((record: any) => record.name === zh.formatErrorCompany), false);
+
+storage.clear();
+storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, JSON.stringify([
+  { id: 'src-1', name: zh.official, isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
+]));
+storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([
+  { id: 'user-2', name: zh.zhangWei, account: 'zhangwei', email: 'zhangwei@company.com', phone: '', role: zh.salesConsultant, isActive: true, createdAt: now, updatedAt: now },
+]));
+const generatedTemplateImport = await leadBulkImportApi.importWorkbook(await leadBulkImportApi.createTemplateWorkbook());
+assert.equal(generatedTemplateImport.code, 0);
+assert.equal(generatedTemplateImport.data.successCount, 1);
+assert.equal(generatedTemplateImport.data.failureCount, 0);
+const generatedTemplateLeads = JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]');
+assert.equal(generatedTemplateLeads.length, 1);
+assert.equal(generatedTemplateLeads[0].source, zh.official);

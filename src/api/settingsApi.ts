@@ -189,6 +189,12 @@ function createLeadHandoffLog(
   };
 }
 
+function leadBelongsToLeavingUser(lead: Lead, leavingUserName: string, ownedCustomerIds = new Set<string>()): boolean {
+  return lead.owner === leavingUserName
+    || lead.assignedTo === leavingUserName
+    || Boolean(lead.customerId && ownedCustomerIds.has(lead.customerId));
+}
+
 function applyLeavingUserCustomerHandoff(
   leavingUser: User,
   users: User[],
@@ -196,22 +202,33 @@ function applyLeavingUserCustomerHandoff(
 ): ApiResponse<null> {
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
   const ownedCustomers = customers.filter((customer) => customer.owner === leavingUser.name);
-  if (!ownedCustomers.length) return createSuccessResponse(null);
+  const ownedCustomerIds = new Set(ownedCustomers.map((customer) => customer.id));
+  const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
+  const ownedLeads = leads.filter((lead) => leadBelongsToLeavingUser(lead, leavingUser.name, ownedCustomerIds));
+  if (!ownedCustomers.length && !ownedLeads.length) return createSuccessResponse(null);
 
   if (!handoff.customerAction) {
-    return createErrorResponse(`该员工名下还有 ${ownedCustomers.length} 个客户，请先选择客户交接方式`);
+    const parts = [
+      ownedCustomers.length ? `${ownedCustomers.length} 个客户` : '',
+      ownedLeads.length ? `${ownedLeads.length} 条线索` : '',
+    ].filter(Boolean).join('、');
+    return createErrorResponse(`该员工名下还有 ${parts}，请先选择业务交接方式`);
   }
 
   const now = new Date().toISOString();
   let nextOwner = '公海';
   let targetUser: User | undefined;
   if (handoff.customerAction === 'transfer') {
-    targetUser = users.find((user) => user.id === handoff.targetUserId && user.id !== leavingUser.id && user.isActive);
+    targetUser = users.find((user) => (
+      user.id === handoff.targetUserId
+      && user.id !== leavingUser.id
+      && user.isActive
+      && (user.employmentStatus || 'active') === 'active'
+    ));
     if (!targetUser) return createErrorResponse('请选择一个在职员工作为客户接收人');
     nextOwner = targetUser.name;
   }
 
-  const ownedCustomerIds = new Set(ownedCustomers.map((customer) => customer.id));
   const reason = handoff.reason?.trim()
     || (handoff.customerAction === 'public_pool'
       ? `${leavingUser.name}离职，客户释放到公海`
@@ -244,12 +261,8 @@ function applyLeavingUserCustomerHandoff(
   });
   setStorageData(STORAGE_KEYS.CUSTOMERS, nextCustomers);
 
-  const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
   const nextLeads = leads.map((lead) => {
-    const shouldUpdate = lead.owner === leavingUser.name
-      || lead.assignedTo === leavingUser.name
-      || Boolean(lead.customerId && ownedCustomerIds.has(lead.customerId));
-    if (!shouldUpdate) return lead;
+    if (!leadBelongsToLeavingUser(lead, leavingUser.name, ownedCustomerIds)) return lead;
     const log = createLeadHandoffLog(leavingUser, nextOwner, reason, now);
     if (handoff.customerAction === 'public_pool') {
       return {
@@ -423,7 +436,15 @@ async function countLeaveOwnedCustomers(userIds: string[]): Promise<ApiResponse<
   const targetIds = new Set(userIds);
   const targetNames = new Set(ensureUsersWithAuth().filter((user) => targetIds.has(user.id)).map((user) => user.name));
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
-  return createSuccessResponse(customers.filter((customer) => targetNames.has(customer.owner)).length);
+  const ownedCustomers = customers.filter((customer) => targetNames.has(customer.owner));
+  const ownedCustomerIds = new Set(ownedCustomers.map((customer) => customer.id));
+  const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
+  const ownedLeads = leads.filter((lead) => (
+    targetNames.has(lead.owner || '')
+    || targetNames.has(lead.assignedTo || '')
+    || Boolean(lead.customerId && ownedCustomerIds.has(lead.customerId))
+  ));
+  return createSuccessResponse(ownedCustomers.length + ownedLeads.length);
 }
 
 async function restoreUser(id: string): Promise<ApiResponse<User | null>> {

@@ -93,10 +93,14 @@ const LeadBulkImportDialog: React.FC<LeadBulkImportDialogProps> = ({ open, onClo
     try {
       const buffer = await file.arrayBuffer();
       const res = await leadBulkImportApi.importWorkbook(buffer);
+      if (res.code !== 0 || !res.data) {
+        setError(res.message || LABEL.failed);
+        return;
+      }
       setResult(res.data);
       onImported?.();
-    } catch {
-      setError(LABEL.failed);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : LABEL.failed);
     } finally {
       setImporting(false);
     }

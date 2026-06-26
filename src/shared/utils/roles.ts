@@ -2,6 +2,7 @@ export const DEFAULT_USER_ROLE = '销售顾问';
 
 export const LEGACY_ROLE_NAME_MAP: Record<string, string> = {
   管理员: '超级管理员',
+  系统管理员: '超级管理员',
   销售: '销售顾问',
   运营: '运营管理员',
   运营专员: '运营管理员',

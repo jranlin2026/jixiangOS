@@ -148,6 +148,7 @@ let customerRecord: any = {
     updatedAt: now.toISOString(),
   },
 };
+let leadRecords: any[] = [];
 
 function createModel<T extends { id: string }>(items: T[]) {
   return {
@@ -196,8 +197,12 @@ const prisma = {
     },
   },
   leadRecord: {
-    findMany: async () => [],
-    update: async () => null,
+    findMany: async () => leadRecords,
+    update: async ({ where, data }: any) => {
+      const index = leadRecords.findIndex((row) => row.id === where.id);
+      if (index !== -1) leadRecords[index] = { ...leadRecords[index], ...data };
+      return index !== -1 ? leadRecords[index] : null;
+    },
   },
 } as any;
 
@@ -286,6 +291,47 @@ const restoredUserData = restoredUser.data as any;
 assert.equal(restoredUser.code, 0);
 assert.equal(restoredUserData.employmentStatus, 'active');
 assert.equal(restoredUserData.isActive, true);
+
+customerRecord = {
+  ...customerRecord,
+  owner: 'Other User',
+  data: {
+    ...(customerRecord.data as any),
+    owner: 'Other User',
+    activityRecords: [],
+  },
+};
+leadRecords = [{
+  id: 'lead-sales-only',
+  owner: 'Sales User',
+  assignedTo: 'Sales User',
+  lifecycleStatusCode: 'pending_followup',
+  data: {
+    id: 'lead-sales-only',
+    owner: 'Sales User',
+    assignedTo: 'Sales User',
+    changeHistory: [],
+  },
+}];
+const leadOnlyCount = await service.countLeaveOwnedCustomers(['user-sales']);
+assert.equal(leadOnlyCount.code, 0);
+assert.equal(leadOnlyCount.data, 1);
+const leadOnlyLeaveBlocked = await service.leaveUser('user-sales');
+assert.notEqual(leadOnlyLeaveBlocked.code, 0);
+assert.match(leadOnlyLeaveBlocked.message || '', /线索/);
+const leadOnlyLeave = await service.leaveUser('user-sales', {
+  customerAction: 'transfer',
+  targetUserId: 'user-receiver',
+  reason: 'lead handoff',
+});
+assert.equal(leadOnlyLeave.code, 0);
+assert.equal(leadRecords[0].owner, 'Receiver User');
+assert.equal(leadRecords[0].assignedTo, 'Receiver User');
+assert.equal(leadRecords[0].data.owner, 'Receiver User');
+assert.match(leadRecords[0].data.changeHistory[0].summary, /lead handoff/);
+
+await service.restoreUser('user-sales');
+leadRecords = [];
 
 await service.leaveUser(createdUserData.id);
 const deletedUser = await service.deleteUser(createdUserData.id);

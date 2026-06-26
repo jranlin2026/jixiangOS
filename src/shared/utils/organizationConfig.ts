@@ -186,6 +186,7 @@ export const DEFAULT_ROLES: Role[] = [
 const ROLE_CODE_BY_NAME: Record<string, string> = {
   超级管理员: 'super_admin',
   管理员: 'super_admin',
+  系统管理员: 'super_admin',
   'Super Admin': 'super_admin',
   销售经理: 'sales_manager',
   'Sales Manager': 'sales_manager',

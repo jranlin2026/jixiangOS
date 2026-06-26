@@ -239,6 +239,7 @@ const DELETE_ACTION_PERMISSION_KEYS = [
 const ROLE_CODE_BY_USER_ROLE: Record<string, string> = {
   超级管理员: 'super_admin',
   管理员: 'super_admin',
+  系统管理员: 'super_admin',
   'Super Admin': 'super_admin',
   销售经理: 'sales_manager',
   'Sales Manager': 'sales_manager',
@@ -307,8 +308,9 @@ function roleHasDirectPermission(role: Role | undefined, permissionKeys: string[
   ));
 }
 
-export function canReceiveLead(user: Pick<User, 'role' | 'roleId' | 'isActive'>, roles: Role[]): boolean {
+export function canReceiveLead(user: Pick<User, 'role' | 'roleId' | 'isActive' | 'employmentStatus'>, roles: Role[]): boolean {
   if (!user.isActive) return false;
+  if ((user.employmentStatus || 'active') !== 'active') return false;
   return roleHasDirectPermission(getUserRole(user, roles), [
     CAPABILITY_KEYS.LEADS_RECEIVE,
     PERMISSION_KEYS.LEADS_FOLLOW,

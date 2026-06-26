@@ -250,6 +250,7 @@ const Leads: React.FC = () => {
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [assignLead, setAssignLead] = useState<Lead | null>(null);
   const [assignSalesName, setAssignSalesName] = useState('');
+  const [templateDownloading, setTemplateDownloading] = useState(false);
 
   const columns = useMemo(() => buildColumns(lifecycleConfigs), [lifecycleConfigs]);
   const [viewConfig, setViewConfig] = useState<LeadViewConfig>(() => readLeadViewConfig(buildColumns([])));
@@ -359,18 +360,25 @@ const Leads: React.FC = () => {
   };
 
   const handleDownloadTemplate = async () => {
-    const workbook = await leadBulkImportApi.createTemplateWorkbook();
-    const blob = new Blob([workbook], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = LEAD_TEMPLATE_FILE_NAME;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    setTemplateDownloading(true);
+    try {
+      const workbook = await leadBulkImportApi.createTemplateWorkbook();
+      const blob = new Blob([workbook], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = LEAD_TEMPLATE_FILE_NAME;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      await alert(error instanceof Error ? error.message : '下载模板失败，请稍后重试', '下载模板失败');
+    } finally {
+      setTemplateDownloading(false);
+    }
   };
 
   const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -479,8 +487,8 @@ const Leads: React.FC = () => {
             <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
               视图设置
             </Button>
-            <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleDownloadTemplate}>
-              {'\u4e0b\u8f7dExcel\u6a21\u677f'}
+            <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleDownloadTemplate} disabled={templateDownloading}>
+              {templateDownloading ? '生成中...' : '\u4e0b\u8f7dExcel\u6a21\u677f'}
             </Button>
             {activeTab === 0 && (
               <PermissionGate permissionKey={PERMISSION_KEYS.LEADS_CREATE}>

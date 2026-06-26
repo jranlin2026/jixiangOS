@@ -170,3 +170,57 @@ assert.ok(createRes.data);
 assert.equal(createRes.data?.phone, '+8613900009999');
 assert.equal(createRes.data?.email, undefined);
 assert.equal(createRes.data?.estimatedAmount, undefined);
+
+storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([
+  {
+    id: 'user-admin',
+    name: '系统管理员',
+    account: 'admin',
+    email: 'admin@company.com',
+    phone: '',
+    role: '超级管理员',
+    roleId: 'role-super-admin',
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+  {
+    id: 'user-new-sales',
+    name: '新销售',
+    account: 'new_sales',
+    email: 'new_sales@company.com',
+    phone: '',
+    role: '销售顾问',
+    roleId: 'role-sales-consultant',
+    isActive: true,
+    employmentStatus: 'active',
+    createdAt: now,
+    updatedAt: now,
+  },
+]));
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([
+  {
+    ...lead,
+    id: 'lead-stale-sales',
+    name: '旧销售线索',
+    phone: '13900008888',
+    assignedTo: '旧销售',
+    owner: '旧销售',
+  },
+  {
+    ...lead,
+    id: 'lead-active-sales',
+    name: '新销售线索',
+    phone: '13900007777',
+    assignedTo: '新销售',
+    owner: '新销售',
+  },
+]));
+
+const reassignedList = await leadApi.fetchLeads({ page: 1, pageSize: 20 });
+const staleSalesLead = reassignedList.data.items.find((item) => item.id === 'lead-stale-sales');
+const activeSalesLead = reassignedList.data.items.find((item) => item.id === 'lead-active-sales');
+assert.equal(staleSalesLead?.owner, '待分配');
+assert.equal(staleSalesLead?.assignedTo, undefined);
+assert.equal(activeSalesLead?.owner, '新销售');
+assert.equal(activeSalesLead?.assignedTo, '新销售');

@@ -13,6 +13,9 @@ import { filterVisibleLeads } from '../shared/utils/dataVisibility';
 import { applyContactEditLock } from '../shared/utils/contactEditLock';
 import { isSuperAdminRoleName } from '../shared/utils/roles';
 import { getPhoneNumberError, normalizePhoneForComparison, normalizePhoneForStorage } from '../shared/utils/phoneNumber';
+import type { User } from '../types/settings';
+import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
+import { canReceiveLead } from '../shared/utils/permissions';
 
 function ensureInit(): void {
   initializeMockData();
@@ -105,11 +108,46 @@ function normalizeLead(lead: Lead): Lead {
   });
 }
 
+function getActiveAssignableSalesNames(): Set<string> {
+  const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
+  const { roles } = ensureOrganizationConfigData();
+  return new Set(
+    users
+      .filter((user) => canReceiveLead(user, roles))
+      .map((user) => user.name)
+      .filter(Boolean),
+  );
+}
+
+function reconcileStaleLeadAssignees(leads: Lead[]): Lead[] {
+  const assignableSalesNames = getActiveAssignableSalesNames();
+  if (!assignableSalesNames.size) return leads;
+
+  return leads.map((lead) => {
+    if (lead.customerId) return lead;
+    const assignedTo = lead.assignedTo && assignableSalesNames.has(lead.assignedTo)
+      ? lead.assignedTo
+      : undefined;
+    const owner = lead.owner && (lead.owner === '待分配' || lead.owner === '公海' || assignableSalesNames.has(lead.owner))
+      ? lead.owner
+      : assignedTo || '待分配';
+
+    if (owner === lead.owner && assignedTo === lead.assignedTo) return lead;
+    return {
+      ...lead,
+      owner,
+      assignedTo,
+      assignedAt: assignedTo ? lead.assignedAt : undefined,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+}
+
 async function fetchLeads(filters?: LeadFilters): Promise<ApiResponse<PaginatedResponse<Lead>>> {
   ensureInit();
   await delay(200);
   const allLeads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
-  const normalizedLeads = allLeads.map(normalizeLead);
+  const normalizedLeads = reconcileStaleLeadAssignees(allLeads.map(normalizeLead));
   if (JSON.stringify(allLeads) !== JSON.stringify(normalizedLeads)) {
     setStorageData(STORAGE_KEYS.LEADS, normalizedLeads);
   }
@@ -150,7 +188,7 @@ async function fetchLeadById(id: string): Promise<ApiResponse<Lead | null>> {
   ensureInit();
   await delay(150);
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
-  const normalizedLeads = leads.map(normalizeLead);
+  const normalizedLeads = reconcileStaleLeadAssignees(leads.map(normalizeLead));
   if (JSON.stringify(leads) !== JSON.stringify(normalizedLeads)) {
     setStorageData(STORAGE_KEYS.LEADS, normalizedLeads);
   }

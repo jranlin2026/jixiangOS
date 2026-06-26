@@ -35,6 +35,7 @@ const users = [
   { id: 'user-finance', name: 'Finance A', account: 'finance', email: 'finance@test.local', phone: '', role: 'Finance Specialist', roleId: 'role-finance', departmentId: 'dept-finance', isActive: true, createdAt: now, updatedAt: now },
   { id: 'user-aa', name: 'AA User', account: 'aa', email: 'aa@test.local', phone: '', role: 'AA', roleId: 'role-aa', departmentId: 'dept-finance', isActive: true, createdAt: now, updatedAt: now },
   { id: 'user-admin', name: 'Admin', account: 'admin', email: 'admin@test.local', phone: '', role: 'Super Admin', roleId: 'role-admin', departmentId: 'dept-admin', isActive: true, createdAt: now, updatedAt: now },
+  { id: 'user-system-admin', name: 'System Admin Name', account: 'system_admin', email: 'system-admin@test.local', phone: '', role: '系统管理员', departmentId: 'dept-admin', isActive: true, createdAt: now, updatedAt: now },
 ];
 
 const roles = [
@@ -145,3 +146,10 @@ assert.deepEqual(adminScope.leads, ['lead-input-a', 'lead-assigned-a', 'lead-b',
 assert.deepEqual(adminScope.orders, ['order-a', 'order-b', 'order-other']);
 assert.equal(adminScope.stats.monthCount, 3);
 assert.equal(adminScope.stats.monthAmount, 600);
+
+resetData('user-system-admin');
+const systemAdminScope = await idsForCurrentUser();
+assert.deepEqual(systemAdminScope.customers, ['cust-a', 'cust-b', 'cust-other']);
+assert.deepEqual(systemAdminScope.publicCustomers, ['cust-public']);
+assert.deepEqual(systemAdminScope.leads, ['lead-input-a', 'lead-assigned-a', 'lead-b', 'lead-other']);
+assert.deepEqual(systemAdminScope.orders, ['order-a', 'order-b', 'order-other']);

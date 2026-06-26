@@ -111,11 +111,11 @@ assert.ok(activeBeforeLeave.data.some((user) => user.id === created.data!.id));
 
 const leaveOwnedCustomerCount = await settingsApi.countLeaveOwnedCustomers([created.data!.id]);
 assert.equal(leaveOwnedCustomerCount.code, 0);
-assert.equal(leaveOwnedCustomerCount.data, 1);
+assert.equal(leaveOwnedCustomerCount.data, 2);
 
 const leaveWithoutHandoffRes = await settingsApi.leaveUser(created.data!.id);
 assert.notEqual(leaveWithoutHandoffRes.code, 0);
-assert.match(leaveWithoutHandoffRes.message || '', /客户交接/);
+assert.match(leaveWithoutHandoffRes.message || '', /客户/);
 
 const leaveRes = await settingsApi.leaveUser(created.data!.id, {
   customerAction: 'transfer',
@@ -157,6 +157,41 @@ assert.equal(restoreRes.data?.leftAt, undefined);
 
 const leftAfterRestore = await settingsApi.fetchUsers({ employmentStatus: 'left' });
 assert.equal(leftAfterRestore.data.some((user) => user.id === created.data!.id), false);
+
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([{
+  id: 'lead-leave-standalone',
+  name: '离职线索交接',
+  company: '离职线索公司',
+  phone: '13900001111',
+  source: '官网',
+  status: '新线索',
+  inputBy: 'Lifecycle Sales',
+  assignedTo: 'Lifecycle Sales',
+  owner: 'Lifecycle Sales',
+  followUpRecords: [],
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+}]));
+const leadOnlyLeaveCount = await settingsApi.countLeaveOwnedCustomers([created.data!.id]);
+assert.equal(leadOnlyLeaveCount.code, 0);
+assert.equal(leadOnlyLeaveCount.data, 1);
+const leadOnlyLeaveWithoutHandoff = await settingsApi.leaveUser(created.data!.id);
+assert.notEqual(leadOnlyLeaveWithoutHandoff.code, 0);
+assert.match(leadOnlyLeaveWithoutHandoff.message || '', /线索/);
+const leadOnlyLeaveWithHandoff = await settingsApi.leaveUser(created.data!.id, {
+  customerAction: 'transfer',
+  targetUserId: receiver.data!.id,
+  reason: '离职线索交接',
+});
+assert.equal(leadOnlyLeaveWithHandoff.code, 0);
+const transferredStandaloneLeads = JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]');
+assert.equal(transferredStandaloneLeads[0].owner, 'Handoff Receiver');
+assert.equal(transferredStandaloneLeads[0].assignedTo, 'Handoff Receiver');
+assert.match(transferredStandaloneLeads[0].changeHistory[0].summary, /离职线索交接/);
+
+const restoreAfterLeadOnly = await settingsApi.restoreUser(created.data!.id);
+assert.equal(restoreAfterLeadOnly.code, 0);
 
 storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([{
   id: 'cust-leave-public',

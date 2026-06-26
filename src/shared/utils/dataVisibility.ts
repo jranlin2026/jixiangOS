@@ -69,12 +69,16 @@ export function getCurrentDataVisibilityScope(domain: DataScopeDomain = 'custome
 
   const users = readLocalStorageJson<User[]>(STORAGE_KEYS.USERS) || [];
   const roles = ensureOrganizationConfigData().roles;
-  const currentUser = users.find((user) => user.id === session.userId && user.isActive);
+  const currentUser = users.find((user) => (
+    user.id === session.userId
+    && user.isActive
+    && (user.employmentStatus || 'active') === 'active'
+  ));
   if (!currentUser) return unrestrictedScope();
 
   const roleCode = getRoleCode(currentUser, roles);
   const role = getUserRole(currentUser, roles);
-  const activeUsers = users.filter((user) => user.isActive);
+  const activeUsers = users.filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active');
   if (isSuperAdminUser(currentUser, roles)) {
     return {
       unrestricted: true,

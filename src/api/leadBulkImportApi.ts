@@ -1,4 +1,5 @@
 import type { Row } from 'exceljs';
+import excelJsBrowserUrl from 'exceljs/dist/exceljs.min.js?url';
 import type { Lead } from '../types/lead';
 import type { LeadSourceConfig, User } from '../types/settings';
 import { LEAD_STATUS, STORAGE_KEYS, normalizeResourceOwnership } from '../shared/utils/constants';
@@ -35,6 +36,7 @@ const TEXT = {
   leadContributorRequired: '\u4e2a\u4eba\u8d44\u6e90\u5fc5\u987b\u586b\u5199\u7ebf\u7d22\u8d21\u732e\u4eba',
   ownerMissing: '\u5206\u914d\u9500\u552e\u4e0d\u5b58\u5728',
   templateSheet: '\u7ebf\u7d22\u6279\u91cf\u5165\u5e93\u6a21\u677f',
+  optionsSheet: '\u5b57\u6bb5\u9009\u9879',
   exampleName: '\u5f20\u4e09',
   exampleCompany: '\u793a\u4f8b\u516c\u53f8',
   exampleSource: '\u5b98\u7f51',
@@ -43,6 +45,8 @@ const TEXT = {
   exampleTags: '\u91cd\u70b9,\u9ad8\u610f\u5411',
   exampleRemark: '\u793a\u4f8b\u6570\u636e\uff0c\u5bfc\u5165\u524d\u8bf7\u5220\u9664',
 } as const;
+
+const TEMPLATE_MAX_ROWS = 500;
 
 export const LEAD_BULK_IMPORT_HEADERS = [
   TEXT.name,
@@ -63,6 +67,9 @@ export const LEAD_BULK_IMPORT_HEADERS = [
 type Header = (typeof LEAD_BULK_IMPORT_HEADERS)[number];
 type ExcelJsNamespace = typeof import('exceljs');
 type ExcelJsModule = ExcelJsNamespace & { default?: ExcelJsNamespace };
+type WindowWithExcelJs = Window & { ExcelJS?: ExcelJsNamespace };
+
+let browserExcelJsPromise: Promise<ExcelJsNamespace> | null = null;
 
 export interface LeadBulkImportRowResult {
   rowNumber: number;
@@ -109,13 +116,45 @@ function getCell(row: Record<string, unknown>, header: Header): string {
   return toText(row[header]);
 }
 
+function loadBrowserExcelJs(): Promise<ExcelJsNamespace> {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return Promise.reject(new Error('Browser ExcelJS runtime is unavailable'));
+  }
+  const existing = (window as WindowWithExcelJs).ExcelJS;
+  if (existing?.Workbook) return Promise.resolve(existing);
+  if (browserExcelJsPromise) return browserExcelJsPromise;
+
+  const promise = new Promise<ExcelJsNamespace>((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = excelJsBrowserUrl;
+    script.async = true;
+    script.onload = () => {
+      const loaded = (window as WindowWithExcelJs).ExcelJS;
+      if (loaded?.Workbook) resolve(loaded);
+      else reject(new Error('ExcelJS 加载失败，请刷新页面后重试'));
+    };
+    script.onerror = () => reject(new Error('ExcelJS 文件加载失败，请检查本地服务后重试'));
+    document.head.appendChild(script);
+  }).finally(() => {
+    browserExcelJsPromise = null;
+  });
+  browserExcelJsPromise = promise;
+
+  return promise;
+}
+
 async function loadExcelJs(): Promise<ExcelJsNamespace> {
-  const imported = await import('exceljs') as ExcelJsModule;
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    return loadBrowserExcelJs();
+  }
+  const importExcelJs = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<ExcelJsModule>;
+  const imported = await importExcelJs('exceljs');
   return typeof imported.Workbook === 'function' ? imported : imported.default || imported;
 }
 
 function getActiveUsers(): User[] {
-  return (getStorageData<User[]>(STORAGE_KEYS.USERS) || []).filter((user) => user.isActive);
+  return (getStorageData<User[]>(STORAGE_KEYS.USERS) || [])
+    .filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active');
 }
 
 function buildSourceOptions(): SourceOption[] {
@@ -172,6 +211,30 @@ async function readRows(arrayBuffer: ArrayBuffer): Promise<CleanRow[]> {
     if (Object.values(data).some(Boolean)) rows.push({ rowNumber, data });
   });
   return rows;
+}
+
+function quoteSheetName(name: string): string {
+  return `'${name.replace(/'/g, "''")}'`;
+}
+
+function optionRange(columnIndex: number, optionCount: number): string | null {
+  if (!optionCount) return null;
+  const column = String.fromCharCode(64 + columnIndex);
+  return `${quoteSheetName(TEXT.optionsSheet)}!$${column}$2:$${column}$${optionCount + 1}`;
+}
+
+function applyListValidation(sheet: import('exceljs').Worksheet, columnIndex: number, formula: string | null): void {
+  if (!formula) return;
+  for (let rowIndex = 2; rowIndex <= TEMPLATE_MAX_ROWS; rowIndex += 1) {
+    sheet.getCell(rowIndex, columnIndex).dataValidation = {
+      type: 'list',
+      allowBlank: true,
+      formulae: [formula],
+      showErrorMessage: true,
+      errorTitle: '\u8bf7\u9009\u62e9\u6709\u6548\u9009\u9879',
+      error: '\u8bf7\u4ece\u4e0b\u62c9\u5217\u8868\u4e2d\u9009\u62e9\uff0c\u6216\u7559\u7a7a\u7531\u7cfb\u7edf\u81ea\u52a8\u5904\u7406\u3002',
+    };
+  }
 }
 
 function validateRow(row: CleanRow) {
@@ -244,6 +307,28 @@ async function createTemplateWorkbook(): Promise<ArrayBuffer> {
   const ExcelJS = await loadExcelJs();
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet(TEXT.templateSheet);
+  const optionsSheet = workbook.addWorksheet(TEXT.optionsSheet);
+  const users = getActiveUsers();
+  const { roles } = ensureOrganizationConfigData();
+  const sourceOptions = buildSourceOptions().map((option) => option.label);
+  const userNames = users.map((user) => user.name);
+  const salesNames = users.filter((user) => canReceiveLead(user, roles)).map((user) => user.name);
+  const optionColumns = [
+    { title: TEXT.sourceType, options: [TEXT.companyResource, '\u4e2a\u4eba\u8d44\u6e90'] },
+    { title: TEXT.source, options: sourceOptions },
+    { title: TEXT.inputBy, options: userNames },
+    { title: TEXT.leadContributor, options: userNames },
+    { title: TEXT.owner, options: [TEXT.toAssign, ...salesNames] },
+  ];
+
+  optionsSheet.addRow(optionColumns.map((column) => column.title));
+  const maxOptionRows = Math.max(...optionColumns.map((column) => column.options.length), 1);
+  for (let rowIndex = 0; rowIndex < maxOptionRows; rowIndex += 1) {
+    optionsSheet.addRow(optionColumns.map((column) => column.options[rowIndex] || ''));
+  }
+  optionsSheet.columns = optionColumns.map((column) => ({ width: Math.max(16, column.title.length + 8) }));
+  optionsSheet.state = 'hidden';
+
   sheet.addRows([
     [...LEAD_BULK_IMPORT_HEADERS],
     [
@@ -265,6 +350,12 @@ async function createTemplateWorkbook(): Promise<ArrayBuffer> {
   sheet.columns = LEAD_BULK_IMPORT_HEADERS.map((header) => ({
     width: Math.max(14, header.length + 8),
   }));
+  sheet.getRow(1).font = { bold: true };
+  applyListValidation(sheet, LEAD_BULK_IMPORT_HEADERS.indexOf(TEXT.sourceType) + 1, optionRange(1, optionColumns[0].options.length));
+  applyListValidation(sheet, LEAD_BULK_IMPORT_HEADERS.indexOf(TEXT.source) + 1, optionRange(2, optionColumns[1].options.length));
+  applyListValidation(sheet, LEAD_BULK_IMPORT_HEADERS.indexOf(TEXT.inputBy) + 1, optionRange(3, optionColumns[2].options.length));
+  applyListValidation(sheet, LEAD_BULK_IMPORT_HEADERS.indexOf(TEXT.leadContributor) + 1, optionRange(4, optionColumns[3].options.length));
+  applyListValidation(sheet, LEAD_BULK_IMPORT_HEADERS.indexOf(TEXT.owner) + 1, optionRange(5, optionColumns[4].options.length));
   const buffer = await workbook.xlsx.writeBuffer();
   return toArrayBuffer(buffer);
 }

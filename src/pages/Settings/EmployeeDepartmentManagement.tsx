@@ -21,6 +21,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Tooltip,
@@ -113,6 +114,8 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const [selectedNodeId, setSelectedNodeId] = useState(COMPANY_ROOT);
   const [search, setSearch] = useState('');
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [memberPage, setMemberPage] = useState(0);
+  const [memberRowsPerPage, setMemberRowsPerPage] = useState(10);
   const [userFormOpen, setUserFormOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [userForm, setUserForm] = useState<UserForm>(emptyUserForm);
@@ -211,6 +214,9 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const selectedUsers = users.filter((user) => selectedUserIds.includes(user.id));
   const selectedTitle = selectedDepartment?.name || organizationProfile.companyName;
   const selectedDepartmentUserCount = filteredUsers.length;
+  const paginatedUsers = filteredUsers.slice(memberPage * memberRowsPerPage, memberPage * memberRowsPerPage + memberRowsPerPage);
+  const paginatedUserIds = paginatedUsers.map((user) => user.id);
+  const selectedCurrentPageCount = paginatedUserIds.filter((id) => selectedUserIds.includes(id)).length;
   const activeUserCount = users.filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active').length;
   const inactiveUserCount = users.length - activeUserCount;
   const selectedDepartmentDirectUserCount = selectedDepartment
@@ -232,10 +238,19 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const getDepartmentName = (departmentId?: string) => activeDepartments.find((department) => department.id === departmentId)?.name || '-';
   const clearSelection = () => setSelectedUserIds([]);
 
+  useEffect(() => {
+    setMemberPage(0);
+  }, [search, selectedNodeId]);
+
+  useEffect(() => {
+    const maxPage = Math.max(Math.ceil(filteredUsers.length / memberRowsPerPage) - 1, 0);
+    if (memberPage > maxPage) setMemberPage(maxPage);
+  }, [filteredUsers.length, memberPage, memberRowsPerPage]);
+
   const countOwnedCustomers = async (targets: User[]) => {
     const res = await settingsApi.countLeaveOwnedCustomers(targets.map((user) => user.id));
     if (res.code !== 0) {
-      await alert(res.message || '客户归属检查失败，请刷新后重试', '客户归属检查失败');
+      await alert(res.message || '业务归属检查失败，请刷新后重试', '业务归属检查失败');
       return null;
     }
     return res.data || 0;
@@ -446,7 +461,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
     const ownedCustomerCount = await countOwnedCustomers(targets);
     if (ownedCustomerCount === null) return;
     if (ownedCustomerCount > 0) {
-      openLeaveHandoffDialog(targets, ownedCustomerCount);
+        openLeaveHandoffDialog(targets, ownedCustomerCount);
       return;
     }
     const skipText = skippedAdminCount ? `，已自动跳过 ${skippedAdminCount} 个内置管理员账号` : '';
@@ -464,7 +479,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const handleConfirmLeaveHandoff = async () => {
     if (!leaveTargets.length) return;
     if (leaveAction === 'transfer' && !leaveReceiverId) {
-      await alert('请选择客户接收人', '客户交接');
+      await alert('请选择业务接收人', '离职交接');
       return;
     }
     const results = await Promise.all(leaveTargets.map((user) => settingsApi.leaveUser(user.id, {
@@ -519,8 +534,23 @@ const EmployeeDepartmentManagement: React.FC = () => {
     ));
   };
 
-  const setAllFilteredSelected = (checked: boolean) => {
-    setSelectedUserIds(checked ? filteredUsers.map((user) => user.id) : []);
+  const setAllCurrentPageSelected = (checked: boolean) => {
+    setSelectedUserIds((current) => {
+      const currentPageIds = new Set(paginatedUserIds);
+      if (!checked) return current.filter((id) => !currentPageIds.has(id));
+      const next = new Set(current);
+      paginatedUserIds.forEach((id) => next.add(id));
+      return Array.from(next);
+    });
+  };
+
+  const handleMemberPageChange = (_event: React.MouseEvent<HTMLButtonElement> | null, page: number) => {
+    setMemberPage(page);
+  };
+
+  const handleMemberRowsPerPageChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    setMemberRowsPerPage(Number(event.target.value));
+    setMemberPage(0);
   };
 
   const openNodeMenu = (event: React.MouseEvent<HTMLElement>, department: Department) => {
@@ -799,15 +829,15 @@ const EmployeeDepartmentManagement: React.FC = () => {
                 </Box>
               </Box>
 
-              <TableContainer component={Paper} elevation={0} sx={{ border: 0 }}>
+              <TableContainer component={Paper} elevation={0} sx={{ border: 0, borderRadius: 0 }}>
                 <Table sx={{ tableLayout: 'fixed', minWidth: 940 }}>
                   <TableHead>
                     <TableRow sx={{ bgcolor: '#f5f8fc' }}>
                       <TableCell padding="checkbox">
                         <Checkbox
-                          checked={filteredUsers.length > 0 && selectedUserIds.length === filteredUsers.length}
-                          indeterminate={selectedUserIds.length > 0 && selectedUserIds.length < filteredUsers.length}
-                          onChange={(event) => setAllFilteredSelected(event.target.checked)}
+                          checked={paginatedUsers.length > 0 && selectedCurrentPageCount === paginatedUsers.length}
+                          indeterminate={selectedCurrentPageCount > 0 && selectedCurrentPageCount < paginatedUsers.length}
+                          onChange={(event) => setAllCurrentPageSelected(event.target.checked)}
                         />
                       </TableCell>
                       <TableCell>姓名</TableCell>
@@ -820,7 +850,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {filteredUsers.map((user) => (
+                    {paginatedUsers.map((user) => (
                       <TableRow key={user.id} hover selected={selectedUserIds.includes(user.id)}>
                         <TableCell padding="checkbox">
                           <Checkbox checked={selectedUserIds.includes(user.id)} onChange={() => toggleUserSelected(user.id)} />
@@ -880,6 +910,22 @@ const EmployeeDepartmentManagement: React.FC = () => {
                   </TableBody>
                 </Table>
               </TableContainer>
+              <TablePagination
+                component="div"
+                count={filteredUsers.length}
+                page={memberPage}
+                rowsPerPage={memberRowsPerPage}
+                rowsPerPageOptions={[10, 20, 50, 100]}
+                onPageChange={handleMemberPageChange}
+                onRowsPerPageChange={handleMemberRowsPerPageChange}
+                labelRowsPerPage="每页条数"
+                labelDisplayedRows={({ from, to, count }) => (count === 0 ? `0 / 共 ${count} 条` : `${from}-${to} / 共 ${count} 条`)}
+                sx={{
+                  borderTop: '1px solid #edf2f7',
+                  bgcolor: '#fff',
+                  '& .MuiTablePagination-toolbar': { minHeight: 48 },
+                }}
+              />
             </Box>
           </Box>
         </Box>
@@ -992,11 +1038,11 @@ const EmployeeDepartmentManagement: React.FC = () => {
       </Dialog>
 
       <Dialog open={leaveDialogOpen} onClose={closeLeaveHandoffDialog} maxWidth="sm" fullWidth>
-        <DialogCloseTitle onClose={closeLeaveHandoffDialog}>离职客户交接</DialogCloseTitle>
+        <DialogCloseTitle onClose={closeLeaveHandoffDialog}>离职业务交接</DialogCloseTitle>
         <DialogContent dividers>
           <Box sx={{ display: 'grid', gap: 2 }}>
             <Typography variant="body2" sx={{ color: '#475569' }}>
-              {leaveTargets.map((user) => user.name).join('、')} 名下还有 {leaveOwnedCustomerCount} 个客户。办理离职前必须处理客户归属，避免客户挂在离职人员名下无人跟进。
+              {leaveTargets.map((user) => user.name).join('、')} 名下还有 {leaveOwnedCustomerCount} 条客户/线索业务记录。办理离职前必须处理归属，避免业务挂在离职人员名下无人跟进。
             </Typography>
             <RadioGroup value={leaveAction} onChange={(event) => setLeaveAction(event.target.value as 'transfer' | 'public_pool')}>
               <FormControlLabel value="transfer" control={<Radio />} label="转交给其他在职员工" />
@@ -1005,11 +1051,11 @@ const EmployeeDepartmentManagement: React.FC = () => {
             {leaveAction === 'transfer' && (
               <TextField
                 select
-                label="客户接收人"
+                label="业务接收人"
                 value={leaveReceiverId}
                 onChange={(event) => setLeaveReceiverId(event.target.value)}
                 fullWidth
-                helperText="客户、关联线索负责人会同步更新为该员工"
+                helperText="客户、线索负责人会同步更新为该员工"
               >
                 {leaveReceiverOptions.map((user) => (
                   <MenuItem key={user.id} value={user.id}>
@@ -1025,7 +1071,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
               fullWidth
               multiline
               minRows={2}
-              helperText="会写入客户动态，方便后续追溯"
+              helperText="会写入客户动态和线索变更记录，方便后续追溯"
             />
           </Box>
         </DialogContent>
