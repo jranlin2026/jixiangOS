@@ -528,7 +528,7 @@ const Orders: React.FC = () => {
       case 'owner':
         return order.owner;
       case 'createdAt':
-        return formatDate(order.createdAt);
+        return formatDate(order.createdAt, 'yyyy-MM-dd HH:mm:ss');
       default:
         return null;
     }

@@ -5,44 +5,44 @@ const typography: TypographyOptions = {
   fontSize: 14,
   h1: {
     fontSize: '2rem',
-    fontWeight: 700,
-    lineHeight: 1.3,
-    letterSpacing: '-0.02em',
+    fontWeight: 900,
+    lineHeight: 1.2,
+    letterSpacing: 0,
   },
   h2: {
     fontSize: '1.5rem',
-    fontWeight: 600,
+    fontWeight: 900,
     lineHeight: 1.4,
-    letterSpacing: '-0.01em',
+    letterSpacing: 0,
   },
   h3: {
     fontSize: '1.25rem',
-    fontWeight: 600,
+    fontWeight: 800,
     lineHeight: 1.4,
   },
   h4: {
     fontSize: '1.125rem',
-    fontWeight: 600,
+    fontWeight: 800,
     lineHeight: 1.5,
   },
   h5: {
     fontSize: '1rem',
-    fontWeight: 600,
+    fontWeight: 800,
     lineHeight: 1.5,
   },
   h6: {
     fontSize: '0.875rem',
-    fontWeight: 600,
+    fontWeight: 800,
     lineHeight: 1.5,
   },
   subtitle1: {
     fontSize: '1rem',
-    fontWeight: 500,
+    fontWeight: 800,
     lineHeight: 1.5,
   },
   subtitle2: {
     fontSize: '0.875rem',
-    fontWeight: 500,
+    fontWeight: 700,
     lineHeight: 1.5,
   },
   body1: {
@@ -57,7 +57,7 @@ const typography: TypographyOptions = {
   },
   button: {
     textTransform: 'none',
-    fontWeight: 500,
+    fontWeight: 800,
   },
   caption: {
     fontSize: '0.75rem',
@@ -66,8 +66,8 @@ const typography: TypographyOptions = {
   },
   overline: {
     fontSize: '0.625rem',
-    fontWeight: 600,
-    letterSpacing: '0.08em',
+    fontWeight: 800,
+    letterSpacing: 0,
     textTransform: 'uppercase',
   },
 };

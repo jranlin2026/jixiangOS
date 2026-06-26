@@ -39,6 +39,7 @@ export interface CustomerActivityRecord {
   type: CustomerActivityType;
   title: string;
   content?: string;
+  attachments?: CustomerActivityAttachment[];
   operator: string;
   createdAt: Timestamp;
   changes?: Array<{
@@ -49,6 +50,18 @@ export interface CustomerActivityRecord {
   }>;
   relatedId?: ID;
   relatedType?: 'order' | 'refund' | 'lead' | 'opportunity';
+}
+
+export type CustomerActivityAttachmentCategory = 'image' | 'document' | 'audio' | 'other';
+
+export interface CustomerActivityAttachment {
+  id: ID;
+  name: string;
+  size: number;
+  type: string;
+  category: CustomerActivityAttachmentCategory;
+  dataUrl: string;
+  uploadedAt: Timestamp;
 }
 
 /** AI 客户画像 */

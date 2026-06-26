@@ -36,6 +36,7 @@ const expensiveFetchOffenders = scannedFiles
 
 assert.deepEqual(expensiveFetchOffenders, [], `Page components should not fetch 1000-row batches in the UI path: ${expensiveFetchOffenders.join(', ')}`);
 
+const businessCockpitSource = readFileSync(join(projectRoot, 'src/pages/Dashboard/BusinessCockpit.tsx'), 'utf8');
 const customersPageSource = readFileSync(join(projectRoot, 'src/pages/Customers/index.tsx'), 'utf8');
 const customerDetailSource = readFileSync(join(projectRoot, 'src/pages/Customers/CustomerDetail.tsx'), 'utf8');
 const leadsPageSource = readFileSync(join(projectRoot, 'src/pages/Leads/index.tsx'), 'utf8');
@@ -72,6 +73,22 @@ const createOrderSplitDialogSource = commissionSource.slice(
 const customerSaveProfileSource = customerDetailSource.slice(
   customerDetailSource.indexOf('const handleSaveProfile'),
   customerDetailSource.indexOf('const handleClaimCurrentCustomer'),
+);
+
+assert.match(
+  businessCockpitSource,
+  /经营信号条/,
+  'Business cockpit should use a distinctive operating signal strip instead of generic equal KPI cards.',
+);
+assert.match(
+  businessCockpitSource,
+  /当前阻塞/,
+  'Business cockpit should make the highest-priority blocker explicit.',
+);
+assert.match(
+  businessCockpitSource,
+  /线索入库[\s\S]*客户沉淀[\s\S]*订单申请[\s\S]*财务入库[\s\S]*分账确认/,
+  'Business cockpit should render the core CRM operating chain in order.',
 );
 
 assert.match(
@@ -158,6 +175,21 @@ assert.doesNotMatch(
   orderDetailSource,
   /leadContributorName\s*\|\|\s*order\.leadInputBy/,
   'Order detail must not label lead input person as lead contributor.',
+);
+assert.doesNotMatch(
+  orderDetailSource,
+  /order\.successName|order\.serviceName/,
+  'Order detail should not expose success/service manager fields that are absent from the order table view settings.',
+);
+assert.match(
+  orderDetailSource,
+  /formatDate\(order\.createdAt,\s*'yyyy-MM-dd HH:mm:ss'\)/,
+  'Order detail creation time should be precise to seconds.',
+);
+assert.match(
+  ordersPageSource,
+  /case 'createdAt':[\s\S]*formatDate\(order\.createdAt,\s*'yyyy-MM-dd HH:mm:ss'\)/,
+  'Order list creation time column should be precise to seconds.',
 );
 assert.doesNotMatch(
   orderReviewSource,

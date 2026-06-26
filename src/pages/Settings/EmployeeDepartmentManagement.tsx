@@ -212,6 +212,17 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const selectedUsers = users.filter((user) => selectedUserIds.includes(user.id));
   const selectedTitle = selectedDepartment?.name || organizationProfile.companyName;
   const selectedDepartmentUserCount = filteredUsers.length;
+  const activeUserCount = users.filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active').length;
+  const inactiveUserCount = users.length - activeUserCount;
+  const selectedDepartmentDirectUserCount = selectedDepartment
+    ? users.filter((user) => user.departmentId === selectedDepartment.id).length
+    : users.length;
+  const selectedDepartmentChildCount = selectedDepartment
+    ? activeDepartments.filter((department) => department.parentId === selectedDepartment.id).length
+    : activeDepartments.length;
+  const selectedDepartmentParentName = selectedDepartment
+    ? activeDepartments.find((department) => department.id === selectedDepartment.parentId)?.name || organizationProfile.companyName
+    : '-';
   const leaveTargetIds = leaveTargets.map((user) => user.id);
   const leaveReceiverOptions = users.filter((user) => (
     user.isActive && !leaveTargetIds.includes(user.id) && user.account !== 'admin'
@@ -563,6 +574,10 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const renderDepartmentRows = (parentId = '', depth = 0): React.ReactNode => (
     (treeByParent.get(parentId) || []).map((department) => {
       const directCount = users.filter((user) => user.departmentId === department.id).length;
+      const scopeCount = users.filter((user) => (
+        user.departmentId === department.id
+        || getDepartmentDescendantIds(activeDepartments, department.id).includes(user.departmentId || '')
+      )).length;
       const selected = selectedNodeId === department.id;
       return (
         <React.Fragment key={department.id}>
@@ -572,22 +587,24 @@ const EmployeeDepartmentManagement: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               gap: 1,
-              minHeight: 38,
-              pl: 1 + depth * 2,
+              minHeight: 36,
+              pl: 1 + depth * 2.25,
               pr: 0.5,
               cursor: 'pointer',
-              bgcolor: selected ? '#eef2ff' : 'transparent',
-              color: selected ? '#1d4ed8' : '#111827',
-              borderRadius: 0.75,
-              '&:hover': { bgcolor: selected ? '#eef2ff' : '#f8fafc' },
+              bgcolor: selected ? '#eaf3ff' : 'transparent',
+              color: selected ? '#0f5fca' : '#243044',
+              borderRadius: 1,
+              border: '1px solid',
+              borderColor: selected ? '#b7d7ff' : 'transparent',
+              '&:hover': { bgcolor: selected ? '#eaf3ff' : '#f7faff', borderColor: selected ? '#b7d7ff' : '#e6eef8' },
             }}
           >
-            <FolderIcon sx={{ fontSize: 20, color: '#7394c4' }} />
+            <FolderIcon sx={{ fontSize: 18, color: selected ? '#1976d2' : '#8aa1bd' }} />
             <Typography variant="body2" sx={{ flex: 1, fontWeight: selected ? 700 : 500 }}>
               {department.name}
             </Typography>
             <Typography variant="caption" sx={{ color: '#94a3b8' }}>
-              {directCount}
+              {scopeCount === directCount ? directCount : `${directCount}/${scopeCount}`}
             </Typography>
             <IconButton size="small" onClick={(event) => openNodeMenu(event, department)}>
               <MoreVertIcon fontSize="small" />
@@ -606,33 +623,39 @@ const EmployeeDepartmentManagement: React.FC = () => {
   });
 
   return (
-    <Box sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', minHeight: 620, bgcolor: '#fff' }}>
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '320px minmax(0, 1fr)' }, minHeight: 620 }}>
-        <Box sx={{ borderRight: { md: '1px solid #e5e7eb' }, bgcolor: '#fbfcfe', p: 2 }}>
-          <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-            <TextField
-              size="small"
-              placeholder="搜索员工、部门"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              fullWidth
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon fontSize="small" />
-                  </InputAdornment>
-                ),
-              }}
-            />
+    <Box sx={{ border: '1px solid #dfe7f1', borderRadius: 1.5, overflow: 'hidden', minHeight: 700, bgcolor: '#fff' }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '300px minmax(0, 1fr)' }, minHeight: 700 }}>
+        <Box sx={{ borderRight: { lg: '1px solid #dfe7f1' }, bgcolor: '#f7faff', p: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#132238' }}>
+              组织架构
+            </Typography>
             <Tooltip title="在公司下添加部门">
               <IconButton
+                size="small"
                 onClick={() => openCreateDepartment(COMPANY_ROOT)}
-                sx={{ width: 40, height: 40, border: '1px solid #dbe4f0', borderRadius: 1 }}
+                sx={{ width: 32, height: 32, border: '1px solid #c9d8ea', borderRadius: 1, bgcolor: '#fff' }}
               >
                 <AddIcon fontSize="small" />
               </IconButton>
             </Tooltip>
           </Box>
+
+          <TextField
+            size="small"
+            placeholder="搜索组织或员工"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            fullWidth
+            sx={{ mb: 2 }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+            }}
+          />
 
           <Box
             onClick={() => selectNode(COMPANY_ROOT)}
@@ -640,22 +663,25 @@ const EmployeeDepartmentManagement: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               gap: 1,
-              minHeight: 40,
+              minHeight: 42,
               px: 1,
-              mb: 0.5,
-              borderRadius: 0.75,
+              mb: 0.75,
+              borderRadius: 1,
               cursor: 'pointer',
-              bgcolor: selectedNodeId === COMPANY_ROOT ? '#eef2ff' : 'transparent',
-              color: selectedNodeId === COMPANY_ROOT ? '#1d4ed8' : '#111827',
-              '&:hover': { bgcolor: selectedNodeId === COMPANY_ROOT ? '#eef2ff' : '#f8fafc' },
+              bgcolor: selectedNodeId === COMPANY_ROOT ? '#e8f2ff' : '#fff',
+              color: selectedNodeId === COMPANY_ROOT ? '#0f5fca' : '#182235',
+              border: '1px solid',
+              borderColor: selectedNodeId === COMPANY_ROOT ? '#b7d7ff' : '#e4edf7',
+              boxShadow: selectedNodeId === COMPANY_ROOT ? '0 8px 18px rgba(25, 118, 210, 0.08)' : 'none',
+              '&:hover': { borderColor: '#b7d7ff' },
             }}
           >
-            <BusinessIcon sx={{ fontSize: 20, color: '#7394c4' }} />
-            <Typography variant="body2" sx={{ flex: 1, fontWeight: selectedNodeId === COMPANY_ROOT ? 700 : 600 }}>
+            <BusinessIcon sx={{ fontSize: 20, color: selectedNodeId === COMPANY_ROOT ? '#1976d2' : '#7890ad' }} />
+            <Typography variant="body2" sx={{ flex: 1, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {organizationProfile.companyName}
             </Typography>
-            <Typography variant="caption" sx={{ color: '#94a3b8' }}>{users.length}</Typography>
-            <Tooltip title="编辑公司名称">
+            <Chip label={users.length} size="small" sx={{ height: 20, bgcolor: '#eef4fb', color: '#52677f', fontSize: 11 }} />
+            <Tooltip title={companyExpanded ? '收起组织树' : '展开组织树'}>
               <IconButton
                 size="small"
                 onClick={(event) => {
@@ -667,124 +693,195 @@ const EmployeeDepartmentManagement: React.FC = () => {
               </IconButton>
             </Tooltip>
           </Box>
-          {companyExpanded && renderDepartmentRows()}
+          <Box sx={{ display: 'grid', gap: 0.5 }}>
+            {companyExpanded && renderDepartmentRows()}
+          </Box>
         </Box>
 
-        <Box sx={{ minWidth: 0 }}>
-          <Box sx={{ px: 3, py: 2, borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <ApartmentIcon sx={{ color: '#64748b' }} />
-              <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                {selectedTitle}({selectedDepartmentUserCount}人)
-              </Typography>
-              {!selectedDepartment && (
-                <Tooltip title="编辑公司名称">
-                  <IconButton
-                    size="small"
-                    onClick={() => {
-                      setCompanyNameDraft(organizationProfile.companyName);
-                      setCompanyDialogOpen(true);
-                    }}
-                    sx={{ color: '#64748b' }}
-                  >
-                    <EditIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-              )}
-            </Box>
-            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              <Button variant="text" onClick={() => openCreateDepartment(selectedDepartment?.id || COMPANY_ROOT)}>
-                {selectedDepartment ? '添加子部门' : '添加部门'}
-              </Button>
-              {selectedDepartment && (
-                <>
-                  <Button variant="text" onClick={() => openEditDepartment()}>编辑部门</Button>
-                  <Button variant="text" color="error" onClick={() => handleDeleteDepartment()}>删除部门</Button>
-                </>
-              )}
-            </Box>
-          </Box>
-
-          <Box sx={{ p: 3 }}>
+        <Box sx={{ minWidth: 0, bgcolor: '#fbfcfe' }}>
+          <Box sx={{ p: { xs: 2, md: 3 }, display: 'grid', gap: 2 }}>
             {error && (
-              <Typography variant="body2" sx={{ color: '#d32f2f', mb: 1 }}>
+              <Typography variant="body2" sx={{ color: '#d32f2f' }}>
                 {error}
               </Typography>
             )}
-            <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
-              <Button variant="outlined" onClick={openCreateUser} startIcon={<AddIcon />}>创建员工</Button>
-              <Button variant="outlined" onClick={handleOpenMove} disabled={!selectedUserIds.length}>移动</Button>
-              <Button variant="outlined" onClick={() => handleBatchActive(false)} disabled={!selectedUserIds.length}>禁用</Button>
-              <Button variant="outlined" onClick={() => handleBatchActive(true)} disabled={!selectedUserIds.length}>解禁</Button>
-              <Button variant="outlined" color="warning" startIcon={<ExitToAppIcon />} onClick={handleBatchLeave} disabled={!selectedUserIds.length}>办理离职</Button>
+
+            <Box sx={{ bgcolor: '#fff', border: '1px solid #dfe7f1', borderRadius: 1.25, overflow: 'hidden' }}>
+              <Box sx={{ px: 2.5, py: 2, borderBottom: '1px solid #edf2f7', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <ApartmentIcon sx={{ color: '#59708d' }} />
+                  <Box>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#132238' }}>
+                      组织信息
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#7890ad' }}>
+                      {selectedDepartment ? '当前部门资料' : '公司组织总览'}
+                    </Typography>
+                  </Box>
+                </Box>
+                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <Button variant="outlined" size="small" onClick={() => openCreateDepartment(selectedDepartment?.id || COMPANY_ROOT)} startIcon={<AddIcon />}>
+                    {selectedDepartment ? '添加子部门' : '添加部门'}
+                  </Button>
+                  {selectedDepartment ? (
+                    <>
+                      <Button variant="text" size="small" onClick={() => openEditDepartment()}>编辑部门</Button>
+                      <Button variant="text" size="small" color="error" onClick={() => handleDeleteDepartment()}>删除部门</Button>
+                    </>
+                  ) : (
+                    <Button
+                      variant="text"
+                      size="small"
+                      onClick={() => {
+                        setCompanyNameDraft(organizationProfile.companyName);
+                        setCompanyDialogOpen(true);
+                      }}
+                    >
+                      编辑公司
+                    </Button>
+                  )}
+                </Box>
+              </Box>
+
+              <Box sx={{ p: 2.5, display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(260px, 1fr) minmax(460px, 1.35fr)' }, gap: 2.5, alignItems: 'stretch' }}>
+                <Box sx={{ display: 'grid', gap: 0.75 }}>
+                  <Typography variant="caption" sx={{ color: '#7890ad' }}>组织名称</Typography>
+                  <Typography variant="h6" sx={{ fontWeight: 800, color: '#132238', lineHeight: 1.25 }}>
+                    {selectedTitle}
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#52677f' }}>
+                    {selectedDepartment
+                      ? `${selectedDepartment.name} 当前范围 ${selectedDepartmentUserCount} 人，直属 ${selectedDepartmentDirectUserCount} 人`
+                      : `${organizationProfile.companyName} 当前共有 ${activeDepartments.length} 个部门，${users.length} 名员工`}
+                  </Typography>
+                </Box>
+
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', xl: 'repeat(4, minmax(0, 1fr))' }, gap: 1.25 }}>
+                  <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: '#f7faff', border: '1px solid #e4edf7', minWidth: 0 }}>
+                    <Typography variant="caption" sx={{ color: '#7890ad' }}>上级组织</Typography>
+                    <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 800, color: '#132238', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {selectedDepartmentParentName}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: '#f7faff', border: '1px solid #e4edf7' }}>
+                    <Typography variant="caption" sx={{ color: '#7890ad' }}>子部门</Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 800, color: '#132238' }}>{selectedDepartmentChildCount}</Typography>
+                  </Box>
+                  <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: '#f7faff', border: '1px solid #e4edf7' }}>
+                    <Typography variant="caption" sx={{ color: '#7890ad' }}>在职</Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 800, color: '#16815c' }}>{selectedDepartment ? filteredUsers.filter((user) => user.isActive).length : activeUserCount}</Typography>
+                  </Box>
+                  <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: '#f7faff', border: '1px solid #e4edf7' }}>
+                    <Typography variant="caption" sx={{ color: '#7890ad' }}>停用/离职</Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 800, color: '#b45309' }}>
+                      {selectedDepartment ? filteredUsers.filter((user) => !user.isActive || (user.employmentStatus || 'active') !== 'active').length : inactiveUserCount}
+                    </Typography>
+                  </Box>
+                </Box>
+              </Box>
             </Box>
 
-            <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #eef2f7' }}>
-              <Table sx={{ tableLayout: 'fixed', minWidth: 900 }}>
-                <TableHead>
-                  <TableRow sx={{ bgcolor: '#f1f5f9' }}>
-                    <TableCell padding="checkbox">
-                      <Checkbox
-                        checked={filteredUsers.length > 0 && selectedUserIds.length === filteredUsers.length}
-                        indeterminate={selectedUserIds.length > 0 && selectedUserIds.length < filteredUsers.length}
-                        onChange={(event) => setAllFilteredSelected(event.target.checked)}
-                      />
-                    </TableCell>
-                    <TableCell>姓名</TableCell>
-                    <TableCell>职位</TableCell>
-                    <TableCell>角色</TableCell>
-                    <TableCell>部门</TableCell>
-                    <TableCell>账号</TableCell>
-                    <TableCell>手机号</TableCell>
-                    <TableCell>状态</TableCell>
-                    <TableCell align="center">操作</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {filteredUsers.map((user) => (
-                    <TableRow key={user.id} hover selected={selectedUserIds.includes(user.id)}>
+            <Box sx={{ bgcolor: '#fff', border: '1px solid #dfe7f1', borderRadius: 1.25, overflow: 'hidden' }}>
+              <Box sx={{ px: 2.5, py: 2, borderBottom: '1px solid #edf2f7', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+                <Box>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#132238' }}>
+                    成员管理
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: '#7890ad' }}>
+                    成员列表（{selectedDepartmentUserCount}人）
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <Button variant="contained" size="small" onClick={openCreateUser} startIcon={<AddIcon />}>添加成员</Button>
+                  <Button variant="outlined" size="small" onClick={handleOpenMove} disabled={!selectedUserIds.length}>移动</Button>
+                  <Button variant="outlined" size="small" onClick={() => handleBatchActive(false)} disabled={!selectedUserIds.length}>禁用</Button>
+                  <Button variant="outlined" size="small" onClick={() => handleBatchActive(true)} disabled={!selectedUserIds.length}>解禁</Button>
+                  <Button variant="outlined" size="small" color="warning" startIcon={<ExitToAppIcon />} onClick={handleBatchLeave} disabled={!selectedUserIds.length}>办理离职</Button>
+                </Box>
+              </Box>
+
+              <TableContainer component={Paper} elevation={0} sx={{ border: 0 }}>
+                <Table sx={{ tableLayout: 'fixed', minWidth: 940 }}>
+                  <TableHead>
+                    <TableRow sx={{ bgcolor: '#f5f8fc' }}>
                       <TableCell padding="checkbox">
-                        <Checkbox checked={selectedUserIds.includes(user.id)} onChange={() => toggleUserSelected(user.id)} />
+                        <Checkbox
+                          checked={filteredUsers.length > 0 && selectedUserIds.length === filteredUsers.length}
+                          indeterminate={selectedUserIds.length > 0 && selectedUserIds.length < filteredUsers.length}
+                          onChange={(event) => setAllFilteredSelected(event.target.checked)}
+                        />
                       </TableCell>
-                      <TableCell sx={{ fontWeight: 500 }}>{user.name}</TableCell>
-                      <TableCell>{getPositionName(user)}</TableCell>
-                      <TableCell>{normalizeUserRoleName(user.role)}</TableCell>
-                      <TableCell>{getDepartmentName(user.departmentId)}</TableCell>
-                      <TableCell>{user.account || '-'}</TableCell>
-                      <TableCell>{user.phone || '-'}</TableCell>
-                      <TableCell>
-                        <Chip label={user.isActive ? '启用' : '禁用'} size="small" color={user.isActive ? 'success' : 'default'} />
-                      </TableCell>
-                      <TableCell align="center">
-                        <Switch checked={user.isActive} size="small" onChange={() => handleToggleUserActive(user)} />
-                        <Tooltip title="编辑资料">
-                          <IconButton size="small" onClick={() => openEditUser(user)}>
-                            <EditIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="重置密码">
-                          <IconButton size="small" color="info" onClick={() => openResetPassword(user)}>
-                            <KeyIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="办理离职">
-                          <IconButton size="small" color="warning" onClick={() => handleLeaveUser(user)}>
-                            <ExitToAppIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </TableCell>
+                      <TableCell>姓名</TableCell>
+                      <TableCell>账号</TableCell>
+                      <TableCell>角色</TableCell>
+                      <TableCell>职务</TableCell>
+                      <TableCell>部门</TableCell>
+                      <TableCell>状态</TableCell>
+                      <TableCell align="center">操作</TableCell>
                     </TableRow>
-                  ))}
-                  {filteredUsers.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={9} align="center" sx={{ py: 6, color: '#94a3b8' }}>
-                        暂无员工数据
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                  </TableHead>
+                  <TableBody>
+                    {filteredUsers.map((user) => (
+                      <TableRow key={user.id} hover selected={selectedUserIds.includes(user.id)}>
+                        <TableCell padding="checkbox">
+                          <Checkbox checked={selectedUserIds.includes(user.id)} onChange={() => toggleUserSelected(user.id)} />
+                        </TableCell>
+                        <TableCell>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Box sx={{ width: 24, height: 24, borderRadius: '50%', bgcolor: '#e8f2ff', color: '#1976d2', display: 'grid', placeItems: 'center', fontSize: 12, fontWeight: 800 }}>
+                              {user.name.slice(0, 1)}
+                            </Box>
+                            <Typography variant="body2" sx={{ fontWeight: 700 }}>{user.name}</Typography>
+                          </Box>
+                        </TableCell>
+                        <TableCell>{user.account || '-'}</TableCell>
+                        <TableCell>
+                          <Chip label={normalizeUserRoleName(user.role)} size="small" sx={{ bgcolor: '#eef4fb', color: '#31506f', fontWeight: 700 }} />
+                        </TableCell>
+                        <TableCell>{getPositionName(user)}</TableCell>
+                        <TableCell>{getDepartmentName(user.departmentId)}</TableCell>
+                        <TableCell>
+                          <Chip
+                            label={user.isActive ? '在职' : '禁用'}
+                            size="small"
+                            sx={{
+                              bgcolor: user.isActive ? '#e7f7ef' : '#fff4e5',
+                              color: user.isActive ? '#16815c' : '#b45309',
+                              fontWeight: 700,
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <Switch checked={user.isActive} size="small" onChange={() => handleToggleUserActive(user)} />
+                          <Tooltip title="编辑资料">
+                            <IconButton size="small" onClick={() => openEditUser(user)}>
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="重置密码">
+                            <IconButton size="small" color="info" onClick={() => openResetPassword(user)}>
+                              <KeyIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="办理离职">
+                            <IconButton size="small" color="warning" onClick={() => handleLeaveUser(user)}>
+                              <ExitToAppIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {filteredUsers.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={8} align="center" sx={{ py: 6, color: '#94a3b8' }}>
+                          暂无员工数据
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Box>
           </Box>
         </Box>
       </Box>

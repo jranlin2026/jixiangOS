@@ -166,6 +166,22 @@ assert.equal(updatedLead.city, '广州');
 assert.equal(updatedLead.remark, '客户资料已完善');
 assert.deepEqual(updatedLead.changeHistory?.[0]?.changes?.map((item) => item.field), ['phone', 'industry', 'city', 'assignedTo', 'remark']);
 
+const followUpWithAttachmentRes = await customerApi.addCustomerFollowUp('cust-test', {
+  content: 'Shared proposal and voice memo',
+  attachments: [{
+    id: 'att-test-image',
+    name: 'proposal.png',
+    size: 2048,
+    type: 'image/png',
+    category: 'image',
+    dataUrl: 'data:image/png;base64,AA==',
+    uploadedAt: now,
+  }],
+} as any);
+assert.equal(followUpWithAttachmentRes.code, 0);
+assert.equal(followUpWithAttachmentRes.data?.activityRecords?.[0]?.attachments?.[0]?.name, 'proposal.png');
+assert.equal(followUpWithAttachmentRes.data?.activityRecords?.[0]?.attachments?.[0]?.category, 'image');
+
 storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
   id: 'user-sales',
   name: 'Sales User',

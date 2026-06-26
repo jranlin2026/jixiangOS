@@ -16,8 +16,8 @@ body {
     'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f8f9fa;
-  color: #1a1a2e;
+  background-color: #f6f8fb;
+  color: #101828;
 }
 
 #root {
@@ -39,5 +39,63 @@ body {
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(0, 0, 0, 0.25);
+  background-color: rgba(16, 24, 40, 0.28);
+}
+
+:root {
+  --jx-page: #f6f8fb;
+  --jx-surface: #ffffff;
+  --jx-ink: #101828;
+  --jx-muted: #667085;
+  --jx-line: #dde4ec;
+  --jx-soft-line: #eef2f6;
+  --jx-blue: #1e6bff;
+  --jx-cyan: #087c8c;
+  --jx-green: #16845b;
+  --jx-amber: #b46a08;
+  --jx-red: #c4322b;
+}
+
+.MuiPaper-root,
+.MuiCard-root {
+  background-image: none !important;
+}
+
+.MuiTableContainer-root {
+  border-color: var(--jx-line) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.MuiTableHead-root .MuiTableCell-root {
+  background: #f3f7fb !important;
+  color: #526173 !important;
+  font-weight: 900 !important;
+  border-right: 1px solid #e4ebf3;
+}
+
+.MuiTableBody-root .MuiTableRow-root:hover {
+  background: #f7faff !important;
+}
+
+.MuiTableBody-root .MuiTableCell-root {
+  color: var(--jx-ink);
+}
+
+.MuiTablePagination-root {
+  border-top: 1px solid var(--jx-soft-line);
+  background: #fbfcfe;
+}
+
+.MuiTabs-root {
+  border-color: var(--jx-line) !important;
+}
+
+.MuiTab-root {
+  letter-spacing: 0 !important;
+}
+
+.MuiInputBase-input::placeholder {
+  color: #8a97a8;
+  opacity: 1;
 }

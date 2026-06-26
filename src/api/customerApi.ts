@@ -387,20 +387,27 @@ async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiR
 
 async function addCustomerFollowUp(
   id: string,
-  data: { content: string; operator?: string; type?: '联系记录' | '客户行为' | '销售活动' | '跟进记录' },
+  data: {
+    content?: string;
+    operator?: string;
+    type?: '联系记录' | '客户行为' | '销售活动' | '跟进记录';
+    attachments?: CustomerActivityRecord['attachments'];
+  },
 ): Promise<ApiResponse<Customer | null>> {
   ensureInit();
   await delay(150);
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
   const idx = customers.findIndex((c) => c.id === id);
   if (idx === -1) return createSuccessResponse(null);
-  const content = data.content.trim();
-  if (!content) return createSuccessResponse(customers[idx]);
+  const content = (data.content || '').trim();
+  const attachments = Array.isArray(data.attachments) ? data.attachments : [];
+  if (!content && !attachments.length) return createSuccessResponse(customers[idx]);
   const now = new Date().toISOString();
   customers[idx] = prependActivity(customers[idx], createActivity({
     type: 'follow',
     title: `发表了${data.type || '跟进记录'}`,
-    content,
+    content: content || undefined,
+    attachments,
     operator: getCurrentOperatorName(data.operator || customers[idx].owner),
     createdAt: now,
   }));

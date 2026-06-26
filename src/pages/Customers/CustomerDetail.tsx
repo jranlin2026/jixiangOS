@@ -10,12 +10,15 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import HistoryIcon from '@mui/icons-material/History';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
+import ImageIcon from '@mui/icons-material/Image';
+import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
+import GraphicEqIcon from '@mui/icons-material/GraphicEq';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import useCustomerStore from '../../store/useCustomerStore';
-import type { Customer, CustomerActivityRecord } from '../../types/customer';
+import type { Customer, CustomerActivityAttachment, CustomerActivityAttachmentCategory, CustomerActivityRecord } from '../../types/customer';
 import type { AIBusinessCard } from '../../types/aiCard';
 import type { Order } from '../../types/order';
 import type { CustomerLevelConfig, LeadSourceConfig, User } from '../../types/settings';
@@ -66,6 +69,41 @@ type SourceOption = {
 const emptyText = (value?: string | number) => (value || value === 0 ? value : '未填写');
 const formatCustomerSource = (customer: Customer) => [customer.leadSource, customer.sourceName].filter(Boolean).join('-') || '未填写';
 const contractKey = (customerId: string) => `aaos_customer_contracts_${customerId}`;
+const MAX_ACTIVITY_ATTACHMENTS = 6;
+const MAX_ACTIVITY_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+
+const activityAttachmentAccept: Record<CustomerActivityAttachmentCategory, string> = {
+  image: 'image/*',
+  document: '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/csv',
+  audio: 'audio/*',
+  other: '*/*',
+};
+
+const formatFileSize = (size: number) => {
+  if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  if (size >= 1024) return `${Math.round(size / 1024)} KB`;
+  return `${size} B`;
+};
+
+const readActivityAttachment = (
+  file: File,
+  category: CustomerActivityAttachmentCategory,
+): Promise<CustomerActivityAttachment> => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => {
+    resolve({
+      id: typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+      name: file.name,
+      size: file.size,
+      type: file.type || 'application/octet-stream',
+      category,
+      dataUrl: String(reader.result || ''),
+      uploadedAt: new Date().toISOString(),
+    });
+  };
+  reader.onerror = () => reject(reader.error || new Error('附件读取失败'));
+  reader.readAsDataURL(file);
+});
 
 const CustomerDetail: React.FC<CustomerDetailProps> = ({
   customer,
@@ -81,6 +119,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const [aiCard, setAiCard] = useState<AIBusinessCard | null>(null);
   const [cardLoading, setCardLoading] = useState(false);
   const [followNote, setFollowNote] = useState('');
+  const [followAttachments, setFollowAttachments] = useState<CustomerActivityAttachment[]>([]);
   const [activeTab, setActiveTab] = useState(0);
   const [editing, setEditing] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
@@ -102,6 +141,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   useEffect(() => {
     setCurrentCustomer(customer);
     setDraft(customer);
+    setFollowNote('');
+    setFollowAttachments([]);
     setEditing(false);
     setActiveTab(0);
     aiCardApi.getCard('customer', customer.id).then((res) => setAiCard(res.data));
@@ -224,6 +265,48 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     return '#64748b';
   };
 
+  const handleSelectFollowAttachments = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+    category: CustomerActivityAttachmentCategory,
+  ) => {
+    const selectedFiles = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!selectedFiles.length) return;
+    const remaining = MAX_ACTIVITY_ATTACHMENTS - followAttachments.length;
+    if (remaining <= 0) {
+      await alert(`单条动态最多添加 ${MAX_ACTIVITY_ATTACHMENTS} 个附件`);
+      return;
+    }
+    const acceptedFiles = selectedFiles.slice(0, remaining);
+    const oversizeFile = acceptedFiles.find((file) => file.size > MAX_ACTIVITY_ATTACHMENT_SIZE);
+    if (oversizeFile) {
+      await alert(`${oversizeFile.name} 超过 10MB，请压缩后再上传`);
+      return;
+    }
+    try {
+      const attachments = await Promise.all(acceptedFiles.map((file) => readActivityAttachment(file, category)));
+      setFollowAttachments((prev) => [...prev, ...attachments]);
+      if (selectedFiles.length > remaining) {
+        await alert(`已添加前 ${remaining} 个附件，单条动态最多 ${MAX_ACTIVITY_ATTACHMENTS} 个附件`);
+      }
+    } catch {
+      await alert('附件读取失败，请重新选择');
+    }
+  };
+
+  const handleRemoveFollowAttachment = (id: string) => {
+    setFollowAttachments((prev) => prev.filter((attachment) => attachment.id !== id));
+  };
+
+  const openActivityAttachment = (attachment: CustomerActivityAttachment) => {
+    const anchor = document.createElement('a');
+    anchor.href = attachment.dataUrl;
+    anchor.download = attachment.name;
+    anchor.target = '_blank';
+    anchor.rel = 'noreferrer';
+    anchor.click();
+  };
+
   const saveContracts = (next: ContractFile[]) => {
     setContracts(next);
     localStorage.setItem(contractKey(currentCustomer.id), JSON.stringify(next));
@@ -253,10 +336,11 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const handleAddFollowUp = async () => {
     if (readOnly) return;
     const content = followNote.trim();
-    if (!content) return;
-    const updated = await addFollowUp(currentCustomer.id, content);
+    if (!content && !followAttachments.length) return;
+    const updated = await addFollowUp(currentCustomer.id, content, undefined, followAttachments);
     if (updated) setCurrentCustomer(updated);
     setFollowNote('');
+    setFollowAttachments([]);
   };
 
   const handleSaveProfile = async () => {
@@ -527,21 +611,75 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     </Box>
   );
 
+  const renderAttachmentButton = (
+    label: string,
+    category: CustomerActivityAttachmentCategory,
+    icon: React.ReactNode,
+  ) => (
+    <Button
+      component="label"
+      size="small"
+      variant="outlined"
+      startIcon={icon}
+      disabled={followAttachments.length >= MAX_ACTIVITY_ATTACHMENTS}
+      sx={{ borderColor: '#dbeafe', color: '#2563eb', bgcolor: '#eff6ff' }}
+    >
+      {label}
+      <input
+        hidden
+        multiple
+        type="file"
+        accept={activityAttachmentAccept[category]}
+        onChange={(event) => handleSelectFollowAttachments(event, category)}
+      />
+    </Button>
+  );
+
   const renderActivityTab = () => (
     <Box>
       {!readOnly && (
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr auto' }, gap: 1, mb: 2 }}>
-          <TextField
-            value={followNote}
-            onChange={(event) => setFollowNote(event.target.value)}
-            placeholder="添加跟进记录，1000字以内"
-            multiline
-            minRows={2}
-            fullWidth
-          />
-          <Button variant="contained" onClick={handleAddFollowUp} disabled={!followNote.trim()} sx={{ alignSelf: 'stretch' }}>
-            发表
-          </Button>
+        <Box sx={{ border: '1px solid #dbeafe', borderRadius: 1, bgcolor: '#fbfdff', mb: 2, overflow: 'hidden' }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr auto' }, gap: 1, p: 1 }}>
+            <TextField
+              value={followNote}
+              onChange={(event) => setFollowNote(event.target.value)}
+              placeholder="添加跟进记录，1000字以内"
+              multiline
+              minRows={2}
+              fullWidth
+            />
+            <Button
+              variant="contained"
+              onClick={handleAddFollowUp}
+              disabled={!followNote.trim() && !followAttachments.length}
+              sx={{ alignSelf: 'stretch', minWidth: 76 }}
+            >
+              发表
+            </Button>
+          </Box>
+          <Box sx={{ px: 1, pb: 1, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+            {renderAttachmentButton('图片', 'image', <ImageIcon fontSize="small" />)}
+            {renderAttachmentButton('文档', 'document', <InsertDriveFileIcon fontSize="small" />)}
+            {renderAttachmentButton('录音', 'audio', <GraphicEqIcon fontSize="small" />)}
+            <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+              最多 {MAX_ACTIVITY_ATTACHMENTS} 个，单个 10MB
+            </Typography>
+          </Box>
+          {followAttachments.length > 0 && (
+            <Box sx={{ px: 1, pb: 1, display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
+              {followAttachments.map((attachment) => (
+                <Chip
+                  key={attachment.id}
+                  size="small"
+                  icon={attachment.category === 'image' ? <ImageIcon /> : attachment.category === 'audio' ? <GraphicEqIcon /> : <InsertDriveFileIcon />}
+                  label={`${attachment.name} · ${formatFileSize(attachment.size)}`}
+                  onDelete={() => handleRemoveFollowAttachment(attachment.id)}
+                  deleteIcon={<CloseIcon />}
+                  sx={{ maxWidth: 260 }}
+                />
+              ))}
+            </Box>
+          )}
         </Box>
       )}
       {activityRecords.length > 0 ? (
@@ -560,6 +698,26 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               {record.content && (
                 <Box sx={{ bgcolor: '#f8fafc', borderRadius: 1, px: 1.5, py: 1, mb: 0.75 }}>
                   <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{record.content}</Typography>
+                </Box>
+              )}
+              {record.attachments && record.attachments.length > 0 && (
+                <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mb: 0.75 }}>
+                  {record.attachments.map((attachment) => (
+                    <Chip
+                      key={attachment.id}
+                      size="small"
+                      icon={attachment.category === 'image' ? <ImageIcon /> : attachment.category === 'audio' ? <GraphicEqIcon /> : <InsertDriveFileIcon />}
+                      label={`${attachment.name} · ${formatFileSize(attachment.size)}`}
+                      onClick={() => openActivityAttachment(attachment)}
+                      sx={{
+                        maxWidth: 280,
+                        bgcolor: '#eef6ff',
+                        border: '1px solid #dbeafe',
+                        cursor: 'pointer',
+                        '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' },
+                      }}
+                    />
+                  ))}
                 </Box>
               )}
               {record.changes && record.changes.length > 0 && (

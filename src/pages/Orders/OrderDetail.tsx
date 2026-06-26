@@ -92,14 +92,6 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
               <Typography variant="body1">{order.salesName || order.owner}</Typography>
             </Box>
             <Box>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>成功经理</Typography>
-              <Typography variant="body1">{order.successName || '-'}</Typography>
-            </Box>
-            <Box>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>服务经理</Typography>
-              <Typography variant="body1">{order.serviceName || '-'}</Typography>
-            </Box>
-            <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>资源归属</Typography>
               <Typography variant="body1">{normalizeResourceOwnership(order.resourceOwnership || order.sourceType)}</Typography>
             </Box>
@@ -117,7 +109,7 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
             </Box>
             <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>创建时间</Typography>
-              <Typography variant="body1">{formatDate(order.createdAt, 'yyyy-MM-dd HH:mm')}</Typography>
+              <Typography variant="body1">{formatDate(order.createdAt, 'yyyy-MM-dd HH:mm:ss')}</Typography>
             </Box>
           </Box>
 

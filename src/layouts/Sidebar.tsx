@@ -37,6 +37,16 @@ interface SidebarProps {
   width: number;
 }
 
+const shell = {
+  ink: '#101828',
+  muted: '#667085',
+  line: '#DDE4EC',
+  softLine: '#EEF2F6',
+  blue: '#1E6BFF',
+  surface: '#FFFFFF',
+  page: '#F6F8FB',
+};
+
 interface NavItem {
   label: string;
   icon: React.ReactElement;
@@ -155,22 +165,22 @@ const Sidebar: React.FC<SidebarProps> = ({ width }) => {
         '& .MuiDrawer-paper': {
           width,
           boxSizing: 'border-box',
-          bgcolor: '#ffffff',
-          borderRight: '1px solid #e5e7eb',
+          bgcolor: shell.surface,
+          borderRight: `1px solid ${shell.line}`,
           boxShadow: 'none',
         },
       }}
     >
       <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <Box sx={{ p: 2.5, display: 'flex', alignItems: 'center', gap: 1.5, height: 72 }}>
+        <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1.25, height: 76, borderBottom: `1px solid ${shell.softLine}` }}>
           <Box
             component="img"
             src="/jixiang-os-logo.png"
             alt="极享OS"
             sx={{
-              width: 38,
-              height: 38,
-              borderRadius: 2,
+              width: 36,
+              height: 36,
+              borderRadius: 1.5,
               objectFit: 'contain',
               flexShrink: 0,
             }}
@@ -185,9 +195,9 @@ const Sidebar: React.FC<SidebarProps> = ({ width }) => {
           </Box>
         </Box>
 
-        <Divider sx={{ borderColor: '#f0f0f0' }} />
+        <Divider sx={{ borderColor: shell.softLine }} />
 
-        <List sx={{ px: 1.5, py: 1, flex: 1, overflowY: 'auto' }}>
+        <List sx={{ px: 1.25, py: 1.25, flex: 1, overflowY: 'auto' }}>
           {visibleNavItems.map((item) => {
             const hasChildren = Boolean(item.children?.length);
             const hasActiveChild = Boolean(item.children?.some(isChildActive));
@@ -210,27 +220,40 @@ const Sidebar: React.FC<SidebarProps> = ({ width }) => {
                   <ListItemButton
                     onClick={handleNavClick}
                     sx={{
-                      borderRadius: 2,
-                      py: 1,
-                      px: 1.5,
-                      bgcolor: isActive ? '#E3F2FD' : 'transparent',
-                      color: isActive ? '#2196F3' : '#6b7280',
-                      '&:hover': { bgcolor: isActive ? '#E3F2FD' : '#f5f5f5' },
+                      position: 'relative',
+                      borderRadius: 1.25,
+                      py: 0.95,
+                      px: 1.25,
+                      minHeight: 44,
+                      bgcolor: isActive ? '#EEF5FF' : 'transparent',
+                      color: isActive ? shell.blue : shell.muted,
+                      border: `1px solid ${isActive ? '#C7DAFF' : 'transparent'}`,
+                      '&:hover': { bgcolor: isActive ? '#EEF5FF' : shell.page },
+                      '&::before': {
+                        content: '""',
+                        position: 'absolute',
+                        left: 6,
+                        top: 10,
+                        bottom: 10,
+                        width: 3,
+                        borderRadius: 3,
+                        bgcolor: isActive ? shell.blue : 'transparent',
+                      },
                     }}
                   >
-                    <ListItemIcon sx={{ minWidth: 36, color: isActive ? '#2196F3' : '#9ca3af' }}>
+                    <ListItemIcon sx={{ minWidth: 36, color: isActive ? shell.blue : '#98A2B3' }}>
                       {item.icon}
                     </ListItemIcon>
                     <ListItemText
                       primary={item.label}
-                      primaryTypographyProps={{ fontSize: '0.8125rem', fontWeight: isActive ? 600 : 400 }}
+                      primaryTypographyProps={{ fontSize: '0.8125rem', fontWeight: isActive ? 900 : 700 }}
                     />
                     {hasChildren && (isExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />)}
                   </ListItemButton>
                 </ListItem>
                 {hasChildren && (
                   <Collapse in={isExpanded} timeout="auto" unmountOnExit>
-                    <List component="div" disablePadding sx={{ pl: 5, pr: 0.5, pb: 0.5 }}>
+                    <List component="div" disablePadding sx={{ pl: 5, pr: 0.5, pb: 0.5, pt: 0.25 }}>
                       {item.children?.map((child) => {
                         const childActive = isChildActive(child);
                         return (
@@ -242,16 +265,16 @@ const Sidebar: React.FC<SidebarProps> = ({ width }) => {
                                 py: 0.75,
                                 px: 1.25,
                                 minHeight: 34,
-                                bgcolor: childActive ? '#EEF6FF' : 'transparent',
-                                color: childActive ? '#1976D2' : '#64748b',
-                                '&:hover': { bgcolor: childActive ? '#EEF6FF' : '#f8fafc' },
+                                bgcolor: childActive ? '#F0F6FF' : 'transparent',
+                                color: childActive ? shell.blue : shell.muted,
+                                '&:hover': { bgcolor: childActive ? '#F0F6FF' : shell.page },
                               }}
                             >
                               <ListItemText
                                 primary={child.label}
                                 primaryTypographyProps={{
                                   fontSize: '0.765rem',
-                                  fontWeight: childActive ? 700 : 500,
+                                  fontWeight: childActive ? 900 : 700,
                                 }}
                               />
                             </ListItemButton>
@@ -267,17 +290,17 @@ const Sidebar: React.FC<SidebarProps> = ({ width }) => {
         </List>
 
         {currentUser && (
-          <Box sx={{ borderTop: '1px solid #f0f0f0', p: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Avatar sx={{ width: 32, height: 32, bgcolor: '#E3F2FD', color: '#1976D2', fontSize: 14 }}>
+          <Box sx={{ borderTop: `1px solid ${shell.softLine}`, p: 1.5, display: 'flex', alignItems: 'center', gap: 1, bgcolor: '#FBFCFE' }}>
+            <Avatar sx={{ width: 32, height: 32, bgcolor: '#EEF5FF', color: shell.blue, fontSize: 14, fontWeight: 900 }}>
               {currentUser.name.slice(0, 1)}
             </Avatar>
             <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography variant="body2" sx={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <Typography variant="body2" sx={{ fontWeight: 900, color: shell.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {currentUser.name}
               </Typography>
               <Typography
                 variant="caption"
-                sx={{ color: '#6b7280', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                sx={{ color: shell.muted, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                 title={currentUserMeta}
               >
                 {currentUserMeta}
