@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Chip,
@@ -9,6 +9,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   Tooltip,
   Typography,
@@ -25,6 +26,8 @@ const AccountRecycleBin: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [error, setError] = useState('');
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
   const { alert, confirm, dialog } = useAppFeedback();
 
   const load = async () => {
@@ -39,7 +42,25 @@ const AccountRecycleBin: React.FC = () => {
     });
   }, []);
 
+  useEffect(() => {
+    const maxPage = Math.max(Math.ceil(users.length / rowsPerPage) - 1, 0);
+    if (page > maxPage) setPage(maxPage);
+  }, [page, rowsPerPage, users.length]);
+
+  const paginatedUsers = useMemo(() => (
+    users.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+  ), [page, rowsPerPage, users]);
+
   const getDepartmentName = (departmentId?: string) => departments.find((department) => department.id === departmentId)?.name || '-';
+
+  const handlePageChange = (_event: unknown, nextPage: number) => {
+    setPage(nextPage);
+  };
+
+  const handleRowsPerPageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setRowsPerPage(Number(event.target.value));
+    setPage(0);
+  };
 
   const restore = async (user: User) => {
     setError('');
@@ -77,10 +98,10 @@ const AccountRecycleBin: React.FC = () => {
 
       {error && <Typography variant="body2" sx={{ color: '#d32f2f', mb: 1 }}>{error}</Typography>}
 
-      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #eef2f7' }}>
+      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: '4px 4px 0 0', overflowX: 'auto' }}>
         <Table sx={{ minWidth: 980, tableLayout: 'fixed' }}>
           <TableHead>
-            <TableRow sx={{ bgcolor: '#f8fafc' }}>
+            <TableRow sx={{ bgcolor: '#f5f8fc' }}>
               <TableCell>姓名</TableCell>
               <TableCell>账号</TableCell>
               <TableCell>手机</TableCell>
@@ -93,7 +114,7 @@ const AccountRecycleBin: React.FC = () => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {users.map((user) => (
+            {paginatedUsers.map((user) => (
               <TableRow key={user.id} hover>
                 <TableCell sx={{ fontWeight: 600 }}>{user.name}</TableCell>
                 <TableCell>{user.account || '-'}</TableCell>
@@ -127,6 +148,24 @@ const AccountRecycleBin: React.FC = () => {
           </TableBody>
         </Table>
       </TableContainer>
+      <TablePagination
+        component="div"
+        count={users.length}
+        page={page}
+        rowsPerPage={rowsPerPage}
+        rowsPerPageOptions={[10, 20, 50, 100]}
+        onPageChange={handlePageChange}
+        onRowsPerPageChange={handleRowsPerPageChange}
+        labelRowsPerPage="每页条数"
+        labelDisplayedRows={({ from, to, count }) => (count === 0 ? `0 / 共 ${count} 条` : `${from}-${to} / 共 ${count} 条`)}
+        sx={{
+          border: '1px solid #e5e7eb',
+          borderTop: 0,
+          borderRadius: '0 0 4px 4px',
+          bgcolor: '#fff',
+          '& .MuiTablePagination-toolbar': { minHeight: 48 },
+        }}
+      />
       {dialog}
     </Box>
   );
