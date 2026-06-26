@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+import type { Row } from 'exceljs';
 import type { Lead } from '../types/lead';
 import type { LeadSourceConfig, User } from '../types/settings';
 import { LEAD_STATUS, STORAGE_KEYS, normalizeResourceOwnership } from '../shared/utils/constants';
@@ -61,6 +61,7 @@ export const LEAD_BULK_IMPORT_HEADERS = [
 ] as const;
 
 type Header = (typeof LEAD_BULK_IMPORT_HEADERS)[number];
+type ExcelJsModule = typeof import('exceljs');
 
 export interface LeadBulkImportRowResult {
   rowNumber: number;
@@ -92,11 +93,23 @@ function ensureInit(): void {
 }
 
 function toText(value: unknown): string {
+  if (value && typeof value === 'object') {
+    const cellValue = value as { text?: unknown; result?: unknown; richText?: Array<{ text?: unknown }> };
+    if (cellValue.text !== undefined) return String(cellValue.text).trim();
+    if (cellValue.result !== undefined) return String(cellValue.result).trim();
+    if (Array.isArray(cellValue.richText)) {
+      return cellValue.richText.map((item) => item.text || '').join('').trim();
+    }
+  }
   return String(value ?? '').trim();
 }
 
 function getCell(row: Record<string, unknown>, header: Header): string {
   return toText(row[header]);
+}
+
+async function loadExcelJs(): Promise<ExcelJsModule> {
+  return await import('exceljs');
 }
 
 function getActiveUsers(): User[] {
@@ -140,19 +153,23 @@ function parseTags(value: string): string[] {
     .filter(Boolean);
 }
 
-function readRows(arrayBuffer: ArrayBuffer): CleanRow[] {
-  const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-  const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+async function readRows(arrayBuffer: ArrayBuffer): Promise<CleanRow[]> {
+  const ExcelJS = await loadExcelJs();
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(arrayBuffer);
+  const firstSheet = workbook.worksheets[0];
   if (!firstSheet) return [];
 
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: '' });
-  return rows.map((row, index) => ({
-    rowNumber: index + 2,
-    data: LEAD_BULK_IMPORT_HEADERS.reduce((acc, header) => {
-      acc[header] = getCell(row, header);
+  const rows: CleanRow[] = [];
+  firstSheet.eachRow({ includeEmpty: false }, (sheetRow: Row, rowNumber: number) => {
+    if (rowNumber === 1) return;
+    const data = LEAD_BULK_IMPORT_HEADERS.reduce((acc, header, index) => {
+      acc[header] = toText(sheetRow.getCell(index + 1).value);
       return acc;
-    }, {} as Record<Header, string>),
-  })).filter((row) => Object.values(row.data).some(Boolean));
+    }, {} as Record<Header, string>);
+    if (Object.values(data).some(Boolean)) rows.push({ rowNumber, data });
+  });
+  return rows;
 }
 
 function validateRow(row: CleanRow) {
@@ -212,8 +229,20 @@ function validateRow(row: CleanRow) {
   return { errors, payload };
 }
 
-function createTemplateWorkbook(): ArrayBuffer {
-  const sheet = XLSX.utils.aoa_to_sheet([
+function toArrayBuffer(value: ArrayBuffer | ArrayBufferView): ArrayBuffer {
+  const view = value instanceof ArrayBuffer
+    ? new Uint8Array(value)
+    : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  const copy = new Uint8Array(view.byteLength);
+  copy.set(view);
+  return copy.buffer;
+}
+
+async function createTemplateWorkbook(): Promise<ArrayBuffer> {
+  const ExcelJS = await loadExcelJs();
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet(TEXT.templateSheet);
+  sheet.addRows([
     [...LEAD_BULK_IMPORT_HEADERS],
     [
       TEXT.exampleName,
@@ -231,12 +260,11 @@ function createTemplateWorkbook(): ArrayBuffer {
       TEXT.exampleRemark,
     ],
   ]);
-  sheet['!cols'] = LEAD_BULK_IMPORT_HEADERS.map((header) => ({
-    wch: Math.max(14, header.length + 8),
+  sheet.columns = LEAD_BULK_IMPORT_HEADERS.map((header) => ({
+    width: Math.max(14, header.length + 8),
   }));
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, sheet, TEXT.templateSheet);
-  return XLSX.write(workbook, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer;
+  const buffer = await workbook.xlsx.writeBuffer();
+  return toArrayBuffer(buffer);
 }
 
 async function importWorkbook(arrayBuffer: ArrayBuffer): Promise<ApiResponse<LeadBulkImportResult>> {
@@ -244,7 +272,7 @@ async function importWorkbook(arrayBuffer: ArrayBuffer): Promise<ApiResponse<Lea
   await delay(80);
 
   const results: LeadBulkImportRowResult[] = [];
-  for (const row of readRows(arrayBuffer)) {
+  for (const row of await readRows(arrayBuffer)) {
     const { errors, payload } = validateRow(row);
     const rowName = row.data[TEXT.name] || row.data[TEXT.company] || `Row ${row.rowNumber}`;
 

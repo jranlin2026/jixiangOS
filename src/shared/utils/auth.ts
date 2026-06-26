@@ -1,5 +1,6 @@
 import type { User } from '../../types/settings';
 import type { UserWithAuth } from '../../types/auth';
+import bcrypt from 'bcryptjs';
 import { normalizeUserRoleName } from './roles';
 
 export const AUTH_SESSION_STORAGE_KEY = 'aaos_auth_session';
@@ -8,6 +9,7 @@ export const DEFAULT_ADMIN_PASSWORD = 'Admin@123456';
 export const DEFAULT_USER_PASSWORD = '1234567';
 
 const ADMIN_USER_ID = 'user-admin';
+const PASSWORD_HASH_ROUNDS = 10;
 
 function readRuntimeEnv(name: string): string | undefined {
   const metaEnv = (import.meta as unknown as { env?: Record<string, string | boolean | undefined> }).env;
@@ -42,11 +44,11 @@ export function normalizeAccount(value?: string): string {
   return String(value || '').trim().toLowerCase();
 }
 
-export function createPasswordSalt(seed: string): string {
-  return `aaos-${normalizeAccount(seed) || 'user'}-salt`;
+export function createPasswordSalt(_seed: string): string {
+  return bcrypt.genSaltSync(PASSWORD_HASH_ROUNDS);
 }
 
-export function hashPassword(password: string, salt: string): string {
+function legacyHashPassword(password: string, salt: string): string {
   const text = `${salt}:${password}`;
   let hash = 2166136261;
   for (let index = 0; index < text.length; index += 1) {
@@ -56,9 +58,15 @@ export function hashPassword(password: string, salt: string): string {
   return `mock-${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
 
+export function hashPassword(password: string, salt: string): string {
+  if (salt.startsWith('$2')) return bcrypt.hashSync(password, salt);
+  return legacyHashPassword(password, salt);
+}
+
 export function verifyPassword(password: string, salt?: string, hash?: string): boolean {
   if (!salt || !hash) return false;
-  return hashPassword(password, salt) === hash;
+  if (hash.startsWith('$2')) return bcrypt.compareSync(password, hash);
+  return legacyHashPassword(password, salt) === hash;
 }
 
 export function deriveAccount(user: Pick<User, 'account' | 'email' | 'phone' | 'name' | 'id'>): string {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { leadBulkImportApi, LEAD_BULK_IMPORT_HEADERS } from './leadBulkImportApi';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
@@ -64,11 +64,23 @@ Object.defineProperty(globalThis, 'localStorage', {
   configurable: true,
 });
 
-function workbookBuffer(rows: Record<string, string>[]) {
-  const sheet = XLSX.utils.json_to_sheet(rows, { header: [...LEAD_BULK_IMPORT_HEADERS] });
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, sheet, '\u7ebf\u7d22\u6279\u91cf\u5165\u5e93\u6a21\u677f');
-  return XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+function toArrayBuffer(value: ArrayBuffer | ArrayBufferView): ArrayBuffer {
+  const view = value instanceof ArrayBuffer
+    ? new Uint8Array(value)
+    : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  const copy = new Uint8Array(view.byteLength);
+  copy.set(view);
+  return copy.buffer;
+}
+
+async function workbookBuffer(rows: Record<string, string>[]) {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('\u7ebf\u7d22\u6279\u91cf\u5165\u5e93\u6a21\u677f');
+  sheet.addRow([...LEAD_BULK_IMPORT_HEADERS]);
+  rows.forEach((row) => {
+    sheet.addRow(LEAD_BULK_IMPORT_HEADERS.map((header) => row[header] || ''));
+  });
+  return toArrayBuffer(await workbook.xlsx.writeBuffer());
 }
 
 const now = '2026-06-19T00:00:00.000Z';
@@ -125,7 +137,7 @@ assert.deepEqual(LEAD_BULK_IMPORT_HEADERS, [
   H.remark,
 ]);
 
-const result = await leadBulkImportApi.importWorkbook(workbookBuffer([
+const result = await leadBulkImportApi.importWorkbook(await workbookBuffer([
   {
     [H.name]: zh.newLead,
     [H.company]: zh.newCompany,

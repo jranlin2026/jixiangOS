@@ -5,6 +5,7 @@ import { initializeMockData } from './mock';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import {
   AUTH_SESSION_STORAGE_KEY,
+  createPasswordSalt,
   ensureAdminUser,
   hashPassword,
   normalizeAccount,
@@ -174,7 +175,7 @@ async function logout(): Promise<ApiResponse<boolean>> {
 }
 
 function createUserPasswordFields(userId: string, account: string, password: string) {
-  const passwordSalt = `aaos-${userId}-${normalizeAccount(account)}-salt`;
+  const passwordSalt = createPasswordSalt(`${userId}-${normalizeAccount(account)}`);
   return {
     passwordSalt,
     passwordHash: hashPassword(password, passwordSalt),

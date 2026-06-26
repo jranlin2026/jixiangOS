@@ -358,8 +358,8 @@ const Leads: React.FC = () => {
     setFormOpen(true);
   };
 
-  const handleDownloadTemplate = () => {
-    const workbook = leadBulkImportApi.createTemplateWorkbook();
+  const handleDownloadTemplate = async () => {
+    const workbook = await leadBulkImportApi.createTemplateWorkbook();
     const blob = new Blob([workbook], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     });
