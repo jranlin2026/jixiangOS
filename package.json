@@ -7,11 +7,13 @@
     "dev": "concurrently \"npm:dev:web\" \"npm:dev:api\"",
     "dev:web": "vite --host 127.0.0.1 --port 3000 --strictPort",
     "dev:api": "tsx watch server/index.ts",
+    "start": "tsx server/index.ts",
     "build": "tsc -b && vite build",
     "test": "tsx scripts/run-tests.ts",
     "preview": "vite preview",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed"
   },
