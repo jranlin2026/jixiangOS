@@ -76,14 +76,15 @@ type OrderViewConfig = {
   schemaVersion: number;
 };
 
-const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_view_v4';
-const ORDER_VIEW_SCHEMA_VERSION = 4;
+const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_view_v5';
+const ORDER_VIEW_SCHEMA_VERSION = 5;
 const ORDER_WIDTH_STORAGE_KEY = 'aaos_order_table_column_widths_v1';
 const ORDER_ACTION_COLUMN_WIDTH = 160;
 
 const ORDER_COLUMNS: OrderColumn[] = [
   { id: 'orderNo', label: '订单号' },
   { id: 'customer', label: '客户' },
+  { id: 'productName', label: '产品名称' },
   { id: 'productLevel', label: '产品等级' },
   { id: 'orderType', label: '订单类型' },
   { id: 'actualAmount', label: '实付金额' },
@@ -97,6 +98,7 @@ const ORDER_COLUMNS: OrderColumn[] = [
 const DEFAULT_VISIBLE_COLUMNS = [
   'orderNo',
   'customer',
+  'productName',
   'productLevel',
   'orderType',
   'actualAmount',
@@ -110,6 +112,7 @@ const DEFAULT_VISIBLE_COLUMNS = [
 const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   orderNo: 180,
   customer: 180,
+  productName: 180,
   productLevel: 140,
   orderType: 140,
   actualAmount: 140,
@@ -507,6 +510,8 @@ const Orders: React.FC = () => {
             {customerDisplayName}
           </Button>
         );
+      case 'productName':
+        return order.productName || order.productLevel || '-';
       case 'productLevel':
         return (
           <Chip
@@ -522,7 +527,7 @@ const Orders: React.FC = () => {
       case 'resourceOwnership':
         return normalizeResourceOwnership(order.resourceOwnership || order.sourceType);
       case 'paymentDate':
-        return formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm');
+        return formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm:ss');
       case 'refundStatus':
         return <RefundStatusBadge status={order.refundStatus} />;
       case 'owner':
@@ -776,7 +781,8 @@ const Orders: React.FC = () => {
             <TableHead>
               <TableRow>
                 <TableCell>订单号</TableCell>
-                <TableCell>产品分类</TableCell>
+                <TableCell>产品名称</TableCell>
+                <TableCell>产品等级</TableCell>
                 <TableCell>订单类型</TableCell>
                 <TableCell>金额</TableCell>
                 <TableCell>付款日期</TableCell>
@@ -787,6 +793,7 @@ const Orders: React.FC = () => {
               {customerOrders.map((order) => (
                 <TableRow key={order.id}>
                   <TableCell>{order.orderNo}</TableCell>
+                  <TableCell>{order.productName || order.productLevel || '-'}</TableCell>
                   <TableCell>
                     <Chip
                       label={order.productLevel}
@@ -796,13 +803,13 @@ const Orders: React.FC = () => {
                   </TableCell>
                   <TableCell>{order.orderType}</TableCell>
                   <TableCell>{formatCurrency(order.actualAmount || order.amount)}</TableCell>
-                  <TableCell>{formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm')}</TableCell>
+                  <TableCell>{formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm:ss')}</TableCell>
                   <TableCell><RefundStatusBadge status={order.refundStatus} /></TableCell>
                 </TableRow>
               ))}
               {customerOrders.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 4, color: '#9ca3af' }}>暂无订单</TableCell>
+                  <TableCell colSpan={7} align="center" sx={{ py: 4, color: '#9ca3af' }}>暂无订单</TableCell>
                 </TableRow>
               )}
             </TableBody>

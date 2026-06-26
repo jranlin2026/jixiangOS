@@ -1,4 +1,6 @@
 import type { FinanceDailyRecord, ChannelROI, FinanceStats, FinanceFilters, FinanceIncome, FinanceExpense } from '../types/finance';
+import type { Order } from '../types/order';
+import type { Product } from '../types/product';
 import type { ApiResponse } from './types';
 import { createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
@@ -24,6 +26,22 @@ function getFinanceStorage(): FinanceStorage {
     channelROI: data?.channelROI || [],
     incomes: data?.incomes || [],
     expenses: data?.expenses || [],
+  };
+}
+
+function getProductName(productId?: string, productLevel?: string, fallback?: string): string | undefined {
+  const products = getStorageData<Product[]>(STORAGE_KEYS.PRODUCTS) || [];
+  const matched = (productId ? products.find((product) => product.id === productId) : undefined)
+    || (productLevel ? products.find((product) => product.level === productLevel) : undefined);
+  return matched?.name || fallback || productLevel;
+}
+
+function enrichIncomeProductName(income: FinanceIncome): FinanceIncome {
+  const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
+  const order = orders.find((item) => item.id === income.orderId || item.orderNo === income.orderNo);
+  return {
+    ...income,
+    productName: getProductName(order?.productId, order?.productLevel || income.productLevel, income.productName || order?.productName),
   };
 }
 
@@ -89,7 +107,7 @@ async function fetchIncomes(filters?: FinanceFilters): Promise<ApiResponse<Finan
   ensureInit();
   await delay(200);
   const storage = getFinanceStorage();
-  let incomes = [...storage.incomes];
+  let incomes = storage.incomes.map(enrichIncomeProductName);
 
   if (filters?.startDate) {
     incomes = incomes.filter((i) => i.receivedAt >= filters.startDate!);
@@ -123,7 +141,7 @@ async function createIncome(data: Omit<FinanceIncome, 'id'>): Promise<ApiRespons
   ensureInit();
   await delay(200);
   const storage = getFinanceStorage();
-  const income: FinanceIncome = { ...data, id: `fi-${uuidv4().slice(0, 8)}` };
+  const income: FinanceIncome = enrichIncomeProductName({ ...data, id: `fi-${uuidv4().slice(0, 8)}` });
   storage.incomes.unshift(income);
   setStorageData(STORAGE_KEYS.FINANCE, storage);
   return createSuccessResponse(income);

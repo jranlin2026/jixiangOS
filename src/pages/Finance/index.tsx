@@ -219,6 +219,7 @@ const Finance: React.FC = () => {
               <TableRow>
                 <TableCell>订单号</TableCell>
                 <TableCell>客户</TableCell>
+                <TableCell>产品名称</TableCell>
                 <TableCell>产品等级</TableCell>
                 <TableCell>金额</TableCell>
                 <TableCell>支付方式</TableCell>
@@ -232,18 +233,19 @@ const Finance: React.FC = () => {
                   <TableRow key={income.id} hover>
                     <TableCell sx={{ fontWeight: 600 }}>{income.orderNo}</TableCell>
                     <TableCell>{income.customerName}</TableCell>
+                    <TableCell>{income.productName || income.productLevel || '-'}</TableCell>
                     <TableCell>
                       <Chip label={income.productLevel} size="small" sx={{ bgcolor: `${levelColor}18`, color: levelColor, fontWeight: 600 }} />
                     </TableCell>
                     <TableCell sx={{ fontWeight: 600 }}>{formatCurrency(income.amount)}</TableCell>
                     <TableCell>{income.paymentMethod}</TableCell>
-                    <TableCell>{formatDate(income.receivedAt, 'yyyy-MM-dd')}</TableCell>
+                    <TableCell>{formatDate(income.receivedAt, 'yyyy-MM-dd HH:mm:ss')}</TableCell>
                   </TableRow>
                 );
               })}
               {incomes.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 4, color: '#9ca3af' }}>暂无收入记录</TableCell>
+                  <TableCell colSpan={7} align="center" sx={{ py: 4, color: '#9ca3af' }}>暂无收入记录</TableCell>
                 </TableRow>
               )}
             </TableBody>

@@ -50,6 +50,7 @@ const zh = {
   department: '\u9500\u552e\u90e8',
   customerName: '\u5ba2\u6237A',
   product: '899',
+  productName: '极享 899 基础版',
 } as const;
 
 const now = '2026-06-19T08:00:00.000Z';
@@ -57,6 +58,7 @@ const now = '2026-06-19T08:00:00.000Z';
 const orderPayload = {
   customerId: 'cust-1',
   customerName: zh.customerName,
+  productId: 'prod-899-basic',
   productLevel: zh.product,
   orderType: 'new',
   amount: 899,
@@ -94,6 +96,9 @@ function seed(userId = 'user-sales') {
   storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([
     { id: 'cust-1', name: zh.customerName, company: zh.customerName, phone: '13900000000', customerLevel: 'L1', owner: 'Sales A', totalSpent: 0, orderCount: 0, growthPath: [], growthRecords: [], createdAt: now, updatedAt: now },
   ]));
+  storage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify([
+    { id: 'prod-899-basic', name: zh.productName, level: zh.product, price: 899, description: '', features: [], deliveryStages: [], isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
+  ]));
   storage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify([]));
   storage.setItem(STORAGE_KEYS.COMMISSIONS, JSON.stringify([]));
   storage.setItem(STORAGE_KEYS.DELIVERIES, JSON.stringify([]));
@@ -105,6 +110,7 @@ seed();
 const submitRes = await orderReviewApi.submitOrderApplication(orderPayload);
 assert.equal(submitRes.code, 0);
 assert.equal(submitRes.data.status, zh.pendingReview);
+assert.equal(submitRes.data.orderData.productName, zh.productName);
 
 storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({ userId: 'user-sales-b', token: 'token-user-sales-b', remember: true, createdAt: now }));
 const otherSubmitRes = await orderReviewApi.submitOrderApplication({
@@ -147,6 +153,7 @@ assert.ok(approveRes.data?.orderId);
 const ordersAfterApprove = await orderApi.fetchOrders({ pageSize: 20 });
 assert.equal(ordersAfterApprove.data.items.length, 1);
 assert.equal(ordersAfterApprove.data.items[0].customerName, zh.customerName);
+assert.equal(ordersAfterApprove.data.items[0].productName, zh.productName);
 assert.equal(approveRes.data?.orderId, ordersAfterApprove.data.items[0].id);
 assert.equal(approveRes.data?.orderNo, ordersAfterApprove.data.items[0].orderNo);
 
@@ -186,6 +193,7 @@ const refundRes = await refundApi.createRefund({
   applicantName: 'Sales A',
 });
 assert.equal(refundRes.code, 0);
+assert.equal(refundRes.data.productName, zh.productName);
 const completeRefundRes = await refundApi.completeRefund(refundRes.data.id, zh.bankTransfer);
 assert.equal(completeRefundRes.code, 0);
 

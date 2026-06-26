@@ -561,7 +561,7 @@ const Delivery: React.FC = () => {
       case 'orderAmount':
         return formatCurrency(delivery.orderAmount || 0);
       case 'paymentDate':
-        return delivery.paymentDate ? formatDate(delivery.paymentDate) : '-';
+        return delivery.paymentDate ? formatDate(delivery.paymentDate, 'yyyy-MM-dd HH:mm:ss') : '-';
       case 'salesOwner':
         return delivery.salesOwner || '-';
       case 'owner':
@@ -854,7 +854,7 @@ const Delivery: React.FC = () => {
               <Box><Typography variant="caption" color="text.secondary">交付负责人</Typography><Typography>{selectedDelivery.owner || '待分配'}</Typography></Box>
               <Box><Typography variant="caption" color="text.secondary">当前状态</Typography><Chip size="small" label={selectedDelivery.status} color={getStatusColor(selectedDelivery.status)} /></Box>
               <Box><Typography variant="caption" color="text.secondary">订单金额</Typography><Typography>{formatCurrency(selectedDelivery.orderAmount || 0)}</Typography></Box>
-              <Box><Typography variant="caption" color="text.secondary">付款日期</Typography><Typography>{selectedDelivery.paymentDate ? formatDate(selectedDelivery.paymentDate) : '-'}</Typography></Box>
+              <Box><Typography variant="caption" color="text.secondary">付款日期</Typography><Typography>{selectedDelivery.paymentDate ? formatDate(selectedDelivery.paymentDate, 'yyyy-MM-dd HH:mm:ss') : '-'}</Typography></Box>
               <Box><Typography variant="caption" color="text.secondary">计划完成</Typography><Typography>{selectedDelivery.plannedCompletedAt ? formatDate(selectedDelivery.plannedCompletedAt) : '-'}</Typography></Box>
               <Box><Typography variant="caption" color="text.secondary">进度</Typography>{renderProgress(selectedDelivery)}</Box>
             </Box>

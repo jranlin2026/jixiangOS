@@ -187,6 +187,7 @@ function normalizeRule(rule: CommissionRule): CommissionRule {
     description: '',
     ...rule,
     resourceOwnership: rule.resourceOwnership ? normalizeResourceOwnership(rule.resourceOwnership) : '',
+    commissionValue: rule.commissionType === 'tiered_percentage' ? 0 : Number(rule.commissionValue) || 0,
     requiresLeaderConfirm: inferredLeaderConfirm,
     evidenceTypes: inferredEvidenceTypes,
   };
@@ -252,6 +253,11 @@ function groupSimpleRules(rules: CommissionRule[]): SimpleCommissionRuleGroup[] 
   }).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
 }
 
+function isSalesCommissionRole(role: CommissionRole): boolean {
+  const config = getCommissionRoleConfigByName(role);
+  return role === ROLE_MATCH_TEXT.sales || config?.code === 'sales' || config?.personSource === 'sales_owner';
+}
+
 function validateSimpleRuleGroup(data: SimpleCommissionRuleGroupInput): string | null {
   if (!data.name.trim()) return '规则名称不能为空';
   if (!data.orderType) return '请选择订单类型';
@@ -259,7 +265,12 @@ function validateSimpleRuleGroup(data: SimpleCommissionRuleGroupInput): string |
   if (!data.payouts.length) return '至少配置一个提成角色';
   const roles = data.payouts.map((item) => item.role);
   if (new Set(roles).size !== roles.length) return '同一规则内不能重复配置提成角色';
-  if (data.payouts.some((item) => Number(item.commissionValue) < 0)) return '分润数值不能小于 0';
+  if (data.payouts.some((item) => item.commissionType !== 'tiered_percentage' && Number(item.commissionValue) < 0)) return '分润数值不能小于 0';
+  for (const payout of data.payouts) {
+    if (payout.commissionType === 'tiered_percentage') {
+      if (!isSalesCommissionRole(payout.role)) return '销售月累计阶梯提成只能配置给销售角色';
+    }
+  }
   const activeRoles = new Set(ensureCommissionRoleConfigs().filter((item) => item.isActive).map((item) => item.name));
   const inactiveRole = roles.find((role) => !activeRoles.has(role));
   if (inactiveRole) return `提成角色「${inactiveRole}」未启用，不能用于新规则`;
@@ -294,7 +305,7 @@ function buildSimpleRule(
     excludeExternalTalent: false,
     role: payout.role,
     commissionType: payout.commissionType,
-    commissionValue: Number(payout.commissionValue) || 0,
+    commissionValue: payout.commissionType === 'tiered_percentage' ? 0 : Number(payout.commissionValue) || 0,
     performanceRate: 100,
     splitRatio: 100,
     collaboratorRole: '',
@@ -581,11 +592,38 @@ function calcBaseAmount(rule: CommissionRule, order: Order): number {
   return Math.round(amount * (rate / 100) * 100) / 100;
 }
 
+interface ResolvedCommissionCalculation {
+  amount: number;
+  commissionValue: number;
+  commissionRate: number;
+}
+
+function roundMoney(amount: number): number {
+  return Math.round(amount * 100) / 100;
+}
+
 function calcCommissionAmount(rule: CommissionRule, performanceAmount: number): number {
   const amount = rule.commissionType === 'fixed'
     ? rule.commissionValue
     : performanceAmount * (rule.commissionValue / 100);
-  return Math.round(amount * 100) / 100;
+  return roundMoney(amount);
+}
+
+function resolveCommissionCalculation(rule: CommissionRule, order: Order): ResolvedCommissionCalculation {
+  const performanceAmount = calcBaseAmount(rule, order);
+  if (rule.commissionType === 'tiered_percentage') {
+    return {
+      amount: 0,
+      commissionValue: 0,
+      commissionRate: 0,
+    };
+  }
+
+  return {
+    amount: calcCommissionAmount(rule, performanceAmount),
+    commissionValue: rule.commissionValue,
+    commissionRate: rule.commissionType === 'percentage' ? rule.commissionValue / 100 : 0,
+  };
 }
 
 function hasPaymentEvidence(order: Order): boolean {
@@ -608,10 +646,18 @@ function resolveEvidenceStatus(rule: CommissionRule, order: Order): Commission['
   return '已齐全';
 }
 
-function buildFormulaText(rule: CommissionRule, amount: number, performanceAmount: number, splitNote?: string): string {
+function buildFormulaText(
+  rule: CommissionRule,
+  amount: number,
+  performanceAmount: number,
+  calculation: ResolvedCommissionCalculation,
+  splitNote?: string,
+): string {
   const base = rule.commissionType === 'fixed'
     ? `固定提成 ${rule.commissionValue} 元`
-    : `业绩金额 ${performanceAmount} × ${rule.commissionValue}% = ${amount} 元`;
+    : rule.commissionType === 'tiered_percentage'
+      ? `销售月累计阶梯提成，月度提成金额将在员工提成月报按月度总实付金额计算`
+      : `业绩金额 ${performanceAmount} × ${rule.commissionValue}% = ${amount} 元`;
   const performance = rule.performanceRate && rule.performanceRate !== 100
     ? `，业绩按实付金额 ${rule.performanceRate}% 核算`
     : '';
@@ -623,6 +669,7 @@ function buildResult(
   order: Order,
   role: CommissionRole,
   amount: number,
+  calculation: ResolvedCommissionCalculation,
   ownerOverride?: string,
   splitNote?: string,
 ): CommissionCalcResult {
@@ -641,9 +688,9 @@ function buildResult(
     ruleId: rule.id,
     role,
     commissionType: rule.commissionType,
-    commissionValue: rule.commissionValue,
+    commissionValue: calculation.commissionValue,
     commissionAmount: amount,
-    commissionRate: rule.commissionType === 'percentage' ? rule.commissionValue / 100 : 0,
+    commissionRate: calculation.commissionRate,
     performanceAmount,
     status,
     ownerOverride,
@@ -654,34 +701,34 @@ function buildResult(
     auditReason: evidenceStatus === '已齐全' || evidenceStatus === '无需凭证' ? '新订单提成待财务审核' : evidenceStatus,
     evidenceRequired: rule.requiresProof || Boolean(rule.evidenceTypes?.length) || rule.requiresLeaderConfirm,
     evidenceStatus,
-    formulaText: buildFormulaText(rule, amount, performanceAmount, splitNote),
+    formulaText: buildFormulaText(rule, amount, performanceAmount, calculation, splitNote),
   };
 }
 
 function createResultsForRule(rule: CommissionRule, order: Order): CommissionCalcResult[] {
-  const performanceAmount = calcBaseAmount(rule, order);
-  const totalAmount = calcCommissionAmount(rule, performanceAmount);
+  const calculation = resolveCommissionCalculation(rule, order);
+  const totalAmount = calculation.amount;
   const splitRatio = rule.splitRatio ?? 100;
 
   if (rule.collaboratorRole && order.collaboratorName && splitRatio > 0 && splitRatio < 100) {
-    const primaryAmount = Math.round(totalAmount * (splitRatio / 100) * 100) / 100;
-    const collaboratorAmount = Math.round((totalAmount - primaryAmount) * 100) / 100;
+    const primaryAmount = roundMoney(totalAmount * (splitRatio / 100));
+    const collaboratorAmount = roundMoney(totalAmount - primaryAmount);
     return [
-      buildResult(rule, order, rule.role, primaryAmount, undefined, `主角色分成 ${splitRatio}%`),
-      buildResult(rule, order, rule.collaboratorRole, collaboratorAmount, order.collaboratorName, `协同分成 ${100 - splitRatio}%`),
+      buildResult(rule, order, rule.role, primaryAmount, calculation, undefined, `主角色分成 ${splitRatio}%`),
+      buildResult(rule, order, rule.collaboratorRole, collaboratorAmount, calculation, order.collaboratorName, `协同分成 ${100 - splitRatio}%`),
     ];
   }
 
   if (order.collaboratorRole && order.collaboratorName && order.collaboratorRatio && order.collaboratorRatio > 0 && order.collaboratorRatio < 100) {
-    const collaboratorAmount = Math.round(totalAmount * (order.collaboratorRatio / 100) * 100) / 100;
-    const primaryAmount = Math.round((totalAmount - collaboratorAmount) * 100) / 100;
+    const collaboratorAmount = roundMoney(totalAmount * (order.collaboratorRatio / 100));
+    const primaryAmount = roundMoney(totalAmount - collaboratorAmount);
     return [
-      buildResult(rule, order, rule.role, primaryAmount, undefined, `主角色分成 ${100 - order.collaboratorRatio}%`),
-      buildResult(rule, order, order.collaboratorRole, collaboratorAmount, order.collaboratorName, `协同分成 ${order.collaboratorRatio}%`),
+      buildResult(rule, order, rule.role, primaryAmount, calculation, undefined, `主角色分成 ${100 - order.collaboratorRatio}%`),
+      buildResult(rule, order, order.collaboratorRole, collaboratorAmount, calculation, order.collaboratorName, `协同分成 ${order.collaboratorRatio}%`),
     ];
   }
 
-  return [buildResult(rule, order, rule.role, totalAmount)];
+  return [buildResult(rule, order, rule.role, totalAmount, calculation)];
 }
 
 async function calculateCommissionsForOrder(order: Order): Promise<ApiResponse<CommissionCalcResult[]>> {

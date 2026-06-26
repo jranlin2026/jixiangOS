@@ -301,13 +301,13 @@ const EmployeeDepartmentManagement: React.FC = () => {
   };
 
   const handleSaveUser = async () => {
-    setError('');
+    const dialogTitle = editingUser ? '编辑员工' : '创建员工';
     if (!userForm.name.trim() || !userForm.account.trim()) {
-      setError('姓名和账号不能为空');
+      await alert('姓名和账号不能为空', dialogTitle);
       return;
     }
     if (!editingUser && (!userForm.password || userForm.password.length < 6)) {
-      setError('初始密码至少 6 位');
+      await alert('初始密码至少 6 位', dialogTitle);
       return;
     }
     const payload = {
@@ -326,7 +326,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
       ? await settingsApi.updateUser(editingUser.id, payload)
       : await settingsApi.createUser(payload);
     if (res.code !== 0) {
-      setError(res.message || '保存失败');
+      await alert(res.message || '保存失败', dialogTitle);
       return;
     }
     setUserFormOpen(false);

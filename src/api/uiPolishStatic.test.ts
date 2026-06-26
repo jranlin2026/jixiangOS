@@ -44,15 +44,25 @@ const leadDetailSource = readFileSync(join(projectRoot, 'src/pages/Leads/LeadDet
 const leadIntakeSource = readFileSync(join(projectRoot, 'src/pages/Leads/LeadIntakeTab.tsx'), 'utf8');
 const orderApiSource = readFileSync(join(projectRoot, 'src/api/orderApi.ts'), 'utf8');
 const ordersPageSource = readFileSync(join(projectRoot, 'src/pages/Orders/index.tsx'), 'utf8');
+const orderFormSource = readFileSync(join(projectRoot, 'src/pages/Orders/OrderForm.tsx'), 'utf8');
 const orderDetailSource = readFileSync(join(projectRoot, 'src/pages/Orders/OrderDetail.tsx'), 'utf8');
+const orderHistorySource = readFileSync(join(projectRoot, 'src/pages/Orders/OrderHistoryDialog.tsx'), 'utf8');
 const orderReviewSource = readFileSync(join(projectRoot, 'src/pages/OrderReview/index.tsx'), 'utf8');
+const deliverySource = readFileSync(join(projectRoot, 'src/pages/Delivery/index.tsx'), 'utf8');
 const rolePermissionSource = readFileSync(join(projectRoot, 'src/pages/Settings/RolePermission.tsx'), 'utf8');
+const dataMaintenanceSource = readFileSync(join(projectRoot, 'src/pages/Settings/DataMaintenance.tsx'), 'utf8');
 const commissionSource = readFileSync(join(projectRoot, 'src/pages/Commission/index.tsx'), 'utf8');
+const commissionRuleConfigSource = readFileSync(join(projectRoot, 'src/pages/Commission/CommissionRuleConfig.tsx'), 'utf8');
 const financeSource = readFileSync(join(projectRoot, 'src/pages/Finance/index.tsx'), 'utf8');
 const refundCenterSource = readFileSync(join(projectRoot, 'src/pages/RefundCenter/index.tsx'), 'utf8');
+const employeeDepartmentSource = readFileSync(join(projectRoot, 'src/pages/Settings/EmployeeDepartmentManagement.tsx'), 'utf8');
 const detailSplitEditorSource = commissionSource.slice(
   commissionSource.indexOf('const renderDetailSplitEditor'),
   commissionSource.indexOf('const renderSettlementDetailActions'),
+);
+const userSaveSource = employeeDepartmentSource.slice(
+  employeeDepartmentSource.indexOf('const handleSaveUser'),
+  employeeDepartmentSource.indexOf('const handleToggleUserActive'),
 );
 const orderToolbarSource = commissionSource.slice(
   commissionSource.indexOf('const renderOrderToolbar'),
@@ -122,6 +132,21 @@ assert.doesNotMatch(
   'Lead permissions are checkbox based and must not require write actions for visible lead operations.',
 );
 assert.match(
+  userSaveSource,
+  /await alert\(/,
+  'Create/edit employee validation and save failures should use app dialog alerts instead of inline page-level errors.',
+);
+assert.match(
+  dataMaintenanceSource,
+  /重新同步本机缓存[\s\S]*resyncLocalCacheFromBackend|resyncLocalCacheFromBackend[\s\S]*重新同步本机缓存/,
+  'Data maintenance should expose a safe local-cache resync action backed by the server snapshot API.',
+);
+assert.doesNotMatch(
+  userSaveSource,
+  /setError\(/,
+  'Create/edit employee validation and save failures must not render page-level error text above the organization panel.',
+);
+assert.match(
   leadsPageSource,
   /PERMISSION_KEYS\.LEADS_DETAIL/,
   'Lead list must gate view-detail operations behind 查看线索资料.',
@@ -162,6 +187,66 @@ assert.match(
   'Order list must refresh when returning from the review tab after an approval creates a formal order.',
 );
 assert.match(
+  orderFormSource,
+  /label="产品名称"[\s\S]*value=\{form\.productId\}|value=\{form\.productId\}[\s\S]*label="产品名称"/,
+  'Order submit form should select a concrete product by productId, not choose a product level.',
+);
+assert.doesNotMatch(
+  orderFormSource,
+  /<TextField select label="产品等级"/,
+  'Order submit form must not present product level as the product selector.',
+);
+assert.match(
+  orderFormSource,
+  /const seconds = String\(value\.getSeconds\(\)\)\.padStart\(2,\s*'0'\)[\s\S]*`\$\{year\}-\$\{month\}-\$\{day\}T\$\{hours\}:\$\{minutes\}:\$\{seconds\}`/,
+  'Order submit form payment time defaults should include seconds.',
+);
+assert.match(
+  orderFormSource,
+  /TextField label="付款时间"[\s\S]*type="datetime-local"[\s\S]*inputProps=\{\{\s*step:\s*1\s*\}\}/,
+  'Order submit form payment time input should allow second precision.',
+);
+assert.match(
+  orderFormSource,
+  /hour = '00', minute = '00', second = '00'[\s\S]*T\$\{hour\.padStart\(2,\s*'0'\)\}:\$\{minute\.padStart\(2,\s*'0'\)\}:\$\{second\.padStart\(2,\s*'0'\)\}/,
+  'Order submit form payment proof recognition should preserve seconds.',
+);
+assert.match(
+  ordersPageSource,
+  /id:\s*'productName'[\s\S]*label:\s*'产品名称'|label:\s*'产品名称'[\s\S]*id:\s*'productName'/,
+  'Order list must expose productName as a first-class column.',
+);
+assert.match(
+  orderDetailSource,
+  /产品名称[\s\S]*order\.productName/,
+  'Order detail must show product name separately from product level.',
+);
+assert.match(
+  orderReviewSource,
+  /productName\s*\|\|[\s\S]*productLevel/,
+  'Order review must display product name with product level as fallback.',
+);
+assert.match(
+  financeSource,
+  /productName\s*\|\|[\s\S]*productLevel/,
+  'Finance income table must show product name with product level as fallback.',
+);
+assert.match(
+  commissionSource,
+  /'productName'[\s\S]*产品名称[\s\S]*summary\.productName/,
+  'Finance order split table must include product name.',
+);
+assert.match(
+  refundCenterSource,
+  /productName[\s\S]*产品名称[\s\S]*refund\.productName/,
+  'Finance refund table must include product name.',
+);
+assert.match(
+  `${customersPageSource}\n${customerDetailSource}`,
+  /productName\s*\|\|[\s\S]*productLevel/,
+  'Customer order views must display product name with product level as fallback.',
+);
+assert.match(
   orderApiSource,
   /field:\s*'leadInputBy',\s*label:\s*'线索录入人'/,
   'Order change history must label leadInputBy as lead input person.',
@@ -190,6 +275,83 @@ assert.match(
   ordersPageSource,
   /case 'createdAt':[\s\S]*formatDate\(order\.createdAt,\s*'yyyy-MM-dd HH:mm:ss'\)/,
   'Order list creation time column should be precise to seconds.',
+);
+assert.match(
+  customersPageSource,
+  /id:\s*'createdAt'[\s\S]*formatDate\(customer\.createdAt,\s*'yyyy-MM-dd HH:mm:ss'\)/,
+  'Customer list creation time should be precise to seconds.',
+);
+assert.match(
+  customerDetailSource,
+  /field === 'createdAt'[\s\S]*formatDate\(currentCustomer\.createdAt,\s*'yyyy-MM-dd HH:mm:ss'\)/,
+  'Customer detail creation time should be precise to seconds.',
+);
+[
+  ['ordersPageSource', ordersPageSource],
+  ['orderDetailSource', orderDetailSource],
+  ['orderReviewSource', orderReviewSource],
+  ['customersPageSource', customersPageSource],
+  ['customerDetailSource', customerDetailSource],
+  ['commissionSource', commissionSource],
+  ['financeSource', financeSource],
+  ['deliverySource', deliverySource],
+  ['orderHistorySource', orderHistorySource],
+].forEach(([name, source]) => {
+  assert.doesNotMatch(
+    source,
+    /(paidAt|paymentDate|receivedAt)[\s\S]{0,120}formatDate\([^)]*'yyyy-MM-dd HH:mm'\)|formatDate\([^)]*(paidAt|paymentDate|receivedAt)[^)]*'yyyy-MM-dd HH:mm'\)/,
+    `${name} must not render order payment time only to minutes.`,
+  );
+});
+assert.match(
+  ordersPageSource,
+  /case 'paymentDate':[\s\S]*formatDate\(order\.payments\?\.\[0\]\?\.paidAt \|\| order\.createdAt,\s*'yyyy-MM-dd HH:mm:ss'\)/,
+  'Order list payment date should be precise to seconds.',
+);
+assert.match(
+  orderDetailSource,
+  /formatDate\(payment\.paidAt,\s*'yyyy-MM-dd HH:mm:ss'\)/,
+  'Order detail payment records should be precise to seconds.',
+);
+assert.match(
+  orderReviewSource,
+  /付款时间[\s\S]*formatDate\(detailApplication\.orderData\.payments\?\.\[0\]\?\.paidAt,\s*'yyyy-MM-dd HH:mm:ss'\)/,
+  'Order review payment time should be precise to seconds.',
+);
+assert.match(
+  customerDetailSource,
+  /formatDate\(order\.payments\?\.\[0\]\?\.paidAt \|\| order\.createdAt,\s*'yyyy-MM-dd HH:mm:ss'\)/,
+  'Customer detail order payment time should be precise to seconds.',
+);
+assert.match(
+  customersPageSource,
+  /formatDate\(order\.payments\?\.\[0\]\?\.paidAt \|\| order\.createdAt,\s*'yyyy-MM-dd HH:mm:ss'\)/,
+  'Customer order dialog payment time should be precise to seconds.',
+);
+assert.match(
+  commissionSource,
+  /case 'paymentDate':[\s\S]*formatDate\(summary\.paymentDate,\s*'yyyy-MM-dd HH:mm:ss'\)/,
+  'Commission order split payment date should be precise to seconds.',
+);
+assert.match(
+  financeSource,
+  /formatDate\(income\.receivedAt,\s*'yyyy-MM-dd HH:mm:ss'\)/,
+  'Finance income received time should be precise to seconds.',
+);
+assert.match(
+  deliverySource,
+  /case 'paymentDate':[\s\S]*formatDate\(delivery\.paymentDate,\s*'yyyy-MM-dd HH:mm:ss'\)/,
+  'Delivery order payment date should be precise to seconds.',
+);
+assert.match(
+  orderHistorySource,
+  /payment\.paidAt[\s\S]*formatDate\(payment\.paidAt,\s*'yyyy-MM-dd HH:mm:ss'\)/,
+  'Order history payment changes should render payment time to seconds.',
+);
+assert.match(
+  orderApiSource,
+  /payment\.paidAt[\s\S]*formatDate\(payment\.paidAt,\s*'yyyy-MM-dd HH:mm:ss'\)/,
+  'Order change history should store payment change summaries to seconds.',
 );
 assert.doesNotMatch(
   orderReviewSource,
@@ -235,6 +397,11 @@ assert.match(
   commissionSource,
   /detail-card-\$\{index\}/,
   'Order split adjustment editor should add people as editable cards instead of table rows.',
+);
+assert.match(
+  detailSplitEditorSource,
+  /计算方式[\s\S]*固定金额[\s\S]*按实付金额百分比[\s\S]*销售月累计阶梯提成/,
+  'Order split adjustment editor should expose fixed, percentage, and tiered calculation type choices.',
 );
 assert.match(
   commissionSource,
@@ -367,6 +534,26 @@ assert.match(
   'Finance payout tab should use the employee monthly commission report wording.',
 );
 assert.match(
+  commissionRuleConfigSource,
+  /value="tiered_percentage"[\s\S]*销售月累计阶梯提成|销售月累计阶梯提成[\s\S]*value="tiered_percentage"/,
+  'Commission rule config should expose sales monthly tiered commission as a calculation type.',
+);
+assert.doesNotMatch(
+  commissionRuleConfigSource,
+  /月累计下限|月累计上限|提成比例/,
+  'Commission rule config should not edit tier thresholds; those belong in monthly payout settings.',
+);
+assert.match(
+  commissionSource,
+  /阶梯配置[\s\S]*总实付金额|总实付金额[\s\S]*阶梯配置/,
+  'Monthly payout workspace should expose tier configuration and total paid amount.',
+);
+assert.match(
+  commissionSource,
+  /headers = \[[\s\S]*'总实付金额'/,
+  'Monthly payout export should include total paid amount.',
+);
+assert.match(
   commissionSource,
   /RefundStatusBadge/,
   'Commission order split should reuse the order list refund status badge.',
@@ -378,8 +565,8 @@ assert.match(
 );
 assert.match(
   commissionSource,
-  /case 'paymentDate':[\s\S]*formatDate\(summary\.paymentDate,\s*'yyyy-MM-dd HH:mm'\)/,
-  'Commission order split should render payment date with the same minute precision as the order list.',
+  /case 'paymentDate':[\s\S]*formatDate\(summary\.paymentDate,\s*'yyyy-MM-dd HH:mm:ss'\)/,
+  'Commission order split should render payment date with the same second precision as the order list.',
 );
 assert.match(
   commissionSource,

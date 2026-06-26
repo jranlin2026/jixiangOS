@@ -70,6 +70,7 @@ const emptyRoleForm: CommissionRoleConfigInput = {
 };
 
 function formatPayout(payout: SimpleCommissionRulePayout): string {
+  if (payout.commissionType === 'tiered_percentage') return `${payout.role} 销售月累计阶梯`;
   return payout.commissionType === 'percentage'
     ? `${payout.role} ${payout.commissionValue}%`
     : `${payout.role} ¥${payout.commissionValue}`;
@@ -135,16 +136,26 @@ const CommissionRuleConfig: React.FC = () => {
     && group.resourceOwnership === ruleForm.resourceOwnership
   )), [editingGroup?.id, groups, ruleForm.orderType, ruleForm.resourceOwnership]);
 
+  const isSalesRole = (role: CommissionRole) => {
+    const config = roleConfigs.find((item) => item.name === role);
+    return role === '销售' || config?.code === 'sales' || config?.personSource === 'sales_owner';
+  };
+
   const ruleValidationMessage = useMemo(() => {
     if (!ruleForm.name.trim()) return '请填写规则名称';
     if (!ruleForm.orderType) return '请选择订单类型';
     if (!ruleForm.resourceOwnership) return '请选择资源来源';
     if (!ruleForm.payouts.length) return '至少添加一条分润角色';
     if (duplicateRuleRoles) return '同一规则内不能重复配置提成角色';
-    if (ruleForm.payouts.some((payout) => Number(payout.commissionValue) < 0)) return '分润数值不能小于 0';
+    if (ruleForm.payouts.some((payout) => payout.commissionType !== 'tiered_percentage' && Number(payout.commissionValue) < 0)) return '分润数值不能小于 0';
+    for (const payout of ruleForm.payouts) {
+      if (payout.commissionType === 'tiered_percentage') {
+        if (!isSalesRole(payout.role)) return '销售月累计阶梯提成只能配置给销售角色';
+      }
+    }
     if (duplicatedCondition) return '相同订单类型和资源来源的规则已存在';
     return '';
-  }, [duplicateRuleRoles, duplicatedCondition, ruleForm]);
+  }, [duplicateRuleRoles, duplicatedCondition, roleConfigs, ruleForm]);
 
   const roleValidationMessage = useMemo(() => {
     if (!roleForm.name.trim()) return '请填写角色名称';
@@ -222,7 +233,13 @@ const CommissionRuleConfig: React.FC = () => {
     setRuleForm((prev) => ({
       ...prev,
       payouts: prev.payouts.map((payout, payoutIndex) => (
-        payoutIndex === index ? { ...payout, [key]: value } : payout
+        payoutIndex === index
+          ? {
+            ...payout,
+            [key]: value,
+            commissionValue: key === 'commissionType' && value === 'tiered_percentage' ? 0 : payout.commissionValue,
+          }
+          : payout
       )),
     }));
   };
@@ -256,7 +273,7 @@ const CommissionRuleConfig: React.FC = () => {
       name: ruleForm.name.trim(),
       payouts: ruleForm.payouts.map((payout) => ({
         ...payout,
-        commissionValue: Number(payout.commissionValue) || 0,
+        commissionValue: payout.commissionType === 'tiered_percentage' ? 0 : Number(payout.commissionValue) || 0,
       })),
     });
     const res = editingGroup
@@ -574,62 +591,71 @@ const CommissionRuleConfig: React.FC = () => {
                 </TableHead>
                 <TableBody>
                   {ruleForm.payouts.map((payout, index) => (
-                    <TableRow key={`${payout.role}-${index}`}>
-                      <TableCell sx={{ width: '32%' }}>
-                        <FormControl fullWidth size="small">
-                          <Select
-                            value={payout.role}
-                            onChange={(event) => updatePayout(index, 'role', event.target.value as CommissionRole)}
+                    <React.Fragment key={`${payout.role}-${index}`}>
+                      <TableRow>
+                        <TableCell sx={{ width: '32%' }}>
+                          <FormControl fullWidth size="small">
+                            <Select
+                              value={payout.role}
+                              onChange={(event) => updatePayout(index, 'role', event.target.value as CommissionRole)}
+                            >
+                              {roleOptionsForPayout(payout.role).map((item) => (
+                                <MenuItem key={item.id} value={item.name}>
+                                  {item.name}{item.isActive ? '' : '（已停用）'}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </TableCell>
+                        <TableCell sx={{ width: '32%' }}>
+                          <FormControl fullWidth size="small">
+                            <Select
+                              value={payout.commissionType}
+                              onChange={(event) => updatePayout(
+                                index,
+                                'commissionType',
+                                event.target.value as SimpleCommissionRulePayout['commissionType'],
+                              )}
+                            >
+                              <MenuItem value="percentage">按实付金额百分比</MenuItem>
+                              <MenuItem value="fixed">固定金额</MenuItem>
+                              <MenuItem value="tiered_percentage">销售月累计阶梯提成</MenuItem>
+                            </Select>
+                          </FormControl>
+                        </TableCell>
+                        <TableCell sx={{ width: '24%' }}>
+                          {payout.commissionType === 'tiered_percentage' ? (
+                            <Typography variant="body2" sx={{ color: '#4b5563' }}>
+                              按下方阶梯计算
+                            </Typography>
+                          ) : (
+                            <TextField
+                              size="small"
+                              type="number"
+                              value={payout.commissionValue}
+                              onChange={(event) => updatePayout(index, 'commissionValue', Number(event.target.value))}
+                              inputProps={{ min: 0, step: payout.commissionType === 'percentage' ? 0.1 : 1 }}
+                              InputProps={{
+                                startAdornment: payout.commissionType === 'fixed' ? '¥' : undefined,
+                                endAdornment: payout.commissionType === 'percentage' ? '%' : undefined,
+                              }}
+                              fullWidth
+                            />
+                          )}
+                        </TableCell>
+                        <TableCell align="center">
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => handleRemovePayout(index)}
+                            disabled={ruleForm.payouts.length <= 1}
+                            title="删除角色"
                           >
-                            {roleOptionsForPayout(payout.role).map((item) => (
-                              <MenuItem key={item.id} value={item.name}>
-                                {item.name}{item.isActive ? '' : '（已停用）'}
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      </TableCell>
-                      <TableCell sx={{ width: '32%' }}>
-                        <FormControl fullWidth size="small">
-                          <Select
-                            value={payout.commissionType}
-                            onChange={(event) => updatePayout(
-                              index,
-                              'commissionType',
-                              event.target.value as SimpleCommissionRulePayout['commissionType'],
-                            )}
-                          >
-                            <MenuItem value="percentage">按实付金额百分比</MenuItem>
-                            <MenuItem value="fixed">固定金额</MenuItem>
-                          </Select>
-                        </FormControl>
-                      </TableCell>
-                      <TableCell sx={{ width: '24%' }}>
-                        <TextField
-                          size="small"
-                          type="number"
-                          value={payout.commissionValue}
-                          onChange={(event) => updatePayout(index, 'commissionValue', Number(event.target.value))}
-                          inputProps={{ min: 0, step: payout.commissionType === 'percentage' ? 0.1 : 1 }}
-                          InputProps={{
-                            startAdornment: payout.commissionType === 'fixed' ? '¥' : undefined,
-                            endAdornment: payout.commissionType === 'percentage' ? '%' : undefined,
-                          }}
-                          fullWidth
-                        />
-                      </TableCell>
-                      <TableCell align="center">
-                        <IconButton
-                          size="small"
-                          color="error"
-                          onClick={() => handleRemovePayout(index)}
-                          disabled={ruleForm.payouts.length <= 1}
-                          title="删除角色"
-                        >
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </TableCell>
-                    </TableRow>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                    </React.Fragment>
                   ))}
                 </TableBody>
               </Table>

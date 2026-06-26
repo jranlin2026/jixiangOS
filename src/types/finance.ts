@@ -33,6 +33,7 @@ export interface FinanceIncome {
   amount: number;
   paymentMethod: PaymentMethod;
   customerName: string;
+  productName?: string;
   productLevel: ProductLevel;
   receivedAt: Timestamp;
 }

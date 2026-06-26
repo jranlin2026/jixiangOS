@@ -60,6 +60,7 @@ export interface Refund {
   orderNo: string;
   customerId: ID;
   customerName: string;
+  productName?: string;
   productLevel: string;
   orderAmount: number;
   refundAmount: number;

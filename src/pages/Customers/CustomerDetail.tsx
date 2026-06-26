@@ -455,7 +455,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     const currentValue = (draft[field] as string) || '';
     const showCurrentUserOption = isUserField && currentValue && !users.some((user) => user.name === currentValue);
     const displayValue = field === 'createdAt' && currentCustomer.createdAt
-      ? formatDate(currentCustomer.createdAt, 'yyyy-MM-dd HH:mm')
+      ? formatDate(currentCustomer.createdAt, 'yyyy-MM-dd HH:mm:ss')
       : field === 'phone'
         ? formatPhoneForDisplay(currentCustomer.phone)
       : emptyText(currentCustomer[field] as string | number);
@@ -753,7 +753,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
           <TableHead>
             <TableRow>
               <TableCell>订单号</TableCell>
-              <TableCell>产品</TableCell>
+              <TableCell>产品名称</TableCell>
+              <TableCell>产品等级</TableCell>
               <TableCell>类型</TableCell>
               <TableCell>金额</TableCell>
               <TableCell>付款日期</TableCell>
@@ -764,18 +765,19 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
             {orders.map((order) => (
               <TableRow key={order.id}>
                 <TableCell sx={{ fontWeight: 600 }}>{order.orderNo}</TableCell>
+                <TableCell>{order.productName || order.productLevel || '-'}</TableCell>
                 <TableCell>
                   <Chip label={order.productLevel} size="small" sx={{ bgcolor: `${getProductLevelColor(order.productLevel)}18`, color: getProductLevelColor(order.productLevel), fontWeight: 600 }} />
                 </TableCell>
                 <TableCell>{order.orderType}</TableCell>
                 <TableCell>{formatCurrency(order.actualAmount || order.amount)}</TableCell>
-                <TableCell>{formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm')}</TableCell>
+                <TableCell>{formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm:ss')}</TableCell>
                 <TableCell><RefundStatusBadge status={order.refundStatus} /></TableCell>
               </TableRow>
             ))}
             {orders.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} align="center" sx={{ py: 4, color: '#9ca3af' }}>暂无订单</TableCell>
+                <TableCell colSpan={7} align="center" sx={{ py: 4, color: '#9ca3af' }}>暂无订单</TableCell>
               </TableRow>
             )}
           </TableBody>

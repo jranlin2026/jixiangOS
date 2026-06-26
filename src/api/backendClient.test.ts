@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
-import { backendRequest, clearBackendToken, readBackendToken, writeBackendToken } from './backendClient';
+import {
+  backendRequest,
+  clearBackendToken,
+  persistBackendStorageValue,
+  readBackendToken,
+  syncBackendStorageFromServer,
+  writeBackendToken,
+} from './backendClient';
+import { STORAGE_KEYS } from '../shared/utils/constants';
 
 const originalFetch = globalThis.fetch;
 const originalUseBackend = process.env.VITE_USE_BACKEND_API;
@@ -36,6 +44,59 @@ try {
   const htmlError = await backendRequest('/settings/users');
   assert.equal(htmlError.code, 502);
   assert.match(htmlError.message, /HTTP 502/);
+
+  const marketLead = {
+    id: 'lead-market-1',
+    name: '市场录入线索',
+    inputBy: '市场专员',
+    owner: '销售一号',
+    assignedTo: '销售一号',
+  };
+  const nextFlowConfig = {
+    autoAssignEnabled: true,
+    participantUserIds: ['user-sales-a', 'user-sales-b'],
+    lastAssignedIndex: 1,
+  };
+  storage.set(STORAGE_KEYS.LEADS, JSON.stringify([marketLead]));
+  storage.set(STORAGE_KEYS.LEAD_FLOW_CONFIG, JSON.stringify(nextFlowConfig));
+
+  const releasePendingWrites: Array<() => void> = [];
+  globalThis.fetch = async (url, init) => {
+    if (init?.method === 'PUT') {
+      await new Promise<void>((resolve) => releasePendingWrites.push(resolve));
+      return {
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        text: async () => JSON.stringify({ code: 0, data: true, message: 'success' }),
+      } as Response;
+    }
+
+    assert.equal(String(url), 'http://127.0.0.1:3001/api/storage');
+    return {
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      text: async () => JSON.stringify({
+        code: 0,
+        data: {
+          [STORAGE_KEYS.LEADS]: [],
+          [STORAGE_KEYS.LEAD_FLOW_CONFIG]: {
+            ...nextFlowConfig,
+            lastAssignedIndex: 0,
+          },
+        },
+        message: 'success',
+      }),
+    } as Response;
+  };
+
+  persistBackendStorageValue(STORAGE_KEYS.LEADS, [marketLead]);
+  persistBackendStorageValue(STORAGE_KEYS.LEAD_FLOW_CONFIG, nextFlowConfig);
+
+  await syncBackendStorageFromServer(0);
+
+  assert.deepEqual(JSON.parse(storage.get(STORAGE_KEYS.LEADS) || '[]'), [marketLead]);
+  assert.equal(JSON.parse(storage.get(STORAGE_KEYS.LEAD_FLOW_CONFIG) || '{}').lastAssignedIndex, 1);
+  releasePendingWrites.forEach((release) => release());
 } finally {
   clearBackendToken();
   globalThis.fetch = originalFetch;

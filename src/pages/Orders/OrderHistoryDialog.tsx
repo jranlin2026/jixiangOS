@@ -38,7 +38,7 @@ function formatLegacyPaymentJson(value: string): string | null {
         `第${index + 1}笔`,
         payment.amount !== undefined ? `金额:${payment.amount}` : '',
         payment.paymentMethod ? `方式:${payment.paymentMethod}` : '',
-        payment.paidAt ? `日期:${String(payment.paidAt).slice(0, 10)}` : '',
+        payment.paidAt ? `日期:${formatDate(payment.paidAt, 'yyyy-MM-dd HH:mm:ss')}` : '',
         payment.paymentOrderNo ? `单号:${payment.paymentOrderNo}` : '',
         payment.voucherName ? `凭证:${payment.voucherName}` : '',
       ].filter(Boolean);

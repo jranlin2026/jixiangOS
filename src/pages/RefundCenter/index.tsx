@@ -35,14 +35,15 @@ type RefundColumn = {
   render: (refund: Refund) => React.ReactNode;
 };
 
-const REFUND_VIEW_STORAGE_KEY = 'aaos_refund_table_view_v1';
-const REFUND_WIDTH_STORAGE_KEY = 'aaos_refund_table_widths_v1';
+const REFUND_VIEW_STORAGE_KEY = 'aaos_refund_table_view_v2';
+const REFUND_WIDTH_STORAGE_KEY = 'aaos_refund_table_widths_v2';
 const REFUND_ACTION_COLUMN_WIDTH = 160;
 
 const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   refundNo: 180,
   orderNo: 180,
   customerName: 180,
+  productName: 180,
   productLevel: 140,
   orderAmount: 140,
   refundAmount: 140,
@@ -139,6 +140,7 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
     { id: 'refundNo', label: '退款号', render: (refund) => refund.refundNo },
     { id: 'orderNo', label: '订单号', render: (refund) => refund.orderNo },
     { id: 'customerName', label: '客户', render: (refund) => refund.customerName },
+    { id: 'productName', label: '产品名称', render: (refund) => refund.productName || refund.productLevel || '-' },
     {
       id: 'productLevel',
       label: '产品等级',

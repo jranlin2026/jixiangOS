@@ -121,7 +121,7 @@ const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[]): Custom
   { id: 'totalSpent', label: '累计消费', render: (customer) => formatCurrency(customer.totalSpent) },
   { id: 'orderCount', label: '订单数', render: (customer) => customer.orderCount },
   { id: 'owner', label: '销售负责人', render: (customer) => customer.owner || '-' },
-  { id: 'createdAt', label: '创建时间', render: (customer) => formatDate(customer.createdAt) },
+  { id: 'createdAt', label: '创建时间', render: (customer) => formatDate(customer.createdAt, 'yyyy-MM-dd HH:mm:ss') },
   ];
 };
 
@@ -675,6 +675,8 @@ const Customers: React.FC = () => {
             <Box sx={{ display: 'grid', gap: 1, bgcolor: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5 }}>
               <Typography variant="body2">申请编号：{submittedOrderApplication.applicationNo}</Typography>
               <Typography variant="body2">客户：{submittedOrderApplication.orderData.customerName}</Typography>
+              <Typography variant="body2">产品名称：{submittedOrderApplication.orderData.productName || submittedOrderApplication.orderData.productLevel || '-'}</Typography>
+              <Typography variant="body2">产品等级：{submittedOrderApplication.orderData.productLevel || '-'}</Typography>
               <Typography variant="body2">订单类型：{submittedOrderApplication.orderData.orderType}</Typography>
               <Typography variant="body2">实付金额：{formatCurrency(submittedOrderApplication.orderData.actualAmount || submittedOrderApplication.orderData.amount)}</Typography>
               <Typography variant="body2">当前状态：{submittedOrderApplication.status}</Typography>
@@ -740,7 +742,8 @@ const Customers: React.FC = () => {
             <TableHead>
               <TableRow>
                 <TableCell>订单号</TableCell>
-                <TableCell>产品分类</TableCell>
+                <TableCell>产品名称</TableCell>
+                <TableCell>产品等级</TableCell>
                 <TableCell>订单类型</TableCell>
                 <TableCell>金额</TableCell>
                 <TableCell>付款日期</TableCell>
@@ -751,6 +754,7 @@ const Customers: React.FC = () => {
               {customerOrders.map((order) => (
                 <TableRow key={order.id}>
                   <TableCell>{order.orderNo}</TableCell>
+                  <TableCell>{order.productName || order.productLevel || '-'}</TableCell>
                   <TableCell>
                     <Chip
                       label={order.productLevel}
@@ -760,13 +764,13 @@ const Customers: React.FC = () => {
                   </TableCell>
                   <TableCell>{order.orderType}</TableCell>
                   <TableCell>{formatCurrency(order.actualAmount || order.amount)}</TableCell>
-                  <TableCell>{formatDate(order.payments?.[0]?.paidAt || order.createdAt)}</TableCell>
+                  <TableCell>{formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm:ss')}</TableCell>
                   <TableCell>{order.status}</TableCell>
                 </TableRow>
               ))}
               {customerOrders.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 4, color: '#9ca3af' }}>
+                  <TableCell colSpan={7} align="center" sx={{ py: 4, color: '#9ca3af' }}>
                     暂无订单
                   </TableCell>
                 </TableRow>

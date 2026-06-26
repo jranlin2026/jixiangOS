@@ -16,12 +16,14 @@ import {
 } from '@mui/material';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import SyncIcon from '@mui/icons-material/Sync';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { STORAGE_KEYS } from '../../shared/utils/constants';
 import {
   BUSINESS_DATA_STORAGE_KEYS,
   clearBusinessTestData,
   CONTRACT_KEY_PREFIX,
+  resyncLocalCacheFromBackend,
 } from '../../api/dataMaintenanceApi';
 
 const readArrayCount = (key: string): number => {
@@ -48,7 +50,12 @@ const readFinanceCount = (): number => {
 
 const readContractCacheCount = (): number => {
   try {
-    return Object.keys(localStorage).filter((key) => key.startsWith(CONTRACT_KEY_PREFIX)).length;
+    let count = 0;
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (key?.startsWith(CONTRACT_KEY_PREFIX)) count += 1;
+    }
+    return count;
   } catch {
     return 0;
   }
@@ -57,6 +64,7 @@ const readContractCacheCount = (): number => {
 const DataMaintenance: React.FC = () => {
   const { alert, confirm, dialog } = useAppFeedback();
   const [refreshToken, setRefreshToken] = useState(0);
+  const [resyncing, setResyncing] = useState(false);
 
   const rows = useMemo(() => (
     BUSINESS_DATA_STORAGE_KEYS.map((item) => ({
@@ -70,6 +78,25 @@ const DataMaintenance: React.FC = () => {
   const totalCount = rows.reduce((sum, item) => sum + item.count, 0) + financeCount + contractCacheCount;
 
   const handleRefresh = () => setRefreshToken((value) => value + 1);
+
+  const handleResyncLocalCache = async () => {
+    const confirmed = await confirm(
+      '这只会清理当前电脑浏览器里的本机业务缓存，并从服务器重新加载数据，不会删除 MySQL 数据，也不会影响其他设备。\n\n如果刚刚录入了数据，请确认页面已经保存成功后再继续。',
+      '重新同步本机缓存',
+    );
+    if (!confirmed) return;
+
+    setResyncing(true);
+    const result = await resyncLocalCacheFromBackend();
+    setResyncing(false);
+    handleRefresh();
+
+    if (result.code === 0) {
+      await alert('本机缓存已从服务器重新同步。请刷新当前业务页面，或重新进入线索、客户、订单等页面查看最新数据。', '同步完成');
+      return;
+    }
+    await alert(result.message || '重新同步失败，请稍后重试。', '同步失败');
+  };
 
   const handleClear = async () => {
     const confirmed = await confirm(
@@ -93,12 +120,15 @@ const DataMaintenance: React.FC = () => {
         <Box>
           <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>数据维护</Typography>
           <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>
-            用于清空本地开发环境的业务测试数据，方便重新跑真实案例流程。
+            用于处理当前电脑缓存、业务测试数据和系统维护任务。
           </Typography>
         </Box>
-        <Stack direction="row" spacing={1}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
           <Button variant="outlined" startIcon={<RefreshIcon />} onClick={handleRefresh}>
             刷新统计
+          </Button>
+          <Button variant="outlined" startIcon={<SyncIcon />} onClick={handleResyncLocalCache} disabled={resyncing}>
+            {resyncing ? '同步中...' : '重新同步本机缓存'}
           </Button>
           <Button variant="contained" color="error" startIcon={<DeleteSweepIcon />} onClick={handleClear}>
             清空业务测试数据
@@ -106,8 +136,12 @@ const DataMaintenance: React.FC = () => {
         </Stack>
       </Stack>
 
+      <Alert severity="info" sx={{ mb: 2 }}>
+        重新同步本机缓存只会刷新当前浏览器里的本地数据副本，不会删除服务器 MySQL 数据。
+      </Alert>
+
       <Alert severity="warning" sx={{ mb: 2 }}>
-        这个操作只适合当前前端 mock/localStorage 测试环境。正式后端上线后，需要改为后端受控的数据维护接口。
+        清空业务测试数据只适合当前测试环境，会清理业务数据；正式生产环境请谨慎使用。
       </Alert>
 
       <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', mb: 2, p: 2 }}>

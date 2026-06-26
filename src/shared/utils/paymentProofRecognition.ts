@@ -4,7 +4,8 @@ function toDateTimeInputValue(value: Date): string {
   const day = String(value.getDate()).padStart(2, '0');
   const hours = String(value.getHours()).padStart(2, '0');
   const minutes = String(value.getMinutes()).padStart(2, '0');
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
+  const seconds = String(value.getSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
 }
 
 function safeDecodeURIComponent(value: string): string {
@@ -51,19 +52,19 @@ function normalizeRecognizedText(rawText: string): string {
 
 function formatDateTimeMatch(match: RegExpMatchArray, dayFirst = false): string {
   if (dayFirst) {
-    const [, month, day, year, hour = '00', minute = '00'] = match;
-    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
+    const [, month, day, year, hour = '00', minute = '00', second = '00'] = match;
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}`;
   }
 
-  const [, year, month, day, hour = '00', minute = '00'] = match;
-  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
+  const [, year, month, day, hour = '00', minute = '00', second = '00'] = match;
+  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}`;
 }
 
 function parseDateInText(text: string): string | null {
   const candidates = [
-    /(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})[\s_T-]+(\d{1,2})[:.-](\d{1,2})/,
+    /(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})[\s_T-]+(\d{1,2})[:.-](\d{1,2})(?:[:.-](\d{1,2}))?/,
     /(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\s+(\d{1,2})(\d{2})\b/,
-    /(\d{1,2})[-/.](\d{1,2})[-/.](20\d{2})[\s_T-]+(\d{1,2})[:.-](\d{1,2})/,
+    /(\d{1,2})[-/.](\d{1,2})[-/.](20\d{2})[\s_T-]+(\d{1,2})[:.-](\d{1,2})(?:[:.-](\d{1,2}))?/,
     /(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})/,
   ];
 
@@ -73,10 +74,10 @@ function parseDateInText(text: string): string | null {
     return formatDateTimeMatch(match, index === 2);
   }
 
-  const compact = text.match(/\b(20\d{2})(\d{2})(\d{2})(\d{2})?(\d{2})?\b/);
+  const compact = text.match(/\b(20\d{2})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?\b/);
   if (compact) {
-    const [, year, month, day, hour = '00', minute = '00'] = compact;
-    return `${year}-${month}-${day}T${hour}:${minute}`;
+    const [, year, month, day, hour = '00', minute = '00', second = '00'] = compact;
+    return `${year}-${month}-${day}T${hour}:${minute}:${second}`;
   }
 
   return null;

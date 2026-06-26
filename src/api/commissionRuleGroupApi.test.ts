@@ -35,6 +35,40 @@ function storedRules(): CommissionRule[] {
   return JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSION_RULES) || '[]') as CommissionRule[];
 }
 
+function seedOrders(orders: Order[]) {
+  storage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
+}
+
+function buildOrder(input: Partial<Order> & Pick<Order, 'id' | 'orderNo' | 'actualAmount' | 'salesId' | 'salesName'>): Order {
+  return {
+    id: input.id,
+    orderNo: input.orderNo,
+    customerId: input.customerId || `cust-${input.id}`,
+    customerName: input.customerName || `客户-${input.id}`,
+    productLevel: input.productLevel || '代理',
+    orderType: input.orderType || '新代理',
+    amount: input.amount ?? input.actualAmount,
+    actualAmount: input.actualAmount,
+    paymentMethod: input.paymentMethod || '对公转账',
+    officialPaymentChannel: input.officialPaymentChannel || '对公银行转账',
+    status: input.status || '已确认',
+    refundStatus: input.refundStatus || '无',
+    owner: input.owner || input.salesName || '',
+    salesId: input.salesId,
+    salesName: input.salesName,
+    resourceOwnership: input.resourceOwnership || '公司资源',
+    sourceType: input.sourceType || '',
+    payments: input.payments || [{
+      id: `pay-${input.id}`,
+      amount: input.actualAmount,
+      paymentMethod: input.paymentMethod || '对公转账',
+      paidAt: input.createdAt || now,
+    }],
+    createdAt: input.createdAt || now,
+    updatedAt: input.updatedAt || input.createdAt || now,
+  } as Order;
+}
+
 const legacyRule: CommissionRule = {
   id: 'legacy-rule',
   name: '旧复杂规则',
@@ -134,3 +168,96 @@ assert.equal(calcRes.data[0].commissionAmount, 100);
 const deleteRes = await (commissionRuleApi as any).deleteSimpleCommissionRuleGroup(createRes.data.id);
 assert.equal(deleteRes.code, 0);
 assert.deepEqual(storedRules(), []);
+
+const tieredGroupRes = await (commissionRuleApi as any).createSimpleCommissionRuleGroup({
+  name: '新代理公司资源-销售阶梯',
+  orderType: '新代理',
+  resourceOwnership: '公司资源',
+  isActive: true,
+  payouts: [{
+    role: '销售',
+    commissionType: 'tiered_percentage',
+    commissionValue: 0,
+  }],
+});
+assert.equal(tieredGroupRes.code, 0);
+assert.equal(tieredGroupRes.data.payouts[0].commissionType, 'tiered_percentage');
+assert.equal('tiers' in tieredGroupRes.data.payouts[0], false);
+
+const tieredRule = storedRules()[0];
+assert.equal(tieredRule.commissionType, 'tiered_percentage');
+assert.equal('tiers' in tieredRule, false);
+
+seedOrders([
+  buildOrder({
+    id: 'order-existing-1',
+    orderNo: 'ORD-EXISTING-1',
+    actualAmount: 20000,
+    salesId: 'sales-a',
+    salesName: 'Sales A',
+    createdAt: '2026-06-05T10:00:00.000Z',
+  }),
+  buildOrder({
+    id: 'order-current',
+    orderNo: 'ORD-CURRENT',
+    actualAmount: 10000,
+    salesId: 'sales-a',
+    salesName: 'Sales A',
+    createdAt: '2026-06-19T08:00:00.000Z',
+  }),
+  buildOrder({
+    id: 'order-other-sales',
+    orderNo: 'ORD-OTHER-SALES',
+    actualAmount: 50000,
+    salesId: 'sales-b',
+    salesName: 'Sales B',
+    createdAt: '2026-06-06T10:00:00.000Z',
+  }),
+  buildOrder({
+    id: 'order-other-month',
+    orderNo: 'ORD-OTHER-MONTH',
+    actualAmount: 50000,
+    salesId: 'sales-a',
+    salesName: 'Sales A',
+    createdAt: '2026-05-06T10:00:00.000Z',
+  }),
+]);
+
+const tieredCalcRes = await commissionRuleApi.calculateCommissionsForOrder(buildOrder({
+  id: 'order-current',
+  orderNo: 'ORD-CURRENT',
+  actualAmount: 10000,
+  salesId: 'sales-a',
+  salesName: 'Sales A',
+  createdAt: '2026-06-19T08:00:00.000Z',
+}));
+assert.equal(tieredCalcRes.code, 0);
+assert.equal(tieredCalcRes.data.length, 1);
+assert.equal(tieredCalcRes.data[0].commissionType, 'tiered_percentage');
+assert.equal(tieredCalcRes.data[0].commissionValue, 0);
+assert.equal(tieredCalcRes.data[0].commissionRate, 0);
+assert.equal(tieredCalcRes.data[0].commissionAmount, 0);
+assert.match(tieredCalcRes.data[0].formulaText || '', /月度提成/);
+
+seedOrders([
+  buildOrder({
+    id: 'order-existing-2',
+    orderNo: 'ORD-EXISTING-2',
+    actualAmount: 45000,
+    salesId: 'sales-a',
+    salesName: 'Sales A',
+    createdAt: '2026-06-05T10:00:00.000Z',
+  }),
+]);
+
+const highTierCalcRes = await commissionRuleApi.calculateCommissionsForOrder(buildOrder({
+  id: 'order-high-tier',
+  orderNo: 'ORD-HIGH-TIER',
+  actualAmount: 5000,
+  salesId: 'sales-a',
+  salesName: 'Sales A',
+  createdAt: '2026-06-20T08:00:00.000Z',
+}));
+assert.equal(highTierCalcRes.code, 0);
+assert.equal(highTierCalcRes.data[0].commissionValue, 0);
+assert.equal(highTierCalcRes.data[0].commissionAmount, 0);

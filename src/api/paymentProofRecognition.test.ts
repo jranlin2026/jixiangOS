@@ -53,22 +53,22 @@ const alipayBillDetail = `
 
 const result1 = recognizePaymentProof(wechatBillDetail, 0, fallbackDate);
 assert.equal(result1.amount, 13000);
-assert.equal(result1.paidDate, '2026-05-28T16:01');
+assert.equal(result1.paidDate, '2026-05-28T16:01:33');
 assert.equal(result1.paymentOrderNo, '2026052822001414451433679725');
 
 const result2 = recognizePaymentProof(wechatShopOrderDetail, 0, fallbackDate);
 assert.equal(result2.amount, 899);
-assert.equal(result2.paidDate, '2026-06-17T11:49');
+assert.equal(result2.paidDate, '2026-06-17T11:49:11');
 assert.equal(result2.paymentOrderNo, '3737140054069494528');
 
 const result3 = recognizePaymentProof(wechatPendingShipmentCollapsed, 899, fallbackDate);
 assert.equal(result3.amount, 899);
-assert.equal(result3.paidDate, '2026-06-23T18:11');
+assert.equal(result3.paidDate, '2026-06-23T18:11:12');
 assert.equal(result3.paymentOrderNo, '3737024527869831424');
 
 const result4 = recognizePaymentProof(alipayBillDetail, 0, fallbackDate);
 assert.equal(result4.amount, 899);
-assert.equal(result4.paidDate, '2026-06-01T19:00');
+assert.equal(result4.paidDate, '2026-06-01T19:00:30');
 assert.equal(result4.paymentOrderNo, '4200003129202606018798179055');
 
 const actualCollapsedWechatOcr = `
@@ -90,5 +90,5 @@ const actualAlipayOcrMissingTopAmount = `
 `;
 const result6 = recognizePaymentProof(actualAlipayOcrMissingTopAmount, 899, fallbackDate);
 assert.equal(result6.amount, 899);
-assert.equal(result6.paidDate, '2026-06-01T19:00');
+assert.equal(result6.paidDate, '2026-06-01T19:00:30');
 assert.equal(result6.paymentOrderNo, '4200003129202606018798179055');

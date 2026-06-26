@@ -7,6 +7,7 @@ import type {
   RefundStats,
 } from '../types/refund';
 import type { Order } from '../types/order';
+import type { Product } from '../types/product';
 import type { Commission, CommissionOperationLog } from '../types/commission';
 import type { FinanceExpense, FinanceDailyRecord, ChannelROI, FinanceIncome } from '../types/finance';
 import type { ApiResponse, PaginatedResponse } from './types';
@@ -68,8 +69,17 @@ function pickDefaultAssignee(data: Partial<Refund>, order?: Order): { id: string
   return { id: data.applicantId || 'user-001', name: data.applicantName || '待分配', role: '销售' };
 }
 
+function getProductName(productId?: string, productLevel?: string, fallback?: string): string | undefined {
+  const products = getStorageData<Product[]>(STORAGE_KEYS.PRODUCTS) || [];
+  const matched = (productId ? products.find((product) => product.id === productId) : undefined)
+    || (productLevel ? products.find((product) => product.level === productLevel) : undefined);
+  return matched?.name || fallback || productLevel;
+}
+
 function normalizeRefund(refund: Refund): Refund {
   const createdAt = refund.createdAt || nowIso();
+  const order = (getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [])
+    .find((item) => item.id === refund.orderId || item.orderNo === refund.orderNo);
   const assigned = pickDefaultAssignee(refund);
   const status = refund.status === '退款申请中' ? '待分配' : refund.status;
   const recoveryTask = refund.recoveryTask || {
@@ -93,6 +103,7 @@ function normalizeRefund(refund: Refund): Refund {
 
   return {
     ...refund,
+    productName: getProductName(order?.productId, order?.productLevel || refund.productLevel, refund.productName || order?.productName),
     status,
     recoveryRate: refund.recoveryRate ?? DEFAULT_RECOVERY_RATE,
     frozenCommissionAmount: refund.frozenCommissionAmount ?? 0,

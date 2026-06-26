@@ -326,6 +326,7 @@ export const STORAGE_KEYS = {
   COMMISSION_RULES: `${STORAGE_PREFIX}commission_rules`,
   COMMISSION_ROLE_CONFIGS: `${STORAGE_PREFIX}commission_role_configs`,
   COMMISSION_SETTLEMENT_BATCHES: `${STORAGE_PREFIX}commission_settlement_batches`,
+  MONTHLY_COMMISSION_TIER_CONFIGS: `${STORAGE_PREFIX}monthly_commission_tier_configs`,
   TAGS: `${STORAGE_PREFIX}tags`,
   INITIALIZED: `${STORAGE_PREFIX}initialized`,
 } as const;

@@ -1,10 +1,12 @@
 import type { Order, OrderFilters, OrderStats } from '../types/order';
 import type { Customer } from '../types/customer';
 import type { Commission, CommissionRole } from '../types/commission';
+import type { Product } from '../types/product';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
+import { formatDate } from '../shared/utils/formatters';
 import { initializeMockData } from './mock';
 import { commissionRuleApi } from './commissionRuleApi';
 import { deliveryApi } from './deliveryApi';
@@ -31,10 +33,25 @@ function getPrimaryPaymentDate(order: Order): string {
   return order.payments?.[0]?.paidAt || order.createdAt;
 }
 
+function getProductName(productId?: string, productLevel?: string, fallback?: string): string | undefined {
+  const products = getStorageData<Product[]>(STORAGE_KEYS.PRODUCTS) || [];
+  const matched = (productId ? products.find((product) => product.id === productId) : undefined)
+    || (productLevel ? products.find((product) => product.level === productLevel) : undefined);
+  return matched?.name || fallback || productLevel;
+}
+
 function normalizeOrder(order: Order): Order {
   return {
     ...order,
+    productName: getProductName(order.productId, order.productLevel, order.productName),
     resourceOwnership: normalizeResourceOwnership(order.resourceOwnership || order.sourceType),
+  };
+}
+
+function enrichOrderProductData<T extends Partial<Order>>(data: T): T & { productName?: string } {
+  return {
+    ...data,
+    productName: getProductName(data.productId, data.productLevel, data.productName),
   };
 }
 
@@ -92,7 +109,7 @@ function syncCustomerOrderStats(order: Order, allOrders: Order[], operator = SYS
       {
         id: `milestone-${uuidv4().slice(0, 8)}`,
         date: getPrimaryPaymentDate(order).slice(0, 10),
-        title: `签约${order.productLevel}产品`,
+        title: `签约${order.productName || order.productLevel}`,
         description: `订单${order.orderNo}，实付${Number(order.actualAmount || order.amount).toLocaleString('zh-CN')}元`,
         productLevel: order.productLevel,
         orderId: order.id,
@@ -106,7 +123,7 @@ function syncCustomerOrderStats(order: Order, allOrders: Order[], operator = SYS
       id: `act-${uuidv4().slice(0, 8)}`,
       type: 'order' as const,
       title: `创建了订单 ${order.orderNo}`,
-      content: `签约${order.productLevel}，实付${Number(order.actualAmount || order.amount).toLocaleString('zh-CN')}元`,
+      content: `签约${order.productName || order.productLevel}，实付${Number(order.actualAmount || order.amount).toLocaleString('zh-CN')}元`,
       operator,
       relatedId: order.id,
       relatedType: 'order' as const,
@@ -141,6 +158,7 @@ function syncCustomerOrderStats(order: Order, allOrders: Order[], operator = SYS
 const ORDER_CHANGE_FIELDS: Array<{ field: keyof Order; label: string }> = [
   { field: 'customerId', label: '客户' },
   { field: 'customerName', label: '客户名称' },
+  { field: 'productName', label: '产品名称' },
   { field: 'productLevel', label: '产品等级/分类' },
   { field: 'orderType', label: '订单类型' },
   { field: 'amount', label: '订单金额' },
@@ -175,7 +193,7 @@ function formatPaymentChangeValue(value: unknown): string | null {
       `第${index + 1}笔`,
       payment.amount !== undefined ? `金额:${payment.amount}` : '',
       payment.paymentMethod ? `方式:${payment.paymentMethod}` : '',
-      payment.paidAt ? `日期:${String(payment.paidAt).slice(0, 10)}` : '',
+      payment.paidAt ? `日期:${formatDate(payment.paidAt, 'yyyy-MM-dd HH:mm:ss')}` : '',
       payment.paymentOrderNo ? `单号:${payment.paymentOrderNo}` : '',
       payment.voucherName ? `凭证:${payment.voucherName}` : '',
     ].filter(Boolean);
@@ -333,7 +351,7 @@ async function fetchOrderStats(): Promise<ApiResponse<OrderStats>> {
 async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'orderNo'>): Promise<ApiResponse<Order>> {
   ensureInit();
   await delay(200);
-  const orderData = enrichOrderDataFromCustomer(data);
+  const orderData = enrichOrderProductData(enrichOrderDataFromCustomer(data));
   const validationError = validateOrderAttribution(orderData);
   if (validationError) return createErrorResponse(validationError);
   const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
@@ -390,6 +408,7 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
         evidenceRequired: calc.evidenceRequired,
         evidenceStatus: calc.evidenceStatus,
         formulaText: calc.formulaText,
+        ruleCalculationType: calc.commissionType,
         role: calc.role,
         owner: resolvedPersonName,
         ownerId: calc.ownerOverride ? undefined : assignee.ownerId,
@@ -489,13 +508,14 @@ async function updateOrder(id: string, data: Partial<Order>): Promise<ApiRespons
   if (idx === -1) return createSuccessResponse(null);
   const now = new Date().toISOString();
   const existing = orders[idx];
-  const changes = buildOrderChanges(existing, data);
+  const nextData = enrichOrderProductData(data);
+  const changes = buildOrderChanges(existing, nextData);
   const history = existing.changeHistory || [];
   const operator = getCurrentOperatorName(existing.owner);
   orders[idx] = {
     ...existing,
-    ...data,
-    resourceOwnership: normalizeResourceOwnership(data.resourceOwnership || data.sourceType || existing.resourceOwnership || existing.sourceType),
+    ...nextData,
+    resourceOwnership: normalizeResourceOwnership(nextData.resourceOwnership || nextData.sourceType || existing.resourceOwnership || existing.sourceType),
     changeHistory: changes.length > 0
       ? [{
         id: `hist-${uuidv4().slice(0, 8)}`,

@@ -20,10 +20,38 @@ const businessUpserts: any[] = [];
 let deletedWhere: any = null;
 let businessDeletedWhere: any = null;
 let appStorageUpserted = false;
+const userRows = [
+  {
+    id: 'user-real-sales',
+    name: '真实销售',
+    account: 'real_sales',
+    email: '',
+    phone: '',
+    role: '销售顾问',
+    avatar: null,
+    departmentId: 'dept-sales',
+    positionId: null,
+    positionName: null,
+    roleId: 'role-sales-consultant',
+    passwordHash: null,
+    passwordSalt: null,
+    passwordUpdatedAt: null,
+    lastLoginAt: null,
+    isActive: true,
+    employmentStatus: 'active',
+    leftAt: null,
+    leftBy: null,
+    createdAt: new Date('2026-06-24T00:00:00.000Z'),
+    updatedAt: new Date('2026-06-24T00:00:00.000Z'),
+  },
+];
 
 const prisma = {
   appStorage: {
-    findMany: async () => [{ key: STORAGE_KEYS.CUSTOMERS, value: [] }],
+    findMany: async () => [
+      { key: STORAGE_KEYS.CUSTOMERS, value: [] },
+      { key: STORAGE_KEYS.USERS, value: [{ id: 'user-stale', name: '李娜' }] },
+    ],
     findUnique: async ({ where }: any) => ({ key: where.key, value: ['app-storage-value'] }),
     upsert: async () => {
       appStorageUpserted = true;
@@ -59,6 +87,9 @@ const prisma = {
       return { count: 0 };
     },
   },
+  user: {
+    findMany: async () => userRows,
+  },
 } as any;
 
 const service = createStorageService(prisma);
@@ -66,10 +97,15 @@ const service = createStorageService(prisma);
 const listResult = await service.list();
 assert.equal(listResult.code, 0);
 assert.deepEqual((listResult.data as any)[STORAGE_KEYS.LEADS].map((item: any) => item.id), ['lead-new', 'lead-old']);
+assert.deepEqual((listResult.data as any)[STORAGE_KEYS.USERS].map((item: any) => item.name), ['真实销售']);
 
 const getResult = await service.get(STORAGE_KEYS.LEADS);
 assert.equal(getResult.code, 0);
 assert.deepEqual((getResult.data as any[]).map((item) => item.id), ['lead-new', 'lead-old']);
+
+const getUsersResult = await service.get(STORAGE_KEYS.USERS);
+assert.equal(getUsersResult.code, 0);
+assert.deepEqual((getUsersResult.data as any[]).map((item) => item.name), ['真实销售']);
 
 const nextLeads = [
   { id: 'lead-a', name: 'A线索', phone: '+8613800000000', status: '新线索', createdAt: '2026-06-24T01:00:00.000Z', updatedAt: '2026-06-24T01:00:00.000Z' },

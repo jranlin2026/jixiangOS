@@ -5,6 +5,7 @@ import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { ensureAdminUser } from '../shared/utils/auth';
 import { ensureOrganizationConfigData, migrateUsersWithOrganization } from '../shared/utils/organizationConfig';
+import { backendRequest, shouldUseBackendApi } from './backendClient';
 
 export type BusinessDataStorageKey = {
   key: string;
@@ -44,13 +45,71 @@ function repairOrganizationStorage(): void {
   setStorageData(STORAGE_KEYS.USERS, migrateUsersWithOrganization(ensureAdminUser(users || [])));
 }
 
+function listLocalStorageKeys(): string[] {
+  const keys: string[] = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key) keys.push(key);
+  }
+  return keys;
+}
+
 export function clearBusinessTestData(): ApiResponse<{ clearedKeys: string[] }> {
   BUSINESS_DATA_STORAGE_KEYS.forEach((item) => setStorageData(item.key, []));
   setStorageData(STORAGE_KEYS.FINANCE, FINANCE_EMPTY_VALUE);
-  Object.keys(localStorage)
+  listLocalStorageKeys()
     .filter((key) => key.startsWith(CONTRACT_KEY_PREFIX))
     .forEach((key) => localStorage.removeItem(key));
   repairOrganizationStorage();
   localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
   return createSuccessResponse({ clearedKeys: BUSINESS_DATA_STORAGE_KEYS.map((item) => item.key) });
+}
+
+function collectLocalCacheKeysForResync(): string[] {
+  const configuredKeys = new Set<string>(Object.values(STORAGE_KEYS));
+  listLocalStorageKeys()
+    .filter((key) => key.startsWith(CONTRACT_KEY_PREFIX))
+    .forEach((key) => configuredKeys.add(key));
+  return Array.from(configuredKeys);
+}
+
+export async function resyncLocalCacheFromBackend(): Promise<ApiResponse<{ clearedKeys: string[]; restoredKeys: string[] }>> {
+  if (!shouldUseBackendApi()) {
+    return {
+      code: -1,
+      data: { clearedKeys: [], restoredKeys: [] },
+      message: '当前未启用后端数据库模式，不能从服务器重新同步本机缓存。',
+    };
+  }
+
+  let response: ApiResponse<Record<string, unknown>>;
+  try {
+    response = await backendRequest<Record<string, unknown>>('/storage');
+  } catch {
+    return {
+      code: -1,
+      data: { clearedKeys: [], restoredKeys: [] },
+      message: '重新同步失败，请检查后端服务或网络连接后重试。',
+    };
+  }
+
+  if (response.code !== 0 || !response.data) {
+    return {
+      code: response.code || -1,
+      data: { clearedKeys: [], restoredKeys: [] },
+      message: response.message || '从服务器读取缓存失败，请稍后重试。',
+    };
+  }
+
+  const clearedKeys = collectLocalCacheKeysForResync();
+  clearedKeys.forEach((key) => localStorage.removeItem(key));
+
+  Object.entries(response.data).forEach(([key, value]) => {
+    localStorage.setItem(key, JSON.stringify(value));
+  });
+
+  return createSuccessResponse({
+    clearedKeys,
+    restoredKeys: Object.keys(response.data),
+  });
 }

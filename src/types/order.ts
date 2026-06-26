@@ -54,6 +54,7 @@ export interface Order {
   orderNo: string;
   customerId: ID;
   customerName: string;
+  productName?: string;
   productLevel: ProductLevel;
   productId?: ID;
   orderType: OrderType;

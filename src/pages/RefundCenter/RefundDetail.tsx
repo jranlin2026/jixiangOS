@@ -77,6 +77,7 @@ const RefundDetail: React.FC<RefundDetailProps> = ({ refund, open, onClose }) =>
         <DialogCloseTitle onClose={onClose}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <Typography variant="h6" sx={{ fontWeight: 600 }}>{refund.refundNo}</Typography>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>{refund.productName || refund.productLevel}</Typography>
             <Chip label={refund.productLevel} size="small" sx={{ bgcolor: `${levelColor}18`, color: levelColor, fontWeight: 600 }} />
           </Box>
           <Chip label={refund.status} size="small" color={getStatusColor(refund.status)} />
@@ -114,6 +115,14 @@ const RefundDetail: React.FC<RefundDetailProps> = ({ refund, open, onClose }) =>
               <Box>
                 <Typography variant="body2" sx={{ color: '#6b7280' }}>客户名称</Typography>
                 <Typography variant="body1">{refund.customerName}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="body2" sx={{ color: '#6b7280' }}>产品名称</Typography>
+                <Typography variant="body1">{refund.productName || refund.productLevel || '-'}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="body2" sx={{ color: '#6b7280' }}>产品等级</Typography>
+                <Typography variant="body1">{refund.productLevel || '-'}</Typography>
               </Box>
               <Box>
                 <Typography variant="body2" sx={{ color: '#6b7280' }}>订单金额</Typography>

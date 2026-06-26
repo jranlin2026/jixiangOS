@@ -66,6 +66,7 @@ import type {
   CommissionOperationLog,
   CommissionRole,
   CommissionRoleConfig,
+  CommissionTier,
   MonthlyCommissionPayout,
 } from '../../types/commission';
 import type { Department } from '../../types/department';
@@ -99,6 +100,7 @@ const DEFAULT_ORDER_STATUS_COUNTS: CommissionOrderSummaryStatusCounts = {
 type OrderSplitColumnId =
   | 'orderNo'
   | 'customerName'
+  | 'productName'
   | 'productLevel'
   | 'orderType'
   | 'orderAmount'
@@ -120,12 +122,13 @@ type OrderSplitColumnMeta = {
   defaultWidth: number;
 };
 
-const ORDER_SPLIT_VIEW_STORAGE_KEY = 'aaos_commission_order_split_view_v1';
-const ORDER_SPLIT_WIDTH_STORAGE_KEY = 'aaos_commission_order_split_widths_v1';
+const ORDER_SPLIT_VIEW_STORAGE_KEY = 'aaos_commission_order_split_view_v2';
+const ORDER_SPLIT_WIDTH_STORAGE_KEY = 'aaos_commission_order_split_widths_v2';
 
 const ORDER_SPLIT_COLUMNS: OrderSplitColumnMeta[] = [
   { id: 'orderNo', label: '订单号', defaultWidth: 170 },
   { id: 'customerName', label: '客户', defaultWidth: 150 },
+  { id: 'productName', label: '产品名称', defaultWidth: 180 },
   { id: 'productLevel', label: '产品等级', defaultWidth: 140 },
   { id: 'orderType', label: '订单类型', defaultWidth: 140 },
   { id: 'orderAmount', label: '实付金额', defaultWidth: 130 },
@@ -145,6 +148,7 @@ const ORDER_SPLIT_COLUMNS: OrderSplitColumnMeta[] = [
 const DEFAULT_ORDER_SPLIT_VISIBLE_COLUMNS: OrderSplitColumnId[] = [
   'orderNo',
   'customerName',
+  'productName',
   'paymentDate',
   'orderAmount',
   'orderType',
@@ -290,6 +294,10 @@ const Commission: React.FC<CommissionProps> = ({
   const [payoutLoading, setPayoutLoading] = useState(false);
   const [payoutConfirmAction, setPayoutConfirmAction] = useState<PayoutConfirmAction | null>(null);
   const [payoutActionLoading, setPayoutActionLoading] = useState(false);
+  const [tierConfigOpen, setTierConfigOpen] = useState(false);
+  const [tierConfigSaving, setTierConfigSaving] = useState(false);
+  const [tierConfigError, setTierConfigError] = useState('');
+  const [tierConfigRows, setTierConfigRows] = useState<CommissionTier[]>([]);
 
   const [commissionRoleConfigs, setCommissionRoleConfigs] = useState<CommissionRoleConfig[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
@@ -324,6 +332,7 @@ const Commission: React.FC<CommissionProps> = ({
   ), [creatableOrderRows, selectedCreatableOrderId]);
   const monthlyPayoutSummary = useMemo(() => payoutRows.reduce((summary, row) => ({
     orderCount: summary.orderCount + row.orderCount,
+    monthlyPaidAmount: summary.monthlyPaidAmount + row.monthlyPaidAmount,
     totalAmount: summary.totalAmount + row.totalAmount,
     pendingConfirmAmount: summary.pendingConfirmAmount + row.pendingConfirmAmount,
     pendingPayAmount: summary.pendingPayAmount + row.pendingPayAmount,
@@ -333,6 +342,7 @@ const Commission: React.FC<CommissionProps> = ({
     chargebackAmount: summary.chargebackAmount + (row.chargebackAmount || 0),
   }), {
     orderCount: 0,
+    monthlyPaidAmount: 0,
     totalAmount: 0,
     pendingConfirmAmount: 0,
     pendingPayAmount: 0,
@@ -454,6 +464,68 @@ const Commission: React.FC<CommissionProps> = ({
       if (res.code === 0) setPayoutRows(res.data);
     } finally {
       setPayoutLoading(false);
+    }
+  };
+
+  const openTierConfig = async () => {
+    if (!payoutPeriod) return;
+    setTierConfigError('');
+    const res = await commissionApi.fetchMonthlyCommissionTierConfig(payoutPeriod);
+    if (res.code !== 0) {
+      setTierConfigError(res.message || '阶梯配置加载失败');
+      return;
+    }
+    setTierConfigRows(res.data.tiers.map((tier) => ({ ...tier })));
+    setTierConfigOpen(true);
+  };
+
+  const updateTierConfigRow = <K extends keyof CommissionTier>(
+    index: number,
+    key: K,
+    value: CommissionTier[K],
+  ) => {
+    setTierConfigRows((rows) => rows.map((tier, tierIndex) => (
+      tierIndex === index ? { ...tier, [key]: value } : tier
+    )));
+  };
+
+  const addTierConfigRow = () => {
+    setTierConfigRows((rows) => {
+      const next = rows.map((tier) => ({ ...tier }));
+      const last = next[next.length - 1];
+      if (!last) return [{ minAmount: 0, rate: 8 }];
+      last.maxAmount = last.minAmount + 10000;
+      next.push({ minAmount: last.maxAmount, rate: last.rate });
+      return next;
+    });
+  };
+
+  const removeTierConfigRow = (index: number) => {
+    setTierConfigRows((rows) => rows.filter((_, tierIndex) => tierIndex !== index));
+  };
+
+  const saveTierConfig = async () => {
+    if (!payoutPeriod) return;
+    setTierConfigSaving(true);
+    setTierConfigError('');
+    try {
+      const payload = tierConfigRows.map((tier) => ({
+        minAmount: Number(tier.minAmount) || 0,
+        ...(tier.maxAmount === undefined || tier.maxAmount === null || Number(tier.maxAmount) <= 0
+          ? {}
+          : { maxAmount: Number(tier.maxAmount) }),
+        rate: Number(tier.rate) || 0,
+      }));
+      const res = await commissionApi.saveMonthlyCommissionTierConfig(payoutPeriod, payload);
+      if (res.code !== 0) {
+        setTierConfigError(res.message || '阶梯配置保存失败');
+        return;
+      }
+      setTierConfigRows(res.data.tiers.map((tier) => ({ ...tier })));
+      setTierConfigOpen(false);
+      await fetchMonthlyPayouts(payoutPeriod);
+    } finally {
+      setTierConfigSaving(false);
     }
   };
 
@@ -630,6 +702,7 @@ const Commission: React.FC<CommissionProps> = ({
     commissionRate: 0,
     performanceAmount: orderAmount,
     calculationNote: '财务人工新增分账',
+    ruleCalculationType: 'fixed',
   });
 
   const openCreateSplitDialog = () => {
@@ -714,6 +787,7 @@ const Commission: React.FC<CommissionProps> = ({
       performanceAmount: item.performanceAmount || item.orderAmount,
       calculationNote: item.calculationNote || item.formulaText || '',
       commissionRuleId: item.commissionRuleId,
+      ruleCalculationType: item.ruleCalculationType || (item.commissionRate > 0 ? 'percentage' : 'fixed'),
     };
   };
 
@@ -871,6 +945,8 @@ const Commission: React.FC<CommissionProps> = ({
             </Box>
           </Button>
         ) : '-';
+      case 'productName':
+        return summary.productName || summary.productLevel || '-';
       case 'productLevel':
         return (
           <Chip
@@ -886,7 +962,7 @@ const Commission: React.FC<CommissionProps> = ({
       case 'resourceOwnership':
         return summary.resourceOwnership ? normalizeResourceOwnership(summary.resourceOwnership) : '-';
       case 'paymentDate':
-        return summary.paymentDate ? formatDate(summary.paymentDate, 'yyyy-MM-dd HH:mm') : '-';
+        return summary.paymentDate ? formatDate(summary.paymentDate, 'yyyy-MM-dd HH:mm:ss') : '-';
       case 'refundStatus':
         return <RefundStatusBadge status={normalizeRefundStatusBadgeValue(summary.refundStatus)} />;
       case 'salesOwner':
@@ -920,10 +996,27 @@ const Commission: React.FC<CommissionProps> = ({
     setDetailEditMode(true);
   };
 
+  const recalcSplitRow = (row: CommissionAdjustmentInput): CommissionAdjustmentInput => {
+    const calculationType = row.ruleCalculationType || 'fixed';
+    const performanceAmount = Number(row.performanceAmount || 0);
+    const commissionRate = Number(row.commissionRate || 0);
+    if (calculationType === 'tiered_percentage') {
+      return { ...row, commissionRate: 0, commissionAmount: 0 };
+    }
+    if (calculationType === 'percentage') {
+      return { ...row, commissionAmount: Math.round(performanceAmount * commissionRate * 100) / 100 };
+    }
+    return { ...row, commissionRate: 0 };
+  };
+
   const updateSplitRow = <K extends keyof CommissionAdjustmentInput>(index: number, key: K, value: CommissionAdjustmentInput[K]) => {
-    setSplitRows((prev) => prev.map((row, rowIndex) => (
-      rowIndex === index ? { ...row, [key]: value } : row
-    )));
+    setSplitRows((prev) => prev.map((row, rowIndex) => {
+      if (rowIndex !== index) return row;
+      const next = { ...row, [key]: value };
+      return key === 'ruleCalculationType' || key === 'commissionRate' || key === 'performanceAmount'
+        ? recalcSplitRow(next)
+        : next;
+    }));
   };
 
   const handleSplitOwnerChange = (index: number, ownerId: string) => {
@@ -1169,12 +1262,13 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const exportMonthlyStatement = () => {
-    const headers = ['月份', '员工', '部门', '订单数', '应发提成', '待确认', '待发放', '已发放', '已撤回', '待冲销', '状态'];
+    const headers = ['月份', '员工', '部门', '订单数', '总实付金额', '应发提成', '待确认', '待发放', '已发放', '已撤回', '待冲销', '状态'];
     const rows = payoutRows.map((row) => [
       row.period,
       formatOwnerDisplayName(row.ownerId, row.owner),
       row.department || '-',
       row.orderCount,
+      row.monthlyPaidAmount,
       row.totalAmount,
       row.pendingConfirmAmount,
       row.pendingPayAmount,
@@ -1769,10 +1863,26 @@ const Commission: React.FC<CommissionProps> = ({
             <Box
               sx={{
                 display: 'grid',
-                gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: '1fr 1fr 1.8fr' },
+                gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: '1fr 1fr 1fr' },
                 gap: 1.25,
               }}
             >
+              <Box sx={{ minWidth: 0 }}>
+                {renderEditorFieldLabel('计算方式')}
+                <FormControl size="small" fullWidth>
+                  <Select
+                    value={row.ruleCalculationType || 'fixed'}
+                    onChange={(event) => updateSplitRow(index, 'ruleCalculationType', event.target.value as CommissionAdjustmentInput['ruleCalculationType'])}
+                    aria-label="计算方式"
+                    fullWidth
+                    sx={{ bgcolor: '#fff' }}
+                  >
+                    <MenuItem value="fixed">固定金额</MenuItem>
+                    <MenuItem value="percentage">按实付金额百分比</MenuItem>
+                    <MenuItem value="tiered_percentage">销售月累计阶梯提成</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
               <Box sx={{ minWidth: 0 }}>
                 {renderEditorFieldLabel('业绩金额')}
                 <TextField
@@ -1785,15 +1895,34 @@ const Commission: React.FC<CommissionProps> = ({
                 />
               </Box>
               <Box sx={{ minWidth: 0 }}>
-                {renderEditorFieldLabel('提成金额')}
-                <TextField
-                  size="small"
-                  type="number"
-                  value={row.commissionAmount}
-                  onChange={(event) => updateSplitRow(index, 'commissionAmount', Number(event.target.value))}
-                  fullWidth
-                  sx={editorInputSx}
-                />
+                {row.ruleCalculationType === 'percentage' ? (
+                  <>
+                    {renderEditorFieldLabel('提成比例')}
+                    <TextField
+                      size="small"
+                      type="number"
+                      value={Math.round(Number(row.commissionRate || 0) * 10000) / 100}
+                      onChange={(event) => updateSplitRow(index, 'commissionRate', Number(event.target.value) / 100)}
+                      InputProps={{ endAdornment: '%' }}
+                      fullWidth
+                      sx={editorInputSx}
+                    />
+                  </>
+                ) : (
+                  <>
+                    {renderEditorFieldLabel('提成金额')}
+                    <TextField
+                      size="small"
+                      type="number"
+                      value={row.commissionAmount}
+                      onChange={(event) => updateSplitRow(index, 'commissionAmount', Number(event.target.value))}
+                      InputProps={{ readOnly: row.ruleCalculationType === 'tiered_percentage' }}
+                      placeholder={row.ruleCalculationType === 'tiered_percentage' ? '员工提成月报自动计算' : undefined}
+                      fullWidth
+                      sx={editorInputSx}
+                    />
+                  </>
+                )}
               </Box>
               <Box sx={{ minWidth: 0, gridColumn: { xs: 'auto', sm: '1 / -1', lg: '1 / -1' } }}>
                 {renderEditorFieldLabel('说明')}
@@ -1933,10 +2062,12 @@ const Commission: React.FC<CommissionProps> = ({
             <Button variant="contained" startIcon={<CheckCircleIcon />} disabled={monthlyPayoutSummary.pendingPayAmount <= 0 || payoutActionLoading} onClick={payBatch}>确认本月已发放</Button>
           </span>
         </Tooltip>
+        <Button variant="outlined" startIcon={<EditIcon />} disabled={payoutActionLoading} onClick={openTierConfig}>阶梯配置</Button>
       </Stack>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 1.25, mb: 2 }}>
         {[
+          { label: '总实付金额', value: monthlyPayoutSummary.monthlyPaidAmount, color: '#0f766e' },
           { label: '本月应发', value: monthlyPayoutSummary.totalAmount, color: '#111827' },
           { label: '待确认', value: monthlyPayoutSummary.pendingConfirmAmount, color: '#2563eb' },
           { label: '待发放', value: monthlyPayoutSummary.pendingPayAmount, color: '#d97706' },
@@ -1961,6 +2092,7 @@ const Commission: React.FC<CommissionProps> = ({
               <TableCell>员工</TableCell>
               <TableCell>部门</TableCell>
               <TableCell>订单数</TableCell>
+              <TableCell>总实付金额</TableCell>
               <TableCell>应发提成</TableCell>
               <TableCell>待确认</TableCell>
               <TableCell>待发放</TableCell>
@@ -1993,6 +2125,7 @@ const Commission: React.FC<CommissionProps> = ({
                     <TableCell sx={{ fontWeight: 700 }}>{formatOwnerDisplayName(row.ownerId, row.owner)}</TableCell>
                     <TableCell>{row.department || '-'}</TableCell>
                     <TableCell>{row.orderCount}</TableCell>
+                    <TableCell sx={{ fontWeight: 700, color: '#0f766e' }}>{formatCurrency(row.monthlyPaidAmount)}</TableCell>
                     <TableCell sx={{ fontWeight: 700, color: '#111827' }}>{formatCurrency(row.totalAmount)}</TableCell>
                     <TableCell sx={{ color: row.pendingConfirmAmount > 0 ? '#2563eb' : undefined }}>{formatCurrency(row.pendingConfirmAmount)}</TableCell>
                     <TableCell sx={{ fontWeight: row.pendingPayAmount > 0 ? 700 : 400, color: row.pendingPayAmount > 0 ? '#d97706' : undefined }}>{formatCurrency(row.pendingPayAmount)}</TableCell>
@@ -2011,7 +2144,7 @@ const Commission: React.FC<CommissionProps> = ({
                     </TableCell>
                   </TableRow>
                   <TableRow>
-                    <TableCell colSpan={12} sx={{ p: 0, border: 0 }}>
+                    <TableCell colSpan={13} sx={{ p: 0, border: 0 }}>
                       <Collapse in={expanded} timeout="auto" unmountOnExit>
                         <Box sx={{ px: { xs: 1.5, sm: 2.5 }, py: 1.5, bgcolor: '#f8fafc' }}>
                           <Stack spacing={1}>
@@ -2026,7 +2159,7 @@ const Commission: React.FC<CommissionProps> = ({
             })}
             {!payoutRows.length && (
               <TableRow>
-                <TableCell colSpan={12} align="center" sx={{ py: 5, color: '#9ca3af' }}>
+                <TableCell colSpan={13} align="center" sx={{ py: 5, color: '#9ca3af' }}>
                   {payoutLoading ? '加载中...' : '暂无员工提成月报数据'}
                 </TableCell>
               </TableRow>
@@ -2147,7 +2280,7 @@ const Commission: React.FC<CommissionProps> = ({
                     { label: '订单号', value: selectedCreatableOrder.orderNo },
                     { label: '客户', value: selectedCreatableOrder.customerName },
                     { label: '实付金额', value: formatCurrency(selectedCreatableOrder.orderAmount) },
-                    { label: '付款日期', value: formatDate(selectedCreatableOrder.paymentDate, 'yyyy-MM-dd HH:mm') },
+                    { label: '付款日期', value: formatDate(selectedCreatableOrder.paymentDate, 'yyyy-MM-dd HH:mm:ss') },
                   ].map((item) => (
                     <Box key={item.label} sx={{ bgcolor: '#fff', border: '1px solid #e5e7eb', borderRadius: 1, px: 1.25, py: 1 }}>
                       <Typography variant="caption" sx={{ color: '#64748b' }}>{item.label}</Typography>
@@ -2218,7 +2351,7 @@ const Commission: React.FC<CommissionProps> = ({
                       {summaryDetail.sourceOrderDeleted && <Chip label="源订单已删除" size="small" />}
                     </Stack>
                     <Typography variant="body2" sx={{ color: '#64748b', overflowWrap: 'anywhere' }}>
-                      {summaryDetail.customerName} · {summaryDetail.orderType || '-'} · {formatDate(summaryDetail.paymentDate, 'yyyy-MM-dd HH:mm')}
+                      {summaryDetail.customerName} · {summaryDetail.orderType || '-'} · {formatDate(summaryDetail.paymentDate, 'yyyy-MM-dd HH:mm:ss')}
                     </Typography>
                   </Box>
                   <Tooltip title={detailEditMode ? '正在调整分账' : getAdjustDisabledReason(summaryDetail)}>
@@ -2404,6 +2537,84 @@ const Commission: React.FC<CommissionProps> = ({
           <Button disabled={payoutActionLoading} onClick={() => setPayoutConfirmAction(null)}>取消</Button>
           <Button variant="contained" disabled={payoutActionLoading} onClick={confirmPayoutAction}>
             {payoutActionLoading ? '处理中...' : payoutConfirmAction?.confirmText || '确认'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={tierConfigOpen}
+        onClose={() => !tierConfigSaving && setTierConfigOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogCloseTitle onClose={() => !tierConfigSaving && setTierConfigOpen(false)}>
+          {payoutPeriod} 阶梯配置
+        </DialogCloseTitle>
+        <DialogContent dividers>
+          <Stack spacing={1.25}>
+            <Typography variant="body2" sx={{ color: '#64748b' }}>
+              阶梯按员工本月总实付金额命中，适用于分账规则中选择“销售月累计阶梯提成”的销售提成。
+            </Typography>
+            {tierConfigError && (
+              <Typography variant="body2" sx={{ color: '#dc2626' }}>
+                {tierConfigError}
+              </Typography>
+            )}
+            {tierConfigRows.map((tier, index) => (
+              <Box
+                key={`monthly-tier-${index}`}
+                sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr auto' }, gap: 1, alignItems: 'center' }}
+              >
+                <TextField
+                  label="月累计下限"
+                  type="number"
+                  size="small"
+                  value={tier.minAmount}
+                  onChange={(event) => updateTierConfigRow(index, 'minAmount', Number(event.target.value))}
+                  inputProps={{ min: 0, step: 100 }}
+                />
+                <TextField
+                  label="月累计上限"
+                  type="number"
+                  size="small"
+                  value={tier.maxAmount ?? ''}
+                  placeholder="不填为以上"
+                  onChange={(event) => updateTierConfigRow(
+                    index,
+                    'maxAmount',
+                    event.target.value === '' ? undefined : Number(event.target.value),
+                  )}
+                  inputProps={{ min: 0, step: 100 }}
+                />
+                <TextField
+                  label="提成比例"
+                  type="number"
+                  size="small"
+                  value={tier.rate}
+                  onChange={(event) => updateTierConfigRow(index, 'rate', Number(event.target.value))}
+                  inputProps={{ min: 0, step: 0.1 }}
+                  InputProps={{ endAdornment: '%' }}
+                />
+                <IconButton
+                  color="error"
+                  size="small"
+                  disabled={tierConfigRows.length <= 1}
+                  onClick={() => removeTierConfigRow(index)}
+                  title="删除档位"
+                >
+                  <DeleteOutlineIcon fontSize="small" />
+                </IconButton>
+              </Box>
+            ))}
+            <Button variant="outlined" startIcon={<AddIcon />} onClick={addTierConfigRow} sx={{ alignSelf: 'flex-start' }}>
+              添加档位
+            </Button>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={tierConfigSaving} onClick={() => setTierConfigOpen(false)}>取消</Button>
+          <Button variant="contained" disabled={tierConfigSaving} onClick={saveTierConfig}>
+            {tierConfigSaving ? '保存中...' : '保存'}
           </Button>
         </DialogActions>
       </Dialog>

@@ -73,6 +73,38 @@ function baseCommission(overrides: Partial<Commission>): Commission {
   };
 }
 
+function baseOrder(overrides: Partial<Order> & Pick<Order, 'id' | 'orderNo' | 'actualAmount'>): Order {
+  return {
+    id: overrides.id,
+    orderNo: overrides.orderNo,
+    customerId: overrides.customerId || `cust-${overrides.id}`,
+    customerName: overrides.customerName || `Customer ${overrides.id}`,
+    productLevel: overrides.productLevel || zh.product,
+    orderType: overrides.orderType || zh.orderType,
+    amount: overrides.amount ?? overrides.actualAmount,
+    actualAmount: overrides.actualAmount,
+    paymentMethod: overrides.paymentMethod || zh.bankTransfer,
+    officialPaymentChannel: overrides.officialPaymentChannel || zh.officialChannel,
+    status: overrides.status || zh.confirmed,
+    refundStatus: overrides.refundStatus || zh.none,
+    owner: overrides.owner || 'Sales A',
+    salesId: overrides.salesId,
+    salesName: overrides.salesName,
+    sourceType: overrides.sourceType || zh.companyResource,
+    resourceOwnership: overrides.resourceOwnership || zh.companyResource,
+    dealScene: overrides.dealScene || zh.orderType,
+    proofStatus: overrides.proofStatus || '\u5df2\u4e0a\u4f20',
+    payments: overrides.payments || [{
+      id: `pay-${overrides.id}`,
+      amount: overrides.actualAmount,
+      paymentMethod: overrides.paymentMethod || zh.bankTransfer,
+      paidAt: overrides.createdAt || '2026-05-20T10:00:00.000Z',
+    }],
+    createdAt: overrides.createdAt || '2026-05-20T10:00:00.000Z',
+    updatedAt: overrides.updatedAt || overrides.createdAt || '2026-05-20T10:00:00.000Z',
+  } as Order;
+}
+
 function seed() {
   storage.clear();
   storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
@@ -261,6 +293,49 @@ assert.equal(
   false,
 );
 
+const createSplitWithCalculationTypesRes = await (commissionApi as any).saveOrderCommissionAdjustments('order-d', [{
+  orderId: 'order-d',
+  role: zh.salesRole,
+  ownerId: 'user-sales',
+  ruleCalculationType: 'percentage',
+  commissionAmount: 0,
+  commissionRate: 0.1,
+  performanceAmount: 899,
+  calculationNote: 'Percentage manual split',
+}, {
+  orderId: 'order-d',
+  role: zh.leadRole,
+  ownerId: 'user-lead',
+  ruleCalculationType: 'fixed',
+  commissionAmount: 30,
+  commissionRate: 0,
+  performanceAmount: 899,
+  calculationNote: 'Fixed manual split',
+}, {
+  orderId: 'order-d',
+  role: zh.salesRole,
+  ownerId: 'user-sales',
+  ruleCalculationType: 'tiered_percentage',
+  commissionAmount: 999,
+  commissionRate: 0.2,
+  performanceAmount: 899,
+  calculationNote: 'Tiered manual split',
+}], 'Create split with calculation types');
+assert.equal(createSplitWithCalculationTypesRes.code, 0);
+const calculationRows = createSplitWithCalculationTypesRes.data as Commission[];
+const percentageRow = calculationRows.find((item) => item.calculationNote?.includes('Percentage manual split'));
+const fixedRow = calculationRows.find((item) => item.calculationNote?.includes('Fixed manual split'));
+const tieredRow = calculationRows.find((item) => item.calculationNote?.includes('Tiered manual split'));
+assert.equal(percentageRow?.ruleCalculationType, 'percentage');
+assert.equal(percentageRow?.commissionRate, 0.1);
+assert.equal(percentageRow?.commissionAmount, 89.9);
+assert.equal(fixedRow?.ruleCalculationType, 'fixed');
+assert.equal(fixedRow?.commissionAmount, 30);
+assert.equal(tieredRow?.ruleCalculationType, 'tiered_percentage');
+assert.equal(tieredRow?.commissionRate, 0);
+assert.equal(tieredRow?.commissionAmount, 0);
+assert.match(tieredRow?.formulaText || '', /员工提成月报/);
+
 const removePendingConfirmLineRes = await (commissionApi as any).saveOrderCommissionAdjustments('order-a', [
   {
     id: 'comm-a-sales',
@@ -427,3 +502,80 @@ const preConfirmSales = preConfirmStatementRes.data.find((item: any) => item.own
 assert.equal(preConfirmSales.pendingConfirmAmount, 100);
 assert.equal(preConfirmSales.pendingPayAmount, 200);
 assert.equal(preConfirmSales.totalAmount, 300);
+
+seed();
+storage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify([
+  baseOrder({ id: 'tier-order-a', orderNo: 'TIER-A', actualAmount: 10000, salesId: 'user-sales', salesName: 'Sales A', createdAt: '2026-05-05T10:00:00.000Z' }),
+  baseOrder({ id: 'tier-order-b', orderNo: 'TIER-B', actualAmount: 20000, salesId: 'user-sales', salesName: 'Sales A', createdAt: '2026-05-10T10:00:00.000Z' }),
+  baseOrder({ id: 'tier-order-other-owner', orderNo: 'TIER-OTHER-OWNER', actualAmount: 50000, salesId: 'user-lead', salesName: 'Lead A', owner: 'Lead A', createdAt: '2026-05-12T10:00:00.000Z' }),
+  baseOrder({ id: 'tier-order-other-month', orderNo: 'TIER-OTHER-MONTH', actualAmount: 50000, salesId: 'user-sales', salesName: 'Sales A', createdAt: '2026-04-12T10:00:00.000Z' }),
+  baseOrder({ id: 'tier-order-cancelled', orderNo: 'TIER-CANCELLED', actualAmount: 50000, salesId: 'user-sales', salesName: 'Sales A', status: '\u5df2\u53d6\u6d88', createdAt: '2026-05-13T10:00:00.000Z' }),
+  baseOrder({ id: 'tier-order-refunded', orderNo: 'TIER-REFUNDED', actualAmount: 50000, salesId: 'user-sales', salesName: 'Sales A', refundStatus: '\u9000\u6b3e\u5df2\u5b8c\u6210', createdAt: '2026-05-14T10:00:00.000Z' }),
+]));
+storage.setItem(STORAGE_KEYS.COMMISSIONS, JSON.stringify([
+  baseCommission({
+    id: 'tier-comm-a',
+    orderId: 'tier-order-a',
+    orderNo: 'TIER-A',
+    customerName: 'Customer tier-order-a',
+    owner: 'Sales A',
+    ownerId: 'user-sales',
+    status: zh.pendingPay,
+    commissionAmount: 0,
+    performanceAmount: 10000,
+    commissionRate: 0,
+    ruleCalculationType: 'tiered_percentage',
+    formulaText: '月度提成待计算',
+    paymentDate: '2026-05-05T10:00:00.000Z',
+  } as any),
+  baseCommission({
+    id: 'tier-comm-b',
+    orderId: 'tier-order-b',
+    orderNo: 'TIER-B',
+    customerName: 'Customer tier-order-b',
+    owner: 'Sales A',
+    ownerId: 'user-sales',
+    status: zh.pendingPay,
+    commissionAmount: 0,
+    performanceAmount: 20000,
+    commissionRate: 0,
+    ruleCalculationType: 'tiered_percentage',
+    formulaText: '月度提成待计算',
+    paymentDate: '2026-05-10T10:00:00.000Z',
+  } as any),
+  baseCommission({
+    id: 'fixed-comm-a',
+    orderId: 'tier-order-a',
+    orderNo: 'TIER-A',
+    customerName: 'Customer tier-order-a',
+    owner: 'Sales A',
+    ownerId: 'user-sales',
+    status: zh.pendingPay,
+    commissionAmount: 123,
+    performanceAmount: 10000,
+    commissionRate: 0,
+    ruleCalculationType: 'fixed',
+    paymentDate: '2026-05-05T10:00:00.000Z',
+  } as any),
+]));
+
+assert.equal(typeof (commissionApi as any).fetchMonthlyCommissionTierConfig, 'function');
+assert.equal(typeof (commissionApi as any).saveMonthlyCommissionTierConfig, 'function');
+const tierConfigRes = await (commissionApi as any).fetchMonthlyCommissionTierConfig('2026-05');
+assert.equal(tierConfigRes.code, 0);
+assert.deepEqual(tierConfigRes.data.tiers, [
+  { minAmount: 0, maxAmount: 30000, rate: 8 },
+  { minAmount: 30000, maxAmount: 50000, rate: 10 },
+  { minAmount: 50000, rate: 15 },
+]);
+const tieredMonthlyRes = await (commissionApi as any).fetchMonthlyCommissionPayouts('2026-05');
+assert.equal(tieredMonthlyRes.code, 0);
+const tieredSales = tieredMonthlyRes.data.find((item: any) => item.ownerId === 'user-sales');
+assert.equal(tieredSales.monthlyPaidAmount, 30000);
+assert.equal(tieredSales.pendingPayAmount, 3123);
+assert.equal(tieredSales.totalAmount, 3123);
+assert.equal(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-a').commissionAmount, 1000);
+assert.equal(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-b').commissionAmount, 2000);
+assert.equal(tieredSales.commissions.find((item: any) => item.id === 'fixed-comm-a').commissionAmount, 123);
+assert.match(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-a').formulaText || '', /总实付金额 30000/);
+assert.match(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-a').formulaText || '', /10%/);

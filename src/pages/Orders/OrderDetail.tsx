@@ -65,6 +65,7 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
         <DialogCloseTitle onClose={onClose}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Typography variant="h6" sx={{ fontWeight: 600 }}>{order.orderNo}</Typography>
+            <Typography variant="body2" sx={{ fontWeight: 600, color: '#374151' }}>{order.productName || order.productLevel}</Typography>
             <Chip label={order.productLevel} size="small" sx={{ bgcolor: `${levelColor}18`, color: levelColor, fontWeight: 600 }} />
             <Chip label={order.orderType} size="small" variant="outlined" />
           </Box>
@@ -74,6 +75,14 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
             <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>客户名称</Typography>
               <Typography variant="body1" sx={{ fontWeight: 500 }}>{order.customerName}</Typography>
+            </Box>
+            <Box>
+              <Typography variant="body2" sx={{ color: '#6b7280' }}>产品名称</Typography>
+              <Typography variant="body1" sx={{ fontWeight: 500 }}>{order.productName || order.productLevel}</Typography>
+            </Box>
+            <Box>
+              <Typography variant="body2" sx={{ color: '#6b7280' }}>产品等级</Typography>
+              <Chip label={order.productLevel} size="small" sx={{ bgcolor: `${levelColor}18`, color: levelColor, fontWeight: 600 }} />
             </Box>
             <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>实付金额</Typography>
@@ -132,7 +141,7 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
                     {order.payments.map((payment) => (
                       <TableRow key={payment.id}>
                         <TableCell>{formatCurrency(payment.amount)}</TableCell>
-                        <TableCell>{formatDate(payment.paidAt, 'yyyy-MM-dd HH:mm')}</TableCell>
+                        <TableCell>{formatDate(payment.paidAt, 'yyyy-MM-dd HH:mm:ss')}</TableCell>
                         <TableCell>{payment.paymentOrderNo || '-'}</TableCell>
                         <TableCell>{payment.voucherName || '-'}</TableCell>
                         <TableCell>{payment.remark || '-'}</TableCell>

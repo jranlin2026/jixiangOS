@@ -65,10 +65,10 @@ const reviewActionText: Record<OrderApplication['reviewLogs'][number]['action'],
   reject: '驳回终止',
 };
 
-function formatDate(value?: string) {
+function formatDate(value?: string, pattern = 'yyyy-MM-dd HH:mm') {
   if (!value) return '-';
   try {
-    return format(new Date(value), 'yyyy-MM-dd HH:mm');
+    return format(new Date(value), pattern);
   } catch {
     return value;
   }
@@ -260,14 +260,14 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
       </Box>
 
       <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
-        <Table sx={{ minWidth: 1180 }}>
+        <Table sx={{ minWidth: 1240 }}>
           <TableHead>
             <TableRow>
               <TableCell>申请编号</TableCell>
               <TableCell>正式订单号</TableCell>
               <TableCell>状态</TableCell>
               <TableCell>客户</TableCell>
-              <TableCell>产品/类型</TableCell>
+              <TableCell>产品名称/等级/类型</TableCell>
               <TableCell>实付金额</TableCell>
               <TableCell>提交人</TableCell>
               <TableCell>提交时间</TableCell>
@@ -321,7 +321,16 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
                       {application.orderData.customerName}
                     </Button>
                   </TableCell>
-                  <TableCell>{application.orderData.productLevel} / {application.orderData.orderType}</TableCell>
+                  <TableCell>
+                    <Box>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {application.orderData.productName || application.orderData.productLevel || '-'}
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: '#64748b' }}>
+                        {application.orderData.productLevel || '-'} / {application.orderData.orderType || '-'}
+                      </Typography>
+                    </Box>
+                  </TableCell>
                   <TableCell>{formatCurrency(application.orderData.actualAmount || application.orderData.amount)}</TableCell>
                   <TableCell>{application.applicantName}</TableCell>
                   <TableCell>{formatDate(application.submittedAt)}</TableCell>
@@ -447,7 +456,10 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
               <Box sx={{ p: 1.5, border: '1px solid #e5e7eb', borderRadius: 1, bgcolor: '#f8fafc' }}>
                 <Typography variant="body2">客户：{reviewAction.application.orderData.customerName}</Typography>
                 <Typography variant="body2">
-                  产品/类型：{reviewAction.application.orderData.productLevel} / {reviewAction.application.orderData.orderType}
+                  产品名称：{reviewAction.application.orderData.productName || reviewAction.application.orderData.productLevel || '-'}
+                </Typography>
+                <Typography variant="body2">
+                  产品等级/类型：{reviewAction.application.orderData.productLevel || '-'} / {reviewAction.application.orderData.orderType || '-'}
                 </Typography>
                 <Typography variant="body2">
                   实付金额：{formatCurrency(reviewAction.application.orderData.actualAmount || reviewAction.application.orderData.amount)}
@@ -496,6 +508,8 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
                 <Typography variant="body2">申请编号：{approvedApplication.applicationNo}</Typography>
                 <Typography variant="body2">正式订单号：{approvedApplication.orderNo || '-'}</Typography>
                 <Typography variant="body2">客户：{approvedApplication.orderData.customerName}</Typography>
+                <Typography variant="body2">产品名称：{approvedApplication.orderData.productName || approvedApplication.orderData.productLevel || '-'}</Typography>
+                <Typography variant="body2">产品等级：{approvedApplication.orderData.productLevel || '-'}</Typography>
                 <Typography variant="body2">
                   实付金额：{formatCurrency(approvedApplication.orderData.actualAmount || approvedApplication.orderData.amount)}
                 </Typography>
@@ -529,14 +543,15 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
                 <Typography>状态：{detailApplication.status}</Typography>
                 <Typography>正式订单号：{detailApplication.orderNo || '-'}</Typography>
                 <Typography>客户：{detailApplication.orderData.customerName}</Typography>
-                <Typography>产品/类型：{detailApplication.orderData.productLevel} / {detailApplication.orderData.orderType}</Typography>
+                <Typography>产品名称：{detailApplication.orderData.productName || detailApplication.orderData.productLevel || '-'}</Typography>
+                <Typography>产品等级/类型：{detailApplication.orderData.productLevel || '-'} / {detailApplication.orderData.orderType || '-'}</Typography>
                 <Typography>销售负责人：{detailApplication.orderData.owner}</Typography>
                 <Typography>提交人：{detailApplication.applicantName}</Typography>
                 <Typography>提交时间：{formatDate(detailApplication.submittedAt)}</Typography>
                 <Typography>审核人：{detailApplication.reviewerName || '-'}</Typography>
                 <Typography>审核时间：{formatDate(detailApplication.reviewedAt)}</Typography>
                 <Typography>实付金额：{formatCurrency(detailApplication.orderData.actualAmount || detailApplication.orderData.amount)}</Typography>
-                <Typography>付款时间：{formatDate(detailApplication.orderData.payments?.[0]?.paidAt)}</Typography>
+                <Typography>付款时间：{formatDate(detailApplication.orderData.payments?.[0]?.paidAt, 'yyyy-MM-dd HH:mm:ss')}</Typography>
               </Box>
               <Typography>原因：{detailApplication.reason || '-'}</Typography>
               <Typography>备注：{detailApplication.orderData.notes || '-'}</Typography>

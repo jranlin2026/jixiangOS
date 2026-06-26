@@ -10,11 +10,15 @@ import type {
   CommissionOperationLog,
   CommissionSettlementBatch,
   CommissionChargebackCompleteInput,
+  CommissionRule,
+  CommissionTier,
+  MonthlyCommissionTierConfig,
   MonthlyCommissionPayout,
   CommissionStats,
   CommissionStatus,
 } from '../types/commission';
 import type { Order } from '../types/order';
+import type { Product } from '../types/product';
 import type { User } from '../types/settings';
 import type { Department } from '../types/department';
 import type { ApiResponse, PaginatedResponse } from './types';
@@ -39,6 +43,74 @@ const ROLE_DEPARTMENT_MAP: Record<Commission['role'], string> = {
 };
 
 const PENDING_ASSIGN_TEXT = '\u5f85\u5206\u914d';
+const DEFAULT_MONTHLY_COMMISSION_TIERS: CommissionTier[] = [
+  { minAmount: 0, maxAmount: 30000, rate: 8 },
+  { minAmount: 30000, maxAmount: 50000, rate: 10 },
+  { minAmount: 50000, rate: 15 },
+];
+
+function roundMoney(amount: number): number {
+  return Math.round(Number(amount || 0) * 100) / 100;
+}
+
+function normalizeCommissionTiers(tiers?: CommissionTier[]): CommissionTier[] {
+  return (tiers?.length ? tiers : DEFAULT_MONTHLY_COMMISSION_TIERS)
+    .map((tier) => {
+      const maxAmount = tier.maxAmount === undefined || tier.maxAmount === null || Number(tier.maxAmount) <= 0
+        ? undefined
+        : Number(tier.maxAmount);
+      return {
+        minAmount: Number(tier.minAmount) || 0,
+        ...(maxAmount === undefined ? {} : { maxAmount }),
+        rate: Number(tier.rate) || 0,
+      };
+    })
+    .sort((a, b) => a.minAmount - b.minAmount);
+}
+
+function validateCommissionTiers(tiers?: CommissionTier[]): string | null {
+  const normalized = normalizeCommissionTiers(tiers);
+  if (!normalized.length) return '至少需要配置一个阶梯档位';
+  if (normalized[0].minAmount !== 0) return '第一档下限必须为 0';
+  for (let index = 0; index < normalized.length; index += 1) {
+    const tier = normalized[index];
+    if (tier.minAmount < 0) return '阶梯下限不能小于 0';
+    if (tier.rate < 0) return '提成比例不能小于 0';
+    if (tier.maxAmount !== undefined && tier.maxAmount <= tier.minAmount) return '阶梯上限必须大于下限';
+    const next = normalized[index + 1];
+    if (next && tier.maxAmount !== next.minAmount) return '阶梯区间必须连续且不能重叠';
+    if (!next && tier.maxAmount !== undefined) return '最后一个阶梯必须不设置上限';
+  }
+  return null;
+}
+
+function readMonthlyTierConfigs(): Record<string, MonthlyCommissionTierConfig> {
+  return getStorageData<Record<string, MonthlyCommissionTierConfig>>(STORAGE_KEYS.MONTHLY_COMMISSION_TIER_CONFIGS) || {};
+}
+
+function getMonthlyTierConfig(period: string): MonthlyCommissionTierConfig {
+  const configs = readMonthlyTierConfigs();
+  const existing = configs[period];
+  return {
+    period,
+    tiers: normalizeCommissionTiers(existing?.tiers),
+    updatedAt: existing?.updatedAt,
+  };
+}
+
+function resolveMonthlyTier(tiers: CommissionTier[], monthlyPaidAmount: number): CommissionTier | undefined {
+  return normalizeCommissionTiers(tiers).find((tier) => (
+    monthlyPaidAmount >= tier.minAmount
+    && (tier.maxAmount === undefined || monthlyPaidAmount < tier.maxAmount)
+  ));
+}
+
+function formatTierRange(tier?: CommissionTier): string {
+  if (!tier) return '未命中阶梯';
+  return tier.maxAmount === undefined
+    ? `${tier.minAmount} 元以上`
+    : `${tier.minAmount}-${tier.maxAmount} 元`;
+}
 
 function getActiveUsers(): User[] {
   return (getStorageData<User[]>(STORAGE_KEYS.USERS) || []).filter((user) => user.isActive);
@@ -114,6 +186,14 @@ function isPendingAssignment(commission: Commission): boolean {
   return commission.owner === PENDING_ASSIGN_TEXT || !commission.ownerId;
 }
 
+function resolveRuleCalculationType(c: Commission): Commission['ruleCalculationType'] {
+  if (c.ruleCalculationType) return c.ruleCalculationType;
+  if (!c.commissionRuleId) return undefined;
+  const rule = (getStorageData<CommissionRule[]>(STORAGE_KEYS.COMMISSION_RULES) || [])
+    .find((item) => item.id === c.commissionRuleId);
+  return rule?.commissionType;
+}
+
 function normalizeCommission(c: Commission, context = createCommissionNormalizeContext()): Commission {
   const normalizedStatus = normalizeCommissionStatus(c);
   const evidenceStatus = c.evidenceStatus || '无需凭证';
@@ -134,6 +214,7 @@ function normalizeCommission(c: Commission, context = createCommissionNormalizeC
     paymentDate: getCommissionPaymentDate(c, order),
     evidenceStatus,
     evidenceRequired: c.evidenceRequired ?? evidenceStatus !== '无需凭证',
+    ruleCalculationType: resolveRuleCalculationType(c),
     formulaText: c.formulaText || (
       c.commissionRate > 0
         ? `业绩金额 ${c.performanceAmount || c.orderAmount} × ${Math.round(c.commissionRate * 100)}% = ${c.commissionAmount} 元`
@@ -157,8 +238,87 @@ function getOrders(): Order[] {
   return getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
 }
 
+function getProductName(productId?: string, productLevel?: string, fallback?: string): string | undefined {
+  const products = getStorageData<Product[]>(STORAGE_KEYS.PRODUCTS) || [];
+  const matched = (productId ? products.find((product) => product.id === productId) : undefined)
+    || (productLevel ? products.find((product) => product.level === productLevel) : undefined);
+  return matched?.name || fallback || productLevel;
+}
+
 function getOrderById(orderId: string): Order | undefined {
   return getOrders().find((order) => order.id === orderId);
+}
+
+function getOrderPaymentDate(order: Order): string {
+  return order.payments?.[0]?.paidAt || order.createdAt;
+}
+
+function isValidMonthlyPaidOrder(order: Order): boolean {
+  if (order.status === '已取消' || order.status === '已退款') return false;
+  if (order.refundStatus === '退款已完成') return false;
+  return true;
+}
+
+function isOrderOwnedByEmployee(order: Order, ownerId?: string, ownerName?: string): boolean {
+  if (ownerId && order.salesId) return order.salesId === ownerId;
+  const targetName = ownerName || '';
+  return Boolean(targetName) && (order.salesName === targetName || order.owner === targetName);
+}
+
+function calcMonthlyPaidAmountForEmployee(period: string, ownerId?: string, ownerName?: string): number {
+  return roundMoney(getOrders()
+    .filter((order) => getOrderPaymentDate(order).startsWith(period))
+    .filter(isValidMonthlyPaidOrder)
+    .filter((order) => isOrderOwnedByEmployee(order, ownerId, ownerName))
+    .reduce((total, order) => total + Number(order.actualAmount || order.amount || 0), 0));
+}
+
+function isTieredMonthlyCommission(commission: Commission): boolean {
+  return commission.ruleCalculationType === 'tiered_percentage' && !commission.isManualAdjusted;
+}
+
+function shouldRecalculateTieredCommission(commission: Commission): boolean {
+  return isTieredMonthlyCommission(commission)
+    && commission.status !== '已发放'
+    && !isWithdrawnCommission(commission)
+    && !isChargebackPendingCommission(commission)
+    && !isChargedBackCommission(commission);
+}
+
+function applyMonthlyTieredCommissions(period: string, commissions: Commission[]): Commission[] {
+  const tierConfig = getMonthlyTierConfig(period);
+  const rows = commissions.map((commission) => normalizeCommission(commission));
+  const monthlyPaidByOwner = new Map<string, number>();
+
+  return rows.map((commission) => {
+    if (!shouldRecalculateTieredCommission(commission)) return commission;
+    const paymentDate = commission.paymentDate || commission.createdAt;
+    if (!paymentDate.startsWith(period)) return commission;
+    const ownerKey = commission.ownerId || `name:${commission.owner}`;
+    if (!monthlyPaidByOwner.has(ownerKey)) {
+      monthlyPaidByOwner.set(ownerKey, calcMonthlyPaidAmountForEmployee(period, commission.ownerId, commission.owner));
+    }
+    const monthlyPaidAmount = monthlyPaidByOwner.get(ownerKey) || 0;
+    const tier = resolveMonthlyTier(tierConfig.tiers, monthlyPaidAmount);
+    const rate = tier?.rate || 0;
+    const performanceAmount = Number(commission.performanceAmount || commission.orderAmount || 0);
+    const commissionAmount = roundMoney(performanceAmount * (rate / 100));
+    const formulaText = `员工月度总实付金额 ${monthlyPaidAmount} 元，命中 ${formatTierRange(tier)} × ${rate}%；业绩金额 ${performanceAmount} × ${rate}% = ${commissionAmount} 元`;
+    return {
+      ...commission,
+      commissionRate: rate / 100,
+      commissionAmount,
+      formulaText,
+      calculationNote: [commission.calculationNote, formulaText].filter(Boolean).join('；'),
+    };
+  });
+}
+
+function refreshMonthlyTieredCommissions(period: string): Commission[] {
+  const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
+  const next = applyMonthlyTieredCommissions(period, commissions);
+  saveCommissions(next);
+  return next;
 }
 
 function getOrderCommissions(orderId: string): Commission[] {
@@ -308,6 +468,7 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
       orderId,
       orderNo: first.orderNo,
       customerName: first.customerName,
+      productName: getProductName(order?.productId, order?.productLevel || first.productLevel, order?.productName),
       productLevel: first.productLevel,
       orderType: order?.orderType || first.scene || '',
       paymentDate,
@@ -406,6 +567,7 @@ function mapCreatableOrder(order: Order): CommissionCreatableOrderSummary {
     orderId: order.id,
     orderNo: order.orderNo,
     customerName: order.customerName,
+    productName: getProductName(order.productId, order.productLevel, order.productName),
     productLevel: order.productLevel,
     orderType: order.orderType,
     paymentDate: order.payments?.[0]?.paidAt || order.createdAt,
@@ -468,8 +630,19 @@ function buildAdjustedCommission(
   now: string,
 ): Commission {
   const orderAmount = order.actualAmount || order.amount;
-  const amount = Math.round(Number(input.commissionAmount || 0) * 100) / 100;
   const performanceAmount = input.performanceAmount ?? existing?.performanceAmount ?? order.performanceBaseAmount ?? orderAmount;
+  const calculationType = input.ruleCalculationType || existing?.ruleCalculationType || (input.commissionRate && input.commissionRate > 0 ? 'percentage' : 'fixed');
+  const commissionRate = calculationType === 'percentage' ? Number(input.commissionRate || 0) : 0;
+  const amount = calculationType === 'tiered_percentage'
+    ? 0
+    : calculationType === 'percentage'
+      ? roundMoney(performanceAmount * commissionRate)
+      : roundMoney(input.commissionAmount || 0);
+  const formulaText = calculationType === 'tiered_percentage'
+    ? '销售月累计阶梯提成，月度提成金额将在员工提成月报按月度总实付金额计算'
+    : calculationType === 'percentage'
+      ? `业绩金额 ${performanceAmount} × ${roundMoney(commissionRate * 100)}% = ${amount} 元`
+      : `人工确认 ${amount} 元`;
   const sourceType = existing?.sourceType || '人工新增';
   return {
     id: existing?.id || input.id || `comm-${uuidv4().slice(0, 8)}`,
@@ -478,7 +651,7 @@ function buildAdjustedCommission(
     customerName: order.customerName,
     productLevel: order.productLevel,
     orderAmount,
-    commissionRate: input.commissionRate ?? existing?.commissionRate ?? 0,
+    commissionRate,
     commissionAmount: amount,
     performanceAmount,
     scene: existing?.scene || order.dealScene,
@@ -488,9 +661,8 @@ function buildAdjustedCommission(
     auditReason: undefined,
     evidenceRequired: existing?.evidenceRequired,
     evidenceStatus: existing?.evidenceStatus || '无需凭证',
-    formulaText: input.commissionRate && input.commissionRate > 0
-      ? `业绩金额 ${performanceAmount} × ${Math.round(input.commissionRate * 100)}% = ${amount} 元`
-      : `人工确认 ${amount} 元`,
+    ruleCalculationType: calculationType,
+    formulaText,
     role: input.role,
     owner: assignee.user.name,
     ownerId: assignee.user.id,
@@ -966,7 +1138,7 @@ function buildPaymentDateSettlementBatch(period: string, commissions: Commission
 async function generateSettlementBatch(period: string): Promise<ApiResponse<CommissionSettlementBatch>> {
   ensureInit();
   await delay(250);
-  const batch = buildPaymentDateSettlementBatch(period, getAllCommissions());
+  const batch = buildPaymentDateSettlementBatch(period, refreshMonthlyTieredCommissions(period));
   const batches = getStoredBatches().filter((item) => item.period !== period);
   setStorageData(STORAGE_KEYS.COMMISSION_SETTLEMENT_BATCHES, [batch, ...batches]);
 
@@ -1012,8 +1184,9 @@ async function paySettlementBatch(batchId: string): Promise<ApiResponse<Commissi
   return createSuccessResponse(batches[batchIdx]);
 }
 
-function getMonthlyPayoutCommissions(period: string): Commission[] {
-  return getAllCommissions().filter((commission) => {
+function getMonthlyPayoutCommissions(period: string, sourceCommissions?: Commission[]): Commission[] {
+  const commissions = sourceCommissions || applyMonthlyTieredCommissions(period, getAllCommissions());
+  return commissions.filter((commission) => {
     const paymentDate = commission.paymentDate || commission.createdAt;
     return paymentDate.startsWith(period)
       && (
@@ -1052,6 +1225,7 @@ function buildMonthlyPayouts(period: string): MonthlyCommissionPayout[] {
       .filter(isChargebackPendingCommission)
       .reduce((sumValue, commission) => sumValue + commission.commissionAmount, 0);
     const orderCount = new Set(rows.map((commission) => commission.orderId)).size;
+    const monthlyPaidAmount = calcMonthlyPaidAmountForEmployee(period, first.ownerId, first.owner);
     const status: MonthlyCommissionPayout['status'] = chargebackAmount > 0
       ? '待冲销'
       : pendingConfirmAmount > 0
@@ -1068,13 +1242,14 @@ function buildMonthlyPayouts(period: string): MonthlyCommissionPayout[] {
       department: first.department,
       departmentId: first.departmentId,
       orderCount,
-      pendingConfirmAmount: Math.round(pendingConfirmAmount * 100) / 100,
-      pendingPayAmount: Math.round(pendingPayAmount * 100) / 100,
-      paidAmount: Math.round(paidAmount * 100) / 100,
-      exceptionAmount: Math.round(chargebackAmount * 100) / 100,
-      withdrawnAmount: Math.round(withdrawnAmount * 100) / 100,
-      chargebackAmount: Math.round(chargebackAmount * 100) / 100,
-      totalAmount: Math.round((pendingConfirmAmount + pendingPayAmount + paidAmount) * 100) / 100,
+      monthlyPaidAmount,
+      pendingConfirmAmount: roundMoney(pendingConfirmAmount),
+      pendingPayAmount: roundMoney(pendingPayAmount),
+      paidAmount: roundMoney(paidAmount),
+      exceptionAmount: roundMoney(chargebackAmount),
+      withdrawnAmount: roundMoney(withdrawnAmount),
+      chargebackAmount: roundMoney(chargebackAmount),
+      totalAmount: roundMoney(pendingConfirmAmount + pendingPayAmount + paidAmount),
       status,
       commissions: rows,
     };
@@ -1092,13 +1267,43 @@ async function fetchMonthlyCommissionPayouts(period: string): Promise<ApiRespons
   return createSuccessResponse(buildMonthlyPayouts(period));
 }
 
+async function fetchMonthlyCommissionTierConfig(period: string): Promise<ApiResponse<MonthlyCommissionTierConfig>> {
+  ensureInit();
+  await delay(100);
+  if (!period) return createErrorResponse('请选择结算月份');
+  return createSuccessResponse(getMonthlyTierConfig(period));
+}
+
+async function saveMonthlyCommissionTierConfig(
+  period: string,
+  tiers: CommissionTier[],
+): Promise<ApiResponse<MonthlyCommissionTierConfig>> {
+  ensureInit();
+  await delay(140);
+  if (!period) return createErrorResponse('请选择结算月份');
+  const validation = validateCommissionTiers(tiers);
+  if (validation) return createErrorResponse(validation);
+  const configs = readMonthlyTierConfigs();
+  const nextConfig: MonthlyCommissionTierConfig = {
+    period,
+    tiers: normalizeCommissionTiers(tiers),
+    updatedAt: new Date().toISOString(),
+  };
+  setStorageData(STORAGE_KEYS.MONTHLY_COMMISSION_TIER_CONFIGS, {
+    ...configs,
+    [period]: nextConfig,
+  });
+  refreshMonthlyTieredCommissions(period);
+  return createSuccessResponse(nextConfig);
+}
+
 async function payMonthlyOwnerCommissions(period: string, ownerId: string): Promise<ApiResponse<MonthlyCommissionPayout[]>> {
   ensureInit();
   await delay(180);
   if (!period) return createErrorResponse('请选择结算月份');
   if (!ownerId) return createErrorResponse('请选择发放人员');
   const now = new Date().toISOString();
-  const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
+  const commissions = refreshMonthlyTieredCommissions(period);
   let changed = false;
   const next = commissions.map((commission) => {
     const normalized = normalizeCommission(commission);
@@ -1121,7 +1326,7 @@ async function payMonthlyCommissionBatch(period: string): Promise<ApiResponse<Mo
   if (!period) return createErrorResponse('请选择结算月份');
   await generateSettlementBatch(period);
   const now = new Date().toISOString();
-  const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
+  const commissions = refreshMonthlyTieredCommissions(period);
   let changed = false;
   const next = commissions.map((commission) => {
     const normalized = normalizeCommission(commission);
@@ -1151,6 +1356,8 @@ export const commissionApi = {
   fetchCommissionOrderSummaryStatusCounts,
   fetchCreatableCommissionOrders,
   fetchMonthlyCommissionPayouts,
+  fetchMonthlyCommissionTierConfig,
+  saveMonthlyCommissionTierConfig,
   fetchCommissionStats,
   fetchCommissionAuditIssues,
   fetchCommissionOperationLogs,

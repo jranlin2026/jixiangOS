@@ -7,6 +7,7 @@ import type {
 } from '../types/order';
 import type { AuthSession } from '../types/auth';
 import type { Customer } from '../types/customer';
+import type { Product } from '../types/product';
 import type { Role } from '../types/role';
 import type { User } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
@@ -59,7 +60,28 @@ export function canReviewOrderApplications(): boolean {
 }
 
 function getStoredApplications(): OrderApplication[] {
-  return readJson<OrderApplication[]>(STORAGE_KEYS.ORDER_APPLICATIONS) || [];
+  return (readJson<OrderApplication[]>(STORAGE_KEYS.ORDER_APPLICATIONS) || []).map(normalizeApplicationProductName);
+}
+
+function getProductName(productId?: string, productLevel?: string, fallback?: string): string | undefined {
+  const products = readJson<Product[]>(STORAGE_KEYS.PRODUCTS) || [];
+  const matched = (productId ? products.find((product) => product.id === productId) : undefined)
+    || (productLevel ? products.find((product) => product.level === productLevel) : undefined);
+  return matched?.name || fallback || productLevel;
+}
+
+function normalizeApplicationProductName(application: OrderApplication): OrderApplication {
+  return {
+    ...application,
+    orderData: {
+      ...application.orderData,
+      productName: getProductName(
+        application.orderData.productId,
+        application.orderData.productLevel,
+        application.orderData.productName,
+      ),
+    },
+  };
 }
 
 function saveApplications(applications: OrderApplication[]): void {
@@ -67,12 +89,16 @@ function saveApplications(applications: OrderApplication[]): void {
 }
 
 function enrichOrderDataFromCustomer(data: OrderApplicationInput): OrderApplicationInput {
-  if (!data.customerId) return data;
+  const withProductName = {
+    ...data,
+    productName: getProductName(data.productId, data.productLevel, data.productName),
+  };
+  if (!data.customerId) return withProductName;
   const customers = readJson<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
   const customer = customers.find((item) => item.id === data.customerId);
-  if (!customer) return data;
+  if (!customer) return withProductName;
   return {
-    ...data,
+    ...withProductName,
     sourceType: customer.leadSource || data.sourceType,
     leadSource: customer.leadSource || data.leadSource,
     leadInputBy: customer.leadInputBy || data.leadInputBy,

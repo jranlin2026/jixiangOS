@@ -75,6 +75,21 @@ export async function backendRequest<T>(path: string, init: RequestInit = {}): P
 
 let storageHydratedAt = 0;
 let storageHydrationPromise: Promise<void> | null = null;
+const pendingStorageWriteKeys = new Set<string>();
+const storageWriteProtectedUntil = new Map<string, number>();
+const STORAGE_WRITE_PROTECTION_MS = 5000;
+
+function protectStorageKeyFromHydration(key: string): void {
+  storageWriteProtectedUntil.set(key, Date.now() + STORAGE_WRITE_PROTECTION_MS);
+}
+
+function isStorageKeyProtectedFromHydration(key: string): boolean {
+  if (pendingStorageWriteKeys.has(key)) return true;
+  const protectedUntil = storageWriteProtectedUntil.get(key) || 0;
+  if (protectedUntil > Date.now()) return true;
+  storageWriteProtectedUntil.delete(key);
+  return false;
+}
 
 export async function syncBackendStorageFromServer(maxAgeMs = 1000): Promise<void> {
   if (!shouldUseBackendApi() || typeof localStorage === 'undefined') return;
@@ -85,6 +100,7 @@ export async function syncBackendStorageFromServer(maxAgeMs = 1000): Promise<voi
     .then((response) => {
       if (response.code !== 0 || !response.data) return;
       Object.entries(response.data).forEach(([key, value]) => {
+        if (isStorageKeyProtectedFromHydration(key)) return;
         localStorage.setItem(key, JSON.stringify(value));
       });
       storageHydratedAt = Date.now();
@@ -101,17 +117,31 @@ export async function syncBackendStorageFromServer(maxAgeMs = 1000): Promise<voi
 
 export function persistBackendStorageValue(key: string, value: unknown): void {
   if (!shouldUseBackendApi()) return;
+  pendingStorageWriteKeys.add(key);
+  protectStorageKeyFromHydration(key);
   void backendRequest(`/storage/${encodeURIComponent(key)}`, {
     method: 'PUT',
     body: JSON.stringify({ value }),
-  }).catch(() => undefined);
+  })
+    .catch(() => undefined)
+    .finally(() => {
+      pendingStorageWriteKeys.delete(key);
+      protectStorageKeyFromHydration(key);
+    });
 }
 
 export function removeBackendStorageValue(key: string): void {
   if (!shouldUseBackendApi()) return;
+  pendingStorageWriteKeys.add(key);
+  protectStorageKeyFromHydration(key);
   void backendRequest(`/storage/${encodeURIComponent(key)}`, {
     method: 'DELETE',
-  }).catch(() => undefined);
+  })
+    .catch(() => undefined)
+    .finally(() => {
+      pendingStorageWriteKeys.delete(key);
+      protectStorageKeyFromHydration(key);
+    });
 }
 
 export function clearBackendStorageValues(): void {
