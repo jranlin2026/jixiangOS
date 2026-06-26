@@ -17,8 +17,8 @@ fi
 
 BASE_URL="${BASE_URL%/}"
 
-echo "Checking health..."
-health="$(curl -fsS "$BASE_URL/api/health")"
+echo "Checking readiness..."
+health="$(curl -fsS "$BASE_URL/api/ready")"
 echo "$health" | grep -q '"ok":true'
 echo "$health" | grep -q '"database":true'
 

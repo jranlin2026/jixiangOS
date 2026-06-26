@@ -17,7 +17,7 @@ set -a
 set +a
 
 BRANCH="${JIXIANG_DEPLOY_BRANCH:-codex/core-crm-polish}"
-HEALTH_URL="${JIXIANG_HEALTH_URL:-http://127.0.0.1:3001/api/health}"
+HEALTH_URL="${JIXIANG_HEALTH_URL:-http://127.0.0.1:3001/api/ready}"
 RUN_BACKUP="${JIXIANG_DEPLOY_BACKUP:-true}"
 
 if [[ "$RUN_BACKUP" == "true" && -x scripts/mysql/backup-linux.sh ]]; then

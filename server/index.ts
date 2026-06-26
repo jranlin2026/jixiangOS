@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { getAllowedCorsOrigins, validateRuntimeConfig } from './config/runtime';
 import { prisma, checkDatabaseConnection } from './db/client';
 import { createRequireAuth, bearerToken } from './middleware/auth';
+import { createLoginRateLimiter } from './middleware/loginRateLimit';
 import { createAuthService } from './services/authService';
 import { createAiConfigService } from './services/aiConfigService';
 import { createSettingsService } from './services/settingsService';
@@ -31,6 +32,7 @@ const requireAiConfigAccess = createRequireAuth(authService, PERMISSION_KEYS.SET
 const requireDataMaintenanceAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE);
 const requireAiChatAccess = createRequireAuth(authService, PERMISSION_KEYS.AI_CHAT);
 const requireCustomerAiCardAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_AI_CARD);
+const loginRateLimiter = createLoginRateLimiter();
 
 app.set('trust proxy', 1);
 app.use((_req, res, next) => {
@@ -103,24 +105,41 @@ async function callDeepSeek(messages: DeepSeekMessage[], options: { temperature?
   return String(payload?.choices?.[0]?.message?.content || '');
 }
 
-app.get('/api/health', async (_req, res) => {
+async function healthPayload() {
   const database = await checkDatabaseConnection();
-  const aiConfig = await aiConfigService.getPublicConfig();
-  res.json({
-    ok: true,
+  const aiConfig = database
+    ? await aiConfigService.getPublicConfig()
+    : { data: null };
+  return {
+    ok: database,
     database,
     aiProvider: aiConfig.data?.provider,
     hasAIKey: Boolean(aiConfig.data?.hasApiKey),
     model: aiConfig.data?.model,
-  });
+  };
+}
+
+app.get('/api/health', async (_req, res) => {
+  const payload = await healthPayload();
+  res.status(payload.database ? 200 : 503).json(payload);
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.get('/api/ready', async (_req, res) => {
+  const payload = await healthPayload();
+  res.status(payload.database ? 200 : 503).json(payload);
+});
+
+app.post('/api/auth/login', loginRateLimiter.guard, async (req, res) => {
   const result = await authService.login({
     account: String(req.body?.account || ''),
     password: String(req.body?.password || ''),
     remember: Boolean(req.body?.remember),
   });
+  if (result.code === 0) {
+    loginRateLimiter.reset(req);
+  } else {
+    loginRateLimiter.recordFailure(req);
+  }
   res.status(result.code === 0 ? 200 : 401).json(result);
 });
 
