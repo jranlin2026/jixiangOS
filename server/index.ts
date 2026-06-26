@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { getAllowedCorsOrigins, validateRuntimeConfig } from './config/runtime';
+import { getAllowedCorsOrigins, getApiListenHost, validateRuntimeConfig } from './config/runtime';
 import { prisma, checkDatabaseConnection } from './db/client';
 import { createRequireAuth, bearerToken } from './middleware/auth';
 import { createLoginRateLimiter } from './middleware/loginRateLimit';
@@ -21,6 +21,7 @@ validateRuntimeConfig();
 
 const app = express();
 const port = Number(process.env.AI_PROXY_PORT || 3001);
+const host = getApiListenHost();
 const allowedCorsOrigins = getAllowedCorsOrigins();
 const authService = createAuthService(prisma);
 const aiConfigService = createAiConfigService(prisma as any);
@@ -426,6 +427,6 @@ app.post('/api/ai/business-card-legacy', requireCustomerAiCardAccess, async (req
   }
 });
 
-app.listen(port, () => {
-  console.log(`AI proxy listening on http://localhost:${port}`);
+app.listen(port, host, () => {
+  console.log(`AI proxy listening on http://${host}:${port}`);
 });

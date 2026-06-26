@@ -12,6 +12,7 @@ module.exports = {
       time: true,
       env: {
         NODE_ENV: 'production',
+        AI_PROXY_HOST: '127.0.0.1',
         AI_PROXY_PORT: '3001',
       },
     },

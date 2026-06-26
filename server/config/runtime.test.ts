@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  getApiListenHost,
   getAllowedCorsOrigins,
   parseCorsOrigins,
   validateRuntimeConfig,
@@ -11,6 +12,7 @@ assert.deepEqual(parseCorsOrigins({ CORS_ORIGINS: 'https://crm.example.com, http
 ]);
 
 assert.ok(getAllowedCorsOrigins({ NODE_ENV: 'development' }).includes('http://127.0.0.1:3000'));
+assert.equal(getApiListenHost({}), '127.0.0.1');
 
 assert.throws(() => validateRuntimeConfig({
   NODE_ENV: 'production',
@@ -75,9 +77,20 @@ assert.throws(() => validateRuntimeConfig({
   JIXIANG_REMEMBER_SESSION_DAYS: '365',
 }), /JIXIANG_REMEMBER_SESSION_DAYS/);
 
+assert.throws(() => validateRuntimeConfig({
+  NODE_ENV: 'production',
+  DATABASE_URL: 'mysql://user:StrongDatabasePassword!@127.0.0.1:3306/db',
+  AI_PROXY_HOST: '0.0.0.0',
+  AI_PROXY_PORT: '3001',
+  JIXIANG_DEFAULT_ADMIN_PASSWORD: 'StrongAdminPassword!',
+  JIXIANG_DEFAULT_USER_PASSWORD: 'StrongUserPassword!',
+  CORS_ORIGINS: 'https://crm.jixiang-ai.com',
+}), /AI_PROXY_HOST/);
+
 assert.doesNotThrow(() => validateRuntimeConfig({
   NODE_ENV: 'production',
   DATABASE_URL: 'mysql://user:StrongDatabasePassword!@127.0.0.1:3306/db',
+  AI_PROXY_HOST: '127.0.0.1',
   AI_PROXY_PORT: '3001',
   JIXIANG_DEFAULT_ADMIN_PASSWORD: 'StrongAdminPassword!',
   JIXIANG_DEFAULT_USER_PASSWORD: 'StrongUserPassword!',

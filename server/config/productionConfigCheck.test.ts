@@ -4,6 +4,7 @@ import { collectProductionConfigErrors } from '../../scripts/deploy/check-produc
 const validProductionEnv: NodeJS.ProcessEnv = {
   NODE_ENV: 'production',
   DATABASE_URL: 'mysql://jixiang_os:StrongDatabasePassword123!@127.0.0.1:3306/jixiang_os',
+  AI_PROXY_HOST: '127.0.0.1',
   AI_PROXY_PORT: '3001',
   CORS_ORIGINS: 'https://crm.jixiang-ai.com',
   VITE_USE_BACKEND_API: 'true',

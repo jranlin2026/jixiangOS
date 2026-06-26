@@ -1,6 +1,7 @@
 import { DEFAULT_ADMIN_PASSWORD, DEFAULT_USER_PASSWORD } from '../../src/shared/utils/auth';
 
 const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+const LOCALHOST_LISTEN_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 const EXAMPLE_ORIGIN = /^https:\/\/([a-z0-9-]+\.)*example\.com(?::\d+)?$/i;
 const PLACEHOLDER_VALUES = new Set([
   'REPLACE_WITH_STRONG_PASSWORD',
@@ -34,6 +35,10 @@ export function getAllowedCorsOrigins(env: NodeJS.ProcessEnv = process.env): str
     'http://127.0.0.1:3002',
     'http://localhost:3002',
   ];
+}
+
+export function getApiListenHost(env: NodeJS.ProcessEnv = process.env): string {
+  return readEnv(env, 'AI_PROXY_HOST') || '127.0.0.1';
 }
 
 function assertRequired(env: NodeJS.ProcessEnv, name: string): void {
@@ -116,6 +121,9 @@ export function validateRuntimeConfig(env: NodeJS.ProcessEnv = process.env): voi
   assertStrongPassword(env, 'JIXIANG_DEFAULT_ADMIN_PASSWORD', DEFAULT_ADMIN_PASSWORD);
   assertStrongPassword(env, 'JIXIANG_DEFAULT_USER_PASSWORD', DEFAULT_USER_PASSWORD);
   assertProductionOrigins(parseCorsOrigins(env));
+  if (!LOCALHOST_LISTEN_HOSTS.has(getApiListenHost(env))) {
+    throw new Error('AI_PROXY_HOST must bind to localhost in production, for example 127.0.0.1.');
+  }
   assertIntegerRange(env, 'JIXIANG_SESSION_TTL_HOURS', 1, 24);
   assertIntegerRange(env, 'JIXIANG_REMEMBER_SESSION_DAYS', 1, 90);
 }
