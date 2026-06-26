@@ -11,6 +11,7 @@
     "build": "tsc -b && vite build",
     "test": "tsx scripts/run-tests.ts",
     "preview": "vite preview",
+    "prod:check": "tsx scripts/deploy/check-production-config.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",

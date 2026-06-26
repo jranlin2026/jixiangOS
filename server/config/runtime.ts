@@ -1,6 +1,14 @@
 import { DEFAULT_ADMIN_PASSWORD, DEFAULT_USER_PASSWORD } from '../../src/shared/utils/auth';
 
 const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+const EXAMPLE_ORIGIN = /^https:\/\/([a-z0-9-]+\.)*example\.com(?::\d+)?$/i;
+const PLACEHOLDER_VALUES = new Set([
+  'REPLACE_WITH_STRONG_PASSWORD',
+  'CHANGE_ME',
+  'CHANGEME',
+  'YOUR_PASSWORD',
+  'STRONG_PASSWORD',
+]);
 
 function readEnv(env: NodeJS.ProcessEnv, name: string): string {
   return String(env[name] || '').trim();
@@ -34,11 +42,42 @@ function assertRequired(env: NodeJS.ProcessEnv, name: string): void {
   }
 }
 
+function assertNotPlaceholder(value: string, name: string): void {
+  const normalized = value.trim().toUpperCase();
+  if (PLACEHOLDER_VALUES.has(normalized) || normalized.includes('REPLACE_WITH')) {
+    throw new Error(`${name} still contains a placeholder value.`);
+  }
+}
+
 function assertStrongPassword(env: NodeJS.ProcessEnv, name: string, unsafeDefault: string): void {
   const password = readEnv(env, name);
   assertRequired(env, name);
+  assertNotPlaceholder(password, name);
   if (password.length < 12 || password === unsafeDefault) {
     throw new Error(`${name} must be at least 12 characters and cannot use the local development default.`);
+  }
+}
+
+function assertDatabaseUrl(env: NodeJS.ProcessEnv): void {
+  const rawUrl = readEnv(env, 'DATABASE_URL');
+  assertRequired(env, 'DATABASE_URL');
+  assertNotPlaceholder(rawUrl, 'DATABASE_URL');
+
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error('DATABASE_URL must be a valid MySQL connection URL.');
+  }
+
+  if (!['mysql:', 'mysql2:'].includes(parsed.protocol)) {
+    throw new Error('DATABASE_URL must use the mysql:// protocol in production.');
+  }
+
+  const databasePassword = decodeURIComponent(parsed.password || '');
+  assertNotPlaceholder(databasePassword, 'DATABASE_URL password');
+  if (databasePassword.length < 12) {
+    throw new Error('DATABASE_URL password must be at least 12 characters in production.');
   }
 }
 
@@ -50,6 +89,10 @@ function assertProductionOrigins(origins: string[]): void {
   if (insecure) {
     throw new Error(`CORS_ORIGINS contains an insecure production origin: ${insecure}`);
   }
+  const example = origins.find((origin) => EXAMPLE_ORIGIN.test(origin));
+  if (example) {
+    throw new Error(`CORS_ORIGINS still contains the example domain: ${example}`);
+  }
 }
 
 export function validateRuntimeConfig(env: NodeJS.ProcessEnv = process.env): void {
@@ -60,7 +103,7 @@ export function validateRuntimeConfig(env: NodeJS.ProcessEnv = process.env): voi
 
   if (!isProductionRuntime(env)) return;
 
-  assertRequired(env, 'DATABASE_URL');
+  assertDatabaseUrl(env);
   assertStrongPassword(env, 'JIXIANG_DEFAULT_ADMIN_PASSWORD', DEFAULT_ADMIN_PASSWORD);
   assertStrongPassword(env, 'JIXIANG_DEFAULT_USER_PASSWORD', DEFAULT_USER_PASSWORD);
   assertProductionOrigins(parseCorsOrigins(env));

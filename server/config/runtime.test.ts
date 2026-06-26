@@ -14,16 +14,16 @@ assert.ok(getAllowedCorsOrigins({ NODE_ENV: 'development' }).includes('http://12
 
 assert.throws(() => validateRuntimeConfig({
   NODE_ENV: 'production',
-  DATABASE_URL: 'mysql://user:pass@127.0.0.1:3306/db',
+  DATABASE_URL: 'mysql://user:StrongDatabasePassword!@127.0.0.1:3306/db',
   AI_PROXY_PORT: '3001',
   JIXIANG_DEFAULT_ADMIN_PASSWORD: 'Admin@123456',
   JIXIANG_DEFAULT_USER_PASSWORD: 'StrongUserPassword!',
-  CORS_ORIGINS: 'https://crm.example.com',
+  CORS_ORIGINS: 'https://crm.jixiang-ai.com',
 }), /JIXIANG_DEFAULT_ADMIN_PASSWORD/);
 
 assert.throws(() => validateRuntimeConfig({
   NODE_ENV: 'production',
-  DATABASE_URL: 'mysql://user:pass@127.0.0.1:3306/db',
+  DATABASE_URL: 'mysql://user:StrongDatabasePassword!@127.0.0.1:3306/db',
   AI_PROXY_PORT: '3001',
   JIXIANG_DEFAULT_ADMIN_PASSWORD: 'StrongAdminPassword!',
   JIXIANG_DEFAULT_USER_PASSWORD: 'StrongUserPassword!',
@@ -31,18 +31,45 @@ assert.throws(() => validateRuntimeConfig({
 
 assert.throws(() => validateRuntimeConfig({
   NODE_ENV: 'production',
-  DATABASE_URL: 'mysql://user:pass@127.0.0.1:3306/db',
+  DATABASE_URL: 'mysql://user:StrongDatabasePassword!@127.0.0.1:3306/db',
   AI_PROXY_PORT: '3001',
   JIXIANG_DEFAULT_ADMIN_PASSWORD: 'StrongAdminPassword!',
   JIXIANG_DEFAULT_USER_PASSWORD: 'StrongUserPassword!',
   CORS_ORIGINS: 'http://crm.example.com',
 }), /insecure/);
 
-assert.doesNotThrow(() => validateRuntimeConfig({
+assert.throws(() => validateRuntimeConfig({
   NODE_ENV: 'production',
-  DATABASE_URL: 'mysql://user:pass@127.0.0.1:3306/db',
+  DATABASE_URL: 'mysql://user:REPLACE_WITH_STRONG_PASSWORD@127.0.0.1:3306/db',
+  AI_PROXY_PORT: '3001',
+  JIXIANG_DEFAULT_ADMIN_PASSWORD: 'StrongAdminPassword!',
+  JIXIANG_DEFAULT_USER_PASSWORD: 'StrongUserPassword!',
+  CORS_ORIGINS: 'https://crm.jixiang-ai.com',
+}), /DATABASE_URL/);
+
+assert.throws(() => validateRuntimeConfig({
+  NODE_ENV: 'production',
+  DATABASE_URL: 'mysql://user:short@127.0.0.1:3306/db',
+  AI_PROXY_PORT: '3001',
+  JIXIANG_DEFAULT_ADMIN_PASSWORD: 'StrongAdminPassword!',
+  JIXIANG_DEFAULT_USER_PASSWORD: 'StrongUserPassword!',
+  CORS_ORIGINS: 'https://crm.jixiang-ai.com',
+}), /DATABASE_URL password/);
+
+assert.throws(() => validateRuntimeConfig({
+  NODE_ENV: 'production',
+  DATABASE_URL: 'mysql://user:StrongDatabasePassword!@127.0.0.1:3306/db',
   AI_PROXY_PORT: '3001',
   JIXIANG_DEFAULT_ADMIN_PASSWORD: 'StrongAdminPassword!',
   JIXIANG_DEFAULT_USER_PASSWORD: 'StrongUserPassword!',
   CORS_ORIGINS: 'https://crm.example.com',
+}), /example domain/);
+
+assert.doesNotThrow(() => validateRuntimeConfig({
+  NODE_ENV: 'production',
+  DATABASE_URL: 'mysql://user:StrongDatabasePassword!@127.0.0.1:3306/db',
+  AI_PROXY_PORT: '3001',
+  JIXIANG_DEFAULT_ADMIN_PASSWORD: 'StrongAdminPassword!',
+  JIXIANG_DEFAULT_USER_PASSWORD: 'StrongUserPassword!',
+  CORS_ORIGINS: 'https://crm.jixiang-ai.com',
 }));

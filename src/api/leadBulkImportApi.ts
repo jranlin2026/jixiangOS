@@ -61,7 +61,8 @@ export const LEAD_BULK_IMPORT_HEADERS = [
 ] as const;
 
 type Header = (typeof LEAD_BULK_IMPORT_HEADERS)[number];
-type ExcelJsModule = typeof import('exceljs');
+type ExcelJsNamespace = typeof import('exceljs');
+type ExcelJsModule = ExcelJsNamespace & { default?: ExcelJsNamespace };
 
 export interface LeadBulkImportRowResult {
   rowNumber: number;
@@ -108,8 +109,9 @@ function getCell(row: Record<string, unknown>, header: Header): string {
   return toText(row[header]);
 }
 
-async function loadExcelJs(): Promise<ExcelJsModule> {
-  return await import('exceljs');
+async function loadExcelJs(): Promise<ExcelJsNamespace> {
+  const imported = await import('exceljs') as ExcelJsModule;
+  return typeof imported.Workbook === 'function' ? imported : imported.default || imported;
 }
 
 function getActiveUsers(): User[] {
