@@ -1,17 +1,14 @@
 import dotenv from 'dotenv';
-import { isAbsolute } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { validateRuntimeConfig } from '../../server/config/runtime';
 
-dotenv.config({ quiet: true });
-
-const errors: string[] = [];
-
-function envValue(name: string): string {
-  return String(process.env[name] || '').trim();
+function envValue(env: NodeJS.ProcessEnv, name: string): string {
+  return String(env[name] || '').trim();
 }
 
-function requireEnv(name: string): string {
-  const value = envValue(name);
+function requireEnv(env: NodeJS.ProcessEnv, errors: string[], name: string): string {
+  const value = envValue(env, name);
   if (!value) {
     errors.push(`${name} must be configured for production deployment.`);
   }
@@ -23,31 +20,45 @@ function isPlaceholder(value: string): boolean {
   return normalized.includes('REPLACE_WITH') || normalized === 'CHANGE_ME' || normalized === 'CHANGEME';
 }
 
-function checkProductionRuntime(): void {
+function checkProductionRuntime(env: NodeJS.ProcessEnv, errors: string[]): void {
+  if (envValue(env, 'NODE_ENV') !== 'production') {
+    errors.push('NODE_ENV must be set to production for cloud deployment.');
+  }
+
   try {
-    validateRuntimeConfig(process.env);
+    validateRuntimeConfig(env);
   } catch (error) {
     errors.push(error instanceof Error ? error.message : String(error));
   }
 }
 
-function checkBackupConfig(): void {
-  const backupEnabled = envValue('JIXIANG_DEPLOY_BACKUP') !== 'false';
+function checkFrontendConfig(env: NodeJS.ProcessEnv, errors: string[]): void {
+  if (envValue(env, 'VITE_USE_BACKEND_API') !== 'true') {
+    errors.push('VITE_USE_BACKEND_API must be true for production builds.');
+  }
+
+  if (envValue(env, 'VITE_AI_API_BASE') !== '/api') {
+    errors.push('VITE_AI_API_BASE must be /api so the frontend uses the Nginx API proxy.');
+  }
+}
+
+function checkBackupConfig(env: NodeJS.ProcessEnv, errors: string[]): void {
+  const backupEnabled = envValue(env, 'JIXIANG_DEPLOY_BACKUP') !== 'false';
   if (!backupEnabled) return;
 
-  const password = requireEnv('JIXIANG_MYSQL_PASSWORD');
+  const password = requireEnv(env, errors, 'JIXIANG_MYSQL_PASSWORD');
   if (password && (password.length < 12 || isPlaceholder(password))) {
     errors.push('JIXIANG_MYSQL_PASSWORD must be at least 12 characters and cannot be a placeholder.');
   }
 
-  const backupDir = envValue('JIXIANG_BACKUP_DIR') || '/var/backups/jixiang-os';
+  const backupDir = envValue(env, 'JIXIANG_BACKUP_DIR') || '/var/backups/jixiang-os';
   if (!isAbsolute(backupDir)) {
     errors.push('JIXIANG_BACKUP_DIR must be an absolute path.');
   }
 }
 
-function checkSmokeConfig(): void {
-  const baseUrl = envValue('JIXIANG_SMOKE_BASE_URL');
+function checkSmokeConfig(env: NodeJS.ProcessEnv, errors: string[]): void {
+  const baseUrl = envValue(env, 'JIXIANG_SMOKE_BASE_URL');
   if (!baseUrl) return;
 
   if (!baseUrl.startsWith('https://')) {
@@ -56,19 +67,34 @@ function checkSmokeConfig(): void {
   if (/example\.com/i.test(baseUrl)) {
     errors.push('JIXIANG_SMOKE_BASE_URL must be changed from the example domain.');
   }
-  requireEnv('JIXIANG_SMOKE_PASSWORD');
+  requireEnv(env, errors, 'JIXIANG_SMOKE_PASSWORD');
 }
 
-checkProductionRuntime();
-checkBackupConfig();
-checkSmokeConfig();
+export function collectProductionConfigErrors(env: NodeJS.ProcessEnv = process.env): string[] {
+  const errors: string[] = [];
 
-if (errors.length) {
-  console.error('Production configuration check failed:');
-  for (const error of errors) {
-    console.error(`- ${error}`);
+  checkProductionRuntime(env, errors);
+  checkFrontendConfig(env, errors);
+  checkBackupConfig(env, errors);
+  checkSmokeConfig(env, errors);
+
+  return errors;
+}
+
+export function runProductionConfigCheck(env: NodeJS.ProcessEnv = process.env): void {
+  const errors = collectProductionConfigErrors(env);
+  if (errors.length) {
+    console.error('Production configuration check failed:');
+    for (const error of errors) {
+      console.error(`- ${error}`);
+    }
+    process.exit(1);
   }
-  process.exit(1);
+
+  console.log('Production configuration check passed.');
 }
 
-console.log('Production configuration check passed.');
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  dotenv.config({ quiet: true });
+  runProductionConfigCheck();
+}
