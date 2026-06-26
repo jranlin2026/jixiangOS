@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Box,
   Button,
   Checkbox,
@@ -330,6 +331,8 @@ const RolePermission: React.FC = () => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'enabled' | 'disabled'>('all');
   const [error, setError] = useState('');
+  const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetchItems();
@@ -366,6 +369,7 @@ const RolePermission: React.FC = () => {
 
   const handleSelectRole = (role: Role) => {
     setError('');
+    setSaveMessage(null);
     setMode('edit');
     setSelectedRoleId(role.id);
     setEditRole(role);
@@ -374,6 +378,7 @@ const RolePermission: React.FC = () => {
 
   const handleCreate = () => {
     setError('');
+    setSaveMessage(null);
     setMode('create');
     setSelectedRoleId('');
     setEditRole(null);
@@ -382,11 +387,19 @@ const RolePermission: React.FC = () => {
 
   const handleSubmit = async () => {
     setError('');
-    if (!form.name.trim()) return;
+    setSaveMessage(null);
+    if (!form.name.trim()) {
+      setSaveMessage({ type: 'error', text: '请先填写角色名称' });
+      return;
+    }
     const permissions = toPermissions(normalizePermissionKeys(form.permissions));
     const dataScopes = normalizeDataScopes(form.dataScopes, editRole?.code);
-    if (!permissions.length) return;
+    if (!permissions.length) {
+      setSaveMessage({ type: 'error', text: '请至少选择一个菜单权限' });
+      return;
+    }
 
+    setSaving(true);
     try {
       if (editRole) {
         await update(editRole.id, { ...form, name: form.name.trim(), permissions, dataScopes, code: editRole.code });
@@ -402,10 +415,14 @@ const RolePermission: React.FC = () => {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存失败');
+      setSaveMessage({ type: 'error', text: err instanceof Error ? err.message : '保存失败' });
+      setSaving(false);
       return;
     }
     setMode('edit');
     await fetchItems();
+    setSaveMessage({ type: 'success', text: editRole ? '角色权限已保存' : '角色已创建' });
+    setSaving(false);
   };
 
   const handlePermissionToggle = (node: PermissionNode, path: string[] = []) => {
@@ -785,10 +802,15 @@ const RolePermission: React.FC = () => {
                   <Button
                     variant="contained"
                     onClick={handleSubmit}
-                    disabled={!form.name.trim() || !normalizePermissionKeys(form.permissions).size}
+                    disabled={saving || !form.name.trim() || !normalizePermissionKeys(form.permissions).size}
                   >
                     {editRole ? '保存权限' : '创建角色'}
                   </Button>
+                  {saveMessage && (
+                    <Alert severity={saveMessage.type} sx={{ width: '100%' }} onClose={() => setSaveMessage(null)}>
+                      {saveMessage.text}
+                    </Alert>
+                  )}
                 </Box>
               </Box>
             </Box>
