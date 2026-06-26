@@ -74,6 +74,8 @@ JIXIANG_MYSQL_PASSWORD="数据库密码"
 DEEPSEEK_API_KEY="你的 DeepSeek Key"
 ```
 
+生产环境启动时会强制检查这些配置。缺少 `DATABASE_URL`、`CORS_ORIGINS`、`JIXIANG_DEFAULT_ADMIN_PASSWORD`、`JIXIANG_DEFAULT_USER_PASSWORD`，或者把 CORS 配成非 HTTPS 公网域名，后端会直接启动失败。
+
 注意：上线后进入系统，把管理员密码改成只由管理员本人知道的密码。
 
 ## 4. 初始化数据库
@@ -187,11 +189,25 @@ curl http://127.0.0.1:3001/api/health
 
 ## 9. 上线验收清单
 
+可以先跑自动冒烟检查：
+
+```bash
+chmod +x scripts/deploy/smoke-test.sh
+JIXIANG_SMOKE_PASSWORD="管理员密码" scripts/deploy/smoke-test.sh https://你的域名
+```
+
+脚本会检查：
+
+- `/api/health` 返回 `ok: true` 和 `database: true`
+- 未登录访问 `/api/settings/users` 返回 401
+- 管理员账号可以登录并拿到 token
+- 登录后访问 `/api/settings/users` 返回 200
+
+人工再确认：
+
 - `https://你的域名` 能打开登录页
 - 浏览器地址栏显示 HTTPS 证书正常
 - 登录后首页、客户、订单、交付、财务、系统设置能正常打开
-- 未登录访问 `/api/settings/users` 返回 401
-- `curl http://127.0.0.1:3001/api/health` 返回 `ok: true` 和 `database: true`
 - `pm2 status` 中 `jixiang-os-api` 为 online
 - Nginx 只开放 80/443，MySQL 未暴露公网
 - 备份目录有当天 `.sql.gz` 文件

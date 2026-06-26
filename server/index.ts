@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { getAllowedCorsOrigins, validateRuntimeConfig } from './config/runtime';
 import { prisma, checkDatabaseConnection } from './db/client';
 import { createRequireAuth, bearerToken } from './middleware/auth';
 import { createAuthService } from './services/authService';
@@ -15,23 +16,11 @@ import {
 } from './services/publicCustomerIntelService';
 
 dotenv.config();
+validateRuntimeConfig();
 
 const app = express();
 const port = Number(process.env.AI_PROXY_PORT || 3001);
-const isProduction = process.env.NODE_ENV === 'production';
-const configuredCorsOrigins = String(process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || '')
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-const developmentCorsOrigins = [
-  'http://127.0.0.1:3000',
-  'http://localhost:3000',
-  'http://127.0.0.1:3002',
-  'http://localhost:3002',
-];
-const allowedCorsOrigins = configuredCorsOrigins.length
-  ? configuredCorsOrigins
-  : (isProduction ? [] : developmentCorsOrigins);
+const allowedCorsOrigins = getAllowedCorsOrigins();
 const authService = createAuthService(prisma);
 const aiConfigService = createAiConfigService(prisma as any);
 const settingsService = createSettingsService(prisma);
