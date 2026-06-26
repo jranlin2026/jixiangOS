@@ -470,11 +470,9 @@ const Customers: React.FC = () => {
           <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
             视图设置
           </Button>
-          <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE} action="write">
-            <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate}>
-              新增客户
-            </Button>
-          </PermissionGate>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate}>
+            新增客户
+          </Button>
         </Box>
       </Box>
 
