@@ -65,6 +65,16 @@ assert.throws(() => validateRuntimeConfig({
   CORS_ORIGINS: 'https://crm.example.com',
 }), /example domain/);
 
+assert.throws(() => validateRuntimeConfig({
+  NODE_ENV: 'production',
+  DATABASE_URL: 'mysql://user:StrongDatabasePassword!@127.0.0.1:3306/db',
+  AI_PROXY_PORT: '3001',
+  JIXIANG_DEFAULT_ADMIN_PASSWORD: 'StrongAdminPassword!',
+  JIXIANG_DEFAULT_USER_PASSWORD: 'StrongUserPassword!',
+  CORS_ORIGINS: 'https://crm.jixiang-ai.com',
+  JIXIANG_REMEMBER_SESSION_DAYS: '365',
+}), /JIXIANG_REMEMBER_SESSION_DAYS/);
+
 assert.doesNotThrow(() => validateRuntimeConfig({
   NODE_ENV: 'production',
   DATABASE_URL: 'mysql://user:StrongDatabasePassword!@127.0.0.1:3306/db',
@@ -72,4 +82,6 @@ assert.doesNotThrow(() => validateRuntimeConfig({
   JIXIANG_DEFAULT_ADMIN_PASSWORD: 'StrongAdminPassword!',
   JIXIANG_DEFAULT_USER_PASSWORD: 'StrongUserPassword!',
   CORS_ORIGINS: 'https://crm.jixiang-ai.com',
+  JIXIANG_SESSION_TTL_HOURS: '12',
+  JIXIANG_REMEMBER_SESSION_DAYS: '30',
 }));

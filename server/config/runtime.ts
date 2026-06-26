@@ -95,6 +95,15 @@ function assertProductionOrigins(origins: string[]): void {
   }
 }
 
+function assertIntegerRange(env: NodeJS.ProcessEnv, name: string, min: number, max: number): void {
+  const value = readEnv(env, name);
+  if (!value) return;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+    throw new Error(`${name} must be an integer between ${min} and ${max}.`);
+  }
+}
+
 export function validateRuntimeConfig(env: NodeJS.ProcessEnv = process.env): void {
   const port = Number(readEnv(env, 'AI_PROXY_PORT') || 3001);
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
@@ -107,4 +116,6 @@ export function validateRuntimeConfig(env: NodeJS.ProcessEnv = process.env): voi
   assertStrongPassword(env, 'JIXIANG_DEFAULT_ADMIN_PASSWORD', DEFAULT_ADMIN_PASSWORD);
   assertStrongPassword(env, 'JIXIANG_DEFAULT_USER_PASSWORD', DEFAULT_USER_PASSWORD);
   assertProductionOrigins(parseCorsOrigins(env));
+  assertIntegerRange(env, 'JIXIANG_SESSION_TTL_HOURS', 1, 24);
+  assertIntegerRange(env, 'JIXIANG_REMEMBER_SESSION_DAYS', 1, 90);
 }
