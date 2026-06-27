@@ -21,7 +21,7 @@ import type { Lead } from '../../types/lead';
 import type { LeadSourceConfig, User } from '../../types/settings';
 import { leadApi, leadFlowApi, roleApi, settingsApi } from '../../api';
 import { formatDate } from '../../shared/utils/formatters';
-import { RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
+import { RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, getLifecycleStatusTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import useAuthStore from '../../store/useAuthStore';
 import { canEditLeadProfile } from './leadDetailRules';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
@@ -485,7 +485,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
         <Box sx={{ minWidth: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>{currentLead.name}</Typography>
-            <Chip label={lifecycleConfig.name} size="small" sx={{ bgcolor: `${lifecycleConfig.color}18`, color: lifecycleConfig.color, fontWeight: 600 }} />
+            <Chip label={lifecycleConfig.name} size="small" sx={getLifecycleStatusTagSx(`${lifecycleCode} ${lifecycleConfig.name}`)} />
           </Box>
           <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>
             {followerName} 跟进 · {formatSource(currentLead)}
@@ -541,7 +541,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
                   color={currentLead.intakeStatus === '待分配' ? 'warning' : currentLead.intakeStatus === '入库失败' ? 'error' : 'success'}
                 />
               ))}
-              {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={{ bgcolor: `${lifecycleConfig.color}18`, color: lifecycleConfig.color, fontWeight: 600 }} />)}
+              {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={getLifecycleStatusTagSx(`${lifecycleCode} ${lifecycleConfig.name}`)} />)}
               {renderStatusRow('创建时间', formatDate(currentLead.createdAt, 'yyyy-MM-dd HH:mm'))}
               {renderStatusRow('更新时间', formatDate(currentLead.updatedAt, 'yyyy-MM-dd HH:mm'))}
               {renderRemarkRow()}

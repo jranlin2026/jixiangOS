@@ -35,7 +35,7 @@ import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import useCustomerStore from '../../store/useCustomerStore';
 import { customerApi, orderApi, settingsApi } from '../../api';
-import { CUSTOMER_LEVELS, ROUTES, getLifecycleConfigByCode, getProductLevelColor, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
+import { CUSTOMER_LEVELS, ROUTES, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import CustomerDetail from './CustomerDetail';
@@ -101,7 +101,7 @@ const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[]): Custom
         <Chip
           label={config.name}
           size="small"
-          sx={{ bgcolor: `${config.color}18`, color: config.color, fontWeight: 600 }}
+          sx={getLifecycleStatusTagSx(`${config.code} ${config.name}`)}
         />
       );
     },
@@ -752,14 +752,14 @@ const Customers: React.FC = () => {
             </TableHead>
             <TableBody>
               {customerOrders.map((order) => (
-                <TableRow key={order.id}>
+                <TableRow key={order.id} sx={getProductLevelRowSx(order.productLevel)}>
                   <TableCell>{order.orderNo}</TableCell>
                   <TableCell>{order.productName || order.productLevel || '-'}</TableCell>
                   <TableCell>
                     <Chip
                       label={order.productLevel}
                       size="small"
-                      sx={{ bgcolor: `${getProductLevelColor(order.productLevel)}18`, color: getProductLevelColor(order.productLevel), fontWeight: 600 }}
+                      sx={getProductLevelTagSx(order.productLevel)}
                     />
                   </TableCell>
                   <TableCell>{order.orderType}</TableCell>

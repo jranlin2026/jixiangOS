@@ -1,6 +1,6 @@
 import React from 'react';
 import { Chip } from '@mui/material';
-import { getCustomerLevelConfig } from '../../shared/utils/constants';
+import { getCustomerLevelConfig, getCustomerLevelTagSx } from '../../shared/utils/constants';
 
 interface CustomerLevelBadgeProps {
   level: string;
@@ -10,7 +10,6 @@ interface CustomerLevelBadgeProps {
 
 const CustomerLevelBadge: React.FC<CustomerLevelBadgeProps> = ({ level, showLabel = true, size = 'small' }) => {
   const config = getCustomerLevelConfig(level);
-  const color = config?.color || '#9E9E9E';
   const label = showLabel ? (config?.label || level) : level;
 
   return (
@@ -18,10 +17,9 @@ const CustomerLevelBadge: React.FC<CustomerLevelBadgeProps> = ({ level, showLabe
       label={label}
       size={size}
       sx={{
-        bgcolor: `${color}18`,
-        color,
-        fontWeight: 600,
-        fontSize: size === 'small' ? '0.6875rem' : '0.8125rem',
+        ...getCustomerLevelTagSx(`${level} ${label}`),
+        fontSize: size === 'small' ? '0.75rem' : '0.8125rem',
+        height: size === 'small' ? 24 : 28,
       }}
     />
   );

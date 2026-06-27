@@ -19,7 +19,7 @@ import {
 } from '@mui/material';
 import useOrderStore from '../../store/useOrderStore';
 import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
-import { getProductLevelColor, REFUND_CATEGORIES } from '../../shared/utils/constants';
+import { getProductLevelTagSx, REFUND_CATEGORIES } from '../../shared/utils/constants';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import { normalizeResourceOwnership } from '../../shared/utils/constants';
 import type { Order } from '../../types/order';
@@ -32,7 +32,6 @@ interface OrderDetailProps {
 }
 
 const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
-  const levelColor = getProductLevelColor(order.productLevel);
   const { applyRefund } = useOrderStore();
   const [refundOpen, setRefundOpen] = useState(false);
   const [refundAmount, setRefundAmount] = useState(order.actualAmount);
@@ -66,7 +65,7 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Typography variant="h6" sx={{ fontWeight: 600 }}>{order.orderNo}</Typography>
             <Typography variant="body2" sx={{ fontWeight: 600, color: '#374151' }}>{order.productName || order.productLevel}</Typography>
-            <Chip label={order.productLevel} size="small" sx={{ bgcolor: `${levelColor}18`, color: levelColor, fontWeight: 600 }} />
+            <Chip label={order.productLevel} size="small" sx={getProductLevelTagSx(order.productLevel)} />
             <Chip label={order.orderType} size="small" variant="outlined" />
           </Box>
         </DialogCloseTitle>
@@ -82,7 +81,7 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
             </Box>
             <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>产品等级</Typography>
-              <Chip label={order.productLevel} size="small" sx={{ bgcolor: `${levelColor}18`, color: levelColor, fontWeight: 600 }} />
+              <Chip label={order.productLevel} size="small" sx={getProductLevelTagSx(order.productLevel)} />
             </Box>
             <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>实付金额</Typography>
@@ -134,6 +133,7 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
                       <TableCell>付款时间</TableCell>
                       <TableCell>付款订单号</TableCell>
                       <TableCell>付款截图</TableCell>
+                      <TableCell>成交路径截图</TableCell>
                       <TableCell>备注</TableCell>
                     </TableRow>
                   </TableHead>
@@ -144,6 +144,7 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
                         <TableCell>{formatDate(payment.paidAt, 'yyyy-MM-dd HH:mm:ss')}</TableCell>
                         <TableCell>{payment.paymentOrderNo || '-'}</TableCell>
                         <TableCell>{payment.voucherName || '-'}</TableCell>
+                        <TableCell>{order.dealEvidenceName || (order.dealEvidencePreview ? '已上传' : '-')}</TableCell>
                         <TableCell>{payment.remark || '-'}</TableCell>
                       </TableRow>
                     ))}

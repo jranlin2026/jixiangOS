@@ -27,7 +27,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import useUpgradeStore from '../../store/useUpgradeStore';
-import { CUSTOMER_LEVEL_COLOR_MAP, getProductLevelColor } from '../../shared/utils/constants';
+import { CUSTOMER_LEVEL_COLOR_MAP, getProductLevelColor, getProductLevelRowSx } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import UpgradeDetail from './UpgradeDetail';
 import CustomerSuccessTab from './CustomerSuccessTab';
@@ -321,7 +321,7 @@ const UpgradePool: React.FC = () => {
           </TableHead>
           <TableBody>
             {items.map((opp) => (
-              <TableRow key={opp.id} hover>
+              <TableRow key={opp.id} hover sx={getProductLevelRowSx(opp.targetProduct)}>
                 {visibleColumns.map((column, columnIndex) => (
                   <TableCell key={column.id} sx={{ ...getResizableCellSx(columnWidths[column.id]), ...getFrozenColumnSx(columnIndex) }}>
                     {column.render(opp)}

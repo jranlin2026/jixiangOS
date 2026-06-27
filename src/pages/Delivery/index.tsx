@@ -2,10 +2,13 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Button,
+  Checkbox,
   Chip,
   Dialog,
   DialogActions,
   DialogContent,
+  DialogTitle,
+  Divider,
   IconButton,
   LinearProgress,
   MenuItem,
@@ -24,45 +27,28 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import {
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  pointerWithin,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-  type DragStartEvent,
-} from '@dnd-kit/core';
-import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import AddIcon from '@mui/icons-material/Add';
 import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
-import BlockIcon from '@mui/icons-material/Block';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import PersonIcon from '@mui/icons-material/Person';
-import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
-import ViewColumnIcon from '@mui/icons-material/ViewColumn';
+import CloseIcon from '@mui/icons-material/Close';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
+import SettingsIcon from '@mui/icons-material/Settings';
+import SkipNextIcon from '@mui/icons-material/SkipNext';
+import SupervisorAccountIcon from '@mui/icons-material/SupervisorAccount';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import useDeliveryStore from '../../store/useDeliveryStore';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { customerApi, deliveryApi, orderApi, productApi, settingsApi } from '../../api';
-import { DEFAULT_PRODUCT_LEVEL_CONFIGS } from '../../shared/utils/constants';
-import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
-import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
-import ResizableHeaderCell, {
-  getResizableCellSx,
-  readColumnWidths,
-  resetColumnWidths,
-  resizeColumnWidths,
-  writeColumnWidths,
-  type ColumnWidthMap,
-} from '../../shared/components/ResizableTable';
-import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
-import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import CustomerDetail from '../Customers/CustomerDetail';
 import OrderDetail from '../Orders/OrderDetail';
-import DeliveryColumn from './DeliveryColumn';
-import DeliveryCard from './DeliveryCard';
+import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import { getProductLevelRowSx, getProductLevelTagSx } from '../../shared/utils/constants';
 import type {
   Delivery,
+  DeliveryCreatableOrderSummary,
+  DeliveryException,
+  DeliveryExceptionType,
   DeliveryFilters,
   DeliveryOverallStatus,
   DeliveryPriority,
@@ -77,47 +63,40 @@ import type { User } from '../../types/settings';
 type DeliveryColumnId =
   | 'orderNo'
   | 'customerName'
+  | 'productName'
   | 'productType'
   | 'orderAmount'
   | 'paymentDate'
   | 'salesOwner'
   | 'owner'
   | 'currentStage'
+  | 'plannedCompletedAt'
   | 'progress'
-  | 'taskCount'
   | 'status'
   | 'priority'
-  | 'plannedCompletedAt'
+  | 'customerSuccessStatus'
   | 'updatedAt';
 
 type DeliveryColumnMeta = {
   id: DeliveryColumnId;
   label: string;
-  defaultWidth: number;
-};
-
-type ProductTabConfig = {
-  label: string;
-  type: DeliveryProductType;
-  color: string;
+  width: number;
 };
 
 type DeliveryViewConfig = {
   visibleColumnIds: DeliveryColumnId[];
-  columnOrder: DeliveryColumnId[];
-  frozenColumnCount: number;
 };
 
-const DELIVERY_VIEW_STORAGE_KEY = 'aaos_delivery_workbench_view_v1';
-const DELIVERY_WIDTH_STORAGE_KEY = 'aaos_delivery_workbench_widths_v1';
-const ACTION_COLUMN_WIDTH = 210;
+type TaskDraft = Record<string, string>;
 
-const STATUS_OPTIONS: Array<{ value: DeliveryOverallStatus; label: string; important?: boolean }> = [
+const VIEW_STORAGE_KEY = 'jixiang_delivery_view_v5';
+
+const STATUS_OPTIONS: Array<{ value: DeliveryOverallStatus; label: string; tone?: 'danger' | 'normal' }> = [
   { value: '全部', label: '全部' },
   { value: '待开始', label: '待开始' },
   { value: '交付中', label: '交付中' },
-  { value: '超期', label: '超期', important: true },
-  { value: '阻塞', label: '阻塞', important: true },
+  { value: '超期', label: '超期', tone: 'danger' },
+  { value: '阻塞', label: '阻塞', tone: 'danger' },
   { value: '待验收', label: '待验收' },
   { value: '已完成', label: '已完成' },
 ];
@@ -130,73 +109,63 @@ const PRIORITY_OPTIONS: Array<{ value: DeliveryPriority | ''; label: string }> =
   { value: 'low', label: '低' },
 ];
 
-const TASK_STATUS_OPTIONS = ['待开始', '进行中', '已完成', '已跳过'];
+const EXCEPTION_OPTIONS: DeliveryExceptionType[] = ['客户不提供资料', '交付超期', '销售承诺不一致', '其他'];
 
 const DELIVERY_COLUMNS: DeliveryColumnMeta[] = [
-  { id: 'orderNo', label: '订单号', defaultWidth: 170 },
-  { id: 'customerName', label: '客户', defaultWidth: 160 },
-  { id: 'productType', label: '产品类型', defaultWidth: 120 },
-  { id: 'orderAmount', label: '订单金额', defaultWidth: 130 },
-  { id: 'paymentDate', label: '付款日期', defaultWidth: 130 },
-  { id: 'salesOwner', label: '销售负责人', defaultWidth: 130 },
-  { id: 'owner', label: '交付负责人', defaultWidth: 130 },
-  { id: 'currentStage', label: '当前阶段', defaultWidth: 140 },
-  { id: 'progress', label: '交付进度', defaultWidth: 150 },
-  { id: 'taskCount', label: '任务数', defaultWidth: 100 },
-  { id: 'status', label: '交付状态', defaultWidth: 120 },
-  { id: 'priority', label: '优先级', defaultWidth: 100 },
-  { id: 'plannedCompletedAt', label: '计划完成', defaultWidth: 130 },
-  { id: 'updatedAt', label: '更新时间', defaultWidth: 160 },
+  { id: 'orderNo', label: '订单号', width: 160 },
+  { id: 'customerName', label: '客户', width: 150 },
+  { id: 'productName', label: '产品名称', width: 150 },
+  { id: 'productType', label: '产品类型', width: 110 },
+  { id: 'orderAmount', label: '订单金额', width: 120 },
+  { id: 'paymentDate', label: '付款日期', width: 150 },
+  { id: 'salesOwner', label: '销售负责人', width: 120 },
+  { id: 'owner', label: '客户成功', width: 120 },
+  { id: 'currentStage', label: '当前步骤', width: 150 },
+  { id: 'plannedCompletedAt', label: '计划完成时间', width: 150 },
+  { id: 'progress', label: '交付进度', width: 160 },
+  { id: 'status', label: '状态', width: 105 },
+  { id: 'priority', label: '优先级', width: 95 },
+  { id: 'customerSuccessStatus', label: '维护状态', width: 110 },
+  { id: 'updatedAt', label: '更新时间', width: 150 },
 ];
 
 const DEFAULT_VISIBLE_COLUMNS: DeliveryColumnId[] = [
   'orderNo',
   'customerName',
+  'productName',
   'productType',
   'orderAmount',
-  'paymentDate',
   'owner',
   'currentStage',
+  'plannedCompletedAt',
   'progress',
   'status',
+  'customerSuccessStatus',
 ];
 
-const DEFAULT_COLUMN_ORDER = DELIVERY_COLUMNS.map((column) => column.id);
-const DEFAULT_COLUMN_WIDTHS = DELIVERY_COLUMNS.reduce<ColumnWidthMap>((result, column) => {
-  result[column.id] = column.defaultWidth;
-  return result;
-}, {});
-
-const fallbackProductTypes: ProductTabConfig[] = DEFAULT_PRODUCT_LEVEL_CONFIGS.map((level) => ({
-  label: level.name.endsWith('产品') ? level.name : `${level.name}产品`,
-  type: level.name,
-  color: level.color,
-}));
-
-function normalizeColumnIds(ids: unknown, fallback: DeliveryColumnId[]): DeliveryColumnId[] {
-  if (!Array.isArray(ids)) return [...fallback];
-  const validIds = new Set(DELIVERY_COLUMNS.map((column) => column.id));
-  const normalized = ids.filter((id): id is DeliveryColumnId => typeof id === 'string' && validIds.has(id as DeliveryColumnId));
-  return normalized.length ? normalized : [...fallback];
+function readViewConfig(): DeliveryViewConfig {
+  try {
+    const raw = localStorage.getItem(VIEW_STORAGE_KEY);
+    if (!raw) return { visibleColumnIds: [...DEFAULT_VISIBLE_COLUMNS] };
+    const parsed = JSON.parse(raw) as Partial<DeliveryViewConfig>;
+    const validIds = new Set(DELIVERY_COLUMNS.map((item) => item.id));
+    const visibleColumnIds = (parsed.visibleColumnIds || [])
+      .filter((id): id is DeliveryColumnId => typeof id === 'string' && validIds.has(id as DeliveryColumnId));
+    return { visibleColumnIds: visibleColumnIds.length ? visibleColumnIds : [...DEFAULT_VISIBLE_COLUMNS] };
+  } catch {
+    return { visibleColumnIds: [...DEFAULT_VISIBLE_COLUMNS] };
+  }
 }
 
-function readDeliveryViewConfig(): DeliveryViewConfig {
-  try {
-    const raw = localStorage.getItem(DELIVERY_VIEW_STORAGE_KEY);
-    if (!raw) {
-      return { visibleColumnIds: [...DEFAULT_VISIBLE_COLUMNS], columnOrder: [...DEFAULT_COLUMN_ORDER], frozenColumnCount: 0 };
-    }
-    const parsed = JSON.parse(raw) as Partial<DeliveryViewConfig>;
-    const storedOrder = normalizeColumnIds(parsed.columnOrder, DEFAULT_COLUMN_ORDER);
-    const missingIds = DEFAULT_COLUMN_ORDER.filter((id) => !storedOrder.includes(id));
-    return {
-      visibleColumnIds: normalizeColumnIds(parsed.visibleColumnIds, DEFAULT_VISIBLE_COLUMNS),
-      columnOrder: [...storedOrder, ...missingIds],
-      frozenColumnCount: Math.max(0, Math.min(Number(parsed.frozenColumnCount) || 0, DELIVERY_COLUMNS.length)),
-    };
-  } catch {
-    return { visibleColumnIds: [...DEFAULT_VISIBLE_COLUMNS], columnOrder: [...DEFAULT_COLUMN_ORDER], frozenColumnCount: 0 };
-  }
+function formatCurrency(value?: number) {
+  return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(value || 0);
+}
+
+function formatDateTime(value?: string) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return value;
+  return date.toLocaleString('zh-CN', { hour12: false });
 }
 
 function getStatusColor(status?: Delivery['status']): 'default' | 'success' | 'error' | 'warning' | 'info' {
@@ -221,35 +190,55 @@ function getPriorityColor(priority?: DeliveryPriority): 'default' | 'success' | 
   return 'info';
 }
 
-const Delivery: React.FC = () => {
+function getTaskColor(task: DeliveryTask): 'default' | 'success' | 'warning' | 'info' {
+  if (task.status === '已完成') return 'success';
+  if (task.status === '已跳过') return 'warning';
+  if (task.status === '进行中') return 'info';
+  return 'default';
+}
+
+function getTerminalTaskCount(delivery: Delivery) {
+  return delivery.tasks.filter((task) => task.status === '已完成' || task.status === '已跳过' || task.completedAt).length;
+}
+
+function compactDraft(draft?: TaskDraft) {
+  return Object.fromEntries(Object.entries(draft || {}).filter(([, value]) => value.trim()));
+}
+
+const DeliveryPage: React.FC = () => {
   const [tabValue, setTabValue] = useState(0);
   const [rows, setRows] = useState<Delivery[]>([]);
-  const [taskSourceRows, setTaskSourceRows] = useState<Delivery[]>([]);
   const [stats, setStats] = useState<DeliveryStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState<DeliveryFilters>({ status: '全部', page: 1, pageSize: 10 });
-  const [listPagination, setListPagination] = useState({ page: 1, pageSize: 10, total: 0 });
+  const [pagination, setPagination] = useState({ page: 1, pageSize: 10, total: 0 });
+  const [viewConfig, setViewConfig] = useState<DeliveryViewConfig>(readViewConfig);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
-  const [viewConfig, setViewConfig] = useState<DeliveryViewConfig>(readDeliveryViewConfig);
-  const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(DELIVERY_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
-  const [productTypes, setProductTypes] = useState<ProductTabConfig[]>(fallbackProductTypes);
-  const [stageOptions, setStageOptions] = useState<string[]>([]);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creatableOrders, setCreatableOrders] = useState<DeliveryCreatableOrderSummary[]>([]);
+  const [createSearch, setCreateSearch] = useState('');
+  const [selectedCreateOrderId, setSelectedCreateOrderId] = useState('');
+  const [createLoading, setCreateLoading] = useState(false);
+  const [productTypes, setProductTypes] = useState<DeliveryProductType[]>(['代理', '贴牌', '合伙人', '899', '课程']);
   const [users, setUsers] = useState<User[]>([]);
   const [selectedDelivery, setSelectedDelivery] = useState<Delivery | null>(null);
+  const [taskDrafts, setTaskDrafts] = useState<Record<string, TaskDraft>>({});
+  const [materialDrafts, setMaterialDrafts] = useState<Record<string, string>>({});
+  const [exceptionType, setExceptionType] = useState<DeliveryExceptionType>('客户不提供资料');
+  const [exceptionDescription, setExceptionDescription] = useState('');
+  const [confirmNotes, setConfirmNotes] = useState('');
   const [assignDelivery, setAssignDelivery] = useState<Delivery | null>(null);
   const [assignOwnerId, setAssignOwnerId] = useState('');
   const [assignPriority, setAssignPriority] = useState<DeliveryPriority>('normal');
   const [assignPlanDate, setAssignPlanDate] = useState('');
-  const [blockReason, setBlockReason] = useState('');
   const [orderDetail, setOrderDetail] = useState<Order | null>(null);
   const [customerDetail, setCustomerDetail] = useState<Customer | null>(null);
-  const [boardProductType, setBoardProductType] = useState<DeliveryProductType>(fallbackProductTypes[0]?.type || '899');
-  const [boardStages, setBoardStages] = useState<string[]>([]);
-  const [activeDelivery, setActiveDelivery] = useState<Delivery | null>(null);
-  const { items: boardItems, fetchByProductType, advanceStage } = useDeliveryStore();
   const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  const visibleColumns = useMemo(
+    () => DELIVERY_COLUMNS.filter((column) => viewConfig.visibleColumnIds.includes(column.id)),
+    [viewConfig.visibleColumnIds],
+  );
 
   const loadWorkbench = useCallback(async (nextFilters: DeliveryFilters) => {
     setLoading(true);
@@ -260,11 +249,9 @@ const Delivery: React.FC = () => {
       ]);
       if (listRes.code === 0) {
         setRows(listRes.data.items);
-        setListPagination({ page: listRes.data.page, pageSize: listRes.data.pageSize, total: listRes.data.total });
+        setPagination({ page: listRes.data.page, pageSize: listRes.data.pageSize, total: listRes.data.total });
       }
-      if (statsRes.code === 0) {
-        setStats(statsRes.data);
-      }
+      if (statsRes.code === 0) setStats(statsRes.data);
     } finally {
       setLoading(false);
     }
@@ -275,124 +262,53 @@ const Delivery: React.FC = () => {
   }, [filters, loadWorkbench]);
 
   useEffect(() => {
-    localStorage.setItem(DELIVERY_VIEW_STORAGE_KEY, JSON.stringify(viewConfig));
+    localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify(viewConfig));
   }, [viewConfig]);
 
   useEffect(() => {
-    writeColumnWidths(DELIVERY_WIDTH_STORAGE_KEY, columnWidths);
-  }, [columnWidths]);
-
-  useEffect(() => {
-    const loadStaticOptions = async () => {
+    const loadOptions = async () => {
       const [productsRes, levelsRes, usersRes] = await Promise.all([
         productApi.getAllProducts(),
         productApi.getProductLevelConfigs(),
         settingsApi.fetchUsers({ isActive: true }),
       ]);
       if (usersRes.code === 0) setUsers(usersRes.data.filter((user) => user.isActive));
+      const productLevelSet = new Set<DeliveryProductType>();
       if (levelsRes.code === 0) {
-        const levelsWithProducts = new Set(
-          productsRes.code === 0 ? productsRes.data.filter((product) => product.isActive).map((product) => product.level) : [],
-        );
-        const next = levelsRes.data
-          .filter((level) => level.isActive || levelsWithProducts.has(level.name))
-          .map((level) => ({
-            label: level.name.endsWith('产品') ? level.name : `${level.name}产品`,
-            type: level.name,
-            color: level.color,
-          }));
-        if (next.length) {
-          setProductTypes(next);
-          setBoardProductType(next[0].type);
-        }
+        levelsRes.data.filter((level) => level.isActive).forEach((level) => productLevelSet.add(level.name));
       }
+      if (productsRes.code === 0) {
+        productsRes.data.filter((product) => product.isActive).forEach((product) => productLevelSet.add(product.level));
+      }
+      ['代理', '贴牌', '合伙人', '899', '课程'].forEach((item) => productLevelSet.add(item));
+      setProductTypes(Array.from(productLevelSet));
     };
-    loadStaticOptions();
+    loadOptions();
   }, []);
 
   useEffect(() => {
-    if (tabValue !== 1 || !boardProductType) return;
-    const loadBoard = async () => {
-      const [stagesRes] = await Promise.all([
-        deliveryApi.fetchDeliveryStagesByProductType(boardProductType),
-        fetchByProductType(boardProductType),
-      ]);
-      if (stagesRes.code === 0) setBoardStages(stagesRes.data);
-    };
-    loadBoard();
-  }, [boardProductType, fetchByProductType, tabValue]);
-
-  useEffect(() => {
-    if (tabValue !== 2) return;
-    deliveryApi.fetchDeliveries({ ...filters, status: '全部', page: 1, pageSize: 100 }).then((res) => {
-      if (res.code === 0) setTaskSourceRows(res.data.items);
-    });
-  }, [filters, tabValue]);
-
-  useEffect(() => {
     if (!selectedDelivery) {
-      setBlockReason('');
+      setTaskDrafts({});
+      setMaterialDrafts({});
       return;
     }
-    setBlockReason(selectedDelivery.blockedReason || '');
-  }, [selectedDelivery]);
+    setTaskDrafts(Object.fromEntries(selectedDelivery.tasks.map((task) => [task.id, task.resultFields || {}])));
+    setMaterialDrafts(Object.fromEntries((selectedDelivery.materialItems || []).map((item) => [item.key, item.value || ''])));
+    setExceptionDescription('');
+    setConfirmNotes('');
+  }, [selectedDelivery?.id]);
 
-  const pagination = {
-    page: listPagination.page || 1,
-    pageSize: listPagination.pageSize || 10,
-    total: listPagination.total,
+  const refreshAfterMutation = async (deliveryId?: string) => {
+    await loadWorkbench(filters);
+    const targetId = deliveryId || selectedDelivery?.id;
+    if (targetId) {
+      const res = await deliveryApi.fetchDeliveryById(targetId);
+      if (res.code === 0) setSelectedDelivery(res.data);
+    }
   };
-
-  const orderedColumns = useMemo(() => {
-    const columnMap = new Map(DELIVERY_COLUMNS.map((column) => [column.id, column]));
-    const ordered = viewConfig.columnOrder
-      .map((columnId) => columnMap.get(columnId))
-      .filter((column): column is DeliveryColumnMeta => Boolean(column));
-    const missing = DELIVERY_COLUMNS.filter((column) => !viewConfig.columnOrder.includes(column.id));
-    return [...ordered, ...missing];
-  }, [viewConfig.columnOrder]);
-
-  const visibleColumns = useMemo(
-    () => orderedColumns.filter((column) => viewConfig.visibleColumnIds.includes(column.id)),
-    [orderedColumns, viewConfig.visibleColumnIds],
-  );
-
-  const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length);
-  const tableMinWidth = visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || column.defaultWidth), 0) + ACTION_COLUMN_WIDTH;
-
-  const getFrozenLeft = (columnIndex: number) => (
-    visibleColumns.slice(0, columnIndex).reduce((sum, column) => sum + (columnWidths[column.id] || column.defaultWidth), 0)
-  );
-
-  const getFrozenColumnSx = (columnIndex: number, isHeader = false) => (
-    columnIndex < frozenColumnCount
-      ? {
-          position: 'sticky' as const,
-          left: getFrozenLeft(columnIndex),
-          zIndex: isHeader ? 5 : 3,
-          bgcolor: isHeader ? '#f8fafc' : '#fff',
-          boxShadow: '1px 0 0 #e5e7eb',
-        }
-      : {}
-  );
-
-  const actionColumnSx = {
-    position: 'sticky' as const,
-    right: 0,
-    zIndex: 4,
-    width: ACTION_COLUMN_WIDTH,
-    minWidth: ACTION_COLUMN_WIDTH,
-    bgcolor: '#fff',
-    boxShadow: '-1px 0 0 #e5e7eb',
-  };
-
-  const taskRows = useMemo(() => (
-    taskSourceRows.flatMap((delivery) => delivery.tasks.map((task) => ({ delivery, task })))
-  ), [taskSourceRows]);
 
   const handleFiltersChange = (patch: Partial<DeliveryFilters>) => {
-    const next = { ...filters, ...patch, page: 1 };
-    setFilters(next);
+    setFilters((current) => ({ ...current, ...patch, page: 1 }));
   };
 
   const handlePageChange = (_event: React.MouseEvent<HTMLButtonElement> | null, page: number) => {
@@ -403,97 +319,46 @@ const Delivery: React.FC = () => {
     setFilters((current) => ({ ...current, page: 1, pageSize: Number(event.target.value) }));
   };
 
-  const handleToggleColumn = (id: string) => {
-    setViewConfig((current) => {
-      const columnId = id as DeliveryColumnId;
-      const visibleColumnIds = current.visibleColumnIds.includes(columnId)
-        ? current.visibleColumnIds.filter((item) => item !== columnId)
-        : [...current.visibleColumnIds, columnId];
-      if (!visibleColumnIds.length) return current;
-      return { ...current, visibleColumnIds, frozenColumnCount: Math.min(current.frozenColumnCount, visibleColumnIds.length) };
-    });
-  };
-
-  const handleReorderColumn = (sourceColumnId: string, targetColumnId: string) => {
-    setViewConfig((current) => {
-      const sourceIndex = current.columnOrder.indexOf(sourceColumnId as DeliveryColumnId);
-      const targetIndex = current.columnOrder.indexOf(targetColumnId as DeliveryColumnId);
-      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return current;
-      const nextOrder = [...current.columnOrder];
-      const [moved] = nextOrder.splice(sourceIndex, 1);
-      nextOrder.splice(targetIndex, 0, moved);
-      return { ...current, columnOrder: nextOrder };
-    });
-  };
-
-  const handleResetView = () => {
-    setViewConfig({ visibleColumnIds: [...DEFAULT_VISIBLE_COLUMNS], columnOrder: [...DEFAULT_COLUMN_ORDER], frozenColumnCount: 0 });
-    setColumnWidths(resetColumnWidths(DEFAULT_COLUMN_WIDTHS));
-  };
-
-  const refreshAfterMutation = async () => {
-    await loadWorkbench(filters);
-    if (tabValue === 1 && boardProductType) await fetchByProductType(boardProductType);
-    if (selectedDelivery) {
-      const res = await deliveryApi.fetchDeliveryById(selectedDelivery.id);
-      if (res.code === 0) setSelectedDelivery(res.data);
+  const loadCreatableOrders = useCallback(async (search = createSearch) => {
+    setCreateLoading(true);
+    try {
+      const res = await deliveryApi.fetchCreatableDeliveryOrders(search);
+      if (res.code === 0) {
+        setCreatableOrders(res.data);
+        setSelectedCreateOrderId((current) => (
+          current && res.data.some((item) => item.orderId === current) ? current : res.data[0]?.orderId || ''
+        ));
+      }
+    } finally {
+      setCreateLoading(false);
     }
+  }, [createSearch]);
+
+  const openCreateDialog = async () => {
+    setCreateOpen(true);
+    await loadCreatableOrders('');
   };
 
-  const handleAdvance = async (delivery: Delivery) => {
-    const currentIndex = delivery.stages.indexOf(delivery.currentStage);
-    const nextStage = delivery.stages[currentIndex + 1];
-    if (!nextStage) {
-      await alert('当前交付单已经到最后阶段。');
+  const handleCreateSearch = async () => {
+    await loadCreatableOrders(createSearch);
+  };
+
+  const handleCreateDelivery = async () => {
+    if (!selectedCreateOrderId) {
+      await alert('请先选择一笔可新建交付单的订单');
       return;
     }
-    const ok = await confirm(`确认将 ${delivery.orderNo} 推进到「${nextStage}」吗？`, '推进交付阶段');
-    if (!ok) return;
-    await deliveryApi.advanceDeliveryStage(delivery.id, nextStage);
-    await refreshAfterMutation();
-  };
-
-  const openAssign = (delivery: Delivery) => {
-    setAssignDelivery(delivery);
-    setAssignOwnerId(delivery.ownerId || '');
-    setAssignPriority(delivery.priority || 'normal');
-    setAssignPlanDate(delivery.plannedCompletedAt || '');
-  };
-
-  const saveAssign = async () => {
-    if (!assignDelivery) return;
-    const user = users.find((item) => item.id === assignOwnerId);
-    await deliveryApi.updateDelivery(assignDelivery.id, {
-      ownerId: user?.id,
-      owner: user?.name || '待分配',
-      priority: assignPriority,
-      plannedCompletedAt: assignPlanDate || undefined,
-    });
-    setAssignDelivery(null);
-    await refreshAfterMutation();
-  };
-
-  const handleTaskStatusChange = async (task: DeliveryTask, status: string) => {
-    if (!selectedDelivery) return;
-    const res = await deliveryApi.updateDeliveryTask(selectedDelivery.id, task.id, { status });
-    if (res.code === 0) {
-      setSelectedDelivery(res.data);
-      await loadWorkbench(filters);
+    const res = await deliveryApi.createDeliveryFromOrder(selectedCreateOrderId);
+    if (res.code !== 0 || !res.data) {
+      await alert(res.message || '新建交付单失败');
+      return;
     }
-  };
-
-  const handleBlockToggle = async () => {
-    if (!selectedDelivery) return;
-    if (selectedDelivery.status === '阻塞') {
-      await deliveryApi.updateDelivery(selectedDelivery.id, { blockedReason: undefined, status: '交付中' });
-    } else {
-      if (!blockReason.trim()) {
-        await alert('请先填写阻塞原因。');
-        return;
-      }
-      await deliveryApi.updateDelivery(selectedDelivery.id, { blockedReason: blockReason.trim(), status: '阻塞' });
-    }
-    await refreshAfterMutation();
+    setCreateOpen(false);
+    setCreateSearch('');
+    setSelectedCreateOrderId('');
+    await loadWorkbench({ ...filters, page: 1 });
+    setFilters((current) => ({ ...current, page: 1 }));
+    setSelectedDelivery(res.data);
   };
 
   const handleViewOrder = async (delivery: Delivery) => {
@@ -506,37 +371,165 @@ const Delivery: React.FC = () => {
     if (res.code === 0 && res.data) setCustomerDetail(res.data);
   };
 
-  const handleDragStart = (event: DragStartEvent) => {
-    const delivery = boardItems.find((item) => item.id === event.active.id);
-    if (delivery) setActiveDelivery(delivery);
+  const handleDeleteDelivery = async (delivery: Delivery) => {
+    const ok = await confirm(`确认删除交付单「${delivery.orderNo}」吗？删除后不会影响订单和客户资料。`, '删除交付单');
+    if (!ok) return;
+    const res = await deliveryApi.deleteDelivery(delivery.id);
+    if (res.code !== 0 || !res.data) {
+      await alert(res.message || '交付单删除失败');
+      return;
+    }
+    if (selectedDelivery?.id === delivery.id) setSelectedDelivery(null);
+    await loadWorkbench(filters);
   };
 
-  const handleDragEnd = async (event: DragEndEvent) => {
-    const { active, over } = event;
-    setActiveDelivery(null);
-    if (!active || !over) return;
-    const deliveryId = String(active.id);
-    const overId = String(over.id);
-    let targetStage: string | null = null;
-    if (overId.startsWith('stage-')) {
-      targetStage = overId.replace('stage-', '');
-    } else {
-      targetStage = boardItems.find((item) => item.id === overId)?.currentStage || null;
+  const handleCompleteTask = async (task: DeliveryTask) => {
+    if (!selectedDelivery) return;
+    const res = await deliveryApi.updateDeliveryTask(selectedDelivery.id, task.id, {
+      status: '已完成',
+      resultFields: compactDraft(taskDrafts[task.id]),
+    });
+    if (res.code !== 0) {
+      await alert(res.message || '步骤保存失败');
+      return;
     }
-    const current = boardItems.find((item) => item.id === deliveryId);
-    if (targetStage && current && current.currentStage !== targetStage) {
-      await advanceStage(deliveryId, targetStage);
+    setSelectedDelivery(res.data);
+    await loadWorkbench(filters);
+  };
+
+  const handleSkipTask = async (task: DeliveryTask) => {
+    if (!selectedDelivery) return;
+    const res = await deliveryApi.updateDeliveryTask(selectedDelivery.id, task.id, {
+      status: '已跳过',
+      skipReason: taskDrafts[task.id]?.note || '客户无此项需求',
+    });
+    if (res.code !== 0) {
+      await alert(res.message || '步骤跳过失败');
+      return;
+    }
+    setSelectedDelivery(res.data);
+    await loadWorkbench(filters);
+  };
+
+  const handleUploadAttachment = async (task: DeliveryTask, event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!selectedDelivery) return;
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!files.length) return;
+    let latest: Delivery | null = selectedDelivery;
+    for (const file of files) {
+      const res = await deliveryApi.addDeliveryAttachment(selectedDelivery.id, task.id, {
+        name: file.name,
+        size: file.size,
+        fileType: file.type,
+        uploadedBy: selectedDelivery.owner || '客户成功',
+      });
+      if (res.code === 0) latest = res.data;
+    }
+    setSelectedDelivery(latest);
+    await loadWorkbench(filters);
+  };
+
+  const handleSaveMaterials = async () => {
+    if (!selectedDelivery) return;
+    const nextItems = (selectedDelivery.materialItems || []).map((item) => {
+      const value = materialDrafts[item.key]?.trim();
+      return {
+        ...item,
+        value,
+        status: item.status === '已确认' ? item.status : value ? '已提供' as const : '缺失' as const,
+      };
+    });
+    const res = await deliveryApi.updateDelivery(selectedDelivery.id, { materialItems: nextItems });
+    if (res.code === 0) {
+      setSelectedDelivery(res.data);
       await loadWorkbench(filters);
     }
+  };
+
+  const handleAddException = async () => {
+    if (!selectedDelivery) return;
+    const res = await deliveryApi.addDeliveryException(selectedDelivery.id, {
+      type: exceptionType,
+      description: exceptionDescription,
+      createdBy: selectedDelivery.owner || '客户成功',
+    });
+    if (res.code !== 0) {
+      await alert(res.message || '异常标记失败');
+      return;
+    }
+    setSelectedDelivery(res.data);
+    setExceptionDescription('');
+    await loadWorkbench(filters);
+  };
+
+  const handleResolveException = async (exception: DeliveryException) => {
+    if (!selectedDelivery) return;
+    const res = await deliveryApi.resolveDeliveryException(selectedDelivery.id, exception.id, {
+      resolvedBy: '客户成功主管',
+      resolution: '主管已介入处理，交付可继续推进',
+    });
+    if (res.code !== 0) {
+      await alert(res.message || '异常解除失败');
+      return;
+    }
+    setSelectedDelivery(res.data);
+    await loadWorkbench(filters);
+  };
+
+  const handleConfirmDelivery = async () => {
+    if (!selectedDelivery) return;
+    const res = await deliveryApi.confirmDeliveryCompletion(selectedDelivery.id, {
+      confirmedBy: '客户成功主管',
+      notes: confirmNotes,
+    });
+    if (res.code !== 0) {
+      await alert(res.message || '主管确认失败');
+      return;
+    }
+    setSelectedDelivery(res.data);
+    await loadWorkbench(filters);
+  };
+
+  const openAssign = (delivery: Delivery) => {
+    setAssignDelivery(delivery);
+    setAssignOwnerId(delivery.ownerId || '');
+    setAssignPriority(delivery.priority || 'normal');
+    setAssignPlanDate(delivery.plannedCompletedAt || '');
+  };
+
+  const saveAssign = async () => {
+    if (!assignDelivery) return;
+    const user = users.find((item) => item.id === assignOwnerId);
+    const res = await deliveryApi.updateDelivery(assignDelivery.id, {
+      ownerId: user?.id,
+      owner: user?.name || '待分配',
+      priority: assignPriority,
+      plannedCompletedAt: assignPlanDate || undefined,
+    });
+    if (res.code === 0) {
+      setAssignDelivery(null);
+      await refreshAfterMutation(res.data?.id);
+    }
+  };
+
+  const toggleColumn = (columnId: DeliveryColumnId) => {
+    setViewConfig((current) => {
+      const exists = current.visibleColumnIds.includes(columnId);
+      if (exists && current.visibleColumnIds.length <= 1) return current;
+      return {
+        visibleColumnIds: exists
+          ? current.visibleColumnIds.filter((item) => item !== columnId)
+          : [...current.visibleColumnIds, columnId],
+      };
+    });
   };
 
   const renderProgress = (delivery: Delivery) => (
     <Box sx={{ minWidth: 120 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
         <Typography variant="caption" sx={{ color: '#64748b' }}>{delivery.progressPercent || 0}%</Typography>
-        <Typography variant="caption" sx={{ color: '#94a3b8' }}>
-          {delivery.tasks.filter((task) => task.status === '已完成' || task.completedAt).length}/{delivery.tasks.length}
-        </Typography>
+        <Typography variant="caption" sx={{ color: '#94a3b8' }}>{getTerminalTaskCount(delivery)}/{delivery.tasks.length}</Typography>
       </Box>
       <LinearProgress variant="determinate" value={delivery.progressPercent || 0} sx={{ height: 6, borderRadius: 999 }} />
     </Box>
@@ -545,48 +538,53 @@ const Delivery: React.FC = () => {
   const renderCell = (delivery: Delivery, columnId: DeliveryColumnId) => {
     switch (columnId) {
       case 'orderNo':
-        return (
-          <Button size="small" variant="text" onClick={() => handleViewOrder(delivery)} sx={{ p: 0, minWidth: 0, fontWeight: 700, textTransform: 'none' }}>
-            {delivery.orderNo}
-          </Button>
-        );
+        return <Button size="small" variant="text" onClick={() => handleViewOrder(delivery)} sx={{ p: 0, minWidth: 0, fontWeight: 700 }}>{delivery.orderNo}</Button>;
       case 'customerName':
-        return (
-          <Button size="small" variant="text" onClick={() => handleViewCustomer(delivery)} sx={{ p: 0, minWidth: 0, textTransform: 'none' }}>
-            {delivery.customerName}
-          </Button>
-        );
+        return <Button size="small" variant="text" onClick={() => handleViewCustomer(delivery)} sx={{ p: 0, minWidth: 0 }}>{delivery.customerName}</Button>;
+      case 'productName':
+        return delivery.productName || delivery.snapshot?.order.productName || delivery.productType || '-';
       case 'productType':
-        return <Chip size="small" label={delivery.productType} />;
+        return (
+          <Chip
+            size="small"
+            label={delivery.productType}
+            sx={getProductLevelTagSx(delivery.productType)}
+          />
+        );
       case 'orderAmount':
-        return formatCurrency(delivery.orderAmount || 0);
+        return formatCurrency(delivery.orderAmount);
       case 'paymentDate':
-        return delivery.paymentDate ? formatDate(delivery.paymentDate, 'yyyy-MM-dd HH:mm:ss') : '-';
+        return formatDateTime(delivery.paymentDate);
       case 'salesOwner':
         return delivery.salesOwner || '-';
       case 'owner':
         return delivery.owner || '待分配';
       case 'currentStage':
         return delivery.currentStage;
+      case 'plannedCompletedAt':
+        return delivery.plannedCompletedAt ? formatDateTime(delivery.plannedCompletedAt) : '-';
       case 'progress':
         return renderProgress(delivery);
-      case 'taskCount':
-        return delivery.tasks.length;
       case 'status':
         return <Chip size="small" label={delivery.status || '交付中'} color={getStatusColor(delivery.status)} />;
       case 'priority':
         return <Chip size="small" label={getPriorityLabel(delivery.priority)} color={getPriorityColor(delivery.priority)} variant="outlined" />;
-      case 'plannedCompletedAt':
-        return delivery.plannedCompletedAt ? formatDate(delivery.plannedCompletedAt) : '-';
+      case 'customerSuccessStatus':
+        return <Chip size="small" label={delivery.customerSuccessStatus || '未开始'} variant="outlined" color={delivery.customerSuccessStatus === '维护中' ? 'success' : 'default'} />;
       case 'updatedAt':
-        return formatDate(delivery.updatedAt);
+        return formatDateTime(delivery.updatedAt);
       default:
         return '-';
     }
   };
 
+  const visibleRows = useMemo(() => {
+    if (tabValue !== 1) return rows;
+    return rows.filter((item) => item.status === '阻塞' || item.status === '超期' || (item.exceptions || []).some((exception) => exception.status !== '已解除'));
+  }, [rows, tabValue]);
+
   const renderStatusBar = () => (
-    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 2 }}>
+    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mb: 2 }}>
       {STATUS_OPTIONS.map((option) => {
         const selected = (filters.status || '全部') === option.value;
         const count = stats?.statusCounts[option.value] || 0;
@@ -594,16 +592,12 @@ const Delivery: React.FC = () => {
           <Button
             key={option.value}
             variant={selected ? 'contained' : 'outlined'}
-            color={option.important ? 'error' : 'primary'}
+            color={option.tone === 'danger' ? 'error' : 'primary'}
             onClick={() => handleFiltersChange({ status: option.value })}
-            sx={{ borderRadius: 1.5 }}
+            sx={{ borderRadius: 1.5, minWidth: 86 }}
           >
             {option.label}
-            <Chip
-              size="small"
-              label={count}
-              sx={{ ml: 1, height: 22, bgcolor: selected ? 'rgba(255,255,255,0.24)' : '#eef2f7' }}
-            />
+            <Chip size="small" label={count} sx={{ ml: 1, height: 22, bgcolor: selected ? 'rgba(255,255,255,0.24)' : '#eef2f7' }} />
           </Button>
         );
       })}
@@ -611,74 +605,57 @@ const Delivery: React.FC = () => {
   );
 
   const renderFilters = () => (
-    <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1.4fr) repeat(5, minmax(150px, 1fr))', gap: 1.25, mb: 2 }}>
+    <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1.35fr) repeat(4, minmax(145px, 1fr))', gap: 1.25, mb: 2 }}>
       <TextField size="small" placeholder="搜索订单号/客户/负责人" value={filters.search || ''} onChange={(event) => handleFiltersChange({ search: event.target.value })} />
       <TextField select size="small" label="产品类型" value={filters.productType || ''} onChange={(event) => handleFiltersChange({ productType: event.target.value || undefined })}>
         <MenuItem value="">全部产品</MenuItem>
-        {productTypes.map((item) => <MenuItem key={item.type} value={item.type}>{item.label}</MenuItem>)}
+        {productTypes.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
       </TextField>
-      <TextField select size="small" label="交付负责人" value={filters.ownerId || ''} onChange={(event) => handleFiltersChange({ ownerId: event.target.value || undefined })}>
+      <TextField select size="small" label="客户成功" value={filters.ownerId || ''} onChange={(event) => handleFiltersChange({ ownerId: event.target.value || undefined })}>
         <MenuItem value="">全部人员</MenuItem>
         {users.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}</MenuItem>)}
       </TextField>
       <TextField select size="small" label="优先级" value={filters.priority || ''} onChange={(event) => handleFiltersChange({ priority: event.target.value as DeliveryPriority | '' })}>
         {PRIORITY_OPTIONS.map((item) => <MenuItem key={item.value || 'all'} value={item.value}>{item.label}</MenuItem>)}
       </TextField>
-      <TextField size="small" label="付款开始" type="date" value={filters.paymentStart || ''} onChange={(event) => handleFiltersChange({ paymentStart: event.target.value || undefined })} InputLabelProps={{ shrink: true }} />
-      <TextField size="small" label="计划完成" type="date" value={filters.plannedEnd || ''} onChange={(event) => handleFiltersChange({ plannedEnd: event.target.value || undefined })} InputLabelProps={{ shrink: true }} />
+      <TextField size="small" label="计划完成前" type="date" value={filters.plannedEnd || ''} onChange={(event) => handleFiltersChange({ plannedEnd: event.target.value || undefined })} InputLabelProps={{ shrink: true }} />
     </Box>
   );
 
-  const renderWorkbench = () => (
-    <Box>
-      {renderStatusBar()}
-      {renderFilters()}
+  const renderTable = () => (
+    <>
       <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflowX: 'auto' }}>
-        <Table sx={{ minWidth: tableMinWidth, tableLayout: 'fixed' }}>
+        <Table sx={{ minWidth: visibleColumns.reduce((sum, column) => sum + column.width, 150), tableLayout: 'fixed' }}>
           <TableHead>
             <TableRow sx={{ bgcolor: '#f8fafc' }}>
-              {visibleColumns.map((column, index) => (
-                <ResizableHeaderCell
-                  key={column.id}
-                  columnId={column.id}
-                  width={columnWidths[column.id] || column.defaultWidth}
-                  onResize={(columnId, delta) => setColumnWidths((current) => resizeColumnWidths(current, columnId, delta))}
-                  sx={getFrozenColumnSx(index, true)}
-                >
-                  {column.label}
-                </ResizableHeaderCell>
+              {visibleColumns.map((column) => (
+                <TableCell key={column.id} sx={{ width: column.width, fontWeight: 700 }}>{column.label}</TableCell>
               ))}
-              <TableCell sx={actionColumnSx} align="center">操作</TableCell>
+              <TableCell align="center" sx={{ width: 150, position: 'sticky', right: 0, bgcolor: '#f8fafc' }}>操作</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {rows.map((delivery) => (
-              <TableRow key={delivery.id} hover>
-                {visibleColumns.map((column, index) => (
-                  <TableCell key={column.id} sx={{ ...getResizableCellSx(columnWidths[column.id]), ...getFrozenColumnSx(index) }}>
+            {visibleRows.map((delivery) => (
+              <TableRow key={delivery.id} hover sx={getProductLevelRowSx(delivery.productType)}>
+                {visibleColumns.map((column) => (
+                  <TableCell key={column.id} sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {renderCell(delivery, column.id)}
                   </TableCell>
                 ))}
-                <TableCell sx={actionColumnSx} align="center">
+                <TableCell align="center" sx={{ position: 'sticky', right: 0, bgcolor: '#fff' }}>
                   <Tooltip title="查看交付">
                     <IconButton size="small" onClick={() => setSelectedDelivery(delivery)}><VisibilityIcon fontSize="small" /></IconButton>
                   </Tooltip>
-                  <Tooltip title="推进阶段">
-                    <span><IconButton size="small" onClick={() => handleAdvance(delivery)} disabled={delivery.status === '已完成'}><ArrowForwardIcon fontSize="small" /></IconButton></span>
-                  </Tooltip>
-                  <Tooltip title="分配负责人">
+                  <Tooltip title="分配交付">
                     <IconButton size="small" onClick={() => openAssign(delivery)}><AssignmentIndIcon fontSize="small" /></IconButton>
                   </Tooltip>
-                  <Tooltip title="查看订单">
-                    <IconButton size="small" onClick={() => handleViewOrder(delivery)}><ReceiptLongIcon fontSize="small" /></IconButton>
-                  </Tooltip>
-                  <Tooltip title="查看客户">
-                    <IconButton size="small" onClick={() => handleViewCustomer(delivery)}><PersonIcon fontSize="small" /></IconButton>
+                  <Tooltip title="删除交付单">
+                    <IconButton size="small" color="error" onClick={() => handleDeleteDelivery(delivery)}><DeleteOutlineIcon fontSize="small" /></IconButton>
                   </Tooltip>
                 </TableCell>
               </TableRow>
             ))}
-            {!rows.length && (
+            {!visibleRows.length && (
               <TableRow>
                 <TableCell colSpan={visibleColumns.length + 1} align="center" sx={{ py: 6, color: '#94a3b8' }}>
                   {loading ? '加载中...' : '暂无交付单'}
@@ -690,108 +667,53 @@ const Delivery: React.FC = () => {
       </TableContainer>
       <TablePagination
         component="div"
-        count={pagination.total}
+        count={tabValue === 1 ? visibleRows.length : pagination.total}
         page={(pagination.page || 1) - 1}
         rowsPerPage={pagination.pageSize}
         onPageChange={handlePageChange}
         onRowsPerPageChange={handleRowsPerPageChange}
         labelRowsPerPage="每页条数"
-        labelDisplayedRows={formatPaginationRows}
+        labelDisplayedRows={({ from, to, count }) => (count === 0 ? '0 / 共 0 条' : `${from}-${to} / 共 ${count} 条`)}
       />
-    </Box>
-  );
-
-  const renderBoard = () => {
-    const currentConfig = productTypes.find((item) => item.type === boardProductType) || productTypes[0] || fallbackProductTypes[0];
-    const stages = boardStages.length ? boardStages : Array.from(new Set(boardItems.flatMap((item) => item.stages)));
-    return (
-      <Box>
-        <Box sx={{ mb: 2, maxWidth: 240 }}>
-          <TextField select size="small" label="产品类型" value={boardProductType} onChange={(event) => setBoardProductType(event.target.value)} fullWidth>
-            {productTypes.map((item) => <MenuItem key={item.type} value={item.type}>{item.label}</MenuItem>)}
-          </TextField>
-        </Box>
-        <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-          <Box sx={{ display: 'flex', gap: 2, overflowX: 'auto', pb: 2 }}>
-            {stages.map((stage) => (
-              <DeliveryColumn
-                key={stage}
-                stage={stage}
-                deliveries={boardItems.filter((item) => item.currentStage === stage)}
-                productType={boardProductType}
-                color={currentConfig.color}
-              />
-            ))}
-          </Box>
-          <DragOverlay dropAnimation={null}>
-            {activeDelivery ? <DeliveryCard delivery={activeDelivery} color={currentConfig.color} isDragging /> : null}
-          </DragOverlay>
-        </DndContext>
-      </Box>
-    );
-  };
-
-  const renderTaskCenter = () => (
-    <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb' }}>
-      <Table>
-        <TableHead>
-          <TableRow sx={{ bgcolor: '#f8fafc' }}>
-            <TableCell>任务</TableCell>
-            <TableCell>订单号</TableCell>
-            <TableCell>客户</TableCell>
-            <TableCell>负责人</TableCell>
-            <TableCell>截止日期</TableCell>
-            <TableCell>状态</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {taskRows.map(({ delivery, task }) => (
-            <TableRow key={`${delivery.id}-${task.id}`} hover>
-              <TableCell>{task.title}</TableCell>
-              <TableCell>{delivery.orderNo}</TableCell>
-              <TableCell>{delivery.customerName}</TableCell>
-              <TableCell>{task.assigneeName || delivery.owner || '待分配'}</TableCell>
-              <TableCell>{task.dueDate ? formatDate(task.dueDate) : '-'}</TableCell>
-              <TableCell><Chip size="small" label={task.status} color={task.status === '已完成' ? 'success' : task.status === '进行中' ? 'info' : 'default'} /></TableCell>
-            </TableRow>
-          ))}
-          {!taskRows.length && (
-            <TableRow><TableCell colSpan={6} align="center" sx={{ py: 5, color: '#94a3b8' }}>暂无交付任务</TableCell></TableRow>
-          )}
-        </TableBody>
-      </Table>
-    </TableContainer>
+    </>
   );
 
   const renderStats = () => (
     <Box sx={{ display: 'grid', gap: 2 }}>
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 2 }}>
-        <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb' }}><Typography variant="body2" color="text.secondary">交付总数</Typography><Typography variant="h5" sx={{ fontWeight: 800 }}>{stats?.total || 0}</Typography></Paper>
-        <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb' }}><Typography variant="body2" color="text.secondary">交付中</Typography><Typography variant="h5" sx={{ fontWeight: 800 }}>{stats?.statusCounts['交付中'] || 0}</Typography></Paper>
-        <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb' }}><Typography variant="body2" color="text.secondary">超期</Typography><Typography variant="h5" sx={{ fontWeight: 800, color: '#d32f2f' }}>{stats?.overdueCount || 0}</Typography></Paper>
-        <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb' }}><Typography variant="body2" color="text.secondary">已完成</Typography><Typography variant="h5" sx={{ fontWeight: 800 }}>{stats?.statusCounts['已完成'] || 0}</Typography></Paper>
+        {[
+          ['交付总数', stats?.total || 0, '#172033'],
+          ['交付中', stats?.statusCounts['交付中'] || 0, '#1976d2'],
+          ['异常/超期', (stats?.statusCounts['阻塞'] || 0) + (stats?.statusCounts['超期'] || 0), '#d32f2f'],
+          ['已完成', stats?.statusCounts['已完成'] || 0, '#2e7d32'],
+        ].map(([label, value, color]) => (
+          <Paper key={label} elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 1 }}>
+            <Typography variant="body2" color="text.secondary">{label}</Typography>
+            <Typography variant="h5" sx={{ fontWeight: 800, color }}>{value}</Typography>
+          </Paper>
+        ))}
       </Box>
       <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-        <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb' }}>
-          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>阶段分布</Typography>
+        <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 1 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>步骤分布</Typography>
           <Stack spacing={1}>
             {(stats?.stageCounts || []).map((item) => (
-              <Box key={item.stage} sx={{ display: 'flex', justifyContent: 'space-between' }}>
+              <Box key={item.stage} sx={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 1 }}>
                 <Typography variant="body2">{item.stage}</Typography>
-                <Chip size="small" label={item.count} />
+                <Typography variant="body2" sx={{ fontWeight: 700 }}>{item.count}</Typography>
               </Box>
             ))}
           </Stack>
         </Paper>
-        <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb' }}>
-          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>人员工作量</Typography>
+        <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 1 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>客户成功工作量</Typography>
           <Stack spacing={1}>
-            {(stats?.ownerWorkload || []).slice(0, 8).map((item) => (
-              <Box key={item.ownerId || item.owner} sx={{ display: 'grid', gridTemplateColumns: '1fr 70px 70px 70px', gap: 1 }}>
+            {(stats?.ownerWorkload || []).map((item) => (
+              <Box key={item.ownerId || item.owner} sx={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: 1.5, alignItems: 'center' }}>
                 <Typography variant="body2">{item.owner}</Typography>
-                <Typography variant="body2">总 {item.total}</Typography>
-                <Typography variant="body2" color="error">超 {item.overdue}</Typography>
-                <Typography variant="body2">完 {item.completed}</Typography>
+                <Chip size="small" label={`总 ${item.total}`} />
+                <Chip size="small" label={`异常 ${item.blocked + item.overdue}`} color={item.blocked + item.overdue ? 'error' : 'default'} variant="outlined" />
+                <Chip size="small" label={`完成 ${item.completed}`} color="success" variant="outlined" />
               </Box>
             ))}
           </Stack>
@@ -800,131 +722,376 @@ const Delivery: React.FC = () => {
     </Box>
   );
 
-  return (
-    <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+  const renderMaterialPanel = (delivery: Delivery) => (
+    <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 1 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>交付资料</Typography>
+        <Button size="small" variant="outlined" onClick={handleSaveMaterials}>保存资料</Button>
+      </Box>
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1.25 }}>
+        {(delivery.materialItems || []).map((item) => (
+          <TextField
+            key={item.key}
+            size="small"
+            label={`${item.label} · ${item.status}`}
+            value={materialDrafts[item.key] || ''}
+            onChange={(event) => setMaterialDrafts((current) => ({ ...current, [item.key]: event.target.value }))}
+          />
+        ))}
+      </Box>
+    </Paper>
+  );
+
+  const renderSnapshotPanel = (delivery: Delivery) => (
+    <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 1 }}>
+      <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1.5 }}>客户与订单资料</Typography>
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 1.5 }}>
+        {[
+          ['客户', delivery.snapshot?.customer.name || delivery.customerName],
+          ['公司', delivery.snapshot?.customer.company || '-'],
+          ['手机', delivery.snapshot?.customer.phone || '-'],
+          ['微信', delivery.snapshot?.customer.wechat || '-'],
+          ['城市/行业', [delivery.snapshot?.customer.city, delivery.snapshot?.customer.industry].filter(Boolean).join(' / ') || '-'],
+          ['产品名称', delivery.productName || delivery.snapshot?.order.productName || delivery.productType || '-'],
+          ['订单金额', formatCurrency(delivery.orderAmount)],
+          ['订单类型', delivery.orderType || '-'],
+          ['付款日期', formatDateTime(delivery.paymentDate)],
+          ['计划完成时间', delivery.plannedCompletedAt ? formatDateTime(delivery.plannedCompletedAt) : '-'],
+          ['销售负责人', delivery.salesOwner || '-'],
+        ].map(([label, value]) => (
+          <Box key={label}>
+            <Typography variant="caption" sx={{ color: '#64748b' }}>{label}</Typography>
+            <Typography variant="body2" sx={{ fontWeight: 600, mt: 0.25 }}>{value}</Typography>
+          </Box>
+        ))}
+      </Box>
+    </Paper>
+  );
+
+  const renderTaskRail = (delivery: Delivery) => (
+    <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 1 }}>
+      <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1.5 }}>交付步骤轨道</Typography>
+      <Stack spacing={1.5}>
+        {delivery.tasks.map((task, index) => {
+          const isCurrent = task.status === '进行中';
+          const isTerminal = task.status === '已完成' || task.status === '已跳过' || Boolean(task.completedAt);
+          return (
+            <Box
+              key={task.id}
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: '34px 1fr',
+                gap: 1.5,
+                p: 1.5,
+                border: '1px solid',
+                borderColor: isCurrent ? '#1976d2' : '#e5e7eb',
+                borderRadius: 1,
+                bgcolor: isCurrent ? '#f0f7ff' : '#fff',
+              }}
+            >
+              <Box sx={{ width: 28, height: 28, borderRadius: '50%', display: 'grid', placeItems: 'center', bgcolor: isTerminal ? '#e8f5e9' : isCurrent ? '#e3f2fd' : '#f1f5f9', color: isTerminal ? '#2e7d32' : isCurrent ? '#1976d2' : '#64748b', fontWeight: 800 }}>
+                {index + 1}
+              </Box>
+              <Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{task.title}</Typography>
+                    <Chip size="small" label={task.status} color={getTaskColor(task)} />
+                    {task.isOptional && <Chip size="small" label="按需" variant="outlined" />}
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Button component="label" size="small" variant="outlined" startIcon={<UploadFileIcon />} disabled={!isCurrent && !isTerminal}>
+                      上传
+                      <input hidden type="file" multiple onChange={(event) => handleUploadAttachment(task, event)} />
+                    </Button>
+                    {task.isOptional && isCurrent && (
+                      <Button size="small" variant="outlined" color="warning" startIcon={<SkipNextIcon />} onClick={() => handleSkipTask(task)}>跳过</Button>
+                    )}
+                    {isCurrent && (
+                      <Button size="small" variant="contained" startIcon={<CheckCircleIcon />} onClick={() => handleCompleteTask(task)}>完成一步</Button>
+                    )}
+                  </Box>
+                </Box>
+                <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>{task.description}</Typography>
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 1, mt: 1 }}>
+                  <TextField size="small" label="后台地址" value={taskDrafts[task.id]?.backendUrl || ''} onChange={(event) => setTaskDrafts((current) => ({ ...current, [task.id]: { ...current[task.id], backendUrl: event.target.value } }))} />
+                  <TextField size="small" label="账号" value={taskDrafts[task.id]?.account || ''} onChange={(event) => setTaskDrafts((current) => ({ ...current, [task.id]: { ...current[task.id], account: event.target.value } }))} />
+                  <TextField size="small" label="交付说明" value={taskDrafts[task.id]?.note || ''} onChange={(event) => setTaskDrafts((current) => ({ ...current, [task.id]: { ...current[task.id], note: event.target.value } }))} />
+                </Box>
+                {!!task.attachments?.length && (
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mt: 1 }}>
+                    {task.attachments.map((attachment) => (
+                      <Chip key={attachment.id} size="small" icon={<InsertDriveFileIcon />} label={attachment.name} variant="outlined" />
+                    ))}
+                  </Box>
+                )}
+              </Box>
+            </Box>
+          );
+        })}
+      </Stack>
+    </Paper>
+  );
+
+  const renderExceptionPanel = (delivery: Delivery) => (
+    <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 1 }}>
+      <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1.5 }}>异常与主管介入</Typography>
+      <Stack spacing={1.25} sx={{ mb: 1.5 }}>
+        <TextField select size="small" label="异常类型" value={exceptionType} onChange={(event) => setExceptionType(event.target.value as DeliveryExceptionType)} fullWidth>
+          {EXCEPTION_OPTIONS.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
+        </TextField>
+        <TextField
+          size="small"
+          label="异常说明"
+          value={exceptionDescription}
+          onChange={(event) => setExceptionDescription(event.target.value)}
+          minRows={2}
+          multiline
+          fullWidth
+        />
+        <Button variant="outlined" color="warning" startIcon={<WarningAmberIcon />} onClick={handleAddException} sx={{ alignSelf: 'flex-start' }}>
+          标记异常
+        </Button>
+      </Stack>
+      <Stack spacing={1}>
+        {(delivery.exceptions || []).map((exception) => (
+          <Box key={exception.id} sx={{ display: 'grid', gridTemplateColumns: '1fr', gap: 1, p: 1, border: '1px solid #edf0f5', borderRadius: 1 }}>
+            <Box>
+              <Typography variant="body2" sx={{ fontWeight: 700 }}>{exception.type} · {exception.status}</Typography>
+              <Typography variant="caption" sx={{ color: '#64748b' }}>{exception.description}</Typography>
+            </Box>
+            {exception.status !== '已解除' && (
+              <Button size="small" startIcon={<SupervisorAccountIcon />} onClick={() => handleResolveException(exception)} sx={{ justifySelf: 'flex-start' }}>主管解除</Button>
+            )}
+          </Box>
+        ))}
+        {!delivery.exceptions?.length && <Typography variant="body2" sx={{ color: '#94a3b8' }}>暂无异常记录。</Typography>}
+      </Stack>
+    </Paper>
+  );
+
+  const renderApprovalPanel = (delivery: Delivery) => (
+    <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 1 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, alignItems: 'center' }}>
         <Box>
-          <Typography variant="h5" sx={{ fontWeight: 800 }}>交付中心</Typography>
-          <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>订单入库后自动生成交付单，交付团队按工单、任务和阶段推进。</Typography>
+          <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>主管确认交付完成</Typography>
+          <Typography variant="body2" sx={{ color: '#64748b' }}>
+            主管确认后，交付单进入已完成，客户后续进入客户成功维护。
+          </Typography>
         </Box>
-        {tabValue === 0 && (
-          <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
+        <Chip label={delivery.approvalStatus || '未提交'} color={delivery.approvalStatus === '已确认' ? 'success' : delivery.approvalStatus === '待主管确认' ? 'info' : 'default'} />
+      </Box>
+      {delivery.supervisorConfirmedAt ? (
+        <Typography variant="body2" sx={{ mt: 1.5, color: '#2e7d32' }}>
+          {delivery.supervisorConfirmedBy || '客户成功主管'} 已于 {formatDateTime(delivery.supervisorConfirmedAt)} 确认完成。
+        </Typography>
+      ) : (
+        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 1, mt: 1.5 }}>
+          <TextField size="small" label="确认说明" value={confirmNotes} onChange={(event) => setConfirmNotes(event.target.value)} />
+          <Button variant="contained" startIcon={<SupervisorAccountIcon />} onClick={handleConfirmDelivery}>主管确认</Button>
+        </Box>
+      )}
+    </Paper>
+  );
+
+  const renderDetailDialog = () => (
+    <Dialog open={Boolean(selectedDelivery)} onClose={() => setSelectedDelivery(null)} maxWidth="lg" fullWidth>
+      {selectedDelivery && (
+        <>
+          <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pr: 1.5 }}>
+            <Box>
+              <Typography component="div" variant="h6" sx={{ fontWeight: 800 }}>{selectedDelivery.orderNo} · {selectedDelivery.customerName}</Typography>
+              <Stack direction="row" spacing={1} sx={{ mt: 0.75 }}>
+                <Chip
+                  size="small"
+                  label={selectedDelivery.productType}
+                  sx={getProductLevelTagSx(selectedDelivery.productType)}
+                />
+                <Chip size="small" label={selectedDelivery.status || '交付中'} color={getStatusColor(selectedDelivery.status)} />
+                <Chip size="small" label={`当前：${selectedDelivery.currentStage}`} variant="outlined" />
+              </Stack>
+            </Box>
+            <IconButton onClick={() => setSelectedDelivery(null)}><CloseIcon /></IconButton>
+          </DialogTitle>
+          <DialogContent dividers sx={{ bgcolor: '#f8fafc' }}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 2 }}>
+              <Stack spacing={2}>
+                {renderSnapshotPanel(selectedDelivery)}
+                {renderTaskRail(selectedDelivery)}
+              </Stack>
+              <Stack spacing={2}>
+                {renderMaterialPanel(selectedDelivery)}
+                {renderExceptionPanel(selectedDelivery)}
+                {renderApprovalPanel(selectedDelivery)}
+              </Stack>
+            </Box>
+          </DialogContent>
+        </>
+      )}
+    </Dialog>
+  );
+
+  const selectedCreateOrder = creatableOrders.find((order) => order.orderId === selectedCreateOrderId);
+
+  const renderCreateDialog = () => (
+    <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="md" fullWidth>
+      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Typography component="div" variant="h6" sx={{ fontWeight: 800 }}>新建交付单</Typography>
+        <IconButton onClick={() => setCreateOpen(false)}><CloseIcon /></IconButton>
+      </DialogTitle>
+      <DialogContent dividers>
+        <Stack spacing={2}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 0.8fr) minmax(320px, 1.2fr) auto', gap: 1 }}>
+            <TextField
+              size="small"
+              placeholder="搜索订单号/客户/产品"
+              value={createSearch}
+              onChange={(event) => setCreateSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') handleCreateSearch();
+              }}
+            />
+            <TextField
+              select
+              size="small"
+              label="选择已确认且未生成交付单的订单"
+              value={selectedCreateOrderId}
+              onChange={(event) => setSelectedCreateOrderId(event.target.value)}
+              disabled={createLoading || !creatableOrders.length}
+            >
+              {creatableOrders.map((order) => (
+                <MenuItem key={order.orderId} value={order.orderId}>
+                  {order.orderNo} · {order.customerName} · {order.productName || order.productType}
+                </MenuItem>
+              ))}
+            </TextField>
+            <Button variant="outlined" onClick={handleCreateSearch} disabled={createLoading}>刷新</Button>
+          </Box>
+
+          {selectedCreateOrder ? (
+            <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 1 }}>
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 1.5 }}>
+                {[
+                  ['订单号', selectedCreateOrder.orderNo],
+                  ['客户', selectedCreateOrder.customerName],
+                  ['产品名称', selectedCreateOrder.productName || selectedCreateOrder.productType],
+                  ['产品类型', selectedCreateOrder.productType],
+                  ['订单金额', formatCurrency(selectedCreateOrder.orderAmount)],
+                  ['付款日期', formatDateTime(selectedCreateOrder.paymentDate)],
+                  ['订单类型', selectedCreateOrder.orderType || '-'],
+                  ['销售负责人', selectedCreateOrder.salesOwner || '-'],
+                ].map(([label, value]) => (
+                  <Box key={label}>
+                    <Typography variant="caption" sx={{ color: '#64748b' }}>{label}</Typography>
+                    {label === '产品类型' ? (
+                      <Box sx={{ mt: 0.5 }}>
+                        <Chip
+                          size="small"
+                          label={value}
+                          sx={getProductLevelTagSx(String(value))}
+                        />
+                      </Box>
+                    ) : (
+                      <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 600 }}>{value}</Typography>
+                    )}
+                  </Box>
+                ))}
+              </Box>
+            </Paper>
+          ) : (
+            <Paper elevation={0} sx={{ p: 3, border: '1px dashed #cbd5e1', borderRadius: 1, textAlign: 'center', color: '#64748b' }}>
+              {createLoading ? '正在加载可新建交付单的订单...' : '暂无可新建交付单的订单'}
+            </Paper>
+          )}
+        </Stack>
+      </DialogContent>
+      <DialogActions sx={{ px: 3, py: 2 }}>
+        <Button onClick={() => setCreateOpen(false)}>取消</Button>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateDelivery} disabled={!selectedCreateOrderId || createLoading}>
+          新建交付单
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+
+  return (
+    <Box sx={{ p: 3, bgcolor: '#f5f7fb', minHeight: '100vh' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2.5 }}>
+        <Box>
+          <Typography variant="h5" sx={{ fontWeight: 800, color: '#172033' }}>交付中心</Typography>
+          <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>
+            客户成功处理代理、贴牌、合伙人交付，主管在最终节点确认交付完成。
+          </Typography>
+        </Box>
+        <Stack direction="row" spacing={1}>
+          <Button variant="outlined" startIcon={<SettingsIcon />} onClick={() => setViewSettingsOpen(true)}>
             视图设置
           </Button>
-        )}
+          <Button variant="contained" startIcon={<AddIcon />} onClick={openCreateDialog}>
+            新建交付单
+          </Button>
+        </Stack>
       </Box>
 
-      <Tabs value={tabValue} onChange={(_event, value) => setTabValue(value)} sx={{ borderBottom: '1px solid #e5e7eb', mb: 2 }}>
+      <Tabs value={tabValue} onChange={(_event, value) => setTabValue(value)} sx={{ borderBottom: '1px solid #dbe2ea', mb: 2 }}>
         <Tab label="交付工单台" />
-        <Tab label="阶段看板" />
-        <Tab label="交付任务" />
+        <Tab label="异常交付" />
         <Tab label="交付统计" />
       </Tabs>
 
-      {tabValue === 0 && renderWorkbench()}
-      {tabValue === 1 && renderBoard()}
-      {tabValue === 2 && renderTaskCenter()}
-      {tabValue === 3 && renderStats()}
+      {tabValue !== 2 && (
+        <>
+          {renderStatusBar()}
+          {renderFilters()}
+          {renderTable()}
+        </>
+      )}
+      {tabValue === 2 && renderStats()}
 
-      <TableViewSettingsDialog
-        open={viewSettingsOpen}
-        title="交付工单台视图设置"
-        description="勾选后会显示在交付工单台中，设置会保存在当前浏览器。"
-        columns={DELIVERY_COLUMNS}
-        visibleColumnIds={viewConfig.visibleColumnIds}
-        columnOrder={viewConfig.columnOrder}
-        frozenColumnCount={viewConfig.frozenColumnCount}
-        maxFrozenColumnCount={viewConfig.visibleColumnIds.length}
-        onClose={() => setViewSettingsOpen(false)}
-        onToggleColumn={handleToggleColumn}
-        onReorderColumn={handleReorderColumn}
-        onFrozenColumnCountChange={(value) => setViewConfig((current) => ({ ...current, frozenColumnCount: Math.max(0, Math.min(value, current.visibleColumnIds.length)) }))}
-        onReset={handleResetView}
-      />
+      {renderDetailDialog()}
+      {renderCreateDialog()}
 
-      <Dialog open={Boolean(selectedDelivery)} onClose={() => setSelectedDelivery(null)} maxWidth="lg" fullWidth>
-        <DialogCloseTitle onClose={() => setSelectedDelivery(null)}>
-          {selectedDelivery?.orderNo || '交付详情'}
-        </DialogCloseTitle>
-        {selectedDelivery && (
-          <DialogContent dividers>
-            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 2, mb: 2 }}>
-              <Box><Typography variant="caption" color="text.secondary">客户</Typography><Typography>{selectedDelivery.customerName}</Typography></Box>
-              <Box><Typography variant="caption" color="text.secondary">产品类型</Typography><Typography>{selectedDelivery.productType}</Typography></Box>
-              <Box><Typography variant="caption" color="text.secondary">交付负责人</Typography><Typography>{selectedDelivery.owner || '待分配'}</Typography></Box>
-              <Box><Typography variant="caption" color="text.secondary">当前状态</Typography><Chip size="small" label={selectedDelivery.status} color={getStatusColor(selectedDelivery.status)} /></Box>
-              <Box><Typography variant="caption" color="text.secondary">订单金额</Typography><Typography>{formatCurrency(selectedDelivery.orderAmount || 0)}</Typography></Box>
-              <Box><Typography variant="caption" color="text.secondary">付款日期</Typography><Typography>{selectedDelivery.paymentDate ? formatDate(selectedDelivery.paymentDate, 'yyyy-MM-dd HH:mm:ss') : '-'}</Typography></Box>
-              <Box><Typography variant="caption" color="text.secondary">计划完成</Typography><Typography>{selectedDelivery.plannedCompletedAt ? formatDate(selectedDelivery.plannedCompletedAt) : '-'}</Typography></Box>
-              <Box><Typography variant="caption" color="text.secondary">进度</Typography>{renderProgress(selectedDelivery)}</Box>
-            </Box>
-            <Box sx={{ mb: 2 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>阶段进度</Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {selectedDelivery.stages.map((stage) => (
-                  <Chip key={stage} label={stage} color={stage === selectedDelivery.currentStage ? 'primary' : 'default'} variant={stage === selectedDelivery.currentStage ? 'filled' : 'outlined'} />
-                ))}
+      <Dialog open={viewSettingsOpen} onClose={() => setViewSettingsOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography component="div" variant="h6" sx={{ fontWeight: 800 }}>视图设置</Typography>
+          <IconButton onClick={() => setViewSettingsOpen(false)}><CloseIcon /></IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={1}>
+            {DELIVERY_COLUMNS.map((column) => (
+              <Box key={column.id} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5 }}>
+                <Checkbox
+                  checked={viewConfig.visibleColumnIds.includes(column.id)}
+                  disabled={viewConfig.visibleColumnIds.length <= 1 && viewConfig.visibleColumnIds.includes(column.id)}
+                  onChange={() => toggleColumn(column.id)}
+                />
+                <Typography variant="body2">{column.label}</Typography>
               </Box>
-            </Box>
-            <Box sx={{ mb: 2 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>交付任务</Typography>
-              <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb' }}>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>任务</TableCell>
-                      <TableCell>负责人</TableCell>
-                      <TableCell>截止日期</TableCell>
-                      <TableCell>状态</TableCell>
-                      <TableCell>完成时间</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {selectedDelivery.tasks.map((task) => (
-                      <TableRow key={task.id}>
-                        <TableCell>{task.title}</TableCell>
-                        <TableCell>{task.assigneeName || selectedDelivery.owner || '待分配'}</TableCell>
-                        <TableCell>{task.dueDate ? formatDate(task.dueDate) : '-'}</TableCell>
-                        <TableCell>
-                          <TextField select size="small" value={task.status} onChange={(event) => handleTaskStatusChange(task, event.target.value)} sx={{ minWidth: 120 }}>
-                            {TASK_STATUS_OPTIONS.map((status) => <MenuItem key={status} value={status}>{status}</MenuItem>)}
-                          </TextField>
-                        </TableCell>
-                        <TableCell>{task.completedAt ? formatDate(task.completedAt) : '-'}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Box>
-            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 1, alignItems: 'center' }}>
-              <TextField label="阻塞原因" value={blockReason} onChange={(event) => setBlockReason(event.target.value)} size="small" fullWidth />
-              <Button color={selectedDelivery.status === '阻塞' ? 'primary' : 'error'} variant="outlined" startIcon={<BlockIcon />} onClick={handleBlockToggle}>
-                {selectedDelivery.status === '阻塞' ? '解除阻塞' : '标记阻塞'}
-              </Button>
-              <Button variant="contained" startIcon={<CheckCircleIcon />} onClick={() => handleAdvance(selectedDelivery)} disabled={selectedDelivery.status === '已完成'}>
-                推进阶段
-              </Button>
-            </Box>
-          </DialogContent>
-        )}
+            ))}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setViewConfig({ visibleColumnIds: [...DEFAULT_VISIBLE_COLUMNS] })}>恢复默认</Button>
+          <Button variant="contained" onClick={() => setViewSettingsOpen(false)}>完成</Button>
+        </DialogActions>
       </Dialog>
 
       <Dialog open={Boolean(assignDelivery)} onClose={() => setAssignDelivery(null)} maxWidth="xs" fullWidth>
-        <DialogCloseTitle onClose={() => setAssignDelivery(null)}>分配交付</DialogCloseTitle>
+        <DialogTitle>分配交付负责人</DialogTitle>
         <DialogContent dividers>
-          <Stack spacing={2}>
-            <TextField select label="交付负责人" value={assignOwnerId} onChange={(event) => setAssignOwnerId(event.target.value)} fullWidth>
+          <Stack spacing={2} sx={{ pt: 0.5 }}>
+            <TextField select label="客户成功" value={assignOwnerId} onChange={(event) => setAssignOwnerId(event.target.value)} fullWidth>
               <MenuItem value="">待分配</MenuItem>
               {users.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}</MenuItem>)}
             </TextField>
             <TextField select label="优先级" value={assignPriority} onChange={(event) => setAssignPriority(event.target.value as DeliveryPriority)} fullWidth>
               {PRIORITY_OPTIONS.filter((item) => item.value).map((item) => <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>)}
             </TextField>
-            <TextField label="计划完成日期" type="date" value={assignPlanDate} onChange={(event) => setAssignPlanDate(event.target.value)} InputLabelProps={{ shrink: true }} fullWidth />
+            <TextField label="计划完成时间" type="date" value={assignPlanDate} onChange={(event) => setAssignPlanDate(event.target.value)} InputLabelProps={{ shrink: true }} fullWidth />
           </Stack>
         </DialogContent>
         <DialogActions>
+          <Button onClick={() => setAssignDelivery(null)}>取消</Button>
           <Button variant="contained" onClick={saveAssign}>保存</Button>
         </DialogActions>
       </Dialog>
@@ -936,4 +1103,4 @@ const Delivery: React.FC = () => {
   );
 };
 
-export default Delivery;
+export default DeliveryPage;

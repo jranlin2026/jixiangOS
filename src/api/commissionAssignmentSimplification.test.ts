@@ -70,6 +70,25 @@ function seed() {
 }
 
 async function createRuleGroup() {
+  async function fixedPlan(name: string, amount: number) {
+    const res = await commissionRuleApi.createCommissionPayoutPlan({
+      name,
+      commissionType: 'fixed',
+      commissionValue: amount,
+      isActive: true,
+      description: '',
+    });
+    assert.equal(res.code, 0);
+    return res.data.id;
+  }
+
+  const salesPlanId = await fixedPlan('测试销售固定 100', 100);
+  const leadPlanId = await fixedPlan('测试线索固定 30', 30);
+  const successPlanId = await fixedPlan('测试客户成功固定 10', 10);
+  const servicePlanId = await fixedPlan('测试售后固定 5', 5);
+  const managerPlanId = await fixedPlan('测试招商主管固定 2', 2);
+  const customPlanId = await fixedPlan('测试渠道固定 1', 1);
+
   const customRole = await commissionRuleApi.createCommissionRoleConfig({
     name: zh.customRole,
     code: 'channel_partner',
@@ -85,12 +104,12 @@ async function createRuleGroup() {
     resourceOwnership: zh.companyResource,
     isActive: true,
     payouts: [
-      { role: zh.sales, commissionType: 'fixed', commissionValue: 100 },
-      { role: zh.lead, commissionType: 'fixed', commissionValue: 30 },
-      { role: zh.success, commissionType: 'fixed', commissionValue: 10 },
-      { role: zh.service, commissionType: 'fixed', commissionValue: 5 },
-      { role: zh.salesManager, commissionType: 'fixed', commissionValue: 2 },
-      { role: zh.customRole, commissionType: 'fixed', commissionValue: 1 },
+      { role: zh.sales, payoutPlanId: salesPlanId, commissionType: 'fixed', commissionValue: 100 },
+      { role: zh.lead, payoutPlanId: leadPlanId, commissionType: 'fixed', commissionValue: 30 },
+      { role: zh.success, payoutPlanId: successPlanId, commissionType: 'fixed', commissionValue: 10 },
+      { role: zh.service, payoutPlanId: servicePlanId, commissionType: 'fixed', commissionValue: 5 },
+      { role: zh.salesManager, payoutPlanId: managerPlanId, commissionType: 'fixed', commissionValue: 2 },
+      { role: zh.customRole, payoutPlanId: customPlanId, commissionType: 'fixed', commissionValue: 1 },
     ],
   });
   assert.equal(group.code, 0);

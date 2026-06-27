@@ -12,7 +12,7 @@ import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
 import useRefundStore from '../../store/useRefundStore';
-import { REFUND_CATEGORIES, getProductLevelColor } from '../../shared/utils/constants';
+import { REFUND_CATEGORIES, getProductLevelColor, getProductLevelRowSx } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import RefundDetail from './RefundDetail';
 import RefundProcessDialog from './RefundProcessDialog';
@@ -354,7 +354,7 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
           <TableBody>
             {items.map((refund: any) => {
               return (
-                <TableRow key={refund.id} hover>
+                <TableRow key={refund.id} hover sx={getProductLevelRowSx(refund.productLevel)}>
                   {visibleColumns.map((column, columnIndex) => (
                     <TableCell key={column.id} sx={{ ...getResizableCellSx(columnWidths[column.id]), ...getFrozenColumnSx(columnIndex) }}>
                       {column.render(refund)}

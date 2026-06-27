@@ -37,14 +37,13 @@ import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import { useSearchParams } from 'react-router-dom';
 import useOrderStore from '../../store/useOrderStore';
 import { customerApi, orderApi, productApi, settingsApi } from '../../api';
-import { getProductLevelColor, PRODUCT_LEVELS, normalizeResourceOwnership } from '../../shared/utils/constants';
+import { getProductLevelColor, getProductLevelRowSx, getProductLevelTagSx, PRODUCT_LEVELS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
 import CustomerDetail from '../Customers/CustomerDetail';
 import OrderDetail from './OrderDetail';
 import OrderForm from './OrderForm';
 import OrderHistoryDialog from './OrderHistoryDialog';
-import OrderStats from './OrderStats';
 import OrderReview from '../OrderReview';
 import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
@@ -170,7 +169,7 @@ const readOrderViewConfig = () => {
 };
 
 const Orders: React.FC = () => {
-  const { items, filters, pagination, fetchItems, fetchStats, setFilters, delete: deleteOrder } = useOrderStore();
+  const { items, filters, pagination, fetchItems, setFilters, delete: deleteOrder } = useOrderStore();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') === 'review' ? 'review' : 'list';
   const orderIdParam = searchParams.get('orderId');
@@ -188,6 +187,7 @@ const Orders: React.FC = () => {
   const [orderTypeConfigs, setOrderTypeConfigs] = useState<OrderTypeConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
+  const [reviewViewSettingsOpen, setReviewViewSettingsOpen] = useState(false);
   const [viewConfig, setViewConfig] = useState<OrderViewConfig>(readOrderViewConfig);
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(ORDER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
   const [orderLookupMessage, setOrderLookupMessage] = useState('');
@@ -210,8 +210,7 @@ const Orders: React.FC = () => {
   useEffect(() => {
     if (activeTab !== 'list') return;
     fetchItems({ ...filters, paymentMethod: undefined });
-    fetchStats();
-  }, [activeTab, fetchItems, fetchStats]);
+  }, [activeTab, fetchItems]);
 
   useEffect(() => {
     localStorage.setItem(ORDER_VIEW_STORAGE_KEY, JSON.stringify(viewConfig));
@@ -474,7 +473,6 @@ const Orders: React.FC = () => {
   );
 
   const renderOrderCell = (order: Order, columnId: string) => {
-    const levelColor = getProductLevelColor(order.productLevel);
     const customerDisplayName = order.customerName;
     switch (columnId) {
       case 'orderNo':
@@ -517,7 +515,7 @@ const Orders: React.FC = () => {
           <Chip
             label={order.productLevel}
             size="small"
-            sx={{ bgcolor: `${levelColor}18`, color: levelColor, fontWeight: 600 }}
+            sx={getProductLevelTagSx(order.productLevel)}
           />
         );
       case 'orderType':
@@ -551,6 +549,11 @@ const Orders: React.FC = () => {
               视图设置
             </Button>
           )}
+          {activeTab === 'review' && (
+            <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setReviewViewSettingsOpen(true)}>
+              视图设置
+            </Button>
+          )}
           <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_CREATE} action="write">
             <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateOrder}>
               提交订单申请
@@ -566,8 +569,6 @@ const Orders: React.FC = () => {
 
       {activeTab === 'list' ? (
         <>
-          <OrderStats />
-
           <Box sx={{ display: 'flex', gap: 2, my: 3, flexWrap: 'wrap' }}>
             <TextField
               placeholder="搜索订单号/客户名"
@@ -633,9 +634,8 @@ const Orders: React.FC = () => {
               </TableHead>
               <TableBody>
                 {items.map((order) => {
-                  const levelColor = getProductLevelColor(order.productLevel);
                   return (
-                    <TableRow key={order.id} hover sx={{ bgcolor: `${levelColor}08` }}>
+                    <TableRow key={order.id} hover sx={getProductLevelRowSx(order.productLevel)}>
                       {visibleColumns.map((column, columnIndex) => (
                         <TableCell
                           key={column.id}
@@ -704,7 +704,11 @@ const Orders: React.FC = () => {
           />
         </>
       ) : (
-        <OrderReview embedded />
+        <OrderReview
+          embedded
+          viewSettingsOpen={reviewViewSettingsOpen}
+          onViewSettingsClose={() => setReviewViewSettingsOpen(false)}
+        />
       )}
 
       {selectedOrder && (
@@ -733,7 +737,6 @@ const Orders: React.FC = () => {
         onClose={() => { setFormOpen(false); setEditingOrder(null); }}
         onSuccess={(application) => {
           fetchItems({ ...filters, paymentMethod: undefined });
-          fetchStats();
           setOrderCustomer(null);
           if (application) {
             const nextParams = new URLSearchParams(searchParams);
@@ -798,7 +801,7 @@ const Orders: React.FC = () => {
                     <Chip
                       label={order.productLevel}
                       size="small"
-                      sx={{ bgcolor: `${getProductLevelColor(order.productLevel)}18`, color: getProductLevelColor(order.productLevel), fontWeight: 600 }}
+                      sx={getProductLevelTagSx(order.productLevel)}
                     />
                   </TableCell>
                   <TableCell>{order.orderType}</TableCell>

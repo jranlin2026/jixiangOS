@@ -62,17 +62,35 @@ const customRoleRes = await (commissionRuleApi as any).createCommissionRoleConfi
 assert.equal(customRoleRes.code, 0);
 assert.equal(customRoleRes.data.name, '渠道伙伴');
 
+async function fixedPlan(name: string, amount: number) {
+  const res = await (commissionRuleApi as any).createCommissionPayoutPlan({
+    name,
+    commissionType: 'fixed',
+    commissionValue: amount,
+    isActive: true,
+    description: '',
+  });
+  assert.equal(res.code, 0);
+  return res.data.id;
+}
+
+const salesPlanId = await fixedPlan('角色测试销售固定 100', 100);
+const leadPlanId = await fixedPlan('角色测试线索固定 30', 30);
+const successPlanId = await fixedPlan('角色测试客户成功固定 10', 10);
+const servicePlanId = await fixedPlan('角色测试售后固定 5', 5);
+const managerPlanId = await fixedPlan('角色测试招商主管固定 2', 2);
+
 const ruleGroupRes = await (commissionRuleApi as any).createSimpleCommissionRuleGroup({
   name: '代理-公司资源',
   orderType: '新代理',
   resourceOwnership: '公司资源',
   isActive: true,
   payouts: [
-    { role: '销售', commissionType: 'fixed', commissionValue: 100 },
-    { role: '线索', commissionType: 'fixed', commissionValue: 30 },
-    { role: '客户成功', commissionType: 'fixed', commissionValue: 10 },
-    { role: '售后', commissionType: 'fixed', commissionValue: 5 },
-    { role: '招商主管', commissionType: 'fixed', commissionValue: 2 },
+    { role: '销售', payoutPlanId: salesPlanId, commissionType: 'fixed', commissionValue: 100 },
+    { role: '线索', payoutPlanId: leadPlanId, commissionType: 'fixed', commissionValue: 30 },
+    { role: '客户成功', payoutPlanId: successPlanId, commissionType: 'fixed', commissionValue: 10 },
+    { role: '售后', payoutPlanId: servicePlanId, commissionType: 'fixed', commissionValue: 5 },
+    { role: '招商主管', payoutPlanId: managerPlanId, commissionType: 'fixed', commissionValue: 2 },
   ],
 });
 assert.equal(ruleGroupRes.code, 0);

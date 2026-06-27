@@ -175,9 +175,6 @@ const ORDER_CHANGE_FIELDS: Array<{ field: keyof Order; label: string }> = [
   { field: 'isExternalTalentOrder', label: '外部达人成交' },
   { field: 'dealScene', label: '成交场景' },
   { field: 'proofStatus', label: '凭证状态' },
-  { field: 'collaboratorName', label: '协同人员' },
-  { field: 'collaboratorRole', label: '提成角色' },
-  { field: 'collaboratorRatio', label: '协同比例' },
   { field: 'originalOrderId', label: '原始订单' },
   { field: 'performanceBaseAmount', label: '业绩核算基数' },
   { field: 'notes', label: '备注' },
@@ -408,7 +405,17 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
         evidenceRequired: calc.evidenceRequired,
         evidenceStatus: calc.evidenceStatus,
         formulaText: calc.formulaText,
+        payoutPlanId: calc.payoutPlanId,
+        payoutPlanName: calc.payoutPlanName,
         ruleCalculationType: calc.commissionType,
+        tierSnapshot: calc.commissionType === 'tiered_percentage' && calc.tiers?.length
+          ? {
+            tiers: calc.tiers,
+            baseAmount: calc.performanceAmount,
+            nextTier: calc.tiers[0],
+            gapToNext: 0,
+          }
+          : undefined,
         role: calc.role,
         owner: resolvedPersonName,
         ownerId: calc.ownerOverride ? undefined : assignee.ownerId,

@@ -33,7 +33,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
 import useLeadStore from '../../store/useLeadStore';
-import { getLifecycleConfigByCode, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
+import { getLifecycleConfigByCode, getLifecycleStatusTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatPaginationRows } from '../../shared/utils/formatters';
 import LeadDetail from './LeadDetail';
 import LeadForm from './LeadForm';
@@ -137,11 +137,7 @@ const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] =
           <Chip
             label={config.name}
             size="small"
-            sx={{
-              bgcolor: `${config.color}18`,
-              color: config.color,
-              fontWeight: 600,
-            }}
+            sx={getLifecycleStatusTagSx(`${config.code} ${config.name}`)}
           />
         );
       },

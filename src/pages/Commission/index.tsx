@@ -40,7 +40,7 @@ import PaymentsIcon from '@mui/icons-material/Payments';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import { commissionApi, commissionRuleApi, customerApi, departmentApi, orderApi, settingsApi } from '../../api';
-import { getProductLevelColor, normalizeResourceOwnership } from '../../shared/utils/constants';
+import { getProductLevelRowSx, getProductLevelTagSx, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import ResizableHeaderCell, {
@@ -54,6 +54,7 @@ import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
 import CommissionRuleConfig from './CommissionRuleConfig';
 import OrderDetail from '../Orders/OrderDetail';
 import CustomerDetail from '../Customers/CustomerDetail';
+import useAuthStore from '../../store/useAuthStore';
 import type {
   Commission,
   CommissionAdjustmentInput,
@@ -64,9 +65,10 @@ import type {
   CommissionOrderSummaryStatus,
   CommissionOrderSummaryStatusCounts,
   CommissionOperationLog,
+  CommissionPayoutPlan,
   CommissionRole,
   CommissionRoleConfig,
-  CommissionTier,
+  MonthlyCommissionRoleSummary,
   MonthlyCommissionPayout,
 } from '../../types/commission';
 import type { Department } from '../../types/department';
@@ -209,6 +211,7 @@ function getOrderStatusColor(status: CommissionOrderSummaryStatus): 'default' | 
   if (status === '已冲销') return 'default';
   if (status === '已撤回') return 'default';
   if (status === '待处理') return 'warning';
+  if (status === '待确认') return 'warning';
   if (status === '待发放') return 'info';
   return 'default';
 }
@@ -216,8 +219,16 @@ function getOrderStatusColor(status: CommissionOrderSummaryStatus): 'default' | 
 function getPayoutStatusColor(status: MonthlyCommissionPayout['status']): 'default' | 'success' | 'error' | 'warning' | 'info' {
   if (status === '已发放') return 'success';
   if (status === '待冲销') return 'error';
-  if (status === '待确认') return 'info';
+  if (status === '待确认') return 'warning';
   if (status === '待发放') return 'warning';
+  return 'default';
+}
+
+function getCommissionStatusColor(status: Commission['status']): 'default' | 'success' | 'error' | 'warning' | 'info' {
+  if (status === '已发放') return 'success';
+  if (status === '待冲销') return 'error';
+  if (status === '待发放') return 'info';
+  if (status === '待确认') return 'warning';
   return 'default';
 }
 
@@ -239,6 +250,8 @@ const REFUND_STATUS_VALUES = new Set<RefundStatus>([
 ]);
 
 const CHARGEBACK_METHOD_OPTIONS: CommissionChargebackMethod[] = ['线下追回', '下月提成抵扣', '财务确认无需追回'];
+const CUSTOM_PAYOUT_PLAN_ID = '__custom_amount__';
+const CUSTOM_PAYOUT_PLAN_NAME = '自定义金额';
 
 function normalizeRefundStatusBadgeValue(status?: string): RefundStatus {
   return status && REFUND_STATUS_VALUES.has(status as RefundStatus) ? (status as RefundStatus) : '无';
@@ -247,6 +260,9 @@ function normalizeRefundStatusBadgeValue(status?: string): RefundStatus {
 interface CommissionProps {
   embedded?: boolean;
   initialTab?: 0 | 1 | 2;
+  payoutScope?: 'all' | 'mine';
+  payoutMode?: 'finance' | 'mine';
+  hidePayoutFinanceActions?: boolean;
   hideEmbeddedOrderSplitViewButton?: boolean;
   orderSplitViewTrigger?: number;
   orderSplitCreateTrigger?: number;
@@ -260,10 +276,14 @@ type PayoutConfirmAction =
 const Commission: React.FC<CommissionProps> = ({
   embedded = false,
   initialTab = 0,
+  payoutScope = 'all',
+  payoutMode = 'finance',
+  hidePayoutFinanceActions = false,
   hideEmbeddedOrderSplitViewButton = false,
   orderSplitViewTrigger = 0,
   orderSplitCreateTrigger = 0,
 }) => {
+  const currentUser = useAuthStore((state) => state.currentUser);
   const [tabValue, setTabValue] = useState(initialTab);
   const lastOrderSplitViewTriggerRef = useRef(orderSplitViewTrigger);
   const lastOrderSplitCreateTriggerRef = useRef(orderSplitCreateTrigger);
@@ -294,12 +314,9 @@ const Commission: React.FC<CommissionProps> = ({
   const [payoutLoading, setPayoutLoading] = useState(false);
   const [payoutConfirmAction, setPayoutConfirmAction] = useState<PayoutConfirmAction | null>(null);
   const [payoutActionLoading, setPayoutActionLoading] = useState(false);
-  const [tierConfigOpen, setTierConfigOpen] = useState(false);
-  const [tierConfigSaving, setTierConfigSaving] = useState(false);
-  const [tierConfigError, setTierConfigError] = useState('');
-  const [tierConfigRows, setTierConfigRows] = useState<CommissionTier[]>([]);
 
   const [commissionRoleConfigs, setCommissionRoleConfigs] = useState<CommissionRoleConfig[]>([]);
+  const [payoutPlans, setPayoutPlans] = useState<CommissionPayoutPlan[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [createSplitOpen, setCreateSplitOpen] = useState(false);
@@ -327,6 +344,7 @@ const Commission: React.FC<CommissionProps> = ({
 
   const activeEmployees = useMemo(() => employees.filter((item) => item.isActive), [employees]);
   const activeRoleConfigs = useMemo(() => commissionRoleConfigs.filter((item) => item.isActive), [commissionRoleConfigs]);
+  const activePayoutPlans = useMemo(() => payoutPlans.filter((item) => item.isActive), [payoutPlans]);
   const selectedCreatableOrder = useMemo(() => (
     creatableOrderRows.find((order) => order.orderId === selectedCreatableOrderId) || null
   ), [creatableOrderRows, selectedCreatableOrderId]);
@@ -368,6 +386,16 @@ const Commission: React.FC<CommissionProps> = ({
   const formatOwnerDisplayName = (ownerId?: string, ownerName?: string) => (
     formatEmployeeDisplayName(findEmployeeForDisplay(ownerId, ownerName), ownerName)
   );
+  const filterPayoutRowsForScope = (rows: MonthlyCommissionPayout[]) => {
+    if (payoutScope !== 'mine') return rows;
+    const currentName = currentUser?.name?.trim();
+    const currentId = currentUser?.id;
+    if (!currentId && !currentName) return [];
+    return rows.filter((row) => (
+      row.ownerId === currentId
+      || Boolean(currentName && row.owner === currentName)
+    ));
+  };
   const orderedOrderSplitColumns = useMemo(() => {
     const byId = new Map(ORDER_SPLIT_COLUMNS.map((column) => [column.id, column]));
     return orderSplitViewConfig.columnOrder
@@ -391,13 +419,125 @@ const Commission: React.FC<CommissionProps> = ({
     return options;
   };
 
+  const planOptionsForSplit = (currentPlanId?: string) => {
+    const options = activePayoutPlans.slice();
+    if (currentPlanId && currentPlanId !== CUSTOM_PAYOUT_PLAN_ID && !options.some((item) => item.id === currentPlanId)) {
+      const current = payoutPlans.find((item) => item.id === currentPlanId);
+      if (current) return [current, ...options];
+    }
+    return options;
+  };
+
+  const findPayoutPlanForRow = (row: CommissionAdjustmentInput) => (
+    payoutPlans.find((item) => item.id === row.payoutPlanId)
+    || (row.payoutPlanName
+      ? payoutPlans.find((item) => (
+        item.name === row.payoutPlanName
+        && item.commissionType === row.ruleCalculationType
+      ))
+      : undefined)
+  );
+
+  const isCustomPayoutRow = (row: CommissionAdjustmentInput) => (
+    row.payoutPlanId === CUSTOM_PAYOUT_PLAN_ID
+    || row.payoutPlanName === CUSTOM_PAYOUT_PLAN_NAME
+  );
+
+  const formatPayoutPlanValue = (
+    plan?: Pick<CommissionPayoutPlan, 'commissionType' | 'commissionValue' | 'tiers'>,
+  ) => {
+    if (!plan) return '未选择方案';
+    if (plan.commissionType === 'tiered_percentage') {
+      const tiers = plan.tiers || [];
+      return tiers.length ? `销售月累计阶梯 · ${tiers.length} 档` : '销售月累计阶梯';
+    }
+    if (plan.commissionType === 'percentage') return `按业绩金额 ${plan.commissionValue}%`;
+    return `固定金额 ${formatCurrency(plan.commissionValue)}`;
+  };
+
+  const applyPayoutPlanToSplitRow = (
+    row: CommissionAdjustmentInput,
+    planId?: string,
+  ): CommissionAdjustmentInput => {
+    if (planId === CUSTOM_PAYOUT_PLAN_ID) {
+      return {
+        ...row,
+        payoutPlanId: CUSTOM_PAYOUT_PLAN_ID,
+        payoutPlanName: CUSTOM_PAYOUT_PLAN_NAME,
+        ruleCalculationType: 'fixed',
+        commissionRate: 0,
+        commissionAmount: Number(row.commissionAmount || 0),
+        tierSnapshot: undefined,
+        calculationNote: row.calculationNote || '财务自定义金额分账',
+      };
+    }
+    const plan = planId ? payoutPlans.find((item) => item.id === planId) : undefined;
+    if (!plan) {
+      return {
+        ...row,
+        payoutPlanId: undefined,
+        payoutPlanName: undefined,
+      };
+    }
+    const performanceAmount = Number(
+      row.performanceAmount
+      || selectedCreatableOrder?.orderAmount
+      || summaryDetail?.orderAmount
+      || 0,
+    );
+    if (plan.commissionType === 'tiered_percentage') {
+      return {
+        ...row,
+        payoutPlanId: plan.id,
+        payoutPlanName: plan.name,
+        ruleCalculationType: plan.commissionType,
+        commissionRate: 0,
+        commissionAmount: 0,
+        performanceAmount,
+        tierSnapshot: {
+          tiers: plan.tiers || [],
+          baseAmount: performanceAmount,
+          gapToNext: 0,
+        },
+        calculationNote: plan.description || '销售月累计阶梯提成，月报自动结算金额',
+      };
+    }
+    if (plan.commissionType === 'percentage') {
+      const rate = Number(plan.commissionValue || 0) / 100;
+      return {
+        ...row,
+        payoutPlanId: plan.id,
+        payoutPlanName: plan.name,
+        ruleCalculationType: plan.commissionType,
+        commissionRate: rate,
+        commissionAmount: Math.round(performanceAmount * rate * 100) / 100,
+        performanceAmount,
+        tierSnapshot: undefined,
+        calculationNote: plan.description || `按业绩金额 ${plan.commissionValue}% 计算`,
+      };
+    }
+    return {
+      ...row,
+      payoutPlanId: plan.id,
+      payoutPlanName: plan.name,
+      ruleCalculationType: plan.commissionType,
+      commissionRate: 0,
+      commissionAmount: Number(plan.commissionValue || 0),
+      performanceAmount,
+      tierSnapshot: undefined,
+      calculationNote: plan.description || `固定提成 ${formatCurrency(plan.commissionValue)}`,
+    };
+  };
+
   const fetchSettlementOptions = async () => {
-    const [rolesRes, usersRes, departmentsRes] = await Promise.all([
+    const [rolesRes, plansRes, usersRes, departmentsRes] = await Promise.all([
       commissionRuleApi.getCommissionRoleConfigs(),
+      commissionRuleApi.getCommissionPayoutPlans(),
       settingsApi.fetchUsers({ isActive: true }),
       departmentApi.getDepartments({ isActive: true }),
     ]);
     if (rolesRes.code === 0) setCommissionRoleConfigs(rolesRes.data);
+    if (plansRes.code === 0) setPayoutPlans(plansRes.data);
     if (usersRes.code === 0) setEmployees(usersRes.data);
     if (departmentsRes.code === 0) setDepartments(departmentsRes.data);
   };
@@ -461,71 +601,9 @@ const Commission: React.FC<CommissionProps> = ({
     setPayoutLoading(true);
     try {
       const res = await commissionApi.fetchMonthlyCommissionPayouts(period);
-      if (res.code === 0) setPayoutRows(res.data);
+      if (res.code === 0) setPayoutRows(filterPayoutRowsForScope(res.data));
     } finally {
       setPayoutLoading(false);
-    }
-  };
-
-  const openTierConfig = async () => {
-    if (!payoutPeriod) return;
-    setTierConfigError('');
-    const res = await commissionApi.fetchMonthlyCommissionTierConfig(payoutPeriod);
-    if (res.code !== 0) {
-      setTierConfigError(res.message || '阶梯配置加载失败');
-      return;
-    }
-    setTierConfigRows(res.data.tiers.map((tier) => ({ ...tier })));
-    setTierConfigOpen(true);
-  };
-
-  const updateTierConfigRow = <K extends keyof CommissionTier>(
-    index: number,
-    key: K,
-    value: CommissionTier[K],
-  ) => {
-    setTierConfigRows((rows) => rows.map((tier, tierIndex) => (
-      tierIndex === index ? { ...tier, [key]: value } : tier
-    )));
-  };
-
-  const addTierConfigRow = () => {
-    setTierConfigRows((rows) => {
-      const next = rows.map((tier) => ({ ...tier }));
-      const last = next[next.length - 1];
-      if (!last) return [{ minAmount: 0, rate: 8 }];
-      last.maxAmount = last.minAmount + 10000;
-      next.push({ minAmount: last.maxAmount, rate: last.rate });
-      return next;
-    });
-  };
-
-  const removeTierConfigRow = (index: number) => {
-    setTierConfigRows((rows) => rows.filter((_, tierIndex) => tierIndex !== index));
-  };
-
-  const saveTierConfig = async () => {
-    if (!payoutPeriod) return;
-    setTierConfigSaving(true);
-    setTierConfigError('');
-    try {
-      const payload = tierConfigRows.map((tier) => ({
-        minAmount: Number(tier.minAmount) || 0,
-        ...(tier.maxAmount === undefined || tier.maxAmount === null || Number(tier.maxAmount) <= 0
-          ? {}
-          : { maxAmount: Number(tier.maxAmount) }),
-        rate: Number(tier.rate) || 0,
-      }));
-      const res = await commissionApi.saveMonthlyCommissionTierConfig(payoutPeriod, payload);
-      if (res.code !== 0) {
-        setTierConfigError(res.message || '阶梯配置保存失败');
-        return;
-      }
-      setTierConfigRows(res.data.tiers.map((tier) => ({ ...tier })));
-      setTierConfigOpen(false);
-      await fetchMonthlyPayouts(payoutPeriod);
-    } finally {
-      setTierConfigSaving(false);
     }
   };
 
@@ -691,19 +769,21 @@ const Commission: React.FC<CommissionProps> = ({
     setOrderSplitColumnWidths(resetColumnWidths(DEFAULT_ORDER_SPLIT_COLUMN_WIDTHS));
   };
 
-  const buildNewSplitRow = (orderId: string, orderAmount: number): CommissionAdjustmentInput => ({
-    orderId,
-    role: activeRoleConfigs[0]?.name || '销售',
-    owner: '',
-    ownerId: '',
-    department: '',
-    departmentId: '',
-    commissionAmount: 0,
-    commissionRate: 0,
-    performanceAmount: orderAmount,
-    calculationNote: '财务人工新增分账',
-    ruleCalculationType: 'fixed',
-  });
+  const buildNewSplitRow = (orderId: string, orderAmount: number): CommissionAdjustmentInput => (
+    applyPayoutPlanToSplitRow({
+      orderId,
+      role: activeRoleConfigs[0]?.name || '销售',
+      owner: '',
+      ownerId: '',
+      department: '',
+      departmentId: '',
+      commissionAmount: 0,
+      commissionRate: 0,
+      performanceAmount: orderAmount,
+      calculationNote: '财务人工新增分账',
+      ruleCalculationType: 'fixed',
+    }, activePayoutPlans[0]?.id)
+  );
 
   const openCreateSplitDialog = () => {
     setCreateSplitOpen(true);
@@ -787,7 +867,10 @@ const Commission: React.FC<CommissionProps> = ({
       performanceAmount: item.performanceAmount || item.orderAmount,
       calculationNote: item.calculationNote || item.formulaText || '',
       commissionRuleId: item.commissionRuleId,
+      payoutPlanId: item.payoutPlanId || (item.payoutPlanName === CUSTOM_PAYOUT_PLAN_NAME ? CUSTOM_PAYOUT_PLAN_ID : undefined),
+      payoutPlanName: item.payoutPlanName,
       ruleCalculationType: item.ruleCalculationType || (item.commissionRate > 0 ? 'percentage' : 'fixed'),
+      tierSnapshot: item.tierSnapshot,
     };
   };
 
@@ -952,7 +1035,7 @@ const Commission: React.FC<CommissionProps> = ({
           <Chip
             label={summary.productLevel || '-'}
             size="small"
-            sx={{ bgcolor: `${getProductLevelColor(summary.productLevel)}18`, color: getProductLevelColor(summary.productLevel), fontWeight: 600 }}
+            sx={getProductLevelTagSx(summary.productLevel)}
           />
         );
       case 'orderType':
@@ -997,22 +1080,49 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const recalcSplitRow = (row: CommissionAdjustmentInput): CommissionAdjustmentInput => {
+    if (isCustomPayoutRow(row)) {
+      return {
+        ...row,
+        ruleCalculationType: 'fixed',
+        commissionRate: 0,
+        tierSnapshot: undefined,
+      };
+    }
+    const plan = findPayoutPlanForRow(row);
     const calculationType = row.ruleCalculationType || 'fixed';
     const performanceAmount = Number(row.performanceAmount || 0);
-    const commissionRate = Number(row.commissionRate || 0);
     if (calculationType === 'tiered_percentage') {
-      return { ...row, commissionRate: 0, commissionAmount: 0 };
+      return {
+        ...row,
+        commissionRate: 0,
+        commissionAmount: 0,
+        tierSnapshot: {
+          tiers: plan?.tiers || row.tierSnapshot?.tiers || [],
+          baseAmount: performanceAmount,
+          gapToNext: row.tierSnapshot?.gapToNext || 0,
+        },
+      };
     }
     if (calculationType === 'percentage') {
-      return { ...row, commissionAmount: Math.round(performanceAmount * commissionRate * 100) / 100 };
+      const commissionRate = plan ? Number(plan.commissionValue || 0) / 100 : Number(row.commissionRate || 0);
+      return {
+        ...row,
+        commissionRate,
+        commissionAmount: Math.round(performanceAmount * commissionRate * 100) / 100,
+      };
     }
-    return { ...row, commissionRate: 0 };
+    return {
+      ...row,
+      commissionRate: 0,
+      commissionAmount: plan ? Number(plan.commissionValue || 0) : row.commissionAmount,
+    };
   };
 
   const updateSplitRow = <K extends keyof CommissionAdjustmentInput>(index: number, key: K, value: CommissionAdjustmentInput[K]) => {
     setSplitRows((prev) => prev.map((row, rowIndex) => {
       if (rowIndex !== index) return row;
       const next = { ...row, [key]: value };
+      if (key === 'payoutPlanId') return applyPayoutPlanToSplitRow(next, value as string);
       return key === 'ruleCalculationType' || key === 'commissionRate' || key === 'performanceAmount'
         ? recalcSplitRow(next)
         : next;
@@ -1244,14 +1354,14 @@ const Commission: React.FC<CommissionProps> = ({
       if (payoutConfirmAction.type === 'payOwner') {
         const res = await commissionApi.payMonthlyOwnerCommissions(payoutPeriod, payoutConfirmAction.ownerId);
         if (res.code === 0) {
-          setPayoutRows(res.data);
+          setPayoutRows(filterPayoutRowsForScope(res.data));
           await fetchOrderSummaries();
         }
       }
       if (payoutConfirmAction.type === 'payBatch') {
         const res = await commissionApi.payMonthlyCommissionBatch(payoutPeriod);
         if (res.code === 0) {
-          setPayoutRows(res.data);
+          setPayoutRows(filterPayoutRowsForScope(res.data));
           await fetchOrderSummaries();
         }
       }
@@ -1287,16 +1397,261 @@ const Commission: React.FC<CommissionProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  const renderPayoutCommissionDetail = (commission: Commission) => {
-    const note = commission.auditReason || commission.adjustReason || commission.calculationNote || '-';
-    const fields: Array<{ label: string; value: React.ReactNode; strong?: boolean; alignRight?: boolean }> = [
-      { label: '订单号', value: commission.orderNo, strong: true },
-      { label: '客户', value: commission.customerName },
-      { label: '提成角色', value: commission.role },
-      { label: '提成金额', value: formatCurrency(commission.commissionAmount), strong: true, alignRight: true },
-      { label: '状态', value: <Chip label={commission.status} size="small" /> },
-      { label: '备注/原因', value: note },
+  const getDisplayCommissionAmount = (commission: Commission, tierSnapshot?: Commission['tierSnapshot']) => {
+    if (commission.ruleCalculationType !== 'tiered_percentage') return commission.commissionAmount;
+    const rate = tierSnapshot?.currentTier?.rate ?? commission.tierSnapshot?.currentTier?.rate ?? Number(commission.commissionRate || 0) * 100;
+    if (!rate) return commission.commissionAmount;
+    return Math.round(Number(commission.performanceAmount || commission.orderAmount || 0) * rate) / 100;
+  };
+
+  const countsTowardTieredMonthlyBase = (commission: Commission) => (
+    commission.ruleCalculationType === 'tiered_percentage'
+    && !['已撤回', '待冲销', '已冲销'].includes(commission.status)
+  );
+
+  const buildTierSnapshotForSummary = (commissions: Commission[]) => {
+    const tierSource = commissions.find((commission) => commission.tierSnapshot?.tiers?.length);
+    const tiers = tierSource?.tierSnapshot?.tiers || [];
+    const monthlyBase = commissions
+      .filter(countsTowardTieredMonthlyBase)
+      .reduce((sum, commission) => sum + Number(commission.performanceAmount || commission.orderAmount || 0), 0);
+    if (!tiers.length) return tierSource?.tierSnapshot;
+    const currentTier = tiers.find((tier) => (
+      monthlyBase >= tier.minAmount
+      && (tier.maxAmount === undefined || monthlyBase < tier.maxAmount)
+    ));
+    const nextTier = tiers.find((tier) => tier.minAmount > monthlyBase);
+    return {
+      tiers,
+      currentTier,
+      nextTier,
+      baseAmount: monthlyBase,
+      gapToNext: nextTier ? Math.round((nextTier.minAmount - monthlyBase) * 100) / 100 : 0,
+    };
+  };
+
+  const getRoleSummariesForPayoutRow = (row: MonthlyCommissionPayout): MonthlyCommissionRoleSummary[] => {
+    const sourceCommissions = row.roleSummaries?.length
+      ? row.roleSummaries.flatMap((summary) => summary.commissions)
+      : row.commissions;
+    const roleBucketMap = new Map<string, { role: CommissionRole; isTiered: boolean; commissions: Commission[] }>();
+    sourceCommissions.forEach((commission) => {
+      const isTiered = commission.ruleCalculationType === 'tiered_percentage';
+      const key = `${commission.role}::${isTiered ? 'tiered' : 'simple'}`;
+      const existing = roleBucketMap.get(key);
+      if (existing) {
+        existing.commissions.push(commission);
+      } else {
+        roleBucketMap.set(key, { role: commission.role, isTiered, commissions: [commission] });
+      }
+    });
+    return Array.from(roleBucketMap.values()).map(({ role, isTiered, commissions }) => {
+      const tierSnapshot = isTiered ? buildTierSnapshotForSummary(commissions) : undefined;
+      const pendingConfirmAmount = commissions
+        .filter((commission) => commission.status === '待确认')
+        .reduce((sum, commission) => sum + getDisplayCommissionAmount(commission, tierSnapshot), 0);
+      const pendingPayAmount = commissions
+        .filter((commission) => commission.status === '待发放')
+        .reduce((sum, commission) => sum + getDisplayCommissionAmount(commission, tierSnapshot), 0);
+      const paidAmount = commissions
+        .filter((commission) => commission.status === '已发放')
+        .reduce((sum, commission) => sum + getDisplayCommissionAmount(commission, tierSnapshot), 0);
+      const withdrawnAmount = commissions
+        .filter((commission) => commission.status === '已撤回')
+        .reduce((sum, commission) => sum + getDisplayCommissionAmount(commission, tierSnapshot), 0);
+      const chargebackAmount = commissions
+        .filter((commission) => commission.status === '待冲销')
+        .reduce((sum, commission) => sum + getDisplayCommissionAmount(commission, tierSnapshot), 0);
+      const status: MonthlyCommissionPayout['status'] = chargebackAmount > 0
+        ? '待冲销'
+        : pendingConfirmAmount > 0
+          ? '待确认'
+          : pendingPayAmount > 0
+            ? '待发放'
+            : paidAmount > 0
+              ? '已发放'
+              : '无应发';
+      return {
+        role,
+        orderCount: new Set(commissions.map((commission) => commission.orderId)).size,
+        monthlyPaidAmount: isTiered
+          ? commissions
+            .filter(countsTowardTieredMonthlyBase)
+            .reduce((sum, commission) => sum + Number(commission.performanceAmount || commission.orderAmount || 0), 0)
+          : commissions.reduce((sum, commission) => sum + Number(commission.orderAmount || 0), 0),
+        pendingConfirmAmount,
+        pendingPayAmount,
+        paidAmount,
+        exceptionAmount: chargebackAmount,
+        withdrawnAmount,
+        chargebackAmount,
+        totalAmount: pendingConfirmAmount + pendingPayAmount + paidAmount,
+        status,
+        isTiered,
+        tierSnapshot,
+        commissions,
+      };
+    }).sort((a, b) => Number(b.isTiered) - Number(a.isTiered) || b.totalAmount - a.totalAmount || a.role.localeCompare(b.role, 'zh-CN'));
+  };
+
+  const formatTierBrief = (summary: MonthlyCommissionRoleSummary) => {
+    const current = summary.tierSnapshot?.currentTier;
+    if (!summary.isTiered) return '';
+    if (!current) return '阶梯方案待月报结算';
+    const range = current.maxAmount === undefined
+      ? `${formatCurrency(current.minAmount)} 以上`
+      : `${formatCurrency(current.minAmount)} - ${formatCurrency(current.maxAmount)}`;
+    const nextText = summary.tierSnapshot?.gapToNext
+      ? `，距下一档还差 ${formatCurrency(summary.tierSnapshot.gapToNext)}`
+      : '，已到最高档';
+    return `当前 ${range} · ${current.rate}%${nextText}`;
+  };
+
+  const renderPayoutRoleSummary = (summary: MonthlyCommissionRoleSummary, compact = false) => {
+    const currentTier = summary.tierSnapshot?.currentTier;
+    const nextTier = summary.tierSnapshot?.nextTier;
+    const tierMax = currentTier?.maxAmount;
+    const tierRange = currentTier
+      ? tierMax === undefined
+        ? `${formatCurrency(currentTier.minAmount)} 以上`
+        : `${formatCurrency(currentTier.minAmount)} - ${formatCurrency(tierMax)}`
+      : '待月报结算';
+    const tierGapText = nextTier
+      ? `还差 ${formatCurrency(summary.tierSnapshot?.gapToNext || 0)} 到 ${nextTier.rate}%`
+      : currentTier
+        ? '已到最高档'
+        : '阶梯方案待结算';
+    const roleNote = summary.isTiered ? formatTierBrief(summary) : '按订单方案结算，不参与销售阶梯';
+    const metricItems = [
+      { label: '待确认', value: summary.pendingConfirmAmount, color: '#d97706' },
+      { label: '待发放', value: summary.pendingPayAmount, color: '#2563eb' },
+      { label: '已发放', value: summary.paidAmount, color: '#16a34a' },
+      { label: '异常/撤回', value: summary.chargebackAmount + summary.withdrawnAmount, color: '#dc2626' },
     ];
+    const metrics = (
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 0.8, mt: 1.1 }}>
+        {metricItems.map((item) => (
+          <Box key={item.label} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, px: 1, py: 0.8, bgcolor: '#f8fafc' }}>
+            <Typography variant="caption" sx={{ display: 'block', color: '#64748b', lineHeight: 1.2 }}>{item.label}</Typography>
+            <Typography variant="body2" sx={{ color: item.color, fontWeight: 900, mt: 0.25 }}>
+              {formatCurrency(item.value)}
+            </Typography>
+          </Box>
+        ))}
+      </Box>
+    );
+
+    return (
+      <Box
+        key={summary.role}
+        sx={{
+          border: summary.isTiered ? '1px solid #bfdbfe' : '1px solid #dbe3ef',
+          borderRadius: 1,
+          bgcolor: '#fff',
+          overflow: 'hidden',
+        }}
+      >
+        {summary.isTiered ? (
+          <Box
+            sx={{
+              px: compact ? 1.4 : 1.6,
+              py: compact ? 1.2 : 1.35,
+              bgcolor: '#eff6ff',
+              borderBottom: '1px solid #bfdbfe',
+            }}
+          >
+            <Stack
+              direction={{ xs: 'column', md: 'row' }}
+              spacing={1.25}
+              sx={{ alignItems: { xs: 'stretch', md: 'flex-start' }, justifyContent: 'space-between' }}
+            >
+              <Box sx={{ minWidth: 0, flex: 1 }}>
+                <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 0.5, mb: 0.55 }}>
+                  <Chip label={summary.role} size="small" color="primary" sx={{ height: 22, fontWeight: 800 }} />
+                  <Typography variant="caption" sx={{ color: '#475569', fontWeight: 800 }}>{summary.orderCount} 单</Typography>
+                  <Chip label="阶梯提成视图" size="small" variant="outlined" color="primary" sx={{ height: 22, bgcolor: '#fff' }} />
+                </Stack>
+                <Typography variant="body2" sx={{ color: '#1e3a8a', fontWeight: 800, overflowWrap: 'anywhere' }}>
+                  {roleNote}
+                </Typography>
+              </Box>
+              <Box sx={{ textAlign: { xs: 'left', md: 'right' }, flexShrink: 0 }}>
+                <Typography variant="caption" sx={{ color: '#475569', display: 'block' }}>本角色应发</Typography>
+                <Typography variant={compact ? 'h6' : 'h5'} sx={{ color: '#0f172a', fontWeight: 900, lineHeight: 1.15 }}>
+                  {formatCurrency(summary.totalAmount)}
+                </Typography>
+              </Box>
+            </Stack>
+
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(150px, 1fr))' }, gap: 0.8, mt: 1.15 }}>
+              {[
+                { label: '阶梯业绩', value: formatCurrency(summary.monthlyPaidAmount), helper: '只统计销售阶梯业绩' },
+                { label: '当前档位', value: currentTier ? `${currentTier.rate}%` : '-', helper: tierRange },
+                { label: '下一档', value: tierGapText, helper: nextTier ? `下一档 ${nextTier.rate}%` : '当前阶梯状态' },
+              ].map((item) => (
+                <Box key={item.label} sx={{ border: '1px solid #bfdbfe', borderRadius: 1, px: 1, py: 0.85, bgcolor: '#fff' }}>
+                  <Typography variant="caption" sx={{ display: 'block', color: '#64748b', lineHeight: 1.2 }}>{item.label}</Typography>
+                  <Typography variant="body2" sx={{ color: '#0f172a', fontWeight: 900, mt: 0.25, overflowWrap: 'anywhere' }}>
+                    {item.value}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: '#64748b', overflowWrap: 'anywhere', display: 'block', mt: 0.1 }}>
+                    {item.helper}
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+
+            {metrics}
+          </Box>
+        ) : (
+          <Box
+            sx={{
+              px: compact ? 1.4 : 1.6,
+              py: compact ? 1.15 : 1.3,
+              bgcolor: '#fff',
+              borderBottom: '1px solid #eef2f7',
+            }}
+          >
+            <Stack
+              direction={{ xs: 'column', md: 'row' }}
+              spacing={1.25}
+              sx={{ alignItems: { xs: 'stretch', md: 'flex-start' }, justifyContent: 'space-between' }}
+            >
+              <Box sx={{ minWidth: 0, flex: 1 }}>
+                <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 0.5, mb: 0.55 }}>
+                  <Chip label={summary.role} size="small" color="default" sx={{ height: 22, fontWeight: 800 }} />
+                  <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 800 }}>{summary.orderCount} 单</Typography>
+                  <Chip label="普通结算视图" size="small" variant="outlined" sx={{ height: 22, bgcolor: '#fff' }} />
+                </Stack>
+                <Box sx={{ border: '1px solid #e5e7eb', borderRadius: 1, px: 1, py: 0.85, bgcolor: '#f8fafc', maxWidth: 620 }}>
+                  <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mb: 0.25 }}>结算说明</Typography>
+                  <Typography variant="body2" sx={{ color: '#334155', fontWeight: 800, overflowWrap: 'anywhere' }}>
+                    {roleNote}
+                  </Typography>
+                </Box>
+              </Box>
+              <Box sx={{ textAlign: { xs: 'left', md: 'right' }, flexShrink: 0 }}>
+                <Typography variant="caption" sx={{ color: '#64748b', display: 'block' }}>本角色应发</Typography>
+                <Typography variant={compact ? 'h6' : 'h5'} sx={{ color: '#111827', fontWeight: 900, lineHeight: 1.15 }}>
+                  {formatCurrency(summary.totalAmount)}
+                </Typography>
+              </Box>
+            </Stack>
+            {metrics}
+          </Box>
+        )}
+
+        <Stack spacing={0.7} sx={{ p: compact ? 1 : 1.25, bgcolor: '#f8fafc' }}>
+          {summary.commissions.map((commission) => renderPayoutCommissionDetail(commission, compact, summary.tierSnapshot))}
+        </Stack>
+      </Box>
+    );
+  };
+
+  const renderPayoutCommissionDetail = (commission: Commission, compact = false, tierSnapshot?: Commission['tierSnapshot']) => {
+    const note = commission.auditReason || commission.adjustReason || commission.calculationNote || '-';
+    const formulaText = commission.formulaText || commission.payoutPlanName || commission.calculationNote || '-';
+    const displayCommissionAmount = getDisplayCommissionAmount(commission, tierSnapshot);
 
     return (
       <Box
@@ -1305,9 +1660,8 @@ const Commission: React.FC<CommissionProps> = ({
           border: '1px solid #e5e7eb',
           borderRadius: 1,
           bgcolor: '#fff',
-          px: 1.5,
-          py: 1.25,
-          maxWidth: 760,
+          px: compact ? 1.15 : 1.35,
+          py: compact ? 0.95 : 1.1,
         }}
       >
         <Box
@@ -1315,47 +1669,124 @@ const Commission: React.FC<CommissionProps> = ({
             display: 'grid',
             gridTemplateColumns: {
               xs: '1fr',
-              md: 'minmax(150px, 1.25fr) minmax(120px, 1fr) 92px 112px 90px minmax(150px, 1.25fr)',
+              md: compact
+                ? 'minmax(190px, 1fr) minmax(110px, 0.65fr) minmax(260px, 1.45fr) minmax(130px, 0.65fr)'
+                : 'minmax(210px, 1fr) minmax(120px, 0.65fr) minmax(280px, 1.45fr) minmax(140px, 0.65fr)',
             },
-            gap: { xs: 1, md: 1.25 },
-            alignItems: 'center',
+            gap: { xs: 0.9, md: 1.4 },
+            alignItems: 'start',
           }}
         >
-          {fields.map((field) => (
-            <Box key={field.label} sx={{ minWidth: 0, textAlign: { xs: 'left', md: field.alignRight ? 'right' : 'left' } }}>
-              <Typography variant="caption" sx={{ display: 'block', color: '#6b7280', mb: 0.25 }}>
-                {field.label}
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="caption" sx={{ display: 'block', color: '#64748b', mb: 0.25 }}>订单 / 客户</Typography>
+            <Typography variant="body2" sx={{ color: '#111827', fontWeight: 900, overflowWrap: 'anywhere', lineHeight: 1.35 }}>
+              {commission.orderNo}
+            </Typography>
+            <Typography variant="caption" sx={{ color: '#64748b', overflowWrap: 'anywhere', display: 'block' }}>
+              {commission.customerName || '-'}{compact ? '' : ` · ${commission.role}`}
+            </Typography>
+          </Box>
+
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="caption" sx={{ display: 'block', color: '#64748b', mb: 0.25 }}>实付金额</Typography>
+            <Typography variant="body2" sx={{ color: '#0f766e', fontWeight: 900 }}>
+              {formatCurrency(commission.orderAmount)}
+            </Typography>
+          </Box>
+
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="caption" sx={{ display: 'block', color: '#64748b', mb: 0.25 }}>计算说明 / 备注</Typography>
+            <Typography variant="body2" sx={{ color: '#334155', fontWeight: 700, overflowWrap: 'anywhere', lineHeight: 1.35 }}>
+              {formulaText}
+            </Typography>
+            {note && note !== formulaText && (
+              <Typography variant="caption" sx={{ color: '#64748b', overflowWrap: 'anywhere', display: 'block', mt: 0.2 }}>
+                {note}
               </Typography>
-              <Typography
-                component="div"
-                variant="body2"
-                sx={{
-                  color: field.strong ? '#111827' : '#374151',
-                  fontWeight: field.strong ? 700 : 500,
-                  overflowWrap: 'anywhere',
-                }}
-              >
-                {field.value}
-              </Typography>
-            </Box>
-          ))}
+            )}
+          </Box>
+
+          <Box sx={{ minWidth: 0, textAlign: { xs: 'left', md: 'right' } }}>
+            <Typography variant="caption" sx={{ display: 'block', color: '#64748b', mb: 0.25 }}>提成金额</Typography>
+            <Typography variant="body2" sx={{ color: '#111827', fontWeight: 900, mb: 0.45 }}>
+              {formatCurrency(displayCommissionAmount)}
+            </Typography>
+            <Chip label={commission.status} size="small" color={getCommissionStatusColor(commission.status)} />
+          </Box>
         </Box>
       </Box>
+    );
+  };
+
+  const renderMinePayoutRoleSections = () => {
+    const roleSummaries = payoutRows.flatMap((row) => getRoleSummariesForPayoutRow(row));
+    const tieredSummaries = roleSummaries.filter((summary) => summary.isTiered);
+    const simpleSummaries = roleSummaries.filter((summary) => !summary.isTiered);
+    const renderSection = (
+      title: string,
+      description: string,
+      summaries: MonthlyCommissionRoleSummary[],
+      tone: 'tiered' | 'simple',
+    ) => {
+      if (!summaries.length) return null;
+      return (
+        <Box
+          sx={{
+            border: `1px solid ${tone === 'tiered' ? '#bfdbfe' : '#e5e7eb'}`,
+            borderRadius: 1,
+            overflow: 'hidden',
+            bgcolor: '#fff',
+          }}
+        >
+          <Box
+            sx={{
+              px: 1.4,
+              py: 1,
+              bgcolor: tone === 'tiered' ? '#eff6ff' : '#f8fafc',
+              borderBottom: `1px solid ${tone === 'tiered' ? '#bfdbfe' : '#e5e7eb'}`,
+            }}
+          >
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="subtitle2" sx={{ color: tone === 'tiered' ? '#1d4ed8' : '#0f172a', fontWeight: 900 }}>
+                  {title}
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#64748b', display: 'block', overflowWrap: 'anywhere' }}>
+                  {description}
+                </Typography>
+              </Box>
+              <Chip label={`${summaries.length} 组`} size="small" color={tone === 'tiered' ? 'primary' : 'default'} />
+            </Stack>
+          </Box>
+          <Stack spacing={1} sx={{ p: 1 }}>
+            {summaries.map((summary) => renderPayoutRoleSummary(summary, true))}
+          </Stack>
+        </Box>
+      );
+    };
+
+    return (
+      <Stack spacing={1.25}>
+        {renderSection('阶梯提成订单', '只汇总命中销售月累计阶梯的订单，阶梯 GMV、档位和本单提成都按这类订单计算。', tieredSummaries, 'tiered')}
+        {renderSection('普通提成订单', '固定金额、固定比例、自定义金额等订单放在这里，同一销售角色的普通订单不会参与阶梯 GMV。', simpleSummaries, 'simple')}
+      </Stack>
     );
   };
 
   const renderSplitSummaryCard = (commission: Commission) => {
     const note = commission.calculationNote || commission.formulaText || '-';
     const performanceAmount = commission.performanceAmount || commission.orderAmount;
-    const statusColor = commission.status === '已发放'
-      ? 'success'
-      : commission.status === '待冲销'
-        ? 'error'
-        : commission.status === '待发放'
-          ? 'info'
-          : commission.status === '待确认'
-            ? 'warning'
-            : 'default';
+    const planName = commission.payoutPlanName || '历史分账未记录方案';
+    const planSummary = commission.payoutPlanName
+      ? formatPayoutPlanValue({
+        commissionType: commission.ruleCalculationType || 'fixed',
+        commissionValue: commission.ruleCalculationType === 'percentage'
+          ? Math.round(Number(commission.commissionRate || 0) * 10000) / 100
+          : commission.commissionAmount,
+        tiers: commission.tierSnapshot?.tiers,
+      })
+      : '旧数据未保存方案快照';
+    const statusColor = getCommissionStatusColor(commission.status);
 
     return (
       <Box
@@ -1364,59 +1795,65 @@ const Commission: React.FC<CommissionProps> = ({
           border: '1px solid #e5e7eb',
           borderRadius: 1,
           bgcolor: '#fff',
-          px: 1.5,
-          py: 1.25,
+          minHeight: 250,
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
         }}
       >
-        <Stack
-          direction={{ xs: 'column', sm: 'row' }}
-          spacing={1}
-          sx={{ alignItems: { xs: 'flex-start', sm: 'center' }, justifyContent: 'space-between', mb: 1 }}
-        >
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0 }}>
-            <Chip label={commission.role} size="small" color="primary" />
-            <Box sx={{ minWidth: 0 }}>
-              <Typography variant="body2" sx={{ color: '#111827', fontWeight: 800, overflowWrap: 'anywhere' }}>
-                {formatOwnerDisplayName(commission.ownerId, commission.owner)}
-              </Typography>
-              <Typography variant="caption" sx={{ color: '#6b7280', overflowWrap: 'anywhere', display: 'block' }}>
-                {commission.department || '-'}
+        <Box sx={{ px: 1.35, py: 1.15, borderBottom: '1px solid #eef2f7', bgcolor: '#f8fafc' }}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start', justifyContent: 'space-between', gap: 1 }}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start', minWidth: 0 }}>
+              <Chip label={commission.role} size="small" color="primary" sx={{ height: 22, mt: 0.1 }} />
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="body2" sx={{ color: '#111827', fontWeight: 900, overflowWrap: 'anywhere', lineHeight: 1.35 }}>
+                  {formatOwnerDisplayName(commission.ownerId, commission.owner)}
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#64748b', overflowWrap: 'anywhere', display: 'block' }}>
+                  {commission.department || '-'}
+                </Typography>
+              </Box>
+            </Stack>
+            <Box sx={{ textAlign: 'right', flexShrink: 0 }}>
+              <Typography variant="caption" sx={{ color: '#64748b', display: 'block' }}>提成</Typography>
+              <Typography variant="h6" sx={{ color: '#dc2626', fontWeight: 900, lineHeight: 1.2 }}>
+                {formatCurrency(commission.commissionAmount)}
               </Typography>
             </Box>
           </Stack>
-          <Box sx={{ textAlign: { xs: 'left', sm: 'right' } }}>
-            <Typography variant="caption" sx={{ color: '#6b7280', display: 'block' }}>提成金额</Typography>
-            <Typography variant="h6" sx={{ color: '#d32f2f', fontWeight: 800, lineHeight: 1.25 }}>
-              {formatCurrency(commission.commissionAmount)}
-            </Typography>
-          </Box>
-        </Stack>
+        </Box>
 
-        <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: { xs: '1fr', sm: '120px 120px minmax(0, 1fr)' },
-            gap: 1,
-            alignItems: 'start',
-          }}
-        >
+        <Stack spacing={1.05} sx={{ p: 1.35, flex: 1 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="caption" sx={{ display: 'block', color: '#6b7280', mb: 0.25 }}>业绩金额</Typography>
+              <Typography variant="body2" sx={{ color: '#111827', fontWeight: 800 }}>
+                {formatCurrency(performanceAmount)}
+              </Typography>
+            </Box>
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="caption" sx={{ display: 'block', color: '#6b7280', mb: 0.25 }}>状态</Typography>
+              <Chip label={commission.status} size="small" color={statusColor} />
+            </Box>
+          </Box>
+
           <Box sx={{ minWidth: 0 }}>
-            <Typography variant="caption" sx={{ display: 'block', color: '#6b7280', mb: 0.25 }}>业绩金额</Typography>
-            <Typography variant="body2" sx={{ color: '#111827', fontWeight: 700 }}>
-              {formatCurrency(performanceAmount)}
+            <Typography variant="caption" sx={{ display: 'block', color: '#6b7280', mb: 0.25 }}>提成方案</Typography>
+            <Typography variant="body2" sx={{ color: '#111827', fontWeight: 700, overflowWrap: 'anywhere' }}>
+              {planName}
+            </Typography>
+            <Typography variant="caption" sx={{ color: '#64748b', overflowWrap: 'anywhere', display: 'block' }}>
+              {planSummary}
             </Typography>
           </Box>
-          <Box sx={{ minWidth: 0 }}>
-            <Typography variant="caption" sx={{ display: 'block', color: '#6b7280', mb: 0.25 }}>状态</Typography>
-            <Chip label={commission.status} size="small" color={statusColor} />
-          </Box>
+
           <Box sx={{ minWidth: 0 }}>
             <Typography variant="caption" sx={{ display: 'block', color: '#6b7280', mb: 0.25 }}>说明</Typography>
-            <Typography variant="body2" sx={{ color: '#374151', overflowWrap: 'anywhere' }}>
+            <Typography variant="body2" sx={{ color: '#374151', overflowWrap: 'anywhere', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
               {note}
             </Typography>
           </Box>
-        </Box>
+        </Stack>
       </Box>
     );
   };
@@ -1434,98 +1871,98 @@ const Commission: React.FC<CommissionProps> = ({
       <Box
         key={log.id}
         sx={{
-          border: '1px solid #e5e7eb',
-          borderRadius: 1,
-          bgcolor: '#fff',
-          p: 1.5,
+          minWidth: 0,
         }}
       >
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} sx={{ alignItems: { xs: 'flex-start', sm: 'flex-start' }, justifyContent: 'space-between', mb: 1.25 }}>
-          <Box sx={{ minWidth: 0 }}>
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0, mb: 0.5 }}>
-              <Chip label={log.action} size="small" color={log.action === '确认分账' ? 'success' : 'primary'} />
-              <Typography variant="body2" sx={{ color: '#111827', fontWeight: 700, overflowWrap: 'anywhere' }}>
-                {operationTitle}
+        <Box
+          sx={{
+            border: '1px solid #e5e7eb',
+            borderLeft: `3px solid ${log.action === '确认分账' ? '#16a34a' : '#2563eb'}`,
+            borderRadius: 1,
+            bgcolor: '#fff',
+            px: 1.25,
+            py: 1,
+            minWidth: 0,
+            overflow: 'hidden',
+          }}
+        >
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start', justifyContent: 'space-between', gap: 1, minWidth: 0 }}>
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', minWidth: 0, mb: 0.25, flexWrap: 'wrap', rowGap: 0.25 }}>
+                <Chip label={log.action} size="small" color={log.action === '确认分账' ? 'success' : 'primary'} sx={{ height: 22 }} />
+                <Typography variant="body2" sx={{ color: '#111827', fontWeight: 800, overflowWrap: 'anywhere', minWidth: 0 }}>
+                  {operationTitle}
+                </Typography>
+              </Stack>
+              <Typography variant="caption" sx={{ color: '#64748b', overflowWrap: 'anywhere', display: 'block' }}>
+                {splitSnapshot.length || log.commissionCount || 0} 个角色 · 合计 {amountText} · {log.operator || '-'}
               </Typography>
-            </Stack>
-            <Typography variant="caption" sx={{ color: '#6b7280', overflowWrap: 'anywhere', display: 'block' }}>
-              {log.orderNo} / {log.customerName}
+            </Box>
+            <Typography variant="caption" sx={{ color: '#64748b', flexShrink: 0 }}>
+              {formatDate(log.operatedAt, 'MM-dd HH:mm')}
             </Typography>
-          </Box>
-          <Typography variant="caption" sx={{ color: '#6b7280', flexShrink: 0 }}>
-            {formatDate(log.operatedAt, 'yyyy-MM-dd HH:mm')}
-          </Typography>
-        </Stack>
+          </Stack>
 
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1, mb: 1 }}>
-          <Box sx={{ minWidth: 0 }}>
-            <Typography variant="caption" sx={{ display: 'block', color: '#6b7280', mb: 0.25 }}>
-              操作人
-            </Typography>
-            <Typography variant="body2" sx={{ color: '#111827', fontWeight: 700, overflowWrap: 'anywhere' }}>
-              {log.operator || '-'}
-            </Typography>
-          </Box>
-          <Box sx={{ minWidth: 0 }}>
-            <Typography variant="caption" sx={{ display: 'block', color: '#6b7280', mb: 0.25 }}>
-              本次结果
-            </Typography>
-            <Typography variant="body2" sx={{ color: '#111827', fontWeight: 700, overflowWrap: 'anywhere' }}>
-              {splitSnapshot.length || log.commissionCount || 0} 个角色，合计 {amountText}
-            </Typography>
+          <Box
+            component="details"
+            sx={{
+              mt: 0.75,
+              minWidth: 0,
+              '& summary': {
+                cursor: 'pointer',
+                color: '#2563eb',
+                fontSize: 12,
+                fontWeight: 700,
+                outline: 'none',
+              },
+            }}
+          >
+            <Box component="summary">查看明细</Box>
+            <Stack spacing={0.75} sx={{ mt: 0.75, minWidth: 0 }}>
+              {log.reason && (
+                <Box sx={{ bgcolor: '#f8fafc', borderRadius: 1, px: 1, py: 0.75 }}>
+                  <Typography variant="caption" sx={{ display: 'block', color: '#6b7280', mb: 0.25 }}>原因</Typography>
+                  <Typography variant="body2" sx={{ color: '#374151', overflowWrap: 'anywhere' }}>{log.reason}</Typography>
+                </Box>
+              )}
+              {splitSnapshot.length > 0 ? (
+                splitSnapshot.map((item, index) => (
+                  <Box
+                    key={`${log.id}-${item.role}-${item.ownerId || item.owner}-${index}`}
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr auto',
+                      gap: 0.75,
+                      alignItems: 'start',
+                      bgcolor: '#f8fafc',
+                      border: '1px solid #eef2f7',
+                      borderRadius: 1,
+                      px: 1,
+                      py: 0.65,
+                    }}
+                  >
+                    <Box sx={{ minWidth: 0 }}>
+                      <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 0.25 }}>
+                        <Chip label={item.role} size="small" variant="outlined" sx={{ height: 22 }} />
+                        <Chip label={item.status} size="small" sx={{ height: 22 }} />
+                      </Stack>
+                      <Typography variant="caption" sx={{ display: 'block', color: '#111827', fontWeight: 700, overflowWrap: 'anywhere', mt: 0.35 }}>
+                        {formatOwnerDisplayName(item.ownerId, item.owner)}{item.department ? ` / ${item.department}` : ''}
+                      </Typography>
+                    </Box>
+                    <Typography variant="caption" sx={{ color: '#111827', fontWeight: 900, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {formatCurrency(item.commissionAmount)}
+                    </Typography>
+                  </Box>
+                ))
+              ) : (
+                <Typography variant="caption" sx={{ color: '#64748b' }}>
+                  旧记录未保存人员明细。
+                </Typography>
+              )}
+            </Stack>
           </Box>
         </Box>
-
-        {log.reason && (
-          <Box sx={{ bgcolor: '#f8fafc', borderRadius: 1, px: 1.25, py: 0.9, mb: 1 }}>
-            <Typography variant="caption" sx={{ display: 'block', color: '#6b7280', mb: 0.25 }}>修改原因</Typography>
-            <Typography variant="body2" sx={{ color: '#374151', overflowWrap: 'anywhere' }}>{log.reason}</Typography>
-          </Box>
-        )}
-
-        {splitSnapshot.length > 0 ? (
-          <Box sx={{ bgcolor: '#f8fafc', borderRadius: 1, px: 1.25, py: 1 }}>
-            <Typography variant="caption" sx={{ display: 'block', color: '#6b7280', mb: 0.75 }}>
-              本次分账结果
-            </Typography>
-            <Stack spacing={0.75}>
-              {splitSnapshot.map((item, index) => (
-                <Box
-                  key={`${log.id}-${item.role}-${item.ownerId || item.owner}-${index}`}
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: { xs: '1fr', sm: '96px minmax(0, 1fr) 112px 86px' },
-                    gap: { xs: 0.5, sm: 1 },
-                    alignItems: 'center',
-                    bgcolor: '#fff',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: 1,
-                    px: 1,
-                    py: 0.75,
-                  }}
-                >
-                  <Chip label={item.role} size="small" variant="outlined" sx={{ justifySelf: { xs: 'flex-start', sm: 'stretch' } }} />
-                  <Typography variant="body2" sx={{ color: '#111827', fontWeight: 700, overflowWrap: 'anywhere' }}>
-                    {formatOwnerDisplayName(item.ownerId, item.owner)}{item.department ? ` / ${item.department}` : ''}
-                  </Typography>
-                  <Typography variant="body2" sx={{ color: '#111827', fontWeight: 800, textAlign: { xs: 'left', sm: 'right' } }}>
-                    {formatCurrency(item.commissionAmount)}
-                  </Typography>
-                  <Chip label={item.status} size="small" />
-                </Box>
-              ))}
-            </Stack>
-          </Box>
-        ) : (
-          <Box sx={{ bgcolor: '#f8fafc', borderRadius: 1, px: 1.25, py: 1 }}>
-            <Typography variant="caption" sx={{ display: 'block', color: '#6b7280', mb: 0.25 }}>
-              本次记录
-            </Typography>
-            <Typography variant="body2" sx={{ color: '#374151', overflowWrap: 'anywhere' }}>
-              保存了 {log.commissionCount ?? '-'} 个分账角色，合计 {amountText}。旧记录未保存人员明细，后续新记录会直接展示每个角色的分账结果。
-            </Typography>
-          </Box>
-        )}
       </Box>
     );
   };
@@ -1654,7 +2091,7 @@ const Commission: React.FC<CommissionProps> = ({
           <TableBody>
             {orderRows.map((summary) => {
               return (
-              <TableRow key={summary.orderId} hover>
+              <TableRow key={summary.orderId} hover sx={getProductLevelRowSx(summary.productLevel)}>
                 {visibleOrderSplitColumns.map((column, columnIndex) => (
                   <TableCell
                     key={`${summary.orderId}-${column.id}`}
@@ -1768,176 +2205,207 @@ const Commission: React.FC<CommissionProps> = ({
 
   const renderDetailSplitEditor = () => (
     <Stack spacing={1.25}>
-      <Stack spacing={1.25}>
-        {splitRows.map((row, index) => (
-          <Box
-            key={row.id || `detail-card-${index}`}
-            sx={{
-              border: '1px solid #e5e7eb',
-              borderRadius: 1,
-              bgcolor: '#fff',
-              px: 1.75,
-              py: 1.5,
-            }}
-          >
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 1.25 }}>
-              <Typography variant="subtitle2" sx={{ color: '#111827', fontWeight: 800 }}>
-                分账人员 {index + 1}
-              </Typography>
-              <Tooltip title={canDeleteSplitRow(row) ? '删除此条未确认分账' : '仅待确认阶段的分账可直接删除'}>
-                <span>
-                  <IconButton
-                    size="small"
-                    color="error"
-                    disabled={!canDeleteSplitRow(row)}
-                    onClick={() => setSplitRows((prev) => prev.filter((_, rowIndex) => rowIndex !== index))}
-                    aria-label="删除分账人员"
-                    sx={{ width: 32, height: 32 }}
-                  >
-                    <DeleteOutlineIcon fontSize="small" />
-                  </IconButton>
-                </span>
-              </Tooltip>
-            </Stack>
-
-            <Box
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', sm: 'repeat(auto-fill, minmax(280px, 320px))' },
+          gap: 1.25,
+          alignItems: 'stretch',
+          justifyContent: 'start',
+        }}
+      >
+        {splitRows.map((row, index) => {
+          const planText = isCustomPayoutRow(row)
+            ? `${CUSTOM_PAYOUT_PLAN_NAME} · 手工 ${formatCurrency(Number(row.commissionAmount || 0))}`
+            : `${row.payoutPlanName || findPayoutPlanForRow(row)?.name || '未选择方案'} · ${formatPayoutPlanValue(findPayoutPlanForRow(row) || {
+              commissionType: row.ruleCalculationType || 'fixed',
+              commissionValue: row.ruleCalculationType === 'percentage'
+                ? Math.round(Number(row.commissionRate || 0) * 10000) / 100
+                : Number(row.commissionAmount || 0),
+              tiers: row.tierSnapshot?.tiers,
+            })}`;
+          return (
+            <Paper
+              key={row.id || `detail-card-${index}`}
+              elevation={0}
               sx={{
-                display: 'grid',
-                gridTemplateColumns: { xs: '1fr', sm: '1fr 1.2fr', lg: '1fr 1.25fr 1.1fr' },
-                gap: 1.25,
-                mb: 1.25,
+                border: '1px solid #dbe3ef',
+                borderRadius: 1,
+                bgcolor: '#fff',
+                overflow: 'hidden',
+                minHeight: 270,
+                display: 'flex',
+                flexDirection: 'column',
               }}
             >
-              <Box sx={{ minWidth: 0 }}>
-                {renderEditorFieldLabel('提成角色')}
-                <FormControl size="small" fullWidth>
-                  <Select
-                    value={row.role}
-                    onChange={(event) => updateSplitRow(index, 'role', event.target.value as CommissionRole)}
-                    aria-label="提成角色"
-                    fullWidth
-                    sx={{ bgcolor: '#fff' }}
-                  >
-                    {roleOptionsForSplit(row.role).map((role) => (
-                      <MenuItem key={role.id} value={role.name}>{role.name}{role.isActive ? '' : '（已停用）'}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+              <Box sx={{ px: 1.35, py: 1.1, borderBottom: '1px solid #eef2f7', bgcolor: '#f8fafc' }}>
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start', justifyContent: 'space-between', gap: 1 }}>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', mb: 0.35 }}>
+                      <Chip label={row.role || `角色 ${index + 1}`} size="small" color="primary" sx={{ height: 22 }} />
+                      <Typography variant="caption" sx={{ color: '#64748b' }}>
+                        分账 {index + 1}
+                      </Typography>
+                    </Stack>
+                    <Typography variant="body2" sx={{ color: '#111827', fontWeight: 800, overflowWrap: 'anywhere' }}>
+                      {row.owner || '未选择人员'}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#64748b' }}>
+                      {row.department || '部门自动带出'}
+                    </Typography>
+                  </Box>
+                  <Tooltip title={canDeleteSplitRow(row) ? '删除此条未确认分账' : '仅待确认阶段的分账可直接删除'}>
+                    <span>
+                      <IconButton
+                        size="small"
+                        color="error"
+                        disabled={!canDeleteSplitRow(row)}
+                        onClick={() => setSplitRows((prev) => prev.filter((_, rowIndex) => rowIndex !== index))}
+                        aria-label="删除分账人员"
+                        sx={{ width: 30, height: 30 }}
+                      >
+                        <DeleteOutlineIcon fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                </Stack>
               </Box>
-              <Box sx={{ minWidth: 0 }}>
-                {renderEditorFieldLabel('人员')}
-                <FormControl size="small" fullWidth>
-                  <Select
-                    value={row.ownerId || ''}
-                    onChange={(event) => handleSplitOwnerChange(index, event.target.value)}
-                    displayEmpty
-                    aria-label="人员"
-                    renderValue={(value) => {
-                      if (!value) return '选择员工';
-                      const employee = activeEmployees.find((item) => item.id === value);
-                      return formatEmployeeDisplayName(employee, row.owner);
-                    }}
-                    fullWidth
-                    sx={{ bgcolor: '#fff' }}
-                  >
-                    <MenuItem value="">选择员工</MenuItem>
-                    {activeEmployees.map((employee) => (
-                      <MenuItem key={employee.id} value={employee.id}>{formatEmployeeDisplayName(employee)}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Box>
-              <Box sx={{ minWidth: 0 }}>
-                {renderEditorFieldLabel('部门')}
-                <TextField
-                  size="small"
-                  value={row.department || ''}
-                  placeholder="自动带出"
-                  InputProps={{ readOnly: true }}
-                  fullWidth
-                  sx={editorInputSx}
-                />
-              </Box>
-            </Box>
 
-            <Box
-              sx={{
-                display: 'grid',
-                gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: '1fr 1fr 1fr' },
-                gap: 1.25,
-              }}
-            >
-              <Box sx={{ minWidth: 0 }}>
-                {renderEditorFieldLabel('计算方式')}
-                <FormControl size="small" fullWidth>
-                  <Select
-                    value={row.ruleCalculationType || 'fixed'}
-                    onChange={(event) => updateSplitRow(index, 'ruleCalculationType', event.target.value as CommissionAdjustmentInput['ruleCalculationType'])}
-                    aria-label="计算方式"
-                    fullWidth
-                    sx={{ bgcolor: '#fff' }}
-                  >
-                    <MenuItem value="fixed">固定金额</MenuItem>
-                    <MenuItem value="percentage">按实付金额百分比</MenuItem>
-                    <MenuItem value="tiered_percentage">销售月累计阶梯提成</MenuItem>
-                  </Select>
-                </FormControl>
-              </Box>
-              <Box sx={{ minWidth: 0 }}>
-                {renderEditorFieldLabel('业绩金额')}
-                <TextField
-                  size="small"
-                  type="number"
-                  value={row.performanceAmount || 0}
-                  onChange={(event) => updateSplitRow(index, 'performanceAmount', Number(event.target.value))}
-                  fullWidth
-                  sx={editorInputSx}
-                />
-              </Box>
-              <Box sx={{ minWidth: 0 }}>
-                {row.ruleCalculationType === 'percentage' ? (
-                  <>
-                    {renderEditorFieldLabel('提成比例')}
+              <Stack spacing={1.05} sx={{ p: 1.35, flex: 1 }}>
+                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
+                  <Box sx={{ minWidth: 0 }}>
+                    {renderEditorFieldLabel('角色')}
+                    <FormControl size="small" fullWidth>
+                      <Select
+                        value={row.role}
+                        onChange={(event) => updateSplitRow(index, 'role', event.target.value as CommissionRole)}
+                        aria-label="提成角色"
+                        sx={{ bgcolor: '#fff' }}
+                      >
+                        {roleOptionsForSplit(row.role).map((role) => (
+                          <MenuItem key={role.id} value={role.name}>{role.name}{role.isActive ? '' : '（已停用）'}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Box>
+                  <Box sx={{ minWidth: 0 }}>
+                    {renderEditorFieldLabel('人员')}
+                    <FormControl size="small" fullWidth>
+                      <Select
+                        value={row.ownerId || ''}
+                        onChange={(event) => handleSplitOwnerChange(index, event.target.value)}
+                        displayEmpty
+                        aria-label="人员"
+                        renderValue={(value) => {
+                          if (!value) return '选择员工';
+                          const employee = activeEmployees.find((item) => item.id === value);
+                          return formatEmployeeDisplayName(employee, row.owner);
+                        }}
+                        sx={{ bgcolor: '#fff' }}
+                      >
+                        <MenuItem value="">选择员工</MenuItem>
+                        {activeEmployees.map((employee) => (
+                          <MenuItem key={employee.id} value={employee.id}>{formatEmployeeDisplayName(employee)}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Box>
+                </Box>
+
+                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
+                  <Box sx={{ minWidth: 0 }}>
+                    {renderEditorFieldLabel('部门')}
                     <TextField
                       size="small"
-                      type="number"
-                      value={Math.round(Number(row.commissionRate || 0) * 10000) / 100}
-                      onChange={(event) => updateSplitRow(index, 'commissionRate', Number(event.target.value) / 100)}
-                      InputProps={{ endAdornment: '%' }}
+                      value={row.department || ''}
+                      placeholder="自动带出"
+                      InputProps={{ readOnly: true }}
                       fullWidth
                       sx={editorInputSx}
                     />
-                  </>
-                ) : (
-                  <>
-                    {renderEditorFieldLabel('提成金额')}
+                  </Box>
+                  <Box sx={{ minWidth: 0 }}>
+                    {renderEditorFieldLabel('业绩金额')}
                     <TextField
                       size="small"
                       type="number"
-                      value={row.commissionAmount}
+                      value={row.performanceAmount || 0}
+                      onChange={(event) => updateSplitRow(index, 'performanceAmount', Number(event.target.value))}
+                      fullWidth
+                      sx={editorInputSx}
+                    />
+                  </Box>
+                </Box>
+
+                <Box sx={{ minWidth: 0 }}>
+                  {renderEditorFieldLabel('提成方案')}
+                  <FormControl size="small" fullWidth>
+                    <Select
+                      value={row.payoutPlanId || ''}
+                      onChange={(event) => updateSplitRow(index, 'payoutPlanId', event.target.value as CommissionAdjustmentInput['payoutPlanId'])}
+                      displayEmpty
+                      aria-label="提成方案"
+                      renderValue={(value) => {
+                        if (!value) return '选择提成方案';
+                        return findPayoutPlanForRow(row)?.name || row.payoutPlanName || CUSTOM_PAYOUT_PLAN_NAME;
+                      }}
+                      sx={{ bgcolor: '#fff' }}
+                    >
+                      <MenuItem value="">选择提成方案</MenuItem>
+                      <MenuItem value={CUSTOM_PAYOUT_PLAN_ID}>{CUSTOM_PAYOUT_PLAN_NAME} · 手工填写金额</MenuItem>
+                      {!planOptionsForSplit(row.payoutPlanId).length && <MenuItem value="" disabled>请先配置提成方案</MenuItem>}
+                      {planOptionsForSplit(row.payoutPlanId).map((plan) => (
+                        <MenuItem key={plan.id} value={plan.id}>
+                          {plan.name}{plan.isActive ? '' : '（已停用）'} · {formatPayoutPlanValue(plan)}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <Typography variant="caption" sx={{ display: 'block', color: '#64748b', mt: 0.45, overflowWrap: 'anywhere' }}>
+                    {planText}
+                  </Typography>
+                </Box>
+
+                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, alignItems: 'end' }}>
+                  <Box sx={{ minWidth: 0 }}>
+                    {renderEditorFieldLabel(isCustomPayoutRow(row) ? '自定义金额' : row.ruleCalculationType === 'tiered_percentage' ? '提成金额' : '方案金额')}
+                    <TextField
+                      size="small"
+                      type={row.ruleCalculationType === 'tiered_percentage' ? 'text' : 'number'}
+                      value={row.ruleCalculationType === 'tiered_percentage' ? '' : row.commissionAmount}
                       onChange={(event) => updateSplitRow(index, 'commissionAmount', Number(event.target.value))}
-                      InputProps={{ readOnly: row.ruleCalculationType === 'tiered_percentage' }}
-                      placeholder={row.ruleCalculationType === 'tiered_percentage' ? '员工提成月报自动计算' : undefined}
+                      InputProps={{ readOnly: !isCustomPayoutRow(row) }}
+                      placeholder={row.ruleCalculationType === 'tiered_percentage' ? '月报自动结算' : undefined}
                       fullWidth
                       sx={editorInputSx}
                     />
-                  </>
-                )}
-              </Box>
-              <Box sx={{ minWidth: 0, gridColumn: { xs: 'auto', sm: '1 / -1', lg: '1 / -1' } }}>
-                {renderEditorFieldLabel('说明')}
-                <TextField
-                  size="small"
-                  value={row.calculationNote || ''}
-                  onChange={(event) => updateSplitRow(index, 'calculationNote', event.target.value)}
-                  fullWidth
-                  sx={editorInputSx}
-                />
-              </Box>
-            </Box>
-          </Box>
-        ))}
-      </Stack>
+                  </Box>
+                  <Box sx={{ minWidth: 0, textAlign: 'right' }}>
+                    <Typography variant="caption" sx={{ display: 'block', color: '#64748b' }}>
+                      当前提成
+                    </Typography>
+                    <Typography variant="h6" sx={{ color: '#dc2626', fontWeight: 900, lineHeight: 1.3 }}>
+                      {row.ruleCalculationType === 'tiered_percentage' ? '月报结算' : formatCurrency(Number(row.commissionAmount || 0))}
+                    </Typography>
+                  </Box>
+                </Box>
+
+                <Box sx={{ minWidth: 0 }}>
+                  {renderEditorFieldLabel('说明')}
+                  <TextField
+                    size="small"
+                    value={row.calculationNote || ''}
+                    onChange={(event) => updateSplitRow(index, 'calculationNote', event.target.value)}
+                    placeholder="可选"
+                    fullWidth
+                    sx={editorInputSx}
+                  />
+                </Box>
+              </Stack>
+            </Paper>
+          );
+        })}
+      </Box>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' } }}>
         <Button startIcon={<AddIcon />} onClick={handleAddSplitRow}>新增分账</Button>
         <TextField
@@ -1955,7 +2423,7 @@ const Commission: React.FC<CommissionProps> = ({
         </Button>
         <Button
           variant="contained"
-          disabled={splitSaving || !splitReason.trim() || splitRows.length === 0 || splitRows.some((row) => !row.ownerId)}
+          disabled={splitSaving || !splitReason.trim() || splitRows.length === 0 || splitRows.some((row) => !row.ownerId || !row.payoutPlanId)}
           onClick={handleSaveSplitRows}
         >
           {splitSaving ? '保存中...' : createSplitOpen ? '保存分账' : '保存调整'}
@@ -2042,27 +2510,30 @@ const Commission: React.FC<CommissionProps> = ({
     <>
       <Stack direction="row" spacing={1.25} sx={{ mb: 2, alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
         <TextField
-          label="统计月份"
+          label={payoutMode === 'mine' ? '我的提成月份' : '统计月份'}
           type="month"
           value={payoutPeriod}
           onChange={(event) => setPayoutPeriod(event.target.value)}
           size="small"
           InputLabelProps={{ shrink: true }}
         />
-        <Tooltip title="按当前月份可发放提成生成发放单，待确认、已撤回和待冲销明细不进入可发放金额">
-          <Button variant="outlined" startIcon={<PaymentsIcon />} disabled={payoutActionLoading} onClick={generateMonthlyBatch}>生成发放单</Button>
-        </Tooltip>
+        {!hidePayoutFinanceActions && (
+          <Tooltip title="按当前月份可发放提成生成发放单，待确认、已撤回和待冲销明细不进入可发放金额">
+            <Button variant="outlined" startIcon={<PaymentsIcon />} disabled={payoutActionLoading} onClick={generateMonthlyBatch}>生成发放单</Button>
+          </Tooltip>
+        )}
         <Tooltip title={payoutRows.length ? '导出当前员工提成月报' : '暂无可导出的月报数据'}>
           <span>
             <Button variant="outlined" startIcon={<FileDownloadIcon />} disabled={!payoutRows.length || payoutActionLoading} onClick={exportMonthlyStatement}>导出发放表</Button>
           </span>
         </Tooltip>
-        <Tooltip title={monthlyPayoutSummary.pendingPayAmount > 0 ? '确认本月待发放提成已完成线下发放' : '当前月份没有待发放金额'}>
-          <span>
-            <Button variant="contained" startIcon={<CheckCircleIcon />} disabled={monthlyPayoutSummary.pendingPayAmount <= 0 || payoutActionLoading} onClick={payBatch}>确认本月已发放</Button>
-          </span>
-        </Tooltip>
-        <Button variant="outlined" startIcon={<EditIcon />} disabled={payoutActionLoading} onClick={openTierConfig}>阶梯配置</Button>
+        {!hidePayoutFinanceActions && (
+          <Tooltip title={monthlyPayoutSummary.pendingPayAmount > 0 ? '确认本月待发放提成已完成线下发放' : '当前月份没有待发放金额'}>
+            <span>
+              <Button variant="contained" startIcon={<CheckCircleIcon />} disabled={monthlyPayoutSummary.pendingPayAmount <= 0 || payoutActionLoading} onClick={payBatch}>确认本月已发放</Button>
+            </span>
+          </Tooltip>
+        )}
       </Stack>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 1.25, mb: 2 }}>
@@ -2082,8 +2553,21 @@ const Commission: React.FC<CommissionProps> = ({
             </Typography>
           </Box>
         ))}
-      </Box>
+        </Box>
 
+      {payoutMode === 'mine' ? (
+        <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
+          {payoutRows.length ? (
+            <Stack spacing={1} sx={{ p: 1.25 }}>
+              {renderMinePayoutRoleSections()}
+            </Stack>
+          ) : (
+            <Box sx={{ py: 5, textAlign: 'center', color: '#9ca3af' }}>
+              {payoutLoading ? '加载中...' : '暂无我的提成数据'}
+            </Box>
+          )}
+        </Paper>
+      ) : (
       <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1 }}>
         <Table>
           <TableHead>
@@ -2100,7 +2584,7 @@ const Commission: React.FC<CommissionProps> = ({
               <TableCell>已撤回</TableCell>
               <TableCell>待冲销</TableCell>
               <TableCell>状态</TableCell>
-              <TableCell align="center">操作</TableCell>
+              {!hidePayoutFinanceActions && <TableCell align="center">操作</TableCell>}
             </TableRow>
           </TableHead>
           <TableBody>
@@ -2133,22 +2617,24 @@ const Commission: React.FC<CommissionProps> = ({
                     <TableCell sx={{ color: row.withdrawnAmount > 0 ? '#6b7280' : undefined }}>{formatCurrency(row.withdrawnAmount)}</TableCell>
                     <TableCell sx={{ color: row.chargebackAmount > 0 ? '#dc2626' : undefined }}>{formatCurrency(row.chargebackAmount)}</TableCell>
                     <TableCell><Chip label={row.status} size="small" color={getPayoutStatusColor(row.status)} /></TableCell>
-                    <TableCell align="center">
-                      <Tooltip title={actionDisabledReason || '确认此人已发'}>
-                        <span>
-                          <IconButton size="small" color="success" disabled={Boolean(actionDisabledReason) || payoutActionLoading} onClick={() => payOwner(row.ownerId)}>
-                            <CheckCircleIcon fontSize="small" />
-                          </IconButton>
-                        </span>
-                      </Tooltip>
-                    </TableCell>
+                    {!hidePayoutFinanceActions && (
+                      <TableCell align="center">
+                        <Tooltip title={actionDisabledReason || '确认此人已发'}>
+                          <span>
+                            <IconButton size="small" color="success" disabled={Boolean(actionDisabledReason) || payoutActionLoading} onClick={() => payOwner(row.ownerId)}>
+                              <CheckCircleIcon fontSize="small" />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      </TableCell>
+                    )}
                   </TableRow>
                   <TableRow>
-                    <TableCell colSpan={13} sx={{ p: 0, border: 0 }}>
+                    <TableCell colSpan={hidePayoutFinanceActions ? 12 : 13} sx={{ p: 0, border: 0 }}>
                       <Collapse in={expanded} timeout="auto" unmountOnExit>
                         <Box sx={{ px: { xs: 1.5, sm: 2.5 }, py: 1.5, bgcolor: '#f8fafc' }}>
                           <Stack spacing={1}>
-                            {row.commissions.map((commission) => renderPayoutCommissionDetail(commission))}
+                            {getRoleSummariesForPayoutRow(row).map((summary) => renderPayoutRoleSummary(summary))}
                           </Stack>
                         </Box>
                       </Collapse>
@@ -2159,7 +2645,7 @@ const Commission: React.FC<CommissionProps> = ({
             })}
             {!payoutRows.length && (
               <TableRow>
-                <TableCell colSpan={13} align="center" sx={{ py: 5, color: '#9ca3af' }}>
+                <TableCell colSpan={hidePayoutFinanceActions ? 12 : 13} align="center" sx={{ py: 5, color: '#9ca3af' }}>
                   {payoutLoading ? '加载中...' : '暂无员工提成月报数据'}
                 </TableCell>
               </TableRow>
@@ -2167,6 +2653,7 @@ const Commission: React.FC<CommissionProps> = ({
           </TableBody>
         </Table>
       </TableContainer>
+      )}
     </>
   );
 
@@ -2341,12 +2828,29 @@ const Commission: React.FC<CommissionProps> = ({
         <DialogCloseTitle onClose={() => { setSummaryDetail(null); resetSettlementDetailForms(); }}>订单分账处理</DialogCloseTitle>
         <DialogContent dividers sx={{ bgcolor: '#f8fafc' }}>
           {summaryDetail && (
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1.15fr 0.85fr' }, gap: 2, minHeight: '68vh' }}>
-              <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', minWidth: 0 }}>
-                <Box sx={{ p: 2, borderBottom: '1px solid #eef2f7', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2 }}>
-                  <Box sx={{ minWidth: 0 }}>
+            <Stack spacing={1.5}>
+              <Paper
+                elevation={0}
+                sx={{
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 1,
+                  bgcolor: '#fff',
+                  overflow: 'hidden',
+                }}
+              >
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: { xs: '1fr', lg: 'minmax(320px, 1.4fr) repeat(4, minmax(110px, 0.65fr))' },
+                    gap: 0,
+                    alignItems: 'stretch',
+                  }}
+                >
+                  <Box sx={{ px: 2, py: 1.5, borderRight: { lg: '1px solid #e5e7eb' }, minWidth: 0 }}>
                     <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 0.5, mb: 0.5 }}>
-                      <Typography variant="h6" sx={{ fontWeight: 800 }}>{summaryDetail.orderNo}</Typography>
+                      <Typography variant="h6" sx={{ color: '#0f172a', fontWeight: 900, letterSpacing: 0 }}>
+                        {summaryDetail.orderNo}
+                      </Typography>
                       <Chip label={summaryDetail.status} size="small" color={getOrderStatusColor(summaryDetail.status)} />
                       {summaryDetail.sourceOrderDeleted && <Chip label="源订单已删除" size="small" />}
                     </Stack>
@@ -2354,64 +2858,112 @@ const Commission: React.FC<CommissionProps> = ({
                       {summaryDetail.customerName} · {summaryDetail.orderType || '-'} · {formatDate(summaryDetail.paymentDate, 'yyyy-MM-dd HH:mm:ss')}
                     </Typography>
                   </Box>
-                  <Tooltip title={detailEditMode ? '正在调整分账' : getAdjustDisabledReason(summaryDetail)}>
-                    <span>
-                      <Button
-                        size="small"
-                        variant={detailEditMode ? 'contained' : 'outlined'}
-                        startIcon={<EditIcon />}
-                        disabled={detailEditMode || !canAdjustSettlementSummary(summaryDetail)}
-                        onClick={beginDetailAdjust}
-                        sx={{ whiteSpace: 'nowrap' }}
-                      >
-                        {detailEditMode ? '正在调整' : '调整分账'}
-                      </Button>
-                    </span>
-                  </Tooltip>
-                </Box>
-                <Box sx={{ p: 2 }}>
-                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(4, 1fr)' }, gap: 1, mb: 2 }}>
-                    {[
-                      { label: '实付金额', value: formatCurrency(summaryDetail.orderAmount) },
-                      { label: '分账总额', value: formatCurrency(summaryDetail.totalCommissionAmount) },
-                      { label: '提成角色', value: `${summaryDetail.commissions.length} 个` },
-                      { label: '撤回/冲销', value: `${summaryDetail.exceptionCount} 条` },
-                    ].map((item) => (
-                      <Box key={item.label} sx={{ bgcolor: '#fff', border: '1px solid #e5e7eb', borderRadius: 1, px: 1.25, py: 1 }}>
-                        <Typography variant="caption" sx={{ color: '#64748b' }}>{item.label}</Typography>
-                        <Typography variant="body2" sx={{ color: '#111827', fontWeight: 800 }}>{item.value}</Typography>
-                      </Box>
-                    ))}
-                  </Box>
-                  {detailEditMode ? (
-                    renderDetailSplitEditor()
-                  ) : (
-                    <Stack spacing={1.25}>
-                      {summaryDetail.commissions.map((commission) => renderSplitSummaryCard(commission))}
-                    </Stack>
-                  )}
+                  {[
+                    { label: '实付金额', value: formatCurrency(summaryDetail.orderAmount), color: '#0f172a' },
+                    { label: '分账总额', value: formatCurrency(summaryDetail.totalCommissionAmount), color: '#d97706' },
+                    { label: '提成角色', value: `${summaryDetail.commissions.length} 个`, color: '#2563eb' },
+                    { label: '撤回/冲销', value: `${summaryDetail.exceptionCount} 条`, color: summaryDetail.exceptionCount ? '#dc2626' : '#64748b' },
+                  ].map((item) => (
+                    <Box
+                      key={item.label}
+                      sx={{
+                        px: 1.5,
+                        py: 1.5,
+                        borderTop: { xs: '1px solid #e5e7eb', lg: 0 },
+                        borderRight: { lg: '1px solid #e5e7eb' },
+                      }}
+                    >
+                      <Typography variant="caption" sx={{ display: 'block', color: '#64748b', lineHeight: 1.2 }}>{item.label}</Typography>
+                      <Typography variant="body2" sx={{ color: item.color, fontWeight: 900, mt: 0.35 }}>{item.value}</Typography>
+                    </Box>
+                  ))}
                 </Box>
               </Paper>
 
-              <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', minWidth: 0 }}>
-                <Box sx={{ p: 2, borderBottom: '1px solid #eef2f7' }}>
-                  <Typography variant="subtitle2" sx={{ color: '#2196F3', fontWeight: 800 }}>当前可操作</Typography>
-                </Box>
-                <Box sx={{ p: 2, borderBottom: '1px solid #eef2f7' }}>
-                  {renderSettlementDetailActions()}
-                </Box>
-                <Box sx={{ p: 2 }}>
-                  <Typography variant="subtitle2" sx={{ color: '#111827', fontWeight: 800, mb: 1.5 }}>操作历史</Typography>
-                  {operationLogs.length === 0 ? (
-                    <Typography variant="body2" sx={{ color: '#9ca3af' }}>暂无分账修改记录</Typography>
-                  ) : (
-                    <Stack spacing={1.25} sx={{ maxHeight: '46vh', overflowY: 'auto', pr: 0.5 }}>
-                      {operationLogs.map((log) => renderOperationLogCard(log))}
-                    </Stack>
-                  )}
-                </Box>
-              </Paper>
-            </Box>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1fr) 360px' }, gap: 1.5, minHeight: '58vh' }}>
+                <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', minWidth: 0 }}>
+                  <Box
+                    sx={{
+                      px: 2,
+                      py: 1.25,
+                      borderBottom: '1px solid #eef2f7',
+                      bgcolor: '#fff',
+                      display: 'flex',
+                      alignItems: { xs: 'flex-start', sm: 'center' },
+                      justifyContent: 'space-between',
+                      gap: 1.5,
+                      flexDirection: { xs: 'column', sm: 'row' },
+                    }}
+                  >
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography variant="subtitle2" sx={{ color: '#0f172a', fontWeight: 900 }}>
+                        {detailEditMode ? '分账明细编辑' : '分账明细'}
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: '#64748b' }}>
+                        按角色核对人员、方案和金额，确认无误后进入右侧操作。
+                      </Typography>
+                    </Box>
+                    <Tooltip title={detailEditMode ? '正在调整分账' : getAdjustDisabledReason(summaryDetail)}>
+                      <span>
+                        <Button
+                          size="small"
+                          variant={detailEditMode ? 'contained' : 'outlined'}
+                          startIcon={<EditIcon />}
+                          disabled={detailEditMode || !canAdjustSettlementSummary(summaryDetail)}
+                          onClick={beginDetailAdjust}
+                          sx={{ whiteSpace: 'nowrap' }}
+                        >
+                          {detailEditMode ? '正在调整' : '调整分账'}
+                        </Button>
+                      </span>
+                    </Tooltip>
+                  </Box>
+                  <Box sx={{ p: 1.5, bgcolor: '#f8fafc' }}>
+                    {detailEditMode ? (
+                      renderDetailSplitEditor()
+                    ) : (
+                      <Box
+                        sx={{
+                          display: 'grid',
+                          gridTemplateColumns: { xs: '1fr', sm: 'repeat(auto-fill, minmax(260px, 310px))' },
+                          gap: 1.25,
+                          alignItems: 'stretch',
+                          justifyContent: 'start',
+                        }}
+                      >
+                        {summaryDetail.commissions.map((commission) => renderSplitSummaryCard(commission))}
+                      </Box>
+                    )}
+                  </Box>
+                </Paper>
+
+                <Stack spacing={1.5} sx={{ minWidth: 0 }}>
+                  <Paper elevation={0} sx={{ border: '1px solid #dbeafe', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
+                    <Box sx={{ px: 1.5, py: 1.1, borderBottom: '1px solid #dbeafe', bgcolor: '#f8fbff' }}>
+                      <Typography variant="subtitle2" sx={{ color: '#2563eb', fontWeight: 900 }}>当前动作</Typography>
+                    </Box>
+                    <Box sx={{ p: 1.5 }}>
+                      {renderSettlementDetailActions()}
+                    </Box>
+                  </Paper>
+
+                  <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
+                    <Box sx={{ px: 1.5, py: 1.1, borderBottom: '1px solid #eef2f7' }}>
+                      <Typography variant="subtitle2" sx={{ color: '#0f172a', fontWeight: 900 }}>操作历史</Typography>
+                    </Box>
+                    <Box sx={{ p: 1.5 }}>
+                      {operationLogs.length === 0 ? (
+                        <Typography variant="body2" sx={{ color: '#9ca3af' }}>暂无分账修改记录</Typography>
+                      ) : (
+                        <Stack spacing={1.25} sx={{ maxHeight: '42vh', overflowY: 'auto', overflowX: 'hidden', pr: 0.5, minWidth: 0 }}>
+                          {operationLogs.map((log) => renderOperationLogCard(log))}
+                        </Stack>
+                      )}
+                    </Box>
+                  </Paper>
+                </Stack>
+              </Box>
+            </Stack>
           )}
         </DialogContent>
       </Dialog>
@@ -2537,84 +3089,6 @@ const Commission: React.FC<CommissionProps> = ({
           <Button disabled={payoutActionLoading} onClick={() => setPayoutConfirmAction(null)}>取消</Button>
           <Button variant="contained" disabled={payoutActionLoading} onClick={confirmPayoutAction}>
             {payoutActionLoading ? '处理中...' : payoutConfirmAction?.confirmText || '确认'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog
-        open={tierConfigOpen}
-        onClose={() => !tierConfigSaving && setTierConfigOpen(false)}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogCloseTitle onClose={() => !tierConfigSaving && setTierConfigOpen(false)}>
-          {payoutPeriod} 阶梯配置
-        </DialogCloseTitle>
-        <DialogContent dividers>
-          <Stack spacing={1.25}>
-            <Typography variant="body2" sx={{ color: '#64748b' }}>
-              阶梯按员工本月总实付金额命中，适用于分账规则中选择“销售月累计阶梯提成”的销售提成。
-            </Typography>
-            {tierConfigError && (
-              <Typography variant="body2" sx={{ color: '#dc2626' }}>
-                {tierConfigError}
-              </Typography>
-            )}
-            {tierConfigRows.map((tier, index) => (
-              <Box
-                key={`monthly-tier-${index}`}
-                sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr auto' }, gap: 1, alignItems: 'center' }}
-              >
-                <TextField
-                  label="月累计下限"
-                  type="number"
-                  size="small"
-                  value={tier.minAmount}
-                  onChange={(event) => updateTierConfigRow(index, 'minAmount', Number(event.target.value))}
-                  inputProps={{ min: 0, step: 100 }}
-                />
-                <TextField
-                  label="月累计上限"
-                  type="number"
-                  size="small"
-                  value={tier.maxAmount ?? ''}
-                  placeholder="不填为以上"
-                  onChange={(event) => updateTierConfigRow(
-                    index,
-                    'maxAmount',
-                    event.target.value === '' ? undefined : Number(event.target.value),
-                  )}
-                  inputProps={{ min: 0, step: 100 }}
-                />
-                <TextField
-                  label="提成比例"
-                  type="number"
-                  size="small"
-                  value={tier.rate}
-                  onChange={(event) => updateTierConfigRow(index, 'rate', Number(event.target.value))}
-                  inputProps={{ min: 0, step: 0.1 }}
-                  InputProps={{ endAdornment: '%' }}
-                />
-                <IconButton
-                  color="error"
-                  size="small"
-                  disabled={tierConfigRows.length <= 1}
-                  onClick={() => removeTierConfigRow(index)}
-                  title="删除档位"
-                >
-                  <DeleteOutlineIcon fontSize="small" />
-                </IconButton>
-              </Box>
-            ))}
-            <Button variant="outlined" startIcon={<AddIcon />} onClick={addTierConfigRow} sx={{ alignSelf: 'flex-start' }}>
-              添加档位
-            </Button>
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button disabled={tierConfigSaving} onClick={() => setTierConfigOpen(false)}>取消</Button>
-          <Button variant="contained" disabled={tierConfigSaving} onClick={saveTierConfig}>
-            {tierConfigSaving ? '保存中...' : '保存'}
           </Button>
         </DialogActions>
       </Dialog>

@@ -98,6 +98,7 @@ const PERMISSION_TREE: PermissionNode[] = [
   {
     label: '财务中心',
     children: [
+      { label: '我的提成', key: PERMISSION_KEYS.FINANCE_MY_COMMISSION },
       { label: '财务总览', key: PERMISSION_KEYS.FINANCE_OVERVIEW },
       { label: '订单分账', key: PERMISSION_KEYS.FINANCE_SETTLEMENT },
       { label: '月度发放', key: PERMISSION_KEYS.FINANCE_PAYOUT },

@@ -112,7 +112,16 @@ const App: React.FC = () => {
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.DELIVERY} />}>
             <Route path={ROUTES.DELIVERY} element={<Suspense fallback={<PageLoader />}><Delivery /></Suspense>} />
           </Route>
-          <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.FINANCE} />}>
+          <Route element={<ProtectedRoute permissionKeys={[
+            PERMISSION_KEYS.FINANCE,
+            PERMISSION_KEYS.FINANCE_MY_COMMISSION,
+            PERMISSION_KEYS.FINANCE_OVERVIEW,
+            PERMISSION_KEYS.FINANCE_SETTLEMENT,
+            PERMISSION_KEYS.FINANCE_PAYOUT,
+            PERMISSION_KEYS.FINANCE_REFUND,
+            PERMISSION_KEYS.FINANCE_FLOW,
+            PERMISSION_KEYS.FINANCE_RULES,
+          ]} />}>
             <Route path={ROUTES.FINANCE} element={<Suspense fallback={<PageLoader />}><Finance /></Suspense>} />
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.FINANCE_SETTLEMENT} />}>

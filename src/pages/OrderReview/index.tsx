@@ -6,6 +6,7 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
+  Divider,
   FormControl,
   IconButton,
   InputLabel,
@@ -36,9 +37,11 @@ import type { OrderApplication, OrderApplicationFilters, OrderApplicationStatus 
 import type { Customer } from '../../types/customer';
 import { formatCurrency, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
+import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import CustomerDetail from '../Customers/CustomerDetail';
 import OrderForm from '../Orders/OrderForm';
-import { ROUTES } from '../../shared/utils/constants';
+import { getProductLevelRowSx, getProductLevelTagSx, normalizeResourceOwnership, ROUTES } from '../../shared/utils/constants';
 import { getCurrentOperatorUser } from '../../shared/utils/currentOperator';
 
 type ReviewAction = {
@@ -48,6 +51,97 @@ type ReviewAction = {
 
 type OrderReviewProps = {
   embedded?: boolean;
+  viewSettingsOpen?: boolean;
+  onViewSettingsClose?: () => void;
+};
+
+type ReviewColumn = {
+  id: string;
+  label: string;
+};
+
+type ReviewViewConfig = {
+  visibleColumnIds: string[];
+  columnOrder: string[];
+  frozenColumnCount: number;
+  schemaVersion: number;
+};
+
+const REVIEW_VIEW_STORAGE_KEY = 'aaos_order_review_table_view_v1';
+const REVIEW_VIEW_SCHEMA_VERSION = 1;
+const REVIEW_ACTION_COLUMN_WIDTH = 112;
+
+const REVIEW_COLUMNS: ReviewColumn[] = [
+  { id: 'applicationNo', label: '申请编号' },
+  { id: 'orderNo', label: '正式订单号' },
+  { id: 'status', label: '状态' },
+  { id: 'customer', label: '客户' },
+  { id: 'productName', label: '产品名称' },
+  { id: 'productLevel', label: '产品等级' },
+  { id: 'orderType', label: '订单类型' },
+  { id: 'amount', label: '实付金额' },
+  { id: 'applicantName', label: '提交人' },
+  { id: 'submittedAt', label: '提交时间' },
+  { id: 'reviewerName', label: '审核人' },
+  { id: 'reason', label: '原因' },
+];
+
+const REVIEW_DEFAULT_VISIBLE_COLUMNS = REVIEW_COLUMNS.map((column) => column.id);
+
+const REVIEW_COLUMN_WIDTHS: Record<string, number> = {
+  applicationNo: 180,
+  orderNo: 180,
+  status: 110,
+  customer: 140,
+  productName: 180,
+  productLevel: 130,
+  orderType: 150,
+  amount: 130,
+  applicantName: 130,
+  submittedAt: 160,
+  reviewerName: 130,
+  reason: 180,
+};
+
+const getDefaultReviewViewConfig = (): ReviewViewConfig => ({
+  visibleColumnIds: REVIEW_DEFAULT_VISIBLE_COLUMNS,
+  columnOrder: REVIEW_COLUMNS.map((column) => column.id),
+  frozenColumnCount: 0,
+  schemaVersion: REVIEW_VIEW_SCHEMA_VERSION,
+});
+
+const normalizeReviewViewConfig = (value: unknown): ReviewViewConfig => {
+  const validIds = new Set(REVIEW_COLUMNS.map((column) => column.id));
+  const defaultConfig = getDefaultReviewViewConfig();
+  if (!value || typeof value !== 'object') return defaultConfig;
+  const config = value as Partial<ReviewViewConfig>;
+  if (config.schemaVersion !== REVIEW_VIEW_SCHEMA_VERSION) return defaultConfig;
+  const visibleColumnIds = Array.isArray(config.visibleColumnIds)
+    ? config.visibleColumnIds.filter((id): id is string => typeof id === 'string' && validIds.has(id))
+    : defaultConfig.visibleColumnIds;
+  const configuredOrder = Array.isArray(config.columnOrder)
+    ? config.columnOrder.filter((id): id is string => typeof id === 'string' && validIds.has(id))
+    : [];
+  const missingOrderIds = REVIEW_COLUMNS.map((column) => column.id).filter((id) => !configuredOrder.includes(id));
+  const frozenColumnCount = Number.isFinite(config.frozenColumnCount)
+    ? Math.max(0, Math.min(Number(config.frozenColumnCount), visibleColumnIds.length))
+    : defaultConfig.frozenColumnCount;
+  return {
+    visibleColumnIds: visibleColumnIds.length ? visibleColumnIds : defaultConfig.visibleColumnIds,
+    columnOrder: [...configuredOrder, ...missingOrderIds],
+    frozenColumnCount,
+    schemaVersion: REVIEW_VIEW_SCHEMA_VERSION,
+  };
+};
+
+const readReviewViewConfig = () => {
+  try {
+    const raw = localStorage.getItem(REVIEW_VIEW_STORAGE_KEY);
+    if (!raw) return getDefaultReviewViewConfig();
+    return normalizeReviewViewConfig(JSON.parse(raw));
+  } catch {
+    return getDefaultReviewViewConfig();
+  }
 };
 
 const statusColor: Record<OrderApplicationStatus, 'warning' | 'info' | 'success' | 'error'> = {
@@ -74,11 +168,23 @@ function formatDate(value?: string, pattern = 'yyyy-MM-dd HH:mm') {
   }
 }
 
-const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
+function SnapshotField({ label, children, strong = false }: { label: string; children: React.ReactNode; strong?: boolean }) {
+  return (
+    <Box>
+      <Typography variant="body2" sx={{ color: '#6b7280' }}>{label}</Typography>
+      <Typography variant="body1" sx={{ fontWeight: strong ? 700 : 500, color: strong ? '#1a1a2e' : 'inherit' }}>
+        {children}
+      </Typography>
+    </Box>
+  );
+}
+
+const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSettingsOpen = false, onViewSettingsClose }) => {
   const [items, setItems] = useState<OrderApplication[]>([]);
   const [filters, setFilters] = useState<OrderApplicationFilters>({ page: 1, pageSize: 10 });
   const [pagination, setPagination] = useState({ page: 1, pageSize: 10, total: 0, totalPages: 0 });
   const [loading, setLoading] = useState(false);
+  const [viewConfig, setViewConfig] = useState<ReviewViewConfig>(readReviewViewConfig);
   const [editingApplication, setEditingApplication] = useState<OrderApplication | null>(null);
   const [detailApplication, setDetailApplication] = useState<OrderApplication | null>(null);
   const [reviewAction, setReviewAction] = useState<ReviewAction>(null);
@@ -108,6 +214,10 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    localStorage.setItem(REVIEW_VIEW_STORAGE_KEY, JSON.stringify(viewConfig));
+  }, [viewConfig]);
+
   const handleFilterChange = (key: keyof OrderApplicationFilters, value: string) => {
     const nextFilters = { ...filters, [key]: value || undefined, page: 1, pageSize: pagination.pageSize };
     setFilters(nextFilters);
@@ -124,6 +234,44 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
     const nextFilters = { ...filters, page: 1, pageSize: Number(event.target.value) };
     setFilters(nextFilters);
     loadItems(nextFilters);
+  };
+
+  const handleToggleColumn = (id: string) => {
+    setViewConfig((current) => {
+      const visibleColumnIds = current.visibleColumnIds.includes(id)
+        ? current.visibleColumnIds.filter((columnId) => columnId !== id)
+        : [...current.visibleColumnIds, id];
+      if (!visibleColumnIds.length) return current;
+      return {
+        ...current,
+        visibleColumnIds,
+        frozenColumnCount: Math.min(current.frozenColumnCount, visibleColumnIds.length),
+      };
+    });
+  };
+
+  const handleReorderColumn = (sourceColumnId: string, targetColumnId: string) => {
+    setViewConfig((current) => {
+      const columnOrder = current.columnOrder.length ? current.columnOrder : REVIEW_COLUMNS.map((column) => column.id);
+      const sourceIndex = columnOrder.indexOf(sourceColumnId);
+      const targetIndex = columnOrder.indexOf(targetColumnId);
+      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return current;
+      const nextOrder = [...columnOrder];
+      const [movedColumnId] = nextOrder.splice(sourceIndex, 1);
+      nextOrder.splice(targetIndex, 0, movedColumnId);
+      return { ...current, columnOrder: nextOrder };
+    });
+  };
+
+  const handleFrozenColumnCountChange = (value: number) => {
+    setViewConfig((current) => ({
+      ...current,
+      frozenColumnCount: Math.max(0, Math.min(value, current.visibleColumnIds.length)),
+    }));
+  };
+
+  const handleResetViewConfig = () => {
+    setViewConfig(getDefaultReviewViewConfig());
   };
 
   const openApproveDialog = (application: OrderApplication) => {
@@ -208,6 +356,114 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
     setCustomerOpen(true);
   };
 
+  const orderedColumns = useMemo(() => {
+    const columnMap = new Map(REVIEW_COLUMNS.map((column) => [column.id, column]));
+    const ordered = viewConfig.columnOrder
+      .map((columnId) => columnMap.get(columnId))
+      .filter((column): column is ReviewColumn => Boolean(column));
+    const missing = REVIEW_COLUMNS.filter((column) => !viewConfig.columnOrder.includes(column.id));
+    return [...ordered, ...missing];
+  }, [viewConfig.columnOrder]);
+  const visibleColumnIds = viewConfig.visibleColumnIds;
+  const visibleColumns = useMemo(
+    () => orderedColumns.filter((column) => visibleColumnIds.includes(column.id)),
+    [orderedColumns, visibleColumnIds],
+  );
+  const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length);
+  const tableMinWidth = useMemo(
+    () => visibleColumns.reduce((sum, column) => sum + (REVIEW_COLUMN_WIDTHS[column.id] || 140), 0) + REVIEW_ACTION_COLUMN_WIDTH,
+    [visibleColumns],
+  );
+
+  const getFrozenLeft = (columnIndex: number) => visibleColumns
+    .slice(0, columnIndex)
+    .reduce((sum, column) => sum + (REVIEW_COLUMN_WIDTHS[column.id] || 140), 0);
+
+  const getFrozenColumnSx = (columnIndex: number, isHeader = false) => (
+    columnIndex < frozenColumnCount
+      ? {
+          position: 'sticky' as const,
+          left: getFrozenLeft(columnIndex),
+          zIndex: isHeader ? 5 : 3,
+          bgcolor: isHeader ? '#f8fafc' : '#fff',
+          boxShadow: '1px 0 0 #e5e7eb',
+        }
+      : {}
+  );
+
+  const actionColumnSx = {
+    position: 'sticky' as const,
+    right: 0,
+    zIndex: 4,
+    width: REVIEW_ACTION_COLUMN_WIDTH,
+    minWidth: REVIEW_ACTION_COLUMN_WIDTH,
+    bgcolor: '#fff',
+    boxShadow: '-1px 0 0 #e5e7eb',
+  };
+
+  const renderReviewCell = (application: OrderApplication, columnId: string) => {
+    switch (columnId) {
+      case 'applicationNo':
+        return (
+          <Button
+            variant="text"
+            size="small"
+            onClick={() => setDetailApplication(application)}
+            sx={{ px: 0, minWidth: 0, justifyContent: 'flex-start', textTransform: 'none', fontWeight: 700 }}
+          >
+            {application.applicationNo}
+          </Button>
+        );
+      case 'orderNo':
+        return application.orderNo ? (
+          <Button variant="text" size="small" onClick={() => viewFormalOrder(application)} sx={{ px: 0 }}>
+            {application.orderNo}
+          </Button>
+        ) : '-';
+      case 'status':
+        return <Chip label={application.status} size="small" color={statusColor[application.status]} variant="outlined" />;
+      case 'customer':
+        return (
+          <Button
+            variant="text"
+            size="small"
+            onClick={() => handleViewCustomer(application)}
+            sx={{ p: 0, minWidth: 0, justifyContent: 'flex-start', textTransform: 'none', fontWeight: 500 }}
+          >
+            {application.orderData.customerName}
+          </Button>
+        );
+      case 'productName':
+        return application.orderData.productName || application.orderData.productLevel || '-';
+      case 'productLevel':
+        return (
+          <Chip
+            label={application.orderData.productLevel || '-'}
+            size="small"
+            sx={getProductLevelTagSx(application.orderData.productLevel)}
+          />
+        );
+      case 'orderType':
+        return <Chip label={application.orderData.orderType || '-'} size="small" variant="outlined" />;
+      case 'amount':
+        return formatCurrency(application.orderData.actualAmount || application.orderData.amount);
+      case 'applicantName':
+        return application.applicantName;
+      case 'submittedAt':
+        return formatDate(application.submittedAt);
+      case 'reviewerName':
+        return application.reviewerName || '-';
+      case 'reason':
+        return (
+          <Tooltip title={application.reason || ''}>
+            <Typography variant="body2" noWrap>{application.reason || '-'}</Typography>
+          </Tooltip>
+        );
+      default:
+        return null;
+    }
+  };
+
   const isCurrentUserApplicant = (application: OrderApplication) => (
     Boolean(currentUser?.id && application.applicantId === currentUser.id)
     || Boolean(currentUser?.name && !application.applicantId && application.applicantName === currentUser.name)
@@ -260,30 +516,25 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
       </Box>
 
       <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
-        <Table sx={{ minWidth: 1240 }}>
+        <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
           <TableHead>
             <TableRow>
-              <TableCell>申请编号</TableCell>
-              <TableCell>正式订单号</TableCell>
-              <TableCell>状态</TableCell>
-              <TableCell>客户</TableCell>
-              <TableCell>产品名称/等级/类型</TableCell>
-              <TableCell>实付金额</TableCell>
-              <TableCell>提交人</TableCell>
-              <TableCell>提交时间</TableCell>
-              <TableCell>审核人</TableCell>
-              <TableCell>原因</TableCell>
+              {visibleColumns.map((column, columnIndex) => (
+                <TableCell
+                  key={column.id}
+                  sx={{
+                    width: REVIEW_COLUMN_WIDTHS[column.id] || 140,
+                    minWidth: REVIEW_COLUMN_WIDTHS[column.id] || 140,
+                    maxWidth: REVIEW_COLUMN_WIDTHS[column.id] || 140,
+                    ...getFrozenColumnSx(columnIndex, true),
+                  }}
+                >
+                  {column.label}
+                </TableCell>
+              ))}
               <TableCell
                 align="center"
-                sx={{
-                  position: 'sticky',
-                  right: 0,
-                  zIndex: 5,
-                  width: 148,
-                  minWidth: 148,
-                  bgcolor: '#f8fafc',
-                  boxShadow: '-1px 0 0 #e5e7eb',
-                }}
+                sx={{ ...actionColumnSx, zIndex: 5, bgcolor: '#f8fafc' }}
               >
                 操作
               </TableCell>
@@ -295,63 +546,24 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
               const canResubmit = application.status === ORDER_APPLICATION_STATUSES.RETURNED && (!reviewer || isCurrentUserApplicant(application));
               const canViewFormalOrder = application.status === ORDER_APPLICATION_STATUSES.APPROVED && Boolean(application.orderId);
               return (
-                <TableRow key={application.id} hover>
-                  <TableCell>
-                    <Button variant="text" onClick={() => setDetailApplication(application)} sx={{ px: 0 }}>
-                      {application.applicationNo}
-                    </Button>
-                  </TableCell>
-                  <TableCell>
-                    {application.orderNo ? (
-                      <Button variant="text" size="small" onClick={() => viewFormalOrder(application)} sx={{ px: 0 }}>
-                        {application.orderNo}
-                      </Button>
-                    ) : '-'}
-                  </TableCell>
-                  <TableCell>
-                    <Chip label={application.status} size="small" color={statusColor[application.status]} variant="outlined" />
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      variant="text"
-                      size="small"
-                      onClick={() => handleViewCustomer(application)}
-                      sx={{ p: 0, minWidth: 0, justifyContent: 'flex-start', textTransform: 'none', fontWeight: 500 }}
+                <TableRow key={application.id} hover sx={getProductLevelRowSx(application.orderData.productLevel)}>
+                  {visibleColumns.map((column, columnIndex) => (
+                    <TableCell
+                      key={column.id}
+                      sx={{
+                        width: REVIEW_COLUMN_WIDTHS[column.id] || 140,
+                        minWidth: REVIEW_COLUMN_WIDTHS[column.id] || 140,
+                        maxWidth: REVIEW_COLUMN_WIDTHS[column.id] || 140,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        ...getFrozenColumnSx(columnIndex),
+                      }}
                     >
-                      {application.orderData.customerName}
-                    </Button>
-                  </TableCell>
-                  <TableCell>
-                    <Box>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                        {application.orderData.productName || application.orderData.productLevel || '-'}
-                      </Typography>
-                      <Typography variant="caption" sx={{ color: '#64748b' }}>
-                        {application.orderData.productLevel || '-'} / {application.orderData.orderType || '-'}
-                      </Typography>
-                    </Box>
-                  </TableCell>
-                  <TableCell>{formatCurrency(application.orderData.actualAmount || application.orderData.amount)}</TableCell>
-                  <TableCell>{application.applicantName}</TableCell>
-                  <TableCell>{formatDate(application.submittedAt)}</TableCell>
-                  <TableCell>{application.reviewerName || '-'}</TableCell>
-                  <TableCell sx={{ maxWidth: 180 }}>
-                    <Tooltip title={application.reason || ''}>
-                      <Typography variant="body2" noWrap>{application.reason || '-'}</Typography>
-                    </Tooltip>
-                  </TableCell>
-                  <TableCell
-                    align="center"
-                    sx={{
-                      position: 'sticky',
-                      right: 0,
-                      zIndex: 4,
-                      width: 148,
-                      minWidth: 148,
-                      bgcolor: '#fff',
-                      boxShadow: '-1px 0 0 #e5e7eb',
-                    }}
-                  >
+                      {renderReviewCell(application, column.id)}
+                    </TableCell>
+                  ))}
+                  <TableCell align="center" sx={actionColumnSx}>
                     <Box sx={{ display: 'flex', gap: 0.25, justifyContent: 'center', flexWrap: 'wrap' }}>
                       {canFinanceOperate && (
                         <>
@@ -393,7 +605,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
             })}
             {!items.length && (
               <TableRow>
-                <TableCell colSpan={11} align="center" sx={{ py: 5, color: '#9ca3af' }}>
+                <TableCell colSpan={visibleColumns.length + 1} align="center" sx={{ py: 5, color: '#9ca3af' }}>
                   {loading ? '加载中...' : '暂无订单申请'}
                 </TableCell>
               </TableRow>
@@ -418,6 +630,22 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
           bgcolor: '#fff',
           '& .MuiTablePagination-toolbar': { minHeight: 48 },
         }}
+      />
+
+      <TableViewSettingsDialog
+        open={viewSettingsOpen}
+        title="订单审核台视图设置"
+        description="勾选后会显示在订单审核台列表中，设置会保存在当前浏览器。"
+        columns={REVIEW_COLUMNS}
+        visibleColumnIds={visibleColumnIds}
+        columnOrder={viewConfig.columnOrder}
+        frozenColumnCount={viewConfig.frozenColumnCount}
+        maxFrozenColumnCount={visibleColumns.length}
+        onClose={onViewSettingsClose || (() => undefined)}
+        onToggleColumn={handleToggleColumn}
+        onReorderColumn={handleReorderColumn}
+        onFrozenColumnCountChange={handleFrozenColumnCountChange}
+        onReset={handleResetViewConfig}
       />
 
       <OrderForm
@@ -533,40 +761,162 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false }) => {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={Boolean(detailApplication)} onClose={() => setDetailApplication(null)} maxWidth="sm" fullWidth>
-        <DialogCloseTitle onClose={() => setDetailApplication(null)}>订单申请详情</DialogCloseTitle>
-        <DialogContent dividers>
-          {detailApplication && (
-            <Box sx={{ display: 'grid', gap: 1.5 }}>
-              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.25 }}>
-                <Typography>申请编号：{detailApplication.applicationNo}</Typography>
-                <Typography>状态：{detailApplication.status}</Typography>
-                <Typography>正式订单号：{detailApplication.orderNo || '-'}</Typography>
-                <Typography>客户：{detailApplication.orderData.customerName}</Typography>
-                <Typography>产品名称：{detailApplication.orderData.productName || detailApplication.orderData.productLevel || '-'}</Typography>
-                <Typography>产品等级/类型：{detailApplication.orderData.productLevel || '-'} / {detailApplication.orderData.orderType || '-'}</Typography>
-                <Typography>销售负责人：{detailApplication.orderData.owner}</Typography>
-                <Typography>提交人：{detailApplication.applicantName}</Typography>
-                <Typography>提交时间：{formatDate(detailApplication.submittedAt)}</Typography>
-                <Typography>审核人：{detailApplication.reviewerName || '-'}</Typography>
-                <Typography>审核时间：{formatDate(detailApplication.reviewedAt)}</Typography>
-                <Typography>实付金额：{formatCurrency(detailApplication.orderData.actualAmount || detailApplication.orderData.amount)}</Typography>
-                <Typography>付款时间：{formatDate(detailApplication.orderData.payments?.[0]?.paidAt, 'yyyy-MM-dd HH:mm:ss')}</Typography>
-              </Box>
-              <Typography>原因：{detailApplication.reason || '-'}</Typography>
-              <Typography>备注：{detailApplication.orderData.notes || '-'}</Typography>
-              <Typography variant="subtitle2" sx={{ mt: 1 }}>审核记录</Typography>
-              {detailApplication.reviewLogs.map((log) => (
-                <Typography key={log.id} variant="body2" sx={{ color: '#6b7280' }}>
-                  {formatDate(log.createdAt)} {log.operatorName} {reviewActionText[log.action]}{log.reason ? `：${log.reason}` : ''}
+      <Dialog open={Boolean(detailApplication)} onClose={() => setDetailApplication(null)} maxWidth="md" fullWidth>
+        {detailApplication && (
+          <>
+            <DialogCloseTitle onClose={() => setDetailApplication(null)}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                <Typography variant="h6" sx={{ fontWeight: 600 }}>{detailApplication.applicationNo}</Typography>
+                <Typography variant="body2" sx={{ fontWeight: 600, color: '#374151' }}>
+                  {detailApplication.orderData.productName || detailApplication.orderData.productLevel || '-'}
                 </Typography>
-              ))}
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDetailApplication(null)}>关闭</Button>
-        </DialogActions>
+                <Chip label={detailApplication.orderData.productLevel || '-'} size="small" sx={getProductLevelTagSx(detailApplication.orderData.productLevel)} />
+                <Chip label={detailApplication.orderData.orderType || '-'} size="small" variant="outlined" />
+                <Chip label={detailApplication.status} size="small" color={statusColor[detailApplication.status]} variant="outlined" />
+              </Box>
+            </DialogCloseTitle>
+            <DialogContent dividers>
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 2 }}>
+                <SnapshotField label="客户名称">{detailApplication.orderData.customerName}</SnapshotField>
+                <SnapshotField label="产品名称">{detailApplication.orderData.productName || detailApplication.orderData.productLevel || '-'}</SnapshotField>
+                <Box>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>产品等级</Typography>
+                  <Chip label={detailApplication.orderData.productLevel || '-'} size="small" sx={getProductLevelTagSx(detailApplication.orderData.productLevel)} />
+                </Box>
+                <SnapshotField label="实付金额" strong>
+                  {formatCurrency(detailApplication.orderData.actualAmount || detailApplication.orderData.amount)}
+                </SnapshotField>
+                <SnapshotField label="官方收款渠道">{detailApplication.orderData.officialPaymentChannel || '-'}</SnapshotField>
+                <Box>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>退款状态</Typography>
+                  <RefundStatusBadge status={detailApplication.orderData.refundStatus} />
+                </Box>
+                <SnapshotField label="销售顾问">{detailApplication.orderData.salesName || detailApplication.orderData.owner}</SnapshotField>
+                <SnapshotField label="资源归属">
+                  {normalizeResourceOwnership(detailApplication.orderData.resourceOwnership || detailApplication.orderData.sourceType)}
+                </SnapshotField>
+                <SnapshotField label="销售负责人">{detailApplication.orderData.owner}</SnapshotField>
+                <SnapshotField label="线索录入人">{detailApplication.orderData.leadInputBy || '-'}</SnapshotField>
+                <SnapshotField label="线索贡献人">{detailApplication.orderData.leadContributorName || '-'}</SnapshotField>
+                <SnapshotField label="正式订单号">{detailApplication.orderNo || '-'}</SnapshotField>
+                <SnapshotField label="提交人">{detailApplication.applicantName}</SnapshotField>
+                <SnapshotField label="提交时间">{formatDate(detailApplication.submittedAt, 'yyyy-MM-dd HH:mm:ss')}</SnapshotField>
+                <SnapshotField label="审核人">{detailApplication.reviewerName || '-'}</SnapshotField>
+                <SnapshotField label="审核时间">{formatDate(detailApplication.reviewedAt, 'yyyy-MM-dd HH:mm:ss')}</SnapshotField>
+                <SnapshotField label="申请原因">{detailApplication.reason || '-'}</SnapshotField>
+                <SnapshotField label="备注">{detailApplication.orderData.notes || '-'}</SnapshotField>
+              </Box>
+
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle2" sx={{ mb: 1, color: '#6b7280' }}>付款记录</Typography>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>金额</TableCell>
+                      <TableCell>付款时间</TableCell>
+                      <TableCell>付款订单号</TableCell>
+                      <TableCell>付款截图</TableCell>
+                      <TableCell>成交路径截图</TableCell>
+                      <TableCell>备注</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {detailApplication.orderData.payments?.length ? (
+                      detailApplication.orderData.payments.map((payment) => (
+                        <TableRow key={payment.id}>
+                          <TableCell>{formatCurrency(payment.amount)}</TableCell>
+                          <TableCell>{formatDate(payment.paidAt, 'yyyy-MM-dd HH:mm:ss')}</TableCell>
+                          <TableCell>{payment.paymentOrderNo || '-'}</TableCell>
+                          <TableCell>{payment.voucherName || '-'}</TableCell>
+                          <TableCell>{detailApplication.orderData.dealEvidenceName || (detailApplication.orderData.dealEvidencePreview ? '已上传' : '-')}</TableCell>
+                          <TableCell>{payment.remark || '-'}</TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={6} align="center" sx={{ color: '#9ca3af', py: 3 }}>暂无付款记录</TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+
+              {(detailApplication.orderData.dealEvidenceName || detailApplication.orderData.dealEvidencePreview) && (
+                <>
+                  <Divider sx={{ my: 2 }} />
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ color: '#6b7280', mb: 1 }}>成交路径截图</Typography>
+                    {detailApplication.orderData.dealEvidenceName && (
+                      <Typography variant="body2" sx={{ mb: 1, color: '#4f46e5' }}>{detailApplication.orderData.dealEvidenceName}</Typography>
+                    )}
+                    {detailApplication.orderData.dealEvidencePreview && (
+                      <Box
+                        component="img"
+                        src={detailApplication.orderData.dealEvidencePreview}
+                        alt="成交路径截图"
+                        sx={{ width: '100%', maxWidth: 520, maxHeight: 320, objectFit: 'contain', borderRadius: 1, border: '1px solid #e5e7eb' }}
+                      />
+                    )}
+                  </Box>
+                </>
+              )}
+
+              <Divider sx={{ my: 2 }} />
+              <Box>
+                <Typography variant="subtitle2" sx={{ mb: 1, color: '#6b7280' }}>审核记录</Typography>
+                {detailApplication.reviewLogs.length ? (
+                  detailApplication.reviewLogs.map((log) => (
+                    <Typography key={log.id} variant="body2" sx={{ color: '#6b7280', lineHeight: 1.9 }}>
+                      {formatDate(log.createdAt)} {log.operatorName} {reviewActionText[log.action]}{log.reason ? `：${log.reason}` : ''}
+                    </Typography>
+                  ))
+                ) : (
+                  <Typography variant="body2" sx={{ color: '#9ca3af' }}>暂无审核记录</Typography>
+                )}
+              </Box>
+            </DialogContent>
+            <DialogActions sx={{ px: 2.5, py: 1.5 }}>
+              <Button onClick={() => setDetailApplication(null)}>关闭</Button>
+              {reviewer && detailApplication.status === ORDER_APPLICATION_STATUSES.PENDING_REVIEW && (
+                <>
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    onClick={() => {
+                      const target = detailApplication;
+                      setDetailApplication(null);
+                      openRejectDialog(target);
+                    }}
+                  >
+                    驳回终止
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    color="info"
+                    onClick={() => {
+                      const target = detailApplication;
+                      setDetailApplication(null);
+                      openReturnDialog(target);
+                    }}
+                  >
+                    退回修改
+                  </Button>
+                  <Button
+                    variant="contained"
+                    onClick={() => {
+                      const target = detailApplication;
+                      setDetailApplication(null);
+                      openApproveDialog(target);
+                    }}
+                  >
+                    审核入库
+                  </Button>
+                </>
+              )}
+            </DialogActions>
+          </>
+        )}
       </Dialog>
     </Box>
   );

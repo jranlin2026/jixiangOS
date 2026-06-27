@@ -12,8 +12,10 @@ import type {
   CommissionChargebackCompleteInput,
   CommissionRule,
   CommissionTier,
+  CommissionTierSnapshot,
   MonthlyCommissionTierConfig,
   MonthlyCommissionPayout,
+  MonthlyCommissionRoleSummary,
   CommissionStats,
   CommissionStatus,
 } from '../types/commission';
@@ -68,6 +70,11 @@ function normalizeCommissionTiers(tiers?: CommissionTier[]): CommissionTier[] {
     .sort((a, b) => a.minAmount - b.minAmount);
 }
 
+function normalizeExplicitCommissionTiers(tiers?: CommissionTier[]): CommissionTier[] {
+  if (!tiers?.length) return [];
+  return normalizeCommissionTiers(tiers);
+}
+
 function validateCommissionTiers(tiers?: CommissionTier[]): string | null {
   const normalized = normalizeCommissionTiers(tiers);
   if (!normalized.length) return '至少需要配置一个阶梯档位';
@@ -103,6 +110,27 @@ function resolveMonthlyTier(tiers: CommissionTier[], monthlyPaidAmount: number):
     monthlyPaidAmount >= tier.minAmount
     && (tier.maxAmount === undefined || monthlyPaidAmount < tier.maxAmount)
   ));
+}
+
+function resolveExplicitTier(tiers: CommissionTier[], baseAmount: number): CommissionTier | undefined {
+  return normalizeExplicitCommissionTiers(tiers).find((tier) => (
+    baseAmount >= tier.minAmount
+    && (tier.maxAmount === undefined || baseAmount < tier.maxAmount)
+  ));
+}
+
+function buildTierSnapshot(tiers: CommissionTier[], baseAmount: number): CommissionTierSnapshot | undefined {
+  const normalized = normalizeExplicitCommissionTiers(tiers);
+  if (!normalized.length) return undefined;
+  const currentTier = resolveExplicitTier(normalized, baseAmount);
+  const nextTier = normalized.find((tier) => tier.minAmount > baseAmount);
+  return {
+    tiers: normalized,
+    currentTier,
+    nextTier,
+    baseAmount: roundMoney(baseAmount),
+    gapToNext: nextTier ? roundMoney(nextTier.minAmount - baseAmount) : 0,
+  };
 }
 
 function formatTierRange(tier?: CommissionTier): string {
@@ -194,12 +222,22 @@ function resolveRuleCalculationType(c: Commission): Commission['ruleCalculationT
   return rule?.commissionType;
 }
 
+function resolveRuleTiers(c: Commission): CommissionTier[] {
+  const snapshotTiers = normalizeExplicitCommissionTiers(c.tierSnapshot?.tiers);
+  if (snapshotTiers.length) return snapshotTiers;
+  if (!c.commissionRuleId) return [];
+  const rule = (getStorageData<CommissionRule[]>(STORAGE_KEYS.COMMISSION_RULES) || [])
+    .find((item) => item.id === c.commissionRuleId);
+  return normalizeExplicitCommissionTiers(rule?.tiers);
+}
+
 function normalizeCommission(c: Commission, context = createCommissionNormalizeContext()): Commission {
   const normalizedStatus = normalizeCommissionStatus(c);
   const evidenceStatus = c.evidenceStatus || '无需凭证';
   const order = context.ordersById.get(c.orderId);
   const ownerUser = findUserByIdOrName(c.ownerId, c.owner, context.users);
   const ownerDepartment = getDepartmentByUser(ownerUser, context.departments);
+  const ruleCalculationType = resolveRuleCalculationType(c);
   return {
     ...c,
     status: normalizedStatus,
@@ -214,7 +252,12 @@ function normalizeCommission(c: Commission, context = createCommissionNormalizeC
     paymentDate: getCommissionPaymentDate(c, order),
     evidenceStatus,
     evidenceRequired: c.evidenceRequired ?? evidenceStatus !== '无需凭证',
-    ruleCalculationType: resolveRuleCalculationType(c),
+    ruleCalculationType,
+    tierSnapshot: c.tierSnapshot || (
+      ruleCalculationType === 'tiered_percentage'
+        ? buildTierSnapshot(resolveRuleTiers(c), Number(c.performanceAmount || c.orderAmount || 0))
+        : undefined
+    ),
     formulaText: c.formulaText || (
       c.commissionRate > 0
         ? `业绩金额 ${c.performanceAmount || c.orderAmount} × ${Math.round(c.commissionRate * 100)}% = ${c.commissionAmount} 元`
@@ -274,7 +317,14 @@ function calcMonthlyPaidAmountForEmployee(period: string, ownerId?: string, owne
 }
 
 function isTieredMonthlyCommission(commission: Commission): boolean {
-  return commission.ruleCalculationType === 'tiered_percentage' && !commission.isManualAdjusted;
+  return commission.ruleCalculationType === 'tiered_percentage';
+}
+
+function countsTowardTieredMonthlyBase(commission: Commission): boolean {
+  return isTieredMonthlyCommission(commission)
+    && !isWithdrawnCommission(commission)
+    && !isChargebackPendingCommission(commission)
+    && !isChargedBackCommission(commission);
 }
 
 function shouldRecalculateTieredCommission(commission: Commission): boolean {
@@ -286,28 +336,52 @@ function shouldRecalculateTieredCommission(commission: Commission): boolean {
 }
 
 function applyMonthlyTieredCommissions(period: string, commissions: Commission[]): Commission[] {
-  const tierConfig = getMonthlyTierConfig(period);
   const rows = commissions.map((commission) => normalizeCommission(commission));
-  const monthlyPaidByOwner = new Map<string, number>();
+  const monthlyBaseByOwnerRole = new Map<string, number>();
+
+  rows.forEach((commission) => {
+    if (!countsTowardTieredMonthlyBase(commission)) return;
+    const paymentDate = commission.paymentDate || commission.createdAt;
+    if (!paymentDate.startsWith(period)) return;
+    const ownerKey = commission.ownerId || `name:${commission.owner}`;
+    const key = `${ownerKey}::${commission.role}`;
+    monthlyBaseByOwnerRole.set(
+      key,
+      roundMoney((monthlyBaseByOwnerRole.get(key) || 0) + Number(commission.performanceAmount || commission.orderAmount || 0)),
+    );
+  });
 
   return rows.map((commission) => {
     if (!shouldRecalculateTieredCommission(commission)) return commission;
     const paymentDate = commission.paymentDate || commission.createdAt;
     if (!paymentDate.startsWith(period)) return commission;
     const ownerKey = commission.ownerId || `name:${commission.owner}`;
-    if (!monthlyPaidByOwner.has(ownerKey)) {
-      monthlyPaidByOwner.set(ownerKey, calcMonthlyPaidAmountForEmployee(period, commission.ownerId, commission.owner));
+    const monthlyPaidAmount = monthlyBaseByOwnerRole.get(`${ownerKey}::${commission.role}`) || 0;
+    const tiers = resolveRuleTiers(commission);
+    if (!tiers.length) {
+      const formulaText = '缺少销售阶梯规则，请在提成规则中补充阶梯档位后重新确认分账';
+      return {
+        ...commission,
+        commissionRate: 0,
+        commissionAmount: 0,
+        tierSnapshot: undefined,
+        status: '待确认',
+        auditReason: formulaText,
+        formulaText,
+        calculationNote: [commission.calculationNote, formulaText].filter(Boolean).join('；'),
+      };
     }
-    const monthlyPaidAmount = monthlyPaidByOwner.get(ownerKey) || 0;
-    const tier = resolveMonthlyTier(tierConfig.tiers, monthlyPaidAmount);
+    const tierSnapshot = buildTierSnapshot(tiers, monthlyPaidAmount);
+    const tier = tierSnapshot?.currentTier;
     const rate = tier?.rate || 0;
     const performanceAmount = Number(commission.performanceAmount || commission.orderAmount || 0);
     const commissionAmount = roundMoney(performanceAmount * (rate / 100));
-    const formulaText = `员工月度总实付金额 ${monthlyPaidAmount} 元，命中 ${formatTierRange(tier)} × ${rate}%；业绩金额 ${performanceAmount} × ${rate}% = ${commissionAmount} 元`;
+    const formulaText = `销售角色月累计阶梯业绩 ${monthlyPaidAmount} 元，命中 ${formatTierRange(tier)} × ${rate}%；本单业绩 ${performanceAmount} × ${rate}% = ${commissionAmount} 元`;
     return {
       ...commission,
       commissionRate: rate / 100,
       commissionAmount,
+      tierSnapshot,
       formulaText,
       calculationNote: [commission.calculationNote, formulaText].filter(Boolean).join('；'),
     };
@@ -632,6 +706,14 @@ function buildAdjustedCommission(
   const orderAmount = order.actualAmount || order.amount;
   const performanceAmount = input.performanceAmount ?? existing?.performanceAmount ?? order.performanceBaseAmount ?? orderAmount;
   const calculationType = input.ruleCalculationType || existing?.ruleCalculationType || (input.commissionRate && input.commissionRate > 0 ? 'percentage' : 'fixed');
+  const matchedRule = input.commissionRuleId
+    ? (getStorageData<CommissionRule[]>(STORAGE_KEYS.COMMISSION_RULES) || []).find((rule) => rule.id === input.commissionRuleId)
+    : undefined;
+  const payoutPlanName = input.payoutPlanName || existing?.payoutPlanName || matchedRule?.payoutPlanName;
+  const tierSource = normalizeExplicitCommissionTiers(input.tierSnapshot?.tiers || existing?.tierSnapshot?.tiers || matchedRule?.tiers);
+  const tierSnapshot = calculationType === 'tiered_percentage'
+    ? buildTierSnapshot(tierSource, performanceAmount)
+    : undefined;
   const commissionRate = calculationType === 'percentage' ? Number(input.commissionRate || 0) : 0;
   const amount = calculationType === 'tiered_percentage'
     ? 0
@@ -639,10 +721,12 @@ function buildAdjustedCommission(
       ? roundMoney(performanceAmount * commissionRate)
       : roundMoney(input.commissionAmount || 0);
   const formulaText = calculationType === 'tiered_percentage'
-    ? '销售月累计阶梯提成，月度提成金额将在员工提成月报按月度总实付金额计算'
+    ? (tierSource.length
+      ? `${payoutPlanName || '销售月累计阶梯提成'}，金额由员工提成月报按销售角色阶梯业绩自动结算`
+      : `${payoutPlanName || '销售月累计阶梯提成'} 缺少销售阶梯规则，请绑定一条销售阶梯规则`)
     : calculationType === 'percentage'
-      ? `业绩金额 ${performanceAmount} × ${roundMoney(commissionRate * 100)}% = ${amount} 元`
-      : `人工确认 ${amount} 元`;
+      ? `${payoutPlanName ? `${payoutPlanName}：` : ''}业绩金额 ${performanceAmount} × ${roundMoney(commissionRate * 100)}% = ${amount} 元`
+      : `${payoutPlanName ? `${payoutPlanName}：` : ''}固定提成 ${amount} 元`;
   const sourceType = existing?.sourceType || '人工新增';
   return {
     id: existing?.id || input.id || `comm-${uuidv4().slice(0, 8)}`,
@@ -661,7 +745,10 @@ function buildAdjustedCommission(
     auditReason: undefined,
     evidenceRequired: existing?.evidenceRequired,
     evidenceStatus: existing?.evidenceStatus || '无需凭证',
+    payoutPlanId: input.payoutPlanId || existing?.payoutPlanId || matchedRule?.payoutPlanId,
+    payoutPlanName,
     ruleCalculationType: calculationType,
+    tierSnapshot,
     formulaText,
     role: input.role,
     owner: assignee.user.name,
@@ -1199,6 +1286,65 @@ function getMonthlyPayoutCommissions(period: string, sourceCommissions?: Commiss
   });
 }
 
+function buildMonthlyRoleSummary(role: string, rows: Commission[]): MonthlyCommissionRoleSummary {
+  const isTiered = rows.some((commission) => commission.ruleCalculationType === 'tiered_percentage');
+  const tierRows = rows.filter((commission) => commission.ruleCalculationType === 'tiered_percentage');
+  const activeTierBase = roundMoney(rows
+    .filter(countsTowardTieredMonthlyBase)
+    .reduce((sumValue, commission) => sumValue + Number(commission.performanceAmount || commission.orderAmount || 0), 0));
+  const tierSource = rows.find(countsTowardTieredMonthlyBase) || tierRows[0];
+  const effectiveTierSnapshot = isTiered && tierSource
+    ? buildTierSnapshot(resolveRuleTiers(tierSource), activeTierBase)
+    : undefined;
+  const getSummaryAmount = (commission: Commission) => {
+    if (commission.ruleCalculationType !== 'tiered_percentage') return commission.commissionAmount;
+    const rate = effectiveTierSnapshot?.currentTier?.rate ?? Number(commission.commissionRate || 0) * 100;
+    if (!rate) return commission.commissionAmount;
+    return roundMoney(Number(commission.performanceAmount || commission.orderAmount || 0) * (rate / 100));
+  };
+  const pendingConfirmAmount = rows
+    .filter((commission) => commission.status === '待确认' && !isCommissionPendingHandling(commission))
+    .reduce((sumValue, commission) => sumValue + getSummaryAmount(commission), 0);
+  const pendingPayAmount = rows
+    .filter((commission) => commission.status === '待发放')
+    .reduce((sumValue, commission) => sumValue + getSummaryAmount(commission), 0);
+  const paidAmount = rows
+    .filter((commission) => commission.status === '已发放')
+    .reduce((sumValue, commission) => sumValue + getSummaryAmount(commission), 0);
+  const withdrawnAmount = rows
+    .filter(isWithdrawnCommission)
+    .reduce((sumValue, commission) => sumValue + getSummaryAmount(commission), 0);
+  const chargebackAmount = rows
+    .filter(isChargebackPendingCommission)
+    .reduce((sumValue, commission) => sumValue + getSummaryAmount(commission), 0);
+  const status: MonthlyCommissionPayout['status'] = chargebackAmount > 0
+    ? '待冲销'
+    : pendingConfirmAmount > 0
+      ? '待确认'
+      : pendingPayAmount > 0
+        ? '待发放'
+        : paidAmount > 0
+          ? '已发放'
+          : '无应发';
+
+  return {
+    role,
+    orderCount: new Set(rows.map((commission) => commission.orderId)).size,
+    monthlyPaidAmount: activeTierBase,
+    pendingConfirmAmount: roundMoney(pendingConfirmAmount),
+    pendingPayAmount: roundMoney(pendingPayAmount),
+    paidAmount: roundMoney(paidAmount),
+    exceptionAmount: roundMoney(chargebackAmount),
+    withdrawnAmount: roundMoney(withdrawnAmount),
+    chargebackAmount: roundMoney(chargebackAmount),
+    totalAmount: roundMoney(pendingConfirmAmount + pendingPayAmount + paidAmount),
+    status,
+    isTiered,
+    tierSnapshot: effectiveTierSnapshot,
+    commissions: rows,
+  };
+}
+
 function buildMonthlyPayouts(period: string): MonthlyCommissionPayout[] {
   const payoutRows = getMonthlyPayoutCommissions(period);
   const map = new Map<string, Commission[]>();
@@ -1209,23 +1355,20 @@ function buildMonthlyPayouts(period: string): MonthlyCommissionPayout[] {
 
   return Array.from(map.entries()).map(([key, rows]) => {
     const first = rows[0];
-    const pendingConfirmAmount = rows
-      .filter((commission) => commission.status === '待确认' && !isCommissionPendingHandling(commission))
-      .reduce((sumValue, commission) => sumValue + commission.commissionAmount, 0);
-    const pendingPayAmount = rows
-      .filter((commission) => commission.status === '待发放')
-      .reduce((sumValue, commission) => sumValue + commission.commissionAmount, 0);
-    const paidAmount = rows
-      .filter((commission) => commission.status === '已发放')
-      .reduce((sumValue, commission) => sumValue + commission.commissionAmount, 0);
-    const withdrawnAmount = rows
-      .filter(isWithdrawnCommission)
-      .reduce((sumValue, commission) => sumValue + commission.commissionAmount, 0);
-    const chargebackAmount = rows
-      .filter(isChargebackPendingCommission)
-      .reduce((sumValue, commission) => sumValue + commission.commissionAmount, 0);
+    const roleMap = new Map<string, Commission[]>();
+    rows.forEach((commission) => {
+      roleMap.set(commission.role, [...(roleMap.get(commission.role) || []), commission]);
+    });
+    const roleSummaries = Array.from(roleMap.entries())
+      .map(([role, roleRows]) => buildMonthlyRoleSummary(role, roleRows))
+      .sort((a, b) => b.totalAmount - a.totalAmount || a.role.localeCompare(b.role, 'zh-CN'));
+    const pendingConfirmAmount = roleSummaries.reduce((sumValue, item) => sumValue + item.pendingConfirmAmount, 0);
+    const pendingPayAmount = roleSummaries.reduce((sumValue, item) => sumValue + item.pendingPayAmount, 0);
+    const paidAmount = roleSummaries.reduce((sumValue, item) => sumValue + item.paidAmount, 0);
+    const withdrawnAmount = roleSummaries.reduce((sumValue, item) => sumValue + item.withdrawnAmount, 0);
+    const chargebackAmount = roleSummaries.reduce((sumValue, item) => sumValue + item.chargebackAmount, 0);
     const orderCount = new Set(rows.map((commission) => commission.orderId)).size;
-    const monthlyPaidAmount = calcMonthlyPaidAmountForEmployee(period, first.ownerId, first.owner);
+    const monthlyPaidAmount = roleSummaries.reduce((sumValue, item) => sumValue + item.monthlyPaidAmount, 0);
     const status: MonthlyCommissionPayout['status'] = chargebackAmount > 0
       ? '待冲销'
       : pendingConfirmAmount > 0
@@ -1252,6 +1395,7 @@ function buildMonthlyPayouts(period: string): MonthlyCommissionPayout[] {
       totalAmount: roundMoney(pendingConfirmAmount + pendingPayAmount + paidAmount),
       status,
       commissions: rows,
+      roleSummaries,
     };
   }).sort((a, b) => (
     b.totalAmount - a.totalAmount
@@ -1264,6 +1408,7 @@ async function fetchMonthlyCommissionPayouts(period: string): Promise<ApiRespons
   ensureInit();
   await delay(160);
   if (!period) return createErrorResponse('请选择结算月份');
+  refreshMonthlyTieredCommissions(period);
   return createSuccessResponse(buildMonthlyPayouts(period));
 }
 

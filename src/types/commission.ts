@@ -77,6 +77,14 @@ export interface CommissionTier {
   rate: number;
 }
 
+export interface CommissionTierSnapshot {
+  tiers: CommissionTier[];
+  currentTier?: CommissionTier;
+  nextTier?: CommissionTier;
+  baseAmount: number;
+  gapToNext: number;
+}
+
 /** 提成规则 — 核心配置，每条规则对应一个角色的提成方式 */
 export interface CommissionRule {
   id: ID;
@@ -105,6 +113,12 @@ export interface CommissionRule {
   commissionType: CommissionRuleCalculationType;
   /** 固定金额值 或 百分比数值 */
   commissionValue: number;
+  /** 销售月累计阶梯档位，仅用于 tiered_percentage */
+  tiers?: CommissionTier[];
+  /** 提成方案 ID，规则行引用方案后会把方案算法快照复制到本规则 */
+  payoutPlanId?: ID;
+  /** 提成方案名称快照 */
+  payoutPlanName?: string;
   /** 业绩核算比例，默认 100%，用于升单 70%、代理复购 50% 等 */
   performanceRate?: number;
   /** 主角色分成比例，默认 100%，协同分成时如 80 表示主角色拿 80% */
@@ -137,9 +151,26 @@ export interface CommissionRule {
 
 export interface SimpleCommissionRulePayout {
   role: CommissionRole;
+  payoutPlanId?: ID;
+  payoutPlanName?: string;
   commissionType: CommissionRuleCalculationType;
   commissionValue: number;
+  tiers?: CommissionTier[];
 }
+
+export interface CommissionPayoutPlan {
+  id: ID;
+  name: string;
+  commissionType: CommissionRuleCalculationType;
+  commissionValue: number;
+  tiers?: CommissionTier[];
+  isActive: boolean;
+  description?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export type CommissionPayoutPlanInput = Omit<CommissionPayoutPlan, 'id' | 'createdAt' | 'updatedAt'>;
 
 export interface SimpleCommissionRuleGroup {
   id: ID;
@@ -195,8 +226,14 @@ export interface Commission {
   evidenceStatus?: '已齐全' | '缺付款截图' | '缺成交路径截图' | '缺聊天记录截图' | '需组长确认' | '无需凭证';
   /** 面向财务展示的公式 */
   formulaText?: string;
+  /** 提成方案 ID，生成或调整分账时保存方案快照 */
+  payoutPlanId?: ID;
+  /** 提成方案名称快照 */
+  payoutPlanName?: string;
   /** 分账规则计算方式，用于月度阶梯提成等结算口径 */
   ruleCalculationType?: CommissionRuleCalculationType;
+  /** 生成/调整分账时保留的阶梯规则快照 */
+  tierSnapshot?: CommissionTierSnapshot;
   /** 所属结算批次 */
   batchId?: ID;
   /** 冻结原因 */
@@ -386,12 +423,30 @@ export interface MonthlyCommissionPayout {
   totalAmount: number;
   status: '待确认' | '待发放' | '已发放' | '待冲销' | '无应发';
   commissions: Commission[];
+  roleSummaries?: MonthlyCommissionRoleSummary[];
 }
 
 export interface MonthlyCommissionTierConfig {
   period: string;
   tiers: CommissionTier[];
   updatedAt?: Timestamp;
+}
+
+export interface MonthlyCommissionRoleSummary {
+  role: CommissionRole;
+  orderCount: number;
+  monthlyPaidAmount: number;
+  pendingConfirmAmount: number;
+  pendingPayAmount: number;
+  paidAmount: number;
+  exceptionAmount: number;
+  withdrawnAmount: number;
+  chargebackAmount: number;
+  totalAmount: number;
+  status: MonthlyCommissionPayout['status'];
+  isTiered: boolean;
+  tierSnapshot?: CommissionTierSnapshot;
+  commissions: Commission[];
 }
 
 export interface CommissionAdjustmentInput {
@@ -408,7 +463,10 @@ export interface CommissionAdjustmentInput {
   performanceAmount?: number;
   calculationNote?: string;
   commissionRuleId?: ID;
+  payoutPlanId?: ID;
+  payoutPlanName?: string;
   ruleCalculationType?: CommissionRuleCalculationType;
+  tierSnapshot?: CommissionTierSnapshot;
 }
 
 /** 提成统计 */
@@ -430,6 +488,9 @@ export interface CommissionCalcResult {
   role: CommissionRole;
   commissionType: CommissionRuleCalculationType;
   commissionValue: number;
+  tiers?: CommissionTier[];
+  payoutPlanId?: ID;
+  payoutPlanName?: string;
   commissionAmount: number;
   commissionRate: number;
   performanceAmount: number;

@@ -21,11 +21,9 @@ import {
   getProductLevelColor,
   normalizeResourceOwnership,
 } from '../../shared/utils/constants';
-import { commissionRuleApi, customerApi, orderReviewApi, productApi, settingsApi } from '../../api';
+import { customerApi, orderReviewApi, productApi, settingsApi } from '../../api';
 import type { OrderType, PaymentMethod, ProductLevel } from '../../types/common';
 import type {
-  CommissionRole,
-  CommissionRoleConfig,
   CommissionScene,
   OfficialPaymentChannel,
   ResourceOwnership,
@@ -171,7 +169,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   const [products, setProducts] = useState<Product[]>([]);
   const [orderTypeConfigs, setOrderTypeConfigs] = useState<OrderTypeConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [commissionRoleConfigs, setCommissionRoleConfigs] = useState<CommissionRoleConfig[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [customerSearch, setCustomerSearch] = useState('');
@@ -192,9 +189,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     actualAmount: 0,
     officialPaymentChannel: '对公银行转账' as OfficialPaymentChannel,
     resourceOwnership: '公司资源' as ResourceOwnership,
-    collaboratorName: '',
-    collaboratorRole: '客户成功' as CommissionRole,
-    collaboratorRatio: 0,
     originalOrderId: '',
     sourceType: '',
     leadInputBy: '',
@@ -275,9 +269,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       actualAmount: sourceOrder.actualAmount || sourceOrder.amount,
       officialPaymentChannel: sourceOrder.officialPaymentChannel || prev.officialPaymentChannel,
       resourceOwnership: normalizeResourceOwnership(sourceOrder.resourceOwnership || sourceOrder.sourceType || prev.resourceOwnership),
-      collaboratorName: sourceOrder.collaboratorName || '',
-      collaboratorRole: sourceOrder.collaboratorRole || prev.collaboratorRole,
-      collaboratorRatio: sourceOrder.collaboratorRatio || 0,
       originalOrderId: sourceOrder.originalOrderId || '',
       sourceType: sourceOrder.sourceType || prev.sourceType,
       leadInputBy: sourceOrder.leadInputBy || prev.leadInputBy,
@@ -325,16 +316,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     Promise.all([
       settingsApi.fetchUsers({ isActive: true }),
       settingsApi.fetchOrderTypeConfigs(),
-      commissionRuleApi.getCommissionRoleConfigs({ isActive: true }),
-    ]).then(([userRes, orderTypeRes, commissionRoleRes]) => {
+    ]).then(([userRes, orderTypeRes]) => {
       if (userRes.code === 0) setUsers(userRes.data.filter((user) => user.isActive));
-      if (commissionRoleRes.code === 0) {
-        setCommissionRoleConfigs(commissionRoleRes.data);
-        setForm((prev) => {
-          if (prev.collaboratorRole && commissionRoleRes.data.some((item) => item.name === prev.collaboratorRole)) return prev;
-          return { ...prev, collaboratorRole: commissionRoleRes.data[0]?.name || prev.collaboratorRole };
-        });
-      }
       if (orderTypeRes.code === 0) {
         const configs = orderTypeRes.data;
         const activeTypes = configs.filter((item) => item.isActive);
@@ -422,20 +405,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     }
   };
 
-  const handleNumberChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    setForm({ ...form, [field]: Number(e.target.value) });
-  };
-
   const handleOwnerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, owner: e.target.value });
-  };
-
-  const handleCollaboratorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const collaboratorName = e.target.value;
-    setForm({
-      ...form,
-      collaboratorName,
-    });
   };
 
   const handleCustomerSelect = (_event: React.SyntheticEvent, selected: Customer | null) => {
@@ -558,8 +529,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       payments,
       isExternalTalentOrder: order?.isExternalTalentOrder || false,
       performanceBaseAmount: order?.performanceBaseAmount ?? actualAmount,
-      collaboratorRatio: Number(form.collaboratorRatio) || undefined,
-      collaboratorName: form.collaboratorName || undefined,
       leadInputBy: form.leadInputBy || undefined,
       leadContributorId: form.leadContributorId || undefined,
       leadContributorName: form.leadContributorName || undefined,
@@ -813,38 +782,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               <MenuItem key={user.id} value={user.name}>{renderUserOptionLabel(user)}</MenuItem>
             ))}
           </TextField>
-          <TextField
-            select
-            label="协同人员"
-            value={form.collaboratorName}
-            onChange={handleCollaboratorChange}
-            helperText="协同人员是实际分账人员，提成角色需单独选择"
-            fullWidth
-          >
-            <MenuItem value="">无</MenuItem>
-            {form.collaboratorName && !users.some((user) => user.name === form.collaboratorName) && (
-              <MenuItem value={form.collaboratorName}>{form.collaboratorName}</MenuItem>
-            )}
-            {users.map((user) => (
-              <MenuItem key={user.id} value={user.name}>{renderUserOptionLabel(user)}</MenuItem>
-            ))}
-          </TextField>
-          <TextField
-            select
-            label="协同提成角色"
-            value={form.collaboratorRole}
-            onChange={handleChange('collaboratorRole')}
-            helperText="此角色仅用于分账，不影响系统权限角色"
-            fullWidth
-          >
-            {form.collaboratorRole && !commissionRoleConfigs.some((item) => item.name === form.collaboratorRole) && (
-              <MenuItem value={form.collaboratorRole}>{form.collaboratorRole}（已停用）</MenuItem>
-            )}
-            {commissionRoleConfigs.map((item) => (
-              <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>
-            ))}
-          </TextField>
-          <TextField label="协同分成比例（%）" type="number" value={form.collaboratorRatio} onChange={handleNumberChange('collaboratorRatio')} fullWidth />
           <TextField label="原899订单ID" value={form.originalOrderId} onChange={handleChange('originalOrderId')} placeholder="成交线索转代理时填写" fullWidth />
           <TextField label="备注" value={form.notes} onChange={handleChange('notes')} fullWidth sx={{ gridColumn: '1 / -1' }} />
         </Box>

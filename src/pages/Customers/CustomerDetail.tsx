@@ -24,7 +24,7 @@ import type { Order } from '../../types/order';
 import type { CustomerLevelConfig, LeadSourceConfig, User } from '../../types/settings';
 import { aiCardApi, customerApi, orderApi, settingsApi } from '../../api';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
-import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, getProductLevelColor, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
+import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelColor, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import AIBusinessCardPanel from '../../shared/components/AIBusinessCardPanel';
 import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
@@ -763,11 +763,11 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
           </TableHead>
           <TableBody>
             {orders.map((order) => (
-              <TableRow key={order.id}>
+              <TableRow key={order.id} sx={getProductLevelRowSx(order.productLevel)}>
                 <TableCell sx={{ fontWeight: 600 }}>{order.orderNo}</TableCell>
                 <TableCell>{order.productName || order.productLevel || '-'}</TableCell>
                 <TableCell>
-                  <Chip label={order.productLevel} size="small" sx={{ bgcolor: `${getProductLevelColor(order.productLevel)}18`, color: getProductLevelColor(order.productLevel), fontWeight: 600 }} />
+                  <Chip label={order.productLevel} size="small" sx={getProductLevelTagSx(order.productLevel)} />
                 </TableCell>
                 <TableCell>{order.orderType}</TableCell>
                 <TableCell>{formatCurrency(order.actualAmount || order.amount)}</TableCell>
@@ -797,7 +797,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                 <Box sx={{ position: 'absolute', left: -17, top: 14, width: 2, height: 'calc(100% - 4px)', bgcolor: '#e5e7eb' }} />
               )}
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                <Chip label={milestone.productLevel} size="small" sx={{ fontSize: '0.6875rem', bgcolor: `${getProductLevelColor(milestone.productLevel)}18`, color: getProductLevelColor(milestone.productLevel) }} />
+                <Chip label={milestone.productLevel} size="small" sx={getProductLevelTagSx(milestone.productLevel)} />
                 <Typography variant="caption" sx={{ color: '#9ca3af' }}>{milestone.date}</Typography>
               </Box>
               <Typography variant="body2" sx={{ fontWeight: 600 }}>{milestone.title}</Typography>
@@ -882,7 +882,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>{currentCustomer.name}</Typography>
             <CustomerLevelBadge level={currentCustomer.customerLevel} />
-            <Chip label={lifecycleConfig.name} size="small" sx={{ bgcolor: `${lifecycleConfig.color}18`, color: lifecycleConfig.color, fontWeight: 600 }} />
+            <Chip label={lifecycleConfig.name} size="small" sx={getLifecycleStatusTagSx(`${lifecycleCode} ${lifecycleConfig.name}`)} />
           </Box>
           <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>
             {currentCustomer.owner || '未分配'} 跟进 · {formatCustomerSource(currentCustomer)}
@@ -930,7 +930,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               {renderInfoRow('公司', 'company')}
               {renderInfoRow('手机', 'phone', canEditLockedContact || canCompletePhoneField(currentCustomer.phone))}
               {renderInfoRow('微信', 'wechat', canEditLockedContact || canCompleteContactField(currentCustomer.wechat))}
-              {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={{ bgcolor: `${lifecycleConfig.color}18`, color: lifecycleConfig.color, fontWeight: 600 }} />)}
+              {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={getLifecycleStatusTagSx(`${lifecycleCode} ${lifecycleConfig.name}`)} />)}
               {renderSourceRow()}
               {renderInfoRow('资源归属', 'sourceType')}
               {renderInfoRow('行业', 'industry')}

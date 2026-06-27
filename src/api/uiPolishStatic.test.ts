@@ -400,8 +400,8 @@ assert.match(
 );
 assert.match(
   detailSplitEditorSource,
-  /计算方式[\s\S]*固定金额[\s\S]*按实付金额百分比[\s\S]*销售月累计阶梯提成/,
-  'Order split adjustment editor should expose fixed, percentage, and tiered calculation type choices.',
+  /提成方案[\s\S]*planOptionsForSplit[\s\S]*方案摘要/,
+  'Order split adjustment editor should choose a commission payout plan instead of editing calculation type directly.',
 );
 assert.match(
   commissionSource,

@@ -334,7 +334,7 @@ assert.equal(fixedRow?.commissionAmount, 30);
 assert.equal(tieredRow?.ruleCalculationType, 'tiered_percentage');
 assert.equal(tieredRow?.commissionRate, 0);
 assert.equal(tieredRow?.commissionAmount, 0);
-assert.match(tieredRow?.formulaText || '', /员工提成月报/);
+assert.match(tieredRow?.formulaText || '', /缺少销售阶梯规则/);
 
 const removePendingConfirmLineRes = await (commissionApi as any).saveOrderCommissionAdjustments('order-a', [
   {
@@ -525,6 +525,15 @@ storage.setItem(STORAGE_KEYS.COMMISSIONS, JSON.stringify([
     performanceAmount: 10000,
     commissionRate: 0,
     ruleCalculationType: 'tiered_percentage',
+    tierSnapshot: {
+      tiers: [
+        { minAmount: 0, maxAmount: 30000, rate: 8 },
+        { minAmount: 30000, maxAmount: 50000, rate: 10 },
+        { minAmount: 50000, rate: 15 },
+      ],
+      baseAmount: 0,
+      gapToNext: 0,
+    },
     formulaText: '月度提成待计算',
     paymentDate: '2026-05-05T10:00:00.000Z',
   } as any),
@@ -540,6 +549,15 @@ storage.setItem(STORAGE_KEYS.COMMISSIONS, JSON.stringify([
     performanceAmount: 20000,
     commissionRate: 0,
     ruleCalculationType: 'tiered_percentage',
+    tierSnapshot: {
+      tiers: [
+        { minAmount: 0, maxAmount: 30000, rate: 8 },
+        { minAmount: 30000, maxAmount: 50000, rate: 10 },
+        { minAmount: 50000, rate: 15 },
+      ],
+      baseAmount: 0,
+      gapToNext: 0,
+    },
     formulaText: '月度提成待计算',
     paymentDate: '2026-05-10T10:00:00.000Z',
   } as any),
@@ -577,5 +595,5 @@ assert.equal(tieredSales.totalAmount, 3123);
 assert.equal(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-a').commissionAmount, 1000);
 assert.equal(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-b').commissionAmount, 2000);
 assert.equal(tieredSales.commissions.find((item: any) => item.id === 'fixed-comm-a').commissionAmount, 123);
-assert.match(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-a').formulaText || '', /总实付金额 30000/);
+assert.match(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-a').formulaText || '', /销售角色月累计阶梯业绩 30000/);
 assert.match(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-a').formulaText || '', /10%/);

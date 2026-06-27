@@ -88,6 +88,28 @@ assert.equal(typeof (commissionRuleApi as any).getSimpleCommissionRuleGroups, 'f
 assert.equal(typeof (commissionRuleApi as any).createSimpleCommissionRuleGroup, 'function');
 assert.equal(typeof (commissionRuleApi as any).updateSimpleCommissionRuleGroup, 'function');
 assert.equal(typeof (commissionRuleApi as any).deleteSimpleCommissionRuleGroup, 'function');
+assert.equal(typeof (commissionRuleApi as any).getCommissionPayoutPlans, 'function');
+
+async function createPlan(name: string, commissionType: 'fixed' | 'percentage' | 'tiered_percentage', commissionValue: number) {
+  const res = await (commissionRuleApi as any).createCommissionPayoutPlan({
+    name,
+    commissionType,
+    commissionValue,
+    isActive: true,
+    description: '',
+  });
+  assert.equal(res.code, 0);
+  return res.data;
+}
+
+const percent8Plan = await createPlan('测试固定比例 8%', 'percentage', 8);
+const percent3Plan = await createPlan('测试固定比例 3%', 'percentage', 3);
+const fixed50Plan = await createPlan('测试固定金额 50', 'fixed', 50);
+const fixed100Plan = await createPlan('测试固定金额 100', 'fixed', 100);
+const defaultPlansRes = await (commissionRuleApi as any).getCommissionPayoutPlans();
+assert.equal(defaultPlansRes.code, 0);
+const tieredPlan = defaultPlansRes.data.find((plan: any) => plan.commissionType === 'tiered_percentage');
+assert.ok(tieredPlan);
 
 const initialGroups = await (commissionRuleApi as any).getSimpleCommissionRuleGroups();
 assert.equal(initialGroups.code, 0);
@@ -100,9 +122,9 @@ const createRes = await (commissionRuleApi as any).createSimpleCommissionRuleGro
   resourceOwnership: '公司资源',
   isActive: true,
   payouts: [
-    { role: '销售', commissionType: 'percentage', commissionValue: 8 },
-    { role: '线索', commissionType: 'percentage', commissionValue: 3 },
-    { role: '客户成功', commissionType: 'fixed', commissionValue: 50 },
+    { role: '销售', payoutPlanId: percent8Plan.id, commissionType: 'percentage', commissionValue: 8 },
+    { role: '线索', payoutPlanId: percent3Plan.id, commissionType: 'percentage', commissionValue: 3 },
+    { role: '客户成功', payoutPlanId: fixed50Plan.id, commissionType: 'fixed', commissionValue: 50 },
   ],
 });
 assert.equal(createRes.code, 0);
@@ -125,7 +147,7 @@ const duplicateRes = await (commissionRuleApi as any).createSimpleCommissionRule
   orderType: '新代理',
   resourceOwnership: '公司资源',
   isActive: true,
-  payouts: [{ role: '销售', commissionType: 'percentage', commissionValue: 10 }],
+  payouts: [{ role: '销售', payoutPlanId: percent8Plan.id, commissionType: 'percentage', commissionValue: 10 }],
 });
 assert.notEqual(duplicateRes.code, 0);
 
@@ -134,7 +156,7 @@ const updateRes = await (commissionRuleApi as any).updateSimpleCommissionRuleGro
   orderType: '新代理',
   resourceOwnership: '公司资源',
   isActive: true,
-  payouts: [{ role: '销售', commissionType: 'fixed', commissionValue: 100 }],
+  payouts: [{ role: '销售', payoutPlanId: fixed100Plan.id, commissionType: 'fixed', commissionValue: 100 }],
 });
 assert.equal(updateRes.code, 0);
 assert.deepEqual(updateRes.data.payouts.map((p: any) => p.role), ['销售']);
@@ -176,17 +198,18 @@ const tieredGroupRes = await (commissionRuleApi as any).createSimpleCommissionRu
   isActive: true,
   payouts: [{
     role: '销售',
+    payoutPlanId: tieredPlan.id,
     commissionType: 'tiered_percentage',
     commissionValue: 0,
   }],
 });
 assert.equal(tieredGroupRes.code, 0);
 assert.equal(tieredGroupRes.data.payouts[0].commissionType, 'tiered_percentage');
-assert.equal('tiers' in tieredGroupRes.data.payouts[0], false);
+assert.equal(tieredGroupRes.data.payouts[0].tiers?.length, 3);
 
 const tieredRule = storedRules()[0];
 assert.equal(tieredRule.commissionType, 'tiered_percentage');
-assert.equal('tiers' in tieredRule, false);
+assert.equal(tieredRule.tiers?.length, 3);
 
 seedOrders([
   buildOrder({

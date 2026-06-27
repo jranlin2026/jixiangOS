@@ -349,6 +349,16 @@ export const getProductLevelColor = (level?: string, fallback = '#9ca3af'): stri
   return PRODUCT_LEVEL_COLOR_MAP[level] || fallback;
 };
 
+export const getProductLevelRowSx = (level?: string) => {
+  const color = getProductLevelColor(level);
+  return {
+    bgcolor: `${color}08`,
+    '&:hover': {
+      bgcolor: `${color}12`,
+    },
+  };
+};
+
 export const getCustomerLevelConfig = (level?: string) => {
   if (!level) return undefined;
   if (typeof localStorage !== 'undefined') {
@@ -367,6 +377,76 @@ export const getCustomerLevelConfig = (level?: string) => {
 };
 
 /** 分页默认值 */
+type SoftTagTone = {
+  bgcolor: string;
+  color: string;
+  borderColor: string;
+};
+
+const TAG_TONES = {
+  neutral: { bgcolor: '#f3f4f6', color: '#4b5563', borderColor: '#e5e7eb' },
+  blue: { bgcolor: '#e8f2ff', color: '#0f5fca', borderColor: '#cfe3fb' },
+  cyan: { bgcolor: '#e6f6fb', color: '#08768f', borderColor: '#c9edf6' },
+  green: { bgcolor: '#e7f7ef', color: '#16815c', borderColor: '#c9ead9' },
+  purple: { bgcolor: '#f1ecff', color: '#6d4cc2', borderColor: '#ded3ff' },
+  amber: { bgcolor: '#fff4e5', color: '#b45309', borderColor: '#f8ddb7' },
+  rose: { bgcolor: '#fff1f2', color: '#be123c', borderColor: '#ffd5dc' },
+  slate: { bgcolor: '#f1f5f9', color: '#475569', borderColor: '#dbe3ec' },
+} satisfies Record<string, SoftTagTone>;
+
+const softTagBaseSx = (tone: SoftTagTone) => ({
+  bgcolor: tone.bgcolor,
+  color: tone.color,
+  border: `1px solid ${tone.borderColor}`,
+  fontWeight: 700,
+  fontSize: '0.75rem',
+  height: 24,
+  borderRadius: '6px',
+  '& .MuiChip-label': {
+    px: 0.75,
+    lineHeight: 1.2,
+  },
+});
+
+const normalizeTagText = (value?: string) => (value || '').toLowerCase();
+
+const pickProductTone = (level?: string) => {
+  const text = normalizeTagText(level);
+  if (text.includes('ai') || text.includes('899') || text.includes('智能体')) return TAG_TONES.blue;
+  if (text.includes('课程')) return TAG_TONES.cyan;
+  if (text.includes('代理')) return TAG_TONES.green;
+  if (text.includes('贴牌') || text.includes('oem')) return TAG_TONES.purple;
+  if (text.includes('合伙人')) return TAG_TONES.amber;
+  return TAG_TONES.neutral;
+};
+
+const pickCustomerTone = (level?: string) => {
+  const text = normalizeTagText(level);
+  if (text.includes('l5') || text.includes('合伙人')) return TAG_TONES.amber;
+  if (text.includes('l4') || text.includes('oem') || text.includes('贴牌')) return TAG_TONES.purple;
+  if (text.includes('l3') || text.includes('代理')) return TAG_TONES.green;
+  if (text.includes('l2') || text.includes('智能体')) return TAG_TONES.blue;
+  return TAG_TONES.neutral;
+};
+
+const pickLifecycleTone = (status?: string) => {
+  const text = normalizeTagText(status);
+  if (text.includes('pending_followup') || text.includes('待跟进')) return TAG_TONES.neutral;
+  if (text.includes('following') || text.includes('跟进中')) return TAG_TONES.blue;
+  if (text.includes('ordered') || text.includes('订单')) return TAG_TONES.green;
+  if (text.includes('refunded') || text.includes('退款')) return TAG_TONES.rose;
+  if (text.includes('public_pool') || text.includes('公海') || text.includes('流失')) return TAG_TONES.slate;
+  return TAG_TONES.neutral;
+};
+
+export const getSoftTagSx = (tone: SoftTagTone = TAG_TONES.neutral) => softTagBaseSx(tone);
+
+export const getProductLevelTagSx = (level?: string) => softTagBaseSx(pickProductTone(level));
+
+export const getCustomerLevelTagSx = (levelOrLabel?: string) => softTagBaseSx(pickCustomerTone(levelOrLabel));
+
+export const getLifecycleStatusTagSx = (codeOrName?: string) => softTagBaseSx(pickLifecycleTone(codeOrName));
+
 export const DEFAULT_PAGE_SIZE = 10;
 export const DEFAULT_PAGE = 1;
 
