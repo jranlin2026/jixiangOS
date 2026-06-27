@@ -3,7 +3,11 @@ import {
   Box,
   Button,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
   FormControl,
+  IconButton,
   InputLabel,
   MenuItem,
   Paper,
@@ -16,9 +20,11 @@ import {
   TablePagination,
   TableRow,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { leadFlowApi } from '../../api';
 import type { LeadIntakeRecord } from '../../types/lead';
 import { formatDate, formatPaginationRows } from '../../shared/utils/formatters';
@@ -33,6 +39,10 @@ import ResizableHeaderCell, {
   type ColumnWidthMap,
 } from '../../shared/components/ResizableTable';
 import { useTableViewConfig } from '../../shared/hooks/useTableViewConfig';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import useAuthStore from '../../store/useAuthStore';
+import { isSuperAdminRoleName } from '../../shared/utils/roles';
 
 type IntakeColumn = {
   id: string;
@@ -42,6 +52,7 @@ type IntakeColumn = {
 
 const INTAKE_VIEW_STORAGE_KEY = 'aaos_lead_intake_table_view_v2';
 const INTAKE_WIDTH_STORAGE_KEY = 'aaos_lead_intake_table_widths_v2';
+const INTAKE_ACTION_COLUMN_WIDTH = 90;
 
 const INTAKE_COLUMNS: IntakeColumn[] = [
   {
@@ -111,6 +122,12 @@ const LeadIntakeTab: React.FC = () => {
   const [status, setStatus] = useState('');
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(INTAKE_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
+  const currentUser = useAuthStore((state) => state.currentUser);
+  const isSuperAdmin = isSuperAdminRoleName(currentUser?.role);
+  const [cleanupRecord, setCleanupRecord] = useState<LeadIntakeRecord | null>(null);
+  const [cleanupReason, setCleanupReason] = useState('');
+  const [cleanupSubmitting, setCleanupSubmitting] = useState(false);
+  const { alert, dialog: feedbackDialog } = useAppFeedback();
   const {
     viewConfig,
     visibleColumnIds,
@@ -171,7 +188,36 @@ const LeadIntakeTab: React.FC = () => {
     setColumnWidths(resetColumnWidths(DEFAULT_COLUMN_WIDTHS));
   };
 
-  const tableMinWidth = visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || DEFAULT_COLUMN_WIDTHS[column.id] || 120), 0);
+  const handleOpenCleanup = (record: LeadIntakeRecord) => {
+    setCleanupRecord(record);
+    setCleanupReason('');
+  };
+
+  const handleCloseCleanup = () => {
+    setCleanupRecord(null);
+    setCleanupReason('');
+  };
+
+  const handleConfirmCleanup = async () => {
+    if (!cleanupRecord) return;
+    const reason = cleanupReason.trim();
+    if (!reason) return;
+    setCleanupSubmitting(true);
+    try {
+      const res = await leadFlowApi.cleanupIntakeRecord(cleanupRecord.id, reason);
+      if (res.code !== 0) {
+        await alert(res.message || '清理线索入库记录失败');
+        return;
+      }
+      handleCloseCleanup();
+      fetchData(search, status, pagination.page, pagination.pageSize);
+    } finally {
+      setCleanupSubmitting(false);
+    }
+  };
+
+  const tableMinWidth = visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || DEFAULT_COLUMN_WIDTHS[column.id] || 120), 0)
+    + (isSuperAdmin ? INTAKE_ACTION_COLUMN_WIDTH : 0);
 
   const getFrozenLeft = (columnIndex: number) => (
     visibleColumns
@@ -242,6 +288,22 @@ const LeadIntakeTab: React.FC = () => {
                   {column.label}
                 </ResizableHeaderCell>
               ))}
+              {isSuperAdmin && (
+                <TableCell
+                  align="center"
+                  sx={{
+                    position: 'sticky',
+                    right: 0,
+                    zIndex: 5,
+                    width: INTAKE_ACTION_COLUMN_WIDTH,
+                    minWidth: INTAKE_ACTION_COLUMN_WIDTH,
+                    bgcolor: '#f8fafc',
+                    boxShadow: '-1px 0 0 #e5e7eb',
+                  }}
+                >
+                  操作
+                </TableCell>
+              )}
             </TableRow>
           </TableHead>
           <TableBody>
@@ -252,11 +314,31 @@ const LeadIntakeTab: React.FC = () => {
                     {column.render(record)}
                   </TableCell>
                 ))}
+                {isSuperAdmin && (
+                  <TableCell
+                    align="center"
+                    sx={{
+                      position: 'sticky',
+                      right: 0,
+                      zIndex: 4,
+                      width: INTAKE_ACTION_COLUMN_WIDTH,
+                      minWidth: INTAKE_ACTION_COLUMN_WIDTH,
+                      bgcolor: '#fff',
+                      boxShadow: '-1px 0 0 #e5e7eb',
+                    }}
+                  >
+                    <Tooltip title="清理入库记录">
+                      <IconButton size="small" color="error" onClick={() => handleOpenCleanup(record)}>
+                        <DeleteOutlineIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </TableCell>
+                )}
               </TableRow>
             ))}
             {items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={visibleColumns.length} align="center" sx={{ py: 6, color: '#9ca3af' }}>
+                <TableCell colSpan={visibleColumns.length + (isSuperAdmin ? 1 : 0)} align="center" sx={{ py: 6, color: '#9ca3af' }}>
                   暂无入库记录
                 </TableCell>
               </TableRow>
@@ -281,6 +363,41 @@ const LeadIntakeTab: React.FC = () => {
           '& .MuiTablePagination-toolbar': { minHeight: 48 },
         }}
       />
+      <Dialog open={Boolean(cleanupRecord)} onClose={cleanupSubmitting ? undefined : handleCloseCleanup} maxWidth="xs" fullWidth>
+        <DialogCloseTitle onClose={() => {
+          if (!cleanupSubmitting) handleCloseCleanup();
+        }}>清理线索入库记录</DialogCloseTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
+            这里清理的是入库流水记录，不会删除已经入库成功的线索或客户。
+          </Typography>
+          {cleanupRecord && (
+            <Box sx={{ p: 1.5, border: '1px solid #fee2e2', borderRadius: 1, bgcolor: '#fff7ed', mb: 2 }}>
+              <Typography variant="body2">客户：{cleanupRecord.name}</Typography>
+              <Typography variant="body2">状态：{cleanupRecord.status}</Typography>
+            </Box>
+          )}
+          <TextField
+            label="清理原因"
+            value={cleanupReason}
+            onChange={(event) => setCleanupReason(event.target.value)}
+            placeholder="例如：测试入库记录、重复导入记录"
+            multiline
+            minRows={3}
+            required
+            fullWidth
+            autoFocus
+            error={!cleanupReason.trim()}
+            helperText={!cleanupReason.trim() ? '清理原因不能为空' : ' '}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseCleanup} disabled={cleanupSubmitting}>取消</Button>
+          <Button color="error" variant="contained" onClick={handleConfirmCleanup} disabled={!cleanupReason.trim() || cleanupSubmitting}>
+            确认清理
+          </Button>
+        </DialogActions>
+      </Dialog>
       <TableViewSettingsDialog
         open={viewSettingsOpen}
         title="入库情况视图设置"
@@ -296,6 +413,7 @@ const LeadIntakeTab: React.FC = () => {
         onFrozenColumnCountChange={setFrozenColumnCount}
         onReset={handleResetViewConfig}
       />
+      {feedbackDialog}
     </Box>
   );
 };

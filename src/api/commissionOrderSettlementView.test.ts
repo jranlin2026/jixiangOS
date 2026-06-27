@@ -455,6 +455,12 @@ const deletedOrderSummaries = await (commissionApi as any).fetchCommissionOrderS
 const deletedOrderSummary = deletedOrderSummaries.data.items.find((item: any) => item.orderId === 'order-a');
 assert.equal(deletedOrderSummary.sourceOrderDeleted, true);
 assert.equal(deletedOrderSummary.status, zh.withdrawn);
+const cleanupWithdrawnRes = await (commissionApi as any).cleanupDeletedSourceOrderCommissions('order-a', '清理已废弃测试分账');
+assert.equal(cleanupWithdrawnRes.code, 0);
+const cleanedSummaries = await (commissionApi as any).fetchCommissionOrderSummaries({ status: zh.withdrawn, pageSize: 20 });
+assert.equal(cleanedSummaries.data.items.some((item: any) => item.orderId === 'order-a'), false);
+const cleanupLogs = ((await (commissionApi as any).fetchCommissionOperationLogs('order-a')).data || []);
+assert.equal(cleanupLogs.some((item: any) => item.action === '清理废弃分账' && item.reason === '清理已废弃测试分账'), true);
 
 seed();
 await commissionApi.confirmOrderCommissions('order-a', 'prepare chargeback');
@@ -494,6 +500,8 @@ const deleteChargedBackOrder = await orderApi.deleteOrder('order-a');
 assert.equal(deleteChargedBackOrder.code, 0);
 const chargedBackDeletedSummaries = await (commissionApi as any).fetchCommissionOrderSummaries({ status: zh.chargedBack, pageSize: 20 });
 assert.equal(chargedBackDeletedSummaries.data.items.find((item: any) => item.orderId === 'order-a')?.sourceOrderDeleted, true);
+const cleanupChargedBackRes = await (commissionApi as any).cleanupDeletedSourceOrderCommissions('order-a', '不能清理冲销链路');
+assert.notEqual(cleanupChargedBackRes.code, 0);
 
 seed();
 const preConfirmStatementRes = await (commissionApi as any).fetchMonthlyCommissionPayouts('2026-05');

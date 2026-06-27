@@ -203,7 +203,7 @@ function isRelatedOrder(customer: Customer, order: Order): boolean {
 }
 
 function reconcileCustomerOrderStats(customers: Customer[]): Customer[] {
-  const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
+  const orders = (getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).filter((order) => !order.deletedAt);
   let changed = false;
 
   const nextCustomers = customers.map((customer) => {
@@ -270,7 +270,7 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
   if (JSON.stringify(raw) !== JSON.stringify(all)) {
     setStorageData(STORAGE_KEYS.CUSTOMERS, all);
   }
-  let filtered = filterVisibleCustomers(all);
+  let filtered = filterVisibleCustomers(all.filter((customer) => !customer.deletedAt));
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
@@ -309,7 +309,7 @@ async function fetchCustomerById(id: string): Promise<ApiResponse<Customer | nul
   ensureInit();
   await delay(150);
   const customers = reconcileCustomerOrderStats((getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || []).map(normalizeCustomer));
-  const customer = filterVisibleCustomers(customers).find((c) => c.id === id) || null;
+  const customer = filterVisibleCustomers(customers.filter((item) => !item.deletedAt)).find((c) => c.id === id) || null;
   return createSuccessResponse(customer);
 }
 
@@ -485,11 +485,29 @@ async function claimCustomerFromPublicPool(id: string, userName: string): Promis
   return createSuccessResponse(updated ? hydrateCustomerLifecycle(updated) : null);
 }
 
-async function deleteCustomer(id: string): Promise<ApiResponse<boolean>> {
+async function deleteCustomer(id: string, reason = ''): Promise<ApiResponse<boolean>> {
   ensureInit();
   await delay(150);
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
-  setStorageData(STORAGE_KEYS.CUSTOMERS, customers.filter((c) => c.id !== id));
+  const index = customers.findIndex((c) => c.id === id);
+  if (index === -1) return createSuccessResponse(true);
+  const customer = customers[index];
+  const relatedOrders = (getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).filter((order) => (
+    !order.deletedAt
+    && (order.customerId === customer.id || order.customerName === customer.company || order.customerName === customer.name)
+  ));
+  if (relatedOrders.length) {
+    return createErrorResponse('客户存在关联订单，不能删除；请先处理订单后再操作。');
+  }
+  const now = new Date().toISOString();
+  customers[index] = {
+    ...customer,
+    deletedAt: now,
+    deletedBy: getCurrentOperatorName(customer.owner),
+    deleteReason: reason.trim() || '业务删除',
+    updatedAt: now,
+  };
+  setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
   return createSuccessResponse(true);
 }
 

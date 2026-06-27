@@ -48,6 +48,49 @@ export interface FinanceExpense {
   paidAt?: Timestamp;
 }
 
+export type FinanceTransactionDirection = 'income' | 'expense' | 'reversal' | 'freeze';
+
+export type FinanceTransactionSourceType =
+  | 'order_payment'
+  | 'manual_income'
+  | 'manual_expense'
+  | 'refund_expense'
+  | 'commission_payout';
+
+export interface FinanceTransaction {
+  id: ID;
+  transactionNo: string;
+  type: string;
+  direction: FinanceTransactionDirection;
+  sourceType: FinanceTransactionSourceType;
+  sourceId: ID;
+  sourceModule: string;
+  amount: number;
+  status: string;
+  relatedBusiness: string;
+  orderId?: ID;
+  orderNo?: string;
+  customerId?: ID;
+  customerName?: string;
+  productName?: string;
+  productLevel?: ProductLevel;
+  paymentMethod?: PaymentMethod;
+  operatorName?: string;
+  occurredAt: Timestamp;
+  reason?: string;
+}
+
+export interface FinanceTransactionFilters {
+  search?: string;
+  type?: string;
+  direction?: FinanceTransactionDirection | '';
+  status?: string;
+  startDate?: string;
+  endDate?: string;
+  page?: number;
+  pageSize?: number;
+}
+
 /** 财务统计 */
 export interface FinanceStats {
   totalRevenue: number;

@@ -28,8 +28,8 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ReplayIcon from '@mui/icons-material/Replay';
 import BlockIcon from '@mui/icons-material/Block';
 import EditIcon from '@mui/icons-material/Edit';
-import RefreshIcon from '@mui/icons-material/Refresh';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { canReviewOrderApplications, customerApi, orderApi, orderReviewApi, ORDER_APPLICATION_STATUSES } from '../../api';
@@ -43,6 +43,8 @@ import CustomerDetail from '../Customers/CustomerDetail';
 import OrderForm from '../Orders/OrderForm';
 import { getProductLevelRowSx, getProductLevelTagSx, normalizeResourceOwnership, ROUTES } from '../../shared/utils/constants';
 import { getCurrentOperatorUser } from '../../shared/utils/currentOperator';
+import { isSuperAdminRoleName } from '../../shared/utils/roles';
+import useAppFeedback from '../../shared/hooks/useAppFeedback';
 
 type ReviewAction = {
   type: 'approve' | 'return' | 'reject';
@@ -69,7 +71,7 @@ type ReviewViewConfig = {
 
 const REVIEW_VIEW_STORAGE_KEY = 'aaos_order_review_table_view_v1';
 const REVIEW_VIEW_SCHEMA_VERSION = 1;
-const REVIEW_ACTION_COLUMN_WIDTH = 112;
+const REVIEW_ACTION_COLUMN_WIDTH = 148;
 
 const REVIEW_COLUMNS: ReviewColumn[] = [
   { id: 'applicationNo', label: '申请编号' },
@@ -192,8 +194,13 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
   const [approvedApplication, setApprovedApplication] = useState<OrderApplication | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [customerOpen, setCustomerOpen] = useState(false);
+  const [cleanupApplication, setCleanupApplication] = useState<OrderApplication | null>(null);
+  const [cleanupReason, setCleanupReason] = useState('');
+  const [cleanupSubmitting, setCleanupSubmitting] = useState(false);
   const reviewer = useMemo(() => canReviewOrderApplications(), []);
   const currentUser = useMemo(() => getCurrentOperatorUser(), []);
+  const isSuperAdmin = isSuperAdminRoleName(currentUser?.role);
+  const { alert, dialog: feedbackDialog } = useAppFeedback();
   const navigate = useNavigate();
 
   const loadItems = async (nextFilters = filters) => {
@@ -294,6 +301,16 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
     setReviewReason('');
   };
 
+  const openCleanupDialog = (application: OrderApplication) => {
+    setCleanupApplication(application);
+    setCleanupReason('');
+  };
+
+  const closeCleanupDialog = () => {
+    setCleanupApplication(null);
+    setCleanupReason('');
+  };
+
   const submitReviewAction = async () => {
     if (!reviewAction) return;
 
@@ -312,6 +329,24 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
 
     closeReviewDialog();
     loadItems();
+  };
+
+  const handleCleanupApplication = async () => {
+    if (!cleanupApplication) return;
+    const reason = cleanupReason.trim();
+    if (!reason) return;
+    setCleanupSubmitting(true);
+    try {
+      const res = await orderReviewApi.cleanupDeletedSourceOrderApplication(cleanupApplication.id, reason);
+      if (res.code !== 0) {
+        await alert(res.message || '清理订单审核记录失败');
+        return;
+      }
+      closeCleanupDialog();
+      await loadItems();
+    } finally {
+      setCleanupSubmitting(false);
+    }
   };
 
   const viewFormalOrder = (application?: OrderApplication | null) => {
@@ -469,8 +504,6 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
     || Boolean(currentUser?.name && !application.applicantId && application.applicantName === currentUser.name)
   );
 
-  const reload = () => loadItems(filters);
-
   return (
     <Box sx={embedded ? { pt: 1 } : { p: 3 }}>
       {!embedded && (
@@ -481,9 +514,6 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
               销售提交后先进入审核台，财务审核通过才生成正式订单和提成。
             </Typography>
           </Box>
-          <Button variant="outlined" startIcon={<RefreshIcon />} onClick={reload} disabled={loading}>
-            刷新
-          </Button>
         </Box>
       )}
 
@@ -508,11 +538,6 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
             ))}
           </Select>
         </FormControl>
-        {embedded && (
-          <Button variant="outlined" startIcon={<RefreshIcon />} onClick={reload} disabled={loading}>
-            刷新
-          </Button>
-        )}
       </Box>
 
       <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
@@ -545,6 +570,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
               const canFinanceOperate = reviewer && application.status === ORDER_APPLICATION_STATUSES.PENDING_REVIEW;
               const canResubmit = application.status === ORDER_APPLICATION_STATUSES.RETURNED && (!reviewer || isCurrentUserApplicant(application));
               const canViewFormalOrder = application.status === ORDER_APPLICATION_STATUSES.APPROVED && Boolean(application.orderId);
+              const canCleanupApplication = isSuperAdmin && application.status === ORDER_APPLICATION_STATUSES.APPROVED && Boolean(application.orderId);
               return (
                 <TableRow key={application.id} hover sx={getProductLevelRowSx(application.orderData.productLevel)}>
                   {visibleColumns.map((column, columnIndex) => (
@@ -565,6 +591,13 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                   ))}
                   <TableCell align="center" sx={actionColumnSx}>
                     <Box sx={{ display: 'flex', gap: 0.25, justifyContent: 'center', flexWrap: 'wrap' }}>
+                      {canCleanupApplication && (
+                        <Tooltip title="清理已删除订单的审核记录">
+                          <IconButton aria-label="清理订单审核记录" size="small" color="error" onClick={() => openCleanupDialog(application)}>
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                       {canFinanceOperate && (
                         <>
                           <Tooltip title="入库">
@@ -761,6 +794,43 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
         </DialogActions>
       </Dialog>
 
+      <Dialog open={Boolean(cleanupApplication)} onClose={cleanupSubmitting ? undefined : closeCleanupDialog} maxWidth="xs" fullWidth>
+        <DialogCloseTitle onClose={() => {
+          if (!cleanupSubmitting) closeCleanupDialog();
+        }}>清理订单审核记录</DialogCloseTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
+            仅用于清理正式订单已经删除后的审核台残留记录。正式订单仍存在、未入库申请或已进入财务链路的数据不会被清理。
+          </Typography>
+          {cleanupApplication && (
+            <Box sx={{ p: 1.5, border: '1px solid #fee2e2', borderRadius: 1, bgcolor: '#fff7ed', mb: 2 }}>
+              <Typography variant="body2">申请编号：{cleanupApplication.applicationNo}</Typography>
+              <Typography variant="body2">正式订单号：{cleanupApplication.orderNo || '-'}</Typography>
+              <Typography variant="body2">客户：{cleanupApplication.orderData.customerName}</Typography>
+            </Box>
+          )}
+          <TextField
+            label="清理原因"
+            value={cleanupReason}
+            onChange={(event) => setCleanupReason(event.target.value)}
+            placeholder="例如：正式订单已进入回收站，审核台保留记录影响核对"
+            multiline
+            minRows={3}
+            required
+            fullWidth
+            autoFocus
+            error={!cleanupReason.trim()}
+            helperText={!cleanupReason.trim() ? '清理原因不能为空' : ' '}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeCleanupDialog} disabled={cleanupSubmitting}>取消</Button>
+          <Button color="error" variant="contained" onClick={handleCleanupApplication} disabled={!cleanupReason.trim() || cleanupSubmitting}>
+            确认清理
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog open={Boolean(detailApplication)} onClose={() => setDetailApplication(null)} maxWidth="md" fullWidth>
         {detailApplication && (
           <>
@@ -918,6 +988,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
           </>
         )}
       </Dialog>
+      {feedbackDialog}
     </Box>
   );
 };

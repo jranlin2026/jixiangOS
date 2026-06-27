@@ -2,12 +2,13 @@ import type { Customer } from '../types/customer';
 import type { Lead, LeadFlowConfig, LeadIntakeRecord } from '../types/lead';
 import type { User } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
-import { createSuccessResponse, delay } from './types';
+import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
 import { DEFAULT_LEAD_FLOW_CONFIG, DEFAULT_PAGE_SIZE, LIFECYCLE_STATUS_CODES, STORAGE_KEYS, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
-import { getCurrentOperatorName, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
+import { getCurrentOperatorName, getCurrentOperatorUser, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
+import { isSuperAdminRoleName } from '../shared/utils/roles';
 import { hydrateLeadLifecycle } from './lifecycleSync';
 import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
 import { canReceiveLead } from '../shared/utils/permissions';
@@ -296,6 +297,21 @@ async function fetchIntakeRecords(filters?: { status?: string; search?: string; 
   });
 }
 
+async function cleanupIntakeRecord(id: string, reason: string): Promise<ApiResponse<boolean>> {
+  ensureInit();
+  await delay(120);
+  if (!isSuperAdminRoleName(getCurrentOperatorUser()?.role)) {
+    return createErrorResponse('仅超级管理员可以清理线索入库记录', 403);
+  }
+  const normalizedReason = reason.trim();
+  if (!normalizedReason) return createErrorResponse('清理线索入库记录必须填写原因');
+
+  const records = getStorageData<LeadIntakeRecord[]>(STORAGE_KEYS.LEAD_INTAKE_RECORDS) || [];
+  if (!records.some((record) => record.id === id)) return createErrorResponse('线索入库记录不存在', 404);
+  setStorageData(STORAGE_KEYS.LEAD_INTAKE_RECORDS, records.filter((record) => record.id !== id));
+  return createSuccessResponse(true);
+}
+
 function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followUpRecords'>): { lead: Lead | null; message: string } {
   const config = ensureLeadFlowConfig();
   const now = new Date().toISOString();
@@ -487,6 +503,7 @@ export const leadFlowApi = {
   fetchLeadFlowConfig,
   updateLeadFlowConfig,
   fetchIntakeRecords,
+  cleanupIntakeRecord,
   intakeLead,
   syncCustomerByLead,
   manualAssignLead,

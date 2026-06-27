@@ -101,6 +101,9 @@ export interface Order {
   deliveryId?: ID;
   notes?: string;
   changeHistory?: OrderChangeLog[];
+  deletedAt?: Timestamp;
+  deletedBy?: string;
+  deleteReason?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

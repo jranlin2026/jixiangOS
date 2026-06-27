@@ -39,6 +39,7 @@ import SupervisorAccountIcon from '@mui/icons-material/SupervisorAccount';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import { format } from 'date-fns';
 import { customerApi, deliveryApi, orderApi, productApi, settingsApi } from '../../api';
 import CustomerDetail from '../Customers/CustomerDetail';
 import OrderDetail from '../Orders/OrderDetail';
@@ -165,7 +166,7 @@ function formatDateTime(value?: string) {
   if (!value) return '-';
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return value;
-  return date.toLocaleString('zh-CN', { hour12: false });
+  return format(date, 'yyyy-MM-dd HH:mm:ss');
 }
 
 function getStatusColor(status?: Delivery['status']): 'default' | 'success' | 'error' | 'warning' | 'info' {

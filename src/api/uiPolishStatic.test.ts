@@ -42,7 +42,9 @@ const customerDetailSource = readFileSync(join(projectRoot, 'src/pages/Customers
 const leadsPageSource = readFileSync(join(projectRoot, 'src/pages/Leads/index.tsx'), 'utf8');
 const leadDetailSource = readFileSync(join(projectRoot, 'src/pages/Leads/LeadDetail.tsx'), 'utf8');
 const leadIntakeSource = readFileSync(join(projectRoot, 'src/pages/Leads/LeadIntakeTab.tsx'), 'utf8');
+const leadFlowApiSource = readFileSync(join(projectRoot, 'src/api/leadFlowApi.ts'), 'utf8');
 const orderApiSource = readFileSync(join(projectRoot, 'src/api/orderApi.ts'), 'utf8');
+const orderReviewApiSource = readFileSync(join(projectRoot, 'src/api/orderReviewApi.ts'), 'utf8');
 const ordersPageSource = readFileSync(join(projectRoot, 'src/pages/Orders/index.tsx'), 'utf8');
 const orderFormSource = readFileSync(join(projectRoot, 'src/pages/Orders/OrderForm.tsx'), 'utf8');
 const orderDetailSource = readFileSync(join(projectRoot, 'src/pages/Orders/OrderDetail.tsx'), 'utf8');
@@ -54,6 +56,7 @@ const dataMaintenanceSource = readFileSync(join(projectRoot, 'src/pages/Settings
 const commissionSource = readFileSync(join(projectRoot, 'src/pages/Commission/index.tsx'), 'utf8');
 const commissionRuleConfigSource = readFileSync(join(projectRoot, 'src/pages/Commission/CommissionRuleConfig.tsx'), 'utf8');
 const financeSource = readFileSync(join(projectRoot, 'src/pages/Finance/index.tsx'), 'utf8');
+const financeApiSource = readFileSync(join(projectRoot, 'src/api/financeApi.ts'), 'utf8');
 const refundCenterSource = readFileSync(join(projectRoot, 'src/pages/RefundCenter/index.tsx'), 'utf8');
 const employeeDepartmentSource = readFileSync(join(projectRoot, 'src/pages/Settings/EmployeeDepartmentManagement.tsx'), 'utf8');
 const detailSplitEditorSource = commissionSource.slice(
@@ -162,6 +165,36 @@ assert.match(
   'Lead intake records table must show who entered the lead.',
 );
 assert.match(
+  orderReviewApiSource,
+  /cleanupDeletedSourceOrderApplication/,
+  'Order review API should expose cleanup for approved applications whose source order was deleted.',
+);
+assert.match(
+  orderReviewSource,
+  /(?:清理订单审核记录[\s\S]*cleanupDeletedSourceOrderApplication|cleanupDeletedSourceOrderApplication[\s\S]*清理订单审核记录)/,
+  'Order review page should let super admins clean stale approved records for deleted formal orders.',
+);
+assert.match(
+  leadsPageSource,
+  /(?:删除线索到业务回收站[\s\S]*leadApi\.deleteLead|leadApi\.deleteLead[\s\S]*删除线索到业务回收站)/,
+  'Lead list should let super admins soft-delete leads into the business recycle bin.',
+);
+assert.match(
+  leadFlowApiSource,
+  /cleanupIntakeRecord/,
+  'Lead flow API should expose super-admin cleanup for intake records.',
+);
+assert.match(
+  leadIntakeSource,
+  /(?:清理入库记录[\s\S]*cleanupIntakeRecord|cleanupIntakeRecord[\s\S]*清理入库记录)/,
+  'Lead intake records table should let super admins clean intake records.',
+);
+assert.match(
+  customersPageSource,
+  /(?:删除客户到业务回收站[\s\S]*customerApi\.deleteCustomer|customerApi\.deleteCustomer[\s\S]*删除客户到业务回收站)/,
+  'Customer list should let super admins soft-delete customers into the business recycle bin.',
+);
+assert.match(
   orderReviewSource,
   /<IconButton[\s\S]*openApproveDialog/,
   'Order review action column should use compact icon buttons for review operations.',
@@ -185,6 +218,11 @@ assert.match(
   ordersPageSource,
   /if\s*\(\s*activeTab\s*!==\s*'list'\s*\)\s*return;[\s\S]*fetchItems\(\{\s*\.\.\.filters,\s*paymentMethod:\s*undefined\s*\}\)/,
   'Order list must refresh when returning from the review tab after an approval creates a formal order.',
+);
+assert.match(
+  ordersPageSource,
+  /items\.length\s*===\s*0[\s\S]*colSpan=\{visibleColumns\.length \+ 1\}[\s\S]*暂无订单数据/,
+  'Order list table should render an empty-state row like the other CRM tables instead of collapsing to header plus pagination.',
 );
 assert.match(
   orderFormSource,
@@ -227,9 +265,14 @@ assert.match(
   'Order review must display product name with product level as fallback.',
 );
 assert.match(
-  financeSource,
+  financeApiSource,
   /productName\s*\|\|[\s\S]*productLevel/,
-  'Finance income table must show product name with product level as fallback.',
+  'Finance flow generation must show product name with product level as fallback.',
+);
+assert.match(
+  financeSource,
+  /业务核账流水[\s\S]*流水编号[\s\S]*关联业务[\s\S]*流水详情/,
+  'Finance flow tab should be designed as a unified business ledger, not separate income and expense tables.',
 );
 assert.match(
   commissionSource,
@@ -315,7 +358,7 @@ assert.match(
 );
 assert.match(
   orderReviewSource,
-  /付款时间[\s\S]*formatDate\(detailApplication\.orderData\.payments\?\.\[0\]\?\.paidAt,\s*'yyyy-MM-dd HH:mm:ss'\)/,
+  /付款时间[\s\S]*detailApplication\.orderData\.payments\.map[\s\S]*formatDate\(payment\.paidAt,\s*'yyyy-MM-dd HH:mm:ss'\)/,
   'Order review payment time should be precise to seconds.',
 );
 assert.match(
@@ -335,12 +378,12 @@ assert.match(
 );
 assert.match(
   financeSource,
-  /formatDate\(income\.receivedAt,\s*'yyyy-MM-dd HH:mm:ss'\)/,
-  'Finance income received time should be precise to seconds.',
+  /formatDate\(row\.occurredAt,\s*'yyyy-MM-dd HH:mm:ss'\)/,
+  'Finance flow occurred time should be precise to seconds.',
 );
 assert.match(
   deliverySource,
-  /case 'paymentDate':[\s\S]*formatDate\(delivery\.paymentDate,\s*'yyyy-MM-dd HH:mm:ss'\)/,
+  /function formatDateTime[\s\S]*format\(date,\s*'yyyy-MM-dd HH:mm:ss'\)[\s\S]*case 'paymentDate':[\s\S]*formatDateTime\(delivery\.paymentDate\)/,
   'Delivery order payment date should be precise to seconds.',
 );
 assert.match(
@@ -400,7 +443,7 @@ assert.match(
 );
 assert.match(
   detailSplitEditorSource,
-  /提成方案[\s\S]*planOptionsForSplit[\s\S]*方案摘要/,
+  /提成方案[\s\S]*planOptionsForSplit[\s\S]*planText/,
   'Order split adjustment editor should choose a commission payout plan instead of editing calculation type directly.',
 );
 assert.match(

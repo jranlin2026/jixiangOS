@@ -89,7 +89,7 @@ function syncCustomerOrderStats(order: Order, allOrders: Order[], operator = SYS
   if (customerIdx === -1) return;
 
   const customer = customers[customerIdx];
-  const relatedOrders = allOrders.filter(
+  const relatedOrders = allOrders.filter((item) => !item.deletedAt).filter(
     (item) => item.customerId === customer.id
       || item.customerName === customer.company
       || item.customerName === customer.name,
@@ -251,7 +251,7 @@ async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<Paginate
   const raw = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
   const all = raw.map(normalizeOrder);
   if (JSON.stringify(raw) !== JSON.stringify(all)) setStorageData(STORAGE_KEYS.ORDERS, all);
-  let filtered = filterVisibleOrders(all);
+  let filtered = filterVisibleOrders(all.filter((order) => !order.deletedAt));
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
@@ -313,13 +313,13 @@ async function fetchOrderById(id: string): Promise<ApiResponse<Order | null>> {
   const raw = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
   const orders = raw.map(normalizeOrder);
   if (JSON.stringify(raw) !== JSON.stringify(orders)) setStorageData(STORAGE_KEYS.ORDERS, orders);
-  return createSuccessResponse(filterVisibleOrders(orders).find((o) => o.id === id) || null);
+  return createSuccessResponse(filterVisibleOrders(orders.filter((order) => !order.deletedAt)).find((o) => o.id === id) || null);
 }
 
 async function fetchOrderStats(): Promise<ApiResponse<OrderStats>> {
   ensureInit();
   await delay(200);
-  const orders = filterVisibleOrders((getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).map(normalizeOrder));
+  const orders = filterVisibleOrders((getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).map(normalizeOrder).filter((order) => !order.deletedAt));
   const now = new Date();
   const today = now.toISOString().split('T')[0];
   const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
@@ -354,7 +354,7 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
   const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
   const now = new Date().toISOString();
   const operator = getCurrentOperatorName(orderData.owner);
-  const orderNo = `ORD-${now.slice(0, 10).replace(/-/g, '')}-${String(orders.length + 1).padStart(4, '0')}`;
+  const orderNo = `ORD-${now.slice(0, 10).replace(/-/g, '')}-${String(orders.filter((order) => !order.deletedAt).length + 1).padStart(4, '0')}`;
 
   const newOrder: Order = {
     ...orderData,
@@ -547,11 +547,13 @@ async function updateOrder(id: string, data: Partial<Order>): Promise<ApiRespons
   return createSuccessResponse(orders[idx]);
 }
 
-async function deleteOrder(id: string): Promise<ApiResponse<boolean>> {
+async function deleteOrder(id: string, reason = ''): Promise<ApiResponse<boolean>> {
   ensureInit();
   await delay(150);
   const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
-  const target = orders.find((o) => o.id === id);
+  const index = orders.findIndex((o) => o.id === id);
+  const target = index >= 0 ? orders[index] : undefined;
+  if (!target) return createSuccessResponse(true);
   const relatedCommissions = (getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [])
     .filter((commission) => commission.orderId === id);
   const hasPaidOrChargeback = relatedCommissions.some((commission) => (
@@ -567,9 +569,16 @@ async function deleteOrder(id: string): Promise<ApiResponse<boolean>> {
   if (hasActiveCommission) {
     return createErrorResponse('该订单已有分账记录，不能直接删除。请先到财务中心处理提成撤回/冲销。');
   }
-  const nextOrders = orders.filter((o) => o.id !== id);
-  setStorageData(STORAGE_KEYS.ORDERS, nextOrders);
-  if (target) syncCustomerOrderStats(target, nextOrders);
+  const now = new Date().toISOString();
+  orders[index] = {
+    ...target,
+    deletedAt: now,
+    deletedBy: getCurrentOperatorName(target.owner || target.salesName),
+    deleteReason: reason.trim() || '业务删除',
+    updatedAt: now,
+  };
+  setStorageData(STORAGE_KEYS.ORDERS, orders);
+  syncCustomerOrderStats(orders[index], orders);
   return createSuccessResponse(true);
 }
 

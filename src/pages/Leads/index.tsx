@@ -32,6 +32,7 @@ import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import useLeadStore from '../../store/useLeadStore';
 import { getLifecycleConfigByCode, getLifecycleStatusTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatPaginationRows } from '../../shared/utils/formatters';
@@ -41,7 +42,7 @@ import { formatPhoneForDisplay } from '../../shared/utils/phoneNumber';
 import LeadBulkImportDialog from './LeadBulkImportDialog';
 import LeadIntakeTab from './LeadIntakeTab';
 import type { Lead } from '../../types/lead';
-import { leadBulkImportApi, leadFlowApi, roleApi, settingsApi } from '../../api';
+import { leadApi, leadBulkImportApi, leadFlowApi, roleApi, settingsApi } from '../../api';
 import type { LeadSourceConfig, LifecycleStatusConfig, User } from '../../types/settings';
 import type { Role } from '../../types/role';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
@@ -59,6 +60,7 @@ import ResizableHeaderCell, {
 } from '../../shared/components/ResizableTable';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import { isSuperAdminRoleName } from '../../shared/utils/roles';
 
 type LeadColumn = {
   id: string;
@@ -76,7 +78,7 @@ type LeadViewConfig = {
 const LEAD_VIEW_STORAGE_KEY = 'aaos_lead_table_view_v9';
 const LEAD_VIEW_SCHEMA_VERSION = 9;
 const LEAD_WIDTH_STORAGE_KEY = 'aaos_lead_table_column_widths_v4';
-const LEAD_ACTION_COLUMN_WIDTH = 150;
+const LEAD_ACTION_COLUMN_WIDTH = 180;
 
 const getAssignedSalesName = (lead: Lead) => {
   const name = lead.assignedTo || lead.owner || '';
@@ -247,6 +249,9 @@ const Leads: React.FC = () => {
   const [assignLead, setAssignLead] = useState<Lead | null>(null);
   const [assignSalesName, setAssignSalesName] = useState('');
   const [templateDownloading, setTemplateDownloading] = useState(false);
+  const [deleteLeadTarget, setDeleteLeadTarget] = useState<Lead | null>(null);
+  const [deleteLeadReason, setDeleteLeadReason] = useState('');
+  const [deleteLeadSubmitting, setDeleteLeadSubmitting] = useState(false);
 
   const columns = useMemo(() => buildColumns(lifecycleConfigs), [lifecycleConfigs]);
   const [viewConfig, setViewConfig] = useState<LeadViewConfig>(() => readLeadViewConfig(buildColumns([])));
@@ -301,6 +306,7 @@ const Leads: React.FC = () => {
   const canViewLeadDetail = hasPermission(currentUser, PERMISSION_KEYS.LEADS_DETAIL);
   const canStartFollowLead = hasPermission(currentUser, PERMISSION_KEYS.LEADS_FOLLOW);
   const canAssignLeads = hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG);
+  const isSuperAdmin = isSuperAdminRoleName(currentUser?.role);
 
   useEffect(() => {
     if (activeTab === 0 && !canViewLeadList && canViewLeadIntake) setActiveTab(1);
@@ -349,6 +355,34 @@ const Leads: React.FC = () => {
     setAssignLead(null);
     setAssignSalesName('');
     fetchItems(filters);
+  };
+
+  const handleOpenDeleteLead = (lead: Lead) => {
+    setDeleteLeadTarget(lead);
+    setDeleteLeadReason('');
+  };
+
+  const handleCloseDeleteLead = () => {
+    setDeleteLeadTarget(null);
+    setDeleteLeadReason('');
+  };
+
+  const handleConfirmDeleteLead = async () => {
+    if (!deleteLeadTarget) return;
+    const reason = deleteLeadReason.trim();
+    if (!reason) return;
+    setDeleteLeadSubmitting(true);
+    try {
+      const res = await leadApi.deleteLead(deleteLeadTarget.id, reason);
+      if (res.code !== 0) {
+        await alert(res.message || '删除线索失败');
+        return;
+      }
+      handleCloseDeleteLead();
+      fetchItems(filters);
+    } finally {
+      setDeleteLeadSubmitting(false);
+    }
   };
 
   const handleCreate = () => {
@@ -586,6 +620,13 @@ const Leads: React.FC = () => {
                       </TableCell>
                     ))}
                     <TableCell align="center" sx={actionColumnSx}>
+                      {isSuperAdmin && (
+                        <Tooltip title="删除线索到业务回收站">
+                          <IconButton size="small" color="error" onClick={() => handleOpenDeleteLead(lead)}>
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                       {canViewLeadDetail && (
                         <Tooltip title="查看线索">
                           <IconButton size="small" onClick={() => handleViewDetail(lead)}>
@@ -698,6 +739,42 @@ const Leads: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button variant="contained" onClick={handleAssignLead}>保存</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteLeadTarget)} onClose={deleteLeadSubmitting ? undefined : handleCloseDeleteLead} maxWidth="xs" fullWidth>
+        <DialogCloseTitle onClose={() => {
+          if (!deleteLeadSubmitting) handleCloseDeleteLead();
+        }}>删除线索</DialogCloseTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
+            删除后线索会进入业务回收站，超级管理员可在系统维护中恢复或永久删除。
+          </Typography>
+          {deleteLeadTarget && (
+            <Box sx={{ p: 1.5, border: '1px solid #fee2e2', borderRadius: 1, bgcolor: '#fff7ed', mb: 2 }}>
+              <Typography variant="body2">线索：{deleteLeadTarget.name}</Typography>
+              <Typography variant="body2">公司：{deleteLeadTarget.company || '-'}</Typography>
+            </Box>
+          )}
+          <TextField
+            label="删除原因"
+            value={deleteLeadReason}
+            onChange={(event) => setDeleteLeadReason(event.target.value)}
+            placeholder="例如：测试数据、重复录入、无效线索"
+            multiline
+            minRows={3}
+            required
+            fullWidth
+            autoFocus
+            error={!deleteLeadReason.trim()}
+            helperText={!deleteLeadReason.trim() ? '删除原因不能为空' : ' '}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDeleteLead} disabled={deleteLeadSubmitting}>取消</Button>
+          <Button color="error" variant="contained" onClick={handleConfirmDeleteLead} disabled={!deleteLeadReason.trim() || deleteLeadSubmitting}>
+            确认删除
+          </Button>
         </DialogActions>
       </Dialog>
 

@@ -682,6 +682,32 @@ const Orders: React.FC = () => {
                     </TableRow>
                   );
                 })}
+                {items.length === 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={visibleColumns.length + 1}
+                      align="center"
+                      sx={{
+                        p: 0,
+                        color: '#9ca3af',
+                        bgcolor: '#fff',
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          py: 6,
+                          position: 'sticky',
+                          left: 0,
+                          width: 'calc(100vw - 360px)',
+                          maxWidth: '100vw',
+                          textAlign: 'center',
+                        }}
+                      >
+                        暂无订单数据
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </TableContainer>

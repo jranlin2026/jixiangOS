@@ -88,6 +88,9 @@ export interface Lead {
   city?: string;
   estimatedProductId?: ID;
   changeHistory?: LeadChangeLog[];
+  deletedAt?: Timestamp;
+  deletedBy?: string;
+  deleteReason?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
   followUpRecords: FollowUpRecord[];

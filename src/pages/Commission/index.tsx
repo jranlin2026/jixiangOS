@@ -68,6 +68,7 @@ import type {
   CommissionPayoutPlan,
   CommissionRole,
   CommissionRoleConfig,
+  CommissionTier,
   MonthlyCommissionRoleSummary,
   MonthlyCommissionPayout,
 } from '../../types/commission';
@@ -314,6 +315,10 @@ const Commission: React.FC<CommissionProps> = ({
   const [payoutLoading, setPayoutLoading] = useState(false);
   const [payoutConfirmAction, setPayoutConfirmAction] = useState<PayoutConfirmAction | null>(null);
   const [payoutActionLoading, setPayoutActionLoading] = useState(false);
+  const [tierConfigOpen, setTierConfigOpen] = useState(false);
+  const [tierConfigRows, setTierConfigRows] = useState<CommissionTier[]>([]);
+  const [tierConfigError, setTierConfigError] = useState('');
+  const [tierConfigLoading, setTierConfigLoading] = useState(false);
 
   const [commissionRoleConfigs, setCommissionRoleConfigs] = useState<CommissionRoleConfig[]>([]);
   const [payoutPlans, setPayoutPlans] = useState<CommissionPayoutPlan[]>([]);
@@ -832,14 +837,23 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const canDeleteOrderSplitSummary = (summary: CommissionOrderSummary) => (
-    !summary.sourceOrderDeleted
-    && ['待处理', '待确认'].includes(summary.status)
-    && summary.commissions.length > 0
-    && summary.commissions.every((commission) => commission.status === '待确认')
+    summary.commissions.length > 0
+    && (
+      summary.sourceOrderDeleted
+        ? summary.commissions.every((commission) => !['已发放', '待冲销', '已冲销'].includes(commission.status))
+        : ['待处理', '待确认'].includes(summary.status)
+          && summary.commissions.every((commission) => commission.status === '待确认')
+    )
   );
 
   const getDeleteOrderSplitDisabledReason = (summary: CommissionOrderSummary) => {
-    if (summary.sourceOrderDeleted) return '源订单已删除，只能查看明细和历史';
+    if (summary.sourceOrderDeleted) {
+      if (!summary.commissions.length) return '没有可清理的废弃分账';
+      if (!summary.commissions.every((commission) => !['已发放', '待冲销', '已冲销'].includes(commission.status))) {
+        return '已发放、待冲销或已冲销的分账不能清理，请继续走冲销/留痕流程';
+      }
+      return '清理废弃分账';
+    }
     if (!summary.commissions.length) return '该订单没有可删除的分账';
     if (!['待处理', '待确认'].includes(summary.status)) return '已进入发放或冲销链路，请使用撤回/冲销流程';
     if (!summary.commissions.every((commission) => commission.status === '待确认')) return '仅待确认阶段的分账可直接删除';
@@ -1189,9 +1203,12 @@ const Commission: React.FC<CommissionProps> = ({
   const confirmDeleteOrderSplit = async () => {
     if (!deleteSummary || !deleteReason.trim()) return;
     const deletingOrderId = deleteSummary.orderId;
+    const shouldCleanupDeletedSource = deleteSummary.sourceOrderDeleted;
     setDeleteLoading(true);
     try {
-      const res = await commissionApi.deleteOrderCommissions(deletingOrderId, deleteReason);
+      const res = shouldCleanupDeletedSource
+        ? await commissionApi.cleanupDeletedSourceOrderCommissions(deletingOrderId, deleteReason)
+        : await commissionApi.deleteOrderCommissions(deletingOrderId, deleteReason);
       if (res.code === 0) {
         setDeleteSummary(null);
         setDeleteReason('');
@@ -1369,6 +1386,73 @@ const Commission: React.FC<CommissionProps> = ({
     } finally {
       setPayoutActionLoading(false);
     }
+  };
+
+  const normalizeTierRowsForEditor = (tiers?: CommissionTier[]) => (
+    (tiers?.length ? tiers : [
+      { minAmount: 0, maxAmount: 30000, rate: 8 },
+      { minAmount: 30000, maxAmount: 50000, rate: 10 },
+      { minAmount: 50000, rate: 15 },
+    ])
+      .map((tier) => ({
+        minAmount: Number(tier.minAmount) || 0,
+        ...(tier.maxAmount === undefined || tier.maxAmount === null || Number(tier.maxAmount) <= 0 ? {} : { maxAmount: Number(tier.maxAmount) }),
+        rate: Number(tier.rate) || 0,
+      }))
+      .sort((a, b) => a.minAmount - b.minAmount)
+  );
+
+  const openTierConfig = async () => {
+    if (!payoutPeriod) return;
+    setTierConfigError('');
+    setTierConfigLoading(true);
+    const res = await commissionApi.fetchMonthlyCommissionTierConfig(payoutPeriod);
+    setTierConfigLoading(false);
+    if (res.code !== 0) {
+      setTierConfigError(res.message || '读取阶梯配置失败');
+      return;
+    }
+    setTierConfigRows(normalizeTierRowsForEditor(res.data.tiers));
+    setTierConfigOpen(true);
+  };
+
+  const updateTierConfigRow = <K extends keyof CommissionTier>(index: number, key: K, value: CommissionTier[K]) => {
+    setTierConfigRows((prev) => normalizeTierRowsForEditor(prev).map((tier, currentIndex) => (
+      currentIndex === index ? { ...tier, [key]: value } : tier
+    )));
+  };
+
+  const addTierConfigRow = () => {
+    setTierConfigRows((prev) => {
+      const rows = normalizeTierRowsForEditor(prev);
+      const last = rows[rows.length - 1] || { minAmount: 0, rate: 8 };
+      const nextMin = last.maxAmount ?? last.minAmount + 10000;
+      return [
+        ...rows.slice(0, -1),
+        { ...last, maxAmount: nextMin },
+        { minAmount: nextMin, rate: last.rate },
+      ];
+    });
+  };
+
+  const removeTierConfigRow = (index: number) => {
+    setTierConfigRows((prev) => {
+      const rows = normalizeTierRowsForEditor(prev).filter((_, currentIndex) => currentIndex !== index);
+      return normalizeTierRowsForEditor(rows);
+    });
+  };
+
+  const saveTierConfig = async () => {
+    if (!payoutPeriod) return;
+    setTierConfigLoading(true);
+    const res = await commissionApi.saveMonthlyCommissionTierConfig(payoutPeriod, normalizeTierRowsForEditor(tierConfigRows));
+    setTierConfigLoading(false);
+    if (res.code !== 0) {
+      setTierConfigError(res.message || '保存阶梯配置失败');
+      return;
+    }
+    setTierConfigOpen(false);
+    await refreshAll();
   };
 
   const exportMonthlyStatement = () => {
@@ -1925,6 +2009,9 @@ const Commission: React.FC<CommissionProps> = ({
                   <Typography variant="body2" sx={{ color: '#374151', overflowWrap: 'anywhere' }}>{log.reason}</Typography>
                 </Box>
               )}
+              <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700 }}>
+                本次记录
+              </Typography>
               {splitSnapshot.length > 0 ? (
                 splitSnapshot.map((item, index) => (
                   <Box
@@ -2518,6 +2605,11 @@ const Commission: React.FC<CommissionProps> = ({
           InputLabelProps={{ shrink: true }}
         />
         {!hidePayoutFinanceActions && (
+          <Button variant="outlined" startIcon={<EditIcon />} disabled={tierConfigLoading} onClick={openTierConfig}>
+            阶梯配置
+          </Button>
+        )}
+        {!hidePayoutFinanceActions && (
           <Tooltip title="按当前月份可发放提成生成发放单，待确认、已撤回和待冲销明细不进入可发放金额">
             <Button variant="outlined" startIcon={<PaymentsIcon />} disabled={payoutActionLoading} onClick={generateMonthlyBatch}>生成发放单</Button>
           </Tooltip>
@@ -2654,6 +2746,81 @@ const Commission: React.FC<CommissionProps> = ({
         </Table>
       </TableContainer>
       )}
+
+      <Dialog open={tierConfigOpen} onClose={() => !tierConfigLoading && setTierConfigOpen(false)} maxWidth="md" fullWidth>
+        <DialogCloseTitle onClose={() => !tierConfigLoading && setTierConfigOpen(false)}>
+          阶梯配置
+        </DialogCloseTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <Typography variant="body2" sx={{ color: '#64748b' }}>
+              当前月份：{payoutPeriod}。销售月累计阶梯配置按月份保存，全员共用；总实付金额达到对应档位后，阶梯式提成按该比例结算。
+            </Typography>
+            <Stack spacing={1}>
+              {normalizeTierRowsForEditor(tierConfigRows).map((tier, index) => (
+                <Box
+                  key={`${tier.minAmount}-${index}`}
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr 42px' },
+                    gap: 1,
+                    alignItems: 'center',
+                  }}
+                >
+                  <TextField
+                    size="small"
+                    type="number"
+                    label="月累计下限"
+                    value={tier.minAmount}
+                    onChange={(event) => updateTierConfigRow(index, 'minAmount', Number(event.target.value))}
+                    inputProps={{ min: 0, step: 1000 }}
+                  />
+                  <TextField
+                    size="small"
+                    type="number"
+                    label="月累计上限"
+                    value={tier.maxAmount ?? ''}
+                    placeholder="最后一档留空"
+                    onChange={(event) => updateTierConfigRow(
+                      index,
+                      'maxAmount',
+                      event.target.value === '' ? undefined : Number(event.target.value),
+                    )}
+                    inputProps={{ min: 0, step: 1000 }}
+                  />
+                  <TextField
+                    size="small"
+                    type="number"
+                    label="提成比例"
+                    value={tier.rate}
+                    onChange={(event) => updateTierConfigRow(index, 'rate', Number(event.target.value))}
+                    inputProps={{ min: 0, step: 0.1 }}
+                    InputProps={{ endAdornment: '%' }}
+                  />
+                  <IconButton
+                    size="small"
+                    color="error"
+                    onClick={() => removeTierConfigRow(index)}
+                    disabled={normalizeTierRowsForEditor(tierConfigRows).length <= 1}
+                  >
+                    <DeleteOutlineIcon fontSize="small" />
+                  </IconButton>
+                </Box>
+              ))}
+            </Stack>
+            <Button variant="outlined" startIcon={<AddIcon />} onClick={addTierConfigRow} sx={{ alignSelf: 'flex-start' }}>
+              添加档位
+            </Button>
+            {tierConfigError && <Typography variant="body2" sx={{ color: '#dc2626' }}>{tierConfigError}</Typography>}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTierConfigOpen(false)} disabled={tierConfigLoading}>取消</Button>
+          <Button variant="contained" onClick={saveTierConfig} disabled={tierConfigLoading}>
+            {tierConfigLoading ? '保存中...' : '保存'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </>
   );
 
@@ -2790,16 +2957,17 @@ const Commission: React.FC<CommissionProps> = ({
       </Dialog>
 
       <Dialog open={Boolean(deleteSummary)} onClose={closeDeleteOrderSplitDialog} maxWidth="sm" fullWidth>
-        <DialogCloseTitle onClose={closeDeleteOrderSplitDialog}>删除订单分账</DialogCloseTitle>
+        <DialogCloseTitle onClose={closeDeleteOrderSplitDialog}>{deleteSummary?.sourceOrderDeleted ? '清理废弃分账' : '删除订单分账'}</DialogCloseTitle>
         <DialogContent dividers>
           {deleteSummary && (
             <Stack spacing={2}>
               <Typography variant="body2" sx={{ color: '#374151', lineHeight: 1.8 }}>
-                将删除 {deleteSummary.orderNo} / {deleteSummary.customerName} 的全部待确认分账记录。
-                删除后，该订单会重新出现在“新建订单分账”可选范围内。
+                {deleteSummary.sourceOrderDeleted
+                  ? `将清理 ${deleteSummary.orderNo} / ${deleteSummary.customerName} 的废弃分账记录。清理后只保留操作日志，已发放或冲销链路中的分账不会允许清理。`
+                  : `将删除 ${deleteSummary.orderNo} / ${deleteSummary.customerName} 的全部待确认分账记录。删除后，该订单会重新出现在“新建订单分账”可选范围内。`}
               </Typography>
               <TextField
-                label="删除原因"
+                label={deleteSummary.sourceOrderDeleted ? '清理原因' : '删除原因'}
                 value={deleteReason}
                 onChange={(event) => setDeleteReason(event.target.value)}
                 required
@@ -2819,7 +2987,7 @@ const Commission: React.FC<CommissionProps> = ({
             onClick={confirmDeleteOrderSplit}
             disabled={deleteLoading || !deleteReason.trim()}
           >
-            {deleteLoading ? '删除中...' : '确认删除'}
+            {deleteLoading ? (deleteSummary?.sourceOrderDeleted ? '清理中...' : '删除中...') : (deleteSummary?.sourceOrderDeleted ? '确认清理' : '确认删除')}
           </Button>
         </DialogActions>
       </Dialog>

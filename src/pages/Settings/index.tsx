@@ -5,6 +5,7 @@ import RolePermission from './RolePermission';
 import ProductConfigPage from './ProductConfig';
 import EmployeeDepartmentManagement from './EmployeeDepartmentManagement';
 import AccountRecycleBin from './AccountRecycleBin';
+import BusinessRecycleBin from './BusinessRecycleBin';
 import CustomerLevelConfigPage from './CustomerLevelConfig';
 import OrderTypeConfigPage from './OrderTypeConfig';
 import LifecycleStatusConfigPage from './LifecycleStatusConfig';
@@ -14,6 +15,7 @@ import AIProviderConfig from './AIProviderConfig';
 import LeadFlowConfigTab from '../Leads/LeadFlowConfigTab';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { isSuperAdminRoleName } from '../../shared/utils/roles';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -25,6 +27,7 @@ type SettingsTabConfig = {
   label: string;
   permissionKey: string;
   permissionKeys?: string[];
+  superAdminOnly?: boolean;
   component: React.ReactNode;
 };
 
@@ -88,12 +91,14 @@ const Settings: React.FC = () => {
       description: '测试数据和系统维护工具',
       tabs: [
         { label: 'AI大脑', permissionKey: PERMISSION_KEYS.SETTINGS_AI_CONFIG, component: <AIProviderConfig /> },
+        { label: '业务回收站', permissionKey: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, superAdminOnly: true, component: <BusinessRecycleBin /> },
         { label: '数据维护', permissionKey: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, component: <DataMaintenance /> },
       ],
     },
   ]).map((group) => ({
     ...group,
     tabs: group.tabs.filter((tab: SettingsTabConfig) => {
+      if (tab.superAdminOnly && !isSuperAdminRoleName(currentUser?.role)) return false;
       const permissionKeys = tab.permissionKeys || [tab.permissionKey];
       return permissionKeys.some((permissionKey: string) => hasPermission(currentUser, permissionKey));
     }),

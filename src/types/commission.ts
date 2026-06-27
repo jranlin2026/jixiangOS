@@ -277,7 +277,7 @@ export interface CommissionChargebackCompleteInput {
   reason: string;
 }
 
-export type CommissionOperationAction = '调整分账' | '确认分账' | '删除分账' | '撤回提成' | '发起冲销' | '退款待冲销' | '冲销处理完成' | '发放提成';
+export type CommissionOperationAction = '调整分账' | '确认分账' | '删除分账' | '清理废弃分账' | '撤回提成' | '发起冲销' | '退款待冲销' | '冲销处理完成' | '发放提成';
 
 export interface CommissionOperationSplitSnapshot {
   role: CommissionRole;

@@ -151,7 +151,7 @@ async function fetchLeads(filters?: LeadFilters): Promise<ApiResponse<PaginatedR
   if (JSON.stringify(allLeads) !== JSON.stringify(normalizedLeads)) {
     setStorageData(STORAGE_KEYS.LEADS, normalizedLeads);
   }
-  let filtered = filterVisibleLeads(normalizedLeads);
+  let filtered = filterVisibleLeads(normalizedLeads.filter((lead) => !lead.deletedAt));
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
@@ -192,7 +192,7 @@ async function fetchLeadById(id: string): Promise<ApiResponse<Lead | null>> {
   if (JSON.stringify(leads) !== JSON.stringify(normalizedLeads)) {
     setStorageData(STORAGE_KEYS.LEADS, normalizedLeads);
   }
-  const lead = filterVisibleLeads(normalizedLeads).find((item) => item.id === id) || null;
+  const lead = filterVisibleLeads(normalizedLeads.filter((item) => !item.deletedAt)).find((item) => item.id === id) || null;
   return createSuccessResponse(lead);
 }
 
@@ -252,11 +252,21 @@ async function updateLead(id: string, data: Partial<Lead>): Promise<ApiResponse<
   return createSuccessResponse(leads[idx]);
 }
 
-async function deleteLead(id: string): Promise<ApiResponse<boolean>> {
+async function deleteLead(id: string, reason = ''): Promise<ApiResponse<boolean>> {
   ensureInit();
   await delay(150);
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
-  setStorageData(STORAGE_KEYS.LEADS, leads.filter((lead) => lead.id !== id));
+  const index = leads.findIndex((lead) => lead.id === id);
+  if (index === -1) return createSuccessResponse(true);
+  const now = new Date().toISOString();
+  leads[index] = {
+    ...leads[index],
+    deletedAt: now,
+    deletedBy: getCurrentOperatorName(leads[index].owner),
+    deleteReason: reason.trim() || '业务删除',
+    updatedAt: now,
+  };
+  setStorageData(STORAGE_KEYS.LEADS, leads);
   return createSuccessResponse(true);
 }
 

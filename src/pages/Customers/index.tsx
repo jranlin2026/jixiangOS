@@ -33,6 +33,7 @@ import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import useCustomerStore from '../../store/useCustomerStore';
 import { customerApi, orderApi, settingsApi } from '../../api';
 import { CUSTOMER_LEVELS, ROUTES, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
@@ -60,6 +61,7 @@ import ResizableHeaderCell, {
   type ColumnWidthMap,
 } from '../../shared/components/ResizableTable';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import { isSuperAdminRoleName } from '../../shared/utils/roles';
 
 type CustomerColumn = {
   id: string;
@@ -79,7 +81,7 @@ type CustomerViewConfig = {
 const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_view_v6';
 const CUSTOMER_VIEW_SCHEMA_VERSION = 6;
 const CUSTOMER_WIDTH_STORAGE_KEY = 'aaos_customer_table_column_widths_v2';
-const CUSTOMER_ACTION_COLUMN_WIDTH = 160;
+const CUSTOMER_ACTION_COLUMN_WIDTH = 190;
 const formatCustomerSource = (customer: Customer) => [customer.leadSource, customer.sourceName].filter(Boolean).join('-') || '-';
 
 const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[]): CustomerColumn[] => {
@@ -228,6 +230,9 @@ const Customers: React.FC = () => {
   const [customerScope, setCustomerScope] = useState<CustomerScope>('active');
   const [releaseTarget, setReleaseTarget] = useState<Customer | null>(null);
   const [releaseReason, setReleaseReason] = useState('');
+  const [deleteCustomerTarget, setDeleteCustomerTarget] = useState<Customer | null>(null);
+  const [deleteCustomerReason, setDeleteCustomerReason] = useState('');
+  const [deleteCustomerSubmitting, setDeleteCustomerSubmitting] = useState(false);
   const { alert, dialog: feedbackDialog } = useAppFeedback();
   const columns = useMemo(() => buildCustomerColumns(lifecycleConfigs), [lifecycleConfigs]);
   const customerLevelOptions = useMemo(() => {
@@ -277,6 +282,7 @@ const Customers: React.FC = () => {
   );
   const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length);
   const visibleOwnerUsers = useMemo(() => filterUsersByCurrentDataScope(users), [users]);
+  const isSuperAdmin = isSuperAdminRoleName(currentUser?.role);
   const tableMinWidth = useMemo(
     () => visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + CUSTOMER_ACTION_COLUMN_WIDTH,
     [columnWidths, visibleColumns],
@@ -339,6 +345,34 @@ const Customers: React.FC = () => {
     const nextFilters = scopedFilters({ ...filters, page: 1, pageSize: pagination.pageSize || 10 }, 'public_pool');
     setFilters(nextFilters);
     fetchItems(nextFilters);
+  };
+
+  const handleOpenDeleteCustomer = (customer: Customer) => {
+    setDeleteCustomerTarget(customer);
+    setDeleteCustomerReason('');
+  };
+
+  const handleCloseDeleteCustomer = () => {
+    setDeleteCustomerTarget(null);
+    setDeleteCustomerReason('');
+  };
+
+  const handleConfirmDeleteCustomer = async () => {
+    if (!deleteCustomerTarget) return;
+    const reason = deleteCustomerReason.trim();
+    if (!reason) return;
+    setDeleteCustomerSubmitting(true);
+    try {
+      const res = await customerApi.deleteCustomer(deleteCustomerTarget.id, reason);
+      if (res.code !== 0) {
+        await alert(res.message || '删除客户失败');
+        return;
+      }
+      handleCloseDeleteCustomer();
+      fetchItems(scopedFilters());
+    } finally {
+      setDeleteCustomerSubmitting(false);
+    }
   };
 
   const handleCreate = () => {
@@ -563,6 +597,13 @@ const Customers: React.FC = () => {
                 ))}
                 <TableCell align="center" sx={actionColumnSx}>
                   <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5 }}>
+                    {isSuperAdmin && (
+                      <Tooltip title="删除客户到业务回收站">
+                        <IconButton size="small" color="error" onClick={() => handleOpenDeleteCustomer(customer)}>
+                          <DeleteOutlineIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                     <Tooltip title="查看客户">
                       <IconButton size="small" color="primary" onClick={() => handleViewDetail(customer)}>
                         <VisibilityIcon fontSize="small" />
@@ -716,6 +757,42 @@ const Customers: React.FC = () => {
         <DialogActions>
           <Button onClick={() => setReleaseTarget(null)}>取消</Button>
           <Button color="warning" variant="contained" onClick={handleConfirmReleaseCustomer}>确认放弃</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteCustomerTarget)} onClose={deleteCustomerSubmitting ? undefined : handleCloseDeleteCustomer} maxWidth="xs" fullWidth>
+        <DialogCloseTitle onClose={() => {
+          if (!deleteCustomerSubmitting) handleCloseDeleteCustomer();
+        }}>删除客户</DialogCloseTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
+            删除后客户会进入业务回收站。有关联订单的客户不会被删除，请先处理订单。
+          </Typography>
+          {deleteCustomerTarget && (
+            <Box sx={{ p: 1.5, border: '1px solid #fee2e2', borderRadius: 1, bgcolor: '#fff7ed', mb: 2 }}>
+              <Typography variant="body2">客户：{deleteCustomerTarget.company || deleteCustomerTarget.name}</Typography>
+              <Typography variant="body2">负责人：{deleteCustomerTarget.owner || '-'}</Typography>
+            </Box>
+          )}
+          <TextField
+            label="删除原因"
+            value={deleteCustomerReason}
+            onChange={(event) => setDeleteCustomerReason(event.target.value)}
+            placeholder="例如：测试客户、重复沉淀、无效客户"
+            multiline
+            minRows={3}
+            required
+            fullWidth
+            autoFocus
+            error={!deleteCustomerReason.trim()}
+            helperText={!deleteCustomerReason.trim() ? '删除原因不能为空' : ' '}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDeleteCustomer} disabled={deleteCustomerSubmitting}>取消</Button>
+          <Button color="error" variant="contained" onClick={handleConfirmDeleteCustomer} disabled={!deleteCustomerReason.trim() || deleteCustomerSubmitting}>
+            确认删除
+          </Button>
         </DialogActions>
       </Dialog>
 

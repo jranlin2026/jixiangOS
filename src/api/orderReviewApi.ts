@@ -16,7 +16,7 @@ import { getStorageData, setStorageData } from './mock/storage';
 import { DEFAULT_PAGE_SIZE, STORAGE_KEYS, normalizeResourceOwnership } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { getCurrentDataVisibilityScope } from '../shared/utils/dataVisibility';
-import { normalizeUserRoleName } from '../shared/utils/roles';
+import { isSuperAdminRoleName, normalizeUserRoleName } from '../shared/utils/roles';
 import { PERMISSION_KEYS, roleHasPermission } from '../shared/utils/permissions';
 import { initializeMockData } from './mock';
 import { orderApi } from './orderApi';
@@ -46,6 +46,10 @@ function getCurrentUser(): User | undefined {
   if (!session?.userId) return undefined;
   const users = readJson<User[]>(STORAGE_KEYS.USERS) || [];
   return users.find((user) => user.id === session.userId && user.isActive);
+}
+
+function isCurrentUserSuperAdmin(): boolean {
+  return isSuperAdminRoleName(getCurrentUser()?.role);
 }
 
 function getRole(user?: User): Role | undefined {
@@ -316,6 +320,28 @@ async function rejectOrderApplication(id: string, reason: string): Promise<ApiRe
   return createSuccessResponse(applications[idx]);
 }
 
+async function cleanupDeletedSourceOrderApplication(id: string, reason: string): Promise<ApiResponse<boolean>> {
+  ensureInit();
+  await delay(120);
+  if (!isCurrentUserSuperAdmin()) return createErrorResponse('仅超级管理员可以清理订单审核记录', 403);
+  const normalizedReason = reason.trim();
+  if (!normalizedReason) return createErrorResponse('清理订单审核记录必须填写原因');
+
+  const applications = getStoredApplications();
+  const target = applications.find((item) => item.id === id);
+  if (!target) return createErrorResponse('订单申请不存在', 404);
+  if (target.status !== STATUS_APPROVED || !target.orderId) {
+    return createErrorResponse('只有已入库且正式订单已删除的申请记录可以清理');
+  }
+
+  const orders = readJson<Order[]>(STORAGE_KEYS.ORDERS) || [];
+  const activeOrder = orders.find((order) => order.id === target.orderId && !order.deletedAt);
+  if (activeOrder) return createErrorResponse('正式订单仍存在，不能清理审核记录');
+
+  saveApplications(applications.filter((item) => item.id !== id));
+  return createSuccessResponse(true);
+}
+
 export const ORDER_APPLICATION_STATUSES = {
   PENDING_REVIEW: STATUS_PENDING_REVIEW,
   RETURNED: STATUS_RETURNED,
@@ -331,4 +357,5 @@ export const orderReviewApi = {
   approveOrderApplication,
   returnOrderApplication,
   rejectOrderApplication,
+  cleanupDeletedSourceOrderApplication,
 };

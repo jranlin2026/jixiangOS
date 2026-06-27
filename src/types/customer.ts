@@ -127,6 +127,9 @@ export interface Customer {
   sourceName?: string;
   sourceAccount?: string;
   score?: number;
+  deletedAt?: Timestamp;
+  deletedBy?: string;
+  deleteReason?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

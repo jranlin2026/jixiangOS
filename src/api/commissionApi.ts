@@ -278,7 +278,7 @@ function saveCommissions(commissions: Commission[]): void {
 }
 
 function getOrders(): Order[] {
-  return getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
+  return (getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).filter((order) => !order.deletedAt);
 }
 
 function getProductName(productId?: string, productLevel?: string, fallback?: string): string | undefined {
@@ -412,7 +412,7 @@ function getCommissionOperationLogs(orderId?: string): CommissionOperationLog[] 
 }
 
 function appendCommissionOperationLog(
-  order: Order,
+  order: Pick<Order, 'id' | 'orderNo' | 'customerName'>,
   action: CommissionOperationLog['action'],
   reason: string | undefined,
   commissions: Commission[],
@@ -838,6 +838,45 @@ async function deleteOrderCommissions(orderId: string, reason: string): Promise<
   const operator = getCurrentOperatorName('财务');
   saveCommissions(commissions.filter((commission) => commission.orderId !== orderId));
   appendCommissionOperationLog(order, '删除分账', normalizedReason, orderCommissions, operator, now);
+  return createSuccessResponse(true);
+}
+
+function buildDeletedSourceOrderFromCommissions(orderId: string, commissions: Commission[]): Pick<Order, 'id' | 'orderNo' | 'customerName'> {
+  const first = commissions[0];
+  return {
+    id: orderId,
+    orderNo: first?.orderNo || orderId,
+    customerName: first?.customerName || '源订单已删除',
+  };
+}
+
+async function cleanupDeletedSourceOrderCommissions(orderId: string, reason: string): Promise<ApiResponse<boolean>> {
+  ensureInit();
+  await delay(160);
+  const normalizedReason = reason.trim();
+  if (!normalizedReason) return createErrorResponse('清理废弃分账必须填写原因');
+  if (getOrderById(orderId)) return createErrorResponse('源订单仍存在，不能作为废弃分账清理');
+
+  const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
+  const orderCommissions = commissions
+    .filter((commission) => commission.orderId === orderId)
+    .map((commission) => normalizeCommission(commission));
+  if (!orderCommissions.length) return createErrorResponse('没有可清理的废弃分账记录');
+
+  const locked = orderCommissions.find((commission) => (
+    commission.status === '已发放'
+    || commission.status === '待冲销'
+    || commission.status === '已冲销'
+  ));
+  if (locked) {
+    return createErrorResponse('已发放、待冲销或已冲销的分账不能清理，请继续走冲销/留痕流程');
+  }
+
+  const now = new Date().toISOString();
+  const operator = getCurrentOperatorName('财务');
+  const deletedOrder = buildDeletedSourceOrderFromCommissions(orderId, orderCommissions);
+  saveCommissions(commissions.filter((commission) => commission.orderId !== orderId));
+  appendCommissionOperationLog(deletedOrder, '清理废弃分账', normalizedReason, orderCommissions, operator, now);
   return createSuccessResponse(true);
 }
 
@@ -1514,6 +1553,7 @@ export const commissionApi = {
   fetchCommissionDetail,
   saveOrderCommissionAdjustments,
   deleteOrderCommissions,
+  cleanupDeletedSourceOrderCommissions,
   confirmOrderCommissions,
   withdrawOrderCommissions,
   startCommissionChargeback,

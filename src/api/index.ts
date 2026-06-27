@@ -22,6 +22,7 @@ export { serviceTicketApi } from './serviceTicketApi';
 export { opportunityApi } from './opportunityApi';
 export { leadFlowApi } from './leadFlowApi';
 export { leadBulkImportApi } from './leadBulkImportApi';
+export { businessRecycleBinApi } from './businessRecycleBinApi';
 export type { LeadBulkImportResult, LeadBulkImportRowResult } from './leadBulkImportApi';
 export { initializeMockData, resetMockData } from './mock';
 export type { ApiResponse, PaginatedResponse } from './types';
