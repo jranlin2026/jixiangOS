@@ -14,6 +14,7 @@ export { departmentApi } from './departmentApi';
 export { roleApi } from './roleApi';
 export { productApi } from './productApi';
 export { refundApi } from './refundApi';
+export { recoveryOrderApi } from './recoveryOrderApi';
 export { upgradeApi } from './upgradeApi';
 export { commissionRuleApi } from './commissionRuleApi';
 export { aiCardApi } from './aiCardApi';

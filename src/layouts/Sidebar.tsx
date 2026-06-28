@@ -20,6 +20,7 @@ import PeopleAltIcon from '@mui/icons-material/PeopleAlt';
 import GroupsIcon from '@mui/icons-material/Groups';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
+import SupportAgentIcon from '@mui/icons-material/SupportAgent';
 import PaidIcon from '@mui/icons-material/Paid';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -70,6 +71,20 @@ const navItems: NavItem[] = [
   { label: '订单', icon: <ReceiptLongIcon />, path: ROUTES.ORDERS, permissionKey: PERMISSION_KEYS.ORDERS },
   { label: '交付', icon: <LocalShippingIcon />, path: ROUTES.DELIVERY, permissionKey: PERMISSION_KEYS.DELIVERY },
   {
+    label: '售后服务',
+    icon: <SupportAgentIcon />,
+    path: ROUTES.AFTER_SALES,
+    permissionKey: PERMISSION_KEYS.AFTER_SALES,
+    permissionKeys: [
+      PERMISSION_KEYS.AFTER_SALES,
+      PERMISSION_KEYS.AFTER_SALES_REFUND,
+      PERMISSION_KEYS.AFTER_SALES_RECOVERY,
+      PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
+      PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+      PERMISSION_KEYS.FINANCE_REFUND,
+    ],
+  },
+  {
     label: '财务中心',
     icon: <PaidIcon />,
     path: ROUTES.FINANCE,
@@ -77,10 +92,8 @@ const navItems: NavItem[] = [
     permissionKeys: [
       PERMISSION_KEYS.FINANCE,
       PERMISSION_KEYS.FINANCE_MY_COMMISSION,
-      PERMISSION_KEYS.FINANCE_OVERVIEW,
       PERMISSION_KEYS.FINANCE_SETTLEMENT,
       PERMISSION_KEYS.FINANCE_PAYOUT,
-      PERMISSION_KEYS.FINANCE_REFUND,
       PERMISSION_KEYS.FINANCE_FLOW,
       PERMISSION_KEYS.FINANCE_RULES,
     ],
@@ -213,7 +226,7 @@ const Sidebar: React.FC<SidebarProps> = ({ width }) => {
             const hasActiveChild = Boolean(item.children?.some(isChildActive));
             const isActive = location.pathname === item.path
               || hasActiveChild
-              || (item.path === ROUTES.FINANCE && [ROUTES.REFUND_CENTER as string].includes(location.pathname))
+              || (item.path === ROUTES.AFTER_SALES && [ROUTES.REFUND_CENTER as string].includes(location.pathname))
               || (item.path === ROUTES.UPGRADE_CENTER && [ROUTES.UPGRADE_POOL as string, ROUTES.UPGRADE_ANALYSIS as string].includes(location.pathname));
             const isExpanded = hasChildren ? (expandedPaths[item.path] ?? isActive) : false;
             const handleNavClick = () => {

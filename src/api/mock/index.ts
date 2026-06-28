@@ -58,6 +58,7 @@ export function initializeMockData(): void {
   initializeStorage(STORAGE_KEYS.ORDER_TYPE_CONFIGS, DEFAULT_ORDER_TYPE_CONFIGS);
   initializeStorage(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS);
   initializeStorage(STORAGE_KEYS.REFUNDS, mockRefunds);
+  initializeStorage(STORAGE_KEYS.RECOVERY_ORDERS, []);
   initializeStorage(STORAGE_KEYS.UPGRADE_POOL, mockUpgradePool);
   initializeStorage(STORAGE_KEYS.AI_CARDS, []);
   initializeStorage(STORAGE_KEYS.CUSTOMER_SUCCESS_TASKS, []);

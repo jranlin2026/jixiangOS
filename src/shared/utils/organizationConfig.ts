@@ -137,6 +137,7 @@ export const DEFAULT_ROLES: Role[] = [
     permissions: [
       { module: PERMISSION_KEYS.DELIVERY, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read'] },
+      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
     ],
     dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' },
@@ -151,11 +152,11 @@ export const DEFAULT_ROLES: Role[] = [
     code: 'finance_specialist',
     departmentId: 'dept-finance',
     permissions: [
-      { module: PERMISSION_KEYS.FINANCE_OVERVIEW, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
       { module: PERMISSION_KEYS.FINANCE_SETTLEMENT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_PAYOUT, actions: ['read', 'write'] },
-      { module: PERMISSION_KEYS.FINANCE_REFUND, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.AFTER_SALES_REFUND, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_FLOW, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_RULES, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDERS, actions: ['read'] },

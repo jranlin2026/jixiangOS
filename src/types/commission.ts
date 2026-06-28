@@ -258,6 +258,8 @@ export interface Commission {
   adjustedAt?: Timestamp;
   commissionType?: 'sales' | 'cs' | 'support' | 'recovery';
   sourceRefundId?: ID;
+  sourceRecoveryOrderId?: ID;
+  sourceBusinessType?: 'formal_order' | 'refund_recovery';
   isRecoveryBonus?: boolean;
   paidAt?: Timestamp;
   chargebackMethod?: CommissionChargebackMethod;

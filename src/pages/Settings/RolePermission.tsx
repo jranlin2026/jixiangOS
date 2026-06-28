@@ -96,13 +96,25 @@ const PERMISSION_TREE: PermissionNode[] = [
     ],
   },
   {
+    label: '售后服务',
+    children: [
+      { label: '退款冲销', key: PERMISSION_KEYS.AFTER_SALES_REFUND },
+      {
+        label: '退款挽回单',
+        children: [
+          { label: '查看挽回单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY },
+          { label: '新建挽回单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE },
+          { label: '审核挽回单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW },
+        ],
+      },
+    ],
+  },
+  {
     label: '财务中心',
     children: [
       { label: '我的提成', key: PERMISSION_KEYS.FINANCE_MY_COMMISSION },
-      { label: '财务总览', key: PERMISSION_KEYS.FINANCE_OVERVIEW },
       { label: '订单分账', key: PERMISSION_KEYS.FINANCE_SETTLEMENT },
       { label: '月度发放', key: PERMISSION_KEYS.FINANCE_PAYOUT },
-      { label: '退款付款', key: PERMISSION_KEYS.FINANCE_REFUND },
       { label: '收支流水', key: PERMISSION_KEYS.FINANCE_FLOW },
       { label: '规则配置', key: PERMISSION_KEYS.FINANCE_RULES },
     ],

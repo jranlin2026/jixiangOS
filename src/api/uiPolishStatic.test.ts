@@ -50,6 +50,8 @@ const orderFormSource = readFileSync(join(projectRoot, 'src/pages/Orders/OrderFo
 const orderDetailSource = readFileSync(join(projectRoot, 'src/pages/Orders/OrderDetail.tsx'), 'utf8');
 const orderHistorySource = readFileSync(join(projectRoot, 'src/pages/Orders/OrderHistoryDialog.tsx'), 'utf8');
 const orderReviewSource = readFileSync(join(projectRoot, 'src/pages/OrderReview/index.tsx'), 'utf8');
+const appSource = readFileSync(join(projectRoot, 'src/App.tsx'), 'utf8');
+const sidebarSource = readFileSync(join(projectRoot, 'src/layouts/Sidebar.tsx'), 'utf8');
 const deliverySource = readFileSync(join(projectRoot, 'src/pages/Delivery/index.tsx'), 'utf8');
 const rolePermissionSource = readFileSync(join(projectRoot, 'src/pages/Settings/RolePermission.tsx'), 'utf8');
 const dataMaintenanceSource = readFileSync(join(projectRoot, 'src/pages/Settings/DataMaintenance.tsx'), 'utf8');
@@ -58,6 +60,8 @@ const commissionRuleConfigSource = readFileSync(join(projectRoot, 'src/pages/Com
 const financeSource = readFileSync(join(projectRoot, 'src/pages/Finance/index.tsx'), 'utf8');
 const financeApiSource = readFileSync(join(projectRoot, 'src/api/financeApi.ts'), 'utf8');
 const refundCenterSource = readFileSync(join(projectRoot, 'src/pages/RefundCenter/index.tsx'), 'utf8');
+const afterSalesSource = readFileSync(join(projectRoot, 'src/pages/AfterSales/index.tsx'), 'utf8');
+const recoveryOrderSource = readFileSync(join(projectRoot, 'src/pages/AfterSales/RecoveryOrderTab.tsx'), 'utf8');
 const employeeDepartmentSource = readFileSync(join(projectRoot, 'src/pages/Settings/EmployeeDepartmentManagement.tsx'), 'utf8');
 const detailSplitEditorSource = commissionSource.slice(
   commissionSource.indexOf('const renderDetailSplitEditor'),
@@ -522,14 +526,34 @@ assert.match(
   'Refund workspace should keep its internal view settings button only for standalone use.',
 );
 assert.match(
-  financeSource,
+  afterSalesSource,
   /activeTab === 'refund'[\s\S]*视图设置/,
-  'Finance refund header should place 视图设置 in the same top-right header action area.',
+  'After-sales refund header should place 视图设置 in the same top-right header action area.',
 );
 assert.match(
-  financeSource,
+  afterSalesSource,
   /refundViewSettingsTrigger/,
-  'Finance refund header should trigger the embedded refund table view settings dialog.',
+  'After-sales refund header should trigger the embedded refund table view settings dialog.',
+);
+assert.doesNotMatch(
+  financeSource,
+  /value:\s*'overview'|value:\s*'refund'/,
+  'Finance center should not expose overview or refund tabs after after-sales split.',
+);
+assert.match(
+  appSource,
+  /ROUTES\.REFUND_CENTER[\s\S]*ROUTES\.AFTER_SALES\}\?tab=refund/,
+  'Legacy refund center route should redirect to after-sales refund tab.',
+);
+assert.match(
+  sidebarSource,
+  /label:\s*'交付'[\s\S]*label:\s*'售后服务'[\s\S]*label:\s*'财务中心'/,
+  'Sidebar should place 售后服务 between 交付 and 财务中心.',
+);
+assert.match(
+  recoveryOrderSource,
+  /第三方平台订单号[\s\S]*审核通过并生成提成记录|审核通过并生成提成记录[\s\S]*第三方平台订单号/,
+  'Recovery order workspace should collect third-party order data and generate commissions after review.',
 );
 assert.match(
   commissionSource,

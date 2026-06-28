@@ -20,6 +20,7 @@ export const BUSINESS_DATA_STORAGE_KEYS: BusinessDataStorageKey[] = [
   { key: STORAGE_KEYS.ORDER_APPLICATIONS, label: '订单申请', description: '订单审核台待审、驳回、通过记录' },
   { key: STORAGE_KEYS.DELIVERIES, label: '交付', description: '订单交付进度和交付记录' },
   { key: STORAGE_KEYS.REFUNDS, label: '退款', description: '退款中心申请与处理记录' },
+  { key: STORAGE_KEYS.RECOVERY_ORDERS, label: '退款挽回单', description: '第三方平台退款挽回与售后提成审核记录' },
   { key: STORAGE_KEYS.COMMISSIONS, label: '提成', description: '订单提成、分账与结算明细' },
   { key: STORAGE_KEYS.COMMISSION_OPERATION_LOGS, label: '分账操作历史', description: '订单分账调整、确认、取消和发放操作记录' },
   { key: STORAGE_KEYS.COMMISSION_SETTLEMENT_BATCHES, label: '提成结算批次', description: '财务结算台批次记录' },
