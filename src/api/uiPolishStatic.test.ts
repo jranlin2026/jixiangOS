@@ -528,13 +528,18 @@ assert.match(
 );
 assert.match(
   afterSalesSource,
-  /label:\s*'退款挽回'[\s\S]*label:\s*'售后工单'/,
-  'After-sales workspace should expose refund recovery and service ticket tabs.',
+  /label:\s*'订单退款'[\s\S]*label:\s*'退款挽回单'/,
+  'After-sales workspace should expose order refund and refund recovery order tabs.',
 );
 assert.doesNotMatch(
   afterSalesSource,
-  /label:\s*'退款冲销'|activeTab === 'refund'|refundViewSettingsTrigger/,
-  'After-sales workspace should not expose refund chargeback as a top-level tab.',
+  /label:\s*'退款冲销'|label:\s*'售后工单'|activeTab === 'refund'|refundViewSettingsTrigger/,
+  'After-sales workspace should not expose chargeback or service tickets as top-level tabs.',
+);
+assert.match(
+  afterSalesSource,
+  /<RefundCenter embedded showInternalTabs=\{false\} \/>/,
+  'After-sales order refund tab should embed the refund workspace without its old internal tabs.',
 );
 assert.doesNotMatch(
   financeSource,
@@ -543,13 +548,8 @@ assert.doesNotMatch(
 );
 assert.match(
   appSource,
-  /ROUTES\.REFUND_CENTER[\s\S]*ROUTES\.AFTER_SALES\}\?tab=tickets/,
-  'Legacy refund center route should redirect to after-sales service tickets.',
-);
-assert.match(
-  serviceTicketSource,
-  /TablePagination[\s\S]*labelDisplayedRows=\{formatPaginationRows\}/,
-  'After-sales service tickets should use the system table pagination pattern.',
+  /ROUTES\.REFUND_CENTER[\s\S]*ROUTES\.AFTER_SALES\}\?tab=order-refund/,
+  'Legacy refund center route should redirect to after-sales order refund.',
 );
 assert.match(
   sidebarSource,

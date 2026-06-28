@@ -236,7 +236,7 @@ function buildWorkbench(data: AssistantData): AIAssistantWorkbench {
       title: '售后退款任务仍在流转',
       content: `当前有 ${activeRefundRows.length} 条退款或挽回任务未闭环，涉及金额 ${formatCurrency(sumRefunds(activeRefundRows))}。`,
       tone: 'error',
-      path: `${ROUTES.AFTER_SALES}?tab=tickets`,
+      path: `${ROUTES.AFTER_SALES}?tab=order-refund`,
     });
   }
   if (highOpportunityRows.length > 0) {
@@ -325,7 +325,7 @@ function buildWorkbench(data: AssistantData): AIAssistantWorkbench {
         count: activeRefundRows.length,
         priority: activeRefundRows.length > 0 ? 'high' : 'low',
         module: '售后服务',
-        path: `${ROUTES.AFTER_SALES}?tab=tickets`,
+        path: `${ROUTES.AFTER_SALES}?tab=order-refund`,
         actionLabel: '处理工单',
       }),
       makeTask({
@@ -442,7 +442,7 @@ function buildRefundResults(data: AssistantData): AIResultData[] {
         { key: 'amount', label: '金额' },
       ],
       tableRows: rows.map((item) => ({ reason: item.name, count: item.count, amount: formatCurrency(item.amount) })),
-      actions: [{ label: '进入售后工单', path: `${ROUTES.AFTER_SALES}?tab=tickets`, variant: 'contained' }],
+      actions: [{ label: '进入订单退款', path: `${ROUTES.AFTER_SALES}?tab=order-refund`, variant: 'contained' }],
     },
     {
       type: 'SUGGESTION',

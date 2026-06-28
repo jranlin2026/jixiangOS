@@ -98,15 +98,15 @@ const PERMISSION_TREE: PermissionNode[] = [
   {
     label: '售后服务',
     children: [
+      { label: '订单退款', key: PERMISSION_KEYS.AFTER_SALES_REFUND },
       {
-        label: '退款挽回',
+        label: '退款挽回单',
         children: [
           { label: '查看挽回单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY },
           { label: '新建挽回单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE },
           { label: '审核挽回单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW },
         ],
       },
-      { label: '售后工单', key: PERMISSION_KEYS.AFTER_SALES_TICKETS },
     ],
   },
   {

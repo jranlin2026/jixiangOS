@@ -58,9 +58,10 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
 interface RefundCenterProps {
   embedded?: boolean;
   refundViewSettingsTrigger?: number;
+  showInternalTabs?: boolean;
 }
 
-const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundViewSettingsTrigger = 0 }) => {
+const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundViewSettingsTrigger = 0, showInternalTabs = true }) => {
   const lastRefundViewSettingsTriggerRef = useRef(refundViewSettingsTrigger);
   const {
     items,
@@ -256,7 +257,7 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
             退款中心
           </Typography>
           <Box sx={{ flex: 1 }} />
-          {activeTab === 0 && (
+          {(!showInternalTabs || activeTab === 0) && (
             <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
               视图设置
             </Button>
@@ -264,12 +265,14 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
         </Box>
       )}
 
-      <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ mb: 3 }}>
-        <Tab label="退款挽回" />
-        <Tab label="售后工单" />
-      </Tabs>
+      {showInternalTabs && (
+        <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ mb: 3 }}>
+          <Tab label="退款挽回" />
+          <Tab label="售后工单" />
+        </Tabs>
+      )}
 
-      {activeTab === 0 ? (
+      {!showInternalTabs || activeTab === 0 ? (
         <>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(7, 1fr)' }, gap: 2, mb: 3 }}>
