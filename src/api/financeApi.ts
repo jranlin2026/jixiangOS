@@ -73,9 +73,7 @@ function makeTransactionNo(date: string, direction: FinanceTransactionDirection,
 
 function isActivePaidOrder(order: Order): boolean {
   return !order.deletedAt
-    && order.status !== '已取消'
-    && order.status !== '已退款'
-    && order.refundStatus !== '退款已完成';
+    && order.status !== '已取消';
 }
 
 function isRefundExpense(expense: FinanceExpense): boolean {

@@ -78,8 +78,8 @@ type CustomerViewConfig = {
   schemaVersion: number;
 };
 
-const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_view_v6';
-const CUSTOMER_VIEW_SCHEMA_VERSION = 6;
+const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_view_v7';
+const CUSTOMER_VIEW_SCHEMA_VERSION = 7;
 const CUSTOMER_WIDTH_STORAGE_KEY = 'aaos_customer_table_column_widths_v2';
 const CUSTOMER_ACTION_COLUMN_WIDTH = 190;
 const formatCustomerSource = (customer: Customer) => [customer.leadSource, customer.sourceName].filter(Boolean).join('-') || '-';
@@ -113,6 +113,17 @@ const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[]): Custom
     label: '客户等级',
     render: (customer) => <CustomerLevelBadge level={customer.customerLevel} />,
   },
+  {
+    id: 'tags',
+    label: '标签',
+    render: (customer) => (
+      <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+        {customer.tags?.length ? customer.tags.map((tag) => (
+          <Chip key={tag} label={tag} size="small" variant="outlined" sx={{ height: 22 }} />
+        )) : '-'}
+      </Box>
+    ),
+  },
   { id: 'leadSource', label: '线索来源', render: (customer) => formatCustomerSource(customer) },
   { id: 'sourceType', label: '资源归属', render: (customer) => normalizeResourceOwnership(customer.sourceType) },
   { id: 'leadInputBy', label: '线索录入人', render: (customer) => customer.leadInputBy || '-' },
@@ -123,6 +134,7 @@ const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[]): Custom
   { id: 'totalSpent', label: '累计消费', render: (customer) => formatCurrency(customer.totalSpent) },
   { id: 'orderCount', label: '订单数', render: (customer) => customer.orderCount },
   { id: 'owner', label: '销售负责人', render: (customer) => customer.owner || '-' },
+  { id: 'remark', label: '备注', render: (customer) => customer.remark || '-' },
   { id: 'createdAt', label: '创建时间', render: (customer) => formatDate(customer.createdAt, 'yyyy-MM-dd HH:mm:ss') },
   ];
 };
@@ -133,6 +145,7 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'phone',
   'lifecycleStatus',
   'customerLevel',
+  'tags',
   'leadSource',
   'sourceType',
   'leadInputBy',
@@ -142,6 +155,7 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'totalSpent',
   'orderCount',
   'owner',
+  'remark',
   'createdAt',
 ];
 
@@ -152,6 +166,7 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   wechat: 150,
   lifecycleStatus: 140,
   customerLevel: 130,
+  tags: 180,
   leadSource: 160,
   sourceType: 140,
   leadInputBy: 140,
@@ -162,6 +177,7 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   totalSpent: 140,
   orderCount: 120,
   owner: 140,
+  remark: 220,
   createdAt: 180,
 };
 

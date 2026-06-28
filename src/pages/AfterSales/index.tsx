@@ -1,12 +1,13 @@
 import React, { useMemo } from 'react';
-import { Box, Stack, Tab, Tabs, Typography } from '@mui/material';
+import { Box, Button, Stack, Tab, Tabs, Typography } from '@mui/material';
+import AddIcon from '@mui/icons-material/Add';
+import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import { Navigate, useSearchParams } from 'react-router-dom';
-import RefundCenter from '../RefundCenter';
 import RecoveryOrderTab from './RecoveryOrderTab';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import useAuthStore from '../../store/useAuthStore';
 
-type AfterSalesTab = 'order-refund' | 'recovery';
+type AfterSalesTab = 'recovery-list' | 'recovery-review';
 
 const shell = {
   ink: '#0f172a',
@@ -15,19 +16,22 @@ const shell = {
 };
 
 const AFTER_SALES_TABS: Array<{ value: AfterSalesTab; label: string; permissionKeys: string[] }> = [
-  { value: 'order-refund', label: '订单退款', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_REFUND, PERMISSION_KEYS.FINANCE_REFUND] },
-  { value: 'recovery', label: '退款挽回单', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW] },
+  { value: 'recovery-list', label: '售后挽回订单列表', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE] },
+  { value: 'recovery-review', label: '售后挽回审核台', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW] },
 ];
 
 function getTab(value: string | null): AfterSalesTab {
-  if (value === 'recovery') return 'recovery';
-  return 'order-refund';
+  if (value === 'recovery-review' || value === 'review') return 'recovery-review';
+  return 'recovery-list';
 }
 
 const AfterSales: React.FC = () => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const [searchParams, setSearchParams] = useSearchParams();
+  const [createSignal, setCreateSignal] = React.useState(0);
+  const [viewSettingsSignal, setViewSettingsSignal] = React.useState(0);
   const requestedTab = getTab(searchParams.get('tab'));
+  const canCreate = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE);
   const canSeeAllAfterSalesTabs = isSuperAdmin(currentUser)
     || ['超级管理员', '系统管理员', '管理员', 'Super Admin'].includes(String(currentUser?.role || ''));
   const visibleTabs = useMemo(() => AFTER_SALES_TABS.filter((tab) => (
@@ -48,14 +52,24 @@ const AfterSales: React.FC = () => {
 
   return (
     <Box sx={{ p: 3, bgcolor: '#f5f7fb', minHeight: '100%' }}>
-      <Stack direction={{ xs: 'column', lg: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', lg: 'flex-start' }} spacing={2} sx={{ mb: 2.5 }}>
+      <Stack direction={{ xs: 'column', lg: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', lg: 'center' }} spacing={2} sx={{ mb: 2.5 }}>
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 800, color: shell.ink }}>
             售后服务
           </Typography>
           <Typography variant="body2" sx={{ color: shell.muted, mt: 0.5, maxWidth: 760 }}>
-            处理正式订单退款和第三方平台退款挽回单，售后事实审核后再进入提成核算。
+            售后只提交挽回事实，财务审核通过后再进入售后挽回分账。
           </Typography>
+        </Box>
+        <Box sx={{ display: 'flex', gap: 1, justifyContent: { xs: 'stretch', lg: 'flex-end' } }}>
+          <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsSignal((value) => value + 1)}>
+            视图设置
+          </Button>
+          {activeTab === 'recovery-list' && canCreate && (
+            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateSignal((value) => value + 1)}>
+              新建售后挽回订单
+            </Button>
+          )}
         </Box>
       </Stack>
 
@@ -74,8 +88,8 @@ const AfterSales: React.FC = () => {
         ))}
       </Tabs>
 
-      {activeTab === 'order-refund' && <RefundCenter embedded showInternalTabs={false} />}
-      {activeTab === 'recovery' && <RecoveryOrderTab />}
+      {activeTab === 'recovery-list' && <RecoveryOrderTab mode="list" createSignal={createSignal} viewSettingsSignal={viewSettingsSignal} />}
+      {activeTab === 'recovery-review' && <RecoveryOrderTab mode="review" viewSettingsSignal={viewSettingsSignal} />}
     </Box>
   );
 };

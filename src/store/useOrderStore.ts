@@ -1,7 +1,6 @@
 import { create } from 'zustand';
-import { orderApi, refundApi } from '../api';
+import { orderApi } from '../api';
 import type { Order, OrderFilters, OrderStats } from '../types/order';
-import type { RefundStatus } from '../types/common';
 
 interface OrderState {
   items: Order[];
@@ -17,7 +16,6 @@ interface OrderState {
   create: (data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'orderNo'>) => Promise<void>;
   update: (id: string, data: Partial<Order>) => Promise<void>;
   delete: (id: string) => Promise<void>;
-  applyRefund: (orderId: string, refundData: { refundAmount: number; refundReason: string; refundCategory: string; applicantId: string; applicantName: string }) => Promise<void>;
   setFilters: (filters: OrderFilters) => void;
   reset: () => void;
 }
@@ -101,44 +99,6 @@ const useOrderStore = create<OrderState>((set, get) => ({
     } catch (e: any) {
       set({ error: e.message, loading: false });
       throw e;
-    }
-  },
-
-  applyRefund: async (orderId, refundData) => {
-    set({ loading: true, error: null });
-    try {
-      const order = get().items.find((o) => o.id === orderId) || get().current;
-      if (!order) {
-        set({ error: '订单不存在', loading: false });
-        return;
-      }
-      const refundRes = await refundApi.createRefund({
-        orderId: order.id,
-        orderNo: order.orderNo,
-        customerId: order.customerId,
-        customerName: order.customerName,
-        productLevel: order.productLevel,
-        orderAmount: order.actualAmount,
-        refundAmount: refundData.refundAmount,
-        refundReason: refundData.refundReason,
-        refundCategory: refundData.refundCategory as any,
-        status: '待分配',
-        applicantId: refundData.applicantId,
-        applicantName: refundData.applicantName,
-      });
-      if (refundRes.code !== 0) {
-        set({ error: refundRes.message, loading: false });
-        return;
-      }
-      await orderApi.updateOrder(orderId, {
-        refundStatus: '待分配' as RefundStatus,
-        refundAmount: refundData.refundAmount,
-        refundReason: refundData.refundReason,
-      });
-      await get().fetchItems();
-      await get().fetchStats();
-    } catch (e: any) {
-      set({ error: e.message, loading: false });
     }
   },
 

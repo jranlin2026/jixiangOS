@@ -50,7 +50,7 @@ export type CommissionScene =
   | '成交线索转新代理'
   | '代理升单'
   | '代理复购'
-  | '退款挽回'
+  | '售后挽回'
   | '转介绍成交'
   | '智能体服务'
   | '个人资源成交';
@@ -67,7 +67,7 @@ export type OfficialPaymentChannel =
 export type ProofStatus = '无需凭证' | '待补充' | '已上传';
 
 export type CommissionEvidenceType = '付款截图' | '成交路径截图' | '聊天记录截图' | '组长确认';
-export type CommissionScenarioGroup = '新客成交' | '代理转化' | '升单复购' | '转介绍' | '退款挽回' | '服务激励' | '个人资源';
+export type CommissionScenarioGroup = '新客成交' | '代理转化' | '升单复购' | '转介绍' | '售后挽回' | '服务激励' | '个人资源';
 export type CommissionSettlementMode = '自动结算' | '人工审核' | '仅计业绩';
 export type CommissionRuleCalculationType = 'fixed' | 'percentage' | 'tiered_percentage';
 
@@ -259,7 +259,7 @@ export interface Commission {
   commissionType?: 'sales' | 'cs' | 'support' | 'recovery';
   sourceRefundId?: ID;
   sourceRecoveryOrderId?: ID;
-  sourceBusinessType?: 'formal_order' | 'refund_recovery';
+  sourceBusinessType?: 'formal_order' | 'after_sales_recovery' | 'refund_recovery';
   isRecoveryBonus?: boolean;
   paidAt?: Timestamp;
   chargebackMethod?: CommissionChargebackMethod;
@@ -369,8 +369,12 @@ export interface CommissionOrderSummary {
   salesOwner?: string;
   salesId?: ID;
   salesName?: string;
+  leadInputBy?: string;
+  leadContributorName?: string;
   sourceType?: string;
   officialPaymentChannel?: OfficialPaymentChannel;
+  originalOrderId?: string;
+  notes?: string;
   createdAt?: Timestamp;
   sourceOrderDeleted?: boolean;
   totalCommissionAmount: number;

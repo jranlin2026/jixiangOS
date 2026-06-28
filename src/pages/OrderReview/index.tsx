@@ -37,7 +37,6 @@ import type { OrderApplication, OrderApplicationFilters, OrderApplicationStatus 
 import type { Customer } from '../../types/customer';
 import { formatCurrency, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
-import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import CustomerDetail from '../Customers/CustomerDetail';
 import OrderForm from '../Orders/OrderForm';
@@ -857,10 +856,6 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                   {formatCurrency(detailApplication.orderData.actualAmount || detailApplication.orderData.amount)}
                 </SnapshotField>
                 <SnapshotField label="官方收款渠道">{detailApplication.orderData.officialPaymentChannel || '-'}</SnapshotField>
-                <Box>
-                  <Typography variant="body2" sx={{ color: '#6b7280' }}>退款状态</Typography>
-                  <RefundStatusBadge status={detailApplication.orderData.refundStatus} />
-                </Box>
                 <SnapshotField label="销售顾问">{detailApplication.orderData.salesName || detailApplication.orderData.owner}</SnapshotField>
                 <SnapshotField label="资源归属">
                   {normalizeResourceOwnership(detailApplication.orderData.resourceOwnership || detailApplication.orderData.sourceType)}

@@ -297,9 +297,7 @@ function getOrderPaymentDate(order: Order): string {
 }
 
 function isValidMonthlyPaidOrder(order: Order): boolean {
-  if (order.status === '已取消' || order.status === '已退款') return false;
-  if (order.refundStatus === '退款已完成') return false;
-  return true;
+  return order.status !== '已取消';
 }
 
 function isOrderOwnedByEmployee(order: Order, ownerId?: string, ownerName?: string): boolean {
@@ -523,10 +521,15 @@ function deriveOrderSummaryStatus(commissions: Commission[]): CommissionOrderSum
 }
 
 function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrderSummary[] {
+  const formalOrderCommissions = commissions.filter((commission) => (
+    commission.sourceBusinessType !== 'after_sales_recovery'
+    && commission.sourceBusinessType !== 'refund_recovery'
+    && !commission.sourceRecoveryOrderId
+  ));
   const ordersById = new Map(getOrders().map((order) => [order.id, order]));
   const roleOrder = ['线索', '销售', '客户成功', '售后', '招商主管', '销售主管'];
   const orderMap = new Map<string, Commission[]>();
-  commissions.forEach((commission) => {
+  formalOrderCommissions.forEach((commission) => {
     const rows = orderMap.get(commission.orderId) || [];
     rows.push(commission);
     orderMap.set(commission.orderId, rows);
@@ -552,8 +555,12 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
       salesOwner: order?.salesName || order?.owner || '',
       salesId: order?.salesId,
       salesName: order?.salesName,
+      leadInputBy: order?.leadInputBy,
+      leadContributorName: order?.leadContributorName,
       sourceType: order?.sourceType,
       officialPaymentChannel: order?.officialPaymentChannel,
+      originalOrderId: order?.originalOrderId,
+      notes: order?.notes,
       createdAt: order?.createdAt || first.createdAt,
       sourceOrderDeleted: !order,
       totalCommissionAmount: Math.round(sortedRows.reduce((sumValue, item) => sumValue + item.commissionAmount, 0) * 100) / 100,
@@ -629,10 +636,8 @@ function hasEffectiveCommission(commissions: Commission[]): boolean {
 }
 
 function isCreatableCommissionOrder(order: Order, commissions: Commission[]): boolean {
-  const refundStatus = order.refundStatus || '无';
   const orderStatus = order.status || '';
   return orderStatus === '已确认'
-    && refundStatus !== '退款已完成'
     && !hasEffectiveCommission(commissions);
 }
 

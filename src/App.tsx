@@ -16,7 +16,6 @@ const Orders = React.lazy(() => import('./pages/Orders'));
 const Delivery = React.lazy(() => import('./pages/Delivery'));
 const AfterSales = React.lazy(() => import('./pages/AfterSales'));
 const Finance = React.lazy(() => import('./pages/Finance'));
-const UpgradeCenter = React.lazy(() => import('./pages/UpgradePool'));
 const AIAssistant = React.lazy(() => import('./pages/AIAssistant'));
 const Settings = React.lazy(() => import('./pages/Settings'));
 const Login = React.lazy(() => import('./pages/Login'));
@@ -115,11 +114,9 @@ const App: React.FC = () => {
           </Route>
           <Route element={<ProtectedRoute permissionKeys={[
             PERMISSION_KEYS.AFTER_SALES,
-            PERMISSION_KEYS.AFTER_SALES_REFUND,
             PERMISSION_KEYS.AFTER_SALES_RECOVERY,
             PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
             PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
-            PERMISSION_KEYS.FINANCE_REFUND,
           ]} />}>
             <Route path={ROUTES.AFTER_SALES} element={<Suspense fallback={<PageLoader />}><AfterSales /></Suspense>} />
           </Route>
@@ -127,19 +124,15 @@ const App: React.FC = () => {
             PERMISSION_KEYS.FINANCE,
             PERMISSION_KEYS.FINANCE_MY_COMMISSION,
             PERMISSION_KEYS.FINANCE_SETTLEMENT,
+            PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT,
             PERMISSION_KEYS.FINANCE_PAYOUT,
             PERMISSION_KEYS.FINANCE_FLOW,
             PERMISSION_KEYS.FINANCE_RULES,
-            PERMISSION_KEYS.AFTER_SALES_REFUND,
-            PERMISSION_KEYS.FINANCE_REFUND,
           ]} />}>
             <Route path={ROUTES.FINANCE} element={<Suspense fallback={<PageLoader />}><Finance /></Suspense>} />
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.FINANCE_SETTLEMENT} />}>
             <Route path={ROUTES.COMMISSION} element={<Navigate to={`${ROUTES.FINANCE}?tab=settlement`} replace />} />
-          </Route>
-          <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.UPGRADE_ANALYSIS} />}>
-            <Route path={ROUTES.UPGRADE_ANALYSIS} element={<Navigate to={`${ROUTES.UPGRADE_CENTER}?tab=analysis`} replace />} />
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.AI_ASSISTANT} />}>
             <Route path={ROUTES.AI_ASSISTANT} element={<Suspense fallback={<PageLoader />}><AIAssistant /></Suspense>} />
@@ -147,12 +140,8 @@ const App: React.FC = () => {
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.SETTINGS} />}>
             <Route path={ROUTES.SETTINGS} element={<Suspense fallback={<PageLoader />}><Settings /></Suspense>} />
           </Route>
-          <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.AFTER_SALES_REFUND, PERMISSION_KEYS.FINANCE_REFUND]} />}>
-            <Route path={ROUTES.REFUND_CENTER} element={<Navigate to={`${ROUTES.AFTER_SALES}?tab=order-refund`} replace />} />
-          </Route>
-          <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.UPGRADE_CENTER, PERMISSION_KEYS.UPGRADE_POOL, PERMISSION_KEYS.UPGRADE_ANALYSIS]} />}>
-            <Route path={ROUTES.UPGRADE_POOL} element={<Navigate to={`${ROUTES.UPGRADE_CENTER}?tab=pool`} replace />} />
-            <Route path={ROUTES.UPGRADE_CENTER} element={<Suspense fallback={<PageLoader />}><UpgradeCenter /></Suspense>} />
+          <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.AFTER_SALES, PERMISSION_KEYS.AFTER_SALES_RECOVERY]} />}>
+            <Route path={ROUTES.REFUND_CENTER} element={<Navigate to={ROUTES.AFTER_SALES} replace />} />
           </Route>
           <Route
             path="/no-permission"

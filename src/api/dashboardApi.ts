@@ -1,9 +1,8 @@
 import type { Customer, CustomerActivityRecord } from '../types/customer';
 import type { Lead } from '../types/lead';
 import type { Order, OrderApplication } from '../types/order';
-import type { Refund } from '../types/refund';
+import type { RecoveryOrder } from '../types/recoveryOrder';
 import type { Delivery } from '../types/delivery';
-import type { UpgradeOpportunity } from '../types/upgrade';
 import type { Commission } from '../types/commission';
 import type { Role } from '../types/role';
 import type {
@@ -97,14 +96,16 @@ function filterApplications(applications: OrderApplication[]): OrderApplication[
   ));
 }
 
-function filterRefunds(refunds: Refund[]): Refund[] {
+function filterRecoveryOrders(orders: RecoveryOrder[]): RecoveryOrder[] {
   const scope = getCurrentDataVisibilityScope();
-  if (scope.unrestricted) return refunds;
-  return refunds.filter((item) => (
-    scope.visibleUserNames.includes(item.applicantName)
-    || scope.visibleUserNames.includes(item.recoveryTask?.assignedToName || '')
-    || scope.visibleUserIds.includes(item.applicantId)
-    || scope.visibleUserIds.includes(item.recoveryTask?.assignedToUserId || '')
+  if (scope.unrestricted) return orders;
+  return orders.filter((item) => (
+    scope.visibleUserNames.includes(item.createdByName)
+    || scope.visibleUserNames.includes(item.recoveryUserName)
+    || scope.visibleUserNames.includes(item.assistUserName || '')
+    || scope.visibleUserIds.includes(item.createdBy)
+    || scope.visibleUserIds.includes(item.recoveryUserId)
+    || scope.visibleUserIds.includes(item.assistUserId || '')
   ));
 }
 
@@ -115,12 +116,6 @@ function filterDeliveries(deliveries: Delivery[]): Delivery[] {
     scope.visibleUserNames.includes(item.owner)
     || item.tasks.some((task) => scope.visibleUserNames.includes(task.assigneeName || '') || scope.visibleUserIds.includes(task.assigneeId || ''))
   ));
-}
-
-function filterOpportunities(opportunities: UpgradeOpportunity[]): UpgradeOpportunity[] {
-  const scope = getCurrentDataVisibilityScope();
-  if (scope.unrestricted) return opportunities;
-  return opportunities.filter((item) => scope.visibleUserNames.includes(item.ownerName));
 }
 
 function filterCommissions(commissions: Commission[]): Commission[] {
@@ -196,18 +191,16 @@ async function fetchHomeWorkbench(): Promise<ApiResponse<HomeWorkbenchData>> {
   const customers = filterVisibleCustomers(readArray<Customer>(STORAGE_KEYS.CUSTOMERS));
   const orders = filterVisibleOrders(readArray<Order>(STORAGE_KEYS.ORDERS));
   const applications = filterApplications(readArray<OrderApplication>(STORAGE_KEYS.ORDER_APPLICATIONS));
-  const refunds = filterRefunds(readArray<Refund>(STORAGE_KEYS.REFUNDS));
+  const recoveryOrders = filterRecoveryOrders(readArray<RecoveryOrder>(STORAGE_KEYS.RECOVERY_ORDERS));
   const deliveries = filterDeliveries(readArray<Delivery>(STORAGE_KEYS.DELIVERIES));
-  const opportunities = filterOpportunities(readArray<UpgradeOpportunity>(STORAGE_KEYS.UPGRADE_POOL));
   const commissions = filterCommissions(readArray<Commission>(STORAGE_KEYS.COMMISSIONS));
 
   const pendingLeads = leads.filter((item) => normalizeLifecycleStatusCode(item.lifecycleStatusCode) === LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP);
   const followingCustomers = customers.filter((item) => normalizeLifecycleStatusCode(item.lifecycleStatusCode) === LIFECYCLE_STATUS_CODES.FOLLOWING);
   const returnedApplications = applications.filter((item) => item.status === '退回修改');
   const pendingApplications = applications.filter((item) => item.status === '待财务审核');
-  const pendingRefunds = refunds.filter((item) => ['待分配', '挽回中', '待财务退款', '退款已批准'].includes(item.status));
+  const pendingRecoveryOrders = recoveryOrders.filter((item) => item.status === '待审核' || item.status === '待分账');
   const activeDeliveries = deliveries.filter((item) => item.tasks.some((task) => task.status === '待开始' || task.status === '进行中'));
-  const pendingOpportunities = opportunities.filter((item) => item.status === '待跟进' || item.status === '跟进中');
   const pendingCommissions = commissions.filter((item) => item.status === '待确认' || item.owner === '待分配' || !item.ownerId);
 
   const quickActions: HomeQuickAction[] = [];
@@ -216,7 +209,7 @@ async function fetchHomeWorkbench(): Promise<ApiResponse<HomeWorkbenchData>> {
   pushIfAllowed(quickActions, PERMISSION_KEYS.ORDERS, { id: 'order', label: '提交订单申请', path: ROUTES.ORDERS, icon: 'order' });
   pushIfAllowed(quickActions, PERMISSION_KEYS.ORDERS, { id: 'review', label: '订单审核台', path: `${ROUTES.ORDERS}?tab=review`, icon: 'review' });
   pushIfAllowed(quickActions, PERMISSION_KEYS.FINANCE_SETTLEMENT, { id: 'commission', label: '分账处理', path: `${ROUTES.FINANCE}?tab=settlement`, icon: 'commission' });
-  pushIfAllowed(quickActions, PERMISSION_KEYS.FINANCE_REFUND, { id: 'refund', label: '退款处理', path: ROUTES.REFUND_CENTER, icon: 'refund' });
+  pushIfAllowed(quickActions, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, { id: 'recovery', label: '新建挽回订单', path: ROUTES.AFTER_SALES, icon: 'refund' });
   pushIfAllowed(quickActions, PERMISSION_KEYS.DELIVERY, { id: 'delivery', label: '交付推进', path: ROUTES.DELIVERY, icon: 'delivery' });
   pushIfAllowed(quickActions, PERMISSION_KEYS.AI_ASSISTANT, { id: 'ai', label: 'AI助手', path: ROUTES.AI_ASSISTANT, icon: 'ai' });
 
@@ -230,9 +223,8 @@ async function fetchHomeWorkbench(): Promise<ApiResponse<HomeWorkbenchData>> {
       makeTask('returned-orders', '退回订单申请', returnedApplications.length, `${ROUTES.ORDERS}?tab=review`, 'error', '销售需要修改后重新提交'),
       makeTask('pending-review', '待审核订单', pendingApplications.length, `${ROUTES.ORDERS}?tab=review`, 'warning', '财务待处理的订单申请'),
       makeTask('pending-commission', '待处理分账', pendingCommissions.length, `${ROUTES.FINANCE}?tab=settlement`, 'info', '待确认或待分配的分账记录'),
-      makeTask('pending-refund', '退款/挽回任务', pendingRefunds.length, ROUTES.REFUND_CENTER, 'error', '仍在流转中的退款任务'),
+      makeTask('pending-recovery', '售后挽回待处理', pendingRecoveryOrders.length, ROUTES.AFTER_SALES, 'warning', '待审核或待分账的售后挽回订单'),
       makeTask('delivery', '交付进行中', activeDeliveries.length, ROUTES.DELIVERY, 'primary', '未完成的交付单'),
-      makeTask('upgrade', '升单机会', pendingOpportunities.length, ROUTES.UPGRADE_POOL, 'success', '可继续跟进的升单机会'),
     ],
     quickActions: quickActions.slice(0, 8),
     activities: getRecentActivities(customers, leads, orders, applications),
@@ -240,7 +232,7 @@ async function fetchHomeWorkbench(): Promise<ApiResponse<HomeWorkbenchData>> {
       { label: '可见线索', value: String(leads.length), tone: 'primary' },
       { label: '可见客户', value: String(customers.length), tone: 'success' },
       { label: '正式订单', value: String(orders.length), tone: 'info' },
-      { label: '待办任务', value: String(pendingLeads.length + returnedApplications.length + pendingApplications.length + pendingCommissions.length + pendingRefunds.length), tone: 'warning' },
+      { label: '待办任务', value: String(pendingLeads.length + returnedApplications.length + pendingApplications.length + pendingCommissions.length + pendingRecoveryOrders.length), tone: 'warning' },
     ],
   });
 }
@@ -265,11 +257,11 @@ async function fetchBusinessCockpit(range?: DashboardDateRange): Promise<ApiResp
   const customers = filterVisibleCustomers(readArray<Customer>(STORAGE_KEYS.CUSTOMERS)).filter((item) => inRange(item.createdAt, start, end));
   const applications = filterApplications(readArray<OrderApplication>(STORAGE_KEYS.ORDER_APPLICATIONS)).filter((item) => inRange(item.submittedAt, start, end));
   const orders = filterVisibleOrders(readArray<Order>(STORAGE_KEYS.ORDERS)).filter((item) => inRange(orderPaymentDate(item), start, end));
-  const refunds = filterRefunds(readArray<Refund>(STORAGE_KEYS.REFUNDS)).filter((item) => inRange(item.createdAt, start, end));
+  const recoveryOrders = filterRecoveryOrders(readArray<RecoveryOrder>(STORAGE_KEYS.RECOVERY_ORDERS)).filter((item) => inRange(item.createdAt, start, end));
   const commissions = filterCommissions(readArray<Commission>(STORAGE_KEYS.COMMISSIONS)).filter((item) => inRange(item.paymentDate || item.createdAt, start, end));
 
   const orderAmount = orders.reduce((sum, item) => sum + (item.actualAmount || item.amount || 0), 0);
-  const refundAmount = refunds.reduce((sum, item) => sum + (item.refundAmount || 0), 0);
+  const recoveryAmount = recoveryOrders.reduce((sum, item) => sum + (item.recoveryAmount || 0), 0);
   const reviewedOrders = applications.filter((item) => item.status === '已入库').length;
   const pendingApplications = applications.filter((item) => item.status === '待财务审核').length;
   const pendingCommissions = commissions.filter((item) => item.status === '待确认' || item.owner === '待分配' || !item.ownerId).length;
@@ -281,7 +273,7 @@ async function fetchBusinessCockpit(range?: DashboardDateRange): Promise<ApiResp
     kpis: [
       { id: 'amount', label: '成交金额', value: formatCurrency(orderAmount), subValue: `${orders.length} 笔正式订单`, tone: 'primary' },
       { id: 'lead', label: '新增线索', value: String(leads.length), subValue: `${customers.length} 个新增客户`, tone: 'info' },
-      { id: 'refund', label: '退款金额', value: formatCurrency(refundAmount), subValue: `退款率 ${orderAmount ? Math.round((refundAmount / orderAmount) * 1000) / 10 : 0}%`, tone: 'error' },
+      { id: 'recovery', label: '挽回金额', value: formatCurrency(recoveryAmount), subValue: `${recoveryOrders.length} 笔售后挽回`, tone: 'success' },
       { id: 'review', label: '待审核订单', value: String(pendingApplications), subValue: '订单审核台待处理', tone: 'warning' },
       { id: 'commission', label: '待确认分账', value: String(pendingCommissions), subValue: `${paidCommissions} 条已发放`, tone: 'success' },
     ],
@@ -299,7 +291,7 @@ async function fetchBusinessCockpit(range?: DashboardDateRange): Promise<ApiResp
     riskTasks: [
       { id: 'review', title: '待审核订单', count: pendingApplications, path: `${ROUTES.ORDERS}?tab=review`, tone: 'warning' },
       { id: 'commission', title: '待处理分账', count: pendingCommissions, path: `${ROUTES.FINANCE}?tab=settlement`, tone: 'info' },
-      { id: 'refund', title: '退款流转中', count: refunds.filter((item) => item.status !== '退款已完成' && item.status !== '退款已拒绝').length, path: ROUTES.REFUND_CENTER, tone: 'error' },
+      { id: 'recovery', title: '售后挽回待处理', count: recoveryOrders.filter((item) => item.status === '待审核' || item.status === '待分账').length, path: ROUTES.AFTER_SALES, tone: 'warning' },
       { id: 'returned', title: '退回订单申请', count: applications.filter((item) => item.status === '退回修改').length, path: `${ROUTES.ORDERS}?tab=review`, tone: 'error' },
     ],
   });

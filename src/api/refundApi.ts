@@ -243,7 +243,7 @@ function createRecoveryCommission(refund: Refund, operatorId: string, operatorNa
     commissionRate: rate,
     commissionAmount: amount,
     performanceAmount: baseAmount,
-    scene: '退款挽回',
+    scene: '售后挽回',
     proofStatus: '已上传',
     calculationNote: `挽回提成 = 保留金额 ${baseAmount} × ${Math.round(rate * 100)}%，来源退款单 ${refund.refundNo}。`,
     role: role === '客户成功' ? '客户成功' : role === '售后' ? '售后' : '销售',

@@ -27,7 +27,6 @@ import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelColor, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import AIBusinessCardPanel from '../../shared/components/AIBusinessCardPanel';
-import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
 import useAuthStore from '../../store/useAuthStore';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
@@ -71,6 +70,8 @@ const formatCustomerSource = (customer: Customer) => [customer.leadSource, custo
 const contractKey = (customerId: string) => `aaos_customer_contracts_${customerId}`;
 const MAX_ACTIVITY_ATTACHMENTS = 6;
 const MAX_ACTIVITY_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+const normalizeCustomerTags = (tags?: string[]) => (tags || []).map((tag) => tag.trim()).filter(Boolean);
+const parseCustomerTagsInput = (value: string) => value.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean);
 
 const activityAttachmentAccept: Record<CustomerActivityAttachmentCategory, string> = {
   image: 'image/*',
@@ -369,6 +370,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       leadContributorId: draft.leadContributorId,
       leadContributorName: draft.leadContributorName,
       customerLevel: draft.customerLevel,
+      tags: normalizeCustomerTags(draft.tags),
       originalSalesTransferBy: draft.originalSalesTransferBy,
       remark: draft.remark,
     };
@@ -592,6 +594,42 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     </Box>
   );
 
+  const renderTagsRow = () => {
+    const tags = normalizeCustomerTags(currentCustomer.tags);
+    const draftTags = normalizeCustomerTags(draft.tags);
+
+    return (
+      <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
+        <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>标签</Box>
+        <Box sx={{ px: 1.5, py: editing ? 0.5 : 1, fontSize: 13 }}>
+          {editing ? (
+            <TextField
+              value={draftTags.join(', ')}
+              onChange={(event) => setDraft((prev) => ({ ...prev, tags: parseCustomerTagsInput(event.target.value) }))}
+              placeholder="多个标签用逗号分隔"
+              size="small"
+              fullWidth
+            />
+          ) : tags.length ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+              {tags.map((tag) => (
+                <Chip
+                  key={tag}
+                  label={tag}
+                  size="small"
+                  variant="outlined"
+                  sx={{ height: 22, borderColor: '#bfdbfe', bgcolor: '#eff6ff', color: '#2563eb', fontWeight: 600 }}
+                />
+              ))}
+            </Box>
+          ) : (
+            emptyText()
+          )}
+        </Box>
+      </Box>
+    );
+  };
+
   const renderRemarkRow = () => (
     <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', minHeight: 72 }}>
       <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>客户备注</Box>
@@ -758,7 +796,6 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               <TableCell>类型</TableCell>
               <TableCell>金额</TableCell>
               <TableCell>付款日期</TableCell>
-              <TableCell>退款状态</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -772,12 +809,11 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                 <TableCell>{order.orderType}</TableCell>
                 <TableCell>{formatCurrency(order.actualAmount || order.amount)}</TableCell>
                 <TableCell>{formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm:ss')}</TableCell>
-                <TableCell><RefundStatusBadge status={order.refundStatus} /></TableCell>
               </TableRow>
             ))}
             {orders.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} align="center" sx={{ py: 4, color: '#9ca3af' }}>暂无订单</TableCell>
+                <TableCell colSpan={6} align="center" sx={{ py: 4, color: '#9ca3af' }}>暂无订单</TableCell>
               </TableRow>
             )}
           </TableBody>
@@ -939,6 +975,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               {renderInfoRow('线索录入人', 'leadInputBy')}
               {renderInfoRow('线索贡献人', 'leadContributorName')}
               {renderInfoRow('客户等级', 'customerLevel')}
+              {renderTagsRow()}
               {renderInfoRow('原销转人员', 'originalSalesTransferBy')}
               {renderInfoRow('累计消费', 'totalSpent', false)}
               {renderInfoRow('订单数', 'orderCount', false)}

@@ -98,13 +98,12 @@ const PERMISSION_TREE: PermissionNode[] = [
   {
     label: '售后服务',
     children: [
-      { label: '订单退款', key: PERMISSION_KEYS.AFTER_SALES_REFUND },
       {
-        label: '退款挽回单',
+        label: '售后挽回订单',
         children: [
-          { label: '查看挽回单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY },
-          { label: '新建挽回单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE },
-          { label: '审核挽回单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW },
+          { label: '查看挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY },
+          { label: '新建挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE },
+          { label: '审核挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW },
         ],
       },
     ],
@@ -114,18 +113,10 @@ const PERMISSION_TREE: PermissionNode[] = [
     children: [
       { label: '我的提成', key: PERMISSION_KEYS.FINANCE_MY_COMMISSION },
       { label: '订单分账', key: PERMISSION_KEYS.FINANCE_SETTLEMENT },
+      { label: '售后挽回分账', key: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT },
       { label: '月度发放', key: PERMISSION_KEYS.FINANCE_PAYOUT },
       { label: '收支流水', key: PERMISSION_KEYS.FINANCE_FLOW },
       { label: '规则配置', key: PERMISSION_KEYS.FINANCE_RULES },
-    ],
-  },
-  {
-    label: '升单中心',
-    children: [
-      { label: '机会池', key: PERMISSION_KEYS.UPGRADE_POOL },
-      { label: '客户成功', key: PERMISSION_KEYS.UPGRADE_CUSTOMER_SUCCESS },
-      { label: '升单分析', key: PERMISSION_KEYS.UPGRADE_ANALYSIS },
-      { label: '行动任务', key: PERMISSION_KEYS.UPGRADE_TASKS },
     ],
   },
   {

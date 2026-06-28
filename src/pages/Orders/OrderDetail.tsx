@@ -1,13 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
   Box,
-  Button,
   Chip,
   Dialog,
-  DialogActions,
   DialogContent,
   Divider,
-  MenuItem,
   Table,
   TableBody,
   TableCell,
@@ -17,9 +14,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import useOrderStore from '../../store/useOrderStore';
-import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
-import { getProductLevelTagSx, REFUND_CATEGORIES } from '../../shared/utils/constants';
+import { getProductLevelTagSx } from '../../shared/utils/constants';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import { normalizeResourceOwnership } from '../../shared/utils/constants';
 import type { Order } from '../../types/order';
@@ -32,34 +27,7 @@ interface OrderDetailProps {
 }
 
 const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
-  const { applyRefund } = useOrderStore();
-  const [refundOpen, setRefundOpen] = useState(false);
-  const [refundAmount, setRefundAmount] = useState(order.actualAmount);
-  const [refundCategory, setRefundCategory] = useState('服务不满意');
-  const [refundReason, setRefundReason] = useState('');
-
-  useEffect(() => {
-    if (!open) return;
-    setRefundAmount(order.actualAmount);
-    setRefundCategory('服务不满意');
-    setRefundReason('');
-    setRefundOpen(false);
-  }, [open, order.id, order.actualAmount]);
-
-  const handleApplyRefund = async () => {
-    await applyRefund(order.id, {
-      refundAmount: Number(refundAmount),
-      refundReason,
-      refundCategory,
-      applicantId: 'user-001',
-      applicantName: order.owner,
-    });
-    setRefundOpen(false);
-    onClose();
-  };
-
   return (
-    <>
       <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
         <DialogCloseTitle onClose={onClose}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -90,10 +58,6 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
             <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>官方收款渠道</Typography>
               <Typography variant="body1">{order.officialPaymentChannel || '-'}</Typography>
-            </Box>
-            <Box>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>退款状态</Typography>
-              <RefundStatusBadge status={order.refundStatus} />
             </Box>
             <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>销售顾问</Typography>
@@ -174,17 +138,6 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
             </>
           )}
 
-          {order.refundStatus !== '无' && (
-            <>
-              <Divider sx={{ my: 2 }} />
-              <Box>
-                <Typography variant="subtitle2" sx={{ color: '#F44336', mb: 1 }}>退款信息</Typography>
-                <Typography variant="body2">退款金额: {formatCurrency(order.refundAmount || 0)}</Typography>
-                <Typography variant="body2">退款原因: {order.refundReason || '-'}</Typography>
-              </Box>
-            </>
-          )}
-
           {order.notes && (
             <>
               <Divider sx={{ my: 2 }} />
@@ -195,44 +148,7 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
             </>
           )}
         </DialogContent>
-        <DialogActions>
-          {order.refundStatus === '无' && order.actualAmount > 0 && (
-            <Button color="warning" variant="outlined" onClick={() => setRefundOpen(true)}>发起退款申请</Button>
-          )}
-        </DialogActions>
       </Dialog>
-
-      <Dialog open={refundOpen} onClose={() => setRefundOpen(false)} maxWidth="sm" fullWidth>
-        <DialogCloseTitle onClose={() => setRefundOpen(false)}>发起退款申请</DialogCloseTitle>
-        <DialogContent>
-          <Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
-            <Typography variant="body2" sx={{ color: '#6b7280' }}>
-              系统会自动带出订单、客户、产品和实付金额；提交后进入退款池并自动生成挽回任务。
-            </Typography>
-            <TextField label="可退金额" value={formatCurrency(order.actualAmount)} disabled fullWidth />
-            <TextField
-              label="退款金额"
-              type="number"
-              value={refundAmount}
-              onChange={(e) => setRefundAmount(Number(e.target.value))}
-              fullWidth
-              required
-              error={refundAmount <= 0 || refundAmount > order.actualAmount}
-              helperText={refundAmount > order.actualAmount ? '退款金额不能大于订单实付金额' : ''}
-            />
-            <TextField select label="退款原因分类" value={refundCategory} onChange={(e) => setRefundCategory(e.target.value)} fullWidth>
-              {REFUND_CATEGORIES.map((item) => <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>)}
-            </TextField>
-            <TextField label="退款说明" value={refundReason} onChange={(e) => setRefundReason(e.target.value)} multiline rows={4} fullWidth required />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="contained" color="warning" onClick={handleApplyRefund} disabled={!refundReason || refundAmount <= 0 || refundAmount > order.actualAmount}>
-            提交申请
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </>
   );
 };
 

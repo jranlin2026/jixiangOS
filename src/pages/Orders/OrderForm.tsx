@@ -140,7 +140,6 @@ function dealSceneFromOrderType(orderType: OrderType): CommissionScene | undefin
     '成交线索转新代理',
     '代理升单',
     '代理复购',
-    '退款挽回',
     '转介绍成交',
     '智能体服务',
     '个人资源成交',
@@ -782,7 +781,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               <MenuItem key={user.id} value={user.name}>{renderUserOptionLabel(user)}</MenuItem>
             ))}
           </TextField>
-          <TextField label="原899订单ID" value={form.originalOrderId} onChange={handleChange('originalOrderId')} placeholder="成交线索转代理时填写" fullWidth />
+          <TextField label="第三方平台订单" value={form.originalOrderId} onChange={handleChange('originalOrderId')} placeholder="填写第三方平台订单号或订单ID" fullWidth />
           <TextField label="备注" value={form.notes} onChange={handleChange('notes')} fullWidth sx={{ gridColumn: '1 / -1' }} />
         </Box>
       </DialogContent>

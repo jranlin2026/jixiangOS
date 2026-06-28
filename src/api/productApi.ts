@@ -10,7 +10,6 @@ import type { Order } from '../types/order';
 import type { Customer } from '../types/customer';
 import type { Commission, CommissionRule } from '../types/commission';
 import type { Refund } from '../types/refund';
-import type { UpgradeOpportunity } from '../types/upgrade';
 import { mockProductLevelConfigs } from './mock/data/productLevels';
 
 function ensureInit(): void {
@@ -71,14 +70,6 @@ function replaceProductLevelReferences(oldName: string, newName: string): void {
   setStorageData(STORAGE_KEYS.REFUNDS, refunds.map((refund) => (
     refund.productLevel === oldName ? { ...refund, productLevel: newName, updatedAt: now } : refund
   )));
-
-  const upgradePool = getStorageData<UpgradeOpportunity[]>(STORAGE_KEYS.UPGRADE_POOL) || [];
-  setStorageData(STORAGE_KEYS.UPGRADE_POOL, upgradePool.map((item) => ({
-    ...item,
-    currentProduct: item.currentProduct === oldName ? newName : item.currentProduct,
-    targetProduct: item.targetProduct === oldName ? newName : item.targetProduct,
-    updatedAt: item.currentProduct === oldName || item.targetProduct === oldName ? now : item.updatedAt,
-  })));
 
   const commissionRules = getStorageData<CommissionRule[]>(STORAGE_KEYS.COMMISSION_RULES) || [];
   setStorageData(STORAGE_KEYS.COMMISSION_RULES, commissionRules.map((rule) => (

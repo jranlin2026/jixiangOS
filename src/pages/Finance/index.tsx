@@ -30,11 +30,12 @@ import { financeApi } from '../../api';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import { ROUTES } from '../../shared/utils/constants';
 import Commission from '../Commission';
+import RecoverySettlement from './RecoverySettlement';
 import type { FinanceTransaction, FinanceTransactionDirection, FinanceTransactionFilters } from '../../types/finance';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 
-type FinanceTab = 'mine' | 'settlement' | 'payout' | 'flow' | 'rules';
+type FinanceTab = 'mine' | 'settlement' | 'recovery-settlement' | 'payout' | 'flow' | 'rules';
 
 const shell = {
   ink: '#0f172a',
@@ -52,6 +53,7 @@ const shell = {
 const FINANCE_TABS: Array<{ value: FinanceTab; label: string; permissionKey: string }> = [
   { value: 'mine', label: '我的提成', permissionKey: PERMISSION_KEYS.FINANCE_MY_COMMISSION },
   { value: 'settlement', label: '订单分账', permissionKey: PERMISSION_KEYS.FINANCE_SETTLEMENT },
+  { value: 'recovery-settlement', label: '售后挽回分账', permissionKey: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT },
   { value: 'payout', label: '员工提成月报', permissionKey: PERMISSION_KEYS.FINANCE_PAYOUT },
   { value: 'flow', label: '收支流水', permissionKey: PERMISSION_KEYS.FINANCE_FLOW },
   { value: 'rules', label: '提成规则', permissionKey: PERMISSION_KEYS.FINANCE_RULES },
@@ -80,6 +82,8 @@ const Finance: React.FC = () => {
   const [flowExporting, setFlowExporting] = useState(false);
   const [settlementViewSettingsTrigger, setSettlementViewSettingsTrigger] = useState(0);
   const [settlementCreateSplitTrigger, setSettlementCreateSplitTrigger] = useState(0);
+  const [recoverySettlementViewSettingsTrigger, setRecoverySettlementViewSettingsTrigger] = useState(0);
+  const [recoverySettlementCreateTrigger, setRecoverySettlementCreateTrigger] = useState(0);
 
   const visibleFinanceTabs = useMemo(
     () => FINANCE_TABS.filter((tab) => {
@@ -108,7 +112,7 @@ const Finance: React.FC = () => {
     direction: flowDirectionFilter as FinanceTransactionDirection | '',
   }), [flowDirectionFilter, flowSearch, flowTypeFilter]);
 
-  const flowTypeOptions = ['订单收款', '其他收入', '业务支出', '退款冲减', '提成发放'];
+  const flowTypeOptions = ['订单收款', '其他收入', '业务支出', '提成发放'];
 
   useEffect(() => {
     if (activeTab !== 'flow') return;
@@ -183,7 +187,7 @@ const Finance: React.FC = () => {
     setSearchParams({ tab: value });
   };
 
-  if (rawTab === 'refund') return <Navigate to={`${ROUTES.AFTER_SALES}?tab=order-refund`} replace />;
+  if (rawTab === 'refund') return <Navigate to={ROUTES.AFTER_SALES} replace />;
   if (rawTab === 'overview') return <Navigate to={`${ROUTES.FINANCE}?tab=mine`} replace />;
 
   if (!visibleFinanceTabs.length) {
@@ -225,7 +229,7 @@ const Finance: React.FC = () => {
                     业务核账流水
                   </Typography>
                   <Typography variant="caption" sx={{ color: shell.muted }}>
-                    订单收款、业务支出、退款冲减和提成发放会在这里形成同一条核账线。
+                    订单收款、业务支出和提成发放会在这里形成同一条核账线。
                   </Typography>
                 </Box>
                 <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, minmax(118px, 1fr))' }, gap: 0.75, minWidth: { lg: 560 } }}>
@@ -440,6 +444,24 @@ const Finance: React.FC = () => {
             </Button>
           </Stack>
         )}
+        {activeTab === 'recovery-settlement' && (
+          <Stack direction="row" spacing={1} justifyContent="flex-end" flexWrap="wrap" useFlexGap>
+            <Button
+              variant="outlined"
+              startIcon={<ViewColumnIcon />}
+              onClick={() => setRecoverySettlementViewSettingsTrigger((value) => value + 1)}
+            >
+              视图设置
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => setRecoverySettlementCreateTrigger((value) => value + 1)}
+            >
+              新建售后挽回分账
+            </Button>
+          </Stack>
+        )}
       </Stack>
 
       <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1.5, bgcolor: '#fff', mb: 2, overflow: 'hidden' }}>
@@ -477,6 +499,12 @@ const Finance: React.FC = () => {
           hideEmbeddedOrderSplitViewButton
           orderSplitViewTrigger={settlementViewSettingsTrigger}
           orderSplitCreateTrigger={settlementCreateSplitTrigger}
+        />
+      )}
+      {activeTab === 'recovery-settlement' && (
+        <RecoverySettlement
+          viewSettingsTrigger={recoverySettlementViewSettingsTrigger}
+          createSettlementTrigger={recoverySettlementCreateTrigger}
         />
       )}
       {activeTab === 'payout' && <Commission key="finance-payout" embedded initialTab={1} payoutMode="finance" />}

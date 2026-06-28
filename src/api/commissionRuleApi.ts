@@ -316,7 +316,7 @@ function inferScenarioGroup(rule: CommissionRule): CommissionRule['scenarioGroup
   if (text.includes('代理') || text.includes('转代理')) return '代理转化';
   if (text.includes('升单') || text.includes('复购')) return '升单复购';
   if (text.includes('转介绍')) return '转介绍';
-  if (text.includes('挽回') || text.includes('退款')) return '退款挽回';
+  if (text.includes('挽回') || text.includes('售后')) return '售后挽回';
   if (text.includes('服务') || text.includes('售后') || text.includes('客服')) return '服务激励';
   if (text.includes('个人资源') || text.includes('自拓')) return '个人资源';
   return '新客成交';

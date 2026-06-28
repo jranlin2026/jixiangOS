@@ -44,26 +44,21 @@ export const PERMISSION_KEYS = {
   DELIVERY_STAGE_CONFIG: '交付/交付阶段配置',
 
   AFTER_SALES: '售后服务',
-  AFTER_SALES_REFUND: '售后服务/订单退款',
+  AFTER_SALES_REFUND: '售后服务/售后挽回订单',
   AFTER_SALES_TICKETS: '售后服务/售后工单',
-  AFTER_SALES_RECOVERY: '售后服务/退款挽回单',
-  AFTER_SALES_RECOVERY_CREATE: '售后服务/退款挽回单/新建挽回单',
-  AFTER_SALES_RECOVERY_REVIEW: '售后服务/退款挽回单/审核挽回单',
+  AFTER_SALES_RECOVERY: '售后服务/售后挽回订单',
+  AFTER_SALES_RECOVERY_CREATE: '售后服务/售后挽回订单/新建挽回订单',
+  AFTER_SALES_RECOVERY_REVIEW: '售后服务/售后挽回订单/审核挽回订单',
 
   FINANCE: '财务中心',
   FINANCE_MY_COMMISSION: '财务中心/我的提成',
   FINANCE_OVERVIEW: '财务中心/财务总览',
   FINANCE_SETTLEMENT: '财务中心/订单分账',
+  FINANCE_RECOVERY_SETTLEMENT: '财务中心/售后挽回分账',
   FINANCE_PAYOUT: '财务中心/月度发放',
-  FINANCE_REFUND: '财务中心/退款付款',
+  FINANCE_REFUND: '财务中心/售后挽回分账',
   FINANCE_FLOW: '财务中心/收支流水',
   FINANCE_RULES: '财务中心/规则配置',
-
-  UPGRADE_CENTER: '升单中心',
-  UPGRADE_POOL: '升单中心/机会池',
-  UPGRADE_CUSTOMER_SUCCESS: '升单中心/客户成功',
-  UPGRADE_ANALYSIS: '升单中心/升单分析',
-  UPGRADE_TASKS: '升单中心/行动任务',
 
   AI_ASSISTANT: 'AI助手',
   AI_CHAT: 'AI助手/AI对话',
@@ -171,12 +166,10 @@ const PERMISSION_GRANT_TREE: Record<string, string[]> = {
   [PERMISSION_KEYS.DELIVERY_STAGE_CONFIG]: [PERMISSION_KEYS.DELIVERY_STAGE_CONFIG],
 
   [PERMISSION_KEYS.AFTER_SALES]: [
-    PERMISSION_KEYS.AFTER_SALES_REFUND,
     PERMISSION_KEYS.AFTER_SALES_RECOVERY,
     PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
     PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
   ],
-  [PERMISSION_KEYS.AFTER_SALES_REFUND]: [PERMISSION_KEYS.AFTER_SALES_REFUND],
   [PERMISSION_KEYS.AFTER_SALES_TICKETS]: [PERMISSION_KEYS.AFTER_SALES_TICKETS],
   [PERMISSION_KEYS.AFTER_SALES_RECOVERY]: [
     PERMISSION_KEYS.AFTER_SALES_RECOVERY,
@@ -191,6 +184,7 @@ const PERMISSION_GRANT_TREE: Record<string, string[]> = {
   [PERMISSION_KEYS.FINANCE]: [
     PERMISSION_KEYS.FINANCE_MY_COMMISSION,
     PERMISSION_KEYS.FINANCE_SETTLEMENT,
+    PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT,
     PERMISSION_KEYS.FINANCE_PAYOUT,
     PERMISSION_KEYS.FINANCE_FLOW,
     PERMISSION_KEYS.FINANCE_RULES,
@@ -198,21 +192,10 @@ const PERMISSION_GRANT_TREE: Record<string, string[]> = {
   [PERMISSION_KEYS.FINANCE_MY_COMMISSION]: [PERMISSION_KEYS.FINANCE_MY_COMMISSION],
   [PERMISSION_KEYS.FINANCE_OVERVIEW]: [PERMISSION_KEYS.FINANCE_MY_COMMISSION],
   [PERMISSION_KEYS.FINANCE_SETTLEMENT]: [PERMISSION_KEYS.FINANCE_SETTLEMENT],
+  [PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT]: [PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT],
   [PERMISSION_KEYS.FINANCE_PAYOUT]: [PERMISSION_KEYS.FINANCE_PAYOUT],
-  [PERMISSION_KEYS.FINANCE_REFUND]: [PERMISSION_KEYS.AFTER_SALES_REFUND],
   [PERMISSION_KEYS.FINANCE_FLOW]: [PERMISSION_KEYS.FINANCE_FLOW],
   [PERMISSION_KEYS.FINANCE_RULES]: [PERMISSION_KEYS.FINANCE_RULES],
-
-  [PERMISSION_KEYS.UPGRADE_CENTER]: [
-    PERMISSION_KEYS.UPGRADE_POOL,
-    PERMISSION_KEYS.UPGRADE_CUSTOMER_SUCCESS,
-    PERMISSION_KEYS.UPGRADE_ANALYSIS,
-    PERMISSION_KEYS.UPGRADE_TASKS,
-  ],
-  [PERMISSION_KEYS.UPGRADE_POOL]: [PERMISSION_KEYS.UPGRADE_POOL],
-  [PERMISSION_KEYS.UPGRADE_CUSTOMER_SUCCESS]: [PERMISSION_KEYS.UPGRADE_CUSTOMER_SUCCESS],
-  [PERMISSION_KEYS.UPGRADE_ANALYSIS]: [PERMISSION_KEYS.UPGRADE_ANALYSIS],
-  [PERMISSION_KEYS.UPGRADE_TASKS]: [PERMISSION_KEYS.UPGRADE_TASKS],
 
   [PERMISSION_KEYS.AI_ASSISTANT]: [
     PERMISSION_KEYS.AI_CHAT,
@@ -282,8 +265,12 @@ const ROLE_CODE_BY_USER_ROLE: Record<string, string> = {
   客户成功: 'customer_success',
 };
 
-export function isSuperAdmin(user?: Pick<AuthenticatedUser, 'role' | 'permissions'> | null): boolean {
+export function isSuperAdmin(user?: Pick<AuthenticatedUser, 'role' | 'roleId' | 'permissions'> | null): boolean {
   if (!user) return false;
+  const roleId = normalizePermissionKey(String(user.roleId || '')).toLowerCase();
+  const roleName = normalizePermissionKey(String(user.role || '')).toLowerCase();
+  if (roleId.includes('super-admin') || roleId.includes('super_admin')) return true;
+  if (roleName.includes('超级管理员') || roleName.includes('系统管理员') || roleName.includes('superadmin')) return true;
   return user.permissions?.some((permission) => normalizePermissionKey(permission.module) === ALL_PERMISSION_KEY) || false;
 }
 
@@ -428,7 +415,7 @@ export function sanitizeRolePermissions(permissions: Permission[] = []): Permiss
 }
 
 export function hasPermission(
-  user: Pick<AuthenticatedUser, 'role' | 'permissions' | 'isActive'> | null | undefined,
+  user: Pick<AuthenticatedUser, 'role' | 'roleId' | 'permissions' | 'isActive'> | null | undefined,
   permissionKey: string,
   action = 'read',
 ): boolean {

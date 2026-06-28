@@ -10,7 +10,7 @@ import { formatDate } from '../shared/utils/formatters';
 import { initializeMockData } from './mock';
 import { commissionRuleApi } from './commissionRuleApi';
 import { deliveryApi } from './deliveryApi';
-import { syncLifecycleByOrder, syncOpportunityRefundedByOrderId } from './lifecycleSync';
+import { syncLifecycleByOrder } from './lifecycleSync';
 import { v4 as uuidv4 } from 'uuid';
 import { getCurrentOperatorName, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
 import { filterVisibleOrders } from '../shared/utils/dataVisibility';
@@ -102,7 +102,6 @@ function syncCustomerOrderStats(order: Order, allOrders: Order[], operator = SYS
   const shouldAppendMilestone = relatedOrders.some((item) => item.id === order.id)
     && !existingGrowthPath.some((item) => item.orderId === order.id || item.orderNo === order.orderNo);
   const hasOrderActivity = existingActivities.some((item) => item.relatedType === 'order' && item.relatedId === order.id && item.type === 'order');
-  const hasRefundActivity = existingActivities.some((item) => item.relatedType === 'order' && item.relatedId === order.id && item.type === 'refund');
   const nextGrowthPath = shouldAppendMilestone
     ? [
       ...existingGrowthPath,
@@ -128,16 +127,6 @@ function syncCustomerOrderStats(order: Order, allOrders: Order[], operator = SYS
       relatedId: order.id,
       relatedType: 'order' as const,
       createdAt: order.createdAt || now,
-    }] : []),
-    ...((order.refundStatus && order.refundStatus !== '无' && !hasRefundActivity) ? [{
-      id: `act-${uuidv4().slice(0, 8)}`,
-      type: 'refund' as const,
-      title: `订单退款状态更新为 ${order.refundStatus}`,
-      content: order.refundReason || undefined,
-      operator,
-      relatedId: order.id,
-      relatedType: 'order' as const,
-      createdAt: now,
     }] : []),
     ...existingActivities,
   ];
@@ -165,7 +154,6 @@ const ORDER_CHANGE_FIELDS: Array<{ field: keyof Order; label: string }> = [
   { field: 'actualAmount', label: '实付金额' },
   { field: 'paymentMethod', label: '支付方式' },
   { field: 'status', label: '订单状态' },
-  { field: 'refundStatus', label: '退款状态' },
   { field: 'owner', label: '销售负责人' },
   { field: 'leadInputBy', label: '线索录入人' },
   { field: 'leadContributorName', label: '线索贡献人' },
@@ -175,7 +163,7 @@ const ORDER_CHANGE_FIELDS: Array<{ field: keyof Order; label: string }> = [
   { field: 'isExternalTalentOrder', label: '外部达人成交' },
   { field: 'dealScene', label: '成交场景' },
   { field: 'proofStatus', label: '凭证状态' },
-  { field: 'originalOrderId', label: '原始订单' },
+  { field: 'originalOrderId', label: '第三方平台订单' },
   { field: 'performanceBaseAmount', label: '业绩核算基数' },
   { field: 'notes', label: '备注' },
   { field: 'payments', label: '付款记录' },
@@ -218,31 +206,6 @@ function buildOrderChanges(before: Order, data: Partial<Order>) {
       newValue: normalizeChangeValue(data[field]),
     }))
     .filter((item) => item.oldValue !== item.newValue);
-}
-
-function syncCommissionRefundState(order: Order): void {
-  if (!order.refundStatus || order.refundStatus === '无') return;
-
-  const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
-  const isRefundDone = order.refundStatus === '退款已完成' || order.status === '已退款';
-  const reason = isRefundDone
-    ? '退款完成，取消未发放提成'
-    : `订单退款流程中（${order.refundStatus}），冻结未发放提成`;
-  let changed = false;
-
-  const nextCommissions = commissions.map((commission) => {
-    if (commission.orderId !== order.id || commission.status === '已发放') return commission;
-    changed = true;
-    return {
-      ...commission,
-      status: isRefundDone ? '已取消' as const : '待确认' as const,
-      auditReason: reason,
-      frozenReason: reason,
-      updatedAt: new Date().toISOString(),
-    };
-  });
-
-  if (changed) setStorageData(STORAGE_KEYS.COMMISSIONS, nextCommissions);
 }
 
 async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<PaginatedResponse<Order>>> {
@@ -326,7 +289,6 @@ async function fetchOrderStats(): Promise<ApiResponse<OrderStats>> {
 
   const todayOrders = orders.filter((o) => o.createdAt >= today);
   const monthOrders = orders.filter((o) => o.createdAt >= monthStart);
-  const refundOrders = orders.filter((o) => o.refundStatus !== '无');
   const upgradeOrders = orders.filter(
     (o) => o.orderType === '升级' || o.orderType === '代理升单',
   );
@@ -336,8 +298,8 @@ async function fetchOrderStats(): Promise<ApiResponse<OrderStats>> {
     todayCount: todayOrders.length,
     monthAmount: monthOrders.reduce((s, o) => s + o.amount, 0),
     monthCount: monthOrders.length,
-    refundCount: refundOrders.length,
-    refundAmount: refundOrders.reduce((s, o) => s + (o.refundAmount || 0), 0),
+    refundCount: 0,
+    refundAmount: 0,
     upgradeCount: upgradeOrders.length,
     upgradeAmount: upgradeOrders.reduce((s, o) => s + o.amount, 0),
   };
@@ -537,13 +499,7 @@ async function updateOrder(id: string, data: Partial<Order>): Promise<ApiRespons
   };
   setStorageData(STORAGE_KEYS.ORDERS, orders);
   syncCustomerOrderStats(orders[idx], orders, operator);
-  syncCommissionRefundState(orders[idx]);
-  if (orders[idx].refundStatus === '退款已完成' || orders[idx].status === '已退款') {
-    syncLifecycleByOrder(orders[idx], 'refunded');
-    syncOpportunityRefundedByOrderId(orders[idx].id);
-  } else {
-    syncLifecycleByOrder(orders[idx], 'ordered');
-  }
+  syncLifecycleByOrder(orders[idx], 'ordered');
   return createSuccessResponse(orders[idx]);
 }
 

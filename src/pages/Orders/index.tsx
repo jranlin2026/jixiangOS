@@ -39,7 +39,6 @@ import useOrderStore from '../../store/useOrderStore';
 import { customerApi, orderApi, productApi, settingsApi } from '../../api';
 import { getProductLevelColor, getProductLevelRowSx, getProductLevelTagSx, PRODUCT_LEVELS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
-import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
 import CustomerDetail from '../Customers/CustomerDetail';
 import OrderDetail from './OrderDetail';
 import OrderForm from './OrderForm';
@@ -75,8 +74,8 @@ type OrderViewConfig = {
   schemaVersion: number;
 };
 
-const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_view_v5';
-const ORDER_VIEW_SCHEMA_VERSION = 5;
+const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_view_v7';
+const ORDER_VIEW_SCHEMA_VERSION = 7;
 const ORDER_WIDTH_STORAGE_KEY = 'aaos_order_table_column_widths_v1';
 const ORDER_ACTION_COLUMN_WIDTH = 160;
 
@@ -87,10 +86,14 @@ const ORDER_COLUMNS: OrderColumn[] = [
   { id: 'productLevel', label: '产品等级' },
   { id: 'orderType', label: '订单类型' },
   { id: 'actualAmount', label: '实付金额' },
+  { id: 'officialPaymentChannel', label: '官方收款渠道' },
   { id: 'resourceOwnership', label: '资源归属' },
-  { id: 'paymentDate', label: '付款日期' },
-  { id: 'refundStatus', label: '退款状态' },
+  { id: 'paymentDate', label: '付款时间' },
   { id: 'owner', label: '销售负责人' },
+  { id: 'leadInputBy', label: '线索录入人' },
+  { id: 'leadContributorName', label: '线索贡献人' },
+  { id: 'originalOrderId', label: '第三方平台订单' },
+  { id: 'notes', label: '备注' },
   { id: 'createdAt', label: '创建时间' },
 ];
 
@@ -101,10 +104,14 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'productLevel',
   'orderType',
   'actualAmount',
+  'officialPaymentChannel',
   'resourceOwnership',
   'paymentDate',
-  'refundStatus',
   'owner',
+  'leadInputBy',
+  'leadContributorName',
+  'originalOrderId',
+  'notes',
   'createdAt',
 ];
 
@@ -115,10 +122,14 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   productLevel: 140,
   orderType: 140,
   actualAmount: 140,
+  officialPaymentChannel: 160,
   resourceOwnership: 140,
   paymentDate: 180,
-  refundStatus: 140,
   owner: 140,
+  leadInputBy: 140,
+  leadContributorName: 150,
+  originalOrderId: 180,
+  notes: 220,
   createdAt: 180,
 };
 
@@ -522,14 +533,22 @@ const Orders: React.FC = () => {
         return <Chip label={order.orderType} size="small" variant="outlined" />;
       case 'actualAmount':
         return formatCurrency(order.actualAmount || order.amount);
+      case 'officialPaymentChannel':
+        return order.officialPaymentChannel || '-';
       case 'resourceOwnership':
         return normalizeResourceOwnership(order.resourceOwnership || order.sourceType);
       case 'paymentDate':
         return formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm:ss');
-      case 'refundStatus':
-        return <RefundStatusBadge status={order.refundStatus} />;
       case 'owner':
         return order.owner;
+      case 'leadInputBy':
+        return order.leadInputBy || '-';
+      case 'leadContributorName':
+        return order.leadContributorName || '-';
+      case 'originalOrderId':
+        return order.originalOrderId || '-';
+      case 'notes':
+        return order.notes || '-';
       case 'createdAt':
         return formatDate(order.createdAt, 'yyyy-MM-dd HH:mm:ss');
       default:
@@ -610,7 +629,7 @@ const Orders: React.FC = () => {
               </Select>
             </FormControl>
             <Button variant="outlined" startIcon={<SortIcon />} onClick={handlePaymentDateSort}>
-              付款日期{filters.sortBy === 'paymentDate' && filters.sortDirection === 'asc' ? '升序' : '降序'}
+              付款时间{filters.sortBy === 'paymentDate' && filters.sortDirection === 'asc' ? '升序' : '降序'}
             </Button>
           </Box>
 
@@ -814,8 +833,7 @@ const Orders: React.FC = () => {
                 <TableCell>产品等级</TableCell>
                 <TableCell>订单类型</TableCell>
                 <TableCell>金额</TableCell>
-                <TableCell>付款日期</TableCell>
-                <TableCell>退款状态</TableCell>
+                <TableCell>付款时间</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -833,12 +851,11 @@ const Orders: React.FC = () => {
                   <TableCell>{order.orderType}</TableCell>
                   <TableCell>{formatCurrency(order.actualAmount || order.amount)}</TableCell>
                   <TableCell>{formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm:ss')}</TableCell>
-                  <TableCell><RefundStatusBadge status={order.refundStatus} /></TableCell>
                 </TableRow>
               ))}
               {customerOrders.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 4, color: '#9ca3af' }}>暂无订单</TableCell>
+                  <TableCell colSpan={6} align="center" sx={{ py: 4, color: '#9ca3af' }}>暂无订单</TableCell>
                 </TableRow>
               )}
             </TableBody>

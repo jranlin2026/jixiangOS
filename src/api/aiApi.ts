@@ -13,7 +13,6 @@ import type { Customer } from '../types/customer';
 import type { Order, OrderApplication } from '../types/order';
 import type { Refund } from '../types/refund';
 import type { Commission } from '../types/commission';
-import type { UpgradeOpportunity } from '../types/upgrade';
 import type { ApiResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
@@ -36,7 +35,6 @@ interface AssistantData {
   applications: OrderApplication[];
   refunds: Refund[];
   commissions: Commission[];
-  opportunities: UpgradeOpportunity[];
 }
 
 function ensureInit(): void {
@@ -103,12 +101,6 @@ function filterCommissions(commissions: Commission[]): Commission[] {
   ));
 }
 
-function filterOpportunities(opportunities: UpgradeOpportunity[]): UpgradeOpportunity[] {
-  const scope = getCurrentDataVisibilityScope();
-  if (scope.unrestricted) return opportunities;
-  return opportunities.filter((item) => scope.visibleUserNames.includes(item.ownerName));
-}
-
 function getAssistantData(): AssistantData {
   return {
     leads: filterVisibleLeads(readArray<Lead>(STORAGE_KEYS.LEADS)),
@@ -117,7 +109,6 @@ function getAssistantData(): AssistantData {
     applications: filterApplications(readArray<OrderApplication>(STORAGE_KEYS.ORDER_APPLICATIONS)),
     refunds: filterRefunds(readArray<Refund>(STORAGE_KEYS.REFUNDS)),
     commissions: filterCommissions(readArray<Commission>(STORAGE_KEYS.COMMISSIONS)),
-    opportunities: filterOpportunities(readArray<UpgradeOpportunity>(STORAGE_KEYS.UPGRADE_POOL)),
   };
 }
 
@@ -169,10 +160,6 @@ function exceptionCommissions(commissions: Commission[]): Commission[] {
   ));
 }
 
-function activeOpportunities(opportunities: UpgradeOpportunity[]): UpgradeOpportunity[] {
-  return opportunities.filter((item) => !includesAny(item.status, ['已转化', '已流失']));
-}
-
 function rankByName<T>(items: T[], getName: (item: T) => string | undefined, getAmount: (item: T) => number): Array<{ name: string; count: number; amount: number }> {
   const map = new Map<string, { name: string; count: number; amount: number }>();
   items.forEach((item) => {
@@ -202,14 +189,11 @@ function buildWorkbench(data: AssistantData): AIAssistantWorkbench {
   const activeRefundRows = activeRefunds(data.refunds);
   const pendingCommissionRows = pendingCommissions(data.commissions);
   const pendingPayoutRows = pendingPayoutCommissions(data.commissions);
-  const opportunityRows = activeOpportunities(data.opportunities);
-  const highOpportunityRows = opportunityRows.filter((item) => item.probability >= 80);
   const taskCount = pendingLeadRows.length
     + pendingReviewRows.length
     + returnedRows.length
     + activeRefundRows.length
-    + pendingCommissionRows.length
-    + highOpportunityRows.length;
+    + pendingCommissionRows.length;
 
   const insights: AIAssistantInsight[] = [];
   if (pendingReviewRows.length > 0) {
@@ -233,26 +217,17 @@ function buildWorkbench(data: AssistantData): AIAssistantWorkbench {
   if (activeRefundRows.length > 0) {
     insights.push({
       id: 'refund-risk',
-      title: '售后退款任务仍在流转',
-      content: `当前有 ${activeRefundRows.length} 条退款或挽回任务未闭环，涉及金额 ${formatCurrency(sumRefunds(activeRefundRows))}。`,
-      tone: 'error',
-      path: `${ROUTES.AFTER_SALES}?tab=order-refund`,
-    });
-  }
-  if (highOpportunityRows.length > 0) {
-    insights.push({
-      id: 'upgrade-chance',
-      title: '高概率升单机会值得推进',
-      content: `AI 识别出 ${highOpportunityRows.length} 个 80% 以上概率的升单机会，适合今天安排客户成功跟进。`,
-      tone: 'success',
-      path: ROUTES.UPGRADE_CENTER,
+      title: '售后挽回任务仍在流转',
+      content: `当前有 ${activeRefundRows.length} 条售后挽回任务未闭环，涉及金额 ${formatCurrency(sumRefunds(activeRefundRows))}。`,
+      tone: 'warning',
+      path: ROUTES.AFTER_SALES,
     });
   }
   if (insights.length === 0) {
     insights.push({
       id: 'healthy',
       title: '当前运营链路较顺',
-      content: '未发现明显堆积任务，可以重点看销售排行和升单机会，继续放大有效动作。',
+      content: '未发现明显堆积任务，可以重点看销售排行和转化漏斗，继续放大有效动作。',
       tone: 'success',
       path: ROUTES.DASHBOARD,
     });
@@ -264,8 +239,8 @@ function buildWorkbench(data: AssistantData): AIAssistantWorkbench {
     metrics: [
       makeMetric('month-amount', '本月成交金额', formatCurrency(monthAmount), 'primary', `${monthOrders.length} 个正式订单`),
       makeMetric('visible-customers', '可见客户', String(data.customers.length), 'success', `${data.leads.length} 条可见线索`),
-      makeMetric('pending-tasks', '待处理任务', String(taskCount), taskCount > 0 ? 'warning' : 'success', '来自线索、订单、退款、分账、升单'),
-      makeMetric('refund-risk', '退款风险金额', formatCurrency(sumRefunds(activeRefundRows)), activeRefundRows.length > 0 ? 'error' : 'neutral', `${activeRefundRows.length} 条未闭环`),
+      makeMetric('pending-tasks', '待处理任务', String(taskCount), taskCount > 0 ? 'warning' : 'success', '来自线索、订单、售后挽回、分账'),
+      makeMetric('recovery-risk', '售后挽回金额', formatCurrency(sumRefunds(activeRefundRows)), activeRefundRows.length > 0 ? 'warning' : 'neutral', `${activeRefundRows.length} 条未闭环`),
     ],
     tasks: [
       makeTask({
@@ -320,23 +295,13 @@ function buildWorkbench(data: AssistantData): AIAssistantWorkbench {
       }),
       makeTask({
         id: 'refund',
-        title: '售后退款/挽回',
-        description: '退款未闭环会影响收入、客户状态和提成撤回/冲销。',
+        title: '售后挽回',
+        description: '售后挽回订单审核通过后，需要进入售后挽回分账。',
         count: activeRefundRows.length,
         priority: activeRefundRows.length > 0 ? 'high' : 'low',
         module: '售后服务',
-        path: `${ROUTES.AFTER_SALES}?tab=order-refund`,
-        actionLabel: '处理工单',
-      }),
-      makeTask({
-        id: 'upgrade',
-        title: '高概率升单',
-        description: '80% 以上概率机会适合安排客户成功或销售推进。',
-        count: highOpportunityRows.length,
-        priority: highOpportunityRows.length > 0 ? 'medium' : 'low',
-        module: '升单中心',
-        path: ROUTES.UPGRADE_CENTER,
-        actionLabel: '推进升单',
+        path: ROUTES.AFTER_SALES,
+        actionLabel: '处理挽回',
       }),
     ].sort((a, b) => {
       const score = { high: 3, medium: 2, low: 1 };
@@ -348,8 +313,7 @@ function buildWorkbench(data: AssistantData): AIAssistantWorkbench {
       { id: 'sales', category: '销售', label: '本月销售情况', prompt: '分析本月销售成交金额、订单数、销售排行和主要增长点' },
       { id: 'review', category: '订单', label: '订单审核风险', prompt: '帮我分析当前订单审核台有什么积压和风险' },
       { id: 'commission', category: '财务', label: '分账待处理', prompt: '检查财务结算台有哪些待确认、待分配和待发放问题' },
-      { id: 'refund', category: '售后', label: '退款原因分析', prompt: '分析当前售后退款和退款挽回情况，告诉我主要原因和建议动作' },
-      { id: 'upgrade', category: '升单', label: '升单机会推荐', prompt: '帮我找出最值得推进的高概率升单客户，并给出跟进建议' },
+      { id: 'refund', category: '售后', label: '售后挽回分析', prompt: '分析当前售后挽回情况，告诉我主要原因和建议动作' },
       { id: 'conversion', category: '经营', label: '转化漏斗', prompt: '分析线索到客户、订单、入库和分账确认的转化漏斗' },
     ],
   };
@@ -363,7 +327,6 @@ function matchScenario(query: string): AIQueryScenario {
   if (/退款|挽回|售后|退费/.test(q)) return 'refund_reason';
   if (/排行|排名|top|谁.*高|业绩/.test(q)) return 'sales_ranking';
   if (/转化|漏斗|转化率|链路/.test(q)) return 'conversion_rate';
-  if (/升单|机会|潜力|客户成功|推荐/.test(q)) return 'high_potential';
   if (/销售|营收|收入|成交|订单|金额/.test(q)) return 'sales_data';
   return 'general';
 }
@@ -377,7 +340,7 @@ function resultMetrics(data: AssistantData): AIResultData {
     metrics: [
       makeMetric('orders', '正式订单', String(data.orders.length), 'primary', `本月 ${monthOrders.length} 单`),
       makeMetric('amount', '本月成交', formatCurrency(sumOrders(monthOrders)), 'success'),
-      makeMetric('refund', '退款金额', formatCurrency(sumRefunds(data.refunds)), sumRefunds(data.refunds) > 0 ? 'error' : 'neutral'),
+      makeMetric('recovery', '售后挽回金额', formatCurrency(sumRefunds(data.refunds)), sumRefunds(data.refunds) > 0 ? 'warning' : 'neutral'),
       makeMetric('commission', '待处理分账', String(pendingCommissions(data.commissions).length), pendingCommissions(data.commissions).length > 0 ? 'warning' : 'success'),
     ],
   };
@@ -391,7 +354,7 @@ function buildDailyTaskResults(workbench: AIAssistantWorkbench): AIResultData[] 
       title: '今日处理顺序',
       content: importantTasks.length
         ? `建议先处理 ${importantTasks[0].title}，它当前数量最高或影响链路最靠前。`
-        : '当前没有明显积压任务，可以优先看升单机会和销售排行。',
+        : '当前没有明显积压任务，可以优先看销售排行和转化漏斗。',
     },
     {
       type: 'TABLE',
@@ -434,7 +397,7 @@ function buildRefundResults(data: AssistantData): AIResultData[] {
   return [
     {
       type: 'TABLE',
-      title: '退款原因和金额',
+      title: '售后挽回线索',
       content: `当前可见退款 ${data.refunds.length} 条，未闭环 ${activeRefunds(data.refunds).length} 条。`,
       tableHeaders: [
         { key: 'reason', label: '原因/分类' },
@@ -442,12 +405,12 @@ function buildRefundResults(data: AssistantData): AIResultData[] {
         { key: 'amount', label: '金额' },
       ],
       tableRows: rows.map((item) => ({ reason: item.name, count: item.count, amount: formatCurrency(item.amount) })),
-      actions: [{ label: '进入订单退款', path: `${ROUTES.AFTER_SALES}?tab=order-refund`, variant: 'contained' }],
+      actions: [{ label: '进入售后服务', path: ROUTES.AFTER_SALES, variant: 'contained' }],
     },
     {
       type: 'SUGGESTION',
       title: '处理建议',
-      content: '退款任务建议按金额和状态优先处理。',
+      content: '售后挽回任务建议按金额和状态优先处理。',
       suggestions: [
         '先处理已批准但未付款的退款，避免财务状态不一致。',
         '挽回中任务需要明确下一次跟进时间和责任人。',
@@ -500,45 +463,7 @@ function buildConversionResults(data: AssistantData): AIResultData[] {
       title: '漏斗判断',
       content: data.applications.length > data.orders.length
         ? '订单申请多于正式订单，说明财务审核入库是当前需要关注的节点。'
-        : '正式订单链路相对顺畅，接下来更应该关注分账确认、退款和升单机会。',
-    },
-  ];
-}
-
-function buildUpgradeResults(data: AssistantData): AIResultData[] {
-  const rows = activeOpportunities(data.opportunities)
-    .sort((a, b) => b.probability - a.probability || b.estimatedAmount - a.estimatedAmount)
-    .slice(0, 8);
-  return [
-    {
-      type: 'TABLE',
-      title: '高概率升单机会',
-      content: '按 AI 概率和预计金额排序。',
-      tableHeaders: [
-        { key: 'customerName', label: '客户' },
-        { key: 'targetProduct', label: '目标产品' },
-        { key: 'probability', label: '概率' },
-        { key: 'amount', label: '预计金额' },
-        { key: 'owner', label: '负责人' },
-      ],
-      tableRows: rows.map((item) => ({
-        customerName: item.customerName,
-        targetProduct: item.targetProduct,
-        probability: `${item.probability}%`,
-        amount: formatCurrency(item.estimatedAmount),
-        owner: item.ownerName,
-      })),
-      actions: [{ label: '进入升单中心', path: ROUTES.UPGRADE_CENTER, variant: 'contained' }],
-    },
-    {
-      type: 'SUGGESTION',
-      title: '推进建议',
-      content: '高概率机会适合拆成具体行动。',
-      suggestions: [
-        '80% 以上机会今天安排销售或客户成功明确下一步。',
-        '预计金额高但跟进次数少的客户，优先补一次价值沟通。',
-        '已流失机会不要继续堆在池子里，转为复盘任务。',
-      ],
+        : '正式订单链路相对顺畅，接下来更应该关注分账确认、退款和客户维护。',
     },
   ];
 }
@@ -598,7 +523,7 @@ function buildGeneralResults(data: AssistantData, workbench: AIAssistantWorkbenc
     {
       type: 'TEXT',
       title: '我能帮你看什么',
-      content: `我已经按${scopeLabel()}读取了当前系统数据。你刚才问的是“${query}”，可以继续让我分析销售、订单审核、分账、退款、升单或转化漏斗。`,
+      content: `我已经按${scopeLabel()}读取了当前系统数据。你刚才问的是“${query}”，可以继续让我分析销售、订单审核、分账、退款或转化漏斗。`,
     },
     resultMetrics(data),
     {
@@ -626,8 +551,6 @@ function generateResults(query: string, data: AssistantData, workbench: AIAssist
       return buildRankingResults(data);
     case 'conversion_rate':
       return buildConversionResults(data);
-    case 'high_potential':
-      return buildUpgradeResults(data);
     case 'finance_settlement':
       return buildCommissionResults(data);
     case 'order_review':

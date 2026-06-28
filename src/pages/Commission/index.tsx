@@ -50,7 +50,6 @@ import ResizableHeaderCell, {
   writeColumnWidths,
   type ColumnWidthMap,
 } from '../../shared/components/ResizableTable';
-import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
 import CommissionRuleConfig from './CommissionRuleConfig';
 import OrderDetail from '../Orders/OrderDetail';
 import CustomerDetail from '../Customers/CustomerDetail';
@@ -76,7 +75,6 @@ import type { Department } from '../../types/department';
 import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
 import type { User } from '../../types/settings';
-import type { RefundStatus } from '../../types/common';
 
 const ORDER_STATUS_OPTIONS: Array<{ value: CommissionOrderSummaryStatus | '全部'; label: string; important?: boolean }> = [
   { value: '全部', label: '全部' },
@@ -109,9 +107,12 @@ type OrderSplitColumnId =
   | 'orderAmount'
   | 'resourceOwnership'
   | 'paymentDate'
-  | 'refundStatus'
   | 'salesOwner'
+  | 'leadInputBy'
+  | 'leadContributorName'
   | 'officialPaymentChannel'
+  | 'originalOrderId'
+  | 'notes'
   | 'createdAt'
   | 'splitDetails'
   | 'totalCommissionAmount'
@@ -125,8 +126,8 @@ type OrderSplitColumnMeta = {
   defaultWidth: number;
 };
 
-const ORDER_SPLIT_VIEW_STORAGE_KEY = 'aaos_commission_order_split_view_v2';
-const ORDER_SPLIT_WIDTH_STORAGE_KEY = 'aaos_commission_order_split_widths_v2';
+const ORDER_SPLIT_VIEW_STORAGE_KEY = 'aaos_commission_order_split_view_v3';
+const ORDER_SPLIT_WIDTH_STORAGE_KEY = 'aaos_commission_order_split_widths_v3';
 
 const ORDER_SPLIT_COLUMNS: OrderSplitColumnMeta[] = [
   { id: 'orderNo', label: '订单号', defaultWidth: 170 },
@@ -135,11 +136,14 @@ const ORDER_SPLIT_COLUMNS: OrderSplitColumnMeta[] = [
   { id: 'productLevel', label: '产品等级', defaultWidth: 140 },
   { id: 'orderType', label: '订单类型', defaultWidth: 140 },
   { id: 'orderAmount', label: '实付金额', defaultWidth: 130 },
+  { id: 'officialPaymentChannel', label: '官方收款渠道', defaultWidth: 160 },
   { id: 'resourceOwnership', label: '资源归属', defaultWidth: 120 },
-  { id: 'paymentDate', label: '付款日期', defaultWidth: 180 },
-  { id: 'refundStatus', label: '退款状态', defaultWidth: 140 },
+  { id: 'paymentDate', label: '付款时间', defaultWidth: 180 },
   { id: 'salesOwner', label: '销售负责人', defaultWidth: 130 },
-  { id: 'officialPaymentChannel', label: '收款渠道', defaultWidth: 150 },
+  { id: 'leadInputBy', label: '线索录入人', defaultWidth: 140 },
+  { id: 'leadContributorName', label: '线索贡献人', defaultWidth: 150 },
+  { id: 'originalOrderId', label: '第三方平台订单', defaultWidth: 180 },
+  { id: 'notes', label: '备注', defaultWidth: 220 },
   { id: 'createdAt', label: '创建时间', defaultWidth: 160 },
   { id: 'splitDetails', label: '分账明细', defaultWidth: 310 },
   { id: 'totalCommissionAmount', label: '分账总额', defaultWidth: 130 },
@@ -152,10 +156,18 @@ const DEFAULT_ORDER_SPLIT_VISIBLE_COLUMNS: OrderSplitColumnId[] = [
   'orderNo',
   'customerName',
   'productName',
-  'paymentDate',
-  'orderAmount',
+  'productLevel',
   'orderType',
+  'orderAmount',
+  'officialPaymentChannel',
+  'resourceOwnership',
+  'paymentDate',
   'salesOwner',
+  'leadInputBy',
+  'leadContributorName',
+  'originalOrderId',
+  'notes',
+  'createdAt',
   'splitDetails',
   'status',
 ];
@@ -238,25 +250,9 @@ function escapeCsvValue(value: unknown): string {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
-const REFUND_STATUS_VALUES = new Set<RefundStatus>([
-  '无',
-  '待分配',
-  '挽回中',
-  '挽回成功',
-  '待财务退款',
-  '退款申请中',
-  '退款已批准',
-  '退款已完成',
-  '退款已拒绝',
-]);
-
 const CHARGEBACK_METHOD_OPTIONS: CommissionChargebackMethod[] = ['线下追回', '下月提成抵扣', '财务确认无需追回'];
 const CUSTOM_PAYOUT_PLAN_ID = '__custom_amount__';
 const CUSTOM_PAYOUT_PLAN_NAME = '自定义金额';
-
-function normalizeRefundStatusBadgeValue(status?: string): RefundStatus {
-  return status && REFUND_STATUS_VALUES.has(status as RefundStatus) ? (status as RefundStatus) : '无';
-}
 
 interface CommissionProps {
   embedded?: boolean;
@@ -1060,12 +1056,18 @@ const Commission: React.FC<CommissionProps> = ({
         return summary.resourceOwnership ? normalizeResourceOwnership(summary.resourceOwnership) : '-';
       case 'paymentDate':
         return summary.paymentDate ? formatDate(summary.paymentDate, 'yyyy-MM-dd HH:mm:ss') : '-';
-      case 'refundStatus':
-        return <RefundStatusBadge status={normalizeRefundStatusBadgeValue(summary.refundStatus)} />;
       case 'salesOwner':
         return summary.salesOwner || summary.salesName || '-';
+      case 'leadInputBy':
+        return summary.leadInputBy || '-';
+      case 'leadContributorName':
+        return summary.leadContributorName || '-';
       case 'officialPaymentChannel':
         return summary.officialPaymentChannel || '-';
+      case 'originalOrderId':
+        return summary.originalOrderId || '-';
+      case 'notes':
+        return summary.notes || '-';
       case 'createdAt':
         return summary.createdAt ? formatDate(summary.createdAt) : '-';
       case 'splitDetails':
@@ -1736,6 +1738,9 @@ const Commission: React.FC<CommissionProps> = ({
     const note = commission.auditReason || commission.adjustReason || commission.calculationNote || '-';
     const formulaText = commission.formulaText || commission.payoutPlanName || commission.calculationNote || '-';
     const displayCommissionAmount = getDisplayCommissionAmount(commission, tierSnapshot);
+    const sourceLabel = commission.sourceBusinessType === 'after_sales_recovery' || commission.sourceBusinessType === 'refund_recovery'
+      ? '售后挽回分账'
+      : '正式订单分账';
 
     return (
       <Box
@@ -1769,6 +1774,17 @@ const Commission: React.FC<CommissionProps> = ({
             <Typography variant="caption" sx={{ color: '#64748b', overflowWrap: 'anywhere', display: 'block' }}>
               {commission.customerName || '-'}{compact ? '' : ` · ${commission.role}`}
             </Typography>
+            <Chip
+              label={sourceLabel}
+              size="small"
+              sx={{
+                mt: 0.6,
+                height: 22,
+                bgcolor: sourceLabel === '售后挽回分账' ? '#ecfdf5' : '#eff6ff',
+                color: sourceLabel === '售后挽回分账' ? '#047857' : '#2563eb',
+                fontWeight: 800,
+              }}
+            />
           </Box>
 
           <Box sx={{ minWidth: 0 }}>
@@ -2547,7 +2563,7 @@ const Commission: React.FC<CommissionProps> = ({
         <Stack spacing={1.25}>
           <Typography variant="body2" sx={{ color: '#64748b' }}>确认后，本订单提成会进入待发放。</Typography>
           <Button variant="contained" color="success" onClick={confirmOrderFromDetail} disabled={detailActionLoading}>确认分账</Button>
-          <TextField label="撤回原因" value={detailActionReason} onChange={(event) => setDetailActionReason(event.target.value)} size="small" placeholder="例如：订单退款、规则错误" fullWidth />
+          <TextField label="撤回原因" value={detailActionReason} onChange={(event) => setDetailActionReason(event.target.value)} size="small" placeholder="例如：线下调整、规则错误" fullWidth />
           <Button color="error" variant="outlined" onClick={withdrawOrderFromDetail} disabled={detailActionLoading || !detailActionReason.trim()}>撤回提成</Button>
         </Stack>
       );
@@ -2557,7 +2573,7 @@ const Commission: React.FC<CommissionProps> = ({
       return (
         <Stack spacing={1.25}>
           <Typography variant="body2" sx={{ color: '#64748b' }}>未发放提成可直接撤回，撤回后不进入月度发放。</Typography>
-          <TextField label="撤回原因" value={detailActionReason} onChange={(event) => setDetailActionReason(event.target.value)} size="small" placeholder="例如：订单退款、金额错误" fullWidth />
+          <TextField label="撤回原因" value={detailActionReason} onChange={(event) => setDetailActionReason(event.target.value)} size="small" placeholder="例如：线下调整、金额错误" fullWidth />
           <Button color="error" variant="contained" onClick={withdrawOrderFromDetail} disabled={detailActionLoading || !detailActionReason.trim()}>撤回提成</Button>
         </Stack>
       );
@@ -2567,7 +2583,7 @@ const Commission: React.FC<CommissionProps> = ({
       return (
         <Stack spacing={1.25}>
           <Typography variant="body2" sx={{ color: '#64748b' }}>提成已发放，需要先发起冲销，后续登记追回或抵扣结果。</Typography>
-          <TextField label="冲销原因" value={detailActionReason} onChange={(event) => setDetailActionReason(event.target.value)} size="small" placeholder="例如：订单退款后追回已发提成" fullWidth />
+          <TextField label="冲销原因" value={detailActionReason} onChange={(event) => setDetailActionReason(event.target.value)} size="small" placeholder="例如：线下调整后追回已发提成" fullWidth />
           <Button color="error" variant="contained" onClick={startChargebackFromDetail} disabled={detailActionLoading || !detailActionReason.trim()}>发起冲销</Button>
         </Stack>
       );
@@ -2923,7 +2939,7 @@ const Commission: React.FC<CommissionProps> = ({
                 </Button>
               </Stack>
               <Typography variant="caption" sx={{ display: 'block', color: '#64748b', mt: 1 }}>
-                仅显示已确认、未退款完成、且当前没有有效分账的订单。
+                仅显示已确认且当前没有有效分账的订单。
               </Typography>
             </Paper>
 

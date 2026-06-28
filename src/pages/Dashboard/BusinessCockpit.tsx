@@ -192,7 +192,7 @@ const ExecutiveSummary: React.FC<{
 }> = ({ data, mainRisk }) => {
   const amount = kpiById(data.kpis, 'amount')?.value || '¥0';
   const lead = kpiById(data.kpis, 'lead')?.value || '0';
-  const refund = kpiById(data.kpis, 'refund')?.value || '¥0';
+  const recovery = kpiById(data.kpis, 'recovery')?.value || '¥0';
   const riskTone = toneColor[mainRisk.tone];
   return (
     <Paper
@@ -213,7 +213,7 @@ const ExecutiveSummary: React.FC<{
             {data.rangeLabel}成交 {amount}，当前阻塞：{mainRisk.count} 项{mainRisk.title}
           </Typography>
           <Typography variant="body2" sx={{ color: palette.muted, mt: 1 }}>
-            {data.scopeLabel} · 新增线索 {lead} · 退款金额 {refund}
+            {data.scopeLabel} · 新增线索 {lead} · 挽回金额 {recovery}
           </Typography>
         </Grid>
         <Grid item xs={12} sm={4} lg={2.3}>

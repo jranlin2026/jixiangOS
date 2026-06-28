@@ -12,7 +12,6 @@ import { mockRoles } from './data/roles';
 import { mockProducts } from './data/products';
 import { mockProductLevelConfigs } from './data/productLevels';
 import { mockRefunds } from './data/refunds';
-import { mockUpgradePool } from './data/upgradePool';
 import { mockCommissionRules } from './data/commissionRules';
 import { mockTags } from './data/tags';
 import { initializeStorage, isStorageInitialized, markStorageInitialized } from './storage';
@@ -31,7 +30,6 @@ export { mockRoles } from './data/roles';
 export { mockProducts } from './data/products';
 export { mockProductLevelConfigs } from './data/productLevels';
 export { mockRefunds } from './data/refunds';
-export { mockUpgradePool } from './data/upgradePool';
 export { mockCommissionRules } from './data/commissionRules';
 export { mockTags } from './data/tags';
 
@@ -59,9 +57,7 @@ export function initializeMockData(): void {
   initializeStorage(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS);
   initializeStorage(STORAGE_KEYS.REFUNDS, mockRefunds);
   initializeStorage(STORAGE_KEYS.RECOVERY_ORDERS, []);
-  initializeStorage(STORAGE_KEYS.UPGRADE_POOL, mockUpgradePool);
   initializeStorage(STORAGE_KEYS.AI_CARDS, []);
-  initializeStorage(STORAGE_KEYS.CUSTOMER_SUCCESS_TASKS, []);
   initializeStorage(STORAGE_KEYS.SERVICE_TICKETS, []);
   initializeStorage(STORAGE_KEYS.OPPORTUNITIES, []);
   initializeStorage(STORAGE_KEYS.LEAD_FLOW_CONFIG, DEFAULT_LEAD_FLOW_CONFIG);

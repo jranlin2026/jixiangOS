@@ -458,7 +458,7 @@ async function fetchCreatableDeliveryOrders(search = ''): Promise<ApiResponse<De
   const keyword = search.trim().toLowerCase();
   const orders = (getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [])
     .filter((order) => order.status === '已确认')
-    .filter((order) => order.refundStatus !== '退款已完成' && order.status !== '已退款')
+    .filter((order) => order.status !== '已取消')
     .filter((order) => !deliveryOrderIds.has(order.id) && (!order.deliveryId || !deliveryIds.has(order.deliveryId)))
     .filter((order) => {
       if (!keyword) return true;
@@ -556,7 +556,7 @@ async function createDeliveryFromOrder(orderId: string): Promise<ApiResponse<Del
 
   const order = orders[orderIndex];
   if (order.status !== '已确认') return createErrorResponse('只有已确认订单可以新建交付单');
-  if (order.refundStatus === '退款已完成' || String(order.status) === '已退款') return createErrorResponse('退款完成订单不能新建交付单');
+  if (String(order.status) === '已取消') return createErrorResponse('已取消订单不能新建交付单');
 
   const delivery = buildDeliveryFromOrder(order);
   deliveries.unshift(delivery);
