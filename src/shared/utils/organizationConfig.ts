@@ -137,6 +137,7 @@ export const DEFAULT_ROLES: Role[] = [
     permissions: [
       { module: PERMISSION_KEYS.DELIVERY, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read'] },
+      { module: PERMISSION_KEYS.AFTER_SALES_TICKETS, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
     ],
@@ -155,7 +156,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
       { module: PERMISSION_KEYS.FINANCE_SETTLEMENT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_PAYOUT, actions: ['read', 'write'] },
-      { module: PERMISSION_KEYS.AFTER_SALES_REFUND, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.AFTER_SALES_TICKETS, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_FLOW, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_RULES, actions: ['read', 'write'] },

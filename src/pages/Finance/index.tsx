@@ -183,7 +183,7 @@ const Finance: React.FC = () => {
     setSearchParams({ tab: value });
   };
 
-  if (rawTab === 'refund') return <Navigate to={`${ROUTES.AFTER_SALES}?tab=refund`} replace />;
+  if (rawTab === 'refund') return <Navigate to={`${ROUTES.AFTER_SALES}?tab=tickets`} replace />;
   if (rawTab === 'overview') return <Navigate to={`${ROUTES.FINANCE}?tab=mine`} replace />;
 
   if (!visibleFinanceTabs.length) {

@@ -115,10 +115,11 @@ const App: React.FC = () => {
           </Route>
           <Route element={<ProtectedRoute permissionKeys={[
             PERMISSION_KEYS.AFTER_SALES,
-            PERMISSION_KEYS.AFTER_SALES_REFUND,
+            PERMISSION_KEYS.AFTER_SALES_TICKETS,
             PERMISSION_KEYS.AFTER_SALES_RECOVERY,
             PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
             PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+            PERMISSION_KEYS.AFTER_SALES_REFUND,
             PERMISSION_KEYS.FINANCE_REFUND,
           ]} />}>
             <Route path={ROUTES.AFTER_SALES} element={<Suspense fallback={<PageLoader />}><AfterSales /></Suspense>} />
@@ -130,6 +131,7 @@ const App: React.FC = () => {
             PERMISSION_KEYS.FINANCE_PAYOUT,
             PERMISSION_KEYS.FINANCE_FLOW,
             PERMISSION_KEYS.FINANCE_RULES,
+            PERMISSION_KEYS.AFTER_SALES_TICKETS,
             PERMISSION_KEYS.AFTER_SALES_REFUND,
             PERMISSION_KEYS.FINANCE_REFUND,
           ]} />}>
@@ -147,8 +149,8 @@ const App: React.FC = () => {
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.SETTINGS} />}>
             <Route path={ROUTES.SETTINGS} element={<Suspense fallback={<PageLoader />}><Settings /></Suspense>} />
           </Route>
-          <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.AFTER_SALES_REFUND, PERMISSION_KEYS.FINANCE_REFUND]} />}>
-            <Route path={ROUTES.REFUND_CENTER} element={<Navigate to={`${ROUTES.AFTER_SALES}?tab=refund`} replace />} />
+          <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.AFTER_SALES_TICKETS, PERMISSION_KEYS.AFTER_SALES_REFUND, PERMISSION_KEYS.FINANCE_REFUND]} />}>
+            <Route path={ROUTES.REFUND_CENTER} element={<Navigate to={`${ROUTES.AFTER_SALES}?tab=tickets`} replace />} />
           </Route>
           <Route element={<ProtectedRoute permissionKeys={[PERMISSION_KEYS.UPGRADE_CENTER, PERMISSION_KEYS.UPGRADE_POOL, PERMISSION_KEYS.UPGRADE_ANALYSIS]} />}>
             <Route path={ROUTES.UPGRADE_POOL} element={<Navigate to={`${ROUTES.UPGRADE_CENTER}?tab=pool`} replace />} />

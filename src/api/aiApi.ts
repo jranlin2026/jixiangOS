@@ -233,10 +233,10 @@ function buildWorkbench(data: AssistantData): AIAssistantWorkbench {
   if (activeRefundRows.length > 0) {
     insights.push({
       id: 'refund-risk',
-      title: '退款付款仍在流转',
+      title: '售后退款任务仍在流转',
       content: `当前有 ${activeRefundRows.length} 条退款或挽回任务未闭环，涉及金额 ${formatCurrency(sumRefunds(activeRefundRows))}。`,
       tone: 'error',
-      path: `${ROUTES.FINANCE}?tab=refund`,
+      path: `${ROUTES.AFTER_SALES}?tab=tickets`,
     });
   }
   if (highOpportunityRows.length > 0) {
@@ -320,13 +320,13 @@ function buildWorkbench(data: AssistantData): AIAssistantWorkbench {
       }),
       makeTask({
         id: 'refund',
-        title: '退款付款/挽回',
+        title: '售后退款/挽回',
         description: '退款未闭环会影响收入、客户状态和提成撤回/冲销。',
         count: activeRefundRows.length,
         priority: activeRefundRows.length > 0 ? 'high' : 'low',
-        module: '财务中心',
-        path: `${ROUTES.FINANCE}?tab=refund`,
-        actionLabel: '处理退款',
+        module: '售后服务',
+        path: `${ROUTES.AFTER_SALES}?tab=tickets`,
+        actionLabel: '处理工单',
       }),
       makeTask({
         id: 'upgrade',
@@ -348,7 +348,7 @@ function buildWorkbench(data: AssistantData): AIAssistantWorkbench {
       { id: 'sales', category: '销售', label: '本月销售情况', prompt: '分析本月销售成交金额、订单数、销售排行和主要增长点' },
       { id: 'review', category: '订单', label: '订单审核风险', prompt: '帮我分析当前订单审核台有什么积压和风险' },
       { id: 'commission', category: '财务', label: '分账待处理', prompt: '检查财务结算台有哪些待确认、待分配和待发放问题' },
-      { id: 'refund', category: '退款', label: '退款原因分析', prompt: '分析当前退款付款和退款挽回情况，告诉我主要原因和建议动作' },
+      { id: 'refund', category: '售后', label: '退款原因分析', prompt: '分析当前售后退款和退款挽回情况，告诉我主要原因和建议动作' },
       { id: 'upgrade', category: '升单', label: '升单机会推荐', prompt: '帮我找出最值得推进的高概率升单客户，并给出跟进建议' },
       { id: 'conversion', category: '经营', label: '转化漏斗', prompt: '分析线索到客户、订单、入库和分账确认的转化漏斗' },
     ],
@@ -360,7 +360,7 @@ function matchScenario(query: string): AIQueryScenario {
   if (/今天|待办|优先|任务|处理/.test(q)) return 'daily_tasks';
   if (/审核|入库|订单申请|退回|驳回/.test(q)) return 'order_review';
   if (/分账|提成|结算|发放|待分配|财务结算/.test(q)) return 'finance_settlement';
-  if (/退款|挽回|退款付款|退费/.test(q)) return 'refund_reason';
+  if (/退款|挽回|售后|退费/.test(q)) return 'refund_reason';
   if (/排行|排名|top|谁.*高|业绩/.test(q)) return 'sales_ranking';
   if (/转化|漏斗|转化率|链路/.test(q)) return 'conversion_rate';
   if (/升单|机会|潜力|客户成功|推荐/.test(q)) return 'high_potential';
@@ -442,7 +442,7 @@ function buildRefundResults(data: AssistantData): AIResultData[] {
         { key: 'amount', label: '金额' },
       ],
       tableRows: rows.map((item) => ({ reason: item.name, count: item.count, amount: formatCurrency(item.amount) })),
-      actions: [{ label: '进入退款付款', path: `${ROUTES.FINANCE}?tab=refund`, variant: 'contained' }],
+      actions: [{ label: '进入售后工单', path: `${ROUTES.AFTER_SALES}?tab=tickets`, variant: 'contained' }],
     },
     {
       type: 'SUGGESTION',

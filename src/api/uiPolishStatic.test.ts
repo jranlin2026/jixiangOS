@@ -62,6 +62,7 @@ const financeApiSource = readFileSync(join(projectRoot, 'src/api/financeApi.ts')
 const refundCenterSource = readFileSync(join(projectRoot, 'src/pages/RefundCenter/index.tsx'), 'utf8');
 const afterSalesSource = readFileSync(join(projectRoot, 'src/pages/AfterSales/index.tsx'), 'utf8');
 const recoveryOrderSource = readFileSync(join(projectRoot, 'src/pages/AfterSales/RecoveryOrderTab.tsx'), 'utf8');
+const serviceTicketSource = readFileSync(join(projectRoot, 'src/pages/RefundCenter/ServiceTicketTab.tsx'), 'utf8');
 const employeeDepartmentSource = readFileSync(join(projectRoot, 'src/pages/Settings/EmployeeDepartmentManagement.tsx'), 'utf8');
 const detailSplitEditorSource = commissionSource.slice(
   commissionSource.indexOf('const renderDetailSplitEditor'),
@@ -527,13 +528,13 @@ assert.match(
 );
 assert.match(
   afterSalesSource,
-  /activeTab === 'refund'[\s\S]*视图设置/,
-  'After-sales refund header should place 视图设置 in the same top-right header action area.',
+  /label:\s*'退款挽回'[\s\S]*label:\s*'售后工单'/,
+  'After-sales workspace should expose refund recovery and service ticket tabs.',
 );
-assert.match(
+assert.doesNotMatch(
   afterSalesSource,
-  /refundViewSettingsTrigger/,
-  'After-sales refund header should trigger the embedded refund table view settings dialog.',
+  /label:\s*'退款冲销'|activeTab === 'refund'|refundViewSettingsTrigger/,
+  'After-sales workspace should not expose refund chargeback as a top-level tab.',
 );
 assert.doesNotMatch(
   financeSource,
@@ -542,8 +543,13 @@ assert.doesNotMatch(
 );
 assert.match(
   appSource,
-  /ROUTES\.REFUND_CENTER[\s\S]*ROUTES\.AFTER_SALES\}\?tab=refund/,
-  'Legacy refund center route should redirect to after-sales refund tab.',
+  /ROUTES\.REFUND_CENTER[\s\S]*ROUTES\.AFTER_SALES\}\?tab=tickets/,
+  'Legacy refund center route should redirect to after-sales service tickets.',
+);
+assert.match(
+  serviceTicketSource,
+  /TablePagination[\s\S]*labelDisplayedRows=\{formatPaginationRows\}/,
+  'After-sales service tickets should use the system table pagination pattern.',
 );
 assert.match(
   sidebarSource,

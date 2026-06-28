@@ -1,14 +1,12 @@
-import React, { useMemo, useState } from 'react';
-import { Box, Button, Paper, Stack, Tab, Tabs, Typography } from '@mui/material';
-import ViewColumnIcon from '@mui/icons-material/ViewColumn';
+import React, { useMemo } from 'react';
+import { Box, Stack, Tab, Tabs, Typography } from '@mui/material';
 import { Navigate, useSearchParams } from 'react-router-dom';
-import RefundCenter from '../RefundCenter';
+import ServiceTicketTab from '../RefundCenter/ServiceTicketTab';
 import RecoveryOrderTab from './RecoveryOrderTab';
-import { ROUTES } from '../../shared/utils/constants';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import useAuthStore from '../../store/useAuthStore';
 
-type AfterSalesTab = 'refund' | 'recovery';
+type AfterSalesTab = 'recovery' | 'tickets';
 
 const shell = {
   ink: '#0f172a',
@@ -17,18 +15,18 @@ const shell = {
 };
 
 const AFTER_SALES_TABS: Array<{ value: AfterSalesTab; label: string; permissionKeys: string[] }> = [
-  { value: 'refund', label: '退款冲销', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_REFUND, PERMISSION_KEYS.FINANCE_REFUND] },
-  { value: 'recovery', label: '退款挽回单', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW] },
+  { value: 'recovery', label: '退款挽回', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW] },
+  { value: 'tickets', label: '售后工单', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_TICKETS, PERMISSION_KEYS.AFTER_SALES_REFUND, PERMISSION_KEYS.FINANCE_REFUND] },
 ];
 
 function getTab(value: string | null): AfterSalesTab {
-  return value === 'recovery' ? 'recovery' : 'refund';
+  if (value === 'tickets' || value === 'refund') return 'tickets';
+  return 'recovery';
 }
 
 const AfterSales: React.FC = () => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const [searchParams, setSearchParams] = useSearchParams();
-  const [refundViewSettingsTrigger, setRefundViewSettingsTrigger] = useState(0);
   const requestedTab = getTab(searchParams.get('tab'));
   const visibleTabs = useMemo(() => AFTER_SALES_TABS.filter((tab) => (
     tab.permissionKeys.some((permissionKey) => hasPermission(currentUser, permissionKey))
@@ -45,41 +43,34 @@ const AfterSales: React.FC = () => {
 
   return (
     <Box sx={{ p: 3, bgcolor: '#f5f7fb', minHeight: '100%' }}>
-      <Stack direction={{ xs: 'column', lg: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', lg: 'flex-start' }} spacing={2} sx={{ mb: 1.5 }}>
+      <Stack direction={{ xs: 'column', lg: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', lg: 'flex-start' }} spacing={2} sx={{ mb: 2.5 }}>
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 800, color: shell.ink }}>
             售后服务
           </Typography>
           <Typography variant="body2" sx={{ color: shell.muted, mt: 0.5, maxWidth: 760 }}>
-            处理退款挽回、退款冲销和第三方平台挽回提成单据。
+            处理第三方平台退款挽回和客户售后工单，售后事实通过审核后再进入提成核算。
           </Typography>
         </Box>
-        {activeTab === 'refund' && (
-          <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setRefundViewSettingsTrigger((value) => value + 1)}>
-            视图设置
-          </Button>
-        )}
       </Stack>
 
-      <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1.5, bgcolor: '#fff', mb: 2, overflow: 'hidden' }}>
-        <Tabs
-          value={activeTab}
-          onChange={handleTabChange}
-          variant="scrollable"
-          scrollButtons="auto"
-          sx={{
-            minHeight: 48,
-            '& .MuiTab-root': { minHeight: 48, fontWeight: 700 },
-          }}
-        >
-          {visibleTabs.map((tab) => (
-            <Tab key={tab.value} value={tab.value} label={tab.label} />
-          ))}
-        </Tabs>
-      </Paper>
+      <Tabs
+        value={activeTab}
+        onChange={handleTabChange}
+        sx={{
+          borderBottom: `1px solid ${shell.line}`,
+          mb: 2,
+          minHeight: 44,
+          '& .MuiTab-root': { minHeight: 44, fontWeight: 700 },
+        }}
+      >
+        {visibleTabs.map((tab) => (
+          <Tab key={tab.value} value={tab.value} label={tab.label} />
+        ))}
+      </Tabs>
 
-      {activeTab === 'refund' && <RefundCenter embedded refundViewSettingsTrigger={refundViewSettingsTrigger} />}
       {activeTab === 'recovery' && <RecoveryOrderTab />}
+      {activeTab === 'tickets' && <ServiceTicketTab />}
     </Box>
   );
 };
