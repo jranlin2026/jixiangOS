@@ -17,7 +17,7 @@ const shell = {
 
 const AFTER_SALES_TABS: Array<{ value: AfterSalesTab; label: string; permissionKeys: string[] }> = [
   { value: 'recovery-list', label: '售后挽回订单列表', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE] },
-  { value: 'recovery-review', label: '售后挽回审核台', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW] },
+  { value: 'recovery-review', label: '售后挽回订单审核台', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW] },
 ];
 
 function getTab(value: string | null): AfterSalesTab {
@@ -76,12 +76,7 @@ const AfterSales: React.FC = () => {
       <Tabs
         value={activeTab}
         onChange={handleTabChange}
-        sx={{
-          borderBottom: `1px solid ${shell.line}`,
-          mb: 2,
-          minHeight: 44,
-          '& .MuiTab-root': { minHeight: 44, fontWeight: 700 },
-        }}
+        sx={{ mb: 2, borderBottom: '1px solid #e5e7eb' }}
       >
         {visibleTabs.map((tab) => (
           <Tab key={tab.value} value={tab.value} label={tab.label} />

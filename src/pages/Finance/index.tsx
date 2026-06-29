@@ -464,22 +464,17 @@ const Finance: React.FC = () => {
         )}
       </Stack>
 
-      <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1.5, bgcolor: '#fff', mb: 2, overflow: 'hidden' }}>
-        <Tabs
-          value={activeTab}
-          onChange={handleTabChange}
-          variant="scrollable"
-          scrollButtons="auto"
-          sx={{
-            minHeight: 48,
-            '& .MuiTab-root': { minHeight: 48, fontWeight: 700 },
-          }}
-        >
-          {visibleFinanceTabs.map((tab) => (
-            <Tab key={tab.value} value={tab.value} label={tab.label} />
-          ))}
-        </Tabs>
-      </Paper>
+      <Tabs
+        value={activeTab}
+        onChange={handleTabChange}
+        variant="scrollable"
+        scrollButtons="auto"
+        sx={{ mb: 2, borderBottom: '1px solid #e5e7eb' }}
+      >
+        {visibleFinanceTabs.map((tab) => (
+          <Tab key={tab.value} value={tab.value} label={tab.label} />
+        ))}
+      </Tabs>
 
       {activeTab === 'mine' && (
         <Commission

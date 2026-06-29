@@ -1,7 +1,7 @@
 import type { ID, Timestamp } from './common';
 
 export type RecoveryOrderStatus = '待审核' | '退回修改' | '审核驳回' | '待分账' | '已分账';
-export type RecoveryOrderSettlementStatus = '未分账' | '待分账' | '已分账';
+export type RecoveryOrderSettlementStatus = '未分账' | '待处理' | '待确认' | '待发放' | '已撤回';
 export type RecoveryOrderMatchStatus = '手工填写' | '已绑定客户' | '售后临时客户';
 
 export interface RecoveryOrder {
@@ -37,6 +37,9 @@ export interface RecoveryOrder {
   auditorName?: string;
   auditedAt?: Timestamp;
   commissionIds?: ID[];
+  deletedAt?: Timestamp;
+  deletedBy?: string;
+  deleteReason?: string;
   createdBy: ID;
   createdByName: string;
   createdAt: Timestamp;
@@ -75,6 +78,7 @@ export interface RecoveryOrderFilters {
   statuses?: RecoveryOrderStatus[];
   settlementStatus?: RecoveryOrderSettlementStatus | '全部';
   ownerId?: ID;
+  includeDeleted?: boolean;
   page?: number;
   pageSize?: number;
 }

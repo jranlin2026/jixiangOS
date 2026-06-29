@@ -34,7 +34,6 @@ import CloseIcon from '@mui/icons-material/Close';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ReplayIcon from '@mui/icons-material/Replay';
 import BlockIcon from '@mui/icons-material/Block';
-import SearchIcon from '@mui/icons-material/Search';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useNavigate } from 'react-router-dom';
 import { productApi, recoveryOrderApi, settingsApi } from '../../api';
@@ -129,8 +128,13 @@ const RECOVERY_ORDER_COLUMNS: Array<TableViewColumnConfig & { id: RecoveryOrderC
 ];
 
 const DEFAULT_VISIBLE_COLUMNS = RECOVERY_ORDER_COLUMNS.map((column) => column.id);
+const RECOVERY_REVIEW_STATUSES: RecoveryOrderStatus[] = ['待审核', '退回修改'];
 const RECOVERY_LIST_STATUSES: RecoveryOrderStatus[] = ['待分账', '已分账'];
 const RECOVERY_LIST_STATUS_OPTIONS: Array<RecoveryOrderStatus | '全部'> = ['全部', ...RECOVERY_LIST_STATUSES];
+
+function isRecoveryOrderLocked(row: RecoveryOrder): boolean {
+  return row.status === '已分账' || ['待确认', '待发放', '已撤回'].includes(row.settlementStatus || '未分账');
+}
 
 const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal = 0, viewSettingsSignal = 0 }) => {
   const navigate = useNavigate();
@@ -149,13 +153,17 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<RecoveryOrderForm>(emptyForm);
   const [editingOrder, setEditingOrder] = useState<RecoveryOrder | null>(null);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: 'success'; text: string } | null>(null);
+  const [errorDialog, setErrorDialog] = useState<{ title: string; text: string } | null>(null);
   const [detailOrder, setDetailOrder] = useState<RecoveryOrder | null>(null);
   const [historyOrder, setHistoryOrder] = useState<RecoveryOrder | null>(null);
+  const [deleteConfirmOrder, setDeleteConfirmOrder] = useState<RecoveryOrder | null>(null);
   const [reviewAction, setReviewAction] = useState<ReviewAction>(null);
   const [reviewReason, setReviewReason] = useState('');
   const [approvedOrder, setApprovedOrder] = useState<RecoveryOrder | null>(null);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
+  const handledCreateSignalRef = React.useRef(createSignal);
+  const handledViewSettingsSignalRef = React.useRef(viewSettingsSignal);
 
   const {
     viewConfig,
@@ -168,15 +176,18 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   } = useTableViewConfig(`after_sales_recovery_${mode}_table_view`, RECOVERY_ORDER_COLUMNS, DEFAULT_VISIBLE_COLUMNS);
 
   const visibleOwnerId = canReview ? undefined : currentUser?.id;
-  const fixedStatus = mode === 'review' ? '待审核' : undefined;
   const filters = useMemo<RecoveryOrderFilters>(() => ({
     search,
-    status: fixedStatus || (mode === 'list' && status !== '全部' ? status : '全部'),
-    statuses: mode === 'list' && status === '全部' ? RECOVERY_LIST_STATUSES : undefined,
+    status: mode === 'list' && status !== '全部' ? status : '全部',
+    statuses: mode === 'review'
+      ? RECOVERY_REVIEW_STATUSES
+      : mode === 'list' && status === '全部'
+        ? RECOVERY_LIST_STATUSES
+        : undefined,
     ownerId: visibleOwnerId,
     page: page + 1,
     pageSize: rowsPerPage,
-  }), [fixedStatus, mode, page, rowsPerPage, search, status, visibleOwnerId]);
+  }), [mode, page, rowsPerPage, search, status, visibleOwnerId]);
 
   const load = useCallback(async () => {
     const [listRes, usersRes, productsRes] = await Promise.all([
@@ -202,16 +213,25 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
 
   useEffect(() => {
     if (mode !== 'list' || createSignal <= 0) return;
+    if (handledCreateSignalRef.current === createSignal) return;
+    handledCreateSignalRef.current = createSignal;
     openCreate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [createSignal]);
 
   useEffect(() => {
-    if (viewSettingsSignal > 0) setViewSettingsOpen(true);
+    if (viewSettingsSignal <= 0) return;
+    if (handledViewSettingsSignalRef.current === viewSettingsSignal) return;
+    handledViewSettingsSignalRef.current = viewSettingsSignal;
+    setViewSettingsOpen(true);
   }, [viewSettingsSignal]);
 
   const activeUsers = users.filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active');
   const productOptions = useMemo(() => [...products].sort((a, b) => a.sortOrder - b.sortOrder), [products]);
+
+  const showErrorDialog = useCallback((text: string, title = '操作失败') => {
+    setErrorDialog({ title, text });
+  }, []);
 
   const openCreate = () => {
     setMessage(null);
@@ -224,8 +244,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   };
 
   const openEdit = (row: RecoveryOrder) => {
-    if (row.status === '已分账' || (row.settlementStatus || '未分账') === '已分账') {
-      setMessage({ type: 'error', text: '已分账的售后挽回订单不能修改' });
+    if (isRecoveryOrderLocked(row)) {
+      showErrorDialog('已分账的售后挽回订单不能修改');
       return;
     }
     setMessage(null);
@@ -320,7 +340,10 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       ? await recoveryOrderApi.updateRecoveryOrder(editingOrder.id, input)
       : await recoveryOrderApi.createRecoveryOrder(input);
     if (res.code !== 0) {
-      setMessage({ type: 'error', text: res.message || (editingOrder ? '修改售后挽回订单失败' : '新建售后挽回订单失败') });
+      showErrorDialog(
+        res.message || (editingOrder ? '修改售后挽回订单失败' : '新建售后挽回订单失败'),
+        '无法提交',
+      );
       return;
     }
     setOpen(false);
@@ -332,23 +355,27 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
         : '已提交售后挽回订单，待财务审核通过后进入售后挽回订单列表',
     });
     await load();
+    navigate(`${ROUTES.AFTER_SALES}?tab=recovery-review`);
   };
 
   const handleDelete = async (row: RecoveryOrder) => {
-    const isSettled = row.status === '已分账' || (row.settlementStatus || '未分账') === '已分账';
+    const isSettled = isRecoveryOrderLocked(row);
     if (isSettled && !canForceDeleteSettled) {
-      setMessage({ type: 'error', text: '已分账的售后挽回订单不能删除' });
+      showErrorDialog('已分账的售后挽回订单不能删除');
       return;
     }
-    const confirmText = isSettled
-      ? `确定删除 ${row.recoveryNo} 吗？该挽回单已分账，删除后会同时清理关联的售后挽回提成记录。`
-      : `确定删除 ${row.recoveryNo} 吗？`;
-    if (!window.confirm(confirmText)) return;
-    const res = await recoveryOrderApi.deleteRecoveryOrder(row.id, { force: isSettled && canForceDeleteSettled });
+    setDeleteConfirmOrder(row);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmOrder) return;
+    const isSettled = isRecoveryOrderLocked(deleteConfirmOrder);
+    const res = await recoveryOrderApi.deleteRecoveryOrder(deleteConfirmOrder.id, { force: isSettled && canForceDeleteSettled });
     if (res.code !== 0) {
-      setMessage({ type: 'error', text: res.message || '删除售后挽回订单失败' });
+      showErrorDialog(res.message || '删除售后挽回订单失败');
       return;
     }
+    setDeleteConfirmOrder(null);
     setMessage({ type: 'success', text: '已删除售后挽回订单' });
     await load();
   };
@@ -369,7 +396,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       res = await recoveryOrderApi.rejectRecoveryOrder(reviewAction.row.id, currentUser.id, currentUser.name, reviewReason);
     }
     if (res.code !== 0) {
-      setMessage({ type: 'error', text: res.message || '审核操作失败' });
+      showErrorDialog(res.message || '审核操作失败');
       return;
     }
     const nextOrder = res.data || reviewAction.row;
@@ -377,9 +404,9 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       setApprovedOrder(nextOrder);
       setMessage({ type: 'success', text: '已审核通过，待财务进行售后挽回分账' });
     } else if (reviewAction.type === 'return') {
-      setMessage({ type: 'success', text: '已退回修改' });
+      setMessage({ type: 'success', text: '已退回修改，可在售后挽回审核台修改后重新提交审核' });
     } else {
-      setMessage({ type: 'success', text: '已驳回挽回订单' });
+      setMessage({ type: 'success', text: '已驳回挽回订单，可在售后挽回订单列表中查看' });
     }
     closeReviewDialog();
     await load();
@@ -435,6 +462,22 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
         return formatDate(row.createdAt, 'yyyy-MM-dd HH:mm');
       case 'actions':
         if (mode === 'review') {
+          if (row.status === '退回修改') {
+            return (
+              <Stack
+                direction="row"
+                spacing={0.25}
+                justifyContent="center"
+                sx={{ minWidth: 148, flexWrap: 'nowrap', whiteSpace: 'nowrap' }}
+              >
+                <Tooltip title="修改并重新提交">
+                  <IconButton aria-label="修改并重新提交" size="small" sx={{ color: '#0f766e' }} onClick={() => openEdit(row)}>
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Stack>
+            );
+          }
           return (
             <Stack
               direction="row"
@@ -491,8 +534,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
               <span>
                 <IconButton
                   size="small"
-                  sx={{ color: row.status === '已分账' ? '#cbd5e1' : '#0f766e' }}
-                  disabled={row.status === '已分账'}
+                  sx={{ color: isRecoveryOrderLocked(row) ? '#cbd5e1' : '#0f766e' }}
+                  disabled={isRecoveryOrderLocked(row)}
                   onClick={() => openEdit(row)}
                 >
                   <EditIcon fontSize="small" />
@@ -508,8 +551,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
               <span>
                 <IconButton
                   size="small"
-                  sx={{ color: row.status === '已分账' && !canForceDeleteSettled ? '#cbd5e1' : shell.red }}
-                  disabled={row.status === '已分账' && !canForceDeleteSettled}
+                  sx={{ color: isRecoveryOrderLocked(row) && !canForceDeleteSettled ? '#cbd5e1' : shell.red }}
+                  disabled={isRecoveryOrderLocked(row) && !canForceDeleteSettled}
                   onClick={() => handleDelete(row)}
                 >
                   <DeleteOutlineIcon fontSize="small" />
@@ -618,28 +661,25 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
         </Alert>
       )}
 
-      <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1.5, p: 1.25 }}>
-        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ xs: 'stretch', md: 'center' }}>
-          <TextField
-            size="small"
-            placeholder="搜索客户、手机号、微信、第三方订单号"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            InputProps={{ startAdornment: <SearchIcon fontSize="small" sx={{ mr: 1, color: shell.muted }} /> }}
-            sx={{ minWidth: { md: 360 } }}
-          />
-          {mode === 'list' && (
-            <FormControl size="small" sx={{ minWidth: 150 }}>
-              <InputLabel>状态</InputLabel>
-              <Select label="状态" value={status} onChange={(event) => setStatus(event.target.value as RecoveryOrderStatus | '全部')}>
-                {RECOVERY_LIST_STATUS_OPTIONS.map((item) => (
-                  <MenuItem key={item} value={item}>{item}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          )}
-        </Stack>
-      </Paper>
+      <Box sx={{ display: 'flex', gap: 2, my: 3, flexWrap: 'wrap' }}>
+        <TextField
+          size="small"
+          placeholder="搜索客户/订单号"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          sx={{ minWidth: 240 }}
+        />
+        {mode === 'list' && (
+          <FormControl size="small" sx={{ minWidth: 120 }}>
+            <InputLabel>状态</InputLabel>
+            <Select label="状态" value={status} onChange={(event) => setStatus(event.target.value as RecoveryOrderStatus | '全部')}>
+              {RECOVERY_LIST_STATUS_OPTIONS.map((item) => (
+                <MenuItem key={item} value={item}>{item}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
+      </Box>
 
       <TableContainer component={Paper} elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: '6px 6px 0 0' }}>
         <Table sx={{ minWidth: 1360 }}>
@@ -844,6 +884,10 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                   <Typography variant="body2" sx={{ color: '#6b7280' }}>审核时间</Typography>
                   <Typography variant="body1">{detailOrder.auditedAt ? formatDate(detailOrder.auditedAt, 'yyyy-MM-dd HH:mm:ss') : '-'}</Typography>
                 </Box>
+                <Box sx={{ gridColumn: { md: '1 / -1' } }}>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>备注</Typography>
+                  <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>{detailOrder.remark || '-'}</Typography>
+                </Box>
               </Box>
 
               <Divider sx={{ my: 2 }} />
@@ -852,23 +896,29 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell>类型</TableCell>
-                      <TableCell>文件</TableCell>
-                      <TableCell>上传内容</TableCell>
-                      <TableCell>备注</TableCell>
+                      <TableCell>收款凭证</TableCell>
+                      <TableCell>聊天记录截图</TableCell>
+                      <TableCell>审核说明</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     <TableRow>
-                      <TableCell>收款凭证</TableCell>
-                      <TableCell>{detailOrder.paymentVoucherName || detailOrder.paymentVoucher || '-'}</TableCell>
-                      <TableCell>{detailOrder.paymentVoucherPreview ? '已上传' : '-'}</TableCell>
-                      <TableCell>{detailOrder.remark || '-'}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell>聊天记录截图</TableCell>
-                      <TableCell>{detailOrder.chatEvidenceName || detailOrder.chatEvidence || '-'}</TableCell>
-                      <TableCell>{detailOrder.chatEvidencePreview ? '已上传' : '-'}</TableCell>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                          {detailOrder.paymentVoucherName || detailOrder.paymentVoucher || '-'}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: '#6b7280' }}>
+                          {detailOrder.paymentVoucherPreview ? '已上传' : '-'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                          {detailOrder.chatEvidenceName || detailOrder.chatEvidence || '-'}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: '#6b7280' }}>
+                          {detailOrder.chatEvidencePreview ? '已上传' : '-'}
+                        </Typography>
+                      </TableCell>
                       <TableCell>{detailOrder.auditReason || '-'}</TableCell>
                     </TableRow>
                   </TableBody>
@@ -1000,6 +1050,46 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
           >
             去售后挽回分账
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteConfirmOrder)} onClose={() => setDeleteConfirmOrder(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>删除售后挽回订单</DialogTitle>
+        <DialogContent dividers>
+          {deleteConfirmOrder && (
+            <Stack spacing={1.25}>
+              <Alert severity="warning">
+                {isRecoveryOrderLocked(deleteConfirmOrder)
+                  ? '该挽回单已进入财务分账链路。删除后，售后挽回订单列表会移除该单，但财务中心会保留废弃分账记录，由管理员在售后挽回分账中清理。'
+                  : '删除后，该售后挽回订单将从订单列表中移除。'}
+              </Alert>
+              <Box sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 1.25, bgcolor: shell.soft }}>
+                <Typography variant="body2" sx={{ fontWeight: 900 }}>{deleteConfirmOrder.recoveryNo}</Typography>
+                <Typography variant="body2" sx={{ color: shell.muted }}>
+                  {deleteConfirmOrder.customerName} · {deleteConfirmOrder.thirdPartyOrderNo || '-'}
+                </Typography>
+                <Typography variant="body2" sx={{ mt: 0.5 }}>
+                  挽回金额：<Box component="span" sx={{ color: shell.green, fontWeight: 900 }}>{formatCurrency(deleteConfirmOrder.recoveryAmount)}</Box>
+                </Typography>
+              </Box>
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteConfirmOrder(null)}>取消</Button>
+          <Button color="error" variant="contained" onClick={confirmDelete}>确认删除</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(errorDialog)} onClose={() => setErrorDialog(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>{errorDialog?.title || '操作失败'}</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ color: shell.ink }}>
+            {errorDialog?.text}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="contained" onClick={() => setErrorDialog(null)}>确定</Button>
         </DialogActions>
       </Dialog>
 
