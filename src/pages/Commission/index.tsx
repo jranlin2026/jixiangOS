@@ -66,7 +66,6 @@ import type {
   CommissionPayoutPlan,
   CommissionRole,
   CommissionRoleConfig,
-  CommissionTier,
   MonthlyCommissionRoleSummary,
   MonthlyCommissionPayout,
 } from '../../types/commission';
@@ -74,6 +73,7 @@ import type { Department } from '../../types/department';
 import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
 import type { User } from '../../types/settings';
+import { moduleRadius, moduleTablePaperSx, moduleTokens } from '../../shared/components/ModuleShell';
 
 const ORDER_STATUS_OPTIONS: Array<{ value: CommissionOrderSummaryStatus | '全部'; label: string; important?: boolean }> = [
   { value: '全部', label: '全部' },
@@ -297,6 +297,23 @@ function escapeCsvValue(value: unknown): string {
 const CUSTOM_PAYOUT_PLAN_ID = '__custom_amount__';
 const CUSTOM_PAYOUT_PLAN_NAME = '自定义金额';
 
+const MONTHLY_PAYOUT_COLUMN_WIDTHS = {
+  expand: 48,
+  employee: 150,
+  department: 130,
+  orderCount: 90,
+  monthlyPaidAmount: 120,
+  totalAmount: 120,
+  pendingConfirmAmount: 110,
+  pendingPayAmount: 110,
+  paidAmount: 110,
+  withdrawnAmount: 110,
+  status: 100,
+  actions: 96,
+};
+
+const MONTHLY_PAYOUT_TABLE_WIDTH = Object.values(MONTHLY_PAYOUT_COLUMN_WIDTHS).reduce((sum, width) => sum + width, 0);
+
 interface CommissionProps {
   embedded?: boolean;
   initialTab?: 0 | 1 | 2;
@@ -355,10 +372,6 @@ const Commission: React.FC<CommissionProps> = ({
   const [payoutLoading, setPayoutLoading] = useState(false);
   const [payoutConfirmAction, setPayoutConfirmAction] = useState<PayoutConfirmAction | null>(null);
   const [payoutActionLoading, setPayoutActionLoading] = useState(false);
-  const [tierConfigOpen, setTierConfigOpen] = useState(false);
-  const [tierConfigRows, setTierConfigRows] = useState<CommissionTier[]>([]);
-  const [tierConfigError, setTierConfigError] = useState('');
-  const [tierConfigLoading, setTierConfigLoading] = useState(false);
 
   const [commissionRoleConfigs, setCommissionRoleConfigs] = useState<CommissionRoleConfig[]>([]);
   const [payoutPlans, setPayoutPlans] = useState<CommissionPayoutPlan[]>([]);
@@ -1381,73 +1394,6 @@ const Commission: React.FC<CommissionProps> = ({
     } finally {
       setPayoutActionLoading(false);
     }
-  };
-
-  const normalizeTierRowsForEditor = (tiers?: CommissionTier[]) => (
-    (tiers?.length ? tiers : [
-      { minAmount: 0, maxAmount: 30000, rate: 8 },
-      { minAmount: 30000, maxAmount: 50000, rate: 10 },
-      { minAmount: 50000, rate: 15 },
-    ])
-      .map((tier) => ({
-        minAmount: Number(tier.minAmount) || 0,
-        ...(tier.maxAmount === undefined || tier.maxAmount === null || Number(tier.maxAmount) <= 0 ? {} : { maxAmount: Number(tier.maxAmount) }),
-        rate: Number(tier.rate) || 0,
-      }))
-      .sort((a, b) => a.minAmount - b.minAmount)
-  );
-
-  const openTierConfig = async () => {
-    if (!payoutPeriod) return;
-    setTierConfigError('');
-    setTierConfigLoading(true);
-    const res = await commissionApi.fetchMonthlyCommissionTierConfig(payoutPeriod);
-    setTierConfigLoading(false);
-    if (res.code !== 0) {
-      setTierConfigError(res.message || '读取阶梯配置失败');
-      return;
-    }
-    setTierConfigRows(normalizeTierRowsForEditor(res.data.tiers));
-    setTierConfigOpen(true);
-  };
-
-  const updateTierConfigRow = <K extends keyof CommissionTier>(index: number, key: K, value: CommissionTier[K]) => {
-    setTierConfigRows((prev) => normalizeTierRowsForEditor(prev).map((tier, currentIndex) => (
-      currentIndex === index ? { ...tier, [key]: value } : tier
-    )));
-  };
-
-  const addTierConfigRow = () => {
-    setTierConfigRows((prev) => {
-      const rows = normalizeTierRowsForEditor(prev);
-      const last = rows[rows.length - 1] || { minAmount: 0, rate: 8 };
-      const nextMin = last.maxAmount ?? last.minAmount + 10000;
-      return [
-        ...rows.slice(0, -1),
-        { ...last, maxAmount: nextMin },
-        { minAmount: nextMin, rate: last.rate },
-      ];
-    });
-  };
-
-  const removeTierConfigRow = (index: number) => {
-    setTierConfigRows((prev) => {
-      const rows = normalizeTierRowsForEditor(prev).filter((_, currentIndex) => currentIndex !== index);
-      return normalizeTierRowsForEditor(rows);
-    });
-  };
-
-  const saveTierConfig = async () => {
-    if (!payoutPeriod) return;
-    setTierConfigLoading(true);
-    const res = await commissionApi.saveMonthlyCommissionTierConfig(payoutPeriod, normalizeTierRowsForEditor(tierConfigRows));
-    setTierConfigLoading(false);
-    if (res.code !== 0) {
-      setTierConfigError(res.message || '保存阶梯配置失败');
-      return;
-    }
-    setTierConfigOpen(false);
-    await refreshAll();
   };
 
   const exportMonthlyStatement = () => {
@@ -2824,11 +2770,6 @@ const Commission: React.FC<CommissionProps> = ({
           InputLabelProps={{ shrink: true }}
         />
         {!hidePayoutFinanceActions && (
-          <Button variant="outlined" startIcon={<EditIcon />} disabled={tierConfigLoading} onClick={openTierConfig}>
-            阶梯配置
-          </Button>
-        )}
-        {!hidePayoutFinanceActions && (
           <Tooltip title="按当前月份可发放提成生成发放单，待确认和已撤回明细不进入可发放金额">
             <Button variant="outlined" startIcon={<PaymentsIcon />} disabled={payoutActionLoading} onClick={generateMonthlyBatch}>生成发放单</Button>
           </Tooltip>
@@ -2847,7 +2788,7 @@ const Commission: React.FC<CommissionProps> = ({
         )}
       </Stack>
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 1.25, mb: 2 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 1, mb: 1.5 }}>
         {[
           { label: '总实付金额', value: monthlyPayoutSummary.monthlyPaidAmount, color: '#0f766e' },
           { label: '本月应发', value: monthlyPayoutSummary.totalAmount, color: '#111827' },
@@ -2856,9 +2797,9 @@ const Commission: React.FC<CommissionProps> = ({
           { label: '已发放', value: monthlyPayoutSummary.paidAmount, color: '#16a34a' },
           { label: '已撤回', value: monthlyPayoutSummary.withdrawnAmount, color: '#6b7280' },
         ].map((item) => (
-          <Box key={item.label} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, px: 1.5, py: 1.25, bgcolor: '#fff' }}>
+          <Box key={item.label} sx={{ border: `1px solid ${moduleTokens.softLine}`, borderRadius: moduleRadius, px: 1.25, py: 0.85, bgcolor: '#fff' }}>
             <Typography variant="caption" sx={{ color: '#6b7280' }}>{item.label}</Typography>
-            <Typography variant="h6" sx={{ color: item.color, fontWeight: 800, lineHeight: 1.35 }}>
+            <Typography variant="subtitle1" sx={{ color: item.color, fontWeight: 800, lineHeight: 1.25 }}>
               {formatCurrency(item.value)}
             </Typography>
           </Box>
@@ -2872,28 +2813,37 @@ const Commission: React.FC<CommissionProps> = ({
               {renderMinePayoutRoleSections()}
             </Stack>
           ) : (
-            <Box sx={{ py: 5, textAlign: 'center', color: '#9ca3af' }}>
+            <Box sx={{ py: 3.5, textAlign: 'center', color: '#9ca3af' }}>
               {payoutLoading ? '加载中...' : '暂无我的提成数据'}
             </Box>
           )}
         </Paper>
       ) : (
-      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1 }}>
-        <Table>
+      <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { overflowX: 'auto' }]}>
+        <Table
+          size="small"
+          sx={{
+            tableLayout: 'fixed',
+            width: MONTHLY_PAYOUT_TABLE_WIDTH,
+            minWidth: MONTHLY_PAYOUT_TABLE_WIDTH,
+            '& .MuiTableCell-root': { py: 1, height: 44, overflow: 'hidden', textOverflow: 'ellipsis' },
+            '& .MuiTableHead-root .MuiTableCell-root': { bgcolor: '#f1f5f9', fontWeight: 800 },
+          }}
+        >
           <TableHead>
             <TableRow>
-              <TableCell width={52} />
-              <TableCell>员工</TableCell>
-              <TableCell>部门</TableCell>
-              <TableCell>订单数</TableCell>
-              <TableCell>总实付金额</TableCell>
-              <TableCell>应发提成</TableCell>
-              <TableCell>待确认</TableCell>
-              <TableCell>待发放</TableCell>
-              <TableCell>已发放</TableCell>
-              <TableCell>已撤回</TableCell>
-              <TableCell>状态</TableCell>
-              {!hidePayoutFinanceActions && <TableCell align="center">操作</TableCell>}
+              <TableCell sx={{ width: MONTHLY_PAYOUT_COLUMN_WIDTHS.expand }} />
+              <TableCell sx={{ width: MONTHLY_PAYOUT_COLUMN_WIDTHS.employee }}>员工</TableCell>
+              <TableCell sx={{ width: MONTHLY_PAYOUT_COLUMN_WIDTHS.department }}>部门</TableCell>
+              <TableCell sx={{ width: MONTHLY_PAYOUT_COLUMN_WIDTHS.orderCount }}>订单数</TableCell>
+              <TableCell sx={{ width: MONTHLY_PAYOUT_COLUMN_WIDTHS.monthlyPaidAmount }}>总实付金额</TableCell>
+              <TableCell sx={{ width: MONTHLY_PAYOUT_COLUMN_WIDTHS.totalAmount }}>应发提成</TableCell>
+              <TableCell sx={{ width: MONTHLY_PAYOUT_COLUMN_WIDTHS.pendingConfirmAmount }}>待确认</TableCell>
+              <TableCell sx={{ width: MONTHLY_PAYOUT_COLUMN_WIDTHS.pendingPayAmount }}>待发放</TableCell>
+              <TableCell sx={{ width: MONTHLY_PAYOUT_COLUMN_WIDTHS.paidAmount }}>已发放</TableCell>
+              <TableCell sx={{ width: MONTHLY_PAYOUT_COLUMN_WIDTHS.withdrawnAmount }}>已撤回</TableCell>
+              <TableCell sx={{ width: MONTHLY_PAYOUT_COLUMN_WIDTHS.status }}>状态</TableCell>
+              {!hidePayoutFinanceActions && <TableCell align="center" sx={{ width: MONTHLY_PAYOUT_COLUMN_WIDTHS.actions }}>操作</TableCell>}
             </TableRow>
           </TableHead>
           <TableBody>
@@ -2951,7 +2901,7 @@ const Commission: React.FC<CommissionProps> = ({
             })}
             {!payoutRows.length && (
               <TableRow>
-                <TableCell colSpan={hidePayoutFinanceActions ? 11 : 12} align="center" sx={{ py: 5, color: '#9ca3af' }}>
+                <TableCell colSpan={hidePayoutFinanceActions ? 11 : 12} align="center" sx={{ py: 3.5, height: 72, color: '#9ca3af' }}>
                   {payoutLoading ? '加载中...' : '暂无员工提成月报数据'}
                 </TableCell>
               </TableRow>
@@ -2961,80 +2911,6 @@ const Commission: React.FC<CommissionProps> = ({
       </TableContainer>
       )}
 
-      <Dialog open={tierConfigOpen} onClose={() => !tierConfigLoading && setTierConfigOpen(false)} maxWidth="md" fullWidth>
-        <DialogCloseTitle onClose={() => !tierConfigLoading && setTierConfigOpen(false)}>
-          阶梯配置
-        </DialogCloseTitle>
-        <DialogContent dividers>
-          <Stack spacing={2}>
-            <Typography variant="body2" sx={{ color: '#64748b' }}>
-              当前月份：{payoutPeriod}。销售月累计阶梯配置按月份保存，全员共用；总实付金额达到对应档位后，阶梯式提成按该比例结算。
-            </Typography>
-            <Stack spacing={1}>
-              {normalizeTierRowsForEditor(tierConfigRows).map((tier, index) => (
-                <Box
-                  key={`${tier.minAmount}-${index}`}
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr 42px' },
-                    gap: 1,
-                    alignItems: 'center',
-                  }}
-                >
-                  <TextField
-                    size="small"
-                    type="number"
-                    label="月累计下限"
-                    value={tier.minAmount}
-                    onChange={(event) => updateTierConfigRow(index, 'minAmount', Number(event.target.value))}
-                    inputProps={{ min: 0, step: 1000 }}
-                  />
-                  <TextField
-                    size="small"
-                    type="number"
-                    label="月累计上限"
-                    value={tier.maxAmount ?? ''}
-                    placeholder="最后一档留空"
-                    onChange={(event) => updateTierConfigRow(
-                      index,
-                      'maxAmount',
-                      event.target.value === '' ? undefined : Number(event.target.value),
-                    )}
-                    inputProps={{ min: 0, step: 1000 }}
-                  />
-                  <TextField
-                    size="small"
-                    type="number"
-                    label="提成比例"
-                    value={tier.rate}
-                    onChange={(event) => updateTierConfigRow(index, 'rate', Number(event.target.value))}
-                    inputProps={{ min: 0, step: 0.1 }}
-                    InputProps={{ endAdornment: '%' }}
-                  />
-                  <IconButton
-                    size="small"
-                    color="error"
-                    onClick={() => removeTierConfigRow(index)}
-                    disabled={normalizeTierRowsForEditor(tierConfigRows).length <= 1}
-                  >
-                    <DeleteOutlineIcon fontSize="small" />
-                  </IconButton>
-                </Box>
-              ))}
-            </Stack>
-            <Button variant="outlined" startIcon={<AddIcon />} onClick={addTierConfigRow} sx={{ alignSelf: 'flex-start' }}>
-              添加档位
-            </Button>
-            {tierConfigError && <Typography variant="body2" sx={{ color: '#dc2626' }}>{tierConfigError}</Typography>}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setTierConfigOpen(false)} disabled={tierConfigLoading}>取消</Button>
-          <Button variant="contained" onClick={saveTierConfig} disabled={tierConfigLoading}>
-            {tierConfigLoading ? '保存中...' : '保存'}
-          </Button>
-        </DialogActions>
-      </Dialog>
     </>
   );
 

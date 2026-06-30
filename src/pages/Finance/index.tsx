@@ -18,7 +18,6 @@ import {
   TableHead,
   TablePagination,
   TableRow,
-  Tabs,
   TextField,
   Typography,
 } from '@mui/material';
@@ -31,6 +30,7 @@ import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/u
 import { ROUTES } from '../../shared/utils/constants';
 import Commission from '../Commission';
 import RecoverySettlement from './RecoverySettlement';
+import { ModuleHeader, ModulePage, ModuleTabs } from '../../shared/components/ModuleShell';
 import type { FinanceTransaction, FinanceTransactionDirection, FinanceTransactionFilters } from '../../types/finance';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
@@ -86,12 +86,7 @@ const Finance: React.FC = () => {
   const [recoverySettlementCreateTrigger, setRecoverySettlementCreateTrigger] = useState(0);
 
   const visibleFinanceTabs = useMemo(
-    () => FINANCE_TABS.filter((tab) => {
-      if (tab.value !== 'mine') return hasPermission(currentUser, tab.permissionKey);
-      return hasPermission(currentUser, PERMISSION_KEYS.FINANCE_MY_COMMISSION)
-        || hasPermission(currentUser, PERMISSION_KEYS.FINANCE_PAYOUT)
-        || hasPermission(currentUser, PERMISSION_KEYS.FINANCE_SETTLEMENT);
-    }),
+    () => FINANCE_TABS.filter((tab) => hasPermission(currentUser, tab.permissionKey)),
     [currentUser],
   );
   const activeTab = visibleFinanceTabs.some((tab) => tab.value === requestedTab)
@@ -416,16 +411,12 @@ const Finance: React.FC = () => {
   };
 
   return (
-    <Box sx={{ p: 3, bgcolor: '#f5f7fb', minHeight: '100%' }}>
-      <Stack direction={{ xs: 'column', lg: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', lg: 'flex-start' }} spacing={2} sx={{ mb: 1.5 }}>
-        <Box>
-          <Typography variant="h5" sx={{ fontWeight: 800, color: shell.ink }}>
-            财务中心
-          </Typography>
-          <Typography variant="body2" sx={{ color: shell.muted, mt: 0.5, maxWidth: 760 }}>
-            聚焦我的提成、订单分账、员工月报、收支流水和提成规则。
-          </Typography>
-        </Box>
+    <ModulePage>
+      <ModuleHeader
+        title="财务中心"
+        description="聚焦我的提成、订单分账、员工月报、收支流水和提成规则。"
+        actions={(
+          <>
         {activeTab === 'settlement' && (
           <Stack direction="row" spacing={1} justifyContent="flex-end" flexWrap="wrap" useFlexGap>
             <Button
@@ -462,19 +453,21 @@ const Finance: React.FC = () => {
             </Button>
           </Stack>
         )}
-      </Stack>
+          </>
+        )}
+        sx={{ mb: 1.5 }}
+      />
 
-      <Tabs
+      <ModuleTabs
         value={activeTab}
         onChange={handleTabChange}
         variant="scrollable"
         scrollButtons="auto"
-        sx={{ mb: 2, borderBottom: '1px solid #e5e7eb' }}
       >
         {visibleFinanceTabs.map((tab) => (
           <Tab key={tab.value} value={tab.value} label={tab.label} />
         ))}
-      </Tabs>
+      </ModuleTabs>
 
       {activeTab === 'mine' && (
         <Commission
@@ -505,7 +498,7 @@ const Finance: React.FC = () => {
       {activeTab === 'payout' && <Commission key="finance-payout" embedded initialTab={1} payoutMode="finance" />}
       {activeTab === 'flow' && renderFlow()}
       {activeTab === 'rules' && <Commission key="finance-rules" embedded initialTab={2} />}
-    </Box>
+    </ModulePage>
   );
 };
 

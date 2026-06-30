@@ -60,6 +60,7 @@ import type {
 import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
 import type { User } from '../../types/settings';
+import { ModuleHeader, ModulePage, ModuleTabs } from '../../shared/components/ModuleShell';
 
 type DeliveryColumnId =
   | 'orderNo'
@@ -1014,29 +1015,27 @@ const DeliveryPage: React.FC = () => {
   );
 
   return (
-    <Box sx={{ p: 3, bgcolor: '#f5f7fb', minHeight: '100vh' }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2.5 }}>
-        <Box>
-          <Typography variant="h5" sx={{ fontWeight: 800, color: '#172033' }}>交付中心</Typography>
-          <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>
-            客户成功处理代理、贴牌、合伙人交付，主管在最终节点确认交付完成。
-          </Typography>
-        </Box>
-        <Stack direction="row" spacing={1}>
+    <ModulePage>
+      <ModuleHeader
+        title="交付中心"
+        description="客户成功处理代理、贴牌、合伙人交付，主管在最终节点确认交付完成。"
+        actions={(
+          <>
           <Button variant="outlined" startIcon={<SettingsIcon />} onClick={() => setViewSettingsOpen(true)}>
             视图设置
           </Button>
           <Button variant="contained" startIcon={<AddIcon />} onClick={openCreateDialog}>
             新建交付单
           </Button>
-        </Stack>
-      </Box>
+          </>
+        )}
+      />
 
-      <Tabs value={tabValue} onChange={(_event, value) => setTabValue(value)} sx={{ borderBottom: '1px solid #dbe2ea', mb: 2 }}>
+      <ModuleTabs value={tabValue} onChange={(_event, value) => setTabValue(value)}>
         <Tab label="交付工单台" />
         <Tab label="异常交付" />
         <Tab label="交付统计" />
-      </Tabs>
+      </ModuleTabs>
 
       {tabValue !== 2 && (
         <>
@@ -1098,7 +1097,7 @@ const DeliveryPage: React.FC = () => {
       {orderDetail && <OrderDetail order={orderDetail} open={Boolean(orderDetail)} onClose={() => setOrderDetail(null)} />}
       {customerDetail && <CustomerDetail customer={customerDetail} open={Boolean(customerDetail)} onClose={() => setCustomerDetail(null)} readOnly />}
       {feedbackDialog}
-    </Box>
+    </ModulePage>
   );
 };
 

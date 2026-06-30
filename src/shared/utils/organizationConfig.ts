@@ -158,7 +158,6 @@ export const DEFAULT_ROLES: Role[] = [
     code: 'finance_specialist',
     departmentId: 'dept-finance',
     permissions: [
-      { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
       { module: PERMISSION_KEYS.FINANCE_SETTLEMENT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_PAYOUT, actions: ['read', 'write'] },

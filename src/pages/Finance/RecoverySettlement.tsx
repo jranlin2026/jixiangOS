@@ -43,6 +43,7 @@ import type { Department } from '../../types/department';
 import type { User } from '../../types/settings';
 import useAuthStore from '../../store/useAuthStore';
 import { isSuperAdmin } from '../../shared/utils/permissions';
+import { StatusSegmentBar } from '../../shared/components/ModuleShell';
 
 const shell = {
   ink: '#0f172a',
@@ -114,6 +115,19 @@ type RecoverySettlementColumnId =
   | 'status'
   | 'auditedAt'
   | 'actions';
+
+const RECOVERY_SETTLEMENT_COLUMN_WIDTHS: Record<RecoverySettlementColumnId, number> = {
+  recoveryNo: 165,
+  customerName: 145,
+  thirdPartyOrderNo: 150,
+  originalProduct: 160,
+  originalAmount: 110,
+  recoveryAmount: 120,
+  recoveryUserName: 120,
+  status: 105,
+  auditedAt: 140,
+  actions: 112,
+};
 
 const RECOVERY_SETTLEMENT_COLUMNS: Array<TableViewColumnConfig & { id: RecoverySettlementColumnId }> = [
   { id: 'recoveryNo', label: '挽回订单号' },
@@ -221,6 +235,14 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     setFrozenColumnCount,
     resetViewConfig,
   } = useTableViewConfig('finance_recovery_settlement_table_view', RECOVERY_SETTLEMENT_COLUMNS, DEFAULT_VISIBLE_COLUMNS);
+
+  const recoverySettlementTableWidth = useMemo(
+    () => visibleColumns.reduce(
+      (sum, column) => sum + RECOVERY_SETTLEMENT_COLUMN_WIDTHS[column.id as RecoverySettlementColumnId],
+      0,
+    ),
+    [visibleColumns],
+  );
 
   const activeUsers = useMemo(
     () => users.filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active'),
@@ -681,43 +703,24 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     <Box sx={{ display: 'grid', gap: 0 }}>
       {message && <Alert severity={message.type} onClose={() => setMessage(null)}>{message.text}</Alert>}
 
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1.5 }}>
-          {STATUS_OPTIONS.map((option) => {
-            const active = status === option.value;
-            const count = counts[option.value as keyof typeof counts] || 0;
-            return (
-              <Button
-                key={option.value}
-                variant={active ? 'contained' : 'outlined'}
-                onClick={() => setStatus(option.value)}
-                color={getStatusButtonColor(option.value)}
-                sx={{
-                  borderRadius: 1.5,
-                  minWidth: 0,
-                  px: 1.5,
-                  height: 42,
-                  fontWeight: 800,
-                }}
-              >
-                <span>{option.label}</span>
-                <Chip
-                  size="small"
-                  label={count}
-                  sx={{
-                    height: 22,
-                    ml: 1,
-                    bgcolor: active ? 'rgba(255,255,255,0.24)' : '#eef2f7',
-                    color: active ? '#fff' : shell.ink,
-                    fontWeight: 900,
-                    '& .MuiChip-label': { px: 0.75 },
-                  }}
-                />
-              </Button>
-            );
-          })}
-      </Box>
+      <StatusSegmentBar
+        value={status}
+        onChange={setStatus}
+        size="small"
+        sx={{ mb: 1.25 }}
+        items={STATUS_OPTIONS.map((option) => ({
+          value: option.value,
+          label: option.label,
+          count: counts[option.value as keyof typeof counts] || 0,
+          tone: option.value === '待处理' ? 'amber'
+            : option.value === '待确认' || option.value === '待发放' ? 'blue'
+              : option.value === '已发放' ? 'green'
+                : option.value === '已撤回' ? 'gray'
+                  : 'blue',
+        }))}
+      />
 
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} sx={{ mb: 2, flexWrap: 'wrap', rowGap: 1 }}>
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} sx={{ mb: 1.25, flexWrap: 'wrap', rowGap: 1 }}>
           <TextField
             size="small"
             placeholder="搜索挽回单号、客户、第三方订单号"
@@ -736,12 +739,28 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
           </FormControl>
       </Stack>
 
-      <TableContainer component={Paper} elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: '6px 6px 0 0' }}>
-        <Table sx={{ minWidth: 1080 }}>
+      <TableContainer component={Paper} elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: '6px 6px 0 0', overflowX: 'auto' }}>
+        <Table
+          size="small"
+          sx={{
+            tableLayout: 'fixed',
+            width: recoverySettlementTableWidth,
+            minWidth: recoverySettlementTableWidth,
+            '& .MuiTableCell-root': { py: 1, height: 44 },
+            '& .MuiTableHead-root .MuiTableCell-root': { bgcolor: '#f1f5f9', fontWeight: 800 },
+          }}
+        >
           <TableHead>
             <TableRow>
               {visibleColumns.map((column) => (
-                <TableCell key={column.id} align={column.id === 'actions' ? 'center' : 'left'}>
+                <TableCell
+                  key={column.id}
+                  align={column.id === 'actions' ? 'center' : 'left'}
+                  sx={{
+                    width: RECOVERY_SETTLEMENT_COLUMN_WIDTHS[column.id as RecoverySettlementColumnId],
+                    minWidth: RECOVERY_SETTLEMENT_COLUMN_WIDTHS[column.id as RecoverySettlementColumnId],
+                  }}
+                >
                   {column.label}
                 </TableCell>
               ))}
@@ -751,7 +770,16 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
             {rows.map((row) => (
               <TableRow key={row.id} hover>
                 {visibleColumns.map((column) => (
-                  <TableCell key={column.id} align={column.id === 'actions' ? 'center' : 'left'}>
+                  <TableCell
+                    key={column.id}
+                    align={column.id === 'actions' ? 'center' : 'left'}
+                    sx={{
+                      width: RECOVERY_SETTLEMENT_COLUMN_WIDTHS[column.id as RecoverySettlementColumnId],
+                      minWidth: RECOVERY_SETTLEMENT_COLUMN_WIDTHS[column.id as RecoverySettlementColumnId],
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
                     {renderCell(row, column.id as RecoverySettlementColumnId)}
                   </TableCell>
                 ))}
@@ -759,7 +787,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
             ))}
             {!rows.length && (
               <TableRow>
-                <TableCell colSpan={visibleColumns.length || 1} align="center" sx={{ py: 6, color: '#9ca3af' }}>
+                <TableCell colSpan={visibleColumns.length || 1} align="center" sx={{ py: 3.5, color: '#9ca3af', height: 72 }}>
                   暂无售后挽回分账数据
                 </TableCell>
               </TableRow>
@@ -780,7 +808,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         }}
         labelRowsPerPage="每页条数"
         labelDisplayedRows={formatPaginationRows}
-        sx={{ border: `1px solid ${shell.line}`, borderTop: 0, bgcolor: '#fff' }}
+        sx={{ border: `1px solid ${shell.line}`, borderTop: 0, bgcolor: '#fff', '& .MuiTablePagination-toolbar': { minHeight: 44 }, '& .MuiTablePagination-selectLabel, & .MuiTablePagination-displayedRows': { my: 0 } }}
       />
 
       <Dialog open={Boolean(detailOrder)} onClose={closeDetail} maxWidth="xl" fullWidth>

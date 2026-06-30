@@ -37,6 +37,7 @@ import type {
   CommissionPayoutPlanInput,
   CommissionRoleConfig,
   CommissionRoleConfigInput,
+  CommissionTier,
   ResourceOwnership,
   SimpleCommissionRuleGroup,
   SimpleCommissionRuleGroupInput,
@@ -81,6 +82,43 @@ const emptyPlanForm: CommissionPayoutPlanInput = {
   description: '',
 };
 
+const DEFAULT_TIER_CONFIG_ROWS: CommissionTier[] = [
+  { minAmount: 0, maxAmount: 30000, rate: 8 },
+  { minAmount: 30000, maxAmount: 50000, rate: 10 },
+  { minAmount: 50000, rate: 15 },
+];
+
+function normalizeTierRowsForEditor(tiers?: CommissionTier[]): CommissionTier[] {
+  return (tiers?.length ? tiers : DEFAULT_TIER_CONFIG_ROWS)
+    .map((tier) => {
+      const maxAmount = tier.maxAmount === undefined || tier.maxAmount === null || Number(tier.maxAmount) <= 0
+        ? undefined
+        : Number(tier.maxAmount);
+      return {
+        minAmount: Number(tier.minAmount) || 0,
+        ...(maxAmount === undefined ? {} : { maxAmount }),
+        rate: Number(tier.rate) || 0,
+      };
+    })
+    .sort((a, b) => a.minAmount - b.minAmount);
+}
+
+function validateTierRows(tiers: CommissionTier[]): string {
+  const rows = normalizeTierRowsForEditor(tiers);
+  if (!rows.length) return '至少需要配置一个阶梯档位';
+  if (rows[0].minAmount !== 0) return '第一档下限必须为 0';
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    const next = rows[index + 1];
+    if (row.minAmount < 0) return '阶梯下限不能小于 0';
+    if (row.rate < 0) return '提成比例不能小于 0';
+    if (row.maxAmount !== undefined && row.maxAmount <= row.minAmount) return '阶梯上限必须大于下限';
+    if (next && row.maxAmount !== next.minAmount) return '阶梯区间必须连续';
+    if (!next && row.maxAmount !== undefined) return '最后一档不设置上限';
+  }
+  return '';
+}
+
 function formatPayout(payout: SimpleCommissionRulePayout): string {
   if (payout.payoutPlanName) return `${payout.role} · ${payout.payoutPlanName}`;
   if (payout.commissionType === 'tiered_percentage') return `${payout.role} 销售月累计阶梯`;
@@ -97,7 +135,7 @@ function formatPlanMethod(type: CommissionPayoutPlan['commissionType']): string 
 
 function formatPlanValue(plan: Pick<CommissionPayoutPlan, 'commissionType' | 'commissionValue' | 'tiers'>): string {
   if (plan.commissionType === 'tiered_percentage') {
-    return '月度提成页统一配置';
+    return `销售阶梯 · ${normalizeTierRowsForEditor(plan.tiers).length} 档`;
   }
   return plan.commissionType === 'percentage'
     ? `${plan.commissionValue}%`
@@ -140,6 +178,11 @@ const CommissionRuleConfig: React.FC = () => {
   const [planForm, setPlanForm] = useState<CommissionPayoutPlanInput>(emptyPlanForm);
   const [planFormError, setPlanFormError] = useState('');
   const [showPlanValidation, setShowPlanValidation] = useState(false);
+  const [tierConfigOpen, setTierConfigOpen] = useState(false);
+  const [tierConfigPlanId, setTierConfigPlanId] = useState('');
+  const [tierConfigRows, setTierConfigRows] = useState<CommissionTier[]>(DEFAULT_TIER_CONFIG_ROWS);
+  const [tierConfigError, setTierConfigError] = useState('');
+  const [tierConfigSaving, setTierConfigSaving] = useState(false);
 
   const activeRoleConfigs = useMemo(
     () => roleConfigs.filter((item) => item.isActive),
@@ -147,6 +190,10 @@ const CommissionRuleConfig: React.FC = () => {
   );
   const activePayoutPlans = useMemo(
     () => payoutPlans.filter((item) => item.isActive),
+    [payoutPlans],
+  );
+  const tieredPayoutPlans = useMemo(
+    () => payoutPlans.filter((item) => item.commissionType === 'tiered_percentage'),
     [payoutPlans],
   );
 
@@ -238,6 +285,7 @@ const CommissionRuleConfig: React.FC = () => {
     const duplicateName = payoutPlans.some((item) => item.id !== editingPlan?.id && item.name === planForm.name.trim());
     if (duplicateName) return '方案名称已存在';
     if (planForm.commissionType !== 'tiered_percentage' && Number(planForm.commissionValue) < 0) return '方案数值不能小于 0';
+    if (planForm.commissionType === 'tiered_percentage') return validateTierRows(planForm.tiers || DEFAULT_TIER_CONFIG_ROWS);
     return '';
   }, [editingPlan?.id, payoutPlans, planForm]);
 
@@ -283,6 +331,112 @@ const CommissionRuleConfig: React.FC = () => {
     const current = currentPlanId ? payoutPlans.find((item) => item.id === currentPlanId) : undefined;
     if (current && !options.some((item) => item.id === current.id)) return [current, ...options];
     return options;
+  };
+
+  const openTierConfig = () => {
+    setTierConfigError('');
+    const tieredPlan = tieredPayoutPlans[0];
+    if (tieredPlan) {
+      setTierConfigPlanId(tieredPlan.id);
+      setTierConfigRows(normalizeTierRowsForEditor(tieredPlan.tiers));
+    } else {
+      setTierConfigPlanId('');
+      setTierConfigRows(DEFAULT_TIER_CONFIG_ROWS);
+    }
+    setTierConfigOpen(true);
+  };
+
+  const updateTierConfigRow = <K extends keyof CommissionTier>(
+    index: number,
+    key: K,
+    value: CommissionTier[K],
+  ) => {
+    setTierConfigRows((prev) => normalizeTierRowsForEditor(prev).map((tier, currentIndex) => (
+      currentIndex === index ? { ...tier, [key]: value } : tier
+    )));
+  };
+
+  const addTierConfigRow = () => {
+    setTierConfigRows((prev) => {
+      const rows = normalizeTierRowsForEditor(prev);
+      const last = rows[rows.length - 1] || { minAmount: 0, rate: 8 };
+      const nextMin = last.maxAmount ?? last.minAmount + 10000;
+      return [
+        ...rows.slice(0, -1),
+        { ...last, maxAmount: nextMin },
+        { minAmount: nextMin, rate: last.rate },
+      ];
+    });
+  };
+
+  const removeTierConfigRow = (index: number) => {
+    setTierConfigRows((prev) => normalizeTierRowsForEditor(prev).filter((_, currentIndex) => currentIndex !== index));
+  };
+
+  const updatePlanFormTierRow = <K extends keyof CommissionTier>(
+    index: number,
+    key: K,
+    value: CommissionTier[K],
+  ) => {
+    setPlanForm((prev) => ({
+      ...prev,
+      tiers: normalizeTierRowsForEditor(prev.tiers || DEFAULT_TIER_CONFIG_ROWS).map((tier, currentIndex) => (
+        currentIndex === index ? { ...tier, [key]: value } : tier
+      )),
+    }));
+  };
+
+  const addPlanFormTierRow = () => {
+    setPlanForm((prev) => {
+      const rows = normalizeTierRowsForEditor(prev.tiers || DEFAULT_TIER_CONFIG_ROWS);
+      const last = rows[rows.length - 1] || { minAmount: 0, rate: 8 };
+      const nextMin = last.maxAmount ?? last.minAmount + 10000;
+      return {
+        ...prev,
+        tiers: [
+          ...rows.slice(0, -1),
+          { ...last, maxAmount: nextMin },
+          { minAmount: nextMin, rate: last.rate },
+        ],
+      };
+    });
+  };
+
+  const removePlanFormTierRow = (index: number) => {
+    setPlanForm((prev) => ({
+      ...prev,
+      tiers: normalizeTierRowsForEditor(prev.tiers || DEFAULT_TIER_CONFIG_ROWS)
+        .filter((_, currentIndex) => currentIndex !== index),
+    }));
+  };
+
+  const saveTierConfig = async () => {
+    const rows = normalizeTierRowsForEditor(tierConfigRows);
+    const validation = validateTierRows(rows);
+    if (validation) {
+      setTierConfigError(validation);
+      return;
+    }
+    setTierConfigSaving(true);
+    const currentPlan = tierConfigPlanId ? payoutPlans.find((item) => item.id === tierConfigPlanId) : undefined;
+    const payload: CommissionPayoutPlanInput = {
+      name: currentPlan?.name || '销售阶梯提成',
+      commissionType: 'tiered_percentage',
+      commissionValue: 0,
+      tiers: rows,
+      isActive: currentPlan?.isActive ?? true,
+      description: currentPlan?.description || '销售角色按月累计阶梯业绩自动结算',
+    };
+    const res = currentPlan
+      ? await commissionRuleApi.updateCommissionPayoutPlan(currentPlan.id, payload)
+      : await commissionRuleApi.createCommissionPayoutPlan(payload);
+    setTierConfigSaving(false);
+    if (res.code !== 0) {
+      setTierConfigError(res.message || '保存阶梯配置失败');
+      return;
+    }
+    setTierConfigOpen(false);
+    fetchAll();
   };
 
   const handleOpenRuleForm = (group?: SimpleCommissionRuleGroup) => {
@@ -350,7 +504,7 @@ const CommissionRuleConfig: React.FC = () => {
         name: plan.name,
         commissionType: plan.commissionType,
         commissionValue: plan.commissionValue,
-        tiers: undefined,
+        tiers: plan.commissionType === 'tiered_percentage' ? normalizeTierRowsForEditor(plan.tiers) : undefined,
         isActive: plan.isActive,
         description: plan.description || '',
       });
@@ -371,7 +525,9 @@ const CommissionRuleConfig: React.FC = () => {
       ...planForm,
       name: planForm.name.trim(),
       commissionValue: planForm.commissionType === 'tiered_percentage' ? 0 : Number(planForm.commissionValue) || 0,
-      tiers: undefined,
+      tiers: planForm.commissionType === 'tiered_percentage'
+        ? normalizeTierRowsForEditor(planForm.tiers || DEFAULT_TIER_CONFIG_ROWS)
+        : undefined,
       description: planForm.description?.trim(),
     };
     const res = editingPlan
@@ -390,7 +546,7 @@ const CommissionRuleConfig: React.FC = () => {
       name: plan.name,
       commissionType: plan.commissionType,
       commissionValue: plan.commissionValue,
-      tiers: undefined,
+      tiers: plan.commissionType === 'tiered_percentage' ? normalizeTierRowsForEditor(plan.tiers) : undefined,
       isActive: !plan.isActive,
       description: plan.description,
     });
@@ -517,9 +673,14 @@ const CommissionRuleConfig: React.FC = () => {
           </Typography>
         </Box>
         {view === 'rules' ? (
+          <Stack direction="row" spacing={1}>
           <Button variant="contained" startIcon={<AddIcon />} size="small" onClick={() => handleOpenRuleForm()}>
             新增规则
           </Button>
+          <Button variant="outlined" startIcon={<EditIcon />} size="small" onClick={openTierConfig}>
+            阶梯配置
+          </Button>
+          </Stack>
         ) : view === 'plans' ? (
           <Button variant="contained" startIcon={<AddIcon />} size="small" onClick={() => handleOpenPlanForm()}>
             新增方案
@@ -868,6 +1029,81 @@ const CommissionRuleConfig: React.FC = () => {
         </DialogActions>
       </Dialog>
 
+      <Dialog open={tierConfigOpen} onClose={() => !tierConfigSaving && setTierConfigOpen(false)} maxWidth="md" fullWidth>
+        <DialogCloseTitle onClose={() => !tierConfigSaving && setTierConfigOpen(false)}>
+          阶梯配置
+        </DialogCloseTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <Alert severity="info">
+              这里配置销售阶梯提成方案的档位。分账规则里的销售角色选择阶梯方案后，会按这里的档位进行月累计阶梯结算。
+            </Alert>
+            <Stack spacing={1}>
+              {normalizeTierRowsForEditor(tierConfigRows).map((tier, index) => (
+                <Box
+                  key={`${tier.minAmount}-${index}`}
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr 42px' },
+                    gap: 1,
+                    alignItems: 'center',
+                  }}
+                >
+                  <TextField
+                    size="small"
+                    type="number"
+                    label="月累计下限"
+                    value={tier.minAmount}
+                    onChange={(event) => updateTierConfigRow(index, 'minAmount', Number(event.target.value))}
+                    inputProps={{ min: 0, step: 1000 }}
+                  />
+                  <TextField
+                    size="small"
+                    type="number"
+                    label="月累计上限"
+                    value={tier.maxAmount ?? ''}
+                    placeholder="最后一档留空"
+                    onChange={(event) => updateTierConfigRow(
+                      index,
+                      'maxAmount',
+                      event.target.value === '' ? undefined : Number(event.target.value),
+                    )}
+                    inputProps={{ min: 0, step: 1000 }}
+                  />
+                  <TextField
+                    size="small"
+                    type="number"
+                    label="提成比例"
+                    value={tier.rate}
+                    onChange={(event) => updateTierConfigRow(index, 'rate', Number(event.target.value))}
+                    inputProps={{ min: 0, step: 0.1 }}
+                    InputProps={{ endAdornment: '%' }}
+                  />
+                  <IconButton
+                    size="small"
+                    color="error"
+                    onClick={() => removeTierConfigRow(index)}
+                    disabled={normalizeTierRowsForEditor(tierConfigRows).length <= 1}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Box>
+              ))}
+            </Stack>
+            <Button variant="outlined" startIcon={<AddIcon />} onClick={addTierConfigRow} sx={{ alignSelf: 'flex-start' }}>
+              添加档位
+            </Button>
+            {tierConfigError && <Alert severity="warning">{tierConfigError}</Alert>}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTierConfigOpen(false)} disabled={tierConfigSaving}>取消</Button>
+          <Button variant="contained" onClick={saveTierConfig} disabled={tierConfigSaving}>
+            {tierConfigSaving ? '保存中...' : '保存'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog open={planFormOpen} onClose={() => setPlanFormOpen(false)} maxWidth="md" fullWidth>
         <DialogCloseTitle onClose={() => setPlanFormOpen(false)}>
           {editingPlan ? '编辑提成方案' : '新增提成方案'}
@@ -892,7 +1128,9 @@ const CommissionRuleConfig: React.FC = () => {
                     ...prev,
                     commissionType,
                     commissionValue: commissionType === 'tiered_percentage' ? 0 : prev.commissionValue,
-                    tiers: undefined,
+                    tiers: commissionType === 'tiered_percentage'
+                      ? normalizeTierRowsForEditor(prev.tiers || DEFAULT_TIER_CONFIG_ROWS)
+                      : undefined,
                   }));
                 }}
               >
@@ -918,8 +1156,75 @@ const CommissionRuleConfig: React.FC = () => {
             )}
             {planForm.commissionType === 'tiered_percentage' && (
               <Alert severity="info" sx={{ gridColumn: '1 / -1' }}>
-                销售月累计阶梯的档位和比例在员工提成月报中统一维护，此处仅选择计算方式。
+                销售月累计阶梯的档位和比例在提成方案中维护，分账规则只需要选择对应方案。
               </Alert>
+            )}
+            {planForm.commissionType === 'tiered_percentage' && (
+              <Box sx={{ gridColumn: '1 / -1', border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>销售阶梯档位</Typography>
+                    <Typography variant="caption" sx={{ color: '#64748b' }}>
+                      按销售角色月累计阶梯业绩命中档位，最后一档上限留空。
+                    </Typography>
+                  </Box>
+                  <Button size="small" startIcon={<AddIcon />} onClick={addPlanFormTierRow}>
+                    添加档位
+                  </Button>
+                </Stack>
+                <Stack spacing={1}>
+                  {normalizeTierRowsForEditor(planForm.tiers || DEFAULT_TIER_CONFIG_ROWS).map((tier, index) => (
+                    <Box
+                      key={`${tier.minAmount}-${index}`}
+                      sx={{
+                        display: 'grid',
+                        gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr 40px' },
+                        gap: 1,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <TextField
+                        size="small"
+                        label="月累计下限"
+                        type="number"
+                        value={tier.minAmount}
+                        onChange={(event) => updatePlanFormTierRow(index, 'minAmount', Number(event.target.value))}
+                        inputProps={{ min: 0, step: 1000 }}
+                      />
+                      <TextField
+                        size="small"
+                        label="月累计上限"
+                        type="number"
+                        value={tier.maxAmount ?? ''}
+                        placeholder="最后一档留空"
+                        onChange={(event) => updatePlanFormTierRow(
+                          index,
+                          'maxAmount',
+                          event.target.value === '' ? undefined : Number(event.target.value),
+                        )}
+                        inputProps={{ min: 0, step: 1000 }}
+                      />
+                      <TextField
+                        size="small"
+                        label="提成比例"
+                        type="number"
+                        value={tier.rate}
+                        onChange={(event) => updatePlanFormTierRow(index, 'rate', Number(event.target.value))}
+                        inputProps={{ min: 0, step: 0.1 }}
+                        InputProps={{ endAdornment: '%' }}
+                      />
+                      <IconButton
+                        size="small"
+                        color="error"
+                        onClick={() => removePlanFormTierRow(index)}
+                        disabled={normalizeTierRowsForEditor(planForm.tiers || DEFAULT_TIER_CONFIG_ROWS).length <= 1}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  ))}
+                </Stack>
+              </Box>
             )}
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minHeight: 56 }}>
               <Switch

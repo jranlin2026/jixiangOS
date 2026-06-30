@@ -16,6 +16,7 @@ import LeadFlowConfigTab from '../Leads/LeadFlowConfigTab';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
+import { ModuleHeader, ModulePage, ModuleTabs, moduleRadius, moduleTokens } from '../../shared/components/ModuleShell';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -123,29 +124,31 @@ const Settings: React.FC = () => {
   }, [activeGroup?.key]);
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h5" sx={{ fontWeight: 600, mb: 2 }}>
-        系统设置
-      </Typography>
+    <ModulePage>
+      <ModuleHeader
+        title="系统设置"
+        description="统一配置组织、产品、客户规则和系统维护项。"
+      />
 
-      <Paper elevation={0} sx={{ border: '1px solid #f0f0f0', borderRadius: 2, overflow: 'hidden' }}>
+      <Paper elevation={0} sx={{ border: `1px solid ${moduleTokens.line}`, borderRadius: moduleRadius, overflow: 'hidden' }}>
         {groups.length === 0 ? (
           <Box sx={{ py: 6, textAlign: 'center', color: '#6b7280' }}>当前账号没有系统设置权限</Box>
         ) : (
           <Box sx={{ minHeight: 640 }}>
             <Box sx={{ minWidth: 0 }}>
-              <Box sx={{ px: 3, pt: 2, pb: 1.5, borderBottom: '1px solid #e5e7eb' }}>
+              <Box sx={{ px: 3, pt: 2, pb: 1.5, borderBottom: `1px solid ${moduleTokens.softLine}` }}>
                 <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
                   {activeGroup?.label}
                 </Typography>
-                <Tabs
+                <ModuleTabs
                   value={tabs.length ? tabValue : false}
                   onChange={(_, value) => setTabValue(value)}
                   variant="scrollable"
                   scrollButtons="auto"
+                  sx={{ mb: 0 }}
                 >
                   {tabs.map((tab) => <Tab key={tab.label} label={tab.label} />)}
-                </Tabs>
+                </ModuleTabs>
               </Box>
 
               <Box sx={{ p: 3 }}>
@@ -159,7 +162,7 @@ const Settings: React.FC = () => {
           </Box>
         )}
       </Paper>
-    </Box>
+    </ModulePage>
   );
 };
 

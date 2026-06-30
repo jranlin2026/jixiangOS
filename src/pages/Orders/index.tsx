@@ -61,6 +61,7 @@ import ResizableHeaderCell, {
   type ColumnWidthMap,
 } from '../../shared/components/ResizableTable';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import { ModuleHeader, ModulePage, ModuleTabs, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
 
 type OrderColumn = {
   id: string;
@@ -557,12 +558,12 @@ const Orders: React.FC = () => {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, gap: 2 }}>
-        <Typography variant="h5" sx={{ fontWeight: 600 }}>
-          订单管理
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+    <ModulePage>
+      <ModuleHeader
+        title="订单管理"
+        description="提交订单申请、财务审核和正式订单管理。"
+        actions={(
+          <>
           {activeTab === 'list' && (
             <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
               视图设置
@@ -578,17 +579,18 @@ const Orders: React.FC = () => {
               提交订单申请
             </Button>
           </PermissionGate>
-        </Box>
-      </Box>
+          </>
+        )}
+      />
 
-      <Tabs value={activeTab} onChange={handleTabChange} sx={{ mb: 2, borderBottom: '1px solid #e5e7eb' }}>
+      <ModuleTabs value={activeTab} onChange={handleTabChange}>
         <Tab value="list" label="订单列表" />
         <Tab value="review" label="订单审核台" />
-      </Tabs>
+      </ModuleTabs>
 
       {activeTab === 'list' ? (
         <>
-          <Box sx={{ display: 'flex', gap: 2, my: 3, flexWrap: 'wrap' }}>
+          <ModuleToolbar>
             <TextField
               placeholder="搜索订单号/客户名"
               value={filters.search || ''}
@@ -631,9 +633,9 @@ const Orders: React.FC = () => {
             <Button variant="outlined" startIcon={<SortIcon />} onClick={handlePaymentDateSort}>
               付款时间{filters.sortBy === 'paymentDate' && filters.sortDirection === 'asc' ? '升序' : '降序'}
             </Button>
-          </Box>
+          </ModuleToolbar>
 
-          <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
+          <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { overflowX: 'auto' }]}>
             <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
               <TableHead>
                 <TableRow>
@@ -868,7 +870,7 @@ const Orders: React.FC = () => {
         </DialogActions>
       </Dialog>
       {feedbackDialog}
-    </Box>
+    </ModulePage>
   );
 };
 

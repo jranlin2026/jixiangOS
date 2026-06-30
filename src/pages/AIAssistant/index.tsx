@@ -29,6 +29,7 @@ import BoltIcon from '@mui/icons-material/Bolt';
 import useAIStore from '../../store/useAIStore';
 import AIResultRenderer from './AIResultRenderer';
 import type { AIAssistantTask, AIAssistantTone, AIQuerySession } from '../../types/ai';
+import { moduleTokens } from '../../shared/components/ModuleShell';
 
 const toneColors: Record<AIAssistantTone, string> = {
   primary: '#2563eb',
@@ -206,8 +207,8 @@ const AIAssistant: React.FC = () => {
   );
 
   return (
-    <Box sx={{ height: 'calc(100vh - 64px)', display: 'grid', gridTemplateColumns: '360px minmax(0, 1fr) 280px', bgcolor: '#f8fafc', overflow: 'hidden' }}>
-      <Box sx={{ borderRight: '1px solid #e5e7eb', bgcolor: '#fff', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <Box sx={{ height: 'calc(100vh - 64px)', display: 'grid', gridTemplateColumns: '360px minmax(0, 1fr) 280px', bgcolor: moduleTokens.page, overflow: 'hidden' }}>
+      <Box sx={{ borderRight: `1px solid ${moduleTokens.softLine}`, bgcolor: '#fff', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <Box sx={{ p: 2.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mb: 1 }}>
             <Box sx={{ width: 36, height: 36, borderRadius: 2, bgcolor: '#2563eb', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -243,7 +244,7 @@ const AIAssistant: React.FC = () => {
       </Box>
 
       <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
-        <Box sx={{ p: 2.5, bgcolor: '#fff', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Box sx={{ p: 2.5, bgcolor: '#fff', borderBottom: `1px solid ${moduleTokens.softLine}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Box>
             <Typography variant="h5" sx={{ fontWeight: 800 }}>运营分析对话</Typography>
             <Typography variant="body2" sx={{ color: '#6b7280', mt: 0.5 }}>
@@ -303,7 +304,7 @@ const AIAssistant: React.FC = () => {
           )}
         </Box>
 
-        <Box sx={{ p: 2, bgcolor: '#fff', borderTop: '1px solid #e5e7eb' }}>
+        <Box sx={{ p: 2, bgcolor: '#fff', borderTop: `1px solid ${moduleTokens.softLine}` }}>
           {loading && (
             <Box sx={{ mb: 1.5 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.75 }}>
@@ -352,7 +353,7 @@ const AIAssistant: React.FC = () => {
         </Box>
       </Box>
 
-      <Box sx={{ borderLeft: '1px solid #e5e7eb', bgcolor: '#fff', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <Box sx={{ borderLeft: `1px solid ${moduleTokens.softLine}`, bgcolor: '#fff', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>会话记录</Typography>
           <Tooltip title="新建对话">

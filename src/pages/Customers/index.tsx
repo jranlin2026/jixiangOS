@@ -62,6 +62,7 @@ import ResizableHeaderCell, {
 } from '../../shared/components/ResizableTable';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
+import { ModuleHeader, ModulePage, ModuleTabs, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
 
 type CustomerColumn = {
   id: string;
@@ -511,27 +512,28 @@ const Customers: React.FC = () => {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, gap: 2 }}>
-        <Typography variant="h5" sx={{ fontWeight: 600 }}>
-          客户管理
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+    <ModulePage>
+      <ModuleHeader
+        title="客户管理"
+        description="沉淀客户资产、跟进动态和订单关系。"
+        actions={(
+          <>
           <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
             视图设置
           </Button>
           <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate}>
             新增客户
           </Button>
-        </Box>
-      </Box>
+          </>
+        )}
+      />
 
-      <Tabs value={customerScope} onChange={handleScopeChange} sx={{ mb: 2 }}>
+      <ModuleTabs value={customerScope} onChange={handleScopeChange}>
         <Tab value="active" label="客户列表" />
         <Tab value="public_pool" label="公海池" />
-      </Tabs>
+      </ModuleTabs>
 
-      <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
+      <ModuleToolbar>
         <TextField
           placeholder="搜索客户姓名/公司/电话/微信"
           value={filters.search || ''}
@@ -575,9 +577,9 @@ const Customers: React.FC = () => {
             ))}
           </Select>
         </FormControl>
-      </Box>
+      </ModuleToolbar>
 
-      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
+      <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { overflowX: 'auto' }]}>
         <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
           <TableHead>
             <TableRow>
@@ -880,7 +882,7 @@ const Customers: React.FC = () => {
         </DialogActions>
       </Dialog>
       {feedbackDialog}
-    </Box>
+    </ModulePage>
   );
 };
 

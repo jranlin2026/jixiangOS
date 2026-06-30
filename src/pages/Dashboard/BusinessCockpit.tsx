@@ -35,7 +35,7 @@ import type {
 } from '../../types/dashboard';
 
 const palette = {
-  page: '#F7F9FC',
+  page: '#F6F8FB',
   surface: '#FFFFFF',
   ink: '#111827',
   muted: '#667085',

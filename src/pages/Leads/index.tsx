@@ -61,6 +61,7 @@ import ResizableHeaderCell, {
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
+import { ModuleHeader, ModulePage, ModuleTabs, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
 
 type LeadColumn = {
   id: string;
@@ -507,13 +508,14 @@ const Leads: React.FC = () => {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, gap: 2 }}>
-        <Typography variant="h5" sx={{ fontWeight: 600 }}>
-          线索管理
-        </Typography>
+    <ModulePage>
+      <ModuleHeader
+        title="线索管理"
+        description="线索录入、批量入库、分配和转客户。"
+        actions={(
+          <>
         {activeTab === 0 && canViewLeadList && (
-          <Box sx={{ display: 'flex', gap: 1 }}>
+          <>
             <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
               视图设置
             </Button>
@@ -532,18 +534,20 @@ const Leads: React.FC = () => {
                 </Box>
               </PermissionGate>
             )}
-          </Box>
+          </>
         )}
-      </Box>
+          </>
+        )}
+      />
 
-      <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ mb: 2, borderBottom: '1px solid #e5e7eb' }}>
+      <ModuleTabs value={activeTab} onChange={(_, value) => setActiveTab(value)}>
         {canViewLeadList && <Tab label="线索列表" value={0} />}
         {canViewLeadIntake && <Tab label="入库情况" value={1} />}
-      </Tabs>
+      </ModuleTabs>
 
       {activeTab === 0 && canViewLeadList && (
         <>
-          <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
+          <ModuleToolbar>
             <TextField
               placeholder="搜索姓名/公司/手机号/微信"
               value={filters.search || ''}
@@ -583,9 +587,9 @@ const Leads: React.FC = () => {
                 ))}
               </Select>
             </FormControl>
-          </Box>
+          </ModuleToolbar>
 
-          <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
+          <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { overflowX: 'auto' }]}>
             <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
               <TableHead>
                 <TableRow>
@@ -794,7 +798,7 @@ const Leads: React.FC = () => {
         onReset={handleResetViewConfig}
       />
       {feedbackDialog}
-    </Box>
+    </ModulePage>
   );
 };
 

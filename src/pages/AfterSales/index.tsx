@@ -1,19 +1,14 @@
 import React, { useMemo } from 'react';
-import { Box, Button, Stack, Tab, Tabs, Typography } from '@mui/material';
+import { Button, Tab } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import { Navigate, useSearchParams } from 'react-router-dom';
 import RecoveryOrderTab from './RecoveryOrderTab';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import useAuthStore from '../../store/useAuthStore';
+import { ModuleHeader, ModulePage, ModuleTabs } from '../../shared/components/ModuleShell';
 
 type AfterSalesTab = 'recovery-list' | 'recovery-review';
-
-const shell = {
-  ink: '#0f172a',
-  muted: '#64748b',
-  line: '#dbe4ee',
-};
 
 const AFTER_SALES_TABS: Array<{ value: AfterSalesTab; label: string; permissionKeys: string[] }> = [
   { value: 'recovery-list', label: '售后挽回订单列表', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE] },
@@ -48,17 +43,12 @@ const AfterSales: React.FC = () => {
   };
 
   return (
-    <Box sx={{ p: 3, bgcolor: '#f5f7fb', minHeight: '100%' }}>
-      <Stack direction={{ xs: 'column', lg: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', lg: 'center' }} spacing={2} sx={{ mb: 2.5 }}>
-        <Box>
-          <Typography variant="h5" sx={{ fontWeight: 800, color: shell.ink }}>
-            售后服务
-          </Typography>
-          <Typography variant="body2" sx={{ color: shell.muted, mt: 0.5, maxWidth: 760 }}>
-            售后只提交挽回事实，财务审核通过后再进入售后挽回分账。
-          </Typography>
-        </Box>
-        <Box sx={{ display: 'flex', gap: 1, justifyContent: { xs: 'stretch', lg: 'flex-end' } }}>
+    <ModulePage>
+      <ModuleHeader
+        title="售后服务"
+        description="售后只提交挽回事实，财务审核通过后再进入售后挽回分账。"
+        actions={(
+          <>
           <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsSignal((value) => value + 1)}>
             视图设置
           </Button>
@@ -67,22 +57,22 @@ const AfterSales: React.FC = () => {
               新建售后挽回订单
             </Button>
           )}
-        </Box>
-      </Stack>
+          </>
+        )}
+      />
 
-      <Tabs
+      <ModuleTabs
         value={activeTab}
         onChange={handleTabChange}
-        sx={{ mb: 2, borderBottom: '1px solid #e5e7eb' }}
       >
         {visibleTabs.map((tab) => (
           <Tab key={tab.value} value={tab.value} label={tab.label} />
         ))}
-      </Tabs>
+      </ModuleTabs>
 
       {activeTab === 'recovery-list' && <RecoveryOrderTab mode="list" createSignal={createSignal} viewSettingsSignal={viewSettingsSignal} />}
       {activeTab === 'recovery-review' && <RecoveryOrderTab mode="review" viewSettingsSignal={viewSettingsSignal} />}
-    </Box>
+    </ModulePage>
   );
 };
 
