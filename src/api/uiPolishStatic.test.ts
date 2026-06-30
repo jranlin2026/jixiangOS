@@ -528,18 +528,18 @@ assert.match(
 );
 assert.match(
   afterSalesSource,
-  /label:\s*'订单退款'[\s\S]*label:\s*'退款挽回单'/,
-  'After-sales workspace should expose order refund and refund recovery order tabs.',
+  /label:\s*'售后挽回订单列表'[\s\S]*label:\s*'售后挽回订单审核台'/,
+  'After-sales workspace should expose recovery order list and review tabs.',
 );
 assert.doesNotMatch(
   afterSalesSource,
   /label:\s*'退款冲销'|label:\s*'售后工单'|activeTab === 'refund'|refundViewSettingsTrigger/,
   'After-sales workspace should not expose chargeback or service tickets as top-level tabs.',
 );
-assert.match(
+assert.doesNotMatch(
   afterSalesSource,
   /<RefundCenter embedded showInternalTabs=\{false\} \/>/,
-  'After-sales order refund tab should embed the refund workspace without its old internal tabs.',
+  'After-sales workspace should not embed refund workspace in the simplified v1 flow.',
 );
 assert.doesNotMatch(
   financeSource,
@@ -548,8 +548,8 @@ assert.doesNotMatch(
 );
 assert.match(
   appSource,
-  /ROUTES\.REFUND_CENTER[\s\S]*ROUTES\.AFTER_SALES\}\?tab=order-refund/,
-  'Legacy refund center route should redirect to after-sales order refund.',
+  /ROUTES\.REFUND_CENTER[\s\S]*ROUTES\.AFTER_SALES/,
+  'Legacy refund center route should redirect to after-sales default recovery workspace.',
 );
 assert.match(
   sidebarSource,
@@ -558,8 +558,8 @@ assert.match(
 );
 assert.match(
   recoveryOrderSource,
-  /第三方平台订单号[\s\S]*审核通过并生成提成记录|审核通过并生成提成记录[\s\S]*第三方平台订单号/,
-  'Recovery order workspace should collect third-party order data and generate commissions after review.',
+  /第三方平台订单号[\s\S]*售后挽回分账|售后挽回分账[\s\S]*第三方平台订单号/,
+  'Recovery order workspace should collect third-party order data and send approved records to recovery settlement.',
 );
 assert.match(
   commissionSource,
@@ -581,15 +581,15 @@ assert.doesNotMatch(
   /查看\/处理/,
   'Order split table should not use the broad 查看/处理 text button.',
 );
-assert.match(
+assert.doesNotMatch(
   commissionSource,
   /确认冲销完成/,
-  'Order split detail workspace should expose a chargeback completion action.',
+  'Order split detail workspace should not expose a chargeback completion action in v1.',
 );
-assert.match(
+assert.doesNotMatch(
   commissionSource,
   /chargebackMethod/,
-  'Order split detail workspace should collect chargeback handling method.',
+  'Order split detail workspace should not collect chargeback handling method in v1.',
 );
 assert.doesNotMatch(
   commissionSource,
@@ -626,10 +626,10 @@ assert.match(
   /headers = \[[\s\S]*'总实付金额'/,
   'Monthly payout export should include total paid amount.',
 );
-assert.match(
+assert.doesNotMatch(
   commissionSource,
   /RefundStatusBadge/,
-  'Commission order split should reuse the order list refund status badge.',
+  'Commission order split should not expose refund status badge in simplified v1 finance flow.',
 );
 assert.match(
   commissionSource,

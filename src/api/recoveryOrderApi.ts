@@ -552,7 +552,7 @@ async function cleanupDeletedSourceRecoverySettlement(
     || commission.status === '已冲销'
   ));
   if (locked) {
-    return createErrorResponse('已发放、待冲销或已冲销的分账不能清理，请继续走冲销/留痕流程');
+    return createErrorResponse('已发放的分账不能清理；第一版不支持系统内冲销，请财务线下处理。');
   }
 
   writeCommissions(commissions.filter((commission) => (

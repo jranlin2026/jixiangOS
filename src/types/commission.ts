@@ -41,7 +41,7 @@ export interface CommissionRoleConfigFilters {
 /** 提成状态 — 含审核流程 */
 export type CommissionStatus = '待确认' | '待发放' | '已发放' | '已取消' | '已撤回' | '待冲销' | '已冲销';
 export type LegacyCommissionStatus = CommissionStatus | '待审核' | '异常';
-export type CommissionOrderSummaryStatus = '待处理' | '待确认' | '待发放' | '已发放' | '已撤回' | '待冲销' | '已冲销';
+export type CommissionOrderSummaryStatus = '待处理' | '待确认' | '待发放' | '已发放' | '已撤回';
 
 export type CommissionScene =
   | '899成交'
@@ -427,7 +427,7 @@ export interface MonthlyCommissionPayout {
   withdrawnAmount: number;
   chargebackAmount: number;
   totalAmount: number;
-  status: '待确认' | '待发放' | '已发放' | '待冲销' | '无应发';
+  status: '待确认' | '待发放' | '已发放' | '无应发';
   commissions: Commission[];
   roleSummaries?: MonthlyCommissionRoleSummary[];
 }

@@ -59,7 +59,7 @@ const shell = {
 const CUSTOM_PLAN_ID = '__custom_amount__';
 const DEFAULT_RECOVERY_ROLE = '挽回人员';
 
-type RecoverySettlementFilterStatus = RecoveryOrderSettlementStatus | '全部' | '已发放' | '待冲销' | '已冲销';
+type RecoverySettlementFilterStatus = RecoveryOrderSettlementStatus | '全部' | '已发放';
 
 type SettlementRow = {
   role: string;
@@ -101,8 +101,6 @@ const STATUS_OPTIONS: Array<{ value: RecoverySettlementFilterStatus; label: stri
   { value: '待发放', label: '待发放', color: shell.green },
   { value: '已发放', label: '已发放', color: shell.blue },
   { value: '已撤回', label: '已撤回', color: shell.red },
-  { value: '待冲销', label: '待冲销', color: shell.red },
-  { value: '已冲销', label: '已冲销', color: shell.blue },
 ];
 
 type RecoverySettlementColumnId =
@@ -247,7 +245,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         settlementStatus: '全部',
         includeDeleted: true,
         page: 1,
-        pageSize: 10000,
+        pageSize: 500,
       }),
       settingsApi.fetchUsers({ employmentStatus: 'active' }),
       departmentApi.getDepartments(),
@@ -319,7 +317,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         statuses: ['待分账'],
         settlementStatus: '待处理',
         page: 1,
-        pageSize: 10000,
+        pageSize: 500,
       });
       if (res.code !== 0) {
         setMessage({ type: 'error', text: res.message || '读取可新建售后挽回分账单失败' });
@@ -364,7 +362,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   }, [createSettlementOpen, creatableRecoverySearch, fetchCreatableRecoveryOrders]);
 
   const counts = useMemo(() => {
-    const base = { 全部: allRowsForCounts.length, 待处理: 0, 待确认: 0, 待发放: 0, 已发放: 0, 已撤回: 0, 待冲销: 0, 已冲销: 0 };
+    const base = { 全部: allRowsForCounts.length, 待处理: 0, 待确认: 0, 待发放: 0, 已发放: 0, 已撤回: 0 };
     allRowsForCounts.forEach((row) => {
       const rowStatus = getSettlementStatus(row);
       if (rowStatus in base) base[rowStatus as keyof typeof base] += 1;
@@ -375,7 +373,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   const loadRecoveryCommissions = async (order: RecoveryOrder): Promise<Commission[]> => {
     try {
       const commissionIds = new Set(order.commissionIds || []);
-      const res = await commissionApi.fetchCommissions({ page: 1, pageSize: 10000 });
+      const res = await commissionApi.fetchCommissions({ page: 1, pageSize: 500 });
       if (res.code !== 0) {
         setMessage({ type: 'error', text: res.message || '读取售后挽回分账明细失败' });
         return [];
@@ -683,7 +681,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                 key={option.value}
                 variant={active ? 'contained' : 'outlined'}
                 onClick={() => setStatus(option.value)}
-                color={option.value === '待冲销' ? 'error' : 'primary'}
+                color="primary"
                 sx={{
                   borderRadius: 1.5,
                   minWidth: 0,

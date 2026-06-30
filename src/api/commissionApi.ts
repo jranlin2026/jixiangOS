@@ -184,10 +184,9 @@ function normalizeDateRange(start?: string, end?: string): { startDate: string; 
 
 function normalizeCommissionStatus(c: Commission): CommissionStatus {
   const rawStatus = String(c.status);
-  const note = `${c.auditReason || ''}${c.frozenReason || ''}${c.calculationNote || ''}`;
   if (rawStatus === '待审核') return '待确认';
   if (rawStatus === '已取消') return '已撤回';
-  if (rawStatus === '异常') return note.includes('已发放后退款') || note.includes('冲销') ? '待冲销' : '已撤回';
+  if (rawStatus === '异常') return '已撤回';
   return c.status as CommissionStatus;
 }
 
@@ -201,6 +200,10 @@ function isChargebackPendingCommission(commission: Commission): boolean {
 
 function isChargedBackCommission(commission: Commission): boolean {
   return commission.status === '已冲销';
+}
+
+function isInactiveCommission(commission: Commission): boolean {
+  return isWithdrawnCommission(commission) || isChargebackPendingCommission(commission) || isChargedBackCommission(commission);
 }
 
 function isCommissionPendingHandling(commission: Commission): boolean {
@@ -510,11 +513,8 @@ async function fetchCommissionsByOrder(orderId: string): Promise<ApiResponse<Com
 }
 
 function deriveOrderSummaryStatus(commissions: Commission[]): CommissionOrderSummary['status'] {
-  if (commissions.some(isChargebackPendingCommission)) return '待冲销';
   if (commissions.some(isCommissionPendingHandling)) return '待处理';
-  if (commissions.every(isChargedBackCommission)) return '已冲销';
-  if (commissions.every(isWithdrawnCommission)) return '已撤回';
-  if (commissions.every((commission) => isWithdrawnCommission(commission) || isChargedBackCommission(commission))) return '已冲销';
+  if (commissions.every(isInactiveCommission)) return '已撤回';
   if (commissions.every((commission) => commission.status === '已发放')) return '已发放';
   if (commissions.every((commission) => commission.status === '待发放' || commission.status === '已发放')) return '待发放';
   return '待确认';
@@ -565,7 +565,7 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
       sourceOrderDeleted: !order,
       totalCommissionAmount: Math.round(sortedRows.reduce((sumValue, item) => sumValue + item.commissionAmount, 0) * 100) / 100,
       pendingAssignCount: sortedRows.filter(isPendingAssignment).length,
-      exceptionCount: sortedRows.filter((item) => isWithdrawnCommission(item) || isChargebackPendingCommission(item) || isChargedBackCommission(item)).length,
+      exceptionCount: sortedRows.filter(isInactiveCommission).length,
       status: deriveOrderSummaryStatus(sortedRows),
       splitSummary: sortedRows.map((item) => ({
         role: item.role,
@@ -619,8 +619,6 @@ async function fetchCommissionOrderSummaryStatusCounts(filters?: CommissionOrder
     待发放: 0,
     已发放: 0,
     已撤回: 0,
-    待冲销: 0,
-    已冲销: 0,
   };
   filtered.forEach((summary) => {
     counts[summary.status] += 1;
@@ -631,7 +629,7 @@ async function fetchCommissionOrderSummaryStatusCounts(filters?: CommissionOrder
 function hasEffectiveCommission(commissions: Commission[]): boolean {
   return commissions.some((commission) => {
     const status = normalizeCommission(commission).status;
-    return !['已撤回', '已冲销', '已取消'].includes(status);
+    return !['已撤回', '待冲销', '已冲销', '已取消'].includes(status);
   });
 }
 
@@ -802,7 +800,7 @@ async function saveOrderCommissionAdjustments(
   const removedLockedRow = Array.from(existingById.values()).find((commission) => (
     !submittedIds.has(commission.id) && commission.status !== '待确认'
   ));
-  if (removedLockedRow) return createErrorResponse('只能删除待确认阶段的分账记录，已进入发放或冲销链路的分账请使用撤回/冲销流程');
+  if (removedLockedRow) return createErrorResponse('只能删除待确认阶段的分账记录，已进入发放链路的分账请使用撤回流程');
 
   const adjustedRows = resolvedRows.map(({ row, resolved }) => buildAdjustedCommission(
     order,
@@ -837,7 +835,7 @@ async function deleteOrderCommissions(orderId: string, reason: string): Promise<
   if (!orderCommissions.length) return createErrorResponse('该订单没有可删除的分账记录');
 
   const lockedCommission = orderCommissions.find((commission) => commission.status !== '待确认');
-  if (lockedCommission) return createErrorResponse('只能删除待确认阶段的订单分账，已进入发放或冲销链路的分账请使用撤回/冲销流程');
+  if (lockedCommission) return createErrorResponse('只能删除待确认阶段的订单分账，已进入发放链路的分账请使用撤回流程');
 
   const now = new Date().toISOString();
   const operator = getCurrentOperatorName('财务');
@@ -873,9 +871,7 @@ async function cleanupDeletedSourceOrderCommissions(orderId: string, reason: str
     || commission.status === '待冲销'
     || commission.status === '已冲销'
   ));
-  if (locked) {
-    return createErrorResponse('已发放、待冲销或已冲销的分账不能清理，请继续走冲销/留痕流程');
-  }
+  if (locked) return createErrorResponse('已发放的分账不能清理；第一版不支持系统内冲销，请财务线下处理。');
 
   const now = new Date().toISOString();
   const operator = getCurrentOperatorName('财务');
@@ -926,24 +922,25 @@ async function withdrawOrderCommissions(orderId: string, reason: string): Promis
   const now = new Date().toISOString();
   const operator = getCurrentOperatorName('财务');
   const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
+  const currentOrderCommissions = commissions
+    .filter((commission) => commission.orderId === orderId)
+    .map((commission) => normalizeCommission(commission));
+  if (currentOrderCommissions.some((commission) => commission.status === '已发放')) {
+    return createErrorResponse('提成已发放，第一版不支持系统内冲销，请财务线下处理。');
+  }
   let changed = false;
   const withdrawnCommissions: Commission[] = [];
   const next = commissions.map((commission) => {
     if (commission.orderId !== orderId) return commission;
     const normalized = normalizeCommission(commission);
-    if (normalized.status === '已撤回' || normalized.status === '待冲销') return commission;
+    if (!['待确认', '待发放'].includes(normalized.status)) return commission;
     changed = true;
-    const isPaid = normalized.status === '已发放';
-    const nextStatus: CommissionStatus = isPaid ? '待冲销' : '已撤回';
-    const note = isPaid
-      ? `撤回提成：${normalizedReason}，该提成已发放，需财务人工冲销/追回。`
-      : `撤回提成：${normalizedReason}。`;
     const updated: Commission = {
       ...commission,
-      status: nextStatus,
+      status: '已撤回',
       auditReason: normalizedReason,
-      frozenReason: isPaid ? normalizedReason : undefined,
-      calculationNote: [commission.calculationNote, note].filter(Boolean).join(' '),
+      frozenReason: undefined,
+      calculationNote: [commission.calculationNote, `撤回提成：${normalizedReason}。`].filter(Boolean).join(' '),
       updatedAt: now,
     };
     withdrawnCommissions.push(normalizeCommission(updated));
@@ -958,34 +955,9 @@ async function withdrawOrderCommissions(orderId: string, reason: string): Promis
 async function startCommissionChargeback(orderId: string, reason: string): Promise<ApiResponse<Commission[]>> {
   ensureInit();
   await delay(160);
-  const normalizedReason = reason.trim();
-  if (!normalizedReason) return createErrorResponse('发起冲销必须填写原因');
-  const order = getOrderById(orderId);
-  if (!order) return createErrorResponse('订单不存在', 404);
-  const now = new Date().toISOString();
-  const operator = getCurrentOperatorName('财务');
-  const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
-  let changed = false;
-  const chargebackCommissions: Commission[] = [];
-  const next = commissions.map((commission) => {
-    const normalized = normalizeCommission(commission);
-    if (normalized.orderId !== orderId || normalized.status !== '已发放') return commission;
-    changed = true;
-    const updated: Commission = {
-      ...commission,
-      status: '待冲销',
-      auditReason: normalizedReason,
-      frozenReason: normalizedReason,
-      calculationNote: [commission.calculationNote, `发起冲销：${normalizedReason}。`].filter(Boolean).join(' '),
-      updatedAt: now,
-    };
-    chargebackCommissions.push(normalizeCommission(updated));
-    return updated;
-  });
-  if (!changed) return createErrorResponse('该订单没有已发放提成可发起冲销');
-  saveCommissions(next);
-  appendCommissionOperationLog(order, '发起冲销', normalizedReason, chargebackCommissions, operator, now);
-  return createSuccessResponse(getOrderCommissions(orderId));
+  void orderId;
+  void reason;
+  return createErrorResponse('第一版不支持系统内冲销，请财务线下处理。');
 }
 
 async function completeCommissionChargeback(
@@ -994,42 +966,9 @@ async function completeCommissionChargeback(
 ): Promise<ApiResponse<Commission[]>> {
   ensureInit();
   await delay(180);
-  const normalizedReason = input.reason.trim();
-  if (!input.method) return createErrorResponse('请选择冲销方式');
-  if (!normalizedReason) return createErrorResponse('确认冲销完成必须填写处理说明');
-  const amount = Math.max(0, Number(input.amount) || 0);
-  if (amount <= 0) return createErrorResponse('冲销金额必须大于 0');
-  const order = getOrderById(orderId);
-  if (!order) return createErrorResponse('订单不存在', 404);
-  const now = new Date().toISOString();
-  const operator = getCurrentOperatorName('财务');
-  const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
-  let changed = false;
-  const completedCommissions: Commission[] = [];
-  const next = commissions.map((commission) => {
-    const normalized = normalizeCommission(commission);
-    if (normalized.orderId !== orderId || normalized.status !== '待冲销') return commission;
-    changed = true;
-    const updated: Commission = {
-      ...commission,
-      status: '已冲销',
-      auditReason: undefined,
-      frozenReason: undefined,
-      chargebackMethod: input.method,
-      chargebackAmount: amount,
-      chargebackReason: normalizedReason,
-      chargebackHandledBy: operator,
-      chargebackHandledAt: now,
-      calculationNote: [commission.calculationNote, `冲销处理完成：${input.method}，${normalizedReason}。`].filter(Boolean).join(' '),
-      updatedAt: now,
-    };
-    completedCommissions.push(normalizeCommission(updated));
-    return updated;
-  });
-  if (!changed) return createErrorResponse('该订单没有待冲销提成');
-  saveCommissions(next);
-  appendCommissionOperationLog(order, '冲销处理完成', normalizedReason, completedCommissions, operator, now);
-  return createSuccessResponse(getOrderCommissions(orderId));
+  void orderId;
+  void input;
+  return createErrorResponse('第一版不支持系统内冲销，请财务线下处理。');
 }
 
 async function fetchCommissionOperationLogs(orderId: string): Promise<ApiResponse<CommissionOperationLog[]>> {
@@ -1325,7 +1264,6 @@ function getMonthlyPayoutCommissions(period: string, sourceCommissions?: Commiss
         || commission.status === '待发放'
         || commission.status === '已发放'
         || commission.status === '已撤回'
-        || commission.status === '待冲销'
       );
   });
 }
@@ -1358,18 +1296,13 @@ function buildMonthlyRoleSummary(role: string, rows: Commission[]): MonthlyCommi
   const withdrawnAmount = rows
     .filter(isWithdrawnCommission)
     .reduce((sumValue, commission) => sumValue + getSummaryAmount(commission), 0);
-  const chargebackAmount = rows
-    .filter(isChargebackPendingCommission)
-    .reduce((sumValue, commission) => sumValue + getSummaryAmount(commission), 0);
-  const status: MonthlyCommissionPayout['status'] = chargebackAmount > 0
-    ? '待冲销'
-    : pendingConfirmAmount > 0
-      ? '待确认'
-      : pendingPayAmount > 0
-        ? '待发放'
-        : paidAmount > 0
-          ? '已发放'
-          : '无应发';
+  const status: MonthlyCommissionPayout['status'] = pendingConfirmAmount > 0
+    ? '待确认'
+    : pendingPayAmount > 0
+      ? '待发放'
+      : paidAmount > 0
+        ? '已发放'
+        : '无应发';
 
   return {
     role,
@@ -1378,9 +1311,9 @@ function buildMonthlyRoleSummary(role: string, rows: Commission[]): MonthlyCommi
     pendingConfirmAmount: roundMoney(pendingConfirmAmount),
     pendingPayAmount: roundMoney(pendingPayAmount),
     paidAmount: roundMoney(paidAmount),
-    exceptionAmount: roundMoney(chargebackAmount),
+    exceptionAmount: 0,
     withdrawnAmount: roundMoney(withdrawnAmount),
-    chargebackAmount: roundMoney(chargebackAmount),
+    chargebackAmount: 0,
     totalAmount: roundMoney(pendingConfirmAmount + pendingPayAmount + paidAmount),
     status,
     isTiered,
@@ -1410,18 +1343,15 @@ function buildMonthlyPayouts(period: string): MonthlyCommissionPayout[] {
     const pendingPayAmount = roleSummaries.reduce((sumValue, item) => sumValue + item.pendingPayAmount, 0);
     const paidAmount = roleSummaries.reduce((sumValue, item) => sumValue + item.paidAmount, 0);
     const withdrawnAmount = roleSummaries.reduce((sumValue, item) => sumValue + item.withdrawnAmount, 0);
-    const chargebackAmount = roleSummaries.reduce((sumValue, item) => sumValue + item.chargebackAmount, 0);
     const orderCount = new Set(rows.map((commission) => commission.orderId)).size;
     const monthlyPaidAmount = roleSummaries.reduce((sumValue, item) => sumValue + item.monthlyPaidAmount, 0);
-    const status: MonthlyCommissionPayout['status'] = chargebackAmount > 0
-      ? '待冲销'
-      : pendingConfirmAmount > 0
-        ? '待确认'
-        : pendingPayAmount > 0
-          ? '待发放'
-          : paidAmount > 0
-            ? '已发放'
-            : '无应发';
+    const status: MonthlyCommissionPayout['status'] = pendingConfirmAmount > 0
+      ? '待确认'
+      : pendingPayAmount > 0
+        ? '待发放'
+        : paidAmount > 0
+          ? '已发放'
+          : '无应发';
     return {
       period,
       owner: first.owner,
@@ -1433,9 +1363,9 @@ function buildMonthlyPayouts(period: string): MonthlyCommissionPayout[] {
       pendingConfirmAmount: roundMoney(pendingConfirmAmount),
       pendingPayAmount: roundMoney(pendingPayAmount),
       paidAmount: roundMoney(paidAmount),
-      exceptionAmount: roundMoney(chargebackAmount),
+      exceptionAmount: 0,
       withdrawnAmount: roundMoney(withdrawnAmount),
-      chargebackAmount: roundMoney(chargebackAmount),
+      chargebackAmount: 0,
       totalAmount: roundMoney(pendingConfirmAmount + pendingPayAmount + paidAmount),
       status,
       commissions: rows,
@@ -1443,7 +1373,6 @@ function buildMonthlyPayouts(period: string): MonthlyCommissionPayout[] {
     };
   }).sort((a, b) => (
     b.totalAmount - a.totalAmount
-    || b.chargebackAmount - a.chargebackAmount
     || a.owner.localeCompare(b.owner, 'zh-CN')
   ));
 }

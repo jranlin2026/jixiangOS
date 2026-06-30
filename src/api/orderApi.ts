@@ -516,14 +516,14 @@ async function deleteOrder(id: string, reason = ''): Promise<ApiResponse<boolean
     commission.status === '已发放' || commission.status === '待冲销'
   ));
   if (hasPaidOrChargeback) {
-    return createErrorResponse('该订单已有已发放提成，需先完成冲销处理后才能删除');
+    return createErrorResponse('该订单已有已发放提成，第一版不支持系统内冲销，请财务线下处理后再删除');
   }
   const hasActiveCommission = relatedCommissions.some((commission) => (
     commission.status !== '已撤回' && String(commission.status) !== '已取消'
     && commission.status !== '已冲销'
   ));
   if (hasActiveCommission) {
-    return createErrorResponse('该订单已有分账记录，不能直接删除。请先到财务中心处理提成撤回/冲销。');
+    return createErrorResponse('该订单已有分账记录，不能直接删除。请先到财务中心处理提成撤回。');
   }
   const now = new Date().toISOString();
   orders[index] = {

@@ -209,7 +209,7 @@ function buildWorkbench(data: AssistantData): AIAssistantWorkbench {
     insights.push({
       id: 'commission-backlog',
       title: '分账存在待确认或待分配',
-      content: `当前有 ${pendingCommissionRows.length} 条分账需要财务确认，建议先处理待分配人员和待冲销分账。`,
+      content: `当前有 ${pendingCommissionRows.length} 条分账需要财务确认，建议先处理待分配人员和待确认分账。`,
       tone: 'error',
       path: `${ROUTES.FINANCE}?tab=settlement`,
     });
@@ -414,7 +414,7 @@ function buildRefundResults(data: AssistantData): AIResultData[] {
       suggestions: [
         '先处理已批准但未付款的退款，避免财务状态不一致。',
         '挽回中任务需要明确下一次跟进时间和责任人。',
-        '已发放提成后发生退款的订单，要进入待冲销处理，不自动扣回。',
+        '已发放提成后的异常退款先由财务线下处理，第一版系统不做自动扣回。',
       ],
     },
   ];

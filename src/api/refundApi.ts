@@ -194,29 +194,7 @@ function cancelCommissions(refund: Refund): void {
 }
 
 function markPaidRefundChargebacks(refund: Refund): void {
-  const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
-  const paidStatus = '已发放';
-  const reason = `已发放后退款：${refund.refundNo}，需财务人工冲销/追回`;
-  const chargebackCommissions: Commission[] = [];
-
-  const nextCommissions = commissions.map((commission) => {
-    if ((commission.orderId !== refund.orderId && commission.orderNo !== refund.orderNo) || commission.isRecoveryBonus) return commission;
-    if (commission.status !== paidStatus) return commission;
-    const nextCommission = {
-      ...commission,
-      status: '待冲销' as const,
-      auditReason: reason,
-      frozenReason: reason,
-      calculationNote: `${commission.calculationNote || ''} ${reason}`.trim(),
-      sourceRefundId: refund.id,
-      updatedAt: nowIso(),
-    };
-    chargebackCommissions.push(nextCommission);
-    return nextCommission;
-  });
-
-  setStorageData(STORAGE_KEYS.COMMISSIONS, nextCommissions);
-  appendRefundCommissionOperationLog(refund, '退款待冲销', reason, chargebackCommissions);
+  void refund;
 }
 
 function markPaidRefundExceptions(refund: Refund): void {

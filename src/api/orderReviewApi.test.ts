@@ -198,8 +198,8 @@ const completeRefundRes = await refundApi.completeRefund(refundRes.data.id, zh.b
 assert.equal(completeRefundRes.code, 0);
 
 const commissionsAfterRefund = JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as Commission[];
-assert.equal(commissionsAfterRefund.every((commission) => commission.status === zh.chargebackPending), true);
-assert.equal(commissionsAfterRefund.some((commission) => `${commission.auditReason || ''}${commission.calculationNote || ''}`.includes(zh.refundException)), true);
+assert.equal(commissionsAfterRefund.every((commission) => commission.status === zh.paid), true);
+assert.equal(commissionsAfterRefund.some((commission) => `${commission.auditReason || ''}${commission.calculationNote || ''}`.includes(zh.refundException)), false);
 
 seed();
 const unpaidSubmitRes = await orderReviewApi.submitOrderApplication(orderPayload);

@@ -262,8 +262,6 @@ assert.deepEqual(statusCountsRes.data, {
   '\u5f85\u53d1\u653e': 0,
   '\u5df2\u53d1\u653e': 0,
   '\u5df2\u64a4\u56de': 0,
-  '\u5f85\u51b2\u9500': 0,
-  '\u5df2\u51b2\u9500': 0,
 });
 
 const creatableOrdersRes = await (commissionApi as any).fetchCreatableCommissionOrders({ pageSize: 20 });
@@ -432,17 +430,11 @@ assert.equal(monthlyPendingAssign.totalAmount, 0);
 const manualWithdrawWithoutReason = await (commissionApi as any).withdrawOrderCommissions('order-a', '');
 assert.notEqual(manualWithdrawWithoutReason.code, 0);
 const manualWithdrawRes = await (commissionApi as any).withdrawOrderCommissions('order-a', '订单退款撤回');
-assert.equal(manualWithdrawRes.code, 0);
-assert.equal((manualWithdrawRes.data as Commission[]).some((item) => item.status === zh.withdrawn), true);
-assert.equal((manualWithdrawRes.data as Commission[]).some((item) => item.status === zh.chargebackPending), true);
+assert.notEqual(manualWithdrawRes.code, 0);
+assert.match(manualWithdrawRes.message || '', /第一版不支持系统内冲销/);
 const deletePaidCommissionOrder = await orderApi.deleteOrder('order-a');
 assert.notEqual(deletePaidCommissionOrder.code, 0);
-assert.match(deletePaidCommissionOrder.message || '', /已发放提成|冲销/);
-const withdrawLogs = ((await (commissionApi as any).fetchCommissionOperationLogs('order-a')).data || []);
-assert.ok(
-  withdrawLogs.some((item: any) => item.action === '\u64a4\u56de\u63d0\u6210' && item.reason === '订单退款撤回'),
-  '撤回提成后应写入订单分账操作历史',
-);
+assert.match(deletePaidCommissionOrder.message || '', /已发放提成|第一版/);
 
 seed();
 const withdrawBeforeDelete = await (commissionApi as any).withdrawOrderCommissions('order-a', '全部撤回后删除订单');
@@ -467,39 +459,23 @@ await commissionApi.confirmOrderCommissions('order-a', 'prepare chargeback');
 await commissionApi.updateCommissionStatus('comm-a-sales', zh.paid);
 await commissionApi.updateCommissionStatus('comm-a-lead', zh.paid);
 const startChargebackRes = await (commissionApi as any).startCommissionChargeback('order-a', '退款后需要追回已发提成');
-assert.equal(startChargebackRes.code, 0);
-assert.equal((startChargebackRes.data as Commission[]).every((item) => item.status === zh.chargebackPending), true);
-let chargebackLogs = ((await (commissionApi as any).fetchCommissionOperationLogs('order-a')).data || []);
-assert.ok(
-  chargebackLogs.some((item: any) => item.action === '发起冲销' && item.reason === '退款后需要追回已发提成'),
-  '发起冲销后应写入操作历史',
-);
+assert.notEqual(startChargebackRes.code, 0);
+assert.match(startChargebackRes.message || '', /第一版不支持系统内冲销/);
 const completeChargebackRes = await (commissionApi as any).completeCommissionChargeback('order-a', {
   method: '下月提成抵扣',
   amount: 130,
   reason: '已在 6 月提成中抵扣',
 });
-assert.equal(completeChargebackRes.code, 0);
-assert.equal((completeChargebackRes.data as Commission[]).every((item) => item.status === zh.chargedBack), true);
-assert.equal((completeChargebackRes.data as Commission[]).every((item) => item.chargebackMethod === '下月提成抵扣'), true);
-assert.equal((completeChargebackRes.data as Commission[]).every((item) => item.chargebackAmount === 130), true);
-assert.equal((completeChargebackRes.data as Commission[]).every((item) => item.chargebackReason === '已在 6 月提成中抵扣'), true);
-chargebackLogs = ((await (commissionApi as any).fetchCommissionOperationLogs('order-a')).data || []);
-assert.ok(
-  chargebackLogs.some((item: any) => item.action === '冲销处理完成' && item.reason === '已在 6 月提成中抵扣'),
-  '确认冲销完成后应写入操作历史',
-);
-const chargedBackSummaries = await (commissionApi as any).fetchCommissionOrderSummaries({ status: zh.chargedBack, pageSize: 20 });
-assert.equal(chargedBackSummaries.data.items.some((item: any) => item.orderId === 'order-a' && item.status === zh.chargedBack), true);
-const chargedBackPayouts = await (commissionApi as any).fetchMonthlyCommissionPayouts('2026-05');
+assert.notEqual(completeChargebackRes.code, 0);
+assert.match(completeChargebackRes.message || '', /第一版不支持系统内冲销/);
+const paidPayoutsAfterBlockedChargeback = await (commissionApi as any).fetchMonthlyCommissionPayouts('2026-05');
 assert.equal(
-  chargedBackPayouts.data.some((item: any) => item.commissions.some((commission: Commission) => commission.orderId === 'order-a')),
-  false,
+  paidPayoutsAfterBlockedChargeback.data.some((item: any) => item.commissions.some((commission: Commission) => commission.orderId === 'order-a')),
+  true,
 );
 const deleteChargedBackOrder = await orderApi.deleteOrder('order-a');
-assert.equal(deleteChargedBackOrder.code, 0);
-const chargedBackDeletedSummaries = await (commissionApi as any).fetchCommissionOrderSummaries({ status: zh.chargedBack, pageSize: 20 });
-assert.equal(chargedBackDeletedSummaries.data.items.find((item: any) => item.orderId === 'order-a')?.sourceOrderDeleted, true);
+assert.notEqual(deleteChargedBackOrder.code, 0);
+assert.match(deleteChargedBackOrder.message || '', /第一版不支持系统内冲销/);
 const cleanupChargedBackRes = await (commissionApi as any).cleanupDeletedSourceOrderCommissions('order-a', '不能清理冲销链路');
 assert.notEqual(cleanupChargedBackRes.code, 0);
 

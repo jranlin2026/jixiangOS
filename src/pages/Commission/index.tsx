@@ -57,7 +57,6 @@ import useAuthStore from '../../store/useAuthStore';
 import type {
   Commission,
   CommissionAdjustmentInput,
-  CommissionChargebackMethod,
   CommissionCreatableOrderSummary,
   CommissionOrderSummary,
   CommissionOrderSummaryFilters,
@@ -83,8 +82,6 @@ const ORDER_STATUS_OPTIONS: Array<{ value: CommissionOrderSummaryStatus | '全�
   { value: '待发放', label: '待发放' },
   { value: '已发放', label: '已发放' },
   { value: '已撤回', label: '已撤回' },
-  { value: '待冲销', label: '待冲销', important: true },
-  { value: '已冲销', label: '已冲销' },
 ];
 
 const DEFAULT_ORDER_STATUS_COUNTS: CommissionOrderSummaryStatusCounts = {
@@ -94,8 +91,6 @@ const DEFAULT_ORDER_STATUS_COUNTS: CommissionOrderSummaryStatusCounts = {
   待发放: 0,
   已发放: 0,
   已撤回: 0,
-  待冲销: 0,
-  已冲销: 0,
 };
 
 type OrderSplitColumnId =
@@ -148,7 +143,7 @@ const ORDER_SPLIT_COLUMNS: OrderSplitColumnMeta[] = [
   { id: 'splitDetails', label: '分账明细', defaultWidth: 310 },
   { id: 'totalCommissionAmount', label: '分账总额', defaultWidth: 130 },
   { id: 'pendingAssignCount', label: '待分配数', defaultWidth: 110 },
-  { id: 'exceptionCount', label: '撤回/冲销数', defaultWidth: 130 },
+  { id: 'exceptionCount', label: '撤回数', defaultWidth: 130 },
   { id: 'status', label: '分账状态', defaultWidth: 120 },
 ];
 
@@ -220,8 +215,6 @@ function readOrderSplitViewConfig(): OrderSplitViewConfig {
 
 function getOrderStatusColor(status: CommissionOrderSummaryStatus): 'default' | 'success' | 'error' | 'warning' | 'info' {
   if (status === '已发放') return 'success';
-  if (status === '待冲销') return 'error';
-  if (status === '已冲销') return 'default';
   if (status === '已撤回') return 'default';
   if (status === '待处理') return 'warning';
   if (status === '待确认') return 'warning';
@@ -231,7 +224,6 @@ function getOrderStatusColor(status: CommissionOrderSummaryStatus): 'default' | 
 
 function getPayoutStatusColor(status: MonthlyCommissionPayout['status']): 'default' | 'success' | 'error' | 'warning' | 'info' {
   if (status === '已发放') return 'success';
-  if (status === '待冲销') return 'error';
   if (status === '待确认') return 'warning';
   if (status === '待发放') return 'warning';
   return 'default';
@@ -239,7 +231,6 @@ function getPayoutStatusColor(status: MonthlyCommissionPayout['status']): 'defau
 
 function getCommissionStatusColor(status: Commission['status']): 'default' | 'success' | 'error' | 'warning' | 'info' {
   if (status === '已发放') return 'success';
-  if (status === '待冲销') return 'error';
   if (status === '待发放') return 'info';
   if (status === '待确认') return 'warning';
   return 'default';
@@ -250,7 +241,6 @@ function escapeCsvValue(value: unknown): string {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
-const CHARGEBACK_METHOD_OPTIONS: CommissionChargebackMethod[] = ['线下追回', '下月提成抵扣', '财务确认无需追回'];
 const CUSTOM_PAYOUT_PLAN_ID = '__custom_amount__';
 const CUSTOM_PAYOUT_PLAN_NAME = '自定义金额';
 
@@ -337,8 +327,6 @@ const Commission: React.FC<CommissionProps> = ({
   const [detailEditMode, setDetailEditMode] = useState(false);
   const [detailActionLoading, setDetailActionLoading] = useState(false);
   const [detailActionReason, setDetailActionReason] = useState('');
-  const [chargebackMethod, setChargebackMethod] = useState<CommissionChargebackMethod>('下月提成抵扣');
-  const [chargebackAmount, setChargebackAmount] = useState(0);
   const [orderDetail, setOrderDetail] = useState<Order | null>(null);
   const [operationLogs, setOperationLogs] = useState<CommissionOperationLog[]>([]);
   const [customerDetail, setCustomerDetail] = useState<Customer | null>(null);
@@ -358,7 +346,7 @@ const Commission: React.FC<CommissionProps> = ({
     paidAmount: summary.paidAmount + row.paidAmount,
     exceptionAmount: summary.exceptionAmount + (row.exceptionAmount || 0),
     withdrawnAmount: summary.withdrawnAmount + (row.withdrawnAmount || 0),
-    chargebackAmount: summary.chargebackAmount + (row.chargebackAmount || 0),
+    chargebackAmount: 0,
   }), {
     orderCount: 0,
     monthlyPaidAmount: 0,
@@ -815,19 +803,15 @@ const Commission: React.FC<CommissionProps> = ({
   const resetSettlementDetailForms = () => {
     setDetailEditMode(false);
     setDetailActionReason('');
-    setChargebackMethod('下月提成抵扣');
-    setChargebackAmount(0);
   };
 
   const canAdjustSettlementSummary = (summary: CommissionOrderSummary) => (
-    !summary.sourceOrderDeleted && !['已发放', '已撤回', '待冲销', '已冲销'].includes(summary.status)
+    !summary.sourceOrderDeleted && !['已发放', '已撤回'].includes(summary.status)
   );
 
   const getAdjustDisabledReason = (summary: CommissionOrderSummary) => {
     if (summary.sourceOrderDeleted) return '源订单已删除，只能查看明细和历史';
-    if (summary.status === '已发放') return '已发放提成不能直接调整，请先发起冲销';
-    if (summary.status === '待冲销') return '待冲销提成需先完成冲销处理';
-    if (summary.status === '已冲销') return '冲销已完成，只能查看留痕';
+    if (summary.status === '已发放') return '已发放提成不能直接调整，第一版不支持系统内冲销，请财务线下处理';
     if (summary.status === '已撤回') return '提成已撤回，只能查看留痕';
     return '调整分账';
   };
@@ -845,20 +829,20 @@ const Commission: React.FC<CommissionProps> = ({
   const getDeleteOrderSplitDisabledReason = (summary: CommissionOrderSummary) => {
     if (summary.sourceOrderDeleted) {
       if (!summary.commissions.length) return '没有可清理的废弃分账';
-      if (!summary.commissions.every((commission) => !['已发放', '待冲销', '已冲销'].includes(commission.status))) {
-        return '已发放、待冲销或已冲销的分账不能清理，请继续走冲销/留痕流程';
-      }
+      if (!summary.commissions.every((commission) => !['已发放', '待冲销', '已冲销'].includes(commission.status))) return '已发放的分账不能清理；第一版不支持系统内冲销，请财务线下处理';
       return '清理废弃分账';
     }
     if (!summary.commissions.length) return '该订单没有可删除的分账';
-    if (!['待处理', '待确认'].includes(summary.status)) return '已进入发放或冲销链路，请使用撤回/冲销流程';
+    if (!['待处理', '待确认'].includes(summary.status)) return '已进入发放链路，请使用撤回流程';
     if (!summary.commissions.every((commission) => commission.status === '待确认')) return '仅待确认阶段的分账可直接删除';
     return '删除订单分账';
   };
 
   const loadOperationLogs = async (orderId: string) => {
     const res = await commissionApi.fetchCommissionOperationLogs(orderId);
-    if (res.code === 0) setOperationLogs(res.data);
+    if (res.code === 0) {
+      setOperationLogs(res.data.filter((log) => !['发起冲销', '退款待冲销', '冲销处理完成'].includes(log.action)));
+    }
   };
 
   const mapCommissionToSplitRow = (item: Commission): CommissionAdjustmentInput => {
@@ -887,9 +871,6 @@ const Commission: React.FC<CommissionProps> = ({
   const openSettlementDetail = async (summary: CommissionOrderSummary, options?: { edit?: boolean }) => {
     setSummaryDetail(summary);
     resetSettlementDetailForms();
-    setChargebackAmount(summary.commissions
-      .filter((commission) => commission.status === '待冲销')
-      .reduce((sum, commission) => sum + commission.commissionAmount, 0));
     await loadOperationLogs(summary.orderId);
     if (options?.edit && canAdjustSettlementSummary(summary)) {
       const res = await commissionApi.fetchCommissionsByOrder(summary.orderId);
@@ -906,11 +887,6 @@ const Commission: React.FC<CommissionProps> = ({
     if (res.code !== 0) return;
     const nextSummary = res.data.items.find((item) => item.orderId === orderId) || null;
     setSummaryDetail(nextSummary);
-    if (nextSummary) {
-      setChargebackAmount(nextSummary.commissions
-        .filter((commission) => commission.status === '待冲销')
-        .reduce((sum, commission) => sum + commission.commissionAmount, 0));
-    }
     await loadOperationLogs(orderId);
   };
 
@@ -920,8 +896,7 @@ const Commission: React.FC<CommissionProps> = ({
       <Stack spacing={0.6} sx={{ py: 0.5 }}>
         {rows.map((item, index) => {
           const isPendingOwner = !item.owner || item.owner === '待分配';
-          const isWithdrawn = item.status === '已撤回';
-          const isChargebackPending = item.status === '待冲销';
+          const isWithdrawn = ['已撤回', '待冲销', '已冲销'].includes(item.status);
           return (
             <Box
               key={`${summary.orderId}-${item.role}-${item.owner || 'pending'}-${index}`}
@@ -947,9 +922,7 @@ const Commission: React.FC<CommissionProps> = ({
                 {formatOwnerDisplayName(item.ownerId, item.owner)}
               </Typography>
               <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end', alignItems: 'center' }}>
-                {(isWithdrawn || isChargebackPending) && (
-                  <Chip label={item.status} size="small" color={isChargebackPending ? 'error' : 'default'} sx={{ height: 20 }} />
-                )}
+                {isWithdrawn && <Chip label="已撤回" size="small" color="default" sx={{ height: 20 }} />}
                 <Typography variant="caption" sx={{ fontWeight: 700, color: item.amount > 0 ? '#d32f2f' : '#6b7280' }}>
                   {formatCurrency(item.amount)}
                 </Typography>
@@ -1254,40 +1227,6 @@ const Commission: React.FC<CommissionProps> = ({
     }
   };
 
-  const startChargebackFromDetail = async () => {
-    if (!summaryDetail || !detailActionReason.trim()) return;
-    setDetailActionLoading(true);
-    try {
-      const res = await commissionApi.startCommissionChargeback(summaryDetail.orderId, detailActionReason);
-      if (res.code === 0) {
-        setDetailActionReason('');
-        await refreshAll();
-        await reloadSettlementDetail(summaryDetail.orderId);
-      }
-    } finally {
-      setDetailActionLoading(false);
-    }
-  };
-
-  const completeChargebackFromDetail = async () => {
-    if (!summaryDetail || !detailActionReason.trim() || chargebackAmount <= 0) return;
-    setDetailActionLoading(true);
-    try {
-      const res = await commissionApi.completeCommissionChargeback(summaryDetail.orderId, {
-        method: chargebackMethod,
-        amount: chargebackAmount,
-        reason: detailActionReason,
-      });
-      if (res.code === 0) {
-        setDetailActionReason('');
-        await refreshAll();
-        await reloadSettlementDetail(summaryDetail.orderId);
-      }
-    } finally {
-      setDetailActionLoading(false);
-    }
-  };
-
   const viewOrder = async (summary: CommissionOrderSummary) => {
     const res = await orderApi.fetchOrderById(summary.orderId);
     if (res.code === 0) setOrderDetail(res.data);
@@ -1335,7 +1274,7 @@ const Commission: React.FC<CommissionProps> = ({
     setPayoutConfirmAction({
       type: 'generate',
       title: '生成发放单',
-      message: `将按 ${payoutPeriod} 当前可发放提成生成发放单。待确认、已撤回和待冲销明细不会进入可发放金额，历史订单、客户等业务数据不会被改动。`,
+      message: `将按 ${payoutPeriod} 当前可发放提成生成发放单。待确认和已撤回明细不会进入可发放金额，历史订单、客户等业务数据不会被改动。`,
       confirmText: '生成发放单',
     });
   };
@@ -1347,7 +1286,7 @@ const Commission: React.FC<CommissionProps> = ({
       type: 'payOwner',
       ownerId,
       title: '确认此人已发',
-      message: `确认已完成 ${row ? formatOwnerDisplayName(row.ownerId, row.owner) : '该员工'} ${payoutPeriod} 的线下提成发放？系统会把该员工本月待发放提成标记为已发放，待确认、已撤回和待冲销明细不会变更。`,
+      message: `确认已完成 ${row ? formatOwnerDisplayName(row.ownerId, row.owner) : '该员工'} ${payoutPeriod} 的线下提成发放？系统会把该员工本月待发放提成标记为已发放，待确认和已撤回明细不会变更。`,
       confirmText: '确认此人已发',
     });
   };
@@ -1357,7 +1296,7 @@ const Commission: React.FC<CommissionProps> = ({
     setPayoutConfirmAction({
       type: 'payBatch',
       title: '确认本月已发放',
-      message: `确认已完成 ${payoutPeriod} 本月线下提成发放？系统只会把待发放金额 ${formatCurrency(monthlyPayoutSummary.pendingPayAmount)} 标记为已发放，待确认、已撤回和待冲销明细不会变更。`,
+      message: `确认已完成 ${payoutPeriod} 本月线下提成发放？系统只会把待发放金额 ${formatCurrency(monthlyPayoutSummary.pendingPayAmount)} 标记为已发放，待确认和已撤回明细不会变更。`,
       confirmText: '确认本月已发放',
     });
   };
@@ -1458,7 +1397,7 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const exportMonthlyStatement = () => {
-    const headers = ['月份', '员工', '部门', '订单数', '总实付金额', '应发提成', '待确认', '待发放', '已发放', '已撤回', '待冲销', '状态'];
+    const headers = ['月份', '员工', '部门', '订单数', '总实付金额', '应发提成', '待确认', '待发放', '已发放', '已撤回', '状态'];
     const rows = payoutRows.map((row) => [
       row.period,
       formatOwnerDisplayName(row.ownerId, row.owner),
@@ -1470,7 +1409,6 @@ const Commission: React.FC<CommissionProps> = ({
       row.pendingPayAmount,
       row.paidAmount,
       row.withdrawnAmount,
-      row.chargebackAmount,
       row.status,
     ]);
     const csv = [headers, ...rows].map((row) => row.map(escapeCsvValue).join(',')).join('\n');
@@ -1543,20 +1481,15 @@ const Commission: React.FC<CommissionProps> = ({
         .filter((commission) => commission.status === '已发放')
         .reduce((sum, commission) => sum + getDisplayCommissionAmount(commission, tierSnapshot), 0);
       const withdrawnAmount = commissions
-        .filter((commission) => commission.status === '已撤回')
+        .filter((commission) => ['已撤回', '待冲销', '已冲销'].includes(commission.status))
         .reduce((sum, commission) => sum + getDisplayCommissionAmount(commission, tierSnapshot), 0);
-      const chargebackAmount = commissions
-        .filter((commission) => commission.status === '待冲销')
-        .reduce((sum, commission) => sum + getDisplayCommissionAmount(commission, tierSnapshot), 0);
-      const status: MonthlyCommissionPayout['status'] = chargebackAmount > 0
-        ? '待冲销'
-        : pendingConfirmAmount > 0
-          ? '待确认'
-          : pendingPayAmount > 0
-            ? '待发放'
-            : paidAmount > 0
-              ? '已发放'
-              : '无应发';
+      const status: MonthlyCommissionPayout['status'] = pendingConfirmAmount > 0
+        ? '待确认'
+        : pendingPayAmount > 0
+          ? '待发放'
+          : paidAmount > 0
+            ? '已发放'
+            : '无应发';
       return {
         role,
         orderCount: new Set(commissions.map((commission) => commission.orderId)).size,
@@ -1568,9 +1501,9 @@ const Commission: React.FC<CommissionProps> = ({
         pendingConfirmAmount,
         pendingPayAmount,
         paidAmount,
-        exceptionAmount: chargebackAmount,
+        exceptionAmount: 0,
         withdrawnAmount,
-        chargebackAmount,
+        chargebackAmount: 0,
         totalAmount: pendingConfirmAmount + pendingPayAmount + paidAmount,
         status,
         isTiered,
@@ -1612,7 +1545,7 @@ const Commission: React.FC<CommissionProps> = ({
       { label: '待确认', value: summary.pendingConfirmAmount, color: '#d97706' },
       { label: '待发放', value: summary.pendingPayAmount, color: '#2563eb' },
       { label: '已发放', value: summary.paidAmount, color: '#16a34a' },
-      { label: '异常/撤回', value: summary.chargebackAmount + summary.withdrawnAmount, color: '#dc2626' },
+      { label: '已撤回', value: summary.withdrawnAmount, color: '#6b7280' },
     ];
     const metrics = (
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 0.8, mt: 1.1 }}>
@@ -2098,7 +2031,7 @@ const Commission: React.FC<CommissionProps> = ({
               <Chip
                 label={count}
                 size="small"
-                color={highlight && !selected ? (item.value === '待冲销' ? 'error' : 'warning') : 'default'}
+                color={highlight && !selected ? 'warning' : 'default'}
                 sx={{
                   ml: 1,
                   height: 22,
@@ -2537,12 +2470,10 @@ const Commission: React.FC<CommissionProps> = ({
 
   const renderSettlementDetailActions = () => {
     if (!summaryDetail) return null;
-    if (summaryDetail.sourceOrderDeleted || ['已撤回', '已冲销'].includes(summaryDetail.status)) {
+    if (summaryDetail.sourceOrderDeleted || summaryDetail.status === '已撤回') {
       const text = summaryDetail.sourceOrderDeleted
         ? '源订单已删除，仅保留分账明细和历史记录。'
-        : summaryDetail.status === '已冲销'
-          ? '冲销已完成，该订单分账进入只读留痕状态。'
-          : '提成已撤回，该订单分账进入只读留痕状态。';
+        : '提成已撤回，该订单分账进入只读留痕状态。';
       return (
         <Box sx={{ bgcolor: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5 }}>
           <Typography variant="body2" sx={{ color: '#64748b' }}>{text}</Typography>
@@ -2581,28 +2512,9 @@ const Commission: React.FC<CommissionProps> = ({
 
     if (summaryDetail.status === '已发放') {
       return (
-        <Stack spacing={1.25}>
-          <Typography variant="body2" sx={{ color: '#64748b' }}>提成已发放，需要先发起冲销，后续登记追回或抵扣结果。</Typography>
-          <TextField label="冲销原因" value={detailActionReason} onChange={(event) => setDetailActionReason(event.target.value)} size="small" placeholder="例如：线下调整后追回已发提成" fullWidth />
-          <Button color="error" variant="contained" onClick={startChargebackFromDetail} disabled={detailActionLoading || !detailActionReason.trim()}>发起冲销</Button>
-        </Stack>
-      );
-    }
-
-    if (summaryDetail.status === '待冲销') {
-      return (
-        <Stack spacing={1.25}>
-          <Typography variant="body2" sx={{ color: '#64748b' }}>登记线下追回或下月抵扣结果，完成后不再计入待冲销金额。</Typography>
-          <FormControl size="small" fullWidth>
-            <InputLabel>冲销方式</InputLabel>
-            <Select value={chargebackMethod} label="冲销方式" onChange={(event) => setChargebackMethod(event.target.value as CommissionChargebackMethod)}>
-              {CHARGEBACK_METHOD_OPTIONS.map((method) => <MenuItem key={method} value={method}>{method}</MenuItem>)}
-            </Select>
-          </FormControl>
-          <TextField label="冲销金额" type="number" value={chargebackAmount} onChange={(event) => setChargebackAmount(Number(event.target.value))} size="small" fullWidth />
-          <TextField label="处理说明" value={detailActionReason} onChange={(event) => setDetailActionReason(event.target.value)} size="small" placeholder="例如：已在 6 月提成中抵扣" fullWidth />
-          <Button color="success" variant="contained" onClick={completeChargebackFromDetail} disabled={detailActionLoading || !detailActionReason.trim() || chargebackAmount <= 0}>确认冲销完成</Button>
-        </Stack>
+        <Box sx={{ bgcolor: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5 }}>
+          <Typography variant="body2" sx={{ color: '#64748b' }}>提成已发放，第一版不支持系统内冲销，请财务线下处理。</Typography>
+        </Box>
       );
     }
 
@@ -2626,7 +2538,7 @@ const Commission: React.FC<CommissionProps> = ({
           </Button>
         )}
         {!hidePayoutFinanceActions && (
-          <Tooltip title="按当前月份可发放提成生成发放单，待确认、已撤回和待冲销明细不进入可发放金额">
+          <Tooltip title="按当前月份可发放提成生成发放单，待确认和已撤回明细不进入可发放金额">
             <Button variant="outlined" startIcon={<PaymentsIcon />} disabled={payoutActionLoading} onClick={generateMonthlyBatch}>生成发放单</Button>
           </Tooltip>
         )}
@@ -2652,7 +2564,6 @@ const Commission: React.FC<CommissionProps> = ({
           { label: '待发放', value: monthlyPayoutSummary.pendingPayAmount, color: '#d97706' },
           { label: '已发放', value: monthlyPayoutSummary.paidAmount, color: '#16a34a' },
           { label: '已撤回', value: monthlyPayoutSummary.withdrawnAmount, color: '#6b7280' },
-          { label: '待冲销', value: monthlyPayoutSummary.chargebackAmount, color: '#dc2626' },
         ].map((item) => (
           <Box key={item.label} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, px: 1.5, py: 1.25, bgcolor: '#fff' }}>
             <Typography variant="caption" sx={{ color: '#6b7280' }}>{item.label}</Typography>
@@ -2690,7 +2601,6 @@ const Commission: React.FC<CommissionProps> = ({
               <TableCell>待发放</TableCell>
               <TableCell>已发放</TableCell>
               <TableCell>已撤回</TableCell>
-              <TableCell>待冲销</TableCell>
               <TableCell>状态</TableCell>
               {!hidePayoutFinanceActions && <TableCell align="center">操作</TableCell>}
             </TableRow>
@@ -2701,9 +2611,7 @@ const Commission: React.FC<CommissionProps> = ({
               const expanded = expandedPayoutOwners.has(ownerKey);
               const actionDisabledReason = !row.ownerId
                 ? '无员工ID，需先在订单分账中分配员工'
-                : row.chargebackAmount > 0
-                  ? '存在待冲销明细，先由财务人工处理后再确认此人已发'
-                  : row.pendingPayAmount <= 0
+                : row.pendingPayAmount <= 0
                     ? '没有待发放金额'
                     : '';
               return (
@@ -2723,7 +2631,6 @@ const Commission: React.FC<CommissionProps> = ({
                     <TableCell sx={{ fontWeight: row.pendingPayAmount > 0 ? 700 : 400, color: row.pendingPayAmount > 0 ? '#d97706' : undefined }}>{formatCurrency(row.pendingPayAmount)}</TableCell>
                     <TableCell>{formatCurrency(row.paidAmount)}</TableCell>
                     <TableCell sx={{ color: row.withdrawnAmount > 0 ? '#6b7280' : undefined }}>{formatCurrency(row.withdrawnAmount)}</TableCell>
-                    <TableCell sx={{ color: row.chargebackAmount > 0 ? '#dc2626' : undefined }}>{formatCurrency(row.chargebackAmount)}</TableCell>
                     <TableCell><Chip label={row.status} size="small" color={getPayoutStatusColor(row.status)} /></TableCell>
                     {!hidePayoutFinanceActions && (
                       <TableCell align="center">
@@ -2738,7 +2645,7 @@ const Commission: React.FC<CommissionProps> = ({
                     )}
                   </TableRow>
                   <TableRow>
-                    <TableCell colSpan={hidePayoutFinanceActions ? 12 : 13} sx={{ p: 0, border: 0 }}>
+                    <TableCell colSpan={hidePayoutFinanceActions ? 11 : 12} sx={{ p: 0, border: 0 }}>
                       <Collapse in={expanded} timeout="auto" unmountOnExit>
                         <Box sx={{ px: { xs: 1.5, sm: 2.5 }, py: 1.5, bgcolor: '#f8fafc' }}>
                           <Stack spacing={1}>
@@ -2753,7 +2660,7 @@ const Commission: React.FC<CommissionProps> = ({
             })}
             {!payoutRows.length && (
               <TableRow>
-                <TableCell colSpan={hidePayoutFinanceActions ? 12 : 13} align="center" sx={{ py: 5, color: '#9ca3af' }}>
+                <TableCell colSpan={hidePayoutFinanceActions ? 11 : 12} align="center" sx={{ py: 5, color: '#9ca3af' }}>
                   {payoutLoading ? '加载中...' : '暂无员工提成月报数据'}
                 </TableCell>
               </TableRow>
@@ -2848,7 +2755,7 @@ const Commission: React.FC<CommissionProps> = ({
             <Box>
               <Typography variant="h5" sx={{ fontWeight: 700 }}>财务结算台</Typography>
               <Typography variant="body2" sx={{ color: '#6b7280', mt: 0.5 }}>
-                订单分账负责确认每笔提成，员工提成月报负责统计每个人本月应发、待确认、待发放、已撤回和待冲销金额。
+                订单分账负责确认每笔提成，员工提成月报负责统计每个人本月应发、待确认、待发放和已撤回金额。
               </Typography>
             </Box>
             {tabValue === 0 && (
@@ -2979,7 +2886,7 @@ const Commission: React.FC<CommissionProps> = ({
             <Stack spacing={2}>
               <Typography variant="body2" sx={{ color: '#374151', lineHeight: 1.8 }}>
                 {deleteSummary.sourceOrderDeleted
-                  ? `将清理 ${deleteSummary.orderNo} / ${deleteSummary.customerName} 的废弃分账记录。清理后只保留操作日志，已发放或冲销链路中的分账不会允许清理。`
+                  ? `将清理 ${deleteSummary.orderNo} / ${deleteSummary.customerName} 的废弃分账记录。清理后只保留操作日志，已发放后的分账不会允许清理。`
                   : `将删除 ${deleteSummary.orderNo} / ${deleteSummary.customerName} 的全部待确认分账记录。删除后，该订单会重新出现在“新建订单分账”可选范围内。`}
               </Typography>
               <TextField
@@ -3046,7 +2953,7 @@ const Commission: React.FC<CommissionProps> = ({
                     { label: '实付金额', value: formatCurrency(summaryDetail.orderAmount), color: '#0f172a' },
                     { label: '分账总额', value: formatCurrency(summaryDetail.totalCommissionAmount), color: '#d97706' },
                     { label: '提成角色', value: `${summaryDetail.commissions.length} 个`, color: '#2563eb' },
-                    { label: '撤回/冲销', value: `${summaryDetail.exceptionCount} 条`, color: summaryDetail.exceptionCount ? '#dc2626' : '#64748b' },
+                    { label: '已撤回', value: `${summaryDetail.exceptionCount} 条`, color: summaryDetail.exceptionCount ? '#64748b' : '#64748b' },
                   ].map((item) => (
                     <Box
                       key={item.label}
