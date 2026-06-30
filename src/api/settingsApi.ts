@@ -339,6 +339,37 @@ async function fetchUsers(filters?: UserFilters): Promise<ApiResponse<User[]>> {
   return createSuccessResponse(users);
 }
 
+async function fetchAssignableUsers(filters?: UserFilters): Promise<ApiResponse<User[]>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<User[]>('/settings/assignable-users');
+    if (response.code !== 0) return response;
+    let users = response.data;
+    const employmentStatus = filters?.employmentStatus || 'active';
+
+    if (filters?.search) {
+      const q = filters.search.toLowerCase();
+      users = users.filter((u) => (
+        u.name.toLowerCase().includes(q)
+        || u.email.toLowerCase().includes(q)
+        || normalizeAccount(u.account).includes(q)
+        || normalizeAccount(u.phone).includes(q)
+      ));
+    }
+    if (filters?.role) users = users.filter((u) => u.role === filters.role);
+    if (filters?.isActive !== undefined) users = users.filter((u) => u.isActive === filters.isActive);
+    if (employmentStatus !== 'all') {
+      users = users.filter((u) => (u.employmentStatus || 'active') === employmentStatus);
+    }
+    return createSuccessResponse(users);
+  }
+
+  return fetchUsers({
+    ...filters,
+    isActive: filters?.isActive ?? true,
+    employmentStatus: filters?.employmentStatus || 'active',
+  });
+}
+
 async function createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'passwordHash' | 'passwordSalt' | 'passwordUpdatedAt'> & { password?: string }): Promise<ApiResponse<User | null>> {
   if (shouldUseBackendApi()) {
     return backendRequest<User | null>('/settings/users', {
@@ -811,6 +842,7 @@ export const settingsApi = {
   fetchOrganizationProfile,
   updateOrganizationProfile,
   fetchUsers,
+  fetchAssignableUsers,
   createUser,
   updateUser,
   leaveUser,

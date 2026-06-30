@@ -576,7 +576,7 @@ const Commission: React.FC<CommissionProps> = ({
     const [rolesRes, plansRes, usersRes, departmentsRes] = await Promise.all([
       commissionRuleApi.getCommissionRoleConfigs(),
       commissionRuleApi.getCommissionPayoutPlans(),
-      settingsApi.fetchUsers({ isActive: true }),
+      settingsApi.fetchAssignableUsers(),
       departmentApi.getDepartments({ isActive: true }),
     ]);
     if (rolesRes.code === 0) setCommissionRoleConfigs(rolesRes.data);

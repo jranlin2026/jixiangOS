@@ -18,11 +18,7 @@ import type { Product } from '../types/product';
 import type { ApiResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import {
-  DELIVERY_STAGES_899,
-  DELIVERY_STAGES_COURSE,
-  STORAGE_KEYS,
-} from '../shared/utils/constants';
+import { STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 
 const STATUS_ALL: DeliveryOverallStatus = '全部';
@@ -36,7 +32,6 @@ const STATUS_COMPLETED: Exclude<DeliveryOverallStatus, '全部'> = '已完成';
 const TASK_PENDING: DeliveryTaskStatus = '待开始';
 const TASK_DOING: DeliveryTaskStatus = '进行中';
 const TASK_DONE: DeliveryTaskStatus = '已完成';
-const TASK_SKIPPED: DeliveryTaskStatus = '已跳过';
 
 const STATUS_OPTIONS: DeliveryOverallStatus[] = [
   STATUS_ALL,
@@ -52,30 +47,6 @@ type DeliveryStepTemplate = {
   title: string;
   description: string;
   isOptional?: boolean;
-};
-
-const AGENT_TEMPLATE: DeliveryStepTemplate[] = [
-  { title: '资料收集', description: '收集品牌名、公司名、域名、logo 等交付资料。' },
-  { title: '直播调试', description: '按客户直播需求完成直播环境调试。', isOptional: true },
-  { title: '代理后台交付', description: '开通代理后台，记录后台地址、账号和初始交付说明。' },
-  { title: '教程发送', description: '发送使用教程、培训资料和后续维护入口。' },
-];
-
-const OEM_TEMPLATE: DeliveryStepTemplate[] = [
-  { title: '资料收集', description: '收集品牌名、公司名、域名、logo 等交付资料。' },
-  { title: '直播调试', description: '按客户直播需求完成直播环境调试。', isOptional: true },
-  { title: '贴牌后台交付', description: '交付贴牌后台，记录后台地址、账号和配置说明。' },
-  { title: '教程发送', description: '发送使用教程、培训资料和后续维护入口。' },
-  { title: '域名申请备案', description: '推进域名申请、解析和备案资料准备。' },
-  { title: '贴牌的需求配置', description: '按销售承诺和客户确认需求完成贴牌配置。' },
-  { title: '小程序申请备案', description: '推进小程序主体、备案和审核资料准备。' },
-  { title: '贴牌小程序的配置', description: '完成贴牌小程序配置、联调和交付说明。' },
-];
-
-const PRODUCT_TEMPLATE_MAP: Record<string, DeliveryStepTemplate[]> = {
-  代理: AGENT_TEMPLATE,
-  贴牌: OEM_TEMPLATE,
-  合伙人: OEM_TEMPLATE,
 };
 
 const PRODUCT_NAME_ALIASES: Record<string, string> = {
@@ -99,24 +70,40 @@ function normalizeProductLevel(productType?: string): ProductLevel {
   return PRODUCT_NAME_ALIASES[productType] || productType;
 }
 
-function getFallbackStages(productType: ProductLevel): string[] {
-  if (productType === '课程') return [...DELIVERY_STAGES_COURSE] as string[];
-  return [...DELIVERY_STAGES_899] as string[];
+function getProductDeliveryStages(productType?: ProductLevel | string, productId?: string, productName?: string): string[] {
+  const normalizedType = normalizeProductLevel(productType);
+  const products = getStorageData<Product[]>(STORAGE_KEYS.PRODUCTS) || [];
+  const productByName = productName ? products.find((item) => item.name === productName) : undefined;
+  const matchingProductByName = productByName && normalizeProductLevel(productByName.level) === normalizedType ? productByName : undefined;
+  const product = (productId ? products.find((item) => item.id === productId) : undefined)
+    || matchingProductByName
+    || products.find((item) => normalizeProductLevel(item.level) === normalizedType && item.isActive)
+    || products.find((item) => normalizeProductLevel(item.level) === normalizedType);
+  return (product?.deliveryStages || []).map((stage) => stage.trim()).filter(Boolean);
 }
 
-function getTemplateByProductType(productType: ProductLevel): DeliveryStepTemplate[] {
-  const normalizedType = normalizeProductLevel(productType);
-  const template = PRODUCT_TEMPLATE_MAP[normalizedType];
-  if (template) return template.map((item) => ({ ...item }));
-
-  const products = getStorageData<Product[]>(STORAGE_KEYS.PRODUCTS) || [];
-  const product = products.find((item) => normalizeProductLevel(item.level) === normalizedType && item.isActive)
-    || products.find((item) => normalizeProductLevel(item.level) === normalizedType);
-  const stages = product?.deliveryStages?.length ? product.deliveryStages : getFallbackStages(normalizedType);
+function toTemplate(stages: string[]): DeliveryStepTemplate[] {
   return stages.map((stage) => ({
     title: stage,
     description: `${stage}任务`,
   }));
+}
+
+function getTemplateByProduct(productType?: ProductLevel | string, productId?: string, productName?: string): DeliveryStepTemplate[] {
+  return toTemplate(getProductDeliveryStages(productType, productId, productName));
+}
+
+function getTemplateByOrder(order: Order): DeliveryStepTemplate[] {
+  return getTemplateByProduct(order.productLevel, order.productId, order.productName);
+}
+
+function getTemplateByDelivery(delivery: Delivery, order?: Order): DeliveryStepTemplate[] {
+  const productType = normalizeProductLevel(delivery.productType || order?.productLevel);
+  return getTemplateByProduct(productType, order?.productId, delivery.productName || order?.productName);
+}
+
+function getTemplateByProductType(productType: ProductLevel): DeliveryStepTemplate[] {
+  return getTemplateByProduct(productType);
 }
 
 function getStagesByProductType(productType: ProductLevel): string[] {
@@ -145,7 +132,7 @@ function toCreatableOrderSummary(order: Order): DeliveryCreatableOrderSummary {
 function buildDeliveryFromOrder(order: Order): Delivery {
   const now = new Date().toISOString();
   const productType = normalizeProductLevel(order.productLevel);
-  const stages = getStagesByProductType(productType);
+  const stages = getTemplateByOrder(order).map((item) => item.title);
   return {
     id: createId('delivery'),
     orderId: order.id,
@@ -183,7 +170,7 @@ function readCustomersById(): Map<string, Customer> {
 }
 
 function isTerminalTask(task: DeliveryTask): boolean {
-  return task.status === TASK_DONE || task.status === TASK_SKIPPED || Boolean(task.completedAt);
+  return task.status === TASK_DONE || Boolean(task.completedAt);
 }
 
 function getProgressPercent(tasks: DeliveryTask[]): number {
@@ -199,8 +186,8 @@ function makeStageTasks(delivery: Delivery, template: DeliveryStepTemplate[], cu
 
   const tasks = template.map((step, index) => {
     const existing = taskByTitle.get(step.title);
-    const existingStatus = existing?.status;
-    const status: DeliveryTaskStatus | string = existingStatus === TASK_DONE || existingStatus === TASK_SKIPPED
+    const existingStatus = existing?.status === '已跳过' ? TASK_DONE : existing?.status;
+    const status: DeliveryTaskStatus | string = existingStatus === TASK_DONE
       ? existingStatus
       : index < fallbackCurrentIndex
         ? TASK_DONE
@@ -217,8 +204,6 @@ function makeStageTasks(delivery: Delivery, template: DeliveryStepTemplate[], cu
       dueDate: existing?.dueDate,
       completedAt: status === TASK_DONE ? existing?.completedAt || delivery.updatedAt : existing?.completedAt,
       completedBy: existing?.completedBy,
-      skippedAt: status === TASK_SKIPPED ? existing?.skippedAt || delivery.updatedAt : existing?.skippedAt,
-      skipReason: existing?.skipReason,
       isOptional: step.isOptional || existing?.isOptional,
       attachments: existing?.attachments || [],
       resultFields: existing?.resultFields || {},
@@ -320,11 +305,11 @@ function normalizeDelivery(delivery: Delivery, ordersById: Map<string, Order>, c
   const order = ordersById.get(delivery.orderId);
   const customer = customersById.get(delivery.customerId || order?.customerId || '');
   const productType = normalizeProductLevel(delivery.productType || order?.productLevel);
-  const template = getTemplateByProductType(productType);
+  const template = getTemplateByDelivery(delivery, order);
   const stages = template.map((item) => item.title);
   const existingCurrentStage = stages.includes(delivery.currentStage) ? delivery.currentStage : undefined;
   const firstOpenStage = delivery.tasks?.find((task) => !isTerminalTask(task) && stages.includes(task.title))?.title;
-  const currentStage = existingCurrentStage || firstOpenStage || stages[0];
+  const currentStage = existingCurrentStage || firstOpenStage || stages[0] || '';
   const tasks = makeStageTasks({ ...delivery, productType, currentStage }, template, currentStage);
   const progressPercent = getProgressPercent(tasks);
   const snapshot = delivery.snapshot || buildSnapshot({ ...delivery, productType }, order, customer);
@@ -365,6 +350,7 @@ function readDeliveries(): Delivery[] {
   const customersById = readCustomersById();
   return (getStorageData<Delivery[]>(STORAGE_KEYS.DELIVERIES) || [])
     .map((delivery) => normalizeDelivery(delivery, ordersById, customersById))
+    .filter((delivery) => delivery.stages.length > 0)
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
@@ -459,6 +445,7 @@ async function fetchCreatableDeliveryOrders(search = ''): Promise<ApiResponse<De
   const orders = (getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [])
     .filter((order) => order.status === '已确认')
     .filter((order) => order.status !== '已取消')
+    .filter((order) => getTemplateByOrder(order).length > 0)
     .filter((order) => !deliveryOrderIds.has(order.id) && (!order.deliveryId || !deliveryIds.has(order.deliveryId)))
     .filter((order) => {
       if (!keyword) return true;
@@ -532,6 +519,70 @@ async function advanceDeliveryStage(id: string, targetStage: string): Promise<Ap
   return updateDeliveryTask(id, currentTask.id, { status: TASK_DONE });
 }
 
+async function revertDeliveryStage(id: string): Promise<ApiResponse<Delivery | null>> {
+  ensureInit();
+  await delay(160);
+  const deliveries = getStorageData<Delivery[]>(STORAGE_KEYS.DELIVERIES) || [];
+  const deliveryIndex = deliveries.findIndex((item) => item.id === id);
+  if (deliveryIndex === -1) return createSuccessResponse(null);
+
+  const normalized = readDeliveries().find((item) => item.id === id);
+  if (!normalized) return createSuccessResponse(null);
+  if (normalized.approvalStatus === '已确认' || normalized.status === STATUS_COMPLETED) {
+    return createErrorResponse('交付已确认完成，不能返回上一步');
+  }
+
+  const currentIndex = normalized.tasks.findIndex((task) => task.status === TASK_DOING);
+  if (currentIndex <= 0) {
+    return createErrorResponse(currentIndex === 0 ? '当前已经是第一步' : '当前没有可回退的步骤');
+  }
+
+  const now = new Date().toISOString();
+  const previousIndex = currentIndex - 1;
+  const nextTasks = normalized.tasks.map((task, index) => {
+    if (index < previousIndex) return { ...task };
+    if (index === previousIndex) {
+      return {
+        ...task,
+        status: TASK_DOING,
+        completedAt: undefined,
+        completedBy: undefined,
+        skippedAt: undefined,
+        skipReason: undefined,
+        updatedAt: now,
+      };
+    }
+    return {
+      ...task,
+      status: TASK_PENDING,
+      completedAt: undefined,
+      completedBy: undefined,
+      skippedAt: undefined,
+      skipReason: undefined,
+      updatedAt: now,
+    };
+  });
+
+  const nextDelivery: Delivery = {
+    ...deliveries[deliveryIndex],
+    ...normalized,
+    tasks: nextTasks,
+    currentStage: normalized.stages[previousIndex],
+    progressPercent: getProgressPercent(nextTasks),
+    approvalStatus: '未提交',
+    actualCompletedAt: undefined,
+    supervisorConfirmedBy: undefined,
+    supervisorConfirmedAt: undefined,
+    supervisorNotes: undefined,
+    updatedAt: now,
+  };
+  nextDelivery.status = deriveStatus(nextDelivery, nextDelivery.stages, nextTasks);
+
+  deliveries[deliveryIndex] = nextDelivery;
+  setStorageData(STORAGE_KEYS.DELIVERIES, deliveries);
+  return createSuccessResponse(normalizeDelivery(nextDelivery, readOrdersById(), readCustomersById()));
+}
+
 async function updateDelivery(id: string, data: Partial<Delivery>): Promise<ApiResponse<Delivery | null>> {
   ensureInit();
   await delay(160);
@@ -557,6 +608,9 @@ async function createDeliveryFromOrder(orderId: string): Promise<ApiResponse<Del
   const order = orders[orderIndex];
   if (order.status !== '已确认') return createErrorResponse('只有已确认订单可以新建交付单');
   if (String(order.status) === '已取消') return createErrorResponse('已取消订单不能新建交付单');
+  if (getTemplateByOrder(order).length === 0) {
+    return createErrorResponse('该订单产品未配置交付阶段，无需创建交付单');
+  }
 
   const delivery = buildDeliveryFromOrder(order);
   deliveries.unshift(delivery);
@@ -587,8 +641,8 @@ async function updateDeliveryTask(deliveryId: string, taskId: string, data: Part
   const now = new Date().toISOString();
   const currentTask = normalized.tasks[taskIndex];
   const nextStatus = data.status || currentTask.status;
-  if (nextStatus === TASK_SKIPPED && !currentTask.isOptional) {
-    return createErrorResponse('只有可选步骤可以跳过');
+  if (nextStatus === '已跳过') {
+    return createErrorResponse('当前版本不支持跳过交付步骤');
   }
 
   const nextTasks = normalized.tasks.map((task, index) => {
@@ -597,7 +651,8 @@ async function updateDeliveryTask(deliveryId: string, taskId: string, data: Part
       ...task,
       ...data,
       completedAt: nextStatus === TASK_DONE ? data.completedAt || task.completedAt || now : data.completedAt,
-      skippedAt: nextStatus === TASK_SKIPPED ? data.skippedAt || task.skippedAt || now : data.skippedAt,
+      skippedAt: undefined,
+      skipReason: undefined,
       updatedAt: now,
       status: nextStatus,
     };
@@ -760,6 +815,7 @@ export const deliveryApi = {
   fetchCreatableDeliveryOrders,
   fetchDeliveryStats,
   advanceDeliveryStage,
+  revertDeliveryStage,
   updateDelivery,
   createDeliveryFromOrder,
   updateDeliveryTask,

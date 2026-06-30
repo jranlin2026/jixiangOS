@@ -115,8 +115,8 @@ const LeadBulkImportDialog: React.FC<LeadBulkImportDialogProps> = ({ open, onClo
           {error && <Alert severity="error">{error}</Alert>}
           {result && (
             <Alert severity={result.failureCount ? 'warning' : 'success'}>
-              {LABEL.summaryPrefix}{LABEL.success} {result.successCount} \u6761\uff0c
-              {LABEL.failure} {result.failureCount} \u6761
+              {LABEL.summaryPrefix}{LABEL.success} {result.successCount} 条，
+              {LABEL.failure} {result.failureCount} 条
             </Alert>
           )}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
@@ -137,7 +137,7 @@ const LeadBulkImportDialog: React.FC<LeadBulkImportDialogProps> = ({ open, onClo
             </Button>
             {file && (
               <Typography variant="body2" sx={{ color: '#4b5563', minWidth: 0, overflowWrap: 'anywhere' }}>
-                {LABEL.fileReady}\uff1a{file.name}
+                {LABEL.fileReady}：{file.name}
               </Typography>
             )}
           </Box>

@@ -1,4 +1,5 @@
 import type { ID, Timestamp } from './common';
+import type { DataScopeDomain } from './role';
 
 export type RecoveryOrderStatus = '待审核' | '退回修改' | '审核驳回' | '待分账' | '已分账';
 export type RecoveryOrderSettlementStatus = '未分账' | '待处理' | '待确认' | '待发放' | '已撤回';
@@ -79,6 +80,7 @@ export interface RecoveryOrderFilters {
   settlementStatus?: RecoveryOrderSettlementStatus | '全部';
   ownerId?: ID;
   includeDeleted?: boolean;
+  scopeDomain?: Extract<DataScopeDomain, 'recoveryOrders' | 'recoveryOrderApplications'>;
   page?: number;
   pageSize?: number;
 }

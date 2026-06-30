@@ -28,13 +28,13 @@ import {
   Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import SettingsIcon from '@mui/icons-material/Settings';
-import SkipNextIcon from '@mui/icons-material/SkipNext';
 import SupervisorAccountIcon from '@mui/icons-material/SupervisorAccount';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import VisibilityIcon from '@mui/icons-material/Visibility';
@@ -193,13 +193,12 @@ function getPriorityColor(priority?: DeliveryPriority): 'default' | 'success' | 
 
 function getTaskColor(task: DeliveryTask): 'default' | 'success' | 'warning' | 'info' {
   if (task.status === '已完成') return 'success';
-  if (task.status === '已跳过') return 'warning';
   if (task.status === '进行中') return 'info';
   return 'default';
 }
 
 function getTerminalTaskCount(delivery: Delivery) {
-  return delivery.tasks.filter((task) => task.status === '已完成' || task.status === '已跳过' || task.completedAt).length;
+  return delivery.tasks.filter((task) => task.status === '已完成' || task.completedAt).length;
 }
 
 function compactDraft(draft?: TaskDraft) {
@@ -398,14 +397,11 @@ const DeliveryPage: React.FC = () => {
     await loadWorkbench(filters);
   };
 
-  const handleSkipTask = async (task: DeliveryTask) => {
+  const handleReturnPreviousTask = async () => {
     if (!selectedDelivery) return;
-    const res = await deliveryApi.updateDeliveryTask(selectedDelivery.id, task.id, {
-      status: '已跳过',
-      skipReason: taskDrafts[task.id]?.note || '客户无此项需求',
-    });
+    const res = await deliveryApi.revertDeliveryStage(selectedDelivery.id);
     if (res.code !== 0) {
-      await alert(res.message || '步骤跳过失败');
+      await alert(res.message || '返回上一步失败');
       return;
     }
     setSelectedDelivery(res.data);
@@ -775,7 +771,8 @@ const DeliveryPage: React.FC = () => {
       <Stack spacing={1.5}>
         {delivery.tasks.map((task, index) => {
           const isCurrent = task.status === '进行中';
-          const isTerminal = task.status === '已完成' || task.status === '已跳过' || Boolean(task.completedAt);
+          const isTerminal = task.status === '已完成' || Boolean(task.completedAt);
+          const canReturnPrevious = isCurrent && index > 0 && delivery.approvalStatus !== '已确认' && delivery.status !== '已完成';
           return (
             <Box
               key={task.id}
@@ -798,18 +795,19 @@ const DeliveryPage: React.FC = () => {
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
                     <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{task.title}</Typography>
                     <Chip size="small" label={task.status} color={getTaskColor(task)} />
-                    {task.isOptional && <Chip size="small" label="按需" variant="outlined" />}
                   </Box>
                   <Box sx={{ display: 'flex', gap: 1 }}>
                     <Button component="label" size="small" variant="outlined" startIcon={<UploadFileIcon />} disabled={!isCurrent && !isTerminal}>
                       上传
                       <input hidden type="file" multiple onChange={(event) => handleUploadAttachment(task, event)} />
                     </Button>
-                    {task.isOptional && isCurrent && (
-                      <Button size="small" variant="outlined" color="warning" startIcon={<SkipNextIcon />} onClick={() => handleSkipTask(task)}>跳过</Button>
-                    )}
                     {isCurrent && (
-                      <Button size="small" variant="contained" startIcon={<CheckCircleIcon />} onClick={() => handleCompleteTask(task)}>完成一步</Button>
+                      <>
+                        {canReturnPrevious && (
+                          <Button size="small" variant="outlined" startIcon={<ArrowBackIcon />} onClick={handleReturnPreviousTask}>返回上一步</Button>
+                        )}
+                        <Button size="small" variant="contained" startIcon={<CheckCircleIcon />} onClick={() => handleCompleteTask(task)}>完成一步</Button>
+                      </>
                     )}
                   </Box>
                 </Box>

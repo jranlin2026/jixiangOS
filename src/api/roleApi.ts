@@ -14,10 +14,20 @@ function ensureInit(): void {
   ensureOrganizationConfigData();
 }
 
+function cacheRoles(roles: Role[]): void {
+  setStorageData(STORAGE_KEYS.ROLES, roles);
+}
+
+function mergeCachedRole(role: Role): void {
+  const roles = getStorageData<Role[]>(STORAGE_KEYS.ROLES) || [];
+  cacheRoles([role, ...roles.filter((item) => item.id !== role.id)]);
+}
+
 async function getRoles(filters?: RoleFilters): Promise<ApiResponse<Role[]>> {
   if (shouldUseBackendApi()) {
     const response = await backendRequest<Role[]>('/settings/roles');
     if (response.code !== 0) return response;
+    cacheRoles(response.data);
     let roles = response.data;
 
     if (filters?.search) {
@@ -57,10 +67,12 @@ async function getRoleById(id: string): Promise<ApiResponse<Role | null>> {
 
 async function createRole(data: Omit<Role, 'id' | 'createdAt' | 'updatedAt'>): Promise<ApiResponse<Role>> {
   if (shouldUseBackendApi()) {
-    return backendRequest<Role>('/settings/roles', {
+    const response = await backendRequest<Role>('/settings/roles', {
       method: 'POST',
       body: JSON.stringify(data),
     });
+    if (response.code === 0 && response.data) mergeCachedRole(response.data);
+    return response;
   }
 
   ensureInit();
@@ -81,10 +93,12 @@ async function createRole(data: Omit<Role, 'id' | 'createdAt' | 'updatedAt'>): P
 
 async function updateRole(id: string, data: Partial<Role>): Promise<ApiResponse<Role | null>> {
   if (shouldUseBackendApi()) {
-    return backendRequest<Role | null>(`/settings/roles/${encodeURIComponent(id)}`, {
+    const response = await backendRequest<Role | null>(`/settings/roles/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
+    if (response.code === 0 && response.data) mergeCachedRole(response.data);
+    return response;
   }
 
   ensureInit();

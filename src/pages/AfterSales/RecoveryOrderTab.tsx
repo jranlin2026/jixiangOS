@@ -139,6 +139,9 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const currentUser = useAuthStore((state) => state.currentUser);
   const canCreate = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE);
   const canReview = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW);
+  const canEdit = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT);
+  const canDelete = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, 'delete');
+  const canViewHistory = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY);
   const canForceDeleteSettled = isSuperAdmin(currentUser);
   const [rows, setRows] = useState<RecoveryOrder[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -174,22 +177,21 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
     resetViewConfig,
   } = useTableViewConfig(`after_sales_recovery_${mode}_table_view`, tableColumns, defaultVisibleColumns);
 
-  const visibleOwnerId = canReview ? undefined : currentUser?.id;
   const filters = useMemo<RecoveryOrderFilters>(() => ({
     search,
     status: '全部',
     statuses: mode === 'review'
       ? RECOVERY_REVIEW_STATUSES
       : RECOVERY_LIST_STATUSES,
-    ownerId: visibleOwnerId,
+    scopeDomain: mode === 'review' ? 'recoveryOrderApplications' : 'recoveryOrders',
     page: page + 1,
     pageSize: rowsPerPage,
-  }), [mode, page, rowsPerPage, search, visibleOwnerId]);
+  }), [mode, page, rowsPerPage, search]);
 
   const load = useCallback(async () => {
     const [listRes, usersRes, productsRes] = await Promise.all([
       recoveryOrderApi.fetchRecoveryOrders(filters),
-      settingsApi.fetchUsers({ employmentStatus: 'active' }),
+      settingsApi.fetchAssignableUsers(),
       productApi.getProducts(),
     ]);
     if (listRes.code === 0) {
@@ -198,7 +200,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
     }
     if (usersRes.code === 0) setUsers(usersRes.data);
     if (productsRes.code === 0) setProducts([...productsRes.data].sort((a, b) => a.sortOrder - b.sortOrder));
-  }, [filters, visibleOwnerId]);
+  }, [filters]);
 
   useEffect(() => {
     load();
@@ -468,9 +470,17 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                 sx={{ minWidth: 148, flexWrap: 'nowrap', whiteSpace: 'nowrap' }}
               >
                 <Tooltip title="修改并重新提交">
-                  <IconButton aria-label="修改并重新提交" size="small" sx={{ color: '#0f766e' }} onClick={() => openEdit(row)}>
-                    <EditIcon fontSize="small" />
-                  </IconButton>
+                  <span>
+                    <IconButton
+                      aria-label="修改并重新提交"
+                      size="small"
+                      sx={{ color: canEdit ? '#0f766e' : '#cbd5e1' }}
+                      disabled={!canEdit}
+                      onClick={() => openEdit(row)}
+                    >
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                  </span>
                 </Tooltip>
               </Stack>
             );
@@ -486,7 +496,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                 <span>
                   <IconButton
                     size="small"
-                    sx={{ color: shell.red }}
+                    sx={{ color: canDelete ? shell.red : '#cbd5e1' }}
+                    disabled={!canDelete}
                     onClick={() => handleDelete(row)}
                   >
                     <DeleteOutlineIcon fontSize="small" />
@@ -531,8 +542,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
               <span>
                 <IconButton
                   size="small"
-                  sx={{ color: isRecoveryOrderLocked(row) ? '#cbd5e1' : '#0f766e' }}
-                  disabled={isRecoveryOrderLocked(row)}
+                  sx={{ color: isRecoveryOrderLocked(row) || !canEdit ? '#cbd5e1' : '#0f766e' }}
+                  disabled={isRecoveryOrderLocked(row) || !canEdit}
                   onClick={() => openEdit(row)}
                 >
                   <EditIcon fontSize="small" />
@@ -540,16 +551,23 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
               </span>
             </Tooltip>
             <Tooltip title="历史">
-              <IconButton size="small" sx={{ color: shell.green }} onClick={() => setHistoryOrder(row)}>
-                <HistoryIcon fontSize="small" />
-              </IconButton>
+              <span>
+                <IconButton
+                  size="small"
+                  sx={{ color: canViewHistory ? shell.green : '#cbd5e1' }}
+                  disabled={!canViewHistory}
+                  onClick={() => setHistoryOrder(row)}
+                >
+                  <HistoryIcon fontSize="small" />
+                </IconButton>
+              </span>
             </Tooltip>
             <Tooltip title="删除">
               <span>
                 <IconButton
                   size="small"
-                  sx={{ color: isRecoveryOrderLocked(row) && !canForceDeleteSettled ? '#cbd5e1' : shell.red }}
-                  disabled={isRecoveryOrderLocked(row) && !canForceDeleteSettled}
+                  sx={{ color: !canDelete || (isRecoveryOrderLocked(row) && !canForceDeleteSettled) ? '#cbd5e1' : shell.red }}
+                  disabled={!canDelete || (isRecoveryOrderLocked(row) && !canForceDeleteSettled)}
                   onClick={() => handleDelete(row)}
                 >
                   <DeleteOutlineIcon fontSize="small" />
@@ -658,13 +676,13 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
         </Alert>
       )}
 
-      <Box sx={{ display: 'flex', gap: 2, my: 3, flexWrap: 'wrap' }}>
+      <Box sx={{ display: 'flex', gap: 2, mt: 0.5, mb: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
         <TextField
           size="small"
           placeholder="搜索客户/订单号"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          sx={{ minWidth: 240 }}
+          sx={{ width: 240 }}
         />
       </Box>
 

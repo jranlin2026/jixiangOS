@@ -3,13 +3,13 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { getAllowedCorsOrigins, getApiListenHost, validateRuntimeConfig } from './config/runtime';
 import { prisma, checkDatabaseConnection } from './db/client';
-import { createRequireAuth, bearerToken } from './middleware/auth';
+import { createRequireAuth, bearerToken, type AuthenticatedRequest } from './middleware/auth';
 import { createLoginRateLimiter } from './middleware/loginRateLimit';
 import { createAuthService } from './services/authService';
 import { createAiConfigService } from './services/aiConfigService';
 import { createSettingsService } from './services/settingsService';
 import { createStorageService } from './services/storageService';
-import { PERMISSION_KEYS } from '../src/shared/utils/permissions';
+import { PERMISSION_KEYS, hasPermission } from '../src/shared/utils/permissions';
 import {
   buildCustomerIntelPrompt,
   searchPublicCustomerIntel,
@@ -33,6 +33,26 @@ const requireAiConfigAccess = createRequireAuth(authService, PERMISSION_KEYS.SET
 const requireDataMaintenanceAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE);
 const requireAiChatAccess = createRequireAuth(authService, PERMISSION_KEYS.AI_CHAT);
 const requireCustomerAiCardAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_AI_CARD);
+const assignableUsersPermissions = [
+  PERMISSION_KEYS.FINANCE_SETTLEMENT,
+  PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT,
+  PERMISSION_KEYS.FINANCE_PAYOUT,
+  PERMISSION_KEYS.FINANCE_RULES,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+];
+const requireAssignableUsersAccess = [
+  createRequireAuth(authService),
+  (req: AuthenticatedRequest, res: express.Response, next: express.NextFunction) => {
+    const user = req.currentUser;
+    if (!user || !assignableUsersPermissions.some((permission) => hasPermission(user, permission))) {
+      res.status(403).json({ code: 403, data: null, message: 'Forbidden' });
+      return;
+    }
+    next();
+  },
+];
 const loginRateLimiter = createLoginRateLimiter();
 
 app.set('trust proxy', 1);
@@ -154,6 +174,10 @@ app.post('/api/auth/logout', async (req, res) => {
 
 app.get('/api/settings/users', requireOrganizationAccess, async (_req, res) => {
   res.json(await settingsService.listUsers());
+});
+
+app.get('/api/settings/assignable-users', requireAssignableUsersAccess, async (_req: express.Request, res: express.Response) => {
+  res.json(await settingsService.listAssignableUsers());
 });
 
 app.post('/api/settings/users/leave-customer-count', requireOrganizationAccess, async (req, res) => {

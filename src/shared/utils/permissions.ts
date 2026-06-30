@@ -1,6 +1,7 @@
 import type { Permission, Role } from '../../types/role';
 import type { AuthenticatedUser } from '../../types/auth';
 import type { User } from '../../types/settings';
+import { STORAGE_KEYS } from './constants';
 import { normalizeUserRoleName } from './roles';
 
 export const CAPABILITY_KEYS = {
@@ -46,11 +47,14 @@ export const PERMISSION_KEYS = {
   DELIVERY_STAGE_CONFIG: '交付/交付阶段配置',
 
   AFTER_SALES: '售后服务',
-  AFTER_SALES_REFUND: '售后服务/售后挽回订单',
+  AFTER_SALES_REFUND: '售后服务/售后挽回订单列表',
   AFTER_SALES_TICKETS: '售后服务/售后工单',
-  AFTER_SALES_RECOVERY: '售后服务/售后挽回订单',
-  AFTER_SALES_RECOVERY_CREATE: '售后服务/售后挽回订单/新建挽回订单',
-  AFTER_SALES_RECOVERY_REVIEW: '售后服务/售后挽回订单/审核挽回订单',
+  AFTER_SALES_RECOVERY: '售后服务/售后挽回订单列表',
+  AFTER_SALES_RECOVERY_REVIEW: '售后服务/售后挽回订单审核操作',
+  AFTER_SALES_RECOVERY_CREATE: '售后服务/新增售后挽回订单',
+  AFTER_SALES_RECOVERY_EDIT: '售后服务/编辑售后挽回订单',
+  AFTER_SALES_RECOVERY_DELETE: '售后服务/删除售后挽回订单',
+  AFTER_SALES_RECOVERY_HISTORY: '售后服务/售后挽回订单修改记录',
 
   FINANCE: '财务中心',
   FINANCE_MY_COMMISSION: '财务中心/我的提成',
@@ -172,16 +176,25 @@ const PERMISSION_GRANT_TREE: Record<string, string[]> = {
 
   [PERMISSION_KEYS.AFTER_SALES]: [
     PERMISSION_KEYS.AFTER_SALES_RECOVERY,
-    PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
     PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT,
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE,
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY,
   ],
   [PERMISSION_KEYS.AFTER_SALES_TICKETS]: [PERMISSION_KEYS.AFTER_SALES_TICKETS],
-  [PERMISSION_KEYS.AFTER_SALES_RECOVERY]: [
-    PERMISSION_KEYS.AFTER_SALES_RECOVERY,
-    PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
-  ],
+  [PERMISSION_KEYS.AFTER_SALES_RECOVERY]: [PERMISSION_KEYS.AFTER_SALES_RECOVERY],
   [PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE]: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE],
+  [PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT]: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT],
+  [PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE]: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE],
+  [PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY]: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY],
   [PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW]: [
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY,
+  ],
+  ['售后服务/售后挽回订单']: [PERMISSION_KEYS.AFTER_SALES_RECOVERY],
+  ['售后服务/售后挽回订单/新建挽回订单']: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE],
+  ['售后服务/售后挽回订单/审核挽回订单']: [
     PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
     PERMISSION_KEYS.AFTER_SALES_RECOVERY,
   ],
@@ -244,10 +257,14 @@ const PERMISSION_GRANTS_BY_NORMALIZED = new Map<string, string[]>(
 const WRITE_ACTION_PERMISSION_KEYS = [
   PERMISSION_KEYS.ORDER_CREATE,
   PERMISSION_KEYS.ORDER_EDIT,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
 ];
 
 const DELETE_ACTION_PERMISSION_KEYS = [
   PERMISSION_KEYS.ORDER_DELETE,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE,
 ];
 
 const ROLE_CODE_BY_USER_ROLE: Record<string, string> = {
@@ -272,6 +289,10 @@ const ROLE_CODE_BY_USER_ROLE: Record<string, string> = {
 
 export function isSuperAdmin(user?: Pick<AuthenticatedUser, 'role' | 'roleId' | 'permissions'> | null): boolean {
   if (!user) return false;
+  const liveRole = getLiveRoleForAuthenticatedUser(user);
+  if (liveRole) {
+    return liveRole.code === 'super_admin' || roleHasPermission(liveRole, ALL_PERMISSION_KEY, 'admin');
+  }
   const roleId = normalizePermissionKey(String(user.roleId || '')).toLowerCase();
   const roleName = normalizePermissionKey(String(user.role || '')).toLowerCase();
   if (roleId.includes('super-admin') || roleId.includes('super_admin')) return true;
@@ -290,6 +311,22 @@ export function getUserRole(user: Pick<User, 'role' | 'roleId'>, roles: Role[]):
       || normalizePermissionKey(item.code).toLowerCase() === normalizedCode
     )
   ));
+}
+
+function readLiveRoles(): Role[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.ROLES);
+    return raw ? (JSON.parse(raw) as Role[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function getLiveRoleForAuthenticatedUser(user: Pick<AuthenticatedUser, 'role' | 'roleId'>): Role | undefined {
+  const roles = readLiveRoles();
+  if (!roles.length) return undefined;
+  return getUserRole({ role: user.role, roleId: user.roleId }, roles);
 }
 
 export function roleHasPermission(role: Role | undefined, permissionKey: string, action = 'read'): boolean {
@@ -426,6 +463,8 @@ export function hasPermission(
 ): boolean {
   if (!user?.isActive) return false;
   if (normalizePermissionKey(permissionKey) === PERMISSION_KEYS.HOME) return true;
+  const liveRole = getLiveRoleForAuthenticatedUser(user);
+  if (liveRole) return roleHasPermission(liveRole, permissionKey, action);
   if (isSuperAdmin(user)) return true;
 
   const requestedKeys = expandPermissionGrants(permissionKey);

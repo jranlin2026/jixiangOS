@@ -172,41 +172,11 @@ export const REFUND_STATUS = {
 
 export type RefundStatus = (typeof REFUND_STATUS)[keyof typeof REFUND_STATUS];
 
-/** 交付流程阶段 — 899产品 */
-export const DELIVERY_STAGES_899 = [
-  '合同签订',
-  '需求确认',
-  '系统部署',
-  '培训交付',
-  '验收完成',
-] as const;
-
-/** 交付流程阶段 — 课程产品 */
-export const DELIVERY_STAGES_COURSE = [
-  '合同签订',
-  '课程安排',
-  '授课进行',
-  '培训完成',
-  '验收完成',
-] as const;
-
-/** 交付流程阶段 — 代理产品 */
-export const DELIVERY_STAGES_AGENT = [
-  '合同签订',
-  '代理授权',
-  '系统开通',
-  '培训完成',
-  '运营支持',
-] as const;
-
-/** 交付流程阶段 — 贴牌产品 */
-export const DELIVERY_STAGES_OEM = [
-  '合同签订',
-  '品牌定制',
-  '系统部署',
-  '测试验收',
-  '上线运营',
-] as const;
+/** 交付流程阶段默认不预设，交付步骤完全由产品配置决定 */
+export const DELIVERY_STAGES_899 = [] as const;
+export const DELIVERY_STAGES_COURSE = [] as const;
+export const DELIVERY_STAGES_AGENT = [] as const;
+export const DELIVERY_STAGES_OEM = [] as const;
 
 export type DeliveryStage899 = (typeof DELIVERY_STAGES_899)[number];
 export type DeliveryStageAgent = (typeof DELIVERY_STAGES_AGENT)[number];
@@ -632,9 +602,9 @@ export const PAYMENT_METHODS = [
 
 /** 预设产品列表 */
 export const PRODUCT_LIST = [
-  { id: 'prod-001', name: '899智能体', level: '899' as const, price: 899, originalPrice: 1299, description: '基础AI智能体，适合个人和小团队', features: ['AI对话', '知识库', '基础分析'], deliveryStages: [...DELIVERY_STAGES_899], isActive: true, sortOrder: 1 },
-  { id: 'prod-002', name: '2980课程', level: '课程' as const, price: 2980, originalPrice: 3980, description: 'AI运营实战课程，系统学习AI应用', features: ['在线课程', '实操指导', '社群答疑'], deliveryStages: [...DELIVERY_STAGES_COURSE], isActive: true, sortOrder: 2 },
-  { id: 'prod-003', name: '9800代理', level: '代理' as const, price: 9800, originalPrice: 12800, description: '区域代理授权，享受代理分销权益', features: ['代理授权', '系统开通', '培训支持', '运营指导'], deliveryStages: [...DELIVERY_STAGES_AGENT], isActive: true, sortOrder: 3 },
-  { id: 'prod-004', name: '29800贴牌', level: '贴牌' as const, price: 29800, originalPrice: 39800, description: '品牌定制版，打造专属AI品牌', features: ['品牌定制', '独立部署', '技术支持', '持续升级'], deliveryStages: [...DELIVERY_STAGES_OEM], isActive: true, sortOrder: 4 },
-  { id: 'prod-005', name: '59800合伙人', level: '合伙人' as const, price: 59800, originalPrice: 79800, description: '战略合伙人，深度合作共享收益', features: ['战略合伙', '利益共享', '优先支持', '定制开发'], deliveryStages: [...DELIVERY_STAGES_899], isActive: true, sortOrder: 5 },
+  { id: 'prod-001', name: '899智能体', level: '899' as const, price: 899, originalPrice: 1299, description: '基础AI智能体，适合个人和小团队', features: ['AI对话', '知识库', '基础分析'], deliveryStages: [], isActive: true, sortOrder: 1 },
+  { id: 'prod-002', name: '2980课程', level: '课程' as const, price: 2980, originalPrice: 3980, description: 'AI运营实战课程，系统学习AI应用', features: ['在线课程', '实操指导', '社群答疑'], deliveryStages: [], isActive: true, sortOrder: 2 },
+  { id: 'prod-003', name: '9800代理', level: '代理' as const, price: 9800, originalPrice: 12800, description: '区域代理授权，享受代理分销权益', features: ['代理授权', '系统开通', '培训支持', '运营指导'], deliveryStages: [], isActive: true, sortOrder: 3 },
+  { id: 'prod-004', name: '29800贴牌', level: '贴牌' as const, price: 29800, originalPrice: 39800, description: '品牌定制版，打造专属AI品牌', features: ['品牌定制', '独立部署', '技术支持', '持续升级'], deliveryStages: [], isActive: true, sortOrder: 4 },
+  { id: 'prod-005', name: '59800合伙人', level: '合伙人' as const, price: 59800, originalPrice: 79800, description: '战略合伙人，深度合作共享收益', features: ['战略合伙', '利益共享', '优先支持', '定制开发'], deliveryStages: [], isActive: true, sortOrder: 5 },
 ];

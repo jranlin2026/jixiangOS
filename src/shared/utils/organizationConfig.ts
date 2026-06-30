@@ -9,7 +9,14 @@ import { getStorageData, setStorageData } from '../../api/mock/storage';
 
 const now = '2026-06-01T00:00:00.000Z';
 const ORGANIZATION_SCHEMA_VERSION = 5;
-const DATA_SCOPE_DOMAINS: DataScopeDomain[] = ['leads', 'customers', 'orders', 'orderApplications'];
+const DATA_SCOPE_DOMAINS: DataScopeDomain[] = [
+  'leads',
+  'customers',
+  'orders',
+  'orderApplications',
+  'recoveryOrders',
+  'recoveryOrderApplications',
+];
 const DATA_SCOPE_LEVELS: DataScopeLevel[] = ['self', 'department', 'all'];
 
 export const DEFAULT_ORGANIZATION_PROFILE: OrganizationProfile = {
@@ -217,26 +224,49 @@ function isDataScopeLevel(value: unknown): value is DataScopeLevel {
   return DATA_SCOPE_LEVELS.includes(value as DataScopeLevel);
 }
 
+function buildDataScopes(
+  leads: DataScopeLevel,
+  customers: DataScopeLevel,
+  orders: DataScopeLevel,
+  orderApplications: DataScopeLevel,
+  recoveryOrders: DataScopeLevel = orders,
+  recoveryOrderApplications: DataScopeLevel = orderApplications,
+): Required<Record<DataScopeDomain, DataScopeLevel>> {
+  return { leads, customers, orders, orderApplications, recoveryOrders, recoveryOrderApplications };
+}
+
 function defaultRoleDataScopes(code?: string): Required<Record<DataScopeDomain, DataScopeLevel>> {
   const normalizedCode = normalizeCode(code);
   if (normalizedCode === 'super_admin') {
-    return { leads: 'all', customers: 'all', orders: 'all', orderApplications: 'all' };
+    return buildDataScopes('all', 'all', 'all', 'all');
   }
   if (normalizedCode === 'sales_manager') {
-    return { leads: 'department', customers: 'department', orders: 'department', orderApplications: 'department' };
+    return buildDataScopes('department', 'department', 'department', 'department');
   }
   if (normalizedCode === 'finance_specialist') {
-    return { leads: 'self', customers: 'self', orders: 'all', orderApplications: 'all' };
+    return buildDataScopes('self', 'self', 'all', 'all');
   }
-  return { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' };
+  return buildDataScopes('self', 'self', 'self', 'self');
 }
 
-export function normalizeRoleDataScopes(role: Pick<Role, 'code'> & { dataScopes?: RoleDataScopes }): Required<Record<DataScopeDomain, DataScopeLevel>> {
+function hasRecoveryReviewPermission(role: { permissions?: Role['permissions'] }): boolean {
+  return Boolean(role.permissions?.some((permission) => [
+    PERMISSION_KEYS.AFTER_SALES,
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+    '售后服务/售后挽回订单/审核挽回订单',
+  ].includes(permission.module)));
+}
+
+export function normalizeRoleDataScopes(role: Pick<Role, 'code'> & { dataScopes?: RoleDataScopes; permissions?: Role['permissions'] }): Required<Record<DataScopeDomain, DataScopeLevel>> {
   const defaults = defaultRoleDataScopes(role.code);
   if (normalizeCode(role.code) === 'super_admin') return defaults;
   return DATA_SCOPE_DOMAINS.reduce((acc, domain) => {
     const value = role.dataScopes?.[domain];
-    acc[domain] = isDataScopeLevel(value) ? value : defaults[domain];
+    acc[domain] = isDataScopeLevel(value)
+      ? value
+      : domain === 'recoveryOrderApplications' && hasRecoveryReviewPermission(role)
+        ? 'all'
+        : defaults[domain];
     return acc;
   }, { ...defaults });
 }

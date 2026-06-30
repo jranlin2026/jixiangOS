@@ -8,7 +8,13 @@ export interface Permission {
 
 export type DataScopeLevel = 'self' | 'department' | 'all';
 
-export type DataScopeDomain = 'leads' | 'customers' | 'orders' | 'orderApplications';
+export type DataScopeDomain =
+  | 'leads'
+  | 'customers'
+  | 'orders'
+  | 'orderApplications'
+  | 'recoveryOrders'
+  | 'recoveryOrderApplications';
 
 export type RoleDataScopes = Partial<Record<DataScopeDomain, DataScopeLevel>>;
 

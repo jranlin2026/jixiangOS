@@ -20,6 +20,7 @@ import { ensureOrganizationConfigData, migrateUsersWithOrganization } from '../s
 import {
   backendRequest,
   clearBackendToken,
+  flushBackendStorageWrites,
   shouldUseBackendApi,
   writeBackendToken,
 } from './backendClient';
@@ -104,6 +105,7 @@ function cacheBackendAuthenticatedUser(user: AuthenticatedUser, token?: string, 
 
 async function login(payload: LoginPayload): Promise<ApiResponse<AuthenticatedUser | null>> {
   if (shouldUseBackendApi()) {
+    await flushBackendStorageWrites();
     const response = await backendRequest<{ token: string; user: AuthenticatedUser }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -164,8 +166,10 @@ async function getCurrentUser(): Promise<ApiResponse<AuthenticatedUser | null>> 
 
 async function logout(): Promise<ApiResponse<boolean>> {
   if (shouldUseBackendApi()) {
+    await flushBackendStorageWrites();
     const response = await backendRequest<boolean>('/auth/logout', { method: 'POST' });
     clearBackendToken();
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
     return response;
   }
 

@@ -14,8 +14,9 @@ import { mockProductLevelConfigs } from './data/productLevels';
 import { mockRefunds } from './data/refunds';
 import { mockCommissionRules } from './data/commissionRules';
 import { mockTags } from './data/tags';
-import { initializeStorage, isStorageInitialized, markStorageInitialized } from './storage';
+import { getStorageData, initializeStorage, isStorageInitialized, markStorageInitialized, setStorageData } from './storage';
 import { DEFAULT_LEAD_FLOW_CONFIG, DEFAULT_LEAD_SOURCE_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, DEFAULT_ORDER_TYPE_CONFIGS, STORAGE_KEYS } from '../../shared/utils/constants';
+import type { Product } from '../../types/product';
 
 export { mockLeads } from './data/leads';
 export { mockCustomers } from './data/customers';
@@ -33,9 +34,41 @@ export { mockRefunds } from './data/refunds';
 export { mockCommissionRules } from './data/commissionRules';
 export { mockTags } from './data/tags';
 
+const LEGACY_DEFAULT_DELIVERY_STAGES: Record<string, string[]> = {
+  'prod-001': ['合同签订', '需求确认', '系统部署', '培训交付', '验收完成'],
+  'prod-002': ['合同签订', '课程安排', '授课进行', '培训完成', '验收完成'],
+  'prod-003': ['合同签订', '代理授权', '系统开通', '培训完成', '运营支持'],
+  'prod-004': ['合同签订', '品牌定制', '系统部署', '测试验收', '上线运营'],
+  'prod-005': ['合同签订', '需求确认', '系统部署', '培训交付', '验收完成'],
+};
+
+function isSameStringList(left: string[] = [], right: string[] = []): boolean {
+  return left.length === right.length && left.every((item, index) => item === right[index]);
+}
+
+function migrateLegacyDefaultProductDeliveryStages(): void {
+  const products = getStorageData<Product[]>(STORAGE_KEYS.PRODUCTS);
+  if (!products?.length) return;
+
+  let changed = false;
+  const nextProducts = products.map((product) => {
+    const legacyStages = LEGACY_DEFAULT_DELIVERY_STAGES[product.id];
+    if (legacyStages && isSameStringList(product.deliveryStages || [], legacyStages)) {
+      changed = true;
+      return { ...product, deliveryStages: [] };
+    }
+    return product;
+  });
+
+  if (changed) setStorageData(STORAGE_KEYS.PRODUCTS, nextProducts);
+}
+
 /** 初始化所有 Mock 数据到 localStorage */
 export function initializeMockData(): void {
-  if (isStorageInitialized()) return;
+  if (isStorageInitialized()) {
+    migrateLegacyDefaultProductDeliveryStages();
+    return;
+  }
 
   initializeStorage(STORAGE_KEYS.LEADS, mockLeads);
   initializeStorage(STORAGE_KEYS.CUSTOMERS, mockCustomers);
@@ -68,6 +101,7 @@ export function initializeMockData(): void {
   initializeStorage(STORAGE_KEYS.TAGS, mockTags);
 
   markStorageInitialized();
+  migrateLegacyDefaultProductDeliveryStages();
 }
 
 /** 重置 Mock 数据 */

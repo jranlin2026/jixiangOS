@@ -12,26 +12,12 @@ import { productApi } from '../../api';
 import type { Product, ProductLevelConfig } from '../../types/product';
 import type { ProductLevel } from '../../types/common';
 import { formatCurrency } from '../../shared/utils/formatters';
-import {
-  DELIVERY_STAGES_899,
-  DELIVERY_STAGES_AGENT,
-  DELIVERY_STAGES_COURSE,
-  DELIVERY_STAGES_OEM,
-  getProductLevelTagSx,
-} from '../../shared/utils/constants';
+import { getProductLevelTagSx } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 
 type ProductForm = Omit<Product, 'id' | 'createdAt' | 'updatedAt'>;
 type ProductLevelConfigForm = Omit<ProductLevelConfig, 'id' | 'createdAt' | 'updatedAt'>;
-
-const levelStages: Record<string, string[]> = {
-  '899': [...DELIVERY_STAGES_899],
-  '课程': [...DELIVERY_STAGES_COURSE],
-  '代理': [...DELIVERY_STAGES_AGENT],
-  '贴牌': [...DELIVERY_STAGES_OEM],
-  '合伙人': [...DELIVERY_STAGES_899],
-};
 
 const emptyForm: ProductForm = {
   name: '',
@@ -40,7 +26,7 @@ const emptyForm: ProductForm = {
   originalPrice: 1299,
   description: '',
   features: [],
-  deliveryStages: [...DELIVERY_STAGES_899],
+  deliveryStages: [],
   isActive: true,
   sortOrder: 100,
 };
@@ -137,11 +123,7 @@ const ProductConfigPage: React.FC = () => {
   const activeLevelConfigs = levelConfigs.filter((level) => level.isActive);
 
   const handleLevelChange = (level: ProductLevel) => {
-    const nextStages = levelStages[level];
-    setForm((prev) => ({ ...prev, level, deliveryStages: nextStages || prev.deliveryStages }));
-    if (nextStages) {
-      setStagesText(joinLines(nextStages));
-    }
+    setForm((prev) => ({ ...prev, level }));
   };
 
   const handleSubmit = async () => {

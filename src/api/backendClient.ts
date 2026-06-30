@@ -76,6 +76,7 @@ export async function backendRequest<T>(path: string, init: RequestInit = {}): P
 let storageHydratedAt = 0;
 let storageHydrationPromise: Promise<void> | null = null;
 const pendingStorageWriteKeys = new Set<string>();
+const pendingStorageWritePromises = new Set<Promise<void>>();
 const storageWriteProtectedUntil = new Map<string, number>();
 const STORAGE_WRITE_PROTECTION_MS = 5000;
 
@@ -119,29 +120,35 @@ export function persistBackendStorageValue(key: string, value: unknown): void {
   if (!shouldUseBackendApi()) return;
   pendingStorageWriteKeys.add(key);
   protectStorageKeyFromHydration(key);
-  void backendRequest(`/storage/${encodeURIComponent(key)}`, {
+  const writePromise = backendRequest(`/storage/${encodeURIComponent(key)}`, {
     method: 'PUT',
     body: JSON.stringify({ value }),
   })
+    .then(() => undefined)
     .catch(() => undefined)
     .finally(() => {
       pendingStorageWriteKeys.delete(key);
       protectStorageKeyFromHydration(key);
+      pendingStorageWritePromises.delete(writePromise);
     });
+  pendingStorageWritePromises.add(writePromise);
 }
 
 export function removeBackendStorageValue(key: string): void {
   if (!shouldUseBackendApi()) return;
   pendingStorageWriteKeys.add(key);
   protectStorageKeyFromHydration(key);
-  void backendRequest(`/storage/${encodeURIComponent(key)}`, {
+  const writePromise = backendRequest(`/storage/${encodeURIComponent(key)}`, {
     method: 'DELETE',
   })
+    .then(() => undefined)
     .catch(() => undefined)
     .finally(() => {
       pendingStorageWriteKeys.delete(key);
       protectStorageKeyFromHydration(key);
+      pendingStorageWritePromises.delete(writePromise);
     });
+  pendingStorageWritePromises.add(writePromise);
 }
 
 export function clearBackendStorageValues(): void {
@@ -149,4 +156,11 @@ export function clearBackendStorageValues(): void {
   void backendRequest('/storage', {
     method: 'DELETE',
   }).catch(() => undefined);
+}
+
+export async function flushBackendStorageWrites(): Promise<void> {
+  if (!shouldUseBackendApi()) return;
+  const writes = Array.from(pendingStorageWritePromises);
+  if (!writes.length) return;
+  await Promise.allSettled(writes);
 }

@@ -99,13 +99,15 @@ function seed(deliveries: Delivery[] = Array.from({ length: 12 }, (_, index) => 
   storage.clear();
   storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
   storage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify([
-    { id: 'prod-agent', name: '9800代理', level: '代理', price: 9800, deliveryStages: ['旧代理授权'], isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
-    { id: 'prod-oem', name: '29800贴牌', level: '贴牌', price: 29800, deliveryStages: ['旧贴牌部署'], isActive: true, sortOrder: 2, createdAt: now, updatedAt: now },
-    { id: 'prod-partner', name: '59800合伙人', level: '合伙人', price: 59800, deliveryStages: ['旧合伙人部署'], isActive: true, sortOrder: 3, createdAt: now, updatedAt: now },
+    { id: 'prod-agent', name: '9800代理', level: '代理', price: 9800, deliveryStages: agentStages, isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
+    { id: 'prod-oem', name: '29800贴牌', level: '贴牌', price: 29800, deliveryStages: oemStages, isActive: true, sortOrder: 2, createdAt: now, updatedAt: now },
+    { id: 'prod-partner', name: '59800合伙人', level: '合伙人', price: 59800, deliveryStages: ['合伙人开通'], isActive: true, sortOrder: 3, createdAt: now, updatedAt: now },
+    { id: 'prod-course-empty', name: '2980课程', level: '课程', price: 2980, deliveryStages: [], isActive: true, sortOrder: 4, createdAt: now, updatedAt: now },
   ]));
   storage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify([
     ...Array.from({ length: 12 }, (_, index) => makeOrder(index + 1, index % 3 === 0 ? '贴牌' : '代理')),
     makeOrder(99, '贴牌'),
+    { ...makeOrder(100, '课程'), id: 'order-100', orderNo: 'ORD-0100', productId: 'prod-course-empty', productName: '2980课程' },
   ]));
   storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([
     ...Array.from({ length: 12 }, (_, index) => makeCustomer(index + 1)),
@@ -134,13 +136,12 @@ const oemStagesRes = await deliveryApi.fetchDeliveryStagesByProductType('贴牌'
 assert.deepEqual(oemStagesRes.data, oemStages);
 
 const partnerStagesRes = await deliveryApi.fetchDeliveryStagesByProductType('合伙人');
-assert.deepEqual(partnerStagesRes.data, oemStages);
+assert.deepEqual(partnerStagesRes.data, ['合伙人开通']);
 
 const detailRes = await deliveryApi.fetchDeliveryById('delivery-01');
 assert.equal(detailRes.code, 0);
 assert.equal(detailRes.data?.tasks.length, agentStages.length);
 assert.equal(detailRes.data?.tasks[0].status, '进行中');
-assert.equal(detailRes.data?.tasks[1].isOptional, true);
 assert.equal(detailRes.data?.materialItems?.find((item) => item.key === 'companyName')?.status, '已提供');
 assert.equal(detailRes.data?.materialItems?.find((item) => item.key === 'domain')?.status, '缺失');
 
@@ -171,8 +172,14 @@ const skippedRes = await deliveryApi.updateDeliveryTask('delivery-01', completed
   status: '已跳过',
   skipReason: '客户无直播需求',
 });
-assert.equal(skippedRes.code, 0);
-assert.equal(skippedRes.data?.currentStage, '代理后台交付');
+assert.notEqual(skippedRes.code, 0);
+assert.match(skippedRes.message, /不支持跳过/);
+
+const completedOptionalRes = await deliveryApi.updateDeliveryTask('delivery-01', completedStepRes.data!.tasks[1].id, {
+  status: '已完成',
+});
+assert.equal(completedOptionalRes.code, 0);
+assert.equal(completedOptionalRes.data?.currentStage, '代理后台交付');
 
 const exceptionRes = await deliveryApi.addDeliveryException('delivery-01', {
   type: '客户不提供资料',
@@ -199,6 +206,28 @@ assert.equal(creatableRes.code, 0);
 assert.equal(creatableRes.data.length, 1);
 assert.equal(creatableRes.data[0].orderId, 'order-99');
 
+const noStageCreatableRes = await deliveryApi.fetchCreatableDeliveryOrders('ORD-0100');
+assert.equal(noStageCreatableRes.code, 0);
+assert.equal(noStageCreatableRes.data.length, 0);
+const noStageCreateRes = await deliveryApi.createDeliveryFromOrder('order-100');
+assert.notEqual(noStageCreateRes.code, 0);
+assert.match(noStageCreateRes.message, /未配置交付阶段/);
+
+seed([
+  makeDelivery(100, {
+    id: 'delivery-hidden-no-stage',
+    orderId: 'order-100',
+    orderNo: 'ORD-0100',
+    productType: '课程',
+    productName: '2980课程',
+    currentStage: '历史默认阶段',
+    stages: ['历史默认阶段'],
+  }),
+]);
+const hiddenNoStageRes = await deliveryApi.fetchDeliveries({ search: 'ORD-0100', page: 1, pageSize: 10, status: '全部' });
+assert.equal(hiddenNoStageRes.data.total, 0);
+
+seed();
 const createDeliveryRes = await deliveryApi.createDeliveryFromOrder('order-99');
 assert.equal(createDeliveryRes.code, 0);
 assert.equal(createDeliveryRes.data?.orderId, 'order-99');
@@ -228,8 +257,7 @@ for (const task of current.tasks) {
   const latest = (await deliveryApi.fetchDeliveryById('delivery-finish')).data!;
   const openTask = latest.tasks.find((item) => item.status === '进行中')!;
   const res = await deliveryApi.updateDeliveryTask('delivery-finish', openTask.id, {
-    status: openTask.isOptional ? '已跳过' : '已完成',
-    skipReason: openTask.isOptional ? '客户无直播需求' : undefined,
+    status: '已完成',
   });
   assert.equal(res.code, 0);
   current = res.data!;

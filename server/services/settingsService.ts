@@ -222,6 +222,17 @@ export function createSettingsService(prisma: SettingsPrisma) {
       return success(rows.map(mapPrismaUser));
     },
 
+    async listAssignableUsers() {
+      const rows = await prisma.user.findMany({
+        where: {
+          isActive: true,
+          employmentStatus: 'active',
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+      return success(rows.map(mapPrismaUser));
+    },
+
     async listRoles() {
       const rows = await prisma.role.findMany({ orderBy: { createdAt: 'asc' } });
       return success(rows.map(mapPrismaRole));

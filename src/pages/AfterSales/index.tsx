@@ -32,13 +32,10 @@ const AfterSales: React.FC = () => {
   const [viewSettingsSignal, setViewSettingsSignal] = React.useState(0);
   const requestedTab = getTab(searchParams.get('tab'));
   const canCreate = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE);
-  const canSeeAllAfterSalesTabs = isSuperAdmin(currentUser)
-    || ['超级管理员', '系统管理员', '管理员', 'Super Admin'].includes(String(currentUser?.role || ''));
+  const canSeeAllAfterSalesTabs = isSuperAdmin(currentUser);
   const visibleTabs = useMemo(() => AFTER_SALES_TABS.filter((tab) => (
     canSeeAllAfterSalesTabs
-    || hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES)
-    ||
-    tab.permissionKeys.some((permissionKey) => hasPermission(currentUser, permissionKey))
+    || tab.permissionKeys.some((permissionKey) => hasPermission(currentUser, permissionKey))
   )), [canSeeAllAfterSalesTabs, currentUser]);
   const activeTab = visibleTabs.some((tab) => tab.value === requestedTab)
     ? requestedTab

@@ -536,7 +536,7 @@ const Leads: React.FC = () => {
         )}
       </Box>
 
-      <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ mb: 3 }}>
+      <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ mb: 2, borderBottom: '1px solid #e5e7eb' }}>
         {canViewLeadList && <Tab label="线索列表" value={0} />}
         {canViewLeadIntake && <Tab label="入库情况" value={1} />}
       </Tabs>

@@ -256,7 +256,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         page: 1,
         pageSize: 500,
       }),
-      settingsApi.fetchUsers({ employmentStatus: 'active' }),
+      settingsApi.fetchAssignableUsers(),
       departmentApi.getDepartments(),
       commissionRuleApi.getCommissionRoleConfigs({ isActive: true }),
       commissionRuleApi.getCommissionPayoutPlans(),
