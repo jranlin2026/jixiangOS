@@ -94,13 +94,13 @@ type SettlementDetailRow = {
   isDefaultPreview?: boolean;
 };
 
-const STATUS_OPTIONS: Array<{ value: RecoverySettlementFilterStatus; label: string; color: string }> = [
-  { value: '全部', label: '全部', color: shell.blue },
-  { value: '待处理', label: '待处理', color: shell.amber },
-  { value: '待确认', label: '待确认', color: shell.blue },
-  { value: '待发放', label: '待发放', color: shell.green },
-  { value: '已发放', label: '已发放', color: shell.blue },
-  { value: '已撤回', label: '已撤回', color: shell.red },
+const STATUS_OPTIONS: Array<{ value: RecoverySettlementFilterStatus; label: string }> = [
+  { value: '全部', label: '全部' },
+  { value: '待处理', label: '待处理' },
+  { value: '待确认', label: '待确认' },
+  { value: '待发放', label: '待发放' },
+  { value: '已发放', label: '已发放' },
+  { value: '已撤回', label: '已撤回' },
 ];
 
 type RecoverySettlementColumnId =
@@ -155,12 +155,21 @@ function getSettlementStatus(order: RecoveryOrder): RecoveryOrderSettlementStatu
   return order.settlementStatus || (order.status === '已分账' ? '待发放' : order.status === '待分账' ? '待处理' : '未分账');
 }
 
-function getStatusChipSx(status: RecoveryOrderSettlementStatus) {
-  if (status === '待发放') return { bgcolor: '#ecfdf5', color: shell.green };
-  if (status === '待确认') return { bgcolor: '#eff6ff', color: shell.blue };
-  if (status === '待处理') return { bgcolor: '#fff7ed', color: shell.amber };
-  if (status === '已撤回') return { bgcolor: '#fff1f2', color: shell.red };
-  return { bgcolor: '#eef4fb', color: shell.muted };
+function getStatusChipColor(status: RecoveryOrderSettlementStatus | string): 'default' | 'primary' | 'success' | 'error' | 'warning' | 'info' {
+  if (status === '待处理') return 'warning';
+  if (status === '待确认') return 'info';
+  if (status === '待发放') return 'primary';
+  if (status === '已发放') return 'success';
+  if (status === '已撤回') return 'default';
+  return 'default';
+}
+
+function getStatusButtonColor(status: RecoverySettlementFilterStatus): 'primary' | 'warning' | 'info' | 'success' | 'inherit' {
+  if (status === '待处理') return 'warning';
+  if (status === '待确认') return 'info';
+  if (status === '待发放') return 'primary';
+  if (status === '已发放') return 'success';
+  return 'primary';
 }
 
 function isSourceRecoveryDeleted(order: RecoveryOrder): boolean {
@@ -624,7 +633,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       case 'recoveryUserName':
         return row.recoveryUserName;
       case 'status':
-        return <Chip size="small" label={settlementStatus} sx={{ ...getStatusChipSx(settlementStatus), fontWeight: 900 }} />;
+        return <Chip size="small" label={settlementStatus} color={getStatusChipColor(settlementStatus)} sx={{ fontWeight: 900 }} />;
       case 'auditedAt':
         return row.auditedAt ? formatDate(row.auditedAt, 'yyyy-MM-dd HH:mm') : '-';
       case 'actions':
@@ -681,7 +690,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                 key={option.value}
                 variant={active ? 'contained' : 'outlined'}
                 onClick={() => setStatus(option.value)}
-                color="primary"
+                color={getStatusButtonColor(option.value)}
                 sx={{
                   borderRadius: 1.5,
                   minWidth: 0,
@@ -792,7 +801,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                       <Typography variant="h6" sx={{ color: shell.ink, fontWeight: 900, letterSpacing: 0 }}>
                         {detailOrder.recoveryNo}
                       </Typography>
-                      <Chip label={getSettlementStatus(detailOrder)} size="small" sx={{ ...getStatusChipSx(getSettlementStatus(detailOrder)), fontWeight: 900 }} />
+                      <Chip label={getSettlementStatus(detailOrder)} size="small" color={getStatusChipColor(getSettlementStatus(detailOrder))} sx={{ fontWeight: 900 }} />
                       {isSourceRecoveryDeleted(detailOrder) && <Chip label="源挽回单已删除" size="small" />}
                     </Stack>
                     <Typography variant="body2" sx={{ color: shell.muted, overflowWrap: 'anywhere' }}>
@@ -905,11 +914,8 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                                   <Chip
                                     size="small"
                                     label={commission.status}
-                                    sx={{
-                                      bgcolor: commission.status === '待处理' ? '#fff7ed' : commission.status === '待确认' ? '#fff7ed' : commission.status === '待发放' ? '#e0f2fe' : '#ecfdf5',
-                                      color: commission.status === '待处理' ? shell.amber : commission.status === '待确认' ? shell.amber : commission.status === '待发放' ? '#0369a1' : shell.green,
-                                      fontWeight: 900,
-                                    }}
+                                    color={getStatusChipColor(commission.status)}
+                                    sx={{ fontWeight: 900 }}
                                   />
                                 </Box>
                               </Box>
@@ -1179,7 +1185,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                       <Typography variant="h6" sx={{ color: shell.ink, fontWeight: 900, letterSpacing: 0 }}>
                         {selected.recoveryNo}
                       </Typography>
-                      <Chip label={getSettlementStatus(selected)} size="small" sx={{ ...getStatusChipSx(getSettlementStatus(selected)), fontWeight: 900 }} />
+                      <Chip label={getSettlementStatus(selected)} size="small" color={getStatusChipColor(getSettlementStatus(selected))} sx={{ fontWeight: 900 }} />
                     </Stack>
                     <Typography variant="body2" sx={{ color: shell.muted, overflowWrap: 'anywhere' }}>
                       {selected.customerName} · 售后挽回 · {selected.createdAt ? formatDate(selected.createdAt, 'yyyy-MM-dd HH:mm:ss') : '-'}

@@ -9,12 +9,9 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
-  FormControl,
   IconButton,
-  InputLabel,
   MenuItem,
   Paper,
-  Select,
   Stack,
   Table,
   TableBody,
@@ -128,9 +125,10 @@ const RECOVERY_ORDER_COLUMNS: Array<TableViewColumnConfig & { id: RecoveryOrderC
 ];
 
 const DEFAULT_VISIBLE_COLUMNS = RECOVERY_ORDER_COLUMNS.map((column) => column.id);
+const RECOVERY_ORDER_LIST_COLUMNS = RECOVERY_ORDER_COLUMNS.filter((column) => column.id !== 'status');
+const DEFAULT_LIST_VISIBLE_COLUMNS = RECOVERY_ORDER_LIST_COLUMNS.map((column) => column.id);
 const RECOVERY_REVIEW_STATUSES: RecoveryOrderStatus[] = ['待审核', '退回修改'];
 const RECOVERY_LIST_STATUSES: RecoveryOrderStatus[] = ['待分账', '已分账'];
-const RECOVERY_LIST_STATUS_OPTIONS: Array<RecoveryOrderStatus | '全部'> = ['全部', ...RECOVERY_LIST_STATUSES];
 
 function isRecoveryOrderLocked(row: RecoveryOrder): boolean {
   return row.status === '已分账' || ['待确认', '待发放', '已撤回'].includes(row.settlementStatus || '未分账');
@@ -146,7 +144,6 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const [users, setUsers] = useState<User[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState<RecoveryOrderStatus | '全部'>('全部');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [total, setTotal] = useState(0);
@@ -164,6 +161,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const handledCreateSignalRef = React.useRef(createSignal);
   const handledViewSettingsSignalRef = React.useRef(viewSettingsSignal);
+  const tableColumns = mode === 'list' ? RECOVERY_ORDER_LIST_COLUMNS : RECOVERY_ORDER_COLUMNS;
+  const defaultVisibleColumns = mode === 'list' ? DEFAULT_LIST_VISIBLE_COLUMNS : DEFAULT_VISIBLE_COLUMNS;
 
   const {
     viewConfig,
@@ -173,21 +172,19 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
     reorderColumn,
     setFrozenColumnCount,
     resetViewConfig,
-  } = useTableViewConfig(`after_sales_recovery_${mode}_table_view`, RECOVERY_ORDER_COLUMNS, DEFAULT_VISIBLE_COLUMNS);
+  } = useTableViewConfig(`after_sales_recovery_${mode}_table_view`, tableColumns, defaultVisibleColumns);
 
   const visibleOwnerId = canReview ? undefined : currentUser?.id;
   const filters = useMemo<RecoveryOrderFilters>(() => ({
     search,
-    status: mode === 'list' && status !== '全部' ? status : '全部',
+    status: '全部',
     statuses: mode === 'review'
       ? RECOVERY_REVIEW_STATUSES
-      : mode === 'list' && status === '全部'
-        ? RECOVERY_LIST_STATUSES
-        : undefined,
+      : RECOVERY_LIST_STATUSES,
     ownerId: visibleOwnerId,
     page: page + 1,
     pageSize: rowsPerPage,
-  }), [mode, page, rowsPerPage, search, status, visibleOwnerId]);
+  }), [mode, page, rowsPerPage, search, visibleOwnerId]);
 
   const load = useCallback(async () => {
     const [listRes, usersRes, productsRes] = await Promise.all([
@@ -209,7 +206,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
 
   useEffect(() => {
     setPage(0);
-  }, [search, status]);
+  }, [search]);
 
   useEffect(() => {
     if (mode !== 'list' || createSignal <= 0) return;
@@ -669,16 +666,6 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
           onChange={(event) => setSearch(event.target.value)}
           sx={{ minWidth: 240 }}
         />
-        {mode === 'list' && (
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-            <InputLabel>状态</InputLabel>
-            <Select label="状态" value={status} onChange={(event) => setStatus(event.target.value as RecoveryOrderStatus | '全部')}>
-              {RECOVERY_LIST_STATUS_OPTIONS.map((item) => (
-                <MenuItem key={item} value={item}>{item}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        )}
       </Box>
 
       <TableContainer component={Paper} elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: '6px 6px 0 0' }}>
@@ -823,8 +810,9 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                 <Typography variant="h6" sx={{ fontWeight: 600 }}>{detailOrder.recoveryNo}</Typography>
                 <Typography variant="body2" sx={{ fontWeight: 600, color: '#374151' }}>{detailOrder.originalProduct}</Typography>
-                <Chip label={detailOrder.status} size="small" sx={{ ...getStatusSx(detailOrder.status), fontWeight: 700 }} />
-                <Chip label={detailOrder.settlementStatus || '未分账'} size="small" variant="outlined" />
+                {mode === 'review' && (
+                  <Chip label={detailOrder.status} size="small" sx={{ ...getStatusSx(detailOrder.status), fontWeight: 700 }} />
+                )}
               </Box>
             </DialogCloseTitle>
             <DialogContent dividers>
@@ -1097,7 +1085,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
         open={viewSettingsOpen}
         title={mode === 'review' ? '售后挽回审核台视图设置' : '售后挽回订单列表视图设置'}
         description="勾选后会显示在售后挽回列表中，设置会保存在当前浏览器。"
-        columns={RECOVERY_ORDER_COLUMNS}
+        columns={tableColumns}
         visibleColumnIds={visibleColumnIds}
         columnOrder={viewConfig.columnOrder}
         frozenColumnCount={viewConfig.frozenColumnCount}

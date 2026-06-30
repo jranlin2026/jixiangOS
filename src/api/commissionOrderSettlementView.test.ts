@@ -66,6 +66,8 @@ function baseCommission(overrides: Partial<Commission>): Commission {
     departmentId: 'dept-sales',
     paymentDate: '2026-05-20T10:00:00.000Z',
     status: zh.pendingConfirm,
+    commissionRuleId: 'rule-existing',
+    payoutPlanName: '标准提成方案',
     sourceType: '\u81ea\u52a8\u89c4\u5219',
     createdAt: now,
     updatedAt: now,
@@ -205,6 +207,28 @@ function seed() {
       createdAt: now,
       updatedAt: now,
     } as any,
+    {
+      id: 'order-e',
+      orderNo: 'ORD-E',
+      customerId: 'cust-e',
+      customerName: 'Customer E',
+      productLevel: zh.product,
+      orderType: zh.orderType,
+      amount: 199,
+      actualAmount: 199,
+      paymentMethod: zh.bankTransfer,
+      officialPaymentChannel: zh.officialChannel,
+      status: zh.confirmed,
+      refundStatus: zh.none,
+      owner: 'Sales A',
+      sourceType: zh.companyResource,
+      resourceOwnership: zh.companyResource,
+      dealScene: zh.orderType,
+      proofStatus: '\u5df2\u4e0a\u4f20',
+      payments: [{ id: 'pay-e', amount: 199, paidAt: '2026-06-28T10:00:00.000Z', method: zh.bankTransfer }],
+      createdAt: now,
+      updatedAt: now,
+    } as any,
   ];
   storage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
   storage.setItem(STORAGE_KEYS.COMMISSIONS, JSON.stringify([
@@ -212,6 +236,23 @@ function seed() {
     baseCommission({ id: 'comm-a-lead', role: zh.leadRole, owner: 'Lead A', ownerId: 'user-lead', department: '\u5e02\u573a\u90e8', departmentId: 'dept-market', commissionAmount: 30 }),
     baseCommission({ id: 'comm-b-sales', orderId: 'order-b', orderNo: 'ORD-B', customerName: 'Customer B', role: zh.salesRole, owner: 'Sales A', ownerId: 'user-sales', commissionAmount: 200, status: zh.pendingPay, paymentDate: '2026-05-25T10:00:00.000Z' }),
     baseCommission({ id: 'comm-b-success', orderId: 'order-b', orderNo: 'ORD-B', customerName: 'Customer B', role: zh.successRole, owner: zh.pendingAssign, ownerId: undefined, commissionAmount: 50, status: zh.pendingConfirm, paymentDate: '2026-05-25T10:00:00.000Z' }),
+    baseCommission({
+      id: 'comm-e-unmatched',
+      orderId: 'order-e',
+      orderNo: 'ORD-E',
+      customerName: 'Customer E',
+      role: zh.salesRole,
+      owner: 'Sales A',
+      ownerId: 'user-sales',
+      commissionAmount: 0,
+      performanceAmount: 199,
+      commissionRuleId: undefined,
+      payoutPlanName: undefined,
+      calculationNote: '\u8ba2\u5355\u5df2\u4ed8\u6b3e\uff0c\u4f46\u5f53\u524d\u89c4\u5219\u914d\u7f6e\u672a\u5339\u914d\u5230\u53ef\u7528\u63d0\u6210\u89c4\u5219',
+      auditReason: '\u89c4\u5219\u672a\u547d\u4e2d',
+      formulaText: '\u672a\u5339\u914d\u89c4\u5219\uff0c\u6682\u4e0d\u8ba1\u7b97\u91d1\u989d',
+      paymentDate: '2026-06-28T10:00:00.000Z',
+    }),
   ] satisfies Commission[]));
   storage.setItem(STORAGE_KEYS.COMMISSION_SETTLEMENT_BATCHES, JSON.stringify([]));
 }
@@ -239,9 +280,10 @@ assert.notEqual((await orderApi.fetchOrderById('order-a')).data, null);
 
 const summariesRes = await (commissionApi as any).fetchCommissionOrderSummaries({ pageSize: 20 });
 assert.equal(summariesRes.code, 0);
-assert.equal(summariesRes.data.items.length, 2);
+assert.equal(summariesRes.data.items.length, 3);
 const orderA = summariesRes.data.items.find((item: any) => item.orderId === 'order-a');
 const orderB = summariesRes.data.items.find((item: any) => item.orderId === 'order-b');
+const orderE = summariesRes.data.items.find((item: any) => item.orderId === 'order-e');
 assert.equal(orderA.status, '\u5f85\u786e\u8ba4');
 assert.equal(orderA.totalCommissionAmount, 130);
 assert.equal(orderA.resourceOwnership, zh.companyResource);
@@ -252,12 +294,18 @@ assert.equal(orderA.createdAt, now);
 assert.deepEqual(orderA.splitSummary.map((item: any) => `${item.role}:${item.amount}`).sort(), [`${zh.salesRole}:100`, `${zh.leadRole}:30`].sort());
 assert.equal(orderB.status, '\u5f85\u5904\u7406');
 assert.equal(orderB.pendingAssignCount, 1);
+assert.equal(orderE.status, '\u5f85\u5904\u7406');
+assert.equal(orderE.pendingAssignCount, 0);
+
+const confirmUnmatchedRes = await (commissionApi as any).confirmOrderCommissions('order-e', 'should be blocked');
+assert.notEqual(confirmUnmatchedRes.code, 0);
+assert.match(confirmUnmatchedRes.message || '', /\u672a\u5904\u7406|\u5904\u7406\u5206\u8d26/);
 
 const statusCountsRes = await (commissionApi as any).fetchCommissionOrderSummaryStatusCounts({ pageSize: 20 });
 assert.equal(statusCountsRes.code, 0);
 assert.deepEqual(statusCountsRes.data, {
-  '\u5168\u90e8': 2,
-  '\u5f85\u5904\u7406': 1,
+  '\u5168\u90e8': 3,
+  '\u5f85\u5904\u7406': 2,
   '\u5f85\u786e\u8ba4': 1,
   '\u5f85\u53d1\u653e': 0,
   '\u5df2\u53d1\u653e': 0,

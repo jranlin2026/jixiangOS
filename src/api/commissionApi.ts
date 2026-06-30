@@ -206,11 +206,41 @@ function isInactiveCommission(commission: Commission): boolean {
   return isWithdrawnCommission(commission) || isChargebackPendingCommission(commission) || isChargedBackCommission(commission);
 }
 
+function getCommissionIssueText(commission: Commission): string {
+  return [
+    commission.auditReason,
+    commission.frozenReason,
+    commission.calculationNote,
+    commission.formulaText,
+    commission.payoutPlanName,
+  ].filter(Boolean).join('；');
+}
+
+function isManualOrCustomCommission(commission: Commission): boolean {
+  const issueText = getCommissionIssueText(commission);
+  return Boolean(commission.isManualAdjusted)
+    || commission.sourceType === '人工新增'
+    || issueText.includes('自定义金额')
+    || issueText.includes('财务人工')
+    || issueText.includes('人工新增');
+}
+
+function hasResolvedCommissionBasis(commission: Commission): boolean {
+  return Boolean(
+    commission.payoutPlanId
+    || commission.payoutPlanName
+    || isManualOrCustomCommission(commission),
+  );
+}
+
 function isCommissionPendingHandling(commission: Commission): boolean {
-  const note = `${commission.auditReason || ''}${commission.frozenReason || ''}${commission.calculationNote || ''}`;
+  const note = getCommissionIssueText(commission);
+  const hasUnresolvedRuleText = ['未匹配', '未命中', '暂不计算', '缺少', '不可用'].some((keyword) => note.includes(keyword));
   return isPendingAssignment(commission)
     || Boolean(commission.frozenReason)
-    || note.includes('冻结');
+    || note.includes('冻结')
+    || !hasResolvedCommissionBasis(commission)
+    || ((Number(commission.commissionAmount) || 0) === 0 && hasUnresolvedRuleText);
 }
 
 function isPendingAssignment(commission: Commission): boolean {
@@ -889,6 +919,12 @@ async function confirmOrderCommissions(orderId: string, reason?: string): Promis
   const now = new Date().toISOString();
   const operator = getCurrentOperatorName('财务');
   const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
+  const currentOrderCommissions = commissions
+    .filter((commission) => commission.orderId === orderId)
+    .map((commission) => normalizeCommission(commission));
+  if (currentOrderCommissions.some((commission) => commission.status === '待确认' && isCommissionPendingHandling(commission))) {
+    return createErrorResponse('该订单分账仍有未处理项，请先处理分账后再确认');
+  }
   let changed = false;
   const confirmedCommissions: Commission[] = [];
   const next = commissions.map((commission) => {

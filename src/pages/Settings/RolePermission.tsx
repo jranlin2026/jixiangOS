@@ -67,10 +67,10 @@ const PERMISSION_TREE: PermissionNode[] = [
   {
     label: '客户',
     children: [
+      { label: '客户列表', key: PERMISSION_KEYS.CUSTOMER_LIST },
+      { label: '查看客户资料', key: PERMISSION_KEYS.CUSTOMER_DETAIL },
       { label: '新建客户', key: PERMISSION_KEYS.CUSTOMER_CREATE },
-      { label: '客户详情', key: PERMISSION_KEYS.CUSTOMER_DETAIL },
-      { label: '客户画像', key: PERMISSION_KEYS.CUSTOMER_PROFILE },
-      { label: 'AI名片', key: PERMISSION_KEYS.CUSTOMER_AI_CARD },
+      { label: '编辑客户', key: PERMISSION_KEYS.CUSTOMER_EDIT },
       { label: '新建客户订单', key: PERMISSION_KEYS.CUSTOMER_CREATE_ORDER },
       { label: '查看客户订单', key: PERMISSION_KEYS.CUSTOMER_VIEW_ORDERS },
     ],
@@ -101,9 +101,9 @@ const PERMISSION_TREE: PermissionNode[] = [
       {
         label: '售后挽回订单',
         children: [
-          { label: '查看挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY },
-          { label: '新建挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE },
-          { label: '审核挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW },
+          { label: '售后挽回订单列表', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY },
+          { label: '新建售后挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE },
+          { label: '售后挽回订单审核台', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW },
         ],
       },
     ],
@@ -114,9 +114,9 @@ const PERMISSION_TREE: PermissionNode[] = [
       { label: '我的提成', key: PERMISSION_KEYS.FINANCE_MY_COMMISSION },
       { label: '订单分账', key: PERMISSION_KEYS.FINANCE_SETTLEMENT },
       { label: '售后挽回分账', key: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT },
-      { label: '月度发放', key: PERMISSION_KEYS.FINANCE_PAYOUT },
+      { label: '员工提成月报', key: PERMISSION_KEYS.FINANCE_PAYOUT },
       { label: '收支流水', key: PERMISSION_KEYS.FINANCE_FLOW },
-      { label: '规则配置', key: PERMISSION_KEYS.FINANCE_RULES },
+      { label: '提成规则', key: PERMISSION_KEYS.FINANCE_RULES },
     ],
   },
   {
@@ -189,7 +189,7 @@ const dataScopeOptions: Array<{ value: DataScopeLevel; label: string }> = [
 
 const dataScopeRows: Array<{ domain: DataScopeDomain; label: string; description: string; permissionKeys: string[] }> = [
   { domain: 'leads', label: '线索数据', description: '控制线索列表、入库情况和线索统计的数据范围', permissionKeys: [PERMISSION_KEYS.LEADS_LIST, PERMISSION_KEYS.LEADS_DETAIL, PERMISSION_KEYS.LEADS_CREATE, PERMISSION_KEYS.LEADS_FOLLOW, PERMISSION_KEYS.LEADS_FLOW_CONFIG, PERMISSION_KEYS.LEADS_INTAKE_STATUS] },
-  { domain: 'customers', label: '客户数据', description: '控制客户列表、客户详情和客户统计的数据范围', permissionKeys: [PERMISSION_KEYS.CUSTOMER_CREATE, PERMISSION_KEYS.CUSTOMER_DETAIL, PERMISSION_KEYS.CUSTOMER_PROFILE, PERMISSION_KEYS.CUSTOMER_AI_CARD, PERMISSION_KEYS.CUSTOMER_CREATE_ORDER, PERMISSION_KEYS.CUSTOMER_VIEW_ORDERS] },
+  { domain: 'customers', label: '客户数据', description: '控制客户列表、客户资料和客户统计的数据范围', permissionKeys: [PERMISSION_KEYS.CUSTOMER_LIST, PERMISSION_KEYS.CUSTOMER_DETAIL, PERMISSION_KEYS.CUSTOMER_CREATE, PERMISSION_KEYS.CUSTOMER_EDIT, PERMISSION_KEYS.CUSTOMER_CREATE_ORDER, PERMISSION_KEYS.CUSTOMER_VIEW_ORDERS] },
   { domain: 'orders', label: '订单数据', description: '控制正式订单列表、订单筛选和订单统计的数据范围', permissionKeys: [PERMISSION_KEYS.ORDER_MANAGE, PERMISSION_KEYS.ORDER_CREATE, PERMISSION_KEYS.ORDER_EDIT, PERMISSION_KEYS.ORDER_DELETE, PERMISSION_KEYS.ORDER_HISTORY, PERMISSION_KEYS.ORDER_PAYMENT_SCREENSHOT] },
   { domain: 'orderApplications', label: '订单审核台数据', description: '控制订单审核台能看到哪些订单申请；审核操作仍由订单审核操作权限控制', permissionKeys: [PERMISSION_KEYS.ORDER_REVIEW, PERMISSION_KEYS.ORDER_MANAGE, PERMISSION_KEYS.ORDER_CREATE] },
 ];
