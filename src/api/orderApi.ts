@@ -284,11 +284,12 @@ async function fetchOrderStats(): Promise<ApiResponse<OrderStats>> {
   await delay(200);
   const orders = filterVisibleOrders((getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).map(normalizeOrder).filter((order) => !order.deletedAt));
   const now = new Date();
-  const today = now.toISOString().split('T')[0];
-  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const getCreatedAtTime = (order: Order) => new Date(order.createdAt).getTime();
 
-  const todayOrders = orders.filter((o) => o.createdAt >= today);
-  const monthOrders = orders.filter((o) => o.createdAt >= monthStart);
+  const todayOrders = orders.filter((o) => getCreatedAtTime(o) >= todayStart);
+  const monthOrders = orders.filter((o) => getCreatedAtTime(o) >= monthStart);
   const upgradeOrders = orders.filter(
     (o) => o.orderType === '升级' || o.orderType === '代理升单',
   );

@@ -611,15 +611,15 @@ assert.match(
   /value="tiered_percentage"[\s\S]*销售月累计阶梯提成|销售月累计阶梯提成[\s\S]*value="tiered_percentage"/,
   'Commission rule config should expose sales monthly tiered commission as a calculation type.',
 );
-assert.doesNotMatch(
+assert.match(
   commissionRuleConfigSource,
   /月累计下限|月累计上限|提成比例/,
-  'Commission rule config should not edit tier thresholds; those belong in monthly payout settings.',
+  'Commission rule config should edit tier thresholds because tier setup belongs to payout plans.',
 );
-assert.match(
+assert.doesNotMatch(
   commissionSource,
-  /阶梯配置[\s\S]*总实付金额|总实付金额[\s\S]*阶梯配置/,
-  'Monthly payout workspace should expose tier configuration and total paid amount.',
+  /阶梯配置/,
+  'Monthly payout workspace should not expose tier configuration; tier setup belongs to commission rules.',
 );
 assert.match(
   commissionSource,

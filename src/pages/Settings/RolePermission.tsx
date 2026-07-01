@@ -688,120 +688,140 @@ const RolePermission: React.FC = () => {
                   <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#132238' }}>菜单权限</Typography>
                   <Typography variant="caption" sx={{ color: '#7890ad' }}>勾选后可见/可用，未勾选则隐藏</Typography>
                 </Box>
-                <Box sx={{ maxHeight: 520, overflowY: 'auto', p: 1.25, display: 'grid', gap: 1 }}>
+                <Box sx={{ maxHeight: 520, overflowY: 'auto', p: 1.25 }}>
                   {PERMISSION_TREE.map((category) => {
                     const categoryPath: string[] = [];
                     const firstLevelNodes = category.children || [];
+                    const directLeafOnly = firstLevelNodes.length > 0 && firstLevelNodes.every((node) => !node.children?.length);
+                    const rows = directLeafOnly
+                      ? [{
+                        label: `${category.label}权限`,
+                        node: category,
+                        path: categoryPath,
+                        children: firstLevelNodes,
+                        childPath: [category.label],
+                      }]
+                      : (firstLevelNodes.length ? firstLevelNodes : [category]).map((node) => ({
+                        label: node.label,
+                        node,
+                        path: firstLevelNodes.length ? [category.label] : categoryPath,
+                        children: node.children || [],
+                        childPath: firstLevelNodes.length ? [category.label, node.label] : categoryPath,
+                      }));
+
                     return (
                       <Box
                         key={category.label}
+                        component="table"
                         sx={{
+                          width: '100%',
+                          tableLayout: 'fixed',
+                          borderCollapse: 'separate',
+                          borderSpacing: 0,
                           border: '1px solid #edf2f7',
                           borderRadius: 1,
                           bgcolor: '#fff',
                           overflow: 'hidden',
+                          mb: 1,
+                          '&:last-of-type': { mb: 0 },
                         }}
                       >
-                        <Box
-                          sx={{
-                            px: 1.25,
-                            py: 0.75,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: 1,
-                            bgcolor: '#f8fbff',
-                            borderBottom: firstLevelNodes.length ? '1px solid #edf2f7' : 'none',
-                          }}
-                        >
-                          <Box component="label" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, minWidth: 0, cursor: 'pointer' }}>
-                            <Checkbox
-                              size="small"
-                              checked={isNodeChecked(form.permissions, category, categoryPath)}
-                              indeterminate={isNodeIndeterminate(form.permissions, category, categoryPath)}
-                              onChange={() => handlePermissionToggle(category, categoryPath)}
-                            />
-                            <Typography variant="body2" sx={{ fontWeight: 800, color: '#132238', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {category.label}
-                            </Typography>
-                          </Box>
-                          <Chip
-                            size="small"
-                            label={`${getSelectableNodeKeys(category, categoryPath).length} 项`}
-                            sx={{ height: 22, bgcolor: '#eef5ff', color: '#1d4ed8', fontWeight: 800 }}
-                          />
-                        </Box>
-                        {!!firstLevelNodes.length && (
-                          <Box sx={{ p: 1, display: 'grid', gap: 0.75 }}>
-                            {firstLevelNodes.map((firstLevel) => {
-                              const firstLevelPath = [category.label];
-                              const childPath = [...firstLevelPath, firstLevel.label];
-                              const children = firstLevel.children || [];
-                              return (
+                        <Box component="tbody">
+                          {rows.map((row, rowIndex) => (
+                            <Box component="tr" key={`${category.label}-${row.label}`}>
+                              {rowIndex === 0 && (
                                 <Box
-                                  key={firstLevel.label}
+                                  component="td"
+                                  rowSpan={rows.length}
                                   sx={{
-                                    display: 'grid',
-                                    gridTemplateColumns: { xs: '1fr', lg: '150px minmax(0, 1fr)' },
-                                    gap: 0.75,
-                                    alignItems: 'start',
-                                    px: 0.75,
-                                    py: 0.5,
-                                    borderRadius: 0.75,
-                                    '&:hover': { bgcolor: '#fbfdff' },
+                                    width: 116,
+                                    p: 1,
+                                    verticalAlign: 'middle',
+                                    bgcolor: '#fbfdff',
+                                    borderRight: '1px solid #edf2f7',
+                                    borderBottom: rowIndex < rows.length - 1 ? '1px solid #edf2f7' : 'none',
                                   }}
                                 >
-                                  <Box component="label" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, minWidth: 0, cursor: 'pointer' }}>
+                                  <Box component="label" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer', minWidth: 0 }}>
                                     <Checkbox
                                       size="small"
-                                      checked={isNodeChecked(form.permissions, firstLevel, firstLevelPath)}
-                                      indeterminate={isNodeIndeterminate(form.permissions, firstLevel, firstLevelPath)}
-                                      onChange={() => handlePermissionToggle(firstLevel, firstLevelPath)}
+                                      checked={isNodeChecked(form.permissions, category, categoryPath)}
+                                      indeterminate={isNodeIndeterminate(form.permissions, category, categoryPath)}
+                                      onChange={() => handlePermissionToggle(category, categoryPath)}
+                                      sx={{ p: 0.25 }}
                                     />
-                                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#243b53', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                      {firstLevel.label}
+                                    <Typography variant="body2" sx={{ fontWeight: 800, color: '#132238', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                      {category.label}
                                     </Typography>
                                   </Box>
-                                  {children.length ? (
-                                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                                      {children.map((child) => (
-                                        <Box
-                                          key={child.label}
-                                          component="label"
-                                          sx={{
-                                            display: 'inline-flex',
-                                            alignItems: 'center',
-                                            gap: 0.35,
-                                            minHeight: 28,
-                                            px: 0.65,
-                                            pr: 0.9,
-                                            border: '1px solid #e5edf6',
-                                            borderRadius: 0.75,
-                                            bgcolor: isNodeChecked(form.permissions, child, childPath) ? '#eff6ff' : '#fff',
-                                            cursor: 'pointer',
-                                          }}
-                                        >
-                                          <Checkbox
-                                            size="small"
-                                            checked={isNodeChecked(form.permissions, child, childPath)}
-                                            indeterminate={isNodeIndeterminate(form.permissions, child, childPath)}
-                                            onChange={() => handlePermissionToggle(child, childPath)}
-                                            sx={{ p: 0.25 }}
-                                          />
-                                          <Typography variant="caption" sx={{ color: '#34495e', fontWeight: 700, lineHeight: 1.2 }}>
-                                            {child.label}
-                                          </Typography>
-                                        </Box>
-                                      ))}
-                                    </Box>
-                                  ) : (
-                                    <Typography variant="caption" sx={{ color: '#8aa0b8', lineHeight: '28px' }}>勾选该项即可开启</Typography>
-                                  )}
                                 </Box>
-                              );
-                            })}
-                          </Box>
-                        )}
+                              )}
+                              <Box
+                                component="td"
+                                sx={{
+                                  width: 150,
+                                  p: 1,
+                                  verticalAlign: 'top',
+                                  bgcolor: '#fff',
+                                  borderRight: '1px solid #edf2f7',
+                                  borderTop: rowIndex > 0 ? '1px solid #edf2f7' : 'none',
+                                }}
+                              >
+                                <Box component="label" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer', minWidth: 0 }}>
+                                  <Checkbox
+                                    size="small"
+                                    checked={isNodeChecked(form.permissions, row.node, row.path)}
+                                    indeterminate={isNodeIndeterminate(form.permissions, row.node, row.path)}
+                                    onChange={() => handlePermissionToggle(row.node, row.path)}
+                                    sx={{ p: 0.25 }}
+                                  />
+                                  <Typography variant="body2" sx={{ fontWeight: 700, color: '#243b53', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {row.label}
+                                  </Typography>
+                                </Box>
+                              </Box>
+                              <Box
+                                component="td"
+                                sx={{
+                                  p: 1,
+                                  verticalAlign: 'top',
+                                  borderTop: rowIndex > 0 ? '1px solid #edf2f7' : 'none',
+                                }}
+                              >
+                                {row.children.length ? (
+                                  <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.25, minHeight: 30 }}>
+                                    {row.children.map((child) => (
+                                      <Box
+                                        key={child.label}
+                                        component="label"
+                                        sx={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: 0.45,
+                                          minWidth: 118,
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        <Checkbox
+                                          size="small"
+                                          checked={isNodeChecked(form.permissions, child, row.childPath)}
+                                          indeterminate={isNodeIndeterminate(form.permissions, child, row.childPath)}
+                                          onChange={() => handlePermissionToggle(child, row.childPath)}
+                                          sx={{ p: 0.25 }}
+                                        />
+                                        <Typography variant="body2" sx={{ color: '#34495e', fontWeight: 600, lineHeight: 1.2 }}>
+                                          {child.label}
+                                        </Typography>
+                                      </Box>
+                                    ))}
+                                  </Box>
+                                ) : (
+                                  <Typography variant="caption" sx={{ color: '#94a3b8' }}>勾选左侧分组即可开启</Typography>
+                                )}
+                              </Box>
+                            </Box>
+                          ))}
+                        </Box>
                       </Box>
                     );
                   })}
@@ -819,9 +839,25 @@ const RolePermission: React.FC = () => {
                       const disabled = editRole?.code === 'super_admin' || !hasAnyPermissionKey(form.permissions, row.permissionKeys);
                       const value = editRole?.code === 'super_admin' ? 'all' : (form.dataScopes[row.domain] || defaultDataScopes[row.domain]);
                       return (
-                        <Box key={row.domain} sx={{ p: 1.35, border: '1px solid #e4edf7', borderRadius: 1, bgcolor: disabled ? '#f8fafc' : '#fff' }}>
-                          <Typography variant="body2" sx={{ fontWeight: 800, color: '#132238' }}>{row.label}</Typography>
-                          <Typography variant="caption" sx={{ color: '#7890ad', display: 'block', mb: 1 }}>{disabled && editRole?.code !== 'super_admin' ? '需先勾选对应功能权限' : row.description}</Typography>
+                        <Box
+                          key={row.domain}
+                          sx={{
+                            p: 1.2,
+                            border: '1px solid #e4edf7',
+                            borderRadius: 1,
+                            bgcolor: disabled ? '#f8fafc' : '#fff',
+                            display: 'grid',
+                            gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1fr) auto' },
+                            gap: 1,
+                            alignItems: 'center',
+                          }}
+                        >
+                          <Box sx={{ minWidth: 0 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 800, color: '#132238' }}>{row.label}</Typography>
+                            <Typography variant="caption" sx={{ color: '#7890ad', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {disabled && editRole?.code !== 'super_admin' ? '需先勾选对应功能权限' : row.description}
+                            </Typography>
+                          </Box>
                           <ToggleButtonGroup
                             exclusive
                             size="small"

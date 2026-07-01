@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { recoveryOrderApi } from './recoveryOrderApi';
+import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { STORAGE_KEYS } from '../shared/utils/constants';
-import type { Commission } from '../types/commission';
+import { PERMISSION_KEYS } from '../shared/utils/permissions';
 import type { Customer } from '../types/customer';
-import type { RecoveryOrder } from '../types/recoveryOrder';
+import type { Role } from '../types/role';
+import type { User } from '../types/settings';
 
 const storage = (() => {
   const data = new Map<string, string>();
@@ -25,6 +27,82 @@ Object.defineProperty(globalThis, 'localStorage', {
 });
 
 const now = '2026-06-28T10:00:00.000Z';
+
+const roles: Role[] = [
+  {
+    id: 'role-service',
+    name: '售后服务专员',
+    code: 'customer_success',
+    permissions: [
+      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY, actions: ['read'] },
+      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT, actions: ['read', 'write'] },
+    ],
+    dataScopes: {
+      leads: 'self',
+      customers: 'self',
+      orders: 'self',
+      orderApplications: 'self',
+      recoveryOrders: 'self',
+      recoveryOrderApplications: 'self',
+    },
+    memberCount: 1,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+  {
+    id: 'role-finance',
+    name: '财务专员',
+    code: 'finance_specialist',
+    permissions: [
+      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, actions: ['read', 'write'] },
+    ],
+    dataScopes: {
+      leads: 'self',
+      customers: 'self',
+      orders: 'all',
+      orderApplications: 'all',
+      recoveryOrders: 'all',
+      recoveryOrderApplications: 'all',
+    },
+    memberCount: 1,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+];
+
+const users: User[] = [
+  {
+    id: 'user-service',
+    name: '售后小陈',
+    account: 'service',
+    email: 'service@test.local',
+    phone: '',
+    role: '售后服务专员',
+    roleId: 'role-service',
+    departmentId: 'dept-service',
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+  {
+    id: 'user-finance',
+    name: '财务专员',
+    account: 'finance',
+    email: 'finance@test.local',
+    phone: '',
+    role: '财务专员',
+    roleId: 'role-finance',
+    departmentId: 'dept-finance',
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+];
+
 const existingCustomer = {
   id: 'cust-existing',
   name: '热帖',
@@ -41,72 +119,75 @@ const existingCustomer = {
   updatedAt: now,
 } as Customer;
 
+function setSession(userId: string) {
+  storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({
+    userId,
+    token: `test-${userId}`,
+    remember: true,
+    createdAt: now,
+  }));
+}
+
 storage.clear();
 storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
+storage.setItem(STORAGE_KEYS.ORGANIZATION_SCHEMA_VERSION, '5');
+storage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(roles));
+storage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify([
+  { id: 'dept-service', name: '售后服务部', code: 'SERVICE', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'dept-finance', name: '财务部', code: 'FINANCE', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+]));
 storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([existingCustomer]));
 storage.setItem(STORAGE_KEYS.RECOVERY_ORDERS, JSON.stringify([]));
 storage.setItem(STORAGE_KEYS.COMMISSIONS, JSON.stringify([]));
+setSession('user-service');
 
-const matched = await recoveryOrderApi.createRecoveryOrder({
-  customerName: '热帖',
-  customerPhone: '13800000000',
-  customerWechat: '',
-  thirdPartyOrderNo: 'TP-001',
-  sourcePlatform: '第三方小店',
-  originalProduct: 'AI课程',
-  originalAmount: 899,
-  refundStatus: '退款中',
-  recoveryAmount: 699,
-  recoveryUserId: 'user-service',
-  recoveryUserName: '售后小陈',
-  createdBy: 'user-service',
-  createdByName: '售后小陈',
-});
-
-assert.equal(matched.code, 0);
-assert.equal(matched.data.customerId, 'cust-existing');
-assert.equal(matched.data.customerMatchStatus, '已绑定客户');
-assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]') as Customer[]).length, 1);
-
-const temporary = await recoveryOrderApi.createRecoveryOrder({
+const created = await recoveryOrderApi.createRecoveryOrder({
   customerName: '第三方客户',
   customerPhone: '13900000000',
   customerWechat: 'third-party',
-  thirdPartyOrderNo: 'TP-002',
+  thirdPartyOrderNo: 'TP-001',
   sourcePlatform: '抖音',
   originalProduct: '代理服务',
   originalAmount: 2980,
-  refundStatus: '退款中',
   recoveryAmount: 1980,
   paymentVoucher: 'pay.png',
   chatEvidence: 'chat.png',
   recoveryUserId: 'user-service',
   recoveryUserName: '售后小陈',
-  assistUserId: 'user-cs',
-  assistUserName: '客户成功小吴',
   createdBy: 'user-service',
   createdByName: '售后小陈',
 });
 
-assert.equal(temporary.code, 0);
-assert.equal(temporary.data.customerMatchStatus, '售后临时客户');
-assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]') as Customer[]).length, 2);
+assert.equal(created.code, 0);
+assert.equal(created.data.customerId, '');
+assert.equal(created.data.customerMatchStatus, '手工填写');
+assert.equal(created.data.status, '待审核');
+assert.equal(created.data.settlementStatus, '未分账');
+assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]') as Customer[]).length, 1);
 
-const rejectWithoutReason = await recoveryOrderApi.rejectRecoveryOrder(temporary.data.id, 'admin', '系统管理员', '');
+const duplicate = await recoveryOrderApi.createRecoveryOrder({
+  ...created.data,
+  thirdPartyOrderNo: 'TP-001',
+});
+assert.notEqual(duplicate.code, 0);
+
+const ownList = await recoveryOrderApi.fetchRecoveryOrders({ ownerId: 'user-service', pageSize: 20 });
+assert.equal(ownList.data.pagination.total, 1);
+assert.equal(ownList.data.items[0].id, created.data.id);
+
+setSession('user-finance');
+const rejectWithoutReason = await recoveryOrderApi.rejectRecoveryOrder(created.data.id, 'user-finance', '财务专员', '');
 assert.notEqual(rejectWithoutReason.code, 0);
 
-const approved = await recoveryOrderApi.approveRecoveryOrder(temporary.data.id, 'finance', '财务专员');
+const approved = await recoveryOrderApi.approveRecoveryOrder(created.data.id, 'user-finance', '财务专员');
 assert.equal(approved.code, 0);
-assert.equal(approved.data?.status, '已生成提成');
-assert.equal(approved.data?.commissionIds?.length, 2);
+assert.equal(approved.data?.status, '待分账');
+assert.equal(approved.data?.settlementStatus, '待处理');
+assert.deepEqual(approved.data?.commissionIds, []);
+assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as unknown[]).length, 0);
 
-const commissions = JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as Commission[];
-assert.equal(commissions.length, 2);
-assert.equal(commissions[0].sourceRecoveryOrderId, temporary.data.id);
-assert.equal(commissions[0].sourceBusinessType, 'refund_recovery');
-assert.equal(commissions[0].orderNo, approved.data?.recoveryNo);
-assert.ok(commissions.every((commission) => commission.isRecoveryBonus));
-
-const list = await recoveryOrderApi.fetchRecoveryOrders({ ownerId: 'user-service', pageSize: 20 });
-assert.equal(list.data.pagination.total, 2);
-assert.ok(list.data.items.every((item: RecoveryOrder) => item.createdBy === 'user-service' || item.recoveryUserId === 'user-service'));
+const stats = await recoveryOrderApi.fetchRecoveryOrderStats();
+assert.equal(stats.data.total, 1);
+assert.equal(stats.data.waitingSettlement, 1);
+assert.equal(stats.data.generatedCommissionAmount, 0);

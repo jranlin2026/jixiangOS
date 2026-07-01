@@ -1,6 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getAllowedCorsOrigins, getApiListenHost, validateRuntimeConfig } from './config/runtime';
 import { prisma, checkDatabaseConnection } from './db/client';
 import { createRequireAuth, bearerToken, type AuthenticatedRequest } from './middleware/auth';
@@ -450,6 +453,20 @@ app.post('/api/ai/business-card-legacy', requireCustomerAiCardAccess, async (req
     res.status(500).json({ code: -1, message: error instanceof Error ? error.message : 'DeepSeek request failed' });
   }
 });
+
+if (process.env.NODE_ENV === 'production') {
+  const serverDir = path.dirname(fileURLToPath(import.meta.url));
+  const distDir = path.resolve(serverDir, '../dist');
+  const indexHtml = path.join(distDir, 'index.html');
+  if (existsSync(indexHtml)) {
+    app.use(express.static(distDir, { index: false }));
+    app.get(/^(?!\/api).*/, (_req, res) => {
+      res.sendFile(indexHtml);
+    });
+  } else {
+    console.warn(`Production frontend dist not found at ${distDir}. Run npm.cmd run build first.`);
+  }
+}
 
 app.listen(port, host, () => {
   console.log(`AI proxy listening on http://${host}:${port}`);

@@ -294,9 +294,7 @@ export function isSuperAdmin(user?: Pick<AuthenticatedUser, 'role' | 'roleId' | 
     return liveRole.code === 'super_admin' || roleHasPermission(liveRole, ALL_PERMISSION_KEY, 'admin');
   }
   const roleId = normalizePermissionKey(String(user.roleId || '')).toLowerCase();
-  const roleName = normalizePermissionKey(String(user.role || '')).toLowerCase();
   if (roleId.includes('super-admin') || roleId.includes('super_admin')) return true;
-  if (roleName.includes('超级管理员') || roleName.includes('系统管理员') || roleName.includes('superadmin')) return true;
   return user.permissions?.some((permission) => normalizePermissionKey(permission.module) === ALL_PERMISSION_KEY) || false;
 }
 
