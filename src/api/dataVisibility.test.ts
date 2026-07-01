@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { customerApi } from './customerApi';
+import { dashboardApi } from './dashboardApi';
 import { leadApi } from './leadApi';
 import { orderApi } from './orderApi';
 import { STORAGE_KEYS } from '../shared/utils/constants';
@@ -91,14 +92,36 @@ async function idsForCurrentUser() {
   const leads = await leadApi.fetchLeads({ pageSize: 20 });
   const orders = await orderApi.fetchOrders({ pageSize: 20 });
   const stats = await orderApi.fetchOrderStats();
+  const workbench = await dashboardApi.fetchHomeWorkbench();
   return {
     customers: customers.data.items.map((item) => item.id),
     publicCustomers: publicCustomers.data.items.map((item) => item.id),
     leads: leads.data.items.map((item) => item.id),
     orders: orders.data.items.map((item) => item.id),
     stats: stats.data,
+    quickActions: workbench.data.quickActions.map((item) => item.id),
   };
 }
+
+resetData('user-sales-a');
+storage.removeItem(AUTH_SESSION_STORAGE_KEY);
+const anonymousScope = await idsForCurrentUser();
+assert.deepEqual(anonymousScope.customers, []);
+assert.deepEqual(anonymousScope.publicCustomers, []);
+assert.deepEqual(anonymousScope.leads, []);
+assert.deepEqual(anonymousScope.orders, []);
+assert.deepEqual(anonymousScope.quickActions, []);
+assert.equal(anonymousScope.stats.monthCount, 0);
+assert.equal(anonymousScope.stats.monthAmount, 0);
+
+resetData('missing-user');
+const missingUserScope = await idsForCurrentUser();
+assert.deepEqual(missingUserScope.customers, []);
+assert.deepEqual(missingUserScope.leads, []);
+assert.deepEqual(missingUserScope.orders, []);
+assert.deepEqual(missingUserScope.quickActions, []);
+assert.equal(missingUserScope.stats.monthCount, 0);
+assert.equal(missingUserScope.stats.monthAmount, 0);
 
 resetData('user-sales-a');
 const salesScope = await idsForCurrentUser();

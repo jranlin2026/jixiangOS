@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { commissionApi } from './commissionApi';
 import { orderApi } from './orderApi';
 import { STORAGE_KEYS } from '../shared/utils/constants';
+import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import type { Commission } from '../types/commission';
 import type { Order } from '../types/order';
 
@@ -113,10 +114,21 @@ function seed() {
   storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([
     { id: 'user-sales', name: 'Sales A', account: 'sales', email: '', phone: '', role: zh.salesRole, departmentId: 'dept-sales', isActive: true, createdAt: now, updatedAt: now },
     { id: 'user-lead', name: 'Lead A', account: 'lead', email: '', phone: '', role: zh.salesRole, departmentId: 'dept-market', isActive: true, createdAt: now, updatedAt: now },
+    { id: 'user-admin', name: 'Admin', account: 'admin', email: '', phone: '', role: '超级管理员', roleId: 'role-super-admin', departmentId: 'dept-admin', isActive: true, createdAt: now, updatedAt: now },
   ]));
+  storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([
+    { id: 'role-super-admin', name: '超级管理员', code: 'super_admin', permissions: [{ module: '全部', actions: ['admin'] }], memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+  ]));
+  storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({
+    userId: 'user-admin',
+    token: 'test-admin',
+    remember: true,
+    createdAt: now,
+  }));
   storage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify([
     { id: 'dept-sales', name: '\u9500\u552e\u90e8', code: 'SALES', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
     { id: 'dept-market', name: '\u5e02\u573a\u90e8', code: 'MARKET', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+    { id: 'dept-admin', name: '管理部', code: 'ADMIN', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
   ]));
   const orders: Order[] = [
     {

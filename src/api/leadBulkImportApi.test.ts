@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { leadBulkImportApi, LEAD_BULK_IMPORT_HEADERS } from './leadBulkImportApi';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
+import { CAPABILITY_KEYS, PERMISSION_KEYS } from '../shared/utils/permissions';
 import type { Customer } from '../types/customer';
 
 const H = {
@@ -94,9 +95,39 @@ storage.setItem(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, JSON.stringify([
   { id: 'src-2', name: zh.douyin, isActive: true, sortOrder: 2, createdAt: now, updatedAt: now },
   { id: 'src-3', name: zh.live, parentId: 'src-2', isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
 ]));
+storage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify([
+  { id: 'dept-ops', name: '运营部', code: 'OPS', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'dept-sales', name: '销售部', code: 'SALES', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+]));
+storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([
+  {
+    id: 'role-ops',
+    name: zh.operator,
+    code: 'ops_admin',
+    permissions: [{ module: PERMISSION_KEYS.LEADS_CREATE, actions: ['read', 'write'] }],
+    memberCount: 1,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+  {
+    id: 'role-sales-consultant',
+    name: zh.salesConsultant,
+    code: 'sales_consultant',
+    permissions: [
+      { module: CAPABILITY_KEYS.LEADS_RECEIVE, actions: ['read'] },
+      { module: PERMISSION_KEYS.LEADS_FOLLOW, actions: ['read', 'write'] },
+    ],
+    dataScopes: { leads: 'self' },
+    memberCount: 1,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+]));
 storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([
-  { id: 'user-1', name: zh.inputUser, account: 'input', email: 'input@company.com', phone: '', role: zh.operator, isActive: true, createdAt: now, updatedAt: now },
-  { id: 'user-2', name: zh.zhangWei, account: 'zhangwei', email: 'zhangwei@company.com', phone: '', role: zh.salesConsultant, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'user-1', name: zh.inputUser, account: 'input', email: 'input@company.com', phone: '', role: zh.operator, roleId: 'role-ops', departmentId: 'dept-ops', isActive: true, createdAt: now, updatedAt: now },
+  { id: 'user-2', name: zh.zhangWei, account: 'zhangwei', email: 'zhangwei@company.com', phone: '', role: zh.salesConsultant, roleId: 'role-sales-consultant', departmentId: 'dept-sales', isActive: true, createdAt: now, updatedAt: now },
 ]));
 storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({
   userId: 'user-1',
@@ -236,8 +267,23 @@ storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
 storage.setItem(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, JSON.stringify([
   { id: 'src-1', name: zh.official, isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
 ]));
+storage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify([
+  { id: 'dept-sales', name: '销售部', code: 'SALES', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+]));
+storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([
+  {
+    id: 'role-sales-consultant',
+    name: zh.salesConsultant,
+    code: 'sales_consultant',
+    permissions: [{ module: CAPABILITY_KEYS.LEADS_RECEIVE, actions: ['read'] }],
+    memberCount: 1,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+]));
 storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([
-  { id: 'user-2', name: zh.zhangWei, account: 'zhangwei', email: 'zhangwei@company.com', phone: '', role: zh.salesConsultant, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'user-2', name: zh.zhangWei, account: 'zhangwei', email: 'zhangwei@company.com', phone: '', role: zh.salesConsultant, roleId: 'role-sales-consultant', departmentId: 'dept-sales', isActive: true, createdAt: now, updatedAt: now },
 ]));
 const generatedTemplateImport = await leadBulkImportApi.importWorkbook(await leadBulkImportApi.createTemplateWorkbook());
 assert.equal(generatedTemplateImport.code, 0);

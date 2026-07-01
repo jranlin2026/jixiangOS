@@ -63,9 +63,19 @@ function unrestrictedScope(): DataVisibilityScope {
   };
 }
 
+function noAccessScope(): DataVisibilityScope {
+  return {
+    unrestricted: false,
+    dataScopeLevel: 'self',
+    visibleUserIds: [],
+    visibleUserNames: [],
+    canViewPublicPool: false,
+  };
+}
+
 export function getCurrentDataVisibilityScope(domain: DataScopeDomain = 'customers'): DataVisibilityScope {
   const session = readLocalStorageJson<AuthSession>(AUTH_SESSION_STORAGE_KEY);
-  if (!isSessionValid(session)) return unrestrictedScope();
+  if (!isSessionValid(session)) return noAccessScope();
 
   const users = readLocalStorageJson<User[]>(STORAGE_KEYS.USERS) || [];
   const roles = ensureOrganizationConfigData().roles;
@@ -74,7 +84,7 @@ export function getCurrentDataVisibilityScope(domain: DataScopeDomain = 'custome
     && user.isActive
     && (user.employmentStatus || 'active') === 'active'
   ));
-  if (!currentUser) return unrestrictedScope();
+  if (!currentUser) return noAccessScope();
 
   const roleCode = getRoleCode(currentUser, roles);
   const role = getUserRole(currentUser, roles);

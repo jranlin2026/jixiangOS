@@ -175,7 +175,7 @@ const LeadFlowConfigTab: React.FC = () => {
             ))}
             {selectedParticipants.length === 0 && (
               <Typography variant="body2" sx={{ color: '#9ca3af', lineHeight: '24px' }}>
-                未指定参与成员，保存后将默认使用所有具备接收线索能力的启用员工
+                未指定参与成员时，新线索将保持待分配，不会自动分给管理员或其他员工
               </Typography>
             )}
           </Box>

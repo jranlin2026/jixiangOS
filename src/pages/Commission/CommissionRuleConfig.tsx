@@ -673,14 +673,9 @@ const CommissionRuleConfig: React.FC = () => {
           </Typography>
         </Box>
         {view === 'rules' ? (
-          <Stack direction="row" spacing={1}>
           <Button variant="contained" startIcon={<AddIcon />} size="small" onClick={() => handleOpenRuleForm()}>
             新增规则
           </Button>
-          <Button variant="outlined" startIcon={<EditIcon />} size="small" onClick={openTierConfig}>
-            阶梯配置
-          </Button>
-          </Stack>
         ) : view === 'plans' ? (
           <Button variant="contained" startIcon={<AddIcon />} size="small" onClick={() => handleOpenPlanForm()}>
             新增方案
@@ -887,7 +882,7 @@ const CommissionRuleConfig: React.FC = () => {
           {editingGroup ? '编辑提成规则' : '新增提成规则'}
         </DialogCloseTitle>
         <DialogContent dividers>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2, pt: 0.5 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1fr) 240px' }, gap: 2, pt: 0.5 }}>
             <TextField
               label="规则名称"
               value={ruleForm.name}
@@ -895,7 +890,7 @@ const CommissionRuleConfig: React.FC = () => {
               fullWidth
               required
             />
-            <FormControl fullWidth required>
+            <FormControl fullWidth required sx={{ maxWidth: { md: 240 }, justifySelf: { md: 'end' } }}>
               <InputLabel>订单类型</InputLabel>
               <Select
                 label="订单类型"
@@ -1152,6 +1147,7 @@ const CommissionRuleConfig: React.FC = () => {
                 }}
                 fullWidth
                 required
+                sx={{ maxWidth: { md: 240 } }}
               />
             )}
             {planForm.commissionType === 'tiered_percentage' && (

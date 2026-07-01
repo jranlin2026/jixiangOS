@@ -5,7 +5,7 @@ import { authApi, roleApi, settingsApi } from './index';
 import { DEFAULT_USER_PASSWORD } from '../shared/utils/auth';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { DEFAULT_ROLES } from '../shared/utils/organizationConfig';
-import { CAPABILITY_KEYS, hasPermission, PERMISSION_KEYS, roleHasPermission, sanitizeRolePermissions, toAuthenticatedUser } from '../shared/utils/permissions';
+import { CAPABILITY_KEYS, canReceiveLead, hasPermission, PERMISSION_KEYS, roleHasPermission, sanitizeRolePermissions, toAuthenticatedUser } from '../shared/utils/permissions';
 import type { Role } from '../types/role';
 
 const appSource = readFileSync(join(process.cwd(), 'src', 'App.tsx'), 'utf8');
@@ -81,6 +81,10 @@ assert.equal(defaultSalesManagerRole.permissions.some((permission) => permission
 const defaultFinanceRole = DEFAULT_ROLES.find((role) => role.code === 'finance_specialist');
 assert.ok(defaultFinanceRole);
 assert.equal(defaultFinanceRole.permissions.some((permission) => permission.module === '财务中心/订单分账'), true);
+assert.equal(roleHasPermission(defaultFinanceRole, PERMISSION_KEYS.FINANCE), true);
+assert.equal(roleHasPermission(defaultFinanceRole, PERMISSION_KEYS.FINANCE_MY_COMMISSION), false);
+assert.equal(roleHasPermission(defaultFinanceRole, PERMISSION_KEYS.FINANCE_SETTLEMENT), true);
+assert.equal(roleHasPermission(defaultFinanceRole, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT), true);
 
 const createdMarketUser = await settingsApi.createUser({
   name: 'Permission Market',
@@ -131,6 +135,17 @@ const financeSettlementRole: Role = {
 };
 assert.equal(roleHasPermission(financeSettlementRole, '财务中心'), true);
 assert.equal(roleHasPermission(financeSettlementRole, '财务中心/订单分账'), true);
+assert.equal(roleHasPermission(financeSettlementRole, PERMISSION_KEYS.FINANCE_MY_COMMISSION), false);
+
+const financeParentOnlyRole: Role = {
+  ...legacyOpportunityRole,
+  id: 'role-finance-parent-only',
+  code: 'finance_parent_only',
+  permissions: [{ module: PERMISSION_KEYS.FINANCE, actions: ['read'] }],
+};
+assert.equal(roleHasPermission(financeParentOnlyRole, PERMISSION_KEYS.FINANCE), true);
+assert.equal(roleHasPermission(financeParentOnlyRole, PERMISSION_KEYS.FINANCE_MY_COMMISSION), false);
+assert.equal(roleHasPermission(financeParentOnlyRole, PERMISSION_KEYS.FINANCE_SETTLEMENT), false);
 
 const customerChildRole: Role = {
   ...legacyOpportunityRole,
@@ -236,3 +251,9 @@ const authenticatedMarket = toAuthenticatedUser({
 }, migratedRoles.data);
 assert.equal(hasPermission(authenticatedMarket, PERMISSION_KEYS.LEADS), true);
 assert.equal(hasPermission(authenticatedMarket, PERMISSION_KEYS.CUSTOMERS), false);
+
+assert.equal(canReceiveLead({
+  role: '超级管理员',
+  roleId: 'role-super-admin',
+  isActive: true,
+}, DEFAULT_ROLES), false);

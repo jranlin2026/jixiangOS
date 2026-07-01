@@ -137,11 +137,12 @@ function pushIfAllowed(actions: HomeQuickAction[], permissionKey: string, action
   const user = scope.currentUser
     ? {
       role: scope.currentUser.role,
+      roleId: scope.currentUser.roleId,
       permissions: resolveUserPermissions(scope.currentUser, roles),
       isActive: scope.currentUser.isActive,
     }
     : null;
-  if (!scope.currentUser || hasPermission(user, permissionKey)) actions.push(action);
+  if (scope.currentUser && hasPermission(user, permissionKey)) actions.push(action);
 }
 
 function getRecentActivities(customers: Customer[], leads: Lead[], orders: Order[], applications: OrderApplication[]): HomeActivityItem[] {

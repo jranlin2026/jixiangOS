@@ -84,9 +84,8 @@ function getActiveSalesUsers(): User[] {
 
 function getConfiguredParticipants(config: LeadFlowConfig): User[] {
   const activeSales = getActiveSalesUsers();
-  if (!config.participantUserIds.length) return activeSales;
-  const selected = activeSales.filter((user) => config.participantUserIds.includes(user.id));
-  return selected.length ? selected : activeSales;
+  if (!config.participantUserIds.length) return [];
+  return activeSales.filter((user) => config.participantUserIds.includes(user.id));
 }
 
 function findCollision(data: Partial<Lead>, excludeLeadId?: string) {
@@ -131,11 +130,15 @@ function formatLeadSourceText(lead: Partial<Lead>): string | undefined {
 }
 
 function assignLeadOwner(config: LeadFlowConfig, fallbackOwner?: string): { owner: string; assignedTo?: string; assignedAt?: string; assignmentRuleId?: string; assignmentStatus: '待分配' | '已分配待领取'; reason: string; nextIndex: number } {
-  if (!config.autoAssignEnabled) {
-    if (fallbackOwner && fallbackOwner !== '待分配') {
+  if (fallbackOwner && fallbackOwner !== '待分配') {
+    const manualOwner = getActiveSalesUsers().find((user) => user.name === fallbackOwner);
+    if (manualOwner) {
       const now = new Date().toISOString();
-      return { owner: fallbackOwner, assignedTo: fallbackOwner, assignedAt: now, assignmentStatus: '已分配待领取', reason: '手动指定销售', nextIndex: config.lastAssignedIndex };
+      return { owner: manualOwner.name, assignedTo: manualOwner.name, assignedAt: now, assignmentStatus: '已分配待领取', reason: '手动指定销售', nextIndex: config.lastAssignedIndex };
     }
+  }
+
+  if (!config.autoAssignEnabled) {
     return { owner: '待分配', assignmentStatus: '待分配', reason: '线索自动分配未开启', nextIndex: config.lastAssignedIndex };
   }
 
@@ -359,6 +362,7 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
   }
 
   const assignment = assignLeadOwner(config, normalizedData.owner);
+  const intakeStatus = assignment.assignmentStatus === '待分配' ? '待分配' : '入库成功';
   const leadId = `lead-${uuidv4().slice(0, 8)}`;
   const lead: Lead = {
     ...normalizedData,
@@ -367,7 +371,7 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
     assignedTo: assignment.assignedTo,
     assignedAt: assignment.assignedAt,
     assignmentRuleId: assignment.assignmentRuleId,
-    intakeStatus: '入库成功',
+    intakeStatus,
     lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP,
     lifecycleStatus: '待跟进',
     sourceType: normalizeResourceOwnership(data.sourceType),
@@ -391,11 +395,11 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
     source: formatLeadSourceText(storedLead),
     inputBy: storedLead.inputBy,
     assignedTo: storedLead.assignedTo,
-    status: '入库成功',
+    status: intakeStatus,
     matchedRule: assignment.reason,
     createdAt: now,
   });
-  return { lead: storedLead, message: '入库成功' };
+  return { lead: storedLead, message: intakeStatus };
 }
 
 function syncCustomerByLead(lead: Lead): void {

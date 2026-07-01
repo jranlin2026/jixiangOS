@@ -199,14 +199,7 @@ const PERMISSION_GRANT_TREE: Record<string, string[]> = {
     PERMISSION_KEYS.AFTER_SALES_RECOVERY,
   ],
 
-  [PERMISSION_KEYS.FINANCE]: [
-    PERMISSION_KEYS.FINANCE_MY_COMMISSION,
-    PERMISSION_KEYS.FINANCE_SETTLEMENT,
-    PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT,
-    PERMISSION_KEYS.FINANCE_PAYOUT,
-    PERMISSION_KEYS.FINANCE_FLOW,
-    PERMISSION_KEYS.FINANCE_RULES,
-  ],
+  [PERMISSION_KEYS.FINANCE]: [PERMISSION_KEYS.FINANCE],
   [PERMISSION_KEYS.FINANCE_MY_COMMISSION]: [PERMISSION_KEYS.FINANCE_MY_COMMISSION],
   [PERMISSION_KEYS.FINANCE_OVERVIEW]: [PERMISSION_KEYS.FINANCE_MY_COMMISSION],
   [PERMISSION_KEYS.FINANCE_SETTLEMENT]: [PERMISSION_KEYS.FINANCE_SETTLEMENT],
@@ -330,15 +323,13 @@ function getLiveRoleForAuthenticatedUser(user: Pick<AuthenticatedUser, 'role' | 
 export function roleHasPermission(role: Role | undefined, permissionKey: string, action = 'read'): boolean {
   if (!role?.isActive) return false;
   if (role.code === 'super_admin') return true;
-  const requestedKeys = expandPermissionGrants(permissionKey);
+  const requestedKeys = expandPermissionRequests(permissionKey);
   if (!requestedKeys.length) return false;
   return role.permissions.some((permission) => {
     if (!actionAllowed(getDefaultPermissionActions(permission.module, permission.actions || []), action)) return false;
     const grantedKeys = expandPermissionGrants(permission.module);
     if (grantedKeys.includes(ALL_PERMISSION_KEY)) return true;
-    return grantedKeys.some((granted) => requestedKeys.some((requested) => (
-      requested === granted || requested.startsWith(`${granted}/`) || granted.startsWith(`${requested}/`)
-    )));
+    return grantedKeys.some((granted) => requestedKeys.includes(granted));
   });
 }
 
@@ -364,7 +355,9 @@ function roleHasDirectPermission(role: Role | undefined, permissionKeys: string[
 export function canReceiveLead(user: Pick<User, 'role' | 'roleId' | 'isActive' | 'employmentStatus'>, roles: Role[]): boolean {
   if (!user.isActive) return false;
   if ((user.employmentStatus || 'active') !== 'active') return false;
-  return roleHasDirectPermission(getUserRole(user, roles), [
+  const role = getUserRole(user, roles);
+  if (role?.code === 'super_admin') return false;
+  return roleHasDirectPermission(role, [
     CAPABILITY_KEYS.LEADS_RECEIVE,
     PERMISSION_KEYS.LEADS_FOLLOW,
   ]);
@@ -429,6 +422,20 @@ function expandPermissionGrants(module: string): string[] {
   return (grants || []).map(normalizePermissionKey);
 }
 
+function expandPermissionRequests(module: string): string[] {
+  const normalized = normalizePermissionKey(module);
+  if (normalized === ALL_PERMISSION_KEY) return [ALL_PERMISSION_KEY];
+  const keys = new Set<string>(expandPermissionGrants(module));
+  keys.add(normalized);
+  for (const [permissionKey, grants] of PERMISSION_GRANTS_BY_NORMALIZED.entries()) {
+    if (permissionKey.startsWith(`${normalized}/`)) {
+      keys.add(permissionKey);
+      grants.map(normalizePermissionKey).forEach((grant) => keys.add(grant));
+    }
+  }
+  return Array.from(keys);
+}
+
 function getSanitizedPermissionModules(module: string): string[] {
   const normalized = normalizePermissionKey(module);
   if (normalized === ALL_PERMISSION_KEY) return [ALL_PERMISSION_KEY];
@@ -465,14 +472,12 @@ export function hasPermission(
   if (liveRole) return roleHasPermission(liveRole, permissionKey, action);
   if (isSuperAdmin(user)) return true;
 
-  const requestedKeys = expandPermissionGrants(permissionKey);
+  const requestedKeys = expandPermissionRequests(permissionKey);
   if (!requestedKeys.length) return false;
   return user.permissions.some((permission) => {
     if (!actionAllowed(permission.actions || [], action)) return false;
     const grantedKeys = expandPermissionGrants(permission.module);
     if (grantedKeys.includes(ALL_PERMISSION_KEY)) return true;
-    return grantedKeys.some((granted) => requestedKeys.some((requested) => (
-      requested === granted || requested.startsWith(`${granted}/`) || granted.startsWith(`${requested}/`)
-    )));
+    return grantedKeys.some((granted) => requestedKeys.includes(granted));
   });
 }

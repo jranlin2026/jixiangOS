@@ -129,6 +129,44 @@ const order: Order = {
 
 storage.clear();
 storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
+storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
+  id: 'user-admin',
+  name: '系统管理员',
+  account: 'admin',
+  email: '',
+  phone: '',
+  role: '超级管理员',
+  roleId: 'role-admin',
+  departmentId: 'dept-admin',
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+}]));
+storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([{
+  id: 'role-admin',
+  name: '超级管理员',
+  code: 'super_admin',
+  permissions: [{ module: '全部', actions: ['admin'] }],
+  memberCount: 1,
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+}]));
+storage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify([{
+  id: 'dept-admin',
+  name: '总经办',
+  code: 'ADMIN',
+  memberCount: 1,
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+}]));
+storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({
+  userId: 'user-admin',
+  token: 'token-admin',
+  remember: true,
+  createdAt: now,
+}));
 storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([customer, legacyCustomer, blankContactCustomer, invalidContactCustomer]));
 storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([lead]));
 storage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify([order]));
