@@ -247,7 +247,7 @@ storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([
   { id: 'role-sales', name: zh.sales, code: 'sales_consultant', permissions: [], memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
   { id: 'role-finance', name: zh.finance, code: 'finance_specialist', permissions: [{ module: PERMISSION_KEYS.ORDER_REVIEW, actions: ['read'] }], dataScopes: { orderApplications: 'self' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
 ]));
-assert.deepEqual((await orderReviewApi.fetchOrderApplications({ pageSize: 20 })).data.items.map((item) => item.id), []);
+assert.deepEqual((await orderReviewApi.fetchOrderApplications({ pageSize: 20 })).data.items.map((item) => item.id), [permissionReviewSubmit.data.id]);
 
 storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([
   { id: 'role-sales', name: zh.sales, code: 'sales_consultant', permissions: [], memberCount: 1, isActive: true, createdAt: now, updatedAt: now },

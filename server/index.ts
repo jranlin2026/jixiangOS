@@ -34,6 +34,7 @@ const requireOrganizationAccess = createRequireAuth(authService, PERMISSION_KEYS
 const requireRoleAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_ROLES);
 const requireAiConfigAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_AI_CONFIG);
 const requireDataMaintenanceAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE);
+const requireStorageAccess = createRequireAuth(authService);
 const requireAiChatAccess = createRequireAuth(authService, PERMISSION_KEYS.AI_CHAT);
 const requireCustomerAiCardAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_AI_CARD);
 const assignableUsersPermissions = [
@@ -281,21 +282,21 @@ app.post('/api/ai/config/test', requireAiConfigAccess, async (_req, res) => {
   }
 });
 
-app.get('/api/storage', requireDataMaintenanceAccess, async (_req, res) => {
+app.get('/api/storage', requireStorageAccess, async (_req, res) => {
   res.json(await storageService.list());
 });
 
-app.get('/api/storage/:key', requireDataMaintenanceAccess, async (req, res) => {
+app.get('/api/storage/:key', requireStorageAccess, async (req, res) => {
   const result = await storageService.get(routeParam(req.params.key));
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.put('/api/storage/:key', requireDataMaintenanceAccess, async (req, res) => {
+app.put('/api/storage/:key', requireStorageAccess, async (req, res) => {
   const result = await storageService.set(routeParam(req.params.key), req.body?.value);
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.delete('/api/storage/:key', requireDataMaintenanceAccess, async (req, res) => {
+app.delete('/api/storage/:key', requireStorageAccess, async (req, res) => {
   const result = await storageService.remove(routeParam(req.params.key));
   res.status(result.code === 0 ? 200 : 400).json(result);
 });

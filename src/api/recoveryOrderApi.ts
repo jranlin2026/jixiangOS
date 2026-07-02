@@ -109,6 +109,12 @@ function canUseRecoveryPermission(permissionKey: string, action = 'read'): boole
 }
 
 function canViewRecoveryOrder(order: RecoveryOrder, scopeDomain: NonNullable<RecoveryOrderFilters['scopeDomain']> = 'recoveryOrders'): boolean {
+  if (scopeDomain === 'recoveryOrderApplications' && canUseRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW)) {
+    return true;
+  }
+  if (scopeDomain === 'recoveryOrders' && canUseRecoveryPermission(PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT)) {
+    return true;
+  }
   const scope = getCurrentDataVisibilityScope(scopeDomain);
   if (scope.unrestricted) return true;
   return scope.visibleUserIds.includes(order.createdBy)
@@ -117,6 +123,13 @@ function canViewRecoveryOrder(order: RecoveryOrder, scopeDomain: NonNullable<Rec
     || scope.visibleUserNames.includes(order.createdByName)
     || scope.visibleUserNames.includes(order.recoveryUserName)
     || Boolean(order.assistUserName && scope.visibleUserNames.includes(order.assistUserName));
+}
+
+function canResubmitReturnedRecoveryOrder(order: RecoveryOrder): boolean {
+  if (order.status !== '退回修改') return false;
+  const user = getCurrentSessionUser();
+  if (!user) return false;
+  return order.createdBy === user.id || order.recoveryUserId === user.id;
 }
 
 function filterVisibleRecoveryOrders(
@@ -251,9 +264,6 @@ async function createRecoveryOrder(data: RecoveryOrderInput): Promise<ApiRespons
 async function updateRecoveryOrder(id: string, data: RecoveryOrderInput): Promise<ApiResponse<RecoveryOrder | null>> {
   ensureInit();
   await delay(160);
-  if (!canUseRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT, 'write')) {
-    return createErrorResponse('无权编辑售后挽回订单', 403);
-  }
   if (!data.customerName.trim()) return createErrorResponse('请填写客户姓名');
   if (!data.thirdPartyOrderNo.trim()) return createErrorResponse('请填写第三方平台订单号');
   if (!data.originalProduct.trim()) return createErrorResponse('请填写原购买产品');
@@ -263,6 +273,9 @@ async function updateRecoveryOrder(id: string, data: RecoveryOrderInput): Promis
   const idx = orders.findIndex((item) => item.id === id);
   if (idx === -1) return createSuccessResponse(null);
   const current = orders[idx];
+  if (!canUseRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT, 'write') && !canResubmitReturnedRecoveryOrder(current)) {
+    return createErrorResponse('无权编辑售后挽回订单', 403);
+  }
   if (['待确认', '待发放', '已撤回'].includes(current.settlementStatus || '未分账') || current.status === '已分账') {
     return createErrorResponse('已分账的售后挽回订单不能修改');
   }

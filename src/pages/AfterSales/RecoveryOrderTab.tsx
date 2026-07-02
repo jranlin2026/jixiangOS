@@ -138,7 +138,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.currentUser);
   const canCreate = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE);
-  const canReview = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW);
+  const canReviewAction = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write');
   const canEdit = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT);
   const canDelete = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, 'delete');
   const canViewHistory = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY);
@@ -227,6 +227,11 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
 
   const activeUsers = users.filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active');
   const productOptions = useMemo(() => [...products].sort((a, b) => a.sortOrder - b.sortOrder), [products]);
+  const canResubmitReturnedOrder = useCallback((row: RecoveryOrder) => (
+    row.status === '退回修改'
+    && Boolean(currentUser)
+    && (row.createdBy === currentUser?.id || row.recoveryUserId === currentUser?.id)
+  ), [currentUser]);
 
   const showErrorDialog = useCallback((text: string, title = '操作失败') => {
     setErrorDialog({ title, text });
@@ -462,7 +467,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       case 'actions':
         if (mode === 'review') {
           if (row.status === '退回修改') {
-            return (
+            const canResubmit = canEdit || canResubmitReturnedOrder(row);
+            return canResubmit ? (
               <Stack
                 direction="row"
                 spacing={0.25}
@@ -470,19 +476,18 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                 sx={{ minWidth: 148, flexWrap: 'nowrap', whiteSpace: 'nowrap' }}
               >
                 <Tooltip title="修改并重新提交">
-                  <span>
-                    <IconButton
-                      aria-label="修改并重新提交"
-                      size="small"
-                      sx={{ color: canEdit ? '#0f766e' : '#cbd5e1' }}
-                      disabled={!canEdit}
-                      onClick={() => openEdit(row)}
-                    >
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                  </span>
+                  <IconButton
+                    aria-label="修改并重新提交"
+                    size="small"
+                    sx={{ color: '#0f766e' }}
+                    onClick={() => openEdit(row)}
+                  >
+                    <EditIcon fontSize="small" />
+                  </IconButton>
                 </Tooltip>
               </Stack>
+            ) : (
+              <Typography variant="body2" sx={{ color: shell.muted }}>-</Typography>
             );
           }
           return (
@@ -492,19 +497,18 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
               justifyContent="center"
               sx={{ minWidth: 148, flexWrap: 'nowrap', whiteSpace: 'nowrap' }}
             >
-              <Tooltip title="删除">
-                <span>
+              {canDelete && (
+                <Tooltip title="删除">
                   <IconButton
                     size="small"
-                    sx={{ color: canDelete ? shell.red : '#cbd5e1' }}
-                    disabled={!canDelete}
+                    sx={{ color: shell.red }}
                     onClick={() => handleDelete(row)}
                   >
                     <DeleteOutlineIcon fontSize="small" />
                   </IconButton>
-                </span>
-              </Tooltip>
-              {canReview && (
+                </Tooltip>
+              )}
+              {canReviewAction && (
                 <>
                   <Tooltip title="通过">
                     <IconButton size="small" sx={{ color: shell.green }} onClick={() => setReviewAction({ type: 'approve', row })}>
@@ -531,49 +535,46 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
             direction="row"
             spacing={0.25}
             justifyContent="center"
-            sx={{ minWidth: 144, flexWrap: 'nowrap', whiteSpace: 'nowrap' }}
+            sx={{ minWidth: 80, flexWrap: 'nowrap', whiteSpace: 'nowrap' }}
           >
             <Tooltip title="查看">
               <IconButton size="small" sx={{ color: shell.blue }} onClick={() => setDetailOrder(row)}>
                 <VisibilityIcon fontSize="small" />
               </IconButton>
             </Tooltip>
-            <Tooltip title="编辑">
-              <span>
+            {canEdit && !isRecoveryOrderLocked(row) && (
+              <Tooltip title="编辑">
                 <IconButton
                   size="small"
-                  sx={{ color: isRecoveryOrderLocked(row) || !canEdit ? '#cbd5e1' : '#0f766e' }}
-                  disabled={isRecoveryOrderLocked(row) || !canEdit}
+                  sx={{ color: '#0f766e' }}
                   onClick={() => openEdit(row)}
                 >
                   <EditIcon fontSize="small" />
                 </IconButton>
-              </span>
-            </Tooltip>
-            <Tooltip title="历史">
-              <span>
+              </Tooltip>
+            )}
+            {canViewHistory && (
+              <Tooltip title="历史">
                 <IconButton
                   size="small"
-                  sx={{ color: canViewHistory ? shell.green : '#cbd5e1' }}
-                  disabled={!canViewHistory}
+                  sx={{ color: shell.green }}
                   onClick={() => setHistoryOrder(row)}
                 >
                   <HistoryIcon fontSize="small" />
                 </IconButton>
-              </span>
-            </Tooltip>
-            <Tooltip title="删除">
-              <span>
+              </Tooltip>
+            )}
+            {canDelete && (!isRecoveryOrderLocked(row) || canForceDeleteSettled) && (
+              <Tooltip title="删除">
                 <IconButton
                   size="small"
-                  sx={{ color: !canDelete || (isRecoveryOrderLocked(row) && !canForceDeleteSettled) ? '#cbd5e1' : shell.red }}
-                  disabled={!canDelete || (isRecoveryOrderLocked(row) && !canForceDeleteSettled)}
+                  sx={{ color: shell.red }}
                   onClick={() => handleDelete(row)}
                 >
                   <DeleteOutlineIcon fontSize="small" />
                 </IconButton>
-              </span>
-            </Tooltip>
+              </Tooltip>
+            )}
           </Stack>
         );
       default:

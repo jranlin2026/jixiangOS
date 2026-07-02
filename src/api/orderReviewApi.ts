@@ -133,6 +133,7 @@ function buildLog(action: OrderApplicationReviewLog['action'], reason?: string):
 }
 
 function filterVisibleApplications(applications: OrderApplication[]): OrderApplication[] {
+  if (canReviewOrderApplications()) return applications;
   const scope = getCurrentDataVisibilityScope('orderApplications');
   if (scope.unrestricted) return applications;
   return applications.filter((application) => (

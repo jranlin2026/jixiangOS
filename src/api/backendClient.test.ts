@@ -7,6 +7,7 @@ import {
   syncBackendStorageFromServer,
   writeBackendToken,
 } from './backendClient';
+import { initializeStorage } from './mock/storage';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 
 const originalFetch = globalThis.fetch;
@@ -97,6 +98,36 @@ try {
   assert.deepEqual(JSON.parse(storage.get(STORAGE_KEYS.LEADS) || '[]'), [marketLead]);
   assert.equal(JSON.parse(storage.get(STORAGE_KEYS.LEAD_FLOW_CONFIG) || '{}').lastAssignedIndex, 1);
   releasePendingWrites.forEach((release) => release());
+
+  const writeRequests: string[] = [];
+  globalThis.fetch = async (url, init) => {
+    if (init?.method === 'PUT') {
+      writeRequests.push(String(url));
+      return {
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        text: async () => JSON.stringify({ code: 0, data: true, message: 'success' }),
+      } as Response;
+    }
+    return {
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      text: async () => JSON.stringify({
+        code: 0,
+        data: {
+          [STORAGE_KEYS.RECOVERY_ORDERS]: [{ id: 'server-recovery-order' }],
+        },
+        message: 'success',
+      }),
+    } as Response;
+  };
+  storage.delete(STORAGE_KEYS.RECOVERY_ORDERS);
+
+  initializeStorage(STORAGE_KEYS.RECOVERY_ORDERS, []);
+  await syncBackendStorageFromServer(0);
+
+  assert.deepEqual(JSON.parse(storage.get(STORAGE_KEYS.RECOVERY_ORDERS) || '[]'), [{ id: 'server-recovery-order' }]);
+  assert.deepEqual(writeRequests, []);
 } finally {
   clearBackendToken();
   globalThis.fetch = originalFetch;

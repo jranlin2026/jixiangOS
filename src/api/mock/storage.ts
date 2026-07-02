@@ -4,6 +4,7 @@ import {
   clearBackendStorageValues,
   persistBackendStorageValue,
   removeBackendStorageValue,
+  shouldUseBackendApi,
 } from '../backendClient';
 
 /** 初始化 localStorage，仅首次执行 */
@@ -11,7 +12,7 @@ export function initializeStorage<T>(key: string, data: T): void {
   const existing = localStorage.getItem(key);
   if (!existing) {
     localStorage.setItem(key, JSON.stringify(data));
-    persistBackendStorageValue(key, data);
+    if (!shouldUseBackendApi()) persistBackendStorageValue(key, data);
   }
 }
 

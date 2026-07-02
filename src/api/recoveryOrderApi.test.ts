@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { commissionApi } from './commissionApi';
 import { recoveryOrderApi } from './recoveryOrderApi';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { STORAGE_KEYS } from '../shared/utils/constants';
@@ -36,7 +37,6 @@ const roles: Role[] = [
     permissions: [
       { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY, actions: ['read'] },
       { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, actions: ['read', 'write'] },
-      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT, actions: ['read', 'write'] },
     ],
     dataScopes: {
       leads: 'self',
@@ -64,8 +64,8 @@ const roles: Role[] = [
       customers: 'self',
       orders: 'all',
       orderApplications: 'all',
-      recoveryOrders: 'all',
-      recoveryOrderApplications: 'all',
+      recoveryOrders: 'self',
+      recoveryOrderApplications: 'self',
     },
     memberCount: 1,
     isActive: true,
@@ -177,9 +177,41 @@ assert.equal(ownList.data.pagination.total, 1);
 assert.equal(ownList.data.items[0].id, created.data.id);
 
 setSession('user-finance');
+const reviewList = await recoveryOrderApi.fetchRecoveryOrders({
+  statuses: [created.data.status],
+  scopeDomain: 'recoveryOrderApplications',
+  pageSize: 20,
+});
+assert.equal(reviewList.data.pagination.total, 1);
+assert.equal(reviewList.data.items[0].id, created.data.id);
 const rejectWithoutReason = await recoveryOrderApi.rejectRecoveryOrder(created.data.id, 'user-finance', '财务专员', '');
 assert.notEqual(rejectWithoutReason.code, 0);
 
+const returned = await recoveryOrderApi.returnRecoveryOrder(created.data.id, 'user-finance', '财务专员', '补充聊天截图');
+assert.equal(returned.code, 0);
+assert.equal(returned.data?.status, '退回修改');
+
+setSession('user-service');
+const resubmitted = await recoveryOrderApi.updateRecoveryOrder(created.data.id, {
+  customerName: '第三方客户',
+  customerPhone: '13900000000',
+  customerWechat: 'third-party',
+  thirdPartyOrderNo: 'TP-001',
+  sourcePlatform: '抖音',
+  originalProduct: '代理服务',
+  originalAmount: 2980,
+  recoveryAmount: 1980,
+  paymentVoucher: 'pay.png',
+  chatEvidence: 'chat-updated.png',
+  recoveryUserId: 'user-service',
+  recoveryUserName: '售后小陈',
+  createdBy: 'user-service',
+  createdByName: '售后小陈',
+});
+assert.equal(resubmitted.code, 0);
+assert.equal(resubmitted.data?.status, '待审核');
+
+setSession('user-finance');
 const approved = await recoveryOrderApi.approveRecoveryOrder(created.data.id, 'user-finance', '财务专员');
 assert.equal(approved.code, 0);
 assert.equal(approved.data?.status, '待分账');
@@ -187,7 +219,36 @@ assert.equal(approved.data?.settlementStatus, '待处理');
 assert.deepEqual(approved.data?.commissionIds, []);
 assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as unknown[]).length, 0);
 
+const settled = await recoveryOrderApi.settleRecoveryOrder(
+  created.data.id,
+  [{
+    role: '售后',
+    ownerId: 'user-service',
+    commissionAmount: 120,
+    performanceAmount: 1980,
+    payoutPlanName: '自定义金额',
+    ruleCalculationType: 'fixed',
+    calculationNote: '售后挽回分账',
+  }],
+  '售后挽回分账',
+  'user-finance',
+  '财务专员',
+);
+assert.equal(settled.code, 0);
+assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as unknown[]).length, 1);
+
+const period = new Date().toISOString().slice(0, 7);
+const payouts = await commissionApi.fetchMonthlyCommissionPayouts(period);
+assert.equal(payouts.code, 0);
+const servicePayout = payouts.data.find((item) => item.ownerId === 'user-service');
+assert.equal(Boolean(servicePayout), true);
+assert.equal(servicePayout?.pendingConfirmAmount, 120);
+assert.equal(servicePayout?.roleSummaries?.some((item) => (
+  item.role === '售后'
+  && item.commissions.some((commission) => commission.sourceBusinessType === 'after_sales_recovery')
+)), true);
+
 const stats = await recoveryOrderApi.fetchRecoveryOrderStats();
 assert.equal(stats.data.total, 1);
-assert.equal(stats.data.waitingSettlement, 1);
-assert.equal(stats.data.generatedCommissionAmount, 0);
+assert.equal(stats.data.waitingSettlement, 0);
+assert.equal(stats.data.generatedCommissionAmount, 120);
