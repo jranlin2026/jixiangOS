@@ -371,7 +371,11 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
     const isContributorField = field === 'leadContributorName';
     const isUserField = field === 'inputBy' || field === 'assignedTo';
     const currentValue = draft[field] || '';
-    const showCurrentUserOption = isUserField && currentValue && !users.some((user) => user.name === currentValue);
+    const userFieldOptions = field === 'assignedTo' ? assignableUsers : users;
+    const showCurrentUserOption = isUserField
+      && currentValue
+      && currentValue !== '待分配'
+      && !userFieldOptions.some((user) => user.name === currentValue);
     const displayValue = field === 'sourceType'
       ? normalizeResourceOwnership(currentLead.sourceType)
       : field === 'tagsText'
@@ -406,7 +410,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
               <TextField select value={currentValue} onChange={handleDraftChange(field)} size="small" fullWidth>
                 {showCurrentUserOption && <MenuItem value={currentValue}>{currentValue}</MenuItem>}
                 {field === 'assignedTo' && <MenuItem value="待分配">待分配</MenuItem>}
-                {users.map((user) => (
+                {userFieldOptions.map((user) => (
                   <MenuItem key={user.id} value={user.name}>
                     {user.name}（{user.positionName || '未设置职位'}）
                   </MenuItem>

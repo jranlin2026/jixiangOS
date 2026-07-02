@@ -20,9 +20,10 @@ import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import useCustomerStore from '../../store/useCustomerStore';
 import type { Customer, CustomerActivityAttachment, CustomerActivityAttachmentCategory, CustomerActivityRecord } from '../../types/customer';
 import type { AIBusinessCard } from '../../types/aiCard';
+import type { LeadFlowConfig } from '../../types/lead';
 import type { Order } from '../../types/order';
 import type { CustomerLevelConfig, LeadSourceConfig, User } from '../../types/settings';
-import { aiCardApi, customerApi, orderApi, settingsApi } from '../../api';
+import { aiCardApi, customerApi, leadFlowApi, orderApi, settingsApi } from '../../api';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelColor, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
@@ -37,6 +38,7 @@ import { formatPhoneForDisplay, getPhoneNumberError, normalizePhoneForStorage } 
 import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution';
 import PermissionGate from '../../shared/auth/PermissionGate';
 import { PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { getLeadAssignmentCandidates, sortLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 
 interface CustomerDetailProps {
   customer: Customer;
@@ -128,6 +130,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const [orders, setOrders] = useState<Order[]>([]);
   const [contracts, setContracts] = useState<ContractFile[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [leadFlowConfig, setLeadFlowConfig] = useState<LeadFlowConfig | null>(null);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
   const [releaseDialogOpen, setReleaseDialogOpen] = useState(false);
@@ -164,6 +167,9 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       if (res.code === 0) {
         setUsers(res.data.filter((user) => user.isActive));
       }
+    });
+    leadFlowApi.fetchLeadFlowConfig().then((res) => {
+      if (res.code === 0) setLeadFlowConfig(res.data);
     });
     settingsApi.fetchLeadSourceConfigs().then((res) => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
@@ -242,6 +248,10 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     }
     return options;
   }, [currentCustomer.customerLevel, customerLevelConfigs]);
+  const assignableUsers = useMemo(
+    () => sortLeadAssignmentCandidates(getLeadAssignmentCandidates(users, leadFlowConfig)),
+    [leadFlowConfig, users],
+  );
 
   const handleSourceSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const option = sourceOptions.find((item) => item.key === event.target.value);
@@ -455,7 +465,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     const isResourceField = field === 'sourceType';
     const isCustomerLevelField = field === 'customerLevel';
     const currentValue = (draft[field] as string) || '';
-    const showCurrentUserOption = isUserField && currentValue && !users.some((user) => user.name === currentValue);
+    const userFieldOptions = field === 'owner' ? assignableUsers : users;
+    const showCurrentUserOption = isUserField && currentValue && !userFieldOptions.some((user) => user.name === currentValue);
     const displayValue = field === 'createdAt' && currentCustomer.createdAt
       ? formatDate(currentCustomer.createdAt, 'yyyy-MM-dd HH:mm:ss')
       : field === 'phone'
@@ -511,7 +522,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               >
                 {field === 'originalSalesTransferBy' && <MenuItem value="">无</MenuItem>}
                 {showCurrentUserOption && <MenuItem value={currentValue}>{currentValue}</MenuItem>}
-                {users.map((user) => (
+                {userFieldOptions.map((user) => (
                   <MenuItem key={user.id} value={user.name}>
                     {user.name}（{user.positionName || '未设置职位'}）
                   </MenuItem>
