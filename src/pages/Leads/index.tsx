@@ -41,15 +41,13 @@ import LeadForm from './LeadForm';
 import { formatPhoneForDisplay } from '../../shared/utils/phoneNumber';
 import LeadBulkImportDialog from './LeadBulkImportDialog';
 import LeadIntakeTab from './LeadIntakeTab';
-import type { Lead } from '../../types/lead';
-import { leadApi, leadBulkImportApi, leadFlowApi, roleApi, settingsApi } from '../../api';
+import type { Lead, LeadFlowConfig } from '../../types/lead';
+import { leadApi, leadBulkImportApi, leadFlowApi, settingsApi } from '../../api';
 import type { LeadSourceConfig, LifecycleStatusConfig, User } from '../../types/settings';
-import type { Role } from '../../types/role';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import PermissionGate from '../../shared/auth/PermissionGate';
 import useAuthStore from '../../store/useAuthStore';
-import { canReceiveLead, hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
-import { filterUsersByCurrentDataScope } from '../../shared/utils/dataVisibility';
+import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import ResizableHeaderCell, {
   getResizableCellSx,
   readColumnWidths,
@@ -62,6 +60,7 @@ import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import { ModuleHeader, ModulePage, ModuleTabs, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
+import { getLeadAssignmentCandidates, sortLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 
 type LeadColumn = {
   id: string;
@@ -245,7 +244,7 @@ const Leads: React.FC = () => {
   const [lifecycleConfigs, setLifecycleConfigs] = useState<LifecycleStatusConfig[]>([]);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [roles, setRoles] = useState<Role[]>([]);
+  const [leadFlowConfig, setLeadFlowConfig] = useState<LeadFlowConfig | null>(null);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [assignLead, setAssignLead] = useState<Lead | null>(null);
   const [assignSalesName, setAssignSalesName] = useState('');
@@ -285,8 +284,8 @@ const Leads: React.FC = () => {
     settingsApi.fetchUsers({ isActive: true }).then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
     });
-    roleApi.getRoles({ isActive: true }).then((res) => {
-      if (res.code === 0) setRoles(res.data);
+    leadFlowApi.fetchLeadFlowConfig().then((res) => {
+      if (res.code === 0) setLeadFlowConfig(res.data);
     });
     settingsApi.fetchLeadSourceConfigs().then((res) => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive && !item.parentId));
@@ -301,7 +300,7 @@ const Leads: React.FC = () => {
     writeColumnWidths(LEAD_WIDTH_STORAGE_KEY, columnWidths);
   }, [columnWidths]);
 
-  const salesUsers = filterUsersByCurrentDataScope(users).filter((user) => canReceiveLead(user, roles));
+  const assignableUsers = sortLeadAssignmentCandidates(getLeadAssignmentCandidates(users, leadFlowConfig));
   const canViewLeadList = hasPermission(currentUser, PERMISSION_KEYS.LEADS_LIST);
   const canViewLeadIntake = hasPermission(currentUser, PERMISSION_KEYS.LEADS_INTAKE_STATUS);
   const canViewLeadDetail = hasPermission(currentUser, PERMISSION_KEYS.LEADS_DETAIL);
@@ -582,7 +581,7 @@ const Leads: React.FC = () => {
               <Select value={filters.owner || ''} label="分配销售" onChange={(event) => handleFilterChange('owner', event.target.value)}>
                 <MenuItem value="">全部</MenuItem>
                 <MenuItem value="待分配">待分配</MenuItem>
-                {salesUsers.map((user) => (
+                {assignableUsers.map((user) => (
                   <MenuItem key={user.id} value={user.name}>{user.name}</MenuItem>
                 ))}
               </Select>
@@ -734,7 +733,12 @@ const Leads: React.FC = () => {
             onChange={(event) => setAssignSalesName(event.target.value)}
             fullWidth
           >
-            {salesUsers.map((user) => (
+            {assignableUsers.length === 0 && (
+              <MenuItem value="" disabled>
+                暂无可分配成员，请到系统设置 &gt; 客户管理 &gt; 线索流转中添加参与成员
+              </MenuItem>
+            )}
+            {assignableUsers.map((user) => (
               <MenuItem key={user.id} value={user.name}>
                 {user.name}（{user.positionName || '未设置职位'}）
               </MenuItem>

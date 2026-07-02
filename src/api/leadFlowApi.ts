@@ -12,6 +12,7 @@ import { isSuperAdminRoleName } from '../shared/utils/roles';
 import { hydrateLeadLifecycle } from './lifecycleSync';
 import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
 import { getPhoneNumberError, normalizePhoneForComparison, normalizePhoneForStorage } from '../shared/utils/phoneNumber';
+import { getLeadAssignmentCandidates, isActiveLeadAssignableUser } from '../shared/utils/leadAssignment';
 
 function ensureInit(): void {
   initializeMockData();
@@ -77,13 +78,11 @@ function validateAttribution(data: Partial<Lead>): string | null {
 
 function getAssignableUsers(): User[] {
   const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
-  return users.filter((user) => user.isActive && (user.employmentStatus || 'active') !== 'left');
+  return users.filter(isActiveLeadAssignableUser);
 }
 
 function getConfiguredParticipants(config: LeadFlowConfig): User[] {
-  const assignableUsers = getAssignableUsers();
-  if (!config.participantUserIds.length) return assignableUsers;
-  return assignableUsers.filter((user) => config.participantUserIds.includes(user.id));
+  return getLeadAssignmentCandidates(getAssignableUsers(), config);
 }
 
 function findCollision(data: Partial<Lead>, excludeLeadId?: string) {

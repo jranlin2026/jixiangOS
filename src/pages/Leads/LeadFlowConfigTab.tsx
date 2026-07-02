@@ -33,14 +33,10 @@ import type { Department } from '../../types/department';
 import type { Role } from '../../types/role';
 import type { User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import { isActiveLeadAssignableUser, NO_LEAD_FLOW_PARTICIPANTS_MARKER } from '../../shared/utils/leadAssignment';
 
 const LEAD_UNIQUE_KEY_MODE = 'phone_or_wechat' as const;
 const MAX_PARTICIPANTS = 500;
-const NO_PARTICIPANTS_MARKER = '__lead_flow_no_participants__';
-
-function isActiveEmployee(user: User): boolean {
-  return user.isActive && (user.employmentStatus || 'active') !== 'left';
-}
 
 function sortUsers(users: User[]): User[] {
   return [...users].sort((a, b) => (a.name || a.account || '').localeCompare(b.name || b.account || '', 'zh-Hans-CN'));
@@ -65,7 +61,7 @@ const LeadFlowConfigTab: React.FC = () => {
       roleApi.getRoles({ isActive: true }),
       departmentApi.getDepartments({ isActive: true }),
     ]).then(([usersRes, rolesRes, departmentsRes]) => {
-      if (usersRes.code === 0) setUsers(sortUsers(usersRes.data.filter(isActiveEmployee)));
+      if (usersRes.code === 0) setUsers(sortUsers(usersRes.data.filter(isActiveLeadAssignableUser)));
       if (rolesRes.code === 0) setRoles(rolesRes.data.filter((role) => role.isActive));
       if (departmentsRes.code === 0) {
         const sortedDepartments = [...departmentsRes.data].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
@@ -118,7 +114,7 @@ const LeadFlowConfigTab: React.FC = () => {
 
   const effectiveSelectedIds = useMemo(() => {
     if (!config) return [];
-    if (config.participantUserIds.includes(NO_PARTICIPANTS_MARKER)) return [];
+    if (config.participantUserIds.includes(NO_LEAD_FLOW_PARTICIPANTS_MARKER)) return [];
     return config.participantUserIds.length
       ? config.participantUserIds.filter((id) => usersById.has(id))
       : users.map((user) => user.id);
@@ -134,7 +130,7 @@ const LeadFlowConfigTab: React.FC = () => {
     if (!config) return;
     const uniqueIds = Array.from(new Set(nextIds)).filter((id) => usersById.has(id));
     if (!uniqueIds.length) {
-      updateConfig('participantUserIds', [NO_PARTICIPANTS_MARKER]);
+      updateConfig('participantUserIds', [NO_LEAD_FLOW_PARTICIPANTS_MARKER]);
       return;
     }
     const allActiveUserIds = users.map((user) => user.id);
