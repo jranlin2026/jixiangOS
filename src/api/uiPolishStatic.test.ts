@@ -553,8 +553,13 @@ assert.match(
 );
 assert.match(
   sidebarSource,
-  /label:\s*'交付'[\s\S]*label:\s*'售后服务'[\s\S]*label:\s*'财务中心'/,
-  'Sidebar should place 售后服务 between 交付 and 财务中心.',
+  /label:\s*'交付中心'[\s\S]*label:\s*'售后服务'[\s\S]*label:\s*'财务中心'/,
+  'Sidebar should place 售后服务 between 交付中心 and 财务中心.',
+);
+assert.match(
+  sidebarSource,
+  /label:\s*'客户管理'[\s\S]*label:\s*'客户列表'[\s\S]*label:\s*'公海池'/,
+  'Sidebar customer module should expose 客户列表 and 公海池 as folded child entries.',
 );
 assert.match(
   recoveryOrderSource,

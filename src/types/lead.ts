@@ -101,6 +101,7 @@ export interface LeadFlowConfig {
   uniqueKeyMode: LeadUniqueKeyMode;
   interceptionEnabled: boolean;
   autoAssignEnabled: boolean;
+  autoClaimAfterAssignmentEnabled: boolean;
   assignmentMode: 'round_robin';
   participantUserIds: ID[];
   dailyLimitEnabled: boolean;

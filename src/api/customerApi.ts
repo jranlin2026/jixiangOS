@@ -287,13 +287,17 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
   if (filters?.customerLevel) {
     filtered = filtered.filter((c) => c.customerLevel === filters.customerLevel);
   }
-  if (filters?.owner) {
-    filtered = filtered.filter((c) => c.owner === filters.owner);
-  }
   if (filters?.lifecycleStatusCode) {
     filtered = filtered.filter((c) => c.lifecycleStatusCode === filters.lifecycleStatusCode);
   } else {
     filtered = filtered.filter((c) => c.lifecycleStatusCode !== 'public_pool');
+  }
+  if (filters?.owner) {
+    filtered = filtered.filter((c) => (
+      filters.lifecycleStatusCode === 'public_pool'
+        ? (c.releasedBy === filters.owner || c.owner === filters.owner)
+        : c.owner === filters.owner
+    ));
   }
 
   const page = filters?.page || 1;

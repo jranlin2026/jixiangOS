@@ -300,6 +300,16 @@ const LeadFlowConfigTab: React.FC = () => {
           control={<Switch checked={config.autoAssignEnabled} onChange={(event) => updateConfig('autoAssignEnabled', event.target.checked)} />}
           label="线索自动分配：按照设置规则将线索自动分配给参与成员"
         />
+        <FormControlLabel
+          control={
+            <Switch
+              checked={config.autoClaimAfterAssignmentEnabled}
+              disabled={!config.autoAssignEnabled}
+              onChange={(event) => updateConfig('autoClaimAfterAssignmentEnabled', event.target.checked)}
+            />
+          }
+          label="线索自动领取：开启后，线索分配到销售时同步进入该销售客户库，无需销售手动领取"
+        />
       </Box>
 
       <Box sx={{ mt: 3, ml: 4 }}>

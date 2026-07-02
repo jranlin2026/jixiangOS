@@ -65,10 +65,27 @@ interface NavChildItem {
 const navItems: NavItem[] = [
   { label: '首页', icon: <HomeIcon />, path: ROUTES.HOME, permissionKey: PERMISSION_KEYS.HOME },
   { label: '驾驶舱', icon: <DashboardIcon />, path: ROUTES.DASHBOARD, permissionKey: PERMISSION_KEYS.DASHBOARD },
-  { label: '线索', icon: <PeopleAltIcon />, path: ROUTES.LEADS, permissionKey: PERMISSION_KEYS.LEADS },
-  { label: '客户', icon: <GroupsIcon />, path: ROUTES.CUSTOMERS, permissionKey: PERMISSION_KEYS.CUSTOMERS },
-  { label: '订单', icon: <ReceiptLongIcon />, path: ROUTES.ORDERS, permissionKey: PERMISSION_KEYS.ORDERS },
-  { label: '交付', icon: <LocalShippingIcon />, path: ROUTES.DELIVERY, permissionKey: PERMISSION_KEYS.DELIVERY },
+  { label: '线索管理', icon: <PeopleAltIcon />, path: ROUTES.LEADS, permissionKey: PERMISSION_KEYS.LEADS },
+  {
+    label: '客户管理',
+    icon: <GroupsIcon />,
+    path: ROUTES.CUSTOMERS,
+    permissionKey: PERMISSION_KEYS.CUSTOMERS,
+    children: [
+      {
+        label: '客户列表',
+        path: `${ROUTES.CUSTOMERS}?tab=active`,
+        permissionKeys: [PERMISSION_KEYS.CUSTOMERS, PERMISSION_KEYS.CUSTOMER_LIST],
+      },
+      {
+        label: '公海池',
+        path: `${ROUTES.CUSTOMERS}?tab=public_pool`,
+        permissionKeys: [PERMISSION_KEYS.CUSTOMERS, PERMISSION_KEYS.CUSTOMER_LIST],
+      },
+    ],
+  },
+  { label: '订单管理', icon: <ReceiptLongIcon />, path: ROUTES.ORDERS, permissionKey: PERMISSION_KEYS.ORDERS },
+  { label: '交付中心', icon: <LocalShippingIcon />, path: ROUTES.DELIVERY, permissionKey: PERMISSION_KEYS.DELIVERY },
   {
     label: '售后服务',
     icon: <SupportAgentIcon />,
@@ -157,7 +174,10 @@ const Sidebar: React.FC<SidebarProps> = ({ width }) => {
     || Boolean(item.children?.length)
   )), [currentUser]);
 
-  const isChildActive = (child: NavChildItem) => currentFullPath === child.path;
+  const isChildActive = (child: NavChildItem) => (
+    currentFullPath === child.path
+    || (child.path === `${ROUTES.CUSTOMERS}?tab=active` && location.pathname === ROUTES.CUSTOMERS && !location.search)
+  );
 
   const handleLogout = async () => {
     await logout();

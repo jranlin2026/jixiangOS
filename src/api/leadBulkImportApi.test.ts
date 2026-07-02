@@ -173,8 +173,11 @@ const templateWorkbook = new ExcelJS.Workbook();
 await templateWorkbook.xlsx.load(templateBuffer);
 const templateSheet = templateWorkbook.getWorksheet('\u7ebf\u7d22\u6279\u91cf\u5165\u5e93\u6a21\u677f');
 const optionsSheet = templateWorkbook.getWorksheet('\u5b57\u6bb5\u9009\u9879');
+const instructionsSheet = templateWorkbook.getWorksheet('填写说明');
 assert.ok(templateSheet);
 assert.ok(optionsSheet);
+assert.ok(instructionsSheet);
+assert.equal(instructionsSheet!.getCell('A1').value, '线索批量入库填写说明');
 assert.deepEqual(
   LEAD_BULK_IMPORT_HEADERS.map((_, index) => templateSheet!.getCell(1, index + 1).value),
   [...LEAD_BULK_IMPORT_HEADERS],

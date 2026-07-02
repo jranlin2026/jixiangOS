@@ -37,6 +37,7 @@ const TEXT = {
   ownerMissing: '\u5206\u914d\u9500\u552e\u4e0d\u5b58\u5728',
   templateSheet: '\u7ebf\u7d22\u6279\u91cf\u5165\u5e93\u6a21\u677f',
   optionsSheet: '\u5b57\u6bb5\u9009\u9879',
+  instructionsSheet: '填写说明',
   exampleName: '\u5f20\u4e09',
   exampleCompany: '\u793a\u4f8b\u516c\u53f8',
   exampleSource: '\u5b98\u7f51',
@@ -307,6 +308,7 @@ async function createTemplateWorkbook(): Promise<ArrayBuffer> {
   const ExcelJS = await loadExcelJs();
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet(TEXT.templateSheet);
+  const instructionsSheet = workbook.addWorksheet(TEXT.instructionsSheet);
   const optionsSheet = workbook.addWorksheet(TEXT.optionsSheet);
   const users = getActiveUsers();
   const { roles } = ensureOrganizationConfigData();
@@ -328,6 +330,39 @@ async function createTemplateWorkbook(): Promise<ArrayBuffer> {
   }
   optionsSheet.columns = optionColumns.map((column) => ({ width: Math.max(16, column.title.length + 8) }));
   optionsSheet.state = 'hidden';
+
+  instructionsSheet.addRows([
+    ['线索批量入库填写说明'],
+    ['必填字段', '姓名、线索来源、手机号/微信二选一'],
+    ['条件必填', '资源归属为“个人资源”时，必须填写线索贡献人'],
+    ['手机号格式', '国内手机号填写 11 位，例如 13800000000；也支持 +8613800000000'],
+    ['线索来源', '必须从模板下拉选项中选择；下拉选项会按系统设置里的最新线索来源自动生成'],
+    ['资源归属', '只能选择“公司资源”或“个人资源”；不填默认公司资源'],
+    ['线索录入人', '可留空，留空时默认当前导入人；填写时必须是系统内在职员工姓名'],
+    ['线索贡献人', '个人资源必填；填写时必须是系统内在职员工姓名'],
+    ['分配销售', '可留空或选择“待分配”；填写员工时必须是可接收线索的在职员工'],
+    ['标签', '多个标签用英文逗号分隔，例如：重点,高意向'],
+    ['查重规则', '系统会按手机号或微信查重；已存在客户或线索时，该行会导入失败'],
+    ['使用提醒', '请勿修改模板表头和顺序；导入前删除示例行；仅支持 .xlsx 文件'],
+  ]);
+  instructionsSheet.getColumn(1).width = 18;
+  instructionsSheet.getColumn(2).width = 92;
+  instructionsSheet.getRow(1).font = { bold: true, size: 14 };
+  instructionsSheet.getRow(1).height = 24;
+  instructionsSheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF6FF' } };
+  instructionsSheet.getCell('B1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF6FF' } };
+  instructionsSheet.eachRow((row, rowNumber) => {
+    row.eachCell((cell) => {
+      cell.alignment = { vertical: 'middle', wrapText: true };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFDDE4EC' } },
+        left: { style: 'thin', color: { argb: 'FFDDE4EC' } },
+        bottom: { style: 'thin', color: { argb: 'FFDDE4EC' } },
+        right: { style: 'thin', color: { argb: 'FFDDE4EC' } },
+      };
+    });
+    if (rowNumber > 1) row.getCell(1).font = { bold: true };
+  });
 
   sheet.addRows([
     [...LEAD_BULK_IMPORT_HEADERS],

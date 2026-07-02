@@ -566,6 +566,7 @@ export const DEFAULT_LEAD_FLOW_CONFIG = {
   uniqueKeyMode: 'phone_or_wechat',
   interceptionEnabled: true,
   autoAssignEnabled: true,
+  autoClaimAfterAssignmentEnabled: false,
   assignmentMode: 'round_robin',
   participantUserIds: [],
   dailyLimitEnabled: true,

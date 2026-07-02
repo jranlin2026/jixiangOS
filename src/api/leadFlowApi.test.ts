@@ -37,6 +37,7 @@ assert.match(flowConfigSource, /选择成员/);
 assert.match(flowConfigSource, /departmentApi/);
 assert.match(flowConfigSource, /默认全体在职员工/);
 assert.match(flowConfigSource, /getParticipantLabel/);
+assert.match(flowConfigSource, /线索自动领取/);
 assert.match(flowConfigSource, /\$\{user\.name\}（\$\{roleLabel\}）/);
 assert.doesNotMatch(flowConfigSource, /salesUsers\.map\(\(user\) => \(\s*<FormControlLabel/);
 
@@ -359,6 +360,33 @@ const roundRobinFirst = leadFlowApi.intakeLead(createLeadInput('Round Robin Firs
 const roundRobinSecond = leadFlowApi.intakeLead(createLeadInput('Round Robin Second', { phone: '13900001002' }));
 assert.equal(roundRobinFirst.lead?.assignedTo, 'Sales A');
 assert.equal(roundRobinSecond.lead?.assignedTo, 'Sales B');
+
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEAD_FLOW_CONFIG, JSON.stringify({
+  id: 'lead-flow-global',
+  uniqueKeyMode: 'phone_or_wechat',
+  interceptionEnabled: true,
+  autoAssignEnabled: true,
+  autoClaimAfterAssignmentEnabled: true,
+  assignmentMode: 'round_robin',
+  participantUserIds: ['user-sales-a'],
+  dailyLimitEnabled: false,
+  dailyLimit: 200,
+  lastAssignedIndex: -1,
+  updatedAt: now,
+}));
+const autoClaimedIntake = leadFlowApi.intakeLead(createLeadInput('Auto Claimed Lead', { phone: '13900001007' }));
+assert.equal(autoClaimedIntake.lead?.assignedTo, 'Sales A');
+assert.equal(autoClaimedIntake.lead?.owner, 'Sales A');
+assert.equal(autoClaimedIntake.lead?.lifecycleStatusCode, 'following');
+assert.ok(autoClaimedIntake.lead?.customerId);
+const autoClaimedCustomers = JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]');
+assert.equal(autoClaimedCustomers.length, 1);
+assert.equal(autoClaimedCustomers[0]?.owner, 'Sales A');
+assert.equal(autoClaimedCustomers[0]?.phone, '+8613900001007');
+assert.equal(autoClaimedCustomers[0]?.lifecycleStatusCode, 'following');
 
 storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
 storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));

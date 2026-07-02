@@ -39,6 +39,10 @@ function normalizeLeadFlowConfig(input?: StoredLeadFlowConfig | null): LeadFlowC
     uniqueKeyMode: OFFICIAL_UNIQUE_KEY_MODE,
     interceptionEnabled: toBoolean(merged.interceptionEnabled, DEFAULT_LEAD_FLOW_CONFIG.interceptionEnabled),
     autoAssignEnabled: toBoolean(merged.autoAssignEnabled, DEFAULT_LEAD_FLOW_CONFIG.autoAssignEnabled),
+    autoClaimAfterAssignmentEnabled: toBoolean(
+      merged.autoClaimAfterAssignmentEnabled,
+      DEFAULT_LEAD_FLOW_CONFIG.autoClaimAfterAssignmentEnabled,
+    ),
     assignmentMode: 'round_robin',
     participantUserIds: Array.isArray(merged.participantUserIds)
       ? merged.participantUserIds.filter((id): id is string => typeof id === 'string')
@@ -378,7 +382,31 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
     updatedAt: now,
   };
   const leadWithLifecycle = hydrateLeadLifecycle(lead);
-  const storedLead = leadWithLifecycle;
+  let storedLead = leadWithLifecycle;
+  if (config.autoClaimAfterAssignmentEnabled && assignment.assignedTo) {
+    const autoClaimedLead = hydrateLeadLifecycle({
+      ...leadWithLifecycle,
+      lifecycleStatusCode: LIFECYCLE_STATUS_CODES.FOLLOWING,
+      lifecycleStatus: '跟进中',
+      lifecycleStatusUpdatedAt: now,
+      changeHistory: [{
+        id: `hist-${uuidv4().slice(0, 8)}`,
+        action: 'update',
+        operator: getCurrentOperatorName(normalizedData.inputBy || assignment.owner),
+        changedAt: now,
+        summary: '线索自动领取到客户库',
+        changes: [{
+          field: 'lifecycleStatus',
+          label: '生命周期',
+          oldValue: '待跟进',
+          newValue: '跟进中',
+        }],
+      }, ...(leadWithLifecycle.changeHistory || [])],
+      updatedAt: now,
+    });
+    const customer = upsertCustomerFromLead(autoClaimedLead);
+    storedLead = { ...autoClaimedLead, customerId: customer.id };
+  }
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
   setStorageData(STORAGE_KEYS.LEADS, [storedLead, ...leads]);
   setStorageData(STORAGE_KEYS.LEAD_FLOW_CONFIG, { ...config, lastAssignedIndex: assignment.nextIndex, updatedAt: now });

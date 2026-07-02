@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -13,8 +13,6 @@ import {
   MenuItem,
   Paper,
   Select,
-  Tab,
-  Tabs,
   Table,
   TableBody,
   TableCell,
@@ -62,7 +60,7 @@ import ResizableHeaderCell, {
 } from '../../shared/components/ResizableTable';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
-import { ModuleHeader, ModulePage, ModuleTabs, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
+import { ModuleHeader, ModulePage, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
 
 type CustomerColumn = {
   id: string;
@@ -85,7 +83,7 @@ const CUSTOMER_WIDTH_STORAGE_KEY = 'aaos_customer_table_column_widths_v2';
 const CUSTOMER_ACTION_COLUMN_WIDTH = 190;
 const formatCustomerSource = (customer: Customer) => [customer.leadSource, customer.sourceName].filter(Boolean).join('-') || '-';
 
-const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[]): CustomerColumn[] => {
+const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[], scope: CustomerScope = 'active'): CustomerColumn[] => {
   const getLifecycleConfig = (customer: Customer) => {
     const code = normalizeLifecycleStatusCode(customer.lifecycleStatusCode);
     return lifecycleConfigs.find((item) => item.code === code) || getLifecycleConfigByCode(code);
@@ -134,7 +132,11 @@ const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[]): Custom
   { id: 'originalSalesTransferBy', label: '原销转人员', render: (customer) => customer.originalSalesTransferBy || '-' },
   { id: 'totalSpent', label: '累计消费', render: (customer) => formatCurrency(customer.totalSpent) },
   { id: 'orderCount', label: '订单数', render: (customer) => customer.orderCount },
-  { id: 'owner', label: '销售负责人', render: (customer) => customer.owner || '-' },
+  {
+    id: 'owner',
+    label: scope === 'public_pool' ? '最后跟进人' : '销售负责人',
+    render: (customer) => (scope === 'public_pool' ? (customer.releasedBy || customer.owner) : customer.owner) || '-',
+  },
   { id: 'remark', label: '备注', render: (customer) => customer.remark || '-' },
   { id: 'createdAt', label: '创建时间', render: (customer) => formatDate(customer.createdAt, 'yyyy-MM-dd HH:mm:ss') },
   ];
@@ -228,8 +230,13 @@ const readCustomerViewConfig = (columns: CustomerColumn[]) => {
   }
 };
 
+const getCustomerScopeFromTab = (tab?: string | null): CustomerScope => (
+  tab === 'public_pool' ? 'public_pool' : 'active'
+);
+
 const Customers: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { items, filters, pagination, fetchItems, setFilters } = useCustomerStore();
   const currentUser = useAuthStore((state) => state.currentUser);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -244,25 +251,29 @@ const Customers: React.FC = () => {
   const [lifecycleConfigs, setLifecycleConfigs] = useState<LifecycleStatusConfig[]>([]);
   const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
-  const [customerScope, setCustomerScope] = useState<CustomerScope>('active');
+  const [customerScope, setCustomerScope] = useState<CustomerScope>(() => getCustomerScopeFromTab(searchParams.get('tab')));
   const [releaseTarget, setReleaseTarget] = useState<Customer | null>(null);
   const [releaseReason, setReleaseReason] = useState('');
   const [deleteCustomerTarget, setDeleteCustomerTarget] = useState<Customer | null>(null);
   const [deleteCustomerReason, setDeleteCustomerReason] = useState('');
   const [deleteCustomerSubmitting, setDeleteCustomerSubmitting] = useState(false);
   const { alert, dialog: feedbackDialog } = useAppFeedback();
-  const columns = useMemo(() => buildCustomerColumns(lifecycleConfigs), [lifecycleConfigs]);
+  const columns = useMemo(() => buildCustomerColumns(lifecycleConfigs, customerScope), [customerScope, lifecycleConfigs]);
   const customerLevelOptions = useMemo(() => {
     const activeConfigs = customerLevelConfigs.filter((item) => item.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
     return activeConfigs.length
       ? activeConfigs.map((item) => ({ value: item.value, label: item.label, color: item.color }))
       : CUSTOMER_LEVELS;
   }, [customerLevelConfigs]);
-  const [viewConfig, setViewConfig] = useState<CustomerViewConfig>(() => readCustomerViewConfig(buildCustomerColumns([])));
+  const [viewConfig, setViewConfig] = useState<CustomerViewConfig>(() => readCustomerViewConfig(buildCustomerColumns([], customerScope)));
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(CUSTOMER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
 
   useEffect(() => {
-    fetchItems();
+    fetchItems({
+      ...filters,
+      productLevel: undefined,
+      lifecycleStatusCode: customerScope === 'public_pool' ? 'public_pool' : undefined,
+    });
     settingsApi.fetchUsers({ isActive: true }).then((res) => {
       if (res.code === 0) {
         setUsers(res.data.filter((user) => user.isActive));
@@ -300,6 +311,8 @@ const Customers: React.FC = () => {
   const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length);
   const visibleOwnerUsers = useMemo(() => filterUsersByCurrentDataScope(users), [users]);
   const isSuperAdmin = isSuperAdminRoleName(currentUser?.role);
+  const isPublicPoolScope = customerScope === 'public_pool';
+  const ownerFilterLabel = isPublicPoolScope ? '最后跟进人' : '销售负责人';
   const tableMinWidth = useMemo(
     () => visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + CUSTOMER_ACTION_COLUMN_WIDTH,
     [columnWidths, visibleColumns],
@@ -321,12 +334,14 @@ const Customers: React.FC = () => {
     lifecycleStatusCode: scope === 'public_pool' ? 'public_pool' : undefined,
   });
 
-  const handleScopeChange = (_: React.SyntheticEvent, value: CustomerScope) => {
-    setCustomerScope(value);
-    const nextFilters = scopedFilters({ ...filters, page: 1, pageSize: pagination.pageSize || 10 }, value);
+  useEffect(() => {
+    const nextScope = getCustomerScopeFromTab(searchParams.get('tab'));
+    if (nextScope === customerScope) return;
+    setCustomerScope(nextScope);
+    const nextFilters = scopedFilters({ ...filters, page: 1, pageSize: pagination.pageSize || 10 }, nextScope);
     setFilters(nextFilters);
     fetchItems(nextFilters);
-  };
+  }, [searchParams]);
 
   const handleClaimCustomer = async (customer: Customer) => {
     const userName = getCurrentUserName();
@@ -514,8 +529,8 @@ const Customers: React.FC = () => {
   return (
     <ModulePage>
       <ModuleHeader
-        title="客户管理"
-        description="沉淀客户资产、跟进动态和订单关系。"
+        title={isPublicPoolScope ? '公海池' : '客户管理'}
+        description={isPublicPoolScope ? '集中管理已释放客户，支持重新领取和后续跟进。' : '沉淀客户资产、跟进动态和订单关系。'}
         actions={(
           <>
           <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
@@ -528,10 +543,6 @@ const Customers: React.FC = () => {
         )}
       />
 
-      <ModuleTabs value={customerScope} onChange={handleScopeChange}>
-        <Tab value="active" label="客户列表" />
-        <Tab value="public_pool" label="公海池" />
-      </ModuleTabs>
 
       <ModuleToolbar>
         <TextField
@@ -556,27 +567,29 @@ const Customers: React.FC = () => {
           </Select>
         </FormControl>
         <FormControl size="small" sx={{ minWidth: 150 }}>
-          <InputLabel>销售负责人</InputLabel>
-          <Select value={filters.owner || ''} label="销售负责人" onChange={(e) => handleFilterChange('owner', e.target.value)}>
+          <InputLabel>{ownerFilterLabel}</InputLabel>
+          <Select value={filters.owner || ''} label={ownerFilterLabel} onChange={(e) => handleFilterChange('owner', e.target.value)}>
             <MenuItem value="">全部</MenuItem>
             {visibleOwnerUsers.map((user) => (
               <MenuItem key={user.id} value={user.name}>{user.name}</MenuItem>
             ))}
           </Select>
         </FormControl>
-        <FormControl size="small" sx={{ minWidth: 140 }}>
-          <InputLabel>生命周期</InputLabel>
-          <Select
-            value={filters.lifecycleStatusCode || ''}
-            label="生命周期"
-            onChange={(e) => handleFilterChange('lifecycleStatusCode', e.target.value)}
-          >
-            <MenuItem value="">默认客户</MenuItem>
-            {lifecycleConfigs.map((status) => (
-              <MenuItem key={status.code} value={status.code}>{status.name}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+        {!isPublicPoolScope && (
+          <FormControl size="small" sx={{ minWidth: 140 }}>
+            <InputLabel>生命周期</InputLabel>
+            <Select
+              value={filters.lifecycleStatusCode || ''}
+              label="生命周期"
+              onChange={(e) => handleFilterChange('lifecycleStatusCode', e.target.value)}
+            >
+              <MenuItem value="">默认客户</MenuItem>
+              {lifecycleConfigs.map((status) => (
+                <MenuItem key={status.code} value={status.code}>{status.name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
       </ModuleToolbar>
 
       <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { overflowX: 'auto' }]}>
