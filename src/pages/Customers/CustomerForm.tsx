@@ -9,15 +9,17 @@ import {
   TextField,
 } from '@mui/material';
 import useCustomerStore from '../../store/useCustomerStore';
-import { settingsApi } from '../../api';
+import { leadFlowApi, settingsApi } from '../../api';
 import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
 import type { Customer } from '../../types/customer';
+import type { LeadFlowConfig } from '../../types/lead';
 import type { CustomerLevelConfig, LeadSourceConfig, User } from '../../types/settings';
 import { applyCurrentLeadInputBy, getCurrentLeadInputName } from '../../shared/utils/leadInputAttribution';
 import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
 import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution';
+import { getLeadAssignmentCandidates, sortLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 
 interface CustomerFormProps {
   open: boolean;
@@ -38,6 +40,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   const { create, update } = useCustomerStore();
   const isEdit = !!customer;
   const [users, setUsers] = useState<User[]>([]);
+  const [leadFlowConfig, setLeadFlowConfig] = useState<LeadFlowConfig | null>(null);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
 
@@ -70,6 +73,10 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   }), [childSources, parentSources]);
 
   const defaultOwner = useMemo(() => getCurrentLeadInputName(users[0]?.name || ''), [users]);
+  const assignableUsers = useMemo(
+    () => sortLeadAssignmentCandidates(getLeadAssignmentCandidates(users, leadFlowConfig)),
+    [leadFlowConfig, users],
+  );
   const customerLevelOptions = useMemo(() => {
     const activeConfigs = customerLevelConfigs.filter((item) => item.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
     const options = activeConfigs.length
@@ -107,6 +114,9 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     settingsApi.fetchUsers({ isActive: true }).then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
     });
+    leadFlowApi.fetchLeadFlowConfig().then((res) => {
+      if (res.code === 0) setLeadFlowConfig(res.data);
+    });
     settingsApi.fetchLeadSourceConfigs().then((res) => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
     });
@@ -119,7 +129,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     if (!open) return;
 
     const defaultSourceOption = sourceOptions[0];
-    const fallbackOwner = customer?.owner || defaultOwner;
+    const fallbackOwner = customer?.owner || assignableUsers[0]?.name || '';
     setForm({
       name: customer?.name || '',
       company: customer?.company || '',
@@ -139,7 +149,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       tags: customer?.tags?.join(', ') || '',
       remark: customer?.remark || '',
     });
-  }, [open, customer, defaultOwner, sourceOptions]);
+  }, [open, customer, assignableUsers, defaultOwner, sourceOptions]);
 
   const selectedSourceKey = sourceOptions.find((option) => (
     option.parentName === form.leadSource && option.childName === (form.sourceName || '')
@@ -199,6 +209,12 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       {user.name}（{user.positionName || '未设置职位'}）
     </MenuItem>
   ));
+  const ownerOptions = assignableUsers.map((user) => (
+    <MenuItem key={user.id} value={user.name}>
+      {`${user.name}${user.positionName ? ` (${user.positionName})` : ''}`}
+    </MenuItem>
+  ));
+  const shouldShowCurrentOwnerOption = form.owner && !assignableUsers.some((user) => user.name === form.owner);
   const missingContact = !form.phone.trim() && !form.wechat.trim();
   const phoneError = getPhoneNumberError(form.phone);
   const missingContributor = normalizeResourceOwnership(form.sourceType) === '个人资源' && !form.leadContributorName;
@@ -274,8 +290,17 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
               </MenuItem>
             ))}
           </TextField>
-          <TextField select label="分配销售" value={form.owner} onChange={handleChange('owner')} required fullWidth>
-            {userOptions}
+          <TextField
+            select
+            label="分配销售"
+            value={form.owner}
+            onChange={handleChange('owner')}
+            required
+            fullWidth
+            helperText={assignableUsers.length ? '候选人来自线索流转参与成员；未单独配置时默认全体在职员工' : '暂无可分配成员，请到系统设置 > 客户管理 > 线索流转中添加参与成员'}
+          >
+            {shouldShowCurrentOwnerOption && <MenuItem value={form.owner}>{form.owner}</MenuItem>}
+            {ownerOptions}
           </TextField>
           <TextField select label="客户等级" value={form.customerLevel} onChange={handleChange('customerLevel')} fullWidth>
             {customerLevelOptions.map((level) => (
