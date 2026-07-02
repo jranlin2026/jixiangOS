@@ -88,6 +88,8 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
   });
 
   useEffect(() => {
+    if (!open) return;
+
     settingsApi.fetchLeadSourceConfigs().then((res) => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
     });
@@ -97,7 +99,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     leadFlowApi.fetchLeadFlowConfig().then((res) => {
       if (res.code === 0) setLeadFlowConfig(res.data);
     });
-  }, []);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
