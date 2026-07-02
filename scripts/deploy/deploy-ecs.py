@@ -68,6 +68,14 @@ def run_local(command: list[str], *, cwd: Path = PROJECT_ROOT) -> None:
     subprocess.run(command, cwd=cwd, check=True)
 
 
+def print_remote_line(line: str) -> None:
+    try:
+        print(line, end="")
+    except UnicodeEncodeError:
+        sys.stdout.buffer.write(line.encode("utf-8", errors="replace"))
+        sys.stdout.buffer.flush()
+
+
 def should_include(path: Path) -> bool:
     relative = path.relative_to(PROJECT_ROOT)
     parts = set(relative.parts)
@@ -121,7 +129,7 @@ def run_remote(client: paramiko.SSHClient, command: str) -> None:
     stdin, stdout, stderr = client.exec_command(command, get_pty=True)
     del stdin
     for line in iter(stdout.readline, ""):
-        print(line, end="")
+        print_remote_line(line)
     exit_code = stdout.channel.recv_exit_status()
     err = stderr.read().decode("utf-8", errors="replace").strip()
     if err:

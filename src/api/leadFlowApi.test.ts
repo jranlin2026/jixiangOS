@@ -33,6 +33,9 @@ assert.doesNotMatch(flowConfigSource, /value="wechat"/);
 assert.doesNotMatch(flowConfigSource, /exemptionEnabled|orderMatchCustomerEnabled|dailyRestartEnabled|failedInboundCompensationEnabled|inactiveMemberSkipEnabled/);
 assert.match(flowConfigSource, /participantDialogOpen/);
 assert.match(flowConfigSource, /添加成员/);
+assert.match(flowConfigSource, /选择成员/);
+assert.match(flowConfigSource, /departmentApi/);
+assert.match(flowConfigSource, /默认全体在职员工/);
 assert.match(flowConfigSource, /getParticipantLabel/);
 assert.match(flowConfigSource, /\$\{user\.name\}（\$\{roleLabel\}）/);
 assert.doesNotMatch(flowConfigSource, /salesUsers\.map\(\(user\) => \(\s*<FormControlLabel/);
@@ -310,11 +313,11 @@ storage.setItem(STORAGE_KEYS.LEAD_FLOW_CONFIG, JSON.stringify({
   updatedAt: now,
 }));
 const defaultParticipantFallback = leadFlowApi.intakeLead(createLeadInput('Default Participant Fallback', { phone: '13900001000' }));
-assert.equal(defaultParticipantFallback.lead?.owner, '待分配');
-assert.equal(defaultParticipantFallback.lead?.assignedTo, undefined);
+assert.equal(defaultParticipantFallback.lead?.owner, 'Market A');
+assert.equal(defaultParticipantFallback.lead?.assignedTo, 'Market A');
 const defaultParticipantRecord = JSON.parse(storage.getItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS) || '[]')[0];
-assert.equal(defaultParticipantRecord?.assignedTo, undefined);
-assert.equal(defaultParticipantRecord?.status, '待分配');
+assert.equal(defaultParticipantRecord?.assignedTo, 'Market A');
+assert.equal(defaultParticipantRecord?.status, '入库成功');
 
 storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
 storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));

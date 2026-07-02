@@ -15,6 +15,7 @@ import { mockRefunds } from './data/refunds';
 import { mockCommissionRules } from './data/commissionRules';
 import { mockTags } from './data/tags';
 import { getStorageData, initializeStorage, isStorageInitialized, markStorageInitialized, setStorageData } from './storage';
+import { shouldUseBackendApi } from '../backendClient';
 import { DEFAULT_LEAD_FLOW_CONFIG, DEFAULT_LEAD_SOURCE_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, DEFAULT_ORDER_TYPE_CONFIGS, STORAGE_KEYS } from '../../shared/utils/constants';
 import type { Product } from '../../types/product';
 
@@ -63,6 +64,10 @@ function migrateLegacyDefaultProductDeliveryStages(): void {
   if (changed) setStorageData(STORAGE_KEYS.PRODUCTS, nextProducts);
 }
 
+function businessSeed<T>(demoData: T, emptyData: T): T {
+  return shouldUseBackendApi() ? emptyData : demoData;
+}
+
 /** 初始化所有 Mock 数据到 localStorage */
 export function initializeMockData(): void {
   if (isStorageInitialized()) {
@@ -70,15 +75,18 @@ export function initializeMockData(): void {
     return;
   }
 
-  initializeStorage(STORAGE_KEYS.LEADS, mockLeads);
-  initializeStorage(STORAGE_KEYS.CUSTOMERS, mockCustomers);
-  initializeStorage(STORAGE_KEYS.ORDERS, mockOrders);
+  initializeStorage(STORAGE_KEYS.LEADS, businessSeed(mockLeads, []));
+  initializeStorage(STORAGE_KEYS.CUSTOMERS, businessSeed(mockCustomers, []));
+  initializeStorage(STORAGE_KEYS.ORDERS, businessSeed(mockOrders, []));
   initializeStorage(STORAGE_KEYS.DELIVERIES, mockDeliveries);
-  initializeStorage(STORAGE_KEYS.COMMISSIONS, mockCommissions);
-  initializeStorage(STORAGE_KEYS.FINANCE, {
+  initializeStorage(STORAGE_KEYS.COMMISSIONS, businessSeed(mockCommissions, []));
+  initializeStorage(STORAGE_KEYS.FINANCE, businessSeed({
     dailyRecords: mockFinanceDailyRecords,
     channelROI: mockChannelROI,
-  });
+  }, {
+    dailyRecords: [],
+    channelROI: [],
+  }));
   initializeStorage(STORAGE_KEYS.USERS, mockUsers);
   initializeStorage(STORAGE_KEYS.AI_SESSIONS, []);
   initializeStorage(STORAGE_KEYS.DEPARTMENTS, mockDepartments);
@@ -88,7 +96,7 @@ export function initializeMockData(): void {
   initializeStorage(STORAGE_KEYS.PRODUCT_LEVELS, mockProductLevelConfigs);
   initializeStorage(STORAGE_KEYS.ORDER_TYPE_CONFIGS, DEFAULT_ORDER_TYPE_CONFIGS);
   initializeStorage(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS);
-  initializeStorage(STORAGE_KEYS.REFUNDS, mockRefunds);
+  initializeStorage(STORAGE_KEYS.REFUNDS, businessSeed(mockRefunds, []));
   initializeStorage(STORAGE_KEYS.RECOVERY_ORDERS, []);
   initializeStorage(STORAGE_KEYS.AI_CARDS, []);
   initializeStorage(STORAGE_KEYS.SERVICE_TICKETS, []);

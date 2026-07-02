@@ -11,7 +11,6 @@ import { getCurrentOperatorName, getCurrentOperatorUser, SYSTEM_OPERATOR } from 
 import { isSuperAdminRoleName } from '../shared/utils/roles';
 import { hydrateLeadLifecycle } from './lifecycleSync';
 import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
-import { canReceiveLead } from '../shared/utils/permissions';
 import { getPhoneNumberError, normalizePhoneForComparison, normalizePhoneForStorage } from '../shared/utils/phoneNumber';
 
 function ensureInit(): void {
@@ -76,16 +75,15 @@ function validateAttribution(data: Partial<Lead>): string | null {
   return null;
 }
 
-function getActiveSalesUsers(): User[] {
+function getAssignableUsers(): User[] {
   const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
-  const { roles } = ensureOrganizationConfigData();
-  return users.filter((user) => canReceiveLead(user, roles));
+  return users.filter((user) => user.isActive && (user.employmentStatus || 'active') !== 'left');
 }
 
 function getConfiguredParticipants(config: LeadFlowConfig): User[] {
-  const activeSales = getActiveSalesUsers();
-  if (!config.participantUserIds.length) return [];
-  return activeSales.filter((user) => config.participantUserIds.includes(user.id));
+  const assignableUsers = getAssignableUsers();
+  if (!config.participantUserIds.length) return assignableUsers;
+  return assignableUsers.filter((user) => config.participantUserIds.includes(user.id));
 }
 
 function findCollision(data: Partial<Lead>, excludeLeadId?: string) {
@@ -131,7 +129,7 @@ function formatLeadSourceText(lead: Partial<Lead>): string | undefined {
 
 function assignLeadOwner(config: LeadFlowConfig, fallbackOwner?: string): { owner: string; assignedTo?: string; assignedAt?: string; assignmentRuleId?: string; assignmentStatus: '待分配' | '已分配待领取'; reason: string; nextIndex: number } {
   if (fallbackOwner && fallbackOwner !== '待分配') {
-    const manualOwner = getActiveSalesUsers().find((user) => user.name === fallbackOwner);
+    const manualOwner = getAssignableUsers().find((user) => user.name === fallbackOwner);
     if (manualOwner) {
       const now = new Date().toISOString();
       return { owner: manualOwner.name, assignedTo: manualOwner.name, assignedAt: now, assignmentStatus: '已分配待领取', reason: '手动指定销售', nextIndex: config.lastAssignedIndex };
