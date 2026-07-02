@@ -14,8 +14,6 @@ import { applyContactEditLock } from '../shared/utils/contactEditLock';
 import { isSuperAdminRoleName } from '../shared/utils/roles';
 import { getPhoneNumberError, normalizePhoneForComparison, normalizePhoneForStorage } from '../shared/utils/phoneNumber';
 import type { User } from '../types/settings';
-import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
-import { canReceiveLead } from '../shared/utils/permissions';
 
 function ensureInit(): void {
   initializeMockData();
@@ -108,27 +106,26 @@ function normalizeLead(lead: Lead): Lead {
   });
 }
 
-function getActiveAssignableSalesNames(): Set<string> {
+function getActiveAssignableUserNames(): Set<string> {
   const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
-  const { roles } = ensureOrganizationConfigData();
   return new Set(
     users
-      .filter((user) => canReceiveLead(user, roles))
+      .filter((user) => user.isActive && (user.employmentStatus || 'active') !== 'left')
       .map((user) => user.name)
       .filter(Boolean),
   );
 }
 
 function reconcileStaleLeadAssignees(leads: Lead[]): Lead[] {
-  const assignableSalesNames = getActiveAssignableSalesNames();
-  if (!assignableSalesNames.size) return leads;
+  const assignableUserNames = getActiveAssignableUserNames();
+  if (!assignableUserNames.size) return leads;
 
   return leads.map((lead) => {
     if (lead.customerId) return lead;
-    const assignedTo = lead.assignedTo && assignableSalesNames.has(lead.assignedTo)
+    const assignedTo = lead.assignedTo && assignableUserNames.has(lead.assignedTo)
       ? lead.assignedTo
       : undefined;
-    const owner = lead.owner && (lead.owner === '待分配' || lead.owner === '公海' || assignableSalesNames.has(lead.owner))
+    const owner = lead.owner && (lead.owner === '待分配' || lead.owner === '公海' || assignableUserNames.has(lead.owner))
       ? lead.owner
       : assignedTo || '待分配';
 

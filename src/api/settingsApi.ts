@@ -1,6 +1,7 @@
 import type { User, UserRole, ProductConfig, OrderTypeConfig, LifecycleStatusConfig, LeadSourceConfig, LifecycleStatusCode, CustomerLevelConfig, OrganizationProfile, EmploymentStatus } from '../types/settings';
 import type { Customer, CustomerActivityRecord } from '../types/customer';
 import type { Lead, LeadChangeLog } from '../types/lead';
+import type { Position, PositionFilters } from '../types/position';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
@@ -368,6 +369,40 @@ async function fetchAssignableUsers(filters?: UserFilters): Promise<ApiResponse<
     isActive: filters?.isActive ?? true,
     employmentStatus: filters?.employmentStatus || 'active',
   });
+}
+
+async function fetchPositions(filters?: PositionFilters): Promise<ApiResponse<Position[]>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Position[]>('/settings/positions');
+    if (response.code !== 0) return response;
+    let positions = response.data;
+    if (filters?.search) {
+      const q = filters.search.toLowerCase();
+      positions = positions.filter((position) => (
+        position.name.toLowerCase().includes(q)
+        || position.code.toLowerCase().includes(q)
+        || position.description?.toLowerCase().includes(q)
+      ));
+    }
+    if (filters?.departmentId) positions = positions.filter((position) => position.departmentId === filters.departmentId);
+    if (filters?.isActive !== undefined) positions = positions.filter((position) => position.isActive === filters.isActive);
+    return createSuccessResponse(positions);
+  }
+
+  ensureInit();
+  await delay(120);
+  let positions = ensureOrganizationConfigData().positions;
+  if (filters?.search) {
+    const q = filters.search.toLowerCase();
+    positions = positions.filter((position) => (
+      position.name.toLowerCase().includes(q)
+      || position.code.toLowerCase().includes(q)
+      || position.description?.toLowerCase().includes(q)
+    ));
+  }
+  if (filters?.departmentId) positions = positions.filter((position) => position.departmentId === filters.departmentId);
+  if (filters?.isActive !== undefined) positions = positions.filter((position) => position.isActive === filters.isActive);
+  return createSuccessResponse(positions);
 }
 
 async function createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'passwordHash' | 'passwordSalt' | 'passwordUpdatedAt'> & { password?: string }): Promise<ApiResponse<User | null>> {
@@ -843,6 +878,7 @@ export const settingsApi = {
   updateOrganizationProfile,
   fetchUsers,
   fetchAssignableUsers,
+  fetchPositions,
   createUser,
   updateUser,
   leaveUser,

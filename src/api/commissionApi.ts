@@ -23,6 +23,8 @@ import type { Order } from '../types/order';
 import type { Product } from '../types/product';
 import type { User } from '../types/settings';
 import type { Department } from '../types/department';
+import type { Position } from '../types/position';
+import type { Role } from '../types/role';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
@@ -148,6 +150,14 @@ function getActiveDepartments(): Department[] {
   return (getStorageData<Department[]>(STORAGE_KEYS.DEPARTMENTS) || []).filter((department) => department.isActive);
 }
 
+function getActivePositions(): Position[] {
+  return (getStorageData<Position[]>(STORAGE_KEYS.POSITIONS) || []).filter((position) => position.isActive);
+}
+
+function getActiveRoles(): Role[] {
+  return (getStorageData<Role[]>(STORAGE_KEYS.ROLES) || []).filter((role) => role.isActive);
+}
+
 type CommissionNormalizeContext = {
   ordersById: Map<string, Order>;
   users: User[];
@@ -168,8 +178,18 @@ function findUserByIdOrName(idOrName?: string, fallbackName?: string, users = ge
 }
 
 function getDepartmentByUser(user?: User, departments = getActiveDepartments()): Department | undefined {
-  if (!user?.departmentId) return undefined;
-  return departments.find((department) => department.id === user.departmentId);
+  if (!user) return undefined;
+  const directDepartment = departments.find((department) => department.id === user.departmentId);
+  if (directDepartment) return directDepartment;
+  const position = getActivePositions().find((item) => item.id === user.positionId || item.name === user.positionName);
+  const positionDepartment = departments.find((department) => department.id === position?.departmentId);
+  if (positionDepartment) return positionDepartment;
+  const role = getActiveRoles().find((item) => (
+    item.id === user.roleId
+    || item.name === user.role
+    || item.code === user.role
+  ));
+  return departments.find((department) => department.id === role?.departmentId);
 }
 
 function getCommissionPaymentDate(commission: Commission, order?: Order): string {

@@ -40,6 +40,7 @@ import { useTableViewConfig } from '../../shared/hooks/useTableViewConfig';
 import type { Commission, CommissionPayoutPlan, CommissionRoleConfig } from '../../types/commission';
 import type { RecoveryOrder, RecoveryOrderSettlementStatus, RecoverySettlementInput } from '../../types/recoveryOrder';
 import type { Department } from '../../types/department';
+import type { Position } from '../../types/position';
 import type { User } from '../../types/settings';
 import useAuthStore from '../../store/useAuthStore';
 import { isSuperAdmin } from '../../shared/utils/permissions';
@@ -204,6 +205,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   const [status, setStatus] = useState<RecoverySettlementFilterStatus>('全部');
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
   const [roles, setRoles] = useState<CommissionRoleConfig[]>([]);
   const [plans, setPlans] = useState<CommissionPayoutPlan[]>([]);
   const [detailOrder, setDetailOrder] = useState<RecoveryOrder | null>(null);
@@ -270,7 +272,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   }), [getDefaultRecoveryOwnerId]);
 
   const load = useCallback(async () => {
-    const [allRes, usersRes, departmentsRes, rolesRes, plansRes] = await Promise.all([
+    const [allRes, usersRes, departmentsRes, positionsRes, rolesRes, plansRes] = await Promise.all([
       recoveryOrderApi.fetchRecoveryOrders({
         search,
         settlementStatus: '全部',
@@ -280,6 +282,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       }),
       settingsApi.fetchAssignableUsers(),
       departmentApi.getDepartments(),
+      settingsApi.fetchPositions({ isActive: true }),
       commissionRuleApi.getCommissionRoleConfigs({ isActive: true }),
       commissionRuleApi.getCommissionPayoutPlans(),
     ]);
@@ -298,6 +301,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     }
     if (usersRes.code === 0) setUsers(usersRes.data);
     if (departmentsRes.code === 0) setDepartments(departmentsRes.data);
+    if (positionsRes.code === 0) setPositions(positionsRes.data);
     if (rolesRes.code === 0) setRoles(rolesRes.data);
     if (plansRes.code === 0) setPlans(plansRes.data);
   }, [page, rowsPerPage, search, status]);
@@ -305,6 +309,14 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   const getDepartmentName = (departmentId?: string) => {
     if (!departmentId) return '-';
     return departments.find((department) => department.id === departmentId)?.name || '-';
+  };
+
+  const getOwnerDepartmentName = (user?: User) => {
+    if (!user) return '-';
+    const directDepartmentName = getDepartmentName(user.departmentId);
+    if (directDepartmentName !== '-') return directDepartmentName;
+    const position = positions.find((item) => item.id === user.positionId || item.name === user.positionName);
+    return getDepartmentName(position?.departmentId);
   };
 
   const getDetailRows = (order: RecoveryOrder): SettlementDetailRow[] => {
@@ -329,7 +341,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       id: `default-${order.id}`,
       role: DEFAULT_RECOVERY_ROLE,
       owner: owner?.name || order.recoveryUserName || order.createdByName || '-',
-      department: getDepartmentName(owner?.departmentId),
+      department: getOwnerDepartmentName(owner),
       commissionAmount: 0,
       performanceAmount: Number(order.recoveryAmount || 0),
       orderAmount: Number(order.recoveryAmount || 0),
@@ -1323,7 +1335,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                                   <Typography variant="body2" sx={{ fontWeight: 900, color: shell.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {owner?.name || '未选择人员'}
                                   </Typography>
-                                  <Typography variant="caption" sx={{ color: shell.muted }}>{getDepartmentName(owner?.departmentId)}</Typography>
+                                  <Typography variant="caption" sx={{ color: shell.muted }}>{getOwnerDepartmentName(owner)}</Typography>
                                 </Box>
                                 <Tooltip title={settlementRows.length > 1 ? '删除' : '至少保留一条分账'}>
                                   <span>
@@ -1372,7 +1384,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                                   {fieldLabel('部门')}
                                   <TextField
                                     size="small"
-                                    value={getDepartmentName(owner?.departmentId)}
+                                    value={getOwnerDepartmentName(owner)}
                                     disabled
                                     fullWidth
                                     sx={inputSx}

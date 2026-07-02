@@ -34,6 +34,7 @@ const roles: Role[] = [
     id: 'role-service',
     name: '售后服务专员',
     code: 'customer_success',
+    departmentId: 'dept-service',
     permissions: [
       { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY, actions: ['read'] },
       { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, actions: ['read', 'write'] },
@@ -83,7 +84,6 @@ const users: User[] = [
     phone: '',
     role: '售后服务专员',
     roleId: 'role-service',
-    departmentId: 'dept-service',
     isActive: true,
     createdAt: now,
     updatedAt: now,
@@ -235,7 +235,10 @@ const settled = await recoveryOrderApi.settleRecoveryOrder(
   '财务专员',
 );
 assert.equal(settled.code, 0);
-assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as unknown[]).length, 1);
+const storedCommissions = JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as any[];
+assert.equal(storedCommissions.length, 1);
+assert.equal(storedCommissions[0].departmentId, 'dept-service');
+assert.equal(storedCommissions[0].department, '售后服务部');
 
 const period = new Date().toISOString().slice(0, 7);
 const payouts = await commissionApi.fetchMonthlyCommissionPayouts(period);

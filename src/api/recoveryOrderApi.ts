@@ -79,6 +79,10 @@ function getDepartments(): Department[] {
   return getStorageData<Department[]>(STORAGE_KEYS.DEPARTMENTS) || [];
 }
 
+function getPositions(): Array<{ id: string; name: string; departmentId?: string }> {
+  return getStorageData<Array<{ id: string; name: string; departmentId?: string }>>(STORAGE_KEYS.POSITIONS) || [];
+}
+
 function getPayoutPlans(): CommissionPayoutPlan[] {
   return getStorageData<CommissionPayoutPlan[]>('commission_payout_plans') || [];
 }
@@ -141,7 +145,14 @@ function filterVisibleRecoveryOrders(
 
 function getDepartmentByUser(user: User): Department | undefined {
   const departments = getDepartments();
-  return departments.find((department) => department.id === user.departmentId);
+  const directDepartment = departments.find((department) => department.id === user.departmentId);
+  if (directDepartment) return directDepartment;
+  const position = getPositions().find((item) => item.id === user.positionId || item.name === user.positionName);
+  const positionDepartment = departments.find((department) => department.id === position?.departmentId);
+  if (positionDepartment) return positionDepartment;
+  const roles = getStorageData<Role[]>(STORAGE_KEYS.ROLES) || [];
+  const role = roles.find((item) => item.id === user.roleId || item.name === user.role);
+  return departments.find((department) => department.id === role?.departmentId);
 }
 
 function getPayoutPlan(planId?: string): CommissionPayoutPlan | undefined {

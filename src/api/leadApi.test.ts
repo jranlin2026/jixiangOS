@@ -197,6 +197,19 @@ storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([
     createdAt: now,
     updatedAt: now,
   },
+  {
+    id: 'user-system-admin',
+    name: 'System Admin',
+    account: 'system_admin',
+    email: 'system_admin@company.com',
+    phone: '',
+    role: '超级管理员',
+    roleId: 'role-super-admin',
+    isActive: true,
+    employmentStatus: 'active',
+    createdAt: now,
+    updatedAt: now,
+  },
 ]));
 storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([
   {
@@ -215,12 +228,23 @@ storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([
     assignedTo: '新销售',
     owner: '新销售',
   },
+  {
+    ...lead,
+    id: 'lead-active-admin',
+    name: '管理员分配线索',
+    phone: '13900006666',
+    assignedTo: 'System Admin',
+    owner: 'System Admin',
+  },
 ]));
 
 const reassignedList = await leadApi.fetchLeads({ page: 1, pageSize: 20 });
 const staleSalesLead = reassignedList.data.items.find((item) => item.id === 'lead-stale-sales');
 const activeSalesLead = reassignedList.data.items.find((item) => item.id === 'lead-active-sales');
+const activeAdminLead = reassignedList.data.items.find((item) => item.id === 'lead-active-admin');
 assert.equal(staleSalesLead?.owner, '待分配');
 assert.equal(staleSalesLead?.assignedTo, undefined);
 assert.equal(activeSalesLead?.owner, '新销售');
 assert.equal(activeSalesLead?.assignedTo, '新销售');
+assert.equal(activeAdminLead?.owner, 'System Admin');
+assert.equal(activeAdminLead?.assignedTo, 'System Admin');

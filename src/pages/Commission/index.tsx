@@ -72,6 +72,7 @@ import type {
 import type { Department } from '../../types/department';
 import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
+import type { Position } from '../../types/position';
 import type { User } from '../../types/settings';
 import { moduleRadius, moduleTablePaperSx, moduleTokens } from '../../shared/components/ModuleShell';
 
@@ -377,6 +378,7 @@ const Commission: React.FC<CommissionProps> = ({
   const [payoutPlans, setPayoutPlans] = useState<CommissionPayoutPlan[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
   const [createSplitOpen, setCreateSplitOpen] = useState(false);
   const [creatableOrderRows, setCreatableOrderRows] = useState<CommissionCreatableOrderSummary[]>([]);
   const [creatableOrderLoading, setCreatableOrderLoading] = useState(false);
@@ -426,7 +428,15 @@ const Commission: React.FC<CommissionProps> = ({
     chargebackAmount: 0,
   }), [payoutRows]);
 
-  const getDepartmentName = (departmentId?: string) => departments.find((item) => item.id === departmentId)?.name || '';
+  const findDepartment = (departmentId?: string) => departments.find((item) => item.id === departmentId);
+  const getDepartmentName = (departmentId?: string) => findDepartment(departmentId)?.name || '';
+  const getOwnerDepartment = (user?: User) => {
+    if (!user) return undefined;
+    const directDepartment = findDepartment(user.departmentId);
+    if (directDepartment) return directDepartment;
+    const position = positions.find((item) => item.id === user.positionId || item.name === user.positionName);
+    return findDepartment(position?.departmentId);
+  };
   const findEmployeeForDisplay = (ownerId?: string, ownerName?: string) => {
     const normalizedOwnerName = ownerName?.trim();
     return activeEmployees.find((user) => (
@@ -586,16 +596,18 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const fetchSettlementOptions = async () => {
-    const [rolesRes, plansRes, usersRes, departmentsRes] = await Promise.all([
+    const [rolesRes, plansRes, usersRes, departmentsRes, positionsRes] = await Promise.all([
       commissionRuleApi.getCommissionRoleConfigs(),
       commissionRuleApi.getCommissionPayoutPlans(),
       settingsApi.fetchAssignableUsers(),
       departmentApi.getDepartments({ isActive: true }),
+      settingsApi.fetchPositions({ isActive: true }),
     ]);
     if (rolesRes.code === 0) setCommissionRoleConfigs(rolesRes.data);
     if (plansRes.code === 0) setPayoutPlans(plansRes.data);
     if (usersRes.code === 0) setEmployees(usersRes.data);
     if (departmentsRes.code === 0) setDepartments(departmentsRes.data);
+    if (positionsRes.code === 0) setPositions(positionsRes.data);
   };
 
   const buildOrderSummaryFilters = (status = orderFilters.status): CommissionOrderSummaryFilters => ({
@@ -914,14 +926,15 @@ const Commission: React.FC<CommissionProps> = ({
 
   const mapCommissionToSplitRow = (item: Commission): CommissionAdjustmentInput => {
     const employee = activeEmployees.find((user) => user.id === item.ownerId || user.name === item.owner);
+    const ownerDepartment = getOwnerDepartment(employee);
     return {
       id: item.id,
       orderId: item.orderId,
       role: item.role,
       owner: employee?.name || '',
       ownerId: employee?.id || '',
-      department: employee ? getDepartmentName(employee.departmentId) : '',
-      departmentId: employee?.departmentId || '',
+      department: ownerDepartment?.name || item.department || '',
+      departmentId: ownerDepartment?.id || item.departmentId || '',
       paymentDate: item.paymentDate,
       commissionAmount: item.commissionAmount,
       commissionRate: item.commissionRate,
@@ -1187,14 +1200,15 @@ const Commission: React.FC<CommissionProps> = ({
 
   const handleSplitOwnerChange = (index: number, ownerId: string) => {
     const employee = activeEmployees.find((item) => item.id === ownerId);
+    const ownerDepartment = getOwnerDepartment(employee);
     setSplitRows((prev) => prev.map((row, rowIndex) => (
       rowIndex === index
         ? {
           ...row,
           ownerId,
           owner: employee?.name || '',
-          departmentId: employee?.departmentId || '',
-          department: getDepartmentName(employee?.departmentId),
+          departmentId: ownerDepartment?.id || '',
+          department: ownerDepartment?.name || '',
         }
         : row
     )));

@@ -55,11 +55,15 @@ function seed() {
     { id: 'user-manager', name: 'Manager A', account: 'manager', email: '', phone: '', role: zh.salesManager, roleId: 'role-manager', departmentId: 'dept-sales', isActive: true, createdAt: now, updatedAt: now },
     { id: 'user-lead', name: 'Lead A', account: 'lead', email: '', phone: '', role: zh.sales, roleId: 'role-sales', departmentId: 'dept-market', isActive: true, createdAt: now, updatedAt: now },
     { id: 'user-success', name: 'Success A', account: 'success', email: '', phone: '', role: zh.success, roleId: 'role-success', departmentId: 'dept-success', isActive: true, createdAt: now, updatedAt: now },
+    { id: 'user-success-position', name: 'Position Success A', account: 'success-position', email: '', phone: '', role: zh.success, roleId: 'role-success', positionId: 'pos-success', positionName: 'Success Specialist', isActive: true, createdAt: now, updatedAt: now },
   ]));
   storage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify([
     { id: 'dept-sales', name: zh.salesDept, code: 'SALES', managerId: 'user-manager', memberCount: 2, isActive: true, createdAt: now, updatedAt: now },
     { id: 'dept-market', name: zh.marketDept, code: 'MARKET', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
     { id: 'dept-success', name: zh.successDept, code: 'SUCCESS', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+  ]));
+  storage.setItem(STORAGE_KEYS.POSITIONS, JSON.stringify([
+    { id: 'pos-success', name: 'Success Specialist', code: 'SUCCESS_SPECIALIST', departmentId: 'dept-success', sortOrder: 1, isActive: true, createdAt: now, updatedAt: now },
   ]));
   storage.setItem(STORAGE_KEYS.ORDERS, '[]');
   storage.setItem(STORAGE_KEYS.COMMISSIONS, '[]');
@@ -201,3 +205,18 @@ assert.equal(validManualAdjust.data[0].owner, 'Success A');
 assert.equal(validManualAdjust.data[0].ownerId, 'user-success');
 assert.equal(validManualAdjust.data[0].department, zh.successDept);
 assert.equal(validManualAdjust.data[0].departmentId, 'dept-success');
+
+const positionDepartmentAdjust = await commissionApi.saveOrderCommissionAdjustments(orderRes.data.id, [{
+  orderId: orderRes.data.id,
+  role: zh.success,
+  ownerId: 'user-success-position',
+  commissionAmount: 18,
+  commissionRate: 0,
+  performanceAmount: 9800,
+  calculationNote: 'manual owner department resolved by position',
+} as any], '\u804c\u4f4d\u90e8\u95e8\u515c\u5e95\u6d4b\u8bd5');
+assert.equal(positionDepartmentAdjust.code, 0);
+assert.equal(positionDepartmentAdjust.data[0].owner, 'Position Success A');
+assert.equal(positionDepartmentAdjust.data[0].ownerId, 'user-success-position');
+assert.equal(positionDepartmentAdjust.data[0].department, zh.successDept);
+assert.equal(positionDepartmentAdjust.data[0].departmentId, 'dept-success');
