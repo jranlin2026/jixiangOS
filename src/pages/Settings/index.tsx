@@ -11,6 +11,7 @@ import OrderTypeConfigPage from './OrderTypeConfig';
 import LifecycleStatusConfigPage from './LifecycleStatusConfig';
 import LeadSourceConfigPage from './LeadSourceConfig';
 import DataMaintenance from './DataMaintenance';
+import CrmMigration from './CrmMigration';
 import AIProviderConfig from './AIProviderConfig';
 import LeadFlowConfigTab from '../Leads/LeadFlowConfigTab';
 import useAuthStore from '../../store/useAuthStore';
@@ -94,6 +95,7 @@ const Settings: React.FC = () => {
         { label: 'AI大脑', permissionKey: PERMISSION_KEYS.SETTINGS_AI_CONFIG, component: <AIProviderConfig /> },
         { label: '业务回收站', permissionKey: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, superAdminOnly: true, component: <BusinessRecycleBin /> },
         { label: '数据维护', permissionKey: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, component: <DataMaintenance /> },
+        { label: 'EC CRM迁移', permissionKey: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, component: <CrmMigration /> },
       ],
     },
   ]).map((group) => ({
