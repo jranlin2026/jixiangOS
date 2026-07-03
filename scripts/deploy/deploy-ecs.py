@@ -3,8 +3,8 @@
 Deploy JixiangOS to the Alibaba Cloud ECS server.
 
 This script builds locally, packages the current workspace, uploads it to the
-server, preserves the server .env file, installs dependencies, syncs Prisma,
-restarts PM2, reloads nginx, and performs health checks.
+server, preserves the server .env file, reuses server dependencies when safe,
+syncs Prisma, restarts PM2, reloads nginx, and performs health checks.
 
 Required:
   pip install paramiko
@@ -58,6 +58,7 @@ EXCLUDE_FILES = {
 
 EXCLUDE_SUFFIXES = (
     ".log",
+    ".map",
     ".tsbuildinfo",
     ".zip",
 )
@@ -109,6 +110,13 @@ def create_release_zip() -> Path:
     return release_path
 
 
+def clean_dist() -> None:
+    dist_dir = PROJECT_ROOT / "dist"
+    if dist_dir.exists():
+        print(f"\nCleaning old build output: {dist_dir}")
+        shutil.rmtree(dist_dir)
+
+
 def ssh_connect(host: str, user: str, password: str, port: int) -> paramiko.SSHClient:
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -146,11 +154,13 @@ def upload_release(client: paramiko.SSHClient, local_zip: Path) -> str:
     return remote_path
 
 
-def build_remote_command(remote_zip: str, app_dir: str, node_env: str) -> str:
+def build_remote_command(remote_zip: str, app_dir: str, node_env: str, fresh_install: bool) -> str:
+    reuse_node_modules = "0" if fresh_install else "1"
     return f"""set -euo pipefail
 APP_DIR="{app_dir}"
 RELEASE_ZIP="{remote_zip}"
 NODE_ENV_VALUE="{node_env}"
+REUSE_NODE_MODULES="{reuse_node_modules}"
 TS="$(date +%Y%m%d-%H%M%S)"
 NEW_DIR="${{APP_DIR}}.new-${{TS}}"
 BACKUP_DIR="${{APP_DIR}}.prev-${{TS}}"
@@ -172,9 +182,13 @@ mkdir -p "$NEW_DIR"
 python3 -m zipfile -e "$RELEASE_ZIP" "$NEW_DIR"
 cp "$ENV_BACKUP" "$NEW_DIR/.env"
 
-echo "Installing dependencies in new release..."
+echo "Preparing dependencies in new release..."
 cd "$NEW_DIR"
-npm install --no-audit --no-fund
+if [ "$REUSE_NODE_MODULES" = "1" ] && [ -d "$APP_DIR/node_modules" ]; then
+  echo "Reusing existing node_modules with hard links..."
+  cp -al "$APP_DIR/node_modules" "$NEW_DIR/node_modules" 2>/dev/null || cp -a "$APP_DIR/node_modules" "$NEW_DIR/node_modules"
+fi
+npm install --prefer-offline --no-audit --no-fund
 npm run db:generate
 npm run db:push -- --accept-data-loss
 
@@ -197,7 +211,16 @@ nginx -t
 systemctl reload nginx
 
 echo "Checking local health..."
-curl -fsS http://127.0.0.1:3001/api/health
+for i in $(seq 1 30); do
+  if curl -fsS http://127.0.0.1:3001/api/health; then
+    break
+  fi
+  if [ "$i" = "30" ]; then
+    echo "API health check failed after waiting." >&2
+    exit 1
+  fi
+  sleep 1
+done
 
 echo
 echo "Cleaning old releases..."
@@ -229,6 +252,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--health-url", default=os.getenv("JIXIANG_PUBLIC_HEALTH_URL", DEFAULT_HEALTH_URL))
     parser.add_argument("--skip-build", action="store_true", help="Skip local npm build.")
     parser.add_argument("--skip-public-health", action="store_true", help="Skip public /api/health check.")
+    parser.add_argument("--fresh-install", action="store_true", help="Do not reuse server node_modules.")
     return parser.parse_args()
 
 
@@ -240,13 +264,14 @@ def main() -> int:
 
     try:
         if not args.skip_build:
+            clean_dist()
             run_local(["npm.cmd" if os.name == "nt" else "npm", "run", "build"])
 
         release_zip = create_release_zip()
         client = ssh_connect(args.host, args.user, password, args.port)
         try:
             remote_zip = upload_release(client, release_zip)
-            command = build_remote_command(remote_zip, args.app_dir, args.node_env)
+            command = build_remote_command(remote_zip, args.app_dir, args.node_env, args.fresh_install)
             run_remote(client, command)
         finally:
             client.close()
