@@ -16,6 +16,7 @@ const Orders = React.lazy(() => import('./pages/Orders'));
 const Delivery = React.lazy(() => import('./pages/Delivery'));
 const AfterSales = React.lazy(() => import('./pages/AfterSales'));
 const Finance = React.lazy(() => import('./pages/Finance'));
+const Assets = React.lazy(() => import('./pages/Assets'));
 const AIAssistant = React.lazy(() => import('./pages/AIAssistant'));
 const Settings = React.lazy(() => import('./pages/Settings'));
 const Login = React.lazy(() => import('./pages/Login'));
@@ -133,6 +134,18 @@ const App: React.FC = () => {
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.FINANCE_SETTLEMENT} />}>
             <Route path={ROUTES.COMMISSION} element={<Navigate to={`${ROUTES.FINANCE}?tab=settlement`} replace />} />
+          </Route>
+          <Route element={<ProtectedRoute permissionKeys={[
+            PERMISSION_KEYS.ASSETS,
+            PERMISSION_KEYS.ASSETS_OVERVIEW,
+            PERMISSION_KEYS.ASSETS_DEVICES,
+            PERMISSION_KEYS.ASSETS_PHONES,
+            PERMISSION_KEYS.ASSETS_ACCOUNTS,
+            PERMISSION_KEYS.ASSETS_RISKS,
+            PERMISSION_KEYS.ASSETS_LOGS,
+            PERMISSION_KEYS.ASSETS_OFFBOARDING,
+          ]} />}>
+            <Route path={ROUTES.ASSETS} element={<Suspense fallback={<PageLoader />}><Assets /></Suspense>} />
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.AI_ASSISTANT} />}>
             <Route path={ROUTES.AI_ASSISTANT} element={<Suspense fallback={<PageLoader />}><AIAssistant /></Suspense>} />

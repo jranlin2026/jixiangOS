@@ -14,6 +14,14 @@ import { mockProductLevelConfigs } from './data/productLevels';
 import { mockRefunds } from './data/refunds';
 import { mockCommissionRules } from './data/commissionRules';
 import { mockTags } from './data/tags';
+import {
+  mockAssetDevices,
+  mockAssetInternetAccounts,
+  mockAssetOffboardingTasks,
+  mockAssetOperationLogs,
+  mockAssetPhoneNumbers,
+  mockAssetRisks,
+} from './data/assets';
 import { getStorageData, initializeStorage, isStorageInitialized, markStorageInitialized, setStorageData } from './storage';
 import { shouldUseBackendApi } from '../backendClient';
 import { DEFAULT_LEAD_FLOW_CONFIG, DEFAULT_LEAD_SOURCE_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, DEFAULT_ORDER_TYPE_CONFIGS, STORAGE_KEYS } from '../../shared/utils/constants';
@@ -34,6 +42,14 @@ export { mockProductLevelConfigs } from './data/productLevels';
 export { mockRefunds } from './data/refunds';
 export { mockCommissionRules } from './data/commissionRules';
 export { mockTags } from './data/tags';
+export {
+  mockAssetDevices,
+  mockAssetInternetAccounts,
+  mockAssetOffboardingTasks,
+  mockAssetOperationLogs,
+  mockAssetPhoneNumbers,
+  mockAssetRisks,
+} from './data/assets';
 
 const LEGACY_DEFAULT_DELIVERY_STAGES: Record<string, string[]> = {
   'prod-001': ['合同签订', '需求确认', '系统部署', '培训交付', '验收完成'],
@@ -68,9 +84,19 @@ function businessSeed<T>(demoData: T, emptyData: T): T {
   return shouldUseBackendApi() ? emptyData : demoData;
 }
 
+function initializeAssetStorage(): void {
+  initializeStorage(STORAGE_KEYS.ASSET_DEVICES, businessSeed(mockAssetDevices, []));
+  initializeStorage(STORAGE_KEYS.ASSET_PHONE_NUMBERS, businessSeed(mockAssetPhoneNumbers, []));
+  initializeStorage(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, businessSeed(mockAssetInternetAccounts, []));
+  initializeStorage(STORAGE_KEYS.ASSET_RISKS, businessSeed(mockAssetRisks, []));
+  initializeStorage(STORAGE_KEYS.ASSET_OPERATION_LOGS, businessSeed(mockAssetOperationLogs, []));
+  initializeStorage(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, businessSeed(mockAssetOffboardingTasks, []));
+}
+
 /** 初始化所有 Mock 数据到 localStorage */
 export function initializeMockData(): void {
   if (isStorageInitialized()) {
+    initializeAssetStorage();
     migrateLegacyDefaultProductDeliveryStages();
     return;
   }
@@ -107,6 +133,7 @@ export function initializeMockData(): void {
   initializeStorage(STORAGE_KEYS.COMMISSION_RULES, mockCommissionRules);
   initializeStorage(STORAGE_KEYS.COMMISSION_ROLE_CONFIGS, []);
   initializeStorage(STORAGE_KEYS.TAGS, mockTags);
+  initializeAssetStorage();
 
   markStorageInitialized();
   migrateLegacyDefaultProductDeliveryStages();

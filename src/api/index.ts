@@ -19,6 +19,7 @@ export { commissionRuleApi } from './commissionRuleApi';
 export { aiCardApi } from './aiCardApi';
 export { serviceTicketApi } from './serviceTicketApi';
 export { opportunityApi } from './opportunityApi';
+export { assetApi } from './assetApi';
 export { leadFlowApi } from './leadFlowApi';
 export { leadBulkImportApi } from './leadBulkImportApi';
 export { businessRecycleBinApi } from './businessRecycleBinApi';

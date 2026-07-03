@@ -22,6 +22,7 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import SupportAgentIcon from '@mui/icons-material/SupportAgent';
 import PaidIcon from '@mui/icons-material/Paid';
+import Inventory2Icon from '@mui/icons-material/Inventory2';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import SettingsIcon from '@mui/icons-material/Settings';
 import HomeIcon from '@mui/icons-material/Home';
@@ -111,6 +112,22 @@ const navItems: NavItem[] = [
       PERMISSION_KEYS.FINANCE_PAYOUT,
       PERMISSION_KEYS.FINANCE_FLOW,
       PERMISSION_KEYS.FINANCE_RULES,
+    ],
+  },
+  {
+    label: '资产管理',
+    icon: <Inventory2Icon />,
+    path: ROUTES.ASSETS,
+    permissionKey: PERMISSION_KEYS.ASSETS,
+    permissionKeys: [
+      PERMISSION_KEYS.ASSETS,
+      PERMISSION_KEYS.ASSETS_OVERVIEW,
+      PERMISSION_KEYS.ASSETS_DEVICES,
+      PERMISSION_KEYS.ASSETS_PHONES,
+      PERMISSION_KEYS.ASSETS_ACCOUNTS,
+      PERMISSION_KEYS.ASSETS_RISKS,
+      PERMISSION_KEYS.ASSETS_LOGS,
+      PERMISSION_KEYS.ASSETS_OFFBOARDING,
     ],
   },
   { label: 'AI助手', icon: <SmartToyIcon />, path: ROUTES.AI_ASSISTANT, permissionKey: PERMISSION_KEYS.AI_ASSISTANT },
