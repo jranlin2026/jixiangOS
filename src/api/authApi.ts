@@ -22,8 +22,28 @@ import {
   clearBackendToken,
   flushBackendStorageWrites,
   shouldUseBackendApi,
+  syncBackendStorageFromServer,
   writeBackendToken,
 } from './backendClient';
+
+const ASSET_STORAGE_KEYS = [
+  STORAGE_KEYS.ASSET_DEVICES,
+  STORAGE_KEYS.ASSET_PHONE_NUMBERS,
+  STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS,
+  STORAGE_KEYS.ASSET_RISKS,
+  STORAGE_KEYS.ASSET_OPERATION_LOGS,
+  STORAGE_KEYS.ASSET_OFFBOARDING_TASKS,
+];
+
+function clearAssetStorageCache(): void {
+  if (typeof localStorage === 'undefined') return;
+  ASSET_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
+}
+
+function setLocalCache<T>(key: string, value: T): void {
+  if (typeof localStorage === 'undefined') return;
+  localStorage.setItem(key, JSON.stringify(value));
+}
 
 function ensureAuthData(): { users: UserWithAuth[]; roles: Role[] } {
   initializeMockData();
@@ -58,7 +78,7 @@ function isExpired(session: AuthSession): boolean {
 
 function cacheBackendAuthenticatedUser(user: AuthenticatedUser, token?: string, remember = true): void {
   const now = new Date().toISOString();
-  setStorageData(AUTH_SESSION_STORAGE_KEY, {
+  setLocalCache(AUTH_SESSION_STORAGE_KEY, {
     userId: user.id,
     token: token || `backend-${user.id}`,
     remember,
@@ -86,7 +106,7 @@ function cacheBackendAuthenticatedUser(user: AuthenticatedUser, token?: string, 
     createdAt: users.find((item) => item.id === user.id)?.createdAt || now,
     updatedAt: now,
   };
-  setStorageData(STORAGE_KEYS.USERS, [cachedUser, ...users.filter((item) => item.id !== user.id)]);
+  setLocalCache(STORAGE_KEYS.USERS, [cachedUser, ...users.filter((item) => item.id !== user.id)]);
 
   const roles = getStorageData<Role[]>(STORAGE_KEYS.ROLES) || [];
   const cachedRole: Role = {
@@ -100,12 +120,13 @@ function cacheBackendAuthenticatedUser(user: AuthenticatedUser, token?: string, 
     createdAt: roles.find((item) => item.id === user.roleId || item.name === user.role)?.createdAt || now,
     updatedAt: now,
   };
-  setStorageData(STORAGE_KEYS.ROLES, [cachedRole, ...roles.filter((item) => item.id !== cachedRole.id && item.name !== cachedRole.name)]);
+  setLocalCache(STORAGE_KEYS.ROLES, [cachedRole, ...roles.filter((item) => item.id !== cachedRole.id && item.name !== cachedRole.name)]);
 }
 
 async function login(payload: LoginPayload): Promise<ApiResponse<AuthenticatedUser | null>> {
   if (shouldUseBackendApi()) {
     await flushBackendStorageWrites();
+    clearAssetStorageCache();
     const response = await backendRequest<{ token: string; user: AuthenticatedUser }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -113,6 +134,7 @@ async function login(payload: LoginPayload): Promise<ApiResponse<AuthenticatedUs
     if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code);
     writeBackendToken(response.data.token);
     cacheBackendAuthenticatedUser(response.data.user, response.data.token, payload.remember);
+    await syncBackendStorageFromServer(0);
     return createSuccessResponse(response.data.user);
   }
 
@@ -170,6 +192,7 @@ async function logout(): Promise<ApiResponse<boolean>> {
     const response = await backendRequest<boolean>('/auth/logout', { method: 'POST' });
     clearBackendToken();
     if (typeof localStorage !== 'undefined') localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+    clearAssetStorageCache();
     return response;
   }
 

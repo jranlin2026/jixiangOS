@@ -13,3 +13,4 @@ vite.config.d.ts.map
 backups/
 .DS_Store
 Thumbs.db
+.codex-*.log

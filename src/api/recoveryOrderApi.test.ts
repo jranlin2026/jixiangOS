@@ -130,7 +130,7 @@ function setSession(userId: string) {
 
 storage.clear();
 storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
-storage.setItem(STORAGE_KEYS.ORGANIZATION_SCHEMA_VERSION, '5');
+storage.setItem(STORAGE_KEYS.ORGANIZATION_SCHEMA_VERSION, '6');
 storage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
 storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(roles));
 storage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify([

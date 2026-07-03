@@ -44,6 +44,10 @@ assert.doesNotMatch(rolePermissionSource, /客户画像/);
 assert.doesNotMatch(rolePermissionSource, /AI名片/);
 assert.match(rolePermissionSource, /客户等级/);
 assert.match(rolePermissionSource, /线索流转/);
+assert.match(rolePermissionSource, /label:\s*'资产管理'/);
+assert.match(rolePermissionSource, /label:\s*'资产总览'/);
+assert.match(rolePermissionSource, /label:\s*'查看敏感字段'/);
+assert.match(rolePermissionSource, /label:\s*'导入导出'/);
 assert.match(rolePermissionSource, /数据维护/);
 assert.match(rolePermissionSource, /label:\s*'线索列表'/);
 assert.match(rolePermissionSource, /label:\s*'入库情况'/);
@@ -86,6 +90,51 @@ assert.equal(roleHasPermission(defaultFinanceRole, PERMISSION_KEYS.FINANCE), tru
 assert.equal(roleHasPermission(defaultFinanceRole, PERMISSION_KEYS.FINANCE_MY_COMMISSION), false);
 assert.equal(roleHasPermission(defaultFinanceRole, PERMISSION_KEYS.FINANCE_SETTLEMENT), true);
 assert.equal(roleHasPermission(defaultFinanceRole, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT), true);
+
+const defaultSalesRole = DEFAULT_ROLES.find((role) => role.code === 'sales_consultant');
+assert.ok(defaultSalesRole);
+const authenticatedSales = toAuthenticatedUser({
+  id: 'user-sales-assets',
+  name: 'Sales Assets',
+  account: 'sales_assets',
+  email: '',
+  phone: '',
+  role: defaultSalesRole.name,
+  roleId: defaultSalesRole.id,
+  isActive: true,
+  createdAt: '2026-07-03T00:00:00.000Z',
+  updatedAt: '2026-07-03T00:00:00.000Z',
+}, DEFAULT_ROLES);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS), true);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_OVERVIEW), true);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_DEVICES), true);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_PHONES), true);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_ACCOUNTS), true);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_RISKS), true);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_LOGS), true);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_OFFBOARDING), true);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS, 'write'), false);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_DEVICES, 'write'), false);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW), false);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_IMPORT_EXPORT, 'write'), false);
+
+const defaultOpsRole = DEFAULT_ROLES.find((role) => role.code === 'ops_admin');
+assert.ok(defaultOpsRole);
+const authenticatedOps = toAuthenticatedUser({
+  id: 'user-ops-assets',
+  name: 'Ops Assets',
+  account: 'ops_assets',
+  email: '',
+  phone: '',
+  role: defaultOpsRole.name,
+  roleId: defaultOpsRole.id,
+  isActive: true,
+  createdAt: '2026-07-03T00:00:00.000Z',
+  updatedAt: '2026-07-03T00:00:00.000Z',
+}, DEFAULT_ROLES);
+assert.equal(hasPermission(authenticatedOps, PERMISSION_KEYS.ASSETS, 'write'), true);
+assert.equal(hasPermission(authenticatedOps, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW), true);
+assert.equal(hasPermission(authenticatedOps, PERMISSION_KEYS.ASSETS_IMPORT_EXPORT, 'write'), true);
 
 const createdMarketUser = await settingsApi.createUser({
   name: 'Permission Market',
@@ -261,6 +310,8 @@ const authenticatedMarket = toAuthenticatedUser({
 }, migratedRoles.data);
 assert.equal(hasPermission(authenticatedMarket, PERMISSION_KEYS.LEADS), true);
 assert.equal(hasPermission(authenticatedMarket, PERMISSION_KEYS.CUSTOMERS), false);
+assert.equal(hasPermission(authenticatedMarket, PERMISSION_KEYS.ASSETS), true);
+assert.equal(hasPermission(authenticatedMarket, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW), false);
 
 assert.equal(canReceiveLead({
   role: '超级管理员',

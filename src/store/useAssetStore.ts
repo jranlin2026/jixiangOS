@@ -6,6 +6,8 @@ import type {
   AssetDevice,
   AssetDeviceInput,
   AssetFilters,
+  AssetImportResult,
+  AssetImportType,
   AssetInternetAccount,
   AssetInternetAccountInput,
   AssetOffboardingTask,
@@ -14,6 +16,8 @@ import type {
   AssetPhoneNumberInput,
   AssetRisk,
   AssetRiskStatus,
+  AssetSensitiveField,
+  AssetSensitiveRevealResult,
   AssetType,
 } from '../types/asset';
 
@@ -52,6 +56,8 @@ interface AssetState {
   updateAccount: (id: string, input: Partial<AssetInternetAccountInput>) => Promise<AssetInternetAccount | null>;
   updateRiskStatus: (riskId: string, status: AssetRiskStatus) => Promise<void>;
   completeOffboardingTask: (taskId: string) => Promise<void>;
+  revealSensitiveField: (type: AssetType, id: string, field: AssetSensitiveField) => Promise<AssetSensitiveRevealResult | null>;
+  importAssetsFromCsv: (type: AssetImportType, csvText: string) => Promise<AssetImportResult | null>;
   clearDetail: () => void;
 }
 
@@ -222,6 +228,28 @@ const useAssetStore = create<AssetState>((set, get) => ({
       set({ offboardingTasks: get().offboardingTasks.map((task) => (task.id === taskId && res.data ? res.data : task)) });
       await get().fetchDashboard();
     }
+  },
+
+  revealSensitiveField: async (type, id, field) => {
+    const res = await assetApi.revealSensitiveField(type, id, field);
+    if (res.code !== 0) {
+      set({ error: res.message });
+      return null;
+    }
+    await get().fetchDetail(type, id);
+    return res.data;
+  },
+
+  importAssetsFromCsv: async (type, csvText) => {
+    set({ loading: true, error: null });
+    const res = await assetApi.importAssetsFromCsv(type, csvText);
+    set({ loading: false });
+    if (res.code !== 0) {
+      set({ error: res.message });
+      return null;
+    }
+    await get().fetchDashboard();
+    return res.data;
   },
 
   clearDetail: () => set({ detail: null }),

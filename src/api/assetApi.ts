@@ -1,9 +1,12 @@
-import type {
+﻿import type {
   AssetDashboard,
   AssetDetailBundle,
   AssetDevice,
   AssetDeviceInput,
   AssetFilters,
+  AssetImportFailedRow,
+  AssetImportResult,
+  AssetImportType,
   AssetInternetAccount,
   AssetInternetAccountInput,
   AssetOffboardingTask,
@@ -12,6 +15,8 @@ import type {
   AssetPhoneNumberInput,
   AssetRisk,
   AssetRiskStatus,
+  AssetSensitiveField,
+  AssetSensitiveRevealResult,
   AssetType,
 } from '../types/asset';
 import type { ApiResponse, PaginatedResponse } from './types';
@@ -19,6 +24,13 @@ import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
 import { DEFAULT_PAGE_SIZE, STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
+import {
+  canViewAssetAccount,
+  canViewAssetDevice,
+  canViewAssetOffboardingTask,
+  canViewAssetPhone,
+  getCurrentDataVisibilityScope,
+} from '../shared/utils/dataVisibility';
 
 function ensureInit(): void {
   initializeMockData();
@@ -147,6 +159,46 @@ function makeRisk(
   };
 }
 
+function assetBelongsToEmployee(
+  asset: { owner?: string; currentUser?: string },
+  employeeName: string,
+): boolean {
+  const name = employeeName.trim();
+  return Boolean(name && (asset.owner === name || asset.currentUser === name));
+}
+
+function makeOffboardingTask(
+  input: {
+    assetId: string;
+    assetType: AssetOffboardingTask['assetType'];
+    assetName: string;
+    employeeName: string;
+    department: string;
+    permissionStatus?: AssetOffboardingTask['permissionStatus'];
+  },
+  existing?: AssetOffboardingTask,
+): AssetOffboardingTask {
+  return {
+    id: existing?.id || `asset-offboarding-${input.assetId}`,
+    employeeName: input.employeeName || existing?.employeeName || '待确认',
+    department: input.department || existing?.department || '',
+    assetType: input.assetType,
+    assetId: input.assetId,
+    assetName: input.assetName,
+    permissionStatus: input.permissionStatus || existing?.permissionStatus || '离职待回收',
+    status: existing?.status || '待回收',
+    dueAt: existing?.dueAt || now().slice(0, 10),
+    handledAt: existing?.handledAt,
+    handler: existing?.handler,
+  };
+}
+
+function assetStillExistsForTask(task: AssetOffboardingTask, deviceRows: AssetDevice[], phoneRows: AssetPhoneNumber[], accountRows: AssetInternetAccount[]): boolean {
+  if (task.assetType === '设备资产') return deviceRows.some((device) => device.id === task.assetId);
+  if (task.assetType === '手机号资产') return phoneRows.some((phone) => phone.id === task.assetId);
+  return accountRows.some((account) => account.id === task.assetId);
+}
+
 function rebuildRisksAndOffboarding(): void {
   const existingByKey = new Map(risks().map((risk) => [risk.riskKey, risk]));
   const deviceRows = devices();
@@ -216,32 +268,264 @@ function rebuildRisksAndOffboarding(): void {
 
   setStorageData(STORAGE_KEYS.ASSET_RISKS, nextRisks);
 
-  const existingTasks = new Map(offboardingTasks().map((task) => [task.assetId, task]));
-  const nextTasks = accountRows
+  const currentTasks = offboardingTasks();
+  const existingTasks = new Map(currentTasks.map((task) => [task.assetId, task]));
+  const preservedTasks = currentTasks.filter((task) => (
+    task.status === '已回收'
+    || task.assetType === '设备资产'
+    || task.assetType === '手机号资产'
+  ) && assetStillExistsForTask(task, deviceRows, phoneRows, accountRows));
+  const preservedIds = new Set(preservedTasks.map((task) => task.assetId));
+  const accountTasks = accountRows
     .filter((account) => account.permissionStatus === '离职待回收')
+    .filter((account) => !preservedIds.has(account.id))
     .map((account) => {
       const existing = existingTasks.get(account.id);
-      return {
-        id: existing?.id || `asset-offboarding-${account.id}`,
+      return makeOffboardingTask({
         employeeName: account.currentUser || account.owner || '待确认',
         department: account.department,
-        assetType: '互联网账号' as const,
+        assetType: '互联网账号',
         assetId: account.id,
         assetName: `${account.platform} / ${account.accountName}`,
         permissionStatus: account.permissionStatus,
-        status: existing?.status || '待回收' as const,
-        dueAt: existing?.dueAt || now().slice(0, 10),
-        handledAt: existing?.handledAt,
-        handler: existing?.handler,
-      };
+      }, existing);
     });
-  setStorageData(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, nextTasks);
+  setStorageData(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, [...preservedTasks, ...accountTasks]);
 }
 
 function requiredText(value: unknown, message: string): string {
   const text = String(value || '').trim();
   if (!text) throw new Error(message);
   return text;
+}
+
+const ASSET_IMPORT_LABELS: Record<AssetImportType, string> = {
+  devices: '设备资产',
+  phones: '手机号资产',
+  accounts: '互联网账号',
+};
+
+export const ASSET_IMPORT_TEMPLATES: Record<AssetImportType, string[]> = {
+  devices: ['设备名称*', '品牌型号*', 'IMEI*', 'SIM类型', '所属主体', '所属部门', '负责人', '当前使用人', '状态', '风险等级', '月费用', '备注'],
+  phones: ['手机号*', '运营商', '所属设备编号*', 'SIM卡槽', '套餐', '月费用', '负责人', '状态'],
+  accounts: ['平台*', '账号名称*', '登录账号*', '绑定手机号', '绑定邮箱', '所属主体', '所属部门', '负责人', '当前使用人', '权限状态', '账号状态', '风险等级', '服务商', '月费用', '到期时间', '用途'],
+};
+
+const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> = {
+  devices: {
+    '设备名称*': '业务备用机',
+    '品牌型号*': 'iPhone 15',
+    'IMEI*': 'IMPORT-IMEI-0001',
+    SIM类型: '双卡',
+    所属主体: '公司',
+    所属部门: '运营管理部',
+    负责人: '张三',
+    当前使用人: '李四',
+    状态: '使用中',
+    风险等级: '低',
+    月费用: '0',
+    备注: '示例行，导入前可删除',
+  },
+  phones: {
+    '手机号*': '13900001111',
+    运营商: '移动',
+    '所属设备编号*': 'DEV-0001',
+    SIM卡槽: '卡槽1',
+    套餐: '商务套餐',
+    月费用: '59',
+    负责人: '张三',
+    状态: '使用中',
+  },
+  accounts: {
+    '平台*': '抖音企业号',
+    '账号名称*': '极享本地生活',
+    '登录账号*': 'jx_import_demo',
+    绑定手机号: '13900001111',
+    绑定邮箱: 'ops@example.com',
+    所属主体: '公司',
+    所属部门: '运营管理部',
+    负责人: '张三',
+    当前使用人: '李四',
+    权限状态: '正常',
+    账号状态: '正常',
+    风险等级: '低',
+    服务商: '自营',
+    月费用: '0',
+    到期时间: '',
+    用途: '示例行，导入前可删除',
+  },
+};
+
+function escapeCsvValue(value: unknown): string {
+  const text = String(value ?? '');
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function rowsToCsv(rows: Array<Record<string, unknown>>): string {
+  if (!rows.length) return '';
+  const columns = Object.keys(rows[0]);
+  return [
+    columns.map(escapeCsvValue).join(','),
+    ...rows.map((row) => columns.map((column) => escapeCsvValue(row[column])).join(',')),
+  ].join('\n');
+}
+
+function getImportTemplateCsv(type: AssetImportType): string {
+  const headers = ASSET_IMPORT_TEMPLATES[type];
+  const sample = ASSET_IMPORT_SAMPLE_ROWS[type];
+  return [
+    headers.map(escapeCsvValue).join(','),
+    headers.map((header) => escapeCsvValue(sample[header] || '')).join(','),
+  ].join('\n');
+}
+
+function getImportFailureCsv(result: AssetImportResult): string {
+  const rawColumns = ASSET_IMPORT_TEMPLATES[result.type];
+  return rowsToCsv(result.failedRows.map((row) => ({
+    行号: row.rowNumber,
+    失败原因: row.reason,
+    ...rawColumns.reduce<Record<string, string>>((acc, column) => {
+      acc[column] = row.raw[column] || '';
+      return acc;
+    }, {}),
+  })));
+}
+
+function parseCsv(csvText: string): Array<{ lineNumber: number; cells: string[] }> {
+  const text = String(csvText || '').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const rows: Array<{ lineNumber: number; cells: string[] }> = [];
+  let lineNumber = 1;
+  let rowLineNumber = 1;
+  let cell = '';
+  let row: string[] = [];
+  let inQuotes = false;
+
+  const pushCell = () => {
+    row.push(cell);
+    cell = '';
+  };
+  const pushRow = () => {
+    pushCell();
+    rows.push({ lineNumber: rowLineNumber, cells: row });
+    row = [];
+    rowLineNumber = lineNumber + 1;
+  };
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"') {
+      if (inQuotes && text[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      pushCell();
+    } else if (char === '\n' && !inQuotes) {
+      pushRow();
+      lineNumber += 1;
+    } else {
+      cell += char;
+    }
+  }
+  if (cell || row.length) pushRow();
+
+  return rows.filter((item) => item.cells.some((value) => value.trim()));
+}
+
+function readCsvRows(csvText: string): Array<{ rowNumber: number; raw: Record<string, string> }> {
+  const rows = parseCsv(csvText);
+  const headerRow = rows[0]?.cells.map((header) => header.trim());
+  if (!headerRow?.length) throw new Error('CSV内容为空');
+  return rows.slice(1).map((row) => ({
+    rowNumber: row.lineNumber,
+    raw: headerRow.reduce<Record<string, string>>((acc, header, index) => {
+      acc[header] = (row.cells[index] || '').trim();
+      return acc;
+    }, {}),
+  }));
+}
+
+function csvCell(raw: Record<string, string>, ...aliases: string[]): string {
+  for (const alias of aliases) {
+    if (raw[alias] !== undefined) return raw[alias].trim();
+    const normalizedAlias = alias.replace(/\*$/, '');
+    const matchedKey = Object.keys(raw).find((key) => key.replace(/\*$/, '') === normalizedAlias);
+    if (matchedKey) return raw[matchedKey].trim();
+  }
+  return '';
+}
+
+function importNumber(value: string): number {
+  const numeric = Number(value || 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function findPhoneForImport(value: string): AssetPhoneNumber | undefined {
+  const keyword = value.trim();
+  if (!keyword) return undefined;
+  return phones().find((phone) => (
+    phone.id === keyword
+    || phone.phoneNumber === keyword
+    || phone.phoneNumberMasked === keyword
+  ));
+}
+
+function deviceInputFromCsv(raw: Record<string, string>): Partial<AssetDeviceInput> {
+  return {
+    deviceName: csvCell(raw, '设备名称*', '设备名称'),
+    brandModel: csvCell(raw, '品牌型号*', '品牌型号'),
+    imei: csvCell(raw, 'IMEI*', 'IMEI'),
+    simType: (csvCell(raw, 'SIM类型') || '双卡') as AssetDeviceInput['simType'],
+    ownerSubject: (csvCell(raw, '所属主体') || '公司') as AssetDeviceInput['ownerSubject'],
+    department: csvCell(raw, '所属部门'),
+    owner: csvCell(raw, '负责人'),
+    currentUser: csvCell(raw, '当前使用人'),
+    status: (csvCell(raw, '状态') || '正常') as AssetDeviceInput['status'],
+    riskLevel: (csvCell(raw, '风险等级') || '低') as AssetDeviceInput['riskLevel'],
+    monthlyCost: importNumber(csvCell(raw, '月费用')),
+    remark: csvCell(raw, '备注'),
+  };
+}
+
+function phoneInputFromCsv(raw: Record<string, string>): Partial<AssetPhoneNumberInput> {
+  const deviceCode = csvCell(raw, '所属设备编号*', '所属设备编号');
+  const device = devices().find((item) => item.deviceCode === deviceCode || item.id === deviceCode);
+  return {
+    phoneNumber: csvCell(raw, '手机号*', '手机号'),
+    operator: (csvCell(raw, '运营商') || '移动') as AssetPhoneNumberInput['operator'],
+    deviceId: device?.id || deviceCode,
+    slotType: (csvCell(raw, 'SIM卡槽') || '卡槽1') as AssetPhoneNumberInput['slotType'],
+    packageName: csvCell(raw, '套餐'),
+    monthlyFee: importNumber(csvCell(raw, '月费用')),
+    owner: csvCell(raw, '负责人'),
+    status: (csvCell(raw, '状态') || '使用中') as AssetPhoneNumberInput['status'],
+  };
+}
+
+function accountInputFromCsv(raw: Record<string, string>): Partial<AssetInternetAccountInput> {
+  const phoneKeyword = csvCell(raw, '绑定手机号');
+  const phone = findPhoneForImport(phoneKeyword);
+  if (phoneKeyword && !phone) throw new Error('绑定手机号不存在');
+  return {
+    platform: csvCell(raw, '平台*', '平台'),
+    accountName: csvCell(raw, '账号名称*', '账号名称'),
+    loginAccount: csvCell(raw, '登录账号*', '登录账号'),
+    phoneId: phone?.id,
+    boundEmail: csvCell(raw, '绑定邮箱'),
+    ownerSubject: (csvCell(raw, '所属主体') || '公司') as AssetInternetAccountInput['ownerSubject'],
+    department: csvCell(raw, '所属部门'),
+    owner: csvCell(raw, '负责人'),
+    currentUser: csvCell(raw, '当前使用人'),
+    permissionStatus: (csvCell(raw, '权限状态') || '正常') as AssetInternetAccountInput['permissionStatus'],
+    accountStatus: (csvCell(raw, '账号状态') || '正常') as AssetInternetAccountInput['accountStatus'],
+    riskLevel: (csvCell(raw, '风险等级') || '低') as AssetInternetAccountInput['riskLevel'],
+    serviceProvider: csvCell(raw, '服务商'),
+    monthlyFee: importNumber(csvCell(raw, '月费用')),
+    expiresAt: csvCell(raw, '到期时间'),
+    purpose: csvCell(raw, '用途'),
+  };
 }
 
 async function guarded<T>(task: () => T): Promise<ApiResponse<T>> {
@@ -264,6 +548,62 @@ function getPhone(phoneId?: string): AssetPhoneNumber | undefined {
 
 function getAccount(accountId?: string): AssetInternetAccount | undefined {
   return accounts().find((account) => account.id === accountId);
+}
+
+function visibleDevices(scope = getCurrentDataVisibilityScope('assets')): AssetDevice[] {
+  const rows = devices();
+  if (scope.unrestricted) return rows;
+  return rows.filter((device) => canViewAssetDevice(device, scope));
+}
+
+function visiblePhones(scope = getCurrentDataVisibilityScope('assets')): AssetPhoneNumber[] {
+  const rows = phones();
+  if (scope.unrestricted) return rows;
+  const visibleDeviceIds = new Set(visibleDevices(scope).map((device) => device.id));
+  return rows.filter((phone) => canViewAssetPhone(phone, scope) || visibleDeviceIds.has(phone.deviceId));
+}
+
+function visibleAccounts(scope = getCurrentDataVisibilityScope('assets')): AssetInternetAccount[] {
+  const rows = accounts();
+  if (scope.unrestricted) return rows;
+  const visiblePhoneIds = new Set(visiblePhones(scope).map((phone) => phone.id));
+  return rows.filter((account) => (
+    canViewAssetAccount(account, scope)
+    || Boolean(account.phoneId && visiblePhoneIds.has(account.phoneId))
+  ));
+}
+
+function visibleAssetIds(scope = getCurrentDataVisibilityScope('assets')): Record<AssetType | 'all', Set<string>> {
+  const deviceIds = new Set(visibleDevices(scope).map((device) => device.id));
+  const phoneIds = new Set(visiblePhones(scope).map((phone) => phone.id));
+  const accountIds = new Set(visibleAccounts(scope).map((account) => account.id));
+  return {
+    device: deviceIds,
+    phone: phoneIds,
+    account: accountIds,
+    all: new Set([...deviceIds, ...phoneIds, ...accountIds]),
+  };
+}
+
+function visibleRisks(scope = getCurrentDataVisibilityScope('assets')): AssetRisk[] {
+  const rows = risks();
+  if (scope.unrestricted) return rows;
+  const idsByType = visibleAssetIds(scope);
+  return rows.filter((risk) => idsByType[risk.targetType].has(risk.targetId));
+}
+
+function visibleLogs(scope = getCurrentDataVisibilityScope('assets')): AssetOperationLog[] {
+  const rows = logs();
+  if (scope.unrestricted) return rows;
+  const ids = visibleAssetIds(scope).all;
+  return rows.filter((log) => ids.has(log.targetId));
+}
+
+function visibleOffboardingTasks(scope = getCurrentDataVisibilityScope('assets')): AssetOffboardingTask[] {
+  const rows = offboardingTasks();
+  if (scope.unrestricted) return rows;
+  const ids = visibleAssetIds(scope).all;
+  return rows.filter((task) => canViewAssetOffboardingTask(task, scope) || ids.has(task.assetId));
 }
 
 function getPhoneDevice(phone?: AssetPhoneNumber): AssetDevice | undefined {
@@ -344,33 +684,34 @@ function relatedAccountsForDevice(deviceId: string): AssetInternetAccount[] {
   return accounts().filter((account) => account.phoneId && phoneIds.includes(account.phoneId));
 }
 
-function detailLogs(type: AssetType, id: string): AssetOperationLog[] {
+function detailLogs(_type: AssetType, id: string): AssetOperationLog[] {
   const targetType: Record<AssetType, string> = {
     device: '设备资产',
     phone: '手机号资产',
     account: '互联网账号',
   };
-  return logs()
-    .filter((log) => log.targetId === id || log.targetType === targetType[type])
+  return visibleLogs()
+    .filter((log) => log.targetId === id)
     .slice(0, 5);
 }
 
 function detailRisks(type: AssetType, id: string): AssetRisk[] {
-  return risks().filter((risk) => risk.targetType === type && risk.targetId === id);
+  return visibleRisks().filter((risk) => risk.targetType === type && risk.targetId === id);
 }
 
 async function fetchDashboard(): Promise<ApiResponse<AssetDashboard>> {
   ensureInit();
   await delay(120);
-  const deviceRows = devices();
-  const phoneRows = phones();
-  const accountRows = accounts();
+  const scope = getCurrentDataVisibilityScope('assets');
+  const deviceRows = visibleDevices(scope);
+  const phoneRows = visiblePhones(scope);
+  const accountRows = visibleAccounts(scope);
   const dashboard: AssetDashboard = {
     deviceCount: deviceRows.length,
     phoneCount: phoneRows.length,
     accountCount: accountRows.length,
-    openRiskCount: risks().filter((risk) => risk.status === 'open').length,
-    offboardingCount: offboardingTasks().filter((task) => task.status === '待回收').length,
+    openRiskCount: visibleRisks(scope).filter((risk) => risk.status === 'open').length,
+    offboardingCount: visibleOffboardingTasks(scope).filter((task) => task.status === '待回收').length,
     monthlyCost: [
       ...deviceRows.map((item) => item.monthlyCost),
       ...phoneRows.map((item) => item.monthlyFee),
@@ -384,7 +725,7 @@ async function fetchDashboard(): Promise<ApiResponse<AssetDashboard>> {
 async function fetchDevices(filters?: AssetFilters): Promise<ApiResponse<PaginatedResponse<AssetDevice>>> {
   ensureInit();
   await delay(120);
-  return createSuccessResponse(paginate(filterDevices(devices(), filters), filters));
+  return createSuccessResponse(paginate(filterDevices(visibleDevices(), filters), filters));
 }
 
 async function createDevice(input: Partial<AssetDeviceInput>): Promise<ApiResponse<AssetDevice>> {
@@ -444,7 +785,7 @@ async function updateDevice(id: string, input: Partial<AssetDeviceInput>): Promi
 async function fetchPhoneNumbers(filters?: AssetFilters): Promise<ApiResponse<PaginatedResponse<AssetPhoneNumber>>> {
   ensureInit();
   await delay(120);
-  return createSuccessResponse(paginate(filterPhones(phones(), filters), filters));
+  return createSuccessResponse(paginate(filterPhones(visiblePhones(), filters), filters));
 }
 
 function assertPhoneBinding(input: Partial<AssetPhoneNumberInput>, excludeId?: string): void {
@@ -512,7 +853,7 @@ async function updatePhoneNumber(id: string, input: Partial<AssetPhoneNumberInpu
 async function fetchInternetAccounts(filters?: AssetFilters): Promise<ApiResponse<PaginatedResponse<AssetInternetAccount>>> {
   ensureInit();
   await delay(120);
-  return createSuccessResponse(paginate(filterAccounts(accounts(), filters), filters));
+  return createSuccessResponse(paginate(filterAccounts(visibleAccounts(), filters), filters));
 }
 
 function assertAccountBinding(input: Partial<AssetInternetAccountInput>, excludeId?: string): void {
@@ -597,11 +938,85 @@ async function updateInternetAccount(id: string, input: Partial<AssetInternetAcc
   });
 }
 
+async function createOffboardingTasksForEmployee(employeeName: string, department = ''): Promise<ApiResponse<AssetOffboardingTask[]>> {
+  return guarded(() => {
+    const name = requiredText(employeeName, '员工姓名不能为空');
+    const deviceRows = devices();
+    const phoneRows = phones();
+    const accountRows = accounts();
+    const currentTasks = offboardingTasks();
+    const existingByAssetId = new Map(currentTasks.map((task) => [task.assetId, task]));
+    const touchedTasks: AssetOffboardingTask[] = [];
+    let nextTasks = [...currentTasks];
+
+    const upsertTask = (task: AssetOffboardingTask) => {
+      const index = nextTasks.findIndex((item) => item.assetId === task.assetId);
+      if (index === -1) nextTasks = [task, ...nextTasks];
+      else nextTasks[index] = { ...nextTasks[index], ...task, id: nextTasks[index].id };
+      touchedTasks.push(index === -1 ? task : nextTasks[index]);
+    };
+
+    deviceRows
+      .filter((device) => assetBelongsToEmployee(device, name))
+      .forEach((device) => {
+        upsertTask(makeOffboardingTask({
+          assetId: device.id,
+          assetType: '设备资产',
+          assetName: `${device.deviceCode} / ${device.deviceName}`,
+          employeeName: name,
+          department: device.department || department,
+          permissionStatus: '离职待回收',
+        }, existingByAssetId.get(device.id)));
+      });
+
+    phoneRows
+      .filter((phone) => assetBelongsToEmployee(phone, name))
+      .forEach((phone) => {
+        upsertTask(makeOffboardingTask({
+          assetId: phone.id,
+          assetType: '手机号资产',
+          assetName: phone.phoneNumberMasked,
+          employeeName: name,
+          department,
+          permissionStatus: '离职待回收',
+        }, existingByAssetId.get(phone.id)));
+      });
+
+    let accountChanged = false;
+    const nextAccounts = accountRows.map((account) => {
+      if (!assetBelongsToEmployee(account, name)) return account;
+      const marked: AssetInternetAccount = {
+        ...account,
+        permissionStatus: '离职待回收',
+        updatedAt: now(),
+      };
+      accountChanged = accountChanged || marked.permissionStatus !== account.permissionStatus;
+      upsertTask(makeOffboardingTask({
+        assetId: marked.id,
+        assetType: '互联网账号',
+        assetName: `${marked.platform} / ${marked.accountName}`,
+        employeeName: name,
+        department: marked.department || department,
+        permissionStatus: marked.permissionStatus,
+      }, existingByAssetId.get(marked.id)));
+      return marked;
+    });
+
+    if (accountChanged) setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, nextAccounts);
+    if (touchedTasks.length) {
+      setStorageData(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, nextTasks);
+      logAssetOperation('生成离职回收', '离职回收', name, name, `为${name}生成${touchedTasks.length}条资产回收任务`);
+    }
+    rebuildRisksAndOffboarding();
+    return touchedTasks;
+  });
+}
+
 async function fetchRisks(filters?: AssetFilters): Promise<ApiResponse<PaginatedResponse<AssetRisk>>> {
   ensureInit();
   await delay(120);
   const keyword = filters?.search?.trim().toLowerCase();
-  const filtered = risks().filter((risk) => {
+  const filtered = visibleRisks().filter((risk) => {
     const matchesKeyword = !keyword || [risk.type, risk.targetName, risk.description].some((value) => includesKeyword(value, keyword));
     const matchesRisk = !filters?.riskLevel || risk.level === filters.riskLevel;
     const matchesStatus = !filters?.status || risk.status === filters.status;
@@ -614,7 +1029,7 @@ async function fetchOperationLogs(filters?: AssetFilters): Promise<ApiResponse<P
   ensureInit();
   await delay(120);
   const keyword = filters?.search?.trim().toLowerCase();
-  const filtered = logs().filter((log) => (
+  const filtered = visibleLogs().filter((log) => (
     !keyword || [log.action, log.targetType, log.targetName, log.operator, log.detail].some((value) => includesKeyword(value, keyword))
   ));
   return createSuccessResponse(paginate(filtered, filters));
@@ -624,7 +1039,7 @@ async function fetchOffboardingTasks(filters?: AssetFilters): Promise<ApiRespons
   ensureInit();
   await delay(120);
   const keyword = filters?.search?.trim().toLowerCase();
-  const filtered = offboardingTasks().filter((task) => {
+  const filtered = visibleOffboardingTasks().filter((task) => {
     const matchesKeyword = !keyword || [
       task.employeeName,
       task.department,
@@ -641,33 +1056,37 @@ async function fetchOffboardingTasks(filters?: AssetFilters): Promise<ApiRespons
 async function fetchDetail(type: AssetType, id: string): Promise<ApiResponse<AssetDetailBundle | null>> {
   ensureInit();
   await delay(120);
+  const scope = getCurrentDataVisibilityScope('assets');
+  const visibleDeviceRows = visibleDevices(scope);
+  const visiblePhoneRows = visiblePhones(scope);
+  const visibleAccountRows = visibleAccounts(scope);
   if (type === 'device') {
-    const device = getDevice(id);
+    const device = visibleDeviceRows.find((item) => item.id === id);
     if (!device) return createSuccessResponse(null);
-    const relatedPhones = phones().filter((phone) => phone.deviceId === id);
+    const relatedPhones = visiblePhoneRows.filter((phone) => phone.deviceId === id);
     return createSuccessResponse({
       type,
       device,
       relatedPhones,
-      relatedAccounts: relatedAccountsForDevice(id),
+      relatedAccounts: relatedAccountsForDevice(id).filter((account) => visibleAccountRows.some((item) => item.id === account.id)),
       risks: detailRisks(type, id),
       logs: detailLogs(type, id),
     });
   }
   if (type === 'phone') {
-    const phone = getPhone(id);
+    const phone = visiblePhoneRows.find((item) => item.id === id);
     if (!phone) return createSuccessResponse(null);
     return createSuccessResponse({
       type,
       phone,
       relatedDevice: getDevice(phone.deviceId),
       relatedPhones: [phone],
-      relatedAccounts: relatedAccountsForPhone(id),
+      relatedAccounts: relatedAccountsForPhone(id).filter((account) => visibleAccountRows.some((item) => item.id === account.id)),
       risks: detailRisks(type, id),
       logs: detailLogs(type, id),
     });
   }
-  const account = getAccount(id);
+  const account = visibleAccountRows.find((item) => item.id === id);
   if (!account) return createSuccessResponse(null);
   const phone = getPhone(account.phoneId);
   return createSuccessResponse({
@@ -684,6 +1103,7 @@ async function fetchDetail(type: AssetType, id: string): Promise<ApiResponse<Ass
 async function updateRiskStatus(riskId: string, status: AssetRiskStatus): Promise<ApiResponse<AssetRisk | null>> {
   ensureInit();
   await delay(120);
+  if (!visibleRisks().some((risk) => risk.id === riskId)) return createSuccessResponse(null);
   let updated: AssetRisk | null = null;
   const nextRisks = risks().map((risk) => {
     if (risk.id !== riskId) return risk;
@@ -702,6 +1122,8 @@ async function updateRiskStatus(riskId: string, status: AssetRiskStatus): Promis
 async function completeOffboardingTask(taskId: string): Promise<ApiResponse<AssetOffboardingTask | null>> {
   ensureInit();
   await delay(120);
+  const targetTask = visibleOffboardingTasks().find((task) => task.id === taskId);
+  if (!targetTask) return createSuccessResponse(null);
   let updated: AssetOffboardingTask | null = null;
   const nextTasks = offboardingTasks().map((task) => {
     if (task.id !== taskId) return task;
@@ -714,12 +1136,113 @@ async function completeOffboardingTask(taskId: string): Promise<ApiResponse<Asse
     };
     return updated;
   });
+  if (targetTask?.assetType === '互联网账号') {
+    setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, accounts().map((account) => (
+      account.id === targetTask.assetId
+        ? { ...account, permissionStatus: '已回收', accountStatus: account.accountStatus === '已注销' ? account.accountStatus : '闲置', updatedAt: now() }
+        : account
+    )));
+  }
+  if (targetTask?.assetType === '设备资产') {
+    setStorageData(STORAGE_KEYS.ASSET_DEVICES, devices().map((device) => (
+      device.id === targetTask.assetId
+        ? { ...device, status: '闲置', currentUser: '', updatedAt: now() }
+        : device
+    )));
+  }
+  if (targetTask?.assetType === '手机号资产') {
+    setStorageData(STORAGE_KEYS.ASSET_PHONE_NUMBERS, phones().map((phone) => (
+      phone.id === targetTask.assetId
+        ? { ...phone, status: '闲置', updatedAt: now() }
+        : phone
+    )));
+  }
   setStorageData(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, nextTasks);
+  if (targetTask) {
+    logAssetOperation('完成离职回收', targetTask.assetType, targetTask.assetId, targetTask.assetName, `${targetTask.employeeName}的${targetTask.assetType}已标记回收`);
+    rebuildRisksAndOffboarding();
+  }
   return createSuccessResponse(updated);
 }
 
 function getAccountPlatformOptions(): string[] {
-  return Array.from(new Set(accounts().map((account) => account.platform))).filter(Boolean);
+  return Array.from(new Set(visibleAccounts().map((account) => account.platform))).filter(Boolean);
+}
+
+async function revealSensitiveField(
+  type: AssetType,
+  id: string,
+  field: AssetSensitiveField,
+): Promise<ApiResponse<AssetSensitiveRevealResult>> {
+  return guarded(() => {
+    if (type === 'device') {
+      const device = visibleDevices().find((item) => item.id === id);
+      if (!device) throw new Error('设备不存在');
+      if (field !== 'imei') throw new Error('该字段不属于设备资产');
+      logAssetOperation('查看敏感字段', '设备资产', device.id, device.deviceName, '查看敏感字段：IMEI');
+      return { field, label: 'IMEI', value: device.imei };
+    }
+    if (type === 'phone') {
+      const phone = visiblePhones().find((item) => item.id === id);
+      if (!phone) throw new Error('手机号不存在');
+      if (field !== 'phoneNumber') throw new Error('该字段不属于手机号资产');
+      logAssetOperation('查看敏感字段', '手机号资产', phone.id, phone.phoneNumberMasked, '查看敏感字段：完整手机号');
+      return { field, label: '完整手机号', value: phone.phoneNumber };
+    }
+    const account = visibleAccounts().find((item) => item.id === id);
+    if (!account) throw new Error('互联网账号不存在');
+    if (field === 'loginAccount') {
+      logAssetOperation('查看敏感字段', '互联网账号', account.id, account.accountName, '查看敏感字段：登录账号');
+      return { field, label: '登录账号', value: account.loginAccount };
+    }
+    if (field === 'boundEmail') {
+      logAssetOperation('查看敏感字段', '互联网账号', account.id, account.accountName, '查看敏感字段：绑定邮箱');
+      return { field, label: '绑定邮箱', value: account.boundEmail || '' };
+    }
+    throw new Error('该字段不属于互联网账号');
+  });
+}
+
+async function importAssetsFromCsv(type: AssetImportType, csvText: string): Promise<ApiResponse<AssetImportResult>> {
+  ensureInit();
+  await delay(120);
+
+  try {
+    const rows = readCsvRows(csvText);
+    const failedRows: AssetImportFailedRow[] = [];
+    const createdIds: string[] = [];
+
+    for (const row of rows) {
+      try {
+        const response = type === 'devices'
+          ? await createDevice(deviceInputFromCsv(row.raw))
+          : type === 'phones'
+            ? await createPhoneNumber(phoneInputFromCsv(row.raw))
+            : await createInternetAccount(accountInputFromCsv(row.raw));
+        if (response.code !== 0) {
+          failedRows.push({ rowNumber: row.rowNumber, raw: row.raw, reason: response.message });
+        } else {
+          createdIds.push(response.data.id);
+        }
+      } catch (error: any) {
+        failedRows.push({ rowNumber: row.rowNumber, raw: row.raw, reason: error.message || '导入失败' });
+      }
+    }
+
+    const result: AssetImportResult = {
+      type,
+      totalRows: rows.length,
+      successCount: createdIds.length,
+      failedCount: failedRows.length,
+      createdIds,
+      failedRows,
+    };
+    logAssetOperation('CSV导入', '资产管理', type, ASSET_IMPORT_LABELS[type], `${ASSET_IMPORT_LABELS[type]}导入：成功${result.successCount}行，失败${result.failedCount}行`);
+    rebuildRisksAndOffboarding();
+    return createSuccessResponse(result);
+  } catch (error: any) {
+    return createErrorResponse(error.message || 'CSV导入失败');
+  }
 }
 
 export const assetApi = {
@@ -733,11 +1256,16 @@ export const assetApi = {
   fetchInternetAccounts,
   createInternetAccount,
   updateInternetAccount,
+  createOffboardingTasksForEmployee,
   fetchRisks,
   fetchOperationLogs,
   fetchOffboardingTasks,
   fetchDetail,
   updateRiskStatus,
   completeOffboardingTask,
+  revealSensitiveField,
+  importAssetsFromCsv,
+  getImportTemplateCsv,
+  getImportFailureCsv,
   getAccountPlatformOptions,
 };

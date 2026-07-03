@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { AuthenticatedUser, LoginPayload } from '../../src/types/auth';
 import { normalizeAccount, verifyPassword } from '../../src/shared/utils/auth';
+import { mergeRoleWithDefaultAccess } from '../../src/shared/utils/organizationConfig';
 import { toAuthenticatedUser } from '../../src/shared/utils/permissions';
 import { failure, success } from '../api/response';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
@@ -32,7 +33,7 @@ function sessionDurationMs(remember: boolean): number {
 export function createAuthService(prisma: AuthPrisma) {
   const readRoles = async () => {
     const roles = await prisma.role.findMany({ where: { isActive: true } });
-    return roles.map(mapPrismaRole);
+    return roles.map(mapPrismaRole).map(mergeRoleWithDefaultAccess);
   };
 
   return {

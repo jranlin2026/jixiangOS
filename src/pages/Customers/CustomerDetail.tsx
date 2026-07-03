@@ -127,6 +127,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const [editing, setEditing] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [draft, setDraft] = useState<Partial<Customer>>({});
+  const [tagInput, setTagInput] = useState('');
   const [orders, setOrders] = useState<Order[]>([]);
   const [contracts, setContracts] = useState<ContractFile[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -145,6 +146,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   useEffect(() => {
     setCurrentCustomer(customer);
     setDraft(customer);
+    setTagInput(normalizeCustomerTags(customer.tags).join(', '));
     setFollowNote('');
     setFollowAttachments([]);
     setEditing(false);
@@ -380,7 +382,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       leadContributorId: draft.leadContributorId,
       leadContributorName: draft.leadContributorName,
       customerLevel: draft.customerLevel,
-      tags: normalizeCustomerTags(draft.tags),
+      tags: parseCustomerTagsInput(tagInput),
       originalSalesTransferBy: draft.originalSalesTransferBy,
       remark: draft.remark,
     };
@@ -393,6 +395,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       }
       setCurrentCustomer(res.data);
       setDraft(res.data);
+      setTagInput(normalizeCustomerTags(res.data.tags).join(', '));
       setEditing(false);
       onUpdated?.(res.data);
     } catch (error) {
@@ -417,6 +420,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     }
     setCurrentCustomer(updatedCustomer);
     setDraft(updatedCustomer);
+    setTagInput(normalizeCustomerTags(updatedCustomer.tags).join(', '));
     onUpdated?.(updatedCustomer);
   };
 
@@ -436,6 +440,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     }
     setCurrentCustomer(releasedCustomer);
     setDraft(releasedCustomer);
+    setTagInput(normalizeCustomerTags(releasedCustomer.tags).join(', '));
     setReleaseDialogOpen(false);
     setReleaseReason('');
     onUpdated?.(releasedCustomer);
@@ -607,7 +612,6 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
 
   const renderTagsRow = () => {
     const tags = normalizeCustomerTags(currentCustomer.tags);
-    const draftTags = normalizeCustomerTags(draft.tags);
 
     return (
       <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
@@ -615,8 +619,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
         <Box sx={{ px: 1.5, py: editing ? 0.5 : 1, fontSize: 13 }}>
           {editing ? (
             <TextField
-              value={draftTags.join(', ')}
-              onChange={(event) => setDraft((prev) => ({ ...prev, tags: parseCustomerTagsInput(event.target.value) }))}
+              value={tagInput}
+              onChange={(event) => setTagInput(event.target.value)}
               placeholder="多个标签用逗号分隔"
               size="small"
               fullWidth
@@ -961,13 +965,32 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                   )}
                   {editing ? (
                     <>
-                      <Button size="small" disabled={profileSaving} onClick={() => { setDraft(currentCustomer); setEditing(false); }}>取消</Button>
+                      <Button
+                        size="small"
+                        disabled={profileSaving}
+                        onClick={() => {
+                          setDraft(currentCustomer);
+                          setTagInput(normalizeCustomerTags(currentCustomer.tags).join(', '));
+                          setEditing(false);
+                        }}
+                      >
+                        取消
+                      </Button>
                       <Button size="small" variant="contained" disabled={profileSaving} onClick={handleSaveProfile} sx={{ minWidth: 76 }}>
                         {profileSaving ? '保存中' : '保存'}
                       </Button>
                     </>
                   ) : (
-                    <Button size="small" variant="outlined" onClick={() => setEditing(true)}>编辑资料</Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => {
+                        setTagInput(normalizeCustomerTags(currentCustomer.tags).join(', '));
+                        setEditing(true);
+                      }}
+                    >
+                      编辑资料
+                    </Button>
                   )}
                 </Box>
               )}

@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getAllowedCorsOrigins, getApiListenHost, validateRuntimeConfig } from './config/runtime';
+import { getAllowedCorsOrigins, getApiJsonBodyLimit, getApiListenHost, validateRuntimeConfig } from './config/runtime';
 import { prisma, checkDatabaseConnection } from './db/client';
 import { createRequireAuth, bearerToken, type AuthenticatedRequest } from './middleware/auth';
 import { createLoginRateLimiter } from './middleware/loginRateLimit';
@@ -12,6 +12,16 @@ import { createAuthService } from './services/authService';
 import { createAiConfigService } from './services/aiConfigService';
 import { createSettingsService } from './services/settingsService';
 import { createStorageService } from './services/storageService';
+import {
+  canReadStorageKey,
+  canWriteStorageKey,
+  filterAssetStorageData,
+  filterSingleStorageKey,
+  isAssetStorageKey,
+} from './services/assetStorageAccess';
+import { migrateDefaultRoleAccess } from './services/roleMigrationService';
+import { mapPrismaRole, mapPrismaUser } from './db/prismaMappers';
+import { mergeRoleWithDefaultAccess } from '../src/shared/utils/organizationConfig';
 import { PERMISSION_KEYS, hasPermission } from '../src/shared/utils/permissions';
 import {
   buildCustomerIntelPrompt,
@@ -75,7 +85,7 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: getApiJsonBodyLimit() }));
 
 type DeepSeekMessage = {
   role: 'system' | 'user' | 'assistant';
@@ -84,6 +94,17 @@ type DeepSeekMessage = {
 
 function routeParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] || '' : value || '';
+}
+
+async function assetStorageContext() {
+  const [roles, users] = await Promise.all([
+    prisma.role.findMany({ where: { isActive: true } }),
+    prisma.user.findMany(),
+  ]);
+  return {
+    roles: roles.map(mapPrismaRole).map(mergeRoleWithDefaultAccess),
+    users: users.map(mapPrismaUser),
+  };
 }
 
 function jsonFromText<T>(text: string): T | null {
@@ -282,22 +303,50 @@ app.post('/api/ai/config/test', requireAiConfigAccess, async (_req, res) => {
   }
 });
 
-app.get('/api/storage', requireStorageAccess, async (_req, res) => {
-  res.json(await storageService.list());
+app.get('/api/storage', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await storageService.list();
+  if (result.code === 0 && result.data && req.currentUser) {
+    const context = await assetStorageContext();
+    res.json({ ...result, data: filterAssetStorageData(result.data as Record<string, unknown>, req.currentUser, context) });
+    return;
+  }
+  res.json(result);
 });
 
-app.get('/api/storage/:key', requireStorageAccess, async (req, res) => {
-  const result = await storageService.get(routeParam(req.params.key));
+app.get('/api/storage/:key', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const key = routeParam(req.params.key);
+  if (req.currentUser && !canReadStorageKey(req.currentUser, key)) {
+    res.status(403).json({ code: 403, data: null, message: 'Forbidden' });
+    return;
+  }
+  if (req.currentUser && isAssetStorageKey(key)) {
+    const result = await storageService.list();
+    const context = await assetStorageContext();
+    const data = filterSingleStorageKey(key, result.data as Record<string, unknown>, req.currentUser, context);
+    res.status(result.code === 0 ? 200 : 400).json({ ...result, data });
+    return;
+  }
+  const result = await storageService.get(key);
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.put('/api/storage/:key', requireStorageAccess, async (req, res) => {
-  const result = await storageService.set(routeParam(req.params.key), req.body?.value);
+app.put('/api/storage/:key', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const key = routeParam(req.params.key);
+  if (req.currentUser && !canWriteStorageKey(req.currentUser, key)) {
+    res.status(403).json({ code: 403, data: null, message: 'Forbidden' });
+    return;
+  }
+  const result = await storageService.set(key, req.body?.value);
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.delete('/api/storage/:key', requireStorageAccess, async (req, res) => {
-  const result = await storageService.remove(routeParam(req.params.key));
+app.delete('/api/storage/:key', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const key = routeParam(req.params.key);
+  if (req.currentUser && !canWriteStorageKey(req.currentUser, key)) {
+    res.status(403).json({ code: 403, data: null, message: 'Forbidden' });
+    return;
+  }
+  const result = await storageService.remove(key);
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
@@ -469,6 +518,17 @@ if (process.env.NODE_ENV === 'production') {
   }
 }
 
-app.listen(port, host, () => {
-  console.log(`AI proxy listening on http://${host}:${port}`);
+async function startServer() {
+  const migratedRoles = await migrateDefaultRoleAccess(prisma);
+  if (migratedRoles > 0) {
+    console.log(`Migrated default role access for ${migratedRoles} roles.`);
+  }
+  app.listen(port, host, () => {
+    console.log(`AI proxy listening on http://${host}:${port}`);
+  });
+}
+
+startServer().catch((error) => {
+  console.error('Failed to start server:', error);
+  process.exit(1);
 });

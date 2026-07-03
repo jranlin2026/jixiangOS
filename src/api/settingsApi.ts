@@ -16,6 +16,7 @@ import { DEFAULT_ORGANIZATION_PROFILE, ensureOrganizationConfigData, getOrganiza
 import { DEFAULT_USER_ROLE } from '../shared/utils/roles';
 import { getCurrentOperatorName } from '../shared/utils/currentOperator';
 import { backendRequest, shouldUseBackendApi } from './backendClient';
+import { assetApi } from './assetApi';
 
 function ensureInit(): void {
   initializeMockData();
@@ -464,10 +465,14 @@ async function updateUser(id: string, data: Partial<User>): Promise<ApiResponse<
 
 async function leaveUser(id: string, handoff?: LeaveUserCustomerHandoff): Promise<ApiResponse<User | null>> {
   if (shouldUseBackendApi()) {
-    return backendRequest<User | null>(`/settings/users/${encodeURIComponent(id)}/leave`, {
+    const result = await backendRequest<User | null>(`/settings/users/${encodeURIComponent(id)}/leave`, {
       method: 'POST',
       body: JSON.stringify(handoff || {}),
     });
+    if (result.code === 0 && result.data?.name) {
+      await assetApi.createOffboardingTasksForEmployee(result.data.name);
+    }
+    return result;
   }
 
   await delay(150);
@@ -487,6 +492,7 @@ async function leaveUser(id: string, handoff?: LeaveUserCustomerHandoff): Promis
     updatedAt: now,
   };
   setStorageData(STORAGE_KEYS.USERS, users);
+  await assetApi.createOffboardingTasksForEmployee(users[idx].name);
   return createSuccessResponse(users[idx]);
 }
 

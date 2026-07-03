@@ -52,6 +52,8 @@ import type {
   AssetDevice,
   AssetDeviceInput,
   AssetFilters,
+  AssetImportResult,
+  AssetImportType,
   AssetInternetAccount,
   AssetInternetAccountInput,
   AssetPhoneNumber,
@@ -59,8 +61,11 @@ import type {
   AssetRisk,
   AssetRiskLevel,
   AssetRiskStatus,
+  AssetSensitiveField,
   AssetType,
 } from '../../types/asset';
+import useAuthStore from '../../store/useAuthStore';
+import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 
 type AssetTab = 'overview' | 'devices' | 'phones' | 'accounts' | 'risks' | 'logs' | 'offboarding';
 
@@ -74,14 +79,22 @@ type AssetFormState = {
   values: Record<string, string>;
 };
 
-const ASSET_TABS: Array<{ value: AssetTab; label: string }> = [
-  { value: 'overview', label: '资产总览' },
-  { value: 'devices', label: '设备资产' },
-  { value: 'phones', label: '手机号资产' },
-  { value: 'accounts', label: '互联网账号' },
-  { value: 'risks', label: '风险提醒' },
-  { value: 'logs', label: '操作日志' },
-  { value: 'offboarding', label: '离职回收' },
+type AssetImportState = {
+  open: boolean;
+  type: AssetImportType;
+  csvText: string;
+  fileName: string;
+  result: AssetImportResult | null;
+};
+
+const ASSET_TABS: Array<{ value: AssetTab; label: string; permissionKey: string }> = [
+  { value: 'overview', label: '资产总览', permissionKey: PERMISSION_KEYS.ASSETS_OVERVIEW },
+  { value: 'devices', label: '设备资产', permissionKey: PERMISSION_KEYS.ASSETS_DEVICES },
+  { value: 'phones', label: '手机号资产', permissionKey: PERMISSION_KEYS.ASSETS_PHONES },
+  { value: 'accounts', label: '互联网账号', permissionKey: PERMISSION_KEYS.ASSETS_ACCOUNTS },
+  { value: 'risks', label: '风险提醒', permissionKey: PERMISSION_KEYS.ASSETS_RISKS },
+  { value: 'logs', label: '操作日志', permissionKey: PERMISSION_KEYS.ASSETS_LOGS },
+  { value: 'offboarding', label: '离职回收', permissionKey: PERMISSION_KEYS.ASSETS_OFFBOARDING },
 ];
 
 const VALID_TABS = new Set(ASSET_TABS.map((tab) => tab.value));
@@ -96,6 +109,14 @@ const emptyForm: AssetFormState = {
   type: 'account',
   mode: 'create',
   values: {},
+};
+
+const emptyImportState: AssetImportState = {
+  open: false,
+  type: 'devices',
+  csvText: '',
+  fileName: '',
+  result: null,
 };
 
 function getTabFromSearch(value: string | null): AssetTab {
@@ -136,6 +157,18 @@ function toCsv(rows: Array<Record<string, unknown>>): string {
   return [columns.join(','), ...rows.map((row) => columns.map((column) => escape(row[column])).join(','))].join('\n');
 }
 
+function downloadCsv(filename: string, csv: string) {
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
+
 const AssetManagement: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = getTabFromSearch(searchParams.get('tab'));
@@ -151,6 +184,9 @@ const AssetManagement: React.FC = () => {
   const [lookupDevices, setLookupDevices] = useState<AssetDevice[]>([]);
   const [lookupPhones, setLookupPhones] = useState<AssetPhoneNumber[]>([]);
   const [formState, setFormState] = useState<AssetFormState>(emptyForm);
+  const [importState, setImportState] = useState<AssetImportState>(emptyImportState);
+  const [revealedValues, setRevealedValues] = useState<Record<string, string>>({});
+  const currentUser = useAuthStore((state) => state.currentUser);
   const {
     dashboard,
     devices,
@@ -161,6 +197,7 @@ const AssetManagement: React.FC = () => {
     offboardingTasks,
     detail,
     pagination,
+    loading,
     fetchDashboard,
     fetchDevices,
     fetchPhones,
@@ -177,8 +214,20 @@ const AssetManagement: React.FC = () => {
     updateAccount,
     updateRiskStatus,
     completeOffboardingTask,
+    revealSensitiveField,
+    importAssetsFromCsv,
     clearDetail,
   } = useAssetStore();
+  const canRevealSensitive = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW);
+  const canImportExport = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_IMPORT_EXPORT, 'write');
+  const canEditAssets = hasPermission(currentUser, PERMISSION_KEYS.ASSETS, 'write');
+  const canHandleRisks = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_RISKS, 'write');
+  const canHandleOffboarding = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_OFFBOARDING, 'write');
+  const visibleTabs = useMemo(
+    () => ASSET_TABS.filter((tab) => hasPermission(currentUser, tab.permissionKey)),
+    [currentUser],
+  );
+  const activeTabVisible = visibleTabs.some((tab) => tab.value === activeTab);
 
   const filters = useMemo<AssetFilters>(() => ({
     search,
@@ -210,6 +259,12 @@ const AssetManagement: React.FC = () => {
   }, [activeTab, clearDetail]);
 
   useEffect(() => {
+    if (!visibleTabs.length || activeTabVisible) return;
+    setSearchParams({ tab: visibleTabs[0].value });
+  }, [activeTabVisible, setSearchParams, visibleTabs]);
+
+  useEffect(() => {
+    if (!activeTabVisible) return;
     if (activeTab === 'overview') {
       fetchDashboard();
       fetchRisks({ pageSize: 5, status: 'open' });
@@ -222,7 +277,7 @@ const AssetManagement: React.FC = () => {
     if (activeTab === 'risks') fetchRisks(filters);
     if (activeTab === 'logs') fetchLogs(filters);
     if (activeTab === 'offboarding') fetchOffboardingTasks(filters);
-  }, [activeTab, fetchAccounts, fetchDashboard, fetchDevices, fetchLogs, fetchOffboardingTasks, fetchPhones, fetchRisks, filters]);
+  }, [activeTab, activeTabVisible, fetchAccounts, fetchDashboard, fetchDevices, fetchLogs, fetchOffboardingTasks, fetchPhones, fetchRisks, filters]);
 
   useEffect(() => {
     setPage(0);
@@ -262,6 +317,80 @@ const AssetManagement: React.FC = () => {
     if (activeTab === 'devices') return 'device';
     if (activeTab === 'phones') return 'phone';
     return 'account';
+  };
+
+  const defaultImportType = (): AssetImportType => {
+    if (activeTab === 'phones') return 'phones';
+    if (activeTab === 'accounts') return 'accounts';
+    return 'devices';
+  };
+
+  const openImportDialog = () => {
+    if (!canImportExport) {
+      setSnackbar('当前账号没有资产导入导出权限');
+      return;
+    }
+    setImportState({ ...emptyImportState, open: true, type: defaultImportType() });
+  };
+
+  const closeImportDialog = () => setImportState(emptyImportState);
+
+  const updateImportType = (type: AssetImportType) => {
+    setImportState((current) => ({ ...current, type, result: null }));
+  };
+
+  const downloadImportTemplate = () => {
+    if (!canImportExport) {
+      setSnackbar('当前账号没有资产导入导出权限');
+      return;
+    }
+    const labelMap: Record<AssetImportType, string> = {
+      devices: '设备资产',
+      phones: '手机号资产',
+      accounts: '互联网账号',
+    };
+    downloadCsv(`资产管理-${labelMap[importState.type]}导入模板.csv`, assetApi.getImportTemplateCsv(importState.type));
+  };
+
+  const downloadFailedRows = () => {
+    if (!canImportExport) {
+      setSnackbar('当前账号没有资产导入导出权限');
+      return;
+    }
+    if (!importState.result?.failedRows.length) return;
+    downloadCsv(`资产管理-导入失败行-${new Date().toISOString().slice(0, 10)}.csv`, assetApi.getImportFailureCsv(importState.result));
+  };
+
+  const handleImportFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    setImportState((current) => ({
+      ...current,
+      csvText: text,
+      fileName: file.name,
+      result: null,
+    }));
+    event.target.value = '';
+  };
+
+  const submitImport = async () => {
+    if (!canImportExport) {
+      setSnackbar('当前账号没有资产导入导出权限');
+      return;
+    }
+    if (!importState.csvText.trim()) {
+      setSnackbar('请先选择或粘贴 CSV 内容');
+      return;
+    }
+    const result = await importAssetsFromCsv(importState.type, importState.csvText);
+    if (!result) {
+      setSnackbar(useAssetStore.getState().error || '导入失败');
+      return;
+    }
+    setImportState((current) => ({ ...current, result }));
+    setSnackbar(`导入完成：成功${result.successCount}行，失败${result.failedCount}行`);
+    await refreshActiveTab();
   };
 
   const updateFormValue = (field: string, value: string) => {
@@ -311,6 +440,10 @@ const AssetManagement: React.FC = () => {
   const closeForm = () => setFormState(emptyForm);
 
   const submitForm = async () => {
+    if (!canEditAssets) {
+      setSnackbar('当前账号没有编辑资产权限');
+      return;
+    }
     let saved: AssetDevice | AssetPhoneNumber | AssetInternetAccount | null = null;
     if (formState.type === 'device') {
       const input = formState.values as Partial<AssetDeviceInput>;
@@ -351,7 +484,48 @@ const AssetManagement: React.FC = () => {
     fetchDetail('phone', phoneId);
   };
 
+  const revealedKey = (type: AssetType, id: string, field: AssetSensitiveField) => `${type}:${id}:${field}`;
+
+  const revealField = async (type: AssetType, id: string, field: AssetSensitiveField) => {
+    if (!canRevealSensitive) {
+      setSnackbar('当前账号没有查看敏感字段权限');
+      return;
+    }
+    const result = await revealSensitiveField(type, id, field);
+    if (!result) {
+      setSnackbar(useAssetStore.getState().error || '查看失败');
+      return;
+    }
+    setRevealedValues((current) => ({
+      ...current,
+      [revealedKey(type, id, field)]: result.value,
+    }));
+    setSnackbar('已记录敏感字段查看日志');
+  };
+
+  const handleRiskStatus = async (riskId: string, nextStatus: AssetRiskStatus) => {
+    if (!canHandleRisks) {
+      setSnackbar('当前账号没有处理资产风险权限');
+      return;
+    }
+    await updateRiskStatus(riskId, nextStatus);
+    await refreshActiveTab();
+  };
+
+  const handleCompleteOffboarding = async (taskId: string) => {
+    if (!canHandleOffboarding) {
+      setSnackbar('当前账号没有处理离职回收权限');
+      return;
+    }
+    await completeOffboardingTask(taskId);
+    await refreshActiveTab();
+  };
+
   const exportCurrentRows = () => {
+    if (!canImportExport) {
+      setSnackbar('当前账号没有资产导入导出权限');
+      return;
+    }
     const rowMap: Record<AssetTab, Array<Record<string, unknown>>> = {
       overview: [],
       devices: devices.map((device) => ({
@@ -421,15 +595,7 @@ const AssetManagement: React.FC = () => {
       setSnackbar('当前工作区暂无可导出的数据');
       return;
     }
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `资产管理-${ASSET_TABS.find((tab) => tab.value === activeTab)?.label || '台账'}-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
+    downloadCsv(`资产管理-${ASSET_TABS.find((tab) => tab.value === activeTab)?.label || '台账'}-${new Date().toISOString().slice(0, 10)}.csv`, csv);
   };
 
   const renderOverview = () => {
@@ -565,11 +731,13 @@ const AssetManagement: React.FC = () => {
               <TableCell><Chip size="small" label={device.riskLevel} sx={chipSx(riskTone(device.riskLevel))} /></TableCell>
               <TableCell>
                 <Tooltip title="查看详情"><IconButton size="small"><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
-                <Tooltip title="编辑资料">
-                  <IconButton size="small" onClick={(event) => { event.stopPropagation(); openEditForm('device', device); }}>
-                    <EditIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
+                {canEditAssets ? (
+                  <Tooltip title="编辑资料">
+                    <IconButton size="small" onClick={(event) => { event.stopPropagation(); openEditForm('device', device); }}>
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                ) : null}
               </TableCell>
             </TableRow>
           ))}
@@ -604,11 +772,13 @@ const AssetManagement: React.FC = () => {
                 <TableCell><Chip size="small" label={phone.status} sx={chipSx(statusTone(phone.status))} /></TableCell>
                 <TableCell>
                   <Tooltip title="查看详情"><IconButton size="small"><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
-                  <Tooltip title="编辑资料">
-                    <IconButton size="small" onClick={(event) => { event.stopPropagation(); openEditForm('phone', phone); }}>
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
+                  {canEditAssets ? (
+                    <Tooltip title="编辑资料">
+                      <IconButton size="small" onClick={(event) => { event.stopPropagation(); openEditForm('phone', phone); }}>
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  ) : null}
                 </TableCell>
               </TableRow>
             );
@@ -658,7 +828,7 @@ const AssetManagement: React.FC = () => {
                 <TableCell>{account.expiresAt || '-'}</TableCell>
                 <TableCell>
                   <Tooltip title="查看详情"><IconButton size="small"><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
-                  <Tooltip title="编辑资料"><IconButton size="small" onClick={(event) => { event.stopPropagation(); openEditForm('account', account); }}><EditIcon fontSize="small" /></IconButton></Tooltip>
+                  {canEditAssets ? <Tooltip title="编辑资料"><IconButton size="small" onClick={(event) => { event.stopPropagation(); openEditForm('account', account); }}><EditIcon fontSize="small" /></IconButton></Tooltip> : null}
                 </TableCell>
               </TableRow>
             );
@@ -687,16 +857,20 @@ const AssetManagement: React.FC = () => {
               <TableCell>{risk.description}</TableCell>
               <TableCell>{formatDate(risk.createdAt, 'yyyy-MM-dd HH:mm')}</TableCell>
               <TableCell>
-                <Tooltip title="标记解决">
-                  <IconButton size="small" onClick={(event) => { event.stopPropagation(); updateRiskStatus(risk.id, 'resolved'); }}>
-                    <CheckCircleOutlineIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title="忽略">
-                  <IconButton size="small" onClick={(event) => { event.stopPropagation(); updateRiskStatus(risk.id, 'ignored'); }}>
-                    <BlockIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
+                {canHandleRisks ? (
+                  <>
+                    <Tooltip title="标记解决">
+                      <IconButton size="small" onClick={(event) => { event.stopPropagation(); handleRiskStatus(risk.id, 'resolved'); }}>
+                        <CheckCircleOutlineIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="忽略">
+                      <IconButton size="small" onClick={(event) => { event.stopPropagation(); handleRiskStatus(risk.id, 'ignored'); }}>
+                        <BlockIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </>
+                ) : null}
               </TableCell>
             </TableRow>
           ))}
@@ -750,17 +924,19 @@ const AssetManagement: React.FC = () => {
               <TableCell>{task.status}</TableCell>
               <TableCell>{task.dueAt}</TableCell>
               <TableCell>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  disabled={task.status === '已回收'}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    completeOffboardingTask(task.id);
-                  }}
-                >
-                  标记已回收
-                </Button>
+                {canHandleOffboarding ? (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={task.status === '已回收'}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleCompleteOffboarding(task.id);
+                    }}
+                  >
+                    标记已回收
+                  </Button>
+                ) : null}
               </TableCell>
             </TableRow>
           ))}
@@ -811,18 +987,20 @@ const AssetManagement: React.FC = () => {
               当前资产 + 关联手机号 + 关联账号 + 风险 + 最近操作日志
             </Typography>
           </Box>
-          <Button
-            size="small"
-            variant="contained"
-            startIcon={<EditIcon />}
-            onClick={() => {
-              if (detail.device) openEditForm('device', detail.device);
-              else if (detail.phone) openEditForm('phone', detail.phone);
-              else if (detail.account) openEditForm('account', detail.account);
-            }}
-          >
-            编辑资料
-          </Button>
+          {canEditAssets ? (
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<EditIcon />}
+              onClick={() => {
+                if (detail.device) openEditForm('device', detail.device);
+                else if (detail.phone) openEditForm('phone', detail.phone);
+                else if (detail.account) openEditForm('account', detail.account);
+              }}
+            >
+              编辑资料
+            </Button>
+          ) : null}
         </Stack>
         <Box sx={{ p: 2, display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '1.4fr 1fr' }, gap: 2 }}>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 28px 1fr 28px 1fr' }, gap: 1, alignItems: 'stretch' }}>
@@ -833,6 +1011,7 @@ const AssetManagement: React.FC = () => {
             {renderTraceNode('互联网账号', primaryAccount ? `${primaryAccount.platform} ${primaryAccount.accountName}` : '未关联账号', primaryAccount?.accountNo || '-')}
           </Box>
           <Box sx={{ display: 'grid', gap: 1 }}>
+            {renderSensitivePanel()}
             <Paper elevation={0} sx={{ border: `1px solid ${shell.softLine}`, borderRadius: 1, p: 1.25 }}>
               <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.75 }}>
                 <Typography variant="body2" sx={{ fontWeight: 900 }}>风险提示</Typography>
@@ -856,6 +1035,51 @@ const AssetManagement: React.FC = () => {
             </Paper>
           </Box>
         </Box>
+      </Paper>
+    );
+  };
+
+  const renderSensitiveValue = (
+    type: AssetType,
+    id: string,
+    field: AssetSensitiveField,
+    label: string,
+    maskedValue?: string,
+  ) => {
+    const key = revealedKey(type, id, field);
+    const value = revealedValues[key] || maskedValue || '-';
+    return (
+      <Stack key={key} direction="row" spacing={1} alignItems="center" justifyContent="space-between" sx={{ py: 0.5 }}>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="caption" sx={{ color: shell.muted, display: 'block' }}>{label}</Typography>
+          <Typography variant="body2" sx={{ fontWeight: 800, color: shell.ink, wordBreak: 'break-all' }}>{value}</Typography>
+        </Box>
+        {canRevealSensitive && !revealedValues[key] ? (
+          <Button size="small" variant="outlined" onClick={() => revealField(type, id, field)}>
+            查看
+          </Button>
+        ) : null}
+      </Stack>
+    );
+  };
+
+  const renderSensitivePanel = () => {
+    if (!detail) return null;
+    const rows: React.ReactNode[] = [];
+    if (detail.device) rows.push(renderSensitiveValue('device', detail.device.id, 'imei', 'IMEI', detail.device.imeiMasked));
+    if (detail.phone) rows.push(renderSensitiveValue('phone', detail.phone.id, 'phoneNumber', '完整手机号', detail.phone.phoneNumberMasked));
+    if (detail.account) {
+      rows.push(renderSensitiveValue('account', detail.account.id, 'loginAccount', '登录账号', detail.account.loginAccountMasked));
+      rows.push(renderSensitiveValue('account', detail.account.id, 'boundEmail', '绑定邮箱', detail.account.boundEmailMasked || detail.account.boundEmail || '-'));
+    }
+    if (!rows.length) return null;
+    return (
+      <Paper elevation={0} sx={{ border: `1px solid ${shell.softLine}`, borderRadius: 1, p: 1.25 }}>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+          <Typography variant="body2" sx={{ fontWeight: 900 }}>敏感字段</Typography>
+          {!canRevealSensitive ? <Chip size="small" label="无明文权限" sx={chipSx(riskTone('中'))} /> : null}
+        </Stack>
+        {rows}
       </Paper>
     );
   };
@@ -982,6 +1206,107 @@ const AssetManagement: React.FC = () => {
     </>
   );
 
+  const renderImportDialog = () => {
+    const labelMap: Record<AssetImportType, string> = {
+      devices: '设备资产',
+      phones: '手机号资产',
+      accounts: '互联网账号',
+    };
+    const failedRows = importState.result?.failedRows || [];
+    return (
+      <Dialog open={importState.open} onClose={closeImportDialog} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ fontWeight: 900, pb: 1 }}>
+          导入资产
+        </DialogTitle>
+        <DialogContent dividers sx={{ bgcolor: '#FBFCFE' }}>
+          <Box sx={{ display: 'grid', gap: 1.5, pt: 0.5 }}>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} alignItems={{ xs: 'stretch', md: 'center' }}>
+              <FormControl size="small" sx={{ minWidth: 180 }}>
+                <InputLabel>导入类型</InputLabel>
+                <Select
+                  label="导入类型"
+                  value={importState.type}
+                  onChange={(event) => updateImportType(event.target.value as AssetImportType)}
+                >
+                  <MenuItem value="devices">设备资产</MenuItem>
+                  <MenuItem value="phones">手机号资产</MenuItem>
+                  <MenuItem value="accounts">互联网账号</MenuItem>
+                </Select>
+              </FormControl>
+              <Button variant="outlined" startIcon={<FileDownloadIcon />} disabled={!canImportExport} onClick={downloadImportTemplate}>
+                下载模板
+              </Button>
+              <Button variant="outlined" startIcon={<FileUploadIcon />} disabled={!canImportExport} component="label">
+                选择CSV
+                <input hidden accept=".csv,text/csv" type="file" onChange={handleImportFileChange} />
+              </Button>
+              {importState.fileName ? (
+                <Typography variant="body2" sx={{ color: shell.muted, fontWeight: 700 }}>
+                  {importState.fileName}
+                </Typography>
+              ) : null}
+            </Stack>
+            <TextField
+              value={importState.csvText}
+              onChange={(event) => setImportState((current) => ({ ...current, csvText: event.target.value, result: null }))}
+              placeholder={`粘贴${labelMap[importState.type]}CSV内容，或先下载模板填写后上传`}
+              multiline
+              minRows={8}
+              fullWidth
+              sx={{ bgcolor: '#fff' }}
+            />
+            {importState.result ? (
+              <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 1.5, bgcolor: '#fff' }}>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between">
+                  <Stack direction="row" spacing={1}>
+                    <Chip size="small" label={`总行数 ${importState.result.totalRows}`} />
+                    <Chip size="small" label={`成功 ${importState.result.successCount}`} sx={chipSx(riskTone('低'))} />
+                    <Chip size="small" label={`失败 ${importState.result.failedCount}`} sx={chipSx(riskTone(importState.result.failedCount ? '中' : '低'))} />
+                  </Stack>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<FileDownloadIcon />}
+                    disabled={!failedRows.length || !canImportExport}
+                    onClick={downloadFailedRows}
+                  >
+                    下载失败行
+                  </Button>
+                </Stack>
+                {failedRows.length ? (
+                  <TableContainer sx={{ mt: 1.25, maxHeight: 240 }}>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>行号</TableCell>
+                          <TableCell>失败原因</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {failedRows.slice(0, 8).map((row) => (
+                          <TableRow key={`${row.rowNumber}-${row.reason}`}>
+                            <TableCell>{row.rowNumber}</TableCell>
+                            <TableCell>{row.reason}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                ) : null}
+              </Paper>
+            ) : null}
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 1.5 }}>
+          <Button onClick={closeImportDialog}>关闭</Button>
+          <Button variant="contained" disabled={loading || !canImportExport} onClick={submitImport}>
+            开始导入
+          </Button>
+        </DialogActions>
+      </Dialog>
+    );
+  };
+
   const renderFormDialog = () => {
     const title = formState.mode === 'edit' ? '编辑资产资料' : '新增资产';
     return (
@@ -1024,24 +1349,31 @@ const AssetManagement: React.FC = () => {
         description="管理设备、手机号与互联网账号，追溯归属、风险与离职回收。"
         actions={(
           <>
-            <Button variant="outlined" startIcon={<FileUploadIcon />} onClick={() => setSnackbar('导入模板与失败行反馈会在下一步接入')}>
-              导入
-            </Button>
-            <Button variant="outlined" startIcon={<FileDownloadIcon />} onClick={exportCurrentRows}>
-              导出
-            </Button>
-            <Button variant="contained" startIcon={<AddIcon />} onClick={() => openCreateForm()}>
-              新增资产
-            </Button>
+            {canImportExport ? (
+              <>
+                <Button variant="outlined" startIcon={<FileUploadIcon />} onClick={openImportDialog}>
+                  导入
+                </Button>
+                <Button variant="outlined" startIcon={<FileDownloadIcon />} onClick={exportCurrentRows}>
+                  导出
+                </Button>
+              </>
+            ) : null}
+            {canEditAssets ? (
+              <Button variant="contained" startIcon={<AddIcon />} onClick={() => openCreateForm()}>
+                新增资产
+              </Button>
+            ) : null}
           </>
         )}
       />
-      <ModuleTabs value={activeTab} onChange={handleTabChange}>
-        {ASSET_TABS.map((tab) => <Tab key={tab.value} value={tab.value} label={tab.label} />)}
+      <ModuleTabs value={activeTabVisible ? activeTab : visibleTabs[0]?.value || 'overview'} onChange={handleTabChange}>
+        {visibleTabs.map((tab) => <Tab key={tab.value} value={tab.value} label={tab.label} />)}
       </ModuleTabs>
       {renderToolbar()}
       {renderActiveTable()}
       {renderDetailPanel()}
+      {renderImportDialog()}
       {renderFormDialog()}
       <Snackbar
         open={Boolean(snackbar)}

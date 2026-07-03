@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Box,
@@ -112,6 +112,20 @@ const PERMISSION_TREE: PermissionNode[] = [
     ],
   },
   {
+    label: '资产管理',
+    children: [
+      { label: '资产总览', key: PERMISSION_KEYS.ASSETS_OVERVIEW },
+      { label: '设备资产', key: PERMISSION_KEYS.ASSETS_DEVICES },
+      { label: '手机号资产', key: PERMISSION_KEYS.ASSETS_PHONES },
+      { label: '互联网账号', key: PERMISSION_KEYS.ASSETS_ACCOUNTS },
+      { label: '风险提醒', key: PERMISSION_KEYS.ASSETS_RISKS },
+      { label: '操作日志', key: PERMISSION_KEYS.ASSETS_LOGS },
+      { label: '离职回收', key: PERMISSION_KEYS.ASSETS_OFFBOARDING },
+      { label: '查看敏感字段', key: PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW },
+      { label: '导入导出', key: PERMISSION_KEYS.ASSETS_IMPORT_EXPORT },
+    ],
+  },
+  {
     label: 'AI助手',
     children: [
       { label: 'AI对话', key: PERMISSION_KEYS.AI_CHAT },
@@ -165,6 +179,7 @@ const defaultDataScopes: Record<DataScopeDomain, DataScopeLevel> = {
   orderApplications: 'self',
   recoveryOrders: 'self',
   recoveryOrderApplications: 'self',
+  assets: 'self',
 };
 const emptyForm: RoleForm = {
   name: '',
@@ -188,6 +203,7 @@ const dataScopeRows: Array<{ domain: DataScopeDomain; label: string; description
   { domain: 'orderApplications', label: '订单审核台数据', description: '控制订单审核台能看到哪些订单申请；审核操作仍由订单审核操作权限控制', permissionKeys: [PERMISSION_KEYS.ORDER_REVIEW, PERMISSION_KEYS.ORDER_MANAGE, PERMISSION_KEYS.ORDER_CREATE] },
   { domain: 'recoveryOrders', label: '售后挽回订单数据', description: '控制售后挽回订单列表、筛选和统计的数据范围', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT, PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY] },
   { domain: 'recoveryOrderApplications', label: '售后挽回订单审核台数据', description: '控制售后挽回审核台能看到哪些挽回订单；审核操作仍由售后挽回订单审核操作权限控制', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW] },
+  { domain: 'assets', label: '资产数据', description: '控制设备资产、手机号资产、互联网账号、风险提醒和离职回收的数据范围', permissionKeys: [PERMISSION_KEYS.ASSETS, PERMISSION_KEYS.ASSETS_OVERVIEW, PERMISSION_KEYS.ASSETS_DEVICES, PERMISSION_KEYS.ASSETS_PHONES, PERMISSION_KEYS.ASSETS_ACCOUNTS, PERMISSION_KEYS.ASSETS_RISKS, PERMISSION_KEYS.ASSETS_LOGS, PERMISSION_KEYS.ASSETS_OFFBOARDING] },
 ];
 
 const getNodeKey = (path: string[]) => path.join('/');
@@ -303,6 +319,7 @@ const normalizeDataScopes = (value?: RoleDataScopes, code?: string): RoleDataSco
       orderApplications: 'all',
       recoveryOrders: 'all',
       recoveryOrderApplications: 'all',
+      assets: 'all',
     };
   }
   return { ...defaultDataScopes, ...(value || {}) };

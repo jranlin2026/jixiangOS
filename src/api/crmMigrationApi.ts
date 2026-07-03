@@ -8,7 +8,8 @@ import type { LeadSourceConfig, User } from '../types/settings';
 import { DEFAULT_LEAD_SOURCE_CONFIGS, STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { getStorageData, setStorageData } from './mock/storage';
-import { createSuccessResponse, delay, type ApiResponse } from './types';
+import { backendRequest, shouldUseBackendApi } from './backendClient';
+import { createErrorResponse, createSuccessResponse, delay, type ApiResponse } from './types';
 
 export type CrmMigrationFileKey =
   | 'teamCustomers'
@@ -628,7 +629,23 @@ async function precheckFiles(files: CrmMigrationFileMap): Promise<ApiResponse<Cr
   return createSuccessResponse(analyzeCrmMigrationTables(tables));
 }
 
-function importMigrationTables(tables: CrmMigrationTables): CrmMigrationImportResult {
+async function persistImportedStorage<T>(key: string, value: T): Promise<string | null> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<unknown>(`/storage/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ value }),
+    });
+    if (response.code !== 0) {
+      return response.message || `${key} 后端保存失败`;
+    }
+    localStorage.setItem(key, JSON.stringify(value));
+  } else {
+    setStorageData(key, value);
+  }
+  return null;
+}
+
+async function importMigrationTables(tables: CrmMigrationTables): Promise<ApiResponse<CrmMigrationImportResult>> {
   ensureInit();
   const now = new Date().toISOString();
   const customers = [...(getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [])];
@@ -689,9 +706,17 @@ function importMigrationTables(tables: CrmMigrationTables): CrmMigrationImportRe
     result.leads.assignedCreated += 1;
   });
 
-  setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
-  setStorageData(STORAGE_KEYS.LEADS, leads);
-  return result;
+  const customerPersistError = await persistImportedStorage(STORAGE_KEYS.CUSTOMERS, customers);
+  if (customerPersistError) {
+    return createErrorResponse(`客户导入已写入本机缓存，但后台数据库保存失败：${customerPersistError}`);
+  }
+
+  const leadPersistError = await persistImportedStorage(STORAGE_KEYS.LEADS, leads);
+  if (leadPersistError) {
+    return createErrorResponse(`客户已保存，线索后台数据库保存失败：${leadPersistError}`);
+  }
+
+  return createSuccessResponse(result);
 }
 
 async function importFiles(files: CrmMigrationFileMap): Promise<ApiResponse<CrmMigrationImportResult>> {
@@ -705,7 +730,7 @@ async function importFiles(files: CrmMigrationFileMap): Promise<ApiResponse<CrmM
     acc[key] = rows;
     return acc;
   }, {} as CrmMigrationTables);
-  return createSuccessResponse(importMigrationTables(tables));
+  return importMigrationTables(tables);
 }
 
 function ensureSourceParent(configs: LeadSourceConfig[], parentName: string, now: string): LeadSourceConfig {

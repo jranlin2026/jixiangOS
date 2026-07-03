@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  getApiJsonBodyLimit,
   getApiListenHost,
   getAllowedCorsOrigins,
   parseCorsOrigins,
@@ -13,6 +14,8 @@ assert.deepEqual(parseCorsOrigins({ CORS_ORIGINS: 'https://crm.example.com, http
 
 assert.ok(getAllowedCorsOrigins({ NODE_ENV: 'development' }).includes('http://127.0.0.1:3000'));
 assert.equal(getApiListenHost({}), '127.0.0.1');
+assert.equal(getApiJsonBodyLimit({}), '50mb');
+assert.equal(getApiJsonBodyLimit({ API_JSON_BODY_LIMIT: '100mb' }), '100mb');
 
 assert.throws(() => validateRuntimeConfig({
   NODE_ENV: 'production',

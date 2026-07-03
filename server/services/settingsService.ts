@@ -14,7 +14,7 @@ import {
   normalizeAccount,
 } from '../../src/shared/utils/auth';
 import { LIFECYCLE_STATUS_CODES, STORAGE_KEYS } from '../../src/shared/utils/constants';
-import { normalizeRoleDataScopes } from '../../src/shared/utils/organizationConfig';
+import { mergeRoleWithDefaultAccess, normalizeRoleDataScopes } from '../../src/shared/utils/organizationConfig';
 
 type SettingsPrisma = Pick<PrismaClient, 'user' | 'role' | 'department' | 'position' | 'authSession' | 'businessRecord' | 'leadRecord'>;
 
@@ -235,7 +235,7 @@ export function createSettingsService(prisma: SettingsPrisma) {
 
     async listRoles() {
       const rows = await prisma.role.findMany({ orderBy: { createdAt: 'asc' } });
-      return success(rows.map(mapPrismaRole));
+      return success(rows.map(mapPrismaRole).map(mergeRoleWithDefaultAccess));
     },
 
     async listDepartments() {

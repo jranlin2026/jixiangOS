@@ -14,7 +14,8 @@ export type DataScopeDomain =
   | 'orders'
   | 'orderApplications'
   | 'recoveryOrders'
-  | 'recoveryOrderApplications';
+  | 'recoveryOrderApplications'
+  | 'assets';
 
 export type RoleDataScopes = Partial<Record<DataScopeDomain, DataScopeLevel>>;
 

@@ -41,6 +41,10 @@ export function getApiListenHost(env: NodeJS.ProcessEnv = process.env): string {
   return readEnv(env, 'AI_PROXY_HOST') || '127.0.0.1';
 }
 
+export function getApiJsonBodyLimit(env: NodeJS.ProcessEnv = process.env): string {
+  return readEnv(env, 'API_JSON_BODY_LIMIT') || '50mb';
+}
+
 function assertRequired(env: NodeJS.ProcessEnv, name: string): void {
   if (!readEnv(env, name)) {
     throw new Error(`${name} must be configured before running jixiangOS in production.`);

@@ -12,6 +12,10 @@ export type AssetRiskStatus = 'open' | 'resolved' | 'ignored';
 
 export type AssetType = 'device' | 'phone' | 'account';
 
+export type AssetSensitiveField = 'imei' | 'phoneNumber' | 'loginAccount' | 'boundEmail';
+
+export type AssetImportType = 'devices' | 'phones' | 'accounts';
+
 export interface AssetDevice {
   id: string;
   deviceCode: string;
@@ -143,6 +147,27 @@ export interface AssetDetailBundle {
   relatedAccounts: AssetInternetAccount[];
   risks: AssetRisk[];
   logs: AssetOperationLog[];
+}
+
+export interface AssetSensitiveRevealResult {
+  field: AssetSensitiveField;
+  label: string;
+  value: string;
+}
+
+export interface AssetImportFailedRow {
+  rowNumber: number;
+  reason: string;
+  raw: Record<string, string>;
+}
+
+export interface AssetImportResult {
+  type: AssetImportType;
+  totalRows: number;
+  successCount: number;
+  failedCount: number;
+  createdIds: string[];
+  failedRows: AssetImportFailedRow[];
 }
 
 export type AssetDeviceInput = Omit<AssetDevice, 'id' | 'deviceCode' | 'imeiMasked' | 'createdAt' | 'updatedAt'> & {
