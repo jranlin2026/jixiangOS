@@ -204,6 +204,18 @@ assert.equal(updatedLead.city, '广州');
 assert.equal(updatedLead.remark, '客户资料已完善');
 assert.deepEqual(updatedLead.changeHistory?.[0]?.changes?.map((item) => item.field), ['phone', 'industry', 'city', 'assignedTo', 'remark']);
 
+const assignRes = await customerApi.assignCustomerOwner('cust-test', '赵敏', '主管重新分配');
+assert.equal(assignRes.code, 0);
+assert.equal(assignRes.data?.owner, '赵敏');
+assert.equal(assignRes.data?.previousOwner, '李娜');
+assert.equal(assignRes.data?.assignmentReason, '主管重新分配');
+assert.equal(assignRes.data?.activityRecords?.[0]?.title, '分配客户给 赵敏');
+
+const reassignedLeads = JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]') as Lead[];
+const reassignedLead = reassignedLeads.find((item) => item.id === 'lead-test');
+assert.equal(reassignedLead?.assignedTo, '赵敏');
+assert.equal(reassignedLead?.owner, '赵敏');
+
 const followUpWithAttachmentRes = await customerApi.addCustomerFollowUp('cust-test', {
   content: 'Shared proposal and voice memo',
   attachments: [{

@@ -32,6 +32,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
 import useCustomerStore from '../../store/useCustomerStore';
 import { customerApi, orderApi, settingsApi } from '../../api';
 import { CUSTOMER_LEVELS, ROUTES, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
@@ -254,6 +255,10 @@ const Customers: React.FC = () => {
   const [customerScope, setCustomerScope] = useState<CustomerScope>(() => getCustomerScopeFromTab(searchParams.get('tab')));
   const [releaseTarget, setReleaseTarget] = useState<Customer | null>(null);
   const [releaseReason, setReleaseReason] = useState('');
+  const [assignTarget, setAssignTarget] = useState<Customer | null>(null);
+  const [assignOwner, setAssignOwner] = useState('');
+  const [assignReason, setAssignReason] = useState('');
+  const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [deleteCustomerTarget, setDeleteCustomerTarget] = useState<Customer | null>(null);
   const [deleteCustomerReason, setDeleteCustomerReason] = useState('');
   const [deleteCustomerSubmitting, setDeleteCustomerSubmitting] = useState(false);
@@ -377,6 +382,38 @@ const Customers: React.FC = () => {
     const nextFilters = scopedFilters({ ...filters, page: 1, pageSize: pagination.pageSize || 10 }, 'public_pool');
     setFilters(nextFilters);
     fetchItems(nextFilters);
+  };
+
+  const handleOpenAssignCustomer = (customer: Customer) => {
+    setAssignTarget(customer);
+    setAssignOwner(customer.owner || '');
+    setAssignReason('');
+  };
+
+  const handleCloseAssignCustomer = () => {
+    if (assignSubmitting) return;
+    setAssignTarget(null);
+    setAssignOwner('');
+    setAssignReason('');
+  };
+
+  const handleConfirmAssignCustomer = async () => {
+    if (!assignTarget || !assignOwner) return;
+    setAssignSubmitting(true);
+    try {
+      const res = await customerApi.assignCustomerOwner(assignTarget.id, assignOwner, assignReason);
+      if (res.code !== 0 || !res.data) {
+        await alert(res.message || '分配客户失败');
+        return;
+      }
+      setSelectedCustomer((current) => (current?.id === assignTarget.id ? res.data : current));
+      setAssignTarget(null);
+      setAssignOwner('');
+      setAssignReason('');
+      fetchItems(scopedFilters());
+    } finally {
+      setAssignSubmitting(false);
+    }
   };
 
   const handleOpenDeleteCustomer = (customer: Customer) => {
@@ -656,6 +693,15 @@ const Customers: React.FC = () => {
                         </IconButton>
                       </Tooltip>
                     </PermissionGate>
+                    {!isPublicPoolCustomer(customer) && (
+                      <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_ASSIGN}>
+                        <Tooltip title="分配销售">
+                          <IconButton size="small" color="info" onClick={() => handleOpenAssignCustomer(customer)}>
+                            <AssignmentIndIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </PermissionGate>
+                    )}
                     {isPublicPoolCustomer(customer) ? (
                       <Tooltip title="重新领取公海客户">
                         <IconButton size="small" color="primary" onClick={() => handleClaimCustomer(customer)}>
@@ -788,6 +834,45 @@ const Customers: React.FC = () => {
         <DialogActions>
           <Button onClick={() => setReleaseTarget(null)}>取消</Button>
           <Button color="warning" variant="contained" onClick={handleConfirmReleaseCustomer}>确认放弃</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(assignTarget)} onClose={handleCloseAssignCustomer} maxWidth="xs" fullWidth>
+        <DialogCloseTitle onClose={handleCloseAssignCustomer}>分配销售</DialogCloseTitle>
+        <DialogContent dividers>
+          {assignTarget && (
+            <Box sx={{ display: 'grid', gap: 1, bgcolor: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5, mb: 2 }}>
+              <Typography variant="body2">客户：{assignTarget.company || assignTarget.name}</Typography>
+              <Typography variant="body2">当前负责人：{assignTarget.owner || '-'}</Typography>
+            </Box>
+          )}
+          <FormControl size="small" fullWidth required sx={{ mb: 2 }}>
+            <InputLabel>新的销售负责人</InputLabel>
+            <Select
+              value={assignOwner}
+              label="新的销售负责人"
+              onChange={(event) => setAssignOwner(event.target.value)}
+            >
+              {visibleOwnerUsers.map((user) => (
+                <MenuItem key={user.id} value={user.name}>{user.name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <TextField
+            label="分配原因"
+            value={assignReason}
+            onChange={(event) => setAssignReason(event.target.value)}
+            placeholder="例如：主管调整、客户无人跟进、转交给更合适的销售"
+            multiline
+            minRows={3}
+            fullWidth
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseAssignCustomer} disabled={assignSubmitting}>取消</Button>
+          <Button variant="contained" onClick={handleConfirmAssignCustomer} disabled={!assignOwner || assignSubmitting}>
+            保存分配
+          </Button>
         </DialogActions>
       </Dialog>
 

@@ -735,7 +735,7 @@ const Leads: React.FC = () => {
           >
             {assignableUsers.length === 0 && (
               <MenuItem value="" disabled>
-                暂无可分配成员，请到系统设置 &gt; 客户管理 &gt; 线索流转中添加参与成员
+                暂无可分配成员，请到系统设置 &gt; 客户设置 &gt; 线索流转中添加参与成员
               </MenuItem>
             )}
             {assignableUsers.map((user) => (

@@ -135,7 +135,7 @@ const navItems: NavItem[] = [
         permissionKeys: [PERMISSION_KEYS.SETTINGS_PRODUCTS, PERMISSION_KEYS.SETTINGS_ORDER_TYPES],
       },
       {
-        label: '客户管理',
+        label: '客户设置',
         path: `${ROUTES.SETTINGS}?group=leadCustomer`,
         permissionKeys: [
           PERMISSION_KEYS.SETTINGS_CUSTOMER_LEVELS,

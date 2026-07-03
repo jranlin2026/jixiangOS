@@ -489,6 +489,55 @@ async function claimCustomerFromPublicPool(id: string, userName: string): Promis
   return createSuccessResponse(updated ? hydrateCustomerLifecycle(updated) : null);
 }
 
+async function assignCustomerOwner(id: string, owner: string, reason = ''): Promise<ApiResponse<Customer | null>> {
+  ensureInit();
+  await delay(150);
+  const nextOwner = owner.trim();
+  if (!nextOwner) return createErrorResponse('请选择新的销售负责人');
+  const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+  const idx = customers.findIndex((item) => item.id === id);
+  if (idx === -1) return createSuccessResponse(null);
+  const existing = customers[idx];
+  const now = new Date().toISOString();
+  const previousOwner = existing.owner || '';
+  const changed = previousOwner !== nextOwner;
+  const operator = getCurrentOperatorName(previousOwner || nextOwner);
+  const cleanReason = reason.trim();
+  const changes = changed
+    ? [{
+        field: 'owner',
+        label: '销售负责人',
+        oldValue: previousOwner || null,
+        newValue: nextOwner,
+      }]
+    : undefined;
+
+  customers[idx] = {
+    ...existing,
+    owner: nextOwner,
+    previousOwner: changed ? previousOwner : existing.previousOwner,
+    assignedBy: operator,
+    assignedAt: changed ? now : existing.assignedAt || now,
+    assignmentReason: cleanReason || existing.assignmentReason,
+    ownerSince: changed ? now : existing.ownerSince,
+    activityRecords: [
+      createActivity({
+        type: 'transfer',
+        title: changed ? `分配客户给 ${nextOwner}` : `确认客户仍由 ${nextOwner} 跟进`,
+        content: cleanReason || undefined,
+        operator,
+        changes,
+        createdAt: now,
+      }),
+      ...(existing.activityRecords || []),
+    ],
+    updatedAt: now,
+  };
+  setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
+  syncLeadsByCustomer(customers[idx], now, operator);
+  return createSuccessResponse(customers[idx]);
+}
+
 async function deleteCustomer(id: string, reason = ''): Promise<ApiResponse<boolean>> {
   ensureInit();
   await delay(150);
@@ -562,6 +611,7 @@ export const customerApi = {
   appendCustomerActivity,
   releaseCustomerToPublicPool,
   claimCustomerFromPublicPool,
+  assignCustomerOwner,
   deleteCustomer,
   fetchAIPortrait,
 };

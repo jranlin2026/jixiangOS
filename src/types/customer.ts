@@ -101,6 +101,14 @@ export interface Customer {
   /** 归属销售 */
   /** 销售负责人 */
   owner: string;
+  /** 上一任销售负责人 */
+  previousOwner?: string;
+  /** 最近分配人 */
+  assignedBy?: string;
+  /** 最近分配时间 */
+  assignedAt?: Timestamp;
+  /** 最近分配原因 */
+  assignmentReason?: string;
   /** 归属开始日期 */
   ownerSince?: Timestamp;
   /** 保护期天数，默认730天 */

@@ -39,6 +39,7 @@ assert.doesNotMatch(rolePermissionSource, /退款付款/);
 assert.match(rolePermissionSource, /客户列表/);
 assert.match(rolePermissionSource, /查看客户资料/);
 assert.match(rolePermissionSource, /编辑客户/);
+assert.match(rolePermissionSource, /分配客户/);
 assert.doesNotMatch(rolePermissionSource, /客户画像/);
 assert.doesNotMatch(rolePermissionSource, /AI名片/);
 assert.match(rolePermissionSource, /客户等级/);
@@ -154,6 +155,15 @@ const customerChildRole: Role = {
   permissions: [{ module: PERMISSION_KEYS.CUSTOMER_CREATE, actions: ['read'] }],
 };
 assert.equal(roleHasPermission(customerChildRole, PERMISSION_KEYS.CUSTOMERS), true);
+
+const customerAssignRole: Role = {
+  ...legacyOpportunityRole,
+  id: 'role-customer-assign',
+  code: 'customer_assign',
+  permissions: [{ module: PERMISSION_KEYS.CUSTOMER_ASSIGN, actions: ['read'] }],
+};
+assert.equal(roleHasPermission(customerAssignRole, PERMISSION_KEYS.CUSTOMERS), true);
+assert.equal(roleHasPermission(customerAssignRole, PERMISSION_KEYS.CUSTOMER_ASSIGN, 'write'), true);
 
 const leadFollowRole: Role = {
   ...legacyOpportunityRole,

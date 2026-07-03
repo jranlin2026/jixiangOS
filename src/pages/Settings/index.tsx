@@ -77,7 +77,7 @@ const Settings: React.FC = () => {
     },
     {
       key: 'leadCustomer',
-      label: '客户管理',
+      label: '客户设置',
       description: '客户等级、客户生命周期、线索来源和流转规则',
       tabs: [
         { label: '客户等级', permissionKey: PERMISSION_KEYS.SETTINGS_CUSTOMER_LEVELS, component: <CustomerLevelConfigPage /> },

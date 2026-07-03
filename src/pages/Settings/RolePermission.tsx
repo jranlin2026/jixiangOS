@@ -64,6 +64,7 @@ const PERMISSION_TREE: PermissionNode[] = [
       { label: '查看客户资料', key: PERMISSION_KEYS.CUSTOMER_DETAIL },
       { label: '新建客户', key: PERMISSION_KEYS.CUSTOMER_CREATE },
       { label: '编辑客户', key: PERMISSION_KEYS.CUSTOMER_EDIT },
+      { label: '分配客户', key: PERMISSION_KEYS.CUSTOMER_ASSIGN },
       { label: '新建客户订单', key: PERMISSION_KEYS.CUSTOMER_CREATE_ORDER },
       { label: '查看客户订单', key: PERMISSION_KEYS.CUSTOMER_VIEW_ORDERS },
     ],
@@ -137,7 +138,7 @@ const PERMISSION_TREE: PermissionNode[] = [
         ],
       },
       {
-        label: '客户管理',
+        label: '客户设置',
         children: [
           { label: '客户等级', key: PERMISSION_KEYS.SETTINGS_CUSTOMER_LEVELS },
           { label: '客户生命周期', key: PERMISSION_KEYS.SETTINGS_LIFECYCLE },
@@ -182,7 +183,7 @@ const dataScopeOptions: Array<{ value: DataScopeLevel; label: string }> = [
 
 const dataScopeRows: Array<{ domain: DataScopeDomain; label: string; description: string; permissionKeys: string[] }> = [
   { domain: 'leads', label: '线索数据', description: '控制线索列表、入库情况和线索统计的数据范围', permissionKeys: [PERMISSION_KEYS.LEADS_LIST, PERMISSION_KEYS.LEADS_DETAIL, PERMISSION_KEYS.LEADS_CREATE, PERMISSION_KEYS.LEADS_FOLLOW, PERMISSION_KEYS.LEADS_FLOW_CONFIG, PERMISSION_KEYS.LEADS_INTAKE_STATUS] },
-  { domain: 'customers', label: '客户数据', description: '控制客户列表、客户资料和客户统计的数据范围', permissionKeys: [PERMISSION_KEYS.CUSTOMER_LIST, PERMISSION_KEYS.CUSTOMER_DETAIL, PERMISSION_KEYS.CUSTOMER_CREATE, PERMISSION_KEYS.CUSTOMER_EDIT, PERMISSION_KEYS.CUSTOMER_CREATE_ORDER, PERMISSION_KEYS.CUSTOMER_VIEW_ORDERS] },
+  { domain: 'customers', label: '客户数据', description: '控制客户列表、客户资料和客户统计的数据范围', permissionKeys: [PERMISSION_KEYS.CUSTOMER_LIST, PERMISSION_KEYS.CUSTOMER_DETAIL, PERMISSION_KEYS.CUSTOMER_CREATE, PERMISSION_KEYS.CUSTOMER_EDIT, PERMISSION_KEYS.CUSTOMER_ASSIGN, PERMISSION_KEYS.CUSTOMER_CREATE_ORDER, PERMISSION_KEYS.CUSTOMER_VIEW_ORDERS] },
   { domain: 'orders', label: '订单数据', description: '控制正式订单列表、订单筛选和订单统计的数据范围', permissionKeys: [PERMISSION_KEYS.ORDER_MANAGE, PERMISSION_KEYS.ORDER_CREATE, PERMISSION_KEYS.ORDER_EDIT, PERMISSION_KEYS.ORDER_DELETE, PERMISSION_KEYS.ORDER_HISTORY, PERMISSION_KEYS.ORDER_PAYMENT_SCREENSHOT] },
   { domain: 'orderApplications', label: '订单审核台数据', description: '控制订单审核台能看到哪些订单申请；审核操作仍由订单审核操作权限控制', permissionKeys: [PERMISSION_KEYS.ORDER_REVIEW, PERMISSION_KEYS.ORDER_MANAGE, PERMISSION_KEYS.ORDER_CREATE] },
   { domain: 'recoveryOrders', label: '售后挽回订单数据', description: '控制售后挽回订单列表、筛选和统计的数据范围', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT, PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY] },

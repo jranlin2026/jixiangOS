@@ -136,7 +136,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     ? isEdit ? '当前角色无分配权限，保存时不会修改分配销售' : '当前角色无分配权限，入库后等待分配'
     : assignableUsers.length
       ? '候选人来自线索流转参与成员；未单独配置时默认为全体在职员工'
-      : '暂无可分配成员，请到系统设置 > 客户管理 > 线索流转中添加参与成员';
+      : '暂无可分配成员，请到系统设置 > 客户设置 > 线索流转中添加参与成员';
 
   const handleChange = (field: string) => (event: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [field]: event.target.value });
