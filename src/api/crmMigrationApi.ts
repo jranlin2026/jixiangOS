@@ -1,6 +1,8 @@
 import type { Row } from 'exceljs';
 import excelJsBrowserUrl from 'exceljs/dist/exceljs.min.js?url';
 import { v4 as uuidv4 } from 'uuid';
+import type { Customer, CustomerActivityRecord } from '../types/customer';
+import type { Lead } from '../types/lead';
 import type { CustomerTag } from '../types/tag';
 import type { LeadSourceConfig, User } from '../types/settings';
 import { DEFAULT_LEAD_SOURCE_CONFIGS, STORAGE_KEYS } from '../shared/utils/constants';
@@ -77,6 +79,20 @@ export interface CrmMigrationPrecheckResult {
     assignedLeadAction: string;
     failedLeadAction: string;
   };
+}
+
+export interface CrmMigrationImportResult {
+  customers: {
+    teamCreated: number;
+    publicCreated: number;
+    skippedDuplicates: number;
+  };
+  leads: {
+    assignedCreated: number;
+    skippedExistingCustomers: number;
+    skippedDuplicates: number;
+  };
+  failedLeadsArchived: number;
 }
 
 export interface CrmMigrationExistingData {
@@ -195,11 +211,130 @@ function collectPhones(rows: MigrationRow[] = []): Set<string> {
   return phones;
 }
 
+function collectWechat(rows: Array<{ wechat?: string }> = []): Set<string> {
+  return new Set(rows.map((row) => normalizeValue(row.wechat)).filter(Boolean));
+}
+
 function hasPhone(row: MigrationRow, phones: Set<string>): boolean {
   return ['手机', '手机1', '手机号', '联系方式'].some((field) => {
     const phone = normalizePhone(row[field]);
     return phone ? phones.has(phone) : false;
   });
+}
+
+function getRowPhone(row: MigrationRow): string {
+  return normalizePhone(row['手机']) || normalizePhone(row['手机1']) || normalizePhone(row['手机号']) || normalizePhone(row['联系方式']);
+}
+
+function getRowWechat(row: MigrationRow): string {
+  return getAny(row, ['微信', '客户微信']);
+}
+
+function getRowName(row: MigrationRow): string {
+  return getAny(row, ['客户全名', '客户名称', '联系人姓名', '姓名', '客户']);
+}
+
+function getSourceParts(row: MigrationRow): { source: string; sourceName: string } {
+  const parsed = parseMigrationSource(getAny(row, SOURCE_FIELDS));
+  if (!parsed) return { source: '', sourceName: '' };
+  return { source: parsed.parentName === '历史导入' ? parsed.childName : parsed.parentName, sourceName: parsed.parentName === '历史导入' ? '' : parsed.childName };
+}
+
+function getTags(row: MigrationRow): string[] {
+  return TAG_FIELDS.flatMap((field) => splitList(row[field]));
+}
+
+function createImportActivity(content: string, now: string): CustomerActivityRecord {
+  return {
+    id: `act-${uuidv4().slice(0, 8)}`,
+    type: 'create',
+    title: 'EC CRM迁移导入',
+    content,
+    operator: '系统',
+    createdAt: now,
+  };
+}
+
+function createCustomerFromMigrationRow(row: MigrationRow, scope: 'team' | 'public', now: string): Customer {
+  const name = getRowName(row) || getRowPhone(row) || getRowWechat(row) || '历史客户';
+  const phone = getRowPhone(row);
+  const wechat = getRowWechat(row);
+  const source = getSourceParts(row);
+  const owner = scope === 'public'
+    ? '公海'
+    : getAny(row, ['客户跟进人', '最后跟进人', '当前跟进人', '上一个跟进人']) || '待分配';
+  const remarkParts = [
+    row['最后跟进记录'] ? `最后跟进记录：${row['最后跟进记录']}` : '',
+    row['CRMID'] ? `EC CRMID：${row['CRMID']}` : '',
+    row['所属公海'] ? `所属公海：${row['所属公海']}` : '',
+  ].filter(Boolean);
+
+  return {
+    id: `cust-mig-${uuidv4().slice(0, 8)}`,
+    name,
+    company: row['公司'] || row['企业名称'] || '',
+    phone,
+    wechat,
+    industry: row['行业'] || '',
+    city: row['城市'] || '',
+    customerLevel: 'L1',
+    lifecycleStatusCode: scope === 'public' ? 'public_pool' : 'pending_followup',
+    lifecycleStatusUpdatedAt: now,
+    publicPoolAt: scope === 'public' ? now : undefined,
+    owner,
+    previousOwner: getAny(row, ['上一个跟进人']),
+    ownerSince: now,
+    ownerProtectDays: 730,
+    totalSpent: 0,
+    orderCount: 0,
+    growthPath: [],
+    growthRecords: [],
+    activityRecords: [createImportActivity(`从EC CRM${scope === 'public' ? '公海客户' : '团队客户'}导入`, now)],
+    tags: getTags(row),
+    leadInputBy: getAny(row, ['线索录入人', '客户创建人', '创建人']),
+    leadSource: source.source,
+    sourceName: source.sourceName,
+    sourceType: '公司资源',
+    remark: remarkParts.join('\n'),
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function createLeadFromAssignedRow(row: MigrationRow, now: string): Lead {
+  const name = getRowName(row) || getRowPhone(row) || getRowWechat(row) || '历史商机';
+  const source = getSourceParts(row);
+  const owner = getAny(row, ['当前商机接收人', '当前跟进人']) || '待分配';
+
+  return {
+    id: `lead-mig-${uuidv4().slice(0, 8)}`,
+    name,
+    company: row['公司'] || '',
+    phone: getRowPhone(row),
+    wechat: getRowWechat(row),
+    source: source.source || '历史导入',
+    sourceName: source.sourceName,
+    status: '新线索' as Lead['status'],
+    intakeStatus: '入库成功' as Lead['intakeStatus'],
+    inputBy: getAny(row, ['创建人', '线索录入人', '分配人']),
+    assignedTo: owner === '待分配' ? undefined : owner,
+    assignedAt: owner === '待分配' ? undefined : now,
+    owner,
+    tags: getTags(row),
+    sourceType: '公司资源',
+    remark: [
+      row['失败原因'] ? `失败原因：${row['失败原因']}` : '',
+      row['商机ID'] ? `汇营销商机ID：${row['商机ID']}` : '',
+      row['备注'] || '',
+    ].filter(Boolean).join('\n'),
+    createdAt: now,
+    updatedAt: now,
+    followUpRecords: [],
+  };
+}
+
+function hasSameContact(phone: string, wechat: string, phones: Set<string>, wechats: Set<string>): boolean {
+  return Boolean((phone && phones.has(phone)) || (wechat && wechats.has(wechat)));
 }
 
 export function parseMigrationSource(value: string): CrmMigrationSourceCandidate | null {
@@ -493,6 +628,86 @@ async function precheckFiles(files: CrmMigrationFileMap): Promise<ApiResponse<Cr
   return createSuccessResponse(analyzeCrmMigrationTables(tables));
 }
 
+function importMigrationTables(tables: CrmMigrationTables): CrmMigrationImportResult {
+  ensureInit();
+  const now = new Date().toISOString();
+  const customers = [...(getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [])];
+  const leads = [...(getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [])];
+  const customerPhones = collectPhones(customers.map((customer) => ({ 手机: customer.phone })));
+  const customerWechats = collectWechat(customers.map((customer) => ({ wechat: customer.wechat })));
+  const leadPhones = collectPhones(leads.map((lead) => ({ 手机: lead.phone })));
+  const leadWechats = collectWechat(leads.map((lead) => ({ wechat: lead.wechat })));
+  const result: CrmMigrationImportResult = {
+    customers: {
+      teamCreated: 0,
+      publicCreated: 0,
+      skippedDuplicates: 0,
+    },
+    leads: {
+      assignedCreated: 0,
+      skippedExistingCustomers: 0,
+      skippedDuplicates: 0,
+    },
+    failedLeadsArchived: (tables.failedLeads || []).length,
+  };
+
+  const importCustomerRows = (rows: MigrationRow[], scope: 'team' | 'public') => {
+    rows.forEach((row) => {
+      const phone = getRowPhone(row);
+      const wechat = getRowWechat(row);
+      if (hasSameContact(phone, wechat, customerPhones, customerWechats)) {
+        result.customers.skippedDuplicates += 1;
+        return;
+      }
+      const customer = createCustomerFromMigrationRow(row, scope, now);
+      customers.unshift(customer);
+      if (customer.phone) customerPhones.add(customer.phone);
+      if (customer.wechat) customerWechats.add(customer.wechat);
+      if (scope === 'team') result.customers.teamCreated += 1;
+      else result.customers.publicCreated += 1;
+    });
+  };
+
+  importCustomerRows(tables.teamCustomers || [], 'team');
+  importCustomerRows(tables.publicPool || [], 'public');
+
+  (tables.assignedLeads || []).forEach((row) => {
+    const phone = getRowPhone(row);
+    const wechat = getRowWechat(row);
+    if (hasSameContact(phone, wechat, customerPhones, customerWechats)) {
+      result.leads.skippedExistingCustomers += 1;
+      return;
+    }
+    if (hasSameContact(phone, wechat, leadPhones, leadWechats)) {
+      result.leads.skippedDuplicates += 1;
+      return;
+    }
+    const lead = createLeadFromAssignedRow(row, now);
+    leads.unshift(lead);
+    if (lead.phone) leadPhones.add(lead.phone);
+    if (lead.wechat) leadWechats.add(lead.wechat);
+    result.leads.assignedCreated += 1;
+  });
+
+  setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
+  setStorageData(STORAGE_KEYS.LEADS, leads);
+  return result;
+}
+
+async function importFiles(files: CrmMigrationFileMap): Promise<ApiResponse<CrmMigrationImportResult>> {
+  ensureInit();
+  await delay(160);
+  const entries = await Promise.all(FILE_KEYS.map(async (key) => {
+    const file = files[key];
+    return [key, file ? await readTableFile(file) : []] as const;
+  }));
+  const tables = entries.reduce((acc, [key, rows]) => {
+    acc[key] = rows;
+    return acc;
+  }, {} as CrmMigrationTables);
+  return createSuccessResponse(importMigrationTables(tables));
+}
+
 function ensureSourceParent(configs: LeadSourceConfig[], parentName: string, now: string): LeadSourceConfig {
   const existing = configs.find((item) => !item.parentId && item.name.trim().toLowerCase() === parentName.trim().toLowerCase());
   if (existing) return existing;
@@ -568,6 +783,11 @@ async function syncTags(tagNames: string[]): Promise<ApiResponse<{ created: numb
 
 export const crmMigrationApi = {
   precheckFiles,
+  importFiles,
   syncLeadSources,
   syncTags,
+};
+
+export const crmMigrationTestUtils = {
+  importMigrationTables,
 };

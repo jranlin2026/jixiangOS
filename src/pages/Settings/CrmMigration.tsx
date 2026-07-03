@@ -21,6 +21,7 @@ import FactCheckIcon from '@mui/icons-material/FactCheck';
 import GroupAddIcon from '@mui/icons-material/GroupAdd';
 import LabelIcon from '@mui/icons-material/Label';
 import SourceIcon from '@mui/icons-material/Source';
+import MoveToInboxIcon from '@mui/icons-material/MoveToInbox';
 import type { CrmMigrationFileKey, CrmMigrationFileMap, CrmMigrationPrecheckResult } from '../../api/crmMigrationApi';
 import { crmMigrationApi } from '../../api/crmMigrationApi';
 import { settingsApi } from '../../api/settingsApi';
@@ -102,6 +103,7 @@ const CrmMigration: React.FC = () => {
   const [files, setFiles] = useState<CrmMigrationFileMap>({});
   const [checking, setChecking] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<CrmMigrationPrecheckResult | null>(null);
   const fileInputs = useRef<Partial<Record<CrmMigrationFileKey, HTMLInputElement | null>>>({});
 
@@ -183,6 +185,40 @@ const CrmMigration: React.FC = () => {
     await runPrecheck();
   };
 
+  const importCustomersAndLeads = async () => {
+    if (!result) return;
+    const confirmed = await confirm(
+      [
+        `将导入团队客户、公海客户，并只把“客户库外”的已分配商机补充为线索。`,
+        `入库失败商机会先作为失败归档口径，不进入正式线索池。`,
+        `导入会按手机号/微信跳过重复数据。`,
+      ].join('\n\n'),
+      '确认导入客户和补充线索',
+    );
+    if (!confirmed) return;
+
+    setImporting(true);
+    const response = await crmMigrationApi.importFiles(files);
+    setImporting(false);
+    if (response.code !== 0 || !response.data) {
+      await alert(response.message || '客户和线索导入失败，请检查文件后重试。', '导入失败');
+      return;
+    }
+    await alert(
+      [
+        `团队客户导入：${response.data.customers.teamCreated} 个`,
+        `公海客户导入：${response.data.customers.publicCreated} 个`,
+        `客户重复跳过：${response.data.customers.skippedDuplicates} 个`,
+        `补充线索导入：${response.data.leads.assignedCreated} 条`,
+        `已在客户库的商机跳过：${response.data.leads.skippedExistingCustomers} 条`,
+        `线索重复跳过：${response.data.leads.skippedDuplicates} 条`,
+        `失败商机归档口径：${response.data.failedLeadsArchived} 条`,
+      ].join('\n'),
+      '导入完成',
+    );
+    await runPrecheck();
+  };
+
   return (
     <Box>
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'stretch', md: 'center' }} justifyContent="space-between" sx={{ mb: 2 }}>
@@ -192,9 +228,14 @@ const CrmMigration: React.FC = () => {
             先预检老系统文件，自动整理员工、来源、标签和重复关系，再决定导入客户与线索。
           </Typography>
         </Box>
-        <Button variant="contained" startIcon={<FactCheckIcon />} onClick={() => runPrecheck()} disabled={!canPrecheck}>
-          开始预检
-        </Button>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+          <Button variant="outlined" startIcon={<MoveToInboxIcon />} onClick={importCustomersAndLeads} disabled={!result || importing || checking || syncing}>
+            导入客户和补充线索
+          </Button>
+          <Button variant="contained" startIcon={<FactCheckIcon />} onClick={() => runPrecheck()} disabled={!canPrecheck}>
+            开始预检
+          </Button>
+        </Stack>
       </Stack>
 
       <Alert severity="info" sx={{ mb: 2 }}>
@@ -231,7 +272,7 @@ const CrmMigration: React.FC = () => {
         </Stack>
       </Paper>
 
-      {checking || syncing ? <LinearProgress sx={{ mb: 2 }} /> : null}
+      {checking || syncing || importing ? <LinearProgress sx={{ mb: 2 }} /> : null}
 
       {result ? (
         <Stack spacing={2}>
