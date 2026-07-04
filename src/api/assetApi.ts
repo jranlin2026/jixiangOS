@@ -767,6 +767,10 @@ async function updateDevice(id: string, input: Partial<AssetDeviceInput>): Promi
     if (!existing) throw new Error('设备不存在');
     const imei = input.imei === undefined ? existing.imei : requiredText(input.imei, 'IMEI不能为空');
     if (rows.some((device) => device.id !== id && device.imei === imei)) throw new Error('IMEI已存在');
+    const nextSimType = input.simType || existing.simType;
+    if (nextSimType === '单卡' && phones().some((phone) => phone.deviceId === id && phone.slotType === '卡槽2')) {
+      throw new Error('单卡设备不能保留卡槽2手机号，请先解绑或迁移卡槽2手机号');
+    }
     const updated: AssetDevice = {
       ...existing,
       ...input,
@@ -790,13 +794,18 @@ async function fetchPhoneNumbers(filters?: AssetFilters): Promise<ApiResponse<Pa
 
 function assertPhoneBinding(input: Partial<AssetPhoneNumberInput>, excludeId?: string): void {
   const deviceId = requiredText(input.deviceId, '所属设备不能为空');
-  if (!getDevice(deviceId)) throw new Error('所属设备不存在');
+  const device = getDevice(deviceId);
+  if (!device) throw new Error('所属设备不存在');
   const slotType = input.slotType || '卡槽1';
+  if (device.simType === '单卡' && slotType === '卡槽2') {
+    throw new Error('单卡设备只能绑定卡槽1手机号');
+  }
   if (phones().some((phone) => phone.id !== excludeId && phone.deviceId === deviceId && phone.slotType === slotType)) {
     throw new Error('该设备卡槽已绑定手机号');
   }
   const boundCount = phones().filter((phone) => phone.id !== excludeId && phone.deviceId === deviceId).length;
-  if (boundCount >= 2) throw new Error('设备最多绑定2个手机号');
+  const maxPhoneCount = device.simType === '双卡' ? 2 : 1;
+  if (boundCount >= maxPhoneCount) throw new Error(`${device.simType}设备最多绑定${maxPhoneCount}个手机号`);
 }
 
 async function createPhoneNumber(input: Partial<AssetPhoneNumberInput>): Promise<ApiResponse<AssetPhoneNumber>> {

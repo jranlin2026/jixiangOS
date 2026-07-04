@@ -80,6 +80,94 @@ await resetAssets();
 }
 
 {
+  const singleCardDevice = await assetApi.createDevice({
+    deviceName: '单卡规则设备',
+    brandModel: 'Single SIM Test',
+    imei: 'SINGLE-SIM-IMEI-0001',
+    simType: '单卡',
+    ownerSubject: '公司',
+    department: '运营管理部',
+    owner: '测试员',
+    currentUser: '测试员',
+    status: '使用中',
+    riskLevel: '低',
+    monthlyCost: 0,
+  });
+  assert.equal(singleCardDevice.code, 0);
+
+  const slot2Phone = await assetApi.createPhoneNumber({
+    phoneNumber: '13900001112',
+    operator: '移动',
+    deviceId: singleCardDevice.data.id,
+    slotType: '卡槽2',
+    packageName: '单卡错误套餐',
+    monthlyFee: 39,
+    owner: '测试员',
+    status: '使用中',
+  });
+  assert.notEqual(slot2Phone.code, 0);
+  assert.match(slot2Phone.message, /单卡设备只能绑定卡槽1/);
+
+  const slot1Phone = await assetApi.createPhoneNumber({
+    phoneNumber: '13900001113',
+    operator: '移动',
+    deviceId: singleCardDevice.data.id,
+    slotType: '卡槽1',
+    packageName: '单卡正确套餐',
+    monthlyFee: 39,
+    owner: '测试员',
+    status: '使用中',
+  });
+  assert.equal(slot1Phone.code, 0);
+
+  const secondPhone = await assetApi.createPhoneNumber({
+    phoneNumber: '13900001114',
+    operator: '移动',
+    deviceId: singleCardDevice.data.id,
+    slotType: '卡槽1',
+    packageName: '单卡重复套餐',
+    monthlyFee: 39,
+    owner: '测试员',
+    status: '使用中',
+  });
+  assert.notEqual(secondPhone.code, 0);
+  assert.match(secondPhone.message, /卡槽已绑定|单卡设备最多绑定1个手机号/);
+}
+
+{
+  const dualCardDevice = await assetApi.createDevice({
+    deviceName: '双卡改单卡规则设备',
+    brandModel: 'Dual SIM Test',
+    imei: 'DUAL-SIM-IMEI-0001',
+    simType: '双卡',
+    ownerSubject: '公司',
+    department: '运营管理部',
+    owner: '测试员',
+    currentUser: '测试员',
+    status: '使用中',
+    riskLevel: '低',
+    monthlyCost: 0,
+  });
+  assert.equal(dualCardDevice.code, 0);
+
+  const slot2Phone = await assetApi.createPhoneNumber({
+    phoneNumber: '13900001115',
+    operator: '移动',
+    deviceId: dualCardDevice.data.id,
+    slotType: '卡槽2',
+    packageName: '双卡套餐',
+    monthlyFee: 39,
+    owner: '测试员',
+    status: '使用中',
+  });
+  assert.equal(slot2Phone.code, 0);
+
+  const downgrade = await assetApi.updateDevice(dualCardDevice.data.id, { simType: '单卡' });
+  assert.notEqual(downgrade.code, 0);
+  assert.match(downgrade.message, /不能保留卡槽2手机号/);
+}
+
+{
   const account = await assetApi.createInternetAccount({
     platform: '测试平台',
     accountName: '未绑定账号',
@@ -147,7 +235,7 @@ await resetAssets();
 {
   const imported = await assetApi.importAssetsFromCsv('phones', [
     '手机号*,运营商,所属设备编号*,SIM卡槽,套餐,月费用,负责人,状态',
-    '13900002222,移动,DEV-018,卡槽2,导入套餐,59,测试员,使用中',
+    '13900002222,移动,DEV-011,卡槽2,导入套餐,59,测试员,使用中',
     '13900003333,移动,DEV-NOT-FOUND,卡槽1,导入套餐,59,测试员,使用中',
   ].join('\n'));
 
@@ -160,7 +248,7 @@ await resetAssets();
   const listed = await assetApi.fetchPhoneNumbers({ search: '13900002222', pageSize: 20 });
   assert.equal(listed.code, 0);
   assert.equal(listed.data.items.length, 1);
-  assert.equal(listed.data.items[0].deviceId, 'asset-device-002');
+  assert.equal(listed.data.items[0].deviceId, 'asset-device-003');
   assert.equal(listed.data.items[0].slotType, '卡槽2');
 }
 

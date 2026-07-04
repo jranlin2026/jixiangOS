@@ -47,6 +47,9 @@ import {
   moduleTableSx,
   moduleTokens,
 } from '../../shared/components/ModuleShell';
+import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
+import type { TableViewColumnConfig } from '../../shared/components/TableViewSettingsDialog';
+import { useTableViewConfig } from '../../shared/hooks/useTableViewConfig';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import type {
   AssetDevice,
@@ -70,6 +73,12 @@ import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 type AssetTab = 'overview' | 'devices' | 'phones' | 'accounts' | 'risks' | 'logs' | 'offboarding';
 
 type AssetFormType = 'device' | 'phone' | 'account';
+
+type ConfigurableAssetTab = Extract<AssetTab, 'devices' | 'phones' | 'accounts'>;
+
+type AssetColumnConfig = TableViewColumnConfig & {
+  width: number;
+};
 
 type AssetFormState = {
   open: boolean;
@@ -96,6 +105,85 @@ const ASSET_TABS: Array<{ value: AssetTab; label: string; permissionKey: string 
   { value: 'logs', label: '操作日志', permissionKey: PERMISSION_KEYS.ASSETS_LOGS },
   { value: 'offboarding', label: '离职回收', permissionKey: PERMISSION_KEYS.ASSETS_OFFBOARDING },
 ];
+
+const CONFIGURABLE_ASSET_TABS = new Set<AssetTab>(['devices', 'phones', 'accounts']);
+
+const ASSET_ACTION_COLUMN_WIDTH = 104;
+
+const DEVICE_COLUMNS: AssetColumnConfig[] = [
+  { id: 'deviceCode', label: '设备编号', width: 130 },
+  { id: 'deviceName', label: '设备名称', width: 130 },
+  { id: 'brandModel', label: '品牌型号', width: 130 },
+  { id: 'imei', label: 'IMEI', width: 130 },
+  { id: 'simType', label: '手机号', width: 190 },
+  { id: 'department', label: '所属部门', width: 130 },
+  { id: 'owner', label: '负责人', width: 120 },
+  { id: 'currentUser', label: '当前使用人', width: 130 },
+  { id: 'status', label: '状态', width: 100 },
+  { id: 'riskLevel', label: '风险', width: 100 },
+];
+const DEFAULT_DEVICE_VISIBLE_COLUMN_IDS = DEVICE_COLUMNS.map((column) => column.id);
+
+const PHONE_COLUMNS: AssetColumnConfig[] = [
+  { id: 'phoneNumber', label: '手机号', width: 140 },
+  { id: 'operator', label: '运营商', width: 100 },
+  { id: 'device', label: '所属设备', width: 180 },
+  { id: 'slotType', label: '卡槽', width: 100 },
+  { id: 'packageName', label: '套餐', width: 140 },
+  { id: 'monthlyFee', label: '月费用', width: 110 },
+  { id: 'owner', label: '负责人', width: 120 },
+  { id: 'status', label: '状态', width: 110 },
+];
+const DEFAULT_PHONE_VISIBLE_COLUMN_IDS = PHONE_COLUMNS.map((column) => column.id);
+
+const ACCOUNT_COLUMNS: AssetColumnConfig[] = [
+  { id: 'accountNo', label: '账号编号', width: 130 },
+  { id: 'platform', label: '平台', width: 120 },
+  { id: 'accountName', label: '账号名称', width: 150 },
+  { id: 'loginAccount', label: '登录账号', width: 150 },
+  { id: 'phone', label: '绑定手机号', width: 150 },
+  { id: 'device', label: '所属设备', width: 180 },
+  { id: 'owner', label: '负责人', width: 120 },
+  { id: 'permissionStatus', label: '权限状态', width: 130 },
+  { id: 'riskLevel', label: '风险等级', width: 120 },
+  { id: 'monthlyFee', label: '月费用', width: 110 },
+  { id: 'expiresAt', label: '到期时间', width: 130 },
+];
+const DEFAULT_ACCOUNT_VISIBLE_COLUMN_IDS = ACCOUNT_COLUMNS.map((column) => column.id);
+
+const ASSET_VIEW_STORAGE_KEYS: Record<ConfigurableAssetTab, string> = {
+  devices: 'aaos_asset_devices_table_view_v1',
+  phones: 'aaos_asset_phones_table_view_v1',
+  accounts: 'aaos_asset_accounts_table_view_v1',
+};
+
+const ASSET_VIEW_TITLES: Record<ConfigurableAssetTab, string> = {
+  devices: '设备资产视图设置',
+  phones: '手机号资产视图设置',
+  accounts: '互联网账号视图设置',
+};
+
+const ASSET_VIEW_DESCRIPTIONS: Record<ConfigurableAssetTab, string> = {
+  devices: '设置设备资产表格的显示字段、字段顺序和固定列。',
+  phones: '设置手机号资产表格的显示字段、字段顺序和固定列。',
+  accounts: '设置互联网账号表格的显示字段、字段顺序和固定列。',
+};
+
+const ASSET_CREATE_LABELS: Record<ConfigurableAssetTab, string> = {
+  devices: '新增设备',
+  phones: '新增手机号',
+  accounts: '新增账号',
+};
+
+const ASSET_CREATE_TYPES: Record<ConfigurableAssetTab, AssetFormType> = {
+  devices: 'device',
+  phones: 'phone',
+  accounts: 'account',
+};
+
+function isConfigurableAssetTab(tab: AssetTab): tab is ConfigurableAssetTab {
+  return CONFIGURABLE_ASSET_TABS.has(tab);
+}
 
 const VALID_TABS = new Set(ASSET_TABS.map((tab) => tab.value));
 
@@ -185,6 +273,8 @@ const AssetManagement: React.FC = () => {
   const [lookupPhones, setLookupPhones] = useState<AssetPhoneNumber[]>([]);
   const [formState, setFormState] = useState<AssetFormState>(emptyForm);
   const [importState, setImportState] = useState<AssetImportState>(emptyImportState);
+  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [viewSettingsOpen, setViewSettingsOpen] = useState<ConfigurableAssetTab | null>(null);
   const [revealedValues, setRevealedValues] = useState<Record<string, string>>({});
   const currentUser = useAuthStore((state) => state.currentUser);
   const {
@@ -241,19 +331,41 @@ const AssetManagement: React.FC = () => {
 
   const deviceById = useMemo(() => new Map(lookupDevices.map((device) => [device.id, device])), [lookupDevices]);
   const phoneById = useMemo(() => new Map(lookupPhones.map((phone) => [phone.id, phone])), [lookupPhones]);
+  const phonesByDeviceId = useMemo(() => {
+    const map = new Map<string, AssetPhoneNumber[]>();
+    lookupPhones.forEach((phone) => {
+      const list = map.get(phone.deviceId) || [];
+      list.push(phone);
+      map.set(phone.deviceId, list);
+    });
+    map.forEach((list) => list.sort((a, b) => a.slotType.localeCompare(b.slotType, 'zh-CN')));
+    return map;
+  }, [lookupPhones]);
+  const deviceView = useTableViewConfig(ASSET_VIEW_STORAGE_KEYS.devices, DEVICE_COLUMNS, DEFAULT_DEVICE_VISIBLE_COLUMN_IDS);
+  const phoneView = useTableViewConfig(ASSET_VIEW_STORAGE_KEYS.phones, PHONE_COLUMNS, DEFAULT_PHONE_VISIBLE_COLUMN_IDS);
+  const accountView = useTableViewConfig(ASSET_VIEW_STORAGE_KEYS.accounts, ACCOUNT_COLUMNS, DEFAULT_ACCOUNT_VISIBLE_COLUMN_IDS);
+  const activeAssetView = viewSettingsOpen === 'devices'
+    ? { columns: DEVICE_COLUMNS, view: deviceView }
+    : viewSettingsOpen === 'phones'
+      ? { columns: PHONE_COLUMNS, view: phoneView }
+      : viewSettingsOpen === 'accounts'
+        ? { columns: ACCOUNT_COLUMNS, view: accountView }
+        : null;
 
   useEffect(() => {
     fetchDashboard();
     assetApi.fetchDevices({ pageSize: 200 }).then((res) => {
       if (res.code === 0) setLookupDevices(res.data.items);
     });
-    assetApi.fetchPhoneNumbers({ pageSize: 200 }).then((res) => {
+    assetApi.fetchPhoneNumbers({ pageSize: 1000 }).then((res) => {
       if (res.code === 0) setLookupPhones(res.data.items);
     });
     setPlatformOptions(assetApi.getAccountPlatformOptions());
   }, [fetchDashboard]);
 
   useEffect(() => {
+    setDetailDialogOpen(false);
+    setViewSettingsOpen(null);
     clearDetail();
     setPage(0);
   }, [activeTab, clearDetail]);
@@ -295,7 +407,7 @@ const AssetManagement: React.FC = () => {
   const refreshLookupData = async () => {
     const [deviceRes, phoneRes] = await Promise.all([
       assetApi.fetchDevices({ pageSize: 200 }),
-      assetApi.fetchPhoneNumbers({ pageSize: 200 }),
+      assetApi.fetchPhoneNumbers({ pageSize: 1000 }),
     ]);
     if (deviceRes.code === 0) setLookupDevices(deviceRes.data.items);
     if (phoneRes.code === 0) setLookupPhones(phoneRes.data.items);
@@ -476,12 +588,19 @@ const AssetManagement: React.FC = () => {
   };
 
   const openDetail = (type: AssetType, id: string) => {
+    setDetailDialogOpen(true);
     fetchDetail(type, id);
   };
 
   const openAccountPhoneDetail = (phoneId?: string) => {
     if (!phoneId) return;
+    setDetailDialogOpen(true);
     fetchDetail('phone', phoneId);
+  };
+
+  const closeDetailDialog = () => {
+    setDetailDialogOpen(false);
+    clearDetail();
   };
 
   const revealedKey = (type: AssetType, id: string, field: AssetSensitiveField) => `${type}:${id}:${field}`;
@@ -697,38 +816,209 @@ const AssetManagement: React.FC = () => {
             </Select>
           </FormControl>
         )}
-        <Tooltip title="列设置">
-          <IconButton sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, bgcolor: '#fff' }} onClick={() => setSnackbar('列设置会在下一步接入')}>
-            <ViewColumnIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
       </ModuleToolbar>
     );
   };
 
+  const getTableMinWidth = (columns: AssetColumnConfig[]) => (
+    columns.reduce((sum, column) => sum + column.width, 0) + ASSET_ACTION_COLUMN_WIDTH
+  );
+
+  const getFrozenColumnSx = (columns: AssetColumnConfig[], columnIndex: number, frozenColumnCount: number, isHeader = false) => {
+    const width = columns[columnIndex]?.width || 120;
+    const base = {
+      width,
+      minWidth: width,
+      maxWidth: width,
+    };
+    if (columnIndex >= frozenColumnCount) return base;
+    const left = columns.slice(0, columnIndex).reduce((sum, column) => sum + column.width, 0);
+    return {
+      ...base,
+      position: 'sticky',
+      left,
+      zIndex: isHeader ? 4 : 3,
+      bgcolor: isHeader ? '#F1F5F9' : '#fff',
+      boxShadow: columnIndex === frozenColumnCount - 1 ? `1px 0 0 ${shell.softLine}` : 'none',
+    };
+  };
+
+  const renderDeviceCell = (device: AssetDevice, columnId: string) => {
+    switch (columnId) {
+      case 'deviceCode':
+        return <Box sx={{ color: shell.tableLink, fontWeight: 900 }}>{device.deviceCode}</Box>;
+      case 'deviceName':
+        return device.deviceName;
+      case 'brandModel':
+        return device.brandModel;
+      case 'imei':
+        return device.imeiMasked;
+      case 'simType':
+        return renderDevicePhones(device);
+      case 'department':
+        return device.department;
+      case 'owner':
+        return device.owner || '-';
+      case 'currentUser':
+        return device.currentUser || '-';
+      case 'status':
+        return <Chip size="small" label={device.status} sx={chipSx(statusTone(device.status))} />;
+      case 'riskLevel':
+        return <Chip size="small" label={device.riskLevel} sx={chipSx(riskTone(device.riskLevel))} />;
+      default:
+        return null;
+    }
+  };
+
+  const renderDevicePhones = (device: AssetDevice) => {
+    const linkedPhones = phonesByDeviceId.get(device.id) || [];
+    const expectedSlots = device.simType === '双卡' ? ['卡槽1', '卡槽2'] : ['卡槽1'];
+    const slotLabelMap: Record<string, string> = {
+      卡槽1: 'A',
+      卡槽2: 'B',
+    };
+    return (
+      <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0, whiteSpace: 'nowrap' }}>
+        {expectedSlots.map((slot, index) => {
+          const phone = linkedPhones.find((item) => item.slotType === slot);
+          const slotLabel = slotLabelMap[slot] || slot;
+          const prefix = `${slotLabel} `;
+          if (!phone) {
+            return (
+              <React.Fragment key={slot}>
+                {index > 0 ? <Typography variant="caption" sx={{ color: shell.muted }}>/</Typography> : null}
+                <Typography variant="caption" sx={{ color: shell.muted, lineHeight: 1.3 }}>
+                  {prefix}未绑定
+                </Typography>
+              </React.Fragment>
+            );
+          }
+          return (
+            <React.Fragment key={phone.id}>
+              {index > 0 ? <Typography variant="caption" sx={{ color: shell.muted }}>/</Typography> : null}
+              <Tooltip title="查看手机号快照">
+                <Box
+                  component="button"
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openDetail('phone', phone.id);
+                  }}
+                  sx={{
+                    border: 0,
+                    bgcolor: 'transparent',
+                    color: shell.tableLink,
+                    cursor: 'pointer',
+                    font: 'inherit',
+                    fontSize: 13,
+                    fontWeight: 900,
+                    lineHeight: 1.3,
+                    p: 0,
+                    textAlign: 'left',
+                    '&:hover': { textDecoration: 'underline' },
+                  }}
+                >
+                  {prefix}{phone.phoneNumberMasked}
+                </Box>
+              </Tooltip>
+            </React.Fragment>
+          );
+        })}
+      </Stack>
+    );
+  };
+
+  const phoneSlotOptionsForDevice = (deviceId?: string) => {
+    const device = deviceId ? deviceById.get(deviceId) : undefined;
+    return device?.simType === '双卡' ? ['卡槽1', '卡槽2'] : ['卡槽1'];
+  };
+
+  const renderPhoneCell = (phone: AssetPhoneNumber, columnId: string) => {
+    const device = deviceById.get(phone.deviceId);
+    switch (columnId) {
+      case 'phoneNumber':
+        return <Box sx={{ color: shell.tableLink, fontWeight: 900 }}>{phone.phoneNumberMasked}</Box>;
+      case 'operator':
+        return phone.operator;
+      case 'device':
+        return <Box sx={{ color: shell.tableLink }}>{device ? `${device.deviceCode} / ${device.deviceName}` : '-'}</Box>;
+      case 'slotType':
+        return phone.slotType;
+      case 'packageName':
+        return phone.packageName;
+      case 'monthlyFee':
+        return formatCurrency(phone.monthlyFee);
+      case 'owner':
+        return phone.owner || '-';
+      case 'status':
+        return <Chip size="small" label={phone.status} sx={chipSx(statusTone(phone.status))} />;
+      default:
+        return null;
+    }
+  };
+
+  const renderAccountCell = (account: AssetInternetAccount, columnId: string) => {
+    const phone = phoneById.get(account.phoneId || '');
+    const device = deviceById.get(phone?.deviceId || '');
+    switch (columnId) {
+      case 'accountNo':
+        return <Box sx={{ color: shell.tableLink, fontWeight: 900 }}>{account.accountNo}</Box>;
+      case 'platform':
+        return account.platform;
+      case 'accountName':
+        return account.accountName;
+      case 'loginAccount':
+        return account.loginAccountMasked;
+      case 'phone':
+        return (
+          <Box
+            sx={{ color: phone ? shell.tableLink : shell.amber, fontWeight: 800 }}
+            onClick={(event) => {
+              event.stopPropagation();
+              openAccountPhoneDetail(account.phoneId);
+            }}
+          >
+            {phone?.phoneNumberMasked || '未绑定'}
+          </Box>
+        );
+      case 'device':
+        return <Box sx={{ color: device ? shell.tableLink : shell.muted }}>{device ? `${device.deviceCode} / ${device.deviceName}` : '-'}</Box>;
+      case 'owner':
+        return account.owner || '-';
+      case 'permissionStatus':
+        return <Chip size="small" label={account.permissionStatus} sx={chipSx(statusTone(account.permissionStatus))} />;
+      case 'riskLevel':
+        return <Chip size="small" label={account.riskLevel} sx={chipSx(riskTone(account.riskLevel))} />;
+      case 'monthlyFee':
+        return formatCurrency(account.monthlyFee);
+      case 'expiresAt':
+        return account.expiresAt || '-';
+      default:
+        return null;
+    }
+  };
+
   const renderDevicesTable = () => (
-    <TableContainer component={Paper} elevation={0} sx={moduleTablePaperSx}>
-      <Table size="small" sx={moduleTableSx}>
+    <TableContainer component={Paper} elevation={0} sx={{ ...moduleTablePaperSx, overflowX: 'auto' }}>
+      <Table size="small" sx={{ ...moduleTableSx, tableLayout: 'fixed', minWidth: getTableMinWidth(deviceView.visibleColumns) }}>
         <TableHead>
           <TableRow>
-            {['设备编号', '设备名称', '品牌型号', 'IMEI', 'SIM类型', '所属部门', '负责人', '当前使用人', '状态', '风险', '操作'].map((column) => (
-              <TableCell key={column}>{column}</TableCell>
+            {deviceView.visibleColumns.map((column, columnIndex) => (
+              <TableCell key={column.id} sx={getFrozenColumnSx(deviceView.visibleColumns, columnIndex, deviceView.frozenColumnCount, true)}>
+                {column.label}
+              </TableCell>
             ))}
+            <TableCell sx={{ width: ASSET_ACTION_COLUMN_WIDTH, minWidth: ASSET_ACTION_COLUMN_WIDTH }}>操作</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
           {devices.map((device) => (
             <TableRow hover key={device.id} onClick={() => openDetail('device', device.id)} sx={{ cursor: 'pointer' }}>
-              <TableCell sx={{ color: shell.tableLink, fontWeight: 900 }}>{device.deviceCode}</TableCell>
-              <TableCell>{device.deviceName}</TableCell>
-              <TableCell>{device.brandModel}</TableCell>
-              <TableCell>{device.imeiMasked}</TableCell>
-              <TableCell>{device.simType}</TableCell>
-              <TableCell>{device.department}</TableCell>
-              <TableCell>{device.owner || '-'}</TableCell>
-              <TableCell>{device.currentUser || '-'}</TableCell>
-              <TableCell><Chip size="small" label={device.status} sx={chipSx(statusTone(device.status))} /></TableCell>
-              <TableCell><Chip size="small" label={device.riskLevel} sx={chipSx(riskTone(device.riskLevel))} /></TableCell>
+              {deviceView.visibleColumns.map((column, columnIndex) => (
+                <TableCell key={column.id} sx={getFrozenColumnSx(deviceView.visibleColumns, columnIndex, deviceView.frozenColumnCount)}>
+                  {renderDeviceCell(device, column.id)}
+                </TableCell>
+              ))}
               <TableCell>
                 <Tooltip title="查看详情"><IconButton size="small"><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
                 {canEditAssets ? (
@@ -748,28 +1038,26 @@ const AssetManagement: React.FC = () => {
   );
 
   const renderPhonesTable = () => (
-    <TableContainer component={Paper} elevation={0} sx={moduleTablePaperSx}>
-      <Table size="small" sx={moduleTableSx}>
+    <TableContainer component={Paper} elevation={0} sx={{ ...moduleTablePaperSx, overflowX: 'auto' }}>
+      <Table size="small" sx={{ ...moduleTableSx, tableLayout: 'fixed', minWidth: getTableMinWidth(phoneView.visibleColumns) }}>
         <TableHead>
           <TableRow>
-            {['手机号', '运营商', '所属设备', '卡槽', '套餐', '月费用', '负责人', '状态', '操作'].map((column) => (
-              <TableCell key={column}>{column}</TableCell>
+            {phoneView.visibleColumns.map((column, columnIndex) => (
+              <TableCell key={column.id} sx={getFrozenColumnSx(phoneView.visibleColumns, columnIndex, phoneView.frozenColumnCount, true)}>
+                {column.label}
+              </TableCell>
             ))}
+            <TableCell sx={{ width: ASSET_ACTION_COLUMN_WIDTH, minWidth: ASSET_ACTION_COLUMN_WIDTH }}>操作</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
-          {phones.map((phone) => {
-            const device = deviceById.get(phone.deviceId);
-            return (
+          {phones.map((phone) => (
               <TableRow hover key={phone.id} onClick={() => openDetail('phone', phone.id)} sx={{ cursor: 'pointer' }}>
-                <TableCell sx={{ color: shell.tableLink, fontWeight: 900 }}>{phone.phoneNumberMasked}</TableCell>
-                <TableCell>{phone.operator}</TableCell>
-                <TableCell sx={{ color: shell.tableLink }}>{device ? `${device.deviceCode} / ${device.deviceName}` : '-'}</TableCell>
-                <TableCell>{phone.slotType}</TableCell>
-                <TableCell>{phone.packageName}</TableCell>
-                <TableCell>{formatCurrency(phone.monthlyFee)}</TableCell>
-                <TableCell>{phone.owner || '-'}</TableCell>
-                <TableCell><Chip size="small" label={phone.status} sx={chipSx(statusTone(phone.status))} /></TableCell>
+                {phoneView.visibleColumns.map((column, columnIndex) => (
+                  <TableCell key={column.id} sx={getFrozenColumnSx(phoneView.visibleColumns, columnIndex, phoneView.frozenColumnCount)}>
+                    {renderPhoneCell(phone, column.id)}
+                  </TableCell>
+                ))}
                 <TableCell>
                   <Tooltip title="查看详情"><IconButton size="small"><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
                   {canEditAssets ? (
@@ -781,8 +1069,7 @@ const AssetManagement: React.FC = () => {
                   ) : null}
                 </TableCell>
               </TableRow>
-            );
-          })}
+          ))}
         </TableBody>
       </Table>
       {renderPagination()}
@@ -790,49 +1077,32 @@ const AssetManagement: React.FC = () => {
   );
 
   const renderAccountsTable = () => (
-    <TableContainer component={Paper} elevation={0} sx={moduleTablePaperSx}>
-      <Table size="small" sx={moduleTableSx}>
+    <TableContainer component={Paper} elevation={0} sx={{ ...moduleTablePaperSx, overflowX: 'auto' }}>
+      <Table size="small" sx={{ ...moduleTableSx, tableLayout: 'fixed', minWidth: getTableMinWidth(accountView.visibleColumns) }}>
         <TableHead>
           <TableRow>
-            {['账号编号', '平台', '账号名称', '登录账号', '绑定手机号', '所属设备', '负责人', '权限状态', '风险等级', '月费用', '到期时间', '操作'].map((column) => (
-              <TableCell key={column}>{column}</TableCell>
+            {accountView.visibleColumns.map((column, columnIndex) => (
+              <TableCell key={column.id} sx={getFrozenColumnSx(accountView.visibleColumns, columnIndex, accountView.frozenColumnCount, true)}>
+                {column.label}
+              </TableCell>
             ))}
+            <TableCell sx={{ width: ASSET_ACTION_COLUMN_WIDTH, minWidth: ASSET_ACTION_COLUMN_WIDTH }}>操作</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
-          {accounts.map((account) => {
-            const phone = phoneById.get(account.phoneId || '');
-            const device = deviceById.get(phone?.deviceId || '');
-            return (
+          {accounts.map((account) => (
               <TableRow hover key={account.id} onClick={() => openDetail('account', account.id)} sx={{ cursor: 'pointer' }}>
-                <TableCell sx={{ color: shell.tableLink, fontWeight: 900 }}>{account.accountNo}</TableCell>
-                <TableCell>{account.platform}</TableCell>
-                <TableCell>{account.accountName}</TableCell>
-                <TableCell>{account.loginAccountMasked}</TableCell>
-                <TableCell
-                  sx={{ color: phone ? shell.tableLink : shell.amber, fontWeight: 800 }}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    openAccountPhoneDetail(account.phoneId);
-                  }}
-                >
-                  {phone?.phoneNumberMasked || '未绑定'}
-                </TableCell>
-                <TableCell sx={{ color: device ? shell.tableLink : shell.muted }}>
-                  {device ? `${device.deviceCode} / ${device.deviceName}` : '-'}
-                </TableCell>
-                <TableCell>{account.owner || '-'}</TableCell>
-                <TableCell><Chip size="small" label={account.permissionStatus} sx={chipSx(statusTone(account.permissionStatus))} /></TableCell>
-                <TableCell><Chip size="small" label={account.riskLevel} sx={chipSx(riskTone(account.riskLevel))} /></TableCell>
-                <TableCell>{formatCurrency(account.monthlyFee)}</TableCell>
-                <TableCell>{account.expiresAt || '-'}</TableCell>
+                {accountView.visibleColumns.map((column, columnIndex) => (
+                  <TableCell key={column.id} sx={getFrozenColumnSx(accountView.visibleColumns, columnIndex, accountView.frozenColumnCount)}>
+                    {renderAccountCell(account, column.id)}
+                  </TableCell>
+                ))}
                 <TableCell>
                   <Tooltip title="查看详情"><IconButton size="small"><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
                   {canEditAssets ? <Tooltip title="编辑资料"><IconButton size="small" onClick={(event) => { event.stopPropagation(); openEditForm('account', account); }}><EditIcon fontSize="small" /></IconButton></Tooltip> : null}
                 </TableCell>
               </TableRow>
-            );
-          })}
+          ))}
         </TableBody>
       </Table>
       {renderPagination()}
@@ -976,18 +1246,35 @@ const AssetManagement: React.FC = () => {
   const primaryPhone = detail?.phone || detail?.relatedPhones[0];
   const primaryAccount = detail?.account || detail?.relatedAccounts[0];
 
-  const renderDetailPanel = () => {
-    if (!detail || activeTab === 'overview' || activeTab === 'logs') return null;
+  const renderDetailDialog = () => {
+    if (activeTab === 'overview' || activeTab === 'logs') return null;
+    const detailTitleMap: Record<AssetType, string> = {
+      device: '设备快照',
+      phone: '手机号快照',
+      account: '账号快照',
+    };
+    const detailDescriptionMap: Record<AssetType, string> = {
+      device: '当前设备 + 绑定手机号 + 关联账号 + 风险 + 最近操作日志',
+      phone: '当前手机号 + 所属设备 + 关联账号 + 风险 + 最近操作日志',
+      account: '当前账号 + 绑定手机号 + 所属设备 + 风险 + 最近操作日志',
+    };
     return (
-      <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, mt: 2, bgcolor: '#fff', overflow: 'hidden' }}>
-        <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', lg: 'center' }} justifyContent="space-between" sx={{ px: 2, py: 1.5, borderBottom: `1px solid ${shell.softLine}` }}>
+      <Dialog
+        open={detailDialogOpen}
+        onClose={closeDetailDialog}
+        maxWidth="lg"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: 1, overflow: 'hidden' } }}
+      >
+        <DialogTitle sx={{ p: 0 }}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between" sx={{ px: 2.25, py: 1.75, borderBottom: `1px solid ${shell.softLine}` }}>
           <Box>
-            <Typography sx={{ fontWeight: 900 }}>关联追溯</Typography>
+            <Typography sx={{ fontWeight: 900 }}>{detail ? detailTitleMap[detail.type] : '资产快照'}</Typography>
             <Typography variant="caption" sx={{ color: shell.muted }}>
-              当前资产 + 关联手机号 + 关联账号 + 风险 + 最近操作日志
+              {detail ? detailDescriptionMap[detail.type] : '资产关联链路、风险与最近操作日志'}
             </Typography>
           </Box>
-          {canEditAssets ? (
+          {canEditAssets && detail ? (
             <Button
               size="small"
               variant="contained"
@@ -1002,7 +1289,14 @@ const AssetManagement: React.FC = () => {
             </Button>
           ) : null}
         </Stack>
-        <Box sx={{ p: 2, display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '1.4fr 1fr' }, gap: 2 }}>
+        </DialogTitle>
+        <DialogContent sx={{ bgcolor: '#F8FAFC', p: 2 }}>
+          {!detail ? (
+            <Box sx={{ py: 6, textAlign: 'center' }}>
+              <Typography sx={{ color: shell.muted, fontWeight: 800 }}>正在加载资产详情</Typography>
+            </Box>
+          ) : (
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '1.4fr 1fr' }, gap: 2 }}>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 28px 1fr 28px 1fr' }, gap: 1, alignItems: 'stretch' }}>
             {renderTraceNode('设备资产', primaryDevice ? `${primaryDevice.deviceCode} ${primaryDevice.deviceName}` : '未关联设备', primaryDevice?.department || '-')}
             {renderTraceArrow()}
@@ -1035,7 +1329,12 @@ const AssetManagement: React.FC = () => {
             </Paper>
           </Box>
         </Box>
-      </Paper>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 2.25, py: 1.5, borderTop: `1px solid ${shell.softLine}` }}>
+          <Button onClick={closeDetailDialog}>关闭</Button>
+        </DialogActions>
+      </Dialog>
     );
   };
 
@@ -1152,15 +1451,38 @@ const AssetManagement: React.FC = () => {
         <Select
           label="所属设备"
           value={formState.values.deviceId || ''}
-          onChange={(event) => updateFormValue('deviceId', event.target.value)}
+          onChange={(event) => {
+            const nextDeviceId = event.target.value;
+            const nextSlots = phoneSlotOptionsForDevice(nextDeviceId);
+            setFormState((current) => ({
+              ...current,
+              values: {
+                ...current.values,
+                deviceId: nextDeviceId,
+                slotType: nextSlots.includes(current.values.slotType) ? current.values.slotType : nextSlots[0],
+              },
+            }));
+          }}
         >
           <MenuItem value="">未选择</MenuItem>
           {lookupDevices.map((device) => (
-            <MenuItem key={device.id} value={device.id}>{device.deviceCode} / {device.deviceName}</MenuItem>
+            <MenuItem key={device.id} value={device.id}>{device.deviceCode} / {device.deviceName} / {device.simType}</MenuItem>
           ))}
         </Select>
       </FormControl>
-      {renderSelectField('slotType', 'SIM卡槽', ['卡槽1', '卡槽2'], { required: true })}
+      <FormControl size="small" fullWidth required disabled={!formState.values.deviceId}>
+        <InputLabel>SIM卡槽</InputLabel>
+        <Select
+          label="SIM卡槽"
+          value={phoneSlotOptionsForDevice(formState.values.deviceId).includes(formState.values.slotType) ? formState.values.slotType : ''}
+          onChange={(event) => updateFormValue('slotType', event.target.value)}
+        >
+          {phoneSlotOptionsForDevice(formState.values.deviceId).map((option) => <MenuItem key={option} value={option}>{option}</MenuItem>)}
+        </Select>
+        <Typography variant="caption" sx={{ color: shell.muted, mt: 0.5 }}>
+          单卡设备仅支持卡槽1，双卡设备支持卡槽1/卡槽2。
+        </Typography>
+      </FormControl>
       {renderTextField('packageName', '套餐')}
       {renderTextField('monthlyFee', '月费用', { type: 'number' })}
       {renderTextField('owner', '负责人')}
@@ -1308,7 +1630,12 @@ const AssetManagement: React.FC = () => {
   };
 
   const renderFormDialog = () => {
-    const title = formState.mode === 'edit' ? '编辑资产资料' : '新增资产';
+    const formTypeLabel: Record<AssetFormType, string> = {
+      device: '设备资产',
+      phone: '手机号资产',
+      account: '互联网账号',
+    };
+    const title = formState.mode === 'edit' ? `编辑${formTypeLabel[formState.type]}` : `新增${formTypeLabel[formState.type]}`;
     return (
       <Dialog open={formState.open} onClose={closeForm} maxWidth="md" fullWidth>
         <DialogTitle sx={{ fontWeight: 900, pb: 1 }}>
@@ -1316,12 +1643,11 @@ const AssetManagement: React.FC = () => {
         </DialogTitle>
         <DialogContent dividers sx={{ bgcolor: '#FBFCFE' }}>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 1.5, pt: 0.5 }}>
-            <FormControl size="small" fullWidth disabled={formState.mode === 'edit'}>
+            <FormControl size="small" fullWidth disabled>
               <InputLabel>资产类型</InputLabel>
               <Select
                 label="资产类型"
                 value={formState.type}
-                onChange={(event) => openCreateForm(event.target.value as AssetFormType)}
               >
                 <MenuItem value="device">设备资产</MenuItem>
                 <MenuItem value="phone">手机号资产</MenuItem>
@@ -1342,6 +1668,27 @@ const AssetManagement: React.FC = () => {
     );
   };
 
+  const renderViewSettingsDialog = () => {
+    if (!viewSettingsOpen || !activeAssetView) return null;
+    return (
+      <TableViewSettingsDialog
+        open={Boolean(viewSettingsOpen)}
+        title={ASSET_VIEW_TITLES[viewSettingsOpen]}
+        description={ASSET_VIEW_DESCRIPTIONS[viewSettingsOpen]}
+        columns={activeAssetView.columns}
+        visibleColumnIds={activeAssetView.view.visibleColumnIds}
+        columnOrder={activeAssetView.view.viewConfig.columnOrder}
+        frozenColumnCount={activeAssetView.view.frozenColumnCount}
+        maxFrozenColumnCount={activeAssetView.view.visibleColumns.length}
+        onClose={() => setViewSettingsOpen(null)}
+        onToggleColumn={activeAssetView.view.toggleColumn}
+        onReorderColumn={activeAssetView.view.reorderColumn}
+        onFrozenColumnCountChange={activeAssetView.view.setFrozenColumnCount}
+        onReset={activeAssetView.view.resetViewConfig}
+      />
+    );
+  };
+
   return (
     <ModulePage>
       <ModuleHeader
@@ -1349,7 +1696,7 @@ const AssetManagement: React.FC = () => {
         description="管理设备、手机号与互联网账号，追溯归属、风险与离职回收。"
         actions={(
           <>
-            {canImportExport ? (
+            {canImportExport && isConfigurableAssetTab(activeTab) ? (
               <>
                 <Button variant="outlined" startIcon={<FileUploadIcon />} onClick={openImportDialog}>
                   导入
@@ -1359,9 +1706,14 @@ const AssetManagement: React.FC = () => {
                 </Button>
               </>
             ) : null}
-            {canEditAssets ? (
-              <Button variant="contained" startIcon={<AddIcon />} onClick={() => openCreateForm()}>
-                新增资产
+            {isConfigurableAssetTab(activeTab) ? (
+              <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(activeTab)}>
+                视图设置
+              </Button>
+            ) : null}
+            {canEditAssets && isConfigurableAssetTab(activeTab) ? (
+              <Button variant="contained" startIcon={<AddIcon />} onClick={() => openCreateForm(ASSET_CREATE_TYPES[activeTab])}>
+                {ASSET_CREATE_LABELS[activeTab]}
               </Button>
             ) : null}
           </>
@@ -1372,9 +1724,10 @@ const AssetManagement: React.FC = () => {
       </ModuleTabs>
       {renderToolbar()}
       {renderActiveTable()}
-      {renderDetailPanel()}
+      {renderDetailDialog()}
       {renderImportDialog()}
       {renderFormDialog()}
+      {renderViewSettingsDialog()}
       <Snackbar
         open={Boolean(snackbar)}
         autoHideDuration={2200}
