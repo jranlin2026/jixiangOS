@@ -21,7 +21,7 @@ import { applyCurrentLeadInputBy, getCurrentLeadInputName } from '../../shared/u
 import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
 import useAuthStore from '../../store/useAuthStore';
 import type { LeadFlowConfig } from '../../types/lead';
-import { getLeadAssignmentCandidates, sortLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
+import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 
 interface LeadFormProps {
   open: boolean;
@@ -93,7 +93,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     settingsApi.fetchLeadSourceConfigs().then((res) => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
     });
-    settingsApi.fetchUsers({ isActive: true }).then((res) => {
+    settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
     });
     leadFlowApi.fetchLeadFlowConfig().then((res) => {
@@ -128,15 +128,15 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
   }, [open, lead, sourceOptions, users]);
 
   const canAssignLeads = hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG);
-  const assignableUsers = sortLeadAssignmentCandidates(getLeadAssignmentCandidates(users, leadFlowConfig));
+  const assignableUsers = getScopedLeadAssignmentCandidates(users, leadFlowConfig, 'leads', currentUser);
   const selectedSourceKey = sourceOptions.find((option) => (
     option.parentName === form.source && option.childName === (form.sourceName || '')
   ))?.key || '';
   const assignmentHelpText = !canAssignLeads
     ? isEdit ? '当前角色无分配权限，保存时不会修改分配销售' : '当前角色无分配权限，入库后等待分配'
     : assignableUsers.length
-      ? '候选人来自线索流转参与成员；未单独配置时默认为全体在职员工'
-      : '暂无可分配成员，请到系统设置 > 客户设置 > 线索流转中添加参与成员';
+      ? '候选人来自线索流转参与成员，并按当前角色的数据范围过滤'
+      : '暂无可分配成员，请检查线索流转参与成员或当前角色的数据范围';
 
   const handleChange = (field: string) => (event: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [field]: event.target.value });

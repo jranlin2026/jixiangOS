@@ -34,7 +34,7 @@ import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
 import useCustomerStore from '../../store/useCustomerStore';
-import { customerApi, orderApi, settingsApi } from '../../api';
+import { customerApi, leadFlowApi, orderApi, settingsApi } from '../../api';
 import { CUSTOMER_LEVELS, ROUTES, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
@@ -43,6 +43,7 @@ import CustomerForm from './CustomerForm';
 import { formatPhoneForDisplay } from '../../shared/utils/phoneNumber';
 import OrderForm from '../Orders/OrderForm';
 import type { Customer, CustomerFilters } from '../../types/customer';
+import type { LeadFlowConfig } from '../../types/lead';
 import type { Order, OrderApplication } from '../../types/order';
 import type { CustomerLevelConfig, LifecycleStatusConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
@@ -50,7 +51,6 @@ import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDi
 import PermissionGate from '../../shared/auth/PermissionGate';
 import { PERMISSION_KEYS } from '../../shared/utils/permissions';
 import useAuthStore from '../../store/useAuthStore';
-import { filterUsersByCurrentDataScope } from '../../shared/utils/dataVisibility';
 import ResizableHeaderCell, {
   getResizableCellSx,
   readColumnWidths,
@@ -62,6 +62,7 @@ import ResizableHeaderCell, {
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import { ModuleHeader, ModulePage, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
+import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 
 type CustomerColumn = {
   id: string;
@@ -249,6 +250,7 @@ const Customers: React.FC = () => {
   const [ordersOpen, setOrdersOpen] = useState(false);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [leadFlowConfig, setLeadFlowConfig] = useState<LeadFlowConfig | null>(null);
   const [lifecycleConfigs, setLifecycleConfigs] = useState<LifecycleStatusConfig[]>([]);
   const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
@@ -279,10 +281,13 @@ const Customers: React.FC = () => {
       productLevel: undefined,
       lifecycleStatusCode: customerScope === 'public_pool' ? 'public_pool' : undefined,
     });
-    settingsApi.fetchUsers({ isActive: true }).then((res) => {
+    settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
       if (res.code === 0) {
         setUsers(res.data.filter((user) => user.isActive));
       }
+    });
+    leadFlowApi.fetchLeadFlowConfig().then((res) => {
+      if (res.code === 0) setLeadFlowConfig(res.data);
     });
     settingsApi.fetchLifecycleStatusConfigs().then((res) => {
       if (res.code === 0) setLifecycleConfigs(res.data);
@@ -290,7 +295,7 @@ const Customers: React.FC = () => {
     settingsApi.fetchCustomerLevelConfigs().then((res) => {
       if (res.code === 0) setCustomerLevelConfigs(res.data);
     });
-  }, [fetchItems]);
+  }, [currentUser?.id, fetchItems]);
 
   useEffect(() => {
     localStorage.setItem(CUSTOMER_VIEW_STORAGE_KEY, JSON.stringify(viewConfig));
@@ -314,7 +319,10 @@ const Customers: React.FC = () => {
     [orderedColumns, visibleColumnIds],
   );
   const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length);
-  const visibleOwnerUsers = useMemo(() => filterUsersByCurrentDataScope(users), [users]);
+  const visibleOwnerUsers = useMemo(
+    () => getScopedLeadAssignmentCandidates(users, leadFlowConfig, 'customers', currentUser),
+    [currentUser, leadFlowConfig, users],
+  );
   const isSuperAdmin = isSuperAdminRoleName(currentUser?.role);
   const isPublicPoolScope = customerScope === 'public_pool';
   const ownerFilterLabel = isPublicPoolScope ? '最后跟进人' : '销售负责人';
@@ -853,6 +861,11 @@ const Customers: React.FC = () => {
               label="新的销售负责人"
               onChange={(event) => setAssignOwner(event.target.value)}
             >
+              {visibleOwnerUsers.length === 0 && (
+                <MenuItem value="" disabled>
+                  当前角色数据范围内暂无可分配成员，请检查数据范围或线索流转参与成员配置。
+                </MenuItem>
+              )}
               {visibleOwnerUsers.map((user) => (
                 <MenuItem key={user.id} value={user.name}>{user.name}</MenuItem>
               ))}

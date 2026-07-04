@@ -60,7 +60,7 @@ import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import { ModuleHeader, ModulePage, ModuleTabs, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
-import { getLeadAssignmentCandidates, sortLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
+import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 
 type LeadColumn = {
   id: string;
@@ -281,7 +281,7 @@ const Leads: React.FC = () => {
     settingsApi.fetchLifecycleStatusConfigs().then((res) => {
       if (res.code === 0) setLifecycleConfigs(res.data);
     });
-    settingsApi.fetchUsers({ isActive: true }).then((res) => {
+    settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
     });
     leadFlowApi.fetchLeadFlowConfig().then((res) => {
@@ -290,7 +290,7 @@ const Leads: React.FC = () => {
     settingsApi.fetchLeadSourceConfigs().then((res) => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive && !item.parentId));
     });
-  }, [fetchItems]);
+  }, [currentUser?.id, fetchItems]);
 
   useEffect(() => {
     localStorage.setItem(LEAD_VIEW_STORAGE_KEY, JSON.stringify(viewConfig));
@@ -300,7 +300,7 @@ const Leads: React.FC = () => {
     writeColumnWidths(LEAD_WIDTH_STORAGE_KEY, columnWidths);
   }, [columnWidths]);
 
-  const assignableUsers = sortLeadAssignmentCandidates(getLeadAssignmentCandidates(users, leadFlowConfig));
+  const assignableUsers = getScopedLeadAssignmentCandidates(users, leadFlowConfig, 'leads', currentUser);
   const canViewLeadList = hasPermission(currentUser, PERMISSION_KEYS.LEADS_LIST);
   const canViewLeadIntake = hasPermission(currentUser, PERMISSION_KEYS.LEADS_INTAKE_STATUS);
   const canViewLeadDetail = hasPermission(currentUser, PERMISSION_KEYS.LEADS_DETAIL);
@@ -735,7 +735,7 @@ const Leads: React.FC = () => {
           >
             {assignableUsers.length === 0 && (
               <MenuItem value="" disabled>
-                暂无可分配成员，请到系统设置 &gt; 客户设置 &gt; 线索流转中添加参与成员
+                暂无可分配成员，请检查线索流转参与成员或当前角色的数据范围
               </MenuItem>
             )}
             {assignableUsers.map((user) => (

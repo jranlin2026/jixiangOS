@@ -19,7 +19,8 @@ import type { CustomerLevelConfig, LeadSourceConfig, User } from '../../types/se
 import { applyCurrentLeadInputBy, getCurrentLeadInputName } from '../../shared/utils/leadInputAttribution';
 import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
 import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution';
-import { getLeadAssignmentCandidates, sortLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
+import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
+import useAuthStore from '../../store/useAuthStore';
 
 interface CustomerFormProps {
   open: boolean;
@@ -38,6 +39,7 @@ type SourceOption = {
 
 const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, onSuccess }) => {
   const { create, update } = useCustomerStore();
+  const currentUser = useAuthStore((state) => state.currentUser);
   const isEdit = !!customer;
   const [users, setUsers] = useState<User[]>([]);
   const [leadFlowConfig, setLeadFlowConfig] = useState<LeadFlowConfig | null>(null);
@@ -74,8 +76,8 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
 
   const defaultOwner = useMemo(() => getCurrentLeadInputName(users[0]?.name || ''), [users]);
   const assignableUsers = useMemo(
-    () => sortLeadAssignmentCandidates(getLeadAssignmentCandidates(users, leadFlowConfig)),
-    [leadFlowConfig, users],
+    () => getScopedLeadAssignmentCandidates(users, leadFlowConfig, 'customers', currentUser),
+    [currentUser, leadFlowConfig, users],
   );
   const customerLevelOptions = useMemo(() => {
     const activeConfigs = customerLevelConfigs.filter((item) => item.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
@@ -111,7 +113,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   useEffect(() => {
     if (!open) return;
 
-    settingsApi.fetchUsers({ isActive: true }).then((res) => {
+    settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
     });
     leadFlowApi.fetchLeadFlowConfig().then((res) => {
@@ -297,9 +299,14 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
             onChange={handleChange('owner')}
             required
             fullWidth
-            helperText={assignableUsers.length ? '候选人来自线索流转参与成员；未单独配置时默认全体在职员工' : '暂无可分配成员，请到系统设置 > 客户设置 > 线索流转中添加参与成员'}
+            helperText={assignableUsers.length ? '候选人来自线索流转参与成员，并按当前角色的数据范围过滤' : '暂无可分配成员，请检查线索流转参与成员或当前角色的数据范围'}
           >
             {shouldShowCurrentOwnerOption && <MenuItem value={form.owner}>{form.owner}</MenuItem>}
+            {assignableUsers.length === 0 && (
+              <MenuItem value="" disabled>
+                当前角色数据范围内暂无可分配成员，请检查数据范围或线索流转参与成员配置。
+              </MenuItem>
+            )}
             {ownerOptions}
           </TextField>
           <TextField select label="客户等级" value={form.customerLevel} onChange={handleChange('customerLevel')} fullWidth>

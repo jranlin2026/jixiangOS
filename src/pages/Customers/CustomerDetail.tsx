@@ -38,7 +38,7 @@ import { formatPhoneForDisplay, getPhoneNumberError, normalizePhoneForStorage } 
 import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution';
 import PermissionGate from '../../shared/auth/PermissionGate';
 import { PERMISSION_KEYS } from '../../shared/utils/permissions';
-import { getLeadAssignmentCandidates, sortLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
+import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 
 interface CustomerDetailProps {
   customer: Customer;
@@ -165,7 +165,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
 
   useEffect(() => {
     if (!open) return;
-    settingsApi.fetchUsers({ isActive: true }).then((res) => {
+    settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
       if (res.code === 0) {
         setUsers(res.data.filter((user) => user.isActive));
       }
@@ -251,8 +251,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     return options;
   }, [currentCustomer.customerLevel, customerLevelConfigs]);
   const assignableUsers = useMemo(
-    () => sortLeadAssignmentCandidates(getLeadAssignmentCandidates(users, leadFlowConfig)),
-    [leadFlowConfig, users],
+    () => getScopedLeadAssignmentCandidates(users, leadFlowConfig, 'customers', currentUser),
+    [currentUser, leadFlowConfig, users],
   );
 
   const handleSourceSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -527,6 +527,11 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               >
                 {field === 'originalSalesTransferBy' && <MenuItem value="">无</MenuItem>}
                 {showCurrentUserOption && <MenuItem value={currentValue}>{currentValue}</MenuItem>}
+                {field === 'owner' && userFieldOptions.length === 0 && (
+                  <MenuItem value="" disabled>
+                    当前角色数据范围内暂无可分配成员，请检查数据范围或线索流转参与成员配置。
+                  </MenuItem>
+                )}
                 {userFieldOptions.map((user) => (
                   <MenuItem key={user.id} value={user.name}>
                     {user.name}（{user.positionName || '未设置职位'}）

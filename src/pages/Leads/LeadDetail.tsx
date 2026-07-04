@@ -29,7 +29,7 @@ import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils
 import { canCompleteContactField } from '../../shared/utils/contactEditLock';
 import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
 import { formatPhoneForDisplay, getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
-import { getLeadAssignmentCandidates, sortLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
+import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 
 interface LeadDetailProps {
   lead: Lead;
@@ -148,7 +148,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
 
   useEffect(() => {
     if (!open) return;
-    settingsApi.fetchUsers({ isActive: true }).then((res) => {
+    settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
     });
     leadFlowApi.fetchLeadFlowConfig().then((res) => {
@@ -209,7 +209,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   const canClaimLead = !currentLead.customerId && hasPermission(currentUser, PERMISSION_KEYS.LEADS_FOLLOW);
   const canEditProfile = canEditLeadProfile(currentLead);
   const canAssignLead = !currentLead.customerId && hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG);
-  const assignableUsers = sortLeadAssignmentCandidates(getLeadAssignmentCandidates(users, leadFlowConfig));
+  const assignableUsers = getScopedLeadAssignmentCandidates(users, leadFlowConfig, 'leads', currentUser);
   const canEditLockedContact = isSuperAdmin(currentUser);
 
   const handleDraftChange = (field: keyof LeadDraft) => (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -410,6 +410,11 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
               <TextField select value={currentValue} onChange={handleDraftChange(field)} size="small" fullWidth>
                 {showCurrentUserOption && <MenuItem value={currentValue}>{currentValue}</MenuItem>}
                 {field === 'assignedTo' && <MenuItem value="待分配">待分配</MenuItem>}
+                {field === 'assignedTo' && userFieldOptions.length === 0 && (
+                  <MenuItem value="" disabled>
+                    当前角色数据范围内暂无可分配成员，请检查数据范围或线索流转参与成员配置。
+                  </MenuItem>
+                )}
                 {userFieldOptions.map((user) => (
                   <MenuItem key={user.id} value={user.name}>
                     {user.name}（{user.positionName || '未设置职位'}）
@@ -580,7 +585,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
         >
           {assignableUsers.length === 0 && (
             <MenuItem value="" disabled>
-              暂无可分配成员，请到系统设置 &gt; 客户设置 &gt; 线索流转中添加参与成员
+              暂无可分配成员，请检查线索流转参与成员或当前角色的数据范围
             </MenuItem>
           )}
           {assignableUsers.map((user) => (

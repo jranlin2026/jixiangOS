@@ -48,6 +48,8 @@ const requireStorageAccess = createRequireAuth(authService);
 const requireAiChatAccess = createRequireAuth(authService, PERMISSION_KEYS.AI_CHAT);
 const requireCustomerAiCardAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_AI_CARD);
 const assignableUsersPermissions = [
+  PERMISSION_KEYS.LEADS_FLOW_CONFIG,
+  PERMISSION_KEYS.CUSTOMER_ASSIGN,
   PERMISSION_KEYS.FINANCE_SETTLEMENT,
   PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT,
   PERMISSION_KEYS.FINANCE_PAYOUT,

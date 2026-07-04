@@ -6,6 +6,7 @@ import { orderApi } from './orderApi';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { PERMISSION_KEYS } from '../shared/utils/permissions';
+import { filterUsersByCurrentDataScope } from '../shared/utils/dataVisibility';
 
 const storage = (() => {
   const values = new Map<string, string>();
@@ -31,6 +32,7 @@ const now = new Date().toISOString();
 const users = [
   { id: 'user-sales-a', name: 'Sales A', account: 'sales_a', email: 'a@test.local', phone: '', role: 'Sales Consultant', roleId: 'role-sales', departmentId: 'dept-sales', isActive: true, createdAt: now, updatedAt: now },
   { id: 'user-sales-b', name: 'Sales B', account: 'sales_b', email: 'b@test.local', phone: '', role: 'Sales Consultant', roleId: 'role-sales', departmentId: 'dept-sales', isActive: true, createdAt: now, updatedAt: now },
+  { id: 'user-sales-child', name: 'Sales Child', account: 'sales_child', email: 'child@test.local', phone: '', role: 'Sales Consultant', roleId: 'role-sales', departmentId: 'dept-sales-child', isActive: true, createdAt: now, updatedAt: now },
   { id: 'user-sales-other', name: 'Other Sales', account: 'sales_other', email: 'other@test.local', phone: '', role: 'Sales Consultant', roleId: 'role-sales', departmentId: 'dept-other', isActive: true, createdAt: now, updatedAt: now },
   { id: 'user-manager', name: 'Sales Manager', account: 'manager', email: 'manager@test.local', phone: '', role: 'Sales Manager', roleId: 'role-manager', departmentId: 'dept-sales', isActive: true, createdAt: now, updatedAt: now },
   { id: 'user-finance', name: 'Finance A', account: 'finance', email: 'finance@test.local', phone: '', role: 'Finance Specialist', roleId: 'role-finance', departmentId: 'dept-finance', isActive: true, createdAt: now, updatedAt: now },
@@ -49,6 +51,7 @@ const roles = [
 
 const departments = [
   { id: 'dept-sales', name: 'Sales', code: 'SALES', managerId: 'user-manager', memberCount: 3, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'dept-sales-child', name: 'Sales Child', code: 'SALES_CHILD', parentId: 'dept-sales', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
   { id: 'dept-other', name: 'Other', code: 'OTHER', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
   { id: 'dept-finance', name: 'Finance', code: 'FINANCE', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
   { id: 'dept-admin', name: 'Admin', code: 'ADMIN', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
@@ -137,6 +140,13 @@ assert.equal((await orderApi.fetchOrderById('order-other')).data, null);
 
 resetData('user-manager');
 const managerScope = await idsForCurrentUser();
+assert.deepEqual(filterUsersByCurrentDataScope(users).map((user) => user.id), ['user-sales-a', 'user-sales-b', 'user-sales-child', 'user-manager']);
+storage.removeItem(AUTH_SESSION_STORAGE_KEY);
+assert.deepEqual(
+  filterUsersByCurrentDataScope(users, 'customers', users.find((user) => user.id === 'user-manager')).map((user) => user.id),
+  ['user-sales-a', 'user-sales-b', 'user-sales-child', 'user-manager'],
+);
+resetData('user-manager');
 assert.deepEqual(managerScope.customers, ['cust-a', 'cust-b']);
 assert.deepEqual(managerScope.publicCustomers, ['cust-public']);
 assert.deepEqual(managerScope.leads, ['lead-input-a', 'lead-assigned-a', 'lead-b']);

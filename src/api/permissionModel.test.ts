@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { authApi, roleApi, settingsApi } from './index';
 import { DEFAULT_USER_PASSWORD } from '../shared/utils/auth';
 import { STORAGE_KEYS } from '../shared/utils/constants';
-import { DEFAULT_ROLES } from '../shared/utils/organizationConfig';
+import { DEFAULT_ROLES, mergeRoleWithDefaultAccess } from '../shared/utils/organizationConfig';
 import { CAPABILITY_KEYS, canReceiveLead, hasPermission, PERMISSION_KEYS, roleHasPermission, sanitizeRolePermissions, toAuthenticatedUser } from '../shared/utils/permissions';
 import type { Role } from '../types/role';
 
@@ -93,6 +93,13 @@ assert.equal(roleHasPermission(defaultFinanceRole, PERMISSION_KEYS.FINANCE_RECOV
 
 const defaultSalesRole = DEFAULT_ROLES.find((role) => role.code === 'sales_consultant');
 assert.ok(defaultSalesRole);
+const savedSalesRoleWithoutLeadActions = mergeRoleWithDefaultAccess({
+  ...defaultSalesRole,
+  permissions: [{ module: PERMISSION_KEYS.LEADS_DETAIL, actions: ['read'] }],
+});
+assert.equal(roleHasPermission(savedSalesRoleWithoutLeadActions, PERMISSION_KEYS.LEADS_DETAIL), true);
+assert.equal(roleHasPermission(savedSalesRoleWithoutLeadActions, PERMISSION_KEYS.LEADS_CREATE), false);
+assert.equal(roleHasPermission(savedSalesRoleWithoutLeadActions, PERMISSION_KEYS.LEADS_FLOW_CONFIG), false);
 const authenticatedSales = toAuthenticatedUser({
   id: 'user-sales-assets',
   name: 'Sales Assets',

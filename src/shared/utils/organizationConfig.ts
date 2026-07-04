@@ -294,19 +294,6 @@ export function normalizeRoleDataScopes(role: Pick<Role, 'code'> & { dataScopes?
   }, { ...defaults });
 }
 
-function mergePermissions(existing: Role['permissions'] = [], required: Role['permissions'] = []): Role['permissions'] {
-  const merged = [...existing];
-  required.forEach((permission) => {
-    const found = merged.find((item) => item.module === permission.module);
-    if (!found) {
-      merged.push(permission);
-      return;
-    }
-    found.actions = Array.from(new Set([...(found.actions || []), ...permission.actions]));
-  });
-  return sanitizeRolePermissions(merged);
-}
-
 function stripLeadSalesAssignmentPermissions(permissions: Role['permissions'] = []): Role['permissions'] {
   const blocked = new Set<string>([
     PERMISSION_KEYS.LEADS,
@@ -335,18 +322,9 @@ export function mergeRoleWithDefaultAccess(role: Role): Role {
     || item.name === role.name
   ));
   const code = seed?.code || role.code;
-  const permissions = !seed
-    ? sanitizeRolePermissions(role.permissions)
-    : seed.code === 'super_admin'
-      ? seed.permissions
-      : mergePermissions(
-        normalizeDefaultAssetSelfServicePermissions(
-          seed.code === 'market_specialist'
-            ? stripLeadSalesAssignmentPermissions(role.permissions)
-            : role.permissions,
-        ),
-        seed.permissions,
-      );
+  const permissions = seed?.code === 'super_admin'
+    ? seed.permissions
+    : sanitizeRolePermissions(normalizeDefaultAssetSelfServicePermissions(role.permissions));
 
   return {
     ...role,
@@ -482,12 +460,14 @@ export function ensureOrganizationConfigData() {
       departmentId: departmentResult.idMap[current.departmentId || ''] || seed.departmentId,
       permissions: seed.code === 'super_admin'
         ? seed.permissions
-        : mergePermissions(
-          seed.code === 'market_specialist'
-            ? stripLeadSalesAssignmentPermissions(current.permissions)
-            : current.permissions,
-          seed.permissions,
-        ),
+        : sanitizeRolePermissions(normalizeDefaultAssetSelfServicePermissions(
+          [
+            ...(seed.code === 'market_specialist'
+              ? stripLeadSalesAssignmentPermissions(current.permissions)
+              : current.permissions),
+            ...seed.permissions,
+          ],
+        )),
       isActive: seed.code === 'super_admin' ? true : (current.isActive ?? seed.isActive),
       createdAt: current.createdAt || seed.createdAt,
       updatedAt: new Date().toISOString(),

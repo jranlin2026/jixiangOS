@@ -9,7 +9,7 @@ import type { User } from '../../types/settings';
 import { AUTH_SESSION_STORAGE_KEY } from './auth';
 import { LIFECYCLE_STATUS_CODES, STORAGE_KEYS, normalizeLifecycleStatusCode } from './constants';
 import { canReceiveLead, getUserRole, isSuperAdminUser } from './permissions';
-import { ensureOrganizationConfigData, normalizeRoleDataScopes } from './organizationConfig';
+import { ensureOrganizationConfigData, getDepartmentDescendantIds, normalizeRoleDataScopes } from './organizationConfig';
 
 export interface DataVisibilityScope {
   unrestricted: boolean;
@@ -20,6 +20,8 @@ export interface DataVisibilityScope {
   canViewPublicPool: boolean;
   roleCode?: string;
 }
+
+type ScopeUser = Pick<User, 'id' | 'name' | 'role' | 'roleId' | 'departmentId' | 'isActive'> & Partial<Pick<User, 'account' | 'employmentStatus'>>;
 
 function readLocalStorageJson<T>(key: string): T | null {
   if (typeof localStorage === 'undefined') return null;
@@ -74,27 +76,51 @@ function noAccessScope(): DataVisibilityScope {
   };
 }
 
-export function getCurrentDataVisibilityScope(domain: DataScopeDomain = 'customers'): DataVisibilityScope {
-  const session = readLocalStorageJson<AuthSession>(AUTH_SESSION_STORAGE_KEY);
-  if (!isSessionValid(session)) return noAccessScope();
+function activeScopeUsers(users: ScopeUser[], currentUser?: ScopeUser): ScopeUser[] {
+  const byId = new Map<string, ScopeUser>();
+  [...users, ...(currentUser ? [currentUser] : [])].forEach((user) => {
+    if (!user?.id) return;
+    if (!user.isActive || (user.employmentStatus || 'active') === 'left') return;
+    byId.set(user.id, user);
+  });
+  return Array.from(byId.values());
+}
 
-  const users = readLocalStorageJson<User[]>(STORAGE_KEYS.USERS) || [];
-  const roles = ensureOrganizationConfigData().roles;
-  const currentUser = users.find((user) => (
-    user.id === session.userId
-    && user.isActive
-    && (user.employmentStatus || 'active') === 'active'
-  ));
-  if (!currentUser) return noAccessScope();
+function hydrateScopeUserFromStorage(currentUser?: ScopeUser): ScopeUser | undefined {
+  if (!currentUser?.id) return currentUser;
+  const storedUsers = readLocalStorageJson<User[]>(STORAGE_KEYS.USERS) || [];
+  const storedUser = storedUsers.find((user) => user.id === currentUser.id);
+  if (!storedUser) return currentUser;
 
-  const roleCode = getRoleCode(currentUser, roles);
+  return {
+    ...storedUser,
+    ...currentUser,
+    account: currentUser.account || storedUser.account,
+    role: currentUser.role || storedUser.role,
+    roleId: currentUser.roleId || storedUser.roleId,
+    departmentId: currentUser.departmentId || storedUser.departmentId,
+    employmentStatus: currentUser.employmentStatus || storedUser.employmentStatus,
+  };
+}
+
+function buildDataVisibilityScopeForUser(
+  rawCurrentUser: ScopeUser | undefined,
+  users: ScopeUser[],
+  roles: Role[],
+  departments: Department[],
+  domain: DataScopeDomain,
+): DataVisibilityScope {
+  const currentUser = hydrateScopeUserFromStorage(rawCurrentUser);
+  if (!currentUser?.id || !currentUser.isActive || (currentUser.employmentStatus || 'active') === 'left') return noAccessScope();
+
+  const roleCode = getRoleCode(currentUser as User, roles);
   const role = getUserRole(currentUser, roles);
-  const activeUsers = users.filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active');
+  const activeUsers = activeScopeUsers(users, currentUser);
   if (isSuperAdminUser(currentUser, roles)) {
     return {
       unrestricted: true,
       dataScopeLevel: 'all',
-      currentUser,
+      currentUser: currentUser as User,
       visibleUserIds: activeUsers.map((user) => user.id),
       visibleUserNames: activeUsers.map((user) => user.name),
       canViewPublicPool: true,
@@ -103,11 +129,15 @@ export function getCurrentDataVisibilityScope(domain: DataScopeDomain = 'custome
   }
 
   const dataScopeLevel = normalizeRoleDataScopes(role || { code: roleCode })[domain];
-  let visibleUsers: User[];
+  let visibleUsers: ScopeUser[];
   if (dataScopeLevel === 'all') {
     visibleUsers = activeUsers;
   } else if (dataScopeLevel === 'department' && currentUser.departmentId) {
-    visibleUsers = activeUsers.filter((user) => user.departmentId === currentUser.departmentId);
+    const visibleDepartmentIds = new Set([
+      currentUser.departmentId,
+      ...getDepartmentDescendantIds(departments, currentUser.departmentId),
+    ]);
+    visibleUsers = activeUsers.filter((user) => Boolean(user.departmentId && visibleDepartmentIds.has(user.departmentId)));
   } else {
     visibleUsers = [currentUser];
   }
@@ -115,12 +145,28 @@ export function getCurrentDataVisibilityScope(domain: DataScopeDomain = 'custome
   return {
     unrestricted: dataScopeLevel === 'all',
     dataScopeLevel,
-    currentUser,
+    currentUser: currentUser as User,
     visibleUserIds: unique(visibleUsers.map((user) => user.id).filter(Boolean)),
     visibleUserNames: unique(visibleUsers.map((user) => user.name).filter(Boolean)),
-    canViewPublicPool: isSalesDataRole(currentUser, roles),
+    canViewPublicPool: dataScopeLevel === 'all' || (domain === 'customers' && isSalesDataRole(currentUser as User, roles)),
     roleCode,
   };
+}
+
+export function getCurrentDataVisibilityScope(domain: DataScopeDomain = 'customers'): DataVisibilityScope {
+  const session = readLocalStorageJson<AuthSession>(AUTH_SESSION_STORAGE_KEY);
+  if (!isSessionValid(session)) return noAccessScope();
+
+  const users = readLocalStorageJson<User[]>(STORAGE_KEYS.USERS) || [];
+  const organizationConfig = ensureOrganizationConfigData();
+  const roles = organizationConfig.roles;
+  const departments = organizationConfig.departments || [];
+  const currentUser = users.find((user) => (
+    user.id === session.userId
+    && user.isActive
+    && (user.employmentStatus || 'active') === 'active'
+  ));
+  return buildDataVisibilityScopeForUser(currentUser, users, roles, departments, domain);
 }
 
 function hasVisibleName(scope: DataVisibilityScope, value?: string): boolean {
@@ -133,13 +179,19 @@ function hasVisibleId(scope: DataVisibilityScope, value?: string): boolean {
   return Boolean(text && scope.visibleUserIds.includes(text));
 }
 
-export function isUserVisibleInCurrentDataScope(user: User): boolean {
-  const scope = getCurrentDataVisibilityScope();
+export function isUserVisibleInCurrentDataScope(user: User, domain: DataScopeDomain = 'customers', currentUser?: ScopeUser): boolean {
+  const { roles, departments } = ensureOrganizationConfigData();
+  const scope = currentUser
+    ? buildDataVisibilityScopeForUser(currentUser, [user], roles, departments || [], domain)
+    : getCurrentDataVisibilityScope(domain);
   return scope.unrestricted || hasVisibleId(scope, user.id) || hasVisibleName(scope, user.name);
 }
 
-export function filterUsersByCurrentDataScope(users: User[]): User[] {
-  const scope = getCurrentDataVisibilityScope();
+export function filterUsersByCurrentDataScope(users: User[], domain: DataScopeDomain = 'customers', currentUser?: ScopeUser): User[] {
+  const { roles, departments } = ensureOrganizationConfigData();
+  const scope = currentUser
+    ? buildDataVisibilityScopeForUser(currentUser, users, roles, departments || [], domain)
+    : getCurrentDataVisibilityScope(domain);
   if (scope.unrestricted) return users;
   return users.filter((user) => hasVisibleId(scope, user.id) || hasVisibleName(scope, user.name));
 }

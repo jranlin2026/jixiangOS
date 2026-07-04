@@ -1,6 +1,8 @@
+import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import type { ApiResponse } from './types';
 
 const BACKEND_SESSION_KEY = 'aaos_backend_auth_token';
+const LOCAL_ONLY_STORAGE_KEYS = new Set([AUTH_SESSION_STORAGE_KEY, BACKEND_SESSION_KEY]);
 
 function readEnv(name: string): string | undefined {
   const viteEnv = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
@@ -92,6 +94,10 @@ function isStorageKeyProtectedFromHydration(key: string): boolean {
   return false;
 }
 
+function isLocalOnlyStorageKey(key: string): boolean {
+  return LOCAL_ONLY_STORAGE_KEYS.has(key);
+}
+
 export async function syncBackendStorageFromServer(maxAgeMs = 1000): Promise<void> {
   if (!shouldUseBackendApi() || typeof localStorage === 'undefined') return;
   if (Date.now() - storageHydratedAt < maxAgeMs) return;
@@ -101,6 +107,7 @@ export async function syncBackendStorageFromServer(maxAgeMs = 1000): Promise<voi
     .then((response) => {
       if (response.code !== 0 || !response.data) return;
       Object.entries(response.data).forEach(([key, value]) => {
+        if (isLocalOnlyStorageKey(key)) return;
         if (isStorageKeyProtectedFromHydration(key)) return;
         localStorage.setItem(key, JSON.stringify(value));
       });
@@ -118,6 +125,7 @@ export async function syncBackendStorageFromServer(maxAgeMs = 1000): Promise<voi
 
 export function persistBackendStorageValue(key: string, value: unknown): void {
   if (!shouldUseBackendApi()) return;
+  if (isLocalOnlyStorageKey(key)) return;
   pendingStorageWriteKeys.add(key);
   protectStorageKeyFromHydration(key);
   const writePromise = backendRequest(`/storage/${encodeURIComponent(key)}`, {
@@ -136,6 +144,7 @@ export function persistBackendStorageValue(key: string, value: unknown): void {
 
 export function removeBackendStorageValue(key: string): void {
   if (!shouldUseBackendApi()) return;
+  if (isLocalOnlyStorageKey(key)) return;
   pendingStorageWriteKeys.add(key);
   protectStorageKeyFromHydration(key);
   const writePromise = backendRequest(`/storage/${encodeURIComponent(key)}`, {

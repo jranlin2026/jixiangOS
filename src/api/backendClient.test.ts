@@ -8,6 +8,7 @@ import {
   writeBackendToken,
 } from './backendClient';
 import { initializeStorage } from './mock/storage';
+import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 
 const originalFetch = globalThis.fetch;
@@ -128,6 +129,53 @@ try {
 
   assert.deepEqual(JSON.parse(storage.get(STORAGE_KEYS.RECOVERY_ORDERS) || '[]'), [{ id: 'server-recovery-order' }]);
   assert.deepEqual(writeRequests, []);
+
+  globalThis.fetch = async () => ({
+    status: 200,
+    headers: new Headers({ 'content-type': 'application/json' }),
+    text: async () => JSON.stringify({
+      code: 0,
+      data: {
+        [AUTH_SESSION_STORAGE_KEY]: {
+          token: 'backend-user-admin',
+          userId: 'user-admin',
+          remember: true,
+        },
+        aaos_backend_auth_token: 'stale-backend-token',
+        [STORAGE_KEYS.CUSTOMERS]: [{ id: 'server-customer' }],
+      },
+      message: 'success',
+    }),
+  } as Response);
+  storage.set(AUTH_SESSION_STORAGE_KEY, JSON.stringify({
+    token: 'backend-user-sales',
+    userId: 'user-sales',
+    remember: true,
+  }));
+  storage.set('aaos_backend_auth_token', 'current-backend-token');
+
+  await syncBackendStorageFromServer(0);
+
+  assert.equal(JSON.parse(storage.get(AUTH_SESSION_STORAGE_KEY) || '{}').userId, 'user-sales');
+  assert.equal(storage.get('aaos_backend_auth_token'), 'current-backend-token');
+  assert.deepEqual(JSON.parse(storage.get(STORAGE_KEYS.CUSTOMERS) || '[]'), [{ id: 'server-customer' }]);
+
+  const localOnlyWriteRequests: string[] = [];
+  globalThis.fetch = async (url, init) => {
+    if (init?.method === 'PUT' || init?.method === 'DELETE') {
+      localOnlyWriteRequests.push(String(url));
+    }
+    return {
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      text: async () => JSON.stringify({ code: 0, data: true, message: 'success' }),
+    } as Response;
+  };
+
+  persistBackendStorageValue(AUTH_SESSION_STORAGE_KEY, { userId: 'user-admin' });
+  persistBackendStorageValue('aaos_backend_auth_token', 'stale-token');
+
+  assert.deepEqual(localOnlyWriteRequests, []);
 } finally {
   clearBackendToken();
   globalThis.fetch = originalFetch;
