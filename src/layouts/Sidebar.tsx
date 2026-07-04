@@ -23,6 +23,7 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import SupportAgentIcon from '@mui/icons-material/SupportAgent';
 import PaidIcon from '@mui/icons-material/Paid';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
+import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import SettingsIcon from '@mui/icons-material/Settings';
 import HomeIcon from '@mui/icons-material/Home';
@@ -128,6 +129,18 @@ const navItems: NavItem[] = [
       PERMISSION_KEYS.ASSETS_RISKS,
       PERMISSION_KEYS.ASSETS_LOGS,
       PERMISSION_KEYS.ASSETS_OFFBOARDING,
+    ],
+  },
+  {
+    label: 'GEO增长中心',
+    icon: <TravelExploreIcon />,
+    path: ROUTES.GEO,
+    permissionKey: PERMISSION_KEYS.GEO,
+    permissionKeys: [
+      PERMISSION_KEYS.GEO,
+      PERMISSION_KEYS.GEO_OVERVIEW,
+      PERMISSION_KEYS.GEO_CONTENT,
+      PERMISSION_KEYS.GEO_ANALYTICS,
     ],
   },
   { label: 'AI助手', icon: <SmartToyIcon />, path: ROUTES.AI_ASSISTANT, permissionKey: PERMISSION_KEYS.AI_ASSISTANT },

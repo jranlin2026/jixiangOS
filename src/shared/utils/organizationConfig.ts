@@ -127,6 +127,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.LEADS_INTAKE_STATUS, actions: ['read'] },
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
       { module: PERMISSION_KEYS.DASHBOARD, actions: ['read'] },
+      { module: PERMISSION_KEYS.GEO, actions: ['read', 'write'] },
       ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
     dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', assets: 'self' },
@@ -205,6 +206,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.SETTINGS_LIFECYCLE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.SETTINGS_LEAD_FLOW, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.GEO, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ASSETS, actions: ['read', 'write'] },
     ],
     dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', assets: 'all' },
@@ -308,11 +310,18 @@ function stripLeadSalesAssignmentPermissions(permissions: Role['permissions'] = 
 }
 
 function normalizeDefaultAssetSelfServicePermissions(permissions: Role['permissions'] = []): Role['permissions'] {
-  return permissions.map((permission) => (
+  const hasAssetSelfServicePermission = permissions.some((permission) => ASSET_SELF_SERVICE_PERMISSION_KEYS.has(permission.module));
+  const normalized = permissions.map((permission) => (
     ASSET_SELF_SERVICE_PERMISSION_KEYS.has(permission.module)
       ? { ...permission, actions: ['read'] }
       : permission
   ));
+  if (!hasAssetSelfServicePermission) return normalized;
+  const existingModules = new Set(normalized.map((permission) => permission.module));
+  return [
+    ...normalized,
+    ...ASSET_SELF_SERVICE_PERMISSIONS.filter((permission) => !existingModules.has(permission.module)),
+  ];
 }
 
 export function mergeRoleWithDefaultAccess(role: Role): Role {

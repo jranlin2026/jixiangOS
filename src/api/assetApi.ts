@@ -684,19 +684,16 @@ function relatedAccountsForDevice(deviceId: string): AssetInternetAccount[] {
   return accounts().filter((account) => account.phoneId && phoneIds.includes(account.phoneId));
 }
 
-function detailLogs(_type: AssetType, id: string): AssetOperationLog[] {
-  const targetType: Record<AssetType, string> = {
-    device: '设备资产',
-    phone: '手机号资产',
-    account: '互联网账号',
-  };
+function detailLogs(assetIds: string[]): AssetOperationLog[] {
+  const idSet = new Set(assetIds.filter(Boolean));
   return visibleLogs()
-    .filter((log) => log.targetId === id)
-    .slice(0, 5);
+    .filter((log) => idSet.has(log.targetId))
+    .slice(0, 12);
 }
 
-function detailRisks(type: AssetType, id: string): AssetRisk[] {
-  return visibleRisks().filter((risk) => risk.targetType === type && risk.targetId === id);
+function detailRisks(assetIds: string[]): AssetRisk[] {
+  const idSet = new Set(assetIds.filter(Boolean));
+  return visibleRisks().filter((risk) => idSet.has(risk.targetId));
 }
 
 async function fetchDashboard(): Promise<ApiResponse<AssetDashboard>> {
@@ -786,6 +783,40 @@ async function updateDevice(id: string, input: Partial<AssetDeviceInput>): Promi
   });
 }
 
+async function deleteDevice(id: string): Promise<ApiResponse<AssetDevice>> {
+  return guarded(() => {
+    const rows = devices();
+    const existing = rows.find((device) => device.id === id);
+    if (!existing) throw new Error('设备不存在');
+
+    const phoneIds = phones().filter((phone) => phone.deviceId === id).map((phone) => phone.id);
+    const relatedAccounts = accounts().filter((account) => account.phoneId && phoneIds.includes(account.phoneId));
+
+    setStorageData(STORAGE_KEYS.ASSET_DEVICES, rows.filter((device) => device.id !== id));
+    setStorageData(STORAGE_KEYS.ASSET_PHONE_NUMBERS, phones().filter((phone) => phone.deviceId !== id));
+    if (relatedAccounts.length) {
+      setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, accounts().map((account) => (
+        account.phoneId && phoneIds.includes(account.phoneId)
+          ? { ...account, phoneId: undefined, updatedAt: now() }
+          : account
+      )));
+    }
+    setStorageData(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, offboardingTasks().filter((task) => (
+      !(task.assetType === '设备资产' && task.assetId === id)
+      && !(task.assetType === '手机号资产' && phoneIds.includes(task.assetId))
+    )));
+    logAssetOperation(
+      '删除资产',
+      '设备资产',
+      existing.id,
+      existing.deviceName,
+      `删除设备 ${existing.deviceCode}，同步移除${phoneIds.length}个手机号，解绑${relatedAccounts.length}个账号`,
+    );
+    rebuildRisksAndOffboarding();
+    return existing;
+  });
+}
+
 async function fetchPhoneNumbers(filters?: AssetFilters): Promise<ApiResponse<PaginatedResponse<AssetPhoneNumber>>> {
   ensureInit();
   await delay(120);
@@ -856,6 +887,34 @@ async function updatePhoneNumber(id: string, input: Partial<AssetPhoneNumberInpu
     logAssetOperation('编辑资料', '手机号资产', updated.id, updated.phoneNumberMasked, `编辑手机号 ${updated.phoneNumberMasked}`);
     rebuildRisksAndOffboarding();
     return updated;
+  });
+}
+
+async function deletePhoneNumber(id: string): Promise<ApiResponse<AssetPhoneNumber>> {
+  return guarded(() => {
+    const rows = phones();
+    const existing = rows.find((phone) => phone.id === id);
+    if (!existing) throw new Error('手机号不存在');
+    const relatedAccounts = accounts().filter((account) => account.phoneId === id);
+
+    setStorageData(STORAGE_KEYS.ASSET_PHONE_NUMBERS, rows.filter((phone) => phone.id !== id));
+    if (relatedAccounts.length) {
+      setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, accounts().map((account) => (
+        account.phoneId === id ? { ...account, phoneId: undefined, updatedAt: now() } : account
+      )));
+    }
+    setStorageData(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, offboardingTasks().filter((task) => (
+      !(task.assetType === '手机号资产' && task.assetId === id)
+    )));
+    logAssetOperation(
+      '删除资产',
+      '手机号资产',
+      existing.id,
+      existing.phoneNumberMasked,
+      `删除手机号 ${existing.phoneNumberMasked}，解绑${relatedAccounts.length}个账号`,
+    );
+    rebuildRisksAndOffboarding();
+    return existing;
   });
 }
 
@@ -944,6 +1003,22 @@ async function updateInternetAccount(id: string, input: Partial<AssetInternetAcc
     }
     rebuildRisksAndOffboarding();
     return updated;
+  });
+}
+
+async function deleteInternetAccount(id: string): Promise<ApiResponse<AssetInternetAccount>> {
+  return guarded(() => {
+    const rows = accounts();
+    const existing = rows.find((account) => account.id === id);
+    if (!existing) throw new Error('互联网账号不存在');
+
+    setStorageData(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, rows.filter((account) => account.id !== id));
+    setStorageData(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, offboardingTasks().filter((task) => (
+      !(task.assetType === '互联网账号' && task.assetId === id)
+    )));
+    logAssetOperation('删除资产', '互联网账号', existing.id, existing.accountName, `删除账号 ${existing.accountNo}`);
+    rebuildRisksAndOffboarding();
+    return existing;
   });
 }
 
@@ -1073,39 +1148,46 @@ async function fetchDetail(type: AssetType, id: string): Promise<ApiResponse<Ass
     const device = visibleDeviceRows.find((item) => item.id === id);
     if (!device) return createSuccessResponse(null);
     const relatedPhones = visiblePhoneRows.filter((phone) => phone.deviceId === id);
+    const relatedAccounts = relatedAccountsForDevice(id).filter((account) => visibleAccountRows.some((item) => item.id === account.id));
+    const detailAssetIds = [device.id, ...relatedPhones.map((phone) => phone.id), ...relatedAccounts.map((account) => account.id)];
     return createSuccessResponse({
       type,
       device,
       relatedPhones,
-      relatedAccounts: relatedAccountsForDevice(id).filter((account) => visibleAccountRows.some((item) => item.id === account.id)),
-      risks: detailRisks(type, id),
-      logs: detailLogs(type, id),
+      relatedAccounts,
+      risks: detailRisks(detailAssetIds),
+      logs: detailLogs(detailAssetIds),
     });
   }
   if (type === 'phone') {
     const phone = visiblePhoneRows.find((item) => item.id === id);
     if (!phone) return createSuccessResponse(null);
+    const relatedDevice = getDevice(phone.deviceId);
+    const relatedAccounts = relatedAccountsForPhone(id).filter((account) => visibleAccountRows.some((item) => item.id === account.id));
+    const detailAssetIds = [relatedDevice?.id || '', phone.id, ...relatedAccounts.map((account) => account.id)];
     return createSuccessResponse({
       type,
       phone,
-      relatedDevice: getDevice(phone.deviceId),
+      relatedDevice,
       relatedPhones: [phone],
-      relatedAccounts: relatedAccountsForPhone(id).filter((account) => visibleAccountRows.some((item) => item.id === account.id)),
-      risks: detailRisks(type, id),
-      logs: detailLogs(type, id),
+      relatedAccounts,
+      risks: detailRisks(detailAssetIds),
+      logs: detailLogs(detailAssetIds),
     });
   }
   const account = visibleAccountRows.find((item) => item.id === id);
   if (!account) return createSuccessResponse(null);
   const phone = getPhone(account.phoneId);
+  const relatedDevice = getPhoneDevice(phone);
+  const detailAssetIds = [relatedDevice?.id || '', phone?.id || '', account.id];
   return createSuccessResponse({
     type,
     account,
-    relatedDevice: getPhoneDevice(phone),
+    relatedDevice,
     relatedPhones: phone ? [phone] : [],
     relatedAccounts: [account],
-    risks: detailRisks(type, id),
-    logs: detailLogs(type, id),
+    risks: detailRisks(detailAssetIds),
+    logs: detailLogs(detailAssetIds),
   });
 }
 
@@ -1259,12 +1341,15 @@ export const assetApi = {
   fetchDevices,
   createDevice,
   updateDevice,
+  deleteDevice,
   fetchPhoneNumbers,
   createPhoneNumber,
   updatePhoneNumber,
+  deletePhoneNumber,
   fetchInternetAccounts,
   createInternetAccount,
   updateInternetAccount,
+  deleteInternetAccount,
   createOffboardingTasksForEmployee,
   fetchRisks,
   fetchOperationLogs,

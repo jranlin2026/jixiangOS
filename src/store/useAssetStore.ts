@@ -50,10 +50,13 @@ interface AssetState {
   fetchDetail: (type: AssetType, id: string) => Promise<void>;
   createDevice: (input: Partial<AssetDeviceInput>) => Promise<AssetDevice | null>;
   updateDevice: (id: string, input: Partial<AssetDeviceInput>) => Promise<AssetDevice | null>;
+  deleteDevice: (id: string) => Promise<AssetDevice | null>;
   createPhone: (input: Partial<AssetPhoneNumberInput>) => Promise<AssetPhoneNumber | null>;
   updatePhone: (id: string, input: Partial<AssetPhoneNumberInput>) => Promise<AssetPhoneNumber | null>;
+  deletePhone: (id: string) => Promise<AssetPhoneNumber | null>;
   createAccount: (input: Partial<AssetInternetAccountInput>) => Promise<AssetInternetAccount | null>;
   updateAccount: (id: string, input: Partial<AssetInternetAccountInput>) => Promise<AssetInternetAccount | null>;
+  deleteAccount: (id: string) => Promise<AssetInternetAccount | null>;
   updateRiskStatus: (riskId: string, status: AssetRiskStatus) => Promise<void>;
   completeOffboardingTask: (taskId: string) => Promise<void>;
   revealSensitiveField: (type: AssetType, id: string, field: AssetSensitiveField) => Promise<AssetSensitiveRevealResult | null>;
@@ -172,6 +175,16 @@ const useAssetStore = create<AssetState>((set, get) => ({
     return res.data;
   },
 
+  deleteDevice: async (id) => {
+    const res = await assetApi.deleteDevice(id);
+    if (res.code !== 0) {
+      set({ error: res.message });
+      return null;
+    }
+    await get().fetchDashboard();
+    return res.data;
+  },
+
   createPhone: async (input) => {
     const res = await assetApi.createPhoneNumber(input);
     if (res.code !== 0) {
@@ -193,6 +206,16 @@ const useAssetStore = create<AssetState>((set, get) => ({
     return res.data;
   },
 
+  deletePhone: async (id) => {
+    const res = await assetApi.deletePhoneNumber(id);
+    if (res.code !== 0) {
+      set({ error: res.message });
+      return null;
+    }
+    await get().fetchDashboard();
+    return res.data;
+  },
+
   createAccount: async (input) => {
     const res = await assetApi.createInternetAccount(input);
     if (res.code !== 0) {
@@ -211,6 +234,16 @@ const useAssetStore = create<AssetState>((set, get) => ({
     }
     await get().fetchDashboard();
     await get().fetchDetail('account', id);
+    return res.data;
+  },
+
+  deleteAccount: async (id) => {
+    const res = await assetApi.deleteInternetAccount(id);
+    if (res.code !== 0) {
+      set({ error: res.message });
+      return null;
+    }
+    await get().fetchDashboard();
     return res.data;
   },
 

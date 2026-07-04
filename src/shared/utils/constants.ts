@@ -15,6 +15,7 @@ export const ROUTES = {
   COMMISSION: '/commission',
   FINANCE: '/finance',
   ASSETS: '/assets',
+  GEO: '/geo',
   AI_ASSISTANT: '/ai-assistant',
   SETTINGS: '/settings',
   REFUND_CENTER: '/refund-center',

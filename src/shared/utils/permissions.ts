@@ -78,6 +78,11 @@ export const PERMISSION_KEYS = {
   ASSETS_SENSITIVE_VIEW: '资产管理/查看敏感字段',
   ASSETS_IMPORT_EXPORT: '资产管理/导入导出',
 
+  GEO: 'GEO',
+  GEO_OVERVIEW: 'GEO/总览',
+  GEO_CONTENT: 'GEO/内容矩阵',
+  GEO_ANALYTICS: 'GEO/效果分析',
+
   AI_ASSISTANT: 'AI助手',
   AI_CHAT: 'AI助手/AI对话',
   AI_SUGGESTIONS: 'AI助手/运营建议',
@@ -242,6 +247,15 @@ const PERMISSION_GRANT_TREE: Record<string, string[]> = {
   [PERMISSION_KEYS.ASSETS_OFFBOARDING]: [PERMISSION_KEYS.ASSETS_OFFBOARDING],
   [PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW]: [PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW],
   [PERMISSION_KEYS.ASSETS_IMPORT_EXPORT]: [PERMISSION_KEYS.ASSETS_IMPORT_EXPORT],
+
+  [PERMISSION_KEYS.GEO]: [
+    PERMISSION_KEYS.GEO_OVERVIEW,
+    PERMISSION_KEYS.GEO_CONTENT,
+    PERMISSION_KEYS.GEO_ANALYTICS,
+  ],
+  [PERMISSION_KEYS.GEO_OVERVIEW]: [PERMISSION_KEYS.GEO_OVERVIEW],
+  [PERMISSION_KEYS.GEO_CONTENT]: [PERMISSION_KEYS.GEO_CONTENT],
+  [PERMISSION_KEYS.GEO_ANALYTICS]: [PERMISSION_KEYS.GEO_ANALYTICS],
 
   [PERMISSION_KEYS.AI_ASSISTANT]: [
     PERMISSION_KEYS.AI_CHAT,
@@ -479,12 +493,45 @@ function getSanitizedPermissionModules(module: string): string[] {
   return PERMISSION_GRANTS_BY_NORMALIZED.get(normalized) || [];
 }
 
+function isReadOnlyPermissionActions(actions: string[] = []): boolean {
+  const normalized = actions.length ? actions : ['read'];
+  return normalized.every((action) => action === 'read');
+}
+
+function getReadOnlyExpandedModules(permissions: Permission[]): Set<string> {
+  const actionsByModule = new Map<string, string[]>();
+  permissions.forEach((permission) => {
+    actionsByModule.set(normalizePermissionKey(permission.module), permission.actions || []);
+  });
+
+  const expanded = new Set<string>();
+  Object.values(PERMISSION_GRANT_TREE).forEach((grants) => {
+    const normalizedGrants = grants.map(normalizePermissionKey);
+    if (normalizedGrants.length <= 1) return;
+    const isCompleteReadOnlyGroup = normalizedGrants.every((module) => (
+      actionsByModule.has(module)
+      && isReadOnlyPermissionActions(actionsByModule.get(module))
+    ));
+    if (isCompleteReadOnlyGroup) {
+      normalizedGrants.forEach((module) => expanded.add(module));
+    }
+  });
+  return expanded;
+}
+
 export function sanitizeRolePermissions(permissions: Permission[] = []): Permission[] {
   const merged = new Map<string, Set<string>>();
+  const readOnlyExpandedModules = getReadOnlyExpandedModules(permissions);
 
   permissions.forEach((permission) => {
     const modules = getSanitizedPermissionModules(permission.module);
-    const permissionActions = getDefaultPermissionActions(permission.module, permission.actions || []);
+    const isReadOnlyExpandedModule = (
+      readOnlyExpandedModules.has(normalizePermissionKey(permission.module))
+      && isReadOnlyPermissionActions(permission.actions || [])
+    );
+    const permissionActions = isReadOnlyExpandedModule
+      ? ['read']
+      : getDefaultPermissionActions(permission.module, permission.actions || []);
     modules.forEach((module) => {
       const actions = merged.get(module) || new Set<string>();
       permissionActions.forEach((action) => actions.add(action));

@@ -13,6 +13,11 @@ const sidebarSource = readFileSync(join(process.cwd(), 'src', 'layouts', 'Sideba
 const settingsSource = readFileSync(join(process.cwd(), 'src', 'pages', 'Settings', 'index.tsx'), 'utf8');
 const rolePermissionSource = readFileSync(join(process.cwd(), 'src', 'pages', 'Settings', 'RolePermission.tsx'), 'utf8');
 assert.match(appSource, /ProtectedRoute permissionKey=\{PERMISSION_KEYS\.CUSTOMERS\}/);
+assert.match(appSource, /ROUTES\.GEO/);
+assert.match(sidebarSource, /ROUTES\.GEO/);
+assert.match(rolePermissionSource, /PERMISSION_KEYS\.GEO_OVERVIEW/);
+assert.match(rolePermissionSource, /PERMISSION_KEYS\.GEO_CONTENT/);
+assert.match(rolePermissionSource, /PERMISSION_KEYS\.GEO_ANALYTICS/);
 assert.doesNotMatch(appSource, /PERMISSION_KEYS\.COMMISSION|PERMISSION_KEYS\.REFUND_CENTER/);
 assert.doesNotMatch(sidebarSource, /PERMISSION_KEYS\.COMMISSION|PERMISSION_KEYS\.REFUND_CENTER/);
 assert.doesNotMatch(sidebarSource, /group=leadCustomer[\s\S]*PERMISSION_KEYS\.LEADS_FLOW_CONFIG/);
@@ -80,6 +85,8 @@ storage.clear();
 
 const marketRole = DEFAULT_ROLES.find((role) => role.code === 'market_specialist');
 assert.ok(marketRole);
+assert.equal(roleHasPermission(marketRole, PERMISSION_KEYS.GEO), true);
+assert.equal(roleHasPermission(marketRole, PERMISSION_KEYS.GEO_CONTENT), true);
 const defaultSalesManagerRole = DEFAULT_ROLES.find((role) => role.code === 'sales_manager');
 assert.ok(defaultSalesManagerRole);
 assert.equal(defaultSalesManagerRole.permissions.some((permission) => permission.module === '提成'), false);
@@ -127,6 +134,8 @@ assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_IMPORT_EXP
 
 const defaultOpsRole = DEFAULT_ROLES.find((role) => role.code === 'ops_admin');
 assert.ok(defaultOpsRole);
+assert.equal(roleHasPermission(defaultOpsRole, PERMISSION_KEYS.GEO, 'write'), true);
+assert.equal(roleHasPermission(defaultOpsRole, PERMISSION_KEYS.GEO_ANALYTICS), true);
 const authenticatedOps = toAuthenticatedUser({
   id: 'user-ops-assets',
   name: 'Ops Assets',

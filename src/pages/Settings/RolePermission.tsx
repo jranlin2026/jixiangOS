@@ -126,6 +126,14 @@ const PERMISSION_TREE: PermissionNode[] = [
     ],
   },
   {
+    label: 'GEO',
+    children: [
+      { label: 'GEO总览', key: PERMISSION_KEYS.GEO_OVERVIEW },
+      { label: '内容矩阵', key: PERMISSION_KEYS.GEO_CONTENT },
+      { label: '效果分析', key: PERMISSION_KEYS.GEO_ANALYTICS },
+    ],
+  },
+  {
     label: 'AI助手',
     children: [
       { label: 'AI对话', key: PERMISSION_KEYS.AI_CHAT },

@@ -17,6 +17,7 @@ const Delivery = React.lazy(() => import('./pages/Delivery'));
 const AfterSales = React.lazy(() => import('./pages/AfterSales'));
 const Finance = React.lazy(() => import('./pages/Finance'));
 const Assets = React.lazy(() => import('./pages/Assets'));
+const GEO = React.lazy(() => import('./pages/GEO'));
 const AIAssistant = React.lazy(() => import('./pages/AIAssistant'));
 const Settings = React.lazy(() => import('./pages/Settings'));
 const Login = React.lazy(() => import('./pages/Login'));
@@ -146,6 +147,14 @@ const App: React.FC = () => {
             PERMISSION_KEYS.ASSETS_OFFBOARDING,
           ]} />}>
             <Route path={ROUTES.ASSETS} element={<Suspense fallback={<PageLoader />}><Assets /></Suspense>} />
+          </Route>
+          <Route element={<ProtectedRoute permissionKeys={[
+            PERMISSION_KEYS.GEO,
+            PERMISSION_KEYS.GEO_OVERVIEW,
+            PERMISSION_KEYS.GEO_CONTENT,
+            PERMISSION_KEYS.GEO_ANALYTICS,
+          ]} />}>
+            <Route path={ROUTES.GEO} element={<Suspense fallback={<PageLoader />}><GEO /></Suspense>} />
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.AI_ASSISTANT} />}>
             <Route path={ROUTES.AI_ASSISTANT} element={<Suspense fallback={<PageLoader />}><AIAssistant /></Suspense>} />

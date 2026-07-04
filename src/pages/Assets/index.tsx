@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
+  Avatar,
   Box,
   Button,
   Chip,
@@ -32,9 +33,15 @@ import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import BlockIcon from '@mui/icons-material/Block';
+import CloseIcon from '@mui/icons-material/Close';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import PhoneIphoneIcon from '@mui/icons-material/PhoneIphone';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { assetApi } from '../../api';
 import useAssetStore from '../../store/useAssetStore';
 import {
@@ -96,6 +103,12 @@ type AssetImportState = {
   result: AssetImportResult | null;
 };
 
+type AssetDeleteTarget = {
+  type: AssetFormType;
+  id: string;
+  label: string;
+} | null;
+
 const ASSET_TABS: Array<{ value: AssetTab; label: string; permissionKey: string }> = [
   { value: 'overview', label: '资产总览', permissionKey: PERMISSION_KEYS.ASSETS_OVERVIEW },
   { value: 'devices', label: '设备资产', permissionKey: PERMISSION_KEYS.ASSETS_DEVICES },
@@ -108,7 +121,52 @@ const ASSET_TABS: Array<{ value: AssetTab; label: string; permissionKey: string 
 
 const CONFIGURABLE_ASSET_TABS = new Set<AssetTab>(['devices', 'phones', 'accounts']);
 
-const ASSET_ACTION_COLUMN_WIDTH = 104;
+const ASSET_ACTION_COLUMN_WIDTH = 132;
+const ASSET_LOOKUP_PAGE_SIZE = 200;
+
+const readAssetText = (asset: unknown, keys: string[], fallback: string): string => {
+  const row = asset as Record<string, unknown>;
+  const value = keys.map((key) => row[key]).find((item) => String(item || '').trim());
+  return value === undefined || value === null ? fallback : String(value);
+};
+
+const deviceDeleteLabel = (device: AssetDevice) => {
+  const code = readAssetText(device, ['deviceCode', 'assetCode', 'code', 'deviceNo'], device.id);
+  const name = readAssetText(device, ['deviceName', 'assetName', 'name', 'brandModel'], '设备资产');
+  return `${code} / ${name}`;
+};
+
+const phoneDeleteLabel = (phone: AssetPhoneNumber) => (
+  readAssetText(phone, ['phoneNumberMasked', 'phoneNumber', 'assetName', 'name'], phone.id)
+);
+
+const accountDeleteLabel = (account: AssetInternetAccount) => {
+  const platform = readAssetText(account, ['platform'], '互联网账号');
+  const name = readAssetText(account, ['accountName', 'assetName', 'name', 'loginAccountMasked'], account.id);
+  return `${platform} / ${name}`;
+};
+
+const PLATFORM_LOGOS = [
+  { keyword: '快手', label: '快', color: '#FF5B22' },
+  { keyword: '抖音', label: '抖', color: '#111827' },
+  { keyword: '微信', label: '微', color: '#18B566' },
+  { keyword: '视频号', label: '视', color: '#18B566' },
+  { keyword: '美团', label: '美', color: '#F6C343' },
+  { keyword: '饿了么', label: '饿', color: '#1677FF' },
+  { keyword: '小红书', label: '红', color: '#FF2442' },
+  { keyword: '百度', label: '百', color: '#315EFB' },
+  { keyword: '高德', label: '高', color: '#1677FF' },
+  { keyword: '58', label: '58', color: '#19A463' },
+];
+
+const platformLogoMeta = (platform: string) => {
+  const matched = PLATFORM_LOGOS.find((item) => platform.includes(item.keyword));
+  if (matched) return matched;
+  return {
+    label: platform.trim().slice(0, 1) || '账',
+    color: '#64748B',
+  };
+};
 
 const DEVICE_COLUMNS: AssetColumnConfig[] = [
   { id: 'deviceCode', label: '设备编号', width: 130 },
@@ -167,6 +225,64 @@ const ASSET_VIEW_DESCRIPTIONS: Record<ConfigurableAssetTab, string> = {
   devices: '设置设备资产表格的显示字段、字段顺序和固定列。',
   phones: '设置手机号资产表格的显示字段、字段顺序和固定列。',
   accounts: '设置互联网账号表格的显示字段、字段顺序和固定列。',
+};
+
+const assetTableContainerSx = {
+  ...moduleTablePaperSx,
+  borderRadius: '6px 6px 0 0',
+  overflowX: 'auto',
+  bgcolor: '#fff',
+};
+
+const assetTableSx = {
+  ...moduleTableSx,
+  '& .MuiTableHead-root .MuiTableCell-root': {
+    ...moduleTableSx['& .MuiTableHead-root .MuiTableCell-root'],
+    height: 44,
+    px: 1.5,
+    py: 1,
+    whiteSpace: 'nowrap',
+    lineHeight: 1.35,
+  },
+  '& .MuiTableBody-root .MuiTableCell-root': {
+    height: 52,
+    px: 1.5,
+    py: 1,
+    verticalAlign: 'middle',
+  },
+  '& .MuiTableCell-root': {
+    ...moduleTableSx['& .MuiTableCell-root'],
+    color: moduleTokens.ink,
+  },
+  '& .MuiTableRow-root:last-of-type .MuiTableCell-root': {
+    borderBottom: 0,
+  },
+};
+
+const assetActionCellSx = {
+  width: ASSET_ACTION_COLUMN_WIDTH,
+  minWidth: ASSET_ACTION_COLUMN_WIDTH,
+  textAlign: 'center',
+  bgcolor: '#fff',
+};
+
+const assetPaginationSx = {
+  border: `1px solid ${moduleTokens.line}`,
+  borderTop: 0,
+  borderRadius: '0 0 6px 6px',
+  bgcolor: '#fff',
+  color: moduleTokens.ink,
+  '& .MuiTablePagination-toolbar': {
+    minHeight: 48,
+    px: 2,
+  },
+  '& .MuiTablePagination-selectLabel, & .MuiTablePagination-displayedRows': {
+    my: 0,
+    color: moduleTokens.ink,
+  },
+  '& .MuiTablePagination-actions': {
+    ml: 1,
+  },
 };
 
 const ASSET_CREATE_LABELS: Record<ConfigurableAssetTab, string> = {
@@ -273,6 +389,7 @@ const AssetManagement: React.FC = () => {
   const [lookupPhones, setLookupPhones] = useState<AssetPhoneNumber[]>([]);
   const [formState, setFormState] = useState<AssetFormState>(emptyForm);
   const [importState, setImportState] = useState<AssetImportState>(emptyImportState);
+  const [deleteTarget, setDeleteTarget] = useState<AssetDeleteTarget>(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [viewSettingsOpen, setViewSettingsOpen] = useState<ConfigurableAssetTab | null>(null);
   const [revealedValues, setRevealedValues] = useState<Record<string, string>>({});
@@ -298,10 +415,13 @@ const AssetManagement: React.FC = () => {
     fetchDetail,
     createDevice,
     updateDevice,
+    deleteDevice,
     createPhone,
     updatePhone,
+    deletePhone,
     createAccount,
     updateAccount,
+    deleteAccount,
     updateRiskStatus,
     completeOffboardingTask,
     revealSensitiveField,
@@ -311,6 +431,7 @@ const AssetManagement: React.FC = () => {
   const canRevealSensitive = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW);
   const canImportExport = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_IMPORT_EXPORT, 'write');
   const canEditAssets = hasPermission(currentUser, PERMISSION_KEYS.ASSETS, 'write');
+  const canDeleteAssets = canEditAssets || hasPermission(currentUser, PERMISSION_KEYS.ASSETS, 'delete');
   const canHandleRisks = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_RISKS, 'write');
   const canHandleOffboarding = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_OFFBOARDING, 'write');
   const visibleTabs = useMemo(
@@ -354,10 +475,10 @@ const AssetManagement: React.FC = () => {
 
   useEffect(() => {
     fetchDashboard();
-    assetApi.fetchDevices({ pageSize: 200 }).then((res) => {
+    assetApi.fetchDevices({ pageSize: ASSET_LOOKUP_PAGE_SIZE }).then((res) => {
       if (res.code === 0) setLookupDevices(res.data.items);
     });
-    assetApi.fetchPhoneNumbers({ pageSize: 1000 }).then((res) => {
+    assetApi.fetchPhoneNumbers({ pageSize: ASSET_LOOKUP_PAGE_SIZE }).then((res) => {
       if (res.code === 0) setLookupPhones(res.data.items);
     });
     setPlatformOptions(assetApi.getAccountPlatformOptions());
@@ -406,8 +527,8 @@ const AssetManagement: React.FC = () => {
 
   const refreshLookupData = async () => {
     const [deviceRes, phoneRes] = await Promise.all([
-      assetApi.fetchDevices({ pageSize: 200 }),
-      assetApi.fetchPhoneNumbers({ pageSize: 1000 }),
+      assetApi.fetchDevices({ pageSize: ASSET_LOOKUP_PAGE_SIZE }),
+      assetApi.fetchPhoneNumbers({ pageSize: ASSET_LOOKUP_PAGE_SIZE }),
     ]);
     if (deviceRes.code === 0) setLookupDevices(deviceRes.data.items);
     if (phoneRes.code === 0) setLookupPhones(phoneRes.data.items);
@@ -584,6 +705,44 @@ const AssetManagement: React.FC = () => {
     }
     closeForm();
     setSnackbar(formState.mode === 'edit' ? '资产资料已更新' : '资产已新增');
+    await refreshActiveTab();
+  };
+
+  const openDeleteConfirm = (type: AssetFormType, id: string, label: string) => {
+    if (!canDeleteAssets) {
+      setSnackbar('当前账号没有删除资产权限');
+      return;
+    }
+    setDeleteTarget({ type, id, label });
+  };
+
+  const closeDeleteConfirm = () => setDeleteTarget(null);
+
+  const submitDelete = async () => {
+    if (!deleteTarget) return;
+    if (!canDeleteAssets) {
+      setSnackbar('当前账号没有删除资产权限');
+      closeDeleteConfirm();
+      return;
+    }
+    const deleted = deleteTarget.type === 'device'
+      ? await deleteDevice(deleteTarget.id)
+      : deleteTarget.type === 'phone'
+        ? await deletePhone(deleteTarget.id)
+        : await deleteAccount(deleteTarget.id);
+    if (!deleted) {
+      setSnackbar(useAssetStore.getState().error || '删除失败');
+      return;
+    }
+    if (
+      detail?.device?.id === deleteTarget.id
+      || detail?.phone?.id === deleteTarget.id
+      || detail?.account?.id === deleteTarget.id
+    ) {
+      closeDetailDialog();
+    }
+    closeDeleteConfirm();
+    setSnackbar('资产已删除');
     await refreshActiveTab();
   };
 
@@ -896,7 +1055,7 @@ const AssetManagement: React.FC = () => {
           return (
             <React.Fragment key={phone.id}>
               {index > 0 ? <Typography variant="caption" sx={{ color: shell.muted }}>/</Typography> : null}
-              <Tooltip title="查看手机号快照">
+              <Tooltip title="查看手机号资料">
                 <Box
                   component="button"
                   type="button"
@@ -999,8 +1158,9 @@ const AssetManagement: React.FC = () => {
   };
 
   const renderDevicesTable = () => (
-    <TableContainer component={Paper} elevation={0} sx={{ ...moduleTablePaperSx, overflowX: 'auto' }}>
-      <Table size="small" sx={{ ...moduleTableSx, tableLayout: 'fixed', minWidth: getTableMinWidth(deviceView.visibleColumns) }}>
+    <>
+    <TableContainer component={Paper} elevation={0} sx={assetTableContainerSx}>
+      <Table size="small" sx={{ ...assetTableSx, tableLayout: 'fixed', minWidth: getTableMinWidth(deviceView.visibleColumns) }}>
         <TableHead>
           <TableRow>
             {deviceView.visibleColumns.map((column, columnIndex) => (
@@ -1008,7 +1168,7 @@ const AssetManagement: React.FC = () => {
                 {column.label}
               </TableCell>
             ))}
-            <TableCell sx={{ width: ASSET_ACTION_COLUMN_WIDTH, minWidth: ASSET_ACTION_COLUMN_WIDTH }}>操作</TableCell>
+            <TableCell align="center" sx={assetActionCellSx}>操作</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -1019,7 +1179,8 @@ const AssetManagement: React.FC = () => {
                   {renderDeviceCell(device, column.id)}
                 </TableCell>
               ))}
-              <TableCell>
+              <TableCell align="center" sx={assetActionCellSx}>
+                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5 }}>
                 <Tooltip title="查看详情"><IconButton size="small"><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
                 {canEditAssets ? (
                   <Tooltip title="编辑资料">
@@ -1028,18 +1189,35 @@ const AssetManagement: React.FC = () => {
                     </IconButton>
                   </Tooltip>
                 ) : null}
+                {canDeleteAssets ? (
+                  <Tooltip title="删除">
+                    <IconButton
+                      size="small"
+                      color="error"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openDeleteConfirm('device', device.id, deviceDeleteLabel(device));
+                      }}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                ) : null}
+                </Box>
               </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
-      {renderPagination()}
     </TableContainer>
+    {renderPagination()}
+    </>
   );
 
   const renderPhonesTable = () => (
-    <TableContainer component={Paper} elevation={0} sx={{ ...moduleTablePaperSx, overflowX: 'auto' }}>
-      <Table size="small" sx={{ ...moduleTableSx, tableLayout: 'fixed', minWidth: getTableMinWidth(phoneView.visibleColumns) }}>
+    <>
+    <TableContainer component={Paper} elevation={0} sx={assetTableContainerSx}>
+      <Table size="small" sx={{ ...assetTableSx, tableLayout: 'fixed', minWidth: getTableMinWidth(phoneView.visibleColumns) }}>
         <TableHead>
           <TableRow>
             {phoneView.visibleColumns.map((column, columnIndex) => (
@@ -1047,7 +1225,7 @@ const AssetManagement: React.FC = () => {
                 {column.label}
               </TableCell>
             ))}
-            <TableCell sx={{ width: ASSET_ACTION_COLUMN_WIDTH, minWidth: ASSET_ACTION_COLUMN_WIDTH }}>操作</TableCell>
+            <TableCell align="center" sx={assetActionCellSx}>操作</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -1058,7 +1236,8 @@ const AssetManagement: React.FC = () => {
                     {renderPhoneCell(phone, column.id)}
                   </TableCell>
                 ))}
-                <TableCell>
+                <TableCell align="center" sx={assetActionCellSx}>
+                  <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5 }}>
                   <Tooltip title="查看详情"><IconButton size="small"><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
                   {canEditAssets ? (
                     <Tooltip title="编辑资料">
@@ -1067,18 +1246,35 @@ const AssetManagement: React.FC = () => {
                       </IconButton>
                     </Tooltip>
                   ) : null}
+                  {canDeleteAssets ? (
+                    <Tooltip title="删除">
+                      <IconButton
+                        size="small"
+                        color="error"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openDeleteConfirm('phone', phone.id, phoneDeleteLabel(phone));
+                        }}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  ) : null}
+                  </Box>
                 </TableCell>
               </TableRow>
           ))}
         </TableBody>
       </Table>
-      {renderPagination()}
     </TableContainer>
+    {renderPagination()}
+    </>
   );
 
   const renderAccountsTable = () => (
-    <TableContainer component={Paper} elevation={0} sx={{ ...moduleTablePaperSx, overflowX: 'auto' }}>
-      <Table size="small" sx={{ ...moduleTableSx, tableLayout: 'fixed', minWidth: getTableMinWidth(accountView.visibleColumns) }}>
+    <>
+    <TableContainer component={Paper} elevation={0} sx={assetTableContainerSx}>
+      <Table size="small" sx={{ ...assetTableSx, tableLayout: 'fixed', minWidth: getTableMinWidth(accountView.visibleColumns) }}>
         <TableHead>
           <TableRow>
             {accountView.visibleColumns.map((column, columnIndex) => (
@@ -1086,7 +1282,7 @@ const AssetManagement: React.FC = () => {
                 {column.label}
               </TableCell>
             ))}
-            <TableCell sx={{ width: ASSET_ACTION_COLUMN_WIDTH, minWidth: ASSET_ACTION_COLUMN_WIDTH }}>操作</TableCell>
+            <TableCell align="center" sx={assetActionCellSx}>操作</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -1097,21 +1293,39 @@ const AssetManagement: React.FC = () => {
                     {renderAccountCell(account, column.id)}
                   </TableCell>
                 ))}
-                <TableCell>
+                <TableCell align="center" sx={assetActionCellSx}>
+                  <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5 }}>
                   <Tooltip title="查看详情"><IconButton size="small"><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
                   {canEditAssets ? <Tooltip title="编辑资料"><IconButton size="small" onClick={(event) => { event.stopPropagation(); openEditForm('account', account); }}><EditIcon fontSize="small" /></IconButton></Tooltip> : null}
+                  {canDeleteAssets ? (
+                    <Tooltip title="删除">
+                      <IconButton
+                        size="small"
+                        color="error"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openDeleteConfirm('account', account.id, accountDeleteLabel(account));
+                        }}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  ) : null}
+                  </Box>
                 </TableCell>
               </TableRow>
           ))}
         </TableBody>
       </Table>
-      {renderPagination()}
     </TableContainer>
+    {renderPagination()}
+    </>
   );
 
   const renderRisksTable = () => (
-    <TableContainer component={Paper} elevation={0} sx={moduleTablePaperSx}>
-      <Table size="small" sx={moduleTableSx}>
+    <>
+    <TableContainer component={Paper} elevation={0} sx={assetTableContainerSx}>
+      <Table size="small" sx={assetTableSx}>
         <TableHead>
           <TableRow>
             {['风险类型', '关联对象', '等级', '状态', '说明', '创建时间', '操作'].map((column) => <TableCell key={column}>{column}</TableCell>)}
@@ -1126,9 +1340,9 @@ const AssetManagement: React.FC = () => {
               <TableCell>{risk.status}</TableCell>
               <TableCell>{risk.description}</TableCell>
               <TableCell>{formatDate(risk.createdAt, 'yyyy-MM-dd HH:mm')}</TableCell>
-              <TableCell>
+              <TableCell align="center" sx={{ minWidth: 112 }}>
                 {canHandleRisks ? (
-                  <>
+                  <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5 }}>
                     <Tooltip title="标记解决">
                       <IconButton size="small" onClick={(event) => { event.stopPropagation(); handleRiskStatus(risk.id, 'resolved'); }}>
                         <CheckCircleOutlineIcon fontSize="small" />
@@ -1139,20 +1353,22 @@ const AssetManagement: React.FC = () => {
                         <BlockIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
-                  </>
+                  </Box>
                 ) : null}
               </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
-      {renderPagination()}
     </TableContainer>
+    {renderPagination()}
+    </>
   );
 
   const renderLogsTable = () => (
-    <TableContainer component={Paper} elevation={0} sx={moduleTablePaperSx}>
-      <Table size="small" sx={moduleTableSx}>
+    <>
+    <TableContainer component={Paper} elevation={0} sx={assetTableContainerSx}>
+      <Table size="small" sx={assetTableSx}>
         <TableHead>
           <TableRow>
             {['时间', '动作', '对象类型', '对象名称', '操作人', '详情'].map((column) => <TableCell key={column}>{column}</TableCell>)}
@@ -1171,13 +1387,15 @@ const AssetManagement: React.FC = () => {
           ))}
         </TableBody>
       </Table>
-      {renderPagination()}
     </TableContainer>
+    {renderPagination()}
+    </>
   );
 
   const renderOffboardingTable = () => (
-    <TableContainer component={Paper} elevation={0} sx={moduleTablePaperSx}>
-      <Table size="small" sx={moduleTableSx}>
+    <>
+    <TableContainer component={Paper} elevation={0} sx={assetTableContainerSx}>
+      <Table size="small" sx={assetTableSx}>
         <TableHead>
           <TableRow>
             {['员工', '部门', '资产类型', '资产名称', '权限状态', '回收状态', '截止时间', '操作'].map((column) => <TableCell key={column}>{column}</TableCell>)}
@@ -1193,7 +1411,7 @@ const AssetManagement: React.FC = () => {
               <TableCell><Chip size="small" label={task.permissionStatus} sx={chipSx(statusTone(task.permissionStatus))} /></TableCell>
               <TableCell>{task.status}</TableCell>
               <TableCell>{task.dueAt}</TableCell>
-              <TableCell>
+              <TableCell align="center" sx={{ minWidth: 140 }}>
                 {canHandleOffboarding ? (
                   <Button
                     size="small"
@@ -1212,8 +1430,9 @@ const AssetManagement: React.FC = () => {
           ))}
         </TableBody>
       </Table>
-      {renderPagination()}
     </TableContainer>
+    {renderPagination()}
+    </>
   );
 
   const renderPagination = () => (
@@ -1221,14 +1440,16 @@ const AssetManagement: React.FC = () => {
       component="div"
       count={pagination.total}
       page={Math.max(0, pagination.page - 1)}
+      rowsPerPageOptions={[10, 20, 50, 100]}
       onPageChange={(_, nextPage) => setPage(nextPage)}
       rowsPerPage={pagination.pageSize}
       onRowsPerPageChange={(event) => {
         setRowsPerPage(parseInt(event.target.value, 10));
         setPage(0);
       }}
-      labelRowsPerPage="每页行数"
+      labelRowsPerPage="每页条数"
       labelDisplayedRows={formatPaginationRows}
+      sx={assetPaginationSx}
     />
   );
 
@@ -1242,94 +1463,496 @@ const AssetManagement: React.FC = () => {
     return renderOffboardingTable();
   };
 
+  const copyText = async (text: string | undefined, label = '内容') => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setSnackbar(`${label}已复制`);
+    } catch {
+      setSnackbar('复制失败，请手动选择复制');
+    }
+  };
+
   const primaryDevice = detail?.device || detail?.relatedDevice;
   const primaryPhone = detail?.phone || detail?.relatedPhones[0];
   const primaryAccount = detail?.account || detail?.relatedAccounts[0];
 
+  const detailCardSx = {
+    border: `1px solid ${shell.softLine}`,
+    borderRadius: 1,
+    bgcolor: '#fff',
+    boxShadow: '0 8px 24px rgba(15, 23, 42, 0.03)',
+  };
+
+  const detailTableSx = {
+    '& .MuiTableCell-root': {
+      borderColor: shell.softLine,
+      color: shell.ink,
+      fontSize: 13,
+      py: 0.75,
+    },
+    '& .MuiTableHead-root .MuiTableCell-root': {
+      bgcolor: '#F8FAFC',
+      color: shell.muted,
+      fontWeight: 900,
+    },
+    '& .MuiTableBody-root .MuiTableRow-root:last-of-type .MuiTableCell-root': {
+      borderBottom: 0,
+    },
+  };
+
+  const riskStatusLabel: Record<AssetRiskStatus, string> = {
+    open: '观察中',
+    resolved: '已处理',
+    ignored: '已忽略',
+  };
+
+  const renderPlatformLogo = (account: AssetInternetAccount) => {
+    const logo = platformLogoMeta(account.platform);
+    return (
+      <Avatar
+        variant="rounded"
+        sx={{
+          width: 34,
+          height: 34,
+          bgcolor: logo.color,
+          color: '#fff',
+          fontSize: 13,
+          fontWeight: 900,
+          borderRadius: 1,
+        }}
+      >
+        {logo.label}
+      </Avatar>
+    );
+  };
+
+  const renderCopyButton = (text: string | undefined, label: string) => (
+    <Tooltip title={`复制${label}`}>
+      <IconButton size="small" onClick={() => copyText(text, label)} sx={{ color: shell.muted }}>
+        <ContentCopyIcon sx={{ fontSize: 15 }} />
+      </IconButton>
+    </Tooltip>
+  );
+
+  const renderSensitiveInline = (
+    type: AssetType,
+    id: string,
+    field: AssetSensitiveField,
+    maskedValue?: string,
+  ) => {
+    const key = revealedKey(type, id, field);
+    const value = revealedValues[key] || maskedValue || '-';
+    return (
+      <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
+        <Box component="span" sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</Box>
+        {canRevealSensitive && !revealedValues[key] ? (
+          <Tooltip title="查看明文">
+            <IconButton size="small" onClick={() => revealField(type, id, field)} sx={{ color: shell.tableLink }}>
+              <VisibilityIcon sx={{ fontSize: 15 }} />
+            </IconButton>
+          </Tooltip>
+        ) : null}
+      </Stack>
+    );
+  };
+
+  const renderInfoRows = (rows: Array<{ label: string; value: React.ReactNode }>, columns = 2) => (
+    <Box
+      sx={{
+        display: 'grid',
+        gridTemplateColumns: { xs: '1fr', md: `repeat(${columns}, minmax(0, 1fr))` },
+        columnGap: 2.5,
+        rowGap: 1.05,
+      }}
+    >
+      {rows.map((row) => (
+        <Box key={row.label} sx={{ display: 'grid', gridTemplateColumns: '92px minmax(0, 1fr)', alignItems: 'center', minWidth: 0 }}>
+          <Typography variant="body2" sx={{ color: shell.muted }}>{row.label}</Typography>
+          <Box sx={{ color: shell.ink, fontWeight: 800, minWidth: 0 }}>{row.value}</Box>
+        </Box>
+      ))}
+    </Box>
+  );
+
+  const renderDetailCard = (title: string, children: React.ReactNode, extra?: React.ReactNode) => (
+    <Paper elevation={0} sx={{ ...detailCardSx, p: 1.75 }}>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1.5} sx={{ mb: 1.5 }}>
+        <Typography sx={{ color: shell.ink, fontWeight: 950 }}>{title}</Typography>
+        {extra}
+      </Stack>
+      {children}
+    </Paper>
+  );
+
+  const renderCompactTable = (
+    columns: string[],
+    rows: React.ReactNode[][],
+    emptyText: string,
+  ) => (
+    <TableContainer sx={{ border: `1px solid ${shell.softLine}`, borderRadius: 1, bgcolor: '#fff' }}>
+      <Table size="small" sx={detailTableSx}>
+        <TableHead>
+          <TableRow>
+            {columns.map((column) => <TableCell key={column}>{column}</TableCell>)}
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.length ? rows.map((row, rowIndex) => (
+            <TableRow key={rowIndex} hover>
+              {row.map((cell, cellIndex) => <TableCell key={cellIndex}>{cell}</TableCell>)}
+            </TableRow>
+          )) : (
+            <TableRow>
+              <TableCell colSpan={columns.length} sx={{ color: shell.muted, textAlign: 'center' }}>{emptyText}</TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+
+  const renderLinkButton = (label: string, onClick: () => void) => (
+    <Button size="small" endIcon={<ChevronRightIcon />} onClick={onClick} sx={{ fontWeight: 900 }}>
+      {label}
+    </Button>
+  );
+
+  const renderDeviceVisual = (device: AssetDevice) => (
+    <Stack spacing={1} alignItems="center" sx={{ width: 92, flexShrink: 0 }}>
+      <Avatar
+        variant="rounded"
+        sx={{
+          width: 72,
+          height: 92,
+          borderRadius: 1.5,
+          bgcolor: '#EAF2FF',
+          color: shell.blue,
+          border: `1px solid ${shell.softLine}`,
+        }}
+      >
+        <PhoneIphoneIcon sx={{ fontSize: 48 }} />
+      </Avatar>
+      <Chip size="small" label={device.status} sx={chipSx(statusTone(device.status))} />
+    </Stack>
+  );
+
+  const renderDeviceBasicCard = (device: AssetDevice) => (
+    renderDetailCard('设备基本信息', (
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+        {renderDeviceVisual(device)}
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          {renderInfoRows([
+            { label: '设备名称', value: device.deviceName },
+            { label: '设备编号', value: <Stack direction="row" alignItems="center" spacing={0.5}>{device.deviceCode}{renderCopyButton(device.deviceCode, '设备编号')}</Stack> },
+            { label: '品牌/型号', value: device.brandModel },
+            { label: 'IMEI', value: renderSensitiveInline('device', device.id, 'imei', device.imeiMasked) },
+            { label: 'SIM 类型', value: device.simType },
+            { label: '所属主体', value: device.ownerSubject },
+            { label: '月费用', value: formatCurrency(device.monthlyCost) },
+            { label: '更新时间', value: formatDate(device.updatedAt, 'yyyy-MM-dd') },
+            { label: '备注', value: device.remark || '-' },
+          ], 2)}
+        </Box>
+      </Stack>
+    ))
+  );
+
+  const renderPhoneBasicCard = (phone: AssetPhoneNumber) => (
+    renderDetailCard('手机号基本信息', (
+      renderInfoRows([
+        { label: '手机号', value: renderSensitiveInline('phone', phone.id, 'phoneNumber', phone.phoneNumberMasked) },
+        { label: '运营商', value: phone.operator },
+        { label: '归属地', value: '-' },
+        { label: '卡类型', value: '实体 SIM 卡' },
+        { label: '所属设备', value: primaryDevice ? `${primaryDevice.deviceCode} / ${primaryDevice.deviceName}` : '-' },
+        { label: 'SIM 卡槽', value: phone.slotType },
+        { label: '套餐', value: phone.packageName || '-' },
+        { label: '月费用', value: formatCurrency(phone.monthlyFee) },
+        { label: '卡状态', value: <Chip size="small" label={phone.status} sx={chipSx(statusTone(phone.status))} /> },
+        { label: '更新时间', value: formatDate(phone.updatedAt, 'yyyy-MM-dd') },
+      ], 2)
+    ))
+  );
+
+  const renderAccountBasicCard = (account: AssetInternetAccount) => (
+    renderDetailCard('账号基本信息', (
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+        <Stack spacing={1} alignItems="center" sx={{ width: 96, flexShrink: 0 }}>
+          <Avatar
+            variant="rounded"
+            sx={{
+              width: 72,
+              height: 72,
+              bgcolor: platformLogoMeta(account.platform).color,
+              color: '#fff',
+              borderRadius: 1.5,
+              fontSize: 28,
+              fontWeight: 950,
+            }}
+          >
+            {platformLogoMeta(account.platform).label}
+          </Avatar>
+          <Chip size="small" label={account.accountStatus} sx={chipSx(statusTone(account.accountStatus))} />
+        </Stack>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1.2 }}>
+            <Typography sx={{ color: shell.ink, fontSize: 22, fontWeight: 950 }}>{account.platform} - {account.accountName}</Typography>
+            <Chip size="small" label={account.permissionStatus} sx={chipSx(statusTone(account.permissionStatus))} />
+          </Stack>
+          {renderInfoRows([
+            { label: '账号编号', value: <Stack direction="row" alignItems="center" spacing={0.5}>{account.accountNo}{renderCopyButton(account.accountNo, '账号编号')}</Stack> },
+            { label: '平台', value: account.platform },
+            { label: '账号类型', value: account.ownerSubject === '公司' ? '主账号' : account.ownerSubject },
+            { label: '登录账号', value: renderSensitiveInline('account', account.id, 'loginAccount', account.loginAccountMasked) },
+            { label: '绑定手机号', value: primaryPhone?.phoneNumberMasked || '-' },
+            { label: '绑定邮箱', value: renderSensitiveInline('account', account.id, 'boundEmail', account.boundEmailMasked || account.boundEmail || '-') },
+            { label: '服务商', value: account.serviceProvider || '-' },
+            { label: '到期时间', value: account.expiresAt || '-' },
+            { label: '用途', value: account.purpose || '-' },
+            { label: '备注', value: account.purpose || '-' },
+          ], 2)}
+        </Box>
+      </Stack>
+    ))
+  );
+
+  const renderResponsibilityCard = () => {
+    if (!detail) return null;
+    const current = detail.device || detail.phone || detail.account;
+    const account = detail.account;
+    const device = detail.device || detail.relatedDevice;
+    const owner = readAssetText(current, ['owner', 'currentUser'], '-');
+    const currentUser = readAssetText(current, ['currentUser', 'owner'], owner);
+    const department = readAssetText(current, ['department'], device?.department || account?.department || '-');
+    return renderDetailCard('归属与责任', (
+      renderInfoRows([
+        { label: '所属员工', value: <Box component="span" sx={{ color: shell.tableLink }}>{currentUser}</Box> },
+        { label: '所属部门', value: department },
+        { label: '负责人', value: owner },
+        { label: '负责人电话', value: '-' },
+        { label: '备用联系人', value: '-' },
+        { label: '分配时间', value: current?.createdAt ? formatDate(current.createdAt, 'yyyy-MM-dd') : '-' },
+      ], 2)
+    ));
+  };
+
+  const renderRiskInfoCard = () => {
+    if (!detail) return null;
+    const riskLevel = detail.risks[0]?.level || detail.device?.riskLevel || detail.account?.riskLevel || '低';
+    const lastCheckedAt = detail.risks[0]?.createdAt || detail.device?.updatedAt || detail.phone?.updatedAt || detail.account?.updatedAt || new Date().toISOString();
+    return renderDetailCard('风险信息', (
+      <Stack spacing={1}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: '92px minmax(0, 1fr)', alignItems: 'center' }}>
+          <Typography variant="body2" sx={{ color: shell.muted }}>风险等级</Typography>
+          <Chip size="small" label={riskLevel} sx={{ ...chipSx(riskTone(riskLevel)), justifySelf: 'start' }} />
+        </Box>
+        <Box sx={{ display: 'grid', gridTemplateColumns: '92px minmax(0, 1fr)', alignItems: 'start' }}>
+          <Typography variant="body2" sx={{ color: shell.muted }}>风险项</Typography>
+          <Stack spacing={0.45}>
+            {detail.risks.length ? detail.risks.map((risk) => (
+              <Typography key={risk.id} variant="body2" sx={{ color: risk.level === '低' ? shell.muted : shell.amber, fontWeight: 800 }}>
+                · {risk.description}
+              </Typography>
+            )) : (
+              <Typography variant="body2" sx={{ color: shell.muted }}>暂无待处理风险</Typography>
+            )}
+          </Stack>
+        </Box>
+        <Box sx={{ display: 'grid', gridTemplateColumns: '92px minmax(0, 1fr)', alignItems: 'center' }}>
+          <Typography variant="body2" sx={{ color: shell.muted }}>最后检测</Typography>
+          <Typography variant="body2" sx={{ color: shell.ink, fontWeight: 800 }}>{formatDate(lastCheckedAt, 'yyyy-MM-dd HH:mm:ss')}</Typography>
+        </Box>
+        <Box sx={{ display: 'grid', gridTemplateColumns: '92px minmax(0, 1fr)', alignItems: 'center' }}>
+          <Typography variant="body2" sx={{ color: shell.muted }}>处理状态</Typography>
+          <Chip size="small" label={riskStatusLabel[detail.risks[0]?.status || 'open']} sx={{ ...chipSx(statusTone(riskStatusLabel[detail.risks[0]?.status || 'open'])), justifySelf: 'start' }} />
+        </Box>
+        <Box sx={{ textAlign: 'right' }}>{renderLinkButton('查看风险详情', () => setSearchParams({ tab: 'risks' }))}</Box>
+      </Stack>
+    ));
+  };
+
+  const renderAssetNameLink = (label: string, onClick: () => void) => (
+    <Button
+      size="small"
+      onClick={onClick}
+      sx={{ px: 0, minWidth: 0, color: shell.tableLink, fontWeight: 900, justifyContent: 'flex-start' }}
+    >
+      {label}
+    </Button>
+  );
+
+  const renderRelatedAssetsSection = () => {
+    if (!detail) return null;
+    const phoneRows = detail.relatedPhones.map((phone) => [
+      phone.slotType,
+      renderAssetNameLink(phone.phoneNumberMasked, () => openDetail('phone', phone.id)),
+      phone.operator,
+      phone.packageName || '-',
+      <Chip size="small" label={phone.status} sx={chipSx(statusTone(phone.status))} />,
+    ]);
+    const accountRows = detail.relatedAccounts.map((account) => [
+      <Stack direction="row" spacing={1} alignItems="center">{renderPlatformLogo(account)}<Box>{account.platform}</Box></Stack>,
+      renderAssetNameLink(account.accountName, () => openDetail('account', account.id)),
+      account.loginAccountMasked,
+      detail.relatedPhones.find((phone) => phone.id === account.phoneId)?.phoneNumberMasked || '-',
+      <Chip size="small" label={account.permissionStatus} sx={chipSx(statusTone(account.permissionStatus))} />,
+    ]);
+    const deviceRows = primaryDevice ? [[
+      <Stack direction="row" spacing={1} alignItems="center">
+        <Avatar variant="rounded" sx={{ width: 34, height: 34, bgcolor: '#EAF2FF', color: shell.blue, borderRadius: 1 }}><PhoneIphoneIcon sx={{ fontSize: 22 }} /></Avatar>
+        {renderAssetNameLink(`${primaryDevice.deviceCode} / ${primaryDevice.deviceName}`, () => openDetail('device', primaryDevice.id))}
+      </Stack>,
+      primaryDevice.brandModel,
+      primaryDevice.simType,
+      <Chip size="small" label={primaryDevice.status} sx={chipSx(statusTone(primaryDevice.status))} />,
+    ]] : [];
+    const employeeRows = primaryAccount ? [[
+      primaryAccount.currentUser || primaryAccount.owner || '-',
+      primaryAccount.department || '-',
+      primaryAccount.owner || '-',
+      formatDate(primaryAccount.createdAt, 'yyyy-MM-dd'),
+    ]] : [];
+
+    if (detail.type === 'device') {
+      return renderDetailCard('关联资产', (
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1.25fr' }, gap: 1.25 }}>
+          {renderCompactTable(['卡槽', '手机号', '运营商', '套餐', '状态'], phoneRows, '暂无绑定手机号')}
+          {renderCompactTable(['平台', '账号名称', '登录账号', '手机号', '状态'], accountRows, '暂无互联网账号')}
+        </Box>
+      ));
+    }
+
+    if (detail.type === 'phone') {
+      return renderDetailCard('关联资产', (
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '0.7fr 1.3fr' }, gap: 1.25 }}>
+          {renderCompactTable(['所在设备', '品牌型号', 'SIM 类型', '状态'], deviceRows, '暂无所在设备')}
+          {renderCompactTable(['平台', '账号名称', '登录账号', '手机号', '状态'], accountRows, '暂无绑定互联网账号')}
+        </Box>
+      ));
+    }
+
+    return (
+      renderDetailCard('关联资产', (
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(3, minmax(0, 1fr))' }, gap: 1.25 }}>
+          {renderCompactTable(['绑定手机号', '运营商', '卡槽', '状态'], primaryPhone ? [[
+            renderAssetNameLink(primaryPhone.phoneNumberMasked, () => openDetail('phone', primaryPhone.id)),
+            primaryPhone.operator,
+            primaryPhone.slotType,
+            <Chip size="small" label={primaryPhone.status} sx={chipSx(statusTone(primaryPhone.status))} />,
+          ]] : [], '暂无绑定手机号')}
+          {renderCompactTable(['关联设备', '品牌型号', 'SIM 类型', '状态'], deviceRows, '暂无关联设备')}
+          {renderCompactTable(['员工', '部门', '负责人', '分配时间'], employeeRows, '暂无员工归属')}
+        </Box>
+      ))
+    );
+  };
+
+  const renderHistorySections = () => {
+    if (!detail) return null;
+    const sensitiveLogs = detail.logs.filter((log) => log.action.includes('查看敏感') || log.detail.includes('查看敏感') || log.detail.includes('完整手机号') || log.detail.includes('IMEI'));
+    const operationRows = detail.logs.slice(0, 5).map((log) => [
+      formatDate(log.time, 'yyyy-MM-dd HH:mm'),
+      log.operator,
+      log.action,
+      log.detail,
+    ]);
+    const sensitiveRows = sensitiveLogs.slice(0, 5).map((log) => [
+      formatDate(log.time, 'yyyy-MM-dd HH:mm'),
+      log.operator,
+      log.targetName,
+      log.detail,
+    ]);
+    return (
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 1.25 }}>
+        <Box>
+          <Typography sx={{ color: shell.ink, fontWeight: 950, mb: 1 }}>操作历史记录</Typography>
+          {renderCompactTable(['操作时间', '操作人', '操作行为', '操作说明'], operationRows, '暂无操作历史记录')}
+        </Box>
+        <Box>
+          <Typography sx={{ color: shell.ink, fontWeight: 950, mb: 1 }}>敏感信息查看记录（近7日）</Typography>
+          {renderCompactTable(['查看时间', '查看人', '查看内容', '查看原因'], sensitiveRows, '暂无敏感信息查看记录')}
+        </Box>
+      </Box>
+    );
+  };
+
+  const renderDetailBody = () => {
+    if (!detail) return null;
+    const titleMap: Record<AssetType, string> = {
+      device: '设备',
+      phone: '手机号',
+      account: '当前账号',
+    };
+    return (
+      <Stack spacing={1.4}>
+        <Paper elevation={0} sx={{ px: 1.5, py: 1, bgcolor: '#EEF6FF', border: '1px solid #D8E9FF', borderRadius: 1 }}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <InfoOutlinedIcon sx={{ color: shell.blue, fontSize: 18 }} />
+            <Typography variant="body2" sx={{ color: shell.ink }}>
+              本页面展示{titleMap[detail.type]}资产的当前资料与关系数据。
+            </Typography>
+          </Stack>
+        </Paper>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1.1fr 0.9fr' }, gap: 1.25 }}>
+          {detail.device ? renderDeviceBasicCard(detail.device) : detail.phone ? renderPhoneBasicCard(detail.phone) : detail.account ? renderAccountBasicCard(detail.account) : null}
+          <Stack spacing={1.25}>
+            {renderResponsibilityCard()}
+            {renderRiskInfoCard()}
+          </Stack>
+        </Box>
+        {renderRelatedAssetsSection()}
+        {renderHistorySections()}
+      </Stack>
+    );
+  };
+
   const renderDetailDialog = () => {
     if (activeTab === 'overview' || activeTab === 'logs') return null;
     const detailTitleMap: Record<AssetType, string> = {
-      device: '设备快照',
-      phone: '手机号快照',
-      account: '账号快照',
-    };
-    const detailDescriptionMap: Record<AssetType, string> = {
-      device: '当前设备 + 绑定手机号 + 关联账号 + 风险 + 最近操作日志',
-      phone: '当前手机号 + 所属设备 + 关联账号 + 风险 + 最近操作日志',
-      account: '当前账号 + 绑定手机号 + 所属设备 + 风险 + 最近操作日志',
+      device: '查看设备资料',
+      phone: '查看手机号资料',
+      account: '查看互联网账号资料',
     };
     return (
       <Dialog
         open={detailDialogOpen}
         onClose={closeDetailDialog}
-        maxWidth="lg"
+        maxWidth="xl"
         fullWidth
-        PaperProps={{ sx: { borderRadius: 1, overflow: 'hidden' } }}
+        PaperProps={{ sx: { borderRadius: 1, overflow: 'hidden', maxWidth: 1320 } }}
       >
         <DialogTitle sx={{ p: 0 }}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between" sx={{ px: 2.25, py: 1.75, borderBottom: `1px solid ${shell.softLine}` }}>
-          <Box>
-            <Typography sx={{ fontWeight: 900 }}>{detail ? detailTitleMap[detail.type] : '资产快照'}</Typography>
-            <Typography variant="caption" sx={{ color: shell.muted }}>
-              {detail ? detailDescriptionMap[detail.type] : '资产关联链路、风险与最近操作日志'}
-            </Typography>
-          </Box>
-          {canEditAssets && detail ? (
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={<EditIcon />}
-              onClick={() => {
-                if (detail.device) openEditForm('device', detail.device);
-                else if (detail.phone) openEditForm('phone', detail.phone);
-                else if (detail.account) openEditForm('account', detail.account);
-              }}
-            >
-              编辑资料
-            </Button>
-          ) : null}
-        </Stack>
+          <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between" sx={{ px: 2.25, py: 1.5, borderBottom: `1px solid ${shell.softLine}` }}>
+            <Typography sx={{ color: shell.ink, fontSize: 20, fontWeight: 950 }}>{detail ? detailTitleMap[detail.type] : '查看资产资料'}</Typography>
+            <Stack direction="row" spacing={1} alignItems="center">
+              {canEditAssets && detail ? (
+                <Button
+                  size="small"
+                  variant="contained"
+                  startIcon={<EditIcon />}
+                  onClick={() => {
+                    if (detail.device) openEditForm('device', detail.device);
+                    else if (detail.phone) openEditForm('phone', detail.phone);
+                    else if (detail.account) openEditForm('account', detail.account);
+                  }}
+                  sx={{ fontWeight: 900, px: 2 }}
+                >
+                  编辑资料
+                </Button>
+              ) : null}
+              <IconButton onClick={closeDetailDialog} sx={{ color: shell.muted }}>
+                <CloseIcon />
+              </IconButton>
+            </Stack>
+          </Stack>
         </DialogTitle>
-        <DialogContent sx={{ bgcolor: '#F8FAFC', p: 2 }}>
+        <DialogContent sx={{ bgcolor: '#FBFCFE', p: 1.5 }}>
           {!detail ? (
             <Box sx={{ py: 6, textAlign: 'center' }}>
               <Typography sx={{ color: shell.muted, fontWeight: 800 }}>正在加载资产详情</Typography>
             </Box>
-          ) : (
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '1.4fr 1fr' }, gap: 2 }}>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 28px 1fr 28px 1fr' }, gap: 1, alignItems: 'stretch' }}>
-            {renderTraceNode('设备资产', primaryDevice ? `${primaryDevice.deviceCode} ${primaryDevice.deviceName}` : '未关联设备', primaryDevice?.department || '-')}
-            {renderTraceArrow()}
-            {renderTraceNode('手机号资产', primaryPhone ? `${primaryPhone.phoneNumberMasked} / ${primaryPhone.slotType}` : '未绑定手机号', primaryPhone?.operator || '-')}
-            {renderTraceArrow()}
-            {renderTraceNode('互联网账号', primaryAccount ? `${primaryAccount.platform} ${primaryAccount.accountName}` : '未关联账号', primaryAccount?.accountNo || '-')}
-          </Box>
-          <Box sx={{ display: 'grid', gap: 1 }}>
-            {renderSensitivePanel()}
-            <Paper elevation={0} sx={{ border: `1px solid ${shell.softLine}`, borderRadius: 1, p: 1.25 }}>
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.75 }}>
-                <Typography variant="body2" sx={{ fontWeight: 900 }}>风险提示</Typography>
-                {detail.risks.length ? <Chip size="small" label={`${detail.risks.length}项`} sx={chipSx(riskTone('中'))} /> : <Chip size="small" label="暂无" sx={chipSx(riskTone('低'))} />}
-              </Stack>
-              {detail.risks.length ? detail.risks.map((risk) => (
-                <Typography key={risk.id} variant="caption" sx={{ color: shell.muted, display: 'block' }}>
-                  {risk.type}：{risk.description}
-                </Typography>
-              )) : (
-                <Typography variant="caption" sx={{ color: shell.muted }}>当前关联链路没有未处理风险。</Typography>
-              )}
-            </Paper>
-            <Paper elevation={0} sx={{ border: `1px solid ${shell.softLine}`, borderRadius: 1, p: 1.25 }}>
-              <Typography variant="body2" sx={{ fontWeight: 900, mb: 0.75 }}>最近操作日志</Typography>
-              {detail.logs.slice(0, 3).map((log) => (
-                <Typography key={log.id} variant="caption" sx={{ color: shell.muted, display: 'block', mb: 0.25 }}>
-                  {formatDate(log.time, 'MM-dd HH:mm')} {log.operator} {log.action}：{log.targetName}
-                </Typography>
-              ))}
-            </Paper>
-          </Box>
-        </Box>
-          )}
+          ) : renderDetailBody()}
         </DialogContent>
         <DialogActions sx={{ px: 2.25, py: 1.5, borderTop: `1px solid ${shell.softLine}` }}>
           <Button onClick={closeDetailDialog}>关闭</Button>
@@ -1337,65 +1960,6 @@ const AssetManagement: React.FC = () => {
       </Dialog>
     );
   };
-
-  const renderSensitiveValue = (
-    type: AssetType,
-    id: string,
-    field: AssetSensitiveField,
-    label: string,
-    maskedValue?: string,
-  ) => {
-    const key = revealedKey(type, id, field);
-    const value = revealedValues[key] || maskedValue || '-';
-    return (
-      <Stack key={key} direction="row" spacing={1} alignItems="center" justifyContent="space-between" sx={{ py: 0.5 }}>
-        <Box sx={{ minWidth: 0 }}>
-          <Typography variant="caption" sx={{ color: shell.muted, display: 'block' }}>{label}</Typography>
-          <Typography variant="body2" sx={{ fontWeight: 800, color: shell.ink, wordBreak: 'break-all' }}>{value}</Typography>
-        </Box>
-        {canRevealSensitive && !revealedValues[key] ? (
-          <Button size="small" variant="outlined" onClick={() => revealField(type, id, field)}>
-            查看
-          </Button>
-        ) : null}
-      </Stack>
-    );
-  };
-
-  const renderSensitivePanel = () => {
-    if (!detail) return null;
-    const rows: React.ReactNode[] = [];
-    if (detail.device) rows.push(renderSensitiveValue('device', detail.device.id, 'imei', 'IMEI', detail.device.imeiMasked));
-    if (detail.phone) rows.push(renderSensitiveValue('phone', detail.phone.id, 'phoneNumber', '完整手机号', detail.phone.phoneNumberMasked));
-    if (detail.account) {
-      rows.push(renderSensitiveValue('account', detail.account.id, 'loginAccount', '登录账号', detail.account.loginAccountMasked));
-      rows.push(renderSensitiveValue('account', detail.account.id, 'boundEmail', '绑定邮箱', detail.account.boundEmailMasked || detail.account.boundEmail || '-'));
-    }
-    if (!rows.length) return null;
-    return (
-      <Paper elevation={0} sx={{ border: `1px solid ${shell.softLine}`, borderRadius: 1, p: 1.25 }}>
-        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-          <Typography variant="body2" sx={{ fontWeight: 900 }}>敏感字段</Typography>
-          {!canRevealSensitive ? <Chip size="small" label="无明文权限" sx={chipSx(riskTone('中'))} /> : null}
-        </Stack>
-        {rows}
-      </Paper>
-    );
-  };
-
-  const renderTraceNode = (label: string, title: string, description: string) => (
-    <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 1.5, bgcolor: '#FBFCFE' }}>
-      <Typography variant="caption" sx={{ color: shell.muted, fontWeight: 800 }}>{label}</Typography>
-      <Typography variant="body2" sx={{ color: shell.ink, fontWeight: 900, mt: 0.75 }}>{title}</Typography>
-      <Typography variant="caption" sx={{ color: shell.muted }}>{description}</Typography>
-    </Paper>
-  );
-
-  const renderTraceArrow = () => (
-    <Box sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center', justifyContent: 'center', color: shell.muted, fontWeight: 900 }}>
-      →
-    </Box>
-  );
 
   const renderTextField = (name: string, label: string, props: { required?: boolean; type?: string; multiline?: boolean } = {}) => (
     <TextField
@@ -1728,6 +2292,21 @@ const AssetManagement: React.FC = () => {
       {renderImportDialog()}
       {renderFormDialog()}
       {renderViewSettingsDialog()}
+      <Dialog open={Boolean(deleteTarget)} onClose={closeDeleteConfirm} maxWidth="xs" fullWidth>
+        <DialogTitle>删除资产</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ color: shell.ink, fontWeight: 900, mb: 1 }}>
+            {deleteTarget?.label}
+          </Typography>
+          <Typography variant="body2" sx={{ color: shell.muted }}>
+            删除后会从当前资产台账移除，并保留操作日志。
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeDeleteConfirm}>取消</Button>
+          <Button color="error" variant="contained" onClick={submitDelete}>确认删除</Button>
+        </DialogActions>
+      </Dialog>
       <Snackbar
         open={Boolean(snackbar)}
         autoHideDuration={2200}

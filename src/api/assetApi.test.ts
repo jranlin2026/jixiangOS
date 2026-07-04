@@ -213,6 +213,157 @@ await resetAssets();
 }
 
 {
+  const device = await assetApi.createDevice({
+    deviceName: 'Delete Phone Device',
+    brandModel: 'iPhone Delete Phone',
+    imei: 'DELETE-PHONE-IMEI-0001',
+    simType: '双卡',
+    ownerSubject: '公司',
+    department: 'Ops',
+    owner: 'Asset Tester',
+    currentUser: 'Asset Tester',
+    status: '使用中',
+    riskLevel: '低',
+    monthlyCost: 0,
+  });
+  assert.equal(device.code, 0);
+
+  const phone = await assetApi.createPhoneNumber({
+    phoneNumber: '13900004441',
+    operator: '移动',
+    deviceId: device.data.id,
+    slotType: '卡槽1',
+    packageName: 'Delete Phone Plan',
+    monthlyFee: 39,
+    owner: 'Asset Tester',
+    status: '使用中',
+  });
+  assert.equal(phone.code, 0);
+
+  const account = await assetApi.createInternetAccount({
+    platform: 'Delete Phone Platform',
+    accountName: 'Delete Phone Account',
+    loginAccount: 'delete_phone_account',
+    phoneId: phone.data.id,
+    ownerSubject: '公司',
+    department: 'Ops',
+    owner: 'Asset Tester',
+    currentUser: 'Asset Tester',
+    permissionStatus: '正常',
+    accountStatus: '正常',
+    riskLevel: '低',
+    serviceProvider: 'Self',
+    monthlyFee: 0,
+    purpose: 'Delete phone regression',
+  });
+  assert.equal(account.code, 0);
+
+  const deleted = await assetApi.deletePhoneNumber(phone.data.id);
+  assert.equal(deleted.code, 0);
+
+  const listedPhones = await assetApi.fetchPhoneNumbers({ search: '13900004441', pageSize: 20 });
+  assert.equal(listedPhones.data.items.length, 0);
+
+  const listedAccounts = await assetApi.fetchInternetAccounts({ search: 'Delete Phone Account', pageSize: 20 });
+  assert.equal(listedAccounts.data.items.length, 1);
+  assert.equal(listedAccounts.data.items[0].phoneId, undefined);
+
+  const logs = JSON.parse(localStorage.getItem(STORAGE_KEYS.ASSET_OPERATION_LOGS) || '[]') as AssetOperationLog[];
+  assert.ok(logs.some((log) => log.targetId === phone.data.id && log.action === '删除资产'));
+}
+
+{
+  const device = await assetApi.createDevice({
+    deviceName: 'Delete Device Cascade',
+    brandModel: 'iPhone Delete Device',
+    imei: 'DELETE-DEVICE-IMEI-0001',
+    simType: '双卡',
+    ownerSubject: '公司',
+    department: 'Ops',
+    owner: 'Asset Tester',
+    currentUser: 'Asset Tester',
+    status: '使用中',
+    riskLevel: '低',
+    monthlyCost: 0,
+  });
+  assert.equal(device.code, 0);
+
+  const phone = await assetApi.createPhoneNumber({
+    phoneNumber: '13900004442',
+    operator: '移动',
+    deviceId: device.data.id,
+    slotType: '卡槽1',
+    packageName: 'Delete Device Plan',
+    monthlyFee: 39,
+    owner: 'Asset Tester',
+    status: '使用中',
+  });
+  assert.equal(phone.code, 0);
+
+  const account = await assetApi.createInternetAccount({
+    platform: 'Delete Device Platform',
+    accountName: 'Delete Device Account',
+    loginAccount: 'delete_device_account',
+    phoneId: phone.data.id,
+    ownerSubject: '公司',
+    department: 'Ops',
+    owner: 'Asset Tester',
+    currentUser: 'Asset Tester',
+    permissionStatus: '正常',
+    accountStatus: '正常',
+    riskLevel: '低',
+    serviceProvider: 'Self',
+    monthlyFee: 0,
+    purpose: 'Delete device regression',
+  });
+  assert.equal(account.code, 0);
+
+  const deleted = await assetApi.deleteDevice(device.data.id);
+  assert.equal(deleted.code, 0);
+
+  const listedDevices = await assetApi.fetchDevices({ search: 'Delete Device Cascade', pageSize: 20 });
+  assert.equal(listedDevices.data.items.length, 0);
+
+  const listedPhones = await assetApi.fetchPhoneNumbers({ search: '13900004442', pageSize: 20 });
+  assert.equal(listedPhones.data.items.length, 0);
+
+  const listedAccounts = await assetApi.fetchInternetAccounts({ search: 'Delete Device Account', pageSize: 20 });
+  assert.equal(listedAccounts.data.items.length, 1);
+  assert.equal(listedAccounts.data.items[0].phoneId, undefined);
+
+  const logs = JSON.parse(localStorage.getItem(STORAGE_KEYS.ASSET_OPERATION_LOGS) || '[]') as AssetOperationLog[];
+  assert.ok(logs.some((log) => log.targetId === device.data.id && log.action === '删除资产'));
+}
+
+{
+  const account = await assetApi.createInternetAccount({
+    platform: 'Delete Account Platform',
+    accountName: 'Delete Account Only',
+    loginAccount: 'delete_account_only',
+    ownerSubject: '公司',
+    department: 'Ops',
+    owner: 'Asset Tester',
+    currentUser: 'Asset Tester',
+    permissionStatus: '正常',
+    accountStatus: '正常',
+    riskLevel: '低',
+    serviceProvider: 'Self',
+    monthlyFee: 0,
+    purpose: 'Delete account regression',
+  });
+  assert.equal(account.code, 0);
+
+  const deleted = await assetApi.deleteInternetAccount(account.data.id);
+  assert.equal(deleted.code, 0);
+
+  const listedAccounts = await assetApi.fetchInternetAccounts({ search: 'Delete Account Only', pageSize: 20 });
+  assert.equal(listedAccounts.data.items.length, 0);
+
+  const logs = JSON.parse(localStorage.getItem(STORAGE_KEYS.ASSET_OPERATION_LOGS) || '[]') as AssetOperationLog[];
+  assert.ok(logs.some((log) => log.targetId === account.data.id && log.action === '删除资产'));
+}
+
+{
   const imported = await assetApi.importAssetsFromCsv('devices', [
     '设备名称*,品牌型号*,IMEI*,SIM类型,所属主体,所属部门,负责人,当前使用人,状态,风险等级,月费用,备注',
     '导入测试设备,iPhone Import,IMPORT-IMEI-0001,双卡,公司,运营管理部,测试员,测试员,使用中,低,0,首批导入',
