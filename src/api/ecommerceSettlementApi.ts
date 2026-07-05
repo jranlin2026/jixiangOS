@@ -9,6 +9,7 @@ import type {
   EcommerceOrderDetailRow,
   EcommerceSettlementConfig,
   EcommerceSettlementRecord,
+  EcommerceSettlementRecordSummary,
   EcommerceSettlementResult,
   EcommerceSettlementStats,
   EcommerceTalentSummaryRow,
@@ -41,6 +42,12 @@ const DEFAULT_CONFIG: EcommerceSettlementConfig = {
   storeName: '抖音店铺',
   shippingFee: 2.4,
 };
+
+const SETTLEMENT_DB_NAME = 'aaos_ecommerce_settlement';
+const SETTLEMENT_DB_VERSION = 1;
+const SETTLEMENT_RECORD_STORE = 'records';
+const MAX_STORED_RECORD_SUMMARIES = 30;
+const PREVIEW_ROW_LIMIT = 12;
 
 const SHEET_HEADERS = {
   orderDetail: [
@@ -77,6 +84,7 @@ const SHEET_HEADERS = {
 } as const;
 
 let browserExcelJsPromise: Promise<ExcelJsNamespace> | null = null;
+const memoryRecordCache = new Map<string, EcommerceSettlementRecord>();
 
 function loadBrowserExcelJs(): Promise<ExcelJsNamespace> {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
@@ -186,6 +194,97 @@ function toArrayBuffer(value: ArrayBuffer | ArrayBufferView): ArrayBuffer {
   const copy = new Uint8Array(view.byteLength);
   copy.set(view);
   return copy.buffer;
+}
+
+function isFullSettlementRecord(value: unknown): value is EcommerceSettlementRecord {
+  const record = value as Partial<EcommerceSettlementRecord> | null;
+  return Boolean(
+    record
+    && typeof record === 'object'
+    && Array.isArray(record.orderDetailRows)
+    && Array.isArray(record.talentSummaryRows)
+    && Array.isArray(record.flowCheckRows),
+  );
+}
+
+export function summarizeSettlementRecord(record: EcommerceSettlementRecord, fullRecordStorage: EcommerceSettlementRecordSummary['fullRecordStorage'] = 'memory'): EcommerceSettlementRecordSummary {
+  return {
+    id: record.id,
+    storeName: record.storeName,
+    generatedAt: record.generatedAt,
+    version: record.version,
+    shippingFee: record.shippingFee,
+    uploadedFileNames: record.uploadedFileNames,
+    stats: record.stats,
+    coveredMonths: record.coveredMonths,
+    previewTalentSummaryRows: record.talentSummaryRows.slice(0, PREVIEW_ROW_LIMIT),
+    previewFlowSceneSummaryRows: record.flowSceneSummaryRows.slice(0, PREVIEW_ROW_LIMIT),
+    previewExceptionRows: record.exceptionRows.slice(0, PREVIEW_ROW_LIMIT),
+    fullRecordStorage,
+  };
+}
+
+function hasIndexedDb(): boolean {
+  return typeof indexedDB !== 'undefined';
+}
+
+function openSettlementDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (!hasIndexedDb()) {
+      reject(new Error('IndexedDB is unavailable'));
+      return;
+    }
+    const request = indexedDB.open(SETTLEMENT_DB_NAME, SETTLEMENT_DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(SETTLEMENT_RECORD_STORE)) {
+        db.createObjectStore(SETTLEMENT_RECORD_STORE, { keyPath: 'id' });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('IndexedDB open failed'));
+  });
+}
+
+async function putIndexedDbRecord(record: EcommerceSettlementRecord): Promise<boolean> {
+  if (!hasIndexedDb()) return false;
+  try {
+    const db = await openSettlementDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(SETTLEMENT_RECORD_STORE, 'readwrite');
+      tx.objectStore(SETTLEMENT_RECORD_STORE).put(record);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error('IndexedDB write failed'));
+      tx.onabort = () => reject(tx.error || new Error('IndexedDB write aborted'));
+    });
+    db.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getIndexedDbRecord(id: string): Promise<EcommerceSettlementRecord | null> {
+  if (!hasIndexedDb()) return null;
+  try {
+    const db = await openSettlementDb();
+    const record = await new Promise<EcommerceSettlementRecord | null>((resolve, reject) => {
+      const tx = db.transaction(SETTLEMENT_RECORD_STORE, 'readonly');
+      const request = tx.objectStore(SETTLEMENT_RECORD_STORE).get(id);
+      request.onsuccess = () => resolve(isFullSettlementRecord(request.result) ? request.result : null);
+      request.onerror = () => reject(request.error || new Error('IndexedDB read failed'));
+    });
+    db.close();
+    return record;
+  } catch {
+    return null;
+  }
+}
+
+function readStoredRecordItems(): Array<EcommerceSettlementRecordSummary | EcommerceSettlementRecord> {
+  if (typeof localStorage === 'undefined') return [];
+  const raw = getStorageData<Array<EcommerceSettlementRecordSummary | EcommerceSettlementRecord>>(STORAGE_KEYS.ECOMMERCE_SETTLEMENT_RECORDS);
+  return Array.isArray(raw) ? raw : [];
 }
 
 export async function readWorkbookRows(arrayBuffer: ArrayBuffer): Promise<RawRow[]> {
@@ -413,14 +512,35 @@ export function buildEcommerceSettlement(input: EcommerceSettlementInput): Ecomm
   };
 }
 
-function readRecords(): EcommerceSettlementRecord[] {
+function readRecordSummaries(): EcommerceSettlementRecordSummary[] {
   if (typeof localStorage === 'undefined') return [];
-  return getStorageData<EcommerceSettlementRecord[]>(STORAGE_KEYS.ECOMMERCE_SETTLEMENT_RECORDS) || [];
+  const storedItems = readStoredRecordItems();
+  let migratedLegacyFullRecords = false;
+  const summaries = storedItems.map((item) => {
+    if (isFullSettlementRecord(item)) {
+      migratedLegacyFullRecords = true;
+      memoryRecordCache.set(item.id, item);
+      void putIndexedDbRecord(item);
+      return summarizeSettlementRecord(item, 'legacy');
+    }
+    return item;
+  });
+  if (migratedLegacyFullRecords) saveRecordSummaries(summaries);
+  return summaries;
 }
 
-function saveRecords(records: EcommerceSettlementRecord[]): void {
+function saveRecordSummaries(records: EcommerceSettlementRecordSummary[]): void {
   if (typeof localStorage === 'undefined') return;
-  setStorageData(STORAGE_KEYS.ECOMMERCE_SETTLEMENT_RECORDS, records);
+  try {
+    setStorageData(STORAGE_KEYS.ECOMMERCE_SETTLEMENT_RECORDS, records);
+  } catch {
+    try {
+      localStorage.removeItem(STORAGE_KEYS.ECOMMERCE_SETTLEMENT_RECORDS);
+      localStorage.setItem(STORAGE_KEYS.ECOMMERCE_SETTLEMENT_RECORDS, JSON.stringify(records));
+    } catch {
+      // The current full result is still usable from memory; history persistence is best effort.
+    }
+  }
 }
 
 export function getEcommerceSettlementConfig(): EcommerceSettlementConfig {
@@ -466,7 +586,10 @@ export async function createSettlementFromFiles(input: EcommerceSettlementFileIn
     ],
     ...result,
   };
-  saveRecords([record, ...readRecords()].slice(0, 30));
+  const indexedDbSaved = await putIndexedDbRecord(record);
+  memoryRecordCache.set(record.id, record);
+  const summary = summarizeSettlementRecord(record, indexedDbSaved ? 'indexeddb' : 'memory');
+  saveRecordSummaries([summary, ...readRecordSummaries().filter((item) => item.id !== record.id)].slice(0, MAX_STORED_RECORD_SUMMARIES));
   return record;
 }
 
@@ -553,9 +676,16 @@ export async function createSettlementWorkbook(record: EcommerceSettlementRecord
 export const ecommerceSettlementApi = {
   getConfig: getEcommerceSettlementConfig,
   saveConfig: saveEcommerceSettlementConfig,
-  fetchRecords: readRecords,
-  fetchRecord: (id: string) => readRecords().find((record) => record.id === id) || null,
+  fetchRecords: readRecordSummaries,
+  fetchRecord: async (id: string) => {
+    const cachedRecord = memoryRecordCache.get(id);
+    if (cachedRecord) return cachedRecord;
+    const indexedDbRecord = await getIndexedDbRecord(id);
+    if (indexedDbRecord) return indexedDbRecord;
+    return readStoredRecordItems().find((item): item is EcommerceSettlementRecord => isFullSettlementRecord(item) && item.id === id) || null;
+  },
   createFromFiles: createSettlementFromFiles,
   createWorkbook: createSettlementWorkbook,
   buildSettlement: buildEcommerceSettlement,
+  summarizeRecord: summarizeSettlementRecord,
 };

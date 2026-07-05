@@ -30,6 +30,7 @@ import type {
   EcommerceFlowSummaryRow,
   EcommerceSettlementConfig,
   EcommerceSettlementRecord,
+  EcommerceSettlementRecordSummary,
   EcommerceTalentSummaryRow,
 } from '../../types/ecommerceSettlement';
 import { ModuleHeader, ModulePage, ModuleTabs, ModuleToolbar, Tab, moduleTablePaperSx, moduleTableSx, moduleTokens } from '../../shared/components/ModuleShell';
@@ -236,7 +237,8 @@ const EcommerceSettlement: React.FC = () => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const visibleTabs = tabs.filter((tab) => hasPermission(currentUser, tab.permissionKey));
   const [activeTab, setActiveTab] = useState<EcommerceSettlementTab>(visibleTabs[0]?.value || 'workbench');
-  const [records, setRecords] = useState<EcommerceSettlementRecord[]>([]);
+  const [records, setRecords] = useState<EcommerceSettlementRecordSummary[]>([]);
+  const [currentSummary, setCurrentSummary] = useState<EcommerceSettlementRecordSummary | null>(null);
   const [currentRecord, setCurrentRecord] = useState<EcommerceSettlementRecord | null>(null);
   const [config, setConfig] = useState<EcommerceSettlementConfig>(() => ecommerceSettlementApi.getConfig());
   const [orderFiles, setOrderFiles] = useState<File[]>([]);
@@ -251,7 +253,7 @@ const EcommerceSettlement: React.FC = () => {
   useEffect(() => {
     const nextRecords = ecommerceSettlementApi.fetchRecords();
     setRecords(nextRecords);
-    setCurrentRecord((record) => record || nextRecords[0] || null);
+    setCurrentSummary((summary) => summary || nextRecords[0] || null);
   }, []);
 
   useEffect(() => {
@@ -260,14 +262,32 @@ const EcommerceSettlement: React.FC = () => {
     }
   }, [activeTab, visibleTabs]);
 
-  const stats = currentRecord?.stats;
+  const stats = currentRecord?.stats || currentSummary?.stats;
   const hasRequiredFiles = orderFiles.length > 0 && flowFiles.length > 0;
   const topRecords = useMemo(() => records.slice(0, 8), [records]);
+  const visibleFlowSummaryRows = currentRecord?.flowSceneSummaryRows || currentSummary?.previewFlowSceneSummaryRows || [];
+  const visibleTalentRows = currentRecord?.talentSummaryRows || currentSummary?.previewTalentSummaryRows || [];
+  const visibleExceptionRows = currentRecord?.exceptionRows || currentSummary?.previewExceptionRows || [];
 
   const refreshRecords = (selected?: EcommerceSettlementRecord) => {
     const nextRecords = ecommerceSettlementApi.fetchRecords();
+    const selectedSummary = selected ? ecommerceSettlementApi.summarizeRecord(selected, 'memory') : nextRecords[0] || null;
     setRecords(nextRecords);
-    setCurrentRecord(selected || nextRecords[0] || null);
+    setCurrentSummary(selectedSummary);
+    setCurrentRecord(selected || null);
+  };
+
+  const loadFullRecord = async (summary: EcommerceSettlementRecordSummary): Promise<EcommerceSettlementRecord | null> => {
+    const record = await ecommerceSettlementApi.fetchRecord(summary.id);
+    setCurrentSummary(summary);
+    setCurrentRecord(record);
+    if (!record) {
+      setMessage({
+        type: 'error',
+        text: '这条历史只有摘要，完整明细没有保存在浏览器数据库中。请重新上传原始表生成后下载。',
+      });
+    }
+    return record;
   };
 
   const handleGenerate = async () => {
@@ -296,7 +316,11 @@ const EcommerceSettlement: React.FC = () => {
     }
   };
 
-  const handleDownload = async (record: EcommerceSettlementRecord) => {
+  const handleDownload = async (recordOrSummary: EcommerceSettlementRecord | EcommerceSettlementRecordSummary) => {
+    const record = 'orderDetailRows' in recordOrSummary
+      ? recordOrSummary
+      : await loadFullRecord(recordOrSummary);
+    if (!record) return;
     const buffer = await ecommerceSettlementApi.createWorkbook(record);
     const month = record.coveredMonths.join('_') || '未识别月份';
     downloadBlob(`${record.storeName}_${month}_电商结算.xlsx`, buffer);
@@ -362,11 +386,11 @@ const EcommerceSettlement: React.FC = () => {
               <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '1fr 1fr' }, gap: 2 }}>
                 <Box>
                   <Typography variant="subtitle1" sx={{ fontWeight: 900, mb: 1 }}>资金流水场景汇总</Typography>
-                  <FlowSummary rows={currentRecord?.flowSceneSummaryRows || []} />
+                  <FlowSummary rows={visibleFlowSummaryRows} />
                 </Box>
                 <Box>
                   <Typography variant="subtitle1" sx={{ fontWeight: 900, mb: 1 }}>达人结算预览</Typography>
-                  <TalentTable rows={currentRecord?.talentSummaryRows || []} />
+                  <TalentTable rows={visibleTalentRows} />
                 </Box>
               </Box>
             </>
@@ -392,7 +416,7 @@ const EcommerceSettlement: React.FC = () => {
                   </Typography>
                 </Box>
                 <Stack direction="row" spacing={1}>
-                  <Button variant="outlined" onClick={() => setCurrentRecord(record)}>查看</Button>
+                  <Button variant="outlined" onClick={() => void loadFullRecord(record)}>查看</Button>
                   <Button variant="contained" startIcon={<FileDownloadIcon />} onClick={() => handleDownload(record)}>下载</Button>
                 </Stack>
               </Stack>
@@ -404,20 +428,20 @@ const EcommerceSettlement: React.FC = () => {
       {activeTab === 'exceptions' && (
         <Stack spacing={1.5}>
           <ModuleToolbar sx={{ mb: 0 }}>
-            <Chip icon={<WarningAmberIcon />} label={`${currentRecord?.exceptionRows.length || 0} 个异常`} color={(currentRecord?.exceptionRows.length || 0) > 0 ? 'warning' : 'success'} />
-            <Typography variant="body2" sx={{ color: moduleTokens.muted }}>{currentRecord ? `${currentRecord.storeName} · ${currentRecord.coveredMonths.join('、')}` : '请选择结算批次'}</Typography>
+            <Chip icon={<WarningAmberIcon />} label={`${stats?.exceptionCount || 0} 个异常`} color={(stats?.exceptionCount || 0) > 0 ? 'warning' : 'success'} />
+            <Typography variant="body2" sx={{ color: moduleTokens.muted }}>{currentSummary ? `${currentSummary.storeName} · ${currentSummary.coveredMonths.join('、')}` : '请选择结算批次'}</Typography>
           </ModuleToolbar>
-          <ExceptionTable rows={currentRecord?.exceptionRows || []} />
+          <ExceptionTable rows={visibleExceptionRows} />
         </Stack>
       )}
 
       {activeTab === 'talents' && (
         <Stack spacing={1.5}>
           <ModuleToolbar sx={{ mb: 0 }}>
-            <Chip label={`${currentRecord?.talentSummaryRows.length || 0} 个达人`} color="primary" />
-            {currentRecord && <Button variant="outlined" startIcon={<FileDownloadIcon />} onClick={() => handleDownload(currentRecord)}>下载当前批次</Button>}
+            <Chip label={`${stats?.talentCount || 0} 个达人`} color="primary" />
+            {(currentRecord || currentSummary) && <Button variant="outlined" startIcon={<FileDownloadIcon />} onClick={() => handleDownload(currentRecord || currentSummary!)}>下载当前批次</Button>}
           </ModuleToolbar>
-          <TalentTable rows={currentRecord?.talentSummaryRows || []} />
+          <TalentTable rows={visibleTalentRows} />
         </Stack>
       )}
 

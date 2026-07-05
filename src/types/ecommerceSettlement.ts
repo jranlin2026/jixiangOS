@@ -95,6 +95,21 @@ export interface EcommerceSettlementRecord extends EcommerceSettlementResult {
   uploadedFileNames: string[];
 }
 
+export interface EcommerceSettlementRecordSummary {
+  id: string;
+  storeName: string;
+  generatedAt: string;
+  version: string;
+  shippingFee: number;
+  uploadedFileNames: string[];
+  stats: EcommerceSettlementStats;
+  coveredMonths: string[];
+  previewTalentSummaryRows: EcommerceTalentSummaryRow[];
+  previewFlowSceneSummaryRows: EcommerceFlowSummaryRow[];
+  previewExceptionRows: EcommerceExceptionRow[];
+  fullRecordStorage: 'indexeddb' | 'memory' | 'legacy';
+}
+
 export interface EcommerceSettlementConfig {
   storeName: string;
   shippingFee: number;

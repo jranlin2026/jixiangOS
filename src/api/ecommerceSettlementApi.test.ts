@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { buildEcommerceSettlement, createSettlementWorkbook } from './ecommerceSettlementApi';
+import { ecommerceSettlementApi, buildEcommerceSettlement, createSettlementWorkbook } from './ecommerceSettlementApi';
+import { STORAGE_KEYS } from '../shared/utils/constants';
 
 const result = buildEcommerceSettlement({
   shippingFee: 2.4,
@@ -56,3 +57,42 @@ const buffer = await createSettlementWorkbook({
   ...result,
 });
 assert.equal(buffer.byteLength > 0, true);
+
+const storage = (() => {
+  const data = new Map<string, string>();
+  return {
+    getItem: (key: string) => data.get(key) || null,
+    setItem: (key: string, value: string) => data.set(key, value),
+    removeItem: (key: string) => data.delete(key),
+    clear: () => data.clear(),
+    key: (index: number) => Array.from(data.keys())[index] || null,
+    get length() {
+      return data.size;
+    },
+  };
+})();
+
+Object.defineProperty(globalThis, 'localStorage', {
+  value: storage,
+  configurable: true,
+});
+
+const fullRecord = {
+  id: 'legacy-full-record',
+  storeName: '旧记录店铺',
+  generatedAt: '2026-07-05T00:00:00.000Z',
+  version: '1.0',
+  shippingFee: 2.4,
+  uploadedFileNames: ['orders.xlsx', 'flows.xlsx'],
+  ...result,
+};
+storage.setItem(STORAGE_KEYS.ECOMMERCE_SETTLEMENT_RECORDS, JSON.stringify([fullRecord]));
+
+const summaries = ecommerceSettlementApi.fetchRecords();
+assert.equal(summaries.length, 1);
+assert.equal('orderDetailRows' in summaries[0], false);
+assert.equal(summaries[0].previewTalentSummaryRows.length > 0, true);
+assert.equal(
+  JSON.parse(storage.getItem(STORAGE_KEYS.ECOMMERCE_SETTLEMENT_RECORDS) || '[]')[0].orderDetailRows,
+  undefined,
+);
