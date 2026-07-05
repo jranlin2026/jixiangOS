@@ -112,6 +112,17 @@ const PERMISSION_TREE: PermissionNode[] = [
     ],
   },
   {
+    label: '电商结算中心',
+    children: [
+      { label: '结算工作台', key: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_WORKBENCH },
+      { label: '结算历史', key: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_HISTORY },
+      { label: '异常核对', key: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_EXCEPTIONS },
+      { label: '达人结算汇总', key: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_TALENTS },
+      { label: '店铺与参数', key: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_SETTINGS },
+      { label: '结算规则', key: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_RULES },
+    ],
+  },
+  {
     label: '资产管理',
     children: [
       { label: '资产总览', key: PERMISSION_KEYS.ASSETS_OVERVIEW },

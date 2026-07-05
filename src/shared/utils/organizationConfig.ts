@@ -8,7 +8,7 @@ import { normalizeUserRoleName } from './roles';
 import { getStorageData, setStorageData } from '../../api/mock/storage';
 
 const now = '2026-06-01T00:00:00.000Z';
-const ORGANIZATION_SCHEMA_VERSION = 6;
+const ORGANIZATION_SCHEMA_VERSION = 7;
 const DATA_SCOPE_DOMAINS: DataScopeDomain[] = [
   'leads',
   'customers',
@@ -183,6 +183,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_FLOW, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_RULES, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDERS, actions: ['read'] },
       ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
@@ -207,6 +208,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.SETTINGS_LEAD_FLOW, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.GEO, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ASSETS, actions: ['read', 'write'] },
     ],
     dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', assets: 'all' },
@@ -378,6 +380,24 @@ function sortPositions(positions: Position[]): Position[] {
   return [...positions].sort((a, b) => Number(a.sortOrder) - Number(b.sortOrder) || a.name.localeCompare(b.name));
 }
 
+function migrateStoredUsersWithIdMaps(
+  users: User[] | null | undefined,
+  roles: Role[],
+  idMaps: { roles: Record<string, string> },
+): User[] | null {
+  if (!users?.length) return null;
+  return users.map((user) => {
+    const roleId = user.roleId ? idMaps.roles[user.roleId] || user.roleId : user.roleId;
+    const role = resolveRoleForUser({ role: user.role, roleId }, roles);
+    return {
+      ...user,
+      role: role?.name || normalizeUserRoleName(user.role),
+      roleId: role?.id || roleId,
+      employmentStatus: user.employmentStatus || 'active',
+    };
+  });
+}
+
 export function sortDepartments(departments: Department[]): Department[] {
   return [...departments].sort((a, b) => {
     if ((a.parentId || '') !== (b.parentId || '')) return (a.parentId || '').localeCompare(b.parentId || '');
@@ -466,7 +486,7 @@ export function ensureOrganizationConfigData() {
       id: seed.id,
       code: seed.code,
       name: seed.name,
-      departmentId: departmentResult.idMap[current.departmentId || ''] || seed.departmentId,
+      departmentId: current.departmentId ? departmentResult.idMap[current.departmentId] || current.departmentId : seed.departmentId,
       permissions: seed.code === 'super_admin'
         ? seed.permissions
         : sanitizeRolePermissions(normalizeDefaultAssetSelfServicePermissions(
@@ -492,10 +512,14 @@ export function ensureOrganizationConfigData() {
     ...role,
     departmentId: role.departmentId ? departmentResult.idMap[role.departmentId] || role.departmentId : role.departmentId,
   }));
+  const migratedUsers = storedVersion < ORGANIZATION_SCHEMA_VERSION
+    ? migrateStoredUsersWithIdMaps(getStorageData<User[]>(STORAGE_KEYS.USERS), roles, { roles: rolesResult.idMap })
+    : null;
 
   setStorageData(STORAGE_KEYS.DEPARTMENTS, departments);
   setStorageData(STORAGE_KEYS.ROLES, roles);
   setStorageData(STORAGE_KEYS.POSITIONS, positions);
+  if (migratedUsers) setStorageData(STORAGE_KEYS.USERS, migratedUsers);
   setStorageData(STORAGE_KEYS.ORGANIZATION_SCHEMA_VERSION, ORGANIZATION_SCHEMA_VERSION);
   getOrganizationProfile();
 

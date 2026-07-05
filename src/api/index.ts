@@ -20,6 +20,7 @@ export { aiCardApi } from './aiCardApi';
 export { serviceTicketApi } from './serviceTicketApi';
 export { opportunityApi } from './opportunityApi';
 export { assetApi } from './assetApi';
+export { ecommerceSettlementApi } from './ecommerceSettlementApi';
 export { leadFlowApi } from './leadFlowApi';
 export { leadBulkImportApi } from './leadBulkImportApi';
 export { crmMigrationApi } from './crmMigrationApi';

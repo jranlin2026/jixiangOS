@@ -22,6 +22,7 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import SupportAgentIcon from '@mui/icons-material/SupportAgent';
 import PaidIcon from '@mui/icons-material/Paid';
+import StorefrontIcon from '@mui/icons-material/Storefront';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
@@ -113,6 +114,21 @@ const navItems: NavItem[] = [
       PERMISSION_KEYS.FINANCE_PAYOUT,
       PERMISSION_KEYS.FINANCE_FLOW,
       PERMISSION_KEYS.FINANCE_RULES,
+    ],
+  },
+  {
+    label: '电商结算中心',
+    icon: <StorefrontIcon />,
+    path: ROUTES.ECOMMERCE_SETTLEMENT,
+    permissionKey: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT,
+    permissionKeys: [
+      PERMISSION_KEYS.ECOMMERCE_SETTLEMENT,
+      PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_WORKBENCH,
+      PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_HISTORY,
+      PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_EXCEPTIONS,
+      PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_TALENTS,
+      PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_SETTINGS,
+      PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_RULES,
     ],
   },
   {

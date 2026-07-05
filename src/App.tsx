@@ -16,6 +16,7 @@ const Orders = React.lazy(() => import('./pages/Orders'));
 const Delivery = React.lazy(() => import('./pages/Delivery'));
 const AfterSales = React.lazy(() => import('./pages/AfterSales'));
 const Finance = React.lazy(() => import('./pages/Finance'));
+const EcommerceSettlement = React.lazy(() => import('./pages/EcommerceSettlement'));
 const Assets = React.lazy(() => import('./pages/Assets'));
 const GEO = React.lazy(() => import('./pages/GEO'));
 const AIAssistant = React.lazy(() => import('./pages/AIAssistant'));
@@ -135,6 +136,17 @@ const App: React.FC = () => {
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.FINANCE_SETTLEMENT} />}>
             <Route path={ROUTES.COMMISSION} element={<Navigate to={`${ROUTES.FINANCE}?tab=settlement`} replace />} />
+          </Route>
+          <Route element={<ProtectedRoute permissionKeys={[
+            PERMISSION_KEYS.ECOMMERCE_SETTLEMENT,
+            PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_WORKBENCH,
+            PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_HISTORY,
+            PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_EXCEPTIONS,
+            PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_TALENTS,
+            PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_SETTINGS,
+            PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_RULES,
+          ]} />}>
+            <Route path={ROUTES.ECOMMERCE_SETTLEMENT} element={<Suspense fallback={<PageLoader />}><EcommerceSettlement /></Suspense>} />
           </Route>
           <Route element={<ProtectedRoute permissionKeys={[
             PERMISSION_KEYS.ASSETS,
