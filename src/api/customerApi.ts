@@ -60,6 +60,10 @@ function normalizeCustomer(customer: Customer): Customer {
     : { ...normalized, growthPath };
 }
 
+function hasFollowActivity(customer: Customer): boolean {
+  return (customer.activityRecords || []).some((record) => record.type === 'follow');
+}
+
 const CUSTOMER_CHANGE_FIELDS: Array<{ field: keyof Customer; label: string }> = [
   { field: 'name', label: '姓名' },
   { field: 'company', label: '公司' },
@@ -307,6 +311,32 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
         ? (c.releasedBy === filters.owner || c.owner === filters.owner)
         : c.owner === filters.owner
     ));
+  }
+  if (filters?.followStatus) {
+    filtered = filtered.filter((c) => (
+      filters.followStatus === 'has_follow'
+        ? hasFollowActivity(c)
+        : !hasFollowActivity(c)
+    ));
+  }
+  if (filters?.sourceType) {
+    filtered = filtered.filter((c) => normalizeResourceOwnership(c.sourceType) === normalizeResourceOwnership(filters.sourceType));
+  }
+  if (filters?.leadSource) {
+    const q = filters.leadSource.toLowerCase();
+    filtered = filtered.filter((c) => (c.leadSource || '').toLowerCase().includes(q));
+  }
+  if (filters?.industry) {
+    const q = filters.industry.toLowerCase();
+    filtered = filtered.filter((c) => (c.industry || '').toLowerCase().includes(q));
+  }
+  if (filters?.city) {
+    const q = filters.city.toLowerCase();
+    filtered = filtered.filter((c) => (c.city || '').toLowerCase().includes(q));
+  }
+  if (filters?.tag) {
+    const q = filters.tag.toLowerCase();
+    filtered = filtered.filter((c) => (c.tags || []).some((tag) => tag.toLowerCase().includes(q)));
   }
 
   const page = filters?.page || 1;

@@ -149,6 +149,12 @@ export interface CustomerFilters {
   customerLevel?: CustomerLevel;
   lifecycleStatusCode?: LifecycleStatusCode;
   owner?: string;
+  followStatus?: 'has_follow' | 'no_follow';
+  sourceType?: string;
+  leadSource?: string;
+  industry?: string;
+  city?: string;
+  tag?: string;
   page?: number;
   pageSize?: number;
 }

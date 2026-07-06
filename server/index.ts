@@ -231,6 +231,12 @@ app.get('/api/customers', requireStorageAccess, async (req: AuthenticatedRequest
     customerLevel: queryParam(req.query.customerLevel) as any,
     lifecycleStatusCode: queryParam(req.query.lifecycleStatusCode) as any,
     owner: queryParam(req.query.owner),
+    followStatus: queryParam(req.query.followStatus) as any,
+    sourceType: queryParam(req.query.sourceType),
+    leadSource: queryParam(req.query.leadSource),
+    industry: queryParam(req.query.industry),
+    city: queryParam(req.query.city),
+    tag: queryParam(req.query.tag),
     page: Number(queryParam(req.query.page)),
     pageSize: Number(queryParam(req.query.pageSize)),
   }, req.currentUser);

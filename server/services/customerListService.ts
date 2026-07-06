@@ -35,6 +35,10 @@ function buildTextLikeCondition(path: string, value: string) {
   return Prisma.sql`LOWER(COALESCE(${jsonText(path)}, '')) LIKE ${value}`;
 }
 
+function buildJsonArraySearchCondition(path: string, value: string) {
+  return Prisma.sql`JSON_SEARCH(data, 'one', ${value}, NULL, ${Prisma.raw(`'${path}'`)}) IS NOT NULL`;
+}
+
 function buildCustomerWhere(filters: CustomerFilters, currentUser?: AuthenticatedUser | null): Prisma.Sql {
   const conditions: Prisma.Sql[] = [
     Prisma.sql`domain = ${STORAGE_KEYS.CUSTOMERS}`,
@@ -73,6 +77,27 @@ function buildCustomerWhere(filters: CustomerFilters, currentUser?: Authenticate
     } else {
       conditions.push(Prisma.sql`owner = ${filters.owner}`);
     }
+  }
+  if (filters.followStatus) {
+    const hasFollowActivity = Prisma.sql`JSON_SEARCH(data, 'one', 'follow', NULL, '$.activityRecords[*].type') IS NOT NULL`;
+    conditions.push(filters.followStatus === 'has_follow'
+      ? hasFollowActivity
+      : Prisma.sql`NOT (${hasFollowActivity})`);
+  }
+  if (filters.sourceType) {
+    conditions.push(Prisma.sql`${jsonText('$.sourceType')} = ${filters.sourceType}`);
+  }
+  if (filters.leadSource) {
+    conditions.push(buildTextLikeCondition('$.leadSource', `%${filters.leadSource.trim().toLowerCase()}%`));
+  }
+  if (filters.industry) {
+    conditions.push(buildTextLikeCondition('$.industry', `%${filters.industry.trim().toLowerCase()}%`));
+  }
+  if (filters.city) {
+    conditions.push(buildTextLikeCondition('$.city', `%${filters.city.trim().toLowerCase()}%`));
+  }
+  if (filters.tag) {
+    conditions.push(buildJsonArraySearchCondition('$.tags[*]', `%${filters.tag.trim()}%`));
   }
 
   return Prisma.sql`${Prisma.join(conditions, ' AND ')}`;

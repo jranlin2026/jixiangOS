@@ -6,11 +6,13 @@ import {
   Box,
   Button,
   Chip,
+  Collapse,
   Dialog,
   DialogActions,
   DialogContent,
   FormControl,
   IconButton,
+  InputAdornment,
   InputLabel,
   MenuItem,
   Paper,
@@ -31,13 +33,16 @@ import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import FilterListIcon from '@mui/icons-material/FilterList';
 import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import SearchIcon from '@mui/icons-material/Search';
 import useCustomerStore from '../../store/useCustomerStore';
 import { customerApi, leadFlowApi, orderApi, settingsApi } from '../../api';
-import { CUSTOMER_LEVELS, ROUTES, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
+import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, ROUTES, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import CustomerDetail from './CustomerDetail';
@@ -238,6 +243,11 @@ const getCustomerScopeFromTab = (tab?: string | null): CustomerScope => (
   tab === 'public_pool' ? 'public_pool' : 'active'
 );
 
+const FOLLOW_STATUS_OPTIONS = [
+  { value: 'has_follow', label: '已跟进' },
+  { value: 'no_follow', label: '未跟进' },
+] as const;
+
 const Customers: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -256,6 +266,7 @@ const Customers: React.FC = () => {
   const [lifecycleConfigs, setLifecycleConfigs] = useState<LifecycleStatusConfig[]>([]);
   const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
+  const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
   const [customerScope, setCustomerScope] = useState<CustomerScope>(() => getCustomerScopeFromTab(searchParams.get('tab')));
   const [releaseTarget, setReleaseTarget] = useState<Customer | null>(null);
   const [releaseReason, setReleaseReason] = useState('');
@@ -328,6 +339,15 @@ const Customers: React.FC = () => {
   const isSuperAdmin = isSuperAdminRoleName(currentUser?.role);
   const isPublicPoolScope = customerScope === 'public_pool';
   const ownerFilterLabel = isPublicPoolScope ? '最后跟进人' : '销售负责人';
+  const hasAdvancedFilters = Boolean(filters.sourceType || filters.leadSource || filters.industry || filters.city || filters.tag);
+  const hasAnyActiveFilter = Boolean(
+    filters.search
+    || filters.customerLevel
+    || filters.owner
+    || filters.followStatus
+    || hasAdvancedFilters
+    || (!isPublicPoolScope && filters.lifecycleStatusCode),
+  );
   const tableMinWidth = useMemo(
     () => visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + CUSTOMER_ACTION_COLUMN_WIDTH,
     [columnWidths, visibleColumns],
@@ -490,6 +510,12 @@ const Customers: React.FC = () => {
     fetchItems(newFilters);
   };
 
+  const handleResetFilters = () => {
+    const newFilters = scopedFilters({ page: 1, pageSize: pagination.pageSize || 10 }, customerScope);
+    setFilters(newFilters);
+    fetchItems(newFilters);
+  };
+
   const handlePageChange = (_: React.MouseEvent<HTMLButtonElement> | null, page: number) => {
     const newFilters = { ...filters, page: page + 1, pageSize: pagination.pageSize || 10 };
     setFilters(newFilters);
@@ -597,7 +623,14 @@ const Customers: React.FC = () => {
           value={filters.search || ''}
           onChange={handleSearch}
           size="small"
-          sx={{ minWidth: 260 }}
+          sx={{ minWidth: { xs: '100%', sm: 260 } }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon fontSize="small" />
+              </InputAdornment>
+            ),
+          }}
         />
         <FormControl size="small" sx={{ minWidth: 140 }}>
           <InputLabel>客户等级</InputLabel>
@@ -637,6 +670,82 @@ const Customers: React.FC = () => {
             </Select>
           </FormControl>
         )}
+        <FormControl size="small" sx={{ minWidth: 140 }}>
+          <InputLabel>跟进状态</InputLabel>
+          <Select
+            value={filters.followStatus || ''}
+            label="跟进状态"
+            onChange={(e) => handleFilterChange('followStatus', e.target.value)}
+          >
+            <MenuItem value="">全部</MenuItem>
+            {FOLLOW_STATUS_OPTIONS.map((status) => (
+              <MenuItem key={status.value} value={status.value}>{status.label}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <Button
+          variant="outlined"
+          startIcon={<FilterListIcon />}
+          onClick={() => setMoreFiltersOpen((open) => !open)}
+          sx={{ height: 40, px: 1.75, fontWeight: 700 }}
+        >
+          更多筛选
+        </Button>
+        <Box sx={{ flexGrow: 1, minWidth: { xs: '100%', md: 16 } }} />
+        <Button
+          variant="outlined"
+          startIcon={<RestartAltIcon />}
+          onClick={handleResetFilters}
+          color={hasAnyActiveFilter ? 'primary' : 'inherit'}
+          sx={{ height: 40, px: 1.75, fontWeight: 700 }}
+        >
+          重置
+        </Button>
+        <Collapse in={moreFiltersOpen} sx={{ width: '100%' }}>
+          <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', pt: 0.5 }}>
+            <FormControl size="small" sx={{ minWidth: 140, bgcolor: '#fff' }}>
+              <InputLabel>资源归属</InputLabel>
+              <Select
+                value={filters.sourceType || ''}
+                label="资源归属"
+                onChange={(e) => handleFilterChange('sourceType', e.target.value)}
+              >
+                <MenuItem value="">全部</MenuItem>
+                {RESOURCE_OWNERSHIPS.map((item) => (
+                  <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <TextField
+              label="线索来源"
+              value={filters.leadSource || ''}
+              onChange={(e) => handleFilterChange('leadSource', e.target.value)}
+              size="small"
+              sx={{ minWidth: 150 }}
+            />
+            <TextField
+              label="行业"
+              value={filters.industry || ''}
+              onChange={(e) => handleFilterChange('industry', e.target.value)}
+              size="small"
+              sx={{ minWidth: 130 }}
+            />
+            <TextField
+              label="城市"
+              value={filters.city || ''}
+              onChange={(e) => handleFilterChange('city', e.target.value)}
+              size="small"
+              sx={{ minWidth: 130 }}
+            />
+            <TextField
+              label="客户标签"
+              value={filters.tag || ''}
+              onChange={(e) => handleFilterChange('tag', e.target.value)}
+              size="small"
+              sx={{ minWidth: 150 }}
+            />
+          </Box>
+        </Collapse>
       </ModuleToolbar>
 
       <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { overflowX: 'auto' }]}>
