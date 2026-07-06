@@ -12,11 +12,20 @@ import { mockRoles } from './data/roles';
 import { mockProducts } from './data/products';
 import { mockProductLevelConfigs } from './data/productLevels';
 import { mockRefunds } from './data/refunds';
-import { mockUpgradePool } from './data/upgradePool';
 import { mockCommissionRules } from './data/commissionRules';
 import { mockTags } from './data/tags';
-import { initializeStorage, isStorageInitialized, markStorageInitialized } from './storage';
+import {
+  mockAssetDevices,
+  mockAssetInternetAccounts,
+  mockAssetOffboardingTasks,
+  mockAssetOperationLogs,
+  mockAssetPhoneNumbers,
+  mockAssetRisks,
+} from './data/assets';
+import { getStorageData, initializeStorage, isStorageInitialized, markStorageInitialized, setStorageData } from './storage';
+import { shouldUseBackendApi } from '../backendClient';
 import { DEFAULT_LEAD_FLOW_CONFIG, DEFAULT_LEAD_SOURCE_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, DEFAULT_ORDER_TYPE_CONFIGS, STORAGE_KEYS } from '../../shared/utils/constants';
+import type { Product } from '../../types/product';
 
 export { mockLeads } from './data/leads';
 export { mockCustomers } from './data/customers';
@@ -31,23 +40,79 @@ export { mockRoles } from './data/roles';
 export { mockProducts } from './data/products';
 export { mockProductLevelConfigs } from './data/productLevels';
 export { mockRefunds } from './data/refunds';
-export { mockUpgradePool } from './data/upgradePool';
 export { mockCommissionRules } from './data/commissionRules';
 export { mockTags } from './data/tags';
+export {
+  mockAssetDevices,
+  mockAssetInternetAccounts,
+  mockAssetOffboardingTasks,
+  mockAssetOperationLogs,
+  mockAssetPhoneNumbers,
+  mockAssetRisks,
+} from './data/assets';
+
+const LEGACY_DEFAULT_DELIVERY_STAGES: Record<string, string[]> = {
+  'prod-001': ['合同签订', '需求确认', '系统部署', '培训交付', '验收完成'],
+  'prod-002': ['合同签订', '课程安排', '授课进行', '培训完成', '验收完成'],
+  'prod-003': ['合同签订', '代理授权', '系统开通', '培训完成', '运营支持'],
+  'prod-004': ['合同签订', '品牌定制', '系统部署', '测试验收', '上线运营'],
+  'prod-005': ['合同签订', '需求确认', '系统部署', '培训交付', '验收完成'],
+};
+
+function isSameStringList(left: string[] = [], right: string[] = []): boolean {
+  return left.length === right.length && left.every((item, index) => item === right[index]);
+}
+
+function migrateLegacyDefaultProductDeliveryStages(): void {
+  const products = getStorageData<Product[]>(STORAGE_KEYS.PRODUCTS);
+  if (!products?.length) return;
+
+  let changed = false;
+  const nextProducts = products.map((product) => {
+    const legacyStages = LEGACY_DEFAULT_DELIVERY_STAGES[product.id];
+    if (legacyStages && isSameStringList(product.deliveryStages || [], legacyStages)) {
+      changed = true;
+      return { ...product, deliveryStages: [] };
+    }
+    return product;
+  });
+
+  if (changed) setStorageData(STORAGE_KEYS.PRODUCTS, nextProducts);
+}
+
+function businessSeed<T>(demoData: T, emptyData: T): T {
+  return shouldUseBackendApi() ? emptyData : demoData;
+}
+
+function initializeAssetStorage(): void {
+  initializeStorage(STORAGE_KEYS.ASSET_DEVICES, businessSeed(mockAssetDevices, []));
+  initializeStorage(STORAGE_KEYS.ASSET_PHONE_NUMBERS, businessSeed(mockAssetPhoneNumbers, []));
+  initializeStorage(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, businessSeed(mockAssetInternetAccounts, []));
+  initializeStorage(STORAGE_KEYS.ASSET_RISKS, businessSeed(mockAssetRisks, []));
+  initializeStorage(STORAGE_KEYS.ASSET_OPERATION_LOGS, businessSeed(mockAssetOperationLogs, []));
+  initializeStorage(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, businessSeed(mockAssetOffboardingTasks, []));
+}
 
 /** 初始化所有 Mock 数据到 localStorage */
 export function initializeMockData(): void {
-  if (isStorageInitialized()) return;
+  if (isStorageInitialized()) {
+    initializeAssetStorage();
+    migrateLegacyDefaultProductDeliveryStages();
+    return;
+  }
 
-  initializeStorage(STORAGE_KEYS.LEADS, mockLeads);
-  initializeStorage(STORAGE_KEYS.CUSTOMERS, mockCustomers);
-  initializeStorage(STORAGE_KEYS.ORDERS, mockOrders);
+  initializeStorage(STORAGE_KEYS.LEADS, businessSeed(mockLeads, []));
+  initializeStorage(STORAGE_KEYS.CUSTOMERS, businessSeed(mockCustomers, []));
+  initializeStorage(STORAGE_KEYS.ORDERS, businessSeed(mockOrders, []));
   initializeStorage(STORAGE_KEYS.DELIVERIES, mockDeliveries);
-  initializeStorage(STORAGE_KEYS.COMMISSIONS, mockCommissions);
-  initializeStorage(STORAGE_KEYS.FINANCE, {
+  initializeStorage(STORAGE_KEYS.COMMISSIONS, businessSeed(mockCommissions, []));
+  initializeStorage(STORAGE_KEYS.FINANCE, businessSeed({
     dailyRecords: mockFinanceDailyRecords,
     channelROI: mockChannelROI,
-  });
+  }, {
+    dailyRecords: [],
+    channelROI: [],
+  }));
   initializeStorage(STORAGE_KEYS.USERS, mockUsers);
   initializeStorage(STORAGE_KEYS.AI_SESSIONS, []);
   initializeStorage(STORAGE_KEYS.DEPARTMENTS, mockDepartments);
@@ -57,10 +122,9 @@ export function initializeMockData(): void {
   initializeStorage(STORAGE_KEYS.PRODUCT_LEVELS, mockProductLevelConfigs);
   initializeStorage(STORAGE_KEYS.ORDER_TYPE_CONFIGS, DEFAULT_ORDER_TYPE_CONFIGS);
   initializeStorage(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS);
-  initializeStorage(STORAGE_KEYS.REFUNDS, mockRefunds);
-  initializeStorage(STORAGE_KEYS.UPGRADE_POOL, mockUpgradePool);
+  initializeStorage(STORAGE_KEYS.REFUNDS, businessSeed(mockRefunds, []));
+  initializeStorage(STORAGE_KEYS.RECOVERY_ORDERS, []);
   initializeStorage(STORAGE_KEYS.AI_CARDS, []);
-  initializeStorage(STORAGE_KEYS.CUSTOMER_SUCCESS_TASKS, []);
   initializeStorage(STORAGE_KEYS.SERVICE_TICKETS, []);
   initializeStorage(STORAGE_KEYS.OPPORTUNITIES, []);
   initializeStorage(STORAGE_KEYS.LEAD_FLOW_CONFIG, DEFAULT_LEAD_FLOW_CONFIG);
@@ -69,8 +133,10 @@ export function initializeMockData(): void {
   initializeStorage(STORAGE_KEYS.COMMISSION_RULES, mockCommissionRules);
   initializeStorage(STORAGE_KEYS.COMMISSION_ROLE_CONFIGS, []);
   initializeStorage(STORAGE_KEYS.TAGS, mockTags);
+  initializeAssetStorage();
 
   markStorageInitialized();
+  migrateLegacyDefaultProductDeliveryStages();
 }
 
 /** 重置 Mock 数据 */

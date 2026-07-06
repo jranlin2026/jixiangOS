@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { leadBulkImportApi, LEAD_BULK_IMPORT_HEADERS } from './leadBulkImportApi';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
+import { CAPABILITY_KEYS, PERMISSION_KEYS } from '../shared/utils/permissions';
 import type { Customer } from '../types/customer';
 
 const H = {
@@ -64,11 +65,23 @@ Object.defineProperty(globalThis, 'localStorage', {
   configurable: true,
 });
 
-function workbookBuffer(rows: Record<string, string>[]) {
-  const sheet = XLSX.utils.json_to_sheet(rows, { header: [...LEAD_BULK_IMPORT_HEADERS] });
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, sheet, '\u7ebf\u7d22\u6279\u91cf\u5165\u5e93\u6a21\u677f');
-  return XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+function toArrayBuffer(value: ArrayBuffer | ArrayBufferView): ArrayBuffer {
+  const view = value instanceof ArrayBuffer
+    ? new Uint8Array(value)
+    : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  const copy = new Uint8Array(view.byteLength);
+  copy.set(view);
+  return copy.buffer;
+}
+
+async function workbookBuffer(rows: Record<string, string>[]) {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('\u7ebf\u7d22\u6279\u91cf\u5165\u5e93\u6a21\u677f');
+  sheet.addRow([...LEAD_BULK_IMPORT_HEADERS]);
+  rows.forEach((row) => {
+    sheet.addRow(LEAD_BULK_IMPORT_HEADERS.map((header) => row[header] || ''));
+  });
+  return toArrayBuffer(await workbook.xlsx.writeBuffer());
 }
 
 const now = '2026-06-19T00:00:00.000Z';
@@ -82,9 +95,39 @@ storage.setItem(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, JSON.stringify([
   { id: 'src-2', name: zh.douyin, isActive: true, sortOrder: 2, createdAt: now, updatedAt: now },
   { id: 'src-3', name: zh.live, parentId: 'src-2', isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
 ]));
+storage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify([
+  { id: 'dept-ops', name: '运营部', code: 'OPS', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'dept-sales', name: '销售部', code: 'SALES', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+]));
+storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([
+  {
+    id: 'role-ops',
+    name: zh.operator,
+    code: 'ops_admin',
+    permissions: [{ module: PERMISSION_KEYS.LEADS_CREATE, actions: ['read', 'write'] }],
+    memberCount: 1,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+  {
+    id: 'role-sales-consultant',
+    name: zh.salesConsultant,
+    code: 'sales_consultant',
+    permissions: [
+      { module: CAPABILITY_KEYS.LEADS_RECEIVE, actions: ['read'] },
+      { module: PERMISSION_KEYS.LEADS_FOLLOW, actions: ['read', 'write'] },
+    ],
+    dataScopes: { leads: 'self' },
+    memberCount: 1,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+]));
 storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([
-  { id: 'user-1', name: zh.inputUser, account: 'input', email: 'input@company.com', phone: '', role: zh.operator, isActive: true, createdAt: now, updatedAt: now },
-  { id: 'user-2', name: zh.zhangWei, account: 'zhangwei', email: 'zhangwei@company.com', phone: '', role: zh.salesConsultant, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'user-1', name: zh.inputUser, account: 'input', email: 'input@company.com', phone: '', role: zh.operator, roleId: 'role-ops', departmentId: 'dept-ops', isActive: true, createdAt: now, updatedAt: now },
+  { id: 'user-2', name: zh.zhangWei, account: 'zhangwei', email: 'zhangwei@company.com', phone: '', role: zh.salesConsultant, roleId: 'role-sales-consultant', departmentId: 'dept-sales', isActive: true, createdAt: now, updatedAt: now },
 ]));
 storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({
   userId: 'user-1',
@@ -125,7 +168,30 @@ assert.deepEqual(LEAD_BULK_IMPORT_HEADERS, [
   H.remark,
 ]);
 
-const result = await leadBulkImportApi.importWorkbook(workbookBuffer([
+const templateBuffer = await leadBulkImportApi.createTemplateWorkbook();
+const templateWorkbook = new ExcelJS.Workbook();
+await templateWorkbook.xlsx.load(templateBuffer);
+const templateSheet = templateWorkbook.getWorksheet('\u7ebf\u7d22\u6279\u91cf\u5165\u5e93\u6a21\u677f');
+const optionsSheet = templateWorkbook.getWorksheet('\u5b57\u6bb5\u9009\u9879');
+const instructionsSheet = templateWorkbook.getWorksheet('填写说明');
+assert.ok(templateSheet);
+assert.ok(optionsSheet);
+assert.ok(instructionsSheet);
+assert.equal(instructionsSheet!.getCell('A1').value, '线索批量入库填写说明');
+assert.deepEqual(
+  LEAD_BULK_IMPORT_HEADERS.map((_, index) => templateSheet!.getCell(1, index + 1).value),
+  [...LEAD_BULK_IMPORT_HEADERS],
+);
+assert.equal(optionsSheet!.state, 'hidden');
+assert.equal(optionsSheet!.getCell('B2').value, zh.official);
+assert.equal(optionsSheet!.getCell('B3').value, zh.douyin);
+assert.equal(optionsSheet!.getCell('B4').value, `${zh.douyin}-${zh.live}`);
+assert.equal(optionsSheet!.getCell('E2').value, '\u5f85\u5206\u914d');
+assert.equal(optionsSheet!.getCell('E3').value, zh.zhangWei);
+assert.equal(templateSheet!.getCell('F2').dataValidation?.type, 'list');
+assert.equal(templateSheet!.getCell('K2').dataValidation?.type, 'list');
+
+const result = await leadBulkImportApi.importWorkbook(await workbookBuffer([
   {
     [H.name]: zh.newLead,
     [H.company]: zh.newCompany,
@@ -195,3 +261,37 @@ assert.equal(intakeRecords.length, 2);
 assert.equal(intakeRecords.some((record: any) => record.name === zh.newLead && record.status === zh.successStatus), true);
 assert.equal(intakeRecords.some((record: any) => record.name === zh.duplicateCustomer && record.status === zh.failedStatus), true);
 assert.equal(intakeRecords.some((record: any) => record.name === zh.formatErrorCompany), false);
+
+storage.clear();
+storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, JSON.stringify([
+  { id: 'src-1', name: zh.official, isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
+]));
+storage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify([
+  { id: 'dept-sales', name: '销售部', code: 'SALES', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+]));
+storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([
+  {
+    id: 'role-sales-consultant',
+    name: zh.salesConsultant,
+    code: 'sales_consultant',
+    permissions: [{ module: CAPABILITY_KEYS.LEADS_RECEIVE, actions: ['read'] }],
+    memberCount: 1,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+]));
+storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([
+  { id: 'user-2', name: zh.zhangWei, account: 'zhangwei', email: 'zhangwei@company.com', phone: '', role: zh.salesConsultant, roleId: 'role-sales-consultant', departmentId: 'dept-sales', isActive: true, createdAt: now, updatedAt: now },
+]));
+const generatedTemplateImport = await leadBulkImportApi.importWorkbook(await leadBulkImportApi.createTemplateWorkbook());
+assert.equal(generatedTemplateImport.code, 0);
+assert.equal(generatedTemplateImport.data.successCount, 1);
+assert.equal(generatedTemplateImport.data.failureCount, 0);
+const generatedTemplateLeads = JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]');
+assert.equal(generatedTemplateLeads.length, 1);
+assert.equal(generatedTemplateLeads[0].source, zh.official);

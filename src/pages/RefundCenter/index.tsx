@@ -1,10 +1,29 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Box, Typography, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, Paper, Chip, TextField,
-  MenuItem, FormControl, InputLabel, Select, Card, CardContent, IconButton, Tooltip,
-  Tabs, Tab, Button, TablePagination,
+  Box,
+  Typography,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Chip,
+  TextField,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Select,
+  Card,
+  CardContent,
+  IconButton,
+  Tooltip,
+  Tabs,
+  Tab,
+  Button,
 } from '@mui/material';
+import TablePagination from '../../shared/components/TablePagination';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
@@ -12,7 +31,7 @@ import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
 import useRefundStore from '../../store/useRefundStore';
-import { REFUND_CATEGORIES, getProductLevelColor } from '../../shared/utils/constants';
+import { REFUND_CATEGORIES, getProductLevelColor, getProductLevelRowSx } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import RefundDetail from './RefundDetail';
 import RefundProcessDialog from './RefundProcessDialog';
@@ -35,14 +54,15 @@ type RefundColumn = {
   render: (refund: Refund) => React.ReactNode;
 };
 
-const REFUND_VIEW_STORAGE_KEY = 'aaos_refund_table_view_v1';
-const REFUND_WIDTH_STORAGE_KEY = 'aaos_refund_table_widths_v1';
+const REFUND_VIEW_STORAGE_KEY = 'aaos_refund_table_view_v2';
+const REFUND_WIDTH_STORAGE_KEY = 'aaos_refund_table_widths_v2';
 const REFUND_ACTION_COLUMN_WIDTH = 160;
 
 const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   refundNo: 180,
   orderNo: 180,
   customerName: 180,
+  productName: 180,
   productLevel: 140,
   orderAmount: 140,
   refundAmount: 140,
@@ -57,9 +77,10 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
 interface RefundCenterProps {
   embedded?: boolean;
   refundViewSettingsTrigger?: number;
+  showInternalTabs?: boolean;
 }
 
-const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundViewSettingsTrigger = 0 }) => {
+const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundViewSettingsTrigger = 0, showInternalTabs = true }) => {
   const lastRefundViewSettingsTriggerRef = useRef(refundViewSettingsTrigger);
   const {
     items,
@@ -139,6 +160,7 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
     { id: 'refundNo', label: '退款号', render: (refund) => refund.refundNo },
     { id: 'orderNo', label: '订单号', render: (refund) => refund.orderNo },
     { id: 'customerName', label: '客户', render: (refund) => refund.customerName },
+    { id: 'productName', label: '产品名称', render: (refund) => refund.productName || refund.productLevel || '-' },
     {
       id: 'productLevel',
       label: '产品等级',
@@ -254,7 +276,7 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
             退款中心
           </Typography>
           <Box sx={{ flex: 1 }} />
-          {activeTab === 0 && (
+          {(!showInternalTabs || activeTab === 0) && (
             <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
               视图设置
             </Button>
@@ -262,12 +284,14 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
         </Box>
       )}
 
-      <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ mb: 3 }}>
-        <Tab label="退款挽回" />
-        <Tab label="售后工单" />
-      </Tabs>
+      {showInternalTabs && (
+        <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ mb: 3 }}>
+          <Tab label="退款挽回" />
+          <Tab label="售后工单" />
+        </Tabs>
+      )}
 
-      {activeTab === 0 ? (
+      {!showInternalTabs || activeTab === 0 ? (
         <>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(7, 1fr)' }, gap: 2, mb: 3 }}>
@@ -352,7 +376,7 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
           <TableBody>
             {items.map((refund: any) => {
               return (
-                <TableRow key={refund.id} hover>
+                <TableRow key={refund.id} hover sx={getProductLevelRowSx(refund.productLevel)}>
                   {visibleColumns.map((column, columnIndex) => (
                     <TableCell key={column.id} sx={{ ...getResizableCellSx(columnWidths[column.id]), ...getFrozenColumnSx(columnIndex) }}>
                       {column.render(refund)}
@@ -459,3 +483,4 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
 };
 
 export default RefundCenter;
+

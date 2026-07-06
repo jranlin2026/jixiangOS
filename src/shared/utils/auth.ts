@@ -1,5 +1,6 @@
 import type { User } from '../../types/settings';
 import type { UserWithAuth } from '../../types/auth';
+import bcrypt from 'bcryptjs';
 import { normalizeUserRoleName } from './roles';
 
 export const AUTH_SESSION_STORAGE_KEY = 'aaos_auth_session';
@@ -8,16 +9,46 @@ export const DEFAULT_ADMIN_PASSWORD = 'Admin@123456';
 export const DEFAULT_USER_PASSWORD = '1234567';
 
 const ADMIN_USER_ID = 'user-admin';
+const PASSWORD_HASH_ROUNDS = 10;
+
+function readRuntimeEnv(name: string): string | undefined {
+  const metaEnv = (import.meta as unknown as { env?: Record<string, string | boolean | undefined> }).env;
+  const nodeEnv = typeof process !== 'undefined' ? process.env[name] : undefined;
+  const value = metaEnv?.[name] ?? nodeEnv;
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function isProductionRuntime(): boolean {
+  const metaEnv = (import.meta as unknown as { env?: { PROD?: boolean; MODE?: string } }).env;
+  return Boolean(metaEnv?.PROD) || readRuntimeEnv('NODE_ENV') === 'production';
+}
+
+function configuredDefaultPassword(envName: string, fallback: string): string {
+  const configured = readRuntimeEnv(envName);
+  if (configured) return configured;
+  if (isProductionRuntime()) {
+    throw new Error(`${envName} must be configured before running jixiangOS in production.`);
+  }
+  return fallback;
+}
+
+export function getDefaultAdminPassword(): string {
+  return configuredDefaultPassword('JIXIANG_DEFAULT_ADMIN_PASSWORD', DEFAULT_ADMIN_PASSWORD);
+}
+
+export function getDefaultUserPassword(): string {
+  return configuredDefaultPassword('JIXIANG_DEFAULT_USER_PASSWORD', DEFAULT_USER_PASSWORD);
+}
 
 export function normalizeAccount(value?: string): string {
   return String(value || '').trim().toLowerCase();
 }
 
-export function createPasswordSalt(seed: string): string {
-  return `aaos-${normalizeAccount(seed) || 'user'}-salt`;
+export function createPasswordSalt(_seed: string): string {
+  return bcrypt.genSaltSync(PASSWORD_HASH_ROUNDS);
 }
 
-export function hashPassword(password: string, salt: string): string {
+function legacyHashPassword(password: string, salt: string): string {
   const text = `${salt}:${password}`;
   let hash = 2166136261;
   for (let index = 0; index < text.length; index += 1) {
@@ -27,9 +58,15 @@ export function hashPassword(password: string, salt: string): string {
   return `mock-${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
 
+export function hashPassword(password: string, salt: string): string {
+  if (salt.startsWith('$2')) return bcrypt.hashSync(password, salt);
+  return legacyHashPassword(password, salt);
+}
+
 export function verifyPassword(password: string, salt?: string, hash?: string): boolean {
   if (!salt || !hash) return false;
-  return hashPassword(password, salt) === hash;
+  if (hash.startsWith('$2')) return bcrypt.compareSync(password, hash);
+  return legacyHashPassword(password, salt) === hash;
 }
 
 export function deriveAccount(user: Pick<User, 'account' | 'email' | 'phone' | 'name' | 'id'>): string {
@@ -45,7 +82,7 @@ export function deriveAccount(user: Pick<User, 'account' | 'email' | 'phone' | '
 export function withAuthDefaults(user: User, index = 0): UserWithAuth {
   const account = deriveAccount(user);
   const salt = user.passwordSalt || createPasswordSalt(`${user.id}-${account}`);
-  const passwordHash = user.passwordHash || hashPassword(DEFAULT_USER_PASSWORD, salt);
+  const passwordHash = user.passwordHash || hashPassword(getDefaultUserPassword(), salt);
 
   return {
     ...user,
@@ -80,7 +117,7 @@ export function ensureAdminUser(users: User[]): UserWithAuth[] {
       isActive: true,
       employmentStatus: 'active' as const,
       passwordSalt: salt,
-      passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD, salt),
+      passwordHash: hashPassword(getDefaultAdminPassword(), salt),
       passwordUpdatedAt: now,
       createdAt: now,
       updatedAt: now,

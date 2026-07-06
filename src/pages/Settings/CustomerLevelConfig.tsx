@@ -26,6 +26,7 @@ import { settingsApi } from '../../api';
 import type { CustomerLevelConfig } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import { getCustomerLevelTagSx } from '../../shared/utils/constants';
 
 type CustomerLevelForm = Omit<CustomerLevelConfig, 'id' | 'createdAt' | 'updatedAt'>;
 
@@ -136,7 +137,7 @@ const CustomerLevelConfigPage: React.FC = () => {
               <TableRow key={item.id} hover>
                 <TableCell sx={{ color: '#6b7280' }}>{item.value}</TableCell>
                 <TableCell>
-                  <Chip label={item.label} size="small" sx={{ bgcolor: `${item.color}18`, color: item.color, fontWeight: 600 }} />
+                  <Chip label={item.label} size="small" sx={getCustomerLevelTagSx(`${item.value} ${item.label}`)} />
                 </TableCell>
                 <TableCell>{item.description || '-'}</TableCell>
                 <TableCell>
@@ -180,7 +181,7 @@ const CustomerLevelConfigPage: React.FC = () => {
             <TextField label="排序" type="number" value={form.sortOrder} onChange={(e) => updateForm('sortOrder', Number(e.target.value))} fullWidth />
             <FormControlLabel control={<Switch checked={form.isActive} onChange={(e) => updateForm('isActive', e.target.checked)} />} label={form.isActive ? '启用' : '停用'} />
             {form.label && (
-              <Chip label={form.label} size="small" sx={{ justifySelf: 'start', bgcolor: `${form.color}18`, color: form.color, fontWeight: 600 }} />
+              <Chip label={form.label} size="small" sx={{ justifySelf: 'start', ...getCustomerLevelTagSx(`${form.value} ${form.label}`) }} />
             )}
           </Box>
         </DialogContent>

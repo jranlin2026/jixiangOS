@@ -16,8 +16,8 @@ body {
     'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f8f9fa;
-  color: #1a1a2e;
+  background-color: #f6f8fb;
+  color: #101828;
 }
 
 #root {
@@ -39,5 +39,287 @@ body {
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(0, 0, 0, 0.25);
+  background-color: rgba(16, 24, 40, 0.28);
+}
+
+:root {
+  --jx-page: #f6f8fb;
+  --jx-surface: #ffffff;
+  --jx-ink: #101828;
+  --jx-muted: #667085;
+  --jx-line: #dde4ec;
+  --jx-soft-line: #eef2f6;
+  --jx-blue: #1e6bff;
+  --jx-cyan: #087c8c;
+  --jx-green: #16845b;
+  --jx-amber: #b46a08;
+  --jx-red: #c4322b;
+}
+
+.MuiPaper-root,
+.MuiCard-root {
+  background-image: none !important;
+}
+
+.MuiTableContainer-root {
+  border-color: var(--jx-line) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.MuiTableHead-root .MuiTableCell-root {
+  background: #f3f7fb !important;
+  color: #526173 !important;
+  font-weight: 900 !important;
+  border-right: 1px solid #e4ebf3;
+}
+
+.MuiTableBody-root .MuiTableRow-root:hover {
+  background: #f7faff !important;
+}
+
+.MuiTableBody-root .MuiTableCell-root {
+  color: var(--jx-ink);
+}
+
+.MuiTablePagination-root {
+  border-top: 1px solid var(--jx-soft-line);
+  background: #fbfcfe;
+  min-width: 0 !important;
+  overflow: visible;
+}
+
+.MuiTablePagination-root .MuiTablePagination-toolbar {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  overflow: visible;
+  min-width: 0 !important;
+  width: 100%;
+  padding: 8px 14px !important;
+  position: relative;
+}
+
+.MuiTablePagination-root .MuiInputBase-root {
+  min-width: 76px;
+  width: 76px;
+  height: 30px;
+  border-radius: 6px;
+  background: #ffffff;
+  border: 1px solid #d7e0ea;
+  position: relative;
+}
+
+.MuiTablePagination-root .MuiTablePagination-input {
+  position: absolute;
+  right: 116px;
+  top: 50%;
+  transform: translateY(-50%);
+  order: 2 !important;
+  flex: 0 0 76px;
+  width: 76px;
+  overflow: visible;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+.MuiTablePagination-root .MuiTablePagination-actions {
+  order: 1 !important;
+  width: 100%;
+  margin: 0 !important;
+}
+
+.MuiTablePagination-root .MuiOutlinedInput-root .MuiOutlinedInput-notchedOutline {
+  border: 0 !important;
+}
+
+.MuiTablePagination-root .MuiOutlinedInput-root:hover .MuiOutlinedInput-notchedOutline,
+.MuiTablePagination-root .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline {
+  border: 0 !important;
+}
+
+.MuiTablePagination-root .MuiTablePagination-select {
+  min-height: 30px !important;
+  min-width: 100% !important;
+  width: 100% !important;
+  padding-top: 4px !important;
+  padding-bottom: 4px !important;
+  padding-left: 8px !important;
+  padding-right: 18px !important;
+  font-size: 12px;
+  font-weight: 800;
+  color: #344054;
+  background: #ffffff !important;
+  border-radius: 6px;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+  box-sizing: border-box;
+}
+
+.MuiTablePagination-root .MuiInputBase-root .MuiSelect-icon {
+  right: 3px !important;
+  font-size: 16px;
+  color: #667085;
+  pointer-events: none;
+}
+
+.JxPaginationActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  width: 100%;
+  order: 1;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.JxTablePagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-height: 48px;
+  width: 100%;
+  padding: 8px 14px;
+  border-top: 1px solid var(--jx-soft-line);
+  background: #fbfcfe;
+  box-sizing: border-box;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.JxPaginationTotal {
+  margin-right: auto;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.JxPaginationPages {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.JxPaginationRowsSlot {
+  width: 82px;
+  height: 30px;
+  flex: 0 0 82px;
+}
+
+.JxPaginationRowsSelect {
+  width: 92px;
+  height: 30px;
+  flex: 0 0 92px;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #344054;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.JxPaginationRowsSelect .MuiSelect-select {
+  display: flex;
+  align-items: center;
+  min-height: 30px !important;
+  padding: 4px 26px 4px 10px !important;
+  box-sizing: border-box;
+}
+
+.JxPaginationRowsSelect .MuiOutlinedInput-notchedOutline {
+  border-color: #d7e0ea !important;
+}
+
+.JxPaginationRowsSelect:hover .MuiOutlinedInput-notchedOutline,
+.JxPaginationRowsSelect.Mui-focused .MuiOutlinedInput-notchedOutline {
+  border-color: #b8c7da !important;
+}
+
+.JxPaginationRowsSelect .MuiSelect-icon {
+  right: 6px;
+  font-size: 16px;
+  color: #667085;
+}
+
+.JxPaginationJump {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #344054;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.JxPaginationJumpInput {
+  width: 56px;
+}
+
+.JxPaginationJumpInput .MuiInputBase-root {
+  width: 56px;
+  min-width: 56px;
+  height: 30px;
+  border-radius: 6px;
+}
+
+.JxPaginationJumpInput input {
+  padding: 4px 8px !important;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.JxPaginationArrow,
+.JxPaginationPage {
+  min-width: 28px;
+  height: 28px;
+  border: 1px solid #d7e0ea !important;
+  border-radius: 6px !important;
+  background: #ffffff !important;
+  color: #344054 !important;
+}
+
+.JxPaginationArrow.Mui-disabled {
+  color: #b9c3d0 !important;
+  background: #f7f9fc !important;
+}
+
+.JxPaginationPage {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.JxPaginationPage.is-active {
+  border-color: #1e6bff !important;
+  background: #eaf2ff !important;
+  color: #1e6bff !important;
+  box-shadow: inset 0 0 0 1px rgba(30, 107, 255, 0.18);
+}
+
+.JxPaginationEllipsis {
+  min-width: 18px;
+  color: #8a97a8;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.MuiTabs-root {
+  border-color: var(--jx-line) !important;
+}
+
+.MuiTab-root {
+  letter-spacing: 0 !important;
+}
+
+.MuiInputBase-input::placeholder {
+  color: #8a97a8;
+  opacity: 1;
 }

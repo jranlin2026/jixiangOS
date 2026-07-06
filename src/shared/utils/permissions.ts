@@ -1,6 +1,7 @@
 import type { Permission, Role } from '../../types/role';
 import type { AuthenticatedUser } from '../../types/auth';
 import type { User } from '../../types/settings';
+import { STORAGE_KEYS } from './constants';
 import { normalizeUserRoleName } from './roles';
 
 export const CAPABILITY_KEYS = {
@@ -22,8 +23,11 @@ export const PERMISSION_KEYS = {
   LEADS_CONVERT: '线索/线索转客户',
 
   CUSTOMERS: '客户',
+  CUSTOMER_LIST: '客户/客户列表',
   CUSTOMER_CREATE: '客户/新建客户',
-  CUSTOMER_DETAIL: '客户/客户详情',
+  CUSTOMER_DETAIL: '客户/查看客户资料',
+  CUSTOMER_EDIT: '客户/编辑客户',
+  CUSTOMER_ASSIGN: '客户/分配客户',
   CUSTOMER_PROFILE: '客户/客户画像',
   CUSTOMER_AI_CARD: '客户/AI名片',
   CUSTOMER_CREATE_ORDER: '客户/新建客户订单',
@@ -43,19 +47,49 @@ export const PERMISSION_KEYS = {
   DELIVERY_MOVE_CARD: '交付/移动交付卡片',
   DELIVERY_STAGE_CONFIG: '交付/交付阶段配置',
 
+  AFTER_SALES: '售后服务',
+  AFTER_SALES_REFUND: '售后服务/售后挽回订单列表',
+  AFTER_SALES_TICKETS: '售后服务/售后工单',
+  AFTER_SALES_RECOVERY: '售后服务/售后挽回订单列表',
+  AFTER_SALES_RECOVERY_REVIEW: '售后服务/售后挽回订单审核操作',
+  AFTER_SALES_RECOVERY_CREATE: '售后服务/新增售后挽回订单',
+  AFTER_SALES_RECOVERY_EDIT: '售后服务/编辑售后挽回订单',
+  AFTER_SALES_RECOVERY_DELETE: '售后服务/删除售后挽回订单',
+  AFTER_SALES_RECOVERY_HISTORY: '售后服务/售后挽回订单修改记录',
+
   FINANCE: '财务中心',
+  FINANCE_MY_COMMISSION: '财务中心/我的提成',
   FINANCE_OVERVIEW: '财务中心/财务总览',
   FINANCE_SETTLEMENT: '财务中心/订单分账',
+  FINANCE_RECOVERY_SETTLEMENT: '财务中心/售后挽回分账',
   FINANCE_PAYOUT: '财务中心/月度发放',
-  FINANCE_REFUND: '财务中心/退款付款',
+  FINANCE_REFUND: '财务中心/售后挽回分账',
   FINANCE_FLOW: '财务中心/收支流水',
   FINANCE_RULES: '财务中心/规则配置',
 
-  UPGRADE_CENTER: '升单中心',
-  UPGRADE_POOL: '升单中心/机会池',
-  UPGRADE_CUSTOMER_SUCCESS: '升单中心/客户成功',
-  UPGRADE_ANALYSIS: '升单中心/升单分析',
-  UPGRADE_TASKS: '升单中心/行动任务',
+  ECOMMERCE_SETTLEMENT: '电商结算中心',
+  ECOMMERCE_SETTLEMENT_WORKBENCH: '电商结算中心/结算工作台',
+  ECOMMERCE_SETTLEMENT_HISTORY: '电商结算中心/结算历史',
+  ECOMMERCE_SETTLEMENT_EXCEPTIONS: '电商结算中心/异常核对',
+  ECOMMERCE_SETTLEMENT_TALENTS: '电商结算中心/达人结算汇总',
+  ECOMMERCE_SETTLEMENT_SETTINGS: '电商结算中心/店铺与参数',
+  ECOMMERCE_SETTLEMENT_RULES: '电商结算中心/结算规则',
+
+  ASSETS: '资产管理',
+  ASSETS_OVERVIEW: '资产管理/资产总览',
+  ASSETS_DEVICES: '资产管理/设备资产',
+  ASSETS_PHONES: '资产管理/手机号资产',
+  ASSETS_ACCOUNTS: '资产管理/互联网账号',
+  ASSETS_RISKS: '资产管理/风险提醒',
+  ASSETS_LOGS: '资产管理/操作日志',
+  ASSETS_OFFBOARDING: '资产管理/离职回收',
+  ASSETS_SENSITIVE_VIEW: '资产管理/查看敏感字段',
+  ASSETS_IMPORT_EXPORT: '资产管理/导入导出',
+
+  GEO: 'GEO',
+  GEO_OVERVIEW: 'GEO/总览',
+  GEO_CONTENT: 'GEO/内容矩阵',
+  GEO_ANALYTICS: 'GEO/效果分析',
 
   AI_ASSISTANT: 'AI助手',
   AI_CHAT: 'AI助手/AI对话',
@@ -70,10 +104,11 @@ export const PERMISSION_KEYS = {
   SETTINGS_ACCOUNT_RECYCLE: '系统设置/组织架构/账号回收站',
   SETTINGS_PRODUCTS: '系统设置/产品设置/产品配置',
   SETTINGS_ORDER_TYPES: '系统设置/产品设置/订单类型',
-  SETTINGS_CUSTOMER_LEVELS: '系统设置/客户管理/客户等级',
-  SETTINGS_LIFECYCLE: '系统设置/客户管理/客户生命周期',
-  SETTINGS_LEAD_SOURCES: '系统设置/客户管理/线索来源',
-  SETTINGS_LEAD_FLOW: '系统设置/客户管理/线索流转',
+  SETTINGS_CUSTOMER_LEVELS: '系统设置/客户设置/客户等级',
+  SETTINGS_LIFECYCLE: '系统设置/客户设置/客户生命周期',
+  SETTINGS_LEAD_SOURCES: '系统设置/客户设置/线索来源',
+  SETTINGS_LEAD_FLOW: '系统设置/客户设置/线索流转',
+  SETTINGS_AI_CONFIG: '系统设置/系统维护/AI大脑',
   SETTINGS_DATA_MAINTENANCE: '系统设置/系统维护/数据维护',
 
   // Deprecated: kept only so older imports fail closed instead of crashing.
@@ -121,17 +156,22 @@ const PERMISSION_GRANT_TREE: Record<string, string[]> = {
   [PERMISSION_KEYS.LEADS_CONVERT]: [PERMISSION_KEYS.LEADS_CONVERT],
 
   [PERMISSION_KEYS.CUSTOMERS]: [
-    PERMISSION_KEYS.CUSTOMER_CREATE,
+    PERMISSION_KEYS.CUSTOMER_LIST,
     PERMISSION_KEYS.CUSTOMER_DETAIL,
-    PERMISSION_KEYS.CUSTOMER_PROFILE,
-    PERMISSION_KEYS.CUSTOMER_AI_CARD,
+    PERMISSION_KEYS.CUSTOMER_CREATE,
+    PERMISSION_KEYS.CUSTOMER_EDIT,
+    PERMISSION_KEYS.CUSTOMER_ASSIGN,
     PERMISSION_KEYS.CUSTOMER_CREATE_ORDER,
     PERMISSION_KEYS.CUSTOMER_VIEW_ORDERS,
   ],
+  [PERMISSION_KEYS.CUSTOMER_LIST]: [PERMISSION_KEYS.CUSTOMER_LIST],
   [PERMISSION_KEYS.CUSTOMER_CREATE]: [PERMISSION_KEYS.CUSTOMER_CREATE],
   [PERMISSION_KEYS.CUSTOMER_DETAIL]: [PERMISSION_KEYS.CUSTOMER_DETAIL],
-  [PERMISSION_KEYS.CUSTOMER_PROFILE]: [PERMISSION_KEYS.CUSTOMER_PROFILE],
-  [PERMISSION_KEYS.CUSTOMER_AI_CARD]: [PERMISSION_KEYS.CUSTOMER_AI_CARD],
+  [PERMISSION_KEYS.CUSTOMER_EDIT]: [PERMISSION_KEYS.CUSTOMER_EDIT],
+  [PERMISSION_KEYS.CUSTOMER_ASSIGN]: [PERMISSION_KEYS.CUSTOMER_ASSIGN],
+  ['客户/客户详情']: [PERMISSION_KEYS.CUSTOMER_DETAIL],
+  [PERMISSION_KEYS.CUSTOMER_PROFILE]: [PERMISSION_KEYS.CUSTOMER_DETAIL],
+  [PERMISSION_KEYS.CUSTOMER_AI_CARD]: [PERMISSION_KEYS.CUSTOMER_DETAIL],
   [PERMISSION_KEYS.CUSTOMER_CREATE_ORDER]: [PERMISSION_KEYS.CUSTOMER_CREATE_ORDER],
   [PERMISSION_KEYS.CUSTOMER_VIEW_ORDERS]: [PERMISSION_KEYS.CUSTOMER_VIEW_ORDERS],
 
@@ -161,31 +201,84 @@ const PERMISSION_GRANT_TREE: Record<string, string[]> = {
   [PERMISSION_KEYS.DELIVERY_MOVE_CARD]: [PERMISSION_KEYS.DELIVERY_MOVE_CARD],
   [PERMISSION_KEYS.DELIVERY_STAGE_CONFIG]: [PERMISSION_KEYS.DELIVERY_STAGE_CONFIG],
 
-  [PERMISSION_KEYS.FINANCE]: [
-    PERMISSION_KEYS.FINANCE_OVERVIEW,
-    PERMISSION_KEYS.FINANCE_SETTLEMENT,
-    PERMISSION_KEYS.FINANCE_PAYOUT,
-    PERMISSION_KEYS.FINANCE_REFUND,
-    PERMISSION_KEYS.FINANCE_FLOW,
-    PERMISSION_KEYS.FINANCE_RULES,
+  [PERMISSION_KEYS.AFTER_SALES]: [
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY,
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT,
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE,
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY,
   ],
-  [PERMISSION_KEYS.FINANCE_OVERVIEW]: [PERMISSION_KEYS.FINANCE_OVERVIEW],
+  [PERMISSION_KEYS.AFTER_SALES_TICKETS]: [PERMISSION_KEYS.AFTER_SALES_TICKETS],
+  [PERMISSION_KEYS.AFTER_SALES_RECOVERY]: [PERMISSION_KEYS.AFTER_SALES_RECOVERY],
+  [PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE]: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE],
+  [PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT]: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT],
+  [PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE]: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE],
+  [PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY]: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY],
+  [PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW]: [
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY,
+  ],
+  ['售后服务/售后挽回订单']: [PERMISSION_KEYS.AFTER_SALES_RECOVERY],
+  ['售后服务/售后挽回订单/新建挽回订单']: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE],
+  ['售后服务/售后挽回订单/审核挽回订单']: [
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY,
+  ],
+
+  [PERMISSION_KEYS.FINANCE]: [PERMISSION_KEYS.FINANCE],
+  [PERMISSION_KEYS.FINANCE_MY_COMMISSION]: [PERMISSION_KEYS.FINANCE_MY_COMMISSION],
+  [PERMISSION_KEYS.FINANCE_OVERVIEW]: [PERMISSION_KEYS.FINANCE_MY_COMMISSION],
   [PERMISSION_KEYS.FINANCE_SETTLEMENT]: [PERMISSION_KEYS.FINANCE_SETTLEMENT],
+  [PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT]: [PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT],
   [PERMISSION_KEYS.FINANCE_PAYOUT]: [PERMISSION_KEYS.FINANCE_PAYOUT],
-  [PERMISSION_KEYS.FINANCE_REFUND]: [PERMISSION_KEYS.FINANCE_REFUND],
   [PERMISSION_KEYS.FINANCE_FLOW]: [PERMISSION_KEYS.FINANCE_FLOW],
   [PERMISSION_KEYS.FINANCE_RULES]: [PERMISSION_KEYS.FINANCE_RULES],
 
-  [PERMISSION_KEYS.UPGRADE_CENTER]: [
-    PERMISSION_KEYS.UPGRADE_POOL,
-    PERMISSION_KEYS.UPGRADE_CUSTOMER_SUCCESS,
-    PERMISSION_KEYS.UPGRADE_ANALYSIS,
-    PERMISSION_KEYS.UPGRADE_TASKS,
+  [PERMISSION_KEYS.ECOMMERCE_SETTLEMENT]: [
+    PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_WORKBENCH,
+    PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_HISTORY,
+    PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_EXCEPTIONS,
+    PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_TALENTS,
+    PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_SETTINGS,
+    PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_RULES,
   ],
-  [PERMISSION_KEYS.UPGRADE_POOL]: [PERMISSION_KEYS.UPGRADE_POOL],
-  [PERMISSION_KEYS.UPGRADE_CUSTOMER_SUCCESS]: [PERMISSION_KEYS.UPGRADE_CUSTOMER_SUCCESS],
-  [PERMISSION_KEYS.UPGRADE_ANALYSIS]: [PERMISSION_KEYS.UPGRADE_ANALYSIS],
-  [PERMISSION_KEYS.UPGRADE_TASKS]: [PERMISSION_KEYS.UPGRADE_TASKS],
+  [PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_WORKBENCH]: [PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_WORKBENCH],
+  [PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_HISTORY]: [PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_HISTORY],
+  [PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_EXCEPTIONS]: [PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_EXCEPTIONS],
+  [PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_TALENTS]: [PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_TALENTS],
+  [PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_SETTINGS]: [PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_SETTINGS],
+  [PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_RULES]: [PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_RULES],
+
+  [PERMISSION_KEYS.ASSETS]: [
+    PERMISSION_KEYS.ASSETS_OVERVIEW,
+    PERMISSION_KEYS.ASSETS_DEVICES,
+    PERMISSION_KEYS.ASSETS_PHONES,
+    PERMISSION_KEYS.ASSETS_ACCOUNTS,
+    PERMISSION_KEYS.ASSETS_RISKS,
+    PERMISSION_KEYS.ASSETS_LOGS,
+    PERMISSION_KEYS.ASSETS_OFFBOARDING,
+    PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW,
+    PERMISSION_KEYS.ASSETS_IMPORT_EXPORT,
+  ],
+  [PERMISSION_KEYS.ASSETS_OVERVIEW]: [PERMISSION_KEYS.ASSETS_OVERVIEW],
+  [PERMISSION_KEYS.ASSETS_DEVICES]: [PERMISSION_KEYS.ASSETS_DEVICES],
+  [PERMISSION_KEYS.ASSETS_PHONES]: [PERMISSION_KEYS.ASSETS_PHONES],
+  [PERMISSION_KEYS.ASSETS_ACCOUNTS]: [PERMISSION_KEYS.ASSETS_ACCOUNTS],
+  [PERMISSION_KEYS.ASSETS_RISKS]: [PERMISSION_KEYS.ASSETS_RISKS],
+  [PERMISSION_KEYS.ASSETS_LOGS]: [PERMISSION_KEYS.ASSETS_LOGS],
+  [PERMISSION_KEYS.ASSETS_OFFBOARDING]: [PERMISSION_KEYS.ASSETS_OFFBOARDING],
+  [PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW]: [PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW],
+  [PERMISSION_KEYS.ASSETS_IMPORT_EXPORT]: [PERMISSION_KEYS.ASSETS_IMPORT_EXPORT],
+
+  [PERMISSION_KEYS.GEO]: [
+    PERMISSION_KEYS.GEO_OVERVIEW,
+    PERMISSION_KEYS.GEO_CONTENT,
+    PERMISSION_KEYS.GEO_ANALYTICS,
+  ],
+  [PERMISSION_KEYS.GEO_OVERVIEW]: [PERMISSION_KEYS.GEO_OVERVIEW],
+  [PERMISSION_KEYS.GEO_CONTENT]: [PERMISSION_KEYS.GEO_CONTENT],
+  [PERMISSION_KEYS.GEO_ANALYTICS]: [PERMISSION_KEYS.GEO_ANALYTICS],
 
   [PERMISSION_KEYS.AI_ASSISTANT]: [
     PERMISSION_KEYS.AI_CHAT,
@@ -206,6 +299,7 @@ const PERMISSION_GRANT_TREE: Record<string, string[]> = {
     PERMISSION_KEYS.SETTINGS_LIFECYCLE,
     PERMISSION_KEYS.SETTINGS_LEAD_SOURCES,
     PERMISSION_KEYS.SETTINGS_LEAD_FLOW,
+    PERMISSION_KEYS.SETTINGS_AI_CONFIG,
     PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE,
   ],
   [PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS]: [PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS],
@@ -217,6 +311,7 @@ const PERMISSION_GRANT_TREE: Record<string, string[]> = {
   [PERMISSION_KEYS.SETTINGS_LIFECYCLE]: [PERMISSION_KEYS.SETTINGS_LIFECYCLE],
   [PERMISSION_KEYS.SETTINGS_LEAD_SOURCES]: [PERMISSION_KEYS.SETTINGS_LEAD_SOURCES],
   [PERMISSION_KEYS.SETTINGS_LEAD_FLOW]: [PERMISSION_KEYS.SETTINGS_LEAD_FLOW],
+  [PERMISSION_KEYS.SETTINGS_AI_CONFIG]: [PERMISSION_KEYS.SETTINGS_AI_CONFIG],
   [PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE]: [PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE],
 };
 
@@ -227,15 +322,24 @@ const PERMISSION_GRANTS_BY_NORMALIZED = new Map<string, string[]>(
 const WRITE_ACTION_PERMISSION_KEYS = [
   PERMISSION_KEYS.ORDER_CREATE,
   PERMISSION_KEYS.ORDER_EDIT,
+  PERMISSION_KEYS.CUSTOMER_ASSIGN,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+  PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_WORKBENCH,
+  PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_SETTINGS,
+  PERMISSION_KEYS.ASSETS_IMPORT_EXPORT,
 ];
 
 const DELETE_ACTION_PERMISSION_KEYS = [
   PERMISSION_KEYS.ORDER_DELETE,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE,
 ];
 
 const ROLE_CODE_BY_USER_ROLE: Record<string, string> = {
   超级管理员: 'super_admin',
   管理员: 'super_admin',
+  系统管理员: 'super_admin',
   'Super Admin': 'super_admin',
   销售经理: 'sales_manager',
   'Sales Manager': 'sales_manager',
@@ -252,8 +356,14 @@ const ROLE_CODE_BY_USER_ROLE: Record<string, string> = {
   客户成功: 'customer_success',
 };
 
-export function isSuperAdmin(user?: Pick<AuthenticatedUser, 'role' | 'permissions'> | null): boolean {
+export function isSuperAdmin(user?: Pick<AuthenticatedUser, 'role' | 'roleId' | 'permissions'> | null): boolean {
   if (!user) return false;
+  const liveRole = getLiveRoleForAuthenticatedUser(user);
+  if (liveRole) {
+    return liveRole.code === 'super_admin' || roleHasPermission(liveRole, ALL_PERMISSION_KEY, 'admin');
+  }
+  const roleId = normalizePermissionKey(String(user.roleId || '')).toLowerCase();
+  if (roleId.includes('super-admin') || roleId.includes('super_admin')) return true;
   return user.permissions?.some((permission) => normalizePermissionKey(permission.module) === ALL_PERMISSION_KEY) || false;
 }
 
@@ -270,18 +380,32 @@ export function getUserRole(user: Pick<User, 'role' | 'roleId'>, roles: Role[]):
   ));
 }
 
+function readLiveRoles(): Role[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.ROLES);
+    return raw ? (JSON.parse(raw) as Role[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function getLiveRoleForAuthenticatedUser(user: Pick<AuthenticatedUser, 'role' | 'roleId'>): Role | undefined {
+  const roles = readLiveRoles();
+  if (!roles.length) return undefined;
+  return getUserRole({ role: user.role, roleId: user.roleId }, roles);
+}
+
 export function roleHasPermission(role: Role | undefined, permissionKey: string, action = 'read'): boolean {
   if (!role?.isActive) return false;
   if (role.code === 'super_admin') return true;
-  const requestedKeys = expandPermissionGrants(permissionKey);
+  const requestedKeys = expandPermissionRequests(permissionKey);
   if (!requestedKeys.length) return false;
   return role.permissions.some((permission) => {
     if (!actionAllowed(getDefaultPermissionActions(permission.module, permission.actions || []), action)) return false;
     const grantedKeys = expandPermissionGrants(permission.module);
     if (grantedKeys.includes(ALL_PERMISSION_KEY)) return true;
-    return grantedKeys.some((granted) => requestedKeys.some((requested) => (
-      requested === granted || requested.startsWith(`${granted}/`) || granted.startsWith(`${requested}/`)
-    )));
+    return grantedKeys.some((granted) => requestedKeys.includes(granted));
   });
 }
 
@@ -304,9 +428,12 @@ function roleHasDirectPermission(role: Role | undefined, permissionKeys: string[
   ));
 }
 
-export function canReceiveLead(user: Pick<User, 'role' | 'roleId' | 'isActive'>, roles: Role[]): boolean {
+export function canReceiveLead(user: Pick<User, 'role' | 'roleId' | 'isActive' | 'employmentStatus'>, roles: Role[]): boolean {
   if (!user.isActive) return false;
-  return roleHasDirectPermission(getUserRole(user, roles), [
+  if ((user.employmentStatus || 'active') !== 'active') return false;
+  const role = getUserRole(user, roles);
+  if (role?.code === 'super_admin') return false;
+  return roleHasDirectPermission(role, [
     CAPABILITY_KEYS.LEADS_RECEIVE,
     PERMISSION_KEYS.LEADS_FOLLOW,
   ]);
@@ -371,18 +498,65 @@ function expandPermissionGrants(module: string): string[] {
   return (grants || []).map(normalizePermissionKey);
 }
 
+function expandPermissionRequests(module: string): string[] {
+  const normalized = normalizePermissionKey(module);
+  if (normalized === ALL_PERMISSION_KEY) return [ALL_PERMISSION_KEY];
+  const keys = new Set<string>(expandPermissionGrants(module));
+  keys.add(normalized);
+  for (const [permissionKey, grants] of PERMISSION_GRANTS_BY_NORMALIZED.entries()) {
+    if (permissionKey.startsWith(`${normalized}/`)) {
+      keys.add(permissionKey);
+      grants.map(normalizePermissionKey).forEach((grant) => keys.add(grant));
+    }
+  }
+  return Array.from(keys);
+}
+
 function getSanitizedPermissionModules(module: string): string[] {
   const normalized = normalizePermissionKey(module);
   if (normalized === ALL_PERMISSION_KEY) return [ALL_PERMISSION_KEY];
   return PERMISSION_GRANTS_BY_NORMALIZED.get(normalized) || [];
 }
 
+function isReadOnlyPermissionActions(actions: string[] = []): boolean {
+  const normalized = actions.length ? actions : ['read'];
+  return normalized.every((action) => action === 'read');
+}
+
+function getReadOnlyExpandedModules(permissions: Permission[]): Set<string> {
+  const actionsByModule = new Map<string, string[]>();
+  permissions.forEach((permission) => {
+    actionsByModule.set(normalizePermissionKey(permission.module), permission.actions || []);
+  });
+
+  const expanded = new Set<string>();
+  Object.values(PERMISSION_GRANT_TREE).forEach((grants) => {
+    const normalizedGrants = grants.map(normalizePermissionKey);
+    if (normalizedGrants.length <= 1) return;
+    const isCompleteReadOnlyGroup = normalizedGrants.every((module) => (
+      actionsByModule.has(module)
+      && isReadOnlyPermissionActions(actionsByModule.get(module))
+    ));
+    if (isCompleteReadOnlyGroup) {
+      normalizedGrants.forEach((module) => expanded.add(module));
+    }
+  });
+  return expanded;
+}
+
 export function sanitizeRolePermissions(permissions: Permission[] = []): Permission[] {
   const merged = new Map<string, Set<string>>();
+  const readOnlyExpandedModules = getReadOnlyExpandedModules(permissions);
 
   permissions.forEach((permission) => {
     const modules = getSanitizedPermissionModules(permission.module);
-    const permissionActions = getDefaultPermissionActions(permission.module, permission.actions || []);
+    const isReadOnlyExpandedModule = (
+      readOnlyExpandedModules.has(normalizePermissionKey(permission.module))
+      && isReadOnlyPermissionActions(permission.actions || [])
+    );
+    const permissionActions = isReadOnlyExpandedModule
+      ? ['read']
+      : getDefaultPermissionActions(permission.module, permission.actions || []);
     modules.forEach((module) => {
       const actions = merged.get(module) || new Set<string>();
       permissionActions.forEach((action) => actions.add(action));
@@ -397,22 +571,22 @@ export function sanitizeRolePermissions(permissions: Permission[] = []): Permiss
 }
 
 export function hasPermission(
-  user: Pick<AuthenticatedUser, 'role' | 'permissions' | 'isActive'> | null | undefined,
+  user: Pick<AuthenticatedUser, 'role' | 'roleId' | 'permissions' | 'isActive'> | null | undefined,
   permissionKey: string,
   action = 'read',
 ): boolean {
   if (!user?.isActive) return false;
   if (normalizePermissionKey(permissionKey) === PERMISSION_KEYS.HOME) return true;
+  const liveRole = getLiveRoleForAuthenticatedUser(user);
+  if (liveRole) return roleHasPermission(liveRole, permissionKey, action);
   if (isSuperAdmin(user)) return true;
 
-  const requestedKeys = expandPermissionGrants(permissionKey);
+  const requestedKeys = expandPermissionRequests(permissionKey);
   if (!requestedKeys.length) return false;
   return user.permissions.some((permission) => {
     if (!actionAllowed(permission.actions || [], action)) return false;
     const grantedKeys = expandPermissionGrants(permission.module);
     if (grantedKeys.includes(ALL_PERMISSION_KEY)) return true;
-    return grantedKeys.some((granted) => requestedKeys.some((requested) => (
-      requested === granted || requested.startsWith(`${granted}/`) || granted.startsWith(`${requested}/`)
-    )));
+    return grantedKeys.some((granted) => requestedKeys.includes(granted));
   });
 }

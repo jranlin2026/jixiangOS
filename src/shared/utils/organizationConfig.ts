@@ -8,8 +8,16 @@ import { normalizeUserRoleName } from './roles';
 import { getStorageData, setStorageData } from '../../api/mock/storage';
 
 const now = '2026-06-01T00:00:00.000Z';
-const ORGANIZATION_SCHEMA_VERSION = 5;
-const DATA_SCOPE_DOMAINS: DataScopeDomain[] = ['leads', 'customers', 'orders', 'orderApplications'];
+const ORGANIZATION_SCHEMA_VERSION = 7;
+const DATA_SCOPE_DOMAINS: DataScopeDomain[] = [
+  'leads',
+  'customers',
+  'orders',
+  'orderApplications',
+  'recoveryOrders',
+  'recoveryOrderApplications',
+  'assets',
+];
 const DATA_SCOPE_LEVELS: DataScopeLevel[] = ['self', 'department', 'all'];
 
 export const DEFAULT_ORGANIZATION_PROFILE: OrganizationProfile = {
@@ -37,6 +45,18 @@ export const DEFAULT_POSITIONS: Position[] = [
   { id: 'pos-ops-admin', name: '运营管理员', code: 'ops_admin', departmentId: 'dept-ops', description: '系统运营和业务配置', sortOrder: 8, isActive: true, createdAt: now, updatedAt: now },
 ];
 
+const ASSET_SELF_SERVICE_PERMISSIONS: Role['permissions'] = [
+  { module: PERMISSION_KEYS.ASSETS_OVERVIEW, actions: ['read'] },
+  { module: PERMISSION_KEYS.ASSETS_DEVICES, actions: ['read'] },
+  { module: PERMISSION_KEYS.ASSETS_PHONES, actions: ['read'] },
+  { module: PERMISSION_KEYS.ASSETS_ACCOUNTS, actions: ['read'] },
+  { module: PERMISSION_KEYS.ASSETS_RISKS, actions: ['read'] },
+  { module: PERMISSION_KEYS.ASSETS_LOGS, actions: ['read'] },
+  { module: PERMISSION_KEYS.ASSETS_OFFBOARDING, actions: ['read'] },
+];
+
+const ASSET_SELF_SERVICE_PERMISSION_KEYS = new Set(ASSET_SELF_SERVICE_PERMISSIONS.map((permission) => permission.module));
+
 export const DEFAULT_ROLES: Role[] = [
   {
     id: 'role-super-admin',
@@ -44,7 +64,7 @@ export const DEFAULT_ROLES: Role[] = [
     code: 'super_admin',
     departmentId: 'dept-general',
     permissions: [{ module: '全部', actions: ['read', 'write', 'delete', 'admin'] }],
-    dataScopes: { leads: 'all', customers: 'all', orders: 'all', orderApplications: 'all' },
+    dataScopes: { leads: 'all', customers: 'all', orders: 'all', orderApplications: 'all', assets: 'all' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -65,9 +85,11 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.ORDER_EDIT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_DELETE, actions: ['read', 'delete'] },
       { module: PERMISSION_KEYS.ORDER_HISTORY, actions: ['read'] },
+      { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
       { module: PERMISSION_KEYS.DASHBOARD, actions: ['read'] },
+      ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
-    dataScopes: { leads: 'department', customers: 'department', orders: 'department', orderApplications: 'department' },
+    dataScopes: { leads: 'department', customers: 'department', orders: 'department', orderApplications: 'department', assets: 'department' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -85,8 +107,10 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_CREATE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_EDIT, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
+      ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
-    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' },
+    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', assets: 'self' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -101,9 +125,12 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.LEADS_DETAIL, actions: ['read'] },
       { module: PERMISSION_KEYS.LEADS_CREATE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.LEADS_INTAKE_STATUS, actions: ['read'] },
+      { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
       { module: PERMISSION_KEYS.DASHBOARD, actions: ['read'] },
+      { module: PERMISSION_KEYS.GEO, actions: ['read', 'write'] },
+      ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
-    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' },
+    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', assets: 'self' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -117,9 +144,10 @@ export const DEFAULT_ROLES: Role[] = [
     permissions: [
       { module: PERMISSION_KEYS.CUSTOMERS, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read'] },
-      { module: PERMISSION_KEYS.UPGRADE_CENTER, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
+      ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
-    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' },
+    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', assets: 'self' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -133,8 +161,11 @@ export const DEFAULT_ROLES: Role[] = [
     permissions: [
       { module: PERMISSION_KEYS.DELIVERY, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read'] },
+      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
+      ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
-    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' },
+    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', assets: 'self' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -146,15 +177,17 @@ export const DEFAULT_ROLES: Role[] = [
     code: 'finance_specialist',
     departmentId: 'dept-finance',
     permissions: [
-      { module: PERMISSION_KEYS.FINANCE_OVERVIEW, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_SETTLEMENT, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_PAYOUT, actions: ['read', 'write'] },
-      { module: PERMISSION_KEYS.FINANCE_REFUND, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_FLOW, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_RULES, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDERS, actions: ['read'] },
+      ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
-    dataScopes: { leads: 'self', customers: 'self', orders: 'all', orderApplications: 'all' },
+    dataScopes: { leads: 'self', customers: 'self', orders: 'all', orderApplications: 'all', assets: 'self' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -174,8 +207,11 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.SETTINGS_LIFECYCLE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.SETTINGS_LEAD_FLOW, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.GEO, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.ASSETS, actions: ['read', 'write'] },
     ],
-    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' },
+    dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', assets: 'all' },
     memberCount: 0,
     isActive: true,
     createdAt: now,
@@ -186,6 +222,7 @@ export const DEFAULT_ROLES: Role[] = [
 const ROLE_CODE_BY_NAME: Record<string, string> = {
   超级管理员: 'super_admin',
   管理员: 'super_admin',
+  系统管理员: 'super_admin',
   'Super Admin': 'super_admin',
   销售经理: 'sales_manager',
   'Sales Manager': 'sales_manager',
@@ -210,41 +247,55 @@ function isDataScopeLevel(value: unknown): value is DataScopeLevel {
   return DATA_SCOPE_LEVELS.includes(value as DataScopeLevel);
 }
 
+function buildDataScopes(
+  leads: DataScopeLevel,
+  customers: DataScopeLevel,
+  orders: DataScopeLevel,
+  orderApplications: DataScopeLevel,
+  recoveryOrders: DataScopeLevel = orders,
+  recoveryOrderApplications: DataScopeLevel = orderApplications,
+  assets: DataScopeLevel = customers,
+): Required<Record<DataScopeDomain, DataScopeLevel>> {
+  return { leads, customers, orders, orderApplications, recoveryOrders, recoveryOrderApplications, assets };
+}
+
 function defaultRoleDataScopes(code?: string): Required<Record<DataScopeDomain, DataScopeLevel>> {
   const normalizedCode = normalizeCode(code);
   if (normalizedCode === 'super_admin') {
-    return { leads: 'all', customers: 'all', orders: 'all', orderApplications: 'all' };
+    return buildDataScopes('all', 'all', 'all', 'all');
   }
   if (normalizedCode === 'sales_manager') {
-    return { leads: 'department', customers: 'department', orders: 'department', orderApplications: 'department' };
+    return buildDataScopes('department', 'department', 'department', 'department');
   }
   if (normalizedCode === 'finance_specialist') {
-    return { leads: 'self', customers: 'self', orders: 'all', orderApplications: 'all' };
+    return buildDataScopes('self', 'self', 'all', 'all');
   }
-  return { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' };
+  if (normalizedCode === 'ops_admin') {
+    return buildDataScopes('self', 'self', 'self', 'self', 'self', 'self', 'all');
+  }
+  return buildDataScopes('self', 'self', 'self', 'self');
 }
 
-export function normalizeRoleDataScopes(role: Pick<Role, 'code'> & { dataScopes?: RoleDataScopes }): Required<Record<DataScopeDomain, DataScopeLevel>> {
+function hasRecoveryReviewPermission(role: { permissions?: Role['permissions'] }): boolean {
+  return Boolean(role.permissions?.some((permission) => [
+    PERMISSION_KEYS.AFTER_SALES,
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+    '售后服务/售后挽回订单/审核挽回订单',
+  ].includes(permission.module)));
+}
+
+export function normalizeRoleDataScopes(role: Pick<Role, 'code'> & { dataScopes?: RoleDataScopes; permissions?: Role['permissions'] }): Required<Record<DataScopeDomain, DataScopeLevel>> {
   const defaults = defaultRoleDataScopes(role.code);
   if (normalizeCode(role.code) === 'super_admin') return defaults;
   return DATA_SCOPE_DOMAINS.reduce((acc, domain) => {
     const value = role.dataScopes?.[domain];
-    acc[domain] = isDataScopeLevel(value) ? value : defaults[domain];
+    acc[domain] = isDataScopeLevel(value)
+      ? value
+      : domain === 'recoveryOrderApplications' && hasRecoveryReviewPermission(role)
+        ? 'all'
+        : defaults[domain];
     return acc;
   }, { ...defaults });
-}
-
-function mergePermissions(existing: Role['permissions'] = [], required: Role['permissions'] = []): Role['permissions'] {
-  const merged = [...existing];
-  required.forEach((permission) => {
-    const found = merged.find((item) => item.module === permission.module);
-    if (!found) {
-      merged.push(permission);
-      return;
-    }
-    found.actions = Array.from(new Set([...(found.actions || []), ...permission.actions]));
-  });
-  return sanitizeRolePermissions(merged);
 }
 
 function stripLeadSalesAssignmentPermissions(permissions: Role['permissions'] = []): Role['permissions'] {
@@ -258,6 +309,40 @@ function stripLeadSalesAssignmentPermissions(permissions: Role['permissions'] = 
     CAPABILITY_KEYS.LEADS_ASSIGN,
   ]);
   return permissions.filter((permission) => !blocked.has(permission.module));
+}
+
+function normalizeDefaultAssetSelfServicePermissions(permissions: Role['permissions'] = []): Role['permissions'] {
+  const hasAssetSelfServicePermission = permissions.some((permission) => ASSET_SELF_SERVICE_PERMISSION_KEYS.has(permission.module));
+  const normalized = permissions.map((permission) => (
+    ASSET_SELF_SERVICE_PERMISSION_KEYS.has(permission.module)
+      ? { ...permission, actions: ['read'] }
+      : permission
+  ));
+  if (!hasAssetSelfServicePermission) return normalized;
+  const existingModules = new Set(normalized.map((permission) => permission.module));
+  return [
+    ...normalized,
+    ...ASSET_SELF_SERVICE_PERMISSIONS.filter((permission) => !existingModules.has(permission.module)),
+  ];
+}
+
+export function mergeRoleWithDefaultAccess(role: Role): Role {
+  const seed = DEFAULT_ROLES.find((item) => (
+    item.id === role.id
+    || normalizeCode(item.code) === normalizeCode(role.code)
+    || item.name === role.name
+  ));
+  const code = seed?.code || role.code;
+  const permissions = seed?.code === 'super_admin'
+    ? seed.permissions
+    : sanitizeRolePermissions(normalizeDefaultAssetSelfServicePermissions(role.permissions));
+
+  return {
+    ...role,
+    code,
+    permissions,
+    dataScopes: normalizeRoleDataScopes({ ...role, code, permissions }),
+  };
 }
 
 function mergeDefaultItems<T extends { code: string; id: string; name: string }>(
@@ -293,6 +378,24 @@ function keepExistingOrDefaults<T>(existing: T[] | null | undefined, defaults: T
 
 function sortPositions(positions: Position[]): Position[] {
   return [...positions].sort((a, b) => Number(a.sortOrder) - Number(b.sortOrder) || a.name.localeCompare(b.name));
+}
+
+function migrateStoredUsersWithIdMaps(
+  users: User[] | null | undefined,
+  roles: Role[],
+  idMaps: { roles: Record<string, string> },
+): User[] | null {
+  if (!users?.length) return null;
+  return users.map((user) => {
+    const roleId = user.roleId ? idMaps.roles[user.roleId] || user.roleId : user.roleId;
+    const role = resolveRoleForUser({ role: user.role, roleId }, roles);
+    return {
+      ...user,
+      role: role?.name || normalizeUserRoleName(user.role),
+      roleId: role?.id || roleId,
+      employmentStatus: user.employmentStatus || 'active',
+    };
+  });
 }
 
 export function sortDepartments(departments: Department[]): Department[] {
@@ -383,15 +486,17 @@ export function ensureOrganizationConfigData() {
       id: seed.id,
       code: seed.code,
       name: seed.name,
-      departmentId: departmentResult.idMap[current.departmentId || ''] || seed.departmentId,
+      departmentId: current.departmentId ? departmentResult.idMap[current.departmentId] || current.departmentId : seed.departmentId,
       permissions: seed.code === 'super_admin'
         ? seed.permissions
-        : mergePermissions(
-          seed.code === 'market_specialist'
-            ? stripLeadSalesAssignmentPermissions(current.permissions)
-            : current.permissions,
-          seed.permissions,
-        ),
+        : sanitizeRolePermissions(normalizeDefaultAssetSelfServicePermissions(
+          [
+            ...(seed.code === 'market_specialist'
+              ? stripLeadSalesAssignmentPermissions(current.permissions)
+              : current.permissions),
+            ...seed.permissions,
+          ],
+        )),
       isActive: seed.code === 'super_admin' ? true : (current.isActive ?? seed.isActive),
       createdAt: current.createdAt || seed.createdAt,
       updatedAt: new Date().toISOString(),
@@ -403,16 +508,18 @@ export function ensureOrganizationConfigData() {
     ...position,
     departmentId: position.departmentId ? departmentResult.idMap[position.departmentId] || position.departmentId : position.departmentId,
   })));
-  const roles = rolesResult.items.map((role) => ({
+  const roles = rolesResult.items.map((role) => mergeRoleWithDefaultAccess({
     ...role,
     departmentId: role.departmentId ? departmentResult.idMap[role.departmentId] || role.departmentId : role.departmentId,
-    permissions: sanitizeRolePermissions(role.permissions),
-    dataScopes: normalizeRoleDataScopes(role),
   }));
+  const migratedUsers = storedVersion < ORGANIZATION_SCHEMA_VERSION
+    ? migrateStoredUsersWithIdMaps(getStorageData<User[]>(STORAGE_KEYS.USERS), roles, { roles: rolesResult.idMap })
+    : null;
 
   setStorageData(STORAGE_KEYS.DEPARTMENTS, departments);
   setStorageData(STORAGE_KEYS.ROLES, roles);
   setStorageData(STORAGE_KEYS.POSITIONS, positions);
+  if (migratedUsers) setStorageData(STORAGE_KEYS.USERS, migratedUsers);
   setStorageData(STORAGE_KEYS.ORGANIZATION_SCHEMA_VERSION, ORGANIZATION_SCHEMA_VERSION);
   getOrganizationProfile();
 

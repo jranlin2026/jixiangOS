@@ -8,7 +8,7 @@ const AppLayout: React.FC = () => {
   const sidebarWidth = 240;
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: '#f8f9fa' }}>
+    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: '#F6F8FB' }}>
       <Sidebar width={sidebarWidth} />
       <GlobalTableColumnResizer />
       <Box
@@ -18,6 +18,7 @@ const AppLayout: React.FC = () => {
           minWidth: 0,
           minHeight: '100vh',
           overflow: 'auto',
+          bgcolor: '#F6F8FB',
         }}
       >
         <Outlet />

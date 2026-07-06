@@ -7,6 +7,7 @@ import type {
   RefundStats,
 } from '../types/refund';
 import type { Order } from '../types/order';
+import type { Product } from '../types/product';
 import type { Commission, CommissionOperationLog } from '../types/commission';
 import type { FinanceExpense, FinanceDailyRecord, ChannelROI, FinanceIncome } from '../types/finance';
 import type { ApiResponse, PaginatedResponse } from './types';
@@ -68,8 +69,17 @@ function pickDefaultAssignee(data: Partial<Refund>, order?: Order): { id: string
   return { id: data.applicantId || 'user-001', name: data.applicantName || '待分配', role: '销售' };
 }
 
+function getProductName(productId?: string, productLevel?: string, fallback?: string): string | undefined {
+  const products = getStorageData<Product[]>(STORAGE_KEYS.PRODUCTS) || [];
+  const matched = (productId ? products.find((product) => product.id === productId) : undefined)
+    || (productLevel ? products.find((product) => product.level === productLevel) : undefined);
+  return matched?.name || fallback || productLevel;
+}
+
 function normalizeRefund(refund: Refund): Refund {
   const createdAt = refund.createdAt || nowIso();
+  const order = (getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [])
+    .find((item) => item.id === refund.orderId || item.orderNo === refund.orderNo);
   const assigned = pickDefaultAssignee(refund);
   const status = refund.status === '退款申请中' ? '待分配' : refund.status;
   const recoveryTask = refund.recoveryTask || {
@@ -93,6 +103,7 @@ function normalizeRefund(refund: Refund): Refund {
 
   return {
     ...refund,
+    productName: getProductName(order?.productId, order?.productLevel || refund.productLevel, refund.productName || order?.productName),
     status,
     recoveryRate: refund.recoveryRate ?? DEFAULT_RECOVERY_RATE,
     frozenCommissionAmount: refund.frozenCommissionAmount ?? 0,
@@ -183,29 +194,7 @@ function cancelCommissions(refund: Refund): void {
 }
 
 function markPaidRefundChargebacks(refund: Refund): void {
-  const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
-  const paidStatus = '已发放';
-  const reason = `已发放后退款：${refund.refundNo}，需财务人工冲销/追回`;
-  const chargebackCommissions: Commission[] = [];
-
-  const nextCommissions = commissions.map((commission) => {
-    if ((commission.orderId !== refund.orderId && commission.orderNo !== refund.orderNo) || commission.isRecoveryBonus) return commission;
-    if (commission.status !== paidStatus) return commission;
-    const nextCommission = {
-      ...commission,
-      status: '待冲销' as const,
-      auditReason: reason,
-      frozenReason: reason,
-      calculationNote: `${commission.calculationNote || ''} ${reason}`.trim(),
-      sourceRefundId: refund.id,
-      updatedAt: nowIso(),
-    };
-    chargebackCommissions.push(nextCommission);
-    return nextCommission;
-  });
-
-  setStorageData(STORAGE_KEYS.COMMISSIONS, nextCommissions);
-  appendRefundCommissionOperationLog(refund, '退款待冲销', reason, chargebackCommissions);
+  void refund;
 }
 
 function markPaidRefundExceptions(refund: Refund): void {
@@ -232,7 +221,7 @@ function createRecoveryCommission(refund: Refund, operatorId: string, operatorNa
     commissionRate: rate,
     commissionAmount: amount,
     performanceAmount: baseAmount,
-    scene: '退款挽回',
+    scene: '售后挽回',
     proofStatus: '已上传',
     calculationNote: `挽回提成 = 保留金额 ${baseAmount} × ${Math.round(rate * 100)}%，来源退款单 ${refund.refundNo}。`,
     role: role === '客户成功' ? '客户成功' : role === '售后' ? '售后' : '销售',

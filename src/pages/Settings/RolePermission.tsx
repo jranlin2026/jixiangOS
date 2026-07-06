@@ -1,21 +1,13 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Box,
   Button,
   Checkbox,
   Chip,
-  Dialog,
-  IconButton,
-  Paper,
+  InputAdornment,
+  MenuItem,
   Switch,
-  Tab,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Tabs,
   TextField,
   ToggleButton,
   ToggleButtonGroup,
@@ -23,11 +15,13 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
-import EditIcon from '@mui/icons-material/Edit';
+import SearchIcon from '@mui/icons-material/Search';
 import useRoleStore from '../../store/useRoleStore';
+import { settingsApi } from '../../api';
 import type { DataScopeDomain, DataScopeLevel, Permission, Role, RoleDataScopes } from '../../types/role';
-import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import type { User } from '../../types/settings';
 import { CAPABILITY_KEYS, PERMISSION_KEYS, getDefaultPermissionActions } from '../../shared/utils/permissions';
+import { normalizeUserRoleName } from '../../shared/utils/roles';
 
 type RoleForm = {
   name: string;
@@ -66,10 +60,11 @@ const PERMISSION_TREE: PermissionNode[] = [
   {
     label: '客户',
     children: [
+      { label: '客户列表', key: PERMISSION_KEYS.CUSTOMER_LIST },
+      { label: '查看客户资料', key: PERMISSION_KEYS.CUSTOMER_DETAIL },
       { label: '新建客户', key: PERMISSION_KEYS.CUSTOMER_CREATE },
-      { label: '客户详情', key: PERMISSION_KEYS.CUSTOMER_DETAIL },
-      { label: '客户画像', key: PERMISSION_KEYS.CUSTOMER_PROFILE },
-      { label: 'AI名片', key: PERMISSION_KEYS.CUSTOMER_AI_CARD },
+      { label: '编辑客户', key: PERMISSION_KEYS.CUSTOMER_EDIT },
+      { label: '分配客户', key: PERMISSION_KEYS.CUSTOMER_ASSIGN },
       { label: '新建客户订单', key: PERMISSION_KEYS.CUSTOMER_CREATE_ORDER },
       { label: '查看客户订单', key: PERMISSION_KEYS.CUSTOMER_VIEW_ORDERS },
     ],
@@ -95,23 +90,58 @@ const PERMISSION_TREE: PermissionNode[] = [
     ],
   },
   {
-    label: '财务中心',
+    label: '售后服务',
     children: [
-      { label: '财务总览', key: PERMISSION_KEYS.FINANCE_OVERVIEW },
-      { label: '订单分账', key: PERMISSION_KEYS.FINANCE_SETTLEMENT },
-      { label: '月度发放', key: PERMISSION_KEYS.FINANCE_PAYOUT },
-      { label: '退款付款', key: PERMISSION_KEYS.FINANCE_REFUND },
-      { label: '收支流水', key: PERMISSION_KEYS.FINANCE_FLOW },
-      { label: '规则配置', key: PERMISSION_KEYS.FINANCE_RULES },
+      { label: '售后挽回订单列表', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY },
+      { label: '售后挽回订单审核操作', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW },
+      { label: '新增售后挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE },
+      { label: '编辑售后挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT },
+      { label: '删除售后挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE },
+      { label: '售后挽回订单修改记录', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY },
     ],
   },
   {
-    label: '升单中心',
+    label: '财务中心',
     children: [
-      { label: '机会池', key: PERMISSION_KEYS.UPGRADE_POOL },
-      { label: '客户成功', key: PERMISSION_KEYS.UPGRADE_CUSTOMER_SUCCESS },
-      { label: '升单分析', key: PERMISSION_KEYS.UPGRADE_ANALYSIS },
-      { label: '行动任务', key: PERMISSION_KEYS.UPGRADE_TASKS },
+      { label: '我的提成', key: PERMISSION_KEYS.FINANCE_MY_COMMISSION },
+      { label: '订单分账', key: PERMISSION_KEYS.FINANCE_SETTLEMENT },
+      { label: '售后挽回分账', key: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT },
+      { label: '员工提成月报', key: PERMISSION_KEYS.FINANCE_PAYOUT },
+      { label: '收支流水', key: PERMISSION_KEYS.FINANCE_FLOW },
+      { label: '提成规则', key: PERMISSION_KEYS.FINANCE_RULES },
+    ],
+  },
+  {
+    label: '电商结算中心',
+    children: [
+      { label: '结算工作台', key: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_WORKBENCH },
+      { label: '结算历史', key: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_HISTORY },
+      { label: '异常核对', key: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_EXCEPTIONS },
+      { label: '达人结算汇总', key: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_TALENTS },
+      { label: '店铺与参数', key: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_SETTINGS },
+      { label: '结算规则', key: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_RULES },
+    ],
+  },
+  {
+    label: '资产管理',
+    children: [
+      { label: '资产总览', key: PERMISSION_KEYS.ASSETS_OVERVIEW },
+      { label: '设备资产', key: PERMISSION_KEYS.ASSETS_DEVICES },
+      { label: '手机号资产', key: PERMISSION_KEYS.ASSETS_PHONES },
+      { label: '互联网账号', key: PERMISSION_KEYS.ASSETS_ACCOUNTS },
+      { label: '风险提醒', key: PERMISSION_KEYS.ASSETS_RISKS },
+      { label: '操作日志', key: PERMISSION_KEYS.ASSETS_LOGS },
+      { label: '离职回收', key: PERMISSION_KEYS.ASSETS_OFFBOARDING },
+      { label: '查看敏感字段', key: PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW },
+      { label: '导入导出', key: PERMISSION_KEYS.ASSETS_IMPORT_EXPORT },
+    ],
+  },
+  {
+    label: 'GEO',
+    children: [
+      { label: 'GEO总览', key: PERMISSION_KEYS.GEO_OVERVIEW },
+      { label: '内容矩阵', key: PERMISSION_KEYS.GEO_CONTENT },
+      { label: '效果分析', key: PERMISSION_KEYS.GEO_ANALYTICS },
     ],
   },
   {
@@ -141,7 +171,7 @@ const PERMISSION_TREE: PermissionNode[] = [
         ],
       },
       {
-        label: '客户管理',
+        label: '客户设置',
         children: [
           { label: '客户等级', key: PERMISSION_KEYS.SETTINGS_CUSTOMER_LEVELS },
           { label: '客户生命周期', key: PERMISSION_KEYS.SETTINGS_LIFECYCLE },
@@ -152,6 +182,7 @@ const PERMISSION_TREE: PermissionNode[] = [
       {
         label: '系统维护',
         children: [
+          { label: 'AI大脑', key: PERMISSION_KEYS.SETTINGS_AI_CONFIG },
           { label: '数据维护', key: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE },
         ],
       },
@@ -165,6 +196,9 @@ const defaultDataScopes: Record<DataScopeDomain, DataScopeLevel> = {
   customers: 'self',
   orders: 'self',
   orderApplications: 'self',
+  recoveryOrders: 'self',
+  recoveryOrderApplications: 'self',
+  assets: 'self',
 };
 const emptyForm: RoleForm = {
   name: '',
@@ -183,9 +217,12 @@ const dataScopeOptions: Array<{ value: DataScopeLevel; label: string }> = [
 
 const dataScopeRows: Array<{ domain: DataScopeDomain; label: string; description: string; permissionKeys: string[] }> = [
   { domain: 'leads', label: '线索数据', description: '控制线索列表、入库情况和线索统计的数据范围', permissionKeys: [PERMISSION_KEYS.LEADS_LIST, PERMISSION_KEYS.LEADS_DETAIL, PERMISSION_KEYS.LEADS_CREATE, PERMISSION_KEYS.LEADS_FOLLOW, PERMISSION_KEYS.LEADS_FLOW_CONFIG, PERMISSION_KEYS.LEADS_INTAKE_STATUS] },
-  { domain: 'customers', label: '客户数据', description: '控制客户列表、客户详情和客户统计的数据范围', permissionKeys: [PERMISSION_KEYS.CUSTOMER_CREATE, PERMISSION_KEYS.CUSTOMER_DETAIL, PERMISSION_KEYS.CUSTOMER_PROFILE, PERMISSION_KEYS.CUSTOMER_AI_CARD, PERMISSION_KEYS.CUSTOMER_CREATE_ORDER, PERMISSION_KEYS.CUSTOMER_VIEW_ORDERS] },
+  { domain: 'customers', label: '客户数据', description: '控制客户列表、客户资料和客户统计的数据范围', permissionKeys: [PERMISSION_KEYS.CUSTOMER_LIST, PERMISSION_KEYS.CUSTOMER_DETAIL, PERMISSION_KEYS.CUSTOMER_CREATE, PERMISSION_KEYS.CUSTOMER_EDIT, PERMISSION_KEYS.CUSTOMER_ASSIGN, PERMISSION_KEYS.CUSTOMER_CREATE_ORDER, PERMISSION_KEYS.CUSTOMER_VIEW_ORDERS] },
   { domain: 'orders', label: '订单数据', description: '控制正式订单列表、订单筛选和订单统计的数据范围', permissionKeys: [PERMISSION_KEYS.ORDER_MANAGE, PERMISSION_KEYS.ORDER_CREATE, PERMISSION_KEYS.ORDER_EDIT, PERMISSION_KEYS.ORDER_DELETE, PERMISSION_KEYS.ORDER_HISTORY, PERMISSION_KEYS.ORDER_PAYMENT_SCREENSHOT] },
   { domain: 'orderApplications', label: '订单审核台数据', description: '控制订单审核台能看到哪些订单申请；审核操作仍由订单审核操作权限控制', permissionKeys: [PERMISSION_KEYS.ORDER_REVIEW, PERMISSION_KEYS.ORDER_MANAGE, PERMISSION_KEYS.ORDER_CREATE] },
+  { domain: 'recoveryOrders', label: '售后挽回订单数据', description: '控制售后挽回订单列表、筛选和统计的数据范围', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT, PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY] },
+  { domain: 'recoveryOrderApplications', label: '售后挽回订单审核台数据', description: '控制售后挽回审核台能看到哪些挽回订单；审核操作仍由售后挽回订单审核操作权限控制', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW] },
+  { domain: 'assets', label: '资产数据', description: '控制设备资产、手机号资产、互联网账号、风险提醒和离职回收的数据范围', permissionKeys: [PERMISSION_KEYS.ASSETS, PERMISSION_KEYS.ASSETS_OVERVIEW, PERMISSION_KEYS.ASSETS_DEVICES, PERMISSION_KEYS.ASSETS_PHONES, PERMISSION_KEYS.ASSETS_ACCOUNTS, PERMISSION_KEYS.ASSETS_RISKS, PERMISSION_KEYS.ASSETS_LOGS, PERMISSION_KEYS.ASSETS_OFFBOARDING] },
 ];
 
 const getNodeKey = (path: string[]) => path.join('/');
@@ -286,8 +323,6 @@ const isNodeIndeterminate = (permissions: Permission[], node: PermissionNode, pa
   return checkedCount > 0 && checkedCount < keys.length;
 };
 
-const getRowSpan = (node: PermissionNode) => Math.max(1, node.children?.length || 0);
-
 const getLeafPermissionLabels = (permissions: Permission[]) => {
   const selected = normalizePermissionKeys(permissions);
   const leafKeys = getAllSelectablePermissionKeys();
@@ -296,7 +331,15 @@ const getLeafPermissionLabels = (permissions: Permission[]) => {
 
 const normalizeDataScopes = (value?: RoleDataScopes, code?: string): RoleDataScopes => {
   if (code === 'super_admin') {
-    return { leads: 'all', customers: 'all', orders: 'all', orderApplications: 'all' };
+    return {
+      leads: 'all',
+      customers: 'all',
+      orders: 'all',
+      orderApplications: 'all',
+      recoveryOrders: 'all',
+      recoveryOrderApplications: 'all',
+      assets: 'all',
+    };
   }
   return { ...defaultDataScopes, ...(value || {}) };
 };
@@ -306,54 +349,105 @@ const hasAnyPermissionKey = (permissions: Permission[], keys: string[]) => {
   return keys.some((key) => selected.has(key));
 };
 
+const roleToForm = (role: Role): RoleForm => ({
+  name: role.name,
+  description: role.description || '',
+  departmentId: role.departmentId || '',
+  isActive: role.isActive,
+  permissions: role.permissions.length ? role.permissions : [defaultPermission],
+  dataScopes: normalizeDataScopes(role.dataScopes, role.code),
+});
+
+const userMatchesRole = (user: User, role: Role): boolean => (
+  user.roleId === role.id || normalizeUserRoleName(user.role) === role.name
+);
+
 const RolePermission: React.FC = () => {
   const { items, fetchItems, create, update, delete: deleteRole } = useRoleStore();
-  const [formOpen, setFormOpen] = useState(false);
   const [editRole, setEditRole] = useState<Role | null>(null);
+  const [users, setUsers] = useState<User[]>([]);
   const [form, setForm] = useState<RoleForm>(emptyForm);
-  const [formTab, setFormTab] = useState<'permissions' | 'dataScopes'>('permissions');
+  const [selectedRoleId, setSelectedRoleId] = useState('');
+  const [mode, setMode] = useState<'edit' | 'create'>('edit');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'enabled' | 'disabled'>('all');
   const [error, setError] = useState('');
+  const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetchItems();
+    settingsApi.fetchUsers().then((res) => {
+      if (res.code === 0) setUsers(res.data);
+    });
   }, [fetchItems]);
+
+  useEffect(() => {
+    if (!items.length || mode === 'create') return;
+    const nextRole = items.find((role) => role.id === selectedRoleId) || items[0];
+    setSelectedRoleId(nextRole.id);
+    setEditRole(nextRole);
+    setForm(roleToForm(nextRole));
+  }, [items, mode, selectedRoleId]);
+
+  const filteredRoles = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return items.filter((role) => {
+      const matchedSearch = !q
+        || role.name.toLowerCase().includes(q)
+        || role.code.toLowerCase().includes(q)
+        || (role.description || '').toLowerCase().includes(q);
+      const matchedStatus = statusFilter === 'all'
+        || (statusFilter === 'enabled' ? role.isActive : !role.isActive);
+      return matchedSearch && matchedStatus;
+    });
+  }, [items, search, statusFilter]);
+
+  const selectedPermissionCount = normalizePermissionKeys(form.permissions).size;
+  const roleMemberCount = (role: Role) => users.filter((user) => userMatchesRole(user, role)).length;
+  const boundUsers = editRole ? users.filter((user) => userMatchesRole(user, editRole)) : [];
+  const activeBoundUsers = boundUsers.filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active');
+
+  const handleSelectRole = (role: Role) => {
+    setError('');
+    setSaveMessage(null);
+    setMode('edit');
+    setSelectedRoleId(role.id);
+    setEditRole(role);
+    setForm(roleToForm(role));
+  };
 
   const handleCreate = () => {
     setError('');
+    setSaveMessage(null);
+    setMode('create');
+    setSelectedRoleId('');
     setEditRole(null);
     setForm({ ...emptyForm, dataScopes: defaultDataScopes });
-    setFormTab('permissions');
-    setFormOpen(true);
-  };
-
-  const handleEdit = (role: Role) => {
-    setError('');
-    setEditRole(role);
-    setForm({
-      name: role.name,
-      description: role.description || '',
-      departmentId: role.departmentId || '',
-      isActive: role.isActive,
-      permissions: role.permissions.length ? role.permissions : [defaultPermission],
-      dataScopes: normalizeDataScopes(role.dataScopes, role.code),
-    });
-    setFormTab('permissions');
-    setFormOpen(true);
   };
 
   const handleSubmit = async () => {
     setError('');
-    if (!form.name) return;
+    setSaveMessage(null);
+    if (!form.name.trim()) {
+      setSaveMessage({ type: 'error', text: '请先填写角色名称' });
+      return;
+    }
     const permissions = toPermissions(normalizePermissionKeys(form.permissions));
     const dataScopes = normalizeDataScopes(form.dataScopes, editRole?.code);
-    if (!permissions.length) return;
+    if (!permissions.length) {
+      setSaveMessage({ type: 'error', text: '请至少选择一个菜单权限' });
+      return;
+    }
 
+    setSaving(true);
     try {
       if (editRole) {
-        await update(editRole.id, { ...form, permissions, dataScopes, code: editRole.code });
+        await update(editRole.id, { ...form, name: form.name.trim(), permissions, dataScopes, code: editRole.code });
       } else {
         await create({
           ...form,
+          name: form.name.trim(),
           permissions,
           dataScopes,
           code: `role-${Date.now()}`,
@@ -362,12 +456,14 @@ const RolePermission: React.FC = () => {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存失败');
+      setSaveMessage({ type: 'error', text: err instanceof Error ? err.message : '保存失败' });
+      setSaving(false);
       return;
     }
-    setFormOpen(false);
-    setEditRole(null);
-    setForm({ ...emptyForm, dataScopes: defaultDataScopes });
-    fetchItems();
+    setMode('edit');
+    await fetchItems();
+    setSaveMessage({ type: 'success', text: editRole ? '角色权限已保存' : '角色已创建' });
+    setSaving(false);
   };
 
   const handlePermissionToggle = (node: PermissionNode, path: string[] = []) => {
@@ -397,16 +493,6 @@ const RolePermission: React.FC = () => {
     }));
   };
 
-  const handleToggleActive = async (role: Role) => {
-    setError('');
-    try {
-      await update(role.id, { isActive: !role.isActive });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '状态修改失败');
-    }
-    fetchItems();
-  };
-
   const handleDelete = async (role: Role) => {
     setError('');
     try {
@@ -418,213 +504,441 @@ const RolePermission: React.FC = () => {
   };
 
   return (
-    <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>角色权限配置</Typography>
-        <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={handleCreate}>
-          新增角色
-        </Button>
-      </Box>
-      {error && <Typography variant="body2" sx={{ color: '#d32f2f', mb: 1 }}>{error}</Typography>}
+    <Box sx={{ border: '1px solid #dfe7f1', borderRadius: 1.5, overflow: 'hidden', minHeight: 700, bgcolor: '#fff' }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '300px minmax(0, 1fr)' }, minHeight: 700 }}>
+        <Box sx={{ borderRight: { lg: '1px solid #dfe7f1' }, bgcolor: '#f7faff', p: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
+            <Box>
+              <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#132238' }}>角色列表</Typography>
+              <Typography variant="caption" sx={{ color: '#7890ad' }}>共 {items.length} 个角色</Typography>
+            </Box>
+            <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={handleCreate}>
+              新增
+            </Button>
+          </Box>
 
-      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0' }}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>角色名称</TableCell>
-              <TableCell>说明</TableCell>
-              <TableCell>权限列表</TableCell>
-              <TableCell>用户数</TableCell>
-              <TableCell>状态</TableCell>
-              <TableCell align="center">操作</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {items.map((role: Role) => (
-              <TableRow key={role.id} hover>
-                <TableCell sx={{ fontWeight: 500 }}>{role.name}</TableCell>
-                <TableCell>{role.description || '-'}</TableCell>
-                <TableCell>
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                    {getLeafPermissionLabels(role.permissions).slice(0, 8).map((module) => (
-                      <Chip key={module} label={module.split('/').slice(-1)[0]} size="small" variant="outlined" />
-                    ))}
-                    {getLeafPermissionLabels(role.permissions).length > 8 && (
-                      <Chip label={`+${getLeafPermissionLabels(role.permissions).length - 8}`} size="small" />
+          <TextField
+            size="small"
+            placeholder="搜索角色名称/标识"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            fullWidth
+            sx={{ mb: 1 }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+            }}
+          />
+          <TextField
+            select
+            size="small"
+            label="状态"
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value as 'all' | 'enabled' | 'disabled')}
+            fullWidth
+            sx={{ mb: 1.5 }}
+          >
+            <MenuItem value="all">全部状态</MenuItem>
+            <MenuItem value="enabled">启用</MenuItem>
+            <MenuItem value="disabled">停用</MenuItem>
+          </TextField>
+
+          <Box sx={{ display: 'grid', gap: 0.75 }}>
+            {mode === 'create' && (
+              <Box
+                sx={{
+                  border: '1px solid #b7d7ff',
+                  bgcolor: '#e8f2ff',
+                  borderRadius: 1,
+                  p: 1.25,
+                  color: '#0f5fca',
+                }}
+              >
+                <Typography variant="body2" sx={{ fontWeight: 800 }}>新建角色</Typography>
+                <Typography variant="caption">配置后保存到角色列表</Typography>
+              </Box>
+            )}
+            {filteredRoles.map((role) => {
+              const selected = mode === 'edit' && selectedRoleId === role.id;
+              const permissionCount = getLeafPermissionLabels(role.permissions).length;
+              const memberCount = roleMemberCount(role);
+              return (
+                <Box
+                  key={role.id}
+                  onClick={() => handleSelectRole(role)}
+                  sx={{
+                    border: '1px solid',
+                    borderColor: selected ? '#b7d7ff' : '#e4edf7',
+                    bgcolor: selected ? '#e8f2ff' : '#fff',
+                    borderRadius: 1,
+                    p: 1.25,
+                    cursor: 'pointer',
+                    boxShadow: selected ? '0 8px 18px rgba(25, 118, 210, 0.08)' : 'none',
+                    '&:hover': { borderColor: '#b7d7ff' },
+                  }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box sx={{ width: 24, height: 24, borderRadius: '50%', bgcolor: selected ? '#1976d2' : '#eef4fb', color: selected ? '#fff' : '#52677f', display: 'grid', placeItems: 'center', fontSize: 12, fontWeight: 800 }}>
+                      {role.name.slice(0, 1)}
+                    </Box>
+                    <Box sx={{ minWidth: 0, flex: 1 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 800, color: '#132238', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {role.name}
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: '#7890ad' }}>
+                        {permissionCount} 项权限 · {memberCount} 人
+                      </Typography>
+                    </Box>
+                    <Chip
+                      label={role.isActive ? '启用' : '停用'}
+                      size="small"
+                      sx={{
+                        height: 22,
+                        bgcolor: role.isActive ? '#e7f7ef' : '#fff4e5',
+                        color: role.isActive ? '#16815c' : '#b45309',
+                        fontWeight: 700,
+                      }}
+                    />
+                  </Box>
+                </Box>
+              );
+            })}
+            {!filteredRoles.length && (
+              <Box sx={{ py: 5, textAlign: 'center', color: '#94a3b8' }}>没有匹配的角色</Box>
+            )}
+          </Box>
+        </Box>
+
+        <Box sx={{ minWidth: 0, bgcolor: '#fbfcfe' }}>
+          <Box sx={{ p: { xs: 2, md: 3 }, display: 'grid', gap: 2 }}>
+            {error && <Typography variant="body2" sx={{ color: '#d32f2f' }}>{error}</Typography>}
+
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 1.12fr) minmax(360px, 0.88fr)' }, gap: 2 }}>
+              <Box sx={{ bgcolor: '#fff', border: '1px solid #dfe7f1', borderRadius: 1.25, overflow: 'hidden' }}>
+                <Box sx={{ px: 2.5, py: 2, borderBottom: '1px solid #edf2f7', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+                  <Box>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#132238' }}>角色资料</Typography>
+                    <Typography variant="caption" sx={{ color: '#7890ad' }}>
+                      {mode === 'create' ? '正在新建角色' : `${boundUsers.length} 名成员绑定该角色`}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                    {editRole && (
+                      <>
+                        <Switch checked={form.isActive} onChange={(event) => setForm({ ...form, isActive: event.target.checked })} disabled={editRole.code === 'super_admin'} />
+                        <Typography variant="body2" sx={{ color: '#52677f', mr: 1 }}>{form.isActive ? '启用' : '停用'}</Typography>
+                      </>
+                    )}
+                    <Button variant="outlined" size="small" onClick={handleCreate} startIcon={<AddIcon />}>新增角色</Button>
+                    {editRole && (
+                      <Button
+                        variant="text"
+                        size="small"
+                        color="error"
+                        onClick={() => handleDelete(editRole)}
+                        disabled={editRole.code === 'super_admin'}
+                        startIcon={<DeleteIcon />}
+                      >
+                        删除角色
+                      </Button>
                     )}
                   </Box>
-                </TableCell>
-                <TableCell>{role.memberCount}</TableCell>
-                <TableCell>
-                  <Chip label={role.isActive ? '启用' : '停用'} size="small" color={role.isActive ? 'success' : 'default'} />
-                </TableCell>
-                <TableCell align="center">
-                  <Switch checked={role.isActive} size="small" onChange={() => handleToggleActive(role)} disabled={role.code === 'super_admin'} />
-                  <IconButton size="small" onClick={() => handleEdit(role)} title="编辑">
-                    <EditIcon fontSize="small" />
-                  </IconButton>
-                  <IconButton size="small" color="error" onClick={() => handleDelete(role)} title="删除" disabled={role.code === 'super_admin'}>
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-
-      <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="md" fullWidth>
-        <DialogCloseTitle onClose={() => setFormOpen(false)}>{editRole ? '编辑角色' : '新增角色'}</DialogCloseTitle>
-        <Box sx={{ p: 3, pt: 1 }}>
-          <Box sx={{ display: 'grid', gap: 2 }}>
-            <TextField label="角色名称" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required fullWidth />
-            <TextField label="说明" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} fullWidth multiline minRows={2} />
-            <Tabs value={formTab} onChange={(_event, value) => setFormTab(value)} sx={{ minHeight: 36, borderBottom: '1px solid #e5e7eb' }}>
-              <Tab value="permissions" label="功能权限" sx={{ minHeight: 36 }} />
-              <Tab value="dataScopes" label="数据范围" sx={{ minHeight: 36 }} />
-            </Tabs>
-            {formTab === 'permissions' && (
-            <Box sx={{ display: 'grid', gap: 1.5 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>权限配置</Typography>
-                <Typography variant="body2" sx={{ color: '#6b7280' }}>勾选后可见/可用，未勾选则隐藏</Typography>
+                </Box>
+                <Box sx={{ p: 2.5, display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1.1fr' }, gap: 2, alignItems: 'start' }}>
+                  <TextField label="角色名称" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required fullWidth />
+                  <TextField label="角色说明" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} fullWidth />
+                </Box>
+                <Box sx={{ mx: 2.5, mb: 2.5, p: 1.75, borderRadius: 1, bgcolor: '#f4f8fd', border: '1px solid #dfeaf7', display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 1.25 }}>
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#7890ad' }}>已选权限</Typography>
+                    <Typography variant="h6" sx={{ color: '#1976d2', fontWeight: 800 }}>{selectedPermissionCount}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#7890ad' }}>绑定成员</Typography>
+                    <Typography variant="h6" sx={{ color: '#132238', fontWeight: 800 }}>{boundUsers.length}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#7890ad' }}>在职成员</Typography>
+                    <Typography variant="h6" sx={{ color: '#16815c', fontWeight: 800 }}>{activeBoundUsers.length}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#7890ad' }}>数据范围</Typography>
+                    <Typography variant="body2" sx={{ mt: 0.75, color: '#52677f', fontWeight: 800 }}>{editRole?.code === 'super_admin' ? '全部数据' : '按域配置'}</Typography>
+                  </Box>
+                </Box>
               </Box>
-              <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb', maxHeight: 420 }}>
-                <Table size="small" stickyHeader>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell sx={{ width: 150, bgcolor: '#f8fafc', fontWeight: 600 }}>模块</TableCell>
-                      <TableCell sx={{ width: 210, bgcolor: '#f8fafc', fontWeight: 600 }}>分组</TableCell>
-                      <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 600 }}>功能权限</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {PERMISSION_TREE.flatMap((category) => {
-                      const firstLevelNodes = category.children?.length ? category.children : [null];
-                      return firstLevelNodes.map((firstLevel, index) => {
-                        const categoryPath: string[] = [];
-                        const firstLevelPath = [category.label];
-                        return (
-                          <TableRow key={`${category.label}-${firstLevel?.label || 'root'}`} hover>
-                            {index === 0 && (
-                              <TableCell rowSpan={getRowSpan(category)} sx={{ verticalAlign: 'top' }}>
-                                <Box component="label" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, cursor: 'pointer' }}>
-                                  <Checkbox
-                                    size="small"
-                                    checked={isNodeChecked(form.permissions, category, categoryPath)}
-                                    indeterminate={isNodeIndeterminate(form.permissions, category, categoryPath)}
-                                    onChange={() => handlePermissionToggle(category, categoryPath)}
-                                  />
-                                  <Typography variant="body2">{category.label}</Typography>
-                                </Box>
-                              </TableCell>
-                            )}
-                            <TableCell>
-                              {firstLevel && (
-                                <Box component="label" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, cursor: 'pointer' }}>
-                                  <Checkbox
-                                    size="small"
-                                    checked={isNodeChecked(form.permissions, firstLevel, firstLevelPath)}
-                                    indeterminate={isNodeIndeterminate(form.permissions, firstLevel, firstLevelPath)}
-                                    onChange={() => handlePermissionToggle(firstLevel, firstLevelPath)}
-                                  />
-                                  <Typography variant="body2">{firstLevel.label}</Typography>
-                                </Box>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              {firstLevel?.children?.length ? (
-                                <Box sx={{ display: 'flex', flexWrap: 'wrap', columnGap: 2, rowGap: 0.75 }}>
-                                  {firstLevel.children.map((child) => (
-                                    <Box
-                                      key={child.label}
-                                      component="label"
-                                      sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, minWidth: 130, cursor: 'pointer' }}
-                                    >
-                                      <Checkbox
-                                        size="small"
-                                        checked={isNodeChecked(form.permissions, child, [...firstLevelPath, firstLevel.label])}
-                                        indeterminate={isNodeIndeterminate(form.permissions, child, [...firstLevelPath, firstLevel.label])}
-                                        onChange={() => handlePermissionToggle(child, [...firstLevelPath, firstLevel.label])}
-                                      />
-                                      <Typography variant="body2">{child.label}</Typography>
-                                    </Box>
-                                  ))}
-                                </Box>
-                              ) : (
-                                <Typography variant="body2" sx={{ color: '#9ca3af' }}>-</Typography>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      });
-                    })}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+
+              <Box sx={{ bgcolor: '#fff', border: '1px solid #dfe7f1', borderRadius: 1.25, overflow: 'hidden' }}>
+                <Box sx={{ px: 2.5, py: 2, borderBottom: '1px solid #edf2f7', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                  <Box>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#132238' }}>已绑定成员</Typography>
+                    <Typography variant="caption" sx={{ color: '#7890ad' }}>员工账号中使用该角色的人</Typography>
+                  </Box>
+                  <Chip label={`${boundUsers.length} 人`} size="small" sx={{ bgcolor: '#eef4fb', color: '#31506f', fontWeight: 700 }} />
+                </Box>
+                <Box sx={{ p: 1.5 }}>
+                  <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(132px, 1fr))', gap: 0.75, maxHeight: 142, overflowY: 'auto', pr: 0.5 }}>
+                    {boundUsers.map((user) => (
+                      <Box
+                        key={user.id}
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 0.75,
+                          minWidth: 0,
+                          minHeight: 34,
+                          px: 0.75,
+                          py: 0.5,
+                          border: '1px solid #edf2f7',
+                          borderRadius: 1,
+                          bgcolor: '#fbfcfe',
+                        }}
+                      >
+                        <Box sx={{ width: 22, height: 22, flex: '0 0 22px', borderRadius: '50%', bgcolor: '#e8f2ff', color: '#1976d2', display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 800 }}>
+                          {user.name.slice(0, 1)}
+                        </Box>
+                        <Box sx={{ minWidth: 0, flex: 1 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 800, color: '#132238', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.2 }}>{user.name}</Typography>
+                            <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: user.isActive ? '#16a34a' : '#f59e0b', flex: '0 0 6px' }} />
+                          </Box>
+                          <Typography variant="caption" sx={{ color: '#7890ad', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.2 }}>{user.positionName || user.account || '-'}</Typography>
+                        </Box>
+                      </Box>
+                    ))}
+                  </Box>
+                  {!boundUsers.length && (
+                    <Box sx={{ py: 4, textAlign: 'center', color: '#94a3b8', border: '1px dashed #d8e3ef', borderRadius: 1 }}>
+                      暂无员工绑定该角色
+                    </Box>
+                  )}
+                </Box>
+              </Box>
             </Box>
-            )}
-            {formTab === 'dataScopes' && (
-              <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb' }}>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell sx={{ width: 180, bgcolor: '#f8fafc', fontWeight: 600 }}>数据类型</TableCell>
-                      <TableCell sx={{ bgcolor: '#f8fafc', fontWeight: 600 }}>说明</TableCell>
-                      <TableCell sx={{ width: 260, bgcolor: '#f8fafc', fontWeight: 600 }}>数据范围</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
+
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 1.25fr) minmax(340px, 0.75fr)' }, gap: 2 }}>
+              <Box sx={{ bgcolor: '#fff', border: '1px solid #dfe7f1', borderRadius: 1.25, overflow: 'hidden' }}>
+                <Box sx={{ px: 2.5, py: 2, borderBottom: '1px solid #edf2f7' }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#132238' }}>菜单权限</Typography>
+                  <Typography variant="caption" sx={{ color: '#7890ad' }}>勾选后可见/可用，未勾选则隐藏</Typography>
+                </Box>
+                <Box sx={{ maxHeight: 520, overflowY: 'auto', p: 1.25 }}>
+                  {PERMISSION_TREE.map((category) => {
+                    const categoryPath: string[] = [];
+                    const firstLevelNodes = category.children || [];
+                    const directLeafOnly = firstLevelNodes.length > 0 && firstLevelNodes.every((node) => !node.children?.length);
+                    const rows = directLeafOnly
+                      ? [{
+                        label: `${category.label}权限`,
+                        node: category,
+                        path: categoryPath,
+                        children: firstLevelNodes,
+                        childPath: [category.label],
+                      }]
+                      : (firstLevelNodes.length ? firstLevelNodes : [category]).map((node) => ({
+                        label: node.label,
+                        node,
+                        path: firstLevelNodes.length ? [category.label] : categoryPath,
+                        children: node.children || [],
+                        childPath: firstLevelNodes.length ? [category.label, node.label] : categoryPath,
+                      }));
+
+                    return (
+                      <Box
+                        key={category.label}
+                        component="table"
+                        sx={{
+                          width: '100%',
+                          tableLayout: 'fixed',
+                          borderCollapse: 'separate',
+                          borderSpacing: 0,
+                          border: '1px solid #edf2f7',
+                          borderRadius: 1,
+                          bgcolor: '#fff',
+                          overflow: 'hidden',
+                          mb: 1,
+                          '&:last-of-type': { mb: 0 },
+                        }}
+                      >
+                        <Box component="tbody">
+                          {rows.map((row, rowIndex) => (
+                            <Box component="tr" key={`${category.label}-${row.label}`}>
+                              {rowIndex === 0 && (
+                                <Box
+                                  component="td"
+                                  rowSpan={rows.length}
+                                  sx={{
+                                    width: 116,
+                                    p: 1,
+                                    verticalAlign: 'middle',
+                                    bgcolor: '#fbfdff',
+                                    borderRight: '1px solid #edf2f7',
+                                    borderBottom: rowIndex < rows.length - 1 ? '1px solid #edf2f7' : 'none',
+                                  }}
+                                >
+                                  <Box component="label" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer', minWidth: 0 }}>
+                                    <Checkbox
+                                      size="small"
+                                      checked={isNodeChecked(form.permissions, category, categoryPath)}
+                                      indeterminate={isNodeIndeterminate(form.permissions, category, categoryPath)}
+                                      onChange={() => handlePermissionToggle(category, categoryPath)}
+                                      sx={{ p: 0.25 }}
+                                    />
+                                    <Typography variant="body2" sx={{ fontWeight: 800, color: '#132238', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                      {category.label}
+                                    </Typography>
+                                  </Box>
+                                </Box>
+                              )}
+                              <Box
+                                component="td"
+                                sx={{
+                                  width: 150,
+                                  p: 1,
+                                  verticalAlign: 'top',
+                                  bgcolor: '#fff',
+                                  borderRight: '1px solid #edf2f7',
+                                  borderTop: rowIndex > 0 ? '1px solid #edf2f7' : 'none',
+                                }}
+                              >
+                                <Box component="label" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer', minWidth: 0 }}>
+                                  <Checkbox
+                                    size="small"
+                                    checked={isNodeChecked(form.permissions, row.node, row.path)}
+                                    indeterminate={isNodeIndeterminate(form.permissions, row.node, row.path)}
+                                    onChange={() => handlePermissionToggle(row.node, row.path)}
+                                    sx={{ p: 0.25 }}
+                                  />
+                                  <Typography variant="body2" sx={{ fontWeight: 700, color: '#243b53', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {row.label}
+                                  </Typography>
+                                </Box>
+                              </Box>
+                              <Box
+                                component="td"
+                                sx={{
+                                  p: 1,
+                                  verticalAlign: 'top',
+                                  borderTop: rowIndex > 0 ? '1px solid #edf2f7' : 'none',
+                                }}
+                              >
+                                {row.children.length ? (
+                                  <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.25, minHeight: 30 }}>
+                                    {row.children.map((child) => (
+                                      <Box
+                                        key={child.label}
+                                        component="label"
+                                        sx={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: 0.45,
+                                          minWidth: 118,
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        <Checkbox
+                                          size="small"
+                                          checked={isNodeChecked(form.permissions, child, row.childPath)}
+                                          indeterminate={isNodeIndeterminate(form.permissions, child, row.childPath)}
+                                          onChange={() => handlePermissionToggle(child, row.childPath)}
+                                          sx={{ p: 0.25 }}
+                                        />
+                                        <Typography variant="body2" sx={{ color: '#34495e', fontWeight: 600, lineHeight: 1.2 }}>
+                                          {child.label}
+                                        </Typography>
+                                      </Box>
+                                    ))}
+                                  </Box>
+                                ) : (
+                                  <Typography variant="caption" sx={{ color: '#94a3b8' }}>勾选左侧分组即可开启</Typography>
+                                )}
+                              </Box>
+                            </Box>
+                          ))}
+                        </Box>
+                      </Box>
+                    );
+                  })}
+                </Box>
+              </Box>
+
+              <Box sx={{ display: 'grid', gap: 2, alignContent: 'start' }}>
+                <Box sx={{ bgcolor: '#fff', border: '1px solid #dfe7f1', borderRadius: 1.25, overflow: 'hidden' }}>
+                  <Box sx={{ px: 2.5, py: 2, borderBottom: '1px solid #edf2f7' }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#132238' }}>数据权限配置</Typography>
+                    <Typography variant="caption" sx={{ color: '#7890ad' }}>控制各类业务数据可见范围</Typography>
+                  </Box>
+                  <Box sx={{ p: 2, display: 'grid', gap: 1 }}>
                     {dataScopeRows.map((row) => {
                       const disabled = editRole?.code === 'super_admin' || !hasAnyPermissionKey(form.permissions, row.permissionKeys);
                       const value = editRole?.code === 'super_admin' ? 'all' : (form.dataScopes[row.domain] || defaultDataScopes[row.domain]);
                       return (
-                        <TableRow key={row.domain} hover>
-                          <TableCell sx={{ fontWeight: 500 }}>{row.label}</TableCell>
-                          <TableCell>
-                            <Typography variant="body2">{row.description}</Typography>
-                            {disabled && editRole?.code !== 'super_admin' && (
-                              <Typography variant="caption" sx={{ color: '#9ca3af' }}>需先勾选对应功能权限</Typography>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <ToggleButtonGroup
-                              exclusive
-                              size="small"
-                              value={value}
-                              disabled={disabled}
-                              onChange={(_event, nextValue) => handleDataScopeChange(row.domain, nextValue)}
-                            >
-                              {dataScopeOptions.map((option) => (
-                                <ToggleButton key={option.value} value={option.value} sx={{ px: 2 }}>
-                                  {option.label}
-                                </ToggleButton>
-                              ))}
-                            </ToggleButtonGroup>
-                          </TableCell>
-                        </TableRow>
+                        <Box
+                          key={row.domain}
+                          sx={{
+                            p: 1.2,
+                            border: '1px solid #e4edf7',
+                            borderRadius: 1,
+                            bgcolor: disabled ? '#f8fafc' : '#fff',
+                            display: 'grid',
+                            gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1fr) auto' },
+                            gap: 1,
+                            alignItems: 'center',
+                          }}
+                        >
+                          <Box sx={{ minWidth: 0 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 800, color: '#132238' }}>{row.label}</Typography>
+                            <Typography variant="caption" sx={{ color: '#7890ad', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {disabled && editRole?.code !== 'super_admin' ? '需先勾选对应功能权限' : row.description}
+                            </Typography>
+                          </Box>
+                          <ToggleButtonGroup
+                            exclusive
+                            size="small"
+                            value={value}
+                            disabled={disabled}
+                            onChange={(_event, nextValue) => handleDataScopeChange(row.domain, nextValue)}
+                          >
+                            {dataScopeOptions.map((option) => (
+                              <ToggleButton key={option.value} value={option.value} sx={{ px: 1.5 }}>
+                                {option.label}
+                              </ToggleButton>
+                            ))}
+                          </ToggleButtonGroup>
+                        </Box>
                       );
                     })}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Switch checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} />
-              <Typography variant="body2">{form.isActive ? '启用' : '停用'}</Typography>
+                  </Box>
+                </Box>
+
+                <Box sx={{ bgcolor: '#fff', border: '1px solid #dfe7f1', borderRadius: 1.25, p: 2.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#132238' }}>保存配置</Typography>
+                    <Typography variant="caption" sx={{ color: '#7890ad' }}>
+                      {mode === 'create' ? '创建新角色后即可分配给员工' : '保存后立即影响该角色成员权限'}
+                    </Typography>
+                  </Box>
+                  <Button
+                    variant="contained"
+                    onClick={handleSubmit}
+                    disabled={saving || !form.name.trim() || !normalizePermissionKeys(form.permissions).size}
+                  >
+                    {editRole ? '保存权限' : '创建角色'}
+                  </Button>
+                  {saveMessage && (
+                    <Alert severity={saveMessage.type} sx={{ width: '100%' }} onClose={() => setSaveMessage(null)}>
+                      {saveMessage.text}
+                    </Alert>
+                  )}
+                </Box>
+              </Box>
             </Box>
           </Box>
-          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 3 }}>
-            <Button
-              variant="contained"
-              onClick={handleSubmit}
-              disabled={!form.name || !form.permissions.length}
-            >
-              {editRole ? '保存' : '创建'}
-            </Button>
-          </Box>
         </Box>
-      </Dialog>
+      </Box>
     </Box>
   );
 };

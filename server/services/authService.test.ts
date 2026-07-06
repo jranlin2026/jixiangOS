@@ -48,6 +48,8 @@ const roles = [
 ];
 
 let createdSessionToken = '';
+let createdSessionExpiresAt: Date | null = null;
+let expiredSessionCleanupCount = 0;
 
 const prisma = {
   user: {
@@ -63,12 +65,16 @@ const prisma = {
   authSession: {
     create: async ({ data }: any) => {
       createdSessionToken = data.token;
+      createdSessionExpiresAt = data.expiresAt;
       return { ...data, id: 'session-001' };
     },
     findUnique: async ({ where }: any) => (
-      where.token === createdSessionToken ? { token: createdSessionToken, userId: 'user-admin', expiresAt: null, user: users[0] } : null
+      where.token === createdSessionToken ? { token: createdSessionToken, userId: 'user-admin', expiresAt: createdSessionExpiresAt, user: users[0] } : null
     ),
-    deleteMany: async () => ({ count: 1 }),
+    deleteMany: async ({ where }: any = {}) => {
+      if (where?.expiresAt?.lte) expiredSessionCleanupCount += 1;
+      return { count: 1 };
+    },
   },
 } as any;
 
@@ -81,6 +87,10 @@ const login = await service.login({ account: 'admin', password: DEFAULT_ADMIN_PA
 assert.equal(login.code, 0);
 assert.equal(login.data?.user.account, 'admin');
 assert.ok(login.data?.token);
+const expiresAt = createdSessionExpiresAt as unknown as Date;
+assert.ok(expiresAt instanceof Date);
+assert.ok(expiresAt.getTime() > Date.now());
+assert.equal(expiredSessionCleanupCount, 1);
 
 const currentUser = await service.getCurrentUser(createdSessionToken);
 assert.equal(currentUser.code, 0);

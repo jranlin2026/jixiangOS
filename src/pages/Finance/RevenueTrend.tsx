@@ -48,8 +48,8 @@ const RevenueTrend: React.FC = () => {
   };
 
   return (
-    <Paper elevation={0} sx={{ border: '1px solid #f0f0f0', borderRadius: 2, p: 2.5 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+    <Paper elevation={0} sx={{ border: '1px solid #dbe4ee', borderRadius: 1.5, p: 1.5 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
         <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '0.9375rem' }}>收入趋势</Typography>
         <ToggleButtonGroup
           size="small"
@@ -62,7 +62,7 @@ const RevenueTrend: React.FC = () => {
           <ToggleButton value="month" sx={{ px: 1.5, fontSize: '0.75rem' }}>月</ToggleButton>
         </ToggleButtonGroup>
       </Box>
-      <ResponsiveContainer width="100%" height={280}>
+      <ResponsiveContainer width="100%" height={220}>
         <LineChart data={processChartData()}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
           <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#9ca3af' }} />

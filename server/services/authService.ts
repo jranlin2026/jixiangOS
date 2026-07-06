@@ -2,16 +2,38 @@ import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { AuthenticatedUser, LoginPayload } from '../../src/types/auth';
 import { normalizeAccount, verifyPassword } from '../../src/shared/utils/auth';
+import { mergeRoleWithDefaultAccess } from '../../src/shared/utils/organizationConfig';
 import { toAuthenticatedUser } from '../../src/shared/utils/permissions';
 import { failure, success } from '../api/response';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 
 type AuthPrisma = Pick<PrismaClient, 'user' | 'role' | 'authSession'>;
 
+const DEFAULT_SESSION_TTL_HOURS = 12;
+const DEFAULT_REMEMBER_SESSION_DAYS = 30;
+const MAX_SESSION_TTL_HOURS = 24;
+const MAX_REMEMBER_SESSION_DAYS = 90;
+
+function boundedPositiveNumber(value: string | undefined, fallback: number, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, max);
+}
+
+function sessionDurationMs(remember: boolean): number {
+  if (remember) {
+    const days = boundedPositiveNumber(process.env.JIXIANG_REMEMBER_SESSION_DAYS, DEFAULT_REMEMBER_SESSION_DAYS, MAX_REMEMBER_SESSION_DAYS);
+    return days * 24 * 60 * 60 * 1000;
+  }
+
+  const hours = boundedPositiveNumber(process.env.JIXIANG_SESSION_TTL_HOURS, DEFAULT_SESSION_TTL_HOURS, MAX_SESSION_TTL_HOURS);
+  return hours * 60 * 60 * 1000;
+}
+
 export function createAuthService(prisma: AuthPrisma) {
   const readRoles = async () => {
     const roles = await prisma.role.findMany({ where: { isActive: true } });
-    return roles.map(mapPrismaRole);
+    return roles.map(mapPrismaRole).map(mergeRoleWithDefaultAccess);
   };
 
   return {
@@ -40,7 +62,10 @@ export function createAuthService(prisma: AuthPrisma) {
         data: { lastLoginAt: now, updatedAt: now },
       });
       const token = `session-${randomUUID()}`;
-      const expiresAt = payload.remember ? null : new Date(Date.now() + 12 * 60 * 60 * 1000);
+      const expiresAt = new Date(now.getTime() + sessionDurationMs(payload.remember));
+      await prisma.authSession.deleteMany({
+        where: { expiresAt: { lte: now } },
+      });
       await prisma.authSession.create({
         data: {
           id: randomUUID(),

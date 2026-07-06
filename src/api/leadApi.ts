@@ -3,6 +3,7 @@ import type { Customer } from '../types/customer';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
+import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
@@ -13,6 +14,7 @@ import { filterVisibleLeads } from '../shared/utils/dataVisibility';
 import { applyContactEditLock } from '../shared/utils/contactEditLock';
 import { isSuperAdminRoleName } from '../shared/utils/roles';
 import { getPhoneNumberError, normalizePhoneForComparison, normalizePhoneForStorage } from '../shared/utils/phoneNumber';
+import type { User } from '../types/settings';
 
 function ensureInit(): void {
   initializeMockData();
@@ -105,15 +107,57 @@ function normalizeLead(lead: Lead): Lead {
   });
 }
 
+function getActiveAssignableUserNames(): Set<string> {
+  const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
+  return new Set(
+    users
+      .filter((user) => user.isActive && (user.employmentStatus || 'active') !== 'left')
+      .map((user) => user.name)
+      .filter(Boolean),
+  );
+}
+
+function reconcileStaleLeadAssignees(leads: Lead[]): Lead[] {
+  const assignableUserNames = getActiveAssignableUserNames();
+  if (!assignableUserNames.size) return leads;
+
+  return leads.map((lead) => {
+    if (lead.customerId) return lead;
+    const assignedTo = lead.assignedTo && assignableUserNames.has(lead.assignedTo)
+      ? lead.assignedTo
+      : undefined;
+    const owner = lead.owner && (lead.owner === '待分配' || lead.owner === '公海' || assignableUserNames.has(lead.owner))
+      ? lead.owner
+      : assignedTo || '待分配';
+
+    if (owner === lead.owner && assignedTo === lead.assignedTo) return lead;
+    return {
+      ...lead,
+      owner,
+      assignedTo,
+      assignedAt: assignedTo ? lead.assignedAt : undefined,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+}
+
 async function fetchLeads(filters?: LeadFilters): Promise<ApiResponse<PaginatedResponse<Lead>>> {
+  if (shouldUseBackendApi()) {
+    const params = new URLSearchParams();
+    Object.entries(filters || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+    });
+    return backendRequest<PaginatedResponse<Lead>>(`/leads${params.size ? `?${params.toString()}` : ''}`);
+  }
+
   ensureInit();
   await delay(200);
   const allLeads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
-  const normalizedLeads = allLeads.map(normalizeLead);
+  const normalizedLeads = reconcileStaleLeadAssignees(allLeads.map(normalizeLead));
   if (JSON.stringify(allLeads) !== JSON.stringify(normalizedLeads)) {
     setStorageData(STORAGE_KEYS.LEADS, normalizedLeads);
   }
-  let filtered = filterVisibleLeads(normalizedLeads);
+  let filtered = filterVisibleLeads(normalizedLeads.filter((lead) => !lead.deletedAt));
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
@@ -150,11 +194,11 @@ async function fetchLeadById(id: string): Promise<ApiResponse<Lead | null>> {
   ensureInit();
   await delay(150);
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
-  const normalizedLeads = leads.map(normalizeLead);
+  const normalizedLeads = reconcileStaleLeadAssignees(leads.map(normalizeLead));
   if (JSON.stringify(leads) !== JSON.stringify(normalizedLeads)) {
     setStorageData(STORAGE_KEYS.LEADS, normalizedLeads);
   }
-  const lead = filterVisibleLeads(normalizedLeads).find((item) => item.id === id) || null;
+  const lead = filterVisibleLeads(normalizedLeads.filter((item) => !item.deletedAt)).find((item) => item.id === id) || null;
   return createSuccessResponse(lead);
 }
 
@@ -214,11 +258,21 @@ async function updateLead(id: string, data: Partial<Lead>): Promise<ApiResponse<
   return createSuccessResponse(leads[idx]);
 }
 
-async function deleteLead(id: string): Promise<ApiResponse<boolean>> {
+async function deleteLead(id: string, reason = ''): Promise<ApiResponse<boolean>> {
   ensureInit();
   await delay(150);
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
-  setStorageData(STORAGE_KEYS.LEADS, leads.filter((lead) => lead.id !== id));
+  const index = leads.findIndex((lead) => lead.id === id);
+  if (index === -1) return createSuccessResponse(true);
+  const now = new Date().toISOString();
+  leads[index] = {
+    ...leads[index],
+    deletedAt: now,
+    deletedBy: getCurrentOperatorName(leads[index].owner),
+    deleteReason: reason.trim() || '业务删除',
+    updatedAt: now,
+  };
+  setStorageData(STORAGE_KEYS.LEADS, leads);
   return createSuccessResponse(true);
 }
 

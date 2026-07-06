@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import GroupAddIcon from '@mui/icons-material/GroupAdd';
 import ReceiptIcon from '@mui/icons-material/Receipt';
-import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import RefundIcon from '@mui/icons-material/MoneyOff';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import PsychologyIcon from '@mui/icons-material/Psychology';
@@ -23,7 +22,6 @@ const actions: QuickActionItem[] = [
   { label: '新增线索', icon: <PersonAddIcon />, path: ROUTES.LEADS, color: '#2196F3', bgColor: '#E3F2FD' },
   { label: '新增客户', icon: <GroupAddIcon />, path: ROUTES.CUSTOMERS, color: '#4CAF50', bgColor: '#E8F5E9' },
   { label: '新增订单', icon: <ReceiptIcon />, path: ROUTES.ORDERS, color: '#FF9800', bgColor: '#FFF3E0' },
-  { label: '代理升级', icon: <TrendingUpIcon />, path: ROUTES.UPGRADE_ANALYSIS, color: '#9C27B0', bgColor: '#F3E5F5' },
   { label: '退款统计', icon: <RefundIcon />, path: ROUTES.ORDERS, color: '#F44336', bgColor: '#FFEBEE' },
   { label: '提成统计', icon: <AccountBalanceWalletIcon />, path: `${ROUTES.FINANCE}?tab=settlement`, color: '#00BCD4', bgColor: '#E0F7FA' },
   { label: '客户画像', icon: <PsychologyIcon />, path: ROUTES.CUSTOMERS, color: '#9C27B0', bgColor: '#F3E5F5' },

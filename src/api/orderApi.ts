@@ -1,14 +1,16 @@
 import type { Order, OrderFilters, OrderStats } from '../types/order';
 import type { Customer } from '../types/customer';
 import type { Commission, CommissionRole } from '../types/commission';
+import type { Product } from '../types/product';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
+import { formatDate } from '../shared/utils/formatters';
 import { initializeMockData } from './mock';
 import { commissionRuleApi } from './commissionRuleApi';
 import { deliveryApi } from './deliveryApi';
-import { syncLifecycleByOrder, syncOpportunityRefundedByOrderId } from './lifecycleSync';
+import { syncLifecycleByOrder } from './lifecycleSync';
 import { v4 as uuidv4 } from 'uuid';
 import { getCurrentOperatorName, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
 import { filterVisibleOrders } from '../shared/utils/dataVisibility';
@@ -31,10 +33,25 @@ function getPrimaryPaymentDate(order: Order): string {
   return order.payments?.[0]?.paidAt || order.createdAt;
 }
 
+function getProductName(productId?: string, productLevel?: string, fallback?: string): string | undefined {
+  const products = getStorageData<Product[]>(STORAGE_KEYS.PRODUCTS) || [];
+  const matched = (productId ? products.find((product) => product.id === productId) : undefined)
+    || (productLevel ? products.find((product) => product.level === productLevel) : undefined);
+  return matched?.name || fallback || productLevel;
+}
+
 function normalizeOrder(order: Order): Order {
   return {
     ...order,
+    productName: getProductName(order.productId, order.productLevel, order.productName),
     resourceOwnership: normalizeResourceOwnership(order.resourceOwnership || order.sourceType),
+  };
+}
+
+function enrichOrderProductData<T extends Partial<Order>>(data: T): T & { productName?: string } {
+  return {
+    ...data,
+    productName: getProductName(data.productId, data.productLevel, data.productName),
   };
 }
 
@@ -72,7 +89,7 @@ function syncCustomerOrderStats(order: Order, allOrders: Order[], operator = SYS
   if (customerIdx === -1) return;
 
   const customer = customers[customerIdx];
-  const relatedOrders = allOrders.filter(
+  const relatedOrders = allOrders.filter((item) => !item.deletedAt).filter(
     (item) => item.customerId === customer.id
       || item.customerName === customer.company
       || item.customerName === customer.name,
@@ -85,14 +102,13 @@ function syncCustomerOrderStats(order: Order, allOrders: Order[], operator = SYS
   const shouldAppendMilestone = relatedOrders.some((item) => item.id === order.id)
     && !existingGrowthPath.some((item) => item.orderId === order.id || item.orderNo === order.orderNo);
   const hasOrderActivity = existingActivities.some((item) => item.relatedType === 'order' && item.relatedId === order.id && item.type === 'order');
-  const hasRefundActivity = existingActivities.some((item) => item.relatedType === 'order' && item.relatedId === order.id && item.type === 'refund');
   const nextGrowthPath = shouldAppendMilestone
     ? [
       ...existingGrowthPath,
       {
         id: `milestone-${uuidv4().slice(0, 8)}`,
         date: getPrimaryPaymentDate(order).slice(0, 10),
-        title: `签约${order.productLevel}产品`,
+        title: `签约${order.productName || order.productLevel}`,
         description: `订单${order.orderNo}，实付${Number(order.actualAmount || order.amount).toLocaleString('zh-CN')}元`,
         productLevel: order.productLevel,
         orderId: order.id,
@@ -106,21 +122,11 @@ function syncCustomerOrderStats(order: Order, allOrders: Order[], operator = SYS
       id: `act-${uuidv4().slice(0, 8)}`,
       type: 'order' as const,
       title: `创建了订单 ${order.orderNo}`,
-      content: `签约${order.productLevel}，实付${Number(order.actualAmount || order.amount).toLocaleString('zh-CN')}元`,
+      content: `签约${order.productName || order.productLevel}，实付${Number(order.actualAmount || order.amount).toLocaleString('zh-CN')}元`,
       operator,
       relatedId: order.id,
       relatedType: 'order' as const,
       createdAt: order.createdAt || now,
-    }] : []),
-    ...((order.refundStatus && order.refundStatus !== '无' && !hasRefundActivity) ? [{
-      id: `act-${uuidv4().slice(0, 8)}`,
-      type: 'refund' as const,
-      title: `订单退款状态更新为 ${order.refundStatus}`,
-      content: order.refundReason || undefined,
-      operator,
-      relatedId: order.id,
-      relatedType: 'order' as const,
-      createdAt: now,
     }] : []),
     ...existingActivities,
   ];
@@ -141,13 +147,13 @@ function syncCustomerOrderStats(order: Order, allOrders: Order[], operator = SYS
 const ORDER_CHANGE_FIELDS: Array<{ field: keyof Order; label: string }> = [
   { field: 'customerId', label: '客户' },
   { field: 'customerName', label: '客户名称' },
+  { field: 'productName', label: '产品名称' },
   { field: 'productLevel', label: '产品等级/分类' },
   { field: 'orderType', label: '订单类型' },
   { field: 'amount', label: '订单金额' },
   { field: 'actualAmount', label: '实付金额' },
   { field: 'paymentMethod', label: '支付方式' },
   { field: 'status', label: '订单状态' },
-  { field: 'refundStatus', label: '退款状态' },
   { field: 'owner', label: '销售负责人' },
   { field: 'leadInputBy', label: '线索录入人' },
   { field: 'leadContributorName', label: '线索贡献人' },
@@ -157,10 +163,7 @@ const ORDER_CHANGE_FIELDS: Array<{ field: keyof Order; label: string }> = [
   { field: 'isExternalTalentOrder', label: '外部达人成交' },
   { field: 'dealScene', label: '成交场景' },
   { field: 'proofStatus', label: '凭证状态' },
-  { field: 'collaboratorName', label: '协同人员' },
-  { field: 'collaboratorRole', label: '提成角色' },
-  { field: 'collaboratorRatio', label: '协同比例' },
-  { field: 'originalOrderId', label: '原始订单' },
+  { field: 'originalOrderId', label: '第三方平台订单' },
   { field: 'performanceBaseAmount', label: '业绩核算基数' },
   { field: 'notes', label: '备注' },
   { field: 'payments', label: '付款记录' },
@@ -175,7 +178,7 @@ function formatPaymentChangeValue(value: unknown): string | null {
       `第${index + 1}笔`,
       payment.amount !== undefined ? `金额:${payment.amount}` : '',
       payment.paymentMethod ? `方式:${payment.paymentMethod}` : '',
-      payment.paidAt ? `日期:${String(payment.paidAt).slice(0, 10)}` : '',
+      payment.paidAt ? `日期:${formatDate(payment.paidAt, 'yyyy-MM-dd HH:mm:ss')}` : '',
       payment.paymentOrderNo ? `单号:${payment.paymentOrderNo}` : '',
       payment.voucherName ? `凭证:${payment.voucherName}` : '',
     ].filter(Boolean);
@@ -205,38 +208,13 @@ function buildOrderChanges(before: Order, data: Partial<Order>) {
     .filter((item) => item.oldValue !== item.newValue);
 }
 
-function syncCommissionRefundState(order: Order): void {
-  if (!order.refundStatus || order.refundStatus === '无') return;
-
-  const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
-  const isRefundDone = order.refundStatus === '退款已完成' || order.status === '已退款';
-  const reason = isRefundDone
-    ? '退款完成，取消未发放提成'
-    : `订单退款流程中（${order.refundStatus}），冻结未发放提成`;
-  let changed = false;
-
-  const nextCommissions = commissions.map((commission) => {
-    if (commission.orderId !== order.id || commission.status === '已发放') return commission;
-    changed = true;
-    return {
-      ...commission,
-      status: isRefundDone ? '已取消' as const : '待确认' as const,
-      auditReason: reason,
-      frozenReason: reason,
-      updatedAt: new Date().toISOString(),
-    };
-  });
-
-  if (changed) setStorageData(STORAGE_KEYS.COMMISSIONS, nextCommissions);
-}
-
 async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<PaginatedResponse<Order>>> {
   ensureInit();
   await delay(200);
   const raw = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
   const all = raw.map(normalizeOrder);
   if (JSON.stringify(raw) !== JSON.stringify(all)) setStorageData(STORAGE_KEYS.ORDERS, all);
-  let filtered = filterVisibleOrders(all);
+  let filtered = filterVisibleOrders(all.filter((order) => !order.deletedAt));
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
@@ -298,20 +276,20 @@ async function fetchOrderById(id: string): Promise<ApiResponse<Order | null>> {
   const raw = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
   const orders = raw.map(normalizeOrder);
   if (JSON.stringify(raw) !== JSON.stringify(orders)) setStorageData(STORAGE_KEYS.ORDERS, orders);
-  return createSuccessResponse(filterVisibleOrders(orders).find((o) => o.id === id) || null);
+  return createSuccessResponse(filterVisibleOrders(orders.filter((order) => !order.deletedAt)).find((o) => o.id === id) || null);
 }
 
 async function fetchOrderStats(): Promise<ApiResponse<OrderStats>> {
   ensureInit();
   await delay(200);
-  const orders = filterVisibleOrders((getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).map(normalizeOrder));
+  const orders = filterVisibleOrders((getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).map(normalizeOrder).filter((order) => !order.deletedAt));
   const now = new Date();
-  const today = now.toISOString().split('T')[0];
-  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const getCreatedAtTime = (order: Order) => new Date(order.createdAt).getTime();
 
-  const todayOrders = orders.filter((o) => o.createdAt >= today);
-  const monthOrders = orders.filter((o) => o.createdAt >= monthStart);
-  const refundOrders = orders.filter((o) => o.refundStatus !== '无');
+  const todayOrders = orders.filter((o) => getCreatedAtTime(o) >= todayStart);
+  const monthOrders = orders.filter((o) => getCreatedAtTime(o) >= monthStart);
   const upgradeOrders = orders.filter(
     (o) => o.orderType === '升级' || o.orderType === '代理升单',
   );
@@ -321,8 +299,8 @@ async function fetchOrderStats(): Promise<ApiResponse<OrderStats>> {
     todayCount: todayOrders.length,
     monthAmount: monthOrders.reduce((s, o) => s + o.amount, 0),
     monthCount: monthOrders.length,
-    refundCount: refundOrders.length,
-    refundAmount: refundOrders.reduce((s, o) => s + (o.refundAmount || 0), 0),
+    refundCount: 0,
+    refundAmount: 0,
     upgradeCount: upgradeOrders.length,
     upgradeAmount: upgradeOrders.reduce((s, o) => s + o.amount, 0),
   };
@@ -333,13 +311,13 @@ async function fetchOrderStats(): Promise<ApiResponse<OrderStats>> {
 async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'orderNo'>): Promise<ApiResponse<Order>> {
   ensureInit();
   await delay(200);
-  const orderData = enrichOrderDataFromCustomer(data);
+  const orderData = enrichOrderProductData(enrichOrderDataFromCustomer(data));
   const validationError = validateOrderAttribution(orderData);
   if (validationError) return createErrorResponse(validationError);
   const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
   const now = new Date().toISOString();
   const operator = getCurrentOperatorName(orderData.owner);
-  const orderNo = `ORD-${now.slice(0, 10).replace(/-/g, '')}-${String(orders.length + 1).padStart(4, '0')}`;
+  const orderNo = `ORD-${now.slice(0, 10).replace(/-/g, '')}-${String(orders.filter((order) => !order.deletedAt).length + 1).padStart(4, '0')}`;
 
   const newOrder: Order = {
     ...orderData,
@@ -390,6 +368,17 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
         evidenceRequired: calc.evidenceRequired,
         evidenceStatus: calc.evidenceStatus,
         formulaText: calc.formulaText,
+        payoutPlanId: calc.payoutPlanId,
+        payoutPlanName: calc.payoutPlanName,
+        ruleCalculationType: calc.commissionType,
+        tierSnapshot: calc.commissionType === 'tiered_percentage' && calc.tiers?.length
+          ? {
+            tiers: calc.tiers,
+            baseAmount: calc.performanceAmount,
+            nextTier: calc.tiers[0],
+            gapToNext: 0,
+          }
+          : undefined,
         role: calc.role,
         owner: resolvedPersonName,
         ownerId: calc.ownerOverride ? undefined : assignee.ownerId,
@@ -489,13 +478,14 @@ async function updateOrder(id: string, data: Partial<Order>): Promise<ApiRespons
   if (idx === -1) return createSuccessResponse(null);
   const now = new Date().toISOString();
   const existing = orders[idx];
-  const changes = buildOrderChanges(existing, data);
+  const nextData = enrichOrderProductData(data);
+  const changes = buildOrderChanges(existing, nextData);
   const history = existing.changeHistory || [];
   const operator = getCurrentOperatorName(existing.owner);
   orders[idx] = {
     ...existing,
-    ...data,
-    resourceOwnership: normalizeResourceOwnership(data.resourceOwnership || data.sourceType || existing.resourceOwnership || existing.sourceType),
+    ...nextData,
+    resourceOwnership: normalizeResourceOwnership(nextData.resourceOwnership || nextData.sourceType || existing.resourceOwnership || existing.sourceType),
     changeHistory: changes.length > 0
       ? [{
         id: `hist-${uuidv4().slice(0, 8)}`,
@@ -510,39 +500,42 @@ async function updateOrder(id: string, data: Partial<Order>): Promise<ApiRespons
   };
   setStorageData(STORAGE_KEYS.ORDERS, orders);
   syncCustomerOrderStats(orders[idx], orders, operator);
-  syncCommissionRefundState(orders[idx]);
-  if (orders[idx].refundStatus === '退款已完成' || orders[idx].status === '已退款') {
-    syncLifecycleByOrder(orders[idx], 'refunded');
-    syncOpportunityRefundedByOrderId(orders[idx].id);
-  } else {
-    syncLifecycleByOrder(orders[idx], 'ordered');
-  }
+  syncLifecycleByOrder(orders[idx], 'ordered');
   return createSuccessResponse(orders[idx]);
 }
 
-async function deleteOrder(id: string): Promise<ApiResponse<boolean>> {
+async function deleteOrder(id: string, reason = ''): Promise<ApiResponse<boolean>> {
   ensureInit();
   await delay(150);
   const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
-  const target = orders.find((o) => o.id === id);
+  const index = orders.findIndex((o) => o.id === id);
+  const target = index >= 0 ? orders[index] : undefined;
+  if (!target) return createSuccessResponse(true);
   const relatedCommissions = (getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [])
     .filter((commission) => commission.orderId === id);
   const hasPaidOrChargeback = relatedCommissions.some((commission) => (
     commission.status === '已发放' || commission.status === '待冲销'
   ));
   if (hasPaidOrChargeback) {
-    return createErrorResponse('该订单已有已发放提成，需先完成冲销处理后才能删除');
+    return createErrorResponse('该订单已有已发放提成，第一版不支持系统内冲销，请财务线下处理后再删除');
   }
   const hasActiveCommission = relatedCommissions.some((commission) => (
     commission.status !== '已撤回' && String(commission.status) !== '已取消'
     && commission.status !== '已冲销'
   ));
   if (hasActiveCommission) {
-    return createErrorResponse('该订单已有分账记录，不能直接删除。请先到财务中心处理提成撤回/冲销。');
+    return createErrorResponse('该订单已有分账记录，不能直接删除。请先到财务中心处理提成撤回。');
   }
-  const nextOrders = orders.filter((o) => o.id !== id);
-  setStorageData(STORAGE_KEYS.ORDERS, nextOrders);
-  if (target) syncCustomerOrderStats(target, nextOrders);
+  const now = new Date().toISOString();
+  orders[index] = {
+    ...target,
+    deletedAt: now,
+    deletedBy: getCurrentOperatorName(target.owner || target.salesName),
+    deleteReason: reason.trim() || '业务删除',
+    updatedAt: now,
+  };
+  setStorageData(STORAGE_KEYS.ORDERS, orders);
+  syncCustomerOrderStats(orders[index], orders);
   return createSuccessResponse(true);
 }
 

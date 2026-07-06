@@ -7,6 +7,7 @@ import type {
 } from '../types/order';
 import type { AuthSession } from '../types/auth';
 import type { Customer } from '../types/customer';
+import type { Product } from '../types/product';
 import type { Role } from '../types/role';
 import type { User } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
@@ -15,7 +16,7 @@ import { getStorageData, setStorageData } from './mock/storage';
 import { DEFAULT_PAGE_SIZE, STORAGE_KEYS, normalizeResourceOwnership } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { getCurrentDataVisibilityScope } from '../shared/utils/dataVisibility';
-import { normalizeUserRoleName } from '../shared/utils/roles';
+import { isSuperAdminRoleName, normalizeUserRoleName } from '../shared/utils/roles';
 import { PERMISSION_KEYS, roleHasPermission } from '../shared/utils/permissions';
 import { initializeMockData } from './mock';
 import { orderApi } from './orderApi';
@@ -47,6 +48,10 @@ function getCurrentUser(): User | undefined {
   return users.find((user) => user.id === session.userId && user.isActive);
 }
 
+function isCurrentUserSuperAdmin(): boolean {
+  return isSuperAdminRoleName(getCurrentUser()?.role);
+}
+
 function getRole(user?: User): Role | undefined {
   if (!user) return undefined;
   const roles = readJson<Role[]>(STORAGE_KEYS.ROLES) || [];
@@ -59,7 +64,28 @@ export function canReviewOrderApplications(): boolean {
 }
 
 function getStoredApplications(): OrderApplication[] {
-  return readJson<OrderApplication[]>(STORAGE_KEYS.ORDER_APPLICATIONS) || [];
+  return (readJson<OrderApplication[]>(STORAGE_KEYS.ORDER_APPLICATIONS) || []).map(normalizeApplicationProductName);
+}
+
+function getProductName(productId?: string, productLevel?: string, fallback?: string): string | undefined {
+  const products = readJson<Product[]>(STORAGE_KEYS.PRODUCTS) || [];
+  const matched = (productId ? products.find((product) => product.id === productId) : undefined)
+    || (productLevel ? products.find((product) => product.level === productLevel) : undefined);
+  return matched?.name || fallback || productLevel;
+}
+
+function normalizeApplicationProductName(application: OrderApplication): OrderApplication {
+  return {
+    ...application,
+    orderData: {
+      ...application.orderData,
+      productName: getProductName(
+        application.orderData.productId,
+        application.orderData.productLevel,
+        application.orderData.productName,
+      ),
+    },
+  };
 }
 
 function saveApplications(applications: OrderApplication[]): void {
@@ -67,12 +93,16 @@ function saveApplications(applications: OrderApplication[]): void {
 }
 
 function enrichOrderDataFromCustomer(data: OrderApplicationInput): OrderApplicationInput {
-  if (!data.customerId) return data;
+  const withProductName = {
+    ...data,
+    productName: getProductName(data.productId, data.productLevel, data.productName),
+  };
+  if (!data.customerId) return withProductName;
   const customers = readJson<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
   const customer = customers.find((item) => item.id === data.customerId);
-  if (!customer) return data;
+  if (!customer) return withProductName;
   return {
-    ...data,
+    ...withProductName,
     sourceType: customer.leadSource || data.sourceType,
     leadSource: customer.leadSource || data.leadSource,
     leadInputBy: customer.leadInputBy || data.leadInputBy,
@@ -103,6 +133,7 @@ function buildLog(action: OrderApplicationReviewLog['action'], reason?: string):
 }
 
 function filterVisibleApplications(applications: OrderApplication[]): OrderApplication[] {
+  if (canReviewOrderApplications()) return applications;
   const scope = getCurrentDataVisibilityScope('orderApplications');
   if (scope.unrestricted) return applications;
   return applications.filter((application) => (
@@ -290,6 +321,28 @@ async function rejectOrderApplication(id: string, reason: string): Promise<ApiRe
   return createSuccessResponse(applications[idx]);
 }
 
+async function cleanupDeletedSourceOrderApplication(id: string, reason: string): Promise<ApiResponse<boolean>> {
+  ensureInit();
+  await delay(120);
+  if (!isCurrentUserSuperAdmin()) return createErrorResponse('仅超级管理员可以清理订单审核记录', 403);
+  const normalizedReason = reason.trim();
+  if (!normalizedReason) return createErrorResponse('清理订单审核记录必须填写原因');
+
+  const applications = getStoredApplications();
+  const target = applications.find((item) => item.id === id);
+  if (!target) return createErrorResponse('订单申请不存在', 404);
+  if (target.status !== STATUS_APPROVED || !target.orderId) {
+    return createErrorResponse('只有已入库且正式订单已删除的申请记录可以清理');
+  }
+
+  const orders = readJson<Order[]>(STORAGE_KEYS.ORDERS) || [];
+  const activeOrder = orders.find((order) => order.id === target.orderId && !order.deletedAt);
+  if (activeOrder) return createErrorResponse('正式订单仍存在，不能清理审核记录');
+
+  saveApplications(applications.filter((item) => item.id !== id));
+  return createSuccessResponse(true);
+}
+
 export const ORDER_APPLICATION_STATUSES = {
   PENDING_REVIEW: STATUS_PENDING_REVIEW,
   RETURNED: STATUS_RETURNED,
@@ -305,4 +358,5 @@ export const orderReviewApi = {
   approveOrderApplication,
   returnOrderApplication,
   rejectOrderApplication,
+  cleanupDeletedSourceOrderApplication,
 };

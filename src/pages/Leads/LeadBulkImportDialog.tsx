@@ -28,6 +28,7 @@ const LABEL = {
   importing: '\u5bfc\u5165\u4e2d...',
   close: '\u5173\u95ed',
   helper: '\u4ec5\u652f\u6301 .xlsx \u6587\u4ef6\uff0c\u5bfc\u5165\u524d\u8bf7\u6309\u6a21\u677f\u586b\u5199\u5b57\u6bb5\u3002',
+  rulesTitle: '填写要求',
   noFile: '\u8bf7\u5148\u9009\u62e9 .xlsx \u6587\u4ef6',
   invalidFile: '\u8bf7\u4e0a\u4f20 .xlsx \u6587\u4ef6',
   failed: '\u5bfc\u5165\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u6587\u4ef6\u5185\u5bb9',
@@ -93,10 +94,14 @@ const LeadBulkImportDialog: React.FC<LeadBulkImportDialogProps> = ({ open, onClo
     try {
       const buffer = await file.arrayBuffer();
       const res = await leadBulkImportApi.importWorkbook(buffer);
+      if (res.code !== 0 || !res.data) {
+        setError(res.message || LABEL.failed);
+        return;
+      }
       setResult(res.data);
       onImported?.();
-    } catch {
-      setError(LABEL.failed);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : LABEL.failed);
     } finally {
       setImporting(false);
     }
@@ -108,11 +113,19 @@ const LeadBulkImportDialog: React.FC<LeadBulkImportDialogProps> = ({ open, onClo
       <DialogContent dividers>
         <Box sx={{ display: 'grid', gap: 2 }}>
           <Alert severity="info">{LABEL.helper}</Alert>
+          <Paper variant="outlined" sx={{ p: 1.5, bgcolor: '#f8fafc', borderColor: '#dde4ec' }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.75 }}>{LABEL.rulesTitle}</Typography>
+            <Typography variant="body2" sx={{ color: '#475569', lineHeight: 1.8 }}>
+              必填：姓名、线索来源、手机号/微信二选一。个人资源必须填写线索贡献人。
+              分配销售可留空，留空进入待分配。线索来源、录入人、贡献人、分配销售必须使用系统内已有选项。
+              请勿修改模板表头，导入前删除示例行；重新下载模板可获取最新线索来源下拉选项。
+            </Typography>
+          </Paper>
           {error && <Alert severity="error">{error}</Alert>}
           {result && (
             <Alert severity={result.failureCount ? 'warning' : 'success'}>
-              {LABEL.summaryPrefix}{LABEL.success} {result.successCount} \u6761\uff0c
-              {LABEL.failure} {result.failureCount} \u6761
+              {LABEL.summaryPrefix}{LABEL.success} {result.successCount} 条，
+              {LABEL.failure} {result.failureCount} 条
             </Alert>
           )}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
@@ -133,7 +146,7 @@ const LeadBulkImportDialog: React.FC<LeadBulkImportDialogProps> = ({ open, onClo
             </Button>
             {file && (
               <Typography variant="body2" sx={{ color: '#4b5563', minWidth: 0, overflowWrap: 'anywhere' }}>
-                {LABEL.fileReady}\uff1a{file.name}
+                {LABEL.fileReady}：{file.name}
               </Typography>
             )}
           </Box>

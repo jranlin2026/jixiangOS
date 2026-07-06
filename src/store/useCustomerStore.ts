@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { customerApi } from '../api';
-import type { Customer, CustomerCreateInput, CustomerFilters, AICustomerPortrait } from '../types/customer';
+import type { Customer, CustomerActivityRecord, CustomerCreateInput, CustomerFilters, AICustomerPortrait } from '../types/customer';
 
 interface CustomerState {
   items: Customer[];
@@ -16,7 +16,7 @@ interface CustomerState {
   delete: (id: string) => Promise<void>;
   fetchAIPortrait: (id: string) => Promise<AICustomerPortrait | null>;
   updateTags: (id: string, tags: string[]) => Promise<void>;
-  addFollowUp: (id: string, content: string, operator?: string) => Promise<Customer | null>;
+  addFollowUp: (id: string, content: string, operator?: string, attachments?: CustomerActivityRecord['attachments']) => Promise<Customer | null>;
   setFilters: (filters: CustomerFilters) => void;
   reset: () => void;
 }
@@ -107,9 +107,9 @@ const useCustomerStore = create<CustomerState>((set, get) => ({
     } catch { /* ignore */ }
   },
 
-  addFollowUp: async (id, content, operator) => {
+  addFollowUp: async (id, content, operator, attachments) => {
     try {
-      const res = await customerApi.addCustomerFollowUp(id, { content, operator });
+      const res = await customerApi.addCustomerFollowUp(id, { content, operator, attachments });
       if (res.code === 0) {
         await get().fetchItems();
         set({ current: res.data });

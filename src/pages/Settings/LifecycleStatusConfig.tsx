@@ -24,6 +24,7 @@ import { settingsApi } from '../../api';
 import type { LifecycleStatusConfig } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import { getLifecycleStatusTagSx } from '../../shared/utils/constants';
 
 type LifecycleForm = Omit<LifecycleStatusConfig, 'id' | 'createdAt' | 'updatedAt'>;
 
@@ -117,7 +118,7 @@ const LifecycleStatusConfigPage: React.FC = () => {
               <TableRow key={item.id} hover>
                 <TableCell sx={{ color: '#6b7280' }}>{item.code}</TableCell>
                 <TableCell>
-                  <Chip label={item.name} size="small" sx={{ bgcolor: `${item.color}18`, color: item.color, fontWeight: 600 }} />
+                  <Chip label={item.name} size="small" sx={getLifecycleStatusTagSx(`${item.code} ${item.name}`)} />
                 </TableCell>
                 <TableCell>{item.description || '-'}</TableCell>
                 <TableCell>

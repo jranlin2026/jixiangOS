@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Button,
@@ -19,7 +19,6 @@ import {
   TableCell,
   TableContainer,
   TableHead,
-  TablePagination,
   TableRow,
   TextField,
   Tooltip,
@@ -27,6 +26,7 @@ import {
   Alert,
   Tabs,
 } from '@mui/material';
+import TablePagination from '../../shared/components/TablePagination';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditIcon from '@mui/icons-material/Edit';
@@ -37,14 +37,12 @@ import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import { useSearchParams } from 'react-router-dom';
 import useOrderStore from '../../store/useOrderStore';
 import { customerApi, orderApi, productApi, settingsApi } from '../../api';
-import { getProductLevelColor, PRODUCT_LEVELS, normalizeResourceOwnership } from '../../shared/utils/constants';
+import { getProductLevelColor, getProductLevelRowSx, getProductLevelTagSx, PRODUCT_LEVELS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
-import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
 import CustomerDetail from '../Customers/CustomerDetail';
 import OrderDetail from './OrderDetail';
 import OrderForm from './OrderForm';
 import OrderHistoryDialog from './OrderHistoryDialog';
-import OrderStats from './OrderStats';
 import OrderReview from '../OrderReview';
 import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
@@ -63,6 +61,7 @@ import ResizableHeaderCell, {
   type ColumnWidthMap,
 } from '../../shared/components/ResizableTable';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import { ModuleHeader, ModulePage, ModuleTabs, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
 
 type OrderColumn = {
   id: string;
@@ -76,47 +75,62 @@ type OrderViewConfig = {
   schemaVersion: number;
 };
 
-const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_view_v4';
-const ORDER_VIEW_SCHEMA_VERSION = 4;
+const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_view_v7';
+const ORDER_VIEW_SCHEMA_VERSION = 7;
 const ORDER_WIDTH_STORAGE_KEY = 'aaos_order_table_column_widths_v1';
 const ORDER_ACTION_COLUMN_WIDTH = 160;
 
 const ORDER_COLUMNS: OrderColumn[] = [
   { id: 'orderNo', label: '订单号' },
   { id: 'customer', label: '客户' },
+  { id: 'productName', label: '产品名称' },
   { id: 'productLevel', label: '产品等级' },
   { id: 'orderType', label: '订单类型' },
   { id: 'actualAmount', label: '实付金额' },
+  { id: 'officialPaymentChannel', label: '官方收款渠道' },
   { id: 'resourceOwnership', label: '资源归属' },
-  { id: 'paymentDate', label: '付款日期' },
-  { id: 'refundStatus', label: '退款状态' },
+  { id: 'paymentDate', label: '付款时间' },
   { id: 'owner', label: '销售负责人' },
+  { id: 'leadInputBy', label: '线索录入人' },
+  { id: 'leadContributorName', label: '线索贡献人' },
+  { id: 'originalOrderId', label: '第三方平台订单' },
+  { id: 'notes', label: '备注' },
   { id: 'createdAt', label: '创建时间' },
 ];
 
 const DEFAULT_VISIBLE_COLUMNS = [
   'orderNo',
   'customer',
+  'productName',
   'productLevel',
   'orderType',
   'actualAmount',
+  'officialPaymentChannel',
   'resourceOwnership',
   'paymentDate',
-  'refundStatus',
   'owner',
+  'leadInputBy',
+  'leadContributorName',
+  'originalOrderId',
+  'notes',
   'createdAt',
 ];
 
 const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   orderNo: 180,
   customer: 180,
+  productName: 180,
   productLevel: 140,
   orderType: 140,
   actualAmount: 140,
+  officialPaymentChannel: 160,
   resourceOwnership: 140,
   paymentDate: 180,
-  refundStatus: 140,
   owner: 140,
+  leadInputBy: 140,
+  leadContributorName: 150,
+  originalOrderId: 180,
+  notes: 220,
   createdAt: 180,
 };
 
@@ -167,7 +181,7 @@ const readOrderViewConfig = () => {
 };
 
 const Orders: React.FC = () => {
-  const { items, filters, pagination, fetchItems, fetchStats, setFilters, delete: deleteOrder } = useOrderStore();
+  const { items, filters, pagination, fetchItems, setFilters, delete: deleteOrder } = useOrderStore();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') === 'review' ? 'review' : 'list';
   const orderIdParam = searchParams.get('orderId');
@@ -185,6 +199,7 @@ const Orders: React.FC = () => {
   const [orderTypeConfigs, setOrderTypeConfigs] = useState<OrderTypeConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
+  const [reviewViewSettingsOpen, setReviewViewSettingsOpen] = useState(false);
   const [viewConfig, setViewConfig] = useState<OrderViewConfig>(readOrderViewConfig);
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(ORDER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
   const [orderLookupMessage, setOrderLookupMessage] = useState('');
@@ -207,8 +222,7 @@ const Orders: React.FC = () => {
   useEffect(() => {
     if (activeTab !== 'list') return;
     fetchItems({ ...filters, paymentMethod: undefined });
-    fetchStats();
-  }, [activeTab, fetchItems, fetchStats]);
+  }, [activeTab, fetchItems]);
 
   useEffect(() => {
     localStorage.setItem(ORDER_VIEW_STORAGE_KEY, JSON.stringify(viewConfig));
@@ -471,7 +485,6 @@ const Orders: React.FC = () => {
   );
 
   const renderOrderCell = (order: Order, columnId: string) => {
-    const levelColor = getProductLevelColor(order.productLevel);
     const customerDisplayName = order.customerName;
     switch (columnId) {
       case 'orderNo':
@@ -507,42 +520,57 @@ const Orders: React.FC = () => {
             {customerDisplayName}
           </Button>
         );
+      case 'productName':
+        return order.productName || order.productLevel || '-';
       case 'productLevel':
         return (
           <Chip
             label={order.productLevel}
             size="small"
-            sx={{ bgcolor: `${levelColor}18`, color: levelColor, fontWeight: 600 }}
+            sx={getProductLevelTagSx(order.productLevel)}
           />
         );
       case 'orderType':
         return <Chip label={order.orderType} size="small" variant="outlined" />;
       case 'actualAmount':
         return formatCurrency(order.actualAmount || order.amount);
+      case 'officialPaymentChannel':
+        return order.officialPaymentChannel || '-';
       case 'resourceOwnership':
         return normalizeResourceOwnership(order.resourceOwnership || order.sourceType);
       case 'paymentDate':
-        return formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm');
-      case 'refundStatus':
-        return <RefundStatusBadge status={order.refundStatus} />;
+        return formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm:ss');
       case 'owner':
         return order.owner;
+      case 'leadInputBy':
+        return order.leadInputBy || '-';
+      case 'leadContributorName':
+        return order.leadContributorName || '-';
+      case 'originalOrderId':
+        return order.originalOrderId || '-';
+      case 'notes':
+        return order.notes || '-';
       case 'createdAt':
-        return formatDate(order.createdAt);
+        return formatDate(order.createdAt, 'yyyy-MM-dd HH:mm:ss');
       default:
         return null;
     }
   };
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, gap: 2 }}>
-        <Typography variant="h5" sx={{ fontWeight: 600 }}>
-          订单管理
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+    <ModulePage>
+      <ModuleHeader
+        title="订单管理"
+        description="提交订单申请、财务审核和正式订单管理。"
+        actions={(
+          <>
           {activeTab === 'list' && (
             <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
+              视图设置
+            </Button>
+          )}
+          {activeTab === 'review' && (
+            <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setReviewViewSettingsOpen(true)}>
               视图设置
             </Button>
           )}
@@ -551,19 +579,18 @@ const Orders: React.FC = () => {
               提交订单申请
             </Button>
           </PermissionGate>
-        </Box>
-      </Box>
+          </>
+        )}
+      />
 
-      <Tabs value={activeTab} onChange={handleTabChange} sx={{ mb: 2, borderBottom: '1px solid #e5e7eb' }}>
+      <ModuleTabs value={activeTab} onChange={handleTabChange}>
         <Tab value="list" label="订单列表" />
         <Tab value="review" label="订单审核台" />
-      </Tabs>
+      </ModuleTabs>
 
       {activeTab === 'list' ? (
         <>
-          <OrderStats />
-
-          <Box sx={{ display: 'flex', gap: 2, my: 3, flexWrap: 'wrap' }}>
+          <ModuleToolbar>
             <TextField
               placeholder="搜索订单号/客户名"
               value={filters.search || ''}
@@ -604,11 +631,11 @@ const Orders: React.FC = () => {
               </Select>
             </FormControl>
             <Button variant="outlined" startIcon={<SortIcon />} onClick={handlePaymentDateSort}>
-              付款日期{filters.sortBy === 'paymentDate' && filters.sortDirection === 'asc' ? '升序' : '降序'}
+              付款时间{filters.sortBy === 'paymentDate' && filters.sortDirection === 'asc' ? '升序' : '降序'}
             </Button>
-          </Box>
+          </ModuleToolbar>
 
-          <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
+          <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { overflowX: 'auto' }]}>
             <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
               <TableHead>
                 <TableRow>
@@ -628,9 +655,8 @@ const Orders: React.FC = () => {
               </TableHead>
               <TableBody>
                 {items.map((order) => {
-                  const levelColor = getProductLevelColor(order.productLevel);
                   return (
-                    <TableRow key={order.id} hover sx={{ bgcolor: `${levelColor}08` }}>
+                    <TableRow key={order.id} hover sx={getProductLevelRowSx(order.productLevel)}>
                       {visibleColumns.map((column, columnIndex) => (
                         <TableCell
                           key={column.id}
@@ -677,6 +703,32 @@ const Orders: React.FC = () => {
                     </TableRow>
                   );
                 })}
+                {items.length === 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={visibleColumns.length + 1}
+                      align="center"
+                      sx={{
+                        p: 0,
+                        color: '#9ca3af',
+                        bgcolor: '#fff',
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          py: 6,
+                          position: 'sticky',
+                          left: 0,
+                          width: 'calc(100vw - 360px)',
+                          maxWidth: '100vw',
+                          textAlign: 'center',
+                        }}
+                      >
+                        暂无订单数据
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </TableContainer>
@@ -699,7 +751,11 @@ const Orders: React.FC = () => {
           />
         </>
       ) : (
-        <OrderReview embedded />
+        <OrderReview
+          embedded
+          viewSettingsOpen={reviewViewSettingsOpen}
+          onViewSettingsClose={() => setReviewViewSettingsOpen(false)}
+        />
       )}
 
       {selectedOrder && (
@@ -728,7 +784,6 @@ const Orders: React.FC = () => {
         onClose={() => { setFormOpen(false); setEditingOrder(null); }}
         onSuccess={(application) => {
           fetchItems({ ...filters, paymentMethod: undefined });
-          fetchStats();
           setOrderCustomer(null);
           if (application) {
             const nextParams = new URLSearchParams(searchParams);
@@ -776,28 +831,28 @@ const Orders: React.FC = () => {
             <TableHead>
               <TableRow>
                 <TableCell>订单号</TableCell>
-                <TableCell>产品分类</TableCell>
+                <TableCell>产品名称</TableCell>
+                <TableCell>产品等级</TableCell>
                 <TableCell>订单类型</TableCell>
                 <TableCell>金额</TableCell>
-                <TableCell>付款日期</TableCell>
-                <TableCell>退款状态</TableCell>
+                <TableCell>付款时间</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {customerOrders.map((order) => (
                 <TableRow key={order.id}>
                   <TableCell>{order.orderNo}</TableCell>
+                  <TableCell>{order.productName || order.productLevel || '-'}</TableCell>
                   <TableCell>
                     <Chip
                       label={order.productLevel}
                       size="small"
-                      sx={{ bgcolor: `${getProductLevelColor(order.productLevel)}18`, color: getProductLevelColor(order.productLevel), fontWeight: 600 }}
+                      sx={getProductLevelTagSx(order.productLevel)}
                     />
                   </TableCell>
                   <TableCell>{order.orderType}</TableCell>
                   <TableCell>{formatCurrency(order.actualAmount || order.amount)}</TableCell>
-                  <TableCell>{formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm')}</TableCell>
-                  <TableCell><RefundStatusBadge status={order.refundStatus} /></TableCell>
+                  <TableCell>{formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm:ss')}</TableCell>
                 </TableRow>
               ))}
               {customerOrders.length === 0 && (
@@ -815,8 +870,9 @@ const Orders: React.FC = () => {
         </DialogActions>
       </Dialog>
       {feedbackDialog}
-    </Box>
+    </ModulePage>
   );
 };
 
 export default Orders;
+

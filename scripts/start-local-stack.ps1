@@ -2,6 +2,15 @@ $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
 $mysqlStarter = Join-Path $root 'scripts\mysql\start-local-mysql.ps1'
+$portableRoot = Join-Path $env:USERPROFILE '.jixiang-os'
+$portableNode = Join-Path $portableRoot 'node\node-v24.18.0-win-x64'
+$portableMysqlBin = Join-Path $portableRoot 'mysql\mysql-8.4.10-winx64\bin'
+
+foreach ($toolPath in @($portableNode, $portableMysqlBin)) {
+  if (Test-Path -LiteralPath $toolPath) {
+    $env:Path = "$toolPath;$env:Path"
+  }
+}
 
 function Test-PortListening {
   param([int]$Port)

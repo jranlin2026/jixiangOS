@@ -1,0 +1,1123 @@
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Box,
+  Button,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  IconButton,
+  MenuItem,
+  Paper,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  Tooltip,
+  Typography,
+} from '@mui/material';
+import TablePagination from '../../shared/components/TablePagination';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import EditIcon from '@mui/icons-material/Edit';
+import HistoryIcon from '@mui/icons-material/History';
+import CloseIcon from '@mui/icons-material/Close';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import ReplayIcon from '@mui/icons-material/Replay';
+import BlockIcon from '@mui/icons-material/Block';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import { useNavigate } from 'react-router-dom';
+import { productApi, recoveryOrderApi, settingsApi } from '../../api';
+import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
+import { getProductLevelColor, getProductLevelTagSx, ROUTES } from '../../shared/utils/constants';
+import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import TableViewSettingsDialog, { type TableViewColumnConfig } from '../../shared/components/TableViewSettingsDialog';
+import { useTableViewConfig } from '../../shared/hooks/useTableViewConfig';
+import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import type { RecoveryOrder, RecoveryOrderFilters, RecoveryOrderInput, RecoveryOrderStatus } from '../../types/recoveryOrder';
+import type { User } from '../../types/settings';
+import type { Product } from '../../types/product';
+import useAuthStore from '../../store/useAuthStore';
+
+const shell = {
+  ink: '#0f172a',
+  muted: '#64748b',
+  line: '#dbe4ee',
+  soft: '#f8fafc',
+  blue: '#2563eb',
+  green: '#059669',
+  amber: '#b45309',
+  red: '#dc2626',
+};
+
+const emptyForm = {
+  customerName: '',
+  customerPhone: '',
+  customerWechat: '',
+  thirdPartyOrderNo: '',
+  sourcePlatform: '',
+  originalProduct: '',
+  originalAmount: '',
+  recoveryAmount: '',
+  paymentVoucher: '',
+  paymentVoucherName: '',
+  paymentVoucherPreview: '',
+  chatEvidence: '',
+  chatEvidenceName: '',
+  chatEvidencePreview: '',
+  recoveryUserId: '',
+  remark: '',
+};
+
+type RecoveryOrderForm = typeof emptyForm;
+
+function getStatusSx(status: RecoveryOrderStatus) {
+  if (status === '已分账' || status === '待分账') return { bgcolor: '#ecfdf5', color: shell.green };
+  if (status === '审核驳回') return { bgcolor: '#fff1f2', color: shell.red };
+  if (status === '退回修改') return { bgcolor: '#eff6ff', color: shell.blue };
+  return { bgcolor: '#fff7ed', color: shell.amber };
+}
+
+interface RecoveryOrderTabProps {
+  mode: 'list' | 'review';
+  createSignal?: number;
+  viewSettingsSignal?: number;
+}
+
+type ReviewAction = {
+  type: 'approve' | 'return' | 'reject';
+  row: RecoveryOrder;
+} | null;
+
+type RecoveryOrderColumnId =
+  | 'recoveryNo'
+  | 'customerName'
+  | 'customerPhone'
+  | 'customerWechat'
+  | 'thirdPartyOrderNo'
+  | 'originalProduct'
+  | 'originalAmount'
+  | 'recoveryAmount'
+  | 'recoveryUserName'
+  | 'status'
+  | 'createdAt'
+  | 'actions';
+
+const RECOVERY_ORDER_COLUMNS: Array<TableViewColumnConfig & { id: RecoveryOrderColumnId }> = [
+  { id: 'recoveryNo', label: '挽回订单号' },
+  { id: 'customerName', label: '客户' },
+  { id: 'customerPhone', label: '手机号' },
+  { id: 'customerWechat', label: '微信' },
+  { id: 'thirdPartyOrderNo', label: '第三方订单' },
+  { id: 'originalProduct', label: '原产品' },
+  { id: 'originalAmount', label: '原付款' },
+  { id: 'recoveryAmount', label: '挽回金额' },
+  { id: 'recoveryUserName', label: '挽回人员' },
+  { id: 'status', label: '状态' },
+  { id: 'createdAt', label: '创建时间' },
+  { id: 'actions', label: '操作' },
+];
+
+const DEFAULT_VISIBLE_COLUMNS = RECOVERY_ORDER_COLUMNS.map((column) => column.id);
+const RECOVERY_ORDER_LIST_COLUMNS = RECOVERY_ORDER_COLUMNS.filter((column) => column.id !== 'status');
+const DEFAULT_LIST_VISIBLE_COLUMNS = RECOVERY_ORDER_LIST_COLUMNS.map((column) => column.id);
+const RECOVERY_REVIEW_STATUSES: RecoveryOrderStatus[] = ['待审核', '退回修改'];
+const RECOVERY_LIST_STATUSES: RecoveryOrderStatus[] = ['待分账', '已分账'];
+
+function isRecoveryOrderLocked(row: RecoveryOrder): boolean {
+  return row.status === '已分账' || ['待确认', '待发放', '已撤回'].includes(row.settlementStatus || '未分账');
+}
+
+const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal = 0, viewSettingsSignal = 0 }) => {
+  const navigate = useNavigate();
+  const currentUser = useAuthStore((state) => state.currentUser);
+  const canCreate = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE);
+  const canReviewAction = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write');
+  const canEdit = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT);
+  const canDelete = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, 'delete');
+  const canViewHistory = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY);
+  const canForceDeleteSettled = isSuperAdmin(currentUser);
+  const [rows, setRows] = useState<RecoveryOrder[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [total, setTotal] = useState(0);
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState<RecoveryOrderForm>(emptyForm);
+  const [editingOrder, setEditingOrder] = useState<RecoveryOrder | null>(null);
+  const [message, setMessage] = useState<{ type: 'success'; text: string } | null>(null);
+  const [errorDialog, setErrorDialog] = useState<{ title: string; text: string } | null>(null);
+  const [detailOrder, setDetailOrder] = useState<RecoveryOrder | null>(null);
+  const [historyOrder, setHistoryOrder] = useState<RecoveryOrder | null>(null);
+  const [deleteConfirmOrder, setDeleteConfirmOrder] = useState<RecoveryOrder | null>(null);
+  const [reviewAction, setReviewAction] = useState<ReviewAction>(null);
+  const [reviewReason, setReviewReason] = useState('');
+  const [approvedOrder, setApprovedOrder] = useState<RecoveryOrder | null>(null);
+  const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
+  const handledCreateSignalRef = React.useRef(createSignal);
+  const handledViewSettingsSignalRef = React.useRef(viewSettingsSignal);
+  const tableColumns = mode === 'list' ? RECOVERY_ORDER_LIST_COLUMNS : RECOVERY_ORDER_COLUMNS;
+  const defaultVisibleColumns = mode === 'list' ? DEFAULT_LIST_VISIBLE_COLUMNS : DEFAULT_VISIBLE_COLUMNS;
+
+  const {
+    viewConfig,
+    visibleColumns,
+    visibleColumnIds,
+    toggleColumn,
+    reorderColumn,
+    setFrozenColumnCount,
+    resetViewConfig,
+  } = useTableViewConfig(`after_sales_recovery_${mode}_table_view`, tableColumns, defaultVisibleColumns);
+
+  const filters = useMemo<RecoveryOrderFilters>(() => ({
+    search,
+    status: '全部',
+    statuses: mode === 'review'
+      ? RECOVERY_REVIEW_STATUSES
+      : RECOVERY_LIST_STATUSES,
+    scopeDomain: mode === 'review' ? 'recoveryOrderApplications' : 'recoveryOrders',
+    page: page + 1,
+    pageSize: rowsPerPage,
+  }), [mode, page, rowsPerPage, search]);
+
+  const load = useCallback(async () => {
+    const [listRes, usersRes, productsRes] = await Promise.all([
+      recoveryOrderApi.fetchRecoveryOrders(filters),
+      settingsApi.fetchAssignableUsers(),
+      productApi.getProducts(),
+    ]);
+    if (listRes.code === 0) {
+      setRows(listRes.data.items);
+      setTotal(listRes.data.pagination.total);
+    }
+    if (usersRes.code === 0) setUsers(usersRes.data);
+    if (productsRes.code === 0) setProducts([...productsRes.data].sort((a, b) => a.sortOrder - b.sortOrder));
+  }, [filters]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [search]);
+
+  useEffect(() => {
+    if (mode !== 'list' || createSignal <= 0) return;
+    if (handledCreateSignalRef.current === createSignal) return;
+    handledCreateSignalRef.current = createSignal;
+    openCreate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createSignal]);
+
+  useEffect(() => {
+    if (viewSettingsSignal <= 0) return;
+    if (handledViewSettingsSignalRef.current === viewSettingsSignal) return;
+    handledViewSettingsSignalRef.current = viewSettingsSignal;
+    setViewSettingsOpen(true);
+  }, [viewSettingsSignal]);
+
+  const activeUsers = users.filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active');
+  const productOptions = useMemo(() => [...products].sort((a, b) => a.sortOrder - b.sortOrder), [products]);
+  const canResubmitReturnedOrder = useCallback((row: RecoveryOrder) => (
+    row.status === '退回修改'
+    && Boolean(currentUser)
+    && (row.createdBy === currentUser?.id || row.recoveryUserId === currentUser?.id)
+  ), [currentUser]);
+
+  const showErrorDialog = useCallback((text: string, title = '操作失败') => {
+    setErrorDialog({ title, text });
+  }, []);
+
+  const openCreate = () => {
+    setMessage(null);
+    setEditingOrder(null);
+    const self = currentUser
+      ? activeUsers.find((user) => user.id === currentUser.id)
+      : undefined;
+    setForm({ ...emptyForm, recoveryUserId: self?.id || currentUser?.id || '' });
+    setOpen(true);
+  };
+
+  const openEdit = (row: RecoveryOrder) => {
+    if (isRecoveryOrderLocked(row)) {
+      showErrorDialog('已分账的售后挽回订单不能修改');
+      return;
+    }
+    setMessage(null);
+    setEditingOrder(row);
+    setForm({
+      customerName: row.customerName || '',
+      customerPhone: row.customerPhone || '',
+      customerWechat: row.customerWechat || '',
+      thirdPartyOrderNo: row.thirdPartyOrderNo || '',
+      sourcePlatform: row.sourcePlatform || '',
+      originalProduct: row.originalProduct || '',
+      originalAmount: String(row.originalAmount || ''),
+      recoveryAmount: String(row.recoveryAmount || ''),
+      paymentVoucher: row.paymentVoucher || '',
+      paymentVoucherName: row.paymentVoucherName || row.paymentVoucher || '',
+      paymentVoucherPreview: row.paymentVoucherPreview || '',
+      chatEvidence: row.chatEvidence || '',
+      chatEvidenceName: row.chatEvidenceName || row.chatEvidence || '',
+      chatEvidencePreview: row.chatEvidencePreview || '',
+      recoveryUserId: row.recoveryUserId || '',
+      remark: row.remark || '',
+    });
+    setOpen(true);
+  };
+
+  const handleProductChange = (productName: string) => {
+    const product = productOptions.find((item) => item.name === productName);
+    setForm((prev) => ({
+      ...prev,
+      originalProduct: product?.name || productName,
+      originalAmount: product && !prev.originalAmount ? String(product.price || '') : prev.originalAmount,
+    }));
+  };
+
+  const handleAttachmentFile = (
+    file: File | undefined,
+    nameField: 'paymentVoucherName' | 'chatEvidenceName',
+    previewField: 'paymentVoucherPreview' | 'chatEvidencePreview',
+    valueField: 'paymentVoucher' | 'chatEvidence',
+  ) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setForm((prev) => ({
+        ...prev,
+        [nameField]: file.name,
+        [previewField]: String(reader.result || ''),
+        [valueField]: file.name,
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const clearAttachmentFile = (
+    nameField: 'paymentVoucherName' | 'chatEvidenceName',
+    previewField: 'paymentVoucherPreview' | 'chatEvidencePreview',
+    valueField: 'paymentVoucher' | 'chatEvidence',
+  ) => {
+    setForm((prev) => ({
+      ...prev,
+      [nameField]: '',
+      [previewField]: '',
+      [valueField]: '',
+    }));
+  };
+
+  const handleCreate = async () => {
+    if (!currentUser) return;
+    const recoveryUser = activeUsers.find((user) => user.id === form.recoveryUserId);
+    const input: RecoveryOrderInput = {
+      customerName: form.customerName,
+      customerPhone: form.customerPhone,
+      customerWechat: form.customerWechat,
+      thirdPartyOrderNo: form.thirdPartyOrderNo,
+      sourcePlatform: form.sourcePlatform,
+      originalProduct: form.originalProduct,
+      originalAmount: Number(form.originalAmount) || 0,
+      recoveryAmount: Number(form.recoveryAmount) || 0,
+      paymentVoucher: form.paymentVoucher,
+      paymentVoucherName: form.paymentVoucherName,
+      paymentVoucherPreview: form.paymentVoucherPreview,
+      chatEvidence: form.chatEvidence,
+      chatEvidenceName: form.chatEvidenceName,
+      chatEvidencePreview: form.chatEvidencePreview,
+      recoveryUserId: recoveryUser?.id || currentUser.id,
+      recoveryUserName: recoveryUser?.name || currentUser.name,
+      remark: form.remark,
+      createdBy: currentUser.id,
+      createdByName: currentUser.name,
+    };
+    const res = editingOrder
+      ? await recoveryOrderApi.updateRecoveryOrder(editingOrder.id, input)
+      : await recoveryOrderApi.createRecoveryOrder(input);
+    if (res.code !== 0) {
+      showErrorDialog(
+        res.message || (editingOrder ? '修改售后挽回订单失败' : '新建售后挽回订单失败'),
+        '无法提交',
+      );
+      return;
+    }
+    setOpen(false);
+    setEditingOrder(null);
+    setMessage({
+      type: 'success',
+      text: editingOrder
+        ? '已修改售后挽回订单，并重新提交审核'
+        : '已提交售后挽回订单，待财务审核通过后进入售后挽回订单列表',
+    });
+    await load();
+    navigate(`${ROUTES.AFTER_SALES}?tab=recovery-review`);
+  };
+
+  const handleDelete = async (row: RecoveryOrder) => {
+    const isSettled = isRecoveryOrderLocked(row);
+    if (isSettled && !canForceDeleteSettled) {
+      showErrorDialog('已分账的售后挽回订单不能删除');
+      return;
+    }
+    setDeleteConfirmOrder(row);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmOrder) return;
+    const isSettled = isRecoveryOrderLocked(deleteConfirmOrder);
+    const res = await recoveryOrderApi.deleteRecoveryOrder(deleteConfirmOrder.id, { force: isSettled && canForceDeleteSettled });
+    if (res.code !== 0) {
+      showErrorDialog(res.message || '删除售后挽回订单失败');
+      return;
+    }
+    setDeleteConfirmOrder(null);
+    setMessage({ type: 'success', text: '已删除售后挽回订单' });
+    await load();
+  };
+
+  const closeReviewDialog = () => {
+    setReviewAction(null);
+    setReviewReason('');
+  };
+
+  const handleReviewSubmit = async () => {
+    if (!currentUser || !reviewAction) return;
+    let res;
+    if (reviewAction.type === 'approve') {
+      res = await recoveryOrderApi.approveRecoveryOrder(reviewAction.row.id, currentUser.id, currentUser.name);
+    } else if (reviewAction.type === 'return') {
+      res = await recoveryOrderApi.returnRecoveryOrder(reviewAction.row.id, currentUser.id, currentUser.name, reviewReason);
+    } else {
+      res = await recoveryOrderApi.rejectRecoveryOrder(reviewAction.row.id, currentUser.id, currentUser.name, reviewReason);
+    }
+    if (res.code !== 0) {
+      showErrorDialog(res.message || '审核操作失败');
+      return;
+    }
+    const nextOrder = res.data || reviewAction.row;
+    if (reviewAction.type === 'approve') {
+      setApprovedOrder(nextOrder);
+      setMessage({ type: 'success', text: '已审核通过，待财务进行售后挽回分账' });
+    } else if (reviewAction.type === 'return') {
+      setMessage({ type: 'success', text: '已退回修改，可在售后挽回审核台修改后重新提交审核' });
+    } else {
+      setMessage({ type: 'success', text: '已驳回挽回订单，可在售后挽回订单列表中查看' });
+    }
+    closeReviewDialog();
+    await load();
+  };
+
+  const renderCell = (row: RecoveryOrder, columnId: RecoveryOrderColumnId) => {
+    switch (columnId) {
+      case 'recoveryNo':
+        return (
+          <Typography
+            component="button"
+            type="button"
+            variant="body2"
+            onClick={() => setDetailOrder(row)}
+            sx={{
+              p: 0,
+              border: 0,
+              bgcolor: 'transparent',
+              font: 'inherit',
+              fontWeight: 900,
+              color: shell.blue,
+              cursor: 'pointer',
+              textAlign: 'left',
+              '&:hover': { textDecoration: 'underline' },
+            }}
+          >
+            {row.recoveryNo}
+          </Typography>
+        );
+      case 'customerName':
+        return <Typography variant="body2" sx={{ fontWeight: 800 }}>{row.customerName}</Typography>;
+      case 'customerPhone':
+        return row.customerPhone || '-';
+      case 'customerWechat':
+        return row.customerWechat || '-';
+      case 'thirdPartyOrderNo':
+        return row.thirdPartyOrderNo;
+      case 'originalProduct':
+        return row.originalProduct;
+      case 'originalAmount':
+        return formatCurrency(row.originalAmount);
+      case 'recoveryAmount':
+        return <Typography variant="body2" sx={{ fontWeight: 900, color: shell.green }}>{formatCurrency(row.recoveryAmount)}</Typography>;
+      case 'recoveryUserName':
+        return row.recoveryUserName;
+      case 'status':
+        return (
+          <Box>
+            <Chip size="small" label={row.status} sx={{ ...getStatusSx(row.status), fontWeight: 900 }} />
+          </Box>
+        );
+      case 'createdAt':
+        return formatDate(row.createdAt, 'yyyy-MM-dd HH:mm');
+      case 'actions':
+        if (mode === 'review') {
+          if (row.status === '退回修改') {
+            const canResubmit = canEdit || canResubmitReturnedOrder(row);
+            return canResubmit ? (
+              <Stack
+                direction="row"
+                spacing={0.25}
+                justifyContent="center"
+                sx={{ minWidth: 148, flexWrap: 'nowrap', whiteSpace: 'nowrap' }}
+              >
+                <Tooltip title="修改并重新提交">
+                  <IconButton
+                    aria-label="修改并重新提交"
+                    size="small"
+                    sx={{ color: '#0f766e' }}
+                    onClick={() => openEdit(row)}
+                  >
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Stack>
+            ) : (
+              <Typography variant="body2" sx={{ color: shell.muted }}>-</Typography>
+            );
+          }
+          return (
+            <Stack
+              direction="row"
+              spacing={0.25}
+              justifyContent="center"
+              sx={{ minWidth: 148, flexWrap: 'nowrap', whiteSpace: 'nowrap' }}
+            >
+              {canDelete && (
+                <Tooltip title="删除">
+                  <IconButton
+                    size="small"
+                    sx={{ color: shell.red }}
+                    onClick={() => handleDelete(row)}
+                  >
+                    <DeleteOutlineIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
+              {canReviewAction && (
+                <>
+                  <Tooltip title="通过">
+                    <IconButton size="small" sx={{ color: shell.green }} onClick={() => setReviewAction({ type: 'approve', row })}>
+                      <CheckCircleOutlineIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="退回修改">
+                    <IconButton aria-label="退回修改" size="small" color="info" onClick={() => setReviewAction({ type: 'return', row })}>
+                      <ReplayIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="驳回终止">
+                    <IconButton aria-label="驳回终止" size="small" color="error" onClick={() => setReviewAction({ type: 'reject', row })}>
+                      <BlockIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </>
+              )}
+            </Stack>
+          );
+        }
+        return (
+          <Stack
+            direction="row"
+            spacing={0.25}
+            justifyContent="center"
+            sx={{ minWidth: 80, flexWrap: 'nowrap', whiteSpace: 'nowrap' }}
+          >
+            <Tooltip title="查看">
+              <IconButton size="small" sx={{ color: shell.blue }} onClick={() => setDetailOrder(row)}>
+                <VisibilityIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            {canEdit && !isRecoveryOrderLocked(row) && (
+              <Tooltip title="编辑">
+                <IconButton
+                  size="small"
+                  sx={{ color: '#0f766e' }}
+                  onClick={() => openEdit(row)}
+                >
+                  <EditIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
+            {canViewHistory && (
+              <Tooltip title="历史">
+                <IconButton
+                  size="small"
+                  sx={{ color: shell.green }}
+                  onClick={() => setHistoryOrder(row)}
+                >
+                  <HistoryIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
+            {canDelete && (!isRecoveryOrderLocked(row) || canForceDeleteSettled) && (
+              <Tooltip title="删除">
+                <IconButton
+                  size="small"
+                  sx={{ color: shell.red }}
+                  onClick={() => handleDelete(row)}
+                >
+                  <DeleteOutlineIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
+          </Stack>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const renderAttachmentUpload = ({
+    title,
+    description,
+    nameField,
+    previewField,
+    valueField,
+    accent,
+  }: {
+    title: string;
+    description: string;
+    nameField: 'paymentVoucherName' | 'chatEvidenceName';
+    previewField: 'paymentVoucherPreview' | 'chatEvidencePreview';
+    valueField: 'paymentVoucher' | 'chatEvidence';
+    accent: string;
+  }) => {
+    const fileName = form[nameField];
+    const preview = form[previewField];
+    return (
+      <Box
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => {
+          event.preventDefault();
+          handleAttachmentFile(event.dataTransfer.files?.[0], nameField, previewField, valueField);
+        }}
+        sx={{
+          gridColumn: { md: '1 / -1' },
+          border: `1px dashed ${accent}`,
+          bgcolor: '#f8fbff',
+          borderRadius: 1,
+          p: 1.5,
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', sm: '1fr auto' },
+          gap: 1.5,
+          alignItems: 'center',
+        }}
+      >
+        <Box>
+          <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.5 }}>{title}</Typography>
+          <Typography variant="body2" sx={{ color: shell.muted }}>{description}</Typography>
+          {fileName && (
+            <Typography variant="body2" sx={{ mt: 1, color: shell.blue, fontWeight: 700 }}>{fileName}</Typography>
+          )}
+        </Box>
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          {preview && preview.startsWith('data:image/') && (
+            <Box sx={{ position: 'relative', width: 72, height: 56 }}>
+              <Box
+                component="img"
+                src={preview}
+                alt={`${title}预览`}
+                sx={{ width: 72, height: 56, objectFit: 'cover', borderRadius: 1, border: `1px solid ${shell.line}` }}
+              />
+              <Tooltip title="删除附件">
+                <IconButton
+                  size="small"
+                  onClick={() => clearAttachmentFile(nameField, previewField, valueField)}
+                  sx={{
+                    position: 'absolute',
+                    top: -8,
+                    right: -8,
+                    width: 22,
+                    height: 22,
+                    bgcolor: '#fff',
+                    border: `1px solid ${shell.line}`,
+                    boxShadow: '0 1px 4px rgba(15, 23, 42, 0.18)',
+                    '&:hover': { bgcolor: '#fee2e2', color: shell.red },
+                  }}
+                >
+                  <CloseIcon sx={{ fontSize: 14 }} />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          )}
+          <Button variant="outlined" component="label">
+            上传附件
+            <input
+              hidden
+              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+              type="file"
+              onChange={(event) => handleAttachmentFile(event.target.files?.[0], nameField, previewField, valueField)}
+            />
+          </Button>
+        </Box>
+      </Box>
+    );
+  };
+
+  return (
+    <Box sx={{ display: 'grid', gap: 1.5 }}>
+      {message && (
+        <Alert severity={message.type} onClose={() => setMessage(null)}>
+          {message.text}
+        </Alert>
+      )}
+
+      <Box sx={{ display: 'flex', gap: 2, mt: 0.5, mb: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
+        <TextField
+          size="small"
+          placeholder="搜索客户/订单号"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          sx={{ width: 240 }}
+        />
+      </Box>
+
+      <TableContainer component={Paper} elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: '6px 6px 0 0' }}>
+        <Table sx={{ minWidth: 1360 }}>
+          <TableHead>
+            <TableRow>
+              {visibleColumns.map((column) => (
+                <TableCell
+                  key={column.id}
+                  align={column.id === 'actions' ? 'center' : 'left'}
+                  sx={{
+                    ...(column.id === 'actions' ? {
+                      minWidth: mode === 'review' ? 176 : 156,
+                      width: mode === 'review' ? 176 : 156,
+                      whiteSpace: 'nowrap',
+                      ...(mode === 'review' ? {
+                        position: 'sticky',
+                        right: 0,
+                        zIndex: 4,
+                        bgcolor: '#f8fafc',
+                        boxShadow: `-1px 0 0 ${shell.line}`,
+                      } : {}),
+                    } : {}),
+                    ...(column.id === 'createdAt' ? { minWidth: mode === 'review' ? 170 : 150, whiteSpace: 'nowrap' } : {}),
+                  }}
+                >
+                  {column.label}
+                </TableCell>
+              ))}
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={row.id} hover>
+                {visibleColumns.map((column) => (
+                  <TableCell
+                    key={column.id}
+                    align={column.id === 'actions' ? 'center' : 'left'}
+                    sx={{
+                      ...(column.id === 'actions' ? {
+                        minWidth: mode === 'review' ? 176 : 156,
+                        width: mode === 'review' ? 176 : 156,
+                        whiteSpace: 'nowrap',
+                        ...(mode === 'review' ? {
+                          position: 'sticky',
+                          right: 0,
+                          zIndex: 3,
+                          bgcolor: '#fff',
+                          boxShadow: `-1px 0 0 ${shell.line}`,
+                        } : {}),
+                      } : {}),
+                      ...(column.id === 'createdAt' ? { minWidth: mode === 'review' ? 170 : 150, whiteSpace: 'nowrap' } : {}),
+                    }}
+                  >
+                    {renderCell(row, column.id as RecoveryOrderColumnId)}
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+            {!rows.length && (
+              <TableRow>
+                <TableCell colSpan={visibleColumns.length || 1} align="center" sx={{ py: 6, color: '#9ca3af' }}>
+                  {mode === 'review' ? '暂无待审核售后挽回订单' : '暂无售后挽回订单'}
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
+      <TablePagination
+        component="div"
+        count={total}
+        page={Math.min(page, Math.max(Math.ceil(total / rowsPerPage) - 1, 0))}
+        rowsPerPage={rowsPerPage}
+        rowsPerPageOptions={[10, 20, 50]}
+        onPageChange={(_, nextPage) => setPage(nextPage)}
+        onRowsPerPageChange={(event) => {
+          setRowsPerPage(Number(event.target.value));
+          setPage(0);
+        }}
+        labelRowsPerPage="每页条数"
+        labelDisplayedRows={formatPaginationRows}
+        sx={{ border: `1px solid ${shell.line}`, borderTop: 0, bgcolor: '#fff' }}
+      />
+
+      <Dialog open={open} onClose={() => { setOpen(false); setEditingOrder(null); }} maxWidth="md" fullWidth>
+        <DialogTitle>{editingOrder ? '编辑售后挽回订单' : '新建售后挽回订单'}</DialogTitle>
+        <DialogContent dividers>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)' }, gap: 2, pt: 1 }}>
+            <TextField label="客户姓名" value={form.customerName} onChange={(event) => setForm({ ...form, customerName: event.target.value })} required />
+            <TextField label="客户手机号" value={form.customerPhone} onChange={(event) => setForm({ ...form, customerPhone: event.target.value })} />
+            <TextField label="客户微信" value={form.customerWechat} onChange={(event) => setForm({ ...form, customerWechat: event.target.value })} />
+            <TextField label="第三方平台订单号" value={form.thirdPartyOrderNo} onChange={(event) => setForm({ ...form, thirdPartyOrderNo: event.target.value })} required />
+            <TextField label="来源平台" value={form.sourcePlatform} onChange={(event) => setForm({ ...form, sourcePlatform: event.target.value })} placeholder="抖音/小红书/第三方小店等" />
+            <TextField select label="原购买产品" value={form.originalProduct} onChange={(event) => handleProductChange(event.target.value)} required>
+              {productOptions.map((product) => (
+                <MenuItem key={product.id} value={product.name}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: getProductLevelColor(product.level) }} />
+                    {product.name}
+                  </Box>
+                </MenuItem>
+              ))}
+              {form.originalProduct && !productOptions.some((product) => product.name === form.originalProduct) && (
+                <MenuItem value={form.originalProduct}>{form.originalProduct}</MenuItem>
+              )}
+            </TextField>
+            <TextField label="原付款金额" type="number" value={form.originalAmount} onChange={(event) => setForm({ ...form, originalAmount: event.target.value })} />
+            <TextField label="挽回成交金额" type="number" value={form.recoveryAmount} onChange={(event) => setForm({ ...form, recoveryAmount: event.target.value })} required />
+            <TextField select label="挽回人员" value={form.recoveryUserId} onChange={(event) => setForm({ ...form, recoveryUserId: event.target.value })} required>
+              {activeUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name} · {user.role}</MenuItem>)}
+            </TextField>
+            {renderAttachmentUpload({
+              title: '收款凭证',
+              description: '拖拽或上传收款凭证截图、PDF 或文档，用于财务审核售后挽回事实。',
+              nameField: 'paymentVoucherName',
+              previewField: 'paymentVoucherPreview',
+              valueField: 'paymentVoucher',
+              accent: '#90caf9',
+            })}
+            {renderAttachmentUpload({
+              title: '聊天记录截图',
+              description: '拖拽或上传聊天记录、成交确认截图或相关文档，作为挽回依据。',
+              nameField: 'chatEvidenceName',
+              previewField: 'chatEvidencePreview',
+              valueField: 'chatEvidence',
+              accent: '#a5b4fc',
+            })}
+            <TextField label="备注" value={form.remark} onChange={(event) => setForm({ ...form, remark: event.target.value })} multiline minRows={3} sx={{ gridColumn: { md: '1 / -1' } }} />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setOpen(false); setEditingOrder(null); }}>取消</Button>
+          <Button variant="contained" onClick={handleCreate}>{editingOrder ? '保存并提交审核' : '提交审核'}</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(detailOrder)} onClose={() => setDetailOrder(null)} maxWidth="md" fullWidth>
+        {detailOrder && (
+          <>
+            <DialogCloseTitle onClose={() => setDetailOrder(null)}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                <Typography variant="h6" sx={{ fontWeight: 600 }}>{detailOrder.recoveryNo}</Typography>
+                <Typography variant="body2" sx={{ fontWeight: 600, color: '#374151' }}>{detailOrder.originalProduct}</Typography>
+                {mode === 'review' && (
+                  <Chip label={detailOrder.status} size="small" sx={{ ...getStatusSx(detailOrder.status), fontWeight: 700 }} />
+                )}
+              </Box>
+            </DialogCloseTitle>
+            <DialogContent dividers>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 2 }}>
+                <Box>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>客户名称</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 500 }}>{detailOrder.customerName}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>客户手机号</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 500 }}>{detailOrder.customerPhone || '-'}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>客户微信</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 500 }}>{detailOrder.customerWechat || '-'}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>第三方平台订单号</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 500 }}>{detailOrder.thirdPartyOrderNo}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>原产品</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 500 }}>{detailOrder.originalProduct}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>产品等级</Typography>
+                  {(() => {
+                    const product = productOptions.find((item) => item.name === detailOrder.originalProduct);
+                    return product ? <Chip label={product.level} size="small" sx={getProductLevelTagSx(product.level)} /> : <Typography variant="body1">-</Typography>;
+                  })()}
+                </Box>
+                <Box>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>原付款金额</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 700, color: '#1a1a2e' }}>{formatCurrency(detailOrder.originalAmount)}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>挽回成交金额</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 700, color: shell.green }}>{formatCurrency(detailOrder.recoveryAmount)}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>来源平台</Typography>
+                  <Typography variant="body1">{detailOrder.sourcePlatform || '-'}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>挽回人员</Typography>
+                  <Typography variant="body1">{detailOrder.recoveryUserName}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>审核人</Typography>
+                  <Typography variant="body1">{detailOrder.auditorName || '-'}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>创建时间</Typography>
+                  <Typography variant="body1">{formatDate(detailOrder.createdAt, 'yyyy-MM-dd HH:mm:ss')}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>审核时间</Typography>
+                  <Typography variant="body1">{detailOrder.auditedAt ? formatDate(detailOrder.auditedAt, 'yyyy-MM-dd HH:mm:ss') : '-'}</Typography>
+                </Box>
+                <Box sx={{ gridColumn: { md: '1 / -1' } }}>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>备注</Typography>
+                  <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>{detailOrder.remark || '-'}</Typography>
+                </Box>
+              </Box>
+
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle2" sx={{ mb: 1, color: '#6b7280' }}>凭证记录</Typography>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>收款凭证</TableCell>
+                      <TableCell>聊天记录截图</TableCell>
+                      <TableCell>审核说明</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    <TableRow>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                          {detailOrder.paymentVoucherName || detailOrder.paymentVoucher || '-'}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: '#6b7280' }}>
+                          {detailOrder.paymentVoucherPreview ? '已上传' : '-'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                          {detailOrder.chatEvidenceName || detailOrder.chatEvidence || '-'}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: '#6b7280' }}>
+                          {detailOrder.chatEvidencePreview ? '已上传' : '-'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>{detailOrder.auditReason || '-'}</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </DialogContent>
+          </>
+        )}
+      </Dialog>
+
+      <Dialog open={Boolean(historyOrder)} onClose={() => setHistoryOrder(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>售后挽回订单历史</DialogTitle>
+        <DialogContent dividers>
+          {historyOrder && (
+            <Stack spacing={1.25}>
+              <Box sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 1.25, bgcolor: shell.soft }}>
+                <Typography variant="body2" sx={{ fontWeight: 900 }}>{historyOrder.recoveryNo}</Typography>
+                <Typography variant="caption" sx={{ color: shell.muted }}>{historyOrder.customerName} - {historyOrder.thirdPartyOrderNo}</Typography>
+              </Box>
+              {[
+                {
+                  title: '创建售后挽回订单',
+                  time: historyOrder.createdAt,
+                  by: historyOrder.createdByName,
+                  note: '提交售后挽回事实，等待审核。',
+                },
+                historyOrder.auditedAt ? {
+                  title: historyOrder.status === '审核驳回' ? '审核驳回' : historyOrder.status === '退回修改' ? '退回修改' : '审核通过',
+                  time: historyOrder.auditedAt,
+                  by: historyOrder.auditorName || '-',
+                  note: historyOrder.auditReason || (historyOrder.status === '已分账' || historyOrder.status === '待分账' ? '进入售后挽回分账。' : '-'),
+                } : null,
+                historyOrder.status === '已分账' ? {
+                  title: '售后挽回分账完成',
+                  time: historyOrder.updatedAt,
+                  by: historyOrder.auditorName || '-',
+                  note: `已生成 ${historyOrder.commissionIds?.length || 0} 条提成记录。`,
+                } : null,
+              ].filter(Boolean).map((item, index) => {
+                const event = item as { title: string; time: string; by: string; note: string };
+                return (
+                  <Box key={`${event.title}-${index}`} sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', gap: 1.25 }}>
+                    <Typography variant="caption" sx={{ color: shell.muted }}>{formatDate(event.time, 'MM-dd HH:mm')}</Typography>
+                    <Box>
+                      <Typography variant="body2" sx={{ fontWeight: 900 }}>{event.title}</Typography>
+                      <Typography variant="caption" sx={{ color: shell.muted }}>{event.by}</Typography>
+                      <Typography variant="body2" sx={{ color: shell.ink, mt: 0.25 }}>{event.note}</Typography>
+                    </Box>
+                  </Box>
+                );
+              })}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setHistoryOrder(null)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(reviewAction)} onClose={closeReviewDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>
+          {reviewAction?.type === 'approve' ? '确认审核通过' : reviewAction?.type === 'return' ? '退回修改' : '驳回终止'}
+        </DialogTitle>
+        <DialogContent dividers>
+          {reviewAction && (
+            <Stack spacing={1.25}>
+              <Alert severity={reviewAction.type === 'approve' ? 'info' : reviewAction.type === 'return' ? 'warning' : 'error'}>
+                {reviewAction.type === 'approve'
+                  ? '通过后，该售后挽回订单会进入财务中心的“售后挽回分账”，不会进入订单分账。'
+                  : reviewAction.type === 'return'
+                    ? '退回后，创建人可按原因修改后重新提交。'
+                    : '驳回后，该售后挽回订单终止，不进入分账。'}
+              </Alert>
+              <Box sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 1, bgcolor: shell.soft }}>
+                <Typography variant="body2">挽回订单：{reviewAction.row.recoveryNo}</Typography>
+                <Typography variant="body2">客户：{reviewAction.row.customerName}</Typography>
+                <Typography variant="body2">第三方订单：{reviewAction.row.thirdPartyOrderNo}</Typography>
+                <Typography variant="body2">挽回金额：{formatCurrency(reviewAction.row.recoveryAmount)}</Typography>
+              </Box>
+              {reviewAction.type !== 'approve' && (
+                <TextField
+                  label={reviewAction.type === 'return' ? '退回原因' : '驳回原因'}
+                  value={reviewReason}
+                  onChange={(event) => setReviewReason(event.target.value)}
+                  multiline
+                  minRows={3}
+                  fullWidth
+                  required
+                />
+              )}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeReviewDialog}>取消</Button>
+          <Button
+            color={reviewAction?.type === 'reject' ? 'error' : reviewAction?.type === 'return' ? 'warning' : 'primary'}
+            variant="contained"
+            disabled={(reviewAction?.type === 'return' || reviewAction?.type === 'reject') && !reviewReason.trim()}
+            onClick={handleReviewSubmit}
+          >
+            {reviewAction?.type === 'approve' ? '确认通过' : reviewAction?.type === 'return' ? '确认退回修改' : '确认驳回终止'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(approvedOrder)} onClose={() => setApprovedOrder(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>审核通过</DialogTitle>
+        <DialogContent dividers>
+          {approvedOrder && (
+            <Stack spacing={1}>
+              <Alert severity="success">售后挽回订单已进入“待分账”。</Alert>
+              <Typography variant="body2">挽回订单：{approvedOrder.recoveryNo}</Typography>
+              <Typography variant="body2">挽回金额：{formatCurrency(approvedOrder.recoveryAmount)}</Typography>
+              <Typography variant="body2" sx={{ color: shell.muted }}>
+                下一步由财务在“售后挽回分账”里选择人员、提成角色和提成方案。
+              </Typography>
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setApprovedOrder(null)}>关闭</Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              setApprovedOrder(null);
+              navigate(`${ROUTES.FINANCE}?tab=recovery-settlement`);
+            }}
+          >
+            去售后挽回分账
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteConfirmOrder)} onClose={() => setDeleteConfirmOrder(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>删除售后挽回订单</DialogTitle>
+        <DialogContent dividers>
+          {deleteConfirmOrder && (
+            <Stack spacing={1.25}>
+              <Alert severity="warning">
+                {isRecoveryOrderLocked(deleteConfirmOrder)
+                  ? '该挽回单已进入财务分账链路。删除后，售后挽回订单列表会移除该单，但财务中心会保留废弃分账记录，由管理员在售后挽回分账中清理。'
+                  : '删除后，该售后挽回订单将从订单列表中移除。'}
+              </Alert>
+              <Box sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 1.25, bgcolor: shell.soft }}>
+                <Typography variant="body2" sx={{ fontWeight: 900 }}>{deleteConfirmOrder.recoveryNo}</Typography>
+                <Typography variant="body2" sx={{ color: shell.muted }}>
+                  {deleteConfirmOrder.customerName} · {deleteConfirmOrder.thirdPartyOrderNo || '-'}
+                </Typography>
+                <Typography variant="body2" sx={{ mt: 0.5 }}>
+                  挽回金额：<Box component="span" sx={{ color: shell.green, fontWeight: 900 }}>{formatCurrency(deleteConfirmOrder.recoveryAmount)}</Box>
+                </Typography>
+              </Box>
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteConfirmOrder(null)}>取消</Button>
+          <Button color="error" variant="contained" onClick={confirmDelete}>确认删除</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(errorDialog)} onClose={() => setErrorDialog(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>{errorDialog?.title || '操作失败'}</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ color: shell.ink }}>
+            {errorDialog?.text}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="contained" onClick={() => setErrorDialog(null)}>确定</Button>
+        </DialogActions>
+      </Dialog>
+
+      <TableViewSettingsDialog
+        open={viewSettingsOpen}
+        title={mode === 'review' ? '售后挽回审核台视图设置' : '售后挽回订单列表视图设置'}
+        description="勾选后会显示在售后挽回列表中，设置会保存在当前浏览器。"
+        columns={tableColumns}
+        visibleColumnIds={visibleColumnIds}
+        columnOrder={viewConfig.columnOrder}
+        frozenColumnCount={viewConfig.frozenColumnCount}
+        maxFrozenColumnCount={visibleColumns.length}
+        onClose={() => setViewSettingsOpen(false)}
+        onToggleColumn={toggleColumn}
+        onReorderColumn={reorderColumn}
+        onFrozenColumnCountChange={setFrozenColumnCount}
+        onReset={resetViewConfig}
+      />
+    </Box>
+  );
+};
+
+export default RecoveryOrderTab;
+

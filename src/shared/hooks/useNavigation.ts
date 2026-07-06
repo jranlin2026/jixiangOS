@@ -16,8 +16,6 @@ export function useNavigation() {
   const goToDelivery = useCallback(() => navigate(ROUTES.DELIVERY), [navigate]);
   const goToCommission = useCallback(() => navigate(`${ROUTES.FINANCE}?tab=settlement`), [navigate]);
   const goToFinance = useCallback(() => navigate(ROUTES.FINANCE), [navigate]);
-  const goToUpgradeCenter = useCallback(() => navigate(ROUTES.UPGRADE_CENTER), [navigate]);
-  const goToUpgradeAnalysis = useCallback(() => navigate(ROUTES.UPGRADE_ANALYSIS), [navigate]);
   const goToAIAssistant = useCallback(() => navigate(ROUTES.AI_ASSISTANT), [navigate]);
   const goToSettings = useCallback(() => navigate(ROUTES.SETTINGS), [navigate]);
 
@@ -30,8 +28,6 @@ export function useNavigation() {
     goToDelivery,
     goToCommission,
     goToFinance,
-    goToUpgradeCenter,
-    goToUpgradeAnalysis,
     goToAIAssistant,
     goToSettings,
   };

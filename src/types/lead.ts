@@ -88,6 +88,9 @@ export interface Lead {
   city?: string;
   estimatedProductId?: ID;
   changeHistory?: LeadChangeLog[];
+  deletedAt?: Timestamp;
+  deletedBy?: string;
+  deleteReason?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
   followUpRecords: FollowUpRecord[];
@@ -98,6 +101,7 @@ export interface LeadFlowConfig {
   uniqueKeyMode: LeadUniqueKeyMode;
   interceptionEnabled: boolean;
   autoAssignEnabled: boolean;
+  autoClaimAfterAssignmentEnabled: boolean;
   assignmentMode: 'round_robin';
   participantUserIds: ID[];
   dailyLimitEnabled: boolean;

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Button,
@@ -18,13 +18,13 @@ import {
   TableCell,
   TableContainer,
   TableHead,
-  TablePagination,
   TableRow,
   Tabs,
   TextField,
   Tooltip,
   Typography,
 } from '@mui/material';
+import TablePagination from '../../shared/components/TablePagination';
 import AddIcon from '@mui/icons-material/Add';
 import DownloadIcon from '@mui/icons-material/Download';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
@@ -32,23 +32,22 @@ import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import useLeadStore from '../../store/useLeadStore';
-import { getLifecycleConfigByCode, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
+import { getLifecycleConfigByCode, getLifecycleStatusTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatPaginationRows } from '../../shared/utils/formatters';
 import LeadDetail from './LeadDetail';
 import LeadForm from './LeadForm';
 import { formatPhoneForDisplay } from '../../shared/utils/phoneNumber';
 import LeadBulkImportDialog from './LeadBulkImportDialog';
 import LeadIntakeTab from './LeadIntakeTab';
-import type { Lead } from '../../types/lead';
-import { leadBulkImportApi, leadFlowApi, roleApi, settingsApi } from '../../api';
+import type { Lead, LeadFlowConfig } from '../../types/lead';
+import { leadApi, leadBulkImportApi, leadFlowApi, settingsApi } from '../../api';
 import type { LeadSourceConfig, LifecycleStatusConfig, User } from '../../types/settings';
-import type { Role } from '../../types/role';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import PermissionGate from '../../shared/auth/PermissionGate';
 import useAuthStore from '../../store/useAuthStore';
-import { canReceiveLead, hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
-import { filterUsersByCurrentDataScope } from '../../shared/utils/dataVisibility';
+import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import ResizableHeaderCell, {
   getResizableCellSx,
   readColumnWidths,
@@ -59,6 +58,9 @@ import ResizableHeaderCell, {
 } from '../../shared/components/ResizableTable';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import { isSuperAdminRoleName } from '../../shared/utils/roles';
+import { ModuleHeader, ModulePage, ModuleTabs, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
+import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 
 type LeadColumn = {
   id: string;
@@ -76,7 +78,7 @@ type LeadViewConfig = {
 const LEAD_VIEW_STORAGE_KEY = 'aaos_lead_table_view_v9';
 const LEAD_VIEW_SCHEMA_VERSION = 9;
 const LEAD_WIDTH_STORAGE_KEY = 'aaos_lead_table_column_widths_v4';
-const LEAD_ACTION_COLUMN_WIDTH = 150;
+const LEAD_ACTION_COLUMN_WIDTH = 180;
 
 const getAssignedSalesName = (lead: Lead) => {
   const name = lead.assignedTo || lead.owner || '';
@@ -137,11 +139,7 @@ const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] =
           <Chip
             label={config.name}
             size="small"
-            sx={{
-              bgcolor: `${config.color}18`,
-              color: config.color,
-              fontWeight: 600,
-            }}
+            sx={getLifecycleStatusTagSx(`${config.code} ${config.name}`)}
           />
         );
       },
@@ -246,10 +244,14 @@ const Leads: React.FC = () => {
   const [lifecycleConfigs, setLifecycleConfigs] = useState<LifecycleStatusConfig[]>([]);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [roles, setRoles] = useState<Role[]>([]);
+  const [leadFlowConfig, setLeadFlowConfig] = useState<LeadFlowConfig | null>(null);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [assignLead, setAssignLead] = useState<Lead | null>(null);
   const [assignSalesName, setAssignSalesName] = useState('');
+  const [templateDownloading, setTemplateDownloading] = useState(false);
+  const [deleteLeadTarget, setDeleteLeadTarget] = useState<Lead | null>(null);
+  const [deleteLeadReason, setDeleteLeadReason] = useState('');
+  const [deleteLeadSubmitting, setDeleteLeadSubmitting] = useState(false);
 
   const columns = useMemo(() => buildColumns(lifecycleConfigs), [lifecycleConfigs]);
   const [viewConfig, setViewConfig] = useState<LeadViewConfig>(() => readLeadViewConfig(buildColumns([])));
@@ -279,16 +281,16 @@ const Leads: React.FC = () => {
     settingsApi.fetchLifecycleStatusConfigs().then((res) => {
       if (res.code === 0) setLifecycleConfigs(res.data);
     });
-    settingsApi.fetchUsers({ isActive: true }).then((res) => {
+    settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
     });
-    roleApi.getRoles({ isActive: true }).then((res) => {
-      if (res.code === 0) setRoles(res.data);
+    leadFlowApi.fetchLeadFlowConfig().then((res) => {
+      if (res.code === 0) setLeadFlowConfig(res.data);
     });
     settingsApi.fetchLeadSourceConfigs().then((res) => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive && !item.parentId));
     });
-  }, [fetchItems]);
+  }, [currentUser?.id, fetchItems]);
 
   useEffect(() => {
     localStorage.setItem(LEAD_VIEW_STORAGE_KEY, JSON.stringify(viewConfig));
@@ -298,12 +300,13 @@ const Leads: React.FC = () => {
     writeColumnWidths(LEAD_WIDTH_STORAGE_KEY, columnWidths);
   }, [columnWidths]);
 
-  const salesUsers = filterUsersByCurrentDataScope(users).filter((user) => canReceiveLead(user, roles));
+  const assignableUsers = getScopedLeadAssignmentCandidates(users, leadFlowConfig, 'leads', currentUser);
   const canViewLeadList = hasPermission(currentUser, PERMISSION_KEYS.LEADS_LIST);
   const canViewLeadIntake = hasPermission(currentUser, PERMISSION_KEYS.LEADS_INTAKE_STATUS);
   const canViewLeadDetail = hasPermission(currentUser, PERMISSION_KEYS.LEADS_DETAIL);
   const canStartFollowLead = hasPermission(currentUser, PERMISSION_KEYS.LEADS_FOLLOW);
   const canAssignLeads = hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG);
+  const isSuperAdmin = isSuperAdminRoleName(currentUser?.role);
 
   useEffect(() => {
     if (activeTab === 0 && !canViewLeadList && canViewLeadIntake) setActiveTab(1);
@@ -354,23 +357,58 @@ const Leads: React.FC = () => {
     fetchItems(filters);
   };
 
+  const handleOpenDeleteLead = (lead: Lead) => {
+    setDeleteLeadTarget(lead);
+    setDeleteLeadReason('');
+  };
+
+  const handleCloseDeleteLead = () => {
+    setDeleteLeadTarget(null);
+    setDeleteLeadReason('');
+  };
+
+  const handleConfirmDeleteLead = async () => {
+    if (!deleteLeadTarget) return;
+    const reason = deleteLeadReason.trim();
+    if (!reason) return;
+    setDeleteLeadSubmitting(true);
+    try {
+      const res = await leadApi.deleteLead(deleteLeadTarget.id, reason);
+      if (res.code !== 0) {
+        await alert(res.message || '删除线索失败');
+        return;
+      }
+      handleCloseDeleteLead();
+      fetchItems(filters);
+    } finally {
+      setDeleteLeadSubmitting(false);
+    }
+  };
+
   const handleCreate = () => {
     setFormOpen(true);
   };
 
-  const handleDownloadTemplate = () => {
-    const workbook = leadBulkImportApi.createTemplateWorkbook();
-    const blob = new Blob([workbook], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = LEAD_TEMPLATE_FILE_NAME;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+  const handleDownloadTemplate = async () => {
+    setTemplateDownloading(true);
+    try {
+      const workbook = await leadBulkImportApi.createTemplateWorkbook();
+      const blob = new Blob([workbook], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = LEAD_TEMPLATE_FILE_NAME;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      await alert(error instanceof Error ? error.message : '下载模板失败，请稍后重试', '下载模板失败');
+    } finally {
+      setTemplateDownloading(false);
+    }
   };
 
   const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -469,18 +507,19 @@ const Leads: React.FC = () => {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, gap: 2 }}>
-        <Typography variant="h5" sx={{ fontWeight: 600 }}>
-          线索管理
-        </Typography>
+    <ModulePage>
+      <ModuleHeader
+        title="线索管理"
+        description="线索录入、批量入库、分配和转客户。"
+        actions={(
+          <>
         {activeTab === 0 && canViewLeadList && (
-          <Box sx={{ display: 'flex', gap: 1 }}>
+          <>
             <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
               视图设置
             </Button>
-            <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleDownloadTemplate}>
-              {'\u4e0b\u8f7dExcel\u6a21\u677f'}
+            <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleDownloadTemplate} disabled={templateDownloading}>
+              {templateDownloading ? '生成中...' : '\u4e0b\u8f7dExcel\u6a21\u677f'}
             </Button>
             {activeTab === 0 && (
               <PermissionGate permissionKey={PERMISSION_KEYS.LEADS_CREATE}>
@@ -494,18 +533,20 @@ const Leads: React.FC = () => {
                 </Box>
               </PermissionGate>
             )}
-          </Box>
+          </>
         )}
-      </Box>
+          </>
+        )}
+      />
 
-      <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ mb: 3 }}>
+      <ModuleTabs value={activeTab} onChange={(_, value) => setActiveTab(value)}>
         {canViewLeadList && <Tab label="线索列表" value={0} />}
         {canViewLeadIntake && <Tab label="入库情况" value={1} />}
-      </Tabs>
+      </ModuleTabs>
 
       {activeTab === 0 && canViewLeadList && (
         <>
-          <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
+          <ModuleToolbar>
             <TextField
               placeholder="搜索姓名/公司/手机号/微信"
               value={filters.search || ''}
@@ -540,14 +581,14 @@ const Leads: React.FC = () => {
               <Select value={filters.owner || ''} label="分配销售" onChange={(event) => handleFilterChange('owner', event.target.value)}>
                 <MenuItem value="">全部</MenuItem>
                 <MenuItem value="待分配">待分配</MenuItem>
-                {salesUsers.map((user) => (
+                {assignableUsers.map((user) => (
                   <MenuItem key={user.id} value={user.name}>{user.name}</MenuItem>
                 ))}
               </Select>
             </FormControl>
-          </Box>
+          </ModuleToolbar>
 
-          <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
+          <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { overflowX: 'auto' }]}>
             <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
               <TableHead>
                 <TableRow>
@@ -582,6 +623,13 @@ const Leads: React.FC = () => {
                       </TableCell>
                     ))}
                     <TableCell align="center" sx={actionColumnSx}>
+                      {isSuperAdmin && (
+                        <Tooltip title="删除线索到业务回收站">
+                          <IconButton size="small" color="error" onClick={() => handleOpenDeleteLead(lead)}>
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                       {canViewLeadDetail && (
                         <Tooltip title="查看线索">
                           <IconButton size="small" onClick={() => handleViewDetail(lead)}>
@@ -685,7 +733,12 @@ const Leads: React.FC = () => {
             onChange={(event) => setAssignSalesName(event.target.value)}
             fullWidth
           >
-            {salesUsers.map((user) => (
+            {assignableUsers.length === 0 && (
+              <MenuItem value="" disabled>
+                暂无可分配成员，请检查线索流转参与成员或当前角色的数据范围
+              </MenuItem>
+            )}
+            {assignableUsers.map((user) => (
               <MenuItem key={user.id} value={user.name}>
                 {user.name}（{user.positionName || '未设置职位'}）
               </MenuItem>
@@ -694,6 +747,42 @@ const Leads: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button variant="contained" onClick={handleAssignLead}>保存</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteLeadTarget)} onClose={deleteLeadSubmitting ? undefined : handleCloseDeleteLead} maxWidth="xs" fullWidth>
+        <DialogCloseTitle onClose={() => {
+          if (!deleteLeadSubmitting) handleCloseDeleteLead();
+        }}>删除线索</DialogCloseTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
+            删除后线索会进入业务回收站，超级管理员可在系统维护中恢复或永久删除。
+          </Typography>
+          {deleteLeadTarget && (
+            <Box sx={{ p: 1.5, border: '1px solid #fee2e2', borderRadius: 1, bgcolor: '#fff7ed', mb: 2 }}>
+              <Typography variant="body2">线索：{deleteLeadTarget.name}</Typography>
+              <Typography variant="body2">公司：{deleteLeadTarget.company || '-'}</Typography>
+            </Box>
+          )}
+          <TextField
+            label="删除原因"
+            value={deleteLeadReason}
+            onChange={(event) => setDeleteLeadReason(event.target.value)}
+            placeholder="例如：测试数据、重复录入、无效线索"
+            multiline
+            minRows={3}
+            required
+            fullWidth
+            autoFocus
+            error={!deleteLeadReason.trim()}
+            helperText={!deleteLeadReason.trim() ? '删除原因不能为空' : ' '}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDeleteLead} disabled={deleteLeadSubmitting}>取消</Button>
+          <Button color="error" variant="contained" onClick={handleConfirmDeleteLead} disabled={!deleteLeadReason.trim() || deleteLeadSubmitting}>
+            确认删除
+          </Button>
         </DialogActions>
       </Dialog>
 
@@ -713,8 +802,9 @@ const Leads: React.FC = () => {
         onReset={handleResetViewConfig}
       />
       {feedbackDialog}
-    </Box>
+    </ModulePage>
   );
 };
 
 export default Leads;
+

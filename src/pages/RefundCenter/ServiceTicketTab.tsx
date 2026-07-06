@@ -1,12 +1,28 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Box, Button, Chip, Dialog, DialogContent,
-  FormControl, InputLabel, MenuItem, Paper, Select, Table, TableBody,
-  TableCell, TableContainer, TableHead, TableRow, TextField, Typography,
+  Box,
+  Button,
+  Chip,
+  Dialog,
+  DialogContent,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Paper,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  Typography,
 } from '@mui/material';
+import TablePagination from '../../shared/components/TablePagination';
 import type { ServiceTicket, ServiceTicketCategory, ServiceTicketStatus } from '../../types/serviceTicket';
 import { serviceTicketApi } from '../../api';
-import { formatDate } from '../../shared/utils/formatters';
+import { formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 
 const categories: ServiceTicketCategory[] = ['咨询', '故障', '培训', '交付问题', '退款前风险'];
@@ -18,22 +34,36 @@ const ServiceTicketTab: React.FC = () => {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [status, setStatus] = useState('');
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [total, setTotal] = useState(0);
   const [selected, setSelected] = useState<ServiceTicket | null>(null);
   const [logContent, setLogContent] = useState('');
   const [nextFollowUpAt, setNextFollowUpAt] = useState('');
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     const [ticketRes, statsRes] = await Promise.all([
-      serviceTicketApi.getTickets({ search, category: category as ServiceTicketCategory | undefined, status: status as ServiceTicketStatus | undefined }),
+      serviceTicketApi.getTickets({
+        search,
+        category: category as ServiceTicketCategory | undefined,
+        status: status as ServiceTicketStatus | undefined,
+        page: page + 1,
+        pageSize: rowsPerPage,
+      }),
       serviceTicketApi.getStats(),
     ]);
     setItems(ticketRes.data.items);
+    setTotal(ticketRes.data.pagination.total);
     setStats(statsRes.data);
-  };
+  }, [category, page, rowsPerPage, search, status]);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [category, search, status]);
 
   const handleStatus = async (nextStatus: ServiceTicketStatus) => {
     if (!selected) return;
@@ -61,8 +91,8 @@ const ServiceTicketTab: React.FC = () => {
   const priorityColor = (priority: string) => priority === '高' ? 'error' : priority === '中' ? 'warning' : 'default';
 
   return (
-    <Box>
-      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 2, mb: 3 }}>
+    <Box sx={{ display: 'grid', gap: 1.5 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', lg: 'repeat(5, 1fr)' }, gap: 1 }}>
         {[
           ['待处理', stats.pending],
           ['处理中', stats.processing],
@@ -70,15 +100,16 @@ const ServiceTicketTab: React.FC = () => {
           ['已解决', stats.resolved],
           ['高优先级', stats.highPriority],
         ].map(([label, value]) => (
-          <Paper key={label} elevation={0} sx={{ p: 2, border: '1px solid #f0f0f0' }}>
-            <Typography variant="body2" sx={{ color: '#6b7280' }}>{label}</Typography>
-            <Typography variant="h5" sx={{ fontWeight: 700 }}>{value}</Typography>
+          <Paper key={label} elevation={0} sx={{ p: 1.5, border: '1px solid #dbe4ee', borderRadius: 1.5, bgcolor: '#fff' }}>
+            <Typography variant="caption" sx={{ color: '#64748b' }}>{label}</Typography>
+            <Typography variant="h6" sx={{ fontWeight: 900, color: label === '高优先级' ? '#dc2626' : '#0f172a', lineHeight: 1.25 }}>{value}</Typography>
           </Paper>
         ))}
       </Box>
 
-      <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
-        <TextField size="small" placeholder="搜索工单号/客户/标题" value={search} onChange={(e) => setSearch(e.target.value)} sx={{ minWidth: 240 }} />
+      <Paper elevation={0} sx={{ p: 1.25, border: '1px solid #dbe4ee', borderRadius: 1.5, bgcolor: '#fff' }}>
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+        <TextField size="small" placeholder="搜索工单号/客户/标题" value={search} onChange={(e) => setSearch(e.target.value)} sx={{ minWidth: 260 }} />
         <FormControl size="small" sx={{ minWidth: 130 }}>
           <InputLabel>问题类型</InputLabel>
           <Select value={category} label="问题类型" onChange={(e) => setCategory(e.target.value)}>
@@ -93,41 +124,76 @@ const ServiceTicketTab: React.FC = () => {
             {statuses.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
           </Select>
         </FormControl>
-        <Button variant="outlined" onClick={fetchData}>筛选</Button>
+          <Button variant="outlined" onClick={fetchData}>筛选</Button>
       </Box>
+      </Paper>
 
-      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0' }}>
-        <Table>
+      <Box>
+      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #dbe4ee', borderRadius: '6px 6px 0 0', overflowX: 'auto' }}>
+        <Table sx={{ minWidth: 1080, tableLayout: 'fixed' }}>
           <TableHead>
-            <TableRow>
-              <TableCell>工单号</TableCell>
-              <TableCell>客户</TableCell>
-              <TableCell>标题</TableCell>
-              <TableCell>类型</TableCell>
-              <TableCell>优先级</TableCell>
-              <TableCell>状态</TableCell>
-              <TableCell>负责人</TableCell>
-              <TableCell>来源</TableCell>
-              <TableCell>更新时间</TableCell>
+            <TableRow sx={{ bgcolor: '#f8fafc' }}>
+              <TableCell sx={{ width: 140, fontWeight: 700 }}>工单号</TableCell>
+              <TableCell sx={{ width: 120, fontWeight: 700 }}>客户</TableCell>
+              <TableCell sx={{ width: 220, fontWeight: 700 }}>标题</TableCell>
+              <TableCell sx={{ width: 110, fontWeight: 700 }}>类型</TableCell>
+              <TableCell sx={{ width: 100, fontWeight: 700 }}>优先级</TableCell>
+              <TableCell sx={{ width: 120, fontWeight: 700 }}>状态</TableCell>
+              <TableCell sx={{ width: 130, fontWeight: 700 }}>负责人</TableCell>
+              <TableCell sx={{ width: 100, fontWeight: 700 }}>来源</TableCell>
+              <TableCell sx={{ width: 160, fontWeight: 700 }}>更新时间</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {items.map((item) => (
               <TableRow key={item.id} hover sx={{ cursor: 'pointer' }} onClick={() => setSelected(item)}>
-                <TableCell sx={{ fontWeight: 600 }}>{item.ticketNo}</TableCell>
+                <TableCell sx={{ fontWeight: 700, color: '#0f172a' }}>{item.ticketNo}</TableCell>
                 <TableCell>{item.customerName}</TableCell>
-                <TableCell>{item.title}</TableCell>
+                <TableCell sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</TableCell>
                 <TableCell><Chip label={item.category} size="small" /></TableCell>
                 <TableCell><Chip label={item.priority} size="small" color={priorityColor(item.priority) as any} /></TableCell>
-                <TableCell>{item.status}</TableCell>
+                <TableCell>
+                  <Chip
+                    label={item.status}
+                    size="small"
+                    sx={{
+                      bgcolor: item.status === '已解决' || item.status === '已关闭' ? '#ecfdf5' : item.status === '待处理' ? '#fff7ed' : '#eff6ff',
+                      color: item.status === '已解决' || item.status === '已关闭' ? '#059669' : item.status === '待处理' ? '#b45309' : '#2563eb',
+                      fontWeight: 800,
+                    }}
+                  />
+                </TableCell>
                 <TableCell>{item.ownerName}</TableCell>
                 <TableCell>{item.source}</TableCell>
                 <TableCell>{formatDate(item.updatedAt)}</TableCell>
               </TableRow>
             ))}
+            {!items.length && (
+              <TableRow>
+                <TableCell colSpan={9} align="center" sx={{ py: 6, color: '#94a3b8' }}>
+                  暂无售后工单
+                </TableCell>
+              </TableRow>
+            )}
           </TableBody>
         </Table>
       </TableContainer>
+      <TablePagination
+        component="div"
+        count={total}
+        page={Math.min(page, Math.max(Math.ceil(total / rowsPerPage) - 1, 0))}
+        rowsPerPage={rowsPerPage}
+        rowsPerPageOptions={[10, 20, 50]}
+        onPageChange={(_, nextPage) => setPage(nextPage)}
+        onRowsPerPageChange={(event) => {
+          setRowsPerPage(Number(event.target.value));
+          setPage(0);
+        }}
+        labelRowsPerPage="每页条数"
+        labelDisplayedRows={formatPaginationRows}
+        sx={{ border: '1px solid #dbe4ee', borderTop: 0, bgcolor: '#fff' }}
+      />
+      </Box>
 
       <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} maxWidth="md" fullWidth>
         {selected && (
@@ -164,3 +230,4 @@ const ServiceTicketTab: React.FC = () => {
 };
 
 export default ServiceTicketTab;
+

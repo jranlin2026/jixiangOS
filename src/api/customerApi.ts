@@ -3,6 +3,7 @@ import type { Lead, LeadChangeLog } from '../types/lead';
 import type { Order } from '../types/order';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
+import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { getStorageData, setStorageData } from './mock/storage';
 import { LIFECYCLE_STATUS_CODES, STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
@@ -57,6 +58,10 @@ function normalizeCustomer(customer: Customer): Customer {
   return growthPath.length === (normalized.growthPath || []).length
     ? normalized
     : { ...normalized, growthPath };
+}
+
+function hasFollowActivity(customer: Customer): boolean {
+  return (customer.activityRecords || []).some((record) => record.type === 'follow');
 }
 
 const CUSTOMER_CHANGE_FIELDS: Array<{ field: keyof Customer; label: string }> = [
@@ -203,7 +208,7 @@ function isRelatedOrder(customer: Customer, order: Order): boolean {
 }
 
 function reconcileCustomerOrderStats(customers: Customer[]): Customer[] {
-  const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
+  const orders = (getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).filter((order) => !order.deletedAt);
   let changed = false;
 
   const nextCustomers = customers.map((customer) => {
@@ -263,6 +268,14 @@ function reconcileCustomerOrderStats(customers: Customer[]): Customer[] {
 }
 
 async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<PaginatedResponse<Customer>>> {
+  if (shouldUseBackendApi()) {
+    const params = new URLSearchParams();
+    Object.entries(filters || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+    });
+    return backendRequest<PaginatedResponse<Customer>>(`/customers${params.size ? `?${params.toString()}` : ''}`);
+  }
+
   ensureInit();
   await delay(200);
   const raw = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
@@ -270,7 +283,7 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
   if (JSON.stringify(raw) !== JSON.stringify(all)) {
     setStorageData(STORAGE_KEYS.CUSTOMERS, all);
   }
-  let filtered = filterVisibleCustomers(all);
+  let filtered = filterVisibleCustomers(all.filter((customer) => !customer.deletedAt));
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
@@ -287,13 +300,43 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
   if (filters?.customerLevel) {
     filtered = filtered.filter((c) => c.customerLevel === filters.customerLevel);
   }
-  if (filters?.owner) {
-    filtered = filtered.filter((c) => c.owner === filters.owner);
-  }
   if (filters?.lifecycleStatusCode) {
     filtered = filtered.filter((c) => c.lifecycleStatusCode === filters.lifecycleStatusCode);
   } else {
     filtered = filtered.filter((c) => c.lifecycleStatusCode !== 'public_pool');
+  }
+  if (filters?.owner) {
+    filtered = filtered.filter((c) => (
+      filters.lifecycleStatusCode === 'public_pool'
+        ? (c.releasedBy === filters.owner || c.owner === filters.owner)
+        : c.owner === filters.owner
+    ));
+  }
+  if (filters?.followStatus) {
+    filtered = filtered.filter((c) => (
+      filters.followStatus === 'has_follow'
+        ? hasFollowActivity(c)
+        : !hasFollowActivity(c)
+    ));
+  }
+  if (filters?.sourceType) {
+    filtered = filtered.filter((c) => normalizeResourceOwnership(c.sourceType) === normalizeResourceOwnership(filters.sourceType));
+  }
+  if (filters?.leadSource) {
+    const q = filters.leadSource.toLowerCase();
+    filtered = filtered.filter((c) => (c.leadSource || '').toLowerCase().includes(q));
+  }
+  if (filters?.industry) {
+    const q = filters.industry.toLowerCase();
+    filtered = filtered.filter((c) => (c.industry || '').toLowerCase().includes(q));
+  }
+  if (filters?.city) {
+    const q = filters.city.toLowerCase();
+    filtered = filtered.filter((c) => (c.city || '').toLowerCase().includes(q));
+  }
+  if (filters?.tag) {
+    const q = filters.tag.toLowerCase();
+    filtered = filtered.filter((c) => (c.tags || []).some((tag) => tag.toLowerCase().includes(q)));
   }
 
   const page = filters?.page || 1;
@@ -309,7 +352,7 @@ async function fetchCustomerById(id: string): Promise<ApiResponse<Customer | nul
   ensureInit();
   await delay(150);
   const customers = reconcileCustomerOrderStats((getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || []).map(normalizeCustomer));
-  const customer = filterVisibleCustomers(customers).find((c) => c.id === id) || null;
+  const customer = filterVisibleCustomers(customers.filter((item) => !item.deletedAt)).find((c) => c.id === id) || null;
   return createSuccessResponse(customer);
 }
 
@@ -387,20 +430,27 @@ async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiR
 
 async function addCustomerFollowUp(
   id: string,
-  data: { content: string; operator?: string; type?: '联系记录' | '客户行为' | '销售活动' | '跟进记录' },
+  data: {
+    content?: string;
+    operator?: string;
+    type?: '联系记录' | '客户行为' | '销售活动' | '跟进记录';
+    attachments?: CustomerActivityRecord['attachments'];
+  },
 ): Promise<ApiResponse<Customer | null>> {
   ensureInit();
   await delay(150);
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
   const idx = customers.findIndex((c) => c.id === id);
   if (idx === -1) return createSuccessResponse(null);
-  const content = data.content.trim();
-  if (!content) return createSuccessResponse(customers[idx]);
+  const content = (data.content || '').trim();
+  const attachments = Array.isArray(data.attachments) ? data.attachments : [];
+  if (!content && !attachments.length) return createSuccessResponse(customers[idx]);
   const now = new Date().toISOString();
   customers[idx] = prependActivity(customers[idx], createActivity({
     type: 'follow',
     title: `发表了${data.type || '跟进记录'}`,
-    content,
+    content: content || undefined,
+    attachments,
     operator: getCurrentOperatorName(data.operator || customers[idx].owner),
     createdAt: now,
   }));
@@ -478,11 +528,78 @@ async function claimCustomerFromPublicPool(id: string, userName: string): Promis
   return createSuccessResponse(updated ? hydrateCustomerLifecycle(updated) : null);
 }
 
-async function deleteCustomer(id: string): Promise<ApiResponse<boolean>> {
+async function assignCustomerOwner(id: string, owner: string, reason = ''): Promise<ApiResponse<Customer | null>> {
+  ensureInit();
+  await delay(150);
+  const nextOwner = owner.trim();
+  if (!nextOwner) return createErrorResponse('请选择新的销售负责人');
+  const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+  const idx = customers.findIndex((item) => item.id === id);
+  if (idx === -1) return createSuccessResponse(null);
+  const existing = customers[idx];
+  const now = new Date().toISOString();
+  const previousOwner = existing.owner || '';
+  const changed = previousOwner !== nextOwner;
+  const operator = getCurrentOperatorName(previousOwner || nextOwner);
+  const cleanReason = reason.trim();
+  const changes = changed
+    ? [{
+        field: 'owner',
+        label: '销售负责人',
+        oldValue: previousOwner || null,
+        newValue: nextOwner,
+      }]
+    : undefined;
+
+  customers[idx] = {
+    ...existing,
+    owner: nextOwner,
+    previousOwner: changed ? previousOwner : existing.previousOwner,
+    assignedBy: operator,
+    assignedAt: changed ? now : existing.assignedAt || now,
+    assignmentReason: cleanReason || existing.assignmentReason,
+    ownerSince: changed ? now : existing.ownerSince,
+    activityRecords: [
+      createActivity({
+        type: 'transfer',
+        title: changed ? `分配客户给 ${nextOwner}` : `确认客户仍由 ${nextOwner} 跟进`,
+        content: cleanReason || undefined,
+        operator,
+        changes,
+        createdAt: now,
+      }),
+      ...(existing.activityRecords || []),
+    ],
+    updatedAt: now,
+  };
+  setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
+  syncLeadsByCustomer(customers[idx], now, operator);
+  return createSuccessResponse(customers[idx]);
+}
+
+async function deleteCustomer(id: string, reason = ''): Promise<ApiResponse<boolean>> {
   ensureInit();
   await delay(150);
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
-  setStorageData(STORAGE_KEYS.CUSTOMERS, customers.filter((c) => c.id !== id));
+  const index = customers.findIndex((c) => c.id === id);
+  if (index === -1) return createSuccessResponse(true);
+  const customer = customers[index];
+  const relatedOrders = (getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).filter((order) => (
+    !order.deletedAt
+    && (order.customerId === customer.id || order.customerName === customer.company || order.customerName === customer.name)
+  ));
+  if (relatedOrders.length) {
+    return createErrorResponse('客户存在关联订单，不能删除；请先处理订单后再操作。');
+  }
+  const now = new Date().toISOString();
+  customers[index] = {
+    ...customer,
+    deletedAt: now,
+    deletedBy: getCurrentOperatorName(customer.owner),
+    deleteReason: reason.trim() || '业务删除',
+    updatedAt: now,
+  };
+  setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
   return createSuccessResponse(true);
 }
 
@@ -533,6 +650,7 @@ export const customerApi = {
   appendCustomerActivity,
   releaseCustomerToPublicPool,
   claimCustomerFromPublicPool,
+  assignCustomerOwner,
   deleteCustomer,
   fetchAIPortrait,
 };

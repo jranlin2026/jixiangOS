@@ -71,6 +71,14 @@ const blankContactCustomer: Customer = {
   wechat: '',
 };
 
+const invalidContactCustomer: Customer = {
+  ...customer,
+  id: 'cust-invalid-contact',
+  name: 'Invalid Contact Customer',
+  phone: '12100019019',
+  wechat: 'invalid_contact_wx',
+};
+
 const lead: Lead = {
   id: 'lead-test',
   customerId: 'cust-test',
@@ -121,7 +129,45 @@ const order: Order = {
 
 storage.clear();
 storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
-storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([customer, legacyCustomer, blankContactCustomer]));
+storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
+  id: 'user-admin',
+  name: '系统管理员',
+  account: 'admin',
+  email: '',
+  phone: '',
+  role: '超级管理员',
+  roleId: 'role-admin',
+  departmentId: 'dept-admin',
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+}]));
+storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([{
+  id: 'role-admin',
+  name: '超级管理员',
+  code: 'super_admin',
+  permissions: [{ module: '全部', actions: ['admin'] }],
+  memberCount: 1,
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+}]));
+storage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify([{
+  id: 'dept-admin',
+  name: '总经办',
+  code: 'ADMIN',
+  memberCount: 1,
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+}]));
+storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({
+  userId: 'user-admin',
+  token: 'token-admin',
+  remember: true,
+  createdAt: now,
+}));
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([customer, legacyCustomer, blankContactCustomer, invalidContactCustomer]));
 storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([lead]));
 storage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify([order]));
 const listRes = await customerApi.fetchCustomers({ pageSize: 10 });
@@ -158,6 +204,34 @@ assert.equal(updatedLead.city, '广州');
 assert.equal(updatedLead.remark, '客户资料已完善');
 assert.deepEqual(updatedLead.changeHistory?.[0]?.changes?.map((item) => item.field), ['phone', 'industry', 'city', 'assignedTo', 'remark']);
 
+const assignRes = await customerApi.assignCustomerOwner('cust-test', '赵敏', '主管重新分配');
+assert.equal(assignRes.code, 0);
+assert.equal(assignRes.data?.owner, '赵敏');
+assert.equal(assignRes.data?.previousOwner, '李娜');
+assert.equal(assignRes.data?.assignmentReason, '主管重新分配');
+assert.equal(assignRes.data?.activityRecords?.[0]?.title, '分配客户给 赵敏');
+
+const reassignedLeads = JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]') as Lead[];
+const reassignedLead = reassignedLeads.find((item) => item.id === 'lead-test');
+assert.equal(reassignedLead?.assignedTo, '赵敏');
+assert.equal(reassignedLead?.owner, '赵敏');
+
+const followUpWithAttachmentRes = await customerApi.addCustomerFollowUp('cust-test', {
+  content: 'Shared proposal and voice memo',
+  attachments: [{
+    id: 'att-test-image',
+    name: 'proposal.png',
+    size: 2048,
+    type: 'image/png',
+    category: 'image',
+    dataUrl: 'data:image/png;base64,AA==',
+    uploadedAt: now,
+  }],
+} as any);
+assert.equal(followUpWithAttachmentRes.code, 0);
+assert.equal(followUpWithAttachmentRes.data?.activityRecords?.[0]?.attachments?.[0]?.name, 'proposal.png');
+assert.equal(followUpWithAttachmentRes.data?.activityRecords?.[0]?.attachments?.[0]?.category, 'image');
+
 storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
   id: 'user-sales',
   name: 'Sales User',
@@ -191,6 +265,14 @@ const lockedCustomerContactRes = await customerApi.updateCustomer('cust-blank-co
 assert.equal(lockedCustomerContactRes.code, 0);
 assert.equal(lockedCustomerContactRes.data?.phone, '+8613811112222');
 assert.equal(lockedCustomerContactRes.data?.wechat, 'customer_wx_001');
+
+const correctedInvalidContactRes = await customerApi.updateCustomer('cust-invalid-contact', {
+  phone: '13328951873',
+  wechat: 'invalid_contact_wx_002',
+});
+assert.equal(correctedInvalidContactRes.code, 0);
+assert.equal(correctedInvalidContactRes.data?.phone, '+8613328951873');
+assert.equal(correctedInvalidContactRes.data?.wechat, 'invalid_contact_wx');
 
 storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
   id: 'user-sales',

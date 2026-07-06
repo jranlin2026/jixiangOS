@@ -1,5 +1,5 @@
 import type { ID, Timestamp, ProductLevel, OrderType, PaymentMethod, RefundStatus } from './common';
-import type { CommissionRole, CommissionScene, OfficialPaymentChannel, ProofStatus, ResourceOwnership } from './commission';
+import type { CommissionScene, OfficialPaymentChannel, ProofStatus, ResourceOwnership } from './commission';
 
 /** 订单状态 */
 export type OrderStatus =
@@ -54,6 +54,7 @@ export interface Order {
   orderNo: string;
   customerId: ID;
   customerName: string;
+  productName?: string;
   productLevel: ProductLevel;
   productId?: ID;
   orderType: OrderType;
@@ -87,10 +88,6 @@ export interface Order {
   dealScene?: CommissionScene;
   /** 凭证状态，转介绍/挽回/个人资源等场景使用 */
   proofStatus?: ProofStatus;
-  /** 协同人员信息，用于 80/20、50/50 等分成 */
-  collaboratorName?: string;
-  collaboratorRole?: CommissionRole;
-  collaboratorRatio?: number;
   /** 原 899 订单关系，用于转代理时冲销基础提成 */
   originalOrderId?: ID;
   /** 业绩核算基数，默认取 actualAmount */
@@ -104,6 +101,9 @@ export interface Order {
   deliveryId?: ID;
   notes?: string;
   changeHistory?: OrderChangeLog[];
+  deletedAt?: Timestamp;
+  deletedBy?: string;
+  deleteReason?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

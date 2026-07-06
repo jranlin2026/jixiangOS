@@ -1,11 +1,16 @@
 node_modules/
 dist/
+.tools/
+pnpm-lock.yaml
+pnpm-workspace.yaml
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts
 vite.config.d.ts.map
 .env
 .env.*
+!.env.example
 backups/
 .DS_Store
 Thumbs.db
+.codex-*.log

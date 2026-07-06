@@ -136,7 +136,12 @@ async function approveOrder(customerId: string, customerName: string, leadInputB
     dealScene: zh.scene,
     proofStatus: '\u5df2\u4e0a\u4f20',
     leadInputBy,
-    payments: [],
+    payments: [{
+      id: `pay-${customerId}`,
+      amount: 899,
+      paymentMethod: zh.bankTransfer,
+      paidAt: now,
+    }],
   } as any);
   assert.equal(submitRes.data.status, zh.pendingReview);
   const approveRes = await orderReviewApi.approveOrderApplication(submitRes.data.id);

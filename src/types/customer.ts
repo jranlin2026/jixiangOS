@@ -39,6 +39,7 @@ export interface CustomerActivityRecord {
   type: CustomerActivityType;
   title: string;
   content?: string;
+  attachments?: CustomerActivityAttachment[];
   operator: string;
   createdAt: Timestamp;
   changes?: Array<{
@@ -49,6 +50,18 @@ export interface CustomerActivityRecord {
   }>;
   relatedId?: ID;
   relatedType?: 'order' | 'refund' | 'lead' | 'opportunity';
+}
+
+export type CustomerActivityAttachmentCategory = 'image' | 'document' | 'audio' | 'other';
+
+export interface CustomerActivityAttachment {
+  id: ID;
+  name: string;
+  size: number;
+  type: string;
+  category: CustomerActivityAttachmentCategory;
+  dataUrl: string;
+  uploadedAt: Timestamp;
 }
 
 /** AI 客户画像 */
@@ -88,6 +101,14 @@ export interface Customer {
   /** 归属销售 */
   /** 销售负责人 */
   owner: string;
+  /** 上一任销售负责人 */
+  previousOwner?: string;
+  /** 最近分配人 */
+  assignedBy?: string;
+  /** 最近分配时间 */
+  assignedAt?: Timestamp;
+  /** 最近分配原因 */
+  assignmentReason?: string;
   /** 归属开始日期 */
   ownerSince?: Timestamp;
   /** 保护期天数，默认730天 */
@@ -114,6 +135,9 @@ export interface Customer {
   sourceName?: string;
   sourceAccount?: string;
   score?: number;
+  deletedAt?: Timestamp;
+  deletedBy?: string;
+  deleteReason?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -125,6 +149,12 @@ export interface CustomerFilters {
   customerLevel?: CustomerLevel;
   lifecycleStatusCode?: LifecycleStatusCode;
   owner?: string;
+  followStatus?: 'has_follow' | 'no_follow';
+  sourceType?: string;
+  leadSource?: string;
+  industry?: string;
+  city?: string;
+  tag?: string;
   page?: number;
   pageSize?: number;
 }

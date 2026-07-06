@@ -18,20 +18,19 @@ import useOrderStore from '../../store/useOrderStore';
 import {
   OFFICIAL_PAYMENT_CHANNELS,
   RESOURCE_OWNERSHIPS,
+  getProductLevelColor,
   normalizeResourceOwnership,
 } from '../../shared/utils/constants';
-import { commissionRuleApi, customerApi, orderReviewApi, productApi, settingsApi } from '../../api';
+import { customerApi, orderReviewApi, productApi, settingsApi } from '../../api';
 import type { OrderType, PaymentMethod, ProductLevel } from '../../types/common';
 import type {
-  CommissionRole,
-  CommissionRoleConfig,
   CommissionScene,
   OfficialPaymentChannel,
   ResourceOwnership,
 } from '../../types/commission';
 import type { Customer } from '../../types/customer';
 import type { Order, OrderApplication } from '../../types/order';
-import type { Product, ProductLevelConfig } from '../../types/product';
+import type { Product } from '../../types/product';
 import type { OrderTypeConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import { recognizePaymentProof as recognizePaymentProofFromOcr } from '../../shared/utils/paymentProofRecognition';
@@ -51,7 +50,8 @@ function toDateTimeInputValue(value: Date): string {
   const day = String(value.getDate()).padStart(2, '0');
   const hours = String(value.getHours()).padStart(2, '0');
   const minutes = String(value.getMinutes()).padStart(2, '0');
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
+  const seconds = String(value.getSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
 }
 
 function normalizeRecognizedText(rawText: string): string {
@@ -68,9 +68,9 @@ function normalizeRecognizedText(rawText: string): string {
 
 function normalizeRecognizedDate(text: string): string | null {
   const candidates = [
-    /(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})[\s_T-]+(\d{1,2})[:.-](\d{1,2})/,
+    /(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})[\s_T-]+(\d{1,2})[:.-](\d{1,2})(?:[:.-](\d{1,2}))?/,
     /(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\s+(\d{1,2})(\d{2})\b/,
-    /(\d{1,2})[-/.](\d{1,2})[-/.](20\d{2})[\s_T-]+(\d{1,2})[:.-](\d{1,2})/,
+    /(\d{1,2})[-/.](\d{1,2})[-/.](20\d{2})[\s_T-]+(\d{1,2})[:.-](\d{1,2})(?:[:.-](\d{1,2}))?/,
     /(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})/,
   ];
 
@@ -79,18 +79,18 @@ function normalizeRecognizedDate(text: string): string | null {
     if (!match) continue;
 
     if (pattern === candidates[2]) {
-      const [, month, day, year, hour = '00', minute = '00'] = match;
-      return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
+      const [, month, day, year, hour = '00', minute = '00', second = '00'] = match;
+      return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}`;
     }
 
-    const [, year, month, day, hour = '00', minute = '00'] = match;
-    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
+    const [, year, month, day, hour = '00', minute = '00', second = '00'] = match;
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}`;
   }
 
-  const compact = text.match(/\b(20\d{2})(\d{2})(\d{2})(\d{2})?(\d{2})?\b/);
+  const compact = text.match(/\b(20\d{2})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?\b/);
   if (compact) {
-    const [, year, month, day, hour = '00', minute = '00'] = compact;
-    return `${year}-${month}-${day}T${hour}:${minute}`;
+    const [, year, month, day, hour = '00', minute = '00', second = '00'] = compact;
+    return `${year}-${month}-${day}T${hour}:${minute}:${second}`;
   }
 
   return null;
@@ -140,7 +140,6 @@ function dealSceneFromOrderType(orderType: OrderType): CommissionScene | undefin
     '成交线索转新代理',
     '代理升单',
     '代理复购',
-    '退款挽回',
     '转介绍成交',
     '智能体服务',
     '个人资源成交',
@@ -167,10 +166,8 @@ function getCustomerOptionLabel(customer: Customer): string {
 const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, application, customer }) => {
   const { update } = useOrderStore();
   const [products, setProducts] = useState<Product[]>([]);
-  const [productLevelConfigs, setProductLevelConfigs] = useState<ProductLevelConfig[]>([]);
   const [orderTypeConfigs, setOrderTypeConfigs] = useState<OrderTypeConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [commissionRoleConfigs, setCommissionRoleConfigs] = useState<CommissionRoleConfig[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [customerSearch, setCustomerSearch] = useState('');
@@ -184,14 +181,13 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
 
   const [form, setForm] = useState({
     customerName: '',
+    productId: '',
+    productName: '',
     productLevel: '' as ProductLevel,
     orderType: '' as OrderType,
     actualAmount: 0,
     officialPaymentChannel: '对公银行转账' as OfficialPaymentChannel,
     resourceOwnership: '公司资源' as ResourceOwnership,
-    collaboratorName: '',
-    collaboratorRole: '客户成功' as CommissionRole,
-    collaboratorRatio: 0,
     originalOrderId: '',
     sourceType: '',
     leadInputBy: '',
@@ -222,6 +218,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
         customerId: customer?.id || '',
         customerName: getCustomerDisplayName(customer),
         owner: customer?.owner || prev.owner,
+        productId: '',
+        productName: '',
         productLevel: customer?.productLevel || prev.productLevel,
         sourceType: sourceTypeFromCustomer(customer, prev.sourceType),
         leadInputBy: customer?.leadInputBy || prev.leadInputBy,
@@ -263,14 +261,13 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       ...prev,
       customerName: sourceOrder.customerName,
       customerId: sourceOrder.customerId || '',
+      productId: sourceOrder.productId || prev.productId,
+      productName: sourceOrder.productName || prev.productName,
       productLevel: sourceOrder.productLevel,
       orderType: sourceOrder.orderType,
       actualAmount: sourceOrder.actualAmount || sourceOrder.amount,
       officialPaymentChannel: sourceOrder.officialPaymentChannel || prev.officialPaymentChannel,
       resourceOwnership: normalizeResourceOwnership(sourceOrder.resourceOwnership || sourceOrder.sourceType || prev.resourceOwnership),
-      collaboratorName: sourceOrder.collaboratorName || '',
-      collaboratorRole: sourceOrder.collaboratorRole || prev.collaboratorRole,
-      collaboratorRatio: sourceOrder.collaboratorRatio || 0,
       originalOrderId: sourceOrder.originalOrderId || '',
       sourceType: sourceOrder.sourceType || prev.sourceType,
       leadInputBy: sourceOrder.leadInputBy || prev.leadInputBy,
@@ -287,22 +284,26 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   useEffect(() => {
     if (!open) return;
     const loadProducts = async () => {
-      const [productRes, levelRes] = await Promise.all([
-        productApi.getProducts(),
-        productApi.getProductLevelConfigs(),
-      ]);
+      const productRes = await productApi.getProducts();
       const productItems = productRes.code === 0 ? productRes.data : [];
-      const activeLevels = levelRes.code === 0 ? levelRes.data.filter((level) => level.isActive) : [];
       if (productRes.code === 0) setProducts(productItems);
-      if (levelRes.code === 0) setProductLevelConfigs(activeLevels);
       setForm((prev) => {
-        if (prev.productLevel) return prev;
-        const nextLevel = activeLevels[0]?.name || productItems[0]?.level || prev.productLevel;
-        const nextAmount = productItems.find((product) => product.level === nextLevel)?.price || prev.actualAmount;
-        return nextLevel ? {
+        const selectedById = prev.productId ? productItems.find((product) => product.id === prev.productId) : undefined;
+        if (selectedById) {
+          return {
+            ...prev,
+            productName: selectedById.name,
+            productLevel: selectedById.level as ProductLevel,
+          };
+        }
+        const selectedByLevel = prev.productLevel ? productItems.find((product) => product.level === prev.productLevel) : undefined;
+        const selectedProduct = selectedByLevel || productItems[0];
+        return selectedProduct ? {
           ...prev,
-          productLevel: nextLevel as ProductLevel,
-          actualAmount: nextAmount,
+          productId: selectedProduct.id,
+          productName: selectedProduct.name,
+          productLevel: selectedProduct.level as ProductLevel,
+          actualAmount: prev.actualAmount || selectedProduct.price,
         } : prev;
       });
     };
@@ -314,16 +315,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     Promise.all([
       settingsApi.fetchUsers({ isActive: true }),
       settingsApi.fetchOrderTypeConfigs(),
-      commissionRuleApi.getCommissionRoleConfigs({ isActive: true }),
-    ]).then(([userRes, orderTypeRes, commissionRoleRes]) => {
+    ]).then(([userRes, orderTypeRes]) => {
       if (userRes.code === 0) setUsers(userRes.data.filter((user) => user.isActive));
-      if (commissionRoleRes.code === 0) {
-        setCommissionRoleConfigs(commissionRoleRes.data);
-        setForm((prev) => {
-          if (prev.collaboratorRole && commissionRoleRes.data.some((item) => item.name === prev.collaboratorRole)) return prev;
-          return { ...prev, collaboratorRole: commissionRoleRes.data[0]?.name || prev.collaboratorRole };
-        });
-      }
       if (orderTypeRes.code === 0) {
         const configs = orderTypeRes.data;
         const activeTypes = configs.filter((item) => item.isActive);
@@ -339,38 +332,14 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     });
   }, [open, order]);
 
-  const amountMap = useMemo(
-    () => Object.fromEntries(products.map((product) => [product.level, product.price])),
+  const productById = useMemo(
+    () => new Map(products.map((product) => [product.id, product])),
     [products],
   );
 
-  const productLevels = useMemo(() => {
-    const configuredLevels = productLevelConfigs.length
-      ? productLevelConfigs
-      : Array.from(new Set(products.map((product) => product.level))).map((level, index) => ({
-        id: level,
-        name: level,
-        color: '#2196F3',
-        isActive: true,
-        sortOrder: index + 1,
-        createdAt: '',
-        updatedAt: '',
-      }));
-
-    if (form.productLevel && !configuredLevels.some((level) => level.name === form.productLevel)) {
-      return [{
-        id: form.productLevel,
-        name: form.productLevel,
-        color: '#607D8B',
-        isActive: true,
-        sortOrder: 0,
-        createdAt: '',
-        updatedAt: '',
-      }, ...configuredLevels];
-    }
-
-    return configuredLevels;
-  }, [form.productLevel, productLevelConfigs, products]);
+  const productOptions = useMemo(() => (
+    [...products].sort((a, b) => a.sortOrder - b.sortOrder)
+  ), [products]);
 
   const orderTypeOptions = useMemo(() => {
     const activeItems = orderTypeConfigs.filter((item) => item.isActive);
@@ -421,38 +390,37 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
 
   const handleChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
-    if (field === 'productLevel') {
-      const amt = amountMap[val] || form.actualAmount || 0;
-      setForm({ ...form, productLevel: val as ProductLevel, actualAmount: amt });
+    if (field === 'productId') {
+      const selectedProduct = productById.get(val);
+      setForm({
+        ...form,
+        productId: selectedProduct?.id || '',
+        productName: selectedProduct?.name || '',
+        productLevel: (selectedProduct?.level || form.productLevel) as ProductLevel,
+        actualAmount: selectedProduct?.price || form.actualAmount || 0,
+      });
     } else {
       setForm({ ...form, [field]: val });
     }
-  };
-
-  const handleNumberChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    setForm({ ...form, [field]: Number(e.target.value) });
   };
 
   const handleOwnerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, owner: e.target.value });
   };
 
-  const handleCollaboratorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const collaboratorName = e.target.value;
-    setForm({
-      ...form,
-      collaboratorName,
-    });
-  };
-
   const handleCustomerSelect = (_event: React.SyntheticEvent, selected: Customer | null) => {
+    const matchedProduct = selected?.productLevel
+      ? products.find((product) => product.level === selected.productLevel)
+      : undefined;
     setSelectedCustomer(selected);
     setForm({
       ...form,
       customerId: selected?.id || '',
       customerName: getCustomerDisplayName(selected),
       owner: selected?.owner || form.owner,
-      productLevel: selected?.productLevel || form.productLevel,
+      productId: matchedProduct?.id || form.productId,
+      productName: matchedProduct?.name || form.productName,
+      productLevel: (matchedProduct?.level || selected?.productLevel || form.productLevel) as ProductLevel,
       sourceType: sourceTypeFromCustomer(selected, form.sourceType),
       leadInputBy: selected?.leadInputBy || '',
       leadContributorId: selected?.leadContributorId || '',
@@ -560,8 +528,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       payments,
       isExternalTalentOrder: order?.isExternalTalentOrder || false,
       performanceBaseAmount: order?.performanceBaseAmount ?? actualAmount,
-      collaboratorRatio: Number(form.collaboratorRatio) || undefined,
-      collaboratorName: form.collaboratorName || undefined,
       leadInputBy: form.leadInputBy || undefined,
       leadContributorId: form.leadContributorId || undefined,
       leadContributorName: form.leadContributorName || undefined,
@@ -585,7 +551,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   };
 
   const customerLocked = Boolean(order || application || customer);
-  const canSubmit = Boolean(form.customerId && form.customerName && form.actualAmount > 0);
+  const canSubmit = Boolean(form.customerId && form.customerName && form.productId && form.actualAmount > 0);
   const formTitle = order ? '编辑订单' : application ? '修改订单申请' : '提交订单申请';
   const actionText = order ? '保存修改' : application ? '重新提交审核' : '提交审核';
 
@@ -643,12 +609,12 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               )}
             />
           )}
-          <TextField select label="产品等级" value={form.productLevel} onChange={handleChange('productLevel')} fullWidth>
-            {productLevels.map((level) => (
-              <MenuItem key={level.name} value={level.name}>
+          <TextField select label="产品名称" value={form.productId} onChange={handleChange('productId')} fullWidth>
+            {productOptions.map((product) => (
+              <MenuItem key={product.id} value={product.id}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: level.color }} />
-                  {level.name}
+                  <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: getProductLevelColor(product.level) }} />
+                  {product.name}
                 </Box>
               </MenuItem>
             ))}
@@ -671,7 +637,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
           <TextField label="线索录入人" value={form.leadInputBy || '-'} fullWidth InputProps={{ readOnly: true }} />
           <TextField label="线索贡献人" value={form.leadContributorName || '-'} fullWidth InputProps={{ readOnly: true }} />
           <TextField label="实付金额" type="number" value={form.actualAmount} onChange={handleChange('actualAmount')} fullWidth />
-          <TextField label="付款时间" type="datetime-local" value={form.paymentDate} onChange={handleChange('paymentDate')} fullWidth InputLabelProps={{ shrink: true }} />
+          <TextField label="付款时间" type="datetime-local" value={form.paymentDate} onChange={handleChange('paymentDate')} fullWidth InputLabelProps={{ shrink: true }} inputProps={{ step: 1 }} />
           <TextField label="付款订单号" value={form.paymentOrderNo} onChange={handleChange('paymentOrderNo')} placeholder="上传截图识别后自动填写" fullWidth />
           <Box
             onDragOver={(e) => e.preventDefault()}
@@ -815,39 +781,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               <MenuItem key={user.id} value={user.name}>{renderUserOptionLabel(user)}</MenuItem>
             ))}
           </TextField>
-          <TextField
-            select
-            label="协同人员"
-            value={form.collaboratorName}
-            onChange={handleCollaboratorChange}
-            helperText="协同人员是实际分账人员，提成角色需单独选择"
-            fullWidth
-          >
-            <MenuItem value="">无</MenuItem>
-            {form.collaboratorName && !users.some((user) => user.name === form.collaboratorName) && (
-              <MenuItem value={form.collaboratorName}>{form.collaboratorName}</MenuItem>
-            )}
-            {users.map((user) => (
-              <MenuItem key={user.id} value={user.name}>{renderUserOptionLabel(user)}</MenuItem>
-            ))}
-          </TextField>
-          <TextField
-            select
-            label="协同提成角色"
-            value={form.collaboratorRole}
-            onChange={handleChange('collaboratorRole')}
-            helperText="此角色仅用于分账，不影响系统权限角色"
-            fullWidth
-          >
-            {form.collaboratorRole && !commissionRoleConfigs.some((item) => item.name === form.collaboratorRole) && (
-              <MenuItem value={form.collaboratorRole}>{form.collaboratorRole}（已停用）</MenuItem>
-            )}
-            {commissionRoleConfigs.map((item) => (
-              <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>
-            ))}
-          </TextField>
-          <TextField label="协同分成比例（%）" type="number" value={form.collaboratorRatio} onChange={handleNumberChange('collaboratorRatio')} fullWidth />
-          <TextField label="原899订单ID" value={form.originalOrderId} onChange={handleChange('originalOrderId')} placeholder="成交线索转代理时填写" fullWidth />
+          <TextField label="第三方平台订单" value={form.originalOrderId} onChange={handleChange('originalOrderId')} placeholder="填写第三方平台订单号或订单ID" fullWidth />
           <TextField label="备注" value={form.notes} onChange={handleChange('notes')} fullWidth sx={{ gridColumn: '1 / -1' }} />
         </Box>
       </DialogContent>

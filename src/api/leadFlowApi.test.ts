@@ -33,7 +33,11 @@ assert.doesNotMatch(flowConfigSource, /value="wechat"/);
 assert.doesNotMatch(flowConfigSource, /exemptionEnabled|orderMatchCustomerEnabled|dailyRestartEnabled|failedInboundCompensationEnabled|inactiveMemberSkipEnabled/);
 assert.match(flowConfigSource, /participantDialogOpen/);
 assert.match(flowConfigSource, /添加成员/);
+assert.match(flowConfigSource, /选择成员/);
+assert.match(flowConfigSource, /departmentApi/);
+assert.match(flowConfigSource, /默认全体在职员工/);
 assert.match(flowConfigSource, /getParticipantLabel/);
+assert.match(flowConfigSource, /线索自动领取/);
 assert.match(flowConfigSource, /\$\{user\.name\}（\$\{roleLabel\}）/);
 assert.doesNotMatch(flowConfigSource, /salesUsers\.map\(\(user\) => \(\s*<FormControlLabel/);
 
@@ -279,6 +283,18 @@ const salesUsers = [
     createdAt: now,
     updatedAt: now,
   },
+  {
+    id: 'user-admin-candidate',
+    name: 'Admin Candidate',
+    account: 'admin-candidate',
+    email: 'admin-candidate@company.com',
+    phone: '',
+    role: 'Super Admin',
+    roleId: 'role-super-admin',
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
 ];
 
 storage.setItem(STORAGE_KEYS.USERS, JSON.stringify(salesUsers));
@@ -298,7 +314,32 @@ storage.setItem(STORAGE_KEYS.LEAD_FLOW_CONFIG, JSON.stringify({
   updatedAt: now,
 }));
 const defaultParticipantFallback = leadFlowApi.intakeLead(createLeadInput('Default Participant Fallback', { phone: '13900001000' }));
-assert.equal(defaultParticipantFallback.lead?.assignedTo, 'Sales A');
+assert.equal(defaultParticipantFallback.lead?.owner, 'Market A');
+assert.equal(defaultParticipantFallback.lead?.assignedTo, 'Market A');
+const defaultParticipantRecord = JSON.parse(storage.getItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS) || '[]')[0];
+assert.equal(defaultParticipantRecord?.assignedTo, 'Market A');
+assert.equal(defaultParticipantRecord?.status, '入库成功');
+
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEAD_FLOW_CONFIG, JSON.stringify({
+  id: 'lead-flow-global',
+  uniqueKeyMode: 'phone_or_wechat',
+  interceptionEnabled: true,
+  autoAssignEnabled: true,
+  assignmentMode: 'round_robin',
+  participantUserIds: ['missing-user'],
+  dailyLimitEnabled: false,
+  dailyLimit: 200,
+  lastAssignedIndex: -1,
+  updatedAt: now,
+}));
+const staleParticipantFallback = leadFlowApi.intakeLead(createLeadInput('Stale Participant Fallback', { phone: '13900001005' }));
+assert.equal(staleParticipantFallback.lead?.owner, '待分配');
+assert.equal(staleParticipantFallback.lead?.assignedTo, undefined);
+const staleParticipantRecord = JSON.parse(storage.getItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS) || '[]')[0];
+assert.equal(staleParticipantRecord?.status, '待分配');
 
 storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
 storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
@@ -319,6 +360,95 @@ const roundRobinFirst = leadFlowApi.intakeLead(createLeadInput('Round Robin Firs
 const roundRobinSecond = leadFlowApi.intakeLead(createLeadInput('Round Robin Second', { phone: '13900001002' }));
 assert.equal(roundRobinFirst.lead?.assignedTo, 'Sales A');
 assert.equal(roundRobinSecond.lead?.assignedTo, 'Sales B');
+
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEAD_FLOW_CONFIG, JSON.stringify({
+  id: 'lead-flow-global',
+  uniqueKeyMode: 'phone_or_wechat',
+  interceptionEnabled: true,
+  autoAssignEnabled: true,
+  autoClaimAfterAssignmentEnabled: true,
+  assignmentMode: 'round_robin',
+  participantUserIds: ['user-sales-a'],
+  dailyLimitEnabled: false,
+  dailyLimit: 200,
+  lastAssignedIndex: -1,
+  updatedAt: now,
+}));
+const autoClaimedIntake = leadFlowApi.intakeLead(createLeadInput('Auto Claimed Lead', { phone: '13900001007' }));
+assert.equal(autoClaimedIntake.lead?.assignedTo, 'Sales A');
+assert.equal(autoClaimedIntake.lead?.owner, 'Sales A');
+assert.equal(autoClaimedIntake.lead?.lifecycleStatusCode, 'following');
+assert.ok(autoClaimedIntake.lead?.customerId);
+const autoClaimedCustomers = JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]');
+assert.equal(autoClaimedCustomers.length, 1);
+assert.equal(autoClaimedCustomers[0]?.owner, 'Sales A');
+assert.equal(autoClaimedCustomers[0]?.phone, '+8613900001007');
+assert.equal(autoClaimedCustomers[0]?.lifecycleStatusCode, 'following');
+
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.LEAD_FLOW_CONFIG, JSON.stringify({
+  id: 'lead-flow-global',
+  uniqueKeyMode: 'phone_or_wechat',
+  interceptionEnabled: true,
+  autoAssignEnabled: true,
+  assignmentMode: 'round_robin',
+  participantUserIds: ['user-sales-a'],
+  dailyLimitEnabled: false,
+  dailyLimit: 200,
+  lastAssignedIndex: -1,
+  updatedAt: now,
+}));
+storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({
+  userId: 'user-market',
+  token: 'test-token-market',
+  remember: true,
+  createdAt: now,
+}));
+const marketIntake = leadFlowApi.intakeLead(createLeadInput('Market Intake', {
+  phone: '13900001006',
+  inputBy: 'Market A',
+  owner: '待分配',
+}));
+assert.equal(marketIntake.lead?.inputBy, 'Market A');
+assert.equal(marketIntake.lead?.assignedTo, 'Sales A');
+assert.notEqual(marketIntake.lead?.assignedTo, 'Admin Candidate');
+
+storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({
+  userId: 'user-market',
+  token: 'test-token-market',
+  remember: true,
+  createdAt: now,
+}));
+assert.deepEqual((await leadApi.fetchLeads({ pageSize: 20 })).data.items.map((item) => item.id), [marketIntake.lead?.id]);
+
+storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({
+  userId: 'user-sales-a',
+  token: 'test-token-sales-a',
+  remember: true,
+  createdAt: now,
+}));
+assert.deepEqual((await leadApi.fetchLeads({ pageSize: 20 })).data.items.map((item) => item.id), [marketIntake.lead?.id]);
+
+storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({
+  userId: 'user-sales-b',
+  token: 'test-token-sales-b',
+  remember: true,
+  createdAt: now,
+}));
+assert.deepEqual((await leadApi.fetchLeads({ pageSize: 20 })).data.items.map((item) => item.id), []);
+
+storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({
+  userId: 'user-admin-candidate',
+  token: 'test-token-admin',
+  remember: true,
+  createdAt: now,
+}));
+assert.equal((await leadApi.fetchLeads({ pageSize: 20 })).data.items.some((item) => item.id === marketIntake.lead?.id), true);
 
 storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
 storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));

@@ -11,11 +11,16 @@ model Department {
   id          String   @id @db.VarChar(64)
   name        String   @db.VarChar(100)
   code        String   @unique @db.VarChar(64)
+  description String?  @db.VarChar(500)
+  parentId    String?  @db.VarChar(64)
+  managerId   String?  @db.VarChar(64)
   memberCount Int      @default(0)
+  sortOrder   Int      @default(0)
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  @@index([parentId])
   @@map("departments")
 }
 
@@ -102,6 +107,19 @@ model AppStorage {
   updatedAt DateTime @updatedAt
 
   @@map("app_storage")
+}
+
+model AiProviderConfig {
+  id        String   @id @default("default") @db.VarChar(32)
+  provider  String   @default("deepseek") @db.VarChar(40)
+  apiKey    String   @db.Text
+  baseUrl   String   @default("https://api.deepseek.com") @db.VarChar(255)
+  model     String   @default("deepseek-chat") @db.VarChar(100)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("ai_provider_configs")
 }
 
 model LeadRecord {

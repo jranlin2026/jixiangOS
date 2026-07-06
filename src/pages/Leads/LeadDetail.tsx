@@ -17,19 +17,19 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import HistoryIcon from '@mui/icons-material/History';
 import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
-import type { Lead } from '../../types/lead';
+import type { Lead, LeadFlowConfig } from '../../types/lead';
 import type { LeadSourceConfig, User } from '../../types/settings';
-import { leadApi, leadFlowApi, roleApi, settingsApi } from '../../api';
+import { leadApi, leadFlowApi, settingsApi } from '../../api';
 import { formatDate } from '../../shared/utils/formatters';
-import { RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
+import { RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, getLifecycleStatusTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import useAuthStore from '../../store/useAuthStore';
 import { canEditLeadProfile } from './leadDetailRules';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
-import { canReceiveLead, hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { canCompleteContactField } from '../../shared/utils/contactEditLock';
-import type { Role } from '../../types/role';
 import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
 import { formatPhoneForDisplay, getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
+import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 
 interface LeadDetailProps {
   lead: Lead;
@@ -134,7 +134,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   const [draft, setDraft] = useState<LeadDraft>(() => toDraft(lead));
   const [activeTab, setActiveTab] = useState(0);
   const [users, setUsers] = useState<User[]>([]);
-  const [roles, setRoles] = useState<Role[]>([]);
+  const [leadFlowConfig, setLeadFlowConfig] = useState<LeadFlowConfig | null>(null);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignSalesName, setAssignSalesName] = useState('');
@@ -148,11 +148,11 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
 
   useEffect(() => {
     if (!open) return;
-    settingsApi.fetchUsers({ isActive: true }).then((res) => {
+    settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
     });
-    roleApi.getRoles({ isActive: true }).then((res) => {
-      if (res.code === 0) setRoles(res.data);
+    leadFlowApi.fetchLeadFlowConfig().then((res) => {
+      if (res.code === 0) setLeadFlowConfig(res.data);
     });
     settingsApi.fetchLeadSourceConfigs().then((res) => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
@@ -209,7 +209,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   const canClaimLead = !currentLead.customerId && hasPermission(currentUser, PERMISSION_KEYS.LEADS_FOLLOW);
   const canEditProfile = canEditLeadProfile(currentLead);
   const canAssignLead = !currentLead.customerId && hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG);
-  const salesUsers = users.filter((user) => canReceiveLead(user, roles));
+  const assignableUsers = getScopedLeadAssignmentCandidates(users, leadFlowConfig, 'leads', currentUser);
   const canEditLockedContact = isSuperAdmin(currentUser);
 
   const handleDraftChange = (field: keyof LeadDraft) => (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -371,7 +371,11 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
     const isContributorField = field === 'leadContributorName';
     const isUserField = field === 'inputBy' || field === 'assignedTo';
     const currentValue = draft[field] || '';
-    const showCurrentUserOption = isUserField && currentValue && !users.some((user) => user.name === currentValue);
+    const userFieldOptions = field === 'assignedTo' ? assignableUsers : users;
+    const showCurrentUserOption = isUserField
+      && currentValue
+      && currentValue !== '待分配'
+      && !userFieldOptions.some((user) => user.name === currentValue);
     const displayValue = field === 'sourceType'
       ? normalizeResourceOwnership(currentLead.sourceType)
       : field === 'tagsText'
@@ -406,7 +410,12 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
               <TextField select value={currentValue} onChange={handleDraftChange(field)} size="small" fullWidth>
                 {showCurrentUserOption && <MenuItem value={currentValue}>{currentValue}</MenuItem>}
                 {field === 'assignedTo' && <MenuItem value="待分配">待分配</MenuItem>}
-                {users.map((user) => (
+                {field === 'assignedTo' && userFieldOptions.length === 0 && (
+                  <MenuItem value="" disabled>
+                    当前角色数据范围内暂无可分配成员，请检查数据范围或线索流转参与成员配置。
+                  </MenuItem>
+                )}
+                {userFieldOptions.map((user) => (
                   <MenuItem key={user.id} value={user.name}>
                     {user.name}（{user.positionName || '未设置职位'}）
                   </MenuItem>
@@ -485,7 +494,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
         <Box sx={{ minWidth: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>{currentLead.name}</Typography>
-            <Chip label={lifecycleConfig.name} size="small" sx={{ bgcolor: `${lifecycleConfig.color}18`, color: lifecycleConfig.color, fontWeight: 600 }} />
+            <Chip label={lifecycleConfig.name} size="small" sx={getLifecycleStatusTagSx(`${lifecycleCode} ${lifecycleConfig.name}`)} />
           </Box>
           <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>
             {followerName} 跟进 · {formatSource(currentLead)}
@@ -541,7 +550,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
                   color={currentLead.intakeStatus === '待分配' ? 'warning' : currentLead.intakeStatus === '入库失败' ? 'error' : 'success'}
                 />
               ))}
-              {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={{ bgcolor: `${lifecycleConfig.color}18`, color: lifecycleConfig.color, fontWeight: 600 }} />)}
+              {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={getLifecycleStatusTagSx(`${lifecycleCode} ${lifecycleConfig.name}`)} />)}
               {renderStatusRow('创建时间', formatDate(currentLead.createdAt, 'yyyy-MM-dd HH:mm'))}
               {renderStatusRow('更新时间', formatDate(currentLead.updatedAt, 'yyyy-MM-dd HH:mm'))}
               {renderRemarkRow()}
@@ -574,7 +583,12 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
           onChange={(event) => setAssignSalesName(event.target.value)}
           fullWidth
         >
-          {salesUsers.map((user) => (
+          {assignableUsers.length === 0 && (
+            <MenuItem value="" disabled>
+              暂无可分配成员，请检查线索流转参与成员或当前角色的数据范围
+            </MenuItem>
+          )}
+          {assignableUsers.map((user) => (
             <MenuItem key={user.id} value={user.name}>
               {user.name}（{user.positionName || '未设置职位'}）
             </MenuItem>

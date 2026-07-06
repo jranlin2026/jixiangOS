@@ -2,10 +2,15 @@ $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $backupDir = Join-Path $root 'backups'
-$mysqlDump = 'C:\Program Files\MySQL\MySQL Server 8.4\bin\mysqldump.exe'
-$database = 'jixiang_os'
-$user = 'jixiang_os'
-$password = 'jixiang_os_dev'
+$portableMysqlDump = Join-Path $env:USERPROFILE '.jixiang-os\mysql\mysql-8.4.10-winx64\bin\mysqldump.exe'
+$mysqlDump = if (Test-Path -LiteralPath $portableMysqlDump) {
+  $portableMysqlDump
+} else {
+  'C:\Program Files\MySQL\MySQL Server 8.4\bin\mysqldump.exe'
+}
+$database = if ($env:JIXIANG_MYSQL_DATABASE) { $env:JIXIANG_MYSQL_DATABASE } else { 'jixiang_os' }
+$user = if ($env:JIXIANG_MYSQL_USER) { $env:JIXIANG_MYSQL_USER } else { 'jixiang_os' }
+$password = if ($env:JIXIANG_MYSQL_PASSWORD) { $env:JIXIANG_MYSQL_PASSWORD } else { 'jixiang_os_dev' }
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $output = Join-Path $backupDir "$database-$timestamp.sql"
 

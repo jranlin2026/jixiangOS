@@ -1,5 +1,14 @@
-$mysqlBase = 'C:\Program Files\MySQL\MySQL Server 8.4'
-$mysqlConfig = 'C:\ProgramData\MySQL\MySQL Server 8.4\my.ini'
+$portableRoot = Join-Path $env:USERPROFILE '.jixiang-os'
+$portableMysqlBase = Join-Path $portableRoot 'mysql\mysql-8.4.10-winx64'
+$portableMysqlConfig = Join-Path $portableRoot 'mysql-run\my.ini'
+
+if (Test-Path -LiteralPath "$portableMysqlBase\bin\mysqld.exe") {
+  $mysqlBase = $portableMysqlBase
+  $mysqlConfig = $portableMysqlConfig
+} else {
+  $mysqlBase = 'C:\Program Files\MySQL\MySQL Server 8.4'
+  $mysqlConfig = 'C:\ProgramData\MySQL\MySQL Server 8.4\my.ini'
+}
 
 if (-not (Test-Path -LiteralPath "$mysqlBase\bin\mysqld.exe")) {
   Write-Error "mysqld.exe not found at $mysqlBase\bin\mysqld.exe"

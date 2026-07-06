@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { customerApi } from './customerApi';
+import { dashboardApi } from './dashboardApi';
 import { leadApi } from './leadApi';
 import { orderApi } from './orderApi';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { PERMISSION_KEYS } from '../shared/utils/permissions';
+import { filterUsersByCurrentDataScope } from '../shared/utils/dataVisibility';
 
 const storage = (() => {
   const values = new Map<string, string>();
@@ -30,11 +32,13 @@ const now = new Date().toISOString();
 const users = [
   { id: 'user-sales-a', name: 'Sales A', account: 'sales_a', email: 'a@test.local', phone: '', role: 'Sales Consultant', roleId: 'role-sales', departmentId: 'dept-sales', isActive: true, createdAt: now, updatedAt: now },
   { id: 'user-sales-b', name: 'Sales B', account: 'sales_b', email: 'b@test.local', phone: '', role: 'Sales Consultant', roleId: 'role-sales', departmentId: 'dept-sales', isActive: true, createdAt: now, updatedAt: now },
+  { id: 'user-sales-child', name: 'Sales Child', account: 'sales_child', email: 'child@test.local', phone: '', role: 'Sales Consultant', roleId: 'role-sales', departmentId: 'dept-sales-child', isActive: true, createdAt: now, updatedAt: now },
   { id: 'user-sales-other', name: 'Other Sales', account: 'sales_other', email: 'other@test.local', phone: '', role: 'Sales Consultant', roleId: 'role-sales', departmentId: 'dept-other', isActive: true, createdAt: now, updatedAt: now },
   { id: 'user-manager', name: 'Sales Manager', account: 'manager', email: 'manager@test.local', phone: '', role: 'Sales Manager', roleId: 'role-manager', departmentId: 'dept-sales', isActive: true, createdAt: now, updatedAt: now },
   { id: 'user-finance', name: 'Finance A', account: 'finance', email: 'finance@test.local', phone: '', role: 'Finance Specialist', roleId: 'role-finance', departmentId: 'dept-finance', isActive: true, createdAt: now, updatedAt: now },
   { id: 'user-aa', name: 'AA User', account: 'aa', email: 'aa@test.local', phone: '', role: 'AA', roleId: 'role-aa', departmentId: 'dept-finance', isActive: true, createdAt: now, updatedAt: now },
   { id: 'user-admin', name: 'Admin', account: 'admin', email: 'admin@test.local', phone: '', role: 'Super Admin', roleId: 'role-admin', departmentId: 'dept-admin', isActive: true, createdAt: now, updatedAt: now },
+  { id: 'user-system-admin', name: 'System Admin Name', account: 'system_admin', email: 'system-admin@test.local', phone: '', role: '系统管理员', departmentId: 'dept-admin', isActive: true, createdAt: now, updatedAt: now },
 ];
 
 const roles = [
@@ -47,6 +51,7 @@ const roles = [
 
 const departments = [
   { id: 'dept-sales', name: 'Sales', code: 'SALES', managerId: 'user-manager', memberCount: 3, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'dept-sales-child', name: 'Sales Child', code: 'SALES_CHILD', parentId: 'dept-sales', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
   { id: 'dept-other', name: 'Other', code: 'OTHER', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
   { id: 'dept-finance', name: 'Finance', code: 'FINANCE', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
   { id: 'dept-admin', name: 'Admin', code: 'ADMIN', memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
@@ -90,14 +95,36 @@ async function idsForCurrentUser() {
   const leads = await leadApi.fetchLeads({ pageSize: 20 });
   const orders = await orderApi.fetchOrders({ pageSize: 20 });
   const stats = await orderApi.fetchOrderStats();
+  const workbench = await dashboardApi.fetchHomeWorkbench();
   return {
     customers: customers.data.items.map((item) => item.id),
     publicCustomers: publicCustomers.data.items.map((item) => item.id),
     leads: leads.data.items.map((item) => item.id),
     orders: orders.data.items.map((item) => item.id),
     stats: stats.data,
+    quickActions: workbench.data.quickActions.map((item) => item.id),
   };
 }
+
+resetData('user-sales-a');
+storage.removeItem(AUTH_SESSION_STORAGE_KEY);
+const anonymousScope = await idsForCurrentUser();
+assert.deepEqual(anonymousScope.customers, []);
+assert.deepEqual(anonymousScope.publicCustomers, []);
+assert.deepEqual(anonymousScope.leads, []);
+assert.deepEqual(anonymousScope.orders, []);
+assert.deepEqual(anonymousScope.quickActions, []);
+assert.equal(anonymousScope.stats.monthCount, 0);
+assert.equal(anonymousScope.stats.monthAmount, 0);
+
+resetData('missing-user');
+const missingUserScope = await idsForCurrentUser();
+assert.deepEqual(missingUserScope.customers, []);
+assert.deepEqual(missingUserScope.leads, []);
+assert.deepEqual(missingUserScope.orders, []);
+assert.deepEqual(missingUserScope.quickActions, []);
+assert.equal(missingUserScope.stats.monthCount, 0);
+assert.equal(missingUserScope.stats.monthAmount, 0);
 
 resetData('user-sales-a');
 const salesScope = await idsForCurrentUser();
@@ -113,6 +140,13 @@ assert.equal((await orderApi.fetchOrderById('order-other')).data, null);
 
 resetData('user-manager');
 const managerScope = await idsForCurrentUser();
+assert.deepEqual(filterUsersByCurrentDataScope(users).map((user) => user.id), ['user-sales-a', 'user-sales-b', 'user-sales-child', 'user-manager']);
+storage.removeItem(AUTH_SESSION_STORAGE_KEY);
+assert.deepEqual(
+  filterUsersByCurrentDataScope(users, 'customers', users.find((user) => user.id === 'user-manager')).map((user) => user.id),
+  ['user-sales-a', 'user-sales-b', 'user-sales-child', 'user-manager'],
+);
+resetData('user-manager');
 assert.deepEqual(managerScope.customers, ['cust-a', 'cust-b']);
 assert.deepEqual(managerScope.publicCustomers, ['cust-public']);
 assert.deepEqual(managerScope.leads, ['lead-input-a', 'lead-assigned-a', 'lead-b']);
@@ -145,3 +179,10 @@ assert.deepEqual(adminScope.leads, ['lead-input-a', 'lead-assigned-a', 'lead-b',
 assert.deepEqual(adminScope.orders, ['order-a', 'order-b', 'order-other']);
 assert.equal(adminScope.stats.monthCount, 3);
 assert.equal(adminScope.stats.monthAmount, 600);
+
+resetData('user-system-admin');
+const systemAdminScope = await idsForCurrentUser();
+assert.deepEqual(systemAdminScope.customers, ['cust-a', 'cust-b', 'cust-other']);
+assert.deepEqual(systemAdminScope.publicCustomers, ['cust-public']);
+assert.deepEqual(systemAdminScope.leads, ['lead-input-a', 'lead-assigned-a', 'lead-b', 'lead-other']);
+assert.deepEqual(systemAdminScope.orders, ['order-a', 'order-b', 'order-other']);

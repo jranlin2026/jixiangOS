@@ -1,8 +1,9 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { failure, success } from '../api/response';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
+import { mapPrismaUser } from '../db/prismaMappers';
 
-type StoragePrisma = Pick<PrismaClient, 'appStorage' | 'leadRecord' | 'businessRecord'>;
+type StoragePrisma = Pick<PrismaClient, 'appStorage' | 'leadRecord' | 'businessRecord' | 'user'>;
 
 const STORAGE_KEY_PATTERN = /^aaos_[a-zA-Z0-9_:-]+$/;
 const STRUCTURED_KEYS = new Set<string>([STORAGE_KEYS.LEADS]);
@@ -10,14 +11,13 @@ const BUSINESS_RECORD_KEYS = new Set<string>([
   STORAGE_KEYS.CUSTOMERS,
   STORAGE_KEYS.ORDERS,
   STORAGE_KEYS.ORDER_APPLICATIONS,
+  STORAGE_KEYS.RECOVERY_ORDERS,
   STORAGE_KEYS.DELIVERIES,
   STORAGE_KEYS.COMMISSIONS,
   STORAGE_KEYS.COMMISSION_OPERATION_LOGS,
   STORAGE_KEYS.COMMISSION_SETTLEMENT_BATCHES,
   STORAGE_KEYS.REFUNDS,
-  STORAGE_KEYS.UPGRADE_POOL,
   STORAGE_KEYS.OPPORTUNITIES,
-  STORAGE_KEYS.CUSTOMER_SUCCESS_TASKS,
   STORAGE_KEYS.SERVICE_TICKETS,
   STORAGE_KEYS.AI_CARDS,
   STORAGE_KEYS.AI_SESSIONS,
@@ -99,6 +99,11 @@ export function createStorageService(prisma: StoragePrisma) {
     return rows
       .sort((a, b) => parseDate((b as any).createdAt).getTime() - parseDate((a as any).createdAt).getTime())
       .map(mapLeadRow);
+  };
+
+  const listUsers = async () => {
+    const rows = await prisma.user.findMany({ orderBy: { updatedAt: 'desc' } });
+    return rows.map(mapPrismaUser);
   };
 
   const setLeads = async (value: unknown) => {
@@ -211,6 +216,7 @@ export function createStorageService(prisma: StoragePrisma) {
       const rows = await prisma.appStorage.findMany({ orderBy: { key: 'asc' } });
       const data = Object.fromEntries(rows.map((row) => [row.key, row.value])) as Record<string, unknown>;
       data[STORAGE_KEYS.LEADS] = await listLeads();
+      data[STORAGE_KEYS.USERS] = await listUsers();
       for (const key of BUSINESS_RECORD_KEYS) {
         data[key] = await listBusinessRecords(key);
       }
@@ -220,6 +226,7 @@ export function createStorageService(prisma: StoragePrisma) {
     async get(key: string) {
       if (!STORAGE_KEY_PATTERN.test(key)) return failure('invalid storage key', 400);
       if (key === STORAGE_KEYS.LEADS) return success(await listLeads());
+      if (key === STORAGE_KEYS.USERS) return success(await listUsers());
       if (BUSINESS_RECORD_KEYS.has(key)) return success(await listBusinessRecords(key));
       const row = await prisma.appStorage.findUnique({ where: { key } });
       return success(row?.value ?? null);

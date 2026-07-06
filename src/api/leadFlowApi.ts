@@ -2,16 +2,18 @@ import type { Customer } from '../types/customer';
 import type { Lead, LeadFlowConfig, LeadIntakeRecord } from '../types/lead';
 import type { User } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
-import { createSuccessResponse, delay } from './types';
+import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
+import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { DEFAULT_LEAD_FLOW_CONFIG, DEFAULT_PAGE_SIZE, LIFECYCLE_STATUS_CODES, STORAGE_KEYS, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
-import { getCurrentOperatorName, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
+import { getCurrentOperatorName, getCurrentOperatorUser, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
+import { isSuperAdminRoleName } from '../shared/utils/roles';
 import { hydrateLeadLifecycle } from './lifecycleSync';
 import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
-import { canReceiveLead } from '../shared/utils/permissions';
 import { getPhoneNumberError, normalizePhoneForComparison, normalizePhoneForStorage } from '../shared/utils/phoneNumber';
+import { getLeadAssignmentCandidates, isActiveLeadAssignableUser } from '../shared/utils/leadAssignment';
 
 function ensureInit(): void {
   initializeMockData();
@@ -38,6 +40,10 @@ function normalizeLeadFlowConfig(input?: StoredLeadFlowConfig | null): LeadFlowC
     uniqueKeyMode: OFFICIAL_UNIQUE_KEY_MODE,
     interceptionEnabled: toBoolean(merged.interceptionEnabled, DEFAULT_LEAD_FLOW_CONFIG.interceptionEnabled),
     autoAssignEnabled: toBoolean(merged.autoAssignEnabled, DEFAULT_LEAD_FLOW_CONFIG.autoAssignEnabled),
+    autoClaimAfterAssignmentEnabled: toBoolean(
+      merged.autoClaimAfterAssignmentEnabled,
+      DEFAULT_LEAD_FLOW_CONFIG.autoClaimAfterAssignmentEnabled,
+    ),
     assignmentMode: 'round_robin',
     participantUserIds: Array.isArray(merged.participantUserIds)
       ? merged.participantUserIds.filter((id): id is string => typeof id === 'string')
@@ -75,17 +81,13 @@ function validateAttribution(data: Partial<Lead>): string | null {
   return null;
 }
 
-function getActiveSalesUsers(): User[] {
+function getAssignableUsers(): User[] {
   const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
-  const { roles } = ensureOrganizationConfigData();
-  return users.filter((user) => canReceiveLead(user, roles));
+  return users.filter(isActiveLeadAssignableUser);
 }
 
 function getConfiguredParticipants(config: LeadFlowConfig): User[] {
-  const activeSales = getActiveSalesUsers();
-  if (!config.participantUserIds.length) return activeSales;
-  const selected = activeSales.filter((user) => config.participantUserIds.includes(user.id));
-  return selected.length ? selected : activeSales;
+  return getLeadAssignmentCandidates(getAssignableUsers(), config);
 }
 
 function findCollision(data: Partial<Lead>, excludeLeadId?: string) {
@@ -130,11 +132,15 @@ function formatLeadSourceText(lead: Partial<Lead>): string | undefined {
 }
 
 function assignLeadOwner(config: LeadFlowConfig, fallbackOwner?: string): { owner: string; assignedTo?: string; assignedAt?: string; assignmentRuleId?: string; assignmentStatus: '待分配' | '已分配待领取'; reason: string; nextIndex: number } {
-  if (!config.autoAssignEnabled) {
-    if (fallbackOwner && fallbackOwner !== '待分配') {
+  if (fallbackOwner && fallbackOwner !== '待分配') {
+    const manualOwner = getAssignableUsers().find((user) => user.name === fallbackOwner);
+    if (manualOwner) {
       const now = new Date().toISOString();
-      return { owner: fallbackOwner, assignedTo: fallbackOwner, assignedAt: now, assignmentStatus: '已分配待领取', reason: '手动指定销售', nextIndex: config.lastAssignedIndex };
+      return { owner: manualOwner.name, assignedTo: manualOwner.name, assignedAt: now, assignmentStatus: '已分配待领取', reason: '手动指定销售', nextIndex: config.lastAssignedIndex };
     }
+  }
+
+  if (!config.autoAssignEnabled) {
     return { owner: '待分配', assignmentStatus: '待分配', reason: '线索自动分配未开启', nextIndex: config.lastAssignedIndex };
   }
 
@@ -258,6 +264,15 @@ function appendIntakeRecord(record: LeadIntakeRecord): void {
 }
 
 async function fetchLeadFlowConfig(): Promise<ApiResponse<LeadFlowConfig>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<StoredLeadFlowConfig | null>(`/storage/${encodeURIComponent(STORAGE_KEYS.LEAD_FLOW_CONFIG)}`);
+    const config = normalizeLeadFlowConfig(response.code === 0 ? response.data : null);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(STORAGE_KEYS.LEAD_FLOW_CONFIG, JSON.stringify(config));
+    }
+    return createSuccessResponse(config);
+  }
+
   ensureInit();
   await delay(120);
   return createSuccessResponse(ensureLeadFlowConfig());
@@ -294,6 +309,21 @@ async function fetchIntakeRecords(filters?: { status?: string; search?: string; 
     items: records.slice((page - 1) * pageSize, page * pageSize),
     pagination: { page, pageSize, total, totalPages },
   });
+}
+
+async function cleanupIntakeRecord(id: string, reason: string): Promise<ApiResponse<boolean>> {
+  ensureInit();
+  await delay(120);
+  if (!isSuperAdminRoleName(getCurrentOperatorUser()?.role)) {
+    return createErrorResponse('仅超级管理员可以清理线索入库记录', 403);
+  }
+  const normalizedReason = reason.trim();
+  if (!normalizedReason) return createErrorResponse('清理线索入库记录必须填写原因');
+
+  const records = getStorageData<LeadIntakeRecord[]>(STORAGE_KEYS.LEAD_INTAKE_RECORDS) || [];
+  if (!records.some((record) => record.id === id)) return createErrorResponse('线索入库记录不存在', 404);
+  setStorageData(STORAGE_KEYS.LEAD_INTAKE_RECORDS, records.filter((record) => record.id !== id));
+  return createSuccessResponse(true);
 }
 
 function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followUpRecords'>): { lead: Lead | null; message: string } {
@@ -343,6 +373,7 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
   }
 
   const assignment = assignLeadOwner(config, normalizedData.owner);
+  const intakeStatus = assignment.assignmentStatus === '待分配' ? '待分配' : '入库成功';
   const leadId = `lead-${uuidv4().slice(0, 8)}`;
   const lead: Lead = {
     ...normalizedData,
@@ -351,7 +382,7 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
     assignedTo: assignment.assignedTo,
     assignedAt: assignment.assignedAt,
     assignmentRuleId: assignment.assignmentRuleId,
-    intakeStatus: '入库成功',
+    intakeStatus,
     lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP,
     lifecycleStatus: '待跟进',
     sourceType: normalizeResourceOwnership(data.sourceType),
@@ -361,7 +392,31 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
     updatedAt: now,
   };
   const leadWithLifecycle = hydrateLeadLifecycle(lead);
-  const storedLead = leadWithLifecycle;
+  let storedLead = leadWithLifecycle;
+  if (config.autoClaimAfterAssignmentEnabled && assignment.assignedTo) {
+    const autoClaimedLead = hydrateLeadLifecycle({
+      ...leadWithLifecycle,
+      lifecycleStatusCode: LIFECYCLE_STATUS_CODES.FOLLOWING,
+      lifecycleStatus: '跟进中',
+      lifecycleStatusUpdatedAt: now,
+      changeHistory: [{
+        id: `hist-${uuidv4().slice(0, 8)}`,
+        action: 'update',
+        operator: getCurrentOperatorName(normalizedData.inputBy || assignment.owner),
+        changedAt: now,
+        summary: '线索自动领取到客户库',
+        changes: [{
+          field: 'lifecycleStatus',
+          label: '生命周期',
+          oldValue: '待跟进',
+          newValue: '跟进中',
+        }],
+      }, ...(leadWithLifecycle.changeHistory || [])],
+      updatedAt: now,
+    });
+    const customer = upsertCustomerFromLead(autoClaimedLead);
+    storedLead = { ...autoClaimedLead, customerId: customer.id };
+  }
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
   setStorageData(STORAGE_KEYS.LEADS, [storedLead, ...leads]);
   setStorageData(STORAGE_KEYS.LEAD_FLOW_CONFIG, { ...config, lastAssignedIndex: assignment.nextIndex, updatedAt: now });
@@ -375,11 +430,11 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
     source: formatLeadSourceText(storedLead),
     inputBy: storedLead.inputBy,
     assignedTo: storedLead.assignedTo,
-    status: '入库成功',
+    status: intakeStatus,
     matchedRule: assignment.reason,
     createdAt: now,
   });
-  return { lead: storedLead, message: '入库成功' };
+  return { lead: storedLead, message: intakeStatus };
 }
 
 function syncCustomerByLead(lead: Lead): void {
@@ -487,6 +542,7 @@ export const leadFlowApi = {
   fetchLeadFlowConfig,
   updateLeadFlowConfig,
   fetchIntakeRecords,
+  cleanupIntakeRecord,
   intakeLead,
   syncCustomerByLead,
   manualAssignLead,

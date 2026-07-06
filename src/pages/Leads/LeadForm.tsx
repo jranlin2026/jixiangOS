@@ -12,14 +12,16 @@ import {
 import useLeadStore from '../../store/useLeadStore';
 import type { Lead } from '../../types/lead';
 import type { LeadSourceConfig, User } from '../../types/settings';
-import { roleApi, settingsApi } from '../../api';
+import { leadFlowApi, settingsApi } from '../../api';
 import { RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
-import { canReceiveLead } from '../../shared/utils/permissions';
-import type { Role } from '../../types/role';
+import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { applyCurrentLeadInputBy, getCurrentLeadInputName } from '../../shared/utils/leadInputAttribution';
 import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
+import useAuthStore from '../../store/useAuthStore';
+import type { LeadFlowConfig } from '../../types/lead';
+import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 
 interface LeadFormProps {
   open: boolean;
@@ -30,10 +32,11 @@ interface LeadFormProps {
 
 const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) => {
   const { create, update } = useLeadStore();
+  const currentUser = useAuthStore((state) => state.currentUser);
   const isEdit = Boolean(lead);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [roles, setRoles] = useState<Role[]>([]);
+  const [leadFlowConfig, setLeadFlowConfig] = useState<LeadFlowConfig | null>(null);
   const [submitError, setSubmitError] = useState('');
 
   const parentSources = useMemo(
@@ -85,16 +88,18 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
   });
 
   useEffect(() => {
+    if (!open) return;
+
     settingsApi.fetchLeadSourceConfigs().then((res) => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
     });
-    settingsApi.fetchUsers({ isActive: true }).then((res) => {
+    settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
     });
-    roleApi.getRoles({ isActive: true }).then((res) => {
-      if (res.code === 0) setRoles(res.data);
+    leadFlowApi.fetchLeadFlowConfig().then((res) => {
+      if (res.code === 0) setLeadFlowConfig(res.data);
     });
-  }, []);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -122,10 +127,16 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     });
   }, [open, lead, sourceOptions, users]);
 
-  const salesUsers = users.filter((user) => canReceiveLead(user, roles));
+  const canAssignLeads = hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG);
+  const assignableUsers = getScopedLeadAssignmentCandidates(users, leadFlowConfig, 'leads', currentUser);
   const selectedSourceKey = sourceOptions.find((option) => (
     option.parentName === form.source && option.childName === (form.sourceName || '')
   ))?.key || '';
+  const assignmentHelpText = !canAssignLeads
+    ? isEdit ? '当前角色无分配权限，保存时不会修改分配销售' : '当前角色无分配权限，入库后等待分配'
+    : assignableUsers.length
+      ? '候选人来自线索流转参与成员，并按当前角色的数据范围过滤'
+      : '暂无可分配成员，请检查线索流转参与成员或当前角色的数据范围';
 
   const handleChange = (field: string) => (event: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [field]: event.target.value });
@@ -151,8 +162,15 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
 
   const handleSubmit = async () => {
     const tags = form.tags ? form.tags.split(',').map((tag) => tag.trim()).filter(Boolean) : [];
+    const effectiveOwner = canAssignLeads
+      ? form.owner
+      : isEdit
+        ? (lead?.assignedTo || lead?.owner || '待分配')
+        : '待分配';
     const payload = {
       ...form,
+      owner: effectiveOwner,
+      assignedTo: effectiveOwner === '待分配' ? undefined : effectiveOwner,
       phone: normalizePhoneForStorage(form.phone),
       sourceType: normalizeResourceOwnership(form.sourceType),
       status: lead?.status || '新线索',
@@ -260,12 +278,29 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
               <MenuItem key={user.id} value={user.id}>{user.name}（{user.positionName || '未设置职位'}）</MenuItem>
             ))}
           </TextField>
-          <TextField select label="分配销售" value={form.owner} onChange={handleChange('owner')} fullWidth helperText="开启自动分配时会按流转规则覆盖">
-            <MenuItem value="待分配">待分配</MenuItem>
-            {salesUsers.map((user) => (
-              <MenuItem key={user.id} value={user.name}>{user.name}（{user.positionName || '未设置职位'}）</MenuItem>
-            ))}
-          </TextField>
+          {canAssignLeads ? (
+            <TextField
+              select
+              label="分配销售"
+              value={form.owner}
+              onChange={handleChange('owner')}
+              fullWidth
+              helperText={assignmentHelpText}
+            >
+              <MenuItem value="待分配">待分配</MenuItem>
+              {assignableUsers.map((user) => (
+                <MenuItem key={user.id} value={user.name}>{user.name}（{user.positionName || '未设置职位'}）</MenuItem>
+              ))}
+            </TextField>
+          ) : (
+            <TextField
+              label="分配销售"
+              value={isEdit ? (lead?.assignedTo || lead?.owner || '待分配') : '待分配'}
+              fullWidth
+              InputProps={{ readOnly: true }}
+              helperText={assignmentHelpText}
+            />
+          )}
           <TextField label="标签（逗号分隔）" value={form.tags} onChange={handleChange('tags')} fullWidth sx={{ gridColumn: '1 / -1' }} />
           <TextField label="备注" value={form.remark} onChange={handleChange('remark')} fullWidth multiline minRows={3} sx={{ gridColumn: '1 / -1' }} />
         </Box>

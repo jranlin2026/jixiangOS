@@ -1,3 +1,5 @@
+import { isPhoneNumberValid } from './phoneNumber';
+
 type ContactLike = {
   phone?: string | null;
   wechat?: string | null;
@@ -10,6 +12,10 @@ export const isBlankContactValue = (value?: string | null): boolean => {
 
 export const canCompleteContactField = (currentValue?: string | null): boolean => (
   isBlankContactValue(currentValue)
+);
+
+export const canCompletePhoneField = (currentValue?: string | null): boolean => (
+  canCompleteContactField(currentValue) || !isPhoneNumberValid(String(currentValue || ''))
 );
 
 export function applyContactEditLock<T extends ContactLike>(
@@ -26,7 +32,10 @@ export function applyContactEditLock<T extends ContactLike>(
       (next as ContactLike)[field] = isBlankContactValue(nextValue) ? '' : String(nextValue).trim();
       return;
     }
-    if (canCompleteContactField(currentValue)) {
+    const canComplete = field === 'phone'
+      ? canCompletePhoneField(currentValue)
+      : canCompleteContactField(currentValue);
+    if (canComplete) {
       (next as ContactLike)[field] = isBlankContactValue(nextValue) ? '' : String(nextValue).trim();
       return;
     }

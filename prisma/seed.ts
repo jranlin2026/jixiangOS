@@ -11,7 +11,6 @@ import { mockFinanceDailyRecords, mockChannelROI } from '../src/api/mock/data/fi
 import { mockProducts } from '../src/api/mock/data/products';
 import { mockProductLevelConfigs } from '../src/api/mock/data/productLevels';
 import { mockRefunds } from '../src/api/mock/data/refunds';
-import { mockUpgradePool } from '../src/api/mock/data/upgradePool';
 import { mockCommissionRules } from '../src/api/mock/data/commissionRules';
 import { mockTags } from '../src/api/mock/data/tags';
 import {
@@ -138,7 +137,11 @@ async function main() {
       update: {
         name: department.name,
         code: department.code,
+        description: department.description,
+        parentId: department.parentId,
+        managerId: department.managerId,
         memberCount: department.memberCount,
+        sortOrder: department.sortOrder || 0,
         isActive: department.isActive,
         updatedAt: new Date(department.updatedAt),
       },
@@ -146,7 +149,11 @@ async function main() {
         id: department.id,
         name: department.name,
         code: department.code,
+        description: department.description,
+        parentId: department.parentId,
+        managerId: department.managerId,
         memberCount: department.memberCount,
+        sortOrder: department.sortOrder || 0,
         isActive: department.isActive,
         createdAt: new Date(department.createdAt),
         updatedAt: new Date(department.updatedAt),
@@ -279,9 +286,7 @@ async function main() {
     { key: STORAGE_KEYS.ORDER_TYPE_CONFIGS, value: DEFAULT_ORDER_TYPE_CONFIGS },
     { key: STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, value: DEFAULT_LIFECYCLE_STATUS_CONFIGS },
     { key: STORAGE_KEYS.REFUNDS, value: mockRefunds },
-    { key: STORAGE_KEYS.UPGRADE_POOL, value: mockUpgradePool },
     { key: STORAGE_KEYS.AI_CARDS, value: [] },
-    { key: STORAGE_KEYS.CUSTOMER_SUCCESS_TASKS, value: [] },
     { key: STORAGE_KEYS.SERVICE_TICKETS, value: [] },
     { key: STORAGE_KEYS.OPPORTUNITIES, value: [] },
     { key: STORAGE_KEYS.LEAD_FLOW_CONFIG, value: DEFAULT_LEAD_FLOW_CONFIG },
@@ -300,9 +305,7 @@ async function main() {
     STORAGE_KEYS.COMMISSION_OPERATION_LOGS,
     STORAGE_KEYS.COMMISSION_SETTLEMENT_BATCHES,
     STORAGE_KEYS.REFUNDS,
-    STORAGE_KEYS.UPGRADE_POOL,
     STORAGE_KEYS.OPPORTUNITIES,
-    STORAGE_KEYS.CUSTOMER_SUCCESS_TASKS,
     STORAGE_KEYS.SERVICE_TICKETS,
     STORAGE_KEYS.AI_CARDS,
     STORAGE_KEYS.AI_SESSIONS,

@@ -12,26 +12,12 @@ import { productApi } from '../../api';
 import type { Product, ProductLevelConfig } from '../../types/product';
 import type { ProductLevel } from '../../types/common';
 import { formatCurrency } from '../../shared/utils/formatters';
-import {
-  DELIVERY_STAGES_899,
-  DELIVERY_STAGES_AGENT,
-  DELIVERY_STAGES_COURSE,
-  DELIVERY_STAGES_OEM,
-  getProductLevelColor,
-} from '../../shared/utils/constants';
+import { getProductLevelTagSx } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 
 type ProductForm = Omit<Product, 'id' | 'createdAt' | 'updatedAt'>;
 type ProductLevelConfigForm = Omit<ProductLevelConfig, 'id' | 'createdAt' | 'updatedAt'>;
-
-const levelStages: Record<string, string[]> = {
-  '899': [...DELIVERY_STAGES_899],
-  '课程': [...DELIVERY_STAGES_COURSE],
-  '代理': [...DELIVERY_STAGES_AGENT],
-  '贴牌': [...DELIVERY_STAGES_OEM],
-  '合伙人': [...DELIVERY_STAGES_899],
-};
 
 const emptyForm: ProductForm = {
   name: '',
@@ -40,7 +26,7 @@ const emptyForm: ProductForm = {
   originalPrice: 1299,
   description: '',
   features: [],
-  deliveryStages: [...DELIVERY_STAGES_899],
+  deliveryStages: [],
   isActive: true,
   sortOrder: 100,
 };
@@ -137,11 +123,7 @@ const ProductConfigPage: React.FC = () => {
   const activeLevelConfigs = levelConfigs.filter((level) => level.isActive);
 
   const handleLevelChange = (level: ProductLevel) => {
-    const nextStages = levelStages[level];
-    setForm((prev) => ({ ...prev, level, deliveryStages: nextStages || prev.deliveryStages }));
-    if (nextStages) {
-      setStagesText(joinLines(nextStages));
-    }
+    setForm((prev) => ({ ...prev, level }));
   };
 
   const handleSubmit = async () => {
@@ -208,13 +190,6 @@ const ProductConfigPage: React.FC = () => {
 
   const isLevelInUse = (levelName: string) => products.some((product) => product.level === levelName);
 
-  const levelColorMap = levelConfigs.reduce<Record<string, string>>((acc, level) => {
-    acc[level.name] = level.color;
-    return acc;
-  }, {});
-
-  const getLevelColor = (level: string) => levelColorMap[level] || getProductLevelColor(level);
-
   const colorOptions = ['#2196F3', '#00BCD4', '#4CAF50', '#9C27B0', '#FF9800', '#F44336', '#607D8B', '#111827'];
 
   const defaultLevel = activeLevelConfigs[0]?.name || '899';
@@ -237,8 +212,7 @@ const ProductConfigPage: React.FC = () => {
   const productLevelOptions = activeLevelConfigs.length ? activeLevelConfigs : levelConfigs;
 
   const renderLevelChip = (level: string) => {
-    const color = getLevelColor(level);
-    return <Chip label={level} size="small" sx={{ bgcolor: `${color}18`, color, fontWeight: 600 }} />;
+    return <Chip label={level} size="small" sx={getProductLevelTagSx(level)} />;
   };
 
   return (
@@ -492,7 +466,7 @@ const ProductConfigPage: React.FC = () => {
                 <Chip
                   label={levelForm.name}
                   size="small"
-                  sx={{ bgcolor: `${levelForm.color}18`, color: levelForm.color, fontWeight: 600 }}
+                  sx={getProductLevelTagSx(levelForm.name)}
                 />
               </Box>
             )}

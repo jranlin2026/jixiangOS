@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import { authApi, roleApi, settingsApi } from './index';
 import { DEFAULT_USER_PASSWORD } from '../shared/utils/auth';
 import { STORAGE_KEYS } from '../shared/utils/constants';
-import { DEFAULT_ROLES } from '../shared/utils/organizationConfig';
-import { CAPABILITY_KEYS, hasPermission, PERMISSION_KEYS, roleHasPermission, sanitizeRolePermissions, toAuthenticatedUser } from '../shared/utils/permissions';
+import { DEFAULT_ROLES, mergeRoleWithDefaultAccess } from '../shared/utils/organizationConfig';
+import { CAPABILITY_KEYS, canReceiveLead, hasPermission, PERMISSION_KEYS, roleHasPermission, sanitizeRolePermissions, toAuthenticatedUser } from '../shared/utils/permissions';
 import type { Role } from '../types/role';
 
 const appSource = readFileSync(join(process.cwd(), 'src', 'App.tsx'), 'utf8');
@@ -13,6 +13,11 @@ const sidebarSource = readFileSync(join(process.cwd(), 'src', 'layouts', 'Sideba
 const settingsSource = readFileSync(join(process.cwd(), 'src', 'pages', 'Settings', 'index.tsx'), 'utf8');
 const rolePermissionSource = readFileSync(join(process.cwd(), 'src', 'pages', 'Settings', 'RolePermission.tsx'), 'utf8');
 assert.match(appSource, /ProtectedRoute permissionKey=\{PERMISSION_KEYS\.CUSTOMERS\}/);
+assert.match(appSource, /ROUTES\.GEO/);
+assert.match(sidebarSource, /ROUTES\.GEO/);
+assert.match(rolePermissionSource, /PERMISSION_KEYS\.GEO_OVERVIEW/);
+assert.match(rolePermissionSource, /PERMISSION_KEYS\.GEO_CONTENT/);
+assert.match(rolePermissionSource, /PERMISSION_KEYS\.GEO_ANALYTICS/);
 assert.doesNotMatch(appSource, /PERMISSION_KEYS\.COMMISSION|PERMISSION_KEYS\.REFUND_CENTER/);
 assert.doesNotMatch(sidebarSource, /PERMISSION_KEYS\.COMMISSION|PERMISSION_KEYS\.REFUND_CENTER/);
 assert.doesNotMatch(sidebarSource, /group=leadCustomer[\s\S]*PERMISSION_KEYS\.LEADS_FLOW_CONFIG/);
@@ -21,11 +26,33 @@ assert.doesNotMatch(rolePermissionSource, /label:\s*'提成'/);
 assert.doesNotMatch(rolePermissionSource, /label:\s*'退款中心'/);
 assert.match(rolePermissionSource, /财务中心/);
 assert.match(rolePermissionSource, /订单分账/);
-assert.match(rolePermissionSource, /月度发放/);
-assert.match(rolePermissionSource, /退款付款/);
-assert.match(rolePermissionSource, /规则配置/);
+assert.match(rolePermissionSource, /员工提成月报/);
+assert.match(rolePermissionSource, /提成规则/);
+assert.match(rolePermissionSource, /售后服务/);
+assert.match(rolePermissionSource, /售后挽回订单列表/);
+assert.match(rolePermissionSource, /售后挽回订单审核操作/);
+assert.match(rolePermissionSource, /新增售后挽回订单/);
+assert.match(rolePermissionSource, /编辑售后挽回订单/);
+assert.match(rolePermissionSource, /删除售后挽回订单/);
+assert.match(rolePermissionSource, /售后挽回订单修改记录/);
+assert.match(rolePermissionSource, /售后挽回订单数据/);
+assert.match(rolePermissionSource, /售后挽回订单审核台数据/);
+assert.doesNotMatch(rolePermissionSource, /订单退款|退款挽回单|新建挽回单|审核挽回单/);
+assert.doesNotMatch(rolePermissionSource, /售后工单/);
+assert.doesNotMatch(rolePermissionSource, /退款冲销/);
+assert.doesNotMatch(rolePermissionSource, /退款付款/);
+assert.match(rolePermissionSource, /客户列表/);
+assert.match(rolePermissionSource, /查看客户资料/);
+assert.match(rolePermissionSource, /编辑客户/);
+assert.match(rolePermissionSource, /分配客户/);
+assert.doesNotMatch(rolePermissionSource, /客户画像/);
+assert.doesNotMatch(rolePermissionSource, /AI名片/);
 assert.match(rolePermissionSource, /客户等级/);
 assert.match(rolePermissionSource, /线索流转/);
+assert.match(rolePermissionSource, /label:\s*'资产管理'/);
+assert.match(rolePermissionSource, /label:\s*'资产总览'/);
+assert.match(rolePermissionSource, /label:\s*'查看敏感字段'/);
+assert.match(rolePermissionSource, /label:\s*'导入导出'/);
 assert.match(rolePermissionSource, /数据维护/);
 assert.match(rolePermissionSource, /label:\s*'线索列表'/);
 assert.match(rolePermissionSource, /label:\s*'入库情况'/);
@@ -58,12 +85,72 @@ storage.clear();
 
 const marketRole = DEFAULT_ROLES.find((role) => role.code === 'market_specialist');
 assert.ok(marketRole);
+assert.equal(roleHasPermission(marketRole, PERMISSION_KEYS.GEO), true);
+assert.equal(roleHasPermission(marketRole, PERMISSION_KEYS.GEO_CONTENT), true);
 const defaultSalesManagerRole = DEFAULT_ROLES.find((role) => role.code === 'sales_manager');
 assert.ok(defaultSalesManagerRole);
 assert.equal(defaultSalesManagerRole.permissions.some((permission) => permission.module === '提成'), false);
 const defaultFinanceRole = DEFAULT_ROLES.find((role) => role.code === 'finance_specialist');
 assert.ok(defaultFinanceRole);
 assert.equal(defaultFinanceRole.permissions.some((permission) => permission.module === '财务中心/订单分账'), true);
+assert.equal(roleHasPermission(defaultFinanceRole, PERMISSION_KEYS.FINANCE), true);
+assert.equal(roleHasPermission(defaultFinanceRole, PERMISSION_KEYS.FINANCE_MY_COMMISSION), false);
+assert.equal(roleHasPermission(defaultFinanceRole, PERMISSION_KEYS.FINANCE_SETTLEMENT), true);
+assert.equal(roleHasPermission(defaultFinanceRole, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT), true);
+
+const defaultSalesRole = DEFAULT_ROLES.find((role) => role.code === 'sales_consultant');
+assert.ok(defaultSalesRole);
+const savedSalesRoleWithoutLeadActions = mergeRoleWithDefaultAccess({
+  ...defaultSalesRole,
+  permissions: [{ module: PERMISSION_KEYS.LEADS_DETAIL, actions: ['read'] }],
+});
+assert.equal(roleHasPermission(savedSalesRoleWithoutLeadActions, PERMISSION_KEYS.LEADS_DETAIL), true);
+assert.equal(roleHasPermission(savedSalesRoleWithoutLeadActions, PERMISSION_KEYS.LEADS_CREATE), false);
+assert.equal(roleHasPermission(savedSalesRoleWithoutLeadActions, PERMISSION_KEYS.LEADS_FLOW_CONFIG), false);
+const authenticatedSales = toAuthenticatedUser({
+  id: 'user-sales-assets',
+  name: 'Sales Assets',
+  account: 'sales_assets',
+  email: '',
+  phone: '',
+  role: defaultSalesRole.name,
+  roleId: defaultSalesRole.id,
+  isActive: true,
+  createdAt: '2026-07-03T00:00:00.000Z',
+  updatedAt: '2026-07-03T00:00:00.000Z',
+}, DEFAULT_ROLES);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS), true);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_OVERVIEW), true);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_DEVICES), true);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_PHONES), true);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_ACCOUNTS), true);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_RISKS), true);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_LOGS), true);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_OFFBOARDING), true);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS, 'write'), false);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_DEVICES, 'write'), false);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW), false);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_IMPORT_EXPORT, 'write'), false);
+
+const defaultOpsRole = DEFAULT_ROLES.find((role) => role.code === 'ops_admin');
+assert.ok(defaultOpsRole);
+assert.equal(roleHasPermission(defaultOpsRole, PERMISSION_KEYS.GEO, 'write'), true);
+assert.equal(roleHasPermission(defaultOpsRole, PERMISSION_KEYS.GEO_ANALYTICS), true);
+const authenticatedOps = toAuthenticatedUser({
+  id: 'user-ops-assets',
+  name: 'Ops Assets',
+  account: 'ops_assets',
+  email: '',
+  phone: '',
+  role: defaultOpsRole.name,
+  roleId: defaultOpsRole.id,
+  isActive: true,
+  createdAt: '2026-07-03T00:00:00.000Z',
+  updatedAt: '2026-07-03T00:00:00.000Z',
+}, DEFAULT_ROLES);
+assert.equal(hasPermission(authenticatedOps, PERMISSION_KEYS.ASSETS, 'write'), true);
+assert.equal(hasPermission(authenticatedOps, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW), true);
+assert.equal(hasPermission(authenticatedOps, PERMISSION_KEYS.ASSETS_IMPORT_EXPORT, 'write'), true);
 
 const createdMarketUser = await settingsApi.createUser({
   name: 'Permission Market',
@@ -114,6 +201,17 @@ const financeSettlementRole: Role = {
 };
 assert.equal(roleHasPermission(financeSettlementRole, '财务中心'), true);
 assert.equal(roleHasPermission(financeSettlementRole, '财务中心/订单分账'), true);
+assert.equal(roleHasPermission(financeSettlementRole, PERMISSION_KEYS.FINANCE_MY_COMMISSION), false);
+
+const financeParentOnlyRole: Role = {
+  ...legacyOpportunityRole,
+  id: 'role-finance-parent-only',
+  code: 'finance_parent_only',
+  permissions: [{ module: PERMISSION_KEYS.FINANCE, actions: ['read'] }],
+};
+assert.equal(roleHasPermission(financeParentOnlyRole, PERMISSION_KEYS.FINANCE), true);
+assert.equal(roleHasPermission(financeParentOnlyRole, PERMISSION_KEYS.FINANCE_MY_COMMISSION), false);
+assert.equal(roleHasPermission(financeParentOnlyRole, PERMISSION_KEYS.FINANCE_SETTLEMENT), false);
 
 const customerChildRole: Role = {
   ...legacyOpportunityRole,
@@ -122,6 +220,15 @@ const customerChildRole: Role = {
   permissions: [{ module: PERMISSION_KEYS.CUSTOMER_CREATE, actions: ['read'] }],
 };
 assert.equal(roleHasPermission(customerChildRole, PERMISSION_KEYS.CUSTOMERS), true);
+
+const customerAssignRole: Role = {
+  ...legacyOpportunityRole,
+  id: 'role-customer-assign',
+  code: 'customer_assign',
+  permissions: [{ module: PERMISSION_KEYS.CUSTOMER_ASSIGN, actions: ['read'] }],
+};
+assert.equal(roleHasPermission(customerAssignRole, PERMISSION_KEYS.CUSTOMERS), true);
+assert.equal(roleHasPermission(customerAssignRole, PERMISSION_KEYS.CUSTOMER_ASSIGN, 'write'), true);
 
 const leadFollowRole: Role = {
   ...legacyOpportunityRole,
@@ -219,3 +326,11 @@ const authenticatedMarket = toAuthenticatedUser({
 }, migratedRoles.data);
 assert.equal(hasPermission(authenticatedMarket, PERMISSION_KEYS.LEADS), true);
 assert.equal(hasPermission(authenticatedMarket, PERMISSION_KEYS.CUSTOMERS), false);
+assert.equal(hasPermission(authenticatedMarket, PERMISSION_KEYS.ASSETS), true);
+assert.equal(hasPermission(authenticatedMarket, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW), false);
+
+assert.equal(canReceiveLead({
+  role: '超级管理员',
+  roleId: 'role-super-admin',
+  isActive: true,
+}, DEFAULT_ROLES), false);

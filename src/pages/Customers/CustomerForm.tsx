@@ -9,14 +9,18 @@ import {
   TextField,
 } from '@mui/material';
 import useCustomerStore from '../../store/useCustomerStore';
-import { settingsApi } from '../../api';
+import { leadFlowApi, settingsApi } from '../../api';
 import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, normalizeResourceOwnership } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
 import type { Customer } from '../../types/customer';
+import type { LeadFlowConfig } from '../../types/lead';
 import type { CustomerLevelConfig, LeadSourceConfig, User } from '../../types/settings';
 import { applyCurrentLeadInputBy, getCurrentLeadInputName } from '../../shared/utils/leadInputAttribution';
 import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
+import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution';
+import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
+import useAuthStore from '../../store/useAuthStore';
 
 interface CustomerFormProps {
   open: boolean;
@@ -35,8 +39,10 @@ type SourceOption = {
 
 const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, onSuccess }) => {
   const { create, update } = useCustomerStore();
+  const currentUser = useAuthStore((state) => state.currentUser);
   const isEdit = !!customer;
   const [users, setUsers] = useState<User[]>([]);
+  const [leadFlowConfig, setLeadFlowConfig] = useState<LeadFlowConfig | null>(null);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
 
@@ -69,6 +75,10 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   }), [childSources, parentSources]);
 
   const defaultOwner = useMemo(() => getCurrentLeadInputName(users[0]?.name || ''), [users]);
+  const assignableUsers = useMemo(
+    () => getScopedLeadAssignmentCandidates(users, leadFlowConfig, 'customers', currentUser),
+    [currentUser, leadFlowConfig, users],
+  );
   const customerLevelOptions = useMemo(() => {
     const activeConfigs = customerLevelConfigs.filter((item) => item.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
     const options = activeConfigs.length
@@ -103,8 +113,11 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   useEffect(() => {
     if (!open) return;
 
-    settingsApi.fetchUsers({ isActive: true }).then((res) => {
+    settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
+    });
+    leadFlowApi.fetchLeadFlowConfig().then((res) => {
+      if (res.code === 0) setLeadFlowConfig(res.data);
     });
     settingsApi.fetchLeadSourceConfigs().then((res) => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
@@ -118,7 +131,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     if (!open) return;
 
     const defaultSourceOption = sourceOptions[0];
-    const fallbackOwner = customer?.owner || defaultOwner;
+    const fallbackOwner = customer?.owner || assignableUsers[0]?.name || '';
     setForm({
       name: customer?.name || '',
       company: customer?.company || '',
@@ -138,7 +151,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       tags: customer?.tags?.join(', ') || '',
       remark: customer?.remark || '',
     });
-  }, [open, customer, defaultOwner, sourceOptions]);
+  }, [open, customer, assignableUsers, defaultOwner, sourceOptions]);
 
   const selectedSourceKey = sourceOptions.find((option) => (
     option.parentName === form.leadSource && option.childName === (form.sourceName || '')
@@ -146,6 +159,14 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
 
   const handleChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [field]: e.target.value });
+  };
+
+  const handlePhoneChange = (value: string) => {
+    setForm((current) => ({
+      ...current,
+      phone: value,
+      city: completeCityFromPhone(current.city, value),
+    }));
   };
 
   const handleContributorSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -171,6 +192,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     const payload = {
       ...form,
       phone: normalizePhoneForStorage(form.phone),
+      city: completeCityFromPhone(form.city, form.phone),
       tags,
       sourceType: normalizeResourceOwnership(form.sourceType),
     };
@@ -189,6 +211,12 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       {user.name}（{user.positionName || '未设置职位'}）
     </MenuItem>
   ));
+  const ownerOptions = assignableUsers.map((user) => (
+    <MenuItem key={user.id} value={user.name}>
+      {`${user.name}${user.positionName ? ` (${user.positionName})` : ''}`}
+    </MenuItem>
+  ));
+  const shouldShowCurrentOwnerOption = form.owner && !assignableUsers.some((user) => user.name === form.owner);
   const missingContact = !form.phone.trim() && !form.wechat.trim();
   const phoneError = getPhoneNumberError(form.phone);
   const missingContributor = normalizeResourceOwnership(form.sourceType) === '个人资源' && !form.leadContributorName;
@@ -205,7 +233,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
           <PhoneNumberInput
             label="手机号"
             value={form.phone}
-            onChange={(value) => setForm({ ...form, phone: value })}
+            onChange={handlePhoneChange}
             error={showContactError}
             helperText={showContactError ? '手机号或微信至少填写一项' : ''}
             fullWidth
@@ -264,8 +292,22 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
               </MenuItem>
             ))}
           </TextField>
-          <TextField select label="分配销售" value={form.owner} onChange={handleChange('owner')} required fullWidth>
-            {userOptions}
+          <TextField
+            select
+            label="分配销售"
+            value={form.owner}
+            onChange={handleChange('owner')}
+            required
+            fullWidth
+            helperText={assignableUsers.length ? '候选人来自线索流转参与成员，并按当前角色的数据范围过滤' : '暂无可分配成员，请检查线索流转参与成员或当前角色的数据范围'}
+          >
+            {shouldShowCurrentOwnerOption && <MenuItem value={form.owner}>{form.owner}</MenuItem>}
+            {assignableUsers.length === 0 && (
+              <MenuItem value="" disabled>
+                当前角色数据范围内暂无可分配成员，请检查数据范围或线索流转参与成员配置。
+              </MenuItem>
+            )}
+            {ownerOptions}
           </TextField>
           <TextField select label="客户等级" value={form.customerLevel} onChange={handleChange('customerLevel')} fullWidth>
             {customerLevelOptions.map((level) => (

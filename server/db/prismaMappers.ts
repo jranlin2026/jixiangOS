@@ -24,13 +24,25 @@ export function mapPrismaDepartment(row: {
   id: string;
   name: string;
   code: string;
+  description?: string | null;
+  parentId?: string | null;
+  managerId?: string | null;
   memberCount: number;
+  sortOrder?: number | null;
   isActive: boolean;
   createdAt: Date | string;
   updatedAt: Date | string;
 }): Department {
   return {
-    ...row,
+    id: row.id,
+    name: row.name,
+    code: row.code,
+    description: row.description || undefined,
+    parentId: row.parentId || undefined,
+    managerId: row.managerId || undefined,
+    memberCount: row.memberCount,
+    sortOrder: row.sortOrder ?? undefined,
+    isActive: row.isActive,
     createdAt: isoRequired(row.createdAt),
     updatedAt: isoRequired(row.updatedAt),
   };
