@@ -127,8 +127,10 @@ assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_ACCOUNTS),
 assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_RISKS), true);
 assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_LOGS), true);
 assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_OFFBOARDING), true);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH), true);
 assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS, 'write'), false);
 assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_DEVICES, 'write'), false);
+assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write'), false);
 assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW), false);
 assert.equal(hasPermission(authenticatedSales, PERMISSION_KEYS.ASSETS_IMPORT_EXPORT, 'write'), false);
 
@@ -327,6 +329,7 @@ const authenticatedMarket = toAuthenticatedUser({
 assert.equal(hasPermission(authenticatedMarket, PERMISSION_KEYS.LEADS), true);
 assert.equal(hasPermission(authenticatedMarket, PERMISSION_KEYS.CUSTOMERS), false);
 assert.equal(hasPermission(authenticatedMarket, PERMISSION_KEYS.ASSETS), true);
+assert.equal(hasPermission(authenticatedMarket, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write'), true);
 assert.equal(hasPermission(authenticatedMarket, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW), false);
 
 assert.equal(canReceiveLead({

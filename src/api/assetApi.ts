@@ -9,6 +9,10 @@
   AssetImportType,
   AssetInternetAccount,
   AssetInternetAccountInput,
+  AssetMatrixPublishStats,
+  AssetMatrixPublishTarget,
+  AssetMatrixPublishTask,
+  AssetMatrixPublishTaskInput,
   AssetOffboardingTask,
   AssetOperationLog,
   AssetPhoneNumber,
@@ -22,6 +26,7 @@
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
+import { getBackendBaseUrl, readBackendToken, shouldUseBackendApi } from './backendClient';
 import { DEFAULT_PAGE_SIZE, STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import {
@@ -79,6 +84,10 @@ function logs(): AssetOperationLog[] {
 
 function offboardingTasks(): AssetOffboardingTask[] {
   return getStorageData<AssetOffboardingTask[]>(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS) || [];
+}
+
+function matrixPublishTasks(): AssetMatrixPublishTask[] {
+  return getStorageData<AssetMatrixPublishTask[]>(STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS) || [];
 }
 
 function maskPhone(value: string): string {
@@ -606,6 +615,18 @@ function visibleOffboardingTasks(scope = getCurrentDataVisibilityScope('assets')
   return rows.filter((task) => canViewAssetOffboardingTask(task, scope) || ids.has(task.assetId));
 }
 
+function visibleMatrixPublishTasks(scope = getCurrentDataVisibilityScope('assets')): AssetMatrixPublishTask[] {
+  const rows = matrixPublishTasks();
+  if (scope.unrestricted) return rows;
+  const visibleAccountIds = new Set(visibleAccounts(scope).map((account) => account.id));
+  return rows
+    .map((task) => ({
+      ...task,
+      targets: task.targets.filter((target) => visibleAccountIds.has(target.accountId)),
+    }))
+    .filter((task) => task.targets.length);
+}
+
 function getPhoneDevice(phone?: AssetPhoneNumber): AssetDevice | undefined {
   return phone ? getDevice(phone.deviceId) : undefined;
 }
@@ -694,6 +715,69 @@ function detailLogs(assetIds: string[]): AssetOperationLog[] {
 function detailRisks(assetIds: string[]): AssetRisk[] {
   const idSet = new Set(assetIds.filter(Boolean));
   return visibleRisks().filter((risk) => idSet.has(risk.targetId));
+}
+
+function matrixTargetFromAccount(account: AssetInternetAccount): AssetMatrixPublishTarget {
+  const phone = getPhone(account.phoneId);
+  const device = getPhoneDevice(phone);
+  return {
+    id: `matrix-target-${Date.now()}-${account.id}-${Math.random().toString(16).slice(2, 8)}`,
+    accountId: account.id,
+    accountNo: account.accountNo,
+    platform: account.platform,
+    accountName: account.accountName,
+    assignee: account.currentUser,
+    department: account.department,
+    phoneId: phone?.id,
+    phoneNumberMasked: phone?.phoneNumberMasked,
+    deviceId: device?.id,
+    deviceCode: device?.deviceCode,
+    deviceName: device?.deviceName,
+    status: 'pending',
+  };
+}
+
+function filterMatrixPublishTasks(rows: AssetMatrixPublishTask[], filters?: AssetFilters): AssetMatrixPublishTask[] {
+  const keyword = filters?.search?.trim().toLowerCase();
+  return rows.filter((task) => {
+    const matchesKeyword = !keyword || [
+      task.title,
+      task.copywriting,
+      task.remark,
+      ...task.targets.flatMap((target) => [
+        target.platform,
+        target.accountName,
+        target.accountNo,
+        target.assignee,
+        target.department,
+      ]),
+    ].some((value) => includesKeyword(value, keyword));
+    const matchesPlatform = !filters?.platform || task.targets.some((target) => target.platform === filters.platform);
+    const matchesStatus = !filters?.status || task.targets.some((target) => target.status === filters.status);
+    return matchesKeyword && matchesPlatform && matchesStatus;
+  });
+}
+
+function isMatrixTargetOverdue(target: AssetMatrixPublishTarget, dueAt: string, nowIso: string): boolean {
+  return target.status !== 'completed' && new Date(dueAt).getTime() < new Date(nowIso).getTime();
+}
+
+function summarizeMatrixTargets(
+  targets: AssetMatrixPublishTarget[],
+  dueAtByTargetId: Map<string, string>,
+  nowIso: string,
+  groupKey: keyof Pick<AssetMatrixPublishTarget, 'platform' | 'department' | 'assignee'>,
+): Array<{ platform?: string; department?: string; assignee?: string; total: number; completed: number; overdue: number }> {
+  const groups = new Map<string, { total: number; completed: number; overdue: number }>();
+  targets.forEach((target) => {
+    const key = String(target[groupKey] || '未分组');
+    const current = groups.get(key) || { total: 0, completed: 0, overdue: 0 };
+    current.total += 1;
+    if (target.status === 'completed') current.completed += 1;
+    if (isMatrixTargetOverdue(target, dueAtByTargetId.get(target.id) || '', nowIso)) current.overdue += 1;
+    groups.set(key, current);
+  });
+  return Array.from(groups.entries()).map(([key, value]) => ({ [groupKey]: key, ...value }));
 }
 
 async function fetchDashboard(): Promise<ApiResponse<AssetDashboard>> {
@@ -1256,6 +1340,123 @@ async function completeOffboardingTask(taskId: string): Promise<ApiResponse<Asse
   return createSuccessResponse(updated);
 }
 
+async function fetchMatrixPublishTasks(filters?: AssetFilters): Promise<ApiResponse<PaginatedResponse<AssetMatrixPublishTask>>> {
+  ensureInit();
+  await delay(120);
+  return createSuccessResponse(paginate(filterMatrixPublishTasks(visibleMatrixPublishTasks(), filters), filters));
+}
+
+async function createMatrixPublishTask(input: Partial<AssetMatrixPublishTaskInput>): Promise<ApiResponse<AssetMatrixPublishTask>> {
+  return guarded(() => {
+    const title = requiredText(input.title, '任务标题不能为空');
+    const dueAt = requiredText(input.dueAt, '截止时间不能为空');
+    const accountIds = Array.from(new Set((input.accountIds || []).map((id) => String(id || '').trim()).filter(Boolean)));
+    if (!accountIds.length) throw new Error('请选择发布账号');
+
+    const availableAccounts = accounts();
+    const selectedAccounts = accountIds.map((accountId) => {
+      const account = availableAccounts.find((item) => item.id === accountId);
+      if (!account) throw new Error('发布账号不存在或无权查看');
+      if (!String(account.currentUser || '').trim()) throw new Error(`${account.platform} / ${account.accountName} 缺少当前使用人，不能派发`);
+      return account;
+    });
+    const createdAt = now();
+    const task: AssetMatrixPublishTask = {
+      id: `matrix-task-${Date.now()}`,
+      title,
+      videoUrl: input.videoUrl || '',
+      videoFileName: input.videoFileName || '',
+      copywriting: input.copywriting || '',
+      remark: input.remark || '',
+      dueAt,
+      targets: selectedAccounts.map(matrixTargetFromAccount),
+      createdBy: '当前用户',
+      createdAt,
+      updatedAt: createdAt,
+    };
+    setStorageData(STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS, [task, ...matrixPublishTasks()]);
+    logAssetOperation('创建矩阵发布', '矩阵发布', task.id, task.title, `创建发布任务，目标账号${task.targets.length}个`);
+    return task;
+  });
+}
+
+async function uploadMatrixPublishVideo(file: File): Promise<ApiResponse<{ url: string; fileName: string } | null>> {
+  if (!shouldUseBackendApi()) return createErrorResponse('当前环境未启用后端上传');
+  try {
+    const headers = new Headers({
+      'Content-Type': file.type || 'application/octet-stream',
+      'X-File-Name': encodeURIComponent(file.name),
+    });
+    const token = readBackendToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    const response = await fetch(`${getBackendBaseUrl()}/uploads/matrix-video`, {
+      method: 'POST',
+      headers,
+      body: file,
+    });
+    const payload = await response.json().catch(() => null) as ApiResponse<{ url: string; fileName: string }> | null;
+    if (payload) return payload;
+    return createErrorResponse(`视频上传失败：HTTP ${response.status}`);
+  } catch (error: any) {
+    return createErrorResponse(error.message || '视频上传失败');
+  }
+}
+
+async function completeMatrixPublishTarget(taskId: string, accountId: string): Promise<ApiResponse<AssetMatrixPublishTarget | null>> {
+  return guarded(() => {
+    let completedTarget: AssetMatrixPublishTarget | null = null;
+    const visibleAccountIds = new Set(visibleAccounts().map((account) => account.id));
+    const nextTasks = matrixPublishTasks().map((task) => {
+      if (task.id !== taskId) return task;
+      const nextTargets = task.targets.map((target) => {
+        if (target.accountId !== accountId) return target;
+        if (!visibleAccountIds.has(target.accountId)) throw new Error('无权完成该账号任务');
+        completedTarget = {
+          ...target,
+          status: 'completed',
+          completedAt: now(),
+        };
+        return completedTarget;
+      });
+      return {
+        ...task,
+        targets: nextTargets,
+        updatedAt: now(),
+      };
+    });
+    if (!completedTarget) throw new Error('发布任务不存在');
+    setStorageData(STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS, nextTasks);
+    const target = completedTarget as AssetMatrixPublishTarget;
+    logAssetOperation('完成矩阵发布', '矩阵发布', taskId, target.accountName, `${target.platform} / ${target.accountName} 已完成发布`);
+    return target;
+  });
+}
+
+async function fetchMatrixPublishStats(nowIso = now()): Promise<ApiResponse<AssetMatrixPublishStats>> {
+  ensureInit();
+  await delay(120);
+  const visibleTasks = visibleMatrixPublishTasks();
+  const dueAtByTargetId = new Map<string, string>();
+  const targets = visibleTasks.flatMap((task) => {
+    task.targets.forEach((target) => dueAtByTargetId.set(target.id, task.dueAt));
+    return task.targets;
+  });
+  const overdueAccounts = targets.filter((target) => isMatrixTargetOverdue(target, dueAtByTargetId.get(target.id) || '', nowIso));
+  const completedTargets = targets.filter((target) => target.status === 'completed').length;
+  const stats: AssetMatrixPublishStats = {
+    totalTargets: targets.length,
+    completedTargets,
+    pendingTargets: targets.length - completedTargets,
+    overdueTargets: overdueAccounts.length,
+    completionRate: targets.length ? Math.round((completedTargets / targets.length) * 100) : 0,
+    overdueAccounts,
+    byPlatform: summarizeMatrixTargets(targets, dueAtByTargetId, nowIso, 'platform') as AssetMatrixPublishStats['byPlatform'],
+    byDepartment: summarizeMatrixTargets(targets, dueAtByTargetId, nowIso, 'department') as AssetMatrixPublishStats['byDepartment'],
+    byAssignee: summarizeMatrixTargets(targets, dueAtByTargetId, nowIso, 'assignee') as AssetMatrixPublishStats['byAssignee'],
+  };
+  return createSuccessResponse(stats);
+}
+
 function getAccountPlatformOptions(): string[] {
   return Array.from(new Set(visibleAccounts().map((account) => account.platform))).filter(Boolean);
 }
@@ -1354,6 +1555,11 @@ export const assetApi = {
   fetchRisks,
   fetchOperationLogs,
   fetchOffboardingTasks,
+  fetchMatrixPublishTasks,
+  createMatrixPublishTask,
+  uploadMatrixPublishVideo,
+  completeMatrixPublishTarget,
+  fetchMatrixPublishStats,
   fetchDetail,
   updateRiskStatus,
   completeOffboardingTask,

@@ -91,6 +91,7 @@ function initializeAssetStorage(): void {
   initializeStorage(STORAGE_KEYS.ASSET_RISKS, businessSeed(mockAssetRisks, []));
   initializeStorage(STORAGE_KEYS.ASSET_OPERATION_LOGS, businessSeed(mockAssetOperationLogs, []));
   initializeStorage(STORAGE_KEYS.ASSET_OFFBOARDING_TASKS, businessSeed(mockAssetOffboardingTasks, []));
+  initializeStorage(STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS, []);
 }
 
 /** 初始化所有 Mock 数据到 localStorage */

@@ -10,6 +10,10 @@ import type {
   AssetImportType,
   AssetInternetAccount,
   AssetInternetAccountInput,
+  AssetMatrixPublishStats,
+  AssetMatrixPublishTarget,
+  AssetMatrixPublishTask,
+  AssetMatrixPublishTaskInput,
   AssetOffboardingTask,
   AssetOperationLog,
   AssetPhoneNumber,
@@ -33,6 +37,8 @@ interface AssetState {
   devices: AssetDevice[];
   phones: AssetPhoneNumber[];
   accounts: AssetInternetAccount[];
+  matrixPublishTasks: AssetMatrixPublishTask[];
+  matrixPublishStats: AssetMatrixPublishStats | null;
   risks: AssetRisk[];
   logs: AssetOperationLog[];
   offboardingTasks: AssetOffboardingTask[];
@@ -44,6 +50,8 @@ interface AssetState {
   fetchDevices: (filters?: AssetFilters) => Promise<void>;
   fetchPhones: (filters?: AssetFilters) => Promise<void>;
   fetchAccounts: (filters?: AssetFilters) => Promise<void>;
+  fetchMatrixPublishTasks: (filters?: AssetFilters) => Promise<void>;
+  fetchMatrixPublishStats: () => Promise<void>;
   fetchRisks: (filters?: AssetFilters) => Promise<void>;
   fetchLogs: (filters?: AssetFilters) => Promise<void>;
   fetchOffboardingTasks: (filters?: AssetFilters) => Promise<void>;
@@ -57,6 +65,8 @@ interface AssetState {
   createAccount: (input: Partial<AssetInternetAccountInput>) => Promise<AssetInternetAccount | null>;
   updateAccount: (id: string, input: Partial<AssetInternetAccountInput>) => Promise<AssetInternetAccount | null>;
   deleteAccount: (id: string) => Promise<AssetInternetAccount | null>;
+  createMatrixPublishTask: (input: Partial<AssetMatrixPublishTaskInput>) => Promise<AssetMatrixPublishTask | null>;
+  completeMatrixPublishTarget: (taskId: string, accountId: string) => Promise<AssetMatrixPublishTarget | null>;
   updateRiskStatus: (riskId: string, status: AssetRiskStatus) => Promise<void>;
   completeOffboardingTask: (taskId: string) => Promise<void>;
   revealSensitiveField: (type: AssetType, id: string, field: AssetSensitiveField) => Promise<AssetSensitiveRevealResult | null>;
@@ -76,6 +86,8 @@ const useAssetStore = create<AssetState>((set, get) => ({
   devices: [],
   phones: [],
   accounts: [],
+  matrixPublishTasks: [],
+  matrixPublishStats: null,
   risks: [],
   logs: [],
   offboardingTasks: [],
@@ -117,6 +129,21 @@ const useAssetStore = create<AssetState>((set, get) => ({
     } catch (e: any) {
       set({ error: e.message, loading: false });
     }
+  },
+
+  fetchMatrixPublishTasks: async (filters) => {
+    set({ loading: true, error: null });
+    try {
+      const res = await assetApi.fetchMatrixPublishTasks(filters);
+      if (res.code === 0) set({ matrixPublishTasks: res.data.items, pagination: res.data.pagination, loading: false });
+    } catch (e: any) {
+      set({ error: e.message, loading: false });
+    }
+  },
+
+  fetchMatrixPublishStats: async () => {
+    const res = await assetApi.fetchMatrixPublishStats();
+    if (res.code === 0) set({ matrixPublishStats: res.data });
   },
 
   fetchRisks: async (filters) => {
@@ -244,6 +271,26 @@ const useAssetStore = create<AssetState>((set, get) => ({
       return null;
     }
     await get().fetchDashboard();
+    return res.data;
+  },
+
+  createMatrixPublishTask: async (input) => {
+    const res = await assetApi.createMatrixPublishTask(input);
+    if (res.code !== 0) {
+      set({ error: res.message });
+      return null;
+    }
+    await get().fetchMatrixPublishStats();
+    return res.data;
+  },
+
+  completeMatrixPublishTarget: async (taskId, accountId) => {
+    const res = await assetApi.completeMatrixPublishTarget(taskId, accountId);
+    if (res.code !== 0) {
+      set({ error: res.message });
+      return null;
+    }
+    await get().fetchMatrixPublishStats();
     return res.data;
   },
 

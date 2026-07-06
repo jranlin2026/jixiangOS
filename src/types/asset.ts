@@ -117,6 +117,61 @@ export interface AssetOffboardingTask {
   handler?: string;
 }
 
+export type AssetMatrixPublishTargetStatus = 'pending' | 'completed';
+
+export interface AssetMatrixPublishTarget {
+  id: string;
+  accountId: string;
+  accountNo: string;
+  platform: string;
+  accountName: string;
+  assignee: string;
+  department: string;
+  phoneId?: string;
+  phoneNumberMasked?: string;
+  deviceId?: string;
+  deviceCode?: string;
+  deviceName?: string;
+  status: AssetMatrixPublishTargetStatus;
+  completedAt?: string;
+}
+
+export interface AssetMatrixPublishTask {
+  id: string;
+  title: string;
+  videoUrl?: string;
+  videoFileName?: string;
+  copywriting: string;
+  remark?: string;
+  dueAt: string;
+  targets: AssetMatrixPublishTarget[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AssetMatrixPublishTaskInput {
+  title: string;
+  videoUrl?: string;
+  videoFileName?: string;
+  copywriting: string;
+  remark?: string;
+  dueAt: string;
+  accountIds: string[];
+}
+
+export interface AssetMatrixPublishStats {
+  totalTargets: number;
+  completedTargets: number;
+  pendingTargets: number;
+  overdueTargets: number;
+  completionRate: number;
+  overdueAccounts: AssetMatrixPublishTarget[];
+  byPlatform: Array<{ platform: string; total: number; completed: number; overdue: number }>;
+  byDepartment: Array<{ department: string; total: number; completed: number; overdue: number }>;
+  byAssignee: Array<{ assignee: string; total: number; completed: number; overdue: number }>;
+}
+
 export interface AssetFilters {
   search?: string;
   platform?: string;

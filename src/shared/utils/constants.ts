@@ -296,6 +296,7 @@ export const STORAGE_KEYS = {
   ASSET_RISKS: `${STORAGE_PREFIX}asset_risks`,
   ASSET_OPERATION_LOGS: `${STORAGE_PREFIX}asset_operation_logs`,
   ASSET_OFFBOARDING_TASKS: `${STORAGE_PREFIX}asset_offboarding_tasks`,
+  ASSET_MATRIX_PUBLISH_TASKS: `${STORAGE_PREFIX}asset_matrix_publish_tasks`,
   LEAD_FLOW_CONFIG: `${STORAGE_PREFIX}lead_flow_config`,
   LEAD_INTAKE_RECORDS: `${STORAGE_PREFIX}lead_intake_records`,
   LEAD_SOURCE_CONFIGS: `${STORAGE_PREFIX}lead_source_configs`,

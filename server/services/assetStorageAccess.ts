@@ -2,6 +2,7 @@ import type { AuthenticatedUser } from '../../src/types/auth';
 import type {
   AssetDevice,
   AssetInternetAccount,
+  AssetMatrixPublishTask,
   AssetOffboardingTask,
   AssetOperationLog,
   AssetPhoneNumber,
@@ -20,6 +21,7 @@ const ASSET_STORAGE_KEYS = new Set<string>([
   STORAGE_KEYS.ASSET_RISKS,
   STORAGE_KEYS.ASSET_OPERATION_LOGS,
   STORAGE_KEYS.ASSET_OFFBOARDING_TASKS,
+  STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS,
 ]);
 
 const ASSET_WRITE_PERMISSIONS: Record<string, string[]> = {
@@ -29,6 +31,7 @@ const ASSET_WRITE_PERMISSIONS: Record<string, string[]> = {
   [STORAGE_KEYS.ASSET_RISKS]: [PERMISSION_KEYS.ASSETS, PERMISSION_KEYS.ASSETS_RISKS],
   [STORAGE_KEYS.ASSET_OPERATION_LOGS]: [PERMISSION_KEYS.ASSETS],
   [STORAGE_KEYS.ASSET_OFFBOARDING_TASKS]: [PERMISSION_KEYS.ASSETS, PERMISSION_KEYS.ASSETS_OFFBOARDING],
+  [STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS]: [PERMISSION_KEYS.ASSETS, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH],
 };
 
 type AssetStorageContext = {
@@ -154,6 +157,14 @@ export function filterAssetStorageData(
     .filter((log) => scope.unrestricted || visibleAssetIds.has(log.targetId));
   const offboardingTasks = asArray<AssetOffboardingTask>(data[STORAGE_KEYS.ASSET_OFFBOARDING_TASKS])
     .filter((task) => scope.unrestricted || hasVisibleName(scope, task.employeeName) || visibleAssetIds.has(task.assetId));
+  const matrixPublishTasks = asArray<AssetMatrixPublishTask>(data[STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS])
+    .map((task) => ({
+      ...task,
+      targets: scope.unrestricted
+        ? task.targets
+        : task.targets.filter((target) => visibleAssetIds.has(target.accountId) || hasVisibleName(scope, target.assignee)),
+    }))
+    .filter((task) => scope.unrestricted || task.targets.length);
 
   return {
     ...data,
@@ -163,6 +174,7 @@ export function filterAssetStorageData(
     [STORAGE_KEYS.ASSET_RISKS]: risks,
     [STORAGE_KEYS.ASSET_OPERATION_LOGS]: logs,
     [STORAGE_KEYS.ASSET_OFFBOARDING_TASKS]: offboardingTasks,
+    [STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS]: matrixPublishTasks,
   };
 }
 

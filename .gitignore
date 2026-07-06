@@ -12,6 +12,7 @@ vite.config.d.ts.map
 .env.*
 !.env.example
 backups/
+uploads/
 .DS_Store
 Thumbs.db
 .codex-*.log

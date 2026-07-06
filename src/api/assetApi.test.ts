@@ -39,6 +39,77 @@ async function resetAssets() {
 await resetAssets();
 
 {
+  const unassigned = await assetApi.createInternetAccount({
+    platform: 'Douyin',
+    accountName: 'No Assignee Matrix Account',
+    loginAccount: 'matrix_no_assignee',
+    ownerSubject: '公司',
+    department: 'Market',
+    owner: 'Market Owner',
+    currentUser: '',
+    permissionStatus: '正常',
+    accountStatus: '正常',
+    riskLevel: '低',
+    serviceProvider: 'Self',
+    monthlyFee: 0,
+    purpose: 'Matrix publishing regression',
+  });
+  assert.equal(unassigned.code, 0);
+
+  const blocked = await assetApi.createMatrixPublishTask({
+    title: 'Launch Video',
+    videoUrl: 'https://pan.example.com/video-001',
+    copywriting: 'Please publish today',
+    remark: 'Matrix publishing',
+    dueAt: '2026-07-01T12:00:00.000Z',
+    accountIds: [unassigned.data.id],
+  });
+  assert.notEqual(blocked.code, 0);
+  assert.match(blocked.message, /当前使用人|assignee/i);
+}
+
+{
+  const created = await assetApi.createMatrixPublishTask({
+    title: 'July Campaign Video',
+    videoUrl: 'https://pan.example.com/video-002',
+    copywriting: '统一发布文案',
+    remark: '逾期账号需要标红',
+    dueAt: '2026-07-01T12:00:00.000Z',
+    accountIds: ['asset-account-001', 'asset-account-003'],
+  });
+  assert.equal(created.code, 0);
+  assert.equal(created.data.targets.length, 2);
+  assert.deepEqual(
+    created.data.targets.map((target) => target.accountId).sort(),
+    ['asset-account-001', 'asset-account-003'],
+  );
+  assert.ok(created.data.targets.every((target) => target.assignee));
+
+  const listed = await assetApi.fetchMatrixPublishTasks({ search: 'July Campaign', pageSize: 20 });
+  assert.equal(listed.code, 0);
+  assert.equal(listed.data.items.length, 1);
+  assert.equal(listed.data.items[0].targets.length, 2);
+
+  const statsBefore = await assetApi.fetchMatrixPublishStats('2026-07-02T00:00:00.000Z');
+  assert.equal(statsBefore.code, 0);
+  assert.equal(statsBefore.data.totalTargets, 2);
+  assert.equal(statsBefore.data.completedTargets, 0);
+  assert.equal(statsBefore.data.overdueTargets, 2);
+  assert.equal(statsBefore.data.overdueAccounts.length, 2);
+
+  const completed = await assetApi.completeMatrixPublishTarget(created.data.id, 'asset-account-001');
+  assert.equal(completed.code, 0);
+  assert.equal(completed.data?.status, 'completed');
+
+  const statsAfter = await assetApi.fetchMatrixPublishStats('2026-07-02T00:00:00.000Z');
+  assert.equal(statsAfter.code, 0);
+  assert.equal(statsAfter.data.totalTargets, 2);
+  assert.equal(statsAfter.data.completedTargets, 1);
+  assert.equal(statsAfter.data.overdueTargets, 1);
+  assert.deepEqual(statsAfter.data.overdueAccounts.map((item) => item.accountId), ['asset-account-003']);
+}
+
+{
   const created = await assetApi.createDevice({
     deviceName: '测试资产机',
     brandModel: 'iPhone Test',

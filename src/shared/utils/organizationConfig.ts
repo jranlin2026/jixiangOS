@@ -50,6 +50,7 @@ const ASSET_SELF_SERVICE_PERMISSIONS: Role['permissions'] = [
   { module: PERMISSION_KEYS.ASSETS_DEVICES, actions: ['read'] },
   { module: PERMISSION_KEYS.ASSETS_PHONES, actions: ['read'] },
   { module: PERMISSION_KEYS.ASSETS_ACCOUNTS, actions: ['read'] },
+  { module: PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, actions: ['read'] },
   { module: PERMISSION_KEYS.ASSETS_RISKS, actions: ['read'] },
   { module: PERMISSION_KEYS.ASSETS_LOGS, actions: ['read'] },
   { module: PERMISSION_KEYS.ASSETS_OFFBOARDING, actions: ['read'] },
@@ -128,7 +129,8 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
       { module: PERMISSION_KEYS.DASHBOARD, actions: ['read'] },
       { module: PERMISSION_KEYS.GEO, actions: ['read', 'write'] },
-      ...ASSET_SELF_SERVICE_PERMISSIONS,
+      ...ASSET_SELF_SERVICE_PERMISSIONS.filter((permission) => permission.module !== PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH),
+      { module: PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, actions: ['read', 'write'] },
     ],
     dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', assets: 'self' },
     memberCount: 0,
@@ -315,6 +317,7 @@ function normalizeDefaultAssetSelfServicePermissions(permissions: Role['permissi
   const hasAssetSelfServicePermission = permissions.some((permission) => ASSET_SELF_SERVICE_PERMISSION_KEYS.has(permission.module));
   const normalized = permissions.map((permission) => (
     ASSET_SELF_SERVICE_PERMISSION_KEYS.has(permission.module)
+      && permission.module !== PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH
       ? { ...permission, actions: ['read'] }
       : permission
   ));

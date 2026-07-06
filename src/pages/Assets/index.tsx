@@ -5,6 +5,7 @@ import {
   Avatar,
   Box,
   Button,
+  Checkbox,
   Chip,
   Dialog,
   DialogActions,
@@ -13,6 +14,7 @@ import {
   FormControl,
   IconButton,
   InputLabel,
+  ListItemText,
   MenuItem,
   Paper,
   Select,
@@ -67,6 +69,7 @@ import type {
   AssetImportType,
   AssetInternetAccount,
   AssetInternetAccountInput,
+  AssetMatrixPublishTaskInput,
   AssetPhoneNumber,
   AssetPhoneNumberInput,
   AssetRisk,
@@ -78,7 +81,7 @@ import type {
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 
-type AssetTab = 'overview' | 'devices' | 'phones' | 'accounts' | 'risks' | 'logs' | 'offboarding';
+type AssetTab = 'overview' | 'devices' | 'phones' | 'accounts' | 'matrix' | 'risks' | 'logs' | 'offboarding';
 
 type AssetFormType = 'device' | 'phone' | 'account';
 
@@ -110,11 +113,17 @@ type AssetDeleteTarget = {
   label: string;
 } | null;
 
+type MatrixPublishFormState = {
+  open: boolean;
+  values: AssetMatrixPublishTaskInput;
+};
+
 const ASSET_TABS: Array<{ value: AssetTab; label: string; permissionKey: string }> = [
   { value: 'overview', label: '资产总览', permissionKey: PERMISSION_KEYS.ASSETS_OVERVIEW },
   { value: 'devices', label: '设备资产', permissionKey: PERMISSION_KEYS.ASSETS_DEVICES },
   { value: 'phones', label: '手机号资产', permissionKey: PERMISSION_KEYS.ASSETS_PHONES },
   { value: 'accounts', label: '互联网账号', permissionKey: PERMISSION_KEYS.ASSETS_ACCOUNTS },
+  { value: 'matrix', label: '矩阵发布', permissionKey: PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH },
   { value: 'risks', label: '风险提醒', permissionKey: PERMISSION_KEYS.ASSETS_RISKS },
   { value: 'logs', label: '操作日志', permissionKey: PERMISSION_KEYS.ASSETS_LOGS },
   { value: 'offboarding', label: '离职回收', permissionKey: PERMISSION_KEYS.ASSETS_OFFBOARDING },
@@ -332,6 +341,19 @@ const emptyImportState: AssetImportState = {
   result: null,
 };
 
+const emptyMatrixPublishForm: MatrixPublishFormState = {
+  open: false,
+  values: {
+    title: '',
+    videoUrl: '',
+    videoFileName: '',
+    copywriting: '',
+    remark: '',
+    dueAt: '',
+    accountIds: [],
+  },
+};
+
 function getTabFromSearch(value: string | null): AssetTab {
   return value && VALID_TABS.has(value as AssetTab) ? (value as AssetTab) : 'overview';
 }
@@ -396,8 +418,10 @@ const AssetManagement: React.FC = () => {
   const [platformOptions, setPlatformOptions] = useState<string[]>([]);
   const [lookupDevices, setLookupDevices] = useState<AssetDevice[]>([]);
   const [lookupPhones, setLookupPhones] = useState<AssetPhoneNumber[]>([]);
+  const [lookupAccounts, setLookupAccounts] = useState<AssetInternetAccount[]>([]);
   const [formState, setFormState] = useState<AssetFormState>(emptyForm);
   const [importState, setImportState] = useState<AssetImportState>(emptyImportState);
+  const [matrixForm, setMatrixForm] = useState<MatrixPublishFormState>(emptyMatrixPublishForm);
   const [deleteTarget, setDeleteTarget] = useState<AssetDeleteTarget>(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [viewSettingsOpen, setViewSettingsOpen] = useState<ConfigurableAssetTab | null>(null);
@@ -408,6 +432,8 @@ const AssetManagement: React.FC = () => {
     devices,
     phones,
     accounts,
+    matrixPublishTasks,
+    matrixPublishStats,
     risks,
     logs,
     offboardingTasks,
@@ -418,6 +444,8 @@ const AssetManagement: React.FC = () => {
     fetchDevices,
     fetchPhones,
     fetchAccounts,
+    fetchMatrixPublishTasks,
+    fetchMatrixPublishStats,
     fetchRisks,
     fetchLogs,
     fetchOffboardingTasks,
@@ -431,6 +459,8 @@ const AssetManagement: React.FC = () => {
     createAccount,
     updateAccount,
     deleteAccount,
+    createMatrixPublishTask,
+    completeMatrixPublishTarget,
     updateRiskStatus,
     completeOffboardingTask,
     revealSensitiveField,
@@ -443,6 +473,7 @@ const AssetManagement: React.FC = () => {
   const canDeleteAssets = canEditAssets || hasPermission(currentUser, PERMISSION_KEYS.ASSETS, 'delete');
   const canHandleRisks = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_RISKS, 'write');
   const canHandleOffboarding = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_OFFBOARDING, 'write');
+  const canManageMatrixPublish = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write');
   const visibleTabs = useMemo(
     () => ASSET_TABS.filter((tab) => hasPermission(currentUser, tab.permissionKey)),
     [currentUser],
@@ -490,6 +521,9 @@ const AssetManagement: React.FC = () => {
     assetApi.fetchPhoneNumbers({ pageSize: ASSET_LOOKUP_PAGE_SIZE }).then((res) => {
       if (res.code === 0) setLookupPhones(res.data.items);
     });
+    assetApi.fetchInternetAccounts({ pageSize: ASSET_LOOKUP_PAGE_SIZE }).then((res) => {
+      if (res.code === 0) setLookupAccounts(res.data.items);
+    });
     setPlatformOptions(assetApi.getAccountPlatformOptions());
   }, [fetchDashboard]);
 
@@ -516,10 +550,14 @@ const AssetManagement: React.FC = () => {
     if (activeTab === 'devices') fetchDevices(filters);
     if (activeTab === 'phones') fetchPhones(filters);
     if (activeTab === 'accounts') fetchAccounts(filters);
+    if (activeTab === 'matrix') {
+      fetchMatrixPublishTasks(filters);
+      fetchMatrixPublishStats();
+    }
     if (activeTab === 'risks') fetchRisks(filters);
     if (activeTab === 'logs') fetchLogs(filters);
     if (activeTab === 'offboarding') fetchOffboardingTasks(filters);
-  }, [activeTab, activeTabVisible, fetchAccounts, fetchDashboard, fetchDevices, fetchLogs, fetchOffboardingTasks, fetchPhones, fetchRisks, filters]);
+  }, [activeTab, activeTabVisible, fetchAccounts, fetchDashboard, fetchDevices, fetchLogs, fetchMatrixPublishStats, fetchMatrixPublishTasks, fetchOffboardingTasks, fetchPhones, fetchRisks, filters]);
 
   useEffect(() => {
     setPage(0);
@@ -535,12 +573,14 @@ const AssetManagement: React.FC = () => {
   };
 
   const refreshLookupData = async () => {
-    const [deviceRes, phoneRes] = await Promise.all([
+    const [deviceRes, phoneRes, accountRes] = await Promise.all([
       assetApi.fetchDevices({ pageSize: ASSET_LOOKUP_PAGE_SIZE }),
       assetApi.fetchPhoneNumbers({ pageSize: ASSET_LOOKUP_PAGE_SIZE }),
+      assetApi.fetchInternetAccounts({ pageSize: ASSET_LOOKUP_PAGE_SIZE }),
     ]);
     if (deviceRes.code === 0) setLookupDevices(deviceRes.data.items);
     if (phoneRes.code === 0) setLookupPhones(phoneRes.data.items);
+    if (accountRes.code === 0) setLookupAccounts(accountRes.data.items);
     setPlatformOptions(assetApi.getAccountPlatformOptions());
   };
 
@@ -549,6 +589,10 @@ const AssetManagement: React.FC = () => {
     if (activeTab === 'devices') await fetchDevices(filters);
     if (activeTab === 'phones') await fetchPhones(filters);
     if (activeTab === 'accounts') await fetchAccounts(filters);
+    if (activeTab === 'matrix') {
+      await fetchMatrixPublishTasks(filters);
+      await fetchMatrixPublishStats();
+    }
     if (activeTab === 'risks') await fetchRisks(filters);
     if (activeTab === 'logs') await fetchLogs(filters);
     if (activeTab === 'offboarding') await fetchOffboardingTasks(filters);
@@ -576,6 +620,59 @@ const AssetManagement: React.FC = () => {
   };
 
   const closeImportDialog = () => setImportState(emptyImportState);
+
+  const openMatrixPublishDialog = () => {
+    if (!canManageMatrixPublish) {
+      setSnackbar('当前账号没有矩阵发布权限');
+      return;
+    }
+    setMatrixForm({
+      open: true,
+      values: {
+        ...emptyMatrixPublishForm.values,
+        dueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
+      },
+    });
+  };
+
+  const closeMatrixPublishDialog = () => setMatrixForm(emptyMatrixPublishForm);
+
+  const updateMatrixPublishValue = <K extends keyof AssetMatrixPublishTaskInput>(
+    key: K,
+    value: AssetMatrixPublishTaskInput[K],
+  ) => {
+    setMatrixForm((current) => ({
+      ...current,
+      values: {
+        ...current.values,
+        [key]: value,
+      },
+    }));
+  };
+
+  const submitMatrixPublishTask = async () => {
+    const result = await createMatrixPublishTask({
+      ...matrixForm.values,
+      dueAt: matrixForm.values.dueAt ? new Date(matrixForm.values.dueAt).toISOString() : '',
+    });
+    if (!result) {
+      setSnackbar(useAssetStore.getState().error || '创建矩阵发布任务失败');
+      return;
+    }
+    closeMatrixPublishDialog();
+    setSnackbar('矩阵发布任务已创建');
+    await refreshActiveTab();
+  };
+
+  const handleCompleteMatrixTarget = async (taskId: string, accountId: string) => {
+    const result = await completeMatrixPublishTarget(taskId, accountId);
+    if (!result) {
+      setSnackbar(useAssetStore.getState().error || '标记完成失败');
+      return;
+    }
+    setSnackbar('账号发布任务已完成');
+    await refreshActiveTab();
+  };
 
   const updateImportType = (type: AssetImportType) => {
     setImportState((current) => ({ ...current, type, result: null }));
@@ -854,6 +951,17 @@ const AssetManagement: React.FC = () => {
           风险等级: account.riskLevel,
         };
       }),
+      matrix: matrixPublishTasks.flatMap((task) => task.targets.map((target) => ({
+        任务: task.title,
+        平台: target.platform,
+        账号: target.accountName,
+        执行人: target.assignee,
+        部门: target.department,
+        设备: target.deviceCode || '',
+        截止时间: task.dueAt,
+        状态: target.status,
+        完成时间: target.completedAt || '',
+      }))),
       risks: risks.map((risk) => ({
         风险类型: risk.type,
         对象: risk.targetName,
@@ -946,7 +1054,7 @@ const AssetManagement: React.FC = () => {
           placeholder="搜索平台、账号名称、负责人"
           sx={{ minWidth: 280 }}
         />
-        {activeTab === 'accounts' && (
+        {(activeTab === 'accounts' || activeTab === 'matrix') && (
           <>
             <FormControl size="small" sx={{ minWidth: 140 }}>
               <InputLabel>平台</InputLabel>
@@ -973,12 +1081,12 @@ const AssetManagement: React.FC = () => {
             </Select>
           </FormControl>
         )}
-        {(activeTab === 'risks' || activeTab === 'offboarding') && (
+        {(activeTab === 'risks' || activeTab === 'offboarding' || activeTab === 'matrix') && (
           <FormControl size="small" sx={{ minWidth: 140 }}>
             <InputLabel>处理状态</InputLabel>
             <Select value={status} label="处理状态" onChange={(event) => setStatus(event.target.value)}>
               <MenuItem value="">全部</MenuItem>
-              {(activeTab === 'risks' ? ['open', 'resolved', 'ignored'] : ['待回收', '已回收']).map((item) => (
+              {(activeTab === 'risks' ? ['open', 'resolved', 'ignored'] : activeTab === 'matrix' ? ['pending', 'completed'] : ['待回收', '已回收']).map((item) => (
                 <MenuItem key={item} value={item}>{item}</MenuItem>
               ))}
             </Select>
@@ -1406,6 +1514,102 @@ const AssetManagement: React.FC = () => {
     </>
   );
 
+  const renderMatrixPublishTable = () => {
+    const rows = matrixPublishTasks.flatMap((task) => task.targets.map((target) => ({
+      task,
+      target,
+      overdue: target.status !== 'completed' && new Date(task.dueAt).getTime() < Date.now(),
+    })));
+    const statusLabel = (value: string) => (value === 'completed' ? '已完成' : '待发布');
+    return (
+      <>
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mb: 1.25 }}>
+          {[
+            { label: '目标账号', value: matrixPublishStats?.totalTargets || 0 },
+            { label: '已完成', value: matrixPublishStats?.completedTargets || 0 },
+            { label: '未完成', value: matrixPublishStats?.pendingTargets || 0 },
+            { label: '逾期账号', value: matrixPublishStats?.overdueTargets || 0, danger: true },
+            { label: '完成率', value: `${matrixPublishStats?.completionRate || 0}%` },
+          ].map((item) => (
+            <Paper
+              key={item.label}
+              elevation={0}
+              sx={{
+                flex: 1,
+                border: `1px solid ${item.danger ? '#FECACA' : shell.softLine}`,
+                borderRadius: 1,
+                p: 1.25,
+                bgcolor: item.danger ? '#FEF3F2' : '#fff',
+              }}
+            >
+              <Typography variant="caption" sx={{ color: shell.muted, fontWeight: 800 }}>{item.label}</Typography>
+              <Typography sx={{ color: item.danger ? shell.red : shell.ink, fontSize: 22, fontWeight: 950 }}>{item.value}</Typography>
+            </Paper>
+          ))}
+        </Stack>
+        <TableContainer component={Paper} elevation={0} sx={assetTableContainerSx}>
+          <Table size="small" sx={{ ...assetTableSx, minWidth: 1120 }}>
+            <TableHead>
+              <TableRow>
+                {['任务', '平台', '账号', '执行人', '部门', '设备', '截止时间', '状态', '素材/文案', '操作'].map((column) => <TableCell key={column}>{column}</TableCell>)}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {rows.map(({ task, target, overdue }) => (
+                <TableRow
+                  hover
+                  key={`${task.id}-${target.accountId}`}
+                  sx={{ bgcolor: overdue ? '#FEF3F2' : undefined }}
+                >
+                  <TableCell sx={{ fontWeight: 900 }}>{task.title}</TableCell>
+                  <TableCell>{target.platform}</TableCell>
+                  <TableCell>
+                    <Stack spacing={0.25}>
+                      <Typography sx={{ fontWeight: 850, color: shell.ink }}>{target.accountName}</Typography>
+                      <Typography variant="caption" sx={{ color: shell.muted }}>{target.accountNo}</Typography>
+                    </Stack>
+                  </TableCell>
+                  <TableCell>{target.assignee}</TableCell>
+                  <TableCell>{target.department || '-'}</TableCell>
+                  <TableCell>{target.deviceCode ? `${target.deviceCode} / ${target.deviceName || '-'}` : '-'}</TableCell>
+                  <TableCell sx={{ color: overdue ? shell.red : shell.ink, fontWeight: overdue ? 900 : 700 }}>
+                    {formatDate(task.dueAt, 'yyyy-MM-dd HH:mm')}
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      size="small"
+                      label={overdue ? '已逾期' : statusLabel(target.status)}
+                      sx={chipSx(overdue ? riskTone('高') : riskTone(target.status === 'completed' ? '低' : '中'))}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5}>
+                      <Button size="small" variant="outlined" disabled={!task.videoUrl} onClick={() => copyText(task.videoUrl, '视频链接')}>链接</Button>
+                      <Button size="small" variant="outlined" disabled={!task.copywriting} onClick={() => copyText(task.copywriting, '发布文案')}>文案</Button>
+                      {task.remark ? <Tooltip title={task.remark}><InfoOutlinedIcon sx={{ color: shell.muted, fontSize: 18, mt: 0.7 }} /></Tooltip> : null}
+                    </Stack>
+                  </TableCell>
+                  <TableCell align="center" sx={{ minWidth: 120 }}>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      disabled={target.status === 'completed'}
+                      onClick={() => handleCompleteMatrixTarget(task.id, target.accountId)}
+                    >
+                      点完成
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {rows.length === 0 && renderAssetEmptyRow(10, '暂无矩阵发布任务')}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        {renderPagination()}
+      </>
+    );
+  };
+
   const renderOffboardingTable = () => (
     <>
     <TableContainer component={Paper} elevation={0} sx={assetTableContainerSx}>
@@ -1473,6 +1677,7 @@ const AssetManagement: React.FC = () => {
     if (activeTab === 'devices') return renderDevicesTable();
     if (activeTab === 'phones') return renderPhonesTable();
     if (activeTab === 'accounts') return renderAccountsTable();
+    if (activeTab === 'matrix') return renderMatrixPublishTable();
     if (activeTab === 'risks') return renderRisksTable();
     if (activeTab === 'logs') return renderLogsTable();
     return renderOffboardingTable();
@@ -1923,7 +2128,7 @@ const AssetManagement: React.FC = () => {
   };
 
   const renderDetailDialog = () => {
-    if (activeTab === 'overview' || activeTab === 'logs') return null;
+    if (activeTab === 'overview' || activeTab === 'logs' || activeTab === 'matrix') return null;
     const detailTitleMap: Record<AssetType, string> = {
       device: '查看设备资料',
       phone: '查看手机号资料',
@@ -2208,6 +2413,127 @@ const AssetManagement: React.FC = () => {
     );
   };
 
+  const renderMatrixPublishDialog = () => (
+    <Dialog open={matrixForm.open} onClose={closeMatrixPublishDialog} maxWidth="md" fullWidth>
+      <DialogTitle sx={{ fontWeight: 900, pb: 1 }}>
+        创建矩阵发布任务
+      </DialogTitle>
+      <DialogContent dividers sx={{ bgcolor: '#FBFCFE' }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 1.5, pt: 0.5 }}>
+          <TextField
+            size="small"
+            label="任务标题"
+            value={matrixForm.values.title}
+            onChange={(event) => updateMatrixPublishValue('title', event.target.value)}
+            required
+            fullWidth
+          />
+          <TextField
+            size="small"
+            label="截止时间"
+            type="datetime-local"
+            value={matrixForm.values.dueAt}
+            onChange={(event) => updateMatrixPublishValue('dueAt', event.target.value)}
+            InputLabelProps={{ shrink: true }}
+            required
+            fullWidth
+          />
+          <TextField
+            size="small"
+            label="网盘/视频链接"
+            value={matrixForm.values.videoUrl || ''}
+            onChange={(event) => updateMatrixPublishValue('videoUrl', event.target.value)}
+            fullWidth
+          />
+          <Button variant="outlined" component="label" sx={{ justifySelf: 'start', height: 40 }}>
+            选择视频文件
+            <input
+              hidden
+              type="file"
+              accept="video/*"
+              onChange={async (event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                updateMatrixPublishValue('videoFileName', file.name);
+                setSnackbar('视频上传中...');
+                const upload = await assetApi.uploadMatrixPublishVideo(file);
+                if (upload.code === 0 && upload.data?.url) {
+                  updateMatrixPublishValue('videoFileName', upload.data.fileName || file.name);
+                  updateMatrixPublishValue('videoUrl', upload.data.url);
+                  setSnackbar('视频已上传');
+                  return;
+                }
+                updateMatrixPublishValue('videoUrl', URL.createObjectURL(file));
+                setSnackbar(upload.message || '后端上传不可用，已使用本地临时视频链接');
+              }}
+            />
+          </Button>
+          {matrixForm.values.videoFileName ? (
+            <Typography variant="body2" sx={{ color: shell.muted, fontWeight: 800, gridColumn: { xs: '1', md: '1 / -1' } }}>
+              已选择：{matrixForm.values.videoFileName}
+            </Typography>
+          ) : null}
+          <TextField
+            size="small"
+            label="发布文案"
+            value={matrixForm.values.copywriting}
+            onChange={(event) => updateMatrixPublishValue('copywriting', event.target.value)}
+            multiline
+            minRows={3}
+            fullWidth
+            sx={{ gridColumn: { xs: '1', md: '1 / -1' } }}
+          />
+          <TextField
+            size="small"
+            label="备注"
+            value={matrixForm.values.remark || ''}
+            onChange={(event) => updateMatrixPublishValue('remark', event.target.value)}
+            multiline
+            minRows={2}
+            fullWidth
+            sx={{ gridColumn: { xs: '1', md: '1 / -1' } }}
+          />
+          <FormControl size="small" fullWidth required sx={{ gridColumn: { xs: '1', md: '1 / -1' } }}>
+            <InputLabel>发布账号</InputLabel>
+            <Select
+              multiple
+              label="发布账号"
+              value={matrixForm.values.accountIds}
+              renderValue={(selected) => `已选择 ${selected.length} 个账号`}
+              onChange={(event) => {
+                const value = event.target.value;
+                updateMatrixPublishValue('accountIds', typeof value === 'string' ? value.split(',') : value);
+              }}
+            >
+              {lookupAccounts.map((account) => {
+                const disabled = !account.currentUser;
+                return (
+                  <MenuItem key={account.id} value={account.id} disabled={disabled}>
+                    <Checkbox checked={matrixForm.values.accountIds.includes(account.id)} />
+                    <ListItemText
+                      primary={`${account.platform} / ${account.accountName}`}
+                      secondary={disabled ? '缺少当前使用人，不能派发' : `${account.currentUser} / ${account.department || '-'}`}
+                    />
+                  </MenuItem>
+                );
+              })}
+            </Select>
+          </FormControl>
+        </Box>
+      </DialogContent>
+      <DialogActions sx={{ px: 3, py: 1.5 }}>
+        <Button onClick={closeMatrixPublishDialog}>取消</Button>
+        <Button
+          variant="contained"
+          disabled={loading || !matrixForm.values.title || !matrixForm.values.dueAt || !matrixForm.values.accountIds.length}
+          onClick={submitMatrixPublishTask}
+        >
+          创建任务
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+
   const renderFormDialog = () => {
     const formTypeLabel: Record<AssetFormType, string> = {
       device: '设备资产',
@@ -2290,6 +2616,11 @@ const AssetManagement: React.FC = () => {
                 视图设置
               </Button>
             ) : null}
+            {activeTab === 'matrix' && canManageMatrixPublish ? (
+              <Button variant="contained" startIcon={<AddIcon />} onClick={openMatrixPublishDialog}>
+                创建发布任务
+              </Button>
+            ) : null}
             {canEditAssets && isConfigurableAssetTab(activeTab) ? (
               <Button variant="contained" startIcon={<AddIcon />} onClick={() => openCreateForm(ASSET_CREATE_TYPES[activeTab])}>
                 {ASSET_CREATE_LABELS[activeTab]}
@@ -2305,6 +2636,7 @@ const AssetManagement: React.FC = () => {
       {renderActiveTable()}
       {renderDetailDialog()}
       {renderImportDialog()}
+      {renderMatrixPublishDialog()}
       {renderFormDialog()}
       {renderViewSettingsDialog()}
       <Dialog open={Boolean(deleteTarget)} onClose={closeDeleteConfirm} maxWidth="xs" fullWidth>

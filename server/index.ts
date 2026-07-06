@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { existsSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAllowedCorsOrigins, getApiJsonBodyLimit, getApiListenHost, validateRuntimeConfig } from './config/runtime';
@@ -38,6 +39,8 @@ validateRuntimeConfig();
 const app = express();
 const port = Number(process.env.AI_PROXY_PORT || 3001);
 const host = getApiListenHost();
+const serverDir = path.dirname(fileURLToPath(import.meta.url));
+const uploadRoot = path.resolve(serverDir, '../uploads');
 const allowedCorsOrigins = getAllowedCorsOrigins();
 const authService = createAuthService(prisma);
 const aiConfigService = createAiConfigService(prisma as any);
@@ -50,6 +53,7 @@ const requireRoleAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTING
 const requireAiConfigAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_AI_CONFIG);
 const requireDataMaintenanceAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE);
 const requireStorageAccess = createRequireAuth(authService);
+const requireMatrixPublishUploadAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write');
 const requireAiChatAccess = createRequireAuth(authService, PERMISSION_KEYS.AI_CHAT);
 const requireCustomerAiCardAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_AI_CARD);
 const assignableUsersPermissions = [
@@ -130,6 +134,7 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: getApiJsonBodyLimit() }));
+app.use('/uploads', express.static(uploadRoot, { index: false }));
 
 type DeepSeekMessage = {
   role: 'system' | 'user' | 'assistant';
@@ -143,6 +148,17 @@ function routeParam(value: string | string[] | undefined): string {
 function queryParam(value: unknown): string {
   if (Array.isArray(value)) return queryParam(value[0]);
   return typeof value === 'string' ? value : '';
+}
+
+function safeUploadFileName(value: unknown): string {
+  const fallback = 'matrix-video';
+  const raw = decodeURIComponent(String(value || fallback)).split(/[\\/]/).pop() || fallback;
+  const sanitized = raw.replace(/[^\w.\-\u4e00-\u9fa5]+/g, '_').slice(0, 100);
+  return sanitized || fallback;
+}
+
+function publicUploadUrl(req: express.Request, relativePath: string): string {
+  return `${req.protocol}://${req.get('host')}${relativePath}`;
 }
 
 async function assetStorageContext() {
@@ -279,6 +295,25 @@ app.get('/api/auth/me', async (req, res) => {
 app.post('/api/auth/logout', async (req, res) => {
   res.json(await authService.logout(bearerToken(req)));
 });
+
+app.post(
+  '/api/uploads/matrix-video',
+  requireMatrixPublishUploadAccess,
+  express.raw({ type: ['video/*', 'application/octet-stream'], limit: '200mb' }),
+  async (req: AuthenticatedRequest, res) => {
+    const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
+    if (!buffer.length) {
+      res.status(400).json({ code: -1, data: null, message: '视频文件不能为空' });
+      return;
+    }
+    const uploadDir = path.join(uploadRoot, 'matrix-videos');
+    await mkdir(uploadDir, { recursive: true });
+    const fileName = `${Date.now()}-${safeUploadFileName(req.headers['x-file-name'])}`;
+    await writeFile(path.join(uploadDir, fileName), buffer);
+    const url = publicUploadUrl(req, `/uploads/matrix-videos/${encodeURIComponent(fileName)}`);
+    res.json({ code: 0, data: { url, fileName }, message: 'success' });
+  },
+);
 
 app.get('/api/settings/users', requireOrganizationAccess, async (_req, res) => {
   res.json(await settingsService.listUsers());
