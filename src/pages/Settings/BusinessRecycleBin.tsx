@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Box,
@@ -19,12 +19,12 @@ import {
   TableCell,
   TableContainer,
   TableHead,
-  TablePagination,
   TableRow,
   TextField,
   Tooltip,
   Typography,
 } from '@mui/material';
+import TablePagination from '../../shared/components/TablePagination';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import RestoreIcon from '@mui/icons-material/Restore';
@@ -301,3 +301,4 @@ const BusinessRecycleBin: React.FC = () => {
 };
 
 export default BusinessRecycleBin;
+

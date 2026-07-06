@@ -3,6 +3,7 @@ import type { Customer } from '../types/customer';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
+import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
@@ -141,6 +142,14 @@ function reconcileStaleLeadAssignees(leads: Lead[]): Lead[] {
 }
 
 async function fetchLeads(filters?: LeadFilters): Promise<ApiResponse<PaginatedResponse<Lead>>> {
+  if (shouldUseBackendApi()) {
+    const params = new URLSearchParams();
+    Object.entries(filters || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+    });
+    return backendRequest<PaginatedResponse<Lead>>(`/leads${params.size ? `?${params.toString()}` : ''}`);
+  }
+
   ensureInit();
   await delay(200);
   const allLeads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];

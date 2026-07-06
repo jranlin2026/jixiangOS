@@ -103,7 +103,7 @@ export async function syncBackendStorageFromServer(maxAgeMs = 1000): Promise<voi
   if (Date.now() - storageHydratedAt < maxAgeMs) return;
   if (storageHydrationPromise) return storageHydrationPromise;
 
-  storageHydrationPromise = backendRequest<Record<string, unknown>>('/storage')
+  storageHydrationPromise = backendRequest<Record<string, unknown>>('/storage?scope=runtime')
     .then((response) => {
       if (response.code !== 0 || !response.data) return;
       Object.entries(response.data).forEach(([key, value]) => {

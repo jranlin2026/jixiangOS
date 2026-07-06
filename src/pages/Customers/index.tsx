@@ -1,5 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+﻿import React, { useEffect, useMemo, useState } from 'react';
+import {
+  useNavigate,
+  useSearchParams } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -18,12 +20,12 @@ import {
   TableCell,
   TableContainer,
   TableHead,
-  TablePagination,
   TableRow,
   TextField,
   Tooltip,
   Typography,
 } from '@mui/material';
+import TablePagination from '../../shared/components/TablePagination';
 import AddIcon from '@mui/icons-material/Add';
 import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
@@ -998,3 +1000,4 @@ const Customers: React.FC = () => {
 };
 
 export default Customers;
+

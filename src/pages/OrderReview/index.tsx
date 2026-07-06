@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Button,
@@ -18,12 +18,12 @@ import {
   TableCell,
   TableContainer,
   TableHead,
-  TablePagination,
   TableRow,
   TextField,
   Tooltip,
   Typography,
 } from '@mui/material';
+import TablePagination from '../../shared/components/TablePagination';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ReplayIcon from '@mui/icons-material/Replay';
 import BlockIcon from '@mui/icons-material/Block';
@@ -989,3 +989,4 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
 };
 
 export default OrderReview;
+

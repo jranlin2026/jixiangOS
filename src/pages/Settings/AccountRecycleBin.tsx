@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Chip,
@@ -9,11 +9,11 @@ import {
   TableCell,
   TableContainer,
   TableHead,
-  TablePagination,
   TableRow,
   Tooltip,
   Typography,
 } from '@mui/material';
+import TablePagination from '../../shared/components/TablePagination';
 import DeleteIcon from '@mui/icons-material/Delete';
 import RestoreIcon from '@mui/icons-material/Restore';
 import { departmentApi, settingsApi } from '../../api';
@@ -172,3 +172,4 @@ const AccountRecycleBin: React.FC = () => {
 };
 
 export default AccountRecycleBin;
+

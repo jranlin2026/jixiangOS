@@ -1,6 +1,7 @@
 import { createTheme } from '@mui/material/styles';
 import palette from './palette';
 import typography from './typography';
+import TablePaginationActions from '../shared/components/TablePaginationActions';
 
 const theme = createTheme({
   palette,
@@ -81,6 +82,72 @@ const theme = createTheme({
           textTransform: 'none',
           letterSpacing: 0,
           backgroundColor: '#F3F7FB',
+        },
+      },
+    },
+    MuiTablePagination: {
+      defaultProps: {
+        ActionsComponent: TablePaginationActions,
+        labelRowsPerPage: '',
+        labelDisplayedRows: () => '',
+        SelectProps: {
+          renderValue: (value) => `${value} 条/页`,
+          MenuProps: {
+            disablePortal: true,
+            anchorOrigin: {
+              vertical: 'bottom',
+              horizontal: 'right',
+            },
+            transformOrigin: {
+              vertical: 'top',
+              horizontal: 'right',
+            },
+            PaperProps: {
+              sx: {
+                width: 76,
+                minWidth: '76px !important',
+                maxHeight: 180,
+                mt: 0.5,
+                boxShadow: '0 12px 28px rgba(16, 24, 40, 0.16)',
+                '& .MuiMenuItem-root': {
+                  minHeight: 30,
+                  px: 1.25,
+                  fontSize: 12,
+                  fontWeight: 700,
+                },
+              },
+            },
+          },
+        },
+      },
+      styleOverrides: {
+        root: {
+          borderTop: '1px solid #EEF2F6',
+          backgroundColor: '#FBFCFE',
+        },
+        toolbar: {
+          minHeight: 48,
+          padding: '8px 14px',
+          gap: 8,
+        },
+        displayedRows: {
+          display: 'none',
+        },
+        selectLabel: {
+          display: 'none',
+        },
+        spacer: {
+          display: 'none',
+        },
+        input: {
+          order: 2,
+          marginLeft: 0,
+          marginRight: 0,
+        },
+        actions: {
+          order: 1,
+          marginLeft: 'auto',
+          marginRight: 6,
         },
       },
     },

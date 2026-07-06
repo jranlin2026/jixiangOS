@@ -10,6 +10,8 @@ import { createRequireAuth, bearerToken, type AuthenticatedRequest } from './mid
 import { createLoginRateLimiter } from './middleware/loginRateLimit';
 import { createAuthService } from './services/authService';
 import { createAiConfigService } from './services/aiConfigService';
+import { createCustomerListService } from './services/customerListService';
+import { createLeadListService } from './services/leadListService';
 import { createSettingsService } from './services/settingsService';
 import { createStorageService } from './services/storageService';
 import {
@@ -23,6 +25,7 @@ import { migrateDefaultRoleAccess } from './services/roleMigrationService';
 import { mapPrismaRole, mapPrismaUser } from './db/prismaMappers';
 import { mergeRoleWithDefaultAccess } from '../src/shared/utils/organizationConfig';
 import { PERMISSION_KEYS, hasPermission } from '../src/shared/utils/permissions';
+import { STORAGE_KEYS } from '../src/shared/utils/constants';
 import {
   buildCustomerIntelPrompt,
   searchPublicCustomerIntel,
@@ -38,6 +41,8 @@ const host = getApiListenHost();
 const allowedCorsOrigins = getAllowedCorsOrigins();
 const authService = createAuthService(prisma);
 const aiConfigService = createAiConfigService(prisma as any);
+const customerListService = createCustomerListService(prisma);
+const leadListService = createLeadListService(prisma);
 const settingsService = createSettingsService(prisma);
 const storageService = createStorageService(prisma);
 const requireOrganizationAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS);
@@ -57,6 +62,43 @@ const assignableUsersPermissions = [
   PERMISSION_KEYS.AFTER_SALES_RECOVERY,
   PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
   PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+];
+const runtimeStorageKeys = [
+  STORAGE_KEYS.LEADS,
+  STORAGE_KEYS.ORDERS,
+  STORAGE_KEYS.ORDER_APPLICATIONS,
+  STORAGE_KEYS.DELIVERIES,
+  STORAGE_KEYS.COMMISSIONS,
+  STORAGE_KEYS.COMMISSION_OPERATION_LOGS,
+  STORAGE_KEYS.COMMISSION_SETTLEMENT_BATCHES,
+  STORAGE_KEYS.REFUNDS,
+  STORAGE_KEYS.RECOVERY_ORDERS,
+  STORAGE_KEYS.OPPORTUNITIES,
+  STORAGE_KEYS.SERVICE_TICKETS,
+  STORAGE_KEYS.AI_CARDS,
+  STORAGE_KEYS.AI_SESSIONS,
+  STORAGE_KEYS.PRODUCTS,
+  STORAGE_KEYS.TAGS,
+  STORAGE_KEYS.FINANCE,
+  STORAGE_KEYS.USERS,
+  STORAGE_KEYS.DEPARTMENTS,
+  STORAGE_KEYS.POSITIONS,
+  STORAGE_KEYS.ROLES,
+  STORAGE_KEYS.ORGANIZATION_SCHEMA_VERSION,
+  STORAGE_KEYS.ORGANIZATION_PROFILE,
+  STORAGE_KEYS.PRODUCT_LEVELS,
+  STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS,
+  STORAGE_KEYS.ORDER_TYPE_CONFIGS,
+  STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS,
+  STORAGE_KEYS.LEAD_FLOW_CONFIG,
+  STORAGE_KEYS.LEAD_INTAKE_RECORDS,
+  STORAGE_KEYS.LEAD_SOURCE_CONFIGS,
+  STORAGE_KEYS.COMMISSION_RULES,
+  STORAGE_KEYS.COMMISSION_ROLE_CONFIGS,
+  STORAGE_KEYS.MONTHLY_COMMISSION_TIER_CONFIGS,
+  STORAGE_KEYS.ECOMMERCE_SETTLEMENT_RECORDS,
+  STORAGE_KEYS.ECOMMERCE_SETTLEMENT_CONFIG,
+  STORAGE_KEYS.INITIALIZED,
 ];
 const requireAssignableUsersAccess = [
   createRequireAuth(authService),
@@ -96,6 +138,11 @@ type DeepSeekMessage = {
 
 function routeParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] || '' : value || '';
+}
+
+function queryParam(value: unknown): string {
+  if (Array.isArray(value)) return queryParam(value[0]);
+  return typeof value === 'string' ? value : '';
 }
 
 async function assetStorageContext() {
@@ -175,6 +222,34 @@ app.get('/api/health', async (_req, res) => {
 app.get('/api/ready', async (_req, res) => {
   const payload = await healthPayload();
   res.status(payload.database ? 200 : 503).json(payload);
+});
+
+app.get('/api/customers', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerListService.list({
+    search: queryParam(req.query.search),
+    productLevel: queryParam(req.query.productLevel) as any,
+    customerLevel: queryParam(req.query.customerLevel) as any,
+    lifecycleStatusCode: queryParam(req.query.lifecycleStatusCode) as any,
+    owner: queryParam(req.query.owner),
+    page: Number(queryParam(req.query.page)),
+    pageSize: Number(queryParam(req.query.pageSize)),
+  }, req.currentUser);
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.get('/api/leads', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await leadListService.list({
+    search: queryParam(req.query.search),
+    source: queryParam(req.query.source) as any,
+    status: queryParam(req.query.status) as any,
+    lifecycleStatusCode: queryParam(req.query.lifecycleStatusCode) as any,
+    owner: queryParam(req.query.owner),
+    startDate: queryParam(req.query.startDate),
+    endDate: queryParam(req.query.endDate),
+    page: Number(queryParam(req.query.page)),
+    pageSize: Number(queryParam(req.query.pageSize)),
+  }, req.currentUser);
+  res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
 app.post('/api/auth/login', loginRateLimiter.guard, async (req, res) => {
@@ -306,6 +381,16 @@ app.post('/api/ai/config/test', requireAiConfigAccess, async (_req, res) => {
 });
 
 app.get('/api/storage', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  if (queryParam(req.query.scope) === 'runtime') {
+    const entries = await Promise.all(runtimeStorageKeys.map(async (key) => {
+      if (req.currentUser && !canReadStorageKey(req.currentUser, key)) return [key, null] as const;
+      const result = await storageService.get(key);
+      return [key, result.code === 0 ? result.data : null] as const;
+    }));
+    res.json({ code: 0, data: Object.fromEntries(entries), message: 'success' });
+    return;
+  }
+
   const result = await storageService.list();
   if (result.code === 0 && result.data && req.currentUser) {
     const context = await assetStorageContext();

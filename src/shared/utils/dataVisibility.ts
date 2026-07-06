@@ -103,7 +103,7 @@ function hydrateScopeUserFromStorage(currentUser?: ScopeUser): ScopeUser | undef
   };
 }
 
-function buildDataVisibilityScopeForUser(
+export function buildDataVisibilityScopeForUser(
   rawCurrentUser: ScopeUser | undefined,
   users: ScopeUser[],
   roles: Role[],

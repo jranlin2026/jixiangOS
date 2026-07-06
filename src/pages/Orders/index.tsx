@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Button,
@@ -19,7 +19,6 @@ import {
   TableCell,
   TableContainer,
   TableHead,
-  TablePagination,
   TableRow,
   TextField,
   Tooltip,
@@ -27,6 +26,7 @@ import {
   Alert,
   Tabs,
 } from '@mui/material';
+import TablePagination from '../../shared/components/TablePagination';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditIcon from '@mui/icons-material/Edit';
@@ -875,3 +875,4 @@ const Orders: React.FC = () => {
 };
 
 export default Orders;
+

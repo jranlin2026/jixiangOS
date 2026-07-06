@@ -4,6 +4,7 @@ import type { User } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
+import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { DEFAULT_LEAD_FLOW_CONFIG, DEFAULT_PAGE_SIZE, LIFECYCLE_STATUS_CODES, STORAGE_KEYS, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
@@ -263,6 +264,15 @@ function appendIntakeRecord(record: LeadIntakeRecord): void {
 }
 
 async function fetchLeadFlowConfig(): Promise<ApiResponse<LeadFlowConfig>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<StoredLeadFlowConfig | null>(`/storage/${encodeURIComponent(STORAGE_KEYS.LEAD_FLOW_CONFIG)}`);
+    const config = normalizeLeadFlowConfig(response.code === 0 ? response.data : null);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(STORAGE_KEYS.LEAD_FLOW_CONFIG, JSON.stringify(config));
+    }
+    return createSuccessResponse(config);
+  }
+
   ensureInit();
   await delay(120);
   return createSuccessResponse(ensureLeadFlowConfig());

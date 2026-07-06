@@ -64,16 +64,13 @@ try {
         }),
       } as Response;
     }
-    if (path.endsWith('/storage')) {
+    if (path.endsWith('/storage?scope=runtime')) {
       return {
         status: 200,
         headers: new Headers({ 'content-type': 'application/json' }),
         text: async () => JSON.stringify({
           code: 0,
-          data: {
-            [STORAGE_KEYS.ASSET_DEVICES]: [{ id: 'employee-device', imei: 'EMP-***', imeiMasked: 'EMP-***' }],
-            [STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS]: [{ id: 'employee-account', loginAccount: 'employee_***', loginAccountMasked: 'employee_***' }],
-          },
+          data: {},
           message: 'success',
         }),
       } as Response;
@@ -89,8 +86,8 @@ try {
   assert.equal(login.code, 0);
   assert.equal(storage.get('aaos_backend_auth_token'), 'employee-token');
   assert.equal(JSON.parse(storage.get(AUTH_SESSION_STORAGE_KEY) || '{}').userId, 'user-sales');
-  assert.deepEqual(JSON.parse(storage.get(STORAGE_KEYS.ASSET_DEVICES) || '[]'), [{ id: 'employee-device', imei: 'EMP-***', imeiMasked: 'EMP-***' }]);
-  assert.deepEqual(JSON.parse(storage.get(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS) || '[]'), [{ id: 'employee-account', loginAccount: 'employee_***', loginAccountMasked: 'employee_***' }]);
+  assert.equal(storage.get(STORAGE_KEYS.ASSET_DEVICES), undefined);
+  assert.equal(storage.get(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS), undefined);
   assert.deepEqual(putRequests, []);
 } finally {
   clearBackendToken();

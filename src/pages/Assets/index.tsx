@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+﻿import React, { useEffect, useMemo, useState } from 'react';
+import {
+  useSearchParams } from 'react-router-dom';
 import {
   Avatar,
   Box,
@@ -22,12 +23,12 @@ import {
   TableCell,
   TableContainer,
   TableHead,
-  TablePagination,
   TableRow,
   TextField,
   Tooltip,
   Typography,
 } from '@mui/material';
+import TablePagination from '../../shared/components/TablePagination';
 import AddIcon from '@mui/icons-material/Add';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
@@ -2318,3 +2319,4 @@ const AssetManagement: React.FC = () => {
 };
 
 export default AssetManagement;
+

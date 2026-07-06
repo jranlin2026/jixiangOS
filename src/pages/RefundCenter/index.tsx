@@ -1,10 +1,29 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Box, Typography, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, Paper, Chip, TextField,
-  MenuItem, FormControl, InputLabel, Select, Card, CardContent, IconButton, Tooltip,
-  Tabs, Tab, Button, TablePagination,
+  Box,
+  Typography,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Chip,
+  TextField,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Select,
+  Card,
+  CardContent,
+  IconButton,
+  Tooltip,
+  Tabs,
+  Tab,
+  Button,
 } from '@mui/material';
+import TablePagination from '../../shared/components/TablePagination';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
@@ -464,3 +483,4 @@ const RefundCenter: React.FC<RefundCenterProps> = ({ embedded = false, refundVie
 };
 
 export default RefundCenter;
+

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import {
   Box,
   Button,
@@ -17,12 +17,12 @@ import {
   TableCell,
   TableContainer,
   TableHead,
-  TablePagination,
   TableRow,
   TextField,
   Tooltip,
   Typography,
 } from '@mui/material';
+import TablePagination from '../../shared/components/TablePagination';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { leadFlowApi } from '../../api';
@@ -419,3 +419,4 @@ const LeadIntakeTab: React.FC = () => {
 };
 
 export default LeadIntakeTab;
+

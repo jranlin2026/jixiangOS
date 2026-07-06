@@ -1,9 +1,25 @@
-import React, { useCallback, useEffect, useState } from 'react';
+﻿import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Box, Button, Chip, Dialog, DialogContent,
-  FormControl, InputLabel, MenuItem, Paper, Select, Table, TableBody,
-  TableCell, TableContainer, TableHead, TablePagination, TableRow, TextField, Typography,
+  Box,
+  Button,
+  Chip,
+  Dialog,
+  DialogContent,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Paper,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  Typography,
 } from '@mui/material';
+import TablePagination from '../../shared/components/TablePagination';
 import type { ServiceTicket, ServiceTicketCategory, ServiceTicketStatus } from '../../types/serviceTicket';
 import { serviceTicketApi } from '../../api';
 import { formatDate, formatPaginationRows } from '../../shared/utils/formatters';
@@ -214,3 +230,4 @@ const ServiceTicketTab: React.FC = () => {
 };
 
 export default ServiceTicketTab;
+

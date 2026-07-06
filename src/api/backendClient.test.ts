@@ -73,7 +73,7 @@ try {
       } as Response;
     }
 
-    assert.equal(String(url), 'http://127.0.0.1:3001/api/storage');
+    assert.equal(String(url), 'http://127.0.0.1:3001/api/storage?scope=runtime');
     return {
       status: 200,
       headers: new Headers({ 'content-type': 'application/json' }),
@@ -142,7 +142,7 @@ try {
           remember: true,
         },
         aaos_backend_auth_token: 'stale-backend-token',
-        [STORAGE_KEYS.CUSTOMERS]: [{ id: 'server-customer' }],
+        [STORAGE_KEYS.LEAD_SOURCE_CONFIGS]: [{ id: 'source-server' }],
       },
       message: 'success',
     }),
@@ -158,7 +158,7 @@ try {
 
   assert.equal(JSON.parse(storage.get(AUTH_SESSION_STORAGE_KEY) || '{}').userId, 'user-sales');
   assert.equal(storage.get('aaos_backend_auth_token'), 'current-backend-token');
-  assert.deepEqual(JSON.parse(storage.get(STORAGE_KEYS.CUSTOMERS) || '[]'), [{ id: 'server-customer' }]);
+  assert.deepEqual(JSON.parse(storage.get(STORAGE_KEYS.LEAD_SOURCE_CONFIGS) || '[]'), [{ id: 'source-server' }]);
 
   const localOnlyWriteRequests: string[] = [];
   globalThis.fetch = async (url, init) => {

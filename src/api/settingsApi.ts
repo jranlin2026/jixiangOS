@@ -23,6 +23,15 @@ function ensureInit(): void {
   ensureOrganizationConfigData();
 }
 
+async function fetchBackendStorageValue<T>(key: string): Promise<T | null> {
+  const response = await backendRequest<T | null>(`/storage/${encodeURIComponent(key)}`);
+  if (response.code !== 0) return null;
+  if (response.data !== null && response.data !== undefined && typeof localStorage !== 'undefined') {
+    localStorage.setItem(key, JSON.stringify(response.data));
+  }
+  return response.data;
+}
+
 function ensureUsersWithAuth(): User[] {
   ensureInit();
   const users = migrateUsersWithOrganization(ensureAdminUser(getStorageData<User[]>(STORAGE_KEYS.USERS) || []));
@@ -675,6 +684,11 @@ async function deleteOrderTypeConfig(id: string): Promise<ApiResponse<boolean>> 
 // ---- 生命周期状态配置 ----
 
 async function fetchLifecycleStatusConfigs(): Promise<ApiResponse<LifecycleStatusConfig[]>> {
+  if (shouldUseBackendApi()) {
+    const stored = await fetchBackendStorageValue<LifecycleStatusConfig[]>(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS);
+    return createSuccessResponse(Array.isArray(stored) && stored.length ? stored : DEFAULT_LIFECYCLE_STATUS_CONFIGS as unknown as LifecycleStatusConfig[]);
+  }
+
   ensureInit();
   await delay(120);
   return createSuccessResponse(ensureLifecycleStatusConfigs());
@@ -740,6 +754,11 @@ async function deleteLifecycleStatusConfig(id: string): Promise<ApiResponse<bool
 // ---- 客户等级配置 ----
 
 async function fetchCustomerLevelConfigs(): Promise<ApiResponse<CustomerLevelConfig[]>> {
+  if (shouldUseBackendApi()) {
+    const stored = await fetchBackendStorageValue<CustomerLevelConfig[]>(STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS);
+    return createSuccessResponse(Array.isArray(stored) && stored.length ? stored : DEFAULT_CUSTOMER_LEVEL_CONFIGS as unknown as CustomerLevelConfig[]);
+  }
+
   ensureInit();
   await delay(120);
   return createSuccessResponse(ensureCustomerLevelConfigs());
@@ -814,6 +833,11 @@ async function deleteCustomerLevelConfig(id: string): Promise<ApiResponse<boolea
 // ---- 线索来源配置 ----
 
 async function fetchLeadSourceConfigs(): Promise<ApiResponse<LeadSourceConfig[]>> {
+  if (shouldUseBackendApi()) {
+    const stored = await fetchBackendStorageValue<LeadSourceConfig[]>(STORAGE_KEYS.LEAD_SOURCE_CONFIGS);
+    return createSuccessResponse(Array.isArray(stored) && stored.length ? stored : DEFAULT_LEAD_SOURCE_CONFIGS as unknown as LeadSourceConfig[]);
+  }
+
   ensureInit();
   await delay(120);
   return createSuccessResponse(ensureLeadSourceConfigs());
