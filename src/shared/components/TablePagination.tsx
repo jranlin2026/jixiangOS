@@ -50,6 +50,7 @@ export default function TablePagination({
   onPageChange,
   onRowsPerPageChange,
   sx,
+  labelDisplayedRows,
 }: TablePaginationProps) {
   const totalPages = Math.max(1, Math.ceil(count / Math.max(rowsPerPage, 1)));
   const currentPage = Math.min(Math.max(page, 0), totalPages - 1);
@@ -70,10 +71,13 @@ export default function TablePagination({
     onPageChange(null, nextPage - 1);
   };
 
+  const from = count === 0 ? 0 : currentPage * rowsPerPage + 1;
+  const to = Math.min(count, (currentPage + 1) * rowsPerPage);
+
   return (
     <Box className="JxTablePagination" component={component} sx={sx}>
       <Typography className="JxPaginationTotal" component="span">
-        共{count}条数据
+        {labelDisplayedRows ? labelDisplayedRows({ from, to, count, page: currentPage }) : `共${count}条数据`}
       </Typography>
 
       <Box className="JxPaginationPages">
@@ -131,6 +135,7 @@ export default function TablePagination({
           variant: 'menu',
           anchorOrigin: { vertical: 'top', horizontal: 'right' },
           transformOrigin: { vertical: 'bottom', horizontal: 'right' },
+          marginThreshold: 0,
           MenuListProps: {
             sx: {
               py: 0,

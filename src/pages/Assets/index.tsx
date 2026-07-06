@@ -286,6 +286,14 @@ const assetPaginationSx = {
   },
 };
 
+const renderAssetEmptyRow = (colSpan: number, label: string) => (
+  <TableRow>
+    <TableCell colSpan={colSpan} align="center" sx={{ py: 6, color: '#9ca3af' }}>
+      {label}
+    </TableCell>
+  </TableRow>
+);
+
 const ASSET_CREATE_LABELS: Record<ConfigurableAssetTab, string> = {
   devices: '新增设备',
   phones: '新增手机号',
@@ -1208,6 +1216,7 @@ const AssetManagement: React.FC = () => {
               </TableCell>
             </TableRow>
           ))}
+          {devices.length === 0 && renderAssetEmptyRow(deviceView.visibleColumns.length + 1, '暂无设备资产数据')}
         </TableBody>
       </Table>
     </TableContainer>
@@ -1265,6 +1274,7 @@ const AssetManagement: React.FC = () => {
                 </TableCell>
               </TableRow>
           ))}
+          {phones.length === 0 && renderAssetEmptyRow(phoneView.visibleColumns.length + 1, '暂无手机号资产数据')}
         </TableBody>
       </Table>
     </TableContainer>
@@ -1316,6 +1326,7 @@ const AssetManagement: React.FC = () => {
                 </TableCell>
               </TableRow>
           ))}
+          {accounts.length === 0 && renderAssetEmptyRow(accountView.visibleColumns.length + 1, '暂无互联网账号数据')}
         </TableBody>
       </Table>
     </TableContainer>
@@ -1359,6 +1370,7 @@ const AssetManagement: React.FC = () => {
               </TableCell>
             </TableRow>
           ))}
+          {risks.length === 0 && renderAssetEmptyRow(7, '暂无风险提醒数据')}
         </TableBody>
       </Table>
     </TableContainer>
@@ -1386,6 +1398,7 @@ const AssetManagement: React.FC = () => {
               <TableCell>{log.detail}</TableCell>
             </TableRow>
           ))}
+          {logs.length === 0 && renderAssetEmptyRow(6, '暂无操作日志数据')}
         </TableBody>
       </Table>
     </TableContainer>
@@ -1429,6 +1442,7 @@ const AssetManagement: React.FC = () => {
               </TableCell>
             </TableRow>
           ))}
+          {offboardingTasks.length === 0 && renderAssetEmptyRow(8, '暂无离职回收数据')}
         </TableBody>
       </Table>
     </TableContainer>

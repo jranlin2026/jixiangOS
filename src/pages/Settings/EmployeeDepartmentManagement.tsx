@@ -830,7 +830,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
               </Box>
 
               <TableContainer component={Paper} elevation={0} sx={{ border: 0, borderRadius: 0 }}>
-                <Table sx={{ tableLayout: 'fixed', minWidth: 940 }}>
+                <Table sx={{ tableLayout: 'fixed', minWidth: 1060 }}>
                   <TableHead>
                     <TableRow sx={{ bgcolor: '#f5f8fc' }}>
                       <TableCell padding="checkbox">
@@ -842,6 +842,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
                       </TableCell>
                       <TableCell>姓名</TableCell>
                       <TableCell>账号</TableCell>
+                      <TableCell>手机号</TableCell>
                       <TableCell>角色</TableCell>
                       <TableCell>职务</TableCell>
                       <TableCell>部门</TableCell>
@@ -864,6 +865,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
                           </Box>
                         </TableCell>
                         <TableCell>{user.account || '-'}</TableCell>
+                        <TableCell>{user.phone || '-'}</TableCell>
                         <TableCell>
                           <Chip label={normalizeUserRoleName(user.role)} size="small" sx={{ bgcolor: '#eef4fb', color: '#31506f', fontWeight: 700 }} />
                         </TableCell>
@@ -902,7 +904,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
                     ))}
                     {filteredUsers.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={8} align="center" sx={{ py: 6, color: '#94a3b8' }}>
+                        <TableCell colSpan={9} align="center" sx={{ py: 6, color: '#94a3b8' }}>
                           暂无员工数据
                         </TableCell>
                       </TableRow>
