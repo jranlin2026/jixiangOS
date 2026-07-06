@@ -2002,7 +2002,7 @@ const AssetManagement: React.FC = () => {
     </Button>
   );
 
-  const renderRelatedAssetsSection = () => {
+  const renderRelatedAssetsSection = (placement: 'full' | 'side' = 'full') => {
     if (!detail) return null;
     const phoneRows = detail.relatedPhones.map((phone) => [
       phone.slotType,
@@ -2036,7 +2036,7 @@ const AssetManagement: React.FC = () => {
 
     if (detail.type === 'device') {
       return renderDetailCard('关联资产', (
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1.25fr' }, gap: 1.25 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: placement === 'side' ? '1fr' : { xs: '1fr', lg: '1fr 1.25fr' }, gap: 1.25 }}>
           {renderCompactTable(['卡槽', '手机号', '运营商', '套餐', '状态'], phoneRows, '暂无绑定手机号')}
           {renderCompactTable(['平台', '账号名称', '登录账号', '手机号', '状态'], accountRows, '暂无互联网账号')}
         </Box>
@@ -2104,6 +2104,29 @@ const AssetManagement: React.FC = () => {
       phone: '手机号',
       account: '当前账号',
     };
+    const basicCard = detail.device ? renderDeviceBasicCard(detail.device) : detail.phone ? renderPhoneBasicCard(detail.phone) : detail.account ? renderAccountBasicCard(detail.account) : null;
+    if (detail.type === 'device') {
+      return (
+        <Stack spacing={1.4}>
+          <Paper elevation={0} sx={{ px: 1.5, py: 1, bgcolor: '#EEF6FF', border: '1px solid #D8E9FF', borderRadius: 1 }}>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <InfoOutlinedIcon sx={{ color: shell.blue, fontSize: 18 }} />
+              <Typography variant="body2" sx={{ color: shell.ink }}>
+                本页面展示{titleMap[detail.type]}资产的当前资料与关系数据。
+              </Typography>
+            </Stack>
+          </Paper>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1.1fr 0.9fr' }, gap: 1.25, alignItems: 'start' }}>
+            <Stack spacing={1.25}>
+              {basicCard}
+              {renderResponsibilityCard()}
+            </Stack>
+            {renderRelatedAssetsSection('side')}
+          </Box>
+          {renderHistorySections()}
+        </Stack>
+      );
+    }
     return (
       <Stack spacing={1.4}>
         <Paper elevation={0} sx={{ px: 1.5, py: 1, bgcolor: '#EEF6FF', border: '1px solid #D8E9FF', borderRadius: 1 }}>
@@ -2115,7 +2138,7 @@ const AssetManagement: React.FC = () => {
           </Stack>
         </Paper>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1.1fr 0.9fr' }, gap: 1.25 }}>
-          {detail.device ? renderDeviceBasicCard(detail.device) : detail.phone ? renderPhoneBasicCard(detail.phone) : detail.account ? renderAccountBasicCard(detail.account) : null}
+          {basicCard}
           <Stack spacing={1.25}>
             {renderResponsibilityCard()}
             {renderRiskInfoCard()}
