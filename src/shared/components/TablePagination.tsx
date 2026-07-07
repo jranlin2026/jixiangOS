@@ -28,7 +28,7 @@ const getPageItems = (page: number, totalPages: number): Array<number | 'ellipsi
 
   const lastPage = totalPages - 1;
   if (page <= 4) {
-    return [0, 1, 2, 3, 4, 'ellipsis', lastPage];
+    return [0, 1, 2, 3, 4, 5, 'ellipsis', lastPage];
   }
 
   if (page >= lastPage - 3) {
