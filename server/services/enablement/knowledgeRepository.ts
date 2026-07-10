@@ -42,8 +42,8 @@ export interface KnowledgeRepository {
     publisherUserId: string;
     chunks: DraftKnowledgeChunk[];
     now: Date;
-  }): Promise<KnowledgeDocumentDto>;
-  retireAtomic(documentId: string, actorUserId: string, now: Date): Promise<void>;
+  }): Promise<KnowledgeDocumentDto | null>;
+  retireAtomic(documentId: string, actorUserId: string, now: Date): Promise<boolean>;
   listVisibleCurrent(now: Date): Promise<KnowledgeDocumentDto[]>;
   listReviewQueue(): Promise<KnowledgeWorkflowItemDto[]>;
   listPublicationQueue(): Promise<KnowledgeWorkflowItemDto[]>;

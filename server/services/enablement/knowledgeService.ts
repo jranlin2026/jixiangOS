@@ -94,6 +94,9 @@ export function createKnowledgeService(deps: KnowledgeServiceDependencies) {
     },
 
     async review(versionId: string, input: { decision: 'APPROVE' | 'REJECT'; comment?: string }, actor: AuthenticatedUser) {
+      if (input.decision !== 'APPROVE' && input.decision !== 'REJECT') {
+        return noData('审核决策必须为通过或驳回');
+      }
       const version = await deps.repository.findVersion(versionId);
       const document = version ? await deps.repository.findDocument(version.documentId) : null;
       const department = document?.ownerDepartmentId ? await deps.repository.findDepartment(document.ownerDepartmentId) : null;
@@ -121,12 +124,15 @@ export function createKnowledgeService(deps: KnowledgeServiceDependencies) {
       }
       const chunks = buildMarkdownChunks(version.contentText);
       if (!chunks.length) return noData('正文无法生成知识片段');
-      return success(await deps.repository.publishAtomic({ version, publisherUserId: actor.id, chunks, now: clock() }));
+      const document = await deps.repository.publishAtomic({ version, publisherUserId: actor.id, chunks, now: clock() });
+      if (!document) return noData('版本状态已变化，请刷新后重试', 409);
+      return success(document);
     },
 
     async retire(documentId: string, actor: AuthenticatedUser) {
       if (!canPublishKnowledge(actor)) return noData('无权下线公司知识', 403);
-      await deps.repository.retireAtomic(documentId, actor.id, clock());
+      const retired = await deps.repository.retireAtomic(documentId, actor.id, clock());
+      if (!retired) return noData('版本状态已变化，请刷新后重试', 409);
       return success(true);
     },
 

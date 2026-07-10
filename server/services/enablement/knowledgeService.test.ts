@@ -7,6 +7,9 @@ const now = new Date('2026-07-10T00:00:00.000Z');
 const events: string[] = [];
 const versions = new Map<string, any>();
 const documents = new Map<string, any>();
+let loseNextPublish = false;
+let loseNextRetire = false;
+let reviewAtomicCalls = 0;
 
 const creator = {
   id: 'user-publisher', departmentId: 'dept-sales', isActive: true,
@@ -67,6 +70,7 @@ const repository: any = {
     return true;
   },
   reviewAtomic: async ({ versionId, expectedStatus, decision, nextStatus }: any) => {
+    reviewAtomicCalls += 1;
     const version = versions.get(versionId);
     if (!version || version.status !== expectedStatus) return false;
     events.push(`REVIEW:${decision}`);
@@ -76,16 +80,30 @@ const repository: any = {
   },
   publishAtomic: async ({ version, chunks }: any) => {
     if (version.status !== KNOWLEDGE_VERSION_STATUS.APPROVED) throw new Error('publish requires approved version');
+    const document = documents.get(version.documentId);
+    if (loseNextPublish) {
+      loseNextPublish = false;
+      version.status = KNOWLEDGE_VERSION_STATUS.CURRENT;
+      document.currentVersionId = version.id;
+      return null;
+    }
     events.push(`PUBLISH:${chunks.length}`);
     version.status = KNOWLEDGE_VERSION_STATUS.CURRENT;
-    const document = documents.get(version.documentId);
     document.currentVersionId = version.id;
     return document;
   },
   retireAtomic: async (documentId: string) => {
     const document = documents.get(documentId);
-    if (document) delete document.currentVersionId;
+    const version = document?.currentVersionId ? versions.get(document.currentVersionId) : null;
+    if (!version || version.status !== KNOWLEDGE_VERSION_STATUS.CURRENT) return false;
+    version.status = KNOWLEDGE_VERSION_STATUS.RETIRED;
+    delete document.currentVersionId;
+    if (loseNextRetire) {
+      loseNextRetire = false;
+      return false;
+    }
     events.push('RETIRE');
+    return true;
   },
   listVisibleCurrent: async (at: Date) => [...documents.values()].filter((document) => {
     const version = document.currentVersionId ? versions.get(document.currentVersionId) : null;
@@ -122,14 +140,29 @@ const detail = await service.getCurrent(documentId, reader);
 assert.equal(detail.code, 0);
 assert.equal(detail.data!.contentText, '# 公司介绍\n极享科技。');
 assert.equal((await service.listCurrent(reader)).data!.length, 1);
+assert.equal((await service.retire(documentId, creator)).code, 0);
+assert.equal(versions.get(versionId).status, KNOWLEDGE_VERSION_STATUS.RETIRED);
+assert.equal((await service.retire(documentId, creator)).code, 409, 'retiring an already-retired document loses the CAS');
+assert.equal((await service.getCurrent(documentId, reader)).code, 404);
 
 const nextVersion = await service.createVersion(documentId, { sourceFileName: '公司介绍-v2.md', markdown: '# 公司介绍\n第二版。' }, creator);
 assert.equal(nextVersion.code, 0);
 assert.equal(nextVersion.data!.version.versionNumber, 2);
 assert.equal((await service.submitForReview(nextVersion.data!.version.id, creator)).code, 0);
+const reviewCallsBeforeInvalidDecision = reviewAtomicCalls;
+assert.notEqual((await service.review(nextVersion.data!.version.id, { decision: 'INVALID' as any }, manager)).code, 0);
+assert.equal(versions.get(nextVersion.data!.version.id).status, KNOWLEDGE_VERSION_STATUS.PENDING_REVIEW);
+assert.equal(reviewAtomicCalls, reviewCallsBeforeInvalidDecision, 'invalid review decisions never reach the atomic transition');
 assert.notEqual((await service.review(nextVersion.data!.version.id, { decision: 'APPROVE' }, { ...manager, id: 'other-user' })).code, 0);
 assert.equal((await service.review(nextVersion.data!.version.id, { decision: 'REJECT' }, manager)).code, 0);
 assert.equal((await service.submitForReview(nextVersion.data!.version.id, creator)).code, 0, 'rejected versions can return to review');
+assert.equal((await service.review(nextVersion.data!.version.id, { decision: 'APPROVE' }, manager)).code, 0);
+loseNextPublish = true;
+assert.equal((await service.publish(nextVersion.data!.version.id, creator)).code, 409, 'a stale approved pre-read loses publication CAS');
+assert.equal(versions.get(nextVersion.data!.version.id).status, KNOWLEDGE_VERSION_STATUS.CURRENT);
+loseNextRetire = true;
+assert.equal((await service.retire(documentId, creator)).code, 409, 'a stale current pre-read loses retirement CAS');
+assert.equal(versions.get(nextVersion.data!.version.id).status, KNOWLEDGE_VERSION_STATUS.RETIRED);
 
 assert.notEqual((await service.submitForReview('missing-version', creator)).code, 0);
 assert.notEqual((await service.publish('missing-version', creator)).code, 0);
@@ -138,8 +171,6 @@ assert.notEqual((await service.createDraft({
   visibility: [{ subjectType: 'ALL_EMPLOYEES' }], sourceFileName: 'bad.md', markdown: '# bad', effectiveAt: '2026-07-11T00:00:00.000Z', expiresAt: '2026-07-11T00:00:00.000Z',
 }, creator)).code, 0);
 assert.notEqual((await service.listPublicationQueue(reader)).code, 0);
-
-await service.retire(documentId, creator);
 assert.equal((await service.getCurrent(documentId, reader)).code, 404);
 
 console.log('knowledgeService lifecycle tests passed');
