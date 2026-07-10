@@ -154,6 +154,15 @@ const PERMISSION_TREE: PermissionNode[] = [
     ],
   },
   {
+    label: '赋能中台',
+    children: [
+      { label: '企业知识', key: PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE },
+      { label: '知识审核', key: PERMISSION_KEYS.ENABLEMENT_REVIEW },
+      { label: '发布管理', key: PERMISSION_KEYS.ENABLEMENT_PUBLISH },
+      { label: '查看敏感知识', key: PERMISSION_KEYS.ENABLEMENT_SENSITIVE },
+    ],
+  },
+  {
     label: '系统设置',
     children: [
       {
