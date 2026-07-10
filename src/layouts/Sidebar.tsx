@@ -39,6 +39,10 @@ import useAuthStore from '../store/useAuthStore';
 
 interface SidebarProps {
   width: number;
+  variant: 'permanent' | 'temporary';
+  open: boolean;
+  onClose: () => void;
+  onNavigate?: () => void;
 }
 
 const shell = {
@@ -211,7 +215,7 @@ const navItems: NavItem[] = [
   },
 ];
 
-const Sidebar: React.FC<SidebarProps> = ({ width }) => {
+const Sidebar: React.FC<SidebarProps> = ({ width, variant, open, onClose, onNavigate }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentUser, logout } = useAuthStore();
@@ -244,9 +248,12 @@ const Sidebar: React.FC<SidebarProps> = ({ width }) => {
 
   return (
     <Drawer
-      variant="permanent"
+      variant={variant}
+      open={open}
+      onClose={onClose}
+      ModalProps={{ keepMounted: true }}
       sx={{
-        width,
+        width: variant === 'permanent' ? width : 0,
         flexShrink: 0,
         '& .MuiDrawer-paper': {
           width,
@@ -294,10 +301,14 @@ const Sidebar: React.FC<SidebarProps> = ({ width }) => {
             const handleNavClick = () => {
               if (!hasChildren) {
                 navigate(item.path);
+                onNavigate?.();
                 return;
               }
               setExpandedPaths((prev) => ({ ...prev, [item.path]: !(prev[item.path] ?? isActive) }));
-              if (!isActive) navigate(item.children?.[0]?.path || item.path);
+              if (!isActive) {
+                navigate(item.children?.[0]?.path || item.path);
+                onNavigate?.();
+              }
             };
             return (
               <React.Fragment key={`${item.label}-${item.path}`}>
@@ -344,7 +355,10 @@ const Sidebar: React.FC<SidebarProps> = ({ width }) => {
                         return (
                           <ListItem key={child.path} disablePadding sx={{ mb: 0.25 }}>
                             <ListItemButton
-                              onClick={() => navigate(child.path)}
+                              onClick={() => {
+                                navigate(child.path);
+                                onNavigate?.();
+                              }}
                               sx={{
                                 borderRadius: 1.5,
                                 py: 0.75,
