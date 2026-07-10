@@ -28,6 +28,13 @@ const asIso = (value: Date | string | null | undefined): string | undefined => (
 
 const asDate = (value: unknown): Date | null => value ? new Date(value as string) : null;
 
+const PUBLISH_CONFLICT = '版本状态已变化，无法发布';
+
+function isExpectedConcurrencyConflict(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === 'P2002' || code === 'P2034';
+}
+
 const currentWindow = (now: Date) => ({
   status: 'CURRENT',
   AND: [
@@ -168,21 +175,26 @@ export function createPrismaKnowledgeRepository(prisma: PrismaKnowledgeClient): 
 
     async createVersion(documentId, rawInput) {
       const input = rawInput as AnyRow;
-      return prisma.$transaction(async (tx) => {
-        const attachment = attachmentData(input, input.versionId);
-        const document = await tx.knowledgeDocument.findUnique({ where: { id: documentId }, include: documentInclude });
-        if (!document) throw new Error('知识文档不存在');
-        const latest = await tx.knowledgeVersion.findFirst({
-          where: { documentId },
-          orderBy: { versionNumber: 'desc' },
-          select: { versionNumber: true },
-        });
-        const version = await tx.knowledgeVersion.create({
-          data: versionData(input, documentId, input.versionId, (latest?.versionNumber || 0) + 1),
-        });
-        await tx.knowledgeAttachment.create({ data: attachment });
-        return { document: mapDocument(document), version: mapVersionRecord(version) };
-      }, { isolationLevel: 'Serializable' });
+      try {
+        return await prisma.$transaction(async (tx) => {
+          const attachment = attachmentData(input, input.versionId);
+          const document = await tx.knowledgeDocument.findUnique({ where: { id: documentId }, include: documentInclude });
+          if (!document) throw new Error('知识文档不存在');
+          const latest = await tx.knowledgeVersion.findFirst({
+            where: { documentId },
+            orderBy: { versionNumber: 'desc' },
+            select: { versionNumber: true },
+          });
+          const version = await tx.knowledgeVersion.create({
+            data: versionData(input, documentId, input.versionId, (latest?.versionNumber || 0) + 1),
+          });
+          await tx.knowledgeAttachment.create({ data: attachment });
+          return { document: mapDocument(document), version: mapVersionRecord(version) };
+        }, { isolationLevel: 'Serializable' });
+      } catch (error) {
+        if (isExpectedConcurrencyConflict(error)) return null;
+        throw error;
+      }
     },
 
     async findVersion(id) {
@@ -249,9 +261,13 @@ export function createPrismaKnowledgeRepository(prisma: PrismaKnowledgeClient): 
           const current = await tx.knowledgeDocument.findUnique({ where: { id: input.version.documentId } });
           if (!current) throw new Error('知识文档不存在');
           const publishVersion = await tx.knowledgeVersion.findUnique({ where: { id: input.version.id } });
-          if (!publishVersion || publishVersion.status !== 'APPROVED') throw new Error('版本状态已变化，无法发布');
+          if (!publishVersion || publishVersion.status !== 'APPROVED') throw new Error(PUBLISH_CONFLICT);
           if (current.currentVersionId) {
-            await tx.knowledgeVersion.update({ where: { id: current.currentVersionId }, data: { status: 'RETIRED' } });
+            const retired = await tx.knowledgeVersion.updateMany({
+              where: { id: current.currentVersionId, status: 'CURRENT' },
+              data: { status: 'RETIRED' },
+            });
+            if (retired.count !== 1) throw new Error(PUBLISH_CONFLICT);
           }
           await tx.knowledgeChunk.deleteMany({ where: { versionId: input.version.id } });
           await tx.knowledgeChunk.createMany({
@@ -264,11 +280,16 @@ export function createPrismaKnowledgeRepository(prisma: PrismaKnowledgeClient): 
               searchText: chunk.searchText,
             })),
           });
-          await tx.knowledgeVersion.update({
-            where: { id: input.version.id },
+          const activated = await tx.knowledgeVersion.updateMany({
+            where: { id: input.version.id, status: 'APPROVED' },
             data: { status: 'CURRENT', publishedAt: input.now, publishedById: input.publisherUserId },
           });
-          await tx.knowledgeDocument.update({ where: { id: current.id }, data: { currentVersionId: input.version.id } });
+          if (activated.count !== 1) throw new Error(PUBLISH_CONFLICT);
+          const pointed = await tx.knowledgeDocument.updateMany({
+            where: { id: current.id, currentVersionId: current.currentVersionId },
+            data: { currentVersionId: input.version.id },
+          });
+          if (pointed.count !== 1) throw new Error(PUBLISH_CONFLICT);
           published = mapDocument({
             ...current,
             currentVersionId: input.version.id,
@@ -282,7 +303,7 @@ export function createPrismaKnowledgeRepository(prisma: PrismaKnowledgeClient): 
         }, { isolationLevel: 'Serializable' });
         return published;
       } catch (error) {
-        if (error instanceof Error && error.message === '版本状态已变化，无法发布') return null;
+        if ((error instanceof Error && error.message === PUBLISH_CONFLICT) || isExpectedConcurrencyConflict(error)) return null;
         throw error;
       }
     },

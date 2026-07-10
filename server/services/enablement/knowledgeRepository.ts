@@ -23,7 +23,7 @@ export type KnowledgeVersionRecord = {
  */
 export interface KnowledgeRepository {
   createDraft(input: Record<string, unknown>): Promise<{ document: KnowledgeDocumentDto; version: KnowledgeVersionRecord }>;
-  createVersion(documentId: string, input: Record<string, unknown>): Promise<{ document: KnowledgeDocumentDto; version: KnowledgeVersionRecord }>;
+  createVersion(documentId: string, input: Record<string, unknown>): Promise<{ document: KnowledgeDocumentDto; version: KnowledgeVersionRecord } | null>;
   findVersion(id: string): Promise<KnowledgeVersionRecord | null>;
   findDocument(id: string): Promise<KnowledgeDocumentDto | null>;
   findCurrentDetail(id: string, now: Date): Promise<KnowledgeDocumentDetailDto | null>;

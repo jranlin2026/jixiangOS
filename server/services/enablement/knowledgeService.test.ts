@@ -148,6 +148,20 @@ assert.equal((await service.getCurrent(documentId, reader)).code, 404);
 const nextVersion = await service.createVersion(documentId, { sourceFileName: '公司介绍-v2.md', markdown: '# 公司介绍\n第二版。' }, creator);
 assert.equal(nextVersion.code, 0);
 assert.equal(nextVersion.data!.version.versionNumber, 2);
+repository.createVersion = async () => null;
+assert.equal(
+  (await service.createVersion(documentId, { sourceFileName: '公司介绍-v3.md', markdown: '# 公司介绍\n第三版。' }, creator)).code,
+  409,
+  'a concurrent version-number collision maps to a conflict',
+);
+repository.createVersion = async (nextDocumentId: string, nextInput: any) => {
+  const version = {
+    id: nextInput.versionId, documentId: nextDocumentId, versionNumber: 3, status: KNOWLEDGE_VERSION_STATUS.DRAFT,
+    sourceFileName: nextInput.sourceFileName, checksum: nextInput.checksum, contentText: nextInput.markdown,
+  };
+  versions.set(version.id, version);
+  return { document: documents.get(nextDocumentId), version };
+};
 assert.equal((await service.submitForReview(nextVersion.data!.version.id, creator)).code, 0);
 const reviewCallsBeforeInvalidDecision = reviewAtomicCalls;
 assert.notEqual((await service.review(nextVersion.data!.version.id, { decision: 'INVALID' as any }, manager)).code, 0);

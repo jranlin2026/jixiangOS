@@ -73,13 +73,15 @@ export function createKnowledgeService(deps: KnowledgeServiceDependencies) {
       const attachment = deps.fileStore
         ? await deps.fileStore.writeMarkdown({ documentId, versionId, fileName: input.sourceFileName, markdown: input.markdown })
         : null;
-      return success(await deps.repository.createVersion(documentId, {
+      const created = await deps.repository.createVersion(documentId, {
         ...input,
         versionId,
         checksum: checksum(input.markdown),
         createdById: actor.id,
         attachment,
-      }));
+      });
+      if (!created) return noData('版本号已被其他操作占用，请刷新后重试', 409);
+      return success(created);
     },
 
     async submitForReview(versionId: string, actor: AuthenticatedUser) {

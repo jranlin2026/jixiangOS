@@ -18,12 +18,16 @@ const operations: string[] = [];
 const tx = {
   knowledgeDocument: {
     findUnique: async () => ({ id: 'doc-1', currentVersionId: 'old-version' }),
-    update: async ({ data }: any) => { operations.push(`point-current:${data.currentVersionId}`); },
+    updateMany: async ({ data }: any) => {
+      operations.push(`point-current:${data.currentVersionId}`);
+      return { count: 1 };
+    },
   },
   knowledgeVersion: {
     findUnique: async () => ({ id: 'new-version', status: 'APPROVED' }),
-    update: async ({ where, data }: any) => {
+    updateMany: async ({ where, data }: any) => {
       operations.push(data.status === 'RETIRED' ? `retire:${where.id}` : `activate:${where.id}`);
+      return { count: 1 };
     },
   },
   knowledgeChunk: {
@@ -47,7 +51,10 @@ const failedTx = {
   ...tx,
   knowledgeDocument: {
     findUnique: async () => ({ id: 'doc-1', currentVersionId: 'old-version' }),
-    update: async ({ data }: any) => { failedOperations.push(`point-current:${data.currentVersionId}`); },
+    updateMany: async ({ data }: any) => {
+      failedOperations.push(`point-current:${data.currentVersionId}`);
+      return { count: 1 };
+    },
   },
   knowledgeChunk: {
     deleteMany: async ({ where }: any) => { failedOperations.push(`delete-chunks:${where.versionId}`); },
@@ -58,4 +65,43 @@ const failedRepository = createPrismaKnowledgeRepository({ $transaction: async (
 await assert.rejects(() => failedRepository.publishAtomic(input), /chunk failure/);
 assert.ok(!failedOperations.some((operation) => operation.startsWith('point-current:')));
 
-console.log('prismaKnowledgeRepository publish transaction tests passed');
+const stalePublishRepository = createPrismaKnowledgeRepository({
+  $transaction: async (callback: any) => callback({
+    knowledgeDocument: {
+      findUnique: async () => ({ id: 'doc-1', currentVersionId: 'old-version' }),
+      updateMany: async () => ({ count: 1 }),
+    },
+    knowledgeVersion: {
+      findUnique: async () => ({ id: 'new-version', status: 'APPROVED' }),
+      updateMany: async ({ data }: any) => ({ count: data.status === 'CURRENT' ? 0 : 1 }),
+    },
+    knowledgeChunk: { deleteMany: async () => {}, createMany: async () => {} },
+  }) as any,
+} as any);
+assert.equal(await stalePublishRepository.publishAtomic(input), null, 'lost approved-state CAS becomes a conflict');
+
+const transactionConflict = Object.assign(new Error('transaction retry exhausted'), { code: 'P2034' });
+const retryPublishRepository = createPrismaKnowledgeRepository({
+  $transaction: async () => { throw transactionConflict; },
+} as any);
+assert.equal(await retryPublishRepository.publishAtomic(input), null, 'serializable retry exhaustion becomes a conflict');
+
+const versionInput = {
+  versionId: 'version-2', sourceFileName: 'v2.md', markdown: '# v2', checksum: 'hash', createdById: 'user-publisher',
+  attachment: { storageKey: 'doc-1/version-2/v2.md', byteSize: 5 },
+};
+for (const code of ['P2002', 'P2034']) {
+  const versionConflictRepository = createPrismaKnowledgeRepository({
+    $transaction: async (callback: any) => callback({
+      knowledgeDocument: { findUnique: async () => ({ id: 'doc-1', visibilities: [], versions: [] }) },
+      knowledgeVersion: {
+        findFirst: async () => ({ versionNumber: 1 }),
+        create: async () => { throw Object.assign(new Error('version conflict'), { code }); },
+      },
+      knowledgeAttachment: { create: async () => {} },
+    }) as any,
+  } as any);
+  assert.equal(await versionConflictRepository.createVersion('doc-1', versionInput), null, `${code} becomes a version conflict`);
+}
+
+console.log('prismaKnowledgeRepository transaction tests passed');
