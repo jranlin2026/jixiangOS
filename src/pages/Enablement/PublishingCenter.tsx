@@ -22,6 +22,7 @@ import { moduleTokens } from '../../shared/components/ModuleShell';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import useAuthStore from '../../store/useAuthStore';
 import useEnablementStore from '../../store/useEnablementStore';
+import { isMarkdownFile } from './utils';
 import type {
   KnowledgeSensitivity,
   KnowledgeVersionStatus,
@@ -111,6 +112,108 @@ const emptyDraft = (departmentId = ''): DraftForm => ({
   effectiveAt: '',
 });
 
+type WorkflowCardProps = {
+  item: KnowledgeWorkflowItemDto;
+  kind: 'review' | 'manage';
+  comment: string;
+  actionPending: boolean;
+  canReviewPermission: boolean;
+  canPublishPermission: boolean;
+  onCommentChange: (versionId: string, value: string) => void;
+  onReview: (item: KnowledgeWorkflowItemDto, decision: 'APPROVE' | 'REJECT', comment: string) => void;
+  onPublish: (item: KnowledgeWorkflowItemDto) => void;
+  onSubmit: (item: KnowledgeWorkflowItemDto) => void;
+  onUploadVersion: (documentId: string, file: File) => void;
+  onInvalidFile: () => void;
+};
+
+const WorkflowCard: React.FC<WorkflowCardProps> = ({
+  item,
+  kind,
+  comment,
+  actionPending,
+  canReviewPermission,
+  canPublishPermission,
+  onCommentChange,
+  onReview,
+  onPublish,
+  onSubmit,
+  onUploadVersion,
+  onInvalidFile,
+}) => {
+  const { document, version } = item;
+  const canSubmit = ['DRAFT', 'REJECTED'].includes(version.status) && canPublishPermission;
+  const canReview = version.status === 'PENDING_REVIEW' && canReviewPermission;
+  const canPublish = version.status === 'APPROVED' && canPublishPermission;
+  return (
+    <Paper sx={{ p: 2, contentVisibility: 'auto', containIntrinsicSize: '0 320px' }}>
+      <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="flex-start">
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="subtitle1">{document.title}</Typography>
+          <Typography variant="caption" color="text.secondary">{document.category} · v{version.versionNumber} · {version.sourceFileName}</Typography>
+        </Box>
+        <Chip size="small" label={statusMeta[version.status].label} sx={{ color: statusMeta[version.status].color, bgcolor: statusMeta[version.status].bg }} />
+      </Stack>
+      <LifecycleRail status={version.status} />
+      {kind === 'review' ? (
+        <Box sx={{ mt: 1.5 }}>
+          <Typography variant="caption" sx={{ color: moduleTokens.muted, fontWeight: 800 }}>待审核 Markdown 正文</Typography>
+          <Box
+            component="pre"
+            tabIndex={0}
+            aria-label={`${document.title} 待审核正文`}
+            sx={{ mt: 0.75, mb: 0, p: 1.5, maxHeight: 320, overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', border: `1px solid ${moduleTokens.line}`, borderRadius: 1, bgcolor: '#F8FAFC', color: moduleTokens.ink, fontFamily: '"SFMono-Regular", Consolas, monospace', fontSize: 12, lineHeight: 1.7 }}
+          >
+            {item.contentText || '正文为空'}
+          </Box>
+        </Box>
+      ) : null}
+      {kind === 'review' && canReview ? (
+        <Stack spacing={1} sx={{ mt: 1.5 }}>
+          <TextField
+            label="审核意见"
+            value={comment}
+            onChange={(event) => onCommentChange(version.id, event.target.value)}
+            placeholder="通过可选填；驳回时请说明需要修改的内容"
+            multiline
+            minRows={2}
+          />
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+            <Button variant="contained" onClick={() => onReview(item, 'APPROVE', comment)} disabled={actionPending}>审核通过</Button>
+            <Button color="error" variant="outlined" onClick={() => onReview(item, 'REJECT', comment)} disabled={actionPending || !comment.trim()}>驳回修改</Button>
+          </Stack>
+        </Stack>
+      ) : null}
+      {kind === 'manage' && (canSubmit || canPublish) ? (
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1.5 }}>
+          {canSubmit ? (
+            <Button variant="contained" onClick={() => onSubmit(item)} disabled={actionPending}>
+              {version.status === 'REJECTED' ? '重新提交审核' : '提交审核'}
+            </Button>
+          ) : null}
+          {canPublish ? <Button variant="contained" onClick={() => onPublish(item)} disabled={actionPending}>正式发布</Button> : null}
+          {version.status === 'REJECTED' ? (
+            <Button component="label" variant="outlined" disabled={actionPending}>
+              上传修订版本
+              <input
+                hidden
+                type="file"
+                accept=".md,text/markdown"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file && isMarkdownFile(file)) onUploadVersion(document.id, file);
+                  else if (file) onInvalidFile();
+                  event.target.value = '';
+                }}
+              />
+            </Button>
+          ) : null}
+        </Stack>
+      ) : null}
+    </Paper>
+  );
+};
+
 const PublishingCenter: React.FC = () => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const {
@@ -128,7 +231,6 @@ const PublishingCenter: React.FC = () => {
   const canPublishPermission = hasPermission(currentUser, PERMISSION_KEYS.ENABLEMENT_PUBLISH, 'write');
   const [form, setForm] = useState<DraftForm>(() => emptyDraft(currentUser?.departmentId));
   const [draftFile, setDraftFile] = useState<File | null>(null);
-  const [stagedItem, setStagedItem] = useState<KnowledgeWorkflowItemDto | null>(null);
   const [reviewComments, setReviewComments] = useState<Record<string, string>>({});
   const [actionPending, setActionPending] = useState('');
   const [notice, setNotice] = useState<{ severity: 'success' | 'error'; message: string } | null>(null);
@@ -155,6 +257,8 @@ const PublishingCenter: React.FC = () => {
 
   const queueCount = reviewQueue.length + publicationQueue.length;
   const currentItems = useMemo(() => knowledge.filter((item) => Boolean(item.currentVersion)), [knowledge]);
+  const draftQueue = useMemo(() => publicationQueue.filter((item) => ['DRAFT', 'REJECTED'].includes(item.version.status)), [publicationQueue]);
+  const approvedQueue = useMemo(() => publicationQueue.filter((item) => item.version.status === 'APPROVED'), [publicationQueue]);
 
   const runAction = async (key: string, action: () => Promise<{ code: number; message: string }>, successMessage: string) => {
     setActionPending(key);
@@ -164,7 +268,6 @@ const PublishingCenter: React.FC = () => {
       setNotice(result.code === 0
         ? { severity: 'success', message: successMessage }
         : { severity: 'error', message: result.message || '操作未完成，请刷新后重试' });
-      if (result.code === 0 && key.startsWith('submit-')) setStagedItem(null);
     } catch (actionError) {
       setNotice({ severity: 'error', message: actionError instanceof Error ? actionError.message : '知识服务暂时不可用' });
     } finally {
@@ -177,6 +280,10 @@ const PublishingCenter: React.FC = () => {
     event.preventDefault();
     if (!draftFile) {
       setNotice({ severity: 'error', message: '请选择一个 Markdown 文件' });
+      return;
+    }
+    if (!isMarkdownFile(draftFile)) {
+      setNotice({ severity: 'error', message: '所选文件不是有效的 Markdown 文件，请上传 .md 文件' });
       return;
     }
     if (!form.title.trim() || !form.category.trim() || !form.summary.trim() || !form.ownerDepartmentId.trim()) {
@@ -203,7 +310,6 @@ const PublishingCenter: React.FC = () => {
         ...(form.effectiveAt ? { effectiveAt: new Date(form.effectiveAt).toISOString() } : {}),
       });
       if (result.code === 0) {
-        setStagedItem(result.data);
         setForm(emptyDraft(currentUser?.departmentId));
         setDraftFile(null);
         setNotice({ severity: 'success', message: '草稿已创建，可提交审核' });
@@ -219,6 +325,10 @@ const PublishingCenter: React.FC = () => {
   };
 
   const uploadVersion = async (documentId: string, file: File) => {
+    if (!isMarkdownFile(file)) {
+      setNotice({ severity: 'error', message: '所选文件不是有效的 Markdown 文件，请上传 .md 文件' });
+      return;
+    }
     setActionPending(`version-${documentId}`);
     setNotice(null);
     try {
@@ -227,7 +337,6 @@ const PublishingCenter: React.FC = () => {
         markdown: await file.text(),
       });
       if (result.code === 0) {
-        setStagedItem(result.data);
         setNotice({ severity: 'success', message: '新版本草稿已创建，原版本保持不变' });
       } else {
         setNotice({ severity: 'error', message: result.message });
@@ -240,74 +349,24 @@ const PublishingCenter: React.FC = () => {
     }
   };
 
-  const WorkflowCard: React.FC<{ item: KnowledgeWorkflowItemDto; kind: 'review' | 'publish' | 'staged' }> = ({ item, kind }) => {
-    const { document, version } = item;
-    const canSubmit = ['DRAFT', 'REJECTED'].includes(version.status);
-    const canReview = version.status === 'PENDING_REVIEW' && hasPermission(currentUser, PERMISSION_KEYS.ENABLEMENT_REVIEW, 'write');
-    const canPublish = version.status === 'APPROVED' && hasPermission(currentUser, PERMISSION_KEYS.ENABLEMENT_PUBLISH, 'write');
-    const comment = reviewComments[version.id] || '';
-    return (
-      <Paper sx={{ p: 2, contentVisibility: 'auto', containIntrinsicSize: '0 240px' }}>
-        <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="flex-start">
-          <Box sx={{ minWidth: 0 }}>
-            <Typography variant="subtitle1">{document.title}</Typography>
-            <Typography variant="caption" color="text.secondary">{document.category} · v{version.versionNumber} · {version.sourceFileName}</Typography>
-          </Box>
-          <Chip size="small" label={statusMeta[version.status].label} sx={{ color: statusMeta[version.status].color, bgcolor: statusMeta[version.status].bg }} />
-        </Stack>
-        <LifecycleRail status={version.status} />
-        {kind === 'review' && canReview ? (
-          <Stack spacing={1} sx={{ mt: 1.5 }}>
-            <TextField
-              label="审核意见"
-              value={comment}
-              onChange={(event) => setReviewComments((current) => ({ ...current, [version.id]: event.target.value }))}
-              placeholder="通过可选填；驳回时请说明需要修改的内容"
-              multiline
-              minRows={2}
-            />
-            <Stack direction="row" spacing={1}>
-              <Button
-                variant="contained"
-                onClick={() => void runAction(`approve-${version.id}`, () => enablementApi.reviewVersion(version.id, { decision: 'APPROVE', comment: comment.trim() || undefined }), '审核已通过')}
-                disabled={Boolean(actionPending)}
-              >
-                审核通过
-              </Button>
-              <Button
-                color="error"
-                variant="outlined"
-                onClick={() => void runAction(`reject-${version.id}`, () => enablementApi.reviewVersion(version.id, { decision: 'REJECT', comment: comment.trim() }), '版本已驳回')}
-                disabled={Boolean(actionPending) || !comment.trim()}
-              >
-                驳回修改
-              </Button>
-            </Stack>
-          </Stack>
-        ) : null}
-        {kind === 'publish' && canPublish ? (
-          <Button
-            variant="contained"
-            sx={{ mt: 1.5 }}
-            onClick={() => void runAction(`publish-${version.id}`, () => enablementApi.publishVersion(version.id), '版本已正式发布')}
-            disabled={Boolean(actionPending)}
-          >
-            正式发布
-          </Button>
-        ) : null}
-        {kind === 'staged' && canSubmit && canPublishPermission ? (
-          <Button
-            variant="contained"
-            sx={{ mt: 1.5 }}
-            onClick={() => void runAction(`submit-${version.id}`, () => enablementApi.submitForReview(version.id), '版本已提交审核')}
-            disabled={Boolean(actionPending)}
-          >
-            提交审核
-          </Button>
-        ) : null}
-      </Paper>
-    );
-  };
+  const invalidMarkdown = () => setNotice({ severity: 'error', message: '所选文件不是有效的 Markdown 文件，请上传 .md 文件' });
+  const workflowCardProps = (item: KnowledgeWorkflowItemDto) => ({
+    item,
+    comment: reviewComments[item.version.id] || '',
+    actionPending: Boolean(actionPending),
+    canReviewPermission,
+    canPublishPermission,
+    onCommentChange: (versionId: string, value: string) => setReviewComments((current) => ({ ...current, [versionId]: value })),
+    onReview: (workflowItem: KnowledgeWorkflowItemDto, decision: 'APPROVE' | 'REJECT', comment: string) => void runAction(
+      `${decision.toLowerCase()}-${workflowItem.version.id}`,
+      () => enablementApi.reviewVersion(workflowItem.version.id, { decision, comment: comment.trim() || undefined }),
+      decision === 'APPROVE' ? '审核已通过' : '版本已驳回',
+    ),
+    onPublish: (workflowItem: KnowledgeWorkflowItemDto) => void runAction(`publish-${workflowItem.version.id}`, () => enablementApi.publishVersion(workflowItem.version.id), '版本已正式发布'),
+    onSubmit: (workflowItem: KnowledgeWorkflowItemDto) => void runAction(`submit-${workflowItem.version.id}`, () => enablementApi.submitForReview(workflowItem.version.id), '版本已提交审核'),
+    onUploadVersion: (documentId: string, file: File) => void uploadVersion(documentId, file),
+    onInvalidFile: invalidMarkdown,
+  });
 
   return (
     <Stack spacing={2}>
@@ -330,8 +389,16 @@ const PublishingCenter: React.FC = () => {
                 <input
                   hidden
                   type="file"
-                  accept=".md,text/markdown,text/plain"
-                  onChange={(event) => setDraftFile(event.target.files?.[0] || null)}
+                  accept=".md,text/markdown"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file && isMarkdownFile(file)) setDraftFile(file);
+                    else if (file) {
+                      setDraftFile(null);
+                      invalidMarkdown();
+                    }
+                    event.target.value = '';
+                  }}
                 />
               </Button>
               <Typography variant="caption" color="text.secondary">仅上传 `.md` 文件；浏览器不会读取或保存本地文件夹位置。</Typography>
@@ -385,19 +452,12 @@ const PublishingCenter: React.FC = () => {
             </Stack>
           </Paper>
 
-          {stagedItem ? (
-            <Box>
-              <Typography variant="subtitle1" sx={{ mb: 1 }}>待提交草稿</Typography>
-              <WorkflowCard item={stagedItem} kind="staged" />
-            </Box>
-          ) : null}
-
           {canReviewPermission ? (
             <Box>
               <Typography variant="subtitle1">部门审核</Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>仅显示当前账号可审核的归属部门知识。</Typography>
               <Stack spacing={1.25}>
-                {reviewQueue.map((item) => <WorkflowCard key={item.version.id} item={item} kind="review" />)}
+                {reviewQueue.map((item) => <WorkflowCard key={item.version.id} kind="review" {...workflowCardProps(item)} />)}
                 {!loading && reviewQueue.length === 0 ? (
                   <Paper sx={{ py: 3, px: 2, textAlign: 'center', color: moduleTokens.muted }}>
                     <Typography variant="body2">暂无待审核版本，新提交的版本会出现在这里。</Typography>
@@ -409,11 +469,26 @@ const PublishingCenter: React.FC = () => {
 
           {canPublishPermission ? (
             <Box>
+              <Typography variant="subtitle1">待提交与已驳回</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>这里来自服务端队列，刷新或重新登录后仍可继续提交、修订。</Typography>
+              <Stack spacing={1.25}>
+                {draftQueue.map((item) => <WorkflowCard key={item.version.id} kind="manage" {...workflowCardProps(item)} />)}
+                {!loading && draftQueue.length === 0 ? (
+                  <Paper sx={{ py: 3, px: 2, textAlign: 'center', color: moduleTokens.muted }}>
+                    <Typography variant="body2">暂无待提交或已驳回版本。</Typography>
+                  </Paper>
+                ) : null}
+              </Stack>
+            </Box>
+          ) : null}
+
+          {canPublishPermission ? (
+            <Box>
               <Typography variant="subtitle1">待正式发布</Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>审核通过后仍需发布，才会成为员工可见的当前版本。</Typography>
               <Stack spacing={1.25}>
-                {publicationQueue.map((item) => <WorkflowCard key={item.version.id} item={item} kind="publish" />)}
-                {!loading && publicationQueue.length === 0 ? (
+                {approvedQueue.map((item) => <WorkflowCard key={item.version.id} kind="manage" {...workflowCardProps(item)} />)}
+                {!loading && approvedQueue.length === 0 ? (
                   <Paper sx={{ py: 3, px: 2, textAlign: 'center', color: moduleTokens.muted }}>
                     <Typography variant="body2">暂无待发布版本。</Typography>
                   </Paper>
@@ -446,10 +521,11 @@ const PublishingCenter: React.FC = () => {
                     <input
                       hidden
                       type="file"
-                      accept=".md,text/markdown,text/plain"
+                      accept=".md,text/markdown"
                       onChange={(event) => {
                         const file = event.target.files?.[0];
-                        if (file) void uploadVersion(document.id, file);
+                        if (file && isMarkdownFile(file)) void uploadVersion(document.id, file);
+                        else if (file) invalidMarkdown();
                         event.target.value = '';
                       }}
                     />

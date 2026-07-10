@@ -161,7 +161,17 @@ const navItems: NavItem[] = [
     ],
   },
   { label: 'AI助手', icon: <SmartToyIcon />, path: ROUTES.AI_ASSISTANT, permissionKey: PERMISSION_KEYS.AI_ASSISTANT },
-  { label: '赋能中台', icon: <SchoolIcon />, path: ROUTES.ENABLEMENT, permissionKey: PERMISSION_KEYS.ENABLEMENT },
+  {
+    label: '赋能中台',
+    icon: <SchoolIcon />,
+    path: ROUTES.ENABLEMENT,
+    permissionKey: PERMISSION_KEYS.ENABLEMENT,
+    permissionKeys: [
+      PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE,
+      PERMISSION_KEYS.ENABLEMENT_REVIEW,
+      PERMISSION_KEYS.ENABLEMENT_PUBLISH,
+    ],
+  },
   {
     label: '系统设置',
     icon: <SettingsIcon />,

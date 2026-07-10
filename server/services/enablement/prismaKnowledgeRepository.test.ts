@@ -80,6 +80,18 @@ const stalePublishRepository = createPrismaKnowledgeRepository({
 } as any);
 assert.equal(await stalePublishRepository.publishAtomic(input), null, 'lost approved-state CAS becomes a conflict');
 
+let publicationQueueWhere: unknown;
+const queueRepository = createPrismaKnowledgeRepository({
+  knowledgeVersion: {
+    findMany: async ({ where }: any) => {
+      publicationQueueWhere = where;
+      return [];
+    },
+  },
+} as any);
+await queueRepository.listPublicationQueue();
+assert.deepEqual(publicationQueueWhere, { status: { in: ['DRAFT', 'REJECTED', 'APPROVED'] } });
+
 const transactionConflict = Object.assign(new Error('transaction retry exhausted'), { code: 'P2034' });
 const retryPublishRepository = createPrismaKnowledgeRepository({
   $transaction: async () => { throw transactionConflict; },

@@ -56,3 +56,30 @@ The first pass risked turning the lifecycle rail into a decorative progress step
 - Verified the UI never renders private file-store identifiers; only the user-visible source filename is displayed.
 - Verified review, publish, submit, upload-new-version, and retire actions are both status-aware and permission-aware.
 - No blocker. The UI intentionally relies on the Task 7 backend and does not provide a local fallback.
+
+## Review-fix pass
+
+### RED evidence
+
+- Detail/static regression failed because knowledge cards did not call `getKnowledge` or render `contentText` in a dialog.
+- Markdown validator test failed with `ERR_MODULE_NOT_FOUND`; both upload handlers previously trusted browser `accept` alone.
+- Store concurrency test failed after the review request completed while the publication request remained active: `loading` incorrectly changed to `false`.
+- Permission regression failed because route/sidebar used the umbrella permission, allowing a sensitive-only grant to expose a dead end.
+- Repository contract test failed with `{ status: 'APPROVED' }` instead of the required authoritative `{ status: { in: ['DRAFT', 'REJECTED', 'APPROVED'] } }` queue.
+- Workflow/static regression failed while `WorkflowCard` was declared inside `PublishingCenter` and review content was absent.
+
+### GREEN changes
+
+- Browse and search cards are keyboard-actionable and open an accessible responsive MUI dialog. The dialog fetches the current detail on demand and shows Markdown as safe text with version, category, sensitivity, and effective/update times.
+- The publisher queue now returns DRAFT, REJECTED, and APPROVED versions. Drafts can submit after reload; rejected versions can resubmit or upload a corrected immutable version; approved versions can publish.
+- Review cards show the full submitted Markdown in a bounded, keyboard-scrollable source panel before decision controls.
+- `WorkflowCard` is module-scoped and receives comment/action callbacks explicitly, preserving input focus across parent renders.
+- Store loading uses a pending-request counter. Parallel queue refreshes remain loading until every request settles; the concurrency test proves the first completion cannot expose false empty states.
+- Every file input uses `.md,text/markdown`, and both selection handlers and mutation functions validate the `.md` extension and Markdown-compatible MIME before `File.text()`.
+- Route/sidebar gates now list only knowledge, review, and publish permissions; sensitive-only permission no longer exposes the module.
+
+### Review-fix verification
+
+- Focused API, module, permission, Markdown validation, store concurrency, and repository queue tests: pass.
+- `pnpm test`: pass, 80 test files.
+- `pnpm build`: pass, TypeScript and Vite production build.

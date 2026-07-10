@@ -1,20 +1,30 @@
 import React, { useEffect, useState } from 'react';
 import SearchIcon from '@mui/icons-material/Search';
 import MenuBookOutlinedIcon from '@mui/icons-material/MenuBookOutlined';
+import CloseIcon from '@mui/icons-material/Close';
 import {
   Alert,
   Box,
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  IconButton,
   InputAdornment,
   Paper,
   Stack,
   TextField,
   Typography,
+  useMediaQuery,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
+import { enablementApi } from '../../api';
 import { moduleTokens } from '../../shared/components/ModuleShell';
 import useEnablementStore from '../../store/useEnablementStore';
+import type { KnowledgeDocumentDetailDto } from '../../types/enablement';
 
 const formatTime = (value?: string) => {
   if (!value) return '未设置';
@@ -25,8 +35,14 @@ const formatTime = (value?: string) => {
 };
 
 const KnowledgeCenter: React.FC = () => {
+  const theme = useTheme();
+  const mobileDetail = useMediaQuery(theme.breakpoints.down('sm'));
   const [query, setQuery] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detail, setDetail] = useState<KnowledgeDocumentDetailDto | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState('');
   const { knowledge, searchHits, loading, error, loadKnowledge, searchKnowledge } = useEnablementStore();
 
   useEffect(() => {
@@ -44,6 +60,22 @@ const KnowledgeCenter: React.FC = () => {
   };
 
   const rows = hasSearched ? searchHits : knowledge;
+
+  const openKnowledge = async (documentId: string) => {
+    setDetailOpen(true);
+    setDetail(null);
+    setDetailError('');
+    setDetailLoading(true);
+    try {
+      const result = await enablementApi.getKnowledge(documentId);
+      if (result.code === 0) setDetail(result.data);
+      else setDetailError(result.message || '知识详情加载失败');
+    } catch (detailRequestError) {
+      setDetailError(detailRequestError instanceof Error ? detailRequestError.message : '知识详情加载失败');
+    } finally {
+      setDetailLoading(false);
+    }
+  };
 
   return (
     <Stack spacing={2}>
@@ -100,7 +132,14 @@ const KnowledgeCenter: React.FC = () => {
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 1.5 }}>
         {hasSearched
           ? searchHits.map((hit) => (
-            <Paper key={`${hit.documentId}-${hit.versionId}-${hit.heading || ''}`} sx={{ p: 2.25 }}>
+            <Paper
+              key={`${hit.documentId}-${hit.versionId}-${hit.heading || ''}`}
+              component="button"
+              type="button"
+              onClick={() => void openKnowledge(hit.documentId)}
+              aria-label={`查看知识：${hit.title}`}
+              sx={{ p: 2.25, width: '100%', textAlign: 'left', font: 'inherit', color: 'inherit', cursor: 'pointer', '&:hover': { borderColor: '#8FB2F7', bgcolor: '#FBFDFF' }, '&:focus-visible': { outline: `3px solid ${moduleTokens.blue}`, outlineOffset: 2 } }}
+            >
               <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="flex-start">
                 <Box sx={{ minWidth: 0 }}>
                   <Typography variant="subtitle1" sx={{ color: moduleTokens.ink }}>{hit.title}</Typography>
@@ -118,7 +157,14 @@ const KnowledgeCenter: React.FC = () => {
             </Paper>
           ))
           : knowledge.map((document) => (
-            <Paper key={document.id} sx={{ p: 2.25 }}>
+            <Paper
+              key={document.id}
+              component="button"
+              type="button"
+              onClick={() => void openKnowledge(document.id)}
+              aria-label={`查看知识：${document.title}`}
+              sx={{ p: 2.25, width: '100%', textAlign: 'left', font: 'inherit', color: 'inherit', cursor: 'pointer', '&:hover': { borderColor: '#8FB2F7', bgcolor: '#FBFDFF' }, '&:focus-visible': { outline: `3px solid ${moduleTokens.blue}`, outlineOffset: 2 } }}
+            >
               <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="flex-start">
                 <Box sx={{ minWidth: 0 }}>
                   <Typography variant="subtitle1" sx={{ color: moduleTokens.ink }}>{document.title}</Typography>
@@ -134,6 +180,49 @@ const KnowledgeCenter: React.FC = () => {
             </Paper>
           ))}
       </Box>
+
+      <Dialog
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        fullScreen={mobileDetail}
+        fullWidth
+        maxWidth="md"
+        aria-labelledby="knowledge-detail-title"
+      >
+        <DialogTitle id="knowledge-detail-title" sx={{ pr: 7 }}>
+          {detail?.title || '知识详情'}
+          <IconButton aria-label="关闭知识详情" onClick={() => setDetailOpen(false)} sx={{ position: 'absolute', right: 12, top: 10 }}>
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: { xs: 2, md: 3 } }}>
+          {detailLoading ? (
+            <Stack alignItems="center" spacing={1} sx={{ py: 8 }}><CircularProgress /><Typography variant="body2">正在加载当前版本…</Typography></Stack>
+          ) : null}
+          {detailError ? <Alert severity="error">{detailError}。请关闭后重试。</Alert> : null}
+          {detail ? (
+            <Stack spacing={2}>
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                <Chip label={detail.category} size="small" color="primary" variant="outlined" />
+                <Chip label={`v${detail.currentVersion?.versionNumber || '—'}`} size="small" />
+                <Chip label={detail.sensitivity === 'INTERNAL' ? '公司内部' : '受限知识'} size="small" />
+              </Stack>
+              <Typography variant="body1" color="text.secondary">{detail.summary}</Typography>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 0.25, sm: 2 }}>
+                <Typography variant="caption" color="text.secondary">生效时间 {formatTime(detail.currentVersion?.effectiveAt || detail.currentVersion?.publishedAt)}</Typography>
+                <Typography variant="caption" color="text.secondary">更新时间 {formatTime(detail.updatedAt)}</Typography>
+              </Stack>
+              <Box
+                component="pre"
+                sx={{ m: 0, p: { xs: 1.5, md: 2.5 }, border: `1px solid ${moduleTokens.line}`, borderRadius: 1, bgcolor: '#F8FAFC', color: moduleTokens.ink, fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace', fontSize: 13, lineHeight: 1.75, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+              >
+                {detail.contentText}
+              </Box>
+            </Stack>
+          ) : null}
+        </DialogContent>
+        <DialogActions><Button onClick={() => setDetailOpen(false)}>关闭</Button></DialogActions>
+      </Dialog>
     </Stack>
   );
 };

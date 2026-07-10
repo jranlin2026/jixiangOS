@@ -172,7 +172,11 @@ const App: React.FC = () => {
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.AI_ASSISTANT} />}>
             <Route path={ROUTES.AI_ASSISTANT} element={<Suspense fallback={<PageLoader />}><AIAssistant /></Suspense>} />
           </Route>
-          <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.ENABLEMENT} />}>
+          <Route element={<ProtectedRoute permissionKeys={[
+            PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE,
+            PERMISSION_KEYS.ENABLEMENT_REVIEW,
+            PERMISSION_KEYS.ENABLEMENT_PUBLISH,
+          ]} />}>
             <Route path={ROUTES.ENABLEMENT} element={<Suspense fallback={<PageLoader />}><Enablement /></Suspense>} />
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.SETTINGS} />}>

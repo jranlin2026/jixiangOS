@@ -354,7 +354,7 @@ export function createPrismaKnowledgeRepository(prisma: PrismaKnowledgeClient): 
 
     async listPublicationQueue() {
       const versions = await prisma.knowledgeVersion.findMany({
-        where: { status: 'APPROVED' },
+        where: { status: { in: ['DRAFT', 'REJECTED', 'APPROVED'] } },
         include: { document: { include: documentInclude } },
         orderBy: { updatedAt: 'asc' },
       });
