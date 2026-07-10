@@ -171,3 +171,115 @@ model BusinessRecord {
   @@index([eventAt])
   @@map("business_records")
 }
+
+model KnowledgeDocument {
+  id                String   @id @db.VarChar(64)
+  slug              String   @unique @db.VarChar(160)
+  title             String   @db.VarChar(240)
+  category          String   @db.VarChar(120)
+  summary           String   @db.Text
+  ownerDepartmentId String?  @db.VarChar(64)
+  ownerUserId       String?  @db.VarChar(64)
+  sensitivity       String   @default("INTERNAL") @db.VarChar(32)
+  currentVersionId  String?  @db.VarChar(64)
+  createdById       String   @db.VarChar(64)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  versions     KnowledgeVersion[]
+  visibilities KnowledgeVisibility[]
+
+  @@index([ownerDepartmentId])
+  @@index([ownerUserId])
+  @@index([currentVersionId])
+  @@map("knowledge_documents")
+}
+
+model KnowledgeVersion {
+  id             String    @id @db.VarChar(64)
+  documentId     String    @db.VarChar(64)
+  versionNumber  Int
+  status         String    @default("DRAFT") @db.VarChar(32)
+  sourceFileName String    @db.VarChar(255)
+  sourcePath     String?   @db.VarChar(1000)
+  checksum       String    @db.VarChar(64)
+  contentText    String    @db.LongText
+  effectiveAt    DateTime?
+  expiresAt      DateTime?
+  publishedAt    DateTime?
+  publishedById  String?   @db.VarChar(64)
+  createdById    String    @db.VarChar(64)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  document    KnowledgeDocument     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  attachments KnowledgeAttachment[]
+  reviews     ContentReview[]
+  chunks      KnowledgeChunk[]
+
+  @@unique([documentId, versionNumber])
+  @@index([status])
+  @@index([effectiveAt, expiresAt])
+  @@map("knowledge_versions")
+}
+
+model KnowledgeAttachment {
+  id          String   @id @db.VarChar(64)
+  versionId   String   @db.VarChar(64)
+  fileName    String   @db.VarChar(255)
+  mimeType    String   @db.VarChar(120)
+  byteSize    Int
+  storageKey  String   @unique @db.VarChar(500)
+  checksum    String   @db.VarChar(64)
+  createdById String   @db.VarChar(64)
+  createdAt   DateTime @default(now())
+
+  version KnowledgeVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([versionId])
+  @@map("knowledge_attachments")
+}
+
+model KnowledgeVisibility {
+  id          String   @id @db.VarChar(64)
+  documentId  String   @db.VarChar(64)
+  subjectType String   @db.VarChar(32)
+  subjectId   String   @default("*") @db.VarChar(64)
+  createdAt   DateTime @default(now())
+
+  document KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, subjectType, subjectId])
+  @@index([subjectType, subjectId])
+  @@map("knowledge_visibilities")
+}
+
+model ContentReview {
+  id             String   @id @db.VarChar(64)
+  versionId      String   @db.VarChar(64)
+  reviewerUserId String   @db.VarChar(64)
+  decision       String   @db.VarChar(24)
+  comment        String?  @db.Text
+  reviewedAt     DateTime @default(now())
+
+  version KnowledgeVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([versionId, reviewedAt])
+  @@map("content_reviews")
+}
+
+model KnowledgeChunk {
+  id         String   @id @db.VarChar(64)
+  versionId  String   @db.VarChar(64)
+  ordinal    Int
+  heading    String?  @db.VarChar(500)
+  content    String   @db.LongText
+  searchText String   @db.LongText
+  createdAt  DateTime @default(now())
+
+  version KnowledgeVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, ordinal])
+  @@index([versionId])
+  @@map("knowledge_chunks")
+}
