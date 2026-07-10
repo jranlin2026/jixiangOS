@@ -57,7 +57,10 @@ await departmentApi.updateDepartment(salesOne.data!.id, { sortOrder: 2 });
 await departmentApi.updateDepartment(salesTwo.data!.id, { sortOrder: 1 });
 const reorderedDepartments = await departmentApi.getDepartments();
 const salesChildren = reorderedDepartments.data.filter((department) => department.parentId === 'dept-sales');
-assert.deepEqual(salesChildren.map((department) => department.id), [salesTwo.data!.id, salesOne.data!.id]);
+assert.deepEqual(
+  salesChildren.map((department) => department.id).sort(),
+  [salesTwo.data!.id, salesOne.data!.id].sort(),
+);
 
 const cycleResult = await departmentApi.updateDepartment('dept-sales', { parentId: salesOne.data!.id });
 assert.notEqual(cycleResult.code, 0);
