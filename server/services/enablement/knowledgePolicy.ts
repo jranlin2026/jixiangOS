@@ -4,6 +4,13 @@ import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../../src/share
 
 type DepartmentFacts = { id: string; managerId?: string | null };
 
+function hasReviewWriteAuthorization(actor: AuthenticatedUser): boolean {
+  return actor.permissions.some((permission) => (
+    (permission.module === PERMISSION_KEYS.ENABLEMENT_REVIEW || permission.module === '全部')
+    && permission.actions.some((action) => ['write', 'delete', 'admin'].includes(action))
+  ));
+}
+
 export function canReadKnowledge(actor: AuthenticatedUser, document: Pick<KnowledgeDocumentDto, 'sensitivity' | 'visibility'>): boolean {
   if (!hasPermission(actor, PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE)) return false;
   if (document.sensitivity !== 'INTERNAL' && !hasPermission(actor, PERMISSION_KEYS.ENABLEMENT_SENSITIVE)) {
@@ -18,6 +25,7 @@ export function canReadKnowledge(actor: AuthenticatedUser, document: Pick<Knowle
 }
 
 export function canReviewKnowledge(actor: AuthenticatedUser, department: DepartmentFacts): boolean {
+  if (!actor.isActive || !hasReviewWriteAuthorization(actor)) return false;
   if (isSuperAdmin(actor)) return true;
   return hasPermission(actor, PERMISSION_KEYS.ENABLEMENT_REVIEW, 'write') && department.managerId === actor.id;
 }

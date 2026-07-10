@@ -15,6 +15,15 @@ const publisher = {
   ...employee, id: 'user-publisher',
   permissions: [{ module: PERMISSION_KEYS.ENABLEMENT_PUBLISH, actions: ['read', 'write'] }],
 } as any;
+const activeSuperAdmin = {
+  ...employee, id: 'user-super-admin', role: 'Super Admin', roleId: 'role-super-admin',
+  permissions: [{ module: '全部', actions: ['admin'] }],
+} as any;
+const inactiveSuperAdmin = { ...activeSuperAdmin, id: 'user-inactive-super-admin', isActive: false } as any;
+const readOnlyAllPermissions = {
+  ...employee, id: 'user-read-all',
+  permissions: [{ module: '全部', actions: ['read'] }],
+} as any;
 
 assert.equal(canReadKnowledge(employee, { sensitivity: 'INTERNAL', visibility: [{ id: 'v1', subjectType: 'ALL_EMPLOYEES' }] } as any), true);
 assert.equal(canReadKnowledge(employee, { sensitivity: 'DEPARTMENT', visibility: [{ id: 'v2', subjectType: 'DEPARTMENT', subjectId: 'dept-sales' }] } as any), true);
@@ -22,5 +31,8 @@ assert.equal(canReadKnowledge(employee, { sensitivity: 'DEPARTMENT', visibility:
 assert.equal(canReadKnowledge(employee, { sensitivity: 'FINANCE', visibility: [{ id: 'v4', subjectType: 'ALL_EMPLOYEES' }] } as any), false);
 assert.equal(canReviewKnowledge(reviewer, { id: 'dept-sales', managerId: 'user-manager' } as any), true);
 assert.equal(canReviewKnowledge(reviewer, { id: 'dept-finance', managerId: 'user-finance' } as any), false);
+assert.equal(canReviewKnowledge(activeSuperAdmin, { id: 'dept-finance', managerId: 'user-finance' } as any), true);
+assert.equal(canReviewKnowledge(inactiveSuperAdmin, { id: 'dept-finance', managerId: 'user-finance' } as any), false);
+assert.equal(canReviewKnowledge(readOnlyAllPermissions, { id: 'dept-finance', managerId: 'user-read-all' } as any), false);
 assert.equal(canPublishKnowledge(publisher), true);
 assert.equal(canPublishKnowledge(employee), false);
