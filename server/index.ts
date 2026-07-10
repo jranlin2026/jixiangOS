@@ -259,6 +259,25 @@ app.get('/api/customers', requireStorageAccess, async (req: AuthenticatedRequest
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
+app.post('/api/customers/:id/follow-ups', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerListService.addFollowUp(routeParam(req.params.id), {
+    content: String(req.body?.content || ''),
+    operator: typeof req.body?.operator === 'string' ? req.body.operator : undefined,
+    type: req.body?.type,
+    attachments: req.body?.attachments,
+  }, req.currentUser);
+  res.status(result.code === 0 ? 200 : result.code === 404 ? 404 : 400).json(result);
+});
+
+app.post('/api/customers/:id/release', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerListService.releaseToPublicPool(
+    routeParam(req.params.id),
+    String(req.body?.reason || ''),
+    req.currentUser,
+  );
+  res.status(result.code === 0 ? 200 : result.code === 404 ? 404 : 400).json(result);
+});
+
 app.get('/api/leads', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
   const result = await leadListService.list({
     search: queryParam(req.query.search),

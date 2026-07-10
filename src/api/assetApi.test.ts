@@ -271,6 +271,65 @@ await resetAssets();
 }
 
 {
+  const realNameDevice = await assetApi.createDevice({
+    deviceName: '实名测试设备',
+    brandModel: 'Real Name Test',
+    imei: 'REAL-NAME-IMEI-0001',
+    simType: '双卡',
+    ownerSubject: '公司',
+    department: '运营管理部',
+    owner: '测试员',
+    currentUser: '测试员',
+    status: '使用中',
+    riskLevel: '低',
+    monthlyCost: 0,
+  });
+  assert.equal(realNameDevice.code, 0);
+
+  const realNamePhone = await assetApi.createPhoneNumber({
+    phoneNumber: '13900006661',
+    realName: '欧阳娜娜',
+    operator: '移动',
+    deviceId: realNameDevice.data.id,
+    slotType: '卡槽1',
+    packageName: '实名测试套餐',
+    monthlyFee: 39,
+    owner: '测试员',
+    status: '使用中',
+  });
+  assert.equal(realNamePhone.code, 0);
+  assert.equal(realNamePhone.data.realNameMasked, '欧*娜娜');
+
+  const realNameAccount = await assetApi.createInternetAccount({
+    platform: '实名测试平台',
+    accountName: '实名测试账号',
+    loginAccount: 'real_name_account',
+    realName: '张三',
+    phoneId: realNamePhone.data.id,
+    ownerSubject: '公司',
+    department: '运营管理部',
+    owner: '测试员',
+    currentUser: '测试员',
+    permissionStatus: '正常',
+    accountStatus: '正常',
+    riskLevel: '低',
+    serviceProvider: '测试服务商',
+    monthlyFee: 0,
+    purpose: '实名脱敏测试',
+  });
+  assert.equal(realNameAccount.code, 0);
+  assert.equal(realNameAccount.data.realNameMasked, '张*');
+
+  const revealedPhoneName = await assetApi.revealSensitiveField('phone', realNamePhone.data.id, 'phoneRealName');
+  assert.equal(revealedPhoneName.code, 0);
+  assert.equal(revealedPhoneName.data.value, '欧阳娜娜');
+
+  const revealedAccountName = await assetApi.revealSensitiveField('account', realNameAccount.data.id, 'accountRealName');
+  assert.equal(revealedAccountName.code, 0);
+  assert.equal(revealedAccountName.data.value, '张三');
+}
+
+{
   const revealed = await assetApi.revealSensitiveField('phone', 'asset-phone-001', 'phoneNumber');
   assert.equal(revealed.code, 0);
   assert.equal(revealed.data.value, '13890566721');
@@ -476,9 +535,9 @@ await resetAssets();
 
 {
   const imported = await assetApi.importAssetsFromCsv('accounts', [
-    '平台*,账号名称*,登录账号*,绑定手机号,绑定邮箱,所属主体,所属部门,负责人,当前使用人,权限状态,账号状态,风险等级,服务商,月费用,到期时间,用途',
-    '导入平台,导入绑定账号,import_account_001,13900002222,import@example.com,公司,运营管理部,测试员,测试员,正常,正常,低,自营,0,,导入测试',
-    '导入平台,未知手机号账号,import_account_002,13999999999,import2@example.com,公司,运营管理部,测试员,测试员,正常,正常,低,自营,0,,导入测试',
+    '平台*,账号名称*,登录账号*,实名信息,绑定手机号,绑定邮箱,所属主体,所属部门,负责人,当前使用人,权限状态,账号状态,用途',
+    '导入平台,导入绑定账号,import_account_001,张三,13900002222,import@example.com,公司,运营管理部,测试员,测试员,正常,正常,导入测试',
+    '导入平台,未知手机号账号,import_account_002,李四,13999999999,import2@example.com,公司,运营管理部,测试员,测试员,正常,正常,导入测试',
   ].join('\n'));
 
   assert.equal(imported.code, 0);

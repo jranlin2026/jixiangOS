@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
+import { createHash } from 'node:crypto';
 import { failure, success } from '../api/response';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { mapPrismaUser } from '../db/prismaMappers';
@@ -6,6 +7,8 @@ import { mapPrismaUser } from '../db/prismaMappers';
 type StoragePrisma = Pick<PrismaClient, 'appStorage' | 'leadRecord' | 'businessRecord' | 'user'>;
 
 const STORAGE_KEY_PATTERN = /^aaos_[a-zA-Z0-9_:-]+$/;
+const BUSINESS_RECORD_ID_MAX_LENGTH = 160;
+const BUSINESS_RECORD_RECORD_ID_MAX_LENGTH = 80;
 const STRUCTURED_KEYS = new Set<string>([STORAGE_KEYS.LEADS]);
 const BUSINESS_RECORD_KEYS = new Set<string>([
   STORAGE_KEYS.CUSTOMERS,
@@ -39,6 +42,12 @@ function nullableText(value: unknown): string | null {
   return text || null;
 }
 
+function compactIdentifier(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  const suffix = createHash('sha1').update(value).digest('hex').slice(0, 12);
+  return `${value.slice(0, maxLength - suffix.length - 1)}-${suffix}`;
+}
+
 function normalizeLead(value: unknown): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 }
@@ -48,11 +57,12 @@ function mapLeadRow(row: { data: unknown }) {
 }
 
 function toRecordId(domain: string, item: Record<string, any>, index: number): string {
-  return nullableText(item.id)
+  const rawId = nullableText(item.id)
     || nullableText(item.orderNo)
     || nullableText(item.refundNo)
     || nullableText(item.applicationNo)
     || `${domain}-${index}`;
+  return compactIdentifier(rawId, BUSINESS_RECORD_RECORD_ID_MAX_LENGTH);
 }
 
 function amountValue(item: Record<string, any>): number | null {
@@ -90,7 +100,7 @@ function ownerValue(item: Record<string, any>): string | null {
 }
 
 function businessRecordId(domain: string, recordId: string): string {
-  return `${domain}:${recordId}`.slice(0, 160);
+  return compactIdentifier(`${domain}:${recordId}`, BUSINESS_RECORD_ID_MAX_LENGTH);
 }
 
 export function createStorageService(prisma: StoragePrisma) {

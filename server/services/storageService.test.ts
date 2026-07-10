@@ -133,3 +133,27 @@ assert.equal(businessUpserts[0].where.domain_recordId.domain, STORAGE_KEYS.CUSTO
 assert.equal(businessUpserts[0].create.title, '客户A');
 assert.equal(String(businessUpserts[0].create.amount), '1200');
 assert.equal(businessDeletedWhere.domain, STORAGE_KEYS.CUSTOMERS);
+
+const collidingCreateIds = new Set<string>();
+const collisionPrisma = {
+  ...prisma,
+  businessRecord: {
+    findMany: async () => [],
+    upsert: async (input: any) => {
+      if (collidingCreateIds.has(input.create.id)) {
+        throw new Error(`duplicate primary id: ${input.create.id}`);
+      }
+      collidingCreateIds.add(input.create.id);
+      return input.create;
+    },
+    deleteMany: async () => ({ count: 0 }),
+  },
+} as any;
+const collisionService = createStorageService(collisionPrisma);
+const longPrefix = `customer-${'a'.repeat(180)}`;
+const longIdCustomers = [
+  { id: `${longPrefix}-one`, name: '长ID客户A', createdAt: '2026-06-24T01:00:00.000Z' },
+  { id: `${longPrefix}-two`, name: '长ID客户B', createdAt: '2026-06-24T02:00:00.000Z' },
+];
+await assert.doesNotReject(() => collisionService.set(STORAGE_KEYS.CUSTOMERS, longIdCustomers));
+assert.equal(collidingCreateIds.size, 2);

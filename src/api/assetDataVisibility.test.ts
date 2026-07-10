@@ -355,7 +355,7 @@ seed('user-self');
   assert.deepEqual(ids(visibleTasks.data.items), ['task-self']);
   assert.equal(hiddenDetail.data, null);
   assert.equal(dashboard.data.deviceCount, 1);
-  assert.equal(dashboard.data.monthlyCost, 148);
+  assert.equal(dashboard.data.monthlyCost, 138);
 }
 
 seed('user-peer');

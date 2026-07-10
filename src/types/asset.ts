@@ -4,6 +4,8 @@ export type AssetDeviceStatus = '正常' | '使用中' | '闲置' | '已注销';
 
 export type AssetPhoneStatus = '使用中' | '闲置' | '已停用';
 
+export type AssetPhoneOperator = '移动' | '联通' | '电信' | '广电' | '未知';
+
 export type AssetPermissionStatus = '正常' | '离职待回收' | '已回收';
 
 export type AssetAccountStatus = '使用中' | '正常' | '闲置' | '异常' | '已注销';
@@ -12,7 +14,7 @@ export type AssetRiskStatus = 'open' | 'resolved' | 'ignored';
 
 export type AssetType = 'device' | 'phone' | 'account';
 
-export type AssetSensitiveField = 'imei' | 'phoneNumber' | 'loginAccount' | 'boundEmail';
+export type AssetSensitiveField = 'imei' | 'phoneNumber' | 'phoneRealName' | 'loginAccount' | 'accountRealName' | 'boundEmail';
 
 export type AssetImportType = 'devices' | 'phones' | 'accounts';
 
@@ -25,8 +27,11 @@ export interface AssetDevice {
   imeiMasked: string;
   simType: '单卡' | '双卡';
   ownerSubject: '公司' | '法人' | '员工个人';
+  departmentId?: string;
   department: string;
+  ownerId?: string;
   owner: string;
+  currentUserId?: string;
   currentUser: string;
   status: AssetDeviceStatus;
   riskLevel: AssetRiskLevel;
@@ -40,12 +45,20 @@ export interface AssetPhoneNumber {
   id: string;
   phoneNumber: string;
   phoneNumberMasked: string;
-  operator: '移动' | '联通' | '电信' | '广电';
+  realName?: string;
+  realNameMasked?: string;
+  operator: AssetPhoneOperator;
+  attributionLocation?: string;
   deviceId: string;
   slotType: '卡槽1' | '卡槽2';
   packageName: string;
   monthlyFee: number;
+  departmentId?: string;
+  department?: string;
+  ownerId?: string;
   owner: string;
+  currentUserId?: string;
+  currentUser?: string;
   status: AssetPhoneStatus;
   createdAt: string;
   updatedAt: string;
@@ -58,12 +71,17 @@ export interface AssetInternetAccount {
   accountName: string;
   loginAccount: string;
   loginAccountMasked: string;
+  realName?: string;
+  realNameMasked?: string;
   phoneId?: string;
   boundEmail?: string;
   boundEmailMasked?: string;
   ownerSubject: '公司' | '法人' | '员工个人';
+  departmentId?: string;
   department: string;
+  ownerId?: string;
   owner: string;
+  currentUserId?: string;
   currentUser: string;
   permissionStatus: AssetPermissionStatus;
   accountStatus: AssetAccountStatus;

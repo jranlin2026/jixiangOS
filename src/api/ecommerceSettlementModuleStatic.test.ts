@@ -12,9 +12,12 @@ const pageSource = readFileSync(join(process.cwd(), 'src', 'pages', 'EcommerceSe
 assert.match(appSource, /ROUTES\.ECOMMERCE_SETTLEMENT/);
 assert.match(sidebarSource, /电商结算中心/);
 assert.match(rolePermissionSource, /PERMISSION_KEYS\.ECOMMERCE_SETTLEMENT_WORKBENCH/);
-assert.match(pageSource, /结算工作台/);
+assert.match(pageSource, /店铺对账/);
+assert.match(pageSource, /生成当前店铺/);
+assert.match(pageSource, /结算结果/);
+assert.match(pageSource, /店铺利润/);
+assert.match(pageSource, /达人利润/);
 assert.match(pageSource, /异常核对/);
-assert.match(pageSource, /达人结算汇总/);
 assert.match(pageSource, /资金流水明细核对/);
 
 const financeRole = DEFAULT_ROLES.find((role) => role.code === 'finance_specialist');

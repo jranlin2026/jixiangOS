@@ -241,19 +241,45 @@ export function filterVisibleOrders<T extends Pick<Order, 'owner' | 'salesName' 
   return items.filter((item) => canViewOrder(item, scope));
 }
 
-export function canViewAssetDevice(device: Pick<AssetDevice, 'owner' | 'currentUser'>, scope = getCurrentDataVisibilityScope('assets')): boolean {
-  if (scope.unrestricted) return true;
-  return hasVisibleName(scope, device.owner) || hasVisibleName(scope, device.currentUser);
+function hasVisibleDepartment(scope: DataVisibilityScope, departmentId?: string): boolean {
+  const text = cleanText(departmentId);
+  if (!text || !scope.currentUser?.departmentId) return false;
+  if (scope.dataScopeLevel === 'department') {
+    const { departments } = ensureOrganizationConfigData();
+    const visibleDepartmentIds = new Set([
+      scope.currentUser.departmentId,
+      ...getDepartmentDescendantIds(departments || [], scope.currentUser.departmentId),
+    ]);
+    return visibleDepartmentIds.has(text);
+  }
+  return false;
 }
 
-export function canViewAssetPhone(phone: Pick<AssetPhoneNumber, 'owner'>, scope = getCurrentDataVisibilityScope('assets')): boolean {
+export function canViewAssetDevice(device: Pick<AssetDevice, 'owner' | 'currentUser' | 'ownerId' | 'currentUserId' | 'departmentId'>, scope = getCurrentDataVisibilityScope('assets')): boolean {
   if (scope.unrestricted) return true;
-  return hasVisibleName(scope, phone.owner);
+  return hasVisibleId(scope, device.ownerId)
+    || hasVisibleId(scope, device.currentUserId)
+    || hasVisibleDepartment(scope, device.departmentId)
+    || hasVisibleName(scope, device.owner)
+    || hasVisibleName(scope, device.currentUser);
 }
 
-export function canViewAssetAccount(account: Pick<AssetInternetAccount, 'owner' | 'currentUser'>, scope = getCurrentDataVisibilityScope('assets')): boolean {
+export function canViewAssetPhone(phone: Pick<AssetPhoneNumber, 'owner' | 'ownerId' | 'currentUser' | 'currentUserId' | 'departmentId'>, scope = getCurrentDataVisibilityScope('assets')): boolean {
   if (scope.unrestricted) return true;
-  return hasVisibleName(scope, account.owner) || hasVisibleName(scope, account.currentUser);
+  return hasVisibleId(scope, phone.ownerId)
+    || hasVisibleId(scope, phone.currentUserId)
+    || hasVisibleDepartment(scope, phone.departmentId)
+    || hasVisibleName(scope, phone.owner)
+    || hasVisibleName(scope, phone.currentUser);
+}
+
+export function canViewAssetAccount(account: Pick<AssetInternetAccount, 'owner' | 'currentUser' | 'ownerId' | 'currentUserId' | 'departmentId'>, scope = getCurrentDataVisibilityScope('assets')): boolean {
+  if (scope.unrestricted) return true;
+  return hasVisibleId(scope, account.ownerId)
+    || hasVisibleId(scope, account.currentUserId)
+    || hasVisibleDepartment(scope, account.departmentId)
+    || hasVisibleName(scope, account.owner)
+    || hasVisibleName(scope, account.currentUser);
 }
 
 export function canViewAssetOffboardingTask(task: Pick<AssetOffboardingTask, 'employeeName'>, scope = getCurrentDataVisibilityScope('assets')): boolean {
@@ -261,17 +287,17 @@ export function canViewAssetOffboardingTask(task: Pick<AssetOffboardingTask, 'em
   return hasVisibleName(scope, task.employeeName);
 }
 
-export function filterVisibleAssetDevices<T extends Pick<AssetDevice, 'owner' | 'currentUser'>>(items: T[], scope = getCurrentDataVisibilityScope('assets')): T[] {
+export function filterVisibleAssetDevices<T extends Pick<AssetDevice, 'owner' | 'currentUser' | 'ownerId' | 'currentUserId' | 'departmentId'>>(items: T[], scope = getCurrentDataVisibilityScope('assets')): T[] {
   if (scope.unrestricted) return items;
   return items.filter((item) => canViewAssetDevice(item, scope));
 }
 
-export function filterVisibleAssetPhones<T extends Pick<AssetPhoneNumber, 'owner'>>(items: T[], scope = getCurrentDataVisibilityScope('assets')): T[] {
+export function filterVisibleAssetPhones<T extends Pick<AssetPhoneNumber, 'owner' | 'ownerId' | 'currentUser' | 'currentUserId' | 'departmentId'>>(items: T[], scope = getCurrentDataVisibilityScope('assets')): T[] {
   if (scope.unrestricted) return items;
   return items.filter((item) => canViewAssetPhone(item, scope));
 }
 
-export function filterVisibleAssetAccounts<T extends Pick<AssetInternetAccount, 'owner' | 'currentUser'>>(items: T[], scope = getCurrentDataVisibilityScope('assets')): T[] {
+export function filterVisibleAssetAccounts<T extends Pick<AssetInternetAccount, 'owner' | 'currentUser' | 'ownerId' | 'currentUserId' | 'departmentId'>>(items: T[], scope = getCurrentDataVisibilityScope('assets')): T[] {
   if (scope.unrestricted) return items;
   return items.filter((item) => canViewAssetAccount(item, scope));
 }

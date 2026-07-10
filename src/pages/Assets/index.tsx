@@ -18,7 +18,6 @@ import {
   MenuItem,
   Paper,
   Select,
-  Snackbar,
   Stack,
   Table,
   TableBody,
@@ -38,14 +37,12 @@ import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import BlockIcon from '@mui/icons-material/Block';
 import CloseIcon from '@mui/icons-material/Close';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
-import PhoneIphoneIcon from '@mui/icons-material/PhoneIphone';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { assetApi } from '../../api';
+import { departmentApi, settingsApi } from '../../api';
 import useAssetStore from '../../store/useAssetStore';
 import {
   ModuleHeader,
@@ -59,6 +56,7 @@ import {
 } from '../../shared/components/ModuleShell';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import type { TableViewColumnConfig } from '../../shared/components/TableViewSettingsDialog';
+import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { useTableViewConfig } from '../../shared/hooks/useTableViewConfig';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import type {
@@ -72,16 +70,15 @@ import type {
   AssetMatrixPublishTaskInput,
   AssetPhoneNumber,
   AssetPhoneNumberInput,
-  AssetRisk,
-  AssetRiskLevel,
-  AssetRiskStatus,
   AssetSensitiveField,
   AssetType,
 } from '../../types/asset';
+import type { Department } from '../../types/department';
+import type { User } from '../../types/settings';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 
-type AssetTab = 'overview' | 'devices' | 'phones' | 'accounts' | 'matrix' | 'risks' | 'logs' | 'offboarding';
+type AssetTab = 'overview' | 'devices' | 'phones' | 'accounts' | 'matrix' | 'logs' | 'offboarding';
 
 type AssetFormType = 'device' | 'phone' | 'account';
 
@@ -124,7 +121,6 @@ const ASSET_TABS: Array<{ value: AssetTab; label: string; permissionKey: string 
   { value: 'phones', label: '手机号资产', permissionKey: PERMISSION_KEYS.ASSETS_PHONES },
   { value: 'accounts', label: '互联网账号', permissionKey: PERMISSION_KEYS.ASSETS_ACCOUNTS },
   { value: 'matrix', label: '矩阵发布', permissionKey: PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH },
-  { value: 'risks', label: '风险提醒', permissionKey: PERMISSION_KEYS.ASSETS_RISKS },
   { value: 'logs', label: '操作日志', permissionKey: PERMISSION_KEYS.ASSETS_LOGS },
   { value: 'offboarding', label: '离职回收', permissionKey: PERMISSION_KEYS.ASSETS_OFFBOARDING },
 ];
@@ -184,22 +180,27 @@ const DEVICE_COLUMNS: AssetColumnConfig[] = [
   { id: 'brandModel', label: '品牌型号', width: 130 },
   { id: 'imei', label: 'IMEI', width: 130 },
   { id: 'simType', label: '手机号', width: 190 },
+  { id: 'accountCount', label: '账号数', width: 100 },
   { id: 'department', label: '所属部门', width: 130 },
   { id: 'owner', label: '负责人', width: 120 },
   { id: 'currentUser', label: '当前使用人', width: 130 },
   { id: 'status', label: '状态', width: 100 },
-  { id: 'riskLevel', label: '风险', width: 100 },
 ];
 const DEFAULT_DEVICE_VISIBLE_COLUMN_IDS = DEVICE_COLUMNS.map((column) => column.id);
 
 const PHONE_COLUMNS: AssetColumnConfig[] = [
   { id: 'phoneNumber', label: '手机号', width: 140 },
+  { id: 'realName', label: '实名信息', width: 110 },
   { id: 'operator', label: '运营商', width: 100 },
+  { id: 'attributionLocation', label: '归属地', width: 110 },
   { id: 'device', label: '所属设备', width: 180 },
+  { id: 'accounts', label: '关联账号', width: 150 },
   { id: 'slotType', label: '卡槽', width: 100 },
   { id: 'packageName', label: '套餐', width: 140 },
   { id: 'monthlyFee', label: '月费用', width: 110 },
+  { id: 'department', label: '所属部门', width: 130 },
   { id: 'owner', label: '负责人', width: 120 },
+  { id: 'currentUser', label: '当前使用人', width: 130 },
   { id: 'status', label: '状态', width: 110 },
 ];
 const DEFAULT_PHONE_VISIBLE_COLUMN_IDS = PHONE_COLUMNS.map((column) => column.id);
@@ -209,20 +210,18 @@ const ACCOUNT_COLUMNS: AssetColumnConfig[] = [
   { id: 'platform', label: '平台', width: 120 },
   { id: 'accountName', label: '账号名称', width: 150 },
   { id: 'loginAccount', label: '登录账号', width: 150 },
+  { id: 'realName', label: '实名信息', width: 110 },
   { id: 'phone', label: '绑定手机号', width: 150 },
   { id: 'device', label: '所属设备', width: 180 },
   { id: 'owner', label: '负责人', width: 120 },
   { id: 'permissionStatus', label: '权限状态', width: 130 },
-  { id: 'riskLevel', label: '风险等级', width: 120 },
-  { id: 'monthlyFee', label: '月费用', width: 110 },
-  { id: 'expiresAt', label: '到期时间', width: 130 },
 ];
 const DEFAULT_ACCOUNT_VISIBLE_COLUMN_IDS = ACCOUNT_COLUMNS.map((column) => column.id);
 
 const ASSET_VIEW_STORAGE_KEYS: Record<ConfigurableAssetTab, string> = {
-  devices: 'aaos_asset_devices_table_view_v1',
-  phones: 'aaos_asset_phones_table_view_v1',
-  accounts: 'aaos_asset_accounts_table_view_v1',
+  devices: 'aaos_asset_devices_table_view_v4',
+  phones: 'aaos_asset_phones_table_view_v6',
+  accounts: 'aaos_asset_accounts_table_view_v6',
 };
 
 const ASSET_VIEW_TITLES: Record<ConfigurableAssetTab, string> = {
@@ -358,9 +357,9 @@ function getTabFromSearch(value: string | null): AssetTab {
   return value && VALID_TABS.has(value as AssetTab) ? (value as AssetTab) : 'overview';
 }
 
-function riskTone(level?: AssetRiskLevel) {
-  if (level === '高') return { color: shell.red, bgcolor: '#FEF3F2', borderColor: '#FECACA' };
-  if (level === '中') return { color: shell.amber, bgcolor: '#FFFAEB', borderColor: '#FEDF89' };
+function toneSx(level?: 'low' | 'medium' | 'high') {
+  if (level === 'high') return { color: shell.red, bgcolor: '#FEF3F2', borderColor: '#FECACA' };
+  if (level === 'medium') return { color: shell.amber, bgcolor: '#FFFAEB', borderColor: '#FEDF89' };
   return { color: shell.green, bgcolor: '#ECFDF3', borderColor: '#ABEFC6' };
 }
 
@@ -377,9 +376,9 @@ function chipSx(tone: { color: string; bgcolor: string; borderColor: string }) {
 }
 
 function statusTone(value?: string) {
-  if (value?.includes('待') || value?.includes('异常')) return riskTone('中');
-  if (value?.includes('注销') || value?.includes('停用') || value?.includes('回收')) return riskTone('高');
-  return riskTone('低');
+  if (value?.includes('待') || value?.includes('异常')) return toneSx('medium');
+  if (value?.includes('注销') || value?.includes('停用') || value?.includes('回收')) return toneSx('high');
+  return toneSx('low');
 }
 
 function toCsv(rows: Array<Record<string, unknown>>): string {
@@ -410,15 +409,19 @@ const AssetManagement: React.FC = () => {
   const [search, setSearch] = useState('');
   const [platform, setPlatform] = useState('');
   const [permissionStatus, setPermissionStatus] = useState('');
-  const [riskLevel, setRiskLevel] = useState('');
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [snackbar, setSnackbar] = useState('');
+  const { alert: showSystemAlert, dialog: feedbackDialog } = useAppFeedback();
+  const showFeedback = (message: React.ReactNode, title = '提示') => {
+    void showSystemAlert(message, title);
+  };
   const [platformOptions, setPlatformOptions] = useState<string[]>([]);
   const [lookupDevices, setLookupDevices] = useState<AssetDevice[]>([]);
   const [lookupPhones, setLookupPhones] = useState<AssetPhoneNumber[]>([]);
   const [lookupAccounts, setLookupAccounts] = useState<AssetInternetAccount[]>([]);
+  const [lookupUsers, setLookupUsers] = useState<User[]>([]);
+  const [lookupDepartments, setLookupDepartments] = useState<Department[]>([]);
   const [formState, setFormState] = useState<AssetFormState>(emptyForm);
   const [importState, setImportState] = useState<AssetImportState>(emptyImportState);
   const [matrixForm, setMatrixForm] = useState<MatrixPublishFormState>(emptyMatrixPublishForm);
@@ -434,7 +437,6 @@ const AssetManagement: React.FC = () => {
     accounts,
     matrixPublishTasks,
     matrixPublishStats,
-    risks,
     logs,
     offboardingTasks,
     detail,
@@ -446,7 +448,6 @@ const AssetManagement: React.FC = () => {
     fetchAccounts,
     fetchMatrixPublishTasks,
     fetchMatrixPublishStats,
-    fetchRisks,
     fetchLogs,
     fetchOffboardingTasks,
     fetchDetail,
@@ -461,7 +462,6 @@ const AssetManagement: React.FC = () => {
     deleteAccount,
     createMatrixPublishTask,
     completeMatrixPublishTarget,
-    updateRiskStatus,
     completeOffboardingTask,
     revealSensitiveField,
     importAssetsFromCsv,
@@ -471,7 +471,6 @@ const AssetManagement: React.FC = () => {
   const canImportExport = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_IMPORT_EXPORT, 'write');
   const canEditAssets = hasPermission(currentUser, PERMISSION_KEYS.ASSETS, 'write');
   const canDeleteAssets = canEditAssets || hasPermission(currentUser, PERMISSION_KEYS.ASSETS, 'delete');
-  const canHandleRisks = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_RISKS, 'write');
   const canHandleOffboarding = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_OFFBOARDING, 'write');
   const canManageMatrixPublish = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write');
   const visibleTabs = useMemo(
@@ -484,14 +483,15 @@ const AssetManagement: React.FC = () => {
     search,
     platform,
     permissionStatus,
-    riskLevel,
     status,
     page: page + 1,
     pageSize: rowsPerPage,
-  }), [page, permissionStatus, platform, riskLevel, rowsPerPage, search, status]);
+  }), [page, permissionStatus, platform, rowsPerPage, search, status]);
 
   const deviceById = useMemo(() => new Map(lookupDevices.map((device) => [device.id, device])), [lookupDevices]);
   const phoneById = useMemo(() => new Map(lookupPhones.map((phone) => [phone.id, phone])), [lookupPhones]);
+  const userById = useMemo(() => new Map(lookupUsers.map((user) => [user.id, user])), [lookupUsers]);
+  const departmentById = useMemo(() => new Map(lookupDepartments.map((department) => [department.id, department])), [lookupDepartments]);
   const phonesByDeviceId = useMemo(() => {
     const map = new Map<string, AssetPhoneNumber[]>();
     lookupPhones.forEach((phone) => {
@@ -502,6 +502,40 @@ const AssetManagement: React.FC = () => {
     map.forEach((list) => list.sort((a, b) => a.slotType.localeCompare(b.slotType, 'zh-CN')));
     return map;
   }, [lookupPhones]);
+  const accountsByPhoneId = useMemo(() => {
+    const map = new Map<string, AssetInternetAccount[]>();
+    lookupAccounts.forEach((account) => {
+      if (!account.phoneId) return;
+      const list = map.get(account.phoneId) || [];
+      list.push(account);
+      map.set(account.phoneId, list);
+    });
+    map.forEach((list) => list.sort((a, b) => a.platform.localeCompare(b.platform, 'zh-CN')));
+    return map;
+  }, [lookupAccounts]);
+  const accountsByDeviceId = useMemo(() => {
+    const map = new Map<string, AssetInternetAccount[]>();
+    lookupAccounts.forEach((account) => {
+      const phone = phoneById.get(account.phoneId || '');
+      if (!phone?.deviceId) return;
+      const list = map.get(phone.deviceId) || [];
+      list.push(account);
+      map.set(phone.deviceId, list);
+    });
+    return map;
+  }, [lookupAccounts, phoneById]);
+  const assetRelationshipSummary = useMemo(() => {
+    const boundPhoneCount = lookupPhones.filter((phone) => Boolean(deviceById.get(phone.deviceId))).length;
+    const boundAccountCount = lookupAccounts.filter((account) => Boolean(account.phoneId && phoneById.get(account.phoneId))).length;
+    const devicesWithPhones = lookupDevices.filter((device) => (phonesByDeviceId.get(device.id) || []).length).length;
+    return {
+      devicesWithPhones,
+      boundPhoneCount,
+      unboundPhoneCount: Math.max(0, lookupPhones.length - boundPhoneCount),
+      boundAccountCount,
+      unboundAccountCount: Math.max(0, lookupAccounts.length - boundAccountCount),
+    };
+  }, [deviceById, lookupAccounts, lookupDevices, lookupPhones, phoneById, phonesByDeviceId]);
   const deviceView = useTableViewConfig(ASSET_VIEW_STORAGE_KEYS.devices, DEVICE_COLUMNS, DEFAULT_DEVICE_VISIBLE_COLUMN_IDS);
   const phoneView = useTableViewConfig(ASSET_VIEW_STORAGE_KEYS.phones, PHONE_COLUMNS, DEFAULT_PHONE_VISIBLE_COLUMN_IDS);
   const accountView = useTableViewConfig(ASSET_VIEW_STORAGE_KEYS.accounts, ACCOUNT_COLUMNS, DEFAULT_ACCOUNT_VISIBLE_COLUMN_IDS);
@@ -524,6 +558,12 @@ const AssetManagement: React.FC = () => {
     assetApi.fetchInternetAccounts({ pageSize: ASSET_LOOKUP_PAGE_SIZE }).then((res) => {
       if (res.code === 0) setLookupAccounts(res.data.items);
     });
+    settingsApi.fetchUsers({ isActive: true, employmentStatus: 'active' }).then((res) => {
+      if (res.code === 0) setLookupUsers(res.data);
+    });
+    departmentApi.getDepartments({ isActive: true }).then((res) => {
+      if (res.code === 0) setLookupDepartments(res.data);
+    });
     setPlatformOptions(assetApi.getAccountPlatformOptions());
   }, [fetchDashboard]);
 
@@ -543,8 +583,6 @@ const AssetManagement: React.FC = () => {
     if (!activeTabVisible) return;
     if (activeTab === 'overview') {
       fetchDashboard();
-      fetchRisks({ pageSize: 5, status: 'open' });
-      fetchLogs({ pageSize: 5 });
       return;
     }
     if (activeTab === 'devices') fetchDevices(filters);
@@ -554,19 +592,17 @@ const AssetManagement: React.FC = () => {
       fetchMatrixPublishTasks(filters);
       fetchMatrixPublishStats();
     }
-    if (activeTab === 'risks') fetchRisks(filters);
     if (activeTab === 'logs') fetchLogs(filters);
     if (activeTab === 'offboarding') fetchOffboardingTasks(filters);
-  }, [activeTab, activeTabVisible, fetchAccounts, fetchDashboard, fetchDevices, fetchLogs, fetchMatrixPublishStats, fetchMatrixPublishTasks, fetchOffboardingTasks, fetchPhones, fetchRisks, filters]);
+  }, [activeTab, activeTabVisible, fetchAccounts, fetchDashboard, fetchDevices, fetchLogs, fetchMatrixPublishStats, fetchMatrixPublishTasks, fetchOffboardingTasks, fetchPhones, filters]);
 
   useEffect(() => {
     setPage(0);
-  }, [search, platform, permissionStatus, riskLevel, status]);
+  }, [search, platform, permissionStatus, status]);
 
   const handleTabChange = (_: React.SyntheticEvent, value: AssetTab) => {
     setPlatform('');
     setPermissionStatus('');
-    setRiskLevel('');
     setStatus('');
     setPage(0);
     setSearchParams({ tab: value });
@@ -581,6 +617,12 @@ const AssetManagement: React.FC = () => {
     if (deviceRes.code === 0) setLookupDevices(deviceRes.data.items);
     if (phoneRes.code === 0) setLookupPhones(phoneRes.data.items);
     if (accountRes.code === 0) setLookupAccounts(accountRes.data.items);
+    const [userRes, departmentRes] = await Promise.all([
+      settingsApi.fetchUsers({ isActive: true, employmentStatus: 'active' }),
+      departmentApi.getDepartments({ isActive: true }),
+    ]);
+    if (userRes.code === 0) setLookupUsers(userRes.data);
+    if (departmentRes.code === 0) setLookupDepartments(departmentRes.data);
     setPlatformOptions(assetApi.getAccountPlatformOptions());
   };
 
@@ -593,7 +635,6 @@ const AssetManagement: React.FC = () => {
       await fetchMatrixPublishTasks(filters);
       await fetchMatrixPublishStats();
     }
-    if (activeTab === 'risks') await fetchRisks(filters);
     if (activeTab === 'logs') await fetchLogs(filters);
     if (activeTab === 'offboarding') await fetchOffboardingTasks(filters);
     await refreshLookupData();
@@ -613,7 +654,7 @@ const AssetManagement: React.FC = () => {
 
   const openImportDialog = () => {
     if (!canImportExport) {
-      setSnackbar('当前账号没有资产导入导出权限');
+      showFeedback('当前账号没有资产导入导出权限');
       return;
     }
     setImportState({ ...emptyImportState, open: true, type: defaultImportType() });
@@ -623,7 +664,7 @@ const AssetManagement: React.FC = () => {
 
   const openMatrixPublishDialog = () => {
     if (!canManageMatrixPublish) {
-      setSnackbar('当前账号没有矩阵发布权限');
+      showFeedback('当前账号没有矩阵发布权限');
       return;
     }
     setMatrixForm({
@@ -656,21 +697,21 @@ const AssetManagement: React.FC = () => {
       dueAt: matrixForm.values.dueAt ? new Date(matrixForm.values.dueAt).toISOString() : '',
     });
     if (!result) {
-      setSnackbar(useAssetStore.getState().error || '创建矩阵发布任务失败');
+      showFeedback(useAssetStore.getState().error || '创建矩阵发布任务失败');
       return;
     }
     closeMatrixPublishDialog();
-    setSnackbar('矩阵发布任务已创建');
+    showFeedback('矩阵发布任务已创建');
     await refreshActiveTab();
   };
 
   const handleCompleteMatrixTarget = async (taskId: string, accountId: string) => {
     const result = await completeMatrixPublishTarget(taskId, accountId);
     if (!result) {
-      setSnackbar(useAssetStore.getState().error || '标记完成失败');
+      showFeedback(useAssetStore.getState().error || '标记完成失败');
       return;
     }
-    setSnackbar('账号发布任务已完成');
+    showFeedback('账号发布任务已完成');
     await refreshActiveTab();
   };
 
@@ -680,7 +721,7 @@ const AssetManagement: React.FC = () => {
 
   const downloadImportTemplate = () => {
     if (!canImportExport) {
-      setSnackbar('当前账号没有资产导入导出权限');
+      showFeedback('当前账号没有资产导入导出权限');
       return;
     }
     const labelMap: Record<AssetImportType, string> = {
@@ -693,7 +734,7 @@ const AssetManagement: React.FC = () => {
 
   const downloadFailedRows = () => {
     if (!canImportExport) {
-      setSnackbar('当前账号没有资产导入导出权限');
+      showFeedback('当前账号没有资产导入导出权限');
       return;
     }
     if (!importState.result?.failedRows.length) return;
@@ -715,20 +756,20 @@ const AssetManagement: React.FC = () => {
 
   const submitImport = async () => {
     if (!canImportExport) {
-      setSnackbar('当前账号没有资产导入导出权限');
+      showFeedback('当前账号没有资产导入导出权限');
       return;
     }
     if (!importState.csvText.trim()) {
-      setSnackbar('请先选择或粘贴 CSV 内容');
+      showFeedback('请先选择或粘贴 CSV 内容');
       return;
     }
     const result = await importAssetsFromCsv(importState.type, importState.csvText);
     if (!result) {
-      setSnackbar(useAssetStore.getState().error || '导入失败');
+      showFeedback(useAssetStore.getState().error || '导入失败');
       return;
     }
     setImportState((current) => ({ ...current, result }));
-    setSnackbar(`导入完成：成功${result.successCount}行，失败${result.failedCount}行`);
+    showFeedback(`导入完成：成功${result.successCount}行，失败${result.failedCount}行`);
     await refreshActiveTab();
   };
 
@@ -739,17 +780,75 @@ const AssetManagement: React.FC = () => {
     }));
   };
 
+  const buildUserFields = (prefix: 'owner' | 'currentUser', userId: string) => {
+    const user = userById.get(userId);
+    return {
+      [`${prefix}Id`]: user?.id || '',
+      [prefix]: user?.name || '',
+    };
+  };
+
+  const buildDepartmentFields = (departmentId?: string) => {
+    const department = departmentId ? departmentById.get(departmentId) : undefined;
+    return {
+      departmentId: department?.id || '',
+      department: department?.name || '',
+    };
+  };
+
+  const updateAssetUser = (prefix: 'owner' | 'currentUser', userId: string) => {
+    const user = userById.get(userId);
+    setFormState((current) => {
+      const nextValues = {
+        ...current.values,
+        ...buildUserFields(prefix, userId),
+      };
+      if (user?.departmentId && (prefix === 'currentUser' || !nextValues.departmentId)) {
+        Object.assign(nextValues, buildDepartmentFields(user.departmentId));
+      }
+      return { ...current, values: nextValues };
+    });
+  };
+
+  const updateAssetDepartment = (departmentId: string) => {
+    setFormState((current) => ({
+      ...current,
+      values: {
+        ...current.values,
+        ...buildDepartmentFields(departmentId),
+      },
+    }));
+  };
+
+  const updatePhoneNumberValue = (value: string) => {
+    const inferredOperator = assetApi.inferPhoneOperator(value);
+    const inferredLocation = assetApi.inferPhoneAttributionLocation(value);
+    setFormState((current) => ({
+      ...current,
+      values: (() => {
+        const previousInferredLocation = assetApi.inferPhoneAttributionLocation(current.values.phoneNumber);
+        const shouldUpdateLocation = !current.values.attributionLocation || current.values.attributionLocation === previousInferredLocation;
+        return {
+          ...current.values,
+          phoneNumber: value,
+          operator: inferredOperator === '未知' && current.values.operator ? current.values.operator : inferredOperator,
+          attributionLocation: shouldUpdateLocation ? inferredLocation : current.values.attributionLocation,
+        };
+      })(),
+    }));
+  };
+
   const openCreateForm = (type: AssetFormType = defaultCreateType()) => {
     const defaults: Record<AssetFormType, Record<string, string>> = {
       device: {
         simType: '双卡',
         ownerSubject: '公司',
         status: '正常',
-        riskLevel: '低',
         monthlyCost: '0',
       },
       phone: {
-        operator: '移动',
+        operator: '',
+        attributionLocation: '',
         deviceId: lookupDevices[0]?.id || '',
         slotType: '卡槽1',
         monthlyFee: '0',
@@ -761,11 +860,27 @@ const AssetManagement: React.FC = () => {
         ownerSubject: '公司',
         permissionStatus: '正常',
         accountStatus: '正常',
-        riskLevel: '低',
-        monthlyFee: '0',
       },
     };
     setFormState({ open: true, type, mode: 'create', values: defaults[type] });
+  };
+
+  const normalizeAssetFormValues = (values: Record<string, string>) => {
+    const owner = userById.get(values.ownerId) || lookupUsers.find((user) => user.name === values.owner);
+    const currentAssetUser = userById.get(values.currentUserId) || lookupUsers.find((user) => user.name === values.currentUser);
+    const department = departmentById.get(values.departmentId)
+      || lookupDepartments.find((item) => item.name === values.department)
+      || (currentAssetUser?.departmentId ? departmentById.get(currentAssetUser.departmentId) : undefined)
+      || (owner?.departmentId ? departmentById.get(owner.departmentId) : undefined);
+    return {
+      ...values,
+      ownerId: owner?.id || values.ownerId || '',
+      owner: owner?.name || values.owner || '',
+      currentUserId: currentAssetUser?.id || values.currentUserId || '',
+      currentUser: currentAssetUser?.name || values.currentUser || '',
+      departmentId: department?.id || values.departmentId || '',
+      department: department?.name || values.department || '',
+    };
   };
 
   const openEditForm = (type: AssetFormType, item: AssetDevice | AssetPhoneNumber | AssetInternetAccount) => {
@@ -773,14 +888,14 @@ const AssetManagement: React.FC = () => {
       acc[key] = String(value ?? '');
       return acc;
     }, {});
-    setFormState({ open: true, type, mode: 'edit', id: item.id, values });
+    setFormState({ open: true, type, mode: 'edit', id: item.id, values: normalizeAssetFormValues(values) });
   };
 
   const closeForm = () => setFormState(emptyForm);
 
   const submitForm = async () => {
     if (!canEditAssets) {
-      setSnackbar('当前账号没有编辑资产权限');
+      showFeedback('当前账号没有编辑资产权限');
       return;
     }
     let saved: AssetDevice | AssetPhoneNumber | AssetInternetAccount | null = null;
@@ -806,17 +921,17 @@ const AssetManagement: React.FC = () => {
       if (saved) await fetchDetail('account', saved.id);
     }
     if (!saved) {
-      setSnackbar(useAssetStore.getState().error || '保存失败');
+      showFeedback(useAssetStore.getState().error || '保存失败');
       return;
     }
     closeForm();
-    setSnackbar(formState.mode === 'edit' ? '资产资料已更新' : '资产已新增');
+    showFeedback(formState.mode === 'edit' ? '资产资料已更新' : '资产已新增');
     await refreshActiveTab();
   };
 
   const openDeleteConfirm = (type: AssetFormType, id: string, label: string) => {
     if (!canDeleteAssets) {
-      setSnackbar('当前账号没有删除资产权限');
+      showFeedback('当前账号没有删除资产权限');
       return;
     }
     setDeleteTarget({ type, id, label });
@@ -827,7 +942,7 @@ const AssetManagement: React.FC = () => {
   const submitDelete = async () => {
     if (!deleteTarget) return;
     if (!canDeleteAssets) {
-      setSnackbar('当前账号没有删除资产权限');
+      showFeedback('当前账号没有删除资产权限');
       closeDeleteConfirm();
       return;
     }
@@ -837,7 +952,7 @@ const AssetManagement: React.FC = () => {
         ? await deletePhone(deleteTarget.id)
         : await deleteAccount(deleteTarget.id);
     if (!deleted) {
-      setSnackbar(useAssetStore.getState().error || '删除失败');
+      showFeedback(useAssetStore.getState().error || '删除失败');
       return;
     }
     if (
@@ -848,7 +963,7 @@ const AssetManagement: React.FC = () => {
       closeDetailDialog();
     }
     closeDeleteConfirm();
-    setSnackbar('资产已删除');
+    showFeedback('资产已删除');
     await refreshActiveTab();
   };
 
@@ -872,33 +987,24 @@ const AssetManagement: React.FC = () => {
 
   const revealField = async (type: AssetType, id: string, field: AssetSensitiveField) => {
     if (!canRevealSensitive) {
-      setSnackbar('当前账号没有查看敏感字段权限');
+      showFeedback('当前账号没有查看敏感字段权限');
       return;
     }
     const result = await revealSensitiveField(type, id, field);
     if (!result) {
-      setSnackbar(useAssetStore.getState().error || '查看失败');
+      showFeedback(useAssetStore.getState().error || '查看失败');
       return;
     }
     setRevealedValues((current) => ({
       ...current,
       [revealedKey(type, id, field)]: result.value,
     }));
-    setSnackbar('已记录敏感字段查看日志');
-  };
-
-  const handleRiskStatus = async (riskId: string, nextStatus: AssetRiskStatus) => {
-    if (!canHandleRisks) {
-      setSnackbar('当前账号没有处理资产风险权限');
-      return;
-    }
-    await updateRiskStatus(riskId, nextStatus);
-    await refreshActiveTab();
+    showFeedback('已显示明文');
   };
 
   const handleCompleteOffboarding = async (taskId: string) => {
     if (!canHandleOffboarding) {
-      setSnackbar('当前账号没有处理离职回收权限');
+      showFeedback('当前账号没有处理离职回收权限');
       return;
     }
     await completeOffboardingTask(taskId);
@@ -907,7 +1013,7 @@ const AssetManagement: React.FC = () => {
 
   const exportCurrentRows = () => {
     if (!canImportExport) {
-      setSnackbar('当前账号没有资产导入导出权限');
+      showFeedback('当前账号没有资产导入导出权限');
       return;
     }
     const rowMap: Record<AssetTab, Array<Record<string, unknown>>> = {
@@ -917,22 +1023,28 @@ const AssetManagement: React.FC = () => {
         设备名称: device.deviceName,
         品牌型号: device.brandModel,
         IMEI: device.imeiMasked,
+        手机号: (phonesByDeviceId.get(device.id) || []).map((phone) => `${phone.slotType}:${phone.phoneNumberMasked}`).join(' / '),
+        账号数: (accountsByDeviceId.get(device.id) || []).length,
         所属部门: device.department,
         负责人: device.owner,
         当前使用人: device.currentUser,
         状态: device.status,
-        风险等级: device.riskLevel,
       })),
       phones: phones.map((phone) => {
         const device = deviceById.get(phone.deviceId);
         return {
           手机号: phone.phoneNumberMasked,
+          实名信息: phone.realNameMasked || '',
           运营商: phone.operator,
+          归属地: phone.attributionLocation || '',
           所属设备: device?.deviceCode || '-',
+          关联账号: (accountsByPhoneId.get(phone.id) || []).map((account) => `${account.platform}/${account.accountName}`).join(' / '),
           卡槽: phone.slotType,
           套餐: phone.packageName,
           月费用: phone.monthlyFee,
+          所属部门: phone.department || '',
           负责人: phone.owner,
+          当前使用人: phone.currentUser || '',
           状态: phone.status,
         };
       }),
@@ -944,11 +1056,11 @@ const AssetManagement: React.FC = () => {
           平台: account.platform,
           账号名称: account.accountName,
           登录账号: account.loginAccountMasked,
+          实名信息: account.realNameMasked || '',
           绑定手机号: phone?.phoneNumberMasked || '未绑定',
           所属设备: device?.deviceCode || '-',
           负责人: account.owner,
           权限状态: account.permissionStatus,
-          风险等级: account.riskLevel,
         };
       }),
       matrix: matrixPublishTasks.flatMap((task) => task.targets.map((target) => ({
@@ -962,13 +1074,6 @@ const AssetManagement: React.FC = () => {
         状态: target.status,
         完成时间: target.completedAt || '',
       }))),
-      risks: risks.map((risk) => ({
-        风险类型: risk.type,
-        对象: risk.targetName,
-        等级: risk.level,
-        状态: risk.status,
-        说明: risk.description,
-      })),
       logs: logs.map((log) => ({
         时间: log.time,
         动作: log.action,
@@ -987,7 +1092,7 @@ const AssetManagement: React.FC = () => {
     };
     const csv = toCsv(rowMap[activeTab]);
     if (!csv) {
-      setSnackbar('当前工作区暂无可导出的数据');
+      showFeedback('当前工作区暂无可导出的数据');
       return;
     }
     downloadCsv(`资产管理-${ASSET_TABS.find((tab) => tab.value === activeTab)?.label || '台账'}-${new Date().toISOString().slice(0, 10)}.csv`, csv);
@@ -998,10 +1103,20 @@ const AssetManagement: React.FC = () => {
       { label: '设备资产', value: dashboard?.deviceCount || 0, tone: shell.blue },
       { label: '手机号资产', value: dashboard?.phoneCount || 0, tone: shell.green },
       { label: '互联网账号', value: dashboard?.accountCount || 0, tone: shell.ink },
-      { label: '未处理风险', value: dashboard?.openRiskCount || 0, tone: shell.red },
       { label: '离职待回收', value: dashboard?.offboardingCount || 0, tone: shell.amber },
       { label: '月度费用', value: formatCurrency(dashboard?.monthlyCost || 0), tone: shell.blue },
     ];
+    const relationCards = [
+      { label: '已挂手机号的设备', value: assetRelationshipSummary.devicesWithPhones, tab: 'devices' as AssetTab },
+      { label: '已绑定设备的手机号', value: assetRelationshipSummary.boundPhoneCount, tab: 'phones' as AssetTab },
+      { label: '已绑定手机号的账号', value: assetRelationshipSummary.boundAccountCount, tab: 'accounts' as AssetTab },
+      { label: '未绑定手机号的账号', value: assetRelationshipSummary.unboundAccountCount, tab: 'accounts' as AssetTab, tone: assetRelationshipSummary.unboundAccountCount ? shell.amber : shell.green },
+    ];
+    const deviceRelationRows = lookupDevices.slice(0, 6).map((device) => {
+      const linkedPhones = phonesByDeviceId.get(device.id) || [];
+      const linkedAccounts = accountsByDeviceId.get(device.id) || [];
+      return { device, linkedPhones, linkedAccounts };
+    });
     return (
       <Box sx={{ display: 'grid', gap: 2 }}>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)', xl: 'repeat(6, 1fr)' }, gap: 1.5 }}>
@@ -1016,27 +1131,88 @@ const AssetManagement: React.FC = () => {
             </Paper>
           ))}
         </Box>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '1fr 1fr' }, gap: 2 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '360px minmax(0, 1fr)' }, gap: 2 }}>
           <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 2 }}>
-            <Typography sx={{ fontWeight: 900, mb: 1.5 }}>待处理风险</Typography>
-            {risks.slice(0, 5).map((risk) => (
-              <Stack key={risk.id} direction="row" spacing={1.25} alignItems="center" sx={{ py: 1, borderTop: `1px solid ${shell.softLine}` }}>
-                <Chip size="small" label={risk.level} sx={chipSx(riskTone(risk.level))} />
-                <Box sx={{ minWidth: 0, flex: 1 }}>
-                  <Typography variant="body2" sx={{ fontWeight: 800 }}>{risk.type}</Typography>
-                  <Typography variant="caption" sx={{ color: shell.muted }}>{risk.targetName}</Typography>
+            <Typography sx={{ fontWeight: 950, mb: 0.5 }}>关系总览</Typography>
+            <Typography variant="body2" sx={{ color: shell.muted, mb: 1.5 }}>
+              设备通过手机号连接互联网账号。
+            </Typography>
+            <Box sx={{ display: 'grid', gap: 1 }}>
+              {relationCards.map((card) => (
+                <Box
+                  key={card.label}
+                  component="button"
+                  type="button"
+                  onClick={() => setSearchParams({ tab: card.tab })}
+                  sx={{
+                    border: `1px solid ${shell.softLine}`,
+                    borderRadius: 1,
+                    bgcolor: '#fff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    px: 1.25,
+                    py: 1,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    '&:hover': { borderColor: shell.blue, bgcolor: '#F8FBFF' },
+                  }}
+                >
+                  <Typography sx={{ color: shell.muted, fontWeight: 800 }}>{card.label}</Typography>
+                  <Typography sx={{ color: card.tone || shell.ink, fontSize: 20, fontWeight: 950 }}>{card.value}</Typography>
                 </Box>
-              </Stack>
-            ))}
+              ))}
+            </Box>
           </Paper>
           <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 2 }}>
-            <Typography sx={{ fontWeight: 900, mb: 1.5 }}>最近操作日志</Typography>
-            {logs.slice(0, 5).map((log) => (
-              <Box key={log.id} sx={{ py: 1, borderTop: `1px solid ${shell.softLine}` }}>
-                <Typography variant="body2" sx={{ fontWeight: 800 }}>{log.action} · {log.targetName}</Typography>
-                <Typography variant="caption" sx={{ color: shell.muted }}>{formatDate(log.time, 'yyyy-MM-dd HH:mm')} / {log.operator}</Typography>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1.5} sx={{ mb: 1.5 }}>
+              <Box>
+                <Typography sx={{ fontWeight: 950 }}>设备关系链</Typography>
+                <Typography variant="body2" sx={{ color: shell.muted }}>从设备往下看手机号，再看到绑定的互联网账号。</Typography>
               </Box>
-            ))}
+              <Button size="small" endIcon={<ChevronRightIcon />} onClick={() => setSearchParams({ tab: 'devices' })}>
+                查看设备
+              </Button>
+            </Stack>
+            <Box sx={{ display: 'grid', gap: 0.75 }}>
+              {deviceRelationRows.map(({ device, linkedPhones, linkedAccounts }) => (
+                <Box
+                  key={device.id}
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: { xs: '1fr', md: '1.2fr 1.4fr 0.8fr' },
+                    gap: 1,
+                    alignItems: 'center',
+                    borderTop: `1px solid ${shell.softLine}`,
+                    pt: 0.9,
+                  }}
+                >
+                  <Stack spacing={0.15} sx={{ minWidth: 0 }}>
+                    {renderRelationLink(`${device.deviceCode} / ${device.deviceName}`, () => openDetail('device', device.id))}
+                    <Typography variant="caption" sx={{ color: shell.muted }}>{device.owner || '未填负责人'} / {device.department || '未填部门'}</Typography>
+                  </Stack>
+                  <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                    {linkedPhones.length ? linkedPhones.map((phone) => (
+                      <Chip
+                        key={phone.id}
+                        size="small"
+                        label={`${phone.slotType} ${phone.phoneNumberMasked}`}
+                        onClick={() => openDetail('phone', phone.id)}
+                        sx={{ ...chipSx(toneSx('low')), cursor: 'pointer' }}
+                      />
+                    )) : (
+                      <Typography variant="body2" sx={{ color: shell.muted }}>未绑定手机号</Typography>
+                    )}
+                  </Stack>
+                  <Typography sx={{ color: linkedAccounts.length ? shell.ink : shell.muted, fontWeight: 850 }}>
+                    {linkedAccounts.length ? `${linkedAccounts.length}个互联网账号` : '暂无账号'}
+                  </Typography>
+                </Box>
+              ))}
+              {!deviceRelationRows.length ? (
+                <Typography sx={{ color: shell.muted, textAlign: 'center', py: 3 }}>暂无设备关系数据</Typography>
+              ) : null}
+            </Box>
           </Paper>
         </Box>
       </Box>
@@ -1045,13 +1221,28 @@ const AssetManagement: React.FC = () => {
 
   const renderToolbar = () => {
     if (activeTab === 'overview') return null;
+    const searchPlaceholderMap: Partial<Record<AssetTab, string>> = {
+      devices: '搜索设备编号、设备名称、IMEI、负责人',
+      phones: '搜索手机号、实名信息、归属地、所属设备',
+      accounts: '搜索平台、账号名称、实名信息、绑定手机号',
+      matrix: '搜索任务、账号、执行人',
+      logs: '搜索操作、对象、操作人',
+      offboarding: '搜索员工、资产名称',
+    };
+    const statusOptionsMap: Partial<Record<AssetTab, string[]>> = {
+      devices: ['正常', '使用中', '闲置', '已注销'],
+      phones: ['使用中', '闲置', '已停用'],
+      accounts: ['使用中', '正常', '闲置', '异常', '已注销'],
+      matrix: ['pending', 'completed'],
+      offboarding: ['待回收', '已回收'],
+    };
     return (
       <ModuleToolbar>
         <TextField
           size="small"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="搜索平台、账号名称、负责人"
+          placeholder={searchPlaceholderMap[activeTab] || '搜索资产'}
           sx={{ minWidth: 280 }}
         />
         {(activeTab === 'accounts' || activeTab === 'matrix') && (
@@ -1072,21 +1263,12 @@ const AssetManagement: React.FC = () => {
             </FormControl>
           </>
         )}
-        {(activeTab === 'devices' || activeTab === 'accounts' || activeTab === 'risks') && (
+        {statusOptionsMap[activeTab] && (
           <FormControl size="small" sx={{ minWidth: 140 }}>
-            <InputLabel>风险等级</InputLabel>
-            <Select value={riskLevel} label="风险等级" onChange={(event) => setRiskLevel(event.target.value)}>
+            <InputLabel>{activeTab === 'matrix' || activeTab === 'offboarding' ? '处理状态' : '状态'}</InputLabel>
+            <Select value={status} label={activeTab === 'matrix' || activeTab === 'offboarding' ? '处理状态' : '状态'} onChange={(event) => setStatus(event.target.value)}>
               <MenuItem value="">全部</MenuItem>
-              {['低', '中', '高'].map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
-            </Select>
-          </FormControl>
-        )}
-        {(activeTab === 'risks' || activeTab === 'offboarding' || activeTab === 'matrix') && (
-          <FormControl size="small" sx={{ minWidth: 140 }}>
-            <InputLabel>处理状态</InputLabel>
-            <Select value={status} label="处理状态" onChange={(event) => setStatus(event.target.value)}>
-              <MenuItem value="">全部</MenuItem>
-              {(activeTab === 'risks' ? ['open', 'resolved', 'ignored'] : activeTab === 'matrix' ? ['pending', 'completed'] : ['待回收', '已回收']).map((item) => (
+              {statusOptionsMap[activeTab]?.map((item) => (
                 <MenuItem key={item} value={item}>{item}</MenuItem>
               ))}
             </Select>
@@ -1119,6 +1301,38 @@ const AssetManagement: React.FC = () => {
     };
   };
 
+  const relationLinkSx = {
+    border: 0,
+    bgcolor: 'transparent',
+    color: shell.tableLink,
+    cursor: 'pointer',
+    font: 'inherit',
+    fontSize: 13,
+    fontWeight: 900,
+    lineHeight: 1.35,
+    p: 0,
+    textAlign: 'left',
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    '&:hover': { textDecoration: 'underline' },
+  };
+
+  const renderRelationLink = (label: string, onClick: () => void) => (
+    <Box
+      component="button"
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      sx={relationLinkSx}
+    >
+      {label}
+    </Box>
+  );
+
   const renderDeviceCell = (device: AssetDevice, columnId: string) => {
     switch (columnId) {
       case 'deviceCode':
@@ -1131,6 +1345,10 @@ const AssetManagement: React.FC = () => {
         return device.imeiMasked;
       case 'simType':
         return renderDevicePhones(device);
+      case 'accountCount': {
+        const count = (accountsByDeviceId.get(device.id) || []).length;
+        return count ? `${count}个账号` : '-';
+      }
       case 'department':
         return device.department;
       case 'owner':
@@ -1139,8 +1357,6 @@ const AssetManagement: React.FC = () => {
         return device.currentUser || '-';
       case 'status':
         return <Chip size="small" label={device.status} sx={chipSx(statusTone(device.status))} />;
-      case 'riskLevel':
-        return <Chip size="small" label={device.riskLevel} sx={chipSx(riskTone(device.riskLevel))} />;
       default:
         return null;
     }
@@ -1173,29 +1389,7 @@ const AssetManagement: React.FC = () => {
             <React.Fragment key={phone.id}>
               {index > 0 ? <Typography variant="caption" sx={{ color: shell.muted }}>/</Typography> : null}
               <Tooltip title="查看手机号资料">
-                <Box
-                  component="button"
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    openDetail('phone', phone.id);
-                  }}
-                  sx={{
-                    border: 0,
-                    bgcolor: 'transparent',
-                    color: shell.tableLink,
-                    cursor: 'pointer',
-                    font: 'inherit',
-                    fontSize: 13,
-                    fontWeight: 900,
-                    lineHeight: 1.3,
-                    p: 0,
-                    textAlign: 'left',
-                    '&:hover': { textDecoration: 'underline' },
-                  }}
-                >
-                  {prefix}{phone.phoneNumberMasked}
-                </Box>
+                {renderRelationLink(`${prefix}${phone.phoneNumberMasked}`, () => openDetail('phone', phone.id))}
               </Tooltip>
             </React.Fragment>
           );
@@ -1214,18 +1408,43 @@ const AssetManagement: React.FC = () => {
     switch (columnId) {
       case 'phoneNumber':
         return <Box sx={{ color: shell.tableLink, fontWeight: 900 }}>{phone.phoneNumberMasked}</Box>;
+      case 'realName':
+        return phone.realNameMasked || '-';
       case 'operator':
         return phone.operator;
+      case 'attributionLocation':
+        return phone.attributionLocation || '-';
       case 'device':
-        return <Box sx={{ color: shell.tableLink }}>{device ? `${device.deviceCode} / ${device.deviceName}` : '-'}</Box>;
+        return device
+          ? renderRelationLink(`${device.deviceCode} / ${device.deviceName}`, () => openDetail('device', device.id))
+          : <Box sx={{ color: shell.muted }}>-</Box>;
+      case 'accounts': {
+        const linkedAccounts = accountsByPhoneId.get(phone.id) || [];
+        if (!linkedAccounts.length) return <Box sx={{ color: shell.muted }}>-</Box>;
+        const firstAccount = linkedAccounts[0];
+        return (
+          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
+            {renderRelationLink(`${firstAccount.platform} / ${firstAccount.accountName}`, () => openDetail('account', firstAccount.id))}
+            {linkedAccounts.length > 1 ? (
+              <Typography variant="caption" sx={{ color: shell.muted, fontWeight: 800, whiteSpace: 'nowrap' }}>
+                +{linkedAccounts.length - 1}
+              </Typography>
+            ) : null}
+          </Stack>
+        );
+      }
       case 'slotType':
         return phone.slotType;
       case 'packageName':
         return phone.packageName;
       case 'monthlyFee':
         return formatCurrency(phone.monthlyFee);
+      case 'department':
+        return phone.department || '-';
       case 'owner':
         return phone.owner || '-';
+      case 'currentUser':
+        return phone.currentUser || '-';
       case 'status':
         return <Chip size="small" label={phone.status} sx={chipSx(statusTone(phone.status))} />;
       default:
@@ -1245,30 +1464,20 @@ const AssetManagement: React.FC = () => {
         return account.accountName;
       case 'loginAccount':
         return account.loginAccountMasked;
+      case 'realName':
+        return account.realNameMasked || '-';
       case 'phone':
-        return (
-          <Box
-            sx={{ color: phone ? shell.tableLink : shell.amber, fontWeight: 800 }}
-            onClick={(event) => {
-              event.stopPropagation();
-              openAccountPhoneDetail(account.phoneId);
-            }}
-          >
-            {phone?.phoneNumberMasked || '未绑定'}
-          </Box>
-        );
+        return phone
+          ? renderRelationLink(phone.phoneNumberMasked, () => openAccountPhoneDetail(account.phoneId))
+          : <Box sx={{ color: shell.amber, fontWeight: 800 }}>未绑定</Box>;
       case 'device':
-        return <Box sx={{ color: device ? shell.tableLink : shell.muted }}>{device ? `${device.deviceCode} / ${device.deviceName}` : '-'}</Box>;
+        return device
+          ? renderRelationLink(`${device.deviceCode} / ${device.deviceName}`, () => openDetail('device', device.id))
+          : <Box sx={{ color: shell.muted }}>-</Box>;
       case 'owner':
         return account.owner || '-';
       case 'permissionStatus':
         return <Chip size="small" label={account.permissionStatus} sx={chipSx(statusTone(account.permissionStatus))} />;
-      case 'riskLevel':
-        return <Chip size="small" label={account.riskLevel} sx={chipSx(riskTone(account.riskLevel))} />;
-      case 'monthlyFee':
-        return formatCurrency(account.monthlyFee);
-      case 'expiresAt':
-        return account.expiresAt || '-';
       default:
         return null;
     }
@@ -1442,50 +1651,6 @@ const AssetManagement: React.FC = () => {
     </>
   );
 
-  const renderRisksTable = () => (
-    <>
-    <TableContainer component={Paper} elevation={0} sx={assetTableContainerSx}>
-      <Table size="small" sx={assetTableSx}>
-        <TableHead>
-          <TableRow>
-            {['风险类型', '关联对象', '等级', '状态', '说明', '创建时间', '操作'].map((column) => <TableCell key={column}>{column}</TableCell>)}
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {risks.map((risk) => (
-            <TableRow hover key={risk.id} onClick={() => openDetail(risk.targetType, risk.targetId)} sx={{ cursor: 'pointer' }}>
-              <TableCell>{risk.type}</TableCell>
-              <TableCell sx={{ color: shell.tableLink, fontWeight: 800 }}>{risk.targetName}</TableCell>
-              <TableCell><Chip size="small" label={risk.level} sx={chipSx(riskTone(risk.level))} /></TableCell>
-              <TableCell>{risk.status}</TableCell>
-              <TableCell>{risk.description}</TableCell>
-              <TableCell>{formatDate(risk.createdAt, 'yyyy-MM-dd HH:mm')}</TableCell>
-              <TableCell align="center" sx={{ minWidth: 112 }}>
-                {canHandleRisks ? (
-                  <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5 }}>
-                    <Tooltip title="标记解决">
-                      <IconButton size="small" onClick={(event) => { event.stopPropagation(); handleRiskStatus(risk.id, 'resolved'); }}>
-                        <CheckCircleOutlineIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="忽略">
-                      <IconButton size="small" onClick={(event) => { event.stopPropagation(); handleRiskStatus(risk.id, 'ignored'); }}>
-                        <BlockIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  </Box>
-                ) : null}
-              </TableCell>
-            </TableRow>
-          ))}
-          {risks.length === 0 && renderAssetEmptyRow(7, '暂无风险提醒数据')}
-        </TableBody>
-      </Table>
-    </TableContainer>
-    {renderPagination()}
-    </>
-  );
-
   const renderLogsTable = () => (
     <>
     <TableContainer component={Paper} elevation={0} sx={assetTableContainerSx}>
@@ -1579,7 +1744,7 @@ const AssetManagement: React.FC = () => {
                     <Chip
                       size="small"
                       label={overdue ? '已逾期' : statusLabel(target.status)}
-                      sx={chipSx(overdue ? riskTone('高') : riskTone(target.status === 'completed' ? '低' : '中'))}
+                      sx={chipSx(overdue ? toneSx('high') : toneSx(target.status === 'completed' ? 'low' : 'medium'))}
                     />
                   </TableCell>
                   <TableCell>
@@ -1678,7 +1843,6 @@ const AssetManagement: React.FC = () => {
     if (activeTab === 'phones') return renderPhonesTable();
     if (activeTab === 'accounts') return renderAccountsTable();
     if (activeTab === 'matrix') return renderMatrixPublishTable();
-    if (activeTab === 'risks') return renderRisksTable();
     if (activeTab === 'logs') return renderLogsTable();
     return renderOffboardingTable();
   };
@@ -1687,15 +1851,14 @@ const AssetManagement: React.FC = () => {
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
-      setSnackbar(`${label}已复制`);
+      showFeedback(`${label}已复制`);
     } catch {
-      setSnackbar('复制失败，请手动选择复制');
+      showFeedback('复制失败，请手动选择复制');
     }
   };
 
   const primaryDevice = detail?.device || detail?.relatedDevice;
   const primaryPhone = detail?.phone || detail?.relatedPhones[0];
-  const primaryAccount = detail?.account || detail?.relatedAccounts[0];
 
   const detailCardSx = {
     border: `1px solid ${shell.softLine}`,
@@ -1719,12 +1882,6 @@ const AssetManagement: React.FC = () => {
     '& .MuiTableBody-root .MuiTableRow-root:last-of-type .MuiTableCell-root': {
       borderBottom: 0,
     },
-  };
-
-  const riskStatusLabel: Record<AssetRiskStatus, string> = {
-    open: '观察中',
-    resolved: '已处理',
-    ignored: '已忽略',
   };
 
   const renderPlatformLogo = (account: AssetInternetAccount) => {
@@ -1838,43 +1995,23 @@ const AssetManagement: React.FC = () => {
     </Button>
   );
 
-  const renderDeviceVisual = (device: AssetDevice) => (
-    <Stack spacing={1} alignItems="center" sx={{ width: 92, flexShrink: 0 }}>
-      <Avatar
-        variant="rounded"
-        sx={{
-          width: 72,
-          height: 92,
-          borderRadius: 1.5,
-          bgcolor: '#EAF2FF',
-          color: shell.blue,
-          border: `1px solid ${shell.softLine}`,
-        }}
-      >
-        <PhoneIphoneIcon sx={{ fontSize: 48 }} />
-      </Avatar>
-      <Chip size="small" label={device.status} sx={chipSx(statusTone(device.status))} />
-    </Stack>
-  );
-
   const renderDeviceBasicCard = (device: AssetDevice) => (
     renderDetailCard('设备基本信息', (
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-        {renderDeviceVisual(device)}
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          {renderInfoRows([
-            { label: '设备名称', value: device.deviceName },
-            { label: '设备编号', value: <Stack direction="row" alignItems="center" spacing={0.5}>{device.deviceCode}{renderCopyButton(device.deviceCode, '设备编号')}</Stack> },
-            { label: '品牌/型号', value: device.brandModel },
-            { label: 'IMEI', value: renderSensitiveInline('device', device.id, 'imei', device.imeiMasked) },
-            { label: 'SIM 类型', value: device.simType },
-            { label: '所属主体', value: device.ownerSubject },
-            { label: '月费用', value: formatCurrency(device.monthlyCost) },
-            { label: '更新时间', value: formatDate(device.updatedAt, 'yyyy-MM-dd') },
-            { label: '备注', value: device.remark || '-' },
-          ], 2)}
-        </Box>
-      </Stack>
+      renderInfoRows([
+        { label: '设备名称', value: device.deviceName },
+        { label: '设备编号', value: <Stack direction="row" alignItems="center" spacing={0.5}>{device.deviceCode}{renderCopyButton(device.deviceCode, '设备编号')}</Stack> },
+        { label: '品牌/型号', value: device.brandModel },
+        { label: 'IMEI', value: renderSensitiveInline('device', device.id, 'imei', device.imeiMasked) },
+        { label: 'SIM 类型', value: device.simType },
+        { label: '状态', value: <Chip size="small" label={device.status} sx={chipSx(statusTone(device.status))} /> },
+        { label: '所属主体', value: device.ownerSubject },
+        { label: '所属部门', value: device.department || '-' },
+        { label: '负责人', value: device.owner || '-' },
+        { label: '当前使用人', value: device.currentUser || '-' },
+        { label: '月费用', value: formatCurrency(device.monthlyCost) },
+        { label: '更新时间', value: formatDate(device.updatedAt, 'yyyy-MM-dd') },
+        { label: '备注', value: device.remark || '-' },
+      ], 2)
     ))
   );
 
@@ -1882,13 +2019,22 @@ const AssetManagement: React.FC = () => {
     renderDetailCard('手机号基本信息', (
       renderInfoRows([
         { label: '手机号', value: renderSensitiveInline('phone', phone.id, 'phoneNumber', phone.phoneNumberMasked) },
+        { label: '实名信息', value: renderSensitiveInline('phone', phone.id, 'phoneRealName', phone.realNameMasked || '-') },
         { label: '运营商', value: phone.operator },
-        { label: '归属地', value: '-' },
+        { label: '归属地', value: phone.attributionLocation || '-' },
         { label: '卡类型', value: '实体 SIM 卡' },
-        { label: '所属设备', value: primaryDevice ? `${primaryDevice.deviceCode} / ${primaryDevice.deviceName}` : '-' },
+        {
+          label: '所属设备',
+          value: primaryDevice
+            ? renderAssetNameLink(`${primaryDevice.deviceCode} / ${primaryDevice.deviceName}`, () => openDetail('device', primaryDevice.id))
+            : '-',
+        },
         { label: 'SIM 卡槽', value: phone.slotType },
         { label: '套餐', value: phone.packageName || '-' },
         { label: '月费用', value: formatCurrency(phone.monthlyFee) },
+        { label: '所属部门', value: phone.department || primaryDevice?.department || '-' },
+        { label: '负责人', value: phone.owner || '-' },
+        { label: '当前使用人', value: phone.currentUser || primaryDevice?.currentUser || '-' },
         { label: '卡状态', value: <Chip size="small" label={phone.status} sx={chipSx(statusTone(phone.status))} /> },
         { label: '更新时间', value: formatDate(phone.updatedAt, 'yyyy-MM-dd') },
       ], 2)
@@ -1923,74 +2069,33 @@ const AssetManagement: React.FC = () => {
           {renderInfoRows([
             { label: '账号编号', value: <Stack direction="row" alignItems="center" spacing={0.5}>{account.accountNo}{renderCopyButton(account.accountNo, '账号编号')}</Stack> },
             { label: '平台', value: account.platform },
-            { label: '账号类型', value: account.ownerSubject === '公司' ? '主账号' : account.ownerSubject },
+            { label: '所属主体', value: account.ownerSubject },
             { label: '登录账号', value: renderSensitiveInline('account', account.id, 'loginAccount', account.loginAccountMasked) },
-            { label: '绑定手机号', value: primaryPhone?.phoneNumberMasked || '-' },
+            { label: '实名信息', value: renderSensitiveInline('account', account.id, 'accountRealName', account.realNameMasked || '-') },
+            {
+              label: '绑定手机号',
+              value: primaryPhone
+                ? renderAssetNameLink(primaryPhone.phoneNumberMasked, () => openDetail('phone', primaryPhone.id))
+                : '-',
+            },
+            {
+              label: '所属设备',
+              value: primaryDevice
+                ? renderAssetNameLink(`${primaryDevice.deviceCode} / ${primaryDevice.deviceName}`, () => openDetail('device', primaryDevice.id))
+                : '-',
+            },
             { label: '绑定邮箱', value: renderSensitiveInline('account', account.id, 'boundEmail', account.boundEmailMasked || account.boundEmail || '-') },
-            { label: '服务商', value: account.serviceProvider || '-' },
-            { label: '到期时间', value: account.expiresAt || '-' },
+            { label: '权限状态', value: <Chip size="small" label={account.permissionStatus} sx={chipSx(statusTone(account.permissionStatus))} /> },
+            { label: '账号状态', value: <Chip size="small" label={account.accountStatus} sx={chipSx(statusTone(account.accountStatus))} /> },
+            { label: '所属部门', value: account.department || '-' },
+            { label: '负责人', value: account.owner || '-' },
+            { label: '当前使用人', value: account.currentUser || '-' },
             { label: '用途', value: account.purpose || '-' },
-            { label: '备注', value: account.purpose || '-' },
           ], 2)}
         </Box>
       </Stack>
     ))
   );
-
-  const renderResponsibilityCard = () => {
-    if (!detail) return null;
-    const current = detail.device || detail.phone || detail.account;
-    const account = detail.account;
-    const device = detail.device || detail.relatedDevice;
-    const owner = readAssetText(current, ['owner', 'currentUser'], '-');
-    const currentUser = readAssetText(current, ['currentUser', 'owner'], owner);
-    const department = readAssetText(current, ['department'], device?.department || account?.department || '-');
-    return renderDetailCard('归属与责任', (
-      renderInfoRows([
-        { label: '所属员工', value: <Box component="span" sx={{ color: shell.tableLink }}>{currentUser}</Box> },
-        { label: '所属部门', value: department },
-        { label: '负责人', value: owner },
-        { label: '负责人电话', value: '-' },
-        { label: '备用联系人', value: '-' },
-        { label: '分配时间', value: current?.createdAt ? formatDate(current.createdAt, 'yyyy-MM-dd') : '-' },
-      ], 2)
-    ));
-  };
-
-  const renderRiskInfoCard = () => {
-    if (!detail) return null;
-    const riskLevel = detail.risks[0]?.level || detail.device?.riskLevel || detail.account?.riskLevel || '低';
-    const lastCheckedAt = detail.risks[0]?.createdAt || detail.device?.updatedAt || detail.phone?.updatedAt || detail.account?.updatedAt || new Date().toISOString();
-    return renderDetailCard('风险信息', (
-      <Stack spacing={1}>
-        <Box sx={{ display: 'grid', gridTemplateColumns: '92px minmax(0, 1fr)', alignItems: 'center' }}>
-          <Typography variant="body2" sx={{ color: shell.muted }}>风险等级</Typography>
-          <Chip size="small" label={riskLevel} sx={{ ...chipSx(riskTone(riskLevel)), justifySelf: 'start' }} />
-        </Box>
-        <Box sx={{ display: 'grid', gridTemplateColumns: '92px minmax(0, 1fr)', alignItems: 'start' }}>
-          <Typography variant="body2" sx={{ color: shell.muted }}>风险项</Typography>
-          <Stack spacing={0.45}>
-            {detail.risks.length ? detail.risks.map((risk) => (
-              <Typography key={risk.id} variant="body2" sx={{ color: risk.level === '低' ? shell.muted : shell.amber, fontWeight: 800 }}>
-                · {risk.description}
-              </Typography>
-            )) : (
-              <Typography variant="body2" sx={{ color: shell.muted }}>暂无待处理风险</Typography>
-            )}
-          </Stack>
-        </Box>
-        <Box sx={{ display: 'grid', gridTemplateColumns: '92px minmax(0, 1fr)', alignItems: 'center' }}>
-          <Typography variant="body2" sx={{ color: shell.muted }}>最后检测</Typography>
-          <Typography variant="body2" sx={{ color: shell.ink, fontWeight: 800 }}>{formatDate(lastCheckedAt, 'yyyy-MM-dd HH:mm:ss')}</Typography>
-        </Box>
-        <Box sx={{ display: 'grid', gridTemplateColumns: '92px minmax(0, 1fr)', alignItems: 'center' }}>
-          <Typography variant="body2" sx={{ color: shell.muted }}>处理状态</Typography>
-          <Chip size="small" label={riskStatusLabel[detail.risks[0]?.status || 'open']} sx={{ ...chipSx(statusTone(riskStatusLabel[detail.risks[0]?.status || 'open'])), justifySelf: 'start' }} />
-        </Box>
-        <Box sx={{ textAlign: 'right' }}>{renderLinkButton('查看风险详情', () => setSearchParams({ tab: 'risks' }))}</Box>
-      </Stack>
-    ));
-  };
 
   const renderAssetNameLink = (label: string, onClick: () => void) => (
     <Button
@@ -2002,11 +2107,12 @@ const AssetManagement: React.FC = () => {
     </Button>
   );
 
-  const renderRelatedAssetsSection = (placement: 'full' | 'side' = 'full') => {
+  const renderRelatedAssetsSection = () => {
     if (!detail) return null;
     const phoneRows = detail.relatedPhones.map((phone) => [
       phone.slotType,
       renderAssetNameLink(phone.phoneNumberMasked, () => openDetail('phone', phone.id)),
+      phone.realNameMasked || '-',
       phone.operator,
       phone.packageName || '-',
       <Chip size="small" label={phone.status} sx={chipSx(statusTone(phone.status))} />,
@@ -2015,137 +2121,45 @@ const AssetManagement: React.FC = () => {
       <Stack direction="row" spacing={1} alignItems="center">{renderPlatformLogo(account)}<Box>{account.platform}</Box></Stack>,
       renderAssetNameLink(account.accountName, () => openDetail('account', account.id)),
       account.loginAccountMasked,
+      account.realNameMasked || '-',
       detail.relatedPhones.find((phone) => phone.id === account.phoneId)?.phoneNumberMasked || '-',
       <Chip size="small" label={account.permissionStatus} sx={chipSx(statusTone(account.permissionStatus))} />,
     ]);
-    const deviceRows = primaryDevice ? [[
-      <Stack direction="row" spacing={1} alignItems="center">
-        <Avatar variant="rounded" sx={{ width: 34, height: 34, bgcolor: '#EAF2FF', color: shell.blue, borderRadius: 1 }}><PhoneIphoneIcon sx={{ fontSize: 22 }} /></Avatar>
-        {renderAssetNameLink(`${primaryDevice.deviceCode} / ${primaryDevice.deviceName}`, () => openDetail('device', primaryDevice.id))}
-      </Stack>,
-      primaryDevice.brandModel,
-      primaryDevice.simType,
-      <Chip size="small" label={primaryDevice.status} sx={chipSx(statusTone(primaryDevice.status))} />,
-    ]] : [];
-    const employeeRows = primaryAccount ? [[
-      primaryAccount.currentUser || primaryAccount.owner || '-',
-      primaryAccount.department || '-',
-      primaryAccount.owner || '-',
-      formatDate(primaryAccount.createdAt, 'yyyy-MM-dd'),
-    ]] : [];
-
     if (detail.type === 'device') {
       return renderDetailCard('关联资产', (
-        <Box sx={{ display: 'grid', gridTemplateColumns: placement === 'side' ? '1fr' : { xs: '1fr', lg: '1fr 1.25fr' }, gap: 1.25 }}>
-          {renderCompactTable(['卡槽', '手机号', '运营商', '套餐', '状态'], phoneRows, '暂无绑定手机号')}
-          {renderCompactTable(['平台', '账号名称', '登录账号', '手机号', '状态'], accountRows, '暂无互联网账号')}
+        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr', gap: 1.25 }}>
+          {renderCompactTable(['卡槽', '手机号', '实名信息', '运营商', '套餐', '状态'], phoneRows, '暂无绑定手机号')}
+          {renderCompactTable(['平台', '账号名称', '登录账号', '实名信息', '手机号', '状态'], accountRows, '暂无互联网账号')}
         </Box>
       ));
     }
 
     if (detail.type === 'phone') {
       return renderDetailCard('关联资产', (
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '0.7fr 1.3fr' }, gap: 1.25 }}>
-          {renderCompactTable(['所在设备', '品牌型号', 'SIM 类型', '状态'], deviceRows, '暂无所在设备')}
-          {renderCompactTable(['平台', '账号名称', '登录账号', '手机号', '状态'], accountRows, '暂无绑定互联网账号')}
+        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr', gap: 1.25 }}>
+          {renderCompactTable(['平台', '账号名称', '登录账号', '实名信息', '手机号', '状态'], accountRows, '暂无绑定互联网账号')}
         </Box>
       ));
     }
 
-    return (
-      renderDetailCard('关联资产', (
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(3, minmax(0, 1fr))' }, gap: 1.25 }}>
-          {renderCompactTable(['绑定手机号', '运营商', '卡槽', '状态'], primaryPhone ? [[
-            renderAssetNameLink(primaryPhone.phoneNumberMasked, () => openDetail('phone', primaryPhone.id)),
-            primaryPhone.operator,
-            primaryPhone.slotType,
-            <Chip size="small" label={primaryPhone.status} sx={chipSx(statusTone(primaryPhone.status))} />,
-          ]] : [], '暂无绑定手机号')}
-          {renderCompactTable(['关联设备', '品牌型号', 'SIM 类型', '状态'], deviceRows, '暂无关联设备')}
-          {renderCompactTable(['员工', '部门', '负责人', '分配时间'], employeeRows, '暂无员工归属')}
-        </Box>
-      ))
-    );
-  };
-
-  const renderHistorySections = () => {
-    if (!detail) return null;
-    const sensitiveLogs = detail.logs.filter((log) => log.action.includes('查看敏感') || log.detail.includes('查看敏感') || log.detail.includes('完整手机号') || log.detail.includes('IMEI'));
-    const operationRows = detail.logs.slice(0, 5).map((log) => [
-      formatDate(log.time, 'yyyy-MM-dd HH:mm'),
-      log.operator,
-      log.action,
-      log.detail,
-    ]);
-    const sensitiveRows = sensitiveLogs.slice(0, 5).map((log) => [
-      formatDate(log.time, 'yyyy-MM-dd HH:mm'),
-      log.operator,
-      log.targetName,
-      log.detail,
-    ]);
-    return (
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 1.25 }}>
-        <Box>
-          <Typography sx={{ color: shell.ink, fontWeight: 950, mb: 1 }}>操作历史记录</Typography>
-          {renderCompactTable(['操作时间', '操作人', '操作行为', '操作说明'], operationRows, '暂无操作历史记录')}
-        </Box>
-        <Box>
-          <Typography sx={{ color: shell.ink, fontWeight: 950, mb: 1 }}>敏感信息查看记录（近7日）</Typography>
-          {renderCompactTable(['查看时间', '查看人', '查看内容', '查看原因'], sensitiveRows, '暂无敏感信息查看记录')}
-        </Box>
-      </Box>
-    );
+    return null;
   };
 
   const renderDetailBody = () => {
     if (!detail) return null;
-    const titleMap: Record<AssetType, string> = {
-      device: '设备',
-      phone: '手机号',
-      account: '当前账号',
-    };
     const basicCard = detail.device ? renderDeviceBasicCard(detail.device) : detail.phone ? renderPhoneBasicCard(detail.phone) : detail.account ? renderAccountBasicCard(detail.account) : null;
     if (detail.type === 'device') {
       return (
-        <Stack spacing={1.4}>
-          <Paper elevation={0} sx={{ px: 1.5, py: 1, bgcolor: '#EEF6FF', border: '1px solid #D8E9FF', borderRadius: 1 }}>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <InfoOutlinedIcon sx={{ color: shell.blue, fontSize: 18 }} />
-              <Typography variant="body2" sx={{ color: shell.ink }}>
-                本页面展示{titleMap[detail.type]}资产的当前资料与关系数据。
-              </Typography>
-            </Stack>
-          </Paper>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1.1fr 0.9fr' }, gap: 1.25, alignItems: 'start' }}>
-            <Stack spacing={1.25}>
-              {basicCard}
-              {renderResponsibilityCard()}
-            </Stack>
-            {renderRelatedAssetsSection('side')}
-          </Box>
-          {renderHistorySections()}
+        <Stack spacing={1.25}>
+          {basicCard}
+          {renderRelatedAssetsSection()}
         </Stack>
       );
     }
     return (
-      <Stack spacing={1.4}>
-        <Paper elevation={0} sx={{ px: 1.5, py: 1, bgcolor: '#EEF6FF', border: '1px solid #D8E9FF', borderRadius: 1 }}>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <InfoOutlinedIcon sx={{ color: shell.blue, fontSize: 18 }} />
-            <Typography variant="body2" sx={{ color: shell.ink }}>
-              本页面展示{titleMap[detail.type]}资产的当前资料与关系数据。
-            </Typography>
-          </Stack>
-        </Paper>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1.1fr 0.9fr' }, gap: 1.25 }}>
-          {basicCard}
-          <Stack spacing={1.25}>
-            {renderResponsibilityCard()}
-            {renderRiskInfoCard()}
-          </Stack>
-        </Box>
+      <Stack spacing={1.25}>
+        {basicCard}
         {renderRelatedAssetsSection()}
-        {renderHistorySections()}
       </Stack>
     );
   };
@@ -2161,9 +2175,9 @@ const AssetManagement: React.FC = () => {
       <Dialog
         open={detailDialogOpen}
         onClose={closeDetailDialog}
-        maxWidth="xl"
+        maxWidth="md"
         fullWidth
-        PaperProps={{ sx: { borderRadius: 1, overflow: 'hidden', maxWidth: 1320 } }}
+        PaperProps={{ sx: { borderRadius: 1, overflow: 'hidden', maxWidth: 960 } }}
       >
         <DialogTitle sx={{ p: 0 }}>
           <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between" sx={{ px: 2.25, py: 1.5, borderBottom: `1px solid ${shell.softLine}` }}>
@@ -2214,6 +2228,7 @@ const AssetManagement: React.FC = () => {
       type={props.type}
       multiline={props.multiline}
       minRows={props.multiline ? 2 : undefined}
+      InputLabelProps={props.type === 'date' ? { shrink: true } : undefined}
       fullWidth
     />
   );
@@ -2232,6 +2247,63 @@ const AssetManagement: React.FC = () => {
     </FormControl>
   );
 
+  const renderUserSelectField = (prefix: 'owner' | 'currentUser', label: string) => {
+    const idField = `${prefix}Id`;
+    const nameValue = formState.values[prefix] || '';
+    return (
+      <FormControl size="small" fullWidth>
+        <InputLabel shrink>{label}</InputLabel>
+        <Select
+          label={label}
+          value={formState.values[idField] || ''}
+          displayEmpty
+          onChange={(event) => updateAssetUser(prefix, event.target.value)}
+          renderValue={(selected) => {
+            const user = userById.get(String(selected));
+            return user?.name || nameValue || '未选择';
+          }}
+        >
+          <MenuItem value="">未选择</MenuItem>
+          {nameValue && !formState.values[idField] ? (
+            <MenuItem value="" disabled>{nameValue}（未匹配员工）</MenuItem>
+          ) : null}
+          {lookupUsers.map((user) => {
+            const department = departmentById.get(user.departmentId || '');
+            return (
+              <MenuItem key={user.id} value={user.id}>
+                {user.name} / {department?.name || '未分配部门'}
+              </MenuItem>
+            );
+          })}
+        </Select>
+      </FormControl>
+    );
+  };
+
+  const renderDepartmentSelectField = () => (
+    <FormControl size="small" fullWidth>
+      <InputLabel shrink>所属部门</InputLabel>
+      <Select
+        label="所属部门"
+        value={formState.values.departmentId || ''}
+        displayEmpty
+        onChange={(event) => updateAssetDepartment(event.target.value)}
+        renderValue={(selected) => {
+          const department = departmentById.get(String(selected));
+          return department?.name || formState.values.department || '未选择';
+        }}
+      >
+        <MenuItem value="">未选择</MenuItem>
+        {formState.values.department && !formState.values.departmentId ? (
+          <MenuItem value="" disabled>{formState.values.department}（未匹配部门）</MenuItem>
+        ) : null}
+        {lookupDepartments.map((department) => (
+          <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>
+        ))}
+      </Select>
+    </FormControl>
+  );
+
   const renderDeviceFields = () => (
     <>
       {renderTextField('deviceName', '设备名称', { required: true })}
@@ -2239,11 +2311,10 @@ const AssetManagement: React.FC = () => {
       {renderTextField('imei', 'IMEI', { required: true })}
       {renderSelectField('simType', 'SIM类型', ['单卡', '双卡'], { required: true })}
       {renderSelectField('ownerSubject', '所属主体', ['公司', '法人', '员工个人'], { required: true })}
-      {renderTextField('department', '所属部门')}
-      {renderTextField('owner', '负责人')}
-      {renderTextField('currentUser', '当前使用人')}
+      {renderDepartmentSelectField()}
+      {renderUserSelectField('owner', '负责人')}
+      {renderUserSelectField('currentUser', '当前使用人')}
       {renderSelectField('status', '状态', ['正常', '使用中', '闲置', '已注销'], { required: true })}
-      {renderSelectField('riskLevel', '风险等级', ['低', '中', '高'], { required: true })}
       {renderTextField('monthlyCost', '月费用', { type: 'number' })}
       {renderTextField('remark', '备注', { multiline: true })}
     </>
@@ -2251,8 +2322,17 @@ const AssetManagement: React.FC = () => {
 
   const renderPhoneFields = () => (
     <>
-      {renderTextField('phoneNumber', '完整手机号', { required: true })}
-      {renderSelectField('operator', '运营商', ['移动', '联通', '电信', '广电'], { required: true })}
+      <TextField
+        size="small"
+        label="完整手机号"
+        value={formState.values.phoneNumber || ''}
+        onChange={(event) => updatePhoneNumberValue(event.target.value)}
+        required
+        fullWidth
+      />
+      {renderTextField('realName', '实名信息')}
+      {renderSelectField('operator', '运营商', ['移动', '联通', '电信', '广电', '未知'])}
+      {renderTextField('attributionLocation', '归属地')}
       <FormControl size="small" fullWidth required>
         <InputLabel>所属设备</InputLabel>
         <Select
@@ -2292,7 +2372,9 @@ const AssetManagement: React.FC = () => {
       </FormControl>
       {renderTextField('packageName', '套餐')}
       {renderTextField('monthlyFee', '月费用', { type: 'number' })}
-      {renderTextField('owner', '负责人')}
+      {renderDepartmentSelectField()}
+      {renderUserSelectField('owner', '负责人')}
+      {renderUserSelectField('currentUser', '当前使用人')}
       {renderSelectField('status', '状态', ['使用中', '闲置', '已停用'], { required: true })}
     </>
   );
@@ -2302,6 +2384,7 @@ const AssetManagement: React.FC = () => {
       {renderTextField('platform', '平台', { required: true })}
       {renderTextField('accountName', '账号名称', { required: true })}
       {renderTextField('loginAccount', '登录账号', { required: true })}
+      {renderTextField('realName', '实名信息')}
       <FormControl size="small" fullWidth>
         <InputLabel>绑定手机号</InputLabel>
         <Select
@@ -2322,15 +2405,11 @@ const AssetManagement: React.FC = () => {
       </FormControl>
       {renderTextField('boundEmail', '绑定邮箱')}
       {renderSelectField('ownerSubject', '所属主体', ['公司', '法人', '员工个人'], { required: true })}
-      {renderTextField('department', '所属部门')}
-      {renderTextField('owner', '负责人')}
-      {renderTextField('currentUser', '当前使用人')}
+      {renderDepartmentSelectField()}
+      {renderUserSelectField('owner', '负责人')}
+      {renderUserSelectField('currentUser', '当前使用人')}
       {renderSelectField('permissionStatus', '权限状态', ['正常', '离职待回收', '已回收'], { required: true })}
       {renderSelectField('accountStatus', '账号状态', ['使用中', '正常', '闲置', '异常', '已注销'], { required: true })}
-      {renderSelectField('riskLevel', '风险等级', ['低', '中', '高'], { required: true })}
-      {renderTextField('serviceProvider', '服务商')}
-      {renderTextField('monthlyFee', '月费用', { type: 'number' })}
-      {renderTextField('expiresAt', '到期时间', { type: 'date' })}
       {renderTextField('purpose', '用途', { multiline: true })}
     </>
   );
@@ -2389,8 +2468,8 @@ const AssetManagement: React.FC = () => {
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between">
                   <Stack direction="row" spacing={1}>
                     <Chip size="small" label={`总行数 ${importState.result.totalRows}`} />
-                    <Chip size="small" label={`成功 ${importState.result.successCount}`} sx={chipSx(riskTone('低'))} />
-                    <Chip size="small" label={`失败 ${importState.result.failedCount}`} sx={chipSx(riskTone(importState.result.failedCount ? '中' : '低'))} />
+                    <Chip size="small" label={`成功 ${importState.result.successCount}`} sx={chipSx(toneSx('low'))} />
+                    <Chip size="small" label={`失败 ${importState.result.failedCount}`} sx={chipSx(toneSx(importState.result.failedCount ? 'medium' : 'low'))} />
                   </Stack>
                   <Button
                     size="small"
@@ -2478,16 +2557,16 @@ const AssetManagement: React.FC = () => {
                 const file = event.target.files?.[0];
                 if (!file) return;
                 updateMatrixPublishValue('videoFileName', file.name);
-                setSnackbar('视频上传中...');
+                showFeedback('视频上传中...');
                 const upload = await assetApi.uploadMatrixPublishVideo(file);
                 if (upload.code === 0 && upload.data?.url) {
                   updateMatrixPublishValue('videoFileName', upload.data.fileName || file.name);
                   updateMatrixPublishValue('videoUrl', upload.data.url);
-                  setSnackbar('视频已上传');
+                  showFeedback('视频已上传');
                   return;
                 }
                 updateMatrixPublishValue('videoUrl', URL.createObjectURL(file));
-                setSnackbar(upload.message || '后端上传不可用，已使用本地临时视频链接');
+                showFeedback(upload.message || '后端上传不可用，已使用本地临时视频链接');
               }}
             />
           </Button>
@@ -2621,7 +2700,7 @@ const AssetManagement: React.FC = () => {
     <ModulePage>
       <ModuleHeader
         title="资产管理"
-        description="管理设备、手机号与互联网账号，追溯归属、风险与离职回收。"
+        description="管理设备、手机号与互联网账号，追溯归属与离职回收。"
         actions={(
           <>
             {canImportExport && isConfigurableAssetTab(activeTab) ? (
@@ -2677,15 +2756,9 @@ const AssetManagement: React.FC = () => {
           <Button color="error" variant="contained" onClick={submitDelete}>确认删除</Button>
         </DialogActions>
       </Dialog>
-      <Snackbar
-        open={Boolean(snackbar)}
-        autoHideDuration={2200}
-        onClose={() => setSnackbar('')}
-        message={snackbar}
-      />
+      {feedbackDialog}
     </ModulePage>
   );
 };
 
 export default AssetManagement;
-

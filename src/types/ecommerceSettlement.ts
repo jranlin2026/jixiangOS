@@ -17,10 +17,13 @@ export interface EcommerceOrderDetailRow {
   orderMonth: string;
   submittedAt: string;
   completedAt: string;
+  paidAt: string;
+  shippedAt: string;
   skuCode: string;
   quantity: number;
   talentId: string;
   talentName: string;
+  productPrice: number;
   payableAmount: number;
   platformDiscount: number;
   merchantDiscount: number;
@@ -38,12 +41,23 @@ export interface EcommerceTalentSummaryRow {
   talentId: string;
   talentName: string;
   orderCount: number;
+  packageCount: number;
   payableAmount: number;
   flowAmount: number;
   productCost: number;
   shippingFee: number;
   freightInsurance: number;
   estimatedProfit: number;
+  totalCost: number;
+  grossProfitRate: number | '';
+}
+
+export interface EcommerceFlowOverviewRow {
+  metric: string;
+  value: string | number;
+  note: string;
+  topScene: string;
+  topNetAmount: string | number;
 }
 
 export interface EcommerceFlowSummaryRow {
@@ -78,6 +92,7 @@ export interface EcommerceExceptionRow {
 export interface EcommerceSettlementResult {
   orderDetailRows: EcommerceOrderDetailRow[];
   talentSummaryRows: EcommerceTalentSummaryRow[];
+  flowOverviewRows: EcommerceFlowOverviewRow[];
   flowSceneSummaryRows: EcommerceFlowSummaryRow[];
   flowMonthSummaryRows: EcommerceFlowSummaryRow[];
   flowCheckRows: EcommerceFlowCheckRow[];

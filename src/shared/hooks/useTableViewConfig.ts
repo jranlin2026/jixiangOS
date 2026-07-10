@@ -35,8 +35,13 @@ const normalizeConfig = (
   const configuredOrder = Array.isArray(config.columnOrder)
     ? config.columnOrder.filter((id): id is string => typeof id === 'string' && validIds.has(id))
     : [];
+  const configuredOrderSet = new Set(configuredOrder);
+  const defaultVisibleMissingIds = defaultVisibleColumnIds.filter((id) => (
+    validIds.has(id) && !visibleColumnIds.includes(id) && !configuredOrderSet.has(id)
+  ));
+  const visibleColumnIdsWithNewDefaults = [...visibleColumnIds, ...defaultVisibleMissingIds];
   const missingOrderIds = columns.map((column) => column.id).filter((id) => !configuredOrder.includes(id));
-  const normalizedVisibleColumnIds = visibleColumnIds.length ? visibleColumnIds : defaultConfig.visibleColumnIds;
+  const normalizedVisibleColumnIds = visibleColumnIdsWithNewDefaults.length ? visibleColumnIdsWithNewDefaults : defaultConfig.visibleColumnIds;
   const frozenColumnCount = Number.isFinite(config.frozenColumnCount)
     ? Math.max(0, Math.min(Number(config.frozenColumnCount), normalizedVisibleColumnIds.length))
     : defaultConfig.frozenColumnCount;
@@ -67,8 +72,29 @@ const orderColumns = <TColumn extends TableViewColumnConfig>(columns: TColumn[],
   const ordered = columnOrder
     .map((columnId) => columnMap.get(columnId))
     .filter((column): column is TColumn => Boolean(column));
-  const missing = columns.filter((column) => !columnOrder.includes(column.id));
-  return [...ordered, ...missing];
+  const orderedIds = new Set(ordered.map((column) => column.id));
+  const next = [...ordered];
+  const missing = columns.filter((column) => !orderedIds.has(column.id));
+
+  missing.forEach((column) => {
+    const naturalIndex = columns.findIndex((item) => item.id === column.id);
+    const previousNaturalIds = columns.slice(0, naturalIndex).map((item) => item.id).reverse();
+    const previousIndex = previousNaturalIds
+      .map((id) => next.findIndex((item) => item.id === id))
+      .find((index) => index >= 0);
+    if (previousIndex !== undefined) {
+      next.splice(previousIndex + 1, 0, column);
+      return;
+    }
+    const nextNaturalIds = columns.slice(naturalIndex + 1).map((item) => item.id);
+    const nextIndex = nextNaturalIds
+      .map((id) => next.findIndex((item) => item.id === id))
+      .find((index) => index >= 0);
+    if (nextIndex !== undefined) next.splice(nextIndex, 0, column);
+    else next.push(column);
+  });
+
+  return next;
 };
 
 export const useTableViewConfig = <TColumn extends TableViewColumnConfig>(

@@ -437,6 +437,15 @@ async function addCustomerFollowUp(
     attachments?: CustomerActivityRecord['attachments'];
   },
 ): Promise<ApiResponse<Customer | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Customer>(`/customers/${encodeURIComponent(id)}/follow-ups`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code);
+    return createSuccessResponse(response.data);
+  }
+
   ensureInit();
   await delay(150);
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
@@ -490,6 +499,15 @@ function findLeadIdByCustomer(customer: Customer): string | undefined {
 }
 
 async function releaseCustomerToPublicPool(id: string, reason: string): Promise<ApiResponse<Customer | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Customer>(`/customers/${encodeURIComponent(id)}/release`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code);
+    return createSuccessResponse(response.data);
+  }
+
   ensureInit();
   await delay(150);
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];

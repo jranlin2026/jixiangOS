@@ -23,6 +23,8 @@
   AssetSensitiveRevealResult,
   AssetType,
 } from '../types/asset';
+import type { Department } from '../types/department';
+import type { User } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
@@ -36,6 +38,7 @@ import {
   canViewAssetPhone,
   getCurrentDataVisibilityScope,
 } from '../shared/utils/dataVisibility';
+import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
 
 function ensureInit(): void {
   initializeMockData();
@@ -112,6 +115,13 @@ function maskEmail(value?: string): string | undefined {
   const [name, domain] = value.split('@');
   if (!domain) return maskLogin(value);
   return `${name.slice(0, 2)}***@${domain}`;
+}
+
+function maskRealName(value?: string): string | undefined {
+  const text = String(value || '').trim();
+  if (!text) return undefined;
+  if (text.length === 1) return '*';
+  return `${text.slice(0, 1)}*${text.slice(2)}`;
 }
 
 function nextNumber<T>(rows: T[], readValue: (row: T) => string, prefix: string): string {
@@ -308,6 +318,90 @@ function requiredText(value: unknown, message: string): string {
   return text;
 }
 
+type AssetOrgInput = {
+  ownerId?: string;
+  owner?: string;
+  currentUserId?: string;
+  currentUser?: string;
+  departmentId?: string;
+  department?: string;
+};
+
+function activeUsers(): User[] {
+  return (getStorageData<User[]>(STORAGE_KEYS.USERS) || []).filter((user) => (
+    user.isActive && (user.employmentStatus || 'active') === 'active'
+  ));
+}
+
+function activeDepartments(): Department[] {
+  return ensureOrganizationConfigData().departments.filter((department) => department.isActive);
+}
+
+function resolveUserReference(userId?: string, userName?: string): User | undefined {
+  const users = activeUsers();
+  const id = String(userId || '').trim();
+  const name = String(userName || '').trim();
+  return users.find((user) => user.id === id) || users.find((user) => user.name === name);
+}
+
+function resolveDepartmentReference(departmentId?: string, departmentName?: string): Department | undefined {
+  const departments = activeDepartments();
+  const id = String(departmentId || '').trim();
+  const name = String(departmentName || '').trim();
+  return departments.find((department) => department.id === id) || departments.find((department) => department.name === name);
+}
+
+function resolveAssetOrgFields(input: AssetOrgInput, existing: AssetOrgInput = {}): Required<Pick<AssetOrgInput, 'owner' | 'currentUser' | 'department'>> & AssetOrgInput {
+  const owner = resolveUserReference(input.ownerId ?? existing.ownerId, input.owner ?? existing.owner);
+  const currentUser = resolveUserReference(input.currentUserId ?? existing.currentUserId, input.currentUser ?? existing.currentUser);
+  const explicitDepartment = resolveDepartmentReference(input.departmentId ?? existing.departmentId, input.department ?? existing.department);
+  const inheritedDepartment = currentUser?.departmentId
+    ? resolveDepartmentReference(currentUser.departmentId)
+    : owner?.departmentId
+      ? resolveDepartmentReference(owner.departmentId)
+      : undefined;
+  const department = explicitDepartment || inheritedDepartment;
+
+  return {
+    ownerId: owner?.id || input.ownerId || existing.ownerId || '',
+    owner: owner?.name || input.owner || existing.owner || '',
+    currentUserId: currentUser?.id || input.currentUserId || existing.currentUserId || '',
+    currentUser: currentUser?.name || input.currentUser || existing.currentUser || '',
+    departmentId: department?.id || input.departmentId || existing.departmentId || '',
+    department: department?.name || input.department || existing.department || '',
+  };
+}
+
+const PHONE_OPERATOR_PREFIXES = {
+  移动: ['134', '135', '136', '137', '138', '139', '147', '150', '151', '152', '157', '158', '159', '172', '178', '182', '183', '184', '187', '188', '195', '197', '198'],
+  联通: ['130', '131', '132', '145', '155', '156', '166', '171', '175', '176', '185', '186', '196'],
+  电信: ['133', '149', '153', '173', '177', '180', '181', '189', '190', '191', '193', '199'],
+  广电: ['192'],
+} as const;
+
+const PHONE_LOCATION_PREFIXES: Record<string, string> = {
+  '1389056': '重庆',
+  '1862301': '重庆',
+  '1896020': '福建厦门',
+  '1575900': '福建福州',
+};
+
+function normalizePhoneNumber(value: unknown): string {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function inferPhoneOperator(phoneNumber: unknown): AssetPhoneNumber['operator'] {
+  const normalized = normalizePhoneNumber(phoneNumber);
+  const prefix = normalized.slice(0, 3);
+  const matched = Object.entries(PHONE_OPERATOR_PREFIXES).find(([, prefixes]) => prefixes.includes(prefix as never));
+  return (matched?.[0] as AssetPhoneNumber['operator'] | undefined) || '未知';
+}
+
+function inferPhoneAttributionLocation(phoneNumber: unknown): string {
+  const normalized = normalizePhoneNumber(phoneNumber);
+  return PHONE_LOCATION_PREFIXES[normalized.slice(0, 7)] || '';
+}
+
 const ASSET_IMPORT_LABELS: Record<AssetImportType, string> = {
   devices: '设备资产',
   phones: '手机号资产',
@@ -315,9 +409,9 @@ const ASSET_IMPORT_LABELS: Record<AssetImportType, string> = {
 };
 
 export const ASSET_IMPORT_TEMPLATES: Record<AssetImportType, string[]> = {
-  devices: ['设备名称*', '品牌型号*', 'IMEI*', 'SIM类型', '所属主体', '所属部门', '负责人', '当前使用人', '状态', '风险等级', '月费用', '备注'],
-  phones: ['手机号*', '运营商', '所属设备编号*', 'SIM卡槽', '套餐', '月费用', '负责人', '状态'],
-  accounts: ['平台*', '账号名称*', '登录账号*', '绑定手机号', '绑定邮箱', '所属主体', '所属部门', '负责人', '当前使用人', '权限状态', '账号状态', '风险等级', '服务商', '月费用', '到期时间', '用途'],
+  devices: ['设备名称*', '品牌型号*', 'IMEI*', 'SIM类型', '所属主体', '所属部门', '负责人', '当前使用人', '状态', '月费用', '备注'],
+  phones: ['手机号*', '实名信息', '运营商', '归属地', '所属设备编号*', 'SIM卡槽', '套餐', '月费用', '所属部门', '负责人', '当前使用人', '状态'],
+  accounts: ['平台*', '账号名称*', '登录账号*', '实名信息', '绑定手机号', '绑定邮箱', '所属主体', '所属部门', '负责人', '当前使用人', '权限状态', '账号状态', '用途'],
 };
 
 const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> = {
@@ -331,24 +425,28 @@ const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> 
     负责人: '张三',
     当前使用人: '李四',
     状态: '使用中',
-    风险等级: '低',
     月费用: '0',
     备注: '示例行，导入前可删除',
   },
   phones: {
     '手机号*': '13900001111',
-    运营商: '移动',
+    实名信息: '张三',
+    运营商: '',
+    归属地: '',
     '所属设备编号*': 'DEV-0001',
     SIM卡槽: '卡槽1',
     套餐: '商务套餐',
     月费用: '59',
+    所属部门: '运营管理部',
     负责人: '张三',
+    当前使用人: '李四',
     状态: '使用中',
   },
   accounts: {
     '平台*': '抖音企业号',
     '账号名称*': '极享本地生活',
     '登录账号*': 'jx_import_demo',
+    实名信息: '张三',
     绑定手机号: '13900001111',
     绑定邮箱: 'ops@example.com',
     所属主体: '公司',
@@ -357,10 +455,6 @@ const ASSET_IMPORT_SAMPLE_ROWS: Record<AssetImportType, Record<string, string>> 
     当前使用人: '李四',
     权限状态: '正常',
     账号状态: '正常',
-    风险等级: '低',
-    服务商: '自营',
-    月费用: '0',
-    到期时间: '',
     用途: '示例行，导入前可删除',
   },
 };
@@ -492,7 +586,6 @@ function deviceInputFromCsv(raw: Record<string, string>): Partial<AssetDeviceInp
     owner: csvCell(raw, '负责人'),
     currentUser: csvCell(raw, '当前使用人'),
     status: (csvCell(raw, '状态') || '正常') as AssetDeviceInput['status'],
-    riskLevel: (csvCell(raw, '风险等级') || '低') as AssetDeviceInput['riskLevel'],
     monthlyCost: importNumber(csvCell(raw, '月费用')),
     remark: csvCell(raw, '备注'),
   };
@@ -501,14 +594,19 @@ function deviceInputFromCsv(raw: Record<string, string>): Partial<AssetDeviceInp
 function phoneInputFromCsv(raw: Record<string, string>): Partial<AssetPhoneNumberInput> {
   const deviceCode = csvCell(raw, '所属设备编号*', '所属设备编号');
   const device = devices().find((item) => item.deviceCode === deviceCode || item.id === deviceCode);
+  const phoneNumber = csvCell(raw, '手机号*', '手机号');
   return {
-    phoneNumber: csvCell(raw, '手机号*', '手机号'),
-    operator: (csvCell(raw, '运营商') || '移动') as AssetPhoneNumberInput['operator'],
+    phoneNumber,
+    realName: csvCell(raw, '实名信息'),
+    operator: (csvCell(raw, '运营商') || inferPhoneOperator(phoneNumber)) as AssetPhoneNumberInput['operator'],
+    attributionLocation: csvCell(raw, '归属地') || inferPhoneAttributionLocation(phoneNumber),
     deviceId: device?.id || deviceCode,
     slotType: (csvCell(raw, 'SIM卡槽') || '卡槽1') as AssetPhoneNumberInput['slotType'],
     packageName: csvCell(raw, '套餐'),
     monthlyFee: importNumber(csvCell(raw, '月费用')),
+    department: csvCell(raw, '所属部门'),
     owner: csvCell(raw, '负责人'),
+    currentUser: csvCell(raw, '当前使用人'),
     status: (csvCell(raw, '状态') || '使用中') as AssetPhoneNumberInput['status'],
   };
 }
@@ -521,6 +619,7 @@ function accountInputFromCsv(raw: Record<string, string>): Partial<AssetInternet
     platform: csvCell(raw, '平台*', '平台'),
     accountName: csvCell(raw, '账号名称*', '账号名称'),
     loginAccount: csvCell(raw, '登录账号*', '登录账号'),
+    realName: csvCell(raw, '实名信息'),
     phoneId: phone?.id,
     boundEmail: csvCell(raw, '绑定邮箱'),
     ownerSubject: (csvCell(raw, '所属主体') || '公司') as AssetInternetAccountInput['ownerSubject'],
@@ -529,7 +628,6 @@ function accountInputFromCsv(raw: Record<string, string>): Partial<AssetInternet
     currentUser: csvCell(raw, '当前使用人'),
     permissionStatus: (csvCell(raw, '权限状态') || '正常') as AssetInternetAccountInput['permissionStatus'],
     accountStatus: (csvCell(raw, '账号状态') || '正常') as AssetInternetAccountInput['accountStatus'],
-    riskLevel: (csvCell(raw, '风险等级') || '低') as AssetInternetAccountInput['riskLevel'],
     serviceProvider: csvCell(raw, '服务商'),
     monthlyFee: importNumber(csvCell(raw, '月费用')),
     expiresAt: csvCell(raw, '到期时间'),
@@ -657,7 +755,10 @@ function filterPhones(rows: AssetPhoneNumber[], filters?: AssetFilters): AssetPh
     const matchesKeyword = !keyword || [
       row.phoneNumber,
       row.phoneNumberMasked,
+      row.realName,
+      row.realNameMasked,
       row.operator,
+      row.attributionLocation,
       row.packageName,
       row.owner,
       row.status,
@@ -679,6 +780,8 @@ function filterAccounts(rows: AssetInternetAccount[], filters?: AssetFilters): A
       row.platform,
       row.accountName,
       row.loginAccountMasked,
+      row.realName,
+      row.realNameMasked,
       row.department,
       row.owner,
       row.currentUser,
@@ -796,7 +899,6 @@ async function fetchDashboard(): Promise<ApiResponse<AssetDashboard>> {
     monthlyCost: [
       ...deviceRows.map((item) => item.monthlyCost),
       ...phoneRows.map((item) => item.monthlyFee),
-      ...accountRows.map((item) => item.monthlyFee),
     ].reduce((sum, value) => sum + Number(value || 0), 0),
     unboundAccountCount: accountRows.filter((account) => !account.phoneId).length,
   };
@@ -815,6 +917,7 @@ async function createDevice(input: Partial<AssetDeviceInput>): Promise<ApiRespon
     const imei = requiredText(input.imei, 'IMEI不能为空');
     if (rows.some((device) => device.imei === imei)) throw new Error('IMEI已存在');
     const createdAt = now();
+    const orgFields = resolveAssetOrgFields(input);
     const device: AssetDevice = {
       id: `asset-device-${Date.now()}`,
       deviceCode: input.deviceCode || nextNumber(rows, (device) => device.deviceCode, 'DEV'),
@@ -824,9 +927,12 @@ async function createDevice(input: Partial<AssetDeviceInput>): Promise<ApiRespon
       imeiMasked: maskLongValue(imei),
       simType: input.simType || '双卡',
       ownerSubject: input.ownerSubject || '公司',
-      department: input.department || '',
-      owner: input.owner || '',
-      currentUser: input.currentUser || '',
+      departmentId: orgFields.departmentId,
+      department: orgFields.department,
+      ownerId: orgFields.ownerId,
+      owner: orgFields.owner,
+      currentUserId: orgFields.currentUserId,
+      currentUser: orgFields.currentUser,
       status: input.status || '正常',
       riskLevel: input.riskLevel || '低',
       monthlyCost: Number(input.monthlyCost || 0),
@@ -852,11 +958,18 @@ async function updateDevice(id: string, input: Partial<AssetDeviceInput>): Promi
     if (nextSimType === '单卡' && phones().some((phone) => phone.deviceId === id && phone.slotType === '卡槽2')) {
       throw new Error('单卡设备不能保留卡槽2手机号，请先解绑或迁移卡槽2手机号');
     }
+    const orgFields = resolveAssetOrgFields(input, existing);
     const updated: AssetDevice = {
       ...existing,
       ...input,
       imei,
       imeiMasked: maskLongValue(imei),
+      departmentId: orgFields.departmentId,
+      department: orgFields.department,
+      ownerId: orgFields.ownerId,
+      owner: orgFields.owner,
+      currentUserId: orgFields.currentUserId,
+      currentUser: orgFields.currentUser,
       monthlyCost: Number(input.monthlyCost ?? existing.monthlyCost),
       updatedAt: now(),
     };
@@ -930,16 +1043,25 @@ async function createPhoneNumber(input: Partial<AssetPhoneNumberInput>): Promise
     const phoneNumber = requiredText(input.phoneNumber, '手机号不能为空');
     if (rows.some((phone) => phone.phoneNumber === phoneNumber)) throw new Error('手机号已存在');
     const createdAt = now();
+    const orgFields = resolveAssetOrgFields(input);
     const phone: AssetPhoneNumber = {
       id: `asset-phone-${Date.now()}`,
       phoneNumber,
       phoneNumberMasked: maskPhone(phoneNumber),
-      operator: input.operator || '移动',
+      realName: input.realName || '',
+      realNameMasked: maskRealName(input.realName),
+      operator: input.operator || inferPhoneOperator(phoneNumber),
+      attributionLocation: input.attributionLocation || inferPhoneAttributionLocation(phoneNumber),
       deviceId: requiredText(input.deviceId, '所属设备不能为空'),
       slotType: input.slotType || '卡槽1',
       packageName: input.packageName || '',
       monthlyFee: Number(input.monthlyFee || 0),
-      owner: input.owner || '',
+      departmentId: orgFields.departmentId,
+      department: orgFields.department,
+      ownerId: orgFields.ownerId,
+      owner: orgFields.owner,
+      currentUserId: orgFields.currentUserId,
+      currentUser: orgFields.currentUser,
       status: input.status || '使用中',
       createdAt,
       updatedAt: createdAt,
@@ -959,11 +1081,21 @@ async function updatePhoneNumber(id: string, input: Partial<AssetPhoneNumberInpu
     assertPhoneBinding({ ...existing, ...input }, id);
     const phoneNumber = input.phoneNumber === undefined ? existing.phoneNumber : requiredText(input.phoneNumber, '手机号不能为空');
     if (rows.some((phone) => phone.id !== id && phone.phoneNumber === phoneNumber)) throw new Error('手机号已存在');
+    const orgFields = resolveAssetOrgFields(input, existing);
     const updated: AssetPhoneNumber = {
       ...existing,
       ...input,
       phoneNumber,
       phoneNumberMasked: maskPhone(phoneNumber),
+      realNameMasked: maskRealName(input.realName ?? existing.realName),
+      operator: input.operator || (input.phoneNumber !== undefined ? inferPhoneOperator(phoneNumber) : existing.operator),
+      attributionLocation: input.attributionLocation || (input.phoneNumber !== undefined ? inferPhoneAttributionLocation(phoneNumber) : existing.attributionLocation),
+      departmentId: orgFields.departmentId,
+      department: orgFields.department,
+      ownerId: orgFields.ownerId,
+      owner: orgFields.owner,
+      currentUserId: orgFields.currentUserId,
+      currentUser: orgFields.currentUser,
       monthlyFee: Number(input.monthlyFee ?? existing.monthlyFee),
       updatedAt: now(),
     };
@@ -1024,6 +1156,7 @@ async function createInternetAccount(input: Partial<AssetInternetAccountInput>):
     const rows = accounts();
     const loginAccount = requiredText(input.loginAccount, '登录账号不能为空');
     const createdAt = now();
+    const orgFields = resolveAssetOrgFields(input);
     const account: AssetInternetAccount = {
       id: `asset-account-${Date.now()}`,
       accountNo: input.accountNo || nextNumber(rows, (account) => account.accountNo, 'A'),
@@ -1031,13 +1164,18 @@ async function createInternetAccount(input: Partial<AssetInternetAccountInput>):
       accountName: requiredText(input.accountName, '账号名称不能为空'),
       loginAccount,
       loginAccountMasked: maskLogin(loginAccount),
+      realName: input.realName || '',
+      realNameMasked: maskRealName(input.realName),
       phoneId: normalizePhoneId(input.phoneId),
       boundEmail: input.boundEmail || '',
       boundEmailMasked: maskEmail(input.boundEmail),
       ownerSubject: input.ownerSubject || '公司',
-      department: input.department || '',
-      owner: input.owner || '',
-      currentUser: input.currentUser || '',
+      departmentId: orgFields.departmentId,
+      department: orgFields.department,
+      ownerId: orgFields.ownerId,
+      owner: orgFields.owner,
+      currentUserId: orgFields.currentUserId,
+      currentUser: orgFields.currentUser,
       permissionStatus: input.permissionStatus || '正常',
       accountStatus: input.accountStatus || '正常',
       riskLevel: input.riskLevel || '低',
@@ -1064,13 +1202,21 @@ async function updateInternetAccount(id: string, input: Partial<AssetInternetAcc
     assertAccountBinding({ ...existing, ...input }, id);
     const loginAccount = input.loginAccount === undefined ? existing.loginAccount : requiredText(input.loginAccount, '登录账号不能为空');
     const nextPhoneId = input.phoneId === undefined ? existing.phoneId : normalizePhoneId(input.phoneId);
+    const orgFields = resolveAssetOrgFields(input, existing);
     const updated: AssetInternetAccount = {
       ...existing,
       ...input,
       phoneId: nextPhoneId,
       loginAccount,
       loginAccountMasked: maskLogin(loginAccount),
+      realNameMasked: maskRealName(input.realName ?? existing.realName),
       boundEmailMasked: maskEmail(input.boundEmail ?? existing.boundEmail),
+      departmentId: orgFields.departmentId,
+      department: orgFields.department,
+      ownerId: orgFields.ownerId,
+      owner: orgFields.owner,
+      currentUserId: orgFields.currentUserId,
+      currentUser: orgFields.currentUser,
       monthlyFee: Number(input.monthlyFee ?? existing.monthlyFee),
       updatedAt: now(),
     };
@@ -1477,15 +1623,25 @@ async function revealSensitiveField(
     if (type === 'phone') {
       const phone = visiblePhones().find((item) => item.id === id);
       if (!phone) throw new Error('手机号不存在');
-      if (field !== 'phoneNumber') throw new Error('该字段不属于手机号资产');
-      logAssetOperation('查看敏感字段', '手机号资产', phone.id, phone.phoneNumberMasked, '查看敏感字段：完整手机号');
-      return { field, label: '完整手机号', value: phone.phoneNumber };
+      if (field === 'phoneNumber') {
+        logAssetOperation('查看敏感字段', '手机号资产', phone.id, phone.phoneNumberMasked, '查看敏感字段：完整手机号');
+        return { field, label: '完整手机号', value: phone.phoneNumber };
+      }
+      if (field === 'phoneRealName') {
+        logAssetOperation('查看敏感字段', '手机号资产', phone.id, phone.phoneNumberMasked, '查看敏感字段：实名信息');
+        return { field, label: '实名信息', value: phone.realName || '' };
+      }
+      throw new Error('该字段不属于手机号资产');
     }
     const account = visibleAccounts().find((item) => item.id === id);
     if (!account) throw new Error('互联网账号不存在');
     if (field === 'loginAccount') {
       logAssetOperation('查看敏感字段', '互联网账号', account.id, account.accountName, '查看敏感字段：登录账号');
       return { field, label: '登录账号', value: account.loginAccount };
+    }
+    if (field === 'accountRealName') {
+      logAssetOperation('查看敏感字段', '互联网账号', account.id, account.accountName, '查看敏感字段：实名信息');
+      return { field, label: '实名信息', value: account.realName || '' };
     }
     if (field === 'boundEmail') {
       logAssetOperation('查看敏感字段', '互联网账号', account.id, account.accountName, '查看敏感字段：绑定邮箱');
@@ -1568,4 +1724,6 @@ export const assetApi = {
   getImportTemplateCsv,
   getImportFailureCsv,
   getAccountPlatformOptions,
+  inferPhoneOperator,
+  inferPhoneAttributionLocation,
 };
