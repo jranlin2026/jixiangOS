@@ -4,7 +4,8 @@ import { failure, success } from '../api/response';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { mapPrismaUser } from '../db/prismaMappers';
 
-type StoragePrisma = Pick<PrismaClient, 'appStorage' | 'leadRecord' | 'businessRecord' | 'user'>;
+type StorageTransaction = Pick<Prisma.TransactionClient, 'appStorage' | 'leadRecord' | 'businessRecord'>;
+type StoragePrisma = StorageTransaction & Pick<PrismaClient, '$transaction' | 'user'>;
 
 const STORAGE_KEY_PATTERN = /^aaos_[a-zA-Z0-9_:-]+$/;
 const BUSINESS_RECORD_ID_MAX_LENGTH = 160;
@@ -116,7 +117,7 @@ export function createStorageService(prisma: StoragePrisma) {
     return rows.map(mapPrismaUser);
   };
 
-  const setLeads = async (value: unknown) => {
+  const setLeads = async (db: StorageTransaction, value: unknown) => {
     if (!Array.isArray(value)) return failure('aaos_leads must be an array', 400);
     const ids = value
       .map((item) => normalizeLead(item).id)
@@ -128,7 +129,7 @@ export function createStorageService(prisma: StoragePrisma) {
       if (!id) continue;
       const createdAt = parseDate(lead.createdAt);
       const updatedAt = parseDate(lead.updatedAt || lead.createdAt);
-      await prisma.leadRecord.upsert({
+      await db.leadRecord.upsert({
         where: { id },
         update: {
           name: String(lead.name || ''),
@@ -166,7 +167,7 @@ export function createStorageService(prisma: StoragePrisma) {
       });
     }
 
-    await prisma.leadRecord.deleteMany({ where: { id: { notIn: ids } } });
+    await db.leadRecord.deleteMany({ where: { id: { notIn: ids } } });
     return success(value);
   };
 
@@ -181,7 +182,7 @@ export function createStorageService(prisma: StoragePrisma) {
     return rows.map((row) => row.data);
   };
 
-  const setBusinessRecords = async (domain: string, value: unknown) => {
+  const setBusinessRecords = async (db: StorageTransaction, domain: string, value: unknown) => {
     if (!Array.isArray(value)) return failure(`${domain} must be an array`, 400);
     const recordIds: string[] = [];
 
@@ -189,7 +190,7 @@ export function createStorageService(prisma: StoragePrisma) {
       const item = normalizeLead(value[index]);
       const recordId = toRecordId(domain, item, index);
       recordIds.push(recordId);
-      await prisma.businessRecord.upsert({
+      await db.businessRecord.upsert({
         where: { domain_recordId: { domain, recordId } },
         update: {
           title: titleValue(domain, item),
@@ -217,7 +218,7 @@ export function createStorageService(prisma: StoragePrisma) {
       });
     }
 
-    await prisma.businessRecord.deleteMany({ where: { domain, recordId: { notIn: recordIds } } });
+    await db.businessRecord.deleteMany({ where: { domain, recordId: { notIn: recordIds } } });
     return success(value);
   };
 
@@ -244,8 +245,8 @@ export function createStorageService(prisma: StoragePrisma) {
 
     async set(key: string, value: unknown) {
       if (!STORAGE_KEY_PATTERN.test(key)) return failure('invalid storage key', 400);
-      if (key === STORAGE_KEYS.LEADS) return setLeads(value);
-      if (BUSINESS_RECORD_KEYS.has(key)) return setBusinessRecords(key, value);
+      if (key === STORAGE_KEYS.LEADS) return prisma.$transaction((tx) => setLeads(tx, value));
+      if (BUSINESS_RECORD_KEYS.has(key)) return prisma.$transaction((tx) => setBusinessRecords(tx, key, value));
       const row = await prisma.appStorage.upsert({
         where: { key },
         update: { value: value as Prisma.InputJsonValue },
