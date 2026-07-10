@@ -104,4 +104,39 @@ for (const code of ['P2002', 'P2034']) {
   assert.equal(await versionConflictRepository.createVersion('doc-1', versionInput), null, `${code} becomes a version conflict`);
 }
 
+const privateVersion = {
+  id: 'version-private', documentId: 'doc-private', versionNumber: 1, status: 'CURRENT',
+  sourceFileName: 'source.md', sourcePath: 'doc-private/version-private/source.md', checksum: 'private-checksum',
+  contentText: '# Inspectable source', createdAt: new Date('2026-07-10T00:00:00.000Z'),
+};
+const privateDocument = {
+  id: 'doc-private', slug: 'private-doc', title: 'Private metadata regression', category: 'test', summary: 'test',
+  ownerDepartmentId: 'dept-1', sensitivity: 'INTERNAL', currentVersionId: privateVersion.id,
+  visibilities: [{ id: 'visibility-1', subjectType: 'ALL_EMPLOYEES', subjectId: '*' }],
+  versions: [privateVersion], createdAt: new Date('2026-07-10T00:00:00.000Z'), updatedAt: new Date('2026-07-10T00:00:00.000Z'),
+};
+const privacyRepository = createPrismaKnowledgeRepository({
+  $transaction: async () => { throw new Error('not used'); },
+  knowledgeDocument: {
+    findMany: async () => [privateDocument],
+    findUnique: async () => privateDocument,
+  },
+  knowledgeVersion: {
+    findMany: async () => [{ ...privateVersion, document: privateDocument }],
+  },
+} as any);
+const publicPayloads = [
+  await privacyRepository.listVisibleCurrent(input.now),
+  await privacyRepository.findCurrentDetail(privateDocument.id, input.now),
+  await privacyRepository.listReviewQueue(),
+  await privacyRepository.listPublicationQueue(),
+];
+for (const payload of publicPayloads) {
+  const serialized = JSON.stringify(payload);
+  assert.doesNotMatch(serialized, /sourcePath|doc-private\/version-private\/source\.md/);
+  assert.match(serialized, /source\.md/);
+  assert.match(serialized, /private-checksum/);
+}
+assert.match(JSON.stringify(publicPayloads.slice(1)), /Inspectable source/);
+
 console.log('prismaKnowledgeRepository transaction tests passed');

@@ -50,7 +50,6 @@ function mapVersion(row: AnyRow): KnowledgeVersionDto {
     versionNumber: row.versionNumber,
     status: row.status,
     sourceFileName: row.sourceFileName,
-    ...(row.sourcePath ? { sourcePath: row.sourcePath } : {}),
     checksum: row.checksum,
     ...(asIso(row.effectiveAt) ? { effectiveAt: asIso(row.effectiveAt) } : {}),
     ...(asIso(row.expiresAt) ? { expiresAt: asIso(row.expiresAt) } : {}),
