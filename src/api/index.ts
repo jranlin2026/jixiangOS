@@ -25,6 +25,7 @@ export { leadFlowApi } from './leadFlowApi';
 export { leadBulkImportApi } from './leadBulkImportApi';
 export { crmMigrationApi } from './crmMigrationApi';
 export { businessRecycleBinApi } from './businessRecycleBinApi';
+export { enablementApi } from './enablementApi';
 export type { LeadBulkImportResult, LeadBulkImportRowResult } from './leadBulkImportApi';
 export { initializeMockData, resetMockData } from './mock';
 export type { ApiResponse, PaginatedResponse } from './types';

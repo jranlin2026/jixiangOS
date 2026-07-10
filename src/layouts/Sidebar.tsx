@@ -26,6 +26,7 @@ import StorefrontIcon from '@mui/icons-material/Storefront';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
+import SchoolIcon from '@mui/icons-material/School';
 import SettingsIcon from '@mui/icons-material/Settings';
 import HomeIcon from '@mui/icons-material/Home';
 import LogoutIcon from '@mui/icons-material/Logout';
@@ -160,6 +161,7 @@ const navItems: NavItem[] = [
     ],
   },
   { label: 'AI助手', icon: <SmartToyIcon />, path: ROUTES.AI_ASSISTANT, permissionKey: PERMISSION_KEYS.AI_ASSISTANT },
+  { label: '赋能中台', icon: <SchoolIcon />, path: ROUTES.ENABLEMENT, permissionKey: PERMISSION_KEYS.ENABLEMENT },
   {
     label: '系统设置',
     icon: <SettingsIcon />,
