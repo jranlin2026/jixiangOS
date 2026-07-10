@@ -6,13 +6,24 @@ import {
   removeBackendStorageValue,
   shouldUseBackendApi,
 } from '../backendClient';
+import { reportStorageSyncFailure } from '../storageSyncStatus';
+
+function reportFailedSync(key: string, operation: 'save' | 'delete' | 'clear', error: unknown): void {
+  reportStorageSyncFailure({
+    key,
+    operation,
+    message: error instanceof Error ? error.message : '数据未保存',
+  });
+}
 
 /** 初始化 localStorage，仅首次执行 */
 export function initializeStorage<T>(key: string, data: T): void {
   const existing = localStorage.getItem(key);
   if (!existing) {
     localStorage.setItem(key, JSON.stringify(data));
-    if (!shouldUseBackendApi()) persistBackendStorageValue(key, data);
+    if (!shouldUseBackendApi()) {
+      void persistBackendStorageValue(key, data).catch((error) => reportFailedSync(key, 'save', error));
+    }
   }
 }
 
@@ -30,13 +41,13 @@ export function getStorageData<T>(key: string): T | null {
 /** 更新 localStorage 数据 */
 export function setStorageData<T>(key: string, data: T): void {
   localStorage.setItem(key, JSON.stringify(data));
-  persistBackendStorageValue(key, data);
+  void persistBackendStorageValue(key, data).catch((error) => reportFailedSync(key, 'save', error));
 }
 
 /** 删除 localStorage 数据 */
 export function removeStorageData(key: string): void {
   localStorage.removeItem(key);
-  removeBackendStorageValue(key);
+  void removeBackendStorageValue(key).catch((error) => reportFailedSync(key, 'delete', error));
 }
 
 /** 清除所有 aaos_ 前缀的数据 */
@@ -49,7 +60,7 @@ export function clearAllStorageData(): void {
     }
   }
   keysToRemove.forEach((key) => localStorage.removeItem(key));
-  clearBackendStorageValues();
+  void clearBackendStorageValues().catch((error) => reportFailedSync(STORAGE_PREFIX, 'clear', error));
 }
 
 /** 检查是否已初始化 */
@@ -60,7 +71,7 @@ export function isStorageInitialized(): boolean {
 /** 标记已初始化 */
 export function markStorageInitialized(): void {
   localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
-  persistBackendStorageValue(STORAGE_KEYS.INITIALIZED, true);
+  void persistBackendStorageValue(STORAGE_KEYS.INITIALIZED, true).catch((error) => reportFailedSync(STORAGE_KEYS.INITIALIZED, 'save', error));
 }
 
 /** 重置所有数据（用于开发调试） */

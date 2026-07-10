@@ -176,6 +176,17 @@ try {
   persistBackendStorageValue('aaos_backend_auth_token', 'stale-token');
 
   assert.deepEqual(localOnlyWriteRequests, []);
+
+  globalThis.fetch = async () => ({
+    status: 403,
+    headers: new Headers({ 'content-type': 'application/json' }),
+    text: async () => JSON.stringify({ code: 403, data: null, message: 'Forbidden' }),
+  } as Response);
+
+  await assert.rejects(
+    () => persistBackendStorageValue(STORAGE_KEYS.CUSTOMERS, []),
+    /Forbidden/,
+  );
 } finally {
   clearBackendToken();
   globalThis.fetch = originalFetch;
