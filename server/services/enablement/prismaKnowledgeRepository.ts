@@ -29,6 +29,13 @@ const asIso = (value: Date | string | null | undefined): string | undefined => (
 const asDate = (value: unknown): Date | null => value ? new Date(value as string) : null;
 
 const PUBLISH_CONFLICT = '版本状态已变化，无法发布';
+const PUBLIC_SOURCE_REFERENCE_PREFIX = 'public:';
+
+function publicSourceReference(row: AnyRow): string | undefined {
+  const stored = typeof row.sourcePath === 'string' ? row.sourcePath : '';
+  if (!stored.startsWith(PUBLIC_SOURCE_REFERENCE_PREFIX)) return undefined;
+  return stored.slice(PUBLIC_SOURCE_REFERENCE_PREFIX.length) || undefined;
+}
 
 function isExpectedConcurrencyConflict(error: unknown): boolean {
   const code = (error as { code?: unknown } | null)?.code;
@@ -50,6 +57,7 @@ function mapVersion(row: AnyRow): KnowledgeVersionDto {
     versionNumber: row.versionNumber,
     status: row.status,
     sourceFileName: row.sourceFileName,
+    ...(publicSourceReference(row) ? { sourceReference: publicSourceReference(row) } : {}),
     checksum: row.checksum,
     ...(asIso(row.effectiveAt) ? { effectiveAt: asIso(row.effectiveAt) } : {}),
     ...(asIso(row.expiresAt) ? { expiresAt: asIso(row.expiresAt) } : {}),
@@ -66,6 +74,7 @@ function mapVersionRecord(row: AnyRow): KnowledgeVersionRecord {
     versionNumber: row.versionNumber,
     status: row.status,
     sourceFileName: row.sourceFileName,
+    ...(publicSourceReference(row) ? { sourceReference: publicSourceReference(row) } : {}),
     checksum: row.checksum,
     contentText: row.contentText,
     effectiveAt: row.effectiveAt || null,
@@ -118,14 +127,14 @@ function attachmentData(input: AnyRow, versionId: string) {
 }
 
 function versionData(input: AnyRow, documentId: string, versionId: string, versionNumber: number) {
-  const storageKey = (input.attachment as { storageKey?: string } | undefined)?.storageKey;
+  const sourceReference = String(input.sourceReference || '').trim();
   return {
     id: versionId,
     documentId,
     versionNumber,
     status: 'DRAFT',
     sourceFileName: input.sourceFileName,
-    sourcePath: storageKey || null,
+    sourcePath: sourceReference ? `${PUBLIC_SOURCE_REFERENCE_PREFIX}${sourceReference}` : null,
     checksum: input.checksum,
     contentText: input.markdown,
     effectiveAt: asDate(input.effectiveAt),
@@ -354,7 +363,7 @@ export function createPrismaKnowledgeRepository(prisma: PrismaKnowledgeClient): 
 
     async listPublicationQueue() {
       const versions = await prisma.knowledgeVersion.findMany({
-        where: { status: { in: ['DRAFT', 'REJECTED', 'APPROVED'] } },
+        where: { status: { in: ['DRAFT', 'REJECTED', 'APPROVED', 'CURRENT'] } },
         include: { document: { include: documentInclude } },
         orderBy: { updatedAt: 'asc' },
       });

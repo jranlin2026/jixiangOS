@@ -24,6 +24,7 @@ export interface KnowledgeVersionDto {
   versionNumber: number;
   status: KnowledgeVersionStatus;
   sourceFileName: string;
+  sourceReference?: string;
   checksum: string;
   effectiveAt?: string;
   expiresAt?: string;
@@ -80,6 +81,7 @@ export interface CreateKnowledgeDraftInput {
   sensitivity: KnowledgeSensitivity;
   visibility: Array<{ subjectType: VisibilitySubjectType; subjectId?: string }>;
   sourceFileName: string;
+  sourceReference?: string;
   markdown: string;
   effectiveAt?: string;
   expiresAt?: string;

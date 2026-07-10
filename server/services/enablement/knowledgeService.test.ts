@@ -35,6 +35,7 @@ const repository: any = {
     const version = {
       id: input.versionId, documentId: input.id, versionNumber: 1, status: KNOWLEDGE_VERSION_STATUS.DRAFT,
       sourceFileName: input.sourceFileName, checksum: input.checksum, contentText: input.markdown,
+      sourceReference: input.sourceReference,
       effectiveAt: input.effectiveAt ? new Date(input.effectiveAt) : null,
       expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
     };
@@ -46,6 +47,7 @@ const repository: any = {
     const version = {
       id: input.versionId, documentId, versionNumber: 2, status: KNOWLEDGE_VERSION_STATUS.DRAFT,
       sourceFileName: input.sourceFileName, checksum: input.checksum, contentText: input.markdown,
+      sourceReference: input.sourceReference,
       effectiveAt: input.effectiveAt ? new Date(input.effectiveAt) : null,
       expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
     };
@@ -113,7 +115,7 @@ const repository: any = {
     .filter((version) => version.status === KNOWLEDGE_VERSION_STATUS.PENDING_REVIEW)
     .map((version) => ({ document: documents.get(version.documentId), version, contentText: version.contentText })),
   listPublicationQueue: async () => [...versions.values()]
-    .filter((version) => version.status === KNOWLEDGE_VERSION_STATUS.APPROVED)
+    .filter((version) => [KNOWLEDGE_VERSION_STATUS.DRAFT, KNOWLEDGE_VERSION_STATUS.REJECTED, KNOWLEDGE_VERSION_STATUS.APPROVED, KNOWLEDGE_VERSION_STATUS.CURRENT].includes(version.status))
     .map((version) => ({ document: documents.get(version.documentId), version, contentText: version.contentText })),
   listSearchableChunks: async () => [],
 };
@@ -122,11 +124,12 @@ const service = createKnowledgeService({ repository, searchProvider: createKeywo
 
 const draft = await service.createDraft({
   slug: 'company-intro', title: '公司介绍', category: '公司认知', summary: '介绍', ownerDepartmentId: 'dept-sales',
-  sensitivity: 'INTERNAL', visibility: [{ subjectType: 'ALL_EMPLOYEES' }], sourceFileName: '公司介绍.md', markdown: '# 公司介绍\n极享科技。',
+  sensitivity: 'INTERNAL', visibility: [{ subjectType: 'ALL_EMPLOYEES' }], sourceFileName: '公司介绍.md', sourceReference: 'WPS知识库/公司介绍', markdown: '# 公司介绍\n极享科技。',
 }, creator);
 assert.equal(draft.code, 0);
 assert.equal(draft.data!.version.status, KNOWLEDGE_VERSION_STATUS.DRAFT);
 assert.match(draft.data!.version.checksum, /^[a-f0-9]{64}$/);
+assert.equal(draft.data!.version.sourceReference, 'WPS知识库/公司介绍');
 
 const versionId = draft.data!.version.id;
 const documentId = draft.data!.document.id;
@@ -135,6 +138,12 @@ assert.equal((await service.review(versionId, { decision: 'APPROVE', comment: '�
 assert.equal((await service.publish(versionId, creator)).code, 0);
 assert.deepEqual(events, ['PENDING_REVIEW', 'REVIEW:APPROVE', 'APPROVED', 'PUBLISH:1']);
 assert.notEqual((await service.publish(versionId, creator)).code, 0, 'CAS-safe publish cannot publish a current version again');
+
+const publisherReload = await service.listPublicationQueue(creator);
+assert.equal(publisherReload.code, 0);
+const reloadedCurrent = publisherReload.data!.find((item: any) => item.version.status === KNOWLEDGE_VERSION_STATUS.CURRENT);
+assert.equal(reloadedCurrent?.document.id, documentId, 'publish-only users reload current documents from their authorized queue');
+assert.equal((await service.createVersion(reloadedCurrent.document.id, { sourceFileName: '公司介绍-修订.md', sourceReference: 'WPS知识库/公司介绍修订', markdown: '# 修订' }, creator)).code, 0);
 
 const detail = await service.getCurrent(documentId, reader);
 assert.equal(detail.code, 0);

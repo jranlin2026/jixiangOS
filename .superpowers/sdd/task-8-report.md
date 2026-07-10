@@ -83,3 +83,24 @@ The first pass risked turning the lifecycle rail into a decorative progress step
 - Focused API, module, permission, Markdown validation, store concurrency, and repository queue tests: pass.
 - `pnpm test`: pass, 80 test files.
 - `pnpm build`: pass, TypeScript and Vite production build.
+
+## Final re-review pass
+
+### RED evidence
+
+- Repository queue test failed because the publish-authorized query returned DRAFT/REJECTED/APPROVED but omitted CURRENT.
+- UI regression failed because neither the detail view nor publishing workflow exposed a public `sourceReference`, and CURRENT maintenance still depended on the employee knowledge list.
+
+### GREEN changes
+
+- The publish-authorized queue now returns CURRENT alongside DRAFT/REJECTED/APPROVED. `PublishingCenter` derives `currentQueue` from that authoritative response and renders upload-new-version and retire actions without requiring `ENABLEMENT_KNOWLEDGE`.
+- The lifecycle test simulates a publish-only user reloading the queue, finding CURRENT, and creating an immutable next version through the queued document identifier. Existing publish authorization continues to govern create-version and retire operations; employee read policy is unchanged.
+- Added optional `sourceReference` to draft/version inputs and public version DTOs. Draft and new-version forms label it “来源说明 / WPS知识路径（可选）”, and detail/workflow views show it when present.
+- Reused the existing nullable provenance column with an explicit `public:` marker. Only marked values map to `sourceReference`; legacy private paths are omitted. Attachment keys remain solely in `KnowledgeAttachment.storageKey` and are never copied into provenance.
+- HTTP serialization still removes `sourcePath` and `storageKey`, and now also suppresses a `sourceReference` value if it matches any private path/key found in the response graph. Regression coverage proves safe WPS provenance survives while private keys and legacy paths do not.
+
+### Final verification
+
+- Focused permission/API/UI/repository/lifecycle/route privacy tests: pass.
+- `pnpm test`: pass, 80 test files.
+- `pnpm build`: pass, TypeScript and Vite production build.

@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import AddIcon from '@mui/icons-material/Add';
 import CloudUploadOutlinedIcon from '@mui/icons-material/CloudUploadOutlined';
-import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import {
   Alert,
   Box,
@@ -99,6 +98,7 @@ type DraftForm = {
   sensitivity: KnowledgeSensitivity;
   visibilityType: VisibilitySubjectType;
   effectiveAt: string;
+  sourceReference: string;
 };
 
 const emptyDraft = (departmentId = ''): DraftForm => ({
@@ -110,6 +110,7 @@ const emptyDraft = (departmentId = ''): DraftForm => ({
   sensitivity: 'INTERNAL',
   visibilityType: 'ALL_EMPLOYEES',
   effectiveAt: '',
+  sourceReference: '',
 });
 
 type WorkflowCardProps = {
@@ -123,7 +124,10 @@ type WorkflowCardProps = {
   onReview: (item: KnowledgeWorkflowItemDto, decision: 'APPROVE' | 'REJECT', comment: string) => void;
   onPublish: (item: KnowledgeWorkflowItemDto) => void;
   onSubmit: (item: KnowledgeWorkflowItemDto) => void;
-  onUploadVersion: (documentId: string, file: File) => void;
+  sourceReferenceInput: string;
+  onSourceReferenceChange: (documentId: string, value: string) => void;
+  onUploadVersion: (documentId: string, file: File, sourceReference?: string) => void;
+  onRetire: (item: KnowledgeWorkflowItemDto) => void;
   onInvalidFile: () => void;
 };
 
@@ -138,19 +142,25 @@ const WorkflowCard: React.FC<WorkflowCardProps> = ({
   onReview,
   onPublish,
   onSubmit,
+  sourceReferenceInput,
+  onSourceReferenceChange,
   onUploadVersion,
+  onRetire,
   onInvalidFile,
 }) => {
   const { document, version } = item;
   const canSubmit = ['DRAFT', 'REJECTED'].includes(version.status) && canPublishPermission;
   const canReview = version.status === 'PENDING_REVIEW' && canReviewPermission;
   const canPublish = version.status === 'APPROVED' && canPublishPermission;
+  const canMaintainCurrent = version.status === 'CURRENT' && canPublishPermission;
+  const canUploadVersion = (version.status === 'REJECTED' || version.status === 'CURRENT') && canPublishPermission;
   return (
     <Paper sx={{ p: 2, contentVisibility: 'auto', containIntrinsicSize: '0 320px' }}>
       <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="flex-start">
         <Box sx={{ minWidth: 0 }}>
           <Typography variant="subtitle1">{document.title}</Typography>
           <Typography variant="caption" color="text.secondary">{document.category} · v{version.versionNumber} · {version.sourceFileName}</Typography>
+          {version.sourceReference ? <Typography variant="caption" sx={{ display: 'block', color: moduleTokens.blue }}>来源：{version.sourceReference}</Typography> : null}
         </Box>
         <Chip size="small" label={statusMeta[version.status].label} sx={{ color: statusMeta[version.status].color, bgcolor: statusMeta[version.status].bg }} />
       </Stack>
@@ -184,30 +194,41 @@ const WorkflowCard: React.FC<WorkflowCardProps> = ({
           </Stack>
         </Stack>
       ) : null}
-      {kind === 'manage' && (canSubmit || canPublish) ? (
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1.5 }}>
-          {canSubmit ? (
-            <Button variant="contained" onClick={() => onSubmit(item)} disabled={actionPending}>
-              {version.status === 'REJECTED' ? '重新提交审核' : '提交审核'}
-            </Button>
+      {kind === 'manage' && (canSubmit || canPublish || canMaintainCurrent) ? (
+        <Stack spacing={1} sx={{ mt: 1.5 }}>
+          {canUploadVersion ? (
+            <TextField
+              label="新版本来源说明 / WPS知识路径（可选）"
+              value={sourceReferenceInput}
+              onChange={(event) => onSourceReferenceChange(document.id, event.target.value)}
+              inputProps={{ maxLength: 900 }}
+            />
           ) : null}
-          {canPublish ? <Button variant="contained" onClick={() => onPublish(item)} disabled={actionPending}>正式发布</Button> : null}
-          {version.status === 'REJECTED' ? (
-            <Button component="label" variant="outlined" disabled={actionPending}>
-              上传修订版本
-              <input
-                hidden
-                type="file"
-                accept=".md,text/markdown"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file && isMarkdownFile(file)) onUploadVersion(document.id, file);
-                  else if (file) onInvalidFile();
-                  event.target.value = '';
-                }}
-              />
-            </Button>
-          ) : null}
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+            {canSubmit ? (
+              <Button variant="contained" onClick={() => onSubmit(item)} disabled={actionPending}>
+                {version.status === 'REJECTED' ? '重新提交审核' : '提交审核'}
+              </Button>
+            ) : null}
+            {canPublish ? <Button variant="contained" onClick={() => onPublish(item)} disabled={actionPending}>正式发布</Button> : null}
+            {canUploadVersion ? (
+              <Button component="label" variant="outlined" disabled={actionPending}>
+                {version.status === 'CURRENT' ? '上传新版本' : '上传修订版本'}
+                <input
+                  hidden
+                  type="file"
+                  accept=".md,text/markdown"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file && isMarkdownFile(file)) onUploadVersion(document.id, file, sourceReferenceInput.trim() || undefined);
+                    else if (file) onInvalidFile();
+                    event.target.value = '';
+                  }}
+                />
+              </Button>
+            ) : null}
+            {canMaintainCurrent ? <Button color="error" variant="outlined" onClick={() => onRetire(item)} disabled={actionPending}>下线知识</Button> : null}
+          </Stack>
         </Stack>
       ) : null}
     </Paper>
@@ -217,7 +238,6 @@ const WorkflowCard: React.FC<WorkflowCardProps> = ({
 const PublishingCenter: React.FC = () => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const {
-    knowledge,
     reviewQueue,
     publicationQueue,
     loading,
@@ -232,6 +252,7 @@ const PublishingCenter: React.FC = () => {
   const [form, setForm] = useState<DraftForm>(() => emptyDraft(currentUser?.departmentId));
   const [draftFile, setDraftFile] = useState<File | null>(null);
   const [reviewComments, setReviewComments] = useState<Record<string, string>>({});
+  const [versionSourceReferences, setVersionSourceReferences] = useState<Record<string, string>>({});
   const [actionPending, setActionPending] = useState('');
   const [notice, setNotice] = useState<{ severity: 'success' | 'error'; message: string } | null>(null);
 
@@ -256,9 +277,9 @@ const PublishingCenter: React.FC = () => {
   }, [currentUser?.departmentId, form.ownerDepartmentId]);
 
   const queueCount = reviewQueue.length + publicationQueue.length;
-  const currentItems = useMemo(() => knowledge.filter((item) => Boolean(item.currentVersion)), [knowledge]);
   const draftQueue = useMemo(() => publicationQueue.filter((item) => ['DRAFT', 'REJECTED'].includes(item.version.status)), [publicationQueue]);
   const approvedQueue = useMemo(() => publicationQueue.filter((item) => item.version.status === 'APPROVED'), [publicationQueue]);
+  const currentQueue = useMemo(() => publicationQueue.filter((item) => item.version.status === 'CURRENT'), [publicationQueue]);
 
   const runAction = async (key: string, action: () => Promise<{ code: number; message: string }>, successMessage: string) => {
     setActionPending(key);
@@ -306,6 +327,7 @@ const PublishingCenter: React.FC = () => {
           ...(form.visibilityType === 'DEPARTMENT' ? { subjectId: form.ownerDepartmentId.trim() } : {}),
         }],
         sourceFileName: draftFile.name,
+        ...(form.sourceReference.trim() ? { sourceReference: form.sourceReference.trim() } : {}),
         markdown: await draftFile.text(),
         ...(form.effectiveAt ? { effectiveAt: new Date(form.effectiveAt).toISOString() } : {}),
       });
@@ -324,7 +346,7 @@ const PublishingCenter: React.FC = () => {
     }
   };
 
-  const uploadVersion = async (documentId: string, file: File) => {
+  const uploadVersion = async (documentId: string, file: File, sourceReference?: string) => {
     if (!isMarkdownFile(file)) {
       setNotice({ severity: 'error', message: '所选文件不是有效的 Markdown 文件，请上传 .md 文件' });
       return;
@@ -334,6 +356,7 @@ const PublishingCenter: React.FC = () => {
     try {
       const result = await enablementApi.createVersion(documentId, {
         sourceFileName: file.name,
+        ...(sourceReference?.trim() ? { sourceReference: sourceReference.trim() } : {}),
         markdown: await file.text(),
       });
       if (result.code === 0) {
@@ -364,7 +387,10 @@ const PublishingCenter: React.FC = () => {
     ),
     onPublish: (workflowItem: KnowledgeWorkflowItemDto) => void runAction(`publish-${workflowItem.version.id}`, () => enablementApi.publishVersion(workflowItem.version.id), '版本已正式发布'),
     onSubmit: (workflowItem: KnowledgeWorkflowItemDto) => void runAction(`submit-${workflowItem.version.id}`, () => enablementApi.submitForReview(workflowItem.version.id), '版本已提交审核'),
-    onUploadVersion: (documentId: string, file: File) => void uploadVersion(documentId, file),
+    sourceReferenceInput: versionSourceReferences[item.document.id] || '',
+    onSourceReferenceChange: (documentId: string, value: string) => setVersionSourceReferences((current) => ({ ...current, [documentId]: value })),
+    onUploadVersion: (documentId: string, file: File, sourceReference?: string) => void uploadVersion(documentId, file, sourceReference),
+    onRetire: (workflowItem: KnowledgeWorkflowItemDto) => void runAction(`retire-${workflowItem.document.id}`, () => enablementApi.retireDocument(workflowItem.document.id), '知识已下线'),
     onInvalidFile: invalidMarkdown,
   });
 
@@ -406,6 +432,13 @@ const PublishingCenter: React.FC = () => {
               <TextField label="知识标识（可选）" value={form.slug} onChange={(event) => setForm((current) => ({ ...current, slug: event.target.value }))} helperText="留空时按标题自动生成" />
               <TextField label="分类" required value={form.category} onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))} placeholder="例如：销售制度 / 交付规范" />
               <TextField label="摘要" required multiline minRows={2} value={form.summary} onChange={(event) => setForm((current) => ({ ...current, summary: event.target.value }))} />
+              <TextField
+                label="来源说明 / WPS知识路径（可选）"
+                value={form.sourceReference}
+                onChange={(event) => setForm((current) => ({ ...current, sourceReference: event.target.value }))}
+                inputProps={{ maxLength: 900 }}
+                helperText="仅填写员工可识别的公开来源，不填写服务器存储位置"
+              />
               <TextField label="归属部门" required value={form.ownerDepartmentId} onChange={(event) => setForm((current) => ({ ...current, ownerDepartmentId: event.target.value }))} />
               <FormControl size="small">
                 <InputLabel id="knowledge-sensitivity-label">敏感级别</InputLabel>
@@ -496,54 +529,23 @@ const PublishingCenter: React.FC = () => {
               </Stack>
             </Box>
           ) : null}
+
+          {canPublishPermission ? (
+            <Box>
+              <Typography variant="subtitle1">当前知识维护</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>当前版本来自发布权限队列，无需额外企业知识读取权限即可上传新版本或下线。</Typography>
+              <Stack spacing={1.25}>
+                {currentQueue.map((item) => <WorkflowCard key={item.version.id} kind="manage" {...workflowCardProps(item)} />)}
+                {!loading && currentQueue.length === 0 ? (
+                  <Paper sx={{ py: 3, px: 2, textAlign: 'center', color: moduleTokens.muted }}>
+                    <Typography variant="body2">暂无当前生效知识。</Typography>
+                  </Paper>
+                ) : null}
+              </Stack>
+            </Box>
+          ) : null}
         </Stack>
       </Box>
-
-      {canPublishPermission && canRead ? (
-        <Box>
-          <Typography variant="subtitle1">当前知识版本</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            上传新版本会创建独立草稿；下线后员工将无法继续检索该知识。
-          </Typography>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
-            {currentItems.map((document) => (
-              <Paper key={document.id} sx={{ p: 2 }}>
-                <Stack direction="row" justifyContent="space-between" spacing={1}>
-                  <Box sx={{ minWidth: 0 }}>
-                    <Typography variant="subtitle1">{document.title}</Typography>
-                    <Typography variant="caption" color="text.secondary">{document.category} · 当前 v{document.currentVersion?.versionNumber}</Typography>
-                  </Box>
-                  <DescriptionOutlinedIcon sx={{ color: '#98A2B3' }} />
-                </Stack>
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1.5 }}>
-                  <Button component="label" variant="outlined" disabled={Boolean(actionPending)}>
-                    上传新版本
-                    <input
-                      hidden
-                      type="file"
-                      accept=".md,text/markdown"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        if (file && isMarkdownFile(file)) void uploadVersion(document.id, file);
-                        else if (file) invalidMarkdown();
-                        event.target.value = '';
-                      }}
-                    />
-                  </Button>
-                  <Button color="error" variant="outlined" disabled={Boolean(actionPending)} onClick={() => void runAction(`retire-${document.id}`, () => enablementApi.retireDocument(document.id), '知识已下线')}>
-                    下线知识
-                  </Button>
-                </Stack>
-              </Paper>
-            ))}
-            {!loading && currentItems.length === 0 ? (
-              <Paper sx={{ py: 3, px: 2, textAlign: 'center', color: moduleTokens.muted }}>
-                <Typography variant="body2">暂无可维护的当前知识。</Typography>
-              </Paper>
-            ) : null}
-          </Box>
-        </Box>
-      ) : null}
     </Stack>
   );
 };

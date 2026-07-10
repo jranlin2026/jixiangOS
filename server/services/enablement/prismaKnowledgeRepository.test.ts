@@ -90,7 +90,7 @@ const queueRepository = createPrismaKnowledgeRepository({
   },
 } as any);
 await queueRepository.listPublicationQueue();
-assert.deepEqual(publicationQueueWhere, { status: { in: ['DRAFT', 'REJECTED', 'APPROVED'] } });
+assert.deepEqual(publicationQueueWhere, { status: { in: ['DRAFT', 'REJECTED', 'APPROVED', 'CURRENT'] } });
 
 const transactionConflict = Object.assign(new Error('transaction retry exhausted'), { code: 'P2034' });
 const retryPublishRepository = createPrismaKnowledgeRepository({
@@ -102,6 +102,24 @@ const versionInput = {
   versionId: 'version-2', sourceFileName: 'v2.md', markdown: '# v2', checksum: 'hash', createdById: 'user-publisher',
   attachment: { storageKey: 'doc-1/version-2/v2.md', byteSize: 5 },
 };
+let provenanceVersionData: any;
+const provenanceRepository = createPrismaKnowledgeRepository({
+  $transaction: async (callback: any) => callback({
+    knowledgeDocument: { findUnique: async () => ({ id: 'doc-1', visibilities: [], versions: [] }) },
+    knowledgeVersion: {
+      findFirst: async () => ({ versionNumber: 1 }),
+      create: async ({ data }: any) => {
+        provenanceVersionData = data;
+        return { ...data, createdAt: input.now };
+      },
+    },
+    knowledgeAttachment: { create: async () => {} },
+  }),
+} as any);
+await provenanceRepository.createVersion('doc-1', { ...versionInput, sourceReference: 'WPS知识库/销售手册' });
+assert.equal(provenanceVersionData.sourcePath, 'public:WPS知识库/销售手册');
+assert.notEqual(provenanceVersionData.sourcePath, versionInput.attachment.storageKey);
+
 for (const code of ['P2002', 'P2034']) {
   const versionConflictRepository = createPrismaKnowledgeRepository({
     $transaction: async (callback: any) => callback({
@@ -121,6 +139,7 @@ const privateVersion = {
   sourceFileName: 'source.md', sourcePath: 'doc-private/version-private/source.md', checksum: 'private-checksum',
   contentText: '# Inspectable source', createdAt: new Date('2026-07-10T00:00:00.000Z'),
 };
+const safeReferenceVersion = { ...privateVersion, sourcePath: 'public:WPS知识库/销售手册' };
 const privateDocument = {
   id: 'doc-private', slug: 'private-doc', title: 'Private metadata regression', category: 'test', summary: 'test',
   ownerDepartmentId: 'dept-1', sensitivity: 'INTERNAL', currentVersionId: privateVersion.id,
@@ -135,6 +154,7 @@ const privacyRepository = createPrismaKnowledgeRepository({
   },
   knowledgeVersion: {
     findMany: async () => [{ ...privateVersion, document: privateDocument }],
+    findUnique: async () => privateVersion,
   },
 } as any);
 const publicPayloads = [
@@ -150,5 +170,12 @@ for (const payload of publicPayloads) {
   assert.match(serialized, /private-checksum/);
 }
 assert.match(JSON.stringify(publicPayloads.slice(1)), /Inspectable source/);
+
+const safeReferenceRepository = createPrismaKnowledgeRepository({
+  knowledgeVersion: { findUnique: async () => safeReferenceVersion },
+} as any);
+const mappedSafeVersion = await safeReferenceRepository.findVersion(safeReferenceVersion.id);
+assert.equal(mappedSafeVersion?.sourceReference, 'WPS知识库/销售手册');
+assert.doesNotMatch(JSON.stringify(await privacyRepository.findVersion(privateVersion.id)), /doc-private\/version-private\/source\.md/);
 
 console.log('prismaKnowledgeRepository transaction tests passed');

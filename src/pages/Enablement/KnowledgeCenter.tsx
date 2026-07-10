@@ -208,6 +208,9 @@ const KnowledgeCenter: React.FC = () => {
                 <Chip label={detail.sensitivity === 'INTERNAL' ? '公司内部' : '受限知识'} size="small" />
               </Stack>
               <Typography variant="body1" color="text.secondary">{detail.summary}</Typography>
+              {detail.currentVersion?.sourceReference ? (
+                <Alert severity="info" icon={false}>来源说明：{detail.currentVersion.sourceReference}</Alert>
+              ) : null}
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 0.25, sm: 2 }}>
                 <Typography variant="caption" color="text.secondary">生效时间 {formatTime(detail.currentVersion?.effectiveAt || detail.currentVersion?.publishedAt)}</Typography>
                 <Typography variant="caption" color="text.secondary">更新时间 {formatTime(detail.updatedAt)}</Typography>

@@ -33,6 +33,7 @@ const version = {
   checksum: 'private-checksum',
   createdAt: '2026-07-10T00:00:00.000Z',
   attachment: { storageKey: privateStorageKey, byteSize: 42 },
+  sourceReference: 'WPS知识库/销售手册',
 };
 const document = {
   id: 'doc-private',
@@ -49,13 +50,20 @@ const document = {
   createdAt: '2026-07-10T00:00:00.000Z',
   updatedAt: '2026-07-10T00:00:00.000Z',
 };
+const leakingDocument = {
+  ...document,
+  id: 'doc-legacy-private-reference',
+  currentVersion: { ...version, id: 'version-legacy-private-reference', sourceReference: privateStorageKey },
+  latestVersion: { ...version, id: 'version-legacy-private-reference', sourceReference: privateStorageKey },
+};
 const workflowItem = { document, version, contentText: '# Reviewable source' };
+const leakingWorkflowItem = { document: leakingDocument, version: leakingDocument.currentVersion, contentText: '# Legacy source' };
 const ok = (data: unknown) => ({ code: 0, data, message: 'success' });
 const knowledgeService = {
-  listCurrent: async () => ok([document]),
+  listCurrent: async () => ok([document, leakingDocument]),
   getCurrent: async () => ok({ ...document, contentText: '# Current source' }),
-  listReviewQueue: async () => ok([workflowItem]),
-  listPublicationQueue: async () => ok([workflowItem]),
+  listReviewQueue: async () => ok([workflowItem, leakingWorkflowItem]),
+  listPublicationQueue: async () => ok([workflowItem, leakingWorkflowItem]),
 } as any;
 const allow: express.RequestHandler = (_req, _res, next) => next();
 const app = express();
@@ -78,6 +86,7 @@ try {
     assert.doesNotMatch(serialized, /sourcePath|storageKey|doc-private\/version-private\/source\.md/, endpoint);
     assert.match(serialized, /source\.md/, `${endpoint} keeps the source file name`);
     assert.match(serialized, /private-checksum/, `${endpoint} keeps the source checksum`);
+    assert.match(serialized, /WPS知识库\/销售手册/, `${endpoint} keeps safe provenance`);
     if (endpoint === '/doc-private') assert.match(serialized, /# Current source/);
     if (endpoint.endsWith('-queue')) assert.match(serialized, /# Reviewable source/);
   }

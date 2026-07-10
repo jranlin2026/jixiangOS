@@ -2,14 +2,30 @@ import express from 'express';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import type { KnowledgeService } from '../services/enablement/knowledgeService';
 
-function withoutPrivateStorageMetadata<T>(value: T): T {
-  if (Array.isArray(value)) return value.map(withoutPrivateStorageMetadata) as T;
+function collectPrivateStorageValues(value: unknown, values = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) value.forEach((item) => collectPrivateStorageValues(item, values));
+  else if (value && typeof value === 'object' && !(value instanceof Date)) {
+    Object.entries(value).forEach(([key, nested]) => {
+      if ((key === 'sourcePath' || key === 'storageKey') && typeof nested === 'string') values.add(nested);
+      collectPrivateStorageValues(nested, values);
+    });
+  }
+  return values;
+}
+
+function sanitizePrivateStorageMetadata<T>(value: T, privateValues: Set<string>): T {
+  if (Array.isArray(value)) return value.map((item) => sanitizePrivateStorageMetadata(item, privateValues)) as T;
   if (!value || typeof value !== 'object' || value instanceof Date) return value;
   return Object.fromEntries(
     Object.entries(value)
       .filter(([key]) => key !== 'sourcePath' && key !== 'storageKey')
-      .map(([key, nested]) => [key, withoutPrivateStorageMetadata(nested)]),
+      .filter(([key, nested]) => !(key === 'sourceReference' && typeof nested === 'string' && privateValues.has(nested)))
+      .map(([key, nested]) => [key, sanitizePrivateStorageMetadata(nested, privateValues)]),
   ) as T;
+}
+
+function withoutPrivateStorageMetadata<T>(value: T): T {
+  return sanitizePrivateStorageMetadata(value, collectPrivateStorageValues(value));
 }
 
 export function createEnablementKnowledgeRouter(deps: {

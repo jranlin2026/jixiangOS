@@ -11,6 +11,7 @@ export type KnowledgeVersionRecord = {
   versionNumber: number;
   status: string;
   sourceFileName: string;
+  sourceReference?: string;
   checksum: string;
   contentText: string;
   effectiveAt?: Date | null;
