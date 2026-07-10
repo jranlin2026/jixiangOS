@@ -1,38 +1,41 @@
-import React, { useState } from 'react';
+import React, { useReducer } from 'react';
 import { Outlet } from 'react-router-dom';
 import MenuIcon from '@mui/icons-material/Menu';
 import { Box, IconButton, Typography, useMediaQuery, useTheme } from '@mui/material';
 import Sidebar from './Sidebar';
+import {
+  APP_SHELL_MAIN_SX,
+  APP_SHELL_VIEWPORT_SX,
+  APP_SIDEBAR_WIDTH,
+  getAppShellPresentation,
+  mobileNavigationReducer,
+} from './appShellState';
 import GlobalTableColumnResizer from '../shared/components/GlobalTableColumnResizer';
 
 const AppLayout: React.FC = () => {
-  const sidebarWidth = 240;
   const theme = useTheme();
   const isDesktop = useMediaQuery(theme.breakpoints.up('md'));
-  const [navigationOpen, setNavigationOpen] = useState(false);
-  const handleCloseNavigation = () => setNavigationOpen(false);
+  const [navigationOpen, dispatchNavigation] = useReducer(mobileNavigationReducer, false);
+  const shellPresentation = getAppShellPresentation(isDesktop, navigationOpen);
+  const handleCloseNavigation = () => dispatchNavigation({ type: 'CLOSE' });
+  const handleNavigation = () => dispatchNavigation({ type: 'NAVIGATE' });
 
   return (
-    <Box sx={{ display: 'flex', width: '100%', maxWidth: '100vw', minHeight: '100vh', overflowX: 'hidden', bgcolor: '#F6F8FB' }}>
+    <Box sx={APP_SHELL_VIEWPORT_SX}>
       <Sidebar
-        width={sidebarWidth}
-        variant={isDesktop ? 'permanent' : 'temporary'}
-        open={isDesktop || navigationOpen}
+        width={APP_SIDEBAR_WIDTH}
+        layoutWidth={shellPresentation.sidebarLayoutWidth}
+        variant={shellPresentation.drawerVariant}
+        open={shellPresentation.drawerOpen}
         onClose={handleCloseNavigation}
-        onNavigate={handleCloseNavigation}
+        onNavigate={handleNavigation}
       />
       <GlobalTableColumnResizer />
       <Box
         component="main"
-        sx={{
-          flexGrow: 1,
-          minWidth: 0,
-          minHeight: '100vh',
-          overflow: 'auto',
-          bgcolor: '#F6F8FB',
-        }}
+        sx={APP_SHELL_MAIN_SX}
       >
-        <Box
+        {shellPresentation.showMobileHeader && <Box
           component="header"
           sx={{
             display: { xs: 'flex', md: 'none' },
@@ -50,7 +53,7 @@ const AppLayout: React.FC = () => {
           <IconButton
             aria-label="打开导航菜单"
             edge="start"
-            onClick={() => setNavigationOpen(true)}
+            onClick={() => dispatchNavigation({ type: 'OPEN' })}
             sx={{ color: '#1E6BFF' }}
           >
             <MenuIcon />
@@ -64,7 +67,7 @@ const AppLayout: React.FC = () => {
           <Typography variant="subtitle1" sx={{ color: '#101828', fontSize: '0.9375rem', fontWeight: 800 }}>
             极享OS
           </Typography>
-        </Box>
+        </Box>}
         <Outlet />
       </Box>
     </Box>

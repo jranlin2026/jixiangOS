@@ -39,6 +39,7 @@ import useAuthStore from '../store/useAuthStore';
 
 interface SidebarProps {
   width: number;
+  layoutWidth: number;
   variant: 'permanent' | 'temporary';
   open: boolean;
   onClose: () => void;
@@ -215,7 +216,7 @@ const navItems: NavItem[] = [
   },
 ];
 
-const Sidebar: React.FC<SidebarProps> = ({ width, variant, open, onClose, onNavigate }) => {
+const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, onClose, onNavigate }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentUser, logout } = useAuthStore();
@@ -253,7 +254,7 @@ const Sidebar: React.FC<SidebarProps> = ({ width, variant, open, onClose, onNavi
       onClose={onClose}
       ModalProps={{ keepMounted: true }}
       sx={{
-        width: variant === 'permanent' ? width : 0,
+        width: layoutWidth,
         flexShrink: 0,
         '& .MuiDrawer-paper': {
           width,

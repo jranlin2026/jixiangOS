@@ -1,47 +1,57 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
-const appLayout = readFileSync(join(process.cwd(), 'src/layouts/AppLayout.tsx'), 'utf8');
-const sidebar = readFileSync(join(process.cwd(), 'src/layouts/Sidebar.tsx'), 'utf8');
+type AppShellStateModule = typeof import('../layouts/appShellState');
 
-assert.match(
-  appLayout,
-  /useMediaQuery\(theme\.breakpoints\.up\('md'\)\)/,
-  'AppLayout must switch the navigation shell at the md breakpoint.',
+let shellState: AppShellStateModule;
+try {
+  shellState = await import('../layouts/appShellState');
+} catch {
+  assert.fail('The responsive shell requires executable presentation and navigation state logic.');
+}
+
+const initialMobile = shellState.getAppShellPresentation(false, false);
+assert.deepEqual(initialMobile, {
+  drawerVariant: 'temporary',
+  drawerOpen: false,
+  showMobileHeader: true,
+  sidebarLayoutWidth: 0,
+});
+
+const openedNavigation = shellState.mobileNavigationReducer(false, { type: 'OPEN' });
+assert.equal(openedNavigation, true, 'The mobile menu button must open navigation.');
+assert.equal(
+  shellState.mobileNavigationReducer(openedNavigation, { type: 'CLOSE' }),
+  false,
+  'The Drawer close callback used by backdrop and Escape must close navigation.',
 );
-assert.match(
-  appLayout,
-  /aria-label="打开导航菜单"/,
-  'The mobile shell must expose a uniquely labelled navigation menu button.',
+assert.equal(
+  shellState.mobileNavigationReducer(openedNavigation, { type: 'NAVIGATE' }),
+  false,
+  'Completing navigation must close the mobile drawer.',
 );
-assert.match(
-  appLayout,
-  /position:\s*'sticky'/,
-  'The mobile product header must remain available while the page scrolls.',
-);
-assert.match(
-  appLayout,
-  /variant=\{isDesktop\s*\?\s*'permanent'\s*:\s*'temporary'\}/,
-  'The sidebar must be permanent on desktop and temporary on mobile.',
-);
-assert.match(
-  appLayout,
-  /<Sidebar[\s\S]*onClose=\{handleCloseNavigation\}[\s\S]*onNavigate=\{handleCloseNavigation\}/,
-  'The mobile drawer must close through Drawer events and after navigation.',
-);
-assert.match(
-  appLayout,
-  /component="main"[\s\S]*minWidth:\s*0/,
-  'The main content must be allowed to shrink without overflowing the viewport.',
-);
-assert.match(
-  sidebar,
-  /ModalProps=\{\{\s*keepMounted:\s*true\s*\}\}/,
-  'The temporary drawer must stay mounted for responsive interaction and focus continuity.',
-);
-assert.match(
-  sidebar,
-  /onClick=\{\(\) => \{\s*navigate\(child\.path\);\s*onNavigate\?\.\(\);\s*\}\}/,
-  'Selecting a nested navigation item must close the temporary drawer.',
-);
+
+const desktop = shellState.getAppShellPresentation(true, false);
+assert.deepEqual(desktop, {
+  drawerVariant: 'permanent',
+  drawerOpen: true,
+  showMobileHeader: false,
+  sidebarLayoutWidth: 240,
+});
+
+assert.deepEqual(shellState.APP_SHELL_VIEWPORT_SX, {
+  display: 'flex',
+  width: '100%',
+  maxWidth: '100vw',
+  height: '100dvh',
+  overflow: 'hidden',
+  bgcolor: '#F6F8FB',
+});
+assert.deepEqual(shellState.APP_SHELL_MAIN_SX, {
+  flexGrow: 1,
+  minWidth: 0,
+  minHeight: 0,
+  height: '100%',
+  overflowX: 'hidden',
+  overflowY: 'auto',
+  bgcolor: '#F6F8FB',
+});
