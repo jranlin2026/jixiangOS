@@ -64,6 +64,8 @@ const repository: any = {
     return { ...document, ...version, contentText: version.contentText };
   },
   findDepartment: async (id: string) => id === 'dept-sales' ? { id, managerId: 'user-manager' } : null,
+  visibilitySubjectExists: async (type: string, id: string) => type === 'DEPARTMENT' && id === 'dept-sales',
+  hasActiveDepartmentManager: async (id: string) => id === 'dept-sales',
   transitionVersion: async (id: string, allowedFrom: string[], nextStatus: string) => {
     const version = versions.get(id);
     if (!version || !allowedFrom.includes(version.status)) return false;

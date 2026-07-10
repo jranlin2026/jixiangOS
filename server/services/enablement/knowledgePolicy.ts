@@ -16,10 +16,15 @@ function withoutReadOnlyAllPermission(actor: AuthenticatedUser): AuthenticatedUs
   };
 }
 
-export function canReadKnowledge(actor: AuthenticatedUser, document: Pick<KnowledgeDocumentDto, 'sensitivity' | 'visibility'>): boolean {
+export function canReadKnowledge(actor: AuthenticatedUser, document: Pick<KnowledgeDocumentDto, 'ownerDepartmentId' | 'sensitivity' | 'visibility'>): boolean {
   if (!hasPermission(actor, PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE)) return false;
-  if (document.sensitivity !== 'INTERNAL' && !hasPermission(actor, PERMISSION_KEYS.ENABLEMENT_SENSITIVE)) {
+  const sensitiveReader = hasPermission(actor, PERMISSION_KEYS.ENABLEMENT_SENSITIVE);
+  if (document.sensitivity !== 'INTERNAL' && !sensitiveReader) {
     if (document.sensitivity !== 'DEPARTMENT') return false;
+    return actor.departmentId === document.ownerDepartmentId && document.visibility.some((rule) => (
+      rule.subjectType === 'DEPARTMENT'
+      && rule.subjectId === document.ownerDepartmentId
+    ));
   }
   return document.visibility.some((rule) => (
     rule.subjectType === 'ALL_EMPLOYEES'

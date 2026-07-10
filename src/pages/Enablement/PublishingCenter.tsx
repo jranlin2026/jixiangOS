@@ -165,6 +165,24 @@ const WorkflowCard: React.FC<WorkflowCardProps> = ({
         <Chip size="small" label={statusMeta[version.status].label} sx={{ color: statusMeta[version.status].color, bgcolor: statusMeta[version.status].bg }} />
       </Stack>
       <LifecycleRail status={version.status} />
+      {kind === 'manage' && canPublish ? (
+        <Box sx={{ mt: 1.5 }}>
+          <Typography variant="caption" sx={{ color: moduleTokens.muted, fontWeight: 800 }}>待发布 Markdown 源文预览</Typography>
+          <Stack spacing={0.25} sx={{ mt: 0.75, mb: 1 }}>
+            <Typography variant="caption" color="text.secondary">版本：v{version.versionNumber} · 文件：{version.sourceFileName}</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>校验和：{version.checksum}</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>公开来源：{version.sourceReference || '未提供公开来源说明'}</Typography>
+          </Stack>
+          <Box
+            component="pre"
+            tabIndex={0}
+            aria-label={`${document.title} 待发布源文预览`}
+            sx={{ m: 0, p: 1.5, maxHeight: 240, overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', border: `1px solid ${moduleTokens.line}`, borderRadius: 1, bgcolor: '#F8FAFC', color: moduleTokens.ink, fontFamily: '"SFMono-Regular", Consolas, monospace', fontSize: 12, lineHeight: 1.7 }}
+          >
+            {item.contentText || '正文为空'}
+          </Box>
+        </Box>
+      ) : null}
       {kind === 'review' ? (
         <Box sx={{ mt: 1.5 }}>
           <Typography variant="caption" sx={{ color: moduleTokens.muted, fontWeight: 800 }}>待审核 Markdown 正文</Typography>

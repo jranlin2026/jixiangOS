@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const cleanSegment = (value: string) => path.basename(value)
@@ -30,6 +30,13 @@ export function createKnowledgeFileStore(root: string) {
     },
     async readMarkdown(storageKey: string) {
       return readFile(resolveKey(storageKey), 'utf8');
+    },
+    async discardNewWrite(storageKey: string) {
+      try {
+        await unlink(resolveKey(storageKey));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
     },
   };
 }

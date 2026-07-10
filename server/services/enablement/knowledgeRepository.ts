@@ -23,12 +23,14 @@ export type KnowledgeVersionRecord = {
  * make transition, review, and publication methods atomic compare-and-set work.
  */
 export interface KnowledgeRepository {
-  createDraft(input: Record<string, unknown>): Promise<{ document: KnowledgeDocumentDto; version: KnowledgeVersionRecord }>;
+  createDraft(input: Record<string, unknown>): Promise<{ document: KnowledgeDocumentDto; version: KnowledgeVersionRecord } | null>;
   createVersion(documentId: string, input: Record<string, unknown>): Promise<{ document: KnowledgeDocumentDto; version: KnowledgeVersionRecord } | null>;
   findVersion(id: string): Promise<KnowledgeVersionRecord | null>;
   findDocument(id: string): Promise<KnowledgeDocumentDto | null>;
   findCurrentDetail(id: string, now: Date): Promise<KnowledgeDocumentDetailDto | null>;
-  findDepartment(id: string): Promise<{ id: string; managerId?: string | null } | null>;
+  findDepartment(id: string): Promise<{ id: string; managerId?: string | null; isActive?: boolean } | null>;
+  visibilitySubjectExists(type: 'DEPARTMENT' | 'ROLE' | 'POSITION', id: string): Promise<boolean>;
+  hasActiveDepartmentManager(id: string): Promise<boolean>;
   transitionVersion(versionId: string, allowedFrom: string[], nextStatus: string): Promise<boolean>;
   reviewAtomic(input: {
     versionId: string;

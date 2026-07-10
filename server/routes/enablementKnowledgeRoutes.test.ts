@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import express from 'express';
 import { createEnablementKnowledgeRouter } from './enablementKnowledgeRoutes';
+import { failure } from '../api/response';
 
 const route = readFileSync(join(process.cwd(), 'server/routes/enablementKnowledgeRoutes.ts'), 'utf8');
 const server = readFileSync(join(process.cwd(), 'server/index.ts'), 'utf8');
@@ -64,9 +65,11 @@ const knowledgeService = {
   getCurrent: async () => ok({ ...document, contentText: '# Current source' }),
   listReviewQueue: async () => ok([workflowItem, leakingWorkflowItem]),
   listPublicationQueue: async () => ok([workflowItem, leakingWorkflowItem]),
+  createDraft: async () => failure('请求体格式错误', 400),
 } as any;
 const allow: express.RequestHandler = (_req, _res, next) => next();
 const app = express();
+app.use(express.json());
 app.use('/api/enablement/knowledge', createEnablementKnowledgeRouter({
   knowledgeService,
   requireRead: allow,
@@ -90,6 +93,11 @@ try {
     if (endpoint === '/doc-private') assert.match(serialized, /# Current source/);
     if (endpoint.endsWith('-queue')) assert.match(serialized, /# Reviewable source/);
   }
+  const malformed = await fetch(`http://127.0.0.1:${address.port}/api/enablement/knowledge/drafts`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 42 }),
+  });
+  assert.equal(malformed.status, 400);
+  assert.match(JSON.stringify(await malformed.json()), /请求体格式错误/);
 } finally {
   await new Promise<void>((resolve, reject) => listener.close((error) => error ? reject(error) : resolve()));
 }

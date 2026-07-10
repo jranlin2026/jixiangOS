@@ -20,6 +20,9 @@ type PrismaKnowledgeClient = {
   knowledgeAttachment: any;
   knowledgeChunk: any;
   department: any;
+  role: any;
+  position: any;
+  user: any;
 };
 
 const asIso = (value: Date | string | null | undefined): string | undefined => (
@@ -37,9 +40,13 @@ function publicSourceReference(row: AnyRow): string | undefined {
   return stored.slice(PUBLIC_SOURCE_REFERENCE_PREFIX.length) || undefined;
 }
 
-function isExpectedConcurrencyConflict(error: unknown): boolean {
+type PrismaConflict = 'DUPLICATE' | 'CONCURRENT';
+
+function classifyPrismaConflict(error: unknown): PrismaConflict | null {
   const code = (error as { code?: unknown } | null)?.code;
-  return code === 'P2002' || code === 'P2034';
+  if (code === 'P2002') return 'DUPLICATE';
+  if (code === 'P2034') return 'CONCURRENT';
+  return null;
 }
 
 const currentWindow = (now: Date) => ({
@@ -127,7 +134,7 @@ function attachmentData(input: AnyRow, versionId: string) {
 }
 
 function versionData(input: AnyRow, documentId: string, versionId: string, versionNumber: number) {
-  const sourceReference = String(input.sourceReference || '').trim();
+  const sourceReference = typeof input.sourceReference === 'string' ? input.sourceReference.trim() : '';
   return {
     id: versionId,
     documentId,
@@ -150,35 +157,40 @@ export function createPrismaKnowledgeRepository(prisma: PrismaKnowledgeClient): 
   return {
     async createDraft(rawInput) {
       const input = rawInput as AnyRow;
-      return prisma.$transaction(async (tx) => {
-        const attachment = attachmentData(input, input.versionId);
-        await tx.knowledgeDocument.create({
-          data: {
-            id: input.id,
-            slug: input.slug,
-            title: input.title,
-            category: input.category,
-            summary: input.summary,
-            ownerDepartmentId: input.ownerDepartmentId || null,
-            ownerUserId: input.ownerUserId || null,
-            sensitivity: input.sensitivity,
-            createdById: input.createdById,
-          },
-        });
-        const version = await tx.knowledgeVersion.create({ data: versionData(input, input.id, input.versionId, 1) });
-        await tx.knowledgeVisibility.createMany({
-          data: (input.visibility || []).map((visibility: AnyRow) => ({
-            id: `kv-${randomUUID()}`,
-            documentId: input.id,
-            subjectType: visibility.subjectType,
-            subjectId: visibility.subjectId || '*',
-          })),
-        });
-        await tx.knowledgeAttachment.create({ data: attachment });
-        const document = await tx.knowledgeDocument.findUnique({ where: { id: input.id }, include: documentInclude });
-        if (!document) throw new Error('知识文档不存在');
-        return { document: mapDocument(document), version: mapVersionRecord(version) };
-      }, { isolationLevel: 'Serializable' });
+      try {
+        return await prisma.$transaction(async (tx) => {
+          const attachment = attachmentData(input, input.versionId);
+          await tx.knowledgeDocument.create({
+            data: {
+              id: input.id,
+              slug: input.slug,
+              title: input.title,
+              category: input.category,
+              summary: input.summary,
+              ownerDepartmentId: input.ownerDepartmentId || null,
+              ownerUserId: input.ownerUserId || null,
+              sensitivity: input.sensitivity,
+              createdById: input.createdById,
+            },
+          });
+          const version = await tx.knowledgeVersion.create({ data: versionData(input, input.id, input.versionId, 1) });
+          await tx.knowledgeVisibility.createMany({
+            data: (input.visibility || []).map((visibility: AnyRow) => ({
+              id: `kv-${randomUUID()}`,
+              documentId: input.id,
+              subjectType: visibility.subjectType,
+              subjectId: visibility.subjectId || '*',
+            })),
+          });
+          await tx.knowledgeAttachment.create({ data: attachment });
+          const document = await tx.knowledgeDocument.findUnique({ where: { id: input.id }, include: documentInclude });
+          if (!document) throw new Error('知识文档不存在');
+          return { document: mapDocument(document), version: mapVersionRecord(version) };
+        }, { isolationLevel: 'Serializable' });
+      } catch (error) {
+        if (classifyPrismaConflict(error)) return null;
+        throw error;
+      }
     },
 
     async createVersion(documentId, rawInput) {
@@ -200,7 +212,7 @@ export function createPrismaKnowledgeRepository(prisma: PrismaKnowledgeClient): 
           return { document: mapDocument(document), version: mapVersionRecord(version) };
         }, { isolationLevel: 'Serializable' });
       } catch (error) {
-        if (isExpectedConcurrencyConflict(error)) return null;
+        if (classifyPrismaConflict(error)) return null;
         throw error;
       }
     },
@@ -226,7 +238,21 @@ export function createPrismaKnowledgeRepository(prisma: PrismaKnowledgeClient): 
     },
 
     async findDepartment(id) {
-      return prisma.department.findUnique({ where: { id }, select: { id: true, managerId: true } });
+      return prisma.department.findUnique({ where: { id }, select: { id: true, managerId: true, isActive: true } });
+    },
+
+    async visibilitySubjectExists(type, id) {
+      const delegates = { DEPARTMENT: prisma.department, ROLE: prisma.role, POSITION: prisma.position };
+      return Boolean(await delegates[type].findUnique({ where: { id }, select: { id: true } }));
+    },
+
+    async hasActiveDepartmentManager(id) {
+      const department = await prisma.department.findUnique({ where: { id }, select: { managerId: true, isActive: true } });
+      if (!department?.isActive || !department.managerId) return false;
+      return Boolean(await prisma.user.findFirst({
+        where: { id: department.managerId, isActive: true, employmentStatus: 'active' },
+        select: { id: true },
+      }));
     },
 
     async transitionVersion(versionId, allowedFrom, nextStatus) {
@@ -257,7 +283,7 @@ export function createPrismaKnowledgeRepository(prisma: PrismaKnowledgeClient): 
         }, { isolationLevel: 'Serializable' });
         return true;
       } catch (error) {
-        if (error instanceof Error && error.message === '版本状态已变化，请刷新后重试') return false;
+        if ((error instanceof Error && error.message === '版本状态已变化，请刷新后重试') || classifyPrismaConflict(error) === 'CONCURRENT') return false;
         throw error;
       }
     },
@@ -311,7 +337,7 @@ export function createPrismaKnowledgeRepository(prisma: PrismaKnowledgeClient): 
         }, { isolationLevel: 'Serializable' });
         return published;
       } catch (error) {
-        if ((error instanceof Error && error.message === PUBLISH_CONFLICT) || isExpectedConcurrencyConflict(error)) return null;
+        if ((error instanceof Error && error.message === PUBLISH_CONFLICT) || classifyPrismaConflict(error)) return null;
         throw error;
       }
     },
@@ -330,7 +356,7 @@ export function createPrismaKnowledgeRepository(prisma: PrismaKnowledgeClient): 
         }, { isolationLevel: 'Serializable' });
         return true;
       } catch (error) {
-        if (error instanceof Error && error.message === '当前版本已变化') return false;
+        if ((error instanceof Error && error.message === '当前版本已变化') || classifyPrismaConflict(error) === 'CONCURRENT') return false;
         throw error;
       }
     },

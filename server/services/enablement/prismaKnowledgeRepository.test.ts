@@ -139,6 +139,15 @@ const retryPublishRepository = createPrismaKnowledgeRepository({
 } as any);
 assert.equal(await retryPublishRepository.publishAtomic(input), null, 'serializable retry exhaustion becomes a conflict');
 
+const reviewConflictRepository = createPrismaKnowledgeRepository({
+  $transaction: async () => { throw transactionConflict; },
+} as any);
+assert.equal(await reviewConflictRepository.reviewAtomic({
+  versionId: 'version-review', expectedStatus: 'PENDING_REVIEW', reviewerUserId: 'manager-1',
+  decision: 'APPROVE', nextStatus: 'APPROVED',
+}), false, 'review P2034 becomes a conflict');
+assert.equal(await reviewConflictRepository.retireAtomic('doc-1', input.publisherUserId, input.now), false, 'retire P2034 becomes a conflict');
+
 const versionInput = {
   versionId: 'version-2', sourceFileName: 'v2.md', markdown: '# v2', checksum: 'hash', createdById: 'user-publisher',
   attachment: { storageKey: 'doc-1/version-2/v2.md', byteSize: 5 },
@@ -174,6 +183,32 @@ for (const code of ['P2002', 'P2034']) {
   } as any);
   assert.equal(await versionConflictRepository.createVersion('doc-1', versionInput), null, `${code} becomes a version conflict`);
 }
+
+for (const code of ['P2002', 'P2034']) {
+  const draftConflictRepository = createPrismaKnowledgeRepository({
+    $transaction: async () => { throw Object.assign(new Error('draft conflict'), { code }); },
+  } as any);
+  assert.equal(await draftConflictRepository.createDraft({
+    id: 'doc-new', versionId: 'version-new', slug: 'duplicate-slug', title: 'title', category: 'category', summary: 'summary',
+    ownerDepartmentId: 'dept-sales', sensitivity: 'INTERNAL', visibility: [{ subjectType: 'ALL_EMPLOYEES' }],
+    sourceFileName: 'source.md', markdown: '# source', checksum: 'hash', createdById: 'user-publisher',
+    attachment: { storageKey: 'doc-new/version-new/source.md', byteSize: 8 },
+  }), null, `draft ${code} becomes a conflict`);
+}
+
+const referenceRepository = createPrismaKnowledgeRepository({
+  department: {
+    findUnique: async ({ where }: any) => where.id === 'dept-sales' ? { id: where.id, managerId: 'manager-active', isActive: true } : null,
+  },
+  role: { findUnique: async ({ where }: any) => where.id === 'role-sales' ? { id: where.id } : null },
+  position: { findUnique: async ({ where }: any) => where.id === 'position-sales' ? { id: where.id } : null },
+  user: { findFirst: async ({ where }: any) => where.id === 'manager-active' && where.isActive ? { id: where.id } : null },
+} as any);
+assert.equal(await referenceRepository.visibilitySubjectExists('DEPARTMENT', 'dept-sales'), true);
+assert.equal(await referenceRepository.visibilitySubjectExists('ROLE', 'role-sales'), true);
+assert.equal(await referenceRepository.visibilitySubjectExists('POSITION', 'position-sales'), true);
+assert.equal(await referenceRepository.visibilitySubjectExists('ROLE', 'missing-role'), false);
+assert.equal(await referenceRepository.hasActiveDepartmentManager('dept-sales'), true);
 
 const privateVersion = {
   id: 'version-private', documentId: 'doc-private', versionNumber: 1, status: 'CURRENT',

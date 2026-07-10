@@ -33,8 +33,20 @@ const readOnlyAllPermissions = {
 } as any;
 
 assert.equal(canReadKnowledge(employee, { sensitivity: 'INTERNAL', visibility: [{ id: 'v1', subjectType: 'ALL_EMPLOYEES' }] } as any), true);
-assert.equal(canReadKnowledge(employee, { sensitivity: 'DEPARTMENT', visibility: [{ id: 'v2', subjectType: 'DEPARTMENT', subjectId: 'dept-sales' }] } as any), true);
-assert.equal(canReadKnowledge(employee, { sensitivity: 'DEPARTMENT', visibility: [{ id: 'v3', subjectType: 'DEPARTMENT', subjectId: 'dept-finance' }] } as any), false);
+assert.equal(canReadKnowledge(employee, { ownerDepartmentId: 'dept-sales', sensitivity: 'DEPARTMENT', visibility: [{ id: 'v2', subjectType: 'DEPARTMENT', subjectId: 'dept-sales' }] } as any), true);
+assert.equal(canReadKnowledge(employee, { ownerDepartmentId: 'dept-finance', sensitivity: 'DEPARTMENT', visibility: [{ id: 'v3', subjectType: 'DEPARTMENT', subjectId: 'dept-finance' }] } as any), false);
+assert.equal(canReadKnowledge(employee, { ownerDepartmentId: 'dept-sales', sensitivity: 'DEPARTMENT', visibility: [{ id: 'v-dept-all', subjectType: 'ALL_EMPLOYEES' }] } as any), false);
+assert.equal(canReadKnowledge(employee, { ownerDepartmentId: 'dept-sales', sensitivity: 'DEPARTMENT', visibility: [{ id: 'v-dept-role', subjectType: 'ROLE', subjectId: 'role-sales' }] } as any), false);
+assert.equal(canReadKnowledge(employee, { ownerDepartmentId: 'dept-finance', sensitivity: 'DEPARTMENT', visibility: [{ id: 'v-dept-sales', subjectType: 'DEPARTMENT', subjectId: 'dept-sales' }] } as any), false);
+assert.equal(canReadKnowledge({
+  ...employee,
+  id: 'user-sensitive-reader',
+  departmentId: 'dept-other',
+  permissions: [
+    { module: PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE, actions: ['read'] },
+    { module: PERMISSION_KEYS.ENABLEMENT_SENSITIVE, actions: ['read'] },
+  ],
+} as any, { ownerDepartmentId: 'dept-sales', sensitivity: 'DEPARTMENT', visibility: [{ id: 'v-sensitive-role', subjectType: 'ROLE', subjectId: 'role-sales' }] } as any), true);
 assert.equal(canReadKnowledge(employee, { sensitivity: 'FINANCE', visibility: [{ id: 'v4', subjectType: 'ALL_EMPLOYEES' }] } as any), false);
 assert.equal(canReviewKnowledge(reviewer, { id: 'dept-sales', managerId: 'user-manager' } as any), true);
 assert.equal(canReviewKnowledge(reviewer, { id: 'dept-finance', managerId: 'user-finance' } as any), false);
