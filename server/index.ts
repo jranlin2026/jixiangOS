@@ -53,6 +53,7 @@ const requireAiConfigAccess = createRequireAuth(authService, PERMISSION_KEYS.SET
 const requireDataMaintenanceAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE);
 const requireStorageAccess = createRequireAuth(authService);
 const requireCustomerListAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_LIST);
+const requireCustomerCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_CREATE, 'write');
 const requireCustomerEditAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_EDIT, 'write');
 const requireCustomerAssignAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_ASSIGN, 'write');
 const requireLeadListAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_LIST);
@@ -231,6 +232,11 @@ app.get('/api/health', async (_req, res) => {
 app.get('/api/ready', async (_req, res) => {
   const payload = await healthPayload();
   res.status(payload.database ? 200 : 503).json(payload);
+});
+
+app.post('/api/customers', requireCustomerCreateAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerListService.create(req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 201 : 400).json(result);
 });
 
 app.get('/api/customers', requireCustomerListAccess, async (req: AuthenticatedRequest, res) => {
