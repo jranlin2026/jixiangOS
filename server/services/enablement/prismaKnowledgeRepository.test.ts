@@ -80,6 +80,47 @@ const stalePublishRepository = createPrismaKnowledgeRepository({
 } as any);
 assert.equal(await stalePublishRepository.publishAtomic(input), null, 'lost approved-state CAS becomes a conflict');
 
+const retirementOperations: string[] = [];
+const preservedHistoryDeletes: string[] = [];
+const retirementRepository = createPrismaKnowledgeRepository({
+  $transaction: async (callback: any) => callback({
+    knowledgeDocument: {
+      findUnique: async () => ({ id: 'doc-1', currentVersionId: 'current-version' }),
+      update: async ({ where, data }: any) => {
+        retirementOperations.push(`clear-current:${where.id}:${String(data.currentVersionId)}`);
+      },
+      delete: async () => { preservedHistoryDeletes.push('document'); },
+      deleteMany: async () => { preservedHistoryDeletes.push('documents'); },
+    },
+    knowledgeVersion: {
+      updateMany: async ({ where, data }: any) => {
+        retirementOperations.push(`retire:${where.id}:${where.status}->${data.status}`);
+        return { count: 1 };
+      },
+      delete: async () => { preservedHistoryDeletes.push('version'); },
+      deleteMany: async () => { preservedHistoryDeletes.push('versions'); },
+    },
+    knowledgeReview: {
+      delete: async () => { preservedHistoryDeletes.push('review'); },
+      deleteMany: async () => { preservedHistoryDeletes.push('reviews'); },
+    },
+    knowledgeAttachment: {
+      delete: async () => { preservedHistoryDeletes.push('attachment'); },
+      deleteMany: async () => { preservedHistoryDeletes.push('attachments'); },
+    },
+    knowledgeChunk: {
+      delete: async () => { preservedHistoryDeletes.push('chunk'); },
+      deleteMany: async () => { preservedHistoryDeletes.push('chunks'); },
+    },
+  }),
+} as any);
+assert.equal(await retirementRepository.retireAtomic('doc-1', input.publisherUserId, input.now), true);
+assert.deepEqual(retirementOperations, [
+  'retire:current-version:CURRENT->RETIRED',
+  'clear-current:doc-1:null',
+]);
+assert.deepEqual(preservedHistoryDeletes, [], 'retirement preserves versions, reviews, attachments, and chunks');
+
 let publicationQueueWhere: unknown;
 const queueRepository = createPrismaKnowledgeRepository({
   knowledgeVersion: {

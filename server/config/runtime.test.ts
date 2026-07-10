@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import {
   getApiJsonBodyLimit,
   getApiListenHost,
@@ -19,6 +20,20 @@ assert.equal(getApiJsonBodyLimit({}), '50mb');
 assert.equal(getApiJsonBodyLimit({ API_JSON_BODY_LIMIT: '100mb' }), '100mb');
 assert.equal(getEnablementPrivateStorageDir({ ENABLEMENT_PRIVATE_STORAGE_DIR: '/tmp/enablement' }), '/tmp/enablement');
 assert.ok(getEnablementPrivateStorageDir({}).endsWith('private_uploads/enablement'));
+
+const publicUploadRoot = path.resolve('uploads');
+assert.throws(
+  () => getEnablementPrivateStorageDir({ ENABLEMENT_PRIVATE_STORAGE_DIR: 'uploads' }, publicUploadRoot),
+  /public uploads/i,
+);
+assert.throws(
+  () => getEnablementPrivateStorageDir({ ENABLEMENT_PRIVATE_STORAGE_DIR: 'uploads/enablement' }, publicUploadRoot),
+  /public uploads/i,
+);
+assert.equal(
+  getEnablementPrivateStorageDir({ ENABLEMENT_PRIVATE_STORAGE_DIR: 'private_uploads/enablement' }, publicUploadRoot),
+  path.resolve('private_uploads/enablement'),
+);
 
 assert.throws(() => validateRuntimeConfig({
   NODE_ENV: 'production',

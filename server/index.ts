@@ -60,7 +60,7 @@ const leadListService = createLeadListService(prisma);
 const settingsService = createSettingsService(prisma);
 const storageService = createStorageService(prisma);
 const knowledgeRepository = createPrismaKnowledgeRepository(prisma as any);
-const knowledgeFileStore = createKnowledgeFileStore(getEnablementPrivateStorageDir());
+const knowledgeFileStore = createKnowledgeFileStore(getEnablementPrivateStorageDir(process.env, uploadRoot));
 const knowledgeService = createKnowledgeService({
   repository: knowledgeRepository,
   fileStore: knowledgeFileStore,
