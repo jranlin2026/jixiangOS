@@ -1,14 +1,19 @@
 import type { AuthenticatedUser } from '../../../src/types/auth';
 import type { KnowledgeDocumentDto } from '../../../src/types/enablement';
-import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../../src/shared/utils/permissions';
+import { getDefaultPermissionActions, hasPermission, isSuperAdmin, normalizePermissionKey, PERMISSION_KEYS } from '../../../src/shared/utils/permissions';
 
 type DepartmentFacts = { id: string; managerId?: string | null };
 
-function hasReviewWriteAuthorization(actor: AuthenticatedUser): boolean {
-  return actor.permissions.some((permission) => (
-    (permission.module === PERMISSION_KEYS.ENABLEMENT_REVIEW || permission.module === '全部')
-    && permission.actions.some((action) => ['write', 'delete', 'admin'].includes(action))
-  ));
+const ALL_PERMISSION_KEY = normalizePermissionKey('全部');
+
+function withoutReadOnlyAllPermission(actor: AuthenticatedUser): AuthenticatedUser {
+  return {
+    ...actor,
+    permissions: actor.permissions.filter((permission) => (
+      normalizePermissionKey(permission.module) !== ALL_PERMISSION_KEY
+      || !getDefaultPermissionActions(permission.module, permission.actions).every((action) => action === 'read')
+    )),
+  };
 }
 
 export function canReadKnowledge(actor: AuthenticatedUser, document: Pick<KnowledgeDocumentDto, 'sensitivity' | 'visibility'>): boolean {
@@ -25,9 +30,11 @@ export function canReadKnowledge(actor: AuthenticatedUser, document: Pick<Knowle
 }
 
 export function canReviewKnowledge(actor: AuthenticatedUser, department: DepartmentFacts): boolean {
-  if (!actor.isActive || !hasReviewWriteAuthorization(actor)) return false;
-  if (isSuperAdmin(actor)) return true;
-  return hasPermission(actor, PERMISSION_KEYS.ENABLEMENT_REVIEW, 'write') && department.managerId === actor.id;
+  if (!actor.isActive) return false;
+  const authorizedActor = withoutReadOnlyAllPermission(actor);
+  if (!hasPermission(authorizedActor, PERMISSION_KEYS.ENABLEMENT_REVIEW, 'write')) return false;
+  if (isSuperAdmin(authorizedActor)) return true;
+  return department.managerId === actor.id;
 }
 
 export function canPublishKnowledge(actor: AuthenticatedUser): boolean {

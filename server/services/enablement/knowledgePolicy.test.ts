@@ -11,6 +11,10 @@ const reviewer = {
   ...employee, id: 'user-manager',
   permissions: [{ module: PERMISSION_KEYS.ENABLEMENT_REVIEW, actions: ['read', 'write'] }],
 } as any;
+const inheritedReviewer = {
+  ...employee, id: 'user-enablement-manager',
+  permissions: [{ module: PERMISSION_KEYS.ENABLEMENT, actions: ['read', 'write'] }],
+} as any;
 const publisher = {
   ...employee, id: 'user-publisher',
   permissions: [{ module: PERMISSION_KEYS.ENABLEMENT_PUBLISH, actions: ['read', 'write'] }],
@@ -20,6 +24,9 @@ const activeSuperAdmin = {
   permissions: [{ module: '全部', actions: ['admin'] }],
 } as any;
 const inactiveSuperAdmin = { ...activeSuperAdmin, id: 'user-inactive-super-admin', isActive: false } as any;
+const roleDerivedSuperAdmin = {
+  ...employee, id: 'user-role-derived-super-admin', roleId: 'role-super-admin',
+} as any;
 const readOnlyAllPermissions = {
   ...employee, id: 'user-read-all',
   permissions: [{ module: '全部', actions: ['read'] }],
@@ -31,8 +38,10 @@ assert.equal(canReadKnowledge(employee, { sensitivity: 'DEPARTMENT', visibility:
 assert.equal(canReadKnowledge(employee, { sensitivity: 'FINANCE', visibility: [{ id: 'v4', subjectType: 'ALL_EMPLOYEES' }] } as any), false);
 assert.equal(canReviewKnowledge(reviewer, { id: 'dept-sales', managerId: 'user-manager' } as any), true);
 assert.equal(canReviewKnowledge(reviewer, { id: 'dept-finance', managerId: 'user-finance' } as any), false);
+assert.equal(canReviewKnowledge(inheritedReviewer, { id: 'dept-sales', managerId: 'user-enablement-manager' } as any), true);
 assert.equal(canReviewKnowledge(activeSuperAdmin, { id: 'dept-finance', managerId: 'user-finance' } as any), true);
 assert.equal(canReviewKnowledge(inactiveSuperAdmin, { id: 'dept-finance', managerId: 'user-finance' } as any), false);
+assert.equal(canReviewKnowledge(roleDerivedSuperAdmin, { id: 'dept-finance', managerId: 'user-finance' } as any), true);
 assert.equal(canReviewKnowledge(readOnlyAllPermissions, { id: 'dept-finance', managerId: 'user-read-all' } as any), false);
 assert.equal(canPublishKnowledge(publisher), true);
 assert.equal(canPublishKnowledge(employee), false);
