@@ -35,3 +35,26 @@ export function createRequireAuth(authService: AuthReader, permissionKey?: strin
     next();
   };
 }
+
+export function createRequireAnyPermission(
+  authService: AuthReader,
+  permissionKeys: readonly string[],
+  action = 'read',
+): RequestHandler {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const auth = await authService.getCurrentUser(bearerToken(req));
+    const user = auth.code === 0 ? auth.data : null;
+    if (!user) {
+      res.status(401).json({ code: 401, data: null, message: 'Unauthorized' });
+      return;
+    }
+
+    if (!permissionKeys.some((permissionKey) => hasPermission(user, permissionKey, action))) {
+      res.status(403).json({ code: 403, data: null, message: 'Forbidden' });
+      return;
+    }
+
+    (req as AuthenticatedRequest).currentUser = user;
+    next();
+  };
+}
