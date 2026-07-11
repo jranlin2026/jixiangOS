@@ -40,7 +40,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_HOST = "120.24.250.244"
 DEFAULT_USER = "root"
 DEFAULT_APP_DIR = "/opt/jixiang-os"
-DEFAULT_HEALTH_URL = "http://120.24.250.244/api/health"
+DEFAULT_HEALTH_URL = "https://jixiangos.cn/api/health"
 
 EXCLUDE_DIRS = {
     ".git",
