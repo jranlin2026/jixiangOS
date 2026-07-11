@@ -117,7 +117,17 @@ const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] =
         return <Chip label={status.label} size="small" color={status.color} />;
       },
     },
-    { id: 'tags', label: '标签', render: (lead) => lead.tags?.join(', ') || '-' },
+    {
+      id: 'tags',
+      label: '标签',
+      render: (lead) => (
+        <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+          {lead.tags?.length ? lead.tags.map((tag) => (
+            <Chip key={tag} label={tag} size="small" variant="outlined" sx={{ height: 22 }} />
+          )) : '-'}
+        </Box>
+      ),
+    },
     { id: 'remark', label: '备注', render: (lead) => lead.remark || '-' },
     {
       id: 'intakeStatus',
@@ -807,4 +817,3 @@ const Leads: React.FC = () => {
 };
 
 export default Leads;
-

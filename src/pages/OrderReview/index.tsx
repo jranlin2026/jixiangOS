@@ -313,21 +313,27 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
   const submitReviewAction = async () => {
     if (!reviewAction) return;
 
+    let res;
     if (reviewAction.type === 'approve') {
-      const res = await orderReviewApi.approveOrderApplication(reviewAction.application.id);
-      if (res.code === 0 && res.data) setApprovedApplication(res.data);
+      res = await orderReviewApi.approveOrderApplication(reviewAction.application.id);
     } else if (reviewAction.type === 'return') {
       const reason = reviewReason.trim();
       if (!reason) return;
-      await orderReviewApi.returnOrderApplication(reviewAction.application.id, reason);
+      res = await orderReviewApi.returnOrderApplication(reviewAction.application.id, reason);
     } else {
       const reason = reviewReason.trim();
       if (!reason) return;
-      await orderReviewApi.rejectOrderApplication(reviewAction.application.id, reason);
+      res = await orderReviewApi.rejectOrderApplication(reviewAction.application.id, reason);
     }
 
+    if (res.code !== 0 || !res.data) {
+      await alert(res.message || '订单审核操作失败');
+      return;
+    }
+
+    if (reviewAction.type === 'approve') setApprovedApplication(res.data);
     closeReviewDialog();
-    loadItems();
+    await loadItems();
   };
 
   const handleCleanupApplication = async () => {
@@ -989,4 +995,3 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
 };
 
 export default OrderReview;
-
