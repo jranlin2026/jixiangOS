@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { customerApi } from './customerApi';
 import { clearBackendToken, writeBackendToken } from './backendClient';
+import { STORAGE_KEYS } from '../shared/utils/constants';
 
 const originalFetch = globalThis.fetch;
 const originalUseBackend = process.env.VITE_USE_BACKEND_API;
@@ -64,7 +65,10 @@ try {
     url: 'http://127.0.0.1:3001/api/customers',
     method: 'POST',
   }]);
-  assert.equal(storage.get('aaos_customers'), undefined);
+  const cachedCustomers = JSON.parse(storage.get(STORAGE_KEYS.CUSTOMERS) || '[]');
+  assert.equal(cachedCustomers.length, 1);
+  assert.equal(cachedCustomers[0].id, 'cust-server');
+  assert.equal(cachedCustomers[0].phone, '+8613800000000');
 } finally {
   clearBackendToken();
   globalThis.fetch = originalFetch;

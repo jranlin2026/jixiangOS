@@ -60,6 +60,40 @@ function normalizeCustomer(customer: Customer): Customer {
     : { ...normalized, growthPath };
 }
 
+function cacheBackendCustomer(customer: Customer): Customer {
+  const normalized = normalizeCustomer(customer);
+  const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+  const index = customers.findIndex((item) => item.id === normalized.id);
+  const nextCustomers = index === -1
+    ? [normalized, ...customers]
+    : customers.map((item, itemIndex) => (itemIndex === index ? normalized : item));
+  setStorageData(STORAGE_KEYS.CUSTOMERS, nextCustomers, { persist: false });
+  return normalized;
+}
+
+function cacheBackendCustomerReleaseInLeads(customer: Customer): void {
+  const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
+  const updatedAt = customer.updatedAt || new Date().toISOString();
+  let changed = false;
+  const nextLeads = leads.map((lead) => {
+    const matches = lead.customerId === customer.id
+      || Boolean(lead.phone && customer.phone && normalizePhoneForComparison(lead.phone) === normalizePhoneForComparison(customer.phone))
+      || Boolean(lead.wechat && customer.wechat && lead.wechat === customer.wechat);
+    if (!matches) return lead;
+    changed = true;
+    return {
+      ...lead,
+      owner: '公海',
+      assignedTo: undefined,
+      lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL,
+      lifecycleStatus: '流失公海',
+      lifecycleStatusUpdatedAt: updatedAt,
+      updatedAt,
+    };
+  });
+  if (changed) setStorageData(STORAGE_KEYS.LEADS, nextLeads, { persist: false });
+}
+
 function hasFollowActivity(customer: Customer): boolean {
   return (customer.activityRecords || []).some((record) => record.type === 'follow');
 }
@@ -363,7 +397,7 @@ async function createCustomer(data: CustomerCreateInput): Promise<ApiResponse<Cu
       body: JSON.stringify(data),
     });
     return response.code === 0 && response.data
-      ? createSuccessResponse(response.data)
+      ? createSuccessResponse(cacheBackendCustomer(response.data))
       : createErrorResponse(response.message, response.code);
   }
 
@@ -453,7 +487,7 @@ async function addCustomerFollowUp(
       body: JSON.stringify(data),
     });
     if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code);
-    return createSuccessResponse(response.data);
+    return createSuccessResponse(cacheBackendCustomer(response.data));
   }
 
   ensureInit();
@@ -515,7 +549,9 @@ async function releaseCustomerToPublicPool(id: string, reason: string): Promise<
       body: JSON.stringify({ reason }),
     });
     if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code);
-    return createSuccessResponse(response.data);
+    const customer = cacheBackendCustomer(response.data);
+    cacheBackendCustomerReleaseInLeads(customer);
+    return createSuccessResponse(customer);
   }
 
   ensureInit();
