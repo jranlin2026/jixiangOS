@@ -27,6 +27,8 @@ import { createKnowledgeFileStore } from './services/enablement/knowledgeFileSto
 import { createPrismaKnowledgeRepository } from './services/enablement/prismaKnowledgeRepository';
 import { createKeywordKnowledgeSearchProvider } from './services/enablement/knowledgeSearchProvider';
 import { createEnablementKnowledgeRouter } from './routes/enablementKnowledgeRoutes';
+import { createCoCreationRouter } from './routes/coCreationRoutes';
+import { createCoCreationService } from './services/coCreation/coCreationService';
 import {
   filterAssetStorageData,
   filterSingleStorageKey,
@@ -56,6 +58,7 @@ const allowedCorsOrigins = getAllowedCorsOrigins();
 const authService = createAuthService(prisma);
 const aiConfigService = createAiConfigService(prisma as any);
 const aiChatClient = createAiChatClient({ configReader: aiConfigService });
+const coCreationService = createCoCreationService({ prisma, aiClient: aiChatClient });
 const customerListService = createCustomerListService(prisma);
 const leadListService = createLeadListService(prisma);
 const settingsService = createSettingsService(prisma);
@@ -72,6 +75,7 @@ const requireRoleAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTING
 const requireAiConfigAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_AI_CONFIG);
 const requireDataMaintenanceAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE);
 const requireStorageAccess = createRequireAuth(authService);
+const requireCoCreationAccess = createRequireAuth(authService);
 const requireCustomerListAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_LIST);
 const requireCustomerCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_CREATE, 'write');
 const requireCustomerEditAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_EDIT, 'write');
@@ -158,6 +162,7 @@ app.use('/api/enablement/knowledge', createEnablementKnowledgeRouter({
   requireReview: requireEnablementReview,
   requirePublish: requireEnablementPublish,
 }));
+app.use('/api/co-creation', createCoCreationRouter({ service: coCreationService, requireAuth: requireCoCreationAccess }));
 
 function routeParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] || '' : value || '';
