@@ -12,7 +12,12 @@ import {
   Typography,
 } from '@mui/material';
 import { moduleTokens } from '../../shared/components/ModuleShell';
-import { TODAY_ACTION_DEMO, getEnablementHomePresentation } from './todayActionData';
+import {
+  TODAY_ACTION_DEMO,
+  getEnablementHomePresentation,
+  getNextMentorDemoOpen,
+  resolveEnablementHomeView,
+} from './todayActionData';
 
 type EnablementHomeProps = {
   canManage: boolean;
@@ -33,12 +38,12 @@ const managementTone = {
   blue: { color: moduleTokens.blue, background: '#EEF5FF' },
 } as const;
 
-const ManagementDemo: React.FC<{ onReturn: () => void }> = ({ onReturn }) => (
+const ManagementDemo: React.FC<{ actionCount: number; onReturn: () => void }> = ({ actionCount, onReturn }) => (
   <Paper sx={{ p: { xs: 2, md: 2.5 }, border: `1px solid ${moduleTokens.line}`, minWidth: 0 }}>
     <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" gap={1.5}>
       <Box sx={{ minWidth: 0 }}>
         <Typography variant="h6" sx={{ color: moduleTokens.ink, fontWeight: 900 }}>管理视角</Typography>
-        <Typography variant="body2" sx={{ color: moduleTokens.muted }}>共5项待办行动 · 演示数据</Typography>
+        <Typography variant="body2" sx={{ color: moduleTokens.muted }}>共{actionCount}项待办行动 · 演示数据</Typography>
       </Box>
       <Button variant="outlined" onClick={onReturn} sx={focusSx}>返回我的学习</Button>
     </Stack>
@@ -66,11 +71,10 @@ const ManagementDemo: React.FC<{ onReturn: () => void }> = ({ onReturn }) => (
 
 const EnablementHome: React.FC<EnablementHomeProps> = ({ canManage, canOpenKnowledge, onOpenKnowledge }) => {
   const [showCompletion, setShowCompletion] = useState(false);
+  const [showMentorDemo, setShowMentorDemo] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
-  const view: 'learning' | 'management' = searchParams.get('view') === 'management' && canManage
-    ? 'management'
-    : 'learning';
-  const presentation = getEnablementHomePresentation(canManage);
+  const view = resolveEnablementHomeView(searchParams.get('view'), canManage);
+  const presentation = getEnablementHomePresentation(canManage, canOpenKnowledge);
   const data = TODAY_ACTION_DEMO;
   const selectView = (next: 'learning' | 'management') => {
     setSearchParams({ view: next });
@@ -111,7 +115,7 @@ const EnablementHome: React.FC<EnablementHomeProps> = ({ canManage, canOpenKnowl
         ) : null}
       </Stack>
 
-      {view === 'management' ? <ManagementDemo onReturn={() => selectView('learning')} /> : (
+      {view === 'management' ? <ManagementDemo actionCount={presentation.managementCount} onReturn={() => selectView('learning')} /> : (
         <>
           <Paper
             sx={{
@@ -173,7 +177,13 @@ const EnablementHome: React.FC<EnablementHomeProps> = ({ canManage, canOpenKnowl
                 <Typography variant="overline" sx={{ color: '#9EC5FF', fontWeight: 900 }}>AI导师</Typography>
                 <Typography variant="h6" sx={{ mt: 0.5, fontWeight: 900 }}>销售与交付应该怎么交接？</Typography>
                 <Typography variant="body2" sx={{ mt: 1, color: '#C6D2E4' }}>基于当前生效的公司知识找答案。</Typography>
-                {canOpenKnowledge ? <Button variant="outlined" onClick={onOpenKnowledge} sx={{ mt: 2, color: '#fff', borderColor: '#8FB2F7', ...focusSx }}>查找企业知识</Button> : null}
+                <Stack direction={{ xs: 'column', sm: 'row' }} gap={1} sx={{ mt: 2 }}>
+                  <Button variant="contained" onClick={() => setShowMentorDemo((open) => getNextMentorDemoOpen(open))} sx={{ bgcolor: '#fff', color: '#17243B', '&:hover': { bgcolor: '#F4F8FF' }, ...focusSx }}>
+                    体验AI导师
+                  </Button>
+                  {presentation.showKnowledgeCta ? <Button variant="outlined" onClick={onOpenKnowledge} sx={{ color: '#fff', borderColor: '#8FB2F7', ...focusSx }}>查找企业知识</Button> : null}
+                </Stack>
+                {showMentorDemo ? <Alert severity="info" sx={{ mt: 2 }}>{data.mentorDemoMessage}</Alert> : null}
               </Paper>
             </Stack>
           </Box>

@@ -30,6 +30,7 @@ export const TODAY_ACTION_DEMO = {
   topic: '认识部门、岗位与协作关系',
   duration: '预计35分钟',
   nextStep: '完成课程与练习后进入第4天',
+  mentorDemoMessage: '演示数据：未调用真实AI，正式AI导师将在后续接入。',
   days: [
     { day: 1, label: '公司认知', status: 'done' },
     { day: 2, label: '产品价值', status: 'done' },
@@ -51,8 +52,18 @@ export const TODAY_ACTION_DEMO = {
   ] satisfies EnablementManagementItem[],
 } as const;
 
-export const getEnablementHomePresentation = (canManage: boolean) => ({
+export type EnablementHomeView = 'learning' | 'management';
+
+export const resolveEnablementHomeView = (
+  requestedView: string | null,
+  canManage: boolean,
+): EnablementHomeView => (requestedView === 'management' && canManage ? 'management' : 'learning');
+
+export const getNextMentorDemoOpen = (current: boolean) => !current;
+
+export const getEnablementHomePresentation = (canManage: boolean, canOpenKnowledge = false) => ({
   showManagementSwitch: canManage,
+  showKnowledgeCta: canOpenKnowledge,
   managementCount: canManage
     ? TODAY_ACTION_DEMO.managementItems.reduce((sum, item) => sum + item.count, 0)
     : 0,
