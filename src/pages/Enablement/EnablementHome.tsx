@@ -17,6 +17,7 @@ import {
   getEnablementHomePresentation,
   getNextMentorDemoOpen,
   resolveEnablementHomeView,
+  setEnablementSearchParam,
 } from './todayActionData';
 
 type EnablementHomeProps = {
@@ -77,14 +78,14 @@ const EnablementHome: React.FC<EnablementHomeProps> = ({ canManage, canOpenKnowl
   const presentation = getEnablementHomePresentation(canManage, canOpenKnowledge);
   const data = TODAY_ACTION_DEMO;
   const selectView = (next: 'learning' | 'management') => {
-    setSearchParams({ view: next });
+    setSearchParams(setEnablementSearchParam(searchParams, 'view', next));
   };
 
   useEffect(() => {
     const requestedView = searchParams.get('view');
     if ((requestedView === 'management' && !canManage)
       || (requestedView !== null && requestedView !== 'learning' && requestedView !== 'management')) {
-      setSearchParams({ view: 'learning' }, { replace: true });
+      setSearchParams(setEnablementSearchParam(searchParams, 'view', 'learning'), { replace: true });
     }
   }, [canManage, searchParams, setSearchParams]);
 
@@ -147,10 +148,12 @@ const EnablementHome: React.FC<EnablementHomeProps> = ({ canManage, canOpenKnowl
                   : day.status === 'current'
                     ? { color: moduleTokens.blue, bg: '#EEF5FF', border: '#8FB2F7' }
                     : { color: moduleTokens.muted, bg: '#F5F7F9', border: moduleTokens.line };
+                const statusLabel = day.status === 'done' ? '已完成' : day.status === 'current' ? '今天' : '未解锁';
                 return (
                   <Box key={day.day} sx={{ p: 1.25, minWidth: 0, borderRadius: 1.5, bgcolor: colors.bg, border: `1px solid ${colors.border}` }}>
                     <Typography variant="caption" sx={{ color: colors.color, fontWeight: 900 }}>第{day.day}天</Typography>
                     <Typography variant="body2" sx={{ color: moduleTokens.ink, fontWeight: 800, overflowWrap: 'anywhere' }}>{day.label}</Typography>
+                    <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: colors.color, fontWeight: 800 }}>{statusLabel}</Typography>
                   </Box>
                 );
               })}

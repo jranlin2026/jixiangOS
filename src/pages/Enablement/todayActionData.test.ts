@@ -4,6 +4,7 @@ import {
   getEnablementHomePresentation,
   getNextMentorDemoOpen,
   resolveEnablementHomeView,
+  setEnablementSearchParam,
 } from './todayActionData';
 
 assert.equal(TODAY_ACTION_DEMO.demo, true);
@@ -31,3 +32,13 @@ assert.equal(getNextMentorDemoOpen(false), true);
 assert.equal(getNextMentorDemoOpen(true), false);
 assert.match(TODAY_ACTION_DEMO.mentorDemoMessage, /演示数据/);
 assert.match(TODAY_ACTION_DEMO.mentorDemoMessage, /未调用真实AI/);
+const existingSearch = new URLSearchParams('tab=home&campaign=summer&view=learning');
+const managementSearch = setEnablementSearchParam(existingSearch, 'view', 'management');
+assert.equal(managementSearch.get('view'), 'management');
+assert.equal(managementSearch.get('tab'), 'home');
+assert.equal(managementSearch.get('campaign'), 'summer');
+assert.equal(existingSearch.get('view'), 'learning');
+const knowledgeSearch = setEnablementSearchParam(managementSearch, 'tab', 'knowledge');
+assert.equal(knowledgeSearch.get('tab'), 'knowledge');
+assert.equal(knowledgeSearch.get('view'), 'management');
+assert.equal(knowledgeSearch.get('campaign'), 'summer');

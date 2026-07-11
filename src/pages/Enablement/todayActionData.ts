@@ -61,6 +61,16 @@ export const resolveEnablementHomeView = (
 
 export const getNextMentorDemoOpen = (current: boolean) => !current;
 
+export const setEnablementSearchParam = (
+  current: URLSearchParams,
+  key: 'tab' | 'view',
+  value: string,
+) => {
+  const next = new URLSearchParams(current);
+  next.set(key, value);
+  return next;
+};
+
 export const getEnablementHomePresentation = (canManage: boolean, canOpenKnowledge = false) => ({
   showManagementSwitch: canManage,
   showKnowledgeCta: canOpenKnowledge,

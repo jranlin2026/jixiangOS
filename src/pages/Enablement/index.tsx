@@ -7,6 +7,7 @@ import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import KnowledgeCenter from './KnowledgeCenter';
 import PublishingCenter from './PublishingCenter';
 import EnablementHome from './EnablementHome';
+import { setEnablementSearchParam } from './todayActionData';
 
 type EnablementTab = 'home' | 'knowledge' | 'publishing';
 
@@ -34,7 +35,7 @@ const Enablement: React.FC = () => {
       />
       <ModuleTabs
         value={activeTab}
-        onChange={(_, value: EnablementTab) => setSearchParams({ tab: value })}
+        onChange={(_, value: EnablementTab) => setSearchParams(setEnablementSearchParam(searchParams, 'tab', value))}
         variant="scrollable"
         allowScrollButtonsMobile
         aria-label="赋能中台视图"
@@ -45,7 +46,7 @@ const Enablement: React.FC = () => {
         <EnablementHome
           canManage={canManage}
           canOpenKnowledge={canReadKnowledge}
-          onOpenKnowledge={() => setSearchParams({ tab: 'knowledge' })}
+          onOpenKnowledge={() => setSearchParams(setEnablementSearchParam(searchParams, 'tab', 'knowledge'))}
         />
       ) : activeTab === 'knowledge' ? (
         <KnowledgeCenter />
