@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Alert,
@@ -65,15 +65,24 @@ const ManagementDemo: React.FC<{ onReturn: () => void }> = ({ onReturn }) => (
 );
 
 const EnablementHome: React.FC<EnablementHomeProps> = ({ canManage, canOpenKnowledge, onOpenKnowledge }) => {
-  const [view, setView] = useState<'learning' | 'management'>('learning');
   const [showCompletion, setShowCompletion] = useState(false);
-  const [, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view: 'learning' | 'management' = searchParams.get('view') === 'management' && canManage
+    ? 'management'
+    : 'learning';
   const presentation = getEnablementHomePresentation(canManage);
   const data = TODAY_ACTION_DEMO;
   const selectView = (next: 'learning' | 'management') => {
-    setView(next);
-    setSearchParams(next === 'learning' ? {} : { view: next });
+    setSearchParams({ view: next });
   };
+
+  useEffect(() => {
+    const requestedView = searchParams.get('view');
+    if ((requestedView === 'management' && !canManage)
+      || (requestedView !== null && requestedView !== 'learning' && requestedView !== 'management')) {
+      setSearchParams({ view: 'learning' }, { replace: true });
+    }
+  }, [canManage, searchParams, setSearchParams]);
 
   return (
     <Stack spacing={2.5} sx={{ minWidth: 0 }}>
