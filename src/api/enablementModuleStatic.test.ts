@@ -20,6 +20,8 @@ assert.match(page, /value:\s*'home',\s*label:\s*'今日行动'/);
 assert.match(page, /activeTab === 'home'/);
 assert.match(home, /演示数据/);
 assert.match(home, /继续今天的学习/);
+assert.match(home, /bgcolor:\s*['"]#1457C8['"]/);
+assert.match(home, /backgroundImage:\s*['"]linear-gradient\(/);
 assert.match(home, /7天上岗地图/);
 assert.match(home, /已完成/);
 assert.match(home, /今天/);

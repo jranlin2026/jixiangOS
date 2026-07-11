@@ -122,7 +122,8 @@ const EnablementHome: React.FC<EnablementHomeProps> = ({ canManage, canOpenKnowl
             sx={{
               p: { xs: 2, md: 2.5 },
               color: '#fff',
-              background: 'linear-gradient(135deg, #1457C8 0%, #347EEA 100%)',
+              bgcolor: '#1457C8',
+              backgroundImage: 'linear-gradient(135deg, #1457C8 0%, #347EEA 100%)',
               minWidth: 0,
             }}
           >
