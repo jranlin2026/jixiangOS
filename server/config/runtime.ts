@@ -1,4 +1,5 @@
 import { DEFAULT_ADMIN_PASSWORD, DEFAULT_USER_PASSWORD } from '../../src/shared/utils/auth';
+import path from 'node:path';
 
 const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 const LOCALHOST_LISTEN_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
@@ -43,6 +44,26 @@ export function getApiListenHost(env: NodeJS.ProcessEnv = process.env): string {
 
 export function getApiJsonBodyLimit(env: NodeJS.ProcessEnv = process.env): string {
   return readEnv(env, 'API_JSON_BODY_LIMIT') || '50mb';
+}
+
+/** Location for original enablement Markdown. This directory is never public. */
+export function getEnablementPrivateStorageDir(
+  env: NodeJS.ProcessEnv = process.env,
+  publicUploadRoot = path.resolve('uploads'),
+): string {
+  const configured = readEnv(env, 'ENABLEMENT_PRIVATE_STORAGE_DIR');
+  const privateStorageDir = path.resolve(configured || 'private_uploads/enablement');
+  const resolvedPublicRoot = path.resolve(publicUploadRoot);
+  const relativeToPublicRoot = path.relative(resolvedPublicRoot, privateStorageDir);
+  const isPublicOrNested = relativeToPublicRoot === '' || (
+    relativeToPublicRoot !== '..'
+    && !relativeToPublicRoot.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relativeToPublicRoot)
+  );
+  if (isPublicOrNested) {
+    throw new Error('ENABLEMENT_PRIVATE_STORAGE_DIR must be outside the public uploads directory.');
+  }
+  return privateStorageDir;
 }
 
 function assertRequired(env: NodeJS.ProcessEnv, name: string): void {

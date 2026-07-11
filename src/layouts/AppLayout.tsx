@@ -1,26 +1,73 @@
-import React from 'react';
+import React, { useReducer } from 'react';
 import { Outlet } from 'react-router-dom';
-import { Box } from '@mui/material';
+import MenuIcon from '@mui/icons-material/Menu';
+import { Box, IconButton, Typography, useMediaQuery, useTheme } from '@mui/material';
 import Sidebar from './Sidebar';
+import {
+  APP_SHELL_MAIN_SX,
+  APP_SHELL_VIEWPORT_SX,
+  APP_SIDEBAR_WIDTH,
+  getAppShellPresentation,
+  mobileNavigationReducer,
+} from './appShellState';
 import GlobalTableColumnResizer from '../shared/components/GlobalTableColumnResizer';
 
 const AppLayout: React.FC = () => {
-  const sidebarWidth = 240;
+  const theme = useTheme();
+  const isDesktop = useMediaQuery(theme.breakpoints.up('md'));
+  const [navigationOpen, dispatchNavigation] = useReducer(mobileNavigationReducer, false);
+  const shellPresentation = getAppShellPresentation(isDesktop, navigationOpen);
+  const handleCloseNavigation = () => dispatchNavigation({ type: 'CLOSE' });
+  const handleNavigation = () => dispatchNavigation({ type: 'NAVIGATE' });
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: '#F6F8FB' }}>
-      <Sidebar width={sidebarWidth} />
+    <Box sx={APP_SHELL_VIEWPORT_SX}>
+      <Sidebar
+        width={APP_SIDEBAR_WIDTH}
+        layoutWidth={shellPresentation.sidebarLayoutWidth}
+        variant={shellPresentation.drawerVariant}
+        open={shellPresentation.drawerOpen}
+        onClose={handleCloseNavigation}
+        onNavigate={handleNavigation}
+      />
       <GlobalTableColumnResizer />
       <Box
         component="main"
-        sx={{
-          flexGrow: 1,
-          minWidth: 0,
-          minHeight: '100vh',
-          overflow: 'auto',
-          bgcolor: '#F6F8FB',
-        }}
+        sx={APP_SHELL_MAIN_SX}
       >
+        {shellPresentation.showMobileHeader && <Box
+          component="header"
+          sx={{
+            display: { xs: 'flex', md: 'none' },
+            position: 'sticky',
+            top: 0,
+            zIndex: 1100,
+            height: 56,
+            px: 1.5,
+            alignItems: 'center',
+            gap: 1,
+            bgcolor: '#FFFFFF',
+            borderBottom: '1px solid #DDE4EC',
+          }}
+        >
+          <IconButton
+            aria-label="打开导航菜单"
+            edge="start"
+            onClick={() => dispatchNavigation({ type: 'OPEN' })}
+            sx={{ color: '#1E6BFF' }}
+          >
+            <MenuIcon />
+          </IconButton>
+          <Box
+            component="img"
+            src="/jixiang-os-logo.png"
+            alt=""
+            sx={{ width: 28, height: 28, objectFit: 'contain' }}
+          />
+          <Typography variant="subtitle1" sx={{ color: '#101828', fontSize: '0.9375rem', fontWeight: 800 }}>
+            极享OS
+          </Typography>
+        </Box>}
         <Outlet />
       </Box>
     </Box>

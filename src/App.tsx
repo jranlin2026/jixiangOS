@@ -21,6 +21,7 @@ const EcommerceSettlement = React.lazy(() => import('./pages/EcommerceSettlement
 const Assets = React.lazy(() => import('./pages/Assets'));
 const GEO = React.lazy(() => import('./pages/GEO'));
 const AIAssistant = React.lazy(() => import('./pages/AIAssistant'));
+const Enablement = React.lazy(() => import('./pages/Enablement'));
 const Settings = React.lazy(() => import('./pages/Settings'));
 const Login = React.lazy(() => import('./pages/Login'));
 const NoPermission = React.lazy(() => import('./pages/NoPermission'));
@@ -173,6 +174,13 @@ const App: React.FC = () => {
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.AI_ASSISTANT} />}>
             <Route path={ROUTES.AI_ASSISTANT} element={<Suspense fallback={<PageLoader />}><AIAssistant /></Suspense>} />
+          </Route>
+          <Route element={<ProtectedRoute permissionKeys={[
+            PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE,
+            PERMISSION_KEYS.ENABLEMENT_REVIEW,
+            PERMISSION_KEYS.ENABLEMENT_PUBLISH,
+          ]} />}>
+            <Route path={ROUTES.ENABLEMENT} element={<Suspense fallback={<PageLoader />}><Enablement /></Suspense>} />
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.SETTINGS} />}>
             <Route path={ROUTES.SETTINGS} element={<Suspense fallback={<PageLoader />}><Settings /></Suspense>} />

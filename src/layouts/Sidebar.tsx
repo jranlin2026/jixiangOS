@@ -26,6 +26,7 @@ import StorefrontIcon from '@mui/icons-material/Storefront';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
+import SchoolIcon from '@mui/icons-material/School';
 import SettingsIcon from '@mui/icons-material/Settings';
 import HomeIcon from '@mui/icons-material/Home';
 import LogoutIcon from '@mui/icons-material/Logout';
@@ -38,6 +39,11 @@ import useAuthStore from '../store/useAuthStore';
 
 interface SidebarProps {
   width: number;
+  layoutWidth: number;
+  variant: 'permanent' | 'temporary';
+  open: boolean;
+  onClose: () => void;
+  onNavigate?: () => void;
 }
 
 const shell = {
@@ -161,6 +167,17 @@ const navItems: NavItem[] = [
   },
   { label: 'AI助手', icon: <SmartToyIcon />, path: ROUTES.AI_ASSISTANT, permissionKey: PERMISSION_KEYS.AI_ASSISTANT },
   {
+    label: '赋能中台',
+    icon: <SchoolIcon />,
+    path: ROUTES.ENABLEMENT,
+    permissionKey: PERMISSION_KEYS.ENABLEMENT,
+    permissionKeys: [
+      PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE,
+      PERMISSION_KEYS.ENABLEMENT_REVIEW,
+      PERMISSION_KEYS.ENABLEMENT_PUBLISH,
+    ],
+  },
+  {
     label: '系统设置',
     icon: <SettingsIcon />,
     path: ROUTES.SETTINGS,
@@ -199,7 +216,7 @@ const navItems: NavItem[] = [
   },
 ];
 
-const Sidebar: React.FC<SidebarProps> = ({ width }) => {
+const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, onClose, onNavigate }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentUser, logout } = useAuthStore();
@@ -232,9 +249,12 @@ const Sidebar: React.FC<SidebarProps> = ({ width }) => {
 
   return (
     <Drawer
-      variant="permanent"
+      variant={variant}
+      open={open}
+      onClose={onClose}
+      ModalProps={{ keepMounted: true }}
       sx={{
-        width,
+        width: layoutWidth,
         flexShrink: 0,
         '& .MuiDrawer-paper': {
           width,
@@ -282,10 +302,14 @@ const Sidebar: React.FC<SidebarProps> = ({ width }) => {
             const handleNavClick = () => {
               if (!hasChildren) {
                 navigate(item.path);
+                onNavigate?.();
                 return;
               }
               setExpandedPaths((prev) => ({ ...prev, [item.path]: !(prev[item.path] ?? isActive) }));
-              if (!isActive) navigate(item.children?.[0]?.path || item.path);
+              if (!isActive) {
+                navigate(item.children?.[0]?.path || item.path);
+                onNavigate?.();
+              }
             };
             return (
               <React.Fragment key={`${item.label}-${item.path}`}>
@@ -332,7 +356,10 @@ const Sidebar: React.FC<SidebarProps> = ({ width }) => {
                         return (
                           <ListItem key={child.path} disablePadding sx={{ mb: 0.25 }}>
                             <ListItemButton
-                              onClick={() => navigate(child.path)}
+                              onClick={() => {
+                                navigate(child.path);
+                                onNavigate?.();
+                              }}
                               sx={{
                                 borderRadius: 1.5,
                                 py: 0.75,

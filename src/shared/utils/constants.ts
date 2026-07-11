@@ -18,6 +18,7 @@ export const ROUTES = {
   ASSETS: '/assets',
   GEO: '/geo',
   AI_ASSISTANT: '/ai-assistant',
+  ENABLEMENT: '/enablement',
   SETTINGS: '/settings',
   REFUND_CENTER: '/refund-center',
 } as const;

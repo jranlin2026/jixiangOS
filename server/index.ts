@@ -5,7 +5,13 @@ import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getAllowedCorsOrigins, getApiJsonBodyLimit, getApiListenHost, validateRuntimeConfig } from './config/runtime';
+import {
+  getAllowedCorsOrigins,
+  getApiJsonBodyLimit,
+  getApiListenHost,
+  getEnablementPrivateStorageDir,
+  validateRuntimeConfig,
+} from './config/runtime';
 import { prisma, checkDatabaseConnection } from './db/client';
 import { createRequireAnyPermission, createRequireAuth, bearerToken, type AuthenticatedRequest } from './middleware/auth';
 import { createLoginRateLimiter } from './middleware/loginRateLimit';
@@ -15,6 +21,11 @@ import { createCustomerListService } from './services/customerListService';
 import { createLeadListService } from './services/leadListService';
 import { createSettingsService } from './services/settingsService';
 import { createStorageService } from './services/storageService';
+import { createKnowledgeService } from './services/enablement/knowledgeService';
+import { createKnowledgeFileStore } from './services/enablement/knowledgeFileStore';
+import { createPrismaKnowledgeRepository } from './services/enablement/prismaKnowledgeRepository';
+import { createKeywordKnowledgeSearchProvider } from './services/enablement/knowledgeSearchProvider';
+import { createEnablementKnowledgeRouter } from './routes/enablementKnowledgeRoutes';
 import {
   filterAssetStorageData,
   filterSingleStorageKey,
@@ -47,6 +58,13 @@ const customerListService = createCustomerListService(prisma);
 const leadListService = createLeadListService(prisma);
 const settingsService = createSettingsService(prisma);
 const storageService = createStorageService(prisma);
+const knowledgeRepository = createPrismaKnowledgeRepository(prisma as any);
+const knowledgeFileStore = createKnowledgeFileStore(getEnablementPrivateStorageDir(process.env, uploadRoot));
+const knowledgeService = createKnowledgeService({
+  repository: knowledgeRepository,
+  fileStore: knowledgeFileStore,
+  searchProvider: createKeywordKnowledgeSearchProvider(),
+});
 const requireOrganizationAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS);
 const requireRoleAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_ROLES);
 const requireAiConfigAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_AI_CONFIG);
@@ -60,6 +78,9 @@ const requireLeadListAccess = createRequireAuth(authService, PERMISSION_KEYS.LEA
 const requireMatrixPublishUploadAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write');
 const requireAiChatAccess = createRequireAuth(authService, PERMISSION_KEYS.AI_CHAT);
 const requireCustomerAiCardAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_AI_CARD);
+const requireEnablementRead = createRequireAuth(authService, PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE);
+const requireEnablementReview = createRequireAuth(authService, PERMISSION_KEYS.ENABLEMENT_REVIEW, 'write');
+const requireEnablementPublish = createRequireAuth(authService, PERMISSION_KEYS.ENABLEMENT_PUBLISH, 'write');
 const assignableUsersPermissions = [
   PERMISSION_KEYS.LEADS_FLOW_CONFIG,
   PERMISSION_KEYS.CUSTOMER_ASSIGN,
@@ -129,6 +150,12 @@ app.use(cors({
 }));
 app.use(express.json({ limit: getApiJsonBodyLimit() }));
 app.use('/uploads', express.static(uploadRoot, { index: false }));
+app.use('/api/enablement/knowledge', createEnablementKnowledgeRouter({
+  knowledgeService,
+  requireRead: requireEnablementRead,
+  requireReview: requireEnablementReview,
+  requirePublish: requireEnablementPublish,
+}));
 
 type DeepSeekMessage = {
   role: 'system' | 'user' | 'assistant';
