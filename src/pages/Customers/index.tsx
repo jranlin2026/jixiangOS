@@ -408,8 +408,7 @@ const Customers: React.FC = () => {
     setSelectedCustomer((current) => (current?.id === releaseTarget.id ? res.data : current));
     setReleaseTarget(null);
     setReleaseReason('');
-    setCustomerScope('public_pool');
-    const nextFilters = scopedFilters({ ...filters, page: 1, pageSize: pagination.pageSize || 10 }, 'public_pool');
+    const nextFilters = scopedFilters({ ...filters, page: 1, pageSize: pagination.pageSize || 10 }, customerScope);
     setFilters(nextFilters);
     fetchItems(nextFilters);
   };
@@ -1109,4 +1108,3 @@ const Customers: React.FC = () => {
 };
 
 export default Customers;
-

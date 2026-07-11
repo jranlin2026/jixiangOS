@@ -108,7 +108,7 @@ const Login: React.FC = () => {
         </Stack>
       </Box>
 
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', p: { xs: 2.25, md: 6 } }}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, p: { xs: 2.25, md: 6 } }}>
         <Paper
           elevation={0}
           sx={{
@@ -194,6 +194,15 @@ const Login: React.FC = () => {
             </Button>
           </Box>
         </Paper>
+        <Box
+          component="a"
+          href="https://beian.miit.gov.cn/"
+          target="_blank"
+          rel="noreferrer"
+          sx={{ color: '#64748b', fontSize: 13, textDecoration: 'none', '&:hover': { color: '#2563eb', textDecoration: 'underline' } }}
+        >
+          闽ICP备2026025630号-1
+        </Box>
       </Box>
     </Box>
   );
