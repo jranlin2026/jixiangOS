@@ -7,7 +7,7 @@ const actor = {
   departmentId: 'dept-1', permissions: [{ module: 'AI共创中心/提交需求', actions: ['read', 'write'] }], isActive: true,
 };
 
-test('creates an employee-owned request and persists one AI question per interview turn', async () => {
+test('creates an employee-owned request with the opening AI question already visible', async () => {
   const records: any[] = [];
   const messages: any[] = [];
   const prisma = {
@@ -31,12 +31,16 @@ test('creates an employee-owned request and persists one AI question per intervi
   const created = await service.createRequest(actor as any, { title: '日报重复整理' });
   assert.equal(created.code, 0);
   assert.equal(created.data?.requesterId, actor.id);
+  assert.equal(created.data?.status, 'INTERVIEWING');
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].role, 'ASSISTANT');
+  assert.match(messages[0].content, /真实工作场景/);
 
   const turn = await service.continueInterview(actor as any, created.data!.id, '我每天都要整理日报');
   assert.equal(turn.code, 0);
   assert.equal((turn.data as any)?.reply, '这个问题最近一次发生在什么时候？');
-  assert.equal(messages.length, 2);
-  assert.equal(messages.filter((message) => message.role === 'ASSISTANT').length, 1);
+  assert.equal(messages.length, 3);
+  assert.equal(messages.filter((message) => message.role === 'ASSISTANT').length, 2);
 });
 
 test('first management approval advances only into requirement validation', async () => {

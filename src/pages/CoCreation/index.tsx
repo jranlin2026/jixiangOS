@@ -31,6 +31,7 @@ const CoCreation: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [interviewRequest, setInterviewRequest] = useState<CoCreationRequestDto | null>(null);
   const [title, setTitle] = useState('');
   const [answer, setAnswer] = useState('');
   const [comment, setComment] = useState('');
@@ -87,9 +88,38 @@ const CoCreation: React.FC = () => {
 
   const create = () => run(async () => {
     const result = await coCreationApi.create(title);
-    if (result.code === 0) { setCreateOpen(false); setTitle(''); setSelected(result.data); }
+    if (result.code === 0) {
+      setTitle('');
+      setInterviewRequest(result.data);
+      setSelected(result.data);
+    }
     return result;
   });
+
+  const continueInDialog = async () => {
+    if (!interviewRequest || !answer.trim()) return;
+    setBusy(true); setMessage(null);
+    const result = await coCreationApi.interview(interviewRequest.id, answer)
+      .catch((error) => ({ code: -1, data: null, message: String(error) }));
+    if (result.code === 0) {
+      setAnswer('');
+      const detail = await coCreationApi.get(interviewRequest.id);
+      if (detail.code === 0) {
+        setInterviewRequest(detail.data);
+        setSelected(detail.data);
+      }
+      const listed = await coCreationApi.list();
+      if (listed.code === 0) setItems(listed.data || []);
+    }
+    setBusy(false);
+    setMessage({ type: result.code === 0 ? 'success' : 'error', text: result.message });
+  };
+
+  const closeInterviewDialog = () => {
+    setCreateOpen(false);
+    setInterviewRequest(null);
+    setAnswer('');
+  };
 
   const decide = (decision: 'APPROVE_VALIDATION' | 'DEFER' | 'MERGE' | 'REJECT') => run(
     () => coCreationApi.decideValidation(selected!.id, decision, comment),
@@ -107,7 +137,7 @@ const CoCreation: React.FC = () => {
         <Paper sx={{ overflow: 'hidden' }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2, py: 1.5 }}>
             <Typography fontWeight={800}>{tabs.find((item) => item.value === tab)?.label}</Typography>
-            {tab === 'mine' && <Button size="small" startIcon={<AddIcon />} onClick={() => setCreateOpen(true)}>提需求</Button>}
+            {tab === 'mine' && <Button size="small" startIcon={<AddIcon />} onClick={() => { setInterviewRequest(null); setCreateOpen(true); }}>提需求</Button>}
           </Stack>
           <Divider />
           {loading ? <Box sx={{ p: 4, textAlign: 'center' }}><CircularProgress size={28} /></Box> : (
@@ -156,10 +186,34 @@ const CoCreation: React.FC = () => {
         </Paper>
       </Box>
 
-      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>提交一个真实工作问题</DialogTitle>
-        <DialogContent><TextField autoFocus fullWidth sx={{ mt: 1 }} label="先用一句话描述，不需要想清楚解决方案" placeholder="例如：我每天要从三个表格重复整理销售日报" value={title} onChange={(event) => setTitle(event.target.value)} /></DialogContent>
-        <DialogActions><Button onClick={() => setCreateOpen(false)}>取消</Button><Button variant="contained" disabled={!title.trim() || busy} onClick={() => void create()}>开始AI访谈</Button></DialogActions>
+      <Dialog open={createOpen} onClose={closeInterviewDialog} fullWidth maxWidth="sm">
+        <DialogTitle>{createOpen && interviewRequest ? 'AI需求追问官' : '提交一个真实工作问题'}</DialogTitle>
+        <DialogContent>
+          {!interviewRequest ? (
+            <TextField autoFocus fullWidth sx={{ mt: 1 }} label="先用一句话描述，不需要想清楚解决方案" placeholder="例如：我每天要从三个表格重复整理销售日报" value={title} onChange={(event) => setTitle(event.target.value)} />
+          ) : (
+            <Stack spacing={2} sx={{ pt: 1 }}>
+              <Alert severity="info">AI会一次只问一个问题。请描述真实工作现场，不需要先想好功能方案。</Alert>
+              <Stack spacing={1} sx={{ maxHeight: 380, overflowY: 'auto' }}>
+                {(interviewRequest.messages || []).map((item) => (
+                  <Box key={item.id} sx={{ alignSelf: item.role === 'USER' ? 'flex-end' : 'flex-start', maxWidth: '90%', bgcolor: item.role === 'USER' ? '#EAF2FF' : '#F3F5F8', borderRadius: 2, px: 1.5, py: 1.25 }}>
+                    <Typography variant="caption" color={moduleTokens.muted}>{item.role === 'USER' ? '我' : 'AI需求追问官'}</Typography>
+                    <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{item.content}</Typography>
+                  </Box>
+                ))}
+              </Stack>
+              <TextField autoFocus fullWidth multiline minRows={3} label="继续回答" value={answer} onChange={(event) => setAnswer(event.target.value)} helperText="回答当前这一个问题即可，AI会继续追问。" />
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeInterviewDialog}>{interviewRequest ? '稍后继续' : '取消'}</Button>
+          {!interviewRequest ? (
+            <Button variant="contained" disabled={!title.trim() || busy} onClick={() => void create()}>开始AI访谈</Button>
+          ) : (
+            <Button variant="contained" endIcon={<SendIcon />} disabled={!answer.trim() || busy} onClick={() => void continueInDialog()}>发送回答</Button>
+          )}
+        </DialogActions>
       </Dialog>
     </ModulePage>
   );

@@ -18,5 +18,8 @@ assert.match(page, /需求验证/);
 assert.match(page, /批准进入验证/);
 assert.doesNotMatch(page, /批准开发/);
 assert.match(page, /系统设置.*DeepSeek/s);
+assert.match(page, /AI需求追问官/);
+assert.match(page, /继续回答/);
+assert.match(page, /createOpen && interviewRequest/);
 
 console.log('coCreationModuleStatic.test.ts passed');

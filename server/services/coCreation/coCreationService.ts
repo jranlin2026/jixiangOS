@@ -44,8 +44,14 @@ export function createCoCreationService({ prisma, aiClient }: { prisma: PrismaLi
         id, title, status: 'DRAFT', requesterId: actor.id, requesterName: actor.name,
         departmentId: actor.departmentId || null,
       }, include: detailInclude() });
-      await event(id, actor, 'CREATE_REQUEST', undefined, 'DRAFT');
-      return success(row, '需求草稿已创建');
+      const openingQuestion = `我先不急着讨论功能。请讲一个最近发生的真实工作场景：你当时在做什么，具体卡在哪里？\n\n你可以这样回答：我是【岗位】，在【时间/场景】需要【完成什么工作】，现在卡在【具体问题】。`;
+      const openingMessage = await prisma.coCreationMessage.create({ data: {
+        id: randomUUID(), requestId: id, role: 'ASSISTANT', content: openingQuestion,
+        metadata: { phase: 'ROLE_SCENARIO', completeness: 0, extractedFacts: [], hypotheses: [], briefReady: false },
+      } });
+      await prisma.coCreationRequest.update({ where: { id }, data: { status: 'INTERVIEWING' } });
+      await event(id, actor, 'CREATE_REQUEST', undefined, 'INTERVIEWING');
+      return success({ ...row, status: 'INTERVIEWING', messages: [openingMessage] }, 'AI访谈已开始');
     },
 
     async listRequests(actor: AuthenticatedUser) {
