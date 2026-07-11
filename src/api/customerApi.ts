@@ -357,6 +357,16 @@ async function fetchCustomerById(id: string): Promise<ApiResponse<Customer | nul
 }
 
 async function createCustomer(data: CustomerCreateInput): Promise<ApiResponse<Customer>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Customer>('/customers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    return response.code === 0 && response.data
+      ? createSuccessResponse(response.data)
+      : createErrorResponse(response.message, response.code);
+  }
+
   ensureInit();
   await delay(200);
   const normalizedData = { ...data, phone: normalizePhoneForStorage(data.phone) };

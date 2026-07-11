@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAllowedCorsOrigins, getApiJsonBodyLimit, getApiListenHost, validateRuntimeConfig } from './config/runtime';
 import { prisma, checkDatabaseConnection } from './db/client';
-import { createRequireAuth, bearerToken, type AuthenticatedRequest } from './middleware/auth';
+import { createRequireAnyPermission, createRequireAuth, bearerToken, type AuthenticatedRequest } from './middleware/auth';
 import { createLoginRateLimiter } from './middleware/loginRateLimit';
 import { createAuthService } from './services/authService';
 import { createAiConfigService } from './services/aiConfigService';
@@ -16,12 +16,11 @@ import { createLeadListService } from './services/leadListService';
 import { createSettingsService } from './services/settingsService';
 import { createStorageService } from './services/storageService';
 import {
-  canReadStorageKey,
-  canWriteStorageKey,
   filterAssetStorageData,
   filterSingleStorageKey,
   isAssetStorageKey,
 } from './services/assetStorageAccess';
+import { canAccessLegacyStorageKey } from './services/legacyStorageAccess';
 import { migrateDefaultRoleAccess } from './services/roleMigrationService';
 import { mapPrismaRole, mapPrismaUser } from './db/prismaMappers';
 import { mergeRoleWithDefaultAccess } from '../src/shared/utils/organizationConfig';
@@ -53,6 +52,11 @@ const requireRoleAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTING
 const requireAiConfigAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_AI_CONFIG);
 const requireDataMaintenanceAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE);
 const requireStorageAccess = createRequireAuth(authService);
+const requireCustomerListAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_LIST);
+const requireCustomerCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_CREATE, 'write');
+const requireCustomerEditAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_EDIT, 'write');
+const requireCustomerAssignAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_ASSIGN, 'write');
+const requireLeadListAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_LIST);
 const requireMatrixPublishUploadAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write');
 const requireAiChatAccess = createRequireAuth(authService, PERMISSION_KEYS.AI_CHAT);
 const requireCustomerAiCardAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_AI_CARD);
@@ -104,17 +108,7 @@ const runtimeStorageKeys = [
   STORAGE_KEYS.ECOMMERCE_SETTLEMENT_CONFIG,
   STORAGE_KEYS.INITIALIZED,
 ];
-const requireAssignableUsersAccess = [
-  createRequireAuth(authService),
-  (req: AuthenticatedRequest, res: express.Response, next: express.NextFunction) => {
-    const user = req.currentUser;
-    if (!user || !assignableUsersPermissions.some((permission) => hasPermission(user, permission))) {
-      res.status(403).json({ code: 403, data: null, message: 'Forbidden' });
-      return;
-    }
-    next();
-  },
-];
+const requireAssignableUsersAccess = createRequireAnyPermission(authService, assignableUsersPermissions);
 const loginRateLimiter = createLoginRateLimiter();
 
 app.set('trust proxy', 1);
@@ -240,7 +234,12 @@ app.get('/api/ready', async (_req, res) => {
   res.status(payload.database ? 200 : 503).json(payload);
 });
 
-app.get('/api/customers', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+app.post('/api/customers', requireCustomerCreateAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerListService.create(req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 201 : 400).json(result);
+});
+
+app.get('/api/customers', requireCustomerListAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerListService.list({
     search: queryParam(req.query.search),
     productLevel: queryParam(req.query.productLevel) as any,
@@ -259,7 +258,7 @@ app.get('/api/customers', requireStorageAccess, async (req: AuthenticatedRequest
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.post('/api/customers/:id/follow-ups', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+app.post('/api/customers/:id/follow-ups', requireCustomerEditAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerListService.addFollowUp(routeParam(req.params.id), {
     content: String(req.body?.content || ''),
     operator: typeof req.body?.operator === 'string' ? req.body.operator : undefined,
@@ -269,7 +268,7 @@ app.post('/api/customers/:id/follow-ups', requireStorageAccess, async (req: Auth
   res.status(result.code === 0 ? 200 : result.code === 404 ? 404 : 400).json(result);
 });
 
-app.post('/api/customers/:id/release', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+app.post('/api/customers/:id/release', requireCustomerAssignAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerListService.releaseToPublicPool(
     routeParam(req.params.id),
     String(req.body?.reason || ''),
@@ -278,7 +277,7 @@ app.post('/api/customers/:id/release', requireStorageAccess, async (req: Authent
   res.status(result.code === 0 ? 200 : result.code === 404 ? 404 : 400).json(result);
 });
 
-app.get('/api/leads', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+app.get('/api/leads', requireLeadListAccess, async (req: AuthenticatedRequest, res) => {
   const result = await leadListService.list({
     search: queryParam(req.query.search),
     source: queryParam(req.query.source) as any,
@@ -442,12 +441,18 @@ app.post('/api/ai/config/test', requireAiConfigAccess, async (_req, res) => {
 
 app.get('/api/storage', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
   if (queryParam(req.query.scope) === 'runtime') {
-    const entries = await Promise.all(runtimeStorageKeys.map(async (key) => {
-      if (req.currentUser && !canReadStorageKey(req.currentUser, key)) return [key, null] as const;
+    const entries = await Promise.all(runtimeStorageKeys
+      .filter((key) => req.currentUser && canAccessLegacyStorageKey(req.currentUser, key, 'runtime'))
+      .map(async (key) => {
       const result = await storageService.get(key);
       return [key, result.code === 0 ? result.data : null] as const;
-    }));
+      }));
     res.json({ code: 0, data: Object.fromEntries(entries), message: 'success' });
+    return;
+  }
+
+  if (!req.currentUser || !hasPermission(req.currentUser, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE)) {
+    res.status(403).json({ code: 403, data: null, message: 'Forbidden' });
     return;
   }
 
@@ -462,7 +467,7 @@ app.get('/api/storage', requireStorageAccess, async (req: AuthenticatedRequest, 
 
 app.get('/api/storage/:key', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
   const key = routeParam(req.params.key);
-  if (req.currentUser && !canReadStorageKey(req.currentUser, key)) {
+  if (!req.currentUser || !canAccessLegacyStorageKey(req.currentUser, key, 'read')) {
     res.status(403).json({ code: 403, data: null, message: 'Forbidden' });
     return;
   }
@@ -479,7 +484,7 @@ app.get('/api/storage/:key', requireStorageAccess, async (req: AuthenticatedRequ
 
 app.put('/api/storage/:key', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
   const key = routeParam(req.params.key);
-  if (req.currentUser && !canWriteStorageKey(req.currentUser, key)) {
+  if (!req.currentUser || !canAccessLegacyStorageKey(req.currentUser, key, 'write')) {
     res.status(403).json({ code: 403, data: null, message: 'Forbidden' });
     return;
   }
@@ -487,14 +492,8 @@ app.put('/api/storage/:key', requireStorageAccess, async (req: AuthenticatedRequ
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.delete('/api/storage/:key', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
-  const key = routeParam(req.params.key);
-  if (req.currentUser && !canWriteStorageKey(req.currentUser, key)) {
-    res.status(403).json({ code: 403, data: null, message: 'Forbidden' });
-    return;
-  }
-  const result = await storageService.remove(key);
-  res.status(result.code === 0 ? 200 : 400).json(result);
+app.delete('/api/storage/:key', requireStorageAccess, async (_req: AuthenticatedRequest, res) => {
+  res.status(405).json({ code: 405, data: null, message: 'Legacy storage deletion is disabled' });
 });
 
 app.delete('/api/storage', requireDataMaintenanceAccess, async (_req, res) => {

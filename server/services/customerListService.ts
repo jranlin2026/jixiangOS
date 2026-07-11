@@ -1,11 +1,20 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { failure, success } from '../api/response';
-import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, LIFECYCLE_STATUS_CODES, normalizeLifecycleStatusCode } from '../../src/shared/utils/constants';
-import type { Customer, CustomerFilters } from '../../src/types/customer';
+import {
+  STORAGE_KEYS,
+  DEFAULT_PAGE_SIZE,
+  LIFECYCLE_STATUS_CODES,
+  normalizeLifecycleStatusCode,
+  normalizeResourceOwnership,
+} from '../../src/shared/utils/constants';
+import type { Customer, CustomerCreateInput, CustomerFilters } from '../../src/types/customer';
 import type { PaginatedResponse } from '../../src/api/types';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import { buildDataVisibilityScopeForUser } from '../../src/shared/utils/dataVisibility';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
+import { getPhoneNumberError, normalizePhoneForStorage } from '../../src/shared/utils/phoneNumber';
+import { PERMISSION_KEYS, hasPermission } from '../../src/shared/utils/permissions';
 
 type CustomerListPrisma = Pick<PrismaClient, 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | '$queryRaw'>;
 
@@ -271,6 +280,66 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
   };
 
   return {
+    async create(input: CustomerCreateInput, currentUser: AuthenticatedUser) {
+      const phone = normalizePhoneForStorage(input.phone);
+      const sourceType = normalizeResourceOwnership(input.sourceType);
+      if (sourceType === '个人资源' && !input.leadContributorId && !input.leadContributorName) {
+        return failure<Customer>('个人资源必须填写线索贡献人', 400);
+      }
+
+      const requestedOwner = cleanText(input.owner);
+      const actorName = currentUser.name || currentUser.account;
+      if (requestedOwner && requestedOwner !== actorName && !hasPermission(currentUser, PERMISSION_KEYS.CUSTOMER_ASSIGN, 'write')) {
+        return failure<Customer>('无权把客户分配给其他负责人', 403);
+      }
+
+      const phoneError = getPhoneNumberError(phone);
+      if (phoneError) return failure<Customer>(phoneError, 400);
+
+      const now = new Date().toISOString();
+      const id = 'cust-' + randomUUID().slice(0, 8);
+      const customer: Customer = {
+        ...input,
+        id,
+        phone,
+        sourceType,
+        owner: requestedOwner || actorName,
+        customerLevel: input.customerLevel || 'L1',
+        lifecycleStatusCode: input.lifecycleStatusCode || LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP,
+        lifecycleStatusUpdatedAt: now,
+        totalSpent: 0,
+        orderCount: 0,
+        growthPath: [],
+        growthRecords: [],
+        activityRecords: [{
+          id: 'act-' + randomUUID().slice(0, 8),
+          type: 'create',
+          title: '创建了客户',
+          operator: actorName,
+          content: input.remark,
+          createdAt: now,
+        }],
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      await prisma.businessRecord.create({
+        data: {
+          id: STORAGE_KEYS.CUSTOMERS + ':' + id,
+          domain: STORAGE_KEYS.CUSTOMERS,
+          recordId: id,
+          title: customer.name || customer.company || id,
+          status: customer.lifecycleStatusCode || null,
+          owner: customer.owner || null,
+          customerId: id,
+          amount: 0,
+          eventAt: new Date(now),
+          data: customer as any,
+        },
+      });
+      return success(customer);
+    },
+
     async list(filters: CustomerFilters = {}, currentUser?: AuthenticatedUser | null) {
       const page = toPositiveInt(filters.page, 1);
       const pageSize = Math.min(toPositiveInt(filters.pageSize, DEFAULT_PAGE_SIZE), 100);

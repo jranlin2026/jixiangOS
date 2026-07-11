@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createRequireAuth } from './auth';
+import { createRequireAnyPermission, createRequireAuth } from './auth';
 import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 
 let nextCalled = false;
@@ -61,3 +61,32 @@ await middleware(request, response as any, next as any);
 assert.equal(response.statusCode, 200);
 assert.equal(request.currentUser.account, 'admin');
 assert.equal(nextCalled, true);
+
+middleware = createRequireAnyPermission({
+  getCurrentUser: async () => ({
+    code: 0,
+    data: {
+      ...activeUser,
+      permissions: [{ module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] }],
+    },
+    message: 'success',
+  }),
+}, [PERMISSION_KEYS.CUSTOMER_LIST, PERMISSION_KEYS.LEADS_LIST]);
+response = createResponse();
+nextCalled = false;
+await middleware({ headers: { authorization: 'Bearer token' } } as any, response as any, next as any);
+assert.equal(response.statusCode, 200);
+assert.equal(nextCalled, true);
+
+middleware = createRequireAnyPermission({
+  getCurrentUser: async () => ({
+    code: 0,
+    data: { ...activeUser, permissions: [] },
+    message: 'success',
+  }),
+}, [PERMISSION_KEYS.CUSTOMER_LIST, PERMISSION_KEYS.LEADS_LIST]);
+response = createResponse();
+nextCalled = false;
+await middleware({ headers: { authorization: 'Bearer token' } } as any, response as any, next as any);
+assert.equal(response.statusCode, 403);
+assert.equal(nextCalled, false);

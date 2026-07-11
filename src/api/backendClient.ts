@@ -123,48 +123,54 @@ export async function syncBackendStorageFromServer(maxAgeMs = 1000): Promise<voi
   return storageHydrationPromise;
 }
 
-export function persistBackendStorageValue(key: string, value: unknown): void {
-  if (!shouldUseBackendApi()) return;
-  if (isLocalOnlyStorageKey(key)) return;
+export function persistBackendStorageValue(key: string, value: unknown): Promise<void> {
+  if (!shouldUseBackendApi()) return Promise.resolve();
+  if (isLocalOnlyStorageKey(key)) return Promise.resolve();
   pendingStorageWriteKeys.add(key);
   protectStorageKeyFromHydration(key);
   const writePromise = backendRequest(`/storage/${encodeURIComponent(key)}`, {
     method: 'PUT',
     body: JSON.stringify({ value }),
   })
-    .then(() => undefined)
-    .catch(() => undefined)
+    .then((response) => {
+      if (response.code !== 0) throw new Error(response.message || '数据未保存');
+    })
     .finally(() => {
       pendingStorageWriteKeys.delete(key);
       protectStorageKeyFromHydration(key);
       pendingStorageWritePromises.delete(writePromise);
     });
   pendingStorageWritePromises.add(writePromise);
+  return writePromise;
 }
 
-export function removeBackendStorageValue(key: string): void {
-  if (!shouldUseBackendApi()) return;
-  if (isLocalOnlyStorageKey(key)) return;
+export function removeBackendStorageValue(key: string): Promise<void> {
+  if (!shouldUseBackendApi()) return Promise.resolve();
+  if (isLocalOnlyStorageKey(key)) return Promise.resolve();
   pendingStorageWriteKeys.add(key);
   protectStorageKeyFromHydration(key);
   const writePromise = backendRequest(`/storage/${encodeURIComponent(key)}`, {
     method: 'DELETE',
   })
-    .then(() => undefined)
-    .catch(() => undefined)
+    .then((response) => {
+      if (response.code !== 0) throw new Error(response.message || '数据未保存');
+    })
     .finally(() => {
       pendingStorageWriteKeys.delete(key);
       protectStorageKeyFromHydration(key);
       pendingStorageWritePromises.delete(writePromise);
     });
   pendingStorageWritePromises.add(writePromise);
+  return writePromise;
 }
 
-export function clearBackendStorageValues(): void {
-  if (!shouldUseBackendApi()) return;
-  void backendRequest('/storage', {
+export function clearBackendStorageValues(): Promise<void> {
+  if (!shouldUseBackendApi()) return Promise.resolve();
+  return backendRequest('/storage', {
     method: 'DELETE',
-  }).catch(() => undefined);
+  }).then((response) => {
+    if (response.code !== 0) throw new Error(response.message || '数据未保存');
+  });
 }
 
 export async function flushBackendStorageWrites(): Promise<void> {

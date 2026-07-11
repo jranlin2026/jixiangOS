@@ -97,9 +97,27 @@ async function updateDepartment(id: string, data: Partial<Department>): Promise<
     if (isDepartmentDescendantOf(departments, data.parentId, id)) return createErrorResponse('上级部门不能选择当前部门的下级部门');
     if (!departments.some((department) => department.id === data.parentId)) return createErrorResponse('上级部门不存在');
   }
-  departments[idx] = { ...departments[idx], ...data, updatedAt: new Date().toISOString() };
-  setStorageData(STORAGE_KEYS.DEPARTMENTS, sortDepartments(departments));
-  return createSuccessResponse(departments[idx]);
+  const updatedDepartment = { ...departments[idx], ...data, updatedAt: new Date().toISOString() };
+  let nextDepartments = departments.map((department) => (
+    department.id === id ? updatedDepartment : department
+  ));
+
+  if (data.sortOrder !== undefined) {
+    const parentId = updatedDepartment.parentId || '';
+    const siblings = nextDepartments
+      .filter((department) => (department.parentId || '') === parentId && department.id !== id)
+      .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || a.name.localeCompare(b.name));
+    const insertionIndex = Math.max(0, Math.min(siblings.length, Math.round(Number(data.sortOrder)) - 1));
+    siblings.splice(insertionIndex, 0, updatedDepartment);
+    const siblingOrder = new Map(siblings.map((department, order) => [department.id, order + 1]));
+    nextDepartments = nextDepartments.map((department) => ({
+      ...department,
+      sortOrder: siblingOrder.get(department.id) || department.sortOrder,
+    }));
+  }
+
+  setStorageData(STORAGE_KEYS.DEPARTMENTS, sortDepartments(nextDepartments));
+  return createSuccessResponse(updatedDepartment);
 }
 
 async function deleteDepartment(id: string): Promise<ApiResponse<boolean>> {

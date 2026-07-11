@@ -7,6 +7,7 @@ import { initializeMockData } from './api';
 import ProtectedRoute from './shared/auth/ProtectedRoute';
 import { PERMISSION_KEYS } from './shared/utils/permissions';
 import useAuthStore from './store/useAuthStore';
+import StorageSyncFailureNotice from './shared/components/StorageSyncFailureNotice';
 
 const HomeWorkbench = React.lazy(() => import('./pages/Dashboard'));
 const BusinessCockpit = React.lazy(() => import('./pages/Dashboard/BusinessCockpit'));
@@ -47,17 +48,19 @@ const App: React.FC = () => {
   }, [bootstrap]);
 
   return (
-    <Routes>
-      <Route
-        path="/login"
-        element={(
-          <Suspense fallback={<PageLoader />}>
-            <Login />
-          </Suspense>
-        )}
-      />
-      <Route element={<ProtectedRoute />}>
-        <Route path="/" element={<AppLayout />}>
+    <>
+      <StorageSyncFailureNotice />
+      <Routes>
+        <Route
+          path="/login"
+          element={(
+            <Suspense fallback={<PageLoader />}>
+              <Login />
+            </Suspense>
+          )}
+        />
+        <Route element={<ProtectedRoute />}>
+          <Route path="/" element={<AppLayout />}>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.HOME} />}>
             <Route
               index
@@ -186,9 +189,10 @@ const App: React.FC = () => {
             )}
           />
           <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
         </Route>
-      </Route>
-    </Routes>
+      </Routes>
+    </>
   );
 };
 

@@ -91,6 +91,7 @@ const prisma = {
     findMany: async () => userRows,
   },
 } as any;
+(prisma as any).$transaction = async (callback: (tx: any) => Promise<unknown>) => callback(prisma);
 
 const service = createStorageService(prisma);
 
@@ -149,6 +150,7 @@ const collisionPrisma = {
     deleteMany: async () => ({ count: 0 }),
   },
 } as any;
+(collisionPrisma as any).$transaction = async (callback: (tx: any) => Promise<unknown>) => callback(collisionPrisma);
 const collisionService = createStorageService(collisionPrisma);
 const longPrefix = `customer-${'a'.repeat(180)}`;
 const longIdCustomers = [
@@ -157,3 +159,37 @@ const longIdCustomers = [
 ];
 await assert.doesNotReject(() => collisionService.set(STORAGE_KEYS.CUSTOMERS, longIdCustomers));
 assert.equal(collidingCreateIds.size, 2);
+
+let transactionCalls = 0;
+const transactionalPrisma = {
+  ...prisma,
+  $transaction: async (callback: (tx: any) => Promise<unknown>) => {
+    transactionCalls += 1;
+    return callback(prisma);
+  },
+} as any;
+const transactionalService = createStorageService(transactionalPrisma);
+await transactionalService.set(STORAGE_KEYS.CUSTOMERS, nextCustomers);
+assert.equal(transactionCalls, 1);
+
+let deleteAttemptedAfterUpsertFailure = false;
+const failingPrisma: any = {
+  ...prisma,
+  businessRecord: {
+    ...prisma.businessRecord,
+    upsert: async () => {
+      throw new Error('upsert failed');
+    },
+    deleteMany: async () => {
+      deleteAttemptedAfterUpsertFailure = true;
+      return { count: 0 };
+    },
+  },
+};
+failingPrisma.$transaction = async (callback: (tx: any) => Promise<unknown>) => callback(failingPrisma);
+
+await assert.rejects(
+  () => createStorageService(failingPrisma).set(STORAGE_KEYS.CUSTOMERS, nextCustomers),
+  /upsert failed/,
+);
+assert.equal(deleteAttemptedAfterUpsertFailure, false);
