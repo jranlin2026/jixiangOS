@@ -61,7 +61,7 @@ function ensureLeadFlowConfig(): LeadFlowConfig {
   const existing = getStorageData<StoredLeadFlowConfig>(STORAGE_KEYS.LEAD_FLOW_CONFIG);
   const config = normalizeLeadFlowConfig(existing);
   if (!existing || JSON.stringify(existing) !== JSON.stringify(config)) {
-    setStorageData(STORAGE_KEYS.LEAD_FLOW_CONFIG, config);
+    setStorageData(STORAGE_KEYS.LEAD_FLOW_CONFIG, config, { persist: false });
   }
   return config;
 }
@@ -168,7 +168,10 @@ function assignLeadOwner(config: LeadFlowConfig, fallbackOwner?: string): { owne
   return { owner: '待分配', assignmentStatus: '待分配', reason: '今日分配上限已达', nextIndex: config.lastAssignedIndex };
 }
 
-function upsertCustomerFromLead(lead: Lead): Customer {
+function upsertCustomerFromLead(
+  lead: Lead,
+  options: { reportStorageFailure?: boolean } = {},
+): { customer: Customer; write: Promise<void> } {
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
   const now = new Date().toISOString();
   const customerId = lead.customerId || `cust-${uuidv4().slice(0, 8)}`;
@@ -216,8 +219,12 @@ function upsertCustomerFromLead(lead: Lead): Customer {
 
   if (idx === -1) {
     customers.unshift(base);
-    setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
-    return base;
+    return {
+      customer: base,
+      write: setStorageData(STORAGE_KEYS.CUSTOMERS, customers, {
+        reportFailure: options.reportStorageFailure,
+      }),
+    };
   }
 
   customers[idx] = {
@@ -254,8 +261,12 @@ function upsertCustomerFromLead(lead: Lead): Customer {
     }, ...(customers[idx].activityRecords || [])],
     updatedAt: now,
   };
-  setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
-  return customers[idx];
+  return {
+    customer: customers[idx],
+    write: setStorageData(STORAGE_KEYS.CUSTOMERS, customers, {
+      reportFailure: options.reportStorageFailure,
+    }),
+  };
 }
 
 function appendIntakeRecord(record: LeadIntakeRecord): void {
@@ -414,7 +425,7 @@ function intakeLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followU
       }, ...(leadWithLifecycle.changeHistory || [])],
       updatedAt: now,
     });
-    const customer = upsertCustomerFromLead(autoClaimedLead);
+    const { customer } = upsertCustomerFromLead(autoClaimedLead);
     storedLead = { ...autoClaimedLead, customerId: customer.id };
   }
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
@@ -490,6 +501,8 @@ async function claimLeadAsCustomer(leadId: string, userName: string): Promise<Ap
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
   const idx = leads.findIndex((lead) => lead.id === leadId);
   if (idx === -1) return createSuccessResponse(null);
+  const previousLeads = JSON.stringify(leads);
+  const previousCustomers = localStorage.getItem(STORAGE_KEYS.CUSTOMERS);
   const now = new Date().toISOString();
   const beforeAssignee = leads[idx].assignedTo || leads[idx].owner || '';
   const changed = beforeAssignee !== userName;
@@ -530,11 +543,19 @@ async function claimLeadAsCustomer(leadId: string, userName: string): Promise<Ap
     }), ...(leads[idx].changeHistory || [])],
     updatedAt: now,
   });
-  const customer = upsertCustomerFromLead(nextLead);
+  const { customer, write: customerWrite } = upsertCustomerFromLead(nextLead, { reportStorageFailure: false });
   nextLead = { ...nextLead, customerId: customer.id };
   leads[idx] = nextLead;
-  setStorageData(STORAGE_KEYS.LEADS, leads);
-  syncCustomerByLead(leads[idx]);
+  const leadWrite = setStorageData(STORAGE_KEYS.LEADS, leads, { reportFailure: false });
+  try {
+    await Promise.all([customerWrite, leadWrite]);
+  } catch (error) {
+    localStorage.setItem(STORAGE_KEYS.LEADS, previousLeads);
+    if (previousCustomers === null) localStorage.removeItem(STORAGE_KEYS.CUSTOMERS);
+    else localStorage.setItem(STORAGE_KEYS.CUSTOMERS, previousCustomers);
+    const message = error instanceof Error ? error.message : '数据未保存';
+    return createErrorResponse(`客户保存失败：${message}`);
+  }
   return createSuccessResponse(leads[idx]);
 }
 

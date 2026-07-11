@@ -263,7 +263,7 @@ function reconcileCustomerOrderStats(customers: Customer[]): Customer[] {
     return nextCustomer;
   });
 
-  if (changed) setStorageData(STORAGE_KEYS.CUSTOMERS, nextCustomers);
+  if (changed) setStorageData(STORAGE_KEYS.CUSTOMERS, nextCustomers, { persist: false });
   return nextCustomers;
 }
 
@@ -281,7 +281,7 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
   const raw = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
   const all = reconcileCustomerOrderStats(raw.map(normalizeCustomer));
   if (JSON.stringify(raw) !== JSON.stringify(all)) {
-    setStorageData(STORAGE_KEYS.CUSTOMERS, all);
+    setStorageData(STORAGE_KEYS.CUSTOMERS, all, { persist: false });
   }
   let filtered = filterVisibleCustomers(all.filter((customer) => !customer.deletedAt));
 

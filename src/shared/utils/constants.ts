@@ -303,6 +303,7 @@ export const STORAGE_KEYS = {
   LEAD_SOURCE_CONFIGS: `${STORAGE_PREFIX}lead_source_configs`,
   COMMISSION_RULES: `${STORAGE_PREFIX}commission_rules`,
   COMMISSION_ROLE_CONFIGS: `${STORAGE_PREFIX}commission_role_configs`,
+  COMMISSION_PAYOUT_PLANS: `${STORAGE_PREFIX}commission_payout_plans`,
   COMMISSION_SETTLEMENT_BATCHES: `${STORAGE_PREFIX}commission_settlement_batches`,
   ECOMMERCE_SETTLEMENT_RECORDS: `${STORAGE_PREFIX}ecommerce_settlement_records`,
   ECOMMERCE_SETTLEMENT_CONFIG: `${STORAGE_PREFIX}ecommerce_settlement_config`,

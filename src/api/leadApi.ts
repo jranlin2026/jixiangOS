@@ -155,7 +155,7 @@ async function fetchLeads(filters?: LeadFilters): Promise<ApiResponse<PaginatedR
   const allLeads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
   const normalizedLeads = reconcileStaleLeadAssignees(allLeads.map(normalizeLead));
   if (JSON.stringify(allLeads) !== JSON.stringify(normalizedLeads)) {
-    setStorageData(STORAGE_KEYS.LEADS, normalizedLeads);
+    setStorageData(STORAGE_KEYS.LEADS, normalizedLeads, { persist: false });
   }
   let filtered = filterVisibleLeads(normalizedLeads.filter((lead) => !lead.deletedAt));
 
@@ -196,7 +196,7 @@ async function fetchLeadById(id: string): Promise<ApiResponse<Lead | null>> {
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
   const normalizedLeads = reconcileStaleLeadAssignees(leads.map(normalizeLead));
   if (JSON.stringify(leads) !== JSON.stringify(normalizedLeads)) {
-    setStorageData(STORAGE_KEYS.LEADS, normalizedLeads);
+    setStorageData(STORAGE_KEYS.LEADS, normalizedLeads, { persist: false });
   }
   const lead = filterVisibleLeads(normalizedLeads.filter((item) => !item.deletedAt)).find((item) => item.id === id) || null;
   return createSuccessResponse(lead);

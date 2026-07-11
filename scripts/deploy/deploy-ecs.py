@@ -44,8 +44,12 @@ DEFAULT_HEALTH_URL = "http://120.24.250.244/api/health"
 
 EXCLUDE_DIRS = {
     ".git",
+    ".local",
+    ".recovery",
     ".tools",
+    ".worktrees",
     "backups",
+    "coverage",
     "node_modules",
 }
 

@@ -37,7 +37,8 @@ const DEFAULT_SALES_COMMISSION_TIERS: CommissionTier[] = [
   { minAmount: 50000, rate: 15 },
 ];
 
-const COMMISSION_PAYOUT_PLANS_STORAGE_KEY = 'commission_payout_plans';
+const COMMISSION_PAYOUT_PLANS_STORAGE_KEY = STORAGE_KEYS.COMMISSION_PAYOUT_PLANS;
+const LEGACY_COMMISSION_PAYOUT_PLANS_STORAGE_KEY = 'commission_payout_plans';
 
 function buildDefaultPayoutPlans(now = new Date().toISOString()): CommissionPayoutPlan[] {
   return [
@@ -88,15 +89,20 @@ function normalizePayoutPlan(plan: CommissionPayoutPlan): CommissionPayoutPlan {
 }
 
 function readPayoutPlans(): CommissionPayoutPlan[] {
-  const raw = getStorageData<CommissionPayoutPlan[]>(COMMISSION_PAYOUT_PLANS_STORAGE_KEY) || [];
+  let raw = getStorageData<CommissionPayoutPlan[]>(COMMISSION_PAYOUT_PLANS_STORAGE_KEY) || [];
   if (!raw.length) {
-    const defaults = buildDefaultPayoutPlans();
-    setStorageData(COMMISSION_PAYOUT_PLANS_STORAGE_KEY, defaults);
-    return defaults;
+    const legacyRaw = getStorageData<CommissionPayoutPlan[]>(LEGACY_COMMISSION_PAYOUT_PLANS_STORAGE_KEY) || [];
+    if (legacyRaw.length) {
+      // The prior key cannot be persisted by the backend. Migrate the browser cache
+      // without re-sending the invalid legacy key.
+      localStorage.setItem(COMMISSION_PAYOUT_PLANS_STORAGE_KEY, JSON.stringify(legacyRaw));
+      raw = legacyRaw;
+    }
   }
-  const normalized = raw.map(normalizePayoutPlan);
-  setStorageData(COMMISSION_PAYOUT_PLANS_STORAGE_KEY, normalized);
-  return normalized;
+  if (!raw.length) {
+    return buildDefaultPayoutPlans();
+  }
+  return raw.map(normalizePayoutPlan);
 }
 
 function resolvePayoutPlan(planId?: string): CommissionPayoutPlan | undefined {
@@ -182,11 +188,11 @@ function ensureCommissionRoleConfigs(): CommissionRoleConfig[] {
   const raw = getStorageData<CommissionRoleConfig[]>(STORAGE_KEYS.COMMISSION_ROLE_CONFIGS) || [];
   if (!raw.length) {
     const defaults = buildDefaultCommissionRoleConfigs();
-    setStorageData(STORAGE_KEYS.COMMISSION_ROLE_CONFIGS, defaults);
+    setStorageData(STORAGE_KEYS.COMMISSION_ROLE_CONFIGS, defaults, { persist: false });
     return defaults;
   }
   const normalized = sortCommissionRoleConfigs(raw);
-  setStorageData(STORAGE_KEYS.COMMISSION_ROLE_CONFIGS, normalized);
+  setStorageData(STORAGE_KEYS.COMMISSION_ROLE_CONFIGS, normalized, { persist: false });
   return normalized;
 }
 
@@ -327,22 +333,22 @@ function migrateCommissionRules(): void {
   const hasNewRules = rules.some((rule) => rule.scene || rule.resourceOwnership || rule.paymentChannels?.length);
 
   if (!hasNewRules) {
-    setStorageData(STORAGE_KEYS.COMMISSION_RULES, mockCommissionRules.map(normalizeRule));
+    setStorageData(STORAGE_KEYS.COMMISSION_RULES, mockCommissionRules.map(normalizeRule), { persist: false });
     return;
   }
 
   const normalized = rules.map(normalizeRule);
-  setStorageData(STORAGE_KEYS.COMMISSION_RULES, normalized);
+  setStorageData(STORAGE_KEYS.COMMISSION_RULES, normalized, { persist: false });
 }
 
 function readCommissionRulesForSimpleGroups(): CommissionRule[] {
   const rules = getStorageData<CommissionRule[]>(STORAGE_KEYS.COMMISSION_RULES) || [];
   if (rules.length && rules.every((rule) => !rule.ruleGroupId)) {
-    setStorageData(STORAGE_KEYS.COMMISSION_RULES, []);
+    setStorageData(STORAGE_KEYS.COMMISSION_RULES, [], { persist: false });
     return [];
   }
   const normalized = rules.map(normalizeRule);
-  setStorageData(STORAGE_KEYS.COMMISSION_RULES, normalized);
+  setStorageData(STORAGE_KEYS.COMMISSION_RULES, normalized, { persist: false });
   return normalized;
 }
 

@@ -46,7 +46,7 @@ function ensureInit(): void {
     createdAt: refund.createdAt || now,
     updatedAt: refund.updatedAt || now,
   }));
-  setStorageData(STORAGE_KEYS.SERVICE_TICKETS, tickets);
+  setStorageData(STORAGE_KEYS.SERVICE_TICKETS, tickets, { persist: false });
 }
 
 async function getTickets(filters?: ServiceTicketFilters): Promise<ApiResponse<PaginatedResponse<ServiceTicket>>> {

@@ -76,7 +76,7 @@ function ensureOrderTypeConfigs(): OrderTypeConfig[] {
   const existing = getStorageData<OrderTypeConfig[]>(STORAGE_KEYS.ORDER_TYPE_CONFIGS);
   const configs: OrderTypeConfig[] = existing?.length ? existing : DEFAULT_ORDER_TYPE_CONFIGS;
   const sorted = [...configs].sort((a, b) => a.sortOrder - b.sortOrder);
-  if (!existing?.length) setStorageData(STORAGE_KEYS.ORDER_TYPE_CONFIGS, sorted);
+  if (!existing?.length) setStorageData(STORAGE_KEYS.ORDER_TYPE_CONFIGS, sorted, { persist: false });
   return sorted;
 }
 
@@ -100,7 +100,7 @@ function ensureLifecycleStatusConfigs(): LifecycleStatusConfig[] {
       isActive: true,
     };
   }).sort((a, b) => a.sortOrder - b.sortOrder);
-  if (JSON.stringify(existing || []) !== JSON.stringify(sorted)) setStorageData(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, sorted);
+  if (JSON.stringify(existing || []) !== JSON.stringify(sorted)) setStorageData(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, sorted, { persist: false });
   return sorted;
 }
 
@@ -108,7 +108,7 @@ function ensureCustomerLevelConfigs(): CustomerLevelConfig[] {
   const existing = getStorageData<CustomerLevelConfig[]>(STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS);
   const configs = existing?.length ? existing : DEFAULT_CUSTOMER_LEVEL_CONFIGS;
   const sorted = [...configs].sort((a, b) => a.sortOrder - b.sortOrder);
-  if (!existing?.length) setStorageData(STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS, sorted);
+  if (!existing?.length) setStorageData(STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS, sorted, { persist: false });
   return sorted;
 }
 
@@ -119,7 +119,7 @@ function ensureLeadSourceConfigs(): LeadSourceConfig[] {
     if ((a.parentId || '') !== (b.parentId || '')) return (a.parentId || '').localeCompare(b.parentId || '');
     return a.sortOrder - b.sortOrder;
   });
-  if (!existing?.length) setStorageData(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, sorted);
+  if (!existing?.length) setStorageData(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, sorted, { persist: false });
   return sorted;
 }
 

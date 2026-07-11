@@ -109,6 +109,13 @@ const runtimeStorageKeys = [
   STORAGE_KEYS.PRODUCTS,
   STORAGE_KEYS.TAGS,
   STORAGE_KEYS.FINANCE,
+  STORAGE_KEYS.ASSET_DEVICES,
+  STORAGE_KEYS.ASSET_PHONE_NUMBERS,
+  STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS,
+  STORAGE_KEYS.ASSET_RISKS,
+  STORAGE_KEYS.ASSET_OPERATION_LOGS,
+  STORAGE_KEYS.ASSET_OFFBOARDING_TASKS,
+  STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS,
   STORAGE_KEYS.USERS,
   STORAGE_KEYS.DEPARTMENTS,
   STORAGE_KEYS.POSITIONS,
@@ -124,6 +131,7 @@ const runtimeStorageKeys = [
   STORAGE_KEYS.LEAD_SOURCE_CONFIGS,
   STORAGE_KEYS.COMMISSION_RULES,
   STORAGE_KEYS.COMMISSION_ROLE_CONFIGS,
+  STORAGE_KEYS.COMMISSION_PAYOUT_PLANS,
   STORAGE_KEYS.MONTHLY_COMMISSION_TIER_CONFIGS,
   STORAGE_KEYS.ECOMMERCE_SETTLEMENT_RECORDS,
   STORAGE_KEYS.ECOMMERCE_SETTLEMENT_CONFIG,
@@ -474,7 +482,13 @@ app.get('/api/storage', requireStorageAccess, async (req: AuthenticatedRequest, 
       const result = await storageService.get(key);
       return [key, result.code === 0 ? result.data : null] as const;
       }));
-    res.json({ code: 0, data: Object.fromEntries(entries), message: 'success' });
+    const data = Object.fromEntries(entries);
+    const context = await assetStorageContext();
+    res.json({
+      code: 0,
+      data: filterAssetStorageData(data, req.currentUser!, context),
+      message: 'success',
+    });
     return;
   }
 

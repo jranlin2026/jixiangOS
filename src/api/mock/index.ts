@@ -77,7 +77,7 @@ function migrateLegacyDefaultProductDeliveryStages(): void {
     return product;
   });
 
-  if (changed) setStorageData(STORAGE_KEYS.PRODUCTS, nextProducts);
+  if (changed) setStorageData(STORAGE_KEYS.PRODUCTS, nextProducts, { persist: false });
 }
 
 function businessSeed<T>(demoData: T, emptyData: T): T {

@@ -84,7 +84,9 @@ function getPositions(): Array<{ id: string; name: string; departmentId?: string
 }
 
 function getPayoutPlans(): CommissionPayoutPlan[] {
-  return getStorageData<CommissionPayoutPlan[]>('commission_payout_plans') || [];
+  return getStorageData<CommissionPayoutPlan[]>(STORAGE_KEYS.COMMISSION_PAYOUT_PLANS)
+    || getStorageData<CommissionPayoutPlan[]>('commission_payout_plans')
+    || [];
 }
 
 function getCurrentSessionUser(): User | undefined {

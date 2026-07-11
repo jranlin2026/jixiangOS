@@ -22,7 +22,7 @@ function ensureProductLevelConfigs(): ProductLevelConfig[] {
   const configs = existing?.length ? existing : mockProductLevelConfigs;
 
   if (!existing?.length) {
-    setStorageData(STORAGE_KEYS.PRODUCT_LEVELS, configs);
+    setStorageData(STORAGE_KEYS.PRODUCT_LEVELS, configs, { persist: false });
   }
   return [...configs].sort((a, b) => a.sortOrder - b.sortOrder);
 }

@@ -39,9 +39,18 @@ export function getStorageData<T>(key: string): T | null {
 }
 
 /** 更新 localStorage 数据 */
-export function setStorageData<T>(key: string, data: T): void {
+export function setStorageData<T>(
+  key: string,
+  data: T,
+  options: { reportFailure?: boolean; persist?: boolean } = {},
+): Promise<void> {
   localStorage.setItem(key, JSON.stringify(data));
-  void persistBackendStorageValue(key, data).catch((error) => reportFailedSync(key, 'save', error));
+  if (options.persist === false) return Promise.resolve();
+  const write = persistBackendStorageValue(key, data);
+  if (options.reportFailure !== false) {
+    void write.catch((error) => reportFailedSync(key, 'save', error));
+  }
+  return write;
 }
 
 /** 删除 localStorage 数据 */

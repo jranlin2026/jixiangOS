@@ -447,7 +447,7 @@ export function getOrganizationProfile(): OrganizationProfile {
   const existing = getStorageData<OrganizationProfile>(STORAGE_KEYS.ORGANIZATION_PROFILE);
   const companyName = String(existing?.companyName || '').trim() || DEFAULT_ORGANIZATION_PROFILE.companyName;
   const profile = { ...DEFAULT_ORGANIZATION_PROFILE, ...existing, companyName };
-  setStorageData(STORAGE_KEYS.ORGANIZATION_PROFILE, profile);
+  setStorageData(STORAGE_KEYS.ORGANIZATION_PROFILE, profile, { persist: false });
   return profile;
 }
 
@@ -519,11 +519,13 @@ export function ensureOrganizationConfigData() {
     ? migrateStoredUsersWithIdMaps(getStorageData<User[]>(STORAGE_KEYS.USERS), roles, { roles: rolesResult.idMap })
     : null;
 
-  setStorageData(STORAGE_KEYS.DEPARTMENTS, departments);
-  setStorageData(STORAGE_KEYS.ROLES, roles);
-  setStorageData(STORAGE_KEYS.POSITIONS, positions);
-  if (migratedUsers) setStorageData(STORAGE_KEYS.USERS, migratedUsers);
-  setStorageData(STORAGE_KEYS.ORGANIZATION_SCHEMA_VERSION, ORGANIZATION_SCHEMA_VERSION);
+  // This helper runs during ordinary page reads (for example, the sidebar).
+  // Keep its normalization local so employees never attempt administrator-only writes.
+  setStorageData(STORAGE_KEYS.DEPARTMENTS, departments, { persist: false });
+  setStorageData(STORAGE_KEYS.ROLES, roles, { persist: false });
+  setStorageData(STORAGE_KEYS.POSITIONS, positions, { persist: false });
+  if (migratedUsers) setStorageData(STORAGE_KEYS.USERS, migratedUsers, { persist: false });
+  setStorageData(STORAGE_KEYS.ORGANIZATION_SCHEMA_VERSION, ORGANIZATION_SCHEMA_VERSION, { persist: false });
   getOrganizationProfile();
 
   return {

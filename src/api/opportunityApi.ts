@@ -51,7 +51,7 @@ function ensureInit(): void {
         updatedAt: lead.updatedAt,
       };
     });
-  setStorageData(STORAGE_KEYS.OPPORTUNITIES, opportunities);
+  setStorageData(STORAGE_KEYS.OPPORTUNITIES, opportunities, { persist: false });
 }
 
 function addDays(date: Date, days: number): string {
@@ -78,7 +78,7 @@ async function getOpportunities(filters?: OpportunityFilters): Promise<ApiRespon
   await delay(150);
   const raw = getStorageData<Opportunity[]>(STORAGE_KEYS.OPPORTUNITIES) || [];
   const normalized = raw.map(normalizeOpportunity);
-  if (JSON.stringify(raw) !== JSON.stringify(normalized)) setStorageData(STORAGE_KEYS.OPPORTUNITIES, normalized);
+  if (JSON.stringify(raw) !== JSON.stringify(normalized)) setStorageData(STORAGE_KEYS.OPPORTUNITIES, normalized, { persist: false });
   let items = normalized;
   if (filters?.search) {
     const q = filters.search.toLowerCase();

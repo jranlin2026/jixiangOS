@@ -121,6 +121,9 @@ assert.equal(upserts[0].create.name, 'A线索');
 assert.equal(deletedWhere.id.notIn.length, 2);
 assert.equal(appStorageUpserted, false);
 
+const payoutPlansResult = await service.set(STORAGE_KEYS.COMMISSION_PAYOUT_PLANS, []);
+assert.equal(payoutPlansResult.code, 0, '提成方案存储 key 必须能被后端持久化');
+
 const customersResult = await service.get(STORAGE_KEYS.CUSTOMERS);
 assert.equal(customersResult.code, 0);
 assert.deepEqual((customersResult.data as any[]).map((item) => item.id), ['customer-1']);

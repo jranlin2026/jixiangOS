@@ -21,5 +21,12 @@ assert.equal(isLegacyStorageKeyRegistered(STORAGE_KEYS.CUSTOMERS), true);
 assert.equal(canAccessLegacyStorageKey(user, STORAGE_KEYS.CUSTOMERS, 'read'), true);
 assert.equal(canAccessLegacyStorageKey(user, STORAGE_KEYS.CUSTOMERS, 'write'), false);
 assert.equal(canAccessLegacyStorageKey(user, STORAGE_KEYS.COMMISSIONS, 'read'), false);
+const financeRuleEditor = {
+  ...user,
+  id: 'user-finance-rule-editor',
+  permissions: [{ module: PERMISSION_KEYS.FINANCE_RULES, actions: ['write'] }],
+};
+assert.equal(isLegacyStorageKeyRegistered(STORAGE_KEYS.COMMISSION_PAYOUT_PLANS), true);
+assert.equal(canAccessLegacyStorageKey(financeRuleEditor, STORAGE_KEYS.COMMISSION_PAYOUT_PLANS, 'write'), true);
 assert.equal(isLegacyStorageKeyRegistered('aaos_unknown_private_data'), false);
 assert.equal(canAccessLegacyStorageKey(user, 'aaos_unknown_private_data', 'read'), false);

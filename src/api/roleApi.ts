@@ -15,7 +15,7 @@ function ensureInit(): void {
 }
 
 function cacheRoles(roles: Role[]): void {
-  setStorageData(STORAGE_KEYS.ROLES, roles);
+  setStorageData(STORAGE_KEYS.ROLES, roles, { persist: false });
 }
 
 function mergeCachedRole(role: Role): void {

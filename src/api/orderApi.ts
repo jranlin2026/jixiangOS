@@ -213,7 +213,7 @@ async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<Paginate
   await delay(200);
   const raw = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
   const all = raw.map(normalizeOrder);
-  if (JSON.stringify(raw) !== JSON.stringify(all)) setStorageData(STORAGE_KEYS.ORDERS, all);
+  if (JSON.stringify(raw) !== JSON.stringify(all)) setStorageData(STORAGE_KEYS.ORDERS, all, { persist: false });
   let filtered = filterVisibleOrders(all.filter((order) => !order.deletedAt));
 
   if (filters?.search) {
@@ -275,7 +275,7 @@ async function fetchOrderById(id: string): Promise<ApiResponse<Order | null>> {
   await delay(150);
   const raw = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
   const orders = raw.map(normalizeOrder);
-  if (JSON.stringify(raw) !== JSON.stringify(orders)) setStorageData(STORAGE_KEYS.ORDERS, orders);
+  if (JSON.stringify(raw) !== JSON.stringify(orders)) setStorageData(STORAGE_KEYS.ORDERS, orders, { persist: false });
   return createSuccessResponse(filterVisibleOrders(orders.filter((order) => !order.deletedAt)).find((o) => o.id === id) || null);
 }
 
