@@ -31,3 +31,9 @@ The generic `.superpowers/sdd/task-8-report.md` was already occupied by the Know
 - The list behavior fake now executes tag matching and salesperson ownership against mixed Sales A/Sales B fixtures, derives count from the filtered set, and slices the same set for pagination. The service result proves only Sales A matches are returned and count/items stay aligned.
 - `tagMatch` is explicitly narrowed to the union in both the HTTP route and radio change handler; no tag-mode `as any` remains.
 - Focused tests, data visibility, full tests, TypeScript, production build, and diff checks pass.
+
+## Final review fix
+
+- Customer list requests now use a monotonically increasing sequence token. Only the newest request may update items, pagination, error, or loading; stale successes and stale failures return without touching state.
+- Deferred asynchronous tests prove a fast B response remains authoritative after both a slow A success and a slow A failure. Apply/clear single-request regression coverage remains green.
+- Focused tests, full tests, TypeScript, production build, and diff checks pass.
