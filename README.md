@@ -44,10 +44,12 @@ NODE_ENV=production pnpm run prod:check
 - 客户列表支持组内任一、任一标签、全部标签以及未打标签筛选，并可与生命周期筛选组合。
 - 历史自由文本标签必须先由超级管理员预览再执行迁移；自动规则标签和高级人群包不在当前版本范围内。
 
-本地集成冒烟脚本只允许连接回环地址和非生产环境。运行前启动本地 API，并通过环境变量提供隔离测试账号：
+本地集成冒烟脚本只允许连接回环地址上的 API 和 MySQL，拒绝生产环境；数据库名必须包含 `_qa` 或 `_test`，并与 `QA_DATABASE_NAME` 完全一致。脚本还要求显式设置 `QA_ALLOW_DESTRUCTIVE_DB=true`，所有保护条件均在实例化数据库客户端前完成。运行前启动本地 API，并通过环境变量提供隔离测试库和账号：
 
 ```bash
 QA_API_BASE=http://127.0.0.1:3001/api \
+DATABASE_URL=mysql://...@127.0.0.1:3306/jixiang_os_qa \
+QA_DATABASE_NAME=jixiang_os_qa QA_ALLOW_DESTRUCTIVE_DB=true \
 QA_ADMIN_ACCOUNT=... QA_ADMIN_PASSWORD=... \
 QA_SALES_ACCOUNT=... QA_SALES_PASSWORD=... \
 pnpm exec tsx scripts/qa/customer-tag-smoke.ts

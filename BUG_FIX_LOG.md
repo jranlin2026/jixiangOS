@@ -16,7 +16,7 @@
 | CUSTOMER-TAG-002 | P1 | 标签筛选不能表达组内任一、跨组全部等精确条件 | 旧筛选只按标签名称做本地模糊匹配 | 新增服务端 `grouped`/`any`/`all`、无标签和缺组查询；包含数据范围、分页、乱序响应回归 | 大数据量生产查询性能需上线后观察 |
 | CUSTOMER-TAG-003 | P1 | 旧自由文本与新目录无法安全衔接 | 没有预览、校验和和幂等迁移过程 | 新增超级管理员专用 preview/apply、目录写锁与审计；服务单测覆盖预览、过期校验和、幂等和写入竞争 | 本轮未连接 QA/生产库，因此真实 preview/apply 数量未取得，生产禁止直接 apply |
 
-本功能验证证据：10 个聚焦命令全部退出 0；`pnpm test` 为 **136 个测试文件通过**；`pnpm build` 退出 0（2866 modules，未出现 Vite chunk 警告，但 `exceljs.min` 静态资产为 947.70 kB）；`tsc -b` 已包含在 build 中。Prisma schema 使用示例本地 URL验证通过；未配置真实 `DATABASE_URL`，所以 migration status 和本地 API/浏览器角色冒烟未执行。自动规则标签和高级人群包明确未实现。
+本功能验证证据：10 个聚焦命令全部退出 0；`pnpm test` 为 **136 个测试文件通过**；`pnpm build` 退出 0（2866 modules，未出现 Vite chunk 警告，但 `exceljs.min` 静态资产为 947.70 kB）；`tsc -b` 已包含在 build 中。Prisma schema 使用示例本地 URL验证通过；未配置真实 `DATABASE_URL`，所以 migration status 和本地 API/浏览器角色冒烟未执行。冒烟脚本同时限制 API/MySQL 回环地址、隔离库命名、精确库名确认和显式破坏性测试开关。自动规则标签和高级人群包明确未实现。
 
 | 项目 | 最新结果 | 证据 |
 |---|---|---|

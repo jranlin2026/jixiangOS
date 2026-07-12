@@ -11,11 +11,29 @@ type Envelope<T> = { code: number; data: T; message?: string };
 type Login = { token: string; user: { id: string; name: string } };
 type CustomerPage = { items: Customer[]; total: number };
 
-const prisma = new PrismaClient();
 const baseUrl = String(process.env.QA_API_BASE || 'http://127.0.0.1:3001/api').replace(/\/$/, '');
 const target = new URL(baseUrl);
-if (process.env.NODE_ENV === 'production' || !new Set(['127.0.0.1', 'localhost', '::1']).has(target.hostname)) {
+const unbracketedHost = (hostname: string) => hostname.replace(/^\[|\]$/g, '');
+if (process.env.NODE_ENV === 'production' || !new Set(['127.0.0.1', 'localhost', '::1']).has(unbracketedHost(target.hostname))) {
   throw new Error('customer-tag-smoke only runs against a loopback non-production API');
+}
+
+const databaseUrlValue = String(process.env.DATABASE_URL || '').trim();
+if (!databaseUrlValue) throw new Error('customer-tag-smoke requires DATABASE_URL for an isolated local QA database');
+const databaseUrl = new URL(databaseUrlValue);
+const databaseName = decodeURIComponent(databaseUrl.pathname.replace(/^\/+/, ''));
+const localHosts = new Set(['127.0.0.1', 'localhost', '::1']);
+if (databaseUrl.protocol !== 'mysql:' || !localHosts.has(unbracketedHost(databaseUrl.hostname))) {
+  throw new Error('customer-tag-smoke requires a loopback mysql DATABASE_URL');
+}
+if (!/(?:_qa|_test)(?:_|$)/i.test(databaseName)) {
+  throw new Error('customer-tag-smoke requires an isolated database name containing _qa or _test');
+}
+if (process.env.QA_ALLOW_DESTRUCTIVE_DB !== 'true') {
+  throw new Error('customer-tag-smoke requires QA_ALLOW_DESTRUCTIVE_DB=true');
+}
+if (!process.env.QA_DATABASE_NAME || process.env.QA_DATABASE_NAME !== databaseName) {
+  throw new Error('QA_DATABASE_NAME must exactly match the DATABASE_URL database name');
 }
 
 const adminAccount = String(process.env.QA_ADMIN_ACCOUNT || '').trim();
@@ -26,10 +44,16 @@ if (!adminAccount || !adminPassword || !salesAccount || !salesPassword) {
   throw new Error('QA admin and sales credentials are required through environment variables');
 }
 
+// Instantiation deliberately happens only after every API, database, destructive-action,
+// database-name, and credential guard above has passed.
+const prisma = new PrismaClient();
+
 const runId = randomUUID().slice(0, 12);
 const prefix = `qa-tag-${runId}`;
 const customerIds = ['a', 'b', 'both', 'empty'].map((suffix) => `${prefix}-customer-${suffix}`);
 const leadId = `${prefix}-lead`;
+const outOfScopeCustomerId = `${prefix}-customer-out-of-scope`;
+const outOfScopeLeadId = `${prefix}-lead-out-of-scope`;
 let adminToken = '';
 let salesToken = '';
 const createdGroupIds: string[] = [];
@@ -57,8 +81,8 @@ async function cleanup() {
   if (adminToken) await raw('/auth/logout', { method: 'POST' }, adminToken).catch(() => undefined);
   if (salesToken) await raw('/auth/logout', { method: 'POST' }, salesToken).catch(() => undefined);
   await prisma.$transaction([
-    prisma.businessRecord.deleteMany({ where: { domain: STORAGE_KEYS.CUSTOMERS, recordId: { in: customerIds } } }),
-    prisma.leadRecord.deleteMany({ where: { id: leadId } }),
+    prisma.businessRecord.deleteMany({ where: { domain: STORAGE_KEYS.CUSTOMERS, recordId: { in: [...customerIds, outOfScopeCustomerId] } } }),
+    prisma.leadRecord.deleteMany({ where: { id: { in: [leadId, outOfScopeLeadId] } } }),
     prisma.businessRecord.deleteMany({ where: { domain: STORAGE_KEYS.TAGS, recordId: { in: createdTagIds } } }),
     prisma.businessRecord.deleteMany({ where: { domain: STORAGE_KEYS.TAG_GROUPS, recordId: { in: createdGroupIds } } }),
   ]);
@@ -67,7 +91,7 @@ async function cleanup() {
 function customer(id: string, owner: string, manualTagIds: string[]): Customer {
   const timestamp = new Date().toISOString();
   return {
-    id, name: `${prefix}-${id.split('-').pop()}`, company: `${prefix}-company`, phone: `199${Math.random().toString().slice(2, 10)}`,
+    id, name: `${prefix}-customer-fixture-${id.split('-').pop()}`, company: `${prefix}-customer-fixture`, phone: `199${Math.random().toString().slice(2, 10)}`,
     owner, customerLevel: 'L1', lifecycleStatusCode: 'following', lifecycleStatusUpdatedAt: timestamp,
     sourceType: '公司资源', totalSpent: 0, orderCount: 0, growthPath: [], growthRecords: [], activityRecords: [],
     manualTagIds, createdAt: timestamp, updatedAt: timestamp,
@@ -92,6 +116,14 @@ try {
     name: `${prefix}-lead-only`, selectionMode: 'single', scope: 'lead', color: '#8c8c8c',
   }), adminToken);
   createdGroupIds.push(leadGroup.id);
+  const customerGroup = await ok<CustomerTagGroup>('/customer-tags/groups', json('POST', {
+    name: `${prefix}-customer`, selectionMode: 'multiple', scope: 'customer', color: '#52c41a',
+  }), adminToken);
+  createdGroupIds.push(customerGroup.id);
+
+  const forbiddenTag = await raw('/customer-tags', json('POST', { groupId: sharedGroup.id, name: `${prefix}-forbidden-tag` }), salesToken);
+  assert.equal(forbiddenTag.response.status, 403);
+  assert.equal(forbiddenTag.payload.code, 403);
 
   const sharedA = await ok<CustomerTag>('/customer-tags', json('POST', { groupId: sharedGroup.id, name: `${prefix}-shared-a` }), adminToken);
   createdTagIds.push(sharedA.id);
@@ -101,6 +133,8 @@ try {
   createdTagIds.push(leadOnly.id);
   const leadOnlySecond = await ok<CustomerTag>('/customer-tags', json('POST', { groupId: leadGroup.id, name: `${prefix}-lead-b` }), adminToken);
   createdTagIds.push(leadOnlySecond.id);
+  const customerOnly = await ok<CustomerTag>('/customer-tags', json('POST', { groupId: customerGroup.id, name: `${prefix}-customer-a` }), adminToken);
+  createdTagIds.push(customerOnly.id);
 
   const timestamp = new Date().toISOString();
   const lead: Lead = {
@@ -110,13 +144,18 @@ try {
     createdAt: timestamp, updatedAt: timestamp, followUpRecords: [],
   };
   const fixtures = [
-    customer(customerIds[0], sales.user.name, [sharedA.id]),
-    customer(customerIds[1], sales.user.name, [sharedB.id]),
+    customer(customerIds[0], sales.user.name, [sharedA.id, customerOnly.id]),
+    customer(customerIds[1], sales.user.name, [sharedB.id, customerOnly.id]),
     customer(customerIds[2], sales.user.name, [sharedA.id, sharedB.id]),
     customer(customerIds[3], sales.user.name, []),
   ];
+  const outOfScopeCustomer = customer(outOfScopeCustomerId, `${prefix}-other-owner`, []);
+  const outOfScopeLead: Lead = {
+    ...lead, id: outOfScopeLeadId, name: `${prefix}-other-lead`, phone: `197${runId.replace(/\D/g, '').padEnd(8, '1').slice(0, 8)}`,
+    owner: `${prefix}-other-owner`, assignedTo: `${prefix}-other-owner`, manualTagIds: [],
+  };
   await prisma.$transaction([
-    ...fixtures.map((value) => prisma.businessRecord.create({ data: {
+    ...[...fixtures, outOfScopeCustomer].map((value) => prisma.businessRecord.create({ data: {
       id: `${STORAGE_KEYS.CUSTOMERS}:${value.id}`, domain: STORAGE_KEYS.CUSTOMERS, recordId: value.id,
       title: value.name, status: value.lifecycleStatusCode, owner: value.owner, customerId: value.id,
       eventAt: new Date(timestamp), data: value as unknown as Prisma.InputJsonValue,
@@ -126,7 +165,17 @@ try {
       lifecycleStatusCode: lead.lifecycleStatusCode, owner: lead.owner, assignedTo: lead.assignedTo,
       data: lead as unknown as Prisma.InputJsonValue,
     } }),
+    prisma.leadRecord.create({ data: {
+      id: outOfScopeLead.id, name: outOfScopeLead.name, company: outOfScopeLead.company, phone: outOfScopeLead.phone,
+      source: outOfScopeLead.source, status: outOfScopeLead.status, lifecycleStatusCode: outOfScopeLead.lifecycleStatusCode,
+      owner: outOfScopeLead.owner, assignedTo: outOfScopeLead.assignedTo, data: outOfScopeLead as unknown as Prisma.InputJsonValue,
+    } }),
   ]);
+
+  const forbiddenCustomerEdit = await raw(`/customers/${encodeURIComponent(outOfScopeCustomerId)}`, json('PUT', { manualTagIds: [sharedA.id] }), salesToken);
+  assert.equal(forbiddenCustomerEdit.payload.code, 403, 'sales cannot edit an out-of-scope customer');
+  const forbiddenLeadEdit = await raw(`/leads/${encodeURIComponent(outOfScopeLeadId)}`, json('PUT', { manualTagIds: [sharedA.id] }), salesToken);
+  assert.equal(forbiddenLeadEdit.payload.code, 403, 'sales cannot edit an out-of-scope lead');
 
   await ok(`/leads/${encodeURIComponent(leadId)}`, json('PUT', { manualTagIds: [sharedA.id, leadOnly.id] }), salesToken);
   const conflict = await raw(`/leads/${encodeURIComponent(leadId)}`, json('PUT', { manualTagIds: [sharedA.id, leadOnly.id, leadOnlySecond.id] }), salesToken);
@@ -144,14 +193,14 @@ try {
   assert.deepEqual((storedCustomer?.data as any).manualTagIds, [sharedA.id], 'customer inherits only shared tags');
 
   const query = async (mode: 'grouped' | 'any' | 'all') => {
-    const params = new URLSearchParams({ search: prefix, tagMatch: mode, page: '1', pageSize: '100' });
-    params.append('tagId', sharedA.id); params.append('tagId', sharedB.id);
+    const params = new URLSearchParams({ search: `${prefix}-customer-fixture`, tagMatch: mode, page: '1', pageSize: '100' });
+    params.append('tagId', sharedA.id); params.append('tagId', customerOnly.id);
     return ok<CustomerPage>(`/customers?${params}`, {}, salesToken);
   };
   const [grouped, any, all] = await Promise.all([query('grouped'), query('any'), query('all')]);
-  assert.deepEqual(new Set(grouped.items.map((item) => item.id)), new Set([customerIds[0], customerIds[1], customerIds[2]]));
+  assert.deepEqual(grouped.items.map((item) => item.id), [customerIds[0]], 'grouped must OR within a group and AND across groups');
   assert.deepEqual(new Set(any.items.map((item) => item.id)), new Set([customerIds[0], customerIds[1], customerIds[2]]));
-  assert.deepEqual(all.items.map((item) => item.id), [customerIds[2]]);
+  assert.deepEqual(all.items.map((item) => item.id), [customerIds[0]]);
 
   const assignmentBeforeRename = await prisma.businessRecord.findUnique({
     where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: customerIds[0] } },

@@ -18,7 +18,7 @@
 | Prisma schema | 通过 | 使用 `.env.example` 形式的回环 MySQL URL 执行 `prisma validate` |
 | Prisma migration status | 未验证 | 工作树没有真实 `DATABASE_URL`，没有连接或修改数据库 |
 | 迁移 preview/apply | 未验证 | 未获得本地超级管理员凭据和隔离数据库，未产生真实计数 |
-| API/浏览器角色冒烟 | 未验证 | 已提供回环地址限定、生产禁用、唯一 run ID 和 finally 清理的脚本；未提供 QA 管理员/销售凭据 |
+| API/浏览器角色冒烟 | 未验证 | 脚本同时限制 API/MySQL 为回环地址，要求 `_qa`/`_test` 隔离库名、`QA_DATABASE_NAME` 精确确认和 `QA_ALLOW_DESTRUCTIVE_DB=true`，并使用唯一 run ID 与 finally 精确清理；未提供 QA 数据库和角色凭据 |
 | 自动规则标签/高级人群包 | 不在范围 | 本版本只交付人工预设标签与精确筛选 |
 
 ## 自动门禁
