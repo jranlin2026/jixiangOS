@@ -270,6 +270,9 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
       const target = catalog.tags.find((tag) => tag.id === targetId);
       if (!source || !target) return failure('标签不存在', 404);
       if (source.groupId !== target.groupId) return failure('只能合并同组标签', 409);
+      if (!target.isActive) return failure('目标标签必须为启用状态', 409);
+      const targetGroup = catalog.groups.find((group) => group.id === target.groupId);
+      if (!targetGroup || !targetGroup.isActive) return failure('目标标签所属分组必须存在且为启用状态', 409);
       const audit = { id: randomUUID(), type: 'tag_merge', title: '合并客户标签', content: `${source.name} → ${target.name}`, operator: user.name, createdAt: now() };
       const businessRows = await tx.businessRecord.findMany({ where: { domain: { in: [STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.LEADS] } } });
       for (const row of businessRows) {

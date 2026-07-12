@@ -24,7 +24,7 @@ const service = {
   updateGroup: async (id: string) => id === 'missing' ? { code: 404, data: null, message: 'missing' } : { code: 0, data: { id }, message: 'success' },
   createTag: async () => ({ code: 0, data: { id: 't2' }, message: 'success' }),
   updateTag: async (id: string) => id === 'duplicate' ? { code: 409, data: null, message: 'duplicate' } : { code: 0, data: { id }, message: 'success' },
-  mergeTag: async () => ({ code: 0, data: {}, message: 'success' }),
+  mergeTag: async (_source: string, target: string) => target === 'inactive' || target === 'inactive-group' ? { code: 409, data: null, message: '目标不可用' } : { code: 0, data: {}, message: 'success' },
   mergeGroup: async (_source: string, target: string, currentUser: any) => currentUser.id === 'sales' ? { code: 403, data: null, message: 'forbidden' } : target === 'inactive' ? { code: 409, data: null, message: '目标已停用' } : { code: 0, data: {}, message: 'success' },
   reorderTags: async () => ({ code: 0, data: {}, message: 'success' }),
 };
@@ -66,6 +66,8 @@ try {
   assert.equal((await request('/groups/missing', { method: 'PUT', body: '{}' })).status, 404);
   assert.equal((await request('/duplicate', { method: 'PUT', body: '{}' })).status, 409);
   assert.equal((await request('/source/merge', { method: 'POST', body: JSON.stringify({ targetId: 'target' }) })).status, 200);
+  assert.equal((await request('/source/merge', { method: 'POST', body: JSON.stringify({ targetId: 'inactive' }) })).status, 409);
+  assert.equal((await request('/source/merge', { method: 'POST', body: JSON.stringify({ targetId: 'inactive-group' }) })).status, 409);
   assert.equal((await request('/groups/source/merge', { method: 'POST', headers: { 'x-user': 'sales' }, body: JSON.stringify({ targetId: 'target' }) })).status, 403);
   assert.equal((await request('/groups/source/merge', { method: 'POST', body: JSON.stringify({ targetId: 'target' }) })).status, 200);
   assert.equal((await request('/groups/source/merge', { method: 'POST', body: JSON.stringify({ targetId: 'inactive' }) })).status, 409);

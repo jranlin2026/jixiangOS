@@ -41,3 +41,4 @@ No real database, live server, production deployment, or production data was acc
 - Group merge rejects inactive targets before any catalog or audit write, while intentionally allowing inactive source groups to be governed into an active target.
 - Historical migration unions canonical `LeadRecord` and legacy lead `BusinessRecord` rows, deduplicates by lead ID with canonical precedence, and writes each migrated lead back to its authoritative storage exactly once.
 - Canonical lead IDs suppress same-ID legacy snapshots even when the canonical row is soft-deleted; deleted canonical and suppressed legacy rows are excluded from preview counts, conflicts, checksum assignments, apply writes, and audit counts.
+- Tag merge now requires an active target tag in an existing active group before any customer, lead, tag, or audit write. Inactive source tags remain intentionally mergeable into a valid active target for catalog governance.

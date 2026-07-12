@@ -179,6 +179,7 @@ assert.equal(target.code, 0);
 const sourceId = inUseTagId;
 const targetId = (target.data as any).id;
 assert.equal((await service.mergeTag(sourceId, targetId, superAdmin)).code, 0);
+assert.equal(prisma.rows.get(rowKey(STORAGE_KEYS.TAGS, sourceId)).data.isActive, false, '停用 source 标签可治理合并到启用 target');
 const updatedCustomer = prisma.rows.get(rowKey(STORAGE_KEYS.CUSTOMERS, 'customer-1')).data;
 assert.deepEqual(updatedCustomer.manualTagIds, [targetId]);
 assert.deepEqual(updatedCustomer.tags, ['重点客户']);
@@ -186,6 +187,24 @@ assert.equal('manualTagNames' in updatedCustomer, false);
 assert.ok(updatedCustomer.activityRecords.some((item: any) => item.title === '合并客户标签'));
 const updatedLead = prisma.leads.get('lead-1').data;
 assert.deepEqual(updatedLead.manualTagIds, [targetId]);
+
+const inactiveMergeTarget = await service.createTag({ groupId, name: '停用合并目标', isActive: false }, superAdmin);
+const activeMergeSource = await service.createTag({ groupId, name: '活动合并源' }, superAdmin);
+const inactiveTargetSnapshot = clone(prisma.rows);
+const inactiveTargetResult = await service.mergeTag((activeMergeSource.data as any).id, (inactiveMergeTarget.data as any).id, superAdmin);
+assert.equal(inactiveTargetResult.code, 409);
+assert.match(inactiveTargetResult.message, /目标标签.*启用/);
+assert.deepEqual(prisma.rows, inactiveTargetSnapshot, '停用 target 必须在客户/线索/标签/审计写入前原子拒绝');
+
+const inactiveMergeGroup = await service.createGroup({ ...validGroup, name: '停用合并分组', isActive: false }, superAdmin);
+const inactiveMergeGroupId = (inactiveMergeGroup.data as any).id;
+const sourceInInactiveGroup = await service.createTag({ groupId: inactiveMergeGroupId, name: '停用组源' }, superAdmin);
+const targetInInactiveGroup = await service.createTag({ groupId: inactiveMergeGroupId, name: '停用组目标' }, superAdmin);
+const inactiveGroupSnapshot = clone(prisma.rows);
+const inactiveGroupResult = await service.mergeTag((sourceInInactiveGroup.data as any).id, (targetInInactiveGroup.data as any).id, superAdmin);
+assert.equal(inactiveGroupResult.code, 409);
+assert.match(inactiveGroupResult.message, /目标标签所属分组.*启用/);
+assert.deepEqual(prisma.rows, inactiveGroupSnapshot, '停用 target group 必须零写入');
 
 const leadOnlyGroup = await service.createGroup({ ...validGroup, name: '待收窄范围', scope: 'both' }, superAdmin);
 const leadOnlyGroupId = (leadOnlyGroup.data as any).id;
