@@ -70,6 +70,7 @@ import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import { ModuleHeader, ModulePage, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
+import { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
 
 type CustomerColumn = {
   id: string;
@@ -124,13 +125,7 @@ const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[], scope: 
   {
     id: 'tags',
     label: '标签',
-    render: (customer) => (
-      <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-        {customer.tags?.length ? customer.tags.map((tag) => (
-          <Chip key={tag} label={tag} size="small" variant="outlined" sx={{ height: 22 }} />
-        )) : '-'}
-      </Box>
-    ),
+    render: (customer) => <ManualTagDisplay scope="customer" ids={customer.manualTagIds} legacyNames={customer.tags} />,
   },
   { id: 'leadSource', label: '线索来源', render: (customer) => formatCustomerSource(customer) },
   { id: 'sourceType', label: '资源归属', render: (customer) => normalizeResourceOwnership(customer.sourceType) },

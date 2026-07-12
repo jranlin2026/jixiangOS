@@ -39,6 +39,7 @@ import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution'
 import PermissionGate from '../../shared/auth/PermissionGate';
 import { PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
+import ManualTagSelector, { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
 
 interface CustomerDetailProps {
   customer: Customer;
@@ -72,8 +73,6 @@ const formatCustomerSource = (customer: Customer) => [customer.leadSource, custo
 const contractKey = (customerId: string) => `aaos_customer_contracts_${customerId}`;
 const MAX_ACTIVITY_ATTACHMENTS = 6;
 const MAX_ACTIVITY_ATTACHMENT_SIZE = 10 * 1024 * 1024;
-const normalizeCustomerTags = (tags?: string[]) => (tags || []).map((tag) => tag.trim()).filter(Boolean);
-const parseCustomerTagsInput = (value: string) => value.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean);
 
 const activityAttachmentAccept: Record<CustomerActivityAttachmentCategory, string> = {
   image: 'image/*',
@@ -127,7 +126,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const [editing, setEditing] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [draft, setDraft] = useState<Partial<Customer>>({});
-  const [tagInput, setTagInput] = useState('');
+  const [selectedManualTagIds, setSelectedManualTagIds] = useState<string[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [contracts, setContracts] = useState<ContractFile[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -146,7 +145,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   useEffect(() => {
     setCurrentCustomer(customer);
     setDraft(customer);
-    setTagInput(normalizeCustomerTags(customer.tags).join(', '));
+    setSelectedManualTagIds(customer.manualTagIds || []);
     setFollowNote('');
     setFollowAttachments([]);
     setEditing(false);
@@ -380,7 +379,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       leadContributorId: draft.leadContributorId,
       leadContributorName: draft.leadContributorName,
       customerLevel: draft.customerLevel,
-      tags: parseCustomerTagsInput(tagInput),
+      manualTagIds: selectedManualTagIds,
       originalSalesTransferBy: draft.originalSalesTransferBy,
       remark: draft.remark,
     };
@@ -393,7 +392,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       }
       setCurrentCustomer(res.data);
       setDraft(res.data);
-      setTagInput(normalizeCustomerTags(res.data.tags).join(', '));
+      setSelectedManualTagIds(res.data.manualTagIds || []);
       setEditing(false);
       onUpdated?.(res.data);
     } catch (error) {
@@ -418,7 +417,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     }
     setCurrentCustomer(updatedCustomer);
     setDraft(updatedCustomer);
-    setTagInput(normalizeCustomerTags(updatedCustomer.tags).join(', '));
+    setSelectedManualTagIds(updatedCustomer.manualTagIds || []);
     onUpdated?.(updatedCustomer);
   };
 
@@ -438,7 +437,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     }
     setCurrentCustomer(releasedCustomer);
     setDraft(releasedCustomer);
-    setTagInput(normalizeCustomerTags(releasedCustomer.tags).join(', '));
+    setSelectedManualTagIds(releasedCustomer.manualTagIds || []);
     setReleaseDialogOpen(false);
     setReleaseReason('');
     onUpdated?.(releasedCustomer);
@@ -614,34 +613,14 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   );
 
   const renderTagsRow = () => {
-    const tags = normalizeCustomerTags(currentCustomer.tags);
-
     return (
       <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
         <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>标签</Box>
         <Box sx={{ px: 1.5, py: editing ? 0.5 : 1, fontSize: 13 }}>
           {editing ? (
-            <TextField
-              value={tagInput}
-              onChange={(event) => setTagInput(event.target.value)}
-              placeholder="多个标签用逗号分隔"
-              size="small"
-              fullWidth
-            />
-          ) : tags.length ? (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
-              {tags.map((tag) => (
-                <Chip
-                  key={tag}
-                  label={tag}
-                  size="small"
-                  variant="outlined"
-                  sx={{ height: 22, borderColor: '#bfdbfe', bgcolor: '#eff6ff', color: '#2563eb', fontWeight: 600 }}
-                />
-              ))}
-            </Box>
+            <ManualTagSelector scope="customer" value={selectedManualTagIds} onChange={setSelectedManualTagIds} disabled={profileSaving} includeInactiveSelected legacyNames={currentCustomer.tags} />
           ) : (
-            emptyText()
+            <ManualTagDisplay scope="customer" ids={currentCustomer.manualTagIds} legacyNames={currentCustomer.tags} />
           )}
         </Box>
       </Box>
@@ -975,7 +954,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                         disabled={profileSaving}
                         onClick={() => {
                           setDraft(currentCustomer);
-                          setTagInput(normalizeCustomerTags(currentCustomer.tags).join(', '));
+                          setSelectedManualTagIds(currentCustomer.manualTagIds || []);
                           setEditing(false);
                         }}
                       >
@@ -990,7 +969,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                       size="small"
                       variant="outlined"
                       onClick={() => {
-                        setTagInput(normalizeCustomerTags(currentCustomer.tags).join(', '));
+                        setSelectedManualTagIds(currentCustomer.manualTagIds || []);
                         setEditing(true);
                       }}
                     >

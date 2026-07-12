@@ -61,6 +61,7 @@ import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import { ModuleHeader, ModulePage, ModuleTabs, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
+import { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
 
 type LeadColumn = {
   id: string;
@@ -120,13 +121,7 @@ const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] =
     {
       id: 'tags',
       label: '标签',
-      render: (lead) => (
-        <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-          {lead.tags?.length ? lead.tags.map((tag) => (
-            <Chip key={tag} label={tag} size="small" variant="outlined" sx={{ height: 22 }} />
-          )) : '-'}
-        </Box>
-      ),
+      render: (lead) => <ManualTagDisplay scope="lead" ids={lead.manualTagIds} legacyNames={lead.tags} />,
     },
     { id: 'remark', label: '备注', render: (lead) => lead.remark || '-' },
     {
