@@ -4,6 +4,7 @@ import type { AuthenticatedUser } from '../../src/types/auth';
 import type { CustomerTag, CustomerTagGroup, CustomerTagMigrationPreview } from '../../src/types/tag';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { failure, success, type ApiResponse } from '../api/response';
+import { catalogWriteTransaction } from './customerTagService';
 
 const AUDIT_DOMAIN = 'aaos_customer_tag_migrations';
 const LEGACY_GROUP_NAME = '历史未归类';
@@ -60,16 +61,21 @@ function storedRecord(domain: string, value: any) {
 }
 
 export function createCustomerTagMigrationService(prisma: MigrationPrisma) {
-  async function previewLegacyTagMigration(): Promise<CustomerTagMigrationPreview> {
+  async function requireSuperAdmin(actor: AuthenticatedUser) {
+    const role = actor.roleId ? await prisma.role.findUnique({ where: { id: actor.roleId } }) : null;
+    return role?.isActive === true && role.code === 'super_admin';
+  }
+
+  async function previewLegacyTagMigration(actor: AuthenticatedUser): Promise<ApiResponse<CustomerTagMigrationPreview | null>> {
+    if (!await requireSuperAdmin(actor)) return failure('仅超级管理员可预览标签迁移', 403);
     const current = await snapshot(prisma);
     const { records: _records, groups: _groups, definitions: _definitions, ...preview } = current;
-    return preview;
+    return success(preview);
   }
 
   async function applyLegacyTagMigration(checksum: string, actor: AuthenticatedUser): Promise<ApiResponse<MigrationResult | null>> {
-    const role = actor.roleId ? await prisma.role.findUnique({ where: { id: actor.roleId } }) : null;
-    if (!role?.isActive || role.code !== 'super_admin') return failure('仅超级管理员可执行标签迁移', 403);
-    return prisma.$transaction(async (tx) => {
+    if (!await requireSuperAdmin(actor)) return failure('仅超级管理员可执行标签迁移', 403);
+    return catalogWriteTransaction(prisma as any, async (tx) => {
       const current = await snapshot(tx);
       if (current.checksum !== checksum) return failure('迁移预览已过期，请重新预览', 409);
       const timestamp = new Date().toISOString();
@@ -113,7 +119,10 @@ export function createCustomerTagMigrationService(prisma: MigrationPrisma) {
 
 export function createCustomerTagMigrationRouter({ service, requireAuth }: { service: ReturnType<typeof createCustomerTagMigrationService>; requireAuth: RequestHandler }) {
   const router = express.Router();
-  router.get('/migration/preview', requireAuth, async (_req, res) => res.json(success(await service.previewLegacyTagMigration())));
+  router.get('/migration/preview', requireAuth, async (req: any, res) => {
+    const result = await service.previewLegacyTagMigration(req.currentUser!);
+    res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 600 ? result.code : 500).json(result);
+  });
   router.post('/migration/apply', requireAuth, async (req: any, res) => {
     const result = await service.applyLegacyTagMigration(String(req.body?.checksum || ''), req.currentUser!);
     res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 600 ? result.code : 500).json(result);

@@ -50,7 +50,7 @@ const CATALOG_LOCK_RECORD_ID = 'customer-tag-catalog-writes';
 
 class CatalogLockError extends Error {}
 
-async function catalogWriteTransaction<T>(prisma: CatalogPrisma, operation: (tx: Prisma.TransactionClient) => Promise<T>) {
+export async function catalogWriteTransaction<T>(prisma: CatalogPrisma, operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
   try {
     return await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       try {
@@ -83,7 +83,7 @@ async function catalogWriteTransaction<T>(prisma: CatalogPrisma, operation: (tx:
       return operation(tx);
     });
   } catch (error) {
-    if (error instanceof CatalogLockError) return failure(error.message, 503);
+    if (error instanceof CatalogLockError) return failure(error.message, 503) as T;
     throw error;
   }
 }
