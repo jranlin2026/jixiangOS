@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import express, { type RequestHandler } from 'express';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { CustomerTag, CustomerTagCatalog, CustomerTagGroup } from '../../src/types/tag';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
@@ -12,6 +13,8 @@ type CatalogPrisma = {
   $transaction<T>(fn: (tx: any) => Promise<T>): Promise<T>;
 };
 
+type CatalogReadTx = Pick<Prisma.TransactionClient, 'businessRecord' | 'leadRecord'>;
+
 type GroupInput = Partial<Pick<CustomerTagGroup, 'name' | 'color' | 'selectionMode' | 'scope' | 'isActive' | 'sortOrder'>>;
 type TagInput = Partial<Pick<CustomerTag, 'groupId' | 'name' | 'color' | 'isActive' | 'sortOrder'>>;
 
@@ -21,18 +24,42 @@ const object = (value: unknown): Record<string, any> => (
 const normalizeName = (value: unknown) => String(value || '').trim();
 const normalizedKey = (value: unknown) => normalizeName(value).toLocaleLowerCase();
 const now = () => new Date().toISOString();
+const GROUP_FIELDS = new Set(['name', 'color', 'selectionMode', 'scope', 'isActive', 'sortOrder']);
+const TAG_FIELDS = new Set(['groupId', 'name', 'color', 'isActive', 'sortOrder']);
+
+function validateInput(input: unknown, allowed: Set<string>, create: boolean, kind: 'group' | 'tag'): string | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return '请求数据格式错误';
+  const value = input as Record<string, unknown>;
+  if (Object.keys(value).some((key) => !allowed.has(key))) return '请求包含不允许的字段';
+  if (create && typeof value.name !== 'string') return '名称必须为字符串';
+  if (value.name !== undefined && (typeof value.name !== 'string' || !value.name.trim() || value.name.trim().length > 80)) return '名称长度必须为 1-80 个字符';
+  if (value.color !== undefined && (typeof value.color !== 'string' || value.color.trim().length > 32)) return '颜色必须是不超过 32 个字符的字符串';
+  if (value.isActive !== undefined && typeof value.isActive !== 'boolean') return '启用状态必须为布尔值';
+  if (value.sortOrder !== undefined && (!Number.isInteger(value.sortOrder) || Number(value.sortOrder) < 0 || Number(value.sortOrder) > 1_000_000)) return '排序值必须是 0-1000000 的整数';
+  if (kind === 'group') {
+    if (value.selectionMode !== undefined && !['single', 'multiple'].includes(String(value.selectionMode))) return '标签组选择模式无效';
+    if (value.scope !== undefined && !['lead', 'customer', 'both'].includes(String(value.scope))) return '标签组范围无效';
+  } else if ((create || value.groupId !== undefined) && (typeof value.groupId !== 'string' || !value.groupId.trim() || value.groupId.length > 80)) {
+    return '标签组 ID 无效';
+  }
+  return null;
+}
+
+async function lockCatalogWrites(tx: Prisma.TransactionClient) {
+  await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${'customer-tag-catalog-writes'}))`);
+}
 
 async function rowsFor(tx: Pick<Prisma.TransactionClient, 'businessRecord'>, domain: string) {
   return tx.businessRecord.findMany({ where: { domain } });
 }
 
 export async function loadCustomerTagCatalog(
-  tx: Pick<Prisma.TransactionClient, 'businessRecord'>,
+  tx: CatalogReadTx,
   includeInactive = false,
 ): Promise<CustomerTagCatalog> {
   const [groupRows, tagRows, customerRows, leadRows] = await Promise.all([
     rowsFor(tx, STORAGE_KEYS.TAG_GROUPS), rowsFor(tx, STORAGE_KEYS.TAGS),
-    rowsFor(tx, STORAGE_KEYS.CUSTOMERS), rowsFor(tx, STORAGE_KEYS.LEADS),
+    rowsFor(tx, STORAGE_KEYS.CUSTOMERS), tx.leadRecord.findMany({ select: { data: true } }),
   ]);
   const groups = groupRows.map((row) => object(row.data) as CustomerTagGroup);
   const usage = new Map<string, number>();
@@ -69,9 +96,11 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
 
   async function createGroup(input: GroupInput, user: AuthenticatedUser) {
     if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
+    const validationError = validateInput(input, GROUP_FIELDS, true, 'group');
+    if (validationError) return failure(validationError, 400);
     const name = normalizeName(input.name);
-    if (!name) return failure('标签组名称不能为空', 400);
     return prisma.$transaction(async (tx) => {
+      await lockCatalogWrites(tx);
       const catalog = await loadCustomerTagCatalog(tx, true);
       if (catalog.groups.some((group) => normalizedKey(group.name) === normalizedKey(name))) return failure('标签组名称已存在', 409);
       const timestamp = now();
@@ -89,14 +118,24 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
 
   async function updateGroup(id: string, input: GroupInput, user: AuthenticatedUser) {
     if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
+    const validationError = validateInput(input, GROUP_FIELDS, false, 'group');
+    if (validationError) return failure(validationError, 400);
     return prisma.$transaction(async (tx) => {
+      await lockCatalogWrites(tx);
       const catalog = await loadCustomerTagCatalog(tx, true);
       const current = catalog.groups.find((group) => group.id === id);
       if (!current) return failure('标签组不存在', 404);
       const name = input.name === undefined ? current.name : normalizeName(input.name);
-      if (!name) return failure('标签组名称不能为空', 400);
       if (catalog.groups.some((group) => group.id !== id && normalizedKey(group.name) === normalizedKey(name))) return failure('标签组名称已存在', 409);
-      const next = { ...current, ...input, name, updatedAt: now() };
+      const next: CustomerTagGroup = {
+        ...current, name,
+        color: input.color === undefined ? current.color : input.color.trim(),
+        selectionMode: input.selectionMode ?? current.selectionMode,
+        scope: input.scope ?? current.scope,
+        isActive: input.isActive ?? current.isActive,
+        sortOrder: input.sortOrder ?? current.sortOrder,
+        updatedAt: now(),
+      };
       await tx.businessRecord.update({ where: { domain_recordId: { domain: STORAGE_KEYS.TAG_GROUPS, recordId: id } }, data: recordData(STORAGE_KEYS.TAG_GROUPS, next) });
       return success(next);
     });
@@ -104,10 +143,12 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
 
   async function createTag(input: TagInput, user: AuthenticatedUser) {
     if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
+    const validationError = validateInput(input, TAG_FIELDS, true, 'tag');
+    if (validationError) return failure(validationError, 400);
     const name = normalizeName(input.name);
-    if (!name || !input.groupId) return failure('标签组和标签名称不能为空', 400);
-    const groupId = input.groupId;
+    const groupId = input.groupId!.trim();
     return prisma.$transaction(async (tx) => {
+      await lockCatalogWrites(tx);
       const catalog = await loadCustomerTagCatalog(tx, true);
       if (!catalog.groups.some((group) => group.id === groupId)) return failure('标签组不存在', 404);
       if (catalog.tags.some((tag) => tag.groupId === groupId && normalizedKey(tag.name) === normalizedKey(name))) return failure('组内标签名称已存在', 409);
@@ -120,16 +161,24 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
 
   async function updateTag(id: string, input: TagInput, user: AuthenticatedUser) {
     if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
+    const validationError = validateInput(input, TAG_FIELDS, false, 'tag');
+    if (validationError) return failure(validationError, 400);
     return prisma.$transaction(async (tx) => {
+      await lockCatalogWrites(tx);
       const catalog = await loadCustomerTagCatalog(tx, true);
       const current = catalog.tags.find((tag) => tag.id === id);
       if (!current) return failure('标签不存在', 404);
-      const groupId = input.groupId || current.groupId;
+      const groupId = input.groupId?.trim() || current.groupId;
       if (!catalog.groups.some((group) => group.id === groupId)) return failure('标签组不存在', 404);
       const name = input.name === undefined ? current.name : normalizeName(input.name);
-      if (!name) return failure('标签名称不能为空', 400);
       if (catalog.tags.some((tag) => tag.id !== id && tag.groupId === groupId && normalizedKey(tag.name) === normalizedKey(name))) return failure('组内标签名称已存在', 409);
-      const next = { ...current, ...input, groupId, name, updatedAt: now() };
+      const next: CustomerTag = {
+        ...current, groupId, name,
+        color: input.color === undefined ? current.color : input.color.trim() || undefined,
+        isActive: input.isActive ?? current.isActive,
+        sortOrder: input.sortOrder ?? current.sortOrder,
+        updatedAt: now(),
+      };
       await tx.businessRecord.update({ where: { domain_recordId: { domain: STORAGE_KEYS.TAGS, recordId: id } }, data: recordData(STORAGE_KEYS.TAGS, next) });
       return success(next);
     });
@@ -139,6 +188,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
     if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
     if (!sourceId || sourceId === targetId) return failure('合并目标无效', 409);
     return prisma.$transaction(async (tx) => {
+      await lockCatalogWrites(tx);
       const catalog = await loadCustomerTagCatalog(tx, true);
       const source = catalog.tags.find((tag) => tag.id === sourceId);
       const target = catalog.tags.find((tag) => tag.id === targetId);
@@ -170,4 +220,51 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
   }
 
   return { loadCatalog: (includeInactive = false) => loadCustomerTagCatalog(prisma as any, includeInactive), createGroup, updateGroup, createTag, updateTag, mergeTag };
+}
+
+export function createCustomerTagRouter({
+  service,
+  requireRead,
+  requireManage,
+}: {
+  service: ReturnType<typeof createCustomerTagService>;
+  requireRead: RequestHandler;
+  requireManage: RequestHandler;
+}) {
+  const router = express.Router();
+  const status = (code: number, successStatus: number) => code === 0 ? successStatus : (code >= 400 && code < 500 ? code : 500);
+
+  router.get('/catalog', requireRead, async (req, res) => {
+    const rawScope = Array.isArray(req.query.scope) ? req.query.scope[0] : req.query.scope;
+    const scope = typeof rawScope === 'string' ? rawScope : '';
+    if (scope && scope !== 'customer' && scope !== 'lead') {
+      res.status(400).json({ code: 400, data: null, message: '无效的标签范围' });
+      return;
+    }
+    const catalog = await service.loadCatalog(req.query.includeInactive === 'true');
+    const groups = scope ? catalog.groups.filter((group) => group.scope === scope || group.scope === 'both') : catalog.groups;
+    const groupIds = new Set(groups.map((group) => group.id));
+    res.status(200).json(success({ groups, tags: catalog.tags.filter((tag) => groupIds.has(tag.groupId)) }));
+  });
+  router.post('/groups', requireManage, async (req: any, res) => {
+    const result = await service.createGroup(req.body || {}, req.currentUser!);
+    res.status(status(result.code, 201)).json(result);
+  });
+  router.put('/groups/:id', requireManage, async (req: any, res) => {
+    const result = await service.updateGroup(String(req.params.id), req.body || {}, req.currentUser!);
+    res.status(status(result.code, 200)).json(result);
+  });
+  router.post('/', requireManage, async (req: any, res) => {
+    const result = await service.createTag(req.body || {}, req.currentUser!);
+    res.status(status(result.code, 201)).json(result);
+  });
+  router.put('/:id', requireManage, async (req: any, res) => {
+    const result = await service.updateTag(String(req.params.id), req.body || {}, req.currentUser!);
+    res.status(status(result.code, 200)).json(result);
+  });
+  router.post('/:id/merge', requireManage, async (req: any, res) => {
+    const result = await service.mergeTag(String(req.params.id), String(req.body?.targetId || ''), req.currentUser!);
+    res.status(status(result.code, 200)).json(result);
+  });
+  return router;
 }

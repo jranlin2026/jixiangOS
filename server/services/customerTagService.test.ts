@@ -7,6 +7,9 @@ const rowKey = (domain: string, recordId: string) => `${domain}:${recordId}`;
 
 class FakePrisma {
   rows = new Map<string, any>();
+  leads = new Map<string, any>();
+  transactionTail = Promise.resolve();
+  advisoryLocks: string[] = [];
   roles = new Map([
     ['role-sales', { id: 'role-sales', code: 'sales', isActive: true }],
     ['role-admin', { id: 'role-admin', code: 'super_admin', isActive: true }],
@@ -41,8 +44,12 @@ class FakePrisma {
   };
 
   leadRecord = {
-    findMany: async () => [],
-    update: async () => null,
+    findMany: async () => Array.from(this.leads.values()).map(clone),
+    update: async ({ where, data }: any) => {
+      const row = { ...this.leads.get(where.id), ...clone(data) };
+      this.leads.set(where.id, row);
+      return clone(row);
+    },
   };
 
   constructor() {
@@ -52,11 +59,24 @@ class FakePrisma {
     };
   }
 
-  $transaction = async (fn: any) => fn(this);
+  $executeRaw = async (query: any) => {
+    this.advisoryLocks.push(String(query?.values?.[0] || 'lock'));
+    return 1;
+  };
+  $transaction = async (fn: any) => {
+    const previous = this.transactionTail;
+    let release!: () => void;
+    this.transactionTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try { return await fn(this); } finally { release(); }
+  };
   seed(domain: string, value: any) {
     this.rows.set(rowKey(domain, value.id), {
       id: rowKey(domain, value.id), domain, recordId: value.id, data: clone(value),
     });
+  }
+  seedLead(value: any) {
+    this.leads.set(value.id, { id: value.id, data: clone(value) });
   }
 }
 
@@ -78,17 +98,38 @@ assert.equal((await service.createGroup(validGroup, superAdmin)).code, 409);
 assert.deepEqual(prisma.roleLookups.slice(0, 4), ['role-sales', 'role-disabled-admin', 'role-admin', 'role-admin']);
 
 const groupId = (createdGroup.data as any).id;
+assert.equal((await service.createGroup({ ...validGroup, id: 'injected' } as any, superAdmin)).code, 400);
+assert.equal((await service.createGroup({ ...validGroup, scope: 'invalid' } as any, superAdmin)).code, 400);
+assert.equal((await service.updateGroup(groupId, { sortOrder: -1 } as any, superAdmin)).code, 400);
 const createdTag = await service.createTag({ groupId, name: '高意向' }, superAdmin);
 assert.equal(createdTag.code, 0);
 assert.equal((await service.createTag({ groupId, name: ' 高意向 ' }, superAdmin)).code, 409);
+assert.equal((await service.createTag({ groupId, name: '非法', createdAt: 'injected' } as any, superAdmin)).code, 400);
+assert.equal((await service.updateTag((createdTag.data as any).id, { isActive: 'false' } as any, superAdmin)).code, 400);
+
+const concurrentName = '并发唯一';
+const concurrent = await Promise.all([
+  service.createTag({ groupId, name: concurrentName }, superAdmin),
+  service.createTag({ groupId, name: ` ${concurrentName} ` }, superAdmin),
+]);
+assert.deepEqual(concurrent.map((result) => result.code).sort((a, b) => a - b), [0, 409]);
+assert.ok(prisma.advisoryLocks.length > 0, '唯一性检查必须在事务级 advisory lock 内执行');
+const renameA = await service.createTag({ groupId, name: '待改名 A' }, superAdmin);
+const renameB = await service.createTag({ groupId, name: '待改名 B' }, superAdmin);
+const concurrentRenames = await Promise.all([
+  service.updateTag((renameA.data as any).id, { name: '同一新名' }, superAdmin),
+  service.updateTag((renameB.data as any).id, { name: '同一新名' }, superAdmin),
+]);
+assert.deepEqual(concurrentRenames.map((result) => result.code).sort((a, b) => a - b), [0, 409]);
 
 const inUseTagId = (createdTag.data as any).id;
 prisma.seed(STORAGE_KEYS.CUSTOMERS, {
   id: 'customer-1', name: '客户甲', manualTagIds: [inUseTagId], manualTagNames: ['高意向'], activityRecords: [],
 });
+prisma.seedLead({ id: 'lead-1', manualTagIds: [inUseTagId], manualTagNames: ['高意向'], activityRecords: [] });
 assert.equal((await service.updateTag(inUseTagId, { isActive: false }, superAdmin)).code, 0);
 const catalogWithInactive = await loadCustomerTagCatalog(prisma as any, true);
-assert.equal(catalogWithInactive.tags.find((tag) => tag.id === inUseTagId)?.usageCount, 1);
+assert.equal(catalogWithInactive.tags.find((tag) => tag.id === inUseTagId)?.usageCount, 2);
 assert.equal((await loadCustomerTagCatalog(prisma as any)).tags.some((tag) => tag.id === inUseTagId), false);
 
 const target = await service.createTag({ groupId, name: '重点客户' }, superAdmin);
@@ -100,3 +141,6 @@ const updatedCustomer = prisma.rows.get(rowKey(STORAGE_KEYS.CUSTOMERS, 'customer
 assert.deepEqual(updatedCustomer.manualTagIds, [targetId]);
 assert.deepEqual(updatedCustomer.manualTagNames, ['重点客户']);
 assert.ok(updatedCustomer.activityRecords.some((item: any) => item.title === '合并客户标签'));
+const updatedLead = prisma.leads.get('lead-1').data;
+assert.deepEqual(updatedLead.manualTagIds, [targetId]);
+assert.deepEqual(updatedLead.manualTagNames, ['重点客户']);

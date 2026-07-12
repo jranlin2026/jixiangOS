@@ -42,9 +42,17 @@ pnpm exec tsc --noEmit && pnpm exec tsx server/services/customerTagService.test.
 
 ## 遗留风险
 
-- `loadCustomerTagCatalog` 按 brief 稳定签名仅依赖 `businessRecord`，因此线索用量汇总依赖线索命令将权威标签快照保持在 `STORAGE_KEYS.LEADS` 记录域中；合并命令同时兼容当前 `leadRecord` 表。
+- 目录写采用全局事务级 advisory lock，以管理命令的低频场景换取无 schema 变更的可靠唯一性；如果未来目录写入量显著增长，可评估引入专用关系表与规范化唯一索引。
 - 本任务只运行 brief 指定的聚焦回归和全量 TypeScript 类型检查，未运行整仓所有独立脚本测试。
 
 ## Commit
 
 - `feat: add authoritative customer tag catalog`
+
+## Fix Review Findings
+
+- `loadCustomerTagCatalog` 现在显式要求 `businessRecord` 和 `leadRecord`，`usageCount` 由客户 `BusinessRecord.data.manualTagIds` 与真实 `LeadRecord.data.manualTagIds` 合并计算；测试覆盖真实线索计数和合并回写。
+- 标签组/标签创建与更新增加严格运行时字段白名单，校验必填值、字符串长度、布尔值、非负整数、scope 和 selectionMode 枚举；更新改为显式字段组装，阻止 `id` / `createdAt` 等注入。
+- 所有目录写事务使用 PostgreSQL `pg_advisory_xact_lock` 的全局目录写锁，并在获锁后重读并执行规范化唯一性检查，保证并发创建/更名不会穿透“先查后写”；并发测试验证同名请求一个成功、一个 409。
+- 路由测试不再依赖源码正则；它挂载生产 `createCustomerTagRouter`，通过真实 HTTP 请求覆盖读取权限、200/201 成功码及 403/404/409 错误码。
+- 修复复审 commit：`fix: harden authoritative customer tag catalog`。

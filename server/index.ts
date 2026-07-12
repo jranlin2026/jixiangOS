@@ -20,7 +20,7 @@ import { createAiConfigService } from './services/aiConfigService';
 import { createAiChatClient, type AiChatMessage } from './services/aiChatClient';
 import { createCustomerListService } from './services/customerListService';
 import { createCustomerCommandService } from './services/customerCommandService';
-import { createCustomerTagService } from './services/customerTagService';
+import { createCustomerTagRouter, createCustomerTagService } from './services/customerTagService';
 import { createLeadListService } from './services/leadListService';
 import { createSettingsService } from './services/settingsService';
 import { createStorageService } from './services/storageService';
@@ -289,44 +289,11 @@ app.get('/api/ready', async (_req, res) => {
   const payload = await healthPayload();
   res.status(payload.database ? 200 : 503).json(payload);
 });
-
-app.get('/api/customer-tags/catalog', requireCustomerTagCatalogReadAccess, async (req: AuthenticatedRequest, res) => {
-  const scope = queryParam(req.query.scope);
-  if (scope && scope !== 'customer' && scope !== 'lead') {
-    res.status(400).json({ code: 400, data: null, message: '无效的标签范围' });
-    return;
-  }
-  const includeInactive = queryParam(req.query.includeInactive) === 'true';
-  const catalog = await customerTagService.loadCatalog(includeInactive);
-  const groups = scope ? catalog.groups.filter((group) => group.scope === scope || group.scope === 'both') : catalog.groups;
-  const groupIds = new Set(groups.map((group) => group.id));
-  res.status(200).json({ code: 0, data: { groups, tags: catalog.tags.filter((tag) => groupIds.has(tag.groupId)) }, message: 'success' });
-});
-
-app.post('/api/customer-tags/groups', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
-  const result = await customerTagService.createGroup(req.body || {}, req.currentUser!);
-  res.status(result.code === 0 ? 201 : result.code).json(result);
-});
-
-app.put('/api/customer-tags/groups/:id', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
-  const result = await customerTagService.updateGroup(routeParam(req.params.id), req.body || {}, req.currentUser!);
-  res.status(result.code === 0 ? 200 : result.code).json(result);
-});
-
-app.post('/api/customer-tags', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
-  const result = await customerTagService.createTag(req.body || {}, req.currentUser!);
-  res.status(result.code === 0 ? 201 : result.code).json(result);
-});
-
-app.put('/api/customer-tags/:id', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
-  const result = await customerTagService.updateTag(routeParam(req.params.id), req.body || {}, req.currentUser!);
-  res.status(result.code === 0 ? 200 : result.code).json(result);
-});
-
-app.post('/api/customer-tags/:id/merge', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
-  const result = await customerTagService.mergeTag(routeParam(req.params.id), String(req.body?.targetId || ''), req.currentUser!);
-  res.status(result.code === 0 ? 200 : result.code).json(result);
-});
+app.use('/api/customer-tags', createCustomerTagRouter({
+  service: customerTagService,
+  requireRead: requireCustomerTagCatalogReadAccess,
+  requireManage: requireStorageAccess,
+}));
 
 app.post('/api/customers', requireCustomerCreateAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerListService.create(req.body || {}, req.currentUser!);
