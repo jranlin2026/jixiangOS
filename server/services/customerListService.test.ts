@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createCustomerListService } from './customerListService';
+import { createCustomerListService, matchesCustomerTagFilters } from './customerListService';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 
@@ -34,6 +34,32 @@ const actor = {
   isActive: true,
   permissions: [{ module: PERMISSION_KEYS.CUSTOMER_CREATE, actions: ['write'] }],
 };
+
+const tagCatalog = {
+  groups: [
+    { id: 'g-intent', name: '意向', scope: 'customer', isActive: true, sortOrder: 0 },
+    { id: 'g-value', name: '价值', scope: 'customer', isActive: true, sortOrder: 1 },
+  ],
+  tags: [
+    { id: 't-agent', groupId: 'g-intent', name: '代理', isActive: true, sortOrder: 0 },
+    { id: 't-private', groupId: 'g-intent', name: '私域', isActive: true, sortOrder: 1 },
+    { id: 't-high-budget', groupId: 'g-value', name: '高预算', isActive: true, sortOrder: 0 },
+  ],
+} as any;
+const tagCustomers = [
+  { id: 'agent-only', manualTagIds: ['t-agent'] },
+  { id: 'private-only', manualTagIds: ['t-private'] },
+  { id: 'both-intents', manualTagIds: ['t-agent', 't-private'] },
+  { id: 'high-budget-agent', manualTagIds: ['t-agent', 't-high-budget'] },
+  { id: 'high-budget-private', manualTagIds: ['t-private', 't-high-budget'] },
+  { id: 'untagged', manualTagIds: [] },
+] as any[];
+const matchingIds = (filters: any) => tagCustomers.filter((customer) => matchesCustomerTagFilters(customer, filters, tagCatalog)).map((customer) => customer.id).sort();
+assert.deepEqual(matchingIds({ tagIds: ['t-agent', 't-private'], tagMatch: 'any' }), ['agent-only', 'both-intents', 'high-budget-agent', 'high-budget-private', 'private-only']);
+assert.deepEqual(matchingIds({ tagIds: ['t-agent', 't-private'], tagMatch: 'all' }), ['both-intents']);
+assert.deepEqual(matchingIds({ tagIds: ['t-agent', 't-private', 't-high-budget'], tagMatch: 'grouped' }), ['high-budget-agent', 'high-budget-private']);
+assert.deepEqual(matchingIds({ withoutTags: true }), ['untagged']);
+assert.deepEqual(matchingIds({ missingTagGroupId: 'g-intent' }), ['untagged']);
 
 const result = await service.create({
   name: '新客户',

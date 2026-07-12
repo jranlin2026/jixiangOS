@@ -14,6 +14,8 @@ import { filterVisibleCustomers } from '../shared/utils/dataVisibility';
 import { applyContactEditLock } from '../shared/utils/contactEditLock';
 import { isSuperAdminRoleName } from '../shared/utils/roles';
 import { getPhoneNumberError, normalizePhoneForComparison, normalizePhoneForStorage } from '../shared/utils/phoneNumber';
+import type { CustomerTagCatalog } from '../types/tag';
+import { groupTagIdsForFilter, normalizeManualTagIds } from '../shared/utils/customerTagPolicy';
 
 function ensureInit(): void {
   initializeMockData();
@@ -344,7 +346,9 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
   if (shouldUseBackendApi()) {
     const params = new URLSearchParams();
     Object.entries(filters || {}).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+      if (key === 'tagIds' && Array.isArray(value)) {
+        normalizeManualTagIds(value).slice(0, 20).forEach((id) => params.append('tagId', id));
+      } else if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
     });
     return backendRequest<PaginatedResponse<Customer>>(`/customers${params.size ? `?${params.toString()}` : ''}`);
   }
@@ -407,9 +411,29 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
     const q = filters.city.toLowerCase();
     filtered = filtered.filter((c) => (c.city || '').toLowerCase().includes(q));
   }
+  const catalog: CustomerTagCatalog = {
+    groups: getStorageData(STORAGE_KEYS.TAG_GROUPS) || [],
+    tags: getStorageData(STORAGE_KEYS.TAGS) || [],
+  };
+  const selectedTagIds = normalizeManualTagIds(filters?.tagIds || []).slice(0, 20);
+  if (selectedTagIds.length) {
+    const mode = filters?.tagMatch || 'grouped';
+    const groups = mode === 'grouped' ? groupTagIdsForFilter(catalog, selectedTagIds) : [selectedTagIds];
+    filtered = filtered.filter((customer) => {
+      const assigned = new Set(customer.manualTagIds || []);
+      if (mode === 'all') return selectedTagIds.every((id) => assigned.has(id));
+      if (mode === 'any') return selectedTagIds.some((id) => assigned.has(id));
+      return groups.length > 0 && groups.every((ids) => ids.some((id) => assigned.has(id)));
+    });
+  }
+  if (filters?.withoutTags) filtered = filtered.filter((customer) => !(customer.manualTagIds || []).length);
+  if (filters?.missingTagGroupId) {
+    const groupTagIds = catalog.tags.filter((tag) => tag.groupId === filters.missingTagGroupId && tag.isActive).map((tag) => tag.id);
+    filtered = filtered.filter((customer) => !(customer.manualTagIds || []).some((id) => groupTagIds.includes(id)));
+  }
   if (filters?.tag) {
     const q = filters.tag.toLowerCase();
-    filtered = filtered.filter((c) => (c.tags || []).some((tag) => tag.toLowerCase().includes(q)));
+    filtered = filtered.filter((c) => (c.tags || []).some((tag) => tag.toLowerCase() === q));
   }
 
   const page = filters?.page || 1;

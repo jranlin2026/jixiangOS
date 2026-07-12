@@ -21,6 +21,8 @@ import {
 import { PERMISSION_KEYS, hasPermission } from '../../src/shared/utils/permissions';
 import { loadCustomerTagCatalog } from './customerTagService';
 import { validateManualTagSelection } from './customerTagPolicy';
+import { groupTagIdsForFilter, normalizeManualTagIds } from '../../src/shared/utils/customerTagPolicy';
+import type { CustomerTagCatalog } from '../../src/types/tag';
 
 type CustomerListPrisma = Pick<PrismaClient, 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | '$queryRaw' | '$transaction'>;
 
@@ -120,11 +122,29 @@ function buildTextLikeCondition(path: string, value: string) {
   return Prisma.sql`LOWER(COALESCE(${jsonText(path)}, '')) LIKE ${value}`;
 }
 
-function buildJsonArraySearchCondition(path: string, value: string) {
-  return Prisma.sql`JSON_SEARCH(data, 'one', ${value}, NULL, ${Prisma.raw(`'${path}'`)}) IS NOT NULL`;
+function containsTagId(tagId: string) {
+  return Prisma.sql`JSON_CONTAINS(COALESCE(JSON_EXTRACT(data, '$.manualTagIds'), JSON_ARRAY()), JSON_QUOTE(${tagId})) = 1`;
 }
 
-function buildCustomerWhere(filters: CustomerFilters, currentUser?: AuthenticatedUser | null): Prisma.Sql {
+export function matchesCustomerTagFilters(customer: Pick<Customer, 'manualTagIds' | 'tags'>, filters: CustomerFilters, catalog: CustomerTagCatalog): boolean {
+  const assigned = new Set(customer.manualTagIds || []);
+  const ids = normalizeManualTagIds(filters.tagIds || []).slice(0, 20);
+  if (ids.length) {
+    const mode = filters.tagMatch || 'grouped';
+    if (mode === 'any' && !ids.some((id) => assigned.has(id))) return false;
+    if (mode === 'all' && !ids.every((id) => assigned.has(id))) return false;
+    if (mode === 'grouped' && !groupTagIdsForFilter(catalog, ids).every((group) => group.some((id) => assigned.has(id)))) return false;
+  }
+  if (filters.withoutTags && assigned.size !== 0) return false;
+  if (filters.missingTagGroupId) {
+    const groupIds = catalog.tags.filter((tag) => tag.isActive && tag.groupId === filters.missingTagGroupId).map((tag) => tag.id);
+    if (groupIds.some((id) => assigned.has(id))) return false;
+  }
+  if (filters.tag && !(customer.tags || []).some((name) => name === filters.tag!.trim())) return false;
+  return true;
+}
+
+function buildCustomerWhere(filters: CustomerFilters, catalog?: CustomerTagCatalog): Prisma.Sql {
   const conditions: Prisma.Sql[] = [
     Prisma.sql`domain = ${STORAGE_KEYS.CUSTOMERS}`,
     Prisma.sql`JSON_EXTRACT(data, '$.deletedAt') IS NULL`,
@@ -182,7 +202,24 @@ function buildCustomerWhere(filters: CustomerFilters, currentUser?: Authenticate
     conditions.push(buildTextLikeCondition('$.city', `%${filters.city.trim().toLowerCase()}%`));
   }
   if (filters.tag) {
-    conditions.push(buildJsonArraySearchCondition('$.tags[*]', `%${filters.tag.trim()}%`));
+    conditions.push(Prisma.sql`JSON_CONTAINS(COALESCE(JSON_EXTRACT(data, '$.tags'), JSON_ARRAY()), JSON_QUOTE(${filters.tag.trim()})) = 1`);
+  }
+  const ids = normalizeManualTagIds(filters.tagIds || []).slice(0, 20);
+  if (ids.length) {
+    const mode = filters.tagMatch || 'grouped';
+    if (mode === 'any') conditions.push(Prisma.sql`(${Prisma.join(ids.map(containsTagId), ' OR ')})`);
+    if (mode === 'all') conditions.push(Prisma.sql`(${Prisma.join(ids.map(containsTagId), ' AND ')})`);
+    if (mode === 'grouped') {
+      const grouped = groupTagIdsForFilter(catalog || { groups: [], tags: [] }, ids);
+      conditions.push(Prisma.sql`(${Prisma.join(grouped.map((group) => Prisma.sql`(${Prisma.join(group.map(containsTagId), ' OR ')})`), ' AND ')})`);
+    }
+  }
+  if (filters.withoutTags) {
+    conditions.push(Prisma.sql`JSON_LENGTH(COALESCE(JSON_EXTRACT(data, '$.manualTagIds'), JSON_ARRAY())) = 0`);
+  }
+  if (filters.missingTagGroupId && catalog) {
+    const groupIds = catalog.tags.filter((tag) => tag.isActive && tag.groupId === filters.missingTagGroupId).map((tag) => tag.id);
+    if (groupIds.length) conditions.push(Prisma.sql`NOT (${Prisma.join(groupIds.map(containsTagId), ' OR ')})`);
   }
 
   return Prisma.sql`${Prisma.join(conditions, ' AND ')}`;
@@ -391,10 +428,25 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
       const page = toPositiveInt(filters.page, 1);
       const pageSize = Math.min(toPositiveInt(filters.pageSize, DEFAULT_PAGE_SIZE), 100);
       const offset = (page - 1) * pageSize;
-      const [where, visibilityWhere] = await Promise.all([
-        Promise.resolve(buildCustomerWhere(filters, currentUser)),
+      const needsCatalog = Boolean(filters.missingTagGroupId || filters.tagIds?.length);
+      const [catalog, visibilityWhere] = await Promise.all([
+        needsCatalog ? loadCustomerTagCatalog(prisma as any, false) : Promise.resolve(undefined),
         buildVisibilityWhere(prisma, currentUser),
       ]);
+      if (filters.missingTagGroupId && !catalog?.groups.some((group) => group.id === filters.missingTagGroupId && group.isActive && (group.scope === 'customer' || group.scope === 'both'))) {
+        return failure<PaginatedResponse<Customer>>('标签分组不存在或已停用', 400);
+      }
+      if (filters.tagIds?.length) {
+        const groups = new Map(catalog?.groups.map((group) => [group.id, group]) || []);
+        const tags = new Map(catalog?.tags.map((tag) => [tag.id, tag]) || []);
+        const invalid = normalizeManualTagIds(filters.tagIds).some((id) => {
+          const tag = tags.get(id);
+          const group = tag ? groups.get(tag.groupId) : undefined;
+          return !tag?.isActive || !group?.isActive || (group.scope !== 'customer' && group.scope !== 'both');
+        });
+        if (invalid) return failure<PaginatedResponse<Customer>>('标签不存在、已停用或不适用于客户', 400);
+      }
+      const where = buildCustomerWhere(filters, catalog);
       const combinedWhere = Prisma.sql`${where} AND ${visibilityWhere}`;
       const countRows = await prisma.$queryRaw<Array<{ total: bigint | number }>>`
         SELECT COUNT(*) AS total

@@ -71,6 +71,7 @@ import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import { ModuleHeader, ModulePage, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 import { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
+import CustomerTagFilter from './CustomerTagFilter';
 
 type CustomerColumn = {
   id: string;
@@ -245,7 +246,7 @@ const FOLLOW_STATUS_OPTIONS = [
 
 const Customers: React.FC = () => {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { items, filters, pagination, fetchItems, setFilters } = useCustomerStore();
   const currentUser = useAuthStore((state) => state.currentUser);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -284,11 +285,19 @@ const Customers: React.FC = () => {
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(CUSTOMER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
 
   useEffect(() => {
-    fetchItems({
+    const urlTagIds = searchParams.getAll('tagId').map((id) => id.trim()).filter(Boolean).slice(0, 20);
+    const urlTagMatch = searchParams.get('tagMatch');
+    const initialFilters: CustomerFilters = {
       ...filters,
+      tagIds: urlTagIds.length ? urlTagIds : filters.tagIds,
+      tagMatch: urlTagIds.length && ['grouped', 'any', 'all'].includes(urlTagMatch || '') ? urlTagMatch as CustomerFilters['tagMatch'] : filters.tagMatch,
+      withoutTags: searchParams.get('withoutTags') === 'true' || filters.withoutTags || undefined,
+      missingTagGroupId: searchParams.get('missingTagGroupId') || filters.missingTagGroupId,
       productLevel: undefined,
       lifecycleStatusCode: customerScope === 'public_pool' ? 'public_pool' : undefined,
-    });
+    };
+    setFilters(initialFilters);
+    fetchItems(initialFilters);
     settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
       if (res.code === 0) {
         setUsers(res.data.filter((user) => user.isActive));
@@ -334,7 +343,7 @@ const Customers: React.FC = () => {
   const isSuperAdmin = isSuperAdminRoleName(currentUser?.role);
   const isPublicPoolScope = customerScope === 'public_pool';
   const ownerFilterLabel = isPublicPoolScope ? '最后跟进人' : '销售负责人';
-  const hasAdvancedFilters = Boolean(filters.sourceType || filters.leadSource || filters.industry || filters.city || filters.tag);
+  const hasAdvancedFilters = Boolean(filters.sourceType || filters.leadSource || filters.industry || filters.city || filters.tagIds?.length || filters.withoutTags || filters.missingTagGroupId);
   const hasAnyActiveFilter = Boolean(
     filters.search
     || filters.customerLevel
@@ -506,6 +515,22 @@ const Customers: React.FC = () => {
 
   const handleResetFilters = () => {
     const newFilters = scopedFilters({ page: 1, pageSize: pagination.pageSize || 10 }, customerScope);
+    const nextParams = new URLSearchParams(searchParams);
+    ['tagId', 'tagMatch', 'withoutTags', 'missingTagGroupId'].forEach((key) => nextParams.delete(key));
+    setSearchParams(nextParams, { replace: true });
+    setFilters(newFilters);
+    fetchItems(newFilters);
+  };
+
+  const handleTagFilterApply = (tagFilters: Pick<CustomerFilters, 'tagIds' | 'tagMatch' | 'withoutTags' | 'missingTagGroupId'>) => {
+    const newFilters = { ...filters, ...tagFilters, tag: undefined, productLevel: undefined, page: 1, pageSize: pagination.pageSize || 10 };
+    const nextParams = new URLSearchParams(searchParams);
+    ['tagId', 'tagMatch', 'withoutTags', 'missingTagGroupId'].forEach((key) => nextParams.delete(key));
+    tagFilters.tagIds?.forEach((id) => nextParams.append('tagId', id));
+    if (tagFilters.tagIds?.length) nextParams.set('tagMatch', tagFilters.tagMatch || 'grouped');
+    if (tagFilters.withoutTags) nextParams.set('withoutTags', 'true');
+    if (tagFilters.missingTagGroupId) nextParams.set('missingTagGroupId', tagFilters.missingTagGroupId);
+    setSearchParams(nextParams, { replace: true });
     setFilters(newFilters);
     fetchItems(newFilters);
   };
@@ -735,13 +760,7 @@ const Customers: React.FC = () => {
               size="small"
               sx={{ minWidth: 130 }}
             />
-            <TextField
-              label="客户标签"
-              value={filters.tag || ''}
-              onChange={(e) => handleFilterChange('tag', e.target.value)}
-              size="small"
-              sx={{ minWidth: 150 }}
-            />
+            <CustomerTagFilter value={filters} onApply={handleTagFilterApply} />
           </Box>
         </Collapse>
       </ModuleToolbar>
