@@ -15,12 +15,13 @@ import SyncIcon from '@mui/icons-material/Sync';
 import {
   applyCustomerTagMigration, createCustomerTag, createCustomerTagGroup,
   fetchCustomerTagCatalog, mergeCustomerTag, previewCustomerTagMigration,
-  updateCustomerTag, updateCustomerTagGroup,
+  reorderCustomerTags, updateCustomerTag, updateCustomerTagGroup,
 } from '../../api/customerTagApi';
 import type { CustomerTag, CustomerTagCatalog, CustomerTagGroup, CustomerTagMigrationPreview, ManualTagScope } from '../../types/tag';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import useAuthStore from '../../store/useAuthStore';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
+import { formatCustomerTagDialogError, staleMigrationMessage } from './customerTagSettingsState';
 
 const scopeLabel: Record<ManualTagScope, string> = { lead: '线索', customer: '客户', both: '线索与客户' };
 const emptyCatalog: CustomerTagCatalog = { groups: [], tags: [] };
@@ -37,6 +38,7 @@ const CustomerTagConfig: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [dialogError, setDialogError] = useState('');
   const [groupDialog, setGroupDialog] = useState(false);
   const [editingGroup, setEditingGroup] = useState<CustomerTagGroup | null>(null);
   const [groupDraft, setGroupDraft] = useState<GroupDraft>(emptyGroup);
@@ -48,12 +50,13 @@ const CustomerTagConfig: React.FC = () => {
   const [migrationOpen, setMigrationOpen] = useState(false);
   const [preview, setPreview] = useState<CustomerTagMigrationPreview | null>(null);
   const [confirmation, setConfirmation] = useState('');
+  const [migrationError, setMigrationError] = useState('');
 
   const loadCatalog = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const response = await fetchCustomerTagCatalog('customer', true);
+      const response = await fetchCustomerTagCatalog('all', true);
       if (response.code !== 0) throw new Error(response.message || '客户标签加载失败');
       setCatalog(response.data);
       setSelectedGroupId((current) => response.data.groups.some((group) => group.id === current) ? current : response.data.groups[0]?.id || '');
@@ -71,26 +74,31 @@ const CustomerTagConfig: React.FC = () => {
   const tags = useMemo(() => catalog.tags.filter((tag) => tag.groupId === selectedGroupId).sort((a, b) => a.sortOrder - b.sortOrder), [catalog.tags, selectedGroupId]);
   const compatibleTargets = useMemo(() => catalog.tags.filter((tag) => tag.groupId === mergeSource?.groupId && tag.id !== mergeSource.id && tag.isActive), [catalog.tags, mergeSource]);
 
-  const runMutation = async (operation: () => Promise<{ code: number; message: string }>, close?: () => void) => {
+  const runMutation = async (operation: () => Promise<{ code: number; message: string }>, close?: () => void, setLocalError?: (message: string) => void) => {
     setSaving(true);
     setError('');
+    setLocalError?.('');
     try {
       const response = await operation();
       if (response.code !== 0) {
-        const prefix = response.code === 403 ? '无管理权限：' : response.code === 409 ? '数据已变化：' : '';
-        setError(`${prefix}${response.message || '操作失败'}`);
-        return;
+        const message = formatCustomerTagDialogError(response.code, response.message);
+        if (setLocalError) setLocalError(message); else setError(message);
+        return false;
       }
       close?.();
       await loadCatalog();
+      return true;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '操作失败');
+      const message = cause instanceof Error ? cause.message : '操作失败';
+      if (setLocalError) setLocalError(message); else setError(message);
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
   const openGroup = (group?: CustomerTagGroup) => {
+    setDialogError('');
     setEditingGroup(group || null);
     setGroupDraft(group ? { name: group.name, color: group.color, selectionMode: group.selectionMode, scope: group.scope, isActive: group.isActive, sortOrder: group.sortOrder } : { ...emptyGroup, sortOrder: groups.length + 1 });
     setGroupDialog(true);
@@ -98,8 +106,10 @@ const CustomerTagConfig: React.FC = () => {
   const saveGroup = () => runMutation(
     () => editingGroup ? updateCustomerTagGroup(editingGroup.id, groupDraft) : createCustomerTagGroup(groupDraft),
     () => setGroupDialog(false),
+    setDialogError,
   );
   const openTag = (tag?: CustomerTag) => {
+    setDialogError('');
     setEditingTag(tag || null);
     setTagDraft(tag ? { name: tag.name, color: tag.color || selectedGroup?.color || '#1677ff', isActive: tag.isActive, sortOrder: tag.sortOrder } : { ...emptyTag, color: selectedGroup?.color || '#1677ff', sortOrder: tags.length + 1 });
     setTagDialog(true);
@@ -107,24 +117,40 @@ const CustomerTagConfig: React.FC = () => {
   const saveTag = () => selectedGroup && runMutation(
     () => editingTag ? updateCustomerTag(editingTag.id, tagDraft) : createCustomerTag({ ...tagDraft, groupId: selectedGroup.id }),
     () => setTagDialog(false),
+    setDialogError,
   );
   const moveTag = (tag: CustomerTag, direction: -1 | 1) => {
     const index = tags.findIndex((item) => item.id === tag.id);
-    const neighbor = tags[index + direction];
-    if (!neighbor) return;
-    void runMutation(async () => {
-      const first = await updateCustomerTag(tag.id, { sortOrder: neighbor.sortOrder });
-      if (first.code !== 0) return first;
-      return updateCustomerTag(neighbor.id, { sortOrder: tag.sortOrder });
-    });
+    if (!tags[index + direction] || !selectedGroup) return;
+    const nextIds = tags.map((item) => item.id);
+    [nextIds[index], nextIds[index + direction]] = [nextIds[index + direction], nextIds[index]];
+    void (async () => {
+      const succeeded = await runMutation(() => reorderCustomerTags(selectedGroup.id, nextIds));
+      if (!succeeded) await loadCatalog();
+    })();
   };
   const openMigration = async () => {
-    setMigrationOpen(true); setPreview(null); setConfirmation(''); setSaving(true); setError('');
+    setMigrationOpen(true); setPreview(null); setConfirmation(''); setSaving(true); setMigrationError('');
     try {
       const response = await previewCustomerTagMigration();
-      if (response.code !== 0) setError(response.message || '迁移预览失败');
+      if (response.code !== 0) setMigrationError(formatCustomerTagDialogError(response.code, response.message || '迁移预览失败'));
       else setPreview(response.data);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '迁移预览失败'); }
+    } catch (cause) { setMigrationError(cause instanceof Error ? cause.message : '迁移预览失败'); }
+    finally { setSaving(false); }
+  };
+  const applyMigration = async () => {
+    if (!preview) return;
+    setSaving(true); setMigrationError('');
+    try {
+      const response = await applyCustomerTagMigration(preview.checksum);
+      if (response.code !== 0) {
+        setMigrationError(response.code === 409 ? staleMigrationMessage(response.message) : formatCustomerTagDialogError(response.code, response.message));
+        if (response.code === 409) { setPreview(null); setConfirmation(''); }
+        return;
+      }
+      setMigrationOpen(false);
+      await loadCatalog();
+    } catch (cause) { setMigrationError(cause instanceof Error ? cause.message : '整理历史标签失败'); }
     finally { setSaving(false); }
   };
 
@@ -177,7 +203,7 @@ const CustomerTagConfig: React.FC = () => {
                 <Button size="small" disabled={!canManage || index === 0 || saving} onClick={() => moveTag(tag, -1)}><ArrowUpwardIcon fontSize="small" /></Button>
                 <Button size="small" disabled={!canManage || index === tags.length - 1 || saving} onClick={() => moveTag(tag, 1)}><ArrowDownwardIcon fontSize="small" /></Button>
                 <Button size="small" disabled={!canManage} onClick={() => openTag(tag)}>编辑</Button>
-                <Button size="small" disabled={!canManage || !tag.isActive || !catalog.tags.some((target) => target.groupId === tag.groupId && target.id !== tag.id && target.isActive)} startIcon={<MergeIcon />} onClick={() => { setMergeSource(tag); setMergeTargetId(''); }}>合并标签</Button>
+                <Button size="small" disabled={!canManage || !tag.isActive || !catalog.tags.some((target) => target.groupId === tag.groupId && target.id !== tag.id && target.isActive)} startIcon={<MergeIcon />} onClick={() => { setDialogError(''); setMergeSource(tag); setMergeTargetId(''); }}>合并标签</Button>
                 <Button size="small" color={tag.isActive ? 'warning' : 'success'} disabled={!canManage || saving} onClick={() => void runMutation(() => updateCustomerTag(tag.id, { isActive: !tag.isActive }))}>{tag.isActive ? '停用' : '启用'}</Button>
               </Stack>
             ))}
@@ -189,6 +215,7 @@ const CustomerTagConfig: React.FC = () => {
       <Dialog open={groupDialog} onClose={() => !saving && setGroupDialog(false)} maxWidth="sm" fullWidth>
         <DialogCloseTitle onClose={() => setGroupDialog(false)}>{editingGroup ? '编辑标签分组' : '添加分组'}</DialogCloseTitle>
         <DialogContent><Stack spacing={2} sx={{ mt: 1 }}>
+          {dialogError && <Alert severity="error">{dialogError}</Alert>}
           <TextField label="分组名称" required value={groupDraft.name} onChange={(e) => setGroupDraft({ ...groupDraft, name: e.target.value })} />
           <TextField label="分组颜色" type="color" value={groupDraft.color} onChange={(e) => setGroupDraft({ ...groupDraft, color: e.target.value })} />
           <FormControl><InputLabel>选择模式</InputLabel><Select label="选择模式" value={groupDraft.selectionMode} onChange={(e) => setGroupDraft({ ...groupDraft, selectionMode: e.target.value as GroupDraft['selectionMode'] })}><MenuItem value="single">单选</MenuItem><MenuItem value="multiple">多选</MenuItem></Select></FormControl>
@@ -201,16 +228,16 @@ const CustomerTagConfig: React.FC = () => {
 
       <Dialog open={tagDialog} onClose={() => !saving && setTagDialog(false)} maxWidth="xs" fullWidth>
         <DialogCloseTitle onClose={() => setTagDialog(false)}>{editingTag ? '编辑标签' : '添加标签'}</DialogCloseTitle>
-        <DialogContent><Stack spacing={2} sx={{ mt: 1 }}><TextField label="标签名称" required value={tagDraft.name} onChange={(e) => setTagDraft({ ...tagDraft, name: e.target.value })} /><TextField label="标签颜色" type="color" value={tagDraft.color} onChange={(e) => setTagDraft({ ...tagDraft, color: e.target.value })} /><TextField label="排序" type="number" value={tagDraft.sortOrder} onChange={(e) => setTagDraft({ ...tagDraft, sortOrder: Number(e.target.value) })} /><FormControlLabel control={<Switch checked={tagDraft.isActive} onChange={(e) => setTagDraft({ ...tagDraft, isActive: e.target.checked })} />} label={tagDraft.isActive ? '启用' : '停用'} /></Stack></DialogContent>
+        <DialogContent><Stack spacing={2} sx={{ mt: 1 }}>{dialogError && <Alert severity="error">{dialogError}</Alert>}<TextField label="标签名称" required value={tagDraft.name} onChange={(e) => setTagDraft({ ...tagDraft, name: e.target.value })} /><TextField label="标签颜色" type="color" value={tagDraft.color} onChange={(e) => setTagDraft({ ...tagDraft, color: e.target.value })} /><TextField label="排序" type="number" value={tagDraft.sortOrder} onChange={(e) => setTagDraft({ ...tagDraft, sortOrder: Number(e.target.value) })} /><FormControlLabel control={<Switch checked={tagDraft.isActive} onChange={(e) => setTagDraft({ ...tagDraft, isActive: e.target.checked })} />} label={tagDraft.isActive ? '启用' : '停用'} /></Stack></DialogContent>
         <DialogActions><Button onClick={() => setTagDialog(false)}>取消</Button><Button variant="contained" disabled={saving || !tagDraft.name.trim()} onClick={() => void saveTag()}>{saving ? '保存中…' : '保存'}</Button></DialogActions>
       </Dialog>
 
       <Dialog open={Boolean(mergeSource)} onClose={() => !saving && setMergeSource(null)} maxWidth="xs" fullWidth>
-        <DialogCloseTitle onClose={() => setMergeSource(null)}>合并标签</DialogCloseTitle><DialogContent><Alert severity="warning" sx={{ mb: 2 }}>“{mergeSource?.name}”的引用将迁移至目标标签，源标签随后停用。</Alert><FormControl fullWidth><InputLabel>目标标签</InputLabel><Select label="目标标签" value={mergeTargetId} onChange={(e) => setMergeTargetId(e.target.value)}>{compatibleTargets.map((tag) => <MenuItem key={tag.id} value={tag.id}>{tag.name}</MenuItem>)}</Select></FormControl></DialogContent><DialogActions><Button onClick={() => setMergeSource(null)}>取消</Button><Button variant="contained" disabled={!mergeSource || !mergeTargetId || saving} onClick={() => mergeSource && void runMutation(() => mergeCustomerTag(mergeSource.id, mergeTargetId), () => setMergeSource(null))}>确认合并</Button></DialogActions>
+        <DialogCloseTitle onClose={() => setMergeSource(null)}>合并标签</DialogCloseTitle><DialogContent>{dialogError && <Alert severity="error" sx={{ mb: 2 }}>{dialogError}</Alert>}<Alert severity="warning" sx={{ mb: 2 }}>“{mergeSource?.name}”的引用将迁移至目标标签，源标签随后停用。</Alert><FormControl fullWidth><InputLabel>目标标签</InputLabel><Select label="目标标签" value={mergeTargetId} onChange={(e) => setMergeTargetId(e.target.value)}>{compatibleTargets.map((tag) => <MenuItem key={tag.id} value={tag.id}>{tag.name}</MenuItem>)}</Select></FormControl></DialogContent><DialogActions><Button onClick={() => setMergeSource(null)}>取消</Button><Button variant="contained" disabled={!mergeSource || !mergeTargetId || saving} onClick={() => mergeSource && void runMutation(() => mergeCustomerTag(mergeSource.id, mergeTargetId), () => setMergeSource(null), setDialogError)}>确认合并</Button></DialogActions>
       </Dialog>
 
       <Dialog open={migrationOpen} onClose={() => !saving && setMigrationOpen(false)} maxWidth="sm" fullWidth>
-        <DialogCloseTitle onClose={() => setMigrationOpen(false)}>整理历史标签</DialogCloseTitle><DialogContent>{saving && !preview ? <Box sx={{ py: 5, textAlign: 'center' }}><CircularProgress size={28} /></Box> : preview && <Stack spacing={2}><Alert severity="info">预览：客户 {preview.customerCount} 条、线索 {preview.leadCount} 条、标签引用 {preview.assignmentCount} 条。</Alert><Box><Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>待创建标签名称</Typography>{preview.missingNames.length ? <Stack direction="row" flexWrap="wrap" gap={1}>{preview.missingNames.map((name) => <Chip key={name} label={name} size="small" />)}</Stack> : <Typography variant="body2" color="text.secondary">没有缺失名称</Typography>}</Box><TextField label="输入“整理历史标签”确认" value={confirmation} onChange={(e) => setConfirmation(e.target.value)} fullWidth /></Stack>}</DialogContent><DialogActions><Button onClick={() => setMigrationOpen(false)}>取消</Button><Button variant="contained" color="warning" disabled={!preview || confirmation !== '整理历史标签' || saving} onClick={() => preview && void runMutation(() => applyCustomerTagMigration(preview.checksum), () => setMigrationOpen(false))}>确认整理</Button></DialogActions>
+        <DialogCloseTitle onClose={() => setMigrationOpen(false)}>整理历史标签</DialogCloseTitle><DialogContent><Stack spacing={2}>{migrationError && <Alert severity="error">{migrationError}</Alert>}{saving && !preview ? <Box sx={{ py: 3, textAlign: 'center' }}><CircularProgress size={28} /></Box> : preview ? <><Alert severity="info">预览：客户 {preview.customerCount} 条、线索 {preview.leadCount} 条、标签引用 {preview.assignmentCount} 条。</Alert><Box><Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>待创建标签名称</Typography>{preview.missingNames.length ? <Stack direction="row" flexWrap="wrap" gap={1}>{preview.missingNames.map((name) => <Chip key={name} label={name} size="small" />)}</Stack> : <Typography variant="body2" color="text.secondary">没有缺失名称</Typography>}</Box><TextField label="输入“整理历史标签”确认" value={confirmation} onChange={(e) => setConfirmation(e.target.value)} fullWidth /></> : !saving && <Button variant="outlined" startIcon={<SyncIcon />} onClick={() => void openMigration()}>重新预览</Button>}</Stack></DialogContent><DialogActions><Button onClick={() => setMigrationOpen(false)}>取消</Button><Button variant="contained" color="warning" disabled={!preview || confirmation !== '整理历史标签' || saving} onClick={() => void applyMigration()}>确认整理</Button></DialogActions>
       </Dialog>
     </Box>
   );

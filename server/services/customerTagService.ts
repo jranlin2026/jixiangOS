@@ -255,7 +255,32 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
     });
   }
 
-  return { loadCatalog: (includeInactive = false) => loadCustomerTagCatalog(prisma as any, includeInactive), createGroup, updateGroup, createTag, updateTag, mergeTag };
+  async function reorderTags(groupId: string, tagIds: string[], user: AuthenticatedUser) {
+    if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
+    if (!groupId || !Array.isArray(tagIds) || tagIds.some((id) => typeof id !== 'string' || !id.trim()) || new Set(tagIds).size !== tagIds.length) {
+      return failure('标签排序数据无效', 400);
+    }
+    return catalogWriteTransaction(prisma, async (tx) => {
+      const catalog = await loadCustomerTagCatalog(tx, true);
+      if (!catalog.groups.some((group) => group.id === groupId)) return failure('标签组不存在', 404);
+      const groupTags = catalog.tags.filter((tag) => tag.groupId === groupId);
+      const expected = new Set(groupTags.map((tag) => tag.id));
+      if (tagIds.length !== groupTags.length || tagIds.some((id) => !expected.has(id))) {
+        return failure('标签目录已变化，请刷新后重试', 409);
+      }
+      const timestamp = now();
+      const reordered: CustomerTag[] = [];
+      for (const [sortOrder, id] of tagIds.entries()) {
+        const current = groupTags.find((tag) => tag.id === id)!;
+        const next = { ...current, sortOrder, updatedAt: timestamp };
+        await tx.businessRecord.update({ where: { domain_recordId: { domain: STORAGE_KEYS.TAGS, recordId: id } }, data: recordData(STORAGE_KEYS.TAGS, next) });
+        reordered.push(next);
+      }
+      return success(reordered);
+    });
+  }
+
+  return { loadCatalog: (includeInactive = false) => loadCustomerTagCatalog(prisma as any, includeInactive), createGroup, updateGroup, createTag, updateTag, mergeTag, reorderTags };
 }
 
 export function createCustomerTagRouter({
@@ -273,12 +298,12 @@ export function createCustomerTagRouter({
   router.get('/catalog', requireRead, async (req, res) => {
     const rawScope = Array.isArray(req.query.scope) ? req.query.scope[0] : req.query.scope;
     const scope = typeof rawScope === 'string' ? rawScope : '';
-    if (scope && scope !== 'customer' && scope !== 'lead') {
+    if (scope && scope !== 'customer' && scope !== 'lead' && scope !== 'all') {
       res.status(400).json({ code: 400, data: null, message: '无效的标签范围' });
       return;
     }
     const catalog = await service.loadCatalog(req.query.includeInactive === 'true');
-    const groups = scope ? catalog.groups.filter((group) => group.scope === scope || group.scope === 'both') : catalog.groups;
+    const groups = scope && scope !== 'all' ? catalog.groups.filter((group) => group.scope === scope || group.scope === 'both') : catalog.groups;
     const groupIds = new Set(groups.map((group) => group.id));
     res.status(200).json(success({ groups, tags: catalog.tags.filter((tag) => groupIds.has(tag.groupId)) }));
   });
@@ -293,6 +318,10 @@ export function createCustomerTagRouter({
   router.post('/', requireManage, async (req: any, res) => {
     const result = await service.createTag(req.body || {}, req.currentUser!);
     res.status(status(result.code, 201)).json(result);
+  });
+  router.post('/groups/:id/reorder', requireManage, async (req: any, res) => {
+    const result = await service.reorderTags(String(req.params.id), Array.isArray(req.body?.tagIds) ? req.body.tagIds : [], req.currentUser!);
+    res.status(status(result.code, 200)).json(result);
   });
   router.put('/:id', requireManage, async (req: any, res) => {
     const result = await service.updateTag(String(req.params.id), req.body || {}, req.currentUser!);

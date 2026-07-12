@@ -15,7 +15,7 @@ const requireManage: express.RequestHandler = (req, res, next) => {
   next();
 };
 const service = {
-  loadCatalog: async () => ({ groups: [{ id: 'g1', scope: 'both', isActive: true, sortOrder: 0 }], tags: [{ id: 't1', groupId: 'g1', isActive: true, sortOrder: 0 }] }),
+  loadCatalog: async () => ({ groups: [{ id: 'g1', scope: 'both', isActive: true, sortOrder: 0 }, { id: 'g-lead', scope: 'lead', isActive: true, sortOrder: 1 }], tags: [{ id: 't1', groupId: 'g1', isActive: true, sortOrder: 0 }, { id: 't-lead', groupId: 'g-lead', isActive: true, sortOrder: 0 }] }),
   createGroup: async (body: any, currentUser: any) => currentUser.id === 'sales'
     ? { code: 403, data: null, message: 'forbidden' }
     : body.name === 'duplicate' ? { code: 409, data: null, message: 'duplicate' }
@@ -25,6 +25,7 @@ const service = {
   createTag: async () => ({ code: 0, data: { id: 't2' }, message: 'success' }),
   updateTag: async (id: string) => id === 'duplicate' ? { code: 409, data: null, message: 'duplicate' } : { code: 0, data: { id }, message: 'success' },
   mergeTag: async () => ({ code: 0, data: {}, message: 'success' }),
+  reorderTags: async () => ({ code: 0, data: {}, message: 'success' }),
 };
 app.use('/api/customer-tags', createCustomerTagRouter({ service: service as any, requireRead, requireManage }));
 
@@ -41,6 +42,9 @@ const request = (path: string, init: RequestInit = {}) => fetch(`${base}${path}`
 try {
   assert.equal((await request('/catalog')).status, 403);
   assert.equal((await request('/catalog?scope=customer', { headers: { 'x-read': 'yes' } })).status, 200);
+  const allCatalog = await request('/catalog?scope=all', { headers: { 'x-read': 'yes' } });
+  assert.equal(allCatalog.status, 200);
+  assert.equal((await allCatalog.json()).data.groups.some((group: any) => group.scope === 'lead'), true, '管理目录必须包含 lead-only 分组');
   assert.equal((await request('/groups', { method: 'POST', headers: { 'x-user': 'sales' }, body: JSON.stringify({ name: 'x' }) })).status, 403);
   assert.equal((await request('/groups', { method: 'POST', body: JSON.stringify({ name: 'new' }) })).status, 201);
   assert.equal((await request('/groups', { method: 'POST', body: JSON.stringify({ name: 'duplicate' }) })).status, 409);
@@ -48,6 +52,7 @@ try {
   assert.equal((await request('/groups/missing', { method: 'PUT', body: '{}' })).status, 404);
   assert.equal((await request('/duplicate', { method: 'PUT', body: '{}' })).status, 409);
   assert.equal((await request('/source/merge', { method: 'POST', body: JSON.stringify({ targetId: 'target' }) })).status, 200);
+  assert.equal((await request('/groups/g1/reorder', { method: 'POST', body: JSON.stringify({ tagIds: ['t1'] }) })).status, 200);
 } finally {
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 }

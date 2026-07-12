@@ -38,6 +38,26 @@ pnpm exec vite build
 
 ## 风险
 
-- 排序使用两次服务端更新交换相邻 `sortOrder`；若第二次请求失败，服务端可能留下重复排序值，UI 会显示服务端错误并重新加载，但后端暂未提供原子重排接口。
-- 当前管理目录通过 customer scope 加载并包含 inactive；依赖后端 catalog 返回 `both` 分组以及其标签，与当前服务契约一致。
 - 本任务没有新增浏览器级组件测试；交互正确性主要由 TypeScript、API/权限契约和静态页面契约保障。
+
+## 复审修订
+
+- 管理页改用显式 `scope=all&includeInactive=true`；路由保留原有 `requireRead` 边界，同时支持 all 并返回 customer、lead、both 全部定义。路由测试用 lead-only 分组验证不会被遗漏。
+- 分组保存、标签保存、合并、迁移预览及应用错误全部显示在所属 Dialog 内。增加纯状态测试覆盖 403、409、一般服务端错误和默认错误文案；预览失败显示错误与“重新预览”，不再留下空白内容。
+- 迁移应用收到陈旧 checksum 的 409 后立即清空 preview 和 confirmation，显示重新预览提示，确认按钮随之禁用，旧 checksum 无法重复提交。
+- 新增 `POST /customer-tags/groups/:id/reorder`：提交整组标签 ID，服务端校验集合完整性，在 active `super_admin` 校验、共享目录行锁及单事务内更新所有 `sortOrder`。UI 不做乐观交换，失败时重新读取目录。
+- 服务测试注入中途 update 失败，验证事务完整回滚；聚焦验证增加 `customerTagSettingsState.test.ts`、路由 all-scope/lead-only 和 reorder API 契约。
+
+复审后的聚焦命令：
+
+```sh
+pnpm exec tsx src/api/customerTagSettingsStatic.test.ts
+pnpm exec tsx src/api/customerTagSettingsState.test.ts
+pnpm exec tsx src/api/customerTagApi.test.ts
+pnpm exec tsx src/api/customerTagPermissionModel.test.ts
+pnpm exec tsx server/customerTagRoutesAuth.test.ts
+pnpm exec tsx server/services/customerTagService.test.ts
+pnpm exec tsx server/services/customerTagMigrationService.test.ts
+pnpm exec tsc -b --pretty false
+pnpm exec vite build
+```

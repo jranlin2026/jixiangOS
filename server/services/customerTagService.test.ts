@@ -12,6 +12,7 @@ class FakePrisma {
   lockWaiters: Array<() => void> = [];
   forceRowLockFailure = false;
   failNextCreate = false;
+  failUpdateAfter = -1;
   sqlContracts: string[] = [];
   roles = new Map([
     ['role-sales', { id: 'role-sales', code: 'sales', isActive: true }],
@@ -50,6 +51,11 @@ class FakePrisma {
       return clone(this.rows.get(key));
     },
     update: async ({ where, data }: any) => {
+      if (this.failUpdateAfter === 0) {
+        this.failUpdateAfter = -1;
+        throw new Error('injected update failure');
+      }
+      if (this.failUpdateAfter > 0) this.failUpdateAfter -= 1;
       const pair = where.domain_recordId;
       const key = rowKey(pair.domain, pair.recordId);
       const row = { ...this.rows.get(key), ...clone(data) };
@@ -179,4 +185,19 @@ assert.deepEqual(updatedCustomer.manualTagNames, ['重点客户']);
 assert.ok(updatedCustomer.activityRecords.some((item: any) => item.title === '合并客户标签'));
 const updatedLead = prisma.leads.get('lead-1').data;
 assert.deepEqual(updatedLead.manualTagIds, [targetId]);
+
+const orderA = await service.createTag({ groupId, name: '排序 A', sortOrder: 1 }, superAdmin);
+const orderB = await service.createTag({ groupId, name: '排序 B', sortOrder: 2 }, superAdmin);
+assert.equal((await service.reorderTags(groupId, [(orderB.data as any).id, (orderA.data as any).id], superAdmin)).code, 409, '排序必须提交整组标签，避免遗漏');
+const groupTagIds = (await loadCustomerTagCatalog(prisma as any, true)).tags.filter((tag) => tag.groupId === groupId).map((tag) => tag.id);
+const reversedIds = [...groupTagIds].reverse();
+assert.equal((await service.reorderTags(groupId, reversedIds, superAdmin)).code, 0);
+const reordered = (await loadCustomerTagCatalog(prisma as any, true)).tags.filter((tag) => tag.groupId === groupId).sort((a, b) => a.sortOrder - b.sortOrder);
+assert.deepEqual(reordered.map((tag) => tag.id), reversedIds);
+
+const snapshotBeforeFailedReorder = reordered.map((tag) => ({ id: tag.id, sortOrder: tag.sortOrder }));
+prisma.failUpdateAfter = 1;
+await assert.rejects(service.reorderTags(groupId, [...reversedIds].reverse(), superAdmin), /injected update failure/);
+const afterFailedReorder = (await loadCustomerTagCatalog(prisma as any, true)).tags.filter((tag) => tag.groupId === groupId).sort((a, b) => a.sortOrder - b.sortOrder);
+assert.deepEqual(afterFailedReorder.map((tag) => ({ id: tag.id, sortOrder: tag.sortOrder })), snapshotBeforeFailedReorder, '失败事务必须回滚全部排序更新');
 assert.deepEqual(updatedLead.manualTagNames, ['重点客户']);
