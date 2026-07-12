@@ -6,6 +6,7 @@ import {
   normalizeManualTagIds,
   resolveManualTagNames,
   validateManualTagSelection,
+  validateManualTagUpdateSelection,
 } from './customerTagPolicy';
 
 const catalog: CustomerTagCatalog = {
@@ -79,6 +80,10 @@ assert.deepEqual(
   inheritableCustomerTagIds(inactiveCatalog, ['t-inactive', 't-active', 't-inactive-group']),
   ['t-active'],
 );
+assert.deepEqual(validateManualTagUpdateSelection(inactiveCatalog, 'customer', ['t-inactive'], ['t-inactive']), { ok: true, tagIds: ['t-inactive'] });
+assert.equal(validateManualTagUpdateSelection(inactiveCatalog, 'customer', ['t-inactive'], []).ok, false);
+assert.equal(validateManualTagUpdateSelection(inactiveCatalog, 'customer', ['missing'], ['missing']).ok, false);
+assert.deepEqual(validateManualTagUpdateSelection(inactiveCatalog, 'customer', ['t-active'], ['t-inactive']), { ok: true, tagIds: ['t-active'] });
 
 const nameResolutionCatalog: CustomerTagCatalog = {
   groups: [

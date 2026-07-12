@@ -206,7 +206,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogCloseTitle onClose={onClose}>{isEdit ? '编辑线索资料' : '新增线索入库'}</DialogCloseTitle>
       <DialogContent>
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2, mt: 1 }}>
           {submitError && (
             <Alert severity="error" sx={{ gridColumn: '1 / -1' }}>
               {submitError}

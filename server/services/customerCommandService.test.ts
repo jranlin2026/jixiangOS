@@ -566,6 +566,7 @@ const tagDefinitions = [
   { id: 'customer-only', groupId: 'group-customer', name: '客户专用', color: '#1677ff', isActive: true, sortOrder: 0, createdAt: FIXED_NOW, updatedAt: FIXED_NOW },
   { id: 'single-a', groupId: 'group-single', name: '单选甲', color: '#1677ff', isActive: true, sortOrder: 0, createdAt: FIXED_NOW, updatedAt: FIXED_NOW },
   { id: 'single-b', groupId: 'group-single', name: '单选乙', color: '#1677ff', isActive: true, sortOrder: 1, createdAt: FIXED_NOW, updatedAt: FIXED_NOW },
+  { id: 'inactive-shared', groupId: 'group-both', name: '已停用通用', color: '#94a3b8', isActive: false, sortOrder: 2, createdAt: FIXED_NOW, updatedAt: FIXED_NOW },
 ] as const;
 
 function tagCatalogRows(): BusinessRow[] {
@@ -626,6 +627,38 @@ const serviceOptions = {
     return () => `generated-${++index}`;
   })(),
 };
+
+// 更新只能原样保留该记录已有的停用标签；移除后不得重新添加。
+{
+  const value = customer('cust-inactive-tag-update');
+  (value as any).manualTagIds = ['inactive-shared'];
+  (value as any).tags = ['已停用通用'];
+  const fake = createFakePrisma({ businessRecords: [businessCustomer(value), ...tagCatalogRows()], leads: [] });
+  const service = createCustomerCommandService(fake.prisma, serviceOptions);
+  const retained = await service.updateCustomer(value.id, { name: '其他字段已修改', manualTagIds: ['inactive-shared'] }, customerEditor);
+  assert.equal(retained.code, 0);
+  assert.deepEqual(retained.data?.manualTagIds, ['inactive-shared']);
+  assert.equal((await service.updateCustomer(value.id, { manualTagIds: [] }, customerEditor)).code, 0);
+  assert.equal((await service.updateCustomer(value.id, { manualTagIds: ['inactive-shared'] }, customerEditor)).code, 400);
+
+  const fresh = customer('cust-new-inactive-tag');
+  const freshFake = createFakePrisma({ businessRecords: [businessCustomer(fresh), ...tagCatalogRows()], leads: [] });
+  assert.equal((await createCustomerCommandService(freshFake.prisma, serviceOptions).updateCustomer(fresh.id, { manualTagIds: ['inactive-shared'] }, customerEditor)).code, 400);
+}
+
+// 线索更新应用与客户相同的停用 ID 保留边界。
+{
+  const source = pendingLead('lead-inactive-tag-update');
+  source.data.manualTagIds = ['inactive-shared'];
+  source.data.tags = ['已停用通用'];
+  const fake = createFakePrisma({ businessRecords: tagCatalogRows(), leads: [source] });
+  const service = createCustomerCommandService(fake.prisma, serviceOptions);
+  const retained = await service.updateLead(source.id, { company: '更新公司', manualTagIds: ['inactive-shared'] }, leadEditor);
+  assert.equal(retained.code, 0);
+  assert.deepEqual(retained.data?.manualTagIds, ['inactive-shared']);
+  assert.equal((await service.updateLead(source.id, { manualTagIds: [] }, leadEditor)).code, 0);
+  assert.equal((await service.updateLead(source.id, { manualTagIds: ['inactive-shared'] }, leadEditor)).code, 400);
+}
 
 // RED: 客户放公海必须在一个事务中同步客户与关联线索。
 {

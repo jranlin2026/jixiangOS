@@ -7,6 +7,11 @@ assert.match(selector, /selectionMode === 'single'/);
 assert.match(selector, /includeInactiveSelected/);
 assert.match(selector, /validateManualTagSelection/);
 assert.match(selector, /20/);
+assert.match(selector, /fetchCustomerTagCatalog\(scope, false\)/);
+assert.match(selector, /catalogRequests = new Map/);
+assert.match(selector, /catalogCache = new Map/);
+assert.match(selector, /重试/);
+assert.match(selector, /标签目录加载失败/);
 assert.doesNotMatch(selector, /freeSolo/);
 
 for (const path of [
@@ -19,6 +24,11 @@ for (const path of [
   assert.match(source, /ManualTagSelector/);
   assert.match(source, /manualTagIds/);
   assert.doesNotMatch(source, /标签（逗号分隔）/);
+}
+
+for (const path of ['src/pages/Customers/CustomerForm.tsx', 'src/pages/Leads/LeadForm.tsx']) {
+  const source = readFileSync(path, 'utf8');
+  assert.match(source, /gridTemplateColumns: \{ xs: '1fr', sm: '1fr 1fr' \}/);
 }
 
 for (const path of ['src/pages/Customers/index.tsx', 'src/pages/Leads/index.tsx']) {

@@ -6,8 +6,12 @@
 - Replaced free-text tag editing in customer create/edit, customer detail, lead create/edit, and lead detail.
 - Payloads now submit only `manualTagIds`; legacy `tags` names are display-only snapshots.
 - Added grouped catalog options with group/tag colors, single-group replacement, multi-select support, a 20-tag limit, loading/error UI, and mobile-safe sizing.
-- Selected inactive tags remain visible with an `已停用` suffix and cannot be newly selected.
+- Business pages fetch only the active scope catalog (`includeInactive=false`), so customer/lead readers never need settings permission.
+- Selected inactive IDs remain visible from the record's ID/name snapshot with an `已停用` suffix, can be removed, and cannot be newly selected.
 - Customer and lead list/detail views resolve catalog colors and show unmigrated names as neutral `历史未归类` chips.
+- Scope-level catalog state deduplicates concurrent row requests, shares successful results, surfaces load failures, and supports retry.
+- Server updates load the complete catalog inside the authorized transaction and allow an inactive ID only when it belonged to that record before the update. Unknown/new inactive IDs remain invalid; removal revokes the preservation allowance.
+- Customer and lead dialogs use an `xs` single-column and `sm+` two-column layout.
 
 ## TDD Evidence
 

@@ -24,7 +24,7 @@ import {
 import { applyContactEditLock } from '../../src/shared/utils/contactEditLock';
 import { mapPrismaDepartment, mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { loadCustomerTagCatalog } from './customerTagService';
-import { inheritableCustomerTagIds, validateManualTagSelection } from './customerTagPolicy';
+import { inheritableCustomerTagIds, validateManualTagSelection, validateManualTagUpdateSelection } from './customerTagPolicy';
 
 type CustomerCommandPrisma = Pick<PrismaClient, '$transaction' | 'leadRecord'>;
 type CustomerCommandTx = Pick<
@@ -723,8 +723,8 @@ export function createCustomerCommandService(
 
         let patch = editableCustomerPatch(input);
         if (Object.prototype.hasOwnProperty.call(input, 'manualTagIds')) {
-          const catalog = await loadCustomerTagCatalog(tx, false);
-          const validation = validateManualTagSelection(catalog, 'customer', input.manualTagIds || []);
+          const catalog = await loadCustomerTagCatalog(tx, true);
+          const validation = validateManualTagUpdateSelection(catalog, 'customer', input.manualTagIds || [], customer.manualTagIds || []);
           if (!validation.ok) return failure<Customer>(validation.message, 400);
           patch.manualTagIds = validation.tagIds;
           patch.tags = validation.tagIds.map((id) => catalog.tags.find((tag) => tag.id === id)!.name);
@@ -1144,8 +1144,8 @@ export function createCustomerCommandService(
 
         let patch = editableLeadPatch(input);
         if (Object.prototype.hasOwnProperty.call(input, 'manualTagIds')) {
-          const catalog = await loadCustomerTagCatalog(tx, false);
-          const validation = validateManualTagSelection(catalog, 'lead', input.manualTagIds || []);
+          const catalog = await loadCustomerTagCatalog(tx, true);
+          const validation = validateManualTagUpdateSelection(catalog, 'lead', input.manualTagIds || [], lead.manualTagIds || []);
           if (!validation.ok) return failure<Lead>(validation.message, 400);
           patch.manualTagIds = validation.tagIds;
           patch.tags = validation.tagIds.map((id) => catalog.tags.find((tag) => tag.id === id)!.name);

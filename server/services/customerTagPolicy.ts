@@ -4,4 +4,5 @@ export {
   normalizeManualTagIds,
   resolveManualTagNames,
   validateManualTagSelection,
+  validateManualTagUpdateSelection,
 } from '../../src/shared/utils/customerTagPolicy';

@@ -238,7 +238,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       <DialogCloseTitle onClose={onClose}>{isEdit ? '编辑客户资料' : '新增客户'}</DialogCloseTitle>
       <DialogContent>
         {submitError && <Alert severity="error" sx={{ mt: 1 }}>{submitError}</Alert>}
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2, mt: 1 }}>
           <TextField label="姓名" value={form.name} onChange={handleChange('name')} required fullWidth />
           <TextField label="公司" value={form.company} onChange={handleChange('company')} fullWidth />
           <PhoneNumberInput

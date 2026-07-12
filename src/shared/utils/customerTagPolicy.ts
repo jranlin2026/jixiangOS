@@ -24,6 +24,32 @@ export function validateManualTagSelection(catalog: CustomerTagCatalog, scope: A
   return { ok: true as const, tagIds: normalized };
 }
 
+export function validateManualTagUpdateSelection(
+  catalog: CustomerTagCatalog,
+  scope: AssignmentScope,
+  requestedIds: string[],
+  previousIds: string[] = [],
+) {
+  const requested = normalizeManualTagIds(requestedIds);
+  if (requested.length > MAX_TAGS_PER_SUBJECT) return { ok: false as const, message: `每条记录最多选择 ${MAX_TAGS_PER_SUBJECT} 个标签` };
+  const previous = new Set(normalizeManualTagIds(previousIds));
+  const groups = new Map(catalog.groups.map((group) => [group.id, group]));
+  const tags = new Map(catalog.tags.map((tag) => [tag.id, tag]));
+  const activeIds: string[] = [];
+  for (const id of requested) {
+    const tag = tags.get(id);
+    const group = tag ? groups.get(tag.groupId) : undefined;
+    if (!tag || !group) return { ok: false as const, message: '标签不存在或已停用' };
+    if (!tag.isActive || !group.isActive) {
+      if (!previous.has(id)) return { ok: false as const, message: '标签不存在或已停用' };
+      continue;
+    }
+    activeIds.push(id);
+  }
+  const activeValidation = validateManualTagSelection(catalog, scope, activeIds);
+  return activeValidation.ok ? { ok: true as const, tagIds: requested } : activeValidation;
+}
+
 export function resolveManualTagNames(catalog: CustomerTagCatalog, scope: AssignmentScope, labels: string[]) {
   const groupById = new Map(catalog.groups.map((group) => [group.id, group]));
   const tagIds: string[] = [];
