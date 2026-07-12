@@ -9,7 +9,7 @@ import {
   normalizeResourceOwnership,
 } from '../../src/shared/utils/constants';
 import type { Customer, CustomerCreateInput, CustomerFilters } from '../../src/types/customer';
-import type { PaginatedResponse } from '../../src/api/types';
+import type { ApiResponse, PaginatedResponse } from '../../src/api/types';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import { buildDataVisibilityScopeForUser } from '../../src/shared/utils/dataVisibility';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
@@ -19,8 +19,12 @@ import {
   normalizePhoneForStorage,
 } from '../../src/shared/utils/phoneNumber';
 import { PERMISSION_KEYS, hasPermission } from '../../src/shared/utils/permissions';
+import { loadCustomerTagCatalog } from './customerTagService';
+import { validateManualTagSelection } from './customerTagPolicy';
+import { groupTagIdsForFilter, normalizeManualTagIds, validateCustomerTagFilters } from '../../src/shared/utils/customerTagPolicy';
+import type { CustomerTagCatalog } from '../../src/types/tag';
 
-type CustomerListPrisma = Pick<PrismaClient, 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | '$queryRaw'>;
+type CustomerListPrisma = Pick<PrismaClient, 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | '$queryRaw' | '$transaction'>;
 
 type CustomerRow = {
   id?: string;
@@ -118,11 +122,29 @@ function buildTextLikeCondition(path: string, value: string) {
   return Prisma.sql`LOWER(COALESCE(${jsonText(path)}, '')) LIKE ${value}`;
 }
 
-function buildJsonArraySearchCondition(path: string, value: string) {
-  return Prisma.sql`JSON_SEARCH(data, 'one', ${value}, NULL, ${Prisma.raw(`'${path}'`)}) IS NOT NULL`;
+function containsTagId(tagId: string) {
+  return Prisma.sql`JSON_CONTAINS(COALESCE(JSON_EXTRACT(data, '$.manualTagIds'), JSON_ARRAY()), JSON_QUOTE(${tagId})) = 1`;
 }
 
-function buildCustomerWhere(filters: CustomerFilters, currentUser?: AuthenticatedUser | null): Prisma.Sql {
+export function matchesCustomerTagFilters(customer: Pick<Customer, 'manualTagIds' | 'tags'>, filters: CustomerFilters, catalog: CustomerTagCatalog): boolean {
+  const assigned = new Set(customer.manualTagIds || []);
+  const ids = normalizeManualTagIds(filters.tagIds || []).slice(0, 20);
+  if (ids.length) {
+    const mode = filters.tagMatch || 'grouped';
+    if (mode === 'any' && !ids.some((id) => assigned.has(id))) return false;
+    if (mode === 'all' && !ids.every((id) => assigned.has(id))) return false;
+    if (mode === 'grouped' && !groupTagIdsForFilter(catalog, ids).every((group) => group.some((id) => assigned.has(id)))) return false;
+  }
+  if (filters.withoutTags && assigned.size !== 0) return false;
+  if (filters.missingTagGroupId) {
+    const groupIds = catalog.tags.filter((tag) => tag.isActive && tag.groupId === filters.missingTagGroupId).map((tag) => tag.id);
+    if (groupIds.some((id) => assigned.has(id))) return false;
+  }
+  if (filters.tag && !(customer.tags || []).some((name) => name === filters.tag!.trim())) return false;
+  return true;
+}
+
+function buildCustomerWhere(filters: CustomerFilters, catalog?: CustomerTagCatalog): Prisma.Sql {
   const conditions: Prisma.Sql[] = [
     Prisma.sql`domain = ${STORAGE_KEYS.CUSTOMERS}`,
     Prisma.sql`JSON_EXTRACT(data, '$.deletedAt') IS NULL`,
@@ -180,7 +202,24 @@ function buildCustomerWhere(filters: CustomerFilters, currentUser?: Authenticate
     conditions.push(buildTextLikeCondition('$.city', `%${filters.city.trim().toLowerCase()}%`));
   }
   if (filters.tag) {
-    conditions.push(buildJsonArraySearchCondition('$.tags[*]', `%${filters.tag.trim()}%`));
+    conditions.push(Prisma.sql`JSON_CONTAINS(COALESCE(JSON_EXTRACT(data, '$.tags'), JSON_ARRAY()), JSON_QUOTE(${filters.tag.trim()})) = 1`);
+  }
+  const ids = normalizeManualTagIds(filters.tagIds || []).slice(0, 20);
+  if (ids.length) {
+    const mode = filters.tagMatch || 'grouped';
+    if (mode === 'any') conditions.push(Prisma.sql`(${Prisma.join(ids.map(containsTagId), ' OR ')})`);
+    if (mode === 'all') conditions.push(Prisma.sql`(${Prisma.join(ids.map(containsTagId), ' AND ')})`);
+    if (mode === 'grouped') {
+      const grouped = groupTagIdsForFilter(catalog || { groups: [], tags: [] }, ids);
+      conditions.push(Prisma.sql`(${Prisma.join(grouped.map((group) => Prisma.sql`(${Prisma.join(group.map(containsTagId), ' OR ')})`), ' AND ')})`);
+    }
+  }
+  if (filters.withoutTags) {
+    conditions.push(Prisma.sql`JSON_LENGTH(COALESCE(JSON_EXTRACT(data, '$.manualTagIds'), JSON_ARRAY())) = 0`);
+  }
+  if (filters.missingTagGroupId && catalog) {
+    const groupIds = catalog.tags.filter((tag) => tag.isActive && tag.groupId === filters.missingTagGroupId).map((tag) => tag.id);
+    if (groupIds.length) conditions.push(Prisma.sql`NOT (${Prisma.join(groupIds.map(containsTagId), ' OR ')})`);
   }
 
   return Prisma.sql`${Prisma.join(conditions, ' AND ')}`;
@@ -284,7 +323,10 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
   };
 
   return {
-    async create(input: CustomerCreateInput, currentUser: AuthenticatedUser) {
+    async create(input: CustomerCreateInput, currentUser: AuthenticatedUser): Promise<ApiResponse<Customer | null>> {
+      if (!hasPermission(currentUser, PERMISSION_KEYS.CUSTOMER_CREATE, 'write')) {
+        return failure<Customer>('无权新建客户', 403);
+      }
       const name = cleanText(input.name);
       if (!name) return failure<Customer>('客户姓名不能为空', 400);
       if (name.length > 100) return failure<Customer>('客户姓名不能超过100个字符', 400);
@@ -307,7 +349,12 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
 
       const comparablePhone = phone ? normalizePhoneForComparison(phone) : '';
       const comparableWechat = wechat.toLowerCase();
-      const existingCustomerRows = await prisma.businessRecord.findMany({
+      const operation = async (tx: Pick<Prisma.TransactionClient, 'businessRecord' | 'leadRecord'>): Promise<ApiResponse<Customer | null>> => {
+      const catalog = await loadCustomerTagCatalog(tx, false);
+      const tagValidation = validateManualTagSelection(catalog, 'customer', input.manualTagIds || []);
+      if (!tagValidation.ok) return failure<Customer>(tagValidation.message, 400);
+      const tagNames = tagValidation.tagIds.map((id) => catalog.tags.find((tag) => tag.id === id)!.name);
+      const existingCustomerRows = await tx.businessRecord.findMany({
         where: { domain: STORAGE_KEYS.CUSTOMERS },
         select: { data: true },
       });
@@ -324,6 +371,8 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
       const id = `cust-${createHash('sha256').update(identity).digest('hex').slice(0, 16)}`;
       const customer: Customer = {
         ...input,
+        manualTagIds: tagValidation.tagIds,
+        tags: tagNames,
         name,
         id,
         phone,
@@ -350,7 +399,7 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
       };
 
       try {
-        await prisma.businessRecord.create({
+        await tx.businessRecord.create({
           data: {
             id: STORAGE_KEYS.CUSTOMERS + ':' + id,
             domain: STORAGE_KEYS.CUSTOMERS,
@@ -371,16 +420,24 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
         throw error;
       }
       return success(customer);
+      };
+      return prisma.$transaction ? (prisma.$transaction as any)(operation) : operation(prisma as any);
     },
 
     async list(filters: CustomerFilters = {}, currentUser?: AuthenticatedUser | null) {
       const page = toPositiveInt(filters.page, 1);
       const pageSize = Math.min(toPositiveInt(filters.pageSize, DEFAULT_PAGE_SIZE), 100);
       const offset = (page - 1) * pageSize;
-      const [where, visibilityWhere] = await Promise.all([
-        Promise.resolve(buildCustomerWhere(filters, currentUser)),
+      const needsCatalog = Boolean(filters.missingTagGroupId || filters.tagIds?.length);
+      const [catalog, visibilityWhere] = await Promise.all([
+        needsCatalog ? loadCustomerTagCatalog(prisma as any, false) : Promise.resolve(undefined),
         buildVisibilityWhere(prisma, currentUser),
       ]);
+      if (catalog) {
+        const validation = validateCustomerTagFilters(catalog, filters);
+        if (!validation.ok) return failure<PaginatedResponse<Customer>>(validation.message, 400);
+      }
+      const where = buildCustomerWhere(filters, catalog);
       const combinedWhere = Prisma.sql`${where} AND ${visibilityWhere}`;
       const countRows = await prisma.$queryRaw<Array<{ total: bigint | number }>>`
         SELECT COUNT(*) AS total

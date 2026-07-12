@@ -70,6 +70,9 @@ import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import { ModuleHeader, ModulePage, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
+import { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
+import CustomerTagFilter from './CustomerTagFilter';
+import { customerTagRequestSource, readCustomerTagFilterParams, writeCustomerTagFilterParams } from './customerTagFilterState';
 
 type CustomerColumn = {
   id: string;
@@ -124,13 +127,7 @@ const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[], scope: 
   {
     id: 'tags',
     label: '标签',
-    render: (customer) => (
-      <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-        {customer.tags?.length ? customer.tags.map((tag) => (
-          <Chip key={tag} label={tag} size="small" variant="outlined" sx={{ height: 22 }} />
-        )) : '-'}
-      </Box>
-    ),
+    render: (customer) => <ManualTagDisplay scope="customer" ids={customer.manualTagIds} legacyNames={customer.tags} />,
   },
   { id: 'leadSource', label: '线索来源', render: (customer) => formatCustomerSource(customer) },
   { id: 'sourceType', label: '资源归属', render: (customer) => normalizeResourceOwnership(customer.sourceType) },
@@ -250,7 +247,7 @@ const FOLLOW_STATUS_OPTIONS = [
 
 const Customers: React.FC = () => {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { items, filters, pagination, fetchItems, setFilters } = useCustomerStore();
   const currentUser = useAuthStore((state) => state.currentUser);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -289,11 +286,6 @@ const Customers: React.FC = () => {
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(CUSTOMER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
 
   useEffect(() => {
-    fetchItems({
-      ...filters,
-      productLevel: undefined,
-      lifecycleStatusCode: customerScope === 'public_pool' ? 'public_pool' : undefined,
-    });
     settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
       if (res.code === 0) {
         setUsers(res.data.filter((user) => user.isActive));
@@ -309,6 +301,13 @@ const Customers: React.FC = () => {
       if (res.code === 0) setCustomerLevelConfigs(res.data);
     });
   }, [currentUser?.id, fetchItems]);
+
+  useEffect(() => {
+    const tagState = readCustomerTagFilterParams(searchParams);
+    const nextFilters: CustomerFilters = { ...filters, ...tagState, productLevel: undefined, page: 1, lifecycleStatusCode: customerScope === 'public_pool' ? 'public_pool' : undefined };
+    setFilters(nextFilters);
+    fetchItems(nextFilters);
+  }, [searchParams.toString(), customerScope, currentUser?.id, fetchItems]);
 
   useEffect(() => {
     localStorage.setItem(CUSTOMER_VIEW_STORAGE_KEY, JSON.stringify(viewConfig));
@@ -339,7 +338,7 @@ const Customers: React.FC = () => {
   const isSuperAdmin = isSuperAdminRoleName(currentUser?.role);
   const isPublicPoolScope = customerScope === 'public_pool';
   const ownerFilterLabel = isPublicPoolScope ? '最后跟进人' : '销售负责人';
-  const hasAdvancedFilters = Boolean(filters.sourceType || filters.leadSource || filters.industry || filters.city || filters.tag);
+  const hasAdvancedFilters = Boolean(filters.sourceType || filters.leadSource || filters.industry || filters.city || filters.tagIds?.length || filters.withoutTags || filters.missingTagGroupId);
   const hasAnyActiveFilter = Boolean(
     filters.search
     || filters.customerLevel
@@ -511,8 +510,17 @@ const Customers: React.FC = () => {
 
   const handleResetFilters = () => {
     const newFilters = scopedFilters({ page: 1, pageSize: pagination.pageSize || 10 }, customerScope);
+    const nextParams = writeCustomerTagFilterParams(searchParams, {});
     setFilters(newFilters);
-    fetchItems(newFilters);
+    if (customerTagRequestSource(searchParams, nextParams) === 'url-effect') setSearchParams(nextParams, { replace: true });
+    else fetchItems(newFilters);
+  };
+
+  const handleTagFilterApply = (tagFilters: Pick<CustomerFilters, 'tagIds' | 'tagMatch' | 'withoutTags' | 'missingTagGroupId'>) => {
+    const newFilters = { ...filters, ...tagFilters, tag: undefined, productLevel: undefined, page: 1, pageSize: pagination.pageSize || 10 };
+    const nextParams = writeCustomerTagFilterParams(searchParams, tagFilters);
+    if (customerTagRequestSource(searchParams, nextParams) === 'url-effect') setSearchParams(nextParams, { replace: true });
+    else { setFilters(newFilters); fetchItems(newFilters); }
   };
 
   const handlePageChange = (_: React.MouseEvent<HTMLButtonElement> | null, page: number) => {
@@ -740,13 +748,7 @@ const Customers: React.FC = () => {
               size="small"
               sx={{ minWidth: 130 }}
             />
-            <TextField
-              label="客户标签"
-              value={filters.tag || ''}
-              onChange={(e) => handleFilterChange('tag', e.target.value)}
-              size="small"
-              sx={{ minWidth: 150 }}
-            />
+            <CustomerTagFilter value={filters} onApply={handleTagFilterApply} />
           </Box>
         </Collapse>
       </ModuleToolbar>

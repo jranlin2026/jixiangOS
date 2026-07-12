@@ -10,6 +10,9 @@ import { createSuccessResponse, delay, type ApiResponse } from './types';
 import { initializeMockData } from './mock';
 import { getStorageData } from './mock/storage';
 import { leadFlowApi } from './leadFlowApi';
+import type { CustomerTagCatalog } from '../types/tag';
+import { resolveManualTagNames } from '../shared/utils/customerTagPolicy';
+import { fetchCustomerTagCatalog } from './customerTagApi';
 
 const TEXT = {
   name: '\u59d3\u540d*',
@@ -238,7 +241,7 @@ function applyListValidation(sheet: import('exceljs').Worksheet, columnIndex: nu
   }
 }
 
-function validateRow(row: CleanRow) {
+function validateRow(row: CleanRow, catalog: CustomerTagCatalog) {
   const data = row.data;
   const errors: string[] = [];
   const users = getActiveUsers();
@@ -250,6 +253,8 @@ function validateRow(row: CleanRow) {
   const inputByValue = data[TEXT.inputBy];
   const contributorValue = data[TEXT.leadContributor];
   const ownerValue = data[TEXT.owner];
+  const requestedTags = parseTags(data[TEXT.tags]);
+  const tagResolution = resolveManualTagNames(catalog, 'lead', requestedTags);
 
   const sourceOption = sourceValue
     ? sourceOptions.find((option) => option.label.trim().toLowerCase() === sourceValue.trim().toLowerCase())
@@ -268,6 +273,7 @@ function validateRow(row: CleanRow) {
   if (contributorValue && !contributorUser) errors.push(`${TEXT.leadContributorMissing}\uff1a${contributorValue}`);
   if (sourceType === '\u4e2a\u4eba\u8d44\u6e90' && !contributorUser) errors.push(TEXT.leadContributorRequired);
   if (ownerValue && ownerValue !== TEXT.toAssign && !ownerUser) errors.push(`${TEXT.ownerMissing}\uff1a${ownerValue}`);
+  if (!tagResolution.ok) errors.push(tagResolution.message);
 
   if (errors.length) {
     return { errors, payload: null };
@@ -288,7 +294,8 @@ function validateRow(row: CleanRow) {
     leadContributorName: contributorUser?.name,
     industry: data[TEXT.industry],
     city: data[TEXT.city],
-    tags: parseTags(data[TEXT.tags]),
+    manualTagIds: tagResolution.ok ? tagResolution.tagIds : [],
+    tags: tagResolution.ok ? tagResolution.tagIds.map((id) => catalog.tags.find((tag) => tag.id === id)!.name) : [],
     remark: data[TEXT.remark],
   };
 
@@ -399,9 +406,22 @@ async function importWorkbook(arrayBuffer: ArrayBuffer): Promise<ApiResponse<Lea
   ensureInit();
   await delay(80);
 
+  // Load one authoritative snapshot before validating any row. If the catalog
+  // cannot be read, abort before the first intake command so a batch is never
+  // partially written against stale browser storage.
+  const catalogResponse = await fetchCustomerTagCatalog('lead', false);
+  if (catalogResponse.code !== 0 || !catalogResponse.data) {
+    return {
+      code: catalogResponse.code,
+      data: null as unknown as LeadBulkImportResult,
+      message: catalogResponse.message || '标签目录加载失败',
+    };
+  }
+  const catalog = catalogResponse.data;
+
   const results: LeadBulkImportRowResult[] = [];
   for (const row of await readRows(arrayBuffer)) {
-    const { errors, payload } = validateRow(row);
+    const { errors, payload } = validateRow(row, catalog);
     const rowName = row.data[TEXT.name] || row.data[TEXT.company] || `Row ${row.rowNumber}`;
 
     if (!payload || errors.length) {

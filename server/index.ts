@@ -20,6 +20,8 @@ import { createAiConfigService } from './services/aiConfigService';
 import { createAiChatClient, type AiChatMessage } from './services/aiChatClient';
 import { createCustomerListService } from './services/customerListService';
 import { createCustomerCommandService } from './services/customerCommandService';
+import { createCustomerTagRouter, createCustomerTagService } from './services/customerTagService';
+import { createCustomerTagMigrationRouter, createCustomerTagMigrationService } from './services/customerTagMigrationService';
 import { createLeadListService } from './services/leadListService';
 import { createSettingsService } from './services/settingsService';
 import { createStorageService } from './services/storageService';
@@ -68,6 +70,8 @@ const aiChatClient = createAiChatClient({ configReader: aiConfigService });
 const coCreationService = createCoCreationService({ prisma, aiClient: aiChatClient });
 const customerListService = createCustomerListService(prisma);
 const customerCommandService = createCustomerCommandService(prisma);
+const customerTagService = createCustomerTagService(prisma);
+const customerTagMigrationService = createCustomerTagMigrationService(prisma as any);
 const leadListService = createLeadListService(prisma);
 const settingsService = createSettingsService(prisma);
 const storageService = createStorageService(prisma);
@@ -97,6 +101,8 @@ const requireDataMaintenanceDeleteAccess = createRequireAuth(authService, PERMIS
 const requireStorageAccess = createRequireAuth(authService);
 const requireCoCreationAccess = createRequireAuth(authService);
 const requireCustomerListAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_LIST);
+const requireCustomerTagLeadReadAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_DETAIL);
+const requireCustomerTagSettingsReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS);
 const requireCustomerCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_CREATE, 'write');
 const requireCustomerEditAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_EDIT, 'write');
 const requireCustomerAssignAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_ASSIGN, 'write');
@@ -217,6 +223,10 @@ function queryParam(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+function queryParams(value: unknown): string[] {
+  return (Array.isArray(value) ? value : [value]).flatMap((item) => typeof item === 'string' ? [item.trim()] : []).filter(Boolean);
+}
+
 function safeUploadFileName(value: unknown): string {
   const fallback = 'matrix-video';
   const raw = decodeURIComponent(String(value || fallback)).split(/[\\/]/).pop() || fallback;
@@ -286,6 +296,17 @@ app.get('/api/ready', async (_req, res) => {
   const payload = await healthPayload();
   res.status(payload.database ? 200 : 503).json(payload);
 });
+app.use('/api/customer-tags', createCustomerTagMigrationRouter({
+  service: customerTagMigrationService,
+  requireAuth: requireStorageAccess,
+}));
+app.use('/api/customer-tags', createCustomerTagRouter({
+  service: customerTagService,
+  requireCustomerRead: requireCustomerListAccess,
+  requireLeadRead: requireCustomerTagLeadReadAccess,
+  requireSettingsRead: requireCustomerTagSettingsReadAccess,
+  requireManage: requireStorageAccess,
+}));
 
 app.post('/api/customers', requireCustomerCreateAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerListService.create(req.body || {}, req.currentUser!);
@@ -293,6 +314,13 @@ app.post('/api/customers', requireCustomerCreateAccess, async (req: Authenticate
 });
 
 app.get('/api/customers', requireCustomerListAccess, async (req: AuthenticatedRequest, res) => {
+  const tagIds = queryParams(req.query.tagId);
+  const rawTagMatch = queryParam(req.query.tagMatch) || 'grouped';
+  const tagMatch = rawTagMatch === 'any' || rawTagMatch === 'all' || rawTagMatch === 'grouped' ? rawTagMatch : null;
+  const withoutTagsRaw = queryParam(req.query.withoutTags);
+  if (tagIds.length > 20) return res.status(400).json({ code: 400, message: '客户标签最多选择 20 个', data: null });
+  if (!tagMatch) return res.status(400).json({ code: 400, message: '不支持的标签匹配方式', data: null });
+  if (withoutTagsRaw && !['true', 'false'].includes(withoutTagsRaw)) return res.status(400).json({ code: 400, message: 'withoutTags 必须为布尔值', data: null });
   const result = await customerListService.list({
     search: queryParam(req.query.search),
     productLevel: queryParam(req.query.productLevel) as any,
@@ -305,6 +333,10 @@ app.get('/api/customers', requireCustomerListAccess, async (req: AuthenticatedRe
     industry: queryParam(req.query.industry),
     city: queryParam(req.query.city),
     tag: queryParam(req.query.tag),
+    tagIds,
+    tagMatch,
+    withoutTags: withoutTagsRaw === 'true',
+    missingTagGroupId: queryParam(req.query.missingTagGroupId) || undefined,
     page: Number(queryParam(req.query.page)),
     pageSize: Number(queryParam(req.query.pageSize)),
   }, req.currentUser);

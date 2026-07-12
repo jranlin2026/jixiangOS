@@ -14,6 +14,7 @@ import DataMaintenance from './DataMaintenance';
 import CrmMigration from './CrmMigration';
 import AIProviderConfig from './AIProviderConfig';
 import LeadFlowConfigTab from '../Leads/LeadFlowConfigTab';
+import CustomerTagConfig from './CustomerTagConfig';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
@@ -79,10 +80,11 @@ const Settings: React.FC = () => {
     {
       key: 'leadCustomer',
       label: '客户设置',
-      description: '客户等级、客户生命周期、线索来源和流转规则',
+      description: '客户等级、生命周期、人工标签、线索来源和流转规则',
       tabs: [
         { label: '客户等级', permissionKey: PERMISSION_KEYS.SETTINGS_CUSTOMER_LEVELS, component: <CustomerLevelConfigPage /> },
         { label: '客户生命周期', permissionKey: PERMISSION_KEYS.SETTINGS_LIFECYCLE, component: <LifecycleStatusConfigPage /> },
+        { label: '客户标签', permissionKey: PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS, component: <CustomerTagConfig /> },
         { label: '线索来源', permissionKey: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, component: <LeadSourceConfigPage /> },
         { label: '线索流转', permissionKey: PERMISSION_KEYS.SETTINGS_LEAD_FLOW, component: <LeadFlowConfigTab /> },
       ],

@@ -78,6 +78,7 @@ export interface Lead {
   estimatedAmount?: number;
   aiAnalysis?: LeadAIAnalysis;
   tags?: string[];
+  manualTagIds?: ID[];
   sourceType?: string;
   sourceName?: string;
   sourceAccount?: string;

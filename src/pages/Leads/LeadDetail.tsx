@@ -30,6 +30,7 @@ import { canCompleteContactField } from '../../shared/utils/contactEditLock';
 import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
 import { formatPhoneForDisplay, getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
+import ManualTagSelector, { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
 
 interface LeadDetailProps {
   lead: Lead;
@@ -53,7 +54,6 @@ type LeadDraft = {
   leadContributorName: string;
   assignedTo: string;
   remark: string;
-  tagsText: string;
 };
 
 type SourceOption = {
@@ -95,7 +95,6 @@ const toDraft = (lead: Lead): LeadDraft => ({
   leadContributorName: lead.leadContributorName || '',
   assignedTo: lead.assignedTo || lead.owner || '',
   remark: lead.remark || '',
-  tagsText: lead.tags?.join(', ') || '',
 });
 
 const HistoryList: React.FC<{ items: HistoryEntry[] }> = ({ items }) => (
@@ -131,6 +130,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   const { alert, dialog: feedbackDialog } = useAppFeedback();
   const [currentLead, setCurrentLead] = useState<Lead>(lead);
   const [editing, setEditing] = useState(false);
+  const [selectedManualTagIds, setSelectedManualTagIds] = useState<string[]>(lead.manualTagIds || []);
   const [draft, setDraft] = useState<LeadDraft>(() => toDraft(lead));
   const [activeTab, setActiveTab] = useState(0);
   const [users, setUsers] = useState<User[]>([]);
@@ -142,6 +142,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   useEffect(() => {
     setCurrentLead(lead);
     setDraft(toDraft(lead));
+    setSelectedManualTagIds(lead.manualTagIds || []);
     setEditing(false);
     setActiveTab(0);
   }, [lead]);
@@ -242,7 +243,6 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
       setEditing(false);
       return;
     }
-    const tags = draft.tagsText.split(',').map((tag) => tag.trim()).filter(Boolean);
     const nextPhone = canEditLockedContact || canCompleteContactField(currentLead.phone)
       ? normalizePhoneForStorage(draft.phone)
       : currentLead.phone;
@@ -264,12 +264,13 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
       leadContributorId: draft.leadContributorId,
       leadContributorName: draft.leadContributorName,
       remark: draft.remark,
-      tags,
+      manualTagIds: selectedManualTagIds,
     };
     const res = await leadApi.updateLead(currentLead.id, payload);
     if (res.code === 0 && res.data) {
       setCurrentLead(res.data);
       setDraft(toDraft(res.data));
+      setSelectedManualTagIds(res.data.manualTagIds || []);
       setEditing(false);
       onUpdated?.(res.data);
     }
@@ -384,9 +385,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
       && !userFieldOptions.some((user) => user.name === currentValue);
     const displayValue = field === 'sourceType'
       ? normalizeResourceOwnership(currentLead.sourceType)
-      : field === 'tagsText'
-        ? currentLead.tags?.join('、')
-        : field === 'assignedTo'
+      : field === 'assignedTo'
           ? followerName
           : field === 'phone'
             ? formatPhoneForDisplay(currentLead.phone)
@@ -442,6 +441,17 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
       </Box>
     );
   };
+
+  const renderTagsRow = () => (
+    <Box sx={{ display: 'grid', gridTemplateColumns: '96px minmax(0, 1fr)', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
+      <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>标签</Box>
+      <Box sx={{ px: 1.5, py: editing ? 0.5 : 1, minWidth: 0 }}>
+        {editing
+          ? <ManualTagSelector scope="lead" value={selectedManualTagIds} onChange={setSelectedManualTagIds} includeInactiveSelected legacyNames={currentLead.tags} />
+          : <ManualTagDisplay scope="lead" ids={currentLead.manualTagIds} legacyNames={currentLead.tags} />}
+      </Box>
+    </Box>
+  );
 
   const renderSourceRow = () => (
     <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
@@ -528,7 +538,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
                 )}
                 {editing && canEditProfile ? (
                   <>
-                    <Button size="small" onClick={() => { setDraft(toDraft(currentLead)); setEditing(false); }}>取消</Button>
+                    <Button size="small" onClick={() => { setDraft(toDraft(currentLead)); setSelectedManualTagIds(currentLead.manualTagIds || []); setEditing(false); }}>取消</Button>
                     <Button size="small" variant="contained" onClick={handleSaveProfile}>保存</Button>
                   </>
                 ) : canEditProfile ? (
@@ -548,7 +558,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
               {renderInfoRow('线索录入人', 'inputBy', false)}
               {renderInfoRow('线索贡献人', 'leadContributorName')}
               {renderInfoRow('分配销售', 'assignedTo', false)}
-              {renderInfoRow('标签', 'tagsText')}
+              {renderTagsRow()}
               {renderStatusRow('入库状态', (
                 <Chip
                   label={currentLead.intakeStatus || '入库成功'}

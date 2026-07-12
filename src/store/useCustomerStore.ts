@@ -15,13 +15,13 @@ interface CustomerState {
   update: (id: string, data: Partial<Customer>) => Promise<boolean>;
   delete: (id: string) => Promise<void>;
   fetchAIPortrait: (id: string) => Promise<AICustomerPortrait | null>;
-  updateTags: (id: string, tags: string[]) => Promise<void>;
   addFollowUp: (id: string, content: string, operator?: string, attachments?: CustomerActivityRecord['attachments']) => Promise<Customer | null>;
   setFilters: (filters: CustomerFilters) => void;
   reset: () => void;
 }
 
 const defaultPagination = { page: 1, pageSize: 10, total: 0, totalPages: 0 };
+let customerListRequestSequence = 0;
 
 const useCustomerStore = create<CustomerState>((set, get) => ({
   items: [],
@@ -32,17 +32,20 @@ const useCustomerStore = create<CustomerState>((set, get) => ({
   pagination: defaultPagination,
 
   fetchItems: async (filters?: CustomerFilters) => {
+    const requestSequence = ++customerListRequestSequence;
     set({ loading: true, error: null });
     try {
       const f = filters || get().filters;
       const res = await customerApi.fetchCustomers(f);
+      if (requestSequence !== customerListRequestSequence) return;
       if (res.code === 0) {
         set({ items: res.data.items, pagination: res.data.pagination, loading: false });
       } else {
         set({ error: res.message, loading: false });
       }
-    } catch (e: any) {
-      set({ error: e.message, loading: false });
+    } catch (e: unknown) {
+      if (requestSequence !== customerListRequestSequence) return;
+      set({ error: e instanceof Error ? e.message : String(e), loading: false });
     }
   },
 
@@ -104,13 +107,6 @@ const useCustomerStore = create<CustomerState>((set, get) => ({
     } catch {
       return null;
     }
-  },
-
-  updateTags: async (id, tags) => {
-    try {
-      await customerApi.updateCustomer(id, { tags });
-      await get().fetchItems();
-    } catch { /* ignore */ }
   },
 
   addFollowUp: async (id, content, operator, attachments) => {

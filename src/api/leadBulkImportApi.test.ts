@@ -65,6 +65,31 @@ Object.defineProperty(globalThis, 'localStorage', {
   configurable: true,
 });
 
+const originalFetch = globalThis.fetch;
+let catalogRequestCount = 0;
+let catalogFailure: { status: number; message: string } | null = null;
+globalThis.fetch = async (input) => {
+  const url = String(input);
+  if (!url.includes('/customer-tags/catalog?scope=lead&includeInactive=false')) {
+    throw new Error(`unexpected request: ${url}`);
+  }
+  catalogRequestCount += 1;
+  if (catalogFailure) {
+    return new Response(JSON.stringify({ code: catalogFailure.status, data: null, message: catalogFailure.message }), {
+      status: catalogFailure.status,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+  return new Response(JSON.stringify({
+    code: 0,
+    data: {
+      groups: JSON.parse(storage.getItem(STORAGE_KEYS.TAG_GROUPS) || '[]'),
+      tags: JSON.parse(storage.getItem(STORAGE_KEYS.TAGS) || '[]'),
+    },
+    message: 'success',
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+};
+
 function toArrayBuffer(value: ArrayBuffer | ArrayBufferView): ArrayBuffer {
   const view = value instanceof ArrayBuffer
     ? new Uint8Array(value)
@@ -89,6 +114,11 @@ const now = '2026-06-19T00:00:00.000Z';
 storage.clear();
 storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
 storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.TAG_GROUPS, JSON.stringify([{ id: 'tag-group-both', name: '通用', color: '#1677ff', selectionMode: 'multiple', scope: 'both', isActive: true, sortOrder: 0, createdAt: now, updatedAt: now }]));
+storage.setItem(STORAGE_KEYS.TAGS, JSON.stringify([
+  { id: 'tag-key', groupId: 'tag-group-both', name: zh.key, color: '#1677ff', isActive: true, sortOrder: 0, createdAt: now, updatedAt: now },
+  { id: 'tag-high', groupId: 'tag-group-both', name: zh.highIntent, color: '#1677ff', isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
+]));
 storage.setItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS, JSON.stringify([]));
 storage.setItem(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, JSON.stringify([
   { id: 'src-1', name: zh.official, isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
@@ -238,6 +268,7 @@ const result = await leadBulkImportApi.importWorkbook(await workbookBuffer([
     [H.remark]: '',
   },
 ]));
+assert.equal(catalogRequestCount, 1, '每个批次只能加载一次权威标签目录');
 
 assert.equal(result.code, 0);
 assert.equal(result.data.successCount, 1);
@@ -255,6 +286,61 @@ assert.equal(leads[0].name, zh.newLead);
 assert.equal(leads[0].source, zh.douyin);
 assert.equal(leads[0].sourceName, zh.live);
 assert.deepEqual(leads[0].tags, [zh.key, zh.highIntent]);
+assert.deepEqual(leads[0].manualTagIds, ['tag-key', 'tag-high']);
+
+const unknownTag = await leadBulkImportApi.importWorkbook(await workbookBuffer([{
+  [H.name]: '未知标签线索', [H.phone]: '13900000008', [H.source]: zh.official, [H.tags]: '未预设标签',
+}]));
+assert.equal(unknownTag.data.failureCount, 1);
+assert.equal(unknownTag.data.rows[0].reason, '标签“未预设标签”未在系统设置中预设');
+
+const invalidImportBase = { [H.source]: zh.official };
+const twentyOneTags = Array.from({ length: 21 }, (_, index) => ({
+  id: `bulk-${index}`,
+  groupId: 'tag-group-both',
+  name: `批量标签${index}`,
+  color: '#1677ff',
+  isActive: true,
+  sortOrder: index + 10,
+  createdAt: now,
+  updatedAt: now,
+}));
+storage.setItem(STORAGE_KEYS.TAGS, JSON.stringify([
+  ...JSON.parse(storage.getItem(STORAGE_KEYS.TAGS) || '[]'),
+  ...twentyOneTags,
+]));
+const tooManyTags = await leadBulkImportApi.importWorkbook(await workbookBuffer([{
+  ...invalidImportBase,
+  [H.name]: '超量标签线索',
+  [H.phone]: '13900000009',
+  [H.tags]: twentyOneTags.map((tag) => tag.name).join(','),
+}]));
+assert.equal(tooManyTags.data.failureCount, 1);
+assert.match(tooManyTags.data.rows[0].reason || '', /每条记录最多选择 20 个标签/);
+
+storage.setItem(STORAGE_KEYS.TAG_GROUPS, JSON.stringify([
+  ...JSON.parse(storage.getItem(STORAGE_KEYS.TAG_GROUPS) || '[]'),
+  { id: 'single-lead', name: '单选线索', color: '#1677ff', selectionMode: 'single', scope: 'lead', isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
+  { id: 'customer-only', name: '客户专用', color: '#1677ff', selectionMode: 'multiple', scope: 'customer', isActive: true, sortOrder: 2, createdAt: now, updatedAt: now },
+  { id: 'inactive-group', name: '停用组', color: '#1677ff', selectionMode: 'multiple', scope: 'lead', isActive: true, sortOrder: 3, createdAt: now, updatedAt: now },
+]));
+storage.setItem(STORAGE_KEYS.TAGS, JSON.stringify([
+  ...JSON.parse(storage.getItem(STORAGE_KEYS.TAGS) || '[]'),
+  { id: 'single-a', groupId: 'single-lead', name: '单选甲', color: '#1677ff', isActive: true, sortOrder: 0, createdAt: now, updatedAt: now },
+  { id: 'single-b', groupId: 'single-lead', name: '单选乙', color: '#1677ff', isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
+  { id: 'customer-tag', groupId: 'customer-only', name: '客户标签', color: '#1677ff', isActive: true, sortOrder: 0, createdAt: now, updatedAt: now },
+  { id: 'inactive-tag', groupId: 'inactive-group', name: '停用标签', color: '#1677ff', isActive: false, sortOrder: 0, createdAt: now, updatedAt: now },
+]));
+const invalidPolicyRows = await leadBulkImportApi.importWorkbook(await workbookBuffer([
+  { ...invalidImportBase, [H.name]: '单选冲突', [H.phone]: '13900000010', [H.tags]: '单选甲,单选乙' },
+  { ...invalidImportBase, [H.name]: '范围错误', [H.phone]: '13900000011', [H.tags]: '客户标签' },
+  { ...invalidImportBase, [H.name]: '停用错误', [H.phone]: '13900000012', [H.tags]: '停用标签' },
+]));
+assert.equal(invalidPolicyRows.data.failureCount, 3);
+assert.match(invalidPolicyRows.data.rows[0].reason || '', /只能选择一项/);
+assert.match(invalidPolicyRows.data.rows[1].reason || '', /不适用于线索/);
+assert.match(invalidPolicyRows.data.rows[2].reason || '', /不存在或已停用/);
+assert.equal(JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]').length, 1, '无效标签行不得写入线索');
 
 const intakeRecords = JSON.parse(storage.getItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS) || '[]');
 assert.equal(intakeRecords.length, 2);
@@ -262,11 +348,48 @@ assert.equal(intakeRecords.some((record: any) => record.name === zh.newLead && r
 assert.equal(intakeRecords.some((record: any) => record.name === zh.duplicateCustomer && record.status === zh.failedStatus), true);
 assert.equal(intakeRecords.some((record: any) => record.name === zh.formatErrorCompany), false);
 
+// 同名解析必须只考虑 eligible 定义，不能被目录顺序、客户专用或停用定义遮蔽。
+storage.setItem(STORAGE_KEYS.TAG_GROUPS, JSON.stringify([
+  ...JSON.parse(storage.getItem(STORAGE_KEYS.TAG_GROUPS) || '[]'),
+  { id: 'shadow-lead', name: '同名线索', color: '#1677ff', selectionMode: 'multiple', scope: 'lead', isActive: true, sortOrder: 10, createdAt: now, updatedAt: now },
+  { id: 'shadow-customer', name: '同名客户', color: '#1677ff', selectionMode: 'multiple', scope: 'customer', isActive: true, sortOrder: 11, createdAt: now, updatedAt: now },
+]));
+const shadowTags = [
+  { id: 'shadow-customer-tag', groupId: 'shadow-customer', name: '同名导入', color: '#1677ff', isActive: true, sortOrder: 0, createdAt: now, updatedAt: now },
+  { id: 'shadow-inactive-tag', groupId: 'shadow-lead', name: '同名导入', color: '#1677ff', isActive: false, sortOrder: 1, createdAt: now, updatedAt: now },
+  { id: 'shadow-eligible-tag', groupId: 'shadow-lead', name: '同名导入', color: '#1677ff', isActive: true, sortOrder: 2, createdAt: now, updatedAt: now },
+  { id: 'ambiguous-one', groupId: 'shadow-lead', name: '歧义导入', color: '#1677ff', isActive: true, sortOrder: 3, createdAt: now, updatedAt: now },
+  { id: 'ambiguous-two', groupId: 'tag-group-both', name: '歧义导入', color: '#1677ff', isActive: true, sortOrder: 4, createdAt: now, updatedAt: now },
+];
+storage.setItem(STORAGE_KEYS.TAGS, JSON.stringify([
+  ...shadowTags,
+  ...JSON.parse(storage.getItem(STORAGE_KEYS.TAGS) || '[]'),
+]));
+const shadowedName = await leadBulkImportApi.importWorkbook(await workbookBuffer([{
+  [H.name]: '同名解析线索', [H.phone]: '13900000013', [H.source]: zh.official, [H.tags]: '同名导入',
+}]));
+assert.equal(shadowedName.data.successCount, 1);
+const shadowedLead = JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]').find((item: any) => item.name === '同名解析线索');
+assert.deepEqual(shadowedLead.manualTagIds, ['shadow-eligible-tag']);
+
+const beforeAmbiguous = JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]').length;
+const ambiguousName = await leadBulkImportApi.importWorkbook(await workbookBuffer([{
+  [H.name]: '歧义标签线索', [H.phone]: '13900000014', [H.source]: zh.official, [H.tags]: '歧义导入',
+}]));
+assert.equal(ambiguousName.data.failureCount, 1);
+assert.equal(ambiguousName.data.rows[0].reason, '标签“歧义导入”名称存在歧义，请使用唯一预设名称');
+assert.equal(JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]').length, beforeAmbiguous, '歧义标签行不得写入线索');
+
 storage.clear();
 storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
 storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
 storage.setItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS, JSON.stringify([]));
 storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.TAG_GROUPS, JSON.stringify([{ id: 'tag-group-both', name: '通用', color: '#1677ff', selectionMode: 'multiple', scope: 'both', isActive: true, sortOrder: 0, createdAt: now, updatedAt: now }]));
+storage.setItem(STORAGE_KEYS.TAGS, JSON.stringify([
+  { id: 'tag-key', groupId: 'tag-group-both', name: zh.key, color: '#1677ff', isActive: true, sortOrder: 0, createdAt: now, updatedAt: now },
+  { id: 'tag-high', groupId: 'tag-group-both', name: zh.highIntent, color: '#1677ff', isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
+]));
 storage.setItem(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, JSON.stringify([
   { id: 'src-1', name: zh.official, isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
 ]));
@@ -295,3 +418,23 @@ assert.equal(generatedTemplateImport.data.failureCount, 0);
 const generatedTemplateLeads = JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]');
 assert.equal(generatedTemplateLeads.length, 1);
 assert.equal(generatedTemplateLeads[0].source, zh.official);
+
+const leadsBeforeCatalogFailure = storage.getItem(STORAGE_KEYS.LEADS);
+catalogFailure = { status: 403, message: 'Forbidden' };
+const forbidden = await leadBulkImportApi.importWorkbook(await workbookBuffer([{
+  [H.name]: '无目录权限', [H.phone]: '13900000015', [H.source]: zh.official,
+}]));
+assert.equal(forbidden.code, 403);
+assert.equal(forbidden.message, 'Forbidden');
+assert.equal(storage.getItem(STORAGE_KEYS.LEADS), leadsBeforeCatalogFailure, '目录失败必须在整批任何写入前终止');
+
+catalogFailure = null;
+globalThis.fetch = async () => { throw new Error('catalog network down'); };
+await assert.rejects(
+  leadBulkImportApi.importWorkbook(await workbookBuffer([{
+    [H.name]: '目录网络失败', [H.phone]: '13900000016', [H.source]: zh.official,
+  }])),
+  /catalog network down/,
+);
+assert.equal(storage.getItem(STORAGE_KEYS.LEADS), leadsBeforeCatalogFailure, '网络失败也不得部分写入');
+globalThis.fetch = originalFetch;

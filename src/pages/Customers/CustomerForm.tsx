@@ -22,6 +22,7 @@ import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/util
 import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 import useAuthStore from '../../store/useAuthStore';
+import ManualTagSelector from '../../shared/components/ManualTagSelector';
 
 interface CustomerFormProps {
   open: boolean;
@@ -109,7 +110,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     owner: '',
     customerLevel: 'L1' as Customer['customerLevel'],
     originalSalesTransferBy: '',
-    tags: '',
+    manualTagIds: [] as string[],
     remark: '',
   });
 
@@ -151,7 +152,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       owner: fallbackOwner,
       customerLevel: customer?.customerLevel || 'L1',
       originalSalesTransferBy: customer?.originalSalesTransferBy || '',
-      tags: customer?.tags?.join(', ') || '',
+      manualTagIds: customer?.manualTagIds || [],
       remark: customer?.remark || '',
     });
   }, [open, customer, assignableUsers, defaultOwner, sourceOptions]);
@@ -191,12 +192,11 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   };
 
   const handleSubmit = async () => {
-    const tags = form.tags ? form.tags.split(',').map((tag) => tag.trim()).filter(Boolean) : [];
     const payload = {
       ...form,
       phone: normalizePhoneForStorage(form.phone),
       city: completeCityFromPhone(form.city, form.phone),
-      tags,
+      manualTagIds: form.manualTagIds,
       sourceType: normalizeResourceOwnership(form.sourceType),
     };
 
@@ -238,7 +238,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       <DialogCloseTitle onClose={onClose}>{isEdit ? '编辑客户资料' : '新增客户'}</DialogCloseTitle>
       <DialogContent>
         {submitError && <Alert severity="error" sx={{ mt: 1 }}>{submitError}</Alert>}
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2, mt: 1 }}>
           <TextField label="姓名" value={form.name} onChange={handleChange('name')} required fullWidth />
           <TextField label="公司" value={form.company} onChange={handleChange('company')} fullWidth />
           <PhoneNumberInput
@@ -334,7 +334,9 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
             <MenuItem value="">无</MenuItem>
             {userOptions}
           </TextField>
-          <TextField label="标签（逗号分隔）" value={form.tags} onChange={handleChange('tags')} fullWidth sx={{ gridColumn: '1 / -1' }} />
+          <Box sx={{ gridColumn: '1 / -1', minWidth: 0 }}>
+            <ManualTagSelector scope="customer" value={form.manualTagIds} onChange={(manualTagIds) => setForm({ ...form, manualTagIds })} disabled={submitting} includeInactiveSelected legacyNames={customer?.tags} />
+          </Box>
           <TextField label="备注" value={form.remark} onChange={handleChange('remark')} fullWidth multiline minRows={3} sx={{ gridColumn: '1 / -1' }} />
         </Box>
       </DialogContent>

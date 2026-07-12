@@ -36,3 +36,22 @@ NODE_ENV=production pnpm run prod:check
 - 当前验收库缺少 `_prisma_migrations` 表，不能直接部署到服务器。
 
 修复证据见 [BUG_FIX_LOG.md](./BUG_FIX_LOG.md)，发布判定见 [RELEASE_CHECKLIST.md](./RELEASE_CHECKLIST.md)，版本变化见 [CHANGELOG.md](./CHANGELOG.md)。
+
+## 客户人工标签
+
+- 超级管理员在“系统设置 → 客户设置 → 客户标签”维护标签组和预设标签。
+- 线索和客户表单只允许选择目录中的有效标签；标签 ID 是稳定关联键，改名不会重写历史分配。
+- 客户列表支持组内任一、任一标签、全部标签以及未打标签筛选，并可与生命周期筛选组合。
+- 历史自由文本标签必须先由超级管理员预览再执行迁移；自动规则标签和高级人群包不在当前版本范围内。
+- 收窄分组范围、改为单选、移动标签或合并分组前，服务端会在事务内重放现有客户/线索分配；任何冲突都会拒绝整次变更。
+
+本地集成冒烟脚本只允许连接回环地址上的 API 和 MySQL，拒绝生产环境；数据库名必须包含 `_qa` 或 `_test`，并与 `QA_DATABASE_NAME` 完全一致。脚本还要求显式设置 `QA_ALLOW_DESTRUCTIVE_DB=true`，所有保护条件均在实例化数据库客户端前完成。运行前启动本地 API，并通过环境变量提供隔离测试库和账号：
+
+```bash
+QA_API_BASE=http://127.0.0.1:3001/api \
+DATABASE_URL=mysql://...@127.0.0.1:3306/jixiang_os_qa \
+QA_DATABASE_NAME=jixiang_os_qa QA_ALLOW_DESTRUCTIVE_DB=true \
+QA_ADMIN_ACCOUNT=... QA_ADMIN_PASSWORD=... \
+QA_SALES_ACCOUNT=... QA_SALES_PASSWORD=... \
+pnpm exec tsx scripts/qa/customer-tag-smoke.ts
+```

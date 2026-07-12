@@ -293,3 +293,27 @@ const superAdminCustomerContactRes = await customerApi.updateCustomer('cust-blan
 assert.equal(superAdminCustomerContactRes.code, 0);
 assert.equal(superAdminCustomerContactRes.data?.phone, '+8613855556666');
 assert.equal(superAdminCustomerContactRes.data?.wechat, 'customer_wx_super');
+
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([
+  { ...customer, id: 'agent-only', manualTagIds: ['t-agent'] }, { ...customer, id: 'private-only', manualTagIds: ['t-private'] },
+  { ...customer, id: 'both-intents', manualTagIds: ['t-agent', 't-private'] }, { ...customer, id: 'high-budget-agent', manualTagIds: ['t-agent', 't-high-budget'] },
+  { ...customer, id: 'high-budget-private', manualTagIds: ['t-private', 't-high-budget'] }, { ...customer, id: 'untagged', manualTagIds: [] },
+]));
+storage.setItem(STORAGE_KEYS.TAG_GROUPS, JSON.stringify([{ id: 'g-intent', name: '意向', scope: 'customer', isActive: true, sortOrder: 0 }, { id: 'g-value', name: '价值', scope: 'customer', isActive: true, sortOrder: 1 }]));
+storage.setItem(STORAGE_KEYS.TAGS, JSON.stringify([{ id: 't-agent', groupId: 'g-intent', name: '代理', isActive: true, sortOrder: 0 }, { id: 't-private', groupId: 'g-intent', name: '私域', isActive: true, sortOrder: 1 }, { id: 't-high-budget', groupId: 'g-value', name: '高预算', isActive: true, sortOrder: 0 }]));
+const groupedLocal = await customerApi.fetchCustomers({ tagIds: ['t-agent', 't-private', 't-high-budget'], tagMatch: 'grouped', pageSize: 20 });
+assert.deepEqual(groupedLocal.data.items.map((item) => item.id).sort(), ['high-budget-agent', 'high-budget-private']);
+assert.deepEqual((await customerApi.fetchCustomers({ withoutTags: true, pageSize: 20 })).data.items.map((item) => item.id), ['untagged']);
+assert.deepEqual((await customerApi.fetchCustomers({ missingTagGroupId: 'g-intent', pageSize: 20 })).data.items.map((item) => item.id), ['untagged']);
+assert.equal((await customerApi.fetchCustomers({ tagIds: ['unknown'], pageSize: 20 })).code, 400);
+assert.equal((await customerApi.fetchCustomers({ missingTagGroupId: 'unknown', pageSize: 20 })).code, 400);
+
+const previousBackendMode = process.env.VITE_USE_BACKEND_API;
+const previousFetch = globalThis.fetch;
+process.env.VITE_USE_BACKEND_API = 'true';
+let requestedUrl = '';
+globalThis.fetch = (async (input: RequestInfo | URL) => { requestedUrl = String(input); return new Response(JSON.stringify({ code: 0, message: 'ok', data: { items: [], pagination: { page: 1, pageSize: 10, total: 0, totalPages: 0 } } }), { status: 200, headers: { 'content-type': 'application/json' } }); }) as typeof fetch;
+await customerApi.fetchCustomers({ tagIds: ['t-agent', 't-private'], tagMatch: 'grouped', page: 1, pageSize: 10 });
+assert.match(requestedUrl, /tagId=t-agent/); assert.match(requestedUrl, /tagId=t-private/); assert.match(requestedUrl, /tagMatch=grouped/); assert.doesNotMatch(requestedUrl, /tagIds=t-agent%2Ct-private/);
+globalThis.fetch = previousFetch;
+if (previousBackendMode === undefined) delete process.env.VITE_USE_BACKEND_API; else process.env.VITE_USE_BACKEND_API = previousBackendMode;

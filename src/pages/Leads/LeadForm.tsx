@@ -22,6 +22,7 @@ import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/util
 import useAuthStore from '../../store/useAuthStore';
 import type { LeadFlowConfig } from '../../types/lead';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
+import ManualTagSelector from '../../shared/components/ManualTagSelector';
 
 interface LeadFormProps {
   open: boolean;
@@ -83,7 +84,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     industry: '',
     city: '',
     sourceType: '公司资源',
-    tags: '',
+    manualTagIds: [] as string[],
     remark: '',
   });
 
@@ -122,7 +123,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
       industry: lead?.industry || '',
       city: lead?.city || '',
       sourceType: normalizeResourceOwnership(lead?.sourceType),
-      tags: lead?.tags?.join(', ') || '',
+      manualTagIds: lead?.manualTagIds || [],
       remark: lead?.remark || '',
     });
   }, [open, lead, sourceOptions, users]);
@@ -161,7 +162,6 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
   };
 
   const handleSubmit = async () => {
-    const tags = form.tags ? form.tags.split(',').map((tag) => tag.trim()).filter(Boolean) : [];
     const effectiveOwner = canAssignLeads
       ? form.owner
       : isEdit
@@ -174,7 +174,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
       phone: normalizePhoneForStorage(form.phone),
       sourceType: normalizeResourceOwnership(form.sourceType),
       status: lead?.status || '新线索',
-      tags,
+      manualTagIds: form.manualTagIds,
     };
     setSubmitError('');
 
@@ -206,7 +206,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogCloseTitle onClose={onClose}>{isEdit ? '编辑线索资料' : '新增线索入库'}</DialogCloseTitle>
       <DialogContent>
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2, mt: 1 }}>
           {submitError && (
             <Alert severity="error" sx={{ gridColumn: '1 / -1' }}>
               {submitError}
@@ -301,7 +301,9 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
               helperText={assignmentHelpText}
             />
           )}
-          <TextField label="标签（逗号分隔）" value={form.tags} onChange={handleChange('tags')} fullWidth sx={{ gridColumn: '1 / -1' }} />
+          <Box sx={{ gridColumn: '1 / -1', minWidth: 0 }}>
+            <ManualTagSelector scope="lead" value={form.manualTagIds} onChange={(manualTagIds) => setForm({ ...form, manualTagIds })} includeInactiveSelected legacyNames={lead?.tags} />
+          </Box>
           <TextField label="备注" value={form.remark} onChange={handleChange('remark')} fullWidth multiline minRows={3} sx={{ gridColumn: '1 / -1' }} />
         </Box>
       </DialogContent>

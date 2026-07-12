@@ -1,12 +1,19 @@
 import assert from 'node:assert/strict';
-import { createCustomerListService } from './customerListService';
+import { createCustomerListService, matchesCustomerTagFilters } from './customerListService';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
+import type { CustomerFilters } from '../../src/types/customer';
+
+const now = '2026-07-12T00:00:00.000Z';
 
 const created: any[] = [];
 const service = createCustomerListService({
   businessRecord: {
-    findMany: async () => created.map((item) => ({ data: item.data.data })),
+    findMany: async (args: any) => {
+      if (args?.where?.domain === STORAGE_KEYS.TAG_GROUPS) return [{ data: { id: 'group-both', name: '通用', color: '#1677ff', selectionMode: 'multiple', scope: 'both', isActive: true, sortOrder: 0 } }];
+      if (args?.where?.domain === STORAGE_KEYS.TAGS) return [{ data: { id: 'shared', groupId: 'group-both', name: '高意向', color: '#1677ff', isActive: true, sortOrder: 0 } }];
+      return created.map((item) => ({ data: item.data.data }));
+    },
     create: async (input: any) => {
       if (created.some((item) => item.data.id === input.data.id)) {
         const error = new Error('duplicate business record') as Error & { code?: string };
@@ -17,6 +24,7 @@ const service = createCustomerListService({
       return input.data;
     },
   },
+  leadRecord: { findMany: async () => [] },
 } as any);
 
 const actor = {
@@ -29,6 +37,32 @@ const actor = {
   isActive: true,
   permissions: [{ module: PERMISSION_KEYS.CUSTOMER_CREATE, actions: ['write'] }],
 };
+
+const tagCatalog = {
+  groups: [
+    { id: 'g-intent', name: '意向', scope: 'customer', isActive: true, sortOrder: 0 },
+    { id: 'g-value', name: '价值', scope: 'customer', isActive: true, sortOrder: 1 },
+  ],
+  tags: [
+    { id: 't-agent', groupId: 'g-intent', name: '代理', isActive: true, sortOrder: 0 },
+    { id: 't-private', groupId: 'g-intent', name: '私域', isActive: true, sortOrder: 1 },
+    { id: 't-high-budget', groupId: 'g-value', name: '高预算', isActive: true, sortOrder: 0 },
+  ],
+} as any;
+const tagCustomers = [
+  { id: 'agent-only', manualTagIds: ['t-agent'] },
+  { id: 'private-only', manualTagIds: ['t-private'] },
+  { id: 'both-intents', manualTagIds: ['t-agent', 't-private'] },
+  { id: 'high-budget-agent', manualTagIds: ['t-agent', 't-high-budget'] },
+  { id: 'high-budget-private', manualTagIds: ['t-private', 't-high-budget'] },
+  { id: 'untagged', manualTagIds: [] },
+] as any[];
+const matchingIds = (filters: any) => tagCustomers.filter((customer) => matchesCustomerTagFilters(customer, filters, tagCatalog)).map((customer) => customer.id).sort();
+assert.deepEqual(matchingIds({ tagIds: ['t-agent', 't-private'], tagMatch: 'any' }), ['agent-only', 'both-intents', 'high-budget-agent', 'high-budget-private', 'private-only']);
+assert.deepEqual(matchingIds({ tagIds: ['t-agent', 't-private'], tagMatch: 'all' }), ['both-intents']);
+assert.deepEqual(matchingIds({ tagIds: ['t-agent', 't-private', 't-high-budget'], tagMatch: 'grouped' }), ['high-budget-agent', 'high-budget-private']);
+assert.deepEqual(matchingIds({ withoutTags: true }), ['untagged']);
+assert.deepEqual(matchingIds({ missingTagGroupId: 'g-intent' }), ['untagged']);
 
 const result = await service.create({
   name: '新客户',
@@ -44,6 +78,16 @@ assert.equal(created.length, 1);
 assert.equal(created[0].data.domain, STORAGE_KEYS.CUSTOMERS);
 assert.equal(created[0].data.data.name, '新客户');
 
+const tagged = await service.create({
+  name: '标签客户', company: '', phone: '13800000001', customerLevel: 'L1', owner: '销售', sourceType: '公司资源', manualTagIds: ['shared'],
+}, actor);
+assert.deepEqual(tagged.data?.tags, ['高意向']);
+
+const missingTag = await service.create({
+  name: '非法标签客户', company: '', phone: '13800000002', customerLevel: 'L1', owner: '销售', sourceType: '公司资源', manualTagIds: ['missing'],
+}, actor);
+assert.equal(missingTag.code, 400);
+
 const denied = await service.create({
   name: '越权客户',
   company: '越权客户公司',
@@ -54,7 +98,7 @@ const denied = await service.create({
 }, actor);
 
 assert.equal(denied.code, 403);
-assert.equal(created.length, 1);
+assert.equal(created.length, 2);
 
 const emptyName = await service.create({
   name: '',
@@ -126,3 +170,61 @@ const [firstDuplicate, secondDuplicate] = await Promise.all([
 assert.equal(firstDuplicate.code, 0);
 assert.equal(secondDuplicate.code, 409);
 assert.equal(secondDuplicate.message, '该手机号已存在客户');
+
+const flattenSql = (value: any): string => {
+  if (value == null) return '';
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  if (Array.isArray(value) && !(value as any).strings) return value.map(flattenSql).join(' ');
+  const strings = value.strings || (Array.isArray(value[0]) ? value[0] : undefined);
+  const values = value.values || (strings ? Array.prototype.slice.call(value, 1) : []);
+  if (!strings) return Object.values(value).map(flattenSql).join(' ');
+  return Array.from(strings).map((part, index) => `${part}${index < values.length ? flattenSql(values[index]) : ''}`).join('');
+};
+const capturedQueries: string[] = [];
+const listFixtures = [
+  { ...created[0].data.data, id: 'sales-a-hit-1', owner: '销售甲', manualTagIds: ['t-agent', 't-high-budget'] },
+  { ...created[0].data.data, id: 'sales-a-hit-2', owner: '销售甲', manualTagIds: ['t-private', 't-high-budget'] },
+  { ...created[0].data.data, id: 'sales-a-miss', owner: '销售甲', manualTagIds: ['t-agent'] },
+  { ...created[0].data.data, id: 'sales-b-hit', owner: '销售乙', manualTagIds: ['t-agent', 't-high-budget'] },
+];
+let executingFilters: any = {};
+const listService = createCustomerListService({
+  businessRecord: { findMany: async ({ where }: any) => {
+    if (where.domain === STORAGE_KEYS.TAG_GROUPS) return tagCatalog.groups.map((data: any) => ({ data }));
+    if (where.domain === STORAGE_KEYS.TAGS) return tagCatalog.tags.map((data: any) => ({ data }));
+    return [];
+  } },
+  leadRecord: { findMany: async () => [] },
+  user: { findMany: async () => [{ id: 'sales-1', name: '销售甲', account: 'sales', email: '', phone: '', role: '销售顾问', avatar: null, departmentId: 'd1', positionId: null, positionName: null, roleId: 'r1', passwordHash: null, passwordSalt: null, passwordUpdatedAt: null, lastLoginAt: null, isActive: true, employmentStatus: 'active', createdAt: now, updatedAt: now }] },
+  role: { findMany: async () => [{ id: 'r1', name: '销售顾问', code: 'sales', description: null, departmentId: null, permissions: [], dataScopes: { customers: 'self' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now }] },
+  department: { findMany: async () => [] },
+  $queryRaw: async (...args: any[]) => {
+    const sql = flattenSql(args);
+    capturedQueries.push(sql);
+    const filtered = listFixtures.filter((item) => item.owner === '销售甲' && matchesCustomerTagFilters(item, executingFilters, tagCatalog));
+    if (sql.includes('COUNT(*)')) return [{ total: BigInt(filtered.length) }];
+    const page = Number(executingFilters.page || 1); const pageSize = Number(executingFilters.pageSize || 10);
+    return filtered.slice((page - 1) * pageSize, page * pageSize).map((data) => ({ data }));
+  },
+} as any);
+const salesActor = { ...actor, id: 'sales-1', name: '销售甲', account: 'sales', role: '销售顾问', roleId: 'r1', departmentId: 'd1' } as any;
+executingFilters = { tagIds: ['t-agent', 't-private', 't-high-budget'], tagMatch: 'grouped', page: 1, pageSize: 1 };
+const sqlList = await listService.list(executingFilters, salesActor);
+assert.equal(sqlList.code, 0);
+assert.deepEqual(sqlList.data?.items.map((item) => item.id), ['sales-a-hit-1']);
+assert.deepEqual(sqlList.data?.pagination, { page: 1, pageSize: 1, total: 2, totalPages: 2 });
+assert.equal(capturedQueries.length, 2);
+for (const sql of capturedQueries) {
+  assert.match(sql, /JSON_CONTAINS/);
+  assert.match(sql, /t-agent/); assert.match(sql, /t-private/); assert.match(sql, /t-high-budget/);
+  assert.match(sql, /owner IN/); assert.match(sql, /销售甲/);
+}
+assert.match(capturedQueries[1], /LIMIT[\s\S]*OFFSET[\s\S]*1 0$/);
+
+const filterCases: Array<[CustomerFilters, string]> = [[{ tagIds: ['t-agent', 't-private'], tagMatch: 'any' }, ' OR '], [{ tagIds: ['t-agent', 't-private'], tagMatch: 'all' }, ' AND '], [{ withoutTags: true }, 'JSON_LENGTH']];
+for (const [filters, joiner] of filterCases) {
+  capturedQueries.length = 0;
+  executingFilters = filters;
+  await listService.list(filters, salesActor);
+  assert.match(capturedQueries[0], joiner === 'JSON_LENGTH' ? /JSON_LENGTH/ : new RegExp(joiner.trim()));
+}
