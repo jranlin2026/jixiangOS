@@ -38,7 +38,9 @@ async function snapshot(prisma: Pick<MigrationPrisma, 'businessRecord' | 'leadRe
   ]);
   const groups: CustomerTagGroup[] = groupRows.map((row: any) => object(row.data) as CustomerTagGroup).sort((a: CustomerTagGroup, b: CustomerTagGroup) => a.id.localeCompare(b.id));
   const definitions: CustomerTag[] = tagRows.map((row: any) => object(row.data) as CustomerTag).sort((a: CustomerTag, b: CustomerTag) => a.id.localeCompare(b.id));
-  const canonicalLeadIds = new Set(leads.filter((row: any) => !isDeleted(row)).map((row: any) => String(row.id || object(row.data).id)));
+  // Any canonical row, including a soft-deleted one, owns its ID. Allowing a
+  // legacy snapshot with that ID back into the migration would resurrect data.
+  const canonicalLeadIds = new Set(leads.map((row: any) => String(row.id || object(row.data).id)));
   const records: Snapshot['records'] = [
     ...customers.filter((row: any) => !isDeleted(row)).map((row: any) => ({ kind: 'customer' as const, storage: 'customer' as const, id: String(row.recordId || object(row.data).id), row, tags: Array.isArray(object(row.data).tags) ? object(row.data).tags.map(name).filter(Boolean) : [] })),
     ...leads.filter((row: any) => !isDeleted(row)).map((row: any) => ({ kind: 'lead' as const, storage: 'canonicalLead' as const, id: String(row.id || object(row.data).id), row, tags: Array.isArray(object(row.data).tags) ? object(row.data).tags.map(name).filter(Boolean) : [] })),
