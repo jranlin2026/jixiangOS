@@ -554,6 +554,27 @@ function businessCustomer(value: ReturnType<typeof customer>): BusinessRow {
   };
 }
 
+const tagGroups = [
+  { id: 'group-both', name: '通用', color: '#1677ff', selectionMode: 'multiple', scope: 'both', isActive: true, sortOrder: 0, createdAt: FIXED_NOW, updatedAt: FIXED_NOW },
+  { id: 'group-lead', name: '线索专用', color: '#1677ff', selectionMode: 'multiple', scope: 'lead', isActive: true, sortOrder: 1, createdAt: FIXED_NOW, updatedAt: FIXED_NOW },
+  { id: 'group-customer', name: '客户专用', color: '#1677ff', selectionMode: 'multiple', scope: 'customer', isActive: true, sortOrder: 2, createdAt: FIXED_NOW, updatedAt: FIXED_NOW },
+  { id: 'group-single', name: '单选组', color: '#1677ff', selectionMode: 'single', scope: 'lead', isActive: true, sortOrder: 3, createdAt: FIXED_NOW, updatedAt: FIXED_NOW },
+] as const;
+const tagDefinitions = [
+  { id: 'shared', groupId: 'group-both', name: '高意向', color: '#1677ff', isActive: true, sortOrder: 0, createdAt: FIXED_NOW, updatedAt: FIXED_NOW },
+  { id: 'lead-only', groupId: 'group-lead', name: '线索专用', color: '#1677ff', isActive: true, sortOrder: 0, createdAt: FIXED_NOW, updatedAt: FIXED_NOW },
+  { id: 'customer-only', groupId: 'group-customer', name: '客户专用', color: '#1677ff', isActive: true, sortOrder: 0, createdAt: FIXED_NOW, updatedAt: FIXED_NOW },
+  { id: 'single-a', groupId: 'group-single', name: '单选甲', color: '#1677ff', isActive: true, sortOrder: 0, createdAt: FIXED_NOW, updatedAt: FIXED_NOW },
+  { id: 'single-b', groupId: 'group-single', name: '单选乙', color: '#1677ff', isActive: true, sortOrder: 1, createdAt: FIXED_NOW, updatedAt: FIXED_NOW },
+] as const;
+
+function tagCatalogRows(): BusinessRow[] {
+  return [
+    ...tagGroups.map((value) => ({ id: `${STORAGE_KEYS.TAG_GROUPS}:${value.id}`, domain: STORAGE_KEYS.TAG_GROUPS, recordId: value.id, data: clone(value) })),
+    ...tagDefinitions.map((value) => ({ id: `${STORAGE_KEYS.TAGS}:${value.id}`, domain: STORAGE_KEYS.TAGS, recordId: value.id, data: clone(value) })),
+  ];
+}
+
 function lead(id: string, owner = salesA.name, customerId?: string): LeadRow {
   const data = {
     id,
@@ -753,6 +774,7 @@ const serviceOptions = {
 // RED: 客户资料更新必须逐记录事务写入，由服务端生成操作人和历史，并同步关联线索。
 {
   const value = customer('cust-update');
+  (value as any).tags = ['历史标签'];
   const fake = createFakePrisma({
     businessRecords: [businessCustomer(value)],
     leads: [lead('lead-customer-update', salesA.name, value.id)],
@@ -761,16 +783,40 @@ const serviceOptions = {
   const result = await service.updateCustomer(value.id, {
     name: '更新后客户',
     phone: '13900000000',
-    tags: ['重点'],
+    tags: ['伪造标签'],
   }, customerEditor);
 
   assert.equal(result.code, 0);
   assert.equal(result.data?.name, '更新后客户');
   assert.equal(result.data?.phone, '+8613800000000', '非超管只能保留原号码并做存储格式规范化');
   assert.equal(result.data?.activityRecords?.[0].operator, salesA.name);
+  assert.deepEqual(result.data?.tags, ['历史标签'], '未显式提交 manualTagIds 时必须忽略调用方 tags 并保留历史快照');
   const next = fake.getState();
   assert.equal(next.leads[0].data.name, '更新后客户');
-  assert.deepEqual(next.leads[0].data.tags, ['重点']);
+  assert.deepEqual(next.leads[0].data.tags, ['历史标签']);
+}
+
+// 标签校验只接受适用于客户的权威 ID；无权限请求必须在读取目录前返回 403。
+{
+  const value = customer('cust-update-tag-policy');
+  const fake = createFakePrisma({ businessRecords: [businessCustomer(value), ...tagCatalogRows()], leads: [] });
+  const service = createCustomerCommandService(fake.prisma, serviceOptions);
+  const wrongScope = await service.updateCustomer(value.id, { manualTagIds: ['lead-only'] }, customerEditor);
+  assert.equal(wrongScope.code, 400);
+  assert.deepEqual(fake.getState().businessRecords.find((row) => row.recordId === value.id)?.data.manualTagIds, undefined);
+  const valid = await service.updateCustomer(value.id, { manualTagIds: ['shared'], tags: ['伪造名称'] }, customerEditor);
+  assert.equal(valid.code, 0);
+  assert.deepEqual(valid.data?.manualTagIds, ['shared']);
+  assert.deepEqual(valid.data?.tags, ['高意向']);
+
+  const deniedFake = createFakePrisma({ businessRecords: [businessCustomer(value), ...tagCatalogRows()], leads: [] });
+  const denied = await createCustomerCommandService(deniedFake.prisma, serviceOptions).updateCustomer(
+    value.id,
+    { manualTagIds: ['missing'], tags: ['目录探测'] },
+    { ...customerEditor, permissions: [] },
+  );
+  assert.equal(denied.code, 403);
+  assert.equal(deniedFake.transactionCalls, 0);
 }
 
 // 通用客户编辑不得绕过客户分配命令修改 owner。
@@ -882,12 +928,13 @@ const serviceOptions = {
 // RED: 待跟进线索资料必须逐记录更新，由服务端生成修改历史。
 {
   const source = pendingLead('lead-update-profile');
+  source.data.tags = ['历史标签'];
   const fake = createFakePrisma({ businessRecords: [], leads: [source] });
   const service = createCustomerCommandService(fake.prisma, serviceOptions);
   const result = await service.updateLead(source.id, {
     name: '更新后线索',
     phone: '13900000000',
-    tags: ['高意向'],
+    tags: ['伪造标签'],
   }, leadEditor);
 
   assert.equal(result.code, 0);
@@ -895,6 +942,26 @@ const serviceOptions = {
   assert.equal(result.data?.phone, '+8613800000000', '非超管只保留原联系号码并做规范化');
   assert.equal(result.data?.changeHistory?.[0].operator, salesA.name);
   assert.match(result.data?.changeHistory?.[0].summary || '', /修改了/);
+  assert.deepEqual(result.data?.tags, ['历史标签'], '线索更新必须忽略调用方伪造的 legacy tags');
+}
+
+// 线索标签更新必须执行单选组约束，且无权限时不得触发目录校验。
+{
+  const source = pendingLead('lead-update-tag-policy');
+  const fake = createFakePrisma({ businessRecords: tagCatalogRows(), leads: [source] });
+  const service = createCustomerCommandService(fake.prisma, serviceOptions);
+  const conflict = await service.updateLead(source.id, { manualTagIds: ['single-a', 'single-b'] }, leadEditor);
+  assert.equal(conflict.code, 400);
+  assert.deepEqual(fake.getState().leads[0].data.manualTagIds, undefined);
+
+  const deniedFake = createFakePrisma({ businessRecords: tagCatalogRows(), leads: [source] });
+  const denied = await createCustomerCommandService(deniedFake.prisma, serviceOptions).updateLead(
+    source.id,
+    { manualTagIds: ['missing'], tags: ['目录探测'] },
+    { ...leadEditor, permissions: [] },
+  );
+  assert.equal(denied.code, 403);
+  assert.equal(deniedFake.transactionCalls, 0);
 }
 
 // RED: 通用线索资料更新不得修改录入人或任何分配字段。
@@ -920,7 +987,7 @@ const serviceOptions = {
 // RED: 新建线索必须由服务端生成 ID/录入人，查重并逐记录写入。
 {
   const fake = createFakePrisma({
-    businessRecords: [],
+    businessRecords: tagCatalogRows(),
     leads: [],
     appStorage: [{
       key: STORAGE_KEYS.LEAD_FLOW_CONFIG,
@@ -995,7 +1062,7 @@ const serviceOptions = {
 // RED: 开启“分配后自动领取”时，线索和客户必须在同一事务中创建。
 {
   const fake = createFakePrisma({
-    businessRecords: [],
+    businessRecords: tagCatalogRows(),
     leads: [],
     appStorage: [
       {
@@ -1020,13 +1087,21 @@ const serviceOptions = {
     status: '新线索',
     owner: '待分配',
     sourceType: '公司资源',
+    manualTagIds: ['shared', 'lead-only'],
+    tags: ['伪造通用名', '伪造线索名'],
   }, leadEditor);
 
   assert.equal(result.code, 0);
   assert.equal(result.data?.lifecycleStatusCode, LIFECYCLE_STATUS_CODES.FOLLOWING);
   assert.match(result.data?.customerId || '', /^cust-/);
-  assert.equal(fake.getState().businessRecords[0]?.recordId, result.data?.customerId);
-  assert.equal(fake.getState().businessRecords[0]?.data.owner, '销售甲');
+  const next = fake.getState();
+  const autoCustomer = next.businessRecords.find((row) => row.domain === STORAGE_KEYS.CUSTOMERS)?.data;
+  assert.equal(autoCustomer?.id, result.data?.customerId);
+  assert.equal(autoCustomer?.owner, '销售甲');
+  assert.deepEqual(autoCustomer?.manualTagIds, ['shared']);
+  assert.deepEqual(autoCustomer?.tags, ['高意向']);
+  assert.deepEqual(next.leads[0].data.manualTagIds, ['shared', 'lead-only']);
+  assert.deepEqual(next.leads[0].data.tags, ['高意向', '线索专用']);
 }
 
 // RED: 显式分配新线索需要分配权限，且手机/微信不得与客户或线索重复。
@@ -1191,6 +1266,22 @@ const serviceOptions = {
   assert.equal(next.businessRecords.length, 1);
   assert.equal(next.leads[0].data.changeHistory.length, 1, '转客户重试不得重复写入历史');
   assert.equal(fake.customerLockQueries, 0, '已转客户重放不得再按线索→客户的反向顺序加锁');
+}
+
+// 显式转客户只继承 both 标签，并保持源线索标签不变。
+{
+  const source = lead('lead-convert-tags');
+  source.data.manualTagIds = ['shared', 'lead-only'];
+  source.data.tags = ['高意向', '线索专用'];
+  const fake = createFakePrisma({ businessRecords: tagCatalogRows(), leads: [source] });
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions).convertLeadToCustomer(source.id, salesA);
+  assert.equal(result.code, 0);
+  const next = fake.getState();
+  const converted = next.businessRecords.find((row) => row.domain === STORAGE_KEYS.CUSTOMERS)?.data;
+  assert.deepEqual(converted?.manualTagIds, ['shared']);
+  assert.deepEqual(converted?.tags, ['高意向']);
+  assert.deepEqual(next.leads[0].data.manualTagIds, ['shared', 'lead-only']);
+  assert.deepEqual(next.leads[0].data.tags, ['高意向', '线索专用']);
 }
 
 // RED: 部门主管代为转换已分配线索时，必须保留原销售归属。

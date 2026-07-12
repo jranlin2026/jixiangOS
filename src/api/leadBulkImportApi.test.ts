@@ -268,6 +268,54 @@ const unknownTag = await leadBulkImportApi.importWorkbook(await workbookBuffer([
 assert.equal(unknownTag.data.failureCount, 1);
 assert.equal(unknownTag.data.rows[0].reason, '标签“未预设标签”未在系统设置中预设');
 
+const invalidImportBase = { [H.source]: zh.official };
+const twentyOneTags = Array.from({ length: 21 }, (_, index) => ({
+  id: `bulk-${index}`,
+  groupId: 'tag-group-both',
+  name: `批量标签${index}`,
+  color: '#1677ff',
+  isActive: true,
+  sortOrder: index + 10,
+  createdAt: now,
+  updatedAt: now,
+}));
+storage.setItem(STORAGE_KEYS.TAGS, JSON.stringify([
+  ...JSON.parse(storage.getItem(STORAGE_KEYS.TAGS) || '[]'),
+  ...twentyOneTags,
+]));
+const tooManyTags = await leadBulkImportApi.importWorkbook(await workbookBuffer([{
+  ...invalidImportBase,
+  [H.name]: '超量标签线索',
+  [H.phone]: '13900000009',
+  [H.tags]: twentyOneTags.map((tag) => tag.name).join(','),
+}]));
+assert.equal(tooManyTags.data.failureCount, 1);
+assert.match(tooManyTags.data.rows[0].reason || '', /每条记录最多选择 20 个标签/);
+
+storage.setItem(STORAGE_KEYS.TAG_GROUPS, JSON.stringify([
+  ...JSON.parse(storage.getItem(STORAGE_KEYS.TAG_GROUPS) || '[]'),
+  { id: 'single-lead', name: '单选线索', color: '#1677ff', selectionMode: 'single', scope: 'lead', isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
+  { id: 'customer-only', name: '客户专用', color: '#1677ff', selectionMode: 'multiple', scope: 'customer', isActive: true, sortOrder: 2, createdAt: now, updatedAt: now },
+  { id: 'inactive-group', name: '停用组', color: '#1677ff', selectionMode: 'multiple', scope: 'lead', isActive: false, sortOrder: 3, createdAt: now, updatedAt: now },
+]));
+storage.setItem(STORAGE_KEYS.TAGS, JSON.stringify([
+  ...JSON.parse(storage.getItem(STORAGE_KEYS.TAGS) || '[]'),
+  { id: 'single-a', groupId: 'single-lead', name: '单选甲', color: '#1677ff', isActive: true, sortOrder: 0, createdAt: now, updatedAt: now },
+  { id: 'single-b', groupId: 'single-lead', name: '单选乙', color: '#1677ff', isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
+  { id: 'customer-tag', groupId: 'customer-only', name: '客户标签', color: '#1677ff', isActive: true, sortOrder: 0, createdAt: now, updatedAt: now },
+  { id: 'inactive-tag', groupId: 'inactive-group', name: '停用标签', color: '#1677ff', isActive: true, sortOrder: 0, createdAt: now, updatedAt: now },
+]));
+const invalidPolicyRows = await leadBulkImportApi.importWorkbook(await workbookBuffer([
+  { ...invalidImportBase, [H.name]: '单选冲突', [H.phone]: '13900000010', [H.tags]: '单选甲,单选乙' },
+  { ...invalidImportBase, [H.name]: '范围错误', [H.phone]: '13900000011', [H.tags]: '客户标签' },
+  { ...invalidImportBase, [H.name]: '停用错误', [H.phone]: '13900000012', [H.tags]: '停用标签' },
+]));
+assert.equal(invalidPolicyRows.data.failureCount, 3);
+assert.match(invalidPolicyRows.data.rows[0].reason || '', /只能选择一项/);
+assert.match(invalidPolicyRows.data.rows[1].reason || '', /不适用于线索/);
+assert.match(invalidPolicyRows.data.rows[2].reason || '', /不存在或已停用/);
+assert.equal(JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]').length, 1, '无效标签行不得写入线索');
+
 const intakeRecords = JSON.parse(storage.getItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS) || '[]');
 assert.equal(intakeRecords.length, 2);
 assert.equal(intakeRecords.some((record: any) => record.name === zh.newLead && record.status === zh.successStatus), true);

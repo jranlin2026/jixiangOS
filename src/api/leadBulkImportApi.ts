@@ -252,9 +252,8 @@ function validateRow(row: CleanRow) {
   const contributorValue = data[TEXT.leadContributor];
   const ownerValue = data[TEXT.owner];
   const requestedTags = parseTags(data[TEXT.tags]);
-  const groups = (getStorageData<CustomerTagGroup[]>(STORAGE_KEYS.TAG_GROUPS) || []).filter((group) => group.isActive && (group.scope === 'lead' || group.scope === 'both'));
-  const groupIds = new Set(groups.map((group) => group.id));
-  const presetTags = (getStorageData<CustomerTag[]>(STORAGE_KEYS.TAGS) || []).filter((tag) => tag.isActive && groupIds.has(tag.groupId));
+  const groups = getStorageData<CustomerTagGroup[]>(STORAGE_KEYS.TAG_GROUPS) || [];
+  const presetTags = getStorageData<CustomerTag[]>(STORAGE_KEYS.TAGS) || [];
   const resolvedTags = requestedTags.map((label) => presetTags.find((tag) => tag.name.trim().toLowerCase() === label.toLowerCase()));
 
   const sourceOption = sourceValue
@@ -277,6 +276,28 @@ function validateRow(row: CleanRow) {
   requestedTags.forEach((label, index) => {
     if (!resolvedTags[index]) errors.push(`标签“${label}”未在系统设置中预设`);
   });
+  if (resolvedTags.every((tag): tag is CustomerTag => Boolean(tag))) {
+    const selectedTags = Array.from(new Map(resolvedTags.map((tag) => [tag.id, tag])).values());
+    if (selectedTags.length > 20) errors.push('每条记录最多选择 20 个标签');
+    const groupsById = new Map(groups.map((group) => [group.id, group]));
+    const selectedCountByGroup = new Map<string, number>();
+    for (const tag of selectedTags) {
+      const group = groupsById.get(tag.groupId);
+      if (!tag.isActive || !group?.isActive) {
+        errors.push(`标签“${tag.name}”不存在或已停用`);
+        continue;
+      }
+      if (group.scope !== 'lead' && group.scope !== 'both') {
+        errors.push(`标签“${tag.name}”不适用于线索`);
+        continue;
+      }
+      const count = (selectedCountByGroup.get(group.id) || 0) + 1;
+      selectedCountByGroup.set(group.id, count);
+      if (group.selectionMode === 'single' && count > 1) {
+        errors.push(`标签分组“${group.name}”只能选择一项`);
+      }
+    }
+  }
 
   if (errors.length) {
     return { errors, payload: null };
