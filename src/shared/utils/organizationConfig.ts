@@ -1,6 +1,6 @@
 import type { Department } from '../../types/department';
 import type { Position } from '../../types/position';
-import type { DataScopeDomain, DataScopeLevel, Role, RoleDataScopes } from '../../types/role';
+import type { DataScopeDomain, DataScopeLevel, Permission, Role, RoleDataScopes } from '../../types/role';
 import type { OrganizationProfile, User } from '../../types/settings';
 import { STORAGE_KEYS } from './constants';
 import { CAPABILITY_KEYS, PERMISSION_KEYS, sanitizeRolePermissions } from './permissions';
@@ -58,6 +58,11 @@ const ASSET_SELF_SERVICE_PERMISSIONS: Role['permissions'] = [
 
 const ASSET_SELF_SERVICE_PERMISSION_KEYS = new Set(ASSET_SELF_SERVICE_PERMISSIONS.map((permission) => permission.module));
 
+const CO_CREATION_EMPLOYEE_PERMISSION: Permission = {
+  module: PERMISSION_KEYS.CO_CREATION_SUBMIT,
+  actions: ['read', 'write'],
+};
+
 export const DEFAULT_ROLES: Role[] = [
   {
     id: 'role-super-admin',
@@ -88,6 +93,8 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.ORDER_HISTORY, actions: ['read'] },
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
       { module: PERMISSION_KEYS.DASHBOARD, actions: ['read'] },
+      CO_CREATION_EMPLOYEE_PERMISSION,
+      { module: PERMISSION_KEYS.CO_CREATION_SUPERVISE, actions: ['read', 'write'] },
       ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
     dataScopes: { leads: 'department', customers: 'department', orders: 'department', orderApplications: 'department', assets: 'department' },
@@ -109,6 +116,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.ORDER_CREATE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_EDIT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
+      CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
     dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', assets: 'self' },
@@ -129,6 +137,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
       { module: PERMISSION_KEYS.DASHBOARD, actions: ['read'] },
       { module: PERMISSION_KEYS.GEO, actions: ['read', 'write'] },
+      CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS.filter((permission) => permission.module !== PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH),
       { module: PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, actions: ['read', 'write'] },
     ],
@@ -147,6 +156,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.CUSTOMERS, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read'] },
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
+      CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
     dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', assets: 'self' },
@@ -165,6 +175,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read'] },
       { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
+      CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
     dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', assets: 'self' },
@@ -187,6 +198,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.FINANCE_RULES, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDERS, actions: ['read'] },
+      CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
     dataScopes: { leads: 'self', customers: 'self', orders: 'all', orderApplications: 'all', assets: 'self' },
@@ -212,6 +224,9 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.GEO, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ASSETS, actions: ['read', 'write'] },
+      CO_CREATION_EMPLOYEE_PERMISSION,
+      { module: PERMISSION_KEYS.CO_CREATION_DECIDE, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.CO_CREATION_VALIDATE, actions: ['read', 'write'] },
     ],
     dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self', assets: 'all' },
     memberCount: 0,

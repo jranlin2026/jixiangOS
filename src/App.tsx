@@ -22,6 +22,7 @@ const Assets = React.lazy(() => import('./pages/Assets'));
 const GEO = React.lazy(() => import('./pages/GEO'));
 const AIAssistant = React.lazy(() => import('./pages/AIAssistant'));
 const Enablement = React.lazy(() => import('./pages/Enablement'));
+const CoCreation = React.lazy(() => import('./pages/CoCreation'));
 const Settings = React.lazy(() => import('./pages/Settings'));
 const Login = React.lazy(() => import('./pages/Login'));
 const NoPermission = React.lazy(() => import('./pages/NoPermission'));
@@ -181,6 +182,14 @@ const App: React.FC = () => {
             PERMISSION_KEYS.ENABLEMENT_PUBLISH,
           ]} />}>
             <Route path={ROUTES.ENABLEMENT} element={<Suspense fallback={<PageLoader />}><Enablement /></Suspense>} />
+          </Route>
+          <Route element={<ProtectedRoute permissionKeys={[
+            PERMISSION_KEYS.CO_CREATION_SUBMIT,
+            PERMISSION_KEYS.CO_CREATION_SUPERVISE,
+            PERMISSION_KEYS.CO_CREATION_DECIDE,
+            PERMISSION_KEYS.CO_CREATION_VALIDATE,
+          ]} />}>
+            <Route path={ROUTES.CO_CREATION} element={<Suspense fallback={<PageLoader />}><CoCreation /></Suspense>} />
           </Route>
           <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.SETTINGS} />}>
             <Route path={ROUTES.SETTINGS} element={<Suspense fallback={<PageLoader />}><Settings /></Suspense>} />

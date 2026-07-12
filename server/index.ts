@@ -17,6 +17,7 @@ import { createRequireAnyPermission, createRequireAuth, bearerToken, type Authen
 import { createLoginRateLimiter } from './middleware/loginRateLimit';
 import { createAuthService } from './services/authService';
 import { createAiConfigService } from './services/aiConfigService';
+import { createAiChatClient, type AiChatMessage } from './services/aiChatClient';
 import { createCustomerListService } from './services/customerListService';
 import { createLeadListService } from './services/leadListService';
 import { createSettingsService } from './services/settingsService';
@@ -26,6 +27,8 @@ import { createKnowledgeFileStore } from './services/enablement/knowledgeFileSto
 import { createPrismaKnowledgeRepository } from './services/enablement/prismaKnowledgeRepository';
 import { createKeywordKnowledgeSearchProvider } from './services/enablement/knowledgeSearchProvider';
 import { createEnablementKnowledgeRouter } from './routes/enablementKnowledgeRoutes';
+import { createCoCreationRouter } from './routes/coCreationRoutes';
+import { createCoCreationService } from './services/coCreation/coCreationService';
 import {
   filterAssetStorageData,
   filterSingleStorageKey,
@@ -54,6 +57,8 @@ const uploadRoot = path.resolve(serverDir, '../uploads');
 const allowedCorsOrigins = getAllowedCorsOrigins();
 const authService = createAuthService(prisma);
 const aiConfigService = createAiConfigService(prisma as any);
+const aiChatClient = createAiChatClient({ configReader: aiConfigService });
+const coCreationService = createCoCreationService({ prisma, aiClient: aiChatClient });
 const customerListService = createCustomerListService(prisma);
 const leadListService = createLeadListService(prisma);
 const settingsService = createSettingsService(prisma);
@@ -70,6 +75,7 @@ const requireRoleAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTING
 const requireAiConfigAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_AI_CONFIG);
 const requireDataMaintenanceAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE);
 const requireStorageAccess = createRequireAuth(authService);
+const requireCoCreationAccess = createRequireAuth(authService);
 const requireCustomerListAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_LIST);
 const requireCustomerCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_CREATE, 'write');
 const requireCustomerEditAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_EDIT, 'write');
@@ -164,11 +170,7 @@ app.use('/api/enablement/knowledge', createEnablementKnowledgeRouter({
   requireReview: requireEnablementReview,
   requirePublish: requireEnablementPublish,
 }));
-
-type DeepSeekMessage = {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-};
+app.use('/api/co-creation', createCoCreationRouter({ service: coCreationService, requireAuth: requireCoCreationAccess }));
 
 function routeParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] || '' : value || '';
@@ -221,28 +223,8 @@ function jsonFromText<T>(text: string): T | null {
   }
 }
 
-async function callDeepSeek(messages: DeepSeekMessage[], options: { temperature?: number } = {}): Promise<string> {
-  const config = await aiConfigService.getRuntimeConfig();
-  if (!config.enabled) throw new Error('DeepSeek AI is disabled');
-  if (!config.apiKey) throw new Error('DeepSeek API Key is not configured');
-
-  const response = await fetch(`${config.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: config.model,
-      messages,
-      temperature: options.temperature ?? 0.2,
-    }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload?.error?.message || `DeepSeek request failed with HTTP ${response.status}`);
-  }
-  return String(payload?.choices?.[0]?.message?.content || '');
+async function callDeepSeek(messages: AiChatMessage[], options: { temperature?: number } = {}): Promise<string> {
+  return aiChatClient.complete(messages, options);
 }
 
 async function healthPayload() {

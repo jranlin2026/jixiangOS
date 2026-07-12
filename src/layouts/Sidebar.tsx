@@ -27,6 +27,7 @@ import Inventory2Icon from '@mui/icons-material/Inventory2';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import SchoolIcon from '@mui/icons-material/School';
+import TipsAndUpdatesIcon from '@mui/icons-material/TipsAndUpdates';
 import SettingsIcon from '@mui/icons-material/Settings';
 import HomeIcon from '@mui/icons-material/Home';
 import LogoutIcon from '@mui/icons-material/Logout';
@@ -175,6 +176,18 @@ const navItems: NavItem[] = [
       PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE,
       PERMISSION_KEYS.ENABLEMENT_REVIEW,
       PERMISSION_KEYS.ENABLEMENT_PUBLISH,
+    ],
+  },
+  {
+    label: 'AI共创中心',
+    icon: <TipsAndUpdatesIcon />,
+    path: ROUTES.CO_CREATION,
+    permissionKey: PERMISSION_KEYS.CO_CREATION,
+    permissionKeys: [
+      PERMISSION_KEYS.CO_CREATION_SUBMIT,
+      PERMISSION_KEYS.CO_CREATION_SUPERVISE,
+      PERMISSION_KEYS.CO_CREATION_DECIDE,
+      PERMISSION_KEYS.CO_CREATION_VALIDATE,
     ],
   },
   {

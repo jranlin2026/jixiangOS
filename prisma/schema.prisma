@@ -122,6 +122,136 @@ model AiProviderConfig {
   @@map("ai_provider_configs")
 }
 
+enum CoCreationStatus {
+  DRAFT
+  INTERVIEWING
+  EMPLOYEE_CONFIRMATION
+  FACT_CONFIRMATION
+  MANAGEMENT_REVIEW
+  VALIDATION_APPROVED
+  VALIDATING
+  PROJECT_DECISION
+  APPROVED
+  DEFERRED
+  MERGED
+  REJECTED
+}
+
+enum CoCreationMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model CoCreationRequest {
+  id              String           @id @db.VarChar(64)
+  title           String           @db.VarChar(200)
+  status          CoCreationStatus @default(DRAFT)
+  requesterId     String           @db.VarChar(64)
+  requesterName   String           @db.VarChar(100)
+  departmentId    String?          @db.VarChar(64)
+  supervisorId    String?          @db.VarChar(64)
+  mergedIntoId    String?          @db.VarChar(64)
+  decisionReason  String?          @db.Text
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  messages   CoCreationMessage[]
+  brief      CoCreationBrief?
+  validation CoCreationValidation?
+  events     CoCreationEvent[]
+
+  @@index([requesterId, createdAt])
+  @@index([departmentId, status])
+  @@index([supervisorId, status])
+  @@index([status, updatedAt])
+  @@map("co_creation_requests")
+}
+
+model CoCreationMessage {
+  id        String                @id @db.VarChar(64)
+  requestId String                @db.VarChar(64)
+  role      CoCreationMessageRole
+  content   String                @db.Text
+  metadata  Json?
+  createdAt DateTime              @default(now())
+
+  request CoCreationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId, createdAt])
+  @@map("co_creation_messages")
+}
+
+model CoCreationBrief {
+  id                  String   @id @db.VarChar(64)
+  requestId           String   @unique @db.VarChar(64)
+  problemStatement    String   @db.Text
+  currentWorkflow     String   @db.Text
+  painPoints          Json
+  affectedRoles       Json
+  frequency           String?  @db.VarChar(100)
+  impact              String?  @db.Text
+  desiredOutcome      String   @db.Text
+  acceptanceCriteria  Json
+  evidence            Json
+  employeeStatements  Json
+  aiHypotheses        Json
+  confirmedFacts      Json
+  openQuestions       Json
+  classification      String?  @db.VarChar(100)
+  prioritySuggestion  String?  @db.VarChar(20)
+  completeness        Int      @default(0)
+  employeeConfirmedAt DateTime?
+  factsConfirmedAt    DateTime?
+  factsConfirmedBy    String?  @db.VarChar(64)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  request CoCreationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@map("co_creation_briefs")
+}
+
+model CoCreationValidation {
+  id                  String   @id @db.VarChar(64)
+  requestId           String   @unique @db.VarChar(64)
+  ownerId              String?  @db.VarChar(64)
+  plan                 Json
+  evidence             Json
+  confirmedFacts       Json
+  metrics              Json
+  unresolvedQuestions  Json
+  recommendation       String?  @db.Text
+  conclusion           String?  @db.Text
+  startedAt            DateTime?
+  completedAt          DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  request CoCreationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@map("co_creation_validations")
+}
+
+model CoCreationEvent {
+  id        String   @id @db.VarChar(64)
+  requestId String   @db.VarChar(64)
+  actorId   String   @db.VarChar(64)
+  actorName String   @db.VarChar(100)
+  action    String   @db.VarChar(100)
+  fromState String?  @db.VarChar(50)
+  toState   String?  @db.VarChar(50)
+  detail    Json?
+  createdAt DateTime @default(now())
+
+  request CoCreationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId, createdAt])
+  @@index([actorId, createdAt])
+  @@map("co_creation_events")
+}
+
 model LeadRecord {
   id                  String   @id @db.VarChar(64)
   name                String   @db.VarChar(120)
