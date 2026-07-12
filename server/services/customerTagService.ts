@@ -45,37 +45,42 @@ function validateInput(input: unknown, allowed: Set<string>, create: boolean, ki
   return null;
 }
 
-const CATALOG_LOCK_NAME = 'aaos:customer-tag-catalog-writes';
-const CATALOG_LOCK_TIMEOUT_SECONDS = 2;
+const CATALOG_LOCK_DOMAIN = 'aaos_internal_locks';
+const CATALOG_LOCK_RECORD_ID = 'customer-tag-catalog-writes';
 
 class CatalogLockError extends Error {}
 
 async function catalogWriteTransaction<T>(prisma: CatalogPrisma, operation: (tx: Prisma.TransactionClient) => Promise<T>) {
   try {
     return await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      let acquired = false;
       try {
-        const rows = await tx.$queryRaw<Array<{ acquired: number | bigint | null }>>(
-          Prisma.sql`SELECT GET_LOCK(${CATALOG_LOCK_NAME}, ${CATALOG_LOCK_TIMEOUT_SECONDS}) AS acquired`,
-        );
-        acquired = Number(rows[0]?.acquired) === 1;
+        try {
+          await tx.businessRecord.upsert({
+            where: { domain_recordId: { domain: CATALOG_LOCK_DOMAIN, recordId: CATALOG_LOCK_RECORD_ID } },
+            create: {
+              id: `${CATALOG_LOCK_DOMAIN}:${CATALOG_LOCK_RECORD_ID}`,
+              domain: CATALOG_LOCK_DOMAIN,
+              recordId: CATALOG_LOCK_RECORD_ID,
+              title: '客户标签目录写锁',
+              data: { internal: true },
+            },
+            update: {},
+          });
+        } catch (error) {
+          // Two first-ever writers may race to create the sentinel. The unique winner
+          // commits the row; the loser can safely continue to the authoritative row lock.
+          if (object(error).code !== 'P2002') throw error;
+        }
+        const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT id FROM business_records
+          WHERE domain = ${CATALOG_LOCK_DOMAIN} AND recordId = ${CATALOG_LOCK_RECORD_ID}
+          FOR UPDATE
+        `);
+        if (rows.length !== 1) throw new Error('sentinel missing');
       } catch {
         throw new CatalogLockError('标签目录锁获取失败');
       }
-      if (!acquired) throw new CatalogLockError('标签目录正忙，请稍后重试');
-      try {
-        return await operation(tx);
-      } finally {
-        try {
-          const rows = await tx.$queryRaw<Array<{ released: number | bigint | null }>>(
-            Prisma.sql`SELECT RELEASE_LOCK(${CATALOG_LOCK_NAME}) AS released`,
-          );
-          if (Number(rows[0]?.released) !== 1) throw new CatalogLockError('标签目录锁释放失败');
-        } catch (error) {
-          if (error instanceof CatalogLockError) throw error;
-          throw new CatalogLockError('标签目录锁释放失败');
-        }
-      }
+      return operation(tx);
     });
   } catch (error) {
     if (error instanceof CatalogLockError) return failure(error.message, 503);
@@ -263,7 +268,7 @@ export function createCustomerTagRouter({
   requireManage: RequestHandler;
 }) {
   const router = express.Router();
-  const status = (code: number, successStatus: number) => code === 0 ? successStatus : (code >= 400 && code < 500 ? code : 500);
+  const status = (code: number, successStatus: number) => code === 0 ? successStatus : (code >= 400 && code < 600 ? code : 500);
 
   router.get('/catalog', requireRead, async (req, res) => {
     const rawScope = Array.isArray(req.query.scope) ? req.query.scope[0] : req.query.scope;

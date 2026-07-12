@@ -42,7 +42,7 @@ pnpm exec tsc --noEmit && pnpm exec tsx server/services/customerTagService.test.
 
 ## 遗留风险
 
-- 目录写采用 MySQL 全局 named lock，以管理命令的低频场景换取无 schema 变更的可靠唯一性；如果未来目录写入量显著增长，可评估引入专用关系表与规范化唯一索引。
+- 目录写采用 MySQL 事务级 sentinel 行锁，以管理命令的低频场景换取无 schema 变更的可靠唯一性；如果未来目录写入量显著增长，可评估引入专用关系表与规范化唯一索引。
 - 本任务只运行 brief 指定的聚焦回归和全量 TypeScript 类型检查，未运行整仓所有独立脚本测试。
 
 ## Commit
@@ -53,7 +53,8 @@ pnpm exec tsc --noEmit && pnpm exec tsx server/services/customerTagService.test.
 
 - `loadCustomerTagCatalog` 现在显式要求 `businessRecord` 和 `leadRecord`，`usageCount` 由客户 `BusinessRecord.data.manualTagIds` 与真实 `LeadRecord.data.manualTagIds` 合并计算；测试覆盖真实线索计数和合并回写。
 - 标签组/标签创建与更新增加严格运行时字段白名单，校验必填值、字符串长度、布尔值、非负整数、scope 和 selectionMode 枚举；更新改为显式字段组装，阻止 `id` / `createdAt` 等注入。
-- 所有目录写事务在 Prisma interactive transaction 的同一 MySQL 连接上用 `GET_LOCK(name, 2)` 获取全局目录写锁，在获锁后重读并执行规范化唯一性检查，并在 `finally` 中用 `RELEASE_LOCK(name)` 显式释放。获取超时、SQL 失败或释放异常统一映射为 503；并发创建和并发更名测试均验证一个成功、一个 409。
-- 二次复审移除了与 schema `provider = "mysql"` 不兼容的 PostgreSQL `pg_advisory_xact_lock/hashtext`。测试 adapter 不再串行整个 fake transaction，而是仅在解析到 `GET_LOCK` 后排队，并断言 `GET_LOCK` / `RELEASE_LOCK` SQL 契约、禁止 PostgreSQL 方言，覆盖获锁超时和释放失败的 503 映射。当前环境未配置可用的本地 MySQL 集成库，因此未运行真库并发测试；剩余风险是部署环境需允许 MySQL named-lock 函数。
+- 最终复审移除所有连接级 `GET_LOCK` / `RELEASE_LOCK` 及 PostgreSQL 锁语法。每个目录写事务先在 `BusinessRecord` 的内部 domain `aaos_internal_locks` upsert 固定 sentinel，再对该行执行 MySQL `SELECT ... FOR UPDATE`；锁随 commit、rollback 或事务超时自动释放。sentinel domain 与 `TAGS` / `TAG_GROUPS` 分离，加载器测试确认其不出现在标签目录。
+- 测试 adapter 不串行整个 fake transaction，只在 sentinel upsert 时排队，并在 transaction `finally` 模拟自动释放。测试禁止 `GET_LOCK` / `RELEASE_LOCK` / PostgreSQL 方言，覆盖并发创建与更名各一成功一 409、行锁 SQL 异常转 503，以及锁内操作抛错回滚后下一事务可继续获锁。当前环境未配置可用的本地 MySQL 集成库，因此未运行真库并发测试。
+- 路由 status 映射现在透传 400-599 范围的业务状态，真实 HTTP 路由测试新增 503 断言。
 - 路由测试不再依赖源码正则；它挂载生产 `createCustomerTagRouter`，通过真实 HTTP 请求覆盖读取权限、200/201 成功码及 403/404/409 错误码。
 - 修复复审 commit：`fix: harden authoritative customer tag catalog`。

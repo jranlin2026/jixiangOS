@@ -10,8 +10,8 @@ class FakePrisma {
   leads = new Map<string, any>();
   lockHeld = false;
   lockWaiters: Array<() => void> = [];
-  forceLockTimeout = false;
-  forceReleaseFailure = false;
+  forceRowLockFailure = false;
+  failNextCreate = false;
   sqlContracts: string[] = [];
   roles = new Map([
     ['role-sales', { id: 'role-sales', code: 'sales', isActive: true }],
@@ -33,9 +33,21 @@ class FakePrisma {
       return clone(this.rows.get(rowKey(pair.domain, pair.recordId)) || null);
     },
     create: async ({ data }: any) => {
+      if (this.failNextCreate) {
+        this.failNextCreate = false;
+        throw new Error('injected create failure');
+      }
       const row = clone(data);
       this.rows.set(rowKey(row.domain, row.recordId), row);
       return clone(row);
+    },
+    upsert: async ({ where, create }: any) => {
+      if (this.lockHeld) await new Promise<void>((resolve) => this.lockWaiters.push(resolve));
+      else this.lockHeld = true;
+      const pair = where.domain_recordId;
+      const key = rowKey(pair.domain, pair.recordId);
+      if (!this.rows.has(key)) this.rows.set(key, clone(create));
+      return clone(this.rows.get(key));
     },
     update: async ({ where, data }: any) => {
       const pair = where.domain_recordId;
@@ -65,18 +77,9 @@ class FakePrisma {
   $queryRaw = async (query: any) => {
     const sql = Array.isArray(query?.strings) ? query.strings.join('?') : String(query);
     this.sqlContracts.push(sql);
-    if (sql.includes('GET_LOCK')) {
-      if (this.forceLockTimeout) return [{ acquired: 0 }];
-      if (this.lockHeld) await new Promise<void>((resolve) => this.lockWaiters.push(resolve));
-      else this.lockHeld = true;
-      return [{ acquired: 1 }];
-    }
-    if (sql.includes('RELEASE_LOCK')) {
-      if (this.forceReleaseFailure) return [{ released: 0 }];
-      const waiter = this.lockWaiters.shift();
-      if (waiter) waiter();
-      else this.lockHeld = false;
-      return [{ released: 1 }];
+    if (/FROM business_records[\s\S]*FOR UPDATE/.test(sql)) {
+      if (this.forceRowLockFailure) throw new Error('injected row lock failure');
+      return [{ id: 'aaos_internal_locks:customer-tag-catalog-writes' }];
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   };
@@ -87,6 +90,10 @@ class FakePrisma {
       this.rows = rows;
       this.leads = leads;
       throw error;
+    } finally {
+      const waiter = this.lockWaiters.shift();
+      if (waiter) waiter();
+      else this.lockHeld = false;
     }
   };
   seed(domain: string, value: any) {
@@ -113,6 +120,8 @@ assert.equal((await service.createGroup(validGroup, salesUser)).code, 403);
 assert.equal((await service.createGroup(validGroup, disabledAdmin)).code, 403);
 const createdGroup = await service.createGroup(validGroup, superAdmin);
 assert.equal(createdGroup.code, 0);
+assert.ok(prisma.rows.has('aaos_internal_locks:customer-tag-catalog-writes'));
+assert.equal((await loadCustomerTagCatalog(prisma as any, true)).groups.length, 1, '内部锁哨兵不得出现在标签目录');
 assert.equal((await service.createGroup(validGroup, superAdmin)).code, 409);
 assert.deepEqual(prisma.roleLookups.slice(0, 4), ['role-sales', 'role-disabled-admin', 'role-admin', 'role-admin']);
 
@@ -132,9 +141,8 @@ const concurrent = await Promise.all([
   service.createTag({ groupId, name: ` ${concurrentName} ` }, superAdmin),
 ]);
 assert.deepEqual(concurrent.map((result) => result.code).sort((a, b) => a - b), [0, 409]);
-assert.ok(prisma.sqlContracts.some((sql) => sql.includes('GET_LOCK')), '必须使用 MySQL GET_LOCK');
-assert.ok(prisma.sqlContracts.some((sql) => sql.includes('RELEASE_LOCK')), '必须显式释放 MySQL named lock');
-assert.equal(prisma.sqlContracts.some((sql) => /pg_advisory|hashtext/i.test(sql)), false, '不得出现 PostgreSQL 锁语法');
+assert.ok(prisma.sqlContracts.some((sql) => /FROM business_records[\s\S]*FOR UPDATE/.test(sql)), '必须使用 MySQL 事务级行锁');
+assert.equal(prisma.sqlContracts.some((sql) => /GET_LOCK|RELEASE_LOCK|pg_advisory|hashtext/i.test(sql)), false, '不得出现连接级或 PostgreSQL 锁语法');
 const renameA = await service.createTag({ groupId, name: '待改名 A' }, superAdmin);
 const renameB = await service.createTag({ groupId, name: '待改名 B' }, superAdmin);
 const concurrentRenames = await Promise.all([
@@ -143,13 +151,12 @@ const concurrentRenames = await Promise.all([
 ]);
 assert.deepEqual(concurrentRenames.map((result) => result.code).sort((a, b) => a - b), [0, 409]);
 
-prisma.forceLockTimeout = true;
-assert.equal((await service.createTag({ groupId, name: '锁超时' }, superAdmin)).code, 503);
-prisma.forceLockTimeout = false;
-prisma.forceReleaseFailure = true;
-assert.equal((await service.createTag({ groupId, name: '释放失败' }, superAdmin)).code, 503);
-prisma.forceReleaseFailure = false;
-prisma.lockHeld = false;
+prisma.forceRowLockFailure = true;
+assert.equal((await service.createTag({ groupId, name: '行锁失败' }, superAdmin)).code, 503);
+prisma.forceRowLockFailure = false;
+prisma.failNextCreate = true;
+await assert.rejects(service.createTag({ groupId, name: '事务异常' }, superAdmin), /injected create failure/);
+assert.equal((await service.createTag({ groupId, name: '异常后可继续' }, superAdmin)).code, 0, '回滚后行锁必须自动释放');
 
 const inUseTagId = (createdTag.data as any).id;
 prisma.seed(STORAGE_KEYS.CUSTOMERS, {

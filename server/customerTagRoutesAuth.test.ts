@@ -18,7 +18,9 @@ const service = {
   loadCatalog: async () => ({ groups: [{ id: 'g1', scope: 'both', isActive: true, sortOrder: 0 }], tags: [{ id: 't1', groupId: 'g1', isActive: true, sortOrder: 0 }] }),
   createGroup: async (body: any, currentUser: any) => currentUser.id === 'sales'
     ? { code: 403, data: null, message: 'forbidden' }
-    : body.name === 'duplicate' ? { code: 409, data: null, message: 'duplicate' } : { code: 0, data: { id: 'g2' }, message: 'success' },
+    : body.name === 'duplicate' ? { code: 409, data: null, message: 'duplicate' }
+      : body.name === 'busy' ? { code: 503, data: null, message: 'busy' }
+        : { code: 0, data: { id: 'g2' }, message: 'success' },
   updateGroup: async (id: string) => id === 'missing' ? { code: 404, data: null, message: 'missing' } : { code: 0, data: { id }, message: 'success' },
   createTag: async () => ({ code: 0, data: { id: 't2' }, message: 'success' }),
   updateTag: async (id: string) => id === 'duplicate' ? { code: 409, data: null, message: 'duplicate' } : { code: 0, data: { id }, message: 'success' },
@@ -42,6 +44,7 @@ try {
   assert.equal((await request('/groups', { method: 'POST', headers: { 'x-user': 'sales' }, body: JSON.stringify({ name: 'x' }) })).status, 403);
   assert.equal((await request('/groups', { method: 'POST', body: JSON.stringify({ name: 'new' }) })).status, 201);
   assert.equal((await request('/groups', { method: 'POST', body: JSON.stringify({ name: 'duplicate' }) })).status, 409);
+  assert.equal((await request('/groups', { method: 'POST', body: JSON.stringify({ name: 'busy' }) })).status, 503);
   assert.equal((await request('/groups/missing', { method: 'PUT', body: '{}' })).status, 404);
   assert.equal((await request('/duplicate', { method: 'PUT', body: '{}' })).status, 409);
   assert.equal((await request('/source/merge', { method: 'POST', body: JSON.stringify({ targetId: 'target' }) })).status, 200);
