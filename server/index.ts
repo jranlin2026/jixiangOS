@@ -21,6 +21,7 @@ import { createAiChatClient, type AiChatMessage } from './services/aiChatClient'
 import { createCustomerListService } from './services/customerListService';
 import { createCustomerCommandService } from './services/customerCommandService';
 import { createCustomerTagRouter, createCustomerTagService } from './services/customerTagService';
+import { createCustomerTagMigrationRouter, createCustomerTagMigrationService } from './services/customerTagMigrationService';
 import { createLeadListService } from './services/leadListService';
 import { createSettingsService } from './services/settingsService';
 import { createStorageService } from './services/storageService';
@@ -70,6 +71,7 @@ const coCreationService = createCoCreationService({ prisma, aiClient: aiChatClie
 const customerListService = createCustomerListService(prisma);
 const customerCommandService = createCustomerCommandService(prisma);
 const customerTagService = createCustomerTagService(prisma);
+const customerTagMigrationService = createCustomerTagMigrationService(prisma as any);
 const leadListService = createLeadListService(prisma);
 const settingsService = createSettingsService(prisma);
 const storageService = createStorageService(prisma);
@@ -289,6 +291,10 @@ app.get('/api/ready', async (_req, res) => {
   const payload = await healthPayload();
   res.status(payload.database ? 200 : 503).json(payload);
 });
+app.use('/api/customer-tags', createCustomerTagMigrationRouter({
+  service: customerTagMigrationService,
+  requireAuth: requireStorageAccess,
+}));
 app.use('/api/customer-tags', createCustomerTagRouter({
   service: customerTagService,
   requireRead: requireCustomerTagCatalogReadAccess,
