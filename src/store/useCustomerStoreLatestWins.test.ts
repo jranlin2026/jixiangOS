@@ -42,4 +42,42 @@ const runRace = async (oldFails: boolean) => {
 
 await runRace(false);
 await runRace(true);
+
+const runStaleSettlesFirst = async (oldFails: boolean) => {
+  const slowA = deferred<ApiResponse<PaginatedResponse<Customer>>>();
+  const pendingB = deferred<ApiResponse<PaginatedResponse<Customer>>>();
+  const third = deferred<ApiResponse<PaginatedResponse<Customer>>>();
+  const requests = [slowA.promise, pendingB.promise, third.promise];
+  let calls = 0;
+  customerApi.fetchCustomers = (() => requests[calls++]) as typeof customerApi.fetchCustomers;
+  const initial = response('initial-result', 7).data;
+  useCustomerStore.setState({ items: initial.items, pagination: initial.pagination, error: null, loading: false });
+  const requestA = useCustomerStore.getState().fetchItems({ search: 'A-old' });
+  const requestB = useCustomerStore.getState().fetchItems({ search: 'B-new' });
+  if (oldFails) slowA.reject(new Error('stale A failure')); else slowA.resolve(response('stale-A-result', 99));
+  await requestA;
+  let state = useCustomerStore.getState();
+  assert.equal(state.loading, true, 'stale A must not clear B loading');
+  assert.equal(state.items[0]?.id, 'initial-result', 'stale A must not replace items while B is pending');
+  assert.deepEqual(state.pagination, initial.pagination, 'stale A must not replace pagination while B is pending');
+  assert.equal(state.error, null, 'stale A failure must not set an error while B is pending');
+  pendingB.resolve(response('B-result', 2));
+  await requestB;
+  state = useCustomerStore.getState();
+  assert.equal(state.items[0]?.id, 'B-result');
+  assert.equal(state.pagination.total, 2);
+  assert.equal(state.loading, false);
+  assert.equal(state.error, null);
+  const requestC = useCustomerStore.getState().fetchItems({ search: 'C-third' });
+  third.resolve(response('C-result', 3));
+  await requestC;
+  state = useCustomerStore.getState();
+  assert.equal(calls, 3);
+  assert.equal(state.items[0]?.id, 'C-result', 'request sequencing must continue after the race');
+  assert.equal(state.pagination.total, 3);
+  assert.equal(state.loading, false);
+};
+
+await runStaleSettlesFirst(false);
+await runStaleSettlesFirst(true);
 customerApi.fetchCustomers = originalFetch;

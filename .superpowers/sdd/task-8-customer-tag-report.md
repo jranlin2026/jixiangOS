@@ -37,3 +37,9 @@ The generic `.superpowers/sdd/task-8-report.md` was already occupied by the Know
 - Customer list requests now use a monotonically increasing sequence token. Only the newest request may update items, pagination, error, or loading; stale successes and stale failures return without touching state.
 - Deferred asynchronous tests prove a fast B response remains authoritative after both a slow A success and a slow A failure. Apply/clear single-request regression coverage remains green.
 - Focused tests, full tests, TypeScript, production build, and diff checks pass.
+
+### Final test coverage extension
+
+- Added A-first deferred cases for both stale success and stale failure. While B remains pending, assertions prove loading stays true and A cannot alter items, pagination, or error.
+- Each case then resolves B and verifies its final state, followed by a successful third request proving later sequence tokens continue to operate normally.
+- No production implementation change was required.
