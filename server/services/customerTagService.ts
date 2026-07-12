@@ -45,8 +45,42 @@ function validateInput(input: unknown, allowed: Set<string>, create: boolean, ki
   return null;
 }
 
-async function lockCatalogWrites(tx: Prisma.TransactionClient) {
-  await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${'customer-tag-catalog-writes'}))`);
+const CATALOG_LOCK_NAME = 'aaos:customer-tag-catalog-writes';
+const CATALOG_LOCK_TIMEOUT_SECONDS = 2;
+
+class CatalogLockError extends Error {}
+
+async function catalogWriteTransaction<T>(prisma: CatalogPrisma, operation: (tx: Prisma.TransactionClient) => Promise<T>) {
+  try {
+    return await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      let acquired = false;
+      try {
+        const rows = await tx.$queryRaw<Array<{ acquired: number | bigint | null }>>(
+          Prisma.sql`SELECT GET_LOCK(${CATALOG_LOCK_NAME}, ${CATALOG_LOCK_TIMEOUT_SECONDS}) AS acquired`,
+        );
+        acquired = Number(rows[0]?.acquired) === 1;
+      } catch {
+        throw new CatalogLockError('标签目录锁获取失败');
+      }
+      if (!acquired) throw new CatalogLockError('标签目录正忙，请稍后重试');
+      try {
+        return await operation(tx);
+      } finally {
+        try {
+          const rows = await tx.$queryRaw<Array<{ released: number | bigint | null }>>(
+            Prisma.sql`SELECT RELEASE_LOCK(${CATALOG_LOCK_NAME}) AS released`,
+          );
+          if (Number(rows[0]?.released) !== 1) throw new CatalogLockError('标签目录锁释放失败');
+        } catch (error) {
+          if (error instanceof CatalogLockError) throw error;
+          throw new CatalogLockError('标签目录锁释放失败');
+        }
+      }
+    });
+  } catch (error) {
+    if (error instanceof CatalogLockError) return failure(error.message, 503);
+    throw error;
+  }
 }
 
 async function rowsFor(tx: Pick<Prisma.TransactionClient, 'businessRecord'>, domain: string) {
@@ -99,8 +133,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
     const validationError = validateInput(input, GROUP_FIELDS, true, 'group');
     if (validationError) return failure(validationError, 400);
     const name = normalizeName(input.name);
-    return prisma.$transaction(async (tx) => {
-      await lockCatalogWrites(tx);
+    return catalogWriteTransaction(prisma, async (tx) => {
       const catalog = await loadCustomerTagCatalog(tx, true);
       if (catalog.groups.some((group) => normalizedKey(group.name) === normalizedKey(name))) return failure('标签组名称已存在', 409);
       const timestamp = now();
@@ -120,8 +153,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
     if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
     const validationError = validateInput(input, GROUP_FIELDS, false, 'group');
     if (validationError) return failure(validationError, 400);
-    return prisma.$transaction(async (tx) => {
-      await lockCatalogWrites(tx);
+    return catalogWriteTransaction(prisma, async (tx) => {
       const catalog = await loadCustomerTagCatalog(tx, true);
       const current = catalog.groups.find((group) => group.id === id);
       if (!current) return failure('标签组不存在', 404);
@@ -147,8 +179,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
     if (validationError) return failure(validationError, 400);
     const name = normalizeName(input.name);
     const groupId = input.groupId!.trim();
-    return prisma.$transaction(async (tx) => {
-      await lockCatalogWrites(tx);
+    return catalogWriteTransaction(prisma, async (tx) => {
       const catalog = await loadCustomerTagCatalog(tx, true);
       if (!catalog.groups.some((group) => group.id === groupId)) return failure('标签组不存在', 404);
       if (catalog.tags.some((tag) => tag.groupId === groupId && normalizedKey(tag.name) === normalizedKey(name))) return failure('组内标签名称已存在', 409);
@@ -163,8 +194,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
     if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
     const validationError = validateInput(input, TAG_FIELDS, false, 'tag');
     if (validationError) return failure(validationError, 400);
-    return prisma.$transaction(async (tx) => {
-      await lockCatalogWrites(tx);
+    return catalogWriteTransaction(prisma, async (tx) => {
       const catalog = await loadCustomerTagCatalog(tx, true);
       const current = catalog.tags.find((tag) => tag.id === id);
       if (!current) return failure('标签不存在', 404);
@@ -187,8 +217,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
   async function mergeTag(sourceId: string, targetId: string, user: AuthenticatedUser) {
     if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
     if (!sourceId || sourceId === targetId) return failure('合并目标无效', 409);
-    return prisma.$transaction(async (tx) => {
-      await lockCatalogWrites(tx);
+    return catalogWriteTransaction(prisma, async (tx) => {
       const catalog = await loadCustomerTagCatalog(tx, true);
       const source = catalog.tags.find((tag) => tag.id === sourceId);
       const target = catalog.tags.find((tag) => tag.id === targetId);
@@ -200,7 +229,8 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
         const value = object(row.data);
         if (!Array.isArray(value.manualTagIds) || !value.manualTagIds.includes(sourceId)) continue;
         const manualTagIds = [...new Set(value.manualTagIds.map((id: string) => id === sourceId ? targetId : id))];
-        const manualTagNames = manualTagIds.map((id) => catalog.tags.find((tag) => tag.id === id)?.name).filter(Boolean);
+        const manualTagNames = manualTagIds.map((id) => catalog.tags.find((tag) => tag.id === id)?.name)
+          .filter((name): name is string => Boolean(name));
         await tx.businessRecord.update({ where: { domain_recordId: { domain: row.domain, recordId: row.recordId } }, data: { data: { ...value, manualTagIds, manualTagNames, activityRecords: [audit, ...(Array.isArray(value.activityRecords) ? value.activityRecords : [])] } } });
       }
       if (tx.leadRecord) {
@@ -209,7 +239,8 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
           const value = object(row.data);
           if (!Array.isArray(value.manualTagIds) || !value.manualTagIds.includes(sourceId)) continue;
           const manualTagIds = [...new Set(value.manualTagIds.map((id: string) => id === sourceId ? targetId : id))];
-          const manualTagNames = manualTagIds.map((id) => catalog.tags.find((tag) => tag.id === id)?.name).filter(Boolean);
+          const manualTagNames = manualTagIds.map((id) => catalog.tags.find((tag) => tag.id === id)?.name)
+            .filter((name): name is string => Boolean(name));
           await tx.leadRecord.update({ where: { id: row.id }, data: { data: { ...value, manualTagIds, manualTagNames, activityRecords: [audit, ...(Array.isArray(value.activityRecords) ? value.activityRecords : [])] } } });
         }
       }

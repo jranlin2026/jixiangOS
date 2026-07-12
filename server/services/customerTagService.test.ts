@@ -8,8 +8,11 @@ const rowKey = (domain: string, recordId: string) => `${domain}:${recordId}`;
 class FakePrisma {
   rows = new Map<string, any>();
   leads = new Map<string, any>();
-  transactionTail = Promise.resolve();
-  advisoryLocks: string[] = [];
+  lockHeld = false;
+  lockWaiters: Array<() => void> = [];
+  forceLockTimeout = false;
+  forceReleaseFailure = false;
+  sqlContracts: string[] = [];
   roles = new Map([
     ['role-sales', { id: 'role-sales', code: 'sales', isActive: true }],
     ['role-admin', { id: 'role-admin', code: 'super_admin', isActive: true }],
@@ -59,16 +62,32 @@ class FakePrisma {
     };
   }
 
-  $executeRaw = async (query: any) => {
-    this.advisoryLocks.push(String(query?.values?.[0] || 'lock'));
-    return 1;
+  $queryRaw = async (query: any) => {
+    const sql = Array.isArray(query?.strings) ? query.strings.join('?') : String(query);
+    this.sqlContracts.push(sql);
+    if (sql.includes('GET_LOCK')) {
+      if (this.forceLockTimeout) return [{ acquired: 0 }];
+      if (this.lockHeld) await new Promise<void>((resolve) => this.lockWaiters.push(resolve));
+      else this.lockHeld = true;
+      return [{ acquired: 1 }];
+    }
+    if (sql.includes('RELEASE_LOCK')) {
+      if (this.forceReleaseFailure) return [{ released: 0 }];
+      const waiter = this.lockWaiters.shift();
+      if (waiter) waiter();
+      else this.lockHeld = false;
+      return [{ released: 1 }];
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
   };
   $transaction = async (fn: any) => {
-    const previous = this.transactionTail;
-    let release!: () => void;
-    this.transactionTail = new Promise<void>((resolve) => { release = resolve; });
-    await previous;
-    try { return await fn(this); } finally { release(); }
+    const rows = clone(this.rows);
+    const leads = clone(this.leads);
+    try { return await fn(this); } catch (error) {
+      this.rows = rows;
+      this.leads = leads;
+      throw error;
+    }
   };
   seed(domain: string, value: any) {
     this.rows.set(rowKey(domain, value.id), {
@@ -113,7 +132,9 @@ const concurrent = await Promise.all([
   service.createTag({ groupId, name: ` ${concurrentName} ` }, superAdmin),
 ]);
 assert.deepEqual(concurrent.map((result) => result.code).sort((a, b) => a - b), [0, 409]);
-assert.ok(prisma.advisoryLocks.length > 0, '唯一性检查必须在事务级 advisory lock 内执行');
+assert.ok(prisma.sqlContracts.some((sql) => sql.includes('GET_LOCK')), '必须使用 MySQL GET_LOCK');
+assert.ok(prisma.sqlContracts.some((sql) => sql.includes('RELEASE_LOCK')), '必须显式释放 MySQL named lock');
+assert.equal(prisma.sqlContracts.some((sql) => /pg_advisory|hashtext/i.test(sql)), false, '不得出现 PostgreSQL 锁语法');
 const renameA = await service.createTag({ groupId, name: '待改名 A' }, superAdmin);
 const renameB = await service.createTag({ groupId, name: '待改名 B' }, superAdmin);
 const concurrentRenames = await Promise.all([
@@ -121,6 +142,14 @@ const concurrentRenames = await Promise.all([
   service.updateTag((renameB.data as any).id, { name: '同一新名' }, superAdmin),
 ]);
 assert.deepEqual(concurrentRenames.map((result) => result.code).sort((a, b) => a - b), [0, 409]);
+
+prisma.forceLockTimeout = true;
+assert.equal((await service.createTag({ groupId, name: '锁超时' }, superAdmin)).code, 503);
+prisma.forceLockTimeout = false;
+prisma.forceReleaseFailure = true;
+assert.equal((await service.createTag({ groupId, name: '释放失败' }, superAdmin)).code, 503);
+prisma.forceReleaseFailure = false;
+prisma.lockHeld = false;
 
 const inUseTagId = (createdTag.data as any).id;
 prisma.seed(STORAGE_KEYS.CUSTOMERS, {
