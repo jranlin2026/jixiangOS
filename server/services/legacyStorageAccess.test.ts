@@ -50,6 +50,15 @@ const commandOnlyWriter = {
     { module: PERMISSION_KEYS.DELIVERY_MOVE_CARD, actions: ['read', 'write'] },
   ],
 };
+const catalogSuperAdmin = {
+  ...commandOnlyWriter,
+  roleId: 'role-admin',
+  permissions: [{ module: '全部', actions: ['read', 'write', 'delete'] }],
+};
+for (const catalogKey of [STORAGE_KEYS.TAGS, STORAGE_KEYS.TAG_GROUPS]) {
+  assert.equal(canAccessLegacyStorageKey(commandOnlyWriter, catalogKey, 'write'), false);
+  assert.equal(canAccessLegacyStorageKey(catalogSuperAdmin, catalogKey, 'write'), false);
+}
 assert.equal(
   canAccessLegacyStorageKey(commandOnlyWriter, STORAGE_KEYS.ORDERS, 'write'),
   false,
