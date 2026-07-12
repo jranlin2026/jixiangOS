@@ -4,6 +4,7 @@ import {
   groupTagIdsForFilter,
   inheritableCustomerTagIds,
   normalizeManualTagIds,
+  resolveManualTagNames,
   validateManualTagSelection,
 } from './customerTagPolicy';
 
@@ -78,3 +79,28 @@ assert.deepEqual(
   inheritableCustomerTagIds(inactiveCatalog, ['t-inactive', 't-active', 't-inactive-group']),
   ['t-active'],
 );
+
+const nameResolutionCatalog: CustomerTagCatalog = {
+  groups: [
+    { id: 'lead-a', name: '线索 A', color: '#1677ff', selectionMode: 'multiple', scope: 'lead', isActive: true, sortOrder: 1, createdAt: '2026-07-12', updatedAt: '2026-07-12' },
+    { id: 'lead-b', name: '线索 B', color: '#1677ff', selectionMode: 'multiple', scope: 'both', isActive: true, sortOrder: 2, createdAt: '2026-07-12', updatedAt: '2026-07-12' },
+    { id: 'customer', name: '客户', color: '#1677ff', selectionMode: 'multiple', scope: 'customer', isActive: true, sortOrder: 3, createdAt: '2026-07-12', updatedAt: '2026-07-12' },
+    { id: 'inactive', name: '停用', color: '#1677ff', selectionMode: 'multiple', scope: 'lead', isActive: false, sortOrder: 4, createdAt: '2026-07-12', updatedAt: '2026-07-12' },
+  ],
+  tags: [
+    { id: 'eligible', groupId: 'lead-a', name: '同名唯一', isActive: true, sortOrder: 1, usageCount: 0, createdAt: '2026-07-12', updatedAt: '2026-07-12' },
+    { id: 'customer-shadow', groupId: 'customer', name: '同名唯一', isActive: true, sortOrder: 1, usageCount: 0, createdAt: '2026-07-12', updatedAt: '2026-07-12' },
+    { id: 'inactive-shadow', groupId: 'inactive', name: '同名唯一', isActive: true, sortOrder: 1, usageCount: 0, createdAt: '2026-07-12', updatedAt: '2026-07-12' },
+    { id: 'ambiguous-a', groupId: 'lead-a', name: '重复有效', isActive: true, sortOrder: 2, usageCount: 0, createdAt: '2026-07-12', updatedAt: '2026-07-12' },
+    { id: 'ambiguous-b', groupId: 'lead-b', name: '重复有效', isActive: true, sortOrder: 2, usageCount: 0, createdAt: '2026-07-12', updatedAt: '2026-07-12' },
+  ],
+};
+assert.deepEqual(resolveManualTagNames(nameResolutionCatalog, 'lead', ['同名唯一']), { ok: true, tagIds: ['eligible'] });
+assert.deepEqual(
+  resolveManualTagNames({ ...nameResolutionCatalog, tags: [...nameResolutionCatalog.tags].reverse() }, 'lead', ['同名唯一']),
+  { ok: true, tagIds: ['eligible'] },
+);
+assert.deepEqual(resolveManualTagNames(nameResolutionCatalog, 'lead', ['重复有效']), {
+  ok: false,
+  message: '标签“重复有效”名称存在歧义，请使用唯一预设名称',
+});

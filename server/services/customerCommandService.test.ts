@@ -775,6 +775,7 @@ const serviceOptions = {
 {
   const value = customer('cust-update');
   (value as any).tags = ['历史标签'];
+  (value as any).manualTagIds = ['legacy-id'];
   const fake = createFakePrisma({
     businessRecords: [businessCustomer(value)],
     leads: [lead('lead-customer-update', salesA.name, value.id)],
@@ -791,6 +792,7 @@ const serviceOptions = {
   assert.equal(result.data?.phone, '+8613800000000', '非超管只能保留原号码并做存储格式规范化');
   assert.equal(result.data?.activityRecords?.[0].operator, salesA.name);
   assert.deepEqual(result.data?.tags, ['历史标签'], '未显式提交 manualTagIds 时必须忽略调用方 tags 并保留历史快照');
+  assert.deepEqual(result.data?.manualTagIds, ['legacy-id']);
   const next = fake.getState();
   assert.equal(next.leads[0].data.name, '更新后客户');
   assert.deepEqual(next.leads[0].data.tags, ['历史标签']);
@@ -929,6 +931,7 @@ const serviceOptions = {
 {
   const source = pendingLead('lead-update-profile');
   source.data.tags = ['历史标签'];
+  source.data.manualTagIds = ['legacy-id'];
   const fake = createFakePrisma({ businessRecords: [], leads: [source] });
   const service = createCustomerCommandService(fake.prisma, serviceOptions);
   const result = await service.updateLead(source.id, {
@@ -943,6 +946,7 @@ const serviceOptions = {
   assert.equal(result.data?.changeHistory?.[0].operator, salesA.name);
   assert.match(result.data?.changeHistory?.[0].summary || '', /修改了/);
   assert.deepEqual(result.data?.tags, ['历史标签'], '线索更新必须忽略调用方伪造的 legacy tags');
+  assert.deepEqual(result.data?.manualTagIds, ['legacy-id']);
 }
 
 // 线索标签更新必须执行单选组约束，且无权限时不得触发目录校验。

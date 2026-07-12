@@ -296,14 +296,14 @@ storage.setItem(STORAGE_KEYS.TAG_GROUPS, JSON.stringify([
   ...JSON.parse(storage.getItem(STORAGE_KEYS.TAG_GROUPS) || '[]'),
   { id: 'single-lead', name: '单选线索', color: '#1677ff', selectionMode: 'single', scope: 'lead', isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
   { id: 'customer-only', name: '客户专用', color: '#1677ff', selectionMode: 'multiple', scope: 'customer', isActive: true, sortOrder: 2, createdAt: now, updatedAt: now },
-  { id: 'inactive-group', name: '停用组', color: '#1677ff', selectionMode: 'multiple', scope: 'lead', isActive: false, sortOrder: 3, createdAt: now, updatedAt: now },
+  { id: 'inactive-group', name: '停用组', color: '#1677ff', selectionMode: 'multiple', scope: 'lead', isActive: true, sortOrder: 3, createdAt: now, updatedAt: now },
 ]));
 storage.setItem(STORAGE_KEYS.TAGS, JSON.stringify([
   ...JSON.parse(storage.getItem(STORAGE_KEYS.TAGS) || '[]'),
   { id: 'single-a', groupId: 'single-lead', name: '单选甲', color: '#1677ff', isActive: true, sortOrder: 0, createdAt: now, updatedAt: now },
   { id: 'single-b', groupId: 'single-lead', name: '单选乙', color: '#1677ff', isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
   { id: 'customer-tag', groupId: 'customer-only', name: '客户标签', color: '#1677ff', isActive: true, sortOrder: 0, createdAt: now, updatedAt: now },
-  { id: 'inactive-tag', groupId: 'inactive-group', name: '停用标签', color: '#1677ff', isActive: true, sortOrder: 0, createdAt: now, updatedAt: now },
+  { id: 'inactive-tag', groupId: 'inactive-group', name: '停用标签', color: '#1677ff', isActive: false, sortOrder: 0, createdAt: now, updatedAt: now },
 ]));
 const invalidPolicyRows = await leadBulkImportApi.importWorkbook(await workbookBuffer([
   { ...invalidImportBase, [H.name]: '单选冲突', [H.phone]: '13900000010', [H.tags]: '单选甲,单选乙' },
@@ -321,6 +321,38 @@ assert.equal(intakeRecords.length, 2);
 assert.equal(intakeRecords.some((record: any) => record.name === zh.newLead && record.status === zh.successStatus), true);
 assert.equal(intakeRecords.some((record: any) => record.name === zh.duplicateCustomer && record.status === zh.failedStatus), true);
 assert.equal(intakeRecords.some((record: any) => record.name === zh.formatErrorCompany), false);
+
+// 同名解析必须只考虑 eligible 定义，不能被目录顺序、客户专用或停用定义遮蔽。
+storage.setItem(STORAGE_KEYS.TAG_GROUPS, JSON.stringify([
+  ...JSON.parse(storage.getItem(STORAGE_KEYS.TAG_GROUPS) || '[]'),
+  { id: 'shadow-lead', name: '同名线索', color: '#1677ff', selectionMode: 'multiple', scope: 'lead', isActive: true, sortOrder: 10, createdAt: now, updatedAt: now },
+  { id: 'shadow-customer', name: '同名客户', color: '#1677ff', selectionMode: 'multiple', scope: 'customer', isActive: true, sortOrder: 11, createdAt: now, updatedAt: now },
+]));
+const shadowTags = [
+  { id: 'shadow-customer-tag', groupId: 'shadow-customer', name: '同名导入', color: '#1677ff', isActive: true, sortOrder: 0, createdAt: now, updatedAt: now },
+  { id: 'shadow-inactive-tag', groupId: 'shadow-lead', name: '同名导入', color: '#1677ff', isActive: false, sortOrder: 1, createdAt: now, updatedAt: now },
+  { id: 'shadow-eligible-tag', groupId: 'shadow-lead', name: '同名导入', color: '#1677ff', isActive: true, sortOrder: 2, createdAt: now, updatedAt: now },
+  { id: 'ambiguous-one', groupId: 'shadow-lead', name: '歧义导入', color: '#1677ff', isActive: true, sortOrder: 3, createdAt: now, updatedAt: now },
+  { id: 'ambiguous-two', groupId: 'tag-group-both', name: '歧义导入', color: '#1677ff', isActive: true, sortOrder: 4, createdAt: now, updatedAt: now },
+];
+storage.setItem(STORAGE_KEYS.TAGS, JSON.stringify([
+  ...shadowTags,
+  ...JSON.parse(storage.getItem(STORAGE_KEYS.TAGS) || '[]'),
+]));
+const shadowedName = await leadBulkImportApi.importWorkbook(await workbookBuffer([{
+  [H.name]: '同名解析线索', [H.phone]: '13900000013', [H.source]: zh.official, [H.tags]: '同名导入',
+}]));
+assert.equal(shadowedName.data.successCount, 1);
+const shadowedLead = JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]').find((item: any) => item.name === '同名解析线索');
+assert.deepEqual(shadowedLead.manualTagIds, ['shadow-eligible-tag']);
+
+const beforeAmbiguous = JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]').length;
+const ambiguousName = await leadBulkImportApi.importWorkbook(await workbookBuffer([{
+  [H.name]: '歧义标签线索', [H.phone]: '13900000014', [H.source]: zh.official, [H.tags]: '歧义导入',
+}]));
+assert.equal(ambiguousName.data.failureCount, 1);
+assert.equal(ambiguousName.data.rows[0].reason, '标签“歧义导入”名称存在歧义，请使用唯一预设名称');
+assert.equal(JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]').length, beforeAmbiguous, '歧义标签行不得写入线索');
 
 storage.clear();
 storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');

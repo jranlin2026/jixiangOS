@@ -11,6 +11,7 @@ import { initializeMockData } from './mock';
 import { getStorageData } from './mock/storage';
 import { leadFlowApi } from './leadFlowApi';
 import type { CustomerTag, CustomerTagGroup } from '../types/tag';
+import { resolveManualTagNames } from '../shared/utils/customerTagPolicy';
 
 const TEXT = {
   name: '\u59d3\u540d*',
@@ -254,7 +255,8 @@ function validateRow(row: CleanRow) {
   const requestedTags = parseTags(data[TEXT.tags]);
   const groups = getStorageData<CustomerTagGroup[]>(STORAGE_KEYS.TAG_GROUPS) || [];
   const presetTags = getStorageData<CustomerTag[]>(STORAGE_KEYS.TAGS) || [];
-  const resolvedTags = requestedTags.map((label) => presetTags.find((tag) => tag.name.trim().toLowerCase() === label.toLowerCase()));
+  const catalog = { groups, tags: presetTags };
+  const tagResolution = resolveManualTagNames(catalog, 'lead', requestedTags);
 
   const sourceOption = sourceValue
     ? sourceOptions.find((option) => option.label.trim().toLowerCase() === sourceValue.trim().toLowerCase())
@@ -273,31 +275,7 @@ function validateRow(row: CleanRow) {
   if (contributorValue && !contributorUser) errors.push(`${TEXT.leadContributorMissing}\uff1a${contributorValue}`);
   if (sourceType === '\u4e2a\u4eba\u8d44\u6e90' && !contributorUser) errors.push(TEXT.leadContributorRequired);
   if (ownerValue && ownerValue !== TEXT.toAssign && !ownerUser) errors.push(`${TEXT.ownerMissing}\uff1a${ownerValue}`);
-  requestedTags.forEach((label, index) => {
-    if (!resolvedTags[index]) errors.push(`标签“${label}”未在系统设置中预设`);
-  });
-  if (resolvedTags.every((tag): tag is CustomerTag => Boolean(tag))) {
-    const selectedTags = Array.from(new Map(resolvedTags.map((tag) => [tag.id, tag])).values());
-    if (selectedTags.length > 20) errors.push('每条记录最多选择 20 个标签');
-    const groupsById = new Map(groups.map((group) => [group.id, group]));
-    const selectedCountByGroup = new Map<string, number>();
-    for (const tag of selectedTags) {
-      const group = groupsById.get(tag.groupId);
-      if (!tag.isActive || !group?.isActive) {
-        errors.push(`标签“${tag.name}”不存在或已停用`);
-        continue;
-      }
-      if (group.scope !== 'lead' && group.scope !== 'both') {
-        errors.push(`标签“${tag.name}”不适用于线索`);
-        continue;
-      }
-      const count = (selectedCountByGroup.get(group.id) || 0) + 1;
-      selectedCountByGroup.set(group.id, count);
-      if (group.selectionMode === 'single' && count > 1) {
-        errors.push(`标签分组“${group.name}”只能选择一项`);
-      }
-    }
-  }
+  if (!tagResolution.ok) errors.push(tagResolution.message);
 
   if (errors.length) {
     return { errors, payload: null };
@@ -318,8 +296,8 @@ function validateRow(row: CleanRow) {
     leadContributorName: contributorUser?.name,
     industry: data[TEXT.industry],
     city: data[TEXT.city],
-    manualTagIds: resolvedTags.filter((tag): tag is CustomerTag => Boolean(tag)).map((tag) => tag.id),
-    tags: resolvedTags.filter((tag): tag is CustomerTag => Boolean(tag)).map((tag) => tag.name),
+    manualTagIds: tagResolution.ok ? tagResolution.tagIds : [],
+    tags: tagResolution.ok ? tagResolution.tagIds.map((id) => presetTags.find((tag) => tag.id === id)!.name) : [],
     remark: data[TEXT.remark],
   };
 
