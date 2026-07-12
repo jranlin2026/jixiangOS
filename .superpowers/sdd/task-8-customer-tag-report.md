@@ -24,3 +24,10 @@ The generic `.superpowers/sdd/task-8-report.md` was already occupied by the Know
 - Added direct `customerListService.list` coverage that captures count/item SQL and proves exact JSON conditions, shared combined visibility scope, totals, page size, and offset.
 - Mobile match-mode radios now stack at `xs` and wrap at larger sizes.
 - Focused tests, full tests, TypeScript, production build, and `git diff --check` pass.
+
+## Second review fixes
+
+- Apply and clear now choose exactly one request source: a changed URL is fetched only by the search-parameter effect; an unchanged URL performs one direct request. Pure regression tests cover apply, clear, and unchanged state.
+- The list behavior fake now executes tag matching and salesperson ownership against mixed Sales A/Sales B fixtures, derives count from the filtered set, and slices the same set for pagination. The service result proves only Sales A matches are returned and count/items stay aligned.
+- `tagMatch` is explicitly narrowed to the union in both the HTTP route and radio change handler; no tag-mode `as any` remains.
+- Focused tests, data visibility, full tests, TypeScript, production build, and diff checks pass.

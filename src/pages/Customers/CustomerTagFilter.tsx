@@ -36,7 +36,7 @@ export default function CustomerTagFilter({ value, onApply }: Props) {
     <Popover open={Boolean(anchor)} anchorEl={anchor} onClose={() => setAnchor(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}>
       <Box sx={{ width: { xs: 'calc(100vw - 32px)', sm: 420 }, maxHeight: '70vh', overflowY: 'auto', p: 2 }}>
         <Typography fontWeight={700} sx={{ mb: 1 }}>客户标签筛选</Typography>
-        <RadioGroup row value={draft.tagMatch || 'grouped'} onChange={(event) => setDraft({ ...draft, tagMatch: event.target.value as any })} sx={{ flexDirection: { xs: 'column', sm: 'row' }, flexWrap: 'wrap' }}>
+        <RadioGroup row value={draft.tagMatch || 'grouped'} onChange={(event) => { const mode = event.target.value; if (mode === 'grouped' || mode === 'any' || mode === 'all') setDraft({ ...draft, tagMatch: mode }); }} sx={{ flexDirection: { xs: 'column', sm: 'row' }, flexWrap: 'wrap' }}>
           <FormControlLabel value="grouped" control={<Radio size="small" />} label="按分组匹配" />
           <FormControlLabel value="any" control={<Radio size="small" />} label="包含任意标签" />
           <FormControlLabel value="all" control={<Radio size="small" />} label="同时包含全部标签" />

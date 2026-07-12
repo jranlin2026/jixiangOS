@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createCustomerListService, matchesCustomerTagFilters } from './customerListService';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
+import type { CustomerFilters } from '../../src/types/customer';
 
 const now = '2026-07-12T00:00:00.000Z';
 
@@ -180,6 +181,13 @@ const flattenSql = (value: any): string => {
   return Array.from(strings).map((part, index) => `${part}${index < values.length ? flattenSql(values[index]) : ''}`).join('');
 };
 const capturedQueries: string[] = [];
+const listFixtures = [
+  { ...created[0].data.data, id: 'sales-a-hit-1', owner: '销售甲', manualTagIds: ['t-agent', 't-high-budget'] },
+  { ...created[0].data.data, id: 'sales-a-hit-2', owner: '销售甲', manualTagIds: ['t-private', 't-high-budget'] },
+  { ...created[0].data.data, id: 'sales-a-miss', owner: '销售甲', manualTagIds: ['t-agent'] },
+  { ...created[0].data.data, id: 'sales-b-hit', owner: '销售乙', manualTagIds: ['t-agent', 't-high-budget'] },
+];
+let executingFilters: any = {};
 const listService = createCustomerListService({
   businessRecord: { findMany: async ({ where }: any) => {
     if (where.domain === STORAGE_KEYS.TAG_GROUPS) return tagCatalog.groups.map((data: any) => ({ data }));
@@ -193,23 +201,30 @@ const listService = createCustomerListService({
   $queryRaw: async (...args: any[]) => {
     const sql = flattenSql(args);
     capturedQueries.push(sql);
-    return sql.includes('COUNT(*)') ? [{ total: 3n }] : [{ data: { ...created[0].data.data, id: 'page-two' } }];
+    const filtered = listFixtures.filter((item) => item.owner === '销售甲' && matchesCustomerTagFilters(item, executingFilters, tagCatalog));
+    if (sql.includes('COUNT(*)')) return [{ total: BigInt(filtered.length) }];
+    const page = Number(executingFilters.page || 1); const pageSize = Number(executingFilters.pageSize || 10);
+    return filtered.slice((page - 1) * pageSize, page * pageSize).map((data) => ({ data }));
   },
 } as any);
 const salesActor = { ...actor, id: 'sales-1', name: '销售甲', account: 'sales', role: '销售顾问', roleId: 'r1', departmentId: 'd1' } as any;
-const sqlList = await listService.list({ tagIds: ['t-agent', 't-private', 't-high-budget'], tagMatch: 'grouped', page: 2, pageSize: 2 }, salesActor);
+executingFilters = { tagIds: ['t-agent', 't-private', 't-high-budget'], tagMatch: 'grouped', page: 1, pageSize: 1 };
+const sqlList = await listService.list(executingFilters, salesActor);
 assert.equal(sqlList.code, 0);
-assert.deepEqual(sqlList.data?.pagination, { page: 2, pageSize: 2, total: 3, totalPages: 2 });
+assert.deepEqual(sqlList.data?.items.map((item) => item.id), ['sales-a-hit-1']);
+assert.deepEqual(sqlList.data?.pagination, { page: 1, pageSize: 1, total: 2, totalPages: 2 });
 assert.equal(capturedQueries.length, 2);
 for (const sql of capturedQueries) {
   assert.match(sql, /JSON_CONTAINS/);
   assert.match(sql, /t-agent/); assert.match(sql, /t-private/); assert.match(sql, /t-high-budget/);
   assert.match(sql, /owner IN/); assert.match(sql, /销售甲/);
 }
-assert.match(capturedQueries[1], /LIMIT[\s\S]*OFFSET[\s\S]*2 2$/);
+assert.match(capturedQueries[1], /LIMIT[\s\S]*OFFSET[\s\S]*1 0$/);
 
-for (const [filters, joiner] of [[{ tagIds: ['t-agent', 't-private'], tagMatch: 'any' }, ' OR '], [{ tagIds: ['t-agent', 't-private'], tagMatch: 'all' }, ' AND '], [{ withoutTags: true }, 'JSON_LENGTH']] as const) {
+const filterCases: Array<[CustomerFilters, string]> = [[{ tagIds: ['t-agent', 't-private'], tagMatch: 'any' }, ' OR '], [{ tagIds: ['t-agent', 't-private'], tagMatch: 'all' }, ' AND '], [{ withoutTags: true }, 'JSON_LENGTH']];
+for (const [filters, joiner] of filterCases) {
   capturedQueries.length = 0;
-  await listService.list(filters as any, salesActor);
+  executingFilters = filters;
+  await listService.list(filters, salesActor);
   assert.match(capturedQueries[0], joiner === 'JSON_LENGTH' ? /JSON_LENGTH/ : new RegExp(joiner.trim()));
 }

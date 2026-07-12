@@ -72,7 +72,7 @@ import { ModuleHeader, ModulePage, ModuleToolbar, moduleTablePaperSx } from '../
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 import { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
 import CustomerTagFilter from './CustomerTagFilter';
-import { readCustomerTagFilterParams, writeCustomerTagFilterParams } from './customerTagFilterState';
+import { customerTagRequestSource, readCustomerTagFilterParams, writeCustomerTagFilterParams } from './customerTagFilterState';
 
 type CustomerColumn = {
   id: string;
@@ -511,17 +511,16 @@ const Customers: React.FC = () => {
   const handleResetFilters = () => {
     const newFilters = scopedFilters({ page: 1, pageSize: pagination.pageSize || 10 }, customerScope);
     const nextParams = writeCustomerTagFilterParams(searchParams, {});
-    setSearchParams(nextParams, { replace: true });
     setFilters(newFilters);
-    fetchItems(newFilters);
+    if (customerTagRequestSource(searchParams, nextParams) === 'url-effect') setSearchParams(nextParams, { replace: true });
+    else fetchItems(newFilters);
   };
 
   const handleTagFilterApply = (tagFilters: Pick<CustomerFilters, 'tagIds' | 'tagMatch' | 'withoutTags' | 'missingTagGroupId'>) => {
     const newFilters = { ...filters, ...tagFilters, tag: undefined, productLevel: undefined, page: 1, pageSize: pagination.pageSize || 10 };
     const nextParams = writeCustomerTagFilterParams(searchParams, tagFilters);
-    setSearchParams(nextParams, { replace: true });
-    setFilters(newFilters);
-    fetchItems(newFilters);
+    if (customerTagRequestSource(searchParams, nextParams) === 'url-effect') setSearchParams(nextParams, { replace: true });
+    else { setFilters(newFilters); fetchItems(newFilters); }
   };
 
   const handlePageChange = (_: React.MouseEvent<HTMLButtonElement> | null, page: number) => {

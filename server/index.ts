@@ -315,10 +315,11 @@ app.post('/api/customers', requireCustomerCreateAccess, async (req: Authenticate
 
 app.get('/api/customers', requireCustomerListAccess, async (req: AuthenticatedRequest, res) => {
   const tagIds = queryParams(req.query.tagId);
-  const tagMatch = queryParam(req.query.tagMatch) || 'grouped';
+  const rawTagMatch = queryParam(req.query.tagMatch) || 'grouped';
+  const tagMatch = rawTagMatch === 'any' || rawTagMatch === 'all' || rawTagMatch === 'grouped' ? rawTagMatch : null;
   const withoutTagsRaw = queryParam(req.query.withoutTags);
   if (tagIds.length > 20) return res.status(400).json({ code: 400, message: '客户标签最多选择 20 个', data: null });
-  if (!['grouped', 'any', 'all'].includes(tagMatch)) return res.status(400).json({ code: 400, message: '不支持的标签匹配方式', data: null });
+  if (!tagMatch) return res.status(400).json({ code: 400, message: '不支持的标签匹配方式', data: null });
   if (withoutTagsRaw && !['true', 'false'].includes(withoutTagsRaw)) return res.status(400).json({ code: 400, message: 'withoutTags 必须为布尔值', data: null });
   const result = await customerListService.list({
     search: queryParam(req.query.search),
@@ -333,7 +334,7 @@ app.get('/api/customers', requireCustomerListAccess, async (req: AuthenticatedRe
     city: queryParam(req.query.city),
     tag: queryParam(req.query.tag),
     tagIds,
-    tagMatch: tagMatch as any,
+    tagMatch,
     withoutTags: withoutTagsRaw === 'true',
     missingTagGroupId: queryParam(req.query.missingTagGroupId) || undefined,
     page: Number(queryParam(req.query.page)),

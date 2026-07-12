@@ -20,3 +20,4 @@ export const writeCustomerTagFilterParams = (current: URLSearchParams, state: Cu
   if (state.missingTagGroupId) next.set('missingTagGroupId', state.missingTagGroupId);
   return next;
 };
+export const customerTagRequestSource = (current: URLSearchParams, next: URLSearchParams): 'url-effect' | 'direct' => current.toString() === next.toString() ? 'direct' : 'url-effect';
