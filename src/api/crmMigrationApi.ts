@@ -791,12 +791,14 @@ async function syncTags(tagNames: string[]): Promise<ApiResponse<{ created: numb
     if (!normalized || existingNames.has(normalized.toLowerCase())) return;
     tags.push({
       id: `tag-mig-${uuidv4().slice(0, 8)}`,
+      groupId: 'tag-group-legacy-import',
       name: normalized,
-      category: '其他' as CustomerTag['category'],
       color: '#64748b',
       usageCount: 0,
       isActive: true,
+      sortOrder: tags.filter((tag) => tag.groupId === 'tag-group-legacy-import').length + 1,
       createdAt: now,
+      updatedAt: now,
     });
     existingNames.add(normalized.toLowerCase());
     created += 1;

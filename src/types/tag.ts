@@ -22,16 +22,14 @@ export interface CustomerTagGroup {
 /** 客户标签 */
 export interface CustomerTag {
   id: ID;
-  groupId?: ID;
+  groupId: ID;
   name: string;
   color?: string;
   isActive: boolean;
-  sortOrder?: number;
+  sortOrder: number;
   usageCount: number;
   createdAt: Timestamp;
-  updatedAt?: Timestamp;
-  /** @deprecated Legacy free-text tag classification retained during migration. */
-  category?: TagCategory;
+  updatedAt: Timestamp;
 }
 
 export interface CustomerTagCatalog {
