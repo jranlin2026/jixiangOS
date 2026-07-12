@@ -5,8 +5,8 @@ import { createCustomerTagRouter } from './services/customerTagService';
 const app = express();
 app.use(express.json());
 const user = { id: 'admin', name: '管理员' };
-const requireRead: express.RequestHandler = (req, res, next) => {
-  if (req.header('x-read') !== 'yes') { res.status(403).json({ code: 403 }); return; }
+const requirePermission = (permission: 'customer' | 'lead' | 'settings'): express.RequestHandler => (req, res, next) => {
+  if (req.header('x-permission') !== permission) { res.status(403).json({ code: 403 }); return; }
   (req as any).currentUser = user;
   next();
 };
@@ -27,7 +27,13 @@ const service = {
   mergeTag: async () => ({ code: 0, data: {}, message: 'success' }),
   reorderTags: async () => ({ code: 0, data: {}, message: 'success' }),
 };
-app.use('/api/customer-tags', createCustomerTagRouter({ service: service as any, requireRead, requireManage }));
+app.use('/api/customer-tags', createCustomerTagRouter({
+  service: service as any,
+  requireCustomerRead: requirePermission('customer'),
+  requireLeadRead: requirePermission('lead'),
+  requireSettingsRead: requirePermission('settings'),
+  requireManage,
+}));
 
 const server = app.listen(0, '127.0.0.1');
 await new Promise<void>((resolve) => server.once('listening', resolve));
@@ -41,8 +47,15 @@ const request = (path: string, init: RequestInit = {}) => fetch(`${base}${path}`
 
 try {
   assert.equal((await request('/catalog')).status, 403);
-  assert.equal((await request('/catalog?scope=customer', { headers: { 'x-read': 'yes' } })).status, 200);
-  const allCatalog = await request('/catalog?scope=all', { headers: { 'x-read': 'yes' } });
+  const customerCatalog = await request('/catalog?scope=customer', { headers: { 'x-permission': 'customer' } });
+  assert.equal(customerCatalog.status, 200);
+  assert.equal((await customerCatalog.json()).data.groups.some((group: any) => group.scope === 'lead'), false, 'customer scope 不得泄露 lead-only 分组');
+  assert.equal((await request('/catalog?scope=lead', { headers: { 'x-permission': 'lead' } })).status, 200);
+  assert.equal((await request('/catalog?scope=all', { headers: { 'x-permission': 'customer' } })).status, 403);
+  assert.equal((await request('/catalog?scope=all', { headers: { 'x-permission': 'lead' } })).status, 403);
+  assert.equal((await request('/catalog?scope=customer&includeInactive=true', { headers: { 'x-permission': 'customer' } })).status, 403);
+  assert.equal((await request('/catalog?scope=lead&includeInactive=true', { headers: { 'x-permission': 'lead' } })).status, 403);
+  const allCatalog = await request('/catalog?scope=all&includeInactive=true', { headers: { 'x-permission': 'settings' } });
   assert.equal(allCatalog.status, 200);
   assert.equal((await allCatalog.json()).data.groups.some((group: any) => group.scope === 'lead'), true, '管理目录必须包含 lead-only 分组');
   assert.equal((await request('/groups', { method: 'POST', headers: { 'x-user': 'sales' }, body: JSON.stringify({ name: 'x' }) })).status, 403);

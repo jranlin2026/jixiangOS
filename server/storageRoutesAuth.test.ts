@@ -115,6 +115,10 @@ assert.match(source, /app\.put\('\/api\/ai\/config', requireAiConfigWriteAccess,
 assert.match(source, /app\.post\('\/api\/ai\/config\/test', requireAiConfigWriteAccess,/);
 
 assert.match(source, /const requireCustomerListAccess = createRequireAuth\(authService, PERMISSION_KEYS\.CUSTOMER_LIST\);/);
+assert.match(source, /const requireCustomerTagSettingsReadAccess = createRequireAuth\(authService, PERMISSION_KEYS\.SETTINGS_CUSTOMER_TAGS\);/);
+assert.match(source, /requireCustomerRead: requireCustomerListAccess/);
+assert.match(source, /requireLeadRead: requireCustomerTagLeadReadAccess/);
+assert.match(source, /requireSettingsRead: requireCustomerTagSettingsReadAccess/);
 assert.match(source, /const requireCustomerCreateAccess = createRequireAuth\(authService, PERMISSION_KEYS\.CUSTOMER_CREATE, 'write'\);/);
 assert.match(source, /const requireCustomerEditAccess = createRequireAuth\(authService, PERMISSION_KEYS\.CUSTOMER_EDIT, 'write'\);/);
 assert.match(source, /const requireCustomerAssignAccess = createRequireAuth\(authService, PERMISSION_KEYS\.CUSTOMER_ASSIGN, 'write'\);/);

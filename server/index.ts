@@ -101,7 +101,8 @@ const requireDataMaintenanceDeleteAccess = createRequireAuth(authService, PERMIS
 const requireStorageAccess = createRequireAuth(authService);
 const requireCoCreationAccess = createRequireAuth(authService);
 const requireCustomerListAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_LIST);
-const requireCustomerTagCatalogReadAccess = createRequireAnyPermission(authService, [PERMISSION_KEYS.CUSTOMER_LIST, PERMISSION_KEYS.LEADS_DETAIL]);
+const requireCustomerTagLeadReadAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_DETAIL);
+const requireCustomerTagSettingsReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS);
 const requireCustomerCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_CREATE, 'write');
 const requireCustomerEditAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_EDIT, 'write');
 const requireCustomerAssignAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_ASSIGN, 'write');
@@ -297,7 +298,9 @@ app.use('/api/customer-tags', createCustomerTagMigrationRouter({
 }));
 app.use('/api/customer-tags', createCustomerTagRouter({
   service: customerTagService,
-  requireRead: requireCustomerTagCatalogReadAccess,
+  requireCustomerRead: requireCustomerListAccess,
+  requireLeadRead: requireCustomerTagLeadReadAccess,
+  requireSettingsRead: requireCustomerTagSettingsReadAccess,
   requireManage: requireStorageAccess,
 }));
 

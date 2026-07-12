@@ -285,17 +285,30 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
 
 export function createCustomerTagRouter({
   service,
-  requireRead,
+  requireCustomerRead,
+  requireLeadRead,
+  requireSettingsRead,
   requireManage,
 }: {
   service: ReturnType<typeof createCustomerTagService>;
-  requireRead: RequestHandler;
+  requireCustomerRead: RequestHandler;
+  requireLeadRead: RequestHandler;
+  requireSettingsRead: RequestHandler;
   requireManage: RequestHandler;
 }) {
   const router = express.Router();
   const status = (code: number, successStatus: number) => code === 0 ? successStatus : (code >= 400 && code < 600 ? code : 500);
+  const requireCatalogRead: RequestHandler = (req, res, next) => {
+    const rawScope = Array.isArray(req.query.scope) ? req.query.scope[0] : req.query.scope;
+    const scope = typeof rawScope === 'string' ? rawScope : '';
+    const includeInactive = req.query.includeInactive === 'true';
+    const middleware = includeInactive || (scope !== 'customer' && scope !== 'lead')
+      ? requireSettingsRead
+      : scope === 'customer' ? requireCustomerRead : requireLeadRead;
+    middleware(req, res, next);
+  };
 
-  router.get('/catalog', requireRead, async (req, res) => {
+  router.get('/catalog', requireCatalogRead, async (req, res) => {
     const rawScope = Array.isArray(req.query.scope) ? req.query.scope[0] : req.query.scope;
     const scope = typeof rawScope === 'string' ? rawScope : '';
     if (scope && scope !== 'customer' && scope !== 'lead' && scope !== 'all') {

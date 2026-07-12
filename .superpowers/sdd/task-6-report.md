@@ -48,6 +48,13 @@ pnpm exec vite build
 - 新增 `POST /customer-tags/groups/:id/reorder`：提交整组标签 ID，服务端校验集合完整性，在 active `super_admin` 校验、共享目录行锁及单事务内更新所有 `sortOrder`。UI 不做乐观交换，失败时重新读取目录。
 - 服务测试注入中途 update 失败，验证事务完整回滚；聚焦验证增加 `customerTagSettingsState.test.ts`、路由 all-scope/lead-only 和 reorder API 契约。
 
+### 二次复审：管理目录读取权限
+
+- `/customer-tags/catalog` 改为按请求参数动态授权：`scope=customer` 且不含 inactive 时要求 `CUSTOMER_LIST`；`scope=lead` 且不含 inactive 时要求 `LEADS_DETAIL`；`scope=all`、未指定 scope 或 `includeInactive=true` 时要求 `SETTINGS_CUSTOMER_TAGS` read。
+- 三条授权路径都使用 `createRequireAuth`，因此同时要求有效认证；仅有 customer/lead 业务权限无法读取管理目录或停用定义。
+- 路由矩阵测试覆盖：customer-only 和 lead-only 请求 all/inactive 返回 403；settings read 可读取 all/inactive 并看到 lead-only；customer 最小读取仍为 200 且结果不包含 lead-only。
+- 写路由仍由认证中间件进入，服务端继续按数据库中的 active `super_admin` 角色复核，不依赖前端角色名称。
+
 复审后的聚焦命令：
 
 ```sh
