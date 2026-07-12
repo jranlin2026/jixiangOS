@@ -71,7 +71,7 @@ pnpm exec prisma migrate status
 NODE_ENV=production pnpm run prod:check
 ```
 
-当前仓库没有 lint 命令，任何任务不得声称 lint 已通过。若未来新增 lint，必须同步更新本文件和任务门禁。
+当前没有 lint 命令，任何任务不得声称 lint 已通过。若未来新增 lint，必须同步更新本文件和任务门禁。
 
 ## 事实源优先级
 
