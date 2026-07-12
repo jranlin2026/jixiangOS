@@ -28,7 +28,7 @@ export function inheritableCustomerTagIds(catalog: CustomerTagCatalog, ids: stri
   return normalizeManualTagIds(ids).filter((id) => {
     const tag = catalog.tags.find((item) => item.id === id && item.isActive);
     return tag && groupById.get(tag.groupId)?.isActive && groupById.get(tag.groupId)?.scope === 'both';
-  });
+  }).slice(0, MAX_TAGS_PER_SUBJECT);
 }
 
 export function groupTagIdsForFilter(catalog: CustomerTagCatalog, ids: string[]): string[][] {
