@@ -267,6 +267,7 @@ export const STORAGE_PREFIX = 'aaos_';
 
 /** localStorage 键名 */
 export const STORAGE_KEYS = {
+  TAG_GROUPS: `${STORAGE_PREFIX}tag_groups`,
   LEADS: `${STORAGE_PREFIX}leads`,
   CUSTOMERS: `${STORAGE_PREFIX}customers`,
   ORDERS: `${STORAGE_PREFIX}orders`,

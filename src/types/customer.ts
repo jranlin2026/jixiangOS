@@ -1,5 +1,6 @@
 import type { ID, Timestamp, ProductLevel, CustomerLevel } from './common';
 import type { LifecycleStatusCode } from './settings';
+import type { CustomerTagFilterMode } from './tag';
 
 /** 成长里程碑 */
 export interface GrowthMilestone {
@@ -120,6 +121,7 @@ export interface Customer {
   activityRecords?: CustomerActivityRecord[];
   aiPortrait?: AICustomerPortrait;
   tags?: string[];
+  manualTagIds?: ID[];
   /** 线索录入人 */
   leadInputBy?: string;
   /** 线索贡献人：资源归属和线索分成依据 */
@@ -154,7 +156,11 @@ export interface CustomerFilters {
   leadSource?: string;
   industry?: string;
   city?: string;
-  tag?: string;
+  tagIds?: ID[];
+  tagMatch?: CustomerTagFilterMode;
+  withoutTags?: boolean;
+  missingTagGroupId?: ID;
+  tag?: string; // one-release compatibility for the old free-text URL
   page?: number;
   pageSize?: number;
 }
