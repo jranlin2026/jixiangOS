@@ -36,3 +36,19 @@ NODE_ENV=production pnpm run prod:check
 - 当前验收库缺少 `_prisma_migrations` 表，不能直接部署到服务器。
 
 修复证据见 [BUG_FIX_LOG.md](./BUG_FIX_LOG.md)，发布判定见 [RELEASE_CHECKLIST.md](./RELEASE_CHECKLIST.md)，版本变化见 [CHANGELOG.md](./CHANGELOG.md)。
+
+## 客户人工标签
+
+- 超级管理员在“系统设置 → 客户设置 → 客户标签”维护标签组和预设标签。
+- 线索和客户表单只允许选择目录中的有效标签；标签 ID 是稳定关联键，改名不会重写历史分配。
+- 客户列表支持组内任一、任一标签、全部标签以及未打标签筛选，并可与生命周期筛选组合。
+- 历史自由文本标签必须先由超级管理员预览再执行迁移；自动规则标签和高级人群包不在当前版本范围内。
+
+本地集成冒烟脚本只允许连接回环地址和非生产环境。运行前启动本地 API，并通过环境变量提供隔离测试账号：
+
+```bash
+QA_API_BASE=http://127.0.0.1:3001/api \
+QA_ADMIN_ACCOUNT=... QA_ADMIN_PASSWORD=... \
+QA_SALES_ACCOUNT=... QA_SALES_PASSWORD=... \
+pnpm exec tsx scripts/qa/customer-tag-smoke.ts
+```
