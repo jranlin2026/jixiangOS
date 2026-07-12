@@ -12,7 +12,7 @@ Scope: all five findings from the final whole-branch review
 2. Lead bulk import loads `fetchCustomerTagCatalog('lead', false)` exactly once before reading/validating the batch. A 403 response is returned unchanged and network errors reject; neither path writes any lead. The implementation no longer reads `TAGS` or `TAG_GROUPS` from browser storage.
 3. CRM missing-tag synchronization now uses the record-level customer-tag group/tag APIs. Every command is awaited, 409 conflicts trigger authoritative refresh and name matching, and 403/other failures propagate. No local `TAGS` write remains.
 4. Legacy migration preview reports cross-group duplicate-name ambiguities with tag/group IDs and includes them in its checksum. Apply returns 409 before business/audit writes while ambiguity exists. The settings dialog explains the remediation and disables apply.
-5. `ManualTagSelector` catalog cache has a 60-second TTL and an exported invalidation function. Successful settings mutations and migration apply invalidate lead/customer selector caches immediately; failed loads remain retryable.
+5. `ManualTagSelector` catalog cache has a 60-second TTL, per-scope generations, and an exported invalidation function. Successful settings mutations and migration apply invalidate lead/customer selector caches immediately. Mounted selectors subscribe to the generation, actively reload after invalidation, deduplicate same-generation requests, discard stale pending responses, and leave failed loads retryable.
 
 ## Verification
 
@@ -22,9 +22,10 @@ Scope: all five findings from the final whole-branch review
   - `src/api/crmMigrationTagSync.test.ts`
   - `server/services/customerTagMigrationService.test.ts`
   - `src/api/manualTagSelectorStatic.test.ts`
+  - `src/shared/utils/manualTagCatalogCache.test.ts` (pending request invalidation race, mounted reload, scope deduplication, TTL expiry, retry)
 - `pnpm exec tsc -b --pretty false`: PASS
-- `pnpm test`: PASS, 137 test files
-- `pnpm build`: PASS, 2866 modules transformed
+- `pnpm test`: PASS, 138 test files
+- `pnpm build`: PASS, 2867 modules transformed
 - `git diff --check`: PASS
 
 ## Remaining boundary

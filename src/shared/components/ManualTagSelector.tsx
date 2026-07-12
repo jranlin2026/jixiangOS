@@ -3,59 +3,30 @@ import { Alert, Autocomplete, Box, Button, Chip, CircularProgress, TextField, Ty
 import { fetchCustomerTagCatalog } from '../../api/customerTagApi';
 import type { CustomerTag, CustomerTagCatalog, CustomerTagGroup } from '../../types/tag';
 import { normalizeManualTagIds, validateManualTagSelection } from '../utils/customerTagPolicy';
+import { createManualTagCatalogCache, type ManualTagCatalogScope } from '../utils/manualTagCatalogCache';
 
-type AssignmentScope = 'lead' | 'customer';
+type AssignmentScope = ManualTagCatalogScope;
 type TagOption = CustomerTag & { group: CustomerTagGroup };
-type CatalogState = { catalog?: CustomerTagCatalog; loading: boolean; error: string; fetchedAt?: number };
-
-const CATALOG_CACHE_TTL_MS = 60_000;
-
-const catalogCache = new Map<AssignmentScope, CatalogState>();
-const catalogRequests = new Map<AssignmentScope, Promise<void>>();
-const catalogListeners = new Map<AssignmentScope, Set<() => void>>();
 const emptyCatalog: CustomerTagCatalog = { groups: [], tags: [] };
-const notifyCatalog = (scope: AssignmentScope) => catalogListeners.get(scope)?.forEach((listener) => listener());
+const catalogCache = createManualTagCatalogCache((scope) => fetchCustomerTagCatalog(scope, false));
 
 export function invalidateManualTagCatalogCache(scope?: AssignmentScope): void {
-  const scopes: AssignmentScope[] = scope ? [scope] : ['lead', 'customer'];
-  scopes.forEach((item) => {
-    catalogCache.delete(item);
-    notifyCatalog(item);
-  });
-}
-
-function loadActiveCatalog(scope: AssignmentScope, retry = false): Promise<void> {
-  const cached = catalogCache.get(scope);
-  if (!retry && cached?.catalog && Date.now() - (cached.fetchedAt || 0) < CATALOG_CACHE_TTL_MS) return Promise.resolve();
-  const existing = catalogRequests.get(scope);
-  if (existing) return existing;
-  catalogCache.set(scope, { ...catalogCache.get(scope), loading: true, error: '' });
-  notifyCatalog(scope);
-  const request = fetchCustomerTagCatalog(scope, false).then((response) => {
-    if (response.code !== 0) throw new Error(response.message || '标签目录加载失败');
-    catalogCache.set(scope, { catalog: response.data, loading: false, error: '', fetchedAt: Date.now() });
-  }).catch((reason) => {
-    catalogCache.set(scope, { loading: false, error: reason instanceof Error ? reason.message : '标签目录加载失败' });
-  }).finally(() => {
-    catalogRequests.delete(scope);
-    notifyCatalog(scope);
-  });
-  catalogRequests.set(scope, request);
-  return request;
+  catalogCache.invalidate(scope);
 }
 
 function useActiveManualTagCatalog(scope: AssignmentScope) {
+  const [version, setVersion] = useState(() => catalogCache.getGeneration(scope));
   const [, render] = useState(0);
   useEffect(() => {
-    const listeners = catalogListeners.get(scope) || new Set<() => void>();
-    const listener = () => render((value) => value + 1);
-    listeners.add(listener);
-    catalogListeners.set(scope, listeners);
-    void loadActiveCatalog(scope);
-    return () => { listeners.delete(listener); };
+    setVersion(catalogCache.getGeneration(scope));
+    return catalogCache.subscribe(scope, () => {
+      setVersion(catalogCache.getGeneration(scope));
+      render((value) => value + 1);
+    });
   }, [scope]);
-  const state = catalogCache.get(scope) || { loading: true, error: '' };
-  return { ...state, catalog: state.catalog || emptyCatalog, retry: () => loadActiveCatalog(scope, true) };
+  useEffect(() => { void catalogCache.load(scope); }, [scope, version]);
+  const state = catalogCache.getState(scope);
+  return { ...state, catalog: state.catalog || emptyCatalog, retry: () => catalogCache.load(scope, true) };
 }
 
 export interface ManualTagSelectorProps {
