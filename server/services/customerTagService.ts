@@ -5,6 +5,7 @@ import type { AuthenticatedUser } from '../../src/types/auth';
 import type { CustomerTag, CustomerTagCatalog, CustomerTagGroup } from '../../src/types/tag';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { failure, success } from '../api/response';
+import { validateManualTagSelection } from './customerTagPolicy';
 
 type CatalogPrisma = {
   businessRecord: Prisma.TransactionClient['businessRecord'];
@@ -26,6 +27,7 @@ const normalizedKey = (value: unknown) => normalizeName(value).toLocaleLowerCase
 const now = () => new Date().toISOString();
 const GROUP_FIELDS = new Set(['name', 'color', 'selectionMode', 'scope', 'isActive', 'sortOrder']);
 const TAG_FIELDS = new Set(['groupId', 'name', 'color', 'isActive', 'sortOrder']);
+const CATALOG_AUDIT_DOMAIN = 'aaos_customer_tag_catalog_audits';
 
 function validateInput(input: unknown, allowed: Set<string>, create: boolean, kind: 'group' | 'tag'): string | null {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return '请求数据格式错误';
@@ -126,6 +128,35 @@ function recordData(domain: string, value: { id: string; name: string; isActive:
   };
 }
 
+type AssignmentRecord = { kind: 'customer' | 'lead'; id: string; manualTagIds: string[] };
+
+async function assignmentRecords(tx: any): Promise<AssignmentRecord[]> {
+  const [businessRows, leadRows] = await Promise.all([
+    tx.businessRecord.findMany({ where: { domain: { in: [STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.LEADS] } } }),
+    tx.leadRecord.findMany(),
+  ]);
+  const fromBusiness = businessRows.map((row: any) => ({
+    kind: row.domain === STORAGE_KEYS.CUSTOMERS ? 'customer' as const : 'lead' as const,
+    id: String(row.recordId || object(row.data).id || ''),
+    manualTagIds: Array.isArray(object(row.data).manualTagIds) ? object(row.data).manualTagIds.map(String) : [],
+  }));
+  const fromLeads = leadRows.map((row: any) => ({
+    kind: 'lead' as const,
+    id: String(row.id || object(row.data).id || ''),
+    manualTagIds: Array.isArray(object(row.data).manualTagIds) ? object(row.data).manualTagIds.map(String) : [],
+  }));
+  return [...fromBusiness, ...fromLeads];
+}
+
+async function validateAffectedAssignments(tx: any, catalog: CustomerTagCatalog, affectedTagIds: Set<string>) {
+  for (const record of await assignmentRecords(tx)) {
+    if (!record.manualTagIds.some((id) => affectedTagIds.has(id))) continue;
+    const validation = validateManualTagSelection(catalog, record.kind, record.manualTagIds);
+    if (!validation.ok) return failure(`${record.kind === 'customer' ? '客户' : '线索'} ${record.id} 的标签分配冲突：${validation.message}`, 409);
+  }
+  return null;
+}
+
 export function createCustomerTagService(prisma: CatalogPrisma) {
   async function requireSuperAdmin(user: AuthenticatedUser) {
     if (!user.roleId) return false;
@@ -173,6 +204,12 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
         sortOrder: input.sortOrder ?? current.sortOrder,
         updatedAt: now(),
       };
+      if (next.scope !== current.scope || next.selectionMode !== current.selectionMode) {
+        const affectedTagIds = new Set(catalog.tags.filter((tag) => tag.groupId === id).map((tag) => tag.id));
+        const simulated = { ...catalog, groups: catalog.groups.map((group) => group.id === id ? next : group) };
+        const conflict = await validateAffectedAssignments(tx, simulated, affectedTagIds);
+        if (conflict) return conflict;
+      }
       await tx.businessRecord.update({ where: { domain_recordId: { domain: STORAGE_KEYS.TAG_GROUPS, recordId: id } }, data: recordData(STORAGE_KEYS.TAG_GROUPS, next) });
       return success(next);
     });
@@ -214,6 +251,11 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
         sortOrder: input.sortOrder ?? current.sortOrder,
         updatedAt: now(),
       };
+      if (next.groupId !== current.groupId) {
+        const simulated = { ...catalog, tags: catalog.tags.map((tag) => tag.id === id ? next : tag) };
+        const conflict = await validateAffectedAssignments(tx, simulated, new Set([id]));
+        if (conflict) return conflict;
+      }
       await tx.businessRecord.update({ where: { domain_recordId: { domain: STORAGE_KEYS.TAGS, recordId: id } }, data: recordData(STORAGE_KEYS.TAGS, next) });
       return success(next);
     });
@@ -255,6 +297,37 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
     });
   }
 
+  async function mergeGroup(sourceId: string, targetId: string, user: AuthenticatedUser) {
+    if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
+    if (!sourceId || !targetId || sourceId === targetId) return failure('分组合并目标无效', 409);
+    return catalogWriteTransaction(prisma, async (tx) => {
+      const catalog = await loadCustomerTagCatalog(tx, true);
+      const source = catalog.groups.find((group) => group.id === sourceId);
+      const target = catalog.groups.find((group) => group.id === targetId);
+      if (!source || !target) return failure('标签分组不存在', 404);
+      const sourceTags = catalog.tags.filter((tag) => tag.groupId === sourceId);
+      const targetNames = new Set(catalog.tags.filter((tag) => tag.groupId === targetId).map((tag) => normalizedKey(tag.name)));
+      const conflicts = sourceTags.filter((tag) => targetNames.has(normalizedKey(tag.name))).map((tag) => tag.name);
+      if (conflicts.length) return failure(`目标分组存在同名标签：${conflicts.join('、')}，请先合并标签`, 409);
+      const timestamp = now();
+      const movedTags = sourceTags.map((tag) => ({ ...tag, groupId: targetId, updatedAt: timestamp }));
+      const nextSource = { ...source, isActive: false, updatedAt: timestamp };
+      const simulated: CustomerTagCatalog = {
+        groups: catalog.groups.map((group) => group.id === sourceId ? nextSource : group),
+        tags: catalog.tags.map((tag) => movedTags.find((moved) => moved.id === tag.id) || tag),
+      };
+      const conflict = await validateAffectedAssignments(tx, simulated, new Set(sourceTags.map((tag) => tag.id)));
+      if (conflict) return conflict;
+      for (const tag of movedTags) {
+        await tx.businessRecord.update({ where: { domain_recordId: { domain: STORAGE_KEYS.TAGS, recordId: tag.id } }, data: recordData(STORAGE_KEYS.TAGS, tag) });
+      }
+      await tx.businessRecord.update({ where: { domain_recordId: { domain: STORAGE_KEYS.TAG_GROUPS, recordId: sourceId } }, data: recordData(STORAGE_KEYS.TAG_GROUPS, nextSource) });
+      const audit = { id: randomUUID(), name: '合并客户标签分组', isActive: true, sourceId, targetId, movedTagIds: movedTags.map((tag) => tag.id), actor: { id: user.id, name: user.name }, createdAt: timestamp };
+      await tx.businessRecord.create({ data: recordData(CATALOG_AUDIT_DOMAIN, audit) });
+      return success({ source: nextSource, target, movedTagIds: movedTags.map((tag) => tag.id) });
+    });
+  }
+
   async function reorderTags(groupId: string, tagIds: string[], user: AuthenticatedUser) {
     if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
     if (!groupId || !Array.isArray(tagIds) || tagIds.some((id) => typeof id !== 'string' || !id.trim()) || new Set(tagIds).size !== tagIds.length) {
@@ -280,7 +353,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
     });
   }
 
-  return { loadCatalog: (includeInactive = false) => loadCustomerTagCatalog(prisma as any, includeInactive), createGroup, updateGroup, createTag, updateTag, mergeTag, reorderTags };
+  return { loadCatalog: (includeInactive = false) => loadCustomerTagCatalog(prisma as any, includeInactive), createGroup, updateGroup, createTag, updateTag, mergeTag, mergeGroup, reorderTags };
 }
 
 export function createCustomerTagRouter({
@@ -334,6 +407,10 @@ export function createCustomerTagRouter({
   });
   router.post('/groups/:id/reorder', requireManage, async (req: any, res) => {
     const result = await service.reorderTags(String(req.params.id), Array.isArray(req.body?.tagIds) ? req.body.tagIds : [], req.currentUser!);
+    res.status(status(result.code, 200)).json(result);
+  });
+  router.post('/groups/:id/merge', requireManage, async (req: any, res) => {
+    const result = await service.mergeGroup(String(req.params.id), String(req.body?.targetId || ''), req.currentUser!);
     res.status(status(result.code, 200)).json(result);
   });
   router.put('/:id', requireManage, async (req: any, res) => {

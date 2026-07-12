@@ -18,6 +18,8 @@
 | CUSTOMER-TAG-004 | P1 | 标签合并后名称快照、批量导入和迁移同步可能继续使用浏览器旧目录 | 合并误写非领域字段 `manualTagNames`；批量入库和 CRM 同步仍读取或整表覆盖本地标签缓存 | 合并同事务更新 canonical `tags`；批量入库每批只读取一次服务端 active 目录且失败整批终止；CRM 同步改为 await 的记录级 group/tag 命令并处理并发 409 | 未连接真实 QA 数据库，仍需 staging 冒烟 |
 | CUSTOMER-TAG-005 | P0 | 历史迁移遇到跨分组同名标签会静默选中任意 ID | 迁移使用 `Map(name → id)`，同名定义覆盖顺序决定归属 | preview 返回歧义名称、组和标签 ID，歧义参与 checksum；apply 在任何业务写入前返回 409，设置页阻止确认并提示先合并或重命名 | 管理员需先治理歧义目录再重新预览 |
 | CUSTOMER-TAG-006 | P2 | 表单标签目录缓存可能长期不刷新，失效时旧 pending 请求还可能回写 | 模块级缓存没有 TTL/请求代次，设置页修改目录后也未失效 | 增加 60 秒 TTL、按 scope 的 generation 与显式 invalidation；已挂载组件失效后主动重载，旧代请求丢弃，同代请求去重，失败可重试；所有设置 mutation 与历史整理成功后立即失效 | 多标签页仍依赖 TTL，未增加跨标签页广播 |
+| CUSTOMER-TAG-007 | P0 | 修改分组适用范围/单选规则、移动标签或历史迁移可制造已存分配冲突 | 目录 mutation 和迁移 preview 未用变更后目录重放客户/线索分配策略 | 在共享目录写锁事务内扫描 BusinessRecord 客户/线索和真实 LeadRecord；冲突 409 且零目录写。迁移 preview 返回结构化 assignmentConflicts 并纳入 checksum，apply 阻断且 UI 禁用 | 真实 QA 数据仍需先 preview，禁止未审阅直接 apply |
+| CUSTOMER-TAG-008 | P1 | 缺少分组级安全合并，管理员无法治理重复分组 | 只有同组标签合并 API | 新增超级管理员 mergeGroup：同名标签明确 409 要求先合并标签；无冲突时原子移动标签、停用源组并写审计，设置页提供确认对话框 | 不自动合并同名标签，避免误合并语义不同的标签 |
 
 本功能最新验证证据：整分支复审修复与缓存竞态聚焦测试全部退出 0；`pnpm test` 为 **138 个测试文件通过**；`pnpm build` 退出 0（2867 modules，未出现 Vite chunk 警告，但 `exceljs.min` 静态资产为 947.70 kB）；`pnpm exec tsc -b --pretty false` 退出 0。Prisma schema 使用示例本地 URL验证通过；未配置真实 `DATABASE_URL`，所以 migration status 和本地 API/浏览器角色冒烟未执行。冒烟脚本同时限制 API/MySQL 回环地址、隔离库命名、精确库名确认和显式破坏性测试开关。自动规则标签和高级人群包明确未实现。
 

@@ -5,6 +5,7 @@ import type { CustomerTag, CustomerTagGroup, CustomerTagMigrationPreview } from 
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { failure, success, type ApiResponse } from '../api/response';
 import { catalogWriteTransaction } from './customerTagService';
+import { validateManualTagSelection } from './customerTagPolicy';
 
 const AUDIT_DOMAIN = 'aaos_customer_tag_migrations';
 const LEGACY_GROUP_NAME = '历史未归类';
@@ -34,9 +35,9 @@ async function snapshot(prisma: Pick<MigrationPrisma, 'businessRecord' | 'leadRe
     prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.TAG_GROUPS } }),
     prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.TAGS } }),
   ]);
-  const groups = groupRows.map((row: any) => object(row.data) as CustomerTagGroup).sort((a: CustomerTagGroup, b: CustomerTagGroup) => a.id.localeCompare(b.id));
+  const groups: CustomerTagGroup[] = groupRows.map((row: any) => object(row.data) as CustomerTagGroup).sort((a: CustomerTagGroup, b: CustomerTagGroup) => a.id.localeCompare(b.id));
   const definitions: CustomerTag[] = tagRows.map((row: any) => object(row.data) as CustomerTag).sort((a: CustomerTag, b: CustomerTag) => a.id.localeCompare(b.id));
-  const records = [
+  const records: Snapshot['records'] = [
     ...customers.filter((row: any) => !isDeleted(row)).map((row: any) => ({ kind: 'customer' as const, id: row.recordId || object(row.data).id, row, tags: Array.isArray(object(row.data).tags) ? object(row.data).tags.map(name).filter(Boolean) : [] })),
     ...leads.filter((row: any) => !isDeleted(row)).map((row: any) => ({ kind: 'lead' as const, id: row.id || object(row.data).id, row, tags: Array.isArray(object(row.data).tags) ? object(row.data).tags.map(name).filter(Boolean) : [] })),
   ].sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
@@ -54,10 +55,29 @@ async function snapshot(prisma: Pick<MigrationPrisma, 'businessRecord' | 'leadRe
       ? [{ name: displayName, tagIds: matches.map((tag) => tag.id).sort(), groupIds }]
       : [];
   }).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+  const timestamp = 'migration-preview';
+  const virtualLegacyGroup: CustomerTagGroup = groups.find((item) => key(item.name) === key(LEGACY_GROUP_NAME)) || {
+    id: 'migration-preview-legacy-group', name: LEGACY_GROUP_NAME, color: '#8c8c8c', selectionMode: 'multiple', scope: 'both', isActive: true, sortOrder: groups.length, createdAt: timestamp, updatedAt: timestamp,
+  };
+  const virtualGroups = groups.map((group) => group.id === virtualLegacyGroup.id ? { ...group, isActive: true, selectionMode: 'multiple' as const, scope: 'both' as const } : group);
+  if (!virtualGroups.some((group) => group.id === virtualLegacyGroup.id)) virtualGroups.push(virtualLegacyGroup);
+  const virtualDefinitions = [...definitions];
+  for (const missingName of missingByKey.values()) {
+    virtualDefinitions.push({ id: `migration-preview-tag-${key(missingName)}`, groupId: virtualLegacyGroup.id, name: missingName, isActive: true, sortOrder: virtualDefinitions.length, usageCount: 0, createdAt: timestamp, updatedAt: timestamp });
+  }
+  const idsByName = new Map<string, string>();
+  for (const tag of virtualDefinitions) if (!idsByName.has(key(tag.name))) idsByName.set(key(tag.name), tag.id);
+  const assignmentConflicts = records.flatMap((record) => {
+    const value = object(record.row.data);
+    const mapped = record.tags.map((tagName) => idsByName.get(key(tagName))).filter((id): id is string => Boolean(id));
+    const manualTagIds = [...new Set([...(Array.isArray(value.manualTagIds) ? value.manualTagIds.map(String) : []), ...mapped])];
+    const validation = validateManualTagSelection({ groups: virtualGroups, tags: virtualDefinitions }, record.kind, manualTagIds);
+    return validation.ok ? [] : [{ recordType: record.kind, recordId: record.id, reason: validation.message }];
+  });
   const checksumInput = records.map((record) => ({ kind: record.kind, id: record.id, tags: object(record.row.data).tags ?? [], manualTagIds: object(record.row.data).manualTagIds ?? [] }))
     .sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
   const catalogInput = definitions.map((tag) => ({ id: tag.id, groupId: tag.groupId, name: tag.name, isActive: tag.isActive }));
-  const checksum = createHash('sha256').update(JSON.stringify({ records: checksumInput, tags: catalogInput, ambiguousNames })).digest('hex');
+  const checksum = createHash('sha256').update(JSON.stringify({ records: checksumInput, tags: catalogInput, ambiguousNames, assignmentConflicts })).digest('hex');
   return {
     customerCount: records.filter((record) => record.kind === 'customer').length,
     leadCount: records.filter((record) => record.kind === 'lead').length,
@@ -65,6 +85,7 @@ async function snapshot(prisma: Pick<MigrationPrisma, 'businessRecord' | 'leadRe
     missingNames: [...missingByKey.values()].sort((a, b) => a.localeCompare(b, 'zh-CN')),
     ambiguousNameCount: ambiguousNames.length,
     ambiguousNames,
+    assignmentConflicts,
     checksum, records, groups, definitions,
   };
 }
@@ -93,6 +114,9 @@ export function createCustomerTagMigrationService(prisma: MigrationPrisma) {
       if (current.checksum !== checksum) return failure('迁移预览已过期，请重新预览', 409);
       if (current.ambiguousNameCount > 0) {
         return failure('存在跨分组同名标签，请先在客户标签设置中合并或重命名后重新预览', 409);
+      }
+      if (current.assignmentConflicts.length > 0) {
+        return failure('历史标签会导致客户或线索分配冲突，请先处理后重新预览', 409);
       }
       const timestamp = new Date().toISOString();
       let group = current.groups.find((item) => key(item.name) === key(LEGACY_GROUP_NAME));

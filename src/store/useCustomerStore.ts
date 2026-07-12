@@ -15,7 +15,6 @@ interface CustomerState {
   update: (id: string, data: Partial<Customer>) => Promise<boolean>;
   delete: (id: string) => Promise<void>;
   fetchAIPortrait: (id: string) => Promise<AICustomerPortrait | null>;
-  updateTags: (id: string, tags: string[]) => Promise<void>;
   addFollowUp: (id: string, content: string, operator?: string, attachments?: CustomerActivityRecord['attachments']) => Promise<Customer | null>;
   setFilters: (filters: CustomerFilters) => void;
   reset: () => void;
@@ -108,13 +107,6 @@ const useCustomerStore = create<CustomerState>((set, get) => ({
     } catch {
       return null;
     }
-  },
-
-  updateTags: async (id, tags) => {
-    try {
-      await customerApi.updateCustomer(id, { tags });
-      await get().fetchItems();
-    } catch { /* ignore */ }
   },
 
   addFollowUp: async (id, content, operator, attachments) => {

@@ -31,3 +31,10 @@ Scope: all five findings from the final whole-branch review
 ## Remaining boundary
 
 No real database, live server, production deployment, or production data was accessed. The existing Task 9 conclusion remains unchanged: staging database/browser role smoke is still required before production release.
+
+## Final review follow-up
+
+- Catalog group scope/selection-mode changes and tag group moves now simulate the resulting catalog under the shared write lock, scan customer records, business-record leads, and real `LeadRecord` rows, and atomically reject assignment conflicts.
+- Migration preview now reports structured `assignmentConflicts`, includes them in the checksum, and apply performs zero business/audit writes when ambiguity or assignment conflicts exist. The settings dialog explains and blocks apply.
+- Added super-admin-only atomic group merge with explicit same-name conflict blocking, assignment replay, source deactivation, audit record, API client, and settings confirmation dialog.
+- CRM precheck loads the authoritative full catalog; the obsolete free-text `useCustomerStore.updateTags` path was removed.

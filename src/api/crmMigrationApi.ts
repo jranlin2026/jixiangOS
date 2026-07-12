@@ -631,7 +631,9 @@ async function precheckFiles(files: CrmMigrationFileMap): Promise<ApiResponse<Cr
     acc[key] = rows;
     return acc;
   }, {} as CrmMigrationTables);
-  return createSuccessResponse(analyzeCrmMigrationTables(tables));
+  const catalogResponse = await fetchCustomerTagCatalog('all', true);
+  if (catalogResponse.code !== 0 || !catalogResponse.data) return catalogResponse as unknown as ApiResponse<CrmMigrationPrecheckResult>;
+  return createSuccessResponse(analyzeCrmMigrationTables(tables, { tags: catalogResponse.data.tags }));
 }
 
 async function persistImportedStorage<T>(key: string, value: T): Promise<string | null> {

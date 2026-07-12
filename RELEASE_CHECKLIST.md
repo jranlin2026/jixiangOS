@@ -20,6 +20,8 @@
 | 迁移 preview/apply | 未验证 | 未获得本地超级管理员凭据和隔离数据库，未产生真实计数 |
 | API/浏览器角色冒烟 | 未验证 | 脚本同时限制 API/MySQL 为回环地址，要求 `_qa`/`_test` 隔离库名、`QA_DATABASE_NAME` 精确确认和 `QA_ALLOW_DESTRUCTIVE_DB=true`，并使用唯一 run ID 与 finally 精确清理；未提供 QA 数据库和角色凭据 |
 | 自动规则标签/高级人群包 | 不在范围 | 本版本只交付人工预设标签与精确筛选 |
+| 目录变更冲突保护 | 通过 | 聚焦测试覆盖 customer、BusinessRecord lead 与真实 LeadRecord；scope/单选/移组冲突返回 409 且零目录写 |
+| 分组合并 | 通过 | 覆盖权限、同名阻断、使用次数保留和中途失败原子回滚 |
 
 ## 自动门禁
 

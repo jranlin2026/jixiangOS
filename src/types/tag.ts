@@ -48,6 +48,11 @@ export interface CustomerTagMigrationPreview {
     tagIds: ID[];
     groupIds: ID[];
   }>;
+  assignmentConflicts: Array<{
+    recordType: 'customer' | 'lead';
+    recordId: ID;
+    reason: string;
+  }>;
   checksum: string;
 }
 

@@ -14,5 +14,8 @@ assert.match(source, /reorderCustomerTags/);
 assert.match(source, /setPreview\(null\)/);
 assert.match(source, /dialogError/);
 assert.match(source, /migrationError/);
+assert.match(source, /assignmentConflicts/);
+assert.match(source, /合并分组/);
+assert.match(source, /mergeCustomerTagGroup/);
 assert.match(source, /if \(!succeeded\) await loadCatalog\(\)/);
 assert.doesNotMatch(source, /freeSolo/);

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   applyCustomerTagMigration, createCustomerTag, createCustomerTagGroup, fetchCustomerTagCatalog, reorderCustomerTags,
   mergeCustomerTag, previewCustomerTagMigration, updateCustomerTag, updateCustomerTagGroup,
+  mergeCustomerTagGroup,
 } from './customerTagApi';
 
 const calls: Array<{ url: string; init: RequestInit }> = [];
@@ -21,6 +22,7 @@ assert.equal((await updateCustomerTagGroup('forbidden', { name: '新分组' })).
 await createCustomerTag({ groupId: 'g', name: '标签' });
 await updateCustomerTag('t/1', { name: '新标签' });
 await mergeCustomerTag('source', 'target');
+await mergeCustomerTagGroup('source-group', 'target-group');
 await reorderCustomerTags('group', ['first', 'second']);
 
 assert.deepEqual(calls.map(({ url, init }) => [url, init.method || 'GET', init.body || null]), [
@@ -33,5 +35,6 @@ assert.deepEqual(calls.map(({ url, init }) => [url, init.method || 'GET', init.b
   ['/api/customer-tags', 'POST', JSON.stringify({ groupId: 'g', name: '标签' })],
   ['/api/customer-tags/t%2F1', 'PUT', JSON.stringify({ name: '新标签' })],
   ['/api/customer-tags/source/merge', 'POST', JSON.stringify({ targetId: 'target' })],
+  ['/api/customer-tags/groups/source-group/merge', 'POST', JSON.stringify({ targetId: 'target-group' })],
   ['/api/customer-tags/groups/group/reorder', 'POST', JSON.stringify({ tagIds: ['first', 'second'] })],
 ]);
