@@ -305,6 +305,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
       const source = catalog.groups.find((group) => group.id === sourceId);
       const target = catalog.groups.find((group) => group.id === targetId);
       if (!source || !target) return failure('标签分组不存在', 404);
+      if (!target.isActive) return failure('目标分组必须为启用状态', 409);
       const sourceTags = catalog.tags.filter((tag) => tag.groupId === sourceId);
       const targetNames = new Set(catalog.tags.filter((tag) => tag.groupId === targetId).map((tag) => normalizedKey(tag.name)));
       const conflicts = sourceTags.filter((tag) => targetNames.has(normalizedKey(tag.name))).map((tag) => tag.name);

@@ -25,7 +25,7 @@ const service = {
   createTag: async () => ({ code: 0, data: { id: 't2' }, message: 'success' }),
   updateTag: async (id: string) => id === 'duplicate' ? { code: 409, data: null, message: 'duplicate' } : { code: 0, data: { id }, message: 'success' },
   mergeTag: async () => ({ code: 0, data: {}, message: 'success' }),
-  mergeGroup: async (_source: string, _target: string, currentUser: any) => currentUser.id === 'sales' ? { code: 403, data: null, message: 'forbidden' } : { code: 0, data: {}, message: 'success' },
+  mergeGroup: async (_source: string, target: string, currentUser: any) => currentUser.id === 'sales' ? { code: 403, data: null, message: 'forbidden' } : target === 'inactive' ? { code: 409, data: null, message: '目标已停用' } : { code: 0, data: {}, message: 'success' },
   reorderTags: async () => ({ code: 0, data: {}, message: 'success' }),
 };
 app.use('/api/customer-tags', createCustomerTagRouter({
@@ -68,6 +68,7 @@ try {
   assert.equal((await request('/source/merge', { method: 'POST', body: JSON.stringify({ targetId: 'target' }) })).status, 200);
   assert.equal((await request('/groups/source/merge', { method: 'POST', headers: { 'x-user': 'sales' }, body: JSON.stringify({ targetId: 'target' }) })).status, 403);
   assert.equal((await request('/groups/source/merge', { method: 'POST', body: JSON.stringify({ targetId: 'target' }) })).status, 200);
+  assert.equal((await request('/groups/source/merge', { method: 'POST', body: JSON.stringify({ targetId: 'inactive' }) })).status, 409);
   assert.equal((await request('/groups/g1/reorder', { method: 'POST', body: JSON.stringify({ tagIds: ['t1'] }) })).status, 200);
 } finally {
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

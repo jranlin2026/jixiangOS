@@ -225,6 +225,15 @@ assert.equal(mergedGroup.code, 0, '无冲突分组可安全合并');
 assert.equal(prisma.rows.get(rowKey(STORAGE_KEYS.TAGS, leadOnlyTagId)).data.groupId, destinationGroupId);
 assert.equal(prisma.rows.get(rowKey(STORAGE_KEYS.TAG_GROUPS, leadOnlyGroupId)).data.isActive, false);
 assert.equal((await loadCustomerTagCatalog(prisma as any, true)).tags.find((tag) => tag.id === leadOnlyTagId)?.usageCount, 1, '移动分组不得丢失使用次数');
+const inactiveTarget = await service.createGroup({ ...validGroup, name: '停用目标', isActive: false }, superAdmin);
+const emptyActiveSource = await service.createGroup({ ...validGroup, name: '空源组' }, superAdmin);
+const beforeInactiveTarget = clone(prisma.rows);
+const rejectedInactiveTarget = await service.mergeGroup((emptyActiveSource.data as any).id, (inactiveTarget.data as any).id, superAdmin);
+assert.equal(rejectedInactiveTarget.code, 409, '分组合并目标必须启用');
+assert.match(rejectedInactiveTarget.message, /启用/);
+assert.deepEqual(prisma.rows, beforeInactiveTarget, '停用目标冲突必须零写入且不得写审计');
+const inactiveSource = await service.createGroup({ ...validGroup, name: '已停用源组', isActive: false }, superAdmin);
+assert.equal((await service.mergeGroup((inactiveSource.data as any).id, destinationGroupId, superAdmin)).code, 0, '允许将历史停用源组治理合并到启用目标');
 
 const rollbackSource = await service.createGroup({ ...validGroup, name: '回滚源组' }, superAdmin);
 const rollbackTarget = await service.createGroup({ ...validGroup, name: '回滚目标组' }, superAdmin);

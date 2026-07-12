@@ -22,24 +22,27 @@ type MigrationPrisma = {
 };
 
 type Snapshot = CustomerTagMigrationPreview & {
-  records: Array<{ kind: 'customer' | 'lead'; id: string; row: any; tags: string[] }>;
+  records: Array<{ kind: 'customer' | 'lead'; storage: 'customer' | 'canonicalLead' | 'legacyLead'; id: string; row: any; tags: string[] }>;
   groups: CustomerTagGroup[];
   definitions: CustomerTag[];
 };
 type MigrationResult = { updatedCustomers: number; updatedLeads: number; createdTags: number; checksum: string };
 
 async function snapshot(prisma: Pick<MigrationPrisma, 'businessRecord' | 'leadRecord'>): Promise<Snapshot> {
-  const [customers, leads, groupRows, tagRows] = await Promise.all([
+  const [customers, leads, legacyLeads, groupRows, tagRows] = await Promise.all([
     prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.CUSTOMERS } }),
     prisma.leadRecord.findMany(),
+    prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.LEADS } }),
     prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.TAG_GROUPS } }),
     prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.TAGS } }),
   ]);
   const groups: CustomerTagGroup[] = groupRows.map((row: any) => object(row.data) as CustomerTagGroup).sort((a: CustomerTagGroup, b: CustomerTagGroup) => a.id.localeCompare(b.id));
   const definitions: CustomerTag[] = tagRows.map((row: any) => object(row.data) as CustomerTag).sort((a: CustomerTag, b: CustomerTag) => a.id.localeCompare(b.id));
+  const canonicalLeadIds = new Set(leads.filter((row: any) => !isDeleted(row)).map((row: any) => String(row.id || object(row.data).id)));
   const records: Snapshot['records'] = [
-    ...customers.filter((row: any) => !isDeleted(row)).map((row: any) => ({ kind: 'customer' as const, id: row.recordId || object(row.data).id, row, tags: Array.isArray(object(row.data).tags) ? object(row.data).tags.map(name).filter(Boolean) : [] })),
-    ...leads.filter((row: any) => !isDeleted(row)).map((row: any) => ({ kind: 'lead' as const, id: row.id || object(row.data).id, row, tags: Array.isArray(object(row.data).tags) ? object(row.data).tags.map(name).filter(Boolean) : [] })),
+    ...customers.filter((row: any) => !isDeleted(row)).map((row: any) => ({ kind: 'customer' as const, storage: 'customer' as const, id: String(row.recordId || object(row.data).id), row, tags: Array.isArray(object(row.data).tags) ? object(row.data).tags.map(name).filter(Boolean) : [] })),
+    ...leads.filter((row: any) => !isDeleted(row)).map((row: any) => ({ kind: 'lead' as const, storage: 'canonicalLead' as const, id: String(row.id || object(row.data).id), row, tags: Array.isArray(object(row.data).tags) ? object(row.data).tags.map(name).filter(Boolean) : [] })),
+    ...legacyLeads.filter((row: any) => !isDeleted(row) && !canonicalLeadIds.has(String(row.recordId || object(row.data).id))).map((row: any) => ({ kind: 'lead' as const, storage: 'legacyLead' as const, id: String(row.recordId || object(row.data).id), row, tags: Array.isArray(object(row.data).tags) ? object(row.data).tags.map(name).filter(Boolean) : [] })),
   ].sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
   const known = new Set(definitions.map((tag) => key(tag.name)));
   const missingByKey = new Map<string, string>();
@@ -74,7 +77,7 @@ async function snapshot(prisma: Pick<MigrationPrisma, 'businessRecord' | 'leadRe
     const validation = validateManualTagSelection({ groups: virtualGroups, tags: virtualDefinitions }, record.kind, manualTagIds);
     return validation.ok ? [] : [{ recordType: record.kind, recordId: record.id, reason: validation.message }];
   });
-  const checksumInput = records.map((record) => ({ kind: record.kind, id: record.id, tags: object(record.row.data).tags ?? [], manualTagIds: object(record.row.data).manualTagIds ?? [] }))
+  const checksumInput = records.map((record) => ({ kind: record.kind, storage: record.storage, id: record.id, tags: object(record.row.data).tags ?? [], manualTagIds: object(record.row.data).manualTagIds ?? [] }))
     .sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
   const catalogInput = definitions.map((tag) => ({ id: tag.id, groupId: tag.groupId, name: tag.name, isActive: tag.isActive }));
   const checksum = createHash('sha256').update(JSON.stringify({ records: checksumInput, tags: catalogInput, ambiguousNames, assignmentConflicts })).digest('hex');
@@ -141,10 +144,12 @@ export function createCustomerTagMigrationService(prisma: MigrationPrisma) {
         const mapped = record.tags.map((tagName) => idsByName.get(key(tagName))).filter((id): id is string => Boolean(id));
         const manualTagIds = [...new Set([...(Array.isArray(value.manualTagIds) ? value.manualTagIds.map(String) : []), ...mapped])];
         if (JSON.stringify(manualTagIds) === JSON.stringify(value.manualTagIds ?? [])) continue;
-        if (record.kind === 'customer') {
+        if (record.storage === 'customer') {
           await tx.businessRecord.update({ where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: record.id } }, data: { data: { ...value, manualTagIds } } }); updatedCustomers += 1;
-        } else {
+        } else if (record.storage === 'canonicalLead') {
           await tx.leadRecord.update({ where: { id: record.id }, data: { data: { ...value, manualTagIds } } }); updatedLeads += 1;
+        } else {
+          await tx.businessRecord.update({ where: { domain_recordId: { domain: STORAGE_KEYS.LEADS, recordId: record.id } }, data: { data: { ...value, manualTagIds } } }); updatedLeads += 1;
         }
       }
       if (updatedCustomers || updatedLeads || current.missingNames.length) {

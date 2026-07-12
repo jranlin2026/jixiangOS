@@ -20,6 +20,7 @@
 | CUSTOMER-TAG-006 | P2 | 表单标签目录缓存可能长期不刷新，失效时旧 pending 请求还可能回写 | 模块级缓存没有 TTL/请求代次，设置页修改目录后也未失效 | 增加 60 秒 TTL、按 scope 的 generation 与显式 invalidation；已挂载组件失效后主动重载，旧代请求丢弃，同代请求去重，失败可重试；所有设置 mutation 与历史整理成功后立即失效 | 多标签页仍依赖 TTL，未增加跨标签页广播 |
 | CUSTOMER-TAG-007 | P0 | 修改分组适用范围/单选规则、移动标签或历史迁移可制造已存分配冲突 | 目录 mutation 和迁移 preview 未用变更后目录重放客户/线索分配策略 | 在共享目录写锁事务内扫描 BusinessRecord 客户/线索和真实 LeadRecord；冲突 409 且零目录写。迁移 preview 返回结构化 assignmentConflicts 并纳入 checksum，apply 阻断且 UI 禁用 | 真实 QA 数据仍需先 preview，禁止未审阅直接 apply |
 | CUSTOMER-TAG-008 | P1 | 缺少分组级安全合并，管理员无法治理重复分组 | 只有同组标签合并 API | 新增超级管理员 mergeGroup：同名标签明确 409 要求先合并标签；无冲突时原子移动标签、停用源组并写审计，设置页提供确认对话框 | 不自动合并同名标签，避免误合并语义不同的标签 |
+| CUSTOMER-TAG-009 | P1 | 历史标签迁移只扫描 canonical LeadRecord，可遗漏 legacy BusinessRecord 线索 | 线索存储迁移期存在两种表达，snapshot 没有去重联合 | preview/apply 同时扫描两种存储，同 ID 明确优先 canonical LeadRecord；legacy-only 线索原子写回正确 BusinessRecord，checksum/计数/审计均使用去重后集合 | 真实 QA 数据仍需 preview 核对数量 |
 
 本功能最新验证证据：整分支复审修复与缓存竞态聚焦测试全部退出 0；`pnpm test` 为 **138 个测试文件通过**；`pnpm build` 退出 0（2867 modules，未出现 Vite chunk 警告，但 `exceljs.min` 静态资产为 947.70 kB）；`pnpm exec tsc -b --pretty false` 退出 0。Prisma schema 使用示例本地 URL验证通过；未配置真实 `DATABASE_URL`，所以 migration status 和本地 API/浏览器角色冒烟未执行。冒烟脚本同时限制 API/MySQL 回环地址、隔离库命名、精确库名确认和显式破坏性测试开关。自动规则标签和高级人群包明确未实现。
 

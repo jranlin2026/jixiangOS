@@ -168,3 +168,24 @@ const conflictApply = await conflictService.applyLegacyTagMigration(conflictPrev
 assert.equal(conflictApply.code, 409);
 assert.deepEqual([...conflictPrisma.rows.entries()].filter(([, row]) => row.domain !== 'aaos_internal_locks'), conflictRowsBefore, '分配冲突不得写目录、客户或审计');
 assert.deepEqual([...conflictPrisma.leads.entries()], conflictLeadsBefore, '分配冲突不得写线索');
+
+const mixedLeadPrisma = new FakePrisma();
+mixedLeadPrisma.seed(STORAGE_KEYS.TAG_GROUPS, { id: 'group-both', name: '通用组', color: '#111', selectionMode: 'multiple', scope: 'both', isActive: true, sortOrder: 0, createdAt: '2026-01-01', updatedAt: '2026-01-01' });
+mixedLeadPrisma.seed(STORAGE_KEYS.TAGS, { id: 'tag-existing', groupId: 'group-both', name: '已有标签', isActive: true, sortOrder: 0, usageCount: 0, createdAt: '2026-01-01', updatedAt: '2026-01-01' });
+mixedLeadPrisma.seed(STORAGE_KEYS.LEADS, { id: 'legacy-only', tags: ['已有标签'], manualTagIds: [] });
+mixedLeadPrisma.seed(STORAGE_KEYS.LEADS, { id: 'duplicate-lead', tags: ['legacy-不应采用'], manualTagIds: [] });
+mixedLeadPrisma.seedLead({ id: 'duplicate-lead', tags: ['已有标签'], manualTagIds: [] });
+const mixedLeadService = createCustomerTagMigrationService(mixedLeadPrisma as any);
+const mixedPreview = (await mixedLeadService.previewLegacyTagMigration(actor)).data!;
+assert.equal(mixedPreview.leadCount, 2, 'canonical LeadRecord 与 legacy BusinessRecord 必须按 ID 去重');
+assert.equal(mixedPreview.assignmentCount, 2);
+assert.deepEqual(mixedPreview.missingNames, [], 'canonical LeadRecord 必须优先，不得读取重复 legacy 快照');
+const mixedApply = await mixedLeadService.applyLegacyTagMigration(mixedPreview.checksum, actor);
+assert.equal(mixedApply.code, 0);
+assert.equal(mixedApply.data?.updatedLeads, 2);
+assert.deepEqual(mixedLeadPrisma.rows.get(`${STORAGE_KEYS.LEADS}:legacy-only`).data.manualTagIds, ['tag-existing'], 'legacy-only lead 必须写回 BusinessRecord');
+assert.deepEqual(mixedLeadPrisma.leads.get('duplicate-lead').data.manualTagIds, ['tag-existing'], '重复 ID 必须只写 canonical LeadRecord');
+assert.deepEqual(mixedLeadPrisma.rows.get(`${STORAGE_KEYS.LEADS}:duplicate-lead`).data.manualTagIds, [], '重复 legacy 快照不得双写');
+const mixedAudits = [...mixedLeadPrisma.rows.values()].filter((row) => row.domain === 'aaos_customer_tag_migrations');
+assert.equal(mixedAudits.length, 1);
+assert.equal(mixedAudits[0].data.leadCount, 2, '审计计数必须使用去重后线索数');
