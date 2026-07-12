@@ -72,6 +72,7 @@ import { ModuleHeader, ModulePage, ModuleToolbar, moduleTablePaperSx } from '../
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 import { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
 import CustomerTagFilter from './CustomerTagFilter';
+import { readCustomerTagFilterParams, writeCustomerTagFilterParams } from './customerTagFilterState';
 
 type CustomerColumn = {
   id: string;
@@ -285,19 +286,6 @@ const Customers: React.FC = () => {
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(CUSTOMER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
 
   useEffect(() => {
-    const urlTagIds = searchParams.getAll('tagId').map((id) => id.trim()).filter(Boolean).slice(0, 20);
-    const urlTagMatch = searchParams.get('tagMatch');
-    const initialFilters: CustomerFilters = {
-      ...filters,
-      tagIds: urlTagIds.length ? urlTagIds : filters.tagIds,
-      tagMatch: urlTagIds.length && ['grouped', 'any', 'all'].includes(urlTagMatch || '') ? urlTagMatch as CustomerFilters['tagMatch'] : filters.tagMatch,
-      withoutTags: searchParams.get('withoutTags') === 'true' || filters.withoutTags || undefined,
-      missingTagGroupId: searchParams.get('missingTagGroupId') || filters.missingTagGroupId,
-      productLevel: undefined,
-      lifecycleStatusCode: customerScope === 'public_pool' ? 'public_pool' : undefined,
-    };
-    setFilters(initialFilters);
-    fetchItems(initialFilters);
     settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
       if (res.code === 0) {
         setUsers(res.data.filter((user) => user.isActive));
@@ -313,6 +301,13 @@ const Customers: React.FC = () => {
       if (res.code === 0) setCustomerLevelConfigs(res.data);
     });
   }, [currentUser?.id, fetchItems]);
+
+  useEffect(() => {
+    const tagState = readCustomerTagFilterParams(searchParams);
+    const nextFilters: CustomerFilters = { ...filters, ...tagState, productLevel: undefined, page: 1, lifecycleStatusCode: customerScope === 'public_pool' ? 'public_pool' : undefined };
+    setFilters(nextFilters);
+    fetchItems(nextFilters);
+  }, [searchParams.toString(), customerScope, currentUser?.id, fetchItems]);
 
   useEffect(() => {
     localStorage.setItem(CUSTOMER_VIEW_STORAGE_KEY, JSON.stringify(viewConfig));
@@ -515,8 +510,7 @@ const Customers: React.FC = () => {
 
   const handleResetFilters = () => {
     const newFilters = scopedFilters({ page: 1, pageSize: pagination.pageSize || 10 }, customerScope);
-    const nextParams = new URLSearchParams(searchParams);
-    ['tagId', 'tagMatch', 'withoutTags', 'missingTagGroupId'].forEach((key) => nextParams.delete(key));
+    const nextParams = writeCustomerTagFilterParams(searchParams, {});
     setSearchParams(nextParams, { replace: true });
     setFilters(newFilters);
     fetchItems(newFilters);
@@ -524,12 +518,7 @@ const Customers: React.FC = () => {
 
   const handleTagFilterApply = (tagFilters: Pick<CustomerFilters, 'tagIds' | 'tagMatch' | 'withoutTags' | 'missingTagGroupId'>) => {
     const newFilters = { ...filters, ...tagFilters, tag: undefined, productLevel: undefined, page: 1, pageSize: pagination.pageSize || 10 };
-    const nextParams = new URLSearchParams(searchParams);
-    ['tagId', 'tagMatch', 'withoutTags', 'missingTagGroupId'].forEach((key) => nextParams.delete(key));
-    tagFilters.tagIds?.forEach((id) => nextParams.append('tagId', id));
-    if (tagFilters.tagIds?.length) nextParams.set('tagMatch', tagFilters.tagMatch || 'grouped');
-    if (tagFilters.withoutTags) nextParams.set('withoutTags', 'true');
-    if (tagFilters.missingTagGroupId) nextParams.set('missingTagGroupId', tagFilters.missingTagGroupId);
+    const nextParams = writeCustomerTagFilterParams(searchParams, tagFilters);
     setSearchParams(nextParams, { replace: true });
     setFilters(newFilters);
     fetchItems(newFilters);

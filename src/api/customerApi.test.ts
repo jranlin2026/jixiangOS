@@ -305,6 +305,8 @@ const groupedLocal = await customerApi.fetchCustomers({ tagIds: ['t-agent', 't-p
 assert.deepEqual(groupedLocal.data.items.map((item) => item.id).sort(), ['high-budget-agent', 'high-budget-private']);
 assert.deepEqual((await customerApi.fetchCustomers({ withoutTags: true, pageSize: 20 })).data.items.map((item) => item.id), ['untagged']);
 assert.deepEqual((await customerApi.fetchCustomers({ missingTagGroupId: 'g-intent', pageSize: 20 })).data.items.map((item) => item.id), ['untagged']);
+assert.equal((await customerApi.fetchCustomers({ tagIds: ['unknown'], pageSize: 20 })).code, 400);
+assert.equal((await customerApi.fetchCustomers({ missingTagGroupId: 'unknown', pageSize: 20 })).code, 400);
 
 const previousBackendMode = process.env.VITE_USE_BACKEND_API;
 const previousFetch = globalThis.fetch;

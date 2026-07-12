@@ -93,3 +93,20 @@ export function groupTagIdsForFilter(catalog: CustomerTagCatalog, ids: string[])
   });
   return Array.from(grouped.values());
 }
+
+export function validateCustomerTagFilters(catalog: CustomerTagCatalog, input: { tagIds?: string[]; missingTagGroupId?: string }) {
+  const groups = new Map(catalog.groups.map((group) => [group.id, group]));
+  const tags = new Map(catalog.tags.map((tag) => [tag.id, tag]));
+  for (const id of normalizeManualTagIds(input.tagIds || [])) {
+    const tag = tags.get(id);
+    const group = tag ? groups.get(tag.groupId) : undefined;
+    if (!tag?.isActive || !group?.isActive || (group.scope !== 'customer' && group.scope !== 'both')) {
+      return { ok: false as const, message: '标签不存在、已停用或不适用于客户' };
+    }
+  }
+  if (input.missingTagGroupId) {
+    const group = groups.get(input.missingTagGroupId);
+    if (!group?.isActive || (group.scope !== 'customer' && group.scope !== 'both')) return { ok: false as const, message: '标签分组不存在或已停用' };
+  }
+  return { ok: true as const };
+}

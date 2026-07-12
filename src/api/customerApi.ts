@@ -15,7 +15,7 @@ import { applyContactEditLock } from '../shared/utils/contactEditLock';
 import { isSuperAdminRoleName } from '../shared/utils/roles';
 import { getPhoneNumberError, normalizePhoneForComparison, normalizePhoneForStorage } from '../shared/utils/phoneNumber';
 import type { CustomerTagCatalog } from '../types/tag';
-import { groupTagIdsForFilter, normalizeManualTagIds } from '../shared/utils/customerTagPolicy';
+import { groupTagIdsForFilter, normalizeManualTagIds, validateCustomerTagFilters } from '../shared/utils/customerTagPolicy';
 
 function ensureInit(): void {
   initializeMockData();
@@ -415,6 +415,8 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
     groups: getStorageData(STORAGE_KEYS.TAG_GROUPS) || [],
     tags: getStorageData(STORAGE_KEYS.TAGS) || [],
   };
+  const tagFilterValidation = validateCustomerTagFilters(catalog, filters || {});
+  if (!tagFilterValidation.ok) return createErrorResponse(tagFilterValidation.message, 400) as ApiResponse<PaginatedResponse<Customer>>;
   const selectedTagIds = normalizeManualTagIds(filters?.tagIds || []).slice(0, 20);
   if (selectedTagIds.length) {
     const mode = filters?.tagMatch || 'grouped';

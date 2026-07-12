@@ -15,3 +15,12 @@
 - `pnpm exec tsc -b --pretty false`, `pnpm test`, and `pnpm build` passed with the bundled Codex Node runtime on 2026-07-12.
 
 The generic `.superpowers/sdd/task-8-report.md` was already occupied by the Knowledge and Publishing UI task, so this report uses a collision-safe name.
+
+## Review fixes
+
+- Added one shared catalog validator used by backend and local mock; unknown, inactive, wrong-scope tags and missing groups now return code 400 consistently.
+- Extracted URL read/write pure functions with regression tests. Customer state now follows `searchParams` changes, including browser back/forward, without an effect that writes the URL.
+- Added explicit catalog loading, rejection/API-error display, retry, disabled dependent controls, and handled Promise rejection in the popover.
+- Added direct `customerListService.list` coverage that captures count/item SQL and proves exact JSON conditions, shared combined visibility scope, totals, page size, and offset.
+- Mobile match-mode radios now stack at `xs` and wrap at larger sizes.
+- Focused tests, full tests, TypeScript, production build, and `git diff --check` pass.

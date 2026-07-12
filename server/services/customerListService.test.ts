@@ -3,6 +3,8 @@ import { createCustomerListService, matchesCustomerTagFilters } from './customer
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 
+const now = '2026-07-12T00:00:00.000Z';
+
 const created: any[] = [];
 const service = createCustomerListService({
   businessRecord: {
@@ -167,3 +169,47 @@ const [firstDuplicate, secondDuplicate] = await Promise.all([
 assert.equal(firstDuplicate.code, 0);
 assert.equal(secondDuplicate.code, 409);
 assert.equal(secondDuplicate.message, '该手机号已存在客户');
+
+const flattenSql = (value: any): string => {
+  if (value == null) return '';
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  if (Array.isArray(value) && !(value as any).strings) return value.map(flattenSql).join(' ');
+  const strings = value.strings || (Array.isArray(value[0]) ? value[0] : undefined);
+  const values = value.values || (strings ? Array.prototype.slice.call(value, 1) : []);
+  if (!strings) return Object.values(value).map(flattenSql).join(' ');
+  return Array.from(strings).map((part, index) => `${part}${index < values.length ? flattenSql(values[index]) : ''}`).join('');
+};
+const capturedQueries: string[] = [];
+const listService = createCustomerListService({
+  businessRecord: { findMany: async ({ where }: any) => {
+    if (where.domain === STORAGE_KEYS.TAG_GROUPS) return tagCatalog.groups.map((data: any) => ({ data }));
+    if (where.domain === STORAGE_KEYS.TAGS) return tagCatalog.tags.map((data: any) => ({ data }));
+    return [];
+  } },
+  leadRecord: { findMany: async () => [] },
+  user: { findMany: async () => [{ id: 'sales-1', name: '销售甲', account: 'sales', email: '', phone: '', role: '销售顾问', avatar: null, departmentId: 'd1', positionId: null, positionName: null, roleId: 'r1', passwordHash: null, passwordSalt: null, passwordUpdatedAt: null, lastLoginAt: null, isActive: true, employmentStatus: 'active', createdAt: now, updatedAt: now }] },
+  role: { findMany: async () => [{ id: 'r1', name: '销售顾问', code: 'sales', description: null, departmentId: null, permissions: [], dataScopes: { customers: 'self' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now }] },
+  department: { findMany: async () => [] },
+  $queryRaw: async (...args: any[]) => {
+    const sql = flattenSql(args);
+    capturedQueries.push(sql);
+    return sql.includes('COUNT(*)') ? [{ total: 3n }] : [{ data: { ...created[0].data.data, id: 'page-two' } }];
+  },
+} as any);
+const salesActor = { ...actor, id: 'sales-1', name: '销售甲', account: 'sales', role: '销售顾问', roleId: 'r1', departmentId: 'd1' } as any;
+const sqlList = await listService.list({ tagIds: ['t-agent', 't-private', 't-high-budget'], tagMatch: 'grouped', page: 2, pageSize: 2 }, salesActor);
+assert.equal(sqlList.code, 0);
+assert.deepEqual(sqlList.data?.pagination, { page: 2, pageSize: 2, total: 3, totalPages: 2 });
+assert.equal(capturedQueries.length, 2);
+for (const sql of capturedQueries) {
+  assert.match(sql, /JSON_CONTAINS/);
+  assert.match(sql, /t-agent/); assert.match(sql, /t-private/); assert.match(sql, /t-high-budget/);
+  assert.match(sql, /owner IN/); assert.match(sql, /销售甲/);
+}
+assert.match(capturedQueries[1], /LIMIT[\s\S]*OFFSET[\s\S]*2 2$/);
+
+for (const [filters, joiner] of [[{ tagIds: ['t-agent', 't-private'], tagMatch: 'any' }, ' OR '], [{ tagIds: ['t-agent', 't-private'], tagMatch: 'all' }, ' AND '], [{ withoutTags: true }, 'JSON_LENGTH']] as const) {
+  capturedQueries.length = 0;
+  await listService.list(filters as any, salesActor);
+  assert.match(capturedQueries[0], joiner === 'JSON_LENGTH' ? /JSON_LENGTH/ : new RegExp(joiner.trim()));
+}

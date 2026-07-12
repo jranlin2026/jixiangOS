@@ -21,7 +21,7 @@ import {
 import { PERMISSION_KEYS, hasPermission } from '../../src/shared/utils/permissions';
 import { loadCustomerTagCatalog } from './customerTagService';
 import { validateManualTagSelection } from './customerTagPolicy';
-import { groupTagIdsForFilter, normalizeManualTagIds } from '../../src/shared/utils/customerTagPolicy';
+import { groupTagIdsForFilter, normalizeManualTagIds, validateCustomerTagFilters } from '../../src/shared/utils/customerTagPolicy';
 import type { CustomerTagCatalog } from '../../src/types/tag';
 
 type CustomerListPrisma = Pick<PrismaClient, 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | '$queryRaw' | '$transaction'>;
@@ -433,18 +433,9 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
         needsCatalog ? loadCustomerTagCatalog(prisma as any, false) : Promise.resolve(undefined),
         buildVisibilityWhere(prisma, currentUser),
       ]);
-      if (filters.missingTagGroupId && !catalog?.groups.some((group) => group.id === filters.missingTagGroupId && group.isActive && (group.scope === 'customer' || group.scope === 'both'))) {
-        return failure<PaginatedResponse<Customer>>('标签分组不存在或已停用', 400);
-      }
-      if (filters.tagIds?.length) {
-        const groups = new Map(catalog?.groups.map((group) => [group.id, group]) || []);
-        const tags = new Map(catalog?.tags.map((tag) => [tag.id, tag]) || []);
-        const invalid = normalizeManualTagIds(filters.tagIds).some((id) => {
-          const tag = tags.get(id);
-          const group = tag ? groups.get(tag.groupId) : undefined;
-          return !tag?.isActive || !group?.isActive || (group.scope !== 'customer' && group.scope !== 'both');
-        });
-        if (invalid) return failure<PaginatedResponse<Customer>>('标签不存在、已停用或不适用于客户', 400);
+      if (catalog) {
+        const validation = validateCustomerTagFilters(catalog, filters);
+        if (!validation.ok) return failure<PaginatedResponse<Customer>>(validation.message, 400);
       }
       const where = buildCustomerWhere(filters, catalog);
       const combinedWhere = Prisma.sql`${where} AND ${visibilityWhere}`;
