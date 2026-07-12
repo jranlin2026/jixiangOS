@@ -15,8 +15,11 @@
 | CUSTOMER-TAG-001 | P1 | 标签可自由输入，名称不统一且无法可靠筛选 | 客户/线索只保存自由文本，没有权威目录、稳定 ID 和分组规则 | 新增服务端标签目录、单选/多选与范围校验、预设选择器；聚焦 10 条测试命令和 136 个全量测试文件通过 | 真实多角色浏览器验证仍需有效 QA 凭据 |
 | CUSTOMER-TAG-002 | P1 | 标签筛选不能表达组内任一、跨组全部等精确条件 | 旧筛选只按标签名称做本地模糊匹配 | 新增服务端 `grouped`/`any`/`all`、无标签和缺组查询；包含数据范围、分页、乱序响应回归 | 大数据量生产查询性能需上线后观察 |
 | CUSTOMER-TAG-003 | P1 | 旧自由文本与新目录无法安全衔接 | 没有预览、校验和和幂等迁移过程 | 新增超级管理员专用 preview/apply、目录写锁与审计；服务单测覆盖预览、过期校验和、幂等和写入竞争 | 本轮未连接 QA/生产库，因此真实 preview/apply 数量未取得，生产禁止直接 apply |
+| CUSTOMER-TAG-004 | P1 | 标签合并后名称快照、批量导入和迁移同步可能继续使用浏览器旧目录 | 合并误写非领域字段 `manualTagNames`；批量入库和 CRM 同步仍读取或整表覆盖本地标签缓存 | 合并同事务更新 canonical `tags`；批量入库每批只读取一次服务端 active 目录且失败整批终止；CRM 同步改为 await 的记录级 group/tag 命令并处理并发 409 | 未连接真实 QA 数据库，仍需 staging 冒烟 |
+| CUSTOMER-TAG-005 | P0 | 历史迁移遇到跨分组同名标签会静默选中任意 ID | 迁移使用 `Map(name → id)`，同名定义覆盖顺序决定归属 | preview 返回歧义名称、组和标签 ID，歧义参与 checksum；apply 在任何业务写入前返回 409，设置页阻止确认并提示先合并或重命名 | 管理员需先治理歧义目录再重新预览 |
+| CUSTOMER-TAG-006 | P2 | 表单标签目录缓存可能长期不刷新 | 模块级缓存没有 TTL，设置页修改目录后也未失效 | 增加 60 秒 TTL、可重试失败状态和显式 cache invalidation；所有设置 mutation 与历史整理成功后立即失效 | 多标签页仍依赖 TTL，未增加跨标签页广播 |
 
-本功能验证证据：10 个聚焦命令全部退出 0；`pnpm test` 为 **136 个测试文件通过**；`pnpm build` 退出 0（2866 modules，未出现 Vite chunk 警告，但 `exceljs.min` 静态资产为 947.70 kB）；`tsc -b` 已包含在 build 中。Prisma schema 使用示例本地 URL验证通过；未配置真实 `DATABASE_URL`，所以 migration status 和本地 API/浏览器角色冒烟未执行。冒烟脚本同时限制 API/MySQL 回环地址、隔离库命名、精确库名确认和显式破坏性测试开关。自动规则标签和高级人群包明确未实现。
+本功能最新验证证据：整分支复审修复的 5 个聚焦测试全部退出 0；`pnpm test` 为 **137 个测试文件通过**；`pnpm build` 退出 0（2866 modules，未出现 Vite chunk 警告，但 `exceljs.min` 静态资产为 947.70 kB）；`pnpm exec tsc -b --pretty false` 退出 0。Prisma schema 使用示例本地 URL验证通过；未配置真实 `DATABASE_URL`，所以 migration status 和本地 API/浏览器角色冒烟未执行。冒烟脚本同时限制 API/MySQL 回环地址、隔离库命名、精确库名确认和显式破坏性测试开关。自动规则标签和高级人群包明确未实现。
 
 | 项目 | 最新结果 | 证据 |
 |---|---|---|

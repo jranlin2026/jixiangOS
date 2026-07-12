@@ -166,9 +166,9 @@ assert.equal((await service.createTag({ groupId, name: '异常后可继续' }, s
 
 const inUseTagId = (createdTag.data as any).id;
 prisma.seed(STORAGE_KEYS.CUSTOMERS, {
-  id: 'customer-1', name: '客户甲', manualTagIds: [inUseTagId], manualTagNames: ['高意向'], activityRecords: [],
+  id: 'customer-1', name: '客户甲', manualTagIds: [inUseTagId], tags: ['高意向'], activityRecords: [],
 });
-prisma.seedLead({ id: 'lead-1', manualTagIds: [inUseTagId], manualTagNames: ['高意向'], activityRecords: [] });
+prisma.seedLead({ id: 'lead-1', manualTagIds: [inUseTagId], tags: ['高意向'], activityRecords: [] });
 assert.equal((await service.updateTag(inUseTagId, { isActive: false }, superAdmin)).code, 0);
 const catalogWithInactive = await loadCustomerTagCatalog(prisma as any, true);
 assert.equal(catalogWithInactive.tags.find((tag) => tag.id === inUseTagId)?.usageCount, 2);
@@ -181,7 +181,8 @@ const targetId = (target.data as any).id;
 assert.equal((await service.mergeTag(sourceId, targetId, superAdmin)).code, 0);
 const updatedCustomer = prisma.rows.get(rowKey(STORAGE_KEYS.CUSTOMERS, 'customer-1')).data;
 assert.deepEqual(updatedCustomer.manualTagIds, [targetId]);
-assert.deepEqual(updatedCustomer.manualTagNames, ['重点客户']);
+assert.deepEqual(updatedCustomer.tags, ['重点客户']);
+assert.equal('manualTagNames' in updatedCustomer, false);
 assert.ok(updatedCustomer.activityRecords.some((item: any) => item.title === '合并客户标签'));
 const updatedLead = prisma.leads.get('lead-1').data;
 assert.deepEqual(updatedLead.manualTagIds, [targetId]);
@@ -200,4 +201,5 @@ prisma.failUpdateAfter = 1;
 await assert.rejects(service.reorderTags(groupId, [...reversedIds].reverse(), superAdmin), /injected update failure/);
 const afterFailedReorder = (await loadCustomerTagCatalog(prisma as any, true)).tags.filter((tag) => tag.groupId === groupId).sort((a, b) => a.sortOrder - b.sortOrder);
 assert.deepEqual(afterFailedReorder.map((tag) => ({ id: tag.id, sortOrder: tag.sortOrder })), snapshotBeforeFailedReorder, '失败事务必须回滚全部排序更新');
-assert.deepEqual(updatedLead.manualTagNames, ['重点客户']);
+assert.deepEqual(updatedLead.tags, ['重点客户']);
+assert.equal('manualTagNames' in updatedLead, false);

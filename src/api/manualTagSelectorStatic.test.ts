@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const selector = readFileSync('src/shared/components/ManualTagSelector.tsx', 'utf8');
+const settings = readFileSync('src/pages/Settings/CustomerTagConfig.tsx', 'utf8');
+
+assert.match(selector, /CATALOG_CACHE_TTL_MS\s*=\s*60_000/);
+assert.match(selector, /export function invalidateManualTagCatalogCache/);
+assert.match(settings, /invalidateManualTagCatalogCache\(\)/, '目录 mutation 成功后必须显式失效表单缓存');
 assert.match(selector, /scope: 'lead' \| 'customer'/);
 assert.match(selector, /selectionMode === 'single'/);
 assert.match(selector, /includeInactiveSelected/);

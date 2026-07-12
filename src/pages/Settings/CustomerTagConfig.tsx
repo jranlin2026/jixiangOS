@@ -19,6 +19,7 @@ import {
 } from '../../api/customerTagApi';
 import type { CustomerTag, CustomerTagCatalog, CustomerTagGroup, CustomerTagMigrationPreview, ManualTagScope } from '../../types/tag';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import { invalidateManualTagCatalogCache } from '../../shared/components/ManualTagSelector';
 import useAuthStore from '../../store/useAuthStore';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import { formatCustomerTagDialogError, staleMigrationMessage } from './customerTagSettingsState';
@@ -86,6 +87,7 @@ const CustomerTagConfig: React.FC = () => {
         return false;
       }
       close?.();
+      invalidateManualTagCatalogCache();
       await loadCatalog();
       return true;
     } catch (cause) {
@@ -149,6 +151,7 @@ const CustomerTagConfig: React.FC = () => {
         return;
       }
       setMigrationOpen(false);
+      invalidateManualTagCatalogCache();
       await loadCatalog();
     } catch (cause) { setMigrationError(cause instanceof Error ? cause.message : '整理历史标签失败'); }
     finally { setSaving(false); }
@@ -237,7 +240,7 @@ const CustomerTagConfig: React.FC = () => {
       </Dialog>
 
       <Dialog open={migrationOpen} onClose={() => !saving && setMigrationOpen(false)} maxWidth="sm" fullWidth>
-        <DialogCloseTitle onClose={() => setMigrationOpen(false)}>整理历史标签</DialogCloseTitle><DialogContent><Stack spacing={2}>{migrationError && <Alert severity="error">{migrationError}</Alert>}{saving && !preview ? <Box sx={{ py: 3, textAlign: 'center' }}><CircularProgress size={28} /></Box> : preview ? <><Alert severity="info">预览：客户 {preview.customerCount} 条、线索 {preview.leadCount} 条、标签引用 {preview.assignmentCount} 条。</Alert><Box><Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>待创建标签名称</Typography>{preview.missingNames.length ? <Stack direction="row" flexWrap="wrap" gap={1}>{preview.missingNames.map((name) => <Chip key={name} label={name} size="small" />)}</Stack> : <Typography variant="body2" color="text.secondary">没有缺失名称</Typography>}</Box><TextField label="输入“整理历史标签”确认" value={confirmation} onChange={(e) => setConfirmation(e.target.value)} fullWidth /></> : !saving && <Button variant="outlined" startIcon={<SyncIcon />} onClick={() => void openMigration()}>重新预览</Button>}</Stack></DialogContent><DialogActions><Button onClick={() => setMigrationOpen(false)}>取消</Button><Button variant="contained" color="warning" disabled={!preview || confirmation !== '整理历史标签' || saving} onClick={() => void applyMigration()}>确认整理</Button></DialogActions>
+        <DialogCloseTitle onClose={() => setMigrationOpen(false)}>整理历史标签</DialogCloseTitle><DialogContent><Stack spacing={2}>{migrationError && <Alert severity="error">{migrationError}</Alert>}{saving && !preview ? <Box sx={{ py: 3, textAlign: 'center' }}><CircularProgress size={28} /></Box> : preview ? <><Alert severity="info">预览：客户 {preview.customerCount} 条、线索 {preview.leadCount} 条、标签引用 {preview.assignmentCount} 条。</Alert>{preview.ambiguousNameCount > 0 && <Alert severity="error">发现 {preview.ambiguousNameCount} 个跨分组同名标签：{preview.ambiguousNames.map((item) => item.name).join('、')}。为避免历史数据归错组，请先在客户标签设置中合并或重命名，再重新预览。</Alert>}<Box><Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>待创建标签名称</Typography>{preview.missingNames.length ? <Stack direction="row" flexWrap="wrap" gap={1}>{preview.missingNames.map((name) => <Chip key={name} label={name} size="small" />)}</Stack> : <Typography variant="body2" color="text.secondary">没有缺失名称</Typography>}</Box><TextField label="输入“整理历史标签”确认" value={confirmation} onChange={(e) => setConfirmation(e.target.value)} fullWidth /></> : !saving && <Button variant="outlined" startIcon={<SyncIcon />} onClick={() => void openMigration()}>重新预览</Button>}</Stack></DialogContent><DialogActions><Button onClick={() => setMigrationOpen(false)}>取消</Button><Button variant="contained" color="warning" disabled={!preview || preview.ambiguousNameCount > 0 || confirmation !== '整理历史标签' || saving} onClick={() => void applyMigration()}>确认整理</Button></DialogActions>
       </Dialog>
     </Box>
   );

@@ -42,16 +42,29 @@ async function snapshot(prisma: Pick<MigrationPrisma, 'businessRecord' | 'leadRe
   ].sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
   const known = new Set(definitions.map((tag) => key(tag.name)));
   const missingByKey = new Map<string, string>();
-  records.flatMap((record) => record.tags).forEach((tagName) => { if (!known.has(key(tagName)) && !missingByKey.has(key(tagName))) missingByKey.set(key(tagName), tagName); });
+  const referencedByKey = new Map<string, string>();
+  records.flatMap((record) => record.tags).forEach((tagName) => {
+    if (!referencedByKey.has(key(tagName))) referencedByKey.set(key(tagName), tagName);
+    if (!known.has(key(tagName)) && !missingByKey.has(key(tagName))) missingByKey.set(key(tagName), tagName);
+  });
+  const ambiguousNames = [...referencedByKey.entries()].flatMap(([normalizedName, displayName]) => {
+    const matches = definitions.filter((tag) => key(tag.name) === normalizedName);
+    const groupIds = [...new Set(matches.map((tag) => tag.groupId))].sort();
+    return matches.length > 1 && groupIds.length > 1
+      ? [{ name: displayName, tagIds: matches.map((tag) => tag.id).sort(), groupIds }]
+      : [];
+  }).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
   const checksumInput = records.map((record) => ({ kind: record.kind, id: record.id, tags: object(record.row.data).tags ?? [], manualTagIds: object(record.row.data).manualTagIds ?? [] }))
     .sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
   const catalogInput = definitions.map((tag) => ({ id: tag.id, groupId: tag.groupId, name: tag.name, isActive: tag.isActive }));
-  const checksum = createHash('sha256').update(JSON.stringify({ records: checksumInput, tags: catalogInput })).digest('hex');
+  const checksum = createHash('sha256').update(JSON.stringify({ records: checksumInput, tags: catalogInput, ambiguousNames })).digest('hex');
   return {
     customerCount: records.filter((record) => record.kind === 'customer').length,
     leadCount: records.filter((record) => record.kind === 'lead').length,
     assignmentCount: records.reduce((count, record) => count + record.tags.length, 0),
     missingNames: [...missingByKey.values()].sort((a, b) => a.localeCompare(b, 'zh-CN')),
+    ambiguousNameCount: ambiguousNames.length,
+    ambiguousNames,
     checksum, records, groups, definitions,
   };
 }
@@ -78,6 +91,9 @@ export function createCustomerTagMigrationService(prisma: MigrationPrisma) {
     return catalogWriteTransaction(prisma as any, async (tx) => {
       const current = await snapshot(tx);
       if (current.checksum !== checksum) return failure('迁移预览已过期，请重新预览', 409);
+      if (current.ambiguousNameCount > 0) {
+        return failure('存在跨分组同名标签，请先在客户标签设置中合并或重命名后重新预览', 409);
+      }
       const timestamp = new Date().toISOString();
       let group = current.groups.find((item) => key(item.name) === key(LEGACY_GROUP_NAME));
       if (!group && current.missingNames.length) {

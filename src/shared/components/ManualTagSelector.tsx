@@ -6,7 +6,9 @@ import { normalizeManualTagIds, validateManualTagSelection } from '../utils/cust
 
 type AssignmentScope = 'lead' | 'customer';
 type TagOption = CustomerTag & { group: CustomerTagGroup };
-type CatalogState = { catalog?: CustomerTagCatalog; loading: boolean; error: string };
+type CatalogState = { catalog?: CustomerTagCatalog; loading: boolean; error: string; fetchedAt?: number };
+
+const CATALOG_CACHE_TTL_MS = 60_000;
 
 const catalogCache = new Map<AssignmentScope, CatalogState>();
 const catalogRequests = new Map<AssignmentScope, Promise<void>>();
@@ -14,15 +16,24 @@ const catalogListeners = new Map<AssignmentScope, Set<() => void>>();
 const emptyCatalog: CustomerTagCatalog = { groups: [], tags: [] };
 const notifyCatalog = (scope: AssignmentScope) => catalogListeners.get(scope)?.forEach((listener) => listener());
 
+export function invalidateManualTagCatalogCache(scope?: AssignmentScope): void {
+  const scopes: AssignmentScope[] = scope ? [scope] : ['lead', 'customer'];
+  scopes.forEach((item) => {
+    catalogCache.delete(item);
+    notifyCatalog(item);
+  });
+}
+
 function loadActiveCatalog(scope: AssignmentScope, retry = false): Promise<void> {
-  if (!retry && catalogCache.get(scope)?.catalog) return Promise.resolve();
+  const cached = catalogCache.get(scope);
+  if (!retry && cached?.catalog && Date.now() - (cached.fetchedAt || 0) < CATALOG_CACHE_TTL_MS) return Promise.resolve();
   const existing = catalogRequests.get(scope);
   if (existing) return existing;
   catalogCache.set(scope, { ...catalogCache.get(scope), loading: true, error: '' });
   notifyCatalog(scope);
   const request = fetchCustomerTagCatalog(scope, false).then((response) => {
     if (response.code !== 0) throw new Error(response.message || '标签目录加载失败');
-    catalogCache.set(scope, { catalog: response.data, loading: false, error: '' });
+    catalogCache.set(scope, { catalog: response.data, loading: false, error: '', fetchedAt: Date.now() });
   }).catch((reason) => {
     catalogCache.set(scope, { loading: false, error: reason instanceof Error ? reason.message : '标签目录加载失败' });
   }).finally(() => {

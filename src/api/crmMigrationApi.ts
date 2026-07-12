@@ -3,13 +3,18 @@ import excelJsBrowserUrl from 'exceljs/dist/exceljs.min.js?url';
 import { v4 as uuidv4 } from 'uuid';
 import type { Customer, CustomerActivityRecord } from '../types/customer';
 import type { Lead } from '../types/lead';
-import type { CustomerTag } from '../types/tag';
+import type { CustomerTag, CustomerTagCatalog } from '../types/tag';
 import type { LeadSourceConfig, User } from '../types/settings';
 import { DEFAULT_LEAD_SOURCE_CONFIGS, STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { getStorageData, setStorageData } from './mock/storage';
 import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { createErrorResponse, createSuccessResponse, delay, type ApiResponse } from './types';
+import {
+  createCustomerTag,
+  createCustomerTagGroup,
+  fetchCustomerTagCatalog,
+} from './customerTagApi';
 
 export type CrmMigrationFileKey =
   | 'teamCustomers'
@@ -779,32 +784,53 @@ async function syncLeadSources(sources: CrmMigrationSourceCandidate[]): Promise<
 }
 
 async function syncTags(tagNames: string[]): Promise<ApiResponse<{ created: number }>> {
-  ensureInit();
-  await delay(120);
-  const now = new Date().toISOString();
-  const tags = [...(getStorageData<CustomerTag[]>(STORAGE_KEYS.TAGS) || [])];
-  const existingNames = new Set(tags.map((tag) => tag.name.trim().toLowerCase()));
-  let created = 0;
+  const loadCatalog = async (): Promise<ApiResponse<CustomerTagCatalog>> => fetchCustomerTagCatalog('all', true);
+  let catalogResponse = await loadCatalog();
+  if (catalogResponse.code !== 0 || !catalogResponse.data) return catalogResponse as unknown as ApiResponse<{ created: number }>;
+  let catalog = catalogResponse.data;
+  const normalizedNames = [...new Map(tagNames.map((item) => normalizeValue(item)).filter(Boolean).map((item) => [item.toLowerCase(), item])).values()];
+  const hasName = (name: string) => catalog.tags.some((tag) => tag.name.trim().toLowerCase() === name.toLowerCase());
+  const missing = normalizedNames.filter((item) => !hasName(item));
+  if (!missing.length) return createSuccessResponse({ created: 0 });
 
-  tagNames.forEach((name) => {
-    const normalized = normalizeValue(name);
-    if (!normalized || existingNames.has(normalized.toLowerCase())) return;
-    tags.push({
-      id: `tag-mig-${uuidv4().slice(0, 8)}`,
-      groupId: 'tag-group-legacy-import',
-      name: normalized,
+  const legacyGroupName = '历史未归类';
+  let group = catalog.groups.find((item) => item.name.trim().toLowerCase() === legacyGroupName.toLowerCase());
+  if (!group) {
+    const createdGroup = await createCustomerTagGroup({
+      name: legacyGroupName,
       color: '#64748b',
-      usageCount: 0,
+      selectionMode: 'multiple',
+      scope: 'both',
       isActive: true,
-      sortOrder: tags.filter((tag) => tag.groupId === 'tag-group-legacy-import').length + 1,
-      createdAt: now,
-      updatedAt: now,
     });
-    existingNames.add(normalized.toLowerCase());
-    created += 1;
-  });
+    if (createdGroup.code === 0 && createdGroup.data) {
+      group = createdGroup.data;
+    } else if (createdGroup.code === 409) {
+      catalogResponse = await loadCatalog();
+      if (catalogResponse.code !== 0 || !catalogResponse.data) return catalogResponse as unknown as ApiResponse<{ created: number }>;
+      catalog = catalogResponse.data;
+      group = catalog.groups.find((item) => item.name.trim().toLowerCase() === legacyGroupName.toLowerCase());
+      if (!group) return createdGroup as unknown as ApiResponse<{ created: number }>;
+    } else {
+      return createdGroup as unknown as ApiResponse<{ created: number }>;
+    }
+  }
 
-  setStorageData(STORAGE_KEYS.TAGS, tags);
+  let created = 0;
+  for (const normalized of missing) {
+    const result = await createCustomerTag({ groupId: group.id, name: normalized, color: '#64748b', isActive: true });
+    if (result.code === 0) {
+      created += 1;
+      continue;
+    }
+    if (result.code === 409) {
+      catalogResponse = await loadCatalog();
+      if (catalogResponse.code !== 0 || !catalogResponse.data) return catalogResponse as unknown as ApiResponse<{ created: number }>;
+      catalog = catalogResponse.data;
+      if (hasName(normalized)) continue;
+    }
+    return result as unknown as ApiResponse<{ created: number }>;
+  }
   return createSuccessResponse({ created });
 }
 

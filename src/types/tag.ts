@@ -42,6 +42,12 @@ export interface CustomerTagMigrationPreview {
   leadCount: number;
   assignmentCount: number;
   missingNames: string[];
+  ambiguousNameCount: number;
+  ambiguousNames: Array<{
+    name: string;
+    tagIds: ID[];
+    groupIds: ID[];
+  }>;
   checksum: string;
 }
 

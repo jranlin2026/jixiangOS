@@ -65,6 +65,31 @@ Object.defineProperty(globalThis, 'localStorage', {
   configurable: true,
 });
 
+const originalFetch = globalThis.fetch;
+let catalogRequestCount = 0;
+let catalogFailure: { status: number; message: string } | null = null;
+globalThis.fetch = async (input) => {
+  const url = String(input);
+  if (!url.includes('/customer-tags/catalog?scope=lead&includeInactive=false')) {
+    throw new Error(`unexpected request: ${url}`);
+  }
+  catalogRequestCount += 1;
+  if (catalogFailure) {
+    return new Response(JSON.stringify({ code: catalogFailure.status, data: null, message: catalogFailure.message }), {
+      status: catalogFailure.status,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+  return new Response(JSON.stringify({
+    code: 0,
+    data: {
+      groups: JSON.parse(storage.getItem(STORAGE_KEYS.TAG_GROUPS) || '[]'),
+      tags: JSON.parse(storage.getItem(STORAGE_KEYS.TAGS) || '[]'),
+    },
+    message: 'success',
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+};
+
 function toArrayBuffer(value: ArrayBuffer | ArrayBufferView): ArrayBuffer {
   const view = value instanceof ArrayBuffer
     ? new Uint8Array(value)
@@ -243,6 +268,7 @@ const result = await leadBulkImportApi.importWorkbook(await workbookBuffer([
     [H.remark]: '',
   },
 ]));
+assert.equal(catalogRequestCount, 1, '每个批次只能加载一次权威标签目录');
 
 assert.equal(result.code, 0);
 assert.equal(result.data.successCount, 1);
@@ -392,3 +418,23 @@ assert.equal(generatedTemplateImport.data.failureCount, 0);
 const generatedTemplateLeads = JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]');
 assert.equal(generatedTemplateLeads.length, 1);
 assert.equal(generatedTemplateLeads[0].source, zh.official);
+
+const leadsBeforeCatalogFailure = storage.getItem(STORAGE_KEYS.LEADS);
+catalogFailure = { status: 403, message: 'Forbidden' };
+const forbidden = await leadBulkImportApi.importWorkbook(await workbookBuffer([{
+  [H.name]: '无目录权限', [H.phone]: '13900000015', [H.source]: zh.official,
+}]));
+assert.equal(forbidden.code, 403);
+assert.equal(forbidden.message, 'Forbidden');
+assert.equal(storage.getItem(STORAGE_KEYS.LEADS), leadsBeforeCatalogFailure, '目录失败必须在整批任何写入前终止');
+
+catalogFailure = null;
+globalThis.fetch = async () => { throw new Error('catalog network down'); };
+await assert.rejects(
+  leadBulkImportApi.importWorkbook(await workbookBuffer([{
+    [H.name]: '目录网络失败', [H.phone]: '13900000016', [H.source]: zh.official,
+  }])),
+  /catalog network down/,
+);
+assert.equal(storage.getItem(STORAGE_KEYS.LEADS), leadsBeforeCatalogFailure, '网络失败也不得部分写入');
+globalThis.fetch = originalFetch;

@@ -68,6 +68,8 @@ const previewResult = await service.previewLegacyTagMigration(actor);
 assert.equal(previewResult.code, 0);
 const preview = previewResult.data!;
 assert.deepEqual(preview.missingNames, ['历史自定义']);
+assert.equal(preview.ambiguousNameCount, 0);
+assert.deepEqual(preview.ambiguousNames, []);
 assert.equal(preview.assignmentCount, 4);
 assert.equal(preview.customerCount, 1);
 assert.equal(preview.leadCount, 1);
@@ -132,3 +134,20 @@ try {
 } finally {
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 }
+
+const ambiguousPrisma = new FakePrisma();
+ambiguousPrisma.seed(STORAGE_KEYS.TAG_GROUPS, { id: 'group-a', name: 'A组', color: '#111', selectionMode: 'multiple', scope: 'both', isActive: true, sortOrder: 0, createdAt: '2026-01-01', updatedAt: '2026-01-01' });
+ambiguousPrisma.seed(STORAGE_KEYS.TAG_GROUPS, { id: 'group-b', name: 'B组', color: '#222', selectionMode: 'multiple', scope: 'both', isActive: true, sortOrder: 1, createdAt: '2026-01-01', updatedAt: '2026-01-01' });
+ambiguousPrisma.seed(STORAGE_KEYS.TAGS, { id: 'tag-a', groupId: 'group-a', name: '跨组同名', isActive: true, sortOrder: 0, usageCount: 0, createdAt: '2026-01-01', updatedAt: '2026-01-01' });
+ambiguousPrisma.seed(STORAGE_KEYS.TAGS, { id: 'tag-b', groupId: 'group-b', name: '跨组同名', isActive: true, sortOrder: 0, usageCount: 0, createdAt: '2026-01-01', updatedAt: '2026-01-01' });
+ambiguousPrisma.seed(STORAGE_KEYS.CUSTOMERS, { id: 'ambiguous-customer', tags: ['跨组同名'], manualTagIds: [] });
+const ambiguousService = createCustomerTagMigrationService(ambiguousPrisma as any);
+const ambiguousPreview = (await ambiguousService.previewLegacyTagMigration(actor)).data!;
+assert.equal(ambiguousPreview.ambiguousNameCount, 1);
+assert.deepEqual(ambiguousPreview.ambiguousNames, [{ name: '跨组同名', tagIds: ['tag-a', 'tag-b'], groupIds: ['group-a', 'group-b'] }]);
+const customerBefore = clone(ambiguousPrisma.rows.get(`${STORAGE_KEYS.CUSTOMERS}:ambiguous-customer`).data);
+const ambiguousApply = await ambiguousService.applyLegacyTagMigration(ambiguousPreview.checksum, actor);
+assert.equal(ambiguousApply.code, 409);
+assert.match(ambiguousApply.message, /合并或重命名/);
+assert.deepEqual(ambiguousPrisma.rows.get(`${STORAGE_KEYS.CUSTOMERS}:ambiguous-customer`).data, customerBefore, '歧义迁移不得写客户');
+assert.equal([...ambiguousPrisma.rows.values()].some((row) => row.domain === 'aaos_customer_tag_migrations'), false, '歧义迁移不得写审计假成功');

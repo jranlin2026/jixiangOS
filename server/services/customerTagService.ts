@@ -234,9 +234,9 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
         const value = object(row.data);
         if (!Array.isArray(value.manualTagIds) || !value.manualTagIds.includes(sourceId)) continue;
         const manualTagIds = [...new Set(value.manualTagIds.map((id: string) => id === sourceId ? targetId : id))];
-        const manualTagNames = manualTagIds.map((id) => catalog.tags.find((tag) => tag.id === id)?.name)
+        const tags = manualTagIds.map((id) => catalog.tags.find((tag) => tag.id === id)?.name)
           .filter((name): name is string => Boolean(name));
-        await tx.businessRecord.update({ where: { domain_recordId: { domain: row.domain, recordId: row.recordId } }, data: { data: { ...value, manualTagIds, manualTagNames, activityRecords: [audit, ...(Array.isArray(value.activityRecords) ? value.activityRecords : [])] } } });
+        await tx.businessRecord.update({ where: { domain_recordId: { domain: row.domain, recordId: row.recordId } }, data: { data: { ...value, manualTagIds, tags, activityRecords: [audit, ...(Array.isArray(value.activityRecords) ? value.activityRecords : [])] } } });
       }
       if (tx.leadRecord) {
         const leads = await tx.leadRecord.findMany();
@@ -244,9 +244,9 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
           const value = object(row.data);
           if (!Array.isArray(value.manualTagIds) || !value.manualTagIds.includes(sourceId)) continue;
           const manualTagIds = [...new Set(value.manualTagIds.map((id: string) => id === sourceId ? targetId : id))];
-          const manualTagNames = manualTagIds.map((id) => catalog.tags.find((tag) => tag.id === id)?.name)
+          const tags = manualTagIds.map((id) => catalog.tags.find((tag) => tag.id === id)?.name)
             .filter((name): name is string => Boolean(name));
-          await tx.leadRecord.update({ where: { id: row.id }, data: { data: { ...value, manualTagIds, manualTagNames, activityRecords: [audit, ...(Array.isArray(value.activityRecords) ? value.activityRecords : [])] } } });
+          await tx.leadRecord.update({ where: { id: row.id }, data: { data: { ...value, manualTagIds, tags, activityRecords: [audit, ...(Array.isArray(value.activityRecords) ? value.activityRecords : [])] } } });
         }
       }
       const nextSource = { ...source, isActive: false, updatedAt: now() };
