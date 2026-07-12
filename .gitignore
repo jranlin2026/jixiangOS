@@ -1,8 +1,11 @@
 node_modules/
+__pycache__/
 dist/
 .mysql/
 .tools/
 .worktrees/
+.local/
+.recovery/
 .superpowers/brainstorm/
 pnpm-lock.yaml
 pnpm-workspace.yaml

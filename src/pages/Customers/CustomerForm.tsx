@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Box,
   Button,
   Dialog,
@@ -45,6 +46,8 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
   const [leadFlowConfig, setLeadFlowConfig] = useState<LeadFlowConfig | null>(null);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
+  const [submitError, setSubmitError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const parentSources = useMemo(
     () => sourceConfigs.filter((item) => !item.parentId && item.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
@@ -197,13 +200,20 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       sourceType: normalizeResourceOwnership(form.sourceType),
     };
 
-    if (isEdit && customer) {
-      await update(customer.id, payload);
-    } else {
-      await create(applyCurrentLeadInputBy(payload, 'leadInputBy'));
+    setSubmitting(true);
+    setSubmitError('');
+    try {
+      const saved = isEdit && customer
+        ? await update(customer.id, payload)
+        : await create(applyCurrentLeadInputBy(payload, 'leadInputBy'));
+      if (!saved) return;
+      onSuccess?.();
+      onClose();
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : '客户资料保存失败');
+    } finally {
+      setSubmitting(false);
     }
-    onSuccess?.();
-    onClose();
   };
 
   const userOptions = users.map((user) => (
@@ -227,6 +237,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogCloseTitle onClose={onClose}>{isEdit ? '编辑客户资料' : '新增客户'}</DialogCloseTitle>
       <DialogContent>
+        {submitError && <Alert severity="error" sx={{ mt: 1 }}>{submitError}</Alert>}
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
           <TextField label="姓名" value={form.name} onChange={handleChange('name')} required fullWidth />
           <TextField label="公司" value={form.company} onChange={handleChange('company')} fullWidth />
@@ -328,7 +339,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
         </Box>
       </DialogContent>
       <DialogActions>
-        <Button variant="contained" onClick={handleSubmit} disabled={!canSubmit}>
+        <Button variant="contained" onClick={handleSubmit} disabled={!canSubmit || submitting}>
           {isEdit ? '保存' : '创建'}
         </Button>
       </DialogActions>

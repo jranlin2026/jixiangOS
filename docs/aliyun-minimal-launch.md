@@ -100,18 +100,34 @@ JIXIANG_BACKUP_KEEP_DAYS=14
 npm run prod:check
 ```
 
-## 6. 初始化并启动
+## 6. 核对数据库和管理员前置条件
+
+生产环境禁止执行 `npm run db:seed`。当前 seed 只用于本地演示数据，不是生产管理员初始化工具。
+
+当前仓库尚无安全的首个管理员初始化命令。数据库迁移只建表，不创建首个管理员；在该能力落地前，全新空库不能作为生产上线目标，属于发布阻塞。不要用 seed、手工 SQL 或临时脚本绕过。
+
+已有数据库必须先确认可用的超级管理员账号，完成 SQL 备份、异库恢复演练和数据对账，再检查 migration baseline：
 
 ```bash
 npm run db:generate
-npm run db:deploy
-npm run db:seed
-npm run build
-
-pm2 start ecosystem.config.cjs --env production
-pm2 save
-pm2 startup
+npx --no-install prisma migrate status
 ```
+
+如果迁移历史缺失、分叉或无法解释，停止上线。满足全部前置条件后，从可信任的本地工作区使用受支持的 ECS 发布入口；不要在服务器上手工执行迁移：
+
+只有在生产库的 migration baseline 已经人工核验、备份和异库恢复演练均完成后，才可在服务器 `.env` 中设置：
+
+```bash
+JIXIANG_PRISMA_BASELINE_CONFIRMED=20260710010000_enablement_knowledge_foundation
+```
+
+未完成核验时必须保持为空，发布脚本将主动终止。
+
+```bash
+python3 scripts/deploy/deploy-ecs.py
+```
+
+旧的 `scripts/deploy/deploy-linux.sh` 已停用。ECS 发布入口会执行生产构建、迁移前备份、migration baseline 校验、`prisma migrate deploy`、版本切换和失败回滚。
 
 检查后端：
 
@@ -179,4 +195,3 @@ crontab -e
 - `pm2 status` 里 `jixiang-os-api` 是 online
 - 服务器安全组没有开放 `3306`
 - 每日备份目录已经生成 `.sql.gz`
-

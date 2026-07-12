@@ -203,3 +203,29 @@ assert.notEqual(nonAdminList.code, 0);
 const nonAdminRestore = await businessRecycleBinApi.restoreRecycleBinItem('order', 'order-a');
 assert.notEqual(nonAdminRestore.code, 0);
 
+const previousBackendFlag = process.env.VITE_USE_BACKEND_API;
+process.env.VITE_USE_BACKEND_API = 'true';
+seed();
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([
+  lead({
+    id: 'lead-backend-purge',
+    name: 'Backend Purge Lead',
+    phone: '13900000009',
+    deletedAt: now,
+    deletedBy: 'Admin',
+    deleteReason: 'backend purge guard',
+  }),
+]));
+const blockedBackendPurge = await businessRecycleBinApi.permanentlyDeleteRecycleBinItem(
+  'lead',
+  'lead-backend-purge',
+  'confirmed cleanup',
+);
+assert.notEqual(blockedBackendPurge.code, 0);
+assert.match(blockedBackendPurge.message || '', /服务器|暂不支持/);
+assert.equal(
+  (JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]') as Lead[]).some((item) => item.id === 'lead-backend-purge'),
+  true,
+);
+if (previousBackendFlag === undefined) delete process.env.VITE_USE_BACKEND_API;
+else process.env.VITE_USE_BACKEND_API = previousBackendFlag;

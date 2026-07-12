@@ -5,6 +5,7 @@ import type { Order } from '../types/order';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
+import { shouldUseBackendApi } from './backendClient';
 import { DEFAULT_PAGE_SIZE, STORAGE_KEYS } from '../shared/utils/constants';
 import { getCurrentOperatorUser } from '../shared/utils/currentOperator';
 import { isSuperAdminRoleName } from '../shared/utils/roles';
@@ -134,10 +135,13 @@ async function fetchRecycleBinItems(filters: BusinessRecycleBinFilters = {}): Pr
 }
 
 async function restoreRecycleBinItem(type: BusinessRecycleBinType, id: string): Promise<ApiResponse<boolean>> {
-  ensureInit();
-  await delay(120);
   const forbidden = requireSuperAdmin();
   if (forbidden) return createErrorResponse(forbidden.message || '仅超级管理员可以管理业务回收站');
+  if (shouldUseBackendApi() && (type === 'lead' || type === 'customer')) {
+    return createErrorResponse('服务器模式暂不支持恢复线索或客户；记录级恢复命令完成前已安全禁用', 409);
+  }
+  ensureInit();
+  await delay(120);
 
   const rows = readRows(type);
   const index = rows.findIndex((item) => item.id === id);
@@ -163,6 +167,10 @@ async function permanentlyDeleteRecycleBinItem(type: BusinessRecycleBinType, id:
 
   const normalizedReason = reason.trim();
   if (!normalizedReason) return createErrorResponse('永久删除必须填写原因');
+
+  if (shouldUseBackendApi() && (type === 'lead' || type === 'customer')) {
+    return createErrorResponse('服务器模式暂不支持永久删除线索或客户，请先保留在业务回收站');
+  }
 
   const rows = readRows(type);
   const target = rows.find((item) => item.id === id);

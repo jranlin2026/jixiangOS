@@ -11,7 +11,14 @@ import type {
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
-import { PERMISSION_KEYS, getUserRole, hasPermission, isSuperAdminUser } from '../../src/shared/utils/permissions';
+import {
+  PERMISSION_KEYS,
+  getUserRole,
+  hasPermission,
+  isSuperAdmin,
+  isSuperAdminUser,
+  normalizePermissionKey,
+} from '../../src/shared/utils/permissions';
 import { normalizeRoleDataScopes } from '../../src/shared/utils/organizationConfig';
 
 const ASSET_STORAGE_KEYS = new Set<string>([
@@ -29,7 +36,7 @@ const ASSET_WRITE_PERMISSIONS: Record<string, string[]> = {
   [STORAGE_KEYS.ASSET_PHONE_NUMBERS]: [PERMISSION_KEYS.ASSETS, PERMISSION_KEYS.ASSETS_PHONES, PERMISSION_KEYS.ASSETS_IMPORT_EXPORT],
   [STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS]: [PERMISSION_KEYS.ASSETS, PERMISSION_KEYS.ASSETS_ACCOUNTS, PERMISSION_KEYS.ASSETS_IMPORT_EXPORT],
   [STORAGE_KEYS.ASSET_RISKS]: [PERMISSION_KEYS.ASSETS, PERMISSION_KEYS.ASSETS_RISKS],
-  [STORAGE_KEYS.ASSET_OPERATION_LOGS]: [PERMISSION_KEYS.ASSETS],
+  [STORAGE_KEYS.ASSET_OPERATION_LOGS]: [PERMISSION_KEYS.ASSETS, PERMISSION_KEYS.ASSETS_LOGS],
   [STORAGE_KEYS.ASSET_OFFBOARDING_TASKS]: [PERMISSION_KEYS.ASSETS, PERMISSION_KEYS.ASSETS_OFFBOARDING],
   [STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS]: [PERMISSION_KEYS.ASSETS, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH],
 };
@@ -52,8 +59,17 @@ export function isAssetStorageKey(key: string): boolean {
   return ASSET_STORAGE_KEYS.has(key);
 }
 
-function hasAnyPermission(user: AuthenticatedUser, permissions: string[], action = 'read'): boolean {
-  return permissions.some((permission) => hasPermission(user, permission, action));
+function hasAnyExactPermission(user: AuthenticatedUser, permissions: string[], action = 'read'): boolean {
+  if (isSuperAdmin(user)) return true;
+  const exactModules = new Set(permissions.map(normalizePermissionKey));
+  return user.permissions.some((permission) => {
+    if (!exactModules.has(normalizePermissionKey(permission.module))) return false;
+    const actions = permission.actions || [];
+    if (actions.includes('admin')) return true;
+    if (action === 'read') return actions.some((item) => ['read', 'write', 'delete'].includes(item));
+    if (action === 'write') return actions.some((item) => ['write', 'delete'].includes(item));
+    return actions.includes(action);
+  });
 }
 
 export function canReadStorageKey(user: AuthenticatedUser, key: string): boolean {
@@ -63,7 +79,7 @@ export function canReadStorageKey(user: AuthenticatedUser, key: string): boolean
 
 export function canWriteStorageKey(user: AuthenticatedUser, key: string): boolean {
   if (!isAssetStorageKey(key)) return true;
-  return hasAnyPermission(user, ASSET_WRITE_PERMISSIONS[key] || [PERMISSION_KEYS.ASSETS], 'write');
+  return hasAnyExactPermission(user, ASSET_WRITE_PERMISSIONS[key] || [PERMISSION_KEYS.ASSETS], 'write');
 }
 
 function assetScopeForUser(user: AuthenticatedUser, context: AssetStorageContext): AssetVisibilityScope {

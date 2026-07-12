@@ -467,7 +467,7 @@ const AssetManagement: React.FC = () => {
     importAssetsFromCsv,
     clearDetail,
   } = useAssetStore();
-  const canRevealSensitive = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW);
+  const canRevealSensitive = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW, 'read');
   const canImportExport = hasPermission(currentUser, PERMISSION_KEYS.ASSETS_IMPORT_EXPORT, 'write');
   const canEditAssets = hasPermission(currentUser, PERMISSION_KEYS.ASSETS, 'write');
   const canDeleteAssets = canEditAssets || hasPermission(currentUser, PERMISSION_KEYS.ASSETS, 'delete');
@@ -692,6 +692,10 @@ const AssetManagement: React.FC = () => {
   };
 
   const submitMatrixPublishTask = async () => {
+    if (!canManageMatrixPublish) {
+      showFeedback('当前账号没有矩阵发布权限');
+      return;
+    }
     const result = await createMatrixPublishTask({
       ...matrixForm.values,
       dueAt: matrixForm.values.dueAt ? new Date(matrixForm.values.dueAt).toISOString() : '',
@@ -706,6 +710,10 @@ const AssetManagement: React.FC = () => {
   };
 
   const handleCompleteMatrixTarget = async (taskId: string, accountId: string) => {
+    if (!canManageMatrixPublish) {
+      showFeedback('当前账号没有矩阵发布权限');
+      return;
+    }
     const result = await completeMatrixPublishTarget(taskId, accountId);
     if (!result) {
       showFeedback(useAssetStore.getState().error || '标记完成失败');
@@ -839,6 +847,10 @@ const AssetManagement: React.FC = () => {
   };
 
   const openCreateForm = (type: AssetFormType = defaultCreateType()) => {
+    if (!canEditAssets) {
+      showFeedback('当前账号没有编辑资产权限');
+      return;
+    }
     const defaults: Record<AssetFormType, Record<string, string>> = {
       device: {
         simType: '双卡',
@@ -884,6 +896,10 @@ const AssetManagement: React.FC = () => {
   };
 
   const openEditForm = (type: AssetFormType, item: AssetDevice | AssetPhoneNumber | AssetInternetAccount) => {
+    if (!canEditAssets) {
+      showFeedback('当前账号没有编辑资产权限');
+      return;
+    }
     const values = Object.entries(item).reduce<Record<string, string>>((acc, [key, value]) => {
       acc[key] = String(value ?? '');
       return acc;
@@ -1755,14 +1771,16 @@ const AssetManagement: React.FC = () => {
                     </Stack>
                   </TableCell>
                   <TableCell align="center" sx={{ minWidth: 120 }}>
-                    <Button
-                      size="small"
-                      variant="contained"
-                      disabled={target.status === 'completed'}
-                      onClick={() => handleCompleteMatrixTarget(task.id, target.accountId)}
-                    >
-                      点完成
-                    </Button>
+                    {canManageMatrixPublish ? (
+                      <Button
+                        size="small"
+                        variant="contained"
+                        disabled={target.status === 'completed'}
+                        onClick={() => handleCompleteMatrixTarget(task.id, target.accountId)}
+                      >
+                        点完成
+                      </Button>
+                    ) : null}
                   </TableCell>
                 </TableRow>
               ))}
@@ -2422,7 +2440,7 @@ const AssetManagement: React.FC = () => {
     };
     const failedRows = importState.result?.failedRows || [];
     return (
-      <Dialog open={importState.open} onClose={closeImportDialog} maxWidth="md" fullWidth>
+      <Dialog open={importState.open && canImportExport} onClose={closeImportDialog} maxWidth="md" fullWidth>
         <DialogTitle sx={{ fontWeight: 900, pb: 1 }}>
           导入资产
         </DialogTitle>
@@ -2516,7 +2534,7 @@ const AssetManagement: React.FC = () => {
   };
 
   const renderMatrixPublishDialog = () => (
-    <Dialog open={matrixForm.open} onClose={closeMatrixPublishDialog} maxWidth="md" fullWidth>
+    <Dialog open={matrixForm.open && canManageMatrixPublish} onClose={closeMatrixPublishDialog} maxWidth="md" fullWidth>
       <DialogTitle sx={{ fontWeight: 900, pb: 1 }}>
         创建矩阵发布任务
       </DialogTitle>
@@ -2554,6 +2572,10 @@ const AssetManagement: React.FC = () => {
               type="file"
               accept="video/*"
               onChange={async (event) => {
+                if (!canManageMatrixPublish) {
+                  showFeedback('当前账号没有矩阵发布权限');
+                  return;
+                }
                 const file = event.target.files?.[0];
                 if (!file) return;
                 updateMatrixPublishValue('videoFileName', file.name);
@@ -2644,7 +2666,7 @@ const AssetManagement: React.FC = () => {
     };
     const title = formState.mode === 'edit' ? `编辑${formTypeLabel[formState.type]}` : `新增${formTypeLabel[formState.type]}`;
     return (
-      <Dialog open={formState.open} onClose={closeForm} maxWidth="md" fullWidth>
+      <Dialog open={formState.open && canEditAssets} onClose={closeForm} maxWidth="md" fullWidth>
         <DialogTitle sx={{ fontWeight: 900, pb: 1 }}>
           {title}
         </DialogTitle>
@@ -2669,7 +2691,7 @@ const AssetManagement: React.FC = () => {
         </DialogContent>
         <DialogActions sx={{ px: 3, py: 1.5 }}>
           <Button onClick={closeForm}>取消</Button>
-          <Button variant="contained" onClick={submitForm}>保存</Button>
+          {canEditAssets ? <Button variant="contained" onClick={submitForm}>保存</Button> : null}
         </DialogActions>
       </Dialog>
     );
@@ -2741,7 +2763,7 @@ const AssetManagement: React.FC = () => {
       {renderMatrixPublishDialog()}
       {renderFormDialog()}
       {renderViewSettingsDialog()}
-      <Dialog open={Boolean(deleteTarget)} onClose={closeDeleteConfirm} maxWidth="xs" fullWidth>
+      <Dialog open={Boolean(deleteTarget) && canDeleteAssets} onClose={closeDeleteConfirm} maxWidth="xs" fullWidth>
         <DialogTitle>删除资产</DialogTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ color: shell.ink, fontWeight: 900, mb: 1 }}>
@@ -2753,7 +2775,7 @@ const AssetManagement: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={closeDeleteConfirm}>取消</Button>
-          <Button color="error" variant="contained" onClick={submitDelete}>确认删除</Button>
+          {canDeleteAssets ? <Button color="error" variant="contained" onClick={submitDelete}>确认删除</Button> : null}
         </DialogActions>
       </Dialog>
       {feedbackDialog}

@@ -233,6 +233,22 @@ export function createSettingsService(prisma: SettingsPrisma) {
       return success(rows.map(mapPrismaUser));
     },
 
+    async listAssignableDirectory() {
+      const [users, departments, positions] = await Promise.all([
+        prisma.user.findMany({
+          where: { isActive: true, employmentStatus: 'active' },
+          orderBy: { createdAt: 'asc' },
+        }),
+        prisma.department.findMany({ where: { isActive: true }, orderBy: { createdAt: 'asc' } }),
+        prisma.position.findMany({ where: { isActive: true }, orderBy: { sortOrder: 'asc' } }),
+      ]);
+      return success({
+        users: users.map(mapPrismaUser),
+        departments: departments.map(mapPrismaDepartment),
+        positions: positions.map(mapPrismaPosition),
+      });
+    },
+
     async listRoles() {
       const rows = await prisma.role.findMany({ orderBy: { createdAt: 'asc' } });
       return success(rows.map(mapPrismaRole).map(mergeRoleWithDefaultAccess));

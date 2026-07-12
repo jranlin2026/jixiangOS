@@ -11,8 +11,8 @@ interface CustomerState {
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
   fetchItems: (filters?: CustomerFilters) => Promise<void>;
   fetchById: (id: string) => Promise<void>;
-  create: (data: CustomerCreateInput) => Promise<void>;
-  update: (id: string, data: Partial<Customer>) => Promise<void>;
+  create: (data: CustomerCreateInput) => Promise<boolean>;
+  update: (id: string, data: Partial<Customer>) => Promise<boolean>;
   delete: (id: string) => Promise<void>;
   fetchAIPortrait: (id: string) => Promise<AICustomerPortrait | null>;
   updateTags: (id: string, tags: string[]) => Promise<void>;
@@ -61,20 +61,26 @@ const useCustomerStore = create<CustomerState>((set, get) => ({
   create: async (data) => {
     set({ loading: true, error: null });
     try {
-      await customerApi.createCustomer(data);
+      const res = await customerApi.createCustomer(data);
+      if (res.code !== 0 || !res.data) throw new Error(res.message || '新增客户失败');
       await get().fetchItems();
+      return true;
     } catch (e: any) {
       set({ error: e.message, loading: false });
+      throw e;
     }
   },
 
   update: async (id, data) => {
     set({ loading: true, error: null });
     try {
-      await customerApi.updateCustomer(id, data);
+      const res = await customerApi.updateCustomer(id, data);
+      if (res.code !== 0 || !res.data) throw new Error(res.message || '更新客户失败');
       await get().fetchItems();
+      return true;
     } catch (e: any) {
       set({ error: e.message, loading: false });
+      throw e;
     }
   },
 

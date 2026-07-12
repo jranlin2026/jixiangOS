@@ -129,6 +129,26 @@ try {
         headers: { 'content-type': 'application/json' },
       });
     }
+    if (method === 'POST' && url.endsWith('/leads')) {
+      const body = JSON.parse(String(init?.body || '{}')) as Partial<Lead>;
+      const createdLead: Lead = {
+        ...body,
+        id: 'lead-new-regression',
+        name: body.name || '新增线索',
+        phone: body.phone || '',
+        source: body.source || '手工录入',
+        status: body.status || LEAD_STATUS.NEW,
+        owner: body.owner || '待分配',
+        inputBy: '销售A',
+        followUpRecords: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+      serverLeads = [createdLead, ...serverLeads];
+      return new Response(JSON.stringify({ code: 0, data: createdLead, message: 'success' }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }
     if (method === 'PUT' && url.endsWith(`/storage/${encodeURIComponent(STORAGE_KEYS.CUSTOMERS)}`)) {
       const body = JSON.parse(String(init?.body || '{}')) as { value?: Customer[] };
       serverCustomers = body.value || [];

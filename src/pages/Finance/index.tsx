@@ -72,6 +72,8 @@ const Finance: React.FC = () => {
   const rawTab = searchParams.get('tab');
   const requestedTab = getTabFromSearch(rawTab);
   const currentUser = useAuthStore((state) => state.currentUser);
+  const canManageSettlement = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_SETTLEMENT, 'write');
+  const canManageRecoverySettlement = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'write');
   const [flowPage, setFlowPage] = useState(0);
   const [flowRowsPerPage, setFlowRowsPerPage] = useState(10);
   const [flowSearch, setFlowSearch] = useState('');
@@ -428,13 +430,15 @@ const Finance: React.FC = () => {
             >
               视图设置
             </Button>
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => setSettlementCreateSplitTrigger((value) => value + 1)}
-            >
-              新建订单分账
-            </Button>
+            {canManageSettlement && (
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={() => setSettlementCreateSplitTrigger((value) => value + 1)}
+              >
+                新建订单分账
+              </Button>
+            )}
           </Stack>
         )}
         {activeTab === 'recovery-settlement' && (
@@ -446,13 +450,15 @@ const Finance: React.FC = () => {
             >
               视图设置
             </Button>
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => setRecoverySettlementCreateTrigger((value) => value + 1)}
-            >
-              新建售后挽回分账
-            </Button>
+            {canManageRecoverySettlement && (
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={() => setRecoverySettlementCreateTrigger((value) => value + 1)}
+              >
+                新建售后挽回分账
+              </Button>
+            )}
           </Stack>
         )}
           </>
@@ -505,4 +511,3 @@ const Finance: React.FC = () => {
 };
 
 export default Finance;
-

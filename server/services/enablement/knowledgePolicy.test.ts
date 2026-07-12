@@ -53,7 +53,7 @@ assert.equal(canReviewKnowledge(reviewer, { id: 'dept-finance', managerId: 'user
 assert.equal(canReviewKnowledge(inheritedReviewer, { id: 'dept-sales', managerId: 'user-enablement-manager' } as any), true);
 assert.equal(canReviewKnowledge(activeSuperAdmin, { id: 'dept-finance', managerId: 'user-finance' } as any), true);
 assert.equal(canReviewKnowledge(inactiveSuperAdmin, { id: 'dept-finance', managerId: 'user-finance' } as any), false);
-assert.equal(canReviewKnowledge(roleDerivedSuperAdmin, { id: 'dept-finance', managerId: 'user-finance' } as any), true);
+assert.equal(canReviewKnowledge(roleDerivedSuperAdmin, { id: 'dept-finance', managerId: 'user-finance' } as any), false);
 assert.equal(canReviewKnowledge(readOnlyAllPermissions, { id: 'dept-finance', managerId: 'user-read-all' } as any), false);
 assert.equal(canPublishKnowledge(publisher), true);
 assert.equal(canPublishKnowledge(employee), false);

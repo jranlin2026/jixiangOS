@@ -5,7 +5,7 @@ import { authApi, roleApi, settingsApi } from './index';
 import { DEFAULT_USER_PASSWORD } from '../shared/utils/auth';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { DEFAULT_ROLES, mergeRoleWithDefaultAccess } from '../shared/utils/organizationConfig';
-import { CAPABILITY_KEYS, canReceiveLead, hasPermission, PERMISSION_KEYS, roleHasPermission, sanitizeRolePermissions, toAuthenticatedUser } from '../shared/utils/permissions';
+import { CAPABILITY_KEYS, canReceiveLead, getRoleEditorPermissionActions, hasPermission, isSuperAdmin, PERMISSION_KEYS, roleHasPermission, sanitizeRolePermissions, toAuthenticatedUser } from '../shared/utils/permissions';
 import type { Role } from '../types/role';
 
 const appSource = readFileSync(join(process.cwd(), 'src', 'App.tsx'), 'utf8');
@@ -18,6 +18,11 @@ assert.match(sidebarSource, /ROUTES\.GEO/);
 assert.match(rolePermissionSource, /PERMISSION_KEYS\.GEO_OVERVIEW/);
 assert.match(rolePermissionSource, /PERMISSION_KEYS\.GEO_CONTENT/);
 assert.match(rolePermissionSource, /PERMISSION_KEYS\.GEO_ANALYTICS/);
+assert.match(
+  rolePermissionSource,
+  /getRoleEditorPermissionActions/,
+  '角色编辑器必须把功能勾选映射为明确的 read\/write\/delete 动作，不能再次把员工操作权限降为只读',
+);
 assert.doesNotMatch(appSource, /PERMISSION_KEYS\.COMMISSION|PERMISSION_KEYS\.REFUND_CENTER/);
 assert.doesNotMatch(sidebarSource, /PERMISSION_KEYS\.COMMISSION|PERMISSION_KEYS\.REFUND_CENTER/);
 assert.doesNotMatch(sidebarSource, /group=leadCustomer[\s\S]*PERMISSION_KEYS\.LEADS_FLOW_CONFIG/);
@@ -82,6 +87,25 @@ Object.defineProperty(globalThis, 'localStorage', {
 });
 
 storage.clear();
+
+const readOnlyAllUser = {
+  role: '只读审计员',
+  roleId: 'role-read-only-auditor',
+  isActive: true,
+  permissions: [{ module: '全部', actions: ['read'] }],
+};
+assert.equal(isSuperAdmin(readOnlyAllUser), false);
+assert.equal(hasPermission(readOnlyAllUser, PERMISSION_KEYS.SETTINGS_ROLES, 'read'), true);
+assert.equal(hasPermission(readOnlyAllUser, PERMISSION_KEYS.SETTINGS_ROLES, 'write'), false);
+
+const realAdminUser = {
+  ...readOnlyAllUser,
+  role: '具备全权的普通命名角色',
+  roleId: 'role-full-access',
+  permissions: [{ module: '全部', actions: ['admin'] }],
+};
+assert.equal(isSuperAdmin(realAdminUser), true);
+assert.equal(hasPermission(realAdminUser, PERMISSION_KEYS.SETTINGS_ROLES, 'write'), true);
 
 const marketRole = DEFAULT_ROLES.find((role) => role.code === 'market_specialist');
 assert.ok(marketRole);
@@ -231,6 +255,16 @@ const customerAssignRole: Role = {
 };
 assert.equal(roleHasPermission(customerAssignRole, PERMISSION_KEYS.CUSTOMERS), true);
 assert.equal(roleHasPermission(customerAssignRole, PERMISSION_KEYS.CUSTOMER_ASSIGN, 'write'), true);
+assert.equal(roleHasPermission(customerAssignRole, PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, 'write'), false);
+
+const customerClaimRole: Role = {
+  ...legacyOpportunityRole,
+  id: 'role-customer-claim',
+  code: 'customer_claim',
+  permissions: [{ module: PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, actions: ['read', 'write'] }],
+};
+assert.equal(roleHasPermission(customerClaimRole, PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, 'write'), true);
+assert.equal(roleHasPermission(customerClaimRole, PERMISSION_KEYS.CUSTOMER_ASSIGN, 'write'), false);
 
 const leadFollowRole: Role = {
   ...legacyOpportunityRole,
@@ -261,6 +295,104 @@ const orderActionRole: Role = {
     { module: PERMISSION_KEYS.ORDER_DELETE, actions: ['read'] },
   ],
 };
+
+const roleEditorWriteActions = [
+  PERMISSION_KEYS.LEADS_CREATE,
+  PERMISSION_KEYS.LEADS_FOLLOW,
+  PERMISSION_KEYS.LEADS_FLOW_CONFIG,
+  PERMISSION_KEYS.CUSTOMER_CREATE,
+  PERMISSION_KEYS.CUSTOMER_EDIT,
+  PERMISSION_KEYS.CUSTOMER_ASSIGN,
+  PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM,
+  PERMISSION_KEYS.CUSTOMER_CREATE_ORDER,
+  PERMISSION_KEYS.ORDER_REVIEW,
+  PERMISSION_KEYS.ORDER_CREATE,
+  PERMISSION_KEYS.ORDER_EDIT,
+  PERMISSION_KEYS.DELIVERY_MOVE_CARD,
+  PERMISSION_KEYS.DELIVERY_STAGE_CONFIG,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT,
+  PERMISSION_KEYS.FINANCE_SETTLEMENT,
+  PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT,
+  PERMISSION_KEYS.FINANCE_PAYOUT,
+  PERMISSION_KEYS.FINANCE_FLOW,
+  PERMISSION_KEYS.FINANCE_RULES,
+  PERMISSION_KEYS.ASSETS_DEVICES,
+  PERMISSION_KEYS.ASSETS_PHONES,
+  PERMISSION_KEYS.ASSETS_ACCOUNTS,
+  PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH,
+  PERMISSION_KEYS.ASSETS_OFFBOARDING,
+  PERMISSION_KEYS.ASSETS_IMPORT_EXPORT,
+  PERMISSION_KEYS.ENABLEMENT_REVIEW,
+  PERMISSION_KEYS.ENABLEMENT_PUBLISH,
+  PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS,
+  PERMISSION_KEYS.SETTINGS_ROLES,
+  PERMISSION_KEYS.SETTINGS_ACCOUNT_RECYCLE,
+  PERMISSION_KEYS.SETTINGS_PRODUCTS,
+  PERMISSION_KEYS.SETTINGS_ORDER_TYPES,
+  PERMISSION_KEYS.SETTINGS_CUSTOMER_LEVELS,
+  PERMISSION_KEYS.SETTINGS_LIFECYCLE,
+  PERMISSION_KEYS.SETTINGS_LEAD_SOURCES,
+  PERMISSION_KEYS.SETTINGS_LEAD_FLOW,
+  PERMISSION_KEYS.SETTINGS_AI_CONFIG,
+  PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE,
+];
+roleEditorWriteActions.forEach((permissionKey) => {
+  assert.equal(
+    getRoleEditorPermissionActions(permissionKey).includes('write'),
+    true,
+    `角色编辑器勾选 ${permissionKey} 后必须保留显式 write 动作`,
+  );
+});
+
+[
+  PERMISSION_KEYS.ORDER_DELETE,
+  PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE,
+  PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS,
+  PERMISSION_KEYS.SETTINGS_ROLES,
+  PERMISSION_KEYS.SETTINGS_ACCOUNT_RECYCLE,
+  PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE,
+].forEach((permissionKey) => {
+  assert.equal(
+    getRoleEditorPermissionActions(permissionKey).includes('delete'),
+    true,
+    `角色编辑器勾选 ${permissionKey} 后必须保留显式 delete 动作`,
+  );
+});
+
+[
+  PERMISSION_KEYS.CUSTOMER_LIST,
+  PERMISSION_KEYS.CUSTOMER_DETAIL,
+  PERMISSION_KEYS.FINANCE_MY_COMMISSION,
+  PERMISSION_KEYS.ASSETS_OVERVIEW,
+  PERMISSION_KEYS.ASSETS_LOGS,
+  PERMISSION_KEYS.ASSETS_SENSITIVE_VIEW,
+].forEach((permissionKey) => {
+  assert.deepEqual(
+    getRoleEditorPermissionActions(permissionKey),
+    ['read'],
+    `纯查看权限 ${permissionKey} 不得因角色编辑器勾选而自动扩权`,
+  );
+});
+
+const mixedCustomerRolePermissions = sanitizeRolePermissions([
+  { module: PERMISSION_KEYS.CUSTOMER_CREATE, actions: ['read'] },
+  { module: PERMISSION_KEYS.CUSTOMER_EDIT, actions: ['read'] },
+  { module: PERMISSION_KEYS.CUSTOMER_ASSIGN, actions: ['read', 'write'] },
+  { module: PERMISSION_KEYS.CUSTOMER_CREATE_ORDER, actions: ['read'] },
+]);
+[
+  PERMISSION_KEYS.CUSTOMER_CREATE,
+  PERMISSION_KEYS.CUSTOMER_EDIT,
+  PERMISSION_KEYS.CUSTOMER_CREATE_ORDER,
+].forEach((permissionKey) => {
+  assert.deepEqual(
+    mixedCustomerRolePermissions.find((permission) => permission.module === permissionKey)?.actions,
+    ['read'],
+    `已显式保存为只读的 ${permissionKey} 不得因同组其他写权限被自动升级`,
+  );
+});
 assert.equal(roleHasPermission(orderActionRole, PERMISSION_KEYS.ORDER_EDIT, 'write'), true);
 assert.equal(roleHasPermission(orderActionRole, PERMISSION_KEYS.ORDER_DELETE, 'delete'), true);
 assert.deepEqual(

@@ -630,8 +630,14 @@ assert.deepEqual(tierConfigRes.data.tiers, [
   { minAmount: 30000, maxAmount: 50000, rate: 10 },
   { minAmount: 50000, rate: 15 },
 ]);
+const commissionsBeforeMonthlyRead = storage.getItem(STORAGE_KEYS.COMMISSIONS);
 const tieredMonthlyRes = await (commissionApi as any).fetchMonthlyCommissionPayouts('2026-05');
 assert.equal(tieredMonthlyRes.code, 0);
+assert.equal(
+  storage.getItem(STORAGE_KEYS.COMMISSIONS),
+  commissionsBeforeMonthlyRead,
+  'reading the monthly statement must not rewrite commission storage',
+);
 const tieredSales = tieredMonthlyRes.data.find((item: any) => item.ownerId === 'user-sales');
 assert.equal(tieredSales.monthlyPaidAmount, 30000);
 assert.equal(tieredSales.pendingPayAmount, 3123);

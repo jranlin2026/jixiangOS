@@ -7,8 +7,9 @@ import type {
 import type { Lead } from '../types/lead';
 import type { Order } from '../types/order';
 import type { ApiResponse, PaginatedResponse } from './types';
-import { createSuccessResponse, delay } from './types';
+import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
+import { shouldUseBackendApi } from './backendClient';
 import { DEFAULT_PAGE_SIZE, LIFECYCLE_STATUS_CODES, PRODUCT_LIST, STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { syncLeadLifecycleByLeadId } from './lifecycleSync';
@@ -95,6 +96,9 @@ async function getOpportunities(filters?: OpportunityFilters): Promise<ApiRespon
 }
 
 async function createFromLead(lead: Lead): Promise<ApiResponse<Opportunity>> {
+  if (shouldUseBackendApi()) {
+    return createErrorResponse('服务器模式的商机记录级联动尚未完成，为避免覆盖线索状态，当前已安全暂停', 409);
+  }
   ensureInit();
   await delay(150);
   const opportunities = getStorageData<Opportunity[]>(STORAGE_KEYS.OPPORTUNITIES) || [];
@@ -168,6 +172,9 @@ function createOrderFromOpportunity(opportunity: Opportunity, operator: string):
 }
 
 async function updateStage(id: string, stage: OpportunityStage, lostReason?: string): Promise<ApiResponse<Opportunity | null>> {
+  if (shouldUseBackendApi()) {
+    return createErrorResponse('服务器模式的商机状态联动尚未完成，为避免覆盖线索状态，当前已安全暂停', 409);
+  }
   ensureInit();
   await delay(100);
   const opportunities = getStorageData<Opportunity[]>(STORAGE_KEYS.OPPORTUNITIES) || [];
@@ -195,6 +202,9 @@ async function updateStage(id: string, stage: OpportunityStage, lostReason?: str
 }
 
 async function reopenOpportunity(id: string): Promise<ApiResponse<Opportunity | null>> {
+  if (shouldUseBackendApi()) {
+    return createErrorResponse('服务器模式的商机撤回联动尚未完成，为避免覆盖线索状态，当前已安全暂停', 409);
+  }
   ensureInit();
   await delay(100);
   const opportunities = getStorageData<Opportunity[]>(STORAGE_KEYS.OPPORTUNITIES) || [];

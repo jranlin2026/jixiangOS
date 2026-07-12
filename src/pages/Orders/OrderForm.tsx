@@ -21,7 +21,7 @@ import {
   getProductLevelColor,
   normalizeResourceOwnership,
 } from '../../shared/utils/constants';
-import { customerApi, orderReviewApi, productApi, settingsApi } from '../../api';
+import { customerApi, orderApi, orderReviewApi, productApi, settingsApi } from '../../api';
 import type { OrderType, PaymentMethod, ProductLevel } from '../../types/common';
 import type {
   CommissionScene,
@@ -34,6 +34,8 @@ import type { Product } from '../../types/product';
 import type { OrderTypeConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import { recognizePaymentProof as recognizePaymentProofFromOcr } from '../../shared/utils/paymentProofRecognition';
+import useAuthStore from '../../store/useAuthStore';
+import { filterUsersByCurrentDataScope } from '../../shared/utils/dataVisibility';
 
 interface OrderFormProps {
   open: boolean;
@@ -165,6 +167,7 @@ function getCustomerOptionLabel(customer: Customer): string {
 
 const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, application, customer }) => {
   const { update } = useOrderStore();
+  const currentUser = useAuthStore((state) => state.currentUser);
   const [products, setProducts] = useState<Product[]>([]);
   const [orderTypeConfigs, setOrderTypeConfigs] = useState<OrderTypeConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -313,10 +316,12 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   useEffect(() => {
     if (!open) return;
     Promise.all([
-      settingsApi.fetchUsers({ isActive: true }),
+      orderApi.fetchOwnerCandidates(),
       settingsApi.fetchOrderTypeConfigs(),
     ]).then(([userRes, orderTypeRes]) => {
-      if (userRes.code === 0) setUsers(userRes.data.filter((user) => user.isActive));
+      if (userRes.code === 0) {
+        setUsers(filterUsersByCurrentDataScope(userRes.data, 'orders', currentUser || undefined));
+      }
       if (orderTypeRes.code === 0) {
         const configs = orderTypeRes.data;
         const activeTypes = configs.filter((item) => item.isActive);
@@ -330,7 +335,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
         }
       }
     });
-  }, [open, order]);
+  }, [currentUser, open, order]);
 
   const productById = useMemo(
     () => new Map(products.map((product) => [product.id, product])),

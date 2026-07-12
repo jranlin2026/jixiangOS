@@ -13,6 +13,7 @@ import type { FinanceExpense, FinanceDailyRecord, ChannelROI, FinanceIncome } fr
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
+import { shouldUseBackendApi } from './backendClient';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { syncLifecycleByOrder, syncOpportunityRefundedByOrderId } from './lifecycleSync';
@@ -582,6 +583,12 @@ async function rejectRefund(id: string, approverId: string, approverName: string
 }
 
 async function completeRefund(id: string, refundMethod: string, refundVoucher?: string, refundSerialNo?: string, refundedAt?: string): Promise<ApiResponse<Refund | null>> {
+  if (shouldUseBackendApi()) {
+    return createErrorResponse(
+      '服务器模式的退款完成命令尚未迁移，为避免陈旧快照覆盖订单、客户和线索状态，当前已安全暂停',
+      409,
+    );
+  }
   ensureInit();
   await delay(200);
   const refunds = (getStorageData<Refund[]>(STORAGE_KEYS.REFUNDS) || []).map(normalizeRefund);

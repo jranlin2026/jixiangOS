@@ -46,5 +46,7 @@ const user = mapPrismaUser({
 });
 
 assert.equal(user.account, 'admin');
-assert.equal(user.passwordHash, 'mock-hash');
+assert.equal('passwordHash' in user, false);
+assert.equal('passwordSalt' in user, false);
+assert.equal('passwordUpdatedAt' in user, false);
 assert.equal(user.createdAt, '2026-06-24T00:00:00.000Z');

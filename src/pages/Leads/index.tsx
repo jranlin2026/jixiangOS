@@ -532,7 +532,7 @@ const Leads: React.FC = () => {
               {templateDownloading ? '生成中...' : '\u4e0b\u8f7dExcel\u6a21\u677f'}
             </Button>
             {activeTab === 0 && (
-              <PermissionGate permissionKey={PERMISSION_KEYS.LEADS_CREATE}>
+              <PermissionGate permissionKey={PERMISSION_KEYS.LEADS_CREATE} action="write">
                 <Box sx={{ display: 'flex', gap: 1 }}>
                   <Button variant="outlined" startIcon={<UploadFileIcon />} onClick={() => setBulkImportOpen(true)}>
                     {'\u6279\u91cf\u5165\u5e93'}

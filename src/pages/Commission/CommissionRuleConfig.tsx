@@ -44,6 +44,8 @@ import type {
   SimpleCommissionRulePayout,
 } from '../../types/commission';
 import type { OrderTypeConfig } from '../../types/settings';
+import useAuthStore from '../../store/useAuthStore';
+import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 
 const RESOURCE_OPTIONS: Array<{ value: ResourceOwnership; label: string }> = [
   { value: '公司资源', label: '公司资源' },
@@ -153,6 +155,8 @@ function cloneRuleForm(form: SimpleCommissionRuleGroupInput): SimpleCommissionRu
 }
 
 const CommissionRuleConfig: React.FC = () => {
+  const currentUser = useAuthStore((state) => state.currentUser);
+  const canManageRules = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_RULES, 'write');
   const [view, setView] = useState<'rules' | 'plans' | 'roles'>('rules');
   const [groups, setGroups] = useState<SimpleCommissionRuleGroup[]>([]);
   const [payoutPlans, setPayoutPlans] = useState<CommissionPayoutPlan[]>([]);
@@ -411,6 +415,7 @@ const CommissionRuleConfig: React.FC = () => {
   };
 
   const saveTierConfig = async () => {
+    if (!canManageRules) return;
     const rows = normalizeTierRowsForEditor(tierConfigRows);
     const validation = validateTierRows(rows);
     if (validation) {
@@ -516,6 +521,7 @@ const CommissionRuleConfig: React.FC = () => {
   };
 
   const handleSubmitPlan = async () => {
+    if (!canManageRules) return;
     setPlanFormError('');
     if (planValidationMessage) {
       setShowPlanValidation(true);
@@ -542,6 +548,7 @@ const CommissionRuleConfig: React.FC = () => {
   };
 
   const handleTogglePlanActive = async (plan: CommissionPayoutPlan) => {
+    if (!canManageRules) return;
     await commissionRuleApi.updateCommissionPayoutPlan(plan.id, {
       name: plan.name,
       commissionType: plan.commissionType,
@@ -554,6 +561,7 @@ const CommissionRuleConfig: React.FC = () => {
   };
 
   const handleDeletePlan = async (plan: CommissionPayoutPlan) => {
+    if (!canManageRules) return;
     const res = await commissionRuleApi.deleteCommissionPayoutPlan(plan.id);
     if (res.code !== 0) {
       setPageError(res.message || '删除失败');
@@ -563,6 +571,7 @@ const CommissionRuleConfig: React.FC = () => {
   };
 
   const handleSubmitRule = async () => {
+    if (!canManageRules) return;
     setRuleFormError('');
     if (ruleValidationMessage) {
       setShowRuleValidation(true);
@@ -588,6 +597,7 @@ const CommissionRuleConfig: React.FC = () => {
   };
 
   const handleToggleRuleActive = async (group: SimpleCommissionRuleGroup) => {
+    if (!canManageRules) return;
     await commissionRuleApi.updateSimpleCommissionRuleGroup(group.id, {
       name: group.name,
       orderType: group.orderType,
@@ -599,6 +609,7 @@ const CommissionRuleConfig: React.FC = () => {
   };
 
   const handleDeleteRule = async (group: SimpleCommissionRuleGroup) => {
+    if (!canManageRules) return;
     await commissionRuleApi.deleteSimpleCommissionRuleGroup(group.id);
     fetchAll();
   };
@@ -624,6 +635,7 @@ const CommissionRuleConfig: React.FC = () => {
   };
 
   const handleSubmitRole = async () => {
+    if (!canManageRules) return;
     setRoleFormError('');
     if (roleValidationMessage) {
       setShowRoleValidation(true);
@@ -648,11 +660,13 @@ const CommissionRuleConfig: React.FC = () => {
   };
 
   const handleToggleRoleActive = async (config: CommissionRoleConfig) => {
+    if (!canManageRules) return;
     await commissionRuleApi.updateCommissionRoleConfig(config.id, { isActive: !config.isActive });
     fetchAll();
   };
 
   const handleDeleteRole = async (config: CommissionRoleConfig) => {
+    if (!canManageRules) return;
     const res = await commissionRuleApi.deleteCommissionRoleConfig(config.id);
     if (res.code !== 0) {
       setPageError(res.message || '删除失败');
@@ -672,7 +686,7 @@ const CommissionRuleConfig: React.FC = () => {
             提成角色仅用于分账口径和订单人员归属，不影响系统登录角色和页面权限。
           </Typography>
         </Box>
-        {view === 'rules' ? (
+        {canManageRules && (view === 'rules' ? (
           <Button variant="contained" startIcon={<AddIcon />} size="small" onClick={() => handleOpenRuleForm()}>
             新增规则
           </Button>
@@ -684,7 +698,7 @@ const CommissionRuleConfig: React.FC = () => {
           <Button variant="contained" startIcon={<AddIcon />} size="small" onClick={() => handleOpenRoleForm()}>
             新增角色
           </Button>
-        )}
+        ))}
       </Box>
 
       <Tabs value={view} onChange={(_event, value) => setView(value)} sx={{ mb: 2 }}>
@@ -739,6 +753,8 @@ const CommissionRuleConfig: React.FC = () => {
                     />
                   </TableCell>
                   <TableCell align="center">
+                    {canManageRules && (
+                      <>
                     <Switch checked={group.isActive} size="small" onChange={() => handleToggleRuleActive(group)} />
                     <IconButton size="small" onClick={() => handleOpenRuleForm(group)} title="编辑">
                       <EditIcon fontSize="small" />
@@ -746,6 +762,8 @@ const CommissionRuleConfig: React.FC = () => {
                     <IconButton size="small" color="error" onClick={() => handleDeleteRule(group)} title="删除">
                       <DeleteIcon fontSize="small" />
                     </IconButton>
+                      </>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -796,6 +814,8 @@ const CommissionRuleConfig: React.FC = () => {
                       />
                     </TableCell>
                     <TableCell align="center">
+                      {canManageRules && (
+                        <>
                       <Switch checked={plan.isActive} size="small" onChange={() => handleTogglePlanActive(plan)} />
                       <IconButton size="small" onClick={() => handleOpenPlanForm(plan)} title="编辑">
                         <EditIcon fontSize="small" />
@@ -803,6 +823,8 @@ const CommissionRuleConfig: React.FC = () => {
                       <IconButton size="small" color="error" onClick={() => handleDeletePlan(plan)} title="删除">
                         <DeleteIcon fontSize="small" />
                       </IconButton>
+                        </>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -854,6 +876,8 @@ const CommissionRuleConfig: React.FC = () => {
                     />
                   </TableCell>
                   <TableCell align="center">
+                    {canManageRules && (
+                      <>
                     <Switch checked={config.isActive} size="small" onChange={() => handleToggleRoleActive(config)} />
                     <IconButton size="small" onClick={() => handleOpenRoleForm(config)} title="编辑">
                       <EditIcon fontSize="small" />
@@ -861,6 +885,8 @@ const CommissionRuleConfig: React.FC = () => {
                     <IconButton size="small" color="error" onClick={() => handleDeleteRole(config)} title="删除">
                       <DeleteIcon fontSize="small" />
                     </IconButton>
+                      </>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

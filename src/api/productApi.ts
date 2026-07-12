@@ -2,6 +2,7 @@ import type { Product, ProductLevelConfig } from '../types/product';
 import type { ApiResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
+import { shouldUseBackendApi } from './backendClient';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
@@ -78,6 +79,8 @@ function replaceProductLevelReferences(oldName: string, newName: string): void {
 }
 
 function syncDeliveryStages(product: Product): void {
+  // 已开始的交付单保留创建时的阶段快照；服务器模式不再用局部整表回写旧交付单。
+  if (shouldUseBackendApi()) return;
   const deliveries = getStorageData<Delivery[]>(STORAGE_KEYS.DELIVERIES) || [];
   const now = new Date().toISOString();
   const next = deliveries.map((delivery) => {
@@ -158,6 +161,16 @@ async function updateProductLevelConfig(
   id: string,
   data: Partial<Omit<ProductLevelConfig, 'id' | 'createdAt' | 'updatedAt'>>,
 ): Promise<ApiResponse<ProductLevelConfig | null>> {
+  if (shouldUseBackendApi() && typeof data.name === 'string') {
+    const existing = getStorageData<ProductLevelConfig[]>(STORAGE_KEYS.PRODUCT_LEVELS) || [];
+    const current = existing.find((config) => config.id === id);
+    if (current && data.name.trim() !== current.name) {
+      return createErrorResponse(
+        '服务器模式的产品等级更名需要记录级迁移客户、订单和交付引用，完成前已安全暂停',
+        409,
+      );
+    }
+  }
   ensureInit();
   await delay(150);
   const configs = ensureProductLevelConfigs();
@@ -168,6 +181,12 @@ async function updateProductLevelConfig(
   if (!nextName) return createErrorResponse('等级名称不能为空');
   if (configs.some((config) => config.id !== id && config.name === nextName)) {
     return createErrorResponse('等级名称已存在');
+  }
+  if (shouldUseBackendApi() && oldName !== nextName) {
+    return createErrorResponse(
+      '服务器模式的产品等级更名需要记录级迁移客户、订单和交付引用，完成前已安全暂停',
+      409,
+    );
   }
 
   const updated: ProductLevelConfig = {

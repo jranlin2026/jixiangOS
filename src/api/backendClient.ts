@@ -1,8 +1,24 @@
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
+import { STORAGE_KEYS } from '../shared/utils/constants';
 import type { ApiResponse } from './types';
 
 const BACKEND_SESSION_KEY = 'aaos_backend_auth_token';
 const LOCAL_ONLY_STORAGE_KEYS = new Set([AUTH_SESSION_STORAGE_KEY, BACKEND_SESSION_KEY]);
+const COMMAND_ONLY_STORAGE_KEYS = new Set<string>([
+  STORAGE_KEYS.CUSTOMERS,
+  STORAGE_KEYS.LEADS,
+  STORAGE_KEYS.ORDERS,
+  STORAGE_KEYS.ORDER_APPLICATIONS,
+  STORAGE_KEYS.DELIVERIES,
+]);
+
+export function isBackendCommandOnlyStorageKey(key: string): boolean {
+  return COMMAND_ONLY_STORAGE_KEYS.has(key);
+}
+
+export function commandOnlyStorageWriteError(key: string): Error {
+  return new Error(`${key} 只能通过记录级命令保存，legacy 整表写已禁用`);
+}
 
 function readEnv(name: string): string | undefined {
   const viteEnv = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
@@ -126,6 +142,7 @@ export async function syncBackendStorageFromServer(maxAgeMs = 1000): Promise<voi
 export function persistBackendStorageValue(key: string, value: unknown): Promise<void> {
   if (!shouldUseBackendApi()) return Promise.resolve();
   if (isLocalOnlyStorageKey(key)) return Promise.resolve();
+  if (isBackendCommandOnlyStorageKey(key)) return Promise.reject(commandOnlyStorageWriteError(key));
   pendingStorageWriteKeys.add(key);
   protectStorageKeyFromHydration(key);
   const writePromise = backendRequest(`/storage/${encodeURIComponent(key)}`, {

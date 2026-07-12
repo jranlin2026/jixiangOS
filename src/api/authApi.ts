@@ -26,7 +26,11 @@ import {
   writeBackendToken,
 } from './backendClient';
 
-const ASSET_STORAGE_KEYS = [
+const SESSION_SCOPED_STORAGE_KEYS = [
+  STORAGE_KEYS.ORDERS,
+  STORAGE_KEYS.ORDER_APPLICATIONS,
+  STORAGE_KEYS.DELIVERIES,
+  STORAGE_KEYS.RECOVERY_ORDERS,
   STORAGE_KEYS.ASSET_DEVICES,
   STORAGE_KEYS.ASSET_PHONE_NUMBERS,
   STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS,
@@ -35,9 +39,9 @@ const ASSET_STORAGE_KEYS = [
   STORAGE_KEYS.ASSET_OFFBOARDING_TASKS,
 ];
 
-function clearAssetStorageCache(): void {
+function clearSessionScopedStorageCache(): void {
   if (typeof localStorage === 'undefined') return;
-  ASSET_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
+  SESSION_SCOPED_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
 }
 
 function setLocalCache<T>(key: string, value: T): void {
@@ -126,7 +130,7 @@ function cacheBackendAuthenticatedUser(user: AuthenticatedUser, token?: string, 
 async function login(payload: LoginPayload): Promise<ApiResponse<AuthenticatedUser | null>> {
   if (shouldUseBackendApi()) {
     await flushBackendStorageWrites();
-    clearAssetStorageCache();
+    clearSessionScopedStorageCache();
     const response = await backendRequest<{ token: string; user: AuthenticatedUser }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -192,7 +196,7 @@ async function logout(): Promise<ApiResponse<boolean>> {
     const response = await backendRequest<boolean>('/auth/logout', { method: 'POST' });
     clearBackendToken();
     if (typeof localStorage !== 'undefined') localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
-    clearAssetStorageCache();
+    clearSessionScopedStorageCache();
     return response;
   }
 

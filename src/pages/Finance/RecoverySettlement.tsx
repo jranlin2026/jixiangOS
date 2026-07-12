@@ -32,7 +32,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import UndoIcon from '@mui/icons-material/Undo';
 import SearchIcon from '@mui/icons-material/Search';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import { commissionApi, commissionRuleApi, departmentApi, recoveryOrderApi, settingsApi } from '../../api';
+import { commissionApi, commissionRuleApi, recoveryOrderApi, settingsApi } from '../../api';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog, { type TableViewColumnConfig } from '../../shared/components/TableViewSettingsDialog';
@@ -43,7 +43,7 @@ import type { Department } from '../../types/department';
 import type { Position } from '../../types/position';
 import type { User } from '../../types/settings';
 import useAuthStore from '../../store/useAuthStore';
-import { isSuperAdmin } from '../../shared/utils/permissions';
+import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { StatusSegmentBar } from '../../shared/components/ModuleShell';
 
 const shell = {
@@ -196,6 +196,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   createSettlementTrigger = 0,
 }) => {
   const currentUser = useAuthStore((state) => state.currentUser);
+  const canManageRecoverySettlement = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'write');
   const [rows, setRows] = useState<RecoveryOrder[]>([]);
   const [allRowsForCounts, setAllRowsForCounts] = useState<RecoveryOrder[]>([]);
   const [page, setPage] = useState(0);
@@ -272,7 +273,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   }), [getDefaultRecoveryOwnerId]);
 
   const load = useCallback(async () => {
-    const [allRes, usersRes, departmentsRes, positionsRes, rolesRes, plansRes] = await Promise.all([
+    const [allRes, directoryRes, rolesRes, plansRes] = await Promise.all([
       recoveryOrderApi.fetchRecoveryOrders({
         search,
         settlementStatus: '全部',
@@ -280,9 +281,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         page: 1,
         pageSize: 500,
       }),
-      settingsApi.fetchAssignableUsers(),
-      departmentApi.getDepartments(),
-      settingsApi.fetchPositions({ isActive: true }),
+      settingsApi.fetchAssignableDirectory(),
       commissionRuleApi.getCommissionRoleConfigs({ isActive: true }),
       commissionRuleApi.getCommissionPayoutPlans(),
     ]);
@@ -299,9 +298,11 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       setTotal(filteredRows.length);
       setAllRowsForCounts(settlementReadyRows);
     }
-    if (usersRes.code === 0) setUsers(usersRes.data);
-    if (departmentsRes.code === 0) setDepartments(departmentsRes.data);
-    if (positionsRes.code === 0) setPositions(positionsRes.data);
+    if (directoryRes.code === 0) {
+      setUsers(directoryRes.data.users);
+      setDepartments(directoryRes.data.departments);
+      setPositions(directoryRes.data.positions);
+    }
     if (rolesRes.code === 0) setRoles(rolesRes.data);
     if (plansRes.code === 0) setPlans(plansRes.data);
   }, [page, rowsPerPage, search, status]);
@@ -390,6 +391,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   }, [viewSettingsTrigger]);
 
   useEffect(() => {
+    if (!canManageRecoverySettlement) return;
     if (createSettlementTrigger <= 0) return;
     if (handledCreateSettlementTriggerRef.current === createSettlementTrigger) return;
     handledCreateSettlementTriggerRef.current = createSettlementTrigger;
@@ -397,7 +399,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     setSelectedCreatableRecoveryId('');
     setCreateSettlementOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [createSettlementTrigger]);
+  }, [canManageRecoverySettlement, createSettlementTrigger]);
 
   useEffect(() => {
     if (!createSettlementOpen) return;
@@ -453,6 +455,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   };
 
   const openSettlement = async (order: RecoveryOrder) => {
+    if (!canManageRecoverySettlement) return;
     if (isSourceRecoveryDeleted(order)) {
       setMessage({ type: 'error', text: '源售后挽回订单已删除，只能查看或清理废弃分账' });
       return;
@@ -502,6 +505,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   const removeRow = (index: number) => setSettlementRows((prev) => prev.filter((_, rowIndex) => rowIndex !== index));
 
   const submitSettlement = async () => {
+    if (!canManageRecoverySettlement) return;
     if (!selected || !currentUser) return;
     const payload: RecoverySettlementInput[] = settlementRows.map((row) => {
       const plan = activePlans.find((item) => item.id === row.payoutPlanId);
@@ -538,6 +542,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   };
 
   const confirmSettlement = async (row: RecoveryOrder) => {
+    if (!canManageRecoverySettlement) return;
     if (!currentUser) return;
     if (getSettlementStatus(row) !== '待确认') {
       setMessage({ type: 'error', text: '只有待确认的售后挽回分账可以确认' });
@@ -555,6 +560,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   };
 
   const withdrawSettlement = async (row: RecoveryOrder, nextWithdrawReason: string) => {
+    if (!canManageRecoverySettlement) return;
     if (!currentUser) return;
     if (!['待确认', '待发放'].includes(getSettlementStatus(row))) {
       setMessage({ type: 'error', text: '只有待确认或待发放的售后挽回分账可以撤回' });
@@ -574,6 +580,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   };
 
   const openResetSettlementDialog = (row: RecoveryOrder) => {
+    if (!canManageRecoverySettlement) return;
     if (isSourceRecoveryDeleted(row)) {
       if (!isSuperAdmin(currentUser)) {
         setMessage({ type: 'error', text: '源挽回单已删除，仅管理员可以清理废弃分账' });
@@ -592,6 +599,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   };
 
   const handleResetSettlement = async () => {
+    if (!canManageRecoverySettlement) return;
     if (!currentUser) return;
     if (!deleteTarget) return;
     if (!deleteReason.trim()) {
@@ -678,32 +686,36 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                 <VisibilityIcon fontSize="small" />
               </IconButton>
             </Tooltip>
-            <Tooltip title={getAdjustDisabledReason(row)}>
-              <span>
-                <IconButton
-                  size="small"
-                  sx={{ color: canAdjustSettlement(row) ? shell.blue : '#94a3b8' }}
-                  disabled={!canAdjustSettlement(row)}
-                  onClick={() => openSettlement(row)}
-                  aria-label="调整分账"
-                >
-                  <EditIcon fontSize="small" />
-                </IconButton>
-              </span>
-            </Tooltip>
-            <Tooltip title={getDeleteDisabledReason(row)}>
-              <span>
-                <IconButton
-                  size="small"
-                  sx={{ color: canDeleteSettlement(row) ? shell.red : '#cbd5e1' }}
-                  disabled={!canDeleteSettlement(row)}
-                  onClick={() => openResetSettlementDialog(row)}
-                  aria-label="删除售后挽回分账"
-                >
-                  <DeleteOutlineIcon fontSize="small" />
-                </IconButton>
-              </span>
-            </Tooltip>
+            {canManageRecoverySettlement && (
+              <>
+                <Tooltip title={getAdjustDisabledReason(row)}>
+                  <span>
+                    <IconButton
+                      size="small"
+                      sx={{ color: canAdjustSettlement(row) ? shell.blue : '#94a3b8' }}
+                      disabled={!canAdjustSettlement(row)}
+                      onClick={() => openSettlement(row)}
+                      aria-label="调整分账"
+                    >
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+                <Tooltip title={getDeleteDisabledReason(row)}>
+                  <span>
+                    <IconButton
+                      size="small"
+                      sx={{ color: canDeleteSettlement(row) ? shell.red : '#cbd5e1' }}
+                      disabled={!canDeleteSettlement(row)}
+                      onClick={() => openResetSettlementDialog(row)}
+                      aria-label="删除售后挽回分账"
+                    >
+                      <DeleteOutlineIcon fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              </>
+            )}
           </Stack>
         );
       default:
@@ -892,19 +904,21 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                         按角色核对人员、方案和金额，售后挽回分账只保留在售后挽回链路。
                       </Typography>
                     </Box>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      startIcon={<EditIcon />}
-                      disabled={isSourceRecoveryDeleted(detailOrder) || (getSettlementStatus(detailOrder) !== '待处理' && getSettlementStatus(detailOrder) !== '待确认')}
-                      onClick={() => {
-                        closeDetail();
-                        openSettlement(detailOrder);
-                      }}
-                      sx={{ whiteSpace: 'nowrap' }}
-                    >
-                      调整分账
-                    </Button>
+                    {canManageRecoverySettlement && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<EditIcon />}
+                        disabled={isSourceRecoveryDeleted(detailOrder) || (getSettlementStatus(detailOrder) !== '待处理' && getSettlementStatus(detailOrder) !== '待确认')}
+                        onClick={() => {
+                          closeDetail();
+                          openSettlement(detailOrder);
+                        }}
+                        sx={{ whiteSpace: 'nowrap' }}
+                      >
+                        调整分账
+                      </Button>
+                    )}
                   </Box>
 
                   <Box sx={{ p: 1.5, bgcolor: '#f8fafc', minHeight: '48vh' }}>
@@ -994,73 +1008,77 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                               ? '本单已进入发放链路，如有错误可撤回。'
                               : '本单提成已撤回，只保留历史记录。'}
                       </Typography>
-                      {isSourceRecoveryDeleted(detailOrder) && isSuperAdmin(currentUser) && (
-                        <Button
-                          variant="contained"
-                          color="warning"
-                          startIcon={<DeleteOutlineIcon />}
-                          onClick={() => {
-                            closeDetail();
-                            openResetSettlementDialog(detailOrder);
-                          }}
-                        >
-                          清理废弃分账
-                        </Button>
-                      )}
-                      {!isSourceRecoveryDeleted(detailOrder) && getSettlementStatus(detailOrder) === '待处理' && (
-                        <Button
-                          variant="contained"
-                          startIcon={<EditIcon />}
-                          onClick={() => {
-                            closeDetail();
-                            openSettlement(detailOrder);
-                          }}
-                        >
-                          处理分账
-                        </Button>
-                      )}
-                      {!isSourceRecoveryDeleted(detailOrder) && getSettlementStatus(detailOrder) === '待确认' && (
+                      {canManageRecoverySettlement && (
                         <>
-                          <Button variant="contained" color="success" startIcon={<CheckCircleOutlineIcon />} onClick={() => confirmSettlement(detailOrder)}>
-                            确认分账
-                          </Button>
-                          <TextField
-                            label="撤回原因"
-                            value={withdrawReason}
-                            onChange={(event) => setWithdrawReason(event.target.value)}
-                            size="small"
-                            placeholder="例如：线下调整、金额错误"
-                            fullWidth
-                          />
-                          <Button
-                            variant="outlined"
-                            color="error"
-                            onClick={() => withdrawSettlement(detailOrder, withdrawReason)}
-                            disabled={!withdrawReason.trim()}
-                          >
-                            撤回提成
-                          </Button>
-                        </>
-                      )}
-                      {!isSourceRecoveryDeleted(detailOrder) && getSettlementStatus(detailOrder) === '待发放' && (
-                        <>
-                          <TextField
-                            label="撤回原因"
-                            value={withdrawReason}
-                            onChange={(event) => setWithdrawReason(event.target.value)}
-                            size="small"
-                            placeholder="例如：线下调整、金额错误"
-                            fullWidth
-                          />
-                          <Button
-                            variant="contained"
-                            color="error"
-                            startIcon={<UndoIcon />}
-                            onClick={() => withdrawSettlement(detailOrder, withdrawReason)}
-                            disabled={!withdrawReason.trim()}
-                          >
-                            撤回提成
-                          </Button>
+                          {isSourceRecoveryDeleted(detailOrder) && isSuperAdmin(currentUser) && (
+                            <Button
+                              variant="contained"
+                              color="warning"
+                              startIcon={<DeleteOutlineIcon />}
+                              onClick={() => {
+                                closeDetail();
+                                openResetSettlementDialog(detailOrder);
+                              }}
+                            >
+                              清理废弃分账
+                            </Button>
+                          )}
+                          {!isSourceRecoveryDeleted(detailOrder) && getSettlementStatus(detailOrder) === '待处理' && (
+                            <Button
+                              variant="contained"
+                              startIcon={<EditIcon />}
+                              onClick={() => {
+                                closeDetail();
+                                openSettlement(detailOrder);
+                              }}
+                            >
+                              处理分账
+                            </Button>
+                          )}
+                          {!isSourceRecoveryDeleted(detailOrder) && getSettlementStatus(detailOrder) === '待确认' && (
+                            <>
+                              <Button variant="contained" color="success" startIcon={<CheckCircleOutlineIcon />} onClick={() => confirmSettlement(detailOrder)}>
+                                确认分账
+                              </Button>
+                              <TextField
+                                label="撤回原因"
+                                value={withdrawReason}
+                                onChange={(event) => setWithdrawReason(event.target.value)}
+                                size="small"
+                                placeholder="例如：线下调整、金额错误"
+                                fullWidth
+                              />
+                              <Button
+                                variant="outlined"
+                                color="error"
+                                onClick={() => withdrawSettlement(detailOrder, withdrawReason)}
+                                disabled={!withdrawReason.trim()}
+                              >
+                                撤回提成
+                              </Button>
+                            </>
+                          )}
+                          {!isSourceRecoveryDeleted(detailOrder) && getSettlementStatus(detailOrder) === '待发放' && (
+                            <>
+                              <TextField
+                                label="撤回原因"
+                                value={withdrawReason}
+                                onChange={(event) => setWithdrawReason(event.target.value)}
+                                size="small"
+                                placeholder="例如：线下调整、金额错误"
+                                fullWidth
+                              />
+                              <Button
+                                variant="contained"
+                                color="error"
+                                startIcon={<UndoIcon />}
+                                onClick={() => withdrawSettlement(detailOrder, withdrawReason)}
+                                disabled={!withdrawReason.trim()}
+                              >
+                                撤回提成
+                              </Button>
+                            </>
+                          )}
                         </>
                       )}
                     </Stack>
@@ -1193,17 +1211,19 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setCreateSettlementOpen(false)}>关闭</Button>
-          <Button
-            variant="contained"
-            disabled={!selectedCreatableRecoveryOrder}
-            onClick={() => {
-              if (!selectedCreatableRecoveryOrder) return;
-              setCreateSettlementOpen(false);
-              openSettlement(selectedCreatableRecoveryOrder);
-            }}
-          >
-            开始处理分账
-          </Button>
+          {canManageRecoverySettlement && (
+            <Button
+              variant="contained"
+              disabled={!selectedCreatableRecoveryOrder}
+              onClick={() => {
+                if (!selectedCreatableRecoveryOrder) return;
+                setCreateSettlementOpen(false);
+                openSettlement(selectedCreatableRecoveryOrder);
+              }}
+            >
+              开始处理分账
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 
@@ -1453,7 +1473,9 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                     </Box>
 
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, mt: 1.5 }}>
-                      <Button startIcon={<AddIcon />} onClick={addRow} sx={{ alignSelf: { xs: 'stretch', sm: 'center' } }}>新增分账</Button>
+                      {canManageRecoverySettlement && (
+                        <Button startIcon={<AddIcon />} onClick={addRow} sx={{ alignSelf: { xs: 'stretch', sm: 'center' } }}>新增分账</Button>
+                      )}
                       <TextField
                         size="small"
                         label="调整原因"
@@ -1467,13 +1489,15 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                       <Button onClick={() => setSelected(null)}>
                         取消编辑
                       </Button>
-                      <Button
-                        variant="contained"
-                        disabled={saving || !reason.trim() || settlementRows.length === 0 || settlementRows.some((row) => !row.ownerId || !row.payoutPlanId)}
-                        onClick={submitSettlement}
-                      >
-                        {saving ? '保存中...' : '保存调整'}
-                      </Button>
+                      {canManageRecoverySettlement && (
+                        <Button
+                          variant="contained"
+                          disabled={saving || !reason.trim() || settlementRows.length === 0 || settlementRows.some((row) => !row.ownerId || !row.payoutPlanId)}
+                          onClick={submitSettlement}
+                        >
+                          {saving ? '保存中...' : '保存调整'}
+                        </Button>
+                      )}
                     </Stack>
                   </Box>
                 </Paper>
@@ -1572,9 +1596,11 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
           }}>
             取消
           </Button>
-          <Button color="error" variant="contained" onClick={handleResetSettlement} disabled={!deleteReason.trim()}>
-            {deleteTarget && isSourceRecoveryDeleted(deleteTarget) ? '确认清理' : '确认删除'}
-          </Button>
+          {canManageRecoverySettlement && (
+            <Button color="error" variant="contained" onClick={handleResetSettlement} disabled={!deleteReason.trim()}>
+              {deleteTarget && isSourceRecoveryDeleted(deleteTarget) ? '确认清理' : '确认删除'}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 
@@ -1607,14 +1633,16 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setWithdrawTarget(null)}>取消</Button>
-          <Button
-            color="warning"
-            variant="contained"
-            disabled={!withdrawReason.trim() || !withdrawTarget}
-            onClick={() => withdrawTarget && withdrawSettlement(withdrawTarget, withdrawReason)}
-          >
-            确认撤回
-          </Button>
+          {canManageRecoverySettlement && (
+            <Button
+              color="warning"
+              variant="contained"
+              disabled={!withdrawReason.trim() || !withdrawTarget}
+              onClick={() => withdrawTarget && withdrawSettlement(withdrawTarget, withdrawReason)}
+            >
+              确认撤回
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 
@@ -1638,4 +1666,3 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
 };
 
 export default RecoverySettlement;
-

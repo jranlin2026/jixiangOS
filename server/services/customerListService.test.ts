@@ -6,7 +6,13 @@ import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 const created: any[] = [];
 const service = createCustomerListService({
   businessRecord: {
+    findMany: async () => created.map((item) => ({ data: item.data.data })),
     create: async (input: any) => {
+      if (created.some((item) => item.data.id === input.data.id)) {
+        const error = new Error('duplicate business record') as Error & { code?: string };
+        error.code = 'P2002';
+        throw error;
+      }
       created.push(input);
       return input.data;
     },
@@ -49,3 +55,74 @@ const denied = await service.create({
 
 assert.equal(denied.code, 403);
 assert.equal(created.length, 1);
+
+const emptyName = await service.create({
+  name: '',
+  company: '',
+  phone: '13700000000',
+  customerLevel: 'L1',
+  owner: '销售',
+  sourceType: '公司资源',
+}, actor);
+
+assert.equal(emptyName.code, 400);
+assert.equal(emptyName.message, '客户姓名不能为空');
+
+const emptyPhone = await service.create({
+  name: '缺少手机号',
+  company: '',
+  phone: '',
+  customerLevel: 'L1',
+  owner: '销售',
+  sourceType: '公司资源',
+}, actor);
+
+assert.equal(emptyPhone.code, 400);
+assert.equal(emptyPhone.message, '客户手机号或微信至少填写一项');
+
+const wechatOnly = await service.create({
+  name: '微信客户',
+  company: '',
+  phone: '',
+  wechat: 'wechat_customer_2026',
+  customerLevel: 'L1',
+  owner: '销售',
+  sourceType: '公司资源',
+}, actor);
+
+assert.equal(wechatOnly.code, 0, '页面允许手机号或微信二选一，服务端必须接受仅微信客户');
+
+const overlongName = await service.create({
+  name: '客'.repeat(101),
+  company: '',
+  phone: '13700000001',
+  customerLevel: 'L1',
+  owner: '销售',
+  sourceType: '公司资源',
+}, actor);
+
+assert.equal(overlongName.code, 400);
+assert.equal(overlongName.message, '客户姓名不能超过100个字符');
+
+const [firstDuplicate, secondDuplicate] = await Promise.all([
+  service.create({
+    name: '并发客户甲',
+    company: '',
+    phone: '136 0000 0000',
+    customerLevel: 'L1',
+    owner: '销售',
+    sourceType: '公司资源',
+  }, actor),
+  service.create({
+    name: '并发客户乙',
+    company: '',
+    phone: '+86 13600000000',
+    customerLevel: 'L1',
+    owner: '销售',
+    sourceType: '公司资源',
+  }, actor),
+]);
+
+assert.equal(firstDuplicate.code, 0);
+assert.equal(secondDuplicate.code, 409);
+assert.equal(secondDuplicate.message, '该手机号已存在客户');

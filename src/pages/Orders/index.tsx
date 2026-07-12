@@ -51,7 +51,8 @@ import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import PermissionGate from '../../shared/auth/PermissionGate';
 import { PERMISSION_KEYS } from '../../shared/utils/permissions';
-import { filterOrderUsersByCurrentDataScope } from '../../shared/utils/dataVisibility';
+import { filterUsersByCurrentDataScope } from '../../shared/utils/dataVisibility';
+import useAuthStore from '../../store/useAuthStore';
 import ResizableHeaderCell, {
   getResizableCellSx,
   readColumnWidths,
@@ -182,6 +183,7 @@ const readOrderViewConfig = () => {
 
 const Orders: React.FC = () => {
   const { items, filters, pagination, fetchItems, setFilters, delete: deleteOrder } = useOrderStore();
+  const currentUser = useAuthStore((state) => state.currentUser);
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') === 'review' ? 'review' : 'list';
   const orderIdParam = searchParams.get('orderId');
@@ -214,7 +216,7 @@ const Orders: React.FC = () => {
     settingsApi.fetchOrderTypeConfigs().then((res) => {
       if (res.code === 0) setOrderTypeConfigs(res.data);
     });
-    settingsApi.fetchUsers({ isActive: true }).then((res) => {
+    orderApi.fetchOwnerCandidates().then((res) => {
       if (res.code === 0) setUsers(res.data.filter((user) => user.isActive));
     });
   }, []);
@@ -478,7 +480,10 @@ const Orders: React.FC = () => {
     [orderedColumns, visibleColumnIds],
   );
   const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length);
-  const visibleOwnerUsers = useMemo(() => filterOrderUsersByCurrentDataScope(users), [users]);
+  const visibleOwnerUsers = useMemo(
+    () => filterUsersByCurrentDataScope(users, 'orders', currentUser || undefined),
+    [currentUser, users],
+  );
   const tableMinWidth = useMemo(
     () => visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + ORDER_ACTION_COLUMN_WIDTH,
     [columnWidths, visibleColumns],
@@ -875,4 +880,3 @@ const Orders: React.FC = () => {
 };
 
 export default Orders;
-

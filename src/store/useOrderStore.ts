@@ -70,22 +70,26 @@ const useOrderStore = create<OrderState>((set, get) => ({
   create: async (data) => {
     set({ loading: true, error: null });
     try {
-      await orderApi.createOrder(data);
+      const res = await orderApi.createOrder(data);
+      if (res.code !== 0) throw new Error(res.message || '创建订单失败');
       await get().fetchItems();
       await get().fetchStats();
     } catch (e: any) {
       set({ error: e.message, loading: false });
+      throw e;
     }
   },
 
   update: async (id, data) => {
     set({ loading: true, error: null });
     try {
-      await orderApi.updateOrder(id, data);
+      const res = await orderApi.updateOrder(id, data);
+      if (res.code !== 0) throw new Error(res.message || '修改订单失败');
       await get().fetchItems();
       await get().fetchStats();
     } catch (e: any) {
       set({ error: e.message, loading: false });
+      throw e;
     }
   },
 

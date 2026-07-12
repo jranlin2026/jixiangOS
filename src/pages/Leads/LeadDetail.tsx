@@ -206,9 +206,15 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   const followerName = currentLead.assignedTo || currentLead.owner || '待分配';
   const lifecycleCode = normalizeLifecycleStatusCode(currentLead.lifecycleStatusCode || currentLead.lifecycleStatus || currentLead.status);
   const lifecycleConfig = getLifecycleConfigByCode(lifecycleCode);
-  const canClaimLead = !currentLead.customerId && hasPermission(currentUser, PERMISSION_KEYS.LEADS_FOLLOW);
-  const canEditProfile = canEditLeadProfile(currentLead);
-  const canAssignLead = !currentLead.customerId && hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG);
+  const canClaimLead = !currentLead.customerId
+    && hasPermission(currentUser, PERMISSION_KEYS.LEADS_FOLLOW, 'write');
+  const canEditProfile = canEditLeadProfile(currentLead)
+    && (
+      hasPermission(currentUser, PERMISSION_KEYS.LEADS_CREATE, 'write')
+      || hasPermission(currentUser, PERMISSION_KEYS.LEADS_DETAIL, 'write')
+    );
+  const canAssignLead = !currentLead.customerId
+    && hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG, 'write');
   const assignableUsers = getScopedLeadAssignmentCandidates(users, leadFlowConfig, 'leads', currentUser);
   const canEditLockedContact = isSuperAdmin(currentUser);
 
@@ -255,11 +261,8 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
       sourceType: normalizeResourceOwnership(draft.sourceType),
       industry: draft.industry,
       city: draft.city,
-      inputBy: draft.inputBy,
       leadContributorId: draft.leadContributorId,
       leadContributorName: draft.leadContributorName,
-      assignedTo: draft.assignedTo,
-      owner: draft.assignedTo || currentLead.owner,
       remark: draft.remark,
       tags,
     };
@@ -273,6 +276,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   };
 
   const handleClaimCurrentLead = async () => {
+    if (!canClaimLead) return;
     const userName = currentUser?.name || currentUser?.account || '';
     if (!userName) {
       alert('当前登录用户无效，请重新登录后再领取线索');
@@ -289,12 +293,14 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   };
 
   const handleOpenAssign = () => {
+    if (!canAssignLead) return;
     const currentAssignee = currentLead.assignedTo || currentLead.owner || '';
     setAssignSalesName(currentAssignee === '待分配' ? '' : currentAssignee);
     setAssignOpen(true);
   };
 
   const handleAssignLead = async () => {
+    if (!canAssignLead) return;
     if (!assignSalesName) {
       alert('请选择要分配的销售');
       return;
@@ -539,9 +545,9 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
               {renderSourceRow()}
               {renderInfoRow('行业', 'industry')}
               {renderInfoRow('城市', 'city')}
-              {renderInfoRow('线索录入人', 'inputBy')}
+              {renderInfoRow('线索录入人', 'inputBy', false)}
               {renderInfoRow('线索贡献人', 'leadContributorName')}
-              {renderInfoRow('分配销售', 'assignedTo')}
+              {renderInfoRow('分配销售', 'assignedTo', false)}
               {renderInfoRow('标签', 'tagsText')}
               {renderStatusRow('入库状态', (
                 <Chip

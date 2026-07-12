@@ -28,6 +28,12 @@ const BUSINESS_RECORD_KEYS = new Set<string>([
   STORAGE_KEYS.PRODUCTS,
   STORAGE_KEYS.TAGS,
 ]);
+const MERGE_ONLY_BUSINESS_RECORD_KEYS = new Set<string>([
+  STORAGE_KEYS.CUSTOMERS,
+  STORAGE_KEYS.ORDERS,
+  STORAGE_KEYS.ORDER_APPLICATIONS,
+]);
+const ORDER_APPLICATION_APPROVED_STATUS = '已入库';
 
 function parseDate(value: unknown): Date {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
@@ -104,6 +110,28 @@ function businessRecordId(domain: string, recordId: string): string {
   return compactIdentifier(`${domain}:${recordId}`, BUSINESS_RECORD_ID_MAX_LENGTH);
 }
 
+function businessRecordUpdate(domain: string, item: Record<string, any>) {
+  return {
+    title: titleValue(domain, item),
+    status: nullableText(item.status),
+    owner: ownerValue(item),
+    customerId: nullableText(item.customerId),
+    orderId: nullableText(item.orderId),
+    amount: amountValue(item),
+    eventAt: eventDate(item),
+    data: item as Prisma.InputJsonValue,
+  };
+}
+
+function businessRecordCreate(domain: string, recordId: string, item: Record<string, any>) {
+  return {
+    id: businessRecordId(domain, recordId),
+    domain,
+    recordId,
+    ...businessRecordUpdate(domain, item),
+  };
+}
+
 export function createStorageService(prisma: StoragePrisma) {
   const listLeads = async () => {
     const rows = await prisma.leadRecord.findMany({ orderBy: { createdAt: 'desc' } });
@@ -119,9 +147,6 @@ export function createStorageService(prisma: StoragePrisma) {
 
   const setLeads = async (db: StorageTransaction, value: unknown) => {
     if (!Array.isArray(value)) return failure('aaos_leads must be an array', 400);
-    const ids = value
-      .map((item) => normalizeLead(item).id)
-      .filter((id): id is string => typeof id === 'string' && Boolean(id.trim()));
 
     for (const item of value) {
       const lead = normalizeLead(item);
@@ -167,7 +192,8 @@ export function createStorageService(prisma: StoragePrisma) {
       });
     }
 
-    await db.leadRecord.deleteMany({ where: { id: { notIn: ids } } });
+    // Leads are fetched with pagination and data-scope filtering. The client array is
+    // therefore never proof of a complete domain snapshot; omitted rows must survive.
     return success(value);
   };
 
@@ -182,8 +208,76 @@ export function createStorageService(prisma: StoragePrisma) {
     return rows.map((row) => row.data);
   };
 
+  const setOrderApplications = async (db: StorageTransaction, value: unknown) => {
+    if (!Array.isArray(value)) return failure(`${STORAGE_KEYS.ORDER_APPLICATIONS} must be an array`, 400);
+
+    const applications = value.map((entry, index) => {
+      const item = normalizeLead(entry);
+      return { item, recordId: toRecordId(STORAGE_KEYS.ORDER_APPLICATIONS, item, index) };
+    });
+
+    // Approval is a server-owned state transition. Validate the complete payload
+    // before applying legacy edits so a forged approval cannot partially commit.
+    for (const { item, recordId } of applications) {
+      if (nullableText(item.status) !== ORDER_APPLICATION_APPROVED_STATUS) continue;
+      const existing = await db.businessRecord.findUnique({
+        where: { domain_recordId: { domain: STORAGE_KEYS.ORDER_APPLICATIONS, recordId } },
+      });
+      if (existing?.status !== ORDER_APPLICATION_APPROVED_STATUS) {
+        return failure('订单审批通过必须使用服务端审批接口', 409);
+      }
+    }
+
+    for (const { item, recordId } of applications) {
+      if (nullableText(item.status) === ORDER_APPLICATION_APPROVED_STATUS) continue;
+      const update = businessRecordUpdate(STORAGE_KEYS.ORDER_APPLICATIONS, item);
+      const updated = await db.businessRecord.updateMany({
+        where: {
+          domain: STORAGE_KEYS.ORDER_APPLICATIONS,
+          recordId,
+          status: { not: ORDER_APPLICATION_APPROVED_STATUS },
+        },
+        data: update,
+      });
+      if (updated.count > 0) continue;
+
+      const existing = await db.businessRecord.findUnique({
+        where: { domain_recordId: { domain: STORAGE_KEYS.ORDER_APPLICATIONS, recordId } },
+      });
+      if (existing?.status === ORDER_APPLICATION_APPROVED_STATUS) continue;
+      if (existing) {
+        throw new Error(`Order application ${recordId} could not be safely updated`);
+      }
+
+      try {
+        await db.businessRecord.create({
+          data: businessRecordCreate(STORAGE_KEYS.ORDER_APPLICATIONS, recordId, item),
+        });
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'P2002') throw error;
+        const retried = await db.businessRecord.updateMany({
+          where: {
+            domain: STORAGE_KEYS.ORDER_APPLICATIONS,
+            recordId,
+            status: { not: ORDER_APPLICATION_APPROVED_STATUS },
+          },
+          data: update,
+        });
+        if (retried.count > 0) continue;
+        const concurrent = await db.businessRecord.findUnique({
+          where: { domain_recordId: { domain: STORAGE_KEYS.ORDER_APPLICATIONS, recordId } },
+        });
+        if (concurrent?.status === ORDER_APPLICATION_APPROVED_STATUS) continue;
+        throw error;
+      }
+    }
+
+    return success(value);
+  };
+
   const setBusinessRecords = async (db: StorageTransaction, domain: string, value: unknown) => {
     if (!Array.isArray(value)) return failure(`${domain} must be an array`, 400);
+    if (domain === STORAGE_KEYS.ORDER_APPLICATIONS) return setOrderApplications(db, value);
     const recordIds: string[] = [];
 
     for (let index = 0; index < value.length; index += 1) {
@@ -192,33 +286,16 @@ export function createStorageService(prisma: StoragePrisma) {
       recordIds.push(recordId);
       await db.businessRecord.upsert({
         where: { domain_recordId: { domain, recordId } },
-        update: {
-          title: titleValue(domain, item),
-          status: nullableText(item.status),
-          owner: ownerValue(item),
-          customerId: nullableText(item.customerId),
-          orderId: nullableText(item.orderId),
-          amount: amountValue(item),
-          eventAt: eventDate(item),
-          data: item as Prisma.InputJsonValue,
-        },
-        create: {
-          id: businessRecordId(domain, recordId),
-          domain,
-          recordId,
-          title: titleValue(domain, item),
-          status: nullableText(item.status),
-          owner: ownerValue(item),
-          customerId: nullableText(item.customerId),
-          orderId: nullableText(item.orderId),
-          amount: amountValue(item),
-          eventAt: eventDate(item),
-          data: item as Prisma.InputJsonValue,
-        },
+        update: businessRecordUpdate(domain, item),
+        create: businessRecordCreate(domain, recordId, item),
       });
     }
 
-    await db.businessRecord.deleteMany({ where: { domain, recordId: { notIn: recordIds } } });
+    // Customers are also fetched as paginated, scope-filtered projections. Keep
+    // legacy replacement semantics only for domains that still receive full snapshots.
+    if (!MERGE_ONLY_BUSINESS_RECORD_KEYS.has(domain)) {
+      await db.businessRecord.deleteMany({ where: { domain, recordId: { notIn: recordIds } } });
+    }
     return success(value);
   };
 

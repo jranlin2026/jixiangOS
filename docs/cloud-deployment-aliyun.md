@@ -78,7 +78,7 @@ DEEPSEEK_API_KEY="你的 DeepSeek Key"
 
 注意：上线后进入系统，把管理员密码改成只由管理员本人知道的密码。
 
-## 4. 初始化数据库
+## 4. 核对数据库迁移与管理员前置条件
 
 如果是本机 MySQL，先创建数据库和账号：
 
@@ -94,24 +94,42 @@ FLUSH PRIVILEGES;
 EXIT;
 ```
 
-然后执行迁移和种子数据：
+生产环境禁止执行 `npm run db:seed`。当前 seed 面向本地演示数据，会写入固定用户和业务样例，不能用来初始化或修复生产账号。
+
+当前仓库尚无安全的首个管理员初始化命令。`prisma migrate deploy` 只创建数据库结构，不会创建首个管理员；在该能力落地前，全新空库不能作为生产上线目标，属于发布阻塞。不要用 seed、手工 SQL 或临时脚本绕过这一前置条件。
+
+已有生产数据库只能在以下条件全部满足后迁移：
+
+1. 已确认至少一名启用中的超级管理员能够登录，且凭据由管理员安全保管。
+2. 已完成 SQL 备份、校验和验证、异库恢复演练和业务数据对账。
+3. 已核对 Prisma migration baseline；若迁移历史缺失、分叉或无法解释，立即停止，不得直接执行 deploy。
+
+迁移前只做状态检查：
 
 ```bash
 npm run db:generate
-npm run db:deploy
-npm run db:seed
+npx --no-install prisma migrate status
 ```
 
-已有生产库时，先备份，再执行 `npm run db:deploy`。
+正式迁移由受支持的 ECS 发布入口在生产配置检查、备份和 baseline 门禁通过后执行；不要在服务器上手工运行 `npm run db:deploy`。
 
-## 5. 构建前端并启动后端
+完成 baseline 人工核验、备份和异库恢复演练后，在服务器 `.env` 中明确写入当前已核验的 baseline：
 
 ```bash
-npm run build
-pm2 start ecosystem.config.cjs --env production
-pm2 save
-pm2 startup
+JIXIANG_PRISMA_BASELINE_CONFIRMED=20260710010000_enablement_knowledge_foundation
 ```
+
+如果尚未核验，保持该值为空，不得为绕过发布门禁而填写。
+
+## 5. 使用受支持的 ECS 发布入口
+
+从可信任的本地工作区执行：
+
+```bash
+python3 scripts/deploy/deploy-ecs.py
+```
+
+旧的 `scripts/deploy/deploy-linux.sh` 已停用。ECS 发布入口会完成生产构建、迁移前备份、migration baseline 校验、`prisma migrate deploy`、版本切换和失败回滚。
 
 检查 API：
 
@@ -177,14 +195,10 @@ crontab -e
 
 ## 8. 每次更新代码
 
+不要在服务器上手工拉取并迁移。仍然从可信任的本地工作区运行受支持入口：
+
 ```bash
-cd /var/www/jixiang-os/current
-git pull --ff-only
-npm ci
-npm run db:deploy
-npm run build
-pm2 reload ecosystem.config.cjs --env production
-curl http://127.0.0.1:3001/api/ready
+python3 scripts/deploy/deploy-ecs.py
 ```
 
 ## 9. 上线验收清单

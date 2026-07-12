@@ -5,7 +5,7 @@ import { refundApi } from './refundApi';
 import { authApi } from './authApi';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
-import { PERMISSION_KEYS } from '../shared/utils/permissions';
+import { PERMISSION_KEYS, roleHasPermission } from '../shared/utils/permissions';
 import type { Commission } from '../types/commission';
 
 const storage = (() => {
@@ -247,16 +247,37 @@ storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([
   { id: 'role-sales', name: zh.sales, code: 'sales_consultant', permissions: [], memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
   { id: 'role-finance', name: zh.finance, code: 'finance_specialist', permissions: [{ module: PERMISSION_KEYS.ORDER_REVIEW, actions: ['read'] }], dataScopes: { orderApplications: 'self' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
 ]));
-assert.deepEqual((await orderReviewApi.fetchOrderApplications({ pageSize: 20 })).data.items.map((item) => item.id), [permissionReviewSubmit.data.id]);
+assert.deepEqual(
+  (await orderReviewApi.fetchOrderApplications({ pageSize: 20 })).data.items.map((item) => item.id),
+  [],
+  '审核页面只读权限不得绕过 self 数据范围',
+);
 
 storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([
   { id: 'role-sales', name: zh.sales, code: 'sales_consultant', permissions: [], memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
-  { id: 'role-finance', name: zh.finance, code: 'finance_specialist', permissions: [{ module: PERMISSION_KEYS.ORDER_REVIEW, actions: ['read'] }], dataScopes: { orderApplications: 'all', orders: 'all' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'role-finance-viewer', name: '财务审核查看员', code: 'finance_viewer', permissions: [{ module: PERMISSION_KEYS.ORDER_REVIEW, actions: ['read'] }], dataScopes: { orderApplications: 'all', orders: 'all' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
 ]));
+storage.setItem(STORAGE_KEYS.USERS, JSON.stringify(
+  (JSON.parse(storage.getItem(STORAGE_KEYS.USERS) || '[]') as any[]).map((user) => (
+    user.id === 'user-finance'
+      ? { ...user, role: '财务审核查看员', roleId: 'role-finance-viewer' }
+      : user
+  )),
+));
 assert.deepEqual((await orderReviewApi.fetchOrderApplications({ pageSize: 20 })).data.items.map((item) => item.id), [permissionReviewSubmit.data.id]);
 const financeWithPermissionApprove = await orderReviewApi.approveOrderApplication(permissionReviewSubmit.data.id);
-assert.equal(financeWithPermissionApprove.code, 0);
-assert.equal(financeWithPermissionApprove.data?.status, zh.approved);
+assert.equal(financeWithPermissionApprove.code, 403, '只读审核权限不得执行审批写操作');
+
+storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([
+  { id: 'role-sales', name: zh.sales, code: 'sales_consultant', permissions: [], memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'role-finance-viewer', name: '财务审核查看员', code: 'finance_viewer', permissions: [{ module: PERMISSION_KEYS.ORDER_REVIEW, actions: ['read', 'write'] }], dataScopes: { orderApplications: 'all', orders: 'all' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+]));
+const financeWriteRole = (JSON.parse(storage.getItem(STORAGE_KEYS.ROLES) || '[]') as any[])[1];
+assert.equal(roleHasPermission(financeWriteRole, PERMISSION_KEYS.ORDER_REVIEW, 'write'), true);
+assert.equal(canReviewOrderApplications(), true);
+const financeWithWritePermissionApprove = await orderReviewApi.approveOrderApplication(permissionReviewSubmit.data.id);
+assert.equal(financeWithWritePermissionApprove.code, 0, financeWithWritePermissionApprove.message);
+assert.equal(financeWithWritePermissionApprove.data?.status, zh.approved);
 
 storage.clear();
 process.env.VITE_USE_BACKEND_API = 'true';

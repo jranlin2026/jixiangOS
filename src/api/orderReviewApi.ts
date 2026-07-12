@@ -4,6 +4,7 @@ import type {
   OrderApplicationFilters,
   OrderApplicationReviewLog,
   OrderApplicationStatus,
+  OrderApprovalResult,
 } from '../types/order';
 import type { AuthSession } from '../types/auth';
 import type { Customer } from '../types/customer';
@@ -12,12 +13,13 @@ import type { Role } from '../types/role';
 import type { User } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
+import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { getStorageData, setStorageData } from './mock/storage';
 import { DEFAULT_PAGE_SIZE, STORAGE_KEYS, normalizeResourceOwnership } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { getCurrentDataVisibilityScope } from '../shared/utils/dataVisibility';
-import { isSuperAdminRoleName, normalizeUserRoleName } from '../shared/utils/roles';
-import { PERMISSION_KEYS, roleHasPermission } from '../shared/utils/permissions';
+import { isSuperAdminRoleName } from '../shared/utils/roles';
+import { getUserRole, PERMISSION_KEYS, roleHasPermission } from '../shared/utils/permissions';
 import { initializeMockData } from './mock';
 import { orderApi } from './orderApi';
 import { v4 as uuidv4 } from 'uuid';
@@ -55,12 +57,11 @@ function isCurrentUserSuperAdmin(): boolean {
 function getRole(user?: User): Role | undefined {
   if (!user) return undefined;
   const roles = readJson<Role[]>(STORAGE_KEYS.ROLES) || [];
-  const normalizedRole = normalizeUserRoleName(user.role);
-  return roles.find((role) => role.isActive && (role.id === user.roleId || role.name === normalizedRole || role.name === user.role));
+  return getUserRole(user, roles);
 }
 
 export function canReviewOrderApplications(): boolean {
-  return roleHasPermission(getRole(getCurrentUser()), PERMISSION_KEYS.ORDER_REVIEW, 'read');
+  return roleHasPermission(getRole(getCurrentUser()), PERMISSION_KEYS.ORDER_REVIEW, 'write');
 }
 
 function getStoredApplications(): OrderApplication[] {
@@ -90,6 +91,28 @@ function normalizeApplicationProductName(application: OrderApplication): OrderAp
 
 function saveApplications(applications: OrderApplication[]): void {
   setStorageData(STORAGE_KEYS.ORDER_APPLICATIONS, applications);
+}
+
+function cacheBackendApplication(application: OrderApplication): OrderApplication {
+  const applications = getStoredApplications();
+  const applicationIndex = applications.findIndex((item) => item.id === application.id);
+  const nextApplications = applicationIndex === -1
+    ? [application, ...applications]
+    : applications.map((item, index) => (index === applicationIndex ? application : item));
+  setStorageData(STORAGE_KEYS.ORDER_APPLICATIONS, nextApplications, { persist: false });
+  return application;
+}
+
+function cacheBackendApproval(result: OrderApprovalResult): OrderApplication {
+  cacheBackendApplication(result.application);
+
+  const orders = readJson<Order[]>(STORAGE_KEYS.ORDERS) || [];
+  const orderIndex = orders.findIndex((item) => item.id === result.order.id);
+  const nextOrders = orderIndex === -1
+    ? [result.order, ...orders]
+    : orders.map((item, index) => (index === orderIndex ? result.order : item));
+  setStorageData(STORAGE_KEYS.ORDERS, nextOrders, { persist: false });
+  return result.application;
 }
 
 function enrichOrderDataFromCustomer(data: OrderApplicationInput): OrderApplicationInput {
@@ -133,7 +156,6 @@ function buildLog(action: OrderApplicationReviewLog['action'], reason?: string):
 }
 
 function filterVisibleApplications(applications: OrderApplication[]): OrderApplication[] {
-  if (canReviewOrderApplications()) return applications;
   const scope = getCurrentDataVisibilityScope('orderApplications');
   if (scope.unrestricted) return applications;
   return applications.filter((application) => (
@@ -166,6 +188,22 @@ function applyFilters(applications: OrderApplication[], filters?: OrderApplicati
 }
 
 async function fetchOrderApplications(filters?: OrderApplicationFilters): Promise<ApiResponse<PaginatedResponse<OrderApplication>>> {
+  if (shouldUseBackendApi()) {
+    const params = new URLSearchParams();
+    Object.entries(filters || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+    });
+    const response = await backendRequest<PaginatedResponse<OrderApplication>>(
+      `/order-applications${params.size ? `?${params.toString()}` : ''}`,
+    );
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '订单申请列表加载失败', response.code || -1);
+    }
+    const items = response.data.items.map(normalizeApplicationProductName);
+    items.forEach(cacheBackendApplication);
+    return createSuccessResponse({ ...response.data, items }, response.message);
+  }
+
   ensureInit();
   await delay(120);
   const filtered = applyFilters(filterVisibleApplications(getStoredApplications()), filters);
@@ -178,12 +216,34 @@ async function fetchOrderApplications(filters?: OrderApplicationFilters): Promis
 }
 
 async function fetchOrderApplicationById(id: string): Promise<ApiResponse<OrderApplication | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<OrderApplication>(`/order-applications/${encodeURIComponent(id)}`);
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '订单申请加载失败', response.code || -1);
+    }
+    return createSuccessResponse(
+      cacheBackendApplication(normalizeApplicationProductName(response.data)),
+      response.message,
+    );
+  }
+
   ensureInit();
   await delay(100);
   return createSuccessResponse(filterVisibleApplications(getStoredApplications()).find((item) => item.id === id) || null);
 }
 
 async function submitOrderApplication(data: OrderApplicationInput): Promise<ApiResponse<OrderApplication>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<OrderApplication>('/order-applications', {
+      method: 'POST',
+      body: JSON.stringify({ orderData: data }),
+    });
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '服务端未返回订单申请', response.code || -1);
+    }
+    return createSuccessResponse(cacheBackendApplication(response.data));
+  }
+
   ensureInit();
   await delay(150);
   const applications = getStoredApplications();
@@ -214,6 +274,20 @@ async function submitOrderApplication(data: OrderApplicationInput): Promise<ApiR
 }
 
 async function updateReturnedOrderApplication(id: string, data: OrderApplicationInput): Promise<ApiResponse<OrderApplication | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<OrderApplication>(
+      `/order-applications/${encodeURIComponent(id)}/resubmit`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ orderData: data }),
+      },
+    );
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '服务端未返回重新提交结果', response.code || -1);
+    }
+    return createSuccessResponse(cacheBackendApplication(response.data));
+  }
+
   ensureInit();
   await delay(150);
   const applications = getStoredApplications();
@@ -240,6 +314,17 @@ async function updateReturnedOrderApplication(id: string, data: OrderApplication
 }
 
 async function approveOrderApplication(id: string): Promise<ApiResponse<OrderApplication | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<OrderApprovalResult>(
+      `/order-applications/${encodeURIComponent(id)}/approve`,
+      { method: 'POST' },
+    );
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '服务端未返回审核结果', response.code || -1);
+    }
+    return createSuccessResponse(cacheBackendApproval(response.data));
+  }
+
   ensureInit();
   await delay(150);
   if (!canReviewOrderApplications()) return createErrorResponse('无权审核订单申请', 403);
@@ -272,6 +357,20 @@ async function approveOrderApplication(id: string): Promise<ApiResponse<OrderApp
 }
 
 async function returnOrderApplication(id: string, reason: string): Promise<ApiResponse<OrderApplication | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<OrderApplication>(
+      `/order-applications/${encodeURIComponent(id)}/return`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      },
+    );
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '服务端未返回退回结果', response.code || -1);
+    }
+    return createSuccessResponse(cacheBackendApplication(response.data));
+  }
+
   ensureInit();
   await delay(120);
   if (!canReviewOrderApplications()) return createErrorResponse('无权退回订单申请', 403);
@@ -297,6 +396,20 @@ async function returnOrderApplication(id: string, reason: string): Promise<ApiRe
 }
 
 async function rejectOrderApplication(id: string, reason: string): Promise<ApiResponse<OrderApplication | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<OrderApplication>(
+      `/order-applications/${encodeURIComponent(id)}/reject`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      },
+    );
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '服务端未返回驳回结果', response.code || -1);
+    }
+    return createSuccessResponse(cacheBackendApplication(response.data));
+  }
+
   ensureInit();
   await delay(120);
   if (!canReviewOrderApplications()) return createErrorResponse('无权驳回订单申请', 403);

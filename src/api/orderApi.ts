@@ -2,8 +2,10 @@ import type { Order, OrderFilters, OrderStats } from '../types/order';
 import type { Customer } from '../types/customer';
 import type { Commission, CommissionRole } from '../types/commission';
 import type { Product } from '../types/product';
+import type { User } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
+import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
 import { formatDate } from '../shared/utils/formatters';
@@ -46,6 +48,16 @@ function normalizeOrder(order: Order): Order {
     productName: getProductName(order.productId, order.productLevel, order.productName),
     resourceOwnership: normalizeResourceOwnership(order.resourceOwnership || order.sourceType),
   };
+}
+
+function cacheBackendOrder(order: Order): Order {
+  const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
+  const index = orders.findIndex((item) => item.id === order.id);
+  const next = index === -1
+    ? [order, ...orders]
+    : orders.map((item, itemIndex) => (itemIndex === index ? order : item));
+  setStorageData(STORAGE_KEYS.ORDERS, next, { persist: false });
+  return order;
 }
 
 function enrichOrderProductData<T extends Partial<Order>>(data: T): T & { productName?: string } {
@@ -209,6 +221,22 @@ function buildOrderChanges(before: Order, data: Partial<Order>) {
 }
 
 async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<PaginatedResponse<Order>>> {
+  if (shouldUseBackendApi()) {
+    const params = new URLSearchParams();
+    Object.entries(filters || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+    });
+    const response = await backendRequest<PaginatedResponse<Order>>(
+      `/orders${params.size ? `?${params.toString()}` : ''}`,
+    );
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '订单列表加载失败', response.code || -1);
+    }
+    const items = response.data.items.map(normalizeOrder);
+    items.forEach(cacheBackendOrder);
+    return createSuccessResponse({ ...response.data, items }, response.message);
+  }
+
   ensureInit();
   await delay(200);
   const raw = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
@@ -270,7 +298,20 @@ async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<Paginate
   return createSuccessResponse({ items, pagination: { page, pageSize, total, totalPages } });
 }
 
+async function fetchOwnerCandidates(): Promise<ApiResponse<User[]>> {
+  if (shouldUseBackendApi()) return backendRequest<User[]>('/orders/owner-candidates');
+  return createSuccessResponse([]);
+}
+
 async function fetchOrderById(id: string): Promise<ApiResponse<Order | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Order>(`/orders/${encodeURIComponent(id)}`);
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '订单加载失败', response.code || -1);
+    }
+    return createSuccessResponse(cacheBackendOrder(normalizeOrder(response.data)), response.message);
+  }
+
   ensureInit();
   await delay(150);
   const raw = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
@@ -280,6 +321,14 @@ async function fetchOrderById(id: string): Promise<ApiResponse<Order | null>> {
 }
 
 async function fetchOrderStats(): Promise<ApiResponse<OrderStats>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<OrderStats>('/orders/stats');
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '订单统计加载失败', response.code || -1);
+    }
+    return createSuccessResponse(response.data, response.message);
+  }
+
   ensureInit();
   await delay(200);
   const orders = filterVisibleOrders((getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).map(normalizeOrder).filter((order) => !order.deletedAt));
@@ -309,6 +358,10 @@ async function fetchOrderStats(): Promise<ApiResponse<OrderStats>> {
 }
 
 async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'orderNo'>): Promise<ApiResponse<Order>> {
+  if (shouldUseBackendApi()) {
+    return createErrorResponse('正式订单必须先提交订单申请并经财务审核入库', 409);
+  }
+
   ensureInit();
   await delay(200);
   const orderData = enrichOrderProductData(enrichOrderDataFromCustomer(data));
@@ -471,6 +524,17 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
 }
 
 async function updateOrder(id: string, data: Partial<Order>): Promise<ApiResponse<Order | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Order>(`/orders/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ data }),
+    });
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '服务端未返回订单修改结果', response.code || -1);
+    }
+    return createSuccessResponse(cacheBackendOrder(response.data));
+  }
+
   ensureInit();
   await delay(200);
   const orders = (getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).map(normalizeOrder);
@@ -505,6 +569,18 @@ async function updateOrder(id: string, data: Partial<Order>): Promise<ApiRespons
 }
 
 async function deleteOrder(id: string, reason = ''): Promise<ApiResponse<boolean>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Order>(`/orders/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ reason }),
+    });
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '服务端未返回订单删除结果', response.code || -1);
+    }
+    cacheBackendOrder(response.data);
+    return createSuccessResponse(true);
+  }
+
   ensureInit();
   await delay(150);
   const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
@@ -540,6 +616,7 @@ async function deleteOrder(id: string, reason = ''): Promise<ApiResponse<boolean
 }
 
 export const orderApi = {
+  fetchOwnerCandidates,
   fetchOrders,
   fetchOrderById,
   fetchOrderStats,

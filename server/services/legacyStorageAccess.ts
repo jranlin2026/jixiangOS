@@ -12,6 +12,13 @@ type LegacyStoragePolicy = {
 };
 
 const policies: Record<string, LegacyStoragePolicy> = {};
+const COMMAND_ONLY_WRITE_KEYS = new Set<string>([
+  STORAGE_KEYS.CUSTOMERS,
+  STORAGE_KEYS.LEADS,
+  STORAGE_KEYS.ORDERS,
+  STORAGE_KEYS.ORDER_APPLICATIONS,
+  STORAGE_KEYS.DELIVERIES,
+]);
 
 function register(
   keys: readonly string[],
@@ -29,9 +36,9 @@ register([STORAGE_KEYS.LEADS], [PERMISSION_KEYS.LEADS_LIST],
 register([STORAGE_KEYS.CUSTOMERS], [PERMISSION_KEYS.CUSTOMER_LIST],
   [PERMISSION_KEYS.CUSTOMER_CREATE, PERMISSION_KEYS.CUSTOMER_EDIT, PERMISSION_KEYS.CUSTOMER_ASSIGN], false);
 register([STORAGE_KEYS.ORDERS], [PERMISSION_KEYS.ORDER_MANAGE],
-  [PERMISSION_KEYS.ORDER_CREATE, PERMISSION_KEYS.ORDER_EDIT, PERMISSION_KEYS.ORDER_DELETE]);
+  [PERMISSION_KEYS.ORDER_CREATE, PERMISSION_KEYS.ORDER_EDIT, PERMISSION_KEYS.ORDER_DELETE], false);
 register([STORAGE_KEYS.ORDER_APPLICATIONS], [PERMISSION_KEYS.ORDER_REVIEW, PERMISSION_KEYS.ORDER_MANAGE],
-  [PERMISSION_KEYS.ORDER_REVIEW]);
+  [PERMISSION_KEYS.ORDER_REVIEW], false);
 register([STORAGE_KEYS.DELIVERIES], [PERMISSION_KEYS.DELIVERY_CENTER],
   [PERMISSION_KEYS.DELIVERY_MOVE_CARD, PERMISSION_KEYS.DELIVERY_STAGE_CONFIG]);
 register([STORAGE_KEYS.COMMISSIONS],
@@ -101,6 +108,7 @@ export function canAccessLegacyStorageKey(
   const policy = policies[key];
   if (!policy) return false;
   if (operation === 'runtime') return policy.runtime && hasAnyPermission(user, policy.read, 'read');
+  if (operation === 'write' && COMMAND_ONLY_WRITE_KEYS.has(key)) return false;
   return operation === 'write'
     ? hasAnyPermission(user, policy.write, 'write')
     : hasAnyPermission(user, policy.read, 'read');

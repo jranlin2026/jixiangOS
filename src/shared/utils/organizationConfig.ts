@@ -86,6 +86,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: CAPABILITY_KEYS.LEADS_RECEIVE, actions: ['read'] },
       { module: CAPABILITY_KEYS.LEADS_ASSIGN, actions: ['read'] },
       { module: PERMISSION_KEYS.CUSTOMERS, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read', 'write', 'delete'] },
       { module: PERMISSION_KEYS.ORDER_CREATE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_EDIT, actions: ['read', 'write'] },
@@ -112,6 +113,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.LEADS, actions: ['read', 'write'] },
       { module: CAPABILITY_KEYS.LEADS_RECEIVE, actions: ['read'] },
       { module: PERMISSION_KEYS.CUSTOMERS, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_CREATE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_EDIT, actions: ['read', 'write'] },
@@ -198,6 +200,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.FINANCE_RULES, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDERS, actions: ['read'] },
+      { module: PERMISSION_KEYS.ORDER_REVIEW, actions: ['read', 'write'] },
       CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],
@@ -344,6 +347,22 @@ function normalizeDefaultAssetSelfServicePermissions(permissions: Role['permissi
   ];
 }
 
+function ensureDefaultRoleRequiredPermissions(
+  permissions: Role['permissions'] = [],
+  code?: string,
+): Role['permissions'] {
+  if (normalizeCode(code) !== 'finance_specialist') return permissions;
+  const existing = permissions.find((permission) => permission.module === PERMISSION_KEYS.ORDER_REVIEW);
+  if (!existing) {
+    return [...permissions, { module: PERMISSION_KEYS.ORDER_REVIEW, actions: ['read', 'write'] }];
+  }
+  return permissions.map((permission) => (
+    permission.module === PERMISSION_KEYS.ORDER_REVIEW
+      ? { ...permission, actions: Array.from(new Set([...(permission.actions || []), 'read', 'write'])) }
+      : permission
+  ));
+}
+
 export function mergeRoleWithDefaultAccess(role: Role): Role {
   const seed = DEFAULT_ROLES.find((item) => (
     item.id === role.id
@@ -353,7 +372,10 @@ export function mergeRoleWithDefaultAccess(role: Role): Role {
   const code = seed?.code || role.code;
   const permissions = seed?.code === 'super_admin'
     ? seed.permissions
-    : sanitizeRolePermissions(normalizeDefaultAssetSelfServicePermissions(role.permissions));
+    : sanitizeRolePermissions(ensureDefaultRoleRequiredPermissions(
+      normalizeDefaultAssetSelfServicePermissions(role.permissions),
+      code,
+    ));
 
   return {
     ...role,
