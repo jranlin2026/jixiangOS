@@ -32,6 +32,8 @@ import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { getCurrentOperatorName } from '../shared/utils/currentOperator';
 import { v4 as uuidv4 } from 'uuid';
+import { orderApi } from './orderApi';
+import { shouldUseBackendApi } from './backendClient';
 
 function ensureInit(): void {
   initializeMockData();
@@ -332,6 +334,26 @@ function saveCommissions(commissions: Commission[]): void {
 
 function getOrders(): Order[] {
   return (getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).filter((order) => !order.deletedAt);
+}
+
+let orderHydrationPromise: Promise<void> | null = null;
+
+async function hydrateCommissionOrderCache(): Promise<void> {
+  if (!shouldUseBackendApi()) return;
+  if (orderHydrationPromise) return orderHydrationPromise;
+  orderHydrationPromise = (async () => {
+    let page = 1;
+    let totalPages = 1;
+    do {
+      const response = await orderApi.fetchOrders({ page, pageSize: 100 });
+      if (response.code !== 0) return;
+      totalPages = Math.max(response.data.pagination.totalPages || 1, 1);
+      page += 1;
+    } while (page <= totalPages);
+  })().finally(() => {
+    orderHydrationPromise = null;
+  });
+  return orderHydrationPromise;
 }
 
 function getProductName(productId?: string, productLevel?: string, fallback?: string): string | undefined {
@@ -647,6 +669,7 @@ function applyOrderSummaryFilters(summaries: CommissionOrderSummary[], filters?:
 
 async function fetchCommissionOrderSummaries(filters?: CommissionOrderSummaryFilters): Promise<ApiResponse<PaginatedResponse<CommissionOrderSummary>>> {
   ensureInit();
+  await hydrateCommissionOrderCache();
   await delay(160);
   const filtered = applyOrderSummaryFilters(buildCommissionOrderSummaries(getAllCommissions()), filters);
   const page = filters?.page || 1;
@@ -659,6 +682,7 @@ async function fetchCommissionOrderSummaries(filters?: CommissionOrderSummaryFil
 
 async function fetchCommissionOrderSummaryStatusCounts(filters?: CommissionOrderSummaryFilters): Promise<ApiResponse<CommissionOrderSummaryStatusCounts>> {
   ensureInit();
+  await hydrateCommissionOrderCache();
   await delay(120);
   const summaries = buildCommissionOrderSummaries(getAllCommissions());
   const filtered = applyOrderSummaryFilters(summaries, { ...filters, status: '全部' });
@@ -1437,7 +1461,6 @@ async function fetchMonthlyCommissionPayouts(period: string): Promise<ApiRespons
   ensureInit();
   await delay(160);
   if (!period) return createErrorResponse('请选择结算月份');
-  refreshMonthlyTieredCommissions(period);
   return createSuccessResponse(buildMonthlyPayouts(period));
 }
 

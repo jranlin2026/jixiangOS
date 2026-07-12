@@ -2,6 +2,7 @@ import type { User, UserRole, ProductConfig, OrderTypeConfig, LifecycleStatusCon
 import type { Customer, CustomerActivityRecord } from '../types/customer';
 import type { Lead, LeadChangeLog } from '../types/lead';
 import type { Position, PositionFilters } from '../types/position';
+import type { Department } from '../types/department';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
@@ -378,6 +379,18 @@ async function fetchAssignableUsers(filters?: UserFilters): Promise<ApiResponse<
     ...filters,
     isActive: filters?.isActive ?? true,
     employmentStatus: filters?.employmentStatus || 'active',
+  });
+}
+
+async function fetchAssignableDirectory(): Promise<ApiResponse<{ users: User[]; departments: Department[]; positions: Position[] }>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest('/settings/assignable-directory');
+  }
+  const organization = ensureOrganizationConfigData();
+  return createSuccessResponse({
+    users: ensureUsersWithAuth().filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active'),
+    departments: organization.departments.filter((department) => department.isActive),
+    positions: organization.positions.filter((position) => position.isActive),
   });
 }
 
@@ -908,6 +921,7 @@ export const settingsApi = {
   updateOrganizationProfile,
   fetchUsers,
   fetchAssignableUsers,
+  fetchAssignableDirectory,
   fetchPositions,
   createUser,
   updateUser,

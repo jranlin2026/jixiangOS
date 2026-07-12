@@ -1,64 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="${JIXIANG_APP_DIR:-/var/www/jixiang-os/current}"
+cat >&2 <<'EOF'
+错误：scripts/deploy/deploy-linux.sh 已停用，禁止用于生产发布。
 
-cd "$APP_DIR"
+这个旧入口不能保证 Prisma migration baseline、迁移前数据库备份、持久上传目录切换和失败回滚，继续执行会绕过稳定版发布门禁。
 
-if [[ ! -f .env ]]; then
-  echo ".env is missing in $APP_DIR" >&2
-  exit 1
-fi
+请从可信任的本地工作区使用唯一受支持的 ECS 发布入口：
+  python3 scripts/deploy/deploy-ecs.py
 
-echo "Loading production environment..."
-set -a
-# shellcheck disable=SC1091
-. ./.env
-set +a
+ECS 发布入口会执行生产配置检查、数据库备份、migration baseline 校验、prisma migrate deploy、版本切换和健康检查。
+EOF
 
-BRANCH="${JIXIANG_DEPLOY_BRANCH:-codex/core-crm-polish}"
-HEALTH_URL="${JIXIANG_HEALTH_URL:-http://127.0.0.1:3001/api/ready}"
-RUN_BACKUP="${JIXIANG_DEPLOY_BACKUP:-true}"
-
-echo "Checking production configuration..."
-npm run prod:check
-
-if [[ "$RUN_BACKUP" == "true" && -x scripts/mysql/backup-linux.sh ]]; then
-  echo "Creating pre-deploy database backup..."
-  scripts/mysql/backup-linux.sh
-fi
-
-echo "Fetching latest code for $BRANCH..."
-git fetch origin --prune
-git checkout "$BRANCH"
-git pull --ff-only origin "$BRANCH"
-
-echo "Installing dependencies..."
-npm ci
-
-echo "Applying database migrations..."
-npm run db:generate
-npm run db:deploy
-
-echo "Building frontend..."
-npm run build
-
-echo "Starting or reloading API..."
-if pm2 describe jixiang-os-api >/dev/null 2>&1; then
-  pm2 reload ecosystem.config.cjs --env production
-else
-  pm2 start ecosystem.config.cjs --env production
-fi
-pm2 save
-
-echo "Checking local health..."
-health="$(curl -fsS "$HEALTH_URL")"
-echo "$health" | grep -q '"ok":true'
-echo "$health" | grep -q '"database":true'
-
-if [[ -n "${JIXIANG_SMOKE_BASE_URL:-}" && -n "${JIXIANG_SMOKE_PASSWORD:-}" ]]; then
-  echo "Running public smoke test..."
-  scripts/deploy/smoke-test.sh "$JIXIANG_SMOKE_BASE_URL"
-fi
-
-echo "Deployment completed successfully."
+exit 64

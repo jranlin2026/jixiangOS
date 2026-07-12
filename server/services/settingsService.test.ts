@@ -223,7 +223,12 @@ const createdUser = await service.createUser({
 assert.equal(createdUser.code, 0);
 const createdUserData = createdUser.data as any;
 assert.equal(createdUserData.account, 'created_user');
-assert.ok(createdUserData.passwordHash);
+const persistedCreatedUser = users.find((item) => item.id === createdUserData.id)!;
+assert.ok(persistedCreatedUser.passwordHash);
+assert.ok(persistedCreatedUser.passwordSalt);
+assert.equal('passwordHash' in createdUserData, false);
+assert.equal('passwordSalt' in createdUserData, false);
+assert.equal('passwordUpdatedAt' in createdUserData, false);
 
 const updatedUser = await service.updateUser(createdUserData.id, { name: 'Updated User', account: 'updated_user' });
 const updatedUserData = updatedUser.data as any;
@@ -231,9 +236,22 @@ assert.equal(updatedUser.code, 0);
 assert.equal(updatedUserData.name, 'Updated User');
 assert.equal(updatedUserData.account, 'updated_user');
 
+const previousHash = persistedCreatedUser.passwordHash;
 const resetUser = await service.resetUserPassword(createdUserData.id, 'NewPass123');
 assert.equal(resetUser.code, 0);
-assert.notEqual((resetUser.data as any).passwordHash, createdUserData.passwordHash);
+const persistedAfterReset = users.find((item) => item.id === createdUserData.id)!;
+assert.notEqual(persistedAfterReset.passwordHash, previousHash);
+assert.equal('passwordHash' in (resetUser.data as any), false);
+assert.equal('passwordSalt' in (resetUser.data as any), false);
+assert.equal('passwordUpdatedAt' in (resetUser.data as any), false);
+
+const listedUsers = await service.listUsers();
+const assignableUsers = await service.listAssignableUsers();
+for (const row of [...(listedUsers.data || []), ...(assignableUsers.data || [])] as any[]) {
+  assert.equal('passwordHash' in row, false);
+  assert.equal('passwordSalt' in row, false);
+  assert.equal('passwordUpdatedAt' in row, false);
+}
 
 const leaveResult = await service.leaveUser('user-sales');
 const leftUser = leaveResult.data as any;

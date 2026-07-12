@@ -124,20 +124,25 @@ assert.match(
   /res\.code\s*!==\s*0[\s\S]*res\.message/,
   'Customer detail save must surface update failures instead of making the save button feel unresponsive.',
 );
-assert.doesNotMatch(
+assert.match(
   `${customersPageSource}\n${customerDetailSource}`,
   /permissionKey=\{PERMISSION_KEYS\.CUSTOMER_CREATE_ORDER\}\s+action="write"/,
-  'Customer submit-order permission is checkbox based and must not require write actions.',
+  'Customer submit-order actions must require explicit write permission.',
+);
+assert.match(
+  customersPageSource,
+  /permissionKey=\{PERMISSION_KEYS\.CUSTOMER_ASSIGN\}\s+action="write"/,
+  'Customer assign, release, and claim actions must require explicit write permission.',
 );
 assert.match(
   rolePermissionSource,
   /订单审核操作/,
   'Role permission tree should describe ORDER_REVIEW as review operations, not page visibility.',
 );
-assert.doesNotMatch(
+assert.match(
   `${leadsPageSource}\n${leadDetailSource}`,
   /PERMISSION_KEYS\.LEADS_FLOW_CONFIG,\s*'write'|PERMISSION_KEYS\.LEADS_CREATE\}\s+action="write"/,
-  'Lead permissions are checkbox based and must not require write actions for visible lead operations.',
+  'Lead mutation actions must require explicit write permission.',
 );
 assert.match(
   userSaveSource,

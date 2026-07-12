@@ -51,6 +51,8 @@ EXCLUDE_DIRS = {
     "backups",
     "coverage",
     "node_modules",
+    "uploads",
+    "private_uploads",
 }
 
 EXCLUDE_FILES = {
@@ -68,9 +70,9 @@ EXCLUDE_SUFFIXES = (
 )
 
 
-def run_local(command: list[str], *, cwd: Path = PROJECT_ROOT) -> None:
+def run_local(command: list[str], *, cwd: Path = PROJECT_ROOT, env: dict[str, str] | None = None) -> None:
     print(f"\n> {' '.join(command)}")
-    subprocess.run(command, cwd=cwd, check=True)
+    subprocess.run(command, cwd=cwd, check=True, env=env)
 
 
 def print_remote_line(line: str) -> None:
@@ -87,6 +89,8 @@ def should_include(path: Path) -> bool:
     if parts & EXCLUDE_DIRS:
         return False
     if path.name in EXCLUDE_FILES:
+        return False
+    if path.name.startswith(".env.") and path.name != ".env.example":
         return False
     if path.name.startswith(".codex-"):
         return False
@@ -169,6 +173,31 @@ TS="$(date +%Y%m%d-%H%M%S)"
 NEW_DIR="${{APP_DIR}}.new-${{TS}}"
 BACKUP_DIR="${{APP_DIR}}.prev-${{TS}}"
 ENV_BACKUP="/tmp/jixiang-os.env-${{TS}}"
+OLD_MOVED="0"
+RELEASE_SWITCHED="0"
+API_WAS_RUNNING="0"
+API_STARTED="0"
+
+rollback_release() {{
+  exit_code="$?"
+  trap - ERR
+  rm -f "$ENV_BACKUP"
+  if [ "$API_STARTED" = "1" ]; then
+    pm2 stop jixiang-os-api >/dev/null 2>&1 || true
+  fi
+  if [ "$RELEASE_SWITCHED" = "1" ] && [ -d "$BACKUP_DIR" ]; then
+    mv "$APP_DIR" "${{NEW_DIR}}.failed" 2>/dev/null || true
+    mv "$BACKUP_DIR" "$APP_DIR"
+  elif [ "$OLD_MOVED" = "1" ] && [ ! -d "$APP_DIR" ] && [ -d "$BACKUP_DIR" ]; then
+    mv "$BACKUP_DIR" "$APP_DIR"
+  fi
+  if [ "$API_WAS_RUNNING" = "1" ] && [ -d "$APP_DIR" ]; then
+    cd "$APP_DIR"
+    AI_PROXY_HOST=127.0.0.1 AI_PROXY_PORT=3001 NODE_ENV=production pm2 restart jixiang-os-api --update-env >/dev/null 2>&1 || true
+  fi
+  exit "$exit_code"
+}}
+trap rollback_release ERR
 
 echo "Preparing release..."
 if [ ! -f "$RELEASE_ZIP" ]; then
@@ -179,12 +208,58 @@ if [ ! -f "$APP_DIR/.env" ]; then
   echo "Server .env not found: $APP_DIR/.env" >&2
   exit 1
 fi
+if [ "$NODE_ENV_VALUE" != "production" ]; then
+  echo "Refusing to deploy with NODE_ENV=$NODE_ENV_VALUE" >&2
+  exit 1
+fi
 
-cp "$APP_DIR/.env" "$ENV_BACKUP"
+set -a
+. "$APP_DIR/.env"
+set +a
+export NODE_ENV="production"
+export AI_PROXY_HOST="127.0.0.1"
+export AI_PROXY_PORT="3001"
+
+echo "Validating current production configuration..."
+cd "$APP_DIR"
+npm run prod:check
+
+PERSISTENT_DATA_DIR="${{JIXIANG_PERSISTENT_DATA_DIR:-${{APP_DIR}}.data}}"
+case "$PERSISTENT_DATA_DIR" in
+  /*) ;;
+  *)
+    echo "PERSISTENT_DATA_DIR must be absolute" >&2
+    false
+    ;;
+esac
+APP_DIR_CANONICAL="$(readlink -m "$APP_DIR")"
+PERSISTENT_DATA_DIR="$(readlink -m "$PERSISTENT_DATA_DIR")"
+case "$PERSISTENT_DATA_DIR/" in
+  "$APP_DIR_CANONICAL/"*)
+    echo "PERSISTENT_DATA_DIR must be outside APP_DIR" >&2
+    false
+    ;;
+esac
+if ! command -v rsync >/dev/null 2>&1; then
+  echo "rsync is required for lossless upload migration" >&2
+  exit 1
+fi
+mkdir -p "$PERSISTENT_DATA_DIR/uploads" "$PERSISTENT_DATA_DIR/private_uploads"
+if [ -d "$APP_DIR/uploads" ] && [ ! -L "$APP_DIR/uploads" ]; then
+  rsync -a --delete "$APP_DIR/uploads/" "$PERSISTENT_DATA_DIR/uploads/"
+fi
+if [ -d "$APP_DIR/private_uploads" ] && [ ! -L "$APP_DIR/private_uploads" ]; then
+  rsync -a --delete "$APP_DIR/private_uploads/" "$PERSISTENT_DATA_DIR/private_uploads/"
+fi
+
+install -m 600 "$APP_DIR/.env" "$ENV_BACKUP"
 rm -rf "$NEW_DIR"
 mkdir -p "$NEW_DIR"
 python3 -m zipfile -e "$RELEASE_ZIP" "$NEW_DIR"
-cp "$ENV_BACKUP" "$NEW_DIR/.env"
+install -m 600 "$ENV_BACKUP" "$NEW_DIR/.env"
+rm -rf "$NEW_DIR/uploads" "$NEW_DIR/private_uploads"
+ln -s "$PERSISTENT_DATA_DIR/uploads" "$NEW_DIR/uploads"
+ln -s "$PERSISTENT_DATA_DIR/private_uploads" "$NEW_DIR/private_uploads"
 
 echo "Preparing dependencies in new release..."
 cd "$NEW_DIR"
@@ -192,14 +267,52 @@ if [ "$REUSE_NODE_MODULES" = "1" ] && [ -d "$APP_DIR/node_modules" ]; then
   echo "Reusing existing node_modules with hard links..."
   cp -al "$APP_DIR/node_modules" "$NEW_DIR/node_modules" 2>/dev/null || cp -a "$APP_DIR/node_modules" "$NEW_DIR/node_modules"
 fi
-npm install --prefer-offline --no-audit --no-fund
+npm ci --include=dev --prefer-offline --no-audit --no-fund
+NODE_ENV="production" AI_PROXY_HOST="127.0.0.1" AI_PROXY_PORT="3001" npm run prod:check
+
+echo "Creating database backup before migration..."
+bash "$NEW_DIR/scripts/mysql/backup-linux.sh"
+
 npm run db:generate
-npm run db:push -- --accept-data-loss
+EXPECTED_BASELINE="20260710010000_enablement_knowledge_foundation"
+if [ "${{JIXIANG_PRISMA_BASELINE_CONFIRMED:-}}" != "$EXPECTED_BASELINE" ]; then
+  echo "Set JIXIANG_PRISMA_BASELINE_CONFIRMED=$EXPECTED_BASELINE only after the production baseline is verified" >&2
+  false
+fi
+MIGRATE_STATUS_CODE="0"
+set +e
+MIGRATE_STATUS_OUTPUT="$(npx --no-install prisma migrate status 2>&1)"
+MIGRATE_STATUS_CODE="$?"
+set -e
+echo "$MIGRATE_STATUS_OUTPUT"
+if echo "$MIGRATE_STATUS_OUTPUT" | grep -Eiq 'failed|diverg|history.*conflict'; then
+  echo "Prisma migration history is unhealthy" >&2
+  false
+fi
+if [ "$MIGRATE_STATUS_CODE" != "0" ] && ! echo "$MIGRATE_STATUS_OUTPUT" | grep -Eq 'Following migrations? have not yet been applied'; then
+  echo "Prisma migration status could not be safely classified" >&2
+  false
+fi
+npm run db:deploy
+
+echo "Finalizing persistent uploads..."
+if pm2 describe jixiang-os-api >/dev/null 2>&1; then
+  API_WAS_RUNNING="1"
+  pm2 stop jixiang-os-api
+fi
+if [ -d "$APP_DIR/uploads" ] && [ ! -L "$APP_DIR/uploads" ]; then
+  rsync -a --delete "$APP_DIR/uploads/" "$PERSISTENT_DATA_DIR/uploads/"
+fi
+if [ -d "$APP_DIR/private_uploads" ] && [ ! -L "$APP_DIR/private_uploads" ]; then
+  rsync -a --delete "$APP_DIR/private_uploads/" "$PERSISTENT_DATA_DIR/private_uploads/"
+fi
 
 echo "Switching release..."
 rm -rf "$BACKUP_DIR"
 mv "$APP_DIR" "$BACKUP_DIR"
+OLD_MOVED="1"
 mv "$NEW_DIR" "$APP_DIR"
+RELEASE_SWITCHED="1"
 cd "$APP_DIR"
 
 echo "Restarting API..."
@@ -208,6 +321,7 @@ if pm2 describe jixiang-os-api >/dev/null 2>&1; then
 else
   AI_PROXY_HOST=127.0.0.1 AI_PROXY_PORT=3001 NODE_ENV="$NODE_ENV_VALUE" pm2 start node_modules/tsx/dist/cli.mjs --name jixiang-os-api -- server/index.ts
 fi
+API_STARTED="1"
 pm2 save
 
 echo "Reloading nginx..."
@@ -221,10 +335,13 @@ for i in $(seq 1 30); do
   fi
   if [ "$i" = "30" ]; then
     echo "API health check failed after waiting." >&2
-    exit 1
+    false
   fi
   sleep 1
 done
+
+trap - ERR
+API_STARTED="0"
 
 echo
 echo "Cleaning old releases..."
@@ -252,7 +369,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--user", default=os.getenv("JIXIANG_DEPLOY_USER", DEFAULT_USER))
     parser.add_argument("--port", type=int, default=int(os.getenv("JIXIANG_DEPLOY_PORT", "22")))
     parser.add_argument("--app-dir", default=os.getenv("JIXIANG_DEPLOY_PATH", DEFAULT_APP_DIR))
-    parser.add_argument("--node-env", default=os.getenv("JIXIANG_REMOTE_NODE_ENV", "development"))
+    parser.add_argument("--node-env", default=os.getenv("JIXIANG_REMOTE_NODE_ENV", "production"))
     parser.add_argument("--health-url", default=os.getenv("JIXIANG_PUBLIC_HEALTH_URL", DEFAULT_HEALTH_URL))
     parser.add_argument("--skip-build", action="store_true", help="Skip local npm build.")
     parser.add_argument("--skip-public-health", action="store_true", help="Skip public /api/health check.")
@@ -269,7 +386,13 @@ def main() -> int:
     try:
         if not args.skip_build:
             clean_dist()
-            run_local(["npm.cmd" if os.name == "nt" else "npm", "run", "build"])
+            build_env = {
+                **os.environ,
+                "NODE_ENV": "production",
+                "VITE_USE_BACKEND_API": "true",
+                "VITE_AI_API_BASE": "/api",
+            }
+            run_local(["npm.cmd" if os.name == "nt" else "npm", "run", "build"], env=build_env)
 
         release_zip = create_release_zip()
         client = ssh_connect(args.host, args.user, password, args.port)

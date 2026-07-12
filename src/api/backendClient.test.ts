@@ -80,7 +80,6 @@ try {
       text: async () => JSON.stringify({
         code: 0,
         data: {
-          [STORAGE_KEYS.LEADS]: [],
           [STORAGE_KEYS.LEAD_FLOW_CONFIG]: {
             ...nextFlowConfig,
             lastAssignedIndex: 0,
@@ -91,7 +90,6 @@ try {
     } as Response;
   };
 
-  persistBackendStorageValue(STORAGE_KEYS.LEADS, [marketLead]);
   persistBackendStorageValue(STORAGE_KEYS.LEAD_FLOW_CONFIG, nextFlowConfig);
 
   await syncBackendStorageFromServer(0);
@@ -185,7 +183,7 @@ try {
 
   await assert.rejects(
     () => persistBackendStorageValue(STORAGE_KEYS.CUSTOMERS, []),
-    /Forbidden/,
+    /记录级命令|legacy/i,
   );
 } finally {
   clearBackendToken();

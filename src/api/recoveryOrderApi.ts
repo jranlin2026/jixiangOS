@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
+import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { initializeMockData } from './mock';
 import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../shared/utils/constants';
@@ -57,6 +58,16 @@ function readRecoveryOrders(): RecoveryOrder[] {
 
 function writeRecoveryOrders(items: RecoveryOrder[]): void {
   setStorageData(STORAGE_KEYS.RECOVERY_ORDERS, items);
+}
+
+function cacheBackendRecoveryOrder(order: RecoveryOrder): RecoveryOrder {
+  const orders = readRecoveryOrders();
+  const index = orders.findIndex((item) => item.id === order.id);
+  const next = index === -1
+    ? [order, ...orders]
+    : orders.map((item, itemIndex) => (itemIndex === index ? order : item));
+  setStorageData(STORAGE_KEYS.RECOVERY_ORDERS, next, { persist: false });
+  return order;
 }
 
 function roundMoney(amount: number): number {
@@ -230,6 +241,17 @@ async function fetchRecoveryOrderStats(ownerId?: string): Promise<ApiResponse<Re
 }
 
 async function createRecoveryOrder(data: RecoveryOrderInput): Promise<ApiResponse<RecoveryOrder>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<RecoveryOrder>('/recovery-orders', {
+      method: 'POST',
+      body: JSON.stringify({ data }),
+    });
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '服务端未返回售后挽回订单', response.code || -1);
+    }
+    return createSuccessResponse(cacheBackendRecoveryOrder(response.data), response.message);
+  }
+
   ensureInit();
   await delay(180);
   if (!canUseRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, 'write')) {

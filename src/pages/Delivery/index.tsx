@@ -61,6 +61,8 @@ import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
 import type { User } from '../../types/settings';
 import { ModuleHeader, ModulePage, ModuleTabs } from '../../shared/components/ModuleShell';
+import useAuthStore from '../../store/useAuthStore';
+import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 
 type DeliveryColumnId =
   | 'orderNo'
@@ -207,6 +209,9 @@ function compactDraft(draft?: TaskDraft) {
 }
 
 const DeliveryPage: React.FC = () => {
+  const currentUser = useAuthStore((state) => state.currentUser);
+  const canMutateDelivery = hasPermission(currentUser, PERMISSION_KEYS.DELIVERY_MOVE_CARD, 'write')
+    || hasPermission(currentUser, PERMISSION_KEYS.DELIVERY_STAGE_CONFIG, 'write');
   const [tabValue, setTabValue] = useState(0);
   const [rows, setRows] = useState<Delivery[]>([]);
   const [stats, setStats] = useState<DeliveryStats | null>(null);
@@ -336,6 +341,7 @@ const DeliveryPage: React.FC = () => {
   }, [createSearch]);
 
   const openCreateDialog = async () => {
+    if (!canMutateDelivery) return;
     setCreateOpen(true);
     await loadCreatableOrders('');
   };
@@ -345,6 +351,7 @@ const DeliveryPage: React.FC = () => {
   };
 
   const handleCreateDelivery = async () => {
+    if (!canMutateDelivery) return;
     if (!selectedCreateOrderId) {
       await alert('请先选择一笔可新建交付单的订单');
       return;
@@ -373,6 +380,7 @@ const DeliveryPage: React.FC = () => {
   };
 
   const handleDeleteDelivery = async (delivery: Delivery) => {
+    if (!canMutateDelivery) return;
     const ok = await confirm(`确认删除交付单「${delivery.orderNo}」吗？删除后不会影响订单和客户资料。`, '删除交付单');
     if (!ok) return;
     const res = await deliveryApi.deleteDelivery(delivery.id);
@@ -385,6 +393,7 @@ const DeliveryPage: React.FC = () => {
   };
 
   const handleCompleteTask = async (task: DeliveryTask) => {
+    if (!canMutateDelivery) return;
     if (!selectedDelivery) return;
     const res = await deliveryApi.updateDeliveryTask(selectedDelivery.id, task.id, {
       status: '已完成',
@@ -399,6 +408,7 @@ const DeliveryPage: React.FC = () => {
   };
 
   const handleReturnPreviousTask = async () => {
+    if (!canMutateDelivery) return;
     if (!selectedDelivery) return;
     const res = await deliveryApi.revertDeliveryStage(selectedDelivery.id);
     if (res.code !== 0) {
@@ -410,6 +420,7 @@ const DeliveryPage: React.FC = () => {
   };
 
   const handleUploadAttachment = async (task: DeliveryTask, event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canMutateDelivery) return;
     if (!selectedDelivery) return;
     const files = Array.from(event.target.files || []);
     event.target.value = '';
@@ -429,6 +440,7 @@ const DeliveryPage: React.FC = () => {
   };
 
   const handleSaveMaterials = async () => {
+    if (!canMutateDelivery) return;
     if (!selectedDelivery) return;
     const nextItems = (selectedDelivery.materialItems || []).map((item) => {
       const value = materialDrafts[item.key]?.trim();
@@ -446,6 +458,7 @@ const DeliveryPage: React.FC = () => {
   };
 
   const handleAddException = async () => {
+    if (!canMutateDelivery) return;
     if (!selectedDelivery) return;
     const res = await deliveryApi.addDeliveryException(selectedDelivery.id, {
       type: exceptionType,
@@ -462,6 +475,7 @@ const DeliveryPage: React.FC = () => {
   };
 
   const handleResolveException = async (exception: DeliveryException) => {
+    if (!canMutateDelivery) return;
     if (!selectedDelivery) return;
     const res = await deliveryApi.resolveDeliveryException(selectedDelivery.id, exception.id, {
       resolvedBy: '客户成功主管',
@@ -476,6 +490,7 @@ const DeliveryPage: React.FC = () => {
   };
 
   const handleConfirmDelivery = async () => {
+    if (!canMutateDelivery) return;
     if (!selectedDelivery) return;
     const res = await deliveryApi.confirmDeliveryCompletion(selectedDelivery.id, {
       confirmedBy: '客户成功主管',
@@ -490,6 +505,7 @@ const DeliveryPage: React.FC = () => {
   };
 
   const openAssign = (delivery: Delivery) => {
+    if (!canMutateDelivery) return;
     setAssignDelivery(delivery);
     setAssignOwnerId(delivery.ownerId || '');
     setAssignPriority(delivery.priority || 'normal');
@@ -497,6 +513,7 @@ const DeliveryPage: React.FC = () => {
   };
 
   const saveAssign = async () => {
+    if (!canMutateDelivery) return;
     if (!assignDelivery) return;
     const user = users.find((item) => item.id === assignOwnerId);
     const res = await deliveryApi.updateDelivery(assignDelivery.id, {
@@ -644,12 +661,16 @@ const DeliveryPage: React.FC = () => {
                   <Tooltip title="查看交付">
                     <IconButton size="small" onClick={() => setSelectedDelivery(delivery)}><VisibilityIcon fontSize="small" /></IconButton>
                   </Tooltip>
-                  <Tooltip title="分配交付">
-                    <IconButton size="small" onClick={() => openAssign(delivery)}><AssignmentIndIcon fontSize="small" /></IconButton>
-                  </Tooltip>
-                  <Tooltip title="删除交付单">
-                    <IconButton size="small" color="error" onClick={() => handleDeleteDelivery(delivery)}><DeleteOutlineIcon fontSize="small" /></IconButton>
-                  </Tooltip>
+                  {canMutateDelivery && (
+                    <>
+                      <Tooltip title="分配交付">
+                        <IconButton size="small" onClick={() => openAssign(delivery)}><AssignmentIndIcon fontSize="small" /></IconButton>
+                      </Tooltip>
+                      <Tooltip title="删除交付单">
+                        <IconButton size="small" color="error" onClick={() => handleDeleteDelivery(delivery)}><DeleteOutlineIcon fontSize="small" /></IconButton>
+                      </Tooltip>
+                    </>
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -724,7 +745,7 @@ const DeliveryPage: React.FC = () => {
     <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 1 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>交付资料</Typography>
-        <Button size="small" variant="outlined" onClick={handleSaveMaterials}>保存资料</Button>
+        {canMutateDelivery && <Button size="small" variant="outlined" onClick={handleSaveMaterials}>保存资料</Button>}
       </Box>
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1.25 }}>
         {(delivery.materialItems || []).map((item) => (
@@ -797,20 +818,22 @@ const DeliveryPage: React.FC = () => {
                     <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{task.title}</Typography>
                     <Chip size="small" label={task.status} color={getTaskColor(task)} />
                   </Box>
-                  <Box sx={{ display: 'flex', gap: 1 }}>
-                    <Button component="label" size="small" variant="outlined" startIcon={<UploadFileIcon />} disabled={!isCurrent && !isTerminal}>
-                      上传
-                      <input hidden type="file" multiple onChange={(event) => handleUploadAttachment(task, event)} />
-                    </Button>
-                    {isCurrent && (
+                  {canMutateDelivery && (
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Button component="label" size="small" variant="outlined" startIcon={<UploadFileIcon />} disabled={!isCurrent && !isTerminal}>
+                        上传
+                        <input hidden type="file" multiple onChange={(event) => handleUploadAttachment(task, event)} />
+                      </Button>
+                      {isCurrent && (
                       <>
                         {canReturnPrevious && (
                           <Button size="small" variant="outlined" startIcon={<ArrowBackIcon />} onClick={handleReturnPreviousTask}>返回上一步</Button>
                         )}
                         <Button size="small" variant="contained" startIcon={<CheckCircleIcon />} onClick={() => handleCompleteTask(task)}>完成一步</Button>
                       </>
-                    )}
-                  </Box>
+                      )}
+                    </Box>
+                  )}
                 </Box>
                 <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>{task.description}</Typography>
                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 1, mt: 1 }}>
@@ -836,7 +859,7 @@ const DeliveryPage: React.FC = () => {
   const renderExceptionPanel = (delivery: Delivery) => (
     <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 1 }}>
       <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1.5 }}>异常与主管介入</Typography>
-      <Stack spacing={1.25} sx={{ mb: 1.5 }}>
+      {canMutateDelivery && <Stack spacing={1.25} sx={{ mb: 1.5 }}>
         <TextField select size="small" label="异常类型" value={exceptionType} onChange={(event) => setExceptionType(event.target.value as DeliveryExceptionType)} fullWidth>
           {EXCEPTION_OPTIONS.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
         </TextField>
@@ -852,7 +875,7 @@ const DeliveryPage: React.FC = () => {
         <Button variant="outlined" color="warning" startIcon={<WarningAmberIcon />} onClick={handleAddException} sx={{ alignSelf: 'flex-start' }}>
           标记异常
         </Button>
-      </Stack>
+      </Stack>}
       <Stack spacing={1}>
         {(delivery.exceptions || []).map((exception) => (
           <Box key={exception.id} sx={{ display: 'grid', gridTemplateColumns: '1fr', gap: 1, p: 1, border: '1px solid #edf0f5', borderRadius: 1 }}>
@@ -860,7 +883,7 @@ const DeliveryPage: React.FC = () => {
               <Typography variant="body2" sx={{ fontWeight: 700 }}>{exception.type} · {exception.status}</Typography>
               <Typography variant="caption" sx={{ color: '#64748b' }}>{exception.description}</Typography>
             </Box>
-            {exception.status !== '已解除' && (
+            {canMutateDelivery && exception.status !== '已解除' && (
               <Button size="small" startIcon={<SupervisorAccountIcon />} onClick={() => handleResolveException(exception)} sx={{ justifySelf: 'flex-start' }}>主管解除</Button>
             )}
           </Box>
@@ -885,12 +908,12 @@ const DeliveryPage: React.FC = () => {
         <Typography variant="body2" sx={{ mt: 1.5, color: '#2e7d32' }}>
           {delivery.supervisorConfirmedBy || '客户成功主管'} 已于 {formatDateTime(delivery.supervisorConfirmedAt)} 确认完成。
         </Typography>
-      ) : (
+      ) : canMutateDelivery ? (
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 1, mt: 1.5 }}>
           <TextField size="small" label="确认说明" value={confirmNotes} onChange={(event) => setConfirmNotes(event.target.value)} />
           <Button variant="contained" startIcon={<SupervisorAccountIcon />} onClick={handleConfirmDelivery}>主管确认</Button>
         </Box>
-      )}
+      ) : null}
     </Paper>
   );
 
@@ -1007,9 +1030,11 @@ const DeliveryPage: React.FC = () => {
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2 }}>
         <Button onClick={() => setCreateOpen(false)}>取消</Button>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateDelivery} disabled={!selectedCreateOrderId || createLoading}>
-          新建交付单
-        </Button>
+        {canMutateDelivery && (
+          <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateDelivery} disabled={!selectedCreateOrderId || createLoading}>
+            新建交付单
+          </Button>
+        )}
       </DialogActions>
     </Dialog>
   );
@@ -1024,9 +1049,11 @@ const DeliveryPage: React.FC = () => {
           <Button variant="outlined" startIcon={<SettingsIcon />} onClick={() => setViewSettingsOpen(true)}>
             视图设置
           </Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={openCreateDialog}>
-            新建交付单
-          </Button>
+          {canMutateDelivery && (
+            <Button variant="contained" startIcon={<AddIcon />} onClick={openCreateDialog}>
+              新建交付单
+            </Button>
+          )}
           </>
         )}
       />
@@ -1090,7 +1117,7 @@ const DeliveryPage: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setAssignDelivery(null)}>取消</Button>
-          <Button variant="contained" onClick={saveAssign}>保存</Button>
+          {canMutateDelivery && <Button variant="contained" onClick={saveAssign}>保存</Button>}
         </DialogActions>
       </Dialog>
 
@@ -1102,4 +1129,3 @@ const DeliveryPage: React.FC = () => {
 };
 
 export default DeliveryPage;
-

@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { failure, success } from '../api/response';
 import {
   STORAGE_KEYS,
@@ -13,7 +13,11 @@ import type { PaginatedResponse } from '../../src/api/types';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import { buildDataVisibilityScopeForUser } from '../../src/shared/utils/dataVisibility';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
-import { getPhoneNumberError, normalizePhoneForStorage } from '../../src/shared/utils/phoneNumber';
+import {
+  getPhoneNumberError,
+  normalizePhoneForComparison,
+  normalizePhoneForStorage,
+} from '../../src/shared/utils/phoneNumber';
 import { PERMISSION_KEYS, hasPermission } from '../../src/shared/utils/permissions';
 
 type CustomerListPrisma = Pick<PrismaClient, 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | '$queryRaw'>;
@@ -281,7 +285,12 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
 
   return {
     async create(input: CustomerCreateInput, currentUser: AuthenticatedUser) {
+      const name = cleanText(input.name);
+      if (!name) return failure<Customer>('客户姓名不能为空', 400);
+      if (name.length > 100) return failure<Customer>('客户姓名不能超过100个字符', 400);
       const phone = normalizePhoneForStorage(input.phone);
+      const wechat = cleanText(input.wechat);
+      if (!phone && !wechat) return failure<Customer>('客户手机号或微信至少填写一项', 400);
       const sourceType = normalizeResourceOwnership(input.sourceType);
       if (sourceType === '个人资源' && !input.leadContributorId && !input.leadContributorName) {
         return failure<Customer>('个人资源必须填写线索贡献人', 400);
@@ -293,15 +302,32 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
         return failure<Customer>('无权把客户分配给其他负责人', 403);
       }
 
-      const phoneError = getPhoneNumberError(phone);
+      const phoneError = phone ? getPhoneNumberError(phone) : '';
       if (phoneError) return failure<Customer>(phoneError, 400);
 
+      const comparablePhone = phone ? normalizePhoneForComparison(phone) : '';
+      const comparableWechat = wechat.toLowerCase();
+      const existingCustomerRows = await prisma.businessRecord.findMany({
+        where: { domain: STORAGE_KEYS.CUSTOMERS },
+        select: { data: true },
+      });
+      const phoneExists = existingCustomerRows.some((row) => {
+        const existing = customerFromRow(row);
+        if (existing.deletedAt) return false;
+        if (comparablePhone && normalizePhoneForComparison(existing.phone) === comparablePhone) return true;
+        return Boolean(comparableWechat && cleanText(existing.wechat).toLowerCase() === comparableWechat);
+      });
+      if (phoneExists) return failure<Customer>(comparablePhone ? '该手机号已存在客户' : '该微信号已存在客户', 409);
+
       const now = new Date().toISOString();
-      const id = 'cust-' + randomUUID().slice(0, 8);
+      const identity = comparablePhone ? `phone:${comparablePhone}` : `wechat:${comparableWechat}`;
+      const id = `cust-${createHash('sha256').update(identity).digest('hex').slice(0, 16)}`;
       const customer: Customer = {
         ...input,
+        name,
         id,
         phone,
+        wechat: wechat || undefined,
         sourceType,
         owner: requestedOwner || actorName,
         customerLevel: input.customerLevel || 'L1',
@@ -323,20 +349,27 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
         updatedAt: now,
       };
 
-      await prisma.businessRecord.create({
-        data: {
-          id: STORAGE_KEYS.CUSTOMERS + ':' + id,
-          domain: STORAGE_KEYS.CUSTOMERS,
-          recordId: id,
-          title: customer.name || customer.company || id,
-          status: customer.lifecycleStatusCode || null,
-          owner: customer.owner || null,
-          customerId: id,
-          amount: 0,
-          eventAt: new Date(now),
-          data: customer as any,
-        },
-      });
+      try {
+        await prisma.businessRecord.create({
+          data: {
+            id: STORAGE_KEYS.CUSTOMERS + ':' + id,
+            domain: STORAGE_KEYS.CUSTOMERS,
+            recordId: id,
+            title: customer.name || customer.company || id,
+            status: customer.lifecycleStatusCode || null,
+            owner: customer.owner || null,
+            customerId: id,
+            amount: 0,
+            eventAt: new Date(now),
+            data: customer as any,
+          },
+        });
+      } catch (error) {
+        if ((error as { code?: unknown } | null)?.code === 'P2002') {
+          return failure<Customer>(comparablePhone ? '该手机号已存在客户' : '该微信号已存在客户', 409);
+        }
+        throw error;
+      }
       return success(customer);
     },
 

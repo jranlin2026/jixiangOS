@@ -2,6 +2,8 @@
 import { STORAGE_KEYS, STORAGE_PREFIX } from '../../shared/utils/constants';
 import {
   clearBackendStorageValues,
+  commandOnlyStorageWriteError,
+  isBackendCommandOnlyStorageKey,
   persistBackendStorageValue,
   removeBackendStorageValue,
   shouldUseBackendApi,
@@ -44,6 +46,18 @@ export function setStorageData<T>(
   data: T,
   options: { reportFailure?: boolean; persist?: boolean } = {},
 ): Promise<void> {
+  if (
+    options.persist !== false
+    && shouldUseBackendApi()
+    && isBackendCommandOnlyStorageKey(key)
+  ) {
+    const error = commandOnlyStorageWriteError(key);
+    const write = Promise.reject(error);
+    if (options.reportFailure !== false) {
+      void write.catch((caught) => reportFailedSync(key, 'save', caught));
+    }
+    return write;
+  }
   localStorage.setItem(key, JSON.stringify(data));
   if (options.persist === false) return Promise.resolve();
   const write = persistBackendStorageValue(key, data);
@@ -80,7 +94,10 @@ export function isStorageInitialized(): boolean {
 /** 标记已初始化 */
 export function markStorageInitialized(): void {
   localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
-  void persistBackendStorageValue(STORAGE_KEYS.INITIALIZED, true).catch((error) => reportFailedSync(STORAGE_KEYS.INITIALIZED, 'save', error));
+  if (!shouldUseBackendApi()) {
+    void persistBackendStorageValue(STORAGE_KEYS.INITIALIZED, true)
+      .catch((error) => reportFailedSync(STORAGE_KEYS.INITIALIZED, 'save', error));
+  }
 }
 
 /** 重置所有数据（用于开发调试） */

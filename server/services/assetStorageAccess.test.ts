@@ -4,7 +4,7 @@ import {
   filterAssetStorageData,
 } from './assetStorageAccess';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
-import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
+import { PERMISSION_KEYS, toAuthenticatedUser } from '../../src/shared/utils/permissions';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
@@ -102,6 +102,30 @@ const opsAuth: AuthenticatedUser = {
   isActive: true,
   permissions: opsRole.permissions,
 };
+const resolvedOpsAuth = toAuthenticatedUser(users[2], [salesRole, opsRole]);
+assert.equal(canWriteStorageKey(resolvedOpsAuth, STORAGE_KEYS.ASSET_DEVICES), true);
+assert.equal(canWriteStorageKey(resolvedOpsAuth, STORAGE_KEYS.ASSET_PHONE_NUMBERS), true);
+assert.equal(canWriteStorageKey(resolvedOpsAuth, STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS), true);
+assert.equal(canWriteStorageKey(resolvedOpsAuth, STORAGE_KEYS.ASSET_RISKS), true);
+assert.equal(canWriteStorageKey(resolvedOpsAuth, STORAGE_KEYS.ASSET_OPERATION_LOGS), true);
+assert.equal(canWriteStorageKey(resolvedOpsAuth, STORAGE_KEYS.ASSET_OFFBOARDING_TASKS), true);
+assert.equal(canWriteStorageKey(resolvedOpsAuth, STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS), true);
+
+const matrixPublisherAuth: AuthenticatedUser = {
+  ...salesAuth,
+  id: 'user-matrix-publisher',
+  name: '矩阵发布专员',
+  account: 'matrix_publisher',
+  permissions: [{ module: PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, actions: ['read', 'write'] }],
+};
+
+assert.equal(canWriteStorageKey(matrixPublisherAuth, STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS), true);
+assert.equal(canWriteStorageKey(matrixPublisherAuth, STORAGE_KEYS.ASSET_DEVICES), false);
+assert.equal(canWriteStorageKey(matrixPublisherAuth, STORAGE_KEYS.ASSET_PHONE_NUMBERS), false);
+assert.equal(canWriteStorageKey(matrixPublisherAuth, STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS), false);
+assert.equal(canWriteStorageKey(matrixPublisherAuth, STORAGE_KEYS.ASSET_RISKS), false);
+assert.equal(canWriteStorageKey(matrixPublisherAuth, STORAGE_KEYS.ASSET_OPERATION_LOGS), false);
+assert.equal(canWriteStorageKey(matrixPublisherAuth, STORAGE_KEYS.ASSET_OFFBOARDING_TASKS), false);
 
 const storageData = {
   [STORAGE_KEYS.ASSET_DEVICES]: [

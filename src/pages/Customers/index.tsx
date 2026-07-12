@@ -608,9 +608,13 @@ const Customers: React.FC = () => {
           <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
             视图设置
           </Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate}>
-            新增客户
-          </Button>
+          {!isPublicPoolScope && (
+            <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE} action="write">
+              <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate}>
+                新增客户
+              </Button>
+            </PermissionGate>
+          )}
           </>
         )}
       />
@@ -796,7 +800,7 @@ const Customers: React.FC = () => {
                       </IconButton>
                     </Tooltip>
                     {canCreateOrderForCustomer(customer) && (
-                    <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE_ORDER}>
+                    <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE_ORDER} action="write">
                       <Tooltip title="提交订单申请">
                         <IconButton size="small" color="info" onClick={() => handleCreateOrder(customer)}>
                           <AddShoppingCartIcon fontSize="small" />
@@ -812,7 +816,7 @@ const Customers: React.FC = () => {
                       </Tooltip>
                     </PermissionGate>
                     {!isPublicPoolCustomer(customer) && (
-                      <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_ASSIGN}>
+                      <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_ASSIGN} action="write">
                         <Tooltip title="分配销售">
                           <IconButton size="small" color="info" onClick={() => handleOpenAssignCustomer(customer)}>
                             <AssignmentIndIcon fontSize="small" />
@@ -821,17 +825,21 @@ const Customers: React.FC = () => {
                       </PermissionGate>
                     )}
                     {isPublicPoolCustomer(customer) ? (
-                      <Tooltip title="重新领取公海客户">
-                        <IconButton size="small" color="primary" onClick={() => handleClaimCustomer(customer)}>
-                          <PersonAddAltIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
+                      <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM} action="write">
+                        <Tooltip title="重新领取公海客户">
+                          <IconButton size="small" color="primary" onClick={() => handleClaimCustomer(customer)}>
+                            <PersonAddAltIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </PermissionGate>
                     ) : (
-                      <Tooltip title="放弃到公海">
-                        <IconButton size="small" color="warning" onClick={() => handleReleaseCustomer(customer)}>
-                          <ExitToAppIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
+                      <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_ASSIGN} action="write">
+                        <Tooltip title="放弃到公海">
+                          <IconButton size="small" color="warning" onClick={() => handleReleaseCustomer(customer)}>
+                            <ExitToAppIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </PermissionGate>
                     )}
                   </Box>
                 </TableCell>
@@ -1096,7 +1104,7 @@ const Customers: React.FC = () => {
         </DialogContent>
         <DialogActions sx={{ display: 'none' }}>
           {orderCustomer && canCreateOrderForCustomer(orderCustomer) && (
-          <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE_ORDER}>
+          <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE_ORDER} action="write">
             <Button onClick={() => orderCustomer && handleCreateOrder(orderCustomer)}>提交订单申请</Button>
           </PermissionGate>
           )}

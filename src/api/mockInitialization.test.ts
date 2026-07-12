@@ -5,6 +5,7 @@ import { STORAGE_KEYS } from '../shared/utils/constants';
 const originalUseBackend = process.env.VITE_USE_BACKEND_API;
 const originalApiBase = process.env.VITE_AI_API_BASE;
 const originalFetch = globalThis.fetch;
+let fetchCalls = 0;
 
 const storage = (() => {
   const values = new Map<string, string>();
@@ -28,11 +29,14 @@ Object.defineProperty(globalThis, 'localStorage', {
 try {
   process.env.VITE_USE_BACKEND_API = 'true';
   process.env.VITE_AI_API_BASE = 'http://127.0.0.1:3001/api';
-  globalThis.fetch = async () => ({
-    status: 200,
-    headers: new Headers({ 'content-type': 'application/json' }),
-    text: async () => JSON.stringify({ code: 0, data: true, message: 'success' }),
-  } as Response);
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    return {
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      text: async () => JSON.stringify({ code: 0, data: true, message: 'success' }),
+    } as Response;
+  };
 
   storage.clear();
   initializeMockData();
@@ -46,6 +50,7 @@ try {
     channelROI: [],
   });
   assert.equal(storage.getItem(STORAGE_KEYS.INITIALIZED), 'true');
+  assert.equal(fetchCalls, 0, 'backend mode must not persist the local initialization marker');
 } finally {
   if (originalUseBackend === undefined) {
     delete process.env.VITE_USE_BACKEND_API;

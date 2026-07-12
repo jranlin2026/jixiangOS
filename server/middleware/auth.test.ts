@@ -53,6 +53,58 @@ assert.equal(nextCalled, false);
 
 middleware = createRequireAuth({
   getCurrentUser: async () => ({ code: 0, data: activeUser, message: 'success' }),
+}, PERMISSION_KEYS.SETTINGS_ROLES, 'write');
+response = createResponse();
+nextCalled = false;
+await middleware({ headers: { authorization: 'Bearer token' } } as any, response as any, next as any);
+assert.equal(response.statusCode, 200);
+assert.equal(nextCalled, true);
+
+middleware = createRequireAuth({
+  getCurrentUser: async () => ({ code: 0, data: activeUser, message: 'success' }),
+}, PERMISSION_KEYS.SETTINGS_ROLES, 'delete');
+response = createResponse();
+nextCalled = false;
+await middleware({ headers: { authorization: 'Bearer token' } } as any, response as any, next as any);
+assert.equal(response.statusCode, 200);
+assert.equal(nextCalled, true);
+
+middleware = createRequireAuth({
+  getCurrentUser: async () => ({
+    code: 0,
+    data: {
+      ...activeUser,
+      role: 'Role Auditor' as any,
+      permissions: [{ module: PERMISSION_KEYS.SETTINGS_ROLES, actions: ['read'] }],
+    },
+    message: 'success',
+  }),
+}, PERMISSION_KEYS.SETTINGS_ROLES, 'delete');
+response = createResponse();
+nextCalled = false;
+await middleware({ headers: { authorization: 'Bearer token' } } as any, response as any, next as any);
+assert.equal(response.statusCode, 403);
+assert.equal(nextCalled, false);
+
+middleware = createRequireAuth({
+  getCurrentUser: async () => ({
+    code: 0,
+    data: {
+      ...activeUser,
+      role: 'Role Auditor' as any,
+      permissions: [{ module: PERMISSION_KEYS.SETTINGS_ROLES, actions: ['read'] }],
+    },
+    message: 'success',
+  }),
+}, PERMISSION_KEYS.SETTINGS_ROLES, 'write');
+response = createResponse();
+nextCalled = false;
+await middleware({ headers: { authorization: 'Bearer token' } } as any, response as any, next as any);
+assert.equal(response.statusCode, 403);
+assert.equal(nextCalled, false);
+
+middleware = createRequireAuth({
+  getCurrentUser: async () => ({ code: 0, data: activeUser, message: 'success' }),
 }, PERMISSION_KEYS.SETTINGS_ROLES);
 response = createResponse();
 const request = { headers: { authorization: 'Bearer token' } } as any;

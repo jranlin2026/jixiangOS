@@ -49,9 +49,23 @@ export type AiRuntimeConfig = AiPublicConfig & {
   apiKey: string;
 };
 
-function normalizeBaseUrl(value: string | undefined): string {
+function validatedBaseUrl(value: string | undefined): string | null {
   const trimmed = String(value || '').trim().replace(/\/+$/, '');
-  return trimmed || DEFAULT_BASE_URL;
+  const candidate = trimmed || DEFAULT_BASE_URL;
+  try {
+    const url = new URL(candidate);
+    if (url.protocol !== 'https:') return null;
+    if (url.hostname.toLowerCase() !== 'api.deepseek.com') return null;
+    if (url.username || url.password) return null;
+    if (url.port && url.port !== '443') return null;
+    return candidate;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeBaseUrl(value: string | undefined): string {
+  return validatedBaseUrl(value) || DEFAULT_BASE_URL;
 }
 
 function normalizeModel(value: string | undefined): string {
@@ -101,13 +115,15 @@ export function createAiConfigService(prisma: AiConfigPrisma) {
       if (provider !== DEFAULT_PROVIDER) return failure('only DeepSeek is supported now', 400);
 
       const existing = await readRow();
+      const baseUrl = validatedBaseUrl(input.baseUrl === undefined ? existing?.baseUrl : input.baseUrl);
+      if (!baseUrl) return failure('DeepSeek base URL must use the official HTTPS endpoint', 400);
       const nextApiKey = typeof input.apiKey === 'string' && input.apiKey.trim()
         ? input.apiKey.trim()
         : existing?.apiKey || '';
       const payload = {
         provider: DEFAULT_PROVIDER,
         apiKey: nextApiKey,
-        baseUrl: normalizeBaseUrl(input.baseUrl),
+        baseUrl,
         model: normalizeModel(input.model),
         enabled: input.enabled ?? existing?.enabled ?? true,
       };

@@ -4,7 +4,7 @@ import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
 import { backendRequest, shouldUseBackendApi } from './backendClient';
-import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
+import { LIFECYCLE_STATUS_CODES, STORAGE_KEYS, DEFAULT_PAGE_SIZE, normalizeResourceOwnership } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 import { leadFlowApi } from './leadFlowApi';
@@ -107,6 +107,16 @@ function normalizeLead(lead: Lead): Lead {
   });
 }
 
+function cacheBackendLead(lead: Lead): Lead {
+  const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
+  const index = leads.findIndex((item) => item.id === lead.id);
+  const nextLeads = index === -1
+    ? [lead, ...leads]
+    : leads.map((item, itemIndex) => (itemIndex === index ? lead : item));
+  setStorageData(STORAGE_KEYS.LEADS, nextLeads, { persist: false });
+  return lead;
+}
+
 function getActiveAssignableUserNames(): Set<string> {
   const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
   return new Set(
@@ -203,6 +213,15 @@ async function fetchLeadById(id: string): Promise<ApiResponse<Lead | null>> {
 }
 
 async function createLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'followUpRecords'>): Promise<ApiResponse<Lead | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Lead>('/leads', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code || -1);
+    return createSuccessResponse(cacheBackendLead(response.data));
+  }
+
   ensureInit();
   await delay(200);
   const result = leadFlowApi.intakeLead(data);
@@ -214,6 +233,15 @@ async function createLead(data: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'f
 }
 
 async function updateLead(id: string, data: Partial<Lead>): Promise<ApiResponse<Lead | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Lead>(`/leads/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+    if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code || -1);
+    return createSuccessResponse(cacheBackendLead(response.data));
+  }
+
   ensureInit();
   await delay(200);
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
@@ -259,6 +287,17 @@ async function updateLead(id: string, data: Partial<Lead>): Promise<ApiResponse<
 }
 
 async function deleteLead(id: string, reason = ''): Promise<ApiResponse<boolean>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<boolean>(`/leads/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ reason }),
+    });
+    if (response.code !== 0 || response.data !== true) return createErrorResponse(response.message, response.code || -1);
+    const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
+    setStorageData(STORAGE_KEYS.LEADS, leads.filter((lead) => lead.id !== id), { persist: false });
+    return createSuccessResponse(true);
+  }
+
   ensureInit();
   await delay(150);
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
@@ -280,6 +319,30 @@ async function addFollowUpRecord(
   leadId: string,
   record: Omit<FollowUpRecord, 'id' | 'leadId' | 'createdAt'>,
 ): Promise<ApiResponse<FollowUpRecord | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<FollowUpRecord>(`/leads/${encodeURIComponent(leadId)}/follow-ups`, {
+      method: 'POST',
+      body: JSON.stringify(record),
+    });
+    if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code || -1);
+    const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
+    const index = leads.findIndex((lead) => lead.id === leadId);
+    if (index !== -1) {
+      const lead = leads[index];
+      const shouldStartFollowing = !lead.lifecycleStatusCode || lead.lifecycleStatusCode === LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP;
+      leads[index] = {
+        ...lead,
+        followUpRecords: [response.data, ...(lead.followUpRecords || [])],
+        lifecycleStatusCode: shouldStartFollowing ? LIFECYCLE_STATUS_CODES.FOLLOWING : lead.lifecycleStatusCode,
+        lifecycleStatus: shouldStartFollowing ? '跟进中' : lead.lifecycleStatus,
+        lifecycleStatusUpdatedAt: shouldStartFollowing ? response.data.createdAt : lead.lifecycleStatusUpdatedAt,
+        updatedAt: response.data.createdAt,
+      };
+      setStorageData(STORAGE_KEYS.LEADS, leads, { persist: false });
+    }
+    return createSuccessResponse(response.data);
+  }
+
   ensureInit();
   await delay(200);
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
@@ -305,6 +368,12 @@ async function addFollowUpRecord(
 }
 
 async function refreshAIAnalysis(leadId: string): Promise<ApiResponse<LeadAIAnalysis | null>> {
+  if (shouldUseBackendApi()) {
+    return createErrorResponse(
+      'AI 线索分析的记录级服务器保存尚未完成，为避免旧快照覆盖线索数据，当前已安全暂停',
+      409,
+    );
+  }
   ensureInit();
   await delay(500);
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];

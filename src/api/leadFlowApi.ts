@@ -454,6 +454,21 @@ function syncCustomerByLead(lead: Lead): void {
 }
 
 async function manualAssignLead(leadId: string, userName: string): Promise<ApiResponse<Lead | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Lead>(`/leads/${encodeURIComponent(leadId)}/assign`, {
+      method: 'POST',
+      body: JSON.stringify({ owner: userName }),
+    });
+    if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code || -1);
+    const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
+    const index = leads.findIndex((lead) => lead.id === response.data!.id);
+    const nextLeads = index === -1
+      ? [response.data, ...leads]
+      : leads.map((lead, itemIndex) => (itemIndex === index ? response.data! : lead));
+    setStorageData(STORAGE_KEYS.LEADS, nextLeads, { persist: false });
+    return createSuccessResponse(response.data);
+  }
+
   ensureInit();
   await delay(150);
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
@@ -496,6 +511,20 @@ async function manualAssignLead(leadId: string, userName: string): Promise<ApiRe
 }
 
 async function claimLeadAsCustomer(leadId: string, userName: string): Promise<ApiResponse<Lead | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Lead>(`/leads/${encodeURIComponent(leadId)}/convert`, { method: 'POST' });
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(`客户保存失败：${response.message || '服务端未返回转换结果'}`, response.code || -1);
+    }
+    const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
+    const index = leads.findIndex((lead) => lead.id === response.data!.id);
+    const nextLeads = index === -1
+      ? [response.data, ...leads]
+      : leads.map((lead, itemIndex) => (itemIndex === index ? response.data! : lead));
+    setStorageData(STORAGE_KEYS.LEADS, nextLeads, { persist: false });
+    return createSuccessResponse(response.data);
+  }
+
   ensureInit();
   await delay(150);
   const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];

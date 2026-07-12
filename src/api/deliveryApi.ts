@@ -17,6 +17,7 @@ import type { Order } from '../types/order';
 import type { Product } from '../types/product';
 import type { ApiResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
+import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
@@ -59,6 +60,23 @@ const PRODUCT_NAME_ALIASES: Record<string, string> = {
 
 function ensureInit(): void {
   initializeMockData();
+}
+
+function cacheBackendDelivery(delivery: Delivery): Delivery {
+  const deliveries = getStorageData<Delivery[]>(STORAGE_KEYS.DELIVERIES) || [];
+  const index = deliveries.findIndex((item) => item.id === delivery.id);
+  const next = index === -1
+    ? [delivery, ...deliveries]
+    : deliveries.map((item, itemIndex) => (itemIndex === index ? delivery : item));
+  setStorageData(STORAGE_KEYS.DELIVERIES, next, { persist: false });
+  return delivery;
+}
+
+function cacheBackendDeliveryResult(response: ApiResponse<Delivery>): ApiResponse<Delivery | null> {
+  if (response.code !== 0 || !response.data) {
+    return createErrorResponse(response.message || '服务端未返回交付单', response.code || -1);
+  }
+  return createSuccessResponse(cacheBackendDelivery(response.data), response.message);
 }
 
 function createId(prefix: string): string {
@@ -502,6 +520,13 @@ async function fetchDeliveryStats(filters?: DeliveryFilters): Promise<ApiRespons
 }
 
 async function advanceDeliveryStage(id: string, targetStage: string): Promise<ApiResponse<Delivery | null>> {
+  if (shouldUseBackendApi()) {
+    return cacheBackendDeliveryResult(await backendRequest<Delivery>(`/deliveries/${encodeURIComponent(id)}/advance`, {
+      method: 'POST',
+      body: JSON.stringify({ targetStage }),
+    }));
+  }
+
   ensureInit();
   await delay(160);
   const normalized = readDeliveries().find((item) => item.id === id);
@@ -520,6 +545,12 @@ async function advanceDeliveryStage(id: string, targetStage: string): Promise<Ap
 }
 
 async function revertDeliveryStage(id: string): Promise<ApiResponse<Delivery | null>> {
+  if (shouldUseBackendApi()) {
+    return cacheBackendDeliveryResult(await backendRequest<Delivery>(`/deliveries/${encodeURIComponent(id)}/revert`, {
+      method: 'POST',
+    }));
+  }
+
   ensureInit();
   await delay(160);
   const deliveries = getStorageData<Delivery[]>(STORAGE_KEYS.DELIVERIES) || [];
@@ -584,6 +615,13 @@ async function revertDeliveryStage(id: string): Promise<ApiResponse<Delivery | n
 }
 
 async function updateDelivery(id: string, data: Partial<Delivery>): Promise<ApiResponse<Delivery | null>> {
+  if (shouldUseBackendApi()) {
+    return cacheBackendDeliveryResult(await backendRequest<Delivery>(`/deliveries/${encodeURIComponent(id)}/card`, {
+      method: 'PATCH',
+      body: JSON.stringify({ data }),
+    }));
+  }
+
   ensureInit();
   await delay(160);
   const deliveries = getStorageData<Delivery[]>(STORAGE_KEYS.DELIVERIES) || [];
@@ -596,6 +634,13 @@ async function updateDelivery(id: string, data: Partial<Delivery>): Promise<ApiR
 }
 
 async function createDeliveryFromOrder(orderId: string): Promise<ApiResponse<Delivery | null>> {
+  if (shouldUseBackendApi()) {
+    return cacheBackendDeliveryResult(await backendRequest<Delivery>('/deliveries/from-order', {
+      method: 'POST',
+      body: JSON.stringify({ orderId }),
+    }));
+  }
+
   ensureInit();
   await delay(160);
   const deliveries = getStorageData<Delivery[]>(STORAGE_KEYS.DELIVERIES) || [];
@@ -622,6 +667,13 @@ async function createDeliveryFromOrder(orderId: string): Promise<ApiResponse<Del
 }
 
 async function updateDeliveryTask(deliveryId: string, taskId: string, data: Partial<DeliveryTask>): Promise<ApiResponse<Delivery | null>> {
+  if (shouldUseBackendApi()) {
+    return cacheBackendDeliveryResult(await backendRequest<Delivery>(
+      `/deliveries/${encodeURIComponent(deliveryId)}/tasks/${encodeURIComponent(taskId)}`,
+      { method: 'PATCH', body: JSON.stringify({ data }) },
+    ));
+  }
+
   ensureInit();
   await delay(160);
   const deliveries = getStorageData<Delivery[]>(STORAGE_KEYS.DELIVERIES) || [];
@@ -690,6 +742,13 @@ async function addDeliveryAttachment(
   taskId: string,
   attachment: Omit<DeliveryAttachment, 'id' | 'uploadedAt'> & Partial<Pick<DeliveryAttachment, 'id' | 'uploadedAt'>>,
 ): Promise<ApiResponse<Delivery | null>> {
+  if (shouldUseBackendApi()) {
+    return cacheBackendDeliveryResult(await backendRequest<Delivery>(
+      `/deliveries/${encodeURIComponent(deliveryId)}/tasks/${encodeURIComponent(taskId)}/attachments`,
+      { method: 'POST', body: JSON.stringify({ attachment }) },
+    ));
+  }
+
   const delivery = readDeliveries().find((item) => item.id === deliveryId);
   if (!delivery) return createSuccessResponse(null);
   const task = delivery.tasks.find((item) => item.id === taskId);
@@ -713,6 +772,20 @@ async function addDeliveryException(
     needsSupervisor?: boolean;
   },
 ): Promise<ApiResponse<Delivery | null>> {
+  if (shouldUseBackendApi()) {
+    return cacheBackendDeliveryResult(await backendRequest<Delivery>(
+      `/deliveries/${encodeURIComponent(deliveryId)}/exceptions`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ data: {
+          type: input.type,
+          description: input.description,
+          needsSupervisor: input.needsSupervisor,
+        } }),
+      },
+    ));
+  }
+
   ensureInit();
   await delay(120);
   if (!input.description.trim()) return createErrorResponse('请填写异常说明');
@@ -740,6 +813,13 @@ async function resolveDeliveryException(
   exceptionId: string,
   input: { resolvedBy?: string; resolution: string },
 ): Promise<ApiResponse<Delivery | null>> {
+  if (shouldUseBackendApi()) {
+    return cacheBackendDeliveryResult(await backendRequest<Delivery>(
+      `/deliveries/${encodeURIComponent(deliveryId)}/exceptions/${encodeURIComponent(exceptionId)}/resolve`,
+      { method: 'POST', body: JSON.stringify({ resolution: input.resolution }) },
+    ));
+  }
+
   ensureInit();
   await delay(120);
   if (!input.resolution.trim()) return createErrorResponse('请填写异常处理结果');
@@ -769,6 +849,13 @@ async function confirmDeliveryCompletion(
   deliveryId: string,
   input: { confirmedBy?: string; notes?: string },
 ): Promise<ApiResponse<Delivery | null>> {
+  if (shouldUseBackendApi()) {
+    return cacheBackendDeliveryResult(await backendRequest<Delivery>(
+      `/deliveries/${encodeURIComponent(deliveryId)}/confirm`,
+      { method: 'POST', body: JSON.stringify({ notes: input.notes }) },
+    ));
+  }
+
   ensureInit();
   await delay(160);
   const normalized = readDeliveries().find((item) => item.id === deliveryId);
@@ -790,6 +877,16 @@ async function confirmDeliveryCompletion(
 }
 
 async function deleteDelivery(id: string): Promise<ApiResponse<boolean>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<boolean>(`/deliveries/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (response.code !== 0 || response.data !== true) {
+      return createErrorResponse(response.message || '服务端未返回交付单删除结果', response.code || -1);
+    }
+    const deliveries = getStorageData<Delivery[]>(STORAGE_KEYS.DELIVERIES) || [];
+    setStorageData(STORAGE_KEYS.DELIVERIES, deliveries.filter((item) => item.id !== id), { persist: false });
+    return createSuccessResponse(true);
+  }
+
   ensureInit();
   await delay(120);
   const deliveries = getStorageData<Delivery[]>(STORAGE_KEYS.DELIVERIES) || [];

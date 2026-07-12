@@ -24,7 +24,6 @@ import SourceIcon from '@mui/icons-material/Source';
 import MoveToInboxIcon from '@mui/icons-material/MoveToInbox';
 import type { CrmMigrationFileKey, CrmMigrationFileMap, CrmMigrationPrecheckResult } from '../../api/crmMigrationApi';
 import { crmMigrationApi } from '../../api/crmMigrationApi';
-import { settingsApi } from '../../api/settingsApi';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 
 const FILE_SLOTS: Array<{ key: CrmMigrationFileKey; label: string; description: string; accept: string }> = [
@@ -59,14 +58,6 @@ const FILE_SLOTS: Array<{ key: CrmMigrationFileKey; label: string; description: 
     accept: '.csv',
   },
 ];
-
-function createAccountFromName(name: string): string {
-  const hash = Array.from(name)
-    .map((char) => char.charCodeAt(0).toString(36))
-    .join('')
-    .slice(0, 14);
-  return `ec_${hash || Date.now().toString(36)}`;
-}
 
 const StatCard: React.FC<{ label: string; value: React.ReactNode; hint?: string; color?: string }> = ({ label, value, hint, color = '#2563eb' }) => (
   <Paper elevation={0} sx={{ border: '1px solid #dbe3ef', borderRadius: 2, p: 1.5, minWidth: 150 }}>
@@ -156,33 +147,10 @@ const CrmMigration: React.FC = () => {
   const createMissingEmployees = async () => {
     const missing = result?.employees.missing || [];
     if (!missing.length) return;
-    const confirmed = await confirm(
-      `将为 ${missing.length} 个 EC CRM 员工创建系统账号草稿，默认角色为“销售顾问”，默认密码为 Jixiang88。创建后可以到组织架构里调整部门、角色和手机号。`,
-      '创建缺失员工账号',
+    await alert(
+      `批量创建员工账号已暂停。请到“组织架构”逐个创建这 ${missing.length} 个员工，并为每人设置唯一初始密码。`,
+      '安全限制',
     );
-    if (!confirmed) return;
-
-    setSyncing(true);
-    let created = 0;
-    let failed = 0;
-    for (const name of missing) {
-      const response = await settingsApi.createUser({
-        name,
-        account: createAccountFromName(name),
-        email: '',
-        phone: '',
-        role: '销售顾问',
-        positionName: '销售顾问',
-        isActive: true,
-        employmentStatus: 'active',
-        password: 'Jixiang88',
-      });
-      if (response.code === 0 && response.data) created += 1;
-      else failed += 1;
-    }
-    setSyncing(false);
-    await alert(`员工账号创建完成：成功 ${created} 个，失败 ${failed} 个。`, '员工同步完成');
-    await runPrecheck();
   };
 
   const importCustomersAndLeads = async () => {

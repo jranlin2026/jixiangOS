@@ -94,6 +94,45 @@ function cacheBackendCustomerReleaseInLeads(customer: Customer): void {
   if (changed) setStorageData(STORAGE_KEYS.LEADS, nextLeads, { persist: false });
 }
 
+function cacheBackendCustomerOwnerInLeads(customer: Customer): void {
+  const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
+  const updatedAt = customer.updatedAt || new Date().toISOString();
+  let changed = false;
+  const nextLeads = leads.map((lead) => {
+    const matches = lead.customerId === customer.id
+      || Boolean(lead.phone && customer.phone && normalizePhoneForComparison(lead.phone) === normalizePhoneForComparison(customer.phone))
+      || Boolean(lead.wechat && customer.wechat && lead.wechat === customer.wechat);
+    if (!matches) return lead;
+    changed = true;
+    return {
+      ...lead,
+      customerId: customer.id,
+      name: customer.name,
+      company: customer.company,
+      phone: customer.phone,
+      wechat: customer.wechat,
+      industry: customer.industry,
+      city: customer.city,
+      owner: customer.owner,
+      assignedTo: customer.owner === '公海' ? undefined : customer.owner,
+      inputBy: customer.leadInputBy,
+      leadContributorId: customer.leadContributorId,
+      leadContributorName: customer.leadContributorName,
+      source: customer.leadSource || lead.source,
+      sourceType: customer.sourceType,
+      sourceName: customer.sourceName,
+      sourceAccount: customer.sourceAccount,
+      tags: customer.tags,
+      remark: customer.remark,
+      score: customer.score,
+      lifecycleStatusCode: customer.lifecycleStatusCode,
+      lifecycleStatusUpdatedAt: customer.lifecycleStatusUpdatedAt || updatedAt,
+      updatedAt,
+    };
+  });
+  if (changed) setStorageData(STORAGE_KEYS.LEADS, nextLeads, { persist: false });
+}
+
 function hasFollowActivity(customer: Customer): boolean {
   return (customer.activityRecords || []).some((record) => record.type === 'follow');
 }
@@ -435,6 +474,17 @@ async function createCustomer(data: CustomerCreateInput): Promise<ApiResponse<Cu
 }
 
 async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiResponse<Customer | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Customer>(`/customers/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+    if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code || -1);
+    const customer = cacheBackendCustomer(response.data);
+    cacheBackendCustomerOwnerInLeads(customer);
+    return createSuccessResponse(customer);
+  }
+
   ensureInit();
   await delay(200);
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
@@ -486,7 +536,7 @@ async function addCustomerFollowUp(
       method: 'POST',
       body: JSON.stringify(data),
     });
-    if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code);
+    if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code || -1);
     return createSuccessResponse(cacheBackendCustomer(response.data));
   }
 
@@ -548,7 +598,7 @@ async function releaseCustomerToPublicPool(id: string, reason: string): Promise<
       method: 'POST',
       body: JSON.stringify({ reason }),
     });
-    if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code);
+    if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code || -1);
     const customer = cacheBackendCustomer(response.data);
     cacheBackendCustomerReleaseInLeads(customer);
     return createSuccessResponse(customer);
@@ -572,6 +622,14 @@ async function releaseCustomerToPublicPool(id: string, reason: string): Promise<
 }
 
 async function claimCustomerFromPublicPool(id: string, userName: string): Promise<ApiResponse<Customer | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Customer>(`/customers/${encodeURIComponent(id)}/claim`, { method: 'POST' });
+    if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code || -1);
+    const customer = cacheBackendCustomer(response.data);
+    cacheBackendCustomerOwnerInLeads(customer);
+    return createSuccessResponse(customer);
+  }
+
   ensureInit();
   await delay(150);
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
@@ -593,6 +651,17 @@ async function claimCustomerFromPublicPool(id: string, userName: string): Promis
 }
 
 async function assignCustomerOwner(id: string, owner: string, reason = ''): Promise<ApiResponse<Customer | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Customer>(`/customers/${encodeURIComponent(id)}/assign`, {
+      method: 'POST',
+      body: JSON.stringify({ owner, reason }),
+    });
+    if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code || -1);
+    const customer = cacheBackendCustomer(response.data);
+    cacheBackendCustomerOwnerInLeads(customer);
+    return createSuccessResponse(customer);
+  }
+
   ensureInit();
   await delay(150);
   const nextOwner = owner.trim();
@@ -642,6 +711,27 @@ async function assignCustomerOwner(id: string, owner: string, reason = ''): Prom
 }
 
 async function deleteCustomer(id: string, reason = ''): Promise<ApiResponse<boolean>> {
+  if (shouldUseBackendApi()) {
+    const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+    const customer = customers.find((item) => item.id === id);
+    const response = await backendRequest<boolean>(`/customers/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ reason }),
+    });
+    if (response.code !== 0 || response.data !== true) return createErrorResponse(response.message, response.code || -1);
+    setStorageData(STORAGE_KEYS.CUSTOMERS, customers.filter((item) => item.id !== id), { persist: false });
+    if (customer) {
+      const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
+      const nextLeads = leads.filter((lead) => !(
+        lead.customerId === customer.id
+        || Boolean(lead.phone && customer.phone && normalizePhoneForComparison(lead.phone) === normalizePhoneForComparison(customer.phone))
+        || Boolean(lead.wechat && customer.wechat && lead.wechat.trim().toLowerCase() === customer.wechat.trim().toLowerCase())
+      ));
+      setStorageData(STORAGE_KEYS.LEADS, nextLeads, { persist: false });
+    }
+    return createSuccessResponse(true);
+  }
+
   ensureInit();
   await delay(150);
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
@@ -668,6 +758,12 @@ async function deleteCustomer(id: string, reason = ''): Promise<ApiResponse<bool
 }
 
 async function fetchAIPortrait(customerId: string): Promise<ApiResponse<AICustomerPortrait | null>> {
+  if (shouldUseBackendApi()) {
+    return createErrorResponse(
+      'AI 客户画像的记录级服务器保存尚未完成，为避免旧快照覆盖客户数据，当前已安全暂停',
+      409,
+    );
+  }
   ensureInit();
   await delay(400);
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];

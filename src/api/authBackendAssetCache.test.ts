@@ -27,6 +27,10 @@ try {
   storage.clear();
   storage.set(STORAGE_KEYS.ASSET_DEVICES, JSON.stringify([{ id: 'admin-device', imei: 'ADMIN-RAW', imeiMasked: 'ADMIN-***' }]));
   storage.set(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS, JSON.stringify([{ id: 'admin-account', loginAccount: 'admin_raw', loginAccountMasked: 'admin_***' }]));
+  storage.set(STORAGE_KEYS.ORDERS, JSON.stringify([{ id: 'admin-order', salesId: 'user-admin' }]));
+  storage.set(STORAGE_KEYS.ORDER_APPLICATIONS, JSON.stringify([{ id: 'admin-application', applicantId: 'user-admin' }]));
+  storage.set(STORAGE_KEYS.DELIVERIES, JSON.stringify([{ id: 'admin-delivery', ownerId: 'user-admin' }]));
+  storage.set(STORAGE_KEYS.RECOVERY_ORDERS, JSON.stringify([{ id: 'admin-recovery', createdBy: 'user-admin' }]));
 
   const putRequests: string[] = [];
   globalThis.fetch = async (url, init) => {
@@ -88,6 +92,20 @@ try {
   assert.equal(JSON.parse(storage.get(AUTH_SESSION_STORAGE_KEY) || '{}').userId, 'user-sales');
   assert.equal(storage.get(STORAGE_KEYS.ASSET_DEVICES), undefined);
   assert.equal(storage.get(STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS), undefined);
+  assert.equal(storage.get(STORAGE_KEYS.ORDERS), undefined);
+  assert.equal(storage.get(STORAGE_KEYS.ORDER_APPLICATIONS), undefined);
+  assert.equal(storage.get(STORAGE_KEYS.DELIVERIES), undefined);
+  assert.equal(storage.get(STORAGE_KEYS.RECOVERY_ORDERS), undefined);
+
+  storage.set(STORAGE_KEYS.ORDERS, JSON.stringify([{ id: 'employee-order', salesId: 'user-sales' }]));
+  storage.set(STORAGE_KEYS.ORDER_APPLICATIONS, JSON.stringify([{ id: 'employee-application', applicantId: 'user-sales' }]));
+  storage.set(STORAGE_KEYS.DELIVERIES, JSON.stringify([{ id: 'employee-delivery', ownerId: 'user-sales' }]));
+  storage.set(STORAGE_KEYS.RECOVERY_ORDERS, JSON.stringify([{ id: 'employee-recovery', createdBy: 'user-sales' }]));
+  await authApi.logout();
+  assert.equal(storage.get(STORAGE_KEYS.ORDERS), undefined);
+  assert.equal(storage.get(STORAGE_KEYS.ORDER_APPLICATIONS), undefined);
+  assert.equal(storage.get(STORAGE_KEYS.DELIVERIES), undefined);
+  assert.equal(storage.get(STORAGE_KEYS.RECOVERY_ORDERS), undefined);
   assert.deepEqual(putRequests, []);
 } finally {
   clearBackendToken();

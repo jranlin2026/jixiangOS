@@ -377,8 +377,6 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       sourceType: normalizeResourceOwnership(draft.sourceType as string | undefined),
       industry: draft.industry,
       city: nextCity,
-      owner: draft.owner,
-      leadInputBy: draft.leadInputBy,
       leadContributorId: draft.leadContributorId,
       leadContributorName: draft.leadContributorName,
       customerLevel: draft.customerLevel,
@@ -801,7 +799,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Typography variant="subtitle2" sx={{ color: '#64748b' }}>共 {orders.length} 笔订单</Typography>
         {!readOnly && onCreateOrder && canCreateOrderForCurrentCustomer && (
-          <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE_ORDER}>
+          <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE_ORDER} action="write">
           <Button variant="contained" size="small" onClick={() => onCreateOrder(currentCustomer)}>提交订单申请</Button>
           </PermissionGate>
         )}
@@ -960,9 +958,11 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               {!readOnly && (
                 <Box sx={{ display: 'flex', gap: 1 }}>
                   {isPublicPoolCustomer ? (
-                    <Button size="small" variant="contained" startIcon={<PersonAddAltIcon />} onClick={handleClaimCurrentCustomer}>
-                      重新领取
-                    </Button>
+                    <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM} action="write">
+                      <Button size="small" variant="contained" startIcon={<PersonAddAltIcon />} onClick={handleClaimCurrentCustomer}>
+                        重新领取
+                      </Button>
+                    </PermissionGate>
                   ) : (
                     <Button size="small" color="warning" variant="outlined" startIcon={<ExitToAppIcon />} onClick={handleReleaseCurrentCustomer}>
                       放弃到公海
@@ -1010,8 +1010,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               {renderInfoRow('资源归属', 'sourceType')}
               {renderInfoRow('行业', 'industry')}
               {renderInfoRow('城市', 'city')}
-              {renderInfoRow('销售负责人', 'owner')}
-              {renderInfoRow('线索录入人', 'leadInputBy')}
+              {renderInfoRow('销售负责人', 'owner', false)}
+              {renderInfoRow('线索录入人', 'leadInputBy', false)}
               {renderInfoRow('线索贡献人', 'leadContributorName')}
               {renderInfoRow('客户等级', 'customerLevel')}
               {renderTagsRow()}

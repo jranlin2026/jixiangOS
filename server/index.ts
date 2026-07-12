@@ -18,9 +18,16 @@ import { createLoginRateLimiter } from './middleware/loginRateLimit';
 import { createAuthService } from './services/authService';
 import { createAiConfigService } from './services/aiConfigService';
 import { createCustomerListService } from './services/customerListService';
+import { createCustomerCommandService } from './services/customerCommandService';
 import { createLeadListService } from './services/leadListService';
 import { createSettingsService } from './services/settingsService';
 import { createStorageService } from './services/storageService';
+import { createOrderApplicationService } from './services/orderApplicationService';
+import { createOrderApprovalDownstreamEffects } from './services/orderApprovalEffectsService';
+import { createOrderCommandService } from './services/orderCommandService';
+import { createOrderQueryService } from './services/orderQueryService';
+import { createDeliveryCommandService } from './services/deliveryCommandService';
+import { createRecoveryOrderCommandService } from './services/recoveryOrderCommandService';
 import { createKnowledgeService } from './services/enablement/knowledgeService';
 import { createKnowledgeFileStore } from './services/enablement/knowledgeFileStore';
 import { createPrismaKnowledgeRepository } from './services/enablement/prismaKnowledgeRepository';
@@ -55,9 +62,17 @@ const allowedCorsOrigins = getAllowedCorsOrigins();
 const authService = createAuthService(prisma);
 const aiConfigService = createAiConfigService(prisma as any);
 const customerListService = createCustomerListService(prisma);
+const customerCommandService = createCustomerCommandService(prisma);
 const leadListService = createLeadListService(prisma);
 const settingsService = createSettingsService(prisma);
 const storageService = createStorageService(prisma);
+const orderApplicationService = createOrderApplicationService(prisma, {
+  applyDownstreamEffects: createOrderApprovalDownstreamEffects(),
+});
+const orderCommandService = createOrderCommandService(prisma);
+const orderQueryService = createOrderQueryService(prisma);
+const deliveryCommandService = createDeliveryCommandService(prisma);
+const recoveryOrderCommandService = createRecoveryOrderCommandService(prisma);
 const knowledgeRepository = createPrismaKnowledgeRepository(prisma as any);
 const knowledgeFileStore = createKnowledgeFileStore(getEnablementPrivateStorageDir(process.env, uploadRoot));
 const knowledgeService = createKnowledgeService({
@@ -65,16 +80,37 @@ const knowledgeService = createKnowledgeService({
   fileStore: knowledgeFileStore,
   searchProvider: createKeywordKnowledgeSearchProvider(),
 });
-const requireOrganizationAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS);
-const requireRoleAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_ROLES);
-const requireAiConfigAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_AI_CONFIG);
-const requireDataMaintenanceAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE);
+const requireOrganizationReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS);
+const requireOrganizationWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS, 'write');
+const requireOrganizationDeleteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS, 'delete');
+const requireRoleReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_ROLES);
+const requireRoleWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_ROLES, 'write');
+const requireRoleDeleteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_ROLES, 'delete');
+const requireAiConfigReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_AI_CONFIG);
+const requireAiConfigWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_AI_CONFIG, 'write');
+const requireDataMaintenanceDeleteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'delete');
 const requireStorageAccess = createRequireAuth(authService);
 const requireCustomerListAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_LIST);
 const requireCustomerCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_CREATE, 'write');
 const requireCustomerEditAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_EDIT, 'write');
 const requireCustomerAssignAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_ASSIGN, 'write');
+const requireCustomerPublicPoolClaimAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, 'write');
+const requireCustomerDeleteAccess = createRequireAuth(authService, '全部', 'delete');
 const requireLeadListAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_LIST);
+const requireLeadCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_CREATE, 'write');
+const requireLeadConvertAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_CONVERT, 'write');
+const requireLeadEditAccess = createRequireAnyPermission(authService, [PERMISSION_KEYS.LEADS_CREATE, PERMISSION_KEYS.LEADS_DETAIL], 'write');
+const requireLeadFollowAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_FOLLOW, 'write');
+const requireLeadAssignAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_FLOW_CONFIG, 'write');
+const requireLeadDeleteAccess = createRequireAuth(authService, '全部', 'delete');
+const requireOrderCreateWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.ORDER_CREATE, 'write');
+const requireOrderReadAccess = createRequireAuth(authService, PERMISSION_KEYS.ORDER_MANAGE);
+const requireOrderApplicationReadAccess = createRequireAnyPermission(authService, [PERMISSION_KEYS.ORDER_REVIEW, PERMISSION_KEYS.ORDER_MANAGE]);
+const requireOrderEditWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.ORDER_EDIT, 'write');
+const requireOrderDeleteAccess = createRequireAuth(authService, PERMISSION_KEYS.ORDER_DELETE, 'delete');
+const requireOrderReviewWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.ORDER_REVIEW, 'write');
+const requireDeliveryWriteAccess = createRequireAnyPermission(authService, [PERMISSION_KEYS.DELIVERY_MOVE_CARD, PERMISSION_KEYS.DELIVERY_STAGE_CONFIG], 'write');
+const requireRecoveryCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, 'write');
 const requireMatrixPublishUploadAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write');
 const requireAiChatAccess = createRequireAuth(authService, PERMISSION_KEYS.AI_CHAT);
 const requireCustomerAiCardAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_AI_CARD);
@@ -271,7 +307,7 @@ app.get('/api/ready', async (_req, res) => {
 
 app.post('/api/customers', requireCustomerCreateAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerListService.create(req.body || {}, req.currentUser!);
-  res.status(result.code === 0 ? 201 : 400).json(result);
+  res.status(result.code === 0 ? 201 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
 app.get('/api/customers', requireCustomerListAccess, async (req: AuthenticatedRequest, res) => {
@@ -293,6 +329,24 @@ app.get('/api/customers', requireCustomerListAccess, async (req: AuthenticatedRe
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
+app.put('/api/customers/:id', requireCustomerEditAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerCommandService.updateCustomer(
+    routeParam(req.params.id),
+    req.body || {},
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.delete('/api/customers/:id', requireCustomerDeleteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerCommandService.deleteCustomer(
+    routeParam(req.params.id),
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
 app.post('/api/customers/:id/follow-ups', requireCustomerEditAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerListService.addFollowUp(routeParam(req.params.id), {
     content: String(req.body?.content || ''),
@@ -304,12 +358,27 @@ app.post('/api/customers/:id/follow-ups', requireCustomerEditAccess, async (req:
 });
 
 app.post('/api/customers/:id/release', requireCustomerAssignAccess, async (req: AuthenticatedRequest, res) => {
-  const result = await customerListService.releaseToPublicPool(
+  const result = await customerCommandService.releaseToPublicPool(
     routeParam(req.params.id),
     String(req.body?.reason || ''),
-    req.currentUser,
+    req.currentUser!,
   );
-  res.status(result.code === 0 ? 200 : result.code === 404 ? 404 : 400).json(result);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/customers/:id/claim', requireCustomerPublicPoolClaimAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerCommandService.claimFromPublicPool(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/customers/:id/assign', requireCustomerAssignAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerCommandService.assignOwner(
+    routeParam(req.params.id),
+    String(req.body?.owner || ''),
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
 app.get('/api/leads', requireLeadListAccess, async (req: AuthenticatedRequest, res) => {
@@ -325,6 +394,256 @@ app.get('/api/leads', requireLeadListAccess, async (req: AuthenticatedRequest, r
     pageSize: Number(queryParam(req.query.pageSize)),
   }, req.currentUser);
   res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.post('/api/leads', requireLeadCreateAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerCommandService.createLead(req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 201 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.put('/api/leads/:id', requireLeadEditAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerCommandService.updateLead(
+    routeParam(req.params.id),
+    req.body || {},
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.delete('/api/leads/:id', requireLeadDeleteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerCommandService.deleteLead(
+    routeParam(req.params.id),
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/leads/:id/follow-ups', requireLeadFollowAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerCommandService.addLeadFollowUp(
+    routeParam(req.params.id),
+    {
+      type: req.body?.type,
+      content: String(req.body?.content || ''),
+      nextFollowUpDate: typeof req.body?.nextFollowUpDate === 'string' ? req.body.nextFollowUpDate : undefined,
+      createdBy: typeof req.body?.createdBy === 'string' ? req.body.createdBy : undefined,
+    },
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 201 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/leads/:id/assign', requireLeadAssignAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerCommandService.assignLead(
+    routeParam(req.params.id),
+    String(req.body?.owner || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/leads/:id/convert', requireLeadConvertAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerCommandService.convertLeadToCustomer(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.get('/api/order-applications', requireOrderApplicationReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderQueryService.listApplications({
+    search: queryParam(req.query.search),
+    status: queryParam(req.query.status) as any,
+    applicantName: queryParam(req.query.applicantName),
+    reviewerName: queryParam(req.query.reviewerName),
+    startDate: queryParam(req.query.startDate),
+    endDate: queryParam(req.query.endDate),
+    page: Number(queryParam(req.query.page)),
+    pageSize: Number(queryParam(req.query.pageSize)),
+  }, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.get('/api/order-applications/:id', requireOrderApplicationReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderQueryService.getApplication(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/order-applications', requireOrderCreateWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderApplicationService.submit(req.body?.orderData, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/order-applications/:id/resubmit', requireOrderCreateWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderApplicationService.resubmit(
+    routeParam(req.params.id),
+    req.body?.orderData,
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/order-applications/:id/return', requireOrderReviewWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderApplicationService.returnApplication(
+    routeParam(req.params.id),
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/order-applications/:id/reject', requireOrderReviewWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderApplicationService.reject(
+    routeParam(req.params.id),
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/order-applications/:id/approve', requireOrderReviewWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderApplicationService.approve(routeParam(req.params.id), req.currentUser!);
+  const status = result.code === 0
+    ? 200
+    : result.code >= 400 && result.code < 500
+      ? result.code
+      : 500;
+  res.status(status).json(result);
+});
+
+app.get('/api/orders', requireOrderReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderQueryService.listOrders({
+    search: queryParam(req.query.search),
+    customerId: queryParam(req.query.customerId),
+    productLevel: queryParam(req.query.productLevel) as any,
+    status: queryParam(req.query.status) as any,
+    owner: queryParam(req.query.owner),
+    orderType: queryParam(req.query.orderType) as any,
+    paymentMethod: queryParam(req.query.paymentMethod) as any,
+    startDate: queryParam(req.query.startDate),
+    endDate: queryParam(req.query.endDate),
+    sortBy: queryParam(req.query.sortBy) as any,
+    sortDirection: queryParam(req.query.sortDirection) as any,
+    page: Number(queryParam(req.query.page)),
+    pageSize: Number(queryParam(req.query.pageSize)),
+  }, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.get('/api/orders/owner-candidates', requireOrderReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderQueryService.listOwnerCandidates(req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.get('/api/orders/stats', requireOrderReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderQueryService.getOrderStats(req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.get('/api/orders/:id', requireOrderReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderQueryService.getOrder(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.put('/api/orders/:id', requireOrderEditWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderCommandService.update(
+    routeParam(req.params.id),
+    req.body?.data || {},
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.delete('/api/orders/:id', requireOrderDeleteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderCommandService.softDelete(
+    routeParam(req.params.id),
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/deliveries/from-order', requireDeliveryWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await deliveryCommandService.createFromOrder(String(req.body?.orderId || ''), req.currentUser!);
+  res.status(result.code === 0 ? 201 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.patch('/api/deliveries/:id/card', requireDeliveryWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await deliveryCommandService.updateCard(
+    routeParam(req.params.id),
+    req.body?.data || {},
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/deliveries/:id/advance', requireDeliveryWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await deliveryCommandService.advance(
+    routeParam(req.params.id),
+    String(req.body?.targetStage || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/deliveries/:id/revert', requireDeliveryWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await deliveryCommandService.revert(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.patch('/api/deliveries/:id/tasks/:taskId', requireDeliveryWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await deliveryCommandService.updateTask(
+    routeParam(req.params.id),
+    routeParam(req.params.taskId),
+    req.body?.data || {},
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/deliveries/:id/tasks/:taskId/attachments', requireDeliveryWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await deliveryCommandService.addAttachment(
+    routeParam(req.params.id),
+    routeParam(req.params.taskId),
+    req.body?.attachment || {},
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 201 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/deliveries/:id/exceptions', requireDeliveryWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await deliveryCommandService.addException(
+    routeParam(req.params.id),
+    req.body?.data || {},
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 201 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/deliveries/:id/exceptions/:exceptionId/resolve', requireDeliveryWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await deliveryCommandService.resolveException(
+    routeParam(req.params.id),
+    routeParam(req.params.exceptionId),
+    String(req.body?.resolution || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/deliveries/:id/confirm', requireDeliveryWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await deliveryCommandService.confirmCompletion(
+    routeParam(req.params.id),
+    String(req.body?.notes || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.delete('/api/deliveries/:id', requireDeliveryWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await deliveryCommandService.delete(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/recovery-orders', requireRecoveryCreateAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await recoveryOrderCommandService.create(req.body?.data || req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 201 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
 app.post('/api/auth/login', loginRateLimiter.guard, async (req, res) => {
@@ -368,7 +687,7 @@ app.post(
   },
 );
 
-app.get('/api/settings/users', requireOrganizationAccess, async (_req, res) => {
+app.get('/api/settings/users', requireOrganizationReadAccess, async (_req, res) => {
   res.json(await settingsService.listUsers());
 });
 
@@ -376,93 +695,97 @@ app.get('/api/settings/assignable-users', requireAssignableUsersAccess, async (_
   res.json(await settingsService.listAssignableUsers());
 });
 
-app.post('/api/settings/users/leave-customer-count', requireOrganizationAccess, async (req, res) => {
+app.get('/api/settings/assignable-directory', requireAssignableUsersAccess, async (_req: express.Request, res: express.Response) => {
+  res.json(await settingsService.listAssignableDirectory());
+});
+
+app.post('/api/settings/users/leave-customer-count', requireOrganizationReadAccess, async (req, res) => {
   const result = await settingsService.countLeaveOwnedCustomers(req.body?.userIds || []);
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.post('/api/settings/users', requireOrganizationAccess, async (req, res) => {
+app.post('/api/settings/users', requireOrganizationWriteAccess, async (req, res) => {
   const result = await settingsService.createUser(req.body || {});
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.put('/api/settings/users/:id', requireOrganizationAccess, async (req, res) => {
+app.put('/api/settings/users/:id', requireOrganizationWriteAccess, async (req, res) => {
   const result = await settingsService.updateUser(routeParam(req.params.id), req.body || {});
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.post('/api/settings/users/:id/leave', requireOrganizationAccess, async (req, res) => {
+app.post('/api/settings/users/:id/leave', requireOrganizationWriteAccess, async (req, res) => {
   const result = await settingsService.leaveUser(routeParam(req.params.id), req.body || {});
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.post('/api/settings/users/:id/restore', requireOrganizationAccess, async (req, res) => {
+app.post('/api/settings/users/:id/restore', requireOrganizationWriteAccess, async (req, res) => {
   const result = await settingsService.restoreUser(routeParam(req.params.id));
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.delete('/api/settings/users/:id', requireOrganizationAccess, async (req, res) => {
+app.delete('/api/settings/users/:id', requireOrganizationDeleteAccess, async (req, res) => {
   const result = await settingsService.deleteUser(routeParam(req.params.id));
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.post('/api/settings/users/:id/reset-password', requireOrganizationAccess, async (req, res) => {
+app.post('/api/settings/users/:id/reset-password', requireOrganizationWriteAccess, async (req, res) => {
   const result = await settingsService.resetUserPassword(routeParam(req.params.id), String(req.body?.password || ''));
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.get('/api/settings/roles', requireRoleAccess, async (_req, res) => {
+app.get('/api/settings/roles', requireRoleReadAccess, async (_req, res) => {
   res.json(await settingsService.listRoles());
 });
 
-app.post('/api/settings/roles', requireRoleAccess, async (req, res) => {
+app.post('/api/settings/roles', requireRoleWriteAccess, async (req, res) => {
   const result = await settingsService.createRole(req.body || {});
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.put('/api/settings/roles/:id', requireRoleAccess, async (req, res) => {
+app.put('/api/settings/roles/:id', requireRoleWriteAccess, async (req, res) => {
   const result = await settingsService.updateRole(routeParam(req.params.id), req.body || {});
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.delete('/api/settings/roles/:id', requireRoleAccess, async (req, res) => {
+app.delete('/api/settings/roles/:id', requireRoleDeleteAccess, async (req, res) => {
   const result = await settingsService.deleteRole(routeParam(req.params.id));
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.get('/api/settings/departments', requireOrganizationAccess, async (_req, res) => {
+app.get('/api/settings/departments', requireOrganizationReadAccess, async (_req, res) => {
   res.json(await settingsService.listDepartments());
 });
 
-app.post('/api/settings/departments', requireOrganizationAccess, async (req, res) => {
+app.post('/api/settings/departments', requireOrganizationWriteAccess, async (req, res) => {
   const result = await settingsService.createDepartment(req.body || {});
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.put('/api/settings/departments/:id', requireOrganizationAccess, async (req, res) => {
+app.put('/api/settings/departments/:id', requireOrganizationWriteAccess, async (req, res) => {
   const result = await settingsService.updateDepartment(routeParam(req.params.id), req.body || {});
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.delete('/api/settings/departments/:id', requireOrganizationAccess, async (req, res) => {
+app.delete('/api/settings/departments/:id', requireOrganizationDeleteAccess, async (req, res) => {
   const result = await settingsService.deleteDepartment(routeParam(req.params.id));
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.get('/api/settings/positions', requireOrganizationAccess, async (_req, res) => {
+app.get('/api/settings/positions', requireOrganizationReadAccess, async (_req, res) => {
   res.json(await settingsService.listPositions());
 });
 
-app.get('/api/ai/config', requireAiConfigAccess, async (_req, res) => {
+app.get('/api/ai/config', requireAiConfigReadAccess, async (_req, res) => {
   res.json(await aiConfigService.getPublicConfig());
 });
 
-app.put('/api/ai/config', requireAiConfigAccess, async (req, res) => {
+app.put('/api/ai/config', requireAiConfigWriteAccess, async (req, res) => {
   const result = await aiConfigService.saveConfig(req.body || {});
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.post('/api/ai/config/test', requireAiConfigAccess, async (_req, res) => {
+app.post('/api/ai/config/test', requireAiConfigWriteAccess, async (_req, res) => {
   try {
     const text = await callDeepSeek([
       { role: 'system', content: '你是极享OS的AI连接测试助手，只返回一句简短中文。' },
@@ -537,7 +860,7 @@ app.delete('/api/storage/:key', requireStorageAccess, async (_req: Authenticated
   res.status(405).json({ code: 405, data: null, message: 'Legacy storage deletion is disabled' });
 });
 
-app.delete('/api/storage', requireDataMaintenanceAccess, async (_req, res) => {
+app.delete('/api/storage', requireDataMaintenanceDeleteAccess, async (_req, res) => {
   res.json(await storageService.clearPrefix());
 });
 

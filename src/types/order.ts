@@ -127,6 +127,22 @@ export interface OrderApplication {
   updatedAt: Timestamp;
 }
 
+export type OrderApprovalEffectStatus = 'applied' | 'deferred';
+
+export interface OrderApprovalEffectState {
+  customerOrderStats: OrderApprovalEffectStatus;
+  commissionGeneration: OrderApprovalEffectStatus;
+  deliveryCreation: OrderApprovalEffectStatus;
+  customerLifecycle: OrderApprovalEffectStatus;
+}
+
+export interface OrderApprovalResult {
+  application: OrderApplication;
+  order: Order;
+  replayed: boolean;
+  downstreamEffects: OrderApprovalEffectState;
+}
+
 /** 订单统计 */
 export interface OrderStats {
   todayAmount: number;

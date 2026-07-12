@@ -39,7 +39,7 @@ import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import PaymentsIcon from '@mui/icons-material/Payments';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
-import { commissionApi, commissionRuleApi, customerApi, departmentApi, orderApi, settingsApi } from '../../api';
+import { commissionApi, commissionRuleApi, customerApi, orderApi, settingsApi } from '../../api';
 import { getProductLevelRowSx, getProductLevelTagSx, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
@@ -54,6 +54,7 @@ import CommissionRuleConfig from './CommissionRuleConfig';
 import OrderDetail from '../Orders/OrderDetail';
 import CustomerDetail from '../Customers/CustomerDetail';
 import useAuthStore from '../../store/useAuthStore';
+import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import type {
   Commission,
   CommissionAdjustmentInput,
@@ -342,6 +343,9 @@ const Commission: React.FC<CommissionProps> = ({
   orderSplitCreateTrigger = 0,
 }) => {
   const currentUser = useAuthStore((state) => state.currentUser);
+  const canManageOrderSettlement = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_SETTLEMENT, 'write');
+  const canManagePayout = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_PAYOUT, 'write');
+  const showPayoutFinanceActions = canManagePayout && !hidePayoutFinanceActions;
   const [tabValue, setTabValue] = useState(initialTab);
   const lastOrderSplitViewTriggerRef = useRef(orderSplitViewTrigger);
   const lastOrderSplitCreateTriggerRef = useRef(orderSplitCreateTrigger);
@@ -596,18 +600,18 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const fetchSettlementOptions = async () => {
-    const [rolesRes, plansRes, usersRes, departmentsRes, positionsRes] = await Promise.all([
+    const [rolesRes, plansRes, directoryRes] = await Promise.all([
       commissionRuleApi.getCommissionRoleConfigs(),
       commissionRuleApi.getCommissionPayoutPlans(),
-      settingsApi.fetchAssignableUsers(),
-      departmentApi.getDepartments({ isActive: true }),
-      settingsApi.fetchPositions({ isActive: true }),
+      settingsApi.fetchAssignableDirectory(),
     ]);
     if (rolesRes.code === 0) setCommissionRoleConfigs(rolesRes.data);
     if (plansRes.code === 0) setPayoutPlans(plansRes.data);
-    if (usersRes.code === 0) setEmployees(usersRes.data);
-    if (departmentsRes.code === 0) setDepartments(departmentsRes.data);
-    if (positionsRes.code === 0) setPositions(positionsRes.data);
+    if (directoryRes.code === 0) {
+      setEmployees(directoryRes.data.users);
+      setDepartments(directoryRes.data.departments);
+      setPositions(directoryRes.data.positions);
+    }
   };
 
   const buildOrderSummaryFilters = (status = orderFilters.status): CommissionOrderSummaryFilters => ({
@@ -854,6 +858,7 @@ const Commission: React.FC<CommissionProps> = ({
   );
 
   const openCreateSplitDialog = () => {
+    if (!canManageOrderSettlement) return;
     setCreateSplitOpen(true);
     setCreatableOrderSearch('');
     setSelectedCreatableOrderId('');
@@ -949,6 +954,7 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const openSettlementDetail = async (summary: CommissionOrderSummary, options?: { edit?: boolean }) => {
+    if (options?.edit && !canManageOrderSettlement) return;
     setSummaryDetail(summary);
     resetSettlementDetailForms();
     await loadOperationLogs(summary.orderId);
@@ -1139,6 +1145,7 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const beginDetailAdjust = async () => {
+    if (!canManageOrderSettlement) return;
     if (!summaryDetail || !canAdjustSettlementSummary(summaryDetail)) return;
     const res = await commissionApi.fetchCommissionsByOrder(summaryDetail.orderId);
     if (res.code !== 0) return;
@@ -1231,6 +1238,7 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const handleSaveSplitRows = async () => {
+    if (!canManageOrderSettlement) return;
     setSplitSaving(true);
     try {
       const res = await commissionApi.saveOrderCommissionAdjustments(splitOrderId, splitRows, splitReason);
@@ -1246,6 +1254,7 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const openDeleteOrderSplitDialog = (summary: CommissionOrderSummary) => {
+    if (!canManageOrderSettlement) return;
     setDeleteSummary(summary);
     setDeleteReason('');
   };
@@ -1257,6 +1266,7 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const confirmDeleteOrderSplit = async () => {
+    if (!canManageOrderSettlement) return;
     if (!deleteSummary || !deleteReason.trim()) return;
     const deletingOrderId = deleteSummary.orderId;
     const shouldCleanupDeletedSource = deleteSummary.sourceOrderDeleted;
@@ -1280,6 +1290,7 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const confirmOrderFromDetail = async () => {
+    if (!canManageOrderSettlement) return;
     if (!summaryDetail || summaryDetail.sourceOrderDeleted) return;
     setDetailActionLoading(true);
     try {
@@ -1294,6 +1305,7 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const withdrawOrderFromDetail = async () => {
+    if (!canManageOrderSettlement) return;
     if (!summaryDetail || !detailActionReason.trim()) return;
     setDetailActionLoading(true);
     try {
@@ -1351,6 +1363,7 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const generateMonthlyBatch = async () => {
+    if (!canManagePayout) return;
     if (!payoutPeriod) return;
     setPayoutConfirmAction({
       type: 'generate',
@@ -1361,6 +1374,7 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const payOwner = async (ownerId?: string) => {
+    if (!canManagePayout) return;
     if (!ownerId) return;
     const row = payoutRows.find((item) => item.ownerId === ownerId);
     setPayoutConfirmAction({
@@ -1373,6 +1387,7 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const payBatch = async () => {
+    if (!canManagePayout) return;
     if (monthlyPayoutSummary.pendingPayAmount <= 0) return;
     setPayoutConfirmAction({
       type: 'payBatch',
@@ -1383,6 +1398,7 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const confirmPayoutAction = async () => {
+    if (!canManagePayout) return;
     if (!payoutConfirmAction) return;
     setPayoutActionLoading(true);
     try {
@@ -2414,6 +2430,8 @@ const Commission: React.FC<CommissionProps> = ({
                         <VisibilityIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
+                    {canManageOrderSettlement && (
+                      <>
                     <Tooltip title={getAdjustDisabledReason(summary)}>
                       <span>
                         <IconButton
@@ -2440,6 +2458,8 @@ const Commission: React.FC<CommissionProps> = ({
                         </IconButton>
                       </span>
                     </Tooltip>
+                      </>
+                    )}
                   </Stack>
                 </TableCell>
               </TableRow>
@@ -2721,6 +2741,9 @@ const Commission: React.FC<CommissionProps> = ({
 
   const renderSettlementDetailActions = () => {
     if (!summaryDetail) return null;
+    if (!canManageOrderSettlement) {
+      return <Typography variant="body2" sx={{ color: '#64748b' }}>当前账号只能查看分账信息。</Typography>;
+    }
     if (summaryDetail.sourceOrderDeleted || summaryDetail.status === '已撤回') {
       const text = summaryDetail.sourceOrderDeleted
         ? '源订单已删除，仅保留分账明细和历史记录。'
@@ -2783,7 +2806,7 @@ const Commission: React.FC<CommissionProps> = ({
           size="small"
           InputLabelProps={{ shrink: true }}
         />
-        {!hidePayoutFinanceActions && (
+        {showPayoutFinanceActions && (
           <Tooltip title="按当前月份可发放提成生成发放单，待确认和已撤回明细不进入可发放金额">
             <Button variant="outlined" startIcon={<PaymentsIcon />} disabled={payoutActionLoading} onClick={generateMonthlyBatch}>生成发放单</Button>
           </Tooltip>
@@ -2793,7 +2816,7 @@ const Commission: React.FC<CommissionProps> = ({
             <Button variant="outlined" startIcon={<FileDownloadIcon />} disabled={!payoutRows.length || payoutActionLoading} onClick={exportMonthlyStatement}>导出发放表</Button>
           </span>
         </Tooltip>
-        {!hidePayoutFinanceActions && (
+        {showPayoutFinanceActions && (
           <Tooltip title={monthlyPayoutSummary.pendingPayAmount > 0 ? '确认本月待发放提成已完成线下发放' : '当前月份没有待发放金额'}>
             <span>
               <Button variant="contained" startIcon={<CheckCircleIcon />} disabled={monthlyPayoutSummary.pendingPayAmount <= 0 || payoutActionLoading} onClick={payBatch}>确认本月已发放</Button>
@@ -2857,7 +2880,7 @@ const Commission: React.FC<CommissionProps> = ({
               <TableCell sx={{ width: MONTHLY_PAYOUT_COLUMN_WIDTHS.paidAmount }}>已发放</TableCell>
               <TableCell sx={{ width: MONTHLY_PAYOUT_COLUMN_WIDTHS.withdrawnAmount }}>已撤回</TableCell>
               <TableCell sx={{ width: MONTHLY_PAYOUT_COLUMN_WIDTHS.status }}>状态</TableCell>
-              {!hidePayoutFinanceActions && <TableCell align="center" sx={{ width: MONTHLY_PAYOUT_COLUMN_WIDTHS.actions }}>操作</TableCell>}
+              {showPayoutFinanceActions && <TableCell align="center" sx={{ width: MONTHLY_PAYOUT_COLUMN_WIDTHS.actions }}>操作</TableCell>}
             </TableRow>
           </TableHead>
           <TableBody>
@@ -2887,7 +2910,7 @@ const Commission: React.FC<CommissionProps> = ({
                     <TableCell>{formatCurrency(row.paidAmount)}</TableCell>
                     <TableCell sx={{ color: row.withdrawnAmount > 0 ? '#6b7280' : undefined }}>{formatCurrency(row.withdrawnAmount)}</TableCell>
                     <TableCell><Chip label={row.status} size="small" color={getPayoutStatusColor(row.status)} /></TableCell>
-                    {!hidePayoutFinanceActions && (
+                    {showPayoutFinanceActions && (
                       <TableCell align="center">
                         <Tooltip title={actionDisabledReason || '确认此人已发'}>
                           <span>
@@ -2900,7 +2923,7 @@ const Commission: React.FC<CommissionProps> = ({
                     )}
                   </TableRow>
                   <TableRow>
-                    <TableCell colSpan={hidePayoutFinanceActions ? 11 : 12} sx={{ p: 0, border: 0 }}>
+                    <TableCell colSpan={showPayoutFinanceActions ? 12 : 11} sx={{ p: 0, border: 0 }}>
                       <Collapse in={expanded} timeout="auto" unmountOnExit>
                         <Box sx={{ px: { xs: 1.5, sm: 2.5 }, py: 1.5, bgcolor: '#f8fafc' }}>
                           <Stack spacing={1}>
@@ -2915,7 +2938,7 @@ const Commission: React.FC<CommissionProps> = ({
             })}
             {!payoutRows.length && (
               <TableRow>
-                <TableCell colSpan={hidePayoutFinanceActions ? 11 : 12} align="center" sx={{ py: 3.5, height: 72, color: '#9ca3af' }}>
+                <TableCell colSpan={showPayoutFinanceActions ? 12 : 11} align="center" sx={{ py: 3.5, height: 72, color: '#9ca3af' }}>
                   {payoutLoading ? '加载中...' : '暂无员工提成月报数据'}
                 </TableCell>
               </TableRow>
@@ -2944,9 +2967,11 @@ const Commission: React.FC<CommissionProps> = ({
                 <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setOrderSplitViewOpen(true)}>
                   视图设置
                 </Button>
-                <Button variant="contained" startIcon={<AddIcon />} onClick={openCreateSplitDialog}>
-                  新建订单分账
-                </Button>
+                {canManageOrderSettlement && (
+                  <Button variant="contained" startIcon={<AddIcon />} onClick={openCreateSplitDialog}>
+                    新建订单分账
+                  </Button>
+                )}
               </Stack>
             )}
           </Box>
@@ -2964,9 +2989,11 @@ const Commission: React.FC<CommissionProps> = ({
           <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setOrderSplitViewOpen(true)}>
             视图设置
           </Button>
-            <Button variant="contained" startIcon={<AddIcon />} onClick={openCreateSplitDialog}>
-              新建订单分账
-            </Button>
+            {canManageOrderSettlement && (
+              <Button variant="contained" startIcon={<AddIcon />} onClick={openCreateSplitDialog}>
+                新建订单分账
+              </Button>
+            )}
           </Stack>
         </Box>
       )}
@@ -3175,6 +3202,7 @@ const Commission: React.FC<CommissionProps> = ({
                         按角色核对人员、方案和金额，确认无误后进入右侧操作。
                       </Typography>
                     </Box>
+                    {canManageOrderSettlement && (
                     <Tooltip title={detailEditMode ? '正在调整分账' : getAdjustDisabledReason(summaryDetail)}>
                       <span>
                         <Button
@@ -3189,6 +3217,7 @@ const Commission: React.FC<CommissionProps> = ({
                         </Button>
                       </span>
                     </Tooltip>
+                    )}
                   </Box>
                   <Box sx={{ p: 1.5, bgcolor: '#f8fafc' }}>
                     {detailEditMode ? (
@@ -3378,4 +3407,3 @@ const Commission: React.FC<CommissionProps> = ({
 };
 
 export default Commission;
-
