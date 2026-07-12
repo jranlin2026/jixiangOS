@@ -10,6 +10,7 @@ import { createSuccessResponse, delay, type ApiResponse } from './types';
 import { initializeMockData } from './mock';
 import { getStorageData } from './mock/storage';
 import { leadFlowApi } from './leadFlowApi';
+import type { CustomerTag, CustomerTagGroup } from '../types/tag';
 
 const TEXT = {
   name: '\u59d3\u540d*',
@@ -250,6 +251,11 @@ function validateRow(row: CleanRow) {
   const inputByValue = data[TEXT.inputBy];
   const contributorValue = data[TEXT.leadContributor];
   const ownerValue = data[TEXT.owner];
+  const requestedTags = parseTags(data[TEXT.tags]);
+  const groups = (getStorageData<CustomerTagGroup[]>(STORAGE_KEYS.TAG_GROUPS) || []).filter((group) => group.isActive && (group.scope === 'lead' || group.scope === 'both'));
+  const groupIds = new Set(groups.map((group) => group.id));
+  const presetTags = (getStorageData<CustomerTag[]>(STORAGE_KEYS.TAGS) || []).filter((tag) => tag.isActive && groupIds.has(tag.groupId));
+  const resolvedTags = requestedTags.map((label) => presetTags.find((tag) => tag.name.trim().toLowerCase() === label.toLowerCase()));
 
   const sourceOption = sourceValue
     ? sourceOptions.find((option) => option.label.trim().toLowerCase() === sourceValue.trim().toLowerCase())
@@ -268,6 +274,9 @@ function validateRow(row: CleanRow) {
   if (contributorValue && !contributorUser) errors.push(`${TEXT.leadContributorMissing}\uff1a${contributorValue}`);
   if (sourceType === '\u4e2a\u4eba\u8d44\u6e90' && !contributorUser) errors.push(TEXT.leadContributorRequired);
   if (ownerValue && ownerValue !== TEXT.toAssign && !ownerUser) errors.push(`${TEXT.ownerMissing}\uff1a${ownerValue}`);
+  requestedTags.forEach((label, index) => {
+    if (!resolvedTags[index]) errors.push(`标签“${label}”未在系统设置中预设`);
+  });
 
   if (errors.length) {
     return { errors, payload: null };
@@ -288,7 +297,8 @@ function validateRow(row: CleanRow) {
     leadContributorName: contributorUser?.name,
     industry: data[TEXT.industry],
     city: data[TEXT.city],
-    tags: parseTags(data[TEXT.tags]),
+    manualTagIds: resolvedTags.filter((tag): tag is CustomerTag => Boolean(tag)).map((tag) => tag.id),
+    tags: resolvedTags.filter((tag): tag is CustomerTag => Boolean(tag)).map((tag) => tag.name),
     remark: data[TEXT.remark],
   };
 

@@ -370,6 +370,7 @@ function createFakePrisma(
       },
     },
     businessRecord: {
+      findMany: async ({ where }: any) => clone(working.businessRecords.filter((item) => item.domain === where.domain).map((item) => ({ data: item.data }))),
       findUnique: async ({ where }: any) => {
         const key = where.domain_recordId;
         const row = working.businessRecords.find((item) => (

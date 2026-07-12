@@ -6,7 +6,11 @@ import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 const created: any[] = [];
 const service = createCustomerListService({
   businessRecord: {
-    findMany: async () => created.map((item) => ({ data: item.data.data })),
+    findMany: async (args: any) => {
+      if (args?.where?.domain === STORAGE_KEYS.TAG_GROUPS) return [{ data: { id: 'group-both', name: '通用', color: '#1677ff', selectionMode: 'multiple', scope: 'both', isActive: true, sortOrder: 0 } }];
+      if (args?.where?.domain === STORAGE_KEYS.TAGS) return [{ data: { id: 'shared', groupId: 'group-both', name: '高意向', color: '#1677ff', isActive: true, sortOrder: 0 } }];
+      return created.map((item) => ({ data: item.data.data }));
+    },
     create: async (input: any) => {
       if (created.some((item) => item.data.id === input.data.id)) {
         const error = new Error('duplicate business record') as Error & { code?: string };
@@ -17,6 +21,7 @@ const service = createCustomerListService({
       return input.data;
     },
   },
+  leadRecord: { findMany: async () => [] },
 } as any);
 
 const actor = {
@@ -44,6 +49,16 @@ assert.equal(created.length, 1);
 assert.equal(created[0].data.domain, STORAGE_KEYS.CUSTOMERS);
 assert.equal(created[0].data.data.name, '新客户');
 
+const tagged = await service.create({
+  name: '标签客户', company: '', phone: '13800000001', customerLevel: 'L1', owner: '销售', sourceType: '公司资源', manualTagIds: ['shared'],
+}, actor);
+assert.deepEqual(tagged.data?.tags, ['高意向']);
+
+const missingTag = await service.create({
+  name: '非法标签客户', company: '', phone: '13800000002', customerLevel: 'L1', owner: '销售', sourceType: '公司资源', manualTagIds: ['missing'],
+}, actor);
+assert.equal(missingTag.code, 400);
+
 const denied = await service.create({
   name: '越权客户',
   company: '越权客户公司',
@@ -54,7 +69,7 @@ const denied = await service.create({
 }, actor);
 
 assert.equal(denied.code, 403);
-assert.equal(created.length, 1);
+assert.equal(created.length, 2);
 
 const emptyName = await service.create({
   name: '',

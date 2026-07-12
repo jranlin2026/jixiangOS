@@ -23,6 +23,8 @@ import {
 } from '../../src/shared/utils/phoneNumber';
 import { applyContactEditLock } from '../../src/shared/utils/contactEditLock';
 import { mapPrismaDepartment, mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
+import { loadCustomerTagCatalog } from './customerTagService';
+import { inheritableCustomerTagIds, validateManualTagSelection } from './customerTagPolicy';
 
 type CustomerCommandPrisma = Pick<PrismaClient, '$transaction' | 'leadRecord'>;
 type CustomerCommandTx = Pick<
@@ -460,6 +462,7 @@ const CUSTOMER_EDIT_FIELDS: Array<{ field: keyof Customer; label: string }> = [
   { field: 'industry', label: '行业' },
   { field: 'city', label: '城市' },
   { field: 'tags', label: '客户标签' },
+  { field: 'manualTagIds', label: '客户标签' },
   { field: 'remark', label: '备注' },
   { field: 'sourceType', label: '资源归属' },
   { field: 'sourceName', label: '来源名称' },
@@ -580,6 +583,7 @@ const LEAD_EDIT_FIELDS: Array<{ field: keyof Lead; label: string }> = [
   { field: 'leadContributorName', label: '线索贡献人' },
   { field: 'remark', label: '备注' },
   { field: 'tags', label: '标签' },
+  { field: 'manualTagIds', label: '标签' },
   { field: 'email', label: '邮箱' },
   { field: 'estimatedAmount', label: '预估金额' },
   { field: 'estimatedProductId', label: '预估产品' },
@@ -720,6 +724,13 @@ export function createCustomerCommandService(
         }
 
         let patch = editableCustomerPatch(input);
+        if (Object.prototype.hasOwnProperty.call(input, 'manualTagIds')) {
+          const catalog = await loadCustomerTagCatalog(tx, false);
+          const validation = validateManualTagSelection(catalog, 'customer', input.manualTagIds || []);
+          if (!validation.ok) return failure<Customer>(validation.message, 400);
+          patch.manualTagIds = validation.tagIds;
+          patch.tags = validation.tagIds.map((id) => catalog.tags.find((tag) => tag.id === id)!.name);
+        }
         patch = applyContactEditLock(customer, patch, {
           canEditLockedContact: isSuperAdmin(currentUser),
         });
@@ -830,6 +841,10 @@ export function createCustomerCommandService(
       return runTransaction(async (tx) => {
         const context = await commandContext(tx, currentUser, 'leads');
         if (!context.actor) return failure<Lead>('当前用户不存在或已离职', 403);
+        const catalog = await loadCustomerTagCatalog(tx, false);
+        const tagValidation = validateManualTagSelection(catalog, 'lead', input.manualTagIds || []);
+        if (!tagValidation.ok) return failure<Lead>(tagValidation.message, 400);
+        const normalizedTagNames = tagValidation.tagIds.map((id) => catalog.tags.find((tag) => tag.id === id)!.name);
         const flowConfig = normalizeLeadFlowConfig(await lockStorageValue(
           tx,
           STORAGE_KEYS.LEAD_FLOW_CONFIG,
@@ -946,6 +961,8 @@ export function createCustomerCommandService(
         const id = newId('lead');
         let lead: Lead = {
           ...input,
+          manualTagIds: tagValidation.tagIds,
+          tags: normalizedTagNames,
           id,
           name,
           source,
@@ -1029,7 +1046,8 @@ export function createCustomerCommandService(
               relatedType: 'lead',
               createdAt: atIso,
             }],
-            tags: lead.tags,
+            manualTagIds: inheritableCustomerTagIds(catalog, lead.manualTagIds || []),
+            tags: inheritableCustomerTagIds(catalog, lead.manualTagIds || []).map((id) => catalog.tags.find((tag) => tag.id === id)!.name),
             leadInputBy: inputBy,
             leadContributorId: lead.leadContributorId,
             leadContributorName: lead.leadContributorName,
@@ -1127,6 +1145,13 @@ export function createCustomerCommandService(
         if (!canEditLeadProfileOnServer(lead)) return failure<Lead>('仅待跟进且未转客户的线索可编辑', 409);
 
         let patch = editableLeadPatch(input);
+        if (Object.prototype.hasOwnProperty.call(input, 'manualTagIds')) {
+          const catalog = await loadCustomerTagCatalog(tx, false);
+          const validation = validateManualTagSelection(catalog, 'lead', input.manualTagIds || []);
+          if (!validation.ok) return failure<Lead>(validation.message, 400);
+          patch.manualTagIds = validation.tagIds;
+          patch.tags = validation.tagIds.map((id) => catalog.tags.find((tag) => tag.id === id)!.name);
+        }
         patch = applyContactEditLock(lead, patch, {
           canEditLockedContact: isSuperAdmin(currentUser),
         });
@@ -1564,6 +1589,8 @@ export function createCustomerCommandService(
         const at = now();
         const atIso = at.toISOString();
         const operator = commandActor(context, currentUser);
+        const catalog = await loadCustomerTagCatalog(tx, false);
+        const inheritedTagIds = inheritableCustomerTagIds(catalog, lead.manualTagIds || []);
         let conversionOwner = operator;
         if (existingOwnerName) {
           const existingOwner = activeUsersNamed(context, existingOwnerName)[0];
@@ -1607,7 +1634,8 @@ export function createCustomerCommandService(
             relatedType: 'lead',
             createdAt: atIso,
           }],
-          tags: lead.tags,
+          manualTagIds: inheritedTagIds,
+          tags: inheritedTagIds.map((id) => catalog.tags.find((tag) => tag.id === id)!.name),
           leadInputBy: lead.inputBy,
           leadContributorId: lead.leadContributorId,
           leadContributorName: lead.leadContributorName,

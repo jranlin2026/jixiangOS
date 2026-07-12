@@ -89,6 +89,11 @@ const now = '2026-06-19T00:00:00.000Z';
 storage.clear();
 storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
 storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.TAG_GROUPS, JSON.stringify([{ id: 'tag-group-both', name: '通用', color: '#1677ff', selectionMode: 'multiple', scope: 'both', isActive: true, sortOrder: 0, createdAt: now, updatedAt: now }]));
+storage.setItem(STORAGE_KEYS.TAGS, JSON.stringify([
+  { id: 'tag-key', groupId: 'tag-group-both', name: zh.key, color: '#1677ff', isActive: true, sortOrder: 0, createdAt: now, updatedAt: now },
+  { id: 'tag-high', groupId: 'tag-group-both', name: zh.highIntent, color: '#1677ff', isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
+]));
 storage.setItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS, JSON.stringify([]));
 storage.setItem(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, JSON.stringify([
   { id: 'src-1', name: zh.official, isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
@@ -255,6 +260,13 @@ assert.equal(leads[0].name, zh.newLead);
 assert.equal(leads[0].source, zh.douyin);
 assert.equal(leads[0].sourceName, zh.live);
 assert.deepEqual(leads[0].tags, [zh.key, zh.highIntent]);
+assert.deepEqual(leads[0].manualTagIds, ['tag-key', 'tag-high']);
+
+const unknownTag = await leadBulkImportApi.importWorkbook(await workbookBuffer([{
+  [H.name]: '未知标签线索', [H.phone]: '13900000008', [H.source]: zh.official, [H.tags]: '未预设标签',
+}]));
+assert.equal(unknownTag.data.failureCount, 1);
+assert.equal(unknownTag.data.rows[0].reason, '标签“未预设标签”未在系统设置中预设');
 
 const intakeRecords = JSON.parse(storage.getItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS) || '[]');
 assert.equal(intakeRecords.length, 2);
@@ -267,6 +279,11 @@ storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
 storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
 storage.setItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS, JSON.stringify([]));
 storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
+storage.setItem(STORAGE_KEYS.TAG_GROUPS, JSON.stringify([{ id: 'tag-group-both', name: '通用', color: '#1677ff', selectionMode: 'multiple', scope: 'both', isActive: true, sortOrder: 0, createdAt: now, updatedAt: now }]));
+storage.setItem(STORAGE_KEYS.TAGS, JSON.stringify([
+  { id: 'tag-key', groupId: 'tag-group-both', name: zh.key, color: '#1677ff', isActive: true, sortOrder: 0, createdAt: now, updatedAt: now },
+  { id: 'tag-high', groupId: 'tag-group-both', name: zh.highIntent, color: '#1677ff', isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
+]));
 storage.setItem(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, JSON.stringify([
   { id: 'src-1', name: zh.official, isActive: true, sortOrder: 1, createdAt: now, updatedAt: now },
 ]));

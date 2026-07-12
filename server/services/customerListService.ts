@@ -9,7 +9,7 @@ import {
   normalizeResourceOwnership,
 } from '../../src/shared/utils/constants';
 import type { Customer, CustomerCreateInput, CustomerFilters } from '../../src/types/customer';
-import type { PaginatedResponse } from '../../src/api/types';
+import type { ApiResponse, PaginatedResponse } from '../../src/api/types';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import { buildDataVisibilityScopeForUser } from '../../src/shared/utils/dataVisibility';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
@@ -19,8 +19,10 @@ import {
   normalizePhoneForStorage,
 } from '../../src/shared/utils/phoneNumber';
 import { PERMISSION_KEYS, hasPermission } from '../../src/shared/utils/permissions';
+import { loadCustomerTagCatalog } from './customerTagService';
+import { validateManualTagSelection } from './customerTagPolicy';
 
-type CustomerListPrisma = Pick<PrismaClient, 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | '$queryRaw'>;
+type CustomerListPrisma = Pick<PrismaClient, 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | '$queryRaw' | '$transaction'>;
 
 type CustomerRow = {
   id?: string;
@@ -284,7 +286,10 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
   };
 
   return {
-    async create(input: CustomerCreateInput, currentUser: AuthenticatedUser) {
+    async create(input: CustomerCreateInput, currentUser: AuthenticatedUser): Promise<ApiResponse<Customer | null>> {
+      if (!hasPermission(currentUser, PERMISSION_KEYS.CUSTOMER_CREATE, 'write')) {
+        return failure<Customer>('无权新建客户', 403);
+      }
       const name = cleanText(input.name);
       if (!name) return failure<Customer>('客户姓名不能为空', 400);
       if (name.length > 100) return failure<Customer>('客户姓名不能超过100个字符', 400);
@@ -307,7 +312,12 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
 
       const comparablePhone = phone ? normalizePhoneForComparison(phone) : '';
       const comparableWechat = wechat.toLowerCase();
-      const existingCustomerRows = await prisma.businessRecord.findMany({
+      const operation = async (tx: Pick<Prisma.TransactionClient, 'businessRecord' | 'leadRecord'>): Promise<ApiResponse<Customer | null>> => {
+      const catalog = await loadCustomerTagCatalog(tx, false);
+      const tagValidation = validateManualTagSelection(catalog, 'customer', input.manualTagIds || []);
+      if (!tagValidation.ok) return failure<Customer>(tagValidation.message, 400);
+      const tagNames = tagValidation.tagIds.map((id) => catalog.tags.find((tag) => tag.id === id)!.name);
+      const existingCustomerRows = await tx.businessRecord.findMany({
         where: { domain: STORAGE_KEYS.CUSTOMERS },
         select: { data: true },
       });
@@ -324,6 +334,8 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
       const id = `cust-${createHash('sha256').update(identity).digest('hex').slice(0, 16)}`;
       const customer: Customer = {
         ...input,
+        manualTagIds: tagValidation.tagIds,
+        tags: tagNames,
         name,
         id,
         phone,
@@ -350,7 +362,7 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
       };
 
       try {
-        await prisma.businessRecord.create({
+        await tx.businessRecord.create({
           data: {
             id: STORAGE_KEYS.CUSTOMERS + ':' + id,
             domain: STORAGE_KEYS.CUSTOMERS,
@@ -371,6 +383,8 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
         throw error;
       }
       return success(customer);
+      };
+      return prisma.$transaction ? (prisma.$transaction as any)(operation) : operation(prisma as any);
     },
 
     async list(filters: CustomerFilters = {}, currentUser?: AuthenticatedUser | null) {
