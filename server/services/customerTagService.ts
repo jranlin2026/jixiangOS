@@ -437,6 +437,10 @@ export function createCustomerTagRouter({
     const result = await service.updateGroup(String(req.params.id), req.body || {}, req.currentUser!);
     res.status(status(result.code, 200)).json(result);
   });
+  router.delete('/groups/:id', requireManage, async (req: any, res) => {
+    const result = await service.deleteGroup(String(req.params.id), req.currentUser!);
+    res.status(status(result.code, 200)).json(result);
+  });
   router.post('/', requireManage, async (req: any, res) => {
     const result = await service.createTag(req.body || {}, req.currentUser!);
     res.status(status(result.code, 201)).json(result);
@@ -451,6 +455,10 @@ export function createCustomerTagRouter({
   });
   router.put('/:id', requireManage, async (req: any, res) => {
     const result = await service.updateTag(String(req.params.id), req.body || {}, req.currentUser!);
+    res.status(status(result.code, 200)).json(result);
+  });
+  router.delete('/:id', requireManage, async (req: any, res) => {
+    const result = await service.deleteTag(String(req.params.id), req.currentUser!);
     res.status(status(result.code, 200)).json(result);
   });
   router.post('/:id/merge', requireManage, async (req: any, res) => {
