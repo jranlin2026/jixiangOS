@@ -62,6 +62,14 @@ class FakePrisma {
       this.rows.set(key, row);
       return clone(row);
     },
+    delete: async ({ where }: any) => {
+      const pair = where.domain_recordId;
+      const key = rowKey(pair.domain, pair.recordId);
+      const row = this.rows.get(key);
+      if (!row) throw new Error('missing record');
+      this.rows.delete(key);
+      return clone(row);
+    },
   };
 
   leadRecord = {
@@ -215,6 +223,16 @@ const scopeRowsBefore = clone(prisma.rows);
 const unsafeScope = await service.updateGroup(leadOnlyGroupId, { scope: 'lead' }, superAdmin);
 assert.equal(unsafeScope.code, 409, '客户引用的分组不得改为线索专用');
 assert.deepEqual(prisma.rows, scopeRowsBefore, '目录冲突不得写入任何记录');
+
+const unused = await service.createTag({ groupId, name: '可删除标签' }, superAdmin);
+assert.equal((await service.deleteTag((unused.data as any).id, salesUser)).code, 403);
+assert.equal((await service.deleteTag((unused.data as any).id, superAdmin)).code, 0);
+assert.equal(prisma.rows.has(rowKey(STORAGE_KEYS.TAGS, (unused.data as any).id)), false);
+assert.equal((await service.deleteTag(targetId, superAdmin)).code, 409);
+const empty = await service.createGroup({ ...validGroup, name: '空分组' }, superAdmin);
+assert.equal((await service.deleteGroup((empty.data as any).id, salesUser)).code, 403);
+assert.equal((await service.deleteGroup((empty.data as any).id, superAdmin)).code, 0);
+assert.equal((await service.deleteGroup(groupId, superAdmin)).code, 409);
 
 const secondInGroup = await service.createTag({ groupId, name: '第二选项' }, superAdmin);
 prisma.seedLead({ id: 'lead-single-conflict', manualTagIds: [targetId, (secondInGroup.data as any).id], tags: ['重点客户', '第二选项'] });

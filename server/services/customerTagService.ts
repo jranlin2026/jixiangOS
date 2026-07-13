@@ -176,7 +176,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
       const group: CustomerTagGroup = {
         id: randomUUID(), name, color: normalizeName(input.color) || '#1677ff',
         selectionMode: input.selectionMode === 'single' ? 'single' : 'multiple',
-        scope: 'customer',
+        scope: input.scope ?? 'customer',
         isActive: input.isActive !== false, sortOrder: input.sortOrder ?? catalog.groups.length,
         createdAt: timestamp, updatedAt: timestamp,
       };
@@ -199,7 +199,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
         ...current, name,
         color: input.color === undefined ? current.color : input.color.trim(),
         selectionMode: input.selectionMode ?? current.selectionMode,
-        scope: 'customer',
+        scope: input.scope ?? current.scope,
         isActive: input.isActive ?? current.isActive,
         sortOrder: input.sortOrder ?? current.sortOrder,
         updatedAt: now(),
@@ -258,6 +258,32 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
       }
       await tx.businessRecord.update({ where: { domain_recordId: { domain: STORAGE_KEYS.TAGS, recordId: id } }, data: recordData(STORAGE_KEYS.TAGS, next) });
       return success(next);
+    });
+  }
+
+  async function deleteTag(id: string, user: AuthenticatedUser) {
+    if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
+    return catalogWriteTransaction(prisma, async (tx) => {
+      const catalog = await loadCustomerTagCatalog(tx, true);
+      const tag = catalog.tags.find((item) => item.id === id);
+      if (!tag) return failure('标签不存在', 404);
+      if (tag.usageCount > 0) return failure('标签已被客户或线索使用，请先合并或停用', 409);
+      await tx.businessRecord.delete({ where: { domain_recordId: { domain: STORAGE_KEYS.TAGS, recordId: id } } });
+      await tx.businessRecord.create({ data: recordData(CATALOG_AUDIT_DOMAIN, { id: randomUUID(), name: `删除客户标签：${tag.name}`, isActive: true }) });
+      return success({ id });
+    });
+  }
+
+  async function deleteGroup(id: string, user: AuthenticatedUser) {
+    if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
+    return catalogWriteTransaction(prisma, async (tx) => {
+      const catalog = await loadCustomerTagCatalog(tx, true);
+      const group = catalog.groups.find((item) => item.id === id);
+      if (!group) return failure('标签分组不存在', 404);
+      if (catalog.tags.some((tag) => tag.groupId === id)) return failure('标签分组仍包含标签，请先合并、停用或删除标签', 409);
+      await tx.businessRecord.delete({ where: { domain_recordId: { domain: STORAGE_KEYS.TAG_GROUPS, recordId: id } } });
+      await tx.businessRecord.create({ data: recordData(CATALOG_AUDIT_DOMAIN, { id: randomUUID(), name: `删除客户标签分组：${group.name}`, isActive: true }) });
+      return success({ id });
     });
   }
 
@@ -357,7 +383,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
     });
   }
 
-  return { loadCatalog: (includeInactive = false) => loadCustomerTagCatalog(prisma as any, includeInactive), createGroup, updateGroup, createTag, updateTag, mergeTag, mergeGroup, reorderTags };
+  return { loadCatalog: (includeInactive = false) => loadCustomerTagCatalog(prisma as any, includeInactive), createGroup, updateGroup, createTag, updateTag, deleteTag, deleteGroup, mergeTag, mergeGroup, reorderTags };
 }
 
 export function createCustomerTagRouter({
