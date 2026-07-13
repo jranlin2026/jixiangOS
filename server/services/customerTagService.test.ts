@@ -224,6 +224,17 @@ const unsafeScope = await service.updateGroup(leadOnlyGroupId, { scope: 'lead' }
 assert.equal(unsafeScope.code, 409, '客户引用的分组不得改为线索专用');
 assert.deepEqual(prisma.rows, scopeRowsBefore, '目录冲突不得写入任何记录');
 
+const legacyUsageTag = await service.createTag({ groupId, name: '历史线索引用' }, superAdmin);
+const legacyUsageTagId = (legacyUsageTag.data as any).id;
+prisma.seed(STORAGE_KEYS.LEADS, { id: 'legacy-live-lead', manualTagIds: [legacyUsageTagId] });
+assert.equal((await loadCustomerTagCatalog(prisma as any, true)).tags.find((tag) => tag.id === legacyUsageTagId)?.usageCount, 1, '未被 canonical LeadRecord 接管的 live legacy 引用必须计入使用次数');
+assert.equal((await service.deleteTag(legacyUsageTagId, superAdmin)).code, 409, 'live legacy 线索引用必须阻止删除标签');
+const supersededLegacyTag = await service.createTag({ groupId, name: '已接管历史线索引用' }, superAdmin);
+const supersededLegacyTagId = (supersededLegacyTag.data as any).id;
+prisma.seed(STORAGE_KEYS.LEADS, { id: 'legacy-owned-by-deleted-canonical', manualTagIds: [supersededLegacyTagId] });
+prisma.seedLead({ id: 'legacy-owned-by-deleted-canonical', manualTagIds: [], deletedAt: '2026-07-13T00:00:00.000Z' });
+assert.equal((await loadCustomerTagCatalog(prisma as any, true)).tags.find((tag) => tag.id === supersededLegacyTagId)?.usageCount, 0, '任意 canonical LeadRecord（包括已删除记录）都必须接管同 ID legacy 引用');
+
 const unused = await service.createTag({ groupId, name: '可删除标签' }, superAdmin);
 assert.equal((await service.deleteTag((unused.data as any).id, salesUser)).code, 403);
 assert.equal((await service.deleteTag((unused.data as any).id, superAdmin)).code, 0);

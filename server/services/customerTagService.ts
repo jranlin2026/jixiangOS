@@ -22,6 +22,7 @@ type TagInput = Partial<Pick<CustomerTag, 'groupId' | 'name' | 'color' | 'isActi
 const object = (value: unknown): Record<string, any> => (
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}
 );
+const isDeleted = (row: any) => row.status === 'deleted' || Boolean(object(row.data).deletedAt) || object(row.data).isDeleted === true;
 const normalizeName = (value: unknown) => String(value || '').trim();
 const normalizedKey = (value: unknown) => normalizeName(value).toLocaleLowerCase();
 const now = () => new Date().toISOString();
@@ -98,13 +99,15 @@ export async function loadCustomerTagCatalog(
   tx: CatalogReadTx,
   includeInactive = false,
 ): Promise<CustomerTagCatalog> {
-  const [groupRows, tagRows, customerRows, leadRows] = await Promise.all([
+  const [groupRows, tagRows, customerRows, leadRows, legacyLeadRows] = await Promise.all([
     rowsFor(tx, STORAGE_KEYS.TAG_GROUPS), rowsFor(tx, STORAGE_KEYS.TAGS),
-    rowsFor(tx, STORAGE_KEYS.CUSTOMERS), tx.leadRecord.findMany({ select: { data: true } }),
+    rowsFor(tx, STORAGE_KEYS.CUSTOMERS), tx.leadRecord.findMany(), rowsFor(tx, STORAGE_KEYS.LEADS),
   ]);
   const groups = groupRows.map((row) => object(row.data) as CustomerTagGroup);
+  const canonicalLeadIds = new Set(leadRows.map((row: any) => String(row.id || object(row.data).id)));
   const usage = new Map<string, number>();
-  for (const row of [...customerRows, ...leadRows]) {
+  const liveLegacyLeads = legacyLeadRows.filter((row: any) => !isDeleted(row) && !canonicalLeadIds.has(String(row.recordId || object(row.data).id)));
+  for (const row of [...customerRows, ...leadRows, ...liveLegacyLeads]) {
     for (const id of (Array.isArray(object(row.data).manualTagIds) ? object(row.data).manualTagIds : [])) {
       usage.set(String(id), (usage.get(String(id)) || 0) + 1);
     }
