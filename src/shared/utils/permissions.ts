@@ -124,7 +124,7 @@ export const PERMISSION_KEYS = {
   SETTINGS_LEAD_SOURCES: '系统设置/客户设置/线索来源',
   SETTINGS_LEAD_FLOW: '系统设置/客户设置/线索流转',
   SETTINGS_AI_CONFIG: '系统设置/系统维护/AI大脑',
-  SETTINGS_DATA_MAINTENANCE: '系统设置/系统维护/数据维护',
+  SETTINGS_DATA_MAINTENANCE: '系统设置/系统维护/业务回收与CRM迁移',
 
   // Deprecated: kept only so older imports fail closed instead of crashing.
   COMMISSION: '提成',

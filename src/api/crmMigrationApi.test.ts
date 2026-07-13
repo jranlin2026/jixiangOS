@@ -36,29 +36,6 @@ const result = analyzeCrmMigrationTables({
       客户进展: '公海',
     },
   ],
-  assignedLeads: [
-    {
-      联系人姓名: '商机A',
-      联系方式: '+86 13800000001',
-      来源: '官网/表单',
-      当前商机接收人: '张伟',
-    },
-    {
-      联系人姓名: '商机C',
-      联系方式: '13800000003',
-      来源: '转介绍',
-      当前商机接收人: '王强',
-    },
-  ],
-  failedLeads: [
-    {
-      联系人姓名: '失败A',
-      联系方式: '13800000003',
-      来源: '转介绍',
-      分配人: '系统',
-      失败原因: '重复',
-    },
-  ],
 }, {
   users: [
     { name: '张伟', isActive: true, employmentStatus: 'active' },
@@ -71,14 +48,10 @@ const result = analyzeCrmMigrationTables({
 
 assert.equal(result.customerStats.teamCustomers, 1);
 assert.equal(result.customerStats.publicPoolCustomers, 1);
-assert.equal(result.leadStats.assignedOverlapTeam, 1);
-assert.equal(result.leadStats.assignedMissingInCustomers, 1);
-assert.equal(result.leadStats.failedOverlapAssigned, 1);
 assert.deepEqual(result.employees.matched, ['张伟']);
-assert.deepEqual(result.employees.missing.sort(), ['李娜', '王强']);
-assert.deepEqual(result.employees.system, ['系统']);
+assert.deepEqual(result.employees.missing.sort(), ['李娜']);
+assert.deepEqual(result.employees.system, []);
 assert.deepEqual(result.tags.matched, ['重点客户']);
 assert.deepEqual(result.tags.missing.sort(), ['公海', '高意向']);
 assert.equal(result.sources.matched.some((source) => source.label === '官网-表单'), true);
 assert.equal(result.sources.missing.some((source) => source.label === '直播部-抖音01'), true);
-assert.equal(result.sources.missing.some((source) => source.label === '历史导入-转介绍'), true);

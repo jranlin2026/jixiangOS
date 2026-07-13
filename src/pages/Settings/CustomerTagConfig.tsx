@@ -8,27 +8,24 @@ import AddIcon from '@mui/icons-material/Add';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import EditIcon from '@mui/icons-material/Edit';
-import GroupIcon from '@mui/icons-material/Group';
 import MergeIcon from '@mui/icons-material/Merge';
-import PersonIcon from '@mui/icons-material/Person';
 import SyncIcon from '@mui/icons-material/Sync';
 import {
   applyCustomerTagMigration, createCustomerTag, createCustomerTagGroup,
   fetchCustomerTagCatalog, mergeCustomerTag, mergeCustomerTagGroup, previewCustomerTagMigration,
   reorderCustomerTags, updateCustomerTag, updateCustomerTagGroup,
 } from '../../api/customerTagApi';
-import type { CustomerTag, CustomerTagCatalog, CustomerTagGroup, CustomerTagMigrationPreview, ManualTagScope } from '../../types/tag';
+import type { CustomerTag, CustomerTagCatalog, CustomerTagGroup, CustomerTagMigrationPreview } from '../../types/tag';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import { invalidateManualTagCatalogCache } from '../../shared/components/ManualTagSelector';
 import useAuthStore from '../../store/useAuthStore';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import { formatCustomerTagDialogError, staleMigrationMessage } from './customerTagSettingsState';
 
-const scopeLabel: Record<ManualTagScope, string> = { lead: '线索', customer: '客户', both: '线索与客户' };
 const emptyCatalog: CustomerTagCatalog = { groups: [], tags: [] };
-type GroupDraft = Pick<CustomerTagGroup, 'name' | 'color' | 'selectionMode' | 'scope' | 'isActive' | 'sortOrder'>;
+type GroupDraft = Pick<CustomerTagGroup, 'name' | 'color' | 'selectionMode' | 'isActive' | 'sortOrder'>;
 type TagDraft = Pick<CustomerTag, 'name' | 'color' | 'isActive' | 'sortOrder'>;
-const emptyGroup: GroupDraft = { name: '', color: '#1677ff', selectionMode: 'multiple', scope: 'both', isActive: true, sortOrder: 100 };
+const emptyGroup: GroupDraft = { name: '', color: '#1677ff', selectionMode: 'multiple', isActive: true, sortOrder: 100 };
 const emptyTag: TagDraft = { name: '', color: '#1677ff', isActive: true, sortOrder: 100 };
 
 const CustomerTagConfig: React.FC = () => {
@@ -72,7 +69,7 @@ const CustomerTagConfig: React.FC = () => {
 
   useEffect(() => { void loadCatalog(); }, [loadCatalog]);
 
-  const groups = useMemo(() => [...catalog.groups].sort((a, b) => a.sortOrder - b.sortOrder), [catalog.groups]);
+  const groups = useMemo(() => catalog.groups.filter((group) => group.scope !== 'lead').sort((a, b) => a.sortOrder - b.sortOrder), [catalog.groups]);
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) || null;
   const tags = useMemo(() => catalog.tags.filter((tag) => tag.groupId === selectedGroupId).sort((a, b) => a.sortOrder - b.sortOrder), [catalog.tags, selectedGroupId]);
   const compatibleTargets = useMemo(() => catalog.tags.filter((tag) => tag.groupId === mergeSource?.groupId && tag.id !== mergeSource.id && tag.isActive), [catalog.tags, mergeSource]);
@@ -104,11 +101,11 @@ const CustomerTagConfig: React.FC = () => {
   const openGroup = (group?: CustomerTagGroup) => {
     setDialogError('');
     setEditingGroup(group || null);
-    setGroupDraft(group ? { name: group.name, color: group.color, selectionMode: group.selectionMode, scope: group.scope, isActive: group.isActive, sortOrder: group.sortOrder } : { ...emptyGroup, sortOrder: groups.length + 1 });
+    setGroupDraft(group ? { name: group.name, color: group.color, selectionMode: group.selectionMode, isActive: group.isActive, sortOrder: group.sortOrder } : { ...emptyGroup, sortOrder: groups.length + 1 });
     setGroupDialog(true);
   };
   const saveGroup = () => runMutation(
-    () => editingGroup ? updateCustomerTagGroup(editingGroup.id, groupDraft) : createCustomerTagGroup(groupDraft),
+    () => editingGroup ? updateCustomerTagGroup(editingGroup.id, { ...groupDraft, scope: 'customer' }) : createCustomerTagGroup({ ...groupDraft, scope: 'customer' }),
     () => setGroupDialog(false),
     setDialogError,
   );
@@ -183,8 +180,7 @@ const CustomerTagConfig: React.FC = () => {
             <List disablePadding>{groups.map((group) => (
               <ListItemButton key={group.id} selected={group.id === selectedGroupId} onClick={() => setSelectedGroupId(group.id)} sx={{ gap: 1, borderBottom: '1px solid #f1f5f9' }}>
                 <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: group.color, flex: '0 0 auto' }} />
-                {group.scope === 'customer' ? <PersonIcon fontSize="small" color="action" /> : <GroupIcon fontSize="small" color="action" />}
-                <ListItemText primary={group.name} secondary={`${scopeLabel[group.scope]} · ${group.selectionMode === 'single' ? '单选' : '多选'}${group.isActive ? '' : ' · 已停用'}`} primaryTypographyProps={{ fontWeight: 600 }} />
+                <ListItemText primary={group.name} secondary={`${group.selectionMode === 'single' ? '单选' : '多选'}${group.isActive ? '' : ' · 已停用'}`} primaryTypographyProps={{ fontWeight: 600 }} />
                 {canManage && <Tooltip title="编辑分组"><Button size="small" onClick={(event) => { event.stopPropagation(); openGroup(group); }}><EditIcon fontSize="small" /></Button></Tooltip>}
                 {canManage && group.isActive && <Tooltip title="合并分组"><Button size="small" onClick={(event) => { event.stopPropagation(); setDialogError(''); setMergeGroupSource(group); setMergeGroupTargetId(''); }}><MergeIcon fontSize="small" /></Button></Tooltip>}
               </ListItemButton>
@@ -197,7 +193,7 @@ const CustomerTagConfig: React.FC = () => {
             <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={2} sx={{ mb: 2 }}>
               <Box>
                 <Stack direction="row" alignItems="center" spacing={1}><Typography variant="h6" sx={{ fontWeight: 700 }}>{selectedGroup.name}</Typography><Chip size="small" label={selectedGroup.isActive ? '启用' : '停用'} color={selectedGroup.isActive ? 'success' : 'default'} /></Stack>
-                <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>选择模式：{selectedGroup.selectionMode === 'single' ? '单选' : '多选'}　适用范围：{scopeLabel[selectedGroup.scope]}</Typography>
+                <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>选择模式：{selectedGroup.selectionMode === 'single' ? '单选' : '多选'}</Typography>
               </Box>
               <Button variant="contained" size="small" startIcon={<AddIcon />} disabled={!canManage || !selectedGroup.isActive} onClick={() => openTag()}>添加标签</Button>
             </Stack>
@@ -225,7 +221,6 @@ const CustomerTagConfig: React.FC = () => {
           <TextField label="分组名称" required value={groupDraft.name} onChange={(e) => setGroupDraft({ ...groupDraft, name: e.target.value })} />
           <TextField label="分组颜色" type="color" value={groupDraft.color} onChange={(e) => setGroupDraft({ ...groupDraft, color: e.target.value })} />
           <FormControl><InputLabel>选择模式</InputLabel><Select label="选择模式" value={groupDraft.selectionMode} onChange={(e) => setGroupDraft({ ...groupDraft, selectionMode: e.target.value as GroupDraft['selectionMode'] })}><MenuItem value="single">单选</MenuItem><MenuItem value="multiple">多选</MenuItem></Select></FormControl>
-          <FormControl><InputLabel>适用范围</InputLabel><Select label="适用范围" value={groupDraft.scope} onChange={(e) => setGroupDraft({ ...groupDraft, scope: e.target.value as ManualTagScope })}><MenuItem value="lead">线索</MenuItem><MenuItem value="customer">客户</MenuItem><MenuItem value="both">线索与客户</MenuItem></Select></FormControl>
           <TextField label="排序" type="number" value={groupDraft.sortOrder} onChange={(e) => setGroupDraft({ ...groupDraft, sortOrder: Number(e.target.value) })} />
           <FormControlLabel control={<Switch checked={groupDraft.isActive} onChange={(e) => setGroupDraft({ ...groupDraft, isActive: e.target.checked })} />} label={groupDraft.isActive ? '启用' : '停用'} />
         </Stack></DialogContent>

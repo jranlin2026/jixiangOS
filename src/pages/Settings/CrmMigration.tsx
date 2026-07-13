@@ -35,8 +35,8 @@ const FILE_SLOTS: Array<{ key: CrmMigrationFileKey; label: string; description: 
   },
   {
     key: 'teamContacts',
-    label: '团队企业联系人',
-    description: 'EC CRM 团队客户文件夹里的企业联系人 Excel',
+    label: '企业联系人',
+    description: 'EC CRM 客户关联的企业联系人 Excel，只补充客户资料，不创建线索',
     accept: '.xlsx,.xls',
   },
   {
@@ -44,18 +44,6 @@ const FILE_SLOTS: Array<{ key: CrmMigrationFileKey; label: string; description: 
     label: '公海客户资料',
     description: 'EC CRM 公海客户 Excel',
     accept: '.xlsx,.xls',
-  },
-  {
-    key: 'assignedLeads',
-    label: '已分配商机',
-    description: '汇营销入库成功/已分配商机 CSV',
-    accept: '.csv',
-  },
-  {
-    key: 'failedLeads',
-    label: '入库失败商机',
-    description: '汇营销入库失败商机 CSV，用于失败归档和重复判断',
-    accept: '.csv',
   },
 ];
 
@@ -153,15 +141,14 @@ const CrmMigration: React.FC = () => {
     );
   };
 
-  const importCustomersAndLeads = async () => {
+  const importCustomers = async () => {
     if (!result) return;
     const confirmed = await confirm(
       [
-        `将导入团队客户、公海客户，并只把“客户库外”的已分配商机补充为线索。`,
-        `入库失败商机会先作为失败归档口径，不进入正式线索池。`,
+        `将导入团队客户与公海客户；企业联系人只补充到对应客户资料，不创建线索。`,
         `导入会按手机号/微信跳过重复数据。`,
       ].join('\n\n'),
-      '确认导入客户和补充线索',
+      '确认导入客户资料',
     );
     if (!confirmed) return;
 
@@ -169,7 +156,7 @@ const CrmMigration: React.FC = () => {
     const response = await crmMigrationApi.importFiles(files);
     setImporting(false);
     if (response.code !== 0 || !response.data) {
-      await alert(response.message || '客户和线索导入失败，请检查文件后重试。', '导入失败');
+      await alert(response.message || '客户资料导入失败，请检查文件后重试。', '导入失败');
       return;
     }
     await alert(
@@ -177,10 +164,6 @@ const CrmMigration: React.FC = () => {
         `团队客户导入：${response.data.customers.teamCreated} 个`,
         `公海客户导入：${response.data.customers.publicCreated} 个`,
         `客户重复跳过：${response.data.customers.skippedDuplicates} 个`,
-        `补充线索导入：${response.data.leads.assignedCreated} 条`,
-        `已在客户库的商机跳过：${response.data.leads.skippedExistingCustomers} 条`,
-        `线索重复跳过：${response.data.leads.skippedDuplicates} 条`,
-        `失败商机归档口径：${response.data.failedLeadsArchived} 条`,
       ].join('\n'),
       '导入完成',
     );
@@ -193,12 +176,12 @@ const CrmMigration: React.FC = () => {
         <Box>
           <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>EC CRM 迁移向导</Typography>
           <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>
-            先预检老系统文件，自动整理员工、来源、标签和重复关系，再决定导入客户与线索。
+            先预检三张客户资料表，自动整理员工、来源、标签和重复关系，再决定导入客户。
           </Typography>
         </Box>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-          <Button variant="outlined" startIcon={<MoveToInboxIcon />} onClick={importCustomersAndLeads} disabled={!result || importing || checking || syncing}>
-            导入客户和补充线索
+          <Button variant="outlined" startIcon={<MoveToInboxIcon />} onClick={importCustomers} disabled={!result || importing || checking || syncing}>
+            导入客户资料
           </Button>
           <Button variant="contained" startIcon={<FactCheckIcon />} onClick={() => runPrecheck()} disabled={!canPrecheck}>
             开始预检
@@ -250,8 +233,6 @@ const CrmMigration: React.FC = () => {
               <StatCard label="团队客户" value={result.customerStats.teamCustomers} hint={`${result.customerStats.uniqueTeamPhones} 个手机号`} />
               <StatCard label="公海客户" value={result.customerStats.publicPoolCustomers} hint={`${result.customerStats.uniquePublicPhones} 个手机号`} />
               <StatCard label="企业联系人" value={result.customerStats.teamContacts} />
-              <StatCard label="已分配商机" value={result.leadStats.assignedLeads} hint={`${result.leadStats.assignedMissingInCustomers} 个客户库外手机号`} color="#0f766e" />
-              <StatCard label="失败商机" value={result.leadStats.failedLeads} hint={`${result.leadStats.failedOnlyArchive} 条仅归档`} color="#b45309" />
             </Stack>
           </Paper>
 

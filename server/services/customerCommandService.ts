@@ -24,7 +24,7 @@ import {
 import { applyContactEditLock } from '../../src/shared/utils/contactEditLock';
 import { mapPrismaDepartment, mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { loadCustomerTagCatalog } from './customerTagService';
-import { inheritableCustomerTagIds, validateManualTagSelection, validateManualTagUpdateSelection } from './customerTagPolicy';
+import { validateManualTagUpdateSelection } from './customerTagPolicy';
 
 type CustomerCommandPrisma = Pick<PrismaClient, '$transaction' | 'leadRecord'>;
 type CustomerCommandTx = Pick<
@@ -581,11 +581,17 @@ const LEAD_EDIT_FIELDS: Array<{ field: keyof Lead; label: string }> = [
   { field: 'leadContributorId', label: '线索贡献人' },
   { field: 'leadContributorName', label: '线索贡献人' },
   { field: 'remark', label: '备注' },
-  { field: 'manualTagIds', label: '标签' },
   { field: 'email', label: '邮箱' },
   { field: 'estimatedAmount', label: '预估金额' },
   { field: 'estimatedProductId', label: '预估产品' },
 ];
+
+function stripLeadTags<T extends object>(input: T): T {
+  const cleaned = { ...input } as Record<string, unknown>;
+  delete cleaned.manualTagIds;
+  delete cleaned.tags;
+  return cleaned as T;
+}
 
 function editableLeadPatch(input: Partial<Lead>): Partial<Lead> {
   return LEAD_EDIT_FIELDS.reduce<Partial<Lead>>((patch, { field }) => {
@@ -722,8 +728,10 @@ export function createCustomerCommandService(
         }
 
         let patch = editableCustomerPatch(input);
+        let tagNameById: Map<string, string> | null = null;
         if (Object.prototype.hasOwnProperty.call(input, 'manualTagIds')) {
           const catalog = await loadCustomerTagCatalog(tx, true);
+          tagNameById = new Map(catalog.tags.map((tag) => [tag.id, tag.name]));
           const validation = validateManualTagUpdateSelection(catalog, 'customer', input.manualTagIds || [], customer.manualTagIds || []);
           if (!validation.ok) return failure<Customer>(validation.message, 400);
           patch.manualTagIds = validation.tagIds;
@@ -758,6 +766,11 @@ export function createCustomerCommandService(
         if (phoneError) return failure<Customer>(phoneError, 400);
 
         const changes = buildCustomerEditChanges(customer, patch);
+        const tagChange = changes.find((change) => change.field === 'manualTagIds');
+        if (tagChange && tagNameById) {
+          tagChange.oldValue = activityValue((customer.manualTagIds || []).map((id) => tagNameById!.get(id) || '历史标签'));
+          tagChange.newValue = activityValue((patch.manualTagIds || []).map((id) => tagNameById!.get(id) || '历史标签'));
+        }
         if (!changes.length) return success(customer);
         const at = now();
         const atIso = at.toISOString();
@@ -767,7 +780,7 @@ export function createCustomerCommandService(
           activityRecords: [{
             id: newId('act'),
             type: 'update',
-            title: `更新了 ${changes.map((change) => change.label).join('、')}`,
+            title: changes.length === 1 && tagChange ? '更新了客户标签' : `更新了 ${changes.map((change) => change.label).join('、')}`,
             operator,
             createdAt: atIso,
             changes,
@@ -839,10 +852,7 @@ export function createCustomerCommandService(
       return runTransaction(async (tx) => {
         const context = await commandContext(tx, currentUser, 'leads');
         if (!context.actor) return failure<Lead>('当前用户不存在或已离职', 403);
-        const catalog = await loadCustomerTagCatalog(tx, false);
-        const tagValidation = validateManualTagSelection(catalog, 'lead', input.manualTagIds || []);
-        if (!tagValidation.ok) return failure<Lead>(tagValidation.message, 400);
-        const normalizedTagNames = tagValidation.tagIds.map((id) => catalog.tags.find((tag) => tag.id === id)!.name);
+        const cleanInput = stripLeadTags(input);
         const flowConfig = normalizeLeadFlowConfig(await lockStorageValue(
           tx,
           STORAGE_KEYS.LEAD_FLOW_CONFIG,
@@ -958,9 +968,7 @@ export function createCustomerCommandService(
 
         const id = newId('lead');
         let lead: Lead = {
-          ...input,
-          manualTagIds: tagValidation.tagIds,
-          tags: normalizedTagNames,
+          ...cleanInput,
           id,
           name,
           source,
@@ -1044,8 +1052,8 @@ export function createCustomerCommandService(
               relatedType: 'lead',
               createdAt: atIso,
             }],
-            manualTagIds: inheritableCustomerTagIds(catalog, lead.manualTagIds || []),
-            tags: inheritableCustomerTagIds(catalog, lead.manualTagIds || []).map((id) => catalog.tags.find((tag) => tag.id === id)!.name),
+            manualTagIds: [],
+            tags: [],
             leadInputBy: inputBy,
             leadContributorId: lead.leadContributorId,
             leadContributorName: lead.leadContributorName,
@@ -1131,7 +1139,7 @@ export function createCustomerCommandService(
       return runTransaction(async (tx) => {
         const row = await lockLead(tx, leadId);
         if (!row) return failure<Lead>('线索不存在', 404);
-        const lead = readJson<Lead>(row.data);
+        const lead = stripLeadTags(readJson<Lead>(row.data));
         if (lead.deletedAt) return failure<Lead>('线索不存在', 404);
         const context = await commandContext(tx, currentUser, 'leads');
         if (!context.actor) return failure<Lead>('当前用户不存在或已离职', 403);
@@ -1142,14 +1150,7 @@ export function createCustomerCommandService(
         if (!canMutateLead(lead, context, currentUser)) return failure<Lead>('无权操作该线索', 403);
         if (!canEditLeadProfileOnServer(lead)) return failure<Lead>('仅待跟进且未转客户的线索可编辑', 409);
 
-        let patch = editableLeadPatch(input);
-        if (Object.prototype.hasOwnProperty.call(input, 'manualTagIds')) {
-          const catalog = await loadCustomerTagCatalog(tx, true);
-          const validation = validateManualTagUpdateSelection(catalog, 'lead', input.manualTagIds || [], lead.manualTagIds || []);
-          if (!validation.ok) return failure<Lead>(validation.message, 400);
-          patch.manualTagIds = validation.tagIds;
-          patch.tags = validation.tagIds.map((id) => catalog.tags.find((tag) => tag.id === id)!.name);
-        }
+        let patch = editableLeadPatch(stripLeadTags(input));
         patch = applyContactEditLock(lead, patch, {
           canEditLockedContact: isSuperAdmin(currentUser),
         });
@@ -1556,7 +1557,7 @@ export function createCustomerCommandService(
       return runTransaction(async (tx) => {
         const leadRow = await lockLead(tx, leadId);
         if (!leadRow) return failure<Lead>('线索不存在', 404);
-        const lead = readJson<Lead>(leadRow.data);
+        const lead = stripLeadTags(readJson<Lead>(leadRow.data));
         if (lead.deletedAt) return failure<Lead>('线索不存在', 404);
 
         const context = await commandContext(tx, currentUser, 'leads');
@@ -1587,8 +1588,6 @@ export function createCustomerCommandService(
         const at = now();
         const atIso = at.toISOString();
         const operator = commandActor(context, currentUser);
-        const catalog = await loadCustomerTagCatalog(tx, false);
-        const inheritedTagIds = inheritableCustomerTagIds(catalog, lead.manualTagIds || []);
         let conversionOwner = operator;
         if (existingOwnerName) {
           const existingOwner = activeUsersNamed(context, existingOwnerName)[0];
@@ -1632,8 +1631,8 @@ export function createCustomerCommandService(
             relatedType: 'lead',
             createdAt: atIso,
           }],
-          manualTagIds: inheritedTagIds,
-          tags: inheritedTagIds.map((id) => catalog.tags.find((tag) => tag.id === id)!.name),
+          manualTagIds: [],
+          tags: [],
           leadInputBy: lead.inputBy,
           leadContributorId: lead.leadContributorId,
           leadContributorName: lead.leadContributorName,

@@ -176,7 +176,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
       const group: CustomerTagGroup = {
         id: randomUUID(), name, color: normalizeName(input.color) || '#1677ff',
         selectionMode: input.selectionMode === 'single' ? 'single' : 'multiple',
-        scope: ['lead', 'customer', 'both'].includes(String(input.scope)) ? input.scope as any : 'both',
+        scope: 'customer',
         isActive: input.isActive !== false, sortOrder: input.sortOrder ?? catalog.groups.length,
         createdAt: timestamp, updatedAt: timestamp,
       };
@@ -199,7 +199,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
         ...current, name,
         color: input.color === undefined ? current.color : input.color.trim(),
         selectionMode: input.selectionMode ?? current.selectionMode,
-        scope: input.scope ?? current.scope,
+        scope: 'customer',
         isActive: input.isActive ?? current.isActive,
         sortOrder: input.sortOrder ?? current.sortOrder,
         updatedAt: now(),

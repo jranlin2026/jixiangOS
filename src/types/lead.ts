@@ -77,7 +77,9 @@ export interface Lead {
   owner: string;
   estimatedAmount?: number;
   aiAnalysis?: LeadAIAnalysis;
+  /** @deprecated 仅用于读取待清理的历史数据；线索端不得再写入、展示或继承。 */
   tags?: string[];
+  /** @deprecated 仅用于读取待清理的历史数据；线索端不得再写入、展示或继承。 */
   manualTagIds?: ID[];
   sourceType?: string;
   sourceName?: string;

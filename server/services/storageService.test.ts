@@ -61,6 +61,7 @@ const prisma = {
   },
   leadRecord: {
     findMany: async () => leadRows,
+    createMany: async ({ data }: any) => ({ count: data.length }),
     upsert: async (input: any) => {
       upserts.push(input);
       return input.create;
@@ -78,6 +79,7 @@ const prisma = {
         eventAt: new Date('2026-06-24T00:00:00.000Z'),
       },
     ] : []),
+    createMany: async ({ data }: any) => ({ count: data.length }),
     upsert: async (input: any) => {
       businessUpserts.push(input);
       return input.create;
@@ -196,6 +198,11 @@ const transactionalPrisma = {
 const transactionalService = createStorageService(transactionalPrisma);
 await transactionalService.set(STORAGE_KEYS.CUSTOMERS, nextCustomers);
 assert.equal(transactionCalls, 1);
+
+transactionCalls = 0;
+const migrationResult = await transactionalService.importCrmMigration(nextCustomers);
+assert.equal(migrationResult.code, 0);
+assert.equal(transactionCalls, 1, 'EC CRM 客户与线索迁移必须在同一事务中保存');
 
 let deleteAttemptedAfterUpsertFailure = false;
 const failingPrisma: any = {
@@ -317,6 +324,72 @@ const pendingApplicationResult = await protectedService.set(STORAGE_KEYS.ORDER_A
   applicantName: '销售A',
 }]);
 assert.equal(pendingApplicationResult.code, 0);
+
+const bulkCreateCalls: Array<{ domain: string; count: number }> = [];
+const bulkMigrationPrisma: any = {
+  appStorage: prisma.appStorage,
+  user: prisma.user,
+  businessRecord: {
+    findMany: async () => [],
+    createMany: async ({ data }: any) => {
+      bulkCreateCalls.push({ domain: data[0]?.domain, count: data.length });
+      return { count: data.length };
+    },
+    upsert: async () => {
+      throw new Error('sequential business upsert timed out');
+    },
+    deleteMany: async () => ({ count: 0 }),
+  },
+  leadRecord: {
+    createMany: async () => {
+      throw new Error('CRM migration must not create leads');
+    },
+  },
+};
+bulkMigrationPrisma.$transaction = async (callback: (tx: any) => Promise<unknown>) => callback(bulkMigrationPrisma);
+
+const bulkCustomers = Array.from({ length: 1_200 }, (_, index) => ({
+  id: `bulk-customer-${index}`,
+  name: `Customer ${index}`,
+  createdAt: '2026-07-13T00:00:00.000Z',
+  updatedAt: '2026-07-13T00:00:00.000Z',
+}));
+const bulkMigrationResult = await createStorageService(bulkMigrationPrisma).importCrmMigration(bulkCustomers);
+assert.equal(bulkMigrationResult.code, 0);
+assert.equal(
+  bulkCreateCalls.filter((call) => call.domain === STORAGE_KEYS.CUSTOMERS).reduce((total, call) => total + call.count, 0),
+  bulkCustomers.length,
+);
+
+const deduplicatedMigrationBatches: any[][] = [];
+const duplicateAwareMigrationPrisma: any = {
+  businessRecord: {
+    findMany: async ({ where }: any) => where.domain === STORAGE_KEYS.CUSTOMERS ? [{
+      data: { id: 'existing-customer', phone: '13800000001', wechat: 'existing-wechat' },
+    }] : [],
+    createMany: async ({ data }: any) => {
+      deduplicatedMigrationBatches.push(data);
+      return { count: data.length };
+    },
+  },
+};
+duplicateAwareMigrationPrisma.$transaction = async (callback: (tx: any) => Promise<unknown>) => callback(duplicateAwareMigrationPrisma);
+
+const duplicateAwareMigrationResult = await createStorageService(duplicateAwareMigrationPrisma).importCrmMigration([
+  { id: 'duplicate-phone', name: '重复手机号', phone: '13800000001' },
+  { id: 'duplicate-wechat', name: '重复微信', wechat: 'existing-wechat' },
+  { id: 'new-customer', name: '新客户', phone: '13900000001', wechat: 'new-wechat' },
+]);
+assert.equal(duplicateAwareMigrationResult.code, 0);
+assert.deepEqual(duplicateAwareMigrationResult.data, {
+  createdIds: ['new-customer'],
+  skippedDuplicates: 2,
+});
+assert.deepEqual(
+  deduplicatedMigrationBatches.flat().map((row) => row.recordId),
+  ['new-customer'],
+  'EC CRM 导入必须跳过数据库内已有手机号或微信的客户。',
+);
 assert.equal(
   protectedRecords.get(`${STORAGE_KEYS.ORDER_APPLICATIONS}:application-pending`).status,
   '待财务审核',

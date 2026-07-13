@@ -190,3 +190,8 @@ assert.match(
 );
 assert.match(source, /Legacy storage deletion is disabled/);
 assert.match(source, /app\.delete\('\/api\/storage', requireDataMaintenanceDeleteAccess,/);
+assert.match(source, /app\.post\('\/api\/crm-migration\/import', requireStorageAccess,/);
+assert.match(source, /crm-migration\/import[\s\S]{0,900}PERMISSION_KEYS\.SETTINGS_DATA_MAINTENANCE/);
+assert.match(source, /PERMISSION_KEYS\.CUSTOMER_CREATE/);
+assert.doesNotMatch(source, /crm-migration\/import[\s\S]{0,900}PERMISSION_KEYS\.LEADS_CREATE/);
+assert.match(source, /storageService\.importCrmMigration\(customers\)/);

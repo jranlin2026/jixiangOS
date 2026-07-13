@@ -61,7 +61,6 @@ import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import { ModuleHeader, ModulePage, ModuleTabs, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
-import { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
 
 type LeadColumn = {
   id: string;
@@ -118,11 +117,6 @@ const buildColumns = (lifecycleConfigs: LifecycleStatusConfig[]): LeadColumn[] =
         return <Chip label={status.label} size="small" color={status.color} />;
       },
     },
-    {
-      id: 'tags',
-      label: '标签',
-      render: (lead) => <ManualTagDisplay scope="lead" ids={lead.manualTagIds} legacyNames={lead.tags} />,
-    },
     { id: 'remark', label: '备注', render: (lead) => lead.remark || '-' },
     {
       id: 'intakeStatus',
@@ -165,7 +159,6 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'leadContributorName',
   'assignedTo',
   'assignmentStatus',
-  'tags',
   'remark',
   'intakeStatus',
   'lifecycleStatus',
@@ -184,7 +177,6 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   leadContributorName: 140,
   assignedTo: 140,
   assignmentStatus: 150,
-  tags: 180,
   remark: 260,
   intakeStatus: 140,
   lifecycleStatus: 140,

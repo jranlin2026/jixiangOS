@@ -39,7 +39,8 @@ import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution'
 import PermissionGate from '../../shared/auth/PermissionGate';
 import { PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
-import ManualTagSelector, { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
+import { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
+import CustomerTagDialog from '../../shared/components/CustomerTagDialog';
 
 interface CustomerDetailProps {
   customer: Customer;
@@ -126,7 +127,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const [editing, setEditing] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [draft, setDraft] = useState<Partial<Customer>>({});
-  const [selectedManualTagIds, setSelectedManualTagIds] = useState<string[]>([]);
+  const [tagDialogOpen, setTagDialogOpen] = useState(false);
+  const [tagSaving, setTagSaving] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
   const [contracts, setContracts] = useState<ContractFile[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -145,7 +147,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   useEffect(() => {
     setCurrentCustomer(customer);
     setDraft(customer);
-    setSelectedManualTagIds(customer.manualTagIds || []);
+    setTagDialogOpen(false);
     setFollowNote('');
     setFollowAttachments([]);
     setEditing(false);
@@ -379,7 +381,6 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       leadContributorId: draft.leadContributorId,
       leadContributorName: draft.leadContributorName,
       customerLevel: draft.customerLevel,
-      manualTagIds: selectedManualTagIds,
       originalSalesTransferBy: draft.originalSalesTransferBy,
       remark: draft.remark,
     };
@@ -392,13 +393,32 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       }
       setCurrentCustomer(res.data);
       setDraft(res.data);
-      setSelectedManualTagIds(res.data.manualTagIds || []);
       setEditing(false);
       onUpdated?.(res.data);
     } catch (error) {
       await alert(error instanceof Error ? error.message : '客户资料保存失败，请稍后重试', '保存失败');
     } finally {
       setProfileSaving(false);
+    }
+  };
+
+  const handleSaveTags = async (manualTagIds: string[]) => {
+    if (readOnly || tagSaving) return;
+    setTagSaving(true);
+    try {
+      const res = await customerApi.updateCustomer(currentCustomer.id, { manualTagIds });
+      if (res.code !== 0 || !res.data) {
+        await alert(res.message || '客户标签保存失败，请稍后重试', '保存失败');
+        return;
+      }
+      setCurrentCustomer(res.data);
+      setDraft(res.data);
+      setTagDialogOpen(false);
+      onUpdated?.(res.data);
+    } catch (error) {
+      await alert(error instanceof Error ? error.message : '客户标签保存失败，请稍后重试', '保存失败');
+    } finally {
+      setTagSaving(false);
     }
   };
 
@@ -417,7 +437,6 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     }
     setCurrentCustomer(updatedCustomer);
     setDraft(updatedCustomer);
-    setSelectedManualTagIds(updatedCustomer.manualTagIds || []);
     onUpdated?.(updatedCustomer);
   };
 
@@ -437,7 +456,6 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     }
     setCurrentCustomer(releasedCustomer);
     setDraft(releasedCustomer);
-    setSelectedManualTagIds(releasedCustomer.manualTagIds || []);
     setReleaseDialogOpen(false);
     setReleaseReason('');
     onUpdated?.(releasedCustomer);
@@ -611,21 +629,6 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       <Box sx={{ px: 1.5, py: 1, fontSize: 13 }}>{value}</Box>
     </Box>
   );
-
-  const renderTagsRow = () => {
-    return (
-      <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
-        <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>标签</Box>
-        <Box sx={{ px: 1.5, py: editing ? 0.5 : 1, fontSize: 13 }}>
-          {editing ? (
-            <ManualTagSelector scope="customer" value={selectedManualTagIds} onChange={setSelectedManualTagIds} disabled={profileSaving} includeInactiveSelected legacyNames={currentCustomer.tags} />
-          ) : (
-            <ManualTagDisplay scope="customer" ids={currentCustomer.manualTagIds} legacyNames={currentCustomer.tags} />
-          )}
-        </Box>
-      </Box>
-    );
-  };
 
   const renderRemarkRow = () => (
     <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', minHeight: 72 }}>
@@ -920,6 +923,10 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
           <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>
             {currentCustomer.owner || '未分配'} 跟进 · {formatCustomerSource(currentCustomer)}
           </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.75, mt: 1 }}>
+            <ManualTagDisplay ids={currentCustomer.manualTagIds} legacyNames={currentCustomer.tags} />
+            {!readOnly && <Button size="small" variant="outlined" onClick={() => setTagDialogOpen(true)}>+ 标签</Button>}
+          </Box>
         </Box>
         <IconButton
           aria-label="关闭"
@@ -954,7 +961,6 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                         disabled={profileSaving}
                         onClick={() => {
                           setDraft(currentCustomer);
-                          setSelectedManualTagIds(currentCustomer.manualTagIds || []);
                           setEditing(false);
                         }}
                       >
@@ -968,10 +974,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                     <Button
                       size="small"
                       variant="outlined"
-                      onClick={() => {
-                        setSelectedManualTagIds(currentCustomer.manualTagIds || []);
-                        setEditing(true);
-                      }}
+                      onClick={() => setEditing(true)}
                     >
                       编辑资料
                     </Button>
@@ -993,7 +996,6 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               {renderInfoRow('线索录入人', 'leadInputBy', false)}
               {renderInfoRow('线索贡献人', 'leadContributorName')}
               {renderInfoRow('客户等级', 'customerLevel')}
-              {renderTagsRow()}
               {renderInfoRow('原销转人员', 'originalSalesTransferBy')}
               {renderInfoRow('累计消费', 'totalSpent', false)}
               {renderInfoRow('订单数', 'orderCount', false)}
@@ -1042,6 +1044,14 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
         <Button color="warning" variant="contained" onClick={handleConfirmReleaseCurrentCustomer}>确认放弃</Button>
       </DialogActions>
     </Dialog>
+    <CustomerTagDialog
+      open={tagDialogOpen}
+      initialIds={currentCustomer.manualTagIds}
+      legacyNames={currentCustomer.tags}
+      saving={tagSaving}
+      onClose={() => setTagDialogOpen(false)}
+      onConfirm={handleSaveTags}
+    />
     {feedbackDialog}
     </>
   );

@@ -10,9 +10,6 @@ import { createSuccessResponse, delay, type ApiResponse } from './types';
 import { initializeMockData } from './mock';
 import { getStorageData } from './mock/storage';
 import { leadFlowApi } from './leadFlowApi';
-import type { CustomerTagCatalog } from '../types/tag';
-import { resolveManualTagNames } from '../shared/utils/customerTagPolicy';
-import { fetchCustomerTagCatalog } from './customerTagApi';
 
 const TEXT = {
   name: '\u59d3\u540d*',
@@ -26,7 +23,6 @@ const TEXT = {
   inputBy: '\u7ebf\u7d22\u5f55\u5165\u4eba',
   leadContributor: '\u7ebf\u7d22\u8d21\u732e\u4eba',
   owner: '\u5206\u914d\u9500\u552e',
-  tags: '\u6807\u7b7e',
   remark: '\u5907\u6ce8',
   companyResource: '\u516c\u53f8\u8d44\u6e90',
   toAssign: '\u5f85\u5206\u914d',
@@ -46,7 +42,6 @@ const TEXT = {
   exampleSource: '\u5b98\u7f51',
   exampleIndustry: '\u6559\u80b2',
   exampleCity: '\u4e0a\u6d77',
-  exampleTags: '\u91cd\u70b9,\u9ad8\u610f\u5411',
   exampleRemark: '\u793a\u4f8b\u6570\u636e\uff0c\u5bfc\u5165\u524d\u8bf7\u5220\u9664',
 } as const;
 
@@ -64,7 +59,6 @@ export const LEAD_BULK_IMPORT_HEADERS = [
   TEXT.inputBy,
   TEXT.leadContributor,
   TEXT.owner,
-  TEXT.tags,
   TEXT.remark,
 ] as const;
 
@@ -191,13 +185,6 @@ function findByName<T extends { name: string }>(items: T[], name: string): T | u
   return items.find((item) => item.name.trim().toLowerCase() === normalized);
 }
 
-function parseTags(value: string): string[] {
-  return value
-    .split(/[,，]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
 async function readRows(arrayBuffer: ArrayBuffer): Promise<CleanRow[]> {
   const ExcelJS = await loadExcelJs();
   const workbook = new ExcelJS.Workbook();
@@ -241,7 +228,7 @@ function applyListValidation(sheet: import('exceljs').Worksheet, columnIndex: nu
   }
 }
 
-function validateRow(row: CleanRow, catalog: CustomerTagCatalog) {
+function validateRow(row: CleanRow) {
   const data = row.data;
   const errors: string[] = [];
   const users = getActiveUsers();
@@ -253,8 +240,6 @@ function validateRow(row: CleanRow, catalog: CustomerTagCatalog) {
   const inputByValue = data[TEXT.inputBy];
   const contributorValue = data[TEXT.leadContributor];
   const ownerValue = data[TEXT.owner];
-  const requestedTags = parseTags(data[TEXT.tags]);
-  const tagResolution = resolveManualTagNames(catalog, 'lead', requestedTags);
 
   const sourceOption = sourceValue
     ? sourceOptions.find((option) => option.label.trim().toLowerCase() === sourceValue.trim().toLowerCase())
@@ -273,7 +258,6 @@ function validateRow(row: CleanRow, catalog: CustomerTagCatalog) {
   if (contributorValue && !contributorUser) errors.push(`${TEXT.leadContributorMissing}\uff1a${contributorValue}`);
   if (sourceType === '\u4e2a\u4eba\u8d44\u6e90' && !contributorUser) errors.push(TEXT.leadContributorRequired);
   if (ownerValue && ownerValue !== TEXT.toAssign && !ownerUser) errors.push(`${TEXT.ownerMissing}\uff1a${ownerValue}`);
-  if (!tagResolution.ok) errors.push(tagResolution.message);
 
   if (errors.length) {
     return { errors, payload: null };
@@ -294,8 +278,6 @@ function validateRow(row: CleanRow, catalog: CustomerTagCatalog) {
     leadContributorName: contributorUser?.name,
     industry: data[TEXT.industry],
     city: data[TEXT.city],
-    manualTagIds: tagResolution.ok ? tagResolution.tagIds : [],
-    tags: tagResolution.ok ? tagResolution.tagIds.map((id) => catalog.tags.find((tag) => tag.id === id)!.name) : [],
     remark: data[TEXT.remark],
   };
 
@@ -348,7 +330,6 @@ async function createTemplateWorkbook(): Promise<ArrayBuffer> {
     ['线索录入人', '可留空，留空时默认当前导入人；填写时必须是系统内在职员工姓名'],
     ['线索贡献人', '个人资源必填；填写时必须是系统内在职员工姓名'],
     ['分配销售', '可留空或选择“待分配”；填写员工时必须是可接收线索的在职员工'],
-    ['标签', '多个标签用英文逗号分隔，例如：重点,高意向'],
     ['查重规则', '系统会按手机号或微信查重；已存在客户或线索时，该行会导入失败'],
     ['使用提醒', '请勿修改模板表头和顺序；导入前删除示例行；仅支持 .xlsx 文件'],
   ]);
@@ -385,7 +366,6 @@ async function createTemplateWorkbook(): Promise<ArrayBuffer> {
       '',
       '',
       '',
-      TEXT.exampleTags,
       TEXT.exampleRemark,
     ],
   ]);
@@ -406,22 +386,9 @@ async function importWorkbook(arrayBuffer: ArrayBuffer): Promise<ApiResponse<Lea
   ensureInit();
   await delay(80);
 
-  // Load one authoritative snapshot before validating any row. If the catalog
-  // cannot be read, abort before the first intake command so a batch is never
-  // partially written against stale browser storage.
-  const catalogResponse = await fetchCustomerTagCatalog('lead', false);
-  if (catalogResponse.code !== 0 || !catalogResponse.data) {
-    return {
-      code: catalogResponse.code,
-      data: null as unknown as LeadBulkImportResult,
-      message: catalogResponse.message || '标签目录加载失败',
-    };
-  }
-  const catalog = catalogResponse.data;
-
   const results: LeadBulkImportRowResult[] = [];
   for (const row of await readRows(arrayBuffer)) {
-    const { errors, payload } = validateRow(row, catalog);
+    const { errors, payload } = validateRow(row);
     const rowName = row.data[TEXT.name] || row.data[TEXT.company] || `Row ${row.rowNumber}`;
 
     if (!payload || errors.length) {

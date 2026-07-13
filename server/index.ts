@@ -308,6 +308,34 @@ app.use('/api/customer-tags', createCustomerTagRouter({
   requireManage: requireStorageAccess,
 }));
 
+app.post('/api/crm-migration/import', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const customers = req.body?.customers;
+  if (!Array.isArray(customers)) {
+    res.status(400).json({ code: 400, data: null, message: 'customers must be an array' });
+    return;
+  }
+
+  const actor = req.currentUser!;
+  if (
+    !hasPermission(actor, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'write')
+    || (customers.length > 0 && !hasPermission(actor, PERMISSION_KEYS.CUSTOMER_CREATE, 'write'))
+  ) {
+    res.status(403).json({ code: 403, data: null, message: 'Forbidden' });
+    return;
+  }
+
+  try {
+    const result = await storageService.importCrmMigration(customers);
+    res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+  } catch (error) {
+    res.status(500).json({
+      code: 500,
+      data: null,
+      message: error instanceof Error ? error.message : 'EC CRM migration import failed',
+    });
+  }
+});
+
 app.post('/api/customers', requireCustomerCreateAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerListService.create(req.body || {}, req.currentUser!);
   res.status(result.code === 0 ? 201 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);

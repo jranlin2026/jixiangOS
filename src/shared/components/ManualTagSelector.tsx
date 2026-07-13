@@ -3,34 +3,33 @@ import { Alert, Autocomplete, Box, Button, Chip, CircularProgress, TextField, Ty
 import { fetchCustomerTagCatalog } from '../../api/customerTagApi';
 import type { CustomerTag, CustomerTagCatalog, CustomerTagGroup } from '../../types/tag';
 import { normalizeManualTagIds, validateManualTagSelection } from '../utils/customerTagPolicy';
-import { createManualTagCatalogCache, type ManualTagCatalogScope } from '../utils/manualTagCatalogCache';
+import { createManualTagCatalogCache } from '../utils/manualTagCatalogCache';
 
-type AssignmentScope = ManualTagCatalogScope;
 type TagOption = CustomerTag & { group: CustomerTagGroup };
+const CUSTOMER_SCOPE = 'customer';
 const emptyCatalog: CustomerTagCatalog = { groups: [], tags: [] };
-const catalogCache = createManualTagCatalogCache((scope) => fetchCustomerTagCatalog(scope, false));
+const catalogCache = createManualTagCatalogCache(() => fetchCustomerTagCatalog(CUSTOMER_SCOPE, false));
 
-export function invalidateManualTagCatalogCache(scope?: AssignmentScope): void {
-  catalogCache.invalidate(scope);
+export function invalidateManualTagCatalogCache(): void {
+  catalogCache.invalidate(CUSTOMER_SCOPE);
 }
 
-function useActiveManualTagCatalog(scope: AssignmentScope) {
-  const [version, setVersion] = useState(() => catalogCache.getGeneration(scope));
+function useActiveManualTagCatalog() {
+  const [version, setVersion] = useState(() => catalogCache.getGeneration(CUSTOMER_SCOPE));
   const [, render] = useState(0);
   useEffect(() => {
-    setVersion(catalogCache.getGeneration(scope));
-    return catalogCache.subscribe(scope, () => {
-      setVersion(catalogCache.getGeneration(scope));
+    setVersion(catalogCache.getGeneration(CUSTOMER_SCOPE));
+    return catalogCache.subscribe(CUSTOMER_SCOPE, () => {
+      setVersion(catalogCache.getGeneration(CUSTOMER_SCOPE));
       render((value) => value + 1);
     });
-  }, [scope]);
-  useEffect(() => { void catalogCache.load(scope); }, [scope, version]);
-  const state = catalogCache.getState(scope);
-  return { ...state, catalog: state.catalog || emptyCatalog, retry: () => catalogCache.load(scope, true) };
+  }, []);
+  useEffect(() => { void catalogCache.load(CUSTOMER_SCOPE); }, [version]);
+  const state = catalogCache.getState(CUSTOMER_SCOPE);
+  return { ...state, catalog: state.catalog || emptyCatalog, retry: () => catalogCache.load(CUSTOMER_SCOPE, true) };
 }
 
 export interface ManualTagSelectorProps {
-  scope: 'lead' | 'customer';
   value: string[];
   onChange: (ids: string[]) => void;
   disabled?: boolean;
@@ -41,9 +40,9 @@ export interface ManualTagSelectorProps {
 const tagColor = (option: TagOption) => option.color || option.group.color || '#64748b';
 
 export const ManualTagSelector: React.FC<ManualTagSelectorProps> = ({
-  scope, value, onChange, disabled = false, includeInactiveSelected = true, legacyNames = [],
+  value, onChange, disabled = false, includeInactiveSelected = true, legacyNames = [],
 }) => {
-  const { catalog, loading, error, retry } = useActiveManualTagCatalog(scope);
+  const { catalog, loading, error, retry } = useActiveManualTagCatalog();
   const [selectionError, setSelectionError] = useState('');
   const options = useMemo<TagOption[]>(() => {
     const groups = new Map(catalog.groups.map((group) => [group.id, group]));
@@ -67,7 +66,7 @@ export const ManualTagSelector: React.FC<ManualTagSelectorProps> = ({
     }
     const nextIds = [...unresolvedIds, ...nextActiveIds];
     if (nextIds.length > 20) { setSelectionError('每条记录最多选择 20 个标签'); return; }
-    const validation = validateManualTagSelection(catalog, scope, nextActiveIds);
+    const validation = validateManualTagSelection(catalog, CUSTOMER_SCOPE, nextActiveIds);
     if (!validation.ok) { setSelectionError(validation.message); return; }
     setSelectionError('');
     onChange(nextIds);
@@ -85,7 +84,7 @@ export const ManualTagSelector: React.FC<ManualTagSelectorProps> = ({
         renderGroup={(params) => <li key={params.key}><Box sx={{ px: 1.5, py: 0.75, display: 'flex', alignItems: 'center', gap: 1, bgcolor: '#f8fafc' }}><Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: options.find((item) => item.group.name === params.group)?.group.color }} /><Typography variant="caption" fontWeight={700}>{params.group}</Typography></Box><ul style={{ padding: 0 }}>{params.children}</ul></li>}
         renderOption={(props, option) => <li {...props} key={option.id}><Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: tagColor(option), mr: 1 }} />{option.name}</li>}
         renderTags={(items, getTagProps) => items.map((option, index) => <Chip {...getTagProps({ index })} key={option.id} size="small" label={option.name} sx={{ borderColor: tagColor(option), color: tagColor(option), maxWidth: '100%' }} variant="outlined" />)}
-        renderInput={(params) => <TextField {...params} label="预设标签" placeholder={selected.length ? '' : '从标签目录中选择'} error={Boolean(selectionError)} helperText={selectionError || '最多选择 20 个标签'} InputProps={{ ...params.InputProps, endAdornment: <>{loading ? <CircularProgress size={18} /> : null}{params.InputProps.endAdornment}</> }} />}
+        renderInput={(params) => <TextField {...params} label="客户标签" placeholder={selected.length ? '' : '从标签目录中选择'} error={Boolean(selectionError)} helperText={selectionError || '最多选择 20 个标签'} InputProps={{ ...params.InputProps, endAdornment: <>{loading ? <CircularProgress size={18} /> : null}{params.InputProps.endAdornment}</> }} />}
       />
       {unresolvedIds.length > 0 && <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mt: 0.75 }}>{unresolvedIds.map((id) => <Chip key={id} size="small" label={`${snapshotById.get(id) || '历史标签'} · 已停用`} onDelete={disabled ? undefined : () => onChange(value.filter((item) => item !== id))} sx={{ color: '#64748b', bgcolor: '#f1f5f9' }} />)}</Box>}
       {historicalNames.length > 0 && <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mt: 0.75 }}>{historicalNames.map((name) => <Chip key={name} size="small" label={`${name} · 历史未归类`} sx={{ color: '#64748b', bgcolor: '#f1f5f9' }} />)}</Box>}
@@ -93,10 +92,10 @@ export const ManualTagSelector: React.FC<ManualTagSelectorProps> = ({
   );
 };
 
-export interface ManualTagDisplayProps { scope: AssignmentScope; ids?: string[]; legacyNames?: string[] }
+export interface ManualTagDisplayProps { ids?: string[]; legacyNames?: string[] }
 
-export const ManualTagDisplay: React.FC<ManualTagDisplayProps> = ({ scope, ids = [], legacyNames = [] }) => {
-  const { catalog, loading, error, retry } = useActiveManualTagCatalog(scope);
+export const ManualTagDisplay: React.FC<ManualTagDisplayProps> = ({ ids = [], legacyNames = [] }) => {
+  const { catalog, loading, error, retry } = useActiveManualTagCatalog();
   if (loading && !catalog.groups.length) return <CircularProgress size={16} />;
   if (error && !catalog.groups.length) return <Alert severity="error" action={<Button size="small" onClick={() => void retry()}>重试</Button>} sx={{ py: 0 }}>标签加载失败</Alert>;
   const groupById = new Map(catalog.groups.map((group) => [group.id, group]));

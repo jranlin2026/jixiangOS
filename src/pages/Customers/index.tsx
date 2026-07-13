@@ -127,7 +127,7 @@ const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[], scope: 
   {
     id: 'tags',
     label: '标签',
-    render: (customer) => <ManualTagDisplay scope="customer" ids={customer.manualTagIds} legacyNames={customer.tags} />,
+    render: (customer) => <ManualTagDisplay ids={customer.manualTagIds} legacyNames={customer.tags} />,
   },
   { id: 'leadSource', label: '线索来源', render: (customer) => formatCustomerSource(customer) },
   { id: 'sourceType', label: '资源归属', render: (customer) => normalizeResourceOwnership(customer.sourceType) },
@@ -609,7 +609,7 @@ const Customers: React.FC = () => {
   return (
     <ModulePage>
       <ModuleHeader
-        title={isPublicPoolScope ? '公海池' : '客户管理'}
+        title={isPublicPoolScope ? '公海池' : '客户列表'}
         description={isPublicPoolScope ? '集中管理已释放客户，支持重新领取和后续跟进。' : '沉淀客户资产、跟进动态和订单关系。'}
         actions={(
           <>

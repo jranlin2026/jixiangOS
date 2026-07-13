@@ -45,7 +45,6 @@ type StoreDraft = {
   processing: boolean;
   record: EcommerceSettlementRecord | null;
   error: string | null;
-  warning: string | null;
 };
 
 type StoreTalentSummaryRow = EcommerceTalentSummaryRow & {
@@ -76,11 +75,6 @@ const metricSx = {
   minHeight: 88,
 } as const;
 
-function currentMonthValue(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-}
-
 function makeStoreDraft(index: number, shippingFee: number): StoreDraft {
   return {
     id: `store-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -93,38 +87,11 @@ function makeStoreDraft(index: number, shippingFee: number): StoreDraft {
     processing: false,
     record: null,
     error: null,
-    warning: null,
   };
 }
 
 function hasStoreRequiredFiles(store: StoreDraft): boolean {
   return store.orderFiles.length > 0 && store.flowFiles.length > 0;
-}
-
-function splitMonths(value: string | number | undefined): string[] {
-  return String(value || '')
-    .split(/[,，、\s]+/)
-    .map((item) => item.trim())
-    .filter((item) => /^\d{4}-\d{2}$/.test(item));
-}
-
-function getRecordFlowMonths(record: EcommerceSettlementRecord): string[] {
-  const overviewRow = record.flowOverviewRows.find((row) => row.metric === '覆盖月份');
-  return splitMonths(overviewRow?.value);
-}
-
-function monthText(months: string[]): string {
-  return months.length ? months.join('、') : '未识别';
-}
-
-function buildMonthWarning(record: EcommerceSettlementRecord, targetMonth: string): string | null {
-  const orderMonths = record.coveredMonths.filter((month) => month && month !== '未识别月份');
-  const flowMonths = getRecordFlowMonths(record);
-  const mismatches: string[] = [];
-  if (!orderMonths.includes(targetMonth)) mismatches.push(`订单明细月份：${monthText(orderMonths)}`);
-  if (!flowMonths.includes(targetMonth)) mismatches.push(`资金流水月份：${monthText(flowMonths)}`);
-  if (!mismatches.length) return null;
-  return `目标结算月份 ${targetMonth} 与上传数据月份不一致，${mismatches.join('；')}。请确认是否上传了正确月份的订单明细和资金流水。`;
 }
 
 function roundMoney(value: number): number {
@@ -233,7 +200,6 @@ function EmptyState({ text }: { text: string }) {
 function StoreStatusChip({ store }: { store: StoreDraft }) {
   if (store.processing) return <Chip size="small" label="生成中" color="primary" />;
   if (store.error) return <Chip size="small" label="表格有误" color="error" />;
-  if (store.warning) return <Chip size="small" label="月份待核对" color="warning" />;
   if (store.record) return <Chip size="small" label="已生成" color="success" />;
   if (hasStoreRequiredFiles(store)) return <Chip size="small" label="可生成" color="warning" />;
   return <Chip size="small" label="待上传" />;
@@ -467,7 +433,6 @@ function ExceptionTable({ rows }: { rows: StoreExceptionRow[] }) {
 const EcommerceSettlement: React.FC = () => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const [config, setConfig] = useState(() => ecommerceSettlementApi.getConfig());
-  const [settlementMonth, setSettlementMonth] = useState(currentMonthValue);
   const [stores, setStores] = useState<StoreDraft[]>(() => [makeStoreDraft(1, ecommerceSettlementApi.getConfig().shippingFee)]);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
   const [resultView, setResultView] = useState<ResultView>('stores');
@@ -521,13 +486,6 @@ const EcommerceSettlement: React.FC = () => {
     setRecentRecords(ecommerceSettlementApi.fetchRecords().slice(0, 6));
   };
 
-  const handleSettlementMonthChange = (month: string) => {
-    setSettlementMonth(month);
-    setStores((prev) => prev.map((store) => (
-      store.record ? { ...store, warning: buildMonthWarning(store.record, month) } : store
-    )));
-  };
-
   const createRecordForStore = async (store: StoreDraft): Promise<EcommerceSettlementRecord> => {
     if (!store.orderFiles[0] || !store.flowFiles.length) {
       throw new Error('请先上传订单明细表和资金流水明细表。');
@@ -545,22 +503,20 @@ const EcommerceSettlement: React.FC = () => {
   const handleGenerateStore = async (storeId: string) => {
     const store = stores.find((item) => item.id === storeId);
     if (!store) return;
-    updateStore(storeId, { processing: true, error: null, warning: null });
+    updateStore(storeId, { processing: true, error: null });
     setMessage(null);
     try {
       const savedConfig = ecommerceSettlementApi.saveConfig({ storeName: store.storeName, shippingFee: store.shippingFee });
       setConfig(savedConfig);
       const record = await createRecordForStore(store);
-      const monthWarning = buildMonthWarning(record, settlementMonth);
-      updateStore(storeId, { processing: false, record, error: null, warning: monthWarning });
+      updateStore(storeId, { processing: false, record, error: null });
       refreshRecentRecords();
-      setMessage({ type: monthWarning ? 'warning' : 'success', text: monthWarning || `${record.storeName} 已生成结算。` });
+      setMessage({ type: 'success', text: `${record.storeName} 已生成结算。` });
     } catch (error) {
       updateStore(storeId, {
         processing: false,
         record: null,
         error: error instanceof Error ? error.message : '结算生成失败',
-        warning: null,
       });
       setMessage({ type: 'error', text: error instanceof Error ? error.message : '结算生成失败' });
     }
@@ -576,34 +532,28 @@ const EcommerceSettlement: React.FC = () => {
     setMessage(null);
     let successCount = 0;
     let errorCount = 0;
-    let warningCount = 0;
     for (const store of targets) {
-      updateStore(store.id, { processing: true, error: null, warning: null });
+      updateStore(store.id, { processing: true, error: null });
       try {
         const record = await createRecordForStore(store);
-        const monthWarning = buildMonthWarning(record, settlementMonth);
         successCount += 1;
-        if (monthWarning) warningCount += 1;
-        updateStore(store.id, { processing: false, record, error: null, warning: monthWarning });
+        updateStore(store.id, { processing: false, record, error: null });
       } catch (error) {
         errorCount += 1;
         updateStore(store.id, {
           processing: false,
           record: null,
           error: error instanceof Error ? error.message : '结算生成失败',
-          warning: null,
         });
       }
     }
     refreshRecentRecords();
     setBatchProcessing(false);
     setMessage({
-      type: errorCount || warningCount ? 'warning' : 'success',
+      type: errorCount ? 'warning' : 'success',
       text: errorCount
         ? `已生成 ${successCount} 个店铺，${errorCount} 个店铺表格有误，请看店铺卡片提示。`
-        : warningCount
-          ? `已生成 ${successCount} 个店铺，其中 ${warningCount} 个店铺月份需要核对。`
-          : `已生成 ${successCount} 个店铺结算。`,
+        : `已生成 ${successCount} 个店铺结算。`,
     });
   };
 
@@ -631,7 +581,7 @@ const EcommerceSettlement: React.FC = () => {
       return;
     }
     const buffer = await ecommerceSettlementApi.createWorkbook(fullRecord);
-    const month = fullRecord.coveredMonths.join('_') || settlementMonth || '未识别月份';
+    const month = fullRecord.coveredMonths.join('_') || '未识别月份';
     downloadBlob(`${fullRecord.storeName}_${month}_电商结算.xlsx`, buffer);
   };
 
@@ -640,13 +590,15 @@ const EcommerceSettlement: React.FC = () => {
       setMessage({ type: 'error', text: '请先生成至少一个店铺结算，再下载全部汇总。' });
       return;
     }
-    const batchName = `${settlementMonth} 电商结算`;
+    const coveredMonths = Array.from(new Set(generatedRecords.flatMap((record) => record.coveredMonths).filter(Boolean)));
+    const month = coveredMonths.join('_') || '未识别月份';
+    const batchName = `${month} 电商结算`;
     const buffer = await ecommerceSettlementApi.createBatchWorkbook({
       batchName,
-      month: settlementMonth,
+      month,
       records: generatedRecords,
     });
-    downloadBlob(`${batchName}_${settlementMonth}_全部店铺汇总.xlsx`, buffer);
+    downloadBlob(`${batchName}_全部店铺汇总.xlsx`, buffer);
   };
 
   return (
@@ -676,16 +628,8 @@ const EcommerceSettlement: React.FC = () => {
         <Paper sx={{ border: `1px solid ${moduleTokens.line}`, borderRadius: 1, boxShadow: 'none', px: 1.5, py: 1.25 }}>
           <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', lg: 'center' }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 900, color: moduleTokens.ink, minWidth: 72 }}>
-              结算参数
+              默认设置
             </Typography>
-            <TextField
-              label="目标月份"
-              type="month"
-              size="small"
-              value={settlementMonth}
-              onChange={(event) => handleSettlementMonthChange(event.target.value)}
-              sx={{ width: { xs: '100%', lg: 180 }, bgcolor: '#fff' }}
-            />
             <TextField
               label="新增店铺默认运费"
               type="number"
@@ -699,7 +643,7 @@ const EcommerceSettlement: React.FC = () => {
               sx={{ width: { xs: '100%', lg: 190 }, bgcolor: '#fff' }}
             />
             <Typography variant="caption" sx={{ color: moduleTokens.muted }}>
-              生成时会核对订单明细月份和资金流水月份；每个店铺运费可在店铺卡片单独改。
+              结算月份以上传的订单和资金流水数据为准；每个店铺运费可在店铺卡片单独改。
             </Typography>
           </Stack>
         </Paper>
@@ -767,7 +711,7 @@ const EcommerceSettlement: React.FC = () => {
             </Stack>
           </Paper>
 
-          <Paper sx={{ border: `1px solid ${selectedStore?.error ? moduleTokens.red : selectedStore?.warning ? moduleTokens.amber : moduleTokens.line}`, borderRadius: 1, boxShadow: 'none', p: 2 }}>
+          <Paper sx={{ border: `1px solid ${selectedStore?.error ? moduleTokens.red : moduleTokens.line}`, borderRadius: 1, boxShadow: 'none', p: 2 }}>
             {selectedStore ? (
               <Stack spacing={1.5}>
                 <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', lg: 'center' }}>
@@ -775,7 +719,7 @@ const EcommerceSettlement: React.FC = () => {
                     label="店铺名称"
                     size="small"
                     value={selectedStore.storeName}
-                    onChange={(event) => updateStore(selectedStore.id, { storeName: event.target.value, record: null, error: null, warning: null })}
+                    onChange={(event) => updateStore(selectedStore.id, { storeName: event.target.value, record: null, error: null })}
                     sx={{ width: { xs: '100%', lg: 240 }, bgcolor: '#fff' }}
                   />
                   <TextField
@@ -783,7 +727,7 @@ const EcommerceSettlement: React.FC = () => {
                     size="small"
                     type="number"
                     value={selectedStore.shippingFee}
-                    onChange={(event) => updateStore(selectedStore.id, { shippingFee: Number(event.target.value), record: null, error: null, warning: null })}
+                    onChange={(event) => updateStore(selectedStore.id, { shippingFee: Number(event.target.value), record: null, error: null })}
                     inputProps={{ min: 0, step: 0.1 }}
                     sx={{ width: { xs: '100%', lg: 170 }, bgcolor: '#fff' }}
                   />
@@ -813,13 +757,12 @@ const EcommerceSettlement: React.FC = () => {
                 ) : null}
 
                 <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
-                  <FilePicker label="订单明细表" files={selectedStore.orderFiles} required hint="包含主订单编号、子订单编号、订单提交时间、订单应付金额" disabled={selectedStore.processing} onChange={(files) => updateStore(selectedStore.id, { orderFiles: files.slice(0, 1), record: null, error: null, warning: null })} />
-                  <FilePicker label="资金流水明细表" files={selectedStore.flowFiles} required multiple hint="包含动账时间、方向、金额、订单号或子订单号" disabled={selectedStore.processing} onChange={(files) => updateStore(selectedStore.id, { flowFiles: files, record: null, error: null, warning: null })} />
-                  <FilePicker label="商品成本明细表" files={selectedStore.productCostFiles} hint="可选，按商家编码匹配产品成本" disabled={selectedStore.processing} onChange={(files) => updateStore(selectedStore.id, { productCostFiles: files.slice(0, 1), record: null, error: null, warning: null })} />
-                  <FilePicker label="运费险明细表" files={selectedStore.freightFiles} multiple hint="可选，只统计保费状态为已扣减" disabled={selectedStore.processing} onChange={(files) => updateStore(selectedStore.id, { freightFiles: files, record: null, error: null, warning: null })} />
+                  <FilePicker label="订单明细表" files={selectedStore.orderFiles} required hint="包含主订单编号、子订单编号、订单提交时间、订单应付金额" disabled={selectedStore.processing} onChange={(files) => updateStore(selectedStore.id, { orderFiles: files.slice(0, 1), record: null, error: null })} />
+                  <FilePicker label="资金流水明细表" files={selectedStore.flowFiles} required multiple hint="包含动账时间、方向、金额、订单号或子订单号" disabled={selectedStore.processing} onChange={(files) => updateStore(selectedStore.id, { flowFiles: files, record: null, error: null })} />
+                  <FilePicker label="商品成本明细表" files={selectedStore.productCostFiles} hint="可选，按商家编码匹配产品成本" disabled={selectedStore.processing} onChange={(files) => updateStore(selectedStore.id, { productCostFiles: files.slice(0, 1), record: null, error: null })} />
+                  <FilePicker label="运费险明细表" files={selectedStore.freightFiles} multiple hint="可选，只统计保费状态为已扣减" disabled={selectedStore.processing} onChange={(files) => updateStore(selectedStore.id, { freightFiles: files, record: null, error: null })} />
                 </Box>
                 {selectedStore.error ? <Alert severity="error">{selectedStore.error}</Alert> : null}
-                {selectedStore.warning ? <Alert severity="warning">{selectedStore.warning}</Alert> : null}
               </Stack>
             ) : <EmptyState text="请先添加店铺。" />}
           </Paper>

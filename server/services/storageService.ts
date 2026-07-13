@@ -10,6 +10,8 @@ type StoragePrisma = StorageTransaction & Pick<PrismaClient, '$transaction' | 'u
 const STORAGE_KEY_PATTERN = /^aaos_[a-zA-Z0-9_:-]+$/;
 const BUSINESS_RECORD_ID_MAX_LENGTH = 160;
 const BUSINESS_RECORD_RECORD_ID_MAX_LENGTH = 80;
+const CRM_MIGRATION_BATCH_SIZE = 250;
+const CRM_MIGRATION_TRANSACTION_TIMEOUT_MS = 120_000;
 const STRUCTURED_KEYS = new Set<string>([STORAGE_KEYS.LEADS]);
 const BUSINESS_RECORD_KEYS = new Set<string>([
   STORAGE_KEYS.CUSTOMERS,
@@ -57,6 +59,15 @@ function compactIdentifier(value: string, maxLength: number): string {
 
 function normalizeLead(value: unknown): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
+}
+
+function normalizeCustomerPhone(value: unknown): string {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.length > 11 && digits.startsWith('86') ? digits.slice(-11) : digits;
+}
+
+function normalizeCustomerWechat(value: unknown): string {
+  return String(value || '').trim().toLowerCase();
 }
 
 function mapLeadRow(row: { data: unknown }) {
@@ -299,6 +310,53 @@ export function createStorageService(prisma: StoragePrisma) {
     return success(value);
   };
 
+  const importCrmMigration = async (customers: unknown) => {
+    if (!Array.isArray(customers)) return failure(`${STORAGE_KEYS.CUSTOMERS} must be an array`, 400);
+
+    return prisma.$transaction(async (tx) => {
+      const existingRows = await tx.businessRecord.findMany({ where: { domain: STORAGE_KEYS.CUSTOMERS } });
+      const phones = new Set<string>();
+      const wechats = new Set<string>();
+      existingRows.forEach((row) => {
+        const customer = normalizeLead((row as { data: unknown }).data);
+        const phone = normalizeCustomerPhone(customer.phone);
+        const wechat = normalizeCustomerWechat(customer.wechat);
+        if (phone) phones.add(phone);
+        if (wechat) wechats.add(wechat);
+      });
+
+      const accepted: Array<{ item: Record<string, any>; recordId: string }> = [];
+      let skippedDuplicates = 0;
+      customers.forEach((entry, index) => {
+        const item = normalizeLead(entry);
+        const phone = normalizeCustomerPhone(item.phone);
+        const wechat = normalizeCustomerWechat(item.wechat);
+        if ((phone && phones.has(phone)) || (wechat && wechats.has(wechat))) {
+          skippedDuplicates += 1;
+          return;
+        }
+        if (phone) phones.add(phone);
+        if (wechat) wechats.add(wechat);
+        accepted.push({ item, recordId: toRecordId(STORAGE_KEYS.CUSTOMERS, item, index) });
+      });
+
+      for (let batchStart = 0; batchStart < accepted.length; batchStart += CRM_MIGRATION_BATCH_SIZE) {
+        const batch = accepted.slice(batchStart, batchStart + CRM_MIGRATION_BATCH_SIZE);
+        await tx.businessRecord.createMany({
+          data: batch.map(({ item, recordId }) => {
+            return businessRecordCreate(STORAGE_KEYS.CUSTOMERS, recordId, item);
+          }),
+          skipDuplicates: true,
+        });
+      }
+
+      return success({
+        createdIds: accepted.map(({ item }) => String(item.id || '')).filter(Boolean),
+        skippedDuplicates,
+      });
+    }, { timeout: CRM_MIGRATION_TRANSACTION_TIMEOUT_MS });
+  };
+
   return {
     async list() {
       const rows = await prisma.appStorage.findMany({ orderBy: { key: 'asc' } });
@@ -331,6 +389,8 @@ export function createStorageService(prisma: StoragePrisma) {
       });
       return success(row.value);
     },
+
+    importCrmMigration,
 
     async remove(key: string) {
       if (!STORAGE_KEY_PATTERN.test(key)) return failure('invalid storage key', 400);

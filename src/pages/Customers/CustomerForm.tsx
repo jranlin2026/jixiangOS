@@ -22,7 +22,6 @@ import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/util
 import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 import useAuthStore from '../../store/useAuthStore';
-import ManualTagSelector from '../../shared/components/ManualTagSelector';
 
 interface CustomerFormProps {
   open: boolean;
@@ -334,9 +333,6 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
             <MenuItem value="">无</MenuItem>
             {userOptions}
           </TextField>
-          <Box sx={{ gridColumn: '1 / -1', minWidth: 0 }}>
-            <ManualTagSelector scope="customer" value={form.manualTagIds} onChange={(manualTagIds) => setForm({ ...form, manualTagIds })} disabled={submitting} includeInactiveSelected legacyNames={customer?.tags} />
-          </Box>
           <TextField label="备注" value={form.remark} onChange={handleChange('remark')} fullWidth multiline minRows={3} sx={{ gridColumn: '1 / -1' }} />
         </Box>
       </DialogContent>

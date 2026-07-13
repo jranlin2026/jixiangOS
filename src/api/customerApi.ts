@@ -14,7 +14,7 @@ import { filterVisibleCustomers } from '../shared/utils/dataVisibility';
 import { applyContactEditLock } from '../shared/utils/contactEditLock';
 import { isSuperAdminRoleName } from '../shared/utils/roles';
 import { getPhoneNumberError, normalizePhoneForComparison, normalizePhoneForStorage } from '../shared/utils/phoneNumber';
-import type { CustomerTagCatalog } from '../types/tag';
+import type { CustomerTag, CustomerTagCatalog } from '../types/tag';
 import { groupTagIdsForFilter, normalizeManualTagIds, validateCustomerTagFilters } from '../shared/utils/customerTagPolicy';
 
 function ensureInit(): void {
@@ -151,7 +151,7 @@ const CUSTOMER_CHANGE_FIELDS: Array<{ field: keyof Customer; label: string }> = 
   { field: 'leadSource', label: '线索来源' },
   { field: 'industry', label: '行业' },
   { field: 'city', label: '城市' },
-  { field: 'tags', label: '客户标签' },
+  { field: 'manualTagIds', label: '客户标签' },
   { field: 'remark', label: '备注' },
   { field: 'sourceType', label: '资源归属' },
   { field: 'sourceName', label: '来源名称' },
@@ -177,7 +177,6 @@ const CUSTOMER_TO_LEAD_FIELDS: Array<{
   { customerField: 'leadInputBy', leadField: 'inputBy', label: '线索录入人' },
   { customerField: 'leadContributorId', leadField: 'leadContributorId', label: '线索贡献人' },
   { customerField: 'leadContributorName', leadField: 'leadContributorName', label: '线索贡献人' },
-  { customerField: 'tags', leadField: 'tags', label: '标签' },
   { customerField: 'remark', leadField: 'remark', label: '备注' },
   { customerField: 'score', leadField: 'score', label: '线索评分' },
 ];
@@ -524,10 +523,22 @@ async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiR
   if (Object.prototype.hasOwnProperty.call(safeData, 'phone')) {
     safeData.phone = normalizePhoneForStorage(safeData.phone);
   }
+  let tagNamesById: Map<string, string> | null = null;
+  if (Object.prototype.hasOwnProperty.call(safeData, 'manualTagIds')) {
+    const tags = getStorageData<CustomerTag[]>(STORAGE_KEYS.TAGS) || [];
+    tagNamesById = new Map(tags.map((tag) => [tag.id, tag.name]));
+    safeData.manualTagIds = normalizeManualTagIds(safeData.manualTagIds || []);
+    safeData.tags = safeData.manualTagIds.map((id) => tagNamesById!.get(id) || '历史标签');
+  }
   const merged = { ...existing, ...safeData, sourceType: normalizeResourceOwnership(safeData.sourceType || existing.sourceType) };
   const validationError = validateCustomerAttribution(merged);
   if (validationError) return createErrorResponse(validationError);
   const changes = buildCustomerChanges(existing, safeData);
+  const tagChange = changes?.find((change) => change.field === 'manualTagIds');
+  if (tagChange && tagNamesById) {
+    tagChange.oldValue = formatActivityValue((existing.manualTagIds || []).map((id) => tagNamesById!.get(id) || '历史标签'));
+    tagChange.newValue = formatActivityValue((safeData.manualTagIds || []).map((id) => tagNamesById!.get(id) || '历史标签'));
+  }
   const operator = getCurrentOperatorName(existing.owner);
   const activityType = safeData.owner && safeData.owner !== existing.owner ? 'transfer' : 'update';
   customers[idx] = {
@@ -535,7 +546,7 @@ async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiR
     activityRecords: changes?.length
       ? [createActivity({
         type: activityType,
-        title: activityType === 'transfer' ? `转交客户给 ${data.owner}` : `更新了 ${changes.map((item) => item.label).join('、')}`,
+        title: activityType === 'transfer' ? `转交客户给 ${data.owner}` : changes.length === 1 && tagChange ? '更新了客户标签' : `更新了 ${changes.map((item) => item.label).join('、')}`,
         operator,
         changes,
         createdAt: now,

@@ -54,7 +54,7 @@ const appSource = readFileSync(join(projectRoot, 'src/App.tsx'), 'utf8');
 const sidebarSource = readFileSync(join(projectRoot, 'src/layouts/Sidebar.tsx'), 'utf8');
 const deliverySource = readFileSync(join(projectRoot, 'src/pages/Delivery/index.tsx'), 'utf8');
 const rolePermissionSource = readFileSync(join(projectRoot, 'src/pages/Settings/RolePermission.tsx'), 'utf8');
-const dataMaintenanceSource = readFileSync(join(projectRoot, 'src/pages/Settings/DataMaintenance.tsx'), 'utf8');
+const settingsSource = readFileSync(join(projectRoot, 'src/pages/Settings/index.tsx'), 'utf8');
 const commissionSource = readFileSync(join(projectRoot, 'src/pages/Commission/index.tsx'), 'utf8');
 const commissionRuleConfigSource = readFileSync(join(projectRoot, 'src/pages/Commission/CommissionRuleConfig.tsx'), 'utf8');
 const financeSource = readFileSync(join(projectRoot, 'src/pages/Finance/index.tsx'), 'utf8');
@@ -149,10 +149,15 @@ assert.match(
   /await alert\(/,
   'Create/edit employee validation and save failures should use app dialog alerts instead of inline page-level errors.',
 );
+assert.doesNotMatch(
+  settingsSource,
+  /DataMaintenance|数据维护/,
+  'System maintenance must not expose the obsolete local data-maintenance tab.',
+);
 assert.match(
-  dataMaintenanceSource,
-  /重新同步本机缓存[\s\S]*resyncLocalCacheFromBackend|resyncLocalCacheFromBackend[\s\S]*重新同步本机缓存/,
-  'Data maintenance should expose a safe local-cache resync action backed by the server snapshot API.',
+  settingsSource,
+  /CrmMigration/,
+  'Removing local data maintenance must keep the EC CRM migration entry available.',
 );
 assert.doesNotMatch(
   userSaveSource,

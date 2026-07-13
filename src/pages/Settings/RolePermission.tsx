@@ -194,7 +194,7 @@ const PERMISSION_TREE: PermissionNode[] = [
         label: '系统维护',
         children: [
           { label: 'AI大脑', key: PERMISSION_KEYS.SETTINGS_AI_CONFIG },
-          { label: '数据维护', key: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE },
+          { label: '业务回收与CRM迁移', key: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE },
         ],
       },
     ],

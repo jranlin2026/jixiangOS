@@ -19,6 +19,9 @@ assert.match(pageSource, /店铺利润/);
 assert.match(pageSource, /达人利润/);
 assert.match(pageSource, /异常核对/);
 assert.match(pageSource, /资金流水明细核对/);
+assert.doesNotMatch(pageSource, /目标月份/);
+assert.doesNotMatch(pageSource, /buildMonthWarning/);
+assert.doesNotMatch(pageSource, /月份待核对/);
 
 const financeRole = DEFAULT_ROLES.find((role) => role.code === 'finance_specialist');
 const opsRole = DEFAULT_ROLES.find((role) => role.code === 'ops_admin');
