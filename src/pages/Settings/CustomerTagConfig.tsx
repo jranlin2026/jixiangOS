@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent,
   Divider, FormControl, FormControlLabel, InputLabel, List, ListItemButton, ListItemText,
-  MenuItem, Paper, Select, Stack, Switch, TextField, Tooltip, Typography,
+  IconButton, Menu, MenuItem, Paper, Select, Stack, Switch, TextField, Tooltip, Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
@@ -10,6 +10,7 @@ import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import EditIcon from '@mui/icons-material/Edit';
 import MergeIcon from '@mui/icons-material/Merge';
 import SyncIcon from '@mui/icons-material/Sync';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
 import {
   applyCustomerTagMigration, createCustomerTag, createCustomerTagGroup,
   deleteCustomerTag, deleteCustomerTagGroup,
@@ -52,6 +53,7 @@ const CustomerTagConfig: React.FC = () => {
   const [preview, setPreview] = useState<CustomerTagMigrationPreview | null>(null);
   const [confirmation, setConfirmation] = useState('');
   const [migrationError, setMigrationError] = useState('');
+  const [actionMenu, setActionMenu] = useState<{ anchor: HTMLElement; kind: 'group' | 'tag'; item: CustomerTagGroup | CustomerTag } | null>(null);
   const [showInactive, setShowInactive] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ kind: 'tag' | 'group'; id: string; name: string } | null>(null);
 
@@ -176,7 +178,7 @@ const CustomerTagConfig: React.FC = () => {
       </Stack>
       {!canManage && <Alert severity="info" sx={{ mb: 2 }}>当前账号可查看标签目录；仅超级管理员可以新增、编辑、启停、合并或整理历史标签。</Alert>}
       {error && <Alert severity="error" onClose={() => setError('')} sx={{ mb: 2 }}>{error}</Alert>}
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '280px minmax(0, 1fr)' }, gap: 2 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '300px minmax(0, 1fr)' }, gap: 2 }}>
         <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2, py: 1.5 }}>
             <Typography sx={{ fontWeight: 700 }}>标签分组</Typography>
@@ -185,12 +187,12 @@ const CustomerTagConfig: React.FC = () => {
           <Divider />
           {groups.length === 0 ? <Typography variant="body2" sx={{ p: 3, textAlign: 'center', color: '#94a3b8' }}>暂无标签分组</Typography> : (
             <List disablePadding>{groups.map((group) => (
-              <ListItemButton key={group.id} selected={group.id === selectedGroupId} onClick={() => setSelectedGroupId(group.id)} sx={{ gap: 1, borderBottom: '1px solid #f1f5f9' }}>
+              <ListItemButton key={group.id} selected={group.id === selectedGroupId} onClick={() => setSelectedGroupId(group.id)} sx={{ gap: 1, minWidth: 0, py: 1.25, borderBottom: '1px solid #f1f5f9' }}>
                 <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: group.color, flex: '0 0 auto' }} />
-                <ListItemText primary={group.name} secondary={`${group.selectionMode === 'single' ? '单选' : '多选'}${group.isActive ? '' : ' · 已停用'}`} primaryTypographyProps={{ fontWeight: 600 }} />
+                <ListItemText sx={{ minWidth: 0, my: 0, '& .MuiListItemText-primary': { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }} primary={group.name} secondary={`${group.selectionMode === 'single' ? '单选' : '多选'}${group.isActive ? '' : ' · 已停用'}`} primaryTypographyProps={{ fontWeight: 600 }} />
                 {canManage && <Tooltip title="编辑分组"><Button size="small" onClick={(event) => { event.stopPropagation(); openGroup(group); }}><EditIcon fontSize="small" /></Button></Tooltip>}
                 {canManage && group.isActive && <Tooltip title="合并分组"><Button size="small" onClick={(event) => { event.stopPropagation(); setDialogError(''); setMergeGroupSource(group); setMergeGroupTargetId(''); }}><MergeIcon fontSize="small" /></Button></Tooltip>}
-                {canManage && !catalog.tags.some((tag) => tag.groupId === group.id) && <Button size="small" color="error" onClick={(event) => { event.stopPropagation(); setDeleteTarget({ kind: 'group', id: group.id, name: group.name }); }}>删除</Button>}
+                {canManage && <IconButton size="small" aria-label="分组操作" onClick={(event) => { event.stopPropagation(); setActionMenu({ anchor: event.currentTarget, kind: 'group', item: group }); }}><MoreVertIcon fontSize="small" /></IconButton>}
               </ListItemButton>
             ))}</List>
           )}
@@ -207,21 +209,32 @@ const CustomerTagConfig: React.FC = () => {
             </Stack>
             <Divider />
             {tags.length === 0 ? <Typography variant="body2" sx={{ py: 7, textAlign: 'center', color: '#94a3b8' }}>该分组暂无标签</Typography> : tags.map((tag, index) => (
-              <Stack key={tag.id} direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'stretch', sm: 'center' }} spacing={1} sx={{ py: 1.25, borderBottom: '1px solid #f1f5f9', opacity: tag.isActive ? 1 : 0.58 }}>
-                <Chip label={tag.name} size="small" sx={{ bgcolor: `${tag.color || selectedGroup.color}18`, color: tag.color || selectedGroup.color, border: `1px solid ${tag.color || selectedGroup.color}55`, alignSelf: { xs: 'flex-start', sm: 'center' } }} />
+              <Stack key={tag.id} direction="row" alignItems="center" spacing={1} sx={{ py: 1.25, minWidth: 0, borderBottom: '1px solid #f1f5f9', opacity: tag.isActive ? 1 : 0.58 }}>
+                <Chip label={tag.name} size="small" sx={{ maxWidth: { xs: 150, sm: 260 }, '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' }, bgcolor: `${tag.color || selectedGroup.color}18`, color: tag.color || selectedGroup.color, border: `1px solid ${tag.color || selectedGroup.color}55` }} />
                 <Typography variant="caption" sx={{ color: '#64748b', flex: 1 }}>使用 {tag.usageCount} 次 · 排序 {tag.sortOrder}</Typography>
                 <Button size="small" disabled={!canManage || index === 0 || saving} onClick={() => moveTag(tag, -1)}><ArrowUpwardIcon fontSize="small" /></Button>
                 <Button size="small" disabled={!canManage || index === tags.length - 1 || saving} onClick={() => moveTag(tag, 1)}><ArrowDownwardIcon fontSize="small" /></Button>
-                <Button size="small" disabled={!canManage} onClick={() => openTag(tag)}>编辑</Button>
-                <Button size="small" disabled={!canManage || !tag.isActive || !catalog.tags.some((target) => target.groupId === tag.groupId && target.id !== tag.id && target.isActive)} startIcon={<MergeIcon />} onClick={() => { setDialogError(''); setMergeSource(tag); setMergeTargetId(''); }}>合并标签</Button>
-                <Button size="small" color={tag.isActive ? 'warning' : 'success'} disabled={!canManage || saving} onClick={() => void runMutation(() => updateCustomerTag(tag.id, { isActive: !tag.isActive }))}>{tag.isActive ? '停用' : '启用'}</Button>
-                {canManage && tag.usageCount === 0 && <Button size="small" color="error" disabled={saving} onClick={() => setDeleteTarget({ kind: 'tag', id: tag.id, name: tag.name })}>删除</Button>}
+                {canManage && <IconButton size="small" aria-label="标签操作" onClick={(event) => setActionMenu({ anchor: event.currentTarget, kind: 'tag', item: tag })}><MoreVertIcon fontSize="small" /></IconButton>}
               </Stack>
             ))}
             <Typography variant="caption" sx={{ display: 'block', mt: 2, color: '#94a3b8' }}>标签保留使用次数，不提供硬删除；不再使用时请停用，重复标签请合并。</Typography>
           </>}
         </Paper>
       </Box>
+
+      <Menu anchorEl={actionMenu?.anchor} open={Boolean(actionMenu)} onClose={() => setActionMenu(null)}>
+        {actionMenu?.kind === 'group' && <>
+          <MenuItem onClick={() => { openGroup(actionMenu.item as CustomerTagGroup); setActionMenu(null); }}><EditIcon fontSize="small" sx={{ mr: 1 }} />编辑分组</MenuItem>
+          {(actionMenu.item as CustomerTagGroup).isActive && <MenuItem onClick={() => { const group = actionMenu.item as CustomerTagGroup; setDialogError(''); setMergeGroupSource(group); setMergeGroupTargetId(''); setActionMenu(null); }}><MergeIcon fontSize="small" sx={{ mr: 1 }} />合并分组</MenuItem>}
+          {!catalog.tags.some((tag) => tag.groupId === actionMenu.item.id) && <MenuItem sx={{ color: 'error.main' }} onClick={() => { const group = actionMenu.item as CustomerTagGroup; setDeleteTarget({ kind: 'group', id: group.id, name: group.name }); setActionMenu(null); }}>删除分组</MenuItem>}
+        </>}
+        {actionMenu?.kind === 'tag' && <>
+          <MenuItem onClick={() => { openTag(actionMenu.item as CustomerTag); setActionMenu(null); }}><EditIcon fontSize="small" sx={{ mr: 1 }} />编辑</MenuItem>
+          {(actionMenu.item as CustomerTag).isActive && catalog.tags.some((target) => target.groupId === (actionMenu.item as CustomerTag).groupId && target.id !== (actionMenu.item as CustomerTag).id && target.isActive) && <MenuItem onClick={() => { const tag = actionMenu.item as CustomerTag; setDialogError(''); setMergeSource(tag); setMergeTargetId(''); setActionMenu(null); }}><MergeIcon fontSize="small" sx={{ mr: 1 }} />合并标签</MenuItem>}
+          <MenuItem onClick={() => { const tag = actionMenu.item as CustomerTag; void runMutation(() => updateCustomerTag(tag.id, { isActive: !tag.isActive })); setActionMenu(null); }}>{(actionMenu.item as CustomerTag).isActive ? '停用' : '启用'}</MenuItem>
+          {(actionMenu.item as CustomerTag).usageCount === 0 && <MenuItem sx={{ color: 'error.main' }} onClick={() => { const tag = actionMenu.item as CustomerTag; setDeleteTarget({ kind: 'tag', id: tag.id, name: tag.name }); setActionMenu(null); }}>删除标签</MenuItem>}
+        </>}
+      </Menu>
 
       <Dialog open={groupDialog} onClose={() => !saving && setGroupDialog(false)} maxWidth="sm" fullWidth>
         <DialogCloseTitle onClose={() => setGroupDialog(false)}>{editingGroup ? '编辑标签分组' : '添加分组'}</DialogCloseTitle>
