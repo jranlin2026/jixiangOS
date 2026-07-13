@@ -12,6 +12,7 @@ import MergeIcon from '@mui/icons-material/Merge';
 import SyncIcon from '@mui/icons-material/Sync';
 import {
   applyCustomerTagMigration, createCustomerTag, createCustomerTagGroup,
+  deleteCustomerTag, deleteCustomerTagGroup,
   fetchCustomerTagCatalog, mergeCustomerTag, mergeCustomerTagGroup, previewCustomerTagMigration,
   reorderCustomerTags, updateCustomerTag, updateCustomerTagGroup,
 } from '../../api/customerTagApi';
@@ -51,12 +52,14 @@ const CustomerTagConfig: React.FC = () => {
   const [preview, setPreview] = useState<CustomerTagMigrationPreview | null>(null);
   const [confirmation, setConfirmation] = useState('');
   const [migrationError, setMigrationError] = useState('');
+  const [showInactive, setShowInactive] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ kind: 'tag' | 'group'; id: string; name: string } | null>(null);
 
   const loadCatalog = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const response = await fetchCustomerTagCatalog('all', true);
+      const response = await fetchCustomerTagCatalog('all', showInactive);
       if (response.code !== 0) throw new Error(response.message || '客户标签加载失败');
       setCatalog(response.data);
       setSelectedGroupId((current) => response.data.groups.some((group) => group.id === current) ? current : response.data.groups[0]?.id || '');
@@ -65,7 +68,7 @@ const CustomerTagConfig: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showInactive]);
 
   useEffect(() => { void loadCatalog(); }, [loadCatalog]);
 
@@ -130,6 +133,10 @@ const CustomerTagConfig: React.FC = () => {
       if (!succeeded) await loadCatalog();
     })();
   };
+  const confirmDelete = () => deleteTarget && runMutation(
+    () => deleteTarget.kind === 'tag' ? deleteCustomerTag(deleteTarget.id) : deleteCustomerTagGroup(deleteTarget.id),
+    () => setDeleteTarget(null),
+  );
   const openMigration = async () => {
     setMigrationOpen(true); setPreview(null); setConfirmation(''); setSaving(true); setMigrationError('');
     try {
@@ -165,7 +172,7 @@ const CustomerTagConfig: React.FC = () => {
           <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>人工标签</Typography>
           <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>按分组维护标签；客户生命周期请在现有“客户生命周期”页配置，不重复作为人工标签。</Typography>
         </Box>
-        <Button startIcon={<SyncIcon />} variant="outlined" disabled={!canManage} onClick={() => void openMigration()}>整理历史标签</Button>
+        <Stack direction="row" spacing={1} alignItems="center"><FormControlLabel control={<Switch size="small" checked={showInactive} onChange={(event) => setShowInactive(event.target.checked)} />} label="显示已停用" /><Button startIcon={<SyncIcon />} variant="outlined" disabled={!canManage} onClick={() => void openMigration()}>整理历史标签</Button></Stack>
       </Stack>
       {!canManage && <Alert severity="info" sx={{ mb: 2 }}>当前账号可查看标签目录；仅超级管理员可以新增、编辑、启停、合并或整理历史标签。</Alert>}
       {error && <Alert severity="error" onClose={() => setError('')} sx={{ mb: 2 }}>{error}</Alert>}
@@ -183,6 +190,7 @@ const CustomerTagConfig: React.FC = () => {
                 <ListItemText primary={group.name} secondary={`${group.selectionMode === 'single' ? '单选' : '多选'}${group.isActive ? '' : ' · 已停用'}`} primaryTypographyProps={{ fontWeight: 600 }} />
                 {canManage && <Tooltip title="编辑分组"><Button size="small" onClick={(event) => { event.stopPropagation(); openGroup(group); }}><EditIcon fontSize="small" /></Button></Tooltip>}
                 {canManage && group.isActive && <Tooltip title="合并分组"><Button size="small" onClick={(event) => { event.stopPropagation(); setDialogError(''); setMergeGroupSource(group); setMergeGroupTargetId(''); }}><MergeIcon fontSize="small" /></Button></Tooltip>}
+                {canManage && !catalog.tags.some((tag) => tag.groupId === group.id) && <Button size="small" color="error" onClick={(event) => { event.stopPropagation(); setDeleteTarget({ kind: 'group', id: group.id, name: group.name }); }}>删除</Button>}
               </ListItemButton>
             ))}</List>
           )}
@@ -207,6 +215,7 @@ const CustomerTagConfig: React.FC = () => {
                 <Button size="small" disabled={!canManage} onClick={() => openTag(tag)}>编辑</Button>
                 <Button size="small" disabled={!canManage || !tag.isActive || !catalog.tags.some((target) => target.groupId === tag.groupId && target.id !== tag.id && target.isActive)} startIcon={<MergeIcon />} onClick={() => { setDialogError(''); setMergeSource(tag); setMergeTargetId(''); }}>合并标签</Button>
                 <Button size="small" color={tag.isActive ? 'warning' : 'success'} disabled={!canManage || saving} onClick={() => void runMutation(() => updateCustomerTag(tag.id, { isActive: !tag.isActive }))}>{tag.isActive ? '停用' : '启用'}</Button>
+                {canManage && tag.usageCount === 0 && <Button size="small" color="error" disabled={saving} onClick={() => setDeleteTarget({ kind: 'tag', id: tag.id, name: tag.name })}>删除</Button>}
               </Stack>
             ))}
             <Typography variant="caption" sx={{ display: 'block', mt: 2, color: '#94a3b8' }}>标签保留使用次数，不提供硬删除；不再使用时请停用，重复标签请合并。</Typography>
@@ -235,6 +244,12 @@ const CustomerTagConfig: React.FC = () => {
 
       <Dialog open={Boolean(mergeSource)} onClose={() => !saving && setMergeSource(null)} maxWidth="xs" fullWidth>
         <DialogCloseTitle onClose={() => setMergeSource(null)}>合并标签</DialogCloseTitle><DialogContent>{dialogError && <Alert severity="error" sx={{ mb: 2 }}>{dialogError}</Alert>}<Alert severity="warning" sx={{ mb: 2 }}>“{mergeSource?.name}”的引用将迁移至目标标签，源标签随后停用。</Alert><FormControl fullWidth><InputLabel>目标标签</InputLabel><Select label="目标标签" value={mergeTargetId} onChange={(e) => setMergeTargetId(e.target.value)}>{compatibleTargets.map((tag) => <MenuItem key={tag.id} value={tag.id}>{tag.name}</MenuItem>)}</Select></FormControl></DialogContent><DialogActions><Button onClick={() => setMergeSource(null)}>取消</Button><Button variant="contained" disabled={!mergeSource || !mergeTargetId || saving} onClick={() => mergeSource && void runMutation(() => mergeCustomerTag(mergeSource.id, mergeTargetId), () => setMergeSource(null), setDialogError)}>确认合并</Button></DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteTarget)} onClose={() => !saving && setDeleteTarget(null)} maxWidth="xs" fullWidth>
+        <DialogCloseTitle onClose={() => setDeleteTarget(null)}>确认删除</DialogCloseTitle>
+        <DialogContent><Alert severity="warning">{deleteTarget?.kind === 'tag' ? '使用 0 次的标签才可以永久删除，删除后不可恢复。' : '没有标签的分组才可以永久删除，删除后不可恢复。'}</Alert><Typography sx={{ mt: 2 }}>确定删除“{deleteTarget?.name}”吗？</Typography></DialogContent>
+        <DialogActions><Button onClick={() => setDeleteTarget(null)}>取消</Button><Button color="error" variant="contained" disabled={saving} onClick={() => void confirmDelete()}>永久删除</Button></DialogActions>
       </Dialog>
 
       <Dialog open={Boolean(mergeGroupSource)} onClose={() => !saving && setMergeGroupSource(null)} maxWidth="xs" fullWidth>
