@@ -138,12 +138,15 @@ async function assignmentRecords(tx: any): Promise<AssignmentRecord[]> {
     tx.businessRecord.findMany({ where: { domain: { in: [STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.LEADS] } } }),
     tx.leadRecord.findMany(),
   ]);
-  const fromBusiness = businessRows.map((row: any) => ({
+  const canonicalLeadIds = new Set(leadRows.map((row: any) => String(row.id || object(row.data).id)));
+  const fromBusiness = businessRows.filter((row: any) => row.domain === STORAGE_KEYS.CUSTOMERS || (
+    !isDeleted(row) && !canonicalLeadIds.has(String(row.recordId || object(row.data).id))
+  )).map((row: any) => ({
     kind: row.domain === STORAGE_KEYS.CUSTOMERS ? 'customer' as const : 'lead' as const,
     id: String(row.recordId || object(row.data).id || ''),
     manualTagIds: Array.isArray(object(row.data).manualTagIds) ? object(row.data).manualTagIds.map(String) : [],
   }));
-  const fromLeads = leadRows.map((row: any) => ({
+  const fromLeads = leadRows.filter((row: any) => !isDeleted(row)).map((row: any) => ({
     kind: 'lead' as const,
     id: String(row.id || object(row.data).id || ''),
     manualTagIds: Array.isArray(object(row.data).manualTagIds) ? object(row.data).manualTagIds.map(String) : [],

@@ -234,6 +234,12 @@ const supersededLegacyTagId = (supersededLegacyTag.data as any).id;
 prisma.seed(STORAGE_KEYS.LEADS, { id: 'legacy-owned-by-deleted-canonical', manualTagIds: [supersededLegacyTagId] });
 prisma.seedLead({ id: 'legacy-owned-by-deleted-canonical', manualTagIds: [], deletedAt: '2026-07-13T00:00:00.000Z' });
 assert.equal((await loadCustomerTagCatalog(prisma as any, true)).tags.find((tag) => tag.id === supersededLegacyTagId)?.usageCount, 0, '任意 canonical LeadRecord（包括已删除记录）都必须接管同 ID legacy 引用');
+const supersededScopeGroup = await service.createGroup({ ...validGroup, name: '已接管旧线索分组', scope: 'both' }, superAdmin);
+const supersededScopeGroupId = (supersededScopeGroup.data as any).id;
+const supersededScopeTag = await service.createTag({ groupId: supersededScopeGroupId, name: '已接管旧线索标签' }, superAdmin);
+prisma.seed(STORAGE_KEYS.LEADS, { id: 'scope-owned-by-deleted-canonical', manualTagIds: [(supersededScopeTag.data as any).id] });
+prisma.seedLead({ id: 'scope-owned-by-deleted-canonical', manualTagIds: [], deletedAt: '2026-07-13T00:00:00.000Z' });
+assert.equal((await service.updateGroup(supersededScopeGroupId, { scope: 'customer' }, superAdmin)).code, 0, '被 canonical 线索接管的旧线索不得阻止作用域更新');
 
 const unused = await service.createTag({ groupId, name: '可删除标签' }, superAdmin);
 assert.equal((await service.deleteTag((unused.data as any).id, salesUser)).code, 403);
