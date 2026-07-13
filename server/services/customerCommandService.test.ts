@@ -772,13 +772,13 @@ const serviceOptions = {
   });
   const service = createCustomerCommandService(fake.prisma, serviceOptions);
 
-  const denied = await service.assignOwner('cust-assign', '外部销售', '越部门分配', manager);
+  const denied = await service.assignOwner('cust-assign', 'user-c', '越部门分配', manager);
   assert.equal(denied.code, 403);
 
-  const nonSales = await service.assignOwner('cust-assign', '财务甲', '错误分配', manager);
+  const nonSales = await service.assignOwner('cust-assign', 'user-finance', '错误分配', manager);
   assert.equal(nonSales.code, 400, '客户不得分配给没有线索接收能力的员工');
 
-  const assigned = await service.assignOwner('cust-assign', '销售乙', '主管调整', manager);
+  const assigned = await service.assignOwner('cust-assign', 'user-b', '主管调整', manager);
   assert.equal(assigned.code, 0);
   assert.equal(assigned.data?.owner, '销售乙');
   const next = fake.getState();
@@ -786,7 +786,7 @@ const serviceOptions = {
   assert.equal(next.leads[0].assignedTo, '销售乙');
 }
 
-// RED: 同名员工无法用现有 owner 姓名字段唯一标识，服务端必须拒绝模糊分配。
+// Stable IDs allow selecting the intended employee even when names are duplicated.
 {
   const duplicateSalesB = {
     ...users.find((user) => user.id === 'user-b')!,
@@ -799,10 +799,11 @@ const serviceOptions = {
     leads: [],
   }, { extraUsers: [duplicateSalesB] });
   const service = createCustomerCommandService(fake.prisma, serviceOptions);
-  const result = await service.assignOwner('cust-duplicate-owner', '销售乙', '同名分配', manager);
+  const result = await service.assignOwner('cust-duplicate-owner', 'user-b', '同名分配', manager);
 
-  assert.equal(result.code, 409);
-  assert.equal(fake.getState().businessRecords[0].owner, salesA.name);
+  assert.equal(result.code, 0);
+  assert.equal(result.data?.ownerId, 'user-b');
+  assert.equal(result.data?.owner, '销售乙');
 }
 
 // RED: 客户资料更新必须逐记录事务写入，由服务端生成操作人和历史，并同步关联线索。

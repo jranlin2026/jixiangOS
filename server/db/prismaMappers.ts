@@ -115,6 +115,7 @@ export function mapPrismaUser(row: {
   passwordHash: string | null;
   passwordSalt: string | null;
   passwordUpdatedAt: NullableDate;
+  mustChangePassword?: boolean;
   lastLoginAt: NullableDate;
   isActive: boolean;
   employmentStatus: string | null;
@@ -135,6 +136,7 @@ export function mapPrismaUser(row: {
     positionId: row.positionId || undefined,
     positionName: row.positionName || undefined,
     roleId: row.roleId || undefined,
+    mustChangePassword: Boolean(row.mustChangePassword),
     lastLoginAt: iso(row.lastLoginAt),
     isActive: row.isActive,
     employmentStatus: (row.employmentStatus || 'active') as User['employmentStatus'],

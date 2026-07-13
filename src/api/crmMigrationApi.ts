@@ -78,13 +78,30 @@ export interface CrmMigrationImportResult {
   };
 }
 
+export interface CustomerOwnerBackfillSummary {
+  totalLegacy: number;
+  resolved: number;
+  unresolved: number;
+  ambiguous: number;
+  publicPool: number;
+  updated: number;
+}
+
+async function previewCustomerOwnerBackfill(): Promise<ApiResponse<CustomerOwnerBackfillSummary>> {
+  return backendRequest<CustomerOwnerBackfillSummary>('/crm-migration/customer-owner-identities/preview');
+}
+
+async function applyCustomerOwnerBackfill(): Promise<ApiResponse<CustomerOwnerBackfillSummary>> {
+  return backendRequest<CustomerOwnerBackfillSummary>('/crm-migration/customer-owner-identities/apply', { method: 'POST' });
+}
+
 type CrmMigrationPersistenceResult = {
   createdIds: string[];
   skippedDuplicates: number;
 };
 
 export interface CrmMigrationExistingData {
-  users?: Array<Pick<User, 'name' | 'isActive' | 'employmentStatus'>>;
+  users?: Array<Pick<User, 'name' | 'isActive' | 'employmentStatus'> & Partial<Pick<User, 'id'>>>;
   leadSourceConfigs?: LeadSourceConfig[];
   tags?: Array<Pick<CustomerTag, 'name' | 'isActive'>>;
 }
@@ -787,6 +804,8 @@ export const crmMigrationApi = {
   importFiles,
   syncLeadSources,
   syncTags,
+  previewCustomerOwnerBackfill,
+  applyCustomerOwnerBackfill,
 };
 
 export const crmMigrationTestUtils = {

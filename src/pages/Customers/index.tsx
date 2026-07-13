@@ -987,7 +987,9 @@ const Customers: React.FC = () => {
                 </MenuItem>
               )}
               {visibleOwnerUsers.map((user) => (
-                <MenuItem key={user.id} value={user.name}>{user.name}</MenuItem>
+                <MenuItem key={user.id} value={user.id}>
+                  {user.name}（{user.positionName || user.account || '未设置职位'}）
+                </MenuItem>
               ))}
             </Select>
           </FormControl>

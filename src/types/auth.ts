@@ -17,6 +17,7 @@ export interface AuthenticatedUser {
   permissions: Permission[];
   isActive: boolean;
   lastLoginAt?: Timestamp;
+  mustChangePassword?: boolean;
 }
 
 export interface LoginPayload {

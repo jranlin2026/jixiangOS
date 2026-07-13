@@ -1,5 +1,5 @@
 import React, { useReducer } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useNavigate } from 'react-router-dom';
 import MenuIcon from '@mui/icons-material/Menu';
 import { Box, IconButton, Typography, useMediaQuery, useTheme } from '@mui/material';
 import Sidebar from './Sidebar';
@@ -11,9 +11,13 @@ import {
   mobileNavigationReducer,
 } from './appShellState';
 import GlobalTableColumnResizer from '../shared/components/GlobalTableColumnResizer';
+import ChangePasswordDialog from '../shared/components/ChangePasswordDialog';
+import useAuthStore from '../store/useAuthStore';
 
 const AppLayout: React.FC = () => {
   const theme = useTheme();
+  const navigate = useNavigate();
+  const { currentUser, logout } = useAuthStore();
   const isDesktop = useMediaQuery(theme.breakpoints.up('md'));
   const [navigationOpen, dispatchNavigation] = useReducer(mobileNavigationReducer, false);
   const shellPresentation = getAppShellPresentation(isDesktop, navigationOpen);
@@ -31,6 +35,14 @@ const AppLayout: React.FC = () => {
         onNavigate={handleNavigation}
       />
       <GlobalTableColumnResizer />
+      <ChangePasswordDialog
+        open={Boolean(currentUser?.mustChangePassword)}
+        forced
+        onChanged={async () => {
+          await logout();
+          navigate('/login', { replace: true, state: { message: '密码修改成功，请使用新密码重新登录' } });
+        }}
+      />
       <Box
         component="main"
         sx={APP_SHELL_MAIN_SX}

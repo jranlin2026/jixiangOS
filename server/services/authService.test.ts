@@ -21,6 +21,7 @@ const users = [
     passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD, salt),
     passwordSalt: salt,
     passwordUpdatedAt: now,
+    mustChangePassword: false,
     lastLoginAt: null,
     isActive: true,
     employmentStatus: 'active',
@@ -57,7 +58,12 @@ const prisma = {
       const account = where.OR[0].account;
       return users.find((user) => user.account === account || user.email === account || user.phone === account) || null;
     },
-    update: async ({ where, data }: any) => ({ ...users.find((user) => user.id === where.id)!, ...data }),
+    findUnique: async ({ where }: any) => users.find((user) => user.id === where.id) || null,
+    update: async ({ where, data }: any) => {
+      const index = users.findIndex((user) => user.id === where.id);
+      users[index] = { ...users[index], ...data } as any;
+      return users[index];
+    },
   },
   role: {
     findMany: async () => roles,
@@ -101,3 +107,18 @@ assert.equal(currentUser.data?.account, 'admin');
 assert.equal('passwordHash' in (currentUser.data as any), false);
 assert.equal('passwordSalt' in (currentUser.data as any), false);
 assert.equal('passwordUpdatedAt' in (currentUser.data as any), false);
+
+const wrongCurrentPassword = await service.changePassword('user-admin', 'wrong', 'new-password-2026');
+assert.equal(wrongCurrentPassword.code, 400);
+
+const weakPassword = await service.changePassword('user-admin', DEFAULT_ADMIN_PASSWORD, 'short');
+assert.equal(weakPassword.code, 400);
+
+const changedPassword = await service.changePassword('user-admin', DEFAULT_ADMIN_PASSWORD, 'new-password-2026');
+assert.equal(changedPassword.code, 0);
+assert.equal(users[0].mustChangePassword, false);
+
+const oldPasswordLogin = await service.login({ account: 'admin', password: DEFAULT_ADMIN_PASSWORD, remember: false });
+assert.notEqual(oldPasswordLogin.code, 0);
+const newPasswordLogin = await service.login({ account: 'admin', password: 'new-password-2026', remember: false });
+assert.equal(newPasswordLogin.code, 0);

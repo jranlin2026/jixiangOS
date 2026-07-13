@@ -72,9 +72,11 @@ export interface Lead {
   leadContributorId?: ID;
   leadContributorName?: string;
   assignedTo?: string;
+  assignedToId?: ID;
   assignedAt?: Timestamp;
   assignmentRuleId?: ID;
   owner: string;
+  ownerId?: ID;
   estimatedAmount?: number;
   aiAnalysis?: LeadAIAnalysis;
   /** @deprecated 仅用于读取待清理的历史数据；线索端不得再写入、展示或继承。 */

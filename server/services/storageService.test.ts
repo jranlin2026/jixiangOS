@@ -384,6 +384,7 @@ assert.equal(duplicateAwareMigrationResult.code, 0);
 assert.deepEqual(duplicateAwareMigrationResult.data, {
   createdIds: ['new-customer'],
   skippedDuplicates: 2,
+  ownerResolution: { resolved: 0, unresolved: 0, ambiguous: 0, public_pool: 1 },
 });
 assert.deepEqual(
   deduplicatedMigrationBatches.flat().map((row) => row.recordId),

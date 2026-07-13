@@ -31,12 +31,14 @@ import TipsAndUpdatesIcon from '@mui/icons-material/TipsAndUpdates';
 import SettingsIcon from '@mui/icons-material/Settings';
 import HomeIcon from '@mui/icons-material/Home';
 import LogoutIcon from '@mui/icons-material/Logout';
+import LockResetIcon from '@mui/icons-material/LockReset';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { ROUTES } from '../shared/utils/constants';
 import { hasPermission, PERMISSION_KEYS } from '../shared/utils/permissions';
 import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
 import useAuthStore from '../store/useAuthStore';
+import ChangePasswordDialog from '../shared/components/ChangePasswordDialog';
 
 interface SidebarProps {
   width: number;
@@ -234,6 +236,7 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
   const location = useLocation();
   const { currentUser, logout } = useAuthStore();
   const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({});
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   const currentFullPath = `${location.pathname}${location.search}`;
   const currentDepartmentName = useMemo(() => {
     if (!currentUser?.departmentId) return '';
@@ -424,8 +427,18 @@ const Sidebar: React.FC<SidebarProps> = ({ width, layoutWidth, variant, open, on
                 <LogoutIcon fontSize="small" />
               </IconButton>
             </Tooltip>
+            <Tooltip title="修改密码">
+              <IconButton size="small" onClick={() => setPasswordDialogOpen(true)}>
+                <LockResetIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </Box>
         )}
+        <ChangePasswordDialog
+          open={passwordDialogOpen}
+          onClose={() => setPasswordDialogOpen(false)}
+          onChanged={handleLogout}
+        />
       </Box>
     </Drawer>
   );

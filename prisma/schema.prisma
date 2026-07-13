@@ -71,6 +71,7 @@ model User {
   passwordHash      String?   @db.VarChar(100)
   passwordSalt      String?   @db.VarChar(100)
   passwordUpdatedAt DateTime?
+  mustChangePassword Boolean   @default(false)
   lastLoginAt       DateTime?
   isActive          Boolean   @default(true)
   employmentStatus  String    @default("active") @db.VarChar(20)

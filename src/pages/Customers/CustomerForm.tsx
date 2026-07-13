@@ -107,6 +107,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     leadContributorId: '',
     leadContributorName: '',
     owner: '',
+    ownerId: '',
     customerLevel: 'L1' as Customer['customerLevel'],
     originalSalesTransferBy: '',
     manualTagIds: [] as string[],
@@ -135,6 +136,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
 
     const defaultSourceOption = sourceOptions[0];
     const fallbackOwner = customer?.owner || assignableUsers[0]?.name || '';
+    const fallbackOwnerId = customer?.ownerId || assignableUsers.find((user) => user.name === fallbackOwner)?.id || '';
     setForm({
       name: customer?.name || '',
       company: customer?.company || '',
@@ -149,6 +151,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       leadContributorId: customer?.leadContributorId || '',
       leadContributorName: customer?.leadContributorName || '',
       owner: fallbackOwner,
+      ownerId: fallbackOwnerId,
       customerLevel: customer?.customerLevel || 'L1',
       originalSalesTransferBy: customer?.originalSalesTransferBy || '',
       manualTagIds: customer?.manualTagIds || [],
@@ -179,6 +182,11 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
       leadContributorId: user?.id || '',
       leadContributorName: user?.name || '',
     });
+  };
+
+  const handleOwnerSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const user = assignableUsers.find((item) => item.id === e.target.value);
+    setForm({ ...form, ownerId: user?.id || '', owner: user?.name || '' });
   };
 
   const handleSourceSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -221,16 +229,16 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
     </MenuItem>
   ));
   const ownerOptions = assignableUsers.map((user) => (
-    <MenuItem key={user.id} value={user.name}>
-      {`${user.name}${user.positionName ? ` (${user.positionName})` : ''}`}
+    <MenuItem key={user.id} value={user.id}>
+      {`${user.name}（${user.positionName || user.account || '未设置职位'}）`}
     </MenuItem>
   ));
-  const shouldShowCurrentOwnerOption = form.owner && !assignableUsers.some((user) => user.name === form.owner);
+  const shouldShowCurrentOwnerOption = form.owner && !assignableUsers.some((user) => user.id === form.ownerId);
   const missingContact = !form.phone.trim() && !form.wechat.trim();
   const phoneError = getPhoneNumberError(form.phone);
   const missingContributor = normalizeResourceOwnership(form.sourceType) === '个人资源' && !form.leadContributorName;
   const showContactError = !!form.name.trim() && missingContact;
-  const canSubmit = !!form.name.trim() && !missingContact && !phoneError && !missingContributor && !!form.owner && !!form.leadInputBy && !!form.leadSource;
+  const canSubmit = !!form.name.trim() && !missingContact && !phoneError && !missingContributor && !!form.ownerId && !!form.leadInputBy && !!form.leadSource;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
@@ -305,13 +313,13 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
           <TextField
             select
             label="分配销售"
-            value={form.owner}
-            onChange={handleChange('owner')}
+            value={form.ownerId}
+            onChange={handleOwnerSelect}
             required
             fullWidth
             helperText={assignableUsers.length ? '候选人来自线索流转参与成员，并按当前角色的数据范围过滤' : '暂无可分配成员，请检查线索流转参与成员或当前角色的数据范围'}
           >
-            {shouldShowCurrentOwnerOption && <MenuItem value={form.owner}>{form.owner}</MenuItem>}
+            {shouldShowCurrentOwnerOption && <MenuItem value={form.ownerId}>{form.owner}（历史负责人）</MenuItem>}
             {assignableUsers.length === 0 && (
               <MenuItem value="" disabled>
                 当前角色数据范围内暂无可分配成员，请检查数据范围或线索流转参与成员配置。

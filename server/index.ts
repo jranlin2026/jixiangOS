@@ -16,10 +16,12 @@ import { prisma, checkDatabaseConnection } from './db/client';
 import { createRequireAnyPermission, createRequireAuth, bearerToken, type AuthenticatedRequest } from './middleware/auth';
 import { createLoginRateLimiter } from './middleware/loginRateLimit';
 import { createAuthService } from './services/authService';
+import { success } from './api/response';
 import { createAiConfigService } from './services/aiConfigService';
 import { createAiChatClient, type AiChatMessage } from './services/aiChatClient';
 import { createCustomerListService } from './services/customerListService';
 import { createCustomerCommandService } from './services/customerCommandService';
+import { backfillCustomerOwnerIdentities } from './services/customerOwnerIdentityService';
 import { createCustomerTagRouter, createCustomerTagService } from './services/customerTagService';
 import { createCustomerTagMigrationRouter, createCustomerTagMigrationService } from './services/customerTagMigrationService';
 import { createLeadListService } from './services/leadListService';
@@ -98,6 +100,7 @@ const requireRoleDeleteAccess = createRequireAuth(authService, PERMISSION_KEYS.S
 const requireAiConfigReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_AI_CONFIG);
 const requireAiConfigWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_AI_CONFIG, 'write');
 const requireDataMaintenanceDeleteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'delete');
+const requireDataMaintenanceWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'write');
 const requireStorageAccess = createRequireAuth(authService);
 const requireCoCreationAccess = createRequireAuth(authService);
 const requireCustomerListAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_LIST);
@@ -336,6 +339,14 @@ app.post('/api/crm-migration/import', requireStorageAccess, async (req: Authenti
   }
 });
 
+app.get('/api/crm-migration/customer-owner-identities/preview', requireDataMaintenanceWriteAccess, async (_req, res) => {
+  res.json(success(await backfillCustomerOwnerIdentities(prisma, false)));
+});
+
+app.post('/api/crm-migration/customer-owner-identities/apply', requireDataMaintenanceWriteAccess, async (_req, res) => {
+  res.json(success(await backfillCustomerOwnerIdentities(prisma, true)));
+});
+
 app.post('/api/customers', requireCustomerCreateAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerListService.create(req.body || {}, req.currentUser!);
   res.status(result.code === 0 ? 201 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
@@ -416,7 +427,7 @@ app.post('/api/customers/:id/claim', requireCustomerPublicPoolClaimAccess, async
 app.post('/api/customers/:id/assign', requireCustomerAssignAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerCommandService.assignOwner(
     routeParam(req.params.id),
-    String(req.body?.owner || ''),
+    String(req.body?.ownerId || ''),
     String(req.body?.reason || ''),
     req.currentUser!,
   );
@@ -708,6 +719,15 @@ app.get('/api/auth/me', async (req, res) => {
 
 app.post('/api/auth/logout', async (req, res) => {
   res.json(await authService.logout(bearerToken(req)));
+});
+
+app.post('/api/auth/change-password', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await authService.changePassword(
+    req.currentUser!.id,
+    String(req.body?.currentPassword || ''),
+    String(req.body?.newPassword || ''),
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
 app.post(

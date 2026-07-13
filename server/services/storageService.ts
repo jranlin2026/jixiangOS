@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { failure, success } from '../api/response';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { mapPrismaUser } from '../db/prismaMappers';
+import { resolveCustomerOwnerIdentity } from './customerOwnerIdentityService';
 
 type StorageTransaction = Pick<Prisma.TransactionClient, 'appStorage' | 'leadRecord' | 'businessRecord'>;
 type StoragePrisma = StorageTransaction & Pick<PrismaClient, '$transaction' | 'user'>;
@@ -312,6 +313,9 @@ export function createStorageService(prisma: StoragePrisma) {
 
   const importCrmMigration = async (customers: unknown) => {
     if (!Array.isArray(customers)) return failure(`${STORAGE_KEYS.CUSTOMERS} must be an array`, 400);
+    const directoryUsers = prisma.user?.findMany
+      ? (await prisma.user.findMany()).map(mapPrismaUser)
+      : [];
 
     return prisma.$transaction(async (tx) => {
       const existingRows = await tx.businessRecord.findMany({ where: { domain: STORAGE_KEYS.CUSTOMERS } });
@@ -328,7 +332,9 @@ export function createStorageService(prisma: StoragePrisma) {
       const accepted: Array<{ item: Record<string, any>; recordId: string }> = [];
       let skippedDuplicates = 0;
       customers.forEach((entry, index) => {
-        const item = normalizeLead(entry);
+        const rawItem = normalizeLead(entry);
+        const identity = resolveCustomerOwnerIdentity(rawItem.owner, directoryUsers);
+        const item: Record<string, any> = { ...rawItem, ...identity };
         const phone = normalizeCustomerPhone(item.phone);
         const wechat = normalizeCustomerWechat(item.wechat);
         if ((phone && phones.has(phone)) || (wechat && wechats.has(wechat))) {
@@ -353,6 +359,11 @@ export function createStorageService(prisma: StoragePrisma) {
       return success({
         createdIds: accepted.map(({ item }) => String(item.id || '')).filter(Boolean),
         skippedDuplicates,
+        ownerResolution: accepted.reduce((counts, { item }) => {
+          const status = String(item.ownerIdentityStatus || 'unresolved') as 'resolved' | 'unresolved' | 'ambiguous' | 'public_pool';
+          counts[status] += 1;
+          return counts;
+        }, { resolved: 0, unresolved: 0, ambiguous: 0, public_pool: 0 }),
       });
     }, { timeout: CRM_MIGRATION_TRANSACTION_TIMEOUT_MS });
   };

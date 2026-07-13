@@ -453,6 +453,7 @@ async function createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'p
     leftAt: data.employmentStatus === 'left' ? data.leftAt || now : undefined,
     leftBy: data.employmentStatus === 'left' ? data.leftBy : undefined,
     ...passwordFields,
+    mustChangePassword: true,
     createdAt: now,
     updatedAt: now,
   };
@@ -601,6 +602,7 @@ async function resetUserPassword(id: string, password: string): Promise<ApiRespo
   users[idx] = {
     ...users[idx],
     ...authApi.createUserPasswordFields(id, users[idx].account || users[idx].email, password),
+    mustChangePassword: true,
     updatedAt: new Date().toISOString(),
   };
   setStorageData(STORAGE_KEYS.USERS, users);

@@ -84,6 +84,7 @@ const CrmMigration: React.FC = () => {
   const [syncing, setSyncing] = useState(false);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<CrmMigrationPrecheckResult | null>(null);
+  const [ownerBackfillBusy, setOwnerBackfillBusy] = useState(false);
   const fileInputs = useRef<Partial<Record<CrmMigrationFileKey, HTMLInputElement | null>>>({});
 
   const selectedCount = useMemo(() => Object.values(files).filter(Boolean).length, [files]);
@@ -170,6 +171,25 @@ const CrmMigration: React.FC = () => {
     await runPrecheck();
   };
 
+  const organizeHistoricalOwners = async () => {
+    setOwnerBackfillBusy(true);
+    const preview = await crmMigrationApi.previewCustomerOwnerBackfill();
+    setOwnerBackfillBusy(false);
+    if (preview.code !== 0 || !preview.data) return alert(preview.message || '历史客户归属预览失败', '整理失败');
+    const summary = preview.data;
+    if (!summary.totalLegacy) return alert('现有客户归属都已使用员工 ID，无需整理。', '检查完成');
+    const confirmed = await confirm(
+      `待整理 ${summary.totalLegacy} 条：可匹配 ${summary.resolved} 条，找不到员工 ${summary.unresolved} 条，重名待确认 ${summary.ambiguous} 条，公海 ${summary.publicPool} 条。\n\n找不到和重名的数据不会归给任何员工。是否继续？`,
+      '整理历史客户归属',
+    );
+    if (!confirmed) return;
+    setOwnerBackfillBusy(true);
+    const applied = await crmMigrationApi.applyCustomerOwnerBackfill();
+    setOwnerBackfillBusy(false);
+    if (applied.code !== 0 || !applied.data) return alert(applied.message || '历史客户归属整理失败', '整理失败');
+    await alert(`已整理 ${applied.data.updated} 条客户归属；其中 ${applied.data.unresolved + applied.data.ambiguous} 条需要管理员后续人工分配。`, '整理完成');
+  };
+
   return (
     <Box>
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'stretch', md: 'center' }} justifyContent="space-between" sx={{ mb: 2 }}>
@@ -190,8 +210,20 @@ const CrmMigration: React.FC = () => {
       </Stack>
 
       <Alert severity="info" sx={{ mb: 2 }}>
-        第一版不会直接把客户写入客户库。先把基础资料对齐，避免正式导入后还要手工修员工、来源和标签。
+        新导入客户会按员工 ID 归属。历史客户可先做安全整理，找不到员工或存在重名时不会自动归人。
       </Alert>
+
+      <Paper elevation={0} sx={{ border: '1px solid #dbe3ef', borderRadius: 2, p: 2, mb: 2 }}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between">
+          <Box>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>历史客户负责人整理</Typography>
+            <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>把旧的姓名归属固化为员工 ID，避免今后出现同名员工时客户串到错误账号。</Typography>
+          </Box>
+          <Button variant="outlined" onClick={organizeHistoricalOwners} disabled={ownerBackfillBusy}>
+            {ownerBackfillBusy ? '正在检查…' : '检查并整理'}
+          </Button>
+        </Stack>
+      </Paper>
 
       <Paper elevation={0} sx={{ border: '1px solid #dbe3ef', borderRadius: 2, p: 2, mb: 2 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} useFlexGap flexWrap="wrap">

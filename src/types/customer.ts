@@ -102,6 +102,10 @@ export interface Customer {
   /** 归属销售 */
   /** 销售负责人 */
   owner: string;
+  /** 销售负责人稳定标识；权限判断必须优先使用此字段 */
+  ownerId?: ID;
+  /** 导入/历史数据的负责人解析状态 */
+  ownerIdentityStatus?: 'resolved' | 'unresolved' | 'ambiguous' | 'public_pool';
   /** 上一任销售负责人 */
   previousOwner?: string;
   /** 最近分配人 */

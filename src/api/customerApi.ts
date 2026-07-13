@@ -687,11 +687,11 @@ async function claimCustomerFromPublicPool(id: string, userName: string): Promis
   return createSuccessResponse(updated ? hydrateCustomerLifecycle(updated) : null);
 }
 
-async function assignCustomerOwner(id: string, owner: string, reason = ''): Promise<ApiResponse<Customer | null>> {
+async function assignCustomerOwner(id: string, ownerId: string, reason = ''): Promise<ApiResponse<Customer | null>> {
   if (shouldUseBackendApi()) {
     const response = await backendRequest<Customer>(`/customers/${encodeURIComponent(id)}/assign`, {
       method: 'POST',
-      body: JSON.stringify({ owner, reason }),
+      body: JSON.stringify({ ownerId, reason }),
     });
     if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code || -1);
     const customer = cacheBackendCustomer(response.data);
@@ -701,7 +701,9 @@ async function assignCustomerOwner(id: string, owner: string, reason = ''): Prom
 
   ensureInit();
   await delay(150);
-  const nextOwner = owner.trim();
+  const targetUser = (getStorageData<Array<{ id: string; name: string }>>(STORAGE_KEYS.USERS) || [])
+    .find((user) => user.id === ownerId);
+  const nextOwner = String(targetUser?.name || '').trim();
   if (!nextOwner) return createErrorResponse('请选择新的销售负责人');
   const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
   const idx = customers.findIndex((item) => item.id === id);
@@ -724,6 +726,8 @@ async function assignCustomerOwner(id: string, owner: string, reason = ''): Prom
   customers[idx] = {
     ...existing,
     owner: nextOwner,
+    ownerId,
+    ownerIdentityStatus: 'resolved',
     previousOwner: changed ? previousOwner : existing.previousOwner,
     assignedBy: operator,
     assignedAt: changed ? now : existing.assignedAt || now,

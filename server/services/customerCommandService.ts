@@ -508,7 +508,9 @@ function syncLeadFromCustomer(lead: Lead, customer: Customer, atIso: string, ope
     industry: customer.industry,
     city: customer.city,
     owner: customer.owner,
+    ownerId: customer.ownerId,
     assignedTo: customer.owner === '公海' ? undefined : customer.owner,
+    assignedToId: customer.owner === '公海' ? undefined : customer.ownerId,
     inputBy: customer.leadInputBy,
     leadContributorId: customer.leadContributorId,
     leadContributorName: customer.leadContributorName,
@@ -1350,6 +1352,8 @@ export function createCustomerCommandService(
         const updatedCustomer: Customer = {
           ...customer,
           owner: '公海',
+          ownerId: undefined,
+          ownerIdentityStatus: 'public_pool',
           previousOwner: previousOwner && previousOwner !== '公海' ? previousOwner : customer.previousOwner,
           lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL,
           lifecycleStatusUpdatedAt: atIso,
@@ -1382,7 +1386,9 @@ export function createCustomerCommandService(
           lead: (lead) => ({
             ...lead,
             owner: '公海',
+            ownerId: undefined,
             assignedTo: undefined,
+            assignedToId: undefined,
             assignedAt: undefined,
             lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL,
             lifecycleStatus: '流失公海',
@@ -1407,9 +1413,6 @@ export function createCustomerCommandService(
         if (!actor || !canReceiveLead(actor, context.roles)) {
           return { error: { code: 403, message: '当前员工不是可领取客户的在职销售' } };
         }
-        if (activeUsersNamed(context, actor.name).length > 1) {
-          return { error: { code: 409, message: '当前员工姓名不唯一，无法安全记录客户归属' } };
-        }
         const operator = actor.name;
         const isPublicPool = customer.lifecycleStatusCode === LIFECYCLE_STATUS_CODES.PUBLIC_POOL || customer.owner === '公海';
         if (!isPublicPool) {
@@ -1420,6 +1423,8 @@ export function createCustomerCommandService(
         const updatedCustomer: Customer = {
           ...customer,
           owner: operator,
+          ownerId: actor.id,
+          ownerIdentityStatus: 'resolved',
           previousOwner: customer.owner,
           assignedBy: operator,
           assignedAt: atIso,
@@ -1453,7 +1458,9 @@ export function createCustomerCommandService(
           lead: (lead) => ({
             ...lead,
             owner: operator,
+            ownerId: actor.id,
             assignedTo: operator,
+            assignedToId: actor.id,
             assignedAt: atIso,
             intakeStatus: '入库成功',
             lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP,
@@ -1474,29 +1481,28 @@ export function createCustomerCommandService(
 
     async assignOwner(
       customerId: string,
-      ownerInput: string,
+      ownerIdInput: string,
       reasonInput: string,
       currentUser: AuthenticatedUser,
     ) {
       if (!hasCustomerCommandPermission(currentUser)) return failure<Customer>('无权分配客户', 403);
-      const owner = cleanText(ownerInput);
-      if (!owner) return failure<Customer>('请选择新的销售负责人', 400);
+      const ownerId = cleanText(ownerIdInput);
+      if (!ownerId) return failure<Customer>('请选择新的销售负责人', 400);
       return transitionCustomer(customerId, currentUser, (customer, context, at) => {
-        const matchingTargets = context.users.filter((user) => (
-          user.name === owner
+        const target = context.users.find((user) => (
+          user.id === ownerId
           && user.isActive
           && (user.employmentStatus || 'active') === 'active'
         ));
-        if (!matchingTargets.length) return { error: { code: 400, message: '目标销售不存在或已离职' } };
-        if (matchingTargets.length > 1) return { error: { code: 409, message: '存在同名员工，无法确定客户归属' } };
-        const target = matchingTargets[0];
+        if (!target) return { error: { code: 400, message: '目标销售不存在或已离职' } };
+        const owner = target.name;
         if (!canReceiveLead(target, context.roles)) {
           return { error: { code: 400, message: '目标员工不是可分配销售' } };
         }
         if (!context.scope.unrestricted && !context.scope.visibleUserIds.includes(target.id)) {
           return { error: { code: 403, message: '无权跨数据范围分配客户' } };
         }
-        if (customer.owner === owner && customer.lifecycleStatusCode !== LIFECYCLE_STATUS_CODES.PUBLIC_POOL) return {};
+        if (customer.ownerId === ownerId && customer.lifecycleStatusCode !== LIFECYCLE_STATUS_CODES.PUBLIC_POOL) return {};
 
         const atIso = at.toISOString();
         const operator = commandActor(context, currentUser);
@@ -1508,6 +1514,8 @@ export function createCustomerCommandService(
         const updatedCustomer: Customer = {
           ...customer,
           owner,
+          ownerId: target.id,
+          ownerIdentityStatus: 'resolved',
           previousOwner: customer.owner,
           assignedBy: operator,
           assignedAt: atIso,
@@ -1533,7 +1541,9 @@ export function createCustomerCommandService(
           lead: (lead) => ({
             ...lead,
             owner,
+            ownerId: target.id,
             assignedTo: owner,
+            assignedToId: target.id,
             assignedAt: atIso,
             intakeStatus: '入库成功',
             lifecycleStatusCode: wasPublicPool ? LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP : lead.lifecycleStatusCode,

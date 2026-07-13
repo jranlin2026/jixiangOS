@@ -106,6 +106,7 @@ function cacheBackendAuthenticatedUser(user: AuthenticatedUser, token?: string, 
     avatar: user.avatar,
     isActive: user.isActive,
     lastLoginAt: user.lastLoginAt,
+    mustChangePassword: user.mustChangePassword,
     employmentStatus: 'active',
     createdAt: users.find((item) => item.id === user.id)?.createdAt || now,
     updatedAt: now,
@@ -205,6 +206,30 @@ async function logout(): Promise<ApiResponse<boolean>> {
   return createSuccessResponse(true);
 }
 
+async function changePassword(currentPassword: string, newPassword: string): Promise<ApiResponse<boolean>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<boolean>('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+  }
+  const session = readSession();
+  if (!session) return createErrorResponse('登录已失效，请重新登录', 401);
+  const { users } = ensureAuthData();
+  const user = users.find((item) => item.id === session.userId);
+  if (!user || !verifyPassword(currentPassword, user.passwordSalt, user.passwordHash)) {
+    return createErrorResponse('当前密码不正确', 400);
+  }
+  if (newPassword.length < 8) return createErrorResponse('新密码至少 8 位', 400);
+  if (verifyPassword(newPassword, user.passwordSalt, user.passwordHash)) return createErrorResponse('新密码不能与当前密码相同', 400);
+  const fields = createUserPasswordFields(user.id, user.account || user.email, newPassword);
+  setStorageData(STORAGE_KEYS.USERS, users.map((item) => item.id === user.id
+    ? { ...item, ...fields, mustChangePassword: false, updatedAt: new Date().toISOString() }
+    : item));
+  removeStorageData(AUTH_SESSION_STORAGE_KEY);
+  return createSuccessResponse(true);
+}
+
 function createUserPasswordFields(userId: string, account: string, password: string) {
   const passwordSalt = createPasswordSalt(`${userId}-${normalizeAccount(account)}`);
   return {
@@ -218,6 +243,7 @@ export const authApi = {
   login,
   getCurrentUser,
   logout,
+  changePassword,
   ensureAuthData,
   createUserPasswordFields,
 };

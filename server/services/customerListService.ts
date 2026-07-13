@@ -246,10 +246,11 @@ async function buildVisibilityWhere(
 
   const visibilityConditions: Prisma.Sql[] = [];
   if (scope.visibleUserNames.length) {
-    visibilityConditions.push(Prisma.sql`owner IN (${Prisma.join(scope.visibleUserNames)})`);
+    visibilityConditions.push(Prisma.sql`(${jsonText('$.ownerId')} IS NULL AND ${jsonText('$.ownerIdentityStatus')} IS NULL AND owner IN (${Prisma.join(scope.visibleUserNames)}))`);
     visibilityConditions.push(Prisma.sql`${jsonText('$.leadContributorName')} IN (${Prisma.join(scope.visibleUserNames)})`);
   }
   if (scope.visibleUserIds.length) {
+    visibilityConditions.push(Prisma.sql`${jsonText('$.ownerId')} IN (${Prisma.join(scope.visibleUserIds)})`);
     visibilityConditions.push(Prisma.sql`${jsonText('$.leadContributorId')} IN (${Prisma.join(scope.visibleUserIds)})`);
   }
   if (scope.canViewPublicPool) {
@@ -338,11 +339,21 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
         return failure<Customer>('个人资源必须填写线索贡献人', 400);
       }
 
+      const requestedOwnerId = cleanText(input.ownerId) || (cleanText(input.owner) === currentUser.name ? currentUser.id : '');
       const requestedOwner = cleanText(input.owner);
       const actorName = currentUser.name || currentUser.account;
-      if (requestedOwner && requestedOwner !== actorName && !hasPermission(currentUser, PERMISSION_KEYS.CUSTOMER_ASSIGN, 'write')) {
+      if (requestedOwnerId && requestedOwnerId !== currentUser.id && !hasPermission(currentUser, PERMISSION_KEYS.CUSTOMER_ASSIGN, 'write')) {
         return failure<Customer>('无权把客户分配给其他负责人', 403);
       }
+      if (!requestedOwnerId && requestedOwner && requestedOwner !== actorName) {
+        return failure<Customer>('无权把客户分配给其他负责人', 403);
+      }
+      const targetOwner = requestedOwnerId === currentUser.id
+        ? { id: currentUser.id, name: actorName }
+        : requestedOwnerId
+          ? await prisma.user.findUnique({ where: { id: requestedOwnerId } })
+          : null;
+      if (!targetOwner) return failure<Customer>('请选择有效的销售负责人', 400);
 
       const phoneError = phone ? getPhoneNumberError(phone) : '';
       if (phoneError) return failure<Customer>(phoneError, 400);
@@ -378,7 +389,9 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
         phone,
         wechat: wechat || undefined,
         sourceType,
-        owner: requestedOwner || actorName,
+        owner: targetOwner.name,
+        ownerId: targetOwner.id,
+        ownerIdentityStatus: 'resolved',
         customerLevel: input.customerLevel || 'L1',
         lifecycleStatusCode: input.lifecycleStatusCode || LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP,
         lifecycleStatusUpdatedAt: now,

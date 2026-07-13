@@ -27,6 +27,7 @@ export interface User {
   passwordHash?: string;
   passwordSalt?: string;
   passwordUpdatedAt?: Timestamp;
+  mustChangePassword?: boolean;
   lastLoginAt?: Timestamp;
   isActive: boolean;
   employmentStatus?: EmploymentStatus;

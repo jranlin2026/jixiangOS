@@ -307,6 +307,7 @@ export function createSettingsService(prisma: SettingsPrisma) {
           passwordHash: hashPassword(password, passwordSalt),
           passwordSalt,
           passwordUpdatedAt: now,
+          mustChangePassword: true,
           isActive: data.isActive ?? true,
           employmentStatus: data.employmentStatus || 'active',
           leftAt: data.employmentStatus === 'left' ? now : null,
@@ -360,9 +361,11 @@ export function createSettingsService(prisma: SettingsPrisma) {
           passwordHash: hashPassword(password, passwordSalt),
           passwordSalt,
           passwordUpdatedAt: new Date(),
+          mustChangePassword: true,
           updatedAt: new Date(),
         },
       });
+      await prisma.authSession.deleteMany({ where: { userId: id } });
       return success(mapPrismaUser(row));
     },
 

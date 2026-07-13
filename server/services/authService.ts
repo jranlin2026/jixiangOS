@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { AuthenticatedUser, LoginPayload } from '../../src/types/auth';
-import { normalizeAccount, verifyPassword } from '../../src/shared/utils/auth';
+import { createPasswordSalt, hashPassword, normalizeAccount, verifyPassword } from '../../src/shared/utils/auth';
 import { mergeRoleWithDefaultAccess } from '../../src/shared/utils/organizationConfig';
 import { toAuthenticatedUser } from '../../src/shared/utils/permissions';
 import { failure, success } from '../api/response';
@@ -104,6 +104,31 @@ export function createAuthService(prisma: AuthPrisma) {
 
     async logout(token?: string) {
       if (token) await prisma.authSession.deleteMany({ where: { token } });
+      return success(true);
+    },
+
+    async changePassword(userId: string, currentPassword: string, newPassword: string) {
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (!user) return failure('账号不存在', 404);
+      if (!verifyPassword(currentPassword, user.passwordSalt || undefined, user.passwordHash || undefined)) {
+        return failure('当前密码不正确', 400);
+      }
+      if (newPassword.length < 8) return failure('新密码至少 8 位', 400);
+      if (verifyPassword(newPassword, user.passwordSalt || undefined, user.passwordHash || undefined)) {
+        return failure('新密码不能与当前密码相同', 400);
+      }
+      const passwordSalt = createPasswordSalt(`${user.id}-${Date.now()}`);
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordHash: hashPassword(newPassword, passwordSalt),
+          passwordSalt,
+          passwordUpdatedAt: new Date(),
+          mustChangePassword: false,
+          updatedAt: new Date(),
+        },
+      });
+      await prisma.authSession.deleteMany({ where: { userId: user.id } });
       return success(true);
     },
   };

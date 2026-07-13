@@ -570,6 +570,7 @@ export function toAuthenticatedUser(user: User, roles: Role[]): AuthenticatedUse
     departmentId: user.departmentId,
     isActive: user.isActive,
     lastLoginAt: user.lastLoginAt,
+    mustChangePassword: Boolean(user.mustChangePassword),
     permissions: resolveUserPermissions(user, roles),
   };
 }
