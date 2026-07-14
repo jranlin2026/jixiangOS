@@ -2,10 +2,11 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { failure, success } from '../api/response';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
+import { matchExactNamesToUniqueIds } from '../../src/shared/utils/exactNameIdentity';
 import { mapPrismaUser } from '../db/prismaMappers';
-import { resolveCustomerOwnerIdentity } from './customerOwnerIdentityService';
+import { loadCustomerTagCatalog } from './customerTagService';
 
-type StorageTransaction = Pick<Prisma.TransactionClient, 'appStorage' | 'leadRecord' | 'businessRecord'>;
+type StorageTransaction = Pick<Prisma.TransactionClient, 'appStorage' | 'leadRecord' | 'businessRecord' | 'user'>;
 type StoragePrisma = StorageTransaction & Pick<PrismaClient, '$transaction' | 'user'>;
 
 const STORAGE_KEY_PATTERN = /^aaos_[a-zA-Z0-9_:-]+$/;
@@ -69,6 +70,19 @@ function normalizeCustomerPhone(value: unknown): string {
 
 function normalizeCustomerWechat(value: unknown): string {
   return String(value || '').trim().toLowerCase();
+}
+
+function normalizeExactName(value: unknown): string {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function exactNameKey(value: unknown): string {
+  return normalizeExactName(value).toLowerCase();
+}
+
+function importedTagNames(value: unknown): string[] {
+  const values = Array.isArray(value) ? value : value ? [value] : [];
+  return values.map(normalizeExactName).filter(Boolean);
 }
 
 function mapLeadRow(row: { data: unknown }) {
@@ -313,11 +327,44 @@ export function createStorageService(prisma: StoragePrisma) {
 
   const importCrmMigration = async (customers: unknown) => {
     if (!Array.isArray(customers)) return failure(`${STORAGE_KEYS.CUSTOMERS} must be an array`, 400);
-    const directoryUsers = prisma.user?.findMany
-      ? (await prisma.user.findMany()).map(mapPrismaUser)
-      : [];
 
     return prisma.$transaction(async (tx) => {
+      const rawCustomers = customers.map(normalizeLead);
+      const ownerNames = rawCustomers
+        .map((item) => normalizeExactName(item.owner))
+        .filter((name) => name && name !== '公海');
+      const tagNames = rawCustomers.flatMap((item) => importedTagNames(item.tags));
+      const [directoryUsers, catalog] = await Promise.all([
+        ownerNames.length > 0 ? tx.user.findMany() : Promise.resolve([]),
+        tagNames.length > 0 ? loadCustomerTagCatalog(tx, false) : Promise.resolve({ groups: [], tags: [] }),
+      ]);
+      const activeUsers = directoryUsers
+        .filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active')
+        .map((user) => ({ id: user.id, name: user.name }));
+      const activeGroupIds = new Set(catalog.groups
+        .filter((group) => group.isActive && (group.scope === 'customer' || group.scope === 'both'))
+        .map((group) => group.id));
+      const activeTags = catalog.tags
+        .filter((tag) => tag.isActive && activeGroupIds.has(tag.groupId))
+        .map((tag) => ({ id: tag.id, name: tag.name }));
+      const ownerMatch = matchExactNamesToUniqueIds(ownerNames, activeUsers);
+      const tagMatch = matchExactNamesToUniqueIds(tagNames, activeTags);
+      const blockers = [
+        ownerMatch.missing.length ? `以下负责人尚未创建员工：${ownerMatch.missing.join('、')}` : '',
+        ownerMatch.ambiguous.length ? `以下负责人存在多个同名员工，无法确定归属：${ownerMatch.ambiguous.join('、')}` : '',
+        tagMatch.missing.length ? `以下标签尚未同步：${tagMatch.missing.join('、')}` : '',
+        tagMatch.ambiguous.length ? `以下标签在多个分组中重名，无法确定标签：${tagMatch.ambiguous.join('、')}` : '',
+      ].filter(Boolean);
+      if (blockers.length > 0) return failure(`${blockers.join('；')}，请重新预检`, 409);
+
+      const ownerIdsByKey = new Map(ownerMatch.matched.map((name) => [
+        exactNameKey(name), ownerMatch.idsByName[name],
+      ]));
+      const tagIdsByKey = new Map(tagMatch.matched.map((name) => [
+        exactNameKey(name), tagMatch.idsByName[name],
+      ]));
+      const activeTagsById = new Map(activeTags.map((tag) => [tag.id, tag]));
+
       const existingRows = await tx.businessRecord.findMany({ where: { domain: STORAGE_KEYS.CUSTOMERS } });
       const phones = new Set<string>();
       const wechats = new Set<string>();
@@ -331,10 +378,17 @@ export function createStorageService(prisma: StoragePrisma) {
 
       const accepted: Array<{ item: Record<string, any>; recordId: string }> = [];
       let skippedDuplicates = 0;
-      customers.forEach((entry, index) => {
-        const rawItem = normalizeLead(entry);
-        const identity = resolveCustomerOwnerIdentity(rawItem.owner, directoryUsers);
-        const item: Record<string, any> = { ...rawItem, ...identity };
+      rawCustomers.forEach((rawItem, index) => {
+        const ownerName = normalizeExactName(rawItem.owner);
+        const publicPool = !ownerName || ownerName === '公海';
+        const resolvedTagIds = importedTagNames(rawItem.tags).map((name) => tagIdsByKey.get(exactNameKey(name)) as string);
+        const item: Record<string, any> = {
+          ...rawItem,
+          ownerId: publicPool ? undefined : ownerIdsByKey.get(exactNameKey(ownerName)),
+          ownerIdentityStatus: publicPool ? 'public_pool' : 'resolved',
+          tags: resolvedTagIds.map((id) => activeTagsById.get(id)?.name as string),
+          manualTagIds: resolvedTagIds,
+        };
         const phone = normalizeCustomerPhone(item.phone);
         const wechat = normalizeCustomerWechat(item.wechat);
         if ((phone && phones.has(phone)) || (wechat && wechats.has(wechat))) {

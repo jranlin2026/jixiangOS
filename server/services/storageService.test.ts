@@ -200,7 +200,10 @@ await transactionalService.set(STORAGE_KEYS.CUSTOMERS, nextCustomers);
 assert.equal(transactionCalls, 1);
 
 transactionCalls = 0;
-const migrationResult = await transactionalService.importCrmMigration(nextCustomers);
+const migrationResult = await transactionalService.importCrmMigration(nextCustomers.map((customer) => ({
+  ...customer,
+  owner: '公海',
+})));
 assert.equal(migrationResult.code, 0);
 assert.equal(transactionCalls, 1, 'EC CRM 客户与线索迁移必须在同一事务中保存');
 
@@ -360,6 +363,71 @@ assert.equal(
   bulkCreateCalls.filter((call) => call.domain === STORAGE_KEYS.CUSTOMERS).reduce((total, call) => total + call.count, 0),
   bulkCustomers.length,
 );
+
+const identityCreatedRows: any[] = [];
+const identityTagGroups = [
+  { id: 'group-intent', name: '意向', scope: 'customer', isActive: true, sortOrder: 0 },
+  { id: 'group-value-a', name: '价值A', scope: 'both', isActive: true, sortOrder: 1 },
+  { id: 'group-value-b', name: '价值B', scope: 'customer', isActive: true, sortOrder: 2 },
+];
+const identityTags = [
+  { id: 'tag-intent', groupId: 'group-intent', name: '高意向', isActive: true, sortOrder: 0 },
+  { id: 'tag-vip-a', groupId: 'group-value-a', name: 'VIP', isActive: true, sortOrder: 0 },
+  { id: 'tag-vip-b', groupId: 'group-value-b', name: 'vip', isActive: true, sortOrder: 0 },
+];
+const identityMigrationPrisma: any = {
+  user: {
+    findMany: async () => [{
+      id: 'u-1', name: '吕煜阳', account: 'lv_yuyang', email: '', phone: '', role: '销售顾问',
+      avatar: null, departmentId: 'dept-sales', positionId: null, positionName: null,
+      roleId: 'role-sales-consultant', passwordHash: '', passwordSalt: '', passwordUpdatedAt: null,
+      lastLoginAt: null, isActive: true, employmentStatus: 'active', leftAt: null, leftBy: null,
+      createdAt: new Date('2026-07-14T00:00:00.000Z'), updatedAt: new Date('2026-07-14T00:00:00.000Z'),
+    }],
+  },
+  businessRecord: {
+    findMany: async ({ where }: any) => {
+      if (where.domain === STORAGE_KEYS.TAG_GROUPS) return identityTagGroups.map((data) => ({ data }));
+      if (where.domain === STORAGE_KEYS.TAGS) return identityTags.map((data) => ({ data }));
+      return [];
+    },
+    createMany: async ({ data }: any) => {
+      identityCreatedRows.push(...data);
+      return { count: data.length };
+    },
+  },
+  leadRecord: { findMany: async () => [] },
+};
+identityMigrationPrisma.$transaction = async (callback: (tx: any) => Promise<unknown>) => callback(identityMigrationPrisma);
+const identityMigrationService = createStorageService(identityMigrationPrisma);
+
+const missingOwnerResult = await identityMigrationService.importCrmMigration([
+  { id: 'identity-missing-owner', owner: '不存在', tags: [] },
+]);
+assert.equal(missingOwnerResult.code, 409);
+assert.equal(identityCreatedRows.length, 0, '负责人缺失时整批不得写入');
+
+const ambiguousTagResult = await identityMigrationService.importCrmMigration([
+  { id: 'identity-ambiguous-tag', owner: '吕煜阳', tags: ['VIP'] },
+]);
+assert.equal(ambiguousTagResult.code, 409);
+assert.equal(identityCreatedRows.length, 0, '标签重名时整批不得写入');
+
+const validIdentityResult = await identityMigrationService.importCrmMigration([
+  {
+    id: 'identity-valid',
+    owner: '吕煜阳',
+    ownerId: 'client-forged-owner',
+    ownerIdentityStatus: 'unresolved',
+    tags: ['高意向'],
+    manualTagIds: ['client-forged-tag'],
+  },
+]);
+assert.equal(validIdentityResult.code, 0);
+assert.equal(identityCreatedRows[0].data.ownerId, 'u-1');
+assert.equal(identityCreatedRows[0].data.ownerIdentityStatus, 'resolved');
+assert.deepEqual(identityCreatedRows[0].data.manualTagIds, ['tag-intent']);
+assert.deepEqual(identityCreatedRows[0].data.tags, ['高意向']);
 
 const deduplicatedMigrationBatches: any[][] = [];
 const duplicateAwareMigrationPrisma: any = {
