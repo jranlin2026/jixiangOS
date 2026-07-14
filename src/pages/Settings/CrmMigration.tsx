@@ -18,13 +18,13 @@ import {
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import FactCheckIcon from '@mui/icons-material/FactCheck';
-import GroupAddIcon from '@mui/icons-material/GroupAdd';
 import LabelIcon from '@mui/icons-material/Label';
 import SourceIcon from '@mui/icons-material/Source';
 import MoveToInboxIcon from '@mui/icons-material/MoveToInbox';
 import type { CrmMigrationFileKey, CrmMigrationFileMap, CrmMigrationPrecheckResult } from '../../api/crmMigrationApi';
 import { crmMigrationApi } from '../../api/crmMigrationApi';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import { canImportCrmMigration, getCrmMigrationImportBlockers } from './crmMigrationImportState';
 
 const FILE_SLOTS: Array<{ key: CrmMigrationFileKey; label: string; description: string; accept: string }> = [
   {
@@ -89,6 +89,7 @@ const CrmMigration: React.FC = () => {
 
   const selectedCount = useMemo(() => Object.values(files).filter(Boolean).length, [files]);
   const canPrecheck = selectedCount > 0 && !checking;
+  const importBlockers = useMemo(() => result ? getCrmMigrationImportBlockers(result) : [], [result]);
 
   const runPrecheck = async (nextFiles: CrmMigrationFileMap = files) => {
     setChecking(true);
@@ -105,6 +106,7 @@ const CrmMigration: React.FC = () => {
     if (!file) return;
     const nextFiles = { ...files, [key]: file };
     setFiles(nextFiles);
+    setResult(null);
   };
 
   const syncSources = async () => {
@@ -133,17 +135,8 @@ const CrmMigration: React.FC = () => {
     await runPrecheck();
   };
 
-  const createMissingEmployees = async () => {
-    const missing = result?.employees.missing || [];
-    if (!missing.length) return;
-    await alert(
-      `批量创建员工账号已暂停。请到“组织架构”逐个创建这 ${missing.length} 个员工，并为每人设置唯一初始密码。`,
-      '安全限制',
-    );
-  };
-
   const importCustomers = async () => {
-    if (!result) return;
+    if (!result || !canImportCrmMigration(result)) return;
     const confirmed = await confirm(
       [
         `将导入团队客户与公海客户；企业联系人只补充到对应客户资料，不创建线索。`,
@@ -200,7 +193,12 @@ const CrmMigration: React.FC = () => {
           </Typography>
         </Box>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-          <Button variant="outlined" startIcon={<MoveToInboxIcon />} onClick={importCustomers} disabled={!result || importing || checking || syncing}>
+          <Button
+            variant="outlined"
+            startIcon={<MoveToInboxIcon />}
+            onClick={importCustomers}
+            disabled={!result || !canImportCrmMigration(result) || importing || checking || syncing}
+          >
             导入客户资料
           </Button>
           <Button variant="contained" startIcon={<FactCheckIcon />} onClick={() => runPrecheck()} disabled={!canPrecheck}>
@@ -268,6 +266,19 @@ const CrmMigration: React.FC = () => {
             </Stack>
           </Paper>
 
+          {importBlockers.length ? (
+            <Stack spacing={1}>
+              {importBlockers.map((blocker) => (
+                <Alert key={blocker} severity="error">{blocker}</Alert>
+              ))}
+            </Stack>
+          ) : (
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
+              <Alert severity="success" sx={{ flex: 1 }}>负责人可安全绑定</Alert>
+              <Alert severity="success" sx={{ flex: 1 }}>标签可安全绑定</Alert>
+            </Stack>
+          )}
+
           <Paper elevation={0} sx={{ border: '1px solid #dbe3ef', borderRadius: 2, p: 2 }}>
             <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', md: 'center' }} justifyContent="space-between" sx={{ mb: 1.5 }}>
               <Box>
@@ -275,9 +286,6 @@ const CrmMigration: React.FC = () => {
                 <Typography variant="body2" sx={{ color: '#64748b' }}>把 EC CRM 里的员工、线索来源、客户标签先对齐到极享OS。</Typography>
               </Box>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                <Button variant="outlined" startIcon={<GroupAddIcon />} disabled={!result.employees.missing.length || syncing} onClick={createMissingEmployees}>
-                  创建缺失员工
-                </Button>
                 <Button variant="outlined" startIcon={<SourceIcon />} disabled={!result.sources.missing.length || syncing} onClick={syncSources}>
                   同步缺失来源
                 </Button>
@@ -286,21 +294,21 @@ const CrmMigration: React.FC = () => {
                 </Button>
               </Stack>
             </Stack>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>团队客户负责人</Typography>
             <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5}>
-              <NameList title="员工已匹配" names={result.employees.matched} empty="暂无匹配员工" color="success" />
-              <NameList title="员工待创建" names={result.employees.missing} empty="员工已全部匹配" color="warning" />
-              <NameList title="系统/自动账号" names={result.employees.system} empty="没有识别到系统账号" />
+              <NameList title="负责人已匹配" names={result.employees.matched} empty="暂无匹配负责人" color="success" />
+              <NameList title="负责人待创建" names={result.employees.missing} empty="负责人已全部匹配" color="warning" />
+              <NameList title="负责人姓名不唯一" names={result.employees.ambiguous} empty="没有重名负责人" color="warning" />
+            </Stack>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mt: 2, mb: 1 }}>客户标签</Typography>
+            <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5}>
+              <NameList title="标签已匹配" names={result.tags.matched} empty="暂无匹配标签" color="success" />
+              <NameList title="标签待同步" names={result.tags.missing} empty="标签已全部匹配" color="warning" />
+              <NameList title="标签名称不唯一" names={result.tags.ambiguous} empty="没有重名标签" color="warning" />
             </Stack>
           </Paper>
 
-          <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2}>
-            <Box sx={{ flex: 1 }}>
-              <NameList title="客户标签待补齐" names={result.tags.missing} empty="标签已全部匹配" color="warning" />
-            </Box>
-            <Box sx={{ flex: 1 }}>
-              <NameList title="客户进展口径" names={result.customerProgresses} empty="未识别客户进展字段" color="primary" />
-            </Box>
-          </Stack>
+          <NameList title="客户进展口径" names={result.customerProgresses} empty="未识别客户进展字段" color="primary" />
 
           <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #dbe3ef', borderRadius: 2 }}>
             <Box sx={{ p: 2 }}>
