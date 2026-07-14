@@ -133,6 +133,8 @@ const SOURCE_FIELDS = ['来源', '线索来源', '商机来源'];
 const PROGRESS_FIELDS = ['客户进展', '客户状态', '阶段'];
 
 const EMPTY_MARKERS = new Set(['', '-', '--', '无', '暂无', '待分配', '未分配']);
+const MISSING_OWNER_LABEL = '未填写负责人';
+const OWNER_EMPTY_MARKERS = new Set([...EMPTY_MARKERS, MISSING_OWNER_LABEL]);
 
 function ensureInit(): void {
   initializeMockData();
@@ -408,10 +410,11 @@ export function analyzeCrmMigrationTables(
   const activeTags = existing.tags.filter((tag) => tag.isActive && activeTagGroupIds.has(tag.groupId));
   const existingSourceKeys = buildExistingSourceKeys(existing.leadSourceConfigs);
 
-  const ownerNames = new Set((tables.teamCustomers || [])
+  const teamOwnerNames = (tables.teamCustomers || [])
     .map((row) => getAny(row, ['客户跟进人', '最后跟进人', '当前跟进人', '上一个跟进人']))
-    .map(normalizeValue)
-    .filter((name) => name && !EMPTY_MARKERS.has(name)));
+    .map(normalizeValue);
+  const hasMissingOwner = teamOwnerNames.some((name) => OWNER_EMPTY_MARKERS.has(name));
+  const ownerNames = new Set(teamOwnerNames.filter((name) => !OWNER_EMPTY_MARKERS.has(name)));
   const departments = new Set<string>();
   const tags = new Set<string>();
   const progresses = new Set<string>();
@@ -420,12 +423,14 @@ export function analyzeCrmMigrationTables(
   const allRows = FILE_KEYS.flatMap((key) => tables[key] || []);
   allRows.forEach((row) => {
     DEPARTMENT_FIELDS.forEach((field) => addSorted(departments, row[field]));
-    TAG_FIELDS.forEach((field) => splitList(row[field]).forEach((tag) => tags.add(tag)));
     PROGRESS_FIELDS.forEach((field) => addSorted(progresses, row[field]));
     SOURCE_FIELDS.forEach((field) => {
       const source = parseMigrationSource(row[field]);
       if (source) sourcesByKey.set(sourceKey(source), source);
     });
+  });
+  [...(tables.teamCustomers || []), ...(tables.publicPool || [])].forEach((row) => {
+    TAG_FIELDS.forEach((field) => splitList(row[field]).forEach((tag) => tags.add(tag)));
   });
 
   const allSources = [...sourcesByKey.values()].sort((a, b) => a.label.localeCompare(b.label, 'zh-Hans-CN'));
@@ -436,6 +441,13 @@ export function analyzeCrmMigrationTables(
   const publicPhones = collectPhones(tables.publicPool);
   const allOwners = [...ownerNames];
   const ownerMatch = matchExactNamesToUniqueIds(allOwners, users.map(({ id, name }) => ({ id: id || '', name })));
+  const employeeMatches = groupNameMatches(allOwners, ownerMatch);
+  if (hasMissingOwner) {
+    employeeMatches.all = [...employeeMatches.all, MISSING_OWNER_LABEL]
+      .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+    employeeMatches.missing = [...employeeMatches.missing, MISSING_OWNER_LABEL]
+      .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+  }
   const allTags = [...tags].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
   const tagMatch = matchExactNamesToUniqueIds(allTags, activeTags.map(({ id, name }) => ({ id, name })));
 
@@ -445,7 +457,7 @@ export function analyzeCrmMigrationTables(
       acc[key] = (tables[key] || []).length;
       return acc;
     }, { ...EMPTY_FILE_COUNTS }),
-    employees: groupNameMatches(allOwners, ownerMatch),
+    employees: employeeMatches,
     departments: [...departments].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')),
     sources: {
       all: allSources,

@@ -92,3 +92,34 @@ assert.deepEqual(unsafeNameResult.employees.matched, ['吕煜阳']);
 assert.deepEqual(unsafeNameResult.employees.missing, []);
 assert.deepEqual(unsafeNameResult.employees.ambiguous, []);
 assert.deepEqual(unsafeNameResult.tags.ambiguous, ['VIP']);
+
+const missingOwnerResult = analyzeCrmMigrationTables({
+  teamCustomers: [
+    { 客户全名: '未填负责人客户' },
+    { 客户全名: '待分配客户', 客户跟进人: '待分配' },
+    { 客户全名: '未分配客户', 客户跟进人: '未分配' },
+  ],
+}, {
+  users: [
+    { id: 'u-placeholder', name: '未填写负责人', isActive: true, employmentStatus: 'active' },
+    { id: 'u-pending', name: '待分配', isActive: true, employmentStatus: 'active' },
+  ],
+  leadSourceConfigs: [],
+  tagGroups: [],
+  tags: [],
+});
+assert.deepEqual(missingOwnerResult.employees.missing, ['未填写负责人']);
+assert.deepEqual(missingOwnerResult.employees.matched, []);
+
+const customerOnlyTagResult = analyzeCrmMigrationTables({
+  teamCustomers: [{ 客户跟进人: '张伟', 客户标签: '团队客户标签' }],
+  teamContacts: [{ 客户标签: '联系人备注标签' }],
+  publicPool: [{ 客户标签: '公海客户标签' }],
+}, {
+  users: [{ id: 'u-zhang', name: '张伟', isActive: true, employmentStatus: 'active' }],
+  leadSourceConfigs: [],
+  tagGroups: [],
+  tags: [],
+});
+assert.deepEqual(customerOnlyTagResult.tags.all, ['公海客户标签', '团队客户标签']);
+assert.equal(customerOnlyTagResult.tags.all.includes('联系人备注标签'), false);
