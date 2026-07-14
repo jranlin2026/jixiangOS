@@ -141,6 +141,18 @@ storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
   isActive: true,
   createdAt: now,
   updatedAt: now,
+}, {
+  id: 'user-zhao-min',
+  name: '赵敏',
+  account: 'zhao_min',
+  email: '',
+  phone: '',
+  role: '销售专员',
+  roleId: 'role-sales',
+  departmentId: 'dept-sales',
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
 }]));
 storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([{
   id: 'role-admin',
@@ -204,7 +216,7 @@ assert.equal(updatedLead.city, '广州');
 assert.equal(updatedLead.remark, '客户资料已完善');
 assert.deepEqual(updatedLead.changeHistory?.[0]?.changes?.map((item) => item.field), ['phone', 'industry', 'city', 'assignedTo', 'remark']);
 
-const assignRes = await customerApi.assignCustomerOwner('cust-test', '赵敏', '主管重新分配');
+const assignRes = await customerApi.assignCustomerOwner('cust-test', 'user-zhao-min', '主管重新分配');
 assert.equal(assignRes.code, 0);
 assert.equal(assignRes.data?.owner, '赵敏');
 assert.equal(assignRes.data?.previousOwner, '李娜');

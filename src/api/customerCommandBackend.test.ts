@@ -84,14 +84,14 @@ try {
   }) as typeof fetch;
 
   assert.equal((await customerApi.claimCustomerFromPublicPool('customer-command', '伪造用户名')).data?.owner, '当前销售');
-  assert.equal((await customerApi.assignCustomerOwner('customer-command', '销售B', '主管分配')).data?.owner, '销售B');
+  assert.equal((await customerApi.assignCustomerOwner('customer-command', 'user-sales-b', '主管分配')).data?.owner, '销售B');
   assert.equal((await customerApi.updateCustomer('customer-command', { name: '客户端伪造名称' })).data?.name, '服务端更新客户');
   assert.equal((await customerApi.deleteCustomer('customer-command', '重复客户')).data, true);
   assert.equal((await leadFlowApi.claimLeadAsCustomer('lead-command', '伪造用户名')).data?.customerId, 'customer-from-lead');
 
   assert.deepEqual(requests, [
     { url: 'http://127.0.0.1:3001/api/customers/customer-command/claim', method: 'POST', body: undefined },
-    { url: 'http://127.0.0.1:3001/api/customers/customer-command/assign', method: 'POST', body: { owner: '销售B', reason: '主管分配' } },
+    { url: 'http://127.0.0.1:3001/api/customers/customer-command/assign', method: 'POST', body: { ownerId: 'user-sales-b', reason: '主管分配' } },
     { url: 'http://127.0.0.1:3001/api/customers/customer-command', method: 'PUT', body: { name: '客户端伪造名称' } },
     { url: 'http://127.0.0.1:3001/api/customers/customer-command', method: 'DELETE', body: { reason: '重复客户' } },
     { url: 'http://127.0.0.1:3001/api/leads/lead-command/convert', method: 'POST', body: undefined },

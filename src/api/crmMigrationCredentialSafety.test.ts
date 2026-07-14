@@ -8,5 +8,4 @@ const compromisedSharedCredential = ['Jixiang', '88'].join('');
 assert.equal(source.includes(compromisedSharedCredential), false, '迁移向导不得包含已泄露的共享凭据');
 assert.doesNotMatch(source, /settingsApi\.createUser/);
 assert.doesNotMatch(source, /password\s*:/);
-assert.match(source, /批量创建员工账号已暂停/);
-assert.match(source, /唯一初始密码/);
+assert.doesNotMatch(source, /创建缺失员工|批量创建员工账号|唯一初始密码/);
