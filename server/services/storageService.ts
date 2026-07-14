@@ -14,6 +14,7 @@ const BUSINESS_RECORD_ID_MAX_LENGTH = 160;
 const BUSINESS_RECORD_RECORD_ID_MAX_LENGTH = 80;
 const CRM_MIGRATION_BATCH_SIZE = 250;
 const CRM_MIGRATION_TRANSACTION_TIMEOUT_MS = 120_000;
+const CRM_MISSING_OWNER_MARKERS = new Set(['', '待分配', '未分配', '未填写负责人']);
 const STRUCTURED_KEYS = new Set<string>([STORAGE_KEYS.LEADS]);
 const BUSINESS_RECORD_KEYS = new Set<string>([
   STORAGE_KEYS.CUSTOMERS,
@@ -330,11 +331,10 @@ export function createStorageService(prisma: StoragePrisma) {
 
     return prisma.$transaction(async (tx) => {
       const rawCustomers = customers.map(normalizeLead);
-      const hasMissingOwner = rawCustomers.some((item) => normalizeExactName(item.owner) !== '公海'
-        && !normalizeExactName(item.owner));
+      const hasMissingOwner = rawCustomers.some((item) => CRM_MISSING_OWNER_MARKERS.has(normalizeExactName(item.owner)));
       const ownerNames = rawCustomers
         .map((item) => normalizeExactName(item.owner))
-        .filter((name) => name && name !== '公海');
+        .filter((name) => !CRM_MISSING_OWNER_MARKERS.has(name) && name !== '公海');
       const tagNames = rawCustomers.flatMap((item) => importedTagNames(item.tags));
       const [directoryUsers, catalog] = await Promise.all([
         ownerNames.length > 0 ? tx.user.findMany() : Promise.resolve([]),

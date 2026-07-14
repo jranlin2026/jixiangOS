@@ -378,13 +378,18 @@ const identityTags = [
 ];
 const identityMigrationPrisma: any = {
   user: {
-    findMany: async () => [{
-      id: 'u-1', name: '吕煜阳', account: 'lv_yuyang', email: '', phone: '', role: '销售顾问',
-      avatar: null, departmentId: 'dept-sales', positionId: null, positionName: null,
-      roleId: 'role-sales-consultant', passwordHash: '', passwordSalt: '', passwordUpdatedAt: null,
-      lastLoginAt: null, isActive: true, employmentStatus: 'active', leftAt: null, leftBy: null,
-      createdAt: new Date('2026-07-14T00:00:00.000Z'), updatedAt: new Date('2026-07-14T00:00:00.000Z'),
-    }],
+    findMany: async () => [
+      {
+        id: 'u-1', name: '吕煜阳', account: 'lv_yuyang', email: '', phone: '', role: '销售顾问',
+        avatar: null, departmentId: 'dept-sales', positionId: null, positionName: null,
+        roleId: 'role-sales-consultant', passwordHash: '', passwordSalt: '', passwordUpdatedAt: null,
+        lastLoginAt: null, isActive: true, employmentStatus: 'active', leftAt: null, leftBy: null,
+        createdAt: new Date('2026-07-14T00:00:00.000Z'), updatedAt: new Date('2026-07-14T00:00:00.000Z'),
+      },
+      { id: 'u-placeholder-pending', name: '待分配', isActive: true, employmentStatus: 'active' },
+      { id: 'u-placeholder-unassigned', name: '未分配', isActive: true, employmentStatus: 'active' },
+      { id: 'u-placeholder-missing', name: '未填写负责人', isActive: true, employmentStatus: 'active' },
+    ],
   },
   businessRecord: {
     findMany: async ({ where }: any) => {
@@ -407,6 +412,14 @@ const missingEmptyOwnerResult = await identityMigrationService.importCrmMigratio
 ]);
 assert.equal(missingEmptyOwnerResult.code, 409);
 assert.equal(identityCreatedRows.length, 0, '团队客户负责人为空时整批不得写入');
+
+const placeholderOwnerResult = await identityMigrationService.importCrmMigration([
+  { id: 'identity-pending-owner', owner: '待分配', tags: [] },
+  { id: 'identity-unassigned-owner', owner: '未分配', tags: [] },
+  { id: 'identity-missing-label-owner', owner: '未填写负责人', tags: [] },
+]);
+assert.equal(placeholderOwnerResult.code, 409);
+assert.equal(identityCreatedRows.length, 0, '占位负责人即使存在同名在职员工也必须整批零写入');
 
 const missingOwnerResult = await identityMigrationService.importCrmMigration([
   { id: 'identity-missing-owner', owner: '不存在', tags: [] },
