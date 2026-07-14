@@ -354,6 +354,7 @@ bulkMigrationPrisma.$transaction = async (callback: (tx: any) => Promise<unknown
 const bulkCustomers = Array.from({ length: 1_200 }, (_, index) => ({
   id: `bulk-customer-${index}`,
   name: `Customer ${index}`,
+  owner: '公海',
   createdAt: '2026-07-13T00:00:00.000Z',
   updatedAt: '2026-07-13T00:00:00.000Z',
 }));
@@ -401,6 +402,12 @@ const identityMigrationPrisma: any = {
 identityMigrationPrisma.$transaction = async (callback: (tx: any) => Promise<unknown>) => callback(identityMigrationPrisma);
 const identityMigrationService = createStorageService(identityMigrationPrisma);
 
+const missingEmptyOwnerResult = await identityMigrationService.importCrmMigration([
+  { id: 'identity-empty-owner', owner: '', tags: [] },
+]);
+assert.equal(missingEmptyOwnerResult.code, 409);
+assert.equal(identityCreatedRows.length, 0, '团队客户负责人为空时整批不得写入');
+
 const missingOwnerResult = await identityMigrationService.importCrmMigration([
   { id: 'identity-missing-owner', owner: '不存在', tags: [] },
 ]);
@@ -429,6 +436,13 @@ assert.equal(identityCreatedRows[0].data.ownerIdentityStatus, 'resolved');
 assert.deepEqual(identityCreatedRows[0].data.manualTagIds, ['tag-intent']);
 assert.deepEqual(identityCreatedRows[0].data.tags, ['高意向']);
 
+const publicPoolResult = await identityMigrationService.importCrmMigration([
+  { id: 'identity-public-pool', owner: '公海', tags: [] },
+]);
+assert.equal(publicPoolResult.code, 0);
+assert.equal(identityCreatedRows[1].data.ownerId, undefined);
+assert.equal(identityCreatedRows[1].data.ownerIdentityStatus, 'public_pool');
+
 const deduplicatedMigrationBatches: any[][] = [];
 const duplicateAwareMigrationPrisma: any = {
   businessRecord: {
@@ -444,9 +458,9 @@ const duplicateAwareMigrationPrisma: any = {
 duplicateAwareMigrationPrisma.$transaction = async (callback: (tx: any) => Promise<unknown>) => callback(duplicateAwareMigrationPrisma);
 
 const duplicateAwareMigrationResult = await createStorageService(duplicateAwareMigrationPrisma).importCrmMigration([
-  { id: 'duplicate-phone', name: '重复手机号', phone: '13800000001' },
-  { id: 'duplicate-wechat', name: '重复微信', wechat: 'existing-wechat' },
-  { id: 'new-customer', name: '新客户', phone: '13900000001', wechat: 'new-wechat' },
+  { id: 'duplicate-phone', name: '重复手机号', phone: '13800000001', owner: '公海' },
+  { id: 'duplicate-wechat', name: '重复微信', wechat: 'existing-wechat', owner: '公海' },
+  { id: 'new-customer', name: '新客户', phone: '13900000001', wechat: 'new-wechat', owner: '公海' },
 ]);
 assert.equal(duplicateAwareMigrationResult.code, 0);
 assert.deepEqual(duplicateAwareMigrationResult.data, {

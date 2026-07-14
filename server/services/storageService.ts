@@ -330,6 +330,8 @@ export function createStorageService(prisma: StoragePrisma) {
 
     return prisma.$transaction(async (tx) => {
       const rawCustomers = customers.map(normalizeLead);
+      const hasMissingOwner = rawCustomers.some((item) => normalizeExactName(item.owner) !== '公海'
+        && !normalizeExactName(item.owner));
       const ownerNames = rawCustomers
         .map((item) => normalizeExactName(item.owner))
         .filter((name) => name && name !== '公海');
@@ -350,6 +352,7 @@ export function createStorageService(prisma: StoragePrisma) {
       const ownerMatch = matchExactNamesToUniqueIds(ownerNames, activeUsers);
       const tagMatch = matchExactNamesToUniqueIds(tagNames, activeTags);
       const blockers = [
+        hasMissingOwner ? '以下负责人尚未创建员工：未填写负责人' : '',
         ownerMatch.missing.length ? `以下负责人尚未创建员工：${ownerMatch.missing.join('、')}` : '',
         ownerMatch.ambiguous.length ? `以下负责人存在多个同名员工，无法确定归属：${ownerMatch.ambiguous.join('、')}` : '',
         tagMatch.missing.length ? `以下标签尚未同步：${tagMatch.missing.join('、')}` : '',
@@ -380,7 +383,7 @@ export function createStorageService(prisma: StoragePrisma) {
       let skippedDuplicates = 0;
       rawCustomers.forEach((rawItem, index) => {
         const ownerName = normalizeExactName(rawItem.owner);
-        const publicPool = !ownerName || ownerName === '公海';
+        const publicPool = ownerName === '公海';
         const resolvedTagIds = importedTagNames(rawItem.tags).map((name) => tagIdsByKey.get(exactNameKey(name)) as string);
         const item: Record<string, any> = {
           ...rawItem,
