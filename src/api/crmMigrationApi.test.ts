@@ -38,20 +38,57 @@ const result = analyzeCrmMigrationTables({
   ],
 }, {
   users: [
-    { name: '张伟', isActive: true, employmentStatus: 'active' },
+    { id: 'u-zhang', name: '张伟', isActive: true, employmentStatus: 'active' },
   ],
   leadSourceConfigs: existingSource,
+  tagGroups: [
+    {
+      id: 'g-customer', name: '客户标签', color: '#000000', selectionMode: 'multiple', scope: 'customer',
+      isActive: true, sortOrder: 1, createdAt: now, updatedAt: now,
+    },
+  ],
   tags: [
-    { name: '重点客户', isActive: true },
+    { id: 'tag-priority', groupId: 'g-customer', name: '重点客户', isActive: true },
   ],
 });
 
 assert.equal(result.customerStats.teamCustomers, 1);
 assert.equal(result.customerStats.publicPoolCustomers, 1);
 assert.deepEqual(result.employees.matched, ['张伟']);
-assert.deepEqual(result.employees.missing.sort(), ['李娜']);
+assert.deepEqual(result.employees.missing, []);
 assert.deepEqual(result.employees.system, []);
 assert.deepEqual(result.tags.matched, ['重点客户']);
 assert.deepEqual(result.tags.missing.sort(), ['公海', '高意向']);
 assert.equal(result.sources.matched.some((source) => source.label === '官网-表单'), true);
 assert.equal(result.sources.missing.some((source) => source.label === '直播部-抖音01'), true);
+
+const unsafeNameResult = analyzeCrmMigrationTables({
+  teamCustomers: [
+    { 客户跟进人: '吕煜阳', 客户创建人: '历史操作员', 客户标签: '高意向,VIP' },
+  ],
+  publicPool: [{ 客户跟进人: '不存在的原负责人' }],
+}, {
+  users: [
+    { id: 'u-1', name: '吕煜阳', isActive: true, employmentStatus: 'active' },
+  ],
+  leadSourceConfigs: [],
+  tagGroups: [
+    {
+      id: 'g-1', name: '意向', color: '#000000', selectionMode: 'multiple', scope: 'customer',
+      isActive: true, sortOrder: 1, createdAt: now, updatedAt: now,
+    },
+    {
+      id: 'g-2', name: '价值', color: '#000000', selectionMode: 'multiple', scope: 'both',
+      isActive: true, sortOrder: 2, createdAt: now, updatedAt: now,
+    },
+  ],
+  tags: [
+    { id: 'tag-1', groupId: 'g-1', name: '高意向', isActive: true },
+    { id: 'tag-2', groupId: 'g-1', name: 'VIP', isActive: true },
+    { id: 'tag-3', groupId: 'g-2', name: 'vip', isActive: true },
+  ],
+});
+assert.deepEqual(unsafeNameResult.employees.matched, ['吕煜阳']);
+assert.deepEqual(unsafeNameResult.employees.missing, []);
+assert.deepEqual(unsafeNameResult.employees.ambiguous, []);
+assert.deepEqual(unsafeNameResult.tags.ambiguous, ['VIP']);

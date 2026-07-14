@@ -2,9 +2,10 @@ import type { Row } from 'exceljs';
 import excelJsBrowserUrl from 'exceljs/dist/exceljs.min.js?url';
 import { v4 as uuidv4 } from 'uuid';
 import type { Customer, CustomerActivityRecord } from '../types/customer';
-import type { CustomerTag, CustomerTagCatalog } from '../types/tag';
+import type { CustomerTag, CustomerTagCatalog, CustomerTagGroup } from '../types/tag';
 import type { LeadSourceConfig, User } from '../types/settings';
 import { DEFAULT_LEAD_SOURCE_CONFIGS, STORAGE_KEYS } from '../shared/utils/constants';
+import { matchExactNamesToUniqueIds, type ExactNameIdentityMatch } from '../shared/utils/exactNameIdentity';
 import { initializeMockData } from './mock';
 import { getStorageData, setStorageData } from './mock/storage';
 import { backendRequest, shouldUseBackendApi } from './backendClient';
@@ -40,6 +41,7 @@ export interface CrmMigrationNameGroup {
   all: string[];
   matched: string[];
   missing: string[];
+  ambiguous: string[];
   system: string[];
 }
 
@@ -103,7 +105,8 @@ type CrmMigrationPersistenceResult = {
 export interface CrmMigrationExistingData {
   users?: Array<Pick<User, 'name' | 'isActive' | 'employmentStatus'> & Partial<Pick<User, 'id'>>>;
   leadSourceConfigs?: LeadSourceConfig[];
-  tags?: Array<Pick<CustomerTag, 'name' | 'isActive'>>;
+  tagGroups?: CustomerTagGroup[];
+  tags?: Array<Pick<CustomerTag, 'id' | 'groupId' | 'name' | 'isActive'>>;
 }
 
 type ExcelJsNamespace = typeof import('exceljs');
@@ -124,24 +127,11 @@ const EMPTY_FILE_COUNTS: Record<CrmMigrationFileKey, number> = {
   publicPool: 0,
 };
 
-const EMPLOYEE_FIELDS = [
-  '客户跟进人',
-  '上一个跟进人',
-  '客户创建人',
-  '线索录入人',
-  '最后跟进人',
-  '当前商机接收人',
-  '当前跟进人',
-  '分配人',
-  '创建人',
-];
-
 const DEPARTMENT_FIELDS = ['部门', '上一个跟进人部门', '最后跟进人部门', '所属部门'];
 const TAG_FIELDS = ['标签', '客户标签'];
 const SOURCE_FIELDS = ['来源', '线索来源', '商机来源'];
 const PROGRESS_FIELDS = ['客户进展', '客户状态', '阶段'];
 
-const SYSTEM_NAMES = new Set(['系统', '系统管理员', '自动分配']);
 const EMPTY_MARKERS = new Set(['', '-', '--', '无', '暂无', '待分配', '未分配']);
 
 function ensureInit(): void {
@@ -189,16 +179,6 @@ function addSorted(set: Set<string>, value: string): void {
   const normalized = normalizeValue(value);
   if (!normalized || EMPTY_MARKERS.has(normalized)) return;
   set.add(normalized);
-}
-
-function addNameValues(set: Set<string>, systemSet: Set<string>, value: string): void {
-  splitList(value).forEach((name) => {
-    if (SYSTEM_NAMES.has(name)) {
-      systemSet.add(name);
-      return;
-    }
-    set.add(name);
-  });
 }
 
 function collectPhones(rows: MigrationRow[] = []): Set<string> {
@@ -377,11 +357,12 @@ function sourceKey(source: CrmMigrationSourceCandidate): string {
 }
 
 function getExistingData(overrides: CrmMigrationExistingData = {}): Required<CrmMigrationExistingData> {
-  const hasCompleteOverrides = Boolean(overrides.users && overrides.leadSourceConfigs && overrides.tags);
+  const hasCompleteOverrides = Boolean(overrides.users && overrides.leadSourceConfigs && overrides.tagGroups && overrides.tags);
   if (!hasCompleteOverrides) ensureInit();
   return {
     users: overrides.users || getStorageData<User[]>(STORAGE_KEYS.USERS) || [],
     leadSourceConfigs: overrides.leadSourceConfigs || getStorageData<LeadSourceConfig[]>(STORAGE_KEYS.LEAD_SOURCE_CONFIGS) || DEFAULT_LEAD_SOURCE_CONFIGS,
+    tagGroups: overrides.tagGroups || getStorageData<CustomerTagGroup[]>(STORAGE_KEYS.TAG_GROUPS) || [],
     tags: overrides.tags || getStorageData<CustomerTag[]>(STORAGE_KEYS.TAGS) || [],
   };
 }
@@ -405,13 +386,13 @@ function buildExistingSourceKeys(configs: LeadSourceConfig[]): Set<string> {
   return keys;
 }
 
-function groupNames(values: Set<string>, existingNames: Set<string>, systemSet: Set<string> = new Set()): CrmMigrationNameGroup {
-  const all = [...values].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+function groupNameMatches(all: string[], match: ExactNameIdentityMatch): CrmMigrationNameGroup {
   return {
     all,
-    matched: all.filter((name) => existingNames.has(name.toLowerCase())),
-    missing: all.filter((name) => !existingNames.has(name.toLowerCase())),
-    system: [...systemSet].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')),
+    matched: match.matched,
+    missing: match.missing,
+    ambiguous: match.ambiguous,
+    system: [],
   };
 }
 
@@ -421,12 +402,16 @@ export function analyzeCrmMigrationTables(
 ): CrmMigrationPrecheckResult {
   const existing = getExistingData(existingOverrides);
   const users = existing.users.filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active');
-  const existingUserNames = new Set(users.map((user) => user.name.trim().toLowerCase()).filter(Boolean));
-  const existingTagNames = new Set(existing.tags.map((tag) => tag.name.trim().toLowerCase()).filter(Boolean));
+  const activeTagGroupIds = new Set(existing.tagGroups
+    .filter((group) => group.isActive && (group.scope === 'customer' || group.scope === 'both'))
+    .map((group) => group.id));
+  const activeTags = existing.tags.filter((tag) => tag.isActive && activeTagGroupIds.has(tag.groupId));
   const existingSourceKeys = buildExistingSourceKeys(existing.leadSourceConfigs);
 
-  const employeeNames = new Set<string>();
-  const systemNames = new Set<string>();
+  const ownerNames = new Set((tables.teamCustomers || [])
+    .map((row) => getAny(row, ['客户跟进人', '最后跟进人', '当前跟进人', '上一个跟进人']))
+    .map(normalizeValue)
+    .filter((name) => name && !EMPTY_MARKERS.has(name)));
   const departments = new Set<string>();
   const tags = new Set<string>();
   const progresses = new Set<string>();
@@ -434,7 +419,6 @@ export function analyzeCrmMigrationTables(
 
   const allRows = FILE_KEYS.flatMap((key) => tables[key] || []);
   allRows.forEach((row) => {
-    EMPLOYEE_FIELDS.forEach((field) => addNameValues(employeeNames, systemNames, row[field]));
     DEPARTMENT_FIELDS.forEach((field) => addSorted(departments, row[field]));
     TAG_FIELDS.forEach((field) => splitList(row[field]).forEach((tag) => tags.add(tag)));
     PROGRESS_FIELDS.forEach((field) => addSorted(progresses, row[field]));
@@ -450,6 +434,10 @@ export function analyzeCrmMigrationTables(
 
   const teamPhones = collectPhones(tables.teamCustomers);
   const publicPhones = collectPhones(tables.publicPool);
+  const allOwners = [...ownerNames];
+  const ownerMatch = matchExactNamesToUniqueIds(allOwners, users.map(({ id, name }) => ({ id: id || '', name })));
+  const allTags = [...tags].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+  const tagMatch = matchExactNamesToUniqueIds(allTags, activeTags.map(({ id, name }) => ({ id, name })));
 
   return {
     generatedAt: new Date().toISOString(),
@@ -457,14 +445,14 @@ export function analyzeCrmMigrationTables(
       acc[key] = (tables[key] || []).length;
       return acc;
     }, { ...EMPTY_FILE_COUNTS }),
-    employees: groupNames(employeeNames, existingUserNames, systemNames),
+    employees: groupNameMatches(allOwners, ownerMatch),
     departments: [...departments].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')),
     sources: {
       all: allSources,
       matched: matchedSources,
       missing: missingSources,
     },
-    tags: groupNames(tags, existingTagNames),
+    tags: groupNameMatches(allTags, tagMatch),
     customerProgresses: [...progresses].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')),
     customerStats: {
       teamCustomers: (tables.teamCustomers || []).length,
@@ -610,7 +598,10 @@ async function precheckFiles(files: CrmMigrationFileMap): Promise<ApiResponse<Cr
   }, {} as CrmMigrationTables);
   const catalogResponse = await fetchCustomerTagCatalog('all', true);
   if (catalogResponse.code !== 0 || !catalogResponse.data) return catalogResponse as unknown as ApiResponse<CrmMigrationPrecheckResult>;
-  return createSuccessResponse(analyzeCrmMigrationTables(tables, { tags: catalogResponse.data.tags }));
+  return createSuccessResponse(analyzeCrmMigrationTables(tables, {
+    tagGroups: catalogResponse.data.groups,
+    tags: catalogResponse.data.tags,
+  }));
 }
 
 async function persistImportedMigration(customers: Customer[]): Promise<ApiResponse<CrmMigrationPersistenceResult>> {
