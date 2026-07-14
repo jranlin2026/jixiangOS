@@ -1,4 +1,24 @@
-import type { CrmMigrationPrecheckResult } from '../../api/crmMigrationApi';
+import type { CrmMigrationFileMap, CrmMigrationPrecheckResult } from '../../api/crmMigrationApi';
+
+const CRM_MIGRATION_FILE_KEYS = ['teamCustomers', 'teamContacts', 'publicPool'] as const;
+
+export interface CrmMigrationPrecheckAttempt {
+  requestId: number;
+  files: CrmMigrationFileMap;
+}
+
+export function snapshotCrmMigrationFiles(files: CrmMigrationFileMap): CrmMigrationFileMap {
+  return { ...files };
+}
+
+export function isCurrentCrmMigrationPrecheck(
+  attempt: CrmMigrationPrecheckAttempt,
+  latestRequestId: number,
+  currentFiles: CrmMigrationFileMap,
+): boolean {
+  return attempt.requestId === latestRequestId
+    && CRM_MIGRATION_FILE_KEYS.every((key) => attempt.files[key] === currentFiles[key]);
+}
 
 export function getCrmMigrationImportBlockers(result: CrmMigrationPrecheckResult): string[] {
   return [

@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
-import { canImportCrmMigration, getCrmMigrationImportBlockers } from './crmMigrationImportState';
+import {
+  canImportCrmMigration,
+  getCrmMigrationImportBlockers,
+  isCurrentCrmMigrationPrecheck,
+  snapshotCrmMigrationFiles,
+} from './crmMigrationImportState';
 
 const result = {
   employees: { all: ['吕煜阳'], matched: [], missing: ['吕煜阳'], ambiguous: [], system: [] },
@@ -29,3 +34,23 @@ const safe = {
 
 assert.equal(canImportCrmMigration(safe), true);
 assert.deepEqual(getCrmMigrationImportBlockers(safe), []);
+
+const firstTeamFile = new File(['first'], 'first.xlsx');
+const secondTeamFile = new File(['second'], 'second.xlsx');
+const firstFiles = { teamCustomers: firstTeamFile };
+const firstAttempt = {
+  requestId: 1,
+  files: snapshotCrmMigrationFiles(firstFiles),
+};
+
+assert.equal(isCurrentCrmMigrationPrecheck(firstAttempt, 1, firstFiles), true);
+assert.equal(
+  isCurrentCrmMigrationPrecheck(firstAttempt, 2, firstFiles),
+  false,
+  'an older response must not replace a newer precheck response',
+);
+assert.equal(
+  isCurrentCrmMigrationPrecheck(firstAttempt, 1, { teamCustomers: secondTeamFile }),
+  false,
+  'a response for an old file selection must not replace the current result',
+);

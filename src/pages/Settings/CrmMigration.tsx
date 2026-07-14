@@ -24,7 +24,12 @@ import MoveToInboxIcon from '@mui/icons-material/MoveToInbox';
 import type { CrmMigrationFileKey, CrmMigrationFileMap, CrmMigrationPrecheckResult } from '../../api/crmMigrationApi';
 import { crmMigrationApi } from '../../api/crmMigrationApi';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
-import { canImportCrmMigration, getCrmMigrationImportBlockers } from './crmMigrationImportState';
+import {
+  canImportCrmMigration,
+  getCrmMigrationImportBlockers,
+  isCurrentCrmMigrationPrecheck,
+  snapshotCrmMigrationFiles,
+} from './crmMigrationImportState';
 
 const FILE_SLOTS: Array<{ key: CrmMigrationFileKey; label: string; description: string; accept: string }> = [
   {
@@ -86,14 +91,23 @@ const CrmMigration: React.FC = () => {
   const [result, setResult] = useState<CrmMigrationPrecheckResult | null>(null);
   const [ownerBackfillBusy, setOwnerBackfillBusy] = useState(false);
   const fileInputs = useRef<Partial<Record<CrmMigrationFileKey, HTMLInputElement | null>>>({});
+  const filesRef = useRef<CrmMigrationFileMap>({});
+  const precheckRequestId = useRef(0);
 
   const selectedCount = useMemo(() => Object.values(files).filter(Boolean).length, [files]);
-  const canPrecheck = selectedCount > 0 && !checking;
+  const fileSelectionBusy = checking || syncing || importing;
+  const canPrecheck = selectedCount > 0 && !fileSelectionBusy;
   const importBlockers = useMemo(() => result ? getCrmMigrationImportBlockers(result) : [], [result]);
 
   const runPrecheck = async (nextFiles: CrmMigrationFileMap = files) => {
+    const attempt = {
+      requestId: ++precheckRequestId.current,
+      files: snapshotCrmMigrationFiles(nextFiles),
+    };
+    setResult(null);
     setChecking(true);
-    const response = await crmMigrationApi.precheckFiles(nextFiles);
+    const response = await crmMigrationApi.precheckFiles(attempt.files);
+    if (!isCurrentCrmMigrationPrecheck(attempt, precheckRequestId.current, filesRef.current)) return;
     setChecking(false);
     if (response.code !== 0 || !response.data) {
       await alert(response.message || 'EC CRM 文件预检失败，请检查文件格式。', '预检失败');
@@ -103,8 +117,10 @@ const CrmMigration: React.FC = () => {
   };
 
   const handlePickFile = (key: CrmMigrationFileKey, file: File | undefined) => {
-    if (!file) return;
+    if (!file || fileSelectionBusy) return;
     const nextFiles = { ...files, [key]: file };
+    precheckRequestId.current += 1;
+    filesRef.current = nextFiles;
     setFiles(nextFiles);
     setResult(null);
   };
@@ -113,26 +129,28 @@ const CrmMigration: React.FC = () => {
     if (!result?.sources.missing.length) return;
     setSyncing(true);
     const response = await crmMigrationApi.syncLeadSources(result.sources.missing);
-    setSyncing(false);
     if (response.code !== 0) {
+      setSyncing(false);
       await alert(response.message || '线索来源同步失败。', '同步失败');
       return;
     }
     await alert(`已补齐 ${response.data?.created || 0} 条来源配置。`, '来源同步完成');
-    await runPrecheck();
+    await runPrecheck(filesRef.current);
+    setSyncing(false);
   };
 
   const syncTags = async () => {
     if (!result?.tags.missing.length) return;
     setSyncing(true);
     const response = await crmMigrationApi.syncTags(result.tags.missing);
-    setSyncing(false);
     if (response.code !== 0) {
+      setSyncing(false);
       await alert(response.message || '客户标签同步失败。', '同步失败');
       return;
     }
     await alert(`已补齐 ${response.data?.created || 0} 个客户标签。`, '标签同步完成');
-    await runPrecheck();
+    await runPrecheck(filesRef.current);
+    setSyncing(false);
   };
 
   const importCustomers = async () => {
@@ -148,8 +166,8 @@ const CrmMigration: React.FC = () => {
 
     setImporting(true);
     const response = await crmMigrationApi.importFiles(files);
-    setImporting(false);
     if (response.code !== 0 || !response.data) {
+      setImporting(false);
       await alert(response.message || '客户资料导入失败，请检查文件后重试。', '导入失败');
       return;
     }
@@ -161,7 +179,8 @@ const CrmMigration: React.FC = () => {
       ].join('\n'),
       '导入完成',
     );
-    await runPrecheck();
+    await runPrecheck(filesRef.current);
+    setImporting(false);
   };
 
   const organizeHistoricalOwners = async () => {
@@ -237,7 +256,13 @@ const CrmMigration: React.FC = () => {
                   variant={files[slot.key] ? 'filled' : 'outlined'}
                   sx={{ justifyContent: 'flex-start', maxWidth: '100%' }}
                 />
-                <Button size="small" variant="outlined" startIcon={<CloudUploadIcon />} onClick={() => fileInputs.current[slot.key]?.click()}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<CloudUploadIcon />}
+                  disabled={fileSelectionBusy}
+                  onClick={() => fileInputs.current[slot.key]?.click()}
+                >
                   选择文件
                 </Button>
                 <input
@@ -245,6 +270,7 @@ const CrmMigration: React.FC = () => {
                   hidden
                   type="file"
                   accept={slot.accept}
+                  disabled={fileSelectionBusy}
                   onChange={(event) => handlePickFile(slot.key, event.target.files?.[0])}
                 />
               </Stack>
