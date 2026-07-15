@@ -12,6 +12,7 @@ export type DataScopeDomain =
   | 'leads'
   | 'customers'
   | 'orders'
+  | 'deliveries'
   | 'orderApplications'
   | 'recoveryOrders'
   | 'recoveryOrderApplications'

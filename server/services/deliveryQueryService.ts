@@ -57,7 +57,7 @@ async function loadScope(prisma: DeliveryQueryPrisma, actor: AuthenticatedUser):
     users.map(mapPrismaUser),
     roles.map(mapPrismaRole),
     departments as any,
-    'orders',
+    'deliveries',
   );
 }
 

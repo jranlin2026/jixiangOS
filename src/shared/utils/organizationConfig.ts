@@ -13,6 +13,7 @@ const DATA_SCOPE_DOMAINS: DataScopeDomain[] = [
   'leads',
   'customers',
   'orders',
+  'deliveries',
   'orderApplications',
   'recoveryOrders',
   'recoveryOrderApplications',
@@ -275,8 +276,9 @@ function buildDataScopes(
   recoveryOrders: DataScopeLevel = orders,
   recoveryOrderApplications: DataScopeLevel = orderApplications,
   assets: DataScopeLevel = customers,
+  deliveries: DataScopeLevel = orders,
 ): Required<Record<DataScopeDomain, DataScopeLevel>> {
-  return { leads, customers, orders, orderApplications, recoveryOrders, recoveryOrderApplications, assets };
+  return { leads, customers, orders, deliveries, orderApplications, recoveryOrders, recoveryOrderApplications, assets };
 }
 
 function defaultRoleDataScopes(code?: string): Required<Record<DataScopeDomain, DataScopeLevel>> {
@@ -311,6 +313,8 @@ export function normalizeRoleDataScopes(role: Pick<Role, 'code'> & { dataScopes?
     const value = role.dataScopes?.[domain];
     acc[domain] = isDataScopeLevel(value)
       ? value
+      : domain === 'deliveries' && isDataScopeLevel(role.dataScopes?.orders)
+        ? role.dataScopes.orders
       : domain === 'recoveryOrderApplications' && hasRecoveryReviewPermission(role)
         ? 'all'
         : defaults[domain];

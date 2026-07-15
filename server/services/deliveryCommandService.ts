@@ -102,8 +102,8 @@ async function loadDirectory(prisma: DeliveryCommandPrisma): Promise<Directory> 
   };
 }
 
-function orderScope(directory: Directory, actor: AuthenticatedUser): DataVisibilityScope {
-  return buildDataVisibilityScopeForUser(actor, directory.users, directory.roles, directory.departments, 'orders');
+function deliveryScope(directory: Directory, actor: AuthenticatedUser): DataVisibilityScope {
+  return buildDataVisibilityScopeForUser(actor, directory.users, directory.roles, directory.departments, 'deliveries');
 }
 
 function relationVisible(
@@ -305,7 +305,7 @@ export function createDeliveryCommandService(
       return failure(denied.message, denied.responseCode);
     }
     const directory = await loadDirectory(prisma);
-    const scope = orderScope(directory, actor);
+    const scope = deliveryScope(directory, actor);
     const result = await execute(() => prisma.$transaction(async (transaction) => {
       const initial = await transaction.businessRecord.findUnique({
         where: { domain_recordId: { domain: STORAGE_KEYS.DELIVERIES, recordId: deliveryId } },
@@ -340,7 +340,7 @@ export function createDeliveryCommandService(
         return failure(denied.message, denied.responseCode);
       }
       const directory = await loadDirectory(prisma);
-      const scope = orderScope(directory, actor);
+      const scope = deliveryScope(directory, actor);
       const cleanOrderId = String(orderId || '').trim();
       if (!cleanOrderId) return failure('订单ID不能为空', 400);
       const result = await execute(() => prisma.$transaction(async (transaction) => {
@@ -672,7 +672,7 @@ export function createDeliveryCommandService(
         return failure(denied.message, denied.responseCode);
       }
       const directory = await loadDirectory(prisma);
-      const scope = orderScope(directory, actor);
+      const scope = deliveryScope(directory, actor);
       const result = await execute(() => prisma.$transaction(async (transaction) => {
         const initial = await transaction.businessRecord.findUnique({
           where: { domain_recordId: { domain: STORAGE_KEYS.DELIVERIES, recordId: deliveryId } },

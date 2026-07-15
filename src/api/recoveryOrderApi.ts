@@ -3,7 +3,7 @@ import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { initializeMockData } from './mock';
-import { getStorageData, setStorageData } from './mock/storage';
+import { getStorageData, setStorageCacheData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { getCurrentOperatorName } from '../shared/utils/currentOperator';
@@ -60,13 +60,25 @@ function writeRecoveryOrders(items: RecoveryOrder[]): void {
   setStorageData(STORAGE_KEYS.RECOVERY_ORDERS, items);
 }
 
+function compactBackendRecoveryCache(order: RecoveryOrder): RecoveryOrder {
+  return {
+    ...order,
+    paymentVoucherPreview: order.paymentVoucherPreview?.startsWith('data:')
+      ? undefined
+      : order.paymentVoucherPreview,
+    chatEvidencePreview: order.chatEvidencePreview?.startsWith('data:')
+      ? undefined
+      : order.chatEvidencePreview,
+  };
+}
+
 function cacheBackendRecoveryOrder(order: RecoveryOrder): RecoveryOrder {
   const orders = readRecoveryOrders();
   const index = orders.findIndex((item) => item.id === order.id);
   const next = index === -1
     ? [order, ...orders]
     : orders.map((item, itemIndex) => (itemIndex === index ? order : item));
-  setStorageData(STORAGE_KEYS.RECOVERY_ORDERS, next, { persist: false });
+  setStorageCacheData(STORAGE_KEYS.RECOVERY_ORDERS, next.map(compactBackendRecoveryCache));
   return order;
 }
 

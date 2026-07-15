@@ -14,7 +14,7 @@ import type { User } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { backendRequest, shouldUseBackendApi } from './backendClient';
-import { getStorageData, setStorageData } from './mock/storage';
+import { getStorageData, setStorageCacheData, setStorageData } from './mock/storage';
 import { DEFAULT_PAGE_SIZE, STORAGE_KEYS, normalizeResourceOwnership } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { getCurrentDataVisibilityScope } from '../shared/utils/dataVisibility';
@@ -93,13 +93,34 @@ function saveApplications(applications: OrderApplication[]): void {
   setStorageData(STORAGE_KEYS.ORDER_APPLICATIONS, applications);
 }
 
+function compactBackendApplicationCache(application: OrderApplication): OrderApplication {
+  return {
+    ...application,
+    orderData: {
+      ...application.orderData,
+      dealEvidencePreview: application.orderData.dealEvidencePreview?.startsWith('data:')
+        ? undefined
+        : application.orderData.dealEvidencePreview,
+      payments: application.orderData.payments.map((payment) => ({
+        ...payment,
+        voucherPreview: payment.voucherPreview?.startsWith('data:')
+          ? undefined
+          : payment.voucherPreview,
+      })),
+    },
+  };
+}
+
 function cacheBackendApplication(application: OrderApplication): OrderApplication {
   const applications = getStoredApplications();
   const applicationIndex = applications.findIndex((item) => item.id === application.id);
   const nextApplications = applicationIndex === -1
     ? [application, ...applications]
     : applications.map((item, index) => (index === applicationIndex ? application : item));
-  setStorageData(STORAGE_KEYS.ORDER_APPLICATIONS, nextApplications, { persist: false });
+  setStorageCacheData(
+    STORAGE_KEYS.ORDER_APPLICATIONS,
+    nextApplications.map(compactBackendApplicationCache),
+  );
   return application;
 }
 
@@ -111,7 +132,7 @@ function cacheBackendApproval(result: OrderApprovalResult): OrderApplication {
   const nextOrders = orderIndex === -1
     ? [result.order, ...orders]
     : orders.map((item, index) => (index === orderIndex ? result.order : item));
-  setStorageData(STORAGE_KEYS.ORDERS, nextOrders, { persist: false });
+  setStorageCacheData(STORAGE_KEYS.ORDERS, nextOrders);
   return result.application;
 }
 

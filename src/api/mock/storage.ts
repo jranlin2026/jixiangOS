@@ -67,6 +67,20 @@ export function setStorageData<T>(
   return write;
 }
 
+/**
+ * Best-effort browser cache write for data that is already authoritative on the backend.
+ * A full or unavailable localStorage must never turn a successful backend command into
+ * a failed user action.
+ */
+export function setStorageCacheData<T>(key: string, data: T): boolean {
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** 删除 localStorage 数据 */
 export function removeStorageData(key: string): void {
   localStorage.removeItem(key);
