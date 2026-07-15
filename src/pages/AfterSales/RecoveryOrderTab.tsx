@@ -44,6 +44,7 @@ import type { RecoveryOrder, RecoveryOrderFilters, RecoveryOrderInput, RecoveryO
 import type { User } from '../../types/settings';
 import type { Product } from '../../types/product';
 import useAuthStore from '../../store/useAuthStore';
+import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
 
 const shell = {
   ink: '#0f172a',
@@ -911,20 +912,18 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                   <TableBody>
                     <TableRow>
                       <TableCell>
-                        <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                          {detailOrder.paymentVoucherName || detailOrder.paymentVoucher || '-'}
-                        </Typography>
-                        <Typography variant="caption" sx={{ color: '#6b7280' }}>
-                          {detailOrder.paymentVoucherPreview ? '已上传' : '-'}
-                        </Typography>
+                        <AttachmentPreviewLink
+                          title="收款凭证"
+                          fileName={detailOrder.paymentVoucherName || detailOrder.paymentVoucher}
+                          src={detailOrder.paymentVoucherPreview}
+                        />
                       </TableCell>
                       <TableCell>
-                        <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                          {detailOrder.chatEvidenceName || detailOrder.chatEvidence || '-'}
-                        </Typography>
-                        <Typography variant="caption" sx={{ color: '#6b7280' }}>
-                          {detailOrder.chatEvidencePreview ? '已上传' : '-'}
-                        </Typography>
+                        <AttachmentPreviewLink
+                          title="聊天记录截图"
+                          fileName={detailOrder.chatEvidenceName || detailOrder.chatEvidence}
+                          src={detailOrder.chatEvidencePreview}
+                        />
                       </TableCell>
                       <TableCell>{detailOrder.auditReason || '-'}</TableCell>
                     </TableRow>
