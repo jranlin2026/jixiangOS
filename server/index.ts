@@ -425,6 +425,11 @@ app.get('/api/customers/:id/todos', requireCustomerListAccess, async (req: Authe
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
+app.get('/api/customer-todos/my', requireCustomerListAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerTodoService.listMine(req.currentUser!);
+  res.status(200).json(result);
+});
+
 app.post('/api/customers/:id/todos', requireCustomerEditAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerTodoService.create(routeParam(req.params.id), req.body || {}, req.currentUser!);
   res.status(result.code === 0 ? 201 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);

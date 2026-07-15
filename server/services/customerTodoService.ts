@@ -114,6 +114,15 @@ export function createCustomerTodoService(
   });
 
   return {
+    async listMine(user: AuthenticatedUser) {
+      const rows = await prisma.customerTodo.findMany({
+        where: { assigneeId: user.id, status: 'PENDING' },
+        orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
+        take: 100,
+      });
+      return success(rows.map(mapTodo));
+    },
+
     async list(customerId: string, user: AuthenticatedUser) {
       const customer = await loadCustomer(customerId, user);
       if (customer.code !== 0) return failure<CustomerTodo[]>(customer.message, customer.code);

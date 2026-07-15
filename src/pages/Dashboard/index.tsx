@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Paper,
@@ -14,7 +16,7 @@ import ScheduleIcon from '@mui/icons-material/Schedule';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { useNavigate } from 'react-router-dom';
-import { dashboardApi } from '../../api';
+import { customerTodoApi, dashboardApi } from '../../api';
 import { ROUTES } from '../../shared/utils/constants';
 import { formatDate } from '../../shared/utils/formatters';
 import useAuthStore from '../../store/useAuthStore';
@@ -85,6 +87,8 @@ const HomeWorkbench: React.FC = () => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const [data, setData] = useState<HomeWorkbenchData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [completingTodoId, setCompletingTodoId] = useState('');
+  const [todoError, setTodoError] = useState('');
 
   const taskTotal = useMemo(() => data?.tasks.reduce((sum, item) => sum + item.count, 0) || 0, [data]);
   const activeTasks = useMemo(
@@ -107,6 +111,20 @@ const HomeWorkbench: React.FC = () => {
   useEffect(() => {
     fetchData();
   }, []);
+
+  const completeCustomerTodo = async (customerId: string, todoId: string) => {
+    setCompletingTodoId(todoId);
+    setTodoError('');
+    try {
+      const response = await customerTodoApi.complete(customerId, todoId);
+      if (response.code === 0) await fetchData();
+      else setTodoError(response.message || '待办完成失败');
+    } catch {
+      setTodoError('待办完成失败，请稍后重试');
+    } finally {
+      setCompletingTodoId('');
+    }
+  };
 
   if (loading || !data) {
     return (
@@ -223,6 +241,55 @@ const HomeWorkbench: React.FC = () => {
             </Box>
           </Box>
         </Paper>
+
+        <Panel title="我的客户待办" eyebrow={`未完成 ${data.customerTodos.length} 项`}>
+          {todoError && <Alert severity="error" sx={{ m: 1.25 }}>{todoError}</Alert>}
+          <Stack divider={<Box sx={{ borderBottom: `1px solid ${palette.softLine}` }} />} sx={{ maxHeight: 380, overflowY: 'auto' }}>
+            {data.customerTodos.slice(0, 10).map((todo) => {
+              const overdue = new Date(todo.dueAt).getTime() < Date.now();
+              const detailPath = `${ROUTES.CUSTOMERS}?customerId=${encodeURIComponent(todo.customerId)}&detailTab=todo`;
+              return (
+                <Stack key={todo.id} direction="row" alignItems="center" spacing={1} sx={{ px: 1.25, py: 0.75 }}>
+                  <Checkbox
+                    size="small"
+                    disabled={completingTodoId === todo.id}
+                    onChange={() => void completeCustomerTodo(todo.customerId, todo.id)}
+                    inputProps={{ 'aria-label': `完成待办：${todo.title}` }}
+                  />
+                  <Button
+                    onClick={() => navigate(detailPath)}
+                    sx={{ flex: 1, minWidth: 0, display: 'block', textAlign: 'left', color: palette.ink, px: 0.5, py: 0.75 }}
+                  >
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 900, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {todo.title}
+                      </Typography>
+                      {overdue && <Chip size="small" color="error" label="已逾期" sx={{ height: 22 }} />}
+                    </Stack>
+                    <Typography variant="caption" sx={{ color: palette.muted }}>
+                      {todo.customerName} · {formatDate(todo.dueAt, 'MM-dd HH:mm')}
+                    </Typography>
+                    {todo.content && (
+                      <Typography variant="caption" sx={{ color: '#475467', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {todo.content}
+                      </Typography>
+                    )}
+                  </Button>
+                </Stack>
+              );
+            })}
+            {!data.customerTodos.length && (
+              <Typography variant="body2" sx={{ color: '#94a3b8', px: 2, py: 4, textAlign: 'center' }}>
+                当前没有分配给你的客户待办
+              </Typography>
+            )}
+          </Stack>
+          {data.customerTodos.length > 10 && (
+            <Box sx={{ px: 2, py: 1, borderTop: `1px solid ${palette.softLine}` }}>
+              <Typography variant="caption" sx={{ color: palette.muted }}>首页显示前 10 项，其余待办请进入客户详情查看。</Typography>
+            </Box>
+          )}
+        </Panel>
 
         <Box
           sx={{

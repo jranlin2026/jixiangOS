@@ -52,6 +52,7 @@ interface CustomerDetailProps {
   onViewOrders?: (customer: Customer) => void;
   onUpdated?: (customer: Customer) => void;
   readOnly?: boolean;
+  initialTab?: 'activity' | 'todo';
 }
 
 interface ContractFile {
@@ -117,6 +118,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   onCreateOrder,
   onUpdated,
   readOnly = false,
+  initialTab = 'activity',
 }) => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const { alert, dialog: feedbackDialog } = useAppFeedback();
@@ -153,14 +155,14 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     setFollowNote('');
     setFollowAttachments([]);
     setEditing(false);
-    setActiveTab(0);
+    setActiveTab(initialTab === 'todo' ? 1 : 0);
     aiCardApi.getCard('customer', customer.id).then((res) => setAiCard(res.data));
     try {
       setContracts(JSON.parse(localStorage.getItem(contractKey(customer.id)) || '[]'));
     } catch {
       setContracts([]);
     }
-  }, [customer]);
+  }, [customer, initialTab]);
 
   useEffect(() => {
     if (readOnly) setEditing(false);

@@ -5,6 +5,9 @@ import type { CustomerTodo, CustomerTodoInput } from '../types/customerTodo';
 const base = (customerId: string) => `/customers/${encodeURIComponent(customerId)}/todos`;
 
 export const customerTodoApi = {
+  listMine(): Promise<ApiResponse<CustomerTodo[]>> {
+    return backendRequest<CustomerTodo[]>('/customer-todos/my');
+  },
   list(customerId: string): Promise<ApiResponse<CustomerTodo[]>> {
     return backendRequest<CustomerTodo[]>(base(customerId));
   },

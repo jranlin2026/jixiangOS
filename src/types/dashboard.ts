@@ -1,4 +1,5 @@
 import type { Timestamp } from './common';
+import type { CustomerTodo } from './customerTodo';
 
 export type DashboardRangePreset = 'today' | 'week' | 'month' | 'custom';
 
@@ -40,6 +41,7 @@ export interface HomeWorkbenchData {
   quickActions: HomeQuickAction[];
   activities: HomeActivityItem[];
   personalMetrics: Array<{ label: string; value: string; tone: HomeTaskItem['tone'] }>;
+  customerTodos: CustomerTodo[];
 }
 
 export interface CockpitKpi {

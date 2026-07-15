@@ -135,6 +135,7 @@ assert.match(source, /app\.get\('\/api\/customers\/:id', requireCustomerListAcce
 assert.match(source, /app\.post\('\/api\/customers', requireCustomerCreateAccess,/);
 assert.match(source, /app\.post\('\/api\/customers\/:id\/follow-ups', requireCustomerEditAccess,/);
 assert.match(source, /app\.get\('\/api\/customers\/:id\/todos', requireCustomerListAccess,/);
+assert.match(source, /app\.get\('\/api\/customer-todos\/my', requireCustomerListAccess,/);
 assert.match(source, /app\.post\('\/api\/customers\/:id\/todos', requireCustomerEditAccess,/);
 assert.match(source, /app\.put\('\/api\/customers\/:id\/todos\/:todoId', requireCustomerEditAccess,/);
 assert.match(source, /app\.post\('\/api\/customers\/:id\/todos\/:todoId\/complete', requireCustomerEditAccess,/);

@@ -16,12 +16,13 @@ const customer: Customer = {
 
 let todoRow: any = null;
 let customerData: Customer = customer;
+let lastFindManyWhere: any = null;
 const at = new Date('2026-07-15T03:00:00.000Z');
 const tx = {
   user: { findUnique: async () => ({ id: 'user-sales', name: '销售甲', isActive: true, employmentStatus: 'active' }) },
   customerTodo: {
     create: async ({ data }: any) => (todoRow = { ...data, status: 'PENDING', completedAt: null, completedById: null, completedByName: null, canceledAt: null, canceledById: null, canceledByName: null, cancelReason: null, createdAt: at, updatedAt: at }),
-    findMany: async () => todoRow ? [todoRow] : [],
+    findMany: async ({ where }: any) => { lastFindManyWhere = where; return todoRow ? [todoRow] : []; },
     findFirst: async ({ where }: any) => todoRow?.id === where.id ? todoRow : null,
     update: async ({ data }: any) => (todoRow = { ...todoRow, ...data, updatedAt: at }),
   },
@@ -47,6 +48,11 @@ const created = await service.create('customer-1', {
 assert.equal(created.code, 0);
 assert.equal(created.data?.assigneeId, 'user-sales');
 assert.equal(customerData.activityRecords?.[0]?.title, '新建了客户待办');
+
+const mine = await service.listMine(actor);
+assert.equal(mine.code, 0);
+assert.equal(mine.data?.[0]?.id, 'todo-1');
+assert.deepEqual(lastFindManyWhere, { assigneeId: actor.id, status: 'PENDING' });
 
 const completed = await service.complete('customer-1', 'todo-1', actor);
 assert.equal(completed.code, 0);

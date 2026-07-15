@@ -357,6 +357,27 @@ const Customers: React.FC = () => {
     setDetailOpen(true);
   };
 
+  useEffect(() => {
+    const customerId = searchParams.get('customerId');
+    if (!customerId) return;
+    let active = true;
+    customerApi.fetchCustomerById(customerId).then((response) => {
+      if (!active || response.code !== 0 || !response.data) return;
+      setSelectedCustomer(response.data);
+      setDetailOpen(true);
+    });
+    return () => { active = false; };
+  }, [searchParams]);
+
+  const handleCloseDetail = () => {
+    setDetailOpen(false);
+    if (!searchParams.get('customerId') && !searchParams.get('detailTab')) return;
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('customerId');
+    nextParams.delete('detailTab');
+    setSearchParams(nextParams, { replace: true });
+  };
+
   const getCurrentUserName = () => currentUser?.name || currentUser?.account || '';
 
   const isPublicPoolCustomer = (customer: Customer) => normalizeLifecycleStatusCode(customer.lifecycleStatusCode) === 'public_pool';
@@ -879,7 +900,8 @@ const Customers: React.FC = () => {
         <CustomerDetail
           customer={selectedCustomer}
           open={detailOpen}
-          onClose={() => setDetailOpen(false)}
+          onClose={handleCloseDetail}
+          initialTab={searchParams.get('detailTab') === 'todo' ? 'todo' : 'activity'}
           onCreateOrder={handleCreateOrder}
           onViewOrders={handleViewOrders}
           onUpdated={(updated) => {

@@ -32,6 +32,8 @@ import {
 } from '../shared/utils/dataVisibility';
 import { hasPermission, PERMISSION_KEYS, resolveUserPermissions } from '../shared/utils/permissions';
 import { formatCurrency } from '../shared/utils/formatters';
+import { shouldUseBackendApi } from './backendClient';
+import { customerTodoApi } from './customerTodoApi';
 
 function ensureInit(): void {
   initializeMockData();
@@ -188,6 +190,9 @@ function getRecentActivities(customers: Customer[], leads: Lead[], orders: Order
 async function fetchHomeWorkbench(): Promise<ApiResponse<HomeWorkbenchData>> {
   ensureInit();
   await delay(100);
+  const customerTodos = shouldUseBackendApi()
+    ? await customerTodoApi.listMine().then((response) => response.code === 0 ? response.data || [] : []).catch(() => [])
+    : [];
   const leads = filterVisibleLeads(readArray<Lead>(STORAGE_KEYS.LEADS));
   const customers = filterVisibleCustomers(readArray<Customer>(STORAGE_KEYS.CUSTOMERS));
   const orders = filterVisibleOrders(readArray<Order>(STORAGE_KEYS.ORDERS));
@@ -219,6 +224,16 @@ async function fetchHomeWorkbench(): Promise<ApiResponse<HomeWorkbenchData>> {
     todayLabel: today.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }),
     scopeLabel: scopeLabel(),
     tasks: [
+      makeTask(
+        'customer-todos',
+        '客户待办',
+        customerTodos.length,
+        customerTodos[0]
+          ? `${ROUTES.CUSTOMERS}?customerId=${encodeURIComponent(customerTodos[0].customerId)}&detailTab=todo`
+          : ROUTES.CUSTOMERS,
+        customerTodos.some((item) => new Date(item.dueAt).getTime() < Date.now()) ? 'error' : 'warning',
+        '分配给我的客户跟进事项',
+      ),
       makeTask('pending-leads', '待跟进线索', pendingLeads.length, ROUTES.LEADS, 'warning', '还没有开始跟进的线索'),
       makeTask('following-customers', '跟进中客户', followingCustomers.length, ROUTES.CUSTOMERS, 'primary', '需要持续推进的客户'),
       makeTask('returned-orders', '退回订单申请', returnedApplications.length, `${ROUTES.ORDERS}?tab=review`, 'error', '销售需要修改后重新提交'),
@@ -233,8 +248,9 @@ async function fetchHomeWorkbench(): Promise<ApiResponse<HomeWorkbenchData>> {
       { label: '可见线索', value: String(leads.length), tone: 'primary' },
       { label: '可见客户', value: String(customers.length), tone: 'success' },
       { label: '正式订单', value: String(orders.length), tone: 'info' },
-      { label: '待办任务', value: String(pendingLeads.length + returnedApplications.length + pendingApplications.length + pendingCommissions.length + pendingRecoveryOrders.length), tone: 'warning' },
+      { label: '待办任务', value: String(customerTodos.length + pendingLeads.length + returnedApplications.length + pendingApplications.length + pendingCommissions.length + pendingRecoveryOrders.length), tone: 'warning' },
     ],
+    customerTodos,
   });
 }
 
