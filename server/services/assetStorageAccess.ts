@@ -207,8 +207,10 @@ export function filterSingleStorageKey(
 
 function canReadAllRecoveryOrders(user: AuthenticatedUser): boolean {
   return isSuperAdmin(user)
-    || hasAnyExactPermission(user, [PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW], 'write')
-    || hasAnyExactPermission(user, [PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT], 'read');
+    || (
+      hasAnyExactPermission(user, [PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW], 'write')
+      && hasAnyExactPermission(user, [PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT], 'read')
+    );
 }
 
 export function filterRecoveryOrderStorageData(

@@ -39,7 +39,7 @@ import { getProductLevelColor, getProductLevelTagSx, ROUTES } from '../../shared
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog, { type TableViewColumnConfig } from '../../shared/components/TableViewSettingsDialog';
 import { useTableViewConfig } from '../../shared/hooks/useTableViewConfig';
-import { hasExplicitPermission, hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { canReviewRecoveryOrders, hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import type { RecoveryOrder, RecoveryOrderFilters, RecoveryOrderInput, RecoveryOrderStatus } from '../../types/recoveryOrder';
 import type { User } from '../../types/settings';
 import type { Product } from '../../types/product';
@@ -139,7 +139,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.currentUser);
   const canCreate = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE);
-  const canReviewAction = hasExplicitPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write');
+  const canReviewAction = canReviewRecoveryOrders(currentUser);
   const canEdit = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT);
   const canDelete = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, 'delete');
   const canViewHistory = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY);

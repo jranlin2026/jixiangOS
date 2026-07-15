@@ -80,7 +80,8 @@ const roles: Role[] = [
     departmentId: 'dept-service',
     permissions: [
       { module: PERMISSION_KEYS.AFTER_SALES, actions: ['read'] },
-      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read'] },
+      // Simulate a stale browser role cache that incorrectly retained review write access.
+      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] },
     ],
     dataScopes: {
       leads: 'self',

@@ -12,6 +12,6 @@ assert.match(
 
 assert.match(
   tabSource,
-  /hasExplicitPermission\(currentUser,\s*PERMISSION_KEYS\.AFTER_SALES_RECOVERY_REVIEW,\s*'write'\)/,
+  /canReviewRecoveryOrders\(currentUser\)/,
   '审核操作按钮必须使用登录用户的明确写权限，不能读取浏览器角色缓存',
 );

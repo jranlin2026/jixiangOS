@@ -722,3 +722,10 @@ export function hasExplicitPermission(
     return normalizedModule === normalizedKey && actionAllowed(permission.actions || [], action);
   });
 }
+
+export function canReviewRecoveryOrders(
+  user: Pick<AuthenticatedUser, 'permissions' | 'isActive'> | null | undefined,
+): boolean {
+  return hasExplicitPermission(user, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write')
+    && hasExplicitPermission(user, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'read');
+}

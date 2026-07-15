@@ -196,8 +196,15 @@ const recoveryReadOnlyAuth: AuthenticatedUser = {
   permissions: [{ module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read'] }],
 };
 const recoveryReviewerAuth: AuthenticatedUser = {
-  ...opsAuth,
+  ...salesAuth,
   permissions: [{ module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] }],
+};
+const financeRecoveryReviewerAuth: AuthenticatedUser = {
+  ...opsAuth,
+  permissions: [
+    { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, actions: ['read', 'write'] },
+  ],
 };
 
 const readOnlyRecoveryData = filterRecoveryOrderStorageData(recoveryStorageData, recoveryReadOnlyAuth);
@@ -212,5 +219,9 @@ assert.deepEqual(
 );
 assert.equal(
   (filterRecoveryOrderStorageData(recoveryStorageData, recoveryReviewerAuth)[STORAGE_KEYS.RECOVERY_ORDERS] as any[]).length,
+  1,
+);
+assert.equal(
+  (filterRecoveryOrderStorageData(recoveryStorageData, financeRecoveryReviewerAuth)[STORAGE_KEYS.RECOVERY_ORDERS] as any[]).length,
   2,
 );

@@ -151,8 +151,13 @@ function canUseDirectRecoveryPermission(permissionKey: string, action = 'read'):
   });
 }
 
+function canUseRecoveryReviewAction(): boolean {
+  return canUseDirectRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write')
+    && canUseDirectRecoveryPermission(PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'read');
+}
+
 function canViewRecoveryOrder(order: RecoveryOrder, scopeDomain: NonNullable<RecoveryOrderFilters['scopeDomain']> = 'recoveryOrders'): boolean {
-  if (scopeDomain === 'recoveryOrderApplications' && canUseDirectRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write')) {
+  if (scopeDomain === 'recoveryOrderApplications' && canUseRecoveryReviewAction()) {
     return true;
   }
   if (scopeDomain === 'recoveryOrders' && canUseRecoveryPermission(PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT)) {
@@ -403,7 +408,7 @@ async function deleteRecoveryOrder(id: string, options: { force?: boolean } = {}
 async function approveRecoveryOrder(id: string, auditorId: string, auditorName: string): Promise<ApiResponse<RecoveryOrder | null>> {
   ensureInit();
   await delay(160);
-  if (!canUseDirectRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write')) {
+  if (!canUseRecoveryReviewAction()) {
     return createErrorResponse('无权审核售后挽回订单', 403);
   }
   const orders = readRecoveryOrders();
@@ -429,7 +434,7 @@ async function approveRecoveryOrder(id: string, auditorId: string, auditorName: 
 async function returnRecoveryOrder(id: string, auditorId: string, auditorName: string, reason: string): Promise<ApiResponse<RecoveryOrder | null>> {
   ensureInit();
   await delay(140);
-  if (!canUseDirectRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write')) {
+  if (!canUseRecoveryReviewAction()) {
     return createErrorResponse('无权退回售后挽回订单', 403);
   }
   const orders = readRecoveryOrders();
@@ -455,7 +460,7 @@ async function returnRecoveryOrder(id: string, auditorId: string, auditorName: s
 async function rejectRecoveryOrder(id: string, auditorId: string, auditorName: string, reason: string): Promise<ApiResponse<RecoveryOrder | null>> {
   ensureInit();
   await delay(140);
-  if (!canUseDirectRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write')) {
+  if (!canUseRecoveryReviewAction()) {
     return createErrorResponse('无权驳回售后挽回订单', 403);
   }
   const orders = readRecoveryOrders();
