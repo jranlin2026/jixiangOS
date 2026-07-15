@@ -208,10 +208,10 @@ assert.equal(creatableRes.data[0].orderId, 'order-99');
 
 const noStageCreatableRes = await deliveryApi.fetchCreatableDeliveryOrders('ORD-0100');
 assert.equal(noStageCreatableRes.code, 0);
-assert.equal(noStageCreatableRes.data.length, 0);
+assert.equal(noStageCreatableRes.data.length, 1);
 const noStageCreateRes = await deliveryApi.createDeliveryFromOrder('order-100');
-assert.notEqual(noStageCreateRes.code, 0);
-assert.match(noStageCreateRes.message, /未配置交付阶段/);
+assert.equal(noStageCreateRes.code, 0);
+assert.ok(noStageCreateRes.data?.stages.length);
 
 seed([
   makeDelivery(100, {
@@ -225,7 +225,7 @@ seed([
   }),
 ]);
 const hiddenNoStageRes = await deliveryApi.fetchDeliveries({ search: 'ORD-0100', page: 1, pageSize: 10, status: '全部' });
-assert.equal(hiddenNoStageRes.data.total, 0);
+assert.equal(hiddenNoStageRes.data.total, 1);
 
 seed();
 const createDeliveryRes = await deliveryApi.createDeliveryFromOrder('order-99');

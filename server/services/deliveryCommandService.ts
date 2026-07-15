@@ -19,6 +19,7 @@ import type { Department } from '../../src/types/department';
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
+import { resolveProductDeliveryStages } from '../../src/shared/utils/deliveryStages';
 
 type DeliveryCommandPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$transaction'>;
 type LockedRow = { id: string; domain: string; recordId: string; data: unknown };
@@ -26,6 +27,11 @@ type Directory = { users: User[]; roles: Role[]; departments: Department[] };
 
 export interface DeliveryCommandServiceOptions {
   now?: () => Date;
+  assigner?: {
+    assignNext(transaction: Prisma.TransactionClient, assignedAt: string): Promise<{
+      ownerId: string; owner: string; assignmentMode: 'auto'; assignedAt: string; assignedBy: 'system';
+    } | null | undefined>;
+  };
 }
 
 export interface DeliveryCardPatch {
@@ -177,9 +183,14 @@ function deliveryTasks(deliveryId: string, stages: string[], now: string): Deliv
   }));
 }
 
-function createDelivery(order: Order, product: Product, createdAt: string): Delivery {
+function createDelivery(
+  order: Order,
+  product: Product,
+  createdAt: string,
+  assignment?: Partial<Pick<Delivery, 'owner' | 'ownerId' | 'assignmentMode' | 'assignedAt' | 'assignedBy'>>,
+): Delivery {
   const id = `delivery-${hash(order.id)}`;
-  const stages = (product.deliveryStages || []).map((stage) => String(stage || '').trim()).filter(Boolean);
+  const stages = resolveProductDeliveryStages(product);
   return {
     id,
     orderId: order.id,
@@ -191,8 +202,11 @@ function createDelivery(order: Order, product: Product, createdAt: string): Deli
     currentStage: stages[0],
     stages,
     tasks: deliveryTasks(id, stages, createdAt),
-    owner: order.successName || order.serviceName || '待分配',
-    ownerId: order.successId || order.serviceId,
+    owner: assignment?.owner || order.successName || order.serviceName || '待分配',
+    ownerId: assignment?.ownerId || order.successId || order.serviceId,
+    assignmentMode: assignment?.assignmentMode,
+    assignedAt: assignment?.assignedAt,
+    assignedBy: assignment?.assignedBy,
     salesOwner: order.salesName || order.owner,
     salesOwnerId: order.salesId,
     orderAmount: order.actualAmount ?? order.amount,
@@ -258,6 +272,7 @@ export function createDeliveryCommandService(
   options: DeliveryCommandServiceOptions = {},
 ) {
   const now = options.now || (() => new Date());
+  const assigner = options.assigner;
   const execute = async <T>(command: () => Promise<T>): Promise<T | ApiResponse<unknown>> => {
     for (let attempt = 1; attempt <= MAX_TRANSACTION_ATTEMPTS; attempt += 1) {
       try {
@@ -355,11 +370,10 @@ export function createDeliveryCommandService(
         if (product.id !== order.productId || product.isActive === false || product.level !== order.productLevel) {
           throw new DeliveryCommandError(409, '订单产品快照与产品稳定ID不一致');
         }
-        if (!(product.deliveryStages || []).some((stage) => String(stage || '').trim())) {
-          throw new DeliveryCommandError(409, '该订单产品未配置交付阶段');
-        }
         const createdAt = now().toISOString();
-        const delivery = createDelivery(order, product, createdAt);
+        const automaticAssignment = assigner ? await assigner.assignNext(transaction, createdAt) : undefined;
+        const assignment = automaticAssignment === null ? { owner: '待分配', ownerId: undefined } : automaticAssignment;
+        const delivery = createDelivery(order, product, createdAt, assignment || undefined);
         await transaction.businessRecord.create({
           data: {
             id: `${STORAGE_KEYS.DELIVERIES}:${delivery.id}`,
@@ -424,6 +438,11 @@ export function createDeliveryCommandService(
           ...patch,
           ownerId,
           owner,
+          ...(Object.prototype.hasOwnProperty.call(patch, 'ownerId') ? {
+            assignmentMode: 'manual' as const,
+            assignedAt: changedAt,
+            assignedBy: actor.name,
+          } : {}),
           updatedAt: changedAt,
         };
         next.progressPercent = taskProgress(next.tasks);
@@ -492,12 +511,8 @@ export function createDeliveryCommandService(
       return mutate(deliveryId, actor, (delivery, _order, changedAt, directory, scope) => {
         const taskIndex = delivery.tasks.findIndex((task) => task.id === taskId);
         if (taskIndex === -1) throw new DeliveryCommandError(404, '交付任务不存在');
-        const firstOpenIndex = delivery.tasks.findIndex((task) => task.status !== '已完成' && !task.completedAt);
-        if (firstOpenIndex !== -1 && taskIndex > firstOpenIndex) {
-          throw new DeliveryCommandError(409, '请先完成当前步骤，再处理后续步骤');
-        }
         if (patch.status && !['待开始', '进行中', '已完成'].includes(patch.status)) {
-          throw new DeliveryCommandError(409, '交付任务状态无效，当前版本不支持跳过步骤');
+          throw new DeliveryCommandError(409, '交付任务状态无效');
         }
         let assigneeId = delivery.tasks[taskIndex].assigneeId;
         let assigneeName = delivery.tasks[taskIndex].assigneeName;
@@ -533,15 +548,11 @@ export function createDeliveryCommandService(
             }
           : { ...task });
         const nextOpen = tasks.findIndex((task) => task.status !== '已完成' && !task.completedAt);
-        tasks.forEach((task, index) => {
-          if (nextOpen >= 0 && index === nextOpen && task.status === '待开始') task.status = '进行中';
-          if (nextOpen >= 0 && index > nextOpen && task.status === '进行中') task.status = '待开始';
-        });
         const allDone = nextOpen === -1;
         const next: Delivery = {
           ...delivery,
           tasks,
-          currentStage: allDone ? delivery.stages[delivery.stages.length - 1] : delivery.stages[nextOpen],
+          currentStage: allDone ? delivery.stages[delivery.stages.length - 1] : delivery.currentStage,
           approvalStatus: allDone ? '待主管确认' : delivery.approvalStatus || '未提交',
           updatedAt: changedAt,
         };

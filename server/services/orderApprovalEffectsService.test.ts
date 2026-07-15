@@ -273,7 +273,10 @@ function fakeTransaction(options: {
     transaction: tx, application, order, reviewer, approvedAt: now,
   } as any);
   assert.equal(result?.deliveryCreation, 'applied');
-  assert.equal(Array.from(rows.values()).some((row) => row.domain === STORAGE_KEYS.DELIVERIES), false, '空交付模板不得创建幽灵交付单');
+  const delivery = Array.from(rows.values()).find((row) => row.domain === STORAGE_KEYS.DELIVERIES);
+  assert.ok(delivery, '启用产品尚未配置交付步骤时也必须使用安全默认步骤创建交付单');
+  assert.ok(delivery.data.stages.length > 0);
+  assert.equal(rows.get(key(STORAGE_KEYS.ORDERS, order.id))!.data.deliveryId, delivery.data.id, '自动建单必须回写订单反向关联');
 }
 
 {
@@ -291,4 +294,18 @@ function fakeTransaction(options: {
     () => createOrderApprovalDownstreamEffects()({ transaction: tx, application, order, reviewer, approvedAt: now } as any),
     /客户.*不存在/,
   );
+}
+
+{
+  const { tx, rows } = fakeTransaction();
+  const apply = createOrderApprovalDownstreamEffects({
+    assignNext: async () => ({
+      ownerId: 'user-cs-auto', owner: '自动客户成功', assignmentMode: 'auto' as const,
+      assignedAt: now, assignedBy: 'system' as const,
+    }),
+  });
+  await apply({ transaction: tx, application, order, reviewer, approvedAt: now } as any);
+  const delivery = Array.from(rows.values()).find((row) => row.domain === STORAGE_KEYS.DELIVERIES)?.data;
+  assert.equal(delivery.ownerId, 'user-cs-auto');
+  assert.equal(delivery.assignmentMode, 'auto');
 }

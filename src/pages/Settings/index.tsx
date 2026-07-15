@@ -14,6 +14,7 @@ import CrmMigration from './CrmMigration';
 import AIProviderConfig from './AIProviderConfig';
 import LeadFlowConfigTab from '../Leads/LeadFlowConfigTab';
 import CustomerTagConfig from './CustomerTagConfig';
+import DeliveryAssignmentConfig from './DeliveryAssignmentConfig';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
@@ -86,6 +87,14 @@ const Settings: React.FC = () => {
         { label: '客户标签', permissionKey: PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS, component: <CustomerTagConfig /> },
         { label: '线索来源', permissionKey: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, component: <LeadSourceConfigPage /> },
         { label: '线索流转', permissionKey: PERMISSION_KEYS.SETTINGS_LEAD_FLOW, component: <LeadFlowConfigTab /> },
+      ],
+    },
+    {
+      key: 'delivery',
+      label: '交付设置',
+      description: '客户成功自动分配规则',
+      tabs: [
+        { label: '客户成功分配', permissionKey: PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT, component: <DeliveryAssignmentConfig /> },
       ],
     },
     {

@@ -1,5 +1,6 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Box,
   Button,
   Checkbox,
@@ -28,9 +29,7 @@ import {
 } from '@mui/material';
 import TablePagination from '../../shared/components/TablePagination';
 import AddIcon from '@mui/icons-material/Add';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
@@ -41,6 +40,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { format } from 'date-fns';
 import { customerApi, deliveryApi, orderApi, productApi, settingsApi } from '../../api';
+import { deliveryAssignmentApi } from '../../api/deliveryAssignmentApi';
 import CustomerDetail from '../Customers/CustomerDetail';
 import OrderDetail from '../Orders/OrderDetail';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
@@ -201,7 +201,11 @@ function getTaskColor(task: DeliveryTask): 'default' | 'success' | 'warning' | '
 }
 
 function getTerminalTaskCount(delivery: Delivery) {
-  return delivery.tasks.filter((task) => task.status === '已完成' || task.completedAt).length;
+  return delivery.tasks.filter(isTerminalTask).length;
+}
+
+function isTerminalTask(task: DeliveryTask) {
+  return task.status === '已完成' || Boolean(task.completedAt);
 }
 
 function compactDraft(draft?: TaskDraft) {
@@ -216,6 +220,7 @@ const DeliveryPage: React.FC = () => {
   const [rows, setRows] = useState<Delivery[]>([]);
   const [stats, setStats] = useState<DeliveryStats | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [filters, setFilters] = useState<DeliveryFilters>({ status: '全部', page: 1, pageSize: 10 });
   const [pagination, setPagination] = useState({ page: 1, pageSize: 10, total: 0 });
   const [viewConfig, setViewConfig] = useState<DeliveryViewConfig>(readViewConfig);
@@ -225,6 +230,7 @@ const DeliveryPage: React.FC = () => {
   const [createSearch, setCreateSearch] = useState('');
   const [selectedCreateOrderId, setSelectedCreateOrderId] = useState('');
   const [createLoading, setCreateLoading] = useState(false);
+  const [createLoadError, setCreateLoadError] = useState('');
   const [productTypes, setProductTypes] = useState<DeliveryProductType[]>(['代理', '贴牌', '合伙人', '899', '课程']);
   const [users, setUsers] = useState<User[]>([]);
   const [selectedDelivery, setSelectedDelivery] = useState<Delivery | null>(null);
@@ -248,6 +254,7 @@ const DeliveryPage: React.FC = () => {
 
   const loadWorkbench = useCallback(async (nextFilters: DeliveryFilters) => {
     setLoading(true);
+    setLoadError('');
     try {
       const [listRes, statsRes] = await Promise.all([
         deliveryApi.fetchDeliveries(nextFilters),
@@ -256,8 +263,11 @@ const DeliveryPage: React.FC = () => {
       if (listRes.code === 0) {
         setRows(listRes.data.items);
         setPagination({ page: listRes.data.page, pageSize: listRes.data.pageSize, total: listRes.data.total });
+      } else {
+        setLoadError(listRes.message || '交付列表加载失败');
       }
       if (statsRes.code === 0) setStats(statsRes.data);
+      else setLoadError((current) => current || statsRes.message || '交付统计加载失败');
     } finally {
       setLoading(false);
     }
@@ -273,12 +283,21 @@ const DeliveryPage: React.FC = () => {
 
   useEffect(() => {
     const loadOptions = async () => {
-      const [productsRes, levelsRes, usersRes] = await Promise.all([
+      const [productsRes, levelsRes, usersRes, assignmentRes] = await Promise.all([
         productApi.getAllProducts(),
         productApi.getProductLevelConfigs(),
         settingsApi.fetchUsers({ isActive: true }),
+        deliveryAssignmentApi.getConfig(),
       ]);
-      if (usersRes.code === 0) setUsers(usersRes.data.filter((user) => user.isActive));
+      if (usersRes.code === 0) {
+        const activeUsers = usersRes.data.filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active');
+        const participantIds = assignmentRes.code === 0 && assignmentRes.data.participants.length
+          ? new Set(assignmentRes.data.participants.filter((item) => !item.paused).map((item) => item.userId))
+          : null;
+        setUsers(participantIds
+          ? activeUsers.filter((user) => participantIds.has(user.id))
+          : activeUsers.filter((user) => /客户成功/.test(`${user.role || ''}${user.positionName || ''}`)));
+      }
       const productLevelSet = new Set<DeliveryProductType>();
       if (levelsRes.code === 0) {
         levelsRes.data.filter((level) => level.isActive).forEach((level) => productLevelSet.add(level.name));
@@ -327,6 +346,7 @@ const DeliveryPage: React.FC = () => {
 
   const loadCreatableOrders = useCallback(async (search = createSearch) => {
     setCreateLoading(true);
+    setCreateLoadError('');
     try {
       const res = await deliveryApi.fetchCreatableDeliveryOrders(search);
       if (res.code === 0) {
@@ -334,6 +354,10 @@ const DeliveryPage: React.FC = () => {
         setSelectedCreateOrderId((current) => (
           current && res.data.some((item) => item.orderId === current) ? current : res.data[0]?.orderId || ''
         ));
+      } else {
+        setCreatableOrders([]);
+        setSelectedCreateOrderId('');
+        setCreateLoadError(res.message || '可新建订单加载失败');
       }
     } finally {
       setCreateLoading(false);
@@ -392,27 +416,15 @@ const DeliveryPage: React.FC = () => {
     await loadWorkbench(filters);
   };
 
-  const handleCompleteTask = async (task: DeliveryTask) => {
+  const handleToggleTaskCompletion = async (task: DeliveryTask) => {
     if (!canMutateDelivery) return;
     if (!selectedDelivery) return;
     const res = await deliveryApi.updateDeliveryTask(selectedDelivery.id, task.id, {
-      status: '已完成',
+      status: isTerminalTask(task) ? '待开始' : '已完成',
       resultFields: compactDraft(taskDrafts[task.id]),
     });
     if (res.code !== 0) {
       await alert(res.message || '步骤保存失败');
-      return;
-    }
-    setSelectedDelivery(res.data);
-    await loadWorkbench(filters);
-  };
-
-  const handleReturnPreviousTask = async () => {
-    if (!canMutateDelivery) return;
-    if (!selectedDelivery) return;
-    const res = await deliveryApi.revertDeliveryStage(selectedDelivery.id);
-    if (res.code !== 0) {
-      await alert(res.message || '返回上一步失败');
       return;
     }
     setSelectedDelivery(res.data);
@@ -524,7 +536,8 @@ const DeliveryPage: React.FC = () => {
     });
     if (res.code === 0) {
       setAssignDelivery(null);
-      await refreshAfterMutation(res.data?.id);
+      await loadWorkbench(filters);
+      await alert('分配成功');
     }
   };
 
@@ -792,9 +805,7 @@ const DeliveryPage: React.FC = () => {
       <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1.5 }}>交付步骤轨道</Typography>
       <Stack spacing={1.5}>
         {delivery.tasks.map((task, index) => {
-          const isCurrent = task.status === '进行中';
-          const isTerminal = task.status === '已完成' || Boolean(task.completedAt);
-          const canReturnPrevious = isCurrent && index > 0 && delivery.approvalStatus !== '已确认' && delivery.status !== '已完成';
+          const isTerminal = isTerminalTask(task);
           return (
             <Box
               key={task.id}
@@ -804,14 +815,17 @@ const DeliveryPage: React.FC = () => {
                 gap: 1.5,
                 p: 1.5,
                 border: '1px solid',
-                borderColor: isCurrent ? '#1976d2' : '#e5e7eb',
+                borderColor: isTerminal ? '#2e7d32' : '#e5e7eb',
                 borderRadius: 1,
-                bgcolor: isCurrent ? '#f0f7ff' : '#fff',
+                bgcolor: isTerminal ? '#f6fff7' : '#fff',
               }}
             >
-              <Box sx={{ width: 28, height: 28, borderRadius: '50%', display: 'grid', placeItems: 'center', bgcolor: isTerminal ? '#e8f5e9' : isCurrent ? '#e3f2fd' : '#f1f5f9', color: isTerminal ? '#2e7d32' : isCurrent ? '#1976d2' : '#64748b', fontWeight: 800 }}>
-                {index + 1}
-              </Box>
+              <Checkbox
+                checked={isTerminal}
+                disabled={!canMutateDelivery || delivery.approvalStatus === '已确认' || delivery.status === '已完成'}
+                onChange={() => handleToggleTaskCompletion(task)}
+                inputProps={{ 'aria-label': `${index + 1}. ${task.title}${isTerminal ? '取消完成' : '标记完成'}` }}
+              />
               <Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
@@ -820,18 +834,10 @@ const DeliveryPage: React.FC = () => {
                   </Box>
                   {canMutateDelivery && (
                     <Box sx={{ display: 'flex', gap: 1 }}>
-                      <Button component="label" size="small" variant="outlined" startIcon={<UploadFileIcon />} disabled={!isCurrent && !isTerminal}>
+                      <Button component="label" size="small" variant="outlined" startIcon={<UploadFileIcon />}>
                         上传
                         <input hidden type="file" multiple onChange={(event) => handleUploadAttachment(task, event)} />
                       </Button>
-                      {isCurrent && (
-                      <>
-                        {canReturnPrevious && (
-                          <Button size="small" variant="outlined" startIcon={<ArrowBackIcon />} onClick={handleReturnPreviousTask}>返回上一步</Button>
-                        )}
-                        <Button size="small" variant="contained" startIcon={<CheckCircleIcon />} onClick={() => handleCompleteTask(task)}>完成一步</Button>
-                      </>
-                      )}
                     </Box>
                   )}
                 </Box>
@@ -964,6 +970,7 @@ const DeliveryPage: React.FC = () => {
       </DialogTitle>
       <DialogContent dividers>
         <Stack spacing={2}>
+          {createLoadError && <Alert severity="error">{createLoadError}</Alert>}
           <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 0.8fr) minmax(320px, 1.2fr) auto', gap: 1 }}>
             <TextField
               size="small"
@@ -1063,6 +1070,8 @@ const DeliveryPage: React.FC = () => {
         <Tab label="异常交付" />
         <Tab label="交付统计" />
       </ModuleTabs>
+
+      {loadError && <Alert severity="error" sx={{ mb: 2 }}>交付数据加载失败：{loadError}</Alert>}
 
       {tabValue !== 2 && (
         <>

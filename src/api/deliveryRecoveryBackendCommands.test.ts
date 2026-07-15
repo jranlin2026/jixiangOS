@@ -55,7 +55,13 @@ try {
     const method = String(init?.method || 'GET');
     const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
     requests.push({ url, method, body });
-    const data = url.endsWith('/recovery-orders')
+    const data = url.includes('/deliveries/creatable-orders')
+      ? [{ orderId: 'order-2', orderNo: 'ORD-2', customerId: 'customer-2', customerName: '客户B', productType: '代理' }]
+      : url.includes('/deliveries/stats')
+        ? { total: 1, pending: 1, inProgress: 0, overdue: 0, completed: 0, statusCounts: { 全部: 1 } }
+        : /\/deliveries(?:\?|$)/.test(url)
+          ? { items: [delivery], total: 1, page: 1, pageSize: 10 }
+          : url.endsWith('/recovery-orders')
       ? recovery
       : method === 'DELETE'
         ? true
@@ -66,6 +72,12 @@ try {
     });
   }) as typeof fetch;
 
+  const listResult = await deliveryApi.fetchDeliveries({ status: '全部', page: 1, pageSize: 10 });
+  assert.equal(listResult.data.total, 1, '后端模式必须从服务端读取交付列表');
+  const statsResult = await deliveryApi.fetchDeliveryStats({ status: '全部' });
+  assert.equal(statsResult.data.total, 1, '后端模式必须从服务端读取交付统计');
+  const creatableResult = await deliveryApi.fetchCreatableDeliveryOrders('ORD');
+  assert.equal(creatableResult.data[0]?.orderId, 'order-2', '后端模式必须从服务端读取可建交付订单');
   assert.equal((await deliveryApi.createDeliveryFromOrder('order-1')).code, 0);
   assert.equal((await deliveryApi.updateDelivery(delivery.id, { priority: 'high' })).code, 0);
   assert.equal((await deliveryApi.advanceDeliveryStage(delivery.id, '账号搭建')).code, 0);
@@ -89,6 +101,9 @@ try {
   await flushBackendStorageWrites();
   assert.equal(requests.some((request) => request.url.includes('/storage')), false);
   assert.deepEqual(requests.map(({ url, method }) => ({ url: url.replace('http://127.0.0.1:3001/api', ''), method })), [
+    { url: '/deliveries?status=%E5%85%A8%E9%83%A8&page=1&pageSize=10', method: 'GET' },
+    { url: '/deliveries/stats?status=%E5%85%A8%E9%83%A8', method: 'GET' },
+    { url: '/deliveries/creatable-orders?search=ORD', method: 'GET' },
     { url: '/deliveries/from-order', method: 'POST' },
     { url: '/deliveries/delivery-backend/card', method: 'PATCH' },
     { url: '/deliveries/delivery-backend/advance', method: 'POST' },
@@ -101,9 +116,9 @@ try {
     { url: '/deliveries/delivery-backend', method: 'DELETE' },
     { url: '/recovery-orders', method: 'POST' },
   ]);
-  assert.deepEqual(requests[0].body, { orderId: 'order-1' });
-  assert.deepEqual(requests[1].body, { data: { priority: 'high' } });
-  assert.deepEqual(requests[10].body, { data: recoveryInput });
+  assert.deepEqual(requests[3].body, { orderId: 'order-1' });
+  assert.deepEqual(requests[4].body, { data: { priority: 'high' } });
+  assert.deepEqual(requests[13].body, { data: recoveryInput });
   const cachedRecoveries = JSON.parse(storage.getItem(STORAGE_KEYS.RECOVERY_ORDERS) || '[]') as RecoveryOrder[];
   assert.ok(cachedRecoveries.some((item) => item.id === recovery.id));
 } finally {

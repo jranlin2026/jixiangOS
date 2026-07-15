@@ -143,6 +143,9 @@ export interface Delivery {
   supervisorConfirmedAt?: Timestamp;
   supervisorNotes?: string;
   customerSuccessStatus?: CustomerSuccessStatus;
+  assignmentMode?: 'auto' | 'manual';
+  assignedAt?: Timestamp;
+  assignedBy?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

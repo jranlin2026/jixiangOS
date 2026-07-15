@@ -12,6 +12,7 @@ import type { Customer } from '../../src/types/customer';
 import type { Delivery } from '../../src/types/delivery';
 import type { Order } from '../../src/types/order';
 import type { Product } from '../../src/types/product';
+import { resolveProductDeliveryStages } from '../../src/shared/utils/deliveryStages';
 import type { ApplyOrderApprovalDownstreamEffects } from './orderApplicationService';
 
 type JsonRow = { id: string; recordId: string; data: unknown; status?: string | null };
@@ -379,7 +380,18 @@ async function createCommissionRecords(transaction: Prisma.TransactionClient, or
   }
 }
 
-async function createDeliveryProjection(transaction: Prisma.TransactionClient, order: Order, approvedAt: string): Promise<void> {
+type DeliveryAssigner = {
+  assignNext(transaction: Prisma.TransactionClient, assignedAt: string): Promise<{
+    ownerId: string; owner: string; assignmentMode: 'auto'; assignedAt: string; assignedBy: 'system';
+  } | null | undefined>;
+};
+
+async function createDeliveryProjection(
+  transaction: Prisma.TransactionClient,
+  order: Order,
+  approvedAt: string,
+  assigner?: DeliveryAssigner,
+): Promise<void> {
   let productRow = order.productId
     ? await transaction.businessRecord.findUnique({
       where: { domain_recordId: { domain: STORAGE_KEYS.PRODUCTS, recordId: order.productId } },
@@ -392,16 +404,25 @@ async function createDeliveryProjection(transaction: Prisma.TransactionClient, o
       return product.level === order.productLevel && product.isActive;
     }) || null;
   }
-  const stages = productRow
-    ? (parseJson<Product>(productRow.data, '产品').deliveryStages || []).map((item) => String(item).trim()).filter(Boolean)
-    : [];
-  if (!stages.length) return;
+  if (!productRow) throw new Error(`订单产品 ${order.productName || order.productLevel} 不存在，不能创建交付单`);
+  const stages = resolveProductDeliveryStages(parseJson<Product>(productRow.data, '产品'));
 
   const recordId = `delivery-${shortHash(order.id)}`;
   const existing = await transaction.businessRecord.findUnique({
     where: { domain_recordId: { domain: STORAGE_KEYS.DELIVERIES, recordId } },
   });
-  if (existing) return;
+  if (existing) {
+    order.deliveryId = recordId;
+    await transaction.businessRecord.update({
+      where: { domain_recordId: { domain: STORAGE_KEYS.ORDERS, recordId: order.id } },
+      data: { data: jsonValue(order), eventAt: new Date(approvedAt) },
+    });
+    return;
+  }
+  const automaticAssignment = assigner ? await assigner.assignNext(transaction, approvedAt) : undefined;
+  const fallbackAssignment = automaticAssignment === undefined
+    ? { owner: order.successName || order.serviceName || '待分配', ownerId: order.successId || order.serviceId }
+    : automaticAssignment || { owner: '待分配', ownerId: undefined };
   const delivery: Delivery = {
     id: recordId,
     orderId: order.id,
@@ -419,7 +440,7 @@ async function createDeliveryProjection(transaction: Prisma.TransactionClient, o
       status: index === 0 ? '进行中' : '待开始',
       records: [],
     })),
-    owner: '待分配',
+    ...fallbackAssignment,
     salesOwner: order.salesName || order.owner,
     salesOwnerId: order.salesId,
     orderAmount: amount(order.actualAmount ?? order.amount),
@@ -446,13 +467,18 @@ async function createDeliveryProjection(transaction: Prisma.TransactionClient, o
       data: jsonValue(delivery),
     },
   });
+  order.deliveryId = recordId;
+  await transaction.businessRecord.update({
+    where: { domain_recordId: { domain: STORAGE_KEYS.ORDERS, recordId: order.id } },
+    data: { data: jsonValue(order), eventAt: new Date(approvedAt) },
+  });
 }
 
-export function createOrderApprovalDownstreamEffects(): ApplyOrderApprovalDownstreamEffects {
+export function createOrderApprovalDownstreamEffects(assigner?: DeliveryAssigner): ApplyOrderApprovalDownstreamEffects {
   return async ({ transaction, order, approvedAt }) => {
     await applyCustomerProjection(transaction, order, approvedAt);
     await createCommissionRecords(transaction, order, approvedAt);
-    await createDeliveryProjection(transaction, order, approvedAt);
+    await createDeliveryProjection(transaction, order, approvedAt, assigner);
     return {
       customerOrderStats: 'applied',
       commissionGeneration: 'applied',
