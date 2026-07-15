@@ -3,10 +3,10 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { failure, success, type ApiResponse } from '../api/response';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { buildDataVisibilityScopeForUser, type DataVisibilityScope } from '../../src/shared/utils/dataVisibility';
-import { PERMISSION_KEYS, hasPermission } from '../../src/shared/utils/permissions';
+import { PERMISSION_KEYS, canReviewRecoveryOrders, hasPermission } from '../../src/shared/utils/permissions';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Department } from '../../src/types/department';
-import type { RecoveryOrder, RecoveryOrderInput } from '../../src/types/recoveryOrder';
+import type { RecoveryOrder, RecoveryOrderFilters, RecoveryOrderInput } from '../../src/types/recoveryOrder';
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
@@ -86,13 +86,45 @@ function sameCreate(existing: RecoveryOrder, desired: RecoveryOrder): boolean {
 }
 
 function recoveryScope(directory: Directory, actor: AuthenticatedUser): DataVisibilityScope {
-  return buildDataVisibilityScopeForUser(
+  const scope = buildDataVisibilityScopeForUser(
     actor,
     directory.users,
     directory.roles,
     directory.departments,
     'recoveryOrderApplications',
   );
+  return canReviewRecoveryOrders(actor)
+    ? { ...scope, unrestricted: true, dataScopeLevel: 'all' }
+    : scope;
+}
+
+function toPositiveInt(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : fallback;
+}
+
+function timestamp(value: unknown): number {
+  const parsed = new Date(String(value || '')).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function matchesRecoveryOrder(order: RecoveryOrder, filters: RecoveryOrderFilters): boolean {
+  if (!filters.includeDeleted && order.deletedAt) return false;
+  const search = cleanText(filters.search).toLocaleLowerCase();
+  if (search && ![
+    order.recoveryNo,
+    order.thirdPartyOrderNo,
+    order.customerName,
+    order.customerPhone,
+    order.customerWechat,
+    order.originalProduct,
+    order.recoveryUserName,
+  ].some((value) => cleanText(value).toLocaleLowerCase().includes(search))) return false;
+  if (filters.statuses?.length && !filters.statuses.includes(order.status)) return false;
+  if (!filters.statuses?.length && filters.status && filters.status !== '全部' && order.status !== filters.status) return false;
+  if (filters.settlementStatus && filters.settlementStatus !== '全部' && order.settlementStatus !== filters.settlementStatus) return false;
+  if (filters.ownerId && ![order.createdBy, order.recoveryUserId, order.assistUserId].includes(filters.ownerId)) return false;
+  return true;
 }
 
 function recoveryVisible(order: RecoveryOrder, scope: DataVisibilityScope): boolean {
@@ -213,6 +245,25 @@ export function createRecoveryOrderCommandService(
   };
 
   return {
+    async list(filters: RecoveryOrderFilters = {}, actor: AuthenticatedUser) {
+      const [rows, directory] = await Promise.all([
+        prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } }),
+        loadDirectory(prisma),
+      ]);
+      const scope = recoveryScope(directory, actor);
+      const items = rows
+        .map((row) => parseObject<RecoveryOrder>(row.data, '售后挽回订单'))
+        .filter((order) => recoveryVisible(order, scope) && matchesRecoveryOrder(order, filters))
+        .sort((left, right) => timestamp(right.updatedAt || right.createdAt) - timestamp(left.updatedAt || left.createdAt));
+      const page = toPositiveInt(filters.page, 1);
+      const pageSize = Math.min(toPositiveInt(filters.pageSize, 10), 100);
+      const total = items.length;
+      return success({
+        items: items.slice((page - 1) * pageSize, page * pageSize),
+        pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
+      });
+    },
+
     async create(
       input: RecoveryOrderInput,
       actor: AuthenticatedUser,
@@ -454,7 +505,7 @@ export function createRecoveryOrderCommandService(
     reason: string,
     actor: AuthenticatedUser,
   ): Promise<ApiResponse<RecoveryOrder | null>> {
-    if (!hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write')) {
+    if (!canReviewRecoveryOrders(actor)) {
       return failure('无权审核售后挽回订单', 403);
     }
     const normalizedReason = cleanText(reason);

@@ -61,8 +61,10 @@ try {
         ? { total: 1, pending: 1, inProgress: 0, overdue: 0, completed: 0, statusCounts: { 全部: 1 } }
         : /\/deliveries(?:\?|$)/.test(url)
           ? { items: [delivery], total: 1, page: 1, pageSize: 10 }
-          : url.endsWith('/recovery-orders')
-      ? recovery
+          : /\/recovery-orders(?:\?|$)/.test(url)
+      ? method === 'GET'
+        ? { items: [recovery], pagination: { page: 1, pageSize: 10, total: 1, totalPages: 1 } }
+        : recovery
       : method === 'DELETE'
         ? true
         : { ...delivery, updatedAt: now };
@@ -96,6 +98,16 @@ try {
     confirmedBy: '伪造', notes: '完成',
   })).code, 0);
   assert.equal((await deliveryApi.deleteDelivery(delivery.id)).code, 0);
+  storage.removeItem(STORAGE_KEYS.RECOVERY_ORDERS);
+  const recoveryList = await recoveryOrderApi.fetchRecoveryOrders({
+    scopeDomain: 'recoveryOrderApplications', page: 1, pageSize: 10,
+  });
+  assert.equal(recoveryList.data.pagination.total, 1, '切换账号清空缓存后必须从服务端数据库重新读取售后挽回订单');
+  assert.equal((await recoveryOrderApi.updateRecoveryOrder(recovery.id, recoveryInput)).code, 0);
+  assert.equal((await recoveryOrderApi.approveRecoveryOrder(recovery.id, 'forged', '伪造审核人')).code, 0);
+  assert.equal((await recoveryOrderApi.returnRecoveryOrder(recovery.id, 'forged', '伪造审核人', '补充材料')).code, 0);
+  assert.equal((await recoveryOrderApi.rejectRecoveryOrder(recovery.id, 'forged', '伪造审核人', '凭证无效')).code, 0);
+  assert.equal((await recoveryOrderApi.deleteRecoveryOrder(recovery.id)).code, 0);
   assert.equal((await recoveryOrderApi.createRecoveryOrder(recoveryInput)).code, 0);
 
   await flushBackendStorageWrites();
@@ -114,11 +126,20 @@ try {
     { url: '/deliveries/delivery-backend/exceptions/exception-1/resolve', method: 'POST' },
     { url: '/deliveries/delivery-backend/confirm', method: 'POST' },
     { url: '/deliveries/delivery-backend', method: 'DELETE' },
+    { url: '/recovery-orders?scopeDomain=recoveryOrderApplications&page=1&pageSize=10', method: 'GET' },
+    { url: '/recovery-orders/recovery-backend', method: 'PUT' },
+    { url: '/recovery-orders/recovery-backend/approve', method: 'POST' },
+    { url: '/recovery-orders/recovery-backend/return', method: 'POST' },
+    { url: '/recovery-orders/recovery-backend/reject', method: 'POST' },
+    { url: '/recovery-orders/recovery-backend', method: 'DELETE' },
     { url: '/recovery-orders', method: 'POST' },
   ]);
   assert.deepEqual(requests[3].body, { orderId: 'order-1' });
   assert.deepEqual(requests[4].body, { data: { priority: 'high' } });
-  assert.deepEqual(requests[13].body, { data: recoveryInput });
+  assert.deepEqual(requests[14].body, { data: recoveryInput });
+  assert.deepEqual(requests[16].body, { reason: '补充材料' });
+  assert.deepEqual(requests[17].body, { reason: '凭证无效' });
+  assert.deepEqual(requests[19].body, { data: recoveryInput });
   const cachedRecoveries = JSON.parse(storage.getItem(STORAGE_KEYS.RECOVERY_ORDERS) || '[]') as RecoveryOrder[];
   assert.ok(cachedRecoveries.some((item) => item.id === recovery.id));
 } finally {

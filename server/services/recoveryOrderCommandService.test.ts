@@ -14,6 +14,14 @@ const creator: AuthenticatedUser = {
 const other: AuthenticatedUser = {
   ...creator, id: 'user-other', name: '交付B', account: 'other', email: 'other@example.com',
 };
+const staleReviewer: AuthenticatedUser = {
+  ...creator,
+  id: 'user-stale-reviewer',
+  name: '非财务审核残留账号',
+  account: 'stale-reviewer',
+  email: 'stale-reviewer@example.com',
+  permissions: [{ module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] }],
+};
 const reviewer: AuthenticatedUser = {
   ...creator,
   id: 'user-reviewer',
@@ -25,6 +33,7 @@ const reviewer: AuthenticatedUser = {
   permissions: [
     { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT, actions: ['read', 'write'] },
     { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, actions: ['read', 'write'] },
     { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, actions: ['read', 'delete'] },
   ],
 };
@@ -70,13 +79,18 @@ class FakePrisma {
     isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW), description: null,
   }, {
     id: 'role-reviewer', name: '售后主管', code: 'after_sales_manager', departmentId: 'dept-delivery',
-    permissions: reviewer.permissions, dataScopes: { recoveryOrderApplications: 'all' }, memberCount: 1,
+    permissions: reviewer.permissions, dataScopes: { recoveryOrderApplications: 'self' }, memberCount: 1,
     isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW), description: null,
   }] };
   readonly department = { findMany: async () => [{
     id: 'dept-delivery', name: '交付部', code: 'DELIVERY', parentId: null, managerId: null,
     memberCount: 2, sortOrder: 1, isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW),
   }] };
+  readonly businessRecord = {
+    findMany: async ({ where }: any) => Array.from(this.rows.values())
+      .filter((row: any) => row.domain === where.domain)
+      .map(clone),
+  };
 
   async $transaction<T>(callback: (transaction: any) => Promise<T>): Promise<T> {
     const staged = new Map(Array.from(this.rows.entries()).map(([id, row]) => [id, clone(row)]));
@@ -139,6 +153,16 @@ assert.equal(created.data?.createdByName, creator.name);
 assert.equal(created.data?.recoveryUserName, creator.name, '姓名必须从员工目录解析');
 assert.ok(prisma.records().some((item) => item.id === oldRecord.id), '新增不得覆盖或删除其他记录');
 
+const creatorList = await service.list({ page: 1, pageSize: 20 }, creator);
+assert.equal(creatorList.code, 0);
+assert.deepEqual(
+  creatorList.data?.items.map((item) => item.id),
+  [created.data!.id],
+  '切换账号后必须从数据库读取，并且普通员工只能看到自己提交的售后挽回订单',
+);
+const reviewerList = await service.list({ page: 1, pageSize: 20 }, reviewer);
+assert.equal(reviewerList.data?.pagination.total, 2, '财务审核人必须从数据库看到全部待审核订单');
+
 const replayed = await service.create(input(), creator);
 assert.equal(replayed.code, 0);
 assert.equal(replayed.data?.id, created.data?.id);
@@ -163,6 +187,12 @@ assert.equal(approved.code, 0);
 assert.equal(approved.data?.status, '待分账');
 assert.equal(approved.data?.auditorId, reviewer.id);
 assert.equal((await service.approve(created.data!.id, reviewer)).code, 0, '重复审核应幂等');
+
+assert.equal(
+  (await service.approve(oldRecord.id, staleReviewer)).code,
+  403,
+  '非财务账号即使残留审核写权限，也不能执行审核',
+);
 
 const returnedSource = await service.create(input({ thirdPartyOrderNo: 'TP-RETURN' }), creator);
 const returned = await service.returnForChanges(returnedSource.data!.id, '请补充凭证', reviewer);

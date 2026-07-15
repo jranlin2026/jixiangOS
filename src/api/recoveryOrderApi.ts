@@ -198,6 +198,23 @@ function getPayoutPlan(planId?: string): CommissionPayoutPlan | undefined {
 }
 
 async function fetchRecoveryOrders(filters: RecoveryOrderFilters = {}): Promise<ApiResponse<PaginatedResponse<RecoveryOrder>>> {
+  if (shouldUseBackendApi()) {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') return;
+      params.set(key, Array.isArray(value) ? value.join(',') : String(value));
+    });
+    const response = await backendRequest<PaginatedResponse<RecoveryOrder>>(
+      `/recovery-orders${params.size ? `?${params.toString()}` : ''}`,
+    );
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '售后挽回订单列表加载失败', response.code || -1);
+    }
+    const items = response.data.items.map(normalizeRecoveryOrder);
+    setStorageCacheData(STORAGE_KEYS.RECOVERY_ORDERS, items.map(compactBackendRecoveryCache));
+    return createSuccessResponse({ ...response.data, items }, response.message);
+  }
+
   ensureInit();
   await delay(120);
   let items = filterVisibleRecoveryOrders(readRecoveryOrders(), filters.scopeDomain);
@@ -321,6 +338,15 @@ async function createRecoveryOrder(data: RecoveryOrderInput): Promise<ApiRespons
 }
 
 async function updateRecoveryOrder(id: string, data: RecoveryOrderInput): Promise<ApiResponse<RecoveryOrder | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<RecoveryOrder | null>(`/recovery-orders/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ data }),
+    });
+    if (response.code !== 0) return createErrorResponse(response.message, response.code);
+    return createSuccessResponse(response.data ? cacheBackendRecoveryOrder(response.data) : null, response.message);
+  }
+
   ensureInit();
   await delay(160);
   if (!data.customerName.trim()) return createErrorResponse('请填写客户姓名');
@@ -380,6 +406,16 @@ async function updateRecoveryOrder(id: string, data: RecoveryOrderInput): Promis
 }
 
 async function deleteRecoveryOrder(id: string, options: { force?: boolean } = {}): Promise<ApiResponse<boolean>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<RecoveryOrder | null>(`/recovery-orders/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ reason: options.force ? '管理员强制删除' : '售后挽回订单删除' }),
+    });
+    if (response.code !== 0) return createErrorResponse(response.message, response.code);
+    if (response.data) cacheBackendRecoveryOrder(response.data);
+    return createSuccessResponse(true, response.message);
+  }
+
   ensureInit();
   await delay(120);
   if (!canUseRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, 'delete')) {
@@ -406,6 +442,14 @@ async function deleteRecoveryOrder(id: string, options: { force?: boolean } = {}
 }
 
 async function approveRecoveryOrder(id: string, auditorId: string, auditorName: string): Promise<ApiResponse<RecoveryOrder | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<RecoveryOrder | null>(`/recovery-orders/${encodeURIComponent(id)}/approve`, {
+      method: 'POST',
+    });
+    if (response.code !== 0) return createErrorResponse(response.message, response.code);
+    return createSuccessResponse(response.data ? cacheBackendRecoveryOrder(response.data) : null, response.message);
+  }
+
   ensureInit();
   await delay(160);
   if (!canUseRecoveryReviewAction()) {
@@ -432,6 +476,15 @@ async function approveRecoveryOrder(id: string, auditorId: string, auditorName: 
 }
 
 async function returnRecoveryOrder(id: string, auditorId: string, auditorName: string, reason: string): Promise<ApiResponse<RecoveryOrder | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<RecoveryOrder | null>(`/recovery-orders/${encodeURIComponent(id)}/return`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    if (response.code !== 0) return createErrorResponse(response.message, response.code);
+    return createSuccessResponse(response.data ? cacheBackendRecoveryOrder(response.data) : null, response.message);
+  }
+
   ensureInit();
   await delay(140);
   if (!canUseRecoveryReviewAction()) {
@@ -458,6 +511,15 @@ async function returnRecoveryOrder(id: string, auditorId: string, auditorName: s
 }
 
 async function rejectRecoveryOrder(id: string, auditorId: string, auditorName: string, reason: string): Promise<ApiResponse<RecoveryOrder | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<RecoveryOrder | null>(`/recovery-orders/${encodeURIComponent(id)}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    if (response.code !== 0) return createErrorResponse(response.message, response.code);
+    return createSuccessResponse(response.data ? cacheBackendRecoveryOrder(response.data) : null, response.message);
+  }
+
   ensureInit();
   await delay(140);
   if (!canUseRecoveryReviewAction()) {

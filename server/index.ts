@@ -56,6 +56,7 @@ import { mapPrismaRole, mapPrismaUser } from './db/prismaMappers';
 import { mergeRoleWithDefaultAccess } from '../src/shared/utils/organizationConfig';
 import { PERMISSION_KEYS, hasPermission } from '../src/shared/utils/permissions';
 import { STORAGE_KEYS } from '../src/shared/utils/constants';
+import type { RecoveryOrderFilters } from '../src/types/recoveryOrder';
 import {
   buildCustomerIntelPrompt,
   searchPublicCustomerIntel,
@@ -797,9 +798,50 @@ app.delete('/api/deliveries/:id', requireDeliveryWriteAccess, async (req: Authen
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
+app.get('/api/recovery-orders', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const statuses = queryParam(req.query.statuses).split(',').filter(Boolean);
+  const result = await recoveryOrderCommandService.list({
+    search: queryParam(req.query.search) || undefined,
+    status: queryParam(req.query.status) as RecoveryOrderFilters['status'] || undefined,
+    statuses: statuses as RecoveryOrderFilters['statuses'],
+    settlementStatus: queryParam(req.query.settlementStatus) as RecoveryOrderFilters['settlementStatus'] || undefined,
+    ownerId: queryParam(req.query.ownerId) || undefined,
+    includeDeleted: queryParam(req.query.includeDeleted) === 'true',
+    scopeDomain: queryParam(req.query.scopeDomain) as RecoveryOrderFilters['scopeDomain'] || undefined,
+    page: Number(queryParam(req.query.page)) || undefined,
+    pageSize: Number(queryParam(req.query.pageSize)) || undefined,
+  }, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
 app.post('/api/recovery-orders', requireRecoveryCreateAccess, async (req: AuthenticatedRequest, res) => {
   const result = await recoveryOrderCommandService.create(req.body?.data || req.body || {}, req.currentUser!);
   res.status(result.code === 0 ? 201 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.put('/api/recovery-orders/:id', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await recoveryOrderCommandService.update(routeParam(req.params.id), req.body?.data || req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/recovery-orders/:id/approve', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await recoveryOrderCommandService.approve(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/recovery-orders/:id/return', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await recoveryOrderCommandService.returnForChanges(routeParam(req.params.id), String(req.body?.reason || ''), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/recovery-orders/:id/reject', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await recoveryOrderCommandService.reject(routeParam(req.params.id), String(req.body?.reason || ''), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.delete('/api/recovery-orders/:id', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await recoveryOrderCommandService.softDelete(routeParam(req.params.id), String(req.body?.reason || ''), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
 app.post('/api/auth/login', loginRateLimiter.guard, async (req, res) => {
