@@ -9,6 +9,7 @@ import type {
   AssetRisk,
 } from '../../src/types/asset';
 import type { Role } from '../../src/types/role';
+import type { RecoveryOrder } from '../../src/types/recoveryOrder';
 import type { User } from '../../src/types/settings';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import {
@@ -202,4 +203,33 @@ export function filterSingleStorageKey(
 ): unknown {
   if (!isAssetStorageKey(key)) return data[key] ?? null;
   return filterAssetStorageData(data, user, context)[key] ?? null;
+}
+
+function canReadAllRecoveryOrders(user: AuthenticatedUser): boolean {
+  return isSuperAdmin(user)
+    || hasAnyExactPermission(user, [PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW], 'write')
+    || hasAnyExactPermission(user, [PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT], 'read');
+}
+
+export function filterRecoveryOrderStorageData(
+  data: Record<string, unknown>,
+  user: AuthenticatedUser,
+): Record<string, unknown> {
+  if (!(STORAGE_KEYS.RECOVERY_ORDERS in data)) return data;
+  const orders = asArray<RecoveryOrder>(data[STORAGE_KEYS.RECOVERY_ORDERS]);
+  return {
+    ...data,
+    [STORAGE_KEYS.RECOVERY_ORDERS]: canReadAllRecoveryOrders(user)
+      ? orders
+      : orders.filter((order) => order.createdBy === user.id),
+  };
+}
+
+export function filterSingleRecoveryOrderStorageKey(
+  key: string,
+  data: Record<string, unknown>,
+  user: AuthenticatedUser,
+): unknown {
+  if (key !== STORAGE_KEYS.RECOVERY_ORDERS) return data[key] ?? null;
+  return filterRecoveryOrderStorageData(data, user)[key] ?? null;
 }

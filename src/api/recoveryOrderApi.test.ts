@@ -73,6 +73,28 @@ const roles: Role[] = [
     createdAt: now,
     updatedAt: now,
   },
+  {
+    id: 'role-recovery-reader',
+    name: '售后只读员工',
+    code: 'recovery_reader',
+    departmentId: 'dept-service',
+    permissions: [
+      { module: PERMISSION_KEYS.AFTER_SALES, actions: ['read'] },
+      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read'] },
+    ],
+    dataScopes: {
+      leads: 'self',
+      customers: 'self',
+      orders: 'self',
+      orderApplications: 'self',
+      recoveryOrders: 'self',
+      recoveryOrderApplications: 'self',
+    },
+    memberCount: 1,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
 ];
 
 const users: User[] = [
@@ -97,6 +119,19 @@ const users: User[] = [
     role: '财务专员',
     roleId: 'role-finance',
     departmentId: 'dept-finance',
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+  {
+    id: 'user-recovery-reader',
+    name: '售后只读员工',
+    account: 'recovery-reader',
+    email: 'recovery-reader@test.local',
+    phone: '',
+    role: '售后只读员工',
+    roleId: 'role-recovery-reader',
+    departmentId: 'dept-service',
     isActive: true,
     createdAt: now,
     updatedAt: now,
@@ -175,6 +210,41 @@ assert.notEqual(duplicate.code, 0);
 const ownList = await recoveryOrderApi.fetchRecoveryOrders({ ownerId: 'user-service', pageSize: 20 });
 assert.equal(ownList.data.pagination.total, 1);
 assert.equal(ownList.data.items[0].id, created.data.id);
+
+const readerOwnOrder = {
+  ...created.data,
+  id: 'recovery-reader-own-order',
+  orderNo: 'RCV-READER-OWN',
+  thirdPartyOrderNo: 'TP-READER-OWN',
+  recoveryUserId: 'user-recovery-reader',
+  recoveryUserName: '售后只读员工',
+  createdBy: 'user-recovery-reader',
+  createdByName: '售后只读员工',
+};
+const readerAssignedOrder = {
+  ...created.data,
+  id: 'recovery-reader-assigned-order',
+  orderNo: 'RCV-READER-ASSIGNED',
+  thirdPartyOrderNo: 'TP-READER-ASSIGNED',
+  recoveryUserId: 'user-recovery-reader',
+  recoveryUserName: '售后只读员工',
+};
+storage.setItem(STORAGE_KEYS.RECOVERY_ORDERS, JSON.stringify([created.data, readerOwnOrder, readerAssignedOrder]));
+
+setSession('user-recovery-reader');
+const readerReviewList = await recoveryOrderApi.fetchRecoveryOrders({
+  statuses: [created.data.status],
+  scopeDomain: 'recoveryOrderApplications',
+  pageSize: 20,
+});
+assert.deepEqual(readerReviewList.data.items.map((item) => item.id), [readerOwnOrder.id]);
+const readerApproveAttempt = await recoveryOrderApi.approveRecoveryOrder(
+  readerOwnOrder.id,
+  'user-recovery-reader',
+  '售后只读员工',
+);
+assert.notEqual(readerApproveAttempt.code, 0);
+storage.setItem(STORAGE_KEYS.RECOVERY_ORDERS, JSON.stringify([created.data]));
 
 setSession('user-finance');
 const reviewList = await recoveryOrderApi.fetchRecoveryOrders({

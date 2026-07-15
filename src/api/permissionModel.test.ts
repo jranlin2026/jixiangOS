@@ -470,3 +470,19 @@ assert.equal(canReceiveLead({
   roleId: 'role-super-admin',
   isActive: true,
 }, DEFAULT_ROLES), false);
+
+const recoveryReviewReadOnlyRole: Role = {
+  id: 'role-recovery-review-read-only',
+  name: '售后审核台只读',
+  code: 'recovery_review_read_only',
+  permissions: [{ module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read'] }],
+  memberCount: 0,
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+};
+assert.equal(
+  roleHasPermission(recoveryReviewReadOnlyRole, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write'),
+  false,
+  '审核台读取权限不得自动升级为审核操作权限',
+);

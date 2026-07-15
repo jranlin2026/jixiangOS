@@ -371,7 +371,6 @@ const WRITE_ACTION_PERMISSION_KEYS = [
   PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM,
   PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
   PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT,
-  PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
   PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_WORKBENCH,
   PERMISSION_KEYS.ECOMMERCE_SETTLEMENT_SETTINGS,
   PERMISSION_KEYS.ASSETS_IMPORT_EXPORT,
@@ -707,5 +706,19 @@ export function hasPermission(
     const grantedKeys = expandPermissionGrants(permission.module);
     if (grantedKeys.includes(ALL_PERMISSION_KEY)) return true;
     return grantedKeys.some((granted) => requestedKeys.includes(granted));
+  });
+}
+
+export function hasExplicitPermission(
+  user: Pick<AuthenticatedUser, 'permissions' | 'isActive'> | null | undefined,
+  permissionKey: string,
+  action = 'read',
+): boolean {
+  if (!user?.isActive) return false;
+  const normalizedKey = normalizePermissionKey(permissionKey);
+  return user.permissions.some((permission) => {
+    const normalizedModule = normalizePermissionKey(permission.module);
+    if (normalizedModule === ALL_PERMISSION_KEY && permission.actions?.includes('admin')) return true;
+    return normalizedModule === normalizedKey && actionAllowed(permission.actions || [], action);
   });
 }

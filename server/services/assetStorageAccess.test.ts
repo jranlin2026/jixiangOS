@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import {
   canWriteStorageKey,
   filterAssetStorageData,
+  filterRecoveryOrderStorageData,
+  filterSingleRecoveryOrderStorageKey,
 } from './assetStorageAccess';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { PERMISSION_KEYS, toAuthenticatedUser } from '../../src/shared/utils/permissions';
@@ -182,3 +184,33 @@ const opsData = filterAssetStorageData(storageData, opsAuth, { roles: [salesRole
 assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[]).length, 2);
 assert.equal((opsData[STORAGE_KEYS.ASSET_DEVICES] as any[])[0].imei, 'IMEI-RAW');
 assert.equal(canWriteStorageKey(opsAuth, STORAGE_KEYS.ASSET_DEVICES), true);
+
+const recoveryStorageData = {
+  [STORAGE_KEYS.RECOVERY_ORDERS]: [
+    { id: 'recovery-self', createdBy: 'user-sales' },
+    { id: 'recovery-other', createdBy: 'user-other' },
+  ],
+};
+const recoveryReadOnlyAuth: AuthenticatedUser = {
+  ...salesAuth,
+  permissions: [{ module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read'] }],
+};
+const recoveryReviewerAuth: AuthenticatedUser = {
+  ...opsAuth,
+  permissions: [{ module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] }],
+};
+
+const readOnlyRecoveryData = filterRecoveryOrderStorageData(recoveryStorageData, recoveryReadOnlyAuth);
+assert.deepEqual(
+  (readOnlyRecoveryData[STORAGE_KEYS.RECOVERY_ORDERS] as any[]).map((item) => item.id),
+  ['recovery-self'],
+);
+assert.deepEqual(
+  (filterSingleRecoveryOrderStorageKey(STORAGE_KEYS.RECOVERY_ORDERS, recoveryStorageData, recoveryReadOnlyAuth) as any[])
+    .map((item) => item.id),
+  ['recovery-self'],
+);
+assert.equal(
+  (filterRecoveryOrderStorageData(recoveryStorageData, recoveryReviewerAuth)[STORAGE_KEYS.RECOVERY_ORDERS] as any[]).length,
+  2,
+);

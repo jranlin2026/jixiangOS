@@ -45,6 +45,8 @@ import { createCoCreationRouter } from './routes/coCreationRoutes';
 import { createCoCreationService } from './services/coCreation/coCreationService';
 import {
   filterAssetStorageData,
+  filterRecoveryOrderStorageData,
+  filterSingleRecoveryOrderStorageKey,
   filterSingleStorageKey,
   isAssetStorageKey,
 } from './services/assetStorageAccess';
@@ -979,9 +981,10 @@ app.get('/api/storage', requireStorageAccess, async (req: AuthenticatedRequest, 
       }));
     const data = Object.fromEntries(entries);
     const context = await assetStorageContext();
+    const assetFilteredData = filterAssetStorageData(data, req.currentUser!, context);
     res.json({
       code: 0,
-      data: filterAssetStorageData(data, req.currentUser!, context),
+      data: filterRecoveryOrderStorageData(assetFilteredData, req.currentUser!),
       message: 'success',
     });
     return;
@@ -995,7 +998,8 @@ app.get('/api/storage', requireStorageAccess, async (req: AuthenticatedRequest, 
   const result = await storageService.list();
   if (result.code === 0 && result.data && req.currentUser) {
     const context = await assetStorageContext();
-    res.json({ ...result, data: filterAssetStorageData(result.data as Record<string, unknown>, req.currentUser, context) });
+    const assetFilteredData = filterAssetStorageData(result.data as Record<string, unknown>, req.currentUser, context);
+    res.json({ ...result, data: filterRecoveryOrderStorageData(assetFilteredData, req.currentUser) });
     return;
   }
   res.json(result);
@@ -1011,6 +1015,16 @@ app.get('/api/storage/:key', requireStorageAccess, async (req: AuthenticatedRequ
     const result = await storageService.list();
     const context = await assetStorageContext();
     const data = filterSingleStorageKey(key, result.data as Record<string, unknown>, req.currentUser, context);
+    res.status(result.code === 0 ? 200 : 400).json({ ...result, data });
+    return;
+  }
+  if (key === STORAGE_KEYS.RECOVERY_ORDERS) {
+    const result = await storageService.get(key);
+    const data = filterSingleRecoveryOrderStorageKey(
+      key,
+      { [key]: result.data },
+      req.currentUser,
+    );
     res.status(result.code === 0 ? 200 : 400).json({ ...result, data });
     return;
   }

@@ -7,8 +7,7 @@ import { getStorageData, setStorageCacheData, setStorageData } from './mock/stor
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { getCurrentOperatorName } from '../shared/utils/currentOperator';
-import { getCurrentDataVisibilityScope } from '../shared/utils/dataVisibility';
-import { PERMISSION_KEYS, roleHasPermission } from '../shared/utils/permissions';
+import { PERMISSION_KEYS, normalizePermissionKey, roleHasPermission } from '../shared/utils/permissions';
 import { normalizeUserRoleName } from '../shared/utils/roles';
 import type { AuthSession } from '../types/auth';
 import type { Commission, CommissionPayoutPlan } from '../types/commission';
@@ -137,21 +136,29 @@ function canUseRecoveryPermission(permissionKey: string, action = 'read'): boole
   return roleHasPermission(getCurrentSessionRole(), permissionKey, action);
 }
 
+function canUseDirectRecoveryPermission(permissionKey: string, action = 'read'): boolean {
+  const role = getCurrentSessionRole();
+  if (!role?.isActive) return false;
+  if (role.code === 'super_admin') return true;
+  const normalizedKey = normalizePermissionKey(permissionKey);
+  return role.permissions.some((permission) => {
+    if (normalizePermissionKey(permission.module) !== normalizedKey) return false;
+    const actions = permission.actions || [];
+    if (actions.includes('admin')) return true;
+    if (action === 'read') return actions.some((item) => ['read', 'write', 'delete'].includes(item));
+    if (action === 'write') return actions.some((item) => ['write', 'delete'].includes(item));
+    return actions.includes(action);
+  });
+}
+
 function canViewRecoveryOrder(order: RecoveryOrder, scopeDomain: NonNullable<RecoveryOrderFilters['scopeDomain']> = 'recoveryOrders'): boolean {
-  if (scopeDomain === 'recoveryOrderApplications' && canUseRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW)) {
+  if (scopeDomain === 'recoveryOrderApplications' && canUseDirectRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write')) {
     return true;
   }
   if (scopeDomain === 'recoveryOrders' && canUseRecoveryPermission(PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT)) {
     return true;
   }
-  const scope = getCurrentDataVisibilityScope(scopeDomain);
-  if (scope.unrestricted) return true;
-  return scope.visibleUserIds.includes(order.createdBy)
-    || scope.visibleUserIds.includes(order.recoveryUserId)
-    || Boolean(order.assistUserId && scope.visibleUserIds.includes(order.assistUserId))
-    || scope.visibleUserNames.includes(order.createdByName)
-    || scope.visibleUserNames.includes(order.recoveryUserName)
-    || Boolean(order.assistUserName && scope.visibleUserNames.includes(order.assistUserName));
+  return order.createdBy === getCurrentSessionUser()?.id;
 }
 
 function canResubmitReturnedRecoveryOrder(order: RecoveryOrder): boolean {
@@ -396,7 +403,7 @@ async function deleteRecoveryOrder(id: string, options: { force?: boolean } = {}
 async function approveRecoveryOrder(id: string, auditorId: string, auditorName: string): Promise<ApiResponse<RecoveryOrder | null>> {
   ensureInit();
   await delay(160);
-  if (!canUseRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write')) {
+  if (!canUseDirectRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write')) {
     return createErrorResponse('无权审核售后挽回订单', 403);
   }
   const orders = readRecoveryOrders();
@@ -422,7 +429,7 @@ async function approveRecoveryOrder(id: string, auditorId: string, auditorName: 
 async function returnRecoveryOrder(id: string, auditorId: string, auditorName: string, reason: string): Promise<ApiResponse<RecoveryOrder | null>> {
   ensureInit();
   await delay(140);
-  if (!canUseRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write')) {
+  if (!canUseDirectRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write')) {
     return createErrorResponse('无权退回售后挽回订单', 403);
   }
   const orders = readRecoveryOrders();
@@ -448,7 +455,7 @@ async function returnRecoveryOrder(id: string, auditorId: string, auditorName: s
 async function rejectRecoveryOrder(id: string, auditorId: string, auditorName: string, reason: string): Promise<ApiResponse<RecoveryOrder | null>> {
   ensureInit();
   await delay(140);
-  if (!canUseRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write')) {
+  if (!canUseDirectRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write')) {
     return createErrorResponse('无权驳回售后挽回订单', 403);
   }
   const orders = readRecoveryOrders();

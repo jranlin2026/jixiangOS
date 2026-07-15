@@ -10,9 +10,9 @@ import { ModuleHeader, ModulePage, ModuleTabs } from '../../shared/components/Mo
 
 type AfterSalesTab = 'recovery-list' | 'recovery-review';
 
-const AFTER_SALES_TABS: Array<{ value: AfterSalesTab; label: string; permissionKeys: string[] }> = [
+const AFTER_SALES_TABS: Array<{ value: AfterSalesTab; label: string; permissionKeys: string[]; action?: 'read' | 'write' }> = [
   { value: 'recovery-list', label: '售后挽回订单列表', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE] },
-  { value: 'recovery-review', label: '售后挽回订单审核台', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW] },
+  { value: 'recovery-review', label: '售后挽回订单审核台', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW], action: 'read' },
 ];
 
 function getTab(value: string | null): AfterSalesTab {
@@ -30,7 +30,7 @@ const AfterSales: React.FC = () => {
   const canSeeAllAfterSalesTabs = isSuperAdmin(currentUser);
   const visibleTabs = useMemo(() => AFTER_SALES_TABS.filter((tab) => (
     canSeeAllAfterSalesTabs
-    || tab.permissionKeys.some((permissionKey) => hasPermission(currentUser, permissionKey))
+    || tab.permissionKeys.some((permissionKey) => hasPermission(currentUser, permissionKey, tab.action))
   )), [canSeeAllAfterSalesTabs, currentUser]);
   const activeTab = visibleTabs.some((tab) => tab.value === requestedTab)
     ? requestedTab
