@@ -19,6 +19,7 @@ import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import { normalizeResourceOwnership } from '../../shared/utils/constants';
 import type { Order } from '../../types/order';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
 
 interface OrderDetailProps {
   order: Order;
@@ -107,34 +108,18 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
                         <TableCell>{formatCurrency(payment.amount)}</TableCell>
                         <TableCell>{formatDate(payment.paidAt, 'yyyy-MM-dd HH:mm:ss')}</TableCell>
                         <TableCell>{payment.paymentOrderNo || '-'}</TableCell>
-                        <TableCell>{payment.voucherName || '-'}</TableCell>
-                        <TableCell>{order.dealEvidenceName || (order.dealEvidencePreview ? '已上传' : '-')}</TableCell>
+                        <TableCell>
+                          <AttachmentPreviewLink title="付款截图" fileName={payment.voucherName} src={payment.voucherPreview} />
+                        </TableCell>
+                        <TableCell>
+                          <AttachmentPreviewLink title="成交路径截图" fileName={order.dealEvidenceName} src={order.dealEvidencePreview} />
+                        </TableCell>
                         <TableCell>{payment.remark || '-'}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               </TableContainer>
-            </>
-          )}
-
-          {(order.dealEvidenceName || order.dealEvidencePreview) && (
-            <>
-              <Divider sx={{ my: 2 }} />
-              <Box>
-                <Typography variant="subtitle2" sx={{ color: '#6b7280', mb: 1 }}>成交路径截图</Typography>
-                {order.dealEvidenceName && (
-                  <Typography variant="body2" sx={{ mb: 1, color: '#4f46e5' }}>{order.dealEvidenceName}</Typography>
-                )}
-                {order.dealEvidencePreview && (
-                  <Box
-                    component="img"
-                    src={order.dealEvidencePreview}
-                    alt="成交路径截图"
-                    sx={{ width: '100%', maxWidth: 520, maxHeight: 320, objectFit: 'contain', borderRadius: 1, border: '1px solid #e5e7eb' }}
-                  />
-                )}
-              </Box>
             </>
           )}
 

@@ -44,6 +44,7 @@ import { getProductLevelRowSx, getProductLevelTagSx, normalizeResourceOwnership,
 import { getCurrentOperatorUser } from '../../shared/utils/currentOperator';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
 
 type ReviewAction = {
   type: 'approve' | 'return' | 'reject';
@@ -899,8 +900,16 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                           <TableCell>{formatCurrency(payment.amount)}</TableCell>
                           <TableCell>{formatDate(payment.paidAt, 'yyyy-MM-dd HH:mm:ss')}</TableCell>
                           <TableCell>{payment.paymentOrderNo || '-'}</TableCell>
-                          <TableCell>{payment.voucherName || '-'}</TableCell>
-                          <TableCell>{detailApplication.orderData.dealEvidenceName || (detailApplication.orderData.dealEvidencePreview ? '已上传' : '-')}</TableCell>
+                          <TableCell>
+                            <AttachmentPreviewLink title="付款截图" fileName={payment.voucherName} src={payment.voucherPreview} />
+                          </TableCell>
+                          <TableCell>
+                            <AttachmentPreviewLink
+                              title="成交路径截图"
+                              fileName={detailApplication.orderData.dealEvidenceName}
+                              src={detailApplication.orderData.dealEvidencePreview}
+                            />
+                          </TableCell>
                           <TableCell>{payment.remark || '-'}</TableCell>
                         </TableRow>
                       ))
@@ -912,26 +921,6 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                   </TableBody>
                 </Table>
               </TableContainer>
-
-              {(detailApplication.orderData.dealEvidenceName || detailApplication.orderData.dealEvidencePreview) && (
-                <>
-                  <Divider sx={{ my: 2 }} />
-                  <Box>
-                    <Typography variant="subtitle2" sx={{ color: '#6b7280', mb: 1 }}>成交路径截图</Typography>
-                    {detailApplication.orderData.dealEvidenceName && (
-                      <Typography variant="body2" sx={{ mb: 1, color: '#4f46e5' }}>{detailApplication.orderData.dealEvidenceName}</Typography>
-                    )}
-                    {detailApplication.orderData.dealEvidencePreview && (
-                      <Box
-                        component="img"
-                        src={detailApplication.orderData.dealEvidencePreview}
-                        alt="成交路径截图"
-                        sx={{ width: '100%', maxWidth: 520, maxHeight: 320, objectFit: 'contain', borderRadius: 1, border: '1px solid #e5e7eb' }}
-                      />
-                    )}
-                  </Box>
-                </>
-              )}
 
               <Divider sx={{ my: 2 }} />
               <Box>
