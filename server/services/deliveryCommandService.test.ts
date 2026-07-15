@@ -167,6 +167,16 @@ class FakePrisma {
   const prisma = new FakePrisma();
   const service = createDeliveryCommandService(prisma as any, { now: () => new Date(NOW) });
   const created = (await service.createFromOrder('order-delivery', engineer)).data!;
+  const thirdTask = created.tasks[2];
+  const completedOutOfOrder = await service.updateTask(created.id, thirdTask.id, { status: '已完成' }, engineer);
+  assert.equal(completedOutOfOrder.code, 0, '后续步骤应允许独立完成');
+  assert.equal(completedOutOfOrder.data?.tasks[2].status, '已完成');
+  assert.equal(completedOutOfOrder.data?.tasks[0].status, '进行中');
+  assert.equal(completedOutOfOrder.data?.progressPercent, 33);
+  const reopened = await service.updateTask(created.id, thirdTask.id, { status: '待开始' }, engineer);
+  assert.equal(reopened.code, 0, '勾错的步骤应允许取消完成');
+  assert.equal(reopened.data?.tasks[2].completedAt, undefined);
+
   const firstTask = created.tasks[0];
   const attached = await service.addAttachment(created.id, firstTask.id, {
     name: 'proof.png', uploadedBy: '伪造操作人',
@@ -211,4 +221,29 @@ class FakePrisma {
   await assert.rejects(() => service.createFromOrder('order-delivery', engineer), /order update failed/);
   assert.equal(prisma.deliveries().length, 0, '订单关联失败时不得留下半成功交付单');
   assert.equal(prisma.order().deliveryId, undefined);
+}
+
+{
+  const prisma = new FakePrisma();
+  prisma.rows.get(rowKey(STORAGE_KEYS.PRODUCTS, 'product-1'))!.data.deliveryStages = [];
+  const service = createDeliveryCommandService(prisma as any, { now: () => new Date(NOW) });
+  const created = await service.createFromOrder('order-delivery', engineer);
+  assert.equal(created.code, 0, '启用产品暂未配置步骤时，手工补建仍应使用安全默认步骤');
+  assert.ok(created.data?.stages.length);
+}
+
+{
+  const prisma = new FakePrisma();
+  const service = createDeliveryCommandService(prisma as any, {
+    now: () => new Date(NOW),
+    assigner: {
+      assignNext: async () => ({
+        ownerId: 'user-auto', owner: '自动客户成功', assignmentMode: 'auto' as const,
+        assignedAt: NOW, assignedBy: 'system' as const,
+      }),
+    },
+  });
+  const created = await service.createFromOrder('order-delivery', engineer);
+  assert.equal(created.data?.ownerId, 'user-auto');
+  assert.equal(created.data?.assignmentMode, 'auto');
 }

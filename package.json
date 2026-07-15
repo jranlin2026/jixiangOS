@@ -16,7 +16,8 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:push": "prisma db push",
-    "db:seed": "prisma db seed"
+    "db:seed": "prisma db seed",
+    "delivery:repair": "tsx scripts/repair-deliveries.ts"
   },
   "overrides": {
     "effect": "3.21.0"

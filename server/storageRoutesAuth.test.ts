@@ -7,6 +7,8 @@ const source = readFileSync(join(process.cwd(), 'server', 'index.ts'), 'utf8');
 for (const [method, route] of [
   ['get', '/api/settings/users'],
   ['get', '/api/settings/assignable-directory'],
+  ['get', '/api/settings/delivery-assignment'],
+  ['put', '/api/settings/delivery-assignment'],
   ['post', '/api/settings/users/leave-customer-count'],
   ['post', '/api/settings/users'],
   ['put', '/api/settings/users/:id'],
@@ -39,6 +41,10 @@ for (const [method, route] of [
   ['get', '/api/orders/stats'],
   ['get', '/api/orders/:id'],
   ['delete', '/api/orders/:id'],
+  ['get', '/api/deliveries'],
+  ['get', '/api/deliveries/stats'],
+  ['get', '/api/deliveries/creatable-orders'],
+  ['get', '/api/deliveries/:id'],
   ['post', '/api/deliveries/from-order'],
   ['patch', '/api/deliveries/:id/card'],
   ['post', '/api/deliveries/:id/advance'],
@@ -75,22 +81,27 @@ assert.match(source, /const requireRoleDeleteAccess = createRequireAuth\(authSer
 assert.match(source, /const requireAiConfigReadAccess = createRequireAuth\(authService, PERMISSION_KEYS\.SETTINGS_AI_CONFIG\);/);
 assert.match(source, /const requireAiConfigWriteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.SETTINGS_AI_CONFIG, 'write'\);/);
 assert.match(source, /const requireDataMaintenanceDeleteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.SETTINGS_DATA_MAINTENANCE, 'delete'\);/);
+assert.match(source, /const requireDeliveryAssignmentReadAccess = createRequireAuth\(authService, PERMISSION_KEYS\.SETTINGS_DELIVERY_ASSIGNMENT\);/);
+assert.match(source, /const requireDeliveryAssignmentWriteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.SETTINGS_DELIVERY_ASSIGNMENT, 'write'\);/);
 assert.match(source, /const requireOrderCreateWriteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.ORDER_CREATE, 'write'\);/);
 assert.match(source, /const requireOrderReadAccess = createRequireAuth\(authService, PERMISSION_KEYS\.ORDER_MANAGE\);/);
 assert.match(source, /const requireOrderApplicationReadAccess = createRequireAnyPermission\(authService, \[PERMISSION_KEYS\.ORDER_REVIEW, PERMISSION_KEYS\.ORDER_MANAGE\]\);/);
 assert.match(source, /const requireOrderEditWriteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.ORDER_EDIT, 'write'\);/);
 assert.match(source, /const requireOrderDeleteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.ORDER_DELETE, 'delete'\);/);
 assert.match(source, /const requireOrderReviewWriteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.ORDER_REVIEW, 'write'\);/);
+assert.match(source, /const requireDeliveryReadAccess = createRequireAuth\(authService, PERMISSION_KEYS\.DELIVERY_CENTER\);/);
 assert.match(source, /const requireDeliveryWriteAccess = createRequireAnyPermission\(authService, \[PERMISSION_KEYS\.DELIVERY_MOVE_CARD, PERMISSION_KEYS\.DELIVERY_STAGE_CONFIG\], 'write'\);/);
 assert.match(source, /const requireRecoveryCreateAccess = createRequireAuth\(authService, PERMISSION_KEYS\.AFTER_SALES_RECOVERY_CREATE, 'write'\);/);
 assert.match(
   source,
-  /createOrderApplicationService\(prisma,\s*\{\s*applyDownstreamEffects: createOrderApprovalDownstreamEffects\(\)/,
+  /createOrderApplicationService\(prisma,\s*\{\s*applyDownstreamEffects: createOrderApprovalDownstreamEffects\(deliveryAssignmentService\)/,
   '订单审核服务必须注入客户、提成和交付的同事务副作用',
 );
 
 assert.match(source, /app\.get\('\/api\/settings\/users', requireOrganizationReadAccess,/);
 assert.match(source, /app\.get\('\/api\/settings\/assignable-directory', requireAssignableUsersAccess,/);
+assert.match(source, /app\.get\('\/api\/settings\/delivery-assignment', requireDeliveryAssignmentReadAccess,/);
+assert.match(source, /app\.put\('\/api\/settings\/delivery-assignment', requireDeliveryAssignmentWriteAccess,/);
 assert.match(source, /app\.post\('\/api\/settings\/users\/leave-customer-count', requireOrganizationReadAccess,/);
 assert.match(source, /app\.post\('\/api\/settings\/users', requireOrganizationWriteAccess,/);
 assert.match(source, /app\.put\('\/api\/settings\/users\/:id', requireOrganizationWriteAccess,/);
@@ -175,6 +186,10 @@ assert.match(source, /app\.get\('\/api\/orders\/owner-candidates', requireOrderR
 assert.match(source, /app\.get\('\/api\/orders\/stats', requireOrderReadAccess,/);
 assert.match(source, /app\.get\('\/api\/orders\/:id', requireOrderReadAccess,/);
 assert.match(source, /app\.delete\('\/api\/orders\/:id', requireOrderDeleteAccess,/);
+assert.match(source, /app\.get\('\/api\/deliveries', requireDeliveryReadAccess,/);
+assert.match(source, /app\.get\('\/api\/deliveries\/stats', requireDeliveryReadAccess,/);
+assert.match(source, /app\.get\('\/api\/deliveries\/creatable-orders', requireDeliveryReadAccess,/);
+assert.match(source, /app\.get\('\/api\/deliveries\/:id', requireDeliveryReadAccess,/);
 assert.match(source, /app\.post\('\/api\/deliveries\/from-order', requireDeliveryWriteAccess,/);
 assert.match(source, /app\.patch\('\/api\/deliveries\/:id\/card', requireDeliveryWriteAccess,/);
 assert.match(source, /app\.post\('\/api\/deliveries\/:id\/advance', requireDeliveryWriteAccess,/);

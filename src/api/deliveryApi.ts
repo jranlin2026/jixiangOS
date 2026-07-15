@@ -20,6 +20,7 @@ import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS } from '../shared/utils/constants';
+import { resolveProductDeliveryStages } from '../shared/utils/deliveryStages';
 import { initializeMockData } from './mock';
 
 const STATUS_ALL: DeliveryOverallStatus = '全部';
@@ -97,7 +98,7 @@ function getProductDeliveryStages(productType?: ProductLevel | string, productId
     || matchingProductByName
     || products.find((item) => normalizeProductLevel(item.level) === normalizedType && item.isActive)
     || products.find((item) => normalizeProductLevel(item.level) === normalizedType);
-  return (product?.deliveryStages || []).map((stage) => stage.trim()).filter(Boolean);
+  return product ? resolveProductDeliveryStages(product) : [];
 }
 
 function toTemplate(stages: string[]): DeliveryStepTemplate[] {
@@ -424,6 +425,18 @@ function filterDeliveries(deliveries: Delivery[], filters?: DeliveryFilters): De
 }
 
 async function fetchDeliveries(filters?: DeliveryFilters): Promise<ApiResponse<DeliveryListResponse>> {
+  if (shouldUseBackendApi()) {
+    const params = new URLSearchParams();
+    Object.entries(filters || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+    });
+    const response = await backendRequest<DeliveryListResponse>(`/deliveries${params.size ? `?${params.toString()}` : ''}`);
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '交付列表加载失败', response.code || -1);
+    }
+    response.data.items.forEach(cacheBackendDelivery);
+    return response;
+  }
   await delay(160);
   const page = Math.max(1, Number(filters?.page) || 1);
   const pageSize = Math.max(1, Number(filters?.pageSize) || 10);
@@ -438,6 +451,11 @@ async function fetchDeliveries(filters?: DeliveryFilters): Promise<ApiResponse<D
 }
 
 async function fetchDeliveryById(id: string): Promise<ApiResponse<Delivery | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Delivery | null>(`/deliveries/${encodeURIComponent(id)}`);
+    if (response.code !== 0) return createErrorResponse(response.message || '交付单加载失败', response.code || -1);
+    return createSuccessResponse(response.data ? cacheBackendDelivery(response.data) : null, response.message);
+  }
   await delay(120);
   return createSuccessResponse(readDeliveries().find((item) => item.id === id) || null);
 }
@@ -454,6 +472,11 @@ async function fetchDeliveriesByProductType(productType: ProductLevel): Promise<
 }
 
 async function fetchCreatableDeliveryOrders(search = ''): Promise<ApiResponse<DeliveryCreatableOrderSummary[]>> {
+  if (shouldUseBackendApi()) {
+    const params = new URLSearchParams();
+    if (search.trim()) params.set('search', search.trim());
+    return backendRequest<DeliveryCreatableOrderSummary[]>(`/deliveries/creatable-orders${params.size ? `?${params.toString()}` : ''}`);
+  }
   ensureInit();
   await delay(120);
   const deliveries = getStorageData<Delivery[]>(STORAGE_KEYS.DELIVERIES) || [];
@@ -483,6 +506,13 @@ async function fetchCreatableDeliveryOrders(search = ''): Promise<ApiResponse<De
 }
 
 async function fetchDeliveryStats(filters?: DeliveryFilters): Promise<ApiResponse<DeliveryStats>> {
+  if (shouldUseBackendApi()) {
+    const params = new URLSearchParams();
+    Object.entries(filters || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+    });
+    return backendRequest<DeliveryStats>(`/deliveries/stats${params.size ? `?${params.toString()}` : ''}`);
+  }
   await delay(120);
   const scopedFilters = { ...filters, status: STATUS_ALL, page: undefined, pageSize: undefined };
   const deliveries = filterDeliveries(readDeliveries(), scopedFilters);

@@ -273,6 +273,7 @@ export const STORAGE_KEYS = {
   ORDERS: `${STORAGE_PREFIX}orders`,
   ORDER_APPLICATIONS: `${STORAGE_PREFIX}order_applications`,
   DELIVERIES: `${STORAGE_PREFIX}deliveries`,
+  DELIVERY_ASSIGNMENT_CONFIG: `${STORAGE_PREFIX}delivery_assignment_config`,
   COMMISSIONS: `${STORAGE_PREFIX}commissions`,
   COMMISSION_OPERATION_LOGS: `${STORAGE_PREFIX}commission_operation_logs`,
   FINANCE: `${STORAGE_PREFIX}finance`,

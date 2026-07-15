@@ -33,6 +33,8 @@ import { createOrderApprovalDownstreamEffects } from './services/orderApprovalEf
 import { createOrderCommandService } from './services/orderCommandService';
 import { createOrderQueryService } from './services/orderQueryService';
 import { createDeliveryCommandService } from './services/deliveryCommandService';
+import { createDeliveryQueryService } from './services/deliveryQueryService';
+import { createDeliveryAssignmentService } from './services/deliveryAssignmentService';
 import { createRecoveryOrderCommandService } from './services/recoveryOrderCommandService';
 import { createKnowledgeService } from './services/enablement/knowledgeService';
 import { createKnowledgeFileStore } from './services/enablement/knowledgeFileStore';
@@ -82,12 +84,14 @@ const customerTagMigrationService = createCustomerTagMigrationService(prisma as 
 const leadListService = createLeadListService(prisma);
 const settingsService = createSettingsService(prisma);
 const storageService = createStorageService(prisma);
+const deliveryAssignmentService = createDeliveryAssignmentService(prisma);
 const orderApplicationService = createOrderApplicationService(prisma, {
-  applyDownstreamEffects: createOrderApprovalDownstreamEffects(),
+  applyDownstreamEffects: createOrderApprovalDownstreamEffects(deliveryAssignmentService),
 });
 const orderCommandService = createOrderCommandService(prisma);
 const orderQueryService = createOrderQueryService(prisma);
-const deliveryCommandService = createDeliveryCommandService(prisma);
+const deliveryCommandService = createDeliveryCommandService(prisma, { assigner: deliveryAssignmentService });
+const deliveryQueryService = createDeliveryQueryService(prisma);
 const recoveryOrderCommandService = createRecoveryOrderCommandService(prisma);
 const knowledgeRepository = createPrismaKnowledgeRepository(prisma as any);
 const knowledgeFileStore = createKnowledgeFileStore(getEnablementPrivateStorageDir(process.env, uploadRoot));
@@ -106,6 +110,8 @@ const requireAiConfigReadAccess = createRequireAuth(authService, PERMISSION_KEYS
 const requireAiConfigWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_AI_CONFIG, 'write');
 const requireDataMaintenanceDeleteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'delete');
 const requireDataMaintenanceWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'write');
+const requireDeliveryAssignmentReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT);
+const requireDeliveryAssignmentWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT, 'write');
 const requireStorageAccess = createRequireAuth(authService);
 const requireCoCreationAccess = createRequireAuth(authService);
 const requireCustomerListAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_LIST);
@@ -129,6 +135,7 @@ const requireOrderApplicationReadAccess = createRequireAnyPermission(authService
 const requireOrderEditWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.ORDER_EDIT, 'write');
 const requireOrderDeleteAccess = createRequireAuth(authService, PERMISSION_KEYS.ORDER_DELETE, 'delete');
 const requireOrderReviewWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.ORDER_REVIEW, 'write');
+const requireDeliveryReadAccess = createRequireAuth(authService, PERMISSION_KEYS.DELIVERY_CENTER);
 const requireDeliveryWriteAccess = createRequireAnyPermission(authService, [PERMISSION_KEYS.DELIVERY_MOVE_CARD, PERMISSION_KEYS.DELIVERY_STAGE_CONFIG], 'write');
 const requireRecoveryCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, 'write');
 const requireMatrixPublishUploadAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write');
@@ -138,6 +145,7 @@ const requireEnablementRead = createRequireAuth(authService, PERMISSION_KEYS.ENA
 const requireEnablementReview = createRequireAuth(authService, PERMISSION_KEYS.ENABLEMENT_REVIEW, 'write');
 const requireEnablementPublish = createRequireAuth(authService, PERMISSION_KEYS.ENABLEMENT_PUBLISH, 'write');
 const assignableUsersPermissions = [
+  PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT,
   PERMISSION_KEYS.LEADS_FLOW_CONFIG,
   PERMISSION_KEYS.CUSTOMER_ASSIGN,
   PERMISSION_KEYS.FINANCE_SETTLEMENT,
@@ -153,6 +161,7 @@ const runtimeStorageKeys = [
   STORAGE_KEYS.ORDERS,
   STORAGE_KEYS.ORDER_APPLICATIONS,
   STORAGE_KEYS.DELIVERIES,
+  STORAGE_KEYS.DELIVERY_ASSIGNMENT_CONFIG,
   STORAGE_KEYS.COMMISSIONS,
   STORAGE_KEYS.COMMISSION_OPERATION_LOGS,
   STORAGE_KEYS.COMMISSION_SETTLEMENT_BATCHES,
@@ -658,6 +667,53 @@ app.delete('/api/orders/:id', requireOrderDeleteAccess, async (req: Authenticate
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
+app.get('/api/deliveries', requireDeliveryReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await deliveryQueryService.list({
+    productType: queryParam(req.query.productType) as any,
+    stage: queryParam(req.query.stage),
+    owner: queryParam(req.query.owner),
+    ownerId: queryParam(req.query.ownerId),
+    salesOwner: queryParam(req.query.salesOwner),
+    status: queryParam(req.query.status) as any,
+    priority: queryParam(req.query.priority) as any,
+    paymentStart: queryParam(req.query.paymentStart),
+    paymentEnd: queryParam(req.query.paymentEnd),
+    plannedStart: queryParam(req.query.plannedStart),
+    plannedEnd: queryParam(req.query.plannedEnd),
+    search: queryParam(req.query.search),
+    page: Number(queryParam(req.query.page)),
+    pageSize: Number(queryParam(req.query.pageSize)),
+  }, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.get('/api/deliveries/stats', requireDeliveryReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await deliveryQueryService.stats({
+    productType: queryParam(req.query.productType) as any,
+    stage: queryParam(req.query.stage),
+    owner: queryParam(req.query.owner),
+    ownerId: queryParam(req.query.ownerId),
+    salesOwner: queryParam(req.query.salesOwner),
+    priority: queryParam(req.query.priority) as any,
+    paymentStart: queryParam(req.query.paymentStart),
+    paymentEnd: queryParam(req.query.paymentEnd),
+    plannedStart: queryParam(req.query.plannedStart),
+    plannedEnd: queryParam(req.query.plannedEnd),
+    search: queryParam(req.query.search),
+  }, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.get('/api/deliveries/creatable-orders', requireDeliveryReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await deliveryQueryService.listCreatableOrders(queryParam(req.query.search), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.get('/api/deliveries/:id', requireDeliveryReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await deliveryQueryService.get(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
 app.post('/api/deliveries/from-order', requireDeliveryWriteAccess, async (req: AuthenticatedRequest, res) => {
   const result = await deliveryCommandService.createFromOrder(String(req.body?.orderId || ''), req.currentUser!);
   res.status(result.code === 0 ? 201 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
@@ -804,6 +860,15 @@ app.get('/api/settings/assignable-users', requireAssignableUsersAccess, async (_
 
 app.get('/api/settings/assignable-directory', requireAssignableUsersAccess, async (_req: express.Request, res: express.Response) => {
   res.json(await settingsService.listAssignableDirectory());
+});
+
+app.get('/api/settings/delivery-assignment', requireDeliveryAssignmentReadAccess, async (_req, res) => {
+  res.json(await deliveryAssignmentService.getConfig());
+});
+
+app.put('/api/settings/delivery-assignment', requireDeliveryAssignmentWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await deliveryAssignmentService.saveConfig(req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code || 400).json(result);
 });
 
 app.post('/api/settings/users/leave-customer-count', requireOrganizationReadAccess, async (req, res) => {
