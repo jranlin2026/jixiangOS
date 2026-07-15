@@ -20,6 +20,8 @@ const staleReviewer: AuthenticatedUser = {
   name: '非财务审核残留账号',
   account: 'stale-reviewer',
   email: 'stale-reviewer@example.com',
+  role: 'customer-success-manager',
+  roleId: 'role-stale-reviewer',
   permissions: [{ module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] }],
 };
 const reviewer: AuthenticatedUser = {
@@ -72,7 +74,7 @@ class FakePrisma {
     id: `${STORAGE_KEYS.RECOVERY_ORDERS}:${oldRecord.id}`, domain: STORAGE_KEYS.RECOVERY_ORDERS,
     recordId: oldRecord.id, status: oldRecord.status, data: clone(oldRecord),
   }]]);
-  readonly user = { findMany: async () => [dbUser(creator), dbUser(other), dbUser(reviewer)] };
+  readonly user = { findMany: async () => [dbUser(creator), dbUser(other), dbUser(staleReviewer), dbUser(reviewer)] };
   readonly role = { findMany: async () => [{
     id: 'role-delivery', name: '交付工程师', code: 'delivery_engineer', departmentId: 'dept-delivery',
     permissions: creator.permissions, dataScopes: { recoveryOrderApplications: 'self' }, memberCount: 2,
@@ -80,6 +82,10 @@ class FakePrisma {
   }, {
     id: 'role-reviewer', name: '售后主管', code: 'after_sales_manager', departmentId: 'dept-delivery',
     permissions: reviewer.permissions, dataScopes: { recoveryOrderApplications: 'self' }, memberCount: 1,
+    isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW), description: null,
+  }, {
+    id: 'role-stale-reviewer', name: 'customer-success-manager', code: 'customer_success_manager', departmentId: 'dept-delivery',
+    permissions: staleReviewer.permissions, dataScopes: { recoveryOrderApplications: 'all' }, memberCount: 1,
     isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW), description: null,
   }] };
   readonly department = { findMany: async () => [{
@@ -162,6 +168,13 @@ assert.deepEqual(
 );
 const reviewerList = await service.list({ page: 1, pageSize: 20 }, reviewer);
 assert.equal(reviewerList.data?.pagination.total, 2, '财务审核人必须从数据库看到全部待审核订单');
+
+const staleReviewerList = await service.list({ page: 1, pageSize: 20 }, staleReviewer);
+assert.equal(
+  staleReviewerList.data?.pagination.total,
+  0,
+  'non-finance account with stale review write and all scope must only see self-created orders',
+);
 
 const replayed = await service.create(input(), creator);
 assert.equal(replayed.code, 0);

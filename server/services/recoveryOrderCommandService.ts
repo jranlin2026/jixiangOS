@@ -246,14 +246,11 @@ export function createRecoveryOrderCommandService(
 
   return {
     async list(filters: RecoveryOrderFilters = {}, actor: AuthenticatedUser) {
-      const [rows, directory] = await Promise.all([
-        prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } }),
-        loadDirectory(prisma),
-      ]);
-      const scope = recoveryScope(directory, actor);
+      const rows = await prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } });
+      const canReadAll = canReviewRecoveryOrders(actor);
       const items = rows
         .map((row) => parseObject<RecoveryOrder>(row.data, '售后挽回订单'))
-        .filter((order) => recoveryVisible(order, scope) && matchesRecoveryOrder(order, filters))
+        .filter((order) => (canReadAll || order.createdBy === actor.id) && matchesRecoveryOrder(order, filters))
         .sort((left, right) => timestamp(right.updatedAt || right.createdAt) - timestamp(left.updatedAt || left.createdAt));
       const page = toPositiveInt(filters.page, 1);
       const pageSize = Math.min(toPositiveInt(filters.pageSize, 10), 100);
