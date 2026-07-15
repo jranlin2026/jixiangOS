@@ -15,7 +15,7 @@ import type {
   HomeWorkbenchData,
 } from '../types/dashboard';
 import type { ApiResponse } from './types';
-import { createSuccessResponse, delay } from './types';
+import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { initializeMockData } from './mock';
 import { getStorageData } from './mock/storage';
 import {
@@ -190,9 +190,19 @@ function getRecentActivities(customers: Customer[], leads: Lead[], orders: Order
 async function fetchHomeWorkbench(): Promise<ApiResponse<HomeWorkbenchData>> {
   ensureInit();
   await delay(100);
-  const customerTodos = shouldUseBackendApi()
-    ? await customerTodoApi.listMine().then((response) => response.code === 0 ? response.data || [] : []).catch(() => [])
-    : [];
+  let customerTodos = [] as HomeWorkbenchData['customerTodos'];
+  if (shouldUseBackendApi()) {
+    try {
+      const response = await customerTodoApi.listMine();
+      if (response.code !== 0) {
+        return createErrorResponse(response.message || '客户待办加载失败', response.code);
+      }
+      customerTodos = response.data || [];
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '客户待办加载失败';
+      return createErrorResponse(message, 503);
+    }
+  }
   const leads = filterVisibleLeads(readArray<Lead>(STORAGE_KEYS.LEADS));
   const customers = filterVisibleCustomers(readArray<Customer>(STORAGE_KEYS.CUSTOMERS));
   const orders = filterVisibleOrders(readArray<Order>(STORAGE_KEYS.ORDERS));

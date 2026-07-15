@@ -87,6 +87,7 @@ const HomeWorkbench: React.FC = () => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const [data, setData] = useState<HomeWorkbenchData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [completingTodoId, setCompletingTodoId] = useState('');
   const [todoError, setTodoError] = useState('');
 
@@ -100,9 +101,13 @@ const HomeWorkbench: React.FC = () => {
 
   const fetchData = async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const res = await dashboardApi.fetchHomeWorkbench();
       if (res.code === 0) setData(res.data);
+      else setLoadError(res.message || '首页待办加载失败');
+    } catch {
+      setLoadError('首页待办加载失败，请稍后重试');
     } finally {
       setLoading(false);
     }
@@ -126,11 +131,23 @@ const HomeWorkbench: React.FC = () => {
     }
   };
 
-  if (loading || !data) {
+  if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
         <CircularProgress size={32} />
       </Box>
+    );
+  }
+
+  if (!data) {
+    return (
+      <Alert
+        severity="error"
+        action={<Button color="inherit" size="small" onClick={() => void fetchData()}>重试</Button>}
+        sx={{ m: 2 }}
+      >
+        {loadError || '首页数据加载失败'}
+      </Alert>
     );
   }
 

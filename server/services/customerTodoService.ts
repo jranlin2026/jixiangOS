@@ -5,6 +5,7 @@ import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Customer, CustomerActivityRecord } from '../../src/types/customer';
 import type { CustomerTodo, CustomerTodoExecutionMethod, CustomerTodoInput } from '../../src/types/customerTodo';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
+import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 
 type CustomerTodoPrisma = Pick<PrismaClient, '$transaction' | 'customerTodo' | 'user'>;
 type VisibleCustomerResolver = (customerId: string, user: AuthenticatedUser) => Promise<ApiResponse<Customer | null>>;
@@ -118,9 +119,14 @@ export function createCustomerTodoService(
       const rows = await prisma.customerTodo.findMany({
         where: { assigneeId: user.id, status: 'PENDING' },
         orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
-        take: 100,
       });
-      return success(rows.map(mapTodo));
+      const customerIds = [...new Set(rows.map((row) => row.customerId))];
+      const visibility = await Promise.all(customerIds.map(async (customerId) => ({
+        customerId,
+        visible: (await loadCustomer(customerId, user)).code === 0,
+      })));
+      const visibleCustomerIds = new Set(visibility.filter((item) => item.visible).map((item) => item.customerId));
+      return success(rows.filter((row) => visibleCustomerIds.has(row.customerId)).map(mapTodo));
     },
 
     async list(customerId: string, user: AuthenticatedUser) {
@@ -181,10 +187,13 @@ export function createCustomerTodoService(
     },
 
     async complete(customerId: string, todoId: string, user: AuthenticatedUser) {
-      const customer = await loadCustomer(customerId, user, true);
+      const customer = await loadCustomer(customerId, user);
       if (customer.code !== 0) return failure<CustomerTodo>(customer.message, customer.code);
       const existing = await getTodo(customerId, todoId);
       if (!existing) return failure<CustomerTodo>('待办不存在', 404);
+      if (existing.assigneeId !== user.id && !hasPermission(user, PERMISSION_KEYS.CUSTOMER_EDIT, 'write')) {
+        return failure<CustomerTodo>('仅执行人或有客户编辑权限的人员可以完成待办', 403);
+      }
       if (existing.status !== 'PENDING') return failure<CustomerTodo>('待办当前状态不能完成', 409);
       const at = now(); const actorName = user.name || user.account;
       const row = await prisma.$transaction(async (tx) => {

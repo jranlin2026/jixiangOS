@@ -440,7 +440,7 @@ app.put('/api/customers/:id/todos/:todoId', requireCustomerEditAccess, async (re
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
-app.post('/api/customers/:id/todos/:todoId/complete', requireCustomerEditAccess, async (req: AuthenticatedRequest, res) => {
+app.post('/api/customers/:id/todos/:todoId/complete', requireCustomerListAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerTodoService.complete(routeParam(req.params.id), routeParam(req.params.todoId), req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
