@@ -85,13 +85,17 @@ function sameCreate(existing: RecoveryOrder, desired: RecoveryOrder): boolean {
     && (existing.assistUserId || '') === (desired.assistUserId || '');
 }
 
-function recoveryScope(directory: Directory, actor: AuthenticatedUser): DataVisibilityScope {
+function recoveryScope(
+  directory: Directory,
+  actor: AuthenticatedUser,
+  domain: NonNullable<RecoveryOrderFilters['scopeDomain']> = 'recoveryOrderApplications',
+): DataVisibilityScope {
   const scope = buildDataVisibilityScopeForUser(
     actor,
     directory.users,
     directory.roles,
     directory.departments,
-    'recoveryOrderApplications',
+    domain,
   );
   return canReviewRecoveryOrders(actor)
     ? { ...scope, unrestricted: true, dataScopeLevel: 'all' }
@@ -246,11 +250,14 @@ export function createRecoveryOrderCommandService(
 
   return {
     async list(filters: RecoveryOrderFilters = {}, actor: AuthenticatedUser) {
-      const rows = await prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } });
-      const canReadAll = canReviewRecoveryOrders(actor);
+      const [rows, directory] = await Promise.all([
+        prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } }),
+        loadDirectory(prisma),
+      ]);
+      const scope = recoveryScope(directory, actor, filters.scopeDomain || 'recoveryOrders');
       const items = rows
         .map((row) => parseObject<RecoveryOrder>(row.data, '售后挽回订单'))
-        .filter((order) => (canReadAll || order.createdBy === actor.id) && matchesRecoveryOrder(order, filters))
+        .filter((order) => recoveryVisible(order, scope) && matchesRecoveryOrder(order, filters))
         .sort((left, right) => timestamp(right.updatedAt || right.createdAt) - timestamp(left.updatedAt || left.createdAt));
       const page = toPositiveInt(filters.page, 1);
       const pageSize = Math.min(toPositiveInt(filters.pageSize, 10), 100);

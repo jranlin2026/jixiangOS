@@ -85,7 +85,9 @@ class FakePrisma {
     isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW), description: null,
   }, {
     id: 'role-stale-reviewer', name: 'customer-success-manager', code: 'customer_success_manager', departmentId: 'dept-delivery',
-    permissions: staleReviewer.permissions, dataScopes: { recoveryOrderApplications: 'all' }, memberCount: 1,
+    permissions: staleReviewer.permissions,
+    dataScopes: { recoveryOrders: 'department', recoveryOrderApplications: 'self' },
+    memberCount: 1,
     isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW), description: null,
   }] };
   readonly department = { findMany: async () => [{
@@ -169,11 +171,21 @@ assert.deepEqual(
 const reviewerList = await service.list({ page: 1, pageSize: 20 }, reviewer);
 assert.equal(reviewerList.data?.pagination.total, 2, '财务审核人必须从数据库看到全部待审核订单');
 
-const staleReviewerList = await service.list({ page: 1, pageSize: 20 }, staleReviewer);
+const staleReviewerList = await service.list({
+  scopeDomain: 'recoveryOrders', page: 1, pageSize: 20,
+}, staleReviewer);
 assert.equal(
   staleReviewerList.data?.pagination.total,
+  2,
+  'recovery order list must honor department data scope',
+);
+const staleReviewerAuditList = await service.list({
+  scopeDomain: 'recoveryOrderApplications', page: 1, pageSize: 20,
+}, staleReviewer);
+assert.equal(
+  staleReviewerAuditList.data?.pagination.total,
   0,
-  'non-finance account with stale review write and all scope must only see self-created orders',
+  'recovery review table must independently honor self data scope',
 );
 
 const replayed = await service.create(input(), creator);
