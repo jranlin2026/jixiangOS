@@ -39,11 +39,14 @@ const deliveries = [sourceDelivery(ownOrder, actor.id), sourceDelivery(otherOrde
 const orders = [ownOrder, otherOrder, candidateOrder];
 const product = { id: 'product-1', name: '9800代理', level: '代理', price: 9800, deliveryStages: [], isActive: true, sortOrder: 1, createdAt: now, updatedAt: now };
 
+let deliveryScope: 'self' | 'department' = 'self';
+
 const prisma: any = {
   user: { findMany: async () => [
     { ...actor, passwordHash: null, passwordSalt: null, passwordUpdatedAt: null, createdAt: new Date(now), updatedAt: new Date(now), employmentStatus: 'active' },
+    { ...actor, id: 'user-other', name: '交付B', account: 'delivery-b', passwordHash: null, passwordSalt: null, passwordUpdatedAt: null, createdAt: new Date(now), updatedAt: new Date(now), employmentStatus: 'active' },
   ] },
-  role: { findMany: async () => [{ id: 'role-delivery', name: actor.role, code: 'delivery_engineer', permissions: actor.permissions, dataScopes: { orders: 'self' }, memberCount: 1, isActive: true, createdAt: new Date(now), updatedAt: new Date(now) }] },
+  role: { findMany: async () => [{ id: 'role-delivery', name: actor.role, code: 'delivery_engineer', permissions: actor.permissions, dataScopes: { orders: 'all', deliveries: deliveryScope }, memberCount: 2, isActive: true, createdAt: new Date(now), updatedAt: new Date(now) }] },
   department: { findMany: async () => [{ id: 'dept-delivery', name: '交付部', code: 'DELIVERY', memberCount: 1, sortOrder: 1, isActive: true, createdAt: new Date(now), updatedAt: new Date(now) }] },
   businessRecord: {
     findMany: async ({ where }: any) => {
@@ -70,3 +73,7 @@ assert.equal((await service.get('delivery-own', actor)).data?.id, 'delivery-own'
 assert.equal((await service.stats({}, actor)).data?.total, 1);
 const candidates = await service.listCreatableOrders('', actor);
 assert.deepEqual(candidates.data?.map((item) => item.orderId), ['candidate']);
+
+deliveryScope = 'department';
+const departmentList = await service.list({ page: 1, pageSize: 10 }, actor);
+assert.deepEqual(departmentList.data?.items.map((item) => item.id), ['delivery-own', 'delivery-other']);
