@@ -178,6 +178,30 @@ const customRoleCount = await migrateDefaultRoleAccess({
   },
 } as any);
 assert.equal(customRoleCount, 0, '一次性基线不得为自定义角色扩权');
+
+const combinedReviewRoleUpdates: any[] = [];
+const legacyCombinedReviewRole = {
+  ...customReadOnlyRole,
+  id: 'role-legacy-recovery-reviewer',
+  code: 'legacy_recovery_reviewer',
+  name: '旧售后审核角色',
+  permissions: [{ module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] }],
+};
+const combinedReviewRoleCount = await migrateDefaultRoleAccess({
+  role: {
+    findMany: async () => [legacyCombinedReviewRole],
+    update: async (input: any) => {
+      combinedReviewRoleUpdates.push(input);
+      return legacyCombinedReviewRole;
+    },
+  },
+} as any);
+assert.equal(combinedReviewRoleCount, 1);
+assert.deepEqual(
+  combinedReviewRoleUpdates[0].data.permissions.find((permission: any) => permission.module === PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST)?.actions,
+  ['read'],
+  '旧版合并权限必须一次性迁移出独立审核列表查看权限',
+);
 assert.equal(customRoleUpdates.length, 0);
 assert.equal(
   customReadOnlyRole.permissions.some((permission: any) => permission.module === PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM),

@@ -12,7 +12,7 @@ type AfterSalesTab = 'recovery-list' | 'recovery-review';
 
 const AFTER_SALES_TABS: Array<{ value: AfterSalesTab; label: string; permissionKeys: string[]; action?: 'read' | 'write' }> = [
   { value: 'recovery-list', label: '售后挽回订单列表', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE] },
-  { value: 'recovery-review', label: '售后挽回订单审核台', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW], action: 'read' },
+  { value: 'recovery-review', label: '售后挽回订单审核台', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST], action: 'read' },
 ];
 
 function getTab(value: string | null): AfterSalesTab {

@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import { authApi, roleApi, settingsApi } from './index';
 import { DEFAULT_USER_PASSWORD } from '../shared/utils/auth';
 import { STORAGE_KEYS } from '../shared/utils/constants';
-import { DEFAULT_ROLES, mergeRoleWithDefaultAccess } from '../shared/utils/organizationConfig';
-import { CAPABILITY_KEYS, canReceiveLead, getRoleEditorPermissionActions, hasPermission, isSuperAdmin, PERMISSION_KEYS, roleHasPermission, sanitizeRolePermissions, toAuthenticatedUser } from '../shared/utils/permissions';
+import { DEFAULT_ROLES, mergeRoleWithDefaultAccess, normalizeRoleDataScopes } from '../shared/utils/organizationConfig';
+import { CAPABILITY_KEYS, canReceiveLead, canReviewRecoveryOrders, getRoleEditorPermissionActions, hasPermission, isSuperAdmin, PERMISSION_KEYS, roleHasPermission, sanitizeRolePermissions, toAuthenticatedUser } from '../shared/utils/permissions';
 import type { Role } from '../types/role';
 
 const appSource = readFileSync(join(process.cwd(), 'src', 'App.tsx'), 'utf8');
@@ -35,6 +35,7 @@ assert.match(rolePermissionSource, /员工提成月报/);
 assert.match(rolePermissionSource, /提成规则/);
 assert.match(rolePermissionSource, /售后服务/);
 assert.match(rolePermissionSource, /售后挽回订单列表/);
+assert.match(rolePermissionSource, /售后挽回订单审核列表/);
 assert.match(rolePermissionSource, /售后挽回订单审核操作/);
 assert.match(rolePermissionSource, /新增售后挽回订单/);
 assert.match(rolePermissionSource, /编辑售后挽回订单/);
@@ -475,14 +476,47 @@ const recoveryReviewReadOnlyRole: Role = {
   id: 'role-recovery-review-read-only',
   name: '售后审核台只读',
   code: 'recovery_review_read_only',
-  permissions: [{ module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read'] }],
+  permissions: [{ module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, actions: ['read'] }],
   memberCount: 0,
   isActive: true,
   createdAt: now,
   updatedAt: now,
 };
 assert.equal(
+  roleHasPermission(recoveryReviewReadOnlyRole, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, 'read'),
+  true,
+  '审核列表权限应允许进入审核台',
+);
+assert.equal(
   roleHasPermission(recoveryReviewReadOnlyRole, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write'),
   false,
-  '审核台读取权限不得自动升级为审核操作权限',
+  '审核列表权限不得自动升级为审核操作权限',
+);
+assert.equal(
+  canReviewRecoveryOrders({
+    isActive: true,
+    permissions: [{ module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] }],
+  }),
+  true,
+  '审核操作应只由明确的审核操作写权限控制，不应再硬编码绑定财务权限',
+);
+assert.equal(
+  normalizeRoleDataScopes({
+    code: 'review_action_only',
+    permissions: [{ module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] }],
+  }).recoveryOrderApplications,
+  'self',
+  '审核操作权限不得把审核台数据范围隐式提升为全部',
+);
+
+const defaultFinanceReviewRole = DEFAULT_ROLES.find((role) => role.code === 'finance_specialist');
+assert.equal(
+  roleHasPermission(defaultFinanceReviewRole, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, 'read'),
+  true,
+  '默认财务角色必须拥有审核列表查看权限',
+);
+assert.equal(
+  roleHasPermission(defaultFinanceReviewRole, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write'),
+  true,
+  '默认财务角色必须单独拥有审核操作权限',
 );

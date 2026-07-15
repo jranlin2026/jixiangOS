@@ -124,7 +124,7 @@ const App: React.FC = () => {
             PERMISSION_KEYS.AFTER_SALES,
             PERMISSION_KEYS.AFTER_SALES_RECOVERY,
             PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
-            PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+            PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST,
           ]} />}>
             <Route path={ROUTES.AFTER_SALES} element={<Suspense fallback={<PageLoader />}><AfterSales /></Suspense>} />
           </Route>

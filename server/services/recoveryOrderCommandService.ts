@@ -14,6 +14,10 @@ import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 type RecoveryCommandPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$transaction'>;
 type Directory = { users: User[]; roles: Role[]; departments: Department[] };
 type LockedRow = { id: string; domain: string; recordId: string; data: unknown };
+type RecoveryOrderPage = {
+  items: RecoveryOrder[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+};
 
 export interface RecoveryOrderCommandServiceOptions {
   now?: () => Date;
@@ -90,16 +94,13 @@ function recoveryScope(
   actor: AuthenticatedUser,
   domain: NonNullable<RecoveryOrderFilters['scopeDomain']> = 'recoveryOrderApplications',
 ): DataVisibilityScope {
-  const scope = buildDataVisibilityScopeForUser(
+  return buildDataVisibilityScopeForUser(
     actor,
     directory.users,
     directory.roles,
     directory.departments,
     domain,
   );
-  return canReviewRecoveryOrders(actor)
-    ? { ...scope, unrestricted: true, dataScopeLevel: 'all' }
-    : scope;
 }
 
 function toPositiveInt(value: unknown, fallback: number): number {
@@ -133,12 +134,9 @@ function matchesRecoveryOrder(order: RecoveryOrder, filters: RecoveryOrderFilter
 
 function recoveryVisible(order: RecoveryOrder, scope: DataVisibilityScope): boolean {
   if (scope.unrestricted) return true;
-  const relation = (id: string | undefined, name: string | undefined) => (
-    id ? scope.visibleUserIds.includes(id) : Boolean(name && scope.visibleUserNames.includes(name))
-  );
-  return relation(order.createdBy, order.createdByName)
-    || relation(order.recoveryUserId, order.recoveryUserName)
-    || relation(order.assistUserId, order.assistUserName);
+  return order.createdBy
+    ? scope.visibleUserIds.includes(order.createdBy)
+    : Boolean(order.createdByName && scope.visibleUserNames.includes(order.createdByName));
 }
 
 async function lockRecoveryOrder(
@@ -249,12 +247,25 @@ export function createRecoveryOrderCommandService(
   };
 
   return {
-    async list(filters: RecoveryOrderFilters = {}, actor: AuthenticatedUser) {
+    async list(
+      filters: RecoveryOrderFilters = {},
+      actor: AuthenticatedUser,
+    ): Promise<ApiResponse<RecoveryOrderPage | null>> {
+      const scopeDomain = filters.scopeDomain || 'recoveryOrders';
+      const canRead = scopeDomain === 'recoveryOrderApplications'
+        ? hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, 'read')
+        : hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY, 'read')
+          || hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, 'read');
+      if (!canRead) {
+        return failure<RecoveryOrderPage>(scopeDomain === 'recoveryOrderApplications'
+          ? '无权查看售后挽回订单审核列表'
+          : '无权查看售后挽回订单列表', 403);
+      }
       const [rows, directory] = await Promise.all([
         prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } }),
         loadDirectory(prisma),
       ]);
-      const scope = recoveryScope(directory, actor, filters.scopeDomain || 'recoveryOrders');
+      const scope = recoveryScope(directory, actor, scopeDomain);
       const items = rows
         .map((row) => parseObject<RecoveryOrder>(row.data, '售后挽回订单'))
         .filter((order) => recoveryVisible(order, scope) && matchesRecoveryOrder(order, filters))

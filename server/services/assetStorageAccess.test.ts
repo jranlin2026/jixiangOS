@@ -223,5 +223,5 @@ assert.equal(
 );
 assert.equal(
   (filterRecoveryOrderStorageData(recoveryStorageData, financeRecoveryReviewerAuth)[STORAGE_KEYS.RECOVERY_ORDERS] as any[]).length,
-  2,
+  0,
 );

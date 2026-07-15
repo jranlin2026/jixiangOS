@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { DEFAULT_ROLES, mergeRoleWithDefaultAccess } from '../../src/shared/utils/organizationConfig';
-import { sanitizeRolePermissions } from '../../src/shared/utils/permissions';
+import { PERMISSION_KEYS, sanitizeRolePermissions } from '../../src/shared/utils/permissions';
 import { mapPrismaRole } from '../db/prismaMappers';
 import type { Permission, Role, RoleDataScopes } from '../../src/types/role';
 
@@ -8,7 +8,7 @@ type RoleMigrationStore = Pick<PrismaClient, 'role'> & Partial<Pick<PrismaClient
 type RoleMigrationPrisma = RoleMigrationStore & Partial<Pick<PrismaClient, '$transaction'>>;
 
 const ROLE_PERMISSION_ACTION_BASELINE_KEY = 'aaos_role_permission_action_baseline_version';
-const ROLE_PERMISSION_ACTION_BASELINE_VERSION = 2;
+const ROLE_PERMISSION_ACTION_BASELINE_VERSION = 3;
 
 function permissionsSignature(permissions: Permission[] = []): string {
   return JSON.stringify(permissions
@@ -52,6 +52,24 @@ function mergeDefaultRolePermissionBaseline(role: Role): Role {
   };
 }
 
+function migrateLegacyRecoveryReviewListPermission(role: Role): Role {
+  if (role.permissions?.some((permission) => permission.module === PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST)) {
+    return role;
+  }
+  const hadCombinedReviewPermission = role.permissions?.some((permission) => [
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+    '售后服务/售后挽回订单/审核挽回订单',
+  ].includes(permission.module) && (permission.actions || []).some((action) => ['read', 'write', 'delete', 'admin'].includes(action)));
+  if (!hadCombinedReviewPermission) return role;
+  return {
+    ...role,
+    permissions: sanitizeRolePermissions([
+      ...(role.permissions || []),
+      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, actions: ['read'] },
+    ]),
+  };
+}
+
 function readBaselineVersion(value: Prisma.JsonValue | undefined): number {
   if (typeof value === 'number') return value;
   if (typeof value === 'string') return Number(value) || 0;
@@ -68,7 +86,9 @@ async function migrateRoleRows(store: RoleMigrationStore, applyPermissionBaselin
   for (const row of rows) {
     const current = mapPrismaRole(row);
     const migrated = mergeRoleWithDefaultAccess(
-      applyPermissionBaseline ? mergeDefaultRolePermissionBaseline(current) : current,
+      applyPermissionBaseline
+        ? migrateLegacyRecoveryReviewListPermission(mergeDefaultRolePermissionBaseline(current))
+        : current,
     );
     const permissionsChanged = permissionsSignature(current.permissions) !== permissionsSignature(migrated.permissions);
     const scopesChanged = dataScopesSignature(current.dataScopes) !== dataScopesSignature(migrated.dataScopes);

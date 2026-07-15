@@ -14,6 +14,14 @@ const creator: AuthenticatedUser = {
 const other: AuthenticatedUser = {
   ...creator, id: 'user-other', name: '交付B', account: 'other', email: 'other@example.com',
 };
+const outsideDepartmentCreator: AuthenticatedUser = {
+  ...creator,
+  id: 'user-customer-success',
+  name: '客户成功A',
+  account: 'customer-success',
+  email: 'customer-success@example.com',
+  departmentId: 'dept-customer-success',
+};
 const staleReviewer: AuthenticatedUser = {
   ...creator,
   id: 'user-stale-reviewer',
@@ -22,7 +30,10 @@ const staleReviewer: AuthenticatedUser = {
   email: 'stale-reviewer@example.com',
   role: 'customer-success-manager',
   roleId: 'role-stale-reviewer',
-  permissions: [{ module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] }],
+  permissions: [
+    { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY, actions: ['read'] },
+    { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, actions: ['read'] },
+  ],
 };
 const reviewer: AuthenticatedUser = {
   ...creator,
@@ -34,8 +45,8 @@ const reviewer: AuthenticatedUser = {
   roleId: 'role-reviewer',
   permissions: [
     { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, actions: ['read'] },
     { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] },
-    { module: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, actions: ['read', 'write'] },
     { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, actions: ['read', 'delete'] },
   ],
 };
@@ -65,23 +76,39 @@ const oldRecord: RecoveryOrder = {
   status: '待审核', settlementStatus: '未分账', commissionIds: [], createdBy: other.id,
   createdByName: other.name, createdAt: NOW, updatedAt: NOW,
 };
+const outsideDepartmentRecord: RecoveryOrder = {
+  ...oldRecord,
+  id: 'recovery-outside-department',
+  recoveryNo: 'RCV-OUTSIDE-DEPARTMENT',
+  thirdPartyOrderNo: 'TP-OUTSIDE-DEPARTMENT',
+  recoveryUserId: creator.id,
+  recoveryUserName: creator.name,
+  createdBy: outsideDepartmentCreator.id,
+  createdByName: outsideDepartmentCreator.name,
+};
 
 const key = (domain: string, id: string) => `${domain}\u0000${id}`;
 const clone = <T>(value: T): T => structuredClone(value);
 
 class FakePrisma {
-  rows = new Map([[key(STORAGE_KEYS.RECOVERY_ORDERS, oldRecord.id), {
-    id: `${STORAGE_KEYS.RECOVERY_ORDERS}:${oldRecord.id}`, domain: STORAGE_KEYS.RECOVERY_ORDERS,
-    recordId: oldRecord.id, status: oldRecord.status, data: clone(oldRecord),
-  }]]);
-  readonly user = { findMany: async () => [dbUser(creator), dbUser(other), dbUser(staleReviewer), dbUser(reviewer)] };
+  rows = new Map([
+    [key(STORAGE_KEYS.RECOVERY_ORDERS, oldRecord.id), {
+      id: `${STORAGE_KEYS.RECOVERY_ORDERS}:${oldRecord.id}`, domain: STORAGE_KEYS.RECOVERY_ORDERS,
+      recordId: oldRecord.id, status: oldRecord.status, data: clone(oldRecord),
+    }],
+    [key(STORAGE_KEYS.RECOVERY_ORDERS, outsideDepartmentRecord.id), {
+      id: `${STORAGE_KEYS.RECOVERY_ORDERS}:${outsideDepartmentRecord.id}`, domain: STORAGE_KEYS.RECOVERY_ORDERS,
+      recordId: outsideDepartmentRecord.id, status: outsideDepartmentRecord.status, data: clone(outsideDepartmentRecord),
+    }],
+  ]);
+  readonly user = { findMany: async () => [dbUser(creator), dbUser(other), dbUser(outsideDepartmentCreator), dbUser(staleReviewer), dbUser(reviewer)] };
   readonly role = { findMany: async () => [{
     id: 'role-delivery', name: '交付工程师', code: 'delivery_engineer', departmentId: 'dept-delivery',
     permissions: creator.permissions, dataScopes: { recoveryOrderApplications: 'self' }, memberCount: 2,
     isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW), description: null,
   }, {
     id: 'role-reviewer', name: '售后主管', code: 'after_sales_manager', departmentId: 'dept-delivery',
-    permissions: reviewer.permissions, dataScopes: { recoveryOrderApplications: 'self' }, memberCount: 1,
+    permissions: reviewer.permissions, dataScopes: { recoveryOrderApplications: 'all' }, memberCount: 1,
     isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW), description: null,
   }, {
     id: 'role-stale-reviewer', name: 'customer-success-manager', code: 'customer_success_manager', departmentId: 'dept-delivery',
@@ -93,6 +120,9 @@ class FakePrisma {
   readonly department = { findMany: async () => [{
     id: 'dept-delivery', name: '交付部', code: 'DELIVERY', parentId: null, managerId: null,
     memberCount: 2, sortOrder: 1, isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW),
+  }, {
+    id: 'dept-customer-success', name: '客户成功部', code: 'CUSTOMER_SUCCESS', parentId: null, managerId: null,
+    memberCount: 1, sortOrder: 2, isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW),
   }] };
   readonly businessRecord = {
     findMany: async ({ where }: any) => Array.from(this.rows.values())
@@ -168,8 +198,15 @@ assert.deepEqual(
   [created.data!.id],
   '切换账号后必须从数据库读取，并且普通员工只能看到自己提交的售后挽回订单',
 );
-const reviewerList = await service.list({ page: 1, pageSize: 20 }, reviewer);
-assert.equal(reviewerList.data?.pagination.total, 2, '财务审核人必须从数据库看到全部待审核订单');
+const reviewerList = await service.list({
+  scopeDomain: 'recoveryOrderApplications', page: 1, pageSize: 20,
+}, reviewer);
+assert.equal(reviewerList.data?.pagination.total, 3, '审核台全部范围必须从数据库看到所有部门的待审核订单');
+
+const unauthorizedReviewList = await service.list({
+  scopeDomain: 'recoveryOrderApplications', page: 1, pageSize: 20,
+}, creator);
+assert.equal(unauthorizedReviewList.code, 403, '没有审核列表权限不得从接口读取审核台数据');
 
 const staleReviewerList = await service.list({
   scopeDomain: 'recoveryOrders', page: 1, pageSize: 20,
@@ -191,13 +228,13 @@ assert.equal(
 const replayed = await service.create(input(), creator);
 assert.equal(replayed.code, 0);
 assert.equal(replayed.data?.id, created.data?.id);
-assert.equal(prisma.records().length, 2, '重试必须幂等');
+assert.equal(prisma.records().length, 3, '重试必须幂等');
 
 const forgedAssignment = await service.create(input({
   thirdPartyOrderNo: 'TP-20260712-002', recoveryUserId: other.id, recoveryUserName: other.name,
 }), creator);
 assert.equal(forgedAssignment.code, 403, 'self scope 不得为其他人创建挪回单');
-assert.equal(prisma.records().length, 2);
+assert.equal(prisma.records().length, 3);
 
 const updated = await service.update(created.data!.id, input({
   customerName: '张三（已核对）',

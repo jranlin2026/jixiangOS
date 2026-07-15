@@ -7,6 +7,7 @@ import { getStorageData, setStorageCacheData, setStorageData } from './mock/stor
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { getCurrentOperatorName } from '../shared/utils/currentOperator';
+import { getCurrentDataVisibilityScope } from '../shared/utils/dataVisibility';
 import { PERMISSION_KEYS, normalizePermissionKey, roleHasPermission } from '../shared/utils/permissions';
 import { normalizeUserRoleName } from '../shared/utils/roles';
 import type { AuthSession } from '../types/auth';
@@ -152,18 +153,15 @@ function canUseDirectRecoveryPermission(permissionKey: string, action = 'read'):
 }
 
 function canUseRecoveryReviewAction(): boolean {
-  return canUseDirectRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write')
-    && canUseDirectRecoveryPermission(PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'read');
+  return canUseDirectRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write');
 }
 
 function canViewRecoveryOrder(order: RecoveryOrder, scopeDomain: NonNullable<RecoveryOrderFilters['scopeDomain']> = 'recoveryOrders'): boolean {
-  if (scopeDomain === 'recoveryOrderApplications' && canUseRecoveryReviewAction()) {
-    return true;
-  }
-  if (scopeDomain === 'recoveryOrders' && canUseRecoveryPermission(PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT)) {
-    return true;
-  }
-  return order.createdBy === getCurrentSessionUser()?.id;
+  const scope = getCurrentDataVisibilityScope(scopeDomain);
+  if (scope.unrestricted) return true;
+  return order.createdBy
+    ? scope.visibleUserIds.includes(order.createdBy)
+    : Boolean(order.createdByName && scope.visibleUserNames.includes(order.createdByName));
 }
 
 function canResubmitReturnedRecoveryOrder(order: RecoveryOrder): boolean {
@@ -217,6 +215,16 @@ async function fetchRecoveryOrders(filters: RecoveryOrderFilters = {}): Promise<
 
   ensureInit();
   await delay(120);
+  const scopeDomain = filters.scopeDomain || 'recoveryOrders';
+  const canRead = scopeDomain === 'recoveryOrderApplications'
+    ? canUseRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, 'read')
+    : canUseRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY, 'read')
+      || canUseRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, 'read');
+  if (!canRead) {
+    return createErrorResponse(scopeDomain === 'recoveryOrderApplications'
+      ? '无权查看售后挽回订单审核列表'
+      : '无权查看售后挽回订单列表', 403);
+  }
   let items = filterVisibleRecoveryOrders(readRecoveryOrders(), filters.scopeDomain);
   if (!filters.includeDeleted) {
     items = items.filter((item) => !item.deletedAt);

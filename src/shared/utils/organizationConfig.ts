@@ -8,7 +8,7 @@ import { normalizeUserRoleName } from './roles';
 import { getStorageData, setStorageData } from '../../api/mock/storage';
 
 const now = '2026-06-01T00:00:00.000Z';
-const ORGANIZATION_SCHEMA_VERSION = 7;
+const ORGANIZATION_SCHEMA_VERSION = 8;
 const DATA_SCOPE_DOMAINS: DataScopeDomain[] = [
   'leads',
   'customers',
@@ -196,6 +196,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.FINANCE_SETTLEMENT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_PAYOUT, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, actions: ['read'] },
       { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_FLOW, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_RULES, actions: ['read', 'write'] },
@@ -298,10 +299,10 @@ function defaultRoleDataScopes(code?: string): Required<Record<DataScopeDomain, 
   return buildDataScopes('self', 'self', 'self', 'self');
 }
 
-function hasRecoveryReviewPermission(role: { permissions?: Role['permissions'] }): boolean {
+function hasRecoveryReviewListPermission(role: { permissions?: Role['permissions'] }): boolean {
   return Boolean(role.permissions?.some((permission) => [
     PERMISSION_KEYS.AFTER_SALES,
-    PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST,
     '售后服务/售后挽回订单/审核挽回订单',
   ].includes(permission.module)));
 }
@@ -315,7 +316,7 @@ export function normalizeRoleDataScopes(role: Pick<Role, 'code'> & { dataScopes?
       ? value
       : domain === 'deliveries' && isDataScopeLevel(role.dataScopes?.orders)
         ? role.dataScopes.orders
-      : domain === 'recoveryOrderApplications' && hasRecoveryReviewPermission(role)
+      : domain === 'recoveryOrderApplications' && hasRecoveryReviewListPermission(role)
         ? 'all'
         : defaults[domain];
     return acc;
@@ -365,6 +366,19 @@ function ensureDefaultRoleRequiredPermissions(
       ? { ...permission, actions: Array.from(new Set([...(permission.actions || []), 'read', 'write'])) }
       : permission
   ));
+}
+
+function migrateLegacyRecoveryReviewListPermission(permissions: Role['permissions'] = []): Role['permissions'] {
+  if (permissions.some((permission) => permission.module === PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST)) {
+    return permissions;
+  }
+  const hadCombinedReviewPermission = permissions.some((permission) => [
+    PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+    '售后服务/售后挽回订单/审核挽回订单',
+  ].includes(permission.module) && (permission.actions || []).some((action) => ['read', 'write', 'delete', 'admin'].includes(action)));
+  return hadCombinedReviewPermission
+    ? [...permissions, { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, actions: ['read'] }]
+    : permissions;
 }
 
 export function mergeRoleWithDefaultAccess(role: Role): Role {
@@ -554,6 +568,9 @@ export function ensureOrganizationConfigData() {
   })));
   const roles = rolesResult.items.map((role) => mergeRoleWithDefaultAccess({
     ...role,
+    permissions: storedVersion < ORGANIZATION_SCHEMA_VERSION
+      ? migrateLegacyRecoveryReviewListPermission(role.permissions)
+      : role.permissions,
     departmentId: role.departmentId ? departmentResult.idMap[role.departmentId] || role.departmentId : role.departmentId,
   }));
   const migratedUsers = storedVersion < ORGANIZATION_SCHEMA_VERSION

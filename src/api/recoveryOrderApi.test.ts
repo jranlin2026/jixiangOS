@@ -57,6 +57,7 @@ const roles: Role[] = [
     name: '财务专员',
     code: 'finance_specialist',
     permissions: [
+      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, actions: ['read'] },
       { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, actions: ['read', 'write'] },
     ],
@@ -66,7 +67,7 @@ const roles: Role[] = [
       orders: 'all',
       orderApplications: 'all',
       recoveryOrders: 'self',
-      recoveryOrderApplications: 'self',
+      recoveryOrderApplications: 'all',
     },
     memberCount: 1,
     isActive: true,
@@ -80,8 +81,7 @@ const roles: Role[] = [
     departmentId: 'dept-service',
     permissions: [
       { module: PERMISSION_KEYS.AFTER_SALES, actions: ['read'] },
-      // Simulate a stale browser role cache that incorrectly retained review write access.
-      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, actions: ['read'] },
     ],
     dataScopes: {
       leads: 'self',
@@ -322,6 +322,10 @@ assert.equal(servicePayout?.roleSummaries?.some((item) => (
   && item.commissions.some((commission) => commission.sourceBusinessType === 'after_sales_recovery')
 )), true);
 
+const financeOwnScopeStats = await recoveryOrderApi.fetchRecoveryOrderStats();
+assert.equal(financeOwnScopeStats.data.total, 0, '售后挽回订单统计必须服从独立的订单列表数据范围');
+
+setSession('user-service');
 const stats = await recoveryOrderApi.fetchRecoveryOrderStats();
 assert.equal(stats.data.total, 1);
 assert.equal(stats.data.waitingSettlement, 0);

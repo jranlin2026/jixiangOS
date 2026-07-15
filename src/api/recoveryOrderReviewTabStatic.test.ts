@@ -6,8 +6,8 @@ const tabSource = readFileSync(new URL('../pages/AfterSales/RecoveryOrderTab.tsx
 
 assert.match(
   source,
-  /value:\s*'recovery-review'[\s\S]*?permissionKeys:\s*\[PERMISSION_KEYS\.AFTER_SALES_RECOVERY_REVIEW\](?![\s\S]*?action:\s*'write')/,
-  '售后员工有审核台读取权限时应保留审核台入口',
+  /value:\s*'recovery-review'[\s\S]*?permissionKeys:\s*\[PERMISSION_KEYS\.AFTER_SALES_RECOVERY_REVIEW_LIST\]/,
+  '审核台入口必须由独立的售后挽回订单审核列表权限控制',
 );
 
 assert.match(
