@@ -405,7 +405,7 @@ async function createDeliveryProjection(
     }) || null;
   }
   if (!productRow) throw new Error(`订单产品 ${order.productName || order.productLevel} 不存在，不能创建交付单`);
-  const stages = resolveProductDeliveryStages(parseJson<Product>(productRow.data, '产品'));
+  const product = parseJson<Product>(productRow.data, '产品');
 
   const recordId = `delivery-${shortHash(order.id)}`;
   const existing = await transaction.businessRecord.findUnique({
@@ -419,6 +419,8 @@ async function createDeliveryProjection(
     });
     return;
   }
+  const stages = resolveProductDeliveryStages(product);
+  if (!stages.length) return;
   const automaticAssignment = assigner ? await assigner.assignNext(transaction, approvedAt) : undefined;
   const fallbackAssignment = automaticAssignment === undefined
     ? { owner: order.successName || order.serviceName || '待分配', ownerId: order.successId || order.serviceId }

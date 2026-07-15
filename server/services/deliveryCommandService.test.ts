@@ -228,8 +228,10 @@ class FakePrisma {
   prisma.rows.get(rowKey(STORAGE_KEYS.PRODUCTS, 'product-1'))!.data.deliveryStages = [];
   const service = createDeliveryCommandService(prisma as any, { now: () => new Date(NOW) });
   const created = await service.createFromOrder('order-delivery', engineer);
-  assert.equal(created.code, 0, '启用产品暂未配置步骤时，手工补建仍应使用安全默认步骤');
-  assert.ok(created.data?.stages.length);
+  assert.equal(created.code, 409, '产品未配置交付阶段时，手工补建也必须拒绝');
+  assert.match(created.message, /未配置交付阶段/);
+  assert.equal(prisma.deliveries().length, 0);
+  assert.equal(prisma.order().deliveryId, undefined);
 }
 
 {

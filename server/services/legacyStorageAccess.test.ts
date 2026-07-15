@@ -42,6 +42,7 @@ const commandOnlyWriter = {
     { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read', 'write'] },
     { module: PERMISSION_KEYS.ORDER_CREATE, actions: ['read', 'write'] },
     { module: PERMISSION_KEYS.ORDER_EDIT, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.ORDER_REVIEW_LIST, actions: ['read'] },
     { module: PERMISSION_KEYS.ORDER_REVIEW, actions: ['read', 'write'] },
     { module: PERMISSION_KEYS.CUSTOMER_EDIT, actions: ['read', 'write'] },
     { module: PERMISSION_KEYS.CUSTOMER_ASSIGN, actions: ['read', 'write'] },

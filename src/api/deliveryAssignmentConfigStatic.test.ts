@@ -5,11 +5,20 @@ import { join } from 'node:path';
 const settings = readFileSync(join(process.cwd(), 'src/pages/Settings/index.tsx'), 'utf8');
 const sidebar = readFileSync(join(process.cwd(), 'src/layouts/Sidebar.tsx'), 'utf8');
 const delivery = readFileSync(join(process.cwd(), 'src/pages/Delivery/index.tsx'), 'utf8');
+const rolePermission = readFileSync(join(process.cwd(), 'src/pages/Settings/RolePermission.tsx'), 'utf8');
 const componentPath = join(process.cwd(), 'src/pages/Settings/DeliveryAssignmentConfig.tsx');
 
 assert.match(settings, /DeliveryAssignmentConfig/);
 assert.match(sidebar, /group=delivery/);
 assert.match(sidebar, /SETTINGS_DELIVERY_ASSIGNMENT/);
+const deliveryPermissionGroup = rolePermission.match(/label: '交付',[\s\S]*?label: '售后服务'/)?.[0] || '';
+const settingsPermissionGroup = rolePermission.match(/label: '系统设置',[\s\S]*?const defaultPermission/)?.[0] || '';
+assert.doesNotMatch(
+  deliveryPermissionGroup,
+  /SETTINGS_DELIVERY_ASSIGNMENT/,
+  '交付中心权限分组不得默认包含交付设置',
+);
+assert.match(settingsPermissionGroup, /label: '交付设置'[\s\S]*SETTINGS_DELIVERY_ASSIGNMENT/);
 const component = readFileSync(componentPath, 'utf8');
 assert.match(component, /客户成功分配/);
 assert.match(component, /下一位预计分配人员/);

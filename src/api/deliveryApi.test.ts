@@ -208,10 +208,10 @@ assert.equal(creatableRes.data[0].orderId, 'order-99');
 
 const noStageCreatableRes = await deliveryApi.fetchCreatableDeliveryOrders('ORD-0100');
 assert.equal(noStageCreatableRes.code, 0);
-assert.equal(noStageCreatableRes.data.length, 1);
+assert.equal(noStageCreatableRes.data.length, 0);
 const noStageCreateRes = await deliveryApi.createDeliveryFromOrder('order-100');
-assert.equal(noStageCreateRes.code, 0);
-assert.ok(noStageCreateRes.data?.stages.length);
+assert.notEqual(noStageCreateRes.code, 0);
+assert.match(noStageCreateRes.message, /未配置交付阶段/);
 
 seed([
   makeDelivery(100, {

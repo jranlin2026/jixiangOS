@@ -72,7 +72,7 @@ assert.equal((await service.get('delivery-other', actor)).code, 403);
 assert.equal((await service.get('delivery-own', actor)).data?.id, 'delivery-own');
 assert.equal((await service.stats({}, actor)).data?.total, 1);
 const candidates = await service.listCreatableOrders('', actor);
-assert.deepEqual(candidates.data?.map((item) => item.orderId), ['candidate']);
+assert.deepEqual(candidates.data?.map((item) => item.orderId), [], '空交付阶段产品的订单不得出现在可创建交付列表');
 
 deliveryScope = 'department';
 const departmentList = await service.list({ page: 1, pageSize: 10 }, actor);

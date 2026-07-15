@@ -269,14 +269,14 @@ function fakeTransaction(options: {
 
 {
   const { tx, rows } = fakeTransaction({ stages: [] });
+  const existingDeliveryId = rows.get(key(STORAGE_KEYS.ORDERS, order.id))!.data.deliveryId;
   const result = await createOrderApprovalDownstreamEffects()({
     transaction: tx, application, order, reviewer, approvedAt: now,
   } as any);
   assert.equal(result?.deliveryCreation, 'applied');
   const delivery = Array.from(rows.values()).find((row) => row.domain === STORAGE_KEYS.DELIVERIES);
-  assert.ok(delivery, '启用产品尚未配置交付步骤时也必须使用安全默认步骤创建交付单');
-  assert.ok(delivery.data.stages.length > 0);
-  assert.equal(rows.get(key(STORAGE_KEYS.ORDERS, order.id))!.data.deliveryId, delivery.data.id, '自动建单必须回写订单反向关联');
+  assert.equal(delivery, undefined, '产品未配置交付阶段时不得自动创建交付单');
+  assert.equal(rows.get(key(STORAGE_KEYS.ORDERS, order.id))!.data.deliveryId, existingDeliveryId, '不得写入新的交付关联');
 }
 
 {

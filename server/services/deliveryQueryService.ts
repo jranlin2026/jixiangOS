@@ -14,6 +14,7 @@ import type {
 } from '../../src/types/delivery';
 import type { Order } from '../../src/types/order';
 import type { Product } from '../../src/types/product';
+import { resolveProductDeliveryStages } from '../../src/shared/utils/deliveryStages';
 
 type DeliveryQueryPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department'>;
 type Row = { data: unknown };
@@ -182,7 +183,11 @@ export function createDeliveryQueryService(prisma: DeliveryQueryPrisma) {
         .filter(Boolean));
       const products = new Map((productRows as Row[])
         .map((row) => parse<Product>(row.data))
-        .filter((product): product is Product => Boolean(product && product.isActive !== false))
+        .filter((product): product is Product => Boolean(
+          product
+          && product.isActive !== false
+          && resolveProductDeliveryStages(product).length,
+        ))
         .map((product) => [product.id, product]));
       const keyword = String(search || '').trim().toLocaleLowerCase();
       const items = (orderRows as Row[])

@@ -370,6 +370,9 @@ export function createDeliveryCommandService(
         if (product.id !== order.productId || product.isActive === false || product.level !== order.productLevel) {
           throw new DeliveryCommandError(409, '订单产品快照与产品稳定ID不一致');
         }
+        if (!resolveProductDeliveryStages(product).length) {
+          throw new DeliveryCommandError(409, '该订单产品未配置交付阶段，无需创建交付单');
+        }
         const createdAt = now().toISOString();
         const automaticAssignment = assigner ? await assigner.assignNext(transaction, createdAt) : undefined;
         const assignment = automaticAssignment === null ? { owner: '待分配', ownerId: undefined } : automaticAssignment;

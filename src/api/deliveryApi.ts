@@ -118,7 +118,9 @@ function getTemplateByOrder(order: Order): DeliveryStepTemplate[] {
 
 function getTemplateByDelivery(delivery: Delivery, order?: Order): DeliveryStepTemplate[] {
   const productType = normalizeProductLevel(delivery.productType || order?.productLevel);
-  return getTemplateByProduct(productType, order?.productId, delivery.productName || order?.productName);
+  const configured = getTemplateByProduct(productType, order?.productId, delivery.productName || order?.productName);
+  if (configured.length) return configured;
+  return toTemplate((delivery.stages || []).map((stage) => String(stage || '').trim()).filter(Boolean));
 }
 
 function getTemplateByProductType(productType: ProductLevel): DeliveryStepTemplate[] {

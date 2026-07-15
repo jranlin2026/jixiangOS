@@ -89,7 +89,6 @@ const PERMISSION_TREE: PermissionNode[] = [
       { label: '交付中心', key: PERMISSION_KEYS.DELIVERY_CENTER },
       { label: '移动交付卡片', key: PERMISSION_KEYS.DELIVERY_MOVE_CARD },
       { label: '交付阶段配置', key: PERMISSION_KEYS.DELIVERY_STAGE_CONFIG },
-      { label: '客户成功分配设置', key: PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT },
     ],
   },
   {
@@ -191,6 +190,12 @@ const PERMISSION_TREE: PermissionNode[] = [
           { label: '客户生命周期', key: PERMISSION_KEYS.SETTINGS_LIFECYCLE },
           { label: '线索来源', key: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES },
           { label: '线索流转', key: PERMISSION_KEYS.SETTINGS_LEAD_FLOW },
+        ],
+      },
+      {
+        label: '交付设置',
+        children: [
+          { label: '客户成功分配', key: PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT },
         ],
       },
       {
