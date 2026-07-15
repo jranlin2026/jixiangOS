@@ -133,18 +133,20 @@ function makeTask(id: string, title: string, count: number, path: string, tone: 
   return { id, title, count, path, tone, description };
 }
 
-function pushIfAllowed(actions: HomeQuickAction[], permissionKey: string, action: HomeQuickAction): void {
+function currentUserHasPermission(permissionKey: string): boolean {
   const scope = getCurrentDataVisibilityScope();
+  if (!scope.currentUser) return false;
   const roles = readArray<Role>(STORAGE_KEYS.ROLES);
-  const user = scope.currentUser
-    ? {
-      role: scope.currentUser.role,
-      roleId: scope.currentUser.roleId,
-      permissions: resolveUserPermissions(scope.currentUser, roles),
-      isActive: scope.currentUser.isActive,
-    }
-    : null;
-  if (scope.currentUser && hasPermission(user, permissionKey)) actions.push(action);
+  return hasPermission({
+    role: scope.currentUser.role,
+    roleId: scope.currentUser.roleId,
+    permissions: resolveUserPermissions(scope.currentUser, roles),
+    isActive: scope.currentUser.isActive,
+  }, permissionKey);
+}
+
+function pushIfAllowed(actions: HomeQuickAction[], permissionKey: string, action: HomeQuickAction): void {
+  if (currentUserHasPermission(permissionKey)) actions.push(action);
 }
 
 function getRecentActivities(customers: Customer[], leads: Lead[], orders: Order[], applications: OrderApplication[]): HomeActivityItem[] {
@@ -191,7 +193,7 @@ async function fetchHomeWorkbench(): Promise<ApiResponse<HomeWorkbenchData>> {
   ensureInit();
   await delay(100);
   let customerTodos = [] as HomeWorkbenchData['customerTodos'];
-  if (shouldUseBackendApi()) {
+  if (shouldUseBackendApi() && currentUserHasPermission(PERMISSION_KEYS.CUSTOMER_LIST)) {
     try {
       const response = await customerTodoApi.listMine();
       if (response.code !== 0) {

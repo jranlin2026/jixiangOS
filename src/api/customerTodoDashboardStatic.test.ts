@@ -11,6 +11,8 @@ const customers = read('src/pages/Customers/index.tsx');
 assert.match(service, /async listMine\(/);
 assert.match(server, /app\.get\('\/api\/customer-todos\/my'/);
 assert.match(dashboardApi, /customerTodoApi\.listMine\(/);
+assert.match(dashboardApi, /function currentUserHasPermission\(/);
+assert.match(dashboardApi, /shouldUseBackendApi\(\)\s*&&\s*currentUserHasPermission\(PERMISSION_KEYS\.CUSTOMER_LIST\)/);
 assert.doesNotMatch(dashboardApi, /listMine\(\)[\s\S]{0,160}\.catch\(\(\) => \[\]\)/);
 assert.match(dashboardApi, /createErrorResponse/);
 assert.match(dashboard, /我的客户待办/);
