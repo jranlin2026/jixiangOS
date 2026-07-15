@@ -33,7 +33,8 @@ export type CustomerActivityType =
   | 'order'
   | 'refund'
   | 'ai'
-  | 'note';
+  | 'note'
+  | 'todo';
 
 export interface CustomerActivityRecord {
   id: ID;
@@ -50,7 +51,7 @@ export interface CustomerActivityRecord {
     newValue?: string | number | boolean | null;
   }>;
   relatedId?: ID;
-  relatedType?: 'order' | 'refund' | 'lead' | 'opportunity';
+  relatedType?: 'order' | 'refund' | 'lead' | 'opportunity' | 'todo';
 }
 
 export type CustomerActivityAttachmentCategory = 'image' | 'document' | 'audio' | 'other';

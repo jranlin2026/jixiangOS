@@ -131,8 +131,15 @@ assert.match(source, /const requireLeadFollowAccess = createRequireAuth\(authSer
 assert.match(source, /const requireLeadAssignAccess = createRequireAuth\(authService, PERMISSION_KEYS\.LEADS_FLOW_CONFIG, 'write'\);/);
 assert.match(source, /const requireLeadDeleteAccess = createRequireAuth\(authService, '全部', 'delete'\);/);
 assert.match(source, /app\.get\('\/api\/customers', requireCustomerListAccess,/);
+assert.match(source, /app\.get\('\/api\/customers\/:id', requireCustomerListAccess,/);
 assert.match(source, /app\.post\('\/api\/customers', requireCustomerCreateAccess,/);
 assert.match(source, /app\.post\('\/api\/customers\/:id\/follow-ups', requireCustomerEditAccess,/);
+assert.match(source, /app\.get\('\/api\/customers\/:id\/todos', requireCustomerListAccess,/);
+assert.match(source, /app\.post\('\/api\/customers\/:id\/todos', requireCustomerEditAccess,/);
+assert.match(source, /app\.put\('\/api\/customers\/:id\/todos\/:todoId', requireCustomerEditAccess,/);
+assert.match(source, /app\.post\('\/api\/customers\/:id\/todos\/:todoId\/complete', requireCustomerEditAccess,/);
+assert.match(source, /app\.post\('\/api\/customers\/:id\/todos\/:todoId\/reopen', requireCustomerEditAccess,/);
+assert.match(source, /app\.post\('\/api\/customers\/:id\/todos\/:todoId\/cancel', requireCustomerEditAccess,/);
 assert.match(source, /app\.post\('\/api\/customers\/:id\/release', requireCustomerAssignAccess,/);
 assert.match(source, /app\.post\('\/api\/customers\/:id\/claim', requireCustomerPublicPoolClaimAccess,/);
 assert.match(source, /app\.post\('\/api\/customers\/:id\/assign', requireCustomerAssignAccess,/);

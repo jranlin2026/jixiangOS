@@ -303,6 +303,40 @@ model BusinessRecord {
   @@map("business_records")
 }
 
+enum CustomerTodoStatus {
+  PENDING
+  COMPLETED
+  CANCELED
+}
+
+model CustomerTodo {
+  id               String             @id @db.VarChar(64)
+  customerId       String             @db.VarChar(80)
+  customerName     String             @db.VarChar(200)
+  title            String             @db.VarChar(120)
+  content          String?            @db.Text
+  status           CustomerTodoStatus @default(PENDING)
+  dueAt            DateTime
+  executionMethod  String             @default("none") @db.VarChar(20)
+  assigneeId       String             @db.VarChar(64)
+  assigneeName     String             @db.VarChar(100)
+  createdById      String             @db.VarChar(64)
+  createdByName    String             @db.VarChar(100)
+  completedAt      DateTime?
+  completedById    String?            @db.VarChar(64)
+  completedByName  String?            @db.VarChar(100)
+  canceledAt       DateTime?
+  canceledById     String?            @db.VarChar(64)
+  canceledByName   String?            @db.VarChar(100)
+  cancelReason     String?            @db.VarChar(500)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@index([customerId, status, dueAt])
+  @@index([assigneeId, status, dueAt])
+  @@map("customer_todos")
+}
+
 model KnowledgeDocument {
   id                String   @id @db.VarChar(64)
   slug              String   @unique @db.VarChar(160)

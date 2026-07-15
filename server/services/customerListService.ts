@@ -324,6 +324,11 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
   };
 
   return {
+    async getById(customerId: string, currentUser?: AuthenticatedUser | null) {
+      const row = await findVisibleCustomerRecord(customerId, currentUser);
+      return row ? success(customerFromRow(row)) : failure<Customer>('客户不存在或无权访问', 404);
+    },
+
     async create(input: CustomerCreateInput, currentUser: AuthenticatedUser): Promise<ApiResponse<Customer | null>> {
       if (!hasPermission(currentUser, PERMISSION_KEYS.CUSTOMER_CREATE, 'write')) {
         return failure<Customer>('无权新建客户', 403);

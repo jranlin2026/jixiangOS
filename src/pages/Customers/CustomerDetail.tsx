@@ -15,6 +15,7 @@ import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import GraphicEqIcon from '@mui/icons-material/GraphicEq';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import TaskAltOutlinedIcon from '@mui/icons-material/TaskAltOutlined';
 import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import useCustomerStore from '../../store/useCustomerStore';
@@ -41,6 +42,7 @@ import { PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 import { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
 import CustomerTagDialog from '../../shared/components/CustomerTagDialog';
+import CustomerTodoPanel from '../../shared/components/CustomerTodoPanel';
 
 interface CustomerDetailProps {
   customer: Customer;
@@ -195,6 +197,13 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     ))
   ), [currentCustomer.activityRecords]);
+
+  const refreshCurrentCustomer = async () => {
+    const response = await customerApi.fetchCustomerById(currentCustomer.id);
+    if (response.code !== 0 || !response.data) return;
+    setCurrentCustomer(response.data);
+    setDraft(response.data);
+  };
 
   const parentSources = useMemo(
     () => sourceConfigs.filter((item) => !item.parentId).sort((a, b) => a.sortOrder - b.sortOrder),
@@ -1007,6 +1016,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
           <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', minWidth: 0 }}>
             <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ px: 2, borderBottom: '1px solid #eef2f7' }}>
               <Tab icon={<HistoryIcon fontSize="small" />} iconPosition="start" label="动态" />
+              <Tab label="待办" icon={<TaskAltOutlinedIcon fontSize="small" />} iconPosition="start" />
               <Tab icon={<ReceiptLongIcon fontSize="small" />} iconPosition="start" label="订单" />
               <Tab icon={<TimelineIcon fontSize="small" />} iconPosition="start" label="成长路径" />
               <Tab icon={<AutoAwesomeIcon fontSize="small" />} iconPosition="start" label="AI名片" />
@@ -1014,10 +1024,21 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
             </Tabs>
             <Box sx={{ p: 2, maxHeight: '68vh', overflowY: 'auto' }}>
               {activeTab === 0 && renderActivityTab()}
-              {activeTab === 1 && renderOrdersTab()}
-              {activeTab === 2 && renderGrowthTab()}
-              {activeTab === 3 && renderAITab()}
-              {activeTab === 4 && renderContractsTab()}
+              {activeTab === 1 && (
+                <CustomerTodoPanel
+                  customerId={currentCustomer.id}
+                  customerName={currentCustomer.name}
+                  ownerId={currentCustomer.ownerId}
+                  users={users}
+                  currentUserId={currentUser?.id}
+                  readOnly={readOnly || isPublicPoolCustomer}
+                  onActivityChanged={refreshCurrentCustomer}
+                />
+              )}
+              {activeTab === 2 && renderOrdersTab()}
+              {activeTab === 3 && renderGrowthTab()}
+              {activeTab === 4 && renderAITab()}
+              {activeTab === 5 && renderContractsTab()}
             </Box>
           </Paper>
         </Box>

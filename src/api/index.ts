@@ -1,5 +1,6 @@
 export { leadApi } from './leadApi';
 export { customerApi } from './customerApi';
+export { customerTodoApi } from './customerTodoApi';
 export { orderApi } from './orderApi';
 export { orderReviewApi, ORDER_APPLICATION_STATUSES, canReviewOrderApplications } from './orderReviewApi';
 export { deliveryApi } from './deliveryApi';

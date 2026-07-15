@@ -447,6 +447,11 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
 }
 
 async function fetchCustomerById(id: string): Promise<ApiResponse<Customer | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Customer>(`/customers/${encodeURIComponent(id)}`);
+    if (response.code !== 0 || !response.data) return createErrorResponse(response.message, response.code || -1);
+    return createSuccessResponse(cacheBackendCustomer(response.data));
+  }
   ensureInit();
   await delay(150);
   const customers = reconcileCustomerOrderStats((getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || []).map(normalizeCustomer));

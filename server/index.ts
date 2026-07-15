@@ -21,6 +21,7 @@ import { createAiConfigService } from './services/aiConfigService';
 import { createAiChatClient, type AiChatMessage } from './services/aiChatClient';
 import { createCustomerListService } from './services/customerListService';
 import { createCustomerCommandService } from './services/customerCommandService';
+import { createCustomerTodoService } from './services/customerTodoService';
 import { backfillCustomerOwnerIdentities } from './services/customerOwnerIdentityService';
 import { createCustomerTagRouter, createCustomerTagService } from './services/customerTagService';
 import { createCustomerTagMigrationRouter, createCustomerTagMigrationService } from './services/customerTagMigrationService';
@@ -72,6 +73,10 @@ const aiChatClient = createAiChatClient({ configReader: aiConfigService });
 const coCreationService = createCoCreationService({ prisma, aiClient: aiChatClient });
 const customerListService = createCustomerListService(prisma);
 const customerCommandService = createCustomerCommandService(prisma);
+const customerTodoService = createCustomerTodoService(
+  prisma,
+  (customerId, user) => customerListService.getById(customerId, user),
+);
 const customerTagService = createCustomerTagService(prisma);
 const customerTagMigrationService = createCustomerTagMigrationService(prisma as any);
 const leadListService = createLeadListService(prisma);
@@ -408,6 +413,41 @@ app.post('/api/customers/:id/follow-ups', requireCustomerEditAccess, async (req:
     attachments: req.body?.attachments,
   }, req.currentUser);
   res.status(result.code === 0 ? 200 : result.code === 404 ? 404 : 400).json(result);
+});
+
+app.get('/api/customers/:id', requireCustomerListAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerListService.getById(routeParam(req.params.id), req.currentUser);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.get('/api/customers/:id/todos', requireCustomerListAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerTodoService.list(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/customers/:id/todos', requireCustomerEditAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerTodoService.create(routeParam(req.params.id), req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 201 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.put('/api/customers/:id/todos/:todoId', requireCustomerEditAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerTodoService.update(routeParam(req.params.id), routeParam(req.params.todoId), req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/customers/:id/todos/:todoId/complete', requireCustomerEditAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerTodoService.complete(routeParam(req.params.id), routeParam(req.params.todoId), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/customers/:id/todos/:todoId/reopen', requireCustomerEditAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerTodoService.reopen(routeParam(req.params.id), routeParam(req.params.todoId), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/customers/:id/todos/:todoId/cancel', requireCustomerEditAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerTodoService.cancel(routeParam(req.params.id), routeParam(req.params.todoId), String(req.body?.reason || ''), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
 app.post('/api/customers/:id/release', requireCustomerAssignAccess, async (req: AuthenticatedRequest, res) => {
