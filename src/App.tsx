@@ -103,7 +103,11 @@ const App: React.FC = () => {
               )}
             />
           </Route>
-          <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.ORDERS} />}>
+          <Route element={<ProtectedRoute permissionKeys={[
+            PERMISSION_KEYS.ORDER_MANAGE,
+            PERMISSION_KEYS.ORDER_REVIEW_LIST,
+            PERMISSION_KEYS.ORDER_CREATE,
+          ]} />}>
             <Route
               path={ROUTES.ORDERS}
               element={(

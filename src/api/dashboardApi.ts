@@ -208,7 +208,9 @@ async function fetchHomeWorkbench(): Promise<ApiResponse<HomeWorkbenchData>> {
   const leads = filterVisibleLeads(readArray<Lead>(STORAGE_KEYS.LEADS));
   const customers = filterVisibleCustomers(readArray<Customer>(STORAGE_KEYS.CUSTOMERS));
   const orders = filterVisibleOrders(readArray<Order>(STORAGE_KEYS.ORDERS));
-  const applications = filterApplications(readArray<OrderApplication>(STORAGE_KEYS.ORDER_APPLICATIONS));
+  const applications = currentUserHasPermission(PERMISSION_KEYS.ORDER_REVIEW_LIST)
+    ? filterApplications(readArray<OrderApplication>(STORAGE_KEYS.ORDER_APPLICATIONS))
+    : [];
   const recoveryOrders = filterRecoveryOrders(readArray<RecoveryOrder>(STORAGE_KEYS.RECOVERY_ORDERS));
   const deliveries = filterDeliveries(readArray<Delivery>(STORAGE_KEYS.DELIVERIES));
   const commissions = filterCommissions(readArray<Commission>(STORAGE_KEYS.COMMISSIONS));
@@ -225,7 +227,7 @@ async function fetchHomeWorkbench(): Promise<ApiResponse<HomeWorkbenchData>> {
   pushIfAllowed(quickActions, PERMISSION_KEYS.LEADS, { id: 'lead', label: '新增线索', path: ROUTES.LEADS, icon: 'lead' });
   pushIfAllowed(quickActions, PERMISSION_KEYS.CUSTOMERS, { id: 'customer', label: '新增客户', path: ROUTES.CUSTOMERS, icon: 'customer' });
   pushIfAllowed(quickActions, PERMISSION_KEYS.ORDERS, { id: 'order', label: '提交订单申请', path: ROUTES.ORDERS, icon: 'order' });
-  pushIfAllowed(quickActions, PERMISSION_KEYS.ORDERS, { id: 'review', label: '订单审核台', path: `${ROUTES.ORDERS}?tab=review`, icon: 'review' });
+  pushIfAllowed(quickActions, PERMISSION_KEYS.ORDER_REVIEW_LIST, { id: 'review', label: '订单审核台', path: `${ROUTES.ORDERS}?tab=review`, icon: 'review' });
   pushIfAllowed(quickActions, PERMISSION_KEYS.FINANCE_SETTLEMENT, { id: 'commission', label: '分账处理', path: `${ROUTES.FINANCE}?tab=settlement`, icon: 'commission' });
   pushIfAllowed(quickActions, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, { id: 'recovery', label: '新建挽回订单', path: ROUTES.AFTER_SALES, icon: 'refund' });
   pushIfAllowed(quickActions, PERMISSION_KEYS.DELIVERY, { id: 'delivery', label: '交付推进', path: ROUTES.DELIVERY, icon: 'delivery' });
@@ -284,7 +286,9 @@ async function fetchBusinessCockpit(range?: DashboardDateRange): Promise<ApiResp
   const { start, end, label } = getRange(range);
   const leads = filterVisibleLeads(readArray<Lead>(STORAGE_KEYS.LEADS)).filter((item) => inRange(item.createdAt, start, end));
   const customers = filterVisibleCustomers(readArray<Customer>(STORAGE_KEYS.CUSTOMERS)).filter((item) => inRange(item.createdAt, start, end));
-  const applications = filterApplications(readArray<OrderApplication>(STORAGE_KEYS.ORDER_APPLICATIONS)).filter((item) => inRange(item.submittedAt, start, end));
+  const applications = currentUserHasPermission(PERMISSION_KEYS.ORDER_REVIEW_LIST)
+    ? filterApplications(readArray<OrderApplication>(STORAGE_KEYS.ORDER_APPLICATIONS)).filter((item) => inRange(item.submittedAt, start, end))
+    : [];
   const orders = filterVisibleOrders(readArray<Order>(STORAGE_KEYS.ORDERS)).filter((item) => inRange(orderPaymentDate(item), start, end));
   const recoveryOrders = filterRecoveryOrders(readArray<RecoveryOrder>(STORAGE_KEYS.RECOVERY_ORDERS)).filter((item) => inRange(item.createdAt, start, end));
   const commissions = filterCommissions(readArray<Commission>(STORAGE_KEYS.COMMISSIONS)).filter((item) => inRange(item.paymentDate || item.createdAt, start, end));

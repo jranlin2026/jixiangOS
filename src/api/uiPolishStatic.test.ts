@@ -136,8 +136,8 @@ assert.match(
 );
 assert.match(
   rolePermissionSource,
-  /订单审核操作/,
-  'Role permission tree should describe ORDER_REVIEW as review operations, not page visibility.',
+  /订单审核列表[\s\S]*订单审核操作/,
+  'Role permission tree should separate order review list visibility from review operations.',
 );
 assert.match(
   `${leadsPageSource}\n${leadDetailSource}`,

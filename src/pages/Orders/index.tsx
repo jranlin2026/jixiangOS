@@ -50,7 +50,7 @@ import type { OrderTypeConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import PermissionGate from '../../shared/auth/PermissionGate';
-import { PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { filterUsersByCurrentDataScope } from '../../shared/utils/dataVisibility';
 import useAuthStore from '../../store/useAuthStore';
 import ResizableHeaderCell, {
@@ -185,7 +185,20 @@ const Orders: React.FC = () => {
   const { items, filters, pagination, fetchItems, setFilters, delete: deleteOrder } = useOrderStore();
   const currentUser = useAuthStore((state) => state.currentUser);
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') === 'review' ? 'review' : 'list';
+  const visibleTabs = useMemo<Array<{ value: 'list' | 'review'; label: string }>>(() => {
+    const tabs: Array<{ value: 'list' | 'review'; label: string }> = [];
+    if (hasPermission(currentUser, PERMISSION_KEYS.ORDER_MANAGE)) {
+      tabs.push({ value: 'list', label: '订单列表' });
+    }
+    if (hasPermission(currentUser, PERMISSION_KEYS.ORDER_REVIEW_LIST)) {
+      tabs.push({ value: 'review', label: '订单审核台' });
+    }
+    return tabs;
+  }, [currentUser]);
+  const requestedTab: 'list' | 'review' = searchParams.get('tab') === 'review' ? 'review' : 'list';
+  const activeTab: 'list' | 'review' | false = visibleTabs.some((tab) => tab.value === requestedTab)
+    ? requestedTab
+    : visibleTabs[0]?.value || false;
   const orderIdParam = searchParams.get('orderId');
   const [detailOpen, setDetailOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -588,10 +601,13 @@ const Orders: React.FC = () => {
         )}
       />
 
-      <ModuleTabs value={activeTab} onChange={handleTabChange}>
-        <Tab value="list" label="订单列表" />
-        <Tab value="review" label="订单审核台" />
-      </ModuleTabs>
+      {visibleTabs.length > 0 && (
+        <ModuleTabs value={activeTab} onChange={handleTabChange}>
+          {visibleTabs.map((tab) => (
+            <Tab key={tab.value} value={tab.value} label={tab.label} />
+          ))}
+        </ModuleTabs>
+      )}
 
       {activeTab === 'list' ? (
         <>
@@ -755,12 +771,14 @@ const Orders: React.FC = () => {
             }}
           />
         </>
-      ) : (
+      ) : activeTab === 'review' ? (
         <OrderReview
           embedded
           viewSettingsOpen={reviewViewSettingsOpen}
           onViewSettingsClose={() => setReviewViewSettingsOpen(false)}
         />
+      ) : (
+        <Alert severity="info">当前角色可提交订单申请，但未开通订单列表或订单审核列表查看权限。</Alert>
       )}
 
       {selectedOrder && (
@@ -790,7 +808,7 @@ const Orders: React.FC = () => {
         onSuccess={(application) => {
           fetchItems({ ...filters, paymentMethod: undefined });
           setOrderCustomer(null);
-          if (application) {
+          if (application && hasPermission(currentUser, PERMISSION_KEYS.ORDER_REVIEW_LIST)) {
             const nextParams = new URLSearchParams(searchParams);
             nextParams.set('tab', 'review');
             nextParams.delete('orderId');

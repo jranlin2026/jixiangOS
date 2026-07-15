@@ -8,7 +8,7 @@ type RoleMigrationStore = Pick<PrismaClient, 'role'> & Partial<Pick<PrismaClient
 type RoleMigrationPrisma = RoleMigrationStore & Partial<Pick<PrismaClient, '$transaction'>>;
 
 const ROLE_PERMISSION_ACTION_BASELINE_KEY = 'aaos_role_permission_action_baseline_version';
-const ROLE_PERMISSION_ACTION_BASELINE_VERSION = 3;
+const ROLE_PERMISSION_ACTION_BASELINE_VERSION = 4;
 
 function permissionsSignature(permissions: Permission[] = []): string {
   return JSON.stringify(permissions
@@ -70,6 +70,45 @@ function migrateLegacyRecoveryReviewListPermission(role: Role): Role {
   };
 }
 
+function migrateLegacyOrderReviewListPermission(role: Role): Role {
+  const permissions = role.permissions || [];
+  const legacyCombinedPermissions = permissions.filter((permission) => permission.module === '订单/订单审核台');
+  if (legacyCombinedPermissions.length) {
+    const legacyActions = Array.from(new Set(legacyCombinedPermissions.flatMap((permission) => permission.actions || ['read'])));
+    const withoutLegacy = permissions.filter((permission) => permission.module !== '订单/订单审核台');
+    const hasReviewList = withoutLegacy.some((permission) => permission.module === PERMISSION_KEYS.ORDER_REVIEW_LIST);
+    const existingReviewAction = withoutLegacy.find((permission) => permission.module === PERMISSION_KEYS.ORDER_REVIEW);
+    const migrated = withoutLegacy.map((permission) => (
+      permission.module === PERMISSION_KEYS.ORDER_REVIEW
+        ? { ...permission, actions: Array.from(new Set([...(permission.actions || []), ...legacyActions])) }
+        : permission
+    ));
+    if (!hasReviewList) migrated.push({ module: PERMISSION_KEYS.ORDER_REVIEW_LIST, actions: ['read'] });
+    if (!existingReviewAction) migrated.push({ module: PERMISSION_KEYS.ORDER_REVIEW, actions: legacyActions });
+    return { ...role, permissions: sanitizeRolePermissions(migrated) };
+  }
+  if (permissions.some((permission) => permission.module === PERMISSION_KEYS.ORDER_REVIEW_LIST)) {
+    return role;
+  }
+  const previousReviewListModules = new Set<string>([
+    PERMISSION_KEYS.ORDER_REVIEW,
+    PERMISSION_KEYS.ORDER_MANAGE,
+    PERMISSION_KEYS.ORDER_CREATE,
+  ]);
+  const previouslyCouldReadReviewList = permissions.some((permission) => (
+    previousReviewListModules.has(permission.module)
+    && (permission.actions || []).some((action) => ['read', 'write', 'delete', 'admin'].includes(action))
+  ));
+  if (!previouslyCouldReadReviewList) return role;
+  return {
+    ...role,
+    permissions: sanitizeRolePermissions([
+      ...permissions,
+      { module: PERMISSION_KEYS.ORDER_REVIEW_LIST, actions: ['read'] },
+    ]),
+  };
+}
+
 function readBaselineVersion(value: Prisma.JsonValue | undefined): number {
   if (typeof value === 'number') return value;
   if (typeof value === 'string') return Number(value) || 0;
@@ -87,7 +126,7 @@ async function migrateRoleRows(store: RoleMigrationStore, applyPermissionBaselin
     const current = mapPrismaRole(row);
     const migrated = mergeRoleWithDefaultAccess(
       applyPermissionBaseline
-        ? migrateLegacyRecoveryReviewListPermission(mergeDefaultRolePermissionBaseline(current))
+        ? migrateLegacyOrderReviewListPermission(migrateLegacyRecoveryReviewListPermission(mergeDefaultRolePermissionBaseline(current)))
         : current,
     );
     const permissionsChanged = permissionsSignature(current.permissions) !== permissionsSignature(migrated.permissions);

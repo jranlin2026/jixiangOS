@@ -96,7 +96,13 @@ const navItems: NavItem[] = [
       },
     ],
   },
-  { label: '订单管理', icon: <ReceiptLongIcon />, path: ROUTES.ORDERS, permissionKey: PERMISSION_KEYS.ORDERS },
+  {
+    label: '订单管理',
+    icon: <ReceiptLongIcon />,
+    path: ROUTES.ORDERS,
+    permissionKey: PERMISSION_KEYS.ORDERS,
+    permissionKeys: [PERMISSION_KEYS.ORDER_MANAGE, PERMISSION_KEYS.ORDER_REVIEW_LIST, PERMISSION_KEYS.ORDER_CREATE],
+  },
   { label: '交付中心', icon: <LocalShippingIcon />, path: ROUTES.DELIVERY, permissionKey: PERMISSION_KEYS.DELIVERY },
   {
     label: '售后服务',

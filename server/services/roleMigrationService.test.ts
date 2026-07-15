@@ -98,6 +98,11 @@ assert.deepEqual(
   ['read', 'write'],
   '现有默认财务角色必须迁移出显式订单审核写权限',
 );
+assert.deepEqual(
+  financeUpdates[0].data.permissions.find((permission: any) => permission.module === PERMISSION_KEYS.ORDER_REVIEW_LIST)?.actions,
+  ['read'],
+  '现有默认财务角色必须迁移出独立订单审核列表查看权限',
+);
 
 let markerValue: unknown;
 let currentStoredRole: any = {
@@ -201,6 +206,35 @@ assert.deepEqual(
   combinedReviewRoleUpdates[0].data.permissions.find((permission: any) => permission.module === PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST)?.actions,
   ['read'],
   '旧版合并权限必须一次性迁移出独立审核列表查看权限',
+);
+
+const legacyOrderReviewUpdates: any[] = [];
+const legacyOrderReviewRole = {
+  ...customReadOnlyRole,
+  id: 'role-legacy-order-reviewer',
+  code: 'legacy_order_reviewer',
+  name: '旧订单审核角色',
+  permissions: [{ module: '订单/订单审核台', actions: ['read', 'write'] }],
+};
+const legacyOrderReviewCount = await migrateDefaultRoleAccess({
+  role: {
+    findMany: async () => [legacyOrderReviewRole],
+    update: async (input: any) => {
+      legacyOrderReviewUpdates.push(input);
+      return legacyOrderReviewRole;
+    },
+  },
+} as any);
+assert.equal(legacyOrderReviewCount, 1);
+assert.deepEqual(
+  legacyOrderReviewUpdates[0].data.permissions.find((permission: any) => permission.module === PERMISSION_KEYS.ORDER_REVIEW_LIST)?.actions,
+  ['read'],
+  '旧版订单审核台合并权限必须迁移出独立审核列表权限',
+);
+assert.deepEqual(
+  legacyOrderReviewUpdates[0].data.permissions.find((permission: any) => permission.module === PERMISSION_KEYS.ORDER_REVIEW)?.actions,
+  ['read', 'write'],
+  '旧版订单审核台合并权限必须保留原有审核操作能力',
 );
 assert.equal(customRoleUpdates.length, 0);
 assert.equal(

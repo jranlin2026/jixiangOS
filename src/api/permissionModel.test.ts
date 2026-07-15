@@ -33,6 +33,8 @@ assert.match(rolePermissionSource, /财务中心/);
 assert.match(rolePermissionSource, /订单分账/);
 assert.match(rolePermissionSource, /员工提成月报/);
 assert.match(rolePermissionSource, /提成规则/);
+assert.match(rolePermissionSource, /订单审核列表/);
+assert.match(rolePermissionSource, /订单审核操作/);
 assert.match(rolePermissionSource, /售后服务/);
 assert.match(rolePermissionSource, /售后挽回订单列表/);
 assert.match(rolePermissionSource, /售后挽回订单审核列表/);
@@ -482,6 +484,22 @@ const recoveryReviewReadOnlyRole: Role = {
   createdAt: now,
   updatedAt: now,
 };
+const orderReviewListOnlyRole: Role = {
+  id: 'role-order-review-list-only',
+  name: '订单审核列表只读',
+  code: 'order_review_list_only',
+  permissions: [{ module: PERMISSION_KEYS.ORDER_REVIEW_LIST, actions: ['read'] }],
+  memberCount: 0,
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+};
+assert.equal(roleHasPermission(orderReviewListOnlyRole, PERMISSION_KEYS.ORDER_REVIEW_LIST, 'read'), true);
+assert.equal(
+  roleHasPermission(orderReviewListOnlyRole, PERMISSION_KEYS.ORDER_REVIEW, 'write'),
+  false,
+  '订单审核列表查看权限不得升级为审核操作权限',
+);
 assert.equal(
   roleHasPermission(recoveryReviewReadOnlyRole, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, 'read'),
   true,

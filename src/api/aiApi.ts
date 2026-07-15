@@ -13,6 +13,7 @@ import type { Customer } from '../types/customer';
 import type { Order, OrderApplication } from '../types/order';
 import type { Refund } from '../types/refund';
 import type { Commission } from '../types/commission';
+import type { Role } from '../types/role';
 import type { ApiResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
@@ -26,6 +27,7 @@ import {
   getCurrentDataVisibilityScope,
 } from '../shared/utils/dataVisibility';
 import { formatCurrency } from '../shared/utils/formatters';
+import { hasPermission, PERMISSION_KEYS, resolveUserPermissions } from '../shared/utils/permissions';
 import { v4 as uuidv4 } from 'uuid';
 
 interface AssistantData {
@@ -43,6 +45,18 @@ function ensureInit(): void {
 
 function readArray<T>(key: string): T[] {
   return getStorageData<T[]>(key) || [];
+}
+
+function currentUserHasPermission(permissionKey: string): boolean {
+  const currentUser = getCurrentDataVisibilityScope().currentUser;
+  if (!currentUser) return false;
+  const roles = readArray<Role>(STORAGE_KEYS.ROLES);
+  return hasPermission({
+    role: currentUser.role,
+    roleId: currentUser.roleId,
+    permissions: resolveUserPermissions(currentUser, roles),
+    isActive: currentUser.isActive,
+  }, permissionKey);
 }
 
 function lower(value: string): string {
@@ -106,7 +120,9 @@ function getAssistantData(): AssistantData {
     leads: filterVisibleLeads(readArray<Lead>(STORAGE_KEYS.LEADS)),
     customers: filterVisibleCustomers(readArray<Customer>(STORAGE_KEYS.CUSTOMERS)),
     orders: filterVisibleOrders(readArray<Order>(STORAGE_KEYS.ORDERS)),
-    applications: filterApplications(readArray<OrderApplication>(STORAGE_KEYS.ORDER_APPLICATIONS)),
+    applications: currentUserHasPermission(PERMISSION_KEYS.ORDER_REVIEW_LIST)
+      ? filterApplications(readArray<OrderApplication>(STORAGE_KEYS.ORDER_APPLICATIONS))
+      : [],
     refunds: filterRefunds(readArray<Refund>(STORAGE_KEYS.REFUNDS)),
     commissions: filterCommissions(readArray<Commission>(STORAGE_KEYS.COMMISSIONS)),
   };

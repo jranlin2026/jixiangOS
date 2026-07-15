@@ -8,7 +8,7 @@ import { normalizeUserRoleName } from './roles';
 import { getStorageData, setStorageData } from '../../api/mock/storage';
 
 const now = '2026-06-01T00:00:00.000Z';
-const ORGANIZATION_SCHEMA_VERSION = 8;
+const ORGANIZATION_SCHEMA_VERSION = 9;
 const DATA_SCOPE_DOMAINS: DataScopeDomain[] = [
   'leads',
   'customers',
@@ -89,6 +89,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.CUSTOMERS, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read', 'write', 'delete'] },
+      { module: PERMISSION_KEYS.ORDER_REVIEW_LIST, actions: ['read'] },
       { module: PERMISSION_KEYS.ORDER_CREATE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_EDIT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_DELETE, actions: ['read', 'delete'] },
@@ -116,6 +117,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.CUSTOMERS, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.ORDER_REVIEW_LIST, actions: ['read'] },
       { module: PERMISSION_KEYS.ORDER_CREATE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_EDIT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
@@ -158,6 +160,7 @@ export const DEFAULT_ROLES: Role[] = [
     permissions: [
       { module: PERMISSION_KEYS.CUSTOMERS, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read'] },
+      { module: PERMISSION_KEYS.ORDER_REVIEW_LIST, actions: ['read'] },
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
       CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS,
@@ -176,6 +179,7 @@ export const DEFAULT_ROLES: Role[] = [
     permissions: [
       { module: PERMISSION_KEYS.DELIVERY, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read'] },
+      { module: PERMISSION_KEYS.ORDER_REVIEW_LIST, actions: ['read'] },
       { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
       CO_CREATION_EMPLOYEE_PERMISSION,
@@ -202,6 +206,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.FINANCE_RULES, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDERS, actions: ['read'] },
+      { module: PERMISSION_KEYS.ORDER_REVIEW_LIST, actions: ['read'] },
       { module: PERMISSION_KEYS.ORDER_REVIEW, actions: ['read', 'write'] },
       CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS,
@@ -357,15 +362,51 @@ function ensureDefaultRoleRequiredPermissions(
   code?: string,
 ): Role['permissions'] {
   if (normalizeCode(code) !== 'finance_specialist') return permissions;
-  const existing = permissions.find((permission) => permission.module === PERMISSION_KEYS.ORDER_REVIEW);
-  if (!existing) {
-    return [...permissions, { module: PERMISSION_KEYS.ORDER_REVIEW, actions: ['read', 'write'] }];
+  const required = new Map<string, string[]>([
+    [PERMISSION_KEYS.ORDER_REVIEW_LIST, ['read']],
+    [PERMISSION_KEYS.ORDER_REVIEW, ['read', 'write']],
+  ]);
+  const normalized = permissions.map((permission) => {
+    const requiredActions = required.get(permission.module);
+    if (!requiredActions) return permission;
+    required.delete(permission.module);
+    return { ...permission, actions: Array.from(new Set([...(permission.actions || []), ...requiredActions])) };
+  });
+  required.forEach((actions, module) => normalized.push({ module, actions }));
+  return normalized;
+}
+
+function migrateLegacyOrderReviewListPermission(permissions: Role['permissions'] = []): Role['permissions'] {
+  const legacyCombinedPermissions = permissions.filter((permission) => permission.module === '订单/订单审核台');
+  if (legacyCombinedPermissions.length) {
+    const legacyActions = Array.from(new Set(legacyCombinedPermissions.flatMap((permission) => permission.actions || ['read'])));
+    const withoutLegacy = permissions.filter((permission) => permission.module !== '订单/订单审核台');
+    const hasReviewList = withoutLegacy.some((permission) => permission.module === PERMISSION_KEYS.ORDER_REVIEW_LIST);
+    const existingReviewAction = withoutLegacy.find((permission) => permission.module === PERMISSION_KEYS.ORDER_REVIEW);
+    const migrated = withoutLegacy.map((permission) => (
+      permission.module === PERMISSION_KEYS.ORDER_REVIEW
+        ? { ...permission, actions: Array.from(new Set([...(permission.actions || []), ...legacyActions])) }
+        : permission
+    ));
+    if (!hasReviewList) migrated.push({ module: PERMISSION_KEYS.ORDER_REVIEW_LIST, actions: ['read'] });
+    if (!existingReviewAction) migrated.push({ module: PERMISSION_KEYS.ORDER_REVIEW, actions: legacyActions });
+    return migrated;
   }
-  return permissions.map((permission) => (
-    permission.module === PERMISSION_KEYS.ORDER_REVIEW
-      ? { ...permission, actions: Array.from(new Set([...(permission.actions || []), 'read', 'write'])) }
-      : permission
+  if (permissions.some((permission) => permission.module === PERMISSION_KEYS.ORDER_REVIEW_LIST)) {
+    return permissions;
+  }
+  const previousReviewListModules = new Set<string>([
+    PERMISSION_KEYS.ORDER_REVIEW,
+    PERMISSION_KEYS.ORDER_MANAGE,
+    PERMISSION_KEYS.ORDER_CREATE,
+  ]);
+  const previouslyCouldReadReviewList = permissions.some((permission) => (
+    previousReviewListModules.has(permission.module)
+    && (permission.actions || []).some((action) => ['read', 'write', 'delete', 'admin'].includes(action))
   ));
+  return previouslyCouldReadReviewList
+    ? [...permissions, { module: PERMISSION_KEYS.ORDER_REVIEW_LIST, actions: ['read'] }]
+    : permissions;
 }
 
 function migrateLegacyRecoveryReviewListPermission(permissions: Role['permissions'] = []): Role['permissions'] {
@@ -569,7 +610,7 @@ export function ensureOrganizationConfigData() {
   const roles = rolesResult.items.map((role) => mergeRoleWithDefaultAccess({
     ...role,
     permissions: storedVersion < ORGANIZATION_SCHEMA_VERSION
-      ? migrateLegacyRecoveryReviewListPermission(role.permissions)
+      ? migrateLegacyOrderReviewListPermission(migrateLegacyRecoveryReviewListPermission(role.permissions))
       : role.permissions,
     departmentId: role.departmentId ? departmentResult.idMap[role.departmentId] || role.departmentId : role.departmentId,
   }));
