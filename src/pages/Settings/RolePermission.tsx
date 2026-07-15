@@ -736,7 +736,7 @@ const RolePermission: React.FC = () => {
               </Box>
             </Box>
 
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 1.25fr) minmax(340px, 0.75fr)' }, gap: 2 }}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 1.25fr) minmax(340px, 0.75fr)' }, gap: 2, alignItems: 'start' }}>
               <Box sx={{ bgcolor: '#fff', border: '1px solid #dfe7f1', borderRadius: 1.25, overflow: 'hidden' }}>
                 <Box sx={{ px: 2.5, py: 2, borderBottom: '1px solid #edf2f7' }}>
                   <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#132238' }}>菜单权限</Typography>
