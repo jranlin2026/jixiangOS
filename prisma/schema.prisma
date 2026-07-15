@@ -295,6 +295,7 @@ model BusinessRecord {
 
   @@unique([domain, recordId])
   @@index([domain])
+  @@index([domain, eventAt, createdAt])
   @@index([status])
   @@index([owner])
   @@index([customerId])
