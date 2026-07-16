@@ -1,5 +1,6 @@
 import type { ID, Timestamp, ProductLevel, OrderType, PaymentMethod, RefundStatus } from './common';
 import type { CommissionScene, OfficialPaymentChannel, ProofStatus, ResourceOwnership } from './commission';
+import type { BusinessAttachment } from './businessAttachment';
 
 /** 订单状态 */
 export type OrderStatus =
@@ -20,6 +21,7 @@ export interface OrderPayment {
   paymentOrderNo?: string;
   voucherName?: string;
   voucherPreview?: string;
+  attachments?: BusinessAttachment[];
   remark?: string;
 }
 
@@ -96,6 +98,7 @@ export interface Order {
   /** 聊天记录、成交路径或客户确认截图 */
   dealEvidenceName?: string;
   dealEvidencePreview?: string;
+  dealEvidenceAttachments?: BusinessAttachment[];
   payments: OrderPayment[];
   commissionId?: ID;
   deliveryId?: ID;

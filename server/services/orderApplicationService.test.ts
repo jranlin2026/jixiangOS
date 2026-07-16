@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import type { AuthenticatedUser } from '../../src/types/auth';
+import type { BusinessAttachment } from '../../src/types/businessAttachment';
 import type { OrderApplication } from '../../src/types/order';
 import {
   createOrderApplicationService,
@@ -24,6 +25,16 @@ type StoredRow = {
 };
 
 const NOW = '2026-07-12T08:00:00.000Z';
+const attachment = (id: string, category: BusinessAttachment['category']): BusinessAttachment => ({
+  id,
+  name: `${id}.png`,
+  mimeType: 'image/png',
+  size: 100,
+  category,
+  uploadedById: 'user-sales',
+  uploadedByName: '销售小王',
+  uploadedAt: NOW,
+});
 
 const reviewer: AuthenticatedUser = {
   id: 'user-finance',
@@ -531,6 +542,34 @@ const deferredEffects: OrderApprovalEffectState = {
   assert.equal(invalid.code, 400);
   assert.equal(missingProduct.code, 409);
   assert.equal(invalidListAmount.code, 400);
+}
+
+{
+  const prisma = new FakePrisma();
+  const service = createOrderApplicationService(prisma as any, { now: () => new Date(NOW) });
+  const tooManyPaymentProofs = await service.submit({
+    ...application().orderData,
+    productId: 'product-1',
+    payments: [{
+      id: 'payment-1', amount: 899, paymentMethod: '对公转账', paidAt: NOW,
+      attachments: [
+        attachment('payment-1', 'order-payment-proof'),
+        attachment('payment-2', 'order-payment-proof'),
+      ],
+    }],
+  }, salesApplicant);
+  assert.equal(tooManyPaymentProofs.code, 400);
+  assert.match(tooManyPaymentProofs.message, /付款截图最多上传 1 张/);
+
+  const eightDealEvidence = await service.submit({
+    ...application().orderData,
+    productId: 'product-1',
+    dealEvidenceAttachments: Array.from({ length: 8 }, (_, index) => (
+      attachment(`deal-${index}`, 'order-deal-evidence')
+    )),
+  }, salesApplicant);
+  assert.equal(eightDealEvidence.code, 0);
+  assert.equal(eightDealEvidence.data?.orderData.dealEvidenceAttachments?.length, 8);
 }
 
 {

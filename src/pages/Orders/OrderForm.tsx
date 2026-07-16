@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Autocomplete,
   Box,
   Button,
@@ -7,13 +8,10 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
-  IconButton,
   MenuItem,
   TextField,
-  Tooltip,
   Typography,
 } from '@mui/material';
-import CloseIcon from '@mui/icons-material/Close';
 import useOrderStore from '../../store/useOrderStore';
 import {
   OFFICIAL_PAYMENT_CHANNELS,
@@ -33,7 +31,10 @@ import type { Order, OrderApplication } from '../../types/order';
 import type { Product } from '../../types/product';
 import type { OrderTypeConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import BusinessAttachmentPicker from '../../shared/components/BusinessAttachmentPicker';
 import { recognizePaymentProof as recognizePaymentProofFromOcr } from '../../shared/utils/paymentProofRecognition';
+import { businessAttachmentApi } from '../../api/businessAttachmentApi';
+import type { BusinessAttachment } from '../../types/businessAttachment';
 import useAuthStore from '../../store/useAuthStore';
 import { filterUsersByCurrentDataScope } from '../../shared/utils/dataVisibility';
 
@@ -179,6 +180,9 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   const [voucherPreview, setVoucherPreview] = useState('');
   const [dealEvidenceName, setDealEvidenceName] = useState('');
   const [dealEvidencePreview, setDealEvidencePreview] = useState('');
+  const [paymentAttachments, setPaymentAttachments] = useState<BusinessAttachment[]>([]);
+  const [dealEvidenceAttachments, setDealEvidenceAttachments] = useState<BusinessAttachment[]>([]);
+  const [attachmentDraftKey] = useState(() => `order-${crypto.randomUUID()}`);
   const [recognitionMessage, setRecognitionMessage] = useState('');
   const [recognizing, setRecognizing] = useState(false);
 
@@ -212,6 +216,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       setVoucherPreview('');
       setDealEvidenceName('');
       setDealEvidencePreview('');
+      setPaymentAttachments([]);
+      setDealEvidenceAttachments([]);
       setRecognitionMessage('');
       setCustomers([]);
       setCustomerSearch('');
@@ -257,6 +263,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     setVoucherPreview(primaryPayment?.voucherPreview || '');
     setDealEvidenceName(sourceOrder.dealEvidenceName || '');
     setDealEvidencePreview(sourceOrder.dealEvidencePreview || '');
+    setPaymentAttachments(primaryPayment?.attachments || []);
+    setDealEvidenceAttachments(sourceOrder.dealEvidenceAttachments || []);
     setRecognitionMessage('');
     setCustomers([]);
     setCustomerSearch('');
@@ -437,25 +445,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     }
   };
 
-  const handleVoucherFile = (file?: File) => {
-    if (!file) return;
-    setVoucherName(file.name);
-    setRecognitionMessage('');
-
-    const reader = new FileReader();
-    reader.onload = () => setVoucherPreview(String(reader.result || ''));
-    reader.readAsDataURL(file);
-  };
-
-  const handleDealEvidenceFile = (file?: File) => {
-    if (!file) return;
-    setDealEvidenceName(file.name);
-
-    const reader = new FileReader();
-    reader.onload = () => setDealEvidencePreview(String(reader.result || ''));
-    reader.readAsDataURL(file);
-  };
-
   const clearVoucherFile = () => {
     setVoucherName('');
     setVoucherPreview('');
@@ -468,7 +457,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   };
 
   const handleRecognizePayment = async () => {
-    if (!voucherName) {
+    if (!voucherName && !paymentAttachments.length) {
       setRecognitionMessage('请先上传付款截图');
       return;
     }
@@ -477,11 +466,21 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     setRecognitionMessage('正在识别付款截图...');
     try {
       let ocrText = '';
-      if (voucherPreview) {
+      let proofSource = voucherPreview;
+      let temporaryUrl = '';
+      if (paymentAttachments[0]) {
+        try {
+          temporaryUrl = URL.createObjectURL(await businessAttachmentApi.fetchBlob(paymentAttachments[0].id));
+          proofSource = temporaryUrl;
+        } catch {
+          proofSource = '';
+        }
+      }
+      if (proofSource) {
         try {
           const { recognize } = await import('tesseract.js');
-          const ocrResult = await recognize(voucherPreview, 'chi_sim+eng');
-          const englishOcrResult = await recognize(voucherPreview, 'eng').catch(() => null);
+          const ocrResult = await recognize(proofSource, 'chi_sim+eng');
+          const englishOcrResult = await recognize(proofSource, 'eng').catch(() => null);
           ocrText = [
             ocrResult.data.text || '',
             englishOcrResult?.data.text || '',
@@ -491,7 +490,9 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
         }
       }
 
-      const result = recognizePaymentProofFromOcr(`${ocrText}\n${voucherName}`, Number(form.actualAmount));
+      if (temporaryUrl) URL.revokeObjectURL(temporaryUrl);
+      const proofName = paymentAttachments[0]?.name || voucherName;
+      const result = recognizePaymentProofFromOcr(`${ocrText}\n${proofName}`, Number(form.actualAmount));
       setForm({
         ...form,
         paymentDate: result.paidDate,
@@ -517,6 +518,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       paymentOrderNo: form.paymentOrderNo || undefined,
       voucherName: voucherName || undefined,
       voucherPreview: voucherPreview || undefined,
+      attachments: paymentAttachments,
       remark: order?.payments?.[0]?.remark,
     };
     const payments = order?.payments?.length ? [payment, ...order.payments.slice(1)] : [payment];
@@ -529,7 +531,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       paymentMethod,
       status: order?.status || '已确认' as Order['status'],
       dealScene: dealSceneFromOrderType(form.orderType),
-      proofStatus: voucherName || voucherPreview ? '已上传' as const : order?.proofStatus || '待补充' as const,
+      proofStatus: paymentAttachments.length || voucherName || voucherPreview ? '已上传' as const : order?.proofStatus || '待补充' as const,
       payments,
       isExternalTalentOrder: order?.isExternalTalentOrder || false,
       performanceBaseAmount: order?.performanceBaseAmount ?? actualAmount,
@@ -539,6 +541,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       originalOrderId: form.originalOrderId || undefined,
       dealEvidenceName: dealEvidenceName || undefined,
       dealEvidencePreview: dealEvidencePreview || undefined,
+      dealEvidenceAttachments,
     };
 
     let submittedApplication: OrderApplication | undefined;
@@ -644,139 +647,58 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
           <TextField label="实付金额" type="number" value={form.actualAmount} onChange={handleChange('actualAmount')} fullWidth />
           <TextField label="付款时间" type="datetime-local" value={form.paymentDate} onChange={handleChange('paymentDate')} fullWidth InputLabelProps={{ shrink: true }} inputProps={{ step: 1 }} />
           <TextField label="付款订单号" value={form.paymentOrderNo} onChange={handleChange('paymentOrderNo')} placeholder="上传截图识别后自动填写" fullWidth />
-          <Box
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              handleVoucherFile(e.dataTransfer.files?.[0]);
-            }}
-            sx={{
-              gridColumn: '1 / -1',
-              border: '1px dashed #90caf9',
-              bgcolor: '#f8fbff',
-              borderRadius: 1,
-              p: 2,
-              display: 'grid',
-              gridTemplateColumns: { xs: '1fr', sm: '1fr auto' },
-              gap: 2,
-              alignItems: 'center',
-            }}
-          >
-            <Box>
-              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>付款截图提交</Typography>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>
-                拖拽截图到这里，或点击上传后确认识别，系统会回填付款时间、实付金额、付款订单号。
+          <Box sx={{ gridColumn: '1 / -1' }}>
+            <BusinessAttachmentPicker
+              title="付款截图"
+              description="支持选择、拖拽或粘贴一张截图，上传后可执行付款信息识别。"
+              value={paymentAttachments}
+              onChange={(attachments) => {
+                setPaymentAttachments(attachments);
+                if (attachments.length) clearVoucherFile();
+              }}
+              category="order-payment-proof"
+              draftKey={attachmentDraftKey}
+              maxCount={1}
+              rejectWholeBatchOnOverflow
+            />
+            {!!voucherName && !paymentAttachments.length && (
+              <Alert severity="info" sx={{ mt: 1 }} onClose={clearVoucherFile}>
+                历史付款截图：{voucherName}。重新上传后将使用新的安全附件。
+              </Alert>
+            )}
+            {recognitionMessage && (
+              <Typography variant="body2" sx={{ mt: 1, color: recognitionMessage.startsWith('已') ? '#2e7d32' : '#d97706' }}>
+                {recognitionMessage}
               </Typography>
-              {voucherName && (
-                <Typography variant="body2" sx={{ mt: 1, color: '#1e88e5' }}>{voucherName}</Typography>
-              )}
-              {recognitionMessage && (
-                <Typography variant="body2" sx={{ mt: 1, color: recognitionMessage.startsWith('已') ? '#2e7d32' : '#d97706' }}>
-                  {recognitionMessage}
-                </Typography>
-              )}
-            </Box>
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-              {voucherPreview && (
-                <Box sx={{ position: 'relative', width: 72, height: 56 }}>
-                  <Box
-                    component="img"
-                    src={voucherPreview}
-                    alt="付款截图预览"
-                    sx={{ width: 72, height: 56, objectFit: 'cover', borderRadius: 1, border: '1px solid #e5e7eb' }}
-                  />
-                  <Tooltip title="删除截图">
-                    <IconButton
-                      size="small"
-                      onClick={clearVoucherFile}
-                      sx={{
-                        position: 'absolute',
-                        top: -8,
-                        right: -8,
-                        width: 22,
-                        height: 22,
-                        bgcolor: '#fff',
-                        border: '1px solid #e5e7eb',
-                        boxShadow: '0 1px 4px rgba(15, 23, 42, 0.18)',
-                        '&:hover': { bgcolor: '#fee2e2', color: '#dc2626' },
-                      }}
-                    >
-                      <CloseIcon sx={{ fontSize: 14 }} />
-                    </IconButton>
-                  </Tooltip>
-                </Box>
-              )}
-              <Button variant="outlined" component="label">
-                上传截图
-                <input hidden accept="image/*" type="file" onChange={(e) => handleVoucherFile(e.target.files?.[0])} />
-              </Button>
-              <Button variant="contained" onClick={handleRecognizePayment} disabled={!voucherName || recognizing}>
-                {recognizing ? '识别中...' : '确认识别'}
-              </Button>
-            </Box>
+            )}
+            <Button
+              variant="contained"
+              size="small"
+              onClick={handleRecognizePayment}
+              disabled={(!paymentAttachments.length && !voucherName) || recognizing}
+              sx={{ mt: 1 }}
+            >
+              {recognizing ? '识别中...' : '确认识别付款截图'}
+            </Button>
           </Box>
-          <Box
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              handleDealEvidenceFile(e.dataTransfer.files?.[0]);
-            }}
-            sx={{
-              gridColumn: '1 / -1',
-              border: '1px dashed #a5b4fc',
-              bgcolor: '#fafbff',
-              borderRadius: 1,
-              p: 2,
-              display: 'grid',
-              gridTemplateColumns: { xs: '1fr', sm: '1fr auto' },
-              gap: 2,
-              alignItems: 'center',
-            }}
-          >
-            <Box>
-              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>成交路径截图</Typography>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>
-                拖拽聊天记录、成交确认或沟通过程截图到这里，用于留存销售成交依据。
-              </Typography>
-              {dealEvidenceName && (
-                <Typography variant="body2" sx={{ mt: 1, color: '#4f46e5' }}>{dealEvidenceName}</Typography>
-              )}
-            </Box>
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-              {dealEvidencePreview && (
-                <Box sx={{ position: 'relative', width: 72, height: 56 }}>
-                  <Box
-                    component="img"
-                    src={dealEvidencePreview}
-                    alt="成交路径截图预览"
-                    sx={{ width: 72, height: 56, objectFit: 'cover', borderRadius: 1, border: '1px solid #e5e7eb' }}
-                  />
-                  <Tooltip title="删除截图">
-                    <IconButton
-                      size="small"
-                      onClick={clearDealEvidenceFile}
-                      sx={{
-                        position: 'absolute',
-                        top: -8,
-                        right: -8,
-                        width: 22,
-                        height: 22,
-                        bgcolor: '#fff',
-                        border: '1px solid #e5e7eb',
-                        boxShadow: '0 1px 4px rgba(15, 23, 42, 0.18)',
-                        '&:hover': { bgcolor: '#fee2e2', color: '#dc2626' },
-                      }}
-                    >
-                      <CloseIcon sx={{ fontSize: 14 }} />
-                    </IconButton>
-                  </Tooltip>
-                </Box>
-              )}
-              <Button variant="outlined" component="label">
-                上传截图
-                <input hidden accept="image/*" type="file" onChange={(e) => handleDealEvidenceFile(e.target.files?.[0])} />
-              </Button>
-            </Box>
+          <Box sx={{ gridColumn: '1 / -1' }}>
+            <BusinessAttachmentPicker
+              title="成交路径 / 聊天记录"
+              description="用于留存聊天记录、成交确认或沟通过程截图。"
+              value={dealEvidenceAttachments}
+              onChange={(attachments) => {
+                setDealEvidenceAttachments(attachments);
+                if (attachments.length) clearDealEvidenceFile();
+              }}
+              category="order-deal-evidence"
+              draftKey={attachmentDraftKey}
+              maxCount={8}
+            />
+            {!!dealEvidenceName && !dealEvidenceAttachments.length && (
+              <Alert severity="info" sx={{ mt: 1 }} onClose={clearDealEvidenceFile}>
+                历史成交截图：{dealEvidenceName}。重新上传后将使用新的安全附件。
+              </Alert>
+            )}
           </Box>
           <TextField select label="销售负责人" value={form.owner} onChange={handleOwnerChange} fullWidth>
             {form.owner && !users.some((user) => user.name === form.owner) && (

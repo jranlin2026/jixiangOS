@@ -45,6 +45,7 @@ import { getCurrentOperatorUser } from '../../shared/utils/currentOperator';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
+import BusinessAttachmentLinks from '../../shared/components/BusinessAttachmentLinks';
 
 type ReviewAction = {
   type: 'approve' | 'return' | 'reject';
@@ -923,14 +924,20 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                           <TableCell>{formatDate(payment.paidAt, 'yyyy-MM-dd HH:mm:ss')}</TableCell>
                           <TableCell>{payment.paymentOrderNo || '-'}</TableCell>
                           <TableCell>
-                            <AttachmentPreviewLink title="付款截图" fileName={payment.voucherName} src={payment.voucherPreview} />
+                            {payment.attachments?.length
+                              ? <BusinessAttachmentLinks attachments={payment.attachments} />
+                              : <AttachmentPreviewLink title="付款截图" fileName={payment.voucherName} src={payment.voucherPreview} />}
                           </TableCell>
                           <TableCell>
-                            <AttachmentPreviewLink
-                              title="成交路径截图"
-                              fileName={detailApplication.orderData.dealEvidenceName}
-                              src={detailApplication.orderData.dealEvidencePreview}
-                            />
+                            {detailApplication.orderData.dealEvidenceAttachments?.length
+                              ? <BusinessAttachmentLinks attachments={detailApplication.orderData.dealEvidenceAttachments} />
+                              : (
+                                <AttachmentPreviewLink
+                                  title="成交路径截图"
+                                  fileName={detailApplication.orderData.dealEvidenceName}
+                                  src={detailApplication.orderData.dealEvidencePreview}
+                                />
+                              )}
                           </TableCell>
                           <TableCell>{payment.remark || '-'}</TableCell>
                         </TableRow>

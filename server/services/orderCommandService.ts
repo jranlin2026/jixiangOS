@@ -79,6 +79,7 @@ const FINANCIAL_FIELDS = new Set([
   'performanceBaseAmount',
   'dealEvidenceName',
   'dealEvidencePreview',
+  'dealEvidenceAttachments',
   'isExternalTalentOrder',
 ]);
 

@@ -20,6 +20,7 @@ import { normalizeResourceOwnership } from '../../shared/utils/constants';
 import type { Order } from '../../types/order';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
+import BusinessAttachmentLinks from '../../shared/components/BusinessAttachmentLinks';
 
 interface OrderDetailProps {
   order: Order;
@@ -109,10 +110,14 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
                         <TableCell>{formatDate(payment.paidAt, 'yyyy-MM-dd HH:mm:ss')}</TableCell>
                         <TableCell>{payment.paymentOrderNo || '-'}</TableCell>
                         <TableCell>
-                          <AttachmentPreviewLink title="付款截图" fileName={payment.voucherName} src={payment.voucherPreview} />
+                          {payment.attachments?.length
+                            ? <BusinessAttachmentLinks attachments={payment.attachments} />
+                            : <AttachmentPreviewLink title="付款截图" fileName={payment.voucherName} src={payment.voucherPreview} />}
                         </TableCell>
                         <TableCell>
-                          <AttachmentPreviewLink title="成交路径截图" fileName={order.dealEvidenceName} src={order.dealEvidencePreview} />
+                          {order.dealEvidenceAttachments?.length
+                            ? <BusinessAttachmentLinks attachments={order.dealEvidenceAttachments} />
+                            : <AttachmentPreviewLink title="成交路径截图" fileName={order.dealEvidenceName} src={order.dealEvidencePreview} />}
                         </TableCell>
                         <TableCell>{payment.remark || '-'}</TableCell>
                       </TableRow>

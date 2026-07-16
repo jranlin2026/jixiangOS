@@ -115,8 +115,8 @@ function ruleMatches(ruleInput: CommissionRule, order: Order): boolean {
 function evidenceState(rule: CommissionRule, order: Order): Pick<Commission, 'evidenceRequired' | 'evidenceStatus' | 'proofStatus'> {
   const types = rule.evidenceTypes || [];
   const required = Boolean(rule.requiresProof || types.length || rule.requiresLeaderConfirm);
-  const hasPayment = Boolean(order.payments?.some((item) => item.voucherName || item.voucherPreview));
-  const hasDeal = Boolean(order.dealEvidenceName || order.dealEvidencePreview);
+  const hasPayment = Boolean(order.payments?.some((item) => item.attachments?.length || item.voucherName || item.voucherPreview));
+  const hasDeal = Boolean(order.dealEvidenceAttachments?.length || order.dealEvidenceName || order.dealEvidencePreview);
   let evidenceStatus: Commission['evidenceStatus'] = '无需凭证';
   if (types.includes('付款截图') && !hasPayment) evidenceStatus = '缺付款截图';
   else if (types.includes('成交路径截图') && !hasDeal) evidenceStatus = '缺成交路径截图';

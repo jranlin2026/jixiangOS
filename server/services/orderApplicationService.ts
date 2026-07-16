@@ -14,6 +14,7 @@ import type { Product } from '../../src/types/product';
 import type { DataScopeDomain, Role } from '../../src/types/role';
 import type { Department } from '../../src/types/department';
 import type { User } from '../../src/types/settings';
+import type { BusinessAttachment, BusinessAttachmentCategory } from '../../src/types/businessAttachment';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 
 type OrderApplicationPrisma = Pick<
@@ -121,6 +122,25 @@ function parseJsonObject<T extends object>(value: unknown, label: string): T {
 function finiteAmount(value: unknown): number | null {
   const amount = Number(value);
   return Number.isFinite(amount) ? amount : null;
+}
+
+function validateAttachmentList(
+  value: unknown,
+  options: { label: string; max: number; category: BusinessAttachmentCategory },
+): BusinessAttachment[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new OrderApprovalError(400, `${options.label}必须是数组`);
+  if (value.length > options.max) throw new OrderApprovalError(400, `${options.label}最多上传 ${options.max} 张`);
+  value.forEach((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new OrderApprovalError(400, `${options.label}数据无效`);
+    }
+    const attachment = item as Partial<BusinessAttachment>;
+    if (!String(attachment.id || '').trim() || attachment.category !== options.category || !String(attachment.mimeType || '').startsWith('image/')) {
+      throw new OrderApprovalError(400, `${options.label}数据无效`);
+    }
+  });
+  return value as BusinessAttachment[];
 }
 
 function hashSuffix(value: string, length = 16): string {
@@ -291,6 +311,12 @@ async function canonicalizeOrderApplicationInput(
   if (listedAmount === null || listedAmount <= 0) throw new OrderApprovalError(400, '订单金额必须大于0');
   if (paidAmount === null || paidAmount <= 0) throw new OrderApprovalError(400, '订单实付金额必须大于0');
   if (!Array.isArray(input.payments)) throw new OrderApprovalError(400, '付款记录必须是数组');
+  input.payments.forEach((payment) => validateAttachmentList(payment.attachments, {
+    label: '付款截图', max: 1, category: 'order-payment-proof',
+  }));
+  validateAttachmentList(input.dealEvidenceAttachments, {
+    label: '聊天记录', max: 8, category: 'order-deal-evidence',
+  });
 
   const [customerRow, productRow] = await Promise.all([
     transaction.businessRecord.findUnique({
