@@ -19,7 +19,7 @@ import type { Department } from '../../src/types/department';
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
-import { resolveProductDeliveryStages } from '../../src/shared/utils/deliveryStages';
+import { resolveLatestCompletedDeliveryStage, resolveProductDeliveryStages } from '../../src/shared/utils/deliveryStages';
 
 type DeliveryCommandPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$transaction'>;
 type LockedRow = { id: string; domain: string; recordId: string; data: unknown };
@@ -158,14 +158,6 @@ async function lockRecord<T extends object>(
 function taskProgress(tasks: DeliveryTask[]): number {
   if (!tasks.length) return 0;
   return Math.round(tasks.filter((task) => task.status === '已完成' || Boolean(task.completedAt)).length / tasks.length * 100);
-}
-
-function latestCompletedStage(delivery: Delivery, tasks: DeliveryTask[]): string {
-  let latestIndex = -1;
-  tasks.forEach((task, index) => {
-    if (task.status === '已完成' || task.completedAt) latestIndex = index;
-  });
-  return delivery.stages[Math.max(0, latestIndex)] || delivery.currentStage;
 }
 
 function openException(delivery: Delivery): boolean {
@@ -563,7 +555,7 @@ export function createDeliveryCommandService(
         const next: Delivery = {
           ...delivery,
           tasks,
-          currentStage: latestCompletedStage(delivery, tasks),
+          currentStage: resolveLatestCompletedDeliveryStage(delivery.stages, tasks, delivery.currentStage),
           approvalStatus: allDone ? '待主管确认' : delivery.approvalStatus || '未提交',
           updatedAt: changedAt,
         };

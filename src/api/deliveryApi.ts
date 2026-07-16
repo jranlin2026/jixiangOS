@@ -20,7 +20,7 @@ import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS } from '../shared/utils/constants';
-import { resolveProductDeliveryStages } from '../shared/utils/deliveryStages';
+import { resolveLatestCompletedDeliveryStage, resolveProductDeliveryStages } from '../shared/utils/deliveryStages';
 import { initializeMockData } from './mock';
 
 const STATUS_ALL: DeliveryOverallStatus = '全部';
@@ -330,8 +330,9 @@ function normalizeDelivery(delivery: Delivery, ordersById: Map<string, Order>, c
   const stages = template.map((item) => item.title);
   const existingCurrentStage = stages.includes(delivery.currentStage) ? delivery.currentStage : undefined;
   const firstOpenStage = delivery.tasks?.find((task) => !isTerminalTask(task) && stages.includes(task.title))?.title;
-  const currentStage = existingCurrentStage || firstOpenStage || stages[0] || '';
-  const tasks = makeStageTasks({ ...delivery, productType, currentStage }, template, currentStage);
+  const taskFallbackStage = existingCurrentStage || firstOpenStage || stages[0] || '';
+  const tasks = makeStageTasks({ ...delivery, productType, currentStage: taskFallbackStage }, template, taskFallbackStage);
+  const currentStage = resolveLatestCompletedDeliveryStage(stages, tasks, taskFallbackStage);
   const progressPercent = getProgressPercent(tasks);
   const snapshot = delivery.snapshot || buildSnapshot({ ...delivery, productType }, order, customer);
   const materialItems = makeMaterialItems({ ...delivery, productType }, order, customer);
@@ -746,11 +747,7 @@ async function updateDeliveryTask(deliveryId: string, taskId: string, data: Part
   }
 
   const allDone = nextOpenIndex === -1;
-  let latestCompletedIndex = -1;
-  nextTasks.forEach((task, index) => {
-    if (isTerminalTask(task)) latestCompletedIndex = index;
-  });
-  const currentStage = normalized.stages[Math.max(0, latestCompletedIndex)] || normalized.currentStage;
+  const currentStage = resolveLatestCompletedDeliveryStage(normalized.stages, nextTasks, normalized.currentStage);
   const progressPercent = getProgressPercent(nextTasks);
   const nextDelivery: Delivery = {
     ...deliveries[deliveryIndex],

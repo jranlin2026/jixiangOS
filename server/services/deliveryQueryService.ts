@@ -14,7 +14,7 @@ import type {
 } from '../../src/types/delivery';
 import type { Order } from '../../src/types/order';
 import type { Product } from '../../src/types/product';
-import { resolveProductDeliveryStages } from '../../src/shared/utils/deliveryStages';
+import { resolveLatestCompletedDeliveryStage, resolveProductDeliveryStages } from '../../src/shared/utils/deliveryStages';
 import { jsonText, queryBusinessRecordPage, visibleJsonCondition } from './businessRecordPageService';
 
 type DeliveryQueryPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$queryRaw'>;
@@ -116,6 +116,13 @@ function buildStats(deliveries: Delivery[]): DeliveryStats {
   };
 }
 
+function withDerivedCurrentStage(delivery: Delivery): Delivery {
+  return {
+    ...delivery,
+    currentStage: resolveLatestCompletedDeliveryStage(delivery.stages, delivery.tasks, delivery.currentStage),
+  };
+}
+
 function deliverySqlConditions(filters: DeliveryFilters, scope: DataVisibilityScope): Prisma.Sql[] {
   const conditions: Prisma.Sql[] = [Prisma.sql`d.domain = ${STORAGE_KEYS.DELIVERIES}`];
   const exact = (path: string, value?: string) => {
@@ -205,6 +212,7 @@ export function createDeliveryQueryService(prisma: DeliveryQueryPrisma) {
     return (deliveryRows as Row[])
       .map((row) => parse<Delivery>(row.data))
       .filter((delivery): delivery is Delivery => Boolean(delivery))
+      .map(withDerivedCurrentStage)
       .filter((delivery) => relationVisible(orders.get(delivery.orderId), delivery, scope) && matches(delivery, filters))
       .sort((left, right) => timestamp(right.updatedAt) - timestamp(left.updatedAt));
   }
@@ -231,7 +239,8 @@ export function createDeliveryQueryService(prisma: DeliveryQueryPrisma) {
         where: { domain_recordId: { domain: STORAGE_KEYS.DELIVERIES, recordId: id } },
       });
       if (!row) return failure<Delivery>('交付单不存在', 404);
-      const delivery = parse<Delivery>(row.data);
+      const parsedDelivery = parse<Delivery>(row.data);
+      const delivery = parsedDelivery ? withDerivedCurrentStage(parsedDelivery) : null;
       if (!delivery) return failure<Delivery>('交付单数据损坏，请先修复数据', 409);
       const [orderRow, scope] = await Promise.all([
         prisma.businessRecord.findUnique({

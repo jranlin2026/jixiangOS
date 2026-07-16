@@ -24,10 +24,15 @@ function sourceOrder(id: string, serviceId: string, overrides: Partial<Order> = 
 }
 
 function sourceDelivery(order: Order, ownerId: string): Delivery {
+  const stages = ['step-1', 'step-2', 'step-3', 'step-4', 'step-5'];
   return {
     id: `delivery-${order.id}`, orderId: order.id, orderNo: order.orderNo, customerId: order.customerId,
     customerName: order.customerName, productName: order.productName, productType: order.productLevel,
-    currentStage: '合同签订', stages: ['合同签订', '验收完成'], tasks: [], owner: ownerId === actor.id ? actor.name : '交付B',
+    currentStage: stages[0], stages, tasks: stages.map((title, index) => ({
+      id: `task-${index}`, title, description: title, records: [],
+      status: index === 0 || index === 3 ? '已完成' : '待开始',
+      completedAt: index === 0 || index === 3 ? now : undefined,
+    })), owner: ownerId === actor.id ? actor.name : '交付B',
     ownerId, status: '待开始', priority: 'normal', progressPercent: 0, createdAt: now, updatedAt: now,
   };
 }
@@ -68,9 +73,12 @@ const service = createDeliveryQueryService(prisma);
 const list = await service.list({ status: '全部', page: 1, pageSize: 10 }, actor);
 assert.deepEqual(list.data?.items.map((item) => item.id), ['delivery-own']);
 assert.equal(list.data?.total, 1);
+assert.equal(list.data?.items[0].currentStage, 'step-4', 'legacy rows derive the last checked step on read');
 assert.equal((await service.get('delivery-other', actor)).code, 403);
-assert.equal((await service.get('delivery-own', actor)).data?.id, 'delivery-own');
-assert.equal((await service.stats({}, actor)).data?.total, 1);
+assert.equal((await service.get('delivery-own', actor)).data?.currentStage, 'step-4');
+const stats = await service.stats({}, actor);
+assert.equal(stats.data?.total, 1);
+assert.deepEqual(stats.data?.stageCounts, [{ stage: 'step-4', count: 1 }]);
 const candidates = await service.listCreatableOrders('', actor);
 assert.deepEqual(candidates.data?.map((item) => item.orderId), [], '空交付阶段产品的订单不得出现在可创建交付列表');
 
