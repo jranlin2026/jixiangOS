@@ -173,9 +173,12 @@ class FakePrisma {
   assert.equal(completedOutOfOrder.data?.tasks[2].status, '已完成');
   assert.equal(completedOutOfOrder.data?.tasks[0].status, '进行中');
   assert.equal(completedOutOfOrder.data?.progressPercent, 33);
+  assert.equal(completedOutOfOrder.data?.currentStage, created.stages[2],
+    'current stage must be the last independently completed step');
   const reopened = await service.updateTask(created.id, thirdTask.id, { status: '待开始' }, engineer);
   assert.equal(reopened.code, 0, '勾错的步骤应允许取消完成');
   assert.equal(reopened.data?.tasks[2].completedAt, undefined);
+  assert.equal(reopened.data?.currentStage, created.stages[0]);
 
   const firstTask = created.tasks[0];
   const attached = await service.addAttachment(created.id, firstTask.id, {

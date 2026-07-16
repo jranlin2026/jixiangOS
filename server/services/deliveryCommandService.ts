@@ -160,6 +160,14 @@ function taskProgress(tasks: DeliveryTask[]): number {
   return Math.round(tasks.filter((task) => task.status === '已完成' || Boolean(task.completedAt)).length / tasks.length * 100);
 }
 
+function latestCompletedStage(delivery: Delivery, tasks: DeliveryTask[]): string {
+  let latestIndex = -1;
+  tasks.forEach((task, index) => {
+    if (task.status === '已完成' || task.completedAt) latestIndex = index;
+  });
+  return delivery.stages[Math.max(0, latestIndex)] || delivery.currentStage;
+}
+
 function openException(delivery: Delivery): boolean {
   return (delivery.exceptions || []).some((item) => item.status !== '已解除');
 }
@@ -555,7 +563,7 @@ export function createDeliveryCommandService(
         const next: Delivery = {
           ...delivery,
           tasks,
-          currentStage: allDone ? delivery.stages[delivery.stages.length - 1] : delivery.currentStage,
+          currentStage: latestCompletedStage(delivery, tasks),
           approvalStatus: allDone ? '待主管确认' : delivery.approvalStatus || '未提交',
           updatedAt: changedAt,
         };

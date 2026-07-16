@@ -151,13 +151,13 @@ const completedStepRes = await deliveryApi.updateDeliveryTask('delivery-01', tas
   resultFields: { backendUrl: 'https://agent.example.com', account: 'admin' },
 });
 assert.equal(completedStepRes.code, 0);
-assert.equal(completedStepRes.data?.currentStage, '直播调试');
+assert.equal(completedStepRes.data?.currentStage, agentStages[0]);
 assert.equal(completedStepRes.data?.tasks[1].status, '进行中');
 assert.equal(completedStepRes.data?.tasks[0].resultFields?.backendUrl, 'https://agent.example.com');
 
 const blockedFutureRes = await deliveryApi.updateDeliveryTask('delivery-01', completedStepRes.data!.tasks[3].id, { status: '已完成' });
-assert.notEqual(blockedFutureRes.code, 0);
-assert.match(blockedFutureRes.message, /当前步骤/);
+assert.equal(blockedFutureRes.code, 0, 'delivery steps can be checked independently');
+assert.equal(blockedFutureRes.data?.currentStage, agentStages[3]);
 
 const uploadRes = await deliveryApi.addDeliveryAttachment('delivery-01', completedStepRes.data!.tasks[1].id, {
   name: '直播需求确认.docx',
@@ -179,7 +179,7 @@ const completedOptionalRes = await deliveryApi.updateDeliveryTask('delivery-01',
   status: '已完成',
 });
 assert.equal(completedOptionalRes.code, 0);
-assert.equal(completedOptionalRes.data?.currentStage, '代理后台交付');
+assert.equal(completedOptionalRes.data?.currentStage, agentStages[3]);
 
 const exceptionRes = await deliveryApi.addDeliveryException('delivery-01', {
   type: '客户不提供资料',

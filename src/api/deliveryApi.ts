@@ -717,11 +717,6 @@ async function updateDeliveryTask(deliveryId: string, taskId: string, data: Part
   const taskIndex = normalized.tasks.findIndex((task) => task.id === taskId);
   if (taskIndex === -1) return createSuccessResponse(null);
 
-  const firstOpenIndex = normalized.tasks.findIndex((task) => !isTerminalTask(task));
-  if (firstOpenIndex !== -1 && taskIndex > firstOpenIndex) {
-    return createErrorResponse('请先完成当前步骤，再处理后续步骤');
-  }
-
   const now = new Date().toISOString();
   const currentTask = normalized.tasks[taskIndex];
   const nextStatus = data.status || currentTask.status;
@@ -751,7 +746,11 @@ async function updateDeliveryTask(deliveryId: string, taskId: string, data: Part
   }
 
   const allDone = nextOpenIndex === -1;
-  const currentStage = allDone ? normalized.stages[normalized.stages.length - 1] : normalized.stages[nextOpenIndex];
+  let latestCompletedIndex = -1;
+  nextTasks.forEach((task, index) => {
+    if (isTerminalTask(task)) latestCompletedIndex = index;
+  });
+  const currentStage = normalized.stages[Math.max(0, latestCompletedIndex)] || normalized.currentStage;
   const progressPercent = getProgressPercent(nextTasks);
   const nextDelivery: Delivery = {
     ...deliveries[deliveryIndex],
