@@ -186,6 +186,17 @@ class FakePrisma {
   }, engineer);
   assert.equal(attached.code, 0);
   assert.equal(attached.data?.tasks[0].attachments?.[0].uploadedBy, engineer.name);
+  const removedAttachment = await service.removeAttachment(created.id, firstTask.id, attached.data!.tasks[0].attachments![0].id, engineer);
+  assert.equal(removedAttachment.code, 0);
+  assert.equal(removedAttachment.data?.tasks[0].attachments?.length, 0);
+  let attachmentLimitResult = removedAttachment;
+  for (let index = 0; index < 9; index += 1) {
+    attachmentLimitResult = await service.addAttachment(created.id, firstTask.id, {
+      id: `attachment-${index}`, name: `${index}.png`, uploadedBy: engineer.name,
+    }, engineer);
+  }
+  assert.equal(attachmentLimitResult.code, 400);
+  assert.equal(attachmentLimitResult.message, '交付附件最多上传 8 个');
 
   const blocked = await service.addException(created.id, {
     type: '其他', description: '等待客户资料', needsSupervisor: true,

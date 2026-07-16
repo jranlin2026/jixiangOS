@@ -60,9 +60,11 @@ import type {
 import type { Customer } from '../../types/customer';
 import type { Order } from '../../types/order';
 import type { User } from '../../types/settings';
+import type { BusinessAttachment } from '../../types/businessAttachment';
 import { ModuleHeader, ModulePage, ModuleTabs } from '../../shared/components/ModuleShell';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import BusinessAttachmentPicker from '../../shared/components/BusinessAttachmentPicker';
 
 type DeliveryColumnId =
   | 'orderNo'
@@ -75,6 +77,7 @@ type DeliveryColumnId =
   | 'owner'
   | 'currentStage'
   | 'plannedCompletedAt'
+  | 'actualCompletedAt'
   | 'progress'
   | 'status'
   | 'priority'
@@ -93,7 +96,7 @@ type DeliveryViewConfig = {
 
 type TaskDraft = Record<string, string>;
 
-const VIEW_STORAGE_KEY = 'jixiang_delivery_view_v5';
+const VIEW_STORAGE_KEY = 'jixiang_delivery_view_v6';
 
 const STATUS_OPTIONS: Array<{ value: DeliveryOverallStatus; label: string; tone?: 'danger' | 'normal' }> = [
   { value: '全部', label: '全部' },
@@ -126,6 +129,7 @@ const DELIVERY_COLUMNS: DeliveryColumnMeta[] = [
   { id: 'owner', label: '客户成功', width: 120 },
   { id: 'currentStage', label: '当前步骤', width: 150 },
   { id: 'plannedCompletedAt', label: '计划完成时间', width: 150 },
+  { id: 'actualCompletedAt', label: '实际完成时间', width: 150 },
   { id: 'progress', label: '交付进度', width: 160 },
   { id: 'status', label: '状态', width: 105 },
   { id: 'priority', label: '优先级', width: 95 },
@@ -142,6 +146,7 @@ const DEFAULT_VISIBLE_COLUMNS: DeliveryColumnId[] = [
   'owner',
   'currentStage',
   'plannedCompletedAt',
+  'actualCompletedAt',
   'progress',
   'status',
   'customerSuccessStatus',
@@ -235,6 +240,9 @@ const DeliveryPage: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [selectedDelivery, setSelectedDelivery] = useState<Delivery | null>(null);
   const [taskDrafts, setTaskDrafts] = useState<Record<string, TaskDraft>>({});
+  const [savedTaskDrafts, setSavedTaskDrafts] = useState<Record<string, TaskDraft>>({});
+  const [savingTaskId, setSavingTaskId] = useState('');
+  const [taskSavedAt, setTaskSavedAt] = useState<Record<string, string>>({});
   const [materialDrafts, setMaterialDrafts] = useState<Record<string, string>>({});
   const [exceptionType, setExceptionType] = useState<DeliveryExceptionType>('客户不提供资料');
   const [exceptionDescription, setExceptionDescription] = useState('');
@@ -314,10 +322,14 @@ const DeliveryPage: React.FC = () => {
   useEffect(() => {
     if (!selectedDelivery) {
       setTaskDrafts({});
+      setSavedTaskDrafts({});
+      setTaskSavedAt({});
       setMaterialDrafts({});
       return;
     }
-    setTaskDrafts(Object.fromEntries(selectedDelivery.tasks.map((task) => [task.id, task.resultFields || {}])));
+    const nextTaskDrafts = Object.fromEntries(selectedDelivery.tasks.map((task) => [task.id, task.resultFields || {}]));
+    setTaskDrafts(nextTaskDrafts);
+    setSavedTaskDrafts(nextTaskDrafts);
     setMaterialDrafts(Object.fromEntries((selectedDelivery.materialItems || []).map((item) => [item.key, item.value || ''])));
     setExceptionDescription('');
     setConfirmNotes('');
@@ -439,27 +451,36 @@ const DeliveryPage: React.FC = () => {
       return;
     }
     setSelectedDelivery(res.data);
+    setSavedTaskDrafts((current) => ({ ...current, [task.id]: compactDraft(taskDrafts[task.id]) }));
+    setTaskSavedAt((current) => ({ ...current, [task.id]: new Date().toISOString() }));
     await loadWorkbench(filters);
   };
 
-  const handleUploadAttachment = async (task: DeliveryTask, event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSaveTask = async (task: DeliveryTask) => {
     if (!canMutateDelivery) return;
     if (!selectedDelivery) return;
-    const files = Array.from(event.target.files || []);
-    event.target.value = '';
-    if (!files.length) return;
-    let latest: Delivery | null = selectedDelivery;
-    for (const file of files) {
-      const res = await deliveryApi.addDeliveryAttachment(selectedDelivery.id, task.id, {
-        name: file.name,
-        size: file.size,
-        fileType: file.type,
-        uploadedBy: selectedDelivery.owner || '客户成功',
-      });
-      if (res.code === 0) latest = res.data;
+    setSavingTaskId(task.id);
+    const resultFields = compactDraft(taskDrafts[task.id]);
+    const res = await deliveryApi.updateDeliveryTask(selectedDelivery.id, task.id, { resultFields });
+    setSavingTaskId('');
+    if (res.code !== 0 || !res.data) {
+      await alert(res.message || '步骤保存失败');
+      return;
     }
-    setSelectedDelivery(latest);
+    setSelectedDelivery(res.data);
+    setSavedTaskDrafts((current) => ({ ...current, [task.id]: resultFields }));
+    setTaskSavedAt((current) => ({ ...current, [task.id]: new Date().toISOString() }));
     await loadWorkbench(filters);
+  };
+
+  const taskIsDirty = (taskId: string) => JSON.stringify(compactDraft(taskDrafts[taskId])) !== JSON.stringify(compactDraft(savedTaskDrafts[taskId]));
+
+  const handleCloseDetail = async () => {
+    if (Object.keys(taskDrafts).some(taskIsDirty)) {
+      const ok = await confirm('还有未保存的步骤内容，确认关闭吗？', '未保存内容');
+      if (!ok) return;
+    }
+    setSelectedDelivery(null);
   };
 
   const handleSaveMaterials = async () => {
@@ -602,6 +623,8 @@ const DeliveryPage: React.FC = () => {
         return delivery.currentStage;
       case 'plannedCompletedAt':
         return delivery.plannedCompletedAt ? formatDateTime(delivery.plannedCompletedAt) : '-';
+      case 'actualCompletedAt':
+        return delivery.actualCompletedAt ? formatDateTime(delivery.actualCompletedAt) : '-';
       case 'progress':
         return renderProgress(delivery);
       case 'status':
@@ -843,14 +866,7 @@ const DeliveryPage: React.FC = () => {
                     <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{task.title}</Typography>
                     <Chip size="small" label={task.status} color={getTaskColor(task)} />
                   </Box>
-                  {canMutateDelivery && (
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                      <Button component="label" size="small" variant="outlined" startIcon={<UploadFileIcon />}>
-                        上传
-                        <input hidden type="file" multiple onChange={(event) => handleUploadAttachment(task, event)} />
-                      </Button>
-                    </Box>
-                  )}
+                  {task.completedAt && <Typography variant="caption" sx={{ color: '#64748b' }}>{formatDateTime(task.completedAt)} · {task.completedBy || '-'}</Typography>}
                 </Box>
                 <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>{task.description}</Typography>
                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 1, mt: 1 }}>
@@ -858,9 +874,37 @@ const DeliveryPage: React.FC = () => {
                   <TextField size="small" label="账号" value={taskDrafts[task.id]?.account || ''} onChange={(event) => setTaskDrafts((current) => ({ ...current, [task.id]: { ...current[task.id], account: event.target.value } }))} />
                   <TextField size="small" label="交付说明" value={taskDrafts[task.id]?.note || ''} onChange={(event) => setTaskDrafts((current) => ({ ...current, [task.id]: { ...current[task.id], note: event.target.value } }))} />
                 </Box>
-                {!!task.attachments?.length && (
+                {canMutateDelivery && <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, alignItems: 'center', mt: 1 }}>
+                  {taskIsDirty(task.id) && <Chip size="small" color="warning" label="有未保存内容" />}
+                  {!taskIsDirty(task.id) && taskSavedAt[task.id] && <Chip size="small" color="success" label={`已保存 ${format(new Date(taskSavedAt[task.id]), 'HH:mm')}`} />}
+                  <Button size="small" variant="contained" disabled={!taskIsDirty(task.id) || savingTaskId === task.id} onClick={() => void handleSaveTask(task)}>{savingTaskId === task.id ? '保存中' : '保存步骤'}</Button>
+                </Box>}
+                <Box sx={{ mt: 1.25 }}>
+                  <BusinessAttachmentPicker
+                    title="交付附件"
+                    description="支持多选、粘贴图片及上传文档，可查看、下载、删除后重新上传。"
+                    value={(task.attachments || []).filter((item) => item.category === 'delivery-task-file') as BusinessAttachment[]}
+                    onChange={(attachments) => setSelectedDelivery((current) => current ? ({ ...current, tasks: current.tasks.map((item) => item.id === task.id ? { ...item, attachments: [...(item.attachments || []).filter((file) => file.category !== 'delivery-task-file'), ...attachments.map((file) => ({ ...file, category: 'delivery-task-file' as const, uploadedBy: file.uploadedByName, fileType: file.mimeType }))] } : item) }) : current)}
+                    category="delivery-task-file"
+                    draftKey={`${delivery.id}:${task.id}`}
+                    maxCount={8}
+                    imagesOnly={false}
+                    disabled={!canMutateDelivery || delivery.approvalStatus === '已确认'}
+                    onUploaded={async (attachment) => {
+                      const response = await deliveryApi.addDeliveryAttachment(delivery.id, task.id, { ...attachment, category: 'delivery-task-file', uploadedBy: attachment.uploadedByName, fileType: attachment.mimeType });
+                      if (response.code === 0 && response.data) setSelectedDelivery(response.data);
+                      return response.code === 0;
+                    }}
+                    onRemove={async (attachment) => {
+                      const response = await deliveryApi.removeDeliveryAttachment(delivery.id, task.id, attachment.id);
+                      if (response.code === 0 && response.data) setSelectedDelivery(response.data);
+                      return response.code === 0;
+                    }}
+                  />
+                </Box>
+                {!!task.attachments?.some((attachment) => !attachment.category) && (
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mt: 1 }}>
-                    {task.attachments.map((attachment) => (
+                    {task.attachments.filter((attachment) => !attachment.category).map((attachment) => (
                       <Chip key={attachment.id} size="small" icon={<InsertDriveFileIcon />} label={attachment.name} variant="outlined" />
                     ))}
                   </Box>
@@ -935,7 +979,7 @@ const DeliveryPage: React.FC = () => {
   );
 
   const renderDetailDialog = () => (
-    <Dialog open={Boolean(selectedDelivery)} onClose={() => setSelectedDelivery(null)} maxWidth="lg" fullWidth>
+    <Dialog open={Boolean(selectedDelivery)} onClose={() => void handleCloseDetail()} maxWidth="lg" fullWidth>
       {selectedDelivery && (
         <>
           <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pr: 1.5 }}>
@@ -951,7 +995,7 @@ const DeliveryPage: React.FC = () => {
                 <Chip size="small" label={`当前：${selectedDelivery.currentStage}`} variant="outlined" />
               </Stack>
             </Box>
-            <IconButton onClick={() => setSelectedDelivery(null)}><CloseIcon /></IconButton>
+              <IconButton onClick={() => void handleCloseDetail()}><CloseIcon /></IconButton>
           </DialogTitle>
           <DialogContent dividers sx={{ bgcolor: '#f8fafc' }}>
             <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 2 }}>

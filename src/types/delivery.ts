@@ -21,6 +21,10 @@ export interface DeliveryAttachment {
   uploadedBy: string;
   uploadedAt: Timestamp;
   remark?: string;
+  mimeType?: string;
+  category?: 'delivery-task-file';
+  uploadedById?: ID;
+  uploadedByName?: string;
 }
 
 export interface DeliveryRecord {

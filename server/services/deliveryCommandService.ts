@@ -578,6 +578,9 @@ export function createDeliveryCommandService(
         const attachmentId = input.id || `file-${hash(`${deliveryId}:${taskId}:${input.name}:${input.size || 0}`)}`;
         const existing = (delivery.tasks[taskIndex].attachments || []).find((item) => item.id === attachmentId);
         if (existing) return delivery;
+        if ((delivery.tasks[taskIndex].attachments || []).length >= 8) {
+          throw new DeliveryCommandError(400, '交付附件最多上传 8 个');
+        }
         const attachment: DeliveryAttachment = {
           ...input,
           id: attachmentId,
@@ -587,6 +590,26 @@ export function createDeliveryCommandService(
         };
         const tasks = delivery.tasks.map((task, index) => index === taskIndex
           ? { ...task, attachments: [...(task.attachments || []), attachment], updatedAt: changedAt }
+          : task);
+        return { ...delivery, tasks, updatedAt: changedAt };
+      });
+    },
+
+    async removeAttachment(
+      deliveryId: string,
+      taskId: string,
+      attachmentId: string,
+      actor: AuthenticatedUser,
+    ) {
+      return mutate(deliveryId, actor, (delivery, _order, changedAt) => {
+        const taskIndex = delivery.tasks.findIndex((task) => task.id === taskId);
+        if (taskIndex === -1) throw new DeliveryCommandError(404, '交付任务不存在');
+        const attachments = delivery.tasks[taskIndex].attachments || [];
+        if (!attachments.some((item) => item.id === attachmentId)) {
+          throw new DeliveryCommandError(404, '交付附件不存在');
+        }
+        const tasks = delivery.tasks.map((task, index) => index === taskIndex
+          ? { ...task, attachments: attachments.filter((item) => item.id !== attachmentId), updatedAt: changedAt }
           : task);
         return { ...delivery, tasks, updatedAt: changedAt };
       });

@@ -762,6 +762,21 @@ app.post('/api/deliveries/:id/tasks/:taskId/attachments', requireDeliveryWriteAc
   res.status(result.code === 0 ? 201 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
+app.delete('/api/deliveries/:id/tasks/:taskId/attachments/:attachmentId', requireDeliveryWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const attachmentId = routeParam(req.params.attachmentId);
+  const result = await deliveryCommandService.removeAttachment(
+    routeParam(req.params.id), routeParam(req.params.taskId), attachmentId, req.currentUser!,
+  );
+  if (result.code === 0) {
+    const fileResult = await businessAttachmentService.remove(attachmentId, req.currentUser!);
+    if (fileResult.code !== 0 && fileResult.code !== 404) {
+      res.status(fileResult.code).json(fileResult);
+      return;
+    }
+  }
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
 app.post('/api/deliveries/:id/exceptions', requireDeliveryWriteAccess, async (req: AuthenticatedRequest, res) => {
   const result = await deliveryCommandService.addException(
     routeParam(req.params.id),

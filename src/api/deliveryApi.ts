@@ -791,6 +791,26 @@ async function addDeliveryAttachment(
   });
 }
 
+async function removeDeliveryAttachment(
+  deliveryId: string,
+  taskId: string,
+  attachmentId: string,
+): Promise<ApiResponse<Delivery | null>> {
+  if (shouldUseBackendApi()) {
+    return cacheBackendDeliveryResult(await backendRequest<Delivery>(
+      `/deliveries/${encodeURIComponent(deliveryId)}/tasks/${encodeURIComponent(taskId)}/attachments/${encodeURIComponent(attachmentId)}`,
+      { method: 'DELETE' },
+    ));
+  }
+  const delivery = readDeliveries().find((item) => item.id === deliveryId);
+  if (!delivery) return createSuccessResponse(null);
+  const task = delivery.tasks.find((item) => item.id === taskId);
+  if (!task) return createSuccessResponse(null);
+  return updateDeliveryTask(deliveryId, taskId, {
+    attachments: (task.attachments || []).filter((item) => item.id !== attachmentId),
+  });
+}
+
 async function addDeliveryException(
   deliveryId: string,
   input: {
@@ -945,6 +965,7 @@ export const deliveryApi = {
   createDeliveryFromOrder,
   updateDeliveryTask,
   addDeliveryAttachment,
+  removeDeliveryAttachment,
   addDeliveryException,
   resolveDeliveryException,
   confirmDeliveryCompletion,

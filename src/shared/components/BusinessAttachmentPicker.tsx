@@ -27,6 +27,8 @@ export interface BusinessAttachmentPickerProps {
   imagesOnly?: boolean;
   disabled?: boolean;
   rejectWholeBatchOnOverflow?: boolean;
+  onUploaded?: (attachment: BusinessAttachment) => Promise<boolean>;
+  onRemove?: (attachment: BusinessAttachment) => Promise<boolean>;
 }
 
 const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
@@ -60,6 +62,8 @@ const BusinessAttachmentPicker: React.FC<BusinessAttachmentPickerProps> = ({
   imagesOnly = true,
   disabled = false,
   rejectWholeBatchOnOverflow = false,
+  onUploaded,
+  onRemove,
 }) => {
   const [message, setMessage] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -125,6 +129,11 @@ const BusinessAttachmentPicker: React.FC<BusinessAttachmentPickerProps> = ({
     for (const file of selection.accepted) {
       const response = await businessAttachmentApi.upload(file, { draftKey, category });
       if (response.code === 0 && response.data) {
+        if (onUploaded && !(await onUploaded(response.data))) {
+          await businessAttachmentApi.remove(response.data.id);
+          failures.push(`${file.name}：附件关联失败`);
+          continue;
+        }
         next = [...next, response.data];
         if (file.type.startsWith('image/')) {
           setPreviewUrls((current) => ({ ...current, [response.data.id]: URL.createObjectURL(file) }));
@@ -140,10 +149,17 @@ const BusinessAttachmentPicker: React.FC<BusinessAttachmentPickerProps> = ({
 
   const removeAttachment = async (attachment: BusinessAttachment) => {
     if (disabled) return;
-    const response = await businessAttachmentApi.remove(attachment.id);
-    if (response.code !== 0) {
-      setMessage(response.message || '附件删除失败');
-      return;
+    if (onRemove) {
+      if (!(await onRemove(attachment))) {
+        setMessage('附件删除失败');
+        return;
+      }
+    } else {
+      const response = await businessAttachmentApi.remove(attachment.id);
+      if (response.code !== 0) {
+        setMessage(response.message || '附件删除失败');
+        return;
+      }
     }
     const previewUrl = previewUrls[attachment.id];
     if (previewUrl) URL.revokeObjectURL(previewUrl);
