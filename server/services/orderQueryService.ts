@@ -222,12 +222,6 @@ export function createOrderQueryService(
   return {
     async listOrders(filters: OrderFilters = {}, actor: AuthenticatedUser) {
       const scope = await loadScope(prisma, actor, 'orders');
-      if (scope.unrestricted && typeof prisma.$queryRaw === 'function') {
-        const result = await queryOrderPage(prisma, filters, scope);
-        const page = toPositiveInt(filters.page, 1);
-        const pageSize = Math.min(toPositiveInt(filters.pageSize, DEFAULT_PAGE_SIZE), 100);
-        return success({ items: result.items, pagination: { page, pageSize, total: result.total, totalPages: Math.ceil(result.total / pageSize) } });
-      }
       const rows = await prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDERS } });
       const direction = filters.sortDirection === 'asc' ? 1 : -1;
       const items = (rows as BusinessRecordRow[])

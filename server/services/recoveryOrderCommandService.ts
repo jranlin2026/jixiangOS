@@ -295,15 +295,6 @@ export function createRecoveryOrderCommandService(
       }
       const directory = await loadDirectory(prisma);
       const scope = recoveryScope(directory, actor, scopeDomain);
-      if (scope.unrestricted && typeof prisma.$queryRaw === 'function') {
-        const result = await queryRecoveryPage(prisma, filters, scope);
-        const page = toPositiveInt(filters.page, 1);
-        const pageSize = Math.min(toPositiveInt(filters.pageSize, 10), 100);
-        return success({
-          items: result.items,
-          pagination: { page, pageSize, total: result.total, totalPages: Math.ceil(result.total / pageSize) },
-        });
-      }
       const rows = await prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } });
       const items = rows
         .map((row) => parseObject<RecoveryOrder>(row.data, '售后挽回订单'))

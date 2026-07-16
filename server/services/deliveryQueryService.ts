@@ -212,12 +212,6 @@ export function createDeliveryQueryService(prisma: DeliveryQueryPrisma) {
   return {
     async list(filters: DeliveryFilters = {}, actor: AuthenticatedUser) {
       const scope = await loadScope(prisma, actor);
-      if (scope.unrestricted && typeof prisma.$queryRaw === 'function') {
-        const result = await queryDeliveryPage(prisma, filters, scope);
-        const page = Math.max(1, Number(filters.page) || 1);
-        const pageSize = Math.min(100, Math.max(1, Number(filters.pageSize) || 10));
-        return success<DeliveryListResponse>({ items: result.items, total: result.total, page, pageSize });
-      }
       const deliveries = await visibleDeliveries(filters, actor, scope);
       const page = Math.max(1, Number(filters.page) || 1);
       const pageSize = Math.min(100, Math.max(1, Number(filters.pageSize) || 10));
