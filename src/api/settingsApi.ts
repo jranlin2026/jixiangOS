@@ -1,4 +1,4 @@
-import type { User, UserRole, ProductConfig, OrderTypeConfig, LifecycleStatusConfig, LeadSourceConfig, LifecycleStatusCode, CustomerLevelConfig, OrganizationProfile, EmploymentStatus } from '../types/settings';
+import type { User, UserRole, ProductConfig, OrderTypeConfig, LifecycleStatusConfig, LeadSourceConfig, LifecycleStatusCode, CustomerLevelConfig, OrganizationProfile, EmploymentStatus, AfterSalesSourceConfig } from '../types/settings';
 import type { Customer, CustomerActivityRecord } from '../types/customer';
 import type { Lead, LeadChangeLog } from '../types/lead';
 import type { Position, PositionFilters } from '../types/position';
@@ -122,6 +122,11 @@ function ensureLeadSourceConfigs(): LeadSourceConfig[] {
   });
   if (!existing?.length) setStorageData(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, sorted, { persist: false });
   return sorted;
+}
+
+function ensureAfterSalesSourceConfigs(): AfterSalesSourceConfig[] {
+  return [...(getStorageData<AfterSalesSourceConfig[]>(STORAGE_KEYS.AFTER_SALES_SOURCE_CONFIGS) || [])]
+    .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
 function replaceOrderTypeReferences(oldName: string, newName: string): void {
@@ -918,6 +923,63 @@ async function deleteLeadSourceConfig(id: string): Promise<ApiResponse<boolean>>
   return createSuccessResponse(true);
 }
 
+// ---- 售后来源平台与店铺 ----
+
+async function fetchAfterSalesSourceConfigs(): Promise<ApiResponse<AfterSalesSourceConfig[]>> {
+  if (shouldUseBackendApi()) {
+    const stored = await fetchBackendStorageValue<AfterSalesSourceConfig[]>(STORAGE_KEYS.AFTER_SALES_SOURCE_CONFIGS);
+    return createSuccessResponse(Array.isArray(stored) ? stored : []);
+  }
+  ensureInit();
+  return createSuccessResponse(ensureAfterSalesSourceConfigs());
+}
+
+async function createAfterSalesSourceConfig(
+  data: Omit<AfterSalesSourceConfig, 'id' | 'createdAt' | 'updatedAt'>,
+): Promise<ApiResponse<AfterSalesSourceConfig | null>> {
+  const configs = (await fetchAfterSalesSourceConfigs()).data;
+  const name = data.name.trim();
+  if (!name) return createErrorResponse(data.parentId ? '店铺名称不能为空' : '平台名称不能为空');
+  if (data.parentId && !configs.some((item) => item.id === data.parentId && !item.parentId)) {
+    return createErrorResponse('所属平台不存在');
+  }
+  if (configs.some((item) => (item.parentId || '') === (data.parentId || '') && item.name === name)) {
+    return createErrorResponse(data.parentId ? '该平台下已存在同名店铺' : '平台已存在');
+  }
+  const now = new Date().toISOString();
+  const item: AfterSalesSourceConfig = {
+    ...data, name, id: `assrc-${uuidv4().slice(0, 8)}`, createdAt: now, updatedAt: now,
+  };
+  await setStorageData(STORAGE_KEYS.AFTER_SALES_SOURCE_CONFIGS, [...configs, item]);
+  return createSuccessResponse(item);
+}
+
+async function updateAfterSalesSourceConfig(
+  id: string,
+  data: Partial<Omit<AfterSalesSourceConfig, 'id' | 'createdAt' | 'updatedAt'>>,
+): Promise<ApiResponse<AfterSalesSourceConfig | null>> {
+  const configs = (await fetchAfterSalesSourceConfigs()).data;
+  const index = configs.findIndex((item) => item.id === id);
+  if (index < 0) return createSuccessResponse(null);
+  const name = typeof data.name === 'string' ? data.name.trim() : configs[index].name;
+  if (!name) return createErrorResponse(configs[index].parentId ? '店铺名称不能为空' : '平台名称不能为空');
+  const parentId = data.parentId ?? configs[index].parentId;
+  if (configs.some((item) => item.id !== id && (item.parentId || '') === (parentId || '') && item.name === name)) {
+    return createErrorResponse(parentId ? '该平台下已存在同名店铺' : '平台已存在');
+  }
+  const next = [...configs];
+  next[index] = { ...configs[index], ...data, name, updatedAt: new Date().toISOString() };
+  await setStorageData(STORAGE_KEYS.AFTER_SALES_SOURCE_CONFIGS, next);
+  return createSuccessResponse(next[index]);
+}
+
+async function deleteAfterSalesSourceConfig(id: string): Promise<ApiResponse<boolean>> {
+  const configs = (await fetchAfterSalesSourceConfigs()).data;
+  if (configs.some((item) => item.parentId === id)) return createErrorResponse('请先删除该平台下的店铺');
+  await setStorageData(STORAGE_KEYS.AFTER_SALES_SOURCE_CONFIGS, configs.filter((item) => item.id !== id));
+  return createSuccessResponse(true);
+}
+
 export const settingsApi = {
   fetchOrganizationProfile,
   updateOrganizationProfile,
@@ -949,4 +1011,8 @@ export const settingsApi = {
   createLeadSourceConfig,
   updateLeadSourceConfig,
   deleteLeadSourceConfig,
+  fetchAfterSalesSourceConfigs,
+  createAfterSalesSourceConfig,
+  updateAfterSalesSourceConfig,
+  deleteAfterSalesSourceConfig,
 };

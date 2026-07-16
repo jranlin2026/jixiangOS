@@ -66,7 +66,7 @@ function input(overrides: Partial<RecoveryOrderInput> = {}): RecoveryOrderInput 
   return {
     customerName: '张三', thirdPartyOrderNo: 'TP-20260712-001', originalProduct: '899课程',
     originalAmount: 899, recoveryAmount: 2980, recoveryUserId: creator.id,
-    recoveryUserName: '伪造姓名', createdBy: other.id, createdByName: other.name, ...overrides,
+    recoveryUserName: '伪造姓名', customerWechat: 'zhangsan', createdBy: other.id, createdByName: other.name, ...overrides,
   };
 }
 
@@ -212,6 +212,23 @@ class FakePrisma {
 
 const prisma = new FakePrisma();
 const service = createRecoveryOrderCommandService(prisma as any, { now: () => new Date(NOW) });
+const missingContact = await service.create(input({
+  thirdPartyOrderNo: 'TP-NO-CONTACT', customerPhone: '', customerWechat: '',
+}), creator);
+assert.equal(missingContact.code, 400);
+assert.equal(missingContact.message, '手机号或微信至少填写一项');
+
+const tooManyProofs = Array.from({ length: 9 }, (_, index) => ({
+  id: `proof-${index}`, name: `${index}.png`, mimeType: 'image/png', size: 100,
+  category: 'recovery-payment-proof' as const, uploadedById: creator.id,
+  uploadedByName: creator.name, uploadedAt: NOW,
+}));
+const tooManyProofsResult = await service.create(input({
+  thirdPartyOrderNo: 'TP-TOO-MANY-PROOFS', paymentAttachments: tooManyProofs,
+}), creator);
+assert.equal(tooManyProofsResult.code, 400);
+assert.equal(tooManyProofsResult.message, '收款凭证最多上传 8 张');
+
 const created = await service.create(input(), creator);
 assert.equal(created.code, 0, '只有 create 权限的角色应能通过记录级命令新增');
 assert.equal(created.data?.createdBy, creator.id, '操作人必须由会话确定');

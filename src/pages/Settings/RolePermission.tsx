@@ -199,6 +199,12 @@ const PERMISSION_TREE: PermissionNode[] = [
         ],
       },
       {
+        label: '售后设置',
+        children: [
+          { label: '来源平台与店铺', key: PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES },
+        ],
+      },
+      {
         label: '系统维护',
         children: [
           { label: 'AI大脑', key: PERMISSION_KEYS.SETTINGS_AI_CONFIG },

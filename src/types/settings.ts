@@ -64,6 +64,17 @@ export interface LeadSourceConfig {
   updatedAt: Timestamp;
 }
 
+/** 售后来源配置：平台 + 平台下店铺 */
+export interface AfterSalesSourceConfig {
+  id: ID;
+  name: string;
+  parentId?: ID;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
 /** 订单类型配置 */
 export interface OrderTypeConfig {
   id: ID;

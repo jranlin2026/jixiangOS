@@ -230,6 +230,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.SETTINGS_CUSTOMER_LEVELS, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.SETTINGS_LIFECYCLE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.SETTINGS_LEAD_FLOW, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.GEO, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ECOMMERCE_SETTLEMENT, actions: ['read', 'write'] },

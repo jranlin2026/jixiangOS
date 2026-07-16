@@ -12,6 +12,7 @@ import type { User } from '../../src/types/settings';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { jsonText, queryBusinessRecordPage, visibleJsonCondition } from './businessRecordPageService';
 import { compactRecoveryOrderListItem, compactRecoverySettlementListItem } from '../../src/shared/utils/listPayload';
+import type { BusinessAttachment, BusinessAttachmentCategory } from '../../src/types/businessAttachment';
 
 type RecoveryCommandPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$transaction' | '$queryRaw'>;
 type Directory = { users: User[]; roles: Role[]; departments: Department[] };
@@ -56,6 +57,22 @@ function normalizeOrderNo(value: unknown): string {
 
 function cleanText(value: unknown): string {
   return String(value || '').trim();
+}
+
+function validateAttachments(
+  value: unknown,
+  category: BusinessAttachmentCategory,
+  label: string,
+): BusinessAttachment[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new RecoveryCommandError(400, `${label}数据无效`);
+  if (value.length > 8) throw new RecoveryCommandError(400, `${label}最多上传 8 张`);
+  value.forEach((attachment) => {
+    if (!attachment || typeof attachment !== 'object' || attachment.category !== category) {
+      throw new RecoveryCommandError(400, `${label}数据无效`);
+    }
+  });
+  return value as BusinessAttachment[];
 }
 
 function amount(value: unknown): number {
@@ -286,6 +303,9 @@ function validateInput(
   const originalProduct = cleanText(input.originalProduct);
   const recoveryAmount = amount(input.recoveryAmount);
   if (!customerName) throw new RecoveryCommandError(400, '请填写客户姓名');
+  if (!cleanText(input.customerPhone) && !cleanText(input.customerWechat)) {
+    throw new RecoveryCommandError(400, '手机号或微信至少填写一项');
+  }
   if (!thirdPartyOrderNo) throw new RecoveryCommandError(400, '请填写第三方平台订单号');
   if (!originalProduct) throw new RecoveryCommandError(400, '请填写原购买产品');
   if (recoveryAmount <= 0) throw new RecoveryCommandError(400, '挽回成交金额必须大于 0');
@@ -473,9 +493,21 @@ export function createRecoveryOrderCommandService(
       const originalProduct = cleanText(input.originalProduct);
       const recoveryAmount = amount(input.recoveryAmount);
       if (!customerName) return failure('请填写客户姓名', 400);
+      if (!cleanText(input.customerPhone) && !cleanText(input.customerWechat)) {
+        return failure('手机号或微信至少填写一项', 400);
+      }
       if (!thirdPartyOrderNo) return failure('请填写第三方平台订单号', 400);
       if (!originalProduct) return failure('请填写原购买产品', 400);
       if (recoveryAmount <= 0) return failure('挽回成交金额必须大于 0', 400);
+      let paymentAttachments: BusinessAttachment[];
+      let chatAttachments: BusinessAttachment[];
+      try {
+        paymentAttachments = validateAttachments(input.paymentAttachments, 'recovery-payment-proof', '收款凭证');
+        chatAttachments = validateAttachments(input.chatAttachments, 'recovery-chat-evidence', '聊天记录');
+      } catch (error) {
+        if (error instanceof RecoveryCommandError) return failure(error.message, error.responseCode);
+        throw error;
+      }
 
       const directory = await loadDirectory(prisma);
       const scope = buildDataVisibilityScopeForUser(
@@ -511,6 +543,10 @@ export function createRecoveryOrderCommandService(
         customerWechat: cleanText(input.customerWechat) || undefined,
         customerMatchStatus: '手工填写',
         sourcePlatform: cleanText(input.sourcePlatform) || undefined,
+        sourcePlatformId: cleanText(input.sourcePlatformId) || undefined,
+        sourcePlatformName: cleanText(input.sourcePlatformName) || cleanText(input.sourcePlatform) || undefined,
+        sourceShopId: cleanText(input.sourceShopId) || undefined,
+        sourceShopName: cleanText(input.sourceShopName) || undefined,
         originalProduct,
         originalAmount: amount(input.originalAmount),
         recoveryAmount,
@@ -520,6 +556,8 @@ export function createRecoveryOrderCommandService(
         chatEvidence: input.chatEvidence,
         chatEvidenceName: input.chatEvidenceName,
         chatEvidencePreview: input.chatEvidencePreview,
+        paymentAttachments,
+        chatAttachments,
         recoveryUserId: recoveryUser.id,
         recoveryUserName: recoveryUser.name,
         assistUserId: assistUser?.id,
@@ -605,6 +643,8 @@ export function createRecoveryOrderCommandService(
           throw new RecoveryCommandError(409, '已进入分账链路的售后挽回订单不能修改');
         }
         const validated = validateInput(input, actor, directory, scope);
+        const paymentAttachments = validateAttachments(input.paymentAttachments, 'recovery-payment-proof', '收款凭证');
+        const chatAttachments = validateAttachments(input.chatAttachments, 'recovery-chat-evidence', '聊天记录');
         const rows = await transaction.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } });
         const duplicate = rows
           .map((row) => parseObject<RecoveryOrder>(row.data, '售后挽回订单'))
@@ -619,6 +659,10 @@ export function createRecoveryOrderCommandService(
           customerWechat: cleanText(input.customerWechat) || undefined,
           thirdPartyOrderNo: validated.thirdPartyOrderNo,
           sourcePlatform: cleanText(input.sourcePlatform) || undefined,
+          sourcePlatformId: cleanText(input.sourcePlatformId) || undefined,
+          sourcePlatformName: cleanText(input.sourcePlatformName) || cleanText(input.sourcePlatform) || undefined,
+          sourceShopId: cleanText(input.sourceShopId) || undefined,
+          sourceShopName: cleanText(input.sourceShopName) || undefined,
           originalProduct: validated.originalProduct,
           originalAmount: validated.originalAmount,
           recoveryAmount: validated.recoveryAmount,
@@ -628,6 +672,8 @@ export function createRecoveryOrderCommandService(
           chatEvidence: input.chatEvidence,
           chatEvidenceName: input.chatEvidenceName,
           chatEvidencePreview: input.chatEvidencePreview,
+          paymentAttachments,
+          chatAttachments,
           recoveryUserId: validated.recoveryUser.id,
           recoveryUserName: validated.recoveryUser.name,
           assistUserId: validated.assistUser?.id,

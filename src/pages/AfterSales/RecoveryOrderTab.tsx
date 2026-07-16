@@ -42,9 +42,13 @@ import { useTableViewConfig } from '../../shared/hooks/useTableViewConfig';
 import { canReviewRecoveryOrders, hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import type { RecoveryOrder, RecoveryOrderFilters, RecoveryOrderInput, RecoveryOrderStatus } from '../../types/recoveryOrder';
 import type { User } from '../../types/settings';
+import type { AfterSalesSourceConfig } from '../../types/settings';
+import type { BusinessAttachment } from '../../types/businessAttachment';
 import type { Product } from '../../types/product';
 import useAuthStore from '../../store/useAuthStore';
 import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
+import BusinessAttachmentPicker from '../../shared/components/BusinessAttachmentPicker';
+import BusinessAttachmentLinks from '../../shared/components/BusinessAttachmentLinks';
 
 const shell = {
   ink: '#0f172a',
@@ -63,6 +67,10 @@ const emptyForm = {
   customerWechat: '',
   thirdPartyOrderNo: '',
   sourcePlatform: '',
+  sourcePlatformId: '',
+  sourcePlatformName: '',
+  sourceShopId: '',
+  sourceShopName: '',
   originalProduct: '',
   originalAmount: '',
   recoveryAmount: '',
@@ -72,6 +80,8 @@ const emptyForm = {
   chatEvidence: '',
   chatEvidenceName: '',
   chatEvidencePreview: '',
+  paymentAttachments: [] as BusinessAttachment[],
+  chatAttachments: [] as BusinessAttachment[],
   recoveryUserId: '',
   remark: '',
 };
@@ -149,6 +159,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const [loadError, setLoadError] = useState('');
   const [users, setUsers] = useState<User[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [sourceConfigs, setSourceConfigs] = useState<AfterSalesSourceConfig[]>([]);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -195,10 +206,11 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
     setLoading(true);
     setLoadError('');
     try {
-      const [listRes, usersRes, productsRes] = await Promise.all([
+      const [listRes, usersRes, productsRes, sourceRes] = await Promise.all([
         recoveryOrderApi.fetchRecoveryOrders(filters),
         settingsApi.fetchAssignableUsers(),
         productApi.getProducts(),
+        settingsApi.fetchAfterSalesSourceConfigs(),
       ]);
       if (listRes.code === 0) {
         setRows(listRes.data.items);
@@ -208,6 +220,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       }
       if (usersRes.code === 0) setUsers(usersRes.data);
       if (productsRes.code === 0) setProducts([...productsRes.data].sort((a, b) => a.sortOrder - b.sortOrder));
+      if (sourceRes.code === 0) setSourceConfigs(sourceRes.data);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : '售后订单加载失败');
     } finally { setLoading(false); }
@@ -238,6 +251,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
 
   const activeUsers = users.filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active');
   const productOptions = useMemo(() => [...products].sort((a, b) => a.sortOrder - b.sortOrder), [products]);
+  const platformOptions = useMemo(() => sourceConfigs.filter((item) => !item.parentId && (item.isActive || item.id === form.sourcePlatformId)).sort((a, b) => a.sortOrder - b.sortOrder), [form.sourcePlatformId, sourceConfigs]);
+  const shopOptions = useMemo(() => sourceConfigs.filter((item) => item.parentId === form.sourcePlatformId && (item.isActive || item.id === form.sourceShopId)).sort((a, b) => a.sortOrder - b.sortOrder), [form.sourcePlatformId, form.sourceShopId, sourceConfigs]);
   const canResubmitReturnedOrder = useCallback((row: RecoveryOrder) => (
     row.status === '退回修改'
     && Boolean(currentUser)
@@ -293,6 +308,10 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       customerWechat: detail.customerWechat || '',
       thirdPartyOrderNo: detail.thirdPartyOrderNo || '',
       sourcePlatform: detail.sourcePlatform || '',
+      sourcePlatformId: detail.sourcePlatformId || '',
+      sourcePlatformName: detail.sourcePlatformName || detail.sourcePlatform || '',
+      sourceShopId: detail.sourceShopId || '',
+      sourceShopName: detail.sourceShopName || '',
       originalProduct: detail.originalProduct || '',
       originalAmount: String(detail.originalAmount || ''),
       recoveryAmount: String(detail.recoveryAmount || ''),
@@ -302,6 +321,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       chatEvidence: detail.chatEvidence || '',
       chatEvidenceName: detail.chatEvidenceName || detail.chatEvidence || '',
       chatEvidencePreview: detail.chatEvidencePreview || '',
+      paymentAttachments: detail.paymentAttachments || [],
+      chatAttachments: detail.chatAttachments || [],
       recoveryUserId: detail.recoveryUserId || '',
       remark: detail.remark || '',
     });
@@ -358,6 +379,10 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       customerWechat: form.customerWechat,
       thirdPartyOrderNo: form.thirdPartyOrderNo,
       sourcePlatform: form.sourcePlatform,
+      sourcePlatformId: form.sourcePlatformId,
+      sourcePlatformName: form.sourcePlatformName,
+      sourceShopId: form.sourceShopId,
+      sourceShopName: form.sourceShopName,
       originalProduct: form.originalProduct,
       originalAmount: Number(form.originalAmount) || 0,
       recoveryAmount: Number(form.recoveryAmount) || 0,
@@ -367,6 +392,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       chatEvidence: form.chatEvidence,
       chatEvidenceName: form.chatEvidenceName,
       chatEvidencePreview: form.chatEvidencePreview,
+      paymentAttachments: form.paymentAttachments,
+      chatAttachments: form.chatAttachments,
       recoveryUserId: recoveryUser?.id || currentUser.id,
       recoveryUserName: recoveryUser?.name || currentUser.name,
       remark: form.remark,
@@ -816,7 +843,20 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
             <TextField label="客户手机号" value={form.customerPhone} onChange={(event) => setForm({ ...form, customerPhone: event.target.value })} />
             <TextField label="客户微信" value={form.customerWechat} onChange={(event) => setForm({ ...form, customerWechat: event.target.value })} />
             <TextField label="第三方平台订单号" value={form.thirdPartyOrderNo} onChange={(event) => setForm({ ...form, thirdPartyOrderNo: event.target.value })} required />
-            <TextField label="来源平台" value={form.sourcePlatform} onChange={(event) => setForm({ ...form, sourcePlatform: event.target.value })} placeholder="抖音/小红书/第三方小店等" />
+            <TextField select label="来源平台" value={form.sourcePlatformId} onChange={(event) => {
+              const platform = sourceConfigs.find((item) => item.id === event.target.value);
+              setForm({ ...form, sourcePlatformId: platform?.id || '', sourcePlatformName: platform?.name || '', sourcePlatform: platform?.name || '', sourceShopId: '', sourceShopName: '' });
+            }}>
+              <MenuItem value="">未选择</MenuItem>
+              {platformOptions.map((platform) => <MenuItem key={platform.id} value={platform.id}>{platform.name}{platform.isActive ? '' : '（已停用）'}</MenuItem>)}
+            </TextField>
+            <TextField select label="来源店铺" value={form.sourceShopId} onChange={(event) => {
+              const shop = sourceConfigs.find((item) => item.id === event.target.value);
+              setForm({ ...form, sourceShopId: shop?.id || '', sourceShopName: shop?.name || '' });
+            }} disabled={!form.sourcePlatformId}>
+              <MenuItem value="">未选择</MenuItem>
+              {shopOptions.map((shop) => <MenuItem key={shop.id} value={shop.id}>{shop.name}{shop.isActive ? '' : '（已停用）'}</MenuItem>)}
+            </TextField>
             <TextField select label="原购买产品" value={form.originalProduct} onChange={(event) => handleProductChange(event.target.value)} required>
               {productOptions.map((product) => (
                 <MenuItem key={product.id} value={product.name}>
@@ -835,22 +875,12 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
             <TextField select label="挽回人员" value={form.recoveryUserId} onChange={(event) => setForm({ ...form, recoveryUserId: event.target.value })} required>
               {activeUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name} · {user.role}</MenuItem>)}
             </TextField>
-            {renderAttachmentUpload({
-              title: '收款凭证',
-              description: '拖拽或上传收款凭证截图、PDF 或文档，用于财务审核售后挽回事实。',
-              nameField: 'paymentVoucherName',
-              previewField: 'paymentVoucherPreview',
-              valueField: 'paymentVoucher',
-              accent: '#90caf9',
-            })}
-            {renderAttachmentUpload({
-              title: '聊天记录截图',
-              description: '拖拽或上传聊天记录、成交确认截图或相关文档，作为挽回依据。',
-              nameField: 'chatEvidenceName',
-              previewField: 'chatEvidencePreview',
-              valueField: 'chatEvidence',
-              accent: '#a5b4fc',
-            })}
+            <Box sx={{ gridColumn: { md: '1 / -1' } }}>
+              <BusinessAttachmentPicker title="收款凭证" description="可多选、拖拽或直接粘贴截图。" value={form.paymentAttachments} onChange={(paymentAttachments) => setForm((current) => ({ ...current, paymentAttachments }))} category="recovery-payment-proof" draftKey={editingOrder?.id || `recovery-new-${currentUser?.id || 'unknown'}`} maxCount={8} />
+            </Box>
+            <Box sx={{ gridColumn: { md: '1 / -1' } }}>
+              <BusinessAttachmentPicker title="聊天记录截图" description="可多选、拖拽或直接粘贴截图。" value={form.chatAttachments} onChange={(chatAttachments) => setForm((current) => ({ ...current, chatAttachments }))} category="recovery-chat-evidence" draftKey={editingOrder?.id || `recovery-new-${currentUser?.id || 'unknown'}`} maxCount={8} />
+            </Box>
             <TextField label="备注" value={form.remark} onChange={(event) => setForm({ ...form, remark: event.target.value })} multiline minRows={3} sx={{ gridColumn: { md: '1 / -1' } }} />
           </Box>
         </DialogContent>
@@ -911,7 +941,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                 </Box>
                 <Box>
                   <Typography variant="body2" sx={{ color: '#6b7280' }}>来源平台</Typography>
-                  <Typography variant="body1">{detailOrder.sourcePlatform || '-'}</Typography>
+                  <Typography variant="body1">{[detailOrder.sourcePlatformName || detailOrder.sourcePlatform, detailOrder.sourceShopName].filter(Boolean).join(' / ') || '-'}</Typography>
                 </Box>
                 <Box>
                   <Typography variant="body2" sx={{ color: '#6b7280' }}>挽回人员</Typography>
@@ -949,18 +979,10 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                   <TableBody>
                     <TableRow>
                       <TableCell>
-                        <AttachmentPreviewLink
-                          title="收款凭证"
-                          fileName={detailOrder.paymentVoucherName || detailOrder.paymentVoucher}
-                          src={detailOrder.paymentVoucherPreview}
-                        />
+                        {detailOrder.paymentAttachments?.length ? <BusinessAttachmentLinks attachments={detailOrder.paymentAttachments} /> : <AttachmentPreviewLink title="收款凭证" fileName={detailOrder.paymentVoucherName || detailOrder.paymentVoucher} src={detailOrder.paymentVoucherPreview} />}
                       </TableCell>
                       <TableCell>
-                        <AttachmentPreviewLink
-                          title="聊天记录截图"
-                          fileName={detailOrder.chatEvidenceName || detailOrder.chatEvidence}
-                          src={detailOrder.chatEvidencePreview}
-                        />
+                        {detailOrder.chatAttachments?.length ? <BusinessAttachmentLinks attachments={detailOrder.chatAttachments} /> : <AttachmentPreviewLink title="聊天记录截图" fileName={detailOrder.chatEvidenceName || detailOrder.chatEvidence} src={detailOrder.chatEvidencePreview} />}
                       </TableCell>
                       <TableCell>{detailOrder.auditReason || '-'}</TableCell>
                     </TableRow>
@@ -1156,4 +1178,3 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
 };
 
 export default RecoveryOrderTab;
-

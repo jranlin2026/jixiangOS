@@ -15,6 +15,7 @@ import AIProviderConfig from './AIProviderConfig';
 import LeadFlowConfigTab from '../Leads/LeadFlowConfigTab';
 import CustomerTagConfig from './CustomerTagConfig';
 import DeliveryAssignmentConfig from './DeliveryAssignmentConfig';
+import AfterSalesSourceConfigPage from './AfterSalesSourceConfig';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
@@ -95,6 +96,14 @@ const Settings: React.FC = () => {
       description: '客户成功自动分配规则',
       tabs: [
         { label: '客户成功分配', permissionKey: PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT, component: <DeliveryAssignmentConfig /> },
+      ],
+    },
+    {
+      key: 'afterSales',
+      label: '售后设置',
+      description: '售后挽回订单来源配置',
+      tabs: [
+        { label: '来源平台与店铺', permissionKey: PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES, component: <AfterSalesSourceConfigPage /> },
       ],
     },
     {

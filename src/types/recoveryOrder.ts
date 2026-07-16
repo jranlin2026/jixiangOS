@@ -1,5 +1,6 @@
 import type { ID, Timestamp } from './common';
 import type { DataScopeDomain } from './role';
+import type { BusinessAttachment } from './businessAttachment';
 
 export type RecoveryOrderStatus = '待审核' | '退回修改' | '审核驳回' | '待分账' | '已分账';
 export type RecoveryOrderSettlementStatus = '未分账' | '待处理' | '待确认' | '待发放' | '已撤回';
@@ -15,6 +16,10 @@ export interface RecoveryOrder {
   customerWechat?: string;
   customerMatchStatus: RecoveryOrderMatchStatus;
   sourcePlatform?: string;
+  sourcePlatformId?: ID;
+  sourcePlatformName?: string;
+  sourceShopId?: ID;
+  sourceShopName?: string;
   originalProduct: string;
   originalAmount: number;
   /** @deprecated 第一版不再做退款流程，保留仅兼容历史数据 */
@@ -26,6 +31,8 @@ export interface RecoveryOrder {
   chatEvidence?: string;
   chatEvidenceName?: string;
   chatEvidencePreview?: string;
+  paymentAttachments?: BusinessAttachment[];
+  chatAttachments?: BusinessAttachment[];
   recoveryUserId: ID;
   recoveryUserName: string;
   assistUserId?: ID;
@@ -53,6 +60,10 @@ export interface RecoveryOrderInput {
   customerWechat?: string;
   thirdPartyOrderNo: string;
   sourcePlatform?: string;
+  sourcePlatformId?: ID;
+  sourcePlatformName?: string;
+  sourceShopId?: ID;
+  sourceShopName?: string;
   originalProduct: string;
   originalAmount: number;
   /** @deprecated 第一版不再做退款流程，保留仅兼容历史数据 */
@@ -64,6 +75,8 @@ export interface RecoveryOrderInput {
   chatEvidence?: string;
   chatEvidenceName?: string;
   chatEvidencePreview?: string;
+  paymentAttachments?: BusinessAttachment[];
+  chatAttachments?: BusinessAttachment[];
   recoveryUserId: ID;
   recoveryUserName: string;
   assistUserId?: ID;
