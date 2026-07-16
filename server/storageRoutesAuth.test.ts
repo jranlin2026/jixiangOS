@@ -203,9 +203,7 @@ assert.match(source, /app\.delete\('\/api\/deliveries\/:id', requireDeliveryWrit
 assert.match(source, /app\.post\('\/api\/recovery-orders', requireRecoveryCreateAccess,/);
 assert.match(source, /canAccessLegacyStorageKey\(req\.currentUser, key, 'read'\)/);
 assert.match(source, /canAccessLegacyStorageKey\(req\.currentUser, key, 'write'\)/);
-assert.match(source, /STORAGE_KEYS\.ASSET_DEVICES/);
-assert.match(source, /STORAGE_KEYS\.ASSET_PHONE_NUMBERS/);
-assert.match(source, /STORAGE_KEYS\.ASSET_INTERNET_ACCOUNTS/);
+assert.match(source, /getScopedStorageKeys\('assets'\)/);
 assert.match(
   source,
   /scope\) === 'runtime'[\s\S]*filterAssetStorageData/,
