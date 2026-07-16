@@ -27,6 +27,7 @@ export interface BusinessAttachmentPickerProps {
   imagesOnly?: boolean;
   disabled?: boolean;
   rejectWholeBatchOnOverflow?: boolean;
+  headerAction?: React.ReactNode;
   onUploaded?: (attachment: BusinessAttachment) => Promise<boolean>;
   onRemove?: (attachment: BusinessAttachment) => Promise<boolean>;
 }
@@ -62,6 +63,7 @@ const BusinessAttachmentPicker: React.FC<BusinessAttachmentPickerProps> = ({
   imagesOnly = true,
   disabled = false,
   rejectWholeBatchOnOverflow = false,
+  headerAction,
   onUploaded,
   onRemove,
 }) => {
@@ -212,15 +214,18 @@ const BusinessAttachmentPicker: React.FC<BusinessAttachmentPickerProps> = ({
             <ContentPasteIcon sx={{ fontSize: 15 }} /> 点击此区域后可直接粘贴截图
           </Typography>
         </Box>
-        <Button
-          variant="outlined"
-          size="small"
-          startIcon={uploading ? <CircularProgress size={16} /> : <UploadFileIcon />}
-          onClick={() => inputRef.current?.click()}
-          disabled={disabled || uploading || value.length >= maxCount}
-        >
-          {uploading ? '上传中' : '选择文件'}
-        </Button>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={uploading ? <CircularProgress size={16} /> : <UploadFileIcon />}
+            onClick={() => inputRef.current?.click()}
+            disabled={disabled || uploading || value.length >= maxCount}
+          >
+            {uploading ? '上传中' : '选择文件'}
+          </Button>
+          {headerAction}
+        </Box>
         <input
           ref={inputRef}
           hidden

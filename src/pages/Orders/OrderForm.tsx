@@ -660,6 +660,16 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               draftKey={attachmentDraftKey}
               maxCount={1}
               rejectWholeBatchOnOverflow
+              headerAction={(
+                <Button
+                  variant="contained"
+                  size="small"
+                  onClick={handleRecognizePayment}
+                  disabled={(!paymentAttachments.length && !voucherName) || recognizing}
+                >
+                  {recognizing ? '识别中...' : '确认识别付款截图'}
+                </Button>
+              )}
             />
             {!!voucherName && !paymentAttachments.length && (
               <Alert severity="info" sx={{ mt: 1 }} onClose={clearVoucherFile}>
@@ -671,15 +681,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
                 {recognitionMessage}
               </Typography>
             )}
-            <Button
-              variant="contained"
-              size="small"
-              onClick={handleRecognizePayment}
-              disabled={(!paymentAttachments.length && !voucherName) || recognizing}
-              sx={{ mt: 1 }}
-            >
-              {recognizing ? '识别中...' : '确认识别付款截图'}
-            </Button>
           </Box>
           <Box sx={{ gridColumn: '1 / -1' }}>
             <BusinessAttachmentPicker
