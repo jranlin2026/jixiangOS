@@ -21,7 +21,7 @@ assert.match(
   'handleCreateDelivery',
   'handleDeleteDelivery',
   'handleToggleTaskCompletion',
-  'handleUploadAttachment',
+  'handleSaveTask',
   'handleSaveMaterials',
   'handleAddException',
   'handleResolveException',
@@ -35,6 +35,12 @@ assert.match(
     `${handlerName} must fail closed without delivery write permission.`,
   );
 });
+
+assert.match(
+  deliverySource,
+  /<BusinessAttachmentPicker[\s\S]{0,1200}disabled=\{!canMutateDelivery \|\| delivery\.approvalStatus === '已确认'\}/,
+  'Delivery attachment picker must fail closed without delivery write permission.',
+);
 
 assert.ok(
   (deliverySource.match(/\{canMutateDelivery &&/g) || []).length >= 7,
