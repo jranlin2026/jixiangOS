@@ -196,6 +196,9 @@ assert.match(source, /app\.post\('\/api\/deliveries\/:id\/advance', requireDeliv
 assert.match(source, /app\.post\('\/api\/deliveries\/:id\/revert', requireDeliveryWriteAccess,/);
 assert.match(source, /app\.patch\('\/api\/deliveries\/:id\/tasks\/:taskId', requireDeliveryWriteAccess,/);
 assert.match(source, /app\.post\('\/api\/deliveries\/:id\/tasks\/:taskId\/attachments', requireDeliveryWriteAccess,/);
+assert.match(source, /app\.post\(\s*'\/api\/business-attachments',\s*requireStorageAccess,/);
+assert.match(source, /app\.get\('\/api\/business-attachments\/:id', requireStorageAccess,/);
+assert.match(source, /app\.delete\('\/api\/business-attachments\/:id', requireStorageAccess,/);
 assert.match(source, /app\.post\('\/api\/deliveries\/:id\/exceptions', requireDeliveryWriteAccess,/);
 assert.match(source, /app\.post\('\/api\/deliveries\/:id\/exceptions\/:exceptionId\/resolve', requireDeliveryWriteAccess,/);
 assert.match(source, /app\.post\('\/api\/deliveries\/:id\/confirm', requireDeliveryWriteAccess,/);

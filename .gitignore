@@ -5,6 +5,7 @@ dist/
 .tools/
 .worktrees/
 .local/
+uploads-private/
 .recovery/
 .superpowers/brainstorm/
 pnpm-lock.yaml

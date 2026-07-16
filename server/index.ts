@@ -29,6 +29,7 @@ import { createCustomerTagMigrationRouter, createCustomerTagMigrationService } f
 import { createLeadListService } from './services/leadListService';
 import { createSettingsService } from './services/settingsService';
 import { createStorageService } from './services/storageService';
+import { createBusinessAttachmentService, createPrismaBusinessAttachmentRepository } from './services/businessAttachmentService';
 import { createAssetListService, isAssetListKind } from './services/assetListService';
 import { createOrderApplicationService } from './services/orderApplicationService';
 import { createOrderApprovalDownstreamEffects } from './services/orderApprovalEffectsService';
@@ -73,6 +74,9 @@ const port = Number(process.env.AI_PROXY_PORT || 3001);
 const host = getApiListenHost();
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
 const uploadRoot = path.resolve(serverDir, '../uploads');
+const businessAttachmentRoot = path.resolve(
+  process.env.BUSINESS_ATTACHMENT_STORAGE_DIR || path.join(serverDir, '../uploads-private/business-attachments'),
+);
 const allowedCorsOrigins = getAllowedCorsOrigins();
 const authService = createAuthService(prisma);
 const aiConfigService = createAiConfigService(prisma as any);
@@ -89,6 +93,10 @@ const customerTagMigrationService = createCustomerTagMigrationService(prisma as 
 const leadListService = createLeadListService(prisma);
 const settingsService = createSettingsService(prisma);
 const storageService = createStorageService(prisma);
+const businessAttachmentService = createBusinessAttachmentService({
+  repository: createPrismaBusinessAttachmentRepository(prisma),
+  rootDir: businessAttachmentRoot,
+});
 const assetListService = createAssetListService(storageService, assetStorageContext);
 const deliveryAssignmentService = createDeliveryAssignmentService(prisma);
 const orderApplicationService = createOrderApplicationService(prisma, {
@@ -899,6 +907,44 @@ app.post(
     res.json({ code: 0, data: { url, fileName }, message: 'success' });
   },
 );
+
+app.post(
+  '/api/business-attachments',
+  requireStorageAccess,
+  express.raw({ type: '*/*', limit: '20mb' }),
+  async (req: AuthenticatedRequest, res) => {
+    const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
+    const result = await businessAttachmentService.upload({
+      draftKey: String(req.headers['x-draft-key'] || ''),
+      category: String(req.headers['x-attachment-category'] || '') as any,
+      file: {
+        originalName: safeUploadFileName(req.headers['x-file-name']),
+        mimeType: String(req.headers['content-type'] || 'application/octet-stream').split(';')[0],
+        size: buffer.length,
+        buffer,
+      },
+    }, req.currentUser!);
+    res.status(result.code === 0 ? 201 : result.code).json(result);
+  },
+);
+
+app.get('/api/business-attachments/:id', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await businessAttachmentService.open(routeParam(req.params.id), req.currentUser!);
+  if (result.code !== 0 || !result.data) {
+    res.status(result.code).json(result);
+    return;
+  }
+  const download = queryParam(req.query.download) === '1';
+  const encodedName = encodeURIComponent(result.data.attachment.name);
+  res.setHeader('Content-Type', result.data.attachment.mimeType);
+  res.setHeader('Content-Disposition', `${download ? 'attachment' : 'inline'}; filename*=UTF-8''${encodedName}`);
+  res.sendFile(result.data.absolutePath);
+});
+
+app.delete('/api/business-attachments/:id', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await businessAttachmentService.remove(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
 
 app.get('/api/settings/users', requireOrganizationReadAccess, async (_req, res) => {
   res.json(await settingsService.listUsers());
