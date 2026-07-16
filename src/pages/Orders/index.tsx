@@ -182,7 +182,7 @@ const readOrderViewConfig = () => {
 };
 
 const Orders: React.FC = () => {
-  const { items, filters, pagination, loading, fetchItems, setFilters, delete: deleteOrder } = useOrderStore();
+  const { items, filters, pagination, loading, error, fetchItems, setFilters, delete: deleteOrder } = useOrderStore();
   const currentUser = useAuthStore((state) => state.currentUser);
   const [searchParams, setSearchParams] = useSearchParams();
   const visibleTabs = useMemo<Array<{ value: 'list' | 'review'; label: string }>>(() => {
@@ -611,6 +611,11 @@ const Orders: React.FC = () => {
 
       {activeTab === 'list' ? (
         <>
+          {error && (
+            <Alert severity="error">
+              订单数据加载失败：{error}。当前列表未更新，请重试。
+            </Alert>
+          )}
           <ModuleToolbar>
             <TextField
               placeholder="搜索订单号/客户名"

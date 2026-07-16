@@ -166,7 +166,7 @@ async function queryRecoveryPage(
     conditions.push(Prisma.sql`(LOWER(br.recordId) LIKE ${pattern} OR LOWER(COALESCE(br.title, '')) LIKE ${pattern} OR LOWER(${jsonText('br', '$.thirdPartyOrderNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.customerPhone')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.customerWechat')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.originalProduct')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.recoveryUserName')}) LIKE ${pattern})`);
   }
   return queryBusinessRecordPage<RecoveryOrder>(prisma, {
-    from: 'business_records br', selectData: 'br.data', conditions,
+    from: 'business_records br', selectId: 'br.id', selectData: 'br.data', conditions,
     orderBy: 'COALESCE(br.eventAt, br.updatedAt, br.createdAt) DESC', page, pageSize,
   });
 }

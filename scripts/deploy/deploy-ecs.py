@@ -267,7 +267,7 @@ if [ "$REUSE_NODE_MODULES" = "1" ] && [ -d "$APP_DIR/node_modules" ]; then
   echo "Reusing existing node_modules with hard links..."
   cp -al "$APP_DIR/node_modules" "$NEW_DIR/node_modules" 2>/dev/null || cp -a "$APP_DIR/node_modules" "$NEW_DIR/node_modules"
 fi
-npm ci --include=dev --prefer-offline --no-audit --no-fund
+npm install --include=dev --prefer-offline --no-audit --no-fund
 NODE_ENV="production" AI_PROXY_HOST="127.0.0.1" AI_PROXY_PORT="3001" npm run prod:check
 
 echo "Creating database backup before migration..."
@@ -289,7 +289,7 @@ if echo "$MIGRATE_STATUS_OUTPUT" | grep -Eiq 'failed|diverg|history.*conflict'; 
   echo "Prisma migration history is unhealthy" >&2
   false
 fi
-if [ "$MIGRATE_STATUS_CODE" != "0" ] && ! echo "$MIGRATE_STATUS_OUTPUT" | grep -Eq 'Following migrations? have not yet been applied'; then
+if [ "$MIGRATE_STATUS_CODE" != "0" ] && ! echo "$MIGRATE_STATUS_OUTPUT" | grep -Eiq 'have not yet been applied'; then
   echo "Prisma migration status could not be safely classified" >&2
   false
 fi
@@ -300,6 +300,8 @@ if pm2 describe jixiang-os-api >/dev/null 2>&1; then
   API_WAS_RUNNING="1"
   pm2 stop jixiang-os-api
 fi
+echo "Repairing legacy business records (idempotent)..."
+npm run business-records:repair -- --apply --confirm-production
 if [ -d "$APP_DIR/uploads" ] && [ ! -L "$APP_DIR/uploads" ]; then
   rsync -a --delete "$APP_DIR/uploads/" "$PERSISTENT_DATA_DIR/uploads/"
 fi

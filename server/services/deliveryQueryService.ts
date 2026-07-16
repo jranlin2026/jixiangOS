@@ -155,7 +155,7 @@ async function queryDeliveryPage(prisma: DeliveryQueryPrisma, filters: DeliveryF
   const pageSize = Math.min(100, Math.max(1, Number(filters.pageSize) || 10));
   return queryBusinessRecordPage<Delivery>(prisma, {
     from: `business_records d LEFT JOIN business_records o ON o.domain = '${STORAGE_KEYS.ORDERS}' AND o.recordId = d.orderId`,
-    selectData: 'd.data', conditions: deliverySqlConditions(filters, scope),
+    selectId: 'd.id', selectData: 'd.data', conditions: deliverySqlConditions(filters, scope),
     orderBy: 'COALESCE(d.eventAt, d.updatedAt, d.createdAt) DESC', page, pageSize,
   });
 }

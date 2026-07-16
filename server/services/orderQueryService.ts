@@ -178,7 +178,7 @@ async function queryOrderPage(
     conditions.push(Prisma.sql`(LOWER(br.recordId) LIKE ${pattern} OR LOWER(COALESCE(br.title, '')) LIKE ${pattern} OR LOWER(COALESCE(br.owner, '')) LIKE ${pattern} OR LOWER(${jsonText('br', '$.orderNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.customerName')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.productName')}) LIKE ${pattern})`);
   }
   return queryBusinessRecordPage<Order>(prisma, {
-    from: 'business_records br', selectData: 'br.data', conditions,
+    from: 'business_records br', selectId: 'br.id', selectData: 'br.data', conditions,
     orderBy: `COALESCE(br.eventAt, br.updatedAt, br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}`,
     page, pageSize,
   });
@@ -206,7 +206,7 @@ async function queryApplicationPage(
     conditions.push(Prisma.sql`(LOWER(br.recordId) LIKE ${pattern} OR LOWER(COALESCE(br.title, '')) LIKE ${pattern} OR LOWER(${jsonText('br', '$.applicationNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.applicantName')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.orderNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.orderData.customerName')}) LIKE ${pattern})`);
   }
   return queryBusinessRecordPage<OrderApplication>(prisma, {
-    from: 'business_records br', selectData: 'br.data', conditions,
+    from: 'business_records br', selectId: 'br.id', selectData: 'br.data', conditions,
     orderBy: 'COALESCE(br.eventAt, br.updatedAt, br.createdAt) DESC', page, pageSize,
   });
 }

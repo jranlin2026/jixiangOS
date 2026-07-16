@@ -6,6 +6,7 @@ export async function queryBusinessRecordPage<T>(
   prisma: RawPagePrisma,
   options: {
     from: string;
+    selectId: string;
     selectData: string;
     conditions: Prisma.Sql[];
     orderBy: string;
@@ -17,19 +18,29 @@ export async function queryBusinessRecordPage<T>(
     ? Prisma.sql`WHERE ${Prisma.join(options.conditions, ' AND ')}`
     : Prisma.empty;
   const from = Prisma.raw(options.from);
+  const selectId = Prisma.raw(options.selectId);
   const selectData = Prisma.raw(options.selectData);
   const orderBy = Prisma.raw(options.orderBy);
   const offset = (options.page - 1) * options.pageSize;
-  const [counts, rows] = await Promise.all([
+  const [counts, pageRows] = await Promise.all([
     prisma.$queryRaw<Array<{ total: bigint | number }>>(
       Prisma.sql`SELECT COUNT(*) AS total FROM ${from} ${where}`,
     ),
-    prisma.$queryRaw<Array<{ data: unknown }>>(
-      Prisma.sql`SELECT ${selectData} AS data FROM ${from} ${where} ORDER BY ${orderBy} LIMIT ${options.pageSize} OFFSET ${offset}`,
+    prisma.$queryRaw<Array<{ id: string }>>(
+      Prisma.sql`SELECT ${selectId} AS id FROM ${from} ${where} ORDER BY ${orderBy} LIMIT ${options.pageSize} OFFSET ${offset}`,
     ),
   ]);
+  if (!pageRows.length) return { items: [], total: Number(counts[0]?.total || 0) };
+
+  const pageIds = pageRows.map((row) => row.id);
+  const dataRows = await prisma.$queryRaw<Array<{ id: string; data: unknown }>>(
+    Prisma.sql`SELECT ${selectId} AS id, ${selectData} AS data FROM ${from} WHERE ${selectId} IN (${Prisma.join(pageIds)})`,
+  );
+  const dataById = new Map(dataRows.map((row) => [row.id, row.data]));
   return {
-    items: rows.map((row) => row.data as T),
+    items: pageIds
+      .map((id) => dataById.get(id))
+      .filter((data): data is T => data !== undefined),
     total: Number(counts[0]?.total || 0),
   };
 }

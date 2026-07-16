@@ -146,6 +146,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const canForceDeleteSettled = isSuperAdmin(currentUser);
   const [rows, setRows] = useState<RecoveryOrder[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [users, setUsers] = useState<User[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState('');
@@ -192,6 +193,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const [listRes, usersRes, productsRes] = await Promise.all([
         recoveryOrderApi.fetchRecoveryOrders(filters),
@@ -201,9 +203,13 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       if (listRes.code === 0) {
         setRows(listRes.data.items);
         setTotal(listRes.data.pagination.total);
+      } else {
+        setLoadError(listRes.message || '售后订单加载失败');
       }
       if (usersRes.code === 0) setUsers(usersRes.data);
       if (productsRes.code === 0) setProducts([...productsRes.data].sort((a, b) => a.sortOrder - b.sortOrder));
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : '售后订单加载失败');
     } finally { setLoading(false); }
   }, [filters]);
 
@@ -679,6 +685,11 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       {message && (
         <Alert severity={message.type} onClose={() => setMessage(null)}>
           {message.text}
+        </Alert>
+      )}
+      {loadError && (
+        <Alert severity="error">
+          售后订单加载失败：{loadError}。当前列表未更新，请重试。
         </Alert>
       )}
 

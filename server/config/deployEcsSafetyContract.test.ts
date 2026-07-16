@@ -41,7 +41,7 @@ assertBefore('npm run db:generate', 'npm run db:deploy', 'Prisma generate 必须
 assert.match(remote, /prisma migrate status/);
 assert.match(remote, /JIXIANG_PRISMA_BASELINE_CONFIRMED/);
 assert.match(remote, /MIGRATE_STATUS_CODE/);
-assert.match(remote, /Following migrations\? have not yet been applied/);
+assert.match(remote, /have not yet been applied/);
 assertBefore('JIXIANG_PRISMA_BASELINE_CONFIRMED', 'npm run db:deploy', 'baseline 确认必须先于 migrate deploy');
 
 assert.match(remote, /\. "\$APP_DIR\/\.env"/);
@@ -61,8 +61,10 @@ assert.match(remote, /ln -s[^\n]*PERSISTENT_DATA_DIR[^\n]*uploads[^\n]*NEW_DIR[^
 assert.match(remote, /ln -s[^\n]*PERSISTENT_DATA_DIR[^\n]*private_uploads[^\n]*NEW_DIR[^\n]*private_uploads/);
 assertBefore('PERSISTENT_DATA_DIR', 'echo "Switching release...', '持久目录必须在版本切换前准备');
 
-assert.match(remote, /npm ci[^\n]*--include=dev/);
-assert.doesNotMatch(remote, /npm install --prefer-offline/);
+assert.match(remote, /npm install[^\n]*--include=dev[^\n]*--prefer-offline/);
+assert.match(remote, /business-records:repair -- --apply --confirm-production/);
+assertBefore('pm2 stop jixiang-os-api', 'business-records:repair', 'legacy repair must run after writes are stopped');
+assertBefore('business-records:repair', 'echo "Switching release...', 'legacy repair must finish before release switch');
 
 assert.match(remote, /trap [^\n]* ERR/);
 assert.doesNotMatch(remote, /(?:^|\n)umask 077(?:\n|$)/);
@@ -94,9 +96,15 @@ assert.doesNotMatch(legacyDeploySource, /git (?:pull|checkout)/);
 assert.doesNotMatch(legacyDeploySource, /pm2 (?:start|reload)/);
 assert.doesNotMatch(legacyDeploySource, /\. \.\/\.env|source \.env/);
 const blockedLegacyDeploy = spawnSync('bash', [legacyDeployPath], { encoding: 'utf8' });
-assert.equal(blockedLegacyDeploy.status, 64);
-assert.equal(blockedLegacyDeploy.stdout, '');
-assert.match(blockedLegacyDeploy.stderr, /scripts\/deploy\/deploy-ecs\.py/);
+const bashAvailable = !blockedLegacyDeploy.error;
+if (blockedLegacyDeploy.error && (blockedLegacyDeploy.error as NodeJS.ErrnoException).code !== 'ENOENT') {
+  throw blockedLegacyDeploy.error;
+}
+if (!blockedLegacyDeploy.error) {
+  assert.equal(blockedLegacyDeploy.status, 64);
+  assert.equal(blockedLegacyDeploy.stdout, '');
+  assert.match(blockedLegacyDeploy.stderr, /scripts\/deploy\/deploy-ecs\.py/);
+}
 
 function assertSafeProductionDatabaseGuidance(source: string, documentName: string) {
   assert.doesNotMatch(
@@ -125,6 +133,8 @@ assert.match(backupSource, /\.partial/);
 assert.match(backupSource, /trap [^\n]* EXIT/);
 assert.match(backupSource, /DATABASE_URL/);
 assert.match(backupSource, /backup target does not match DATABASE_URL/);
+
+if (!bashAvailable) process.exit(0);
 
 const failureRoot = mkdtempSync(join(tmpdir(), 'jixiang-backup-failure-'));
 const fakeBin = join(failureRoot, 'bin');
