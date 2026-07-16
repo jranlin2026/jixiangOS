@@ -54,3 +54,24 @@ assert.match(
 );
 assert.match(recoverySettlementSource, /售后挽回订单资料/);
 assert.match(recoverySettlementSource, /sourceDetailOrder\.recoveryAt/);
+
+assert.match(
+  recoveryOrderSource,
+  /\| 'recoveryAt'[\s\S]*?\{ id: 'recoveryAt', label: '挽回时间' \}/,
+  'Recovery order list and review table should expose a recovery-time column.',
+);
+assert.match(
+  recoveryOrderSource,
+  /case 'recoveryAt':[\s\S]*?formatDate\(row\.recoveryAt \|\| row\.createdAt, 'yyyy-MM-dd HH:mm'\)/,
+  'Recovery order list and review table should render the saved recovery time.',
+);
+assert.match(
+  recoverySettlementSource,
+  /\| 'recoveryAt'[\s\S]*?\{ id: 'recoveryAt', label: '挽回时间' \}/,
+  'Finance recovery settlement table should expose a recovery-time column.',
+);
+assert.match(
+  recoverySettlementSource,
+  /case 'recoveryAt':[\s\S]*?formatDate\(row\.recoveryAt \|\| row\.createdAt, 'yyyy-MM-dd HH:mm'\)/,
+  'Finance recovery settlement table should render the saved recovery time.',
+);

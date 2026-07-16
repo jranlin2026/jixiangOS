@@ -115,6 +115,7 @@ type RecoverySettlementColumnId =
   | 'originalAmount'
   | 'recoveryAmount'
   | 'recoveryUserName'
+  | 'recoveryAt'
   | 'status'
   | 'auditedAt'
   | 'actions';
@@ -127,6 +128,7 @@ const RECOVERY_SETTLEMENT_COLUMN_WIDTHS: Record<RecoverySettlementColumnId, numb
   originalAmount: 110,
   recoveryAmount: 120,
   recoveryUserName: 120,
+  recoveryAt: 145,
   status: 105,
   auditedAt: 140,
   actions: 112,
@@ -140,6 +142,7 @@ const RECOVERY_SETTLEMENT_COLUMNS: Array<TableViewColumnConfig & { id: RecoveryS
   { id: 'originalAmount', label: '原付款' },
   { id: 'recoveryAmount', label: '挽回金额' },
   { id: 'recoveryUserName', label: '挽回人员' },
+  { id: 'recoveryAt', label: '挽回时间' },
   { id: 'status', label: '分账状态' },
   { id: 'auditedAt', label: '审核时间' },
   { id: 'actions', label: '操作' },
@@ -720,6 +723,8 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         return <Typography variant="body2" sx={{ fontWeight: 900, color: shell.teal }}>{formatCurrency(row.recoveryAmount)}</Typography>;
       case 'recoveryUserName':
         return row.recoveryUserName;
+      case 'recoveryAt':
+        return formatDate(row.recoveryAt || row.createdAt, 'yyyy-MM-dd HH:mm');
       case 'status':
         return <Chip size="small" label={settlementStatus} color={getStatusChipColor(settlementStatus)} sx={{ fontWeight: 900 }} />;
       case 'auditedAt':

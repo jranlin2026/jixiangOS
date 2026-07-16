@@ -122,6 +122,7 @@ type RecoveryOrderColumnId =
   | 'originalAmount'
   | 'recoveryAmount'
   | 'recoveryUserName'
+  | 'recoveryAt'
   | 'status'
   | 'createdAt'
   | 'actions';
@@ -136,6 +137,7 @@ const RECOVERY_ORDER_COLUMNS: Array<TableViewColumnConfig & { id: RecoveryOrderC
   { id: 'originalAmount', label: '原付款' },
   { id: 'recoveryAmount', label: '挽回金额' },
   { id: 'recoveryUserName', label: '挽回人员' },
+  { id: 'recoveryAt', label: '挽回时间' },
   { id: 'status', label: '状态' },
   { id: 'createdAt', label: '创建时间' },
   { id: 'actions', label: '操作' },
@@ -492,6 +494,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
         return <Typography variant="body2" sx={{ fontWeight: 900, color: shell.green }}>{formatCurrency(row.recoveryAmount)}</Typography>;
       case 'recoveryUserName':
         return row.recoveryUserName;
+      case 'recoveryAt':
+        return formatDate(row.recoveryAt || row.createdAt, 'yyyy-MM-dd HH:mm');
       case 'status':
         return (
           <Box>
@@ -662,7 +666,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                         boxShadow: `-1px 0 0 ${shell.line}`,
                       } : {}),
                     } : {}),
-                    ...(column.id === 'createdAt' ? { minWidth: mode === 'review' ? 170 : 150, whiteSpace: 'nowrap' } : {}),
+                    ...(['recoveryAt', 'createdAt'].includes(column.id) ? { minWidth: mode === 'review' ? 170 : 150, whiteSpace: 'nowrap' } : {}),
                   }}
                 >
                   {column.label}
@@ -690,7 +694,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                           boxShadow: `-1px 0 0 ${shell.line}`,
                         } : {}),
                       } : {}),
-                      ...(column.id === 'createdAt' ? { minWidth: mode === 'review' ? 170 : 150, whiteSpace: 'nowrap' } : {}),
+                      ...(['recoveryAt', 'createdAt'].includes(column.id) ? { minWidth: mode === 'review' ? 170 : 150, whiteSpace: 'nowrap' } : {}),
                     }}
                   >
                     {renderCell(row, column.id as RecoveryOrderColumnId)}
