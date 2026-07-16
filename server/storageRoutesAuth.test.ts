@@ -198,6 +198,11 @@ assert.match(source, /app\.patch\('\/api\/deliveries\/:id\/tasks\/:taskId', requ
 assert.match(source, /app\.post\('\/api\/deliveries\/:id\/tasks\/:taskId\/attachments', requireDeliveryWriteAccess,/);
 assert.match(source, /app\.post\(\s*'\/api\/business-attachments',\s*requireStorageAccess,/);
 assert.match(source, /app\.get\('\/api\/business-attachments\/:id', requireStorageAccess,/);
+assert.match(
+  source,
+  /res\.sendFile\(result\.data\.absolutePath, \{ dotfiles: 'allow' \}\);/,
+  '鉴权后的业务附件必须支持从 .worktrees 等受控隐藏父目录读取',
+);
 assert.match(source, /app\.delete\('\/api\/business-attachments\/:id', requireStorageAccess,/);
 assert.match(source, /app\.post\('\/api\/deliveries\/:id\/exceptions', requireDeliveryWriteAccess,/);
 assert.match(source, /app\.post\('\/api\/deliveries\/:id\/exceptions\/:exceptionId\/resolve', requireDeliveryWriteAccess,/);

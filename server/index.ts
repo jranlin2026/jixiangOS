@@ -954,7 +954,7 @@ app.get('/api/business-attachments/:id', requireStorageAccess, async (req: Authe
   const encodedName = encodeURIComponent(result.data.attachment.name);
   res.setHeader('Content-Type', result.data.attachment.mimeType);
   res.setHeader('Content-Disposition', `${download ? 'attachment' : 'inline'}; filename*=UTF-8''${encodedName}`);
-  res.sendFile(result.data.absolutePath);
+  res.sendFile(result.data.absolutePath, { dotfiles: 'allow' });
 });
 
 app.delete('/api/business-attachments/:id', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
