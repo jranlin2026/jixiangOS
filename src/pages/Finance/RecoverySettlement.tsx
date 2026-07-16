@@ -198,7 +198,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   const currentUser = useAuthStore((state) => state.currentUser);
   const canManageRecoverySettlement = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'write');
   const [rows, setRows] = useState<RecoveryOrder[]>([]);
-  const [allRowsForCounts, setAllRowsForCounts] = useState<RecoveryOrder[]>([]);
+  const [settlementCounts, setSettlementCounts] = useState<Record<string, number>>({});
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [total, setTotal] = useState(0);
@@ -273,31 +273,25 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   }), [getDefaultRecoveryOwnerId]);
 
   const load = useCallback(async () => {
-    const [allRes, directoryRes, rolesRes, plansRes] = await Promise.all([
+    const readyStatuses = ['待处理', '待确认', '待发放', '已发放', '已撤回'] as const;
+    const [allRes, countsRes, directoryRes, rolesRes, plansRes] = await Promise.all([
       recoveryOrderApi.fetchRecoveryOrders({
         search,
-        settlementStatus: '全部',
+        settlementStatuses: status === '全部' ? [...readyStatuses] : [status],
         includeDeleted: true,
-        page: 1,
-        pageSize: 500,
+        page: page + 1,
+        pageSize: rowsPerPage,
       }),
+      recoveryOrderApi.fetchRecoverySettlementCounts({ search, includeDeleted: true }),
       settingsApi.fetchAssignableDirectory(),
       commissionRuleApi.getCommissionRoleConfigs({ isActive: true }),
       commissionRuleApi.getCommissionPayoutPlans(),
     ]);
     if (allRes.code === 0) {
-      const settlementReadyRows = allRes.data.items.filter((item) => {
-        const rowStatus = getSettlementStatus(item);
-        return ['待处理', '待确认', '待发放', '已撤回'].includes(rowStatus);
-      });
-      const filteredRows = status === '全部'
-        ? settlementReadyRows
-        : settlementReadyRows.filter((item) => getSettlementStatus(item) === status);
-      const start = page * rowsPerPage;
-      setRows(filteredRows.slice(start, start + rowsPerPage));
-      setTotal(filteredRows.length);
-      setAllRowsForCounts(settlementReadyRows);
+      setRows(allRes.data.items);
+      setTotal(allRes.data.pagination.total);
     }
+    if (countsRes.code === 0) setSettlementCounts(countsRes.data.statusCounts);
     if (directoryRes.code === 0) {
       setUsers(directoryRes.data.users);
       setDepartments(directoryRes.data.departments);
@@ -361,7 +355,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         statuses: ['待分账'],
         settlementStatus: '待处理',
         page: 1,
-        pageSize: 500,
+        pageSize: 100,
       });
       if (res.code !== 0) {
         setMessage({ type: 'error', text: res.message || '读取可新建售后挽回分账单失败' });
@@ -407,13 +401,13 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   }, [createSettlementOpen, creatableRecoverySearch, fetchCreatableRecoveryOrders]);
 
   const counts = useMemo(() => {
-    const base = { 全部: allRowsForCounts.length, 待处理: 0, 待确认: 0, 待发放: 0, 已发放: 0, 已撤回: 0 };
-    allRowsForCounts.forEach((row) => {
-      const rowStatus = getSettlementStatus(row);
-      if (rowStatus in base) base[rowStatus as keyof typeof base] += 1;
+    const base = { 全部: 0, 待处理: 0, 待确认: 0, 待发放: 0, 已发放: 0, 已撤回: 0 };
+    Object.entries(settlementCounts).forEach(([key, value]) => {
+      if (key in base) base[key as keyof typeof base] = value;
     });
+    base.全部 = Object.values(base).reduce((sum, value) => sum + value, 0);
     return base;
-  }, [allRowsForCounts]);
+  }, [settlementCounts]);
 
   const loadRecoveryCommissions = async (order: RecoveryOrder): Promise<Commission[]> => {
     try {

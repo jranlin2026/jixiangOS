@@ -22,6 +22,7 @@ import type {
   RecoverySettlementInput,
   RecoveryOrderSettlementStatus,
   RecoveryOrderStats,
+  RecoverySettlementCounts,
 } from '../types/recoveryOrder';
 
 function ensureInit(): void {
@@ -249,6 +250,11 @@ async function fetchRecoveryOrders(filters: RecoveryOrderFilters = {}): Promise<
   if (filters.settlementStatus && filters.settlementStatus !== '全部') {
     items = items.filter((item) => (item.settlementStatus || '未分账') === filters.settlementStatus);
   }
+  if (filters.settlementStatuses?.length) {
+    items = items.filter((item) => filters.settlementStatuses?.includes(
+      (item.settlementStatus || '未分账') as any,
+    ));
+  }
   if (filters.ownerId) {
     items = items.filter((item) => (
       item.createdBy === filters.ownerId
@@ -265,6 +271,28 @@ async function fetchRecoveryOrders(filters: RecoveryOrderFilters = {}): Promise<
     items: items.slice((page - 1) * pageSize, page * pageSize),
     pagination: { page, pageSize, total, totalPages },
   });
+}
+
+async function fetchRecoveryOrderById(
+  id: string,
+  scopeDomain: NonNullable<RecoveryOrderFilters['scopeDomain']> = 'recoveryOrders',
+): Promise<ApiResponse<RecoveryOrder | null>> {
+  if (shouldUseBackendApi()) {
+    const params = new URLSearchParams({ scopeDomain });
+    const response = await backendRequest<RecoveryOrder>(
+      `/recovery-orders/${encodeURIComponent(id)}?${params.toString()}`,
+    );
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '售后挽回订单详情加载失败', response.code || -1);
+    }
+    return createSuccessResponse(cacheBackendRecoveryOrder(normalizeRecoveryOrder(response.data)), response.message);
+  }
+
+  ensureInit();
+  await delay(80);
+  const order = filterVisibleRecoveryOrders(readRecoveryOrders(), scopeDomain)
+    .find((item) => item.id === id && !item.deletedAt);
+  return createSuccessResponse(order || null);
 }
 
 async function fetchRecoveryOrderStats(ownerId?: string): Promise<ApiResponse<RecoveryOrderStats>> {
@@ -286,6 +314,32 @@ async function fetchRecoveryOrderStats(ownerId?: string): Promise<ApiResponse<Re
     generatedCommissionAmount: commissions
       .filter((commission) => commissionIds.has(commission.id))
       .reduce((sum, commission) => sum + Number(commission.commissionAmount || 0), 0),
+  });
+}
+
+async function fetchRecoverySettlementCounts(
+  filters: Pick<RecoveryOrderFilters, 'search' | 'includeDeleted'> = {},
+): Promise<ApiResponse<RecoverySettlementCounts>> {
+  if (shouldUseBackendApi()) {
+    const params = new URLSearchParams();
+    if (filters.search) params.set('search', filters.search);
+    if (filters.includeDeleted) params.set('includeDeleted', 'true');
+    return backendRequest<RecoverySettlementCounts>(
+      `/recovery-orders/settlement-counts${params.size ? `?${params.toString()}` : ''}`,
+    );
+  }
+  const items = filterVisibleRecoveryOrders(readRecoveryOrders(), 'recoveryOrders')
+    .filter((item) => filters.includeDeleted || !item.deletedAt)
+    .filter((item) => !filters.search || [item.recoveryNo, item.customerName, item.thirdPartyOrderNo]
+      .some((value) => normalizeText(value).includes(normalizeText(filters.search))));
+  const statusCounts: Record<string, number> = { 待处理: 0, 待确认: 0, 待发放: 0, 已发放: 0, 已撤回: 0 };
+  items.forEach((item) => {
+    const value = String(item.settlementStatus || '');
+    if (value in statusCounts) statusCounts[value] += 1;
+  });
+  return createSuccessResponse({
+    total: Object.values(statusCounts).reduce((sum, count) => sum + count, 0),
+    statusCounts,
   });
 }
 
@@ -819,7 +873,9 @@ async function withdrawRecoverySettlement(id: string, reason: string, operatorNa
 
 export const recoveryOrderApi = {
   fetchRecoveryOrders,
+  fetchRecoveryOrderById,
   fetchRecoveryOrderStats,
+  fetchRecoverySettlementCounts,
   createRecoveryOrder,
   updateRecoveryOrder,
   deleteRecoveryOrder,

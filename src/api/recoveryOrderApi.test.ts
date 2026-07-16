@@ -330,3 +330,13 @@ const stats = await recoveryOrderApi.fetchRecoveryOrderStats();
 assert.equal(stats.data.total, 1);
 assert.equal(stats.data.waitingSettlement, 0);
 assert.equal(stats.data.generatedCommissionAmount, 120);
+
+const legacyRows = JSON.parse(storage.getItem(STORAGE_KEYS.RECOVERY_ORDERS) || '[]') as any[];
+legacyRows[0] = { ...legacyRows[0], settlementStatus: '已分账' };
+storage.setItem(STORAGE_KEYS.RECOVERY_ORDERS, JSON.stringify(legacyRows));
+const legacySettlementPage = await recoveryOrderApi.fetchRecoveryOrders({
+  settlementStatuses: ['待发放'], page: 1, pageSize: 20,
+});
+assert.equal(legacySettlementPage.data.items.length, 1, '本地模式必须把历史已分账归一化为待发放');
+const legacySettlementCounts = await recoveryOrderApi.fetchRecoverySettlementCounts();
+assert.equal(legacySettlementCounts.data.statusCounts['待发放'], 1);

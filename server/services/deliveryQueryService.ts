@@ -16,6 +16,7 @@ import type { Order } from '../../src/types/order';
 import type { Product } from '../../src/types/product';
 import { resolveLatestCompletedDeliveryStage, resolveProductDeliveryStages } from '../../src/shared/utils/deliveryStages';
 import { jsonText, queryBusinessRecordPage, visibleJsonCondition } from './businessRecordPageService';
+import { compactDeliveryListItem } from '../../src/shared/utils/listPayload';
 
 type DeliveryQueryPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$queryRaw'>;
 type Row = { data: unknown };
@@ -224,7 +225,7 @@ export function createDeliveryQueryService(prisma: DeliveryQueryPrisma) {
       const page = Math.max(1, Number(filters.page) || 1);
       const pageSize = Math.min(100, Math.max(1, Number(filters.pageSize) || 10));
       const data: DeliveryListResponse = {
-        items: deliveries.slice((page - 1) * pageSize, page * pageSize),
+        items: deliveries.slice((page - 1) * pageSize, page * pageSize).map(compactDeliveryListItem),
         total: deliveries.length,
         page,
         pageSize,

@@ -78,11 +78,17 @@ export interface RecoveryOrderFilters {
   status?: RecoveryOrderStatus | '全部';
   statuses?: RecoveryOrderStatus[];
   settlementStatus?: RecoveryOrderSettlementStatus | '全部';
+  settlementStatuses?: Array<RecoveryOrderSettlementStatus | '已发放'>;
   ownerId?: ID;
   includeDeleted?: boolean;
   scopeDomain?: Extract<DataScopeDomain, 'recoveryOrders' | 'recoveryOrderApplications'>;
   page?: number;
   pageSize?: number;
+}
+
+export interface RecoverySettlementCounts {
+  total: number;
+  statusCounts: Record<string, number>;
 }
 
 export interface RecoveryOrderStats {

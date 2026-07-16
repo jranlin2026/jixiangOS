@@ -264,9 +264,16 @@ const Orders: React.FC = () => {
     };
   }, [activeTab, orderIdParam]);
 
-  const handleViewDetail = (order: Order) => {
+  const handleViewDetail = async (order: Order) => {
     setSelectedOrder(order);
     setDetailOpen(true);
+    const res = await orderApi.fetchOrderById(order.id);
+    if (res.code === 0 && res.data) {
+      setSelectedOrder((current) => current?.id === order.id ? res.data : current);
+    } else {
+      setDetailOpen(false);
+      await alert(res.message || '订单详情加载失败');
+    }
   };
 
   const handleTabChange = (_event: React.SyntheticEvent, value: 'list' | 'review') => {
@@ -296,8 +303,13 @@ const Orders: React.FC = () => {
     setFormOpen(true);
   };
 
-  const handleEditOrder = (order: Order) => {
-    setEditingOrder(order);
+  const handleEditOrder = async (order: Order) => {
+    const res = await orderApi.fetchOrderById(order.id);
+    if (res.code !== 0 || !res.data) {
+      await alert(res.message || '订单详情加载失败，暂时不能编辑');
+      return;
+    }
+    setEditingOrder(res.data);
     setFormOpen(true);
   };
 

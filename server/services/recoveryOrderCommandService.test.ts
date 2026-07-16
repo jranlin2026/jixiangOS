@@ -6,6 +6,7 @@ import type { RecoveryOrder, RecoveryOrderInput } from '../../src/types/recovery
 import { createRecoveryOrderCommandService } from './recoveryOrderCommandService';
 
 const NOW = '2026-07-12T18:00:00.000Z';
+const INLINE_PROOF = `data:image/png;base64,${'A'.repeat(10_000)}`;
 const creator: AuthenticatedUser = {
   id: 'user-delivery', name: '交付A', account: 'delivery', email: 'delivery@example.com', phone: '',
   role: '交付工程师', roleId: 'role-delivery', departmentId: 'dept-delivery', isActive: true,
@@ -73,8 +74,24 @@ const oldRecord: RecoveryOrder = {
   id: 'recovery-old', recoveryNo: 'RCV-OLD', thirdPartyOrderNo: 'TP-OLD', customerId: '',
   customerName: '历史客户', customerMatchStatus: '手工填写', originalProduct: '历史产品',
   originalAmount: 100, recoveryAmount: 200, recoveryUserId: other.id, recoveryUserName: other.name,
-  status: '待审核', settlementStatus: '未分账', commissionIds: [], createdBy: other.id,
+  status: '待审核', settlementStatus: '待处理', commissionIds: [], createdBy: other.id,
   createdByName: other.name, createdAt: NOW, updatedAt: NOW,
+  paymentVoucherPreview: INLINE_PROOF,
+  chatEvidencePreview: INLINE_PROOF,
+  customerPhone: '13800000000',
+  customerWechat: 'private-wechat',
+  remark: 'finance list must not expose this note',
+};
+const finance: AuthenticatedUser = {
+  ...creator,
+  id: 'user-finance',
+  name: '财务A',
+  account: 'finance',
+  email: 'finance@example.com',
+  role: '财务专员',
+  roleId: 'role-finance',
+  departmentId: 'dept-finance',
+  permissions: [{ module: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, actions: ['read', 'write'] }],
 };
 const outsideDepartmentRecord: RecoveryOrder = {
   ...oldRecord,
@@ -101,7 +118,7 @@ class FakePrisma {
       recordId: outsideDepartmentRecord.id, status: outsideDepartmentRecord.status, data: clone(outsideDepartmentRecord),
     }],
   ]);
-  readonly user = { findMany: async () => [dbUser(creator), dbUser(other), dbUser(outsideDepartmentCreator), dbUser(staleReviewer), dbUser(reviewer)] };
+  readonly user = { findMany: async () => [dbUser(creator), dbUser(other), dbUser(outsideDepartmentCreator), dbUser(staleReviewer), dbUser(reviewer), dbUser(finance)] };
   readonly role = { findMany: async () => [{
     id: 'role-delivery', name: '交付工程师', code: 'delivery_engineer', departmentId: 'dept-delivery',
     permissions: creator.permissions, dataScopes: { recoveryOrderApplications: 'self' }, memberCount: 2,
@@ -109,6 +126,10 @@ class FakePrisma {
   }, {
     id: 'role-reviewer', name: '售后主管', code: 'after_sales_manager', departmentId: 'dept-delivery',
     permissions: reviewer.permissions, dataScopes: { recoveryOrderApplications: 'all' }, memberCount: 1,
+    isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW), description: null,
+  }, {
+    id: 'role-finance', name: '财务专员', code: 'finance_specialist', departmentId: 'dept-finance',
+    permissions: finance.permissions, dataScopes: { recoveryOrders: 'all' }, memberCount: 1,
     isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW), description: null,
   }, {
     id: 'role-stale-reviewer', name: 'customer-success-manager', code: 'customer_success_manager', departmentId: 'dept-delivery',
@@ -121,6 +142,9 @@ class FakePrisma {
     id: 'dept-delivery', name: '交付部', code: 'DELIVERY', parentId: null, managerId: null,
     memberCount: 2, sortOrder: 1, isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW),
   }, {
+    id: 'dept-finance', name: '财务部', code: 'FINANCE', parentId: null, managerId: null,
+    memberCount: 1, sortOrder: 3, isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW),
+  }, {
     id: 'dept-customer-success', name: '客户成功部', code: 'CUSTOMER_SUCCESS', parentId: null, managerId: null,
     memberCount: 1, sortOrder: 2, isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW),
   }] };
@@ -128,6 +152,10 @@ class FakePrisma {
     findMany: async ({ where }: any) => Array.from(this.rows.values())
       .filter((row: any) => row.domain === where.domain)
       .map(clone),
+    findUnique: async ({ where }: any) => {
+      const target = where.domain_recordId;
+      return clone(this.rows.get(key(target.domain, target.recordId)) || null);
+    },
   };
 
   async $transaction<T>(callback: (transaction: any) => Promise<T>): Promise<T> {
@@ -202,6 +230,12 @@ const reviewerList = await service.list({
   scopeDomain: 'recoveryOrderApplications', page: 1, pageSize: 20,
 }, reviewer);
 assert.equal(reviewerList.data?.pagination.total, 3, '审核台全部范围必须从数据库看到所有部门的待审核订单');
+const listedOldRecord = reviewerList.data?.items.find((item) => item.id === oldRecord.id);
+assert.equal(listedOldRecord?.paymentVoucherPreview, undefined);
+assert.equal(listedOldRecord?.chatEvidencePreview, undefined);
+const oldRecordDetail = await service.get(oldRecord.id, reviewer, 'recoveryOrderApplications');
+assert.equal(oldRecordDetail.data?.paymentVoucherPreview, INLINE_PROOF);
+assert.equal(oldRecordDetail.data?.chatEvidencePreview, INLINE_PROOF);
 
 const unauthorizedReviewList = await service.list({
   scopeDomain: 'recoveryOrderApplications', page: 1, pageSize: 20,
@@ -216,6 +250,33 @@ assert.equal(
   2,
   'recovery order list must honor department data scope',
 );
+const settlementPage = await service.list({
+  scopeDomain: 'recoveryOrders', settlementStatuses: ['待处理'], page: 1, pageSize: 20,
+}, staleReviewer);
+assert.deepEqual(settlementPage.data?.items.map((item) => item.id), [oldRecord.id]);
+const settlementCounts = await service.settlementCounts({ includeDeleted: true }, staleReviewer);
+assert.equal(settlementCounts.data?.total, 1);
+assert.equal(settlementCounts.data?.statusCounts['待处理'], 1);
+const financeList = await service.list({}, finance);
+assert.equal(financeList.code, 0);
+assert.deepEqual(
+  financeList.data?.items.map((item) => item.id).sort(),
+  [oldRecord.id, outsideDepartmentRecord.id].sort(),
+  'finance-only access must be limited to settlement-ready orders',
+);
+financeList.data?.items.forEach((item) => {
+  assert.equal(item.paymentVoucherPreview, undefined);
+  assert.equal(item.chatEvidencePreview, undefined);
+  assert.equal(item.customerPhone, undefined);
+  assert.equal(item.customerWechat, undefined);
+  assert.equal(item.remark, undefined);
+});
+assert.equal(
+  (await service.list({ settlementStatuses: ['待确认'] }, finance)).data?.pagination.total,
+  0,
+  'finance-only status tabs must keep their requested settlement filter',
+);
+assert.equal((await service.settlementCounts({ includeDeleted: true }, finance)).code, 0);
 const staleReviewerAuditList = await service.list({
   scopeDomain: 'recoveryOrderApplications', page: 1, pageSize: 20,
 }, staleReviewer);
@@ -275,3 +336,8 @@ const deleted = await service.softDelete(returnedSource.data!.id, '重复录入'
 assert.equal(deleted.code, 0);
 assert.equal(deleted.data?.deletedBy, reviewer.name);
 assert.equal(deleted.data?.deleteReason, '重复录入');
+assert.equal(
+  (await service.get(returnedSource.data!.id, reviewer, 'recoveryOrderApplications')).code,
+  404,
+  'soft-deleted recovery evidence must not be readable by id',
+);

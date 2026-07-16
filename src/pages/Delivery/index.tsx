@@ -403,6 +403,17 @@ const DeliveryPage: React.FC = () => {
     if (res.code === 0 && res.data) setCustomerDetail(res.data);
   };
 
+  const handleOpenDelivery = async (delivery: Delivery) => {
+    setSelectedDelivery(delivery);
+    const response = await deliveryApi.fetchDeliveryById(delivery.id);
+    if (response.code === 0 && response.data) {
+      setSelectedDelivery((current) => current?.id === delivery.id ? response.data : current);
+    } else {
+      setSelectedDelivery((current) => current?.id === delivery.id ? null : current);
+      await alert(response.message || '交付详情加载失败');
+    }
+  };
+
   const handleDeleteDelivery = async (delivery: Delivery) => {
     if (!canMutateDelivery) return;
     const ok = await confirm(`确认删除交付单「${delivery.orderNo}」吗？删除后不会影响订单和客户资料。`, '删除交付单');
@@ -672,7 +683,7 @@ const DeliveryPage: React.FC = () => {
                 ))}
                 <TableCell align="center" sx={{ position: 'sticky', right: 0, bgcolor: '#fff' }}>
                   <Tooltip title="查看交付">
-                    <IconButton size="small" onClick={() => setSelectedDelivery(delivery)}><VisibilityIcon fontSize="small" /></IconButton>
+                    <IconButton size="small" onClick={() => void handleOpenDelivery(delivery)}><VisibilityIcon fontSize="small" /></IconButton>
                   </Tooltip>
                   {canMutateDelivery && (
                     <>

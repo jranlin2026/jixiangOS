@@ -17,6 +17,7 @@ import {
 } from '../../src/shared/utils/dataVisibility';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { jsonText, queryBusinessRecordPage, visibleJsonCondition } from './businessRecordPageService';
+import { compactOrderApplicationListItem, compactOrderListItem } from '../../src/shared/utils/listPayload';
 
 type OrderQueryPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$queryRaw'>;
 
@@ -229,7 +230,8 @@ export function createOrderQueryService(
         .filter((order): order is Order => Boolean(order && !order.deletedAt))
         .filter((order) => orderIsVisible(order, scope) && matchesOrder(order, filters))
         .sort((left, right) => direction * (timestamp(left.updatedAt || left.createdAt) - timestamp(right.updatedAt || right.createdAt)));
-      return success(paginate(items, filters.page, filters.pageSize));
+      const result = paginate(items, filters.page, filters.pageSize);
+      return success({ ...result, items: result.items.map(compactOrderListItem) });
     },
 
     async getOrder(orderId: string, actor: AuthenticatedUser) {
@@ -255,7 +257,10 @@ export function createOrderQueryService(
         const result = await queryApplicationPage(prisma, filters, scope);
         const page = toPositiveInt(filters.page, 1);
         const pageSize = Math.min(toPositiveInt(filters.pageSize, DEFAULT_PAGE_SIZE), 100);
-        return success({ items: result.items, pagination: { page, pageSize, total: result.total, totalPages: Math.ceil(result.total / pageSize) } });
+        return success({
+          items: result.items.map(compactOrderApplicationListItem),
+          pagination: { page, pageSize, total: result.total, totalPages: Math.ceil(result.total / pageSize) },
+        });
       }
       const rows = await prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDER_APPLICATIONS } });
       const items = (rows as BusinessRecordRow[])
@@ -263,7 +268,8 @@ export function createOrderQueryService(
         .filter((application): application is OrderApplication => Boolean(application))
         .filter((application) => applicationIsVisible(application, scope) && matchesApplication(application, filters))
         .sort((left, right) => timestamp(right.updatedAt || right.createdAt) - timestamp(left.updatedAt || left.createdAt));
-      return success(paginate(items, filters.page, filters.pageSize));
+      const result = paginate(items, filters.page, filters.pageSize);
+      return success({ ...result, items: result.items.map(compactOrderApplicationListItem) });
     },
 
     async listOwnerCandidates(actor: AuthenticatedUser) {

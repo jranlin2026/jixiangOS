@@ -281,6 +281,28 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
     setViewConfig(getDefaultReviewViewConfig());
   };
 
+  const loadApplicationDetail = async (application: OrderApplication) => {
+    const response = await orderReviewApi.fetchOrderApplicationById(application.id);
+    if (response.code === 0 && response.data) return response.data;
+    await alert(response.message || '订单申请详情加载失败');
+    return null;
+  };
+
+  const openApplicationDetail = async (application: OrderApplication) => {
+    setDetailApplication(application);
+    const detail = await loadApplicationDetail(application);
+    if (!detail) {
+      setDetailApplication((current) => current?.id === application.id ? null : current);
+      return;
+    }
+    setDetailApplication((current) => current?.id === application.id ? detail : current);
+  };
+
+  const openApplicationEdit = async (application: OrderApplication) => {
+    const detail = await loadApplicationDetail(application);
+    if (detail) setEditingApplication(detail);
+  };
+
   const openApproveDialog = (application: OrderApplication) => {
     setReviewAction({ type: 'approve', application });
     setReviewReason('');
@@ -449,7 +471,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
           <Button
             variant="text"
             size="small"
-            onClick={() => setDetailApplication(application)}
+            onClick={() => void openApplicationDetail(application)}
             sx={{ px: 0, minWidth: 0, justifyContent: 'flex-start', textTransform: 'none', fontWeight: 700 }}
           >
             {application.applicationNo}
@@ -625,7 +647,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                       )}
                       {canResubmit && (
                         <Tooltip title="修改提交">
-                          <IconButton aria-label="修改提交" size="small" color="primary" onClick={() => setEditingApplication(application)}>
+                          <IconButton aria-label="修改提交" size="small" color="primary" onClick={() => void openApplicationEdit(application)}>
                             <EditIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>

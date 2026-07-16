@@ -6,11 +6,12 @@ import { buildDataVisibilityScopeForUser, type DataVisibilityScope } from '../..
 import { PERMISSION_KEYS, canReviewRecoveryOrders, hasPermission } from '../../src/shared/utils/permissions';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Department } from '../../src/types/department';
-import type { RecoveryOrder, RecoveryOrderFilters, RecoveryOrderInput } from '../../src/types/recoveryOrder';
+import type { RecoveryOrder, RecoveryOrderFilters, RecoveryOrderInput, RecoverySettlementCounts } from '../../src/types/recoveryOrder';
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { jsonText, queryBusinessRecordPage, visibleJsonCondition } from './businessRecordPageService';
+import { compactRecoveryOrderListItem, compactRecoverySettlementListItem } from '../../src/shared/utils/listPayload';
 
 type RecoveryCommandPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$transaction' | '$queryRaw'>;
 type Directory = { users: User[]; roles: Role[]; departments: Department[] };
@@ -114,6 +115,13 @@ function timestamp(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function recoverySettlementStatus(order: RecoveryOrder): string {
+  const raw = String(order.settlementStatus || '');
+  if (raw === '待分账') return '待处理';
+  if (raw === '已分账') return '待发放';
+  return raw || (order.status === '已分账' ? '待发放' : order.status === '待分账' ? '待处理' : '未分账');
+}
+
 function matchesRecoveryOrder(order: RecoveryOrder, filters: RecoveryOrderFilters): boolean {
   if (!filters.includeDeleted && order.deletedAt) return false;
   const search = cleanText(filters.search).toLocaleLowerCase();
@@ -128,7 +136,9 @@ function matchesRecoveryOrder(order: RecoveryOrder, filters: RecoveryOrderFilter
   ].some((value) => cleanText(value).toLocaleLowerCase().includes(search))) return false;
   if (filters.statuses?.length && !filters.statuses.includes(order.status)) return false;
   if (!filters.statuses?.length && filters.status && filters.status !== '全部' && order.status !== filters.status) return false;
-  if (filters.settlementStatus && filters.settlementStatus !== '全部' && order.settlementStatus !== filters.settlementStatus) return false;
+  const settlementStatus = recoverySettlementStatus(order);
+  if (filters.settlementStatus && filters.settlementStatus !== '全部' && settlementStatus !== filters.settlementStatus) return false;
+  if (filters.settlementStatuses?.length && !filters.settlementStatuses.includes(settlementStatus as any)) return false;
   if (filters.ownerId && ![order.createdBy, order.recoveryUserId, order.assistUserId].includes(filters.ownerId)) return false;
   return true;
 }
@@ -140,19 +150,29 @@ function recoveryVisible(order: RecoveryOrder, scope: DataVisibilityScope): bool
     : Boolean(order.createdByName && scope.visibleUserNames.includes(order.createdByName));
 }
 
-async function queryRecoveryPage(
-  prisma: RecoveryCommandPrisma,
-  filters: RecoveryOrderFilters,
-  scope: DataVisibilityScope,
-) {
-  const page = toPositiveInt(filters.page, 1);
-  const pageSize = Math.min(toPositiveInt(filters.pageSize, 10), 100);
+function recoverySettlementStatusSql(alias: string): Prisma.Sql {
+  const value = jsonText(alias, '$.settlementStatus');
+  const orderStatus = jsonText(alias, '$.status');
+  return Prisma.sql`CASE
+    WHEN ${value} = '待分账' THEN '待处理'
+    WHEN ${value} = '已分账' THEN '待发放'
+    WHEN COALESCE(${value}, '') <> '' THEN ${value}
+    WHEN ${orderStatus} = '待分账' THEN '待处理'
+    WHEN ${orderStatus} = '已分账' THEN '待发放'
+    ELSE '未分账'
+  END`;
+}
+
+function recoverySqlConditions(filters: RecoveryOrderFilters, scope: DataVisibilityScope): Prisma.Sql[] {
   const conditions: Prisma.Sql[] = [Prisma.sql`br.domain = ${STORAGE_KEYS.RECOVERY_ORDERS}`];
   if (!filters.includeDeleted) conditions.push(Prisma.sql`JSON_EXTRACT(br.data, '$.deletedAt') IS NULL`);
   if (filters.statuses?.length) conditions.push(Prisma.sql`br.status IN (${Prisma.join(filters.statuses)})`);
   else if (filters.status && filters.status !== '全部') conditions.push(Prisma.sql`br.status = ${filters.status}`);
   if (filters.settlementStatus && filters.settlementStatus !== '全部') {
-    conditions.push(Prisma.sql`${jsonText('br', '$.settlementStatus')} = ${filters.settlementStatus}`);
+    conditions.push(Prisma.sql`${recoverySettlementStatusSql('br')} = ${filters.settlementStatus}`);
+  }
+  if (filters.settlementStatuses?.length) {
+    conditions.push(Prisma.sql`${recoverySettlementStatusSql('br')} IN (${Prisma.join(filters.settlementStatuses)})`);
   }
   if (filters.ownerId) {
     conditions.push(Prisma.sql`(${jsonText('br', '$.createdBy')} = ${filters.ownerId} OR ${jsonText('br', '$.recoveryUserId')} = ${filters.ownerId} OR ${jsonText('br', '$.assistUserId')} = ${filters.ownerId})`);
@@ -163,12 +183,46 @@ async function queryRecoveryPage(
   const search = cleanText(filters.search).toLocaleLowerCase();
   if (search) {
     const pattern = `%${search}%`;
-    conditions.push(Prisma.sql`(LOWER(br.recordId) LIKE ${pattern} OR LOWER(COALESCE(br.title, '')) LIKE ${pattern} OR LOWER(${jsonText('br', '$.thirdPartyOrderNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.customerPhone')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.customerWechat')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.originalProduct')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.recoveryUserName')}) LIKE ${pattern})`);
+    conditions.push(Prisma.sql`(LOWER(br.recordId) LIKE ${pattern} OR LOWER(COALESCE(br.title, '')) LIKE ${pattern} OR LOWER(${jsonText('br', '$.recoveryNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.thirdPartyOrderNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.customerPhone')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.customerWechat')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.originalProduct')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.recoveryUserName')}) LIKE ${pattern})`);
   }
+  return conditions;
+}
+
+async function queryRecoveryPage(
+  prisma: RecoveryCommandPrisma,
+  filters: RecoveryOrderFilters,
+  scope: DataVisibilityScope,
+) {
+  const page = toPositiveInt(filters.page, 1);
+  const pageSize = Math.min(toPositiveInt(filters.pageSize, 10), 100);
+  const conditions = recoverySqlConditions(filters, scope);
   return queryBusinessRecordPage<RecoveryOrder>(prisma, {
     from: 'business_records br', selectId: 'br.id', selectData: 'br.data', conditions,
-    orderBy: 'COALESCE(br.eventAt, br.updatedAt, br.createdAt) DESC', page, pageSize,
+    orderBy: 'br.eventAt DESC, br.createdAt DESC', page, pageSize,
   });
+}
+
+async function queryRecoverySettlementCounts(
+  prisma: RecoveryCommandPrisma,
+  filters: Pick<RecoveryOrderFilters, 'search' | 'includeDeleted'>,
+  scope: DataVisibilityScope,
+): Promise<RecoverySettlementCounts> {
+  const conditions = recoverySqlConditions(filters, scope);
+  const where = Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
+  const statusExpression = recoverySettlementStatusSql('br');
+  const rows = await prisma.$queryRaw<Array<{ settlementStatus: string; count: bigint | number }>>(
+    Prisma.sql`SELECT ${statusExpression} AS settlementStatus, COUNT(*) AS count
+      FROM business_records br ${where}
+      GROUP BY settlementStatus`,
+  );
+  const statusCounts: Record<string, number> = { 待处理: 0, 待确认: 0, 待发放: 0, 已发放: 0, 已撤回: 0 };
+  rows.forEach((row) => {
+    if (row.settlementStatus in statusCounts) statusCounts[row.settlementStatus] = Number(row.count);
+  });
+  return {
+    total: Object.values(statusCounts).reduce((sum, count) => sum + count, 0),
+    statusCounts,
+  };
 }
 
 async function lockRecoveryOrder(
@@ -284,10 +338,14 @@ export function createRecoveryOrderCommandService(
       actor: AuthenticatedUser,
     ): Promise<ApiResponse<RecoveryOrderPage | null>> {
       const scopeDomain = filters.scopeDomain || 'recoveryOrders';
-      const canRead = scopeDomain === 'recoveryOrderApplications'
+      const hasRecoveryRead = scopeDomain === 'recoveryOrderApplications'
         ? hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, 'read')
         : hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY, 'read')
           || hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, 'read');
+      const financeOnly = scopeDomain === 'recoveryOrders'
+        && !hasRecoveryRead
+        && hasPermission(actor, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'read');
+      const canRead = hasRecoveryRead || financeOnly;
       if (!canRead) {
         return failure<RecoveryOrderPage>(scopeDomain === 'recoveryOrderApplications'
           ? '无权查看售后挽回订单审核列表'
@@ -295,17 +353,106 @@ export function createRecoveryOrderCommandService(
       }
       const directory = await loadDirectory(prisma);
       const scope = recoveryScope(directory, actor, scopeDomain);
+      const financeAllowedStatuses = ['待处理', '待确认', '待发放', '已发放', '已撤回'] as const;
+      const requestedFinanceStatuses = filters.settlementStatuses?.length
+        ? filters.settlementStatuses
+        : filters.settlementStatus && filters.settlementStatus !== '全部'
+          ? [filters.settlementStatus]
+          : financeAllowedStatuses;
+      const financeSettlementStatuses = requestedFinanceStatuses.filter((status) => (
+        financeAllowedStatuses.includes(status as typeof financeAllowedStatuses[number])
+      ));
+      const effectiveFilters: RecoveryOrderFilters = financeOnly
+        ? { ...filters, settlementStatus: undefined, settlementStatuses: financeSettlementStatuses }
+        : filters;
+      const compactListItem = financeOnly ? compactRecoverySettlementListItem : compactRecoveryOrderListItem;
+      if (financeOnly && !financeSettlementStatuses.length) {
+        const page = toPositiveInt(effectiveFilters.page, 1);
+        const pageSize = Math.min(toPositiveInt(effectiveFilters.pageSize, 10), 100);
+        return success({ items: [], pagination: { page, pageSize, total: 0, totalPages: 0 } });
+      }
+      if (scope.unrestricted && typeof prisma.$queryRaw === 'function') {
+        const result = await queryRecoveryPage(prisma, effectiveFilters, scope);
+        const page = toPositiveInt(effectiveFilters.page, 1);
+        const pageSize = Math.min(toPositiveInt(effectiveFilters.pageSize, 10), 100);
+        return success({
+          items: result.items.map(compactListItem),
+          pagination: { page, pageSize, total: result.total, totalPages: Math.ceil(result.total / pageSize) },
+        });
+      }
       const rows = await prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } });
       const items = rows
         .map((row) => parseObject<RecoveryOrder>(row.data, '售后挽回订单'))
-        .filter((order) => recoveryVisible(order, scope) && matchesRecoveryOrder(order, filters))
+        .filter((order) => recoveryVisible(order, scope) && matchesRecoveryOrder(order, effectiveFilters))
         .sort((left, right) => timestamp(right.updatedAt || right.createdAt) - timestamp(left.updatedAt || left.createdAt));
       const page = toPositiveInt(filters.page, 1);
       const pageSize = Math.min(toPositiveInt(filters.pageSize, 10), 100);
       const total = items.length;
       return success({
-        items: items.slice((page - 1) * pageSize, page * pageSize),
+        items: items.slice((page - 1) * pageSize, page * pageSize).map(compactListItem),
         pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
+      });
+    },
+
+    async get(
+      orderId: string,
+      actor: AuthenticatedUser,
+      scopeDomain: NonNullable<RecoveryOrderFilters['scopeDomain']> = 'recoveryOrders',
+    ): Promise<ApiResponse<RecoveryOrder | null>> {
+      const id = cleanText(orderId);
+      if (!id) return failure<RecoveryOrder>('售后挽回订单ID不能为空', 400);
+      const canRead = scopeDomain === 'recoveryOrderApplications'
+        ? hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, 'read')
+        : hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY, 'read')
+          || hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, 'read');
+      if (!canRead) return failure<RecoveryOrder>('无权查看该售后挽回订单', 403);
+      const [row, directory] = await Promise.all([
+        prisma.businessRecord.findUnique({
+          where: { domain_recordId: { domain: STORAGE_KEYS.RECOVERY_ORDERS, recordId: id } },
+        }),
+        loadDirectory(prisma),
+      ]);
+      if (!row) return failure<RecoveryOrder>('售后挽回订单不存在', 404);
+      const order = parseObject<RecoveryOrder>(row.data, '售后挽回订单');
+      if (order.deletedAt) return failure<RecoveryOrder>('售后挽回订单不存在', 404);
+      if (!recoveryVisible(order, recoveryScope(directory, actor, scopeDomain))) {
+        return failure<RecoveryOrder>('无权查看该售后挽回订单', 403);
+      }
+      return success(order);
+    },
+
+    async settlementCounts(
+      filters: Pick<RecoveryOrderFilters, 'search' | 'includeDeleted'>,
+      actor: AuthenticatedUser,
+    ): Promise<ApiResponse<RecoverySettlementCounts | null>> {
+      const canRead = hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY, 'read')
+        || hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, 'read')
+        || hasPermission(actor, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'read');
+      if (!canRead) return failure<RecoverySettlementCounts>('无权查看售后挽回分账统计', 403);
+      const directory = await loadDirectory(prisma);
+      const scope = recoveryScope(directory, actor, 'recoveryOrders');
+      if (scope.unrestricted && typeof prisma.$queryRaw === 'function') {
+        return success(await queryRecoverySettlementCounts(prisma, filters, scope));
+      }
+      const rows = await prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } });
+      const readyStatuses = new Set(['待处理', '待确认', '待发放', '已发放', '已撤回']);
+      const statusCounts: Record<string, number> = {
+        待处理: 0,
+        待确认: 0,
+        待发放: 0,
+        已发放: 0,
+        已撤回: 0,
+      };
+      rows
+        .map((row) => parseObject<RecoveryOrder>(row.data, '售后挽回订单'))
+        .filter((order) => recoveryVisible(order, scope) && matchesRecoveryOrder(order, filters))
+        .forEach((order) => {
+          const settlementStatus = recoverySettlementStatus(order);
+          if (readyStatuses.has(settlementStatus)) statusCounts[settlementStatus] += 1;
+        });
+      return success({
+        total: Object.values(statusCounts).reduce((sum, count) => sum + count, 0),
+        statusCounts,
       });
     },
 

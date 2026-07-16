@@ -258,30 +258,52 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
     setOpen(true);
   };
 
-  const openEdit = (row: RecoveryOrder) => {
+  const loadRecoveryDetail = async (row: RecoveryOrder) => {
+    const response = await recoveryOrderApi.fetchRecoveryOrderById(
+      row.id,
+      mode === 'review' ? 'recoveryOrderApplications' : 'recoveryOrders',
+    );
+    if (response.code === 0 && response.data) return response.data;
+    showErrorDialog(response.message || '售后挽回订单详情加载失败');
+    return null;
+  };
+
+  const openDetail = async (row: RecoveryOrder) => {
+    setDetailOrder(row);
+    const detail = await loadRecoveryDetail(row);
+    if (!detail) {
+      setDetailOrder((current) => current?.id === row.id ? null : current);
+      return;
+    }
+    setDetailOrder((current) => current?.id === row.id ? detail : current);
+  };
+
+  const openEdit = async (row: RecoveryOrder) => {
     if (isRecoveryOrderLocked(row)) {
       showErrorDialog('已分账的售后挽回订单不能修改');
       return;
     }
     setMessage(null);
-    setEditingOrder(row);
+    const detail = await loadRecoveryDetail(row);
+    if (!detail) return;
+    setEditingOrder(detail);
     setForm({
-      customerName: row.customerName || '',
-      customerPhone: row.customerPhone || '',
-      customerWechat: row.customerWechat || '',
-      thirdPartyOrderNo: row.thirdPartyOrderNo || '',
-      sourcePlatform: row.sourcePlatform || '',
-      originalProduct: row.originalProduct || '',
-      originalAmount: String(row.originalAmount || ''),
-      recoveryAmount: String(row.recoveryAmount || ''),
-      paymentVoucher: row.paymentVoucher || '',
-      paymentVoucherName: row.paymentVoucherName || row.paymentVoucher || '',
-      paymentVoucherPreview: row.paymentVoucherPreview || '',
-      chatEvidence: row.chatEvidence || '',
-      chatEvidenceName: row.chatEvidenceName || row.chatEvidence || '',
-      chatEvidencePreview: row.chatEvidencePreview || '',
-      recoveryUserId: row.recoveryUserId || '',
-      remark: row.remark || '',
+      customerName: detail.customerName || '',
+      customerPhone: detail.customerPhone || '',
+      customerWechat: detail.customerWechat || '',
+      thirdPartyOrderNo: detail.thirdPartyOrderNo || '',
+      sourcePlatform: detail.sourcePlatform || '',
+      originalProduct: detail.originalProduct || '',
+      originalAmount: String(detail.originalAmount || ''),
+      recoveryAmount: String(detail.recoveryAmount || ''),
+      paymentVoucher: detail.paymentVoucher || '',
+      paymentVoucherName: detail.paymentVoucherName || detail.paymentVoucher || '',
+      paymentVoucherPreview: detail.paymentVoucherPreview || '',
+      chatEvidence: detail.chatEvidence || '',
+      chatEvidenceName: detail.chatEvidenceName || detail.chatEvidence || '',
+      chatEvidencePreview: detail.chatEvidencePreview || '',
+      recoveryUserId: detail.recoveryUserId || '',
+      remark: detail.remark || '',
     });
     setOpen(true);
   };
@@ -435,7 +457,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
             component="button"
             type="button"
             variant="body2"
-            onClick={() => setDetailOrder(row)}
+            onClick={() => void openDetail(row)}
             sx={{
               p: 0,
               border: 0,
@@ -549,7 +571,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
             sx={{ minWidth: 80, flexWrap: 'nowrap', whiteSpace: 'nowrap' }}
           >
             <Tooltip title="查看">
-              <IconButton size="small" sx={{ color: shell.blue }} onClick={() => setDetailOrder(row)}>
+              <IconButton size="small" sx={{ color: shell.blue }} onClick={() => void openDetail(row)}>
                 <VisibilityIcon fontSize="small" />
               </IconButton>
             </Tooltip>

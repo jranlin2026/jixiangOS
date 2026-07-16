@@ -812,12 +812,30 @@ app.get('/api/recovery-orders', requireStorageAccess, async (req: AuthenticatedR
     status: queryParam(req.query.status) as RecoveryOrderFilters['status'] || undefined,
     statuses: statuses as RecoveryOrderFilters['statuses'],
     settlementStatus: queryParam(req.query.settlementStatus) as RecoveryOrderFilters['settlementStatus'] || undefined,
+    settlementStatuses: queryParam(req.query.settlementStatuses).split(',').filter(Boolean) as RecoveryOrderFilters['settlementStatuses'],
     ownerId: queryParam(req.query.ownerId) || undefined,
     includeDeleted: queryParam(req.query.includeDeleted) === 'true',
     scopeDomain: queryParam(req.query.scopeDomain) as RecoveryOrderFilters['scopeDomain'] || undefined,
     page: Number(queryParam(req.query.page)) || undefined,
     pageSize: Number(queryParam(req.query.pageSize)) || undefined,
   }, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.get('/api/recovery-orders/settlement-counts', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await recoveryOrderCommandService.settlementCounts({
+    search: queryParam(req.query.search) || undefined,
+    includeDeleted: queryParam(req.query.includeDeleted) === 'true',
+  }, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.get('/api/recovery-orders/:id', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await recoveryOrderCommandService.get(
+    routeParam(req.params.id),
+    req.currentUser!,
+    queryParam(req.query.scopeDomain) as RecoveryOrderFilters['scopeDomain'] || undefined,
+  );
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 

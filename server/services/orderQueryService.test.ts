@@ -5,6 +5,7 @@ import type { Order, OrderApplication } from '../../src/types/order';
 import { createOrderQueryService } from './orderQueryService';
 
 const now = '2026-07-12T15:00:00.000Z';
+const inlineProof = `data:image/png;base64,${'A'.repeat(10_000)}`;
 const sales: AuthenticatedUser = {
   id: 'user-sales', name: '销售A', account: 'sales', email: 'sales@example.com', phone: '',
   role: '销售顾问', roleId: 'role-sales', departmentId: 'dept-sales', isActive: true,
@@ -60,13 +61,23 @@ const departments = [
 ];
 
 const records = [
-  order('order-self', sales.id, sales.name),
+  order('order-self', sales.id, sales.name, {
+    dealEvidencePreview: inlineProof,
+    payments: [{ id: 'payment-self', amount: 899, paymentMethod: '对公转账', paidAt: now, voucherPreview: inlineProof }],
+  }),
   order('order-legacy-self', undefined, sales.name),
   order('order-other', 'user-other', '销售B'),
   order('order-deleted', sales.id, sales.name, { deletedAt: now }),
 ];
 const applications = [
-  application('application-self', sales.id, sales.name),
+  {
+    ...application('application-self', sales.id, sales.name),
+    orderData: {
+      ...application('application-self', sales.id, sales.name).orderData,
+      dealEvidencePreview: inlineProof,
+      payments: [{ id: 'payment-application', amount: 899, paymentMethod: '对公转账', paidAt: now, voucherPreview: inlineProof }],
+    },
+  },
   application('application-legacy-self', undefined, sales.name),
   application('application-other', 'user-other', '销售B'),
 ];
@@ -97,6 +108,9 @@ const salesOrders = await service.listOrders({ page: 1, pageSize: 10 }, sales);
 assert.equal(salesOrders.code, 0);
 assert.deepEqual(salesOrders.data?.items.map((item) => item.id).sort(), ['order-legacy-self', 'order-self']);
 assert.equal(salesOrders.data?.pagination.total, 2);
+const listedOrder = salesOrders.data?.items.find((item) => item.id === 'order-self');
+assert.equal(listedOrder?.dealEvidencePreview, undefined);
+assert.equal(listedOrder?.payments[0].voucherPreview, undefined);
 
 const financeOrders = await service.listOrders({ search: 'order-other', page: 1, pageSize: 10 }, finance);
 assert.deepEqual(financeOrders.data?.items.map((item) => item.id), ['order-other']);
@@ -104,7 +118,9 @@ assert.deepEqual(financeOrders.data?.items.map((item) => item.id), ['order-other
 const forbiddenOrder = await service.getOrder('order-other', sales);
 assert.equal(forbiddenOrder.code, 403);
 assert.equal(forbiddenOrder.data, null);
-assert.equal((await service.getOrder('order-self', sales)).data?.id, 'order-self');
+const orderDetail = (await service.getOrder('order-self', sales)).data;
+assert.equal(orderDetail?.dealEvidencePreview, inlineProof, 'detail keeps the original evidence');
+assert.equal(orderDetail?.payments[0].voucherPreview, inlineProof);
 
 const salesStats = await service.getOrderStats(sales);
 assert.equal(salesStats.code, 0);
@@ -124,6 +140,9 @@ assert.deepEqual(
   salesApplications.data?.items.map((item) => item.id).sort(),
   ['application-legacy-self', 'application-self'],
 );
+const listedApplication = salesApplications.data?.items.find((item) => item.id === 'application-self');
+assert.equal(listedApplication?.orderData.dealEvidencePreview, undefined);
+assert.equal(listedApplication?.orderData.payments[0].voucherPreview, undefined);
 assert.equal((await service.getApplication('application-other', sales)).code, 403);
-assert.equal((await service.getApplication('application-self', sales)).data?.id, 'application-self');
+assert.equal((await service.getApplication('application-self', sales)).data?.orderData.dealEvidencePreview, inlineProof);
 assert.equal((await service.listApplications({ page: 1, pageSize: 1 }, finance)).data?.pagination.total, 3);

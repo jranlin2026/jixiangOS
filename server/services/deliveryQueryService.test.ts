@@ -6,6 +6,7 @@ import type { Order } from '../../src/types/order';
 import { createDeliveryQueryService } from './deliveryQueryService';
 
 const now = '2026-07-15T04:00:00.000Z';
+const inlineAttachment = `data:image/png;base64,${'A'.repeat(10_000)}`;
 const actor: AuthenticatedUser = {
   id: 'user-delivery', name: '交付A', account: 'delivery', email: '', phone: '', role: '交付工程师',
   roleId: 'role-delivery', departmentId: 'dept-delivery', isActive: true,
@@ -29,7 +30,9 @@ function sourceDelivery(order: Order, ownerId: string): Delivery {
     id: `delivery-${order.id}`, orderId: order.id, orderNo: order.orderNo, customerId: order.customerId,
     customerName: order.customerName, productName: order.productName, productType: order.productLevel,
     currentStage: stages[0], stages, tasks: stages.map((title, index) => ({
-      id: `task-${index}`, title, description: title, records: [],
+      id: `task-${index}`, title, description: title,
+      records: index === 0 ? [{ id: 'record-1', content: 'result', createdBy: actor.name, createdAt: now, attachments: [inlineAttachment] }] : [],
+      attachments: index === 0 ? [{ id: 'attachment-1', name: 'proof.png', url: inlineAttachment, uploadedBy: actor.name, uploadedAt: now }] : undefined,
       status: index === 0 || index === 3 ? '已完成' : '待开始',
       completedAt: index === 0 || index === 3 ? now : undefined,
     })), owner: ownerId === actor.id ? actor.name : '交付B',
@@ -74,8 +77,12 @@ const list = await service.list({ status: '全部', page: 1, pageSize: 10 }, act
 assert.deepEqual(list.data?.items.map((item) => item.id), ['delivery-own']);
 assert.equal(list.data?.total, 1);
 assert.equal(list.data?.items[0].currentStage, 'step-4', 'legacy rows derive the last checked step on read');
+assert.equal(list.data?.items[0].tasks[0].attachments?.[0].url, undefined);
+assert.deepEqual(list.data?.items[0].tasks[0].records[0].attachments, []);
 assert.equal((await service.get('delivery-other', actor)).code, 403);
-assert.equal((await service.get('delivery-own', actor)).data?.currentStage, 'step-4');
+const deliveryDetail = (await service.get('delivery-own', actor)).data;
+assert.equal(deliveryDetail?.currentStage, 'step-4');
+assert.equal(deliveryDetail?.tasks[0].attachments?.[0].url, inlineAttachment);
 const stats = await service.stats({}, actor);
 assert.equal(stats.data?.total, 1);
 assert.deepEqual(stats.data?.stageCounts, [{ stage: 'step-4', count: 1 }]);
