@@ -6,6 +6,7 @@ export async function queryBusinessRecordPage<T>(
   prisma: RawPagePrisma,
   options: {
     from: string;
+    pageFrom?: string;
     selectId: string;
     selectData: string;
     conditions: Prisma.Sql[];
@@ -18,6 +19,7 @@ export async function queryBusinessRecordPage<T>(
     ? Prisma.sql`WHERE ${Prisma.join(options.conditions, ' AND ')}`
     : Prisma.empty;
   const from = Prisma.raw(options.from);
+  const pageFrom = Prisma.raw(options.pageFrom || options.from);
   const selectId = Prisma.raw(options.selectId);
   const selectData = Prisma.raw(options.selectData);
   const orderBy = Prisma.raw(options.orderBy);
@@ -27,7 +29,7 @@ export async function queryBusinessRecordPage<T>(
       Prisma.sql`SELECT COUNT(*) AS total FROM ${from} ${where}`,
     ),
     prisma.$queryRaw<Array<{ id: string }>>(
-      Prisma.sql`SELECT ${selectId} AS id FROM ${from} ${where} ORDER BY ${orderBy} LIMIT ${options.pageSize} OFFSET ${offset}`,
+      Prisma.sql`SELECT ${selectId} AS id FROM ${pageFrom} ${where} ORDER BY ${orderBy} LIMIT ${options.pageSize} OFFSET ${offset}`,
     ),
   ]);
   if (!pageRows.length) return { items: [], total: Number(counts[0]?.total || 0) };

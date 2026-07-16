@@ -197,7 +197,9 @@ async function queryRecoveryPage(
   const pageSize = Math.min(toPositiveInt(filters.pageSize, 10), 100);
   const conditions = recoverySqlConditions(filters, scope);
   return queryBusinessRecordPage<RecoveryOrder>(prisma, {
-    from: 'business_records br', selectId: 'br.id', selectData: 'br.data', conditions,
+    from: 'business_records br',
+    pageFrom: 'business_records br FORCE INDEX (business_records_domain_eventAt_createdAt_idx)',
+    selectId: 'br.id', selectData: 'br.data', conditions,
     orderBy: 'br.eventAt DESC, br.createdAt DESC', page, pageSize,
   });
 }

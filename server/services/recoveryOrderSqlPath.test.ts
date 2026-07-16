@@ -111,6 +111,11 @@ const prisma = {
     const sql = query.strings?.join('?') || '';
     sqlStatements.push(sql);
     sqlValues.push(...(query.values || []));
+    if (sql.includes('AS id FROM') && sql.includes('ORDER BY') && !sql.includes('FORCE INDEX')) {
+      const error = new Error('Out of sort memory, consider increasing server sort buffer size');
+      Object.assign(error, { code: '1038' });
+      throw error;
+    }
     if (sql.includes('GROUP BY settlementStatus')) {
       return [{ settlementStatus: '待发放', count: 1 }];
     }
