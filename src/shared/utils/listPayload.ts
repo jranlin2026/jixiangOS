@@ -1,6 +1,20 @@
 import type { Delivery, DeliveryAttachment } from '../../types/delivery';
 import type { Order, OrderApplication, OrderPayment } from '../../types/order';
 import type { RecoveryOrder } from '../../types/recoveryOrder';
+import type { BusinessAttachment } from '../../types/businessAttachment';
+
+function compactBusinessAttachment(attachment: BusinessAttachment): BusinessAttachment {
+  return {
+    id: attachment.id,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    size: attachment.size,
+    category: attachment.category,
+    uploadedById: attachment.uploadedById,
+    uploadedByName: attachment.uploadedByName,
+    uploadedAt: attachment.uploadedAt,
+  };
+}
 
 function withoutInlinePayload(value?: string): string | undefined {
   const normalized = String(value || '').trim().toLocaleLowerCase();
@@ -8,13 +22,14 @@ function withoutInlinePayload(value?: string): string | undefined {
 }
 
 function compactPayment(payment: OrderPayment): OrderPayment {
-  return { ...payment, voucherPreview: withoutInlinePayload(payment.voucherPreview) };
+  return { ...payment, voucherPreview: withoutInlinePayload(payment.voucherPreview), attachments: payment.attachments?.map(compactBusinessAttachment) };
 }
 
 export function compactOrderListItem(order: Order): Order {
   return {
     ...order,
     dealEvidencePreview: withoutInlinePayload(order.dealEvidencePreview),
+    dealEvidenceAttachments: order.dealEvidenceAttachments?.map(compactBusinessAttachment),
     payments: (order.payments || []).map(compactPayment),
   };
 }
@@ -31,6 +46,8 @@ export function compactRecoveryOrderListItem(order: RecoveryOrder): RecoveryOrde
     ...order,
     paymentVoucherPreview: withoutInlinePayload(order.paymentVoucherPreview),
     chatEvidencePreview: withoutInlinePayload(order.chatEvidencePreview),
+    paymentAttachments: order.paymentAttachments?.map(compactBusinessAttachment),
+    chatAttachments: order.chatAttachments?.map(compactBusinessAttachment),
   };
 }
 

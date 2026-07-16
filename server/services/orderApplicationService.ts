@@ -131,7 +131,7 @@ function validateAttachmentList(
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new OrderApprovalError(400, `${options.label}必须是数组`);
   if (value.length > options.max) throw new OrderApprovalError(400, `${options.label}最多上传 ${options.max} 张`);
-  value.forEach((item) => {
+  return value.map((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) {
       throw new OrderApprovalError(400, `${options.label}数据无效`);
     }
@@ -139,8 +139,13 @@ function validateAttachmentList(
     if (!String(attachment.id || '').trim() || attachment.category !== options.category || !String(attachment.mimeType || '').startsWith('image/')) {
       throw new OrderApprovalError(400, `${options.label}数据无效`);
     }
+    return {
+      id: String(attachment.id), name: String(attachment.name || ''), mimeType: String(attachment.mimeType),
+      size: Number(attachment.size) || 0, category: attachment.category,
+      uploadedById: String(attachment.uploadedById || ''), uploadedByName: String(attachment.uploadedByName || ''),
+      uploadedAt: String(attachment.uploadedAt || ''),
+    };
   });
-  return value as BusinessAttachment[];
 }
 
 function hashSuffix(value: string, length = 16): string {

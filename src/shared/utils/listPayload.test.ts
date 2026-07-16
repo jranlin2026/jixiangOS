@@ -14,7 +14,7 @@ const order = {
   id: 'order-1',
   dealEvidencePreview: inline,
   payments: [
-    { id: 'payment-1', voucherPreview: inline },
+    { id: 'payment-1', voucherPreview: inline, attachments: [{ id: 'proof', name: 'proof.png', mimeType: 'image/png', size: 1, category: 'order-payment-proof', uploadedById: 'u1', uploadedByName: 'A', uploadedAt: '2026-01-01', storageName: 'secret.png', buffer: inline }] },
     { id: 'payment-2', voucherPreview: remote },
   ],
 } as any;
@@ -22,6 +22,8 @@ const compactOrder = compactOrderListItem(order);
 assert.equal(compactOrder.dealEvidencePreview, undefined);
 assert.equal(compactOrder.payments[0].voucherPreview, undefined);
 assert.equal(compactOrder.payments[1].voucherPreview, remote);
+assert.equal((compactOrder.payments[0].attachments?.[0] as any).storageName, undefined);
+assert.equal((compactOrder.payments[0].attachments?.[0] as any).buffer, undefined);
 assert.equal(order.dealEvidencePreview, inline, 'list projection must not mutate detail data');
 assert.ok(JSON.stringify(compactOrder).length < JSON.stringify(order).length / 10);
 
@@ -37,10 +39,12 @@ const recovery = {
   remark: 'private remark',
   paymentVoucherPreview: inline,
   chatEvidencePreview: inline,
+  paymentAttachments: [{ id: 'proof', name: 'proof.png', mimeType: 'image/png', size: 1, category: 'recovery-payment-proof', uploadedById: 'u1', uploadedByName: 'A', uploadedAt: '2026-01-01', storageName: 'secret.png' }],
 } as any;
 const compactRecovery = compactRecoveryOrderListItem(recovery);
 assert.equal(compactRecovery.paymentVoucherPreview, undefined);
 assert.equal(compactRecovery.chatEvidencePreview, undefined);
+assert.equal((compactRecovery.paymentAttachments?.[0] as any).storageName, undefined);
 assert.equal(recovery.paymentVoucherPreview, inline);
 assert.ok(JSON.stringify(compactRecovery).length < JSON.stringify(recovery).length / 10);
 const compactSettlement = compactRecoverySettlementListItem(recovery);

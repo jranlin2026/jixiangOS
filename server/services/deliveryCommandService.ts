@@ -582,11 +582,17 @@ export function createDeliveryCommandService(
           throw new DeliveryCommandError(400, '交付附件最多上传 8 个');
         }
         const attachment: DeliveryAttachment = {
-          ...input,
           id: attachmentId,
           name: cleanAttachmentName(input.name),
+          size: Number(input.size) || 0,
+          fileType: input.fileType ? String(input.fileType) : undefined,
+          mimeType: input.mimeType ? String(input.mimeType) : undefined,
+          category: input.category === 'delivery-task-file' ? input.category : undefined,
+          uploadedById: input.uploadedById ? String(input.uploadedById) : undefined,
+          uploadedByName: input.uploadedByName ? String(input.uploadedByName) : undefined,
           uploadedBy: actor.name,
           uploadedAt: input.uploadedAt || changedAt,
+          remark: input.remark ? String(input.remark) : undefined,
         };
         const tasks = delivery.tasks.map((task, index) => index === taskIndex
           ? { ...task, attachments: [...(task.attachments || []), attachment], updatedAt: changedAt }

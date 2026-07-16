@@ -67,12 +67,19 @@ function validateAttachments(
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new RecoveryCommandError(400, `${label}数据无效`);
   if (value.length > 8) throw new RecoveryCommandError(400, `${label}最多上传 8 张`);
-  value.forEach((attachment) => {
-    if (!attachment || typeof attachment !== 'object' || attachment.category !== category) {
+  return value.map((item) => {
+    const attachment = item as Partial<BusinessAttachment> | null;
+    if (!attachment || typeof attachment !== 'object' || attachment.category !== category
+      || !cleanText(attachment.id) || !cleanText(attachment.mimeType).startsWith('image/')) {
       throw new RecoveryCommandError(400, `${label}数据无效`);
     }
+    return {
+      id: cleanText(attachment.id), name: cleanText(attachment.name), mimeType: cleanText(attachment.mimeType),
+      size: Number(attachment.size) || 0, category,
+      uploadedById: cleanText(attachment.uploadedById), uploadedByName: cleanText(attachment.uploadedByName),
+      uploadedAt: cleanText(attachment.uploadedAt),
+    };
   });
-  return value as BusinessAttachment[];
 }
 
 function amount(value: unknown): number {
