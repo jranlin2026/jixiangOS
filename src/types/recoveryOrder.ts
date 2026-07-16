@@ -25,6 +25,7 @@ export interface RecoveryOrder {
   /** @deprecated 第一版不再做退款流程，保留仅兼容历史数据 */
   refundStatus?: string;
   recoveryAmount: number;
+  recoveryAt?: Timestamp;
   paymentVoucher?: string;
   paymentVoucherName?: string;
   paymentVoucherPreview?: string;
@@ -69,6 +70,7 @@ export interface RecoveryOrderInput {
   /** @deprecated 第一版不再做退款流程，保留仅兼容历史数据 */
   refundStatus?: string;
   recoveryAmount: number;
+  recoveryAt?: Timestamp;
   paymentVoucher?: string;
   paymentVoucherName?: string;
   paymentVoucherPreview?: string;

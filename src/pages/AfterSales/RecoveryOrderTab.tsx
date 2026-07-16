@@ -27,7 +27,6 @@ import TablePagination from '../../shared/components/TablePagination';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditIcon from '@mui/icons-material/Edit';
 import HistoryIcon from '@mui/icons-material/History';
-import CloseIcon from '@mui/icons-material/Close';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ReplayIcon from '@mui/icons-material/Replay';
 import BlockIcon from '@mui/icons-material/Block';
@@ -61,6 +60,12 @@ const shell = {
   red: '#dc2626',
 };
 
+function toDateTimeInputValue(value: Date | string = new Date()): string {
+  const date = value instanceof Date ? value : new Date(value);
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  return new Date(safeDate.getTime() - safeDate.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
+
 const emptyForm = {
   customerName: '',
   customerPhone: '',
@@ -74,6 +79,7 @@ const emptyForm = {
   originalProduct: '',
   originalAmount: '',
   recoveryAmount: '',
+  recoveryAt: toDateTimeInputValue(),
   paymentVoucher: '',
   paymentVoucherName: '',
   paymentVoucherPreview: '',
@@ -269,7 +275,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
     const self = currentUser
       ? activeUsers.find((user) => user.id === currentUser.id)
       : undefined;
-    setForm({ ...emptyForm, recoveryUserId: self?.id || currentUser?.id || '' });
+    setForm({ ...emptyForm, recoveryAt: toDateTimeInputValue(), recoveryUserId: self?.id || currentUser?.id || '' });
     setOpen(true);
   };
 
@@ -315,6 +321,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       originalProduct: detail.originalProduct || '',
       originalAmount: String(detail.originalAmount || ''),
       recoveryAmount: String(detail.recoveryAmount || ''),
+      recoveryAt: toDateTimeInputValue(detail.recoveryAt || detail.createdAt),
       paymentVoucher: detail.paymentVoucher || '',
       paymentVoucherName: detail.paymentVoucherName || detail.paymentVoucher || '',
       paymentVoucherPreview: detail.paymentVoucherPreview || '',
@@ -338,38 +345,6 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
     }));
   };
 
-  const handleAttachmentFile = (
-    file: File | undefined,
-    nameField: 'paymentVoucherName' | 'chatEvidenceName',
-    previewField: 'paymentVoucherPreview' | 'chatEvidencePreview',
-    valueField: 'paymentVoucher' | 'chatEvidence',
-  ) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setForm((prev) => ({
-        ...prev,
-        [nameField]: file.name,
-        [previewField]: String(reader.result || ''),
-        [valueField]: file.name,
-      }));
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const clearAttachmentFile = (
-    nameField: 'paymentVoucherName' | 'chatEvidenceName',
-    previewField: 'paymentVoucherPreview' | 'chatEvidencePreview',
-    valueField: 'paymentVoucher' | 'chatEvidence',
-  ) => {
-    setForm((prev) => ({
-      ...prev,
-      [nameField]: '',
-      [previewField]: '',
-      [valueField]: '',
-    }));
-  };
-
   const handleCreate = async () => {
     if (!currentUser) return;
     const recoveryUser = activeUsers.find((user) => user.id === form.recoveryUserId);
@@ -386,6 +361,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       originalProduct: form.originalProduct,
       originalAmount: Number(form.originalAmount) || 0,
       recoveryAmount: Number(form.recoveryAmount) || 0,
+      recoveryAt: form.recoveryAt ? new Date(form.recoveryAt).toISOString() : undefined,
       paymentVoucher: form.paymentVoucher,
       paymentVoucherName: form.paymentVoucherName,
       paymentVoucherPreview: form.paymentVoucherPreview,
@@ -642,93 +618,6 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
     }
   };
 
-  const renderAttachmentUpload = ({
-    title,
-    description,
-    nameField,
-    previewField,
-    valueField,
-    accent,
-  }: {
-    title: string;
-    description: string;
-    nameField: 'paymentVoucherName' | 'chatEvidenceName';
-    previewField: 'paymentVoucherPreview' | 'chatEvidencePreview';
-    valueField: 'paymentVoucher' | 'chatEvidence';
-    accent: string;
-  }) => {
-    const fileName = form[nameField];
-    const preview = form[previewField];
-    return (
-      <Box
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={(event) => {
-          event.preventDefault();
-          handleAttachmentFile(event.dataTransfer.files?.[0], nameField, previewField, valueField);
-        }}
-        sx={{
-          gridColumn: { md: '1 / -1' },
-          border: `1px dashed ${accent}`,
-          bgcolor: '#f8fbff',
-          borderRadius: 1,
-          p: 1.5,
-          display: 'grid',
-          gridTemplateColumns: { xs: '1fr', sm: '1fr auto' },
-          gap: 1.5,
-          alignItems: 'center',
-        }}
-      >
-        <Box>
-          <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.5 }}>{title}</Typography>
-          <Typography variant="body2" sx={{ color: shell.muted }}>{description}</Typography>
-          {fileName && (
-            <Typography variant="body2" sx={{ mt: 1, color: shell.blue, fontWeight: 700 }}>{fileName}</Typography>
-          )}
-        </Box>
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-          {preview && preview.startsWith('data:image/') && (
-            <Box sx={{ position: 'relative', width: 72, height: 56 }}>
-              <Box
-                component="img"
-                src={preview}
-                alt={`${title}预览`}
-                sx={{ width: 72, height: 56, objectFit: 'cover', borderRadius: 1, border: `1px solid ${shell.line}` }}
-              />
-              <Tooltip title="删除附件">
-                <IconButton
-                  size="small"
-                  onClick={() => clearAttachmentFile(nameField, previewField, valueField)}
-                  sx={{
-                    position: 'absolute',
-                    top: -8,
-                    right: -8,
-                    width: 22,
-                    height: 22,
-                    bgcolor: '#fff',
-                    border: `1px solid ${shell.line}`,
-                    boxShadow: '0 1px 4px rgba(15, 23, 42, 0.18)',
-                    '&:hover': { bgcolor: '#fee2e2', color: shell.red },
-                  }}
-                >
-                  <CloseIcon sx={{ fontSize: 14 }} />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          )}
-          <Button variant="outlined" component="label">
-            上传附件
-            <input
-              hidden
-              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
-              type="file"
-              onChange={(event) => handleAttachmentFile(event.target.files?.[0], nameField, previewField, valueField)}
-            />
-          </Button>
-        </Box>
-      </Box>
-    );
-  };
-
   return (
     <Box sx={{ display: 'grid', gap: 1.5 }}>
       {message && (
@@ -872,14 +761,12 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
             </TextField>
             <TextField label="原付款金额" type="number" value={form.originalAmount} onChange={(event) => setForm({ ...form, originalAmount: event.target.value })} />
             <TextField label="挽回成交金额" type="number" value={form.recoveryAmount} onChange={(event) => setForm({ ...form, recoveryAmount: event.target.value })} required />
+            <TextField label="挽回时间" type="datetime-local" value={form.recoveryAt} onChange={(event) => setForm({ ...form, recoveryAt: event.target.value })} required InputLabelProps={{ shrink: true }} inputProps={{ step: 1 }} />
             <TextField select label="挽回人员" value={form.recoveryUserId} onChange={(event) => setForm({ ...form, recoveryUserId: event.target.value })} required>
               {activeUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name} · {user.role}</MenuItem>)}
             </TextField>
             <Box sx={{ gridColumn: { md: '1 / -1' } }}>
-              <BusinessAttachmentPicker title="收款凭证" description="可多选、拖拽或直接粘贴截图。" value={form.paymentAttachments} onChange={(paymentAttachments) => setForm((current) => ({ ...current, paymentAttachments }))} category="recovery-payment-proof" draftKey={editingOrder?.id || `recovery-new-${currentUser?.id || 'unknown'}`} maxCount={8} />
-            </Box>
-            <Box sx={{ gridColumn: { md: '1 / -1' } }}>
-              <BusinessAttachmentPicker title="聊天记录截图" description="可多选、拖拽或直接粘贴截图。" value={form.chatAttachments} onChange={(chatAttachments) => setForm((current) => ({ ...current, chatAttachments }))} category="recovery-chat-evidence" draftKey={editingOrder?.id || `recovery-new-${currentUser?.id || 'unknown'}`} maxCount={8} />
+              <BusinessAttachmentPicker title="挽回凭证" description="用于上传付款、聊天或其他挽回过程截图，可多选、拖拽或直接粘贴。" value={form.paymentAttachments} onChange={(paymentAttachments) => setForm((current) => ({ ...current, paymentAttachments }))} category="recovery-payment-proof" draftKey={editingOrder?.id || `recovery-new-${currentUser?.id || 'unknown'}`} maxCount={8} />
             </Box>
             <TextField label="备注" value={form.remark} onChange={(event) => setForm({ ...form, remark: event.target.value })} multiline minRows={3} sx={{ gridColumn: { md: '1 / -1' } }} />
           </Box>
@@ -948,6 +835,10 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                   <Typography variant="body1">{detailOrder.recoveryUserName}</Typography>
                 </Box>
                 <Box>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>挽回时间</Typography>
+                  <Typography variant="body1">{formatDate(detailOrder.recoveryAt || detailOrder.createdAt, 'yyyy-MM-dd HH:mm:ss')}</Typography>
+                </Box>
+                <Box>
                   <Typography variant="body2" sx={{ color: '#6b7280' }}>审核人</Typography>
                   <Typography variant="body1">{detailOrder.auditorName || '-'}</Typography>
                 </Box>
@@ -971,18 +862,16 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell>收款凭证</TableCell>
-                      <TableCell>聊天记录截图</TableCell>
+                      <TableCell>挽回凭证</TableCell>
                       <TableCell>审核说明</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     <TableRow>
                       <TableCell>
-                        {detailOrder.paymentAttachments?.length ? <BusinessAttachmentLinks attachments={detailOrder.paymentAttachments} /> : <AttachmentPreviewLink title="收款凭证" fileName={detailOrder.paymentVoucherName || detailOrder.paymentVoucher} src={detailOrder.paymentVoucherPreview} />}
-                      </TableCell>
-                      <TableCell>
-                        {detailOrder.chatAttachments?.length ? <BusinessAttachmentLinks attachments={detailOrder.chatAttachments} /> : <AttachmentPreviewLink title="聊天记录截图" fileName={detailOrder.chatEvidenceName || detailOrder.chatEvidence} src={detailOrder.chatEvidencePreview} />}
+                        {[...(detailOrder.paymentAttachments || []), ...(detailOrder.chatAttachments || [])].length
+                          ? <BusinessAttachmentLinks attachments={[...(detailOrder.paymentAttachments || []), ...(detailOrder.chatAttachments || [])]} />
+                          : <AttachmentPreviewLink title="挽回凭证" fileName={detailOrder.paymentVoucherName || detailOrder.paymentVoucher || detailOrder.chatEvidenceName || detailOrder.chatEvidence} src={detailOrder.paymentVoucherPreview || detailOrder.chatEvidencePreview} />}
                       </TableCell>
                       <TableCell>{detailOrder.auditReason || '-'}</TableCell>
                     </TableRow>

@@ -59,6 +59,14 @@ function cleanText(value: unknown): string {
   return String(value || '').trim();
 }
 
+function recoveryTime(value: unknown, fallback: string): string {
+  const text = cleanText(value);
+  if (!text) return fallback;
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) throw new RecoveryCommandError(400, '挽回时间格式无效');
+  return parsed.toISOString();
+}
+
 function validateAttachments(
   value: unknown,
   category: BusinessAttachmentCategory,
@@ -104,13 +112,14 @@ async function loadDirectory(prisma: RecoveryCommandPrisma): Promise<Directory> 
   };
 }
 
-function sameCreate(existing: RecoveryOrder, desired: RecoveryOrder): boolean {
+function sameCreate(existing: RecoveryOrder, desired: RecoveryOrder, compareRecoveryAt: boolean): boolean {
   return existing.createdBy === desired.createdBy
     && normalizeOrderNo(existing.thirdPartyOrderNo) === normalizeOrderNo(desired.thirdPartyOrderNo)
     && existing.customerName === desired.customerName
     && existing.originalProduct === desired.originalProduct
     && Number(existing.originalAmount) === Number(desired.originalAmount)
     && Number(existing.recoveryAmount) === Number(desired.recoveryAmount)
+    && (!compareRecoveryAt || (existing.recoveryAt || existing.createdAt) === (desired.recoveryAt || desired.createdAt))
     && existing.recoveryUserId === desired.recoveryUserId
     && (existing.assistUserId || '') === (desired.assistUserId || '');
 }
@@ -282,7 +291,7 @@ async function writeRecoveryOrder(
       customerId: order.customerId || null,
       orderId: null,
       amount: order.recoveryAmount,
-      eventAt: new Date(order.updatedAt),
+      eventAt: new Date(order.recoveryAt || order.updatedAt),
       data: jsonValue(order),
     },
   });
@@ -430,10 +439,14 @@ export function createRecoveryOrderCommandService(
     ): Promise<ApiResponse<RecoveryOrder | null>> {
       const id = cleanText(orderId);
       if (!id) return failure<RecoveryOrder>('售后挽回订单ID不能为空', 400);
-      const canRead = scopeDomain === 'recoveryOrderApplications'
+      const hasRecoveryRead = scopeDomain === 'recoveryOrderApplications'
         ? hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, 'read')
         : hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY, 'read')
           || hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, 'read');
+      const financeOnly = scopeDomain === 'recoveryOrders'
+        && !hasRecoveryRead
+        && hasPermission(actor, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'read');
+      const canRead = hasRecoveryRead || financeOnly;
       if (!canRead) return failure<RecoveryOrder>('无权查看该售后挽回订单', 403);
       const [row, directory] = await Promise.all([
         prisma.businessRecord.findUnique({
@@ -443,7 +456,10 @@ export function createRecoveryOrderCommandService(
       ]);
       if (!row) return failure<RecoveryOrder>('售后挽回订单不存在', 404);
       const order = parseObject<RecoveryOrder>(row.data, '售后挽回订单');
-      if (order.deletedAt) return failure<RecoveryOrder>('售后挽回订单不存在', 404);
+      if (order.deletedAt && !financeOnly) return failure<RecoveryOrder>('售后挽回订单不存在', 404);
+      if (financeOnly && !['待处理', '待确认', '待发放', '已发放', '已撤回'].includes(recoverySettlementStatus(order))) {
+        return failure<RecoveryOrder>('无权查看该售后挽回订单', 403);
+      }
       if (!recoveryVisible(order, recoveryScope(directory, actor, scopeDomain))) {
         return failure<RecoveryOrder>('无权查看该售后挽回订单', 403);
       }
@@ -509,7 +525,7 @@ export function createRecoveryOrderCommandService(
       let paymentAttachments: BusinessAttachment[];
       let chatAttachments: BusinessAttachment[];
       try {
-        paymentAttachments = validateAttachments(input.paymentAttachments, 'recovery-payment-proof', '收款凭证');
+        paymentAttachments = validateAttachments(input.paymentAttachments, 'recovery-payment-proof', '挽回凭证');
         chatAttachments = validateAttachments(input.chatAttachments, 'recovery-chat-evidence', '聊天记录');
       } catch (error) {
         if (error instanceof RecoveryCommandError) return failure(error.message, error.responseCode);
@@ -557,6 +573,7 @@ export function createRecoveryOrderCommandService(
         originalProduct,
         originalAmount: amount(input.originalAmount),
         recoveryAmount,
+        recoveryAt: recoveryTime(input.recoveryAt, createdAt),
         paymentVoucher: input.paymentVoucher,
         paymentVoucherName: input.paymentVoucherName,
         paymentVoucherPreview: input.paymentVoucherPreview,
@@ -588,7 +605,7 @@ export function createRecoveryOrderCommandService(
             .map((row) => parseObject<RecoveryOrder>(row.data, '售后挽回订单'))
             .find((order) => normalizeOrderNo(order.thirdPartyOrderNo) === normalizedNo);
           if (duplicate) {
-            if (duplicate.id === id && sameCreate(duplicate, next)) return duplicate;
+            if (duplicate.id === id && sameCreate(duplicate, next, Boolean(cleanText(input.recoveryAt)))) return duplicate;
             throw new RecoveryCommandError(409, '该第三方平台订单号已经创建过售后挽回订单');
           }
           await transaction.businessRecord.create({
@@ -602,7 +619,7 @@ export function createRecoveryOrderCommandService(
               customerId: null,
               orderId: null,
               amount: next.recoveryAmount,
-              eventAt: new Date(createdAt),
+              eventAt: new Date(next.recoveryAt || createdAt),
               data: jsonValue(next),
             },
           });
@@ -621,7 +638,7 @@ export function createRecoveryOrderCommandService(
           });
           if (concurrent) {
             const existing = parseObject<RecoveryOrder>(concurrent.data, '售后挽回订单');
-            if (sameCreate(existing, next)) return success(existing);
+            if (sameCreate(existing, next, Boolean(cleanText(input.recoveryAt)))) return success(existing);
           }
           return failure('该第三方平台订单号已经创建过售后挽回订单', 409);
         }
@@ -650,7 +667,7 @@ export function createRecoveryOrderCommandService(
           throw new RecoveryCommandError(409, '已进入分账链路的售后挽回订单不能修改');
         }
         const validated = validateInput(input, actor, directory, scope);
-        const paymentAttachments = validateAttachments(input.paymentAttachments, 'recovery-payment-proof', '收款凭证');
+        const paymentAttachments = validateAttachments(input.paymentAttachments, 'recovery-payment-proof', '挽回凭证');
         const chatAttachments = validateAttachments(input.chatAttachments, 'recovery-chat-evidence', '聊天记录');
         const rows = await transaction.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } });
         const duplicate = rows
@@ -673,6 +690,7 @@ export function createRecoveryOrderCommandService(
           originalProduct: validated.originalProduct,
           originalAmount: validated.originalAmount,
           recoveryAmount: validated.recoveryAmount,
+          recoveryAt: recoveryTime(input.recoveryAt, current.recoveryAt || current.createdAt),
           paymentVoucher: input.paymentVoucher,
           paymentVoucherName: input.paymentVoucherName,
           paymentVoucherPreview: input.paymentVoucherPreview,

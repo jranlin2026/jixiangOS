@@ -33,6 +33,12 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function normalizeRecoveryTime(value: string | undefined, fallback: string): string {
+  if (!value) return fallback;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? fallback : parsed.toISOString();
+}
+
 function normalizeText(value?: string): string {
   return String(value || '').trim().toLowerCase();
 }
@@ -383,6 +389,7 @@ async function createRecoveryOrder(data: RecoveryOrderInput): Promise<ApiRespons
     customerMatchStatus: '手工填写',
     originalAmount: Number(data.originalAmount) || 0,
     recoveryAmount: Number(data.recoveryAmount) || 0,
+    recoveryAt: normalizeRecoveryTime(data.recoveryAt, now),
     paymentVoucher: data.paymentVoucher,
     paymentVoucherName: data.paymentVoucherName,
     paymentVoucherPreview: data.paymentVoucherPreview,
@@ -447,6 +454,7 @@ async function updateRecoveryOrder(id: string, data: RecoveryOrderInput): Promis
     originalProduct: data.originalProduct.trim(),
     originalAmount: Number(data.originalAmount) || 0,
     recoveryAmount: Number(data.recoveryAmount) || 0,
+    recoveryAt: normalizeRecoveryTime(data.recoveryAt, current.recoveryAt || current.createdAt),
     paymentVoucher: data.paymentVoucher,
     paymentVoucherName: data.paymentVoucherName,
     paymentVoucherPreview: data.paymentVoucherPreview,

@@ -45,6 +45,8 @@ import type { User } from '../../types/settings';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { StatusSegmentBar } from '../../shared/components/ModuleShell';
+import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
+import BusinessAttachmentLinks from '../../shared/components/BusinessAttachmentLinks';
 
 const shell = {
   ink: '#0f172a',
@@ -210,6 +212,8 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   const [roles, setRoles] = useState<CommissionRoleConfig[]>([]);
   const [plans, setPlans] = useState<CommissionPayoutPlan[]>([]);
   const [detailOrder, setDetailOrder] = useState<RecoveryOrder | null>(null);
+  const [sourceDetailOrder, setSourceDetailOrder] = useState<RecoveryOrder | null>(null);
+  const [sourceDetailLoading, setSourceDetailLoading] = useState(false);
   const [detailCommissions, setDetailCommissions] = useState<Commission[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [selected, setSelected] = useState<RecoveryOrder | null>(null);
@@ -228,6 +232,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   const [withdrawTarget, setWithdrawTarget] = useState<RecoveryOrder | null>(null);
   const [withdrawReason, setWithdrawReason] = useState('');
   const handledCreateSettlementTriggerRef = React.useRef(createSettlementTrigger);
+  const sourceDetailRequestRef = React.useRef(0);
 
   const {
     viewConfig,
@@ -442,6 +447,35 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     }
   };
 
+  const openSourceDetail = async (order: RecoveryOrder) => {
+    const requestId = sourceDetailRequestRef.current + 1;
+    sourceDetailRequestRef.current = requestId;
+    setSourceDetailOrder(order);
+    setSourceDetailLoading(true);
+    try {
+      const response = await recoveryOrderApi.fetchRecoveryOrderById(order.id, 'recoveryOrders');
+      if (sourceDetailRequestRef.current !== requestId) return;
+      if (response.code === 0 && response.data) {
+        setSourceDetailOrder(response.data);
+        return;
+      }
+      setMessage({ type: 'error', text: response.message || '售后挽回订单资料加载失败' });
+      setSourceDetailOrder(null);
+    } catch (error) {
+      if (sourceDetailRequestRef.current !== requestId) return;
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : '售后挽回订单资料加载失败' });
+      setSourceDetailOrder(null);
+    } finally {
+      if (sourceDetailRequestRef.current === requestId) setSourceDetailLoading(false);
+    }
+  };
+
+  const closeSourceDetail = () => {
+    sourceDetailRequestRef.current += 1;
+    setSourceDetailOrder(null);
+    setSourceDetailLoading(false);
+  };
+
   const closeDetail = () => {
     setDetailOrder(null);
     setDetailCommissions([]);
@@ -647,7 +681,25 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       case 'recoveryNo':
         return (
           <Stack spacing={0.5} sx={{ alignItems: 'flex-start' }}>
-            <Typography variant="body2" sx={{ fontWeight: 900, color: shell.ink }}>{row.recoveryNo}</Typography>
+            <Typography
+              component="button"
+              type="button"
+              variant="body2"
+              onClick={() => void openSourceDetail(row)}
+              sx={{
+                p: 0,
+                border: 0,
+                bgcolor: 'transparent',
+                font: 'inherit',
+                fontWeight: 900,
+                color: shell.blue,
+                cursor: 'pointer',
+                textAlign: 'left',
+                '&:hover': { textDecoration: 'underline' },
+              }}
+            >
+              {row.recoveryNo}
+            </Typography>
             {isSourceRecoveryDeleted(row) && <Chip label="源挽回单已删除" size="small" sx={{ height: 22 }} />}
           </Stack>
         );
@@ -828,6 +880,57 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         labelDisplayedRows={formatPaginationRows}
         sx={{ border: `1px solid ${shell.line}`, borderTop: 0, bgcolor: '#fff', '& .MuiTablePagination-toolbar': { minHeight: 44 }, '& .MuiTablePagination-selectLabel, & .MuiTablePagination-displayedRows': { my: 0 } }}
       />
+
+      <Dialog open={Boolean(sourceDetailOrder)} onClose={closeSourceDetail} maxWidth="md" fullWidth>
+        <DialogCloseTitle onClose={closeSourceDetail}>售后挽回订单资料</DialogCloseTitle>
+        <DialogContent dividers>
+          {sourceDetailOrder && (
+            <Stack spacing={2}>
+              {sourceDetailLoading && <Typography variant="body2" sx={{ color: shell.muted }}>正在加载完整资料...</Typography>}
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 2 }}>
+                {[
+                  { label: '挽回订单号', value: sourceDetailOrder.recoveryNo },
+                  { label: '客户名称', value: sourceDetailOrder.customerName },
+                  { label: '客户手机号', value: sourceDetailOrder.customerPhone || '-' },
+                  { label: '客户微信', value: sourceDetailOrder.customerWechat || '-' },
+                  { label: '第三方平台订单号', value: sourceDetailOrder.thirdPartyOrderNo || '-' },
+                  { label: '来源平台/店铺', value: [sourceDetailOrder.sourcePlatformName || sourceDetailOrder.sourcePlatform, sourceDetailOrder.sourceShopName].filter(Boolean).join(' / ') || '-' },
+                  { label: '原购买产品', value: sourceDetailOrder.originalProduct || '-' },
+                  { label: '原付款金额', value: formatCurrency(sourceDetailOrder.originalAmount) },
+                  { label: '挽回成交金额', value: formatCurrency(sourceDetailOrder.recoveryAmount) },
+                  { label: '挽回人员', value: sourceDetailOrder.recoveryUserName || '-' },
+                  { label: '协助人员', value: sourceDetailOrder.assistUserName || '-' },
+                  { label: '挽回时间', value: formatDate(sourceDetailOrder.recoveryAt || sourceDetailOrder.createdAt, 'yyyy-MM-dd HH:mm:ss') },
+                  { label: '订单状态', value: sourceDetailOrder.status || '-' },
+                  { label: '创建人', value: sourceDetailOrder.createdByName || '-' },
+                  { label: '创建时间', value: formatDate(sourceDetailOrder.createdAt, 'yyyy-MM-dd HH:mm:ss') },
+                  { label: '审核人', value: sourceDetailOrder.auditorName || '-' },
+                  { label: '审核时间', value: sourceDetailOrder.auditedAt ? formatDate(sourceDetailOrder.auditedAt, 'yyyy-MM-dd HH:mm:ss') : '-' },
+                ].map((item) => (
+                  <Box key={item.label}>
+                    <Typography variant="body2" sx={{ color: shell.muted }}>{item.label}</Typography>
+                    <Typography variant="body1" sx={{ color: shell.ink, fontWeight: 700, overflowWrap: 'anywhere' }}>{item.value}</Typography>
+                  </Box>
+                ))}
+                <Box sx={{ gridColumn: { md: '1 / -1' } }}>
+                  <Typography variant="body2" sx={{ color: shell.muted }}>备注</Typography>
+                  <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>{sourceDetailOrder.remark || '-'}</Typography>
+                </Box>
+                <Box sx={{ gridColumn: { md: '1 / -1' } }}>
+                  <Typography variant="body2" sx={{ color: shell.muted }}>审核说明</Typography>
+                  <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>{sourceDetailOrder.auditReason || '-'}</Typography>
+                </Box>
+              </Box>
+              <Box>
+                <Typography variant="subtitle2" sx={{ mb: 1, color: shell.muted }}>挽回凭证</Typography>
+                {[...(sourceDetailOrder.paymentAttachments || []), ...(sourceDetailOrder.chatAttachments || [])].length
+                  ? <BusinessAttachmentLinks attachments={[...(sourceDetailOrder.paymentAttachments || []), ...(sourceDetailOrder.chatAttachments || [])]} />
+                  : <AttachmentPreviewLink title="挽回凭证" fileName={sourceDetailOrder.paymentVoucherName || sourceDetailOrder.paymentVoucher || sourceDetailOrder.chatEvidenceName || sourceDetailOrder.chatEvidence} src={sourceDetailOrder.paymentVoucherPreview || sourceDetailOrder.chatEvidencePreview} />}
+              </Box>
+            </Stack>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(detailOrder)} onClose={closeDetail} maxWidth="xl" fullWidth>
         <DialogCloseTitle onClose={closeDetail}>售后挽回分账处理</DialogCloseTitle>

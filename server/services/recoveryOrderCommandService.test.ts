@@ -65,7 +65,7 @@ function dbUser(user: AuthenticatedUser) {
 function input(overrides: Partial<RecoveryOrderInput> = {}): RecoveryOrderInput {
   return {
     customerName: '张三', thirdPartyOrderNo: 'TP-20260712-001', originalProduct: '899课程',
-    originalAmount: 899, recoveryAmount: 2980, recoveryUserId: creator.id,
+    originalAmount: 899, recoveryAmount: 2980, recoveryAt: '2026-07-12T15:30:00.000Z', recoveryUserId: creator.id,
     recoveryUserName: '伪造姓名', customerWechat: 'zhangsan', createdBy: other.id, createdByName: other.name, ...overrides,
   };
 }
@@ -227,13 +227,14 @@ const tooManyProofsResult = await service.create(input({
   thirdPartyOrderNo: 'TP-TOO-MANY-PROOFS', paymentAttachments: tooManyProofs,
 }), creator);
 assert.equal(tooManyProofsResult.code, 400);
-assert.equal(tooManyProofsResult.message, '收款凭证最多上传 8 张');
+assert.equal(tooManyProofsResult.message, '挽回凭证最多上传 8 张');
 
 const created = await service.create(input(), creator);
 assert.equal(created.code, 0, '只有 create 权限的角色应能通过记录级命令新增');
 assert.equal(created.data?.createdBy, creator.id, '操作人必须由会话确定');
 assert.equal(created.data?.createdByName, creator.name);
 assert.equal(created.data?.recoveryUserName, creator.name, '姓名必须从员工目录解析');
+assert.equal(created.data?.recoveryAt, '2026-07-12T15:30:00.000Z', '挽回时间必须按提交值保存');
 assert.ok(prisma.records().some((item) => item.id === oldRecord.id), '新增不得覆盖或删除其他记录');
 
 const creatorList = await service.list({ page: 1, pageSize: 20 }, creator);
@@ -288,6 +289,22 @@ financeList.data?.items.forEach((item) => {
   assert.equal(item.customerWechat, undefined);
   assert.equal(item.remark, undefined);
 });
+const financeDetail = await service.get(oldRecord.id, finance, 'recoveryOrders');
+assert.equal(financeDetail.code, 0, '财务分账角色必须能从订单号查看售后挽回订单完整资料');
+assert.equal(financeDetail.data?.customerPhone, oldRecord.customerPhone);
+assert.equal(financeDetail.data?.remark, oldRecord.remark);
+const oldRecordKey = key(STORAGE_KEYS.RECOVERY_ORDERS, oldRecord.id);
+const activeOldRecordRow = clone(prisma.rows.get(oldRecordKey)!);
+prisma.rows.set(oldRecordKey, {
+  ...activeOldRecordRow,
+  data: { ...(activeOldRecordRow as any).data, deletedAt: NOW, deletedBy: reviewer.name },
+});
+assert.equal(
+  (await service.get(oldRecord.id, finance, 'recoveryOrders')).code,
+  0,
+  '财务列表中的已删除源挽回单仍须支持查看留存资料',
+);
+prisma.rows.set(oldRecordKey, activeOldRecordRow);
 assert.equal(
   (await service.list({ settlementStatuses: ['待确认'] }, finance)).data?.pagination.total,
   0,
@@ -307,6 +324,16 @@ const replayed = await service.create(input(), creator);
 assert.equal(replayed.code, 0);
 assert.equal(replayed.data?.id, created.data?.id);
 assert.equal(prisma.records().length, 3, '重试必须幂等');
+
+const legacyRetryPrisma = new FakePrisma();
+let legacyRetryNow = new Date('2026-07-12T18:00:00.000Z');
+const legacyRetryService = createRecoveryOrderCommandService(legacyRetryPrisma as any, { now: () => legacyRetryNow });
+const legacyRetryInput = input({ thirdPartyOrderNo: 'TP-LEGACY-RETRY', recoveryAt: undefined });
+const legacyFirst = await legacyRetryService.create(legacyRetryInput, creator);
+legacyRetryNow = new Date('2026-07-12T18:01:00.000Z');
+const legacyReplayed = await legacyRetryService.create(legacyRetryInput, creator);
+assert.equal(legacyReplayed.code, 0, '旧客户端未传挽回时间时重复提交仍须幂等');
+assert.equal(legacyReplayed.data?.id, legacyFirst.data?.id);
 
 const forgedAssignment = await service.create(input({
   thirdPartyOrderNo: 'TP-20260712-002', recoveryUserId: other.id, recoveryUserName: other.name,
