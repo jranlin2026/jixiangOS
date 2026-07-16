@@ -12,6 +12,7 @@ import {
   getEnablementPrivateStorageDir,
   validateRuntimeConfig,
 } from './config/runtime';
+import { getScopedStorageKeys } from './config/storageScopes';
 import { prisma, checkDatabaseConnection } from './db/client';
 import { createRequireAnyPermission, createRequireAuth, bearerToken, type AuthenticatedRequest } from './middleware/auth';
 import { createLoginRateLimiter } from './middleware/loginRateLimit';
@@ -192,26 +193,6 @@ const runtimeStorageKeys = [
   STORAGE_KEYS.ECOMMERCE_SETTLEMENT_CONFIG,
   STORAGE_KEYS.INITIALIZED,
 ];
-const scopedStorageKeys: Record<string, string[]> = {
-  assets: [
-    STORAGE_KEYS.ASSET_DEVICES,
-    STORAGE_KEYS.ASSET_PHONE_NUMBERS,
-    STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS,
-    STORAGE_KEYS.ASSET_RISKS,
-    STORAGE_KEYS.ASSET_OPERATION_LOGS,
-    STORAGE_KEYS.ASSET_OFFBOARDING_TASKS,
-    STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS,
-  ],
-  finance: [
-    STORAGE_KEYS.ORDERS,
-    STORAGE_KEYS.COMMISSIONS,
-    STORAGE_KEYS.COMMISSION_OPERATION_LOGS,
-    STORAGE_KEYS.COMMISSION_SETTLEMENT_BATCHES,
-    STORAGE_KEYS.REFUNDS,
-    STORAGE_KEYS.RECOVERY_ORDERS,
-    STORAGE_KEYS.FINANCE,
-  ],
-};
 const requireAssignableUsersAccess = createRequireAnyPermission(authService, assignableUsersPermissions);
 const loginRateLimiter = createLoginRateLimiter();
 
@@ -1063,7 +1044,7 @@ app.get('/api/assets/:kind', requireAssetReadAccess, async (req: AuthenticatedRe
 app.get('/api/storage', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
   const runtimeScope = queryParam(req.query.scope) === 'runtime';
   const requestedScope = queryParam(req.query.scope);
-  const requestedKeys = runtimeScope ? runtimeStorageKeys : scopedStorageKeys[requestedScope];
+  const requestedKeys = runtimeScope ? runtimeStorageKeys : getScopedStorageKeys(requestedScope);
   if (requestedKeys) {
     const entries = await Promise.all(requestedKeys
       .filter((key) => req.currentUser && canAccessLegacyStorageKey(req.currentUser, key, 'runtime'))
@@ -1104,7 +1085,7 @@ app.get('/api/storage/:key', requireStorageAccess, async (req: AuthenticatedRequ
     return;
   }
   if (req.currentUser && isAssetStorageKey(key)) {
-    const entries = await Promise.all(scopedStorageKeys.assets.map(async (assetKey) => {
+    const entries = await Promise.all((getScopedStorageKeys('assets') || []).map(async (assetKey) => {
       const result = await storageService.get(assetKey);
       return [assetKey, result.code === 0 ? result.data : []] as const;
     }));

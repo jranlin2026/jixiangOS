@@ -34,7 +34,7 @@ import { getCurrentOperatorName } from '../shared/utils/currentOperator';
 import { v4 as uuidv4 } from 'uuid';
 import { orderApi } from './orderApi';
 
-const delay = (ms?: number) => baseDelay(ms, 'finance');
+const delay = (ms?: number) => baseDelay(ms, 'commissions');
 import { shouldUseBackendApi } from './backendClient';
 
 function ensureInit(): void {

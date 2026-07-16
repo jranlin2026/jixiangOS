@@ -19,7 +19,7 @@ import { DEFAULT_PAGE_SIZE, STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
 
-const delay = (ms?: number) => baseDelay(ms, 'finance');
+const delay = (ms?: number) => baseDelay(ms, 'finance-flow');
 
 function ensureInit(): void {
   initializeMockData();
