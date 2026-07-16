@@ -295,7 +295,7 @@ export function createRecoveryOrderCommandService(
       }
       const directory = await loadDirectory(prisma);
       const scope = recoveryScope(directory, actor, scopeDomain);
-      if (typeof prisma.$queryRaw === 'function') {
+      if (scope.unrestricted && typeof prisma.$queryRaw === 'function') {
         const result = await queryRecoveryPage(prisma, filters, scope);
         const page = toPositiveInt(filters.page, 1);
         const pageSize = Math.min(toPositiveInt(filters.pageSize, 10), 100);

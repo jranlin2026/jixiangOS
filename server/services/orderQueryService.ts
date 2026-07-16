@@ -221,17 +221,14 @@ export function createOrderQueryService(
 ) {
   return {
     async listOrders(filters: OrderFilters = {}, actor: AuthenticatedUser) {
-      if (typeof prisma.$queryRaw === 'function') {
-        const scope = await loadScope(prisma, actor, 'orders');
+      const scope = await loadScope(prisma, actor, 'orders');
+      if (scope.unrestricted && typeof prisma.$queryRaw === 'function') {
         const result = await queryOrderPage(prisma, filters, scope);
         const page = toPositiveInt(filters.page, 1);
         const pageSize = Math.min(toPositiveInt(filters.pageSize, DEFAULT_PAGE_SIZE), 100);
         return success({ items: result.items, pagination: { page, pageSize, total: result.total, totalPages: Math.ceil(result.total / pageSize) } });
       }
-      const [rows, scope] = await Promise.all([
-        prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDERS } }),
-        loadScope(prisma, actor, 'orders'),
-      ]);
+      const rows = await prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDERS } });
       const direction = filters.sortDirection === 'asc' ? 1 : -1;
       const items = (rows as BusinessRecordRow[])
         .map((row) => parseRecord<Order>(row.data))
@@ -259,17 +256,14 @@ export function createOrderQueryService(
     },
 
     async listApplications(filters: OrderApplicationFilters = {}, actor: AuthenticatedUser) {
-      if (typeof prisma.$queryRaw === 'function') {
-        const scope = await loadScope(prisma, actor, 'orderApplications');
+      const scope = await loadScope(prisma, actor, 'orderApplications');
+      if (scope.unrestricted && typeof prisma.$queryRaw === 'function') {
         const result = await queryApplicationPage(prisma, filters, scope);
         const page = toPositiveInt(filters.page, 1);
         const pageSize = Math.min(toPositiveInt(filters.pageSize, DEFAULT_PAGE_SIZE), 100);
         return success({ items: result.items, pagination: { page, pageSize, total: result.total, totalPages: Math.ceil(result.total / pageSize) } });
       }
-      const [rows, scope] = await Promise.all([
-        prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDER_APPLICATIONS } }),
-        loadScope(prisma, actor, 'orderApplications'),
-      ]);
+      const rows = await prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDER_APPLICATIONS } });
       const items = (rows as BusinessRecordRow[])
         .map((row) => parseRecord<OrderApplication>(row.data))
         .filter((application): application is OrderApplication => Boolean(application))

@@ -192,11 +192,11 @@ async function queryDeliveryStats(prisma: DeliveryQueryPrisma, filters: Delivery
 }
 
 export function createDeliveryQueryService(prisma: DeliveryQueryPrisma) {
-  async function visibleDeliveries(filters: DeliveryFilters, actor: AuthenticatedUser) {
+  async function visibleDeliveries(filters: DeliveryFilters, actor: AuthenticatedUser, loadedScope?: DataVisibilityScope) {
     const [deliveryRows, orderRows, scope] = await Promise.all([
       prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.DELIVERIES } }),
       prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDERS } }),
-      loadScope(prisma, actor),
+      loadedScope ? Promise.resolve(loadedScope) : loadScope(prisma, actor),
     ]);
     const orders = new Map((orderRows as Row[])
       .map((row) => parse<Order>(row.data))
@@ -211,14 +211,14 @@ export function createDeliveryQueryService(prisma: DeliveryQueryPrisma) {
 
   return {
     async list(filters: DeliveryFilters = {}, actor: AuthenticatedUser) {
-      if (typeof prisma.$queryRaw === 'function') {
-        const scope = await loadScope(prisma, actor);
+      const scope = await loadScope(prisma, actor);
+      if (scope.unrestricted && typeof prisma.$queryRaw === 'function') {
         const result = await queryDeliveryPage(prisma, filters, scope);
         const page = Math.max(1, Number(filters.page) || 1);
         const pageSize = Math.min(100, Math.max(1, Number(filters.pageSize) || 10));
         return success<DeliveryListResponse>({ items: result.items, total: result.total, page, pageSize });
       }
-      const deliveries = await visibleDeliveries(filters, actor);
+      const deliveries = await visibleDeliveries(filters, actor, scope);
       const page = Math.max(1, Number(filters.page) || 1);
       const pageSize = Math.min(100, Math.max(1, Number(filters.pageSize) || 10));
       const data: DeliveryListResponse = {
