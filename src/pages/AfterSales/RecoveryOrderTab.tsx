@@ -145,6 +145,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const canViewHistory = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY);
   const canForceDeleteSettled = isSuperAdmin(currentUser);
   const [rows, setRows] = useState<RecoveryOrder[]>([]);
+  const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState('');
@@ -190,17 +191,20 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   }), [mode, page, rowsPerPage, search]);
 
   const load = useCallback(async () => {
-    const [listRes, usersRes, productsRes] = await Promise.all([
-      recoveryOrderApi.fetchRecoveryOrders(filters),
-      settingsApi.fetchAssignableUsers(),
-      productApi.getProducts(),
-    ]);
-    if (listRes.code === 0) {
-      setRows(listRes.data.items);
-      setTotal(listRes.data.pagination.total);
-    }
-    if (usersRes.code === 0) setUsers(usersRes.data);
-    if (productsRes.code === 0) setProducts([...productsRes.data].sort((a, b) => a.sortOrder - b.sortOrder));
+    setLoading(true);
+    try {
+      const [listRes, usersRes, productsRes] = await Promise.all([
+        recoveryOrderApi.fetchRecoveryOrders(filters),
+        settingsApi.fetchAssignableUsers(),
+        productApi.getProducts(),
+      ]);
+      if (listRes.code === 0) {
+        setRows(listRes.data.items);
+        setTotal(listRes.data.pagination.total);
+      }
+      if (usersRes.code === 0) setUsers(usersRes.data);
+      if (productsRes.code === 0) setProducts([...productsRes.data].sort((a, b) => a.sortOrder - b.sortOrder));
+    } finally { setLoading(false); }
   }, [filters]);
 
   useEffect(() => {
@@ -748,7 +752,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
             {!rows.length && (
               <TableRow>
                 <TableCell colSpan={visibleColumns.length || 1} align="center" sx={{ py: 6, color: '#9ca3af' }}>
-                  {mode === 'review' ? '暂无待审核售后挽回订单' : '暂无售后挽回订单'}
+                  {loading ? '加载中...' : mode === 'review' ? '暂无待审核售后挽回订单' : '暂无售后挽回订单'}
                 </TableCell>
               </TableRow>
             )}

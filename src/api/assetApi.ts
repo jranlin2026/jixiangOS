@@ -26,11 +26,13 @@
 import type { Department } from '../types/department';
 import type { User } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
-import { createErrorResponse, createSuccessResponse, delay } from './types';
+import { createErrorResponse, createSuccessResponse, delay as baseDelay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { getBackendBaseUrl, readBackendToken, shouldUseBackendApi } from './backendClient';
+import { backendRequest, getBackendBaseUrl, readBackendToken, shouldUseBackendApi } from './backendClient';
 import { DEFAULT_PAGE_SIZE, STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
+
+const delay = (ms?: number) => baseDelay(ms, 'assets');
 import {
   canViewAssetAccount,
   canViewAssetDevice,
@@ -59,6 +61,18 @@ function paginate<T>(items: T[], filters?: AssetFilters): PaginatedResponse<T> {
       totalPages: Math.max(1, Math.ceil(items.length / pageSize)),
     },
   };
+}
+
+function backendAssetList<T>(kind: string, filters?: AssetFilters): Promise<ApiResponse<PaginatedResponse<T>>> {
+  const params = new URLSearchParams();
+  if (filters?.search) params.set('search', filters.search);
+  if (filters?.platform) params.set('platform', filters.platform);
+  if (filters?.permissionStatus) params.set('permissionStatus', filters.permissionStatus);
+  if (filters?.riskLevel) params.set('riskLevel', filters.riskLevel);
+  if (filters?.status) params.set('status', filters.status);
+  params.set('page', String(filters?.page || 1));
+  params.set('pageSize', String(filters?.pageSize || DEFAULT_PAGE_SIZE));
+  return backendRequest(`/assets/${kind}?${params.toString()}`);
 }
 
 function includesKeyword(value: unknown, keyword: string): boolean {
@@ -884,6 +898,7 @@ function summarizeMatrixTargets(
 }
 
 async function fetchDashboard(): Promise<ApiResponse<AssetDashboard>> {
+  if (shouldUseBackendApi()) return backendRequest<AssetDashboard>('/assets/dashboard');
   ensureInit();
   await delay(120);
   const scope = getCurrentDataVisibilityScope('assets');
@@ -906,6 +921,7 @@ async function fetchDashboard(): Promise<ApiResponse<AssetDashboard>> {
 }
 
 async function fetchDevices(filters?: AssetFilters): Promise<ApiResponse<PaginatedResponse<AssetDevice>>> {
+  if (shouldUseBackendApi()) return backendAssetList<AssetDevice>('devices', filters);
   ensureInit();
   await delay(120);
   return createSuccessResponse(paginate(filterDevices(visibleDevices(), filters), filters));
@@ -1015,6 +1031,7 @@ async function deleteDevice(id: string): Promise<ApiResponse<AssetDevice>> {
 }
 
 async function fetchPhoneNumbers(filters?: AssetFilters): Promise<ApiResponse<PaginatedResponse<AssetPhoneNumber>>> {
+  if (shouldUseBackendApi()) return backendAssetList<AssetPhoneNumber>('phones', filters);
   ensureInit();
   await delay(120);
   return createSuccessResponse(paginate(filterPhones(visiblePhones(), filters), filters));
@@ -1135,6 +1152,7 @@ async function deletePhoneNumber(id: string): Promise<ApiResponse<AssetPhoneNumb
 }
 
 async function fetchInternetAccounts(filters?: AssetFilters): Promise<ApiResponse<PaginatedResponse<AssetInternetAccount>>> {
+  if (shouldUseBackendApi()) return backendAssetList<AssetInternetAccount>('accounts', filters);
   ensureInit();
   await delay(120);
   return createSuccessResponse(paginate(filterAccounts(visibleAccounts(), filters), filters));
@@ -1327,6 +1345,7 @@ async function createOffboardingTasksForEmployee(employeeName: string, departmen
 }
 
 async function fetchRisks(filters?: AssetFilters): Promise<ApiResponse<PaginatedResponse<AssetRisk>>> {
+  if (shouldUseBackendApi()) return backendAssetList<AssetRisk>('risks', filters);
   ensureInit();
   await delay(120);
   const keyword = filters?.search?.trim().toLowerCase();
@@ -1340,6 +1359,7 @@ async function fetchRisks(filters?: AssetFilters): Promise<ApiResponse<Paginated
 }
 
 async function fetchOperationLogs(filters?: AssetFilters): Promise<ApiResponse<PaginatedResponse<AssetOperationLog>>> {
+  if (shouldUseBackendApi()) return backendAssetList<AssetOperationLog>('logs', filters);
   ensureInit();
   await delay(120);
   const keyword = filters?.search?.trim().toLowerCase();
@@ -1350,6 +1370,7 @@ async function fetchOperationLogs(filters?: AssetFilters): Promise<ApiResponse<P
 }
 
 async function fetchOffboardingTasks(filters?: AssetFilters): Promise<ApiResponse<PaginatedResponse<AssetOffboardingTask>>> {
+  if (shouldUseBackendApi()) return backendAssetList<AssetOffboardingTask>('offboarding', filters);
   ensureInit();
   await delay(120);
   const keyword = filters?.search?.trim().toLowerCase();
@@ -1487,6 +1508,7 @@ async function completeOffboardingTask(taskId: string): Promise<ApiResponse<Asse
 }
 
 async function fetchMatrixPublishTasks(filters?: AssetFilters): Promise<ApiResponse<PaginatedResponse<AssetMatrixPublishTask>>> {
+  if (shouldUseBackendApi()) return backendAssetList<AssetMatrixPublishTask>('matrix-publish', filters);
   ensureInit();
   await delay(120);
   return createSuccessResponse(paginate(filterMatrixPublishTasks(visibleMatrixPublishTasks(), filters), filters));

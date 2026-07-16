@@ -82,6 +82,7 @@ const Finance: React.FC = () => {
   const [selectedFlowId, setSelectedFlowId] = useState('');
   const [selectedFlow, setSelectedFlow] = useState<FinanceTransaction | null>(null);
   const [flowRows, setFlowRows] = useState<FinanceTransaction[]>([]);
+  const [flowLoading, setFlowLoading] = useState(false);
   const [flowTotal, setFlowTotal] = useState(0);
   const [flowExporting, setFlowExporting] = useState(false);
   const [settlementViewSettingsTrigger, setSettlementViewSettingsTrigger] = useState(0);
@@ -116,6 +117,7 @@ const Finance: React.FC = () => {
   useEffect(() => {
     if (activeTab !== 'flow') return;
     let mounted = true;
+    setFlowLoading(true);
     financeApi.fetchFinanceTransactions(flowQueryFilters).then((res) => {
       if (!mounted || res.code !== 0) return;
       setFlowRows(res.data.items);
@@ -125,6 +127,8 @@ const Finance: React.FC = () => {
         : (res.data.items[0]?.id || '');
       setSelectedFlowId(nextSelectedId);
       if (!nextSelectedId) setSelectedFlow(null);
+    }).finally(() => {
+      if (mounted) setFlowLoading(false);
     });
     return () => {
       mounted = false;
@@ -347,7 +351,7 @@ const Finance: React.FC = () => {
                   {!flowRows.length && (
                     <TableRow>
                       <TableCell colSpan={9} align="center" sx={{ py: 5, color: '#9ca3af' }}>
-                        暂无收支流水
+                        {flowLoading ? '加载中...' : '暂无收支流水'}
                       </TableCell>
                     </TableRow>
                   )}

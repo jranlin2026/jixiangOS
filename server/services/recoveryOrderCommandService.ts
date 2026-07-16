@@ -10,8 +10,9 @@ import type { RecoveryOrder, RecoveryOrderFilters, RecoveryOrderInput } from '..
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
+import { jsonText, queryBusinessRecordPage, visibleJsonCondition } from './businessRecordPageService';
 
-type RecoveryCommandPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$transaction'>;
+type RecoveryCommandPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$transaction' | '$queryRaw'>;
 type Directory = { users: User[]; roles: Role[]; departments: Department[] };
 type LockedRow = { id: string; domain: string; recordId: string; data: unknown };
 type RecoveryOrderPage = {
@@ -139,6 +140,37 @@ function recoveryVisible(order: RecoveryOrder, scope: DataVisibilityScope): bool
     : Boolean(order.createdByName && scope.visibleUserNames.includes(order.createdByName));
 }
 
+async function queryRecoveryPage(
+  prisma: RecoveryCommandPrisma,
+  filters: RecoveryOrderFilters,
+  scope: DataVisibilityScope,
+) {
+  const page = toPositiveInt(filters.page, 1);
+  const pageSize = Math.min(toPositiveInt(filters.pageSize, 10), 100);
+  const conditions: Prisma.Sql[] = [Prisma.sql`br.domain = ${STORAGE_KEYS.RECOVERY_ORDERS}`];
+  if (!filters.includeDeleted) conditions.push(Prisma.sql`JSON_EXTRACT(br.data, '$.deletedAt') IS NULL`);
+  if (filters.statuses?.length) conditions.push(Prisma.sql`br.status IN (${Prisma.join(filters.statuses)})`);
+  else if (filters.status && filters.status !== '全部') conditions.push(Prisma.sql`br.status = ${filters.status}`);
+  if (filters.settlementStatus && filters.settlementStatus !== '全部') {
+    conditions.push(Prisma.sql`${jsonText('br', '$.settlementStatus')} = ${filters.settlementStatus}`);
+  }
+  if (filters.ownerId) {
+    conditions.push(Prisma.sql`(${jsonText('br', '$.createdBy')} = ${filters.ownerId} OR ${jsonText('br', '$.recoveryUserId')} = ${filters.ownerId} OR ${jsonText('br', '$.assistUserId')} = ${filters.ownerId})`);
+  }
+  if (!scope.unrestricted) conditions.push(visibleJsonCondition(
+    'br', ['$.createdBy'], ['$.createdByName'], scope.visibleUserIds, scope.visibleUserNames,
+  ));
+  const search = cleanText(filters.search).toLocaleLowerCase();
+  if (search) {
+    const pattern = `%${search}%`;
+    conditions.push(Prisma.sql`(LOWER(br.recordId) LIKE ${pattern} OR LOWER(COALESCE(br.title, '')) LIKE ${pattern} OR LOWER(${jsonText('br', '$.thirdPartyOrderNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.customerPhone')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.customerWechat')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.originalProduct')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.recoveryUserName')}) LIKE ${pattern})`);
+  }
+  return queryBusinessRecordPage<RecoveryOrder>(prisma, {
+    from: 'business_records br', selectData: 'br.data', conditions,
+    orderBy: 'COALESCE(br.eventAt, br.updatedAt, br.createdAt) DESC', page, pageSize,
+  });
+}
+
 async function lockRecoveryOrder(
   transaction: Prisma.TransactionClient,
   orderId: string,
@@ -261,11 +293,18 @@ export function createRecoveryOrderCommandService(
           ? '无权查看售后挽回订单审核列表'
           : '无权查看售后挽回订单列表', 403);
       }
-      const [rows, directory] = await Promise.all([
-        prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } }),
-        loadDirectory(prisma),
-      ]);
+      const directory = await loadDirectory(prisma);
       const scope = recoveryScope(directory, actor, scopeDomain);
+      if (typeof prisma.$queryRaw === 'function') {
+        const result = await queryRecoveryPage(prisma, filters, scope);
+        const page = toPositiveInt(filters.page, 1);
+        const pageSize = Math.min(toPositiveInt(filters.pageSize, 10), 100);
+        return success({
+          items: result.items,
+          pagination: { page, pageSize, total: result.total, totalPages: Math.ceil(result.total / pageSize) },
+        });
+      }
+      const rows = await prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } });
       const items = rows
         .map((row) => parseObject<RecoveryOrder>(row.data, '售后挽回订单'))
         .filter((order) => recoveryVisible(order, scope) && matchesRecoveryOrder(order, filters))

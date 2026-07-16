@@ -13,11 +13,13 @@ import type { Commission } from '../types/commission';
 import type { Order } from '../types/order';
 import type { Product } from '../types/product';
 import type { ApiResponse, PaginatedResponse } from './types';
-import { createSuccessResponse, delay } from './types';
+import { createSuccessResponse, delay as baseDelay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
 import { DEFAULT_PAGE_SIZE, STORAGE_KEYS } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
+
+const delay = (ms?: number) => baseDelay(ms, 'finance');
 
 function ensureInit(): void {
   initializeMockData();

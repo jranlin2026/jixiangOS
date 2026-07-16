@@ -93,6 +93,8 @@ export async function backendRequest<T>(path: string, init: RequestInit = {}): P
 
 let storageHydratedAt = 0;
 let storageHydrationPromise: Promise<void> | null = null;
+const scopedStorageHydratedAt = new Map<string, number>();
+const scopedStorageHydrationPromises = new Map<string, Promise<void>>();
 const pendingStorageWriteKeys = new Set<string>();
 const pendingStorageWritePromises = new Set<Promise<void>>();
 const storageWriteProtectedUntil = new Map<string, number>();
@@ -137,6 +139,27 @@ export async function syncBackendStorageFromServer(maxAgeMs = 1000): Promise<voi
     });
 
   return storageHydrationPromise;
+}
+
+export async function syncBackendStorageScopeFromServer(scope: string, maxAgeMs = 1000): Promise<void> {
+  if (!shouldUseBackendApi() || typeof localStorage === 'undefined') return;
+  if (Date.now() - (scopedStorageHydratedAt.get(scope) || 0) < maxAgeMs) return;
+  const pending = scopedStorageHydrationPromises.get(scope);
+  if (pending) return pending;
+
+  const hydration = backendRequest<Record<string, unknown>>(`/storage?scope=${encodeURIComponent(scope)}`)
+    .then((response) => {
+      if (response.code !== 0 || !response.data) return;
+      Object.entries(response.data).forEach(([key, value]) => {
+        if (isLocalOnlyStorageKey(key) || isStorageKeyProtectedFromHydration(key)) return;
+        localStorage.setItem(key, JSON.stringify(value));
+      });
+      scopedStorageHydratedAt.set(scope, Date.now());
+    })
+    .catch(() => undefined)
+    .finally(() => scopedStorageHydrationPromises.delete(scope));
+  scopedStorageHydrationPromises.set(scope, hydration);
+  return hydration;
 }
 
 export function persistBackendStorageValue(key: string, value: unknown): Promise<void> {

@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { failure, success } from '../api/response';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { buildDataVisibilityScopeForUser, type DataVisibilityScope } from '../../src/shared/utils/dataVisibility';
@@ -15,8 +15,9 @@ import type {
 import type { Order } from '../../src/types/order';
 import type { Product } from '../../src/types/product';
 import { resolveProductDeliveryStages } from '../../src/shared/utils/deliveryStages';
+import { jsonText, queryBusinessRecordPage, visibleJsonCondition } from './businessRecordPageService';
 
-type DeliveryQueryPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department'>;
+type DeliveryQueryPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$queryRaw'>;
 type Row = { data: unknown };
 
 const STATUS_OPTIONS: DeliveryOverallStatus[] = ['全部', '待开始', '交付中', '超期', '阻塞', '待验收', '已完成'];
@@ -115,6 +116,81 @@ function buildStats(deliveries: Delivery[]): DeliveryStats {
   };
 }
 
+function deliverySqlConditions(filters: DeliveryFilters, scope: DataVisibilityScope): Prisma.Sql[] {
+  const conditions: Prisma.Sql[] = [Prisma.sql`d.domain = ${STORAGE_KEYS.DELIVERIES}`];
+  const exact = (path: string, value?: string) => {
+    if (value) conditions.push(Prisma.sql`${jsonText('d', path)} = ${value}`);
+  };
+  exact('$.productType', filters.productType);
+  exact('$.currentStage', filters.stage);
+  exact('$.owner', filters.owner);
+  exact('$.ownerId', filters.ownerId);
+  exact('$.salesOwner', filters.salesOwner);
+  exact('$.priority', filters.priority);
+  if (filters.status && filters.status !== '全部') conditions.push(Prisma.sql`d.status = ${filters.status}`);
+  if (filters.paymentStart) conditions.push(Prisma.sql`${jsonText('d', '$.paymentDate')} >= ${filters.paymentStart}`);
+  if (filters.paymentEnd) conditions.push(Prisma.sql`${jsonText('d', '$.paymentDate')} <= ${filters.paymentEnd}`);
+  if (filters.plannedStart) conditions.push(Prisma.sql`${jsonText('d', '$.plannedCompletedAt')} >= ${filters.plannedStart}`);
+  if (filters.plannedEnd) conditions.push(Prisma.sql`${jsonText('d', '$.plannedCompletedAt')} <= ${filters.plannedEnd}`);
+  if (!scope.unrestricted) {
+    const relations = [
+      visibleJsonCondition('d', ['$.ownerId'], ['$.owner'], scope.visibleUserIds, scope.visibleUserNames),
+      visibleJsonCondition('d', ['$.salesOwnerId'], ['$.salesOwner'], scope.visibleUserIds, scope.visibleUserNames),
+      visibleJsonCondition('o', ['$.salesId'], ['$.salesName', '$.owner'], scope.visibleUserIds, scope.visibleUserNames),
+      visibleJsonCondition('o', ['$.successId'], ['$.successName'], scope.visibleUserIds, scope.visibleUserNames),
+      visibleJsonCondition('o', ['$.serviceId'], ['$.serviceName'], scope.visibleUserIds, scope.visibleUserNames),
+    ];
+    conditions.push(Prisma.sql`(${Prisma.join(relations, ' OR ')})`);
+  }
+  const search = String(filters.search || '').trim().toLocaleLowerCase();
+  if (search) {
+    const pattern = `%${search}%`;
+    conditions.push(Prisma.sql`(LOWER(d.recordId) LIKE ${pattern} OR LOWER(COALESCE(d.title, '')) LIKE ${pattern} OR LOWER(COALESCE(d.owner, '')) LIKE ${pattern} OR LOWER(${jsonText('d', '$.orderNo')}) LIKE ${pattern} OR LOWER(${jsonText('d', '$.productName')}) LIKE ${pattern} OR LOWER(${jsonText('d', '$.salesOwner')}) LIKE ${pattern})`);
+  }
+  return conditions;
+}
+
+async function queryDeliveryPage(prisma: DeliveryQueryPrisma, filters: DeliveryFilters, scope: DataVisibilityScope) {
+  const page = Math.max(1, Number(filters.page) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number(filters.pageSize) || 10));
+  return queryBusinessRecordPage<Delivery>(prisma, {
+    from: `business_records d LEFT JOIN business_records o ON o.domain = '${STORAGE_KEYS.ORDERS}' AND o.recordId = d.orderId`,
+    selectData: 'd.data', conditions: deliverySqlConditions(filters, scope),
+    orderBy: 'COALESCE(d.eventAt, d.updatedAt, d.createdAt) DESC', page, pageSize,
+  });
+}
+
+async function queryDeliveryStats(prisma: DeliveryQueryPrisma, filters: DeliveryFilters, scope: DataVisibilityScope): Promise<DeliveryStats> {
+  const conditions = deliverySqlConditions({ ...filters, status: '全部', page: undefined, pageSize: undefined }, scope);
+  const where = Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
+  const from = Prisma.raw(`business_records d LEFT JOIN business_records o ON o.domain = '${STORAGE_KEYS.ORDERS}' AND o.recordId = d.orderId`);
+  const [statusRows, stageRows, ownerRows] = await Promise.all([
+    prisma.$queryRaw<Array<{ status: string | null; count: bigint | number }>>(
+      Prisma.sql`SELECT d.status, COUNT(*) AS count FROM ${from} ${where} GROUP BY d.status`,
+    ),
+    prisma.$queryRaw<Array<{ stage: string | null; count: bigint | number }>>(
+      Prisma.sql`SELECT ${jsonText('d', '$.currentStage')} AS stage, COUNT(*) AS count FROM ${from} ${where} GROUP BY stage`,
+    ),
+    prisma.$queryRaw<Array<{ ownerId: string | null; owner: string | null; total: bigint | number; overdue: bigint | number; blocked: bigint | number; completed: bigint | number }>>(
+      Prisma.sql`SELECT ${jsonText('d', '$.ownerId')} AS ownerId, COALESCE(${jsonText('d', '$.owner')}, '待分配') AS owner, COUNT(*) AS total, SUM(d.status = ${STATUS_OPTIONS[3]}) AS overdue, SUM(d.status = ${STATUS_OPTIONS[4]}) AS blocked, SUM(d.status = ${STATUS_OPTIONS[6]}) AS completed FROM ${from} ${where} GROUP BY ownerId, owner`,
+    ),
+  ]);
+  const statusCounts = Object.fromEntries(STATUS_OPTIONS.map((status) => [status, 0])) as DeliveryStats['statusCounts'];
+  statusRows.forEach((row) => {
+    if (row.status && row.status in statusCounts) statusCounts[row.status as DeliveryOverallStatus] = Number(row.count);
+  });
+  statusCounts['全部'] = statusRows.reduce((sum, row) => sum + Number(row.count), 0);
+  return {
+    total: statusCounts['全部'], statusCounts,
+    stageCounts: stageRows.filter((row) => row.stage).map((row) => ({ stage: row.stage!, count: Number(row.count) })),
+    ownerWorkload: ownerRows.map((row) => ({
+      owner: row.owner || '待分配', ownerId: row.ownerId || undefined, total: Number(row.total),
+      overdue: Number(row.overdue), blocked: Number(row.blocked), completed: Number(row.completed),
+    })),
+    overdueCount: statusCounts[STATUS_OPTIONS[3]],
+  };
+}
+
 export function createDeliveryQueryService(prisma: DeliveryQueryPrisma) {
   async function visibleDeliveries(filters: DeliveryFilters, actor: AuthenticatedUser) {
     const [deliveryRows, orderRows, scope] = await Promise.all([
@@ -135,6 +211,13 @@ export function createDeliveryQueryService(prisma: DeliveryQueryPrisma) {
 
   return {
     async list(filters: DeliveryFilters = {}, actor: AuthenticatedUser) {
+      if (typeof prisma.$queryRaw === 'function') {
+        const scope = await loadScope(prisma, actor);
+        const result = await queryDeliveryPage(prisma, filters, scope);
+        const page = Math.max(1, Number(filters.page) || 1);
+        const pageSize = Math.min(100, Math.max(1, Number(filters.pageSize) || 10));
+        return success<DeliveryListResponse>({ items: result.items, total: result.total, page, pageSize });
+      }
       const deliveries = await visibleDeliveries(filters, actor);
       const page = Math.max(1, Number(filters.page) || 1);
       const pageSize = Math.min(100, Math.max(1, Number(filters.pageSize) || 10));
@@ -168,6 +251,9 @@ export function createDeliveryQueryService(prisma: DeliveryQueryPrisma) {
     },
 
     async stats(filters: DeliveryFilters = {}, actor: AuthenticatedUser) {
+      if (typeof prisma.$queryRaw === 'function') {
+        return success(await queryDeliveryStats(prisma, filters, await loadScope(prisma, actor)));
+      }
       return success(buildStats(await visibleDeliveries({ ...filters, status: '全部', page: undefined, pageSize: undefined }, actor)));
     },
 

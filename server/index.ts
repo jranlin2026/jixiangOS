@@ -28,6 +28,7 @@ import { createCustomerTagMigrationRouter, createCustomerTagMigrationService } f
 import { createLeadListService } from './services/leadListService';
 import { createSettingsService } from './services/settingsService';
 import { createStorageService } from './services/storageService';
+import { createAssetListService, isAssetListKind } from './services/assetListService';
 import { createOrderApplicationService } from './services/orderApplicationService';
 import { createOrderApprovalDownstreamEffects } from './services/orderApprovalEffectsService';
 import { createOrderCommandService } from './services/orderCommandService';
@@ -87,6 +88,7 @@ const customerTagMigrationService = createCustomerTagMigrationService(prisma as 
 const leadListService = createLeadListService(prisma);
 const settingsService = createSettingsService(prisma);
 const storageService = createStorageService(prisma);
+const assetListService = createAssetListService(storageService, assetStorageContext);
 const deliveryAssignmentService = createDeliveryAssignmentService(prisma);
 const orderApplicationService = createOrderApplicationService(prisma, {
   applyDownstreamEffects: createOrderApprovalDownstreamEffects(deliveryAssignmentService),
@@ -142,6 +144,7 @@ const requireDeliveryReadAccess = createRequireAuth(authService, PERMISSION_KEYS
 const requireDeliveryWriteAccess = createRequireAnyPermission(authService, [PERMISSION_KEYS.DELIVERY_MOVE_CARD, PERMISSION_KEYS.DELIVERY_STAGE_CONFIG], 'write');
 const requireRecoveryCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, 'write');
 const requireMatrixPublishUploadAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write');
+const requireAssetReadAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS);
 const requireAiChatAccess = createRequireAuth(authService, PERMISSION_KEYS.AI_CHAT);
 const requireCustomerAiCardAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_AI_CARD);
 const requireEnablementRead = createRequireAuth(authService, PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE);
@@ -161,30 +164,13 @@ const assignableUsersPermissions = [
   PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
 ];
 const runtimeStorageKeys = [
-  STORAGE_KEYS.LEADS,
-  STORAGE_KEYS.ORDERS,
-  STORAGE_KEYS.ORDER_APPLICATIONS,
-  STORAGE_KEYS.DELIVERIES,
   STORAGE_KEYS.DELIVERY_ASSIGNMENT_CONFIG,
-  STORAGE_KEYS.COMMISSIONS,
-  STORAGE_KEYS.COMMISSION_OPERATION_LOGS,
-  STORAGE_KEYS.COMMISSION_SETTLEMENT_BATCHES,
-  STORAGE_KEYS.REFUNDS,
-  STORAGE_KEYS.RECOVERY_ORDERS,
   STORAGE_KEYS.OPPORTUNITIES,
   STORAGE_KEYS.SERVICE_TICKETS,
   STORAGE_KEYS.AI_CARDS,
   STORAGE_KEYS.AI_SESSIONS,
   STORAGE_KEYS.PRODUCTS,
   STORAGE_KEYS.TAGS,
-  STORAGE_KEYS.FINANCE,
-  STORAGE_KEYS.ASSET_DEVICES,
-  STORAGE_KEYS.ASSET_PHONE_NUMBERS,
-  STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS,
-  STORAGE_KEYS.ASSET_RISKS,
-  STORAGE_KEYS.ASSET_OPERATION_LOGS,
-  STORAGE_KEYS.ASSET_OFFBOARDING_TASKS,
-  STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS,
   STORAGE_KEYS.USERS,
   STORAGE_KEYS.DEPARTMENTS,
   STORAGE_KEYS.POSITIONS,
@@ -206,6 +192,26 @@ const runtimeStorageKeys = [
   STORAGE_KEYS.ECOMMERCE_SETTLEMENT_CONFIG,
   STORAGE_KEYS.INITIALIZED,
 ];
+const scopedStorageKeys: Record<string, string[]> = {
+  assets: [
+    STORAGE_KEYS.ASSET_DEVICES,
+    STORAGE_KEYS.ASSET_PHONE_NUMBERS,
+    STORAGE_KEYS.ASSET_INTERNET_ACCOUNTS,
+    STORAGE_KEYS.ASSET_RISKS,
+    STORAGE_KEYS.ASSET_OPERATION_LOGS,
+    STORAGE_KEYS.ASSET_OFFBOARDING_TASKS,
+    STORAGE_KEYS.ASSET_MATRIX_PUBLISH_TASKS,
+  ],
+  finance: [
+    STORAGE_KEYS.ORDERS,
+    STORAGE_KEYS.COMMISSIONS,
+    STORAGE_KEYS.COMMISSION_OPERATION_LOGS,
+    STORAGE_KEYS.COMMISSION_SETTLEMENT_BATCHES,
+    STORAGE_KEYS.REFUNDS,
+    STORAGE_KEYS.RECOVERY_ORDERS,
+    STORAGE_KEYS.FINANCE,
+  ],
+};
 const requireAssignableUsersAccess = createRequireAnyPermission(authService, assignableUsersPermissions);
 const loginRateLimiter = createLoginRateLimiter();
 
@@ -1014,9 +1020,34 @@ app.post('/api/ai/config/test', requireAiConfigWriteAccess, async (_req, res) =>
   }
 });
 
+app.get('/api/assets/dashboard', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
+  res.json(await assetListService.dashboard(req.currentUser!));
+});
+
+app.get('/api/assets/:kind', requireAssetReadAccess, async (req: AuthenticatedRequest, res) => {
+  const kind = routeParam(req.params.kind);
+  if (!isAssetListKind(kind)) {
+    res.status(404).json({ code: 404, data: null, message: 'Unknown asset list' });
+    return;
+  }
+  const result = await assetListService.list(kind, {
+    search: queryParam(req.query.search),
+    platform: queryParam(req.query.platform),
+    permissionStatus: queryParam(req.query.permissionStatus),
+    riskLevel: queryParam(req.query.riskLevel),
+    status: queryParam(req.query.status),
+    page: Number(queryParam(req.query.page) || 1),
+    pageSize: Number(queryParam(req.query.pageSize) || 20),
+  }, req.currentUser!);
+  res.json(result);
+});
+
 app.get('/api/storage', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
-  if (queryParam(req.query.scope) === 'runtime') {
-    const entries = await Promise.all(runtimeStorageKeys
+  const runtimeScope = queryParam(req.query.scope) === 'runtime';
+  const requestedScope = queryParam(req.query.scope);
+  const requestedKeys = runtimeScope ? runtimeStorageKeys : scopedStorageKeys[requestedScope];
+  if (requestedKeys) {
+    const entries = await Promise.all(requestedKeys
       .filter((key) => req.currentUser && canAccessLegacyStorageKey(req.currentUser, key, 'runtime'))
       .map(async (key) => {
       const result = await storageService.get(key);
@@ -1055,10 +1086,13 @@ app.get('/api/storage/:key', requireStorageAccess, async (req: AuthenticatedRequ
     return;
   }
   if (req.currentUser && isAssetStorageKey(key)) {
-    const result = await storageService.list();
+    const entries = await Promise.all(scopedStorageKeys.assets.map(async (assetKey) => {
+      const result = await storageService.get(assetKey);
+      return [assetKey, result.code === 0 ? result.data : []] as const;
+    }));
     const context = await assetStorageContext();
-    const data = filterSingleStorageKey(key, result.data as Record<string, unknown>, req.currentUser, context);
-    res.status(result.code === 0 ? 200 : 400).json({ ...result, data });
+    const data = filterSingleStorageKey(key, Object.fromEntries(entries), req.currentUser, context);
+    res.json({ code: 0, data, message: 'success' });
     return;
   }
   if (key === STORAGE_KEYS.RECOVERY_ORDERS) {

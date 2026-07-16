@@ -1,5 +1,5 @@
 /** API 响应类型 */
-import { syncBackendStorageFromServer } from './backendClient';
+import { syncBackendStorageScopeFromServer } from './backendClient';
 
 export interface ApiResponse<T> {
   code: number;
@@ -29,8 +29,8 @@ export function createErrorResponse<T>(message: string, code: number = -1): ApiR
 }
 
 /** 模拟异步延迟 */
-export function delay(ms: number = 300): Promise<void> {
-  return syncBackendStorageFromServer()
+export function delay(ms: number = 300, storageScope?: string): Promise<void> {
+  return (storageScope ? syncBackendStorageScopeFromServer(storageScope) : Promise.resolve())
     .catch(() => undefined)
     .then(() => new Promise((resolve) => setTimeout(resolve, ms)));
 }

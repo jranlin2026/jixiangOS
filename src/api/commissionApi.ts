@@ -26,13 +26,15 @@ import type { Department } from '../types/department';
 import type { Position } from '../types/position';
 import type { Role } from '../types/role';
 import type { ApiResponse, PaginatedResponse } from './types';
-import { createErrorResponse, createSuccessResponse, delay } from './types';
+import { createErrorResponse, createSuccessResponse, delay as baseDelay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { getCurrentOperatorName } from '../shared/utils/currentOperator';
 import { v4 as uuidv4 } from 'uuid';
 import { orderApi } from './orderApi';
+
+const delay = (ms?: number) => baseDelay(ms, 'finance');
 import { shouldUseBackendApi } from './backendClient';
 
 function ensureInit(): void {

@@ -182,7 +182,7 @@ const readOrderViewConfig = () => {
 };
 
 const Orders: React.FC = () => {
-  const { items, filters, pagination, fetchItems, setFilters, delete: deleteOrder } = useOrderStore();
+  const { items, filters, pagination, loading, fetchItems, setFilters, delete: deleteOrder } = useOrderStore();
   const currentUser = useAuthStore((state) => state.currentUser);
   const [searchParams, setSearchParams] = useSearchParams();
   const visibleTabs = useMemo<Array<{ value: 'list' | 'review'; label: string }>>(() => {
@@ -745,7 +745,7 @@ const Orders: React.FC = () => {
                           textAlign: 'center',
                         }}
                       >
-                        暂无订单数据
+                        {loading ? '加载中...' : '暂无订单数据'}
                       </Box>
                     </TableCell>
                   </TableRow>

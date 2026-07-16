@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { failure, success } from '../api/response';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../../src/shared/utils/constants';
 import type { PaginatedResponse } from '../../src/api/types';
@@ -16,8 +16,9 @@ import {
   type DataVisibilityScope,
 } from '../../src/shared/utils/dataVisibility';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
+import { jsonText, queryBusinessRecordPage, visibleJsonCondition } from './businessRecordPageService';
 
-type OrderQueryPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department'>;
+type OrderQueryPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$queryRaw'>;
 
 type BusinessRecordRow = {
   data: unknown;
@@ -141,6 +142,75 @@ function matchesApplication(application: OrderApplication, filters: OrderApplica
   return inDateRange(application.submittedAt || application.createdAt, filters.startDate, filters.endDate);
 }
 
+function exactJson(alias: string, path: string, value?: string): Prisma.Sql[] {
+  return value ? [Prisma.sql`${jsonText(alias, path)} = ${value}`] : [];
+}
+
+async function queryOrderPage(
+  prisma: OrderQueryPrisma,
+  filters: OrderFilters,
+  scope: DataVisibilityScope,
+) {
+  const page = toPositiveInt(filters.page, 1);
+  const pageSize = Math.min(toPositiveInt(filters.pageSize, DEFAULT_PAGE_SIZE), 100);
+  const conditions: Prisma.Sql[] = [
+    Prisma.sql`br.domain = ${STORAGE_KEYS.ORDERS}`,
+    Prisma.sql`JSON_EXTRACT(br.data, '$.deletedAt') IS NULL`,
+    ...exactJson('br', '$.customerId', filters.customerId),
+    ...exactJson('br', '$.productLevel', filters.productLevel),
+    ...exactJson('br', '$.orderType', filters.orderType),
+    ...exactJson('br', '$.paymentMethod', filters.paymentMethod),
+  ];
+  if (filters.status) conditions.push(Prisma.sql`br.status = ${filters.status}`);
+  if (filters.owner) conditions.push(Prisma.sql`(br.owner = ${filters.owner} OR ${jsonText('br', '$.salesName')} = ${filters.owner})`);
+  if (filters.startDate) conditions.push(Prisma.sql`${jsonText('br', '$.createdAt')} >= ${filters.startDate}`);
+  if (filters.endDate) conditions.push(Prisma.sql`${jsonText('br', '$.createdAt')} <= ${/^\d{4}-\d{2}-\d{2}$/.test(filters.endDate) ? `${filters.endDate}T23:59:59.999Z` : filters.endDate}`);
+  if (!scope.unrestricted) {
+    const salesId = jsonText('br', '$.salesId');
+    const ownerName = Prisma.sql`COALESCE(NULLIF(${jsonText('br', '$.salesName')}, ''), ${jsonText('br', '$.owner')})`;
+    const idMatch = scope.visibleUserIds.length ? Prisma.sql`${salesId} IN (${Prisma.join(scope.visibleUserIds)})` : Prisma.sql`FALSE`;
+    const nameMatch = scope.visibleUserNames.length ? Prisma.sql`${ownerName} IN (${Prisma.join(scope.visibleUserNames)})` : Prisma.sql`FALSE`;
+    conditions.push(Prisma.sql`(${idMatch} OR (COALESCE(${salesId}, '') = '' AND ${nameMatch}))`);
+  }
+  const search = lowerText(filters.search);
+  if (search) {
+    const pattern = `%${search}%`;
+    conditions.push(Prisma.sql`(LOWER(br.recordId) LIKE ${pattern} OR LOWER(COALESCE(br.title, '')) LIKE ${pattern} OR LOWER(COALESCE(br.owner, '')) LIKE ${pattern} OR LOWER(${jsonText('br', '$.orderNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.customerName')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.productName')}) LIKE ${pattern})`);
+  }
+  return queryBusinessRecordPage<Order>(prisma, {
+    from: 'business_records br', selectData: 'br.data', conditions,
+    orderBy: `COALESCE(br.eventAt, br.updatedAt, br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}`,
+    page, pageSize,
+  });
+}
+
+async function queryApplicationPage(
+  prisma: OrderQueryPrisma,
+  filters: OrderApplicationFilters,
+  scope: DataVisibilityScope,
+) {
+  const page = toPositiveInt(filters.page, 1);
+  const pageSize = Math.min(toPositiveInt(filters.pageSize, DEFAULT_PAGE_SIZE), 100);
+  const conditions: Prisma.Sql[] = [Prisma.sql`br.domain = ${STORAGE_KEYS.ORDER_APPLICATIONS}`];
+  if (filters.status) conditions.push(Prisma.sql`br.status = ${filters.status}`);
+  conditions.push(...exactJson('br', '$.applicantName', filters.applicantName));
+  conditions.push(...exactJson('br', '$.reviewerName', filters.reviewerName));
+  if (filters.startDate) conditions.push(Prisma.sql`COALESCE(${jsonText('br', '$.submittedAt')}, ${jsonText('br', '$.createdAt')}) >= ${filters.startDate}`);
+  if (filters.endDate) conditions.push(Prisma.sql`COALESCE(${jsonText('br', '$.submittedAt')}, ${jsonText('br', '$.createdAt')}) <= ${/^\d{4}-\d{2}-\d{2}$/.test(filters.endDate) ? `${filters.endDate}T23:59:59.999Z` : filters.endDate}`);
+  if (!scope.unrestricted) conditions.push(visibleJsonCondition(
+    'br', ['$.applicantId'], ['$.applicantName'], scope.visibleUserIds, scope.visibleUserNames,
+  ));
+  const search = lowerText(filters.search);
+  if (search) {
+    const pattern = `%${search}%`;
+    conditions.push(Prisma.sql`(LOWER(br.recordId) LIKE ${pattern} OR LOWER(COALESCE(br.title, '')) LIKE ${pattern} OR LOWER(${jsonText('br', '$.applicationNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.applicantName')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.orderNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.orderData.customerName')}) LIKE ${pattern})`);
+  }
+  return queryBusinessRecordPage<OrderApplication>(prisma, {
+    from: 'business_records br', selectData: 'br.data', conditions,
+    orderBy: 'COALESCE(br.eventAt, br.updatedAt, br.createdAt) DESC', page, pageSize,
+  });
+}
+
 export interface OrderQueryServiceOptions {
   now?: () => Date;
 }
@@ -151,6 +221,13 @@ export function createOrderQueryService(
 ) {
   return {
     async listOrders(filters: OrderFilters = {}, actor: AuthenticatedUser) {
+      if (typeof prisma.$queryRaw === 'function') {
+        const scope = await loadScope(prisma, actor, 'orders');
+        const result = await queryOrderPage(prisma, filters, scope);
+        const page = toPositiveInt(filters.page, 1);
+        const pageSize = Math.min(toPositiveInt(filters.pageSize, DEFAULT_PAGE_SIZE), 100);
+        return success({ items: result.items, pagination: { page, pageSize, total: result.total, totalPages: Math.ceil(result.total / pageSize) } });
+      }
       const [rows, scope] = await Promise.all([
         prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDERS } }),
         loadScope(prisma, actor, 'orders'),
@@ -182,6 +259,13 @@ export function createOrderQueryService(
     },
 
     async listApplications(filters: OrderApplicationFilters = {}, actor: AuthenticatedUser) {
+      if (typeof prisma.$queryRaw === 'function') {
+        const scope = await loadScope(prisma, actor, 'orderApplications');
+        const result = await queryApplicationPage(prisma, filters, scope);
+        const page = toPositiveInt(filters.page, 1);
+        const pageSize = Math.min(toPositiveInt(filters.pageSize, DEFAULT_PAGE_SIZE), 100);
+        return success({ items: result.items, pagination: { page, pageSize, total: result.total, totalPages: Math.ceil(result.total / pageSize) } });
+      }
       const [rows, scope] = await Promise.all([
         prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDER_APPLICATIONS } }),
         loadScope(prisma, actor, 'orderApplications'),
