@@ -51,6 +51,7 @@ function createStore(
     queryLog?: string[];
     transactionAttempts?: { value: number };
     failTransactions?: number;
+    failAfterGroupWrites?: number;
   } = {},
 ) {
   const state: State = {
@@ -62,6 +63,7 @@ function createStore(
     appStorage: structuredClone((input as any).appStorage || []),
   };
   let remainingTransactionFailures = options.failTransactions || 0;
+  let remainingPartialGroupWriteFailures = options.failAfterGroupWrites || 0;
   const store: any = {
     contactIdentity: {
       findUnique: async ({ where }: any) => state.identities.find((row) => matchesWhere(row, where)) || null,
@@ -112,6 +114,10 @@ function createStore(
         }
         const row = { ...structuredClone(data), createdAt: new Date() };
         state.groups.push(row);
+        if (remainingPartialGroupWriteFailures > 0) {
+          remainingPartialGroupWriteFailures -= 1;
+          throw Object.assign(new Error('backfill deadlock after duplicate-group write'), { code: 'P2034' });
+        }
         return structuredClone(row);
       },
       update: async ({ where, data }: any) => {
@@ -190,7 +196,18 @@ function createStore(
       throw Object.assign(new Error('backfill deadlock'), { code: 'P2034' });
     }
     options.beforeTransaction?.(state);
-    return operation(store);
+    const snapshot = structuredClone(state);
+    try {
+      return await operation(store);
+    } catch (error) {
+      state.identities = snapshot.identities;
+      state.links = snapshot.links;
+      state.groups = snapshot.groups;
+      state.customers = snapshot.customers;
+      state.leads = snapshot.leads;
+      state.appStorage = snapshot.appStorage;
+      throw error;
+    }
   };
   return { store, state };
 }
@@ -473,6 +490,38 @@ assert.equal(normalizeContactIdentity('wechat', ' WeiXin_A '), 'weixin_a');
     (error: unknown) => (error as { code?: string }).code === 'P2034',
   );
   assert.equal(exhaustedAttempts.value, 3);
+}
+
+// RED: a retryable failure after backfill has already inserted links and a
+// duplicate group must roll back that partial attempt before retrying. The
+// converged retry has exactly the current two links and one group, not a mix
+// of failed-attempt rows and retry rows.
+{
+  const sharedPhone = '13900000045';
+  const attempts = { value: 0 };
+  const { store, state } = createStore({
+    customers: [
+      {
+        id: 'aaos_customers:c-backfill-partial-a', domain: 'aaos_customers', recordId: 'c-backfill-partial-a',
+        data: { id: 'c-backfill-partial-a', name: '回填部分写入甲', phone: sharedPhone },
+      },
+      {
+        id: 'aaos_customers:c-backfill-partial-b', domain: 'aaos_customers', recordId: 'c-backfill-partial-b',
+        data: { id: 'c-backfill-partial-b', name: '回填部分写入乙', phone: sharedPhone },
+      },
+    ],
+  }, { failAfterGroupWrites: 1, transactionAttempts: attempts });
+
+  const result = await backfillContactIdentities(store, { apply: true, crypto });
+  assert.equal(attempts.value, 2, 'a post-write P2034 must restart the whole transaction');
+  assert.equal(result.conflicts, 1);
+  assert.equal(state.identities.length, 1);
+  assert.equal(state.links.filter((link) => link.linkStatus === 'active').length, 2);
+  assert.equal(state.groups.length, 1);
+  assert.deepEqual(
+    state.links.filter((link) => link.linkStatus === 'active').map((link) => link.entityId).sort(),
+    ['c-backfill-partial-a', 'c-backfill-partial-b'],
+  );
 }
 
 {

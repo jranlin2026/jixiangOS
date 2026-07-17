@@ -4,7 +4,12 @@ import {
   createCustomerCommandService,
 } from './customerCommandService';
 import { createPrismaCustomerAuditAppender } from './customerAuditService';
-import { hashContactIdentity, normalizeContactIdentity } from './contactIdentityService';
+import {
+  CONTACT_IDENTITY_MUTATION_GATE_KEY,
+  backfillContactIdentities,
+  hashContactIdentity,
+  normalizeContactIdentity,
+} from './contactIdentityService';
 import { DEFAULT_LEAD_FLOW_CONFIG, LIFECYCLE_STATUS_CODES, STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import type { Customer } from '../../src/types/customer';
@@ -348,6 +353,7 @@ function createFakePrisma(
     roleRows?: any[];
     seedContactIdentities?: boolean;
     queryLog?: string[];
+    onMutationGateLocked?: () => void | Promise<void>;
   } = {},
 ) {
   let state: FakeState = {
@@ -455,6 +461,7 @@ function createFakePrisma(
         options.queryLog?.push(`app_storage_upsert:${where.key}`);
         if (String(where.key).startsWith('aaos_contact_lock_')) contactLockUpserts += 1;
         await lockContact(where.key);
+        if (where.key === CONTACT_IDENTITY_MUTATION_GATE_KEY) await options.onMutationGateLocked?.();
         const rows = working.appStorage || (working.appStorage = []);
         const row = rows.find((item) => item.key === where.key);
         if (row) {
@@ -645,6 +652,9 @@ function createFakePrisma(
         }
         if (text.includes('ORDER BY recordId') && text.includes('FOR UPDATE')) {
           const [legacyDomain, normalized] = values;
+          if (!text.includes('AND (')) {
+            return clone(working.businessRecords.filter((row) => row.domain === legacyDomain));
+          }
           const type = text.includes("'$.wechat'") ? 'wechat' : 'phone';
           return clone(working.businessRecords.filter((row) => (
             row.domain === legacyDomain
@@ -1580,6 +1590,298 @@ const serviceOptions = {
   assert.match(result.data?.changeHistory?.[0].summary || '', /修改了/);
   assert.equal(result.data?.tags, undefined, '线索更新必须清理历史标签');
   assert.equal(result.data?.manualTagIds, undefined);
+}
+
+// The locked relational id, rather than a stale embedded JSON id, must also
+// exclude the source lead from collision detection.
+{
+  const source = pendingLead('lead-stale-json-self-collision');
+  source.data.id = 'stale-json-lead-id-for-collision';
+  source.phone = '13800000076';
+  source.data.phone = source.phone;
+  const fake = createFakePrisma({ businessRecords: [], leads: [source] });
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .updateLead(source.id, { company: '不应把自己判为冲突' }, superAdmin);
+
+  assert.equal(result.code, 0);
+  const next = fake.getState();
+  assert.equal(next.leads[0]?.data.company, '不应把自己判为冲突');
+  assert.equal(next.contactIdentityLinks?.some((link) => (
+    link.entityType === 'lead' && link.entityId === source.id && link.linkStatus === 'active'
+  )), true, 'a non-backfilled lead is linked using the authoritative record id');
+}
+
+// RED: 已被回填的独立线索修改联系方式时，旧 identity link 必须在同一
+// 事务中结束，新联系方式必须建立 active link；该路径也必须先取得全局
+// identity mutation gate，避免与 backfill 的 source/identity 锁交错。
+{
+  const source = pendingLead('lead-identity-contact-rollover');
+  const lockedLeadId = source.id;
+  const oldPhone = '13800000071';
+  const newPhone = '13900000071';
+  source.phone = oldPhone;
+  source.data.phone = oldPhone;
+  source.data.id = 'stale-json-lead-id';
+  const oldHash = hashContactIdentity(normalizeContactIdentity('phone', oldPhone), TEST_CONTACT_CRYPTO.hmacKey);
+  const oldIdentityId = `ci_phone_${oldHash.slice(0, 32)}`;
+  const queryLog: string[] = [];
+  const fake = createFakePrisma({
+    businessRecords: [],
+    leads: [source],
+    contactIdentities: [{
+      id: oldIdentityId,
+      type: 'phone',
+      normalizedHash: oldHash,
+      hashKeyVersion: 1,
+      status: 'active',
+      encryptedNormalizedValue: 'ci:v1:test',
+      canonicalCustomerId: null,
+      conflictReason: null,
+    }],
+    contactIdentityLinks: [{
+      id: 'lead-old-phone-link',
+      identityId: oldIdentityId,
+      entityType: 'lead',
+      entityId: lockedLeadId,
+      linkStatus: 'active',
+      source: 'historical_backfill',
+      endedAt: null,
+    }],
+  }, { queryLog });
+
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .updateLead(lockedLeadId, { phone: newPhone }, superAdmin);
+
+  assert.equal(result.code, 0);
+  const next = fake.getState();
+  const newHash = hashContactIdentity(normalizeContactIdentity('phone', newPhone), TEST_CONTACT_CRYPTO.hmacKey);
+  const newIdentity = next.contactIdentities?.find((identity) => identity.type === 'phone' && identity.normalizedHash === newHash);
+  assert.ok(newIdentity, 'current contact must have an identity');
+  assert.equal(next.contactIdentityLinks?.find((link) => link.id === 'lead-old-phone-link')?.linkStatus, 'ended');
+  assert.equal(next.contactIdentityLinks?.some((link) => (
+    link.identityId === newIdentity.id
+    && link.entityType === 'lead'
+    && link.entityId === lockedLeadId
+    && link.linkStatus === 'active'
+  )), true);
+  assert.equal(next.contactIdentities?.find((identity) => identity.id === oldIdentityId)?.canonicalCustomerId, null);
+  assert.equal(newIdentity.canonicalCustomerId, null, 'standalone lead sync must not claim a customer canonical pointer');
+  const gate = queryLog.indexOf(`app_storage_upsert:${CONTACT_IDENTITY_MUTATION_GATE_KEY}`);
+  const leadLock = queryLog.findIndex((text) => text.includes('FROM lead_records') && text.includes('WHERE id =') && text.includes('FOR UPDATE'));
+  assert.ok(gate >= 0 && leadLock > gate, 'lead update must take the mutation gate before locking the source lead');
+}
+
+// Clearing every contact on a standalone lead ends all of its active identity
+// links without altering customer canonical state on the historical identities.
+{
+  const source = pendingLead('lead-identity-contact-clear');
+  const phone = '13800000072';
+  const wechat = 'lead_clear_old';
+  source.phone = phone;
+  source.data.phone = phone;
+  source.wechat = wechat;
+  source.data.wechat = wechat;
+  const phoneHash = hashContactIdentity(normalizeContactIdentity('phone', phone), TEST_CONTACT_CRYPTO.hmacKey);
+  const wechatHash = hashContactIdentity(normalizeContactIdentity('wechat', wechat), TEST_CONTACT_CRYPTO.hmacKey);
+  const phoneIdentityId = `ci_phone_${phoneHash.slice(0, 32)}`;
+  const wechatIdentityId = `ci_wechat_${wechatHash.slice(0, 32)}`;
+  const fake = createFakePrisma({
+    businessRecords: [],
+    leads: [source],
+    contactIdentities: [
+      {
+        id: phoneIdentityId,
+        type: 'phone',
+        normalizedHash: phoneHash,
+        hashKeyVersion: 1,
+        status: 'active',
+        encryptedNormalizedValue: 'ci:v1:test',
+        canonicalCustomerId: null,
+        conflictReason: null,
+      },
+      {
+        id: wechatIdentityId,
+        type: 'wechat',
+        normalizedHash: wechatHash,
+        hashKeyVersion: 1,
+        status: 'active',
+        encryptedNormalizedValue: 'ci:v1:test',
+        canonicalCustomerId: null,
+        conflictReason: null,
+      },
+    ],
+    contactIdentityLinks: [
+      {
+        id: 'lead-clear-phone-link',
+        identityId: phoneIdentityId,
+        entityType: 'lead',
+        entityId: source.id,
+        linkStatus: 'active',
+        source: 'historical_backfill',
+        endedAt: null,
+      },
+      {
+        id: 'lead-clear-wechat-link',
+        identityId: wechatIdentityId,
+        entityType: 'lead',
+        entityId: source.id,
+        linkStatus: 'active',
+        source: 'historical_backfill',
+        endedAt: null,
+      },
+    ],
+  });
+
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .updateLead(source.id, { phone: '', wechat: '' }, superAdmin);
+
+  assert.equal(result.code, 0);
+  const next = fake.getState();
+  assert.equal(next.contactIdentityLinks?.some((link) => (
+    link.entityType === 'lead' && link.entityId === source.id && link.linkStatus === 'active'
+  )), false);
+  assert.equal(next.contactIdentityLinks?.filter((link) => (
+    link.entityType === 'lead' && link.entityId === source.id && link.linkStatus === 'ended'
+  )).length, 2);
+  assert.equal(next.contactIdentities?.find((identity) => identity.id === phoneIdentityId)?.canonicalCustomerId, null);
+  assert.equal(next.contactIdentities?.find((identity) => identity.id === wechatIdentityId)?.canonicalCustomerId, null);
+}
+
+// A lead update holding the mutation gate and a backfill apply started while
+// that gate is held must serialize. Backfill therefore sees the committed new
+// Lead source and cannot reactivate the obsolete old-contact link.
+{
+  const source = pendingLead('lead-identity-backfill-interleave');
+  const oldPhone = '13800000073';
+  const newPhone = '13900000073';
+  source.phone = oldPhone;
+  source.data.phone = oldPhone;
+  const oldHash = hashContactIdentity(normalizeContactIdentity('phone', oldPhone), TEST_CONTACT_CRYPTO.hmacKey);
+  const oldIdentityId = `ci_phone_${oldHash.slice(0, 32)}`;
+  const queryLog: string[] = [];
+  let markFirstGate!: () => void;
+  let releaseFirstGate!: () => void;
+  const firstGateLocked = new Promise<void>((resolve) => { markFirstGate = resolve; });
+  const continueFirstTransaction = new Promise<void>((resolve) => { releaseFirstGate = resolve; });
+  let mutationGateAcquisitions = 0;
+  const fake = createFakePrisma({
+    businessRecords: [],
+    leads: [source],
+    contactIdentities: [{
+      id: oldIdentityId,
+      type: 'phone',
+      normalizedHash: oldHash,
+      hashKeyVersion: 1,
+      status: 'active',
+      encryptedNormalizedValue: 'ci:v1:test',
+      canonicalCustomerId: null,
+      conflictReason: null,
+    }],
+    contactIdentityLinks: [{
+      id: 'lead-interleave-old-link',
+      identityId: oldIdentityId,
+      entityType: 'lead',
+      entityId: source.id,
+      linkStatus: 'active',
+      source: 'historical_backfill',
+      endedAt: null,
+    }],
+  }, {
+    queryLog,
+    onMutationGateLocked: async () => {
+      mutationGateAcquisitions += 1;
+      if (mutationGateAcquisitions === 1) {
+        markFirstGate();
+        await continueFirstTransaction;
+      }
+    },
+  });
+  const service = createCustomerCommandService(fake.prisma, serviceOptions);
+  const update = service.updateLead(source.id, { phone: newPhone }, superAdmin);
+  await firstGateLocked;
+  const backfill = backfillContactIdentities(fake.prisma, { apply: true, crypto: TEST_CONTACT_CRYPTO });
+  releaseFirstGate();
+  const [updated, summary] = await Promise.all([update, backfill]);
+
+  assert.equal(updated.code, 0);
+  assert.equal(summary.canonicalCustomers, 0);
+  assert.equal(mutationGateAcquisitions, 2);
+  const next = fake.getState();
+  const newHash = hashContactIdentity(normalizeContactIdentity('phone', newPhone), TEST_CONTACT_CRYPTO.hmacKey);
+  assert.equal(next.contactIdentityLinks?.find((link) => link.id === 'lead-interleave-old-link')?.linkStatus, 'ended');
+  assert.deepEqual(
+    next.contactIdentityLinks?.filter((link) => link.entityType === 'lead' && link.entityId === source.id && link.linkStatus === 'active')
+      .map((link) => next.contactIdentities?.find((identity) => identity.id === link.identityId)?.normalizedHash),
+    [newHash],
+  );
+  const gateIndexes = queryLog
+    .map((entry, index) => entry === `app_storage_upsert:${CONTACT_IDENTITY_MUTATION_GATE_KEY}` ? index : -1)
+    .filter((index) => index >= 0);
+  const backfillLeadSourceLock = queryLog.findIndex((text) => (
+    text.includes('FROM lead_records') && text.includes('ORDER BY id ASC') && text.includes('FOR UPDATE')
+  ));
+  assert.equal(gateIndexes.length, 2);
+  assert.ok(backfillLeadSourceLock > gateIndexes[1], 'backfill source reads must wait until its mutation gate is held');
+}
+
+// Collision validation precedes standalone-link synchronization. A rejected
+// contact edit must leave the historical active link intact whether the target
+// contact belongs to an existing customer or another lead.
+for (const targetType of ['customer', 'lead'] as const) {
+  const source = pendingLead(`lead-identity-collision-${targetType}`);
+  const oldPhone = targetType === 'customer' ? '13800000074' : '13800000075';
+  const blockedPhone = targetType === 'customer' ? '13900000074' : '13900000075';
+  source.phone = oldPhone;
+  source.data.phone = oldPhone;
+  const oldHash = hashContactIdentity(normalizeContactIdentity('phone', oldPhone), TEST_CONTACT_CRYPTO.hmacKey);
+  const oldIdentityId = `ci_phone_${oldHash.slice(0, 32)}`;
+  const blockingCustomer = customer(`cust-blocking-lead-contact-${targetType}`);
+  blockingCustomer.phone = blockedPhone;
+  const blockingLead = pendingLead(`lead-blocking-lead-contact-${targetType}`);
+  blockingLead.phone = blockedPhone;
+  blockingLead.data.phone = blockedPhone;
+  const fake = createFakePrisma({
+    businessRecords: targetType === 'customer' ? [businessCustomer(blockingCustomer)] : [],
+    leads: targetType === 'lead' ? [source, blockingLead] : [source],
+    contactIdentities: [{
+      id: oldIdentityId,
+      type: 'phone',
+      normalizedHash: oldHash,
+      hashKeyVersion: 1,
+      status: 'active',
+      encryptedNormalizedValue: 'ci:v1:test',
+      canonicalCustomerId: null,
+      conflictReason: null,
+    }],
+    contactIdentityLinks: [{
+      id: `lead-collision-old-link-${targetType}`,
+      identityId: oldIdentityId,
+      entityType: 'lead',
+      entityId: source.id,
+      linkStatus: 'active',
+      source: 'historical_backfill',
+      endedAt: null,
+    }],
+  });
+
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .updateLead(source.id, { phone: blockedPhone }, superAdmin);
+
+  assert.equal(result.code, 409, `${targetType} collision must reject the edit`);
+  const next = fake.getState();
+  assert.deepEqual(
+    next.contactIdentityLinks?.filter((link) => link.entityType === 'lead' && link.entityId === source.id),
+    [{
+      id: `lead-collision-old-link-${targetType}`,
+      identityId: oldIdentityId,
+      entityType: 'lead',
+      entityId: source.id,
+      linkStatus: 'active',
+      source: 'historical_backfill',
+      endedAt: null,
+    }],
+  );
+  assert.equal(next.leads.find((lead) => lead.id === source.id)?.data.phone, oldPhone);
 }
 
 // 线索标签请求必须被忽略，且无权限时仍需在事务前拒绝。

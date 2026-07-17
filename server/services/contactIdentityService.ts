@@ -101,6 +101,16 @@ export type LeadCustomerIdentityInput = CustomerIdentityInput & {
   leadId: string;
 };
 
+/**
+ * A standalone lead participates in the identity index, but never claims or
+ * changes customer canonical ownership. Callers must already hold the shared
+ * identity mutation gate before invoking this lifecycle helper.
+ */
+export type LeadIdentityInput = ContactInput & {
+  leadId: string;
+  source?: string;
+};
+
 export interface ContactIdentityBackfillOptions {
   apply: boolean;
   crypto?: ContactIdentityCrypto;
@@ -606,6 +616,27 @@ export async function endLeadContactIdentityLinks(
   leadId: string,
 ): Promise<void> {
   await endObsoleteEntityLinks(tx, 'lead', leadId, new Set());
+}
+
+/**
+ * Converges a standalone lead's active links to its current valid contacts.
+ * It deliberately leaves identity customer status/canonical fields unchanged:
+ * standalone leads are observers of a contact identity, not customer owners.
+ */
+export async function upsertLeadContactIdentities(
+  tx: ContactIdentityStore,
+  input: LeadIdentityInput,
+): Promise<ContactIdentityRecord[]> {
+  const crypto = requireCrypto(input.crypto);
+  const source = String(input.source || 'lead_write').trim() || 'lead_write';
+  const identities: ContactIdentityRecord[] = [];
+  for (const candidate of candidatesFromContact(input, crypto)) {
+    const identity = await lockOrCreateIdentity(tx, candidate, crypto);
+    await upsertActiveLink(tx, identity.id, 'lead', input.leadId, source);
+    identities.push(identity);
+  }
+  await endObsoleteEntityLinks(tx, 'lead', input.leadId, new Set(identities.map((identity) => identity.id)));
+  return identities;
 }
 
 export async function upsertCustomerContactIdentities(

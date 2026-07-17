@@ -65,6 +65,7 @@ import {
   linkLeadAndCustomerIdentity,
   lockContactIdentityMutationGate,
   normalizeContactIdentity,
+  upsertLeadContactIdentities,
   upsertCustomerContactIdentities,
   type ContactIdentityCrypto,
 } from './contactIdentityService';
@@ -1822,6 +1823,7 @@ export function createCustomerCommandService(
         || hasPermission(currentUser, PERMISSION_KEYS.LEADS_DETAIL, 'write');
       if (!canEdit) return failure<Lead>('无权编辑线索', 403);
       return runTransaction(async (tx) => {
+        await lockContactIdentityMutationGate(tx);
         const row = await lockLead(tx, leadId);
         if (!row) return failure<Lead>('线索不存在', 404);
         const lead = stripLeadTags(readJson<Lead>(row.data));
@@ -1876,9 +1878,18 @@ export function createCustomerCommandService(
         await lockCustomerContacts(tx, options.contactIdentityCrypto, lead, updated);
         const [customerCollision, leadCollision] = await Promise.all([
           findCustomerContactCollision(tx, updated),
-          findLeadContactCollision(tx, updated, lead.id),
+          findLeadContactCollision(tx, updated, row.id),
         ]);
         if (customerCollision || leadCollision) return failure<Lead>('手机号或微信已存在于其他客户或线索', 409);
+        await upsertLeadContactIdentities(tx, {
+          // The relational record id is authoritative. A stale/legacy id
+          // embedded in JSON must never create an orphaned identity link.
+          leadId: row.id,
+          phone: updated.phone,
+          wechat: updated.wechat,
+          source: 'lead_profile_update',
+          crypto: options.contactIdentityCrypto,
+        });
         await persistLead(tx, row.id, updated, at);
         return success(updated);
       });

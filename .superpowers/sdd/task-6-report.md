@@ -71,6 +71,12 @@ audit append.
   establishes all new identities before ending obsolete links, then persists
   the customer and synchronizes linked leads plus their identity links. Any
   conflict throws through the transaction and maps to HTTP/API 409 outside it.
+- `updateLead`: first takes the identity mutation gate, locks the authoritative
+  `LeadRecord.id`, then performs collision checks before converging standalone
+  lead links to the updated phone/WeChat values. It creates/reactivates only
+  lead links, ends obsolete lead links (including when contacts are cleared),
+  and never changes a customer canonical pointer or ownership. A stale JSON
+  `lead.id` is never used as the link or self-exclusion key.
 - `convertLeadToCustomer`: identity/link writes precede customer creation in the
   same transaction, preserve the active lead link, create the customer link,
   and set `canonicalCustomerId`.
@@ -87,8 +93,9 @@ audit append.
   capability. It is passed through direct create, profile/sync, auto-claim,
   and conversion paths; client-token claims cannot grant disclosure.
 - Every production transaction that writes or ends a contact identity/link
-  (direct create, profile update/sync, both customer delete paths, create-lead,
-  conversion, lead delete, and backfill apply) first takes the persistent,
+  (direct create, customer profile update/sync, standalone lead update, both
+  customer delete paths, create-lead, conversion, lead delete, and backfill
+  apply) first takes the persistent,
   non-PII `aaos_contact_identity_mutation_gate_v1` AppStorage row with
   `upsert + SELECT ... FOR UPDATE`. This intentionally serializes only contact
   lifecycle mutation, including during manual apply; unrelated customer/lead
@@ -119,7 +126,9 @@ audit append.
 - Identity and link unique constraints plus link upsert/reactivation make apply
   reruns idempotent. Whole-apply transaction retries are bounded to three for
   `P2034`/deadlock/1213/40001 conflicts; each retry reacquires source locks and
-  rebuilds the plan. Concurrent identity/group discovery uses `SELECT ... FOR
+  rebuilds the plan. A deterministic post-candidate-group P2034 regression
+  confirms a partially written link/group attempt rolls back before its clean
+  retry. Concurrent identity/group discovery uses `SELECT ... FOR
   UPDATE` current reads for both unique-key winner reload and active-link
   admission, so a REPEATABLE READ snapshot cannot add a second customer link.
 - Added protected preview/apply endpoints alongside the existing owner-identity
@@ -192,6 +201,10 @@ Focused regressions cover:
   and whole-apply retry/exhaustion behavior;
 - conversion gate-before-source ordering, covering the former
   backfill/customer-to-lead versus conversion/lead-to-customer cycle;
+- standalone-lead contact rollover and clearing, authoritative locked-record
+  IDs despite stale JSON payload IDs, customer/lead collision rollback, and a
+  shared-gate updateLead-versus-backfill serialization regression that proves
+  the obsolete lead link cannot be resurrected;
 - both customer soft-delete paths ending links and restoring reusable canonical
   state; exact legacy-lock cleanup that preserves HMAC and lookalike keys;
 - missing, short, incomplete, and unsupported-version production keys.
@@ -222,7 +235,8 @@ Focused regressions cover:
   or lead transaction; each takes the fixed non-PII mutation gate before any
   source/identity lock. Conflict exceptions roll back contact locks, links,
   customer/lead writes, audit writes, and a first-attempt tentative customer
-  record on retry.
+  record on retry. Standalone lead sync is deliberately after collision checks,
+  so rejected edits leave prior active links untouched.
 - Legacy paths: POST customer create, edit, explicit conversion, and create-lead
   auto-claim are covered. Customer JSON remains a BusinessRecord.
 - Safe conflicts: readable details are allowlisted (`id`, `name`, `company`,
