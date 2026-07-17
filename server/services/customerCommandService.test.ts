@@ -1066,6 +1066,35 @@ const serviceOptions = {
   assert.equal(manual.data?.lifecycleStatusCode, LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP);
 }
 
+// 历史客户与早期状态配置可能只保留中文展示名。通用更新应在校验前
+// 归一当前值和提交值，成功后持久化稳定生命周期码；系统终态仍不可手设。
+{
+  const value = customer('cust-update-legacy-lifecycle') as any;
+  value.lifecycleStatusCode = '未转商机';
+  const legacyNameOnlyLifecycleConfig = [
+    { id: 'legacy-pending', name: '未转商机', color: '#999', isActive: true, sortOrder: 1, createdAt: '', updatedAt: '' },
+    { id: 'legacy-following', name: '商机跟进中', color: '#369', isActive: true, sortOrder: 2, createdAt: '', updatedAt: '' },
+  ];
+  const fake = createFakePrisma({
+    businessRecords: [businessCustomer(value), ...tagCatalogRows()],
+    leads: [],
+    appStorage: [{ key: STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, value: legacyNameOnlyLifecycleConfig }],
+  });
+  const service = createCustomerCommandService(fake.prisma, serviceOptions);
+  const updated = await service.updateCustomer(value.id, {
+    lifecycleStatusCode: '商机跟进中',
+  } as any, customerEditor);
+
+  assert.equal(updated.code, 0);
+  assert.equal(updated.data?.lifecycleStatusCode, LIFECYCLE_STATUS_CODES.FOLLOWING);
+  assert.equal(fake.getState().businessRecords[0].data.lifecycleStatusCode, LIFECYCLE_STATUS_CODES.FOLLOWING);
+  const systemStatus = await service.updateCustomer(value.id, {
+    lifecycleStatusCode: '已流失',
+  } as any, customerEditor);
+  assert.equal(systemStatus.code, 400, '历史展示名也不得绕过系统终态限制');
+  assert.equal(fake.getState().businessRecords[0].data.lifecycleStatusCode, LIFECYCLE_STATUS_CODES.FOLLOWING);
+}
+
 // RED: 客户更新仍要执行个人资源贡献人归因校验。
 {
   const value = customer('cust-update-attribution');

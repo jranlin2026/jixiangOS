@@ -94,13 +94,18 @@ await assert.rejects(
   /操作原因不能为空/,
 );
 
-function createAtomicFixture(options: { auditFails?: boolean; blockedAssociation?: boolean } = {}) {
-  let source = structuredClone(customer);
+function createAtomicFixture(options: {
+  auditFails?: boolean;
+  blockedAssociation?: boolean;
+  customerOverrides?: Record<string, unknown>;
+  lifecycleConfigOverride?: unknown;
+} = {}) {
+  let source = { ...structuredClone(customer), ...(options.customerOverrides || {}) };
   let savedCustomer: any = null;
   let todoMutation: any = null;
   let createdTodo: any = null;
   let auditEvent: any = null;
-  const lifecycleConfig = {
+  const lifecycleConfig = options.lifecycleConfigOverride || {
     statuses: [
       { id: 'following', code: 'following', name: '跟进中', color: '#2196F3', isActive: true, sortOrder: 1, createdAt: '', updatedAt: '' },
       { id: 'pending', code: 'pending_followup', name: '待跟进', color: '#999', isActive: true, sortOrder: 2, createdAt: '', updatedAt: '' },
@@ -199,6 +204,30 @@ function createAtomicFixture(options: { auditFails?: boolean; blockedAssociation
   assert.equal(result.customer.lifecycleStatusCode, 'pending_followup');
   await assert.rejects(
     () => fixture.service.execute({ action: 'set_progress', customerId: 'c-1', lifecycleStatusCode: 'public_pool', reason: '不能手设' }, fixture.context),
+    /系统状态/,
+  );
+}
+
+// 历史客户和旧配置都可能只保存中文展示名。原子进展命令必须先把两端
+// 归一为稳定码，再按同一张图校验，并把稳定码写回客户记录。
+{
+  const fixture = createAtomicFixture({
+    customerOverrides: { lifecycleStatusCode: '未转商机' },
+    lifecycleConfigOverride: [
+      { id: 'legacy-pending', name: '未转商机', color: '#999', isActive: true, sortOrder: 1, createdAt: '', updatedAt: '' },
+      { id: 'legacy-following', name: '商机跟进中', color: '#369', isActive: true, sortOrder: 2, createdAt: '', updatedAt: '' },
+    ],
+  });
+  const result = await fixture.service.execute({
+    action: 'set_progress', customerId: 'c-1', lifecycleStatusCode: '商机跟进中', reason: '开始跟进',
+  }, fixture.context);
+
+  assert.equal(result.customer.lifecycleStatusCode, 'following');
+  assert.equal(fixture.get().savedCustomer.lifecycleStatusCode, 'following');
+  await assert.rejects(
+    () => fixture.service.execute({
+      action: 'set_progress', customerId: 'c-1', lifecycleStatusCode: '已流失', reason: '不得手设系统状态',
+    }, fixture.context),
     /系统状态/,
   );
 }

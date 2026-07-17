@@ -33,7 +33,11 @@ import { applyContactEditLock } from '../../src/shared/utils/contactEditLock';
 import { mapPrismaDepartment, mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { loadCustomerTagCatalog } from './customerTagService';
 import { validateManualTagUpdateSelection } from './customerTagPolicy';
-import { normalizeCustomerLifecycleConfig, assertLifecycleTransition } from './customerLifecyclePolicy';
+import {
+  normalizeCustomerLifecycleConfig,
+  normalizeCustomerLifecycleValue,
+  assertLifecycleTransition,
+} from './customerLifecyclePolicy';
 import { assertCustomerCanBeSoftDeleted } from './customerDeletePolicy';
 import { lockCustomerAssociationScope } from './customerAssociationRegistry';
 import {
@@ -601,10 +605,6 @@ function isCanonicalPublicPoolCustomer(customer: Customer): boolean {
     && !customer.ownerId;
 }
 
-function lifecycleCodeForPolicy(value: unknown, fallback?: string): string {
-  return cleanText(value) || cleanText(fallback) || LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP;
-}
-
 function syncLeadFromCustomer(lead: Lead, customer: Customer, atIso: string, operator: string): Lead {
   const isPublicPool = isCanonicalPublicPoolCustomer(customer);
   const patch: Partial<Lead> = {
@@ -850,14 +850,18 @@ export function createCustomerAtomicCommandService(options: {
       } else if (command.action === 'set_progress') {
         const stored = await lockStorageValue(tx, STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS);
         const lifecycleConfig = normalizeCustomerLifecycleConfig(stored);
+        const currentLifecycleCode = normalizeCustomerLifecycleValue(customer.lifecycleStatusCode)
+          || LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP;
+        const targetLifecycleCode = normalizeCustomerLifecycleValue(command.lifecycleStatusCode);
+        if (!targetLifecycleCode) throw new Error('客户进展不能为空');
         assertLifecycleTransition({
-          from: lifecycleCodeForPolicy(customer.lifecycleStatusCode),
-          to: lifecycleCodeForPolicy(command.lifecycleStatusCode),
+          from: currentLifecycleCode,
+          to: targetLifecycleCode,
           config: lifecycleConfig,
         });
         next = {
           ...next,
-          lifecycleStatusCode: lifecycleCodeForPolicy(command.lifecycleStatusCode) as Customer['lifecycleStatusCode'],
+          lifecycleStatusCode: targetLifecycleCode as Customer['lifecycleStatusCode'],
           lifecycleStatusUpdatedAt: atIso,
         };
       } else if (command.action === 'update_tags') {
@@ -1070,14 +1074,19 @@ export function createCustomerCommandService(
 
         let patch = submittedPatch;
         const hasSubmittedLifecycleCode = Object.prototype.hasOwnProperty.call(patch, 'lifecycleStatusCode');
-        const submittedLifecycleCode = hasSubmittedLifecycleCode
+        const submittedLifecycleInput = hasSubmittedLifecycleCode
           ? cleanText(patch.lifecycleStatusCode)
           : undefined;
-        if (hasSubmittedLifecycleCode && !submittedLifecycleCode) {
+        const submittedLifecycleCode = submittedLifecycleInput
+          ? normalizeCustomerLifecycleValue(submittedLifecycleInput)
+          : undefined;
+        if (hasSubmittedLifecycleCode && !submittedLifecycleInput) {
           return failure<Customer>('客户进展不能为空', 400);
         }
+        const currentLifecycleCode = normalizeCustomerLifecycleValue(customer.lifecycleStatusCode)
+          || LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP;
         const lifecycleChanged = submittedLifecycleCode !== undefined
-          && submittedLifecycleCode !== lifecycleCodeForPolicy(customer.lifecycleStatusCode);
+          && submittedLifecycleCode !== currentLifecycleCode;
         if (lifecycleChanged) {
           try {
             const stored = await lockStorageValue(
@@ -1086,13 +1095,18 @@ export function createCustomerCommandService(
               DEFAULT_LIFECYCLE_STATUS_CONFIGS,
             );
             assertLifecycleTransition({
-              from: lifecycleCodeForPolicy(customer.lifecycleStatusCode),
+              from: currentLifecycleCode,
               to: submittedLifecycleCode,
               config: normalizeCustomerLifecycleConfig(stored),
             });
           } catch (error) {
             return failure<Customer>(error instanceof Error ? error.message : '客户进展更新失败', 400);
           }
+        }
+        if (submittedLifecycleCode !== undefined) {
+          // Even a semantically unchanged legacy display alias is persisted as
+          // the stable code, so each successful user edit gradually migrates
+          // historical customer snapshots.
           patch = {
             ...patch,
             lifecycleStatusCode: submittedLifecycleCode as Customer['lifecycleStatusCode'],

@@ -3,6 +3,7 @@ import {
   assertLifecycleTransition,
   getManualLifecycleTargets,
   normalizeCustomerLifecycleConfig,
+  normalizeCustomerLifecycleValue,
 } from './customerLifecyclePolicy';
 
 const config = normalizeCustomerLifecycleConfig({
@@ -119,6 +120,12 @@ assert.equal(
   unknownNameOnlyCustomConfig.statuses[0].code,
   '续费培育中',
   '未知自定义展示名必须保留，不能被共享默认映射压成 pending_followup',
+);
+assert.equal(normalizeCustomerLifecycleValue('未转商机'), 'pending_followup');
+assert.equal(
+  normalizeCustomerLifecycleValue('续费培育中'),
+  '续费培育中',
+  '供命令边界复用的归一化函数同样不能吞掉未知自定义状态',
 );
 
 console.log('customer lifecycle policy tests passed');

@@ -41,7 +41,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
-function normalizeStoredLifecycleValue(value: unknown): string {
+/**
+ * Converts only the legacy values known to the shared client migration.
+ * Unknown custom statuses deliberately survive unchanged instead of being
+ * collapsed into the shared helper's default pending state.
+ */
+export function normalizeCustomerLifecycleValue(value: unknown): string {
   const candidate = String(value || '').trim();
   if (!candidate) return '';
   return LEGACY_NORMALIZABLE_LIFECYCLE_VALUES.has(candidate)
@@ -52,7 +57,7 @@ function normalizeStoredLifecycleValue(value: unknown): string {
 function lifecycleConfigCode(row: Record<string, unknown>, index: number): string {
   const explicitCode = String(row.code || '').trim();
   const displayName = String(row.name || '').trim();
-  return normalizeStoredLifecycleValue(explicitCode || displayName) || `lifecycle-${index + 1}`;
+  return normalizeCustomerLifecycleValue(explicitCode || displayName) || `lifecycle-${index + 1}`;
 }
 
 function normalizeStatuses(value: unknown): CustomerLifecycleStatus[] {
@@ -69,7 +74,7 @@ function normalizeStatuses(value: unknown): CustomerLifecycleStatus[] {
       sortOrder: Number.isFinite(Number(row.sortOrder)) ? Number(row.sortOrder) : index + 1,
       isSystem: row.isSystem === true,
       allowedManualTargetCodes: Array.isArray(row.allowedManualTargetCodes)
-        ? Array.from(new Set(row.allowedManualTargetCodes.map(normalizeStoredLifecycleValue).filter(Boolean)))
+        ? Array.from(new Set(row.allowedManualTargetCodes.map(normalizeCustomerLifecycleValue).filter(Boolean)))
         : undefined,
       createdAt: String(row.createdAt || ''),
       updatedAt: String(row.updatedAt || ''),
@@ -113,10 +118,10 @@ function normalizeTransitions(
   }
   const transitions: Record<string, string[]> = {};
   for (const [from, targets] of Object.entries(value)) {
-    const normalizedFrom = normalizeStoredLifecycleValue(from);
+    const normalizedFrom = normalizeCustomerLifecycleValue(from);
     if (!normalizedFrom) continue;
     const normalizedTargets = Array.isArray(targets)
-      ? Array.from(new Set(targets.map(normalizeStoredLifecycleValue).filter(Boolean)))
+      ? Array.from(new Set(targets.map(normalizeCustomerLifecycleValue).filter(Boolean)))
       : [];
     transitions[normalizedFrom] = Array.from(new Set([
       ...(transitions[normalizedFrom] || []),
@@ -134,7 +139,7 @@ export function normalizeCustomerLifecycleConfig(input: unknown): CustomerLifecy
   const source = isRecord(input) ? input : {};
   const statuses = normalizeStatuses(Array.isArray(input) ? input : source.statuses);
   const enabledStatusCodes = Array.isArray(source.enabledStatusCodes)
-    ? Array.from(new Set(source.enabledStatusCodes.map(normalizeStoredLifecycleValue).filter(Boolean)))
+    ? Array.from(new Set(source.enabledStatusCodes.map(normalizeCustomerLifecycleValue).filter(Boolean)))
     : statuses.filter((status) => status.isActive).map((status) => status.code);
   return {
     statuses,
