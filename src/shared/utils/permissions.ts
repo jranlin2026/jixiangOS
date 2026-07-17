@@ -714,6 +714,12 @@ function getLiveRoleForAuthenticatedUser(user: Pick<AuthenticatedUser, 'role' | 
 
 export function roleHasPermission(role: Role | undefined, permissionKey: string, action = 'read'): boolean {
   if (!role?.isActive) return false;
+  if (normalizePermissionKey(permissionKey) === normalizePermissionKey(PERMISSION_KEYS.CUSTOMER_DELETE)) {
+    return role.permissions.some((permission) => (
+      normalizePermissionKey(permission.module) === normalizePermissionKey(PERMISSION_KEYS.CUSTOMER_DELETE)
+      && actionAllowed(getDefaultPermissionActions(permission.module, permission.actions || []), action)
+    ));
+  }
   if (role.code === 'super_admin') return true;
   const requestedKeys = expandPermissionRequests(permissionKey);
   if (!requestedKeys.length) return false;
@@ -756,15 +762,26 @@ export function canReceiveLead(user: Pick<User, 'role' | 'roleId' | 'isActive' |
 }
 
 export function resolveUserPermissions(user: User, roles: Role[]): Permission[] {
+  const role = resolveAuthenticatedUserRole(user, roles);
+  if (role?.permissions?.length) return sanitizeRolePermissions(role.permissions);
+  return [{ module: normalizeUserRoleName(user.role), actions: ['read'] }];
+}
+
+function resolveAuthenticatedUserRole(user: Pick<User, 'role' | 'roleId'>, roles: Role[]): Role | undefined {
   const normalizedRole = normalizeUserRoleName(user.role);
   const mappedCode = ROLE_CODE_BY_USER_ROLE[normalizedRole] || ROLE_CODE_BY_USER_ROLE[String(user.role)];
-  const role = getUserRole(user, roles)
-    || roles.find((item) => item.isActive && Boolean(mappedCode && item.code === mappedCode));
-  if (role?.permissions?.length) return sanitizeRolePermissions(role.permissions);
-  return [{ module: normalizedRole, actions: ['read'] }];
+  const activeRoles = roles.filter((role) => role.isActive);
+  if (user.roleId) return activeRoles.find((role) => role.id === user.roleId);
+  const normalizedCode = mappedCode || normalizePermissionKey(normalizedRole).toLowerCase();
+  const candidates = activeRoles.filter((role) => (
+    role.name === normalizedRole
+    || normalizePermissionKey(role.code).toLowerCase() === normalizedCode
+  ));
+  return candidates.length === 1 ? candidates[0] : undefined;
 }
 
 export function toAuthenticatedUser(user: User, roles: Role[]): AuthenticatedUser {
+  const resolvedRole = resolveAuthenticatedUserRole(user, roles);
   return {
     id: user.id,
     name: user.name,
@@ -772,7 +789,7 @@ export function toAuthenticatedUser(user: User, roles: Role[]): AuthenticatedUse
     email: user.email,
     phone: user.phone,
     role: normalizeUserRoleName(user.role),
-    roleId: user.roleId,
+    roleId: resolvedRole?.id || user.roleId,
     positionId: user.positionId,
     positionName: user.positionName,
     avatar: user.avatar,
@@ -780,7 +797,9 @@ export function toAuthenticatedUser(user: User, roles: Role[]): AuthenticatedUse
     isActive: user.isActive,
     lastLoginAt: user.lastLoginAt,
     mustChangePassword: Boolean(user.mustChangePassword),
-    permissions: resolveUserPermissions(user, roles),
+    permissions: resolvedRole?.permissions?.length
+      ? sanitizeRolePermissions(resolvedRole.permissions)
+      : [{ module: normalizeUserRoleName(user.role), actions: ['read'] }],
   };
 }
 
@@ -915,6 +934,12 @@ export function hasPermission(
   if (normalizePermissionKey(permissionKey) === PERMISSION_KEYS.HOME) return true;
   const liveRole = getLiveRoleForAuthenticatedUser(user);
   if (liveRole) return roleHasPermission(liveRole, permissionKey, action);
+  if (normalizePermissionKey(permissionKey) === normalizePermissionKey(PERMISSION_KEYS.CUSTOMER_DELETE)) {
+    return user.permissions.some((permission) => (
+      normalizePermissionKey(permission.module) === normalizePermissionKey(PERMISSION_KEYS.CUSTOMER_DELETE)
+      && actionAllowed(getDefaultPermissionActions(permission.module, permission.actions || []), action)
+    ));
+  }
   if (isSuperAdmin(user)) return true;
 
   const requestedKeys = expandPermissionRequests(permissionKey);
@@ -936,7 +961,11 @@ export function hasExplicitPermission(
   const normalizedKey = normalizePermissionKey(permissionKey);
   return user.permissions.some((permission) => {
     const normalizedModule = normalizePermissionKey(permission.module);
-    if (normalizedModule === ALL_PERMISSION_KEY && permission.actions?.includes('admin')) return true;
+    if (
+      normalizedKey !== normalizePermissionKey(PERMISSION_KEYS.CUSTOMER_DELETE)
+      && normalizedModule === ALL_PERMISSION_KEY
+      && permission.actions?.includes('admin')
+    ) return true;
     return normalizedModule === normalizedKey && actionAllowed(permission.actions || [], action);
   });
 }

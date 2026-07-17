@@ -6,6 +6,7 @@ import {
   getGrantedPermissionModules,
   getRoleEditorPermissionActions,
   hasPermission,
+  hasExplicitPermission,
   PERMISSION_KEYS,
   roleHasPermission,
   sanitizeRolePermissions,
@@ -151,6 +152,44 @@ const highRiskCustomerLeaves = [
   PERMISSION_KEYS.CUSTOMER_MERGE,
   PERMISSION_KEYS.CUSTOMER_BATCH_CANCEL,
 ];
+
+const wildcardDeleteRole = roleFixture([
+  { module: '全部', actions: ['delete'] },
+]);
+assert.equal(
+  roleHasPermission(wildcardDeleteRole, PERMISSION_KEYS.CUSTOMER_DELETE, 'delete'),
+  false,
+  'CUSTOMER_DELETE 必须有显式叶子，全部/delete 不得隐式授权',
+);
+const wildcardAdminRole = {
+  ...roleFixture([{ module: '全部', actions: ['admin'] }]),
+  code: 'super_admin',
+};
+assert.equal(
+  roleHasPermission(wildcardAdminRole, PERMISSION_KEYS.CUSTOMER_DELETE, 'delete'),
+  false,
+  '角色 code 或 全部/admin 都不得绕过显式 CUSTOMER_DELETE 叶子',
+);
+assert.equal(
+  hasPermission({ role: '旧超级管理员', isActive: true, permissions: [{ module: '全部', actions: ['admin'] }] }, PERMISSION_KEYS.CUSTOMER_DELETE, 'delete'),
+  false,
+  '无 live role 的登录态 fallback 也必须拒绝 wildcard 客户删除',
+);
+assert.equal(
+  hasExplicitPermission({ isActive: true, permissions: [{ module: '全部', actions: ['admin'] }] }, PERMISSION_KEYS.CUSTOMER_DELETE, 'delete'),
+  false,
+  '显式权限 helper 不得把 全部/admin 当成 CUSTOMER_DELETE',
+);
+const explicitDeletePermissions = [{ module: PERMISSION_KEYS.CUSTOMER_DELETE, actions: ['read', 'delete'] }];
+assert.equal(
+  roleHasPermission(roleFixture(explicitDeletePermissions), PERMISSION_KEYS.CUSTOMER_DELETE, 'delete'),
+  true,
+  'manifest 迁移写入的显式 CUSTOMER_DELETE 叶子必须授权删除',
+);
+assert.equal(
+  hasPermission({ role: '清单删除角色', isActive: true, permissions: explicitDeletePermissions }, PERMISSION_KEYS.CUSTOMER_DELETE, 'delete'),
+  true,
+);
 for (const legacyAction of ['read', 'write', 'delete', 'admin']) {
   const parentPermissions = [{ module: PERMISSION_KEYS.CUSTOMERS, actions: [legacyAction] }];
   const parentRole = roleFixture(parentPermissions);

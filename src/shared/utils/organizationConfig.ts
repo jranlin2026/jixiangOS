@@ -460,12 +460,17 @@ function migrateLegacyRecoveryReviewListPermission(permissions: Role['permission
 export function mergeRoleWithDefaultAccess(role: Role): Role {
   const seed = DEFAULT_ROLES.find((item) => (
     item.id === role.id
-    || normalizeCode(item.code) === normalizeCode(role.code)
-    || item.name === role.name
+    || (
+      item.code !== 'super_admin'
+      && (
+        normalizeCode(item.code) === normalizeCode(role.code)
+        || item.name === role.name
+      )
+    )
   ));
   const code = seed?.code || role.code;
   const permissions = seed?.code === 'super_admin'
-    ? seed.permissions
+    ? sanitizeRolePermissions([...seed.permissions, ...role.permissions])
     : sanitizeRolePermissions(ensureDefaultRoleRequiredPermissions(
       normalizeDefaultAssetSelfServicePermissions(role.permissions),
       code,
@@ -477,6 +482,39 @@ export function mergeRoleWithDefaultAccess(role: Role): Role {
     permissions,
     dataScopes: normalizeRoleDataScopes({ ...role, code, permissions }),
   };
+}
+
+/**
+ * Capture-only compatibility adapter for the pre-customer-leaf release.
+ * Runtime authorization and migrations must consume the captured immutable IDs,
+ * never call this role name/code based legacy behavior.
+ */
+export function captureLegacyCustomerDeleteRoleIds(roles: readonly Role[]): string[] {
+  return roles
+    .filter((role) => role.isActive)
+    .filter((role) => {
+      const hasLegacyAllAdmin = role.permissions.some((permission) => (
+        String(permission.module || '').replace(/\s+/g, '') === '全部'
+        && (permission.actions || []).includes('admin')
+      ));
+      const matchedLegacySuperAdmin = DEFAULT_ROLES.some((seed) => (
+        seed.code === 'super_admin'
+        && (
+          seed.id === role.id
+          || normalizeCode(seed.code) === normalizeCode(role.code)
+          || seed.name === role.name
+        )
+      ));
+      const passedLegacyAuthorizationEntry = matchedLegacySuperAdmin || hasLegacyAllAdmin;
+      const hadUnrestrictedCustomerCommandScope = (
+        normalizeCode(role.code) === 'super_admin'
+        || hasLegacyAllAdmin
+        || role.dataScopes?.customers === 'all'
+      );
+      return passedLegacyAuthorizationEntry && hadUnrestrictedCustomerCommandScope;
+    })
+    .map((role) => String(role.id))
+    .sort();
 }
 
 function mergeDefaultItems<T extends { code: string; id: string; name: string }>(

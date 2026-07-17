@@ -20,6 +20,7 @@ vite.config.d.ts.map
 backups/
 uploads/
 private_uploads/
+private_reports/
 .DS_Store
 Thumbs.db
 .codex-*.log

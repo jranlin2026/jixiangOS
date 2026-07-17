@@ -3,6 +3,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const source = readFileSync(join(process.cwd(), 'server', 'index.ts'), 'utf8');
+const runtimeStorageRouteSource = readFileSync(
+  join(process.cwd(), 'server', 'routes', 'runtimeStorageRoutes.ts'),
+  'utf8',
+);
 
 for (const [method, route] of [
   ['get', '/api/settings/users'],
@@ -214,9 +218,10 @@ assert.match(source, /canAccessLegacyStorageKey\(req\.currentUser, key, 'write'\
 assert.match(source, /getScopedStorageKeys\('assets'\)/);
 assert.match(
   source,
-  /scope\) === 'runtime'[\s\S]*filterAssetStorageData/,
+  /createRuntimeStorageGetHandler\(\{[\s\S]*filterAssetStorageData/,
   '运行时资产同步必须按当前员工的数据范围过滤',
 );
+assert.match(runtimeStorageRouteSource, /queryScope\(request\.query\.scope\) !== 'runtime'/);
 assert.match(source, /Legacy storage deletion is disabled/);
 assert.match(source, /app\.delete\('\/api\/storage', requireDataMaintenanceDeleteAccess,/);
 assert.match(source, /app\.post\('\/api\/crm-migration\/import', requireStorageAccess,/);

@@ -45,6 +45,7 @@ import { createPrismaKnowledgeRepository } from './services/enablement/prismaKno
 import { createKeywordKnowledgeSearchProvider } from './services/enablement/knowledgeSearchProvider';
 import { createEnablementKnowledgeRouter } from './routes/enablementKnowledgeRoutes';
 import { createCoCreationRouter } from './routes/coCreationRoutes';
+import { createRuntimeStorageGetHandler } from './routes/runtimeStorageRoutes';
 import { createCoCreationService } from './services/coCreation/coCreationService';
 import {
   filterAssetStorageData,
@@ -54,7 +55,12 @@ import {
   isAssetStorageKey,
 } from './services/assetStorageAccess';
 import { canAccessLegacyStorageKey } from './services/legacyStorageAccess';
-import { migrateDefaultRoleAccess } from './services/roleMigrationService';
+import {
+  createCustomerPermissionMigrationManifestAuthenticatorFromEnv,
+  migrateCustomerPermissionAndScopeBaseline,
+  migrateDefaultRoleAccess,
+  toSafeCustomerPermissionMigrationErrorCode,
+} from './services/roleMigrationService';
 import { mapPrismaRole, mapPrismaUser } from './db/prismaMappers';
 import { mergeRoleWithDefaultAccess } from '../src/shared/utils/organizationConfig';
 import { PERMISSION_KEYS, hasPermission } from '../src/shared/utils/permissions';
@@ -1103,14 +1109,37 @@ app.get('/api/assets/:kind', requireAssetReadAccess, async (req: AuthenticatedRe
   res.json(result);
 });
 
-app.get('/api/storage', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
-  const runtimeScope = queryParam(req.query.scope) === 'runtime';
+const runtimeStorageGetHandler = createRuntimeStorageGetHandler({
+  roleStore: prisma.role,
+  runtimeStorageKeys,
+  storageReader: storageService,
+  filterData: async (data, currentUser) => {
+    const context = await assetStorageContext();
+    const assetFilteredData = filterAssetStorageData(data, currentUser, context);
+    return filterRecoveryOrderStorageData(assetFilteredData, currentUser);
+  },
+});
+
+app.get('/api/storage', requireStorageAccess, runtimeStorageGetHandler, async (req: AuthenticatedRequest, res) => {
   const requestedScope = queryParam(req.query.scope);
-  const requestedKeys = runtimeScope ? runtimeStorageKeys : getScopedStorageKeys(requestedScope);
+  const requestedKeys = getScopedStorageKeys(requestedScope);
   if (requestedKeys) {
     const entries = await Promise.all(requestedKeys
-      .filter((key) => req.currentUser && canAccessLegacyStorageKey(req.currentUser, key, 'runtime'))
+      .filter((key) => key === STORAGE_KEYS.ROLES || (req.currentUser && canAccessLegacyStorageKey(req.currentUser, key, 'runtime')))
       .map(async (key) => {
+      if (key === STORAGE_KEYS.ROLES) {
+        const canReadAllRoles = Boolean(
+          req.currentUser
+          && canAccessLegacyStorageKey(req.currentUser, key, 'runtime'),
+        );
+        const rows = canReadAllRoles
+          ? await prisma.role.findMany({ orderBy: { createdAt: 'asc' } })
+          : await prisma.role.findMany({
+            where: { id: req.currentUser?.roleId || '__missing-role__' },
+            orderBy: { createdAt: 'asc' },
+          });
+        return [key, rows.map(mapPrismaRole)] as const;
+      }
       const result = await storageService.get(key);
       return [key, result.code === 0 ? result.data : null] as const;
       }));
@@ -1353,16 +1382,21 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 async function startServer() {
+  const manifestAuthenticator = createCustomerPermissionMigrationManifestAuthenticatorFromEnv(process.env);
   const migratedRoles = await migrateDefaultRoleAccess(prisma);
   if (migratedRoles > 0) {
     console.log(`Migrated default role access for ${migratedRoles} roles.`);
   }
+  const customerPermissionMigration = await migrateCustomerPermissionAndScopeBaseline(prisma, manifestAuthenticator);
+  console.log(
+    `Customer permission/scope baseline v${customerPermissionMigration.version}: ${customerPermissionMigration.migratedRoleIds.length} roles migrated.`,
+  );
   app.listen(port, host, () => {
     console.log(`AI proxy listening on http://${host}:${port}`);
   });
 }
 
 startServer().catch((error) => {
-  console.error('Failed to start server:', error);
+  console.error('Failed to start server:', toSafeCustomerPermissionMigrationErrorCode(error));
   process.exit(1);
 });

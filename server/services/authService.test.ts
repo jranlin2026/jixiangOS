@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createAuthService } from './authService';
 import { DEFAULT_ADMIN_PASSWORD, createPasswordSalt, hashPassword } from '../../src/shared/utils/auth';
+import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 
 const now = new Date('2026-06-24T00:00:00.000Z');
 const salt = createPasswordSalt('user-admin');
@@ -39,7 +40,10 @@ const roles = [
     code: 'super_admin',
     description: '拥有全部权限',
     departmentId: null,
-    permissions: [{ module: '全部', actions: ['admin'] }],
+    permissions: [
+      { module: '全部', actions: ['admin'] },
+      { module: PERMISSION_KEYS.CUSTOMER_DELETE, actions: ['read', 'delete'] },
+    ],
     dataScopes: {},
     memberCount: 1,
     isActive: true,
@@ -107,6 +111,11 @@ assert.equal(currentUser.data?.account, 'admin');
 assert.equal('passwordHash' in (currentUser.data as any), false);
 assert.equal('passwordSalt' in (currentUser.data as any), false);
 assert.equal('passwordUpdatedAt' in (currentUser.data as any), false);
+assert.equal(
+  hasPermission(currentUser.data, PERMISSION_KEYS.CUSTOMER_DELETE, 'delete'),
+  true,
+  '迁移写入默认超级管理员的显式 CUSTOMER_DELETE 必须穿过真实 authService 链保留',
+);
 
 const wrongCurrentPassword = await service.changePassword('user-admin', 'wrong', 'new-password-2026');
 assert.equal(wrongCurrentPassword.code, 400);
