@@ -2,6 +2,10 @@ import type { Permission, Role, RoleDataScopes } from '../../src/types/role';
 import type { Department } from '../../src/types/department';
 import type { Position } from '../../src/types/position';
 import type { User } from '../../src/types/settings';
+import {
+  sanitizeAuditEventForViewer,
+  type CustomerAuditEventView,
+} from './customerAuditProjection';
 
 type NullableDate = Date | string | null | undefined;
 
@@ -145,4 +149,29 @@ export function mapPrismaUser(row: {
     createdAt: isoRequired(row.createdAt),
     updatedAt: isoRequired(row.updatedAt),
   };
+}
+
+/**
+ * Prisma represents BIGINT as JavaScript bigint. Map it at the persistence
+ * boundary so an audit payload can always be passed to JSON.stringify safely.
+ */
+export function mapPrismaCustomerAuditEvent(row: {
+  id: string;
+  eventSequence: bigint | number | string;
+  customerId: string;
+  batchJobId: string | null;
+  operation: string;
+  actorId: string;
+  actorName: string;
+  reason: string | null;
+  inputHash: string | null;
+  beforeSnapshot: unknown;
+  afterSnapshot: unknown;
+  result: string;
+  requestId: string | null;
+  idempotencyKey: string | null;
+  ip: string | null;
+  createdAt: Date | string;
+}): CustomerAuditEventView {
+  return sanitizeAuditEventForViewer(row);
 }

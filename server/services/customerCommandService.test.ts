@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { createCustomerCommandService } from './customerCommandService';
+import {
+  createAuditedCustomerAtomicCommandService,
+  createCustomerCommandService,
+} from './customerCommandService';
+import { createPrismaCustomerAuditAppender } from './customerAuditService';
 import { DEFAULT_LEAD_FLOW_CONFIG, LIFECYCLE_STATUS_CODES, STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import type { Customer } from '../../src/types/customer';
@@ -305,6 +309,7 @@ type FakeState = {
   businessRecords: BusinessRow[];
   leads: LeadRow[];
   customerTodos?: any[];
+  customerAuditEvents?: any[];
   appStorage?: Array<{ key: string; value: any; createdAt?: Date; updatedAt?: Date }>;
 };
 
@@ -328,6 +333,7 @@ function createFakePrisma(
     failLeadUpdate?: boolean;
     failCustomerCreate?: boolean;
     failCustomerCompareAndSave?: boolean;
+    failCustomerAuditCreate?: boolean;
     failTransactions?: number;
     extraUsers?: any[];
     roleRows?: any[];
@@ -336,6 +342,7 @@ function createFakePrisma(
   let state: FakeState = {
     ...clone(initial),
     customerTodos: clone(initial.customerTodos || []),
+    customerAuditEvents: clone(initial.customerAuditEvents || []),
     appStorage: clone(initial.appStorage || []),
   };
   let transactionCalls = 0;
@@ -363,15 +370,23 @@ function createFakePrisma(
     };
   };
 
-  const makeClient = (working: FakeState, lockContact: (key: string) => Promise<void>) => ({
-    user: { findMany: async () => clone([...users, ...(options.extraUsers || []), {
+  const makeClient = (working: FakeState, lockContact: (key: string) => Promise<void>) => {
+    const directoryUsers = () => [...users, ...(options.extraUsers || []), {
       ...users[0],
       id: manager.id,
       name: manager.name,
       account: manager.account,
       role: manager.role,
       roleId: manager.roleId,
-    }]) },
+    }];
+    return {
+    user: {
+      findMany: async () => clone(directoryUsers()),
+      findUnique: async ({ where }: any) => {
+        const user = directoryUsers().find((candidate) => candidate.id === where.id);
+        return user ? clone(user) : null;
+      },
+    },
     role: { findMany: async () => clone(options.roleRows || [salesRole, managerRole, financeRole, superRole]) },
     department: { findMany: async () => clone(departments) },
     appStorage: {
@@ -464,6 +479,19 @@ function createFakePrisma(
         return { count };
       },
     },
+    customerAuditEvent: {
+      create: async ({ data }: any) => {
+        if (options.failCustomerAuditCreate) throw new Error('audit write failed');
+        const events = working.customerAuditEvents || (working.customerAuditEvents = []);
+        const event = {
+          ...clone(data),
+          eventSequence: BigInt(events.length + 1),
+          createdAt: new Date(FIXED_NOW),
+        };
+        events.push(event);
+        return clone(event);
+      },
+    },
     $queryRaw: async (query: any) => {
       const text = queryText(query);
       const values = query?.values || [];
@@ -525,7 +553,8 @@ function createFakePrisma(
       }
       throw new Error(`unexpected query: ${text}`);
     },
-  });
+  };
+  };
 
   const prisma: any = {
     leadRecord: {
@@ -743,7 +772,7 @@ const serviceOptions = {
   const service = createCustomerCommandService(fake.prisma, serviceOptions);
   const result = await service.releaseToPublicPool('cust-release', '暂时无意向', salesA);
 
-  assert.equal(result.code, 0);
+  assert.equal(result.code, 0, result.message);
   assert.equal(fake.transactionCalls, 1);
   const next = fake.getState();
   assert.equal(next.businessRecords[0].owner, '公海');
@@ -770,6 +799,100 @@ const serviceOptions = {
     /lead update failed/,
   );
   assert.deepEqual(fake.getState().businessRecords[0], originalCustomer);
+}
+
+// RED: 审计适配器必须使用同一 Prisma 事务；客户 JSON、待办、活动和审计要么一起提交，要么一起回滚。
+{
+  const initialCustomer = businessCustomer(customer('cust-audited-release'));
+  const initialTodo = { id: 'todo-audited-release', customerId: 'cust-audited-release', status: 'PENDING' };
+  const fake = createFakePrisma({
+    businessRecords: [initialCustomer],
+    leads: [],
+    customerTodos: [initialTodo],
+  });
+  const service = createAuditedCustomerAtomicCommandService(fake.prisma, {
+    ...serviceOptions,
+    auditAppender: createPrismaCustomerAuditAppender(),
+  });
+  const result = await service.execute({
+    action: 'release_to_pool', customerId: 'cust-audited-release', reason: '审计事务提交验证',
+  }, salesA);
+
+  assert.equal(result.code, 0, result.message);
+  const committed = fake.getState();
+  assert.equal(committed.businessRecords[0].data.owner, '公海');
+  assert.equal(committed.businessRecords[0].data.activityRecords.length, 1);
+  assert.equal(committed.customerTodos?.[0].status, 'CANCELED');
+  assert.equal(committed.customerAuditEvents?.length, 1);
+  assert.equal(committed.customerAuditEvents?.[0].customerId, 'cust-audited-release');
+  assert.match(committed.customerAuditEvents?.[0].inputHash || '', /^[a-f0-9]{64}$/, 'single commands derive a correlation hash when callers do not supply one');
+
+  const sameCommandFake = createFakePrisma({
+    businessRecords: [businessCustomer(customer('cust-audited-release'))],
+    leads: [],
+    customerTodos: [initialTodo],
+  });
+  const sameCommandResult = await createAuditedCustomerAtomicCommandService(sameCommandFake.prisma, {
+    ...serviceOptions,
+    auditAppender: createPrismaCustomerAuditAppender(),
+  }).execute({
+    action: 'release_to_pool', customerId: 'cust-audited-release', reason: '审计事务提交验证',
+  }, salesA, { inputHash: 'raw-contact:13800138000' } as any);
+  assert.equal(sameCommandResult.code, 0, sameCommandResult.message);
+  assert.equal(
+    sameCommandFake.getState().customerAuditEvents?.[0].inputHash,
+    committed.customerAuditEvents?.[0].inputHash,
+    'caller-provided inputHash is ignored; the canonical command hash stays stable',
+  );
+  assert.notEqual(
+    committed.customerAuditEvents?.[0].inputHash,
+    'raw-contact:13800138000',
+    'raw caller input must never be persisted as audit inputHash',
+  );
+
+  const blankReasonFake = createFakePrisma({
+    businessRecords: [businessCustomer(customer('cust-audited-no-reason'))],
+    leads: [],
+  });
+  const blankReasonResult = await createAuditedCustomerAtomicCommandService(blankReasonFake.prisma, {
+    ...serviceOptions,
+    auditAppender: createPrismaCustomerAuditAppender(),
+  }).execute({
+    action: 'release_to_pool', customerId: 'cust-audited-no-reason', reason: '   ',
+  }, salesA);
+  assert.equal(blankReasonResult.code, 400, 'atomic routes must reject a missing user-supplied reason');
+  assert.equal(blankReasonFake.getState().customerAuditEvents?.length, 0);
+  assert.equal(blankReasonFake.getState().businessRecords[0].data.owner, salesA.name);
+
+  const missingDeleteResult = await createAuditedCustomerAtomicCommandService(createFakePrisma({
+    businessRecords: [], leads: [],
+  }).prisma, {
+    ...serviceOptions,
+    auditAppender: createPrismaCustomerAuditAppender(),
+  }).execute({
+    action: 'soft_delete', customerId: 'cust-missing-delete', reason: '幂等删除', confirmed: true,
+  }, superAdmin);
+  assert.equal(missingDeleteResult.code, 404, 'the facade exposes a missing customer so the HTTP DELETE route can deliberately retain its legacy no-op contract');
+
+  const rollbackCustomer = businessCustomer(customer('cust-audited-rollback'));
+  const rollbackTodo = { id: 'todo-audited-rollback', customerId: 'cust-audited-rollback', status: 'PENDING' };
+  const rollbackFake = createFakePrisma({
+    businessRecords: [rollbackCustomer],
+    leads: [],
+    customerTodos: [rollbackTodo],
+  }, { failCustomerAuditCreate: true });
+  const rollbackService = createAuditedCustomerAtomicCommandService(rollbackFake.prisma, {
+    ...serviceOptions,
+    auditAppender: createPrismaCustomerAuditAppender(),
+  });
+  const rejected = await rollbackService.execute({
+    action: 'release_to_pool', customerId: 'cust-audited-rollback', reason: '审计失败必须回滚',
+  }, salesA);
+
+  assert.notEqual(rejected.code, 0);
+  assert.deepEqual(rollbackFake.getState().businessRecords[0], rollbackCustomer);
+  assert.deepEqual(rollbackFake.getState().customerTodos, [rollbackTodo]);
+  assert.deepEqual(rollbackFake.getState().customerAuditEvents, []);
 }
 
 // RED: 员工不能仅因自己是线索贡献人就释放他人的客户。
@@ -827,6 +950,7 @@ const serviceOptions = {
   assert.equal(next.leads[0].owner, salesA.name);
   assert.equal(next.leads[0].assignedTo, salesA.name);
   assert.equal(next.leads[0].data.lifecycleStatusCode, LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP);
+  assert.equal(next.customerAuditEvents?.[0]?.operation, 'claim_from_pool');
 
   const replay = await service.claimFromPublicPool('cust-claim', claimOnlySales);
   assert.equal(replay.code, 0);
@@ -929,6 +1053,22 @@ const serviceOptions = {
   assert.deepEqual(next.leads[0].data.tags, ['历史标签']);
   assert.equal(fake.businessRecordUpdateCalls, 0, '客户写入必须统一走 compare-and-save 边界');
   assert.equal(fake.businessRecordCompareAndSaveCalls, 1);
+  assert.equal(next.customerAuditEvents?.[0]?.operation, 'update_profile');
+  assert.match(next.customerAuditEvents?.[0]?.inputHash || '', /^[a-f0-9]{64}$/);
+}
+
+// A legacy profile write and its audit event share the same transaction. An
+// audit failure must leave the BusinessRecord JSON untouched.
+{
+  const original = businessCustomer(customer('cust-update-audit-rollback'));
+  const fake = createFakePrisma({ businessRecords: [original], leads: [] }, { failCustomerAuditCreate: true });
+  const service = createCustomerCommandService(fake.prisma, serviceOptions);
+  await assert.rejects(
+    () => service.updateCustomer('cust-update-audit-rollback', { name: '不得提交' }, customerEditor),
+    /audit write failed/,
+  );
+  assert.deepEqual(fake.getState().businessRecords[0], original);
+  assert.deepEqual(fake.getState().customerAuditEvents, []);
 }
 
 // RED: 贡献人可读不等于可写，未解析负责人也必须 fail closed。

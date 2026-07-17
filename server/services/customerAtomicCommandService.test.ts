@@ -78,6 +78,10 @@ assert.equal(saved.owner, '公海');
 assert.equal(saved.ownerIdentityStatus, 'public_pool');
 assert.equal(audit.reason, '客户主动放弃');
 assert.equal(audit.idempotencyKey, 'job-1:c-1');
+assert.equal('inputHash' in audit, false, 'atomic appender inputs never accept a caller-supplied hash');
+assert.deepEqual(audit.canonicalInput, {
+  action: 'release_to_pool', customerId: 'c-1', reason: '客户主动放弃',
+});
 assert.equal(audit.beforeSnapshot.owner, '销售甲');
 assert.equal(audit.afterSnapshot.owner, '公海');
 assert.deepEqual(audit.actor, { id: 'u-1', name: '销售甲' });
@@ -197,6 +201,32 @@ function createAtomicFixture(options: {
   assert.equal(fixture.get().savedCustomer.ownerId, 'u-target');
   assert.equal(fixture.get().todoMutation.assigneeId, 'u-target');
   assert.equal(fixture.get().auditEvent.actor.id, 'u-1');
+}
+// A same-owner assignment was historically an idempotent no-op. It emits an
+// append-only audit record, but does not add activity or mutate todos/customer.
+{
+  const fixture = createAtomicFixture();
+  const result = await fixture.service.execute({ action: 'transfer', customerId: 'c-1', targetOwnerId: 'u-1', reason: '重复分配' }, fixture.context);
+  assert.equal(result.reassignedTodoCount, 0);
+  assert.equal(fixture.get().savedCustomer, null);
+  assert.equal(fixture.get().todoMutation, null);
+  assert.equal(fixture.get().auditEvent.result, 'noop');
+}
+// Preserve legacy authorization order: a user who can only read the public
+// pool cannot release it, and the failed request leaves every write untouched.
+{
+  const fixture = createAtomicFixture({
+    customerOverrides: {
+      owner: '公海', ownerId: undefined, ownerIdentityStatus: 'public_pool', lifecycleStatusCode: 'public_pool',
+    },
+  });
+  await assert.rejects(
+    () => fixture.service.execute({ action: 'release_to_pool', customerId: 'c-1', reason: '重复释放' }, fixture.context),
+    /无权操作该客户/,
+  );
+  assert.equal(fixture.get().savedCustomer, null);
+  assert.equal(fixture.get().todoMutation, null);
+  assert.equal(fixture.get().auditEvent, null);
 }
 {
   const fixture = createAtomicFixture();

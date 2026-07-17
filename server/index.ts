@@ -21,7 +21,11 @@ import { success } from './api/response';
 import { createAiConfigService } from './services/aiConfigService';
 import { createAiChatClient, type AiChatMessage } from './services/aiChatClient';
 import { createCustomerListService } from './services/customerListService';
-import { createCustomerCommandService } from './services/customerCommandService';
+import {
+  createAuditedCustomerAtomicCommandService,
+  createCustomerCommandService,
+} from './services/customerCommandService';
+import { createPrismaCustomerAuditAppender } from './services/customerAuditService';
 import { createCustomerTodoService } from './services/customerTodoService';
 import { createCustomerManageableUsersService } from './services/customerManageableUsersService';
 import { backfillCustomerOwnerIdentitiesResult } from './services/customerOwnerIdentityService';
@@ -97,6 +101,12 @@ const aiChatClient = createAiChatClient({ configReader: aiConfigService });
 const coCreationService = createCoCreationService({ prisma, aiClient: aiChatClient });
 const customerListService = createCustomerListService(prisma);
 const customerCommandService = createCustomerCommandService(prisma);
+// Transfer/release/delete use the shared atomic command engine. Profile,
+// todo, claim, creation, and follow-up services retain their dedicated
+// request contracts, but each appends its audit event in the same transaction.
+const customerAtomicCommandService = createAuditedCustomerAtomicCommandService(prisma, {
+  auditAppender: createPrismaCustomerAuditAppender(),
+});
 const customerTodoService = createCustomerTodoService(prisma);
 const customerManageableUsersService = createCustomerManageableUsersService(prisma);
 const customerTagService = createCustomerTagService(prisma);
@@ -409,11 +419,15 @@ app.put('/api/customers/:id', requireCustomerUpdateAccess, async (req: Authentic
 });
 
 app.delete('/api/customers/:id', requireCustomerDeleteAccess, async (req: AuthenticatedRequest, res) => {
-  const result = await customerCommandService.deleteCustomer(
-    routeParam(req.params.id),
-    String(req.body?.reason || ''),
-    req.currentUser!,
-  );
+  const atomicResult = await customerAtomicCommandService.execute({
+    action: 'soft_delete',
+    customerId: routeParam(req.params.id),
+    reason: String(req.body?.reason || '').trim(),
+    confirmed: true,
+  }, req.currentUser!);
+  // Preserve the legacy DELETE contract: a missing/already-deleted customer is
+  // an idempotent no-op. Successful mutations still use the audited atomic path.
+  const result = atomicResult.code === 0 || atomicResult.code === 404 ? success(true) : atomicResult;
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
@@ -460,11 +474,12 @@ app.post('/api/customers/:id/todos/:todoId/cancel', requireCustomerTodoWriteAcce
 });
 
 app.post('/api/customers/:id/release', requireCustomerReleaseAccess, async (req: AuthenticatedRequest, res) => {
-  const result = await customerCommandService.releaseToPublicPool(
-    routeParam(req.params.id),
-    String(req.body?.reason || ''),
-    req.currentUser!,
-  );
+  const atomicResult = await customerAtomicCommandService.execute({
+    action: 'release_to_pool',
+    customerId: routeParam(req.params.id),
+    reason: String(req.body?.reason || '').trim(),
+  }, req.currentUser!);
+  const result = atomicResult.code === 0 ? success(atomicResult.data!.customer) : atomicResult;
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
@@ -474,12 +489,13 @@ app.post('/api/customers/:id/claim', requireCustomerPublicPoolClaimAccess, async
 });
 
 app.post('/api/customers/:id/assign', requireCustomerTransferAccess, async (req: AuthenticatedRequest, res) => {
-  const result = await customerCommandService.assignOwner(
-    routeParam(req.params.id),
-    String(req.body?.ownerId || ''),
-    String(req.body?.reason || ''),
-    req.currentUser!,
-  );
+  const atomicResult = await customerAtomicCommandService.execute({
+    action: 'transfer',
+    customerId: routeParam(req.params.id),
+    targetOwnerId: String(req.body?.ownerId || ''),
+    reason: String(req.body?.reason || '').trim(),
+  }, req.currentUser!);
+  const result = atomicResult.code === 0 ? success(atomicResult.data!.customer) : atomicResult;
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 

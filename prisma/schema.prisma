@@ -450,3 +450,175 @@ model KnowledgeChunk {
   @@index([versionId])
   @@map("knowledge_chunks")
 }
+
+model CustomerBatchPrecheck {
+  id                      String   @id @db.VarChar(64)
+  actorId                 String   @db.VarChar(64)
+  handlerKey              String   @db.VarChar(80)
+  operation               String   @db.VarChar(80)
+  status                  String   @db.VarChar(32)
+  tokenHash               String   @unique @db.Char(64)
+  selectionHash           String   @db.Char(64)
+  inputHash               String   @db.Char(64)
+  guardManifest           Json
+  fileHash                String?  @db.Char(64)
+  normalizedRowsHash      String?  @db.Char(64)
+  customerVersionManifest Json
+  selectedCustomerIds     Json
+  filterSnapshot          Json?
+  expiresAt               DateTime
+  consumedAt              DateTime?
+  consumedResultType      String?  @db.VarChar(64)
+  consumedResultId        String?  @db.VarChar(64)
+  consumedIdempotencyKey  String?  @db.VarChar(128)
+  createdAt               DateTime @default(now())
+
+  @@index([actorId, operation, expiresAt])
+  @@index([consumedResultType, consumedResultId])
+  @@map("customer_batch_prechecks")
+}
+
+model CustomerBatchJob {
+  id                     String                 @id @db.VarChar(64)
+  handlerKey             String                 @db.VarChar(80)
+  operation              String                 @db.VarChar(80)
+  status                 String                 @db.VarChar(32)
+  selectionMode          String                 @db.VarChar(32)
+  selectedCustomerIds    Json
+  filterSnapshot         Json?
+  input                  Json
+  inputHash              String                 @db.Char(64)
+  idempotencyFingerprint String                 @db.Char(64)
+  reason                 String                 @db.Text
+  idempotencyKey         String                 @db.VarChar(128)
+  actorId                String                 @db.VarChar(64)
+  actorName              String                 @db.VarChar(100)
+  actorDepartmentId      String?                @db.VarChar(64)
+  frozenCustomerCount    Int
+  totalCount             Int                    @default(0)
+  successCount           Int                    @default(0)
+  failedCount            Int                    @default(0)
+  skippedCount           Int                    @default(0)
+  cancelledCount         Int                    @default(0)
+  leaseOwner             String?                @db.VarChar(64)
+  leaseEpoch             Int                    @default(0)
+  leaseExpiresAt         DateTime?
+  heartbeatAt            DateTime?
+  cursor                 Int                    @default(0)
+  cancelRequestedAt      DateTime?
+  cancelledAt            DateTime?
+  createdAt              DateTime               @default(now())
+  startedAt              DateTime?
+  finishedAt             DateTime?
+  expiresAt              DateTime?
+  attemptCount           Int                    @default(0)
+  lastError              String?                @db.Text
+  retryOfJobId           String?                @db.VarChar(64)
+  retryOf                CustomerBatchJob?      @relation("CustomerBatchJobRetry", fields: [retryOfJobId], references: [id], onDelete: SetNull)
+  retryChildren          CustomerBatchJob[]     @relation("CustomerBatchJobRetry")
+  items                  CustomerBatchJobItem[]
+
+  @@unique([actorId, handlerKey, operation, idempotencyKey])
+  @@index([status, leaseExpiresAt])
+  @@index([retryOfJobId])
+  @@map("customer_batch_jobs")
+}
+
+model CustomerBatchJobItem {
+  id                String           @id @db.VarChar(64)
+  jobId             String           @db.VarChar(64)
+  targetKey         String           @db.VarChar(120)
+  status            String           @db.VarChar(32)
+  errorCode         String?          @db.VarChar(64)
+  errorMessage      String?          @db.Text
+  expectedUpdatedAt DateTime?
+  beforeHash        String?          @db.Char(64)
+  afterHash         String?          @db.Char(64)
+  beforeSnapshot    Json?
+  afterSnapshot     Json?
+  idempotencyKey    String           @unique @db.VarChar(191)
+  attemptCount      Int              @default(0)
+  retryable         Boolean          @default(false)
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  job               CustomerBatchJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, targetKey], map: "customer_batch_job_item_target_unique")
+  @@index([jobId, status])
+  @@map("customer_batch_job_items")
+}
+
+model CustomerAuditEvent {
+  id             String   @id @db.VarChar(64)
+  eventSequence  BigInt   @unique @default(autoincrement())
+  customerId     String   @db.VarChar(80)
+  batchJobId     String?  @db.VarChar(64)
+  operation      String   @db.VarChar(80)
+  actorId        String   @db.VarChar(64)
+  actorName      String   @db.VarChar(100)
+  reason         String?  @db.Text
+  inputHash      String?  @db.Char(64)
+  beforeSnapshot Json?
+  afterSnapshot  Json?
+  result         String   @db.VarChar(32)
+  requestId      String?  @db.VarChar(128)
+  idempotencyKey String?  @db.VarChar(191)
+  ip             String?  @db.VarChar(64)
+  createdAt      DateTime @default(now())
+
+  @@index([customerId, eventSequence])
+  @@index([batchJobId, createdAt])
+  @@map("customer_audit_events")
+}
+
+model ContactIdentity {
+  id                       String                @id @db.VarChar(64)
+  type                     String                @db.VarChar(32)
+  normalizedHash           String                @db.Char(64)
+  hashKeyVersion           Int
+  status                   String                @db.VarChar(32)
+  encryptedNormalizedValue String                @db.Text
+  canonicalCustomerId      String?               @db.VarChar(80)
+  conflictReason           String?               @db.Text
+  createdAt                DateTime              @default(now())
+  updatedAt                DateTime              @updatedAt
+  links                    ContactIdentityLink[]
+
+  @@unique([type, normalizedHash])
+  @@map("contact_identities")
+}
+
+model ContactIdentityLink {
+  id         String          @id @db.VarChar(64)
+  identityId String          @db.VarChar(64)
+  entityType String          @db.VarChar(32)
+  entityId   String          @db.VarChar(80)
+  linkStatus String          @db.VarChar(32)
+  source     String          @db.VarChar(64)
+  createdAt  DateTime        @default(now())
+  endedAt    DateTime?
+  identity   ContactIdentity @relation(fields: [identityId], references: [id], onDelete: Cascade)
+
+  @@unique([identityId, entityType, entityId])
+  @@index([entityType, entityId, linkStatus])
+  @@map("contact_identity_links")
+}
+
+model CustomerDuplicateGroup {
+  id                String   @id @db.VarChar(64)
+  groupKey          String   @unique @db.Char(64)
+  rule              String   @db.VarChar(80)
+  confidence        String   @db.VarChar(32)
+  status            String   @db.VarChar(32)
+  customerIds       Json
+  contactIdentityId String?  @db.VarChar(64)
+  sourceJobId       String?  @db.VarChar(64)
+  createdById       String?  @db.VarChar(64)
+  createdAt         DateTime @default(now())
+  resolvedAt        DateTime?
+  mergeLedgerId     String?  @db.VarChar(64)
+
+  @@index([status, createdAt])
+  @@index([contactIdentityId])
+  @@map("customer_duplicate_groups")
+}

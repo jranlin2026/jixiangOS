@@ -17,10 +17,11 @@ import {
 } from './customerBusinessRecordRepository';
 import { customerWriteConflictResponse } from './customerWriteConflict';
 import { lockCustomerAssociationScope } from './customerAssociationRegistry';
+import { appendCustomerAuditEvent } from './customerAuditService';
 
 type CustomerTodoPrisma = Pick<
   PrismaClient,
-  '$transaction' | '$queryRaw' | 'businessRecord' | 'customerTodo' | 'department' | 'role' | 'user'
+  '$transaction' | '$queryRaw' | 'businessRecord' | 'customerTodo' | 'customerAuditEvent' | 'department' | 'role' | 'user'
 >;
 
 type CustomerTodoServiceOptions = {
@@ -163,6 +164,7 @@ export function createCustomerTodoService(
       updatedAt: at.toISOString(),
     };
     await createCustomerBusinessRecordRepository(tx).compareAndSave(snapshot, updated, at);
+    return updated;
   };
 
   return {
@@ -221,7 +223,7 @@ export function createCustomerTodoService(
           assigneeId: assignee.id, assigneeName: assignee.name,
           createdById: user.id, createdByName: actorName,
         } });
-        await appendActivity(
+        const afterSnapshot = await appendActivity(
           tx,
           customer.snapshot,
           created.id,
@@ -230,6 +232,19 @@ export function createCustomerTodoService(
           actorName,
           at,
         );
+        await appendCustomerAuditEvent(tx, {
+          operation: 'add_todo',
+          customerId,
+          actor: { id: user.id, name: actorName },
+          reason: '新建客户待办',
+          beforeSnapshot: customer.snapshot.customer,
+          afterSnapshot,
+          canonicalInput: {
+            operation: 'add_todo', customerId, todoId: created.id,
+            title: clean(input.title), content: clean(input.content), dueAt: input.dueAt,
+            executionMethod: input.executionMethod || 'none', assigneeId: assignee.id,
+          },
+        });
         return success(mapTodo(created));
       });
     },
@@ -255,7 +270,7 @@ export function createCustomerTodoService(
           title: clean(input.title), content: clean(input.content) || null, dueAt: new Date(input.dueAt),
           executionMethod: input.executionMethod || 'none', assigneeId: assignee.id, assigneeName: assignee.name,
         } });
-        await appendActivity(
+        const afterSnapshot = await appendActivity(
           tx,
           customer.snapshot,
           todoId,
@@ -264,6 +279,19 @@ export function createCustomerTodoService(
           actorName,
           at,
         );
+        await appendCustomerAuditEvent(tx, {
+          operation: 'update_todo',
+          customerId,
+          actor: { id: user.id, name: actorName },
+          reason: '更新客户待办',
+          beforeSnapshot: customer.snapshot.customer,
+          afterSnapshot,
+          canonicalInput: {
+            operation: 'update_todo', customerId, todoId,
+            title: clean(input.title), content: clean(input.content), dueAt: input.dueAt,
+            executionMethod: input.executionMethod || 'none', assigneeId: assignee.id,
+          },
+        });
         return success(mapTodo(updated));
       });
     },
@@ -292,7 +320,16 @@ export function createCustomerTodoService(
             completedByName: actorName,
           },
         });
-        await appendActivity(tx, customer.snapshot, todoId, '完成了客户待办', updated.title, actorName, at);
+        const afterSnapshot = await appendActivity(tx, customer.snapshot, todoId, '完成了客户待办', updated.title, actorName, at);
+        await appendCustomerAuditEvent(tx, {
+          operation: 'complete_todo',
+          customerId,
+          actor: { id: user.id, name: actorName },
+          reason: '完成客户待办',
+          beforeSnapshot: customer.snapshot.customer,
+          afterSnapshot,
+          canonicalInput: { operation: 'complete_todo', customerId, todoId },
+        });
         return success(mapTodo(updated));
       });
     },
@@ -312,7 +349,16 @@ export function createCustomerTodoService(
           where: { id: todoId },
           data: { status: 'PENDING', completedAt: null, completedById: null, completedByName: null },
         });
-        await appendActivity(tx, customer.snapshot, todoId, '重新打开了客户待办', updated.title, actorName, at);
+        const afterSnapshot = await appendActivity(tx, customer.snapshot, todoId, '重新打开了客户待办', updated.title, actorName, at);
+        await appendCustomerAuditEvent(tx, {
+          operation: 'reopen_todo',
+          customerId,
+          actor: { id: user.id, name: actorName },
+          reason: '重新打开客户待办',
+          beforeSnapshot: customer.snapshot.customer,
+          afterSnapshot,
+          canonicalInput: { operation: 'reopen_todo', customerId, todoId },
+        });
         return success(mapTodo(updated));
       });
     },
@@ -338,7 +384,7 @@ export function createCustomerTodoService(
             cancelReason: clean(reason) || null,
           },
         });
-        await appendActivity(
+        const afterSnapshot = await appendActivity(
           tx,
           customer.snapshot,
           todoId,
@@ -347,6 +393,15 @@ export function createCustomerTodoService(
           actorName,
           at,
         );
+        await appendCustomerAuditEvent(tx, {
+          operation: 'cancel_todo',
+          customerId,
+          actor: { id: user.id, name: actorName },
+          reason: '取消客户待办',
+          beforeSnapshot: customer.snapshot.customer,
+          afterSnapshot,
+          canonicalInput: { operation: 'cancel_todo', customerId, todoId, reason: clean(reason) },
+        });
         return success(mapTodo(updated));
       });
     },

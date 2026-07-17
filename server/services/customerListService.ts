@@ -34,8 +34,9 @@ import {
   type CustomerBusinessRecordRow,
 } from './customerBusinessRecordRepository';
 import { customerWriteConflictResponse } from './customerWriteConflict';
+import { appendCustomerAuditEvent } from './customerAuditService';
 
-type CustomerListPrisma = Pick<PrismaClient, 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | '$queryRaw' | '$transaction'>;
+type CustomerListPrisma = Pick<PrismaClient, 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | 'customerAuditEvent' | '$queryRaw' | '$transaction'>;
 
 type CustomerRow = CustomerBusinessRecordRow;
 
@@ -307,7 +308,7 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
 
       const comparablePhone = phone ? normalizePhoneForComparison(phone) : '';
       const comparableWechat = wechat.toLowerCase();
-      const operation = async (tx: Pick<Prisma.TransactionClient, 'businessRecord' | 'leadRecord'>): Promise<ApiResponse<Customer | null>> => {
+      const operation = async (tx: Pick<Prisma.TransactionClient, 'businessRecord' | 'leadRecord' | 'customerAuditEvent'>): Promise<ApiResponse<Customer | null>> => {
       const catalog = await loadCustomerTagCatalog(tx, false);
       const tagValidation = validateManualTagSelection(catalog, 'customer', input.manualTagIds || []);
       if (!tagValidation.ok) return failure<Customer>(tagValidation.message, 400);
@@ -379,6 +380,23 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
         }
         throw error;
       }
+      await appendCustomerAuditEvent(tx, {
+        operation: 'create_customer',
+        customerId: customer.id,
+        actor: { id: currentUser.id, name: actorName },
+        reason: '创建客户',
+        afterSnapshot: customer,
+        canonicalInput: {
+          operation: 'create_customer',
+          name,
+          company: cleanText(input.company),
+          phone,
+          wechat: wechat || null,
+          ownerId: targetOwner.id,
+          sourceType,
+          manualTagIds: tagValidation.tagIds,
+        },
+      });
       return success(customer);
       };
       return prisma.$transaction ? (prisma.$transaction as any)(operation) : operation(prisma as any);
@@ -444,6 +462,21 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
           const operator = currentUser.name || currentUser.account || snapshot.customer.owner || '系统';
           const updated = addFollowActivity(snapshot.customer, input, operator);
           await repository.compareAndSave(snapshot, updated, new Date(updated.updatedAt));
+          await appendCustomerAuditEvent(tx as any, {
+            operation: 'add_follow_up',
+            customerId: snapshot.customer.id,
+            actor: { id: currentUser.id, name: operator },
+            reason: '新增客户跟进',
+            beforeSnapshot: snapshot.customer,
+            afterSnapshot: updated,
+            canonicalInput: {
+              operation: 'add_follow_up',
+              customerId: snapshot.customer.id,
+              type: input.type || '跟进记录',
+              content,
+              attachmentCount: attachments.length,
+            },
+          });
           return success(updated);
         });
       } catch (error) {

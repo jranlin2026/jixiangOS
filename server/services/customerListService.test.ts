@@ -7,6 +7,7 @@ import type { CustomerFilters } from '../../src/types/customer';
 const now = '2026-07-12T00:00:00.000Z';
 
 const created: any[] = [];
+const auditEvents: any[] = [];
 const service = createCustomerListService({
   businessRecord: {
     findMany: async (args: any) => {
@@ -31,6 +32,13 @@ const service = createCustomerListService({
     },
   },
   leadRecord: { findMany: async () => [] },
+  customerAuditEvent: {
+    create: async ({ data }: any) => {
+      const event = { ...data, eventSequence: BigInt(auditEvents.length + 1), createdAt: new Date(now) };
+      auditEvents.push(event);
+      return event;
+    },
+  },
 } as any);
 
 const actor = {
@@ -84,6 +92,8 @@ assert.equal(result.code, 0);
 assert.equal(created.length, 1);
 assert.equal(created[0].data.domain, STORAGE_KEYS.CUSTOMERS);
 assert.equal(created[0].data.data.name, '新客户');
+assert.equal(auditEvents[0]?.operation, 'create_customer');
+assert.match(auditEvents[0]?.inputHash || '', /^[a-f0-9]{64}$/);
 
 const tagged = await service.create({
   name: '标签客户', company: '', phone: '13800000001', customerLevel: 'L1', owner: '销售', ownerId: actor.id, sourceType: '公司资源', manualTagIds: ['shared'],

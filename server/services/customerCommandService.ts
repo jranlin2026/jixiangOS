@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
-import { failure, success } from '../api/response';
+import { failure, success, type ApiResponse } from '../api/response';
 import {
   DEFAULT_LEAD_FLOW_CONFIG,
   DEFAULT_LIFECYCLE_STATUS_CONFIGS,
@@ -54,11 +54,12 @@ import {
   type CustomerRecordSnapshot,
 } from './customerBusinessRecordRepository';
 import { customerWriteConflictResponse } from './customerWriteConflict';
+import { appendCustomerAuditEvent } from './customerAuditService';
 
 type CustomerCommandPrisma = Pick<PrismaClient, '$transaction' | 'leadRecord'>;
-type CustomerCommandTx = Pick<
+export type CustomerCommandTx = Pick<
   Prisma.TransactionClient,
-  'appStorage' | 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | 'customerTodo' | '$queryRaw'
+  'appStorage' | 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | 'customerTodo' | 'customerAuditEvent' | '$queryRaw'
 >;
 
 export type CustomerAtomicCommand =
@@ -69,15 +70,30 @@ export type CustomerAtomicCommand =
   | { action: 'add_todo'; customerId: string; title: string; content: string; dueAt: string; executionMethod: string; reason: string }
   | { action: 'soft_delete'; customerId: string; reason: string; confirmed: true };
 
+export type CustomerAuditOperation = CustomerAtomicCommand['action']
+  | 'create_customer'
+  | 'update_profile'
+  | 'claim_from_pool'
+  | 'add_follow_up'
+  | 'create_todo'
+  | 'update_todo'
+  | 'complete_todo'
+  | 'reopen_todo'
+  | 'cancel_todo';
+
 export interface CustomerAuditEventInput {
-  operation: CustomerAtomicCommand['action'];
+  /** Optional caller-provided correlation ID; normal single commands generate one. */
+  id?: string;
+  operation: CustomerAuditOperation;
   customerId: string;
+  batchJobId?: string;
   actor: { id: string; name: string };
   reason: string;
-  beforeSnapshot: Customer;
-  afterSnapshot: Customer;
+  beforeSnapshot?: Customer;
+  afterSnapshot?: Customer;
   idempotencyKey?: string;
-  inputHash?: string;
+  /** Never persisted; used only to derive the SHA-256 audit input hash. */
+  canonicalInput?: unknown;
   result?: string;
   requestId?: string;
   ip?: string;
@@ -99,9 +115,9 @@ export interface CustomerAtomicCommandContext {
   /** The current role directory is supplied by the caller's transaction. */
   roles?: Role[];
   idempotencyKey?: string;
-  inputHash?: string;
   requestId?: string;
   ip?: string;
+  batchJobId?: string;
 }
 
 export interface CustomerAtomicCommandResult {
@@ -805,6 +821,40 @@ export function createCustomerAtomicCommandService(options: {
       assertCustomerActionPermission(context.access, permissionAction);
       assertCanManageCustomer(context.access, customer);
 
+      const canonicalInput = canonicalAtomicCommandInput(command);
+      const appendAudit = (afterSnapshot: Customer, result = 'succeeded') => options.auditAppender.append(tx, {
+        operation: command.action,
+        customerId: customer.id,
+        batchJobId: context.batchJobId,
+        actor,
+        reason,
+        beforeSnapshot,
+        afterSnapshot,
+        idempotencyKey: context.idempotencyKey,
+        canonicalInput,
+        result,
+        requestId: context.requestId,
+        ip: context.ip,
+      });
+      const noOpResult = async (): Promise<CustomerAtomicCommandResult> => {
+        const audit = await appendAudit(beforeSnapshot, 'noop');
+        return {
+          operationId: audit.id,
+          customer,
+          beforeSnapshot,
+          afterSnapshot: beforeSnapshot,
+          cancelledTodoCount: 0,
+          reassignedTodoCount: 0,
+        };
+      };
+
+      // Releasing an already-public customer has historically been an
+      // idempotent no-op. Authorization intentionally happened first, then
+      // the request remains write-free while retaining its audit record.
+      if (command.action === 'release_to_pool' && isCanonicalPublicPoolCustomer(customer)) {
+        return noOpResult();
+      }
+
       const at = now();
       const atIso = at.toISOString();
       let next: Customer = { ...customer };
@@ -822,6 +872,11 @@ export function createCustomerAtomicCommandService(options: {
           throw new Error('目标员工不是可分配销售');
         }
         if (!context.access.manageableOwnerIds.has(target.id)) throw new Error('无权跨数据范围分配客户');
+        if (customer.ownerId === target.id && customer.lifecycleStatusCode !== LIFECYCLE_STATUS_CODES.PUBLIC_POOL) {
+          // Preserve legacy same-owner idempotency while recording the request
+          // in the same transaction: do not add activity or touch todos.
+          return noOpResult();
+        }
         const fromPool = isCanonicalPublicPoolCustomer(customer);
         next = {
           ...next,
@@ -933,19 +988,7 @@ export function createCustomerAtomicCommandService(options: {
           await persistLead(tx, row.id, nextLead, at);
         }
       }
-      const audit = await options.auditAppender.append(tx, {
-        operation: command.action,
-        customerId: customer.id,
-        actor,
-        reason,
-        beforeSnapshot,
-        afterSnapshot: next,
-        idempotencyKey: context.idempotencyKey,
-        inputHash: context.inputHash,
-        result: 'succeeded',
-        requestId: context.requestId,
-        ip: context.ip,
-      });
+      const audit = await appendAudit(next);
       return {
         operationId: audit.id,
         customer: next,
@@ -955,6 +998,134 @@ export function createCustomerAtomicCommandService(options: {
         reassignedTodoCount,
         ...(createdTodoId ? { createdTodoId } : {}),
       };
+    },
+  };
+}
+
+export type CustomerAtomicCommandMetadata = Pick<
+  CustomerAtomicCommandContext,
+  'idempotencyKey' | 'requestId' | 'ip' | 'batchJobId'
+>;
+
+/**
+ * Canonical correlation input for a single command. The append layer hashes
+ * this value itself, so callers cannot inject arbitrary material into a
+ * persisted audit hash column.
+ */
+function canonicalAtomicCommandInput(command: CustomerAtomicCommand): Record<string, unknown> {
+  return (() => {
+    switch (command.action) {
+      case 'transfer':
+        return {
+          action: command.action,
+          customerId: cleanText(command.customerId),
+          targetOwnerId: cleanText(command.targetOwnerId),
+          reason: cleanText(command.reason),
+        };
+      case 'release_to_pool':
+        return {
+          action: command.action,
+          customerId: cleanText(command.customerId),
+          reason: cleanText(command.reason),
+        };
+      case 'set_progress':
+        return {
+          action: command.action,
+          customerId: cleanText(command.customerId),
+          lifecycleStatusCode: cleanText(command.lifecycleStatusCode),
+          reason: cleanText(command.reason),
+        };
+      case 'update_tags':
+        return {
+          action: command.action,
+          customerId: cleanText(command.customerId),
+          mode: command.mode,
+          tagIds: [...new Set(command.tagIds.map(cleanText).filter(Boolean))].sort(),
+          reason: cleanText(command.reason),
+        };
+      case 'add_todo':
+        return {
+          action: command.action,
+          customerId: cleanText(command.customerId),
+          title: cleanText(command.title),
+          content: cleanText(command.content),
+          dueAt: cleanText(command.dueAt),
+          executionMethod: cleanText(command.executionMethod),
+          reason: cleanText(command.reason),
+        };
+      case 'soft_delete':
+        return {
+          action: command.action,
+          customerId: cleanText(command.customerId),
+          confirmed: command.confirmed === true,
+          reason: cleanText(command.reason),
+        };
+    }
+  })();
+}
+
+function toAtomicCommandFailure(error: unknown): ApiResponse<CustomerAtomicCommandResult | null> {
+  const conflict = customerWriteConflictResponse<CustomerAtomicCommandResult>(error);
+  if (conflict) return conflict;
+  const message = error instanceof Error ? error.message : '客户操作失败';
+  if (/客户不存在/.test(message)) return failure<CustomerAtomicCommandResult>(message, 404);
+  if (/无权|当前用户不存在或已离职|当前用户不是/.test(message)) {
+    return failure<CustomerAtomicCommandResult>(message, 403);
+  }
+  if (/存在关联|已被其他人领取|冲突|重复/.test(message)) {
+    return failure<CustomerAtomicCommandResult>(message, 409);
+  }
+  if (/audit write failed|审计/.test(message)) return failure<CustomerAtomicCommandResult>('客户操作审计失败', 500);
+  return failure<CustomerAtomicCommandResult>(message, 400);
+}
+
+/**
+ * Production facade for the Task 4 engine. It owns exactly one Prisma
+ * transaction, reloads the transaction-local access context, and gives that
+ * same transaction to the audit adapter. A failed append therefore aborts all
+ * customer, todo, lead, activity, and audit writes together.
+ */
+export function createAuditedCustomerAtomicCommandService(
+  prisma: Pick<PrismaClient, '$transaction'>,
+  options: {
+    auditAppender: CustomerAuditAppender;
+    now?: () => Date;
+    createId?: () => string;
+  },
+) {
+  const atomic = createCustomerAtomicCommandService(options);
+
+  return {
+    async execute(
+      command: CustomerAtomicCommand,
+      currentUser: AuthenticatedUser,
+      metadata: CustomerAtomicCommandMetadata = {},
+    ): Promise<ApiResponse<CustomerAtomicCommandResult | null>> {
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+          const result = await prisma.$transaction(async (rawTx) => {
+            const tx = rawTx as CustomerCommandTx;
+            const context = await commandContext(tx, currentUser, 'customers');
+            if (!context.actor || !context.customerAccess) throw new Error('当前用户不存在或已离职');
+            return atomic.execute(command, {
+              tx,
+              access: context.customerAccess,
+              actor: { id: context.actor.id, name: context.actor.name },
+              roles: context.roles,
+              ...metadata,
+            });
+          });
+          return success(result);
+        } catch (error) {
+          lastError = error;
+          const code = (error as { code?: string }).code;
+          const message = error instanceof Error ? error.message : String(error || '');
+          const retryable = code === 'P2034' || /deadlock|write conflict|1213|40001/i.test(message);
+          if (!retryable || attempt === 3) return toAtomicCommandFailure(error);
+        }
+      }
+      return toAtomicCommandFailure(lastError);
     },
   };
 }
@@ -1043,6 +1214,28 @@ export function createCustomerCommandService(
     for (const leadRow of leadRows) {
       await persistLead(tx, leadRow.id, result.lead(readJson<Lead>(leadRow.data)), at);
     }
+    const operation: CustomerAuditOperation = authorization === 'claim_from_pool'
+      ? 'claim_from_pool'
+      : authorization;
+    const reason = operation === 'claim_from_pool'
+      ? result.customer.assignmentReason || '从公海领取'
+      : operation === 'release_to_pool'
+        ? result.customer.releaseReason || '释放客户至公海'
+        : result.customer.assignmentReason || '调整客户负责人';
+    await appendCustomerAuditEvent(tx, {
+      operation,
+      customerId: customer.id,
+      actor: { id: context.actor.id, name: context.actor.name },
+      reason,
+      beforeSnapshot: customer,
+      afterSnapshot: result.customer,
+      canonicalInput: {
+        operation,
+        customerId: customer.id,
+        nextOwnerId: result.customer.ownerId || null,
+        reason,
+      },
+    });
     return success(result.customer);
   });
 
@@ -1183,6 +1376,19 @@ export function createCustomerCommandService(
           const nextLead = syncLeadFromCustomer(lead, updated, atIso, operator);
           if (nextLead !== lead) await persistLead(tx, leadRow.id, nextLead, at);
         }
+        await appendCustomerAuditEvent(tx, {
+          operation: 'update_profile',
+          customerId: customer.id,
+          actor: { id: context.actor.id, name: context.actor.name },
+          reason: '更新客户资料',
+          beforeSnapshot: customer,
+          afterSnapshot: updated,
+          canonicalInput: {
+            operation: 'update_profile',
+            customerId: customer.id,
+            patch: submittedPatch,
+          },
+        });
         return success(updated);
       });
     },
@@ -1224,6 +1430,15 @@ export function createCustomerCommandService(
           updatedAt: atIso,
         };
         await persistCustomer(tx, snapshot, deleted, at);
+        await appendCustomerAuditEvent(tx, {
+          operation: 'soft_delete',
+          customerId: customer.id,
+          actor: { id: context.actor.id, name: context.actor.name },
+          reason,
+          beforeSnapshot: customer,
+          afterSnapshot: deleted,
+          canonicalInput: { operation: 'soft_delete', customerId: customer.id, reason },
+        });
         return success(true);
       });
     },
@@ -1472,6 +1687,17 @@ export function createCustomerCommandService(
               data: jsonValue(customer),
             },
           });
+          await appendCustomerAuditEvent(tx, {
+            operation: 'create_customer',
+            customerId,
+            actor: { id: context.actor.id, name: context.actor.name },
+            reason: '线索自动领取创建客户',
+            afterSnapshot: customer,
+            canonicalInput: {
+              operation: 'create_customer', customerId, sourceLeadId: lead.id,
+              assignedToId: assignedToId || null, source: 'lead_auto_claim',
+            },
+          });
           lead = {
             ...lead,
             customerId,
@@ -1642,12 +1868,25 @@ export function createCustomerCommandService(
         await persistLead(tx, row.id, updated, at);
         if (shouldStartFollowing && customerSnapshot) {
           const customer = customerSnapshot.customer;
-          await persistCustomer(tx, customerSnapshot, {
+          const updatedCustomer: Customer = {
             ...customer,
             lifecycleStatusCode: LIFECYCLE_STATUS_CODES.FOLLOWING,
             lifecycleStatusUpdatedAt: atIso,
             updatedAt: atIso,
-          }, at);
+          };
+          await persistCustomer(tx, customerSnapshot, updatedCustomer, at);
+          await appendCustomerAuditEvent(tx, {
+            operation: 'add_follow_up',
+            customerId: customer.id,
+            actor: { id: context.actor.id, name: context.actor.name },
+            reason: '线索跟进推进客户进展',
+            beforeSnapshot: customer,
+            afterSnapshot: updatedCustomer,
+            canonicalInput: {
+              operation: 'add_follow_up', customerId: customer.id, leadId,
+              followUpType: input.type, content,
+            },
+          });
         }
         return success(record);
       });
@@ -2073,6 +2312,17 @@ export function createCustomerCommandService(
             amount: 0,
             eventAt: at,
             data: jsonValue(customer),
+          },
+        });
+        await appendCustomerAuditEvent(tx, {
+          operation: 'create_customer',
+          customerId,
+          actor: { id: context.actor.id, name: context.actor.name },
+          reason: '线索转为客户',
+          afterSnapshot: customer,
+          canonicalInput: {
+            operation: 'create_customer', customerId, sourceLeadId: lead.id,
+            conversionOwnerId, source: 'lead_conversion',
           },
         });
 

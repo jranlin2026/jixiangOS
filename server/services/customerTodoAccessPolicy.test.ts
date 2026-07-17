@@ -71,6 +71,9 @@ function fixture(initialCustomer: Customer, role = baseRole, conflict = false) {
       }),
       update: async ({ data }: any) => (todo = { ...todo, ...data, updatedAt: NOW }),
     },
+    customerAuditEvent: {
+      create: async ({ data }: any) => ({ ...data, eventSequence: 1n, createdAt: NOW }),
+    },
     $queryRaw: async () => [row()],
   };
   const prisma = { ...tx, $transaction: async (operation: any) => operation(tx) };
