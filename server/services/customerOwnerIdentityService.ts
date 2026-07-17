@@ -2,6 +2,11 @@ import type { Customer } from '../../src/types/customer';
 import { createCustomerBusinessRecordRepository } from './customerBusinessRecordRepository';
 import { success, type ApiResponse } from '../api/response';
 import { customerWriteConflictResponse } from './customerWriteConflict';
+import {
+  backfillContactIdentities,
+  type ContactIdentityBackfillOptions,
+  type ContactIdentityBackfillSummary,
+} from './contactIdentityService';
 
 export type CustomerOwnerIdentityStatus = NonNullable<Customer['ownerIdentityStatus']>;
 
@@ -195,4 +200,16 @@ export async function backfillCustomerOwnerIdentitiesResult(
     if (conflict) return conflict;
     throw error;
   }
+}
+
+/**
+ * Keeps the two pre-release identity reports behind the existing migration
+ * module without coupling either backfill's transaction to the other. Contact
+ * apply mutates only identity/link/candidate tables; customer JSON is untouched.
+ */
+export async function backfillCustomerContactIdentitiesResult(
+  prisma: any,
+  options: ContactIdentityBackfillOptions,
+): Promise<ApiResponse<ContactIdentityBackfillSummary | null>> {
+  return success(await backfillContactIdentities(prisma, options));
 }

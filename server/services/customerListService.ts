@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { failure, success } from '../api/response';
 import {
   STORAGE_KEYS,
@@ -13,7 +13,6 @@ import type { ApiResponse, PaginatedResponse } from '../../src/api/types';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import {
   getPhoneNumberError,
-  normalizePhoneForComparison,
   normalizePhoneForStorage,
 } from '../../src/shared/utils/phoneNumber';
 import { PERMISSION_KEYS, hasExplicitPermission, hasPermission } from '../../src/shared/utils/permissions';
@@ -35,8 +34,20 @@ import {
 } from './customerBusinessRecordRepository';
 import { customerWriteConflictResponse } from './customerWriteConflict';
 import { appendCustomerAuditEvent } from './customerAuditService';
+import {
+  ContactIdentityConflictError,
+  upsertCustomerContactIdentities,
+  type ContactIdentityCrypto,
+} from './contactIdentityService';
 
-type CustomerListPrisma = Pick<PrismaClient, 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | 'customerAuditEvent' | '$queryRaw' | '$transaction'>;
+type CustomerListPrisma = Pick<PrismaClient,
+  'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | 'customerAuditEvent'
+  | 'contactIdentity' | 'contactIdentityLink' | '$queryRaw' | '$transaction'
+>;
+
+type CustomerListServiceOptions = {
+  contactIdentityCrypto?: ContactIdentityCrypto;
+};
 
 type CustomerRow = CustomerBusinessRecordRow;
 
@@ -247,7 +258,10 @@ async function buildVisibilityWhere(
   };
 }
 
-export function createCustomerListService(prisma: CustomerListPrisma) {
+export function createCustomerListService(
+  prisma: CustomerListPrisma,
+  options: CustomerListServiceOptions = {},
+) {
   const findVisibleCustomerRecord = async (customerId: string, currentUser?: AuthenticatedUser | null) => {
     if (!currentUser) return null;
     const [context, snapshot] = await Promise.all([
@@ -306,28 +320,16 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
       const phoneError = phone ? getPhoneNumberError(phone) : '';
       if (phoneError) return failure<Customer>(phoneError, 400);
 
-      const comparablePhone = phone ? normalizePhoneForComparison(phone) : '';
-      const comparableWechat = wechat.toLowerCase();
-      const operation = async (tx: Pick<Prisma.TransactionClient, 'businessRecord' | 'leadRecord' | 'customerAuditEvent'>): Promise<ApiResponse<Customer | null>> => {
+      const operation = async (tx: Pick<Prisma.TransactionClient,
+        'businessRecord' | 'leadRecord' | 'customerAuditEvent' | 'contactIdentity' | 'contactIdentityLink' | '$queryRaw'
+      >): Promise<ApiResponse<Customer | null>> => {
       const catalog = await loadCustomerTagCatalog(tx, false);
       const tagValidation = validateManualTagSelection(catalog, 'customer', input.manualTagIds || []);
       if (!tagValidation.ok) return failure<Customer>(tagValidation.message, 400);
       const tagNames = tagValidation.tagIds.map((id) => catalog.tags.find((tag) => tag.id === id)!.name);
-      const existingCustomerRows = await tx.businessRecord.findMany({
-        where: { domain: STORAGE_KEYS.CUSTOMERS },
-        select: { id: true, domain: true, recordId: true, data: true, updatedAt: true },
-      });
-      const phoneExists = existingCustomerRows.some((row) => {
-        const existing = customerFromRow(row);
-        if (existing.deletedAt) return false;
-        if (comparablePhone && normalizePhoneForComparison(existing.phone) === comparablePhone) return true;
-        return Boolean(comparableWechat && cleanText(existing.wechat).toLowerCase() === comparableWechat);
-      });
-      if (phoneExists) return failure<Customer>(comparablePhone ? '该手机号已存在客户' : '该微信号已存在客户', 409);
 
       const now = new Date().toISOString();
-      const identity = comparablePhone ? `phone:${comparablePhone}` : `wechat:${comparableWechat}`;
-      const id = `cust-${createHash('sha256').update(identity).digest('hex').slice(0, 16)}`;
+      const id = `cust-${randomUUID()}`;
       const customer: Customer = {
         ...input,
         manualTagIds: tagValidation.tagIds,
@@ -359,27 +361,27 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
         updatedAt: now,
       };
 
-      try {
-        await tx.businessRecord.create({
-          data: {
-            id: STORAGE_KEYS.CUSTOMERS + ':' + id,
-            domain: STORAGE_KEYS.CUSTOMERS,
-            recordId: id,
-            title: customer.name || customer.company || id,
-            status: customer.lifecycleStatusCode || null,
-            owner: customer.owner || null,
-            customerId: id,
-            amount: 0,
-            eventAt: new Date(now),
-            data: customer as any,
-          },
-        });
-      } catch (error) {
-        if ((error as { code?: unknown } | null)?.code === 'P2002') {
-          return failure<Customer>(comparablePhone ? '该手机号已存在客户' : '该微信号已存在客户', 409);
-        }
-        throw error;
-      }
+      await upsertCustomerContactIdentities(tx, {
+        customerId: customer.id,
+        phone: customer.phone,
+        wechat: customer.wechat,
+        source: 'customer_create',
+        crypto: options.contactIdentityCrypto,
+      });
+      await tx.businessRecord.create({
+        data: {
+          id: STORAGE_KEYS.CUSTOMERS + ':' + id,
+          domain: STORAGE_KEYS.CUSTOMERS,
+          recordId: id,
+          title: customer.name || customer.company || id,
+          status: customer.lifecycleStatusCode || null,
+          owner: customer.owner || null,
+          customerId: id,
+          amount: 0,
+          eventAt: new Date(now),
+          data: customer as any,
+        },
+      });
       await appendCustomerAuditEvent(tx, {
         operation: 'create_customer',
         customerId: customer.id,
@@ -399,7 +401,18 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
       });
       return success(customer);
       };
-      return prisma.$transaction ? (prisma.$transaction as any)(operation) : operation(prisma as any);
+      try {
+        return await (prisma.$transaction ? (prisma.$transaction as any)(operation) : operation(prisma as any));
+      } catch (error) {
+        if (error instanceof ContactIdentityConflictError) {
+          return {
+            code: 409,
+            data: error.safePayload.customer || null,
+            message: error.safePayload.message,
+          } as ApiResponse<Customer | null>;
+        }
+        throw error;
+      }
     },
 
     async list(filters: CustomerFilters = {}, currentUser?: AuthenticatedUser | null) {

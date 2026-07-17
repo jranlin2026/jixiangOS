@@ -18,7 +18,8 @@
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
     "delivery:repair": "tsx scripts/repair-deliveries.ts",
-    "business-records:repair": "tsx scripts/repair-legacy-business-records.ts"
+    "business-records:repair": "tsx scripts/repair-legacy-business-records.ts",
+    "customer-contacts:backfill": "tsx scripts/backfill-contact-identities.ts"
   },
   "overrides": {
     "effect": "3.21.0"

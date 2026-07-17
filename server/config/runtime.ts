@@ -1,5 +1,6 @@
 import { DEFAULT_ADMIN_PASSWORD, DEFAULT_USER_PASSWORD } from '../../src/shared/utils/auth';
 import path from 'node:path';
+import { createContactIdentityCryptoFromEnv } from '../services/contactIdentityService';
 
 const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 const LOCALHOST_LISTEN_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
@@ -151,4 +152,5 @@ export function validateRuntimeConfig(env: NodeJS.ProcessEnv = process.env): voi
   }
   assertIntegerRange(env, 'JIXIANG_SESSION_TTL_HOURS', 1, 24);
   assertIntegerRange(env, 'JIXIANG_REMEMBER_SESSION_DAYS', 1, 90);
+  createContactIdentityCryptoFromEnv(env);
 }

@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { failure, success, type ApiResponse } from '../api/response';
 import {
   DEFAULT_LEAD_FLOW_CONFIG,
@@ -46,6 +46,7 @@ import {
   assertCustomerClaimPermission,
   assertCustomerFieldPermissions,
   buildCustomerAccessContextFromDirectory,
+  canReadCustomer,
   type CustomerAccessContext,
   type CustomerMutationAction,
 } from './customerAccessPolicy';
@@ -55,11 +56,21 @@ import {
 } from './customerBusinessRecordRepository';
 import { customerWriteConflictResponse } from './customerWriteConflict';
 import { appendCustomerAuditEvent } from './customerAuditService';
+import {
+  ContactIdentityConflictError,
+  createContactIdentityCryptoFromEnv,
+  hashContactIdentity,
+  linkLeadAndCustomerIdentity,
+  normalizeContactIdentity,
+  upsertCustomerContactIdentities,
+  type ContactIdentityCrypto,
+} from './contactIdentityService';
 
 type CustomerCommandPrisma = Pick<PrismaClient, '$transaction' | 'leadRecord'>;
 export type CustomerCommandTx = Pick<
   Prisma.TransactionClient,
-  'appStorage' | 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | 'customerTodo' | 'customerAuditEvent' | '$queryRaw'
+  'appStorage' | 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | 'customerTodo' | 'customerAuditEvent'
+  | 'contactIdentity' | 'contactIdentityLink' | '$queryRaw'
 >;
 
 export type CustomerAtomicCommand =
@@ -150,6 +161,7 @@ type LockedAppStorage = {
 type CommandOptions = {
   now?: () => Date;
   createId?: () => string;
+  contactIdentityCrypto?: ContactIdentityCrypto;
 };
 
 type CommandContext = {
@@ -423,24 +435,29 @@ async function findCustomerContactCollision(
   return rows[0] || null;
 }
 
-function contactLockKeys(contact: Pick<Lead, 'phone' | 'wechat'>): string[] {
+function contactLockKeys(
+  contact: Pick<Lead, 'phone' | 'wechat'>,
+  cryptoInput?: ContactIdentityCrypto,
+): string[] {
+  const crypto = cryptoInput || createContactIdentityCryptoFromEnv();
   const identities = [
-    ['phone', normalizePhoneForComparison(contact.phone)],
-    ['wechat', normalizedWechat(contact.wechat)],
+    ['phone', normalizeContactIdentity('phone', String(contact.phone || ''))],
+    ['wechat', normalizeContactIdentity('wechat', String(contact.wechat || ''))],
   ].filter((entry): entry is [string, string] => Boolean(entry[1]));
   return identities
     .map(([kind, value]) => {
-      const digest = createHash('sha256').update(`${kind}:${value}`).digest('hex');
-      return `aaos_contact_lock_${digest}`;
+      const digest = hashContactIdentity(value, crypto.hmacKey);
+      return `aaos_contact_lock_v${crypto.keyVersion}_${kind}_${digest}`;
     })
     .sort();
 }
 
 async function lockCustomerContacts(
   tx: CustomerCommandTx,
+  crypto: ContactIdentityCrypto | undefined,
   ...contacts: Array<Pick<Lead, 'phone' | 'wechat'>>
 ): Promise<void> {
-  const keys = Array.from(new Set(contacts.flatMap(contactLockKeys))).sort();
+  const keys = Array.from(new Set(contacts.flatMap((contact) => contactLockKeys(contact, crypto)))).sort();
   for (const key of keys) {
     await tx.appStorage.upsert({
       where: { key },
@@ -479,9 +496,9 @@ async function commandContext(
     roles,
     actor,
     scope: buildDataVisibilityScopeForUser(actor, users, roles, departments, domain),
-    customerAccess: domain === 'customers'
-      ? buildCustomerAccessContextFromDirectory(currentUser, users, roles, departments)
-      : undefined,
+    // Lead-to-customer writes need the customer read policy as well so any
+    // identity conflict detail is filtered through the exact same scope model.
+    customerAccess: buildCustomerAccessContextFromDirectory(currentUser, users, roles, departments),
   };
 }
 
@@ -1142,6 +1159,13 @@ export function createCustomerCommandService(
       try {
         return await prisma.$transaction(async (rawTx) => operation(rawTx as CustomerCommandTx));
       } catch (error) {
+        if (error instanceof ContactIdentityConflictError) {
+          return {
+            code: 409,
+            data: error.safePayload.customer || null,
+            message: error.safePayload.message,
+          } as T;
+        }
         const conflict = customerWriteConflictResponse(error);
         if (conflict) return conflict as T;
         lastError = error;
@@ -1366,15 +1390,36 @@ export function createCustomerCommandService(
           updatedAt: atIso,
         };
 
-        await lockCustomerContacts(tx, customer, updated);
-        const collision = await findCustomerContactCollision(tx, updated, customer.id);
-        if (collision) return failure<Customer>('手机号或微信已存在于其他客户', 409);
+        await lockCustomerContacts(tx, options.contactIdentityCrypto, customer, updated);
+        await upsertCustomerContactIdentities(tx, {
+          customerId: customer.id,
+          phone: updated.phone,
+          wechat: updated.wechat,
+          source: 'customer_profile_update',
+          crypto: options.contactIdentityCrypto,
+          conflictViewer: {
+            canReadCustomer: (candidate) => canReadCustomer(context.customerAccess!, candidate),
+          },
+        });
         await persistCustomer(tx, snapshot, updated, at);
         const leadRows = await linkedLeadRows(tx, customer);
         for (const leadRow of leadRows) {
           const lead = readJson<Lead>(leadRow.data);
           const nextLead = syncLeadFromCustomer(lead, updated, atIso, operator);
-          if (nextLead !== lead) await persistLead(tx, leadRow.id, nextLead, at);
+          if (nextLead !== lead) {
+            await linkLeadAndCustomerIdentity(tx, {
+              leadId: lead.id,
+              customerId: customer.id,
+              phone: nextLead.phone,
+              wechat: nextLead.wechat,
+              source: 'customer_profile_sync',
+              crypto: options.contactIdentityCrypto,
+              conflictViewer: {
+                canReadCustomer: (candidate) => canReadCustomer(context.customerAccess!, candidate),
+              },
+            });
+            await persistLead(tx, leadRow.id, nextLead, at);
+          }
         }
         await appendCustomerAuditEvent(tx, {
           operation: 'update_profile',
@@ -1601,7 +1646,7 @@ export function createCustomerCommandService(
           createdAt: atIso,
           updatedAt: atIso,
         };
-        await lockCustomerContacts(tx, lead);
+        await lockCustomerContacts(tx, options.contactIdentityCrypto, lead);
         const [customerCollision, leadCollision] = flowConfig.interceptionEnabled
           ? await Promise.all([
               findCustomerContactCollision(tx, lead),
@@ -1609,21 +1654,15 @@ export function createCustomerCommandService(
             ])
           : [null, null];
         if (customerCollision || leadCollision) {
-          const collisionType = customerCollision ? '客户' : '线索';
-          const collisionId = customerCollision?.recordId || leadCollision?.id;
-          const collisionData = customerCollision
-            ? readJson<Customer>(customerCollision.data)
-            : readJson<Lead>(leadCollision!.data);
-          const message = `手机号或微信已存在于${collisionType}库：${collisionData.name}`;
+          // Intake history is durable and may be viewed by a wider audience
+          // later, so collision identity/name/id never belongs in that record.
+          const message = '系统中已存在相同联系方式';
           await recordIntake({
             id: newId('intake'),
             ...intakeBase,
             status: '入库失败',
             matchedRule: '手机号和微信二选一',
             failureReason: message,
-            collisionTargetType: collisionType,
-            collisionTargetId: collisionId,
-            collisionTargetName: collisionData.name,
           });
           return failure<Lead>(message, 409);
         }
@@ -1673,6 +1712,19 @@ export function createCustomerCommandService(
             createdAt: atIso,
             updatedAt: atIso,
           };
+          await linkLeadAndCustomerIdentity(tx, {
+            leadId: lead.id,
+            customerId,
+            phone: customer.phone,
+            wechat: customer.wechat,
+            source: 'lead_auto_claim',
+            crypto: options.contactIdentityCrypto,
+            conflictViewer: {
+              canReadCustomer: (candidate) => Boolean(
+                context.customerAccess && canReadCustomer(context.customerAccess, candidate)
+              ),
+            },
+          });
           await tx.businessRecord.create({
             data: {
               id: `${STORAGE_KEYS.CUSTOMERS}:${customerId}`,
@@ -1806,7 +1858,7 @@ export function createCustomerCommandService(
           ],
           updatedAt: atIso,
         };
-        await lockCustomerContacts(tx, lead, updated);
+        await lockCustomerContacts(tx, options.contactIdentityCrypto, lead, updated);
         const [customerCollision, leadCollision] = await Promise.all([
           findCustomerContactCollision(tx, updated),
           findLeadContactCollision(tx, updated, lead.id),
@@ -2231,10 +2283,7 @@ export function createCustomerCommandService(
           if (existingCustomer) return success(lead);
         }
 
-        await lockCustomerContacts(tx, lead);
-        const contactCollision = await findCustomerContactCollision(tx, lead);
-        if (contactCollision) return failure<Lead>('手机号或微信已存在于客户库', 409);
-
+        await lockCustomerContacts(tx, options.contactIdentityCrypto, lead);
         const at = now();
         const atIso = at.toISOString();
         const operator = commandActor(context, currentUser);
@@ -2299,6 +2348,20 @@ export function createCustomerCommandService(
           createdAt: atIso,
           updatedAt: atIso,
         };
+
+        await linkLeadAndCustomerIdentity(tx, {
+          leadId: lead.id,
+          customerId,
+          phone: customer.phone,
+          wechat: customer.wechat,
+          source: 'lead_conversion',
+          crypto: options.contactIdentityCrypto,
+          conflictViewer: {
+            canReadCustomer: (candidate) => Boolean(
+              context.customerAccess && canReadCustomer(context.customerAccess, candidate)
+            ),
+          },
+        });
 
         await tx.businessRecord.create({
           data: {

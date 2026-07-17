@@ -4,11 +4,18 @@ import {
   createCustomerCommandService,
 } from './customerCommandService';
 import { createPrismaCustomerAuditAppender } from './customerAuditService';
+import { hashContactIdentity, normalizeContactIdentity } from './contactIdentityService';
 import { DEFAULT_LEAD_FLOW_CONFIG, LIFECYCLE_STATUS_CODES, STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import type { Customer } from '../../src/types/customer';
 
 const FIXED_NOW = new Date('2026-07-12T01:02:03.000Z');
+const TEST_CONTACT_CRYPTO = {
+  hmacKey: Buffer.alloc(32, 11),
+  keyVersion: 1 as const,
+  encryptionKey: Buffer.alloc(32, 12),
+  encryptionKeyVersion: 1 as const,
+};
 
 const salesRole = {
   id: 'role-sales',
@@ -308,6 +315,8 @@ type LeadRow = {
 type FakeState = {
   businessRecords: BusinessRow[];
   leads: LeadRow[];
+  contactIdentities?: any[];
+  contactIdentityLinks?: any[];
   customerTodos?: any[];
   customerAuditEvents?: any[];
   appStorage?: Array<{ key: string; value: any; createdAt?: Date; updatedAt?: Date }>;
@@ -344,7 +353,51 @@ function createFakePrisma(
     customerTodos: clone(initial.customerTodos || []),
     customerAuditEvents: clone(initial.customerAuditEvents || []),
     appStorage: clone(initial.appStorage || []),
+    contactIdentities: clone(initial.contactIdentities || []),
+    contactIdentityLinks: clone(initial.contactIdentityLinks || []),
   };
+  for (const row of state.businessRecords.filter((item) => item.domain === STORAGE_KEYS.CUSTOMERS)) {
+    const value = row.data as Customer;
+    if (value.deletedAt) continue;
+    for (const type of ['phone', 'wechat'] as const) {
+      const normalized = normalizeContactIdentity(type, String(value[type] || ''));
+      if (!normalized) continue;
+      const normalizedHash = hashContactIdentity(normalized, TEST_CONTACT_CRYPTO.hmacKey);
+      let identity = state.contactIdentities!.find((candidate) => (
+        candidate.type === type && candidate.normalizedHash === normalizedHash
+      ));
+      if (!identity) {
+        identity = {
+          id: `seed-${type}-${normalizedHash.slice(0, 20)}`,
+          type,
+          normalizedHash,
+          hashKeyVersion: 1,
+          status: 'active',
+          encryptedNormalizedValue: 'ci:v1:test',
+          canonicalCustomerId: value.id,
+          conflictReason: null,
+        };
+        state.contactIdentities!.push(identity);
+      } else if (identity.canonicalCustomerId !== value.id) {
+        identity.status = 'conflict';
+        identity.canonicalCustomerId = null;
+        identity.conflictReason = 'multiple_active_customers';
+      }
+      if (!state.contactIdentityLinks!.some((link) => (
+        link.identityId === identity.id && link.entityType === 'customer' && link.entityId === value.id
+      ))) {
+        state.contactIdentityLinks!.push({
+          id: `seed-link-${identity.id}-${value.id}`,
+          identityId: identity.id,
+          entityType: 'customer',
+          entityId: value.id,
+          linkStatus: 'active',
+          source: 'test_backfill',
+          endedAt: null,
+        });
+      }
+    }
+  }
   let transactionCalls = 0;
   let linkedLeadLockQueries = 0;
   let contactLockQueries = 0;
@@ -492,6 +545,57 @@ function createFakePrisma(
         return clone(event);
       },
     },
+    contactIdentity: {
+      findUnique: async ({ where }: any) => {
+        const compound = where.type_normalizedHash;
+        const row = (working.contactIdentities || []).find((item) => (
+          item.type === compound.type && item.normalizedHash === compound.normalizedHash
+        ));
+        return row ? clone(row) : null;
+      },
+      create: async ({ data }: any) => {
+        const rows = working.contactIdentities || (working.contactIdentities = []);
+        if (rows.some((item) => item.type === data.type && item.normalizedHash === data.normalizedHash)) {
+          throw Object.assign(new Error('duplicate contact identity'), { code: 'P2002' });
+        }
+        const row = { ...clone(data), createdAt: new Date(FIXED_NOW), updatedAt: new Date(FIXED_NOW) };
+        rows.push(row);
+        return clone(row);
+      },
+      update: async ({ where, data }: any) => {
+        const row = (working.contactIdentities || []).find((item) => item.id === where.id);
+        if (!row) throw new Error('contact identity missing');
+        applyPatch(row, clone(data));
+        return clone(row);
+      },
+    },
+    contactIdentityLink: {
+      findMany: async ({ where }: any = {}) => clone((working.contactIdentityLinks || []).filter((row) => (
+        Object.entries(where || {}).every(([key, value]) => row[key] === value)
+      ))),
+      upsert: async ({ where, update, create }: any) => {
+        const key = where.identityId_entityType_entityId;
+        const rows = working.contactIdentityLinks || (working.contactIdentityLinks = []);
+        const row = rows.find((item) => item.identityId === key.identityId
+          && item.entityType === key.entityType && item.entityId === key.entityId);
+        if (row) {
+          applyPatch(row, clone(update));
+          return clone(row);
+        }
+        const created = { ...clone(create), createdAt: new Date(FIXED_NOW) };
+        rows.push(created);
+        return clone(created);
+      },
+      updateMany: async ({ where, data }: any) => {
+        let count = 0;
+        for (const row of working.contactIdentityLinks || []) {
+          if (!Object.entries(where || {}).every(([key, value]) => row[key] === value)) continue;
+          applyPatch(row, clone(data));
+          count += 1;
+        }
+        return { count };
+      },
+    },
     $queryRaw: async (query: any) => {
       const text = queryText(query);
       const values = query?.values || [];
@@ -546,6 +650,7 @@ function createFakePrisma(
       if (text.includes('FROM customer_todos')) {
         return clone(working.customerTodos || []);
       }
+      if (text.includes('FROM contact_identities')) return [];
       if (text.includes('FROM app_storage')) {
         if (text.includes('FOR UPDATE')) contactLockQueries += 1;
         const row = (working.appStorage || []).find((item) => item.key === values[0]);
@@ -582,6 +687,8 @@ function createFakePrisma(
           working.leads = latest.leads;
           working.customerTodos = latest.customerTodos || [];
           working.appStorage = latest.appStorage || [];
+          working.contactIdentities = latest.contactIdentities || [];
+          working.contactIdentityLinks = latest.contactIdentityLinks || [];
         }));
         state = working;
         return result;
@@ -728,6 +835,7 @@ const serviceOptions = {
     let index = 0;
     return () => `generated-${++index}`;
   })(),
+  contactIdentityCrypto: TEST_CONTACT_CRYPTO,
 };
 
 // 更新只能原样保留该记录已有的停用标签；移除后不得重新添加。
@@ -1548,6 +1656,13 @@ const serviceOptions = {
   assert.deepEqual(autoCustomer?.tags, []);
   assert.equal(next.leads[0].data.manualTagIds, undefined);
   assert.equal(next.leads[0].data.tags, undefined);
+  const autoIdentity = next.contactIdentities?.find((identity) => identity.canonicalCustomerId === autoCustomer?.id);
+  assert.ok(autoIdentity, '自动领取必须在同一事务中建立联系方式身份');
+  assert.deepEqual(
+    next.contactIdentityLinks?.filter((link) => link.identityId === autoIdentity.id && link.linkStatus === 'active')
+      .map((link) => link.entityType).sort(),
+    ['customer', 'lead'],
+  );
 }
 
 // RED: 显式分配新线索需要分配权限，且手机/微信不得与客户或线索重复。
@@ -1610,7 +1725,8 @@ const serviceOptions = {
   assert.equal(result.code, 409);
   const records = fake.getState().appStorage?.find((row) => row.key === STORAGE_KEYS.LEAD_INTAKE_RECORDS)?.value || [];
   assert.equal(records[0]?.status, '入库失败');
-  assert.equal(records[0]?.collisionTargetType, '客户');
+  assert.equal(records[0]?.failureReason, '系统中已存在相同联系方式');
+  assert.equal(records[0]?.collisionTargetType, undefined);
 }
 
 // 线索资料编辑不得绕过分配命令，也不得修改已转客户线索。
@@ -1703,6 +1819,15 @@ const serviceOptions = {
   assert.equal(next.businessRecords[0].domain, STORAGE_KEYS.CUSTOMERS);
   assert.equal(next.businessRecords[0].owner, salesA.name);
   assert.equal(next.leads[0].data.customerId, next.businessRecords[0].recordId);
+  const conversionIdentity = next.contactIdentities?.find((identity) => (
+    identity.canonicalCustomerId === next.businessRecords[0].recordId
+  ));
+  assert.ok(conversionIdentity);
+  assert.deepEqual(
+    next.contactIdentityLinks?.filter((link) => link.identityId === conversionIdentity.id && link.linkStatus === 'active')
+      .map((link) => link.entityType).sort(),
+    ['customer', 'lead'],
+  );
   assert.equal(fake.contactLockUpserts, 1, '转客户前必须建立规范化联系人锁');
   assert.equal(fake.contactLockQueries, 1, '联系人锁必须使用 FOR UPDATE');
 
@@ -1836,9 +1961,61 @@ const serviceOptions = {
   const result = await service.convertLeadToCustomer('lead-duplicate-customer', salesA);
 
   assert.equal(result.code, 409);
+  assert.equal(result.message, '系统中已存在相同联系方式');
+  assert.deepEqual(result.data, {
+    id: 'cust-existing',
+    name: '客户-cust-existing',
+    company: '公司-cust-existing',
+    owner: salesA.name,
+  });
+  assert.doesNotMatch(JSON.stringify(result), /13800000000|normalizedHash|encryptedNormalizedValue/);
   const next = fake.getState();
   assert.equal(next.businessRecords.length, 1);
   assert.equal(next.leads[0].data.customerId, undefined);
+}
+
+// RED: 范围外联系方式冲突只允许返回通用语义，不得泄露对象。
+{
+  const hidden = customer('cust-hidden-contact', '外部销售');
+  hidden.phone = '13900000077';
+  const sourceLead = lead('lead-hidden-contact');
+  sourceLead.phone = '13900000077';
+  sourceLead.data.phone = '13900000077';
+  const fake = createFakePrisma({
+    businessRecords: [businessCustomer(hidden)],
+    leads: [sourceLead],
+  });
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .convertLeadToCustomer(sourceLead.id, salesA);
+
+  assert.equal(result.code, 409);
+  assert.equal(result.message, '系统中已存在相同联系方式');
+  assert.equal(result.data, null);
+  assert.doesNotMatch(JSON.stringify(result), /外部销售|cust-hidden-contact|13900000077/);
+}
+
+// RED: 客户联系方式变更必须先建立新身份，再结束旧关联。
+{
+  const value = customer('cust-contact-rotate');
+  value.phone = '13800000000';
+  const fake = createFakePrisma({ businessRecords: [businessCustomer(value)], leads: [] });
+  const service = createCustomerCommandService(fake.prisma, serviceOptions);
+  const result = await service.updateCustomer(value.id, { phone: '13900000066' }, superAdmin);
+
+  assert.equal(result.code, 0, result.message);
+  const next = fake.getState();
+  const customerLinks = next.contactIdentityLinks?.filter((link) => (
+    link.entityType === 'customer' && link.entityId === value.id
+  )) || [];
+  assert.equal(customerLinks.filter((link) => link.linkStatus === 'active').length, 1);
+  assert.equal(customerLinks.filter((link) => link.linkStatus === 'ended').length, 1);
+  const activeIdentity = next.contactIdentities?.find((identity) => (
+    identity.id === customerLinks.find((link) => link.linkStatus === 'active')?.identityId
+  ));
+  assert.equal(
+    activeIdentity?.normalizedHash,
+    hashContactIdentity('13900000066', TEST_CONTACT_CRYPTO.hmacKey),
+  );
 }
 
 // RED: 联系人碰撞应使用规范化身份，不得被国家码、空格或大小写绕过。

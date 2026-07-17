@@ -26,9 +26,13 @@ import {
   createCustomerCommandService,
 } from './services/customerCommandService';
 import { createPrismaCustomerAuditAppender } from './services/customerAuditService';
+import { createContactIdentityCryptoFromEnv } from './services/contactIdentityService';
 import { createCustomerTodoService } from './services/customerTodoService';
 import { createCustomerManageableUsersService } from './services/customerManageableUsersService';
-import { backfillCustomerOwnerIdentitiesResult } from './services/customerOwnerIdentityService';
+import {
+  backfillCustomerContactIdentitiesResult,
+  backfillCustomerOwnerIdentitiesResult,
+} from './services/customerOwnerIdentityService';
 import { createCustomerTagRouter, createCustomerTagService } from './services/customerTagService';
 import { createCustomerTagMigrationRouter, createCustomerTagMigrationService } from './services/customerTagMigrationService';
 import { createLeadListService } from './services/leadListService';
@@ -95,12 +99,21 @@ const businessAttachmentRoot = path.resolve(
   process.env.BUSINESS_ATTACHMENT_STORAGE_DIR || path.join(serverDir, '../uploads-private/business-attachments'),
 );
 const allowedCorsOrigins = getAllowedCorsOrigins();
+const contactIdentityEnvNames = [
+  'CONTACT_IDENTITY_HMAC_KEY',
+  'CONTACT_IDENTITY_HMAC_KEY_VERSION',
+  'CONTACT_IDENTITY_ENCRYPTION_KEY',
+  'CONTACT_IDENTITY_ENCRYPTION_KEY_VERSION',
+] as const;
+const contactIdentityCrypto = contactIdentityEnvNames.some((name) => String(process.env[name] || '').trim())
+  ? createContactIdentityCryptoFromEnv(process.env)
+  : undefined;
 const authService = createAuthService(prisma);
 const aiConfigService = createAiConfigService(prisma as any);
 const aiChatClient = createAiChatClient({ configReader: aiConfigService });
 const coCreationService = createCoCreationService({ prisma, aiClient: aiChatClient });
-const customerListService = createCustomerListService(prisma);
-const customerCommandService = createCustomerCommandService(prisma);
+const customerListService = createCustomerListService(prisma, { contactIdentityCrypto });
+const customerCommandService = createCustomerCommandService(prisma, { contactIdentityCrypto });
 // Transfer/release/delete use the shared atomic command engine. Profile,
 // todo, claim, creation, and follow-up services retain their dedicated
 // request contracts, but each appends its audit event in the same transaction.
@@ -369,6 +382,22 @@ app.get('/api/crm-migration/customer-owner-identities/preview', requireDataMaint
 
 app.post('/api/crm-migration/customer-owner-identities/apply', requireDataMaintenanceWriteAccess, async (_req, res) => {
   const result = await backfillCustomerOwnerIdentitiesResult(prisma, true);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.get('/api/crm-migration/contact-identities/preview', requireDataMaintenanceWriteAccess, async (_req, res) => {
+  const result = await backfillCustomerContactIdentitiesResult(prisma, {
+    apply: false,
+    crypto: contactIdentityCrypto,
+  });
+  res.status(result.code === 0 ? 200 : result.code).json(result);
+});
+
+app.post('/api/crm-migration/contact-identities/apply', requireDataMaintenanceWriteAccess, async (_req, res) => {
+  const result = await backfillCustomerContactIdentitiesResult(prisma, {
+    apply: true,
+    crypto: contactIdentityCrypto,
+  });
   res.status(result.code === 0 ? 200 : result.code).json(result);
 });
 

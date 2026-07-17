@@ -8,7 +8,11 @@ const now = '2026-07-12T00:00:00.000Z';
 
 const created: any[] = [];
 const auditEvents: any[] = [];
-const service = createCustomerListService({
+const contactIdentities: any[] = [];
+const contactLinks: any[] = [];
+let transactionTail = Promise.resolve<unknown>(undefined);
+let servicePrisma: any;
+const service = createCustomerListService(servicePrisma = {
   businessRecord: {
     findMany: async (args: any) => {
       if (args?.where?.domain === STORAGE_KEYS.TAG_GROUPS) return [{ data: { id: 'group-both', name: '通用', color: '#1677ff', selectionMode: 'multiple', scope: 'both', isActive: true, sortOrder: 0 } }];
@@ -39,7 +43,55 @@ const service = createCustomerListService({
       return event;
     },
   },
-} as any);
+  contactIdentity: {
+    findUnique: async ({ where }: any) => contactIdentities.find((identity) => (
+      identity.type === where.type_normalizedHash.type
+      && identity.normalizedHash === where.type_normalizedHash.normalizedHash
+    )) || null,
+    create: async ({ data }: any) => {
+      if (contactIdentities.some((identity) => (
+        identity.type === data.type && identity.normalizedHash === data.normalizedHash
+      ))) throw Object.assign(new Error('duplicate identity'), { code: 'P2002' });
+      contactIdentities.push({ ...data });
+      return { ...data };
+    },
+    update: async ({ where, data }: any) => {
+      const identity = contactIdentities.find((candidate) => candidate.id === where.id)!;
+      Object.assign(identity, data);
+      return { ...identity };
+    },
+  },
+  contactIdentityLink: {
+    findMany: async ({ where }: any) => contactLinks.filter((link) => (
+      Object.entries(where || {}).every(([key, value]) => link[key] === value)
+    )).map((link) => ({ ...link })),
+    upsert: async ({ where, create, update }: any) => {
+      const key = where.identityId_entityType_entityId;
+      const link = contactLinks.find((candidate) => candidate.identityId === key.identityId
+        && candidate.entityType === key.entityType && candidate.entityId === key.entityId);
+      if (link) { Object.assign(link, update); return { ...link }; }
+      contactLinks.push({ ...create });
+      return { ...create };
+    },
+    updateMany: async ({ where, data }: any) => {
+      let count = 0;
+      for (const link of contactLinks) {
+        if (!Object.entries(where || {}).every(([key, value]) => link[key] === value)) continue;
+        Object.assign(link, data); count += 1;
+      }
+      return { count };
+    },
+  },
+  $queryRaw: async () => [],
+  $transaction: async (operation: any) => {
+    const result = transactionTail.then(() => operation(servicePrisma));
+    transactionTail = result.then(() => undefined, () => undefined);
+    return result;
+  },
+} as any, { contactIdentityCrypto: {
+  hmacKey: Buffer.alloc(32, 21), keyVersion: 1,
+  encryptionKey: Buffer.alloc(32, 22), encryptionKeyVersion: 1,
+} });
 
 const actor = {
   id: 'user-sales',
@@ -94,6 +146,8 @@ assert.equal(created[0].data.domain, STORAGE_KEYS.CUSTOMERS);
 assert.equal(created[0].data.data.name, '新客户');
 assert.equal(auditEvents[0]?.operation, 'create_customer');
 assert.match(auditEvents[0]?.inputHash || '', /^[a-f0-9]{64}$/);
+assert.equal(contactIdentities.length, 1);
+assert.equal(contactLinks[0]?.entityId, result.data?.id);
 
 const tagged = await service.create({
   name: '标签客户', company: '', phone: '13800000001', customerLevel: 'L1', owner: '销售', ownerId: actor.id, sourceType: '公司资源', manualTagIds: ['shared'],
@@ -194,7 +248,7 @@ const [firstDuplicate, secondDuplicate] = await Promise.all([
 
 assert.equal(firstDuplicate.code, 0);
 assert.equal(secondDuplicate.code, 409);
-assert.equal(secondDuplicate.message, '该手机号已存在客户');
+assert.equal(secondDuplicate.message, '系统中已存在相同联系方式');
 
 const flattenSql = (value: any): string => {
   if (value == null) return '';
