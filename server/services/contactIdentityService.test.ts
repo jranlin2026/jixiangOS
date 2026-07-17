@@ -3,6 +3,7 @@ import { createHash, createHmac } from 'node:crypto';
 import {
   ContactIdentityConflictError,
   backfillContactIdentities,
+  hashContactIdentity,
   linkLeadAndCustomerIdentity,
   normalizeContactIdentity,
   upsertCustomerContactIdentities,
@@ -21,6 +22,7 @@ type State = {
   groups: any[];
   customers: any[];
   leads: any[];
+  appStorage: Array<{ key: string; value: unknown }>;
 };
 
 function matchesWhere(row: any, where: any): boolean {
@@ -48,12 +50,15 @@ function createStore(input: Partial<State> = {}) {
     groups: structuredClone(input.groups || []),
     customers: structuredClone(input.customers || []),
     leads: structuredClone(input.leads || []),
+    appStorage: structuredClone((input as any).appStorage || []),
   };
   const store: any = {
     contactIdentity: {
       findUnique: async ({ where }: any) => state.identities.find((row) => matchesWhere(row, where)) || null,
       create: async ({ data }: any) => {
-        if (state.identities.some((row) => row.type === data.type && row.normalizedHash === data.normalizedHash)) {
+        if (state.identities.some((row) => (
+          row.id === data.id || (row.type === data.type && row.normalizedHash === data.normalizedHash)
+        ))) {
           throw Object.assign(new Error('duplicate identity'), { code: 'P2002' });
         }
         const row = { ...structuredClone(data), createdAt: new Date(), updatedAt: new Date() };
@@ -118,10 +123,198 @@ function createStore(input: Partial<State> = {}) {
     leadRecord: {
       findMany: async () => structuredClone(state.leads),
     },
-    $queryRaw: async () => [],
+    appStorage: {
+      findMany: async () => structuredClone(state.appStorage),
+      deleteMany: async ({ where }: any) => {
+        const keys = new Set<string>(where?.key?.in || []);
+        const before = state.appStorage.length;
+        state.appStorage = state.appStorage.filter((row) => !keys.has(row.key));
+        return { count: before - state.appStorage.length };
+      },
+    },
+    $queryRaw: async (query: any) => {
+      const text = Array.isArray(query?.strings) ? query.strings.join('?') : String(query || '');
+      const values = query?.values || [];
+      if (text.includes('FROM contact_identities')) {
+        const [type, normalizedHash] = values;
+        return structuredClone(state.identities.filter((row) => (
+          row.type === type && row.normalizedHash === normalizedHash
+        )));
+      }
+      if (text.includes('FROM contact_identity_links')) {
+        if (text.includes('WHERE identityId')) {
+          const [identityId] = values;
+          return structuredClone(state.links.filter((row) => (
+            row.identityId === identityId && row.entityType === 'customer' && row.linkStatus === 'active'
+          )).map((row) => ({ entityId: row.entityId })));
+        }
+        const [entityType, entityId] = values;
+        return structuredClone(state.links.filter((row) => (
+          row.entityType === entityType && row.entityId === entityId && row.linkStatus === 'active'
+        )).map((row) => ({ identityId: row.identityId })));
+      }
+      if (text.includes('FROM customer_duplicate_groups')) {
+        const [groupKey] = values;
+        return structuredClone(state.groups.filter((row) => row.groupKey === groupKey));
+      }
+      if (text.includes('FROM business_records')) return structuredClone(state.customers);
+      return [];
+    },
   };
   store.$transaction = async (operation: any) => operation(store);
   return { store, state };
+}
+
+// RED: identity primary keys must include the contact type. A phone and a
+// WeChat value can normalize to the same string while remaining separate
+// identities under the schema's (type, normalizedHash) uniqueness boundary.
+{
+  const { store, state } = createStore({
+    customers: [{
+      id: 'aaos_customers:c-type', domain: 'aaos_customers', recordId: 'c-type',
+      data: { id: 'c-type', name: '跨类型客户', phone: '13800138000', wechat: '13800138000' },
+    }],
+  });
+  const identities = await upsertCustomerContactIdentities(store, {
+    customerId: 'c-type', phone: '13800138000', wechat: '13800138000', crypto,
+  });
+  assert.equal(identities.length, 2);
+  assert.deepEqual(identities.map((identity) => identity.type).sort(), ['phone', 'wechat']);
+  assert.notEqual(identities[0].id, identities[1].id);
+  assert.equal(new Set(state.identities.map((identity) => identity.id)).size, 2);
+}
+
+// Existing pre-fix rows retain their legacy primary key. A subsequent
+// backfill safely keeps that row and creates the missing other contact type
+// under the new type-qualified key; no schema/data ID rewrite is required.
+{
+  const normalizedHash = hashContactIdentity('13800138000', crypto.hmacKey);
+  const legacyId = `contact-${normalizedHash.slice(0, 32)}`;
+  const { store, state } = createStore({
+    identities: [{
+      id: legacyId, type: 'phone', normalizedHash, hashKeyVersion: 1, status: 'active',
+      encryptedNormalizedValue: 'ci:v1:legacy', canonicalCustomerId: 'c-legacy-id', conflictReason: null,
+    }],
+    customers: [{
+      id: 'aaos_customers:c-legacy-id', domain: 'aaos_customers', recordId: 'c-legacy-id',
+      data: { id: 'c-legacy-id', name: '兼容客户', phone: '13800138000', wechat: '13800138000' },
+    }],
+  });
+  await backfillContactIdentities(store, { apply: true, crypto });
+  assert.equal(state.identities.find((identity) => identity.type === 'phone')?.id, legacyId);
+  assert.match(state.identities.find((identity) => identity.type === 'wechat')?.id || '', /^ci_wechat_/);
+  assert.equal(state.identities.length, 2);
+}
+
+// RED: a P2002 loser must use a locking current read, not its repeatable-read
+// snapshot, to reload the already-committed identity winner.
+{
+  const expectedHash = hashContactIdentity('13800138000', crypto.hmacKey);
+  const winner = {
+    id: 'ci_phone_current-read', type: 'phone', normalizedHash: expectedHash, hashKeyVersion: 1,
+    status: 'active', encryptedNormalizedValue: 'ci:v1:test', canonicalCustomerId: 'c-winner', conflictReason: null,
+  };
+  let currentReads = 0;
+  let linkCurrentReads = 0;
+  let loserUpserts = 0;
+  const store: any = {
+    contactIdentity: {
+      findUnique: async () => null,
+      create: async () => { throw Object.assign(new Error('duplicate identity'), { code: 'P2002' }); },
+      update: async ({ data }: any) => ({ ...winner, ...data }),
+    },
+    contactIdentityLink: {
+      findMany: async () => { throw new Error('stale ORM link snapshot must not decide admission'); },
+      upsert: async () => { loserUpserts += 1; return {}; },
+      updateMany: async () => ({ count: 0 }),
+    },
+    businessRecord: { findMany: async () => [], findUnique: async () => null },
+    $queryRaw: async (query: any) => {
+      const text = Array.isArray(query?.strings) ? query.strings.join('?') : String(query || '');
+      if (text.includes('FROM contact_identities')) {
+        currentReads += 1;
+        assert.match(text, /FOR UPDATE/);
+        assert.deepEqual(query.values, ['phone', expectedHash]);
+        return [winner];
+      }
+      if (text.includes('FROM contact_identity_links')) {
+        linkCurrentReads += 1;
+        assert.match(text, /FOR UPDATE/);
+        assert.deepEqual(query.values, [winner.id]);
+        return [{ entityId: 'c-winner' }];
+      }
+      return [];
+    },
+  };
+  await assert.rejects(
+    () => upsertCustomerContactIdentities(store, {
+      customerId: 'c-current-read', phone: '13800138000', crypto,
+    }),
+    (error: unknown) => error instanceof ContactIdentityConflictError,
+  );
+  assert.ok(currentReads >= 1, 'P2002 recovery must use SELECT ... FOR UPDATE current read');
+  assert.ok(linkCurrentReads >= 1, 'admission after P2002 must use a current locked link read');
+  assert.equal(loserUpserts, 0);
+}
+
+// A transaction can also have an existing stale identity snapshot before any
+// insert attempt. The same current identity/link reads must reject the loser
+// without relying on P2002 as the only refresh trigger.
+{
+  const expectedHash = hashContactIdentity('13900000006', crypto.hmacKey);
+  const identity = {
+    id: 'ci_phone_existing-current-read', type: 'phone', normalizedHash: expectedHash, hashKeyVersion: 1,
+    status: 'active', encryptedNormalizedValue: 'ci:v1:test', canonicalCustomerId: null, conflictReason: null,
+  };
+  let creates = 0;
+  let upserts = 0;
+  const store: any = {
+    contactIdentity: {
+      findUnique: async () => ({ ...identity }),
+      create: async () => { creates += 1; return identity; },
+      update: async ({ data }: any) => ({ ...identity, ...data }),
+    },
+    contactIdentityLink: {
+      findMany: async () => { throw new Error('stale ORM link snapshot must not decide admission'); },
+      upsert: async () => { upserts += 1; return {}; },
+      updateMany: async () => ({ count: 0 }),
+    },
+    businessRecord: { findMany: async () => [], findUnique: async () => null },
+    $queryRaw: async (query: any) => {
+      const text = Array.isArray(query?.strings) ? query.strings.join('?') : String(query || '');
+      if (text.includes('FROM contact_identities')) return [{ ...identity, canonicalCustomerId: 'c-winner' }];
+      if (text.includes('FROM contact_identity_links')) return [{ entityId: 'c-winner' }];
+      return [];
+    },
+  };
+  await assert.rejects(
+    () => upsertCustomerContactIdentities(store, {
+      customerId: 'c-stale-reader', phone: '13900000006', crypto,
+    }),
+    (error: unknown) => error instanceof ContactIdentityConflictError,
+  );
+  assert.equal(creates, 0);
+  assert.equal(upserts, 0);
+}
+
+// RED: before a full historical backfill, a matching active legacy customer
+// without an identity link is reconciled inside the write transaction and
+// blocks a new duplicate customer.
+{
+  const { store, state } = createStore({
+    customers: [{
+      id: 'aaos_customers:c-legacy', domain: 'aaos_customers', recordId: 'c-legacy',
+      data: { id: 'c-legacy', name: '历史客户', phone: '13800138000' },
+    }],
+  });
+  await assert.rejects(
+    () => upsertCustomerContactIdentities(store, {
+      customerId: 'c-new', phone: '13800138000', crypto,
+    }),
+    (error: unknown) => error instanceof ContactIdentityConflictError,
+  );
+  assert.equal(state.identities.length, 1);
+  assert.equal(state.links.some((link) => link.entityId === 'c-legacy' && link.linkStatus === 'active'), true);
 }
 
 assert.equal(normalizeContactIdentity('phone', ' +86 138 0013 8000 '), '13800138000');
@@ -215,6 +408,7 @@ assert.equal(normalizeContactIdentity('wechat', ' WeiXin_A '), 'weixin_a');
     conflicts: 1,
     invalidValues: 1,
     duplicateGroups: 1,
+    legacyContactLockKeysCleared: 0,
   });
   assert.equal(state.identities.length, 0);
 
@@ -246,4 +440,31 @@ assert.equal(normalizeContactIdentity('wechat', ' WeiXin_A '), 'weixin_a');
   const canonical = state.identities.find((identity) => identity.canonicalCustomerId === 'c-3');
   assert.ok(canonical);
   assert.equal(state.links.filter((link) => link.identityId === canonical.id && link.linkStatus === 'active').length, 2);
+}
+
+// RED: a controlled contact-backfill apply clears only the obsolete Task 5
+// unversioned SHA-256 lock shape, including when every identity is already
+// backfilled. New HMAC locks and unrelated AppStorage entries survive.
+{
+  const legacyKey = `aaos_contact_lock_${'a'.repeat(64)}`;
+  const currentKey = `aaos_contact_lock_v1_phone_${'b'.repeat(64)}`;
+  const uppercaseLookalikeKey = `aaos_contact_lock_${'A'.repeat(64)}`;
+  const unrelatedKey = 'aaos_contact_lock_not-a-legacy-digest';
+  const { store, state } = createStore({
+    appStorage: [
+      { key: legacyKey, value: { kind: 'obsolete' } },
+      { key: currentKey, value: { kind: 'customer_contact_lock' } },
+      { key: uppercaseLookalikeKey, value: { keep: true } },
+      { key: unrelatedKey, value: { keep: true } },
+    ],
+  } as any);
+  const preview = await backfillContactIdentities(store, { apply: false, crypto });
+  assert.equal(preview.legacyContactLockKeysCleared, 0);
+  assert.equal(state.appStorage.length, 4);
+  const applied = await backfillContactIdentities(store, { apply: true, crypto });
+  assert.equal(applied.legacyContactLockKeysCleared, 1);
+  assert.deepEqual(
+    state.appStorage.map((row) => row.key).sort(),
+    [currentKey, uppercaseLookalikeKey, unrelatedKey].sort(),
+  );
 }

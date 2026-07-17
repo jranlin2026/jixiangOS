@@ -346,6 +346,7 @@ function createFakePrisma(
     failTransactions?: number;
     extraUsers?: any[];
     roleRows?: any[];
+    seedContactIdentities?: boolean;
   } = {},
 ) {
   let state: FakeState = {
@@ -356,7 +357,9 @@ function createFakePrisma(
     contactIdentities: clone(initial.contactIdentities || []),
     contactIdentityLinks: clone(initial.contactIdentityLinks || []),
   };
-  for (const row of state.businessRecords.filter((item) => item.domain === STORAGE_KEYS.CUSTOMERS)) {
+  for (const row of (options.seedContactIdentities === false
+    ? []
+    : state.businessRecords.filter((item) => item.domain === STORAGE_KEYS.CUSTOMERS))) {
     const value = row.data as Customer;
     if (value.deletedAt) continue;
     for (const type of ['phone', 'wechat'] as const) {
@@ -555,7 +558,9 @@ function createFakePrisma(
       },
       create: async ({ data }: any) => {
         const rows = working.contactIdentities || (working.contactIdentities = []);
-        if (rows.some((item) => item.type === data.type && item.normalizedHash === data.normalizedHash)) {
+        if (rows.some((item) => (
+          item.id === data.id || (item.type === data.type && item.normalizedHash === data.normalizedHash)
+        ))) {
           throw Object.assign(new Error('duplicate contact identity'), { code: 'P2002' });
         }
         const row = { ...clone(data), createdAt: new Date(FIXED_NOW), updatedAt: new Date(FIXED_NOW) };
@@ -599,6 +604,24 @@ function createFakePrisma(
     $queryRaw: async (query: any) => {
       const text = queryText(query);
       const values = query?.values || [];
+      if (text.includes('FROM contact_identity_links')) {
+        if (text.includes('WHERE identityId')) {
+          const [identityId] = values;
+          return clone((working.contactIdentityLinks || []).filter((row) => (
+            row.identityId === identityId && row.entityType === 'customer' && row.linkStatus === 'active'
+          )).map((row) => ({ entityId: row.entityId })));
+        }
+        const [entityType, entityId] = values;
+        return clone((working.contactIdentityLinks || []).filter((row) => (
+          row.entityType === entityType && row.entityId === entityId && row.linkStatus === 'active'
+        )).map((row) => ({ identityId: row.identityId })));
+      }
+      if (text.includes('FROM contact_identities')) {
+        const [type, normalizedHash] = values;
+        return clone((working.contactIdentities || []).filter((row) => (
+          row.type === type && row.normalizedHash === normalizedHash
+        )));
+      }
       if (text.includes('FROM business_records')) {
         if (text.includes('recordId =') && text.includes('FOR UPDATE')) customerLockQueries += 1;
         const [domain, recordId] = values;
@@ -612,6 +635,15 @@ function createFakePrisma(
               || row.data?.customerName === values[4]
             )
           )).slice(0, 1));
+        }
+        if (text.includes('ORDER BY recordId') && text.includes('FOR UPDATE')) {
+          const [legacyDomain, normalized] = values;
+          const type = text.includes("'$.wechat'") ? 'wechat' : 'phone';
+          return clone(working.businessRecords.filter((row) => (
+            row.domain === legacyDomain
+            && !row.data?.deletedAt
+            && normalizeContactIdentity(type, String(row.data?.[type] || '')) === normalized
+          )));
         }
         if (text.includes("'$.phone'") || text.includes("'$.wechat'")) {
           const hasExcludedRecord = text.includes('recordId <>');
@@ -650,7 +682,6 @@ function createFakePrisma(
       if (text.includes('FROM customer_todos')) {
         return clone(working.customerTodos || []);
       }
-      if (text.includes('FROM contact_identities')) return [];
       if (text.includes('FROM app_storage')) {
         if (text.includes('FOR UPDATE')) contactLockQueries += 1;
         const row = (working.appStorage || []).find((item) => item.key === values[0]);
@@ -1001,6 +1032,30 @@ const serviceOptions = {
   assert.deepEqual(rollbackFake.getState().businessRecords[0], rollbackCustomer);
   assert.deepEqual(rollbackFake.getState().customerTodos, [rollbackTodo]);
   assert.deepEqual(rollbackFake.getState().customerAuditEvents, []);
+}
+
+// RED: the atomic DELETE facade must end active customer identity links in the
+// same transaction and recompute the identity's reusable canonical state.
+{
+  const value = customer('cust-atomic-delete-contact');
+  const fake = createFakePrisma({ businessRecords: [businessCustomer(value)], leads: [] });
+  const result = await createAuditedCustomerAtomicCommandService(fake.prisma, {
+    ...serviceOptions,
+    auditAppender: createPrismaCustomerAuditAppender(),
+  }).execute({
+    action: 'soft_delete', customerId: value.id, reason: '原子删除身份收尾', confirmed: true,
+  }, superAdmin);
+  assert.equal(result.code, 0, result.message);
+  const next = fake.getState();
+  const identity = next.contactIdentities?.find((item) => item.canonicalCustomerId === null);
+  assert.ok(identity);
+  assert.equal(next.contactIdentityLinks?.some((link) => (
+    link.entityId === value.id && link.linkStatus === 'active'
+  )), false);
+  assert.equal(next.contactIdentityLinks?.some((link) => (
+    link.entityId === value.id && link.linkStatus === 'ended'
+  )), true);
+  assert.equal(identity.status, 'active');
 }
 
 // RED: 员工不能仅因自己是线索贡献人就释放他人的客户。
@@ -1412,6 +1467,27 @@ const serviceOptions = {
   assert.equal(next.leads[0].data.deleteReason, undefined);
 }
 
+// RED: the legacy direct delete path shares the same identity-link cleanup;
+// a soft-deleted customer cannot remain an active contact owner.
+{
+  const value = customer('cust-direct-delete-contact');
+  const fake = createFakePrisma({ businessRecords: [businessCustomer(value)], leads: [] });
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .deleteCustomer(value.id, '直接删除身份收尾', superAdmin);
+  assert.equal(result.code, 0, result.message);
+  const next = fake.getState();
+  const identity = next.contactIdentities?.[0];
+  assert.ok(identity);
+  assert.equal(identity.canonicalCustomerId, null);
+  assert.equal(identity.status, 'active');
+  assert.equal(next.contactIdentityLinks?.some((link) => (
+    link.entityId === value.id && link.linkStatus === 'active'
+  )), false);
+  assert.equal(next.contactIdentityLinks?.some((link) => (
+    link.entityId === value.id && link.linkStatus === 'ended'
+  )), true);
+}
+
 // RED: 只有名称的历史订单不能在同名客户之间被猜测为关联，删除只依据注册的稳定 ID。
 {
   const target = { ...customer('cust-delete-name-only-target'), name: '同名客户', company: '同名公司' };
@@ -1663,6 +1739,40 @@ const serviceOptions = {
       .map((link) => link.entityType).sort(),
     ['customer', 'lead'],
   );
+}
+
+// RED: automatic claim must also be blocked by an active historical customer
+// whose ContactIdentity rows have not been backfilled yet.
+{
+  const legacyCustomer = customer('cust-auto-claim-legacy');
+  legacyCustomer.phone = '13900000035';
+  const fake = createFakePrisma({
+    businessRecords: [
+      ...tagCatalogRows(),
+      businessCustomer(legacyCustomer),
+    ],
+    leads: [],
+    appStorage: [
+      {
+        key: STORAGE_KEYS.LEAD_FLOW_CONFIG,
+        value: {
+          ...DEFAULT_LEAD_FLOW_CONFIG,
+          participantUserIds: ['user-a'],
+          autoClaimAfterAssignmentEnabled: true,
+          dailyLimitEnabled: false,
+          lastAssignedIndex: -1,
+        },
+      },
+      { key: STORAGE_KEYS.LEAD_INTAKE_RECORDS, value: [] },
+    ],
+  }, { seedContactIdentities: false });
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions).createLead({
+    name: '不应自动领取的重复线索', phone: legacyCustomer.phone, source: '官网', status: '新线索',
+    owner: '待分配', sourceType: '公司资源',
+  }, leadEditor);
+  assert.equal(result.code, 409);
+  assert.equal(fake.getState().businessRecords.filter((row) => row.domain === STORAGE_KEYS.CUSTOMERS).length, 1);
+  assert.equal(fake.getState().leads.length, 0);
 }
 
 // RED: 显式分配新线索需要分配权限，且手机/微信不得与客户或线索重复。
@@ -1956,7 +2066,10 @@ const serviceOptions = {
 {
   const existingCustomer = businessCustomer(customer('cust-existing'));
   const sourceLead = lead('lead-duplicate-customer');
-  const fake = createFakePrisma({ businessRecords: [existingCustomer], leads: [sourceLead] });
+  const fake = createFakePrisma(
+    { businessRecords: [existingCustomer], leads: [sourceLead] },
+    { seedContactIdentities: false },
+  );
   const service = createCustomerCommandService(fake.prisma, serviceOptions);
   const result = await service.convertLeadToCustomer('lead-duplicate-customer', salesA);
 
@@ -2016,6 +2129,26 @@ const serviceOptions = {
     activeIdentity?.normalizedHash,
     hashContactIdentity('13900000066', TEST_CONTACT_CRYPTO.hmacKey),
   );
+}
+
+// RED: an ordinary profile edit on a pre-backfill customer starts with an
+// empty identity table, claims its own legacy record under row locking, and
+// creates the link atomically rather than relying on a global completion flag.
+{
+  const value = customer('cust-legacy-profile-edit');
+  value.phone = '13900000065';
+  const fake = createFakePrisma(
+    { businessRecords: [businessCustomer(value)], leads: [] },
+    { seedContactIdentities: false },
+  );
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .updateCustomer(value.id, { company: '完成过渡的历史公司' }, superAdmin);
+  assert.equal(result.code, 0, result.message);
+  const next = fake.getState();
+  assert.equal(next.contactIdentities?.length, 1);
+  assert.equal(next.contactIdentityLinks?.some((link) => (
+    link.entityType === 'customer' && link.entityId === value.id && link.linkStatus === 'active'
+  )), true);
 }
 
 // RED: 联系人碰撞应使用规范化身份，不得被国家码、空格或大小写绕过。

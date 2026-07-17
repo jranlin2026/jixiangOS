@@ -25,6 +25,13 @@ const service = createCustomerListService(servicePrisma = {
         updatedAt: new Date(item.data.eventAt),
       }));
     },
+    findUnique: async ({ where }: any) => {
+      const compound = where?.domain_recordId;
+      const row = created.map((item) => item.data).find((item) => (
+        item.domain === compound?.domain && item.recordId === compound?.recordId
+      ));
+      return row ? { data: structuredClone(row.data) } : null;
+    },
     create: async (input: any) => {
       if (created.some((item) => item.data.id === input.data.id)) {
         const error = new Error('duplicate business record') as Error & { code?: string };
@@ -36,6 +43,22 @@ const service = createCustomerListService(servicePrisma = {
     },
   },
   leadRecord: { findMany: async () => [] },
+  user: {
+    findMany: async () => [{
+      id: 'user-sales', name: '销售', account: 'sales', email: '', phone: '', role: '销售顾问', avatar: null,
+      departmentId: 'dept-sales', positionId: null, positionName: null, roleId: 'role-sales', passwordHash: null,
+      passwordSalt: null, passwordUpdatedAt: null, lastLoginAt: null, isActive: true, employmentStatus: 'active',
+      createdAt: now, updatedAt: now,
+    }],
+  },
+  role: {
+    findMany: async () => [{
+      id: 'role-sales', name: '销售顾问', code: 'sales', description: null, departmentId: null,
+      permissions: [{ module: PERMISSION_KEYS.CUSTOMER_CREATE, actions: ['write'] }],
+      dataScopes: { customers: 'self' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now,
+    }],
+  },
+  department: { findMany: async () => [] },
   customerAuditEvent: {
     create: async ({ data }: any) => {
       const event = { ...data, eventSequence: BigInt(auditEvents.length + 1), createdAt: new Date(now) };
@@ -45,12 +68,14 @@ const service = createCustomerListService(servicePrisma = {
   },
   contactIdentity: {
     findUnique: async ({ where }: any) => contactIdentities.find((identity) => (
-      identity.type === where.type_normalizedHash.type
-      && identity.normalizedHash === where.type_normalizedHash.normalizedHash
+      where.id ? identity.id === where.id : (
+        identity.type === where.type_normalizedHash.type
+        && identity.normalizedHash === where.type_normalizedHash.normalizedHash
+      )
     )) || null,
     create: async ({ data }: any) => {
       if (contactIdentities.some((identity) => (
-        identity.type === data.type && identity.normalizedHash === data.normalizedHash
+        identity.id === data.id || (identity.type === data.type && identity.normalizedHash === data.normalizedHash)
       ))) throw Object.assign(new Error('duplicate identity'), { code: 'P2002' });
       contactIdentities.push({ ...data });
       return { ...data };
@@ -82,7 +107,29 @@ const service = createCustomerListService(servicePrisma = {
       return { count };
     },
   },
-  $queryRaw: async () => [],
+  $queryRaw: async (query: any) => {
+    const text = Array.isArray(query?.strings) ? query.strings.join('?') : String(query || '');
+    const values = query?.values || [];
+    if (text.includes('FROM contact_identities')) {
+      const [type, normalizedHash] = values;
+      return contactIdentities.filter((identity) => identity.type === type && identity.normalizedHash === normalizedHash)
+        .map((identity) => ({ ...identity }));
+    }
+    if (text.includes('FROM contact_identity_links')) {
+      if (text.includes('WHERE identityId')) {
+        const [identityId] = values;
+        return contactLinks.filter((link) => (
+          link.identityId === identityId && link.entityType === 'customer' && link.linkStatus === 'active'
+        )).map((link) => ({ entityId: link.entityId }));
+      }
+      const [entityType, entityId] = values;
+      return contactLinks.filter((link) => (
+        link.entityType === entityType && link.entityId === entityId && link.linkStatus === 'active'
+      )).map((link) => ({ identityId: link.identityId }));
+    }
+    if (text.includes('FROM business_records')) return created.map((item) => ({ ...item.data, data: structuredClone(item.data.data) }));
+    return [];
+  },
   $transaction: async (operation: any) => {
     const result = transactionTail.then(() => operation(servicePrisma));
     transactionTail = result.then(() => undefined, () => undefined);
@@ -149,6 +196,41 @@ assert.match(auditEvents[0]?.inputHash || '', /^[a-f0-9]{64}$/);
 assert.equal(contactIdentities.length, 1);
 assert.equal(contactLinks[0]?.entityId, result.data?.id);
 
+// RED: a direct POST customer create must reconcile an active pre-backfill
+// BusinessRecord (identity table intentionally empty for this customer) and
+// return the permitted safe summary to its acting viewer.
+const legacyContact = '13900000008';
+created.push({
+  data: {
+    id: `${STORAGE_KEYS.CUSTOMERS}:legacy-no-identity`,
+    domain: STORAGE_KEYS.CUSTOMERS,
+    recordId: 'legacy-no-identity',
+    title: '历史客户',
+    status: 'following',
+    owner: actor.name,
+    customerId: 'legacy-no-identity',
+    amount: 0,
+    eventAt: new Date(now),
+    data: {
+      id: 'legacy-no-identity', name: '历史客户', company: '历史公司', owner: actor.name,
+      ownerId: actor.id, ownerIdentityStatus: 'resolved', phone: legacyContact,
+    },
+  },
+});
+const createdBeforeLegacyConflict = created.length;
+const directLegacyConflict = await service.create({
+  name: '重复新建', company: '', phone: legacyContact, customerLevel: 'L1', owner: actor.name,
+  ownerId: actor.id, sourceType: '公司资源',
+}, actor);
+assert.equal(directLegacyConflict.code, 409);
+assert.deepEqual(directLegacyConflict.data, {
+  id: 'legacy-no-identity', name: '历史客户', company: '历史公司', owner: actor.name,
+});
+assert.equal(created.length, createdBeforeLegacyConflict, '冲突回滚不得写入新客户');
+assert.equal(contactLinks.some((link) => (
+  link.entityId === 'legacy-no-identity' && link.entityType === 'customer' && link.linkStatus === 'active'
+)), true);
+
 const tagged = await service.create({
   name: '标签客户', company: '', phone: '13800000001', customerLevel: 'L1', owner: '销售', ownerId: actor.id, sourceType: '公司资源', manualTagIds: ['shared'],
 }, actor);
@@ -171,7 +253,7 @@ const denied = await service.create({
 assert.equal(denied.code, 0, 'ownerId 缺失时必须由服务端明确归属当前 actor，不能按姓名分配');
 assert.equal(denied.data?.ownerId, actor.id);
 assert.equal(denied.data?.owner, actor.name);
-assert.equal(created.length, 3);
+assert.equal(created.length, 4);
 
 const emptyName = await service.create({
   name: '',

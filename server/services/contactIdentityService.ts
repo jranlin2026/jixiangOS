@@ -70,7 +70,12 @@ type ContactIdentityStore = {
     findUnique(args: any): Promise<any>;
     create(args: any): Promise<any>;
   };
+  appStorage?: {
+    findMany(args?: any): Promise<Array<{ key: string }>>;
+    deleteMany(args: any): Promise<{ count: number }>;
+  };
   $queryRaw?<T = unknown>(query: Prisma.Sql): Promise<T>;
+  $executeRaw?(query: Prisma.Sql): Promise<number>;
 };
 
 type ConflictViewer = {
@@ -103,6 +108,8 @@ export interface ContactIdentityBackfillSummary {
   conflicts: number;
   invalidValues: number;
   duplicateGroups: number;
+  /** Count of obsolete SHA-256 contact-lock rows removed by an explicit apply. */
+  legacyContactLockKeysCleared: number;
 }
 
 type IdentityCandidate = {
@@ -113,6 +120,11 @@ type IdentityCandidate = {
 
 const GENERIC_CONFLICT_MESSAGE = '系统中已存在相同联系方式' as const;
 const CONTACT_IDENTITY_ENCRYPTION_INFO = Buffer.from('jixiangos/contact-identity/encryption/v1', 'utf8');
+// Task 5 used this exactly-shaped SHA-256 key. Keep the matcher narrow so the
+// maintenance operation never deletes a current versioned HMAC lock or any
+// unrelated AppStorage entry.
+const LEGACY_CONTACT_LOCK_KEY_PATTERN = /^aaos_contact_lock_[a-f0-9]{64}$/;
+const LEGACY_CONTACT_LOCK_KEY_SQL_PATTERN = '^aaos_contact_lock_[a-f0-9]{64}$';
 
 function requireKeyBuffer(key: Buffer, label: string): Buffer {
   if (!Buffer.isBuffer(key) || key.length < 32) throw new Error(`${label} must contain at least 32 bytes.`);
@@ -230,6 +242,44 @@ async function lockIdentity(tx: ContactIdentityStore, identityId: string): Promi
   `);
 }
 
+function contactIdentityId(candidate: IdentityCandidate): string {
+  // The database uniqueness boundary includes type. Including it in the
+  // deterministic primary key prevents an otherwise valid phone/WeChat pair
+  // with the same normalized string from colliding on ContactIdentity.id.
+  return `ci_${candidate.type}_${candidate.normalizedHash.slice(0, 32)}`;
+}
+
+function isP2002(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === 'P2002';
+}
+
+async function findAndLockIdentityByHash(
+  tx: ContactIdentityStore,
+  candidate: IdentityCandidate,
+): Promise<ContactIdentityRecord | null> {
+  if (!tx.$queryRaw) return null;
+  // InnoDB's locking read is a current read under REPEATABLE READ. This must
+  // be used after a unique-key race instead of another snapshot findUnique.
+  const rows = await tx.$queryRaw<ContactIdentityRecord[]>(Prisma.sql`
+    SELECT id, type, normalizedHash, hashKeyVersion, status,
+           encryptedNormalizedValue, canonicalCustomerId, conflictReason,
+           createdAt, updatedAt
+    FROM contact_identities
+    WHERE type = ${candidate.type}
+      AND normalizedHash = ${candidate.normalizedHash}
+    LIMIT 1
+    FOR UPDATE
+  `);
+  return rows[0] || null;
+}
+
+function assertIdentityKeyVersion(identity: ContactIdentityRecord, crypto: ContactIdentityCrypto): ContactIdentityRecord {
+  if (identity.hashKeyVersion !== crypto.keyVersion) {
+    throw new Error('Contact identity HMAC version mismatch; run an explicit rotation migration.');
+  }
+  return identity;
+}
+
 async function lockOrCreateIdentity(
   tx: ContactIdentityStore,
   candidate: IdentityCandidate,
@@ -241,7 +291,7 @@ async function lockOrCreateIdentity(
     try {
       identity = await tx.contactIdentity.create({
         data: {
-          id: `contact-${candidate.normalizedHash.slice(0, 32)}`,
+          id: contactIdentityId(candidate),
           type: candidate.type,
           normalizedHash: candidate.normalizedHash,
           hashKeyVersion: crypto.keyVersion,
@@ -252,18 +302,24 @@ async function lockOrCreateIdentity(
         },
       });
     } catch (error) {
-      if ((error as { code?: unknown } | null)?.code !== 'P2002') throw error;
+      if (!isP2002(error)) throw error;
+      const currentWinner = await findAndLockIdentityByHash(tx, candidate);
+      if (currentWinner) return assertIdentityKeyVersion(currentWinner, crypto);
+      // Never fall back to a repeatable-read ORM snapshot after a real
+      // locking read misses: that would hide an unrelated P2002 or revive the
+      // stale-winner bug. Adapters without raw capability retain the fallback.
+      if (tx.$queryRaw) throw error;
       identity = await tx.contactIdentity.findUnique({ where });
       if (!identity) throw error;
     }
   }
+  const current = await findAndLockIdentityByHash(tx, candidate);
+  if (current) return assertIdentityKeyVersion(current, crypto);
+  if (tx.$queryRaw) throw new Error('Contact identity disappeared during current locking read.');
   await lockIdentity(tx, identity.id);
   const locked = await tx.contactIdentity.findUnique({ where });
   if (!locked) throw new Error('Contact identity disappeared after locking.');
-  if (locked.hashKeyVersion !== crypto.keyVersion) {
-    throw new Error('Contact identity HMAC version mismatch; run an explicit rotation migration.');
-  }
-  return locked;
+  return assertIdentityKeyVersion(locked, crypto);
 }
 
 function parseCustomer(row: any): Customer | null {
@@ -305,10 +361,7 @@ async function assertIdentityCanAcceptCustomer(
   customerId: string,
   viewer?: ConflictViewer,
 ): Promise<void> {
-  const activeCustomerLinks = await tx.contactIdentityLink.findMany({
-    where: { identityId: identity.id, entityType: 'customer', linkStatus: 'active' },
-    select: { entityId: true },
-  });
+  const activeCustomerLinks = await activeCustomerLinksForUpdate(tx, identity.id);
   const otherCustomerIds = activeCustomerLinks
     .map((link) => String(link.entityId))
     .filter((entityId) => entityId !== customerId);
@@ -319,6 +372,30 @@ async function assertIdentityCanAcceptCustomer(
     viewer,
   );
   throw new ContactIdentityConflictError(payload);
+}
+
+async function activeCustomerLinksForUpdate(
+  tx: ContactIdentityStore,
+  identityId: string,
+): Promise<Array<{ entityId: string }>> {
+  if (tx.$queryRaw) {
+    // This is deliberately a locking/current read: after a P2002 winner
+    // reload, a normal ORM read could still see the old RR snapshot and admit
+    // a second customer link for the same identity.
+    const rows = await tx.$queryRaw<Array<{ entityId: string }>>(Prisma.sql`
+      SELECT entityId
+      FROM contact_identity_links
+      WHERE identityId = ${identityId}
+        AND entityType = 'customer'
+        AND linkStatus = 'active'
+      FOR UPDATE
+    `);
+    return rows;
+  }
+  return tx.contactIdentityLink.findMany({
+    where: { identityId, entityType: 'customer', linkStatus: 'active' },
+    select: { entityId: true },
+  });
 }
 
 async function upsertActiveLink(
@@ -346,13 +423,10 @@ async function upsertActiveLink(
 async function reconcileIdentityAfterCustomerLinkEnd(
   tx: ContactIdentityStore,
   identityId: string,
-): Promise<void> {
-  const active = await tx.contactIdentityLink.findMany({
-    where: { identityId, entityType: 'customer', linkStatus: 'active' },
-    select: { entityId: true },
-  });
+): Promise<ContactIdentityRecord> {
+  const active = await activeCustomerLinksForUpdate(tx, identityId);
   const customerIds = [...new Set(active.map((link) => String(link.entityId)))].sort();
-  await tx.contactIdentity.update({
+  return tx.contactIdentity.update({
     where: { id: identityId },
     data: customerIds.length > 1
       ? { status: 'conflict', canonicalCustomerId: null, conflictReason: 'multiple_active_customers' }
@@ -370,10 +444,7 @@ async function endObsoleteEntityLinks(
   entityId: string,
   retainedIdentityIds: Set<string>,
 ): Promise<void> {
-  const activeLinks = await tx.contactIdentityLink.findMany({
-    where: { entityType, entityId, linkStatus: 'active' },
-    select: { identityId: true },
-  });
+  const activeLinks = await activeEntityLinksForUpdate(tx, entityType, entityId);
   const obsoleteIds = [...new Set(
     activeLinks
       .map((link) => String(link.identityId))
@@ -381,12 +452,129 @@ async function endObsoleteEntityLinks(
   )].sort();
   const endedAt = new Date();
   for (const identityId of obsoleteIds) {
+    // The active entity-link read locks only the link row. Lock its identity
+    // before recomputing canonical state so a concurrent claimant cannot have
+    // its newer canonical pointer overwritten by this cleanup.
+    await lockIdentity(tx, identityId);
     await tx.contactIdentityLink.updateMany({
       where: { identityId, entityType, entityId, linkStatus: 'active' },
       data: { linkStatus: 'ended', endedAt },
     });
     if (entityType === 'customer') await reconcileIdentityAfterCustomerLinkEnd(tx, identityId);
   }
+}
+
+async function activeEntityLinksForUpdate(
+  tx: ContactIdentityStore,
+  entityType: 'customer' | 'lead',
+  entityId: string,
+): Promise<Array<{ identityId: string }>> {
+  if (tx.$queryRaw) {
+    return tx.$queryRaw<Array<{ identityId: string }>>(Prisma.sql`
+      SELECT identityId
+      FROM contact_identity_links
+      WHERE entityType = ${entityType}
+        AND entityId = ${entityId}
+        AND linkStatus = 'active'
+      FOR UPDATE
+    `);
+  }
+  return tx.contactIdentityLink.findMany({
+    where: { entityType, entityId, linkStatus: 'active' },
+    select: { identityId: true },
+  });
+}
+
+function customerMatchesCandidate(customer: Customer, candidate: IdentityCandidate): boolean {
+  if (customer.deletedAt) return false;
+  return normalizeContactIdentity(candidate.type, String(customer[candidate.type] || '')) === candidate.normalized;
+}
+
+function legacyCustomerCondition(candidate: IdentityCandidate): Prisma.Sql {
+  if (candidate.type === 'wechat') {
+    return Prisma.sql`
+      LOWER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.wechat')), ''))) = ${candidate.normalized}
+    `;
+  }
+  const digits = candidate.normalized.replace(/\D/g, '');
+  if (/^1[3-9]\d{9}$/.test(candidate.normalized)) {
+    return Prisma.sql`
+      RIGHT(
+        REGEXP_REPLACE(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.phone')), ''), '[^0-9]', ''),
+        11
+      ) = ${candidate.normalized}
+    `;
+  }
+  return Prisma.sql`
+    REGEXP_REPLACE(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.phone')), ''), '[^0-9]', '') = ${digits}
+  `;
+}
+
+async function lockMatchingLegacyCustomerRows(
+  tx: ContactIdentityStore,
+  candidate: IdentityCandidate,
+): Promise<any[]> {
+  let rows: any[];
+  if (tx.$queryRaw) {
+    rows = await tx.$queryRaw<any[]>(Prisma.sql`
+      SELECT id, domain, recordId, data
+      FROM business_records
+      WHERE domain = ${STORAGE_KEYS.CUSTOMERS}
+        AND (
+          JSON_EXTRACT(data, '$.deletedAt') IS NULL
+          OR JSON_TYPE(JSON_EXTRACT(data, '$.deletedAt')) = 'NULL'
+        )
+        AND (${legacyCustomerCondition(candidate)})
+      ORDER BY recordId ASC
+      FOR UPDATE
+    `);
+  } else if (tx.businessRecord?.findMany) {
+    // Test/adapter fallback only. Production takes the lock-bearing SQL path.
+    rows = await tx.businessRecord.findMany({
+      where: { domain: STORAGE_KEYS.CUSTOMERS },
+      orderBy: { recordId: 'asc' },
+    });
+  } else {
+    return [];
+  }
+  return rows.filter((row) => {
+    const customer = parseCustomer(row);
+    return Boolean(customer && customerMatchesCandidate(customer, candidate));
+  });
+}
+
+async function reconcileMatchingLegacyCustomers(
+  tx: ContactIdentityStore,
+  identity: ContactIdentityRecord,
+  candidate: IdentityCandidate,
+): Promise<ContactIdentityRecord> {
+  const rows = await lockMatchingLegacyCustomerRows(tx, candidate);
+  const legacyCustomerIds = [...new Set(rows
+    .map((row) => String(row.recordId || parseCustomer(row)?.id || '').trim())
+    .filter(Boolean))].sort();
+  if (!legacyCustomerIds.length) return identity;
+  const active = await activeCustomerLinksForUpdate(tx, identity.id);
+  const activeIds = new Set(active.map((link) => String(link.entityId)));
+  for (const customerId of legacyCustomerIds) {
+    if (!activeIds.has(customerId)) {
+      await upsertActiveLink(tx, identity.id, 'customer', customerId, 'legacy_transition');
+    }
+  }
+  return reconcileIdentityAfterCustomerLinkEnd(tx, identity.id);
+}
+
+export async function endCustomerContactIdentityLinks(
+  tx: ContactIdentityStore,
+  customerId: string,
+): Promise<void> {
+  await endObsoleteEntityLinks(tx, 'customer', customerId, new Set());
+}
+
+export async function endLeadContactIdentityLinks(
+  tx: ContactIdentityStore,
+  leadId: string,
+): Promise<void> {
+  await endObsoleteEntityLinks(tx, 'lead', leadId, new Set());
 }
 
 export async function upsertCustomerContactIdentities(
@@ -397,7 +585,11 @@ export async function upsertCustomerContactIdentities(
   const candidates = candidatesFromContact(input, crypto);
   const prepared: Array<{ candidate: IdentityCandidate; identity: ContactIdentityRecord }> = [];
   for (const candidate of candidates) {
-    const identity = await lockOrCreateIdentity(tx, candidate, crypto);
+    const identity = await reconcileMatchingLegacyCustomers(
+      tx,
+      await lockOrCreateIdentity(tx, candidate, crypto),
+      candidate,
+    );
     await assertIdentityCanAcceptCustomer(tx, identity, input.customerId, input.conflictViewer);
     prepared.push({ candidate, identity });
   }
@@ -427,7 +619,11 @@ export async function linkLeadAndCustomerIdentity(
   const candidates = candidatesFromContact(input, crypto);
   const prepared: ContactIdentityRecord[] = [];
   for (const candidate of candidates) {
-    const identity = await lockOrCreateIdentity(tx, candidate, crypto);
+    const identity = await reconcileMatchingLegacyCustomers(
+      tx,
+      await lockOrCreateIdentity(tx, candidate, crypto),
+      candidate,
+    );
     await assertIdentityCanAcceptCustomer(tx, identity, input.customerId, input.conflictViewer);
     prepared.push(identity);
   }
@@ -489,6 +685,27 @@ async function createOrReloadDuplicateGroup(
   });
 }
 
+async function cleanupLegacyContactLockKeys(tx: ContactIdentityStore): Promise<number> {
+  if (tx.$executeRaw) {
+    // Only the unversioned, exactly-64-lowercase-hex Task 5 key shape is
+    // eligible. Current HMAC locks include "_v1_" and do not match.
+    return tx.$executeRaw(Prisma.sql`
+      DELETE FROM app_storage
+      WHERE REGEXP_LIKE(\`key\`, ${LEGACY_CONTACT_LOCK_KEY_SQL_PATTERN}, 'c')
+    `);
+  }
+  if (!tx.appStorage?.findMany || !tx.appStorage.deleteMany) return 0;
+  const rows = await tx.appStorage.findMany({
+    where: { key: { startsWith: 'aaos_contact_lock_' } },
+    select: { key: true },
+  });
+  const legacyKeys = rows
+    .map((row) => String(row.key || ''))
+    .filter((key) => LEGACY_CONTACT_LOCK_KEY_PATTERN.test(key));
+  if (!legacyKeys.length) return 0;
+  return (await tx.appStorage.deleteMany({ where: { key: { in: legacyKeys } } })).count;
+}
+
 export async function backfillContactIdentities(
   prisma: ContactIdentityStore & { $transaction?(operation: (tx: ContactIdentityStore) => Promise<void>): Promise<void> },
   options: ContactIdentityBackfillOptions,
@@ -543,8 +760,9 @@ export async function backfillContactIdentities(
     conflicts: orderedPlans.filter((plan) => plan.customers.length > 1).length,
     invalidValues,
     duplicateGroups: orderedPlans.filter((plan) => plan.customers.length > 1).length,
+    legacyContactLockKeysCleared: 0,
   };
-  if (!options.apply || orderedPlans.length === 0) return summary;
+  if (!options.apply) return summary;
 
   const apply = async (tx: ContactIdentityStore) => {
     for (const plan of orderedPlans) {
@@ -568,6 +786,11 @@ export async function backfillContactIdentities(
       });
       if (conflict) await createOrReloadDuplicateGroup(tx, identity.id, plan.type, plan.customers);
     }
+    // This controlled maintenance action is intentionally coupled to a
+    // successful contact backfill apply. It allows a post-rollout operator to
+    // clear exactly the obsolete SHA-256 locks, even when no contact rows need
+    // to be written on a later rerun.
+    summary.legacyContactLockKeysCleared = await cleanupLegacyContactLockKeys(tx);
   };
   if (prisma.$transaction) await prisma.$transaction(apply);
   else await apply(prisma);

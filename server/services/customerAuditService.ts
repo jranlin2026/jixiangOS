@@ -37,6 +37,7 @@ export type CustomerDuplicateGroupStore = {
     }): Promise<CustomerDuplicateGroup>;
     findUnique(args: { where: { groupKey: string } }): Promise<CustomerDuplicateGroup | null>;
   };
+  $queryRaw?<T = unknown>(query: Prisma.Sql): Promise<T>;
 };
 
 export type CreateCustomerDuplicateGroupInput = {
@@ -147,6 +148,26 @@ function isUniqueConstraintError(error: unknown): boolean {
   return code === 'P2002' || /unique constraint/i.test(message);
 }
 
+async function findAndLockCustomerDuplicateGroup(
+  tx: CustomerDuplicateGroupStore,
+  groupKey: string,
+): Promise<CustomerDuplicateGroup | null> {
+  if (!tx.$queryRaw) return null;
+  // A locking read is a current read in InnoDB RR. Do not replace this with a
+  // second ORM findUnique after P2002: that query can retain the earlier
+  // snapshot and miss the committed winner.
+  const rows = await tx.$queryRaw<CustomerDuplicateGroup[]>(Prisma.sql`
+    SELECT id, groupKey, rule, confidence, status, customerIds,
+           contactIdentityId, sourceJobId, createdById, createdAt,
+           resolvedAt, mergeLedgerId
+    FROM customer_duplicate_groups
+    WHERE groupKey = ${groupKey}
+    LIMIT 1
+    FOR UPDATE
+  `);
+  return rows[0] || null;
+}
+
 /**
  * The unique group key is the concurrency boundary for later identity
  * backfills. A losing concurrent create reloads the committed winner instead
@@ -174,7 +195,9 @@ export async function createOrReloadCustomerDuplicateGroup(
     });
   } catch (error) {
     if (!isUniqueConstraintError(error)) throw error;
-    const existing = await tx.customerDuplicateGroup.findUnique({ where: { groupKey: identity.groupKey } });
+    const current = await findAndLockCustomerDuplicateGroup(tx, identity.groupKey);
+    if (tx.$queryRaw && !current) throw error;
+    const existing = current || await tx.customerDuplicateGroup.findUnique({ where: { groupKey: identity.groupKey } });
     if (!existing) throw error;
     return existing;
   }

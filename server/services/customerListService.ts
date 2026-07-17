@@ -321,7 +321,8 @@ export function createCustomerListService(
       if (phoneError) return failure<Customer>(phoneError, 400);
 
       const operation = async (tx: Pick<Prisma.TransactionClient,
-        'businessRecord' | 'leadRecord' | 'customerAuditEvent' | 'contactIdentity' | 'contactIdentityLink' | '$queryRaw'
+        'businessRecord' | 'leadRecord' | 'customerAuditEvent' | 'contactIdentity' | 'contactIdentityLink'
+        | 'user' | 'role' | 'department' | '$queryRaw'
       >): Promise<ApiResponse<Customer | null>> => {
       const catalog = await loadCustomerTagCatalog(tx, false);
       const tagValidation = validateManualTagSelection(catalog, 'customer', input.manualTagIds || []);
@@ -361,12 +362,19 @@ export function createCustomerListService(
         updatedAt: now,
       };
 
+      // Resolve disclosure scope from the same transaction as the identity
+      // write, so a safe conflict summary never relies on an earlier role
+      // directory snapshot.
+      const identityConflictAccess = await loadCustomerAccessContext(tx, currentUser);
       await upsertCustomerContactIdentities(tx, {
         customerId: customer.id,
         phone: customer.phone,
         wechat: customer.wechat,
         source: 'customer_create',
         crypto: options.contactIdentityCrypto,
+        conflictViewer: {
+          canReadCustomer: (candidate) => canReadCustomer(identityConflictAccess, candidate),
+        },
       });
       await tx.businessRecord.create({
         data: {

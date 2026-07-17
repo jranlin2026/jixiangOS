@@ -59,6 +59,8 @@ import { appendCustomerAuditEvent } from './customerAuditService';
 import {
   ContactIdentityConflictError,
   createContactIdentityCryptoFromEnv,
+  endCustomerContactIdentityLinks,
+  endLeadContactIdentityLinks,
   hashContactIdentity,
   linkLeadAndCustomerIdentity,
   normalizeContactIdentity,
@@ -976,6 +978,9 @@ export function createCustomerAtomicCommandService(options: {
         updatedAt: atIso,
       };
       await repository.compareAndSave(snapshot, next, at);
+      if (command.action === 'soft_delete') {
+        await endCustomerContactIdentityLinks(tx, customer.id);
+      }
       if (command.action === 'transfer' || command.action === 'release_to_pool') {
         const relatedLeads = await lockedLeadRowsByStableCustomerId(tx, customer.id);
         for (const row of relatedLeads) {
@@ -1475,6 +1480,7 @@ export function createCustomerCommandService(
           updatedAt: atIso,
         };
         await persistCustomer(tx, snapshot, deleted, at);
+        await endCustomerContactIdentityLinks(tx, customer.id);
         await appendCustomerAuditEvent(tx, {
           operation: 'soft_delete',
           customerId: customer.id,
@@ -2018,6 +2024,7 @@ export function createCustomerCommandService(
           updatedAt: atIso,
         };
         await persistLead(tx, row.id, deleted, at);
+        await endLeadContactIdentityLinks(tx, lead.id);
         return success(true);
       });
     },

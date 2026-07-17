@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -290,6 +291,43 @@ const [groupA, groupB] = await Promise.all([
 assert.equal(groupA.id, groupB.id, 'concurrent discovery reloads the unique group-key winner');
 assert.equal(duplicateGroups.size, 1);
 assert.deepEqual(groupA.customerIds, ['customer-1', 'customer-2']);
+
+// RED: under MySQL REPEATABLE READ a P2002 loser cannot rely on a second
+// snapshot findUnique. It must reload the group winner with a locking current
+// read, just like ContactIdentity.
+{
+  const expectedGroupKey = createHash('sha256').update(JSON.stringify({
+    rule: 'same_phone', customerIds: ['customer-1', 'customer-2'],
+  })).digest('hex');
+  const winner = {
+    id: 'duplicate-current-read', groupKey: expectedGroupKey, rule: 'same_phone',
+    confidence: 'high', status: 'open', customerIds: ['customer-1', 'customer-2'],
+    contactIdentityId: null, sourceJobId: null, createdById: null, mergeLedgerId: null,
+    createdAt: new Date('2026-07-18T02:00:00.000Z'), resolvedAt: null,
+  };
+  let currentReads = 0;
+  const staleSnapshotStore: any = {
+    customerDuplicateGroup: {
+      create: async () => { throw Object.assign(new Error('duplicate group'), { code: 'P2002' }); },
+      findUnique: async () => null,
+    },
+    $queryRaw: async (query: any) => {
+      const text = Array.isArray(query?.strings) ? query.strings.join('?') : String(query || '');
+      if (text.includes('FROM customer_duplicate_groups')) {
+        currentReads += 1;
+        assert.match(text, /FOR UPDATE/);
+        assert.deepEqual(query.values, [expectedGroupKey]);
+        return [winner];
+      }
+      return [];
+    },
+  };
+  const reloaded = await createOrReloadCustomerDuplicateGroup(staleSnapshotStore, {
+    rule: 'same_phone', confidence: 'high', status: 'open', customerIds: ['customer-2', 'customer-1'],
+  });
+  assert.equal(reloaded.id, winner.id);
+  assert.equal(currentReads, 1);
+}
 
 const viewerEvent = sanitizeAuditEventForViewer({
   ...first,

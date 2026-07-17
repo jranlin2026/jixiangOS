@@ -20,6 +20,7 @@ export async function runContactIdentityBackfill(
     conflicts: summary.conflicts,
     invalidValues: summary.invalidValues,
     duplicateGroups: summary.duplicateGroups,
+    legacyContactLockKeysCleared: summary.legacyContactLockKeysCleared,
   }));
 }
 
