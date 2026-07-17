@@ -4,7 +4,7 @@ import type { Customer } from '../../types/customer';
 import type { Department } from '../../types/department';
 import type { Lead } from '../../types/lead';
 import type { Order } from '../../types/order';
-import type { DataScopeDomain, DataScopeLevel, Role } from '../../types/role';
+import type { CustomerDataScopeLevel, DataScopeDomain, DataScopeLevel, Role } from '../../types/role';
 import type { User } from '../../types/settings';
 import { AUTH_SESSION_STORAGE_KEY } from './auth';
 import { LIFECYCLE_STATUS_CODES, STORAGE_KEYS, normalizeLifecycleStatusCode } from './constants';
@@ -13,7 +13,7 @@ import { ensureOrganizationConfigData, getDepartmentDescendantIds, normalizeRole
 
 export interface DataVisibilityScope {
   unrestricted: boolean;
-  dataScopeLevel: DataScopeLevel;
+  dataScopeLevel: DataScopeLevel | CustomerDataScopeLevel;
   currentUser?: User;
   visibleUserIds: string[];
   visibleUserNames: string[];
@@ -132,7 +132,15 @@ export function buildDataVisibilityScopeForUser(
   let visibleUsers: ScopeUser[];
   if (dataScopeLevel === 'all') {
     visibleUsers = activeUsers;
-  } else if (dataScopeLevel === 'department' && currentUser.departmentId) {
+  } else if (domain === 'customers' && dataScopeLevel === 'department_only' && currentUser.departmentId) {
+    visibleUsers = activeUsers.filter((user) => user.departmentId === currentUser.departmentId);
+  } else if (
+    currentUser.departmentId
+    && (
+      (domain === 'customers' && dataScopeLevel === 'department_and_descendants')
+      || (domain !== 'customers' && dataScopeLevel === 'department')
+    )
+  ) {
     const visibleDepartmentIds = new Set([
       currentUser.departmentId,
       ...getDepartmentDescendantIds(departments, currentUser.departmentId),

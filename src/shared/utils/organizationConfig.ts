@@ -1,6 +1,16 @@
 import type { Department } from '../../types/department';
 import type { Position } from '../../types/position';
-import type { DataScopeDomain, DataScopeLevel, Permission, Role, RoleDataScopes } from '../../types/role';
+import {
+  normalizeCustomerDataScope,
+  type DataScopeDomain,
+  type DataScopeLevel,
+  type LegacyCustomerDataScopeInput,
+  type NonCustomerDataScopeDomain,
+  type NormalizedRoleDataScopes,
+  type Permission,
+  type Role,
+  type RoleDataScopes,
+} from '../../types/role';
 import type { OrganizationProfile, User } from '../../types/settings';
 import { STORAGE_KEYS } from './constants';
 import { CAPABILITY_KEYS, PERMISSION_KEYS, sanitizeRolePermissions } from './permissions';
@@ -9,9 +19,8 @@ import { getStorageData, setStorageData } from '../../api/mock/storage';
 
 const now = '2026-06-01T00:00:00.000Z';
 const ORGANIZATION_SCHEMA_VERSION = 9;
-const DATA_SCOPE_DOMAINS: DataScopeDomain[] = [
+const NON_CUSTOMER_DATA_SCOPE_DOMAINS: NonCustomerDataScopeDomain[] = [
   'leads',
-  'customers',
   'orders',
   'deliveries',
   'orderApplications',
@@ -87,6 +96,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: CAPABILITY_KEYS.LEADS_RECEIVE, actions: ['read'] },
       { module: CAPABILITY_KEYS.LEADS_ASSIGN, actions: ['read'] },
       { module: PERMISSION_KEYS.CUSTOMERS, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.CUSTOMER_ASSIGN, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read', 'write', 'delete'] },
       { module: PERMISSION_KEYS.ORDER_REVIEW_LIST, actions: ['read'] },
@@ -115,6 +125,7 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.LEADS, actions: ['read', 'write'] },
       { module: CAPABILITY_KEYS.LEADS_RECEIVE, actions: ['read'] },
       { module: PERMISSION_KEYS.CUSTOMERS, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.CUSTOMER_ASSIGN, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_REVIEW_LIST, actions: ['read'] },
@@ -159,6 +170,7 @@ export const DEFAULT_ROLES: Role[] = [
     departmentId: 'dept-success',
     permissions: [
       { module: PERMISSION_KEYS.CUSTOMERS, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.CUSTOMER_ASSIGN, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read'] },
       { module: PERMISSION_KEYS.ORDER_REVIEW_LIST, actions: ['read'] },
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
@@ -277,18 +289,31 @@ function isDataScopeLevel(value: unknown): value is DataScopeLevel {
 
 function buildDataScopes(
   leads: DataScopeLevel,
-  customers: DataScopeLevel,
+  customers: LegacyCustomerDataScopeInput,
   orders: DataScopeLevel,
   orderApplications: DataScopeLevel,
   recoveryOrders: DataScopeLevel = orders,
   recoveryOrderApplications: DataScopeLevel = orderApplications,
-  assets: DataScopeLevel = customers,
+  assets: DataScopeLevel = customers === 'department'
+    ? 'department'
+    : customers === 'self' || customers === 'all'
+      ? customers
+      : 'self',
   deliveries: DataScopeLevel = orders,
-): Required<Record<DataScopeDomain, DataScopeLevel>> {
-  return { leads, customers, orders, deliveries, orderApplications, recoveryOrders, recoveryOrderApplications, assets };
+): NormalizedRoleDataScopes {
+  return {
+    leads,
+    customers: normalizeCustomerDataScope(customers),
+    orders,
+    deliveries,
+    orderApplications,
+    recoveryOrders,
+    recoveryOrderApplications,
+    assets,
+  };
 }
 
-function defaultRoleDataScopes(code?: string): Required<Record<DataScopeDomain, DataScopeLevel>> {
+function defaultRoleDataScopes(code?: string): NormalizedRoleDataScopes {
   const normalizedCode = normalizeCode(code);
   if (normalizedCode === 'super_admin') {
     return buildDataScopes('all', 'all', 'all', 'all');
@@ -313,10 +338,10 @@ function hasRecoveryReviewListPermission(role: { permissions?: Role['permissions
   ].includes(permission.module)));
 }
 
-export function normalizeRoleDataScopes(role: Pick<Role, 'code'> & { dataScopes?: RoleDataScopes; permissions?: Role['permissions'] }): Required<Record<DataScopeDomain, DataScopeLevel>> {
+export function normalizeRoleDataScopes(role: Pick<Role, 'code'> & { dataScopes?: RoleDataScopes; permissions?: Role['permissions'] }): NormalizedRoleDataScopes {
   const defaults = defaultRoleDataScopes(role.code);
   if (normalizeCode(role.code) === 'super_admin') return defaults;
-  return DATA_SCOPE_DOMAINS.reduce((acc, domain) => {
+  const nonCustomerScopes = NON_CUSTOMER_DATA_SCOPE_DOMAINS.reduce((acc, domain) => {
     const value = role.dataScopes?.[domain];
     acc[domain] = isDataScopeLevel(value)
       ? value
@@ -326,7 +351,16 @@ export function normalizeRoleDataScopes(role: Pick<Role, 'code'> & { dataScopes?
         ? 'all'
         : defaults[domain];
     return acc;
-  }, { ...defaults });
+  }, {} as Required<Record<NonCustomerDataScopeDomain, DataScopeLevel>>);
+  const customerScope = role.dataScopes?.customers;
+  return {
+    ...nonCustomerScopes,
+    customers: normalizeCustomerDataScope(
+      customerScope && (customerScope === 'department' || customerScope === 'self' || customerScope === 'department_only' || customerScope === 'department_and_descendants' || customerScope === 'all')
+        ? customerScope
+        : defaults.customers,
+    ),
+  };
 }
 
 function stripLeadSalesAssignmentPermissions(permissions: Role['permissions'] = []): Role['permissions'] {

@@ -11,6 +11,7 @@ import {
   TextField,
   ToggleButton,
   ToggleButtonGroup,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
@@ -18,10 +19,19 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import SearchIcon from '@mui/icons-material/Search';
 import useRoleStore from '../../store/useRoleStore';
 import { settingsApi } from '../../api';
-import type { DataScopeDomain, DataScopeLevel, Permission, Role, RoleDataScopes } from '../../types/role';
+import {
+  type CustomerDataScopeLevel,
+  type DataScopeDomain,
+  type DataScopeLevel,
+  type NormalizedRoleDataScopes,
+  type Permission,
+  type Role,
+  type RoleDataScopes,
+} from '../../types/role';
 import type { User } from '../../types/settings';
-import { CAPABILITY_KEYS, PERMISSION_KEYS, getRoleEditorPermissionActions } from '../../shared/utils/permissions';
+import { CAPABILITY_KEYS, PERMISSION_KEYS, getCustomerPermissionTree } from '../../shared/utils/permissions';
 import { normalizeUserRoleName } from '../../shared/utils/roles';
+import { buildRoleEditorPermissions, normalizeRoleEditorDataScopes } from './rolePermissionModel';
 
 type RoleForm = {
   name: string;
@@ -59,16 +69,13 @@ const PERMISSION_TREE: PermissionNode[] = [
   },
   {
     label: '客户',
-    children: [
-      { label: '客户列表', key: PERMISSION_KEYS.CUSTOMER_LIST },
-      { label: '查看客户资料', key: PERMISSION_KEYS.CUSTOMER_DETAIL },
-      { label: '新建客户', key: PERMISSION_KEYS.CUSTOMER_CREATE },
-      { label: '编辑客户', key: PERMISSION_KEYS.CUSTOMER_EDIT },
-      { label: '分配客户', key: PERMISSION_KEYS.CUSTOMER_ASSIGN },
-      { label: '领取公海客户', key: PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM },
-      { label: '新建客户订单', key: PERMISSION_KEYS.CUSTOMER_CREATE_ORDER },
-      { label: '查看客户订单', key: PERMISSION_KEYS.CUSTOMER_VIEW_ORDERS },
-    ],
+    children: getCustomerPermissionTree().map((group) => ({
+      label: group.label,
+      children: group.leafKeys.map((key) => {
+        const labels = key.split('/');
+        return { label: labels[labels.length - 1] || key, key };
+      }),
+    })),
   },
   {
     label: '订单',
@@ -216,7 +223,7 @@ const PERMISSION_TREE: PermissionNode[] = [
 ];
 
 const defaultPermission: Permission = { module: PERMISSION_KEYS.HOME, actions: ['read'] };
-const defaultDataScopes: Record<DataScopeDomain, DataScopeLevel> = {
+const defaultDataScopes: NormalizedRoleDataScopes = {
   leads: 'self',
   customers: 'self',
   orders: 'self',
@@ -241,9 +248,16 @@ const dataScopeOptions: Array<{ value: DataScopeLevel; label: string }> = [
   { value: 'all', label: '全部' },
 ];
 
+const CUSTOMER_SCOPE_OPTIONS = [
+  { value: 'self', label: '仅本人' },
+  { value: 'department_only', label: '仅本部门' },
+  { value: 'department_and_descendants', label: '本部门及所有下级部门' },
+  { value: 'all', label: '全部客户' },
+] as const;
+
 const dataScopeRows: Array<{ domain: DataScopeDomain; label: string; description: string; permissionKeys: string[] }> = [
   { domain: 'leads', label: '线索数据', description: '控制线索列表、入库情况和线索统计的数据范围', permissionKeys: [PERMISSION_KEYS.LEADS_LIST, PERMISSION_KEYS.LEADS_DETAIL, PERMISSION_KEYS.LEADS_CREATE, PERMISSION_KEYS.LEADS_FOLLOW, PERMISSION_KEYS.LEADS_FLOW_CONFIG, PERMISSION_KEYS.LEADS_INTAKE_STATUS] },
-  { domain: 'customers', label: '客户数据', description: '控制客户列表、客户资料和客户统计的数据范围', permissionKeys: [PERMISSION_KEYS.CUSTOMER_LIST, PERMISSION_KEYS.CUSTOMER_DETAIL, PERMISSION_KEYS.CUSTOMER_CREATE, PERMISSION_KEYS.CUSTOMER_EDIT, PERMISSION_KEYS.CUSTOMER_ASSIGN, PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, PERMISSION_KEYS.CUSTOMER_CREATE_ORDER, PERMISSION_KEYS.CUSTOMER_VIEW_ORDERS] },
+  { domain: 'customers', label: '客户数据', description: '控制客户列表、客户资料和客户统计的数据范围', permissionKeys: getCustomerPermissionTree().flatMap((node) => node.leafKeys) },
   { domain: 'orders', label: '订单数据', description: '控制正式订单列表、订单筛选和订单统计的数据范围', permissionKeys: [PERMISSION_KEYS.ORDER_MANAGE, PERMISSION_KEYS.ORDER_CREATE, PERMISSION_KEYS.ORDER_EDIT, PERMISSION_KEYS.ORDER_DELETE, PERMISSION_KEYS.ORDER_HISTORY, PERMISSION_KEYS.ORDER_PAYMENT_SCREENSHOT] },
   { domain: 'deliveries', label: '交付数据', description: '控制交付中心列表、详情、统计和可创建交付订单的数据范围', permissionKeys: [PERMISSION_KEYS.DELIVERY, PERMISSION_KEYS.DELIVERY_CENTER, PERMISSION_KEYS.DELIVERY_MOVE_CARD, PERMISSION_KEYS.DELIVERY_STAGE_CONFIG] },
   { domain: 'orderApplications', label: '订单审核台数据', description: '控制订单审核台能看到哪些订单申请；审核列表权限控制入口，审核操作权限控制通过、退回和驳回', permissionKeys: [PERMISSION_KEYS.ORDER_REVIEW_LIST] },
@@ -288,6 +302,8 @@ const getPermissionAliasMap = () => {
     .filter((category) => category.label !== '全部')
     .forEach((category) => walk(category, []));
 
+  aliases.set(PERMISSION_KEYS.CUSTOMERS, [PERMISSION_KEYS.CUSTOMER_LIST, PERMISSION_KEYS.CUSTOMER_DETAIL]);
+
   [
     '用户管理',
     '系统设置/组织权限/用户管理',
@@ -314,10 +330,6 @@ const getPermissionAliasMap = () => {
 
   return aliases;
 };
-
-const toPermissions = (keys: Set<string>): Permission[] => (
-  Array.from(keys).sort().map((module) => ({ module, actions: getRoleEditorPermissionActions(module) }))
-);
 
 const normalizePermissionKeys = (permissions: Permission[]) => {
   const selectableKeys = new Set(getAllSelectablePermissionKeys());
@@ -356,22 +368,6 @@ const getLeafPermissionLabels = (permissions: Permission[]) => {
   return Array.from(selected).filter((key) => leafKeys.includes(key));
 };
 
-const normalizeDataScopes = (value?: RoleDataScopes, code?: string): RoleDataScopes => {
-  if (code === 'super_admin') {
-    return {
-      leads: 'all',
-      customers: 'all',
-      orders: 'all',
-      deliveries: 'all',
-      orderApplications: 'all',
-      recoveryOrders: 'all',
-      recoveryOrderApplications: 'all',
-      assets: 'all',
-    };
-  }
-  return { ...defaultDataScopes, ...(value || {}) };
-};
-
 const hasAnyPermissionKey = (permissions: Permission[], keys: string[]) => {
   const selected = normalizePermissionKeys(permissions);
   return keys.some((key) => selected.has(key));
@@ -383,7 +379,7 @@ const roleToForm = (role: Role): RoleForm => ({
   departmentId: role.departmentId || '',
   isActive: role.isActive,
   permissions: role.permissions.length ? role.permissions : [defaultPermission],
-  dataScopes: normalizeDataScopes(role.dataScopes, role.code),
+  dataScopes: normalizeRoleEditorDataScopes(role.code, role.dataScopes, role.permissions),
 });
 
 const userMatchesRole = (user: User, role: Role): boolean => (
@@ -432,6 +428,7 @@ const RolePermission: React.FC = () => {
   }, [items, search, statusFilter]);
 
   const selectedPermissionCount = normalizePermissionKeys(form.permissions).size;
+  const hasLegacyCustomerParentPermission = form.permissions.some((permission) => permission.module.trim() === PERMISSION_KEYS.CUSTOMERS);
   const roleMemberCount = (role: Role) => users.filter((user) => userMatchesRole(user, role)).length;
   const boundUsers = editRole ? users.filter((user) => userMatchesRole(user, editRole)) : [];
   const activeBoundUsers = boundUsers.filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active');
@@ -461,8 +458,8 @@ const RolePermission: React.FC = () => {
       setSaveMessage({ type: 'error', text: '请先填写角色名称' });
       return;
     }
-    const permissions = toPermissions(normalizePermissionKeys(form.permissions));
-    const dataScopes = normalizeDataScopes(form.dataScopes, editRole?.code);
+    const permissions = buildRoleEditorPermissions(normalizePermissionKeys(form.permissions));
+    const dataScopes = normalizeRoleEditorDataScopes(editRole?.code, form.dataScopes, form.permissions);
     if (!permissions.length) {
       setSaveMessage({ type: 'error', text: '请至少选择一个菜单权限' });
       return;
@@ -506,11 +503,11 @@ const RolePermission: React.FC = () => {
           nextKeys.add(key);
         }
       });
-      return { ...prev, permissions: toPermissions(nextKeys) };
+      return { ...prev, permissions: buildRoleEditorPermissions(nextKeys) };
     });
   };
 
-  const handleDataScopeChange = (domain: DataScopeDomain, value: DataScopeLevel | null) => {
+  const handleDataScopeChange = (domain: DataScopeDomain, value: DataScopeLevel | CustomerDataScopeLevel | null) => {
     if (!value) return;
     setForm((prev) => ({
       ...prev,
@@ -751,7 +748,10 @@ const RolePermission: React.FC = () => {
               <Box sx={{ bgcolor: '#fff', border: '1px solid #dfe7f1', borderRadius: 1.25, overflow: 'hidden' }}>
                 <Box sx={{ px: 2.5, py: 2, borderBottom: '1px solid #edf2f7' }}>
                   <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#132238' }}>菜单权限</Typography>
-                  <Typography variant="caption" sx={{ color: '#7890ad' }}>勾选后可见/可用，未勾选则隐藏</Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    <Typography variant="caption" sx={{ color: '#7890ad' }}>勾选后可见/可用，未勾选则隐藏</Typography>
+                    {hasLegacyCustomerParentPermission && <Chip label="旧权限兼容" size="small" sx={{ height: 20, fontWeight: 700 }} />}
+                  </Box>
                 </Box>
                 <Box sx={{ maxHeight: 520, overflowY: 'auto', p: 1.25 }}>
                   {PERMISSION_TREE.map((category) => {
@@ -897,7 +897,9 @@ const RolePermission: React.FC = () => {
                 <Box sx={{ bgcolor: '#fff', border: '1px solid #dfe7f1', borderRadius: 1.25, overflow: 'hidden' }}>
                   <Box sx={{ px: 2.5, py: 2, borderBottom: '1px solid #edf2f7' }}>
                     <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#132238' }}>数据权限配置</Typography>
-                    <Typography variant="caption" sx={{ color: '#7890ad' }}>控制各类业务数据可见范围</Typography>
+                    <Tooltip title="权限决定可执行动作；客户数据范围决定可管理的负责人覆盖范围。">
+                      <Typography variant="caption" sx={{ color: '#7890ad', cursor: 'help' }}>控制各类业务数据可见范围</Typography>
+                    </Tooltip>
                   </Box>
                   <Box sx={{ p: 2, display: 'grid', gap: 1 }}>
                     {dataScopeRows.map((row) => {
@@ -930,7 +932,7 @@ const RolePermission: React.FC = () => {
                             disabled={disabled}
                             onChange={(_event, nextValue) => handleDataScopeChange(row.domain, nextValue)}
                           >
-                            {dataScopeOptions.map((option) => (
+                            {(row.domain === 'customers' ? CUSTOMER_SCOPE_OPTIONS : dataScopeOptions).map((option) => (
                               <ToggleButton key={option.value} value={option.value} sx={{ px: 1.5 }}>
                                 {option.label}
                               </ToggleButton>

@@ -8,6 +8,10 @@ export interface Permission {
 
 export type DataScopeLevel = 'self' | 'department' | 'all';
 
+export type CustomerDataScopeLevel = 'self' | 'department_only' | 'department_and_descendants' | 'all';
+
+export type LegacyCustomerDataScopeInput = CustomerDataScopeLevel | 'department';
+
 export type DataScopeDomain =
   | 'leads'
   | 'customers'
@@ -18,7 +22,19 @@ export type DataScopeDomain =
   | 'recoveryOrderApplications'
   | 'assets';
 
-export type RoleDataScopes = Partial<Record<DataScopeDomain, DataScopeLevel>>;
+export type NonCustomerDataScopeDomain = Exclude<DataScopeDomain, 'customers'>;
+
+export type RoleDataScopes = Partial<Record<NonCustomerDataScopeDomain, DataScopeLevel>> & {
+  customers?: LegacyCustomerDataScopeInput;
+};
+
+export type NormalizedRoleDataScopes = Required<Record<NonCustomerDataScopeDomain, DataScopeLevel>> & {
+  customers: CustomerDataScopeLevel;
+};
+
+export function normalizeCustomerDataScope(value: LegacyCustomerDataScopeInput): CustomerDataScopeLevel {
+  return value === 'department' ? 'department_and_descendants' : value;
+}
 
 /** 角色 */
 export interface Role {

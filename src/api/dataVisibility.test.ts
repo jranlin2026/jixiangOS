@@ -6,7 +6,8 @@ import { orderApi } from './orderApi';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { PERMISSION_KEYS } from '../shared/utils/permissions';
-import { filterUsersByCurrentDataScope } from '../shared/utils/dataVisibility';
+import { buildDataVisibilityScopeForUser, filterUsersByCurrentDataScope } from '../shared/utils/dataVisibility';
+import type { Role } from '../types/role';
 
 const storage = (() => {
   const values = new Map<string, string>();
@@ -41,7 +42,7 @@ const users = [
   { id: 'user-system-admin', name: 'System Admin Name', account: 'system_admin', email: 'system-admin@test.local', phone: '', role: '系统管理员', departmentId: 'dept-admin', isActive: true, createdAt: now, updatedAt: now },
 ];
 
-const roles = [
+const roles: Role[] = [
   { id: 'role-sales', name: 'Sales Consultant', code: 'sales_consultant', permissions: [{ module: PERMISSION_KEYS.LEADS, actions: ['read'] }], dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' }, memberCount: 3, isActive: true, createdAt: now, updatedAt: now },
   { id: 'role-manager', name: 'Sales Manager', code: 'sales_manager', permissions: [{ module: PERMISSION_KEYS.LEADS, actions: ['read'] }], dataScopes: { leads: 'department', customers: 'department', orders: 'department', orderApplications: 'department' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
   { id: 'role-finance', name: 'Finance Specialist', code: 'finance_specialist', permissions: [{ module: PERMISSION_KEYS.ORDER_MANAGE, actions: ['read'] }], dataScopes: { leads: 'self', customers: 'self', orders: 'self', orderApplications: 'self' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
@@ -140,6 +141,44 @@ assert.equal((await orderApi.fetchOrderById('order-other')).data, null);
 
 resetData('user-manager');
 const managerScope = await idsForCurrentUser();
+const managerUser = users.find((user) => user.id === 'user-manager')!;
+const customerDepartmentOnlyScope = buildDataVisibilityScopeForUser(
+  { ...managerUser, roleId: 'role-customer-department-only' },
+  users,
+  [
+    {
+      ...roles.find((role) => role.id === 'role-manager')!,
+      id: 'role-customer-department-only',
+      code: 'customer_department_only',
+      dataScopes: { customers: 'department_only' },
+    },
+    ...roles,
+  ],
+  departments,
+  'customers',
+);
+assert.deepEqual(customerDepartmentOnlyScope.visibleUserIds, ['user-sales-a', 'user-sales-b', 'user-manager']);
+assert.equal(customerDepartmentOnlyScope.visibleUserIds.includes('user-sales-child'), false);
+
+const customerDepartmentAndDescendantsScope = buildDataVisibilityScopeForUser(
+  { ...managerUser, roleId: 'role-customer-department-and-descendants' },
+  users,
+  [
+    {
+      ...roles.find((role) => role.id === 'role-manager')!,
+      id: 'role-customer-department-and-descendants',
+      code: 'customer_department_and_descendants',
+      dataScopes: { customers: 'department_and_descendants' },
+    },
+    ...roles,
+  ],
+  departments,
+  'customers',
+);
+assert.deepEqual(customerDepartmentAndDescendantsScope.visibleUserIds, ['user-sales-a', 'user-sales-b', 'user-sales-child', 'user-manager']);
+
+const nonCustomerDepartmentScope = buildDataVisibilityScopeForUser(managerUser, users, roles, departments, 'leads');
+assert.deepEqual(nonCustomerDepartmentScope.visibleUserIds, ['user-sales-a', 'user-sales-b', 'user-sales-child', 'user-manager']);
 assert.deepEqual(filterUsersByCurrentDataScope(users).map((user) => user.id), ['user-sales-a', 'user-sales-b', 'user-sales-child', 'user-manager']);
 storage.removeItem(AUTH_SESSION_STORAGE_KEY);
 assert.deepEqual(
