@@ -750,6 +750,21 @@ const deferredEffects: OrderApprovalEffectState = {
   assert.equal(rejected.data?.reviewLogs[0].action, 'reject');
 }
 
+// 锁住客户关联后，审核写入仍要重新确认客户未被删除；否则历史脏数据
+// 会让退回/驳回继续写入一个已经失效的客户关联申请。
+for (const action of [
+  (service: ReturnType<typeof createOrderApplicationService>) => service.returnApplication('oa-concurrent-1', '客户已失效', reviewer),
+  (service: ReturnType<typeof createOrderApplicationService>) => service.reject('oa-concurrent-1', '客户已失效', reviewer),
+]) {
+  const prisma = new FakePrisma();
+  const customerRow = prisma.rows.get(rowKey(STORAGE_KEYS.CUSTOMERS, 'customer-1'))!;
+  customerRow.data.deletedAt = NOW;
+  const result = await action(createOrderApplicationService(prisma as any, { now: () => new Date(NOW) }));
+
+  assert.equal(result.code, 409, '客户删除后不得继续审核写入订单申请');
+  assert.equal(prisma.applicationRow().data.status, '待财务审核', '客户复核失败时订单申请状态必须保持不变');
+}
+
 {
   const prisma = new FakePrisma({ dataScope: 'self' });
   const service = createOrderApplicationService(prisma as any, { now: () => new Date(NOW) });

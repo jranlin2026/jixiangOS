@@ -74,4 +74,51 @@ assert.throws(
   /系统状态/,
 );
 
+// 真实早期配置只保存展示 name，没有 code；服务端必须映射为稳定 code，
+// 否则历史客户的通用进展更新会找不到起点或被错误拒绝。
+const historicalNameOnlyConfig = normalizeCustomerLifecycleConfig([
+  { id: 'legacy-1', name: '未转商机', description: '', color: '#111111', isActive: true, sortOrder: 99, isSystem: true, createdAt: '2026-06-01T00:00:00.000Z', updatedAt: '2026-06-01T00:00:00.000Z' },
+  { id: 'legacy-2', name: '商机跟进中', description: '', color: '#222222', isActive: true, sortOrder: 99, isSystem: true, createdAt: '2026-06-01T00:00:00.000Z', updatedAt: '2026-06-01T00:00:00.000Z' },
+  { id: 'legacy-3', name: '已流失', description: '', color: '#333333', isActive: true, sortOrder: 99, isSystem: true, createdAt: '2026-06-01T00:00:00.000Z', updatedAt: '2026-06-01T00:00:00.000Z' },
+]);
+assert.deepEqual(
+  historicalNameOnlyConfig.statuses.map((status) => status.code),
+  ['pending_followup', 'following', 'public_pool'],
+);
+assert.doesNotThrow(() => assertLifecycleTransition({
+  from: 'pending_followup', to: 'following', config: historicalNameOnlyConfig,
+}));
+
+// 部分早期环境已把数组包进 policy 对象，连 enabledStatusCodes 与
+// transitions 都仍然是展示名。三处必须一起映射，否则状态行虽然正常，
+// 实际流转仍会因为图的键不匹配而被拒绝。
+const historicalNameOnlyPolicyObject = normalizeCustomerLifecycleConfig({
+  statuses: [
+    { id: 'legacy-policy-1', name: '未转商机', color: '#111111', isActive: true, sortOrder: 1, createdAt: '', updatedAt: '' },
+    { id: 'legacy-policy-2', name: '商机跟进中', color: '#222222', isActive: true, sortOrder: 2, createdAt: '', updatedAt: '' },
+  ],
+  enabledStatusCodes: ['未转商机', '商机跟进中'],
+  transitions: {
+    未转商机: ['商机跟进中'],
+    商机跟进中: ['未转商机'],
+  },
+});
+assert.deepEqual(historicalNameOnlyPolicyObject.enabledStatusCodes, ['pending_followup', 'following']);
+assert.deepEqual(historicalNameOnlyPolicyObject.transitions, {
+  pending_followup: ['following'],
+  following: ['pending_followup'],
+});
+assert.doesNotThrow(() => assertLifecycleTransition({
+  from: 'pending_followup', to: 'following', config: historicalNameOnlyPolicyObject,
+}));
+
+const unknownNameOnlyCustomConfig = normalizeCustomerLifecycleConfig([
+  { id: 'legacy-custom-name', name: '续费培育中', color: '#444444', isActive: true, sortOrder: 1, createdAt: '', updatedAt: '' },
+]);
+assert.equal(
+  unknownNameOnlyCustomConfig.statuses[0].code,
+  '续费培育中',
+  '未知自定义展示名必须保留，不能被共享默认映射压成 pending_followup',
+);
+
 console.log('customer lifecycle policy tests passed');

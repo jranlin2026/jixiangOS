@@ -373,6 +373,12 @@ type AuditCandidate = {
   storageDomain: string;
   pathKey: string;
   recordId: string;
+  /**
+   * The legacy display identity observed during preflight.  It must be
+   * re-resolved in the write transaction; retaining only the preflight ID
+   * would turn a concurrent rename into an unsafe stable-ID backfill.
+   */
+  legacyName: string;
   customerId: string;
   row: any;
   collection?: 'incomes' | 'expenses' | 'transactions';
@@ -464,7 +470,7 @@ export async function auditHistoricalCustomerAssociationIds(
   const candidates: AuditCandidate[] = [];
   const candidateKeys = new Set<string>();
   const addLegacyCandidate = (
-    base: Omit<AuditCandidate, 'customerId'>,
+    base: Omit<AuditCandidate, 'customerId' | 'legacyName'>,
     legacyName: string,
   ) => {
     const matches = matchingCustomerIds(legacyName, customers);
@@ -480,7 +486,7 @@ export async function auditHistoricalCustomerAssociationIds(
     const key = `${base.storageDomain}\u0000${base.pathKey}\u0000${base.recordId}`;
     if (!candidateKeys.has(key)) {
       candidateKeys.add(key);
-      candidates.push({ ...base, customerId: matches[0] });
+      candidates.push({ ...base, legacyName, customerId: matches[0] });
     }
   };
 
@@ -575,17 +581,42 @@ export async function auditHistoricalCustomerAssociationIds(
   await prisma.$transaction(async (tx: any) => {
     const candidateCustomerIds = Array.from(new Set(candidates.map((candidate) => candidate.customerId))).sort();
     // A repair is an association writer just like an order or a todo. Serialize
-    // it with delete/merge first, then re-read the target identities inside the
-    // same transaction before creating any stable-ID link.
+    // it with delete/merge first. Then lock the whole currently-existing
+    // customer identity set: a generic customer rename locks its root row, so
+    // it cannot make a previously unique legacy name ambiguous after the
+    // transactional recheck below.
     await lockCustomerAssociationScope(tx, candidateCustomerIds);
-    const liveCustomerIds = new Set((await tx.businessRecord.findMany({
+    await tx.$queryRaw(Prisma.sql`
+      SELECT id
+      FROM business_records
+      WHERE domain = ${STORAGE_KEYS.CUSTOMERS}
+      FOR UPDATE
+    `);
+    const currentCustomers: AuditCustomer[] = (await tx.businessRecord.findMany({
       where: { domain: STORAGE_KEYS.CUSTOMERS },
     }))
       .map((row: any) => readObject(row.data))
       .filter((customer: any) => customer.id && !customer.deletedAt)
-      .map((customer: any) => String(customer.id)));
-    if (candidateCustomerIds.some((customerId) => !liveCustomerIds.has(customerId))) {
-      throw new Error('客户关联审计目标客户不存在或已删除，请重新预检');
+      .map((customer: any) => ({
+        id: String(customer.id),
+        names: [String(customer.name || '').trim(), String(customer.company || '').trim()].filter(Boolean),
+      }));
+
+    const safeCandidates: AuditCandidate[] = [];
+    for (const candidate of candidates) {
+      const currentMatches = matchingCustomerIds(candidate.legacyName, currentCustomers);
+      if (currentMatches.length === 1 && currentMatches[0] === candidate.customerId) {
+        safeCandidates.push(candidate);
+        continue;
+      }
+      addRepair({
+        storageDomain: candidate.storageDomain,
+        pathKey: candidate.pathKey,
+        recordId: candidate.recordId,
+        // A unique but different stable ID is also unsafe: the legacy display
+        // identity no longer proves that the preflight customer is the same one.
+        reason: currentMatches.length === 0 ? 'CUSTOMER_IDENTITY_NOT_FOUND' : 'CUSTOMER_IDENTITY_AMBIGUOUS',
+      });
     }
 
     const businessChanges = new Map<string, { row: any; customerId: unknown; data: Record<string, any>; dataChanged: boolean; count: number }>();
@@ -593,7 +624,7 @@ export async function auditHistoricalCustomerAssociationIds(
     const todoChanges = new Map<string, { row: any; customerId: string; count: number }>();
     const nextFinance = structuredClone(finance);
     let financeCount = 0;
-    for (const candidate of [...candidates].sort((left, right) => (
+    for (const candidate of [...safeCandidates].sort((left, right) => (
       left.storageDomain.localeCompare(right.storageDomain)
       || left.pathKey.localeCompare(right.pathKey)
       || left.recordId.localeCompare(right.recordId)
@@ -679,5 +710,6 @@ export async function auditHistoricalCustomerAssociationIds(
       });
     }
   });
+  summary.repairRows.sort((left, right) => repairKey(left).localeCompare(repairKey(right)));
   return summary;
 }

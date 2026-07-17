@@ -135,6 +135,7 @@ let auditTodoRows: any[] = [
 const auditCheckpoints = new Map<string, any>();
 const auditAssociationLockKeys: string[] = [];
 let forceBusinessConflict = false;
+let beforeAuditTransaction: (() => void) | undefined;
 const auditPrisma: any = {
   businessRecord: {
     findMany: async () => auditBusinessRows,
@@ -179,7 +180,12 @@ const auditPrisma: any = {
     },
   },
   $queryRaw: async () => [],
-  $transaction: async (operation: any) => operation(auditPrisma),
+  $transaction: async (operation: any) => {
+    const hook = beforeAuditTransaction;
+    beforeAuditTransaction = undefined;
+    hook?.();
+    return operation(auditPrisma);
+  },
 };
 
 const dryAudit = await auditHistoricalCustomerAssociationIds(auditPrisma, {
@@ -226,6 +232,36 @@ const todoBlockersAfterAudit = await findBlockingCustomerAssociations({
   appStorage: { findUnique: async () => null },
 } as any, 'c-1');
 assert.equal(todoBlockersAfterAudit.includes('待办关联'), true, '补齐稳定 ID 后待办必须进入删除阻断扫描');
+
+// 模拟预检后、事务开始前另一客户被改成相同名称。审计不得继续把旧的
+// 唯一匹配写入稳定 ID，必须将这条记录留给人工修复。
+const auditRaceName = '预检后重复名称';
+const raceSourceCustomer = {
+  id: 'customer-race-source', domain: STORAGE_KEYS.CUSTOMERS, recordId: 'customer-race-source',
+  customerId: 'customer-race-source', updatedAt: AUDIT_AT,
+  data: { id: 'customer-race-source', name: auditRaceName, company: '唯一来源公司' },
+};
+const raceTodo = { id: 'legacy-todo-race', customerId: null, customerName: auditRaceName, updatedAt: AUDIT_AT };
+auditBusinessRows.push(raceSourceCustomer);
+auditTodoRows.push(raceTodo);
+beforeAuditTransaction = () => {
+  auditBusinessRows.push({
+    id: 'customer-race-duplicate', domain: STORAGE_KEYS.CUSTOMERS, recordId: 'customer-race-duplicate',
+    customerId: 'customer-race-duplicate', updatedAt: AUDIT_AT,
+    data: { id: 'customer-race-duplicate', name: auditRaceName, company: '并发改名客户' },
+  });
+};
+const raceAudit = await auditHistoricalCustomerAssociationIds(auditPrisma, {
+  apply: true,
+  checkpointKey: 'association-race',
+});
+assert.equal(raceAudit.backfilled, 0, '事务内名称不再唯一时不得回填任何稳定 customerId');
+assert.equal(raceTodo.customerId, null, '预检候选在事务内变成重名后必须保持未关联');
+assert.equal(raceAudit.repairRows.some((row) => (
+  row.storageDomain === 'customer_todos'
+  && row.recordId === 'legacy-todo-race'
+  && row.reason === 'CUSTOMER_IDENTITY_AMBIGUOUS'
+)), true, '事务内重名必须标记为人工修复项');
 
 auditCheckpoints.delete('association-conflict');
 delete (auditBusinessRows[3].data as any).orderData.customerId;

@@ -301,6 +301,30 @@ function cleanOrderInput(input: OrderApplicationInput): Record<string, unknown> 
   return clean;
 }
 
+/**
+ * Association locks prevent a customer delete from interleaving with an order
+ * application write, but the writer still has to read the locked state.  Keep
+ * that post-lock check shared so submit, resubmit, review transitions, and
+ * approval all make the same active-customer guarantee.
+ */
+async function requireActiveOrderApplicationCustomer(
+  transaction: Prisma.TransactionClient,
+  customerIdInput: unknown,
+  message = '订单申请关联客户不存在或已删除',
+): Promise<Customer> {
+  const customerId = String(customerIdInput || '').trim();
+  if (!customerId) throw new OrderApprovalError(409, message);
+  const customerRow = await transaction.businessRecord.findUnique({
+    where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: customerId } },
+  });
+  if (!customerRow) throw new OrderApprovalError(409, message);
+  const customer = parseJsonObject<Customer>(customerRow.data, '客户');
+  if (customer.id !== customerId || customer.deletedAt) {
+    throw new OrderApprovalError(409, message);
+  }
+  return customer;
+}
+
 async function canonicalizeOrderApplicationInput(
   transaction: Prisma.TransactionClient,
   input: OrderApplicationInput,
@@ -328,19 +352,14 @@ async function canonicalizeOrderApplicationInput(
     label: '聊天记录', max: 8, category: 'order-deal-evidence',
   });
 
-  const [customerRow, productRow] = await Promise.all([
-    transaction.businessRecord.findUnique({
-      where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: customerId } },
-    }),
+  const [customer, productRow] = await Promise.all([
+    requireActiveOrderApplicationCustomer(transaction, customerId, '客户不存在或已删除'),
     transaction.businessRecord.findUnique({
       where: { domain_recordId: { domain: STORAGE_KEYS.PRODUCTS, recordId: productId } },
     }),
   ]);
-  if (!customerRow) throw new OrderApprovalError(409, '客户不存在');
   if (!productRow) throw new OrderApprovalError(409, '产品不存在');
-  const customer = parseJsonObject<Customer>(customerRow.data, '客户');
   const product = parseJsonObject<Product>(productRow.data, '产品');
-  if (customer.id !== customerId || customer.deletedAt) throw new OrderApprovalError(409, '客户不存在或已删除');
   if (product.id !== productId || product.isActive === false) throw new OrderApprovalError(409, '产品不存在或已停用');
 
   const customerAccess = buildCustomerAccessContextFromDirectory(
@@ -389,21 +408,14 @@ async function validateStoredApplicationSnapshot(
   if (!salesId) throw new OrderApprovalError(409, '待审申请缺少销售稳定ID，请退回销售重新提交');
   if (!applicantId) throw new OrderApprovalError(409, '待审申请缺少申请人稳定ID，请退回销售重新提交');
 
-  const [customerRow, productRow] = await Promise.all([
-    transaction.businessRecord.findUnique({
-      where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: customerId } },
-    }),
+  const [customer, productRow] = await Promise.all([
+    requireActiveOrderApplicationCustomer(transaction, customerId, '待审申请关联客户不存在或已删除'),
     transaction.businessRecord.findUnique({
       where: { domain_recordId: { domain: STORAGE_KEYS.PRODUCTS, recordId: productId } },
     }),
   ]);
-  if (!customerRow) throw new OrderApprovalError(409, '待审申请关联客户不存在，请退回销售处理');
   if (!productRow) throw new OrderApprovalError(409, '待审申请关联产品不存在，请退回销售处理');
-  const customer = parseJsonObject<Customer>(customerRow.data, '客户');
   const product = parseJsonObject<Product>(productRow.data, '产品');
-  if (customer.id !== customerId || customer.deletedAt) {
-    throw new OrderApprovalError(409, '待审申请关联客户不存在或已删除');
-  }
   if (product.id !== productId || product.isActive === false) {
     throw new OrderApprovalError(409, '待审申请关联产品不存在或已停用');
   }
@@ -534,7 +546,10 @@ export function createOrderApplicationService(
     try {
       const created = await prisma.$transaction(async (transaction) => {
         const requestedCustomerId = String(input?.customerId || '').trim();
-        if (requestedCustomerId) await lockCustomerAssociationScope(transaction, [requestedCustomerId]);
+        if (requestedCustomerId) {
+          await lockCustomerAssociationScope(transaction, [requestedCustomerId]);
+          await requireActiveOrderApplicationCustomer(transaction, requestedCustomerId);
+        }
         const orderData = await canonicalizeOrderApplicationInput(transaction, input, applicant, directory);
         const application: OrderApplication = {
           id: applicationId,
@@ -619,6 +634,12 @@ export function createOrderApplicationService(
             application.orderData.customerId,
             String(input?.customerId || '').trim(),
           ]);
+          for (const customerId of new Set([
+            String(application.orderData.customerId || '').trim(),
+            String(input?.customerId || '').trim(),
+          ].filter(Boolean))) {
+            await requireActiveOrderApplicationCustomer(transaction, customerId);
+          }
 
           const submittedAt = now().toISOString();
           const orderData = await canonicalizeOrderApplicationInput(transaction, input, applicant, directory);
@@ -709,6 +730,7 @@ export function createOrderApplicationService(
           }
 
           await lockCustomerAssociationScope(transaction, [application.orderData.customerId]);
+          await requireActiveOrderApplicationCustomer(transaction, application.orderData.customerId);
 
           const reviewedAt = now().toISOString();
           const next: OrderApplication = {
@@ -796,6 +818,7 @@ export function createOrderApplicationService(
             }
 
             await lockCustomerAssociationScope(transaction, [application.orderData.customerId]);
+            await requireActiveOrderApplicationCustomer(transaction, application.orderData.customerId);
 
             if (application.status === STATUS_APPROVED) {
               if (!application.orderId || !application.orderNo) {
