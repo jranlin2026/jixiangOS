@@ -3,7 +3,7 @@ import {
   createAuditedCustomerAtomicCommandService,
   createCustomerCommandService,
 } from './customerCommandService';
-import { createPrismaCustomerAuditAppender } from './customerAuditService';
+import { createPrismaCustomerAuditAppender, hashCustomerAuditInput } from './customerAuditService';
 import {
   CONTACT_IDENTITY_MUTATION_GATE_KEY,
   backfillContactIdentities,
@@ -1251,6 +1251,74 @@ const serviceOptions = {
   assert.deepEqual(fake.getState().customerAuditEvents, []);
 }
 
+// RED: profile synchronization must use the locked LeadRecord id for link
+// lifecycle work, even when a linked lead retains a stale JSON payload id.
+{
+  const value = customer('cust-profile-sync-real-lead-id');
+  const oldPhone = '13800000081';
+  const newPhone = '13900000081';
+  value.phone = oldPhone;
+  const linked = lead('lead-row-profile-sync-real-id', salesA.name, value.id);
+  linked.phone = oldPhone;
+  linked.data.phone = oldPhone;
+  linked.data.id = 'stale-json-profile-sync-id';
+  const oldHash = hashContactIdentity(normalizeContactIdentity('phone', oldPhone), TEST_CONTACT_CRYPTO.hmacKey);
+  const oldIdentityId = `ci_phone_${oldHash.slice(0, 32)}`;
+  const fake = createFakePrisma({
+    businessRecords: [businessCustomer(value)],
+    leads: [linked],
+    contactIdentities: [{
+      id: oldIdentityId,
+      type: 'phone',
+      normalizedHash: oldHash,
+      hashKeyVersion: 1,
+      status: 'active',
+      encryptedNormalizedValue: 'ci:v1:test',
+      canonicalCustomerId: value.id,
+      conflictReason: null,
+    }],
+    contactIdentityLinks: [
+      {
+        id: 'profile-sync-old-customer-link',
+        identityId: oldIdentityId,
+        entityType: 'customer',
+        entityId: value.id,
+        linkStatus: 'active',
+        source: 'historical_backfill',
+        endedAt: null,
+      },
+      {
+        id: 'profile-sync-old-lead-link',
+        identityId: oldIdentityId,
+        entityType: 'lead',
+        entityId: linked.id,
+        linkStatus: 'active',
+        source: 'historical_backfill',
+        endedAt: null,
+      },
+    ],
+  }, { seedContactIdentities: false });
+
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .updateCustomer(value.id, { phone: newPhone }, superAdmin);
+
+  assert.equal(result.code, 0);
+  const next = fake.getState();
+  const newHash = hashContactIdentity(normalizeContactIdentity('phone', newPhone), TEST_CONTACT_CRYPTO.hmacKey);
+  assert.equal(next.contactIdentityLinks?.find((link) => link.id === 'profile-sync-old-lead-link')?.linkStatus, 'ended');
+  assert.deepEqual(
+    next.contactIdentityLinks?.filter((link) => link.entityType === 'lead' && link.linkStatus === 'active')
+      .map((link) => ({
+        entityId: link.entityId,
+        normalizedHash: next.contactIdentities?.find((identity) => identity.id === link.identityId)?.normalizedHash,
+      })),
+    [{ entityId: linked.id, normalizedHash: newHash }],
+  );
+  assert.equal(next.contactIdentityLinks?.some((link) => (
+    link.entityType === 'lead' && link.entityId === 'stale-json-profile-sync-id'
+  )), false);
+}
+
 // RED: 贡献人可读不等于可写，未解析负责人也必须 fail closed。
 {
   const contributed = {
@@ -2050,6 +2118,66 @@ for (const targetType of ['customer', 'lead'] as const) {
   );
 }
 
+// A caller-controlled JSON id must never become the identity link, audit, or
+// intake source key during auto-claim. The generated LeadRecord id is the
+// authoritative value before any of those writes occur.
+{
+  const forgedId = 'forged-json-auto-claim-id';
+  const fake = createFakePrisma({
+    businessRecords: tagCatalogRows(),
+    leads: [],
+    appStorage: [
+      {
+        key: STORAGE_KEYS.LEAD_FLOW_CONFIG,
+        value: {
+          ...DEFAULT_LEAD_FLOW_CONFIG,
+          participantUserIds: ['user-a'],
+          autoClaimAfterAssignmentEnabled: true,
+          dailyLimitEnabled: false,
+          lastAssignedIndex: -1,
+        },
+      },
+      { key: STORAGE_KEYS.LEAD_INTAKE_RECORDS, value: [] },
+    ],
+  });
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions).createLead({
+    id: forgedId,
+    name: '伪造 ID 自动领取线索',
+    phone: '13900000036',
+    source: '抖音',
+    status: '新线索',
+    owner: '待分配',
+    sourceType: '公司资源',
+  } as any, leadEditor);
+
+  assert.equal(result.code, 0);
+  const next = fake.getState();
+  const leadRow = next.leads[0];
+  const customerId = result.data?.customerId;
+  assert.ok(leadRow && customerId);
+  assert.notEqual(leadRow.id, forgedId);
+  assert.equal(leadRow.data.id, leadRow.id);
+  const identity = next.contactIdentities?.find((candidate) => candidate.canonicalCustomerId === customerId);
+  assert.ok(identity);
+  assert.deepEqual(
+    next.contactIdentityLinks?.filter((link) => link.identityId === identity.id && link.entityType === 'lead' && link.linkStatus === 'active')
+      .map((link) => link.entityId),
+    [leadRow.id],
+  );
+  assert.equal(next.contactIdentityLinks?.some((link) => link.entityId === forgedId), false);
+  const customer = next.businessRecords.find((row) => row.domain === STORAGE_KEYS.CUSTOMERS)?.data;
+  assert.equal(customer?.activityRecords?.[0]?.relatedId, leadRow.id);
+  const intake = next.appStorage?.find((row) => row.key === STORAGE_KEYS.LEAD_INTAKE_RECORDS)?.value?.[0];
+  assert.equal(intake?.leadId, leadRow.id);
+  assert.equal(
+    next.customerAuditEvents?.[0]?.inputHash,
+    hashCustomerAuditInput({
+      operation: 'create_customer', customerId, sourceLeadId: leadRow.id,
+      assignedToId: 'user-a', source: 'lead_auto_claim',
+    }),
+  );
+}
+
 // RED: automatic claim must also be blocked by an active historical customer
 // whose ContactIdentity rows have not been backfilled yet.
 {
@@ -2270,6 +2398,51 @@ for (const targetType of ['customer', 'lead'] as const) {
   assert.equal(convertedResult.code, 409);
 }
 
+// RED: lead link cleanup follows the locked relational record id, not a stale
+// JSON id embedded in the deleted lead payload.
+{
+  const source = pendingLead('lead-row-delete-real-id');
+  const phone = '13800000082';
+  source.phone = phone;
+  source.data.phone = phone;
+  source.data.id = 'stale-json-delete-id';
+  const normalizedHash = hashContactIdentity(normalizeContactIdentity('phone', phone), TEST_CONTACT_CRYPTO.hmacKey);
+  const identityId = `ci_phone_${normalizedHash.slice(0, 32)}`;
+  const fake = createFakePrisma({
+    businessRecords: [],
+    leads: [source],
+    contactIdentities: [{
+      id: identityId,
+      type: 'phone',
+      normalizedHash,
+      hashKeyVersion: 1,
+      status: 'active',
+      encryptedNormalizedValue: 'ci:v1:test',
+      canonicalCustomerId: null,
+      conflictReason: null,
+    }],
+    contactIdentityLinks: [{
+      id: 'delete-real-id-lead-link',
+      identityId,
+      entityType: 'lead',
+      entityId: source.id,
+      linkStatus: 'active',
+      source: 'historical_backfill',
+      endedAt: null,
+    }],
+  });
+
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .deleteLead(source.id, '清理真实行 ID 链接', superAdmin);
+
+  assert.equal(result.code, 0);
+  const next = fake.getState();
+  assert.equal(next.contactIdentityLinks?.find((link) => link.id === 'delete-real-id-lead-link')?.linkStatus, 'ended');
+  assert.equal(next.contactIdentityLinks?.some((link) => (
+    link.entityType === 'lead' && link.entityId === 'stale-json-delete-id'
+  )), false);
+}
+
 // RED: 线索转客户要原子创建 BusinessRecord 并回写 LeadRecord，重试不得重复创建。
 {
   const queryLog: string[] = [];
@@ -2314,6 +2487,31 @@ for (const targetType of ['customer', 'lead'] as const) {
   assert.equal(next.businessRecords.length, 1);
   assert.equal(next.leads[0].data.changeHistory.length, 1, '转客户重试不得重复写入历史');
   assert.equal(fake.customerLockQueries, 0, '已转客户重放不得再按线索→客户的反向顺序加锁');
+}
+
+// RED: conversion must retain the locked LeadRecord id for its active identity
+// link and customer activity relation when legacy JSON contains a stale id.
+{
+  const source = lead('lead-row-convert-real-id');
+  source.data.id = 'stale-json-convert-id';
+  const fake = createFakePrisma({ businessRecords: [], leads: [source] });
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .convertLeadToCustomer(source.id, salesA);
+
+  assert.equal(result.code, 0);
+  const next = fake.getState();
+  const converted = next.businessRecords.find((row) => row.domain === STORAGE_KEYS.CUSTOMERS)?.data;
+  const identity = next.contactIdentities?.find((candidate) => candidate.canonicalCustomerId === converted?.id);
+  assert.ok(identity);
+  assert.deepEqual(
+    next.contactIdentityLinks?.filter((link) => link.identityId === identity.id && link.entityType === 'lead' && link.linkStatus === 'active')
+      .map((link) => link.entityId),
+    [source.id],
+  );
+  assert.equal(next.contactIdentityLinks?.some((link) => (
+    link.entityType === 'lead' && link.entityId === 'stale-json-convert-id'
+  )), false);
+  assert.equal(converted?.activityRecords?.[0]?.relatedId, source.id);
 }
 
 // 显式转客户不得继承线索历史标签。

@@ -168,6 +168,7 @@ const clearPrisma = {
       return { count: 1 };
     },
   },
+  contactIdentityLink: { findMany: async () => [] },
   businessRecord: {
     findMany: async () => [],
     upsert: async () => ({}),
@@ -183,15 +184,156 @@ const clearResult = await createStorageService(clearPrisma).clearPrefix();
 assert.equal(clearResult.code, 0);
 assert.deepEqual(clearResult.data, {
   clearedPrefix: 'aaos_',
-  preservedKeys: [STORAGE_KEYS.CUSTOMERS],
+  preservedKeys: ['aaos_contact_identity_mutation_gate_v1', STORAGE_KEYS.CUSTOMERS],
 });
 assert.deepEqual(clearCalls.appStorage, [{
-  where: { key: { startsWith: 'aaos_', notIn: [STORAGE_KEYS.CUSTOMERS] } },
+  where: {
+    key: {
+      startsWith: 'aaos_',
+      notIn: ['aaos_contact_identity_mutation_gate_v1', STORAGE_KEYS.CUSTOMERS],
+    },
+  },
 }]);
 assert.equal(clearCalls.leads, 1, '整体维护清理仍应清理非客户线索数据');
 assert.deepEqual(clearCalls.business, [{
   where: { domain: { not: STORAGE_KEYS.CUSTOMERS } },
 }], '整体维护清理必须保留客户域，同时清理其他 BusinessRecord 域');
+
+// RED: controlled lead maintenance deletion must take the shared contact gate,
+// end links for locked relational LeadRecord IDs, and leave customer canonical
+// ownership untouched. Both public-prefix maintenance and the internal
+// structured-key helper must take this same path.
+function createLeadIdentityPurgePrisma() {
+  const leads = [
+    { id: 'lead-row-maintenance-a', data: { id: 'stale-json-maintenance-a' } },
+    { id: 'lead-row-maintenance-b', data: { id: 'stale-json-maintenance-b' } },
+  ];
+  const identity = {
+    id: 'identity-maintenance',
+    type: 'phone',
+    normalizedHash: 'maintenance-hash',
+    hashKeyVersion: 1,
+    status: 'active',
+    encryptedNormalizedValue: 'ci:v1:test',
+    canonicalCustomerId: 'customer-canonical-preserved',
+    conflictReason: null,
+  };
+  const links = [
+    {
+      id: 'maintenance-customer-link', identityId: identity.id, entityType: 'customer',
+      entityId: 'customer-canonical-preserved', linkStatus: 'active', source: 'historical_backfill', endedAt: null,
+    },
+    {
+      id: 'maintenance-lead-link-a', identityId: identity.id, entityType: 'lead',
+      entityId: leads[0].id, linkStatus: 'active', source: 'historical_backfill', endedAt: null,
+    },
+    {
+      id: 'maintenance-lead-link-b', identityId: identity.id, entityType: 'lead',
+      entityId: leads[1].id, linkStatus: 'active', source: 'historical_backfill', endedAt: null,
+    },
+    {
+      id: 'maintenance-orphaned-lead-link', identityId: identity.id, entityType: 'lead',
+      entityId: 'historical-orphaned-lead-id', linkStatus: 'active', source: 'historical_backfill', endedAt: null,
+    },
+  ];
+  const events: string[] = [];
+  const deletedLeadIds: string[][] = [];
+  const prisma: any = {
+    appStorage: {
+      findMany: async () => [],
+      findUnique: async () => null,
+      upsert: async ({ where }: any) => {
+        events.push(`gate:${where.key}`);
+        return { key: where.key, value: {} };
+      },
+      deleteMany: async () => ({ count: 0 }),
+    },
+    leadRecord: {
+      findMany: async () => {
+        events.push('select-leads');
+        return leads.map((row) => ({ ...row }));
+      },
+      deleteMany: async (input: any = {}) => {
+        const ids = input.where?.id?.in || leads.map((row) => row.id);
+        deletedLeadIds.push([...ids].sort());
+        events.push('delete-leads');
+        for (let index = leads.length - 1; index >= 0; index -= 1) {
+          if (ids.includes(leads[index].id)) leads.splice(index, 1);
+        }
+        return { count: ids.length };
+      },
+    },
+    contactIdentity: {
+      findUnique: async () => identity,
+      update: async () => {
+        throw new Error('lead maintenance cleanup must not recompute customer canonical ownership');
+      },
+    },
+    contactIdentityLink: {
+      findMany: async ({ where }: any) => links
+        .filter((link) => (
+          (!where.entityType || link.entityType === where.entityType)
+          && (!where.entityId || link.entityId === where.entityId)
+          && (!where.linkStatus || link.linkStatus === where.linkStatus)
+        ))
+        .map((link) => ({ identityId: link.identityId, entityId: link.entityId })),
+      updateMany: async ({ where, data }: any) => {
+        let count = 0;
+        for (const link of links) {
+          if (
+            link.identityId === where.identityId
+            && link.entityType === where.entityType
+            && link.entityId === where.entityId
+            && link.linkStatus === where.linkStatus
+          ) {
+            Object.assign(link, data);
+            count += 1;
+          }
+        }
+        return { count };
+      },
+    },
+    businessRecord: {
+      findMany: async () => [],
+      deleteMany: async () => ({ count: 0 }),
+    },
+    user: { findMany: async () => [] },
+  };
+  prisma.$transaction = async (callback: (tx: any) => Promise<unknown>) => callback(prisma);
+  return { prisma, leads, identity, links, events, deletedLeadIds };
+}
+
+for (const action of ['clearPrefix', 'remove'] as const) {
+  const fixture = createLeadIdentityPurgePrisma();
+  const maintenanceService = createStorageService(fixture.prisma);
+  const result = action === 'clearPrefix'
+    ? await maintenanceService.clearPrefix()
+    : await maintenanceService.remove(STORAGE_KEYS.LEADS);
+
+  assert.equal(result.code, 0, `${action} must complete controlled lead cleanup`);
+  assert.equal(fixture.leads.length, 0, `${action} must delete the selected lead rows`);
+  assert.deepEqual(fixture.deletedLeadIds, [[
+    'lead-row-maintenance-a',
+    'lead-row-maintenance-b',
+  ]], `${action} must delete exactly the relational IDs it selected`);
+  assert.equal(
+    fixture.links.some((link) => link.entityType === 'lead' && link.linkStatus === 'active'),
+    false,
+    `${action} must not leave an active identity link for a purged lead`,
+  );
+  assert.equal(fixture.identity.status, 'active');
+  assert.equal(fixture.identity.canonicalCustomerId, 'customer-canonical-preserved');
+  assert.equal(
+    fixture.links.find((link) => link.id === 'maintenance-customer-link')?.linkStatus,
+    'active',
+    `${action} must not end the linked customer's canonical association`,
+  );
+  assert.ok(
+    fixture.events.indexOf('gate:aaos_contact_identity_mutation_gate_v1')
+      < fixture.events.indexOf('select-leads'),
+    `${action} must acquire the identity mutation gate before selecting lead rows`,
+  );
+}
 
 const nextCustomers = [
   { id: 'customer-a', name: '客户A', company: 'A公司', owner: '销售A', totalSpent: 1200, createdAt: '2026-06-24T01:00:00.000Z', updatedAt: '2026-06-24T01:00:00.000Z' },

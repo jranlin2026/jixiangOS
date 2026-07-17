@@ -1419,7 +1419,7 @@ export function createCustomerCommandService(
           const nextLead = syncLeadFromCustomer(lead, updated, atIso, operator);
           if (nextLead !== lead) {
             await linkLeadAndCustomerIdentity(tx, {
-              leadId: lead.id,
+              leadId: leadRow.id,
               customerId: customer.id,
               phone: nextLead.phone,
               wechat: nextLead.wechat,
@@ -1709,7 +1709,7 @@ export function createCustomerCommandService(
               title: '线索自动领取创建客户',
               content: lead.remark,
               operator: inputBy,
-              relatedId: lead.id,
+              relatedId: id,
               relatedType: 'lead',
               createdAt: atIso,
             }],
@@ -1728,7 +1728,9 @@ export function createCustomerCommandService(
             updatedAt: atIso,
           };
           await linkLeadAndCustomerIdentity(tx, {
-            leadId: lead.id,
+            // `id` is the server-generated LeadRecord primary key; no JSON
+            // payload field is used for contact-identity link ownership.
+            leadId: id,
             customerId,
             phone: customer.phone,
             wechat: customer.wechat,
@@ -1762,7 +1764,7 @@ export function createCustomerCommandService(
             reason: '线索自动领取创建客户',
             afterSnapshot: customer,
             canonicalInput: {
-              operation: 'create_customer', customerId, sourceLeadId: lead.id,
+              operation: 'create_customer', customerId, sourceLeadId: id,
               assignedToId: assignedToId || null, source: 'lead_auto_claim',
             },
           });
@@ -1807,7 +1809,7 @@ export function createCustomerCommandService(
         });
         await recordIntake({
           id: newId('intake'),
-          leadId: lead.id,
+          leadId: id,
           customerId: lead.customerId,
           ...intakeBase,
           assignedTo: lead.assignedTo,
@@ -2045,7 +2047,7 @@ export function createCustomerCommandService(
           updatedAt: atIso,
         };
         await persistLead(tx, row.id, deleted, at);
-        await endLeadContactIdentityLinks(tx, lead.id);
+        await endLeadContactIdentityLinks(tx, row.id);
         return success(true);
       });
     },
@@ -2359,7 +2361,7 @@ export function createCustomerCommandService(
             title: '线索转为客户',
             content: lead.remark,
             operator,
-            relatedId: lead.id,
+            relatedId: leadRow.id,
             relatedType: 'lead',
             createdAt: atIso,
           }],
@@ -2379,7 +2381,7 @@ export function createCustomerCommandService(
         };
 
         await linkLeadAndCustomerIdentity(tx, {
-          leadId: lead.id,
+          leadId: leadRow.id,
           customerId,
           phone: customer.phone,
           wechat: customer.wechat,
@@ -2414,7 +2416,7 @@ export function createCustomerCommandService(
           reason: '线索转为客户',
           afterSnapshot: customer,
           canonicalInput: {
-            operation: 'create_customer', customerId, sourceLeadId: lead.id,
+            operation: 'create_customer', customerId, sourceLeadId: leadRow.id,
             conversionOwnerId, source: 'lead_conversion',
           },
         });

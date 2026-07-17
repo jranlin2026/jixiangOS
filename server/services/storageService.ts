@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { failure, success } from '../api/response';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
@@ -6,8 +6,15 @@ import { matchExactNamesToUniqueIds } from '../../src/shared/utils/exactNameIden
 import { mapPrismaUser } from '../db/prismaMappers';
 import { loadCustomerTagCatalog } from './customerTagService';
 import { CUSTOMER_ASSOCIATION_DEFINITIONS, lockCustomerAssociationScope } from './customerAssociationRegistry';
+import {
+  CONTACT_IDENTITY_MUTATION_GATE_KEY,
+  endLeadContactIdentityLinks,
+  lockContactIdentityMutationGate,
+} from './contactIdentityService';
 
-type StorageTransaction = Pick<Prisma.TransactionClient, 'appStorage' | 'leadRecord' | 'businessRecord' | 'user' | '$queryRaw'>;
+type StorageTransaction = Pick<Prisma.TransactionClient,
+  'appStorage' | 'leadRecord' | 'businessRecord' | 'user' | 'contactIdentity' | 'contactIdentityLink' | '$queryRaw'
+>;
 type StoragePrisma = StorageTransaction & Pick<PrismaClient, '$transaction' | 'user'>;
 
 const STORAGE_KEY_PATTERN = /^aaos_[a-zA-Z0-9_:-]+$/;
@@ -148,6 +155,57 @@ function normalizeCustomerWechat(value: unknown): string {
   return String(value || '').trim().toLowerCase();
 }
 
+/**
+ * This is a current, locking read in production. The selected physical row IDs
+ * are the sole authority for both identity-link cleanup and deletion; Lead JSON
+ * payload IDs may be stale after a legacy import.
+ */
+async function lockLeadIdsForMaintenancePurge(db: StorageTransaction): Promise<string[]> {
+  if (db.$queryRaw) {
+    const rows = await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT id
+      FROM lead_records
+      ORDER BY id ASC
+      FOR UPDATE
+    `);
+    return rows.map((row) => String(row.id)).filter(Boolean);
+  }
+  // Adapter/test fallback only. Production Prisma always takes the locking
+  // SQL path above.
+  const rows = await db.leadRecord.findMany({
+    select: { id: true },
+    orderBy: { id: 'asc' },
+  });
+  return rows.map((row) => String(row.id)).filter(Boolean);
+}
+
+/**
+ * A full lead-domain purge also retires any historical orphan link. Those
+ * links have no source row for a future backfill to discover, so leaving them
+ * active would preserve the very dangling state this maintenance path removes.
+ */
+async function lockActiveLeadLinkEntityIdsForMaintenancePurge(db: StorageTransaction): Promise<string[]> {
+  if (db.$queryRaw) {
+    const rows = await db.$queryRaw<Array<{ entityId: string }>>(Prisma.sql`
+      SELECT entityId
+      FROM contact_identity_links
+      WHERE entityType = 'lead'
+        AND linkStatus = 'active'
+      ORDER BY entityId ASC
+      FOR UPDATE
+    `);
+    return [...new Set(rows.map((row) => String(row.entityId)).filter(Boolean))];
+  }
+  // Adapter/test fallback only. Production Prisma always takes the locking
+  // SQL path above.
+  const rows = await db.contactIdentityLink.findMany({
+    where: { entityType: 'lead', linkStatus: 'active' },
+    select: { entityId: true },
+    orderBy: { entityId: 'asc' },
+  });
+  return [...new Set(rows.map((row) => String(row.entityId)).filter(Boolean))];
+}
+
 function normalizeExactName(value: unknown): string {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -254,6 +312,21 @@ export function createStorageService(prisma: StoragePrisma) {
   const listUsers = async () => {
     const rows = await prisma.user.findMany({ orderBy: { updatedAt: 'desc' } });
     return rows.map(mapPrismaUser);
+  };
+
+  const purgeLeadRecordsWithIdentityLinks = async (tx: StorageTransaction) => {
+    // The identity gate must come before any lead source lock. It serializes
+    // maintenance deletion with lead writes, conversion, profile sync, and
+    // contact backfill so a link cannot be recreated after this cleanup.
+    await lockContactIdentityMutationGate(tx);
+    const leadIds = await lockLeadIdsForMaintenancePurge(tx);
+    const activeLinkedLeadIds = await lockActiveLeadLinkEntityIdsForMaintenancePurge(tx);
+    for (const leadId of [...new Set([...leadIds, ...activeLinkedLeadIds])].sort()) {
+      await endLeadContactIdentityLinks(tx, leadId);
+    }
+    // Delete exactly the rows selected under lock. An unqualified delete could
+    // remove a concurrently inserted source whose identity link was not ended.
+    await tx.leadRecord.deleteMany({ where: { id: { in: leadIds } } });
   };
 
   const setLeads = async (db: StorageTransaction, value: unknown) => {
@@ -567,8 +640,10 @@ export function createStorageService(prisma: StoragePrisma) {
       if (!STORAGE_KEY_PATTERN.test(key)) return failure('invalid storage key', 400);
       if (RAW_STORAGE_PROTECTED_KEYS.has(key)) return failure('客户资产禁止通过原始存储删除', 403);
       if (key === STORAGE_KEYS.LEADS) {
-        await prisma.leadRecord.deleteMany();
-        return success(true);
+        return runStorageTransaction(async (tx) => {
+          await purgeLeadRecordsWithIdentityLinks(tx);
+          return success(true);
+        });
       }
       if (BUSINESS_RECORD_KEYS.has(key)) {
         await prisma.businessRecord.deleteMany({ where: { domain: key } });
@@ -579,22 +654,31 @@ export function createStorageService(prisma: StoragePrisma) {
     },
 
     async clearPrefix(prefix = 'aaos_') {
-      const preservedKeys = Array.from(RAW_STORAGE_PROTECTED_KEYS).filter((key) => key.startsWith(prefix));
-      await prisma.appStorage.deleteMany({
-        where: {
-          key: {
-            startsWith: prefix,
-            ...(preservedKeys.length ? { notIn: preservedKeys } : {}),
+      // Keep the contact gate durable while it serializes this destructive
+      // maintenance action; it is infrastructure rather than clearable data.
+      const preservedKeys = Array.from(new Set([
+        ...Array.from(RAW_STORAGE_PROTECTED_KEYS).filter((key) => key.startsWith(prefix)),
+        ...(CONTACT_IDENTITY_MUTATION_GATE_KEY.startsWith(prefix) ? [CONTACT_IDENTITY_MUTATION_GATE_KEY] : []),
+      ])).sort();
+      return runStorageTransaction(async (tx) => {
+        if (prefix === 'aaos_' || STRUCTURED_KEYS.has(prefix)) {
+          await purgeLeadRecordsWithIdentityLinks(tx);
+        }
+        await tx.appStorage.deleteMany({
+          where: {
+            key: {
+              startsWith: prefix,
+              ...(preservedKeys.length ? { notIn: preservedKeys } : {}),
+            },
           },
-        },
-      });
-      if (prefix === 'aaos_' || STRUCTURED_KEYS.has(prefix)) await prisma.leadRecord.deleteMany();
-      if (prefix === 'aaos_') {
-        await prisma.businessRecord.deleteMany({
-          where: { domain: { not: STORAGE_KEYS.CUSTOMERS } },
         });
-      }
-      return success({ clearedPrefix: prefix, preservedKeys });
+        if (prefix === 'aaos_') {
+          await tx.businessRecord.deleteMany({
+            where: { domain: { not: STORAGE_KEYS.CUSTOMERS } },
+          });
+        }
+        return success({ clearedPrefix: prefix, preservedKeys });
+      });
     },
   };
 }

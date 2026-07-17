@@ -75,8 +75,12 @@ audit append.
   `LeadRecord.id`, then performs collision checks before converging standalone
   lead links to the updated phone/WeChat values. It creates/reactivates only
   lead links, ends obsolete lead links (including when contacts are cleared),
-  and never changes a customer canonical pointer or ownership. A stale JSON
-  `lead.id` is never used as the link or self-exclusion key.
+  and never changes a customer canonical pointer or ownership. Profile sync,
+  deletion, conversion, and auto-claim likewise use locked or server-generated
+  relational IDs for identity links and lead-source references; backfill uses
+  only `BusinessRecord.recordId` and `LeadRecord.id`, skipping a malformed row
+  with no relational ID. A stale JSON `id` is never used as a lifecycle, link,
+  canonical, or self-exclusion key.
 - `convertLeadToCustomer`: identity/link writes precede customer creation in the
   same transaction, preserve the active lead link, create the customer link,
   and set `canonicalCustomerId`.
@@ -85,6 +89,11 @@ audit append.
 - Both customer soft-delete paths now end active customer identity links in the
   same transaction and recompute the identity status/canonical pointer. The
   independent-lead delete path ends historical lead links as well.
+- Controlled data-maintenance lead purges (`clearPrefix` and the internal
+  structured-key remove path) take the identity gate first, lock relational
+  lead rows and active lead links, end their links (including legacy orphan
+  links), then delete only the locked physical lead rows. Customer canonical
+  fields are not changed, and the durable mutation gate is preserved.
 - Durable lead-intake collision records contain only the generic conflict
   message; customer/lead IDs and names are never copied into them.
 - Role-name checks and data-scope semantics were not added or changed. Conflict
@@ -202,9 +211,15 @@ Focused regressions cover:
 - conversion gate-before-source ordering, covering the former
   backfill/customer-to-lead versus conversion/lead-to-customer cycle;
 - standalone-lead contact rollover and clearing, authoritative locked-record
-  IDs despite stale JSON payload IDs, customer/lead collision rollback, and a
-  shared-gate updateLead-versus-backfill serialization regression that proves
-  the obsolete lead link cannot be resurrected;
+  IDs despite stale JSON payload IDs; customer-profile synchronization,
+  deletion, conversion, auto-claim, and backfill regressions prove no ghost
+  stale-ID lead links, customer links, canonicals, or source references;
+  controlled maintenance purge
+  regressions prove both public-prefix and internal-key deletion retire real
+  and historical-orphan lead links without touching customer canonical state;
+  customer/lead collision rollback; and a shared-gate updateLead-versus-
+  backfill serialization regression that proves the obsolete lead link cannot
+  be resurrected;
 - both customer soft-delete paths ending links and restoring reusable canonical
   state; exact legacy-lock cleanup that preserves HMAC and lookalike keys;
 - missing, short, incomplete, and unsupported-version production keys.

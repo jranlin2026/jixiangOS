@@ -591,7 +591,7 @@ async function reconcileMatchingLegacyCustomers(
   rows: any[],
 ): Promise<ContactIdentityRecord> {
   const legacyCustomerIds = [...new Set(rows
-    .map((row) => String(row.recordId || parseCustomer(row)?.id || '').trim())
+    .map((row) => String(row.recordId || '').trim())
     .filter(Boolean))].sort();
   if (!legacyCustomerIds.length) return identity;
   const active = await activeCustomerLinksForUpdate(tx, identity.id);
@@ -797,7 +797,7 @@ function buildBackfillPlan(
 
   for (const row of [...customerRows].sort((left, right) => String(left.recordId).localeCompare(String(right.recordId)))) {
     const customer = dataObject(row);
-    const customerId = String(row.recordId || customer?.id || '').trim();
+    const customerId = String(row.recordId || '').trim();
     if (!customerId) continue;
     customerIds.add(customerId);
     if (!customer || customer.deletedAt) continue;
@@ -811,7 +811,7 @@ function buildBackfillPlan(
 
   for (const row of [...leadRows].sort((left, right) => String(left.id).localeCompare(String(right.id)))) {
     const lead = dataObject(row);
-    const leadId = String(row.id || lead?.id || '').trim();
+    const leadId = String(row.id || '').trim();
     if (!leadId) continue;
     leadIds.add(leadId);
     if (!lead || lead.deletedAt) continue;

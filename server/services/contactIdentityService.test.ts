@@ -253,6 +253,99 @@ function createStore(
   assert.equal(state.identities.length, 2);
 }
 
+// A backfill source's relational row ID is authoritative even when legacy JSON
+// carries a different id. Applying the current contact must end the old real
+// row link, create the new real row link, and never create a stale JSON-ID
+// ghost link.
+{
+  const realLeadId = 'lead-row-backfill-real-id';
+  const staleJsonId = 'stale-json-backfill-id';
+  const oldPhone = '13800138011';
+  const newPhone = '13900139011';
+  const oldHash = hashContactIdentity(oldPhone, crypto.hmacKey);
+  const oldIdentityId = `ci_phone_${oldHash.slice(0, 32)}`;
+  const { store, state } = createStore({
+    identities: [{
+      id: oldIdentityId, type: 'phone', normalizedHash: oldHash, hashKeyVersion: 1, status: 'active',
+      encryptedNormalizedValue: 'ci:v1:test', canonicalCustomerId: null, conflictReason: null,
+    }],
+    links: [{
+      id: 'backfill-real-row-old-link', identityId: oldIdentityId, entityType: 'lead', entityId: realLeadId,
+      linkStatus: 'active', source: 'historical_backfill', endedAt: null,
+    }],
+    leads: [{
+      id: realLeadId,
+      phone: newPhone,
+      data: { id: staleJsonId, phone: newPhone },
+    }],
+  });
+
+  await backfillContactIdentities(store, { apply: true, crypto });
+
+  const newHash = hashContactIdentity(newPhone, crypto.hmacKey);
+  const newIdentity = state.identities.find((identity) => identity.normalizedHash === newHash);
+  assert.ok(newIdentity);
+  assert.equal(state.links.find((link) => link.id === 'backfill-real-row-old-link')?.linkStatus, 'ended');
+  assert.deepEqual(
+    state.links.filter((link) => link.identityId === newIdentity.id && link.entityType === 'lead' && link.linkStatus === 'active')
+      .map((link) => link.entityId),
+    [realLeadId],
+  );
+  assert.equal(state.links.some((link) => link.entityType === 'lead' && link.entityId === staleJsonId), false);
+}
+
+// A malformed adapter row without a relational ID must not fall back to an id
+// embedded in mutable JSON. Production LeadRecord rows always have an id, and
+// skipping malformed input is safer than creating an unowned ghost link.
+{
+  const staleJsonId = 'stale-json-without-relational-row-id';
+  const { store, state } = createStore({
+    leads: [{
+      id: '',
+      phone: '13900139012',
+      data: { id: staleJsonId, phone: '13900139012' },
+    }],
+  });
+
+  await backfillContactIdentities(store, { apply: true, crypto });
+
+  assert.equal(state.identities.length, 0);
+  assert.equal(state.links.some((link) => link.entityId === staleJsonId), false);
+}
+
+// The customer side follows the same rule: a malformed BusinessRecord without
+// recordId cannot use data.id as a backfill source or legacy-reconciliation
+// target, because that would create a forged customer link/canonical owner.
+{
+  const staleJsonId = 'stale-json-customer-without-record-id';
+  const phone = '13900139013';
+  const malformedCustomer = {
+    id: 'aaos_customers:malformed-no-record-id',
+    domain: 'aaos_customers',
+    recordId: '',
+    data: { id: staleJsonId, name: '损坏客户行', phone },
+  };
+  const backfill = createStore({ customers: [malformedCustomer] });
+  await backfillContactIdentities(backfill.store, { apply: true, crypto });
+  assert.equal(backfill.state.identities.length, 0);
+  assert.equal(backfill.state.links.some((link) => link.entityId === staleJsonId), false);
+
+  const reconciliation = createStore({ customers: [malformedCustomer] });
+  await assert.doesNotReject(() => upsertCustomerContactIdentities(reconciliation.store, {
+    customerId: 'customer-real-row-id', phone, crypto,
+  }));
+  assert.equal(reconciliation.state.links.some((link) => link.entityId === staleJsonId), false);
+  assert.deepEqual(
+    reconciliation.state.links.filter((link) => link.entityType === 'customer' && link.linkStatus === 'active')
+      .map((link) => link.entityId),
+    ['customer-real-row-id'],
+  );
+  assert.equal(
+    reconciliation.state.identities[0]?.canonicalCustomerId,
+    'customer-real-row-id',
+  );
+}
+
 // RED: a P2002 loser must use a locking current read, not its repeatable-read
 // snapshot, to reload the already-committed identity winner.
 {
