@@ -10,15 +10,17 @@ import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import ReplayIcon from '@mui/icons-material/Replay';
 import DialogCloseTitle from './DialogCloseTitle';
 import { customerTodoApi } from '../../api/customerTodoApi';
-import type { User } from '../../types/settings';
+import type { CustomerManageableUser } from '../../types/customer';
 import type { CustomerTodo, CustomerTodoExecutionMethod, CustomerTodoInput } from '../../types/customerTodo';
+import { canRunCustomerTodoAction } from '../../pages/Customers/customerDetailPolicy';
 
 interface CustomerTodoPanelProps {
   customerId: string;
   customerName: string;
   ownerId?: string;
-  users: User[];
+  users: CustomerManageableUser[];
   currentUserId?: string;
+  canManageTodos?: boolean;
   readOnly?: boolean;
   onActivityChanged?: () => void | Promise<void>;
 }
@@ -47,7 +49,7 @@ const displayTime = (value: string) => new Intl.DateTimeFormat('zh-CN', {
 }).format(new Date(value));
 
 const CustomerTodoPanel: React.FC<CustomerTodoPanelProps> = ({
-  customerId, customerName, ownerId, users, currentUserId, readOnly = false, onActivityChanged,
+  customerId, customerName, ownerId, users, currentUserId, canManageTodos = false, readOnly = false, onActivityChanged,
 }) => {
   const [todos, setTodos] = useState<CustomerTodo[]>([]);
   const [statusTab, setStatusTab] = useState<'pending' | 'completed'>('pending');
@@ -81,6 +83,7 @@ const CustomerTodoPanel: React.FC<CustomerTodoPanelProps> = ({
   const visibleTodos = statusTab === 'pending' ? pending : completed;
 
   const openCreate = () => {
+    if (readOnly || !canManageTodos) return;
     const defaultAssignee = users.find((user) => user.id === ownerId)?.id
       || users.find((user) => user.id === currentUserId)?.id
       || users[0]?.id || '';
@@ -91,6 +94,7 @@ const CustomerTodoPanel: React.FC<CustomerTodoPanelProps> = ({
   };
 
   const openEdit = (todo: CustomerTodo) => {
+    if (!canRunCustomerTodoAction('edit', todo, currentUserId, canManageTodos, readOnly)) return;
     setEditingTodo(todo);
     setForm({
       title: todo.title, content: todo.content || '', dueAt: dateTimeLocal(new Date(todo.dueAt)),
@@ -106,6 +110,7 @@ const CustomerTodoPanel: React.FC<CustomerTodoPanelProps> = ({
   };
 
   const handleSave = async () => {
+    if (readOnly || !canManageTodos) return;
     if (!form.title.trim()) { setError('请输入待办标题'); return; }
     if (!form.assigneeId) { setError('请选择执行人'); return; }
     if (!form.dueAt || Number.isNaN(new Date(form.dueAt).getTime())) { setError('请选择有效的提醒时间'); return; }
@@ -121,6 +126,7 @@ const CustomerTodoPanel: React.FC<CustomerTodoPanelProps> = ({
   };
 
   const runAction = async (action: 'complete' | 'reopen' | 'cancel', todo: CustomerTodo, reason = '') => {
+    if (!canRunCustomerTodoAction(action, todo, currentUserId, canManageTodos, readOnly)) return;
     setError('');
     const response = action === 'complete'
       ? await customerTodoApi.complete(customerId, todo.id)
@@ -142,7 +148,7 @@ const CustomerTodoPanel: React.FC<CustomerTodoPanelProps> = ({
           <Tab value="pending" label={`未完成(${pending.length})`} sx={{ minHeight: 36, py: 0 }} />
           <Tab value="completed" label={`已完成(${completed.length})`} sx={{ minHeight: 36, py: 0 }} />
         </Tabs>
-        {!readOnly && (
+        {!readOnly && canManageTodos && (
           <Tooltip title="新建待办"><IconButton color="primary" onClick={openCreate} aria-label="新建待办"><AddIcon /></IconButton></Tooltip>
         )}
       </Stack>
@@ -158,10 +164,14 @@ const CustomerTodoPanel: React.FC<CustomerTodoPanelProps> = ({
         <Stack divider={<Divider flexItem />}>
           {visibleTodos.map((todo) => {
             const overdue = todo.status === 'pending' && new Date(todo.dueAt).getTime() < Date.now();
+            const canComplete = canRunCustomerTodoAction('complete', todo, currentUserId, canManageTodos, readOnly);
+            const canReopen = canRunCustomerTodoAction('reopen', todo, currentUserId, canManageTodos, readOnly);
+            const canEdit = canRunCustomerTodoAction('edit', todo, currentUserId, canManageTodos, readOnly);
+            const canCancel = canRunCustomerTodoAction('cancel', todo, currentUserId, canManageTodos, readOnly);
             return (
               <Stack key={todo.id} direction="row" spacing={1} alignItems="flex-start" sx={{ py: 1.5 }}>
                 <Checkbox
-                  size="small" checked={todo.status === 'completed'} disabled={readOnly}
+                  size="small" checked={todo.status === 'completed'} disabled={todo.status === 'completed' ? !canReopen : !canComplete}
                   onChange={() => void runAction(todo.status === 'completed' ? 'reopen' : 'complete', todo)}
                   inputProps={{ 'aria-label': todo.status === 'completed' ? '重新打开待办' : '完成待办' }}
                 />
@@ -177,13 +187,13 @@ const CustomerTodoPanel: React.FC<CustomerTodoPanelProps> = ({
                     <Typography variant="caption" color={overdue ? 'error' : 'inherit'}>提醒时间：{displayTime(todo.dueAt)}</Typography>
                   </Stack>
                 </Box>
-                {!readOnly && todo.status === 'pending' && (
+                {(canEdit || canCancel) && todo.status === 'pending' && (
                   <Stack direction="row">
-                    <Tooltip title="编辑"><IconButton size="small" onClick={() => openEdit(todo)}><EditOutlinedIcon fontSize="small" /></IconButton></Tooltip>
-                    <Tooltip title="取消待办"><IconButton size="small" color="error" onClick={() => { setCancelingTodo(todo); setCancelReason(''); }}><DeleteOutlineIcon fontSize="small" /></IconButton></Tooltip>
+                    {canEdit && <Tooltip title="编辑"><IconButton size="small" onClick={() => openEdit(todo)}><EditOutlinedIcon fontSize="small" /></IconButton></Tooltip>}
+                    {canCancel && <Tooltip title="取消待办"><IconButton size="small" color="error" onClick={() => { setCancelingTodo(todo); setCancelReason(''); }}><DeleteOutlineIcon fontSize="small" /></IconButton></Tooltip>}
                   </Stack>
                 )}
-                {!readOnly && todo.status === 'completed' && (
+                {canReopen && todo.status === 'completed' && (
                   <Tooltip title="重新打开"><IconButton size="small" onClick={() => void runAction('reopen', todo)}><ReplayIcon fontSize="small" /></IconButton></Tooltip>
                 )}
               </Stack>

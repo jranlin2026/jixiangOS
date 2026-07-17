@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { customerApi } from './customerApi';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
+import { PERMISSION_KEYS } from '../shared/utils/permissions';
 import type { Customer } from '../types/customer';
 import type { Lead } from '../types/lead';
 import type { Order } from '../types/order';
@@ -158,7 +159,10 @@ storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([{
   id: 'role-admin',
   name: '超级管理员',
   code: 'super_admin',
-  permissions: [{ module: '全部', actions: ['admin'] }],
+  permissions: [
+    { module: '全部', actions: ['admin'] },
+    { module: PERMISSION_KEYS.CUSTOMER_DELETE, actions: ['read', 'delete'] },
+  ],
   memberCount: 1,
   isActive: true,
   createdAt: now,
@@ -293,6 +297,37 @@ storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
   email: 'admin@company.com',
   phone: '',
   role: '\u8d85\u7ea7\u7ba1\u7406\u5458',
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+}]));
+
+const roleNameOnlyContactRes = await customerApi.updateCustomer('cust-blank-contact', {
+  phone: '13844445555',
+  wechat: 'customer_wx_role_name_only',
+});
+assert.equal(roleNameOnlyContactRes.code, 0);
+assert.equal(roleNameOnlyContactRes.data?.phone, '+8613811112222', '角色显示名不得授予锁定联系方式覆盖权');
+
+storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([{
+  id: 'role-contact-admin',
+  name: '联系方式校正员',
+  code: 'contact_admin',
+  permissions: [{ module: PERMISSION_KEYS.CUSTOMER_DELETE, actions: ['delete'] }],
+  dataScopes: { customers: 'all' },
+  memberCount: 1,
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+}]));
+storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
+  id: 'user-sales',
+  name: 'System Admin',
+  account: 'admin',
+  email: 'admin@company.com',
+  phone: '',
+  role: '任意展示名',
+  roleId: 'role-contact-admin',
   isActive: true,
   createdAt: now,
   updatedAt: now,

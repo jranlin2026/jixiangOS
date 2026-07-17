@@ -86,31 +86,47 @@ function activeScopeUsers(users: ScopeUser[], currentUser?: ScopeUser): ScopeUse
   return Array.from(byId.values());
 }
 
-function hydrateScopeUserFromStorage(currentUser?: ScopeUser): ScopeUser | undefined {
-  if (!currentUser?.id) return currentUser;
-  const storedUsers = readLocalStorageJson<User[]>(STORAGE_KEYS.USERS) || [];
-  const storedUser = storedUsers.find((user) => user.id === currentUser.id);
-  if (!storedUser) return currentUser;
+function explicitScopeIsValid(role: Role | undefined, domain: DataScopeDomain): boolean {
+  const value = role?.dataScopes?.[domain];
+  if (value === undefined) return true;
+  if (domain === 'customers') {
+    return value === 'self'
+      || value === 'department'
+      || value === 'department_only'
+      || value === 'department_and_descendants'
+      || value === 'all';
+  }
+  return value === 'self' || value === 'department' || value === 'all';
+}
 
-  return {
-    ...storedUser,
-    ...currentUser,
-    account: currentUser.account || storedUser.account,
-    role: currentUser.role || storedUser.role,
-    roleId: currentUser.roleId || storedUser.roleId,
-    departmentId: currentUser.departmentId || storedUser.departmentId,
-    employmentStatus: currentUser.employmentStatus || storedUser.employmentStatus,
-  };
+function visibleDepartmentIdsForScope(
+  domain: DataScopeDomain,
+  level: DataScopeLevel | CustomerDataScopeLevel,
+  currentDepartmentId: string,
+  departments: Department[],
+): Set<string> {
+  if (domain === 'customers' && level === 'department_only') {
+    return new Set([currentDepartmentId]);
+  }
+  if (
+    (domain === 'customers' && level === 'department_and_descendants')
+    || (domain !== 'customers' && level === 'department')
+  ) {
+    return new Set([
+      currentDepartmentId,
+      ...getDepartmentDescendantIds(departments, currentDepartmentId),
+    ]);
+  }
+  return new Set();
 }
 
 export function buildDataVisibilityScopeForUser(
-  rawCurrentUser: ScopeUser | undefined,
+  currentUser: ScopeUser | undefined,
   users: ScopeUser[],
   roles: Role[],
   departments: Department[],
   domain: DataScopeDomain,
 ): DataVisibilityScope {
-  const currentUser = hydrateScopeUserFromStorage(rawCurrentUser);
   if (!currentUser?.id || !currentUser.isActive || (currentUser.employmentStatus || 'active') === 'left') return noAccessScope();
 
   const roleCode = getRoleCode(currentUser as User, roles);
@@ -128,23 +144,25 @@ export function buildDataVisibilityScopeForUser(
     };
   }
 
+  if (!explicitScopeIsValid(role, domain)) {
+    return {
+      ...noAccessScope(),
+      currentUser: currentUser as User,
+      roleCode,
+    };
+  }
+
   const dataScopeLevel = normalizeRoleDataScopes(role || { code: roleCode })[domain];
   let visibleUsers: ScopeUser[];
   if (dataScopeLevel === 'all') {
     visibleUsers = activeUsers;
-  } else if (domain === 'customers' && dataScopeLevel === 'department_only' && currentUser.departmentId) {
-    visibleUsers = activeUsers.filter((user) => user.departmentId === currentUser.departmentId);
-  } else if (
-    currentUser.departmentId
-    && (
-      (domain === 'customers' && dataScopeLevel === 'department_and_descendants')
-      || (domain !== 'customers' && dataScopeLevel === 'department')
-    )
-  ) {
-    const visibleDepartmentIds = new Set([
+  } else if (currentUser.departmentId && dataScopeLevel !== 'self') {
+    const visibleDepartmentIds = visibleDepartmentIdsForScope(
+      domain,
+      dataScopeLevel,
       currentUser.departmentId,
-      ...getDepartmentDescendantIds(departments, currentUser.departmentId),
-    ]);
+      departments,
+    );
     visibleUsers = activeUsers.filter((user) => Boolean(user.departmentId && visibleDepartmentIds.has(user.departmentId)));
   } else {
     visibleUsers = [currentUser];

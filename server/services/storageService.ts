@@ -16,6 +16,7 @@ const CRM_MIGRATION_BATCH_SIZE = 250;
 const CRM_MIGRATION_TRANSACTION_TIMEOUT_MS = 120_000;
 const CRM_MISSING_OWNER_MARKERS = new Set(['', '待分配', '未分配', '未填写负责人']);
 const STRUCTURED_KEYS = new Set<string>([STORAGE_KEYS.LEADS]);
+const RAW_STORAGE_PROTECTED_KEYS = new Set<string>([STORAGE_KEYS.CUSTOMERS]);
 const BUSINESS_RECORD_KEYS = new Set<string>([
   STORAGE_KEYS.CUSTOMERS,
   STORAGE_KEYS.ORDERS,
@@ -428,10 +429,13 @@ export function createStorageService(prisma: StoragePrisma) {
   return {
     async list() {
       const rows = await prisma.appStorage.findMany({ orderBy: { key: 'asc' } });
-      const data = Object.fromEntries(rows.map((row) => [row.key, row.value])) as Record<string, unknown>;
+      const data = Object.fromEntries(rows
+        .filter((row) => !RAW_STORAGE_PROTECTED_KEYS.has(row.key))
+        .map((row) => [row.key, row.value])) as Record<string, unknown>;
       data[STORAGE_KEYS.LEADS] = await listLeads();
       data[STORAGE_KEYS.USERS] = await listUsers();
       for (const key of BUSINESS_RECORD_KEYS) {
+        if (RAW_STORAGE_PROTECTED_KEYS.has(key)) continue;
         data[key] = await listBusinessRecords(key);
       }
       return success(data);
@@ -439,6 +443,7 @@ export function createStorageService(prisma: StoragePrisma) {
 
     async get(key: string) {
       if (!STORAGE_KEY_PATTERN.test(key)) return failure('invalid storage key', 400);
+      if (RAW_STORAGE_PROTECTED_KEYS.has(key)) return failure('客户资产禁止通过原始存储读取', 403);
       if (key === STORAGE_KEYS.LEADS) return success(await listLeads());
       if (key === STORAGE_KEYS.USERS) return success(await listUsers());
       if (BUSINESS_RECORD_KEYS.has(key)) return success(await listBusinessRecords(key));
@@ -462,6 +467,7 @@ export function createStorageService(prisma: StoragePrisma) {
 
     async remove(key: string) {
       if (!STORAGE_KEY_PATTERN.test(key)) return failure('invalid storage key', 400);
+      if (RAW_STORAGE_PROTECTED_KEYS.has(key)) return failure('客户资产禁止通过原始存储删除', 403);
       if (key === STORAGE_KEYS.LEADS) {
         await prisma.leadRecord.deleteMany();
         return success(true);
@@ -475,10 +481,22 @@ export function createStorageService(prisma: StoragePrisma) {
     },
 
     async clearPrefix(prefix = 'aaos_') {
-      await prisma.appStorage.deleteMany({ where: { key: { startsWith: prefix } } });
+      const preservedKeys = Array.from(RAW_STORAGE_PROTECTED_KEYS).filter((key) => key.startsWith(prefix));
+      await prisma.appStorage.deleteMany({
+        where: {
+          key: {
+            startsWith: prefix,
+            ...(preservedKeys.length ? { notIn: preservedKeys } : {}),
+          },
+        },
+      });
       if (prefix === 'aaos_' || STRUCTURED_KEYS.has(prefix)) await prisma.leadRecord.deleteMany();
-      if (prefix === 'aaos_') await prisma.businessRecord.deleteMany();
-      return success(true);
+      if (prefix === 'aaos_') {
+        await prisma.businessRecord.deleteMany({
+          where: { domain: { not: STORAGE_KEYS.CUSTOMERS } },
+        });
+      }
+      return success({ clearedPrefix: prefix, preservedKeys });
     },
   };
 }

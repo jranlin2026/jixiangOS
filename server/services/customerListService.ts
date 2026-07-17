@@ -8,34 +8,42 @@ import {
   normalizeLifecycleStatusCode,
   normalizeResourceOwnership,
 } from '../../src/shared/utils/constants';
-import type { Customer, CustomerCreateInput, CustomerFilters } from '../../src/types/customer';
+import type { Customer, CustomerActivityAttachment, CustomerCreateInput, CustomerFilters } from '../../src/types/customer';
 import type { ApiResponse, PaginatedResponse } from '../../src/api/types';
 import type { AuthenticatedUser } from '../../src/types/auth';
-import { buildDataVisibilityScopeForUser } from '../../src/shared/utils/dataVisibility';
-import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import {
   getPhoneNumberError,
   normalizePhoneForComparison,
   normalizePhoneForStorage,
 } from '../../src/shared/utils/phoneNumber';
-import { PERMISSION_KEYS, hasPermission } from '../../src/shared/utils/permissions';
+import { PERMISSION_KEYS, hasExplicitPermission, hasPermission } from '../../src/shared/utils/permissions';
 import { loadCustomerTagCatalog } from './customerTagService';
 import { validateManualTagSelection } from './customerTagPolicy';
 import { groupTagIdsForFilter, normalizeManualTagIds, validateCustomerTagFilters } from '../../src/shared/utils/customerTagPolicy';
 import type { CustomerTagCatalog } from '../../src/types/tag';
+import {
+  assertCanManageCustomer,
+  assertCustomerFieldPermissions,
+  canReadCustomer,
+  loadCustomerAccessContext,
+  type CustomerAccessContext,
+} from './customerAccessPolicy';
+import {
+  createCustomerBusinessRecordRepository,
+  mapCustomerBusinessRecord,
+  type CustomerBusinessRecordRow,
+} from './customerBusinessRecordRepository';
+import { customerWriteConflictResponse } from './customerWriteConflict';
 
 type CustomerListPrisma = Pick<PrismaClient, 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | '$queryRaw' | '$transaction'>;
 
-type CustomerRow = {
-  id?: string;
-  data: unknown;
-};
+type CustomerRow = CustomerBusinessRecordRow;
 
-type CustomerActivityInput = {
+export type CustomerActivityInput = {
   content?: string;
   operator?: string;
   type?: '联系记录' | '客户行为' | '销售活动' | '跟进记录';
-  attachments?: Customer['activityRecords'] extends Array<infer T> ? T extends { attachments?: infer A } ? A : never : never;
+  attachments?: CustomerActivityAttachment[];
 };
 
 function cleanText(value: unknown): string {
@@ -49,7 +57,16 @@ function toPositiveInt(value: unknown, fallback: number): number {
 }
 
 function customerFromRow(row: CustomerRow): Customer {
-  return typeof row.data === 'string' ? JSON.parse(row.data) as Customer : row.data as Customer;
+  return mapCustomerBusinessRecord(row).customer;
+}
+
+function permissionMessage(operation: () => void): string | null {
+  try {
+    operation();
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : '无权操作客户';
+  }
 }
 
 function createActivityId(): string {
@@ -81,37 +98,6 @@ function addFollowActivity(customer: Customer, input: CustomerActivityInput, ope
     next.lifecycleStatusUpdatedAt = now;
   }
   return next;
-}
-
-function releaseCustomer(customer: Customer, reason: string, operator: string): Customer {
-  const now = new Date().toISOString();
-  return {
-    ...customer,
-    owner: '公海',
-    lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL,
-    lifecycleStatusUpdatedAt: now,
-    publicPoolAt: now,
-    releasedBy: operator,
-    releaseReason: reason,
-    activityRecords: [
-      {
-        id: createActivityId(),
-        type: 'transfer',
-        title: '释放到公海',
-        content: reason || '销售放弃跟进，客户进入公海池',
-        operator,
-        createdAt: now,
-        changes: [{
-          field: 'owner',
-          label: '销售负责人',
-          oldValue: customer.owner,
-          newValue: '公海',
-        }],
-      },
-      ...(customer.activityRecords || []),
-    ],
-    updatedAt: now,
-  };
 }
 
 function jsonText(path: string) {
@@ -160,8 +146,7 @@ function buildCustomerWhere(filters: CustomerFilters, catalog?: CustomerTagCatal
   if (filters.search) {
     const q = `%${filters.search.trim().toLowerCase()}%`;
     conditions.push(Prisma.sql`(
-      LOWER(COALESCE(title, '')) LIKE ${q}
-      OR ${buildTextLikeCondition('$.name', q)}
+      ${buildTextLikeCondition('$.name', q)}
       OR ${buildTextLikeCondition('$.company', q)}
       OR ${buildTextLikeCondition('$.phone', q)}
       OR ${buildTextLikeCondition('$.wechat', q)}
@@ -178,9 +163,9 @@ function buildCustomerWhere(filters: CustomerFilters, catalog?: CustomerTagCatal
 
   if (filters.owner) {
     if (normalizeLifecycleStatusCode(filters.lifecycleStatusCode) === LIFECYCLE_STATUS_CODES.PUBLIC_POOL) {
-      conditions.push(Prisma.sql`(${jsonText('$.releasedBy')} = ${filters.owner} OR owner = ${filters.owner})`);
+      conditions.push(Prisma.sql`(${jsonText('$.releasedBy')} = ${filters.owner} OR ${jsonText('$.owner')} = ${filters.owner})`);
     } else {
-      conditions.push(Prisma.sql`owner = ${filters.owner}`);
+      conditions.push(Prisma.sql`${jsonText('$.owner')} = ${filters.owner}`);
     }
   }
   if (filters.followStatus) {
@@ -228,105 +213,53 @@ function buildCustomerWhere(filters: CustomerFilters, catalog?: CustomerTagCatal
 async function buildVisibilityWhere(
   prisma: CustomerListPrisma,
   currentUser?: AuthenticatedUser | null,
-): Promise<Prisma.Sql> {
-  if (!currentUser) return Prisma.sql`1 = 0`;
-  const [users, roles, departments] = await Promise.all([
-    prisma.user.findMany(),
-    prisma.role.findMany({ where: { isActive: true } }),
-    prisma.department.findMany(),
-  ]);
-  const scope = buildDataVisibilityScopeForUser(
-    currentUser,
-    users.map(mapPrismaUser),
-    roles.map(mapPrismaRole),
-    departments as any,
-    'customers',
-  );
-  if (scope.unrestricted) return Prisma.sql`1 = 1`;
+): Promise<{ where: Prisma.Sql; context: CustomerAccessContext | null }> {
+  if (!currentUser) return { where: Prisma.sql`1 = 0`, context: null };
+  const context = await loadCustomerAccessContext(prisma, currentUser);
 
   const visibilityConditions: Prisma.Sql[] = [];
-  if (scope.visibleUserNames.length) {
-    visibilityConditions.push(Prisma.sql`(${jsonText('$.ownerId')} IS NULL AND ${jsonText('$.ownerIdentityStatus')} IS NULL AND owner IN (${Prisma.join(scope.visibleUserNames)}))`);
-    visibilityConditions.push(Prisma.sql`${jsonText('$.leadContributorName')} IN (${Prisma.join(scope.visibleUserNames)})`);
+  const readableNames = [...context.legacyReadableNames];
+  const readableIds = [...context.readableUserIds];
+  if (readableNames.length) {
+    visibilityConditions.push(Prisma.sql`(
+      ${jsonText('$.ownerId')} IS NULL
+      AND COALESCE(${jsonText('$.ownerIdentityStatus')}, '') <> 'resolved'
+      AND ${jsonText('$.owner')} IN (${Prisma.join(readableNames)})
+    )`);
+    visibilityConditions.push(Prisma.sql`(
+      ${jsonText('$.leadContributorId')} IS NULL
+      AND ${jsonText('$.leadContributorName')} IN (${Prisma.join(readableNames)})
+    )`);
   }
-  if (scope.visibleUserIds.length) {
-    visibilityConditions.push(Prisma.sql`${jsonText('$.ownerId')} IN (${Prisma.join(scope.visibleUserIds)})`);
-    visibilityConditions.push(Prisma.sql`${jsonText('$.leadContributorId')} IN (${Prisma.join(scope.visibleUserIds)})`);
+  if (readableIds.length) {
+    visibilityConditions.push(Prisma.sql`${jsonText('$.ownerId')} IN (${Prisma.join(readableIds)})`);
+    visibilityConditions.push(Prisma.sql`${jsonText('$.leadContributorId')} IN (${Prisma.join(readableIds)})`);
   }
-  if (scope.canViewPublicPool) {
+  if (context.canReadPublicPool) {
     visibilityConditions.push(Prisma.sql`${jsonText('$.lifecycleStatusCode')} = ${LIFECYCLE_STATUS_CODES.PUBLIC_POOL}`);
   }
-  if (!visibilityConditions.length) return Prisma.sql`1 = 0`;
-  return Prisma.sql`(${Prisma.join(visibilityConditions, ' OR ')})`;
+  return {
+    where: visibilityConditions.length
+      ? Prisma.sql`(${Prisma.join(visibilityConditions, ' OR ')})`
+      : Prisma.sql`1 = 0`,
+    context,
+  };
 }
 
 export function createCustomerListService(prisma: CustomerListPrisma) {
   const findVisibleCustomerRecord = async (customerId: string, currentUser?: AuthenticatedUser | null) => {
-    const visibilityWhere = await buildVisibilityWhere(prisma, currentUser);
-    const rows = await prisma.$queryRaw<CustomerRow[]>`
-      SELECT id, data
-      FROM business_records
-      WHERE domain = ${STORAGE_KEYS.CUSTOMERS}
-        AND JSON_EXTRACT(data, '$.deletedAt') IS NULL
-        AND ${jsonText('$.id')} = ${customerId}
-        AND ${visibilityWhere}
-      LIMIT 1
-    `;
-    return rows[0] || null;
-  };
-
-  const syncLeadRelease = async (customer: Customer, reason: string, operator: string) => {
-    const conditions: Prisma.Sql[] = [
-      Prisma.sql`${jsonText('$.customerId')} = ${customer.id}`,
-    ];
-    if (customer.phone) conditions.push(Prisma.sql`phone = ${customer.phone}`);
-    if (customer.wechat) conditions.push(Prisma.sql`wechat = ${customer.wechat}`);
-
-    const rows = await prisma.$queryRaw<Array<{ id: string; data: unknown }>>`
-      SELECT id, data
-      FROM lead_records
-      WHERE ${Prisma.join(conditions, ' OR ')}
-    `;
-    const now = new Date();
-    const nowIso = now.toISOString();
-    for (const leadRow of rows) {
-      const lead = typeof leadRow.data === 'string' ? JSON.parse(leadRow.data) as Record<string, any> : leadRow.data as Record<string, any>;
-      const nextLead = {
-        ...lead,
-        owner: '公海',
-        assignedTo: undefined,
-        lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL,
-        lifecycleStatusUpdatedAt: nowIso,
-        changeHistory: [{
-          id: `hist-${Math.random().toString(36).slice(2, 10)}`,
-          action: 'update',
-          operator,
-          changedAt: nowIso,
-          summary: reason || '销售放弃跟进，客户进入公海池',
-          changes: [
-            { field: 'owner', label: '负责人', oldValue: lead.owner, newValue: '公海' },
-            { field: 'assignedTo', label: '分配销售', oldValue: lead.assignedTo, newValue: undefined },
-          ],
-        }, ...(Array.isArray(lead.changeHistory) ? lead.changeHistory : [])],
-        updatedAt: nowIso,
-      };
-      await prisma.leadRecord.update({
-        where: { id: leadRow.id },
-        data: {
-          owner: '公海',
-          assignedTo: null,
-          lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL,
-          data: nextLead as any,
-          updatedAt: now,
-        },
-      });
-    }
+    if (!currentUser) return null;
+    const [context, snapshot] = await Promise.all([
+      loadCustomerAccessContext(prisma, currentUser),
+      createCustomerBusinessRecordRepository(prisma).findById(customerId),
+    ]);
+    return snapshot && canReadCustomer(context, snapshot.customer) ? snapshot : null;
   };
 
   return {
     async getById(customerId: string, currentUser?: AuthenticatedUser | null) {
-      const row = await findVisibleCustomerRecord(customerId, currentUser);
-      return row ? success(customerFromRow(row)) : failure<Customer>('客户不存在或无权访问', 404);
+      const snapshot = await findVisibleCustomerRecord(customerId, currentUser);
+      return snapshot ? success(snapshot.customer) : failure<Customer>('客户不存在或无权访问', 404);
     },
 
     async create(input: CustomerCreateInput, currentUser: AuthenticatedUser): Promise<ApiResponse<Customer | null>> {
@@ -344,21 +277,30 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
         return failure<Customer>('个人资源必须填写线索贡献人', 400);
       }
 
-      const requestedOwnerId = cleanText(input.ownerId) || (cleanText(input.owner) === currentUser.name ? currentUser.id : '');
-      const requestedOwner = cleanText(input.owner);
+      // Missing stable identity always means self-assignment. The display name
+      // supplied by a client is never used to choose a write target.
+      const requestedOwnerId = cleanText(input.ownerId) || currentUser.id;
       const actorName = currentUser.name || currentUser.account;
-      if (requestedOwnerId && requestedOwnerId !== currentUser.id && !hasPermission(currentUser, PERMISSION_KEYS.CUSTOMER_ASSIGN, 'write')) {
-        return failure<Customer>('无权把客户分配给其他负责人', 403);
-      }
-      if (!requestedOwnerId && requestedOwner && requestedOwner !== actorName) {
-        return failure<Customer>('无权把客户分配给其他负责人', 403);
+      let assignmentAccess: CustomerAccessContext | null = null;
+      if (requestedOwnerId && requestedOwnerId !== currentUser.id) {
+        if (!hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_TRANSFER, 'write')) {
+          return failure<Customer>('无权把客户分配给其他负责人', 403);
+        }
+        assignmentAccess = await loadCustomerAccessContext(prisma, currentUser);
+        if (!assignmentAccess.manageableOwnerIds.has(requestedOwnerId)) {
+          return failure<Customer>('无权跨数据范围分配客户', 403);
+        }
       }
       const targetOwner = requestedOwnerId === currentUser.id
-        ? { id: currentUser.id, name: actorName }
+        ? { id: currentUser.id, name: actorName, isActive: true, employmentStatus: 'active' }
         : requestedOwnerId
           ? await prisma.user.findUnique({ where: { id: requestedOwnerId } })
           : null;
-      if (!targetOwner) return failure<Customer>('请选择有效的销售负责人', 400);
+      if (
+        !targetOwner
+        || !targetOwner.isActive
+        || (targetOwner.employmentStatus || 'active') !== 'active'
+      ) return failure<Customer>('请选择有效的销售负责人', 400);
 
       const phoneError = phone ? getPhoneNumberError(phone) : '';
       if (phoneError) return failure<Customer>(phoneError, 400);
@@ -372,7 +314,7 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
       const tagNames = tagValidation.tagIds.map((id) => catalog.tags.find((tag) => tag.id === id)!.name);
       const existingCustomerRows = await tx.businessRecord.findMany({
         where: { domain: STORAGE_KEYS.CUSTOMERS },
-        select: { data: true },
+        select: { id: true, domain: true, recordId: true, data: true, updatedAt: true },
       });
       const phoneExists = existingCustomerRows.some((row) => {
         const existing = customerFromRow(row);
@@ -447,7 +389,7 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
       const pageSize = Math.min(toPositiveInt(filters.pageSize, DEFAULT_PAGE_SIZE), 100);
       const offset = (page - 1) * pageSize;
       const needsCatalog = Boolean(filters.missingTagGroupId || filters.tagIds?.length);
-      const [catalog, visibilityWhere] = await Promise.all([
+      const [catalog, visibility] = await Promise.all([
         needsCatalog ? loadCustomerTagCatalog(prisma as any, false) : Promise.resolve(undefined),
         buildVisibilityWhere(prisma, currentUser),
       ]);
@@ -456,7 +398,7 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
         if (!validation.ok) return failure<PaginatedResponse<Customer>>(validation.message, 400);
       }
       const where = buildCustomerWhere(filters, catalog);
-      const combinedWhere = Prisma.sql`${where} AND ${visibilityWhere}`;
+      const combinedWhere = Prisma.sql`${where} AND ${visibility.where}`;
       const countRows = await prisma.$queryRaw<Array<{ total: bigint | number }>>`
         SELECT COUNT(*) AS total
         FROM business_records
@@ -464,7 +406,7 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
       `;
       const total = Number(countRows[0]?.total || 0);
       const rows = await prisma.$queryRaw<CustomerRow[]>`
-        SELECT data
+        SELECT id, domain, recordId, data, updatedAt
         FROM business_records
         WHERE ${combinedWhere}
         ORDER BY COALESCE(eventAt, createdAt) DESC, createdAt DESC
@@ -472,7 +414,9 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
       `;
       const totalPages = Math.ceil(total / pageSize);
       return success<PaginatedResponse<Customer>>({
-        items: rows.map(customerFromRow),
+        items: rows.map(customerFromRow).filter((customer) => (
+          visibility.context ? canReadCustomer(visibility.context, customer) : false
+        )),
         pagination: { page, pageSize, total, totalPages },
       });
     },
@@ -482,49 +426,31 @@ export function createCustomerListService(prisma: CustomerListPrisma) {
       const attachments = Array.isArray(input.attachments) ? input.attachments : [];
       if (!content && !attachments.length) return failure<Customer>('跟进内容或附件不能为空', 400);
 
-      const row = await findVisibleCustomerRecord(customerId, currentUser);
-      if (!row?.id) return failure<Customer>('客户不存在或无权访问', 404);
-
-      const customer = customerFromRow(row);
-      const operator = cleanText(input.operator) || currentUser?.name || currentUser?.account || customer.owner || '系统';
-      const updated = addFollowActivity(customer, input, operator);
-      await prisma.businessRecord.update({
-        where: { id: row.id },
-        data: {
-          status: updated.lifecycleStatusCode || null,
-          owner: updated.owner || null,
-          customerId: updated.id || null,
-          amount: Number.isFinite(Number(updated.totalSpent)) ? Number(updated.totalSpent) : null,
-          eventAt: new Date(updated.updatedAt),
-          data: updated as any,
-        },
-      });
-      return success(updated);
-    },
-
-    async releaseToPublicPool(customerId: string, reasonInput = '', currentUser?: AuthenticatedUser | null) {
-      const row = await findVisibleCustomerRecord(customerId, currentUser);
-      if (!row?.id) return failure<Customer>('客户不存在或无权访问', 404);
-
-      const customer = customerFromRow(row);
-      const reason = cleanText(reasonInput) || '销售放弃跟进，客户进入公海池';
-      const operator = currentUser?.name || currentUser?.account || customer.owner || '系统';
-      const updated = releaseCustomer(customer, reason, operator);
-      const eventAt = new Date(updated.updatedAt);
-
-      await prisma.businessRecord.update({
-        where: { id: row.id },
-        data: {
-          status: updated.lifecycleStatusCode || null,
-          owner: updated.owner || null,
-          customerId: updated.id || null,
-          amount: Number.isFinite(Number(updated.totalSpent)) ? Number(updated.totalSpent) : null,
-          eventAt,
-          data: updated as any,
-        },
-      });
-      await syncLeadRelease(updated, reason, operator);
-      return success(updated);
+      if (!currentUser) return failure<Customer>('客户不存在或无权访问', 404);
+      if (!hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE, 'write')) {
+        return failure<Customer>('无权编辑客户资料', 403);
+      }
+      try {
+        return await prisma.$transaction(async (tx) => {
+          const repository = createCustomerBusinessRecordRepository(tx as any);
+          const snapshot = await repository.lockById(customerId);
+          if (!snapshot || snapshot.customer.deletedAt) return failure<Customer>('客户不存在或无权访问', 404);
+          const access = await loadCustomerAccessContext(tx as any, currentUser);
+          const accessError = permissionMessage(() => {
+            assertCustomerFieldPermissions(access, { remark: input.content });
+            assertCanManageCustomer(access, snapshot.customer);
+          });
+          if (accessError) return failure<Customer>(accessError, 403);
+          const operator = currentUser.name || currentUser.account || snapshot.customer.owner || '系统';
+          const updated = addFollowActivity(snapshot.customer, input, operator);
+          await repository.compareAndSave(snapshot, updated, new Date(updated.updatedAt));
+          return success(updated);
+        });
+      } catch (error) {
+        const conflict = customerWriteConflictResponse<Customer>(error);
+        if (conflict) return conflict;
+        throw error;
+      }
     },
   };
 }

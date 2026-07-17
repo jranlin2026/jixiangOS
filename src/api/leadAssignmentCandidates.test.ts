@@ -268,7 +268,8 @@ assert.deepEqual(
 
 assert.deepEqual(
   ids(getScopedLeadAssignmentCandidates(users, baseConfig, 'customers', currentUserWithoutDepartment('user-sales-manager'))),
-  ['user-sales-a', 'user-sales-child', 'user-sales-manager', 'user-super-admin'],
+  ['user-sales-manager'],
+  '缺少可信部门 ID 时不得从浏览器存储补权，应收敛为本人范围',
 );
 
 assert.deepEqual(

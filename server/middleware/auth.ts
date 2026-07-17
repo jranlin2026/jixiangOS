@@ -11,6 +11,11 @@ export type AuthenticatedRequest = Request & {
   currentUser?: AuthenticatedUser;
 };
 
+export type PermissionRequirement = {
+  permissionKey: string;
+  action: string;
+};
+
 export function bearerToken(req: Request): string | undefined {
   const header = req.headers.authorization || '';
   const match = header.match(/^Bearer\s+(.+)$/i);
@@ -38,7 +43,7 @@ export function createRequireAuth(authService: AuthReader, permissionKey?: strin
 
 export function createRequireAnyPermission(
   authService: AuthReader,
-  permissionKeys: readonly string[],
+  permissionRequirements: readonly (string | PermissionRequirement)[],
   action = 'read',
 ): RequestHandler {
   return async (req: Request, res: Response, next: NextFunction) => {
@@ -49,7 +54,11 @@ export function createRequireAnyPermission(
       return;
     }
 
-    if (!permissionKeys.some((permissionKey) => hasPermission(user, permissionKey, action))) {
+    if (!permissionRequirements.some((requirement) => (
+      typeof requirement === 'string'
+        ? hasPermission(user, requirement, action)
+        : hasPermission(user, requirement.permissionKey, requirement.action)
+    ))) {
       res.status(403).json({ code: 403, data: null, message: 'Forbidden' });
       return;
     }

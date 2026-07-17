@@ -18,15 +18,16 @@ const user = {
 };
 
 assert.equal(isLegacyStorageKeyRegistered(STORAGE_KEYS.CUSTOMERS), true);
-assert.equal(canAccessLegacyStorageKey(user, STORAGE_KEYS.CUSTOMERS, 'read'), true);
+assert.equal(canAccessLegacyStorageKey(user, STORAGE_KEYS.CUSTOMERS, 'read'), false);
 assert.equal(canAccessLegacyStorageKey(user, STORAGE_KEYS.CUSTOMERS, 'write'), false);
+assert.equal(canAccessLegacyStorageKey(user, STORAGE_KEYS.CUSTOMERS, 'runtime'), false);
 assert.equal(canAccessLegacyStorageKey(user, STORAGE_KEYS.COMMISSIONS, 'read'), false);
 const readOnlyAllUser = {
   ...user,
   id: 'user-read-only-all',
   permissions: [{ module: '全部', actions: ['read'] }],
 };
-assert.equal(canAccessLegacyStorageKey(readOnlyAllUser, STORAGE_KEYS.CUSTOMERS, 'read'), true);
+assert.equal(canAccessLegacyStorageKey(readOnlyAllUser, STORAGE_KEYS.CUSTOMERS, 'read'), false);
 assert.equal(canAccessLegacyStorageKey(readOnlyAllUser, STORAGE_KEYS.CUSTOMERS, 'write'), false);
 const financeRuleEditor = {
   ...user,
@@ -44,8 +45,9 @@ const commandOnlyWriter = {
     { module: PERMISSION_KEYS.ORDER_EDIT, actions: ['read', 'write'] },
     { module: PERMISSION_KEYS.ORDER_REVIEW_LIST, actions: ['read'] },
     { module: PERMISSION_KEYS.ORDER_REVIEW, actions: ['read', 'write'] },
-    { module: PERMISSION_KEYS.CUSTOMER_EDIT, actions: ['read', 'write'] },
-    { module: PERMISSION_KEYS.CUSTOMER_ASSIGN, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.CUSTOMER_TRANSFER, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS, actions: ['read', 'write'] },
     { module: PERMISSION_KEYS.LEADS_CREATE, actions: ['read', 'write'] },
     { module: PERMISSION_KEYS.LEADS_FOLLOW, actions: ['read', 'write'] },
     { module: PERMISSION_KEYS.DELIVERY_MOVE_CARD, actions: ['read', 'write'] },

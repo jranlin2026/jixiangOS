@@ -2,15 +2,18 @@ import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import express, { type RequestHandler } from 'express';
 import type { AuthenticatedUser } from '../../src/types/auth';
+import type { Customer } from '../../src/types/customer';
 import type { CustomerTag, CustomerTagCatalog, CustomerTagGroup } from '../../src/types/tag';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
+import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import { failure, success } from '../api/response';
+import { createCustomerBusinessRecordRepository } from './customerBusinessRecordRepository';
+import { customerWriteConflictResponse } from './customerWriteConflict';
 import { validateManualTagSelection } from './customerTagPolicy';
 
 type CatalogPrisma = {
   businessRecord: Prisma.TransactionClient['businessRecord'];
   leadRecord?: Prisma.TransactionClient['leadRecord'];
-  role: { findUnique(args: { where: { id: string } }): Promise<{ code: string; isActive: boolean } | null> };
   $transaction<T>(fn: (tx: any) => Promise<T>): Promise<T>;
 };
 
@@ -87,6 +90,8 @@ export async function catalogWriteTransaction<T>(prisma: CatalogPrisma, operatio
     });
   } catch (error) {
     if (error instanceof CatalogLockError) return failure(error.message, 503) as T;
+    const conflict = customerWriteConflictResponse(error);
+    if (conflict) return conflict as T;
     throw error;
   }
 }
@@ -164,14 +169,12 @@ async function validateAffectedAssignments(tx: any, catalog: CustomerTagCatalog,
 }
 
 export function createCustomerTagService(prisma: CatalogPrisma) {
-  async function requireSuperAdmin(user: AuthenticatedUser) {
-    if (!user.roleId) return false;
-    const role = await prisma.role.findUnique({ where: { id: user.roleId } });
-    return role?.isActive === true && role.code === 'super_admin';
-  }
+  const canManageCatalog = (user: AuthenticatedUser) => (
+    hasPermission(user, PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS, 'write')
+  );
 
   async function createGroup(input: GroupInput, user: AuthenticatedUser) {
-    if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
+    if (!canManageCatalog(user)) return failure('无权管理客户标签目录', 403);
     const validationError = validateInput(input, GROUP_FIELDS, true, 'group');
     if (validationError) return failure(validationError, 400);
     const name = normalizeName(input.name);
@@ -192,7 +195,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
   }
 
   async function updateGroup(id: string, input: GroupInput, user: AuthenticatedUser) {
-    if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
+    if (!canManageCatalog(user)) return failure('无权管理客户标签目录', 403);
     const validationError = validateInput(input, GROUP_FIELDS, false, 'group');
     if (validationError) return failure(validationError, 400);
     return catalogWriteTransaction(prisma, async (tx) => {
@@ -222,7 +225,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
   }
 
   async function createTag(input: TagInput, user: AuthenticatedUser) {
-    if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
+    if (!canManageCatalog(user)) return failure('无权管理客户标签目录', 403);
     const validationError = validateInput(input, TAG_FIELDS, true, 'tag');
     if (validationError) return failure(validationError, 400);
     const name = normalizeName(input.name);
@@ -239,7 +242,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
   }
 
   async function updateTag(id: string, input: TagInput, user: AuthenticatedUser) {
-    if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
+    if (!canManageCatalog(user)) return failure('无权管理客户标签目录', 403);
     const validationError = validateInput(input, TAG_FIELDS, false, 'tag');
     if (validationError) return failure(validationError, 400);
     return catalogWriteTransaction(prisma, async (tx) => {
@@ -268,7 +271,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
   }
 
   async function deleteTag(id: string, user: AuthenticatedUser) {
-    if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
+    if (!canManageCatalog(user)) return failure('无权管理客户标签目录', 403);
     return catalogWriteTransaction(prisma, async (tx) => {
       const catalog = await loadCustomerTagCatalog(tx, true);
       const tag = catalog.tags.find((item) => item.id === id);
@@ -281,7 +284,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
   }
 
   async function deleteGroup(id: string, user: AuthenticatedUser) {
-    if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
+    if (!canManageCatalog(user)) return failure('无权管理客户标签目录', 403);
     return catalogWriteTransaction(prisma, async (tx) => {
       const catalog = await loadCustomerTagCatalog(tx, true);
       const group = catalog.groups.find((item) => item.id === id);
@@ -294,7 +297,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
   }
 
   async function mergeTag(sourceId: string, targetId: string, user: AuthenticatedUser) {
-    if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
+    if (!canManageCatalog(user)) return failure('无权管理客户标签目录', 403);
     if (!sourceId || sourceId === targetId) return failure('合并目标无效', 409);
     return catalogWriteTransaction(prisma, async (tx) => {
       const catalog = await loadCustomerTagCatalog(tx, true);
@@ -306,8 +309,28 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
       const targetGroup = catalog.groups.find((group) => group.id === target.groupId);
       if (!targetGroup || !targetGroup.isActive) return failure('目标标签所属分组必须存在且为启用状态', 409);
       const audit = { id: randomUUID(), type: 'tag_merge', title: '合并客户标签', content: `${source.name} → ${target.name}`, operator: user.name, createdAt: now() };
-      const businessRows = await tx.businessRecord.findMany({ where: { domain: { in: [STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.LEADS] } } });
+      const customerRepository = createCustomerBusinessRecordRepository(tx);
+      const businessRows = (await tx.businessRecord.findMany({ where: { domain: { in: [STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.LEADS] } } }))
+        .sort((a, b) => `${a.domain}:${a.recordId}`.localeCompare(`${b.domain}:${b.recordId}`));
       for (const row of businessRows) {
+        if (row.domain === STORAGE_KEYS.CUSTOMERS) {
+          const snapshot = await customerRepository.lockById(String(row.recordId));
+          if (!snapshot) continue;
+          const customer = snapshot.customer;
+          if (!Array.isArray(customer.manualTagIds) || !customer.manualTagIds.includes(sourceId)) continue;
+          const manualTagIds = [...new Set(customer.manualTagIds.map((id) => id === sourceId ? targetId : id))];
+          const tags = manualTagIds.map((id) => catalog.tags.find((tag) => tag.id === id)?.name)
+            .filter((name): name is string => Boolean(name));
+          const updatedCustomer: Customer = {
+            ...customer,
+            manualTagIds,
+            tags,
+            activityRecords: [audit as any, ...(customer.activityRecords || [])],
+            updatedAt: audit.createdAt,
+          };
+          await customerRepository.compareAndSave(snapshot, updatedCustomer, new Date(audit.createdAt));
+          continue;
+        }
         const value = object(row.data);
         if (!Array.isArray(value.manualTagIds) || !value.manualTagIds.includes(sourceId)) continue;
         const manualTagIds = [...new Set(value.manualTagIds.map((id: string) => id === sourceId ? targetId : id))];
@@ -333,7 +356,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
   }
 
   async function mergeGroup(sourceId: string, targetId: string, user: AuthenticatedUser) {
-    if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
+    if (!canManageCatalog(user)) return failure('无权管理客户标签目录', 403);
     if (!sourceId || !targetId || sourceId === targetId) return failure('分组合并目标无效', 409);
     return catalogWriteTransaction(prisma, async (tx) => {
       const catalog = await loadCustomerTagCatalog(tx, true);
@@ -365,7 +388,7 @@ export function createCustomerTagService(prisma: CatalogPrisma) {
   }
 
   async function reorderTags(groupId: string, tagIds: string[], user: AuthenticatedUser) {
-    if (!await requireSuperAdmin(user)) return failure('仅超级管理员可管理标签目录', 403);
+    if (!canManageCatalog(user)) return failure('无权管理客户标签目录', 403);
     if (!groupId || !Array.isArray(tagIds) || tagIds.some((id) => typeof id !== 'string' || !id.trim()) || new Set(tagIds).size !== tagIds.length) {
       return failure('标签排序数据无效', 400);
     }

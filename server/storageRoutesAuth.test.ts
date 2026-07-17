@@ -10,6 +10,7 @@ const runtimeStorageRouteSource = readFileSync(
 
 for (const [method, route] of [
   ['get', '/api/settings/users'],
+  ['get', '/api/settings/assignable-users'],
   ['get', '/api/settings/assignable-directory'],
   ['get', '/api/settings/delivery-assignment'],
   ['put', '/api/settings/delivery-assignment'],
@@ -103,7 +104,53 @@ assert.match(
 );
 
 assert.match(source, /app\.get\('\/api\/settings\/users', requireOrganizationReadAccess,/);
+assert.match(
+  source,
+  /app\.get\('\/api\/customers\/manageable-users', requireCustomerManageableUsersAccess, createCustomerManageableUsersHandler\(customerManageableUsersService\)\);/,
+  '服务端必须实际挂载客户专用可管理人员目录',
+);
+assert.match(
+  source,
+  /const requireAssignableUsersAccess = createRequireAnyPermission\(authService, assignableUsersPermissions\);/,
+  '候选人接口必须通过 requireAny 校验用途权限',
+);
 assert.match(source, /app\.get\('\/api\/settings\/assignable-directory', requireAssignableUsersAccess,/);
+assert.match(
+  source,
+  /app\.get\('\/api\/settings\/assignable-users', requireAssignableUsersAccess, async \(_req: express\.Request, res: express\.Response\) => \{\s*res\.json\(await settingsService\.listAssignableUsers\(\)\);\s*\}\);/,
+  '共享 assignable-users 必须保持跨模块候选人语义，不接受 customer scope 请求上下文',
+);
+const assignableUsersPermissionSource = source.slice(
+  source.indexOf('const assignableUsersPermissions = ['),
+  source.indexOf('const runtimeStorageKeys = ['),
+);
+for (const permissionKey of [
+  'SETTINGS_DELIVERY_ASSIGNMENT',
+  'LEADS_FLOW_CONFIG',
+  'CUSTOMER_SET_TODOS',
+  'CUSTOMER_TRANSFER',
+  'AFTER_SALES_RECOVERY_CREATE',
+] as const) {
+  assert.match(
+    assignableUsersPermissionSource,
+    new RegExp(`PERMISSION_KEYS\\.${permissionKey}`),
+    `共享候选目录必须保留 ${permissionKey} 模块用途`,
+  );
+}
+for (const customerOnlyPermission of [
+  'CUSTOMER_EDIT_PROFILE',
+  'CUSTOMER_SET_TAGS',
+  'CUSTOMER_SET_PROGRESS',
+  'CUSTOMER_EDIT_ATTRIBUTION',
+  'CUSTOMER_RELEASE_TO_POOL',
+  'CUSTOMER_DELETE',
+] as const) {
+  assert.doesNotMatch(
+    assignableUsersPermissionSource,
+    new RegExp(`PERMISSION_KEYS\\.${customerOnlyPermission}`),
+    `客户专用叶子 ${customerOnlyPermission} 不得扩张共享候选目录的访问面`,
+  );
+}
 assert.match(source, /app\.get\('\/api\/settings\/delivery-assignment', requireDeliveryAssignmentReadAccess,/);
 assert.match(source, /app\.put\('\/api\/settings\/delivery-assignment', requireDeliveryAssignmentWriteAccess,/);
 assert.match(source, /app\.post\('\/api\/settings\/users\/leave-customer-count', requireOrganizationReadAccess,/);
@@ -131,13 +178,21 @@ assert.match(source, /app\.post\('\/api\/ai\/config\/test', requireAiConfigWrite
 
 assert.match(source, /const requireCustomerListAccess = createRequireAuth\(authService, PERMISSION_KEYS\.CUSTOMER_LIST\);/);
 assert.match(source, /const requireCustomerTagSettingsReadAccess = createRequireAuth\(authService, PERMISSION_KEYS\.SETTINGS_CUSTOMER_TAGS\);/);
+assert.match(source, /const requireCustomerTagManageAccess = createRequireAuth\(authService, PERMISSION_KEYS\.SETTINGS_CUSTOMER_TAGS, 'write'\);/);
 assert.match(source, /requireCustomerRead: requireCustomerListAccess/);
 assert.match(source, /requireLeadRead: requireCustomerTagLeadReadAccess/);
 assert.match(source, /requireSettingsRead: requireCustomerTagSettingsReadAccess/);
+assert.match(source, /requireManage: requireCustomerTagManageAccess/);
+assert.match(source, /createCustomerTagMigrationRouter\(\{[\s\S]{0,160}requireAuth: requireDataMaintenanceWriteAccess/);
 assert.match(source, /const requireCustomerCreateAccess = createRequireAuth\(authService, PERMISSION_KEYS\.CUSTOMER_CREATE, 'write'\);/);
-assert.match(source, /const requireCustomerEditAccess = createRequireAuth\(authService, PERMISSION_KEYS\.CUSTOMER_EDIT, 'write'\);/);
-assert.match(source, /const requireCustomerAssignAccess = createRequireAuth\(authService, PERMISSION_KEYS\.CUSTOMER_ASSIGN, 'write'\);/);
+assert.match(source, /const requireCustomerUpdateAccess = createRequireAnyPermission\(authService, \[/);
+assert.match(source, /const requireCustomerProfileEditAccess = createRequireAuth\(authService, PERMISSION_KEYS\.CUSTOMER_EDIT_PROFILE, 'write'\);/);
+assert.match(source, /const requireCustomerTodoWriteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.CUSTOMER_SET_TODOS, 'write'\);/);
+assert.match(source, /const requireCustomerTransferAccess = createRequireAuth\(authService, PERMISSION_KEYS\.CUSTOMER_TRANSFER, 'write'\);/);
+assert.match(source, /const requireCustomerReleaseAccess = createRequireAuth\(authService, PERMISSION_KEYS\.CUSTOMER_RELEASE_TO_POOL, 'write'\);/);
 assert.match(source, /const requireCustomerPublicPoolClaimAccess = createRequireAuth\(authService, PERMISSION_KEYS\.CUSTOMER_PUBLIC_POOL_CLAIM, 'write'\);/);
+assert.match(source, /const requireCustomerDeleteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.CUSTOMER_DELETE, 'delete'\);/);
+assert.doesNotMatch(source, /const requireCustomer(?:Edit|Assign)Access/);
 assert.match(source, /const requireLeadListAccess = createRequireAuth\(authService, PERMISSION_KEYS\.LEADS_LIST\);/);
 assert.match(source, /const requireLeadCreateAccess = createRequireAuth\(authService, PERMISSION_KEYS\.LEADS_CREATE, 'write'\);/);
 assert.match(source, /const requireLeadConvertAccess = createRequireAuth\(authService, PERMISSION_KEYS\.LEADS_CONVERT, 'write'\);/);
@@ -148,17 +203,17 @@ assert.match(source, /const requireLeadDeleteAccess = createRequireAuth\(authSer
 assert.match(source, /app\.get\('\/api\/customers', requireCustomerListAccess,/);
 assert.match(source, /app\.get\('\/api\/customers\/:id', requireCustomerListAccess,/);
 assert.match(source, /app\.post\('\/api\/customers', requireCustomerCreateAccess,/);
-assert.match(source, /app\.post\('\/api\/customers\/:id\/follow-ups', requireCustomerEditAccess,/);
+assert.match(source, /app\.post\('\/api\/customers\/:id\/follow-ups', requireCustomerProfileEditAccess,/);
 assert.match(source, /app\.get\('\/api\/customers\/:id\/todos', requireCustomerListAccess,/);
 assert.match(source, /app\.get\('\/api\/customer-todos\/my', requireCustomerListAccess,/);
-assert.match(source, /app\.post\('\/api\/customers\/:id\/todos', requireCustomerEditAccess,/);
-assert.match(source, /app\.put\('\/api\/customers\/:id\/todos\/:todoId', requireCustomerEditAccess,/);
+assert.match(source, /app\.post\('\/api\/customers\/:id\/todos', requireCustomerTodoWriteAccess,/);
+assert.match(source, /app\.put\('\/api\/customers\/:id\/todos\/:todoId', requireCustomerTodoWriteAccess,/);
 assert.match(source, /app\.post\('\/api\/customers\/:id\/todos\/:todoId\/complete', requireCustomerListAccess,/);
-assert.match(source, /app\.post\('\/api\/customers\/:id\/todos\/:todoId\/reopen', requireCustomerEditAccess,/);
-assert.match(source, /app\.post\('\/api\/customers\/:id\/todos\/:todoId\/cancel', requireCustomerEditAccess,/);
-assert.match(source, /app\.post\('\/api\/customers\/:id\/release', requireCustomerAssignAccess,/);
+assert.match(source, /app\.post\('\/api\/customers\/:id\/todos\/:todoId\/reopen', requireCustomerTodoWriteAccess,/);
+assert.match(source, /app\.post\('\/api\/customers\/:id\/todos\/:todoId\/cancel', requireCustomerTodoWriteAccess,/);
+assert.match(source, /app\.post\('\/api\/customers\/:id\/release', requireCustomerReleaseAccess,/);
 assert.match(source, /app\.post\('\/api\/customers\/:id\/claim', requireCustomerPublicPoolClaimAccess,/);
-assert.match(source, /app\.post\('\/api\/customers\/:id\/assign', requireCustomerAssignAccess,/);
+assert.match(source, /app\.post\('\/api\/customers\/:id\/assign', requireCustomerTransferAccess,/);
 const customerCreateRoute = source.slice(
   source.indexOf("app.post('/api/customers',"),
   source.indexOf("app.get('/api/customers',"),
@@ -168,7 +223,7 @@ assert.match(
   /res\.status\(result\.code === 0 \? 201 : result\.code >= 400 && result\.code < 500 \? result\.code : 500\)\.json\(result\);/,
   '新增客户必须保留 409 等明确的业务 HTTP 状态',
 );
-assert.match(source, /app\.put\('\/api\/customers\/:id', requireCustomerEditAccess,/);
+assert.match(source, /app\.put\('\/api\/customers\/:id', requireCustomerUpdateAccess,/);
 assert.match(source, /app\.delete\('\/api\/customers\/:id', requireCustomerDeleteAccess,/);
 assert.match(source, /app\.get\('\/api\/leads', requireLeadListAccess,/);
 assert.match(source, /app\.post\('\/api\/leads', requireLeadCreateAccess,/);
@@ -224,8 +279,9 @@ assert.match(
 assert.match(runtimeStorageRouteSource, /queryScope\(request\.query\.scope\) !== 'runtime'/);
 assert.match(source, /Legacy storage deletion is disabled/);
 assert.match(source, /app\.delete\('\/api\/storage', requireDataMaintenanceDeleteAccess,/);
-assert.match(source, /app\.post\('\/api\/crm-migration\/import', requireStorageAccess,/);
-assert.match(source, /crm-migration\/import[\s\S]{0,900}PERMISSION_KEYS\.SETTINGS_DATA_MAINTENANCE/);
-assert.match(source, /PERMISSION_KEYS\.CUSTOMER_CREATE/);
-assert.doesNotMatch(source, /crm-migration\/import[\s\S]{0,900}PERMISSION_KEYS\.LEADS_CREATE/);
-assert.match(source, /storageService\.importCrmMigration\(customers\)/);
+assert.match(
+  source,
+  /app\.post\('\/api\/crm-migration\/import', requireStorageAccess, createDisabledCrmCustomerImportHandler\(\)\);/,
+  '旧 CRM 客户导入入口必须固定返回 410，不得进入任何客户写服务',
+);
+assert.doesNotMatch(source, /storageService\.importCrmMigration\(/);

@@ -14,6 +14,7 @@ import type { Order } from '../../src/types/order';
 import type { Product } from '../../src/types/product';
 import { resolveProductDeliveryStages } from '../../src/shared/utils/deliveryStages';
 import type { ApplyOrderApprovalDownstreamEffects } from './orderApplicationService';
+import { createCustomerBusinessRecordRepository } from './customerBusinessRecordRepository';
 
 type JsonRow = { id: string; recordId: string; data: unknown; status?: string | null };
 type DirectoryUser = { id: string; name: string; departmentId?: string | null; isActive?: boolean; employmentStatus?: string };
@@ -189,19 +190,10 @@ function assigneeForRole(
 }
 
 async function applyCustomerProjection(transaction: Prisma.TransactionClient, order: Order, approvedAt: string): Promise<void> {
-  await transaction.$queryRaw(Prisma.sql`
-    SELECT id
-    FROM business_records
-    WHERE domain = ${STORAGE_KEYS.CUSTOMERS}
-      AND recordId = ${order.customerId}
-    LIMIT 1
-    FOR UPDATE
-  `);
-  const row = await transaction.businessRecord.findUnique({
-    where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: order.customerId } },
-  });
-  if (!row) throw new Error(`客户 ${order.customerId} 不存在，不能完成订单审核`);
-  const customer = parseJson<Customer>(row.data, '客户');
+  const customerRecords = createCustomerBusinessRecordRepository(transaction);
+  const snapshot = await customerRecords.lockById(order.customerId);
+  if (!snapshot) throw new Error(`客户 ${order.customerId} 不存在，不能完成订单审核`);
+  const customer = snapshot.customer;
   const orderRows = await transaction.businessRecord.findMany({
     where: { domain: STORAGE_KEYS.ORDERS, customerId: customer.id },
   });
@@ -247,18 +239,7 @@ async function applyCustomerProjection(transaction: Prisma.TransactionClient, or
     activityRecords,
     updatedAt: approvedAt,
   };
-  await transaction.businessRecord.update({
-    where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: order.customerId } },
-    data: {
-      title: updated.name || updated.company || updated.id,
-      status: updated.lifecycleStatusCode,
-      owner: updated.owner || null,
-      customerId: updated.id,
-      amount: updated.totalSpent,
-      eventAt: new Date(approvedAt),
-      data: jsonValue(updated),
-    },
-  });
+  await customerRecords.compareAndSave(snapshot, updated, new Date(approvedAt));
 }
 
 async function commissionRules(transaction: Prisma.TransactionClient): Promise<CommissionRule[]> {

@@ -41,7 +41,7 @@ import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SearchIcon from '@mui/icons-material/Search';
 import useCustomerStore from '../../store/useCustomerStore';
-import { customerApi, leadFlowApi, orderApi, settingsApi } from '../../api';
+import { customerApi, orderApi, settingsApi } from '../../api';
 import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, ROUTES, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
@@ -49,14 +49,13 @@ import CustomerDetail from './CustomerDetail';
 import CustomerForm from './CustomerForm';
 import { formatPhoneForDisplay } from '../../shared/utils/phoneNumber';
 import OrderForm from '../Orders/OrderForm';
-import type { Customer, CustomerFilters } from '../../types/customer';
-import type { LeadFlowConfig } from '../../types/lead';
+import type { Customer, CustomerFilters, CustomerManageableUser } from '../../types/customer';
 import type { Order, OrderApplication } from '../../types/order';
-import type { CustomerLevelConfig, LifecycleStatusConfig, User } from '../../types/settings';
+import type { CustomerLevelConfig, LifecycleStatusConfig } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import PermissionGate from '../../shared/auth/PermissionGate';
-import { PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { PERMISSION_KEYS, hasExplicitPermission } from '../../shared/utils/permissions';
 import useAuthStore from '../../store/useAuthStore';
 import ResizableHeaderCell, {
   getResizableCellSx,
@@ -67,12 +66,11 @@ import ResizableHeaderCell, {
   type ColumnWidthMap,
 } from '../../shared/components/ResizableTable';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
-import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import { ModuleHeader, ModulePage, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
-import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 import { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
 import CustomerTagFilter from './CustomerTagFilter';
 import { customerTagRequestSource, readCustomerTagFilterParams, writeCustomerTagFilterParams } from './customerTagFilterState';
+import { buildCustomerWriteActionPolicy, buildManageableOwnerIds } from './customerDetailPolicy';
 
 type CustomerColumn = {
   id: string;
@@ -258,8 +256,7 @@ const Customers: React.FC = () => {
   const [submittedOrderApplication, setSubmittedOrderApplication] = useState<OrderApplication | null>(null);
   const [ordersOpen, setOrdersOpen] = useState(false);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [leadFlowConfig, setLeadFlowConfig] = useState<LeadFlowConfig | null>(null);
+  const [manageableUsers, setManageableUsers] = useState<CustomerManageableUser[]>([]);
   const [lifecycleConfigs, setLifecycleConfigs] = useState<LifecycleStatusConfig[]>([]);
   const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
@@ -286,13 +283,8 @@ const Customers: React.FC = () => {
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(CUSTOMER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
 
   useEffect(() => {
-    settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
-      if (res.code === 0) {
-        setUsers(res.data.filter((user) => user.isActive));
-      }
-    });
-    leadFlowApi.fetchLeadFlowConfig().then((res) => {
-      if (res.code === 0) setLeadFlowConfig(res.data);
+    customerApi.fetchManageableUsers().then((res) => {
+      setManageableUsers(res.code === 0 ? res.data : []);
     });
     settingsApi.fetchLifecycleStatusConfigs().then((res) => {
       if (res.code === 0) setLifecycleConfigs(res.data);
@@ -331,11 +323,31 @@ const Customers: React.FC = () => {
     [orderedColumns, visibleColumnIds],
   );
   const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length);
-  const visibleOwnerUsers = useMemo(
-    () => getScopedLeadAssignmentCandidates(users, leadFlowConfig, 'customers', currentUser),
-    [currentUser, leadFlowConfig, users],
+  const visibleOwnerUsers = manageableUsers;
+  const customerWritePermissions = useMemo(() => ({
+    editProfile: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE, 'write'),
+    editAttribution: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_EDIT_ATTRIBUTION, 'write'),
+    setTags: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_SET_TAGS, 'write'),
+    setTodos: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_SET_TODOS, 'write'),
+    setProgress: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_SET_PROGRESS, 'write'),
+    transfer: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_TRANSFER, 'write'),
+    release: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, 'write'),
+    delete: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_DELETE, 'delete'),
+  }), [currentUser]);
+  const manageableOwnerIds = useMemo(
+    () => buildManageableOwnerIds(currentUser?.id, manageableUsers),
+    [currentUser?.id, manageableUsers],
   );
-  const isSuperAdmin = isSuperAdminRoleName(currentUser?.role);
+  const transferableOwnerIds = useMemo(
+    () => new Set(manageableUsers.map((user) => user.id)),
+    [manageableUsers],
+  );
+  const customerWriteActions = (customer: Customer) => buildCustomerWriteActionPolicy({
+    customer,
+    manageableOwnerIds,
+    permissions: customerWritePermissions,
+    readOnly: false,
+  }).actions;
   const isPublicPoolScope = customerScope === 'public_pool';
   const ownerFilterLabel = isPublicPoolScope ? '最后跟进人' : '销售负责人';
   const hasAdvancedFilters = Boolean(filters.sourceType || filters.leadSource || filters.industry || filters.city || filters.tagIds?.length || filters.withoutTags || filters.missingTagGroupId);
@@ -414,12 +426,13 @@ const Customers: React.FC = () => {
   };
 
   const handleReleaseCustomer = (customer: Customer) => {
+    if (!customerWriteActions(customer).release) return;
     setReleaseTarget(customer);
     setReleaseReason('');
   };
 
   const handleConfirmReleaseCustomer = async () => {
-    if (!releaseTarget) return;
+    if (!releaseTarget || !customerWriteActions(releaseTarget).release) return;
     const res = await customerApi.releaseCustomerToPublicPool(releaseTarget.id, releaseReason.trim() || '销售放弃跟进');
     if (res.code !== 0 || !res.data) {
       alert(res.message || '释放到公海失败');
@@ -434,8 +447,9 @@ const Customers: React.FC = () => {
   };
 
   const handleOpenAssignCustomer = (customer: Customer) => {
+    if (!customerWriteActions(customer).transfer) return;
     setAssignTarget(customer);
-    setAssignOwner(customer.owner || '');
+    setAssignOwner(customer.ownerId && transferableOwnerIds.has(customer.ownerId) ? customer.ownerId : '');
     setAssignReason('');
   };
 
@@ -447,7 +461,7 @@ const Customers: React.FC = () => {
   };
 
   const handleConfirmAssignCustomer = async () => {
-    if (!assignTarget || !assignOwner) return;
+    if (!assignTarget || !assignOwner || !transferableOwnerIds.has(assignOwner) || !customerWriteActions(assignTarget).transfer) return;
     setAssignSubmitting(true);
     try {
       const res = await customerApi.assignCustomerOwner(assignTarget.id, assignOwner, assignReason);
@@ -466,6 +480,7 @@ const Customers: React.FC = () => {
   };
 
   const handleOpenDeleteCustomer = (customer: Customer) => {
+    if (!customerWriteActions(customer).delete) return;
     setDeleteCustomerTarget(customer);
     setDeleteCustomerReason('');
   };
@@ -476,7 +491,7 @@ const Customers: React.FC = () => {
   };
 
   const handleConfirmDeleteCustomer = async () => {
-    if (!deleteCustomerTarget) return;
+    if (!deleteCustomerTarget || !customerWriteActions(deleteCustomerTarget).delete) return;
     const reason = deleteCustomerReason.trim();
     if (!reason) return;
     setDeleteCustomerSubmitting(true);
@@ -793,7 +808,9 @@ const Customers: React.FC = () => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {items.map((customer) => (
+            {items.map((customer) => {
+              const customerActions = customerWriteActions(customer);
+              return (
               <TableRow key={customer.id} hover>
                 {visibleColumns.map((column, columnIndex) => (
                   <TableCell
@@ -810,12 +827,14 @@ const Customers: React.FC = () => {
                 ))}
                 <TableCell align="center" sx={actionColumnSx}>
                   <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5 }}>
-                    {isSuperAdmin && (
+                    {customerActions.delete && (
+                    <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_DELETE} action="delete">
                       <Tooltip title="删除客户到业务回收站">
                         <IconButton size="small" color="error" onClick={() => handleOpenDeleteCustomer(customer)}>
                           <DeleteOutlineIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
+                    </PermissionGate>
                     )}
                     <Tooltip title="查看客户">
                       <IconButton size="small" color="primary" onClick={() => handleViewDetail(customer)}>
@@ -838,8 +857,8 @@ const Customers: React.FC = () => {
                         </IconButton>
                       </Tooltip>
                     </PermissionGate>
-                    {!isPublicPoolCustomer(customer) && (
-                      <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_ASSIGN} action="write">
+                    {!isPublicPoolCustomer(customer) && customerActions.transfer && (
+                      <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_TRANSFER} action="write">
                         <Tooltip title="分配销售">
                           <IconButton size="small" color="info" onClick={() => handleOpenAssignCustomer(customer)}>
                             <AssignmentIndIcon fontSize="small" />
@@ -855,19 +874,20 @@ const Customers: React.FC = () => {
                           </IconButton>
                         </Tooltip>
                       </PermissionGate>
-                    ) : (
-                      <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_ASSIGN} action="write">
+                    ) : customerActions.release ? (
+                      <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL} action="write">
                         <Tooltip title="放弃到公海">
                           <IconButton size="small" color="warning" onClick={() => handleReleaseCustomer(customer)}>
                             <ExitToAppIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       </PermissionGate>
-                    )}
+                    ) : null}
                   </Box>
                 </TableCell>
               </TableRow>
-            ))}
+              );
+            })}
             {items.length === 0 && (
               <TableRow>
                 <TableCell colSpan={visibleColumns.length + 1} align="center" sx={{ py: 6, color: '#9ca3af' }}>
@@ -983,7 +1003,14 @@ const Customers: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setReleaseTarget(null)}>取消</Button>
-          <Button color="warning" variant="contained" onClick={handleConfirmReleaseCustomer}>确认放弃</Button>
+          <Button
+            color="warning"
+            variant="contained"
+            onClick={handleConfirmReleaseCustomer}
+            disabled={!releaseTarget || !customerWriteActions(releaseTarget).release}
+          >
+            确认放弃
+          </Button>
         </DialogActions>
       </Dialog>
 
@@ -1005,12 +1032,12 @@ const Customers: React.FC = () => {
             >
               {visibleOwnerUsers.length === 0 && (
                 <MenuItem value="" disabled>
-                  当前角色数据范围内暂无可分配成员，请检查数据范围或线索流转参与成员配置。
+                  当前客户数据范围内暂无可分配成员。
                 </MenuItem>
               )}
               {visibleOwnerUsers.map((user) => (
                 <MenuItem key={user.id} value={user.id}>
-                  {user.name}（{user.positionName || user.account || '未设置职位'}）
+                  {user.name}（{user.positionName || '未设置职位'}）
                 </MenuItem>
               ))}
             </Select>
@@ -1027,7 +1054,11 @@ const Customers: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseAssignCustomer} disabled={assignSubmitting}>取消</Button>
-          <Button variant="contained" onClick={handleConfirmAssignCustomer} disabled={!assignOwner || assignSubmitting}>
+          <Button
+            variant="contained"
+            onClick={handleConfirmAssignCustomer}
+            disabled={!assignTarget || !assignOwner || !transferableOwnerIds.has(assignOwner) || assignSubmitting || !customerWriteActions(assignTarget).transfer}
+          >
             保存分配
           </Button>
         </DialogActions>
@@ -1063,7 +1094,12 @@ const Customers: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseDeleteCustomer} disabled={deleteCustomerSubmitting}>取消</Button>
-          <Button color="error" variant="contained" onClick={handleConfirmDeleteCustomer} disabled={!deleteCustomerReason.trim() || deleteCustomerSubmitting}>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={handleConfirmDeleteCustomer}
+            disabled={!deleteCustomerTarget || !deleteCustomerReason.trim() || deleteCustomerSubmitting || !customerWriteActions(deleteCustomerTarget).delete}
+          >
             确认删除
           </Button>
         </DialogActions>

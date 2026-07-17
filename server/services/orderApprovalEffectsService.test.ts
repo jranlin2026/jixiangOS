@@ -55,6 +55,7 @@ type Row = {
   domain: string;
   recordId: string;
   data: any;
+  updatedAt?: Date;
   status?: string | null;
   owner?: string | null;
   customerId?: string | null;
@@ -74,6 +75,8 @@ function fakeTransaction(options: {
   stages?: string[];
   rules?: any[];
   includeCustomer?: boolean;
+  customerDataId?: string;
+  forceCustomerVersionConflict?: boolean;
   users?: any[];
 } = {}) {
   const rows = new Map<string, Row>();
@@ -85,8 +88,9 @@ function fakeTransaction(options: {
       recordId: order.customerId,
       customerId: order.customerId,
       owner: order.owner,
+      updatedAt: new Date(now),
       data: {
-        id: order.customerId,
+        id: options.customerDataId || order.customerId,
         name: order.customerName,
         company: order.customerName,
         phone: '13900000000',
@@ -177,10 +181,27 @@ function fakeTransaction(options: {
         rows.set(target, { ...current, ...clone(data) });
         return clone(rows.get(target));
       },
+      updateMany: async ({ where, data }: any) => {
+        if (options.forceCustomerVersionConflict) return { count: 0 };
+        const current = Array.from(rows.values()).find((row) => row.id === where.id);
+        const matchesVersion = current?.updatedAt?.getTime() === where.updatedAt?.getTime();
+        if (!current || current.domain !== where.domain || current.recordId !== where.recordId || !matchesVersion) {
+          return { count: 0 };
+        }
+        const target = key(current.domain, current.recordId);
+        rows.set(target, {
+          ...current,
+          ...clone(data),
+          updatedAt: new Date(current.updatedAt!.getTime() + 1),
+        });
+        return { count: 1 };
+      },
     },
-    $queryRaw: async () => {
+    $queryRaw: async (query: any) => {
       customerLockQueries += 1;
-      return [];
+      const values = query?.values || [];
+      const row = rows.get(key(String(values[0] || ''), String(values[1] || '')));
+      return row ? [clone(row)] : [];
     },
   };
   return { tx, rows, get customerLockQueries() { return customerLockQueries; } };
@@ -293,6 +314,27 @@ function fakeTransaction(options: {
   await assert.rejects(
     () => createOrderApprovalDownstreamEffects()({ transaction: tx, application, order, reviewer, approvedAt: now } as any),
     /客户.*不存在/,
+  );
+}
+
+{
+  const { tx } = fakeTransaction({ customerDataId: 'corrupted-customer-id' });
+  await assert.rejects(
+    () => createOrderApprovalDownstreamEffects()({ transaction: tx, application, order, reviewer, approvedAt: now } as any),
+    /客户ID与 BusinessRecord\.recordId 不一致/,
+  );
+}
+
+{
+  const { tx, rows } = fakeTransaction({ forceCustomerVersionConflict: true });
+  await assert.rejects(
+    () => createOrderApprovalDownstreamEffects()({ transaction: tx, application, order, reviewer, approvedAt: now } as any),
+    /客户记录已更新，请刷新后重试/,
+  );
+  assert.equal(
+    Array.from(rows.values()).filter((row) => row.domain === STORAGE_KEYS.COMMISSIONS).length,
+    0,
+    '客户投影并发冲突后不得继续生成下游提成',
   );
 }
 

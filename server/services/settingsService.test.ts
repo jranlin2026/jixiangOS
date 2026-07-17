@@ -286,9 +286,28 @@ const leaveWithHandoff = await service.leaveUser('user-sales', {
   targetUserId: 'user-receiver',
   reason: 'leave handoff',
 });
-assert.equal(leaveWithHandoff.code, 0);
-assert.equal((customerRecord.data as any).owner, 'Receiver User');
-assert.match((customerRecord.data as any).activityRecords[0].content, /leave handoff/);
+assert.notEqual(leaveWithHandoff.code, 0);
+assert.match(leaveWithHandoff.message || '', /客户列表/);
+assert.equal((customerRecord.data as any).owner, 'Sales User');
+assert.equal(users.find((user) => user.id === 'user-sales')?.employmentStatus, 'active');
+
+customerRecord = {
+  ...customerRecord,
+  owner: 'Other User',
+  data: {
+    ...(customerRecord.data as any),
+    owner: 'Other User',
+    ownerId: 'user-sales',
+    ownerIdentityStatus: 'resolved',
+  },
+};
+const stableOwnerBlocked = await service.leaveUser('user-sales', {
+  customerAction: 'public_pool',
+  reason: '不得绕过客户命令',
+});
+assert.notEqual(stableOwnerBlocked.code, 0, '稳定 ownerId 必须阻止 settings 直接移交客户');
+assert.equal((customerRecord.data as any).ownerId, 'user-sales');
+assert.equal(users.find((user) => user.id === 'user-sales')?.employmentStatus, 'active');
 
 customerRecord = {
   ...customerRecord,
@@ -296,6 +315,8 @@ customerRecord = {
   data: {
     ...(customerRecord.data as any),
     owner: undefined,
+    ownerId: undefined,
+    ownerIdentityStatus: 'unresolved',
     activityRecords: [],
   },
 };

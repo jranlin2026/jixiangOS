@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
+import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import { createCustomerTagService, loadCustomerTagCatalog } from './customerTagService';
 
 const clone = <T>(value: T): T => structuredClone(value);
@@ -13,6 +14,8 @@ class FakePrisma {
   forceRowLockFailure = false;
   failNextCreate = false;
   failUpdateAfter = -1;
+  forceCustomerCompareConflict = false;
+  injectCustomerActivityAfterNextBatchRead = false;
   sqlContracts: string[] = [];
   roles = new Map([
     ['role-sales', { id: 'role-sales', code: 'sales', isActive: true }],
@@ -26,9 +29,30 @@ class FakePrisma {
   } as any;
 
   businessRecord = {
-    findMany: async ({ where }: any = {}) => Array.from(this.rows.values())
-      .filter((row) => !where?.domain || row.domain === where.domain || where.domain?.in?.includes(row.domain))
-      .map(clone),
+    findMany: async ({ where }: any = {}) => {
+      const rows = Array.from(this.rows.values())
+        .filter((row) => !where?.domain || row.domain === where.domain || where.domain?.in?.includes(row.domain))
+        .map(clone);
+      if (this.injectCustomerActivityAfterNextBatchRead && where?.domain?.in?.includes(STORAGE_KEYS.CUSTOMERS)) {
+        this.injectCustomerActivityAfterNextBatchRead = false;
+        const customerRow = Array.from(this.rows.values()).find((row) => row.domain === STORAGE_KEYS.CUSTOMERS);
+        if (customerRow) {
+          customerRow.data = {
+            ...customerRow.data,
+            activityRecords: [{
+              id: 'activity-concurrent',
+              type: 'update',
+              title: '并发客户动态',
+              operator: '其他命令',
+              createdAt: '2026-07-17T02:00:00.000Z',
+            }, ...(customerRow.data.activityRecords || [])],
+            updatedAt: '2026-07-17T02:00:00.000Z',
+          };
+          customerRow.updatedAt = new Date('2026-07-17T02:00:00.000Z');
+        }
+      }
+      return rows;
+    },
     findUnique: async ({ where }: any) => {
       const pair = where.domain_recordId;
       return clone(this.rows.get(rowKey(pair.domain, pair.recordId)) || null);
@@ -62,6 +86,21 @@ class FakePrisma {
       this.rows.set(key, row);
       return clone(row);
     },
+    updateMany: async ({ where, data }: any) => {
+      if (this.forceCustomerCompareConflict && where.domain === STORAGE_KEYS.CUSTOMERS) return { count: 0 };
+      const key = rowKey(where.domain, where.recordId);
+      const current = this.rows.get(key);
+      const expectedUpdatedAt = new Date(where.updatedAt).getTime();
+      const currentUpdatedAt = current?.updatedAt ? new Date(current.updatedAt).getTime() : Number.NaN;
+      if (!current || current.id !== where.id || currentUpdatedAt !== expectedUpdatedAt) return { count: 0 };
+      const row = {
+        ...current,
+        ...clone(data),
+        updatedAt: new Date(data.eventAt || current.updatedAt),
+      };
+      this.rows.set(key, row);
+      return { count: 1 };
+    },
     delete: async ({ where }: any) => {
       const pair = where.domain_recordId;
       const key = rowKey(pair.domain, pair.recordId);
@@ -93,6 +132,11 @@ class FakePrisma {
     this.sqlContracts.push(sql);
     if (/FROM business_records[\s\S]*FOR UPDATE/.test(sql)) {
       if (this.forceRowLockFailure) throw new Error('injected row lock failure');
+      const values = Array.isArray(query?.values) ? query.values : [];
+      if (values[0] === STORAGE_KEYS.CUSTOMERS) {
+        const row = this.rows.get(rowKey(STORAGE_KEYS.CUSTOMERS, String(values[1] || '')));
+        return row ? [clone(row)] : [];
+      }
       return [{ id: 'aaos_internal_locks:customer-tag-catalog-writes' }];
     }
     throw new Error(`Unexpected SQL: ${sql}`);
@@ -113,6 +157,8 @@ class FakePrisma {
   seed(domain: string, value: any) {
     this.rows.set(rowKey(domain, value.id), {
       id: rowKey(domain, value.id), domain, recordId: value.id, data: clone(value),
+      createdAt: new Date('2026-07-17T00:00:00.000Z'),
+      updatedAt: new Date('2026-07-17T00:00:00.000Z'),
     });
   }
   seedLead(value: any) {
@@ -124,20 +170,27 @@ const prisma = new FakePrisma();
 const service = createCustomerTagService(prisma as any);
 const salesUser = {
   id: 'sales', name: '销售', account: 'sales', email: '', phone: '', role: '超级管理员', roleId: 'role-sales',
-  isActive: true, permissions: [{ module: '全部', actions: ['read', 'write', 'delete'] }],
+  isActive: true, permissions: [{ module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] }],
 } as any;
-const superAdmin = { ...salesUser, id: 'admin', name: '管理员', roleId: 'role-admin' };
-const disabledAdmin = { ...superAdmin, id: 'disabled', roleId: 'role-disabled-admin' };
+const roleCodeOnlyAdmin = { ...salesUser, id: 'role-code-only', name: '角色代码管理员', roleId: 'role-admin' };
+const superAdmin = {
+  ...salesUser,
+  id: 'tag-manager',
+  name: '标签管理员',
+  permissions: [{ module: PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS, actions: ['read', 'write'] }],
+};
+const disabledAdmin = { ...roleCodeOnlyAdmin, id: 'disabled', roleId: 'role-disabled-admin' };
 const validGroup = { name: '客户阶段', color: '#1677ff', selectionMode: 'multiple', scope: 'both' } as const;
 
 assert.equal((await service.createGroup(validGroup, salesUser)).code, 403);
+assert.equal((await service.createGroup(validGroup, roleCodeOnlyAdmin)).code, 403, '角色代码不得授予标签目录管理权');
 assert.equal((await service.createGroup(validGroup, disabledAdmin)).code, 403);
 const createdGroup = await service.createGroup(validGroup, superAdmin);
 assert.equal(createdGroup.code, 0);
 assert.ok(prisma.rows.has('aaos_internal_locks:customer-tag-catalog-writes'));
 assert.equal((await loadCustomerTagCatalog(prisma as any, true)).groups.length, 1, '内部锁哨兵不得出现在标签目录');
 assert.equal((await service.createGroup(validGroup, superAdmin)).code, 409);
-assert.deepEqual(prisma.roleLookups.slice(0, 4), ['role-sales', 'role-disabled-admin', 'role-admin', 'role-admin']);
+assert.deepEqual(prisma.roleLookups, [], '标签目录授权不得查询或识别角色代码');
 
 const groupId = (createdGroup.data as any).id;
 assert.equal((await service.createGroup({ ...validGroup, id: 'injected' } as any, superAdmin)).code, 400);
@@ -186,6 +239,7 @@ const target = await service.createTag({ groupId, name: '重点客户' }, superA
 assert.equal(target.code, 0);
 const sourceId = inUseTagId;
 const targetId = (target.data as any).id;
+prisma.injectCustomerActivityAfterNextBatchRead = true;
 assert.equal((await service.mergeTag(sourceId, targetId, superAdmin)).code, 0);
 assert.equal(prisma.rows.get(rowKey(STORAGE_KEYS.TAGS, sourceId)).data.isActive, false, '停用 source 标签可治理合并到启用 target');
 const updatedCustomer = prisma.rows.get(rowKey(STORAGE_KEYS.CUSTOMERS, 'customer-1')).data;
@@ -193,8 +247,26 @@ assert.deepEqual(updatedCustomer.manualTagIds, [targetId]);
 assert.deepEqual(updatedCustomer.tags, ['重点客户']);
 assert.equal('manualTagNames' in updatedCustomer, false);
 assert.ok(updatedCustomer.activityRecords.some((item: any) => item.title === '合并客户标签'));
+assert.ok(updatedCustomer.activityRecords.some((item: any) => item.title === '并发客户动态'), '标签合并不得覆盖并发客户动态');
 const updatedLead = prisma.leads.get('lead-1').data;
 assert.deepEqual(updatedLead.manualTagIds, [targetId]);
+
+const conflictSource = await service.createTag({ groupId, name: '并发合并源' }, superAdmin);
+const conflictTarget = await service.createTag({ groupId, name: '并发合并目标' }, superAdmin);
+prisma.seed(STORAGE_KEYS.CUSTOMERS, {
+  id: 'customer-merge-conflict', name: '冲突客户', manualTagIds: [(conflictSource.data as any).id], activityRecords: [],
+});
+const mergeConflictSnapshot = clone(prisma.rows);
+prisma.forceCustomerCompareConflict = true;
+const customerMergeConflict = await service.mergeTag(
+  (conflictSource.data as any).id,
+  (conflictTarget.data as any).id,
+  superAdmin,
+);
+prisma.forceCustomerCompareConflict = false;
+assert.equal(customerMergeConflict.code, 409);
+assert.match(customerMergeConflict.message, /客户记录已更新/);
+assert.deepEqual(prisma.rows, mergeConflictSnapshot, '客户标签合并 CAS 冲突必须整事务回滚');
 
 const inactiveMergeTarget = await service.createTag({ groupId, name: '停用合并目标', isActive: false }, superAdmin);
 const activeMergeSource = await service.createTag({ groupId, name: '活动合并源' }, superAdmin);

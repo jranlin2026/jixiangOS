@@ -4,7 +4,6 @@ import { failure, success, type ApiResponse } from '../api/response';
 import { STORAGE_KEYS, normalizeResourceOwnership } from '../../src/shared/utils/constants';
 import {
   buildDataVisibilityScopeForUser,
-  canViewCustomer,
   type DataVisibilityScope,
 } from '../../src/shared/utils/dataVisibility';
 import type { AuthenticatedUser } from '../../src/types/auth';
@@ -16,6 +15,11 @@ import type { Department } from '../../src/types/department';
 import type { User } from '../../src/types/settings';
 import type { BusinessAttachment, BusinessAttachmentCategory } from '../../src/types/businessAttachment';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
+import {
+  buildCustomerAccessContextFromDirectory,
+  canReadCustomer,
+} from './customerAccessPolicy';
+import { customerWriteConflictResponse } from './customerWriteConflict';
 
 type OrderApplicationPrisma = Pick<
   PrismaClient,
@@ -338,8 +342,13 @@ async function canonicalizeOrderApplicationInput(
   if (customer.id !== customerId || customer.deletedAt) throw new OrderApprovalError(409, '客户不存在或已删除');
   if (product.id !== productId || product.isActive === false) throw new OrderApprovalError(409, '产品不存在或已停用');
 
-  const customerScope = commandScope(directory, actor, 'customers');
-  if (!canViewCustomer(customer, customerScope)) throw new OrderApprovalError(403, '无权为该客户提交订单申请');
+  const customerAccess = buildCustomerAccessContextFromDirectory(
+    actor,
+    directory.users,
+    directory.roles,
+    directory.departments,
+  );
+  if (!canReadCustomer(customerAccess, customer)) throw new OrderApprovalError(403, '无权为该客户提交订单申请');
   const sales = resolveSalesOwner(input, actor, directory, commandScope(directory, actor, 'orders'));
   const clean = cleanOrderInput(input);
   return {
@@ -895,6 +904,8 @@ export function createOrderApplicationService(
           if (error instanceof OrderApprovalError) {
             return failure<OrderApprovalResult>(error.message, error.responseCode);
           }
+          const customerConflict = customerWriteConflictResponse<OrderApprovalResult>(error);
+          if (customerConflict) return customerConflict;
           if (prismaCode(error) === 'P2034') {
             if (attempt < MAX_TRANSACTION_ATTEMPTS) continue;
             return failure<OrderApprovalResult>('订单审核发生并发冲突，请刷新后重试', 409);

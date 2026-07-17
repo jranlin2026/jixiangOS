@@ -19,12 +19,11 @@ import TaskAltOutlinedIcon from '@mui/icons-material/TaskAltOutlined';
 import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import useCustomerStore from '../../store/useCustomerStore';
-import type { Customer, CustomerActivityAttachment, CustomerActivityAttachmentCategory, CustomerActivityRecord } from '../../types/customer';
+import type { Customer, CustomerActivityAttachment, CustomerActivityAttachmentCategory, CustomerActivityRecord, CustomerManageableUser } from '../../types/customer';
 import type { AIBusinessCard } from '../../types/aiCard';
-import type { LeadFlowConfig } from '../../types/lead';
 import type { Order } from '../../types/order';
-import type { CustomerLevelConfig, LeadSourceConfig, User } from '../../types/settings';
-import { aiCardApi, customerApi, leadFlowApi, orderApi, settingsApi } from '../../api';
+import type { CustomerLevelConfig, LeadSourceConfig } from '../../types/settings';
+import { aiCardApi, customerApi, orderApi, settingsApi } from '../../api';
 import { formatCurrency, formatDate } from '../../shared/utils/formatters';
 import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelColor, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
@@ -34,15 +33,18 @@ import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import PhoneNumberInput from '../../shared/components/PhoneNumberInput';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { canCompleteContactField, canCompletePhoneField } from '../../shared/utils/contactEditLock';
-import { isSuperAdminRoleName } from '../../shared/utils/roles';
-import { formatPhoneForDisplay, getPhoneNumberError, normalizePhoneForStorage } from '../../shared/utils/phoneNumber';
+import { formatPhoneForDisplay, getPhoneNumberError } from '../../shared/utils/phoneNumber';
 import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution';
 import PermissionGate from '../../shared/auth/PermissionGate';
-import { PERMISSION_KEYS } from '../../shared/utils/permissions';
-import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
+import { hasExplicitPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
 import CustomerTagDialog from '../../shared/components/CustomerTagDialog';
 import CustomerTodoPanel from '../../shared/components/CustomerTodoPanel';
+import {
+  buildCustomerWriteActionPolicy,
+  buildCustomerDetailPatch,
+  buildManageableOwnerIds,
+} from './customerDetailPolicy';
 
 interface CustomerDetailProps {
   customer: Customer;
@@ -135,8 +137,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const [tagSaving, setTagSaving] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
   const [contracts, setContracts] = useState<ContractFile[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [leadFlowConfig, setLeadFlowConfig] = useState<LeadFlowConfig | null>(null);
+  const [manageableUsers, setManageableUsers] = useState<CustomerManageableUser[]>([]);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
   const [releaseDialogOpen, setReleaseDialogOpen] = useState(false);
@@ -146,7 +147,28 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const lifecycleConfig = getLifecycleConfigByCode(lifecycleCode);
   const isPublicPoolCustomer = lifecycleCode === 'public_pool';
   const canCreateOrderForCurrentCustomer = !isPublicPoolCustomer;
-  const canEditLockedContact = isSuperAdminRoleName(currentUser?.role);
+  const writePermissions = useMemo(() => ({
+    editProfile: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE, 'write'),
+    editAttribution: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_EDIT_ATTRIBUTION, 'write'),
+    setTags: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_SET_TAGS, 'write'),
+    setTodos: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_SET_TODOS, 'write'),
+    setProgress: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_SET_PROGRESS, 'write'),
+    transfer: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_TRANSFER, 'write'),
+    release: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, 'write'),
+    delete: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_DELETE, 'delete'),
+  }), [currentUser]);
+  const manageableOwnerIds = useMemo(
+    () => buildManageableOwnerIds(currentUser?.id, manageableUsers),
+    [currentUser?.id, manageableUsers],
+  );
+  const detailActions = useMemo(() => buildCustomerWriteActionPolicy({
+    customer: currentCustomer,
+    manageableOwnerIds,
+    permissions: writePermissions,
+    readOnly,
+  }), [currentCustomer, manageableOwnerIds, readOnly, writePermissions]);
+  const canOpenCustomerEditor = detailActions.actions.editProfile || detailActions.actions.editAttribution;
+  const canEditLockedContact = detailActions.actions.delete;
 
   useEffect(() => {
     setCurrentCustomer(customer);
@@ -170,13 +192,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
 
   useEffect(() => {
     if (!open) return;
-    settingsApi.fetchAssignableUsers({ isActive: true }).then((res) => {
-      if (res.code === 0) {
-        setUsers(res.data.filter((user) => user.isActive));
-      }
-    });
-    leadFlowApi.fetchLeadFlowConfig().then((res) => {
-      if (res.code === 0) setLeadFlowConfig(res.data);
+    customerApi.fetchManageableUsers().then((res) => {
+      setManageableUsers(res.code === 0 ? res.data : []);
     });
     settingsApi.fetchLeadSourceConfigs().then((res) => {
       if (res.code === 0) setSourceConfigs(res.data.filter((item) => item.isActive));
@@ -262,11 +279,6 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     }
     return options;
   }, [currentCustomer.customerLevel, customerLevelConfigs]);
-  const assignableUsers = useMemo(
-    () => getScopedLeadAssignmentCandidates(users, leadFlowConfig, 'customers', currentUser),
-    [currentUser, leadFlowConfig, users],
-  );
-
   const handleSourceSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const option = sourceOptions.find((item) => item.key === event.target.value);
     if (!option) return;
@@ -359,7 +371,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   };
 
   const handleAddFollowUp = async () => {
-    if (readOnly) return;
+    if (!detailActions.actions.addFollowUp) return;
     const content = followNote.trim();
     if (!content && !followAttachments.length) return;
     const updated = await addFollowUp(currentCustomer.id, content, undefined, followAttachments);
@@ -369,32 +381,23 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   };
 
   const handleSaveProfile = async () => {
-    if (readOnly || profileSaving) return;
-    const nextPhone = canEditLockedContact || canCompletePhoneField(currentCustomer.phone)
-      ? normalizePhoneForStorage(String(draft.phone || ''))
-      : currentCustomer.phone;
-    const nextCity = completeCityFromPhone(String(draft.city || ''), nextPhone);
-    const phoneError = getPhoneNumberError(nextPhone);
+    if (readOnly || profileSaving || !canOpenCustomerEditor) return;
+    const payload = buildCustomerDetailPatch({
+      current: currentCustomer,
+      draft,
+      canEditProfile: detailActions.actions.editProfile,
+      canEditAttribution: detailActions.actions.editAttribution,
+      canEditLockedContact,
+    });
+    const phoneError = getPhoneNumberError(String(payload.phone ?? currentCustomer.phone));
     if (phoneError) {
       alert(phoneError);
       return;
     }
-    const payload: Partial<Customer> = {
-      name: draft.name,
-      company: draft.company,
-      phone: nextPhone,
-      wechat: canEditLockedContact || canCompleteContactField(currentCustomer.wechat) ? String(draft.wechat || '').trim() : currentCustomer.wechat,
-      leadSource: draft.leadSource,
-      sourceName: draft.sourceName,
-      sourceType: normalizeResourceOwnership(draft.sourceType as string | undefined),
-      industry: draft.industry,
-      city: nextCity,
-      leadContributorId: draft.leadContributorId,
-      leadContributorName: draft.leadContributorName,
-      customerLevel: draft.customerLevel,
-      originalSalesTransferBy: draft.originalSalesTransferBy,
-      remark: draft.remark,
-    };
+    if (!Object.keys(payload).length) {
+      setEditing(false);
+      return;
+    }
     setProfileSaving(true);
     try {
       const res = await customerApi.updateCustomer(currentCustomer.id, payload);
@@ -414,7 +417,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   };
 
   const handleSaveTags = async (manualTagIds: string[]) => {
-    if (readOnly || tagSaving) return;
+    if (readOnly || tagSaving || !detailActions.actions.setTags) return;
     setTagSaving(true);
     try {
       const res = await customerApi.updateCustomer(currentCustomer.id, { manualTagIds });
@@ -452,13 +455,13 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   };
 
   const handleReleaseCurrentCustomer = () => {
-    if (readOnly) return;
+    if (!detailActions.actions.release) return;
     setReleaseReason('');
     setReleaseDialogOpen(true);
   };
 
   const handleConfirmReleaseCurrentCustomer = async () => {
-    if (readOnly) return;
+    if (!detailActions.actions.release) return;
     const res = await customerApi.releaseCustomerToPublicPool(currentCustomer.id, releaseReason.trim() || '销售放弃跟进');
     const releasedCustomer = res.data as Customer;
     if (res.code !== 0 || !releasedCustomer) {
@@ -496,7 +499,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
     const isResourceField = field === 'sourceType';
     const isCustomerLevelField = field === 'customerLevel';
     const currentValue = (draft[field] as string) || '';
-    const userFieldOptions = field === 'owner' ? assignableUsers : users;
+    const userFieldOptions = manageableUsers;
     const showCurrentUserOption = isUserField && currentValue && !userFieldOptions.some((user) => user.name === currentValue);
     const displayValue = field === 'createdAt' && currentCustomer.createdAt
       ? formatDate(currentCustomer.createdAt, 'yyyy-MM-dd HH:mm:ss')
@@ -526,7 +529,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                 select
                 value={(draft.leadContributorId as string) || ''}
                 onChange={(event) => {
-                  const user = users.find((item) => item.id === event.target.value);
+                  const user = manageableUsers.find((item) => item.id === event.target.value);
                   setDraft((prev) => ({
                     ...prev,
                     leadContributorId: user?.id || '',
@@ -537,7 +540,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                 fullWidth
               >
                 <MenuItem value="">无</MenuItem>
-                {users.map((user) => (
+                {manageableUsers.map((user) => (
                   <MenuItem key={user.id} value={user.id}>
                     {user.name}（{user.positionName || '未设置职位'}）
                   </MenuItem>
@@ -607,8 +610,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const renderSourceRow = () => (
     <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', borderBottom: '1px solid #eef2f7', minHeight: 38 }}>
       <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>来源</Box>
-      <Box sx={{ px: 1.5, py: editing ? 0.5 : 1, fontSize: 13 }}>
-        {editing ? (
+      <Box sx={{ px: 1.5, py: editing && detailActions.actions.editAttribution ? 0.5 : 1, fontSize: 13 }}>
+        {editing && detailActions.actions.editAttribution ? (
           <TextField select value={selectedSourceKey} onChange={handleSourceSelect} size="small" fullWidth>
             {parentSources.flatMap((parent) => {
               const options = sourceOptions.filter((option) => option.parentId === parent.id);
@@ -644,8 +647,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
   const renderRemarkRow = () => (
     <Box sx={{ display: 'grid', gridTemplateColumns: '96px 1fr', minHeight: 72 }}>
       <Box sx={{ bgcolor: '#f6f8fb', px: 1.25, py: 1, color: '#64748b', fontSize: 13 }}>客户备注</Box>
-      <Box sx={{ px: 1.5, py: editing ? 0.75 : 1, fontSize: 13 }}>
-        {editing ? (
+      <Box sx={{ px: 1.5, py: editing && detailActions.actions.editProfile ? 0.75 : 1, fontSize: 13 }}>
+        {editing && detailActions.actions.editProfile ? (
           <TextField
             value={draft.remark || ''}
             onChange={(event) => setDraft((prev) => ({ ...prev, remark: event.target.value }))}
@@ -686,7 +689,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
 
   const renderActivityTab = () => (
     <Box>
-      {!readOnly && (
+      {detailActions.actions.addFollowUp && (
         <Box sx={{ border: '1px solid #dbeafe', borderRadius: 1, bgcolor: '#fbfdff', mb: 2, overflow: 'hidden' }}>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr auto' }, gap: 1, p: 1 }}>
             <TextField
@@ -936,7 +939,9 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
           </Typography>
           <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.75, mt: 1 }}>
             <ManualTagDisplay ids={currentCustomer.manualTagIds} legacyNames={currentCustomer.tags} />
-            {!readOnly && <Button size="small" variant="outlined" onClick={() => setTagDialogOpen(true)}>+ 标签</Button>}
+            {detailActions.actions.setTags && (
+              <Button size="small" variant="outlined" onClick={() => setTagDialogOpen(true)}>+ 标签</Button>
+            )}
           </Box>
         </Box>
         <IconButton
@@ -951,7 +956,19 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '0.82fr 1.18fr' }, gap: 2, minHeight: '72vh' }}>
           <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', alignSelf: 'start' }}>
             <Box sx={{ p: 2, borderBottom: '1px solid #eef2f7', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Typography variant="subtitle2" sx={{ color: '#2196F3', fontWeight: 700 }}>资料</Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="subtitle2" sx={{ color: '#2196F3', fontWeight: 700 }}>资料</Typography>
+                {editing && !detailActions.actions.editAttribution && (
+                  <Tooltip title="需要“编辑客户归属”权限">
+                    <Chip size="small" variant="outlined" label="归属字段只读" />
+                  </Tooltip>
+                )}
+                {editing && !detailActions.actions.editProfile && (
+                  <Tooltip title="需要“编辑客户资料”权限">
+                    <Chip size="small" variant="outlined" label="资料字段只读" />
+                  </Tooltip>
+                )}
+              </Box>
               {!readOnly && (
                 <Box sx={{ display: 'flex', gap: 1 }}>
                   {isPublicPoolCustomer ? (
@@ -960,7 +977,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                         重新领取
                       </Button>
                     </PermissionGate>
-                  ) : (
+                  ) : detailActions.actions.release && (
                     <Button size="small" color="warning" variant="outlined" startIcon={<ExitToAppIcon />} onClick={handleReleaseCurrentCustomer}>
                       放弃到公海
                     </Button>
@@ -982,32 +999,34 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                       </Button>
                     </>
                   ) : (
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      onClick={() => setEditing(true)}
-                    >
-                      编辑资料
-                    </Button>
+                    canOpenCustomerEditor && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => setEditing(true)}
+                      >
+                        编辑资料
+                      </Button>
+                    )
                   )}
                 </Box>
               )}
             </Box>
             <Box>
-              {renderInfoRow('客户全名', 'name')}
-              {renderInfoRow('公司', 'company')}
-              {renderInfoRow('手机', 'phone', canEditLockedContact || canCompletePhoneField(currentCustomer.phone))}
-              {renderInfoRow('微信', 'wechat', canEditLockedContact || canCompleteContactField(currentCustomer.wechat))}
+              {renderInfoRow('客户全名', 'name', detailActions.actions.editProfile)}
+              {renderInfoRow('公司', 'company', detailActions.actions.editProfile)}
+              {renderInfoRow('手机', 'phone', detailActions.actions.editProfile && (canEditLockedContact || canCompletePhoneField(currentCustomer.phone)))}
+              {renderInfoRow('微信', 'wechat', detailActions.actions.editProfile && (canEditLockedContact || canCompleteContactField(currentCustomer.wechat)))}
               {renderStatusRow('生命周期', <Chip label={lifecycleConfig.name} size="small" sx={getLifecycleStatusTagSx(`${lifecycleCode} ${lifecycleConfig.name}`)} />)}
               {renderSourceRow()}
-              {renderInfoRow('资源归属', 'sourceType')}
-              {renderInfoRow('行业', 'industry')}
-              {renderInfoRow('城市', 'city')}
+              {renderInfoRow('资源归属', 'sourceType', detailActions.actions.editAttribution)}
+              {renderInfoRow('行业', 'industry', detailActions.actions.editProfile)}
+              {renderInfoRow('城市', 'city', detailActions.actions.editProfile)}
               {renderInfoRow('销售负责人', 'owner', false)}
               {renderInfoRow('线索录入人', 'leadInputBy', false)}
-              {renderInfoRow('线索贡献人', 'leadContributorName')}
-              {renderInfoRow('客户等级', 'customerLevel')}
-              {renderInfoRow('原销转人员', 'originalSalesTransferBy')}
+              {renderInfoRow('线索贡献人', 'leadContributorName', detailActions.actions.editAttribution)}
+              {renderInfoRow('客户等级', 'customerLevel', detailActions.actions.editProfile)}
+              {renderInfoRow('原销转人员', 'originalSalesTransferBy', detailActions.actions.editAttribution)}
               {renderInfoRow('累计消费', 'totalSpent', false)}
               {renderInfoRow('订单数', 'orderCount', false)}
               {renderInfoRow('创建时间', 'createdAt', false)}
@@ -1031,9 +1050,10 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                   customerId={currentCustomer.id}
                   customerName={currentCustomer.name}
                   ownerId={currentCustomer.ownerId}
-                  users={users}
+                  users={manageableUsers}
                   currentUserId={currentUser?.id}
-                  readOnly={readOnly || isPublicPoolCustomer}
+                  canManageTodos={detailActions.actions.setTodos}
+                  readOnly={readOnly}
                   onActivityChanged={refreshCurrentCustomer}
                 />
               )}

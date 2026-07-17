@@ -11,6 +11,10 @@ import type { Department } from '../../src/types/department';
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
+import {
+  createCustomerBusinessRecordRepository,
+  CustomerWriteConflictError,
+} from './customerBusinessRecordRepository';
 
 type OrderCommandPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$transaction'>;
 
@@ -236,16 +240,25 @@ async function recalculateCustomerProjection(
   customerId: string,
   changedAt: string,
 ): Promise<void> {
-  const customerRows = await transaction.$queryRaw<LockedOrderRow[]>`
-    SELECT id, domain, recordId, data
-    FROM business_records
-    WHERE domain = ${STORAGE_KEYS.CUSTOMERS}
-      AND recordId = ${customerId}
-    LIMIT 1
-    FOR UPDATE
-  `;
-  if (!customerRows[0]) return;
-  const customer = parseObject<Customer>(customerRows[0].data, '客户');
+  const customerRecords = createCustomerBusinessRecordRepository(transaction);
+  let snapshot;
+  try {
+    snapshot = await customerRecords.lockById(customerId);
+  } catch (error) {
+    if (
+      error instanceof SyntaxError
+      || (error instanceof Error && (
+        error.message.startsWith('客户 BusinessRecord')
+        || error.message.startsWith('客户ID')
+        || error.message.startsWith('客户记录必须来自')
+      ))
+    ) {
+      throw new OrderCommandError(409, `客户投影数据损坏：${error.message}`);
+    }
+    throw error;
+  }
+  if (!snapshot) return;
+  const customer = snapshot.customer;
   const orderRows = await transaction.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDERS } });
   const orders = orderRows
     .map((row) => parseObject<Order>(row.data, '订单'))
@@ -260,18 +273,14 @@ async function recalculateCustomerProjection(
     totalSpent: Math.round(orders.reduce((sum, order) => sum + Number(order.actualAmount || 0), 0) * 100) / 100,
     updatedAt: changedAt,
   };
-  await transaction.businessRecord.update({
-    where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: customerId } },
-    data: {
-      title: updated.name || updated.company || updated.id,
-      status: updated.lifecycleStatusCode || null,
-      owner: updated.owner || null,
-      customerId: updated.id,
-      amount: updated.totalSpent,
-      eventAt: new Date(changedAt),
-      data: jsonValue(updated),
-    },
-  });
+  try {
+    await customerRecords.compareAndSave(snapshot, updated, new Date(changedAt));
+  } catch (error) {
+    if (error instanceof CustomerWriteConflictError) {
+      throw new OrderCommandError(409, error.message);
+    }
+    throw error;
+  }
 }
 
 export function createOrderCommandService(

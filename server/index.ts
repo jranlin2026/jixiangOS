@@ -23,7 +23,8 @@ import { createAiChatClient, type AiChatMessage } from './services/aiChatClient'
 import { createCustomerListService } from './services/customerListService';
 import { createCustomerCommandService } from './services/customerCommandService';
 import { createCustomerTodoService } from './services/customerTodoService';
-import { backfillCustomerOwnerIdentities } from './services/customerOwnerIdentityService';
+import { createCustomerManageableUsersService } from './services/customerManageableUsersService';
+import { backfillCustomerOwnerIdentitiesResult } from './services/customerOwnerIdentityService';
 import { createCustomerTagRouter, createCustomerTagService } from './services/customerTagService';
 import { createCustomerTagMigrationRouter, createCustomerTagMigrationService } from './services/customerTagMigrationService';
 import { createLeadListService } from './services/leadListService';
@@ -46,6 +47,12 @@ import { createKeywordKnowledgeSearchProvider } from './services/enablement/know
 import { createEnablementKnowledgeRouter } from './routes/enablementKnowledgeRoutes';
 import { createCoCreationRouter } from './routes/coCreationRoutes';
 import { createRuntimeStorageGetHandler } from './routes/runtimeStorageRoutes';
+import { createDisabledCrmCustomerImportHandler } from './routes/crmMigrationRoutes';
+import { createCustomerFollowUpHandler } from './routes/customerFollowUpRoutes';
+import {
+  CUSTOMER_MANAGEABLE_USERS_PERMISSION_REQUIREMENTS,
+  createCustomerManageableUsersHandler,
+} from './routes/customerManageableUsersRoutes';
 import { createCoCreationService } from './services/coCreation/coCreationService';
 import {
   filterAssetStorageData,
@@ -90,10 +97,8 @@ const aiChatClient = createAiChatClient({ configReader: aiConfigService });
 const coCreationService = createCoCreationService({ prisma, aiClient: aiChatClient });
 const customerListService = createCustomerListService(prisma);
 const customerCommandService = createCustomerCommandService(prisma);
-const customerTodoService = createCustomerTodoService(
-  prisma,
-  (customerId, user) => customerListService.getById(customerId, user),
-);
+const customerTodoService = createCustomerTodoService(prisma);
+const customerManageableUsersService = createCustomerManageableUsersService(prisma);
 const customerTagService = createCustomerTagService(prisma);
 const customerTagMigrationService = createCustomerTagMigrationService(prisma as any);
 const leadListService = createLeadListService(prisma);
@@ -137,11 +142,24 @@ const requireCoCreationAccess = createRequireAuth(authService);
 const requireCustomerListAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_LIST);
 const requireCustomerTagLeadReadAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_DETAIL);
 const requireCustomerTagSettingsReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS);
+const requireCustomerTagManageAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS, 'write');
 const requireCustomerCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_CREATE, 'write');
-const requireCustomerEditAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_EDIT, 'write');
-const requireCustomerAssignAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_ASSIGN, 'write');
+const requireCustomerUpdateAccess = createRequireAnyPermission(authService, [
+  PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE,
+  PERMISSION_KEYS.CUSTOMER_SET_PROGRESS,
+  PERMISSION_KEYS.CUSTOMER_SET_TAGS,
+  PERMISSION_KEYS.CUSTOMER_EDIT_ATTRIBUTION,
+], 'write');
+const requireCustomerProfileEditAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE, 'write');
+const requireCustomerTodoWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_SET_TODOS, 'write');
+const requireCustomerTransferAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_TRANSFER, 'write');
+const requireCustomerReleaseAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, 'write');
 const requireCustomerPublicPoolClaimAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, 'write');
-const requireCustomerDeleteAccess = createRequireAuth(authService, '全部', 'delete');
+const requireCustomerDeleteAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_DELETE, 'delete');
+const requireCustomerManageableUsersAccess = createRequireAnyPermission(
+  authService,
+  CUSTOMER_MANAGEABLE_USERS_PERMISSION_REQUIREMENTS,
+);
 const requireLeadListAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_LIST);
 const requireLeadCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_CREATE, 'write');
 const requireLeadConvertAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_CONVERT, 'write');
@@ -168,7 +186,8 @@ const requireEnablementPublish = createRequireAuth(authService, PERMISSION_KEYS.
 const assignableUsersPermissions = [
   PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT,
   PERMISSION_KEYS.LEADS_FLOW_CONFIG,
-  PERMISSION_KEYS.CUSTOMER_ASSIGN,
+  PERMISSION_KEYS.CUSTOMER_TRANSFER,
+  PERMISSION_KEYS.CUSTOMER_SET_TODOS,
   PERMISSION_KEYS.FINANCE_SETTLEMENT,
   PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT,
   PERMISSION_KEYS.FINANCE_PAYOUT,
@@ -321,50 +340,26 @@ app.get('/api/ready', async (_req, res) => {
 });
 app.use('/api/customer-tags', createCustomerTagMigrationRouter({
   service: customerTagMigrationService,
-  requireAuth: requireStorageAccess,
+  requireAuth: requireDataMaintenanceWriteAccess,
 }));
 app.use('/api/customer-tags', createCustomerTagRouter({
   service: customerTagService,
   requireCustomerRead: requireCustomerListAccess,
   requireLeadRead: requireCustomerTagLeadReadAccess,
   requireSettingsRead: requireCustomerTagSettingsReadAccess,
-  requireManage: requireStorageAccess,
+  requireManage: requireCustomerTagManageAccess,
 }));
 
-app.post('/api/crm-migration/import', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
-  const customers = req.body?.customers;
-  if (!Array.isArray(customers)) {
-    res.status(400).json({ code: 400, data: null, message: 'customers must be an array' });
-    return;
-  }
-
-  const actor = req.currentUser!;
-  if (
-    !hasPermission(actor, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'write')
-    || (customers.length > 0 && !hasPermission(actor, PERMISSION_KEYS.CUSTOMER_CREATE, 'write'))
-  ) {
-    res.status(403).json({ code: 403, data: null, message: 'Forbidden' });
-    return;
-  }
-
-  try {
-    const result = await storageService.importCrmMigration(customers);
-    res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
-  } catch (error) {
-    res.status(500).json({
-      code: 500,
-      data: null,
-      message: error instanceof Error ? error.message : 'EC CRM migration import failed',
-    });
-  }
-});
+app.post('/api/crm-migration/import', requireStorageAccess, createDisabledCrmCustomerImportHandler());
 
 app.get('/api/crm-migration/customer-owner-identities/preview', requireDataMaintenanceWriteAccess, async (_req, res) => {
-  res.json(success(await backfillCustomerOwnerIdentities(prisma, false)));
+  const result = await backfillCustomerOwnerIdentitiesResult(prisma, false);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
 });
 
 app.post('/api/crm-migration/customer-owner-identities/apply', requireDataMaintenanceWriteAccess, async (_req, res) => {
-  res.json(success(await backfillCustomerOwnerIdentities(prisma, true)));
+  const result = await backfillCustomerOwnerIdentitiesResult(prisma, true);
+  res.status(result.code === 0 ? 200 : result.code).json(result);
 });
 
 app.post('/api/customers', requireCustomerCreateAccess, async (req: AuthenticatedRequest, res) => {
@@ -402,7 +397,9 @@ app.get('/api/customers', requireCustomerListAccess, async (req: AuthenticatedRe
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.put('/api/customers/:id', requireCustomerEditAccess, async (req: AuthenticatedRequest, res) => {
+app.get('/api/customers/manageable-users', requireCustomerManageableUsersAccess, createCustomerManageableUsersHandler(customerManageableUsersService));
+
+app.put('/api/customers/:id', requireCustomerUpdateAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerCommandService.updateCustomer(
     routeParam(req.params.id),
     req.body || {},
@@ -420,15 +417,7 @@ app.delete('/api/customers/:id', requireCustomerDeleteAccess, async (req: Authen
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
-app.post('/api/customers/:id/follow-ups', requireCustomerEditAccess, async (req: AuthenticatedRequest, res) => {
-  const result = await customerListService.addFollowUp(routeParam(req.params.id), {
-    content: String(req.body?.content || ''),
-    operator: typeof req.body?.operator === 'string' ? req.body.operator : undefined,
-    type: req.body?.type,
-    attachments: req.body?.attachments,
-  }, req.currentUser);
-  res.status(result.code === 0 ? 200 : result.code === 404 ? 404 : 400).json(result);
-});
+app.post('/api/customers/:id/follow-ups', requireCustomerProfileEditAccess, createCustomerFollowUpHandler(customerListService));
 
 app.get('/api/customers/:id', requireCustomerListAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerListService.getById(routeParam(req.params.id), req.currentUser);
@@ -445,12 +434,12 @@ app.get('/api/customer-todos/my', requireCustomerListAccess, async (req: Authent
   res.status(200).json(result);
 });
 
-app.post('/api/customers/:id/todos', requireCustomerEditAccess, async (req: AuthenticatedRequest, res) => {
+app.post('/api/customers/:id/todos', requireCustomerTodoWriteAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerTodoService.create(routeParam(req.params.id), req.body || {}, req.currentUser!);
   res.status(result.code === 0 ? 201 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
-app.put('/api/customers/:id/todos/:todoId', requireCustomerEditAccess, async (req: AuthenticatedRequest, res) => {
+app.put('/api/customers/:id/todos/:todoId', requireCustomerTodoWriteAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerTodoService.update(routeParam(req.params.id), routeParam(req.params.todoId), req.body || {}, req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
@@ -460,17 +449,17 @@ app.post('/api/customers/:id/todos/:todoId/complete', requireCustomerListAccess,
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
-app.post('/api/customers/:id/todos/:todoId/reopen', requireCustomerEditAccess, async (req: AuthenticatedRequest, res) => {
+app.post('/api/customers/:id/todos/:todoId/reopen', requireCustomerTodoWriteAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerTodoService.reopen(routeParam(req.params.id), routeParam(req.params.todoId), req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
-app.post('/api/customers/:id/todos/:todoId/cancel', requireCustomerEditAccess, async (req: AuthenticatedRequest, res) => {
+app.post('/api/customers/:id/todos/:todoId/cancel', requireCustomerTodoWriteAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerTodoService.cancel(routeParam(req.params.id), routeParam(req.params.todoId), String(req.body?.reason || ''), req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
-app.post('/api/customers/:id/release', requireCustomerAssignAccess, async (req: AuthenticatedRequest, res) => {
+app.post('/api/customers/:id/release', requireCustomerReleaseAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerCommandService.releaseToPublicPool(
     routeParam(req.params.id),
     String(req.body?.reason || ''),
@@ -484,7 +473,7 @@ app.post('/api/customers/:id/claim', requireCustomerPublicPoolClaimAccess, async
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
-app.post('/api/customers/:id/assign', requireCustomerAssignAccess, async (req: AuthenticatedRequest, res) => {
+app.post('/api/customers/:id/assign', requireCustomerTransferAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerCommandService.assignOwner(
     routeParam(req.params.id),
     String(req.body?.ownerId || ''),

@@ -105,6 +105,11 @@ const listedUser = (listResult.data as any)[STORAGE_KEYS.USERS][0];
 assert.equal('passwordHash' in listedUser, false);
 assert.equal('passwordSalt' in listedUser, false);
 assert.equal('passwordUpdatedAt' in listedUser, false);
+assert.equal(
+  Object.prototype.hasOwnProperty.call(listResult.data, STORAGE_KEYS.CUSTOMERS),
+  false,
+  '数据维护原始列表不得导出客户资产，即使 app_storage 残留同名 key',
+);
 
 const getResult = await service.get(STORAGE_KEYS.LEADS);
 assert.equal(getResult.code, 0);
@@ -137,8 +142,56 @@ const payoutPlansResult = await service.set(STORAGE_KEYS.COMMISSION_PAYOUT_PLANS
 assert.equal(payoutPlansResult.code, 0, '提成方案存储 key 必须能被后端持久化');
 
 const customersResult = await service.get(STORAGE_KEYS.CUSTOMERS);
-assert.equal(customersResult.code, 0);
-assert.deepEqual((customersResult.data as any[]).map((item) => item.id), ['customer-1']);
+assert.equal(customersResult.code, 403, '单 key 原始读取也不得绕过客户查询与导出权限');
+assert.match(customersResult.message, /客户.*原始存储/);
+
+const removeCustomerResult = await service.remove(STORAGE_KEYS.CUSTOMERS);
+assert.equal(removeCustomerResult.code, 403, '单 key 原始删除不得绕过客户删除命令');
+assert.equal(businessDeletedWhere, null, '拒绝客户原始删除时不得触碰客户记录');
+
+const clearCalls = { appStorage: [] as any[], leads: 0, business: [] as any[] };
+const clearPrisma = {
+  appStorage: {
+    findMany: async () => [],
+    findUnique: async () => null,
+    upsert: async () => ({ value: null }),
+    deleteMany: async (input: any) => {
+      clearCalls.appStorage.push(input);
+      return { count: 2 };
+    },
+  },
+  leadRecord: {
+    findMany: async () => [],
+    upsert: async () => ({}),
+    deleteMany: async () => {
+      clearCalls.leads += 1;
+      return { count: 1 };
+    },
+  },
+  businessRecord: {
+    findMany: async () => [],
+    upsert: async () => ({}),
+    deleteMany: async (input: any) => {
+      clearCalls.business.push(input);
+      return { count: 3 };
+    },
+  },
+  user: { findMany: async () => [] },
+  $transaction: async (callback: (tx: any) => Promise<unknown>) => callback(clearPrisma),
+} as any;
+const clearResult = await createStorageService(clearPrisma).clearPrefix();
+assert.equal(clearResult.code, 0);
+assert.deepEqual(clearResult.data, {
+  clearedPrefix: 'aaos_',
+  preservedKeys: [STORAGE_KEYS.CUSTOMERS],
+});
+assert.deepEqual(clearCalls.appStorage, [{
+  where: { key: { startsWith: 'aaos_', notIn: [STORAGE_KEYS.CUSTOMERS] } },
+}]);
+assert.equal(clearCalls.leads, 1, '整体维护清理仍应清理非客户线索数据');
+assert.deepEqual(clearCalls.business, [{
+  where: { domain: { not: STORAGE_KEYS.CUSTOMERS } },
+}], '整体维护清理必须保留客户域，同时清理其他 BusinessRecord 域');
 
 const nextCustomers = [
   { id: 'customer-a', name: '客户A', company: 'A公司', owner: '销售A', totalSpent: 1200, createdAt: '2026-06-24T01:00:00.000Z', updatedAt: '2026-06-24T01:00:00.000Z' },

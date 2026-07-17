@@ -1,15 +1,19 @@
 import assert from 'node:assert/strict';
 import { createCustomerTodoService } from './customerTodoService';
+import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
+import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Customer } from '../../src/types/customer';
 
 const actor = {
   id: 'user-admin', name: '系统管理员', account: 'admin', email: 'admin@example.com', phone: '',
-  role: '超级管理员', permissions: [], isActive: true,
+  role: '自定义', roleId: 'role-todo', departmentId: 'dept-sales',
+  permissions: [{ module: PERMISSION_KEYS.CUSTOMER_SET_TODOS, actions: ['read', 'write'] }], isActive: true,
 } as AuthenticatedUser;
 
 const customer: Customer = {
-  id: 'customer-1', name: '测试客户', company: '', phone: '+8613800000000', owner: '销售甲', ownerId: 'user-sales',
+  id: 'customer-1', name: '测试客户', company: '', phone: '+8613800000000', owner: actor.name, ownerId: actor.id,
+  ownerIdentityStatus: 'resolved',
   customerLevel: 'L1', lifecycleStatusCode: 'pending_followup', totalSpent: 0, orderCount: 0,
   growthPath: [], growthRecords: [], activityRecords: [], createdAt: '2026-07-15T00:00:00.000Z', updatedAt: '2026-07-15T00:00:00.000Z',
 };
@@ -17,10 +21,34 @@ const customer: Customer = {
 let todoRow: any = null;
 let customerData: Customer = customer;
 let lastFindManyArgs: any = null;
-const visibleCustomerIds: string[] = [];
+const queriedCustomerIds: string[] = [];
+let version = new Date('2026-07-15T03:00:00.000Z');
 const at = new Date('2026-07-15T03:00:00.000Z');
+const customerRow = () => ({
+  id: `${STORAGE_KEYS.CUSTOMERS}:${customerData.id}`,
+  domain: STORAGE_KEYS.CUSTOMERS,
+  recordId: customerData.id,
+  data: customerData,
+  updatedAt: new Date(version),
+});
 const tx = {
-  user: { findUnique: async ({ where }: any) => ({ id: where.id, name: '系统管理员', isActive: true, employmentStatus: 'active' }) },
+  user: {
+    findMany: async () => [{
+      ...actor, avatar: null, positionId: null, positionName: null, passwordHash: null, passwordSalt: null,
+      passwordUpdatedAt: null, lastLoginAt: null, employmentStatus: 'active', leftAt: null, leftBy: null,
+      createdAt: at, updatedAt: at,
+    }],
+    findUnique: async ({ where }: any) => ({ id: where.id, name: '系统管理员', isActive: true, employmentStatus: 'active' }),
+  },
+  role: { findMany: async () => [{
+    id: 'role-todo', name: '自定义', code: 'custom', description: null, departmentId: 'dept-sales',
+    permissions: [{ module: PERMISSION_KEYS.CUSTOMER_SET_TODOS, actions: ['read', 'write'] }],
+    dataScopes: { customers: 'self' }, memberCount: 1, isActive: true, createdAt: at, updatedAt: at,
+  }] },
+  department: { findMany: async () => [{
+    id: 'dept-sales', name: '销售部', code: 'SALES', parentId: null, managerId: null,
+    memberCount: 1, sortOrder: 1, isActive: true, createdAt: at, updatedAt: at,
+  }] },
   customerTodo: {
     create: async ({ data }: any) => (todoRow = { ...data, status: 'PENDING', completedAt: null, completedById: null, completedByName: null, canceledAt: null, canceledById: null, canceledByName: null, cancelReason: null, createdAt: at, updatedAt: at }),
     findMany: async (args: any) => {
@@ -34,9 +62,19 @@ const tx = {
     update: async ({ data }: any) => (todoRow = { ...todoRow, ...data, updatedAt: at }),
   },
   businessRecord: {
-    findFirst: async () => ({ id: 'customers:customer-1', data: customerData }),
-    update: async ({ data }: any) => { customerData = data.data; return { id: 'customers:customer-1' }; },
+    findUnique: async ({ where }: any) => {
+      const customerId = where.domain_recordId.recordId;
+      queriedCustomerIds.push(customerId);
+      return customerId === customerData.id ? customerRow() : null;
+    },
+    updateMany: async ({ where, data }: any) => {
+      if (new Date(where.updatedAt).getTime() !== version.getTime()) return { count: 0 };
+      customerData = data.data;
+      version = new Date(version.getTime() + 1);
+      return { count: 1 };
+    },
   },
+  $queryRaw: async () => [customerRow()],
 };
 const prisma = {
   ...tx,
@@ -45,12 +83,6 @@ const prisma = {
 
 const service = createCustomerTodoService(
   prisma as any,
-  async (customerId) => {
-    visibleCustomerIds.push(customerId);
-    return customerId === customer.id
-      ? { code: 0, data: customerData, message: 'success' }
-      : { code: 404, data: null, message: '客户不存在或无权访问' };
-  },
   { now: () => at, createId: () => 'todo-1' },
 );
 
@@ -67,7 +99,7 @@ assert.equal(mine.data?.[0]?.id, 'todo-1');
 assert.equal(mine.data?.length, 1);
 assert.deepEqual(lastFindManyArgs.where, { assigneeId: actor.id, status: 'PENDING' });
 assert.equal('take' in lastFindManyArgs, false);
-assert.ok(visibleCustomerIds.includes('customer-hidden'));
+assert.ok(queriedCustomerIds.includes('customer-hidden'));
 
 const outsider = { ...actor, id: 'user-outsider', role: '销售顾问', permissions: [] };
 const forbidden = await service.complete('customer-1', 'todo-1', outsider);

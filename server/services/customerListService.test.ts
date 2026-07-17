@@ -12,7 +12,13 @@ const service = createCustomerListService({
     findMany: async (args: any) => {
       if (args?.where?.domain === STORAGE_KEYS.TAG_GROUPS) return [{ data: { id: 'group-both', name: '通用', color: '#1677ff', selectionMode: 'multiple', scope: 'both', isActive: true, sortOrder: 0 } }];
       if (args?.where?.domain === STORAGE_KEYS.TAGS) return [{ data: { id: 'shared', groupId: 'group-both', name: '高意向', color: '#1677ff', isActive: true, sortOrder: 0 } }];
-      return created.map((item) => ({ data: item.data.data }));
+      return created.map((item) => ({
+        id: item.data.id,
+        domain: item.data.domain,
+        recordId: item.data.recordId,
+        data: item.data.data,
+        updatedAt: new Date(item.data.eventAt),
+      }));
     },
     create: async (input: any) => {
       if (created.some((item) => item.data.id === input.data.id)) {
@@ -70,6 +76,7 @@ const result = await service.create({
   phone: '13800000000',
   customerLevel: 'L1',
   owner: '销售',
+  ownerId: actor.id,
   sourceType: '公司资源',
 }, actor);
 
@@ -79,12 +86,12 @@ assert.equal(created[0].data.domain, STORAGE_KEYS.CUSTOMERS);
 assert.equal(created[0].data.data.name, '新客户');
 
 const tagged = await service.create({
-  name: '标签客户', company: '', phone: '13800000001', customerLevel: 'L1', owner: '销售', sourceType: '公司资源', manualTagIds: ['shared'],
+  name: '标签客户', company: '', phone: '13800000001', customerLevel: 'L1', owner: '销售', ownerId: actor.id, sourceType: '公司资源', manualTagIds: ['shared'],
 }, actor);
 assert.deepEqual(tagged.data?.tags, ['高意向']);
 
 const missingTag = await service.create({
-  name: '非法标签客户', company: '', phone: '13800000002', customerLevel: 'L1', owner: '销售', sourceType: '公司资源', manualTagIds: ['missing'],
+  name: '非法标签客户', company: '', phone: '13800000002', customerLevel: 'L1', owner: '销售', ownerId: actor.id, sourceType: '公司资源', manualTagIds: ['missing'],
 }, actor);
 assert.equal(missingTag.code, 400);
 
@@ -97,8 +104,10 @@ const denied = await service.create({
   sourceType: '公司资源',
 }, actor);
 
-assert.equal(denied.code, 403);
-assert.equal(created.length, 2);
+assert.equal(denied.code, 0, 'ownerId 缺失时必须由服务端明确归属当前 actor，不能按姓名分配');
+assert.equal(denied.data?.ownerId, actor.id);
+assert.equal(denied.data?.owner, actor.name);
+assert.equal(created.length, 3);
 
 const emptyName = await service.create({
   name: '',
@@ -106,6 +115,7 @@ const emptyName = await service.create({
   phone: '13700000000',
   customerLevel: 'L1',
   owner: '销售',
+  ownerId: actor.id,
   sourceType: '公司资源',
 }, actor);
 
@@ -118,6 +128,7 @@ const emptyPhone = await service.create({
   phone: '',
   customerLevel: 'L1',
   owner: '销售',
+  ownerId: actor.id,
   sourceType: '公司资源',
 }, actor);
 
@@ -131,6 +142,7 @@ const wechatOnly = await service.create({
   wechat: 'wechat_customer_2026',
   customerLevel: 'L1',
   owner: '销售',
+  ownerId: actor.id,
   sourceType: '公司资源',
 }, actor);
 
@@ -142,6 +154,7 @@ const overlongName = await service.create({
   phone: '13700000001',
   customerLevel: 'L1',
   owner: '销售',
+  ownerId: actor.id,
   sourceType: '公司资源',
 }, actor);
 
@@ -155,6 +168,7 @@ const [firstDuplicate, secondDuplicate] = await Promise.all([
     phone: '136 0000 0000',
     customerLevel: 'L1',
     owner: '销售',
+    ownerId: actor.id,
     sourceType: '公司资源',
   }, actor),
   service.create({
@@ -163,6 +177,7 @@ const [firstDuplicate, secondDuplicate] = await Promise.all([
     phone: '+86 13600000000',
     customerLevel: 'L1',
     owner: '销售',
+    ownerId: actor.id,
     sourceType: '公司资源',
   }, actor),
 ]);
@@ -182,10 +197,10 @@ const flattenSql = (value: any): string => {
 };
 const capturedQueries: string[] = [];
 const listFixtures = [
-  { ...created[0].data.data, id: 'sales-a-hit-1', owner: '销售甲', manualTagIds: ['t-agent', 't-high-budget'] },
-  { ...created[0].data.data, id: 'sales-a-hit-2', owner: '销售甲', manualTagIds: ['t-private', 't-high-budget'] },
-  { ...created[0].data.data, id: 'sales-a-miss', owner: '销售甲', manualTagIds: ['t-agent'] },
-  { ...created[0].data.data, id: 'sales-b-hit', owner: '销售乙', manualTagIds: ['t-agent', 't-high-budget'] },
+  { ...created[0].data.data, id: 'sales-a-hit-1', owner: '销售甲', ownerId: 'sales-1', ownerIdentityStatus: 'resolved', manualTagIds: ['t-agent', 't-high-budget'] },
+  { ...created[0].data.data, id: 'sales-a-hit-2', owner: '销售甲', ownerId: 'sales-1', ownerIdentityStatus: 'resolved', manualTagIds: ['t-private', 't-high-budget'] },
+  { ...created[0].data.data, id: 'sales-a-miss', owner: '销售甲', ownerId: 'sales-1', ownerIdentityStatus: 'resolved', manualTagIds: ['t-agent'] },
+  { ...created[0].data.data, id: 'sales-b-hit', owner: '销售乙', ownerId: 'sales-2', ownerIdentityStatus: 'resolved', manualTagIds: ['t-agent', 't-high-budget'] },
 ];
 let executingFilters: any = {};
 const listService = createCustomerListService({
@@ -204,7 +219,13 @@ const listService = createCustomerListService({
     const filtered = listFixtures.filter((item) => item.owner === '销售甲' && matchesCustomerTagFilters(item, executingFilters, tagCatalog));
     if (sql.includes('COUNT(*)')) return [{ total: BigInt(filtered.length) }];
     const page = Number(executingFilters.page || 1); const pageSize = Number(executingFilters.pageSize || 10);
-    return filtered.slice((page - 1) * pageSize, page * pageSize).map((data) => ({ data }));
+    return filtered.slice((page - 1) * pageSize, page * pageSize).map((data) => ({
+      id: `${STORAGE_KEYS.CUSTOMERS}:${data.id}`,
+      domain: STORAGE_KEYS.CUSTOMERS,
+      recordId: data.id,
+      data,
+      updatedAt: new Date(data.updatedAt),
+    }));
   },
 } as any);
 const salesActor = { ...actor, id: 'sales-1', name: '销售甲', account: 'sales', role: '销售顾问', roleId: 'r1', departmentId: 'd1' } as any;
@@ -217,7 +238,8 @@ assert.equal(capturedQueries.length, 2);
 for (const sql of capturedQueries) {
   assert.match(sql, /JSON_CONTAINS/);
   assert.match(sql, /t-agent/); assert.match(sql, /t-private/); assert.match(sql, /t-high-budget/);
-  assert.match(sql, /owner IN/); assert.match(sql, /销售甲/);
+  assert.match(sql, /JSON_UNQUOTE\(JSON_EXTRACT\(data, '\$\.owner'\)\) IN/); assert.match(sql, /销售甲/);
+  assert.doesNotMatch(sql, /AND owner IN/);
 }
 assert.match(capturedQueries[1], /LIMIT[\s\S]*OFFSET[\s\S]*1 0$/);
 
@@ -228,3 +250,171 @@ for (const [filters, joiner] of filterCases) {
   await listService.list(filters, salesActor);
   assert.match(capturedQueries[0], joiner === 'JSON_LENGTH' ? /JSON_LENGTH/ : new RegExp(joiner.trim()));
 }
+
+const mirrorListDirectory = {
+  businessRecord: { findMany: async () => [] },
+  leadRecord: { findMany: async () => [] },
+  user: {
+    findMany: async () => [
+      { id: 'sales-1', name: '销售甲', account: 'sales-a', email: '', phone: '', role: '销售顾问', avatar: null, departmentId: 'd1', positionId: null, positionName: null, roleId: 'r1', passwordHash: null, passwordSalt: null, passwordUpdatedAt: null, lastLoginAt: null, isActive: true, employmentStatus: 'active', createdAt: now, updatedAt: now },
+      { id: 'sales-2', name: '销售乙', account: 'sales-b', email: '', phone: '', role: '销售顾问', avatar: null, departmentId: 'd1', positionId: null, positionName: null, roleId: 'r1', passwordHash: null, passwordSalt: null, passwordUpdatedAt: null, lastLoginAt: null, isActive: true, employmentStatus: 'active', createdAt: now, updatedAt: now },
+    ],
+  },
+  role: { findMany: async () => [{ id: 'r1', name: '销售顾问', code: 'sales', description: null, departmentId: null, permissions: [], dataScopes: { customers: 'self' }, memberCount: 2, isActive: true, createdAt: now, updatedAt: now }] },
+  department: { findMany: async () => [] },
+};
+const createMirrorListService = ($queryRaw: (...args: any[]) => Promise<any>) => createCustomerListService({
+  ...mirrorListDirectory,
+  $queryRaw,
+} as any);
+
+const mirrorMismatchRows = [
+  {
+    owner: '销售乙',
+    data: {
+      ...created[0].data.data,
+      id: 'canonical-sales-a',
+      owner: '销售甲',
+      ownerId: 'sales-1',
+      ownerIdentityStatus: 'resolved',
+    },
+  },
+  {
+    owner: '销售甲',
+    data: {
+      ...created[0].data.data,
+      id: 'canonical-sales-b',
+      owner: '销售乙',
+      ownerId: 'sales-2',
+      ownerIdentityStatus: 'resolved',
+    },
+  },
+];
+const mirrorMismatchService = createMirrorListService(async (...args: any[]) => {
+    const sql = flattenSql(args);
+    const ownerFilterReadsJson = /JSON_UNQUOTE\(JSON_EXTRACT\(data, '\$\.owner'\)\)\s*=\s*销售甲/.test(sql);
+    const matchingRows = mirrorMismatchRows.filter((row) => (
+      row.data.ownerId === 'sales-1'
+      && (ownerFilterReadsJson ? row.data.owner === '销售甲' : row.owner === '销售甲')
+    ));
+    if (sql.includes('COUNT(*)')) return [{ total: BigInt(matchingRows.length) }];
+    return matchingRows.map((row) => ({
+      id: `${STORAGE_KEYS.CUSTOMERS}:${row.data.id}`,
+      domain: STORAGE_KEYS.CUSTOMERS,
+      recordId: row.data.id,
+      data: row.data,
+      updatedAt: new Date(row.data.updatedAt),
+    }));
+});
+
+const mirrorMismatchResult = await mirrorMismatchService.list(
+  { owner: '销售甲', page: 1, pageSize: 10 },
+  salesActor,
+);
+assert.equal(mirrorMismatchResult.code, 0);
+assert.deepEqual(
+  mirrorMismatchResult.data?.items.map((customer) => customer.id),
+  ['canonical-sales-a'],
+  '客户 JSON 是权威数据，不得因顶层 owner 镜像滞后丢失可见客户',
+);
+assert.deepEqual(mirrorMismatchResult.data?.pagination, {
+  page: 1,
+  pageSize: 10,
+  total: 1,
+  totalPages: 1,
+});
+
+const unresolvedMirrorService = createMirrorListService(async (...args: any[]) => {
+    const sql = flattenSql(args);
+    const visibilityReadsJsonOwner = /JSON_UNQUOTE\(JSON_EXTRACT\(data, '\$\.owner'\)\)\s+IN\s+\(销售甲\)/.test(sql);
+    const row = {
+      owner: '销售乙',
+      data: {
+        ...created[0].data.data,
+        id: 'legacy-canonical-sales-a',
+        owner: '销售甲',
+        ownerId: undefined,
+        ownerIdentityStatus: 'unresolved' as const,
+      },
+    };
+    const matchingRows = (visibilityReadsJsonOwner ? row.data.owner : row.owner) === '销售甲' ? [row] : [];
+    if (sql.includes('COUNT(*)')) return [{ total: BigInt(matchingRows.length) }];
+    return matchingRows.map((item) => ({
+      id: `${STORAGE_KEYS.CUSTOMERS}:${item.data.id}`,
+      domain: STORAGE_KEYS.CUSTOMERS,
+      recordId: item.data.id,
+      data: item.data,
+      updatedAt: new Date(item.data.updatedAt),
+    }));
+});
+
+const unresolvedMirrorResult = await unresolvedMirrorService.list(
+  { page: 1, pageSize: 10 },
+  salesActor,
+);
+assert.deepEqual(unresolvedMirrorResult.data?.items.map((customer) => customer.id), [
+  'legacy-canonical-sales-a',
+]);
+assert.deepEqual(unresolvedMirrorResult.data?.pagination, {
+  page: 1,
+  pageSize: 10,
+  total: 1,
+  totalPages: 1,
+});
+
+const searchMirrorRows = [
+  {
+    title: '旧标题',
+    data: {
+      ...created[0].data.data,
+      id: 'canonical-search-hit',
+      name: '目标客户',
+      owner: '销售甲',
+      ownerId: 'sales-1',
+      ownerIdentityStatus: 'resolved' as const,
+    },
+  },
+  {
+    title: '目标客户',
+    data: {
+      ...created[0].data.data,
+      id: 'stale-title-only',
+      name: '其他客户',
+      company: '',
+      phone: '13900000009',
+      wechat: '',
+      owner: '销售甲',
+      ownerId: 'sales-1',
+      ownerIdentityStatus: 'resolved' as const,
+    },
+  },
+];
+const searchMirrorService = createMirrorListService(async (...args: any[]) => {
+    const sql = flattenSql(args);
+    const queryReadsMirrorTitle = /LOWER\(COALESCE\(title, ''\)\)/.test(sql);
+    const matchingRows = searchMirrorRows.filter((row) => (
+      row.data.name.includes('目标') || (queryReadsMirrorTitle && row.title.includes('目标'))
+    ));
+    if (sql.includes('COUNT(*)')) return [{ total: BigInt(matchingRows.length) }];
+    return matchingRows.map((row) => ({
+      id: `${STORAGE_KEYS.CUSTOMERS}:${row.data.id}`,
+      domain: STORAGE_KEYS.CUSTOMERS,
+      recordId: row.data.id,
+      data: row.data,
+      updatedAt: new Date(row.data.updatedAt),
+    }));
+});
+
+const searchMirrorResult = await searchMirrorService.list(
+  { search: '目标', page: 1, pageSize: 10 },
+  salesActor,
+);
+assert.deepEqual(searchMirrorResult.data?.items.map((customer) => customer.id), [
+  'canonical-search-hit',
+]);
+assert.deepEqual(searchMirrorResult.data?.pagination, {
+  page: 1,
+  pageSize: 10,
+  total: 1,
+  totalPages: 1,
+});

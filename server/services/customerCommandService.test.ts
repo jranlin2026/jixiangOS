@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createCustomerCommandService } from './customerCommandService';
 import { DEFAULT_LEAD_FLOW_CONFIG, LIFECYCLE_STATUS_CODES, STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
+import type { Customer } from '../../src/types/customer';
 
 const FIXED_NOW = new Date('2026-07-12T01:02:03.000Z');
 
@@ -12,7 +13,12 @@ const salesRole = {
   description: null,
   departmentId: 'dept-sales',
   permissions: [
-    { module: PERMISSION_KEYS.CUSTOMER_ASSIGN, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.CUSTOMER_SET_PROGRESS, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.CUSTOMER_SET_TAGS, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.CUSTOMER_EDIT_ATTRIBUTION, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.CUSTOMER_TRANSFER, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, actions: ['read', 'write'] },
     { module: PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, actions: ['read', 'write'] },
     { module: PERMISSION_KEYS.LEADS_FOLLOW, actions: ['read', 'write'] },
     { module: PERMISSION_KEYS.LEADS_CONVERT, actions: ['read', 'write'] },
@@ -38,7 +44,10 @@ const superRole = {
   name: '超级管理员',
   code: 'super_admin',
   departmentId: 'dept-sales',
-  permissions: [{ module: '全部', actions: ['read', 'write', 'delete', 'admin'] }],
+  permissions: [
+    { module: '全部', actions: ['read', 'write', 'delete', 'admin'] },
+    { module: PERMISSION_KEYS.CUSTOMER_DELETE, actions: ['read', 'delete'] },
+  ],
   dataScopes: { leads: 'all', customers: 'all' },
 };
 
@@ -237,7 +246,12 @@ const claimOnlySales = {
 
 const customerEditor = {
   ...salesA,
-  permissions: [{ module: PERMISSION_KEYS.CUSTOMER_EDIT, actions: ['read', 'write'] }],
+  permissions: [
+    { module: PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.CUSTOMER_SET_PROGRESS, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.CUSTOMER_SET_TAGS, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.CUSTOMER_EDIT_ATTRIBUTION, actions: ['read', 'write'] },
+  ],
 };
 
 const leadEditor = {
@@ -312,8 +326,10 @@ function createFakePrisma(
   options: {
     failLeadUpdate?: boolean;
     failCustomerCreate?: boolean;
+    failCustomerCompareAndSave?: boolean;
     failTransactions?: number;
     extraUsers?: any[];
+    roleRows?: any[];
   } = {},
 ) {
   let state: FakeState = { ...clone(initial), appStorage: clone(initial.appStorage || []) };
@@ -322,6 +338,8 @@ function createFakePrisma(
   let contactLockQueries = 0;
   let contactLockUpserts = 0;
   let customerLockQueries = 0;
+  let businessRecordUpdateCalls = 0;
+  let businessRecordCompareAndSaveCalls = 0;
   let remainingTransactionFailures = options.failTransactions || 0;
   const contactLockTails = new Map<string, Promise<void>>();
 
@@ -349,7 +367,7 @@ function createFakePrisma(
       role: manager.role,
       roleId: manager.roleId,
     }]) },
-    role: { findMany: async () => clone([salesRole, managerRole, financeRole, superRole]) },
+    role: { findMany: async () => clone(options.roleRows || [salesRole, managerRole, financeRole, superRole]) },
     department: { findMany: async () => clone(departments) },
     appStorage: {
       findUnique: async ({ where }: any) => {
@@ -379,17 +397,32 @@ function createFakePrisma(
         return row ? clone(row) : null;
       },
       update: async ({ where, data }: any) => {
+        businessRecordUpdateCalls += 1;
         const row = working.businessRecords.find((item) => item.id === where.id);
         if (!row) throw new Error('business record missing');
         applyPatch(row, clone(data));
         return clone(row);
+      },
+      updateMany: async ({ where, data }: any) => {
+        businessRecordCompareAndSaveCalls += 1;
+        if (options.failCustomerCompareAndSave) return { count: 0 };
+        const row = working.businessRecords.find((item) => (
+          item.id === where.id
+          && item.domain === where.domain
+          && item.recordId === where.recordId
+          && new Date(item.updatedAt).getTime() === new Date(where.updatedAt).getTime()
+        ));
+        if (!row) return { count: 0 };
+        applyPatch(row, clone(data));
+        row.updatedAt = new Date(new Date(where.updatedAt).getTime() + 1);
+        return { count: 1 };
       },
       create: async ({ data }: any) => {
         if (options.failCustomerCreate) throw new Error('customer create failed');
         if (working.businessRecords.some((item) => item.domain === data.domain && item.recordId === data.recordId)) {
           throw new Error('duplicate business record');
         }
-        working.businessRecords.push(clone(data));
+        working.businessRecords.push({ ...clone(data), updatedAt: new Date(data.updatedAt || data.eventAt || FIXED_NOW) });
         return clone(data);
       },
     },
@@ -510,6 +543,8 @@ function createFakePrisma(
     get contactLockQueries() { return contactLockQueries; },
     get contactLockUpserts() { return contactLockUpserts; },
     get customerLockQueries() { return customerLockQueries; },
+    get businessRecordUpdateCalls() { return businessRecordUpdateCalls; },
+    get businessRecordCompareAndSaveCalls() { return businessRecordCompareAndSaveCalls; },
   };
 }
 
@@ -521,13 +556,23 @@ function customer(
   id: string,
   owner = salesA.name,
   lifecycleStatusCode: 'pending_followup' | 'following' | 'ordered' | 'refunded' | 'public_pool' = LIFECYCLE_STATUS_CODES.FOLLOWING,
-) {
+): Customer {
+  const ownerId = owner === salesA.name
+    ? salesA.id
+    : owner === '销售乙'
+      ? 'user-b'
+      : owner === '外部销售'
+        ? 'user-c'
+        : undefined;
+  const isPublicPool = owner === '公海' || lifecycleStatusCode === LIFECYCLE_STATUS_CODES.PUBLIC_POOL;
   return {
     id,
     name: `客户-${id}`,
     company: `公司-${id}`,
     phone: '13800000000',
     owner,
+    ownerId: isPublicPool ? undefined : ownerId,
+    ownerIdentityStatus: isPublicPool ? 'public_pool' : ownerId ? 'resolved' : 'unresolved',
     customerLevel: 'L1',
     lifecycleStatusCode,
     lifecycleStatusUpdatedAt: '2026-07-01T00:00:00.000Z',
@@ -551,6 +596,7 @@ function businessCustomer(value: ReturnType<typeof customer>): BusinessRow {
     owner: value.owner,
     customerId: value.id,
     data: clone(value),
+    updatedAt: new Date(value.updatedAt),
   };
 }
 
@@ -701,7 +747,11 @@ const serviceOptions = {
 
 // RED: 员工不能仅因自己是线索贡献人就释放他人的客户。
 {
-  const value = { ...customer('cust-not-owner', salesA.name === '销售甲' ? '销售乙' : '其他人'), leadContributorName: salesA.name };
+  const value = {
+    ...customer('cust-not-owner', salesA.name === '销售甲' ? '销售乙' : '其他人'),
+    leadContributorId: salesA.id,
+    leadContributorName: salesA.name,
+  };
   const fake = createFakePrisma({ businessRecords: [businessCustomer(value)], leads: [] });
   const service = createCustomerCommandService(fake.prisma, serviceOptions);
   const result = await service.releaseToPublicPool('cust-not-owner', '越权尝试', salesA);
@@ -718,14 +768,19 @@ const serviceOptions = {
     account: 'sales-a-duplicate',
     email: 'sales-a-duplicate@example.com',
   };
+  const ambiguousCustomer = {
+    ...customer('cust-ambiguous-source'),
+    ownerId: undefined,
+    ownerIdentityStatus: 'ambiguous' as const,
+  };
   const fake = createFakePrisma({
-    businessRecords: [businessCustomer(customer('cust-ambiguous-source'))],
+    businessRecords: [businessCustomer(ambiguousCustomer)],
     leads: [],
   }, { extraUsers: [duplicateSalesA] });
   const service = createCustomerCommandService(fake.prisma, serviceOptions);
   const result = await service.releaseToPublicPool('cust-ambiguous-source', '同名源归属', salesA);
 
-  assert.equal(result.code, 409);
+  assert.equal(result.code, 403);
   assert.equal(fake.getState().businessRecords[0].owner, salesA.name);
 }
 
@@ -749,6 +804,20 @@ const serviceOptions = {
   const replay = await service.claimFromPublicPool('cust-claim', claimOnlySales);
   assert.equal(replay.code, 0);
   assert.equal(fake.getState().businessRecords[0].data.activityRecords.length, 1, '重试领取不得重复写入活动');
+}
+
+// 仅伪造展示姓名“公海”不得把普通客户变成可领取客户。
+{
+  const spoofed = customer('cust-owner-name-pool');
+  spoofed.owner = '公海';
+  spoofed.ownerId = 'user-b';
+  const fake = createFakePrisma({ businessRecords: [businessCustomer(spoofed)], leads: [] });
+  const service = createCustomerCommandService(fake.prisma, serviceOptions);
+  const result = await service.claimFromPublicPool(spoofed.id, claimOnlySales);
+
+  assert.equal(result.code, 409);
+  assert.equal(fake.getState().businessRecords[0].data.ownerId, 'user-b');
+  assert.equal(fake.getState().businessRecords[0].data.lifecycleStatusCode, LIFECYCLE_STATUS_CODES.FOLLOWING);
 }
 
 // RED: 即使自定义角色拥有客户分配权和 all 范围，非销售也不得领取公海。
@@ -831,6 +900,48 @@ const serviceOptions = {
   const next = fake.getState();
   assert.equal(next.leads[0].data.name, '更新后客户');
   assert.deepEqual(next.leads[0].data.tags, ['历史标签']);
+  assert.equal(fake.businessRecordUpdateCalls, 0, '客户写入必须统一走 compare-and-save 边界');
+  assert.equal(fake.businessRecordCompareAndSaveCalls, 1);
+}
+
+// RED: 贡献人可读不等于可写，未解析负责人也必须 fail closed。
+{
+  const contributed = {
+    ...customer('cust-contributor-read-only', '销售乙'),
+    leadContributorId: salesA.id,
+    leadContributorName: salesA.name,
+  };
+  const unresolved = {
+    ...customer('cust-unresolved-owner'),
+    ownerId: undefined,
+    ownerIdentityStatus: 'unresolved' as const,
+  };
+  const fake = createFakePrisma({
+    businessRecords: [businessCustomer(contributed), businessCustomer(unresolved)],
+    leads: [],
+  });
+  const service = createCustomerCommandService(fake.prisma, serviceOptions);
+  assert.equal((await service.updateCustomer(contributed.id, { name: '贡献人越权' }, customerEditor)).code, 403);
+  assert.equal((await service.updateCustomer(unresolved.id, { name: '未解析越权' }, customerEditor)).code, 403);
+  assert.equal(fake.businessRecordCompareAndSaveCalls, 0);
+}
+
+// RED: 混合字段缺任一叶子权限时，整请求必须在任何写入前拒绝。
+{
+  const value = customer('cust-mixed-field-denied');
+  const profileOnlyRole = {
+    ...salesRole,
+    permissions: [{ module: PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE, actions: ['read', 'write'] }],
+  };
+  const fake = createFakePrisma(
+    { businessRecords: [businessCustomer(value), ...tagCatalogRows()], leads: [] },
+    { roleRows: [profileOnlyRole, managerRole, financeRole, superRole] },
+  );
+  const service = createCustomerCommandService(fake.prisma, serviceOptions);
+  const denied = await service.updateCustomer(value.id, { name: '不应保存', manualTagIds: ['shared'] }, customerEditor);
+  assert.equal(denied.code, 403);
+  assert.equal(fake.businessRecordCompareAndSaveCalls, 0);
+  assert.equal(fake.getState().businessRecords.find((row) => row.recordId === value.id)?.data.name, value.name);
 }
 
 // 标签校验只接受适用于客户的权威 ID；无权限请求必须在读取目录前返回 403。
@@ -850,7 +961,17 @@ const serviceOptions = {
     field: 'manualTagIds', label: '客户标签', oldValue: null, newValue: '高意向',
   }]);
 
-  const deniedFake = createFakePrisma({ businessRecords: [businessCustomer(value), ...tagCatalogRows()], leads: [] });
+  const deniedFake = createFakePrisma(
+    { businessRecords: [businessCustomer(value), ...tagCatalogRows()], leads: [] },
+    {
+      roleRows: [
+        { ...salesRole, permissions: [] },
+        managerRole,
+        financeRole,
+        superRole,
+      ],
+    },
+  );
   const denied = await createCustomerCommandService(deniedFake.prisma, serviceOptions).updateCustomer(
     value.id,
     { manualTagIds: ['missing'], tags: ['目录探测'] },
@@ -941,6 +1062,23 @@ const serviceOptions = {
   assert.equal(next.businessRecords[0].data.deleteReason, '重复客户');
   assert.equal(next.leads[0].data.deletedBy, superAdmin.name);
   assert.match(next.leads[0].data.deleteReason, /关联客户删除/);
+}
+
+// RED: “全部”的 delete/admin 不得绕过 Task 2 客户删除 explicit-only 规则。
+{
+  const value = customer('cust-delete-global-only');
+  const globalOnlySuperRole = {
+    ...superRole,
+    permissions: [{ module: '全部', actions: ['read', 'write', 'delete', 'admin'] }],
+  };
+  const fake = createFakePrisma(
+    { businessRecords: [businessCustomer(value)], leads: [] },
+    { roleRows: [salesRole, managerRole, financeRole, globalOnlySuperRole] },
+  );
+  const denied = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .deleteCustomer(value.id, '不应删除', superAdmin);
+  assert.equal(denied.code, 403);
+  assert.equal(fake.businessRecordCompareAndSaveCalls, 0);
 }
 
 // RED: 存在有效关联订单的客户不得删除。
@@ -1486,15 +1624,36 @@ const serviceOptions = {
   const fake = createFakePrisma({
     businessRecords: [businessCustomer(customer('cust-no-permission'))],
     leads: [],
+  }, {
+    roleRows: [
+      { ...salesRole, permissions: [{ module: PERMISSION_KEYS.CUSTOMER_ASSIGN, actions: ['read', 'write'] }] },
+      managerRole,
+      financeRole,
+      superRole,
+    ],
   });
   const service = createCustomerCommandService(fake.prisma, serviceOptions);
   const result = await service.releaseToPublicPool('cust-no-permission', '', {
     ...salesA,
-    permissions: [],
+    permissions: [{ module: PERMISSION_KEYS.CUSTOMER_ASSIGN, actions: ['read', 'write'] }],
   });
 
   assert.equal(result.code, 403);
   assert.equal(fake.transactionCalls, 0);
+}
+
+// RED: 客户 CAS 版本冲突必须返回可恢复的 409，不得冒泡为 500。
+{
+  const value = customer('cust-cas-conflict');
+  const fake = createFakePrisma({
+    businessRecords: [businessCustomer(value)],
+    leads: [],
+  }, { failCustomerCompareAndSave: true });
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .updateCustomer(value.id, { name: '并发修改' }, customerEditor);
+
+  assert.equal(result.code, 409);
+  assert.match(result.message, /客户记录已更新/);
 }
 
 // RED: MySQL 死锁/Prisma P2034 应有限重试，且不重复写入历史。

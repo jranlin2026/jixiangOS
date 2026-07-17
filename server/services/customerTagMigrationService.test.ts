@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import express from 'express';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
+import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import { createCustomerTagMigrationRouter, createCustomerTagMigrationService } from './customerTagMigrationService';
 import { createCustomerTagService } from './customerTagService';
 
@@ -12,6 +13,8 @@ class FakePrisma {
   lockHeld = false;
   lockWaiters: Array<() => void> = [];
   lockWaitCount = 0;
+  directCustomerUpdates = 0;
+  customerCompareSaves = 0;
   roleLookups: string[] = [];
   role = { findUnique: async ({ where }: any) => {
     this.roleLookups.push(where.id);
@@ -34,19 +37,50 @@ class FakePrisma {
     },
     update: async ({ where, data }: any) => {
       const key = `${where.domain_recordId.domain}:${where.domain_recordId.recordId}`;
+      if (where.domain_recordId.domain === STORAGE_KEYS.CUSTOMERS) this.directCustomerUpdates += 1;
       this.rows.set(key, { ...this.rows.get(key), ...clone(data) }); return clone(this.rows.get(key));
+    },
+    updateMany: async ({ where, data }: any) => {
+      const key = `${where.domain}:${where.recordId}`;
+      const row = this.rows.get(key);
+      if (!row || new Date(row.updatedAt).getTime() !== new Date(where.updatedAt).getTime()) return { count: 0 };
+      this.customerCompareSaves += 1;
+      this.rows.set(key, {
+        ...row,
+        ...clone(data),
+        updatedAt: new Date(new Date(row.updatedAt).getTime() + 1),
+      });
+      return { count: 1 };
     },
   };
   leadRecord = {
     findMany: async () => [...this.leads.values()].map(clone),
     update: async ({ where, data }: any) => { this.leads.set(where.id, { ...this.leads.get(where.id), ...clone(data) }); return clone(this.leads.get(where.id)); },
   };
-  $queryRaw = async () => [{ id: 'lock' }];
+  $queryRaw = async (query: any) => {
+    const values = query.values || [];
+    const domain = String(values[0] || '');
+    const recordId = String(values[1] || '');
+    if (domain === STORAGE_KEYS.CUSTOMERS) {
+      const row = this.rows.get(`${domain}:${recordId}`);
+      return row ? [clone(row)] : [];
+    }
+    return [{ id: 'lock' }];
+  };
   async $transaction<T>(fn: (tx: this) => Promise<T>) {
     try { return await fn(this); }
     finally { this.lockHeld = false; this.lockWaiters.shift()?.(); }
   }
-  seed(domain: string, data: any, status = 'active') { this.rows.set(`${domain}:${data.id}`, { id: `${domain}:${data.id}`, domain, recordId: data.id, status, data: clone(data) }); }
+  seed(domain: string, data: any, status = 'active') {
+    this.rows.set(`${domain}:${data.id}`, {
+      id: `${domain}:${data.id}`,
+      domain,
+      recordId: data.id,
+      status,
+      data: clone(data),
+      updatedAt: new Date('2026-07-17T00:00:00.000Z'),
+    });
+  }
   seedLead(data: any) { this.leads.set(data.id, { id: data.id, data: clone(data) }); }
 }
 
@@ -60,10 +94,29 @@ prisma.seedLead({ id: 'lead-1', name: '线索', tags: ['高意向', '历史自�
 prisma.seed(STORAGE_KEYS.CUSTOMERS, { id: 'deleted', tags: ['历史自定义'] }, 'deleted');
 
 const service = createCustomerTagMigrationService(prisma as any);
-const actor = { id: 'admin', name: '管理员', roleId: 'role-admin' } as any;
-const sales = { ...actor, id: 'sales', roleId: 'role-sales' };
+const actor = {
+  id: 'maintenance',
+  name: '数据维护员',
+  roleId: 'role-sales',
+  isActive: true,
+  permissions: [
+    { module: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, actions: ['read', 'write'] },
+  ],
+} as any;
+const sales = {
+  ...actor,
+  id: 'sales',
+  permissions: [{ module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] }],
+};
+const roleCodeOnlyAdmin = { ...sales, id: 'role-code-only', roleId: 'role-admin' };
+const tagManager = {
+  ...actor,
+  id: 'tag-manager',
+  permissions: [{ module: PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS, actions: ['read', 'write'] }],
+};
 assert.equal((await service.previewLegacyTagMigration(sales)).code, 403);
-assert.equal((await service.previewLegacyTagMigration({ ...actor, roleId: 'role-disabled' })).code, 403);
+assert.equal((await service.previewLegacyTagMigration(roleCodeOnlyAdmin)).code, 403, '角色代码不得授予迁移维护权');
+assert.equal((await service.previewLegacyTagMigration({ ...sales, roleId: 'role-disabled' })).code, 403);
 const previewResult = await service.previewLegacyTagMigration(actor);
 assert.equal(previewResult.code, 0);
 const preview = previewResult.data!;
@@ -92,6 +145,8 @@ assert.equal(updatedCustomer.owner, '张三');
 assert.deepEqual(updatedCustomer.orderIds, ['o1']);
 assert.ok(updatedCustomer.manualTagIds?.length);
 assert.deepEqual(updatedCustomer.tags, [' 已退款 ', '无意向']);
+assert.equal(prisma.directCustomerUpdates, 0, '标签迁移不得直接覆盖客户 JSON');
+assert.equal(prisma.customerCompareSaves, 1, '标签迁移必须锁定客户并 compare-and-save');
 assert.equal([...prisma.rows.values()].filter((row) => row.domain === 'aaos_customer_tag_migrations').length, 1);
 
 assert.equal([...prisma.rows.values()].filter((row) => row.domain === STORAGE_KEYS.TAG_GROUPS && row.data.name === '历史未归类').length, 1);
@@ -102,14 +157,27 @@ assert.equal(secondApply.code, 0);
 assert.equal(secondApply.data?.updatedCustomers, 0);
 assert.equal(secondApply.data?.updatedLeads, 0);
 assert.equal([...prisma.rows.values()].filter((row) => row.domain === 'aaos_customer_tag_migrations').length, 1, '幂等重试不应重复审计');
-assert.ok(prisma.roleLookups.length >= 7, '预览和执行每次都必须查实时角色');
+assert.deepEqual(prisma.roleLookups, [], '迁移授权不得查询或识别角色代码');
+
+const casConflictPrisma = new FakePrisma();
+casConflictPrisma.seed(STORAGE_KEYS.TAG_GROUPS, { id: 'group-cas', name: 'CAS组', color: '#111', selectionMode: 'multiple', scope: 'customer', isActive: true, sortOrder: 0, createdAt: '2026-01-01', updatedAt: '2026-01-01' });
+casConflictPrisma.seed(STORAGE_KEYS.TAGS, { id: 'tag-cas', groupId: 'group-cas', name: 'CAS标签', isActive: true, sortOrder: 0, usageCount: 0, createdAt: '2026-01-01', updatedAt: '2026-01-01' });
+casConflictPrisma.seed(STORAGE_KEYS.CUSTOMERS, { id: 'customer-cas', name: '并发客户', tags: ['CAS标签'], manualTagIds: [] });
+const casConflictService = createCustomerTagMigrationService(casConflictPrisma as any);
+const casConflictPreview = (await casConflictService.previewLegacyTagMigration(actor)).data!;
+const customerBeforeConflict = clone(casConflictPrisma.rows.get(`${STORAGE_KEYS.CUSTOMERS}:customer-cas`).data);
+casConflictPrisma.businessRecord.updateMany = async () => ({ count: 0 });
+const casConflictResult = await casConflictService.applyLegacyTagMigration(casConflictPreview.checksum, actor);
+assert.equal(casConflictResult.code, 409, '客户版本冲突必须显式返回 409');
+assert.deepEqual(casConflictPrisma.rows.get(`${STORAGE_KEYS.CUSTOMERS}:customer-cas`).data, customerBeforeConflict);
+assert.equal([...casConflictPrisma.rows.values()].filter((row) => row.domain === 'aaos_customer_tag_migrations').length, 0, 'CAS 冲突不得记录迁移成功审计');
 
 prisma.seed(STORAGE_KEYS.CUSTOMERS, { id: 'customer-2', name: '客户二', tags: ['另一历史标签'] });
 const sharedLockPreview = (await service.previewLegacyTagMigration(actor)).data!;
 const catalogService = createCustomerTagService(prisma as any);
 const waitsBefore = prisma.lockWaitCount;
 const [catalogWrite, migrationWrite] = await Promise.all([
-  catalogService.createGroup({ name: '并发目录分组', selectionMode: 'multiple', scope: 'both' }, actor),
+  catalogService.createGroup({ name: '并发目录分组', selectionMode: 'multiple', scope: 'both' }, tagManager as any),
   service.applyLegacyTagMigration(sharedLockPreview.checksum, actor),
 ]);
 assert.equal(catalogWrite.code, 0);

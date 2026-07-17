@@ -131,9 +131,21 @@ assert.match(
 );
 assert.match(
   customersPageSource,
-  /permissionKey=\{PERMISSION_KEYS\.CUSTOMER_ASSIGN\}\s+action="write"/,
-  'Customer assign, release, and claim actions must require explicit write permission.',
+  /permissionKey=\{PERMISSION_KEYS\.CUSTOMER_TRANSFER\}\s+action="write"/,
+  'Customer transfer actions must require the dedicated leaf permission.',
 );
+assert.match(
+  `${customersPageSource}\n${customerDetailSource}`,
+  /permissionKey=\{PERMISSION_KEYS\.CUSTOMER_RELEASE_TO_POOL\}\s+action="write"/,
+  'Customer release actions must require the dedicated leaf permission.',
+);
+assert.match(
+  customersPageSource,
+  /permissionKey=\{PERMISSION_KEYS\.CUSTOMER_DELETE\}\s+action="delete"/,
+  'Customer delete actions must use the explicit high-risk leaf instead of a role-name check.',
+);
+assert.doesNotMatch(customersPageSource, /CUSTOMER_ASSIGN|isSuperAdminRoleName/);
+assert.doesNotMatch(customerDetailSource, /isSuperAdminRoleName/);
 assert.match(
   rolePermissionSource,
   /订单审核列表[\s\S]*订单审核操作/,

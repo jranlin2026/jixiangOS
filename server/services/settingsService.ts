@@ -50,10 +50,6 @@ export function createSettingsService(prisma: SettingsPrisma) {
     return [...new Set(owners)];
   };
 
-  const customerOwner = (row: { owner?: string | null; data: unknown }): string | null => (
-    customerOwners(row)[0] || null
-  );
-
   const leadOwners = (row: { owner?: string | null; assignedTo?: string | null; data: unknown }): string[] => {
     const lead = asRecord(row.data);
     const owners = [
@@ -74,13 +70,23 @@ export function createSettingsService(prisma: SettingsPrisma) {
     || Boolean(asRecord(row.data).customerId && ownedCustomerIds.has(String(asRecord(row.data).customerId)))
   );
 
-  const findOwnedCustomerRowsByNames = async (names: string[]) => {
-    const ownerNames = new Set(names.map((name) => name.trim()).filter(Boolean));
-    if (!ownerNames.size) return [];
+  const findOwnedCustomerRows = async (
+    owners: Array<{ id: string; name: string }>,
+  ) => {
+    const ownerIds = new Set(owners.map((owner) => owner.id).filter(Boolean));
+    const legacyOwnerNames = new Set(owners.map((owner) => owner.name.trim()).filter(Boolean));
+    if (!ownerIds.size) return [];
     const customerRows = await prisma.businessRecord.findMany({
       where: { domain: STORAGE_KEYS.CUSTOMERS },
     });
-    return customerRows.filter((row) => customerOwners(row).some((owner) => ownerNames.has(owner)));
+    return customerRows.filter((row) => {
+      const customer = asRecord(row.data);
+      const ownerId = nullableText(customer.ownerId);
+      if (ownerId) return ownerIds.has(ownerId);
+      // Legacy unresolved rows have no stable owner ID. Conservatively block a
+      // possible match by name, but never use that name to perform a write.
+      return customerOwners(row).some((owner) => legacyOwnerNames.has(owner));
+    });
   };
 
   const applyCustomerHandoff = async (
@@ -89,7 +95,7 @@ export function createSettingsService(prisma: SettingsPrisma) {
   ) => {
     if (!leavingUser) return success(null);
 
-    const ownedCustomerRows = await findOwnedCustomerRowsByNames([leavingUser.name]);
+    const ownedCustomerRows = await findOwnedCustomerRows([leavingUser]);
     const ownedCustomerIds = new Set<string>(
       ownedCustomerRows.map((row) => String(asRecord(row.data).id || row.recordId)),
     );
@@ -97,12 +103,14 @@ export function createSettingsService(prisma: SettingsPrisma) {
     const leadRows = allLeadRows.filter((row) => leadBelongsToLeavingUser(row, leavingUser.name, ownedCustomerIds));
     if (!ownedCustomerRows.length && !leadRows.length) return success(null);
 
+    if (ownedCustomerRows.length) {
+      return failure(
+        `该员工名下还有 ${ownedCustomerRows.length} 个客户，请先在客户列表完成转移或释放，再办理离职`,
+      );
+    }
+
     if (!handoff.customerAction) {
-      const parts = [
-        ownedCustomerRows.length ? `${ownedCustomerRows.length} 个客户` : '',
-        leadRows.length ? `${leadRows.length} 条线索` : '',
-      ].filter(Boolean).join('、');
-      return failure(`该员工名下还有 ${parts}，请先选择业务交接方式`);
+      return failure(`该员工名下还有 ${leadRows.length} 条线索，请先选择业务交接方式`);
     }
 
     let nextOwner = '公海';
@@ -120,54 +128,6 @@ export function createSettingsService(prisma: SettingsPrisma) {
       || (handoff.customerAction === 'public_pool'
         ? `${leavingUser.name}离职，客户释放到公海`
         : `${leavingUser.name}离职，客户交接给${nextOwner}`);
-
-    for (const row of ownedCustomerRows) {
-      const customer = asRecord(row.data);
-      const activity = {
-        id: `act-${randomUUID().slice(0, 8)}`,
-        type: 'transfer',
-        title: nextOwner === '公海' ? '离职客户释放到公海' : `离职客户交接给${nextOwner}`,
-        content: reason,
-        operator: '系统',
-        createdAt: nowIso,
-        changes: [{
-          field: 'owner',
-          label: '销售负责人',
-          oldValue: leavingUser.name,
-          newValue: nextOwner,
-        }],
-      };
-      const nextCustomer = handoff.customerAction === 'public_pool'
-        ? {
-          ...customer,
-          owner: '公海',
-          lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL,
-          lifecycleStatusUpdatedAt: nowIso,
-          publicPoolAt: nowIso,
-          releasedBy: leavingUser.name,
-          releaseReason: reason,
-          activityRecords: [activity, ...(Array.isArray(customer.activityRecords) ? customer.activityRecords : [])],
-          updatedAt: nowIso,
-        }
-        : {
-          ...customer,
-          owner: nextOwner,
-          ownerSince: nowIso,
-          originalSalesTransferBy: leavingUser.name,
-          activityRecords: [activity, ...(Array.isArray(customer.activityRecords) ? customer.activityRecords : [])],
-          updatedAt: nowIso,
-        };
-
-      await prisma.businessRecord.update({
-        where: { domain_recordId: { domain: row.domain, recordId: row.recordId } },
-        data: {
-          owner: nextOwner,
-          status: (nextCustomer as any).status || null,
-          eventAt: now,
-          data: nextCustomer as any,
-        },
-      });
-    }
 
     for (const row of leadRows) {
       const lead = asRecord(row.data);
@@ -268,10 +228,9 @@ export function createSettingsService(prisma: SettingsPrisma) {
       const targetIds = new Set((Array.isArray(userIds) ? userIds : []).map((id) => String(id || '').trim()).filter(Boolean));
       if (!targetIds.size) return success(0);
       const users = await prisma.user.findMany();
-      const targetNames = users
-        .filter((user) => targetIds.has(user.id))
-        .map((user) => user.name);
-      const rows = await findOwnedCustomerRowsByNames(targetNames);
+      const targetUsers = users.filter((user) => targetIds.has(user.id));
+      const targetNames = targetUsers.map((user) => user.name);
+      const rows = await findOwnedCustomerRows(targetUsers);
       const ownedCustomerIds = new Set(rows.map((row) => String(asRecord(row.data).id || row.recordId)));
       const ownerNames = new Set(targetNames.map((name) => name.trim()).filter(Boolean));
       const leadRows = await prisma.leadRecord.findMany();

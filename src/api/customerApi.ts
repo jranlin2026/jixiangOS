@@ -1,4 +1,4 @@
-import type { Customer, CustomerActivityRecord, CustomerCreateInput, CustomerFilters, AICustomerPortrait } from '../types/customer';
+import type { Customer, CustomerActivityRecord, CustomerCreateInput, CustomerFilters, AICustomerPortrait, CustomerManageableUser } from '../types/customer';
 import type { Lead, LeadChangeLog } from '../types/lead';
 import type { Order } from '../types/order';
 import type { ApiResponse, PaginatedResponse } from './types';
@@ -12,13 +12,25 @@ import { getCurrentOperatorName, getCurrentOperatorUser, SYSTEM_OPERATOR } from 
 import { claimFromPublicPool, hydrateCustomerLifecycle, releaseToPublicPool, setLeadLifecycle } from './lifecycleSync';
 import { filterVisibleCustomers } from '../shared/utils/dataVisibility';
 import { applyContactEditLock } from '../shared/utils/contactEditLock';
-import { isSuperAdminRoleName } from '../shared/utils/roles';
 import { getPhoneNumberError, normalizePhoneForComparison, normalizePhoneForStorage } from '../shared/utils/phoneNumber';
 import type { CustomerTag, CustomerTagCatalog } from '../types/tag';
+import type { Role } from '../types/role';
 import { groupTagIdsForFilter, normalizeManualTagIds, validateCustomerTagFilters } from '../shared/utils/customerTagPolicy';
+import { PERMISSION_KEYS } from '../shared/utils/permissions';
 
 function ensureInit(): void {
   initializeMockData();
+}
+
+function canEditLockedCustomerContact(): boolean {
+  const user = getCurrentOperatorUser();
+  if (!user?.isActive || !user.roleId) return false;
+  const roles = getStorageData<Role[]>(STORAGE_KEYS.ROLES) || [];
+  const role = roles.find((candidate) => candidate.id === user.roleId && candidate.isActive);
+  return Boolean(role?.permissions.some((permission) => (
+    permission.module === PERMISSION_KEYS.CUSTOMER_DELETE
+    && permission.actions.includes('delete')
+  )));
 }
 
 function isPersonalResource(value?: string): boolean {
@@ -341,6 +353,19 @@ function reconcileCustomerOrderStats(customers: Customer[]): Customer[] {
   return nextCustomers;
 }
 
+async function fetchManageableUsers(): Promise<ApiResponse<CustomerManageableUser[]>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<CustomerManageableUser[]>('/customers/manageable-users');
+  }
+  const currentUser = getCurrentOperatorUser();
+  if (!currentUser) return createSuccessResponse([]);
+  return createSuccessResponse([{
+    id: currentUser.id,
+    name: currentUser.name,
+    ...(currentUser.positionName ? { positionName: currentUser.positionName } : {}),
+  }]);
+}
+
 async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<PaginatedResponse<Customer>>> {
   if (shouldUseBackendApi()) {
     const params = new URLSearchParams();
@@ -523,7 +548,8 @@ async function updateCustomer(id: string, data: Partial<Customer>): Promise<ApiR
   const existing = customers[idx];
   const now = new Date().toISOString();
   const safeData = applyContactEditLock<Customer>(existing, data, {
-    canEditLockedContact: isSuperAdminRoleName(getCurrentOperatorUser()?.role),
+    // Mock mode still requires a stable role ID and the explicit high-risk leaf.
+    canEditLockedContact: canEditLockedCustomerContact(),
   });
   if (Object.prototype.hasOwnProperty.call(safeData, 'phone')) {
     safeData.phone = normalizePhoneForStorage(safeData.phone);
@@ -848,6 +874,7 @@ async function fetchAIPortrait(customerId: string): Promise<ApiResponse<AICustom
 }
 
 export const customerApi = {
+  fetchManageableUsers,
   fetchCustomers,
   fetchCustomerById,
   createCustomer,

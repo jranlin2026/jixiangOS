@@ -7,6 +7,7 @@ import {
   createOrderApplicationService,
   type OrderApprovalEffectState,
 } from './orderApplicationService';
+import { CustomerWriteConflictError } from './customerBusinessRecordRepository';
 
 type StoredRow = {
   id: string;
@@ -477,6 +478,21 @@ const deferredEffects: OrderApprovalEffectState = {
 
 {
   const prisma = new FakePrisma();
+  const service = createOrderApplicationService(prisma as any, {
+    now: () => new Date(NOW),
+    applyDownstreamEffects: async () => {
+      throw new CustomerWriteConflictError();
+    },
+  });
+  const result = await service.approve('oa-concurrent-1', reviewer);
+  assert.equal(result.code, 409);
+  assert.match(result.message, /客户记录已更新/);
+  assert.equal(prisma.domainRows(STORAGE_KEYS.ORDERS).length, 0, '客户投影冲突回滚正式订单');
+  assert.equal(prisma.applicationRow().data.status, '待财务审核', '客户投影冲突回滚申请状态');
+}
+
+{
+  const prisma = new FakePrisma();
   prisma.p2034FailuresRemaining = 2;
   const result = await createOrderApplicationService(prisma as any, { now: () => new Date(NOW) })
     .approve('oa-concurrent-1', reviewer);
@@ -518,6 +534,19 @@ const deferredEffects: OrderApprovalEffectState = {
   assert.equal(result.data?.orderData.salesName, salesApplicant.name);
   assert.equal(result.data?.orderData.owner, salesApplicant.name);
   assert.equal(prisma.applicationRow(result.data!.id).data.applicantId, salesApplicant.id);
+}
+
+{
+  const prisma = new FakePrisma();
+  const storedApplicant = prisma.users.find((user) => user.id === salesApplicant.id)!;
+  storedApplicant.roleId = 'role-customer-access-revoked';
+  const result = await createOrderApplicationService(prisma as any, { now: () => new Date(NOW) }).submit({
+    ...application().orderData,
+    productId: 'product-1',
+  }, salesApplicant);
+
+  assert.equal(result.code, 403, '客户读权必须使用实时目录中的稳定 roleId，不得继续信任会话角色');
+  assert.equal(prisma.domainRows(STORAGE_KEYS.ORDER_APPLICATIONS).length, 1, '被拒绝时不得新建订单申请');
 }
 
 {

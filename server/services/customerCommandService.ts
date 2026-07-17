@@ -15,7 +15,13 @@ import {
   buildDataVisibilityScopeForUser,
   type DataVisibilityScope,
 } from '../../src/shared/utils/dataVisibility';
-import { canReceiveLead, hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
+import {
+  canReceiveLead,
+  hasExplicitPermission,
+  hasPermission,
+  isSuperAdmin,
+  PERMISSION_KEYS,
+} from '../../src/shared/utils/permissions';
 import {
   getPhoneNumberError,
   normalizePhoneForComparison,
@@ -25,6 +31,20 @@ import { applyContactEditLock } from '../../src/shared/utils/contactEditLock';
 import { mapPrismaDepartment, mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { loadCustomerTagCatalog } from './customerTagService';
 import { validateManualTagUpdateSelection } from './customerTagPolicy';
+import {
+  assertCanManageCustomer,
+  assertCustomerActionPermission,
+  assertCustomerClaimPermission,
+  assertCustomerFieldPermissions,
+  buildCustomerAccessContextFromDirectory,
+  type CustomerAccessContext,
+  type CustomerMutationAction,
+} from './customerAccessPolicy';
+import {
+  createCustomerBusinessRecordRepository,
+  type CustomerRecordSnapshot,
+} from './customerBusinessRecordRepository';
+import { customerWriteConflictResponse } from './customerWriteConflict';
 
 type CustomerCommandPrisma = Pick<PrismaClient, '$transaction' | 'leadRecord'>;
 type CustomerCommandTx = Pick<
@@ -56,6 +76,7 @@ type CommandOptions = {
 
 type CommandContext = {
   scope: DataVisibilityScope;
+  customerAccess?: CustomerAccessContext;
   users: ReturnType<typeof mapPrismaUser>[];
   roles: ReturnType<typeof mapPrismaRole>[];
   actor?: ReturnType<typeof mapPrismaUser>;
@@ -82,25 +103,44 @@ function commandActor(context: CommandContext, user: AuthenticatedUser): string 
   return cleanText(context.actor?.name) || cleanText(user.name) || cleanText(user.account) || '系统';
 }
 
-function hasCustomerCommandPermission(user: AuthenticatedUser): boolean {
-  return hasPermission(user, PERMISSION_KEYS.CUSTOMER_ASSIGN, 'write');
-}
-
-function hasCustomerClaimPermission(user: AuthenticatedUser): boolean {
-  return hasPermission(user, PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, 'write');
-}
-
 function hasLeadConvertPermission(user: AuthenticatedUser): boolean {
   return hasPermission(user, PERMISSION_KEYS.LEADS_CONVERT, 'write');
 }
 
-function canMutateCustomer(customer: Customer, scope: DataVisibilityScope): boolean {
-  if (customer.deletedAt) return false;
-  if (customer.lifecycleStatusCode === LIFECYCLE_STATUS_CODES.PUBLIC_POOL || customer.owner === '公海') {
-    return scope.canViewPublicPool;
+const CUSTOMER_MUTATION_PERMISSION_ACTION = new Map<string, string>([
+  [PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE, 'write'],
+  [PERMISSION_KEYS.CUSTOMER_SET_PROGRESS, 'write'],
+  [PERMISSION_KEYS.CUSTOMER_SET_TAGS, 'write'],
+  [PERMISSION_KEYS.CUSTOMER_EDIT_ATTRIBUTION, 'write'],
+  [PERMISSION_KEYS.CUSTOMER_TRANSFER, 'write'],
+  [PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, 'write'],
+  [PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, 'write'],
+  [PERMISSION_KEYS.CUSTOMER_DELETE, 'delete'],
+]);
+
+function preflightCustomerAccess(user: AuthenticatedUser): CustomerAccessContext {
+  const grantedPermissions = new Set<string>();
+  for (const [permissionKey, action] of CUSTOMER_MUTATION_PERMISSION_ACTION) {
+    if (hasExplicitPermission(user, permissionKey, action)) grantedPermissions.add(permissionKey);
   }
-  if (scope.unrestricted) return true;
-  return Boolean(customer.owner && scope.visibleUserNames.includes(customer.owner));
+  return {
+    actorId: user.id,
+    actorName: user.name || user.account,
+    readableUserIds: new Set(),
+    legacyReadableNames: new Set(),
+    manageableOwnerIds: new Set(),
+    canReadPublicPool: false,
+    grantedPermissions,
+  };
+}
+
+function permissionError(operation: () => void): string | null {
+  try {
+    operation();
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : '无权操作客户';
+  }
 }
 
 function canMutateLead(
@@ -254,18 +294,6 @@ function leadHistory(
   };
 }
 
-async function lockCustomer(tx: CustomerCommandTx, customerId: string): Promise<LockedBusinessRecord | null> {
-  const rows = await tx.$queryRaw<LockedBusinessRecord[]>(Prisma.sql`
-    SELECT id, domain, recordId, data
-    FROM business_records
-    WHERE domain = ${STORAGE_KEYS.CUSTOMERS}
-      AND recordId = ${customerId}
-    LIMIT 1
-    FOR UPDATE
-  `);
-  return rows[0] || null;
-}
-
 async function lockLead(tx: CustomerCommandTx, leadId: string): Promise<LockedLeadRecord | null> {
   const rows = await tx.$queryRaw<LockedLeadRecord[]>(Prisma.sql`
     SELECT id, data
@@ -373,6 +401,9 @@ async function commandContext(
     roles,
     actor,
     scope: buildDataVisibilityScopeForUser(actor, users, roles, departments, domain),
+    customerAccess: domain === 'customers'
+      ? buildCustomerAccessContextFromDirectory(currentUser, users, roles, departments)
+      : undefined,
   };
 }
 
@@ -414,19 +445,13 @@ async function linkedLeadRows(tx: CustomerCommandTx, customer: Customer) {
   return rows.filter((row) => isLinkedLead(readJson<Lead>(row.data), customer));
 }
 
-async function persistCustomer(tx: CustomerCommandTx, rowId: string, customer: Customer, now: Date) {
-  return tx.businessRecord.update({
-    where: { id: rowId },
-    data: {
-      title: customer.name || customer.company || customer.id,
-      status: customer.lifecycleStatusCode || null,
-      owner: customer.owner || null,
-      customerId: customer.id,
-      amount: Number.isFinite(Number(customer.totalSpent)) ? Number(customer.totalSpent) : null,
-      eventAt: now,
-      data: jsonValue(customer),
-    },
-  });
+async function persistCustomer(
+  tx: CustomerCommandTx,
+  snapshot: CustomerRecordSnapshot,
+  customer: Customer,
+  now: Date,
+) {
+  return createCustomerBusinessRecordRepository(tx).compareAndSave(snapshot, customer, now);
 }
 
 async function persistLead(tx: CustomerCommandTx, rowId: string, lead: Lead, now: Date) {
@@ -456,6 +481,7 @@ const CUSTOMER_EDIT_FIELDS: Array<{ field: keyof Customer; label: string }> = [
   { field: 'phone', label: '电话' },
   { field: 'wechat', label: '微信' },
   { field: 'customerLevel', label: '客户等级' },
+  { field: 'lifecycleStatusCode', label: '客户进展' },
   { field: 'leadContributorId', label: '线索贡献人' },
   { field: 'leadContributorName', label: '线索贡献人' },
   { field: 'leadSource', label: '线索来源' },
@@ -498,7 +524,14 @@ function buildCustomerEditChanges(customer: Customer, patch: Partial<Customer>) 
     .filter((change) => change.oldValue !== change.newValue);
 }
 
+function isCanonicalPublicPoolCustomer(customer: Customer): boolean {
+  return customer.lifecycleStatusCode === LIFECYCLE_STATUS_CODES.PUBLIC_POOL
+    && customer.ownerIdentityStatus === 'public_pool'
+    && !customer.ownerId;
+}
+
 function syncLeadFromCustomer(lead: Lead, customer: Customer, atIso: string, operator: string): Lead {
+  const isPublicPool = isCanonicalPublicPoolCustomer(customer);
   const patch: Partial<Lead> = {
     customerId: customer.id,
     name: customer.name,
@@ -509,8 +542,8 @@ function syncLeadFromCustomer(lead: Lead, customer: Customer, atIso: string, ope
     city: customer.city,
     owner: customer.owner,
     ownerId: customer.ownerId,
-    assignedTo: customer.owner === '公海' ? undefined : customer.owner,
-    assignedToId: customer.owner === '公海' ? undefined : customer.ownerId,
+    assignedTo: isPublicPool ? undefined : customer.owner,
+    assignedToId: isPublicPool ? undefined : customer.ownerId,
     inputBy: customer.leadInputBy,
     leadContributorId: customer.leadContributorId,
     leadContributorName: customer.leadContributorName,
@@ -665,6 +698,8 @@ export function createCustomerCommandService(
       try {
         return await prisma.$transaction(async (rawTx) => operation(rawTx as CustomerCommandTx));
       } catch (error) {
+        const conflict = customerWriteConflictResponse(error);
+        if (conflict) return conflict as T;
         lastError = error;
         const code = (error as { code?: string }).code;
         const message = error instanceof Error ? error.message : String(error || '');
@@ -678,33 +713,36 @@ export function createCustomerCommandService(
   const transitionCustomer = async (
     customerId: string,
     currentUser: AuthenticatedUser,
+    authorization: CustomerMutationAction | 'claim_from_pool',
     transition: (
       customer: Customer,
       context: CommandContext,
       at: Date,
     ) => { customer?: Customer; lead?: (lead: Lead) => Lead; error?: { code: number; message: string } },
   ) => runTransaction(async (tx) => {
-    const row = await lockCustomer(tx, customerId);
-    if (!row) return failure<Customer>('客户不存在', 404);
-    const customer = readJson<Customer>(row.data);
+    const snapshot = await createCustomerBusinessRecordRepository(tx).lockById(customerId);
+    if (!snapshot) return failure<Customer>('客户不存在', 404);
+    const customer = snapshot.customer;
     if (customer.deletedAt) return failure<Customer>('客户不存在', 404);
 
     const context = await commandContext(tx, currentUser, 'customers');
-    if (!context.actor) return failure<Customer>('当前用户不存在或已离职', 403);
-    if (!canMutateCustomer(customer, context.scope)) return failure<Customer>('无权操作该客户', 403);
-    if (
-      customer.owner !== '公海'
-      && activeUsersNamed(context, cleanText(customer.owner)).length > 1
-    ) {
-      return failure<Customer>('客户归属姓名不唯一，请先完成归属身份清理', 409);
-    }
+    if (!context.actor || !context.customerAccess) return failure<Customer>('当前用户不存在或已离职', 403);
+    const authorizationError = permissionError(() => {
+      if (authorization === 'claim_from_pool') {
+        assertCustomerClaimPermission(context.customerAccess!);
+      } else {
+        assertCustomerActionPermission(context.customerAccess!, authorization);
+        assertCanManageCustomer(context.customerAccess!, customer);
+      }
+    });
+    if (authorizationError) return failure<Customer>(authorizationError, 403);
 
     const at = now();
     const result = transition(customer, context, at);
     if (result.error) return failure<Customer>(result.error.message, result.error.code);
     if (!result.customer || !result.lead) return success(customer);
 
-    await persistCustomer(tx, row.id, result.customer, at);
+    await persistCustomer(tx, snapshot, result.customer, at);
     const leadRows = await linkedLeadRows(tx, customer);
     for (const leadRow of leadRows) {
       await persistLead(tx, leadRow.id, result.lead(readJson<Lead>(leadRow.data)), at);
@@ -714,22 +752,28 @@ export function createCustomerCommandService(
 
   return {
     async updateCustomer(customerId: string, input: Partial<Customer>, currentUser: AuthenticatedUser) {
-      if (!hasPermission(currentUser, PERMISSION_KEYS.CUSTOMER_EDIT, 'write')) {
-        return failure<Customer>('无权编辑客户', 403);
-      }
+      const submittedPatch = editableCustomerPatch(input);
+      const preflightError = permissionError(() => (
+        assertCustomerFieldPermissions(
+          preflightCustomerAccess(currentUser),
+          submittedPatch as Record<string, unknown>,
+        )
+      ));
+      if (preflightError) return failure<Customer>(preflightError, 403);
       return runTransaction(async (tx) => {
-        const row = await lockCustomer(tx, customerId);
-        if (!row) return failure<Customer>('客户不存在', 404);
-        const customer = readJson<Customer>(row.data);
+        const snapshot = await createCustomerBusinessRecordRepository(tx).lockById(customerId);
+        if (!snapshot) return failure<Customer>('客户不存在', 404);
+        const customer = snapshot.customer;
         if (customer.deletedAt) return failure<Customer>('客户不存在', 404);
         const context = await commandContext(tx, currentUser, 'customers');
-        if (!context.actor) return failure<Customer>('当前用户不存在或已离职', 403);
-        if (!canMutateCustomer(customer, context.scope)) return failure<Customer>('无权操作该客户', 403);
-        if (customer.owner !== '公海' && activeUsersNamed(context, cleanText(customer.owner)).length > 1) {
-          return failure<Customer>('客户归属姓名不唯一，请先完成归属身份清理', 409);
-        }
+        if (!context.actor || !context.customerAccess) return failure<Customer>('当前用户不存在或已离职', 403);
+        const accessError = permissionError(() => {
+          assertCustomerFieldPermissions(context.customerAccess!, submittedPatch as Record<string, unknown>);
+          assertCanManageCustomer(context.customerAccess!, customer);
+        });
+        if (accessError) return failure<Customer>(accessError, 403);
 
-        let patch = editableCustomerPatch(input);
+        let patch = submittedPatch;
         let tagNameById: Map<string, string> | null = null;
         if (Object.prototype.hasOwnProperty.call(input, 'manualTagIds')) {
           const catalog = await loadCustomerTagCatalog(tx, true);
@@ -740,7 +784,7 @@ export function createCustomerCommandService(
           patch.tags = validation.tagIds.map((id) => catalog.tags.find((tag) => tag.id === id)!.name);
         }
         patch = applyContactEditLock(customer, patch, {
-          canEditLockedContact: isSuperAdmin(currentUser),
+          canEditLockedContact: context.customerAccess.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_DELETE),
         });
         if (Object.prototype.hasOwnProperty.call(patch, 'phone')) {
           patch.phone = normalizePhoneForStorage(patch.phone);
@@ -793,7 +837,7 @@ export function createCustomerCommandService(
         await lockCustomerContacts(tx, customer, updated);
         const collision = await findCustomerContactCollision(tx, updated, customer.id);
         if (collision) return failure<Customer>('手机号或微信已存在于其他客户', 409);
-        await persistCustomer(tx, row.id, updated, at);
+        await persistCustomer(tx, snapshot, updated, at);
         const leadRows = await linkedLeadRows(tx, customer);
         for (const leadRow of leadRows) {
           const lead = readJson<Lead>(leadRow.data);
@@ -805,14 +849,22 @@ export function createCustomerCommandService(
     },
 
     async deleteCustomer(customerId: string, reasonInput: string, currentUser: AuthenticatedUser) {
-      if (!isSuperAdmin(currentUser)) return failure<boolean>('仅超级管理员可以删除客户', 403);
+      const preflightError = permissionError(() => (
+        assertCustomerActionPermission(preflightCustomerAccess(currentUser), 'soft_delete')
+      ));
+      if (preflightError) return failure<boolean>(preflightError, 403);
       return runTransaction(async (tx) => {
-        const row = await lockCustomer(tx, customerId);
-        if (!row) return success(true);
-        const customer = readJson<Customer>(row.data);
+        const snapshot = await createCustomerBusinessRecordRepository(tx).lockById(customerId);
+        if (!snapshot) return success(true);
+        const customer = snapshot.customer;
         if (customer.deletedAt) return success(true);
         const context = await commandContext(tx, currentUser, 'customers');
-        if (!context.actor || !context.scope.unrestricted) return failure<boolean>('无权删除该客户', 403);
+        if (!context.actor || !context.customerAccess) return failure<boolean>('无权删除该客户', 403);
+        const accessError = permissionError(() => {
+          assertCustomerActionPermission(context.customerAccess!, 'soft_delete');
+          assertCanManageCustomer(context.customerAccess!, customer);
+        });
+        if (accessError) return failure<boolean>(accessError, 403);
         if (await hasActiveCustomerOrder(tx, customer)) {
           return failure<boolean>('客户存在关联订单，不能删除；请先处理订单后再操作。', 409);
         }
@@ -828,7 +880,7 @@ export function createCustomerCommandService(
           deleteReason: reason,
           updatedAt: atIso,
         };
-        await persistCustomer(tx, row.id, deleted, at);
+        await persistCustomer(tx, snapshot, deleted, at);
         const leadRows = await linkedLeadRows(tx, customer);
         for (const leadRow of leadRows) {
           const lead = readJson<Lead>(leadRow.data);
@@ -914,6 +966,7 @@ export function createCustomerCommandService(
         const requestedOwner = cleanText(input.assignedTo || input.owner);
         let owner = '待分配';
         let assignedTo: string | undefined;
+        let assignedToId: string | undefined;
         let assignedAt: string | undefined;
         let assignmentRuleId: string | undefined;
         let assignmentReason = '线索自动分配未开启';
@@ -932,6 +985,7 @@ export function createCustomerCommandService(
           }
           owner = targets[0].name;
           assignedTo = targets[0].name;
+          assignedToId = targets[0].id;
           assignedAt = atIso;
           assignmentReason = '手动指定销售';
         } else if (flowConfig.autoAssignEnabled) {
@@ -958,6 +1012,7 @@ export function createCustomerCommandService(
               if (flowConfig.dailyLimitEnabled && assignedToday >= flowConfig.dailyLimit) continue;
               owner = participant.name;
               assignedTo = participant.name;
+              assignedToId = participant.id;
               assignedAt = atIso;
               assignmentRuleId = flowConfig.id;
               assignmentReason = '顺序平均分配';
@@ -980,6 +1035,7 @@ export function createCustomerCommandService(
           status: input.status || '新线索',
           owner,
           assignedTo,
+          assignedToId,
           assignedAt,
           assignmentRuleId,
           inputBy,
@@ -1037,6 +1093,8 @@ export function createCustomerCommandService(
             industry: lead.industry,
             city: lead.city,
             owner: assignedTo,
+            ownerId: assignedToId,
+            ownerIdentityStatus: 'resolved',
             customerLevel: 'L1',
             lifecycleStatusCode: LIFECYCLE_STATUS_CODES.FOLLOWING,
             lifecycleStatusUpdatedAt: atIso,
@@ -1214,7 +1272,9 @@ export function createCustomerCommandService(
       const hint = await prisma.leadRecord.findUnique({ where: { id: leadId }, select: { data: true } });
       const hintedCustomerId = hint ? readJson<Lead>(hint.data).customerId : undefined;
       return runTransaction(async (tx) => {
-        const customerRow = hintedCustomerId ? await lockCustomer(tx, hintedCustomerId) : null;
+        const customerSnapshot = hintedCustomerId
+          ? await createCustomerBusinessRecordRepository(tx).lockById(hintedCustomerId)
+          : null;
         const row = await lockLead(tx, leadId);
         if (!row) return failure<FollowUpRecord>('线索不存在', 404);
         const lead = readJson<Lead>(row.data);
@@ -1248,9 +1308,9 @@ export function createCustomerCommandService(
           updatedAt: atIso,
         };
         await persistLead(tx, row.id, updated, at);
-        if (shouldStartFollowing && customerRow) {
-          const customer = readJson<Customer>(customerRow.data);
-          await persistCustomer(tx, customerRow.id, {
+        if (shouldStartFollowing && customerSnapshot) {
+          const customer = customerSnapshot.customer;
+          await persistCustomer(tx, customerSnapshot, {
             ...customer,
             lifecycleStatusCode: LIFECYCLE_STATUS_CODES.FOLLOWING,
             lifecycleStatusUpdatedAt: atIso,
@@ -1340,9 +1400,12 @@ export function createCustomerCommandService(
     },
 
     async releaseToPublicPool(customerId: string, reasonInput: string, currentUser: AuthenticatedUser) {
-      if (!hasCustomerCommandPermission(currentUser)) return failure<Customer>('无权释放客户到公海', 403);
-      return transitionCustomer(customerId, currentUser, (customer, _context, at) => {
-        if (customer.lifecycleStatusCode === LIFECYCLE_STATUS_CODES.PUBLIC_POOL && customer.owner === '公海') {
+      const preflightError = permissionError(() => (
+        assertCustomerActionPermission(preflightCustomerAccess(currentUser), 'release_to_pool')
+      ));
+      if (preflightError) return failure<Customer>(preflightError, 403);
+      return transitionCustomer(customerId, currentUser, 'release_to_pool', (customer, _context, at) => {
+        if (isCanonicalPublicPoolCustomer(customer)) {
           return {};
         }
         const atIso = at.toISOString();
@@ -1407,16 +1470,19 @@ export function createCustomerCommandService(
     },
 
     async claimFromPublicPool(customerId: string, currentUser: AuthenticatedUser) {
-      if (!hasCustomerClaimPermission(currentUser)) return failure<Customer>('无权领取公海客户', 403);
-      return transitionCustomer(customerId, currentUser, (customer, context, at) => {
+      const preflightError = permissionError(() => (
+        assertCustomerClaimPermission(preflightCustomerAccess(currentUser))
+      ));
+      if (preflightError) return failure<Customer>(preflightError, 403);
+      return transitionCustomer(customerId, currentUser, 'claim_from_pool', (customer, context, at) => {
         const actor = context.actor;
         if (!actor || !canReceiveLead(actor, context.roles)) {
           return { error: { code: 403, message: '当前员工不是可领取客户的在职销售' } };
         }
         const operator = actor.name;
-        const isPublicPool = customer.lifecycleStatusCode === LIFECYCLE_STATUS_CODES.PUBLIC_POOL || customer.owner === '公海';
+        const isPublicPool = isCanonicalPublicPoolCustomer(customer);
         if (!isPublicPool) {
-          if (customer.owner === operator) return {};
+          if (customer.ownerIdentityStatus === 'resolved' && customer.ownerId === actor.id) return {};
           return { error: { code: 409, message: '客户已被其他人领取' } };
         }
         const atIso = at.toISOString();
@@ -1485,10 +1551,13 @@ export function createCustomerCommandService(
       reasonInput: string,
       currentUser: AuthenticatedUser,
     ) {
-      if (!hasCustomerCommandPermission(currentUser)) return failure<Customer>('无权分配客户', 403);
+      const preflightError = permissionError(() => (
+        assertCustomerActionPermission(preflightCustomerAccess(currentUser), 'transfer')
+      ));
+      if (preflightError) return failure<Customer>(preflightError, 403);
       const ownerId = cleanText(ownerIdInput);
       if (!ownerId) return failure<Customer>('请选择新的销售负责人', 400);
-      return transitionCustomer(customerId, currentUser, (customer, context, at) => {
+      return transitionCustomer(customerId, currentUser, 'transfer', (customer, context, at) => {
         const target = context.users.find((user) => (
           user.id === ownerId
           && user.isActive
@@ -1499,7 +1568,7 @@ export function createCustomerCommandService(
         if (!canReceiveLead(target, context.roles)) {
           return { error: { code: 400, message: '目标员工不是可分配销售' } };
         }
-        if (!context.scope.unrestricted && !context.scope.visibleUserIds.includes(target.id)) {
+        if (!context.customerAccess?.manageableOwnerIds.has(target.id)) {
           return { error: { code: 403, message: '无权跨数据范围分配客户' } };
         }
         if (customer.ownerId === ownerId && customer.lifecycleStatusCode !== LIFECYCLE_STATUS_CODES.PUBLIC_POOL) return {};
@@ -1507,7 +1576,7 @@ export function createCustomerCommandService(
         const atIso = at.toISOString();
         const operator = commandActor(context, currentUser);
         const reason = cleanText(reasonInput);
-        const wasPublicPool = customer.lifecycleStatusCode === LIFECYCLE_STATUS_CODES.PUBLIC_POOL || customer.owner === '公海';
+        const wasPublicPool = isCanonicalPublicPoolCustomer(customer);
         const nextLifecycle = wasPublicPool
           ? LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP
           : customer.lifecycleStatusCode;
@@ -1599,12 +1668,14 @@ export function createCustomerCommandService(
         const atIso = at.toISOString();
         const operator = commandActor(context, currentUser);
         let conversionOwner = operator;
+        let conversionOwnerId = context.actor.id;
         if (existingOwnerName) {
           const existingOwner = activeUsersNamed(context, existingOwnerName)[0];
           if (!existingOwner || !canReceiveLead(existingOwner, context.roles)) {
             return failure<Lead>('线索已分配的销售不存在、已离职或不可接收线索', 409);
           }
           conversionOwner = existingOwner.name;
+          conversionOwnerId = existingOwner.id;
         } else {
           if (!canReceiveLead(context.actor, context.roles)) {
             return failure<Lead>('当前员工不是可领取线索的在职销售', 403);
@@ -1624,6 +1695,8 @@ export function createCustomerCommandService(
           industry: lead.industry,
           city: lead.city,
           owner: conversionOwner,
+          ownerId: conversionOwnerId,
+          ownerIdentityStatus: 'resolved',
           customerLevel: 'L1',
           lifecycleStatusCode: LIFECYCLE_STATUS_CODES.FOLLOWING,
           lifecycleStatusUpdatedAt: atIso,

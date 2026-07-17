@@ -114,6 +114,17 @@ assert.equal(response.statusCode, 200);
 assert.equal(request.currentUser.account, 'admin');
 assert.equal(nextCalled, true);
 
+const customerManageRequirements = [
+  { permissionKey: PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE, action: 'write' },
+  { permissionKey: PERMISSION_KEYS.CUSTOMER_SET_TAGS, action: 'write' },
+  { permissionKey: PERMISSION_KEYS.CUSTOMER_SET_TODOS, action: 'write' },
+  { permissionKey: PERMISSION_KEYS.CUSTOMER_SET_PROGRESS, action: 'write' },
+  { permissionKey: PERMISSION_KEYS.CUSTOMER_EDIT_ATTRIBUTION, action: 'write' },
+  { permissionKey: PERMISSION_KEYS.CUSTOMER_TRANSFER, action: 'write' },
+  { permissionKey: PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, action: 'write' },
+  { permissionKey: PERMISSION_KEYS.CUSTOMER_DELETE, action: 'delete' },
+];
+
 middleware = createRequireAnyPermission({
   getCurrentUser: async () => ({
     code: 0,
@@ -141,4 +152,38 @@ response = createResponse();
 nextCalled = false;
 await middleware({ headers: { authorization: 'Bearer token' } } as any, response as any, next as any);
 assert.equal(response.statusCode, 403);
+assert.equal(nextCalled, false);
+
+middleware = createRequireAnyPermission({
+  getCurrentUser: async () => ({
+    code: 0,
+    data: {
+      ...activeUser,
+      role: '客户资料编辑者' as any,
+      permissions: [{ module: PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE, actions: ['write'] }],
+    },
+    message: 'success',
+  }),
+}, customerManageRequirements);
+response = createResponse();
+nextCalled = false;
+await middleware({ headers: { authorization: 'Bearer token' } } as any, response as any, next as any);
+assert.equal(response.statusCode, 200, '逐项 action 的 requireAny 应允许 profile-only 写叶子');
+assert.equal(nextCalled, true);
+
+middleware = createRequireAnyPermission({
+  getCurrentUser: async () => ({
+    code: 0,
+    data: {
+      ...activeUser,
+      role: '客户只读者' as any,
+      permissions: [{ module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] }],
+    },
+    message: 'success',
+  }),
+}, customerManageRequirements);
+response = createResponse();
+nextCalled = false;
+await middleware({ headers: { authorization: 'Bearer token' } } as any, response as any, next as any);
+assert.equal(response.statusCode, 403, '没有任何客户 manage 叶子时必须拒绝候选人路由');
 assert.equal(nextCalled, false);

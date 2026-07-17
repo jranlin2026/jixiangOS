@@ -104,6 +104,7 @@ type Row = {
   domain: string;
   recordId: string;
   data: any;
+  updatedAt?: Date;
   status?: string | null;
   owner?: string | null;
   customerId?: string | null;
@@ -122,6 +123,7 @@ function clone<T>(value: T): T {
 
 class FakePrisma {
   readonly rows = new Map<string, Row>();
+  readonly forceCustomerVersionConflict: boolean;
   readonly users = [databaseUser(sales), databaseUser(otherSales)];
   readonly roles = [role()];
   readonly departments = [{
@@ -137,7 +139,10 @@ class FakePrisma {
     sourceOrder?: Order;
     commissionStatus?: string;
     deliveryStatus?: string;
+    customerDataId?: string;
+    forceCustomerVersionConflict?: boolean;
   } = {}) {
+    this.forceCustomerVersionConflict = options.forceCustomerVersionConflict === true;
     const sourceOrder = options.sourceOrder || order();
     this.rows.set(key(STORAGE_KEYS.ORDERS, sourceOrder.id), {
       id: `${STORAGE_KEYS.ORDERS}:${sourceOrder.id}`,
@@ -157,8 +162,9 @@ class FakePrisma {
       customerId: 'customer-1',
       owner: sales.name,
       amount: 899,
+      updatedAt: new Date(NOW),
       data: {
-        id: 'customer-1', name: '数据库客户', company: '数据库公司', phone: '13900000000',
+        id: options.customerDataId || 'customer-1', name: '数据库客户', company: '数据库公司', phone: '13900000000',
         owner: sales.name, customerLevel: 'L1', lifecycleStatusCode: 'ordered', totalSpent: 899,
         orderCount: 1, growthPath: [], growthRecords: [], activityRecords: [], createdAt: NOW, updatedAt: NOW,
       },
@@ -195,8 +201,12 @@ class FakePrisma {
   }
 
   async $transaction<T>(callback: (transaction: any) => Promise<T>): Promise<T> {
+    const before = clone(Array.from(this.rows.entries()));
     const tx = {
-      $queryRaw: async (_strings: TemplateStringsArray, ...values: unknown[]) => {
+      $queryRaw: async (queryOrStrings: TemplateStringsArray | { values?: unknown[] }, ...taggedValues: unknown[]) => {
+        const values: unknown[] = Array.isArray(queryOrStrings)
+          ? taggedValues
+          : (queryOrStrings as { values?: unknown[] }).values || [];
         const row = this.rows.get(key(String(values[0] || ''), String(values[1] || '')));
         return row ? [clone(row)] : [];
       },
@@ -218,9 +228,30 @@ class FakePrisma {
           this.rows.set(rowKey, next);
           return clone(next);
         },
+        updateMany: async ({ where, data }: any) => {
+          if (this.forceCustomerVersionConflict) return { count: 0 };
+          const current = Array.from(this.rows.values()).find((row) => row.id === where.id);
+          const matchesVersion = current?.updatedAt?.getTime() === where.updatedAt?.getTime();
+          if (!current || current.domain !== where.domain || current.recordId !== where.recordId || !matchesVersion) {
+            return { count: 0 };
+          }
+          const rowKey = key(current.domain, current.recordId);
+          this.rows.set(rowKey, {
+            ...current,
+            ...clone(data),
+            updatedAt: new Date(current.updatedAt!.getTime() + 1),
+          });
+          return { count: 1 };
+        },
       },
     };
-    return callback(tx);
+    try {
+      return await callback(tx);
+    } catch (error) {
+      this.rows.clear();
+      before.forEach(([rowKey, row]) => this.rows.set(rowKey, row));
+      throw error;
+    }
   }
 
   orderData(): Order {
@@ -303,4 +334,24 @@ class FakePrisma {
   assert.equal(result.data?.deleteReason, '重复订单');
   assert.equal(prisma.customerData().orderCount, 0);
   assert.equal(prisma.customerData().totalSpent, 0);
+}
+
+{
+  const prisma = new FakePrisma({ customerDataId: 'corrupted-customer-id' });
+  const result = await createOrderCommandService(prisma as any, { now: () => new Date(NOW) })
+    .softDelete('order-1', '重复订单', sales);
+
+  assert.equal(result.code, 409, '客户稳定ID损坏时不得继续删除并重算投影');
+  assert.match(result.message, /客户.*ID/);
+  assert.equal(prisma.orderData().deletedAt, undefined, '投影校验失败时订单删除必须回滚');
+}
+
+{
+  const prisma = new FakePrisma({ forceCustomerVersionConflict: true });
+  const result = await createOrderCommandService(prisma as any, { now: () => new Date(NOW) })
+    .softDelete('order-1', '重复订单', sales);
+
+  assert.equal(result.code, 409, '客户投影并发冲突时应提示刷新重试');
+  assert.match(result.message, /客户记录已更新/);
+  assert.equal(prisma.orderData().deletedAt, undefined, '客户投影并发冲突时订单删除必须回滚');
 }

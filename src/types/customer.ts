@@ -176,3 +176,10 @@ export type CustomerCreateInput = Omit<
 > & {
   productLevel?: ProductLevel;
 };
+
+/** 客户写操作中可选的最小人员投影。 */
+export interface CustomerManageableUser {
+  id: ID;
+  name: string;
+  positionName?: string;
+}
