@@ -29,8 +29,9 @@ audit append.
 - `ContactIdentityConflictError` with code
   `CONTACT_IDENTITY_CONFLICT` and a safe payload. The public message is always
   `系统中已存在相同联系方式`. A safe customer summary is returned only when
-  the caller's existing `canReadCustomer` policy passes; unreadable conflicts
-  return `data: null`.
+  the current server role directory grants `CUSTOMER_LIST/read` **and** the
+  caller's existing `canReadCustomer` data-scope policy passes; all other
+  conflicts return `data: null`.
 
 ## Cryptography and configuration
 
@@ -57,10 +58,15 @@ audit append.
 ## Transaction integration
 
 - `customerListService.create`: removed the JSON scan/deterministic raw-contact
-  customer ID as uniqueness authority; creates identity/link, BusinessRecord,
+  customer ID as uniqueness authority; creates BusinessRecord, identity/link,
   and audit event in one transaction. Customer IDs are now random UUID-based.
-  Its conflict viewer is resolved from that transaction's current access scope,
-  so only an authorized actor receives the allowlisted safe summary.
+  It stages the private BusinessRecord before shared identity work, matching
+  the source-record → identity order of edit/delete paths. It retries only
+  transaction conflicts (`P2034`, deadlock/1213/40001 signatures) up to three
+  attempts, returning a generic 409 after exhaustion; identity conflicts and
+  P2002 are never retried. Its conflict viewer is resolved from that
+  transaction's current server access context. It takes the fixed identity
+  mutation gate before its private-record lock.
 - `customerCommandService.updateCustomer`: retains association/contact locks,
   establishes all new identities before ending obsolete links, then persists
   the customer and synchronizes linked leads plus their identity links. Any
@@ -76,7 +82,17 @@ audit append.
 - Durable lead-intake collision records contain only the generic conflict
   message; customer/lead IDs and names are never copied into them.
 - Role-name checks and data-scope semantics were not added or changed. Conflict
-  visibility uses the existing stable `canReadCustomer` policy.
+  visibility requires the existing stable `canReadCustomer` policy plus the
+  explicit, server-derived `CustomerAccessContext.canReadCustomerList`
+  capability. It is passed through direct create, profile/sync, auto-claim,
+  and conversion paths; client-token claims cannot grant disclosure.
+- Every production transaction that writes or ends a contact identity/link
+  (direct create, profile update/sync, both customer delete paths, create-lead,
+  conversion, lead delete, and backfill apply) first takes the persistent,
+  non-PII `aaos_contact_identity_mutation_gate_v1` AppStorage row with
+  `upsert + SELECT ... FOR UPDATE`. This intentionally serializes only contact
+  lifecycle mutation, including during manual apply; unrelated customer/lead
+  mutations do not take the gate.
 
 ## Backfill and operability
 
@@ -86,9 +102,14 @@ audit append.
 - Output is aggregate JSON only: `canonicalCustomers`, `conflicts`,
   `invalidValues`, `duplicateGroups`, and `legacyContactLockKeysCleared`; it
   never logs contact values, hashes, ciphertext, customer names, or IDs.
-- Apply mode writes identity/link/candidate records and can delete only the
-  obsolete exact legacy lock keys inside its transaction. It never modifies
-  customer BusinessRecord JSON.
+- Apply mode takes current `FOR UPDATE` source reads in fixed customer-then-lead
+  order inside its transaction, after the identity mutation gate, rebuilds its
+  plan from those locked rows, and
+  writes identity/link/candidate records from that plan. It ends obsolete links
+  for every locked source row (including deleted, empty, and invalid contacts)
+  before recomputing canonical/conflict state from actual active links. It can
+  delete only the obsolete exact legacy lock keys inside that transaction and
+  never modifies customer BusinessRecord JSON.
 - Historical identities with one active customer become canonical. Identities
   with multiple active customers become `conflict`, have no canonical customer,
   retain all active links, and produce one candidate group.
@@ -96,7 +117,9 @@ audit append.
   `createOrReloadCustomerDuplicateGroup`, including its canonical SHA-256 of
   JSON `{ rule, customerIds: sortedUniqueIds }` and P2002 winner reload.
 - Identity and link unique constraints plus link upsert/reactivation make apply
-  reruns idempotent. Concurrent identity/group discovery uses `SELECT ... FOR
+  reruns idempotent. Whole-apply transaction retries are bounded to three for
+  `P2034`/deadlock/1213/40001 conflicts; each retry reacquires source locks and
+  rebuilds the plan. Concurrent identity/group discovery uses `SELECT ... FOR
   UPDATE` current reads for both unique-key winner reload and active-link
   admission, so a REPEATABLE READ snapshot cannot add a second customer link.
 - Added protected preview/apply endpoints alongside the existing owner-identity
@@ -111,9 +134,15 @@ audit append.
   text can therefore coexist as the schema permits. No Prisma schema migration
   is required: existing `contact-<HMAC-prefix>` rows remain valid, and a later
   backfill creates only the previously blocked other type under its new ID.
-- Before a manual backfill completes, each contact write takes the identity
-  current lock and locks matching active legacy customer BusinessRecord rows.
-  It attaches unlinked historical owners before deciding admission. New direct
+- Before a manual backfill completes, each contact write locks matching active
+  legacy customer BusinessRecord rows before the shared identity current lock.
+  Direct creation stages its own BusinessRecord first; edits/deletes already
+  lock their source record. Profile sync and lead conversion require opposite
+  customer/lead source orders, so a fixed,
+  persistent non-PII identity-mutation gate is acquired as the first lock in
+  every contact lifecycle transaction and backfill apply. That narrow gate
+  prevents cross-workflow cycles without serializing unrelated commands. It
+  attaches unlinked historical owners before deciding admission. New direct
   creation, profile edits, conversion, and auto-claim consequently either
   reconcile the legacy owner or fail with the same generic safe conflict.
 - After a P2002, identity and duplicate-group code use a locking current read
@@ -152,7 +181,17 @@ Focused regressions cover:
 - phone/WeChat same-string primary-key separation plus compatibility with an
   existing pre-fix identity ID;
 - empty-identity-table legacy direct create, profile edit, conversion, and
-  auto-claim blocking; authorized direct-create safe conflict detail;
+  auto-claim blocking; no-list generic conflict data for direct create,
+  profile update, auto-claim, and conversion; server-directory list-read safe
+  detail only for an in-scope actor;
+- direct-create source-record → legacy-source → identity lock-order assertion,
+  gate-first assertion, deterministic post-BusinessRecord P2034 rollback/retry
+  success, and bounded exhausted 409 behavior;
+- backfill discovery-to-apply edit and soft-delete races, fixed-order source
+  `FOR UPDATE` assertions after the gate, stale-link ending/idempotent rerun,
+  and whole-apply retry/exhaustion behavior;
+- conversion gate-before-source ordering, covering the former
+  backfill/customer-to-lead versus conversion/lead-to-customer cycle;
 - both customer soft-delete paths ending links and restoring reusable canonical
   state; exact legacy-lock cleanup that preserves HMAC and lookalike keys;
 - missing, short, incomplete, and unsupported-version production keys.
@@ -180,16 +219,21 @@ Focused regressions cover:
   versioned GCM envelope, domain-separated derived encryption key, derived-key
   zeroing, and no fallback secret were verified.
 - Transaction boundaries: all identity changes are inside the owning customer
-  or lead transaction; conflict exceptions roll back contact locks, links,
-  customer/lead writes, and audit writes.
+  or lead transaction; each takes the fixed non-PII mutation gate before any
+  source/identity lock. Conflict exceptions roll back contact locks, links,
+  customer/lead writes, audit writes, and a first-attempt tentative customer
+  record on retry.
 - Legacy paths: POST customer create, edit, explicit conversion, and create-lead
   auto-claim are covered. Customer JSON remains a BusinessRecord.
 - Safe conflicts: readable details are allowlisted (`id`, `name`, `company`,
-  `owner`) only after `canReadCustomer`; unreadable responses and durable intake
-  history are generic-only. Raw contact/hash/ciphertext are regression-tested.
-- Backfill idempotency: deterministic sorted discovery, shared Task 5 group key,
-  locking current-read P2002 reload, link reactivation, dry-run no writes,
-  exact legacy-lock cleanup, and apply reruns were verified.
+  `owner`) only after server-authoritative `CUSTOMER_LIST/read` and
+  `canReadCustomer`; unreadable responses and durable intake history are
+  generic-only. Raw contact/hash/ciphertext are regression-tested.
+- Backfill idempotency: dry preview uses deterministic sorted discovery, while
+  apply rebuilds from fixed-order current source locks; stale edit/delete/no-
+  contact links are ended before canonical/group reconciliation. Shared Task 5
+  group keys, locking current-read P2002 reload, bounded transaction retry,
+  dry-run no writes, exact legacy-lock cleanup, and apply reruns were verified.
 
 ## Deferred release concern
 

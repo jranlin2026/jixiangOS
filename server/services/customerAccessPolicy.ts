@@ -33,6 +33,8 @@ export interface CustomerAccessContext {
   legacyReadableNames: ReadonlySet<string>;
   manageableOwnerIds: ReadonlySet<string>;
   canReadPublicPool: boolean;
+  /** Server-authoritative capability to disclose customer-list details. */
+  canReadCustomerList: boolean;
   /**
    * Contains only permissions granted for their authoritative mutation action.
    * In particular CUSTOMER_DELETE is added only for an explicit `delete` grant.
@@ -119,6 +121,7 @@ function emptyContext(actorId: string, actorName = ''): CustomerAccessContext {
     legacyReadableNames: new Set(),
     manageableOwnerIds: new Set(),
     canReadPublicPool: false,
+    canReadCustomerList: false,
     grantedPermissions: new Set(),
   };
 }
@@ -190,6 +193,7 @@ export function buildCustomerAccessContextFromDirectory(
     legacyReadableNames: new Set(manageableUsers.map((user) => user.name).filter(Boolean)),
     manageableOwnerIds: new Set(manageableUsers.map((user) => user.id)),
     canReadPublicPool: scope === 'all' || canReceiveLead(actor, [role]),
+    canReadCustomerList: roleHasPermission(role, PERMISSION_KEYS.CUSTOMER_LIST, 'read'),
     grantedPermissions,
   };
 }

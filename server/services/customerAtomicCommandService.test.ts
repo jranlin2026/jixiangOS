@@ -67,7 +67,7 @@ const result = await commands.execute({
   actor: { id: 'u-1', name: '销售甲' },
   access: {
     actorId: 'u-1', actorName: '销售甲', readableUserIds: new Set(['u-1']), legacyReadableNames: new Set(['销售甲']),
-    manageableOwnerIds: new Set(['u-1']), canReadPublicPool: false,
+    manageableOwnerIds: new Set(['u-1']), canReadPublicPool: false, canReadCustomerList: false,
     grantedPermissions: new Set([PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL]),
   },
   idempotencyKey: 'job-1:c-1',
@@ -93,7 +93,7 @@ assert.equal(savedLead.owner, '公海');
 await assert.rejects(
   () => commands.execute({ action: 'release_to_pool', customerId: 'c-1', reason: '' }, {
     tx: transaction, actor: { id: 'u-1', name: '销售甲' },
-    access: { actorId: 'u-1', actorName: '销售甲', readableUserIds: new Set(), legacyReadableNames: new Set(), manageableOwnerIds: new Set(), canReadPublicPool: false, grantedPermissions: new Set() },
+    access: { actorId: 'u-1', actorName: '销售甲', readableUserIds: new Set(), legacyReadableNames: new Set(), manageableOwnerIds: new Set(), canReadPublicPool: false, canReadCustomerList: false, grantedPermissions: new Set() },
   }),
   /操作原因不能为空/,
 );
@@ -175,7 +175,7 @@ function createAtomicFixture(options: {
       actor: { id: 'u-1', name: '伪造姓名不得生效' },
       access: {
         actorId: 'u-1', actorName: '销售甲', readableUserIds: new Set(['u-1']), legacyReadableNames: new Set(['销售甲']),
-        manageableOwnerIds: new Set(['u-1', 'u-target']), canReadPublicPool: true,
+        manageableOwnerIds: new Set(['u-1', 'u-target']), canReadPublicPool: true, canReadCustomerList: false,
         grantedPermissions: new Set([
           PERMISSION_KEYS.CUSTOMER_TRANSFER,
           PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL,

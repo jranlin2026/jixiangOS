@@ -10,7 +10,13 @@ const created: any[] = [];
 const auditEvents: any[] = [];
 const contactIdentities: any[] = [];
 const contactLinks: any[] = [];
+const appStorage: any[] = [];
 let transactionTail = Promise.resolve<unknown>(undefined);
+let remainingTransactionFailures = 0;
+let remainingPostBusinessRecordFailures = 0;
+let transactionCalls = 0;
+let serverDirectoryAllowsCustomerList = false;
+const directCreateLockOrder: string[] = [];
 let servicePrisma: any;
 const service = createCustomerListService(servicePrisma = {
   businessRecord: {
@@ -33,12 +39,17 @@ const service = createCustomerListService(servicePrisma = {
       return row ? { data: structuredClone(row.data) } : null;
     },
     create: async (input: any) => {
+      directCreateLockOrder.push('business-record');
       if (created.some((item) => item.data.id === input.data.id)) {
         const error = new Error('duplicate business record') as Error & { code?: string };
         error.code = 'P2002';
         throw error;
       }
       created.push(input);
+      if (remainingPostBusinessRecordFailures > 0) {
+        remainingPostBusinessRecordFailures -= 1;
+        throw Object.assign(new Error('deadlock after private customer record write'), { code: 'P2034' });
+      }
       return input.data;
     },
   },
@@ -54,7 +65,12 @@ const service = createCustomerListService(servicePrisma = {
   role: {
     findMany: async () => [{
       id: 'role-sales', name: '销售顾问', code: 'sales', description: null, departmentId: null,
-      permissions: [{ module: PERMISSION_KEYS.CUSTOMER_CREATE, actions: ['write'] }],
+      permissions: [
+        { module: PERMISSION_KEYS.CUSTOMER_CREATE, actions: ['write'] },
+        ...(serverDirectoryAllowsCustomerList
+          ? [{ module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] }]
+          : []),
+      ],
       dataScopes: { customers: 'self' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now,
     }],
   },
@@ -107,9 +123,25 @@ const service = createCustomerListService(servicePrisma = {
       return { count };
     },
   },
+  appStorage: {
+    upsert: async ({ where, update, create }: any) => {
+      directCreateLockOrder.push('mutation-gate');
+      const row = appStorage.find((candidate) => candidate.key === where.key);
+      if (row) {
+        Object.assign(row, structuredClone(update));
+        return { ...row };
+      }
+      appStorage.push(structuredClone(create));
+      return structuredClone(create);
+    },
+  },
   $queryRaw: async (query: any) => {
     const text = Array.isArray(query?.strings) ? query.strings.join('?') : String(query || '');
     const values = query?.values || [];
+    if (text.includes('FROM business_records') && text.includes('ORDER BY recordId') && text.includes('FOR UPDATE')) {
+      directCreateLockOrder.push('legacy-source');
+    }
+    if (text.includes('FROM contact_identities')) directCreateLockOrder.push('identity');
     if (text.includes('FROM contact_identities')) {
       const [type, normalizedHash] = values;
       return contactIdentities.filter((identity) => identity.type === type && identity.normalizedHash === normalizedHash)
@@ -131,7 +163,26 @@ const service = createCustomerListService(servicePrisma = {
     return [];
   },
   $transaction: async (operation: any) => {
-    const result = transactionTail.then(() => operation(servicePrisma));
+    const result = transactionTail.then(async () => {
+      transactionCalls += 1;
+      if (remainingTransactionFailures > 0) {
+        remainingTransactionFailures -= 1;
+        throw Object.assign(new Error('deadlock while creating customer'), { code: 'P2034' });
+      }
+      // The fake needs transaction rollback now that create intentionally
+      // writes its private BusinessRecord before claiming the shared identity.
+      const snapshot = structuredClone({ created, auditEvents, contactIdentities, contactLinks, appStorage });
+      try {
+        return await operation(servicePrisma);
+      } catch (error) {
+        created.splice(0, created.length, ...snapshot.created);
+        auditEvents.splice(0, auditEvents.length, ...snapshot.auditEvents);
+        contactIdentities.splice(0, contactIdentities.length, ...snapshot.contactIdentities);
+        contactLinks.splice(0, contactLinks.length, ...snapshot.contactLinks);
+        appStorage.splice(0, appStorage.length, ...snapshot.appStorage);
+        throw error;
+      }
+    });
     transactionTail = result.then(() => undefined, () => undefined);
     return result;
   },
@@ -195,10 +246,15 @@ assert.equal(auditEvents[0]?.operation, 'create_customer');
 assert.match(auditEvents[0]?.inputHash || '', /^[a-f0-9]{64}$/);
 assert.equal(contactIdentities.length, 1);
 assert.equal(contactLinks[0]?.entityId, result.data?.id);
+assert.equal(directCreateLockOrder[0], 'mutation-gate');
+assert.ok(directCreateLockOrder.indexOf('business-record') >= 0);
+assert.ok(directCreateLockOrder.indexOf('legacy-source') > directCreateLockOrder.indexOf('business-record'));
+assert.ok(directCreateLockOrder.indexOf('identity') > directCreateLockOrder.indexOf('legacy-source'));
 
 // RED: a direct POST customer create must reconcile an active pre-backfill
 // BusinessRecord (identity table intentionally empty for this customer) and
-// return the permitted safe summary to its acting viewer.
+// return only the generic conflict to an actor with matching data scope but
+// no server-authoritative customer-list read permission.
 const legacyContact = '13900000008';
 created.push({
   data: {
@@ -223,13 +279,56 @@ const directLegacyConflict = await service.create({
   ownerId: actor.id, sourceType: '公司资源',
 }, actor);
 assert.equal(directLegacyConflict.code, 409);
-assert.deepEqual(directLegacyConflict.data, {
-  id: 'legacy-no-identity', name: '历史客户', company: '历史公司', owner: actor.name,
-});
+assert.equal(directLegacyConflict.data, null);
 assert.equal(created.length, createdBeforeLegacyConflict, '冲突回滚不得写入新客户');
 assert.equal(contactLinks.some((link) => (
   link.entityId === 'legacy-no-identity' && link.entityType === 'customer' && link.linkStatus === 'active'
-)), true);
+)), false, 'conflicting create must roll back every tentative identity write as well');
+
+// The same self-scoped actor may receive the minimal summary only after the
+// server role directory grants CUSTOMER_LIST/read; a client token alone is
+// deliberately not the authority for disclosure.
+serverDirectoryAllowsCustomerList = true;
+const directLegacyConflictAllowed = await service.create({
+  name: '可披露重复新建', company: '', phone: legacyContact, customerLevel: 'L1', owner: actor.name,
+  ownerId: actor.id, sourceType: '公司资源',
+}, actor);
+assert.equal(directLegacyConflictAllowed.code, 409);
+assert.deepEqual(directLegacyConflictAllowed.data, {
+  id: 'legacy-no-identity', name: '历史客户', company: '历史公司', owner: actor.name,
+});
+serverDirectoryAllowsCustomerList = false;
+
+// RED: direct create retries an entire transaction after the deterministic
+// deadlock signal, then returns a safe 409 after the bounded retry budget is
+// exhausted without duplicating customer/audit writes.
+{
+  const beforeRetry = { created: created.length, audits: auditEvents.length, transactions: transactionCalls };
+  const linksBeforeRetry = contactLinks.length;
+  remainingPostBusinessRecordFailures = 1;
+  const retried = await service.create({
+    name: '死锁重试客户', company: '', phone: '13600000090', customerLevel: 'L1', owner: actor.name,
+    ownerId: actor.id, sourceType: '公司资源',
+  }, actor);
+  assert.equal(retried.code, 0);
+  assert.equal(transactionCalls - beforeRetry.transactions, 2, 'P2034 must retry the whole create transaction once');
+  assert.equal(created.length, beforeRetry.created + 1);
+  assert.equal(auditEvents.length, beforeRetry.audits + 1, 'retry must not duplicate audit history');
+  assert.equal(contactLinks.length, linksBeforeRetry + 1, 'post-create rollback must not leave a duplicate identity link');
+
+  const beforeExhausted = { created: created.length, audits: auditEvents.length, transactions: transactionCalls };
+  remainingPostBusinessRecordFailures = 3;
+  const exhausted = await service.create({
+    name: '死锁耗尽客户', company: '', phone: '13600000091', customerLevel: 'L1', owner: actor.name,
+    ownerId: actor.id, sourceType: '公司资源',
+  }, actor);
+  assert.equal(exhausted.code, 409);
+  assert.equal(exhausted.data, null);
+  assert.match(exhausted.message, /并发冲突/);
+  assert.equal(transactionCalls - beforeExhausted.transactions, 3, 'retry budget must remain bounded');
+  assert.equal(created.length, beforeExhausted.created);
+  assert.equal(auditEvents.length, beforeExhausted.audits);
+}
 
 const tagged = await service.create({
   name: '标签客户', company: '', phone: '13800000001', customerLevel: 'L1', owner: '销售', ownerId: actor.id, sourceType: '公司资源', manualTagIds: ['shared'],
@@ -253,7 +352,7 @@ const denied = await service.create({
 assert.equal(denied.code, 0, 'ownerId 缺失时必须由服务端明确归属当前 actor，不能按姓名分配');
 assert.equal(denied.data?.ownerId, actor.id);
 assert.equal(denied.data?.owner, actor.name);
-assert.equal(created.length, 4);
+assert.equal(created.length, 5);
 
 const emptyName = await service.create({
   name: '',

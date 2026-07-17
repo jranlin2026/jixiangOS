@@ -55,6 +55,12 @@ assert.equal(departmentOnly.manageableOwnerIds.has('user-child'), false, '服务
 assert.equal(departmentOnly.manageableOwnerIds.has('user-left'), false, '离职员工不得进入可管理集');
 assert.equal(departmentOnly.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE), true);
 assert.equal(departmentOnly.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_DELETE), true, '直接 delete 授权应生效');
+assert.equal(departmentOnly.canReadCustomerList, false, '数据范围本身不得授予客户列表详情披露权');
+
+const listReadable = await loadCustomerAccessContext(directory('self', [
+  { module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] },
+]) as any, actor);
+assert.equal(listReadable.canReadCustomerList, true, '客户列表 read 必须来自服务端角色目录');
 
 const descendants = await loadCustomerAccessContext(directory('department_and_descendants') as any, actor);
 assert.equal(descendants.manageableOwnerIds.has('user-child'), true);

@@ -347,6 +347,7 @@ function createFakePrisma(
     extraUsers?: any[];
     roleRows?: any[];
     seedContactIdentities?: boolean;
+    queryLog?: string[];
   } = {},
 ) {
   let state: FakeState = {
@@ -451,6 +452,7 @@ function createFakePrisma(
         return row ? clone(row) : null;
       },
       upsert: async ({ where, update, create }: any) => {
+        options.queryLog?.push(`app_storage_upsert:${where.key}`);
         if (String(where.key).startsWith('aaos_contact_lock_')) contactLockUpserts += 1;
         await lockContact(where.key);
         const rows = working.appStorage || (working.appStorage = []);
@@ -509,6 +511,10 @@ function createFakePrisma(
     },
     leadRecord: {
       findMany: async () => clone(working.leads),
+      findUnique: async ({ where }: any) => {
+        const row = working.leads.find((item) => item.id === where.id);
+        return row ? clone(row) : null;
+      },
       create: async ({ data }: any) => {
         if (working.leads.some((lead) => lead.id === data.id)) throw new Error('duplicate lead');
         working.leads.push(clone(data));
@@ -603,6 +609,7 @@ function createFakePrisma(
     },
     $queryRaw: async (query: any) => {
       const text = queryText(query);
+      options.queryLog?.push(text);
       const values = query?.values || [];
       if (text.includes('FROM contact_identity_links')) {
         if (text.includes('WHERE identityId')) {
@@ -1775,6 +1782,51 @@ const serviceOptions = {
   assert.equal(fake.getState().leads.length, 0);
 }
 
+// RED: auto-claim reaches the identity conflict path after normal legacy
+// contact prechecks pass. Self scope is insufficient to disclose the linked
+// customer when the server role lacks CUSTOMER_LIST/read.
+{
+  const incomingPhone = '13900000037';
+  const existing = customer('cust-auto-claim-summary-hidden');
+  existing.phone = '13900000038';
+  const normalizedHash = hashContactIdentity(incomingPhone, TEST_CONTACT_CRYPTO.hmacKey);
+  const fake = createFakePrisma({
+    businessRecords: [...tagCatalogRows(), businessCustomer(existing)],
+    leads: [],
+    contactIdentities: [{
+      id: 'ci-auto-claim-summary-hidden', type: 'phone', normalizedHash, hashKeyVersion: 1,
+      status: 'active', encryptedNormalizedValue: 'ci:v1:test', canonicalCustomerId: existing.id,
+      conflictReason: null,
+    }],
+    contactIdentityLinks: [{
+      id: 'cil-auto-claim-summary-hidden', identityId: 'ci-auto-claim-summary-hidden',
+      entityType: 'customer', entityId: existing.id, linkStatus: 'active', source: 'test', endedAt: null,
+    }],
+    appStorage: [
+      {
+        key: STORAGE_KEYS.LEAD_FLOW_CONFIG,
+        value: {
+          ...DEFAULT_LEAD_FLOW_CONFIG,
+          participantUserIds: ['user-a'],
+          autoClaimAfterAssignmentEnabled: true,
+          dailyLimitEnabled: false,
+          lastAssignedIndex: -1,
+        },
+      },
+      { key: STORAGE_KEYS.LEAD_INTAKE_RECORDS, value: [] },
+    ],
+  }, { seedContactIdentities: false });
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions).createLead({
+    name: '自动领取摘要保护', phone: incomingPhone, source: '官网', status: '新线索',
+    owner: '待分配', sourceType: '公司资源',
+  }, leadEditor);
+
+  assert.equal(result.code, 409);
+  assert.equal(result.data, null);
+  assert.equal(fake.getState().businessRecords.filter((row) => row.domain === STORAGE_KEYS.CUSTOMERS).length, 1);
+  assert.equal(fake.getState().leads.length, 0);
+}
+
 // RED: 显式分配新线索需要分配权限，且手机/微信不得与客户或线索重复。
 {
   const explicitFake = createFakePrisma({ businessRecords: [], leads: [] });
@@ -1918,7 +1970,8 @@ const serviceOptions = {
 
 // RED: 线索转客户要原子创建 BusinessRecord 并回写 LeadRecord，重试不得重复创建。
 {
-  const fake = createFakePrisma({ businessRecords: [], leads: [lead('lead-convert')] });
+  const queryLog: string[] = [];
+  const fake = createFakePrisma({ businessRecords: [], leads: [lead('lead-convert')] }, { queryLog });
   const service = createCustomerCommandService(fake.prisma, serviceOptions);
   const result = await service.convertLeadToCustomer('lead-convert', salesA);
 
@@ -1939,7 +1992,19 @@ const serviceOptions = {
     ['customer', 'lead'],
   );
   assert.equal(fake.contactLockUpserts, 1, '转客户前必须建立规范化联系人锁');
-  assert.equal(fake.contactLockQueries, 1, '联系人锁必须使用 FOR UPDATE');
+  assert.equal(fake.contactLockQueries, 2, '身份门与联系人锁都必须使用 FOR UPDATE');
+  const customerSourceLock = queryLog.findIndex((text) => (
+    text.includes('FROM business_records') && text.includes('ORDER BY recordId ASC') && text.includes('FOR UPDATE')
+  ));
+  const mutationGateLock = queryLog.findIndex((text) => (
+    text === 'app_storage_upsert:aaos_contact_identity_mutation_gate_v1'
+  ));
+  const leadSourceLock = queryLog.findIndex((text) => (
+    text.includes('FROM lead_records') && text.includes('WHERE id =') && text.includes('FOR UPDATE')
+  ));
+  assert.ok(mutationGateLock >= 0 && leadSourceLock > mutationGateLock);
+  assert.ok(customerSourceLock > mutationGateLock,
+    'the shared gate must precede conversion source locks that otherwise oppose backfill order');
 
   const replay = await service.convertLeadToCustomer('lead-convert', salesA);
   assert.equal(replay.code, 0);
@@ -2075,16 +2140,39 @@ const serviceOptions = {
 
   assert.equal(result.code, 409);
   assert.equal(result.message, '系统中已存在相同联系方式');
-  assert.deepEqual(result.data, {
-    id: 'cust-existing',
-    name: '客户-cust-existing',
-    company: '公司-cust-existing',
-    owner: salesA.name,
-  });
+  assert.equal(result.data, null, 'self data scope without CUSTOMER_LIST/read must not disclose the matching customer');
   assert.doesNotMatch(JSON.stringify(result), /13800000000|normalizedHash|encryptedNormalizedValue/);
   const next = fake.getState();
   assert.equal(next.businessRecords.length, 1);
   assert.equal(next.leads[0].data.customerId, undefined);
+}
+
+// The same in-scope conversion may disclose the four safe fields only when
+// the server role directory explicitly grants CUSTOMER_LIST/read.
+{
+  const existingCustomer = businessCustomer(customer('cust-existing-list-readable'));
+  const sourceLead = lead('lead-duplicate-customer-list-readable');
+  const listReadableRole = {
+    ...salesRole,
+    permissions: [
+      ...salesRole.permissions,
+      { module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] },
+    ],
+  };
+  const fake = createFakePrisma(
+    { businessRecords: [existingCustomer], leads: [sourceLead] },
+    { seedContactIdentities: false, roleRows: [listReadableRole, managerRole, financeRole, superRole] },
+  );
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .convertLeadToCustomer(sourceLead.id, salesA);
+
+  assert.equal(result.code, 409);
+  assert.deepEqual(result.data, {
+    id: 'cust-existing-list-readable',
+    name: '客户-cust-existing-list-readable',
+    company: '公司-cust-existing-list-readable',
+    owner: salesA.name,
+  });
 }
 
 // RED: 范围外联系方式冲突只允许返回通用语义，不得泄露对象。
@@ -2129,6 +2217,27 @@ const serviceOptions = {
     activeIdentity?.normalizedHash,
     hashContactIdentity('13900000066', TEST_CONTACT_CRYPTO.hmacKey),
   );
+}
+
+// RED: 编辑者即使在同一数据范围内，也不能仅凭范围读取权限获知
+// 冲突客户；摘要还要求服务端 CUSTOMER_LIST/read capability。
+{
+  const target = customer('cust-profile-conflict-target');
+  // A blank historical value is legitimately completable by a profile editor;
+  // use it so the contact-edit lock does not mask the identity conflict path.
+  target.phone = '';
+  const existing = customer('cust-profile-conflict-existing');
+  existing.phone = '13900000062';
+  const fake = createFakePrisma({
+    businessRecords: [businessCustomer(target), businessCustomer(existing)],
+    leads: [],
+  });
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .updateCustomer(target.id, { phone: existing.phone }, customerEditor);
+
+  assert.equal(result.code, 409);
+  assert.equal(result.data, null);
+  assert.equal(fake.getState().businessRecords.find((row) => row.recordId === target.id)?.data.phone, target.phone);
 }
 
 // RED: an ordinary profile edit on a pre-backfill customer starts with an

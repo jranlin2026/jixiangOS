@@ -63,6 +63,7 @@ import {
   endLeadContactIdentityLinks,
   hashContactIdentity,
   linkLeadAndCustomerIdentity,
+  lockContactIdentityMutationGate,
   normalizeContactIdentity,
   upsertCustomerContactIdentities,
   type ContactIdentityCrypto,
@@ -222,6 +223,7 @@ function preflightCustomerAccess(user: AuthenticatedUser): CustomerAccessContext
     legacyReadableNames: new Set(),
     manageableOwnerIds: new Set(),
     canReadPublicPool: false,
+    canReadCustomerList: false,
     grantedPermissions,
   };
 }
@@ -825,6 +827,7 @@ export function createCustomerAtomicCommandService(options: {
     ): Promise<CustomerAtomicCommandResult> {
       const reason = requireAtomicReason(command.reason);
       const tx = context.tx;
+      if (command.action === 'soft_delete') await lockContactIdentityMutationGate(tx);
       await lockCustomerAssociationScope(tx, [command.customerId]);
       const repository = createCustomerBusinessRecordRepository(tx);
       const snapshot = await repository.lockById(command.customerId);
@@ -1279,6 +1282,7 @@ export function createCustomerCommandService(
       ));
       if (preflightError) return failure<Customer>(preflightError, 403);
       return runTransaction(async (tx) => {
+        await lockContactIdentityMutationGate(tx);
         // Serialize every association writer/checker before observing whether a
         // delete is safe; otherwise a new order could slip in after the check.
         await lockCustomerAssociationScope(tx, [customerId]);
@@ -1403,6 +1407,7 @@ export function createCustomerCommandService(
           source: 'customer_profile_update',
           crypto: options.contactIdentityCrypto,
           conflictViewer: {
+            canReadCustomerList: context.customerAccess!.canReadCustomerList,
             canReadCustomer: (candidate) => canReadCustomer(context.customerAccess!, candidate),
           },
         });
@@ -1420,6 +1425,7 @@ export function createCustomerCommandService(
               source: 'customer_profile_sync',
               crypto: options.contactIdentityCrypto,
               conflictViewer: {
+                canReadCustomerList: context.customerAccess!.canReadCustomerList,
                 canReadCustomer: (candidate) => canReadCustomer(context.customerAccess!, candidate),
               },
             });
@@ -1449,6 +1455,7 @@ export function createCustomerCommandService(
       ));
       if (preflightError) return failure<boolean>(preflightError, 403);
       return runTransaction(async (tx) => {
+        await lockContactIdentityMutationGate(tx);
         // Deletion must serialize against every stable customer association
         // writer before it checks the registry and marks the customer deleted.
         await lockCustomerAssociationScope(tx, [customerId]);
@@ -1502,6 +1509,7 @@ export function createCustomerCommandService(
         return failure<Lead>('无权新建线索', 403);
       }
       return runTransaction(async (tx) => {
+        await lockContactIdentityMutationGate(tx);
         const context = await commandContext(tx, currentUser, 'leads');
         if (!context.actor) return failure<Lead>('当前用户不存在或已离职', 403);
         const cleanInput = stripLeadTags(input);
@@ -1726,6 +1734,7 @@ export function createCustomerCommandService(
             source: 'lead_auto_claim',
             crypto: options.contactIdentityCrypto,
             conflictViewer: {
+              canReadCustomerList: Boolean(context.customerAccess?.canReadCustomerList),
               canReadCustomer: (candidate) => Boolean(
                 context.customerAccess && canReadCustomer(context.customerAccess, candidate)
               ),
@@ -2007,6 +2016,7 @@ export function createCustomerCommandService(
     async deleteLead(leadId: string, reasonInput: string, currentUser: AuthenticatedUser) {
       if (!isSuperAdmin(currentUser)) return failure<boolean>('仅超级管理员可以删除线索', 403);
       return runTransaction(async (tx) => {
+        await lockContactIdentityMutationGate(tx);
         const row = await lockLead(tx, leadId);
         if (!row) return success(true);
         const lead = readJson<Lead>(row.data);
@@ -2264,6 +2274,7 @@ export function createCustomerCommandService(
     async convertLeadToCustomer(leadId: string, currentUser: AuthenticatedUser) {
       if (!hasLeadConvertPermission(currentUser)) return failure<Lead>('无权将线索转为客户', 403);
       return runTransaction(async (tx) => {
+        await lockContactIdentityMutationGate(tx);
         const leadRow = await lockLead(tx, leadId);
         if (!leadRow) return failure<Lead>('线索不存在', 404);
         const lead = stripLeadTags(readJson<Lead>(leadRow.data));
@@ -2364,6 +2375,7 @@ export function createCustomerCommandService(
           source: 'lead_conversion',
           crypto: options.contactIdentityCrypto,
           conflictViewer: {
+            canReadCustomerList: Boolean(context.customerAccess?.canReadCustomerList),
             canReadCustomer: (candidate) => Boolean(
               context.customerAccess && canReadCustomer(context.customerAccess, candidate)
             ),

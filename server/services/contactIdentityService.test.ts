@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
 import {
+  CONTACT_IDENTITY_MUTATION_GATE_KEY,
   ContactIdentityConflictError,
   backfillContactIdentities,
   hashContactIdentity,
@@ -43,7 +44,15 @@ function matchesWhere(row: any, where: any): boolean {
   });
 }
 
-function createStore(input: Partial<State> = {}) {
+function createStore(
+  input: Partial<State> = {},
+  options: {
+    beforeTransaction?: (state: State) => void;
+    queryLog?: string[];
+    transactionAttempts?: { value: number };
+    failTransactions?: number;
+  } = {},
+) {
   const state: State = {
     identities: structuredClone(input.identities || []),
     links: structuredClone(input.links || []),
@@ -52,6 +61,7 @@ function createStore(input: Partial<State> = {}) {
     leads: structuredClone(input.leads || []),
     appStorage: structuredClone((input as any).appStorage || []),
   };
+  let remainingTransactionFailures = options.failTransactions || 0;
   const store: any = {
     contactIdentity: {
       findUnique: async ({ where }: any) => state.identities.find((row) => matchesWhere(row, where)) || null,
@@ -125,6 +135,16 @@ function createStore(input: Partial<State> = {}) {
     },
     appStorage: {
       findMany: async () => structuredClone(state.appStorage),
+      upsert: async ({ where, update, create }: any) => {
+        options.queryLog?.push(`app_storage_upsert:${where.key}`);
+        const row = state.appStorage.find((candidate) => candidate.key === where.key);
+        if (row) {
+          Object.assign(row, structuredClone(update));
+          return structuredClone(row);
+        }
+        state.appStorage.push(structuredClone(create));
+        return structuredClone(create);
+      },
       deleteMany: async ({ where }: any) => {
         const keys = new Set<string>(where?.key?.in || []);
         const before = state.appStorage.length;
@@ -134,6 +154,7 @@ function createStore(input: Partial<State> = {}) {
     },
     $queryRaw: async (query: any) => {
       const text = Array.isArray(query?.strings) ? query.strings.join('?') : String(query || '');
+      options.queryLog?.push(text);
       const values = query?.values || [];
       if (text.includes('FROM contact_identities')) {
         const [type, normalizedHash] = values;
@@ -158,10 +179,19 @@ function createStore(input: Partial<State> = {}) {
         return structuredClone(state.groups.filter((row) => row.groupKey === groupKey));
       }
       if (text.includes('FROM business_records')) return structuredClone(state.customers);
+      if (text.includes('FROM lead_records')) return structuredClone(state.leads);
       return [];
     },
   };
-  store.$transaction = async (operation: any) => operation(store);
+  store.$transaction = async (operation: any) => {
+    if (options.transactionAttempts) options.transactionAttempts.value += 1;
+    if (remainingTransactionFailures > 0) {
+      remainingTransactionFailures -= 1;
+      throw Object.assign(new Error('backfill deadlock'), { code: 'P2034' });
+    }
+    options.beforeTransaction?.(state);
+    return operation(store);
+  };
   return { store, state };
 }
 
@@ -320,6 +350,131 @@ function createStore(input: Partial<State> = {}) {
 assert.equal(normalizeContactIdentity('phone', ' +86 138 0013 8000 '), '13800138000');
 assert.equal(normalizeContactIdentity('wechat', ' WeiXin_A '), 'weixin_a');
 
+// RED: apply must rebuild from the current locked source rows, not reactivate
+// an identity planned before a customer changed contact details.
+{
+  const oldPhone = '13900000041';
+  const newPhone = '13900000042';
+  const oldHash = hashContactIdentity(oldPhone, crypto.hmacKey);
+  const queryLog: string[] = [];
+  const { store, state } = createStore({
+    identities: [{
+      id: `ci_phone_${oldHash.slice(0, 32)}`, type: 'phone', normalizedHash: oldHash,
+      hashKeyVersion: 1, status: 'active', encryptedNormalizedValue: 'ci:v1:test',
+      canonicalCustomerId: null, conflictReason: null,
+    }],
+    links: [{
+      id: 'link-before-edit', identityId: `ci_phone_${oldHash.slice(0, 32)}`,
+      entityType: 'customer', entityId: 'c-backfill-edit', linkStatus: 'ended',
+      source: 'historical_backfill', endedAt: new Date(),
+    }],
+    customers: [{
+      id: 'aaos_customers:c-backfill-edit', domain: 'aaos_customers', recordId: 'c-backfill-edit',
+      data: { id: 'c-backfill-edit', name: '回填并发编辑客户', phone: oldPhone },
+    }],
+  }, {
+    queryLog,
+    beforeTransaction: (current) => {
+      current.customers[0].data.phone = newPhone;
+    },
+  });
+
+  await backfillContactIdentities(store, { apply: true, crypto });
+  assert.equal(
+    state.links.find((link) => link.id === 'link-before-edit')?.linkStatus,
+    'ended',
+    'apply must not reactivate the old pre-transaction contact link',
+  );
+  const currentIdentity = state.identities.find((identity) => (
+    identity.normalizedHash === hashContactIdentity(newPhone, crypto.hmacKey)
+  ));
+  assert.ok(currentIdentity);
+  assert.equal(state.links.some((link) => (
+    link.identityId === currentIdentity.id && link.entityId === 'c-backfill-edit' && link.linkStatus === 'active'
+  )), true);
+  const sourceCustomerLock = queryLog.findIndex((text) => (
+    text.includes('FROM business_records') && text.includes('ORDER BY recordId ASC') && text.includes('FOR UPDATE')
+  ));
+  const mutationGateLock = queryLog.findIndex((text) => (
+    text === 'app_storage_upsert:aaos_contact_identity_mutation_gate_v1'
+  ));
+  const sourceLeadLock = queryLog.findIndex((text) => (
+    text.includes('FROM lead_records') && text.includes('ORDER BY id ASC') && text.includes('FOR UPDATE')
+  ));
+  const firstIdentityLock = queryLog.findIndex((text) => text.includes('FROM contact_identities'));
+  assert.ok(mutationGateLock >= 0 && sourceCustomerLock > mutationGateLock);
+  assert.ok(sourceCustomerLock >= 0 && sourceLeadLock > sourceCustomerLock);
+  assert.ok(firstIdentityLock > sourceLeadLock, 'source rows must be current-locked before identities are touched');
+}
+
+// RED: a source soft-delete between preview and apply ends its old active
+// link. A second apply remains idempotent instead of resurrecting it.
+{
+  const phone = '13900000043';
+  const normalizedHash = hashContactIdentity(phone, crypto.hmacKey);
+  const identityId = `ci_phone_${normalizedHash.slice(0, 32)}`;
+  const { store, state } = createStore({
+    identities: [{
+      id: identityId, type: 'phone', normalizedHash, hashKeyVersion: 1, status: 'active',
+      encryptedNormalizedValue: 'ci:v1:test', canonicalCustomerId: 'c-backfill-delete', conflictReason: null,
+    }],
+    links: [{
+      id: 'link-before-delete', identityId, entityType: 'customer', entityId: 'c-backfill-delete',
+      linkStatus: 'active', source: 'historical_backfill', endedAt: null,
+    }],
+    customers: [{
+      id: 'aaos_customers:c-backfill-delete', domain: 'aaos_customers', recordId: 'c-backfill-delete',
+      data: { id: 'c-backfill-delete', name: '回填并发删除客户', phone },
+    }],
+  }, {
+    beforeTransaction: (current) => {
+      current.customers[0].data.deletedAt = '2026-07-18T00:00:00.000Z';
+    },
+  });
+
+  await backfillContactIdentities(store, { apply: true, crypto });
+  assert.equal(state.links.find((link) => link.id === 'link-before-delete')?.linkStatus, 'ended');
+  const deletedIdentity = state.identities.find((identity) => identity.id === identityId);
+  assert.equal(deletedIdentity?.status, 'active');
+  assert.equal(deletedIdentity?.canonicalCustomerId, null);
+  assert.equal(deletedIdentity?.conflictReason, null);
+  const stable = {
+    identities: structuredClone(state.identities),
+    links: structuredClone(state.links),
+    groups: structuredClone(state.groups),
+  };
+  await backfillContactIdentities(store, { apply: true, crypto });
+  assert.deepEqual(
+    { identities: state.identities, links: state.links, groups: state.groups },
+    stable,
+    'deleted source cleanup must stay idempotent on rerun',
+  );
+}
+
+// RED: whole backfill apply retries a transaction-level deadlock from a clean
+// attempt and stops after three failed attempts.
+{
+  const attempts = { value: 0 };
+  const { store, state } = createStore({
+    customers: [{
+      id: 'aaos_customers:c-backfill-retry', domain: 'aaos_customers', recordId: 'c-backfill-retry',
+      data: { id: 'c-backfill-retry', name: '回填重试客户', phone: '13900000044' },
+    }],
+  }, { failTransactions: 1, transactionAttempts: attempts });
+  const result = await backfillContactIdentities(store, { apply: true, crypto });
+  assert.equal(attempts.value, 2);
+  assert.equal(result.canonicalCustomers, 1);
+  assert.equal(state.links.filter((link) => link.linkStatus === 'active').length, 1);
+
+  const exhaustedAttempts = { value: 0 };
+  const exhausted = createStore({}, { failTransactions: 3, transactionAttempts: exhaustedAttempts });
+  await assert.rejects(
+    () => backfillContactIdentities(exhausted.store, { apply: true, crypto }),
+    (error: unknown) => (error as { code?: string }).code === 'P2034',
+  );
+  assert.equal(exhaustedAttempts.value, 3);
+}
+
 {
   const { store, state } = createStore({
     customers: [{
@@ -364,6 +519,22 @@ assert.equal(normalizeContactIdentity('wechat', ' WeiXin_A '), 'weixin_a');
     () => upsertCustomerContactIdentities(store, {
       customerId: 'c-2', phone: '13800138000', wechat: '', crypto,
       conflictViewer: {
+        canReadCustomerList: false,
+        canReadCustomer: (customer) => customer.id === 'c-1',
+      },
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof ContactIdentityConflictError);
+      assert.deepEqual(error.safePayload, { message: '系统中已存在相同联系方式' });
+      return true;
+    },
+  );
+
+  await assert.rejects(
+    () => upsertCustomerContactIdentities(store, {
+      customerId: 'c-2', phone: '13800138000', wechat: '', crypto,
+      conflictViewer: {
+        canReadCustomerList: true,
         canReadCustomer: (customer) => customer.id === 'c-1',
       },
     }),
@@ -465,6 +636,6 @@ assert.equal(normalizeContactIdentity('wechat', ' WeiXin_A '), 'weixin_a');
   assert.equal(applied.legacyContactLockKeysCleared, 1);
   assert.deepEqual(
     state.appStorage.map((row) => row.key).sort(),
-    [currentKey, uppercaseLookalikeKey, unrelatedKey].sort(),
+    [CONTACT_IDENTITY_MUTATION_GATE_KEY, currentKey, uppercaseLookalikeKey, unrelatedKey].sort(),
   );
 }

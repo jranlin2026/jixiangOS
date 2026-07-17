@@ -73,12 +73,15 @@ type ContactIdentityStore = {
   appStorage?: {
     findMany(args?: any): Promise<Array<{ key: string }>>;
     deleteMany(args: any): Promise<{ count: number }>;
+    upsert?(args: any): Promise<any>;
   };
   $queryRaw?<T = unknown>(query: Prisma.Sql): Promise<T>;
   $executeRaw?(query: Prisma.Sql): Promise<number>;
 };
 
 type ConflictViewer = {
+  /** Server-derived list-read capability; data scope alone must not disclose. */
+  canReadCustomerList: boolean;
   canReadCustomer(customer: Customer): boolean;
 };
 
@@ -125,6 +128,8 @@ const CONTACT_IDENTITY_ENCRYPTION_INFO = Buffer.from('jixiangos/contact-identity
 // unrelated AppStorage entry.
 const LEGACY_CONTACT_LOCK_KEY_PATTERN = /^aaos_contact_lock_[a-f0-9]{64}$/;
 const LEGACY_CONTACT_LOCK_KEY_SQL_PATTERN = '^aaos_contact_lock_[a-f0-9]{64}$';
+/** Serializes only identity/link lifecycle mutations; its value contains no contact data. */
+export const CONTACT_IDENTITY_MUTATION_GATE_KEY = 'aaos_contact_identity_mutation_gate_v1';
 
 function requireKeyBuffer(key: Buffer, label: string): Buffer {
   if (!Buffer.isBuffer(key) || key.length < 32) throw new Error(`${label} must contain at least 32 bytes.`);
@@ -170,6 +175,30 @@ function requireCrypto(input?: ContactIdentityCrypto): ContactIdentityCrypto {
     throw new Error('Contact identity key versions must remain pinned to 1 until a rotation migration is available.');
   }
   return crypto;
+}
+
+/**
+ * Take the fixed, non-PII identity mutation gate before any source, link, or
+ * identity lock. Different workflows otherwise need opposing customer/lead
+ * source orders (for example profile sync versus lead conversion). The gate
+ * deliberately scopes serialization to contact lifecycle writes and backfill.
+ */
+export async function lockContactIdentityMutationGate(tx: ContactIdentityStore): Promise<void> {
+  if (!tx.appStorage?.upsert) {
+    throw new Error('Contact identity mutation gate store is unavailable.');
+  }
+  await tx.appStorage.upsert({
+    where: { key: CONTACT_IDENTITY_MUTATION_GATE_KEY },
+    update: { value: { kind: 'contact_identity_mutation_gate' } },
+    create: { key: CONTACT_IDENTITY_MUTATION_GATE_KEY, value: { kind: 'contact_identity_mutation_gate' } },
+  });
+  if (!tx.$queryRaw) return;
+  await tx.$queryRaw(Prisma.sql`
+    SELECT \`key\`
+    FROM app_storage
+    WHERE \`key\` = ${CONTACT_IDENTITY_MUTATION_GATE_KEY}
+    FOR UPDATE
+  `);
 }
 
 export function normalizeContactIdentity(type: ContactIdentityType, value: string): string {
@@ -334,7 +363,9 @@ async function safeConflictPayload(
   customerIds: string[],
   viewer?: ConflictViewer,
 ): Promise<SafeContactIdentityConflictPayload> {
-  if (!viewer || !tx.businessRecord?.findUnique) return { message: GENERIC_CONFLICT_MESSAGE };
+  if (!viewer?.canReadCustomerList || !tx.businessRecord?.findUnique) {
+    return { message: GENERIC_CONFLICT_MESSAGE };
+  }
   for (const customerId of [...new Set(customerIds)].sort()) {
     const row = await tx.businessRecord.findUnique({
       where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: customerId } },
@@ -443,7 +474,7 @@ async function endObsoleteEntityLinks(
   entityType: 'customer' | 'lead',
   entityId: string,
   retainedIdentityIds: Set<string>,
-): Promise<void> {
+): Promise<string[]> {
   const activeLinks = await activeEntityLinksForUpdate(tx, entityType, entityId);
   const obsoleteIds = [...new Set(
     activeLinks
@@ -462,6 +493,7 @@ async function endObsoleteEntityLinks(
     });
     if (entityType === 'customer') await reconcileIdentityAfterCustomerLinkEnd(tx, identityId);
   }
+  return obsoleteIds;
 }
 
 async function activeEntityLinksForUpdate(
@@ -546,9 +578,8 @@ async function lockMatchingLegacyCustomerRows(
 async function reconcileMatchingLegacyCustomers(
   tx: ContactIdentityStore,
   identity: ContactIdentityRecord,
-  candidate: IdentityCandidate,
+  rows: any[],
 ): Promise<ContactIdentityRecord> {
-  const rows = await lockMatchingLegacyCustomerRows(tx, candidate);
   const legacyCustomerIds = [...new Set(rows
     .map((row) => String(row.recordId || parseCustomer(row)?.id || '').trim())
     .filter(Boolean))].sort();
@@ -585,10 +616,14 @@ export async function upsertCustomerContactIdentities(
   const candidates = candidatesFromContact(input, crypto);
   const prepared: Array<{ candidate: IdentityCandidate; identity: ContactIdentityRecord }> = [];
   for (const candidate of candidates) {
+    // Customer source rows are locked before the shared identity. Deletes and
+    // edits already lock their business record before ending identity links;
+    // keeping this order removes the create-vs-delete lock cycle.
+    const legacyRows = await lockMatchingLegacyCustomerRows(tx, candidate);
     const identity = await reconcileMatchingLegacyCustomers(
       tx,
       await lockOrCreateIdentity(tx, candidate, crypto),
-      candidate,
+      legacyRows,
     );
     await assertIdentityCanAcceptCustomer(tx, identity, input.customerId, input.conflictViewer);
     prepared.push({ candidate, identity });
@@ -619,10 +654,11 @@ export async function linkLeadAndCustomerIdentity(
   const candidates = candidatesFromContact(input, crypto);
   const prepared: ContactIdentityRecord[] = [];
   for (const candidate of candidates) {
+    const legacyRows = await lockMatchingLegacyCustomerRows(tx, candidate);
     const identity = await reconcileMatchingLegacyCustomers(
       tx,
       await lockOrCreateIdentity(tx, candidate, crypto),
-      candidate,
+      legacyRows,
     );
     await assertIdentityCanAcceptCustomer(tx, identity, input.customerId, input.conflictViewer);
     prepared.push(identity);
@@ -706,29 +742,34 @@ async function cleanupLegacyContactLockKeys(tx: ContactIdentityStore): Promise<n
   return (await tx.appStorage.deleteMany({ where: { key: { in: legacyKeys } } })).count;
 }
 
-export async function backfillContactIdentities(
-  prisma: ContactIdentityStore & { $transaction?(operation: (tx: ContactIdentityStore) => Promise<void>): Promise<void> },
-  options: ContactIdentityBackfillOptions,
-): Promise<ContactIdentityBackfillSummary> {
-  const crypto = requireCrypto(options.crypto);
-  if (!prisma.businessRecord?.findMany || !prisma.leadRecord?.findMany) {
-    throw new Error('Contact identity backfill requires businessRecord and leadRecord readers.');
-  }
-  const [customerRows, leadRows] = await Promise.all([
-    prisma.businessRecord.findMany({
-      where: { domain: STORAGE_KEYS.CUSTOMERS },
-      orderBy: { recordId: 'asc' },
-    }),
-    prisma.leadRecord.findMany({ orderBy: { id: 'asc' } }),
-  ]);
+type BackfillPlan = {
+  orderedPlans: PlannedIdentity[];
+  customerIds: string[];
+  leadIds: string[];
+  invalidValues: number;
+};
+
+/**
+ * Turns a point-in-time source snapshot into the links that should be active.
+ * All source ids are retained even when their record is deleted or has no
+ * usable contact so apply can end old links for those records.
+ */
+function buildBackfillPlan(
+  customerRows: any[],
+  leadRows: any[],
+  crypto: ContactIdentityCrypto,
+): BackfillPlan {
   const plans = new Map<string, PlannedIdentity>();
+  const customerIds = new Set<string>();
+  const leadIds = new Set<string>();
   let invalidValues = 0;
 
   for (const row of [...customerRows].sort((left, right) => String(left.recordId).localeCompare(String(right.recordId)))) {
     const customer = dataObject(row);
-    if (!customer || customer.deletedAt) continue;
-    const customerId = String(row.recordId || customer.id || '').trim();
+    const customerId = String(row.recordId || customer?.id || '').trim();
     if (!customerId) continue;
+    customerIds.add(customerId);
+    if (!customer || customer.deletedAt) continue;
     const phone = String(customer.phone || '').trim();
     if (phone && getPhoneNumberError(phone)) invalidValues += 1;
     const validContact = { phone: phone && !getPhoneNumberError(phone) ? phone : '', wechat: customer.wechat };
@@ -736,11 +777,13 @@ export async function backfillContactIdentities(
       addPlannedReference(plans, candidate, 'customer', customerId);
     }
   }
+
   for (const row of [...leadRows].sort((left, right) => String(left.id).localeCompare(String(right.id)))) {
     const lead = dataObject(row);
-    if (!lead || lead.deletedAt) continue;
-    const leadId = String(row.id || lead.id || '').trim();
+    const leadId = String(row.id || lead?.id || '').trim();
     if (!leadId) continue;
+    leadIds.add(leadId);
+    if (!lead || lead.deletedAt) continue;
     const phone = String(lead.phone ?? row.phone ?? '').trim();
     if (phone && getPhoneNumberError(phone)) invalidValues += 1;
     const validContact = {
@@ -752,47 +795,182 @@ export async function backfillContactIdentities(
     }
   }
 
-  const orderedPlans = [...plans.values()].sort((left, right) => (
-    left.type.localeCompare(right.type) || left.normalizedHash.localeCompare(right.normalizedHash)
-  ));
-  const summary: ContactIdentityBackfillSummary = {
-    canonicalCustomers: orderedPlans.filter((plan) => plan.customers.length === 1).length,
-    conflicts: orderedPlans.filter((plan) => plan.customers.length > 1).length,
+  return {
+    orderedPlans: [...plans.values()].sort((left, right) => (
+      left.type.localeCompare(right.type) || left.normalizedHash.localeCompare(right.normalizedHash)
+    )),
+    customerIds: [...customerIds].sort(),
+    leadIds: [...leadIds].sort(),
     invalidValues,
-    duplicateGroups: orderedPlans.filter((plan) => plan.customers.length > 1).length,
+  };
+}
+
+function backfillSummaryFromPlan(plan: BackfillPlan): ContactIdentityBackfillSummary {
+  return {
+    canonicalCustomers: plan.orderedPlans.filter((identity) => identity.customers.length === 1).length,
+    conflicts: plan.orderedPlans.filter((identity) => identity.customers.length > 1).length,
+    invalidValues: plan.invalidValues,
+    duplicateGroups: plan.orderedPlans.filter((identity) => identity.customers.length > 1).length,
     legacyContactLockKeysCleared: 0,
   };
-  if (!options.apply) return summary;
+}
 
-  const apply = async (tx: ContactIdentityStore) => {
-    for (const plan of orderedPlans) {
-      const identity = await lockOrCreateIdentity(tx, plan, crypto);
-      for (const customerId of plan.customers) {
-        await upsertActiveLink(tx, identity.id, 'customer', customerId, 'historical_backfill');
-      }
-      for (const leadId of plan.leads) {
-        await upsertActiveLink(tx, identity.id, 'lead', leadId, 'historical_backfill');
-      }
-      const conflict = plan.customers.length > 1;
-      await tx.contactIdentity.update({
-        where: { id: identity.id },
-        data: conflict
-          ? { status: 'conflict', canonicalCustomerId: null, conflictReason: 'multiple_active_customers' }
-          : {
-            status: 'active',
-            canonicalCustomerId: plan.customers[0] || null,
-            conflictReason: null,
-          },
-      });
-      if (conflict) await createOrReloadDuplicateGroup(tx, identity.id, plan.type, plan.customers);
+/**
+ * The source locks intentionally use one fixed order. InnoDB locking reads
+ * are current reads under RR, which prevents an apply from reviving a link
+ * planned from an older source snapshot.
+ */
+async function lockCurrentBackfillSources(
+  tx: ContactIdentityStore,
+): Promise<{ customerRows: any[]; leadRows: any[] }> {
+  if (tx.$queryRaw) {
+    const customerRows = await tx.$queryRaw<any[]>(Prisma.sql`
+      SELECT id, domain, recordId, data
+      FROM business_records
+      WHERE domain = ${STORAGE_KEYS.CUSTOMERS}
+      ORDER BY recordId ASC
+      FOR UPDATE
+    `);
+    const leadRows = await tx.$queryRaw<any[]>(Prisma.sql`
+      SELECT id, phone, wechat, data
+      FROM lead_records
+      ORDER BY id ASC
+      FOR UPDATE
+    `);
+    return { customerRows, leadRows };
+  }
+  if (!tx.businessRecord?.findMany || !tx.leadRecord?.findMany) {
+    throw new Error('Contact identity backfill requires businessRecord and leadRecord readers.');
+  }
+  // Adapter/test fallback only. Production Prisma has $queryRaw and therefore
+  // takes the current lock-bearing path above.
+  const customerRows = await tx.businessRecord.findMany({
+    where: { domain: STORAGE_KEYS.CUSTOMERS },
+    orderBy: { recordId: 'asc' },
+  });
+  const leadRows = await tx.leadRecord.findMany({ orderBy: { id: 'asc' } });
+  return { customerRows, leadRows };
+}
+
+async function applyBackfillPlan(
+  tx: ContactIdentityStore,
+  plan: BackfillPlan,
+  crypto: ContactIdentityCrypto,
+): Promise<void> {
+  const retainedCustomerIdentityIds = new Map<string, Set<string>>();
+  const retainedLeadIdentityIds = new Map<string, Set<string>>();
+  const affectedIdentityIds = new Set<string>();
+
+  for (const plannedIdentity of plan.orderedPlans) {
+    const identity = await lockOrCreateIdentity(tx, plannedIdentity, crypto);
+    affectedIdentityIds.add(identity.id);
+    for (const customerId of plannedIdentity.customers) {
+      const retained = retainedCustomerIdentityIds.get(customerId) || new Set<string>();
+      retained.add(identity.id);
+      retainedCustomerIdentityIds.set(customerId, retained);
+      await upsertActiveLink(tx, identity.id, 'customer', customerId, 'historical_backfill');
     }
-    // This controlled maintenance action is intentionally coupled to a
-    // successful contact backfill apply. It allows a post-rollout operator to
-    // clear exactly the obsolete SHA-256 locks, even when no contact rows need
-    // to be written on a later rerun.
-    summary.legacyContactLockKeysCleared = await cleanupLegacyContactLockKeys(tx);
-  };
-  if (prisma.$transaction) await prisma.$transaction(apply);
-  else await apply(prisma);
-  return summary;
+    for (const leadId of plannedIdentity.leads) {
+      const retained = retainedLeadIdentityIds.get(leadId) || new Set<string>();
+      retained.add(identity.id);
+      retainedLeadIdentityIds.set(leadId, retained);
+      await upsertActiveLink(tx, identity.id, 'lead', leadId, 'historical_backfill');
+    }
+  }
+
+  // Reconcile every current source entity, not only the identities in the
+  // plan. This is what ends a link after a source was edited, deleted, or
+  // changed to an invalid/empty contact between preview and apply.
+  for (const customerId of plan.customerIds) {
+    for (const identityId of await endObsoleteEntityLinks(
+      tx,
+      'customer',
+      customerId,
+      retainedCustomerIdentityIds.get(customerId) || new Set<string>(),
+    )) {
+      affectedIdentityIds.add(identityId);
+    }
+  }
+  for (const leadId of plan.leadIds) {
+    for (const identityId of await endObsoleteEntityLinks(
+      tx,
+      'lead',
+      leadId,
+      retainedLeadIdentityIds.get(leadId) || new Set<string>(),
+    )) {
+      affectedIdentityIds.add(identityId);
+    }
+  }
+
+  // Plan cardinalities cannot decide state here: an identity might have had a
+  // stale link ended above. Recompute from the current locked link set, then
+  // build candidate groups only from that converged state.
+  for (const identityId of [...affectedIdentityIds].sort()) {
+    const identity = await reconcileIdentityAfterCustomerLinkEnd(tx, identityId);
+    const activeCustomerIds = [...new Set((await activeCustomerLinksForUpdate(tx, identity.id))
+      .map((link) => String(link.entityId)))].sort();
+    if (
+      activeCustomerIds.length > 1
+      && (identity.type === 'phone' || identity.type === 'wechat')
+    ) {
+      await createOrReloadDuplicateGroup(tx, identity.id, identity.type, activeCustomerIds);
+    }
+  }
+}
+
+function isRetryableContactIdentityTransactionConflict(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === 'P2002') return false;
+  const message = error instanceof Error ? error.message : String(error || '');
+  return code === 'P2034' || /deadlock|write conflict|1213|40001/i.test(message);
+}
+
+export async function backfillContactIdentities(
+  prisma: ContactIdentityStore & { $transaction?(operation: (tx: ContactIdentityStore) => Promise<void>): Promise<void> },
+  options: ContactIdentityBackfillOptions,
+): Promise<ContactIdentityBackfillSummary> {
+  const crypto = requireCrypto(options.crypto);
+  if (!options.apply) {
+    if (!prisma.businessRecord?.findMany || !prisma.leadRecord?.findMany) {
+      throw new Error('Contact identity backfill requires businessRecord and leadRecord readers.');
+    }
+    const [customerRows, leadRows] = await Promise.all([
+      prisma.businessRecord.findMany({
+        where: { domain: STORAGE_KEYS.CUSTOMERS },
+        orderBy: { recordId: 'asc' },
+      }),
+      prisma.leadRecord.findMany({ orderBy: { id: 'asc' } }),
+    ]);
+    return backfillSummaryFromPlan(buildBackfillPlan(customerRows, leadRows, crypto));
+  }
+
+  if (!prisma.$transaction) {
+    throw new Error('Contact identity backfill apply requires a transaction-capable store.');
+  }
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    let summary: ContactIdentityBackfillSummary | null = null;
+    try {
+      await prisma.$transaction(async (tx) => {
+        await lockContactIdentityMutationGate(tx);
+        const { customerRows, leadRows } = await lockCurrentBackfillSources(tx);
+        const plan = buildBackfillPlan(customerRows, leadRows, crypto);
+        await applyBackfillPlan(tx, plan, crypto);
+        // This controlled maintenance action is intentionally coupled to a
+        // successful contact backfill apply. It allows a post-rollout operator
+        // to clear exactly the obsolete SHA-256 locks, even when no contact
+        // rows need to be written on a later rerun.
+        summary = {
+          ...backfillSummaryFromPlan(plan),
+          legacyContactLockKeysCleared: await cleanupLegacyContactLockKeys(tx),
+        };
+      });
+      if (!summary) throw new Error('Contact identity backfill transaction returned no summary.');
+      return summary;
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableContactIdentityTransactionConflict(error) || attempt === 3) throw error;
+    }
+  }
+  throw lastError;
 }

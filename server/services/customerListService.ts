@@ -36,13 +36,14 @@ import { customerWriteConflictResponse } from './customerWriteConflict';
 import { appendCustomerAuditEvent } from './customerAuditService';
 import {
   ContactIdentityConflictError,
+  lockContactIdentityMutationGate,
   upsertCustomerContactIdentities,
   type ContactIdentityCrypto,
 } from './contactIdentityService';
 
 type CustomerListPrisma = Pick<PrismaClient,
   'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | 'customerAuditEvent'
-  | 'contactIdentity' | 'contactIdentityLink' | '$queryRaw' | '$transaction'
+  | 'contactIdentity' | 'contactIdentityLink' | 'appStorage' | '$queryRaw' | '$transaction'
 >;
 
 type CustomerListServiceOptions = {
@@ -83,6 +84,13 @@ function permissionMessage(operation: () => void): string | null {
 
 function createActivityId(): string {
   return `act-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function isRetryableCustomerCreateConflict(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (error instanceof ContactIdentityConflictError || code === 'P2002') return false;
+  const message = error instanceof Error ? error.message : String(error || '');
+  return code === 'P2034' || /deadlock|write conflict|1213|40001/i.test(message);
 }
 
 function addFollowActivity(customer: Customer, input: CustomerActivityInput, operator: string): Customer {
@@ -322,8 +330,9 @@ export function createCustomerListService(
 
       const operation = async (tx: Pick<Prisma.TransactionClient,
         'businessRecord' | 'leadRecord' | 'customerAuditEvent' | 'contactIdentity' | 'contactIdentityLink'
-        | 'user' | 'role' | 'department' | '$queryRaw'
+        | 'user' | 'role' | 'department' | 'appStorage' | '$queryRaw'
       >): Promise<ApiResponse<Customer | null>> => {
+      await lockContactIdentityMutationGate(tx);
       const catalog = await loadCustomerTagCatalog(tx, false);
       const tagValidation = validateManualTagSelection(catalog, 'customer', input.manualTagIds || []);
       if (!tagValidation.ok) return failure<Customer>(tagValidation.message, 400);
@@ -362,20 +371,10 @@ export function createCustomerListService(
         updatedAt: now,
       };
 
-      // Resolve disclosure scope from the same transaction as the identity
-      // write, so a safe conflict summary never relies on an earlier role
-      // directory snapshot.
-      const identityConflictAccess = await loadCustomerAccessContext(tx, currentUser);
-      await upsertCustomerContactIdentities(tx, {
-        customerId: customer.id,
-        phone: customer.phone,
-        wechat: customer.wechat,
-        source: 'customer_create',
-        crypto: options.contactIdentityCrypto,
-        conflictViewer: {
-          canReadCustomer: (candidate) => canReadCustomer(identityConflictAccess, candidate),
-        },
-      });
+      // Create (and therefore lock) the private business record before
+      // touching shared contact identities. Customer edit/delete paths take
+      // the same business-record -> identity order. A contact conflict aborts
+      // this transaction, so the tentative record is never committed.
       await tx.businessRecord.create({
         data: {
           id: STORAGE_KEYS.CUSTOMERS + ':' + id,
@@ -388,6 +387,21 @@ export function createCustomerListService(
           amount: 0,
           eventAt: new Date(now),
           data: customer as any,
+        },
+      });
+      // Resolve disclosure scope from the same transaction as the identity
+      // write, so a safe conflict summary never relies on an earlier role
+      // directory snapshot.
+      const identityConflictAccess = await loadCustomerAccessContext(tx, currentUser);
+      await upsertCustomerContactIdentities(tx, {
+        customerId: customer.id,
+        phone: customer.phone,
+        wechat: customer.wechat,
+        source: 'customer_create',
+        crypto: options.contactIdentityCrypto,
+        conflictViewer: {
+          canReadCustomerList: identityConflictAccess.canReadCustomerList,
+          canReadCustomer: (candidate) => canReadCustomer(identityConflictAccess, candidate),
         },
       });
       await appendCustomerAuditEvent(tx, {
@@ -409,18 +423,26 @@ export function createCustomerListService(
       });
       return success(customer);
       };
-      try {
-        return await (prisma.$transaction ? (prisma.$transaction as any)(operation) : operation(prisma as any));
-      } catch (error) {
-        if (error instanceof ContactIdentityConflictError) {
-          return {
-            code: 409,
-            data: error.safePayload.customer || null,
-            message: error.safePayload.message,
-          } as ApiResponse<Customer | null>;
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+          return await (prisma.$transaction as any)(operation);
+        } catch (error) {
+          if (error instanceof ContactIdentityConflictError) {
+            return {
+              code: 409,
+              data: error.safePayload.customer || null,
+              message: error.safePayload.message,
+            } as ApiResponse<Customer | null>;
+          }
+          const conflict = customerWriteConflictResponse<Customer>(error);
+          if (conflict) return conflict;
+          lastError = error;
+          if (!isRetryableCustomerCreateConflict(error)) throw error;
+          if (attempt === 3) return failure<Customer>('客户创建发生并发冲突，请稍后重试', 409);
         }
-        throw error;
       }
+      throw lastError;
     },
 
     async list(filters: CustomerFilters = {}, currentUser?: AuthenticatedUser | null) {

@@ -44,6 +44,7 @@ function access(overrides: Partial<CustomerAccessContext> = {}): CustomerAccessC
     legacyReadableNames: new Set(['销售一']),
     manageableOwnerIds: new Set(['user-actor']),
     canReadPublicPool: false,
+    canReadCustomerList: false,
     grantedPermissions: new Set(),
     ...overrides,
   };
