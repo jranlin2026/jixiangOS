@@ -22,6 +22,7 @@ let todoRow: any = null;
 let customerData: Customer = customer;
 let lastFindManyArgs: any = null;
 const queriedCustomerIds: string[] = [];
+const associationLockKeys: string[] = [];
 let version = new Date('2026-07-15T03:00:00.000Z');
 const at = new Date('2026-07-15T03:00:00.000Z');
 const customerRow = () => ({
@@ -74,6 +75,12 @@ const tx = {
       return { count: 1 };
     },
   },
+  appStorage: {
+    upsert: async ({ where }: any) => {
+      associationLockKeys.push(where.key);
+      return { key: where.key };
+    },
+  },
   $queryRaw: async () => [customerRow()],
 };
 const prisma = {
@@ -92,6 +99,10 @@ const created = await service.create('customer-1', {
 assert.equal(created.code, 0);
 assert.equal(created.data?.assigneeId, actor.id);
 assert.equal(customerData.activityRecords?.[0]?.title, '新建了客户待办');
+assert.ok(
+  associationLockKeys.includes('aaos_customer_association_lock:customer-1'),
+  '新建客户待办前必须取得客户关联锁，避免与删除/合并并发穿插',
+);
 
 const mine = await service.listMine(actor);
 assert.equal(mine.code, 0);

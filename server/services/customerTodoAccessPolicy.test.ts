@@ -50,6 +50,7 @@ function fixture(initialCustomer: Customer, role = baseRole, conflict = false) {
     },
     role: { findMany: async () => [role] },
     department: { findMany: async () => [department] },
+    appStorage: { upsert: async ({ where }: any) => ({ key: where.key }) },
     businessRecord: {
       findUnique: async () => row(),
       updateMany: async ({ where, data }: any) => {

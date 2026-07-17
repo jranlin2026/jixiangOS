@@ -304,6 +304,7 @@ type LeadRow = {
 type FakeState = {
   businessRecords: BusinessRow[];
   leads: LeadRow[];
+  customerTodos?: any[];
   appStorage?: Array<{ key: string; value: any; createdAt?: Date; updatedAt?: Date }>;
 };
 
@@ -332,7 +333,11 @@ function createFakePrisma(
     roleRows?: any[];
   } = {},
 ) {
-  let state: FakeState = { ...clone(initial), appStorage: clone(initial.appStorage || []) };
+  let state: FakeState = {
+    ...clone(initial),
+    customerTodos: clone(initial.customerTodos || []),
+    appStorage: clone(initial.appStorage || []),
+  };
   let transactionCalls = 0;
   let linkedLeadLockQueries = 0;
   let contactLockQueries = 0;
@@ -388,7 +393,12 @@ function createFakePrisma(
       },
     },
     businessRecord: {
-      findMany: async ({ where }: any) => clone(working.businessRecords.filter((item) => item.domain === where.domain).map((item) => ({ data: item.data }))),
+      findMany: async (args: any = {}) => {
+        const rows = args.where?.domain
+          ? working.businessRecords.filter((item) => item.domain === args.where.domain)
+          : working.businessRecords;
+        return clone(rows);
+      },
       findUnique: async ({ where }: any) => {
         const key = where.domain_recordId;
         const row = working.businessRecords.find((item) => (
@@ -441,6 +451,19 @@ function createFakePrisma(
         return clone(row);
       },
     },
+    customerTodo: {
+      findMany: async () => clone(working.customerTodos || []),
+      updateMany: async ({ where, data }: any) => {
+        let count = 0;
+        for (const row of working.customerTodos || []) {
+          if (row.customerId === where.customerId && (!where.status || row.status === where.status)) {
+            applyPatch(row, clone(data));
+            count += 1;
+          }
+        }
+        return { count };
+      },
+    },
     $queryRaw: async (query: any) => {
       const text = queryText(query);
       const values = query?.values || [];
@@ -486,11 +509,14 @@ function createFakePrisma(
           )).slice(0, 1));
         }
         if (!text.includes('WHERE id =')) {
-          if (text.includes('FOR UPDATE')) linkedLeadLockQueries += 1;
+          if (text.includes('FOR UPDATE') && text.includes('SELECT id, data')) linkedLeadLockQueries += 1;
           return clone(working.leads);
         }
         const [leadId] = values;
         return clone(working.leads.filter((row) => row.id === leadId));
+      }
+      if (text.includes('FROM customer_todos')) {
+        return clone(working.customerTodos || []);
       }
       if (text.includes('FROM app_storage')) {
         if (text.includes('FOR UPDATE')) contactLockQueries += 1;
@@ -525,6 +551,7 @@ function createFakePrisma(
           const latest = clone(state);
           working.businessRecords = latest.businessRecords;
           working.leads = latest.leads;
+          working.customerTodos = latest.customerTodos || [];
           working.appStorage = latest.appStorage || [];
         }));
         state = working;
@@ -1040,7 +1067,7 @@ const serviceOptions = {
   assert.deepEqual(fake.getState().businessRecords[0], original);
 }
 
-// RED: 客户删除只允许超级管理员，且同步软删除关联线索。
+// RED: 稳定 customerId 关联的线索是外部业务关联，必须阻断删除，不能级联软删除。
 {
   const value = customer('cust-delete');
   const deniedFake = createFakePrisma({ businessRecords: [businessCustomer(value)], leads: [] });
@@ -1056,12 +1083,29 @@ const serviceOptions = {
   const service = createCustomerCommandService(fake.prisma, serviceOptions);
   const result = await service.deleteCustomer(value.id, '重复客户', superAdmin);
 
+  assert.equal(result.code, 409);
+  const next = fake.getState();
+  assert.equal(next.businessRecords[0].data.deletedAt, undefined);
+  assert.equal(next.leads[0].data.deletedAt, undefined);
+}
+
+// RED: 仅手机号/微信相同但没有稳定 customerId 的线索，不得被删除操作猜测关联或级联删除。
+{
+  const value = customer('cust-delete-same-contact');
+  const unlinked = lead('lead-same-contact', salesA.name);
+  unlinked.phone = value.phone;
+  unlinked.data.phone = value.phone;
+  unlinked.wechat = value.wechat;
+  unlinked.data.wechat = value.wechat;
+  const fake = createFakePrisma({ businessRecords: [businessCustomer(value)], leads: [unlinked] });
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .deleteCustomer(value.id, '可安全删除', superAdmin);
+
   assert.equal(result.code, 0);
   const next = fake.getState();
   assert.equal(next.businessRecords[0].data.deletedBy, superAdmin.name);
-  assert.equal(next.businessRecords[0].data.deleteReason, '重复客户');
-  assert.equal(next.leads[0].data.deletedBy, superAdmin.name);
-  assert.match(next.leads[0].data.deleteReason, /关联客户删除/);
+  assert.equal(next.leads[0].data.deletedAt, undefined);
+  assert.equal(next.leads[0].data.deleteReason, undefined);
 }
 
 // RED: “全部”的 delete/admin 不得绕过 Task 2 客户删除 explicit-only 规则。

@@ -542,16 +542,25 @@ export const LIFECYCLE_STATUS_CODES = {
 export type LifecycleStatusCode = (typeof LIFECYCLE_STATUS_CODES)[keyof typeof LIFECYCLE_STATUS_CODES];
 
 export const DEFAULT_LIFECYCLE_STATUS_CONFIGS = [
-  { id: 'lsc-001', code: LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP, name: '待跟进', description: '线索入库或领取后等待销售开始跟进', color: '#9E9E9E', isActive: true, sortOrder: 1, isSystem: true },
-  { id: 'lsc-002', code: LIFECYCLE_STATUS_CODES.FOLLOWING, name: '跟进中', description: '销售正在跟进客户需求', color: '#2196F3', isActive: true, sortOrder: 2, isSystem: true },
-  { id: 'lsc-003', code: LIFECYCLE_STATUS_CODES.ORDERED, name: '已转订单', description: '客户已创建或确认订单', color: '#4CAF50', isActive: true, sortOrder: 3, isSystem: true },
-  { id: 'lsc-004', code: LIFECYCLE_STATUS_CODES.REFUNDED, name: '已退款', description: '关联订单退款已完成', color: '#F44336', isActive: true, sortOrder: 4, isSystem: true },
-  { id: 'lsc-005', code: LIFECYCLE_STATUS_CODES.PUBLIC_POOL, name: '流失公海', description: '销售放弃后释放归属并进入公海', color: '#607D8B', isActive: true, sortOrder: 5, isSystem: true },
+  { id: 'lsc-001', code: LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP, name: '待跟进', description: '线索入库或领取后等待销售开始跟进', color: '#9E9E9E', isActive: true, sortOrder: 1, isSystem: true, allowedManualTargetCodes: [LIFECYCLE_STATUS_CODES.FOLLOWING] },
+  { id: 'lsc-002', code: LIFECYCLE_STATUS_CODES.FOLLOWING, name: '跟进中', description: '销售正在跟进客户需求', color: '#2196F3', isActive: true, sortOrder: 2, isSystem: true, allowedManualTargetCodes: [LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP] },
+  { id: 'lsc-003', code: LIFECYCLE_STATUS_CODES.ORDERED, name: '已转订单', description: '客户已创建或确认订单', color: '#4CAF50', isActive: true, sortOrder: 3, isSystem: true, allowedManualTargetCodes: [] },
+  { id: 'lsc-004', code: LIFECYCLE_STATUS_CODES.REFUNDED, name: '已退款', description: '关联订单退款已完成', color: '#F44336', isActive: true, sortOrder: 4, isSystem: true, allowedManualTargetCodes: [] },
+  { id: 'lsc-005', code: LIFECYCLE_STATUS_CODES.PUBLIC_POOL, name: '流失公海', description: '销售放弃后释放归属并进入公海', color: '#607D8B', isActive: true, sortOrder: 5, isSystem: true, allowedManualTargetCodes: [] },
 ].map((item) => ({
   ...item,
   createdAt: '2026-06-01T00:00:00.000Z',
   updatedAt: '2026-06-01T00:00:00.000Z',
 }));
+
+/** Manual lifecycle moves for the legacy five-state configuration. */
+export const DEFAULT_CUSTOMER_LIFECYCLE_TRANSITIONS: Record<LifecycleStatusCode, LifecycleStatusCode[]> = {
+  [LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP]: [LIFECYCLE_STATUS_CODES.FOLLOWING],
+  [LIFECYCLE_STATUS_CODES.FOLLOWING]: [LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP],
+  [LIFECYCLE_STATUS_CODES.ORDERED]: [],
+  [LIFECYCLE_STATUS_CODES.REFUNDED]: [],
+  [LIFECYCLE_STATUS_CODES.PUBLIC_POOL]: [],
+};
 
 export function normalizeLifecycleStatusCode(value?: string | null): LifecycleStatusCode {
   const text = String(value || '').trim();

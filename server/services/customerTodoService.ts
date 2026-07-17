@@ -16,6 +16,7 @@ import {
   type CustomerRecordSnapshot,
 } from './customerBusinessRecordRepository';
 import { customerWriteConflictResponse } from './customerWriteConflict';
+import { lockCustomerAssociationScope } from './customerAssociationRegistry';
 
 type CustomerTodoPrisma = Pick<
   PrismaClient,
@@ -199,6 +200,10 @@ export function createCustomerTodoService(
       const error = validateInput(input);
       if (error) return failure<CustomerTodo>(error, 400);
       return runMutation(async (tx) => {
+        // A todo is a stable customer association.  Share the same lock used
+        // by customer delete, transfer/release and batch commands so a todo
+        // cannot be inserted after an association safety check has passed.
+        await lockCustomerAssociationScope(tx, [customerId]);
         const customer = await loadLockedCustomer(tx, customerId, user);
         if (!customer.ok) return failure<CustomerTodo>(customer.error.message, customer.error.code);
         const denied = authorizeTodoMutation(customer.context, customer.snapshot.customer);

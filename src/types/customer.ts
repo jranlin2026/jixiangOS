@@ -1,5 +1,5 @@
 import type { ID, Timestamp, ProductLevel, CustomerLevel } from './common';
-import type { LifecycleStatusCode } from './settings';
+import type { LifecycleStatusCode, LifecycleStatusConfig } from './settings';
 import type { CustomerTagFilterMode } from './tag';
 
 /** 成长里程碑 */
@@ -147,6 +147,18 @@ export interface Customer {
   deleteReason?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+}
+
+/**
+ * 生命周期策略接受扩展状态 code，但现有客户字段继续使用受控的 LifecycleStatusCode。
+ * 这样历史配置可以先被审计/归一化，而不会扩大客户写模型的类型范围。
+ */
+export type CustomerLifecycleStatus = Omit<LifecycleStatusConfig, 'code'> & { code: string };
+
+export interface CustomerLifecycleConfig {
+  statuses: CustomerLifecycleStatus[];
+  enabledStatusCodes: string[];
+  transitions: Record<string, string[]>;
 }
 
 /** 客户筛选参数 */

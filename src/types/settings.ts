@@ -96,6 +96,8 @@ export interface LifecycleStatusConfig {
   isActive: boolean;
   sortOrder: number;
   isSystem?: boolean;
+  /** Stable target codes allowed when this status is the current state. */
+  allowedManualTargetCodes?: string[];
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

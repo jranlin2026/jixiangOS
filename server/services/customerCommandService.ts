@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { failure, success } from '../api/response';
 import {
   DEFAULT_LEAD_FLOW_CONFIG,
+  DEFAULT_LIFECYCLE_STATUS_CONFIGS,
   LIFECYCLE_STATUS_CODES,
   STORAGE_KEYS,
   normalizeLifecycleStatusCode,
@@ -11,6 +12,7 @@ import {
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Customer, CustomerActivityRecord } from '../../src/types/customer';
 import type { FollowUpRecord, Lead, LeadChangeLog, LeadFlowConfig, LeadIntakeRecord } from '../../src/types/lead';
+import type { Role } from '../../src/types/role';
 import {
   buildDataVisibilityScopeForUser,
   type DataVisibilityScope,
@@ -31,6 +33,9 @@ import { applyContactEditLock } from '../../src/shared/utils/contactEditLock';
 import { mapPrismaDepartment, mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { loadCustomerTagCatalog } from './customerTagService';
 import { validateManualTagUpdateSelection } from './customerTagPolicy';
+import { normalizeCustomerLifecycleConfig, assertLifecycleTransition } from './customerLifecyclePolicy';
+import { assertCustomerCanBeSoftDeleted } from './customerDeletePolicy';
+import { lockCustomerAssociationScope } from './customerAssociationRegistry';
 import {
   assertCanManageCustomer,
   assertCustomerActionPermission,
@@ -49,8 +54,61 @@ import { customerWriteConflictResponse } from './customerWriteConflict';
 type CustomerCommandPrisma = Pick<PrismaClient, '$transaction' | 'leadRecord'>;
 type CustomerCommandTx = Pick<
   Prisma.TransactionClient,
-  'appStorage' | 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | '$queryRaw'
+  'appStorage' | 'businessRecord' | 'leadRecord' | 'user' | 'role' | 'department' | 'customerTodo' | '$queryRaw'
 >;
+
+export type CustomerAtomicCommand =
+  | { action: 'transfer'; customerId: string; targetOwnerId: string; reason: string }
+  | { action: 'release_to_pool'; customerId: string; reason: string }
+  | { action: 'set_progress'; customerId: string; lifecycleStatusCode: string; reason: string }
+  | { action: 'update_tags'; customerId: string; mode: 'add' | 'remove'; tagIds: string[]; reason: string }
+  | { action: 'add_todo'; customerId: string; title: string; content: string; dueAt: string; executionMethod: string; reason: string }
+  | { action: 'soft_delete'; customerId: string; reason: string; confirmed: true };
+
+export interface CustomerAuditEventInput {
+  operation: CustomerAtomicCommand['action'];
+  customerId: string;
+  actor: { id: string; name: string };
+  reason: string;
+  beforeSnapshot: Customer;
+  afterSnapshot: Customer;
+  idempotencyKey?: string;
+  inputHash?: string;
+  result?: string;
+  requestId?: string;
+  ip?: string;
+}
+
+/**
+ * The caller owns this transaction. Task 5 supplies the persistent appender;
+ * accepting a required port here prevents a batch operation from succeeding
+ * without its audit event in the same transaction.
+ */
+export interface CustomerAuditAppender {
+  append(tx: CustomerCommandTx, input: CustomerAuditEventInput): Promise<{ id: string }>;
+}
+
+export interface CustomerAtomicCommandContext {
+  tx: CustomerCommandTx;
+  access: CustomerAccessContext;
+  actor: { id: string; name: string };
+  /** The current role directory is supplied by the caller's transaction. */
+  roles?: Role[];
+  idempotencyKey?: string;
+  inputHash?: string;
+  requestId?: string;
+  ip?: string;
+}
+
+export interface CustomerAtomicCommandResult {
+  operationId: string;
+  customer: Customer;
+  beforeSnapshot: Customer;
+  afterSnapshot: Customer;
+  cancelledTodoCount: number;
+  reassignedTodoCount: number;
+  createdTodoId?: string;
+}
 
 type LockedBusinessRecord = {
   id: string;
@@ -445,6 +503,19 @@ async function linkedLeadRows(tx: CustomerCommandTx, customer: Customer) {
   return rows.filter((row) => isLinkedLead(readJson<Lead>(row.data), customer));
 }
 
+/**
+ * Batch-safe association lookup: unlike the legacy compatibility helper above,
+ * this deliberately follows only the stable customerId relation.
+ */
+async function lockedLeadRowsByStableCustomerId(tx: CustomerCommandTx, customerId: string) {
+  return tx.$queryRaw<LockedLeadRecord[]>(Prisma.sql`
+    SELECT id, data
+    FROM lead_records
+    WHERE JSON_UNQUOTE(JSON_EXTRACT(data, '$.customerId')) = ${customerId}
+    FOR UPDATE
+  `);
+}
+
 async function persistCustomer(
   tx: CustomerCommandTx,
   snapshot: CustomerRecordSnapshot,
@@ -686,6 +757,219 @@ function canEditLeadProfileOnServer(lead: Lead): boolean {
       === LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP;
 }
 
+function requireAtomicReason(reason: string): string {
+  const normalized = cleanText(reason);
+  if (!normalized) throw new Error('操作原因不能为空');
+  return normalized;
+}
+
+function atomicActivity(
+  command: CustomerAtomicCommand,
+  actor: { name: string },
+  at: Date,
+): CustomerActivityRecord {
+  const labels: Record<CustomerAtomicCommand['action'], string> = {
+    transfer: '转让了客户',
+    release_to_pool: '释放客户至公海',
+    set_progress: '更新了客户进展',
+    update_tags: '更新了客户标签',
+    add_todo: '新建了客户待办',
+    soft_delete: '删除了客户',
+  };
+  return {
+    id: `activity-${randomUUID()}`,
+    type: command.action === 'add_todo' ? 'todo' : command.action === 'set_progress' || command.action === 'update_tags' ? 'update' : 'transfer',
+    title: labels[command.action],
+    content: command.reason,
+    operator: actor.name,
+    createdAt: at.toISOString(),
+  };
+}
+
+/**
+ * Executes one phase-one batch-able customer mutation inside a transaction
+ * supplied by the caller. It intentionally never starts a transaction itself:
+ * the batch worker owns the job-item/customer/audit atomic boundary.
+ */
+export function createCustomerAtomicCommandService(options: {
+  auditAppender: CustomerAuditAppender;
+  now?: () => Date;
+  createId?: () => string;
+}) {
+  if (!options.auditAppender || typeof options.auditAppender.append !== 'function') {
+    throw new Error('CustomerAuditAppender 为必填依赖');
+  }
+  const now = () => options.now?.() || new Date();
+  const createId = (prefix: string) => `${prefix}-${options.createId?.() || randomUUID()}`;
+
+  return {
+    async execute(
+      command: CustomerAtomicCommand,
+      context: CustomerAtomicCommandContext,
+    ): Promise<CustomerAtomicCommandResult> {
+      const reason = requireAtomicReason(command.reason);
+      const tx = context.tx;
+      await lockCustomerAssociationScope(tx, [command.customerId]);
+      const repository = createCustomerBusinessRecordRepository(tx);
+      const snapshot = await repository.lockById(command.customerId);
+      if (!snapshot || snapshot.customer.deletedAt) throw new Error('客户不存在');
+      const liveActor = await (tx as any).user.findUnique({ where: { id: context.actor.id } });
+      if (!liveActor || !liveActor.isActive || (liveActor.employmentStatus || 'active') !== 'active') {
+        throw new Error('当前用户不存在或已离职');
+      }
+      const actor = { id: liveActor.id, name: liveActor.name };
+      const beforeSnapshot = structuredClone(snapshot.customer);
+      const customer = snapshot.customer;
+      const permissionAction: CustomerMutationAction = command.action;
+      assertCustomerActionPermission(context.access, permissionAction);
+      assertCanManageCustomer(context.access, customer);
+
+      const at = now();
+      const atIso = at.toISOString();
+      let next: Customer = { ...customer };
+      let cancelledTodoCount = 0;
+      let reassignedTodoCount = 0;
+      let createdTodoId: string | undefined;
+      const todos = (tx as any).customerTodo;
+
+      if (command.action === 'transfer') {
+        const target = await (tx as any).user.findUnique({ where: { id: command.targetOwnerId } });
+        if (!target || !target.isActive || (target.employmentStatus || 'active') !== 'active') {
+          throw new Error('目标销售不存在或已离职');
+        }
+        if (!context.roles || !canReceiveLead(target, context.roles)) {
+          throw new Error('目标员工不是可分配销售');
+        }
+        if (!context.access.manageableOwnerIds.has(target.id)) throw new Error('无权跨数据范围分配客户');
+        const fromPool = isCanonicalPublicPoolCustomer(customer);
+        next = {
+          ...next,
+          owner: target.name, ownerId: target.id, ownerIdentityStatus: 'resolved', previousOwner: customer.owner,
+          assignedBy: actor.name, assignedAt: atIso, assignmentReason: reason, ownerSince: atIso,
+          ...(fromPool ? { lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP, lifecycleStatusUpdatedAt: atIso } : {}),
+        };
+        const result = await todos.updateMany({
+          where: { customerId: customer.id, status: 'PENDING' },
+          data: { assigneeId: target.id, assigneeName: target.name },
+        });
+        reassignedTodoCount = result.count;
+      } else if (command.action === 'release_to_pool') {
+        next = {
+          ...next,
+          owner: '公海', ownerId: undefined, ownerIdentityStatus: 'public_pool',
+          previousOwner: customer.owner === '公海' ? customer.previousOwner : customer.owner,
+          lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL,
+          lifecycleStatusUpdatedAt: atIso, publicPoolAt: atIso, releasedBy: actor.name, releaseReason: reason,
+        };
+        const result = await todos.updateMany({
+          where: { customerId: customer.id, status: 'PENDING' },
+          data: { status: 'CANCELED', canceledAt: at, canceledById: actor.id, canceledByName: actor.name, cancelReason: reason },
+        });
+        cancelledTodoCount = result.count;
+      } else if (command.action === 'set_progress') {
+        const stored = await lockStorageValue(tx, STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS);
+        const lifecycleConfig = normalizeCustomerLifecycleConfig(stored);
+        assertLifecycleTransition({
+          from: normalizeLifecycleStatusCode(customer.lifecycleStatusCode),
+          to: command.lifecycleStatusCode,
+          config: lifecycleConfig,
+        });
+        next = { ...next, lifecycleStatusCode: command.lifecycleStatusCode as Customer['lifecycleStatusCode'], lifecycleStatusUpdatedAt: atIso };
+      } else if (command.action === 'update_tags') {
+        const catalog = await loadCustomerTagCatalog(tx, true);
+        const targetIds = new Set(customer.manualTagIds || []);
+        command.tagIds.forEach((tagId) => command.mode === 'add' ? targetIds.add(tagId) : targetIds.delete(tagId));
+        const validation = validateManualTagUpdateSelection(catalog, 'customer', [...targetIds], customer.manualTagIds || []);
+        if (!validation.ok) throw new Error(validation.message);
+        next = {
+          ...next,
+          manualTagIds: validation.tagIds,
+          tags: validation.tagIds.map((tagId) => catalog.tags.find((tag) => tag.id === tagId)!.name),
+        };
+      } else if (command.action === 'add_todo') {
+        const title = cleanText(command.title);
+        const content = cleanText(command.content);
+        if (!title || title.length > 120) throw new Error('待办标题不能为空或超过120个字符');
+        if (content.length > 2000) throw new Error('待办内容不能超过2000个字符');
+        if (!command.dueAt || Number.isNaN(new Date(command.dueAt).getTime())) throw new Error('请选择有效的提醒时间');
+        if (!new Set(['none', 'phone', 'wechat', 'visit', 'sms', 'email']).has(command.executionMethod || 'none')) throw new Error('执行方式无效');
+        const todo = await todos.create({
+          data: {
+            id: createId('todo'), customerId: customer.id, customerName: customer.name,
+            title, content: content || null,
+            dueAt: new Date(command.dueAt), executionMethod: command.executionMethod || 'none',
+            assigneeId: actor.id, assigneeName: actor.name,
+            createdById: actor.id, createdByName: actor.name,
+          },
+        });
+        createdTodoId = todo.id;
+      } else if (command.action === 'soft_delete') {
+        if (command.confirmed !== true) throw new Error('删除客户需要明确确认');
+        await assertCustomerCanBeSoftDeleted(tx, customer.id);
+        next = { ...next, deletedAt: atIso, deletedBy: actor.name, deleteReason: reason };
+      }
+
+      next = {
+        ...next,
+        activityRecords: [atomicActivity(command, actor, at), ...(next.activityRecords || [])],
+        updatedAt: atIso,
+      };
+      await repository.compareAndSave(snapshot, next, at);
+      if (command.action === 'transfer' || command.action === 'release_to_pool') {
+        const relatedLeads = await lockedLeadRowsByStableCustomerId(tx, customer.id);
+        for (const row of relatedLeads) {
+          const lead = readJson<Lead>(row.data);
+          const nextLead: Lead = command.action === 'transfer'
+            ? {
+              ...lead,
+              owner: next.owner,
+              ownerId: next.ownerId,
+              assignedTo: next.owner,
+              assignedToId: next.ownerId,
+              assignedAt: atIso,
+              updatedAt: atIso,
+            }
+            : {
+              ...lead,
+              owner: '公海',
+              ownerId: undefined,
+              assignedTo: undefined,
+              assignedToId: undefined,
+              assignedAt: undefined,
+              lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL,
+              lifecycleStatus: '流失公海',
+              lifecycleStatusUpdatedAt: atIso,
+              updatedAt: atIso,
+            };
+          await persistLead(tx, row.id, nextLead, at);
+        }
+      }
+      const audit = await options.auditAppender.append(tx, {
+        operation: command.action,
+        customerId: customer.id,
+        actor,
+        reason,
+        beforeSnapshot,
+        afterSnapshot: next,
+        idempotencyKey: context.idempotencyKey,
+        inputHash: context.inputHash,
+        result: 'succeeded',
+        requestId: context.requestId,
+        ip: context.ip,
+      });
+      return {
+        operationId: audit.id,
+        customer: next,
+        beforeSnapshot,
+        afterSnapshot: next,
+        cancelledTodoCount,
+        reassignedTodoCount,
+        ...(createdTodoId ? { createdTodoId } : {}),
+      };
+    },
+  };
+}
+
 export function createCustomerCommandService(
   prisma: CustomerCommandPrisma,
   options: CommandOptions = {},
@@ -720,6 +1004,10 @@ export function createCustomerCommandService(
       at: Date,
     ) => { customer?: Customer; lead?: (lead: Lead) => Lead; error?: { code: number; message: string } },
   ) => runTransaction(async (tx) => {
+    // Transfers and releases write customer-linked records.  Acquire the same
+    // deterministic association lock used by deletion and batch commands so a
+    // concurrent order/association writer cannot interleave with the change.
+    await lockCustomerAssociationScope(tx, [customerId]);
     const snapshot = await createCustomerBusinessRecordRepository(tx).lockById(customerId);
     if (!snapshot) return failure<Customer>('客户不存在', 404);
     const customer = snapshot.customer;
@@ -743,7 +1031,26 @@ export function createCustomerCommandService(
     if (!result.customer || !result.lead) return success(customer);
 
     await persistCustomer(tx, snapshot, result.customer, at);
-    const leadRows = await linkedLeadRows(tx, customer);
+    if (authorization === 'transfer') {
+      await tx.customerTodo.updateMany({
+        where: { customerId: customer.id, status: 'PENDING' },
+        data: { assigneeId: result.customer.ownerId, assigneeName: result.customer.owner },
+      });
+    } else if (authorization === 'release_to_pool') {
+      await tx.customerTodo.updateMany({
+        where: { customerId: customer.id, status: 'PENDING' },
+        data: {
+          status: 'CANCELED',
+          canceledAt: at,
+          canceledById: context.actor.id,
+          canceledByName: context.actor.name,
+          cancelReason: result.customer.releaseReason || '客户释放至公海',
+        },
+      });
+    }
+    const leadRows = authorization === 'transfer' || authorization === 'release_to_pool'
+      ? await lockedLeadRowsByStableCustomerId(tx, customer.id)
+      : await linkedLeadRows(tx, customer);
     for (const leadRow of leadRows) {
       await persistLead(tx, leadRow.id, result.lead(readJson<Lead>(leadRow.data)), at);
     }
@@ -761,6 +1068,9 @@ export function createCustomerCommandService(
       ));
       if (preflightError) return failure<Customer>(preflightError, 403);
       return runTransaction(async (tx) => {
+        // Serialize every association writer/checker before observing whether a
+        // delete is safe; otherwise a new order could slip in after the check.
+        await lockCustomerAssociationScope(tx, [customerId]);
         const snapshot = await createCustomerBusinessRecordRepository(tx).lockById(customerId);
         if (!snapshot) return failure<Customer>('客户不存在', 404);
         const customer = snapshot.customer;
@@ -854,6 +1164,9 @@ export function createCustomerCommandService(
       ));
       if (preflightError) return failure<boolean>(preflightError, 403);
       return runTransaction(async (tx) => {
+        // Deletion must serialize against every stable customer association
+        // writer before it checks the registry and marks the customer deleted.
+        await lockCustomerAssociationScope(tx, [customerId]);
         const snapshot = await createCustomerBusinessRecordRepository(tx).lockById(customerId);
         if (!snapshot) return success(true);
         const customer = snapshot.customer;
@@ -865,6 +1178,13 @@ export function createCustomerCommandService(
           assertCanManageCustomer(context.customerAccess!, customer);
         });
         if (accessError) return failure<boolean>(accessError, 403);
+        try {
+          await assertCustomerCanBeSoftDeleted(tx, customer.id);
+        } catch (error) {
+          return failure<boolean>(error instanceof Error ? error.message : '客户存在关联业务，不能删除', 409);
+        }
+        // Kept for legacy query coverage while the registry inventory is rolled
+        // out; the association registry is the authoritative broad blocker.
         if (await hasActiveCustomerOrder(tx, customer)) {
           return failure<boolean>('客户存在关联订单，不能删除；请先处理订单后再操作。', 409);
         }
@@ -881,17 +1201,6 @@ export function createCustomerCommandService(
           updatedAt: atIso,
         };
         await persistCustomer(tx, snapshot, deleted, at);
-        const leadRows = await linkedLeadRows(tx, customer);
-        for (const leadRow of leadRows) {
-          const lead = readJson<Lead>(leadRow.data);
-          await persistLead(tx, leadRow.id, {
-            ...lead,
-            deletedAt: atIso,
-            deletedBy: operator,
-            deleteReason: `关联客户删除：${reason}`,
-            updatedAt: atIso,
-          }, at);
-        }
         return success(true);
       });
     },
