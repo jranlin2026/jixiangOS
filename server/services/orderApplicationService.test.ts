@@ -183,6 +183,7 @@ class FakePrisma {
   readonly users: any[];
   readonly roles: any[];
   readonly departments: any[];
+  readonly associationLockKeys: string[] = [];
   transactionAttempts = 0;
   p2034FailuresRemaining = 0;
   private lockTails = new Map<string, Promise<void>>();
@@ -326,7 +327,28 @@ class FakePrisma {
     };
     const tx = {
       businessRecord,
-      $queryRaw: async (_strings: TemplateStringsArray, ...values: unknown[]) => {
+      appStorage: {
+        upsert: async ({ where }: any) => {
+          this.associationLockKeys.push(String(where.key));
+          return { key: where.key, value: { kind: 'customer_association_lock' } };
+        },
+      },
+      $queryRaw: async (query: TemplateStringsArray | { strings?: string[]; values?: unknown[] }, ...taggedValues: unknown[]) => {
+        const rawQuery = query as any;
+        const text = Array.isArray(rawQuery)
+          ? rawQuery.join('?')
+          : Array.isArray(rawQuery?.strings) ? rawQuery.strings.join('?') : '';
+        const values = Array.isArray(rawQuery?.values)
+          ? rawQuery.values as unknown[]
+          : taggedValues;
+        // The association lock protocol issues several lock-only SQL queries.
+        // They need no row emulation in this in-memory aggregate fixture.
+        if (text.includes('app_storage') || text.includes('lead_records') || text.includes('customer_todos')) {
+          return [];
+        }
+        if (text.includes('SELECT id FROM business_records') && text.includes('customerId IN')) {
+          return [];
+        }
         const domain = String(values[0] || '');
         const recordId = String(values[1] || '');
         release = await this.acquire(rowKey(domain, recordId));
@@ -379,6 +401,10 @@ const deferredEffects: OrderApprovalEffectState = {
   assert.deepEqual(result.data?.downstreamEffects, deferredEffects, 'service does not pretend legacy downstream effects ran');
   assert.equal(prisma.domainRows(STORAGE_KEYS.ORDERS).length, 1);
   assert.equal(prisma.domainRows(STORAGE_KEYS.ORDERS)[0].data.sourceApplicationId, 'oa-concurrent-1');
+  assert.ok(
+    prisma.associationLockKeys.includes('aaos_customer_association_lock:customer-1'),
+    '审批入库写正式订单前必须取得客户关联锁',
+  );
 }
 
 {
@@ -534,6 +560,10 @@ const deferredEffects: OrderApprovalEffectState = {
   assert.equal(result.data?.orderData.salesName, salesApplicant.name);
   assert.equal(result.data?.orderData.owner, salesApplicant.name);
   assert.equal(prisma.applicationRow(result.data!.id).data.applicantId, salesApplicant.id);
+  assert.ok(
+    prisma.associationLockKeys.includes('aaos_customer_association_lock:customer-1'),
+    '新建客户关联订单申请前必须取得客户关联锁，避免与客户删除并发穿插',
+  );
 }
 
 {
@@ -660,6 +690,10 @@ const deferredEffects: OrderApprovalEffectState = {
   assert.equal(result.data?.orderData.salesId, salesApplicant.id);
   assert.equal(result.data?.reviewLogs[0].action, 'resubmit');
   assert.equal(result.data?.reviewLogs[0].operatorId, salesApplicant.id);
+  assert.ok(
+    prisma.associationLockKeys.includes('aaos_customer_association_lock:customer-1'),
+    '重新提交更新客户关联申请前必须取得客户关联锁',
+  );
 }
 
 {
@@ -699,6 +733,10 @@ const deferredEffects: OrderApprovalEffectState = {
   assert.equal(returned.data?.reason, '补充付款凭证');
   assert.equal(returned.data?.reviewerId, reviewer.id);
   assert.equal(returned.data?.reviewLogs[0].action, 'return');
+  assert.ok(
+    prisma.associationLockKeys.includes('aaos_customer_association_lock:customer-1'),
+    '退回更新客户关联申请前必须取得客户关联锁',
+  );
 }
 
 {

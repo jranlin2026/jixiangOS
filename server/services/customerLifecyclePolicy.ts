@@ -54,17 +54,34 @@ function normalizeTransitions(
   statuses: CustomerLifecycleStatus[],
 ): Record<string, string[]> {
   if (!isRecord(value)) {
-    if (statuses.some((status) => Array.isArray(status.allowedManualTargetCodes))) {
+    const configuredManualCodes = statuses
+      .filter((status) => status.isActive && !SYSTEM_ONLY_LIFECYCLE_CODES.has(status.code))
+      .map((status) => status.code);
+    const hasCustomOrLegacyStatuses = statuses.some((status) => (
+      !Object.prototype.hasOwnProperty.call(DEFAULT_CUSTOMER_LIFECYCLE_TRANSITIONS, status.code)
+    ));
+    const hasExplicitPerStatusTransitions = statuses.some((status) => (
+      Array.isArray(status.allowedManualTargetCodes)
+    ));
+
+    // Historical arrays had no graph, but their active custom states were
+    // manually editable. Keep those states usable while still rejecting global
+    // system terminal codes in assertLifecycleTransition below.
+    if (hasCustomOrLegacyStatuses || !hasExplicitPerStatusTransitions) {
       return Object.fromEntries(statuses.map((status) => [
         status.code,
-        Array.from(new Set(
-          (status.allowedManualTargetCodes || []).map((target) => String(target).trim()).filter(Boolean),
-        )),
+        Array.isArray(status.allowedManualTargetCodes)
+          ? Array.from(new Set(status.allowedManualTargetCodes.map((target) => String(target).trim()).filter(Boolean)))
+          : configuredManualCodes.filter((target) => target !== status.code),
       ]));
     }
-    return Object.fromEntries(
-      Object.entries(DEFAULT_CUSTOMER_LIFECYCLE_TRANSITIONS).map(([from, targets]) => [from, [...targets]]),
-    );
+
+    return Object.fromEntries(statuses.map((status) => [
+      status.code,
+      Array.from(new Set(
+        (status.allowedManualTargetCodes || []).map((target) => String(target).trim()).filter(Boolean),
+      )),
+    ]));
   }
   return Object.fromEntries(
     Object.entries(value).map(([from, targets]) => [

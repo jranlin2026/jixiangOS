@@ -601,6 +601,10 @@ function isCanonicalPublicPoolCustomer(customer: Customer): boolean {
     && !customer.ownerId;
 }
 
+function lifecycleCodeForPolicy(value: unknown, fallback?: string): string {
+  return cleanText(value) || cleanText(fallback) || LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP;
+}
+
 function syncLeadFromCustomer(lead: Lead, customer: Customer, atIso: string, operator: string): Lead {
   const isPublicPool = isCanonicalPublicPoolCustomer(customer);
   const patch: Partial<Lead> = {
@@ -649,29 +653,6 @@ function syncLeadFromCustomer(lead: Lead, customer: Customer, atIso: string, ope
 
 function newIdForSync(prefix: string): string {
   return `${prefix}-${randomUUID().slice(0, 8)}`;
-}
-
-async function hasActiveCustomerOrder(
-  tx: CustomerCommandTx,
-  customer: Customer,
-): Promise<boolean> {
-  const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-    SELECT id
-    FROM business_records
-    WHERE domain = ${STORAGE_KEYS.ORDERS}
-      AND (
-        JSON_EXTRACT(data, '$.deletedAt') IS NULL
-        OR JSON_TYPE(JSON_EXTRACT(data, '$.deletedAt')) = 'NULL'
-      )
-      AND (
-        customerId = ${customer.id}
-        OR JSON_UNQUOTE(JSON_EXTRACT(data, '$.customerId')) = ${customer.id}
-        OR JSON_UNQUOTE(JSON_EXTRACT(data, '$.customerName')) IN (${customer.name}, ${customer.company})
-      )
-    LIMIT 1
-    FOR UPDATE
-  `);
-  return rows.length > 0;
 }
 
 const LEAD_EDIT_FIELDS: Array<{ field: keyof Lead; label: string }> = [
@@ -870,11 +851,15 @@ export function createCustomerAtomicCommandService(options: {
         const stored = await lockStorageValue(tx, STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS);
         const lifecycleConfig = normalizeCustomerLifecycleConfig(stored);
         assertLifecycleTransition({
-          from: normalizeLifecycleStatusCode(customer.lifecycleStatusCode),
-          to: command.lifecycleStatusCode,
+          from: lifecycleCodeForPolicy(customer.lifecycleStatusCode),
+          to: lifecycleCodeForPolicy(command.lifecycleStatusCode),
           config: lifecycleConfig,
         });
-        next = { ...next, lifecycleStatusCode: command.lifecycleStatusCode as Customer['lifecycleStatusCode'], lifecycleStatusUpdatedAt: atIso };
+        next = {
+          ...next,
+          lifecycleStatusCode: lifecycleCodeForPolicy(command.lifecycleStatusCode) as Customer['lifecycleStatusCode'],
+          lifecycleStatusUpdatedAt: atIso,
+        };
       } else if (command.action === 'update_tags') {
         const catalog = await loadCustomerTagCatalog(tx, true);
         const targetIds = new Set(customer.manualTagIds || []);
@@ -1084,6 +1069,35 @@ export function createCustomerCommandService(
         if (accessError) return failure<Customer>(accessError, 403);
 
         let patch = submittedPatch;
+        const hasSubmittedLifecycleCode = Object.prototype.hasOwnProperty.call(patch, 'lifecycleStatusCode');
+        const submittedLifecycleCode = hasSubmittedLifecycleCode
+          ? cleanText(patch.lifecycleStatusCode)
+          : undefined;
+        if (hasSubmittedLifecycleCode && !submittedLifecycleCode) {
+          return failure<Customer>('客户进展不能为空', 400);
+        }
+        const lifecycleChanged = submittedLifecycleCode !== undefined
+          && submittedLifecycleCode !== lifecycleCodeForPolicy(customer.lifecycleStatusCode);
+        if (lifecycleChanged) {
+          try {
+            const stored = await lockStorageValue(
+              tx,
+              STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS,
+              DEFAULT_LIFECYCLE_STATUS_CONFIGS,
+            );
+            assertLifecycleTransition({
+              from: lifecycleCodeForPolicy(customer.lifecycleStatusCode),
+              to: submittedLifecycleCode,
+              config: normalizeCustomerLifecycleConfig(stored),
+            });
+          } catch (error) {
+            return failure<Customer>(error instanceof Error ? error.message : '客户进展更新失败', 400);
+          }
+          patch = {
+            ...patch,
+            lifecycleStatusCode: submittedLifecycleCode as Customer['lifecycleStatusCode'],
+          };
+        }
         let tagNameById: Map<string, string> | null = null;
         if (Object.prototype.hasOwnProperty.call(input, 'manualTagIds')) {
           const catalog = await loadCustomerTagCatalog(tx, true);
@@ -1133,6 +1147,7 @@ export function createCustomerCommandService(
         const operator = commandActor(context, currentUser);
         const updated: Customer = {
           ...merged,
+          ...(lifecycleChanged ? { lifecycleStatusUpdatedAt: atIso } : {}),
           activityRecords: [{
             id: newId('act'),
             type: 'update',
@@ -1183,12 +1198,6 @@ export function createCustomerCommandService(
         } catch (error) {
           return failure<boolean>(error instanceof Error ? error.message : '客户存在关联业务，不能删除', 409);
         }
-        // Kept for legacy query coverage while the registry inventory is rolled
-        // out; the association registry is the authoritative broad blocker.
-        if (await hasActiveCustomerOrder(tx, customer)) {
-          return failure<boolean>('客户存在关联订单，不能删除；请先处理订单后再操作。', 409);
-        }
-
         const at = now();
         const atIso = at.toISOString();
         const operator = commandActor(context, currentUser);

@@ -59,4 +59,19 @@ assert.throws(
   /不允许/,
 );
 
+// 历史配置常常只有状态数组，没有 allowedManualTargetCodes 或 transitions；
+// 已启用的自定义人工状态仍必须可互转，系统终态仍由专用业务命令控制。
+const historicalCustomConfig = normalizeCustomerLifecycleConfig([
+  { id: 'legacy-new', code: 'new', name: '新客户', color: '#999', isActive: true, sortOrder: 1, createdAt: '', updatedAt: '' },
+  { id: 'legacy-contacted', code: 'contacted', name: '已联系', color: '#369', isActive: true, sortOrder: 2, createdAt: '', updatedAt: '' },
+  { id: 'legacy-custom', code: 'proposal_sent', name: '方案已发', color: '#396', isActive: true, sortOrder: 3, createdAt: '', updatedAt: '' },
+  { id: 'legacy-pool', code: 'public_pool', name: '公海', color: '#333', isActive: true, sortOrder: 4, createdAt: '', updatedAt: '' },
+]);
+assert.doesNotThrow(() => assertLifecycleTransition({ from: 'new', to: 'contacted', config: historicalCustomConfig }));
+assert.doesNotThrow(() => assertLifecycleTransition({ from: 'contacted', to: 'proposal_sent', config: historicalCustomConfig }));
+assert.throws(
+  () => assertLifecycleTransition({ from: 'proposal_sent', to: 'public_pool', config: historicalCustomConfig }),
+  /系统状态/,
+);
+
 console.log('customer lifecycle policy tests passed');

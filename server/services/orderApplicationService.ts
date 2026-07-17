@@ -20,6 +20,7 @@ import {
   canReadCustomer,
 } from './customerAccessPolicy';
 import { customerWriteConflictResponse } from './customerWriteConflict';
+import { lockCustomerAssociationScope } from './customerAssociationRegistry';
 
 type OrderApplicationPrisma = Pick<
   PrismaClient,
@@ -532,6 +533,8 @@ export function createOrderApplicationService(
 
     try {
       const created = await prisma.$transaction(async (transaction) => {
+        const requestedCustomerId = String(input?.customerId || '').trim();
+        if (requestedCustomerId) await lockCustomerAssociationScope(transaction, [requestedCustomerId]);
         const orderData = await canonicalizeOrderApplicationInput(transaction, input, applicant, directory);
         const application: OrderApplication = {
           id: applicationId,
@@ -611,6 +614,11 @@ export function createOrderApplicationService(
           if (application.status !== STATUS_RETURNED) {
             throw new OrderApprovalError(409, '只有退回修改的订单申请可以重新提交');
           }
+
+          await lockCustomerAssociationScope(transaction, [
+            application.orderData.customerId,
+            String(input?.customerId || '').trim(),
+          ]);
 
           const submittedAt = now().toISOString();
           const orderData = await canonicalizeOrderApplicationInput(transaction, input, applicant, directory);
@@ -700,6 +708,8 @@ export function createOrderApplicationService(
               : '只有待财务审核的订单申请可以驳回');
           }
 
+          await lockCustomerAssociationScope(transaction, [application.orderData.customerId]);
+
           const reviewedAt = now().toISOString();
           const next: OrderApplication = {
             ...application,
@@ -784,6 +794,8 @@ export function createOrderApplicationService(
             if (!applicationIsVisible(application, scope)) {
               throw new OrderApprovalError(403, '无权操作该订单申请');
             }
+
+            await lockCustomerAssociationScope(transaction, [application.orderData.customerId]);
 
             if (application.status === STATUS_APPROVED) {
               if (!application.orderId || !application.orderNo) {

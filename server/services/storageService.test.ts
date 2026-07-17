@@ -196,14 +196,11 @@ assert.deepEqual(clearCalls.business, [{
 const nextCustomers = [
   { id: 'customer-a', name: '客户A', company: 'A公司', owner: '销售A', totalSpent: 1200, createdAt: '2026-06-24T01:00:00.000Z', updatedAt: '2026-06-24T01:00:00.000Z' },
 ];
-await service.set(STORAGE_KEYS.CUSTOMERS, nextCustomers);
-assert.equal(businessUpserts.length, 1);
-assert.equal(businessUpserts[0].where.domain_recordId.domain, STORAGE_KEYS.CUSTOMERS);
-assert.equal(businessUpserts[0].create.title, '客户A');
-assert.equal(String(businessUpserts[0].create.amount), '1200');
-assert.equal(businessDeletedWhere, null, '分页客户快照不得删除本次请求未提交的服务器客户');
-await service.set(STORAGE_KEYS.CUSTOMERS, []);
-assert.equal(businessDeletedWhere, null, '空的客户局部快照不得清空服务器客户');
+const rawCustomerSetResult = await service.set(STORAGE_KEYS.CUSTOMERS, nextCustomers);
+assert.equal(rawCustomerSetResult.code, 403, '客户资产不得通过原始存储整表写入');
+assert.match(rawCustomerSetResult.message, /客户.*原始存储/);
+assert.equal(businessUpserts.length, 0, '拒绝客户原始写入时不得触碰客户记录');
+assert.equal(businessDeletedWhere, null, '拒绝客户原始写入时不得执行客户清理');
 
 await service.set(STORAGE_KEYS.DELIVERIES, [{
   id: 'delivery-a',
@@ -214,6 +211,60 @@ await service.set(STORAGE_KEYS.DELIVERIES, [{
 const deliveryDeletedWhere = businessDeletedWhere as any;
 assert.equal(deliveryDeletedWhere.domain, STORAGE_KEYS.DELIVERIES);
 assert.deepEqual(deliveryDeletedWhere.recordId.notIn, ['delivery-a']);
+
+// Legacy storage is still available for several customer-adjacent domains. It
+// must join the same customer association lock protocol as record commands and
+// re-read the customer after the lock so a concurrent soft-delete cannot leave
+// a new dangling stable-ID link behind.
+const associationGuardEvents: string[] = [];
+const associationGuardWrites: any[] = [];
+const associationCustomers = new Map<string, any>([
+  ['customer-live', { data: { id: 'customer-live', name: '仍在使用的客户' } }],
+  ['customer-deleted', { data: { id: 'customer-deleted', name: '已删除客户', deletedAt: '2026-07-18T00:00:00.000Z' } }],
+]);
+const associationGuardPrisma: any = {
+  ...prisma,
+  appStorage: {
+    ...prisma.appStorage,
+    upsert: async ({ where }: any) => {
+      associationGuardEvents.push(`lock:${where.key}`);
+      return { key: where.key, value: {} };
+    },
+  },
+  businessRecord: {
+    ...prisma.businessRecord,
+    findUnique: async ({ where }: any) => {
+      if (where.domain_recordId?.domain === STORAGE_KEYS.CUSTOMERS) {
+        associationGuardEvents.push(`validate:${where.domain_recordId.recordId}`);
+        return associationCustomers.get(where.domain_recordId.recordId) || null;
+      }
+      return null;
+    },
+    upsert: async (input: any) => {
+      associationGuardWrites.push(input);
+      return input.create;
+    },
+  },
+  $queryRaw: async () => [],
+};
+associationGuardPrisma.$transaction = async (callback: (tx: any) => Promise<unknown>) => callback(associationGuardPrisma);
+const associationGuardService = createStorageService(associationGuardPrisma);
+const stableAssociationResult = await associationGuardService.set(STORAGE_KEYS.SERVICE_TICKETS, [{
+  id: 'ticket-live', customerId: 'customer-live', title: '正常客户工单',
+}]);
+assert.equal(stableAssociationResult.code, 0);
+assert.ok(
+  associationGuardEvents.indexOf('lock:aaos_customer_association_lock:customer-live')
+    < associationGuardEvents.indexOf('validate:customer-live'),
+  '稳定客户关联必须先取得关联锁，再校验客户仍可用',
+);
+assert.equal(associationGuardWrites.length, 1);
+
+const deletedAssociationResult = await associationGuardService.set(STORAGE_KEYS.SERVICE_TICKETS, [{
+  id: 'ticket-deleted', customerId: 'customer-deleted', title: '不应写入已删除客户',
+}]);
+assert.equal(deletedAssociationResult.code, 409, '原始存储不得给已删除客户新增稳定关联');
+assert.equal(associationGuardWrites.length, 1, '客户复核失败后不得写入关联业务记录');
 
 const collidingCreateIds = new Set<string>();
 const collisionPrisma = {
@@ -232,12 +283,12 @@ const collisionPrisma = {
 } as any;
 (collisionPrisma as any).$transaction = async (callback: (tx: any) => Promise<unknown>) => callback(collisionPrisma);
 const collisionService = createStorageService(collisionPrisma);
-const longPrefix = `customer-${'a'.repeat(180)}`;
-const longIdCustomers = [
-  { id: `${longPrefix}-one`, name: '长ID客户A', createdAt: '2026-06-24T01:00:00.000Z' },
-  { id: `${longPrefix}-two`, name: '长ID客户B', createdAt: '2026-06-24T02:00:00.000Z' },
+const longPrefix = `product-${'a'.repeat(180)}`;
+const longIdProducts = [
+  { id: `${longPrefix}-one`, name: '长ID产品A', createdAt: '2026-06-24T01:00:00.000Z' },
+  { id: `${longPrefix}-two`, name: '长ID产品B', createdAt: '2026-06-24T02:00:00.000Z' },
 ];
-await assert.doesNotReject(() => collisionService.set(STORAGE_KEYS.CUSTOMERS, longIdCustomers));
+await assert.doesNotReject(() => collisionService.set(STORAGE_KEYS.PRODUCTS, longIdProducts));
 assert.equal(collidingCreateIds.size, 2);
 
 let transactionCalls = 0;
@@ -249,7 +300,7 @@ const transactionalPrisma = {
   },
 } as any;
 const transactionalService = createStorageService(transactionalPrisma);
-await transactionalService.set(STORAGE_KEYS.CUSTOMERS, nextCustomers);
+await transactionalService.set(STORAGE_KEYS.PRODUCTS, [{ id: 'product-transactional', name: '事务产品' }]);
 assert.equal(transactionCalls, 1);
 
 transactionCalls = 0;
@@ -277,7 +328,7 @@ const failingPrisma: any = {
 failingPrisma.$transaction = async (callback: (tx: any) => Promise<unknown>) => callback(failingPrisma);
 
 await assert.rejects(
-  () => createStorageService(failingPrisma).set(STORAGE_KEYS.CUSTOMERS, nextCustomers),
+  () => createStorageService(failingPrisma).set(STORAGE_KEYS.PRODUCTS, [{ id: 'product-failing', name: '失败产品' }]),
   /upsert failed/,
 );
 assert.equal(deleteAttemptedAfterUpsertFailure, false);

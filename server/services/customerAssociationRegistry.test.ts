@@ -128,7 +128,12 @@ let financeValue: any = {
   expenses: [], transactions: [],
 };
 let financeUpdatedAt = AUDIT_AT;
+let auditTodoRows: any[] = [
+  { id: 'legacy-todo-unique', customerId: null, customerName: '唯一客户', updatedAt: AUDIT_AT },
+  { id: 'legacy-todo-ambiguous', customerId: null, customerName: '重名客户', updatedAt: AUDIT_AT },
+];
 const auditCheckpoints = new Map<string, any>();
+const auditAssociationLockKeys: string[] = [];
 let forceBusinessConflict = false;
 const auditPrisma: any = {
   businessRecord: {
@@ -143,7 +148,16 @@ const auditPrisma: any = {
     },
   },
   leadRecord: { findMany: async () => [] },
-  customerTodo: { findMany: async () => [] },
+  customerTodo: {
+    findMany: async () => auditTodoRows,
+    updateMany: async ({ where, data }: any) => {
+      const row = auditTodoRows.find((candidate) => candidate.id === where.id);
+      if (!row || row.updatedAt.getTime() !== where.updatedAt.getTime()) return { count: 0 };
+      Object.assign(row, data);
+      row.updatedAt = new Date(row.updatedAt.getTime() + 1);
+      return { count: 1 };
+    },
+  },
   appStorage: {
     findUnique: async ({ where }: any) => {
       if (where.key === STORAGE_KEYS.FINANCE) return { key: where.key, value: financeValue, updatedAt: financeUpdatedAt };
@@ -156,10 +170,15 @@ const auditPrisma: any = {
       return { count: 1 };
     },
     upsert: async ({ where, create, update }: any) => {
+      if (String(where.key).startsWith('aaos_customer_association_lock:')) {
+        auditAssociationLockKeys.push(where.key);
+        return { key: where.key, value: create.value };
+      }
       auditCheckpoints.set(where.key, auditCheckpoints.has(where.key) ? update.value : create.value);
       return { key: where.key, value: auditCheckpoints.get(where.key) };
     },
   },
+  $queryRaw: async () => [],
   $transaction: async (operation: any) => operation(auditPrisma),
 };
 
@@ -168,8 +187,13 @@ const dryAudit = await auditHistoricalCustomerAssociationIds(auditPrisma, {
   checkpointKey: 'association-audit',
 });
 assert.equal(dryAudit.backfilled, 0);
-assert.equal(dryAudit.backfillCandidates >= 2, true);
+assert.equal(dryAudit.backfillCandidates >= 3, true);
 assert.equal(dryAudit.repairRows.some((row) => row.reason === 'CUSTOMER_IDENTITY_AMBIGUOUS'), true);
+assert.equal(dryAudit.repairRows.some((row) => (
+  row.storageDomain === 'customer_todos'
+  && row.recordId === 'legacy-todo-ambiguous'
+  && row.reason === 'CUSTOMER_IDENTITY_AMBIGUOUS'
+)), true, '重名历史待办必须报告修复失败，而不是猜测归属');
 assert.equal(dryAudit.repairRows.some((row) => (
   row.storageDomain === STORAGE_KEYS.ORDERS
   && row.pathKey === 'data.orderData.customerId'
@@ -177,16 +201,31 @@ assert.equal(dryAudit.repairRows.some((row) => (
 )), true);
 assert.equal((auditBusinessRows[3].data as any).orderData.customerId, undefined);
 assert.equal(financeValue.incomes[0].customerId, undefined);
+assert.equal(auditTodoRows[0].customerId, null);
 
 const appliedAudit = await auditHistoricalCustomerAssociationIds(auditPrisma, {
   apply: true,
   checkpointKey: 'association-audit',
 });
-assert.equal(appliedAudit.backfilled >= 2, true);
+assert.equal(appliedAudit.backfilled >= 3, true);
 assert.equal((auditBusinessRows[3].data as any).orderData.customerId, 'c-1');
 assert.equal(financeValue.incomes[0].customerId, 'c-1');
 assert.equal(financeValue.incomes[1].customerId, undefined, '重名 legacy row 不得猜测客户');
+assert.equal(auditTodoRows[0].customerId, 'c-1', '唯一匹配的历史待办必须补齐稳定 customerId');
+assert.equal(auditTodoRows[1].customerId, null, '重名历史待办不得猜测 customerId');
 assert.equal(auditCheckpoints.get('association-audit').completed, true);
+assert.ok(
+  auditAssociationLockKeys.includes('aaos_customer_association_lock:c-1'),
+  '历史关联修复写入稳定 customerId 前必须取得同一客户关联锁',
+);
+
+const todoBlockersAfterAudit = await findBlockingCustomerAssociations({
+  businessRecord: { findMany: async () => [] },
+  leadRecord: { findMany: async () => [] },
+  customerTodo: { findMany: async () => auditTodoRows },
+  appStorage: { findUnique: async () => null },
+} as any, 'c-1');
+assert.equal(todoBlockersAfterAudit.includes('待办关联'), true, '补齐稳定 ID 后待办必须进入删除阻断扫描');
 
 auditCheckpoints.delete('association-conflict');
 delete (auditBusinessRows[3].data as any).orderData.customerId;

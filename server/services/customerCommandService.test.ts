@@ -1039,6 +1039,33 @@ const serviceOptions = {
   assert.equal(result.data?.leadInputBy, '原录入人');
 }
 
+// RED: 通用 PUT 只能走人工生命周期图，不能伪造成公海/成交/退款等系统终态。
+{
+  const value = customer('cust-update-lifecycle-policy');
+  const fake = createFakePrisma({ businessRecords: [businessCustomer(value)], leads: [] });
+  const service = createCustomerCommandService(fake.prisma, serviceOptions);
+  for (const terminal of [
+    LIFECYCLE_STATUS_CODES.PUBLIC_POOL,
+    LIFECYCLE_STATUS_CODES.ORDERED,
+    LIFECYCLE_STATUS_CODES.REFUNDED,
+    'deal_closed',
+  ]) {
+    const result = await service.updateCustomer(value.id, { lifecycleStatusCode: terminal } as any, customerEditor);
+    assert.equal(result.code, 400, `通用更新不得直接写入系统终态 ${terminal}`);
+    assert.equal(fake.getState().businessRecords[0].data.lifecycleStatusCode, LIFECYCLE_STATUS_CODES.FOLLOWING);
+  }
+  const blank = await service.updateCustomer(value.id, { lifecycleStatusCode: '   ' } as any, customerEditor);
+  assert.equal(blank.code, 400, '通用更新不得把空进展默认为其他人工状态');
+  assert.equal(fake.getState().businessRecords[0].data.lifecycleStatusCode, LIFECYCLE_STATUS_CODES.FOLLOWING);
+  const manual = await service.updateCustomer(
+    value.id,
+    { lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP },
+    customerEditor,
+  );
+  assert.equal(manual.code, 0, '普通人工进展仍可经通用更新走配置的转换图');
+  assert.equal(manual.data?.lifecycleStatusCode, LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP);
+}
+
 // RED: 客户更新仍要执行个人资源贡献人归因校验。
 {
   const value = customer('cust-update-attribution');
@@ -1106,6 +1133,31 @@ const serviceOptions = {
   assert.equal(next.businessRecords[0].data.deletedBy, superAdmin.name);
   assert.equal(next.leads[0].data.deletedAt, undefined);
   assert.equal(next.leads[0].data.deleteReason, undefined);
+}
+
+// RED: 只有名称的历史订单不能在同名客户之间被猜测为关联，删除只依据注册的稳定 ID。
+{
+  const target = { ...customer('cust-delete-name-only-target'), name: '同名客户', company: '同名公司' };
+  const sibling = { ...customer('cust-delete-name-only-sibling'), name: '同名客户', company: '同名公司' };
+  const fake = createFakePrisma({
+    businessRecords: [
+      businessCustomer(target),
+      businessCustomer(sibling),
+      {
+        id: `${STORAGE_KEYS.ORDERS}:legacy-name-only`,
+        domain: STORAGE_KEYS.ORDERS,
+        recordId: 'legacy-name-only',
+        customerId: null,
+        data: { id: 'legacy-name-only', customerName: '同名客户', status: '已审核' },
+      },
+    ],
+    leads: [],
+  });
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .deleteCustomer(target.id, '无稳定关联可安全删除', superAdmin);
+
+  assert.equal(result.code, 0);
+  assert.equal(fake.getState().businessRecords[0].data.deletedAt, FIXED_NOW.toISOString());
 }
 
 // RED: “全部”的 delete/admin 不得绕过 Task 2 客户删除 explicit-only 规则。

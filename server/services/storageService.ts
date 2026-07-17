@@ -5,8 +5,9 @@ import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { matchExactNamesToUniqueIds } from '../../src/shared/utils/exactNameIdentity';
 import { mapPrismaUser } from '../db/prismaMappers';
 import { loadCustomerTagCatalog } from './customerTagService';
+import { CUSTOMER_ASSOCIATION_DEFINITIONS, lockCustomerAssociationScope } from './customerAssociationRegistry';
 
-type StorageTransaction = Pick<Prisma.TransactionClient, 'appStorage' | 'leadRecord' | 'businessRecord' | 'user'>;
+type StorageTransaction = Pick<Prisma.TransactionClient, 'appStorage' | 'leadRecord' | 'businessRecord' | 'user' | '$queryRaw'>;
 type StoragePrisma = StorageTransaction & Pick<PrismaClient, '$transaction' | 'user'>;
 
 const STORAGE_KEY_PATTERN = /^aaos_[a-zA-Z0-9_:-]+$/;
@@ -41,6 +42,13 @@ const MERGE_ONLY_BUSINESS_RECORD_KEYS = new Set<string>([
 ]);
 const ORDER_APPLICATION_APPROVED_STATUS = '已入库';
 
+class CustomerAssociationStorageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CustomerAssociationStorageError';
+  }
+}
+
 function parseDate(value: unknown): Date {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
   if (typeof value === 'string' || typeof value === 'number') {
@@ -63,6 +71,72 @@ function compactIdentifier(value: string, maxLength: number): string {
 
 function normalizeLead(value: unknown): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
+}
+
+function uniqueCustomerIds(values: unknown[]): string[] {
+  return Array.from(new Set(values
+    .map((value) => nullableText(value))
+    .filter((value): value is string => Boolean(value))));
+}
+
+function stableBlockingAssociationPaths(storageDomain: string): Set<string> {
+  return new Set(CUSTOMER_ASSOCIATION_DEFINITIONS
+    .filter((definition) => (
+      definition.storageDomain === storageDomain
+      && definition.blocksSoftDelete
+      && definition.mergeAdapterKind === 'stable_id'
+    ))
+    .map((definition) => definition.pathKey));
+}
+
+function stableCustomerIdsForBusinessItem(domain: string, item: Record<string, any>): string[] {
+  const paths = stableBlockingAssociationPaths(domain);
+  if (!paths.size) return [];
+  const data = normalizeLead(item.data);
+  const orderData = normalizeLead(item.orderData || data.orderData);
+  const ids: unknown[] = [];
+  if (paths.has('customerId')) ids.push(item.customerId);
+  // Storage writes receive business payloads, while the registry scans persisted
+  // JSON. Accept both shapes for registered `data.*` paths only.
+  if (paths.has('data.customerId')) ids.push(item.customerId, data.customerId);
+  if (paths.has('data.orderData.customerId')) ids.push(orderData.customerId, normalizeLead(data.orderData).customerId);
+  const subjectType = nullableText(item.subjectType) || nullableText(data.subjectType);
+  if (paths.has('data.subjectId|data.subjectType=customer') && subjectType === 'customer') {
+    ids.push(item.subjectId, data.subjectId);
+  }
+  return uniqueCustomerIds(ids);
+}
+
+function stableCustomerIdsForRows(domain: string, value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return uniqueCustomerIds(value.flatMap((entry) => stableCustomerIdsForBusinessItem(domain, normalizeLead(entry))));
+}
+
+function stableCustomerIdsForFinance(value: unknown): string[] {
+  const finance = normalizeLead(value);
+  const paths = stableBlockingAssociationPaths(STORAGE_KEYS.FINANCE);
+  return uniqueCustomerIds(['incomes', 'expenses', 'transactions'].flatMap((collection) => {
+    if (!paths.has(`value.${collection}[].customerId`)) return [];
+    const rows = Array.isArray(finance[collection]) ? finance[collection] : [];
+    return rows.map((row) => normalizeLead(row).customerId);
+  }));
+}
+
+async function lockAndValidateCustomerAssociations(
+  db: StorageTransaction,
+  customerIds: string[],
+): Promise<void> {
+  if (!customerIds.length) return;
+  await lockCustomerAssociationScope(db, customerIds);
+  for (const customerId of customerIds) {
+    const row = await db.businessRecord.findUnique({
+      where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: customerId } },
+    });
+    const customer = normalizeLead(row?.data);
+    if (!row || nullableText(customer.id) !== customerId || customer.deletedAt || customer.isDeleted === true) {
+      throw new CustomerAssociationStorageError('关联客户不存在或已删除，不能写入客户关联业务');
+    }
+  }
 }
 
 function normalizeCustomerPhone(value: unknown): string {
@@ -161,6 +235,15 @@ function businessRecordCreate(domain: string, recordId: string, item: Record<str
 }
 
 export function createStorageService(prisma: StoragePrisma) {
+  const runStorageTransaction = async (callback: (tx: StorageTransaction) => Promise<any>) => {
+    try {
+      return await prisma.$transaction((tx) => callback(tx as StorageTransaction));
+    } catch (error) {
+      if (error instanceof CustomerAssociationStorageError) return failure(error.message, 409);
+      throw error;
+    }
+  };
+
   const listLeads = async () => {
     const rows = await prisma.leadRecord.findMany({ orderBy: { createdAt: 'desc' } });
     return rows
@@ -175,6 +258,7 @@ export function createStorageService(prisma: StoragePrisma) {
 
   const setLeads = async (db: StorageTransaction, value: unknown) => {
     if (!Array.isArray(value)) return failure('aaos_leads must be an array', 400);
+    await lockAndValidateCustomerAssociations(db, stableCustomerIdsForRows('lead_records', value));
 
     for (const item of value) {
       const lead = normalizeLead(item);
@@ -238,6 +322,7 @@ export function createStorageService(prisma: StoragePrisma) {
 
   const setOrderApplications = async (db: StorageTransaction, value: unknown) => {
     if (!Array.isArray(value)) return failure(`${STORAGE_KEYS.ORDER_APPLICATIONS} must be an array`, 400);
+    await lockAndValidateCustomerAssociations(db, stableCustomerIdsForRows(STORAGE_KEYS.ORDER_APPLICATIONS, value));
 
     const applications = value.map((entry, index) => {
       const item = normalizeLead(entry);
@@ -306,6 +391,7 @@ export function createStorageService(prisma: StoragePrisma) {
   const setBusinessRecords = async (db: StorageTransaction, domain: string, value: unknown) => {
     if (!Array.isArray(value)) return failure(`${domain} must be an array`, 400);
     if (domain === STORAGE_KEYS.ORDER_APPLICATIONS) return setOrderApplications(db, value);
+    await lockAndValidateCustomerAssociations(db, stableCustomerIdsForRows(domain, value));
     const recordIds: string[] = [];
 
     for (let index = 0; index < value.length; index += 1) {
@@ -453,8 +539,20 @@ export function createStorageService(prisma: StoragePrisma) {
 
     async set(key: string, value: unknown) {
       if (!STORAGE_KEY_PATTERN.test(key)) return failure('invalid storage key', 400);
-      if (key === STORAGE_KEYS.LEADS) return prisma.$transaction((tx) => setLeads(tx, value));
-      if (BUSINESS_RECORD_KEYS.has(key)) return prisma.$transaction((tx) => setBusinessRecords(tx, key, value));
+      if (RAW_STORAGE_PROTECTED_KEYS.has(key)) return failure('客户资产禁止通过原始存储写入', 403);
+      if (key === STORAGE_KEYS.LEADS) return runStorageTransaction((tx) => setLeads(tx, value));
+      if (BUSINESS_RECORD_KEYS.has(key)) return runStorageTransaction((tx) => setBusinessRecords(tx, key, value));
+      if (key === STORAGE_KEYS.FINANCE) {
+        return runStorageTransaction(async (tx) => {
+          await lockAndValidateCustomerAssociations(tx, stableCustomerIdsForFinance(value));
+          const row = await tx.appStorage.upsert({
+            where: { key },
+            update: { value: value as Prisma.InputJsonValue },
+            create: { key, value: value as Prisma.InputJsonValue },
+          });
+          return success(row.value);
+        });
+      }
       const row = await prisma.appStorage.upsert({
         where: { key },
         update: { value: value as Prisma.InputJsonValue },

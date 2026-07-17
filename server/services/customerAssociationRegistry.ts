@@ -369,7 +369,7 @@ export interface CustomerAssociationAuditSummary {
 
 type AuditCustomer = { id: string; names: string[] };
 type AuditCandidate = {
-  storageModel: 'business_record' | 'lead_record' | 'app_storage';
+  storageModel: 'business_record' | 'lead_record' | 'customer_todo' | 'app_storage';
   storageDomain: string;
   pathKey: string;
   recordId: string;
@@ -440,7 +440,7 @@ export async function auditHistoricalCustomerAssociationIds(
   const [businessRows, leadRows, todoRows, financeRow] = await Promise.all([
     prisma.businessRecord?.findMany?.({ select: { id: true, domain: true, recordId: true, customerId: true, data: true, updatedAt: true } }) ?? [],
     prisma.leadRecord?.findMany?.({ select: { id: true, data: true, updatedAt: true } }) ?? [],
-    prisma.customerTodo?.findMany?.({ select: { id: true, customerId: true, customerName: true } }) ?? [],
+    prisma.customerTodo?.findMany?.({ select: { id: true, customerId: true, customerName: true, updatedAt: true } }) ?? [],
     prisma.appStorage?.findUnique?.({ where: { key: STORAGE_KEYS.FINANCE } }) ?? null,
   ]);
   const customers: AuditCustomer[] = businessRows
@@ -519,6 +519,20 @@ export async function auditHistoricalCustomerAssociationIds(
     }, legacyName);
   }
 
+  const todoDefinition = CUSTOMER_ASSOCIATION_DEFINITIONS.find((item) => item.id === 'customer_todos:customerId')!;
+  for (const row of todoRows) {
+    if (String(row.customerId || '').trim()) continue;
+    const legacyName = firstLegacyName(row, todoDefinition);
+    if (!legacyName) continue;
+    addLegacyCandidate({
+      storageModel: 'customer_todo',
+      storageDomain: 'customer_todos',
+      pathKey: 'customerId',
+      recordId: String(row.id),
+      row,
+    }, legacyName);
+  }
+
   const finance = readObject(financeRow?.value);
   for (const collection of ['incomes', 'expenses', 'transactions'] as const) {
     const items = Array.isArray(finance[collection]) ? finance[collection] : [];
@@ -559,8 +573,24 @@ export async function auditHistoricalCustomerAssociationIds(
   if (!options.apply || candidates.length === 0) return summary;
 
   await prisma.$transaction(async (tx: any) => {
+    const candidateCustomerIds = Array.from(new Set(candidates.map((candidate) => candidate.customerId))).sort();
+    // A repair is an association writer just like an order or a todo. Serialize
+    // it with delete/merge first, then re-read the target identities inside the
+    // same transaction before creating any stable-ID link.
+    await lockCustomerAssociationScope(tx, candidateCustomerIds);
+    const liveCustomerIds = new Set((await tx.businessRecord.findMany({
+      where: { domain: STORAGE_KEYS.CUSTOMERS },
+    }))
+      .map((row: any) => readObject(row.data))
+      .filter((customer: any) => customer.id && !customer.deletedAt)
+      .map((customer: any) => String(customer.id)));
+    if (candidateCustomerIds.some((customerId) => !liveCustomerIds.has(customerId))) {
+      throw new Error('客户关联审计目标客户不存在或已删除，请重新预检');
+    }
+
     const businessChanges = new Map<string, { row: any; customerId: unknown; data: Record<string, any>; dataChanged: boolean; count: number }>();
     const leadChanges = new Map<string, { row: any; data: Record<string, any>; count: number }>();
+    const todoChanges = new Map<string, { row: any; customerId: string; count: number }>();
     const nextFinance = structuredClone(finance);
     let financeCount = 0;
     for (const candidate of [...candidates].sort((left, right) => (
@@ -591,6 +621,15 @@ export async function auditHistoricalCustomerAssociationIds(
         existing.data.customerId = candidate.customerId;
         existing.count += 1;
         leadChanges.set(candidate.row.id, existing);
+      } else if (candidate.storageModel === 'customer_todo') {
+        const existing = todoChanges.get(candidate.row.id) || {
+          row: candidate.row,
+          customerId: candidate.customerId,
+          count: 0,
+        };
+        existing.customerId = candidate.customerId;
+        existing.count += 1;
+        todoChanges.set(candidate.row.id, existing);
       } else if (candidate.collection !== undefined && candidate.itemIndex !== undefined) {
         nextFinance[candidate.collection][candidate.itemIndex].customerId = candidate.customerId;
         financeCount += 1;
@@ -612,6 +651,14 @@ export async function auditHistoricalCustomerAssociationIds(
       const result = await tx.leadRecord.updateMany({
         where: { id: change.row.id, updatedAt: change.row.updatedAt },
         data: { data: change.data },
+      });
+      if (result.count !== 1) throw new Error(`客户关联审计并发更新：${change.row.id}`);
+      summary.backfilled += change.count;
+    }
+    for (const change of [...todoChanges.values()].sort((a, b) => String(a.row.id).localeCompare(String(b.row.id)))) {
+      const result = await tx.customerTodo.updateMany({
+        where: { id: change.row.id, updatedAt: change.row.updatedAt },
+        data: { customerId: change.customerId },
       });
       if (result.count !== 1) throw new Error(`客户关联审计并发更新：${change.row.id}`);
       summary.backfilled += change.count;
