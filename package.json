@@ -19,7 +19,10 @@
     "db:seed": "prisma db seed",
     "delivery:repair": "tsx scripts/repair-deliveries.ts",
     "business-records:repair": "tsx scripts/repair-legacy-business-records.ts",
-    "customer-contacts:backfill": "tsx scripts/backfill-contact-identities.ts"
+    "customer-contacts:backfill": "tsx scripts/backfill-contact-identities.ts",
+    "customer:permission-audit": "tsx scripts/audit-customer-permission-migration.ts",
+    "customer:association-audit": "tsx scripts/audit-customer-associations.ts",
+    "customer:batch-verify": "tsx scripts/verify-customer-batch-foundation.ts"
   },
   "overrides": {
     "effect": "3.21.0"

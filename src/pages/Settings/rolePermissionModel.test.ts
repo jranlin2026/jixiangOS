@@ -78,11 +78,13 @@ const editorSavedPermissions = buildRoleEditorPermissions(
 assert.equal(editorSavedPermissions.some((permission) => permission.module === PERMISSION_KEYS.CUSTOMERS), false);
 assert.deepEqual(
   editorSavedPermissions.find((permission) => permission.module === PERMISSION_KEYS.CUSTOMER_LIST)?.actions,
-  ['read'],
+  undefined,
+  '历史 admin 父权限不得在角色编辑器打开保存时扩张成客户列表读取权',
 );
 assert.deepEqual(
   editorSavedPermissions.find((permission) => permission.module === PERMISSION_KEYS.CUSTOMER_DETAIL)?.actions,
-  ['read'],
+  undefined,
+  '历史 admin 父权限不得在角色编辑器打开保存时扩张成客户详情读取权',
 );
 
 const toggledEditorPermissions = buildRoleEditorPermissions([

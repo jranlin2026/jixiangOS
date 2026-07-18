@@ -897,9 +897,14 @@ export function sanitizeRolePermissions(permissions: Permission[] = []): Permiss
 
   permissions.forEach((permission) => {
     if (normalizePermissionKey(permission.module) === normalizePermissionKey(PERMISSION_KEYS.CUSTOMERS)) {
-      [PERMISSION_KEYS.CUSTOMERS, PERMISSION_KEYS.CUSTOMER_LIST, PERMISSION_KEYS.CUSTOMER_DETAIL].forEach((module) => {
+      const modules = isReadOnlyPermissionActions(permission.actions || [])
+        ? [PERMISSION_KEYS.CUSTOMERS, PERMISSION_KEYS.CUSTOMER_LIST, PERMISSION_KEYS.CUSTOMER_DETAIL]
+        : [PERMISSION_KEYS.CUSTOMERS];
+      modules.forEach((module) => {
         const actions = merged.get(module) || new Set<string>();
-        actions.add('read');
+        (module === PERMISSION_KEYS.CUSTOMERS && modules.length === 1
+          ? (permission.actions || [])
+          : ['read']).forEach((action) => actions.add(action));
         merged.set(module, actions);
       });
       return;

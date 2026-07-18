@@ -205,18 +205,19 @@ for (const storedAction of ['read', 'write', 'delete', 'admin']) {
   ]));
   assert.deepEqual(
     loadedRole.permissions.find((permission) => permission.module === PERMISSION_KEYS.CUSTOMERS)?.actions,
-    ['read'],
-    `真实角色加载必须把客户父权限 ${storedAction} 保留为只读迁移标记`,
+    [storedAction],
+    `真实角色加载必须保留客户父权限 ${storedAction} 的原始动作，避免把非 read 历史权限扩张成读取权`,
   );
   assert.deepEqual(
     loadedRole.permissions.find((permission) => permission.module === PERMISSION_KEYS.CUSTOMER_LIST)?.actions,
-    ['read'],
+    storedAction === 'read' ? ['read'] : undefined,
   );
   assert.deepEqual(
     loadedRole.permissions.find((permission) => permission.module === PERMISSION_KEYS.CUSTOMER_DETAIL)?.actions,
-    ['read'],
+    storedAction === 'read' ? ['read'] : undefined,
   );
-  assert.equal(roleHasPermission(loadedRole, PERMISSION_KEYS.CUSTOMERS, 'write'), false);
+  assert.equal(roleHasPermission(loadedRole, PERMISSION_KEYS.CUSTOMER_LIST, 'read'), storedAction === 'read');
+  assert.equal(roleHasPermission(loadedRole, PERMISSION_KEYS.CUSTOMER_DETAIL, 'read'), storedAction === 'read');
   for (const leaf of highRiskCustomerLeaves) {
     assert.equal(roleHasPermission(loadedRole, leaf), false, `加载后的迁移标记不得授权高风险叶子 ${leaf}`);
   }
