@@ -32,7 +32,7 @@ import type { CustomerBatchSelectionState } from '../../../shared/utils/customer
 
 export const CUSTOMER_BATCH_ACTION_LABELS: Record<CustomerBatchOperation, string> = {
   transfer: '转让客户',
-  release_to_pool: '放弃客户',
+  release_to_pool: '释放到公海',
   set_progress: '设置客户进展',
   update_tags: '设置客户标签',
   add_todo: '添加客户待办',

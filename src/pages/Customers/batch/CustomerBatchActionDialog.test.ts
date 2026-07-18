@@ -1,9 +1,16 @@
 import assert from 'node:assert/strict';
 import {
+  CUSTOMER_BATCH_ACTION_LABELS,
   canSubmitBatchDialog,
   getBatchDialogPresentation,
   initialCustomerBatchDialogState,
 } from './CustomerBatchActionDialog';
+
+assert.equal(
+  CUSTOMER_BATCH_ACTION_LABELS.release_to_pool,
+  '释放到公海',
+  '批量释放必须与单客户操作使用同一业务名称',
+);
 
 const precheck = {
   confirmationToken: 'opaque-token',
