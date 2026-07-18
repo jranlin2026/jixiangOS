@@ -41,8 +41,9 @@ for (const highRiskKey of [
     assert.equal(legacyGrant.has(highRiskKey), false);
   }
 }
-assert.equal(normalizeRoleDataScopes({ code: 'test', dataScopes: { customers: 'department' } }).customers, 'department_and_descendants');
-assert.equal(normalizeRoleDataScopes({ code: 'test', dataScopes: { customers: 'department_only' } }).customers, 'department_only');
+assert.equal(normalizeRoleDataScopes({ code: 'test', dataScopes: { customers: 'department' } }).customers, 'department');
+assert.equal(normalizeRoleDataScopes({ code: 'test', dataScopes: { customers: 'department_only' } }).customers, 'department');
+assert.equal(normalizeRoleDataScopes({ code: 'test', dataScopes: { customers: 'department_and_descendants' } }).customers, 'department');
 assert.equal(normalizeRoleDataScopes({ code: 'test', dataScopes: { orders: 'department' } }).orders, 'department');
 assert.equal(normalizeRoleDataScopes({ code: 'test', dataScopes: { orders: 'department' } }).deliveries, 'department');
 assert.equal(normalizeRoleDataScopes({ code: 'finance_specialist' }).orders, 'all');
@@ -74,7 +75,7 @@ assert.deepEqual(
   }),
   {
     leads: 'all',
-    customers: 'department_only',
+    customers: 'department',
     orders: 'department',
     deliveries: 'all',
     orderApplications: 'department',

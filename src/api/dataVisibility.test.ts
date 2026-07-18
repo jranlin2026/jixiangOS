@@ -157,8 +157,8 @@ const customerDepartmentOnlyScope = buildDataVisibilityScopeForUser(
   departments,
   'customers',
 );
-assert.deepEqual(customerDepartmentOnlyScope.visibleUserIds, ['user-sales-a', 'user-sales-b', 'user-manager']);
-assert.equal(customerDepartmentOnlyScope.visibleUserIds.includes('user-sales-child'), false);
+assert.deepEqual(customerDepartmentOnlyScope.visibleUserIds, ['user-sales-a', 'user-sales-b', 'user-sales-child', 'user-manager']);
+assert.equal(customerDepartmentOnlyScope.visibleUserIds.includes('user-sales-child'), true);
 
 const customerDepartmentAndDescendantsScope = buildDataVisibilityScopeForUser(
   { ...managerUser, roleId: 'role-customer-department-and-descendants' },

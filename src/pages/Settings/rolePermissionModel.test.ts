@@ -1,15 +1,20 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { buildRoleEditorPermissions, normalizeRoleEditorDataScopes } from './rolePermissionModel';
 import { PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { mergeRoleWithDefaultAccess } from '../../shared/utils/organizationConfig';
 import type { Role } from '../../types/role';
+
+const rolePermissionSource = readFileSync(new URL('./RolePermission.tsx', import.meta.url), 'utf8');
+assert.doesNotMatch(rolePermissionSource, /仅本部门|本部门及所有下级部门/);
+assert.match(rolePermissionSource, /CUSTOMER_SCOPE_OPTIONS[\s\S]*value: 'self'[\s\S]*value: 'department'[\s\S]*value: 'all'/);
 
 const sparseFinanceScopes = normalizeRoleEditorDataScopes('finance_specialist', {
   customers: 'department_only',
 });
 assert.deepEqual(sparseFinanceScopes, {
   leads: 'self',
-  customers: 'department_only',
+  customers: 'department',
   orders: 'all',
   deliveries: 'all',
   orderApplications: 'all',
@@ -29,7 +34,7 @@ const sparseSalesManagerScopes = normalizeRoleEditorDataScopes('sales_manager', 
 });
 assert.deepEqual(sparseSalesManagerScopes, {
   leads: 'department',
-  customers: 'department_and_descendants',
+  customers: 'department',
   orders: 'department',
   deliveries: 'department',
   orderApplications: 'department',

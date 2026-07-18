@@ -500,8 +500,8 @@ assert.equal(
 );
 assert.equal(
   customerHarness.role('role-legacy-reader').dataScopes.customers,
-  'department_and_descendants',
-  '旧 department 客户范围必须升级为部门及下级部门',
+  'department',
+  '旧客户部门范围必须统一为本部门树语义',
 );
 assert.deepEqual(
   customerHarness.role('role-legacy-assigner').permissions

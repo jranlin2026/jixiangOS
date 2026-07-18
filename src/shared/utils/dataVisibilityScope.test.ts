@@ -32,7 +32,8 @@ function scope(domain: DataScopeDomain, value: unknown) {
 }
 
 assert.deepEqual(scope('customers', 'self').visibleUserIds, ['actor']);
-assert.deepEqual(new Set(scope('customers', 'department_only').visibleUserIds), new Set(['actor', 'peer']));
+assert.deepEqual(new Set(scope('customers', 'department').visibleUserIds), new Set(['actor', 'peer', 'child']));
+assert.deepEqual(new Set(scope('customers', 'department_only').visibleUserIds), new Set(['actor', 'peer', 'child']));
 assert.deepEqual(new Set(scope('customers', 'department_and_descendants').visibleUserIds), new Set(['actor', 'peer', 'child']));
 assert.deepEqual(new Set(scope('customers', 'all').visibleUserIds), new Set(['actor', 'peer', 'child', 'other']));
 
@@ -56,8 +57,8 @@ Object.defineProperty(globalThis, 'localStorage', {
   configurable: true,
 });
 assert.deepEqual(
-  new Set(scope('customers', 'department_only').visibleUserIds),
-  new Set(['actor', 'peer']),
+  new Set(scope('customers', 'department').visibleUserIds),
+  new Set(['actor', 'peer', 'child']),
   '传入的目录数据必须是唯一 scope 来源，不得再水合 localStorage',
 );
 

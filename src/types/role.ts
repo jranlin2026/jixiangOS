@@ -8,9 +8,9 @@ export interface Permission {
 
 export type DataScopeLevel = 'self' | 'department' | 'all';
 
-export type CustomerDataScopeLevel = 'self' | 'department_only' | 'department_and_descendants' | 'all';
+export type CustomerDataScopeLevel = 'self' | 'department' | 'all';
 
-export type LegacyCustomerDataScopeInput = CustomerDataScopeLevel | 'department';
+export type LegacyCustomerDataScopeInput = CustomerDataScopeLevel | 'department_only' | 'department_and_descendants';
 
 export type DataScopeDomain =
   | 'leads'
@@ -33,7 +33,7 @@ export type NormalizedRoleDataScopes = Required<Record<NonCustomerDataScopeDomai
 };
 
 export function normalizeCustomerDataScope(value: LegacyCustomerDataScopeInput): CustomerDataScopeLevel {
-  return value === 'department' ? 'department_and_descendants' : value;
+  return value === 'department_only' || value === 'department_and_descendants' ? 'department' : value;
 }
 
 /** 角色 */

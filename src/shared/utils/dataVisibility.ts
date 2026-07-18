@@ -105,13 +105,7 @@ function visibleDepartmentIdsForScope(
   currentDepartmentId: string,
   departments: Department[],
 ): Set<string> {
-  if (domain === 'customers' && level === 'department_only') {
-    return new Set([currentDepartmentId]);
-  }
-  if (
-    (domain === 'customers' && level === 'department_and_descendants')
-    || (domain !== 'customers' && level === 'department')
-  ) {
+  if (level === 'department') {
     return new Set([
       currentDepartmentId,
       ...getDepartmentDescendantIds(departments, currentDepartmentId),

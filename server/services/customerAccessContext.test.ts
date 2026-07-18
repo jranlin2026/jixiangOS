@@ -50,8 +50,8 @@ Object.defineProperty(globalThis, 'localStorage', {
 });
 
 const departmentOnly = await loadCustomerAccessContext(directory('department_only') as any, actor);
-assert.deepEqual(departmentOnly.manageableOwnerIds, new Set(['user-actor', 'user-peer']));
-assert.equal(departmentOnly.manageableOwnerIds.has('user-child'), false, '服务端 scope 不得受 localStorage 注入影响');
+assert.deepEqual(departmentOnly.manageableOwnerIds, new Set(['user-actor', 'user-peer', 'user-child']));
+assert.equal(departmentOnly.manageableOwnerIds.has('user-child'), true, '旧 department_only 必须兼容为新的本部门树范围');
 assert.equal(departmentOnly.manageableOwnerIds.has('user-left'), false, '离职员工不得进入可管理集');
 assert.equal(departmentOnly.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE), true);
 assert.equal(departmentOnly.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_DELETE), true, '直接 delete 授权应生效');

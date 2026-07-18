@@ -109,13 +109,8 @@ const CUSTOMER_MUTATION_PERMISSION_ACTIONS = new Map<string, string>([
 
 function explicitCustomerScope(value: unknown): CustomerDataScopeLevel | null | undefined {
   if (value === undefined) return undefined;
-  if (value === 'department') return 'department_and_descendants';
-  if (
-    value === 'self'
-    || value === 'department_only'
-    || value === 'department_and_descendants'
-    || value === 'all'
-  ) return value;
+  if (value === 'department' || value === 'department_only' || value === 'department_and_descendants') return 'department';
+  if (value === 'self' || value === 'all') return value;
   return null;
 }
 
@@ -176,9 +171,7 @@ export function buildCustomerAccessContextFromDirectory(
     manageableUsers = [actor];
   } else if (scope === 'all') {
     manageableUsers = activeUsers;
-  } else if (actor.departmentId && scope === 'department_only') {
-    manageableUsers = activeUsers.filter((user) => user.departmentId === actor.departmentId);
-  } else if (actor.departmentId && scope === 'department_and_descendants') {
+  } else if (actor.departmentId && scope === 'department') {
     const departmentIds = new Set([
       actor.departmentId,
       ...getDepartmentDescendantIds(departments, actor.departmentId),

@@ -13,7 +13,7 @@ import {
   roleHasPermission,
 } from '../src/shared/utils/permissions';
 
-const validScopes = new Set(['self', 'department_only', 'department_and_descendants', 'all']);
+const validScopes = new Set(['self', 'department', 'department_only', 'department_and_descendants', 'all']);
 const readOnlyCustomerLeaves = new Set<string>([
   PERMISSION_KEYS.CUSTOMER_LIST,
   PERMISSION_KEYS.CUSTOMER_DETAIL,
@@ -38,6 +38,7 @@ export async function auditCustomerPermissionMigration(client: typeof prisma) {
     : {};
   const unexpectedPrivilegeChanges: Array<{ roleId: string; reason: string }> = [];
   const unexpectedScopeChanges: Array<{ roleId: string; scope: string }> = [];
+  const legacyCustomerScopeRoleIds: string[] = [];
 
   if (Number(marker.version) !== CUSTOMER_PERMISSION_SCOPE_BASELINE_VERSION) {
     unexpectedPrivilegeChanges.push({ roleId: '*', reason: 'CUSTOMER_PERMISSION_BASELINE_MARKER_MISSING' });
@@ -49,6 +50,9 @@ export async function auditCustomerPermissionMigration(client: typeof prisma) {
   const roleReports = roles.map((role) => {
     const scope = String(role.dataScopes?.customers || 'self');
     if (!validScopes.has(scope)) unexpectedScopeChanges.push({ roleId: role.id, scope });
+    if (scope === 'department_only' || scope === 'department_and_descendants') {
+      legacyCustomerScopeRoleIds.push(role.id);
+    }
     const effectiveLeafPermissions = CUSTOMER_LEAF_PERMISSION_KEYS.filter((permissionKey) => {
       const action = permissionKey === PERMISSION_KEYS.CUSTOMER_DELETE ? 'delete'
         : readOnlyCustomerLeaves.has(permissionKey) ? 'read'
@@ -68,6 +72,8 @@ export async function auditCustomerPermissionMigration(client: typeof prisma) {
     manifestChecksumMatches: Boolean(manifestRow && String(marker.manifestChecksum || '') === String(manifest.checksum || '')),
     roleCount: roles.length,
     roles: roleReports,
+    legacyCustomerScopeRoleIds,
+    legacyScopeCompatibility: 'legacy department scopes execute as department trees and converge on next role save',
     unexpectedPrivilegeChanges,
     unexpectedScopeChanges,
     passed: unexpectedPrivilegeChanges.length === 0 && unexpectedScopeChanges.length === 0,

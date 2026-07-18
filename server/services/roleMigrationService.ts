@@ -445,8 +445,12 @@ function migrateLegacyCustomerRole(role: Role, deleteRoleIds: ReadonlySet<string
   }
 
   const currentScopes = role.dataScopes;
-  const dataScopes = currentScopes?.customers === 'department'
-    ? { ...currentScopes, customers: 'department_and_descendants' as const }
+  // Fresh migrations persist the canonical three-value model. Databases that
+  // already completed the v1 migration keep their signed baseline intact;
+  // runtime normalization gives both legacy values the same department-tree
+  // semantics, and the role editor writes `department` on the next save.
+  const dataScopes = currentScopes?.customers === 'department_only' || currentScopes?.customers === 'department_and_descendants'
+    ? { ...currentScopes, customers: 'department' as const }
     : currentScopes;
   return { ...role, permissions, dataScopes };
 }

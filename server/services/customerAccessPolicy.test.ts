@@ -104,23 +104,30 @@ function scopedRole(customers: Role['dataScopes'] extends infer S ? S extends ob
   };
 }
 
-const departmentOnly = buildDataVisibilityScopeForUser(
+const parentDepartment = buildDataVisibilityScopeForUser(
   directoryUsers[0] as any,
   directoryUsers as any,
-  [scopedRole('department_only')],
+  [scopedRole('department')],
   departments as any,
   'customers',
 );
-assert.deepEqual(new Set(departmentOnly.visibleUserIds), new Set(['user-actor', 'user-peer']));
-assert.equal(departmentOnly.visibleUserIds.includes('user-child'), false, 'department_only 不包子部门');
+assert.deepEqual(
+  new Set(parentDepartment.visibleUserIds),
+  new Set(['user-actor', 'user-peer', 'user-child']),
+  '挂在上级部门的员工选择本部门时必须包含所有下级部门',
+);
 
-const departmentAndDescendants = buildDataVisibilityScopeForUser(
-  directoryUsers[0] as any,
+const leafDepartment = buildDataVisibilityScopeForUser(
+  directoryUsers[2] as any,
   directoryUsers as any,
-  [scopedRole('department_and_descendants')],
+  [scopedRole('department')],
   departments as any,
   'customers',
 );
-assert.equal(departmentAndDescendants.visibleUserIds.includes('user-child'), true, 'department_and_descendants 必须包子部门');
+assert.deepEqual(
+  leafDepartment.visibleUserIds,
+  ['user-child'],
+  '挂在叶子部门的员工选择本部门时只能看到该叶子部门',
+);
 
 console.log('customer access policy tests passed');

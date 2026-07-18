@@ -287,6 +287,10 @@ function isDataScopeLevel(value: unknown): value is DataScopeLevel {
   return DATA_SCOPE_LEVELS.includes(value as DataScopeLevel);
 }
 
+function customerScopeAsStandardScope(value: LegacyCustomerDataScopeInput): DataScopeLevel {
+  return normalizeCustomerDataScope(value);
+}
+
 function buildDataScopes(
   leads: DataScopeLevel,
   customers: LegacyCustomerDataScopeInput,
@@ -294,11 +298,7 @@ function buildDataScopes(
   orderApplications: DataScopeLevel,
   recoveryOrders: DataScopeLevel = orders,
   recoveryOrderApplications: DataScopeLevel = orderApplications,
-  assets: DataScopeLevel = customers === 'department'
-    ? 'department'
-    : customers === 'self' || customers === 'all'
-      ? customers
-      : 'self',
+  assets: DataScopeLevel = customerScopeAsStandardScope(customers),
   deliveries: DataScopeLevel = orders,
 ): NormalizedRoleDataScopes {
   return {

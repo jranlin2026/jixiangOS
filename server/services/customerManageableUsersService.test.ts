@@ -28,11 +28,12 @@ const userRow = (id: string, departmentId: string) => ({
   updatedAt: now,
 });
 
-let customerScope: 'self' | 'department_only' = 'self';
+let customerScope: 'self' | 'department' = 'self';
 const directory = {
   user: { findMany: async () => [
     userRow('user-actor', 'dept-sales'),
     userRow('user-peer', 'dept-sales'),
+    userRow('user-child', 'dept-sales-one'),
     userRow('user-other-dept', 'dept-other'),
     { ...userRow('user-left', 'dept-sales'), employmentStatus: 'left' },
   ] },
@@ -49,10 +50,16 @@ const directory = {
     createdAt: now,
     updatedAt: now,
   }] },
-  department: { findMany: async () => [{
-    id: 'dept-sales', name: '销售部', code: 'SALES', description: null, parentId: null,
-    managerId: null, memberCount: 2, sortOrder: 1, isActive: true, createdAt: now, updatedAt: now,
-  }] },
+  department: { findMany: async () => [
+    {
+      id: 'dept-sales', name: '销售部', code: 'SALES', description: null, parentId: null,
+      managerId: null, memberCount: 2, sortOrder: 1, isActive: true, createdAt: now, updatedAt: now,
+    },
+    {
+      id: 'dept-sales-one', name: '销售一部', code: 'SALES_ONE', description: null, parentId: 'dept-sales',
+      managerId: null, memberCount: 1, sortOrder: 2, isActive: true, createdAt: now, updatedAt: now,
+    },
+  ] },
 };
 
 const actor: AuthenticatedUser = {
@@ -77,12 +84,12 @@ assert.deepEqual(
   '客户可管理目录不得泄露 email、phone、role 或鉴权字段',
 );
 
-customerScope = 'department_only';
+customerScope = 'department';
 const departmentResult = await createCustomerManageableUsersService(directory as any).list(actor);
 assert.deepEqual(
   departmentResult.data?.map((user) => user.id),
-  ['user-actor', 'user-peer'],
-  '实时 department_only 只返回同部门在职成员，不受请求旧 departmentId 影响',
+  ['user-actor', 'user-peer', 'user-child'],
+  '上级部门员工的本部门范围必须包含下级部门在职成员，且不受请求旧 departmentId 影响',
 );
 
 console.log('customer manageable users service tests passed');

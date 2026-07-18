@@ -249,10 +249,9 @@ const dataScopeOptions: Array<{ value: DataScopeLevel; label: string }> = [
 ];
 
 const CUSTOMER_SCOPE_OPTIONS = [
-  { value: 'self', label: '仅本人' },
-  { value: 'department_only', label: '仅本部门' },
-  { value: 'department_and_descendants', label: '本部门及所有下级部门' },
-  { value: 'all', label: '全部客户' },
+  { value: 'self', label: '本人' },
+  { value: 'department', label: '本部门' },
+  { value: 'all', label: '全部' },
 ] as const;
 
 const dataScopeRows: Array<{ domain: DataScopeDomain; label: string; description: string; permissionKeys: string[] }> = [
