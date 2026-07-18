@@ -80,10 +80,11 @@ async function access(request: AuthenticatedRequest, loader: CustomerMergeRouter
 }
 
 function sendError(response: any, error: unknown) {
-  const known = error instanceof BatchPrecheckValidationError
+  const explicitStatus = Number((error as { statusCode?: unknown } | null)?.statusCode);
+  const known = [400, 403, 404, 409, 422].includes(explicitStatus) ? explicitStatus : error instanceof BatchPrecheckValidationError
     ? 400 : error instanceof BatchPrecheckAuthorizationError
       ? 403 : error instanceof BatchPrecheckConflictError
-        ? 409 : /MERGE_REQUIRES|字段|标签|原因/.test(String((error as Error)?.message || '')) ? 422 : 500;
+        ? 409 : /REQUIRES_TWO_TO_TEN|字段|标签|原因/.test(String((error as Error)?.message || '')) ? 422 : 500;
   const message = known === 500 ? '客户合并服务暂时不可用' : String((error as Error)?.message || '客户合并失败');
   response.status(known).json(failure(message, known));
 }

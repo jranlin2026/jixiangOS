@@ -201,6 +201,11 @@ function mergedCustomerValue(
     const source = chosen ? customers.find((customer) => customer.id === chosen) : undefined;
     const fallback = customers.find((customer) => fieldValue(customer, field));
     (result as any)[field] = source ? (source as any)[field] : (result as any)[field] || (fallback as any)?.[field];
+    if (field === 'ownerId' && source) {
+      result.owner = source.owner;
+      result.ownerIdentityStatus = source.ownerIdentityStatus;
+      result.ownerSince = source.ownerSince;
+    }
   }
   result.manualTagIds = [...input.tagDecision.selectedTagIds];
   result.activityRecords = uniqueSubrecords(customers.map((customer) => customer.activityRecords || [])) as Customer['activityRecords'];
@@ -540,6 +545,7 @@ export function createCustomerMergeService(prisma: any, options: MergeServiceOpt
           const mainSnapshot = state.snapshots.find((item) => item.recordId === input.mainCustomerId)!;
           const customers = state.snapshots.map((item) => item.customer);
           const nextMain = mergedCustomerValue(mainSnapshot.customer, customers, state.input, timestampIso);
+          nextMain.mergeLedgerId = ledgerId;
           const keyring = options.snapshotKeyring || createCustomerMergeSnapshotKeyringFromEnv(process.env);
           const sealed = sealMergeSnapshot({
             customers: state.snapshots.map((snapshot) => ({
@@ -744,6 +750,15 @@ export function createCustomerMergeService(prisma: any, options: MergeServiceOpt
       const loadUndoResult = async (tx: any, id: string) => {
         const row = await tx.customerMergeLedger.findUnique({ where: { id } });
         if (!row || !row.undoIdempotencyFingerprint) return null;
+        const participantIds = [row.mainCustomerId, ...stringArray(row.secondaryCustomerIds)];
+        const participantRows: CustomerMergeRow[] = await tx.businessRecord.findMany({
+          where: { domain: STORAGE_KEYS.CUSTOMERS, recordId: { in: participantIds } },
+          select: { id: true, domain: true, recordId: true, data: true, recordRevision: true, updatedAt: true },
+        });
+        if (participantRows.length !== participantIds.length || participantRows.some((participant) => {
+          const customer = parseCustomer(participant);
+          return !customer || !canManageLedgerParticipant(context, customer, row);
+        })) throw new BatchPrecheckAuthorizationError();
         return { type: 'customer_merge_ledger_undo' as const, id: row.id, idempotencyFingerprint: row.undoIdempotencyFingerprint, value: ledgerView(row) };
       };
       return consumeBatchPrecheckToken({
@@ -785,7 +800,7 @@ export function createCustomerMergeService(prisma: any, options: MergeServiceOpt
             }
             snapshots.push(snapshot);
           }
-          await lockCustomerAssociationScope(tx, selectedIds);
+          await lockCustomerAssociationScope(tx, selectedIds, { allowMerged: true });
           const guard = object(ledger.guardManifest);
           const occurrences = (await discoverCustomerAssociationDomains(tx, [ledger.mainCustomerId]))
             .map((item) => `${item.storageDomain}:${item.pathKey}:${item.recordId}`).sort();

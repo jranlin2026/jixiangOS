@@ -344,6 +344,7 @@ export async function findBlockingCustomerAssociations(
 export async function lockCustomerAssociationScope(
   tx: CustomerAssociationReader,
   customerIdsInput: string[],
+  options: { allowMerged?: boolean } = {},
 ): Promise<void> {
   const customerIds = Array.from(new Set(customerIdsInput.map((id) => String(id).trim()).filter(Boolean))).sort();
   if (!customerIds.length) return;
@@ -358,6 +359,17 @@ export async function lockCustomerAssociationScope(
       create: { key, value: { kind: 'customer_association_lock', customerId } },
     });
     await tx.$queryRaw(Prisma.sql`SELECT \`key\` FROM app_storage WHERE \`key\` = ${key} FOR UPDATE`);
+  }
+  if (!options.allowMerged && tx.businessRecord?.findMany) {
+    const customerRows = await tx.businessRecord.findMany({
+      where: { domain: STORAGE_KEYS.CUSTOMERS, recordId: { in: customerIds } },
+      select: { recordId: true, mergedIntoId: true, data: true },
+    });
+    const merged = customerRows.find((row) => (
+      Boolean(row.mergedIntoId)
+      || Boolean(readObject(row.data).mergedIntoId)
+    ));
+    if (merged) throw new Error(`CUSTOMER_ALREADY_MERGED:${merged.recordId}`);
   }
   await tx.$queryRaw(Prisma.sql`
     SELECT id FROM business_records

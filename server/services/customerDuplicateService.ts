@@ -103,7 +103,7 @@ export async function createDuplicateCandidateGroup(
 
 function assertMergePermission(context: CustomerAccessContext): void {
   if (!context.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_MERGE)) {
-    throw new Error('无权合并客户');
+    throw Object.assign(new Error('无权合并客户'), { statusCode: 403 });
   }
 }
 

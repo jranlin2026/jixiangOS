@@ -8,6 +8,7 @@ import {
   discoverCustomerAssociationDomains,
   findBlockingCustomerAssociations,
   hasBlockingCustomerAssociationAuditWork,
+  lockCustomerAssociationScope,
 } from './customerAssociationRegistry';
 
 const customer = {
@@ -40,6 +41,12 @@ const businessRows = [
     data: { customerId: 'c-1', orderData: { customerId: 'c-1' }, subjectType: 'customer', subjectId: 'c-1' },
   },
 ];
+
+await assert.rejects(() => lockCustomerAssociationScope({
+  appStorage: { upsert: async () => ({}), findUnique: async () => null },
+  $queryRaw: async () => [],
+  businessRecord: { findMany: async () => [{ recordId: 'merged-customer', mergedIntoId: 'main-customer', data: { id: 'merged-customer', mergedIntoId: 'main-customer' } }] },
+} as any, ['merged-customer']), /CUSTOMER_ALREADY_MERGED/);
 
 const tx = {
   businessRecord: { findMany: async () => businessRows },

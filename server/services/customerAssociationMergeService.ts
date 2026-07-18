@@ -66,7 +66,10 @@ export async function migrateCustomerAssociations(
     const nextCustomerId = secondaryIds.has(String(row.customerId || '')) ? mainCustomerId : row.customerId;
     if (nextCustomerId === row.customerId && !rewritten.changed) continue;
     const after = { customerId: nextCustomerId ?? null, data: rewritten.value };
-    await tx.businessRecord.update({ where: { id: row.id }, data: after });
+    await tx.businessRecord.update({
+      where: { id: row.id },
+      data: { ...after, recordRevision: { increment: 1 } },
+    });
     entries.push({ domain: row.domain, recordId: row.recordId, beforeSnapshot: before, afterSnapshot: after, rowRevision: row.recordRevision, updatedAtValue: row.updatedAt });
   }
 
@@ -119,7 +122,10 @@ export async function restoreCustomerAssociations(tx: any, entries: CustomerAsso
     } else if (entry.domain === STORAGE_KEYS.FINANCE && entry.recordId === STORAGE_KEYS.FINANCE) {
       await tx.appStorage.update({ where: { key: STORAGE_KEYS.FINANCE }, data: entry.beforeSnapshot });
     } else {
-      await tx.businessRecord.update({ where: { domain_recordId: { domain: entry.domain, recordId: entry.recordId } }, data: entry.beforeSnapshot });
+      await tx.businessRecord.update({
+        where: { domain_recordId: { domain: entry.domain, recordId: entry.recordId } },
+        data: { ...entry.beforeSnapshot, ...(entry.rowRevision === null || entry.rowRevision === undefined ? {} : { recordRevision: { increment: 1 } }) },
+      });
     }
   }
 }
