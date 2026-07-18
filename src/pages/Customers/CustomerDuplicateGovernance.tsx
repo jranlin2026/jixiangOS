@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Divider,
-  FormControl, InputLabel, MenuItem, Paper, Select, Stack, Tab, Tabs,
+  Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, MenuItem, Paper, Select, Stack, Tab, Tabs,
   TextField, Typography,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -42,6 +42,7 @@ const CustomerDuplicateGovernance: React.FC = () => {
   const [precheckToken, setPrecheckToken] = useState('');
   const [notice, setNotice] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingUndo, setPendingUndo] = useState<{ ledger: CustomerMergeLedgerView; token: string } | null>(null);
 
   const refresh = useCallback(async () => {
     const [candidateResponse, historyResponse] = await Promise.all([
@@ -123,10 +124,19 @@ const CustomerDuplicateGovernance: React.FC = () => {
         setNotice({ type: 'error', text: checked.data?.conflicts?.map((item) => item.message).join('；') || checked.message || '撤销预检未通过' });
         return;
       }
-      if (!window.confirm('确认撤销本次客户合并？系统会恢复合并前的客户与关联关系。')) return;
-      const response = await customerMergeApi.undo(ledger.id, checked.data.precheckToken, `undo-${crypto.randomUUID()}`);
+      setPendingUndo({ ledger, token: checked.data.precheckToken });
+    } finally { setBusy(false); }
+  };
+
+  const confirmUndoMerge = async () => {
+    if (!pendingUndo) return;
+    setBusy(true);
+    try {
+      const response = await customerMergeApi.undo(pendingUndo.ledger.id, pendingUndo.token, `undo-${crypto.randomUUID()}`);
       if (response.code !== 0) { setNotice({ type: 'error', text: response.message || '撤销失败' }); return; }
-      setNotice({ type: 'success', text: '客户合并已撤销。' }); await refresh();
+      setPendingUndo(null);
+      setNotice({ type: 'success', text: '客户合并已撤销。' });
+      await refresh();
     } finally { setBusy(false); }
   };
 
@@ -165,6 +175,13 @@ const CustomerDuplicateGovernance: React.FC = () => {
 
       {tab === 'history' && <Stack spacing={2}>{history.map((ledger) => <Card key={ledger.id} variant="outlined"><CardContent><Stack direction="row" justifyContent="space-between" alignItems="flex-start"><Box><Stack direction="row" spacing={1} alignItems="center"><Typography fontWeight={800}>{ledger.mainCustomerId}</Typography><Chip size="small" color={ledger.status === 'merged' ? 'primary' : 'default'} label={ledger.status === 'merged' ? '已合并' : '已撤销'} /></Stack><Typography color="text.secondary" mt={1}>合并 {ledger.secondaryCustomerIds.length} 位次客户 · {new Date(ledger.mergedAt).toLocaleString()}</Typography><Typography mt={1}>原因：{ledger.reason}</Typography><Typography color="text.secondary">操作人：{ledger.actor.name} · 撤销截止：{new Date(ledger.undoDeadlineAt).toLocaleString()}</Typography></Box>{canUndo && ledger.status === 'merged' && <Button startIcon={<RestoreIcon />} onClick={() => undoMerge(ledger)}>撤销合并</Button>}</Stack></CardContent></Card>)}{!history.length && <Paper sx={{ p: 4, textAlign: 'center' }}><Typography color="text.secondary">暂无合并记录</Typography></Paper>}</Stack>}
       <Divider sx={{ mt: 3 }} />
+      <Dialog open={Boolean(pendingUndo)} onClose={() => !busy && setPendingUndo(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>确认撤销客户合并</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mt: 1 }}>系统会恢复本次合并前的客户资料、联系方式和业务关联。若合并后数据已经变化，服务端会拒绝撤销。</Alert>
+        </DialogContent>
+        <DialogActions><Button disabled={busy} onClick={() => setPendingUndo(null)}>取消</Button><Button variant="contained" color="warning" disabled={busy} onClick={confirmUndoMerge}>确认撤销</Button></DialogActions>
+      </Dialog>
     </Box>
   );
 };

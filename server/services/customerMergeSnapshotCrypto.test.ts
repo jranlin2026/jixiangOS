@@ -27,7 +27,9 @@ const rotatedKeyring = createCustomerMergeSnapshotKeyringFromEnv({
 assert.deepEqual(openMergeSnapshot(sealed.value, 1, rotatedKeyring), payload, '轮换后必须仍可读取旧版本快照');
 assert.equal(sealMergeSnapshot(payload, rotatedKeyring).keyVersion, 2, '新快照必须使用当前活动版本');
 
-const tampered = `${sealed.value.slice(0, -2)}AA`;
+const parts = sealed.value.split(':');
+parts[4] = `${parts[4][0] === 'A' ? 'B' : 'A'}${parts[4].slice(1)}`;
+const tampered = parts.join(':');
 assert.throws(() => openMergeSnapshot(tampered, 1, firstKeyring), /MERGE_SNAPSHOT_AUTHENTICATION_FAILED/);
 assert.throws(() => openMergeSnapshot(sealed.value, 2, rotatedKeyring), /MERGE_SNAPSHOT_AUTHENTICATION_FAILED/);
 assert.throws(() => openMergeSnapshot(sealed.value, 9, rotatedKeyring), /MERGE_SNAPSHOT_KEY_VERSION_UNKNOWN:9/);
