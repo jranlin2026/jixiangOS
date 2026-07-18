@@ -3,6 +3,7 @@ import type { ApiResponse } from './types';
 import type {
   CreateCustomerBatchJobRequest,
   CustomerBatchJobItemView,
+  CustomerBatchJobResultView,
   CustomerBatchJobSummary,
   CustomerBatchPrecheckRequest,
   CustomerBatchPrecheckResult,
@@ -53,6 +54,10 @@ export const customerBatchApi = {
 
   listItems(id: string): Promise<ApiResponse<CustomerBatchJobItemView[]>> {
     return backendRequest<CustomerBatchJobItemView[]>(`${ROOT}/${encodeURIComponent(id)}/items`);
+  },
+
+  getResult(id: string): Promise<ApiResponse<CustomerBatchJobResultView>> {
+    return backendRequest<CustomerBatchJobResultView>(`${ROOT}/${encodeURIComponent(id)}/result`);
   },
 
   cancel(id: string): Promise<ApiResponse<CustomerBatchJobSummary>> {

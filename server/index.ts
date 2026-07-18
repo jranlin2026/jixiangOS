@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -23,6 +24,7 @@ import { createAiChatClient, type AiChatMessage } from './services/aiChatClient'
 import { createCustomerListService } from './services/customerListService';
 import {
   createAuditedCustomerAtomicCommandService,
+  createCustomerAtomicCommandService,
   createCustomerCommandService,
 } from './services/customerCommandService';
 import { createPrismaCustomerAuditAppender } from './services/customerAuditService';
@@ -30,6 +32,14 @@ import { createContactIdentityCryptoFromEnv } from './services/contactIdentitySe
 import { createCustomerTodoService } from './services/customerTodoService';
 import { createCustomerManageableUsersService } from './services/customerManageableUsersService';
 import { createCustomerBatchService } from './services/customerBatchService';
+import {
+  createCustomerBatchWorker,
+  createPrismaCustomerBatchWorkerStore,
+} from './services/customerBatchWorker';
+import {
+  CustomerBatchJobHandlerRegistry,
+  createCustomerMutationBatchJobHandler,
+} from './services/customerBatchJobHandler';
 import { loadCustomerAccessContext } from './services/customerAccessPolicy';
 import {
   backfillCustomerContactIdentitiesResult,
@@ -120,12 +130,26 @@ const customerCommandService = createCustomerCommandService(prisma, { contactIde
 // Transfer/release/delete use the shared atomic command engine. Profile,
 // todo, claim, creation, and follow-up services retain their dedicated
 // request contracts, but each appends its audit event in the same transaction.
+const customerAtomicCommandEngine = createCustomerAtomicCommandService({
+  auditAppender: createPrismaCustomerAuditAppender(),
+});
 const customerAtomicCommandService = createAuditedCustomerAtomicCommandService(prisma, {
   auditAppender: createPrismaCustomerAuditAppender(),
 });
 const customerTodoService = createCustomerTodoService(prisma);
 const customerManageableUsersService = createCustomerManageableUsersService(prisma);
 const customerBatchService = createCustomerBatchService(prisma);
+const customerBatchWorker = createCustomerBatchWorker({
+  store: createPrismaCustomerBatchWorkerStore(prisma),
+  handlers: new CustomerBatchJobHandlerRegistry([
+    createCustomerMutationBatchJobHandler({ atomicService: customerAtomicCommandEngine }),
+  ]),
+  workerId: `${process.pid}-${randomUUID()}`,
+  onError: (error) => console.error(
+    'Customer batch worker failed:',
+    String((error as { code?: unknown } | null)?.code || 'WORKER_ERROR'),
+  ),
+});
 const customerTagService = createCustomerTagService(prisma);
 const customerTagMigrationService = createCustomerTagMigrationService(prisma as any);
 const leadListService = createLeadListService(prisma);
@@ -1441,9 +1465,20 @@ async function startServer() {
   console.log(
     `Customer permission/scope baseline v${customerPermissionMigration.version}: ${customerPermissionMigration.migratedRoleIds.length} roles migrated.`,
   );
-  app.listen(port, host, () => {
+  const server = app.listen(port, host, () => {
     console.log(`AI proxy listening on http://${host}:${port}`);
   });
+  customerBatchWorker.start();
+  let shuttingDown = false;
+  const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    await customerBatchWorker.stop();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await prisma.$disconnect();
+  };
+  process.once('SIGTERM', () => { void shutdown(); });
+  process.once('SIGINT', () => { void shutdown(); });
 }
 
 startServer().catch((error) => {

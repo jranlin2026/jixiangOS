@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
-import { createCustomerBatchService, lockServerAccessContext } from './customerBatchService';
+import {
+  createCustomerBatchService,
+  createPrismaJobStore,
+  lockServerAccessContext,
+  lockServerCustomerDirectory,
+} from './customerBatchService';
 import { sha256Json } from './customerBatchPrecheckService';
 
 const now = new Date('2026-07-18T00:00:00.000Z');
@@ -37,6 +42,39 @@ const access = (permissions: Set<string> = new Set([
   grantedPermissions: permissions,
 });
 
+// RED: queued cancellation must settle every unstarted item in the same transaction.
+{
+  const itemUpdates: any[] = [];
+  const jobUpdates: any[] = [];
+  const tx = {
+    customerBatchJobItem: {
+      updateMany: async (args: any) => { itemUpdates.push(args); return { count: 3 }; },
+    },
+    customerBatchJob: {
+      updateMany: async (args: any) => { jobUpdates.push(args); return { count: 1 }; },
+      findUnique: async () => ({
+        id: 'job-queued-cancel', status: 'cancelled', actorId: 'actor-a', handlerKey: 'customer_mutation',
+        operation: 'transfer', selectionMode: 'ids', selectedCustomerIds: ['c-1', 'c-2', 'c-3'],
+        inputHash: 'a'.repeat(64), idempotencyFingerprint: 'b'.repeat(64), idempotencyKey: 'cancel-items',
+        frozenCustomerCount: 3, totalCount: 3, successCount: 0, failedCount: 0, skippedCount: 0,
+        cancelledCount: 3, createdAt: now,
+      }),
+    },
+  };
+  const store = createPrismaJobStore({} as any, (prefix) => prefix, () => now);
+  const result = await store.requestCancellation(tx as any, {
+    id: 'job-queued-cancel', status: 'queued', actorId: 'actor-a', handlerKey: 'customer_mutation',
+    operation: 'transfer', selectionMode: 'ids', selectedCustomerIds: ['c-1', 'c-2', 'c-3'],
+    inputHash: 'a'.repeat(64), idempotencyFingerprint: 'b'.repeat(64), idempotencyKey: 'cancel-items',
+    frozenCustomerCount: 3, totalCount: 3, createdAt: now,
+  } as any);
+  assert.equal(result?.status, 'cancelled');
+  assert.equal(itemUpdates.length, 1);
+  assert.deepEqual(itemUpdates[0].where, { jobId: 'job-queued-cancel', status: { in: ['queued', 'running'] } });
+  assert.equal(itemUpdates[0].data.status, 'cancelled');
+  assert.equal(jobUpdates[0].data.cancelledCount, 3);
+}
+
 {
   const rawActor = {
     id: 'actor-a', name: '批量管理员', account: 'actor-a', email: '', phone: '', role: '销售', avatar: null,
@@ -62,6 +100,17 @@ const access = (permissions: Set<string> = new Set([
   assert.equal(context.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE), true, 'raw SQL role JSON 必须解析出批量管理叶子');
   assert.equal(context.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_TRANSFER), true, 'raw SQL role JSON 必须解析出动作叶子');
   assert.equal(context.manageableOwnerIds.has('actor-a'), true, 'raw SQL dataScopes JSON 必须解析出当前写入范围');
+
+  rawRead = 0;
+  const directory = await lockServerCustomerDirectory({
+    $queryRaw: async () => {
+      rawRead += 1;
+      return rawRead === 1 ? [rawActor] : rawRead === 2 ? [rawRole] : [];
+    },
+  } as any, 'actor-a');
+  assert.equal(directory.actor.id, 'actor-a');
+  assert.equal(directory.roles[0].permissions[0].module, PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE);
+  assert.equal(directory.access.manageableOwnerIds.has('actor-a'), true);
 }
 
 function fixture(options: { useDefaultOperationGuard?: boolean } = {}) {
@@ -71,6 +120,7 @@ function fixture(options: { useDefaultOperationGuard?: boolean } = {}) {
   let frozenCustomerIds = ['c-1'];
   let currentCustomer = customer('c-1', updatedAt);
   let jobCustomerRows: Array<{ customer: ReturnType<typeof customer> }> | null = null;
+  const lockOrder: string[] = [];
   const prechecks: any[] = [];
   const jobs: any[] = [];
   const items: any[] = [];
@@ -96,7 +146,7 @@ function fixture(options: { useDefaultOperationGuard?: boolean } = {}) {
     },
     tokenStore: store,
     loadCurrentAccess: async () => currentAccess,
-    lockCurrentAccess: async () => currentAccess,
+    lockCurrentAccess: async () => { lockOrder.push('access'); return currentAccess; },
     lockCustomerRecords: async () => frozenCustomerIds.map((customerId) => ({
       customer: { ...currentCustomer, id: customerId, updatedAt }, businessRecordUpdatedAt: updatedAt,
     })),
@@ -139,7 +189,7 @@ function fixture(options: { useDefaultOperationGuard?: boolean } = {}) {
         return job ? { type: 'customer_batch_job' as const, id: job.id, idempotencyFingerprint: job.idempotencyFingerprint, value: job } : null;
       },
       get: async (_client: unknown, id: string) => jobs.find((row) => row.id === id) || null,
-      lock: async (_tx: unknown, id: string) => jobs.find((row) => row.id === id) || null,
+      lock: async (_tx: unknown, id: string) => { lockOrder.push('job'); return jobs.find((row) => row.id === id) || null; },
       list: async () => jobs,
       listItems: async (_client: unknown, jobId: string) => items.filter((item) => item.jobId === jobId),
       requestCancellation: async (_tx: unknown, job: any) => jobs.find((candidate) => candidate.id === job.id) || null,
@@ -159,6 +209,8 @@ function fixture(options: { useDefaultOperationGuard?: boolean } = {}) {
     setFrozenCustomerIds: (value: string[]) => { frozenCustomerIds = value; },
     setCurrentCustomer: (value: ReturnType<typeof customer>) => { currentCustomer = value; },
     setJobCustomerRows: (value: Array<{ customer: ReturnType<typeof customer> }>) => { jobCustomerRows = value; },
+    lockOrder,
+    resetLockOrder: () => { lockOrder.length = 0; },
   };
 }
 
@@ -175,6 +227,8 @@ function fixture(options: { useDefaultOperationGuard?: boolean } = {}) {
   assert.equal(precheck.executionMode, 'background');
   const created = await test.service.createCustomerBatchJob({ precheckToken: precheck.confirmationToken, idempotencyKey: 'click-1' }, access());
   assert.equal(created.id, 'batch-job-1');
+  assert.equal(created.actorId, 'actor-a');
+  assert.equal(created.actorName, '批量管理员');
   assert.equal(test.items.length, 1, '任务及其明细必须在同一个确认流程中创建');
   const replayed = await test.service.createCustomerBatchJob({ precheckToken: precheck.confirmationToken, idempotencyKey: 'click-1' }, access());
   assert.equal(replayed.id, created.id, '同一确认键重放必须返回同一任务');
@@ -294,8 +348,10 @@ function fixture(options: { useDefaultOperationGuard?: boolean } = {}) {
   }, access());
   const job = await test.service.createCustomerBatchJob({ precheckToken: precheck.confirmationToken, idempotencyKey: 'creator-cancel' }, access());
   test.setAccess(access(new Set()));
+  test.resetLockOrder();
   const cancelled = await test.service.requestCustomerBatchCancellation(job.id, access(new Set()));
   assert.equal(cancelled.id, job.id, '创建者可取消自己的任务，无需额外取消叶子权限');
+  assert.deepEqual(test.lockOrder.slice(0, 2), ['job', 'access'], '取消与工作者必须统一先锁任务、再锁权限目录');
 }
 
 {
@@ -321,6 +377,11 @@ function fixture(options: { useDefaultOperationGuard?: boolean } = {}) {
   assert.equal((await test.service.listCustomerBatchJobs(access())).some((summary) => summary.id === job.id), true, '创建者自己的摘要不能因后续转让而从列表消失');
   const items = await test.service.listCustomerBatchJobItems(job.id, access());
   assert.deepEqual(items, [], '任务明细必须过滤已移出当前读取范围的客户，不能泄露 targetKey');
+  assert.deepEqual(
+    await test.service.getCustomerBatchJobResult(job.id, access()),
+    { job: await test.service.getCustomerBatchJob(job.id, access()), items: [] },
+    '结构化结果入口必须复用当前摘要和逐项范围过滤',
+  );
 }
 
 {

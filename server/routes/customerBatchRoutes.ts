@@ -3,6 +3,7 @@ import type { AuthenticatedUser } from '../../src/types/auth';
 import type {
   CreateCustomerBatchJobRequest,
   CustomerBatchJobItemView,
+  CustomerBatchJobResultView,
   CustomerBatchJobSummary,
   CustomerBatchPrecheckRequest,
   CustomerBatchPrecheckResult,
@@ -26,6 +27,7 @@ type CustomerBatchRouteService = {
   getCustomerBatchJob(id: string, context: CustomerAccessContext): Promise<CustomerBatchJobSummary | null>;
   listCustomerBatchJobs(context: CustomerAccessContext): Promise<CustomerBatchJobSummary[]>;
   listCustomerBatchJobItems(id: string, context: CustomerAccessContext): Promise<CustomerBatchJobItemView[]>;
+  getCustomerBatchJobResult(id: string, context: CustomerAccessContext): Promise<CustomerBatchJobResultView | null>;
   requestCustomerBatchCancellation(id: string, context: CustomerAccessContext): Promise<CustomerBatchJobSummary>;
 };
 
@@ -168,6 +170,20 @@ export function createCustomerBatchRouter(deps: CustomerBatchRouterDependencies)
     try {
       const context = await currentAccess(request, deps.loadCurrentAccess);
       response.status(200).json(success(await deps.service.listCustomerBatchJobItems(routeParam(request.params.id), context)));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  router.get('/:id/result', deps.requireRead, async (request: AuthenticatedRequest, response) => {
+    try {
+      const context = await currentAccess(request, deps.loadCurrentAccess);
+      const result = await deps.service.getCustomerBatchJobResult(routeParam(request.params.id), context);
+      if (!result) {
+        response.status(404).json(failure('批量任务不存在', 404));
+        return;
+      }
+      response.status(200).json(success(result));
     } catch (error) {
       sendError(response, error);
     }

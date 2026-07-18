@@ -14,6 +14,7 @@ import type {
   BatchPrecheckGuardManifest,
   CreateCustomerBatchJobRequest,
   CustomerBatchJobItemView,
+  CustomerBatchJobResultView,
   CustomerBatchJobSummary,
   CustomerBatchOperation,
   CustomerBatchOperationInput,
@@ -96,6 +97,8 @@ type StoredBatchJob = {
   createdAt: Date | string;
   startedAt?: Date | string | null;
   finishedAt?: Date | string | null;
+  cancelRequestedAt?: Date | string | null;
+  cancelledAt?: Date | string | null;
 };
 
 type StoredBatchJobItem = {
@@ -438,6 +441,8 @@ function readSelectedIds(value: unknown): string[] {
 function normalizeJobSummary(job: StoredBatchJob): CustomerBatchJobSummary {
   return {
     id: job.id,
+    actorId: job.actorId,
+    actorName: job.actorName || '',
     handlerKey: job.handlerKey,
     operation: job.operation as CustomerBatchOperation,
     status: job.status as CustomerBatchJobSummary['status'],
@@ -451,6 +456,8 @@ function normalizeJobSummary(job: StoredBatchJob): CustomerBatchJobSummary {
     createdAt: toIso(job.createdAt) || new Date(0).toISOString(),
     ...(toIso(job.startedAt) ? { startedAt: toIso(job.startedAt)! } : {}),
     ...(toIso(job.finishedAt) ? { finishedAt: toIso(job.finishedAt)! } : {}),
+    ...(toIso(job.cancelRequestedAt) ? { cancelRequestedAt: toIso(job.cancelRequestedAt)! } : {}),
+    ...(toIso(job.cancelledAt) ? { cancelledAt: toIso(job.cancelledAt)! } : {}),
   };
 }
 
@@ -520,7 +527,7 @@ function createPrismaTokenStore(prisma: any): BatchPrecheckTokenStore<BatchTx> {
   };
 }
 
-function createPrismaJobStore(prisma: any, createId: (prefix: string) => string, now: () => Date): CustomerBatchJobStore<BatchTx> {
+export function createPrismaJobStore(prisma: any, createId: (prefix: string) => string, now: () => Date): CustomerBatchJobStore<BatchTx> {
   const load = async (tx: BatchTx, id: string) => {
     const job = await tx.customerBatchJob.findUnique({ where: { id } });
     return job
@@ -610,9 +617,27 @@ function createPrismaJobStore(prisma: any, createId: (prefix: string) => string,
     requestCancellation: async (tx, job) => {
       if (job.status === 'queued') {
         const timestamp = now();
+        const cancelledItems = await tx.customerBatchJobItem.updateMany({
+          where: { jobId: job.id, status: { in: ['queued', 'running'] } },
+          data: {
+            status: 'cancelled',
+            retryable: false,
+            errorCode: null,
+            errorMessage: null,
+            finishedAt: timestamp,
+          },
+        });
         const updated = await tx.customerBatchJob.updateMany({
           where: { id: job.id, status: 'queued' },
-          data: { status: 'cancelled', cancelledAt: timestamp, finishedAt: timestamp },
+          data: {
+            status: 'cancelled',
+            cancelRequestedAt: timestamp,
+            cancelledAt: timestamp,
+            finishedAt: timestamp,
+            cancelledCount: cancelledItems.count,
+            leaseOwner: null,
+            leaseExpiresAt: null,
+          },
         });
         if (updated.count !== 1) return null;
         return await tx.customerBatchJob.findUnique({ where: { id: job.id } }) as StoredBatchJob | null;
@@ -630,22 +655,39 @@ function createPrismaJobStore(prisma: any, createId: (prefix: string) => string,
   };
 }
 
-export async function lockServerAccessContext(tx: BatchTx, actorId: string): Promise<CustomerAccessContext> {
+export async function lockServerCustomerDirectory(tx: BatchTx, actorId: string) {
   // Deliberately lock the directory in one fixed order. The transaction uses
   // READ COMMITTED as a second safeguard against RR snapshot stale reads.
   const userRows = await rawRows<any>(tx, Prisma.sql`SELECT * FROM users ORDER BY id ASC FOR UPDATE`);
   const roleRows = await rawRows<any>(tx, Prisma.sql`SELECT * FROM roles WHERE isActive = true ORDER BY id ASC FOR UPDATE`);
   const departmentRows = await rawRows<any>(tx, Prisma.sql`SELECT * FROM departments ORDER BY id ASC FOR UPDATE`);
-  return buildCustomerAccessContextFromDirectory(
-    currentActor(actorId),
-    userRows.map(mapPrismaUser),
-    roleRows.map((row) => mapPrismaRole({
+  const users = userRows.map(mapPrismaUser);
+  const roles = roleRows.map((row) => mapPrismaRole({
       ...row,
       permissions: decodeJson(row.permissions),
       dataScopes: decodeJson(row.dataScopes),
-    })),
-    departmentRows.map(mapPrismaDepartment),
-  );
+    }));
+  const departments = departmentRows.map(mapPrismaDepartment);
+  const actor = users.find((user) => (
+    user.id === actorId
+    && user.isActive
+    && (user.employmentStatus || 'active') === 'active'
+  ));
+  if (!actor) throw new BatchPrecheckAuthorizationError('当前用户不存在或已离职');
+  return {
+    actor: { id: actor.id, name: actor.name },
+    roles,
+    access: buildCustomerAccessContextFromDirectory(
+      currentActor(actorId),
+      users,
+      roles,
+      departments,
+    ),
+  };
+}
+
+export async function lockServerAccessContext(tx: BatchTx, actorId: string): Promise<CustomerAccessContext> {
+  return (await lockServerCustomerDirectory(tx, actorId)).access;
 }
 
 function objectData(value: unknown): Record<string, unknown> {
@@ -1010,6 +1052,31 @@ export function createCustomerBatchService(
     assertCanReadJob(job, context, rows);
   };
 
+  const visibleItems = async (
+    client: BatchTx,
+    job: StoredBatchJob,
+    context: CustomerAccessContext,
+  ): Promise<CustomerBatchJobItemView[]> => {
+    const actorIsCreator = job.actorId === context.actorId;
+    if (!actorIsCreator && !requiresAuditRead(context)) {
+      throw new BatchPrecheckAuthorizationError('无权查看批量任务');
+    }
+    const readableIds = new Set(
+      (await jobCustomers(client, jobCustomerIds(job)))
+        .filter(({ customer }) => canReadCustomer(context, customer))
+        .map(({ customer }) => cleanText(customer.id)),
+    );
+    if (!actorIsCreator && !readableIds.size) {
+      throw new BatchPrecheckAuthorizationError('无权查看批量任务');
+    }
+    return (await jobStore.listItems(client, job.id))
+      .filter((item) => {
+        const match = /^customer:(.+)$/.exec(item.targetKey);
+        return Boolean(match && readableIds.has(match[1]));
+      })
+      .map(normalizeJobItem);
+  };
+
   return {
     async precheckCustomerBatch(input: CustomerBatchPrecheckRequest, context: CustomerAccessContext): Promise<CustomerBatchPrecheckResult> {
       const request = normalizeCustomerBatchPrecheckRequest(input);
@@ -1184,35 +1251,30 @@ export function createCustomerBatchService(
       const job = await jobStore.get(prisma, cleanText(id));
       if (!job) throw new BatchPrecheckConflictError('批量任务不存在');
       const current = await loadAccess(prisma, context.actorId);
-      const actorIsCreator = job.actorId === current.actorId;
-      if (!actorIsCreator && !requiresAuditRead(current)) {
-        throw new BatchPrecheckAuthorizationError('无权查看批量任务');
-      }
-      // An audit reader can see the task only through their current scope. Do
-      // not reveal target keys for customers that have since moved away.
-      const readableIds = new Set(
-        (await jobCustomers(prisma, jobCustomerIds(job)))
-          .filter(({ customer }) => canReadCustomer(current, customer))
-          .map(({ customer }) => cleanText(customer.id)),
-      );
-      if (!actorIsCreator && !readableIds.size) {
-        throw new BatchPrecheckAuthorizationError('无权查看批量任务');
-      }
-      return (await jobStore.listItems(prisma, job.id))
-        .filter((item) => {
-          const match = /^customer:(.+)$/.exec(item.targetKey);
-          return Boolean(match && readableIds.has(match[1]));
-        })
-        .map(normalizeJobItem);
+      return visibleItems(prisma, job, current);
+    },
+
+    async getCustomerBatchJobResult(id: string, context: CustomerAccessContext): Promise<CustomerBatchJobResultView | null> {
+      const job = await jobStore.get(prisma, cleanText(id));
+      if (!job) return null;
+      const current = await loadAccess(prisma, context.actorId);
+      await assertVisible(prisma, job, current);
+      return {
+        job: normalizeJobSummary(job),
+        items: await visibleItems(prisma, job, current),
+      };
     },
 
     async requestCustomerBatchCancellation(id: string, context: CustomerAccessContext): Promise<CustomerBatchJobSummary> {
       const jobId = cleanText(id);
       if (!jobId) throw new BatchPrecheckValidationError('批量任务 ID 无效');
       return tokenStore.transaction(async (tx) => {
-        const current = await lockAccess(tx, context.actorId);
         const job = await jobStore.lock(tx, jobId);
         if (!job) throw new BatchPrecheckConflictError('批量任务不存在');
+        // The worker also locks job → directory → customer. Keep cancellation
+        // in the same global order so a live item commit and a cancel request
+        // cannot deadlock each other by taking the first two locks backwards.
+        const current = await lockAccess(tx, context.actorId);
         const records = job.actorId === current.actorId
           ? []
           : await lockRecords(tx, jobCustomerIds(job));

@@ -42,7 +42,7 @@ const service = {
   createCustomerBatchJob: async (input: unknown, context: unknown) => {
     calls.push({ method: 'create', input, context });
     return {
-      id: 'job-1', handlerKey: 'customer_mutation', operation: 'transfer' as const,
+      id: 'job-1', actorId: 'u-1', actorName: '批量管理员', handlerKey: 'customer_mutation', operation: 'transfer' as const,
       status: 'queued' as const, selectionMode: 'ids' as const, frozenCustomerCount: 1,
       totalCount: 1, successCount: 0, failedCount: 0, skippedCount: 0, cancelledCount: 0,
       createdAt: '2026-07-18T00:00:00.000Z',
@@ -60,11 +60,15 @@ const service = {
     calls.push({ method: 'items', id, context });
     return [];
   },
+  getCustomerBatchJobResult: async (id: string, context: unknown) => {
+    calls.push({ method: 'result', id, context });
+    return null;
+  },
   requestCustomerBatchCancellation: async (id: string, context: unknown) => {
     calls.push({ method: 'cancel', id, context });
     if (id === 'forbidden') throw Object.assign(new Error('当前无权取消其他人的批量任务'), { statusCode: 403 });
     return {
-      id, handlerKey: 'customer_mutation', operation: 'transfer' as const,
+      id, actorId: 'u-1', actorName: '批量管理员', handlerKey: 'customer_mutation', operation: 'transfer' as const,
       status: 'cancel_requested' as const, selectionMode: 'ids' as const, frozenCustomerCount: 1,
       totalCount: 1, successCount: 0, failedCount: 0, skippedCount: 0, cancelledCount: 0,
       createdAt: '2026-07-18T00:00:00.000Z',
@@ -143,9 +147,10 @@ try {
     ['', 'read', 'list'],
     ['/job-1', 'read', 'get'],
     ['/job-1/items', 'read', 'items'],
+    ['/job-1/result', 'read', 'result'],
   ] as const) {
     const response = await fetch(`${root}${path}`);
-    assert.equal(response.status, path === '/job-1' ? 404 : 200, path || '/');
+    assert.equal(response.status, path === '/job-1' || path === '/job-1/result' ? 404 : 200, path || '/');
     assert.equal(calls[calls.length - 1]?.method, expectedMethod);
     assert.equal(gateCalls[gateCalls.length - 1], expectedGate);
   }

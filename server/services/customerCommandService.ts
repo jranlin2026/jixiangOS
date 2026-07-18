@@ -52,6 +52,7 @@ import {
 } from './customerAccessPolicy';
 import {
   createCustomerBusinessRecordRepository,
+  CustomerWriteConflictError,
   type CustomerRecordSnapshot,
 } from './customerBusinessRecordRepository';
 import { customerWriteConflictResponse } from './customerWriteConflict';
@@ -133,6 +134,8 @@ export interface CustomerAtomicCommandContext {
   requestId?: string;
   ip?: string;
   batchJobId?: string;
+  /** Frozen top-level BusinessRecord.updatedAt used by background batch jobs. */
+  expectedUpdatedAt?: string;
 }
 
 export interface CustomerAtomicCommandResult {
@@ -833,6 +836,15 @@ export function createCustomerAtomicCommandService(options: {
       const repository = createCustomerBusinessRecordRepository(tx);
       const snapshot = await repository.lockById(command.customerId);
       if (!snapshot || snapshot.customer.deletedAt) throw new Error('客户不存在');
+      if (context.expectedUpdatedAt) {
+        const expected = new Date(context.expectedUpdatedAt);
+        if (
+          Number.isNaN(expected.getTime())
+          || expected.getTime() !== snapshot.businessRecordUpdatedAt.getTime()
+        ) {
+          throw new CustomerWriteConflictError();
+        }
+      }
       const liveActor = await (tx as any).user.findUnique({ where: { id: context.actor.id } });
       if (!liveActor || !liveActor.isActive || (liveActor.employmentStatus || 'active') !== 'active') {
         throw new Error('当前用户不存在或已离职');
@@ -1030,7 +1042,7 @@ export function createCustomerAtomicCommandService(options: {
 
 export type CustomerAtomicCommandMetadata = Pick<
   CustomerAtomicCommandContext,
-  'idempotencyKey' | 'requestId' | 'ip' | 'batchJobId'
+  'idempotencyKey' | 'requestId' | 'ip' | 'batchJobId' | 'expectedUpdatedAt'
 >;
 
 /**

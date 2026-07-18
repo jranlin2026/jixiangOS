@@ -2840,6 +2840,27 @@ for (const targetType of ['customer', 'lead'] as const) {
   assert.match(result.message, /客户记录已更新/);
 }
 
+// RED: 批量工作者冻结的顶层 BusinessRecord.updatedAt 必须在原子写入事务内再次校验。
+{
+  const value = customer('cust-batch-version-conflict');
+  const fake = createFakePrisma({ businessRecords: [businessCustomer(value)], leads: [] });
+  const result = await createAuditedCustomerAtomicCommandService(fake.prisma, {
+    ...serviceOptions,
+    auditAppender: createPrismaCustomerAuditAppender(),
+  }).execute({
+    action: 'release_to_pool', customerId: value.id, reason: '批量版本重验',
+  }, salesA, {
+    expectedUpdatedAt: '2026-07-18T09:00:00.000Z',
+    batchJobId: 'job-version-conflict',
+    idempotencyKey: 'job-version-conflict:customer:cust-batch-version-conflict',
+  } as any);
+
+  assert.equal(result.code, 409);
+  assert.match(result.message, /客户记录已更新/);
+  assert.equal(fake.getState().businessRecords[0].data.owner, salesA.name);
+  assert.equal(fake.getState().customerAuditEvents?.length, 0);
+}
+
 // RED: MySQL 死锁/Prisma P2034 应有限重试，且不重复写入历史。
 {
   const fake = createFakePrisma({

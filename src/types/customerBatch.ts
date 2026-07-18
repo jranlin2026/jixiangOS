@@ -94,6 +94,8 @@ export type CreateCustomerBatchJobRequest = {
 
 export type CustomerBatchJobSummary = {
   id: string;
+  actorId: string;
+  actorName: string;
   handlerKey: string;
   operation: CustomerBatchOperation;
   status: CustomerBatchJobStatus;
@@ -107,6 +109,8 @@ export type CustomerBatchJobSummary = {
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;
+  cancelRequestedAt?: string;
+  cancelledAt?: string;
 };
 
 export type CustomerBatchJobItemView = {
@@ -117,6 +121,11 @@ export type CustomerBatchJobItemView = {
   errorMessage?: string;
   retryable: boolean;
   attemptCount: number;
+};
+
+export type CustomerBatchJobResultView = {
+  job: CustomerBatchJobSummary;
+  items: CustomerBatchJobItemView[];
 };
 
 /** A first-stage mutation item always points at one opaque customer ID. */

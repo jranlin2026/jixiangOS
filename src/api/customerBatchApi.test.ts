@@ -32,6 +32,7 @@ await customerBatchApi.createJob({ precheckToken: 'opaque-token', idempotencyKey
 await customerBatchApi.list();
 await customerBatchApi.get('job / 1');
 await customerBatchApi.listItems('job / 1');
+await customerBatchApi.getResult('job / 1');
 await customerBatchApi.cancel('job / 1');
 
 assert.equal(requests[0]?.path, '/api/customer-batch-jobs/precheck');
@@ -49,6 +50,7 @@ assert.deepEqual(requests.slice(2).map((request) => [request.path, request.init.
   ['/api/customer-batch-jobs', undefined],
   ['/api/customer-batch-jobs/job%20%2F%201', undefined],
   ['/api/customer-batch-jobs/job%20%2F%201/items', undefined],
+  ['/api/customer-batch-jobs/job%20%2F%201/result', undefined],
   ['/api/customer-batch-jobs/job%20%2F%201/cancel', 'POST'],
 ]);
 
