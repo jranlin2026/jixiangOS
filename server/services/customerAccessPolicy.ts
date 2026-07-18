@@ -105,6 +105,8 @@ const CUSTOMER_MUTATION_PERMISSION_ACTIONS = new Map<string, string>([
   [PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE, 'write'],
   [PERMISSION_KEYS.CUSTOMER_BATCH_CANCEL, 'write'],
   [PERMISSION_KEYS.CUSTOMER_BATCH_AUDIT_READ, 'read'],
+  [PERMISSION_KEYS.CUSTOMER_MERGE, 'write'],
+  [PERMISSION_KEYS.CUSTOMER_MERGE_UNDO, 'write'],
 ]);
 
 function explicitCustomerScope(value: unknown): CustomerDataScopeLevel | null | undefined {
@@ -204,8 +206,22 @@ function assertPermission(context: CustomerAccessContext, permission: { key: str
 }
 
 export function canManageCustomer(context: CustomerAccessContext, customer: Customer): boolean {
-  if (customer.deletedAt) return false;
+  if (customer.deletedAt || customer.mergedIntoId) return false;
   if (customer.ownerIdentityStatus !== 'resolved' || !customer.ownerId) return false;
+  return context.manageableOwnerIds.has(customer.ownerId);
+}
+
+export function canManageHistoricalMergedCustomer(
+  context: CustomerAccessContext,
+  customer: Customer,
+  expectedMainCustomerId: string,
+  expectedLedgerId: string,
+): boolean {
+  if (customer.deletedAt
+    || customer.mergedIntoId !== expectedMainCustomerId
+    || customer.mergeLedgerId !== expectedLedgerId
+    || customer.ownerIdentityStatus !== 'resolved'
+    || !customer.ownerId) return false;
   return context.manageableOwnerIds.has(customer.ownerId);
 }
 

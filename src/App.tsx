@@ -13,6 +13,7 @@ const HomeWorkbench = React.lazy(() => import('./pages/Dashboard'));
 const BusinessCockpit = React.lazy(() => import('./pages/Dashboard/BusinessCockpit'));
 const Leads = React.lazy(() => import('./pages/Leads'));
 const Customers = React.lazy(() => import('./pages/Customers'));
+const CustomerDuplicateGovernance = React.lazy(() => import('./pages/Customers/CustomerDuplicateGovernance'));
 const Orders = React.lazy(() => import('./pages/Orders'));
 const Delivery = React.lazy(() => import('./pages/Delivery'));
 const AfterSales = React.lazy(() => import('./pages/AfterSales'));
@@ -101,6 +102,12 @@ const App: React.FC = () => {
                   <Customers />
                 </Suspense>
               )}
+            />
+          </Route>
+          <Route element={<ProtectedRoute permissionKey={PERMISSION_KEYS.CUSTOMER_MERGE} action="write" />}>
+            <Route
+              path={ROUTES.CUSTOMER_DUPLICATES}
+              element={<Suspense fallback={<PageLoader />}><CustomerDuplicateGovernance /></Suspense>}
             />
           </Route>
           <Route element={<ProtectedRoute permissionKeys={[

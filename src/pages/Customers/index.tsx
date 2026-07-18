@@ -42,6 +42,7 @@ import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SearchIcon from '@mui/icons-material/Search';
 import TaskAltOutlinedIcon from '@mui/icons-material/TaskAltOutlined';
+import MergeTypeIcon from '@mui/icons-material/MergeType';
 import useCustomerStore from '../../store/useCustomerStore';
 import { customerApi, customerBatchApi, orderApi, settingsApi } from '../../api';
 import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, ROUTES, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
@@ -378,6 +379,7 @@ const Customers: React.FC = () => {
   const canReadBatchTasks = hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE, 'write')
     || hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_BATCH_AUDIT_READ, 'read');
   const canCancelAnyBatchTask = hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_BATCH_CANCEL, 'write');
+  const canMergeCustomers = hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_MERGE, 'write');
   const batchSelectionActive = batchSelection.mode === 'filter_snapshot' || batchSelection.selectedIds.length > 0;
   const pageCustomerIds = useMemo(() => items.map((customer) => customer.id), [items]);
   const selectedPageCount = batchSelection.mode === 'ids'
@@ -721,6 +723,21 @@ const Customers: React.FC = () => {
           {canReadBatchTasks && (
             <Button variant="outlined" startIcon={<TaskAltOutlinedIcon />} onClick={() => void handleOpenLatestBatchTask()}>
               批量任务
+            </Button>
+          )}
+          {canMergeCustomers && (
+            <Button
+              variant="outlined"
+              startIcon={<MergeTypeIcon />}
+              onClick={() => navigate(
+                batchSelection.mode === 'ids' && batchSelection.selectedIds.length >= 2 && batchSelection.selectedIds.length <= 10
+                  ? `${ROUTES.CUSTOMER_DUPLICATES}?ids=${encodeURIComponent(batchSelection.selectedIds.join(','))}`
+                  : ROUTES.CUSTOMER_DUPLICATES,
+              )}
+            >
+              {batchSelection.mode === 'ids' && batchSelection.selectedIds.length >= 2 && batchSelection.selectedIds.length <= 10
+                ? `合并已选客户（${batchSelection.selectedIds.length}）`
+                : '重复客户治理'}
             </Button>
           )}
           {!isPublicPoolScope && (

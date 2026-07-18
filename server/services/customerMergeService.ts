@@ -27,7 +27,7 @@ import {
   discoverCustomerAssociationDomains,
   lockCustomerAssociationScope,
 } from './customerAssociationRegistry';
-import { canManageCustomer, type CustomerAccessContext } from './customerAccessPolicy';
+import { canManageCustomer, canManageHistoricalMergedCustomer, type CustomerAccessContext } from './customerAccessPolicy';
 import { createCustomerDuplicateService } from './customerDuplicateService';
 import { CUSTOMER_MERGE_FIELDS, CUSTOMER_MERGE_HANDLER_KEY, CUSTOMER_MERGE_UNDO_HANDLER_KEY } from '../../src/types/customerMerge';
 import { createCustomerBusinessRecordRepository, type CustomerRecordSnapshot } from './customerBusinessRecordRepository';
@@ -170,6 +170,15 @@ function ledgerView(row: any): CustomerMergeLedgerView {
   };
 }
 
+function canManageLedgerParticipant(
+  context: CustomerAccessContext,
+  customer: Customer,
+  ledger: any,
+): boolean {
+  if (customer.id === ledger.mainCustomerId || ledger.status === 'undone') return canManageCustomer(context, customer);
+  return canManageHistoricalMergedCustomer(context, customer, ledger.mainCustomerId, ledger.id);
+}
+
 function uniqueSubrecords(values: unknown[][]): unknown[] {
   const seen = new Set<string>();
   const result: unknown[] = [];
@@ -287,7 +296,7 @@ export function createCustomerMergeService(prisma: any, options: MergeServiceOpt
         });
         if (rows.length === ids.length && rows.every((row) => {
           const customer = parseCustomer(row);
-          return customer && canManageCustomer(context, customer);
+          return customer && canManageLedgerParticipant(context, customer, ledger);
         })) result.push(ledgerView(ledger));
       }
       return result;
@@ -445,7 +454,7 @@ export function createCustomerMergeService(prisma: any, options: MergeServiceOpt
         });
         if (customerRows.some((item: CustomerMergeRow) => {
           const customer = parseCustomer(item);
-          return !customer || !canManageCustomer(context, customer);
+          return !customer || !canManageLedgerParticipant(context, customer, row);
         })) throw new BatchPrecheckAuthorizationError();
         return { type: 'customer_merge_ledger' as const, id: row.id, idempotencyFingerprint: row.mergeIdempotencyFingerprint, value: ledgerView(row) };
       };
@@ -679,7 +688,7 @@ export function createCustomerMergeService(prisma: any, options: MergeServiceOpt
       const postVersions = object(guard.postCustomerVersions);
       for (const row of rows) {
         const customer = parseCustomer(row);
-        if (!customer || !canManageCustomer(context, customer)) conflicts.push(conflict('CUSTOMER_OUT_OF_SCOPE', '存在无权管理的客户', 'Customer'));
+        if (!customer || !canManageLedgerParticipant(context, customer, ledger)) conflicts.push(conflict('CUSTOMER_OUT_OF_SCOPE', '存在无权管理的客户', 'Customer'));
         if (Number(row.recordRevision ?? 0) !== Number(postVersions[row.recordId] ?? -1)) {
           conflicts.push(conflict('CUSTOMER_CHANGED_AFTER_MERGE', '客户在合并后已发生变化', 'Customer'));
         }
@@ -769,7 +778,7 @@ export function createCustomerMergeService(prisma: any, options: MergeServiceOpt
           for (const id of selectedIds) {
             const snapshot = await repository.lockById(id);
             const expected = object(versions[id]);
-            if (!snapshot || !canManageCustomer(context, snapshot.customer)
+            if (!snapshot || !canManageLedgerParticipant(context, snapshot.customer, ledger)
               || snapshot.recordRevision !== Number(expected.recordRevision ?? -1)
               || snapshot.businessRecordUpdatedAt.toISOString() !== String(expected.updatedAt || '')) {
               throw new BatchPrecheckConflictError('客户在撤销预检后已变化');

@@ -1,6 +1,7 @@
 export { leadApi } from './leadApi';
 export { customerApi } from './customerApi';
 export { customerBatchApi } from './customerBatchApi';
+export { customerMergeApi } from './customerMergeApi';
 export { customerTodoApi } from './customerTodoApi';
 export { orderApi } from './orderApi';
 export { orderReviewApi, ORDER_APPLICATION_STATUSES, canReviewOrderApplications } from './orderReviewApi';

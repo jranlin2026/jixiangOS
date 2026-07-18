@@ -94,6 +94,11 @@ const navItems: NavItem[] = [
         path: `${ROUTES.CUSTOMERS}?tab=public_pool`,
         permissionKeys: [PERMISSION_KEYS.CUSTOMERS, PERMISSION_KEYS.CUSTOMER_LIST],
       },
+      {
+        label: '重复客户治理',
+        path: ROUTES.CUSTOMER_DUPLICATES,
+        permissionKeys: [PERMISSION_KEYS.CUSTOMER_MERGE],
+      },
     ],
   },
   {

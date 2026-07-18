@@ -9,6 +9,7 @@ import {
   assertCustomerClaimPermission,
   assertCustomerFieldPermissions,
   canManageCustomer,
+  canManageHistoricalMergedCustomer,
   canReadCustomer,
   type CustomerAccessContext,
 } from './customerAccessPolicy';
@@ -53,6 +54,11 @@ function access(overrides: Partial<CustomerAccessContext> = {}): CustomerAccessC
 const contributed = customer({ leadContributorId: 'user-actor' });
 assert.equal(canReadCustomer(access(), contributed), true, '贡献人可读其他人客户');
 assert.equal(canManageCustomer(access(), contributed), false, '贡献人不得写其他人客户');
+const mergedCustomer = customer({ mergedIntoId: 'customer-main', mergeLedgerId: 'ledger-1' });
+assert.equal(canManageCustomer(access(), mergedCustomer), false, '已合并次客户不得进入普通写路径');
+const historicalAccess = access({ manageableOwnerIds: new Set(['user-owner']) });
+assert.equal(canManageHistoricalMergedCustomer(historicalAccess, mergedCustomer, 'customer-main', 'ledger-1'), true, '撤销与历史读取可使用窄化后的合并关系');
+assert.equal(canManageHistoricalMergedCustomer(access(), mergedCustomer, 'other-main', 'ledger-1'), false, '历史权限必须绑定同一主客户和台账');
 
 const publicPool = customer({
   owner: '公海',
