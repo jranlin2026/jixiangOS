@@ -477,7 +477,7 @@ function currentActor(actorId: string): AuthenticatedUser {
   return { id: actorId } as AuthenticatedUser;
 }
 
-function createPrismaTokenStore(prisma: any): BatchPrecheckTokenStore<BatchTx> {
+export function createPrismaTokenStore(prisma: any): BatchPrecheckTokenStore<BatchTx> {
   return {
     transaction: (operation) => prisma.$transaction(
       (tx: BatchTx) => operation(tx),
