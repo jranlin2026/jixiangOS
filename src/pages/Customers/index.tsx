@@ -5,6 +5,7 @@ import {
 import {
   Box,
   Button,
+  Checkbox,
   Chip,
   Collapse,
   Dialog,
@@ -40,8 +41,9 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SearchIcon from '@mui/icons-material/Search';
+import TaskAltOutlinedIcon from '@mui/icons-material/TaskAltOutlined';
 import useCustomerStore from '../../store/useCustomerStore';
-import { customerApi, orderApi, settingsApi } from '../../api';
+import { customerApi, customerBatchApi, orderApi, settingsApi } from '../../api';
 import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, ROUTES, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
@@ -55,7 +57,11 @@ import type { CustomerLevelConfig, LifecycleStatusConfig } from '../../types/set
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import PermissionGate from '../../shared/auth/PermissionGate';
-import { PERMISSION_KEYS, hasExplicitPermission } from '../../shared/utils/permissions';
+import {
+  CUSTOMER_BATCH_ACTION_PERMISSION_MAP,
+  PERMISSION_KEYS,
+  hasExplicitPermission,
+} from '../../shared/utils/permissions';
 import useAuthStore from '../../store/useAuthStore';
 import ResizableHeaderCell, {
   getResizableCellSx,
@@ -71,6 +77,18 @@ import { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
 import CustomerTagFilter from './CustomerTagFilter';
 import { customerTagRequestSource, readCustomerTagFilterParams, writeCustomerTagFilterParams } from './customerTagFilterState';
 import { buildCustomerWriteActionPolicy, buildManageableOwnerIds } from './customerDetailPolicy';
+import type { CustomerBatchJobSummary, CustomerBatchOperation } from '../../types/customerBatch';
+import {
+  clearCustomerBatchSelection,
+  deselectPageCustomers,
+  isCustomerSelected,
+  selectCurrentFilterResult,
+  selectPageCustomers,
+  toggleCustomerSelection,
+} from '../../shared/utils/customerBatchSelection';
+import CustomerBatchToolbar from './batch/CustomerBatchToolbar';
+import CustomerBatchActionDialog from './batch/CustomerBatchActionDialog';
+import CustomerBatchTaskDrawer from './batch/CustomerBatchTaskDrawer';
 
 type CustomerColumn = {
   id: string;
@@ -91,6 +109,7 @@ const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_view_v7';
 const CUSTOMER_VIEW_SCHEMA_VERSION = 7;
 const CUSTOMER_WIDTH_STORAGE_KEY = 'aaos_customer_table_column_widths_v2';
 const CUSTOMER_ACTION_COLUMN_WIDTH = 190;
+const CUSTOMER_SELECTION_COLUMN_WIDTH = 52;
 const formatCustomerSource = (customer: Customer) => [customer.leadSource, customer.sourceName].filter(Boolean).join('-') || '-';
 
 const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[], scope: CustomerScope = 'active'): CustomerColumn[] => {
@@ -271,6 +290,11 @@ const Customers: React.FC = () => {
   const [deleteCustomerTarget, setDeleteCustomerTarget] = useState<Customer | null>(null);
   const [deleteCustomerReason, setDeleteCustomerReason] = useState('');
   const [deleteCustomerSubmitting, setDeleteCustomerSubmitting] = useState(false);
+  const [batchSelection, setBatchSelection] = useState(clearCustomerBatchSelection);
+  const [batchOperation, setBatchOperation] = useState<CustomerBatchOperation | null>(null);
+  const [batchTaskId, setBatchTaskId] = useState<string | null>(null);
+  const [batchTasks, setBatchTasks] = useState<CustomerBatchJobSummary[]>([]);
+  const [batchTaskDrawerOpen, setBatchTaskDrawerOpen] = useState(false);
   const { alert, dialog: feedbackDialog } = useAppFeedback();
   const columns = useMemo(() => buildCustomerColumns(lifecycleConfigs, customerScope), [customerScope, lifecycleConfigs]);
   const customerLevelOptions = useMemo(() => {
@@ -342,6 +366,24 @@ const Customers: React.FC = () => {
     () => new Set(manageableUsers.map((user) => user.id)),
     [manageableUsers],
   );
+  const availableBatchActions = useMemo(() => (
+    (Object.keys(CUSTOMER_BATCH_ACTION_PERMISSION_MAP) as CustomerBatchOperation[]).filter((operation) => (
+      CUSTOMER_BATCH_ACTION_PERMISSION_MAP[operation].every((permissionKey) => hasExplicitPermission(
+        currentUser,
+        permissionKey,
+        permissionKey === PERMISSION_KEYS.CUSTOMER_DELETE ? 'delete' : 'write',
+      ))
+    ))
+  ), [currentUser]);
+  const canReadBatchTasks = hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE, 'write')
+    || hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_BATCH_AUDIT_READ, 'read');
+  const canCancelAnyBatchTask = hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_BATCH_CANCEL, 'write');
+  const batchSelectionActive = batchSelection.mode === 'filter_snapshot' || batchSelection.selectedIds.length > 0;
+  const pageCustomerIds = useMemo(() => items.map((customer) => customer.id), [items]);
+  const selectedPageCount = batchSelection.mode === 'ids'
+    ? pageCustomerIds.filter((id) => batchSelection.selectedIds.includes(id)).length
+    : 0;
+  const allPageSelected = pageCustomerIds.length > 0 && selectedPageCount === pageCustomerIds.length;
   const customerWriteActions = (customer: Customer) => buildCustomerWriteActionPolicy({
     customer,
     manageableOwnerIds,
@@ -360,8 +402,10 @@ const Customers: React.FC = () => {
     || (!isPublicPoolScope && filters.lifecycleStatusCode),
   );
   const tableMinWidth = useMemo(
-    () => visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + CUSTOMER_ACTION_COLUMN_WIDTH,
-    [columnWidths, visibleColumns],
+    () => visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0)
+      + CUSTOMER_ACTION_COLUMN_WIDTH
+      + (availableBatchActions.length ? CUSTOMER_SELECTION_COLUMN_WIDTH : 0),
+    [availableBatchActions.length, columnWidths, visibleColumns],
   );
 
   const handleViewDetail = (customer: Customer) => {
@@ -404,6 +448,7 @@ const Customers: React.FC = () => {
   useEffect(() => {
     const nextScope = getCustomerScopeFromTab(searchParams.get('tab'));
     if (nextScope === customerScope) return;
+    setBatchSelection(clearCustomerBatchSelection());
     setCustomerScope(nextScope);
     const nextFilters = scopedFilters({ ...filters, page: 1, pageSize: pagination.pageSize || 10 }, nextScope);
     setFilters(nextFilters);
@@ -530,12 +575,14 @@ const Customers: React.FC = () => {
   };
 
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setBatchSelection(clearCustomerBatchSelection());
     const newFilters = { ...filters, search: e.target.value, productLevel: undefined, page: 1, pageSize: pagination.pageSize || 10 };
     setFilters(newFilters);
     fetchItems(newFilters);
   };
 
   const handleFilterChange = (key: string, value: string) => {
+    setBatchSelection(clearCustomerBatchSelection());
     if (key === 'lifecycleStatusCode') {
       setCustomerScope(value === 'public_pool' ? 'public_pool' : 'active');
     }
@@ -545,6 +592,7 @@ const Customers: React.FC = () => {
   };
 
   const handleResetFilters = () => {
+    setBatchSelection(clearCustomerBatchSelection());
     const newFilters = scopedFilters({ page: 1, pageSize: pagination.pageSize || 10 }, customerScope);
     const nextParams = writeCustomerTagFilterParams(searchParams, {});
     setFilters(newFilters);
@@ -553,6 +601,7 @@ const Customers: React.FC = () => {
   };
 
   const handleTagFilterApply = (tagFilters: Pick<CustomerFilters, 'tagIds' | 'tagMatch' | 'withoutTags' | 'missingTagGroupId'>) => {
+    setBatchSelection(clearCustomerBatchSelection());
     const newFilters = { ...filters, ...tagFilters, tag: undefined, productLevel: undefined, page: 1, pageSize: pagination.pageSize || 10 };
     const nextParams = writeCustomerTagFilterParams(searchParams, tagFilters);
     if (customerTagRequestSource(searchParams, nextParams) === 'url-effect') setSearchParams(nextParams, { replace: true });
@@ -615,9 +664,26 @@ const Customers: React.FC = () => {
     setColumnWidths((current) => resizeColumnWidths(current, id, delta));
   };
 
+  const handleOpenLatestBatchTask = async () => {
+    const response = await customerBatchApi.list();
+    if (response.code !== 0) {
+      await alert(response.message || '批量任务加载失败');
+      return;
+    }
+    const latest = response.data?.[0];
+    if (!latest) {
+      await alert('暂无可查看的批量任务');
+      return;
+    }
+    setBatchTasks(response.data || []);
+    setBatchTaskId(latest.id);
+    setBatchTaskDrawerOpen(true);
+  };
+
   const getFrozenLeft = (columnIndex: number) => {
     const widths = visibleColumns.map((column) => columnWidths[column.id] || DEFAULT_COLUMN_WIDTHS[column.id] || 120);
-    return widths.slice(0, columnIndex).reduce((sum, width) => sum + width, 0);
+    return (availableBatchActions.length ? CUSTOMER_SELECTION_COLUMN_WIDTH : 0)
+      + widths.slice(0, columnIndex).reduce((sum, width) => sum + width, 0);
   };
 
   const getFrozenColumnSx = (columnIndex: number, isHeader = false) => (
@@ -652,6 +718,11 @@ const Customers: React.FC = () => {
           <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
             视图设置
           </Button>
+          {canReadBatchTasks && (
+            <Button variant="outlined" startIcon={<TaskAltOutlinedIcon />} onClick={() => void handleOpenLatestBatchTask()}>
+              批量任务
+            </Button>
+          )}
           {!isPublicPoolScope && (
             <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE} action="write">
               <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate}>
@@ -789,10 +860,39 @@ const Customers: React.FC = () => {
         </Collapse>
       </ModuleToolbar>
 
+      {batchSelectionActive && (
+        <CustomerBatchToolbar
+          selection={batchSelection}
+          availableActions={availableBatchActions}
+          onChooseAction={setBatchOperation}
+          onClear={() => setBatchSelection(clearCustomerBatchSelection())}
+          onSelectFilterResult={() => setBatchSelection(selectCurrentFilterResult(scopedFilters()))}
+        />
+      )}
+
       <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { overflowX: 'auto' }]}>
         <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
           <TableHead>
             <TableRow>
+              {availableBatchActions.length > 0 && (
+                <TableCell
+                  padding="checkbox"
+                  sx={{ position: 'sticky', left: 0, zIndex: 6, width: CUSTOMER_SELECTION_COLUMN_WIDTH, minWidth: CUSTOMER_SELECTION_COLUMN_WIDTH, bgcolor: '#f8fafc' }}
+                >
+                  <Checkbox
+                    size="small"
+                    checked={allPageSelected}
+                    indeterminate={selectedPageCount > 0 && !allPageSelected}
+                    disabled={batchSelection.mode === 'filter_snapshot'}
+                    onChange={() => setBatchSelection((current) => (
+                      allPageSelected
+                        ? deselectPageCustomers(current, pageCustomerIds)
+                        : selectPageCustomers(current, pageCustomerIds)
+                    ))}
+                    inputProps={{ 'aria-label': '选择当前页客户' }}
+                  />
+                </TableCell>
+              )}
               {visibleColumns.map((column, columnIndex) => (
                 <ResizableHeaderCell
                   key={column.id}
@@ -812,6 +912,17 @@ const Customers: React.FC = () => {
               const customerActions = customerWriteActions(customer);
               return (
               <TableRow key={customer.id} hover>
+                {availableBatchActions.length > 0 && (
+                  <TableCell padding="checkbox" sx={{ position: 'sticky', left: 0, zIndex: 4, width: CUSTOMER_SELECTION_COLUMN_WIDTH, minWidth: CUSTOMER_SELECTION_COLUMN_WIDTH, bgcolor: '#fff' }}>
+                    <Checkbox
+                      size="small"
+                      checked={isCustomerSelected(batchSelection, customer.id)}
+                      disabled={batchSelection.mode === 'filter_snapshot'}
+                      onChange={() => setBatchSelection((current) => toggleCustomerSelection(current, customer.id))}
+                      inputProps={{ 'aria-label': `选择客户 ${customer.name || customer.id}` }}
+                    />
+                  </TableCell>
+                )}
                 {visibleColumns.map((column, columnIndex) => (
                   <TableCell
                     key={column.id}
@@ -890,7 +1001,7 @@ const Customers: React.FC = () => {
             })}
             {items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={visibleColumns.length + 1} align="center" sx={{ py: 6, color: '#9ca3af' }}>
+                <TableCell colSpan={visibleColumns.length + 1 + (availableBatchActions.length ? 1 : 0)} align="center" sx={{ py: 6, color: '#9ca3af' }}>
                   暂无客户数据
                 </TableCell>
               </TableRow>
@@ -1104,6 +1215,32 @@ const Customers: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <CustomerBatchActionDialog
+        open={Boolean(batchOperation)}
+        operation={batchOperation}
+        selection={batchSelection}
+        manageableUsers={manageableUsers}
+        lifecycleConfigs={lifecycleConfigs}
+        onClose={() => setBatchOperation(null)}
+        onCreated={(job) => {
+          setBatchSelection(clearCustomerBatchSelection());
+          setBatchTasks((current) => [job, ...current.filter((item) => item.id !== job.id)]);
+          setBatchTaskId(job.id);
+          setBatchTaskDrawerOpen(true);
+        }}
+      />
+
+      <CustomerBatchTaskDrawer
+        open={batchTaskDrawerOpen}
+        jobId={batchTaskId}
+        jobs={batchTasks}
+        currentUserId={currentUser?.id}
+        canCancelAny={canCancelAnyBatchTask}
+        onSelectJob={setBatchTaskId}
+        onClose={() => setBatchTaskDrawerOpen(false)}
+        onJobChanged={() => void fetchItems(scopedFilters())}
+      />
 
       <TableViewSettingsDialog
         open={viewSettingsOpen}
