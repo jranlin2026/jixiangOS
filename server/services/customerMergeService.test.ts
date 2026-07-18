@@ -5,6 +5,8 @@ import {
 } from '../../src/types/customerMerge';
 import {
   buildCustomerMergeInputHash,
+  buildCustomerMergeUndoInputHash,
+  buildLockOrder,
   createCustomerMergeService,
   requiredFieldDecisions,
   validateMergeSelection,
@@ -34,6 +36,15 @@ const commonDecision = { fieldDecisions: {}, tagDecision: { selectedTagIds: [] }
 assert.notEqual(
   buildCustomerMergeInputHash({ mainCustomerId: 'c1', secondaryCustomerIds: ['c2'], ...commonDecision }),
   buildCustomerMergeInputHash({ mainCustomerId: 'c2', secondaryCustomerIds: ['c1'], ...commonDecision }),
+);
+assert.equal(buildCustomerMergeUndoInputHash(' ledger-1 '), buildCustomerMergeUndoInputHash('ledger-1'));
+assert.deepEqual(
+  buildLockOrder('c9', ['c3', 'c7'], ['i9', 'i2'], ['l7', 'l1'], ['orders', 'customer_todos']),
+  ['customer:c3', 'customer:c7', 'customer:c9', 'identity:i2', 'identity:i9', 'identity_link:l1', 'identity_link:l7', 'domain:orders', 'domain:customer_todos'],
+);
+assert.deepEqual(
+  buildLockOrder('c3', ['c9', 'c7'], ['i2', 'i9'], ['l1', 'l7'], ['orders', 'customer_todos']),
+  buildLockOrder('c9', ['c3', 'c7'], ['i9', 'i2'], ['l7', 'l1'], ['orders', 'customer_todos']),
 );
 
 const selectedCustomers = [

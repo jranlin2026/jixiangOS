@@ -154,6 +154,7 @@ export function matchesCustomerTagFilters(customer: Pick<Customer, 'manualTagIds
 export function buildCustomerWhere(filters: CustomerFilters, catalog?: CustomerTagCatalog): Prisma.Sql {
   const conditions: Prisma.Sql[] = [
     Prisma.sql`domain = ${STORAGE_KEYS.CUSTOMERS}`,
+    Prisma.sql`mergedIntoId IS NULL`,
     Prisma.sql`JSON_EXTRACT(data, '$.deletedAt') IS NULL`,
   ];
 

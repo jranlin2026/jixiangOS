@@ -95,7 +95,10 @@ export type CustomerAuditOperation = CustomerAtomicCommand['action']
   | 'update_todo'
   | 'complete_todo'
   | 'reopen_todo'
-  | 'cancel_todo';
+  | 'cancel_todo'
+  | 'merge_customer_main'
+  | 'merge_customer_secondary'
+  | 'undo_customer_merge';
 
 export interface CustomerAuditEventInput {
   /** Optional caller-provided correlation ID; normal single commands generate one. */

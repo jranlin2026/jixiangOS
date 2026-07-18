@@ -74,6 +74,9 @@ import {
   createCustomerManageableUsersHandler,
 } from './routes/customerManageableUsersRoutes';
 import { createCustomerBatchRouter } from './routes/customerBatchRoutes';
+import { createCustomerMergeRouter } from './routes/customerMergeRoutes';
+import { createCustomerMergeService } from './services/customerMergeService';
+import { resolveCanonicalCustomer } from './services/customerCanonicalService';
 import { createCoCreationService } from './services/coCreation/coCreationService';
 import {
   filterAssetStorageData,
@@ -139,6 +142,7 @@ const customerAtomicCommandService = createAuditedCustomerAtomicCommandService(p
 const customerTodoService = createCustomerTodoService(prisma);
 const customerManageableUsersService = createCustomerManageableUsersService(prisma);
 const customerBatchService = createCustomerBatchService(prisma);
+const customerMergeService = createCustomerMergeService(prisma);
 const customerBatchWorker = createCustomerBatchWorker({
   store: createPrismaCustomerBatchWorkerStore(prisma),
   handlers: new CustomerBatchJobHandlerRegistry([
@@ -216,6 +220,8 @@ const requireCustomerBatchReadAccess = createRequireAnyPermission(authService, [
   { permissionKey: PERMISSION_KEYS.CUSTOMER_BATCH_AUDIT_READ, action: 'read' },
   { permissionKey: PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE, action: 'write' },
 ]);
+const requireCustomerMergeAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_MERGE, 'write');
+const requireCustomerMergeUndoAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_MERGE_UNDO, 'write');
 const requireLeadListAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_LIST);
 const requireLeadCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_CREATE, 'write');
 const requireLeadConvertAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_CONVERT, 'write');
@@ -412,6 +418,12 @@ app.use('/api/customer-batch-jobs', createCustomerBatchRouter({
   requireRead: requireCustomerBatchReadAccess,
   requireAuthenticated: requireStorageAccess,
 }));
+app.use('/api', createCustomerMergeRouter({
+  service: customerMergeService,
+  loadCurrentAccess: (currentUser) => loadCustomerAccessContext(prisma, currentUser),
+  requireMerge: requireCustomerMergeAccess,
+  requireUndo: requireCustomerMergeUndoAccess,
+}));
 
 app.post('/api/crm-migration/import', requireStorageAccess, createDisabledCrmCustomerImportHandler());
 
@@ -503,7 +515,13 @@ app.delete('/api/customers/:id', requireCustomerDeleteAccess, async (req: Authen
 app.post('/api/customers/:id/follow-ups', requireCustomerProfileEditAccess, createCustomerFollowUpHandler(customerListService));
 
 app.get('/api/customers/:id', requireCustomerListAccess, async (req: AuthenticatedRequest, res) => {
-  const result = await customerListService.getById(routeParam(req.params.id), req.currentUser);
+  const customerId = routeParam(req.params.id);
+  const redirect = await resolveCanonicalCustomer(prisma, customerId);
+  if (redirect) {
+    res.status(409).json({ code: 409, message: '客户已合并，请查看主客户', data: redirect, canonicalCustomerId: redirect.canonicalCustomerId });
+    return;
+  }
+  const result = await customerListService.getById(customerId, req.currentUser);
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
