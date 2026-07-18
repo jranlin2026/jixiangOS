@@ -143,6 +143,17 @@ export function getCustomerAssociationDefinitions(): readonly CustomerAssociatio
   return CUSTOMER_ASSOCIATION_DEFINITIONS;
 }
 
+export interface CustomerAssociationAdapterDescriptor {
+  domain: CustomerAssociationDomain;
+}
+
+const CUSTOMER_ASSOCIATION_ADAPTERS: readonly CustomerAssociationAdapterDescriptor[] =
+  CUSTOMER_ASSOCIATION_DOMAIN_ORDER.map((domain) => ({ domain }));
+
+export function getCustomerAssociationAdapters(): readonly CustomerAssociationAdapterDescriptor[] {
+  return CUSTOMER_ASSOCIATION_ADAPTERS;
+}
+
 const DEFINITION_BY_PAIR = new Map(
   CUSTOMER_ASSOCIATION_DEFINITIONS.map((item) => [`${item.storageDomain}\u0000${item.pathKey}`, item]),
 );
@@ -277,6 +288,33 @@ export async function discoverCustomerAssociationDomains(
     || left.pathKey.localeCompare(right.pathKey)
     || left.recordId.localeCompare(right.recordId)
   ));
+}
+
+/**
+ * Merge prechecks fail closed when a stable customer reference is discovered
+ * without an explicit registry definition. This is intentionally stricter
+ * than soft-delete blocking: a known domain with a new JSON path is unknown
+ * merge behavior and must be registered before any IDs can be rewritten.
+ */
+export async function assertAssociationRegistryComplete(
+  tx: CustomerAssociationReader,
+  customerIds: string[],
+): Promise<void> {
+  const adapters = getCustomerAssociationAdapters();
+  if (
+    adapters.length !== CUSTOMER_ASSOCIATION_DOMAIN_ORDER.length
+    || adapters.some((adapter, index) => adapter.domain !== CUSTOMER_ASSOCIATION_DOMAIN_ORDER[index])
+  ) throw new Error('CUSTOMER_ASSOCIATION_REGISTRY_INCOMPLETE');
+
+  const discovered = await discoverCustomerAssociationDomains(tx, customerIds);
+  const unknown = Array.from(new Set(
+    discovered
+      .filter((item) => !item.definitionId)
+      .map((item) => `${item.storageDomain}:${item.pathKey}`),
+  )).sort();
+  if (unknown.length) {
+    throw new Error(`UNREGISTERED_CUSTOMER_ASSOCIATION_PATH:${unknown.join(',')}`);
+  }
 }
 
 export async function findBlockingCustomerAssociations(

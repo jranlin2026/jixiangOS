@@ -7,6 +7,7 @@ export type CustomerBusinessRecordRow = {
   domain: string;
   recordId: string;
   data: unknown;
+  recordRevision?: number | null;
   updatedAt: Date | string;
 };
 
@@ -14,6 +15,7 @@ export type CustomerRecordSnapshot = {
   rowId: string;
   recordId: string;
   customer: Customer;
+  recordRevision: number;
   businessRecordUpdatedAt: Date;
 };
 
@@ -21,10 +23,10 @@ type CustomerBusinessRecordWriter = {
   businessRecord: {
     findUnique(args: {
       where: { domain_recordId: { domain: string; recordId: string } };
-      select: { id: true; domain: true; recordId: true; data: true; updatedAt: true };
+      select: { id: true; domain: true; recordId: true; data: true; recordRevision: true; updatedAt: true };
     }): Promise<CustomerBusinessRecordRow | null>;
     updateMany(args: {
-      where: { id: string; domain: string; recordId: string; updatedAt: Date };
+      where: { id: string; domain: string; recordId: string; recordRevision: number; updatedAt: Date };
       data: Record<string, unknown>;
     }): Promise<{ count: number }>;
   };
@@ -62,10 +64,16 @@ export function mapCustomerBusinessRecord(row: CustomerBusinessRecordRow): Custo
   }
   const version = row.updatedAt instanceof Date ? row.updatedAt : new Date(row.updatedAt);
   if (Number.isNaN(version.getTime())) throw new Error('客户 BusinessRecord.updatedAt 无效');
+  const recordRevision = Number(row.recordRevision ?? customer.recordRevision ?? 0);
+  if (!Number.isSafeInteger(recordRevision) || recordRevision < 0) throw new Error('客户 recordRevision 无效');
+  if (customer.recordRevision !== undefined && customer.recordRevision !== recordRevision) {
+    throw new Error('客户 recordRevision 与 BusinessRecord 不一致');
+  }
   return {
     rowId: row.id,
     recordId: row.recordId,
     customer,
+    recordRevision,
     businessRecordUpdatedAt: version,
   };
 }
@@ -80,14 +88,14 @@ export function createCustomerBusinessRecordRepository(client: CustomerBusinessR
             recordId: customerId,
           },
         },
-        select: { id: true, domain: true, recordId: true, data: true, updatedAt: true },
+        select: { id: true, domain: true, recordId: true, data: true, recordRevision: true, updatedAt: true },
       });
       return row ? mapCustomerBusinessRecord(row) : null;
     },
 
     async lockById(customerId: string): Promise<CustomerRecordSnapshot | null> {
       const rows = await client.$queryRaw<CustomerBusinessRecordRow[]>(Prisma.sql`
-        SELECT id, domain, recordId, data, updatedAt
+        SELECT id, domain, recordId, data, recordRevision, updatedAt
         FROM business_records
         WHERE domain = ${STORAGE_KEYS.CUSTOMERS}
           AND recordId = ${customerId}
@@ -105,21 +113,25 @@ export function createCustomerBusinessRecordRepository(client: CustomerBusinessR
       if (customer.id !== snapshot.recordId) {
         throw new Error('不得通过客户更新修改客户ID');
       }
+      const nextRevision = snapshot.recordRevision + 1;
+      const nextCustomer: Customer = { ...customer, recordRevision: nextRevision };
       const result = await client.businessRecord.updateMany({
         where: {
           id: snapshot.rowId,
           domain: STORAGE_KEYS.CUSTOMERS,
           recordId: snapshot.recordId,
+          recordRevision: snapshot.recordRevision,
           updatedAt: snapshot.businessRecordUpdatedAt,
         },
         data: {
-          title: customer.name || customer.company || customer.id,
-          status: customer.lifecycleStatusCode || null,
-          owner: customer.owner || null,
-          customerId: customer.id,
-          amount: Number.isFinite(Number(customer.totalSpent)) ? Number(customer.totalSpent) : null,
+          title: nextCustomer.name || nextCustomer.company || nextCustomer.id,
+          status: nextCustomer.lifecycleStatusCode || null,
+          owner: nextCustomer.owner || null,
+          customerId: nextCustomer.id,
+          amount: Number.isFinite(Number(nextCustomer.totalSpent)) ? Number(nextCustomer.totalSpent) : null,
           eventAt,
-          data: toJson(customer),
+          recordRevision: nextRevision,
+          data: toJson(nextCustomer),
         },
       });
       if (result.count !== 1) throw new CustomerWriteConflictError();

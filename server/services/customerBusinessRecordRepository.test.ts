@@ -19,6 +19,7 @@ const row = {
   id: `${STORAGE_KEYS.CUSTOMERS}:${value.id}`,
   domain: STORAGE_KEYS.CUSTOMERS,
   recordId: value.id,
+  recordRevision: 0,
   data: JSON.stringify(value),
   updatedAt: VERSION,
 };
@@ -27,6 +28,7 @@ const snapshot = mapCustomerBusinessRecord(row);
 assert.equal(snapshot.customer.id, value.id);
 assert.equal(snapshot.rowId, row.id);
 assert.equal(snapshot.businessRecordUpdatedAt.getTime(), VERSION.getTime());
+assert.equal(snapshot.recordRevision, 0);
 assert.throws(
   () => mapCustomerBusinessRecord({ ...row, domain: STORAGE_KEYS.ORDERS }),
   /aaos_customers/,
@@ -59,8 +61,11 @@ assert.deepEqual(updates[0].where, {
   domain: STORAGE_KEYS.CUSTOMERS,
   recordId: value.id,
   updatedAt: VERSION,
+  recordRevision: 0,
 });
 assert.equal(updates[0].data.data.name, '更新后客户');
+assert.equal(updates[0].data.data.recordRevision, 1);
+assert.equal(updates[0].data.recordRevision, 1);
 assert.equal(updates[0].data.owner, '销售');
 assert.equal(updates[0].data.status, 'following');
 assert.equal(updates[0].data.customerId, value.id);

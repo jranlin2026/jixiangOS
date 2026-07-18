@@ -3,6 +3,7 @@ import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import {
   CUSTOMER_ASSOCIATION_DOMAIN_ORDER,
   CUSTOMER_ASSOCIATION_DEFINITIONS,
+  assertAssociationRegistryComplete,
   auditHistoricalCustomerAssociationIds,
   discoverCustomerAssociationDomains,
   findBlockingCustomerAssociations,
@@ -109,6 +110,24 @@ for (const label of ['订单关联', '订单申请关联', '交付关联', '退�
 assert.equal(blockers.some((label) => /跟进|成长|标签/.test(label)), false, 'intrinsic 子记录不能永久阻断删除');
 assert.equal(blockers.some((label) => label.includes('aaos_orders:data.orderData.customerId')), true);
 assert.equal(blockers.some((label) => label.includes('aaos_future_business:data.customerId')), true);
+
+await assert.rejects(
+  () => assertAssociationRegistryComplete(tx as any, ['c-1']),
+  /UNREGISTERED_CUSTOMER_ASSOCIATION_PATH:.*aaos_future_business/,
+  '未知关联域必须阻断客户合并',
+);
+const registeredOnlyTx = {
+  ...tx,
+  businessRecord: {
+    findMany: async () => businessRows.filter((row) => (
+      row.id !== 'unknown-domain' && row.id !== 'order-unknown-path'
+    )),
+  },
+};
+await assert.doesNotReject(
+  () => assertAssociationRegistryComplete(registeredOnlyTx as any, ['c-1']),
+  '全部关联路径已登记时应允许进入合并预检',
+);
 
 console.log('customer association registry tests passed');
 
