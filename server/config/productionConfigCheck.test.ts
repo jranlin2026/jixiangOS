@@ -15,6 +15,7 @@ const validProductionEnv: NodeJS.ProcessEnv = {
   CONTACT_IDENTITY_HMAC_KEY_VERSION: '1',
   CONTACT_IDENTITY_ENCRYPTION_KEY: Buffer.alloc(32, 3).toString('base64'),
   CONTACT_IDENTITY_ENCRYPTION_KEY_VERSION: '1',
+  CUSTOMER_PERMISSION_MIGRATION_SIGNING_KEY: 'StrongPermissionMigrationSigningKey-123',
   JIXIANG_DEPLOY_BACKUP: 'true',
   JIXIANG_MYSQL_PASSWORD: 'StrongDatabasePassword123!',
   JIXIANG_BACKUP_DIR: '/var/backups/jixiang-os',
@@ -37,4 +38,13 @@ assert.match(
 assert.match(
   collectProductionConfigErrors({ ...validProductionEnv, VITE_AI_API_BASE: 'http:\/\/127.0.0.1:3001' }).join('\n'),
   /VITE_AI_API_BASE/,
+);
+
+assert.match(
+  collectProductionConfigErrors({
+    ...validProductionEnv,
+    CUSTOMER_PERMISSION_MIGRATION_SIGNING_KEY: '',
+  }).join('\n'),
+  /CUSTOMER_PERMISSION_MIGRATION_SIGNING_KEY_REQUIRED/,
+  '生产配置检查必须在切换版本前发现启动必需的迁移签名密钥缺失',
 );

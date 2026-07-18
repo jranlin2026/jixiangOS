@@ -742,3 +742,31 @@ assert.equal(
   false,
   '订单申请空快照不得清空服务器审核记录',
 );
+
+const commissionUpdates: any[] = [];
+const commissionStoragePrisma: any = {
+  businessRecord: {
+    upsert: async (input: any) => {
+      commissionUpdates.push(input.update);
+      return input.update;
+    },
+    deleteMany: async () => ({ count: 0 }),
+  },
+};
+commissionStoragePrisma.$transaction = async (callback: (tx: any) => Promise<unknown>) => callback(commissionStoragePrisma);
+const commissionStorageResult = await createStorageService(commissionStoragePrisma).set(STORAGE_KEYS.COMMISSIONS, [{
+  id: 'commission-preserve-customer',
+  orderId: 'order-preserve-customer',
+  orderNo: 'ORD-PRESERVE',
+  customerName: '稳定客户',
+  commissionAmount: 100,
+  status: '待确认',
+  createdAt: '2026-07-18T00:00:00.000Z',
+  updatedAt: '2026-07-18T00:00:00.000Z',
+}]);
+assert.equal(commissionStorageResult.code, 0);
+assert.equal(
+  Object.prototype.hasOwnProperty.call(commissionUpdates[0], 'customerId'),
+  false,
+  '不含 customerId 的佣金载荷不得清空数据库稳定 customerId',
+);

@@ -293,7 +293,13 @@ if [ "$MIGRATE_STATUS_CODE" != "0" ] && ! echo "$MIGRATE_STATUS_OUTPUT" | grep -
   echo "Prisma migration status could not be safely classified" >&2
   false
 fi
+if echo "$MIGRATE_STATUS_OUTPUT" | grep -Fq "$EXPECTED_BASELINE"; then
+  echo "Confirmed Prisma baseline is still reported as unapplied; resolve the production baseline before deployment" >&2
+  false
+fi
 npm run db:deploy
+npx --no-install prisma migrate status
+npx --no-install prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma --exit-code
 
 echo "Finalizing persistent uploads..."
 if pm2 describe jixiang-os-api >/dev/null 2>&1; then
@@ -302,6 +308,14 @@ if pm2 describe jixiang-os-api >/dev/null 2>&1; then
 fi
 echo "Repairing legacy business records (idempotent)..."
 npm run business-records:repair -- --apply --confirm-production
+echo "Running customer release gates..."
+mkdir -p "$PERSISTENT_DATA_DIR/private_reports"
+npm run customer:demo-fixture-cleanup -- --apply --confirm-production --out "$PERSISTENT_DATA_DIR/private_reports/demo-refunds-${{TS}}.json"
+npx --no-install tsx server/services/customerBatchFoundation.integration.test.ts
+NODE_ENV=test npm test
+npm run customer:permission-audit
+npm run customer:association-audit -- --dry-run --out "$PERSISTENT_DATA_DIR/private_reports/customer-association-${{TS}}.json"
+npm run customer:batch-verify
 if [ -d "$APP_DIR/uploads" ] && [ ! -L "$APP_DIR/uploads" ]; then
   rsync -a --delete "$APP_DIR/uploads/" "$PERSISTENT_DATA_DIR/uploads/"
 fi
@@ -394,7 +408,10 @@ def main() -> int:
                 "VITE_USE_BACKEND_API": "true",
                 "VITE_AI_API_BASE": "/api",
             }
-            run_local(["npm.cmd" if os.name == "nt" else "npm", "run", "build"], env=build_env)
+            test_env = {**os.environ, "NODE_ENV": "test"}
+            npm = "npm.cmd" if os.name == "nt" else "npm"
+            run_local([npm, "test"], env=test_env)
+            run_local([npm, "run", "build"], env=build_env)
 
         release_zip = create_release_zip()
         client = ssh_connect(args.host, args.user, password, args.port)

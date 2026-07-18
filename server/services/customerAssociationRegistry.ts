@@ -24,6 +24,7 @@ export type CustomerAssociationStorageModel =
   | 'customer_json_subrecord'
   | 'app_storage';
 export type CustomerAssociationMergeAdapterKind = 'stable_id' | 'intrinsic_subrecord' | 'none';
+export type CustomerAssociationMissingAuditPolicy = 'ignore' | 'legacy_identity';
 
 export interface CustomerAssociationDefinition {
   id: string;
@@ -35,6 +36,8 @@ export interface CustomerAssociationDefinition {
   blockerLabel: string;
   blocksSoftDelete: boolean;
   mergeAdapterKind: CustomerAssociationMergeAdapterKind;
+  /** Missing optional/legacy mirror paths are not corruption unless this policy opts in. */
+  missingAuditPolicy: CustomerAssociationMissingAuditPolicy;
 }
 
 export interface DiscoveredCustomerAssociationPath {
@@ -65,6 +68,7 @@ const definition = (
   blocksSoftDelete: boolean,
   mergeAdapterKind: CustomerAssociationMergeAdapterKind,
   legacyNamePaths: string[] = [],
+  missingAuditPolicy: CustomerAssociationMissingAuditPolicy = 'ignore',
 ): CustomerAssociationDefinition => ({
   id,
   domain,
@@ -75,6 +79,7 @@ const definition = (
   blockerLabel,
   blocksSoftDelete,
   mergeAdapterKind,
+  missingAuditPolicy,
 });
 
 const businessStableDefinitions = (
@@ -84,6 +89,7 @@ const businessStableDefinitions = (
   blockerLabel: string,
   paths: string[],
   legacyNamePaths = ['data.customerName'],
+  legacyIdentityBackfillPaths = paths,
 ) => paths.map((pathKey) => definition(
   `${prefix}:${pathKey}`,
   domain,
@@ -94,6 +100,7 @@ const businessStableDefinitions = (
   true,
   'stable_id',
   legacyNamePaths,
+  legacyIdentityBackfillPaths.includes(pathKey) ? 'legacy_identity' : 'ignore',
 ));
 
 export const CUSTOMER_ASSOCIATION_DEFINITIONS: readonly CustomerAssociationDefinition[] = [
@@ -106,17 +113,18 @@ export const CUSTOMER_ASSOCIATION_DEFINITIONS: readonly CustomerAssociationDefin
     '订单申请关联',
     ['customerId', 'data.customerId', 'data.orderData.customerId'],
     ['data.customerName', 'data.orderData.customerName'],
+    ['customerId', 'data.orderData.customerId'],
   ),
   ...businessStableDefinitions('deliveries', 'deliveries', STORAGE_KEYS.DELIVERIES, '交付关联', ['customerId', 'data.customerId']),
   ...businessStableDefinitions('refunds', 'refunds', STORAGE_KEYS.REFUNDS, '退款关联', ['customerId', 'data.customerId']),
-  ...businessStableDefinitions('recovery_orders', 'recovery_orders', STORAGE_KEYS.RECOVERY_ORDERS, '挽回订单关联', ['customerId', 'data.customerId']),
+  ...businessStableDefinitions('recovery_orders', 'recovery_orders', STORAGE_KEYS.RECOVERY_ORDERS, '挽回订单关联', ['customerId', 'data.customerId'], ['data.customerName'], []),
   ...businessStableDefinitions('service_tickets', 'service_tickets', STORAGE_KEYS.SERVICE_TICKETS, '售后工单关联', ['customerId', 'data.customerId']),
   ...businessStableDefinitions('opportunities', 'opportunities', STORAGE_KEYS.OPPORTUNITIES, '商机关联', ['customerId', 'data.customerId']),
-  ...businessStableDefinitions('commissions', 'commissions_finance', STORAGE_KEYS.COMMISSIONS, '佣金/财务关联', ['customerId', 'data.customerId']),
-  definition('finance:incomes', 'commissions_finance', 'app_storage', STORAGE_KEYS.FINANCE, 'value.incomes[].customerId', '佣金/财务关联', true, 'stable_id', ['value.incomes[].customerName']),
-  definition('finance:expenses', 'commissions_finance', 'app_storage', STORAGE_KEYS.FINANCE, 'value.expenses[].customerId', '佣金/财务关联', true, 'stable_id', ['value.expenses[].customerName']),
-  definition('finance:transactions', 'commissions_finance', 'app_storage', STORAGE_KEYS.FINANCE, 'value.transactions[].customerId', '佣金/财务关联', true, 'stable_id', ['value.transactions[].customerName']),
-  definition('customer_todos:customerId', 'customer_todos', 'customer_todo', 'customer_todos', 'customerId', '待办关联', true, 'stable_id', ['customerName']),
+  ...businessStableDefinitions('commissions', 'commissions_finance', STORAGE_KEYS.COMMISSIONS, '佣金/财务关联', ['customerId', 'data.customerId'], ['data.customerName'], []),
+  definition('finance:incomes', 'commissions_finance', 'app_storage', STORAGE_KEYS.FINANCE, 'value.incomes[].customerId', '佣金/财务关联', true, 'stable_id', ['value.incomes[].customerName'], 'legacy_identity'),
+  definition('finance:expenses', 'commissions_finance', 'app_storage', STORAGE_KEYS.FINANCE, 'value.expenses[].customerId', '佣金/财务关联', true, 'stable_id', ['value.expenses[].customerName'], 'legacy_identity'),
+  definition('finance:transactions', 'commissions_finance', 'app_storage', STORAGE_KEYS.FINANCE, 'value.transactions[].customerId', '佣金/财务关联', true, 'stable_id', ['value.transactions[].customerName'], 'legacy_identity'),
+  definition('customer_todos:customerId', 'customer_todos', 'customer_todo', 'customer_todos', 'customerId', '待办关联', true, 'stable_id', ['customerName'], 'legacy_identity'),
   definition('customer_root:customerId', 'customer_json_subrecords', 'customer_json_subrecord', STORAGE_KEYS.CUSTOMERS, 'customerId', '客户根记录', false, 'intrinsic_subrecord'),
   definition('customer_followups', 'customer_json_subrecords', 'customer_json_subrecord', STORAGE_KEYS.CUSTOMERS, 'data.activityRecords[type=follow]', '客户跟进记录', false, 'intrinsic_subrecord'),
   definition('customer_activities', 'customer_json_subrecords', 'customer_json_subrecord', STORAGE_KEYS.CUSTOMERS, 'data.activityRecords[]', '客户活动记录', false, 'intrinsic_subrecord'),
@@ -352,6 +360,10 @@ export interface CustomerAssociationAuditRepairRow {
   reason:
     | 'CUSTOMER_IDENTITY_NOT_FOUND'
     | 'CUSTOMER_IDENTITY_AMBIGUOUS'
+    | 'CUSTOMER_REFERENCE_NOT_FOUND'
+    | 'CUSTOMER_REFERENCE_DELETED'
+    | 'CUSTOMER_REFERENCE_MISSING'
+    | 'CUSTOMER_REFERENCE_CONFLICT'
     | 'UNREGISTERED_CUSTOMER_ASSOCIATION_PATH';
 }
 
@@ -367,6 +379,12 @@ export interface CustomerAssociationAuditSummary {
   requiresAssociationWriterLock: true;
 }
 
+export function hasBlockingCustomerAssociationAuditWork(
+  summary: Pick<CustomerAssociationAuditSummary, 'backfillCandidates' | 'backfilled' | 'repairRows'>,
+): boolean {
+  return summary.backfillCandidates > summary.backfilled || summary.repairRows.length > 0;
+}
+
 type AuditCustomer = { id: string; names: string[] };
 type AuditCandidate = {
   storageModel: 'business_record' | 'lead_record' | 'customer_todo' | 'app_storage';
@@ -378,7 +396,8 @@ type AuditCandidate = {
    * re-resolved in the write transaction; retaining only the preflight ID
    * would turn a concurrent rename into an unsafe stable-ID backfill.
    */
-  legacyName: string;
+  legacyName?: string;
+  sourceReference?: { storageDomain: string; recordId: string };
   customerId: string;
   row: any;
   collection?: 'incomes' | 'expenses' | 'transactions';
@@ -449,10 +468,16 @@ export async function auditHistoricalCustomerAssociationIds(
     prisma.customerTodo?.findMany?.({ select: { id: true, customerId: true, customerName: true, updatedAt: true } }) ?? [],
     prisma.appStorage?.findUnique?.({ where: { key: STORAGE_KEYS.FINANCE } }) ?? null,
   ]);
-  const customers: AuditCustomer[] = businessRows
+  const customerSnapshots = businessRows
     .filter((row: any) => row.domain === STORAGE_KEYS.CUSTOMERS)
     .map((row: any) => readObject(row.data))
-    .filter((customer: any) => customer.id && !customer.deletedAt)
+    .filter((customer: any) => customer.id);
+  const customerStates = new Map<string, 'active' | 'deleted'>(customerSnapshots.map((customer: any) => [
+    String(customer.id),
+    customer.deletedAt || customer.isDeleted === true ? 'deleted' : 'active',
+  ]));
+  const customers: AuditCustomer[] = customerSnapshots
+    .filter((customer: any) => customerStates.get(String(customer.id)) === 'active')
     .map((customer: any) => ({
       id: String(customer.id),
       names: [String(customer.name || '').trim(), String(customer.company || '').trim()].filter(Boolean),
@@ -467,10 +492,105 @@ export async function auditHistoricalCustomerAssociationIds(
       repairRows.push(row);
     }
   };
+  const validateReference = (
+    storageDomain: string,
+    pathKey: string,
+    recordId: string,
+    value: unknown,
+  ) => {
+    const customerId = String(value || '').trim();
+    if (!customerId) return;
+    const state = customerStates.get(customerId);
+    if (state === 'active') return;
+    addRepair({
+      storageDomain,
+      pathKey,
+      recordId,
+      reason: state === 'deleted' ? 'CUSTOMER_REFERENCE_DELETED' : 'CUSTOMER_REFERENCE_NOT_FOUND',
+    });
+  };
+
+  for (const row of businessRows) {
+    const data = readObject(row.data);
+    const recordId = String(row.recordId || row.id);
+    const explicitStableReferences = [
+      { pathKey: 'customerId', value: row.customerId },
+      { pathKey: 'data.customerId', value: data.customerId },
+      { pathKey: 'data.orderData.customerId', value: readObject(data.orderData).customerId },
+      {
+        pathKey: 'data.subjectId|data.subjectType=customer',
+        value: String(data.subjectType || '') === 'customer' ? data.subjectId : undefined,
+      },
+    ];
+    for (const reference of explicitStableReferences) {
+      if (
+        String(reference.value || '').trim()
+        && !DEFINITION_BY_PAIR.has(`${row.domain}\u0000${reference.pathKey}`)
+      ) {
+        addRepair({
+          storageDomain: row.domain,
+          pathKey: reference.pathKey,
+          recordId,
+          reason: 'UNREGISTERED_CUSTOMER_ASSOCIATION_PATH',
+        });
+      }
+    }
+    const presentReferences: Array<{ pathKey: string; customerId: string }> = [];
+    for (const registered of CUSTOMER_ASSOCIATION_DEFINITIONS) {
+      if (
+        registered.storageModel !== 'business_record'
+        || registered.storageDomain !== row.domain
+        || registered.mergeAdapterKind !== 'stable_id'
+      ) continue;
+      const stableValue = registered.pathKey === 'customerId'
+        ? row.customerId
+        : registered.pathKey === 'data.subjectId|data.subjectType=customer'
+          ? String(data.subjectType || '') === 'customer' ? data.subjectId : undefined
+          : valueAtPath(row.data, registered.pathKey);
+      const customerId = String(stableValue || '').trim();
+      if (customerId) presentReferences.push({ pathKey: registered.pathKey, customerId });
+      validateReference(row.domain, registered.pathKey, recordId, stableValue);
+    }
+    if (new Set(presentReferences.map((item) => item.customerId)).size > 1) {
+      for (const reference of presentReferences) {
+        addRepair({
+          storageDomain: row.domain,
+          pathKey: reference.pathKey,
+          recordId,
+          reason: 'CUSTOMER_REFERENCE_CONFLICT',
+        });
+      }
+    }
+  }
+  for (const row of leadRows) {
+    const data = readObject(row.data);
+    validateReference('lead_records', 'data.customerId', String(row.id), data.customerId);
+    if (!String(data.customerId || '').trim()) {
+      const historicalCustomerIds = Array.from(new Set(
+        (Array.isArray(data.changeHistory) ? data.changeHistory : [])
+          .flatMap((entry: any) => Array.isArray(entry?.changes) ? entry.changes : [])
+          .filter((change: any) => String(change?.field || '').trim() === 'customerId')
+          .map((change: any) => String(change?.newValue || '').trim())
+          .filter(Boolean),
+      ));
+      if (historicalCustomerIds.length > 0) {
+        addRepair({
+          storageDomain: 'lead_records',
+          pathKey: 'data.customerId',
+          recordId: String(row.id),
+          reason: 'CUSTOMER_REFERENCE_MISSING',
+        });
+      }
+    }
+  }
+  for (const row of todoRows) {
+    validateReference('customer_todos', 'customerId', String(row.id), row.customerId);
+  }
+
   const candidates: AuditCandidate[] = [];
   const candidateKeys = new Set<string>();
   const addLegacyCandidate = (
-    base: Omit<AuditCandidate, 'customerId' | 'legacyName'>,
+    base: Omit<AuditCandidate, 'customerId' | 'legacyName' | 'sourceReference'>,
     legacyName: string,
   ) => {
     const matches = matchingCustomerIds(legacyName, customers);
@@ -489,11 +609,22 @@ export async function auditHistoricalCustomerAssociationIds(
       candidates.push({ ...base, legacyName, customerId: matches[0] });
     }
   };
+  const addStrongReferenceCandidate = (
+    base: Omit<AuditCandidate, 'customerId' | 'legacyName' | 'sourceReference'>,
+    customerId: string,
+    sourceReference: NonNullable<AuditCandidate['sourceReference']>,
+  ) => {
+    const key = `${base.storageDomain}\u0000${base.pathKey}\u0000${base.recordId}`;
+    if (candidateKeys.has(key)) return;
+    candidateKeys.add(key);
+    candidates.push({ ...base, customerId, sourceReference });
+  };
 
   for (const row of businessRows) {
     for (const registered of CUSTOMER_ASSOCIATION_DEFINITIONS) {
       if (registered.storageModel !== 'business_record' || registered.storageDomain !== row.domain) continue;
       if (!['customerId', 'data.customerId', 'data.orderData.customerId'].includes(registered.pathKey)) continue;
+      if (registered.missingAuditPolicy !== 'legacy_identity') continue;
       const stableValue = registered.pathKey === 'customerId'
         ? row.customerId
         : valueAtPath(row.data, registered.pathKey);
@@ -510,19 +641,82 @@ export async function auditHistoricalCustomerAssociationIds(
     }
   }
 
-  const leadDefinition = CUSTOMER_ASSOCIATION_DEFINITIONS.find((item) => item.id === 'lead_records:data.customerId')!;
-  for (const row of leadRows) {
+  const businessRowsByDomainRecord = new Map<string, any>(businessRows.map((row: any) => [
+    `${String(row.domain || '')}\u0000${String(row.recordId || row.id || '')}`,
+    row,
+  ]));
+  for (const row of businessRows) {
+    if (row.domain !== STORAGE_KEYS.COMMISSIONS) continue;
     const data = readObject(row.data);
-    if (String(data.customerId || '').trim()) continue;
-    const legacyName = firstLegacyName({ data }, leadDefinition);
-    if (!legacyName) continue;
-    addLegacyCandidate({
-      storageModel: 'lead_record',
-      storageDomain: 'lead_records',
-      pathKey: 'data.customerId',
-      recordId: String(row.id),
+    const sourceRecordId = String(data.orderId || '').trim();
+    const sourceBusinessType = String(data.sourceBusinessType || '').trim();
+    const formalOrderCommission = sourceBusinessType === 'formal_order';
+    if (sourceBusinessType === 'after_sales_recovery' || sourceBusinessType === 'refund_recovery') continue;
+    if (!sourceRecordId) {
+      if (formalOrderCommission) addRepair({
+        storageDomain: STORAGE_KEYS.COMMISSIONS,
+        pathKey: 'customerId',
+        recordId: String(row.recordId || row.id),
+        reason: 'CUSTOMER_REFERENCE_NOT_FOUND',
+      });
+      continue;
+    }
+    const source = businessRowsByDomainRecord.get(`${STORAGE_KEYS.ORDERS}\u0000${sourceRecordId}`);
+    if (!source) {
+      if (formalOrderCommission) addRepair({
+        storageDomain: STORAGE_KEYS.COMMISSIONS,
+        pathKey: 'customerId',
+        recordId: String(row.recordId || row.id),
+        reason: 'CUSTOMER_REFERENCE_NOT_FOUND',
+      });
+      continue;
+    }
+    const sourceData = readObject(source.data);
+    const sourceCustomerIds = Array.from(new Set([
+      String(source.customerId || '').trim(),
+      String(sourceData.customerId || '').trim(),
+    ].filter(Boolean)));
+    if (sourceCustomerIds.length !== 1 || customerStates.get(sourceCustomerIds[0]) !== 'active') {
+      if (formalOrderCommission) addRepair({
+        storageDomain: STORAGE_KEYS.COMMISSIONS,
+        pathKey: 'customerId',
+        recordId: String(row.recordId || row.id),
+        reason: sourceCustomerIds.length > 1
+          ? 'CUSTOMER_REFERENCE_CONFLICT'
+          : 'CUSTOMER_REFERENCE_NOT_FOUND',
+      });
+      continue;
+    }
+    const commissionDataCustomerId = String(data.customerId || '').trim();
+    if (commissionDataCustomerId && commissionDataCustomerId !== sourceCustomerIds[0]) {
+      addRepair({
+        storageDomain: STORAGE_KEYS.COMMISSIONS,
+        pathKey: 'data.customerId',
+        recordId: String(row.recordId || row.id),
+        reason: 'CUSTOMER_REFERENCE_CONFLICT',
+      });
+      continue;
+    }
+    const commissionCustomerId = String(row.customerId || '').trim();
+    if (commissionCustomerId) {
+      if (commissionCustomerId !== sourceCustomerIds[0]) addRepair({
+        storageDomain: STORAGE_KEYS.COMMISSIONS,
+        pathKey: 'customerId',
+        recordId: String(row.recordId || row.id),
+        reason: 'CUSTOMER_REFERENCE_CONFLICT',
+      });
+      continue;
+    }
+    addStrongReferenceCandidate({
+      storageModel: 'business_record',
+      storageDomain: STORAGE_KEYS.COMMISSIONS,
+      pathKey: 'customerId',
+      recordId: String(row.recordId || row.id),
       row,
-    }, legacyName);
+    }, sourceCustomerIds[0], {
+      storageDomain: STORAGE_KEYS.ORDERS,
+      recordId: sourceRecordId,
+    });
   }
 
   const todoDefinition = CUSTOMER_ASSOCIATION_DEFINITIONS.find((item) => item.id === 'customer_todos:customerId')!;
@@ -543,6 +737,12 @@ export async function auditHistoricalCustomerAssociationIds(
   for (const collection of ['incomes', 'expenses', 'transactions'] as const) {
     const items = Array.isArray(finance[collection]) ? finance[collection] : [];
     items.forEach((item: any, itemIndex: number) => {
+      validateReference(
+        STORAGE_KEYS.FINANCE,
+        `value.${collection}[].customerId`,
+        String(item?.id || `${collection}:${itemIndex}`),
+        item?.customerId,
+      );
       if (String(item?.customerId || '').trim() || !String(item?.customerName || '').trim()) return;
       addLegacyCandidate({
         storageModel: 'app_storage',
@@ -604,7 +804,39 @@ export async function auditHistoricalCustomerAssociationIds(
 
     const safeCandidates: AuditCandidate[] = [];
     for (const candidate of candidates) {
-      const currentMatches = matchingCustomerIds(candidate.legacyName, currentCustomers);
+      if (candidate.sourceReference) {
+        const source = await tx.businessRecord.findUnique({
+          where: {
+            domain_recordId: {
+              domain: candidate.sourceReference.storageDomain,
+              recordId: candidate.sourceReference.recordId,
+            },
+          },
+        });
+        const sourceData = readObject(source?.data);
+        const currentSourceCustomerIds = Array.from(new Set([
+          String(source?.customerId || '').trim(),
+          String(sourceData.customerId || '').trim(),
+        ].filter(Boolean)));
+        if (
+          currentSourceCustomerIds.length === 1
+          && currentSourceCustomerIds[0] === candidate.customerId
+          && currentCustomers.some((customer) => customer.id === candidate.customerId)
+        ) {
+          safeCandidates.push(candidate);
+          continue;
+        }
+        addRepair({
+          storageDomain: candidate.storageDomain,
+          pathKey: candidate.pathKey,
+          recordId: candidate.recordId,
+          reason: currentSourceCustomerIds.length > 1
+            ? 'CUSTOMER_REFERENCE_CONFLICT'
+            : 'CUSTOMER_REFERENCE_NOT_FOUND',
+        });
+        continue;
+      }
+      const currentMatches = matchingCustomerIds(candidate.legacyName || '', currentCustomers);
       if (currentMatches.length === 1 && currentMatches[0] === candidate.customerId) {
         safeCandidates.push(candidate);
         continue;

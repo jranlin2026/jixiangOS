@@ -22,6 +22,7 @@
     "customer-contacts:backfill": "tsx scripts/backfill-contact-identities.ts",
     "customer:permission-audit": "tsx scripts/audit-customer-permission-migration.ts",
     "customer:association-audit": "tsx scripts/audit-customer-associations.ts",
+    "customer:demo-fixture-cleanup": "tsx scripts/cleanup-demo-refund-fixtures.ts",
     "customer:batch-verify": "tsx scripts/verify-customer-batch-foundation.ts"
   },
   "overrides": {

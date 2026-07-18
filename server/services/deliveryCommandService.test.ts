@@ -112,6 +112,9 @@ class FakePrisma {
     };
     const tx = {
       businessRecord,
+      appStorage: {
+        upsert: async () => ({ key: 'customer-association-lock' }),
+      },
       $queryRaw: async (_strings: TemplateStringsArray, ...values: unknown[]) => {
         const row = staged.get(rowKey(String(values[0] || ''), String(values[1] || '')));
         return row ? [clone(row)] : [];
@@ -124,6 +127,16 @@ class FakePrisma {
 
   order(): Order { return clone(this.rows.get(rowKey(STORAGE_KEYS.ORDERS, 'order-delivery'))!.data); }
   deliveries() { return Array.from(this.rows.values()).filter((row) => row.domain === STORAGE_KEYS.DELIVERIES); }
+}
+
+{
+  const prisma = new FakePrisma();
+  const customer = prisma.rows.get(rowKey(STORAGE_KEYS.CUSTOMERS, 'customer-1'))!;
+  customer.data.deletedAt = NOW;
+  const service = createDeliveryCommandService(prisma as any, { now: () => new Date(NOW) });
+  const created = await service.createFromOrder('order-delivery', engineer);
+  assert.equal(created.code, 409, '已删除客户不得新建交付关联');
+  assert.equal(prisma.deliveries().length, 0);
 }
 
 {

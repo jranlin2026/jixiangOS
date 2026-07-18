@@ -43,6 +43,28 @@ assert.match(remote, /JIXIANG_PRISMA_BASELINE_CONFIRMED/);
 assert.match(remote, /MIGRATE_STATUS_CODE/);
 assert.match(remote, /have not yet been applied/);
 assertBefore('JIXIANG_PRISMA_BASELINE_CONFIRMED', 'npm run db:deploy', 'baseline 确认必须先于 migrate deploy');
+assert.match(
+  remote,
+  /MIGRATE_STATUS_OUTPUT.*grep.*EXPECTED_BASELINE/,
+  '已确认 baseline 仍显示未应用时必须停止，而不是直接 deploy',
+);
+const postDeployMigrationChecks = remote.slice(
+  remote.indexOf('npm run db:deploy'),
+  remote.indexOf('Finalizing persistent uploads'),
+);
+assert.match(postDeployMigrationChecks, /prisma migrate status/);
+assert.match(postDeployMigrationChecks, /prisma migrate diff/);
+assert.match(postDeployMigrationChecks, /--exit-code/);
+assert.match(remote, /npm run customer:permission-audit/);
+assert.match(remote, /npm run customer:association-audit -- --dry-run/);
+assert.match(remote, /npm run customer:batch-verify/);
+assert.match(remote, /npm run customer:demo-fixture-cleanup -- --apply --confirm-production/);
+assert.match(remote, /customerBatchFoundation\.integration\.test\.ts/);
+assert.match(remote, /npm test/);
+assertBefore('customer:demo-fixture-cleanup', 'npm run customer:association-audit', '已知演示数据必须先备份清理再做关联审计');
+assertBefore('npm run customer:permission-audit', 'echo "Switching release...', '客户权限审计必须先于版本切换');
+assertBefore('npm run customer:association-audit', 'echo "Switching release...', '客户关联审计必须先于版本切换');
+assertBefore('npm run customer:batch-verify', 'echo "Switching release...', '客户批量验证必须先于版本切换');
 
 assert.match(remote, /\. "\$APP_DIR\/\.env"/);
 assert.match(remote, /"\$NEW_DIR\/scripts\/mysql\/backup-linux\.sh"/);

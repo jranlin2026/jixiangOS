@@ -98,6 +98,20 @@ assert.throws(() => validateRuntimeConfig({
 assert.throws(() => validateRuntimeConfig({
   NODE_ENV: 'production',
   DATABASE_URL: 'mysql://user:StrongDatabasePassword!@127.0.0.1:3306/db',
+  AI_PROXY_HOST: '127.0.0.1',
+  AI_PROXY_PORT: '3001',
+  JIXIANG_DEFAULT_ADMIN_PASSWORD: 'StrongAdminPassword!',
+  JIXIANG_DEFAULT_USER_PASSWORD: 'StrongUserPassword!',
+  CORS_ORIGINS: 'https://crm.jixiang-ai.com',
+  CONTACT_IDENTITY_HMAC_KEY: Buffer.alloc(32, 1).toString('base64'),
+  CONTACT_IDENTITY_HMAC_KEY_VERSION: '1',
+  CONTACT_IDENTITY_ENCRYPTION_KEY: Buffer.alloc(32, 2).toString('base64'),
+  CONTACT_IDENTITY_ENCRYPTION_KEY_VERSION: '1',
+}), /CUSTOMER_PERMISSION_MIGRATION_SIGNING_KEY_REQUIRED/);
+
+assert.throws(() => validateRuntimeConfig({
+  NODE_ENV: 'production',
+  DATABASE_URL: 'mysql://user:StrongDatabasePassword!@127.0.0.1:3306/db',
   AI_PROXY_PORT: '3001',
   JIXIANG_DEFAULT_ADMIN_PASSWORD: 'StrongAdminPassword!',
   JIXIANG_DEFAULT_USER_PASSWORD: 'StrongUserPassword!',
@@ -173,4 +187,5 @@ assert.doesNotThrow(() => validateRuntimeConfig({
   CONTACT_IDENTITY_HMAC_KEY_VERSION: '1',
   CONTACT_IDENTITY_ENCRYPTION_KEY: Buffer.alloc(32, 2).toString('base64'),
   CONTACT_IDENTITY_ENCRYPTION_KEY_VERSION: '1',
+  CUSTOMER_PERMISSION_MIGRATION_SIGNING_KEY: 'StrongPermissionMigrationSigningKey-123',
 }));

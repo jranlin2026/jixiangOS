@@ -2,7 +2,10 @@ import 'dotenv/config';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { prisma } from '../server/db/client';
-import { auditHistoricalCustomerAssociationIds } from '../server/services/customerAssociationRegistry';
+import {
+  auditHistoricalCustomerAssociationIds,
+  hasBlockingCustomerAssociationAuditWork,
+} from '../server/services/customerAssociationRegistry';
 
 const apply = process.argv.includes('--apply');
 const dryRun = process.argv.includes('--dry-run');
@@ -23,7 +26,7 @@ try {
   }
   process.stdout.write(serialized);
 
-  if (summary.repairRows.length > 0) process.exitCode = 2;
+  if (hasBlockingCustomerAssociationAuditWork(summary)) process.exitCode = 2;
 } finally {
   await prisma.$disconnect();
 }

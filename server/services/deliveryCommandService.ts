@@ -20,6 +20,7 @@ import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { resolveLatestCompletedDeliveryStage, resolveProductDeliveryStages } from '../../src/shared/utils/deliveryStages';
+import { lockCustomerAssociationScope } from './customerAssociationRegistry';
 
 type DeliveryCommandPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$transaction'>;
 type LockedRow = { id: string; domain: string; recordId: string; data: unknown };
@@ -344,7 +345,28 @@ export function createDeliveryCommandService(
       const cleanOrderId = String(orderId || '').trim();
       if (!cleanOrderId) return failure('订单ID不能为空', 400);
       const result = await execute(() => prisma.$transaction(async (transaction) => {
+        // Discover the stable customer ID without taking the order row lock first.
+        // Every customer-association writer must acquire the shared association
+        // lock before any business row lock, matching delete/merge lock ordering.
+        const initialOrderRow = await transaction.businessRecord.findUnique({
+          where: { domain_recordId: { domain: STORAGE_KEYS.ORDERS, recordId: cleanOrderId } },
+        });
+        if (!initialOrderRow) throw new DeliveryCommandError(404, '订单不存在');
+        const initialOrder = parseObject<Order>(initialOrderRow.data, '订单');
+        const customerId = String(initialOrder.customerId || '').trim();
+        if (!customerId) throw new DeliveryCommandError(409, '订单缺少客户稳定ID');
+        await lockCustomerAssociationScope(transaction, [customerId]);
+        const customerRow = await transaction.businessRecord.findUnique({
+          where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: customerId } },
+        });
+        const customer = customerRow ? parseObject<{ id?: string; deletedAt?: string }>(customerRow.data, '客户') : null;
+        if (!customer || customer.id !== customerId || customer.deletedAt) {
+          throw new DeliveryCommandError(409, '订单关联客户不存在或已删除');
+        }
         const order = await lockRecord<Order>(transaction, STORAGE_KEYS.ORDERS, cleanOrderId, '订单');
+        if (order.customerId !== customerId) {
+          throw new DeliveryCommandError(409, '订单关联客户已变更，请刷新后重试');
+        }
         if (!relationVisible(order, undefined, scope)) throw new DeliveryCommandError(403, '无权为该订单创建交付单');
         if (order.deletedAt) throw new DeliveryCommandError(409, '已删除订单不能创建交付单');
         if (order.status !== '已确认') throw new DeliveryCommandError(409, '只有已确认订单可以创建交付单');

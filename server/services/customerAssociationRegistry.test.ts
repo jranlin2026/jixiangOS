@@ -6,6 +6,7 @@ import {
   auditHistoricalCustomerAssociationIds,
   discoverCustomerAssociationDomains,
   findBlockingCustomerAssociations,
+  hasBlockingCustomerAssociationAuditWork,
 } from './customerAssociationRegistry';
 
 const customer = {
@@ -272,5 +273,358 @@ await assert.rejects(
 );
 assert.equal(auditCheckpoints.has('association-conflict'), false, 'CAS 失败不得推进 checkpoint');
 forceBusinessConflict = false;
+
+const unconvertedLeadAudit = await auditHistoricalCustomerAssociationIds({
+  businessRecord: {
+    findMany: async () => [{
+      id: 'customer-unconverted-name-match',
+      domain: STORAGE_KEYS.CUSTOMERS,
+      recordId: 'customer-unconverted-name-match',
+      customerId: 'customer-unconverted-name-match',
+      updatedAt: AUDIT_AT,
+      data: {
+        ...customer,
+        id: 'customer-unconverted-name-match',
+        name: '尚未转客户的同名线索',
+      },
+    }],
+  },
+  leadRecord: {
+    findMany: async () => [{
+      id: 'lead-pending-name-match',
+      data: {
+        id: 'lead-pending-name-match',
+        name: '尚未转客户的同名线索',
+        status: '新线索',
+        lifecycleStatusCode: 'pending_followup',
+      },
+      updatedAt: AUDIT_AT,
+    }],
+  },
+  customerTodo: { findMany: async () => [] },
+  appStorage: { findUnique: async () => null },
+} as any, { apply: false });
+assert.equal(unconvertedLeadAudit.backfillCandidates, 0, '未转客户线索不得仅凭姓名生成客户关联回填');
+assert.deepEqual(unconvertedLeadAudit.repairRows, [], '未转客户线索缺少 customerId 是正常状态');
+
+const convertedLeadMissingReferenceAudit = await auditHistoricalCustomerAssociationIds({
+  businessRecord: {
+    findMany: async () => [{
+      id: 'customer-converted-lead',
+      domain: STORAGE_KEYS.CUSTOMERS,
+      recordId: 'customer-converted-lead',
+      customerId: 'customer-converted-lead',
+      updatedAt: AUDIT_AT,
+      data: { ...customer, id: 'customer-converted-lead', name: '已转客户线索' },
+    }],
+  },
+  leadRecord: {
+    findMany: async () => [{
+      id: 'lead-converted-reference-lost',
+      data: {
+        id: 'lead-converted-reference-lost',
+        name: '已转客户线索',
+        changeHistory: [{
+          changes: [{ field: 'customerId', oldValue: null, newValue: 'customer-converted-lead' }],
+        }],
+      },
+      updatedAt: AUDIT_AT,
+    }],
+  },
+  customerTodo: { findMany: async () => [] },
+  appStorage: { findUnique: async () => null },
+} as any, { apply: false });
+assert.deepEqual(convertedLeadMissingReferenceAudit.repairRows, [{
+  storageDomain: 'lead_records',
+  pathKey: 'data.customerId',
+  recordId: 'lead-converted-reference-lost',
+  reason: 'CUSTOMER_REFERENCE_MISSING',
+}], '转换历史已记录稳定客户 ID 时，不得忽略丢失的线索关联');
+
+const canonicalApplicationAudit = await auditHistoricalCustomerAssociationIds({
+  businessRecord: {
+    findMany: async () => [
+      {
+        id: 'customer-application-canonical',
+        domain: STORAGE_KEYS.CUSTOMERS,
+        recordId: 'customer-application-canonical',
+        customerId: 'customer-application-canonical',
+        updatedAt: AUDIT_AT,
+        data: { ...customer, id: 'customer-application-canonical', name: '规范订单客户' },
+      },
+      {
+        id: 'application-canonical',
+        domain: STORAGE_KEYS.ORDER_APPLICATIONS,
+        recordId: 'application-canonical',
+        customerId: 'customer-application-canonical',
+        updatedAt: AUDIT_AT,
+        data: {
+          orderData: {
+            customerId: 'customer-application-canonical',
+            customerName: '规范订单客户',
+          },
+        },
+      },
+    ],
+  },
+  leadRecord: { findMany: async () => [] },
+  customerTodo: { findMany: async () => [] },
+  appStorage: { findUnique: async () => null },
+} as any, { apply: false });
+assert.equal(canonicalApplicationAudit.backfillCandidates, 0, '订单申请不得要求非规范 data.customerId 副本');
+assert.deepEqual(canonicalApplicationAudit.repairRows, []);
+
+const danglingReferenceAudit = await auditHistoricalCustomerAssociationIds({
+  businessRecord: {
+    findMany: async () => [
+      {
+        id: 'customer-reference-source',
+        domain: STORAGE_KEYS.CUSTOMERS,
+        recordId: 'customer-reference-source',
+        customerId: 'customer-reference-source',
+        updatedAt: AUDIT_AT,
+        data: { ...customer, id: 'customer-reference-source' },
+      },
+      {
+        id: 'refund-dangling-reference',
+        domain: STORAGE_KEYS.REFUNDS,
+        recordId: 'refund-dangling-reference',
+        customerId: 'customer-does-not-exist',
+        updatedAt: AUDIT_AT,
+        data: { customerId: 'customer-does-not-exist', customerName: '历史退款客户' },
+      },
+    ],
+  },
+  leadRecord: { findMany: async () => [] },
+  customerTodo: { findMany: async () => [] },
+  appStorage: { findUnique: async () => null },
+} as any, { apply: false });
+assert.deepEqual(
+  danglingReferenceAudit.repairRows.map((row) => `${row.pathKey}:${String(row.reason)}`).sort(),
+  [
+    'customerId:CUSTOMER_REFERENCE_NOT_FOUND',
+    'data.customerId:CUSTOMER_REFERENCE_NOT_FOUND',
+  ],
+  '非空 customerId 也必须校验其客户是否真实存在',
+);
+
+const conflictingReferenceAudit = await auditHistoricalCustomerAssociationIds({
+  businessRecord: {
+    findMany: async () => [
+      {
+        id: 'customer-conflict-one', domain: STORAGE_KEYS.CUSTOMERS,
+        recordId: 'customer-conflict-one', customerId: 'customer-conflict-one', updatedAt: AUDIT_AT,
+        data: { ...customer, id: 'customer-conflict-one', name: '冲突客户一' },
+      },
+      {
+        id: 'customer-conflict-two', domain: STORAGE_KEYS.CUSTOMERS,
+        recordId: 'customer-conflict-two', customerId: 'customer-conflict-two', updatedAt: AUDIT_AT,
+        data: { ...customer, id: 'customer-conflict-two', name: '冲突客户二' },
+      },
+      {
+        id: 'order-conflicting-reference', domain: STORAGE_KEYS.ORDERS,
+        recordId: 'order-conflicting-reference', customerId: 'customer-conflict-one', updatedAt: AUDIT_AT,
+        data: { customerId: 'customer-conflict-two', customerName: '冲突客户一' },
+      },
+    ],
+  },
+  leadRecord: { findMany: async () => [] },
+  customerTodo: { findMany: async () => [] },
+  appStorage: { findUnique: async () => null },
+} as any, { apply: false });
+assert.deepEqual(
+  conflictingReferenceAudit.repairRows.map((row) => `${row.pathKey}:${String(row.reason)}`).sort(),
+  [
+    'customerId:CUSTOMER_REFERENCE_CONFLICT',
+    'data.customerId:CUSTOMER_REFERENCE_CONFLICT',
+  ],
+  '同一业务记录的稳定客户 ID 不一致时必须阻止发布',
+);
+
+const unknownDanglingPathAudit = await auditHistoricalCustomerAssociationIds({
+  businessRecord: {
+    findMany: async () => [{
+      id: 'future-domain-dangling',
+      domain: 'aaos_future_customer_business',
+      recordId: 'future-domain-dangling',
+      customerId: 'customer-future-ghost',
+      updatedAt: AUDIT_AT,
+      data: {},
+    }],
+  },
+  leadRecord: { findMany: async () => [] },
+  customerTodo: { findMany: async () => [] },
+  appStorage: { findUnique: async () => null },
+} as any, { apply: false });
+assert.deepEqual(
+  unknownDanglingPathAudit.repairRows.map((row) => `${row.pathKey}:${String(row.reason)}`),
+  ['customerId:UNREGISTERED_CUSTOMER_ASSOCIATION_PATH'],
+  '未知业务域即使引用不存在客户也必须 fail closed',
+);
+
+const formalOrderCommissionRows = [
+  {
+    id: 'customer-formal-order', domain: STORAGE_KEYS.CUSTOMERS,
+    recordId: 'customer-formal-order', customerId: 'customer-formal-order', updatedAt: AUDIT_AT,
+    data: { ...customer, id: 'customer-formal-order', name: '正式订单客户' },
+  },
+  {
+    id: 'order-formal-source', domain: STORAGE_KEYS.ORDERS,
+    recordId: 'order-formal-source', customerId: 'customer-formal-order', updatedAt: AUDIT_AT,
+    data: { customerId: 'customer-formal-order', customerName: '正式订单客户' },
+  },
+  {
+    id: 'commission-missing-stable-customer', domain: STORAGE_KEYS.COMMISSIONS,
+    recordId: 'commission-missing-stable-customer', customerId: null, updatedAt: AUDIT_AT,
+    data: {
+      id: 'commission-missing-stable-customer',
+      orderId: 'order-formal-source',
+      customerName: '正式订单客户',
+      sourceBusinessType: 'formal_order',
+    },
+  },
+];
+const formalOrderCommissionPrisma: any = {
+  businessRecord: {
+    findMany: async ({ where }: any = {}) => where?.domain
+      ? formalOrderCommissionRows.filter((row) => row.domain === where.domain)
+      : formalOrderCommissionRows,
+    findUnique: async ({ where }: any) => formalOrderCommissionRows.find((row) => (
+      row.domain === where.domain_recordId.domain
+      && row.recordId === where.domain_recordId.recordId
+    )) || null,
+    updateMany: async ({ where, data }: any) => {
+      const row = formalOrderCommissionRows.find((item) => item.id === where.id && item.updatedAt === where.updatedAt);
+      if (!row) return { count: 0 };
+      Object.assign(row, data);
+      return { count: 1 };
+    },
+  },
+  leadRecord: { findMany: async () => [] },
+  customerTodo: { findMany: async () => [] },
+  appStorage: {
+    findUnique: async () => null,
+    upsert: async ({ create }: any) => create,
+  },
+  $queryRaw: async () => [],
+  $transaction: async (operation: any) => operation(formalOrderCommissionPrisma),
+};
+const formalOrderCommissionAudit = await auditHistoricalCustomerAssociationIds(formalOrderCommissionPrisma, { apply: false });
+assert.equal(formalOrderCommissionAudit.backfillCandidates, 1, '正式订单佣金应从来源订单回填唯一稳定 customerId');
+assert.deepEqual(formalOrderCommissionAudit.repairRows, []);
+assert.equal(hasBlockingCustomerAssociationAuditWork(formalOrderCommissionAudit), true, '待回填候选也必须阻止发布');
+const appliedFormalOrderCommissionAudit = await auditHistoricalCustomerAssociationIds(
+  formalOrderCommissionPrisma,
+  { apply: true, checkpointKey: 'formal-order-commission-audit' },
+);
+assert.equal(appliedFormalOrderCommissionAudit.backfilled, 1);
+assert.equal(hasBlockingCustomerAssociationAuditWork(appliedFormalOrderCommissionAudit), false, '已成功应用的候选不应使 --apply 误报失败');
+assert.equal(formalOrderCommissionRows[2].customerId, 'customer-formal-order');
+assert.equal('customerId' in formalOrderCommissionRows[2].data, false, 'Commission JSON 不得写入不存在的 customerId 副本');
+const cleanFormalOrderCommissionAudit = await auditHistoricalCustomerAssociationIds(
+  formalOrderCommissionPrisma,
+  { apply: false },
+);
+assert.equal(hasBlockingCustomerAssociationAuditWork(cleanFormalOrderCommissionAudit), false);
+
+const conflictingCommissionSourceAudit = await auditHistoricalCustomerAssociationIds({
+  businessRecord: {
+    findMany: async () => [
+      {
+        id: 'customer-commission-source-a', domain: STORAGE_KEYS.CUSTOMERS,
+        recordId: 'customer-commission-source-a', customerId: 'customer-commission-source-a', updatedAt: AUDIT_AT,
+        data: { ...customer, id: 'customer-commission-source-a', name: '佣金来源客户A' },
+      },
+      {
+        id: 'customer-commission-data-b', domain: STORAGE_KEYS.CUSTOMERS,
+        recordId: 'customer-commission-data-b', customerId: 'customer-commission-data-b', updatedAt: AUDIT_AT,
+        data: { ...customer, id: 'customer-commission-data-b', name: '佣金快照客户B' },
+      },
+      {
+        id: 'order-commission-source-a', domain: STORAGE_KEYS.ORDERS,
+        recordId: 'order-commission-source-a', customerId: 'customer-commission-source-a', updatedAt: AUDIT_AT,
+        data: { customerId: 'customer-commission-source-a', customerName: '佣金来源客户A' },
+      },
+      {
+        id: 'commission-source-conflict', domain: STORAGE_KEYS.COMMISSIONS,
+        recordId: 'commission-source-conflict', customerId: null, updatedAt: AUDIT_AT,
+        data: {
+          id: 'commission-source-conflict',
+          orderId: 'order-commission-source-a',
+          customerId: 'customer-commission-data-b',
+        },
+      },
+    ],
+  },
+  leadRecord: { findMany: async () => [] },
+  customerTodo: { findMany: async () => [] },
+  appStorage: { findUnique: async () => null },
+} as any, { apply: false });
+assert.equal(conflictingCommissionSourceAudit.backfillCandidates, 0, '来源订单与佣金 JSON 客户冲突时不得自动回填');
+assert.ok(conflictingCommissionSourceAudit.repairRows.some((row) => (
+  row.recordId === 'commission-source-conflict'
+  && row.pathKey === 'data.customerId'
+  && row.reason === 'CUSTOMER_REFERENCE_CONFLICT'
+)));
+
+const missingFormalOrderCommissionAudit = await auditHistoricalCustomerAssociationIds({
+  businessRecord: {
+    findMany: async () => [{
+      id: 'commission-missing-formal-order',
+      domain: STORAGE_KEYS.COMMISSIONS,
+      recordId: 'commission-missing-formal-order',
+      customerId: null,
+      updatedAt: AUDIT_AT,
+      data: {
+        id: 'commission-missing-formal-order',
+        orderId: 'order-no-longer-exists',
+        sourceBusinessType: 'formal_order',
+      },
+    }],
+  },
+  leadRecord: { findMany: async () => [] },
+  customerTodo: { findMany: async () => [] },
+  appStorage: { findUnique: async () => null },
+} as any, { apply: false });
+assert.ok(missingFormalOrderCommissionAudit.repairRows.some((row) => (
+  row.recordId === 'commission-missing-formal-order'
+  && row.pathKey === 'customerId'
+  && row.reason === 'CUSTOMER_REFERENCE_NOT_FOUND'
+)), '正式订单佣金的来源订单缺失时必须阻止发布');
+
+const wrongExistingCommissionCustomerAudit = await auditHistoricalCustomerAssociationIds({
+  businessRecord: {
+    findMany: async () => [
+      {
+        id: 'customer-order-authority', domain: STORAGE_KEYS.CUSTOMERS,
+        recordId: 'customer-order-authority', customerId: 'customer-order-authority', updatedAt: AUDIT_AT,
+        data: { ...customer, id: 'customer-order-authority', name: '订单权威客户' },
+      },
+      {
+        id: 'customer-wrong-commission', domain: STORAGE_KEYS.CUSTOMERS,
+        recordId: 'customer-wrong-commission', customerId: 'customer-wrong-commission', updatedAt: AUDIT_AT,
+        data: { ...customer, id: 'customer-wrong-commission', name: '错误佣金客户' },
+      },
+      {
+        id: 'order-customer-authority', domain: STORAGE_KEYS.ORDERS,
+        recordId: 'order-customer-authority', customerId: 'customer-order-authority', updatedAt: AUDIT_AT,
+        data: { customerId: 'customer-order-authority' },
+      },
+      {
+        id: 'commission-wrong-existing-customer', domain: STORAGE_KEYS.COMMISSIONS,
+        recordId: 'commission-wrong-existing-customer', customerId: 'customer-wrong-commission', updatedAt: AUDIT_AT,
+        data: { orderId: 'order-customer-authority', sourceBusinessType: 'formal_order' },
+      },
+    ],
+  },
+  leadRecord: { findMany: async () => [] },
+  customerTodo: { findMany: async () => [] },
+  appStorage: { findUnique: async () => null },
+} as any, { apply: false });
+assert.ok(wrongExistingCommissionCustomerAudit.repairRows.some((row) => (
+  row.recordId === 'commission-wrong-existing-customer'
+  && row.pathKey === 'customerId'
+  && row.reason === 'CUSTOMER_REFERENCE_CONFLICT'
+)), '佣金已有的有效客户 ID 也必须与来源订单交叉校验');
 
 console.log('customer association audit tests passed');

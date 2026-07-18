@@ -270,12 +270,22 @@ function businessRecordId(domain: string, recordId: string): string {
   return compactIdentifier(`${domain}:${recordId}`, BUSINESS_RECORD_ID_MAX_LENGTH);
 }
 
+function canonicalCustomerIdForBusinessItem(domain: string, item: Record<string, any>): string | null | undefined {
+  if (Object.prototype.hasOwnProperty.call(item, 'customerId')) return nullableText(item.customerId);
+  if (domain === STORAGE_KEYS.ORDER_APPLICATIONS) {
+    const orderData = normalizeLead(item.orderData);
+    if (Object.prototype.hasOwnProperty.call(orderData, 'customerId')) return nullableText(orderData.customerId);
+  }
+  return undefined;
+}
+
 function businessRecordUpdate(domain: string, item: Record<string, any>) {
+  const customerId = canonicalCustomerIdForBusinessItem(domain, item);
   return {
     title: titleValue(domain, item),
     status: nullableText(item.status),
     owner: ownerValue(item),
-    customerId: nullableText(item.customerId),
+    ...(customerId !== undefined ? { customerId } : {}),
     orderId: nullableText(item.orderId),
     amount: amountValue(item),
     eventAt: eventDate(item),
@@ -284,11 +294,13 @@ function businessRecordUpdate(domain: string, item: Record<string, any>) {
 }
 
 function businessRecordCreate(domain: string, recordId: string, item: Record<string, any>) {
+  const update = businessRecordUpdate(domain, item);
   return {
     id: businessRecordId(domain, recordId),
     domain,
     recordId,
-    ...businessRecordUpdate(domain, item),
+    ...update,
+    customerId: update.customerId ?? null,
   };
 }
 
