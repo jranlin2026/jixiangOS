@@ -145,6 +145,14 @@ export interface Customer {
   deletedAt?: Timestamp;
   deletedBy?: string;
   deleteReason?: string;
+  /** 合并后的规范客户；存在时当前记录只可用于受控跳转和撤销。 */
+  mergedIntoId?: ID;
+  mergedAt?: Timestamp;
+  mergedById?: ID;
+  mergedByName?: string;
+  mergeLedgerId?: ID;
+  /** 客户业务写入的单调版本号，用于合并与撤销并发保护。 */
+  recordRevision?: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

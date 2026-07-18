@@ -289,6 +289,12 @@ model BusinessRecord {
   orderId    String?  @db.VarChar(80)
   amount     Decimal? @db.Decimal(14, 2)
   eventAt    DateTime?
+  mergedIntoId  String?   @db.VarChar(80)
+  mergedAt      DateTime?
+  mergedById    String?   @db.VarChar(64)
+  mergedByName  String?   @db.VarChar(100)
+  mergeLedgerId String?   @db.VarChar(64)
+  recordRevision Int      @default(0)
   data       Json
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -302,6 +308,8 @@ model BusinessRecord {
   @@index([customerId])
   @@index([orderId])
   @@index([eventAt])
+  @@index([domain, mergedIntoId])
+  @@index([domain, mergeLedgerId])
   @@map("business_records")
 }
 
@@ -621,4 +629,60 @@ model CustomerDuplicateGroup {
   @@index([status, createdAt])
   @@index([contactIdentityId])
   @@map("customer_duplicate_groups")
+}
+
+model CustomerMergeLedger {
+  id                   String   @id @default(cuid()) @db.VarChar(64)
+  duplicateGroupId     String?  @db.VarChar(64)
+  mainCustomerId       String   @db.VarChar(80)
+  secondaryCustomerIds Json
+  fieldDecisions       Json
+  tagDecision          Json
+  encryptedCustomerSnapshots String @db.LongText
+  snapshotKeyVersion   Int
+  guardManifest        Json
+  reason               String   @db.Text
+  actorId              String   @db.VarChar(64)
+  actorName            String   @db.VarChar(100)
+  mergeInputHash       String   @db.Char(64)
+  mergeIdempotencyKey  String   @db.VarChar(80)
+  mergeIdempotencyFingerprint String @db.Char(64)
+  mergedAt             DateTime @default(now())
+  undoDeadlineAt       DateTime
+  status               String   @default("merged") @db.VarChar(32)
+  undoneAt             DateTime?
+  undoneById           String?  @db.VarChar(64)
+  undoneByName         String?  @db.VarChar(100)
+  undoInputHash        String?  @db.Char(64)
+  undoIdempotencyKey   String?  @db.VarChar(80)
+  undoIdempotencyFingerprint String? @db.Char(64)
+  lastUndoBlockedAt    DateTime?
+  undoConflicts        Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  entries              CustomerMergeLedgerEntry[]
+
+  @@index([mainCustomerId])
+  @@index([duplicateGroupId])
+  @@index([status, undoDeadlineAt])
+  @@unique([actorId, mergeIdempotencyKey])
+  @@unique([undoneById, undoIdempotencyKey])
+  @@map("customer_merge_ledgers")
+}
+
+model CustomerMergeLedgerEntry {
+  id             String   @id @default(cuid()) @db.VarChar(64)
+  ledgerId       String   @db.VarChar(64)
+  domain         String   @db.VarChar(80)
+  recordId       String   @db.VarChar(160)
+  beforeSnapshot Json
+  afterSnapshot  Json
+  rowRevision    Int?
+  updatedAtValue DateTime?
+  createdAt      DateTime @default(now())
+  ledger         CustomerMergeLedger @relation(fields: [ledgerId], references: [id], onDelete: Cascade)
+
+  @@unique([ledgerId, domain, recordId])
+  @@index([domain, recordId])
+  @@map("customer_merge_ledger_entries")
 }
