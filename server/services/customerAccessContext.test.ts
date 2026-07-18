@@ -62,6 +62,15 @@ const listReadable = await loadCustomerAccessContext(directory('self', [
 ]) as any, actor);
 assert.equal(listReadable.canReadCustomerList, true, '客户列表 read 必须来自服务端角色目录');
 
+const batchManage = await loadCustomerAccessContext(directory('self', [
+  { module: PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE, actions: ['write'] },
+  { module: PERMISSION_KEYS.CUSTOMER_BATCH_CANCEL, actions: ['write'] },
+  { module: PERMISSION_KEYS.CUSTOMER_BATCH_AUDIT_READ, actions: ['read'] },
+]) as any, actor);
+assert.equal(batchManage.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE), true, '批量管理必须从服务端角色目录显式授予');
+assert.equal(batchManage.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_BATCH_CANCEL), true, '批量取消必须从服务端角色目录显式授予');
+assert.equal(batchManage.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_BATCH_AUDIT_READ), true, '批量审计读取必须从服务端角色目录显式授予');
+
 const descendants = await loadCustomerAccessContext(directory('department_and_descendants') as any, actor);
 assert.equal(descendants.manageableOwnerIds.has('user-child'), true);
 

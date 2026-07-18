@@ -99,6 +99,12 @@ const CUSTOMER_MUTATION_PERMISSION_ACTIONS = new Map<string, string>([
   [PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, 'write'],
   [PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, 'write'],
   [PERMISSION_KEYS.CUSTOMER_DELETE, 'delete'],
+  // Batch permissions are leaf grants too. Keeping them in the authoritative
+  // server-side context prevents routes from trusting a browser-supplied
+  // permission list while still allowing the batch layer to revalidate them.
+  [PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE, 'write'],
+  [PERMISSION_KEYS.CUSTOMER_BATCH_CANCEL, 'write'],
+  [PERMISSION_KEYS.CUSTOMER_BATCH_AUDIT_READ, 'read'],
 ]);
 
 function explicitCustomerScope(value: unknown): CustomerDataScopeLevel | null | undefined {

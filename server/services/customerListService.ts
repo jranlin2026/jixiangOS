@@ -150,7 +150,8 @@ export function matchesCustomerTagFilters(customer: Pick<Customer, 'manualTagIds
   return true;
 }
 
-function buildCustomerWhere(filters: CustomerFilters, catalog?: CustomerTagCatalog): Prisma.Sql {
+/** Shared SQL predicate for list and server-side batch filter snapshots. */
+export function buildCustomerWhere(filters: CustomerFilters, catalog?: CustomerTagCatalog): Prisma.Sql {
   const conditions: Prisma.Sql[] = [
     Prisma.sql`domain = ${STORAGE_KEYS.CUSTOMERS}`,
     Prisma.sql`JSON_EXTRACT(data, '$.deletedAt') IS NULL`,

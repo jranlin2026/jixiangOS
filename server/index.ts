@@ -29,6 +29,8 @@ import { createPrismaCustomerAuditAppender } from './services/customerAuditServi
 import { createContactIdentityCryptoFromEnv } from './services/contactIdentityService';
 import { createCustomerTodoService } from './services/customerTodoService';
 import { createCustomerManageableUsersService } from './services/customerManageableUsersService';
+import { createCustomerBatchService } from './services/customerBatchService';
+import { loadCustomerAccessContext } from './services/customerAccessPolicy';
 import {
   backfillCustomerContactIdentitiesResult,
   backfillCustomerOwnerIdentitiesResult,
@@ -61,6 +63,7 @@ import {
   CUSTOMER_MANAGEABLE_USERS_PERMISSION_REQUIREMENTS,
   createCustomerManageableUsersHandler,
 } from './routes/customerManageableUsersRoutes';
+import { createCustomerBatchRouter } from './routes/customerBatchRoutes';
 import { createCoCreationService } from './services/coCreation/coCreationService';
 import {
   filterAssetStorageData,
@@ -122,6 +125,7 @@ const customerAtomicCommandService = createAuditedCustomerAtomicCommandService(p
 });
 const customerTodoService = createCustomerTodoService(prisma);
 const customerManageableUsersService = createCustomerManageableUsersService(prisma);
+const customerBatchService = createCustomerBatchService(prisma);
 const customerTagService = createCustomerTagService(prisma);
 const customerTagMigrationService = createCustomerTagMigrationService(prisma as any);
 const leadListService = createLeadListService(prisma);
@@ -183,6 +187,11 @@ const requireCustomerManageableUsersAccess = createRequireAnyPermission(
   authService,
   CUSTOMER_MANAGEABLE_USERS_PERMISSION_REQUIREMENTS,
 );
+const requireCustomerBatchManageAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE, 'write');
+const requireCustomerBatchReadAccess = createRequireAnyPermission(authService, [
+  { permissionKey: PERMISSION_KEYS.CUSTOMER_BATCH_AUDIT_READ, action: 'read' },
+  { permissionKey: PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE, action: 'write' },
+]);
 const requireLeadListAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_LIST);
 const requireLeadCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_CREATE, 'write');
 const requireLeadConvertAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_CONVERT, 'write');
@@ -371,6 +380,13 @@ app.use('/api/customer-tags', createCustomerTagRouter({
   requireLeadRead: requireCustomerTagLeadReadAccess,
   requireSettingsRead: requireCustomerTagSettingsReadAccess,
   requireManage: requireCustomerTagManageAccess,
+}));
+app.use('/api/customer-batch-jobs', createCustomerBatchRouter({
+  service: customerBatchService,
+  loadCurrentAccess: (currentUser) => loadCustomerAccessContext(prisma, currentUser),
+  requireManage: requireCustomerBatchManageAccess,
+  requireRead: requireCustomerBatchReadAccess,
+  requireAuthenticated: requireStorageAccess,
 }));
 
 app.post('/api/crm-migration/import', requireStorageAccess, createDisabledCrmCustomerImportHandler());
