@@ -33,6 +33,7 @@ import type { Department } from '../../types/department';
 import type { Role } from '../../types/role';
 import type { User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 import { isActiveLeadAssignableUser, NO_LEAD_FLOW_PARTICIPANTS_MARKER } from '../../shared/utils/leadAssignment';
 
 const LEAD_UNIQUE_KEY_MODE = 'phone_or_wechat' as const;
@@ -102,10 +103,7 @@ const LeadFlowConfigTab: React.FC = () => {
     || ''
   );
 
-  const getParticipantLabel = (user: User) => {
-    const roleLabel = getParticipantRoleLabel(user);
-    return roleLabel ? `${user.name}（${roleLabel}）` : user.name;
-  };
+  const getParticipantLabel = (user: User) => formatEmployeeNameWithPosition(user);
 
   const getDepartmentUsers = (departmentId: string) => {
     const scopedIds = new Set(departmentDescendantIds.get(departmentId) || [departmentId]);
@@ -199,7 +197,7 @@ const LeadFlowConfigTab: React.FC = () => {
         <PersonIcon sx={{ fontSize: 16, color: '#94a3b8' }} />
         <Box sx={{ minWidth: 0 }}>
           <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.3 }} noWrap>
-            {user.name}
+            {formatEmployeeNameWithPosition(user)}
           </Typography>
           <Typography variant="caption" sx={{ color: '#64748b' }} noWrap>
             {[getParticipantRoleLabel(user), user.account, user.phone].filter(Boolean).join(' / ') || '-'}
@@ -478,7 +476,7 @@ const LeadFlowConfigTab: React.FC = () => {
                       {(user.name || user.account || '?').slice(0, 1)}
                     </Box>
                     <Box sx={{ minWidth: 0 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>{user.name}</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>{formatEmployeeNameWithPosition(user)}</Typography>
                       <Typography variant="caption" sx={{ color: '#94a3b8' }} noWrap>
                         {[getParticipantRoleLabel(user), user.account].filter(Boolean).join(' / ') || '-'}
                       </Typography>

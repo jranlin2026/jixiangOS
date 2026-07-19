@@ -58,7 +58,7 @@ import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDi
 import type { TableViewColumnConfig } from '../../shared/components/TableViewSettingsDialog';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { useTableViewConfig } from '../../shared/hooks/useTableViewConfig';
-import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
+import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
 import type {
   AssetDevice,
   AssetDeviceInput,
@@ -2278,21 +2278,18 @@ const AssetManagement: React.FC = () => {
           onChange={(event) => updateAssetUser(prefix, event.target.value)}
           renderValue={(selected) => {
             const user = userById.get(String(selected));
-            return user?.name || nameValue || '未选择';
+            return user ? formatEmployeeNameWithPosition(user) : nameValue || '未选择';
           }}
         >
           <MenuItem value="">未选择</MenuItem>
           {nameValue && !formState.values[idField] ? (
             <MenuItem value="" disabled>{nameValue}（未匹配员工）</MenuItem>
           ) : null}
-          {lookupUsers.map((user) => {
-            const department = departmentById.get(user.departmentId || '');
-            return (
-              <MenuItem key={user.id} value={user.id}>
-                {user.name} / {department?.name || '未分配部门'}
-              </MenuItem>
-            );
-          })}
+          {lookupUsers.map((user) => (
+            <MenuItem key={user.id} value={user.id}>
+              {formatEmployeeNameWithPosition(user)}
+            </MenuItem>
+          ))}
         </Select>
       </FormControl>
     );

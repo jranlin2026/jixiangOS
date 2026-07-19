@@ -38,7 +38,7 @@ assert.match(flowConfigSource, /departmentApi/);
 assert.match(flowConfigSource, /默认全体在职员工/);
 assert.match(flowConfigSource, /getParticipantLabel/);
 assert.match(flowConfigSource, /线索自动领取/);
-assert.match(flowConfigSource, /\$\{user\.name\}（\$\{roleLabel\}）/);
+assert.match(flowConfigSource, /formatEmployeeNameWithPosition\(user\)/);
 assert.doesNotMatch(flowConfigSource, /salesUsers\.map\(\(user\) => \(\s*<FormControlLabel/);
 
 const now = '2026-06-18T12:00:00.000Z';

@@ -52,6 +52,7 @@ import {
   isDepartmentDescendantOf,
 } from '../../shared/utils/organizationConfig';
 import { DEFAULT_USER_ROLE, normalizeUserRoleName } from '../../shared/utils/roles';
+import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 
 type UserForm = {
   name: string;
@@ -1061,7 +1062,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
               >
                 {leaveReceiverOptions.map((user) => (
                   <MenuItem key={user.id} value={user.id}>
-                    {user.name}（{user.positionName || user.role || '员工'}）
+                    {formatEmployeeNameWithPosition(user)}
                   </MenuItem>
                 ))}
               </TextField>
@@ -1110,4 +1111,3 @@ const EmployeeDepartmentManagement: React.FC = () => {
 };
 
 export default EmployeeDepartmentManagement;
-

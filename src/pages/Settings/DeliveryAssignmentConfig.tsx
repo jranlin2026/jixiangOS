@@ -5,6 +5,7 @@ import { deliveryAssignmentApi } from '../../api/deliveryAssignmentApi';
 import { settingsApi } from '../../api/settingsApi';
 import type { User } from '../../types/settings';
 import type { DeliveryAssignmentConfig, DeliveryAssignmentParticipant } from '../../types/deliveryAssignment';
+import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 
 const DeliveryAssignmentConfigPage: React.FC = () => {
   const [config, setConfig] = useState<DeliveryAssignmentConfig>({ enabled: false, participants: [] });
@@ -56,17 +57,17 @@ const DeliveryAssignmentConfigPage: React.FC = () => {
     {message && <Alert severity="success" sx={{ mb: 2 }}>{message}</Alert>}
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     <FormControlLabel control={<Switch checked={config.enabled} onChange={(event) => setConfig((current) => ({ ...current, enabled: event.target.checked }))} />} label="启用自动分配" />
-    <Alert severity="info" sx={{ my: 2 }}>下一位预计分配人员：{nextUser?.name || '暂无可分配人员'}</Alert>
+    <Alert severity="info" sx={{ my: 2 }}>下一位预计分配人员：{nextUser ? formatEmployeeNameWithPosition(nextUser) : '暂无可分配人员'}</Alert>
     <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
       <Select size="small" displayEmpty value={addUserId} onChange={(event) => setAddUserId(event.target.value)} sx={{ minWidth: 240 }}>
         <MenuItem value="">选择参与人员</MenuItem>
-        {users.filter((user) => !config.participants.some((item) => item.userId === user.id)).map((user) => <MenuItem key={user.id} value={user.id}>{user.name}</MenuItem>)}
+        {users.filter((user) => !config.participants.some((item) => item.userId === user.id)).map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
       </Select>
       <Button variant="outlined" onClick={addParticipant}>添加成员</Button>
     </Stack>
     <Stack spacing={1}>
       {config.participants.map((participant, index) => <Paper key={participant.userId} draggable onDragStart={() => setDragIndex(index)} onDragOver={(event) => event.preventDefault()} onDrop={() => { if (dragIndex !== null) moveParticipant(dragIndex, index); setDragIndex(null); }} variant="outlined" sx={{ p: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
-        <DragIndicator color="disabled" /><Typography sx={{ width: 28 }}>{index + 1}</Typography><Typography sx={{ flex: 1 }}>{userMap.get(participant.userId)?.name || participant.userId}</Typography>
+        <DragIndicator color="disabled" /><Typography sx={{ width: 28 }}>{index + 1}</Typography><Typography sx={{ flex: 1 }}>{userMap.get(participant.userId) ? formatEmployeeNameWithPosition(userMap.get(participant.userId)!) : participant.userId}</Typography>
         <FormControlLabel control={<Switch size="small" checked={participant.paused} onChange={(event) => updateParticipant(index, { paused: event.target.checked })} />} label="暂停接单" />
         <IconButton onClick={() => moveParticipant(index, index - 1)} disabled={index === 0}><ArrowUpward /></IconButton>
         <IconButton onClick={() => moveParticipant(index, index + 1)} disabled={index === config.participants.length - 1}><ArrowDownward /></IconButton>

@@ -13,6 +13,7 @@ import { customerTodoApi } from '../../api/customerTodoApi';
 import type { CustomerManageableUser } from '../../types/customer';
 import type { CustomerTodo, CustomerTodoExecutionMethod, CustomerTodoInput } from '../../types/customerTodo';
 import { canRunCustomerTodoAction } from '../../pages/Customers/customerDetailPolicy';
+import { formatEmployeeNameWithPosition } from '../utils/formatters';
 
 interface CustomerTodoPanelProps {
   customerId: string;
@@ -216,7 +217,7 @@ const CustomerTodoPanel: React.FC<CustomerTodoPanelProps> = ({
               </TextField>
             </Stack>
             <TextField select label="执行人" required value={form.assigneeId} onChange={(event) => setForm({ ...form, assigneeId: event.target.value })}>
-              {users.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}</MenuItem>)}
+              {users.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
             </TextField>
             <TextField label="关联客户" value={customerName} disabled />
           </Stack>

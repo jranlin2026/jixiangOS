@@ -485,8 +485,8 @@ assert.match(
 );
 assert.match(
   commissionSource,
-  /\$\{name\}（\$\{role\}）/,
-  'Commission personnel labels should show employee name plus system permission role, such as 张伟（销售专员）.',
+  /formatEmployeeNameWithPosition\(user \|\| \{ name \}\)/,
+  'Commission personnel labels should show employee name plus position, such as 张伟（销售专员）.',
 );
 assert.doesNotMatch(
   detailSplitEditorSource,

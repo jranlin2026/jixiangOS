@@ -35,7 +35,7 @@ import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import useLeadStore from '../../store/useLeadStore';
 import { getLifecycleConfigByCode, getLifecycleStatusTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
-import { formatPaginationRows } from '../../shared/utils/formatters';
+import { formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
 import LeadDetail from './LeadDetail';
 import LeadForm from './LeadForm';
 import { formatPhoneForDisplay } from '../../shared/utils/phoneNumber';
@@ -579,7 +579,7 @@ const Leads: React.FC = () => {
                 <MenuItem value="">全部</MenuItem>
                 <MenuItem value="待分配">待分配</MenuItem>
                 {assignableUsers.map((user) => (
-                  <MenuItem key={user.id} value={user.name}>{user.name}</MenuItem>
+                  <MenuItem key={user.id} value={user.name}>{formatEmployeeNameWithPosition(user)}</MenuItem>
                 ))}
               </Select>
             </FormControl>
@@ -737,7 +737,7 @@ const Leads: React.FC = () => {
             )}
             {assignableUsers.map((user) => (
               <MenuItem key={user.id} value={user.name}>
-                {user.name}（{user.positionName || '未设置职位'}）
+                {formatEmployeeNameWithPosition(user)}
               </MenuItem>
             ))}
           </TextField>

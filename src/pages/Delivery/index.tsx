@@ -45,6 +45,7 @@ import CustomerDetail from '../Customers/CustomerDetail';
 import OrderDetail from '../Orders/OrderDetail';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { getProductLevelRowSx, getProductLevelTagSx } from '../../shared/utils/constants';
+import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 import type {
   Delivery,
   DeliveryCreatableOrderSummary,
@@ -675,7 +676,7 @@ const DeliveryPage: React.FC = () => {
       </TextField>
       <TextField select size="small" label="客户成功" value={filters.ownerId || ''} onChange={(event) => handleFiltersChange({ ownerId: event.target.value || undefined })}>
         <MenuItem value="">全部人员</MenuItem>
-        {users.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}</MenuItem>)}
+        {users.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
       </TextField>
       <TextField select size="small" label="优先级" value={filters.priority || ''} onChange={(event) => handleFiltersChange({ priority: event.target.value as DeliveryPriority | '' })}>
         {PRIORITY_OPTIONS.map((item) => <MenuItem key={item.value || 'all'} value={item.value}>{item.label}</MenuItem>)}
@@ -1171,7 +1172,7 @@ const DeliveryPage: React.FC = () => {
           <Stack spacing={2} sx={{ pt: 0.5 }}>
             <TextField select label="客户成功" value={assignOwnerId} onChange={(event) => setAssignOwnerId(event.target.value)} fullWidth>
               <MenuItem value="">待分配</MenuItem>
-              {users.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}</MenuItem>)}
+              {users.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
             </TextField>
             <TextField select label="优先级" value={assignPriority} onChange={(event) => setAssignPriority(event.target.value as DeliveryPriority)} fullWidth>
               {PRIORITY_OPTIONS.filter((item) => item.value).map((item) => <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>)}

@@ -20,7 +20,7 @@ import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import type { Lead, LeadFlowConfig } from '../../types/lead';
 import type { LeadSourceConfig, User } from '../../types/settings';
 import { leadApi, leadFlowApi, settingsApi } from '../../api';
-import { formatDate } from '../../shared/utils/formatters';
+import { formatDate, formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 import { RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, getLifecycleStatusTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import useAuthStore from '../../store/useAuthStore';
 import { canEditLeadProfile } from './leadDetailRules';
@@ -402,7 +402,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
                 <MenuItem value="">无</MenuItem>
                 {users.map((user) => (
                   <MenuItem key={user.id} value={user.id}>
-                    {user.name}（{user.positionName || '未设置职位'}）
+                    {formatEmployeeNameWithPosition(user)}
                   </MenuItem>
                 ))}
               </TextField>
@@ -417,7 +417,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
                 )}
                 {userFieldOptions.map((user) => (
                   <MenuItem key={user.id} value={user.name}>
-                    {user.name}（{user.positionName || '未设置职位'}）
+                    {formatEmployeeNameWithPosition(user)}
                   </MenuItem>
                 ))}
               </TextField>
@@ -589,7 +589,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
           )}
           {assignableUsers.map((user) => (
             <MenuItem key={user.id} value={user.name}>
-              {user.name}（{user.positionName || '未设置职位'}）
+              {formatEmployeeNameWithPosition(user)}
             </MenuItem>
           ))}
         </TextField>

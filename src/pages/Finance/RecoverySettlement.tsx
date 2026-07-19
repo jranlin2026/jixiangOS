@@ -33,7 +33,7 @@ import UndoIcon from '@mui/icons-material/Undo';
 import SearchIcon from '@mui/icons-material/Search';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import { commissionApi, commissionRuleApi, recoveryOrderApi, settingsApi } from '../../api';
-import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
+import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog, { type TableViewColumnConfig } from '../../shared/components/TableViewSettingsDialog';
 import { useTableViewConfig } from '../../shared/hooks/useTableViewConfig';
@@ -1455,7 +1455,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                                     <Typography variant="caption" sx={{ color: shell.muted }}>分账 {index + 1}</Typography>
                                   </Stack>
                                   <Typography variant="body2" sx={{ fontWeight: 900, color: shell.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {owner?.name || '未选择人员'}
+                                    {owner ? formatEmployeeNameWithPosition(owner) : '未选择人员'}
                                   </Typography>
                                   <Typography variant="caption" sx={{ color: shell.muted }}>{getOwnerDepartmentName(owner)}</Typography>
                                 </Box>
@@ -1495,10 +1495,10 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                                       onChange={(event) => updateRow(index, { ownerId: event.target.value })}
                                       renderValue={(value) => {
                                         const selectedOwner = activeUsers.find((user) => user.id === value);
-                                        return selectedOwner ? `${selectedOwner.name} - ${selectedOwner.role}` : '选择人员';
+                                        return selectedOwner ? formatEmployeeNameWithPosition(selectedOwner) : '选择人员';
                                       }}
                                     >
-                                      {activeUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name} - {user.role}</MenuItem>)}
+                                      {activeUsers.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
                                     </Select>
                                   </FormControl>
                                 </Box>

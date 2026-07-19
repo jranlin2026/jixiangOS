@@ -47,7 +47,7 @@ import FileUploadOutlinedIcon from '@mui/icons-material/FileUploadOutlined';
 import useCustomerStore from '../../store/useCustomerStore';
 import { customerApi, customerBatchApi, orderApi, settingsApi } from '../../api';
 import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, ROUTES, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
-import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
+import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import CustomerDetail from './CustomerDetail';
 import CustomerForm from './CustomerForm';
@@ -802,7 +802,7 @@ const Customers: React.FC = () => {
           <Select value={filters.owner || ''} label={ownerFilterLabel} onChange={(e) => handleFilterChange('owner', e.target.value)}>
             <MenuItem value="">全部</MenuItem>
             {visibleOwnerUsers.map((user) => (
-              <MenuItem key={user.id} value={user.name}>{user.name}</MenuItem>
+              <MenuItem key={user.id} value={user.name}>{formatEmployeeNameWithPosition(user)}</MenuItem>
             ))}
           </Select>
         </FormControl>
@@ -1197,7 +1197,7 @@ const Customers: React.FC = () => {
               )}
               {transferableOwnerUsers.map((user) => (
                 <MenuItem key={user.id} value={user.id}>
-                  {user.name}（{user.positionName || '未设置职位'}）
+                  {formatEmployeeNameWithPosition(user)}
                 </MenuItem>
               ))}
             </Select>

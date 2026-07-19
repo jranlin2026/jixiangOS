@@ -24,7 +24,7 @@ import type { AIBusinessCard } from '../../types/aiCard';
 import type { Order } from '../../types/order';
 import type { CustomerLevelConfig, LeadSourceConfig } from '../../types/settings';
 import { aiCardApi, customerApi, orderApi, settingsApi } from '../../api';
-import { formatCurrency, formatDate } from '../../shared/utils/formatters';
+import { formatCurrency, formatDate, formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelColor, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import AIBusinessCardPanel from '../../shared/components/AIBusinessCardPanel';
@@ -542,7 +542,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                 <MenuItem value="">无</MenuItem>
                 {manageableUsers.map((user) => (
                   <MenuItem key={user.id} value={user.id}>
-                    {user.name}（{user.positionName || '未设置职位'}）
+                    {formatEmployeeNameWithPosition(user)}
                   </MenuItem>
                 ))}
               </TextField>
@@ -563,7 +563,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                 )}
                 {userFieldOptions.map((user) => (
                   <MenuItem key={user.id} value={user.name}>
-                    {user.name}（{user.positionName || '未设置职位'}）
+                    {formatEmployeeNameWithPosition(user)}
                   </MenuItem>
                 ))}
               </TextField>

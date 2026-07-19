@@ -22,6 +22,7 @@ import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/util
 import useAuthStore from '../../store/useAuthStore';
 import type { LeadFlowConfig } from '../../types/lead';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
+import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 
 interface LeadFormProps {
   open: boolean;
@@ -255,7 +256,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
           {isEdit && (
             <TextField select label="线索录入人" value={form.inputBy} onChange={handleChange('inputBy')} fullWidth helperText="默认当前登录人员">
               {users.map((user) => (
-                <MenuItem key={user.id} value={user.name}>{user.name}</MenuItem>
+                <MenuItem key={user.id} value={user.name}>{formatEmployeeNameWithPosition(user)}</MenuItem>
               ))}
             </TextField>
           )}
@@ -271,7 +272,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
           >
             <MenuItem value="">无</MenuItem>
             {users.map((user) => (
-              <MenuItem key={user.id} value={user.id}>{user.name}（{user.positionName || '未设置职位'}）</MenuItem>
+              <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>
             ))}
           </TextField>
           {canAssignLeads ? (
@@ -285,7 +286,7 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
             >
               <MenuItem value="待分配">待分配</MenuItem>
               {assignableUsers.map((user) => (
-                <MenuItem key={user.id} value={user.name}>{user.name}（{user.positionName || '未设置职位'}）</MenuItem>
+                <MenuItem key={user.id} value={user.name}>{formatEmployeeNameWithPosition(user)}</MenuItem>
               ))}
             </TextField>
           ) : (

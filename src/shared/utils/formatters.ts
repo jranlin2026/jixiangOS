@@ -134,6 +134,20 @@ export const formatPaginationRows = ({
   return `${from}-${to} / 共 ${count} 条`;
 };
 
+type EmployeeNameWithPosition = {
+  name: string;
+  positionName?: string | null;
+};
+
+/** 员工选择项统一显示为“姓名（职位）”。 */
+export const formatEmployeeNameWithPosition = (
+  employee: EmployeeNameWithPosition,
+): string => {
+  const name = employee.name.trim() || '未命名员工';
+  const positionName = employee.positionName?.trim() || '未设置职位';
+  return `${name}（${positionName}）`;
+};
+
 /**
  * 截断文本
  * @param text 原始文本

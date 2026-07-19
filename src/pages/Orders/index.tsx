@@ -38,7 +38,7 @@ import { useSearchParams } from 'react-router-dom';
 import useOrderStore from '../../store/useOrderStore';
 import { customerApi, orderApi, productApi, settingsApi } from '../../api';
 import { getProductLevelColor, getProductLevelRowSx, getProductLevelTagSx, PRODUCT_LEVELS, normalizeResourceOwnership } from '../../shared/utils/constants';
-import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
+import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
 import CustomerDetail from '../Customers/CustomerDetail';
 import OrderDetail from './OrderDetail';
 import OrderForm from './OrderForm';
@@ -664,7 +664,7 @@ const Orders: React.FC = () => {
               <Select value={filters.owner || ''} label="销售负责人" onChange={(e) => handleFilterChange('owner', e.target.value)}>
                 <MenuItem value="">全部</MenuItem>
                 {visibleOwnerUsers.map((user) => (
-                  <MenuItem key={user.id} value={user.name}>{user.name}</MenuItem>
+                  <MenuItem key={user.id} value={user.name}>{formatEmployeeNameWithPosition(user)}</MenuItem>
                 ))}
               </Select>
             </FormControl>

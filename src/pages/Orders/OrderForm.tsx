@@ -37,6 +37,7 @@ import { businessAttachmentApi } from '../../api/businessAttachmentApi';
 import type { BusinessAttachment } from '../../types/businessAttachment';
 import useAuthStore from '../../store/useAuthStore';
 import { filterUsersByCurrentDataScope } from '../../shared/utils/dataVisibility';
+import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 
 interface OrderFormProps {
   open: boolean;
@@ -148,10 +149,6 @@ function dealSceneFromOrderType(orderType: OrderType): CommissionScene | undefin
     '个人资源成交',
   ];
   return scenes.includes(orderType) ? orderType as CommissionScene : undefined;
-}
-
-function renderUserOptionLabel(user: User): string {
-  return `${user.name}（${user.positionName || '未设置职位'}）`;
 }
 
 function getCustomerDisplayName(customer?: Customer | null): string {
@@ -703,10 +700,10 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
           </Box>
           <TextField select label="销售负责人" value={form.owner} onChange={handleOwnerChange} fullWidth>
             {form.owner && !users.some((user) => user.name === form.owner) && (
-              <MenuItem value={form.owner}>{form.owner}</MenuItem>
+              <MenuItem value={form.owner}>{form.owner}（历史负责人）</MenuItem>
             )}
             {users.map((user) => (
-              <MenuItem key={user.id} value={user.name}>{renderUserOptionLabel(user)}</MenuItem>
+              <MenuItem key={user.id} value={user.name}>{formatEmployeeNameWithPosition(user)}</MenuItem>
             ))}
           </TextField>
           <TextField label="第三方平台订单" value={form.originalOrderId} onChange={handleChange('originalOrderId')} placeholder="填写第三方平台订单号或订单ID" fullWidth />

@@ -22,6 +22,7 @@ import { getPhoneNumberError, normalizePhoneForStorage } from '../../shared/util
 import { completeCityFromPhone } from '../../shared/utils/mobileCityAttribution';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 import useAuthStore from '../../store/useAuthStore';
+import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 
 interface CustomerFormProps {
   open: boolean;
@@ -225,12 +226,12 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
 
   const userOptions = users.map((user) => (
     <MenuItem key={user.id} value={user.name}>
-      {user.name}（{user.positionName || '未设置职位'}）
+      {formatEmployeeNameWithPosition(user)}
     </MenuItem>
   ));
   const ownerOptions = assignableUsers.map((user) => (
     <MenuItem key={user.id} value={user.id}>
-      {`${user.name}（${user.positionName || user.account || '未设置职位'}）`}
+      {formatEmployeeNameWithPosition(user)}
     </MenuItem>
   ));
   const shouldShowCurrentOwnerOption = form.owner && !assignableUsers.some((user) => user.id === form.ownerId);
@@ -306,7 +307,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
             <MenuItem value="">无</MenuItem>
             {users.map((user) => (
               <MenuItem key={user.id} value={user.id}>
-                {user.name}（{user.positionName || '未设置职位'}）
+                {formatEmployeeNameWithPosition(user)}
               </MenuItem>
             ))}
           </TextField>
@@ -319,7 +320,11 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
             fullWidth
             helperText={assignableUsers.length ? '候选人来自线索流转参与成员，并按当前角色的数据范围过滤' : '暂无可选负责人，请检查线索流转参与成员或当前角色的数据范围'}
           >
-            {shouldShowCurrentOwnerOption && <MenuItem value={form.ownerId}>{form.owner}（历史负责人）</MenuItem>}
+            {shouldShowCurrentOwnerOption && (
+              <MenuItem value={form.ownerId}>
+                {form.owner}（历史负责人）
+              </MenuItem>
+            )}
             {assignableUsers.length === 0 && (
               <MenuItem value="" disabled>
                 当前角色数据范围内暂无可选负责人，请检查数据范围或线索流转参与成员配置。

@@ -33,7 +33,7 @@ import BlockIcon from '@mui/icons-material/Block';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useNavigate } from 'react-router-dom';
 import { productApi, recoveryOrderApi, settingsApi } from '../../api';
-import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
+import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
 import { getProductLevelColor, getProductLevelTagSx, ROUTES } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog, { type TableViewColumnConfig } from '../../shared/components/TableViewSettingsDialog';
@@ -767,7 +767,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
             <TextField label="挽回成交金额" type="number" value={form.recoveryAmount} onChange={(event) => setForm({ ...form, recoveryAmount: event.target.value })} required />
             <TextField label="挽回时间" type="datetime-local" value={form.recoveryAt} onChange={(event) => setForm({ ...form, recoveryAt: event.target.value })} required InputLabelProps={{ shrink: true }} inputProps={{ step: 1 }} />
             <TextField select label="挽回人员" value={form.recoveryUserId} onChange={(event) => setForm({ ...form, recoveryUserId: event.target.value })} required>
-              {activeUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name} · {user.role}</MenuItem>)}
+              {activeUsers.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
             </TextField>
             <Box sx={{ gridColumn: { md: '1 / -1' } }}>
               <BusinessAttachmentPicker title="挽回凭证" description="用于上传付款、聊天或其他挽回过程截图，可多选、拖拽或直接粘贴。" value={form.paymentAttachments} onChange={(paymentAttachments) => setForm((current) => ({ ...current, paymentAttachments }))} category="recovery-payment-proof" draftKey={editingOrder?.id || `recovery-new-${currentUser?.id || 'unknown'}`} maxCount={8} />

@@ -41,7 +41,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import { commissionApi, commissionRuleApi, customerApi, orderApi, settingsApi } from '../../api';
 import { getProductLevelRowSx, getProductLevelTagSx, normalizeResourceOwnership } from '../../shared/utils/constants';
-import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/utils/formatters';
+import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import ResizableHeaderCell, {
   readColumnWidths,
@@ -450,8 +450,7 @@ const Commission: React.FC<CommissionProps> = ({
   const formatEmployeeDisplayName = (user?: User | null, fallbackName?: string) => {
     const name = user?.name || fallbackName?.trim() || '';
     if (!name) return '待分配';
-    const role = user?.role?.trim();
-    return role ? `${name}（${role}）` : name;
+    return formatEmployeeNameWithPosition(user || { name });
   };
   const formatOwnerDisplayName = (ownerId?: string, ownerName?: string) => (
     formatEmployeeDisplayName(findEmployeeForDisplay(ownerId, ownerName), ownerName)

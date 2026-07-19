@@ -29,6 +29,7 @@ import type {
 import type { LifecycleStatusConfig } from '../../../types/settings';
 import type { CustomerTag } from '../../../types/tag';
 import type { CustomerBatchSelectionState } from '../../../shared/utils/customerBatchSelection';
+import { formatEmployeeNameWithPosition } from '../../../shared/utils/formatters';
 
 export const CUSTOMER_BATCH_ACTION_LABELS: Record<CustomerBatchOperation, string> = {
   transfer: '转让客户',
@@ -260,7 +261,7 @@ const CustomerBatchActionDialog: React.FC<Props> = ({
           </Alert>
           {operation === 'transfer' && (
             <TextField select required label="转让给" value={form.targetOwnerId} onChange={(event) => updateForm({ targetOwnerId: event.target.value })}>
-              {manageableUsers.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}{user.positionName ? `（${user.positionName}）` : ''}</MenuItem>)}
+              {manageableUsers.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
             </TextField>
           )}
           {operation === 'set_progress' && (

@@ -29,6 +29,7 @@ import useDepartmentStore from '../../store/useDepartmentStore';
 import { settingsApi } from '../../api';
 import type { Department } from '../../types/department';
 import type { User } from '../../types/settings';
+import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 
 type DepartmentForm = {
   name: string;
@@ -209,7 +210,7 @@ const DepartmentManagement: React.FC = () => {
             </TextField>
             <TextField select label="部门负责人" value={form.managerId} onChange={(event) => setForm({ ...form, managerId: event.target.value })} fullWidth>
               <MenuItem value="">未设置</MenuItem>
-              {users.map((user) => <MenuItem key={user.id} value={user.id}>{user.name}</MenuItem>)}
+              {users.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
             </TextField>
             <TextField label="说明" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} fullWidth multiline minRows={2} sx={{ gridColumn: '1 / -1' }} />
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
