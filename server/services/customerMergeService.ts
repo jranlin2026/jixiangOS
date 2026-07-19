@@ -189,7 +189,7 @@ function uniqueSubrecords(values: unknown[][]): unknown[] {
   return result;
 }
 
-function mergedCustomerValue(
+export function mergedCustomerValue(
   main: Customer,
   customers: Customer[],
   input: CustomerMergePrecheckInput,
@@ -206,7 +206,12 @@ function mergedCustomerValue(
       result.ownerIdentityStatus = source.ownerIdentityStatus;
       result.ownerSince = source.ownerSince;
     }
+    if (field === 'leadSource' && source) {
+      result.sourceName = source.sourceName;
+      result.sourceAccount = source.sourceAccount;
+    }
   }
+  delete result.email;
   result.manualTagIds = [...input.tagDecision.selectedTagIds];
   result.tags = Array.from(new Set(customers.flatMap((customer) => customer.tags || [])));
   result.activityRecords = uniqueSubrecords(customers.map((customer) => customer.activityRecords || [])) as Customer['activityRecords'];

@@ -44,6 +44,53 @@ final result: passed
 
 ---
 
+# Design QA — 客户合并字段批注修订
+
+- Source visual truth: browser annotations `browser:负责人`, `browser:邮箱 未填写 来自 1112`, and `browser:Selected browser region` from `http://127.0.0.1:3002/customers?tab=active`.
+- Before screenshot: `.artifacts/customer-merge-before-annotation.png`
+- Implementation screenshots:
+  - `.artifacts/customer-merge-dialog.png`
+  - `.artifacts/customer-merge-source-fields.png`
+- Side-by-side comparison: `.artifacts/customer-merge-annotation-comparison.png`
+- Viewport: 929 × 919
+- State: 2 位客户已选择，线索来源已切换到客户 2223，合并影响预检已通过但未执行最终合并。
+
+## Full-view comparison evidence
+
+- “负责人”已改为“销售负责人”，与客户模块业务用语一致。
+- 基本信息中不再出现邮箱，字段密度降低且没有留下空白行。
+- 来源与备注区域只保留“线索来源”和“备注”，不再暴露资源归属、来源名称、来源账号。
+
+## Focused comparison evidence
+
+- 线索来源一行显示组合后的业务值“个人线索-BOSS”，并明确来自客户 2223。
+- 选择线索来源时，内部来源明细会随所选客户同步，用户无需分别决定多个来源字段。
+- 字体、间距、边框、圆角、颜色和下拉控件继续复用现有 MUI 设计体系；本次没有新增或替换图像资产。
+
+## Findings and comparison history
+
+- Earlier P1: 客户合并弹窗暴露已下线的邮箱字段。
+  - Fix: 从前后端可合并字段中移除邮箱，并在实际合并时清理主档案残留邮箱值。
+  - Post-fix evidence: 弹窗文本和 DOM 均无邮箱行。
+- Earlier P1: 来源信息拆成线索来源、资源归属、来源名称、来源账号四行，用户无法理解差异。
+  - Fix: UI 只保留一个线索来源选择，展示父子来源组合值；后台同步所选客户的来源上下文。
+  - Post-fix evidence: 来源区域只剩“线索来源”和“备注”，切换后显示“个人线索-BOSS”。
+- Earlier P2: “负责人”与客户模块其他位置的“销售负责人”用语不一致。
+  - Fix: 统一为“销售负责人”。
+  - Post-fix evidence: 客户归属首行显示“销售负责人”。
+
+## Interaction and console checks
+
+- 批量操作 -> 合并客户 -> 打开弹窗：passed
+- 切换线索来源到另一位客户：passed
+- 合并影响预检：passed
+- 最终确认合并：未点击，测试数据未修改
+- Console errors: none
+
+final result: passed
+
+---
+
 # Design QA — 客户合并弹窗
 
 ## Source and implementation

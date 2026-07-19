@@ -26,7 +26,6 @@ import {
   CUSTOMER_LEVELS,
   getLifecycleConfigByCode,
   normalizeLifecycleStatusCode,
-  normalizeResourceOwnership,
 } from '../../shared/utils/constants';
 import type { Customer } from '../../types/customer';
 import {
@@ -55,7 +54,7 @@ const FIELD_GROUPS: Array<{
   {
     title: '客户归属',
     fields: [
-      { key: 'ownerId', label: '负责人' },
+      { key: 'ownerId', label: '销售负责人' },
       { key: 'lifecycleStatusCode', label: '客户进度' },
       { key: 'customerLevel', label: '客户等级' },
     ],
@@ -66,7 +65,6 @@ const FIELD_GROUPS: Array<{
       { key: 'name', label: '客户姓名' },
       { key: 'phone', label: '手机号' },
       { key: 'wechat', label: '微信' },
-      { key: 'email', label: '邮箱' },
       { key: 'company', label: '公司' },
       { key: 'industry', label: '行业' },
       { key: 'city', label: '城市' },
@@ -76,9 +74,6 @@ const FIELD_GROUPS: Array<{
     title: '来源与备注',
     fields: [
       { key: 'leadSource', label: '线索来源' },
-      { key: 'sourceType', label: '资源归属' },
-      { key: 'sourceName', label: '来源名称' },
-      { key: 'sourceAccount', label: '来源账号' },
       { key: 'remark', label: '备注' },
     ],
   },
@@ -111,7 +106,9 @@ const fieldDisplayValue = (customer: Customer, field: CustomerMergeField) => {
   if (field === 'customerLevel') {
     return CUSTOMER_LEVELS.find((item) => item.value === customer.customerLevel)?.label || customer.customerLevel || '未填写';
   }
-  if (field === 'sourceType') return normalizeResourceOwnership(customer.sourceType) || '未填写';
+  if (field === 'leadSource') {
+    return [customer.leadSource, customer.sourceName].filter(Boolean).join('-') || '未填写';
+  }
   const value = customer[field];
   return String(value || '').trim() || '未填写';
 };

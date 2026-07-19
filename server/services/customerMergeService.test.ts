@@ -8,13 +8,14 @@ import {
   buildCustomerMergeUndoInputHash,
   buildLockOrder,
   createCustomerMergeService,
+  mergedCustomerValue,
   requiredFieldDecisions,
   validateMergeSelection,
 } from './customerMergeService';
 
 assert.deepEqual(CUSTOMER_MERGE_FIELDS, [
-  'name', 'phone', 'wechat', 'email', 'company', 'customerLevel', 'industry', 'city',
-  'leadSource', 'sourceType', 'sourceName', 'sourceAccount', 'remark', 'ownerId', 'lifecycleStatusCode',
+  'name', 'phone', 'wechat', 'company', 'customerLevel', 'industry', 'city',
+  'leadSource', 'remark', 'ownerId', 'lifecycleStatusCode',
 ]);
 assert.equal(isCustomerMergeExecutionInput({ mainCustomerId: 'c1' }), false);
 assert.equal(isCustomerMergeExecutionInput({
@@ -52,6 +53,21 @@ const selectedCustomers = [
   { id: 'c1', name: '客户甲', company: '同一公司', phone: '13800138000', owner: '销售甲', ownerId: 'u1', ownerIdentityStatus: 'resolved', customerLevel: 'L1', lifecycleStatusCode: 'following', totalSpent: 0, orderCount: 0, growthPath: [], growthRecords: [], manualTagIds: [], createdAt: '2026-07-18T00:00:00Z', updatedAt: '2026-07-18T00:00:00Z', recordRevision: 0 },
   { id: 'c2', name: '客户乙', company: '同一公司', phone: '13800138000', owner: '销售甲', ownerId: 'u1', ownerIdentityStatus: 'resolved', customerLevel: 'L1', lifecycleStatusCode: 'following', totalSpent: 0, orderCount: 0, growthPath: [], growthRecords: [], manualTagIds: [], createdAt: '2026-07-18T00:00:00Z', updatedAt: '2026-07-18T00:00:00Z', recordRevision: 0 },
 ];
+const sourceSelectionCustomers = [
+  { ...selectedCustomers[0], email: 'legacy@example.com', leadSource: '市场品牌部', sourceName: '官网', sourceAccount: 'legacy-main' },
+  { ...selectedCustomers[1], leadSource: '直播部', sourceName: '抖音01', sourceAccount: 'legacy-secondary' },
+];
+const mergedSourceCustomer = mergedCustomerValue(sourceSelectionCustomers[0] as any, sourceSelectionCustomers as any, {
+  mainCustomerId: 'c1',
+  secondaryCustomerIds: ['c2'],
+  fieldDecisions: { leadSource: { sourceCustomerId: 'c2' } },
+  tagDecision: { selectedTagIds: [] },
+  reason: '重复客户',
+}, '2026-07-19T00:00:00Z');
+assert.equal(mergedSourceCustomer.leadSource, '直播部');
+assert.equal(mergedSourceCustomer.sourceName, '抖音01', '选择线索来源时应同步来源明细');
+assert.equal(mergedSourceCustomer.sourceAccount, 'legacy-secondary', '选择线索来源时应同步内部来源上下文');
+assert.equal(mergedSourceCustomer.email, undefined, '合并时应清理历史客户邮箱字段');
 const precheckRows: any[] = [];
 const duplicateGroups: any[] = [];
 const mergePrisma = {

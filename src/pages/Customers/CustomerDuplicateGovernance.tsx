@@ -27,9 +27,8 @@ const fields: Array<{ key: CustomerMergeField; label: string }> = [
   { key: 'name', label: '客户姓名' },
   { key: 'phone', label: '手机号' },
   { key: 'wechat', label: '微信' },
-  { key: 'email', label: '邮箱' },
   { key: 'company', label: '公司' },
-  { key: 'ownerId', label: '负责人' },
+  { key: 'ownerId', label: '销售负责人' },
   { key: 'lifecycleStatusCode', label: '客户进度' },
 ];
 

@@ -4,10 +4,14 @@ import { readFileSync } from 'node:fs';
 const source = readFileSync(new URL('./CustomerMergeDialog.tsx', import.meta.url), 'utf8');
 
 for (const label of [
-  '客户姓名', '手机号', '微信', '邮箱', '公司', '客户等级', '行业', '城市',
-  '线索来源', '资源归属', '来源名称', '来源账号', '备注', '负责人', '客户进度',
+  '客户姓名', '手机号', '微信', '公司', '客户等级', '行业', '城市',
+  '线索来源', '备注', '销售负责人', '客户进度',
 ]) {
   assert.match(source, new RegExp(label));
+}
+
+for (const field of ['email', 'sourceType', 'sourceName', 'sourceAccount']) {
+  assert.doesNotMatch(source, new RegExp(`\\{ key: '${field}'`), `${field} 不应作为合并选择字段`);
 }
 
 assert.match(source, /保留为主客户档案/);
