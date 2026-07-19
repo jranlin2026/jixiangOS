@@ -87,7 +87,7 @@ try {
   assert.equal((await customerApi.assignCustomerOwner('customer-command', 'user-sales-b', '主管分配')).data?.owner, '销售B');
   assert.equal((await customerApi.updateCustomer('customer-command', { name: '客户端伪造名称' })).data?.name, '服务端更新客户');
   assert.equal((await customerApi.deleteCustomer('customer-command', '重复客户')).data, true);
-  assert.equal((await leadFlowApi.claimLeadAsCustomer('lead-command', '伪造用户名')).data?.customerId, 'customer-from-lead');
+  assert.equal((await leadFlowApi.claimLeadAsCustomer('lead-command')).data?.customerId, 'customer-from-lead');
 
   assert.deepEqual(requests, [
     { url: 'http://127.0.0.1:3001/api/customers/customer-command/claim', method: 'POST', body: undefined },

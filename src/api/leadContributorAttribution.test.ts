@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { commissionApi, customerApi, leadApi, leadFlowApi, orderReviewApi } from './index';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { STORAGE_KEYS } from '../shared/utils/constants';
+import { PERMISSION_KEYS } from '../shared/utils/permissions';
 import type { Commission, CommissionRule } from '../types/commission';
 import type { Customer } from '../types/customer';
 import type { Lead } from '../types/lead';
@@ -55,7 +56,11 @@ function seed(userId = 'user-sales') {
     { id: 'user-finance', name: 'Finance A', account: 'finance', email: '', phone: '', role: zh.finance, roleId: 'role-finance', departmentId: 'dept-finance', isActive: true, createdAt: now, updatedAt: now },
   ]));
   storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([
-    { id: 'role-sales', name: zh.sales, code: 'sales_consultant', permissions: [], memberCount: 2, isActive: true, createdAt: now, updatedAt: now },
+    {
+      id: 'role-sales', name: zh.sales, code: 'sales_consultant',
+      permissions: [{ module: PERMISSION_KEYS.LEADS_FOLLOW, actions: ['read', 'write'] }],
+      memberCount: 2, isActive: true, createdAt: now, updatedAt: now,
+    },
     { id: 'role-finance', name: zh.finance, code: 'finance', permissions: [{ module: zh.all, actions: ['admin'] }], memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
   ]));
   storage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify([
@@ -165,7 +170,7 @@ assert.equal(validLead.code, 0);
 assert.equal((validLead.data as Lead).inputBy, 'Sales A');
 assert.equal((validLead.data as any).leadContributorName, 'Lead A');
 
-const claimedLead = await leadFlowApi.claimLeadAsCustomer((validLead.data as Lead).id, 'Sales A');
+const claimedLead = await leadFlowApi.claimLeadAsCustomer((validLead.data as Lead).id);
 assert.equal(claimedLead.code, 0);
 assert.ok(claimedLead.data?.customerId);
 

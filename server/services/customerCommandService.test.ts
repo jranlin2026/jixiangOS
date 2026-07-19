@@ -2560,18 +2560,29 @@ for (const targetType of ['customer', 'lead'] as const) {
   assert.equal(next.leads[0].data.tags, undefined);
 }
 
-// RED: 部门主管代为转换已分配线索时，必须保留原销售归属。
+// RED: 部门主管主动点击“开始跟进并加入客户”时，
+// 客户与线索应归实际领取人，原分配人只保留在变更历史中。
 {
   const subordinateLead = lead('lead-manager-convert', salesA.name);
+  subordinateLead.data.ownerId = salesA.id;
+  subordinateLead.data.assignedToId = salesA.id;
   const fake = createFakePrisma({ businessRecords: [], leads: [subordinateLead] });
   const service = createCustomerCommandService(fake.prisma, serviceOptions);
   const result = await service.convertLeadToCustomer('lead-manager-convert', manager);
 
   assert.equal(result.code, 0);
   const next = fake.getState();
-  assert.equal(next.businessRecords[0].owner, salesA.name);
-  assert.equal(next.leads[0].owner, salesA.name);
-  assert.equal(next.leads[0].assignedTo, salesA.name);
+  assert.equal(next.businessRecords[0].owner, manager.name);
+  assert.equal(next.businessRecords[0].data.ownerId, manager.id);
+  assert.equal(next.leads[0].owner, manager.name);
+  assert.equal(next.leads[0].assignedTo, manager.name);
+  assert.equal(next.leads[0].data.ownerId, manager.id);
+  assert.equal(next.leads[0].data.assignedToId, manager.id);
+  assert.equal(next.leads[0].data.changeHistory[0].changes.some((change: any) => (
+    change.field === 'assignedTo'
+    && change.oldValue === salesA.name
+    && change.newValue === manager.name
+  )), true);
 }
 
 // 同一联系人的两条线索并发转客户时，联系人行锁保证只创建一个客户。

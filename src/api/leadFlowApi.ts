@@ -1,5 +1,6 @@
 import type { Customer } from '../types/customer';
 import type { Lead, LeadFlowConfig, LeadIntakeRecord } from '../types/lead';
+import type { Role } from '../types/role';
 import type { User } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
@@ -14,6 +15,8 @@ import { hydrateLeadLifecycle } from './lifecycleSync';
 import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
 import { getPhoneNumberError, normalizePhoneForComparison, normalizePhoneForStorage } from '../shared/utils/phoneNumber';
 import { getLeadAssignmentCandidates, isActiveLeadAssignableUser } from '../shared/utils/leadAssignment';
+import { canReceiveLead } from '../shared/utils/permissions';
+import { canViewLead } from '../shared/utils/dataVisibility';
 
 function ensureInit(): void {
   initializeMockData();
@@ -186,6 +189,8 @@ function upsertCustomerFromLead(
     industry: lead.industry,
     city: lead.city,
     owner: lead.owner,
+    ownerId: lead.ownerId,
+    ownerIdentityStatus: lead.ownerId ? 'resolved' : 'unresolved',
     lifecycleStatusCode: lead.lifecycleStatusCode || LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP,
     lifecycleStatusUpdatedAt: lead.lifecycleStatusUpdatedAt || now,
     customerLevel: 'L1',
@@ -235,7 +240,11 @@ function upsertCustomerFromLead(
     wechat: lead.wechat,
     industry: lead.industry,
     city: lead.city,
-    owner: lead.owner,
+    owner: lead.ownerId ? lead.owner : customers[idx].owner,
+    ownerId: lead.ownerId || customers[idx].ownerId,
+    ownerIdentityStatus: lead.ownerId
+      ? 'resolved'
+      : customers[idx].ownerIdentityStatus || 'unresolved',
     lifecycleStatusCode: lead.lifecycleStatusCode || customers[idx].lifecycleStatusCode || LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP,
     lifecycleStatusUpdatedAt: lead.lifecycleStatusUpdatedAt || customers[idx].lifecycleStatusUpdatedAt || now,
     leadInputBy: lead.inputBy,
@@ -508,7 +517,7 @@ async function manualAssignLead(leadId: string, userName: string): Promise<ApiRe
   return createSuccessResponse(leads[idx]);
 }
 
-async function claimLeadAsCustomer(leadId: string, userName: string): Promise<ApiResponse<Lead | null>> {
+async function claimLeadAsCustomer(leadId: string): Promise<ApiResponse<Lead | null>> {
   if (shouldUseBackendApi()) {
     const response = await backendRequest<Lead>(`/leads/${encodeURIComponent(leadId)}/convert`, { method: 'POST' });
     if (response.code !== 0 || !response.data) {
@@ -531,13 +540,33 @@ async function claimLeadAsCustomer(leadId: string, userName: string): Promise<Ap
   const previousLeads = JSON.stringify(leads);
   const previousCustomers = localStorage.getItem(STORAGE_KEYS.CUSTOMERS);
   const now = new Date().toISOString();
+  const claimant = getCurrentOperatorUser();
+  if (!claimant || !isActiveLeadAssignableUser(claimant)) {
+    return createErrorResponse('当前登录员工不存在、已离职或不可领取线索', 403);
+  }
+  const roles = getStorageData<Role[]>(STORAGE_KEYS.ROLES) || [];
+  if (!canReceiveLead(claimant, roles)) {
+    return createErrorResponse('当前员工没有“开始跟进并加入客户”权限', 403);
+  }
+  if (!canViewLead(leads[idx])) {
+    return createErrorResponse('无权操作该线索', 403);
+  }
+  const activeSameNameUsers = (getStorageData<User[]>(STORAGE_KEYS.USERS) || []).filter((user) => (
+    isActiveLeadAssignableUser(user) && user.name === claimant.name
+  ));
+  if (activeSameNameUsers.length !== 1) {
+    return createErrorResponse('当前员工姓名不唯一，无法安全记录线索归属', 409);
+  }
+  const claimantName = claimant.name;
   const beforeAssignee = leads[idx].assignedTo || leads[idx].owner || '';
-  const changed = beforeAssignee !== userName;
+  const changed = beforeAssignee !== claimantName;
   const operator = getCurrentOperatorName(leads[idx].inputBy || leads[idx].owner);
   let nextLead = hydrateLeadLifecycle({
     ...leads[idx],
-    owner: userName,
-    assignedTo: userName,
+    owner: claimantName,
+    ownerId: claimant.id,
+    assignedTo: claimantName,
+    assignedToId: claimant.id,
     assignedAt: changed || !leads[idx].assignedAt ? now : leads[idx].assignedAt,
     intakeStatus: '入库成功',
     lifecycleStatusCode: LIFECYCLE_STATUS_CODES.FOLLOWING,
@@ -554,7 +583,7 @@ async function claimLeadAsCustomer(leadId: string, userName: string): Promise<Ap
             field: 'assignedTo',
             label: '分配销售',
             oldValue: beforeAssignee || null,
-            newValue: userName,
+            newValue: claimantName,
           }, {
             field: 'lifecycleStatus',
             label: '生命周期',

@@ -5,6 +5,7 @@ import { leadFlowApi } from './leadFlowApi';
 import { orderApi } from './orderApi';
 import { LEAD_STATUS, STORAGE_KEYS } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
+import { PERMISSION_KEYS } from '../shared/utils/permissions';
 
 const storage = (() => {
   const values = new Map<string, string>();
@@ -32,14 +33,20 @@ function seed() {
   storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
   storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([{
     id: 'user-admin',
-    name: 'System Admin',
+    name: 'Sales Manager',
     account: 'admin',
     email: 'admin@company.com',
     phone: '',
-    role: 'super_admin',
+    role: 'Sales Manager',
+    roleId: 'role-sales-manager',
     isActive: true,
     createdAt: now,
     updatedAt: now,
+  }]));
+  storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([{
+    id: 'role-sales-manager', name: 'Sales Manager', code: 'sales_manager',
+    permissions: [{ module: PERMISSION_KEYS.LEADS_FOLLOW, actions: ['read', 'write'] }],
+    dataScopes: { leads: 'all' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now,
   }]));
   storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({
     userId: 'user-admin',
@@ -81,7 +88,7 @@ function intakeLead(name: string, phone: string) {
 seed();
 
 const lostLead = intakeLead('33333', '13333000001');
-const lostClaim = await leadFlowApi.claimLeadAsCustomer(lostLead.id, 'Sales A');
+const lostClaim = await leadFlowApi.claimLeadAsCustomer(lostLead.id);
 assert.equal(lostClaim.code, 0);
 assert.equal(lostClaim.data?.lifecycleStatusCode, 'following');
 assert.ok(lostClaim.data?.customerId);
@@ -93,7 +100,7 @@ assert.equal(lostRelease.data?.lifecycleStatusCode, 'public_pool');
 const lostLeadAfter = await leadApi.fetchLeadById(lostLead.id);
 assert.equal(lostLeadAfter.code, 0);
 assert.equal(lostLeadAfter.data?.lifecycleStatusCode, 'public_pool');
-assert.equal(lostLeadAfter.data?.owner, 'Sales A');
+assert.equal(lostLeadAfter.data?.owner, 'Sales Manager');
 
 const reclaimCustomer = await customerApi.claimCustomerFromPublicPool(lostClaim.data!.customerId!, 'Sales C');
 assert.equal(reclaimCustomer.code, 0);
@@ -115,7 +122,7 @@ assert.equal(followedLeadAfter.code, 0);
 assert.equal(followedLeadAfter.data?.lifecycleStatusCode, 'following');
 
 const orderedLead = intakeLead('11111', '13333000002');
-const orderedClaim = await leadFlowApi.claimLeadAsCustomer(orderedLead.id, 'Sales B');
+const orderedClaim = await leadFlowApi.claimLeadAsCustomer(orderedLead.id);
 assert.equal(orderedClaim.code, 0);
 assert.equal(orderedClaim.data?.lifecycleStatusCode, 'following');
 assert.ok(orderedClaim.data?.customerId);

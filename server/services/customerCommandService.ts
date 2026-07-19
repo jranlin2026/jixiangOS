@@ -2316,9 +2316,6 @@ export function createCustomerCommandService(
         const context = await commandContext(tx, currentUser, 'leads');
         if (!context.actor) return failure<Lead>('当前用户不存在或已离职', 403);
         const existingOwnerName = assignedLeadOwnerName(lead);
-        if (existingOwnerName && activeUsersNamed(context, existingOwnerName).length > 1) {
-          return failure<Lead>('线索归属姓名不唯一，请先完成归属身份清理', 409);
-        }
         if (!canMutateLead(lead, context, currentUser)) return failure<Lead>('无权操作该线索', 403);
 
         if (lead.customerId) {
@@ -2338,23 +2335,14 @@ export function createCustomerCommandService(
         const at = now();
         const atIso = at.toISOString();
         const operator = commandActor(context, currentUser);
-        let conversionOwner = operator;
-        let conversionOwnerId = context.actor.id;
-        if (existingOwnerName) {
-          const existingOwner = activeUsersNamed(context, existingOwnerName)[0];
-          if (!existingOwner || !canReceiveLead(existingOwner, context.roles)) {
-            return failure<Lead>('线索已分配的销售不存在、已离职或不可接收线索', 409);
-          }
-          conversionOwner = existingOwner.name;
-          conversionOwnerId = existingOwner.id;
-        } else {
-          if (!canReceiveLead(context.actor, context.roles)) {
-            return failure<Lead>('当前员工不是可领取线索的在职销售', 403);
-          }
-          if (activeUsersNamed(context, context.actor.name).length > 1) {
-            return failure<Lead>('当前员工姓名不唯一，无法安全记录线索归属', 409);
-          }
+        if (!canReceiveLead(context.actor, context.roles)) {
+          return failure<Lead>('当前员工不是可领取线索的在职销售', 403);
         }
+        if (activeUsersNamed(context, context.actor.name).length > 1) {
+          return failure<Lead>('当前员工姓名不唯一，无法安全记录线索归属', 409);
+        }
+        const conversionOwner = operator;
+        const conversionOwnerId = context.actor.id;
         const customerId = lead.customerId || newId('cust');
         const customer: Customer = {
           id: customerId,
@@ -2447,7 +2435,9 @@ export function createCustomerCommandService(
           phone: normalizePhoneForStorage(lead.phone),
           wechat: normalizedWechat(lead.wechat) || undefined,
           owner: conversionOwner,
+          ownerId: conversionOwnerId,
           assignedTo: conversionOwner,
+          assignedToId: conversionOwnerId,
           assignedAt: lead.assignedTo === conversionOwner && lead.assignedAt ? lead.assignedAt : atIso,
           intakeStatus: '入库成功',
           lifecycleStatusCode: LIFECYCLE_STATUS_CODES.FOLLOWING,
@@ -2457,6 +2447,9 @@ export function createCustomerCommandService(
             leadHistory(newId('hist'), atIso, operator, '领取线索并转为客户', [
               { field: 'customerId', label: '客户', oldValue: lead.customerId || null, newValue: customerId },
               { field: 'owner', label: '负责人', oldValue: lead.owner || null, newValue: conversionOwner },
+              ...(existingOwnerName !== conversionOwner ? [{
+                field: 'assignedTo', label: '分配销售', oldValue: existingOwnerName || null, newValue: conversionOwner,
+              }] : []),
             ]),
             ...(lead.changeHistory || []),
           ],

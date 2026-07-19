@@ -315,15 +315,12 @@ const Leads: React.FC = () => {
     setDetailOpen(true);
   };
 
-  const getCurrentUserName = () => currentUser?.name || currentUser?.account || '';
-
   const handleStartFollow = async (lead: Lead) => {
-    const userName = getCurrentUserName();
-    if (!userName) {
+    if (!currentUser?.id) {
       alert('当前登录用户无效，请重新登录后再领取线索');
       return;
     }
-    const res = await leadFlowApi.claimLeadAsCustomer(lead.id, userName);
+    const res = await leadFlowApi.claimLeadAsCustomer(lead.id);
     if (res.code !== 0 || !res.data) {
       alert(res.message || '领取失败');
       return;

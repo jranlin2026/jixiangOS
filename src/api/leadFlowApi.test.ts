@@ -5,6 +5,7 @@ import { leadFlowApi } from './leadFlowApi';
 import { leadApi } from './leadApi';
 import { LEAD_STATUS, STORAGE_KEYS } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
+import { PERMISSION_KEYS } from '../shared/utils/permissions';
 import type { Lead } from '../types/lead';
 
 const storage = (() => {
@@ -152,16 +153,61 @@ assert.equal(assignRes.data?.customerId, undefined);
 const customersAfterAssign = JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]');
 assert.equal(customersAfterAssign.length, customerCountBeforeIntake);
 
-const claimRes = await leadFlowApi.claimLeadAsCustomer(intake.lead!.id, 'Li');
+const unauthorizedClaim = await leadFlowApi.claimLeadAsCustomer(intake.lead!.id);
+assert.equal(unauthorizedClaim.code, 403, '非销售员工不得领取线索转客户');
+assert.equal(JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]').length, customerCountBeforeIntake);
+
+storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([
+  ...JSON.parse(storage.getItem(STORAGE_KEYS.USERS) || '[]'),
+  {
+    id: 'user-sales-manager', name: 'Sales Manager', account: 'sales-manager', email: '', phone: '',
+    role: 'Sales Manager', roleId: 'role-sales-manager', departmentId: 'dept-sales', isActive: true,
+    createdAt: now, updatedAt: now,
+  },
+]));
+storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([{
+  id: 'role-sales-manager', name: 'Sales Manager', code: 'sales_manager',
+  permissions: [{ module: PERMISSION_KEYS.LEADS_FOLLOW, actions: ['read', 'write'] }],
+  dataScopes: { leads: 'all' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now,
+}]));
+storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({
+  userId: 'user-sales-manager', token: 'sales-manager-token', remember: true, createdAt: now,
+}));
+
+assert.equal(leadFlowApi.claimLeadAsCustomer.length, 1, '领取人必须来自当前会话，接口不得接收用户名参数');
+const claimRes = await leadFlowApi.claimLeadAsCustomer(intake.lead!.id);
 assert.equal(claimRes.code, 0);
 assert.equal(claimRes.data?.lifecycleStatusCode, 'following');
 assert.ok(claimRes.data?.customerId);
+assert.equal(claimRes.data?.owner, 'Sales Manager');
+assert.equal(claimRes.data?.ownerId, 'user-sales-manager');
+assert.equal(claimRes.data?.assignedTo, 'Sales Manager');
+assert.equal(claimRes.data?.assignedToId, 'user-sales-manager');
+assert.deepEqual(claimRes.data?.changeHistory?.[0].changes?.[0], {
+  field: 'assignedTo',
+  label: '分配销售',
+  oldValue: 'Li',
+  newValue: 'Sales Manager',
+});
 
 const customersAfterClaim = JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]');
 assert.equal(customersAfterClaim.length, customerCountBeforeIntake + 1);
 const claimedCustomer = customersAfterClaim.find((item: any) => item.phone === '+8613900000002');
 assert.equal(claimedCustomer?.lifecycleStatusCode, 'following');
-assert.equal(claimedCustomer?.owner, 'Li');
+assert.equal(claimedCustomer?.owner, 'Sales Manager');
+assert.equal(claimedCustomer?.ownerId, 'user-sales-manager');
+assert.equal(claimedCustomer?.ownerIdentityStatus, 'resolved');
+
+leadFlowApi.syncCustomerByLead({
+  ...claimRes.data!,
+  owner: '只有姓名的历史负责人',
+  ownerId: undefined,
+});
+const customerAfterUnsafeLegacySync = JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]')
+  .find((item: any) => item.id === claimedCustomer?.id);
+assert.equal(customerAfterUnsafeLegacySync?.owner, 'Sales Manager');
+assert.equal(customerAfterUnsafeLegacySync?.ownerId, 'user-sales-manager');
+assert.equal(customerAfterUnsafeLegacySync?.ownerIdentityStatus, 'resolved');
 
 const defaultListRes = await leadApi.fetchLeads({ page: 1, pageSize: 20 });
 assert.equal(defaultListRes.code, 0);

@@ -273,12 +273,11 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
 
   const handleClaimCurrentLead = async () => {
     if (!canClaimLead) return;
-    const userName = currentUser?.name || currentUser?.account || '';
-    if (!userName) {
+    if (!currentUser?.id) {
       alert('当前登录用户无效，请重新登录后再领取线索');
       return;
     }
-    const res = await leadFlowApi.claimLeadAsCustomer(currentLead.id, userName);
+    const res = await leadFlowApi.claimLeadAsCustomer(currentLead.id);
     if (res.code !== 0 || !res.data) {
       alert(res.message || '领取失败');
       return;

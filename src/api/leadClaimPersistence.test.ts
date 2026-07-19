@@ -66,7 +66,7 @@ globalThis.fetch = async (input) => {
 };
 
 try {
-  const result = await leadFlowApi.claimLeadAsCustomer(lead.id, 'System Admin');
+  const result = await leadFlowApi.claimLeadAsCustomer(lead.id);
   assert.notEqual(result.code, 0, '客户存储失败时，领取线索不能伪成功');
   assert.match(result.message || '', /保存失败|未保存/);
   assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]'), [lead], '失败后必须恢复原线索');
