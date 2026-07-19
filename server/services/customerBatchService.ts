@@ -6,7 +6,6 @@ import {
   STORAGE_KEYS,
 } from '../../src/shared/utils/constants';
 import {
-  canReceiveLead,
   getCustomerBatchActionPermissions,
   PERMISSION_KEYS,
 } from '../../src/shared/utils/permissions';
@@ -928,18 +927,13 @@ async function assertCurrentOperationGuard(
     // The access context lock has already serialized the directory. Lock the
     // target row too so a concurrent departure/role change cannot slip between
     // precheck confirmation and job creation.
-    const [targetRows, roleRows] = await Promise.all([
-      rawRows<any>(tx, Prisma.sql`SELECT * FROM users WHERE id = ${targetOwnerId} LIMIT 1 FOR UPDATE`),
-      rawRows<any>(tx, Prisma.sql`SELECT * FROM roles WHERE isActive = true ORDER BY id ASC FOR UPDATE`),
-    ]);
+    const targetRows = await rawRows<any>(tx, Prisma.sql`SELECT * FROM users WHERE id = ${targetOwnerId} LIMIT 1 FOR UPDATE`);
     const target = targetRows[0] ? mapPrismaUser(targetRows[0]) : null;
-    const targetRoles = roleRows.map((row) => mapPrismaRole({
-      ...row,
-      permissions: decodeJson(row.permissions),
-      dataScopes: decodeJson(row.dataScopes),
-    }));
-    if (!target || !canReceiveLead(target, targetRoles)) {
-      throw new BatchPrecheckConflictError('目标负责人当前不可接收客户');
+    if (!target || !target.isActive || (target.employmentStatus || 'active') !== 'active') {
+      throw new BatchPrecheckConflictError('目标负责人已离职或停用');
+    }
+    if (records.length > 0 && records.every((record) => cleanText(record.customer.ownerId) === targetOwnerId)) {
+      throw new BatchPrecheckConflictError('所选客户当前均由目标负责人跟进，无需转让');
     }
     return;
   }

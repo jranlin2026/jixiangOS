@@ -57,8 +57,18 @@ assert.match(
 );
 assert.match(
   source,
-  /const transferableOwnerIds = useMemo\(\s*\(\) => new Set\(manageableUsers\.map\(\(user\) => user\.id\)\)/,
-  '转交可选 ID 必须仅由客户专用 endpoint 响应构造',
+  /const transferableOwnerUsers = useMemo\([\s\S]*user\.id !== assignTarget\?\.ownerId/,
+  '转让候选必须来自客户数据范围，并排除当前销售负责人',
+);
+assert.match(
+  source,
+  /const transferableOwnerIds = useMemo\(\s*\(\) => new Set\(transferableOwnerUsers\.map\(\(user\) => user\.id\)\)/,
+  '转让可选 ID 必须只由过滤后的客户范围候选构造',
+);
+assert.match(
+  source,
+  /operation === 'transfer' && manageableUsers\.length <= 1/,
+  '本人范围或当前范围没有其他员工时，批量操作不得提供无意义的转让任务',
 );
 assert.match(
   source,

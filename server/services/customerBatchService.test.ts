@@ -113,7 +113,7 @@ const access = (permissions: Set<string> = new Set([
   assert.equal(directory.access.manageableOwnerIds.has('actor-a'), true);
 }
 
-function fixture(options: { useDefaultOperationGuard?: boolean } = {}) {
+function fixture(options: { useDefaultOperationGuard?: boolean; targetRow?: Record<string, unknown> } = {}) {
   let currentAccess = access();
   let updatedAt = '2026-07-18T00:00:00.000Z';
   let revisions = { lifecycleConfigRevision: 'life-1', tagCatalogRevision: 'tags-1' };
@@ -130,7 +130,11 @@ function fixture(options: { useDefaultOperationGuard?: boolean } = {}) {
     create: async (row: any) => { prechecks.push(structuredClone(row)); },
     lockByToken: async (_tx: unknown, tokenHash: string) => prechecks.find((row) => row.tokenHash === tokenHash) || null,
     update: async (_tx: unknown, id: string, patch: any) => Object.assign(prechecks.find((row) => row.id === id), structuredClone(patch)),
-    $queryRaw: async () => [],
+    $queryRaw: async (query: any) => {
+      const text = String(query?.strings?.join(' ') || '');
+      if (text.includes('FROM users') && options.targetRow) return [options.targetRow];
+      return [];
+    },
   };
   const service = createCustomerBatchService({} as any, {
     selectionService: {
@@ -339,6 +343,53 @@ function fixture(options: { useDefaultOperationGuard?: boolean } = {}) {
     /目标负责人不在当前可管理范围内/,
   );
   assert.equal(test.jobs.length, 0, '目标负责人移出当前范围后不得创建任务');
+}
+
+{
+  const test = fixture({
+    useDefaultOperationGuard: true,
+    targetRow: {
+      id: 'owner-b', name: '部门内员工', account: 'owner-b', email: '', phone: '', role: '普通员工',
+      avatar: null, departmentId: 'dept-sales', positionId: null, positionName: null, roleId: 'role-no-leads',
+      passwordHash: null, passwordSalt: null, passwordUpdatedAt: null, lastLoginAt: null,
+      isActive: true, employmentStatus: 'active', leftAt: null, leftBy: null, createdAt: now, updatedAt: now,
+    },
+  });
+  const departmentAccess = { ...access(), manageableOwnerIds: new Set(['owner-a', 'owner-b']) };
+  test.setAccess(departmentAccess);
+  const precheck = await test.service.precheckCustomerBatch({
+    handlerKey: 'customer_mutation', operation: 'transfer', selection: { mode: 'ids', customerIds: ['c-1'] }, input: { targetOwnerId: 'owner-b' }, reason: '部门内转让',
+  }, departmentAccess);
+  const created = await test.service.createCustomerBatchJob({ precheckToken: precheck.confirmationToken, idempotencyKey: 'target-in-customer-scope' }, departmentAccess);
+  assert.equal(created.id, 'batch-job-1', '客户范围内的在职员工无需线索接收资格即可成为负责人');
+}
+
+{
+  const test = fixture({
+    useDefaultOperationGuard: true,
+    targetRow: {
+      id: 'owner-b', name: '部门内员工', account: 'owner-b', email: '', phone: '', role: '普通员工',
+      avatar: null, departmentId: 'dept-sales', positionId: null, positionName: null, roleId: 'role-no-leads',
+      passwordHash: null, passwordSalt: null, passwordUpdatedAt: null, lastLoginAt: null,
+      isActive: true, employmentStatus: 'active', leftAt: null, leftBy: null, createdAt: now, updatedAt: now,
+    },
+  });
+  const sameOwnerCustomer = { ...customer('c-1'), ownerId: 'owner-b', owner: '部门内员工' };
+  const departmentAccess = {
+    ...access(),
+    readableUserIds: new Set(['owner-a', 'owner-b']),
+    manageableOwnerIds: new Set(['owner-a', 'owner-b']),
+  };
+  test.setAccess(departmentAccess);
+  test.setCurrentCustomer(sameOwnerCustomer);
+  const precheck = await test.service.precheckCustomerBatch({
+    handlerKey: 'customer_mutation', operation: 'transfer', selection: { mode: 'ids', customerIds: ['c-1'] }, input: { targetOwnerId: 'owner-b' }, reason: '重复转让',
+  }, departmentAccess);
+  await assert.rejects(
+    () => test.service.createCustomerBatchJob({ precheckToken: precheck.confirmationToken, idempotencyKey: 'all-same-owner' }, departmentAccess),
+    /无需转让/,
+  );
+  assert.equal(test.jobs.length, 0, '全部客户已属于目标负责人时不应创建空转让任务');
 }
 
 {

@@ -513,6 +513,15 @@ async function commandContext(
   };
 }
 
+async function lockCustomerTransferDirectory(tx: CustomerCommandTx): Promise<void> {
+  // A transfer decision depends on both the actor's data scope and the target
+  // employee's current status. Lock the full directory in the same fixed order
+  // used by batch transfer before deriving either value.
+  await tx.$queryRaw(Prisma.sql`SELECT id FROM users ORDER BY id ASC FOR UPDATE`);
+  await tx.$queryRaw(Prisma.sql`SELECT id FROM roles ORDER BY id ASC FOR UPDATE`);
+  await tx.$queryRaw(Prisma.sql`SELECT id FROM departments ORDER BY id ASC FOR UPDATE`);
+}
+
 function isLinkedLead(lead: Lead, customer: Customer): boolean {
   if (lead.customerId === customer.id) return true;
   if (lead.phone && customer.phone && normalizePhoneForComparison(lead.phone) === normalizePhoneForComparison(customer.phone)) {
@@ -906,9 +915,6 @@ export function createCustomerAtomicCommandService(options: {
         if (!target || !target.isActive || (target.employmentStatus || 'active') !== 'active') {
           throw new Error('目标销售不存在或已离职');
         }
-        if (!context.roles || !canReceiveLead(target, context.roles)) {
-          throw new Error('目标员工不可接收转让客户');
-        }
         if (!context.access.manageableOwnerIds.has(target.id)) throw new Error('无权跨数据范围转让客户');
         if (customer.ownerId === target.id && customer.lifecycleStatusCode !== LIFECYCLE_STATUS_CODES.PUBLIC_POOL) {
           // Preserve legacy same-owner idempotency while recording the request
@@ -1147,6 +1153,7 @@ export function createAuditedCustomerAtomicCommandService(
         try {
           const result = await prisma.$transaction(async (rawTx) => {
             const tx = rawTx as CustomerCommandTx;
+            if (command.action === 'transfer') await lockCustomerTransferDirectory(tx);
             const context = await commandContext(tx, currentUser, 'customers');
             if (!context.actor || !context.customerAccess) throw new Error('当前用户不存在或已离职');
             return atomic.execute(command, {
@@ -2233,9 +2240,6 @@ export function createCustomerCommandService(
         ));
         if (!target) return { error: { code: 400, message: '目标销售不存在或已离职' } };
         const owner = target.name;
-        if (!canReceiveLead(target, context.roles)) {
-          return { error: { code: 400, message: '目标员工不可接收转让客户' } };
-        }
         if (!context.customerAccess?.manageableOwnerIds.has(target.id)) {
           return { error: { code: 403, message: '无权跨数据范围转让客户' } };
         }

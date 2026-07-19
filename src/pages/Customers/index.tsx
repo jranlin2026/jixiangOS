@@ -357,6 +357,10 @@ const Customers: React.FC = () => {
   );
   const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length);
   const visibleOwnerUsers = manageableUsers;
+  const transferableOwnerUsers = useMemo(
+    () => manageableUsers.filter((user) => user.id !== assignTarget?.ownerId),
+    [assignTarget?.ownerId, manageableUsers],
+  );
   const customerWritePermissions = useMemo(() => ({
     editProfile: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE, 'write'),
     editAttribution: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_EDIT_ATTRIBUTION, 'write'),
@@ -372,18 +376,19 @@ const Customers: React.FC = () => {
     [currentUser?.id, manageableUsers],
   );
   const transferableOwnerIds = useMemo(
-    () => new Set(manageableUsers.map((user) => user.id)),
-    [manageableUsers],
+    () => new Set(transferableOwnerUsers.map((user) => user.id)),
+    [transferableOwnerUsers],
   );
   const availableBatchActions = useMemo(() => (
     (Object.keys(CUSTOMER_BATCH_ACTION_PERMISSION_MAP) as CustomerBatchOperation[]).filter((operation) => (
-      CUSTOMER_BATCH_ACTION_PERMISSION_MAP[operation].every((permissionKey) => hasExplicitPermission(
-        currentUser,
-        permissionKey,
-        permissionKey === PERMISSION_KEYS.CUSTOMER_DELETE ? 'delete' : 'write',
-      ))
+      !(operation === 'transfer' && manageableUsers.length <= 1)
+      && CUSTOMER_BATCH_ACTION_PERMISSION_MAP[operation].every((permissionKey) => hasExplicitPermission(
+          currentUser,
+          permissionKey,
+          permissionKey === PERMISSION_KEYS.CUSTOMER_DELETE ? 'delete' : 'write',
+        ))
     ))
-  ), [currentUser]);
+  ), [currentUser, manageableUsers.length]);
   const canReadBatchTasks = hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE, 'write')
     || hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_BATCH_AUDIT_READ, 'read');
   const canCancelAnyBatchTask = hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_BATCH_CANCEL, 'write');
@@ -512,7 +517,7 @@ const Customers: React.FC = () => {
   const handleOpenAssignCustomer = (customer: Customer) => {
     if (!customerWriteActions(customer).transfer) return;
     setAssignTarget(customer);
-    setAssignOwner(customer.ownerId && transferableOwnerIds.has(customer.ownerId) ? customer.ownerId : '');
+    setAssignOwner('');
     setAssignReason('');
   };
 
@@ -1010,7 +1015,9 @@ const Customers: React.FC = () => {
                         </IconButton>
                       </Tooltip>
                     </PermissionGate>
-                    {!isPublicPoolCustomer(customer) && customerActions.transfer && (
+                    {!isPublicPoolCustomer(customer)
+                      && customerActions.transfer
+                      && manageableUsers.some((user) => user.id !== customer.ownerId) && (
                       <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_TRANSFER} action="write">
                         <Tooltip title="转让客户">
                           <IconButton size="small" color="info" onClick={() => handleOpenAssignCustomer(customer)}>
@@ -1183,12 +1190,12 @@ const Customers: React.FC = () => {
               label="新的销售负责人"
               onChange={(event) => setAssignOwner(event.target.value)}
             >
-              {visibleOwnerUsers.length === 0 && (
+              {transferableOwnerUsers.length === 0 && (
                 <MenuItem value="" disabled>
                   当前客户数据范围内暂无可接收转让的成员。
                 </MenuItem>
               )}
-              {visibleOwnerUsers.map((user) => (
+              {transferableOwnerUsers.map((user) => (
                 <MenuItem key={user.id} value={user.id}>
                   {user.name}（{user.positionName || '未设置职位'}）
                 </MenuItem>

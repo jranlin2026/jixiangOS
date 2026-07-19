@@ -699,6 +699,9 @@ function createFakePrisma(
       if (text.includes('FROM customer_todos')) {
         return clone(working.customerTodos || []);
       }
+      if (text.includes('FROM users') || text.includes('FROM roles') || text.includes('FROM departments')) {
+        return [];
+      }
       if (text.includes('FROM app_storage')) {
         if (text.includes('FOR UPDATE')) contactLockQueries += 1;
         const row = (working.appStorage || []).find((item) => item.key === values[0]);
@@ -885,6 +888,30 @@ const serviceOptions = {
   })(),
   contactIdentityCrypto: TEST_CONTACT_CRYPTO,
 };
+
+// RED: single-customer transfer must lock the employee/role/department
+// directory before deriving the transaction-local customer data scope.
+{
+  const queryLog: string[] = [];
+  const fake = createFakePrisma({
+    businessRecords: [businessCustomer(customer('cust-transfer-directory-lock'))],
+    leads: [],
+  }, { queryLog });
+  const result = await createAuditedCustomerAtomicCommandService(fake.prisma, {
+    ...serviceOptions,
+    auditAppender: createPrismaCustomerAuditAppender(),
+  }).execute({
+    action: 'transfer', customerId: 'cust-transfer-directory-lock', targetOwnerId: 'user-finance', reason: '部门内转让',
+  }, manager);
+
+  assert.equal(result.code, 0, result.message);
+  const userLock = queryLog.findIndex((query) => query.includes('FROM users') && query.includes('FOR UPDATE'));
+  const roleLock = queryLog.findIndex((query) => query.includes('FROM roles') && query.includes('FOR UPDATE'));
+  const departmentLock = queryLog.findIndex((query) => query.includes('FROM departments') && query.includes('FOR UPDATE'));
+  const customerLock = queryLog.findIndex((query) => query.includes('FROM business_records') && query.includes('FOR UPDATE'));
+  assert.ok(userLock >= 0 && roleLock > userLock && departmentLock > roleLock, '必须按用户、角色、部门的固定顺序锁定权限目录');
+  assert.ok(customerLock > departmentLock, '客户锁定必须发生在范围目录复核之后');
+}
 
 // 更新只能原样保留该记录已有的停用标签；移除后不得重新添加。
 {
@@ -1164,7 +1191,7 @@ const serviceOptions = {
   assert.equal(fake.getState().businessRecords[0].owner, '公海');
 }
 
-// RED: 部门管理者只能把客户分配给数据范围内的在职员工。
+// 部门管理者可以转让给客户数据范围内的在职员工，不依赖目标员工的线索接收资格。
 {
   const fake = createFakePrisma({
     businessRecords: [businessCustomer(customer('cust-assign'))],
@@ -1176,9 +1203,9 @@ const serviceOptions = {
   assert.equal(denied.code, 403);
   assert.match(denied.message, /转让客户/);
 
-  const nonSales = await service.assignOwner('cust-assign', 'user-finance', '错误分配', manager);
-  assert.equal(nonSales.code, 400, '客户不得分配给没有线索接收能力的员工');
-  assert.match(nonSales.message, /转让客户/);
+  const nonLeadReceiver = await service.assignOwner('cust-assign', 'user-finance', '部门内转让', manager);
+  assert.equal(nonLeadReceiver.code, 0, '客户转让只服从客户数据范围，不应复用线索接收资格');
+  assert.equal(nonLeadReceiver.data?.ownerId, 'user-finance');
 
   const assigned = await service.assignOwner('cust-assign', 'user-b', '主管调整', manager);
   assert.equal(assigned.code, 0);

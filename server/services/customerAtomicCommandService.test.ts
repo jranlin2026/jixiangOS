@@ -187,7 +187,7 @@ function createAtomicFixture(options: {
       },
       roles: [{
         id: 'role-sales', name: '销售顾问', code: 'sales_consultant', isActive: true,
-        permissions: [{ module: PERMISSION_KEYS.LEADS_FOLLOW, actions: ['read', 'write'] }],
+        permissions: [],
       }] as any,
     },
   };
@@ -196,7 +196,7 @@ function createAtomicFixture(options: {
 // 六种命令各自写入客户、待办和审计；批量调用只需复用同一口径。
 {
   const fixture = createAtomicFixture();
-  const result = await fixture.service.execute({ action: 'transfer', customerId: 'c-1', targetOwnerId: 'u-target', reason: '分配客户' }, fixture.context);
+  const result = await fixture.service.execute({ action: 'transfer', customerId: 'c-1', targetOwnerId: 'u-target', reason: '转让客户' }, fixture.context);
   assert.equal(result.reassignedTodoCount, 1);
   assert.equal(fixture.get().savedCustomer.ownerId, 'u-target');
   assert.equal(fixture.get().todoMutation.assigneeId, 'u-target');
