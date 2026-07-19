@@ -907,9 +907,9 @@ export function createCustomerAtomicCommandService(options: {
           throw new Error('目标销售不存在或已离职');
         }
         if (!context.roles || !canReceiveLead(target, context.roles)) {
-          throw new Error('目标员工不是可分配销售');
+          throw new Error('目标员工不可接收转让客户');
         }
-        if (!context.access.manageableOwnerIds.has(target.id)) throw new Error('无权跨数据范围分配客户');
+        if (!context.access.manageableOwnerIds.has(target.id)) throw new Error('无权跨数据范围转让客户');
         if (customer.ownerId === target.id && customer.lifecycleStatusCode !== LIFECYCLE_STATUS_CODES.PUBLIC_POOL) {
           // Preserve legacy same-owner idempotency while recording the request
           // in the same transaction: do not add activity or touch todos.
@@ -2234,10 +2234,10 @@ export function createCustomerCommandService(
         if (!target) return { error: { code: 400, message: '目标销售不存在或已离职' } };
         const owner = target.name;
         if (!canReceiveLead(target, context.roles)) {
-          return { error: { code: 400, message: '目标员工不是可分配销售' } };
+          return { error: { code: 400, message: '目标员工不可接收转让客户' } };
         }
         if (!context.customerAccess?.manageableOwnerIds.has(target.id)) {
-          return { error: { code: 403, message: '无权跨数据范围分配客户' } };
+          return { error: { code: 403, message: '无权跨数据范围转让客户' } };
         }
         if (customer.ownerId === ownerId && customer.lifecycleStatusCode !== LIFECYCLE_STATUS_CODES.PUBLIC_POOL) return {};
 
@@ -2265,7 +2265,7 @@ export function createCustomerCommandService(
               newId('act'),
               atIso,
               operator,
-              `分配客户给 ${owner}`,
+              `转让客户给 ${owner}`,
               reason || undefined,
               [{ field: 'owner', label: '销售负责人', oldValue: customer.owner || null, newValue: owner }],
             ),
@@ -2287,7 +2287,7 @@ export function createCustomerCommandService(
             lifecycleStatus: wasPublicPool ? '待跟进' : lead.lifecycleStatus,
             lifecycleStatusUpdatedAt: wasPublicPool ? atIso : lead.lifecycleStatusUpdatedAt,
             changeHistory: [
-              leadHistory(newId('hist'), atIso, operator, reason || `分配客户给 ${owner}`, [
+              leadHistory(newId('hist'), atIso, operator, reason || `转让客户给 ${owner}`, [
                 { field: 'owner', label: '负责人', oldValue: lead.owner || null, newValue: owner },
                 { field: 'assignedTo', label: '分配销售', oldValue: lead.assignedTo || null, newValue: owner },
               ]),

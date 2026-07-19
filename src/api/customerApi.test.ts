@@ -225,7 +225,7 @@ assert.equal(assignRes.code, 0);
 assert.equal(assignRes.data?.owner, '赵敏');
 assert.equal(assignRes.data?.previousOwner, '李娜');
 assert.equal(assignRes.data?.assignmentReason, '主管重新分配');
-assert.equal(assignRes.data?.activityRecords?.[0]?.title, '分配客户给 赵敏');
+assert.equal(assignRes.data?.activityRecords?.[0]?.title, '转让客户给 赵敏');
 
 const reassignedLeads = JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]') as Lead[];
 const reassignedLead = reassignedLeads.find((item) => item.id === 'lead-test');

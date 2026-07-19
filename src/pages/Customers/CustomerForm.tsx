@@ -312,17 +312,17 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
           </TextField>
           <TextField
             select
-            label="分配销售"
+            label="销售负责人"
             value={form.ownerId}
             onChange={handleOwnerSelect}
             required
             fullWidth
-            helperText={assignableUsers.length ? '候选人来自线索流转参与成员，并按当前角色的数据范围过滤' : '暂无可分配成员，请检查线索流转参与成员或当前角色的数据范围'}
+            helperText={assignableUsers.length ? '候选人来自线索流转参与成员，并按当前角色的数据范围过滤' : '暂无可选负责人，请检查线索流转参与成员或当前角色的数据范围'}
           >
             {shouldShowCurrentOwnerOption && <MenuItem value={form.ownerId}>{form.owner}（历史负责人）</MenuItem>}
             {assignableUsers.length === 0 && (
               <MenuItem value="" disabled>
-                当前角色数据范围内暂无可分配成员，请检查数据范围或线索流转参与成员配置。
+                当前角色数据范围内暂无可选负责人，请检查数据范围或线索流转参与成员配置。
               </MenuItem>
             )}
             {ownerOptions}

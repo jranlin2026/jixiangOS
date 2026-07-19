@@ -152,6 +152,17 @@ export const PERMISSION_KEYS = {
   REFUND_CENTER: '退款中心',
 } as const;
 
+/**
+ * Returns the user-facing name of a permission without changing its persisted
+ * key. Some legacy keys must remain stable so existing role grants continue to
+ * work after product terminology changes.
+ */
+export function getPermissionLeafDisplayLabel(key: string): string {
+  if (key === PERMISSION_KEYS.CUSTOMER_TRANSFER) return '转让客户';
+  const labels = String(key || '').split('/');
+  return labels[labels.length - 1] || key;
+}
+
 export const CUSTOMER_LEAF_PERMISSION_KEYS = [
   PERMISSION_KEYS.CUSTOMER_LIST,
   PERMISSION_KEYS.CUSTOMER_DETAIL,

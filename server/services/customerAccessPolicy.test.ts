@@ -87,7 +87,7 @@ assert.throws(
 );
 assert.throws(
   () => assertCustomerActionPermission(access(), 'transfer'),
-  /转让／分配客户/,
+  /转让客户/,
 );
 
 const claimOnly = access({ grantedPermissions: new Set([PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM]) });

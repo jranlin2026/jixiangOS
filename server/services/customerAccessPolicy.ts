@@ -81,7 +81,7 @@ const FIELD_GROUP_PERMISSION: Record<CustomerFieldGroup, { key: string; label: s
 };
 
 const ACTION_PERMISSION: Record<CustomerMutationAction, { key: string; label: string }> = {
-  transfer: { key: PERMISSION_KEYS.CUSTOMER_TRANSFER, label: '转让／分配客户' },
+  transfer: { key: PERMISSION_KEYS.CUSTOMER_TRANSFER, label: '转让客户' },
   release_to_pool: { key: PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, label: '释放客户至公海' },
   set_progress: { key: PERMISSION_KEYS.CUSTOMER_SET_PROGRESS, label: '设置客户进展' },
   update_tags: { key: PERMISSION_KEYS.CUSTOMER_SET_TAGS, label: '设置客户标签' },

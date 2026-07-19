@@ -38,7 +38,7 @@ import FilterListIcon from '@mui/icons-material/FilterList';
 import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
+import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SearchIcon from '@mui/icons-material/Search';
 import TaskAltOutlinedIcon from '@mui/icons-material/TaskAltOutlined';
@@ -529,7 +529,7 @@ const Customers: React.FC = () => {
     try {
       const res = await customerApi.assignCustomerOwner(assignTarget.id, assignOwner, assignReason);
       if (res.code !== 0 || !res.data) {
-        await alert(res.message || '分配客户失败');
+        await alert(res.message || '转让客户失败');
         return;
       }
       setSelectedCustomer((current) => (current?.id === assignTarget.id ? res.data : current));
@@ -1012,9 +1012,9 @@ const Customers: React.FC = () => {
                     </PermissionGate>
                     {!isPublicPoolCustomer(customer) && customerActions.transfer && (
                       <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_TRANSFER} action="write">
-                        <Tooltip title="分配销售">
+                        <Tooltip title="转让客户">
                           <IconButton size="small" color="info" onClick={() => handleOpenAssignCustomer(customer)}>
-                            <AssignmentIndIcon fontSize="small" />
+                            <SwapHorizIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       </PermissionGate>
@@ -1168,7 +1168,7 @@ const Customers: React.FC = () => {
       </Dialog>
 
       <Dialog open={Boolean(assignTarget)} onClose={handleCloseAssignCustomer} maxWidth="xs" fullWidth>
-        <DialogCloseTitle onClose={handleCloseAssignCustomer}>分配销售</DialogCloseTitle>
+        <DialogCloseTitle onClose={handleCloseAssignCustomer}>转让客户</DialogCloseTitle>
         <DialogContent dividers>
           {assignTarget && (
             <Box sx={{ display: 'grid', gap: 1, bgcolor: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5, mb: 2 }}>
@@ -1185,7 +1185,7 @@ const Customers: React.FC = () => {
             >
               {visibleOwnerUsers.length === 0 && (
                 <MenuItem value="" disabled>
-                  当前客户数据范围内暂无可分配成员。
+                  当前客户数据范围内暂无可接收转让的成员。
                 </MenuItem>
               )}
               {visibleOwnerUsers.map((user) => (
@@ -1196,7 +1196,7 @@ const Customers: React.FC = () => {
             </Select>
           </FormControl>
           <TextField
-            label="分配原因"
+            label="转让原因"
             value={assignReason}
             onChange={(event) => setAssignReason(event.target.value)}
             placeholder="例如：主管调整、客户无人跟进、转交给更合适的销售"
@@ -1212,7 +1212,7 @@ const Customers: React.FC = () => {
             onClick={handleConfirmAssignCustomer}
             disabled={!assignTarget || !assignOwner || !transferableOwnerIds.has(assignOwner) || assignSubmitting || !customerWriteActions(assignTarget).transfer}
           >
-            保存分配
+            确认转让
           </Button>
         </DialogActions>
       </Dialog>

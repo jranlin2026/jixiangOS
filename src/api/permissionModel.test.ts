@@ -5,7 +5,7 @@ import { authApi, roleApi, settingsApi } from './index';
 import { DEFAULT_USER_PASSWORD } from '../shared/utils/auth';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { DEFAULT_ROLES, mergeRoleWithDefaultAccess, normalizeRoleDataScopes } from '../shared/utils/organizationConfig';
-import { CAPABILITY_KEYS, canReceiveLead, canReviewRecoveryOrders, getRoleEditorPermissionActions, hasPermission, isSuperAdmin, PERMISSION_KEYS, roleHasPermission, sanitizeRolePermissions, toAuthenticatedUser } from '../shared/utils/permissions';
+import { CAPABILITY_KEYS, canReceiveLead, canReviewRecoveryOrders, getPermissionLeafDisplayLabel, getRoleEditorPermissionActions, hasPermission, isSuperAdmin, PERMISSION_KEYS, roleHasPermission, sanitizeRolePermissions, toAuthenticatedUser } from '../shared/utils/permissions';
 import type { Role } from '../types/role';
 
 const appSource = readFileSync(join(process.cwd(), 'src', 'App.tsx'), 'utf8');
@@ -70,6 +70,8 @@ assert.match(rolePermissionSource, /label:\s*'新建线索'/);
 assert.match(rolePermissionSource, /label:\s*'开始跟进并加入客户'/);
 assert.match(rolePermissionSource, /label:\s*'分配销售'/);
 assert.doesNotMatch(rolePermissionSource, /label:\s*'接收\/领取线索'|label:\s*'分配线索能力'|label:\s*'线索跟进'|label:\s*'线索转客户'/);
+assert.equal(PERMISSION_KEYS.CUSTOMER_TRANSFER, '客户/转移客户', 'stored permission key must stay stable for existing roles');
+assert.equal(getPermissionLeafDisplayLabel(PERMISSION_KEYS.CUSTOMER_TRANSFER), '转让客户');
 
 const storage = (() => {
   const values = new Map<string, string>();

@@ -38,6 +38,7 @@ assert.deepEqual(expensiveFetchOffenders, [], `Page components should not fetch 
 
 const businessCockpitSource = readFileSync(join(projectRoot, 'src/pages/Dashboard/BusinessCockpit.tsx'), 'utf8');
 const customersPageSource = readFileSync(join(projectRoot, 'src/pages/Customers/index.tsx'), 'utf8');
+const customerFormSource = readFileSync(join(projectRoot, 'src/pages/Customers/CustomerForm.tsx'), 'utf8');
 const customerDetailSource = readFileSync(join(projectRoot, 'src/pages/Customers/CustomerDetail.tsx'), 'utf8');
 const leadsPageSource = readFileSync(join(projectRoot, 'src/pages/Leads/index.tsx'), 'utf8');
 const leadDetailSource = readFileSync(join(projectRoot, 'src/pages/Leads/LeadDetail.tsx'), 'utf8');
@@ -134,6 +135,10 @@ assert.match(
   /permissionKey=\{PERMISSION_KEYS\.CUSTOMER_TRANSFER\}\s+action="write"/,
   'Customer transfer actions must require the dedicated leaf permission.',
 );
+assert.match(customersPageSource, /Tooltip title="转让客户"[\s\S]*SwapHorizIcon/, 'Customer list must call the operation 转让客户 and use a transfer icon.');
+assert.match(customersPageSource, /DialogCloseTitle[^>]*>转让客户<[\s\S]*label="转让原因"[\s\S]*确认转让/, 'Customer transfer dialog wording must be consistent.');
+assert.doesNotMatch(customersPageSource, /分配销售|分配客户失败|保存分配/, 'Customer list must not retain the old assignment wording.');
+assert.match(customerFormSource, /label="销售负责人"/, 'Customer owner field is a role field, not a customer-transfer action.');
 assert.match(
   `${customersPageSource}\n${customerDetailSource}`,
   /permissionKey=\{PERMISSION_KEYS\.CUSTOMER_RELEASE_TO_POOL\}\s+action="write"/,

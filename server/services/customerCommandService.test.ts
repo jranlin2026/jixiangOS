@@ -1174,9 +1174,11 @@ const serviceOptions = {
 
   const denied = await service.assignOwner('cust-assign', 'user-c', '越部门分配', manager);
   assert.equal(denied.code, 403);
+  assert.match(denied.message, /转让客户/);
 
   const nonSales = await service.assignOwner('cust-assign', 'user-finance', '错误分配', manager);
   assert.equal(nonSales.code, 400, '客户不得分配给没有线索接收能力的员工');
+  assert.match(nonSales.message, /转让客户/);
 
   const assigned = await service.assignOwner('cust-assign', 'user-b', '主管调整', manager);
   assert.equal(assigned.code, 0);
@@ -1184,6 +1186,7 @@ const serviceOptions = {
   const next = fake.getState();
   assert.equal(next.leads[0].owner, '销售乙');
   assert.equal(next.leads[0].assignedTo, '销售乙');
+  assert.equal(next.businessRecords[0].data.activityRecords[0].title, '转让客户给 销售乙');
 }
 
 // Stable IDs allow selecting the intended employee even when names are duplicated.

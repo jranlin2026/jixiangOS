@@ -29,7 +29,12 @@ import {
   type RoleDataScopes,
 } from '../../types/role';
 import type { User } from '../../types/settings';
-import { CAPABILITY_KEYS, PERMISSION_KEYS, getCustomerPermissionTree } from '../../shared/utils/permissions';
+import {
+  CAPABILITY_KEYS,
+  PERMISSION_KEYS,
+  getCustomerPermissionTree,
+  getPermissionLeafDisplayLabel,
+} from '../../shared/utils/permissions';
 import { normalizeUserRoleName } from '../../shared/utils/roles';
 import { buildRoleEditorPermissions, normalizeRoleEditorDataScopes } from './rolePermissionModel';
 
@@ -71,10 +76,10 @@ const PERMISSION_TREE: PermissionNode[] = [
     label: '客户',
     children: getCustomerPermissionTree().map((group) => ({
       label: group.label,
-      children: group.leafKeys.map((key) => {
-        const labels = key.split('/');
-        return { label: labels[labels.length - 1] || key, key };
-      }),
+      children: group.leafKeys.map((key) => ({
+        label: getPermissionLeafDisplayLabel(key),
+        key,
+      })),
     })),
   },
   {

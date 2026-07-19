@@ -767,7 +767,7 @@ async function assignCustomerOwner(id: string, ownerId: string, reason = ''): Pr
     activityRecords: [
       createActivity({
         type: 'transfer',
-        title: changed ? `分配客户给 ${nextOwner}` : `确认客户仍由 ${nextOwner} 跟进`,
+        title: changed ? `转让客户给 ${nextOwner}` : `确认客户仍由 ${nextOwner} 跟进`,
         content: cleanReason || undefined,
         operator,
         changes,

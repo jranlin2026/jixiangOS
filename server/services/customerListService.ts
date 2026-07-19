@@ -321,11 +321,11 @@ export function createCustomerListService(
       let assignmentAccess: CustomerAccessContext | null = null;
       if (requestedOwnerId && requestedOwnerId !== currentUser.id) {
         if (!hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_TRANSFER, 'write')) {
-          return failure<Customer>('无权把客户分配给其他负责人', 403);
+          return failure<Customer>('无权把客户转让给其他负责人', 403);
         }
         assignmentAccess = await loadCustomerAccessContext(database, currentUser);
         if (!assignmentAccess.manageableOwnerIds.has(requestedOwnerId)) {
-          return failure<Customer>('无权跨数据范围分配客户', 403);
+          return failure<Customer>('无权跨数据范围转让客户', 403);
         }
       }
       const targetOwner = requestedOwnerId === currentUser.id
