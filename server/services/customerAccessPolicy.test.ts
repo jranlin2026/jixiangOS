@@ -45,7 +45,7 @@ function access(overrides: Partial<CustomerAccessContext> = {}): CustomerAccessC
     legacyReadableNames: new Set(['销售一']),
     manageableOwnerIds: new Set(['user-actor']),
     canReadPublicPool: false,
-    canReadCustomerList: false,
+    canReadCustomerList: true,
     grantedPermissions: new Set(),
     ...overrides,
   };
@@ -68,6 +68,11 @@ const publicPool = customer({
 });
 assert.equal(canReadCustomer(access({ canReadPublicPool: true }), publicPool), true, '公海可见性只授予读取');
 assert.equal(canManageCustomer(access({ canReadPublicPool: true }), publicPool), false, '公海可见不得推导写权');
+assert.equal(canReadCustomer(access({
+  canReadPublicPool: false,
+  canReadCustomerList: true,
+  readableUserIds: new Set(['user-owner']),
+}), { ...publicPool, leadContributorId: 'user-owner' }), false, '公海客户不得通过线索贡献人或数据范围绕过公海查看权');
 
 const unresolved = customer({ ownerId: undefined, ownerIdentityStatus: 'unresolved' });
 const legacyReadContext = access({

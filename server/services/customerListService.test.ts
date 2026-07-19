@@ -456,7 +456,7 @@ const listService = createCustomerListService({
   } },
   leadRecord: { findMany: async () => [] },
   user: { findMany: async () => [{ id: 'sales-1', name: '销售甲', account: 'sales', email: '', phone: '', role: '销售顾问', avatar: null, departmentId: 'd1', positionId: null, positionName: null, roleId: 'r1', passwordHash: null, passwordSalt: null, passwordUpdatedAt: null, lastLoginAt: null, isActive: true, employmentStatus: 'active', createdAt: now, updatedAt: now }] },
-  role: { findMany: async () => [{ id: 'r1', name: '销售顾问', code: 'sales', description: null, departmentId: null, permissions: [], dataScopes: { customers: 'self' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now }] },
+  role: { findMany: async () => [{ id: 'r1', name: '销售顾问', code: 'sales', description: null, departmentId: null, permissions: [{ module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] }], dataScopes: { customers: 'self' }, memberCount: 1, isActive: true, createdAt: now, updatedAt: now }] },
   department: { findMany: async () => [] },
   $queryRaw: async (...args: any[]) => {
     const sql = flattenSql(args);
@@ -505,7 +505,7 @@ const mirrorListDirectory = {
       { id: 'sales-2', name: '销售乙', account: 'sales-b', email: '', phone: '', role: '销售顾问', avatar: null, departmentId: 'd1', positionId: null, positionName: null, roleId: 'r1', passwordHash: null, passwordSalt: null, passwordUpdatedAt: null, lastLoginAt: null, isActive: true, employmentStatus: 'active', createdAt: now, updatedAt: now },
     ],
   },
-  role: { findMany: async () => [{ id: 'r1', name: '销售顾问', code: 'sales', description: null, departmentId: null, permissions: [], dataScopes: { customers: 'self' }, memberCount: 2, isActive: true, createdAt: now, updatedAt: now }] },
+  role: { findMany: async () => [{ id: 'r1', name: '销售顾问', code: 'sales', description: null, departmentId: null, permissions: [{ module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] }], dataScopes: { customers: 'self' }, memberCount: 2, isActive: true, createdAt: now, updatedAt: now }] },
   department: { findMany: async () => [] },
 };
 const createMirrorListService = ($queryRaw: (...args: any[]) => Promise<any>) => createCustomerListService({

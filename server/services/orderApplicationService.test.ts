@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
+import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { BusinessAttachment } from '../../src/types/businessAttachment';
 import type { OrderApplication } from '../../src/types/order';
@@ -205,6 +206,10 @@ class FakePrisma {
       name: '销售顾问',
       code: 'sales_consultant',
       departmentId: 'dept-sales',
+      permissions: [
+        { module: '订单/新增订单', actions: ['read', 'write'] },
+        { module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] },
+      ],
       dataScopes: { customers: 'self', orders: 'self', orderApplications: 'self' },
     }, {
       ...role('self'),
@@ -212,6 +217,11 @@ class FakePrisma {
       name: '销售经理',
       code: 'sales_manager',
       departmentId: 'dept-sales',
+      permissions: [
+        { module: '订单/新增订单', actions: ['read', 'write'] },
+        { module: '订单/订单列表', actions: ['read', 'write'] },
+        { module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] },
+      ],
       dataScopes: { customers: 'department', orders: 'department', orderApplications: 'department' },
     }];
     this.departments = [department(), { ...department(), id: 'dept-sales', name: '销售部', code: 'SALES' }];

@@ -55,7 +55,25 @@ assert.equal(departmentOnly.manageableOwnerIds.has('user-child'), true, '旧 dep
 assert.equal(departmentOnly.manageableOwnerIds.has('user-left'), false, '离职员工不得进入可管理集');
 assert.equal(departmentOnly.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE), true);
 assert.equal(departmentOnly.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_DELETE), true, '直接 delete 授权应生效');
-assert.equal(departmentOnly.canReadCustomerList, false, '数据范围本身不得授予客户列表详情披露权');
+assert.equal(departmentOnly.canReadCustomerList, false, '领取公海权不得扩张为普通客户列表披露权');
+assert.equal(departmentOnly.canReadPublicPool, true, '领取公海客户必须自动具备公海查看权');
+
+const leadReceiverWithoutPoolView = await loadCustomerAccessContext(directory('self', [
+  { module: PERMISSION_KEYS.LEADS_FOLLOW, actions: ['read', 'write'] },
+  { module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] },
+]) as any, actor);
+assert.equal(leadReceiverWithoutPoolView.canReadPublicPool, false, '线索接收或跟进能力不得再隐式授予公海查看权');
+
+const allScopeWithoutPoolView = await loadCustomerAccessContext(directory('all', [
+  { module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] },
+]) as any, actor);
+assert.equal(allScopeWithoutPoolView.canReadPublicPool, false, '客户数据范围为全部也不得隐式授予公海查看权');
+
+const explicitPoolViewer = await loadCustomerAccessContext(directory('self', [
+  { module: PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW, actions: ['read'] },
+]) as any, actor);
+assert.equal(explicitPoolViewer.canReadPublicPool, true, '查看公海池权限应直接授予公海可见性');
+assert.equal(explicitPoolViewer.canReadCustomerList, false, '只查看公海池不得扩张为普通客户列表披露权');
 
 const listReadable = await loadCustomerAccessContext(directory('self', [
   { module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] },

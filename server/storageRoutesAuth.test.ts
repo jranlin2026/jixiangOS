@@ -177,9 +177,13 @@ assert.match(source, /app\.put\('\/api\/ai\/config', requireAiConfigWriteAccess,
 assert.match(source, /app\.post\('\/api\/ai\/config\/test', requireAiConfigWriteAccess,/);
 
 assert.match(source, /const requireCustomerListAccess = createRequireAuth\(authService, PERMISSION_KEYS\.CUSTOMER_LIST\);/);
+assert.match(
+  source,
+  /const requireCustomerReadAccess = createRequireAnyPermission\(authService, \[\s*PERMISSION_KEYS\.CUSTOMER_LIST,\s*PERMISSION_KEYS\.CUSTOMER_PUBLIC_POOL_VIEW,\s*\]\);/,
+);
 assert.match(source, /const requireCustomerTagSettingsReadAccess = createRequireAuth\(authService, PERMISSION_KEYS\.SETTINGS_CUSTOMER_TAGS\);/);
 assert.match(source, /const requireCustomerTagManageAccess = createRequireAuth\(authService, PERMISSION_KEYS\.SETTINGS_CUSTOMER_TAGS, 'write'\);/);
-assert.match(source, /requireCustomerRead: requireCustomerListAccess/);
+assert.match(source, /requireCustomerRead: requireCustomerReadAccess/);
 assert.match(source, /requireLeadRead: requireCustomerTagLeadReadAccess/);
 assert.match(source, /requireSettingsRead: requireCustomerTagSettingsReadAccess/);
 assert.match(source, /requireManage: requireCustomerTagManageAccess/);
@@ -200,11 +204,16 @@ assert.match(source, /const requireLeadEditAccess = createRequireAnyPermission\(
 assert.match(source, /const requireLeadFollowAccess = createRequireAuth\(authService, PERMISSION_KEYS\.LEADS_FOLLOW, 'write'\);/);
 assert.match(source, /const requireLeadAssignAccess = createRequireAuth\(authService, PERMISSION_KEYS\.LEADS_FLOW_CONFIG, 'write'\);/);
 assert.match(source, /const requireLeadDeleteAccess = createRequireAuth\(authService, '全部', 'delete'\);/);
-assert.match(source, /app\.get\('\/api\/customers', requireCustomerListAccess,/);
-assert.match(source, /app\.get\('\/api\/customers\/:id', requireCustomerListAccess,/);
+assert.match(source, /app\.get\('\/api\/customers', requireCustomerReadAccess,/);
+assert.match(source, /app\.get\('\/api\/customers\/:id', requireCustomerReadAccess,/);
+assert.match(
+  source,
+  /app\.get\('\/api\/customers\/:id',[\s\S]*?customerListService\.getById\(customerId, req\.currentUser\)[\s\S]*?if \(result\.code !== 0\)[\s\S]*?return;[\s\S]*?resolveCanonicalCustomer\(prisma, customerId\)/,
+  '合并跳转前必须先做客户记录级可见性校验，避免泄露主客户与合并台账标识',
+);
 assert.match(source, /app\.post\('\/api\/customers', requireCustomerCreateAccess,/);
 assert.match(source, /app\.post\('\/api\/customers\/:id\/follow-ups', requireCustomerProfileEditAccess,/);
-assert.match(source, /app\.get\('\/api\/customers\/:id\/todos', requireCustomerListAccess,/);
+assert.match(source, /app\.get\('\/api\/customers\/:id\/todos', requireCustomerReadAccess,/);
 assert.match(source, /app\.get\('\/api\/customer-todos\/my', requireCustomerListAccess,/);
 assert.match(source, /app\.post\('\/api\/customers\/:id\/todos', requireCustomerTodoWriteAccess,/);
 assert.match(source, /app\.put\('\/api\/customers\/:id\/todos\/:todoId', requireCustomerTodoWriteAccess,/);

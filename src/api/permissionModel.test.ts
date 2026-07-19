@@ -292,7 +292,19 @@ const customerClaimRole: Role = {
   permissions: [{ module: PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, actions: ['read', 'write'] }],
 };
 assert.equal(roleHasPermission(customerClaimRole, PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, 'write'), true);
+assert.equal(roleHasPermission(customerClaimRole, PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW, 'read'), true, '领取权必须包含公海查看权');
+assert.equal(roleHasPermission(customerClaimRole, PERMISSION_KEYS.CUSTOMER_LIST, 'read'), false, '领取权不得隐式获得普通客户列表权');
 assert.equal(roleHasPermission(customerClaimRole, PERMISSION_KEYS.CUSTOMER_ASSIGN, 'write'), false);
+
+const customerPoolViewRole: Role = {
+  ...legacyOpportunityRole,
+  id: 'role-customer-pool-view',
+  code: 'customer_pool_view',
+  permissions: [{ module: PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW, actions: ['read'] }],
+};
+assert.equal(roleHasPermission(customerPoolViewRole, PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW, 'read'), true);
+assert.equal(roleHasPermission(customerPoolViewRole, PERMISSION_KEYS.CUSTOMER_LIST, 'read'), false);
+assert.equal(roleHasPermission(customerPoolViewRole, PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, 'write'), false, '只查看公海不得反向获得领取权');
 
 const leadFollowRole: Role = {
   ...legacyOpportunityRole,

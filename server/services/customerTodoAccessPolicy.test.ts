@@ -31,7 +31,7 @@ function customer(overrides: Partial<Customer> = {}): Customer {
   };
 }
 
-function fixture(initialCustomer: Customer, role = baseRole, conflict = false) {
+function fixture(initialCustomer: Customer, role: any = baseRole, conflict = false) {
   let storedCustomer = structuredClone(initialCustomer);
   let version = new Date(NOW);
   let todo: any = null;
@@ -107,7 +107,10 @@ assert.equal((await contributorOnly.service.create('customer-contributor-todo', 
 }, actor)).code, 403);
 assert.equal(contributorOnly.compareSaves, 0);
 
-const readOnlyRole = { ...baseRole, permissions: [] };
+const readOnlyRole = {
+  ...baseRole,
+  permissions: [{ module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] }],
+};
 const selfComplete = fixture(customer({
   id: 'customer-self-complete', owner: '销售乙', ownerId: 'user-b', leadContributorId: actor.id,
 }), readOnlyRole);

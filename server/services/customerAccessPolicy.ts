@@ -6,7 +6,6 @@ import type { Department } from '../../src/types/department';
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import {
-  canReceiveLead,
   PERMISSION_KEYS,
   roleHasPermission,
 } from '../../src/shared/utils/permissions';
@@ -97,6 +96,7 @@ const CUSTOMER_MUTATION_PERMISSION_ACTIONS = new Map<string, string>([
   [PERMISSION_KEYS.CUSTOMER_EDIT_ATTRIBUTION, 'write'],
   [PERMISSION_KEYS.CUSTOMER_TRANSFER, 'write'],
   [PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, 'write'],
+  [PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW, 'read'],
   [PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM, 'write'],
   [PERMISSION_KEYS.CUSTOMER_DELETE, 'delete'],
   // Batch permissions are leaf grants too. Keeping them in the authoritative
@@ -193,7 +193,7 @@ export function buildCustomerAccessContextFromDirectory(
     readableUserIds: new Set(manageableUsers.map((user) => user.id)),
     legacyReadableNames: new Set(manageableUsers.map((user) => user.name).filter(Boolean)),
     manageableOwnerIds: new Set(manageableUsers.map((user) => user.id)),
-    canReadPublicPool: scope === 'all' || canReceiveLead(actor, [role]),
+    canReadPublicPool: roleHasPermission(role, PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW, 'read'),
     canReadCustomerList: roleHasPermission(role, PERMISSION_KEYS.CUSTOMER_LIST, 'read'),
     grantedPermissions,
   };
@@ -227,6 +227,10 @@ export function canManageHistoricalMergedCustomer(
 
 export function canReadCustomer(context: CustomerAccessContext, customer: Customer): boolean {
   if (customer.deletedAt) return false;
+  if (customer.lifecycleStatusCode === LIFECYCLE_STATUS_CODES.PUBLIC_POOL) {
+    return context.canReadPublicPool;
+  }
+  if (!context.canReadCustomerList) return false;
   if (canManageCustomer(context, customer)) return true;
   const canReadByStableOwner = Boolean(
     customer.ownerId && context.readableUserIds.has(customer.ownerId),
@@ -244,11 +248,7 @@ export function canReadCustomer(context: CustomerAccessContext, customer: Custom
   );
   return canReadByStableOwner
     || canReadByLegacyOwner
-    || canReadByContributor
-    || (
-      customer.lifecycleStatusCode === LIFECYCLE_STATUS_CODES.PUBLIC_POOL
-      && context.canReadPublicPool
-    );
+    || canReadByContributor;
 }
 
 export function assertCanManageCustomer(context: CustomerAccessContext, customer: Customer): void {

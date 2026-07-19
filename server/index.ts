@@ -203,6 +203,10 @@ const requireDeliveryAssignmentWriteAccess = createRequireAuth(authService, PERM
 const requireStorageAccess = createRequireAuth(authService);
 const requireCoCreationAccess = createRequireAuth(authService);
 const requireCustomerListAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_LIST);
+const requireCustomerReadAccess = createRequireAnyPermission(authService, [
+  PERMISSION_KEYS.CUSTOMER_LIST,
+  PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW,
+]);
 const requireCustomerTagLeadReadAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_DETAIL);
 const requireCustomerTagSettingsReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS);
 const requireCustomerTagManageAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS, 'write');
@@ -416,7 +420,7 @@ app.use('/api/customer-tags', createCustomerTagMigrationRouter({
 }));
 app.use('/api/customer-tags', createCustomerTagRouter({
   service: customerTagService,
-  requireCustomerRead: requireCustomerListAccess,
+  requireCustomerRead: requireCustomerReadAccess,
   requireLeadRead: requireCustomerTagLeadReadAccess,
   requireSettingsRead: requireCustomerTagSettingsReadAccess,
   requireManage: requireCustomerTagManageAccess,
@@ -473,7 +477,7 @@ app.post('/api/customers', requireCustomerCreateAccess, async (req: Authenticate
   res.status(result.code === 0 ? 201 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
-app.get('/api/customers', requireCustomerListAccess, async (req: AuthenticatedRequest, res) => {
+app.get('/api/customers', requireCustomerReadAccess, async (req: AuthenticatedRequest, res) => {
   const tagIds = queryParams(req.query.tagId);
   const rawTagMatch = queryParam(req.query.tagMatch) || 'grouped';
   const tagMatch = rawTagMatch === 'any' || rawTagMatch === 'all' || rawTagMatch === 'grouped' ? rawTagMatch : null;
@@ -529,18 +533,22 @@ app.delete('/api/customers/:id', requireCustomerDeleteAccess, async (req: Authen
 
 app.post('/api/customers/:id/follow-ups', requireCustomerProfileEditAccess, createCustomerFollowUpHandler(customerListService));
 
-app.get('/api/customers/:id', requireCustomerListAccess, async (req: AuthenticatedRequest, res) => {
+app.get('/api/customers/:id', requireCustomerReadAccess, async (req: AuthenticatedRequest, res) => {
   const customerId = routeParam(req.params.id);
+  const result = await customerListService.getById(customerId, req.currentUser);
+  if (result.code !== 0) {
+    res.status(result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+    return;
+  }
   const redirect = await resolveCanonicalCustomer(prisma, customerId);
   if (redirect) {
     res.status(409).json({ code: 409, message: '客户已合并，请查看主客户', data: redirect, canonicalCustomerId: redirect.canonicalCustomerId });
     return;
   }
-  const result = await customerListService.getById(customerId, req.currentUser);
-  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+  res.status(200).json(result);
 });
 
-app.get('/api/customers/:id/todos', requireCustomerListAccess, async (req: AuthenticatedRequest, res) => {
+app.get('/api/customers/:id/todos', requireCustomerReadAccess, async (req: AuthenticatedRequest, res) => {
   const result = await customerTodoService.list(routeParam(req.params.id), req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });

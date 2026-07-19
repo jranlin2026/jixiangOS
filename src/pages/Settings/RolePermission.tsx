@@ -350,6 +350,10 @@ const normalizePermissionKeys = (permissions: Permission[]) => {
     aliases.get(module)?.forEach((key) => normalized.add(key));
   });
 
+  if (normalized.has(PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM)) {
+    normalized.add(PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW);
+  }
+
   return normalized;
 };
 

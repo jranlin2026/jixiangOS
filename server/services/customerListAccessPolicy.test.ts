@@ -17,6 +17,7 @@ const users = [
 const role = {
   id: 'role-sales', name: '自定义', code: 'custom', description: null, departmentId: 'dept-sales',
   permissions: [
+    { module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] },
     { module: PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE, actions: ['read', 'write'] },
     { module: PERMISSION_KEYS.LEADS_FOLLOW, actions: ['read', 'write'] },
   ],
@@ -138,6 +139,16 @@ const contributed = fixture(value({
 const readOnlyWrite = await contributed.service.addFollowUp('customer-contributed', { content: '越权跟进' }, actor as any);
 assert.equal(readOnlyWrite.code, 403, '贡献人可读不得跟进他人客户');
 assert.equal(contributed.compareSaves, 0);
+
+const hiddenPublicPool = fixture(value({
+  id: 'customer-hidden-public-pool', owner: '公海', ownerId: undefined, ownerIdentityStatus: 'public_pool',
+  lifecycleStatusCode: 'public_pool', leadContributorId: actor.id,
+}));
+assert.equal(
+  (await hiddenPublicPool.service.getById('customer-hidden-public-pool', actor as any)).code,
+  404,
+  '即使是线索贡献人，没有查看公海池权限也不得读取公海客户',
+);
 
 const noProfileRole = { ...role, permissions: [{ module: PERMISSION_KEYS.LEADS_FOLLOW, actions: ['read'] }] };
 const noProfile = fixture(value({ id: 'customer-no-profile' }), noProfileRole);

@@ -103,3 +103,21 @@ assert.deepEqual(
   toggledEditorPermissions.find((permission) => permission.module === PERMISSION_KEYS.CUSTOMER_SET_PROGRESS)?.actions,
   ['read', 'write'],
 );
+
+const publicPoolClaimPermissions = buildRoleEditorPermissions([
+  PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM,
+]);
+assert.deepEqual(
+  publicPoolClaimPermissions.find((permission) => permission.module === PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM)?.actions,
+  ['read', 'write'],
+);
+assert.deepEqual(
+  publicPoolClaimPermissions.find((permission) => permission.module === PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW)?.actions,
+  ['read'],
+  '角色编辑器选中领取时必须持久化查看公海池依赖',
+);
+assert.deepEqual(
+  publicPoolClaimPermissions.find((permission) => permission.module === PERMISSION_KEYS.CUSTOMER_LIST)?.actions,
+  undefined,
+  '领取公海权不得在角色编辑器中隐式扩张为普通客户列表权',
+);

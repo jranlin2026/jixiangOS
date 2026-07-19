@@ -45,7 +45,10 @@ const tx = {
   },
   role: { findMany: async () => [{
     id: 'role-todo', name: '自定义', code: 'custom', description: null, departmentId: 'dept-sales',
-    permissions: [{ module: PERMISSION_KEYS.CUSTOMER_SET_TODOS, actions: ['read', 'write'] }],
+    permissions: [
+      { module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] },
+      { module: PERMISSION_KEYS.CUSTOMER_SET_TODOS, actions: ['read', 'write'] },
+    ],
     dataScopes: { customers: 'self' }, memberCount: 1, isActive: true, createdAt: at, updatedAt: at,
   }] },
   department: { findMany: async () => [{

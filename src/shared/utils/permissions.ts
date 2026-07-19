@@ -36,6 +36,7 @@ export const PERMISSION_KEYS = {
   CUSTOMER_DELETE: '客户/删除客户',
   CUSTOMER_TRANSFER: '客户/转移客户',
   CUSTOMER_RELEASE_TO_POOL: '客户/释放至公海',
+  CUSTOMER_PUBLIC_POOL_VIEW: '客户/查看公海池',
   CUSTOMER_PUBLIC_POOL_CLAIM: '客户/领取公海客户',
   CUSTOMER_BATCH_MANAGE: '客户/批量管理',
   CUSTOMER_IMPORT: '客户/导入客户',
@@ -175,6 +176,7 @@ export const CUSTOMER_LEAF_PERMISSION_KEYS = [
   PERMISSION_KEYS.CUSTOMER_DELETE,
   PERMISSION_KEYS.CUSTOMER_TRANSFER,
   PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL,
+  PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW,
   PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM,
   PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE,
   PERMISSION_KEYS.CUSTOMER_IMPORT,
@@ -217,6 +219,7 @@ const CUSTOMER_PERMISSION_TREE: CustomerPermissionTreeNode[] = [
     leafKeys: [
       PERMISSION_KEYS.CUSTOMER_TRANSFER,
       PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL,
+      PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW,
       PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM,
     ],
   },
@@ -351,6 +354,7 @@ const PERMISSION_GRANT_TREE: Record<string, string[]> = {
   [PERMISSION_KEYS.CUSTOMER_DELETE]: [PERMISSION_KEYS.CUSTOMER_DELETE],
   [PERMISSION_KEYS.CUSTOMER_TRANSFER]: [PERMISSION_KEYS.CUSTOMER_TRANSFER],
   [PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL]: [PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL],
+  [PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW]: [PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW],
   [PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM]: [PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM],
   [PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE]: [PERMISSION_KEYS.CUSTOMER_BATCH_MANAGE],
   [PERMISSION_KEYS.CUSTOMER_IMPORT]: [PERMISSION_KEYS.CUSTOMER_IMPORT],
@@ -861,6 +865,12 @@ function expandPermissionRequests(module: string): string[] {
   if (normalized === ALL_PERMISSION_KEY) return [ALL_PERMISSION_KEY];
   const keys = new Set<string>(expandPermissionGrants(module));
   keys.add(normalized);
+  // This dependency is deliberately one-way: a role that can claim from the
+  // public pool can also view it, while a view-only role cannot claim. Encoding
+  // it in the ordinary grant tree would make the prerequisite grant stronger.
+  if (normalized === normalizePermissionKey(PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW)) {
+    keys.add(normalizePermissionKey(PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM));
+  }
   for (const [permissionKey, grants] of PERMISSION_GRANTS_BY_NORMALIZED.entries()) {
     if (permissionKey.startsWith(`${normalized}/`)) {
       keys.add(permissionKey);

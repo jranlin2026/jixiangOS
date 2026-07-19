@@ -589,6 +589,11 @@ assert.match(
   'Sidebar customer module should expose 客户列表 and 公海池 as folded child entries.',
 );
 assert.match(
+  sidebarSource,
+  /label:\s*'公海池'[\s\S]*permissionKeys:\s*\[PERMISSION_KEYS\.CUSTOMER_PUBLIC_POOL_VIEW\]/,
+  '公海池菜单必须由独立查看公海权限控制。',
+);
+assert.match(
   recoveryOrderSource,
   /第三方平台订单号[\s\S]*售后挽回分账|售后挽回分账[\s\S]*第三方平台订单号/,
   'Recovery order workspace should collect third-party order data and send approved records to recovery settlement.',

@@ -3,7 +3,11 @@ import { normalizeRoleDataScopes } from '../../shared/utils/organizationConfig';
 import { getRoleEditorPermissionActions, normalizePermissionKey, PERMISSION_KEYS } from '../../shared/utils/permissions';
 
 export function buildRoleEditorPermissions(modules: Iterable<string>): Permission[] {
-  return Array.from(new Set(modules))
+  const selected = new Set(modules);
+  if (selected.has(PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_CLAIM)) {
+    selected.add(PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW);
+  }
+  return Array.from(selected)
     .filter((module) => normalizePermissionKey(module) !== normalizePermissionKey(PERMISSION_KEYS.CUSTOMERS))
     .sort()
     .map((module) => ({ module, actions: getRoleEditorPermissionActions(module) }));

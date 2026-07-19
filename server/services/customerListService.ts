@@ -246,23 +246,30 @@ async function buildVisibilityWhere(
   if (!currentUser) return { where: Prisma.sql`1 = 0`, context: null };
   const context = await loadCustomerAccessContext(prisma, currentUser);
 
-  const visibilityConditions: Prisma.Sql[] = [];
+  const scopedVisibilityConditions: Prisma.Sql[] = [];
   const readableNames = [...context.legacyReadableNames];
   const readableIds = [...context.readableUserIds];
-  if (readableNames.length) {
-    visibilityConditions.push(Prisma.sql`(
+  if (context.canReadCustomerList && readableNames.length) {
+    scopedVisibilityConditions.push(Prisma.sql`(
       ${jsonText('$.ownerId')} IS NULL
       AND COALESCE(${jsonText('$.ownerIdentityStatus')}, '') <> 'resolved'
       AND ${jsonText('$.owner')} IN (${Prisma.join(readableNames)})
     )`);
-    visibilityConditions.push(Prisma.sql`(
+    scopedVisibilityConditions.push(Prisma.sql`(
       ${jsonText('$.leadContributorId')} IS NULL
       AND ${jsonText('$.leadContributorName')} IN (${Prisma.join(readableNames)})
     )`);
   }
-  if (readableIds.length) {
-    visibilityConditions.push(Prisma.sql`${jsonText('$.ownerId')} IN (${Prisma.join(readableIds)})`);
-    visibilityConditions.push(Prisma.sql`${jsonText('$.leadContributorId')} IN (${Prisma.join(readableIds)})`);
+  if (context.canReadCustomerList && readableIds.length) {
+    scopedVisibilityConditions.push(Prisma.sql`${jsonText('$.ownerId')} IN (${Prisma.join(readableIds)})`);
+    scopedVisibilityConditions.push(Prisma.sql`${jsonText('$.leadContributorId')} IN (${Prisma.join(readableIds)})`);
+  }
+  const visibilityConditions: Prisma.Sql[] = [];
+  if (scopedVisibilityConditions.length) {
+    visibilityConditions.push(Prisma.sql`(
+      COALESCE(${jsonText('$.lifecycleStatusCode')}, '') <> ${LIFECYCLE_STATUS_CODES.PUBLIC_POOL}
+      AND (${Prisma.join(scopedVisibilityConditions, ' OR ')})
+    )`);
   }
   if (context.canReadPublicPool) {
     visibilityConditions.push(Prisma.sql`${jsonText('$.lifecycleStatusCode')} = ${LIFECYCLE_STATUS_CODES.PUBLIC_POOL}`);

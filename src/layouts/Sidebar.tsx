@@ -92,7 +92,7 @@ const navItems: NavItem[] = [
       {
         label: '公海池',
         path: `${ROUTES.CUSTOMERS}?tab=public_pool`,
-        permissionKeys: [PERMISSION_KEYS.CUSTOMERS, PERMISSION_KEYS.CUSTOMER_LIST],
+        permissionKeys: [PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW],
       },
     ],
   },
