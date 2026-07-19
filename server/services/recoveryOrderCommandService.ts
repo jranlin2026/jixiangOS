@@ -7,6 +7,11 @@ import { PERMISSION_KEYS, canReviewRecoveryOrders, hasPermission } from '../../s
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Department } from '../../src/types/department';
 import type { RecoveryOrder, RecoveryOrderFilters, RecoveryOrderInput, RecoverySettlementCounts } from '../../src/types/recoveryOrder';
+import {
+  isInactiveRecoveryCommissionStatus,
+  isRecoveryCommissionRelatedToOrder,
+  isRecoveryOrderDeletionLocked,
+} from '../../src/shared/utils/recoveryOrderDeletion';
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
@@ -743,7 +748,35 @@ export function createRecoveryOrderCommandService(
         const current = await lockRecoveryOrder(transaction, orderId);
         if (!recoveryVisible(current, scope)) throw new RecoveryCommandError(403, '无权删除该售后挽回订单');
         if (current.deletedAt) return current;
-        if ((current.commissionIds || []).length || ['待确认', '待发放', '已撤回'].includes(current.settlementStatus || '未分账')) {
+        const commissionIds = new Set(current.commissionIds || []);
+        const commissionRows = await transaction.businessRecord.findMany({
+          where: {
+            domain: STORAGE_KEYS.COMMISSIONS,
+            OR: [
+              { orderId: current.id },
+              { data: { path: '$.sourceRecoveryOrderId', equals: current.id } },
+              ...(commissionIds.size ? [{ recordId: { in: Array.from(commissionIds) } }] : []),
+            ],
+          },
+        });
+        const relatedCommissionStatuses = commissionRows.flatMap((row) => {
+          const commission = parseObject<{
+            id?: string;
+            orderId?: string;
+            sourceRecoveryOrderId?: string;
+            status?: string;
+          }>(row.data, '售后挽回分账');
+          const related = isRecoveryCommissionRelatedToOrder(current.id, commissionIds, {
+            ...commission,
+            id: row.recordId || commission.id,
+            orderId: row.orderId || commission.orderId,
+          });
+          return related ? [String(row.status || commission.status || '')] : [];
+        });
+        if (relatedCommissionStatuses.some((status) => !isInactiveRecoveryCommissionStatus(status))) {
+          throw new RecoveryCommandError(409, '该售后挽回订单仍有活动提成，请先在财务中心处理');
+        }
+        if (isRecoveryOrderDeletionLocked(current)) {
           throw new RecoveryCommandError(409, '该售后挽回订单已有分账，请先处理分账记录');
         }
         const deletedAt = now().toISOString();

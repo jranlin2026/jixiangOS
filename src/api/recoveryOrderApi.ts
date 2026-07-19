@@ -10,6 +10,11 @@ import { getCurrentOperatorName } from '../shared/utils/currentOperator';
 import { getCurrentDataVisibilityScope } from '../shared/utils/dataVisibility';
 import { PERMISSION_KEYS, normalizePermissionKey, roleHasPermission } from '../shared/utils/permissions';
 import { normalizeUserRoleName } from '../shared/utils/roles';
+import {
+  isInactiveRecoveryCommissionStatus,
+  isRecoveryCommissionRelatedToOrder,
+  isRecoveryOrderDeletionLocked,
+} from '../shared/utils/recoveryOrderDeletion';
 import type { AuthSession } from '../types/auth';
 import type { Commission, CommissionPayoutPlan } from '../types/commission';
 import type { Department } from '../types/department';
@@ -475,11 +480,11 @@ async function updateRecoveryOrder(id: string, data: RecoveryOrderInput): Promis
   return createSuccessResponse(orders[idx]);
 }
 
-async function deleteRecoveryOrder(id: string, options: { force?: boolean } = {}): Promise<ApiResponse<boolean>> {
+async function deleteRecoveryOrder(id: string): Promise<ApiResponse<boolean>> {
   if (shouldUseBackendApi()) {
     const response = await backendRequest<RecoveryOrder | null>(`/recovery-orders/${encodeURIComponent(id)}`, {
       method: 'DELETE',
-      body: JSON.stringify({ reason: options.force ? '管理员强制删除' : '售后挽回订单删除' }),
+      body: JSON.stringify({ reason: '售后挽回订单删除' }),
     });
     if (response.code !== 0) return createErrorResponse(response.message, response.code);
     if (response.data) cacheBackendRecoveryOrder(response.data);
@@ -495,9 +500,15 @@ async function deleteRecoveryOrder(id: string, options: { force?: boolean } = {}
   const idx = orders.findIndex((item) => item.id === id);
   const target = idx >= 0 ? orders[idx] : undefined;
   if (!target) return createSuccessResponse(true);
-  const isSettled = ['待确认', '待发放', '已撤回'].includes(target.settlementStatus || '未分账') || target.status === '已分账';
-  if (isSettled && !options.force) {
-    return createErrorResponse('已分账的售后挽回订单不能删除，请先删除分账记录');
+  const commissionIds = new Set(target.commissionIds || []);
+  const relatedCommissionStatuses = readCommissions()
+    .filter((commission) => isRecoveryCommissionRelatedToOrder(target.id, commissionIds, commission))
+    .map((commission) => commission.status);
+  if (relatedCommissionStatuses.some((status) => !isInactiveRecoveryCommissionStatus(status))) {
+    return createErrorResponse('该售后挽回订单仍有活动提成，请先在财务中心处理', 409);
+  }
+  if (isRecoveryOrderDeletionLocked(target)) {
+    return createErrorResponse('该售后挽回订单仍有活动分账，请先在财务中心处理', 409);
   }
   const now = nowIso();
   orders[idx] = {
@@ -794,49 +805,6 @@ async function resetRecoverySettlement(id: string, operatorName: string, reason?
   return createSuccessResponse(orders[idx]);
 }
 
-async function cleanupDeletedSourceRecoverySettlement(
-  id: string,
-  operatorName: string,
-  reason?: string,
-): Promise<ApiResponse<boolean>> {
-  ensureInit();
-  await delay(160);
-  const normalizedReason = String(reason || '').trim();
-  if (!normalizedReason) return createErrorResponse('清理废弃分账必须填写原因');
-
-  const orders = readRecoveryOrders();
-  const target = orders.find((item) => item.id === id);
-  if (!target) return createSuccessResponse(true);
-  if (!target.deletedAt) return createErrorResponse('源售后挽回订单仍存在，不能作为废弃分账清理');
-
-  const commissionIds = new Set(target.commissionIds || []);
-  const commissions = readCommissions();
-  const relatedCommissions = commissions.filter((commission) => (
-    commissionIds.has(commission.id)
-    || commission.sourceRecoveryOrderId === target.id
-    || commission.orderId === target.id
-    || commission.orderNo === target.recoveryNo
-  ));
-  const locked = relatedCommissions.find((commission) => (
-    commission.status === '已发放'
-    || commission.status === '待冲销'
-    || commission.status === '已冲销'
-  ));
-  if (locked) {
-    return createErrorResponse('已发放的分账不能清理；第一版不支持系统内冲销，请财务线下处理。');
-  }
-
-  writeCommissions(commissions.filter((commission) => (
-    !commissionIds.has(commission.id)
-    && commission.sourceRecoveryOrderId !== target.id
-    && commission.orderId !== target.id
-    && commission.orderNo !== target.recoveryNo
-  )));
-  writeRecoveryOrders(orders.filter((item) => item.id !== id));
-  void operatorName;
-  return createSuccessResponse(true);
-}
-
 async function withdrawRecoverySettlement(id: string, reason: string, operatorName: string): Promise<ApiResponse<RecoveryOrder | null>> {
   ensureInit();
   await delay(140);
@@ -893,6 +861,5 @@ export const recoveryOrderApi = {
   settleRecoveryOrder,
   confirmRecoverySettlement,
   resetRecoverySettlement,
-  cleanupDeletedSourceRecoverySettlement,
   withdrawRecoverySettlement,
 };

@@ -107,8 +107,22 @@ const outsideDepartmentRecord: RecoveryOrder = {
 const key = (domain: string, id: string) => `${domain}\u0000${id}`;
 const clone = <T>(value: T): T => structuredClone(value);
 
+function matchesBusinessRecordWhere(row: any, where: any): boolean {
+  if (!where) return true;
+  if (where.domain !== undefined && row.domain !== where.domain) return false;
+  if (where.orderId !== undefined && row.orderId !== where.orderId) return false;
+  if (where.recordId?.in && !where.recordId.in.includes(row.recordId)) return false;
+  if (where.data?.path && where.data.equals !== undefined) {
+    const field = String(where.data.path).replace(/^\$\./, '');
+    if (row.data?.[field] !== where.data.equals) return false;
+  }
+  if (Array.isArray(where.OR) && !where.OR.some((candidate: any) => matchesBusinessRecordWhere(row, candidate))) return false;
+  return true;
+}
+
 class FakePrisma {
-  rows = new Map([
+  readonly businessFindManyWheres: any[] = [];
+  rows = new Map<string, any>([
     [key(STORAGE_KEYS.RECOVERY_ORDERS, oldRecord.id), {
       id: `${STORAGE_KEYS.RECOVERY_ORDERS}:${oldRecord.id}`, domain: STORAGE_KEYS.RECOVERY_ORDERS,
       recordId: oldRecord.id, status: oldRecord.status, data: clone(oldRecord),
@@ -149,9 +163,12 @@ class FakePrisma {
     memberCount: 1, sortOrder: 2, isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW),
   }] };
   readonly businessRecord = {
-    findMany: async ({ where }: any) => Array.from(this.rows.values())
-      .filter((row: any) => row.domain === where.domain)
-      .map(clone),
+    findMany: async ({ where }: any) => {
+      this.businessFindManyWheres.push(clone(where));
+      return Array.from(this.rows.values())
+        .filter((row: any) => matchesBusinessRecordWhere(row, where))
+        .map(clone);
+    },
     findUnique: async ({ where }: any) => {
       const target = where.domain_recordId;
       return clone(this.rows.get(key(target.domain, target.recordId)) || null);
@@ -161,7 +178,10 @@ class FakePrisma {
   async $transaction<T>(callback: (transaction: any) => Promise<T>): Promise<T> {
     const staged = new Map(Array.from(this.rows.entries()).map(([id, row]) => [id, clone(row)]));
     const tx = { businessRecord: {
-      findMany: async ({ where }: any) => Array.from(staged.values()).filter((row: any) => row.domain === where.domain).map(clone),
+      findMany: async ({ where }: any) => {
+        this.businessFindManyWheres.push(clone(where));
+        return Array.from(staged.values()).filter((row: any) => matchesBusinessRecordWhere(row, where)).map(clone);
+      },
       findUnique: async ({ where }: any) => {
         const target = where.domain_recordId;
         return clone(staged.get(key(target.domain, target.recordId)) || null);
@@ -375,6 +395,102 @@ const rejectedSource = await service.create(input({ thirdPartyOrderNo: 'TP-REJEC
 const rejected = await service.reject(rejectedSource.data!.id, '凭证无效', reviewer);
 assert.equal(rejected.code, 0);
 assert.equal(rejected.data?.status, '审核驳回');
+
+const withdrawnSource = await service.create(input({ thirdPartyOrderNo: 'TP-WITHDRAWN-DELETE' }), creator);
+const withdrawnRow = prisma.rows.get(key(STORAGE_KEYS.RECOVERY_ORDERS, withdrawnSource.data!.id))!;
+withdrawnRow.status = '已分账';
+withdrawnRow.data = {
+  ...withdrawnRow.data,
+  status: '已分账',
+  settlementStatus: '已撤回',
+  commissionIds: ['commission-withdrawn-history'],
+};
+prisma.rows.set(key(STORAGE_KEYS.COMMISSIONS, 'commission-withdrawn-history'), {
+  id: `${STORAGE_KEYS.COMMISSIONS}:commission-withdrawn-history`,
+  domain: STORAGE_KEYS.COMMISSIONS,
+  recordId: 'commission-withdrawn-history',
+  orderId: withdrawnSource.data!.id,
+  status: '已撤回',
+  data: {
+    id: 'commission-withdrawn-history',
+    orderId: withdrawnSource.data!.id,
+    sourceRecoveryOrderId: withdrawnSource.data!.id,
+    status: '已撤回',
+  },
+});
+const withdrawnDeleted = await service.softDelete(withdrawnSource.data!.id, '已撤回后清理', reviewer);
+assert.equal(withdrawnDeleted.code, 0, '已撤回分账只保留历史关联，不应阻止售后挽回订单删除');
+assert.equal(withdrawnDeleted.data?.deletedBy, reviewer.name);
+assert.equal(
+  (await service.get(withdrawnSource.data!.id, finance, 'recoveryOrders')).code,
+  0,
+  '财务中心必须继续读取已软删售后挽回订单的撤回留痕',
+);
+assert.equal(
+  prisma.rows.has(key(STORAGE_KEYS.COMMISSIONS, 'commission-withdrawn-history')),
+  true,
+  '删除源售后挽回订单必须保留已撤回分账留痕',
+);
+
+const inconsistentWithdrawnSource = await service.create(input({ thirdPartyOrderNo: 'TP-WITHDRAWN-ACTIVE-COMMISSION' }), creator);
+const inconsistentWithdrawnRow = prisma.rows.get(key(STORAGE_KEYS.RECOVERY_ORDERS, inconsistentWithdrawnSource.data!.id))!;
+inconsistentWithdrawnRow.status = '已分账';
+inconsistentWithdrawnRow.data = {
+  ...inconsistentWithdrawnRow.data,
+  status: '已分账',
+  settlementStatus: '已撤回',
+  commissionIds: ['commission-still-active'],
+};
+prisma.rows.set(key(STORAGE_KEYS.COMMISSIONS, 'commission-still-active'), {
+  id: `${STORAGE_KEYS.COMMISSIONS}:commission-still-active`,
+  domain: STORAGE_KEYS.COMMISSIONS,
+  recordId: 'commission-still-active',
+  orderId: inconsistentWithdrawnSource.data!.id,
+  status: '待发放',
+  data: {
+    id: 'commission-still-active',
+    orderId: inconsistentWithdrawnSource.data!.id,
+    sourceRecoveryOrderId: inconsistentWithdrawnSource.data!.id,
+    status: '待发放',
+  },
+});
+const inconsistentDelete = await service.softDelete(inconsistentWithdrawnSource.data!.id, '尝试删除', reviewer);
+assert.equal(inconsistentDelete.code, 409, '仍有关联活动提成时必须禁止删除');
+assert.match(inconsistentDelete.message, /活动提成|处理分账/);
+assert.equal(
+  prisma.businessFindManyWheres.some((where) => (
+    where.domain === STORAGE_KEYS.COMMISSIONS
+    && where.OR?.some((candidate: any) => candidate.orderId === inconsistentWithdrawnSource.data!.id)
+    && where.OR?.some((candidate: any) => candidate.recordId?.in?.includes('commission-still-active'))
+  )),
+  true,
+  '删除校验必须按订单和历史提成 ID 查询关联分账',
+);
+
+const sourceLinkedOrder = await service.create(input({ thirdPartyOrderNo: 'TP-SOURCE-LINKED-COMMISSION' }), creator);
+const sourceLinkedRow = prisma.rows.get(key(STORAGE_KEYS.RECOVERY_ORDERS, sourceLinkedOrder.data!.id))!;
+sourceLinkedRow.status = '已分账';
+sourceLinkedRow.data = {
+  ...sourceLinkedRow.data,
+  status: '已分账',
+  settlementStatus: '已撤回',
+  commissionIds: [],
+};
+prisma.rows.set(key(STORAGE_KEYS.COMMISSIONS, 'commission-source-linked'), {
+  id: `${STORAGE_KEYS.COMMISSIONS}:commission-source-linked`,
+  domain: STORAGE_KEYS.COMMISSIONS,
+  recordId: 'commission-source-linked',
+  orderId: 'legacy-mismatched-order-id',
+  status: '待确认',
+  data: {
+    id: 'commission-source-linked',
+    orderId: 'legacy-mismatched-order-id',
+    sourceRecoveryOrderId: sourceLinkedOrder.data!.id,
+    status: '待确认',
+  },
+});
+const sourceLinkedDelete = await service.softDelete(sourceLinkedOrder.data!.id, '尝试删除', reviewer);
+assert.equal(sourceLinkedDelete.code, 409, '仅通过 sourceRecoveryOrderId 关联的活动提成也必须阻止删除');
 
 const deleted = await service.softDelete(returnedSource.data!.id, '重复录入', reviewer);
 assert.equal(deleted.code, 0);

@@ -75,3 +75,13 @@ assert.match(
   /case 'recoveryAt':[\s\S]*?formatDate\(row\.recoveryAt \|\| row\.createdAt, 'yyyy-MM-dd HH:mm'\)/,
   'Finance recovery settlement table should render the saved recovery time.',
 );
+
+assert.doesNotMatch(
+  recoverySettlementSource,
+  /cleanupDeletedSourceRecoverySettlement|清理废弃分账/,
+  '已删除源订单的撤回分账必须保留为只读财务留痕，不能提供物理清理入口。',
+);
+assert.match(
+  recoverySettlementSource,
+  /源售后挽回订单已删除，分账与撤回记录永久保留为只读留痕/,
+);

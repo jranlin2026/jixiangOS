@@ -38,8 +38,9 @@ import { getProductLevelColor, getProductLevelTagSx, ROUTES } from '../../shared
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog, { type TableViewColumnConfig } from '../../shared/components/TableViewSettingsDialog';
 import { useTableViewConfig } from '../../shared/hooks/useTableViewConfig';
-import { canReviewRecoveryOrders, hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { canReviewRecoveryOrders, hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import type { RecoveryOrder, RecoveryOrderFilters, RecoveryOrderInput, RecoveryOrderStatus } from '../../types/recoveryOrder';
+import { isRecoveryOrderDeletionLocked } from '../../shared/utils/recoveryOrderDeletion';
 import type { User } from '../../types/settings';
 import type { AfterSalesSourceConfig } from '../../types/settings';
 import type { BusinessAttachment } from '../../types/businessAttachment';
@@ -161,7 +162,6 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const canEdit = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT);
   const canDelete = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, 'delete');
   const canViewHistory = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY);
-  const canForceDeleteSettled = isSuperAdmin(currentUser);
   const [rows, setRows] = useState<RecoveryOrder[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
@@ -401,9 +401,9 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   };
 
   const handleDelete = async (row: RecoveryOrder) => {
-    const isSettled = isRecoveryOrderLocked(row);
-    if (isSettled && !canForceDeleteSettled) {
-      showErrorDialog('已分账的售后挽回订单不能删除');
+    const isSettled = isRecoveryOrderDeletionLocked(row);
+    if (isSettled) {
+      showErrorDialog('该售后挽回订单仍有活动分账，请先在财务中心处理');
       return;
     }
     setDeleteConfirmOrder(row);
@@ -411,8 +411,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
 
   const confirmDelete = async () => {
     if (!deleteConfirmOrder) return;
-    const isSettled = isRecoveryOrderLocked(deleteConfirmOrder);
-    const res = await recoveryOrderApi.deleteRecoveryOrder(deleteConfirmOrder.id, { force: isSettled && canForceDeleteSettled });
+    const res = await recoveryOrderApi.deleteRecoveryOrder(deleteConfirmOrder.id);
     if (res.code !== 0) {
       showErrorDialog(res.message || '删除售后挽回订单失败');
       return;
@@ -604,7 +603,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                 </IconButton>
               </Tooltip>
             )}
-            {canDelete && (!isRecoveryOrderLocked(row) || canForceDeleteSettled) && (
+            {canDelete && !isRecoveryOrderDeletionLocked(row) && (
               <Tooltip title="删除">
                 <IconButton
                   size="small"
@@ -1017,8 +1016,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
           {deleteConfirmOrder && (
             <Stack spacing={1.25}>
               <Alert severity="warning">
-                {isRecoveryOrderLocked(deleteConfirmOrder)
-                  ? '该挽回单已进入财务分账链路。删除后，售后挽回订单列表会移除该单，但财务中心会保留废弃分账记录，由管理员在售后挽回分账中清理。'
+                {deleteConfirmOrder.settlementStatus === '已撤回'
+                  ? '该挽回单的提成已经撤回。删除后订单会从售后挽回列表移除，财务中心仍会保留已撤回分账和操作记录。'
                   : '删除后，该售后挽回订单将从订单列表中移除。'}
               </Alert>
               <Box sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 1.25, bgcolor: shell.soft }}>

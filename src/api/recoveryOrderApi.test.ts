@@ -38,6 +38,7 @@ const roles: Role[] = [
     permissions: [
       { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY, actions: ['read'] },
       { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, actions: ['read', 'delete'] },
     ],
     dataScopes: {
       leads: 'self',
@@ -340,3 +341,20 @@ const legacySettlementPage = await recoveryOrderApi.fetchRecoveryOrders({
 assert.equal(legacySettlementPage.data.items.length, 1, '本地模式必须把历史已分账归一化为待发放');
 const legacySettlementCounts = await recoveryOrderApi.fetchRecoverySettlementCounts();
 assert.equal(legacySettlementCounts.data.statusCounts['待发放'], 1);
+
+const withdrawnRows = JSON.parse(storage.getItem(STORAGE_KEYS.RECOVERY_ORDERS) || '[]') as any[];
+withdrawnRows[0] = { ...withdrawnRows[0], status: '已分账', settlementStatus: '已撤回' };
+storage.setItem(STORAGE_KEYS.RECOVERY_ORDERS, JSON.stringify(withdrawnRows));
+const blockedByActiveCommission = await recoveryOrderApi.deleteRecoveryOrder(created.data.id);
+assert.equal(blockedByActiveCommission.code, 409, '本地模式仍有活动提成时必须禁止删除已撤回订单');
+
+const withdrawnCommissions = JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as any[];
+withdrawnCommissions[0] = { ...withdrawnCommissions[0], status: '已撤回', auditReason: '测试撤回' };
+storage.setItem(STORAGE_KEYS.COMMISSIONS, JSON.stringify(withdrawnCommissions));
+const deletedWithdrawnOrder = await recoveryOrderApi.deleteRecoveryOrder(created.data.id);
+assert.equal(deletedWithdrawnOrder.code, 0, '本地模式全部提成已撤回后应允许删除订单');
+assert.equal(
+  (JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as any[])[0]?.status,
+  '已撤回',
+  '删除订单后必须保留已撤回分账留痕',
+);
