@@ -208,6 +208,7 @@ function mergedCustomerValue(
     }
   }
   result.manualTagIds = [...input.tagDecision.selectedTagIds];
+  result.tags = Array.from(new Set(customers.flatMap((customer) => customer.tags || [])));
   result.activityRecords = uniqueSubrecords(customers.map((customer) => customer.activityRecords || [])) as Customer['activityRecords'];
   result.growthPath = uniqueSubrecords(customers.map((customer) => customer.growthPath || [])) as Customer['growthPath'];
   result.growthRecords = uniqueSubrecords(customers.map((customer) => customer.growthRecords || [])) as Customer['growthRecords'];

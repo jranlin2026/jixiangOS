@@ -13,7 +13,8 @@ import {
 } from './customerMergeService';
 
 assert.deepEqual(CUSTOMER_MERGE_FIELDS, [
-  'name', 'phone', 'wechat', 'email', 'company', 'ownerId', 'lifecycleStatusCode',
+  'name', 'phone', 'wechat', 'email', 'company', 'customerLevel', 'industry', 'city',
+  'leadSource', 'sourceType', 'sourceName', 'sourceAccount', 'remark', 'ownerId', 'lifecycleStatusCode',
 ]);
 assert.equal(isCustomerMergeExecutionInput({ mainCustomerId: 'c1' }), false);
 assert.equal(isCustomerMergeExecutionInput({

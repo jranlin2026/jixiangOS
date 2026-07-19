@@ -41,3 +41,42 @@
 售后挽回的真实截图点击验收需要一条已上传凭证的本地测试数据；不影响订单审核已完成的交互验收。
 
 final result: passed
+
+---
+
+# Design QA — 客户合并弹窗
+
+## Source and implementation
+
+- Reference: `/var/folders/x4/fnz851dj7rv2p9y0_1zx4gx40000gn/T/codex-clipboard-79af50e6-44cc-44f3-b4f0-445a57b2002c.png`
+- Implementation: `.artifacts/customer-merge-dialog.png`
+- Side-by-side comparison: `.artifacts/customer-merge-comparison.png`
+- Verified URL: `http://127.0.0.1:3002/customers?tab=active`
+- Viewport: 1280 × 720
+
+## Comparison findings
+
+- The implementation preserves the reference workflow: selected-customer summary, main customer selection, grouped final-field decisions, and a fixed action footer.
+- The visual language intentionally follows the existing 极享OS MUI system instead of copying the reference product's green styling.
+- Each supported merge field has an explicit source selector and identifies which customer supplied the selected value.
+- Selectable fields cover ownership, progress, customer level, contact details, company, industry, city, source attribution, and remarks.
+- Tags and associated business records are clearly separated as automatically merged content.
+- The existing two-phase safety contract is visible in the same dialog: impact precheck first, final merge confirmation second.
+- The dialog remains within the customer list route and leaves the cross-page batch selection intact.
+
+## Interaction verification
+
+- Selected two customers and opened “批量操作 → 合并客户”.
+- Confirmed the URL did not change and the merge dialog opened in place.
+- Switched the final customer-name field from customer `1112` to customer `2223`.
+- Ran the impact precheck and confirmed association counts rendered.
+- Confirmed the final “确认合并” action appeared only after a successful precheck.
+- Did not execute the final merge, so test customer data was not changed.
+
+## Review history
+
+1. Initial build placed all field decisions and safety checks inside one modal.
+2. Browser verification confirmed the field selector state change and precheck transition.
+3. Side-by-side review found no blocking layout, spacing, cropping, or hierarchy issues.
+
+final result: passed

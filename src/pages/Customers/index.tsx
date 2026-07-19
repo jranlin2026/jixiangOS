@@ -90,6 +90,7 @@ import {
 import CustomerBatchToolbar from './batch/CustomerBatchToolbar';
 import CustomerBatchActionDialog from './batch/CustomerBatchActionDialog';
 import CustomerBatchTaskDrawer from './batch/CustomerBatchTaskDrawer';
+import CustomerMergeDialog from './CustomerMergeDialog';
 
 type CustomerColumn = {
   id: string;
@@ -296,6 +297,7 @@ const Customers: React.FC = () => {
   const [batchTaskId, setBatchTaskId] = useState<string | null>(null);
   const [batchTasks, setBatchTasks] = useState<CustomerBatchJobSummary[]>([]);
   const [batchTaskDrawerOpen, setBatchTaskDrawerOpen] = useState(false);
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
   const { alert, dialog: feedbackDialog } = useAppFeedback();
   const columns = useMemo(() => buildCustomerColumns(lifecycleConfigs, customerScope), [customerScope, lifecycleConfigs]);
   const customerLevelOptions = useMemo(() => {
@@ -876,7 +878,7 @@ const Customers: React.FC = () => {
             label: '合并客户',
             disabled: !mergeSelectionAvailability.enabled,
             helperText: mergeSelectionAvailability.reason,
-            onClick: () => navigate(`${ROUTES.CUSTOMER_DUPLICATES}?ids=${encodeURIComponent(batchSelection.selectedIds.join(','))}`),
+            onClick: () => setMergeDialogOpen(true),
           }] : []}
           onChooseAction={setBatchOperation}
           onClear={() => setBatchSelection(clearCustomerBatchSelection())}
@@ -1254,6 +1256,18 @@ const Customers: React.FC = () => {
         onSelectJob={setBatchTaskId}
         onClose={() => setBatchTaskDrawerOpen(false)}
         onJobChanged={() => void fetchItems(scopedFilters())}
+      />
+
+      <CustomerMergeDialog
+        open={mergeDialogOpen}
+        customerIds={batchSelection.mode === 'ids' ? batchSelection.selectedIds : []}
+        onClose={() => setMergeDialogOpen(false)}
+        onMerged={async () => {
+          setMergeDialogOpen(false);
+          setBatchSelection(clearCustomerBatchSelection());
+          await fetchItems(scopedFilters());
+          await alert('客户已合并，关联业务记录已迁移到主客户。');
+        }}
       />
 
       <TableViewSettingsDialog
