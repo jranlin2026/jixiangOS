@@ -88,6 +88,7 @@ export type CustomerAtomicCommand =
 
 export type CustomerAuditOperation = CustomerAtomicCommand['action']
   | 'create_customer'
+  | 'import_customer_to_public_pool'
   | 'update_profile'
   | 'claim_from_pool'
   | 'add_follow_up'

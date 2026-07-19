@@ -15,14 +15,32 @@ const options = {
   leadSources: ['市场品牌部-官网'],
   tagNames: ['高意向'],
   canOverrideAttribution: false,
+  canImportToPublicPool: true,
 };
 
-const template = await createCustomerImportTemplateWorkbook(options);
+const template = await createCustomerImportTemplateWorkbook(options, 'assigned');
 const templateBook = new ExcelJS.Workbook();
 await templateBook.xlsx.load(template);
 const templateHeaders = templateBook.worksheets[0].getRow(1).values;
 assert.deepEqual(Array.isArray(templateHeaders) ? templateHeaders.slice(1) : [], [...CUSTOMER_IMPORT_HEADERS]);
 assert.equal(templateBook.worksheets[0].getCell('E2').dataValidation.type, 'list');
+
+const publicPoolTemplate = await createCustomerImportTemplateWorkbook({
+  ...options,
+  lifecycleStatuses: ['待跟进', '流失公海'],
+}, 'public_pool');
+const publicPoolTemplateBook = new ExcelJS.Workbook();
+await publicPoolTemplateBook.xlsx.load(publicPoolTemplate);
+assert.doesNotMatch(
+  publicPoolTemplateBook.getWorksheet('字段选项')!.getColumn(2).values.join('|'),
+  /流失公海/,
+);
+assert.equal(publicPoolTemplateBook.worksheets[0].getCell('E2').dataValidation?.type, undefined);
+assert.equal(publicPoolTemplateBook.worksheets[0].getCell('F2').dataValidation?.type, undefined);
+assert.match(
+  publicPoolTemplateBook.getWorksheet('填写说明')!.getColumn(2).values.join('|'),
+  /销售负责人和客户进展必须留空|必须留空/,
+);
 
 const inputBook = new ExcelJS.Workbook();
 const sheet = inputBook.addWorksheet('客户导入');

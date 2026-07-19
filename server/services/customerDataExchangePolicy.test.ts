@@ -37,7 +37,7 @@ const precheck = validateCustomerImportRows(rows, {
   leadSources: [{ value: '市场品牌部', label: '市场品牌部-官网', sourceName: '官网' }],
   tags: [{ id: 't1', name: '高意向' }, { id: 't2', name: '复购' }],
   existingContactKeys: new Set<string>(),
-});
+}, 'assigned');
 
 assert.equal(precheck[0].status, 'ready');
 assert.equal(precheck[0].input.ownerId, 'u1');
@@ -61,7 +61,7 @@ const blocked = validateCustomerImportRows([
   leadSources: [{ value: '市场品牌部', label: '市场品牌部-官网', sourceName: '官网' }],
   tags: [{ id: 't1', name: '高意向' }, { id: 't2', name: '复购' }],
   existingContactKeys: new Set(['phone:+8613800000000']),
-});
+}, 'assigned');
 
 assert.match(blocked[0].reason, /系统中已存在/);
 assert.match(blocked[1].reason, /无权覆盖销售负责人/);
@@ -71,8 +71,34 @@ const ambiguousSource = validateCustomerImportRows([{ ...rows[0], leadSource: '�
   currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: false,
   owners: [{ id: 'u1', name: '销售甲' }], lifecycleStatuses: [], customerLevels: [], tags: [], existingContactKeys: new Set(),
   leadSources: [{ value: '来源A', label: '同名来源' }, { value: '来源B', label: '同名来源' }],
-});
+}, 'assigned');
 assert.match(ambiguousSource[0].reason, /线索来源存在重名/);
+
+const publicPoolReady = validateCustomerImportRows([{ ...rows[0], ownerName: '', lifecycleStatus: '', customerLevel: '', leadSource: '', tagNames: [] }], {
+  currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: false,
+  owners: [{ id: 'u1', name: '销售甲' }], lifecycleStatuses: [], customerLevels: [], leadSources: [], tags: [], existingContactKeys: new Set(),
+}, 'public_pool');
+assert.equal(publicPoolReady[0].status, 'ready');
+assert.equal(publicPoolReady[0].input.owner, '公海');
+assert.equal(publicPoolReady[0].input.ownerId, undefined);
+assert.equal(publicPoolReady[0].input.ownerIdentityStatus, 'public_pool');
+assert.equal(publicPoolReady[0].input.lifecycleStatusCode, 'public_pool');
+
+const publicPoolBlocked = validateCustomerImportRows([
+  { ...rows[0], ownerName: '销售甲', lifecycleStatus: '', customerLevel: '', leadSource: '', tagNames: [] },
+  { ...rows[0], rowNumber: 3, phone: '', wechat: 'wx-public', ownerName: '', lifecycleStatus: '跟进中', customerLevel: '', leadSource: '', tagNames: [] },
+], {
+  currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: false,
+  owners: [{ id: 'u1', name: '销售甲' }], lifecycleStatuses: [{ code: 'following', name: '跟进中' }], customerLevels: [], leadSources: [], tags: [], existingContactKeys: new Set(),
+}, 'public_pool');
+assert.match(publicPoolBlocked[0].reason, /导入公海池时销售负责人必须留空/);
+assert.match(publicPoolBlocked[1].reason, /导入公海池时客户进展必须留空/);
+
+const assignedPublicPoolStatus = validateCustomerImportRows([{ ...rows[0], lifecycleStatus: '流失公海', customerLevel: '', leadSource: '', tagNames: [] }], {
+  currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: false,
+  owners: [{ id: 'u1', name: '销售甲' }], lifecycleStatuses: [{ code: 'public_pool', name: '流失公海' }], customerLevels: [], leadSources: [], tags: [], existingContactKeys: new Set(),
+}, 'assigned');
+assert.match(assignedPublicPoolStatus[0].reason, /请选择直接导入公海池/);
 
 const exportRows = projectCustomerExportRows([{
   id: 'c1',

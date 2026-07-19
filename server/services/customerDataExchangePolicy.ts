@@ -1,5 +1,5 @@
 import type { Customer, CustomerCreateInput } from '../../src/types/customer';
-import type { CustomerImportRow, CustomerImportRowResult, CustomerExportRow } from '../../src/types/customerDataExchange';
+import type { CustomerImportDestination, CustomerImportRow, CustomerImportRowResult, CustomerExportRow } from '../../src/types/customerDataExchange';
 import { LIFECYCLE_STATUS_CODES, normalizeLifecycleStatusCode } from '../../src/shared/utils/constants';
 import { getPhoneNumberError, normalizePhoneForStorage } from '../../src/shared/utils/phoneNumber';
 
@@ -73,6 +73,7 @@ function duplicateNameCount<T>(items: T[], value: string, name: (item: T) => str
 export function validateCustomerImportRows(
   rows: NormalizedImportRow[],
   directory: CustomerImportDirectory,
+  destination: CustomerImportDestination,
 ): ValidatedCustomerImportRow[] {
   const encountered = new Set<string>();
   return rows.map((row) => {
@@ -92,11 +93,13 @@ export function validateCustomerImportRows(
     }
     contactKeys.forEach((key) => encountered.add(key));
 
-    const requestedOwnerName = row.ownerName || directory.currentOwnerName;
-    const ownerCount = duplicateNameCount(directory.owners, requestedOwnerName, (item) => item.name);
-    const owner = exactlyOneByName(directory.owners, requestedOwnerName, (item) => item.name);
-    if (!owner) errors.push(ownerCount > 1 ? `销售负责人姓名存在重名：${requestedOwnerName}` : `销售负责人不存在或已离职：${requestedOwnerName}`);
-    if (owner && owner.id !== directory.currentOwnerId && !directory.canOverrideAttribution) {
+    const importingToPublicPool = destination === 'public_pool';
+    const requestedOwnerName = importingToPublicPool ? '' : row.ownerName || directory.currentOwnerName;
+    const ownerCount = importingToPublicPool ? 0 : duplicateNameCount(directory.owners, requestedOwnerName, (item) => item.name);
+    const owner = importingToPublicPool ? null : exactlyOneByName(directory.owners, requestedOwnerName, (item) => item.name);
+    if (importingToPublicPool && row.ownerName) errors.push('导入公海池时销售负责人必须留空');
+    if (!importingToPublicPool && !owner) errors.push(ownerCount > 1 ? `销售负责人姓名存在重名：${requestedOwnerName}` : `销售负责人不存在或已离职：${requestedOwnerName}`);
+    if (!importingToPublicPool && owner && owner.id !== directory.currentOwnerId && !directory.canOverrideAttribution) {
       errors.push('无权覆盖销售负责人，请留空或填写本人');
     }
 
@@ -104,7 +107,9 @@ export function validateCustomerImportRows(
       ? exactlyOneByName(directory.lifecycleStatuses, row.lifecycleStatus, (item) => item.name)
         || directory.lifecycleStatuses.find((item) => normalizedLookup(item.code) === normalizedLookup(row.lifecycleStatus))
       : null;
-    if (row.lifecycleStatus && !lifecycle) errors.push(`客户进展不存在：${row.lifecycleStatus}`);
+    if (importingToPublicPool && row.lifecycleStatus) errors.push('导入公海池时客户进展必须留空，由系统设置为公海');
+    else if (row.lifecycleStatus && !lifecycle) errors.push(`客户进展不存在：${row.lifecycleStatus}`);
+    else if (lifecycle?.code === LIFECYCLE_STATUS_CODES.PUBLIC_POOL) errors.push('公海不是客户进展，请选择直接导入公海池');
 
     const level = row.customerLevel
       ? directory.customerLevels.find((item) => [item.value, item.label].some((value) => normalizedLookup(value) === normalizedLookup(row.customerLevel)))
@@ -135,11 +140,11 @@ export function validateCustomerImportRows(
       phone: row.phone,
       wechat: row.wechat || undefined,
       company: row.company,
-      owner: owner?.name || requestedOwnerName,
-      ownerId: owner?.id,
-      ownerIdentityStatus: 'resolved',
+      owner: importingToPublicPool ? '公海' : owner?.name || requestedOwnerName,
+      ownerId: importingToPublicPool ? undefined : owner?.id,
+      ownerIdentityStatus: importingToPublicPool ? 'public_pool' : 'resolved',
       customerLevel: (level?.value || 'L1') as Customer['customerLevel'],
-      lifecycleStatusCode: (lifecycle?.code || LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP) as Customer['lifecycleStatusCode'],
+      lifecycleStatusCode: (importingToPublicPool ? LIFECYCLE_STATUS_CODES.PUBLIC_POOL : lifecycle?.code || LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP) as Customer['lifecycleStatusCode'],
       leadSource: source?.value || row.leadSource || undefined,
       sourceName: source?.sourceName || undefined,
       industry: row.industry || undefined,

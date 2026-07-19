@@ -5,6 +5,7 @@ import type { ApiResponse } from './types';
 import {
   CUSTOMER_IMPORT_HEADERS,
   CUSTOMER_IMPORT_MAX_ROWS,
+  type CustomerImportDestination,
   type CustomerExportRequest,
   type CustomerExportResult,
   type CustomerImportConfirmResult,
@@ -104,7 +105,10 @@ function applyValidation(sheet: import('exceljs').Worksheet, column: number, opt
   }
 }
 
-export async function createCustomerImportTemplateWorkbook(options: CustomerImportTemplateOptions): Promise<ArrayBuffer> {
+export async function createCustomerImportTemplateWorkbook(
+  options: CustomerImportTemplateOptions,
+  destination: CustomerImportDestination,
+): Promise<ArrayBuffer> {
   const ExcelJS = await loadExcelJs();
   const workbook = new ExcelJS.Workbook();
   workbook.creator = '极享OS';
@@ -116,9 +120,13 @@ export async function createCustomerImportTemplateWorkbook(options: CustomerImpo
   sheet.autoFilter = { from: 'A1', to: 'L1' };
   sheet.columns = [18, 18, 20, 24, 18, 18, 16, 26, 18, 18, 28, 36].map((width) => ({ width }));
 
+  const ownerNames = destination === 'public_pool' ? [] : options.ownerNames;
+  const lifecycleStatuses = destination === 'public_pool'
+    ? []
+    : options.lifecycleStatuses.filter((status) => status !== '流失公海');
   const optionColumns = [
-    { title: '销售负责人', values: options.ownerNames },
-    { title: '客户进度', values: options.lifecycleStatuses },
+    { title: '销售负责人', values: ownerNames },
+    { title: '客户进度', values: lifecycleStatuses },
     { title: '客户等级', values: options.customerLevels },
     { title: '线索来源', values: options.leadSources },
     { title: '客户标签', values: options.tagNames },
@@ -128,15 +136,19 @@ export async function createCustomerImportTemplateWorkbook(options: CustomerImpo
   for (let index = 0; index < maxOptions; index += 1) optionSheet.addRow(optionColumns.map((item) => item.values[index] || ''));
   optionSheet.columns = optionColumns.map(() => ({ width: 28 }));
   optionSheet.state = 'hidden';
-  applyValidation(sheet, 5, 'A', options.ownerNames.length);
-  applyValidation(sheet, 6, 'B', options.lifecycleStatuses.length);
+  applyValidation(sheet, 5, 'A', ownerNames.length);
+  applyValidation(sheet, 6, 'B', lifecycleStatuses.length);
   applyValidation(sheet, 7, 'C', options.customerLevels.length);
   applyValidation(sheet, 8, 'D', options.leadSources.length);
 
   instructions.addRows([
     ['极享OS 客户批量导入说明'],
     ['必填字段', '客户姓名；手机号和微信至少填写一项。'],
-    ['销售负责人', options.canOverrideAttribution ? '可从下拉列表选择数据范围内的销售负责人；留空默认导入人。' : '当前账号无导入覆盖归属权限，必须留空或填写本人。'],
+    ['导入去向', destination === 'public_pool' ? '本模板将直接导入公海池。' : '本模板将导入客户列表。'],
+    ['销售负责人', destination === 'public_pool'
+      ? '必须留空，由系统直接写入公海归属。'
+      : options.canOverrideAttribution ? '可从下拉列表选择数据范围内的销售负责人；留空默认导入人。' : '当前账号无导入覆盖归属权限，必须留空或填写本人。'],
+    ['客户进展', destination === 'public_pool' ? '必须留空，由系统设置为公海状态。' : '可从下拉列表选择；公海不属于客户进展。'],
     ['线索来源', '只填写“线索来源”一个字段，并从模板下拉选项选择。'],
     ['客户标签', '多个标签使用中文逗号、英文逗号或顿号分隔；标签必须已经存在。'],
     ['重复校验', '系统按手机号或微信检查系统存量和当前文件重复；重复行不会导入。'],
@@ -238,11 +250,11 @@ export const customerDataExchangeApi = {
   templateOptions(): Promise<ApiResponse<CustomerImportTemplateOptions>> {
     return backendRequest(`${ROOT}/template-options`);
   },
-  precheckImport(rows: CustomerImportRow[]): Promise<ApiResponse<CustomerImportPrecheckResult>> {
-    return backendRequest(`${ROOT}/import/precheck`, { method: 'POST', body: JSON.stringify({ rows }) });
+  precheckImport(rows: CustomerImportRow[], destination: CustomerImportDestination): Promise<ApiResponse<CustomerImportPrecheckResult>> {
+    return backendRequest(`${ROOT}/import/precheck`, { method: 'POST', body: JSON.stringify({ rows, destination }) });
   },
-  confirmImport(rows: CustomerImportRow[], confirmationToken: string): Promise<ApiResponse<CustomerImportConfirmResult>> {
-    return backendRequest(`${ROOT}/import/confirm`, { method: 'POST', body: JSON.stringify({ rows, confirmationToken }) });
+  confirmImport(rows: CustomerImportRow[], destination: CustomerImportDestination, confirmationToken: string): Promise<ApiResponse<CustomerImportConfirmResult>> {
+    return backendRequest(`${ROOT}/import/confirm`, { method: 'POST', body: JSON.stringify({ rows, destination, confirmationToken }) });
   },
   exportCustomers(input: CustomerExportRequest): Promise<ApiResponse<CustomerExportResult>> {
     return backendRequest(`${ROOT}/export`, { method: 'POST', body: JSON.stringify(input) });

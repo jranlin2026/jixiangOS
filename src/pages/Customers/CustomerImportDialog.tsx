@@ -9,6 +9,9 @@ import {
   DialogContent,
   LinearProgress,
   Paper,
+  Radio,
+  RadioGroup,
+  FormControlLabel,
   Stack,
   Table,
   TableBody,
@@ -20,6 +23,7 @@ import {
 } from '@mui/material';
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
+import { useNavigate } from 'react-router-dom';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import {
   createCustomerImportErrorWorkbook,
@@ -29,10 +33,12 @@ import {
 } from '../../api/customerDataExchangeApi';
 import type {
   CustomerImportConfirmResult,
+  CustomerImportDestination,
   CustomerImportPrecheckResult,
   CustomerImportRow,
   CustomerImportTemplateOptions,
 } from '../../types/customerDataExchange';
+import { ROUTES } from '../../shared/utils/constants';
 
 type Props = {
   open: boolean;
@@ -50,6 +56,7 @@ function downloadBuffer(fileName: string, buffer: ArrayBuffer): void {
 }
 
 export default function CustomerImportDialog({ open, onClose, onImported }: Props) {
+  const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [options, setOptions] = useState<CustomerImportTemplateOptions | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -58,6 +65,7 @@ export default function CustomerImportDialog({ open, onClose, onImported }: Prop
   const [result, setResult] = useState<CustomerImportConfirmResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [destination, setDestination] = useState<CustomerImportDestination>('assigned');
 
   useEffect(() => {
     if (!open) return;
@@ -68,6 +76,7 @@ export default function CustomerImportDialog({ open, onClose, onImported }: Prop
     setPrecheck(null);
     setResult(null);
     setError('');
+    setDestination('assigned');
     customerDataExchangeApi.templateOptions().then((response) => {
       if (!active) return;
       if (response.code === 0 && response.data) setOptions(response.data);
@@ -84,7 +93,8 @@ export default function CustomerImportDialog({ open, onClose, onImported }: Prop
     setBusy(true);
     setError('');
     try {
-      downloadBuffer('极享OS客户批量导入模板.xlsx', await createCustomerImportTemplateWorkbook(options));
+      const fileName = destination === 'public_pool' ? '极享OS公海客户批量导入模板.xlsx' : '极享OS客户批量导入模板.xlsx';
+      downloadBuffer(fileName, await createCustomerImportTemplateWorkbook(options, destination));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '模板下载失败');
     } finally { setBusy(false); }
@@ -118,7 +128,7 @@ export default function CustomerImportDialog({ open, onClose, onImported }: Prop
     setBusy(true);
     setError('');
     try {
-      const response = await customerDataExchangeApi.precheckImport(rows);
+      const response = await customerDataExchangeApi.precheckImport(rows, destination);
       if (response.code !== 0 || !response.data) throw new Error(response.message || '客户导入预检失败');
       setPrecheck(response.data);
     } catch (caught) {
@@ -131,7 +141,7 @@ export default function CustomerImportDialog({ open, onClose, onImported }: Prop
     setBusy(true);
     setError('');
     try {
-      const response = await customerDataExchangeApi.confirmImport(rows, precheck.confirmationToken);
+      const response = await customerDataExchangeApi.confirmImport(rows, destination, precheck.confirmationToken);
       if (response.code !== 0 || !response.data) throw new Error(response.message || '客户导入失败');
       setResult(response.data);
       onImported();
@@ -146,22 +156,49 @@ export default function CustomerImportDialog({ open, onClose, onImported }: Prop
     downloadBuffer(`客户导入错误报告-${new Date().toISOString().slice(0, 10)}.xlsx`, await createCustomerImportErrorWorkbook(failed, rows));
   };
 
+  const handleDestinationChange = (next: CustomerImportDestination) => {
+    if (next === 'public_pool' && !options?.canImportToPublicPool) return;
+    setDestination(next);
+    setPrecheck(null);
+    setResult(null);
+    setError('');
+  };
+
   return (
     <Dialog open={open} onClose={busy ? undefined : onClose} maxWidth="lg" fullWidth>
       <DialogCloseTitle onClose={() => { if (!busy) onClose(); }}>批量导入客户</DialogCloseTitle>
       <DialogContent dividers>
         <Stack spacing={2}>
           <Alert severity="info">
-            请先下载极享OS标准模板。系统会校验手机号/微信重复、负责人范围、客户进度、等级、来源和标签，预检通过后才会写入客户库。
+            先选择导入去向，再下载或上传极享OS标准模板。系统预检通过后会直接写入对应位置，不需要二次转移。
           </Alert>
+          <Paper variant="outlined" sx={{ p: 2 }}>
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>导入去向</Typography>
+            <RadioGroup
+              row
+              value={destination}
+              onChange={(event) => handleDestinationChange(event.target.value as CustomerImportDestination)}
+            >
+              <FormControlLabel value="assigned" control={<Radio />} label="导入客户列表" disabled={busy || Boolean(result)} />
+              <FormControlLabel value="public_pool" control={<Radio />} label="直接导入公海池" disabled={busy || Boolean(result) || !options?.canImportToPublicPool} />
+            </RadioGroup>
+            <Typography variant="body2" color="text.secondary">
+              {destination === 'public_pool'
+                ? '销售负责人和客户进展必须留空，系统将直接建立无销售归属的公海客户。'
+                : '销售负责人留空时默认归属当前导入人；指定其他销售需要导入覆盖归属权限。'}
+            </Typography>
+            {options && !options.canImportToPublicPool ? (
+              <Typography variant="caption" color="warning.main">当前账号没有“释放至公海”权限，不能直接导入公海池。</Typography>
+            ) : null}
+          </Paper>
           {error ? <Alert severity="error">{error}</Alert> : null}
           {result ? (
             <Alert severity={result.failureCount ? 'warning' : 'success'}>
-              导入完成：成功 {result.successCount} 条，失败 {result.failureCount} 条。
+              导入完成：成功 {result.successCount} 条，失败 {result.failureCount} 条；已写入{destination === 'public_pool' ? '公海池' : '客户列表'}。
             </Alert>
           ) : precheck ? (
             <Alert severity={precheck.blockedCount ? 'warning' : 'success'}>
-              预检完成：可导入 {precheck.readyCount} 条，阻止 {precheck.blockedCount} 条。确认后只写入可导入数据。
+              预检完成：可导入 {precheck.readyCount} 条，阻止 {precheck.blockedCount} 条。确认后将写入{destination === 'public_pool' ? '公海池' : '客户列表'}。
             </Alert>
           ) : null}
           <Paper variant="outlined" sx={{ p: 2, bgcolor: '#f8fafc' }}>
@@ -204,6 +241,9 @@ export default function CustomerImportDialog({ open, onClose, onImported }: Prop
         {visibleRows.some((row) => row.status === 'blocked' || row.status === 'failed') ? <Button onClick={() => void downloadErrors()}>下载错误报告</Button> : null}
         <Box sx={{ flex: 1 }} />
         <Button onClick={onClose} disabled={busy}>{result ? '完成' : '取消'}</Button>
+        {result && destination === 'public_pool' ? (
+          <Button variant="contained" onClick={() => { onClose(); navigate(`${ROUTES.CUSTOMERS}?tab=public_pool`); }}>查看公海池</Button>
+        ) : null}
         {!precheck ? <Button variant="contained" onClick={() => void handlePrecheck()} disabled={!rows.length || busy}>开始预检</Button> : null}
         {precheck && !result ? <Button variant="contained" onClick={() => void handleConfirm()} disabled={!precheck.readyCount || busy}>确认导入 {precheck.readyCount} 条</Button> : null}
       </DialogActions>

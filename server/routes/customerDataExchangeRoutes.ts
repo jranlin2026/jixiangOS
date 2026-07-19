@@ -1,14 +1,14 @@
 import { Router, type RequestHandler } from 'express';
 import type { AuthenticatedUser } from '../../src/types/auth';
-import type { CustomerExportRequest, CustomerImportRow } from '../../src/types/customerDataExchange';
+import type { CustomerExportRequest, CustomerImportDestination, CustomerImportRow } from '../../src/types/customerDataExchange';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { failure, success } from '../api/response';
 import { CustomerDataExchangeError } from '../services/customerDataExchangeService';
 
 type CustomerDataExchangeRouteService = {
   templateOptions(user: AuthenticatedUser): Promise<unknown>;
-  precheckImport(rows: CustomerImportRow[], user: AuthenticatedUser): Promise<unknown>;
-  confirmImport(input: { rows: CustomerImportRow[]; confirmationToken: string }, user: AuthenticatedUser): Promise<unknown>;
+  precheckImport(rows: CustomerImportRow[], destination: CustomerImportDestination, user: AuthenticatedUser): Promise<unknown>;
+  confirmImport(input: { rows: CustomerImportRow[]; destination: CustomerImportDestination; confirmationToken: string }, user: AuthenticatedUser): Promise<unknown>;
   exportCustomers(input: CustomerExportRequest, user: AuthenticatedUser): Promise<unknown>;
 };
 
@@ -59,6 +59,11 @@ function parseRows(value: unknown): CustomerImportRow[] {
   });
 }
 
+function parseDestination(value: unknown): CustomerImportDestination {
+  if (value === 'assigned' || value === 'public_pool') return value;
+  throw new CustomerDataExchangeError('客户导入去向无效');
+}
+
 function parseSelection(value: unknown): CustomerExportRequest['selection'] {
   const raw = object(value);
   if (raw.mode === 'ids') {
@@ -86,15 +91,16 @@ export function createCustomerDataExchangeRouter(deps: CustomerDataExchangeRoute
   });
   router.post('/import/precheck', deps.requireImport, async (request: AuthenticatedRequest, response) => {
     try {
-      const raw = exact(request.body, ['rows']);
-      response.json(success(await deps.service.precheckImport(parseRows(raw.rows), currentUser(request))));
+      const raw = exact(request.body, ['rows', 'destination']);
+      response.json(success(await deps.service.precheckImport(parseRows(raw.rows), parseDestination(raw.destination), currentUser(request))));
     } catch (error) { sendError(response, error); }
   });
   router.post('/import/confirm', deps.requireImport, async (request: AuthenticatedRequest, response) => {
     try {
-      const raw = exact(request.body, ['rows', 'confirmationToken']);
+      const raw = exact(request.body, ['rows', 'destination', 'confirmationToken']);
       response.status(201).json(success(await deps.service.confirmImport({
         rows: parseRows(raw.rows),
+        destination: parseDestination(raw.destination),
         confirmationToken: String(raw.confirmationToken || ''),
       }, currentUser(request))));
     } catch (error) { sendError(response, error); }

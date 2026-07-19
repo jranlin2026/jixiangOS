@@ -2,6 +2,8 @@ import type { CustomerFilters } from './customer';
 
 export const CUSTOMER_IMPORT_MAX_ROWS = 2_000;
 
+export type CustomerImportDestination = 'assigned' | 'public_pool';
+
 export const CUSTOMER_IMPORT_HEADERS = [
   '客户姓名*',
   '手机号',
@@ -64,6 +66,7 @@ export type CustomerImportTemplateOptions = {
   leadSources: string[];
   tagNames: string[];
   canOverrideAttribution: boolean;
+  canImportToPublicPool: boolean;
 };
 
 export type CustomerExportSelection =

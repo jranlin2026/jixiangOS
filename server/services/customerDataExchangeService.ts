@@ -3,6 +3,7 @@ import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Customer, CustomerCreateInput } from '../../src/types/customer';
 import {
   CUSTOMER_IMPORT_MAX_ROWS,
+  type CustomerImportDestination,
   type CustomerExportRequest,
   type CustomerExportResult,
   type CustomerImportConfirmResult,
@@ -36,6 +37,7 @@ export type CustomerImportExecutionEvent = {
   actorName: string;
   rowsHash: string;
   totalCount: number;
+  destination: CustomerImportDestination;
 };
 
 export type CustomerImportExecutionHandle = {
@@ -62,11 +64,12 @@ export type CustomerDataExchangeDependencies = {
     index: number;
     row: CustomerImportRowResult;
     input?: CustomerCreateInput;
+    destination: CustomerImportDestination;
     user: AuthenticatedUser;
   }): Promise<CustomerImportRowResult>;
   readCustomers(selection: ExchangeSelection, user: AuthenticatedUser): Promise<Customer[]>;
   recordExportAudit(event: CustomerExportAuditEvent): Promise<void>;
-  persistImportPrecheck(event: { token: string; actorId: string; rowsHash: string; expiresAt: string; totalCount: number }): Promise<void>;
+  persistImportPrecheck(event: { token: string; actorId: string; rowsHash: string; expiresAt: string; totalCount: number; destination: CustomerImportDestination }): Promise<void>;
   beginImportExecution(event: CustomerImportExecutionEvent): Promise<CustomerImportExecutionHandle>;
   finalizeImportExecution(event: CustomerImportFinalizeEvent): Promise<void>;
 };
@@ -85,8 +88,8 @@ type TokenPayload = {
 };
 
 const cleanText = (value: unknown) => String(value ?? '').trim();
-const hashRows = (rows: ReturnType<typeof normalizeCustomerImportRows>) => (
-  createHash('sha256').update(JSON.stringify(rows), 'utf8').digest('hex')
+const hashRows = (rows: ReturnType<typeof normalizeCustomerImportRows>, destination: CustomerImportDestination) => (
+  createHash('sha256').update(JSON.stringify({ destination, rows }), 'utf8').digest('hex')
 );
 
 function encodeToken(payload: TokenPayload, secret: string): string {
@@ -126,6 +129,12 @@ function assertPermission(user: AuthenticatedUser, key: string, message: string)
   if (!hasPermission(user, key, 'write')) throw new CustomerDataExchangeError(message, 403);
 }
 
+function assertImportDestinationPermission(destination: CustomerImportDestination, user: AuthenticatedUser): void {
+  if (destination === 'public_pool') {
+    assertPermission(user, PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, '无权直接导入公海池');
+  }
+}
+
 function importExecutionUser(user: AuthenticatedUser, canOverrideAttribution: boolean): AuthenticatedUser {
   const permissions = [...(user.permissions || [])];
   if (!hasPermission(user, PERMISSION_KEYS.CUSTOMER_CREATE, 'write')) {
@@ -141,11 +150,12 @@ export function createCustomerDataExchangeService(deps: CustomerDataExchangeDepe
   if (cleanText(deps.secret).length < 16) throw new Error('客户数据交换签名密钥至少需要 16 个字符');
   const now = () => deps.now?.() || new Date();
 
-  const prepare = async (rows: CustomerImportRow[], user: AuthenticatedUser) => {
+  const prepare = async (rows: CustomerImportRow[], destination: CustomerImportDestination, user: AuthenticatedUser) => {
     assertRows(rows);
+    assertImportDestinationPermission(destination, user);
     const normalizedRows = normalizeCustomerImportRows(rows);
     const directory = await deps.loadDirectory(user, rows);
-    const validated = validateCustomerImportRows(normalizedRows, directory);
+    const validated = validateCustomerImportRows(normalizedRows, directory, destination);
     return { normalizedRows, directory, validated };
   };
 
@@ -160,15 +170,16 @@ export function createCustomerDataExchangeService(deps: CustomerDataExchangeDepe
         leadSources: directory.leadSources.map((item) => item.label),
         tagNames: directory.tags.map((item) => item.name),
         canOverrideAttribution: directory.canOverrideAttribution,
+        canImportToPublicPool: hasPermission(user, PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, 'write'),
       };
     },
 
-    async precheckImport(rows: CustomerImportRow[], user: AuthenticatedUser): Promise<CustomerImportPrecheckResult> {
+    async precheckImport(rows: CustomerImportRow[], destination: CustomerImportDestination, user: AuthenticatedUser): Promise<CustomerImportPrecheckResult> {
       assertPermission(user, PERMISSION_KEYS.CUSTOMER_IMPORT, '无权导入客户');
-      const prepared = await prepare(rows, user);
+      const prepared = await prepare(rows, destination, user);
       const expiresAt = new Date(now().getTime() + 15 * 60_000).toISOString();
       const readyCount = prepared.validated.filter((row) => row.status === 'ready').length;
-      const rowsHash = hashRows(prepared.normalizedRows);
+      const rowsHash = hashRows(prepared.normalizedRows, destination);
       const confirmationToken = encodeToken({ actorId: user.id, rowsHash, expiresAt, nonce: randomUUID() }, deps.secret);
       await deps.persistImportPrecheck({
         token: confirmationToken,
@@ -176,6 +187,7 @@ export function createCustomerDataExchangeService(deps: CustomerDataExchangeDepe
         rowsHash,
         expiresAt,
         totalCount: prepared.validated.length,
+        destination,
       });
       return {
         confirmationToken,
@@ -188,24 +200,26 @@ export function createCustomerDataExchangeService(deps: CustomerDataExchangeDepe
     },
 
     async confirmImport(
-      request: { rows: CustomerImportRow[]; confirmationToken: string },
+      request: { rows: CustomerImportRow[]; destination: CustomerImportDestination; confirmationToken: string },
       user: AuthenticatedUser,
     ): Promise<CustomerImportConfirmResult> {
       assertPermission(user, PERMISSION_KEYS.CUSTOMER_IMPORT, '无权导入客户');
       assertRows(request.rows);
+      assertImportDestinationPermission(request.destination, user);
       const normalizedRows = normalizeCustomerImportRows(request.rows);
       const token = decodeToken(request.confirmationToken, deps.secret);
       if (token.actorId !== user.id) throw new CustomerDataExchangeError('导入预检凭证不属于当前用户', 403);
-      if (token.rowsHash !== hashRows(normalizedRows)) throw new CustomerDataExchangeError('导入文件与预检内容不一致，请重新预检', 409);
+      if (token.rowsHash !== hashRows(normalizedRows, request.destination)) throw new CustomerDataExchangeError('导入文件或导入去向与预检内容不一致，请重新预检', 409);
 
       const directory = await deps.loadDirectory(user, request.rows);
-      const validated = validateCustomerImportRows(normalizedRows, directory);
+      const validated = validateCustomerImportRows(normalizedRows, directory, request.destination);
       const execution = await deps.beginImportExecution({
         token: request.confirmationToken,
         actorId: user.id,
         actorName: user.name || user.account,
         rowsHash: token.rowsHash,
         totalCount: validated.length,
+        destination: request.destination,
       });
       const completed = new Map(execution.completedRows.map((item) => [item.index, item.row]));
       if (execution.terminal) {
@@ -231,6 +245,7 @@ export function createCustomerDataExchangeService(deps: CustomerDataExchangeDepe
             ? { rowNumber: row.rowNumber, name: row.name, status: 'ready', reason: '可导入' }
             : { rowNumber: row.rowNumber, name: row.name, status: 'failed', reason: row.reason },
           ...(row.status === 'ready' ? { input: row.input } : {}),
+          destination: request.destination,
           user: executionUser,
         });
         results.push(result);

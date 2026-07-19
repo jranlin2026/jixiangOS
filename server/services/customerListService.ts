@@ -55,6 +55,7 @@ export type CustomerCreateExecutionContext = {
   batchJobId?: string;
   requestId?: string;
   idempotencyKey?: string;
+  importDestination?: 'assigned' | 'public_pool';
 };
 
 type CustomerRow = CustomerBusinessRecordRow;
@@ -321,9 +322,17 @@ export function createCustomerListService(
         return failure<Customer>('个人资源必须填写线索贡献人', 400);
       }
 
+      const importToPublicPool = execution.importDestination === 'public_pool';
+      if (importToPublicPool && !hasPermission(currentUser, PERMISSION_KEYS.CUSTOMER_IMPORT, 'write')) {
+        return failure<Customer>('无权导入客户', 403);
+      }
+      if (importToPublicPool && !hasPermission(currentUser, PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, 'write')) {
+        return failure<Customer>('无权直接导入公海池', 403);
+      }
+
       // Missing stable identity always means self-assignment. The display name
       // supplied by a client is never used to choose a write target.
-      const requestedOwnerId = cleanText(input.ownerId) || currentUser.id;
+      const requestedOwnerId = importToPublicPool ? '' : cleanText(input.ownerId) || currentUser.id;
       const actorName = currentUser.name || currentUser.account;
       let assignmentAccess: CustomerAccessContext | null = null;
       if (requestedOwnerId && requestedOwnerId !== currentUser.id) {
@@ -335,16 +344,16 @@ export function createCustomerListService(
           return failure<Customer>('无权跨数据范围转让客户', 403);
         }
       }
-      const targetOwner = requestedOwnerId === currentUser.id
+      const targetOwner = importToPublicPool ? null : requestedOwnerId === currentUser.id
         ? { id: currentUser.id, name: actorName, isActive: true, employmentStatus: 'active' }
         : requestedOwnerId
           ? await database.user.findUnique({ where: { id: requestedOwnerId } })
           : null;
-      if (
+      if (!importToPublicPool && (
         !targetOwner
         || !targetOwner.isActive
         || (targetOwner.employmentStatus || 'active') !== 'active'
-      ) return failure<Customer>('请选择有效的销售负责人', 400);
+      )) return failure<Customer>('请选择有效的销售负责人', 400);
 
       const phoneError = phone ? getPhoneNumberError(phone) : '';
       if (phoneError) return failure<Customer>(phoneError, 400);
@@ -370,12 +379,19 @@ export function createCustomerListService(
         phone,
         wechat: wechat || undefined,
         sourceType,
-        owner: targetOwner.name,
-        ownerId: targetOwner.id,
-        ownerIdentityStatus: 'resolved',
+        owner: importToPublicPool ? '公海' : targetOwner!.name,
+        ownerId: importToPublicPool ? undefined : targetOwner!.id,
+        ownerIdentityStatus: importToPublicPool ? 'public_pool' : 'resolved',
         customerLevel: input.customerLevel || 'L1',
-        lifecycleStatusCode: input.lifecycleStatusCode || LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP,
+        lifecycleStatusCode: importToPublicPool
+          ? LIFECYCLE_STATUS_CODES.PUBLIC_POOL
+          : input.lifecycleStatusCode || LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP,
         lifecycleStatusUpdatedAt: now,
+        ...(importToPublicPool ? {
+          publicPoolAt: now,
+          releasedBy: actorName,
+          releaseReason: '批量导入至公海',
+        } : {}),
         totalSpent: 0,
         orderCount: 0,
         growthPath: [],
@@ -383,7 +399,7 @@ export function createCustomerListService(
         activityRecords: [{
           id: 'act-' + randomUUID().slice(0, 8),
           type: 'create',
-          title: '创建了客户',
+          title: importToPublicPool ? '导入至公海池' : '创建了客户',
           operator: actorName,
           content: input.remark,
           createdAt: now,
@@ -426,21 +442,22 @@ export function createCustomerListService(
         },
       });
       await appendCustomerAuditEvent(tx, {
-        operation: 'create_customer',
+        operation: importToPublicPool ? 'import_customer_to_public_pool' : 'create_customer',
         customerId: customer.id,
         batchJobId: execution.batchJobId,
         requestId: execution.requestId,
         idempotencyKey: execution.idempotencyKey,
         actor: { id: currentUser.id, name: actorName },
-        reason: '创建客户',
+        reason: importToPublicPool ? '批量导入至公海' : '创建客户',
         afterSnapshot: customer,
         canonicalInput: {
-          operation: 'create_customer',
+          operation: importToPublicPool ? 'import_customer_to_public_pool' : 'create_customer',
           name,
           company: cleanText(input.company),
           phone,
           wechat: wechat || null,
-          ownerId: targetOwner.id,
+          ownerId: targetOwner?.id || null,
+          importDestination: execution.importDestination || 'assigned',
           sourceType,
           manualTagIds: tagValidation.tagIds,
         },

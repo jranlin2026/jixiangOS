@@ -251,6 +251,50 @@ assert.ok(directCreateLockOrder.indexOf('business-record') >= 0);
 assert.ok(directCreateLockOrder.indexOf('legacy-source') > directCreateLockOrder.indexOf('business-record'));
 assert.ok(directCreateLockOrder.indexOf('identity') > directCreateLockOrder.indexOf('legacy-source'));
 
+const publicPoolActor = {
+  ...actor,
+  permissions: [
+    ...(actor.permissions || []),
+    { module: PERMISSION_KEYS.CUSTOMER_IMPORT, actions: ['write'] },
+    { module: PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, actions: ['write'] },
+  ],
+};
+const publicPoolCreated = await service.create({
+  name: '导入公海客户',
+  company: '公海测试公司',
+  phone: '13800000099',
+  customerLevel: 'L1',
+  owner: '公海',
+  sourceType: '公司资源',
+}, publicPoolActor, { importDestination: 'public_pool', batchJobId: 'import-public-pool' });
+assert.equal(publicPoolCreated.code, 0);
+assert.equal(publicPoolCreated.data?.owner, '公海');
+assert.equal(publicPoolCreated.data?.ownerId, undefined);
+assert.equal(publicPoolCreated.data?.ownerIdentityStatus, 'public_pool');
+assert.equal(publicPoolCreated.data?.lifecycleStatusCode, 'public_pool');
+assert.equal(publicPoolCreated.data?.releasedBy, actor.name);
+assert.equal(publicPoolCreated.data?.releaseReason, '批量导入至公海');
+assert.equal(auditEvents[auditEvents.length - 1]?.operation, 'import_customer_to_public_pool');
+
+const releaseOnlyActor = {
+  ...actor,
+  permissions: [
+    ...(actor.permissions || []),
+    { module: PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, actions: ['write'] },
+  ],
+};
+const deniedWithoutImportPermission = await service.create({
+  name: '缺少导入权限', company: '', phone: '13800000097', customerLevel: 'L1', owner: '公海', sourceType: '公司资源',
+}, releaseOnlyActor, { importDestination: 'public_pool' });
+assert.equal(deniedWithoutImportPermission.code, 403);
+assert.match(deniedWithoutImportPermission.message, /无权导入客户/);
+
+const deniedPublicPoolImport = await service.create({
+  name: '无权公海导入', company: '', phone: '13800000098', customerLevel: 'L1', owner: '公海', sourceType: '公司资源',
+}, actor, { importDestination: 'public_pool' });
+assert.equal(deniedPublicPoolImport.code, 403);
+assert.match(deniedPublicPoolImport.message, /无权导入客户/);
+
 // RED: a direct POST customer create must reconcile an active pre-backfill
 // BusinessRecord (identity table intentionally empty for this customer) and
 // return only the generic conflict to an actor with matching data scope but
@@ -352,7 +396,7 @@ const denied = await service.create({
 assert.equal(denied.code, 0, 'ownerId 缺失时必须由服务端明确归属当前 actor，不能按姓名分配');
 assert.equal(denied.data?.ownerId, actor.id);
 assert.equal(denied.data?.owner, actor.name);
-assert.equal(created.length, 5);
+assert.equal(created.length, 6);
 
 const emptyName = await service.create({
   name: '',

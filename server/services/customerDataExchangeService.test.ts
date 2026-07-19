@@ -18,7 +18,7 @@ const user: AuthenticatedUser = {
   ],
 };
 
-const created: Array<{ ownerId?: string; name: string }> = [];
+const created: Array<{ ownerId?: string; name: string; destination: string; ownerIdentityStatus?: string; lifecycleStatusCode?: string }> = [];
 const exportAudit: unknown[] = [];
 const persistedTokens = new Set<string>();
 const consumedTokens = new Set<string>();
@@ -41,7 +41,13 @@ const service = createCustomerDataExchangeService({
   }),
   processImportRow: async (event) => {
     if (!event.input) return event.row;
-    created.push({ ownerId: event.input.ownerId, name: event.input.name });
+    created.push({
+      ownerId: event.input.ownerId,
+      name: event.input.name,
+      destination: event.destination,
+      ownerIdentityStatus: event.input.ownerIdentityStatus,
+      lifecycleStatusCode: event.input.lifecycleStatusCode,
+    });
     const result = { ...event.row, status: 'imported' as const, reason: '导入成功', customerId: `c${created.length}` };
     recordedRows.set(event.index, result);
     return result;
@@ -82,22 +88,22 @@ const importRows = [{
   remark: '',
 }];
 
-const precheck = await service.precheckImport(importRows, user);
+const precheck = await service.precheckImport(importRows, 'assigned', user);
 assert.equal(precheck.readyCount, 1);
 assert.match(precheck.confirmationToken, /^cx1\./);
 
-const confirmed = await service.confirmImport({ rows: importRows, confirmationToken: precheck.confirmationToken }, user);
+const confirmed = await service.confirmImport({ rows: importRows, destination: 'assigned', confirmationToken: precheck.confirmationToken }, user);
 assert.equal(confirmed.successCount, 1);
 assert.equal(created.length, 1);
 assert.equal(confirmed.rows[0].customerId, 'c1');
 assert.equal(importFinalizations.length, 1);
 
-const replayed = await service.confirmImport({ rows: importRows, confirmationToken: precheck.confirmationToken }, user);
+const replayed = await service.confirmImport({ rows: importRows, destination: 'assigned', confirmationToken: precheck.confirmationToken }, user);
 assert.deepEqual(replayed, confirmed);
 assert.equal(created.length, 1);
 
 await assert.rejects(
-  () => service.confirmImport({ rows: [{ ...importRows[0], name: '被篡改' }], confirmationToken: precheck.confirmationToken }, user),
+  () => service.confirmImport({ rows: [{ ...importRows[0], name: '被篡改' }], destination: 'assigned', confirmationToken: precheck.confirmationToken }, user),
   /预检内容不一致/,
 );
 
@@ -120,10 +126,45 @@ const failingService = createCustomerDataExchangeService({
   finalizeImportExecution: async (event) => { importFinalizations.push(event); },
 });
 const failingRows = [{ ...importRows[0], lifecycleStatus: '', customerLevel: '', leadSource: '' }];
-const failingPrecheck = await failingService.precheckImport(failingRows, user);
-const failingResult = await failingService.confirmImport({ rows: failingRows, confirmationToken: failingPrecheck.confirmationToken }, user);
+const failingPrecheck = await failingService.precheckImport(failingRows, 'assigned', user);
+const failingResult = await failingService.confirmImport({ rows: failingRows, destination: 'assigned', confirmationToken: failingPrecheck.confirmationToken }, user);
 assert.equal(failingResult.failureCount, 1);
 assert.equal(failingResult.rows[0].reason, '客户写入失败，请重新确认以恢复处理');
+
+await assert.rejects(
+  () => service.precheckImport([{ ...importRows[0], ownerName: '', lifecycleStatus: '' }], 'public_pool', user),
+  /无权直接导入公海池/,
+);
+
+const publicPoolUser: AuthenticatedUser = {
+  ...user,
+  permissions: [
+    ...(user.permissions || []),
+    { module: PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, actions: ['read', 'write'] },
+  ],
+};
+const publicPoolRows = [{ ...importRows[0], ownerName: '', lifecycleStatus: '' }];
+const publicPoolPrecheck = await service.precheckImport(publicPoolRows, 'public_pool', publicPoolUser);
+assert.equal(publicPoolPrecheck.readyCount, 1);
+await assert.rejects(
+  () => service.confirmImport({ rows: publicPoolRows, destination: 'assigned', confirmationToken: publicPoolPrecheck.confirmationToken }, publicPoolUser),
+  /预检内容不一致/,
+);
+recordedRows.clear();
+importTerminal = false;
+const publicPoolConfirmed = await service.confirmImport({
+  rows: publicPoolRows,
+  destination: 'public_pool',
+  confirmationToken: publicPoolPrecheck.confirmationToken,
+}, publicPoolUser);
+assert.equal(publicPoolConfirmed.successCount, 1);
+assert.deepEqual(created[created.length - 1], {
+  ownerId: undefined,
+  name: '张三',
+  destination: 'public_pool',
+  ownerIdentityStatus: 'public_pool',
+  lifecycleStatusCode: 'public_pool',
+});
 
 const exported = await service.exportCustomers({
   selection: { mode: 'ids', customerIds: ['c1'] },

@@ -14,8 +14,8 @@ app.use('/api/customer-data-exchange', createCustomerDataExchangeRouter({
   requireExport: auth,
   service: {
     templateOptions: async () => ({ ownerNames: [] }),
-    precheckImport: async (rows) => { calls.push(`precheck:${rows.length}`); return { readyCount: rows.length }; },
-    confirmImport: async ({ rows }) => { calls.push(`confirm:${rows.length}`); return { successCount: rows.length }; },
+    precheckImport: async (rows, destination) => { calls.push(`precheck:${destination}:${rows.length}`); return { readyCount: rows.length }; },
+    confirmImport: async ({ rows, destination }) => { calls.push(`confirm:${destination}:${rows.length}`); return { successCount: rows.length }; },
     exportCustomers: async (input) => { calls.push(`export:${input.selection.mode}`); return { rows: [] }; },
   },
 }));
@@ -27,13 +27,13 @@ const base = `http://127.0.0.1:${address.port}/api/customer-data-exchange`;
 
 try {
   const row = { rowNumber: 2, name: '张三', phone: '13800000000' };
-  const precheck = await fetch(`${base}/import/precheck`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [row] }) });
+  const precheck = await fetch(`${base}/import/precheck`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [row], destination: 'public_pool' }) });
   assert.equal(precheck.status, 200);
-  const confirm = await fetch(`${base}/import/confirm`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [row], confirmationToken: 'token' }) });
+  const confirm = await fetch(`${base}/import/confirm`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [row], destination: 'public_pool', confirmationToken: 'token' }) });
   assert.equal(confirm.status, 201);
   const exported = await fetch(`${base}/export`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ selection: { mode: 'ids', customerIds: ['c1'] }, includeSensitive: false, reason: '备份' }) });
   assert.equal(exported.status, 200);
-  assert.deepEqual(calls, ['precheck:1', 'confirm:1', 'export:ids']);
+  assert.deepEqual(calls, ['precheck:public_pool:1', 'confirm:public_pool:1', 'export:ids']);
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }

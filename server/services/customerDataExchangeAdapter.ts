@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Customer, CustomerCreateInput, CustomerFilters } from '../../src/types/customer';
-import type { CustomerExportSelection, CustomerImportRow } from '../../src/types/customerDataExchange';
+import type { CustomerExportSelection, CustomerImportDestination, CustomerImportRow } from '../../src/types/customerDataExchange';
 import type { ApiResponse, PaginatedResponse } from '../../src/api/types';
 import type { CustomerCreateExecutionContext } from './customerListService';
 import type { CustomerLevelConfig, LeadSourceConfig, LifecycleStatusConfig } from '../../src/types/settings';
@@ -174,7 +174,7 @@ async function recordExportAudit(prisma: PrismaClient, event: CustomerExportAudi
 
 async function persistImportPrecheck(
   prisma: PrismaClient,
-  event: { token: string; actorId: string; rowsHash: string; expiresAt: string; totalCount: number },
+  event: { token: string; actorId: string; rowsHash: string; expiresAt: string; totalCount: number; destination: CustomerImportDestination },
 ): Promise<void> {
   await prisma.customerBatchPrecheck.create({
     data: {
@@ -186,7 +186,7 @@ async function persistImportPrecheck(
       tokenHash: tokenHash(event.token),
       selectionHash: event.rowsHash,
       inputHash: event.rowsHash,
-      guardManifest: json({ kind: 'customer_import', totalCount: event.totalCount }),
+      guardManifest: json({ kind: 'customer_import', totalCount: event.totalCount, destination: event.destination }),
       normalizedRowsHash: event.rowsHash,
       customerVersionManifest: json({}),
       selectedCustomerIds: json([]),
@@ -197,7 +197,7 @@ async function persistImportPrecheck(
 
 async function beginImportExecution(
   prisma: PrismaClient,
-  event: { token: string; actorId: string; actorName: string; rowsHash: string; totalCount: number },
+  event: { token: string; actorId: string; actorName: string; rowsHash: string; totalCount: number; destination: CustomerImportDestination },
 ): Promise<{
   jobId: string;
   leaseOwner: string;
@@ -229,8 +229,9 @@ async function beginImportExecution(
     if (!precheck || precheck.actorId !== event.actorId || precheck.normalizedRowsHash !== event.rowsHash) {
       throw new CustomerDataExchangeError('导入预检凭证无效或与当前文件不一致', 409);
     }
-    const manifest = readStorageValue<{ totalCount?: number }>(precheck.guardManifest, {});
+    const manifest = readStorageValue<{ totalCount?: number; destination?: CustomerImportDestination }>(precheck.guardManifest, {});
     if (Number(manifest.totalCount) !== event.totalCount) throw new CustomerDataExchangeError('导入预检行数已变化，请重新预检', 409);
+    if (manifest.destination !== event.destination) throw new CustomerDataExchangeError('导入去向已变化，请重新预检', 409);
 
     if (precheck.consumedAt) {
       if (!precheck.consumedResultId) throw new CustomerDataExchangeError('导入批次记录已损坏，请联系管理员', 409);
@@ -288,7 +289,7 @@ async function beginImportExecution(
         status: 'running',
         selectionMode: 'file_rows',
         selectedCustomerIds: json([]),
-        input: json({ rowsHash: event.rowsHash }),
+        input: json({ rowsHash: event.rowsHash, destination: event.destination }),
         inputHash: event.rowsHash,
         idempotencyFingerprint: event.rowsHash,
         reason: '批量导入客户',
@@ -328,6 +329,7 @@ async function processImportRow(
     index: number;
     row: { rowNumber: number; name: string; status: string; reason: string; customerId?: string };
     input?: CustomerCreateInput;
+    destination: CustomerImportDestination;
     user: AuthenticatedUser;
   },
 ): Promise<{ rowNumber: number; name: string; status: 'ready' | 'blocked' | 'imported' | 'failed'; reason: string; customerId?: string }> {
@@ -383,6 +385,7 @@ async function processImportRow(
         batchJobId: event.jobId,
         requestId: `${event.jobId}:row:${event.index + 1}`,
         idempotencyKey: `${event.jobId}:row:${event.index + 1}`,
+        importDestination: event.destination,
       });
       result = created.code === 0 && created.data
         ? { rowNumber: event.row.rowNumber, name: event.row.name, status: 'imported', reason: '导入成功', customerId: created.data.id }
@@ -483,7 +486,9 @@ export function createPrismaCustomerDataExchangeService(input: {
         currentOwnerName: user.name || user.account,
         canOverrideAttribution,
         owners: users.filter((candidate) => allowedOwnerIds.has(candidate.id)),
-        lifecycleStatuses: lifecycle.map((item) => ({ code: item.code, name: item.name })),
+        lifecycleStatuses: lifecycle
+          .filter((item) => item.code !== 'public_pool')
+          .map((item) => ({ code: item.code, name: item.name })),
         customerLevels: levels.map((item) => ({ value: item.value, label: item.label })),
         leadSources: leadSourceOptions(sources),
         tags: catalog.tags.filter((tag) => tag.isActive !== false).map((tag) => ({ id: tag.id, name: tag.name })),
