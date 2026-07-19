@@ -39,6 +39,12 @@ export const CUSTOMER_BATCH_ACTION_LABELS: Record<CustomerBatchOperation, string
   soft_delete: '删除客户',
 };
 
+export const getCustomerBatchOperationLabel = (operation: string) => (
+  operation === 'export' ? '导出客户'
+    : operation === 'import' ? '导入客户'
+      : CUSTOMER_BATCH_ACTION_LABELS[operation as CustomerBatchOperation] || operation
+);
+
 export interface CustomerBatchDialogState {
   operation: CustomerBatchOperation | null;
   reason: string;

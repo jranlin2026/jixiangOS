@@ -5,6 +5,7 @@ import {
   getApiListenHost,
   getAllowedCorsOrigins,
   getEnablementPrivateStorageDir,
+  getCustomerDataExchangeSecret,
   parseCorsOrigins,
   validateRuntimeConfig,
 } from './runtime';
@@ -18,6 +19,7 @@ assert.ok(getAllowedCorsOrigins({ NODE_ENV: 'development' }).includes('http://12
 assert.equal(getApiListenHost({}), '127.0.0.1');
 assert.equal(getApiJsonBodyLimit({}), '50mb');
 assert.equal(getApiJsonBodyLimit({ API_JSON_BODY_LIMIT: '100mb' }), '100mb');
+assert.match(getCustomerDataExchangeSecret({}), /local-customer-data-exchange/);
 assert.equal(getEnablementPrivateStorageDir({ ENABLEMENT_PRIVATE_STORAGE_DIR: '/tmp/enablement' }), '/tmp/enablement');
 assert.ok(getEnablementPrivateStorageDir({}).endsWith('private_uploads/enablement'));
 
@@ -207,4 +209,5 @@ assert.doesNotThrow(() => validateRuntimeConfig({
   CUSTOMER_PERMISSION_MIGRATION_SIGNING_KEY: 'StrongPermissionMigrationSigningKey-123',
   CUSTOMER_MERGE_SNAPSHOT_ACTIVE_KEY_VERSION: '1',
   CUSTOMER_MERGE_SNAPSHOT_KEYS_JSON: JSON.stringify({ 1: Buffer.alloc(32, 3).toString('base64') }),
+  CUSTOMER_DATA_EXCHANGE_SIGNING_KEY: 'StrongCustomerDataExchangeSigningKey-123',
 }));

@@ -18,6 +18,7 @@ const validProductionEnv: NodeJS.ProcessEnv = {
   CUSTOMER_MERGE_SNAPSHOT_ACTIVE_KEY_VERSION: '1',
   CUSTOMER_MERGE_SNAPSHOT_KEYS_JSON: JSON.stringify({ 1: Buffer.alloc(32, 4).toString('base64') }),
   CUSTOMER_PERMISSION_MIGRATION_SIGNING_KEY: 'StrongPermissionMigrationSigningKey-123',
+  CUSTOMER_DATA_EXCHANGE_SIGNING_KEY: 'StrongCustomerDataExchangeSigningKey-123',
   JIXIANG_DEPLOY_BACKUP: 'true',
   JIXIANG_MYSQL_PASSWORD: 'StrongDatabasePassword123!',
   JIXIANG_BACKUP_DIR: '/var/backups/jixiang-os',

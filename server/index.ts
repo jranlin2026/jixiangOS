@@ -11,6 +11,7 @@ import {
   getApiJsonBodyLimit,
   getApiListenHost,
   getEnablementPrivateStorageDir,
+  getCustomerDataExchangeSecret,
   validateRuntimeConfig,
 } from './config/runtime';
 import { getScopedStorageKeys } from './config/storageScopes';
@@ -76,6 +77,8 @@ import {
 import { createCustomerBatchRouter } from './routes/customerBatchRoutes';
 import { createCustomerMergeRouter } from './routes/customerMergeRoutes';
 import { createCustomerMergeService } from './services/customerMergeService';
+import { createPrismaCustomerDataExchangeService } from './services/customerDataExchangeAdapter';
+import { createCustomerDataExchangeRouter } from './routes/customerDataExchangeRoutes';
 import { resolveCanonicalCustomer } from './services/customerCanonicalService';
 import { createCoCreationService } from './services/coCreation/coCreationService';
 import {
@@ -143,6 +146,11 @@ const customerTodoService = createCustomerTodoService(prisma);
 const customerManageableUsersService = createCustomerManageableUsersService(prisma);
 const customerBatchService = createCustomerBatchService(prisma);
 const customerMergeService = createCustomerMergeService(prisma);
+const customerDataExchangeService = createPrismaCustomerDataExchangeService({
+  prisma,
+  customerReader: customerListService,
+  secret: getCustomerDataExchangeSecret(),
+});
 const customerBatchWorker = createCustomerBatchWorker({
   store: createPrismaCustomerBatchWorkerStore(prisma),
   handlers: new CustomerBatchJobHandlerRegistry([
@@ -222,6 +230,8 @@ const requireCustomerBatchReadAccess = createRequireAnyPermission(authService, [
 ]);
 const requireCustomerMergeAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_MERGE, 'write');
 const requireCustomerMergeUndoAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_MERGE_UNDO, 'write');
+const requireCustomerImportAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_IMPORT, 'write');
+const requireCustomerExportAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_EXPORT, 'write');
 const requireLeadListAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_LIST);
 const requireLeadCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_CREATE, 'write');
 const requireLeadConvertAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_CONVERT, 'write');
@@ -417,6 +427,11 @@ app.use('/api/customer-batch-jobs', createCustomerBatchRouter({
   requireManage: requireCustomerBatchManageAccess,
   requireRead: requireCustomerBatchReadAccess,
   requireAuthenticated: requireStorageAccess,
+}));
+app.use('/api/customer-data-exchange', createCustomerDataExchangeRouter({
+  service: customerDataExchangeService,
+  requireImport: requireCustomerImportAccess,
+  requireExport: requireCustomerExportAccess,
 }));
 app.use('/api', createCustomerMergeRouter({
   service: customerMergeService,

@@ -42,6 +42,8 @@ import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SearchIcon from '@mui/icons-material/Search';
 import TaskAltOutlinedIcon from '@mui/icons-material/TaskAltOutlined';
+import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
+import FileUploadOutlinedIcon from '@mui/icons-material/FileUploadOutlined';
 import useCustomerStore from '../../store/useCustomerStore';
 import { customerApi, customerBatchApi, orderApi, settingsApi } from '../../api';
 import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, ROUTES, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
@@ -91,6 +93,8 @@ import CustomerBatchToolbar from './batch/CustomerBatchToolbar';
 import CustomerBatchActionDialog from './batch/CustomerBatchActionDialog';
 import CustomerBatchTaskDrawer from './batch/CustomerBatchTaskDrawer';
 import CustomerMergeDialog from './CustomerMergeDialog';
+import CustomerImportDialog from './CustomerImportDialog';
+import CustomerExportDialog from './CustomerExportDialog';
 
 type CustomerColumn = {
   id: string;
@@ -298,6 +302,8 @@ const Customers: React.FC = () => {
   const [batchTasks, setBatchTasks] = useState<CustomerBatchJobSummary[]>([]);
   const [batchTaskDrawerOpen, setBatchTaskDrawerOpen] = useState(false);
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const { alert, dialog: feedbackDialog } = useAppFeedback();
   const columns = useMemo(() => buildCustomerColumns(lifecycleConfigs, customerScope), [customerScope, lifecycleConfigs]);
   const customerLevelOptions = useMemo(() => {
@@ -382,7 +388,10 @@ const Customers: React.FC = () => {
     || hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_BATCH_AUDIT_READ, 'read');
   const canCancelAnyBatchTask = hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_BATCH_CANCEL, 'write');
   const canMergeCustomers = hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_MERGE, 'write');
-  const hasCustomerSelectionActions = availableBatchActions.length > 0 || canMergeCustomers;
+  const canImportCustomers = hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_IMPORT, 'write');
+  const canExportCustomers = hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_EXPORT, 'write');
+  const canExportSensitiveCustomers = hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_EXPORT_SENSITIVE, 'write');
+  const hasCustomerSelectionActions = availableBatchActions.length > 0 || canMergeCustomers || canExportCustomers;
   const mergeSelectionAvailability = useMemo(
     () => getCustomerMergeSelectionAvailability(batchSelection),
     [batchSelection],
@@ -732,6 +741,16 @@ const Customers: React.FC = () => {
               批量任务
             </Button>
           )}
+          {!isPublicPoolScope && canImportCustomers && (
+            <Button variant="outlined" startIcon={<FileUploadOutlinedIcon />} onClick={() => setImportDialogOpen(true)}>
+              导入客户
+            </Button>
+          )}
+          {canExportCustomers && (
+            <Button variant="outlined" startIcon={<FileDownloadOutlinedIcon />} onClick={() => setExportDialogOpen(true)}>
+              导出客户
+            </Button>
+          )}
           {!isPublicPoolScope && (
             <PermissionGate permissionKey={PERMISSION_KEYS.CUSTOMER_CREATE} action="write">
               <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate}>
@@ -873,13 +892,20 @@ const Customers: React.FC = () => {
         <CustomerBatchToolbar
           selection={batchSelection}
           availableActions={availableBatchActions}
-          additionalActions={canMergeCustomers ? [{
-            key: 'merge-customers',
-            label: '合并客户',
-            disabled: !mergeSelectionAvailability.enabled,
-            helperText: mergeSelectionAvailability.reason,
-            onClick: () => setMergeDialogOpen(true),
-          }] : []}
+          additionalActions={[
+            ...(canMergeCustomers ? [{
+              key: 'merge-customers',
+              label: '合并客户',
+              disabled: !mergeSelectionAvailability.enabled,
+              helperText: mergeSelectionAvailability.reason,
+              onClick: () => setMergeDialogOpen(true),
+            }] : []),
+            ...(canExportCustomers ? [{
+              key: 'export-customers',
+              label: '导出所选客户',
+              onClick: () => setExportDialogOpen(true),
+            }] : []),
+          ]}
           onChooseAction={setBatchOperation}
           onClear={() => setBatchSelection(clearCustomerBatchSelection())}
           onSelectFilterResult={() => setBatchSelection(selectCurrentFilterResult(scopedFilters()))}
@@ -1284,6 +1310,29 @@ const Customers: React.FC = () => {
         onReorderColumn={handleReorderColumn}
         onFrozenColumnCountChange={handleFrozenColumnCountChange}
         onReset={handleResetViewConfig}
+      />
+
+      <CustomerImportDialog
+        open={importDialogOpen}
+        onClose={() => setImportDialogOpen(false)}
+        onImported={() => {
+          setBatchSelection(clearCustomerBatchSelection());
+          void fetchItems(scopedFilters());
+        }}
+      />
+      <CustomerExportDialog
+        open={exportDialogOpen}
+        selectedSelection={batchSelectionActive
+          ? batchSelection.mode === 'ids'
+            ? { mode: 'ids', customerIds: batchSelection.selectedIds }
+            : { mode: 'filter_snapshot', filters: batchSelection.filters || {} }
+          : null}
+        filterSelection={{
+          mode: 'filter_snapshot',
+          filters: scopedFilters(),
+        }}
+        canExportSensitive={canExportSensitiveCustomers}
+        onClose={() => setExportDialogOpen(false)}
       />
 
       <Dialog open={ordersOpen} onClose={() => setOrdersOpen(false)} maxWidth="md" fullWidth>

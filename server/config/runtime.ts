@@ -49,6 +49,13 @@ export function getApiJsonBodyLimit(env: NodeJS.ProcessEnv = process.env): strin
   return readEnv(env, 'API_JSON_BODY_LIMIT') || '50mb';
 }
 
+export function getCustomerDataExchangeSecret(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = readEnv(env, 'CUSTOMER_DATA_EXCHANGE_SIGNING_KEY');
+  if (configured) return configured;
+  if (isProductionRuntime(env)) throw new Error('CUSTOMER_DATA_EXCHANGE_SIGNING_KEY must be configured before running jixiangOS in production.');
+  return 'local-customer-data-exchange-signing-key-only';
+}
+
 /** Location for original enablement Markdown. This directory is never public. */
 export function getEnablementPrivateStorageDir(
   env: NodeJS.ProcessEnv = process.env,
@@ -157,4 +164,7 @@ export function validateRuntimeConfig(env: NodeJS.ProcessEnv = process.env): voi
   createContactIdentityCryptoFromEnv(env);
   createCustomerPermissionMigrationManifestAuthenticatorFromEnv(env);
   createCustomerMergeSnapshotKeyringFromEnv(env);
+  if (getCustomerDataExchangeSecret(env).length < 32) {
+    throw new Error('CUSTOMER_DATA_EXCHANGE_SIGNING_KEY must be at least 32 characters.');
+  }
 }

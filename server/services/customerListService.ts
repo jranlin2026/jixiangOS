@@ -50,6 +50,13 @@ type CustomerListServiceOptions = {
   contactIdentityCrypto?: ContactIdentityCrypto;
 };
 
+export type CustomerCreateExecutionContext = {
+  tx?: Prisma.TransactionClient;
+  batchJobId?: string;
+  requestId?: string;
+  idempotencyKey?: string;
+};
+
 type CustomerRow = CustomerBusinessRecordRow;
 
 export type CustomerActivityInput = {
@@ -287,7 +294,12 @@ export function createCustomerListService(
       return snapshot ? success(snapshot.customer) : failure<Customer>('客户不存在或无权访问', 404);
     },
 
-    async create(input: CustomerCreateInput, currentUser: AuthenticatedUser): Promise<ApiResponse<Customer | null>> {
+    async create(
+      input: CustomerCreateInput,
+      currentUser: AuthenticatedUser,
+      execution: CustomerCreateExecutionContext = {},
+    ): Promise<ApiResponse<Customer | null>> {
+      const database = (execution.tx || prisma) as CustomerListPrisma;
       if (!hasPermission(currentUser, PERMISSION_KEYS.CUSTOMER_CREATE, 'write')) {
         return failure<Customer>('无权新建客户', 403);
       }
@@ -311,7 +323,7 @@ export function createCustomerListService(
         if (!hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_TRANSFER, 'write')) {
           return failure<Customer>('无权把客户分配给其他负责人', 403);
         }
-        assignmentAccess = await loadCustomerAccessContext(prisma, currentUser);
+        assignmentAccess = await loadCustomerAccessContext(database, currentUser);
         if (!assignmentAccess.manageableOwnerIds.has(requestedOwnerId)) {
           return failure<Customer>('无权跨数据范围分配客户', 403);
         }
@@ -319,7 +331,7 @@ export function createCustomerListService(
       const targetOwner = requestedOwnerId === currentUser.id
         ? { id: currentUser.id, name: actorName, isActive: true, employmentStatus: 'active' }
         : requestedOwnerId
-          ? await prisma.user.findUnique({ where: { id: requestedOwnerId } })
+          ? await database.user.findUnique({ where: { id: requestedOwnerId } })
           : null;
       if (
         !targetOwner
@@ -409,6 +421,9 @@ export function createCustomerListService(
       await appendCustomerAuditEvent(tx, {
         operation: 'create_customer',
         customerId: customer.id,
+        batchJobId: execution.batchJobId,
+        requestId: execution.requestId,
+        idempotencyKey: execution.idempotencyKey,
         actor: { id: currentUser.id, name: actorName },
         reason: '创建客户',
         afterSnapshot: customer,
@@ -426,11 +441,15 @@ export function createCustomerListService(
       return success(customer);
       };
       let lastError: unknown;
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const attempts = execution.tx ? 1 : 3;
+      for (let attempt = 1; attempt <= attempts; attempt += 1) {
         try {
-          return await (prisma.$transaction as any)(operation);
+          return execution.tx
+            ? await operation(execution.tx as any)
+            : await (prisma.$transaction as any)(operation);
         } catch (error) {
           if (error instanceof ContactIdentityConflictError) {
+            if (execution.tx) throw error;
             return {
               code: 409,
               data: error.safePayload.customer || null,
@@ -438,10 +457,13 @@ export function createCustomerListService(
             } as ApiResponse<Customer | null>;
           }
           const conflict = customerWriteConflictResponse<Customer>(error);
-          if (conflict) return conflict;
+          if (conflict) {
+            if (execution.tx) throw error;
+            return conflict;
+          }
           lastError = error;
           if (!isRetryableCustomerCreateConflict(error)) throw error;
-          if (attempt === 3) return failure<Customer>('客户创建发生并发冲突，请稍后重试', 409);
+          if (attempt === attempts) return failure<Customer>('客户创建发生并发冲突，请稍后重试', 409);
         }
       }
       throw lastError;

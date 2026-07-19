@@ -18,7 +18,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { customerBatchApi } from '../../../api/customerBatchApi';
 import type { CustomerBatchJobResultView, CustomerBatchJobStatus, CustomerBatchJobSummary } from '../../../types/customerBatch';
-import { CUSTOMER_BATCH_ACTION_LABELS } from './CustomerBatchActionDialog';
+import { getCustomerBatchOperationLabel } from './CustomerBatchActionDialog';
 
 const terminalStatuses = new Set<CustomerBatchJobStatus>(['cancelled', 'succeeded', 'partial_failed', 'failed']);
 export const isTerminalCustomerBatchJobStatus = (status?: CustomerBatchJobStatus) => Boolean(status && terminalStatuses.has(status));
@@ -149,13 +149,13 @@ const CustomerBatchTaskDrawer: React.FC<Props> = ({
               >
                 {jobs.map((job) => (
                   <MenuItem key={job.id} value={job.id}>
-                    {CUSTOMER_BATCH_ACTION_LABELS[job.operation]} · {statusLabel[job.status]} · {new Date(job.createdAt).toLocaleString('zh-CN')}
+                    {getCustomerBatchOperationLabel(job.operation)} · {statusLabel[job.status]} · {new Date(job.createdAt).toLocaleString('zh-CN')}
                   </MenuItem>
                 ))}
               </TextField>
             )}
             <Stack direction="row" alignItems="center" spacing={1}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>{CUSTOMER_BATCH_ACTION_LABELS[result.job.operation]}</Typography>
+              <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>{getCustomerBatchOperationLabel(result.job.operation)}</Typography>
               <Chip size="small" color={statusColor(result.job.status)} label={statusLabel[result.job.status]} />
             </Stack>
             <Box>

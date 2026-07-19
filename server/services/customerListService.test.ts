@@ -663,3 +663,18 @@ assert.deepEqual(searchMirrorResult.data?.pagination, {
   total: 1,
   totalPages: 1,
 });
+
+const transactionCallsBeforeBatchCreate = transactionCalls;
+const batchCreated = await service.create({
+  name: '批量导入事务客户', company: '', phone: '13500000088', customerLevel: 'L1',
+  owner: actor.name, ownerId: actor.id, sourceType: '公司资源',
+}, actor, {
+  tx: servicePrisma,
+  batchJobId: 'import-job-test',
+  requestId: 'import-job-test:row:1',
+  idempotencyKey: 'import-job-test:row:1',
+});
+assert.equal(batchCreated.code, 0);
+assert.equal(transactionCalls, transactionCallsBeforeBatchCreate, 'existing transaction must not open a nested transaction');
+assert.equal(auditEvents[auditEvents.length - 1]?.batchJobId, 'import-job-test');
+assert.equal(auditEvents[auditEvents.length - 1]?.requestId, 'import-job-test:row:1');
