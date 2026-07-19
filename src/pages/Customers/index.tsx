@@ -42,7 +42,6 @@ import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SearchIcon from '@mui/icons-material/Search';
 import TaskAltOutlinedIcon from '@mui/icons-material/TaskAltOutlined';
-import MergeTypeIcon from '@mui/icons-material/MergeType';
 import useCustomerStore from '../../store/useCustomerStore';
 import { customerApi, customerBatchApi, orderApi, settingsApi } from '../../api';
 import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, ROUTES, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
@@ -82,6 +81,7 @@ import type { CustomerBatchJobSummary, CustomerBatchOperation } from '../../type
 import {
   clearCustomerBatchSelection,
   deselectPageCustomers,
+  getCustomerMergeSelectionAvailability,
   isCustomerSelected,
   selectCurrentFilterResult,
   selectPageCustomers,
@@ -380,6 +380,11 @@ const Customers: React.FC = () => {
     || hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_BATCH_AUDIT_READ, 'read');
   const canCancelAnyBatchTask = hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_BATCH_CANCEL, 'write');
   const canMergeCustomers = hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_MERGE, 'write');
+  const hasCustomerSelectionActions = availableBatchActions.length > 0 || canMergeCustomers;
+  const mergeSelectionAvailability = useMemo(
+    () => getCustomerMergeSelectionAvailability(batchSelection),
+    [batchSelection],
+  );
   const batchSelectionActive = batchSelection.mode === 'filter_snapshot' || batchSelection.selectedIds.length > 0;
   const pageCustomerIds = useMemo(() => items.map((customer) => customer.id), [items]);
   const selectedPageCount = batchSelection.mode === 'ids'
@@ -406,8 +411,8 @@ const Customers: React.FC = () => {
   const tableMinWidth = useMemo(
     () => visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0)
       + CUSTOMER_ACTION_COLUMN_WIDTH
-      + (availableBatchActions.length ? CUSTOMER_SELECTION_COLUMN_WIDTH : 0),
-    [availableBatchActions.length, columnWidths, visibleColumns],
+      + (hasCustomerSelectionActions ? CUSTOMER_SELECTION_COLUMN_WIDTH : 0),
+    [columnWidths, hasCustomerSelectionActions, visibleColumns],
   );
 
   const handleViewDetail = (customer: Customer) => {
@@ -684,7 +689,7 @@ const Customers: React.FC = () => {
 
   const getFrozenLeft = (columnIndex: number) => {
     const widths = visibleColumns.map((column) => columnWidths[column.id] || DEFAULT_COLUMN_WIDTHS[column.id] || 120);
-    return (availableBatchActions.length ? CUSTOMER_SELECTION_COLUMN_WIDTH : 0)
+    return (hasCustomerSelectionActions ? CUSTOMER_SELECTION_COLUMN_WIDTH : 0)
       + widths.slice(0, columnIndex).reduce((sum, width) => sum + width, 0);
   };
 
@@ -723,21 +728,6 @@ const Customers: React.FC = () => {
           {canReadBatchTasks && (
             <Button variant="outlined" startIcon={<TaskAltOutlinedIcon />} onClick={() => void handleOpenLatestBatchTask()}>
               批量任务
-            </Button>
-          )}
-          {canMergeCustomers && (
-            <Button
-              variant="outlined"
-              startIcon={<MergeTypeIcon />}
-              onClick={() => navigate(
-                batchSelection.mode === 'ids' && batchSelection.selectedIds.length >= 2 && batchSelection.selectedIds.length <= 10
-                  ? `${ROUTES.CUSTOMER_DUPLICATES}?ids=${encodeURIComponent(batchSelection.selectedIds.join(','))}`
-                  : ROUTES.CUSTOMER_DUPLICATES,
-              )}
-            >
-              {batchSelection.mode === 'ids' && batchSelection.selectedIds.length >= 2 && batchSelection.selectedIds.length <= 10
-                ? `合并已选客户（${batchSelection.selectedIds.length}）`
-                : '重复客户治理'}
             </Button>
           )}
           {!isPublicPoolScope && (
@@ -881,6 +871,13 @@ const Customers: React.FC = () => {
         <CustomerBatchToolbar
           selection={batchSelection}
           availableActions={availableBatchActions}
+          additionalActions={canMergeCustomers ? [{
+            key: 'merge-customers',
+            label: '合并客户',
+            disabled: !mergeSelectionAvailability.enabled,
+            helperText: mergeSelectionAvailability.reason,
+            onClick: () => navigate(`${ROUTES.CUSTOMER_DUPLICATES}?ids=${encodeURIComponent(batchSelection.selectedIds.join(','))}`),
+          }] : []}
           onChooseAction={setBatchOperation}
           onClear={() => setBatchSelection(clearCustomerBatchSelection())}
           onSelectFilterResult={() => setBatchSelection(selectCurrentFilterResult(scopedFilters()))}
@@ -891,7 +888,7 @@ const Customers: React.FC = () => {
         <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
           <TableHead>
             <TableRow>
-              {availableBatchActions.length > 0 && (
+              {hasCustomerSelectionActions && (
                 <TableCell
                   padding="checkbox"
                   sx={{ position: 'sticky', left: 0, zIndex: 6, width: CUSTOMER_SELECTION_COLUMN_WIDTH, minWidth: CUSTOMER_SELECTION_COLUMN_WIDTH, bgcolor: '#f8fafc' }}
@@ -929,7 +926,7 @@ const Customers: React.FC = () => {
               const customerActions = customerWriteActions(customer);
               return (
               <TableRow key={customer.id} hover>
-                {availableBatchActions.length > 0 && (
+                {hasCustomerSelectionActions && (
                   <TableCell padding="checkbox" sx={{ position: 'sticky', left: 0, zIndex: 4, width: CUSTOMER_SELECTION_COLUMN_WIDTH, minWidth: CUSTOMER_SELECTION_COLUMN_WIDTH, bgcolor: '#fff' }}>
                     <Checkbox
                       size="small"
@@ -1018,7 +1015,7 @@ const Customers: React.FC = () => {
             })}
             {items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={visibleColumns.length + 1 + (availableBatchActions.length ? 1 : 0)} align="center" sx={{ py: 6, color: '#9ca3af' }}>
+                <TableCell colSpan={visibleColumns.length + 1 + (hasCustomerSelectionActions ? 1 : 0)} align="center" sx={{ py: 6, color: '#9ca3af' }}>
                   暂无客户数据
                 </TableCell>
               </TableRow>

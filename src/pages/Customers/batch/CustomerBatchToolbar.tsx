@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Button, Menu, MenuItem, Paper, Stack, Typography } from '@mui/material';
+import { Button, Divider, ListItemText, Menu, MenuItem, Paper, Stack, Typography } from '@mui/material';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import PlaylistAddCheckIcon from '@mui/icons-material/PlaylistAddCheck';
 import type { CustomerBatchOperation } from '../../../types/customerBatch';
@@ -12,6 +12,13 @@ type Props = {
   onChooseAction: (operation: CustomerBatchOperation) => void;
   onClear: () => void;
   onSelectFilterResult: () => void;
+  additionalActions?: Array<{
+    key: string;
+    label: string;
+    disabled?: boolean;
+    helperText?: string;
+    onClick: () => void;
+  }>;
 };
 
 const CustomerBatchToolbar: React.FC<Props> = ({
@@ -20,11 +27,12 @@ const CustomerBatchToolbar: React.FC<Props> = ({
   onChooseAction,
   onClear,
   onSelectFilterResult,
+  additionalActions = [],
 }) => {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const selectionText = selection.mode === 'filter_snapshot'
     ? '已选择当前筛选结果（数量以服务器预检为准）'
-    : `已选择 ${selection.selectedIds.length} 位客户`;
+    : `已选择 ${selection.selectedIds.length} 位客户（可翻页继续选择）`;
 
   return (
     <Paper
@@ -49,7 +57,7 @@ const CustomerBatchToolbar: React.FC<Props> = ({
           size="small"
           variant="contained"
           endIcon={<KeyboardArrowDownIcon />}
-          disabled={!availableActions.length}
+          disabled={!availableActions.length && !additionalActions.length}
           onClick={(event) => setAnchor(event.currentTarget)}
         >
           批量操作
@@ -67,6 +75,19 @@ const CustomerBatchToolbar: React.FC<Props> = ({
             sx={operation === 'soft_delete' ? { color: 'error.main' } : undefined}
           >
             {CUSTOMER_BATCH_ACTION_LABELS[operation]}
+          </MenuItem>
+        ))}
+        {availableActions.length > 0 && additionalActions.length > 0 && <Divider />}
+        {additionalActions.map((action) => (
+          <MenuItem
+            key={action.key}
+            disabled={action.disabled}
+            onClick={() => {
+              setAnchor(null);
+              action.onClick();
+            }}
+          >
+            <ListItemText primary={action.label} secondary={action.disabled ? action.helperText : undefined} />
           </MenuItem>
         ))}
       </Menu>

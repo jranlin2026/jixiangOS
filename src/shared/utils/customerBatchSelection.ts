@@ -58,6 +58,30 @@ export function selectCurrentFilterResult(filters: CustomerFilters): CustomerBat
   };
 }
 
+export type CustomerMergeSelectionAvailability = {
+  enabled: boolean;
+  reason: string;
+};
+
+/**
+ * Customer merge is an interactive comparison, not a background bulk mutation.
+ * It therefore accepts only an explicit, cross-page ID selection of 2-10 records.
+ */
+export function getCustomerMergeSelectionAvailability(
+  selection: CustomerBatchSelectionState,
+): CustomerMergeSelectionAvailability {
+  if (selection.mode !== 'ids') {
+    return { enabled: false, reason: '合并客户需要手动勾选 2–10 位客户，不能使用筛选结果全选。' };
+  }
+  if (selection.selectedIds.length < 2) {
+    return { enabled: false, reason: '请至少手动勾选 2 位客户。' };
+  }
+  if (selection.selectedIds.length > 10) {
+    return { enabled: false, reason: '一次最多合并 10 位客户，请减少选择数量。' };
+  }
+  return { enabled: true, reason: '' };
+}
+
 export function canOfferBatchAction(
   grantedPermissionKeys: readonly string[],
   operation: CustomerBatchOperation,
