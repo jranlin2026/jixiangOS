@@ -33,6 +33,30 @@ assert.equal(updatedProfile.code, 0);
 assert.equal(updatedProfile.data?.companyName, '福建极享科技');
 assert.equal((await settingsApi.fetchOrganizationProfile()).data.companyName, '福建极享科技');
 
+const existingRoles = await roleApi.getRoles();
+const existingRole = existingRoles.data[0];
+const duplicateRoleCreate = await roleApi.createRole({
+  ...existingRole,
+  name: `  ${existingRole.name}  `,
+  code: 'duplicate-role-name',
+});
+assert.notEqual(duplicateRoleCreate.code, 0);
+assert.equal(duplicateRoleCreate.message, '角色名称已存在');
+
+const temporaryRole = await roleApi.createRole({
+  name: '临时唯一角色',
+  code: 'temporary-unique-role',
+  permissions: [],
+  dataScopes: {},
+  memberCount: 0,
+  isActive: true,
+});
+assert.equal(temporaryRole.code, 0);
+const duplicateRoleUpdate = await roleApi.updateRole(temporaryRole.data!.id, { name: existingRole.name });
+assert.notEqual(duplicateRoleUpdate.code, 0);
+assert.equal(duplicateRoleUpdate.message, '角色名称已存在');
+assert.equal((await roleApi.deleteRole(temporaryRole.data!.id)).code, 0);
+
 const salesOne = await departmentApi.createDepartment({
   name: '销售一部',
   code: 'SALES_ONE',

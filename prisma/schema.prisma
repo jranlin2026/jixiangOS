@@ -40,8 +40,9 @@ model Position {
 }
 
 model Role {
-  id           String   @id @db.VarChar(64)
-  name         String   @db.VarChar(100)
+  id             String   @id @db.VarChar(64)
+  name           String   @db.VarChar(100)
+  normalizedName String   @unique(map: "roles_normalized_name_key") @db.VarChar(191)
   code         String   @unique @db.VarChar(64)
   description  String?  @db.VarChar(500)
   departmentId String?  @db.VarChar(64)

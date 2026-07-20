@@ -411,12 +411,46 @@ const createdRole = await service.createRole({
 assert.equal(createdRole.code, 0);
 const createdRoleData = createdRole.data as any;
 assert.equal(createdRoleData.code, 'backend_role');
+assert.equal(roles.find((role) => role.id === createdRoleData.id)?.normalizedName, 'backend role');
+
+const duplicateRole = await service.createRole({
+  name: '  Backend Role  ',
+  code: 'duplicate_backend_role',
+  permissions: [],
+  isActive: true,
+} as any);
+assert.notEqual(duplicateRole.code, 0);
+assert.equal(duplicateRole.message, '角色名称已存在');
+assert.equal(roles.filter((role) => role.name === 'Backend Role').length, 1);
+
+const originalRoleCreate = prisma.role.create;
+prisma.role.create = async () => {
+  const error = new Error('unique constraint') as Error & { code: string; meta: { target: string } };
+  error.code = 'P2002';
+  error.meta = { target: 'roles_normalized_name_key' };
+  throw error;
+};
+const concurrentDuplicateRole = await service.createRole({
+  name: 'Concurrent Backend Role',
+  code: 'concurrent_backend_role',
+  permissions: [],
+  isActive: true,
+} as any);
+prisma.role.create = originalRoleCreate;
+assert.notEqual(concurrentDuplicateRole.code, 0);
+assert.equal(concurrentDuplicateRole.message, '角色名称已存在');
+
+const duplicateRoleUpdate = await service.updateRole(createdRoleData.id, { name: ' sales ' });
+assert.notEqual(duplicateRoleUpdate.code, 0);
+assert.equal(duplicateRoleUpdate.message, '角色名称已存在');
+assert.equal(roles.find((role) => role.id === createdRoleData.id)?.name, 'Backend Role');
 
 const updatedRole = await service.updateRole(createdRoleData.id, { name: 'Updated Backend Role', isActive: false });
 const updatedRoleData = updatedRole.data as any;
 assert.equal(updatedRole.code, 0);
 assert.equal(updatedRoleData.name, 'Updated Backend Role');
 assert.equal(updatedRoleData.isActive, false);
+assert.equal(roles.find((role) => role.id === createdRoleData.id)?.normalizedName, 'updated backend role');
 
 const deletedRole = await service.deleteRole(createdRoleData.id);
 assert.equal(deletedRole.code, 0);

@@ -15,6 +15,7 @@ import {
 } from '../../src/shared/utils/auth';
 import { LIFECYCLE_STATUS_CODES, STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { mergeRoleWithDefaultAccess, normalizeRoleDataScopes } from '../../src/shared/utils/organizationConfig';
+import { normalizeRoleNameForComparison } from '../../src/shared/utils/roles';
 
 type SettingsPrisma = Pick<PrismaClient, 'user' | 'role' | 'department' | 'position' | 'authSession' | 'businessRecord' | 'leadRecord'>;
 
@@ -39,6 +40,13 @@ function compactId(prefix: string): string {
 function nullableText(value: unknown): string | null {
   const text = String(value || '').trim();
   return text || null;
+}
+
+function isNormalizedRoleNameConflict(error: unknown): boolean {
+  const record = asRecord(error);
+  if (record.code !== 'P2002') return false;
+  const target = JSON.stringify(asRecord(record.meta).target || '');
+  return target.includes('normalizedName') || target.includes('roles_normalized_name_key');
 }
 
 export function createSettingsService(prisma: SettingsPrisma) {
@@ -412,48 +420,72 @@ export function createSettingsService(prisma: SettingsPrisma) {
       const name = String(data.name || '').trim();
       const code = String(data.code || name || compactId('role')).trim();
       if (!name) return failure('角色名称不能为空');
-      const row = await prisma.role.create({
-        data: {
-          id: compactId('role'),
-          name,
-          code,
-          description: data.description || null,
-          departmentId: data.departmentId || null,
-          permissions: (Array.isArray(data.permissions) ? data.permissions : []) as any,
-          dataScopes: normalizeRoleDataScopes({ code, dataScopes: data.dataScopes }) as any,
-          memberCount: Number(data.memberCount || 0),
-          isActive: data.isActive ?? true,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
-      return success(mapPrismaRole(row));
+      const roles = await prisma.role.findMany();
+      if (roles.some((role) => normalizeRoleNameForComparison(role.name) === normalizeRoleNameForComparison(name))) {
+        return failure('角色名称已存在');
+      }
+      try {
+        const row = await prisma.role.create({
+          data: {
+            id: compactId('role'),
+            name,
+            normalizedName: normalizeRoleNameForComparison(name),
+            code,
+            description: data.description || null,
+            departmentId: data.departmentId || null,
+            permissions: (Array.isArray(data.permissions) ? data.permissions : []) as any,
+            dataScopes: normalizeRoleDataScopes({ code, dataScopes: data.dataScopes }) as any,
+            memberCount: Number(data.memberCount || 0),
+            isActive: data.isActive ?? true,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        });
+        return success(mapPrismaRole(row));
+      } catch (error) {
+        if (isNormalizedRoleNameConflict(error)) return failure('角色名称已存在');
+        throw error;
+      }
     },
 
     async updateRole(id: string, data: Record<string, any>) {
       const role = await prisma.role.findUnique({ where: { id } });
       if (!role) return success(null);
       if (role.code === 'super_admin' && data.isActive === false) return failure('超级管理员角色不能停用');
+      const nextName = data.name !== undefined ? String(data.name).trim() : role.name;
+      if (!nextName) return failure('角色名称不能为空');
+      if (data.name !== undefined) {
+        const roles = await prisma.role.findMany();
+        if (roles.some((item) => item.id !== id && normalizeRoleNameForComparison(item.name) === normalizeRoleNameForComparison(nextName))) {
+          return failure('角色名称已存在');
+        }
+      }
       const nextCode = data.code !== undefined ? String(data.code).trim() : role.code;
       const nextRole = {
         code: nextCode,
         dataScopes: data.dataScopes !== undefined ? data.dataScopes : asRecord(role.dataScopes),
       };
-      const row = await prisma.role.update({
-        where: { id },
-        data: {
-          name: data.name !== undefined ? String(data.name).trim() : undefined,
-          code: nextCode,
-          description: data.description !== undefined ? data.description || null : undefined,
-          departmentId: data.departmentId !== undefined ? data.departmentId || null : undefined,
-          permissions: data.permissions !== undefined ? (Array.isArray(data.permissions) ? data.permissions : []) as any : undefined,
-          dataScopes: data.dataScopes !== undefined || data.code !== undefined ? normalizeRoleDataScopes(nextRole) as any : undefined,
-          memberCount: data.memberCount !== undefined ? Number(data.memberCount) : undefined,
-          isActive: data.isActive,
-          updatedAt: new Date(),
-        },
-      });
-      return success(mapPrismaRole(row));
+      try {
+        const row = await prisma.role.update({
+          where: { id },
+          data: {
+            name: data.name !== undefined ? nextName : undefined,
+            normalizedName: data.name !== undefined ? normalizeRoleNameForComparison(nextName) : undefined,
+            code: nextCode,
+            description: data.description !== undefined ? data.description || null : undefined,
+            departmentId: data.departmentId !== undefined ? data.departmentId || null : undefined,
+            permissions: data.permissions !== undefined ? (Array.isArray(data.permissions) ? data.permissions : []) as any : undefined,
+            dataScopes: data.dataScopes !== undefined || data.code !== undefined ? normalizeRoleDataScopes(nextRole) as any : undefined,
+            memberCount: data.memberCount !== undefined ? Number(data.memberCount) : undefined,
+            isActive: data.isActive,
+            updatedAt: new Date(),
+          },
+        });
+        return success(mapPrismaRole(row));
+      } catch (error) {
+        if (isNormalizedRoleNameConflict(error)) return failure('角色名称已存在');
+        throw error;
+      }
     },
 
     async deleteRole(id: string) {

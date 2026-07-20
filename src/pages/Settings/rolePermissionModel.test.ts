@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { buildRoleEditorPermissions, normalizeRoleEditorDataScopes } from './rolePermissionModel';
+import { buildRoleEditorPermissions, hasDuplicateRoleName, normalizeRoleEditorDataScopes } from './rolePermissionModel';
 import { PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { mergeRoleWithDefaultAccess } from '../../shared/utils/organizationConfig';
 import type { Role } from '../../types/role';
@@ -8,6 +8,15 @@ import type { Role } from '../../types/role';
 const rolePermissionSource = readFileSync(new URL('./RolePermission.tsx', import.meta.url), 'utf8');
 assert.doesNotMatch(rolePermissionSource, /仅本部门|本部门及所有下级部门/);
 assert.match(rolePermissionSource, /CUSTOMER_SCOPE_OPTIONS[\s\S]*value: 'self'[\s\S]*value: 'department'[\s\S]*value: 'all'/);
+
+const roleNames = [
+  { id: 'role-sales', name: '销售经理' },
+  { id: 'role-finance', name: 'Finance Manager' },
+];
+assert.equal(hasDuplicateRoleName('  销售经理  ', roleNames), true);
+assert.equal(hasDuplicateRoleName('FINANCE manager', roleNames), true);
+assert.equal(hasDuplicateRoleName('销售经理', roleNames, 'role-sales'), false);
+assert.equal(hasDuplicateRoleName('销售总监', roleNames), false);
 
 const sparseFinanceScopes = normalizeRoleEditorDataScopes('finance_specialist', {
   customers: 'department_only',

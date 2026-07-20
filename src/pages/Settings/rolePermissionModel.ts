@@ -1,6 +1,19 @@
 import type { NormalizedRoleDataScopes, Permission, RoleDataScopes } from '../../types/role';
 import { normalizeRoleDataScopes } from '../../shared/utils/organizationConfig';
 import { getRoleEditorPermissionActions, normalizePermissionKey, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { normalizeRoleNameForComparison } from '../../shared/utils/roles';
+
+export function hasDuplicateRoleName(
+  name: string,
+  roles: Array<{ id: string; name: string }>,
+  currentRoleId?: string,
+): boolean {
+  const normalizedName = normalizeRoleNameForComparison(name);
+  return Boolean(normalizedName) && roles.some((role) => (
+    role.id !== currentRoleId
+    && normalizeRoleNameForComparison(role.name) === normalizedName
+  ));
+}
 
 export function buildRoleEditorPermissions(modules: Iterable<string>): Permission[] {
   const selected = new Set(modules);

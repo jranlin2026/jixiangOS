@@ -1,5 +1,9 @@
 export const DEFAULT_USER_ROLE = '销售顾问';
 
+export function normalizeRoleNameForComparison(role?: string): string {
+  return String(role || '').trim().toLocaleLowerCase('zh-CN');
+}
+
 export const LEGACY_ROLE_NAME_MAP: Record<string, string> = {
   管理员: '超级管理员',
   系统管理员: '超级管理员',

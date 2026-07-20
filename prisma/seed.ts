@@ -13,6 +13,7 @@ import { mockProductLevelConfigs } from '../src/api/mock/data/productLevels';
 import { mockRefunds } from '../src/api/mock/data/refunds';
 import { mockCommissionRules } from '../src/api/mock/data/commissionRules';
 import { mockTags } from '../src/api/mock/data/tags';
+import { normalizeRoleNameForComparison } from '../src/shared/utils/roles';
 import {
   DEFAULT_LEAD_FLOW_CONFIG,
   DEFAULT_LEAD_SOURCE_CONFIGS,
@@ -192,6 +193,7 @@ async function main() {
       where: { id: role.id },
       update: {
         name: role.name,
+        normalizedName: normalizeRoleNameForComparison(role.name),
         code: role.code,
         description: role.description,
         departmentId: role.departmentId,
@@ -204,6 +206,7 @@ async function main() {
       create: {
         id: role.id,
         name: role.name,
+        normalizedName: normalizeRoleNameForComparison(role.name),
         code: role.code,
         description: role.description,
         departmentId: role.departmentId,

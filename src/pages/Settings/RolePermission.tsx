@@ -5,6 +5,10 @@ import {
   Button,
   Checkbox,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   InputAdornment,
   MenuItem,
   Switch,
@@ -36,7 +40,7 @@ import {
   getPermissionLeafDisplayLabel,
 } from '../../shared/utils/permissions';
 import { normalizeUserRoleName } from '../../shared/utils/roles';
-import { buildRoleEditorPermissions, normalizeRoleEditorDataScopes } from './rolePermissionModel';
+import { buildRoleEditorPermissions, hasDuplicateRoleName, normalizeRoleEditorDataScopes } from './rolePermissionModel';
 
 type RoleForm = {
   name: string;
@@ -406,6 +410,9 @@ const RolePermission: React.FC = () => {
   const [error, setError] = useState('');
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [rolePendingDelete, setRolePendingDelete] = useState<Role | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [noticeMessage, setNoticeMessage] = useState('');
 
   useEffect(() => {
     fetchItems();
@@ -466,6 +473,11 @@ const RolePermission: React.FC = () => {
       setSaveMessage({ type: 'error', text: '请先填写角色名称' });
       return;
     }
+    if (hasDuplicateRoleName(form.name, items, editRole?.id)) {
+      setSaveMessage({ type: 'error', text: '角色名称已存在' });
+      setNoticeMessage('角色名称已存在，请使用其他名称');
+      return;
+    }
     const permissions = buildRoleEditorPermissions(normalizePermissionKeys(form.permissions));
     const dataScopes = normalizeRoleEditorDataScopes(editRole?.code, form.dataScopes, form.permissions);
     if (!permissions.length) {
@@ -488,8 +500,10 @@ const RolePermission: React.FC = () => {
         });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存失败');
-      setSaveMessage({ type: 'error', text: err instanceof Error ? err.message : '保存失败' });
+      const message = err instanceof Error ? err.message : '保存失败';
+      setError(message);
+      setSaveMessage({ type: 'error', text: message });
+      if (message.includes('角色名称已存在')) setNoticeMessage('角色名称已存在，请使用其他名称');
       setSaving(false);
       return;
     }
@@ -526,18 +540,24 @@ const RolePermission: React.FC = () => {
     }));
   };
 
-  const handleDelete = async (role: Role) => {
+  const handleConfirmDelete = async () => {
+    if (!rolePendingDelete) return;
     setError('');
+    setDeleting(true);
     try {
-      await deleteRole(role.id);
+      await deleteRole(rolePendingDelete.id);
+      setRolePendingDelete(null);
+      await fetchItems();
     } catch (err) {
       setError(err instanceof Error ? err.message : '删除失败');
+    } finally {
+      setDeleting(false);
     }
-    fetchItems();
   };
 
   return (
-    <Box sx={{ border: '1px solid #dfe7f1', borderRadius: 1.5, overflow: 'hidden', minHeight: 700, bgcolor: '#fff' }}>
+    <>
+      <Box sx={{ border: '1px solid #dfe7f1', borderRadius: 1.5, overflow: 'hidden', minHeight: 700, bgcolor: '#fff' }}>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '300px minmax(0, 1fr)' }, minHeight: 700 }}>
         <Box sx={{ borderRight: { lg: '1px solid #dfe7f1' }, bgcolor: '#f7faff', p: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
@@ -671,7 +691,7 @@ const RolePermission: React.FC = () => {
                         variant="text"
                         size="small"
                         color="error"
-                        onClick={() => handleDelete(editRole)}
+                        onClick={() => setRolePendingDelete(editRole)}
                         disabled={editRole.code === 'super_admin'}
                         startIcon={<DeleteIcon />}
                       >
@@ -978,7 +998,36 @@ const RolePermission: React.FC = () => {
           </Box>
         </Box>
       </Box>
-    </Box>
+      </Box>
+      <Dialog
+        open={Boolean(rolePendingDelete)}
+        onClose={() => !deleting && setRolePendingDelete(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>确认删除角色</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ color: '#52677f' }}>
+            确定删除角色“{rolePendingDelete?.name}”吗？删除后无法恢复。
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button onClick={() => setRolePendingDelete(null)} disabled={deleting}>取消</Button>
+          <Button variant="contained" color="error" onClick={handleConfirmDelete} disabled={deleting}>
+            {deleting ? '删除中…' : '确认删除'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog open={Boolean(noticeMessage)} onClose={() => setNoticeMessage('')} maxWidth="xs" fullWidth>
+        <DialogTitle>提示</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ color: '#52677f' }}>{noticeMessage}</Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button variant="contained" onClick={() => setNoticeMessage('')}>确定</Button>
+        </DialogActions>
+      </Dialog>
+    </>
   );
 };
 

@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ensureOrganizationConfigData, normalizeRoleDataScopes } from '../shared/utils/organizationConfig';
 import type { User } from '../types/settings';
 import { backendRequest, shouldUseBackendApi } from './backendClient';
+import { normalizeRoleNameForComparison } from '../shared/utils/roles';
 
 function ensureInit(): void {
   initializeMockData();
@@ -78,9 +79,15 @@ async function createRole(data: Omit<Role, 'id' | 'createdAt' | 'updatedAt'>): P
   ensureInit();
   await delay(200);
   const roles: Role[] = [...ensureOrganizationConfigData().roles];
+  const name = data.name.trim();
+  if (!name) return createErrorResponse('角色名称不能为空');
+  if (roles.some((role) => normalizeRoleNameForComparison(role.name) === normalizeRoleNameForComparison(name))) {
+    return createErrorResponse('角色名称已存在');
+  }
   const now = new Date().toISOString();
   const newRole: Role = {
     ...data,
+    name,
     dataScopes: normalizeRoleDataScopes(data),
     id: `role-${uuidv4().slice(0, 8)}`,
     createdAt: now,
@@ -108,6 +115,14 @@ async function updateRole(id: string, data: Partial<Role>): Promise<ApiResponse<
   if (idx === -1) return createSuccessResponse(null);
   if (roles[idx].code === 'super_admin' && data.isActive === false) {
     return createErrorResponse('超级管理员角色不能停用');
+  }
+  if (data.name !== undefined) {
+    const name = data.name.trim();
+    if (!name) return createErrorResponse('角色名称不能为空');
+    if (roles.some((role) => role.id !== id && normalizeRoleNameForComparison(role.name) === normalizeRoleNameForComparison(name))) {
+      return createErrorResponse('角色名称已存在');
+    }
+    data = { ...data, name };
   }
   const nextRole = { ...roles[idx], ...data };
   roles[idx] = {
