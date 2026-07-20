@@ -49,6 +49,7 @@ import useAuthStore from '../../store/useAuthStore';
 import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
 import BusinessAttachmentPicker from '../../shared/components/BusinessAttachmentPicker';
 import BusinessAttachmentLinks from '../../shared/components/BusinessAttachmentLinks';
+import { subscribePageRefresh } from '../../shared/utils/pageRefresh';
 
 const shell = {
   ink: '#0f172a',
@@ -184,6 +185,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const [reviewReason, setReviewReason] = useState('');
   const [approvedOrder, setApprovedOrder] = useState<RecoveryOrder | null>(null);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
+  const loadRequestIdRef = React.useRef(0);
   const handledCreateSignalRef = React.useRef(createSignal);
   const handledViewSettingsSignalRef = React.useRef(viewSettingsSignal);
   const tableColumns = mode === 'list' ? RECOVERY_ORDER_LIST_COLUMNS : RECOVERY_ORDER_COLUMNS;
@@ -211,6 +213,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   }), [mode, page, rowsPerPage, search]);
 
   const load = useCallback(async () => {
+    const requestId = loadRequestIdRef.current + 1;
+    loadRequestIdRef.current = requestId;
     setLoading(true);
     setLoadError('');
     try {
@@ -220,6 +224,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
         productApi.getProducts(),
         settingsApi.fetchAfterSalesSourceConfigs(),
       ]);
+      if (requestId !== loadRequestIdRef.current) return;
       if (listRes.code === 0) {
         setRows(listRes.data.items);
         setTotal(listRes.data.pagination.total);
@@ -230,12 +235,20 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       if (productsRes.code === 0) setProducts([...productsRes.data].sort((a, b) => a.sortOrder - b.sortOrder));
       if (sourceRes.code === 0) setSourceConfigs(sourceRes.data);
     } catch (error) {
+      if (requestId !== loadRequestIdRef.current) return;
       setLoadError(error instanceof Error ? error.message : '售后订单加载失败');
-    } finally { setLoading(false); }
+    } finally {
+      if (requestId === loadRequestIdRef.current) setLoading(false);
+    }
   }, [filters]);
 
   useEffect(() => {
-    load();
+    void load();
+    const unsubscribe = subscribePageRefresh(() => { void load(); });
+    return () => {
+      unsubscribe();
+      loadRequestIdRef.current += 1;
+    };
   }, [load]);
 
   useEffect(() => {
