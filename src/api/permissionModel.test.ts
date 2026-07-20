@@ -528,7 +528,20 @@ assert.equal(canReceiveLead({
   role: '超级管理员',
   roleId: 'role-super-admin',
   isActive: true,
-}, DEFAULT_ROLES), false);
+}, DEFAULT_ROLES), false, '只有通用管理权限的超级管理员不应自动成为销售候选人');
+
+const superAdminWithLeadFollow: Role = {
+  ...DEFAULT_ROLES.find((role) => role.code === 'super_admin')!,
+  permissions: [
+    { module: '全部', actions: ['read', 'write', 'delete', 'admin'] },
+    { module: PERMISSION_KEYS.LEADS_FOLLOW, actions: ['read', 'write'] },
+  ],
+};
+assert.equal(canReceiveLead({
+  role: '超级管理员',
+  roleId: superAdminWithLeadFollow.id,
+  isActive: true,
+}, [superAdminWithLeadFollow]), true, '显式配置线索跟进权限的超级管理员应允许领取');
 
 const recoveryReviewReadOnlyRole: Role = {
   id: 'role-recovery-review-read-only',

@@ -2585,6 +2585,32 @@ for (const targetType of ['customer', 'lead'] as const) {
   )), true);
 }
 
+// 拥有“开始跟进并加入客户”权限的超级管理员也是合法领取人，
+// 可领取能力不得再按角色名称硬排除。
+{
+  const source = lead('lead-super-admin-convert', salesA.name);
+  const superRoleWithLeadFollow = {
+    ...superRole,
+    permissions: [
+      ...superRole.permissions,
+      { module: PERMISSION_KEYS.LEADS_FOLLOW, actions: ['read', 'write'] },
+    ],
+  };
+  const fake = createFakePrisma(
+    { businessRecords: [], leads: [source] },
+    { roleRows: [salesRole, managerRole, financeRole, superRoleWithLeadFollow] },
+  );
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .convertLeadToCustomer(source.id, superAdmin);
+
+  assert.equal(result.code, 0);
+  const next = fake.getState();
+  assert.equal(next.businessRecords[0].owner, superAdmin.name);
+  assert.equal(next.businessRecords[0].data.ownerId, superAdmin.id);
+  assert.equal(next.leads[0].data.owner, superAdmin.name);
+  assert.equal(next.leads[0].data.ownerId, superAdmin.id);
+}
+
 // 同一联系人的两条线索并发转客户时，联系人行锁保证只创建一个客户。
 {
   const firstLead = lead('lead-concurrent-a');

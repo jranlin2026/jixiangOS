@@ -757,7 +757,6 @@ export function isSuperAdminUser(user: Pick<User, 'role' | 'roleId' | 'isActive'
 
 function roleHasDirectPermission(role: Role | undefined, permissionKeys: string[], action = 'read'): boolean {
   if (!role?.isActive) return false;
-  if (role.code === 'super_admin') return true;
   const requestedKeys = permissionKeys.map(normalizePermissionKey);
   return role.permissions.some((permission) => (
     actionAllowed(permission.actions || [], action)
@@ -769,7 +768,6 @@ export function canReceiveLead(user: Pick<User, 'role' | 'roleId' | 'isActive' |
   if (!user.isActive) return false;
   if ((user.employmentStatus || 'active') !== 'active') return false;
   const role = getUserRole(user, roles);
-  if (role?.code === 'super_admin') return false;
   return roleHasDirectPermission(role, [
     CAPABILITY_KEYS.LEADS_RECEIVE,
     PERMISSION_KEYS.LEADS_FOLLOW,
