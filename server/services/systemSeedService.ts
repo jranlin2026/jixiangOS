@@ -1,5 +1,6 @@
 import {
   DEFAULT_LEAD_FLOW_CONFIG,
+  DEFAULT_LIFECYCLE_STATUS_CONFIGS,
   CLEAN_INSTALL_EMPTY_STORAGE_KEYS,
   STORAGE_KEYS,
 } from '../../src/shared/utils/constants';
@@ -108,6 +109,7 @@ export async function seedSystemBaseline(store: any, options: SystemSeedOptions)
     await putStorage(store, STORAGE_KEYS.ORGANIZATION_PROFILE, { companyName: options.companyName });
   }
   await putStorage(store, STORAGE_KEYS.LEAD_FLOW_CONFIG, DEFAULT_LEAD_FLOW_CONFIG);
+  await putStorage(store, STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS);
   await putStorage(store, STORAGE_KEYS.FINANCE, { dailyRecords: [], channelROI: [] });
   for (const key of CLEAN_INSTALL_EMPTY_STORAGE_KEYS) await putStorage(store, key, []);
   const migratedAt = new Date().toISOString();

@@ -56,6 +56,7 @@ import { createBusinessRecycleBinRouter } from './routes/businessRecycleBinRoute
 import { createSystemSetupRouter } from './routes/systemSetupRoutes';
 import { createPrismaSystemSetupRepository } from './services/systemSetupRepository';
 import { createSystemSetupService } from './services/systemSetupService';
+import { ensureSystemLifecycleDefaults } from './services/systemConfigMigrationService';
 import { createSettingsService } from './services/settingsService';
 import { createStorageService } from './services/storageService';
 import { createBusinessAttachmentService, createPrismaBusinessAttachmentRepository } from './services/businessAttachmentService';
@@ -1523,6 +1524,7 @@ async function startServer() {
     throw new Error('SYSTEM_SETUP_STATUS_UNAVAILABLE');
   }
   if (setupStatus.data?.initialized) {
+    await ensureSystemLifecycleDefaults(prisma);
     const manifestAuthenticator = createCustomerPermissionMigrationManifestAuthenticatorFromEnv(process.env);
     const migratedRoles = await migrateDefaultRoleAccess(prisma);
     if (migratedRoles > 0) {

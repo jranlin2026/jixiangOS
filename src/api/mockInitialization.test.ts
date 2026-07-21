@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { initializeMockData } from './mock';
 import { productApi } from './productApi';
 import { settingsApi } from './settingsApi';
-import { CLEAN_INSTALL_EMPTY_STORAGE_KEYS, STORAGE_KEYS } from '../shared/utils/constants';
+import { CLEAN_INSTALL_EMPTY_STORAGE_KEYS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, STORAGE_KEYS } from '../shared/utils/constants';
 
 const originalUseBackend = process.env.VITE_USE_BACKEND_API;
 const originalApiBase = process.env.VITE_AI_API_BASE;
@@ -36,7 +36,7 @@ try {
     return {
       status: 200,
       headers: new Headers({ 'content-type': 'application/json' }),
-      text: async () => JSON.stringify({ code: 0, data: true, message: 'success' }),
+      text: async () => JSON.stringify({ code: 0, data: [], message: 'success' }),
     } as Response;
   };
 
@@ -56,7 +56,10 @@ try {
   assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.PRODUCT_LEVELS) || 'null'), []);
   assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.ORDER_TYPE_CONFIGS) || 'null'), []);
   assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS) || 'null'), []);
-  assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS) || 'null'), []);
+  assert.deepEqual(
+    JSON.parse(storage.getItem(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS) || 'null'),
+    DEFAULT_LIFECYCLE_STATUS_CONFIGS,
+  );
   assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.LEAD_SOURCE_CONFIGS) || 'null'), []);
   assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.REFUNDS) || 'null'), []);
   assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSION_RULES) || 'null'), []);
@@ -71,7 +74,7 @@ try {
   assert.deepEqual((await productApi.getProductLevelConfigs()).data, []);
   assert.deepEqual((await settingsApi.fetchOrderTypeConfigs()).data, []);
   assert.deepEqual((await settingsApi.fetchCustomerLevelConfigs()).data, []);
-  assert.deepEqual((await settingsApi.fetchLifecycleStatusConfigs()).data, []);
+  assert.deepEqual((await settingsApi.fetchLifecycleStatusConfigs()).data, DEFAULT_LIFECYCLE_STATUS_CONFIGS);
   assert.deepEqual((await settingsApi.fetchLeadSourceConfigs()).data, []);
   assert.equal(storage.getItem(STORAGE_KEYS.INITIALIZED), 'true');
   assert.equal(fetchCalls, 4, '只有四个配置读取请求，不得把空配置写回服务器');

@@ -123,7 +123,7 @@ export function initializeMockData(): void {
   initializeStorage(STORAGE_KEYS.PRODUCT_LEVELS, businessSeed(mockProductLevelConfigs, []));
   initializeStorage(STORAGE_KEYS.ORDER_TYPE_CONFIGS, businessSeed(DEFAULT_ORDER_TYPE_CONFIGS, []));
   initializeStorage(STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS, businessSeed(DEFAULT_CUSTOMER_LEVEL_CONFIGS, []));
-  initializeStorage(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, businessSeed(DEFAULT_LIFECYCLE_STATUS_CONFIGS, []));
+  initializeStorage(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS);
   initializeStorage(STORAGE_KEYS.REFUNDS, businessSeed(mockRefunds, []));
   initializeStorage(STORAGE_KEYS.RECOVERY_ORDERS, []);
   initializeStorage(STORAGE_KEYS.AI_CARDS, []);

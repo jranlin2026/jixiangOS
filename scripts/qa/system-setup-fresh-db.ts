@@ -3,7 +3,7 @@ import { createAuthService } from '../../server/services/authService';
 import { createPrismaSystemSetupRepository } from '../../server/services/systemSetupRepository';
 import { createSystemSetupService } from '../../server/services/systemSetupService';
 import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
-import { CLEAN_INSTALL_EMPTY_STORAGE_KEYS } from '../../src/shared/utils/constants';
+import { CLEAN_INSTALL_EMPTY_STORAGE_KEYS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, STORAGE_KEYS } from '../../src/shared/utils/constants';
 
 const databaseUrl = new URL(String(process.env.DATABASE_URL || ''));
 const databaseName = databaseUrl.pathname.slice(1);
@@ -84,6 +84,8 @@ try {
       const row = await prisma.appStorage.findUnique({ where: { key } });
       assert.deepEqual(row?.value, [], `${key} 在纯净初始化后必须为空`);
     }
+    const lifecycle = await prisma.appStorage.findUnique({ where: { key: STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS } });
+    assert.deepEqual(lifecycle?.value, DEFAULT_LIFECYCLE_STATUS_CONFIGS, '纯净初始化仍必须提供系统生命周期状态');
   }
   console.log('fresh database system setup QA passed');
 } finally {

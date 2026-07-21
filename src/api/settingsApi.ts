@@ -87,7 +87,10 @@ function ensureOrderTypeConfigs(): OrderTypeConfig[] {
 function ensureLifecycleStatusConfigs(): LifecycleStatusConfig[] {
   const existing = getStorageData<LifecycleStatusConfig[]>(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS);
   if (shouldUseBackendApi()) {
-    return [...(Array.isArray(existing) ? existing : [])].sort((a, b) => a.sortOrder - b.sortOrder);
+    const configs = Array.isArray(existing) && existing.length
+      ? existing
+      : DEFAULT_LIFECYCLE_STATUS_CONFIGS as unknown as LifecycleStatusConfig[];
+    return [...configs].sort((a, b) => a.sortOrder - b.sortOrder);
   }
   const existingByCode = new Map<LifecycleStatusCode, LifecycleStatusConfig>();
   (existing || []).forEach((item) => {
@@ -723,7 +726,11 @@ async function deleteOrderTypeConfig(id: string): Promise<ApiResponse<boolean>> 
 async function fetchLifecycleStatusConfigs(): Promise<ApiResponse<LifecycleStatusConfig[]>> {
   if (shouldUseBackendApi()) {
     const stored = await fetchBackendStorageValue<LifecycleStatusConfig[]>(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS);
-    return createSuccessResponse(Array.isArray(stored) ? stored : []);
+    return createSuccessResponse(
+      Array.isArray(stored) && stored.length
+        ? stored
+        : DEFAULT_LIFECYCLE_STATUS_CONFIGS as unknown as LifecycleStatusConfig[],
+    );
   }
 
   ensureInit();

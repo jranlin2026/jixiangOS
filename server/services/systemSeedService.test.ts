@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { seedSystemBaseline } from './systemSeedService';
-import { STORAGE_KEYS } from '../../src/shared/utils/constants';
+import { DEFAULT_LIFECYCLE_STATUS_CONFIGS, STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import {
   CUSTOMER_PERMISSION_SCOPE_BASELINE_KEY,
@@ -49,11 +49,15 @@ for (const key of [
   STORAGE_KEYS.PRODUCT_LEVELS,
   STORAGE_KEYS.ORDER_TYPE_CONFIGS,
   STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS,
-  STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS,
   STORAGE_KEYS.LEAD_SOURCE_CONFIGS,
 ]) {
   assert.deepEqual(minimal.storage.get(key), [], `全新初始化的公司配置 ${key} 必须为空`);
 }
+assert.deepEqual(
+  minimal.storage.get(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS),
+  DEFAULT_LIFECYCLE_STATUS_CONFIGS,
+  '客户生命周期属于系统主状态，首次初始化必须提供固定默认配置',
+);
 assert.equal((minimal.storage.get(ROLE_PERMISSION_ACTION_BASELINE_KEY) as any).version, ROLE_PERMISSION_ACTION_BASELINE_VERSION);
 assert.equal((minimal.storage.get(CUSTOMER_PERMISSION_SCOPE_BASELINE_KEY) as any).version, CUSTOMER_PERMISSION_SCOPE_BASELINE_VERSION);
 
@@ -82,10 +86,10 @@ for (const key of [
   STORAGE_KEYS.PRODUCT_LEVELS,
   STORAGE_KEYS.ORDER_TYPE_CONFIGS,
   STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS,
-  STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS,
   STORAGE_KEYS.LEAD_SOURCE_CONFIGS,
 ]) {
   assert.deepEqual(recommended.storage.get(key), [], `推荐组织模板也不得预置公司配置 ${key}`);
 }
+assert.deepEqual(recommended.storage.get(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS), DEFAULT_LIFECYCLE_STATUS_CONFIGS);
 
 console.log('system seed service tests passed');
