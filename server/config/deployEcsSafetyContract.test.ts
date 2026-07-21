@@ -71,6 +71,11 @@ assert.match(remote, /npm run customer:batch-verify/);
 assert.match(remote, /npm run customer:demo-fixture-cleanup -- --apply --confirm-production/);
 assert.match(remote, /customerBatchFoundation\.integration\.test\.ts/);
 assert.match(remote, /npm test/);
+assert.match(
+  remote,
+  /NODE_ENV=test VITE_USE_BACKEND_API=false VITE_AI_API_BASE=\/api npm test/,
+  '发布测试必须关闭默认后端调用，避免把浏览器相对 API 地址交给 Node fetch',
+);
 assertBefore('customer:demo-fixture-cleanup', 'npm run customer:association-audit', '已知演示数据必须先备份清理再做关联审计');
 assertBefore('npm run customer:permission-audit', 'echo "Switching release...', '客户权限审计必须先于版本切换');
 assertBefore('npm run customer:association-audit', 'echo "Switching release...', '客户关联审计必须先于版本切换');

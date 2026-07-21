@@ -313,7 +313,7 @@ echo "Running customer release gates..."
 mkdir -p "$PERSISTENT_DATA_DIR/private_reports"
 npm run customer:demo-fixture-cleanup -- --apply --confirm-production --out "$PERSISTENT_DATA_DIR/private_reports/demo-refunds-${{TS}}.json"
 npx --no-install tsx server/services/customerBatchFoundation.integration.test.ts
-NODE_ENV=test npm test
+NODE_ENV=test VITE_USE_BACKEND_API=false VITE_AI_API_BASE=/api npm test
 npm run customer:permission-audit
 npm run customer:association-audit -- --dry-run --out "$PERSISTENT_DATA_DIR/private_reports/customer-association-${{TS}}.json"
 npm run customer:batch-verify
