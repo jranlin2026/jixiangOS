@@ -1,4 +1,4 @@
-﻿-- CreateTable
+-- CreateTable
 CREATE TABLE `departments` (
     `id` VARCHAR(64) NOT NULL,
     `name` VARCHAR(100) NOT NULL,
@@ -176,4 +176,3 @@ CREATE TABLE `business_records` (
 
 -- AddForeignKey
 ALTER TABLE `auth_sessions` ADD CONSTRAINT `auth_sessions_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `users`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
-

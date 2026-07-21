@@ -43,6 +43,7 @@ const service = createSystemSetupService({
 const status = await service.status();
 assert.equal(status.code, 0);
 assert.equal(status.data?.state, 'UNINITIALIZED');
+assert.equal(status.data?.installationId, 'installation-1');
 assert.equal(status.data?.initialized, false);
 assert.equal(status.data?.setupAvailable, true);
 

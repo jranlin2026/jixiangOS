@@ -22,8 +22,8 @@ Object.defineProperty(globalThis, 'fetch', {
     return new Response(JSON.stringify({
       code: 0,
       data: initializing
-        ? { state: 'ACTIVE', initialized: true, setupAvailable: false, setupVersion: 1, companyName: '新企业' }
-        : { state: 'UNINITIALIZED', initialized: false, setupAvailable: true, setupVersion: 1, companyName: null },
+        ? { installationId: 'installation-1', state: 'ACTIVE', initialized: true, setupAvailable: false, setupVersion: 1, companyName: '新企业' }
+        : { installationId: 'installation-1', state: 'UNINITIALIZED', initialized: false, setupAvailable: true, setupVersion: 1, companyName: null },
       message: 'success',
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   },

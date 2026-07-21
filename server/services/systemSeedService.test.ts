@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { seedSystemBaseline } from './systemSeedService';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
+import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import {
   CUSTOMER_PERMISSION_SCOPE_BASELINE_KEY,
   CUSTOMER_PERMISSION_SCOPE_BASELINE_VERSION,
@@ -55,5 +56,18 @@ await seedSystemBaseline(recommended.store, {
 assert.ok(recommended.departments.length > 1);
 assert.ok(recommended.positions.length > 1);
 assert.ok(recommended.roles.length > 1);
+for (const role of recommended.roles) {
+  assert.equal(
+    role.permissions.some((permission: any) => permission.module === PERMISSION_KEYS.CUSTOMERS),
+    false,
+    `全新初始化角色 ${role.name} 不得携带旧客户父权限`,
+  );
+}
+for (const code of ['sales_manager', 'sales_consultant', 'customer_success']) {
+  const role = recommended.roles.find((candidate) => candidate.code === code);
+  assert.ok(role, `缺少默认角色 ${code}`);
+  assert.ok(role.permissions.some((permission: any) => permission.module === PERMISSION_KEYS.CUSTOMER_LIST));
+  assert.ok(role.permissions.some((permission: any) => permission.module === PERMISSION_KEYS.CUSTOMER_DETAIL));
+}
 
 console.log('system seed service tests passed');

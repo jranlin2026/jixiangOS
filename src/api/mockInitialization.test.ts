@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { initializeMockData } from './mock';
-import { STORAGE_KEYS } from '../shared/utils/constants';
+import { CLEAN_INSTALL_EMPTY_STORAGE_KEYS, STORAGE_KEYS } from '../shared/utils/constants';
 
 const originalUseBackend = process.env.VITE_USE_BACKEND_API;
 const originalApiBase = process.env.VITE_AI_API_BASE;
@@ -45,10 +45,23 @@ try {
   assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || 'null'), []);
   assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.ORDERS) || 'null'), []);
   assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || 'null'), []);
+  assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.DELIVERIES) || 'null'), []);
+  assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.USERS) || 'null'), []);
+  assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.DEPARTMENTS) || 'null'), []);
+  assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.POSITIONS) || 'null'), []);
+  assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.ROLES) || 'null'), []);
+  assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.PRODUCTS) || 'null'), []);
+  assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.PRODUCT_LEVELS) || 'null'), []);
+  assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.REFUNDS) || 'null'), []);
+  assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSION_RULES) || 'null'), []);
+  assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.TAGS) || 'null'), []);
   assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.FINANCE) || 'null'), {
     dailyRecords: [],
     channelROI: [],
   });
+  for (const key of CLEAN_INSTALL_EMPTY_STORAGE_KEYS) {
+    assert.deepEqual(JSON.parse(storage.getItem(key) || '[]'), [], `${key} 在后端纯净模式下必须为空`);
+  }
   assert.equal(storage.getItem(STORAGE_KEYS.INITIALIZED), 'true');
   assert.equal(fetchCalls, 0, 'backend mode must not persist the local initialization marker');
 } finally {

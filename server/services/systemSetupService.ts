@@ -29,6 +29,7 @@ export interface SystemSetupInitializeInput {
 export type PersistedSystemSetupInput = Omit<SystemSetupInitializeInput, 'setupToken'>;
 
 export interface SystemSetupStatus {
+  installationId: string;
   state: SystemInstallationState;
   initialized: boolean;
   setupAvailable: boolean;
@@ -49,6 +50,7 @@ interface SystemSetupServiceOptions {
 
 function statusFromRecord(record: SystemInstallationRecord, setupToken: string): SystemSetupStatus {
   return {
+    installationId: record.installationId,
     state: record.state,
     initialized: record.state === 'ACTIVE',
     setupAvailable: ['UNINITIALIZED', 'FAILED'].includes(record.state) && setupToken.length > 0,

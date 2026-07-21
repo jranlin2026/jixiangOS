@@ -29,13 +29,6 @@ interface SystemSetupProps {
 
 const steps = ['验证安装', '企业与管理员', '确认初始化'];
 
-function clearClientRuntimeCache(): void {
-  const keys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index));
-  keys.forEach((key) => {
-    if (key?.startsWith('aaos_')) localStorage.removeItem(key);
-  });
-}
-
 const SystemSetup: React.FC<SystemSetupProps> = ({ status, onComplete }) => {
   const [liveStatus, setLiveStatus] = useState(status);
   const [activeStep, setActiveStep] = useState(0);
@@ -66,7 +59,6 @@ const SystemSetup: React.FC<SystemSetupProps> = ({ status, onComplete }) => {
         const response = await systemSetupApi.getStatus();
         if (cancelled || response.code !== 0 || !response.data) return;
         if (response.data.state === 'ACTIVE') {
-          clearClientRuntimeCache();
           onComplete(response.data);
           return;
         }
@@ -125,7 +117,6 @@ const SystemSetup: React.FC<SystemSetupProps> = ({ status, onComplete }) => {
         setError(response.message || '系统初始化失败');
         return;
       }
-      clearClientRuntimeCache();
       onComplete(response.data);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '系统初始化失败');

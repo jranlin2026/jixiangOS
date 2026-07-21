@@ -3,6 +3,7 @@ import {
   DEFAULT_LEAD_SOURCE_CONFIGS,
   DEFAULT_LIFECYCLE_STATUS_CONFIGS,
   DEFAULT_ORDER_TYPE_CONFIGS,
+  CLEAN_INSTALL_EMPTY_STORAGE_KEYS,
   STORAGE_KEYS,
 } from '../../src/shared/utils/constants';
 import {
@@ -25,31 +26,6 @@ interface SystemSeedOptions {
   markInitialized?: boolean;
   hasAdmin?: boolean;
 }
-
-const EMPTY_ARRAY_KEYS = [
-  STORAGE_KEYS.LEADS,
-  STORAGE_KEYS.CUSTOMERS,
-  STORAGE_KEYS.ORDERS,
-  STORAGE_KEYS.ORDER_APPLICATIONS,
-  STORAGE_KEYS.DELIVERIES,
-  STORAGE_KEYS.COMMISSIONS,
-  STORAGE_KEYS.COMMISSION_OPERATION_LOGS,
-  STORAGE_KEYS.COMMISSION_SETTLEMENT_BATCHES,
-  STORAGE_KEYS.REFUNDS,
-  STORAGE_KEYS.RECOVERY_ORDERS,
-  STORAGE_KEYS.AI_CARDS,
-  STORAGE_KEYS.AI_SESSIONS,
-  STORAGE_KEYS.SERVICE_TICKETS,
-  STORAGE_KEYS.OPPORTUNITIES,
-  STORAGE_KEYS.LEAD_INTAKE_RECORDS,
-  STORAGE_KEYS.PRODUCTS,
-  STORAGE_KEYS.PRODUCT_LEVELS,
-  STORAGE_KEYS.TAGS,
-  STORAGE_KEYS.COMMISSION_RULES,
-  STORAGE_KEYS.COMMISSION_ROLE_CONFIGS,
-  STORAGE_KEYS.COMMISSION_PAYOUT_PLANS,
-  STORAGE_KEYS.ECOMMERCE_SETTLEMENT_RECORDS,
-] as const;
 
 async function putStorage(store: any, key: string, value: unknown): Promise<void> {
   await store.appStorage.upsert({
@@ -139,7 +115,7 @@ export async function seedSystemBaseline(store: any, options: SystemSeedOptions)
   await putStorage(store, STORAGE_KEYS.LEAD_FLOW_CONFIG, DEFAULT_LEAD_FLOW_CONFIG);
   await putStorage(store, STORAGE_KEYS.LEAD_SOURCE_CONFIGS, DEFAULT_LEAD_SOURCE_CONFIGS);
   await putStorage(store, STORAGE_KEYS.FINANCE, { dailyRecords: [], channelROI: [] });
-  for (const key of EMPTY_ARRAY_KEYS) await putStorage(store, key, []);
+  for (const key of CLEAN_INSTALL_EMPTY_STORAGE_KEYS) await putStorage(store, key, []);
   const migratedAt = new Date().toISOString();
   await putStorage(store, ROLE_PERMISSION_ACTION_BASELINE_KEY, {
     version: ROLE_PERMISSION_ACTION_BASELINE_VERSION,

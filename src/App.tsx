@@ -9,6 +9,7 @@ import { PERMISSION_KEYS } from './shared/utils/permissions';
 import useAuthStore from './store/useAuthStore';
 import StorageSyncFailureNotice from './shared/components/StorageSyncFailureNotice';
 import { systemSetupApi, type SystemSetupStatus } from './api/systemSetupApi';
+import { synchronizeClientInstallation } from './shared/utils/systemInstallationCache';
 
 const HomeWorkbench = React.lazy(() => import('./pages/Dashboard'));
 const BusinessCockpit = React.lazy(() => import('./pages/Dashboard/BusinessCockpit'));
@@ -50,19 +51,24 @@ const App: React.FC = () => {
   const [setupLoading, setSetupLoading] = useState(true);
   const [setupError, setSetupError] = useState<string | null>(null);
 
+  const acceptSetupStatus = useCallback((status: SystemSetupStatus) => {
+    synchronizeClientInstallation(status.installationId);
+    setSetupStatus(status);
+  }, []);
+
   const loadSetupStatus = useCallback(async () => {
     setSetupLoading(true);
     setSetupError(null);
     try {
       const response = await systemSetupApi.getStatus();
       if (response.code !== 0 || !response.data) throw new Error(response.message || '无法读取系统初始化状态');
-      setSetupStatus(response.data);
+      acceptSetupStatus(response.data);
     } catch (error) {
       setSetupError(error instanceof Error ? error.message : '无法读取系统初始化状态');
     } finally {
       setSetupLoading(false);
     }
-  }, []);
+  }, [acceptSetupStatus]);
 
   useEffect(() => {
     void loadSetupStatus();
@@ -90,7 +96,7 @@ const App: React.FC = () => {
   if (!setupStatus?.initialized) {
     return (
       <Routes>
-        <Route path="/setup" element={<Suspense fallback={<PageLoader />}><SystemSetup status={setupStatus} onComplete={setSetupStatus} /></Suspense>} />
+        <Route path="/setup" element={<Suspense fallback={<PageLoader />}><SystemSetup status={setupStatus} onComplete={acceptSetupStatus} /></Suspense>} />
         <Route path="*" element={<Navigate to="/setup" replace />} />
       </Routes>
     );

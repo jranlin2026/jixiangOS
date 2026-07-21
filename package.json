@@ -20,6 +20,7 @@
     "system:setup-state": "tsx scripts/read-system-installation-state.ts",
     "system:database-state": "tsx scripts/read-database-installation-state.ts",
     "system:setup-qa": "tsx scripts/qa/system-setup-fresh-db.ts",
+    "system:setup-qa:fresh": "tsx scripts/qa/system-setup-empty-database.ts",
     "delivery:repair": "tsx scripts/repair-deliveries.ts",
     "business-records:repair": "tsx scripts/repair-legacy-business-records.ts",
     "customer-contacts:backfill": "tsx scripts/backfill-contact-identities.ts",

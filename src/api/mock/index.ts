@@ -105,7 +105,7 @@ export function initializeMockData(): void {
   initializeStorage(STORAGE_KEYS.LEADS, businessSeed(mockLeads, []));
   initializeStorage(STORAGE_KEYS.CUSTOMERS, businessSeed(mockCustomers, []));
   initializeStorage(STORAGE_KEYS.ORDERS, businessSeed(mockOrders, []));
-  initializeStorage(STORAGE_KEYS.DELIVERIES, mockDeliveries);
+  initializeStorage(STORAGE_KEYS.DELIVERIES, businessSeed(mockDeliveries, []));
   initializeStorage(STORAGE_KEYS.COMMISSIONS, businessSeed(mockCommissions, []));
   initializeStorage(STORAGE_KEYS.FINANCE, businessSeed({
     dailyRecords: mockFinanceDailyRecords,
@@ -114,13 +114,13 @@ export function initializeMockData(): void {
     dailyRecords: [],
     channelROI: [],
   }));
-  initializeStorage(STORAGE_KEYS.USERS, mockUsers);
+  initializeStorage(STORAGE_KEYS.USERS, businessSeed(mockUsers, []));
   initializeStorage(STORAGE_KEYS.AI_SESSIONS, []);
-  initializeStorage(STORAGE_KEYS.DEPARTMENTS, mockDepartments);
-  initializeStorage(STORAGE_KEYS.POSITIONS, mockPositions);
-  initializeStorage(STORAGE_KEYS.ROLES, mockRoles);
-  initializeStorage(STORAGE_KEYS.PRODUCTS, mockProducts);
-  initializeStorage(STORAGE_KEYS.PRODUCT_LEVELS, mockProductLevelConfigs);
+  initializeStorage(STORAGE_KEYS.DEPARTMENTS, businessSeed(mockDepartments, []));
+  initializeStorage(STORAGE_KEYS.POSITIONS, businessSeed(mockPositions, []));
+  initializeStorage(STORAGE_KEYS.ROLES, businessSeed(mockRoles, []));
+  initializeStorage(STORAGE_KEYS.PRODUCTS, businessSeed(mockProducts, []));
+  initializeStorage(STORAGE_KEYS.PRODUCT_LEVELS, businessSeed(mockProductLevelConfigs, []));
   initializeStorage(STORAGE_KEYS.ORDER_TYPE_CONFIGS, DEFAULT_ORDER_TYPE_CONFIGS);
   initializeStorage(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS);
   initializeStorage(STORAGE_KEYS.REFUNDS, businessSeed(mockRefunds, []));
@@ -131,9 +131,9 @@ export function initializeMockData(): void {
   initializeStorage(STORAGE_KEYS.LEAD_FLOW_CONFIG, DEFAULT_LEAD_FLOW_CONFIG);
   initializeStorage(STORAGE_KEYS.LEAD_INTAKE_RECORDS, []);
   initializeStorage(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, DEFAULT_LEAD_SOURCE_CONFIGS);
-  initializeStorage(STORAGE_KEYS.COMMISSION_RULES, mockCommissionRules);
+  initializeStorage(STORAGE_KEYS.COMMISSION_RULES, businessSeed(mockCommissionRules, []));
   initializeStorage(STORAGE_KEYS.COMMISSION_ROLE_CONFIGS, []);
-  initializeStorage(STORAGE_KEYS.TAGS, mockTags);
+  initializeStorage(STORAGE_KEYS.TAGS, businessSeed(mockTags, []));
   initializeAssetStorage();
 
   markStorageInitialized();

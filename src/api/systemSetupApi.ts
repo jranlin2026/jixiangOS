@@ -3,6 +3,7 @@ import { backendRequest } from './backendClient';
 export type SystemInstallationState = 'UNINITIALIZED' | 'INITIALIZING' | 'ACTIVE' | 'RESETTING' | 'FAILED';
 
 export interface SystemSetupStatus {
+  installationId: string;
   state: SystemInstallationState;
   initialized: boolean;
   setupAvailable: boolean;
