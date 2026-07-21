@@ -42,6 +42,16 @@ assert.match(remote, /prisma migrate status/);
 assert.match(remote, /JIXIANG_PRISMA_BASELINE_CONFIRMED/);
 assert.match(remote, /MIGRATE_STATUS_CODE/);
 assert.match(remote, /have not yet been applied/);
+assert.match(
+  remote,
+  /if MIGRATE_STATUS_OUTPUT="\$\(npx --no-install prisma migrate status 2>&1\)"; then[\s\S]*?MIGRATE_STATUS_CODE="\$\?"/,
+  'Prisma 正常报告待应用迁移时必须捕获非零状态，不能触发全局 ERR 回滚',
+);
+assert.doesNotMatch(
+  remote,
+  /set \+e\s+MIGRATE_STATUS_OUTPUT="\$\(npx --no-install prisma migrate status 2>&1\)"/,
+  '全局 ERR trap 下不能依赖 set +e 捕获 Prisma 状态',
+);
 assertBefore('JIXIANG_PRISMA_BASELINE_CONFIRMED', 'npm run db:deploy', 'baseline 确认必须先于 migrate deploy');
 assert.match(
   remote,

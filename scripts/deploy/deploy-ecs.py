@@ -280,10 +280,11 @@ if [ "${{JIXIANG_PRISMA_BASELINE_CONFIRMED:-}}" != "$EXPECTED_BASELINE" ]; then
   false
 fi
 MIGRATE_STATUS_CODE="0"
-set +e
-MIGRATE_STATUS_OUTPUT="$(npx --no-install prisma migrate status 2>&1)"
-MIGRATE_STATUS_CODE="$?"
-set -e
+if MIGRATE_STATUS_OUTPUT="$(npx --no-install prisma migrate status 2>&1)"; then
+  MIGRATE_STATUS_CODE="0"
+else
+  MIGRATE_STATUS_CODE="$?"
+fi
 echo "$MIGRATE_STATUS_OUTPUT"
 if echo "$MIGRATE_STATUS_OUTPUT" | grep -Eiq 'failed|diverg|history.*conflict'; then
   echo "Prisma migration history is unhealthy" >&2
