@@ -7,6 +7,7 @@ import { prisma } from '../server/db/client';
 import { STORAGE_KEYS } from '../src/shared/utils/constants';
 
 const CLEANUP_MARKER = 'aaos_cleanup_legacy_orphan_customer_associations_v1';
+const CLEANUP_VERSION = 2;
 const LEGACY_MIGRATION_MARKER = 'aaos_migration_legacy_business_records_v1';
 const EXPECTED_ORDER_IDS = Array.from({ length: 40 }, (_, index) => `order-${String(index + 1).padStart(3, '0')}`);
 
@@ -49,9 +50,14 @@ function expectedLegacyMissingCount(marker: unknown, domain: string): number {
   return Number(reports.find((report: any) => report?.domain === domain)?.missing || 0);
 }
 
+function markerVersion(marker: unknown): number {
+  return Number(readObject(marker).version || 0);
+}
+
 export async function cleanupLegacyOrphanCustomerAssociations(outputPath: string) {
   const existingMarker = await prisma.appStorage.findUnique({ where: { key: CLEANUP_MARKER } });
-  if (existingMarker) return { skipped: true, marker: existingMarker.value };
+  const existingVersion = markerVersion(existingMarker?.value);
+  if (existingVersion >= CLEANUP_VERSION) return { skipped: true, marker: existingMarker?.value };
 
   const [legacyMarker, orders, commissions, customers, leads, allBusinessRecords] = await Promise.all([
     prisma.appStorage.findUnique({ where: { key: LEGACY_MIGRATION_MARKER } }),
@@ -80,10 +86,10 @@ export async function cleanupLegacyOrphanCustomerAssociations(outputPath: string
     }];
   });
 
-  if (orders.length !== expectedLegacyMissingCount(legacyMarker.value, STORAGE_KEYS.ORDERS)) {
+  if (existingVersion === 0 && orders.length !== expectedLegacyMissingCount(legacyMarker.value, STORAGE_KEYS.ORDERS)) {
     throw new Error('LEGACY_ORPHAN_ASSOCIATION_ORDER_COUNT_MISMATCH');
   }
-  if (orders.length > 0) {
+  if (existingVersion === 0 && orders.length > 0) {
     if (orders.length !== EXPECTED_ORDER_IDS.length || orders.some((row, index) => row.recordId !== EXPECTED_ORDER_IDS[index])) {
       throw new Error('LEGACY_ORPHAN_ASSOCIATION_ORDER_SIGNATURE_MISMATCH');
     }
@@ -106,7 +112,7 @@ export async function cleanupLegacyOrphanCustomerAssociations(outputPath: string
 
   const expectedOrderIdSet = new Set(EXPECTED_ORDER_IDS);
   const dependentCommissions = commissions.filter((row) => expectedOrderIdSet.has(String(readObject(row.data).orderId || '')));
-  if (dependentCommissions.length !== expectedLegacyMissingCount(legacyMarker.value, STORAGE_KEYS.COMMISSIONS)) {
+  if (existingVersion === 0 && dependentCommissions.length !== expectedLegacyMissingCount(legacyMarker.value, STORAGE_KEYS.COMMISSIONS)) {
     throw new Error('LEGACY_ORPHAN_ASSOCIATION_COMMISSION_COUNT_MISMATCH');
   }
   const unexpectedDependents = allBusinessRecords.filter((row) => {
@@ -115,12 +121,20 @@ export async function cleanupLegacyOrphanCustomerAssociations(outputPath: string
     const serialized = JSON.stringify(row.data || {});
     return EXPECTED_ORDER_IDS.some((orderId) => serialized.includes(orderId));
   });
-  if (unexpectedDependents.length > 0) throw new Error('LEGACY_ORPHAN_ASSOCIATION_UNEXPECTED_DEPENDENCY');
+  if (existingVersion === 0 && unexpectedDependents.length > 0) throw new Error('LEGACY_ORPHAN_ASSOCIATION_UNEXPECTED_DEPENDENCY');
 
   const detachedLeads = leads.filter((row) => {
     const data = readObject(row.data);
     const customerId = String(data.customerId || '');
-    return customerStates.get(customerId) === 'deleted' && !data.convertedAt;
+    const historicalCustomerIds = (Array.isArray(data.changeHistory) ? data.changeHistory : [])
+      .flatMap((entry: any) => Array.isArray(entry?.changes) ? entry.changes : [])
+      .filter((change: any) => String(change?.field || '').trim() === 'customerId')
+      .flatMap((change: any) => [String(change?.oldValue || ''), String(change?.newValue || '')])
+      .filter(Boolean);
+    return !data.convertedAt && (
+      customerStates.get(customerId) === 'deleted'
+      || (!customerId && historicalCustomerIds.some((id: string) => customerStates.get(id) === 'deleted'))
+    );
   });
   await writePrivateBackup(outputPath, {
     version: 1,
@@ -141,6 +155,16 @@ export async function cleanupLegacyOrphanCustomerAssociations(outputPath: string
     for (const lead of detachedLeads) {
       const data = { ...readObject(lead.data) };
       delete data.customerId;
+      data.changeHistory = (Array.isArray(data.changeHistory) ? data.changeHistory : [])
+        .map((entry: any) => ({
+          ...entry,
+          changes: (Array.isArray(entry?.changes) ? entry.changes : []).filter((change: any) => {
+            if (String(change?.field || '').trim() !== 'customerId') return true;
+            const referencedIds = [String(change?.oldValue || ''), String(change?.newValue || '')].filter(Boolean);
+            return !referencedIds.some((id) => customerStates.get(id) === 'deleted');
+          }),
+        }))
+        .filter((entry: any) => entry.changes.length > 0);
       const update = await transaction.leadRecord.updateMany({
         where: { id: lead.id, updatedAt: lead.updatedAt },
         data: { data },
@@ -149,14 +173,16 @@ export async function cleanupLegacyOrphanCustomerAssociations(outputPath: string
       detachedLeadCount += 1;
     }
     const markerValue = {
-      version: 1,
+      version: CLEANUP_VERSION,
       cleanedAt: new Date().toISOString(),
       deletedOrderCount: orderDelete.count,
       deletedCommissionCount: commissionDelete.count,
       detachedLeadCount,
     };
-    await transaction.appStorage.create({
-      data: { key: CLEANUP_MARKER, value: markerValue as unknown as Prisma.InputJsonValue },
+    await transaction.appStorage.upsert({
+      where: { key: CLEANUP_MARKER },
+      create: { key: CLEANUP_MARKER, value: markerValue as unknown as Prisma.InputJsonValue },
+      update: { value: markerValue as unknown as Prisma.InputJsonValue },
     });
     return markerValue;
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
