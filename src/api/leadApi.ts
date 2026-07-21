@@ -1,5 +1,6 @@
 import type { Lead, LeadFilters, FollowUpRecord, LeadAIAnalysis } from '../types/lead';
 import type { Customer } from '../types/customer';
+import type { Order } from '../types/order';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
@@ -288,13 +289,28 @@ async function updateLead(id: string, data: Partial<Lead>): Promise<ApiResponse<
 
 async function deleteLead(id: string, reason = ''): Promise<ApiResponse<boolean>> {
   if (shouldUseBackendApi()) {
+    const cachedLeads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
+    const cachedLead = cachedLeads.find((lead) => lead.id === id);
     const response = await backendRequest<boolean>(`/leads/${encodeURIComponent(id)}`, {
       method: 'DELETE',
       body: JSON.stringify({ reason }),
     });
     if (response.code !== 0 || response.data !== true) return createErrorResponse(response.message, response.code || -1);
-    const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
-    setStorageData(STORAGE_KEYS.LEADS, leads.filter((lead) => lead.id !== id), { persist: false });
+    setStorageData(
+      STORAGE_KEYS.LEADS,
+      cachedLeads.filter((lead) => cachedLead?.customerId
+        ? lead.customerId !== cachedLead.customerId
+        : lead.id !== id),
+      { persist: false },
+    );
+    if (cachedLead?.customerId) {
+      const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+      setStorageData(
+        STORAGE_KEYS.CUSTOMERS,
+        customers.filter((customer) => customer.id !== cachedLead.customerId),
+        { persist: false },
+      );
+    }
     return createSuccessResponse(true);
   }
 
@@ -304,6 +320,33 @@ async function deleteLead(id: string, reason = ''): Promise<ApiResponse<boolean>
   const index = leads.findIndex((lead) => lead.id === id);
   if (index === -1) return createSuccessResponse(true);
   const now = new Date().toISOString();
+  const linkedCustomerId = leads[index].customerId;
+  if (linkedCustomerId) {
+    const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+    const customerIndex = customers.findIndex((customer) => customer.id === linkedCustomerId);
+    if (customerIndex === -1) return createErrorResponse('关联客户不存在，请先修复数据后重试', 409);
+    const customer = customers[customerIndex];
+    const relatedOrders = (getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).filter((order) => (
+      !order.deletedAt && (order.customerId === customer.id || order.customerName === customer.company || order.customerName === customer.name)
+    ));
+    if (relatedOrders.length) return createErrorResponse('客户存在关联订单，不能删除；请先处理订单后再操作。');
+    const deletionCascadeId = `delete-cascade-${uuidv4()}`;
+    const cascadeDeletedLeadIds = leads
+      .filter((lead) => lead.customerId === linkedCustomerId && !lead.deletedAt)
+      .map((lead) => lead.id);
+    const operator = getCurrentOperatorName(leads[index].owner);
+    const deleteReason = reason.trim() || '业务删除';
+    customers[customerIndex] = {
+      ...customer, deletedAt: now, deletedBy: operator, deleteReason,
+      deletionCascadeId, cascadeDeletedLeadIds, updatedAt: now,
+    };
+    const nextLeads = leads.map((lead) => lead.customerId === linkedCustomerId && !lead.deletedAt
+      ? { ...lead, deletedAt: now, deletedBy: operator, deleteReason, deletionCascadeId, updatedAt: now }
+      : lead);
+    setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
+    setStorageData(STORAGE_KEYS.LEADS, nextLeads);
+    return createSuccessResponse(true);
+  }
   leads[index] = {
     ...leads[index],
     deletedAt: now,

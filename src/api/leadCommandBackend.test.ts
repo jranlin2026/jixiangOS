@@ -4,6 +4,7 @@ import { leadFlowApi } from './leadFlowApi';
 import { clearBackendToken, writeBackendToken } from './backendClient';
 import { LIFECYCLE_STATUS_CODES, STORAGE_KEYS } from '../shared/utils/constants';
 import type { FollowUpRecord, Lead } from '../types/lead';
+import type { Customer } from '../types/customer';
 
 const values = new Map<string, string>();
 const storage = {
@@ -118,6 +119,24 @@ try {
     (JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]') as Lead[]).map((item) => item.id),
     ['lead-server-create'],
   );
+
+  const linkedCustomer = {
+    id: 'customer-linked-cache', name: '关联客户', company: '关联公司', phone: lead.phone,
+    customerLevel: 'L1', owner: '销售甲', totalSpent: 0, orderCount: 0, growthPath: [], growthRecords: [],
+    createdAt: now, updatedAt: now,
+  } as Customer;
+  const converted = { ...lead, customerId: linkedCustomer.id };
+  const sibling = { ...lead, id: 'lead-linked-sibling', customerId: linkedCustomer.id };
+  const sameContactOnly = { ...lead, id: 'lead-same-contact-only', customerId: undefined };
+  storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([linkedCustomer]));
+  storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([converted, sibling, sameContactOnly]));
+  assert.equal((await leadApi.deleteLead(converted.id, '联合删除缓存')).data, true);
+  assert.deepEqual(
+    (JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]') as Lead[]).map((item) => item.id),
+    ['lead-same-contact-only'],
+    '服务器删除成功后只能按稳定 customerId 清理关联线索缓存',
+  );
+  assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]'), []);
 } finally {
   clearBackendToken();
   globalThis.fetch = originalFetch;

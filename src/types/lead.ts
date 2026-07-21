@@ -96,6 +96,8 @@ export interface Lead {
   deletedAt?: Timestamp;
   deletedBy?: string;
   deleteReason?: string;
+  /** 与关联客户联合删除时的批次标识。 */
+  deletionCascadeId?: ID;
   createdAt: Timestamp;
   updatedAt: Timestamp;
   followUpRecords: FollowUpRecord[];

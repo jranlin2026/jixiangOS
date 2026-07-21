@@ -39,4 +39,25 @@ const txWithIntrinsicOnly = {
 };
 await assert.doesNotReject(() => assertCustomerCanBeSoftDeleted(txWithIntrinsicOnly as any, 'c-2'));
 
+const txWithConvertedLead = {
+  businessRecord: {
+    findMany: async () => [{
+      id: 'root', domain: STORAGE_KEYS.CUSTOMERS, recordId: 'c-3', customerId: 'c-3',
+      data: { id: 'c-3', activityRecords: [], growthPath: [], growthRecords: [] },
+    }],
+  },
+  leadRecord: { findMany: async () => [{ id: 'lead-c-3', data: { id: 'lead-c-3', customerId: 'c-3' } }] },
+  customerTodo: { findMany: async () => [] },
+  appStorage: { findUnique: async () => null },
+};
+await assert.rejects(
+  () => assertCustomerCanBeSoftDeleted(txWithConvertedLead as any, 'c-3'),
+  /线索关联/,
+);
+await assert.doesNotReject(() => assertCustomerCanBeSoftDeleted(
+  txWithConvertedLead as any,
+  'c-3',
+  { cascadeLinkedLeads: true },
+));
+
 console.log('customer delete policy tests passed');

@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   CUSTOMER_BATCH_ACTION_LABELS,
   canSubmitBatchDialog,
   getBatchDialogPresentation,
   initialCustomerBatchDialogState,
 } from './CustomerBatchActionDialog';
+
+const dialogSource = readFileSync(new URL('./CustomerBatchActionDialog.tsx', import.meta.url), 'utf8');
+assert.match(dialogSource, /客户及其关联来源线索会一起进入业务回收站/);
 
 assert.equal(
   CUSTOMER_BATCH_ACTION_LABELS.release_to_pool,

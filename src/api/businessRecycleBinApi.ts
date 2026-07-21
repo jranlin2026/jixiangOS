@@ -148,6 +148,24 @@ async function restoreRecycleBinItem(type: BusinessRecycleBinType, id: string): 
   if (index === -1 || !isDeleted(rows[index])) return createErrorResponse(`${getTypeLabel(type)}不在业务回收站中`);
 
   const now = new Date().toISOString();
+  const deletionCascadeId = (rows[index] as Customer | Lead).deletionCascadeId;
+  if (deletionCascadeId && (type === 'lead' || type === 'customer')) {
+    const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+    const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
+    setStorageData(STORAGE_KEYS.CUSTOMERS, customers.map((customer) => customer.deletionCascadeId === deletionCascadeId
+      ? {
+        ...customer, deletedAt: undefined, deletedBy: undefined, deleteReason: undefined,
+        deletionCascadeId: undefined, cascadeDeletedLeadIds: undefined, updatedAt: now,
+      }
+      : customer));
+    setStorageData(STORAGE_KEYS.LEADS, leads.map((lead) => lead.deletionCascadeId === deletionCascadeId
+      ? {
+        ...lead, deletedAt: undefined, deletedBy: undefined, deleteReason: undefined,
+        deletionCascadeId: undefined, updatedAt: now,
+      }
+      : lead));
+    return createSuccessResponse(true);
+  }
   rows[index] = {
     ...rows[index],
     deletedAt: undefined,

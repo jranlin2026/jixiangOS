@@ -750,7 +750,7 @@ const Leads: React.FC = () => {
         }}>删除线索</DialogCloseTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
-            删除后线索会进入业务回收站，超级管理员可在系统维护中恢复或永久删除。
+            删除后线索会进入业务回收站。若线索已转为客户，关联客户及同一客户下的来源线索会一并进入回收站；客户存在订单等业务关联时仍不能删除。
           </Typography>
           {deleteLeadTarget && (
             <Box sx={{ p: 1.5, border: '1px solid #fee2e2', borderRadius: 1, bgcolor: '#fff7ed', mb: 2 }}>

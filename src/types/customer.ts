@@ -145,6 +145,10 @@ export interface Customer {
   deletedAt?: Timestamp;
   deletedBy?: string;
   deleteReason?: string;
+  /** 联合删除批次；用于审计及回收站精确恢复本次级联记录。 */
+  deletionCascadeId?: ID;
+  /** 本次联合删除中新进入回收站的来源线索稳定 ID。 */
+  cascadeDeletedLeadIds?: ID[];
   /** 合并后的规范客户；存在时当前记录只可用于受控跳转和撤销。 */
   mergedIntoId?: ID;
   mergedAt?: Timestamp;

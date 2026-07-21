@@ -212,6 +212,11 @@ assert.match(
   'Lead list should let super admins soft-delete leads into the business recycle bin.',
 );
 assert.match(
+  leadsPageSource,
+  /已转为客户[\s\S]*一并进入回收站/,
+  'Lead delete confirmation must disclose linked customer soft deletion.',
+);
+assert.match(
   leadFlowApiSource,
   /cleanupIntakeRecord/,
   'Lead flow API should expose super-admin cleanup for intake records.',
@@ -225,6 +230,11 @@ assert.match(
   customersPageSource,
   /(?:删除客户到业务回收站[\s\S]*customerApi\.deleteCustomer|customerApi\.deleteCustomer[\s\S]*删除客户到业务回收站)/,
   'Customer list should let super admins soft-delete customers into the business recycle bin.',
+);
+assert.match(
+  customersPageSource,
+  /同时删除关联来源线索/,
+  'Customer delete confirmation must disclose linked source lead soft deletion.',
 );
 assert.match(
   orderReviewSource,

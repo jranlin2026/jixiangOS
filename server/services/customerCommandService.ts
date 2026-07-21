@@ -134,6 +134,8 @@ export interface CustomerAtomicCommandContext {
   actor: { id: string; name: string };
   /** The current role directory is supplied by the caller's transaction. */
   roles?: Role[];
+  /** Linked-lead deletion retains the same super-admin + unrestricted-scope guard as direct lead deletion. */
+  canCascadeDeleteLeads?: boolean;
   idempotencyKey?: string;
   requestId?: string;
   ip?: string;
@@ -604,6 +606,70 @@ async function persistLead(tx: CustomerCommandTx, rowId: string, lead: Lead, now
   });
 }
 
+async function softDeleteStableLinkedLeads(
+  tx: CustomerCommandTx,
+  customerId: string,
+  at: Date,
+  deletedBy: string,
+  deleteReason: string,
+  deletionCascadeId: string,
+): Promise<string[]> {
+  const atIso = at.toISOString();
+  const rows = await lockedLeadRowsByStableCustomerId(tx, customerId);
+  const deletedLeadIds: string[] = [];
+  for (const row of rows) {
+    const lead = readJson<Lead>(row.data);
+    if (lead.deletedAt) continue;
+    await persistLead(tx, row.id, {
+      ...lead,
+      deletedAt: atIso,
+      deletedBy,
+      deleteReason,
+      deletionCascadeId,
+      updatedAt: atIso,
+    }, at);
+    await endLeadContactIdentityLinks(tx, row.id);
+    deletedLeadIds.push(lead.id || row.id);
+  }
+  return deletedLeadIds;
+}
+
+async function softDeleteCustomerAndStableLinkedLeads(
+  tx: CustomerCommandTx,
+  snapshot: CustomerRecordSnapshot,
+  at: Date,
+  actor: { id: string; name: string },
+  reason: string,
+): Promise<Customer> {
+  const deletionCascadeId = `delete-cascade-${randomUUID()}`;
+  const deletedLeadIds = await softDeleteStableLinkedLeads(
+    tx, snapshot.customer.id, at, actor.name, reason, deletionCascadeId,
+  );
+  const deleted: Customer = {
+    ...snapshot.customer,
+    deletedAt: at.toISOString(),
+    deletedBy: actor.name,
+    deleteReason: reason,
+    deletionCascadeId,
+    cascadeDeletedLeadIds: deletedLeadIds,
+    updatedAt: at.toISOString(),
+  };
+  await persistCustomer(tx, snapshot, deleted, at);
+  await endCustomerContactIdentityLinks(tx, snapshot.customer.id);
+  await appendCustomerAuditEvent(tx, {
+    operation: 'soft_delete',
+    customerId: snapshot.customer.id,
+    actor,
+    reason,
+    beforeSnapshot: snapshot.customer,
+    afterSnapshot: deleted,
+    canonicalInput: {
+      operation: 'soft_delete', customerId: snapshot.customer.id, reason, deletionCascadeId, deletedLeadIds,
+    },
+  });
+  return deleted;
+}
+
 const CUSTOMER_EDIT_FIELDS: Array<{ field: keyof Customer; label: string }> = [
   { field: 'name', label: '姓名' },
   { field: 'company', label: '公司' },
@@ -994,8 +1060,24 @@ export function createCustomerAtomicCommandService(options: {
         createdTodoId = todo.id;
       } else if (command.action === 'soft_delete') {
         if (command.confirmed !== true) throw new Error('删除客户需要明确确认');
-        await assertCustomerCanBeSoftDeleted(tx, customer.id);
-        next = { ...next, deletedAt: atIso, deletedBy: actor.name, deleteReason: reason };
+        await assertCustomerCanBeSoftDeleted(tx, customer.id, { cascadeLinkedLeads: true });
+        const linkedRows = await lockedLeadRowsByStableCustomerId(tx, customer.id);
+        const activeLinkedLeadIds = linkedRows
+          .map((row) => ({ row, lead: readJson<Lead>(row.data) }))
+          .filter(({ lead }) => !lead.deletedAt)
+          .map(({ row, lead }) => lead.id || row.id);
+        if (activeLinkedLeadIds.length && !context.canCascadeDeleteLeads) {
+          throw new Error('删除关联线索需要超级管理员及全部线索数据权限');
+        }
+        const deletionCascadeId = `delete-cascade-${randomUUID()}`;
+        next = {
+          ...next,
+          deletedAt: atIso,
+          deletedBy: actor.name,
+          deleteReason: reason,
+          deletionCascadeId,
+          cascadeDeletedLeadIds: activeLinkedLeadIds,
+        };
       }
 
       next = {
@@ -1006,6 +1088,9 @@ export function createCustomerAtomicCommandService(options: {
       await repository.compareAndSave(snapshot, next, at);
       if (command.action === 'soft_delete') {
         await endCustomerContactIdentityLinks(tx, customer.id);
+        await softDeleteStableLinkedLeads(
+          tx, customer.id, at, actor.name, reason, next.deletionCascadeId!,
+        );
       }
       if (command.action === 'transfer' || command.action === 'release_to_pool') {
         const relatedLeads = await lockedLeadRowsByStableCustomerId(tx, customer.id);
@@ -1157,11 +1242,15 @@ export function createAuditedCustomerAtomicCommandService(
             if (command.action === 'transfer') await lockCustomerTransferDirectory(tx);
             const context = await commandContext(tx, currentUser, 'customers');
             if (!context.actor || !context.customerAccess) throw new Error('当前用户不存在或已离职');
+            const leadContext = command.action === 'soft_delete'
+              ? await commandContext(tx, currentUser, 'leads')
+              : null;
             return atomic.execute(command, {
               tx,
               access: context.customerAccess,
               actor: { id: context.actor.id, name: context.actor.name },
               roles: context.roles,
+              canCascadeDeleteLeads: isSuperAdmin(currentUser) && Boolean(leadContext?.scope.unrestricted),
               ...metadata,
             });
           });
@@ -1494,33 +1583,28 @@ export function createCustomerCommandService(
           assertCanManageCustomer(context.customerAccess!, customer);
         });
         if (accessError) return failure<boolean>(accessError, 403);
+        const at = now();
+        const reason = cleanText(reasonInput) || '业务删除';
         try {
-          await assertCustomerCanBeSoftDeleted(tx, customer.id);
+          await assertCustomerCanBeSoftDeleted(tx, customer.id, { cascadeLinkedLeads: true });
         } catch (error) {
           return failure<boolean>(error instanceof Error ? error.message : '客户存在关联业务，不能删除', 409);
         }
-        const at = now();
-        const atIso = at.toISOString();
-        const operator = commandActor(context, currentUser);
-        const reason = cleanText(reasonInput) || '业务删除';
-        const deleted: Customer = {
-          ...customer,
-          deletedAt: atIso,
-          deletedBy: operator,
-          deleteReason: reason,
-          updatedAt: atIso,
-        };
-        await persistCustomer(tx, snapshot, deleted, at);
-        await endCustomerContactIdentityLinks(tx, customer.id);
-        await appendCustomerAuditEvent(tx, {
-          operation: 'soft_delete',
-          customerId: customer.id,
-          actor: { id: context.actor.id, name: context.actor.name },
+        const linkedRows = await lockedLeadRowsByStableCustomerId(tx, customer.id);
+        const hasActiveLinkedLeads = linkedRows.some((row) => !readJson<Lead>(row.data).deletedAt);
+        if (hasActiveLinkedLeads) {
+          const leadContext = await commandContext(tx, currentUser, 'leads');
+          if (!isSuperAdmin(currentUser) || !leadContext.actor || !leadContext.scope.unrestricted) {
+            return failure<boolean>('删除关联线索需要超级管理员及全部线索数据权限', 403);
+          }
+        }
+        await softDeleteCustomerAndStableLinkedLeads(
+          tx,
+          snapshot,
+          at,
+          { id: context.actor.id, name: context.actor.name },
           reason,
-          beforeSnapshot: customer,
-          afterSnapshot: deleted,
-          canonicalInput: { operation: 'soft_delete', customerId: customer.id, reason },
-        });
+        );
         return success(true);
       });
     },
@@ -2053,11 +2137,92 @@ export function createCustomerCommandService(
       if (!isSuperAdmin(currentUser)) return failure<boolean>('仅超级管理员可以删除线索', 403);
       return runTransaction(async (tx) => {
         await lockContactIdentityMutationGate(tx);
+        const initialRow = await tx.leadRecord.findUnique({ where: { id: leadId } });
+        if (!initialRow) return success(true);
+        const initialLead = readJson<Lead>(initialRow.data);
+        if (initialLead.customerId) await lockCustomerAssociationScope(tx, [initialLead.customerId]);
         const row = await lockLead(tx, leadId);
         if (!row) return success(true);
         const lead = readJson<Lead>(row.data);
         if (lead.deletedAt) return success(true);
-        if (lead.customerId) return failure<boolean>('线索已转为客户，不能单独删除', 409);
+        if (lead.customerId && lead.customerId !== initialLead.customerId) {
+          return failure<boolean>('线索关联客户已变更，请刷新后重试', 409);
+        }
+        if (lead.customerId) {
+          const snapshot = await createCustomerBusinessRecordRepository(tx).lockById(lead.customerId);
+          if (snapshot && !snapshot.customer.deletedAt) {
+            const customerContext = await commandContext(tx, currentUser, 'customers');
+            if (!customerContext.actor || !customerContext.customerAccess) {
+              return failure<boolean>('无权删除关联客户', 403);
+            }
+            if (!customerContext.scope.unrestricted) {
+              return failure<boolean>('无权删除关联线索', 403);
+            }
+            const accessError = permissionError(() => {
+              assertCustomerActionPermission(customerContext.customerAccess!, 'soft_delete');
+              assertCanManageCustomer(customerContext.customerAccess!, snapshot.customer);
+            });
+            if (accessError) return failure<boolean>(accessError, 403);
+            const at = now();
+            const reason = cleanText(reasonInput) || '业务删除';
+            try {
+              await assertCustomerCanBeSoftDeleted(tx, snapshot.customer.id, { cascadeLinkedLeads: true });
+            } catch (error) {
+              return failure<boolean>(error instanceof Error ? error.message : '客户存在关联业务，不能删除', 409);
+            }
+            await softDeleteCustomerAndStableLinkedLeads(
+              tx,
+              snapshot,
+              at,
+              { id: customerContext.actor.id, name: customerContext.actor.name },
+              reason,
+            );
+            return success(true);
+          }
+          if (!snapshot) return failure<boolean>('关联客户不存在，请先修复数据后重试', 409);
+          const at = now();
+          const reason = cleanText(reasonInput) || '业务删除';
+          const leadContext = await commandContext(tx, currentUser, 'leads');
+          if (!leadContext.actor || !leadContext.scope.unrestricted) {
+            return failure<boolean>('无权删除关联线索', 403);
+          }
+          const deletionCascadeId = snapshot.customer.deletionCascadeId || `delete-cascade-${randomUUID()}`;
+          const deletedLeadIds = await softDeleteStableLinkedLeads(
+            tx,
+            snapshot.customer.id,
+            at,
+            commandActor(leadContext, currentUser),
+            reason,
+            deletionCascadeId,
+          );
+          if (deletedLeadIds.length) {
+            const updatedCustomer: Customer = {
+              ...snapshot.customer,
+              deletionCascadeId,
+              cascadeDeletedLeadIds: [
+                ...new Set([...(snapshot.customer.cascadeDeletedLeadIds || []), ...deletedLeadIds]),
+              ],
+              updatedAt: at.toISOString(),
+            };
+            await persistCustomer(tx, snapshot, updatedCustomer, at);
+            await appendCustomerAuditEvent(tx, {
+              operation: 'soft_delete',
+              customerId: snapshot.customer.id,
+              actor: { id: leadContext.actor.id, name: leadContext.actor.name },
+              reason,
+              beforeSnapshot: snapshot.customer,
+              afterSnapshot: updatedCustomer,
+              canonicalInput: {
+                operation: 'soft_delete_linked_leads',
+                customerId: snapshot.customer.id,
+                deletionCascadeId,
+                deletedLeadIds,
+                reason,
+              },
+            });
+          }
+          return success(true);
+        }
         const context = await commandContext(tx, currentUser, 'leads');
         if (!context.actor || !context.scope.unrestricted) return failure<boolean>('无权删除该线索', 403);
         const at = now();

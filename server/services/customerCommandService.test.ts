@@ -691,6 +691,10 @@ function createFakePrisma(
         }
         if (!text.includes('WHERE id =')) {
           if (text.includes('FOR UPDATE') && text.includes('SELECT id, data')) linkedLeadLockQueries += 1;
+          if (text.includes("JSON_EXTRACT(data, '$.customerId')")) {
+            const customerIds = new Set(values.map((value: unknown) => String(value)));
+            return clone(working.leads.filter((row) => customerIds.has(String(row.data?.customerId || ''))));
+          }
           return clone(working.leads);
         }
         const [leadId] = values;
@@ -1541,7 +1545,7 @@ const serviceOptions = {
   assert.deepEqual(fake.getState().businessRecords[0], original);
 }
 
-// RED: 稳定 customerId 关联的线索是外部业务关联，必须阻断删除，不能级联软删除。
+// RED: 客户删除必须把稳定 customerId 关联的来源线索一起软删除，避免互锁。
 {
   const value = customer('cust-delete');
   const deniedFake = createFakePrisma({ businessRecords: [businessCustomer(value)], leads: [] });
@@ -1550,17 +1554,53 @@ const serviceOptions = {
   assert.equal(denied.code, 403);
   assert.equal(deniedFake.transactionCalls, 0);
 
+  const normalizedHash = hashContactIdentity(
+    normalizeContactIdentity('phone', value.phone),
+    TEST_CONTACT_CRYPTO.hmacKey,
+  );
+  const identityId = `seed-phone-${normalizedHash.slice(0, 20)}`;
   const fake = createFakePrisma({
     businessRecords: [businessCustomer(value)],
     leads: [lead('lead-customer-delete', salesA.name, value.id)],
+    contactIdentityLinks: [{
+      id: 'linked-lead-delete-contact',
+      identityId,
+      entityType: 'lead',
+      entityId: 'lead-customer-delete',
+      linkStatus: 'active',
+      source: 'lead_conversion',
+      endedAt: null,
+    }],
   });
   const service = createCustomerCommandService(fake.prisma, serviceOptions);
   const result = await service.deleteCustomer(value.id, '重复客户', superAdmin);
 
-  assert.equal(result.code, 409);
+  assert.equal(result.code, 0, result.message);
   const next = fake.getState();
-  assert.equal(next.businessRecords[0].data.deletedAt, undefined);
-  assert.equal(next.leads[0].data.deletedAt, undefined);
+  assert.equal(next.businessRecords[0].data.deletedBy, superAdmin.name);
+  assert.equal(next.businessRecords[0].data.deleteReason, '重复客户');
+  assert.equal(next.leads[0].data.deletedBy, superAdmin.name);
+  assert.equal(next.leads[0].data.deleteReason, '重复客户');
+  assert.ok(next.businessRecords[0].data.deletionCascadeId);
+  assert.equal(next.leads[0].data.deletionCascadeId, next.businessRecords[0].data.deletionCascadeId);
+  assert.deepEqual(next.businessRecords[0].data.cascadeDeletedLeadIds, ['lead-customer-delete']);
+  assert.equal(next.contactIdentityLinks?.find((link) => link.id === 'linked-lead-delete-contact')?.linkStatus, 'ended');
+
+  const rollbackCustomer = customer('cust-delete-linked-rollback');
+  const rollbackLead = lead('lead-customer-delete-rollback', salesA.name, rollbackCustomer.id);
+  const rollbackFake = createFakePrisma({
+    businessRecords: [businessCustomer(rollbackCustomer)],
+    leads: [rollbackLead],
+  }, { failLeadUpdate: true });
+  await assert.rejects(
+    () => createCustomerCommandService(rollbackFake.prisma, serviceOptions)
+      .deleteCustomer(rollbackCustomer.id, '级联失败必须回滚', superAdmin),
+    /lead update failed/,
+  );
+  const rollbackNext = rollbackFake.getState();
+  assert.equal(rollbackNext.businessRecords[0].data.deletedAt, undefined);
+  assert.equal(rollbackNext.leads[0].data.deletedAt, undefined);
+
 }
 
 // RED: 仅手机号/微信相同但没有稳定 customerId 的线索，不得被删除操作猜测关联或级联删除。
@@ -2407,7 +2447,7 @@ for (const targetType of ['customer', 'lead'] as const) {
   assert.equal(result.data?.changeHistory?.[0].operator, manager.name);
 }
 
-// RED: 线索删除只允许超级管理员，已转客户的线索不得单独删除。
+// RED: 线索删除只允许超级管理员；已转客户的线索必须与客户一起软删除。
 {
   const source = pendingLead('lead-delete-command');
   const deniedFake = createFakePrisma({ businessRecords: [], leads: [source] });
@@ -2421,11 +2461,60 @@ for (const targetType of ['customer', 'lead'] as const) {
   assert.equal(result.code, 0);
   assert.equal(deniedFake.getState().leads[0].data.deletedBy, superAdmin.name);
 
-  const converted = pendingLead('lead-delete-linked', salesA.name, 'cust-linked');
-  const convertedFake = createFakePrisma({ businessRecords: [], leads: [converted] });
+  const linkedCustomer = customer('cust-linked');
+  const converted = pendingLead('lead-delete-linked', salesA.name, linkedCustomer.id);
+  const convertedFake = createFakePrisma({
+    businessRecords: [businessCustomer(linkedCustomer)],
+    leads: [converted],
+  });
   const convertedResult = await createCustomerCommandService(convertedFake.prisma, serviceOptions)
-    .deleteLead(converted.id, '错误删除', superAdmin);
-  assert.equal(convertedResult.code, 409);
+    .deleteLead(converted.id, '清理已转客户线索', superAdmin);
+  assert.equal(convertedResult.code, 0, convertedResult.message);
+  const convertedNext = convertedFake.getState();
+  assert.equal(convertedNext.leads[0].data.deletedBy, superAdmin.name);
+  assert.equal(convertedNext.leads[0].data.deleteReason, '清理已转客户线索');
+  assert.equal(convertedNext.businessRecords[0].data.deletedBy, superAdmin.name);
+  assert.equal(convertedNext.businessRecords[0].data.deleteReason, '清理已转客户线索');
+
+  const alreadyDeletedCustomer = {
+    ...customer('cust-already-deleted'),
+    deletedAt: '2026-07-01T00:00:00.000Z',
+    deletedBy: '历史管理员',
+    deletionCascadeId: 'delete-cascade-existing',
+  };
+  const siblingA = pendingLead('lead-deleted-customer-a', salesA.name, alreadyDeletedCustomer.id);
+  const siblingB = pendingLead('lead-deleted-customer-b', salesA.name, alreadyDeletedCustomer.id);
+  const alreadyDeletedFake = createFakePrisma({
+    businessRecords: [businessCustomer(alreadyDeletedCustomer)],
+    leads: [siblingA, siblingB],
+  });
+  const alreadyDeletedResult = await createCustomerCommandService(alreadyDeletedFake.prisma, serviceOptions)
+    .deleteLead(siblingA.id, '补齐历史联合删除', superAdmin);
+  assert.equal(alreadyDeletedResult.code, 0, alreadyDeletedResult.message);
+  assert.equal(alreadyDeletedFake.getState().leads.every((item) => Boolean(item.data.deletedAt)), true);
+  assert.equal(alreadyDeletedFake.getState().leads.every((item) => item.data.deletionCascadeId === 'delete-cascade-existing'), true);
+
+  const orderedCustomer = customer('cust-linked-ordered');
+  const orderedLead = pendingLead('lead-delete-linked-ordered', salesA.name, orderedCustomer.id);
+  const orderedFake = createFakePrisma({
+    businessRecords: [
+      businessCustomer(orderedCustomer),
+      {
+        id: `${STORAGE_KEYS.ORDERS}:order-linked`,
+        domain: STORAGE_KEYS.ORDERS,
+        recordId: 'order-linked',
+        customerId: orderedCustomer.id,
+        data: { id: 'order-linked', customerId: orderedCustomer.id, status: '已审核' },
+      },
+    ],
+    leads: [orderedLead],
+  });
+  const orderedResult = await createCustomerCommandService(orderedFake.prisma, serviceOptions)
+    .deleteLead(orderedLead.id, '有关联订单不得删除', superAdmin);
+  assert.equal(orderedResult.code, 409);
+  assert.match(orderedResult.message, /订单关联/);
+  assert.equal(orderedFake.getState().leads[0].data.deletedAt, undefined);
+  assert.equal(orderedFake.getState().businessRecords[0].data.deletedAt, undefined);
 }
 
 // RED: lead link cleanup follows the locked relational record id, not a stale

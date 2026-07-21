@@ -320,6 +320,7 @@ export async function assertAssociationRegistryComplete(
 export async function findBlockingCustomerAssociations(
   tx: CustomerAssociationReader,
   customerId: string,
+  options: { cascadeLinkedLeads?: boolean } = {},
 ): Promise<string[]> {
   const discovered = await discoverCustomerAssociationDomains(tx, [customerId]);
   const labels: string[] = [];
@@ -327,7 +328,10 @@ export async function findBlockingCustomerAssociations(
   for (const item of discovered) {
     const registered = DEFINITION_BY_PAIR.get(`${item.storageDomain}\u0000${item.pathKey}`);
     const label = registered
-      ? registered.blocksSoftDelete ? registered.blockerLabel : ''
+      ? registered.blocksSoftDelete
+        && !(options.cascadeLinkedLeads && registered.id === 'lead_records:data.customerId')
+        ? registered.blockerLabel
+        : ''
       : `未登记关联（${item.storageDomain}:${item.pathKey}）`;
     if (label && !seen.has(label)) {
       seen.add(label);

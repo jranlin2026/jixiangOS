@@ -1230,7 +1230,7 @@ const Customers: React.FC = () => {
         }}>删除客户</DialogCloseTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
-            删除后客户会进入业务回收站。有关联订单的客户不会被删除，请先处理订单。
+            删除后客户会进入业务回收站；由线索转化而来的客户会同时删除关联来源线索。有关联订单、交付、退款等业务的客户仍不会被删除，请先处理相关业务。
           </Typography>
           {deleteCustomerTarget && (
             <Box sx={{ p: 1.5, border: '1px solid #fee2e2', borderRadius: 1, bgcolor: '#fff7ed', mb: 2 }}>

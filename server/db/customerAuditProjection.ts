@@ -64,11 +64,12 @@ const AUDIT_BUSINESS_FIELDS = [
   'deletedAt',
   'deletedBy',
   'deleteReason',
+  'deletionCascadeId',
   'createdAt',
   'updatedAt',
 ] as const;
 
-const AUDIT_STRING_ARRAY_FIELDS = ['manualTagIds', 'tags'] as const;
+const AUDIT_STRING_ARRAY_FIELDS = ['manualTagIds', 'tags', 'cascadeDeletedLeadIds'] as const;
 
 function cleanText(value: unknown): string {
   return String(value || '').trim();

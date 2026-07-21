@@ -308,7 +308,7 @@ const CustomerBatchActionDialog: React.FC<Props> = ({
           )}
           {operation === 'soft_delete' && (
             <Alert severity="warning" icon={false}>
-              删除后客户进入业务回收站；存在订单、交付、售后等关联的客户会被阻止。请在下方输入“删除客户”。
+              删除后客户及其关联来源线索会一起进入业务回收站；存在订单、交付、售后等关联的客户会被阻止。请在下方输入“删除客户”。
             </Alert>
           )}
           <TextField

@@ -794,11 +794,7 @@ async function deleteCustomer(id: string, reason = ''): Promise<ApiResponse<bool
     setStorageData(STORAGE_KEYS.CUSTOMERS, customers.filter((item) => item.id !== id), { persist: false });
     if (customer) {
       const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
-      const nextLeads = leads.filter((lead) => !(
-        lead.customerId === customer.id
-        || Boolean(lead.phone && customer.phone && normalizePhoneForComparison(lead.phone) === normalizePhoneForComparison(customer.phone))
-        || Boolean(lead.wechat && customer.wechat && lead.wechat.trim().toLowerCase() === customer.wechat.trim().toLowerCase())
-      ));
+      const nextLeads = leads.filter((lead) => lead.customerId !== customer.id);
       setStorageData(STORAGE_KEYS.LEADS, nextLeads, { persist: false });
     }
     return createSuccessResponse(true);
@@ -818,14 +814,34 @@ async function deleteCustomer(id: string, reason = ''): Promise<ApiResponse<bool
     return createErrorResponse('客户存在关联订单，不能删除；请先处理订单后再操作。');
   }
   const now = new Date().toISOString();
+  const deletionCascadeId = `delete-cascade-${uuidv4()}`;
+  const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
+  const cascadeDeletedLeadIds = leads
+    .filter((lead) => lead.customerId === customer.id && !lead.deletedAt)
+    .map((lead) => lead.id);
   customers[index] = {
     ...customer,
     deletedAt: now,
     deletedBy: getCurrentOperatorName(customer.owner),
     deleteReason: reason.trim() || '业务删除',
+    deletionCascadeId,
+    cascadeDeletedLeadIds,
     updatedAt: now,
   };
+  const nextLeads = leads.map((lead) => (
+    lead.customerId === customer.id && !lead.deletedAt
+      ? {
+        ...lead,
+        deletedAt: now,
+        deletedBy: getCurrentOperatorName(customer.owner),
+        deleteReason: reason.trim() || '业务删除',
+        deletionCascadeId,
+        updatedAt: now,
+      }
+      : lead
+  ));
   setStorageData(STORAGE_KEYS.CUSTOMERS, customers);
+  setStorageData(STORAGE_KEYS.LEADS, nextLeads);
   return createSuccessResponse(true);
 }
 

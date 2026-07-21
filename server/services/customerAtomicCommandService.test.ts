@@ -101,6 +101,7 @@ await assert.rejects(
 function createAtomicFixture(options: {
   auditFails?: boolean;
   blockedAssociation?: boolean;
+  linkedLead?: boolean;
   customerOverrides?: Record<string, unknown>;
   lifecycleConfigOverride?: unknown;
 } = {}) {
@@ -109,6 +110,10 @@ function createAtomicFixture(options: {
   let todoMutation: any = null;
   let createdTodo: any = null;
   let auditEvent: any = null;
+  let linkedLead: any = options.linkedLead ? {
+    id: 'lead-linked-delete',
+    data: { id: 'lead-linked-delete', customerId: 'c-1', name: '客户甲', owner: '销售甲' },
+  } : null;
   const lifecycleConfig = options.lifecycleConfigOverride || {
     statuses: [
       { id: 'following', code: 'following', name: '跟进中', color: '#2196F3', isActive: true, sortOrder: 1, createdAt: '', updatedAt: '' },
@@ -127,6 +132,7 @@ function createAtomicFixture(options: {
   };
   tx.$queryRaw = async (query: any) => {
     const text = String(query?.strings?.join(' ') || '');
+    if (text.includes('lead_records')) return linkedLead ? [structuredClone(linkedLead)] : [];
     if (text.includes('business_records') && text.includes('recordId')) {
       return [{ id: 'row-c-1', domain: 'aaos_customers', recordId: 'c-1', data: source, updatedAt: new Date('2026-07-17T00:00:00.000Z') }];
     }
@@ -145,7 +151,13 @@ function createAtomicFixture(options: {
     },
     updateMany: async ({ data }: any) => { source = data.data; savedCustomer = data.data; return { count: 1 }; },
   };
-  tx.leadRecord = { findMany: async () => [], update: async () => undefined };
+  tx.leadRecord = {
+    findMany: async () => linkedLead ? [structuredClone(linkedLead)] : [],
+    update: async ({ data }: any) => {
+      if (linkedLead) linkedLead = { ...linkedLead, ...data, data: data.data };
+      return data;
+    },
+  };
   tx.customerTodo = {
     findMany: async () => options.blockedAssociation ? [{ id: 'todo-blocker', customerId: 'c-1' }] : [],
     updateMany: async ({ data }: any) => { todoMutation = data; return { count: 1 }; },
@@ -169,9 +181,10 @@ function createAtomicFixture(options: {
     },
   });
   return {
-    service, tx, get: () => ({ savedCustomer, todoMutation, createdTodo, auditEvent }),
+    service, tx, get: () => ({ savedCustomer, todoMutation, createdTodo, auditEvent, linkedLead }),
     context: {
       tx,
+      canCascadeDeleteLeads: true,
       actor: { id: 'u-1', name: '伪造姓名不得生效' },
       access: {
         actorId: 'u-1', actorName: '销售甲', readableUserIds: new Set(['u-1']), legacyReadableNames: new Set(['销售甲']),
@@ -280,9 +293,26 @@ function createAtomicFixture(options: {
   assert.equal(fixture.get().createdTodo.createdById, 'u-1');
 }
 {
-  const fixture = createAtomicFixture();
+  const fixture = createAtomicFixture({ linkedLead: true });
   const result = await fixture.service.execute({ action: 'soft_delete', customerId: 'c-1', confirmed: true, reason: '重复测试数据' }, fixture.context);
   assert.equal(result.customer.deletedBy, '销售甲');
+  assert.equal(fixture.get().linkedLead.data.deletedBy, '销售甲');
+  assert.equal(fixture.get().linkedLead.data.deleteReason, '重复测试数据');
+  assert.ok(fixture.get().savedCustomer.deletionCascadeId);
+  assert.equal(fixture.get().linkedLead.data.deletionCascadeId, fixture.get().savedCustomer.deletionCascadeId);
+  assert.deepEqual(fixture.get().savedCustomer.cascadeDeletedLeadIds, ['lead-linked-delete']);
+  assert.deepEqual(fixture.get().auditEvent.afterSnapshot.cascadeDeletedLeadIds, ['lead-linked-delete']);
+}
+
+{
+  const fixture = createAtomicFixture({ linkedLead: true });
+  fixture.context.canCascadeDeleteLeads = false;
+  await assert.rejects(
+    () => fixture.service.execute({ action: 'soft_delete', customerId: 'c-1', confirmed: true, reason: '权限不足' }, fixture.context),
+    /超级管理员|线索/,
+  );
+  assert.equal(fixture.get().savedCustomer, null);
+  assert.equal(fixture.get().linkedLead.data.deletedAt, undefined);
 }
 {
   const fixture = createAtomicFixture({ blockedAssociation: true });
