@@ -317,6 +317,7 @@ NODE_ENV=test VITE_USE_BACKEND_API=false VITE_AI_API_BASE=/api JIXIANG_DEFAULT_A
 npm run customer:permission-migrate -- --out "$PERSISTENT_DATA_DIR/private_reports/customer-permission-manifest-${{TS}}.json"
 npm run customer:permission-audit
 npm run customer:association-cleanup -- --apply --confirm-production --out "$PERSISTENT_DATA_DIR/private_reports/legacy-orphan-associations-${{TS}}.json"
+npm run customer:association-audit -- --apply --out "$PERSISTENT_DATA_DIR/private_reports/customer-association-apply-${{TS}}.json"
 npm run customer:association-audit -- --dry-run --out "$PERSISTENT_DATA_DIR/private_reports/customer-association-${{TS}}.json"
 npm run customer:batch-verify
 if [ -d "$APP_DIR/uploads" ] && [ ! -L "$APP_DIR/uploads" ]; then
