@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   getLeadAssignmentCandidates,
+  getLeadReceiveEligibleUsers,
   getScopedLeadAssignmentCandidates,
   NO_LEAD_FLOW_PARTICIPANTS_MARKER,
 } from '../shared/utils/leadAssignment';
@@ -10,6 +11,7 @@ import type { Department } from '../types/department';
 import type { LeadFlowConfig } from '../types/lead';
 import type { Role } from '../types/role';
 import type { User } from '../types/settings';
+import { CAPABILITY_KEYS } from '../shared/utils/permissions';
 
 const storage = (() => {
   const values = new Map<string, string>();
@@ -48,7 +50,7 @@ const roles: Role[] = [
     id: 'role-sales-manager',
     name: '销售经理',
     code: 'sales_manager',
-    permissions: [],
+    permissions: [{ module: CAPABILITY_KEYS.LEADS_RECEIVE, actions: ['read'] }],
     dataScopes: { leads: 'department', customers: 'department' },
     memberCount: 1,
     isActive: true,
@@ -59,7 +61,7 @@ const roles: Role[] = [
     id: 'role-sales',
     name: '销售顾问',
     code: 'sales_consultant',
-    permissions: [],
+    permissions: [{ module: CAPABILITY_KEYS.LEADS_RECEIVE, actions: ['read'] }],
     dataScopes: { leads: 'self', customers: 'self' },
     memberCount: 2,
     isActive: true,
@@ -248,7 +250,8 @@ seedOrganization();
 
 assert.deepEqual(
   getLeadAssignmentCandidates(users, baseConfig).map((user) => user.id),
-  ['user-super-admin', 'user-sales-manager', 'user-sales-a', 'user-sales-child', 'user-finance'],
+  ['user-super-admin', 'user-sales-manager', 'user-sales-a', 'user-sales-child'],
+  '默认候选必须排除没有领取线索权限的在职员工',
 );
 
 assert.deepEqual(
@@ -259,6 +262,12 @@ assert.deepEqual(
 assert.deepEqual(
   getLeadAssignmentCandidates(users, { ...baseConfig, participantUserIds: [NO_LEAD_FLOW_PARTICIPANTS_MARKER] }).map((user) => user.id),
   [],
+);
+
+assert.deepEqual(
+  ids(getLeadReceiveEligibleUsers(users, roles)),
+  ['user-sales-a', 'user-sales-child', 'user-sales-manager', 'user-super-admin'],
+  '默认参与人数只统计在职、启用且拥有领取线索权限的员工',
 );
 
 assert.deepEqual(
@@ -309,5 +318,6 @@ assert.deepEqual(
     'customers',
     currentUser('user-super-admin'),
   )),
-  ['user-finance', 'user-sales-a'],
+  ['user-sales-a'],
+  '超级管理员的数据范围不能绕过候选人的领取权限',
 );

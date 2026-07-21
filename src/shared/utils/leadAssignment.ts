@@ -1,9 +1,11 @@
 import type { LeadFlowConfig } from '../../types/lead';
 import type { DataScopeDomain } from '../../types/role';
 import type { AuthenticatedUser } from '../../types/auth';
+import type { Role } from '../../types/role';
 import type { User } from '../../types/settings';
 import { STORAGE_KEYS } from './constants';
 import { filterUsersByCurrentDataScope } from './dataVisibility';
+import { canReceiveLead } from './permissions';
 
 export const NO_LEAD_FLOW_PARTICIPANTS_MARKER = '__lead_flow_no_participants__';
 
@@ -11,13 +13,32 @@ export function isActiveLeadAssignableUser(user: User): boolean {
   return user.isActive && (user.employmentStatus || 'active') !== 'left';
 }
 
-export function getLeadAssignmentCandidates(users: User[], config?: LeadFlowConfig | null): User[] {
-  const activeUsers = users.filter(isActiveLeadAssignableUser);
-  if (!config || !config.participantUserIds.length) return activeUsers;
+export function getLeadReceiveEligibleUsers(users: User[], roles: Role[]): User[] {
+  return users.filter((user) => canReceiveLead(user, roles));
+}
+
+function readStoredRoles(): Role[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.ROLES);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function getLeadAssignmentCandidates(
+  users: User[],
+  config?: LeadFlowConfig | null,
+  roles: Role[] = readStoredRoles(),
+): User[] {
+  const eligibleUsers = getLeadReceiveEligibleUsers(users, roles);
+  if (!config || !config.participantUserIds.length) return eligibleUsers;
   if (config.participantUserIds.includes(NO_LEAD_FLOW_PARTICIPANTS_MARKER)) return [];
 
   const participantIds = new Set(config.participantUserIds);
-  return activeUsers.filter((user) => participantIds.has(user.id));
+  return eligibleUsers.filter((user) => participantIds.has(user.id));
 }
 
 function readStoredUsers(): User[] {

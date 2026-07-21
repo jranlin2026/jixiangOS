@@ -36,7 +36,10 @@ assert.match(flowConfigSource, /participantDialogOpen/);
 assert.match(flowConfigSource, /添加成员/);
 assert.match(flowConfigSource, /选择成员/);
 assert.match(flowConfigSource, /departmentApi/);
-assert.match(flowConfigSource, /默认全体在职员工/);
+assert.match(flowConfigSource, /getLeadReceiveEligibleUsers/);
+assert.match(flowConfigSource, /默认全体有领取权限的在职员工/);
+assert.match(flowConfigSource, /默认全公司在职、启用且拥有领取线索权限的员工参与分配/);
+assert.doesNotMatch(flowConfigSource, /默认全公司在职员工都可以参与分配/);
 assert.match(flowConfigSource, /getParticipantLabel/);
 assert.match(flowConfigSource, /线索自动领取/);
 assert.match(flowConfigSource, /formatEmployeeNameWithPosition\(user\)/);
@@ -344,6 +347,22 @@ const salesUsers = [
 ];
 
 storage.setItem(STORAGE_KEYS.USERS, JSON.stringify(salesUsers));
+storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([
+  {
+    id: 'role-market-specialist', name: 'Market Specialist', code: 'market_specialist', permissions: [],
+    memberCount: 1, isActive: true, createdAt: now, updatedAt: now,
+  },
+  {
+    id: 'role-sales-consultant', name: 'Sales Consultant', code: 'sales_consultant',
+    permissions: [{ module: PERMISSION_KEYS.LEADS_FOLLOW, actions: ['read'] }],
+    memberCount: 2, isActive: true, createdAt: now, updatedAt: now,
+  },
+  {
+    id: 'role-super-admin', name: 'Super Admin', code: 'super_admin',
+    permissions: [{ module: '*', actions: ['admin'] }],
+    memberCount: 1, isActive: true, createdAt: now, updatedAt: now,
+  },
+]));
 storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));
 storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([]));
 storage.setItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS, JSON.stringify([]));
@@ -360,10 +379,10 @@ storage.setItem(STORAGE_KEYS.LEAD_FLOW_CONFIG, JSON.stringify({
   updatedAt: now,
 }));
 const defaultParticipantFallback = leadFlowApi.intakeLead(createLeadInput('Default Participant Fallback', { phone: '13900001000' }));
-assert.equal(defaultParticipantFallback.lead?.owner, 'Market A');
-assert.equal(defaultParticipantFallback.lead?.assignedTo, 'Market A');
+assert.equal(defaultParticipantFallback.lead?.owner, 'Sales A');
+assert.equal(defaultParticipantFallback.lead?.assignedTo, 'Sales A');
 const defaultParticipantRecord = JSON.parse(storage.getItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS) || '[]')[0];
-assert.equal(defaultParticipantRecord?.assignedTo, 'Market A');
+assert.equal(defaultParticipantRecord?.assignedTo, 'Sales A');
 assert.equal(defaultParticipantRecord?.status, '入库成功');
 
 storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([]));

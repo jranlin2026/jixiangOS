@@ -34,7 +34,7 @@ import type { Role } from '../../types/role';
 import type { User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
-import { isActiveLeadAssignableUser, NO_LEAD_FLOW_PARTICIPANTS_MARKER } from '../../shared/utils/leadAssignment';
+import { getLeadReceiveEligibleUsers, NO_LEAD_FLOW_PARTICIPANTS_MARKER } from '../../shared/utils/leadAssignment';
 
 const LEAD_UNIQUE_KEY_MODE = 'phone_or_wechat' as const;
 const MAX_PARTICIPANTS = 500;
@@ -62,8 +62,13 @@ const LeadFlowConfigTab: React.FC = () => {
       roleApi.getRoles({ isActive: true }),
       departmentApi.getDepartments({ isActive: true }),
     ]).then(([usersRes, rolesRes, departmentsRes]) => {
-      if (usersRes.code === 0) setUsers(sortUsers(usersRes.data.filter(isActiveLeadAssignableUser)));
-      if (rolesRes.code === 0) setRoles(rolesRes.data.filter((role) => role.isActive));
+      const activeRoles = rolesRes.code === 0 ? rolesRes.data.filter((role) => role.isActive) : [];
+      if (rolesRes.code === 0) setRoles(activeRoles);
+      if (usersRes.code === 0 && rolesRes.code === 0) {
+        setUsers(sortUsers(getLeadReceiveEligibleUsers(usersRes.data, activeRoles)));
+      } else {
+        setUsers([]);
+      }
       if (departmentsRes.code === 0) {
         const sortedDepartments = [...departmentsRes.data].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
         setDepartments(sortedDepartments);
@@ -346,7 +351,7 @@ const LeadFlowConfigTab: React.FC = () => {
             }}
           >
             {isDefaultAll ? (
-              <Chip label={`默认全体在职员工（${users.length}人）`} size="small" color="primary" variant="outlined" />
+              <Chip label={`默认全体有领取权限的在职员工（${users.length}人）`} size="small" color="primary" variant="outlined" />
             ) : selectedParticipants.map((user) => (
               <Chip
                 key={user.id}
@@ -369,7 +374,7 @@ const LeadFlowConfigTab: React.FC = () => {
             )}
           </Box>
           <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: '#64748b' }}>
-            不单独配置时，默认全公司在职员工都可以参与分配；管理员可按组织架构勾选指定范围。
+            不单独配置时，默认全公司在职、启用且拥有领取线索权限的员工参与分配；管理员可按组织架构勾选指定范围。
           </Typography>
         </Box>
 

@@ -14,7 +14,7 @@ import { isSuperAdminRoleName } from '../shared/utils/roles';
 import { hydrateLeadLifecycle } from './lifecycleSync';
 import { ensureOrganizationConfigData } from '../shared/utils/organizationConfig';
 import { getPhoneNumberError, normalizePhoneForComparison, normalizePhoneForStorage } from '../shared/utils/phoneNumber';
-import { getLeadAssignmentCandidates, isActiveLeadAssignableUser } from '../shared/utils/leadAssignment';
+import { getLeadAssignmentCandidates, getLeadReceiveEligibleUsers, isActiveLeadAssignableUser } from '../shared/utils/leadAssignment';
 import { canReceiveLead } from '../shared/utils/permissions';
 import { canViewLead } from '../shared/utils/dataVisibility';
 
@@ -86,7 +86,8 @@ function validateAttribution(data: Partial<Lead>): string | null {
 
 function getAssignableUsers(): User[] {
   const users = getStorageData<User[]>(STORAGE_KEYS.USERS) || [];
-  return users.filter(isActiveLeadAssignableUser);
+  const roles = getStorageData<Role[]>(STORAGE_KEYS.ROLES) || [];
+  return getLeadReceiveEligibleUsers(users, roles);
 }
 
 function getConfiguredParticipants(config: LeadFlowConfig): User[] {
