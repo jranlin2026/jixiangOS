@@ -2699,21 +2699,10 @@ for (const targetType of ['customer', 'lead'] as const) {
   )), true);
 }
 
-// 拥有“开始跟进并加入客户”权限的超级管理员也是合法领取人，
-// 可领取能力不得再按角色名称硬排除。
+// “全部”权限已经覆盖“开始跟进并加入客户”，默认超级管理员应可直接执行并成为负责人。
 {
   const source = lead('lead-super-admin-convert', salesA.name);
-  const superRoleWithLeadFollow = {
-    ...superRole,
-    permissions: [
-      ...superRole.permissions,
-      { module: PERMISSION_KEYS.LEADS_FOLLOW, actions: ['read', 'write'] },
-    ],
-  };
-  const fake = createFakePrisma(
-    { businessRecords: [], leads: [source] },
-    { roleRows: [salesRole, managerRole, financeRole, superRoleWithLeadFollow] },
-  );
+  const fake = createFakePrisma({ businessRecords: [], leads: [source] });
   const result = await createCustomerCommandService(fake.prisma, serviceOptions)
     .convertLeadToCustomer(source.id, superAdmin);
 

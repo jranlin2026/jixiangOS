@@ -755,23 +755,12 @@ export function isSuperAdminUser(user: Pick<User, 'role' | 'roleId' | 'isActive'
   return hasRolePermission(user, roles, ALL_PERMISSION_KEY, 'admin') || getUserRole(user, roles)?.code === 'super_admin';
 }
 
-function roleHasDirectPermission(role: Role | undefined, permissionKeys: string[], action = 'read'): boolean {
-  if (!role?.isActive) return false;
-  const requestedKeys = permissionKeys.map(normalizePermissionKey);
-  return role.permissions.some((permission) => (
-    actionAllowed(permission.actions || [], action)
-    && requestedKeys.includes(normalizePermissionKey(permission.module))
-  ));
-}
-
 export function canReceiveLead(user: Pick<User, 'role' | 'roleId' | 'isActive' | 'employmentStatus'>, roles: Role[]): boolean {
   if (!user.isActive) return false;
   if ((user.employmentStatus || 'active') !== 'active') return false;
   const role = getUserRole(user, roles);
-  return roleHasDirectPermission(role, [
-    CAPABILITY_KEYS.LEADS_RECEIVE,
-    PERMISSION_KEYS.LEADS_FOLLOW,
-  ]);
+  return roleHasPermission(role, CAPABILITY_KEYS.LEADS_RECEIVE)
+    || roleHasPermission(role, PERMISSION_KEYS.LEADS_FOLLOW);
 }
 
 export function resolveUserPermissions(user: User, roles: Role[]): Permission[] {

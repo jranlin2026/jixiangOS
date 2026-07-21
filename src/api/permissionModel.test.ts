@@ -528,7 +528,19 @@ assert.equal(canReceiveLead({
   role: '超级管理员',
   roleId: 'role-super-admin',
   isActive: true,
-}, DEFAULT_ROLES), false, '只有通用管理权限的超级管理员不应自动成为销售候选人');
+}, DEFAULT_ROLES), true, '超级管理员的全部权限应覆盖领取线索并转客户');
+assert.equal(canReceiveLead({
+  role: '超级管理员',
+  roleId: 'role-super-admin',
+  isActive: false,
+  employmentStatus: 'active',
+}, DEFAULT_ROLES), false, '停用账号即使拥有全部权限也不能领取线索');
+assert.equal(canReceiveLead({
+  role: '超级管理员',
+  roleId: 'role-super-admin',
+  isActive: true,
+  employmentStatus: 'left',
+}, DEFAULT_ROLES), false, '离职账号即使拥有全部权限也不能领取线索');
 
 const superAdminWithLeadFollow: Role = {
   ...DEFAULT_ROLES.find((role) => role.code === 'super_admin')!,
