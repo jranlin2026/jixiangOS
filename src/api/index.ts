@@ -30,6 +30,7 @@ export { leadBulkImportApi } from './leadBulkImportApi';
 export { crmMigrationApi } from './crmMigrationApi';
 export { businessRecycleBinApi } from './businessRecycleBinApi';
 export { businessAttachmentApi } from './businessAttachmentApi';
+export { systemSetupApi } from './systemSetupApi';
 export { enablementApi } from './enablementApi';
 export type { LeadBulkImportResult, LeadBulkImportRowResult } from './leadBulkImportApi';
 export { initializeMockData, resetMockData } from './mock';

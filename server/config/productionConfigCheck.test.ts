@@ -51,3 +51,9 @@ assert.match(
   /CUSTOMER_PERMISSION_MIGRATION_SIGNING_KEY_REQUIRED/,
   '生产配置检查必须在切换版本前发现启动必需的迁移签名密钥缺失',
 );
+
+assert.match(
+  collectProductionConfigErrors({ ...validProductionEnv, JIXIANG_SETUP_TOKEN: 'short' }).join('\n'),
+  /JIXIANG_SETUP_TOKEN/,
+  '配置初始化码时必须满足服务端安全长度',
+);

@@ -40,6 +40,9 @@ assert.match(remote, /npm run db:deploy/);
 assertBefore('npm run db:generate', 'npm run db:deploy', 'Prisma generate 必须先于 migrate deploy');
 assert.match(remote, /prisma migrate status/);
 assert.match(remote, /JIXIANG_PRISMA_BASELINE_CONFIRMED/);
+assert.match(remote, /system:database-state/);
+assert.match(remote, /DATABASE_INSTALLATION_STATE/);
+assert.match(remote, /DATABASE_INSTALLATION_STATE" = "NONEMPTY"/);
 assert.match(remote, /MIGRATE_STATUS_CODE/);
 assert.match(remote, /have not yet been applied/);
 assert.match(
@@ -76,6 +79,10 @@ assert.match(remote, /private_reports\/legacy-orphan-associations-/);
 assert.match(remote, /npm run customer:batch-verify/);
 assert.match(remote, /npm run customer:demo-fixture-cleanup -- --apply --confirm-production/);
 assert.match(remote, /customerBatchFoundation\.integration\.test\.ts/);
+assert.match(remote, /SYSTEM_SETUP_STATE/);
+assert.match(remote, /system:setup-state/);
+assert.match(remote, /if \[ "\$SYSTEM_SETUP_STATE" = "ACTIVE" \]/);
+assert.match(remote, /Skipping legacy production data gates for an uninitialized instance/);
 assert.match(remote, /npm test/);
 assert.match(
   remote,
@@ -94,6 +101,10 @@ assert.match(remote, /\. "\$APP_DIR\/\.env"/);
 assert.match(remote, /"\$NEW_DIR\/scripts\/mysql\/backup-linux\.sh"/);
 assert.doesNotMatch(remote, /"\$APP_DIR\/scripts\/mysql\/backup-linux\.sh"/);
 assert.match(remote, /npm run prod:check/);
+assert.match(remote, /JIXIANG_SETUP_TOKEN/);
+assert.match(remote, /openssl rand -hex 24/);
+assert.match(remote, /initial-setup-token/);
+assert.match(remote, /export JIXIANG_SETUP_TOKEN="\$SETUP_TOKEN_VALUE"/, '部署进程必须获得实际生成的初始化码');
 assertBefore('npm run prod:check', 'backup-linux.sh', '生产配置检查必须先于数据库备份');
 assertBefore('backup-linux.sh', 'npm run db:deploy', 'SQL 备份必须先于数据库迁移');
 
@@ -159,8 +170,9 @@ function assertSafeProductionDatabaseGuidance(source: string, documentName: stri
     `${documentName} 不得把 db:seed 写成可执行的生产步骤`,
   );
   assert.match(source, /生产环境[^\n]*(?:禁止|不得)[^\n]*db:seed/i);
-  assert.match(source, /尚无[^\n]*首个管理员[^\n]*初始化命令/);
-  assert.match(source, /(?:空库|全新数据库)[^\n]*(?:阻塞|不能|不可)[^\n]*(?:生产|上线)/);
+  assert.match(source, /(?:空库|全新数据库)[^\n]*初始化向导/);
+  assert.match(source, /JIXIANG_SETUP_TOKEN/);
+  assert.match(source, /\/setup/);
   assert.match(source, /prisma migrate status/);
   assert.match(source, /python3 scripts\/deploy\/deploy-ecs\.py/);
 }

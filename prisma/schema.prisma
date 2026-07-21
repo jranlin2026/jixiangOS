@@ -124,6 +124,28 @@ model AiProviderConfig {
   @@map("ai_provider_configs")
 }
 
+enum SystemInstallationState {
+  UNINITIALIZED
+  INITIALIZING
+  ACTIVE
+  RESETTING
+  FAILED
+}
+
+model SystemInstallation {
+  id             String                  @id @default("primary") @db.VarChar(32)
+  installationId String                  @unique @db.VarChar(64)
+  state          SystemInstallationState @default(UNINITIALIZED)
+  setupVersion   Int                     @default(1)
+  companyName    String?                 @db.VarChar(100)
+  initializedAt  DateTime?
+  lastError      String?                 @db.VarChar(100)
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+
+  @@map("system_installations")
+}
+
 enum CoCreationStatus {
   DRAFT
   INTERVIEWING

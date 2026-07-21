@@ -70,6 +70,14 @@ function checkSmokeConfig(env: NodeJS.ProcessEnv, errors: string[]): void {
   requireEnv(env, errors, 'JIXIANG_SMOKE_PASSWORD');
 }
 
+function checkSystemSetupConfig(env: NodeJS.ProcessEnv, errors: string[]): void {
+  const token = envValue(env, 'JIXIANG_SETUP_TOKEN');
+  if (!token) return;
+  if (token.length < 32 || isPlaceholder(token)) {
+    errors.push('JIXIANG_SETUP_TOKEN must be at least 32 characters and cannot be a placeholder.');
+  }
+}
+
 export function collectProductionConfigErrors(env: NodeJS.ProcessEnv = process.env): string[] {
   const errors: string[] = [];
 
@@ -77,6 +85,7 @@ export function collectProductionConfigErrors(env: NodeJS.ProcessEnv = process.e
   checkFrontendConfig(env, errors);
   checkBackupConfig(env, errors);
   checkSmokeConfig(env, errors);
+  checkSystemSetupConfig(env, errors);
 
   return errors;
 }

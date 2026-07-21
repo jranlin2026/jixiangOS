@@ -1,13 +1,14 @@
-import React, { Suspense, useEffect } from 'react';
+import React, { Suspense, useCallback, useEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import AppLayout from './layouts/AppLayout';
-import { CircularProgress, Box } from '@mui/material';
+import { Alert, Button, CircularProgress, Box, Stack } from '@mui/material';
 import { ROUTES } from './shared/utils/constants';
 import { initializeMockData } from './api';
 import ProtectedRoute from './shared/auth/ProtectedRoute';
 import { PERMISSION_KEYS } from './shared/utils/permissions';
 import useAuthStore from './store/useAuthStore';
 import StorageSyncFailureNotice from './shared/components/StorageSyncFailureNotice';
+import { systemSetupApi, type SystemSetupStatus } from './api/systemSetupApi';
 
 const HomeWorkbench = React.lazy(() => import('./pages/Dashboard'));
 const BusinessCockpit = React.lazy(() => import('./pages/Dashboard/BusinessCockpit'));
@@ -27,6 +28,7 @@ const CoCreation = React.lazy(() => import('./pages/CoCreation'));
 const Settings = React.lazy(() => import('./pages/Settings'));
 const Login = React.lazy(() => import('./pages/Login'));
 const NoPermission = React.lazy(() => import('./pages/NoPermission'));
+const SystemSetup = React.lazy(() => import('./pages/SystemSetup'));
 
 const PageLoader: React.FC = () => (
   <Box
@@ -44,16 +46,61 @@ const PageLoader: React.FC = () => (
 
 const App: React.FC = () => {
   const bootstrap = useAuthStore((state) => state.bootstrap);
+  const [setupStatus, setSetupStatus] = useState<SystemSetupStatus | null>(null);
+  const [setupLoading, setSetupLoading] = useState(true);
+  const [setupError, setSetupError] = useState<string | null>(null);
+
+  const loadSetupStatus = useCallback(async () => {
+    setSetupLoading(true);
+    setSetupError(null);
+    try {
+      const response = await systemSetupApi.getStatus();
+      if (response.code !== 0 || !response.data) throw new Error(response.message || '无法读取系统初始化状态');
+      setSetupStatus(response.data);
+    } catch (error) {
+      setSetupError(error instanceof Error ? error.message : '无法读取系统初始化状态');
+    } finally {
+      setSetupLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
+    void loadSetupStatus();
+  }, [loadSetupStatus]);
+
+  useEffect(() => {
+    if (!setupStatus?.initialized) return;
     initializeMockData();
-    bootstrap();
-  }, [bootstrap]);
+    void bootstrap();
+  }, [bootstrap, setupStatus?.initialized]);
+
+  if (setupLoading) return <PageLoader />;
+
+  if (setupError || !setupStatus) {
+    return (
+      <Box sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center', bgcolor: '#f6f8fb', p: 3 }}>
+        <Stack spacing={2} sx={{ width: '100%', maxWidth: 520 }}>
+          <Alert severity="error">{setupError || '无法读取系统初始化状态'}</Alert>
+          <Button variant="contained" onClick={() => void loadSetupStatus()}>重新检查</Button>
+        </Stack>
+      </Box>
+    );
+  }
+
+  if (!setupStatus?.initialized) {
+    return (
+      <Routes>
+        <Route path="/setup" element={<Suspense fallback={<PageLoader />}><SystemSetup status={setupStatus} onComplete={setSetupStatus} /></Suspense>} />
+        <Route path="*" element={<Navigate to="/setup" replace />} />
+      </Routes>
+    );
+  }
 
   return (
     <>
       <StorageSyncFailureNotice />
       <Routes>
+        <Route path="/setup" element={<Navigate to="/login" replace />} />
         <Route
           path="/login"
           element={(

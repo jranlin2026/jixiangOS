@@ -261,6 +261,29 @@ rm -rf "$NEW_DIR/uploads" "$NEW_DIR/private_uploads"
 ln -s "$PERSISTENT_DATA_DIR/uploads" "$NEW_DIR/uploads"
 ln -s "$PERSISTENT_DATA_DIR/private_uploads" "$NEW_DIR/private_uploads"
 
+SETUP_TOKEN_FILE="$PERSISTENT_DATA_DIR/initial-setup-token"
+SETUP_TOKEN_VALUE="$(
+  set +u
+  JIXIANG_SETUP_TOKEN=""
+  set -a
+  . "$NEW_DIR/.env"
+  set +a
+  printf '%s' "${{JIXIANG_SETUP_TOKEN:-}}"
+)"
+if [ "${{#SETUP_TOKEN_VALUE}}" -lt 32 ]; then
+  SETUP_TOKEN="$(openssl rand -hex 24)"
+  if grep -Eq '^[[:space:]]*JIXIANG_SETUP_TOKEN=' "$NEW_DIR/.env"; then
+    sed -i "s|^[[:space:]]*JIXIANG_SETUP_TOKEN=.*$|JIXIANG_SETUP_TOKEN=\"$SETUP_TOKEN\"|" "$NEW_DIR/.env"
+  else
+    printf '\nJIXIANG_SETUP_TOKEN="%s"\n' "$SETUP_TOKEN" >> "$NEW_DIR/.env"
+  fi
+  install -m 600 /dev/null "$SETUP_TOKEN_FILE"
+  printf '%s\n' "$SETUP_TOKEN" > "$SETUP_TOKEN_FILE"
+  SETUP_TOKEN_VALUE="$SETUP_TOKEN"
+  echo "Generated a one-time system setup token at $SETUP_TOKEN_FILE"
+fi
+export JIXIANG_SETUP_TOKEN="$SETUP_TOKEN_VALUE"
+
 echo "Preparing dependencies in new release..."
 cd "$NEW_DIR"
 if [ "$REUSE_NODE_MODULES" = "1" ] && [ -d "$APP_DIR/node_modules" ]; then
@@ -275,7 +298,12 @@ bash "$NEW_DIR/scripts/mysql/backup-linux.sh"
 
 npm run db:generate
 EXPECTED_BASELINE="20260710010000_enablement_knowledge_foundation"
-if [ "${{JIXIANG_PRISMA_BASELINE_CONFIRMED:-}}" != "$EXPECTED_BASELINE" ]; then
+DATABASE_INSTALLATION_STATE="$(npm run --silent system:database-state)"
+if [ "$DATABASE_INSTALLATION_STATE" != "EMPTY" ] && [ "$DATABASE_INSTALLATION_STATE" != "NONEMPTY" ]; then
+  echo "Unrecognized database installation state: $DATABASE_INSTALLATION_STATE" >&2
+  false
+fi
+if [ "$DATABASE_INSTALLATION_STATE" = "NONEMPTY" ] && [ "${{JIXIANG_PRISMA_BASELINE_CONFIRMED:-}}" != "$EXPECTED_BASELINE" ]; then
   echo "Set JIXIANG_PRISMA_BASELINE_CONFIRMED=$EXPECTED_BASELINE only after the production baseline is verified" >&2
   false
 fi
@@ -294,7 +322,7 @@ if [ "$MIGRATE_STATUS_CODE" != "0" ] && ! echo "$MIGRATE_STATUS_OUTPUT" | grep -
   echo "Prisma migration status could not be safely classified" >&2
   false
 fi
-if echo "$MIGRATE_STATUS_OUTPUT" | grep -Fq "$EXPECTED_BASELINE"; then
+if [ "$DATABASE_INSTALLATION_STATE" = "NONEMPTY" ] && echo "$MIGRATE_STATUS_OUTPUT" | grep -Fq "$EXPECTED_BASELINE"; then
   echo "Confirmed Prisma baseline is still reported as unapplied; resolve the production baseline before deployment" >&2
   false
 fi
@@ -307,19 +335,28 @@ if pm2 describe jixiang-os-api >/dev/null 2>&1; then
   API_WAS_RUNNING="1"
   pm2 stop jixiang-os-api
 fi
-echo "Repairing legacy business records (idempotent)..."
-npm run business-records:repair -- --apply --confirm-production
-echo "Running customer release gates..."
-mkdir -p "$PERSISTENT_DATA_DIR/private_reports"
-npm run customer:demo-fixture-cleanup -- --apply --confirm-production --out "$PERSISTENT_DATA_DIR/private_reports/demo-refunds-${{TS}}.json"
-npx --no-install tsx server/services/customerBatchFoundation.integration.test.ts
+SYSTEM_SETUP_STATE="$(npm run --silent system:setup-state)"
+if [ "$SYSTEM_SETUP_STATE" != "ACTIVE" ] && [ "$SYSTEM_SETUP_STATE" != "UNINITIALIZED" ] && [ "$SYSTEM_SETUP_STATE" != "FAILED" ]; then
+  echo "Unrecognized system setup state: $SYSTEM_SETUP_STATE" >&2
+  false
+fi
 NODE_ENV=test VITE_USE_BACKEND_API=false VITE_AI_API_BASE=/api JIXIANG_DEFAULT_ADMIN_PASSWORD= JIXIANG_DEFAULT_USER_PASSWORD= npm test
-npm run customer:permission-migrate -- --out "$PERSISTENT_DATA_DIR/private_reports/customer-permission-manifest-${{TS}}.json"
-npm run customer:permission-audit
-npm run customer:association-cleanup -- --apply --confirm-production --out "$PERSISTENT_DATA_DIR/private_reports/legacy-orphan-associations-${{TS}}.json"
-npm run customer:association-audit -- --apply --out "$PERSISTENT_DATA_DIR/private_reports/customer-association-apply-${{TS}}.json"
-npm run customer:association-audit -- --dry-run --out "$PERSISTENT_DATA_DIR/private_reports/customer-association-${{TS}}.json"
-npm run customer:batch-verify
+if [ "$SYSTEM_SETUP_STATE" = "ACTIVE" ]; then
+  echo "Repairing legacy business records (idempotent)..."
+  npm run business-records:repair -- --apply --confirm-production
+  echo "Running customer release gates..."
+  mkdir -p "$PERSISTENT_DATA_DIR/private_reports"
+  npm run customer:demo-fixture-cleanup -- --apply --confirm-production --out "$PERSISTENT_DATA_DIR/private_reports/demo-refunds-${{TS}}.json"
+  npx --no-install tsx server/services/customerBatchFoundation.integration.test.ts
+  npm run customer:permission-migrate -- --out "$PERSISTENT_DATA_DIR/private_reports/customer-permission-manifest-${{TS}}.json"
+  npm run customer:permission-audit
+  npm run customer:association-cleanup -- --apply --confirm-production --out "$PERSISTENT_DATA_DIR/private_reports/legacy-orphan-associations-${{TS}}.json"
+  npm run customer:association-audit -- --apply --out "$PERSISTENT_DATA_DIR/private_reports/customer-association-apply-${{TS}}.json"
+  npm run customer:association-audit -- --dry-run --out "$PERSISTENT_DATA_DIR/private_reports/customer-association-${{TS}}.json"
+  npm run customer:batch-verify
+else
+  echo "Skipping legacy production data gates for an uninitialized instance."
+fi
 if [ -d "$APP_DIR/uploads" ] && [ ! -L "$APP_DIR/uploads" ]; then
   rsync -a --delete "$APP_DIR/uploads/" "$PERSISTENT_DATA_DIR/uploads/"
 fi

@@ -18,6 +18,7 @@ import { getScopedStorageKeys } from './config/storageScopes';
 import { prisma, checkDatabaseConnection } from './db/client';
 import { createRequireAnyPermission, createRequireAuth, bearerToken, type AuthenticatedRequest } from './middleware/auth';
 import { createLoginRateLimiter } from './middleware/loginRateLimit';
+import { createSystemInstallationGate } from './middleware/systemInstallationGate';
 import { createAuthService } from './services/authService';
 import { success } from './api/response';
 import { createAiConfigService } from './services/aiConfigService';
@@ -52,6 +53,9 @@ import { createLeadListService } from './services/leadListService';
 import { createBusinessRecycleBinService } from './services/businessRecycleBinService';
 import { createPrismaBusinessRecycleBinRepository } from './services/businessRecycleBinRepository';
 import { createBusinessRecycleBinRouter } from './routes/businessRecycleBinRoutes';
+import { createSystemSetupRouter } from './routes/systemSetupRoutes';
+import { createPrismaSystemSetupRepository } from './services/systemSetupRepository';
+import { createSystemSetupService } from './services/systemSetupService';
 import { createSettingsService } from './services/settingsService';
 import { createStorageService } from './services/storageService';
 import { createBusinessAttachmentService, createPrismaBusinessAttachmentRepository } from './services/businessAttachmentService';
@@ -131,6 +135,11 @@ const contactIdentityCrypto = contactIdentityEnvNames.some((name) => String(proc
   ? createContactIdentityCryptoFromEnv(process.env)
   : undefined;
 const authService = createAuthService(prisma);
+const systemSetupService = createSystemSetupService({
+  repository: createPrismaSystemSetupRepository(prisma),
+  setupToken: process.env.JIXIANG_SETUP_TOKEN,
+  onError: (error) => console.error('System setup operation failed:', error),
+});
 const aiConfigService = createAiConfigService(prisma as any);
 const aiChatClient = createAiChatClient({ configReader: aiConfigService });
 const coCreationService = createCoCreationService({ prisma, aiClient: aiChatClient });
@@ -328,6 +337,8 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: getApiJsonBodyLimit() }));
+app.use('/api/system/setup', createSystemSetupRouter({ service: systemSetupService }));
+app.use(createSystemInstallationGate(systemSetupService));
 app.use('/uploads', express.static(uploadRoot, { index: false }));
 app.use('/api/enablement/knowledge', createEnablementKnowledgeRouter({
   knowledgeService,
@@ -1507,15 +1518,23 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 async function startServer() {
-  const manifestAuthenticator = createCustomerPermissionMigrationManifestAuthenticatorFromEnv(process.env);
-  const migratedRoles = await migrateDefaultRoleAccess(prisma);
-  if (migratedRoles > 0) {
-    console.log(`Migrated default role access for ${migratedRoles} roles.`);
+  const setupStatus = await systemSetupService.status();
+  if (setupStatus.code !== 0 || !setupStatus.data) {
+    throw new Error('SYSTEM_SETUP_STATUS_UNAVAILABLE');
   }
-  const customerPermissionMigration = await migrateCustomerPermissionAndScopeBaseline(prisma, manifestAuthenticator);
-  console.log(
-    `Customer permission/scope baseline v${customerPermissionMigration.version}: ${customerPermissionMigration.migratedRoleIds.length} roles migrated.`,
-  );
+  if (setupStatus.data?.initialized) {
+    const manifestAuthenticator = createCustomerPermissionMigrationManifestAuthenticatorFromEnv(process.env);
+    const migratedRoles = await migrateDefaultRoleAccess(prisma);
+    if (migratedRoles > 0) {
+      console.log(`Migrated default role access for ${migratedRoles} roles.`);
+    }
+    const customerPermissionMigration = await migrateCustomerPermissionAndScopeBaseline(prisma, manifestAuthenticator);
+    console.log(
+      `Customer permission/scope baseline v${customerPermissionMigration.version}: ${customerPermissionMigration.migratedRoleIds.length} roles migrated.`,
+    );
+  } else {
+    console.log('Awaiting first-time system setup. Legacy production migrations were skipped.');
+  }
   const server = app.listen(port, host, () => {
     console.log(`AI proxy listening on http://${host}:${port}`);
   });
