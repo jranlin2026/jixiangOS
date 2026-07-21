@@ -5,7 +5,7 @@ import type { Order } from '../types/order';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
 import { getStorageData, setStorageData } from './mock/storage';
-import { shouldUseBackendApi } from './backendClient';
+import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { DEFAULT_PAGE_SIZE, STORAGE_KEYS } from '../shared/utils/constants';
 import { getCurrentOperatorUser } from '../shared/utils/currentOperator';
 import { isSuperAdminRoleName } from '../shared/utils/roles';
@@ -104,6 +104,15 @@ function getTypeLabel(type: BusinessRecycleBinType): string {
 }
 
 async function fetchRecycleBinItems(filters: BusinessRecycleBinFilters = {}): Promise<ApiResponse<PaginatedResponse<BusinessRecycleBinItem>>> {
+  if (shouldUseBackendApi()) {
+    const params = new URLSearchParams();
+    if (filters.type) params.set('type', filters.type);
+    if (filters.search) params.set('search', filters.search);
+    if (filters.page) params.set('page', String(filters.page));
+    if (filters.pageSize) params.set('pageSize', String(filters.pageSize));
+    const suffix = params.size ? `?${params.toString()}` : '';
+    return backendRequest<PaginatedResponse<BusinessRecycleBinItem>>(`/business-recycle-bin${suffix}`);
+  }
   ensureInit();
   await delay(120);
   const forbidden = requireSuperAdmin();

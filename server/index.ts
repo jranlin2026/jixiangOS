@@ -49,6 +49,9 @@ import {
 import { createCustomerTagRouter, createCustomerTagService } from './services/customerTagService';
 import { createCustomerTagMigrationRouter, createCustomerTagMigrationService } from './services/customerTagMigrationService';
 import { createLeadListService } from './services/leadListService';
+import { createBusinessRecycleBinService } from './services/businessRecycleBinService';
+import { createPrismaBusinessRecycleBinRepository } from './services/businessRecycleBinRepository';
+import { createBusinessRecycleBinRouter } from './routes/businessRecycleBinRoutes';
 import { createSettingsService } from './services/settingsService';
 import { createStorageService } from './services/storageService';
 import { createBusinessAttachmentService, createPrismaBusinessAttachmentRepository } from './services/businessAttachmentService';
@@ -165,6 +168,7 @@ const customerBatchWorker = createCustomerBatchWorker({
 const customerTagService = createCustomerTagService(prisma);
 const customerTagMigrationService = createCustomerTagMigrationService(prisma as any);
 const leadListService = createLeadListService(prisma);
+const businessRecycleBinService = createBusinessRecycleBinService(createPrismaBusinessRecycleBinRepository(prisma));
 const settingsService = createSettingsService(prisma);
 const storageService = createStorageService(prisma);
 const businessAttachmentService = createBusinessAttachmentService({
@@ -198,6 +202,7 @@ const requireAiConfigReadAccess = createRequireAuth(authService, PERMISSION_KEYS
 const requireAiConfigWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_AI_CONFIG, 'write');
 const requireDataMaintenanceDeleteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'delete');
 const requireDataMaintenanceWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'write');
+const requireDataMaintenanceReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'read');
 const requireDeliveryAssignmentReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT);
 const requireDeliveryAssignmentWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT, 'write');
 const requireStorageAccess = createRequireAuth(authService);
@@ -506,6 +511,11 @@ app.get('/api/customers', requireCustomerReadAccess, async (req: AuthenticatedRe
   }, req.currentUser);
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
+
+app.use('/api/business-recycle-bin', createBusinessRecycleBinRouter({
+  service: businessRecycleBinService,
+  requireRead: requireDataMaintenanceReadAccess,
+}));
 
 app.get('/api/customers/manageable-users', requireCustomerManageableUsersAccess, createCustomerManageableUsersHandler(customerManageableUsersService));
 

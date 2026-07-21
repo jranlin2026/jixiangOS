@@ -4,6 +4,8 @@ import {
   createCustomerCommandService,
 } from './customerCommandService';
 import { createPrismaCustomerAuditAppender, hashCustomerAuditInput } from './customerAuditService';
+import { createBusinessRecycleBinService } from './businessRecycleBinService';
+import { createPrismaBusinessRecycleBinRepository } from './businessRecycleBinRepository';
 import {
   CONTACT_IDENTITY_MUTATION_GATE_KEY,
   backfillContactIdentities,
@@ -722,6 +724,20 @@ function createFakePrisma(
         const row = state.leads.find((item) => item.id === where.id);
         return row ? { data: clone(row.data) } : null;
       },
+    },
+    $queryRaw: async (query: any) => {
+      const text = queryText(query);
+      if (!text.includes('AS deleted_records')) throw new Error(`unexpected root query: ${text}`);
+      const deleted = [
+        ...state.leads.filter((row) => row.data?.deletedAt).map((row) => ({ recordType: 'lead', data: clone(row.data) })),
+        ...state.businessRecords
+          .filter((row) => [STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.ORDERS].includes(row.domain as any) && row.data?.deletedAt)
+          .map((row) => ({
+            recordType: row.domain === STORAGE_KEYS.CUSTOMERS ? 'customer' : 'order',
+            data: clone(row.data),
+          })),
+      ];
+      return text.includes('COUNT(*)') ? [{ total: deleted.length }] : deleted;
     },
     $transaction: async (callback: (tx: any) => Promise<unknown>) => {
       transactionCalls += 1;
@@ -1585,6 +1601,15 @@ const serviceOptions = {
   assert.equal(next.leads[0].data.deletionCascadeId, next.businessRecords[0].data.deletionCascadeId);
   assert.deepEqual(next.businessRecords[0].data.cascadeDeletedLeadIds, ['lead-customer-delete']);
   assert.equal(next.contactIdentityLinks?.find((link) => link.id === 'linked-lead-delete-contact')?.linkStatus, 'ended');
+  const recycleResult = await createBusinessRecycleBinService(
+    createPrismaBusinessRecycleBinRepository(fake.prisma),
+  ).list({ pageSize: 20 }, superAdmin);
+  assert.equal(recycleResult.code, 0);
+  assert.deepEqual(
+    recycleResult.data?.items.map((item) => `${item.type}:${item.id}`).sort(),
+    ['customer:cust-delete', 'lead:lead-customer-delete'],
+    '删除命令持久化后的客户与线索必须能被服务器回收站重新查询',
+  );
 
   const rollbackCustomer = customer('cust-delete-linked-rollback');
   const rollbackLead = lead('lead-customer-delete-rollback', salesA.name, rollbackCustomer.id);

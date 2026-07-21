@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { customerApi } from './customerApi';
+import { businessRecycleBinApi } from './businessRecycleBinApi';
 import { clearBackendToken, writeBackendToken } from './backendClient';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import type { Customer } from '../types/customer';
@@ -40,10 +41,22 @@ try {
     lead('same-contact-unlinked'),
   ]));
   writeBackendToken('customer-delete-cache-test');
-  globalThis.fetch = (async () => new Response(JSON.stringify({ code: 0, data: true, message: 'success' }), {
-    status: 200,
-    headers: { 'content-type': 'application/json' },
-  })) as typeof fetch;
+  const requests: string[] = [];
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = String(input);
+    requests.push(url);
+    const data = url.includes('/business-recycle-bin') ? {
+      items: [{
+        id: target.id, type: 'customer', title: target.name, subtitle: target.company,
+        owner: target.owner, deletedAt: at, deletedBy: '管理员', deleteReason: '清理缓存', relationStatus: '无有效订单',
+      }],
+      pagination: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
+    } : true;
+    return new Response(JSON.stringify({ code: 0, data, message: 'success' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }) as typeof fetch;
 
   assert.equal((await customerApi.deleteCustomer(target.id, '清理缓存')).data, true);
   assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]'), []);
@@ -52,6 +65,14 @@ try {
     ['same-contact-unlinked'],
     '联系方式相同不能替代稳定 customerId 清理缓存',
   );
+  const recycleBin = await businessRecycleBinApi.fetchRecycleBinItems({ type: 'customer', pageSize: 20 });
+  assert.equal(recycleBin.code, 0);
+  assert.equal(
+    recycleBin.data.items.some((item) => item.id === target.id),
+    true,
+    '服务器模式删除成功后，回收站必须立即显示该客户',
+  );
+  assert.equal(requests.some((url) => url.includes('/business-recycle-bin')), true);
 } finally {
   clearBackendToken();
   globalThis.fetch = originalFetch;
