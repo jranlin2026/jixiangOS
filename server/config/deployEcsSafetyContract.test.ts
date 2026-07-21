@@ -69,6 +69,8 @@ assert.match(remote, /npm run customer:permission-audit/);
 assert.match(remote, /npm run customer:permission-migrate/);
 assert.match(remote, /private_reports\/customer-permission-manifest-/);
 assert.match(remote, /npm run customer:association-audit -- --dry-run/);
+assert.match(remote, /npm run customer:association-cleanup -- --apply --confirm-production/);
+assert.match(remote, /private_reports\/legacy-orphan-associations-/);
 assert.match(remote, /npm run customer:batch-verify/);
 assert.match(remote, /npm run customer:demo-fixture-cleanup -- --apply --confirm-production/);
 assert.match(remote, /customerBatchFoundation\.integration\.test\.ts/);
@@ -80,6 +82,7 @@ assert.match(
 );
 assertBefore('customer:demo-fixture-cleanup', 'npm run customer:association-audit', '已知演示数据必须先备份清理再做关联审计');
 assertBefore('npm run customer:permission-migrate', 'npm run customer:permission-audit', '客户权限基线迁移必须先于权限审计');
+assertBefore('npm run customer:association-cleanup', 'npm run customer:association-audit', '已知孤儿关联必须先私有备份清理再做关联审计');
 assertBefore('npm run customer:permission-audit', 'echo "Switching release...', '客户权限审计必须先于版本切换');
 assertBefore('npm run customer:association-audit', 'echo "Switching release...', '客户关联审计必须先于版本切换');
 assertBefore('npm run customer:batch-verify', 'echo "Switching release...', '客户批量验证必须先于版本切换');

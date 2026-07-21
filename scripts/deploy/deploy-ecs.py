@@ -316,6 +316,7 @@ npx --no-install tsx server/services/customerBatchFoundation.integration.test.ts
 NODE_ENV=test VITE_USE_BACKEND_API=false VITE_AI_API_BASE=/api JIXIANG_DEFAULT_ADMIN_PASSWORD= JIXIANG_DEFAULT_USER_PASSWORD= npm test
 npm run customer:permission-migrate -- --out "$PERSISTENT_DATA_DIR/private_reports/customer-permission-manifest-${{TS}}.json"
 npm run customer:permission-audit
+npm run customer:association-cleanup -- --apply --confirm-production --out "$PERSISTENT_DATA_DIR/private_reports/legacy-orphan-associations-${{TS}}.json"
 npm run customer:association-audit -- --dry-run --out "$PERSISTENT_DATA_DIR/private_reports/customer-association-${{TS}}.json"
 npm run customer:batch-verify
 if [ -d "$APP_DIR/uploads" ] && [ ! -L "$APP_DIR/uploads" ]; then

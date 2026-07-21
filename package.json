@@ -23,6 +23,7 @@
     "customer:permission-audit": "tsx scripts/audit-customer-permission-migration.ts",
     "customer:permission-migrate": "tsx scripts/migrate-customer-permission-baseline.ts",
     "customer:association-audit": "tsx scripts/audit-customer-associations.ts",
+    "customer:association-cleanup": "tsx scripts/cleanup-legacy-orphan-customer-associations.ts",
     "customer:demo-fixture-cleanup": "tsx scripts/cleanup-demo-refund-fixtures.ts",
     "customer:batch-verify": "tsx scripts/verify-customer-batch-foundation.ts",
     "customer:merge-release-gate": "tsx scripts/verify-customer-merge-release.ts"
