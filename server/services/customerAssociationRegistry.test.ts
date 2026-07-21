@@ -48,6 +48,22 @@ await assert.rejects(() => lockCustomerAssociationScope({
   businessRecord: { findMany: async () => [{ recordId: 'merged-customer', mergedIntoId: 'main-customer', data: { id: 'merged-customer', mergedIntoId: 'main-customer' } }] },
 } as any, ['merged-customer']), /CUSTOMER_ALREADY_MERGED/);
 
+const lockQueries: string[] = [];
+await lockCustomerAssociationScope({
+  appStorage: { upsert: async () => ({}) },
+  businessRecord: { findMany: async () => [] },
+  $queryRaw: async (query: any) => {
+    lockQueries.push(Array.from(query.strings || []).join('?'));
+    return [];
+  },
+} as any, ['customer-lock-query']);
+const businessLockQuery = lockQueries.find((query) => query.includes('FROM business_records')) || '';
+assert.doesNotMatch(
+  businessLockQuery,
+  /ORDER BY domain, recordId/,
+  '客户关联锁扫描不得对整张业务记录表做 filesort，客户级锁已经提供一致的锁顺序',
+);
+
 const tx = {
   businessRecord: { findMany: async () => businessRows },
   leadRecord: { findMany: async () => [{ id: 'lead-1', data: { customerId: 'c-1', name: '唯一客户' } }] },

@@ -380,7 +380,6 @@ export async function lockCustomerAssociationScope(
          JSON_UNQUOTE(JSON_EXTRACT(data, '$.subjectType')) = 'customer'
          AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.subjectId')) IN (${Prisma.join(customerIds)})
        )
-    ORDER BY domain, recordId
     FOR UPDATE
   `);
   await tx.$queryRaw(Prisma.sql`
