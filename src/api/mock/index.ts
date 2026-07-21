@@ -24,7 +24,7 @@ import {
 } from './data/assets';
 import { getStorageData, initializeStorage, isStorageInitialized, markStorageInitialized, setStorageData } from './storage';
 import { shouldUseBackendApi } from '../backendClient';
-import { DEFAULT_LEAD_FLOW_CONFIG, DEFAULT_LEAD_SOURCE_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, DEFAULT_ORDER_TYPE_CONFIGS, STORAGE_KEYS } from '../../shared/utils/constants';
+import { DEFAULT_CUSTOMER_LEVEL_CONFIGS, DEFAULT_LEAD_FLOW_CONFIG, DEFAULT_LEAD_SOURCE_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, DEFAULT_ORDER_TYPE_CONFIGS, STORAGE_KEYS } from '../../shared/utils/constants';
 import type { Product } from '../../types/product';
 
 export { mockLeads } from './data/leads';
@@ -121,8 +121,9 @@ export function initializeMockData(): void {
   initializeStorage(STORAGE_KEYS.ROLES, businessSeed(mockRoles, []));
   initializeStorage(STORAGE_KEYS.PRODUCTS, businessSeed(mockProducts, []));
   initializeStorage(STORAGE_KEYS.PRODUCT_LEVELS, businessSeed(mockProductLevelConfigs, []));
-  initializeStorage(STORAGE_KEYS.ORDER_TYPE_CONFIGS, DEFAULT_ORDER_TYPE_CONFIGS);
-  initializeStorage(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS);
+  initializeStorage(STORAGE_KEYS.ORDER_TYPE_CONFIGS, businessSeed(DEFAULT_ORDER_TYPE_CONFIGS, []));
+  initializeStorage(STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS, businessSeed(DEFAULT_CUSTOMER_LEVEL_CONFIGS, []));
+  initializeStorage(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS, businessSeed(DEFAULT_LIFECYCLE_STATUS_CONFIGS, []));
   initializeStorage(STORAGE_KEYS.REFUNDS, businessSeed(mockRefunds, []));
   initializeStorage(STORAGE_KEYS.RECOVERY_ORDERS, []);
   initializeStorage(STORAGE_KEYS.AI_CARDS, []);
@@ -130,7 +131,7 @@ export function initializeMockData(): void {
   initializeStorage(STORAGE_KEYS.OPPORTUNITIES, []);
   initializeStorage(STORAGE_KEYS.LEAD_FLOW_CONFIG, DEFAULT_LEAD_FLOW_CONFIG);
   initializeStorage(STORAGE_KEYS.LEAD_INTAKE_RECORDS, []);
-  initializeStorage(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, DEFAULT_LEAD_SOURCE_CONFIGS);
+  initializeStorage(STORAGE_KEYS.LEAD_SOURCE_CONFIGS, businessSeed(DEFAULT_LEAD_SOURCE_CONFIGS, []));
   initializeStorage(STORAGE_KEYS.COMMISSION_RULES, businessSeed(mockCommissionRules, []));
   initializeStorage(STORAGE_KEYS.COMMISSION_ROLE_CONFIGS, []);
   initializeStorage(STORAGE_KEYS.TAGS, businessSeed(mockTags, []));

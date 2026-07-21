@@ -45,6 +45,15 @@ assert.equal(minimal.storage.get(STORAGE_KEYS.INITIALIZED), true);
 assert.deepEqual(minimal.storage.get(STORAGE_KEYS.LEADS), []);
 assert.deepEqual(minimal.storage.get(STORAGE_KEYS.CUSTOMERS), []);
 assert.deepEqual(minimal.storage.get(STORAGE_KEYS.ORDERS), []);
+for (const key of [
+  STORAGE_KEYS.PRODUCT_LEVELS,
+  STORAGE_KEYS.ORDER_TYPE_CONFIGS,
+  STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS,
+  STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS,
+  STORAGE_KEYS.LEAD_SOURCE_CONFIGS,
+]) {
+  assert.deepEqual(minimal.storage.get(key), [], `全新初始化的公司配置 ${key} 必须为空`);
+}
 assert.equal((minimal.storage.get(ROLE_PERMISSION_ACTION_BASELINE_KEY) as any).version, ROLE_PERMISSION_ACTION_BASELINE_VERSION);
 assert.equal((minimal.storage.get(CUSTOMER_PERMISSION_SCOPE_BASELINE_KEY) as any).version, CUSTOMER_PERMISSION_SCOPE_BASELINE_VERSION);
 
@@ -68,6 +77,15 @@ for (const code of ['sales_manager', 'sales_consultant', 'customer_success']) {
   assert.ok(role, `缺少默认角色 ${code}`);
   assert.ok(role.permissions.some((permission: any) => permission.module === PERMISSION_KEYS.CUSTOMER_LIST));
   assert.ok(role.permissions.some((permission: any) => permission.module === PERMISSION_KEYS.CUSTOMER_DETAIL));
+}
+for (const key of [
+  STORAGE_KEYS.PRODUCT_LEVELS,
+  STORAGE_KEYS.ORDER_TYPE_CONFIGS,
+  STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS,
+  STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS,
+  STORAGE_KEYS.LEAD_SOURCE_CONFIGS,
+]) {
+  assert.deepEqual(recommended.storage.get(key), [], `推荐组织模板也不得预置公司配置 ${key}`);
 }
 
 console.log('system seed service tests passed');

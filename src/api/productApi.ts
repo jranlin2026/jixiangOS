@@ -20,6 +20,9 @@ function ensureInit(): void {
 
 function ensureProductLevelConfigs(): ProductLevelConfig[] {
   const existing = getStorageData<ProductLevelConfig[]>(STORAGE_KEYS.PRODUCT_LEVELS);
+  if (shouldUseBackendApi()) {
+    return [...(Array.isArray(existing) ? existing : [])].sort((a, b) => a.sortOrder - b.sortOrder);
+  }
   const configs = existing?.length ? existing : mockProductLevelConfigs;
 
   if (!existing?.length) {

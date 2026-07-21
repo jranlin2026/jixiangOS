@@ -37,7 +37,7 @@ import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import { useSearchParams } from 'react-router-dom';
 import useOrderStore from '../../store/useOrderStore';
 import { customerApi, orderApi, productApi, settingsApi } from '../../api';
-import { getProductLevelColor, getProductLevelRowSx, getProductLevelTagSx, PRODUCT_LEVELS, normalizeResourceOwnership } from '../../shared/utils/constants';
+import { getProductLevelRowSx, getProductLevelTagSx, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
 import CustomerDetail from '../Customers/CustomerDetail';
 import OrderDetail from './OrderDetail';
@@ -481,9 +481,7 @@ const Orders: React.FC = () => {
     setCustomerOrdersOpen(true);
   };
 
-  const productLevelOptions = productLevels.length
-    ? productLevels
-    : Object.values(PRODUCT_LEVELS).map((name) => ({ name, color: getProductLevelColor(name) }));
+  const productLevelOptions = productLevels;
   const selectedProductLevel = productLevelOptions.some((level) => level.name === filters.productLevel)
     ? filters.productLevel || ''
     : '';

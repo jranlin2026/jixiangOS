@@ -75,6 +75,9 @@ function withResolvedUserOrganization<T extends Partial<User>>(data: T): T {
 
 function ensureOrderTypeConfigs(): OrderTypeConfig[] {
   const existing = getStorageData<OrderTypeConfig[]>(STORAGE_KEYS.ORDER_TYPE_CONFIGS);
+  if (shouldUseBackendApi()) {
+    return [...(Array.isArray(existing) ? existing : [])].sort((a, b) => a.sortOrder - b.sortOrder);
+  }
   const configs: OrderTypeConfig[] = existing?.length ? existing : DEFAULT_ORDER_TYPE_CONFIGS;
   const sorted = [...configs].sort((a, b) => a.sortOrder - b.sortOrder);
   if (!existing?.length) setStorageData(STORAGE_KEYS.ORDER_TYPE_CONFIGS, sorted, { persist: false });
@@ -83,6 +86,9 @@ function ensureOrderTypeConfigs(): OrderTypeConfig[] {
 
 function ensureLifecycleStatusConfigs(): LifecycleStatusConfig[] {
   const existing = getStorageData<LifecycleStatusConfig[]>(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS);
+  if (shouldUseBackendApi()) {
+    return [...(Array.isArray(existing) ? existing : [])].sort((a, b) => a.sortOrder - b.sortOrder);
+  }
   const existingByCode = new Map<LifecycleStatusCode, LifecycleStatusConfig>();
   (existing || []).forEach((item) => {
     existingByCode.set(normalizeLifecycleStatusCode(item.code || item.name), item);
@@ -107,6 +113,9 @@ function ensureLifecycleStatusConfigs(): LifecycleStatusConfig[] {
 
 function ensureCustomerLevelConfigs(): CustomerLevelConfig[] {
   const existing = getStorageData<CustomerLevelConfig[]>(STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS);
+  if (shouldUseBackendApi()) {
+    return [...(Array.isArray(existing) ? existing : [])].sort((a, b) => a.sortOrder - b.sortOrder);
+  }
   const configs = existing?.length ? existing : DEFAULT_CUSTOMER_LEVEL_CONFIGS;
   const sorted = [...configs].sort((a, b) => a.sortOrder - b.sortOrder);
   if (!existing?.length) setStorageData(STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS, sorted, { persist: false });
@@ -115,6 +124,9 @@ function ensureCustomerLevelConfigs(): CustomerLevelConfig[] {
 
 function ensureLeadSourceConfigs(): LeadSourceConfig[] {
   const existing = getStorageData<LeadSourceConfig[]>(STORAGE_KEYS.LEAD_SOURCE_CONFIGS);
+  if (shouldUseBackendApi()) {
+    return [...(Array.isArray(existing) ? existing : [])].sort((a, b) => a.sortOrder - b.sortOrder);
+  }
   const configs = existing?.length ? existing : DEFAULT_LEAD_SOURCE_CONFIGS;
   const sorted = [...configs].sort((a, b) => {
     if ((a.parentId || '') !== (b.parentId || '')) return (a.parentId || '').localeCompare(b.parentId || '');
@@ -631,6 +643,11 @@ async function fetchProductConfigs(): Promise<ApiResponse<ProductConfig[]>> {
 // ---- 订单类型配置 ----
 
 async function fetchOrderTypeConfigs(): Promise<ApiResponse<OrderTypeConfig[]>> {
+  if (shouldUseBackendApi()) {
+    const stored = await fetchBackendStorageValue<OrderTypeConfig[]>(STORAGE_KEYS.ORDER_TYPE_CONFIGS);
+    return createSuccessResponse(Array.isArray(stored) ? stored : []);
+  }
+
   ensureInit();
   await delay(120);
   return createSuccessResponse(ensureOrderTypeConfigs());
@@ -706,7 +723,7 @@ async function deleteOrderTypeConfig(id: string): Promise<ApiResponse<boolean>> 
 async function fetchLifecycleStatusConfigs(): Promise<ApiResponse<LifecycleStatusConfig[]>> {
   if (shouldUseBackendApi()) {
     const stored = await fetchBackendStorageValue<LifecycleStatusConfig[]>(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS);
-    return createSuccessResponse(Array.isArray(stored) && stored.length ? stored : DEFAULT_LIFECYCLE_STATUS_CONFIGS as unknown as LifecycleStatusConfig[]);
+    return createSuccessResponse(Array.isArray(stored) ? stored : []);
   }
 
   ensureInit();
@@ -776,7 +793,7 @@ async function deleteLifecycleStatusConfig(id: string): Promise<ApiResponse<bool
 async function fetchCustomerLevelConfigs(): Promise<ApiResponse<CustomerLevelConfig[]>> {
   if (shouldUseBackendApi()) {
     const stored = await fetchBackendStorageValue<CustomerLevelConfig[]>(STORAGE_KEYS.CUSTOMER_LEVEL_CONFIGS);
-    return createSuccessResponse(Array.isArray(stored) && stored.length ? stored : DEFAULT_CUSTOMER_LEVEL_CONFIGS as unknown as CustomerLevelConfig[]);
+    return createSuccessResponse(Array.isArray(stored) ? stored : []);
   }
 
   ensureInit();
@@ -855,7 +872,7 @@ async function deleteCustomerLevelConfig(id: string): Promise<ApiResponse<boolea
 async function fetchLeadSourceConfigs(): Promise<ApiResponse<LeadSourceConfig[]>> {
   if (shouldUseBackendApi()) {
     const stored = await fetchBackendStorageValue<LeadSourceConfig[]>(STORAGE_KEYS.LEAD_SOURCE_CONFIGS);
-    return createSuccessResponse(Array.isArray(stored) && stored.length ? stored : DEFAULT_LEAD_SOURCE_CONFIGS as unknown as LeadSourceConfig[]);
+    return createSuccessResponse(Array.isArray(stored) ? stored : []);
   }
 
   ensureInit();
