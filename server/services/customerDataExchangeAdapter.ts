@@ -329,6 +329,7 @@ async function processImportRow(
     index: number;
     row: { rowNumber: number; name: string; status: string; reason: string; customerId?: string };
     input?: CustomerCreateInput;
+    lastFollowUpRecord?: string;
     destination: CustomerImportDestination;
     user: AuthenticatedUser;
   },
@@ -386,6 +387,7 @@ async function processImportRow(
         requestId: `${event.jobId}:row:${event.index + 1}`,
         idempotencyKey: `${event.jobId}:row:${event.index + 1}`,
         importDestination: event.destination,
+        importedLastFollowUpRecord: event.lastFollowUpRecord,
       });
       result = created.code === 0 && created.data
         ? { rowNumber: event.row.rowNumber, name: event.row.name, status: 'imported', reason: '导入成功', customerId: created.data.id }

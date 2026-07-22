@@ -23,6 +23,11 @@ const templateBook = new ExcelJS.Workbook();
 await templateBook.xlsx.load(template);
 const templateHeaders = templateBook.worksheets[0].getRow(1).values;
 assert.deepEqual(Array.isArray(templateHeaders) ? templateHeaders.slice(1) : [], [...CUSTOMER_IMPORT_HEADERS]);
+assert.equal(
+  Array.isArray(templateHeaders) && templateHeaders.includes('最后跟进记录'),
+  true,
+  '客户导入模板应包含最后跟进记录字段',
+);
 assert.equal(templateBook.worksheets[0].getCell('E2').dataValidation.type, 'list');
 
 const publicPoolTemplate = await createCustomerImportTemplateWorkbook({
@@ -45,13 +50,15 @@ assert.match(
 const inputBook = new ExcelJS.Workbook();
 const sheet = inputBook.addWorksheet('客户导入');
 sheet.addRow([...CUSTOMER_IMPORT_HEADERS]);
-sheet.addRow(['张三', '13800000000', '', '示例公司', '销售甲', '跟进中', 'L1-潜客', '市场品牌部-官网', '教育', '厦门', '高意向', '重点跟进']);
+sheet.addRow(['张三', '13800000000', '', '示例公司', '销售甲', '跟进中', 'L1-潜客', '市场品牌部-官网', '教育', '厦门', '高意向', '已确认报价', '重点跟进']);
 const inputBuffer = await inputBook.xlsx.writeBuffer();
 const rows = await parseCustomerImportWorkbook(inputBuffer);
 assert.equal(rows.length, 1);
 assert.equal(rows[0].rowNumber, 2);
 assert.equal(rows[0].name, '张三');
 assert.equal(rows[0].leadSource, '市场品牌部-官网');
+assert.equal(rows[0].lastFollowUpRecord, '已确认报价');
+assert.equal(rows[0].remark, '重点跟进');
 
 const exportBuffer = await createCustomerExportWorkbook([{ 客户编号: 'c1', 客户姓名: '张三', 手机号: '+8613800000000' }]);
 const exportBook = new ExcelJS.Workbook();
@@ -67,5 +74,6 @@ await errorBook.xlsx.load(errorBuffer);
 const errorHeaders = errorBook.worksheets[0].getRow(1).values;
 assert.deepEqual(Array.isArray(errorHeaders) ? errorHeaders.slice(1) : [], [...CUSTOMER_IMPORT_HEADERS, '错误原因']);
 assert.equal(errorBook.worksheets[0].getCell('B2').value, '13800000000');
+assert.equal(errorBook.worksheets[0].getCell('L2').value, '已确认报价');
 
 console.log('customer data exchange workbook: ok');

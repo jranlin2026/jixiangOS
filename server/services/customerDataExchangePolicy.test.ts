@@ -117,12 +117,18 @@ const exportRows = projectCustomerExportRows([{
   orderCount: 1,
   growthPath: [],
   growthRecords: [],
+  activityRecords: [
+    { id: 'note-newer', type: 'note', title: '普通动态', content: '不应导出', operator: '销售甲', createdAt: '2026-07-04T00:00:00.000Z' },
+    { id: 'follow-latest', type: 'follow', title: '发表了跟进记录', content: '客户已确认报价', operator: '销售甲', createdAt: '2026-07-03T00:00:00.000Z' },
+    { id: 'follow-old', type: 'follow', title: '发表了跟进记录', content: '首次沟通', operator: '销售甲', createdAt: '2026-07-02T00:00:00.000Z' },
+  ],
   createdAt: '2026-07-01T00:00:00.000Z',
   updatedAt: '2026-07-02T00:00:00.000Z',
 }], false);
 
 assert.equal(exportRows[0]['客户姓名'], '张三');
 assert.equal(exportRows[0]['线索来源'], '市场品牌部-官网');
+assert.equal(exportRows[0]['最后跟进记录'], '客户已确认报价');
 assert.equal(Object.prototype.hasOwnProperty.call(exportRows[0], '手机号'), false);
 assert.equal(Object.prototype.hasOwnProperty.call(exportRows[0], '微信'), false);
 

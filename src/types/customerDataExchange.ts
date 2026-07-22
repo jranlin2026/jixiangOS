@@ -16,6 +16,7 @@ export const CUSTOMER_IMPORT_HEADERS = [
   '行业',
   '城市',
   '客户标签',
+  '最后跟进记录',
   '备注',
 ] as const;
 
@@ -32,6 +33,7 @@ export type CustomerImportRow = {
   industry: string;
   city: string;
   tagNames: string;
+  lastFollowUpRecord?: string;
   remark: string;
 };
 

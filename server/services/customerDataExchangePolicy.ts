@@ -55,6 +55,7 @@ export function normalizeCustomerImportRows(rows: CustomerImportRow[]): Normaliz
     industry: cleanText(row.industry),
     city: cleanText(row.city),
     tagNames: splitTagNames(row.tagNames),
+    lastFollowUpRecord: cleanText(row.lastFollowUpRecord),
     remark: cleanText(row.remark),
   }));
 }
@@ -165,6 +166,17 @@ export function validateCustomerImportRows(
   });
 }
 
+function latestFollowUpContent(customer: Customer): string {
+  const latest = (customer.activityRecords || []).reduce<NonNullable<Customer['activityRecords']>[number] | null>((selected, record) => {
+    if (record.type !== 'follow') return selected;
+    if (!selected) return record;
+    const selectedAt = Date.parse(selected.createdAt) || 0;
+    const recordAt = Date.parse(record.createdAt) || 0;
+    return recordAt > selectedAt ? record : selected;
+  }, null);
+  return cleanText(latest?.content);
+}
+
 export function projectCustomerExportRows(customers: Customer[], includeSensitive: boolean): CustomerExportRow[] {
   return customers.map((customer) => {
     const row: CustomerExportRow = {
@@ -178,6 +190,7 @@ export function projectCustomerExportRows(customers: Customer[], includeSensitiv
       行业: customer.industry || '',
       城市: customer.city || '',
       客户标签: (customer.tags || []).join('、'),
+      最后跟进记录: latestFollowUpContent(customer),
       累计成交金额: Number(customer.totalSpent || 0),
       订单数量: Number(customer.orderCount || 0),
       备注: customer.remark || '',

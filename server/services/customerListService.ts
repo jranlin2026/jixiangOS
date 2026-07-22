@@ -56,6 +56,7 @@ export type CustomerCreateExecutionContext = {
   requestId?: string;
   idempotencyKey?: string;
   importDestination?: 'assigned' | 'public_pool';
+  importedLastFollowUpRecord?: string;
 };
 
 type CustomerRow = CustomerBusinessRecordRow;
@@ -318,6 +319,9 @@ export function createCustomerListService(
       const wechat = cleanText(input.wechat);
       if (!phone && !wechat) return failure<Customer>('客户手机号或微信至少填写一项', 400);
       const sourceType = normalizeResourceOwnership(input.sourceType);
+      const importedLastFollowUpRecord = execution.importDestination
+        ? cleanText(execution.importedLastFollowUpRecord)
+        : '';
       if (sourceType === '个人资源' && !input.leadContributorId && !input.leadContributorName) {
         return failure<Customer>('个人资源必须填写线索贡献人', 400);
       }
@@ -396,14 +400,24 @@ export function createCustomerListService(
         orderCount: 0,
         growthPath: [],
         growthRecords: [],
-        activityRecords: [{
-          id: 'act-' + randomUUID().slice(0, 8),
-          type: 'create',
-          title: importToPublicPool ? '导入至公海池' : '创建了客户',
-          operator: actorName,
-          content: input.remark,
-          createdAt: now,
-        }],
+        activityRecords: [
+          ...(importedLastFollowUpRecord ? [{
+            id: 'act-' + randomUUID().slice(0, 8),
+            type: 'follow' as const,
+            title: '历史最后跟进记录',
+            content: importedLastFollowUpRecord,
+            operator: actorName,
+            createdAt: now,
+          }] : []),
+          {
+            id: 'act-' + randomUUID().slice(0, 8),
+            type: 'create',
+            title: importToPublicPool ? '导入至公海池' : '创建了客户',
+            operator: actorName,
+            content: input.remark,
+            createdAt: now,
+          },
+        ],
         createdAt: now,
         updatedAt: now,
       };

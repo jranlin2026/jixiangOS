@@ -117,8 +117,8 @@ export async function createCustomerImportTemplateWorkbook(
   const optionSheet = workbook.addWorksheet(OPTIONS_SHEET);
   sheet.addRow([...CUSTOMER_IMPORT_HEADERS]);
   styleHeader(sheet.getRow(1));
-  sheet.autoFilter = { from: 'A1', to: 'L1' };
-  sheet.columns = [18, 18, 20, 24, 18, 18, 16, 26, 18, 18, 28, 36].map((width) => ({ width }));
+  sheet.autoFilter = { from: 'A1', to: sheet.getRow(1).getCell(CUSTOMER_IMPORT_HEADERS.length).address };
+  sheet.columns = [18, 18, 20, 24, 18, 18, 16, 26, 18, 18, 28, 42, 36].map((width) => ({ width }));
 
   const ownerNames = destination === 'public_pool' ? [] : options.ownerNames;
   const lifecycleStatuses = destination === 'public_pool'
@@ -151,6 +151,7 @@ export async function createCustomerImportTemplateWorkbook(
     ['客户进展', destination === 'public_pool' ? '必须留空，由系统设置为公海状态。' : '可从下拉列表选择；公海不属于客户进展。'],
     ['线索来源', '只填写“线索来源”一个字段，并从模板下拉选项选择。'],
     ['客户标签', '多个标签使用中文逗号、英文逗号或顿号分隔；标签必须已经存在。'],
+    ['最后跟进记录', '可选；导入后会作为客户的一条历史跟进记录保存。'],
     ['重复校验', '系统按手机号或微信检查系统存量和当前文件重复；重复行不会导入。'],
     ['导入流程', '上传文件后先预检。只有“可导入”的行会在确认后写入客户库，错误行可下载报告。'],
     ['文件限制', `仅支持 .xlsx；请勿修改表头；单次最多 ${CUSTOMER_IMPORT_MAX_ROWS} 条。`],
@@ -198,6 +199,7 @@ export async function parseCustomerImportWorkbook(buffer: ArrayBuffer | ArrayBuf
       industry: cell(row, '行业'),
       city: cell(row, '城市'),
       tagNames: cell(row, '客户标签'),
+      lastFollowUpRecord: cell(row, '最后跟进记录'),
       remark: cell(row, '备注'),
     });
   });
@@ -240,6 +242,7 @@ export async function createCustomerImportErrorWorkbook(
       行业: row?.industry || '',
       城市: row?.city || '',
       客户标签: row?.tagNames || '',
+      最后跟进记录: row?.lastFollowUpRecord || '',
       备注: row?.remark || '',
       错误原因: result.reason,
     };

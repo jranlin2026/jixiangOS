@@ -64,6 +64,7 @@ export type CustomerDataExchangeDependencies = {
     index: number;
     row: CustomerImportRowResult;
     input?: CustomerCreateInput;
+    lastFollowUpRecord?: string;
     destination: CustomerImportDestination;
     user: AuthenticatedUser;
   }): Promise<CustomerImportRowResult>;
@@ -245,6 +246,9 @@ export function createCustomerDataExchangeService(deps: CustomerDataExchangeDepe
             ? { rowNumber: row.rowNumber, name: row.name, status: 'ready', reason: '可导入' }
             : { rowNumber: row.rowNumber, name: row.name, status: 'failed', reason: row.reason },
           ...(row.status === 'ready' ? { input: row.input } : {}),
+          ...(row.status === 'ready' && normalizedRows[index].lastFollowUpRecord
+            ? { lastFollowUpRecord: normalizedRows[index].lastFollowUpRecord }
+            : {}),
           destination: request.destination,
           user: executionUser,
         });

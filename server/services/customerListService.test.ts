@@ -251,6 +251,28 @@ assert.ok(directCreateLockOrder.indexOf('business-record') >= 0);
 assert.ok(directCreateLockOrder.indexOf('legacy-source') > directCreateLockOrder.indexOf('business-record'));
 assert.ok(directCreateLockOrder.indexOf('identity') > directCreateLockOrder.indexOf('legacy-source'));
 
+const importedWithFollowUp = await service.create({
+  name: '带历史跟进的客户',
+  company: '导入测试公司',
+  phone: '13800000096',
+  customerLevel: 'L1',
+  owner: '销售',
+  ownerId: actor.id,
+  sourceType: '公司资源',
+}, actor, {
+  importDestination: 'assigned',
+  importedLastFollowUpRecord: '已确认报价，等待客户回复',
+});
+assert.equal(importedWithFollowUp.code, 0);
+assert.deepEqual(importedWithFollowUp.data?.activityRecords?.map((record) => ({
+  type: record.type,
+  title: record.title,
+  content: record.content,
+})), [
+  { type: 'follow', title: '历史最后跟进记录', content: '已确认报价，等待客户回复' },
+  { type: 'create', title: '创建了客户', content: undefined },
+]);
+
 const publicPoolActor = {
   ...actor,
   permissions: [
@@ -396,7 +418,7 @@ const denied = await service.create({
 assert.equal(denied.code, 0, 'ownerId 缺失时必须由服务端明确归属当前 actor，不能按姓名分配');
 assert.equal(denied.data?.ownerId, actor.id);
 assert.equal(denied.data?.owner, actor.name);
-assert.equal(created.length, 6);
+assert.equal(created.length, 7);
 
 const emptyName = await service.create({
   name: '',

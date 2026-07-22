@@ -18,7 +18,7 @@ const user: AuthenticatedUser = {
   ],
 };
 
-const created: Array<{ ownerId?: string; name: string; destination: string; ownerIdentityStatus?: string; lifecycleStatusCode?: string }> = [];
+const created: Array<{ ownerId?: string; name: string; destination: string; ownerIdentityStatus?: string; lifecycleStatusCode?: string; lastFollowUpRecord?: string }> = [];
 const exportAudit: unknown[] = [];
 const persistedTokens = new Set<string>();
 const consumedTokens = new Set<string>();
@@ -47,6 +47,7 @@ const service = createCustomerDataExchangeService({
       destination: event.destination,
       ownerIdentityStatus: event.input.ownerIdentityStatus,
       lifecycleStatusCode: event.input.lifecycleStatusCode,
+      lastFollowUpRecord: event.lastFollowUpRecord,
     });
     const result = { ...event.row, status: 'imported' as const, reason: '导入成功', customerId: `c${created.length}` };
     recordedRows.set(event.index, result);
@@ -85,6 +86,7 @@ const importRows = [{
   industry: '',
   city: '',
   tagNames: '',
+  lastFollowUpRecord: '已确认报价，等待客户回复',
   remark: '',
 }];
 
@@ -95,6 +97,7 @@ assert.match(precheck.confirmationToken, /^cx1\./);
 const confirmed = await service.confirmImport({ rows: importRows, destination: 'assigned', confirmationToken: precheck.confirmationToken }, user);
 assert.equal(confirmed.successCount, 1);
 assert.equal(created.length, 1);
+assert.equal(created[0].lastFollowUpRecord, '已确认报价，等待客户回复');
 assert.equal(confirmed.rows[0].customerId, 'c1');
 assert.equal(importFinalizations.length, 1);
 
@@ -164,6 +167,7 @@ assert.deepEqual(created[created.length - 1], {
   destination: 'public_pool',
   ownerIdentityStatus: 'public_pool',
   lifecycleStatusCode: 'public_pool',
+  lastFollowUpRecord: '已确认报价，等待客户回复',
 });
 
 const exported = await service.exportCustomers({
