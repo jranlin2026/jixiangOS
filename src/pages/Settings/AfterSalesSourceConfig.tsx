@@ -40,9 +40,18 @@ const AfterSalesSourceConfigPage: React.FC = () => {
   return <Box>
     <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>来源平台与店铺</Typography>
     <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>先维护平台，再为平台添加店铺。停用项不会出现在新建挽回订单中，历史订单仍保留原名称。</Typography>
-    <Box sx={{ display: 'flex', gap: 1, mb: 2, maxWidth: 520 }}>
-      <TextField size="small" label="新增平台" value={newPlatform} onChange={(event) => setNewPlatform(event.target.value)} fullWidth />
-      <Button variant="contained" startIcon={<AddIcon />} disabled={!newPlatform.trim()} onClick={() => void add(newPlatform.trim())}>添加</Button>
+    <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1, mb: 2, maxWidth: 520 }}>
+      <TextField size="small" label="新增平台" value={newPlatform} onChange={(event) => setNewPlatform(event.target.value)} fullWidth sx={{ minWidth: 0 }} />
+      <Button
+        data-testid="add-after-sales-platform"
+        variant="contained"
+        startIcon={<AddIcon />}
+        disabled={!newPlatform.trim()}
+        onClick={() => void add(newPlatform.trim())}
+        sx={{ minWidth: 112, whiteSpace: 'nowrap', flexShrink: 0, width: { xs: '100%', sm: 'auto' } }}
+      >
+        添加
+      </Button>
     </Box>
     {message && <Typography variant="body2" sx={{ mb: 1, color: message === '已保存' || message === '已删除' ? '#059669' : '#dc2626' }}>{message}</Typography>}
     <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e2e8f0' }}>
