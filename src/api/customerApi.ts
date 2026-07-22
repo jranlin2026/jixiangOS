@@ -17,7 +17,7 @@ import type { CustomerTag, CustomerTagCatalog } from '../types/tag';
 import type { Role } from '../types/role';
 import { groupTagIdsForFilter, normalizeManualTagIds, validateCustomerTagFilters } from '../shared/utils/customerTagPolicy';
 import { PERMISSION_KEYS } from '../shared/utils/permissions';
-import { getLatestCustomerFollowUp } from '../shared/utils/customerFollowUp';
+import { getCustomerLastFollowUpOwner } from '../shared/utils/customerFollowUp';
 
 function ensureInit(): void {
   initializeMockData();
@@ -375,7 +375,7 @@ async function fetchPublicPoolFollowUpUsers(): Promise<ApiResponse<CustomerManag
   }
   const names = filterVisibleCustomers(getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [])
     .filter((customer) => customer.lifecycleStatusCode === LIFECYCLE_STATUS_CODES.PUBLIC_POOL)
-    .map((customer) => getLatestCustomerFollowUp(customer)?.operator?.trim() || '')
+    .map(getCustomerLastFollowUpOwner)
     .filter(Boolean);
   return createSuccessResponse(Array.from(new Set(names)).map((name) => ({ id: `last-follow-up:${name}`, name })));
 }
@@ -424,7 +424,7 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
     const owner = filters.owner.trim();
     filtered = filtered.filter((c) => (
       filters.lifecycleStatusCode === 'public_pool'
-        ? getLatestCustomerFollowUp(c)?.operator?.trim() === owner
+        ? getCustomerLastFollowUpOwner(c) === owner
         : c.owner === owner
     ));
   }

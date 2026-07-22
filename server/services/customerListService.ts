@@ -16,6 +16,7 @@ import {
   normalizePhoneForStorage,
 } from '../../src/shared/utils/phoneNumber';
 import { PERMISSION_KEYS, hasExplicitPermission, hasPermission } from '../../src/shared/utils/permissions';
+import { NO_CUSTOMER_FOLLOW_UP_OWNER } from '../../src/shared/utils/customerFollowUp';
 import { loadCustomerTagCatalog } from './customerTagService';
 import { validateManualTagSelection } from './customerTagPolicy';
 import { groupTagIdsForFilter, normalizeManualTagIds, validateCustomerTagFilters } from '../../src/shared/utils/customerTagPolicy';
@@ -141,8 +142,8 @@ function containsTagId(tagId: string) {
   return Prisma.sql`JSON_CONTAINS(COALESCE(JSON_EXTRACT(data, '$.manualTagIds'), JSON_ARRAY()), JSON_QUOTE(${tagId})) = 1`;
 }
 
-function latestFollowUpOperatorSql() {
-  return Prisma.sql`COALESCE((
+function publicPoolLastFollowUpOwnerSql() {
+  return Prisma.sql`COALESCE(NULLIF((
     SELECT TRIM(activity.activity_operator)
     FROM JSON_TABLE(
       COALESCE(JSON_EXTRACT(data, '$.activityRecords'), JSON_ARRAY()),
@@ -155,7 +156,7 @@ function latestFollowUpOperatorSql() {
     WHERE activity.activity_type = 'follow'
     ORDER BY activity.activity_created_at DESC
     LIMIT 1
-  ), '')`;
+  ), ''), NULLIF(TRIM(${jsonText('$.previousOwner')}), ''), ${NO_CUSTOMER_FOLLOW_UP_OWNER})`;
 }
 
 export function matchesCustomerTagFilters(customer: Pick<Customer, 'manualTagIds' | 'tags'>, filters: CustomerFilters, catalog: CustomerTagCatalog): boolean {
@@ -211,7 +212,7 @@ export function buildCustomerWhere(filters: CustomerFilters, catalog?: CustomerT
 
   if (filters.owner) {
     if (normalizeLifecycleStatusCode(filters.lifecycleStatusCode) === LIFECYCLE_STATUS_CODES.PUBLIC_POOL) {
-      conditions.push(Prisma.sql`${latestFollowUpOperatorSql()} = ${filters.owner.trim()}`);
+      conditions.push(Prisma.sql`${publicPoolLastFollowUpOwnerSql()} = ${filters.owner.trim()}`);
     } else {
       conditions.push(Prisma.sql`${jsonText('$.owner')} = ${filters.owner}`);
     }
@@ -564,16 +565,16 @@ export function createCustomerListService(
     async listPublicPoolFollowUpOperators(currentUser?: AuthenticatedUser | null) {
       const visibility = await buildVisibilityWhere(prisma, currentUser);
       const where = buildCustomerWhere({ lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL });
-      const latestOperator = latestFollowUpOperatorSql();
+      const lastFollowUpOwner = publicPoolLastFollowUpOwnerSql();
       const rows = await prisma.$queryRaw<Array<{ name: string }>>(Prisma.sql`
-        SELECT DISTINCT latest_follow_up_operator AS name
+        SELECT DISTINCT last_follow_up_owner AS name
         FROM (
-          SELECT ${latestOperator} AS latest_follow_up_operator
+          SELECT ${lastFollowUpOwner} AS last_follow_up_owner
           FROM business_records
           WHERE ${where} AND ${visibility.where}
         ) AS public_pool_follow_ups
-        WHERE latest_follow_up_operator <> ''
-        ORDER BY latest_follow_up_operator
+        WHERE last_follow_up_owner <> ''
+        ORDER BY last_follow_up_owner
       `);
       return success(rows.map((row) => cleanText(row.name)).filter(Boolean));
     },

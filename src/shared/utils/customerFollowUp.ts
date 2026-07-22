@@ -1,5 +1,7 @@
 import type { Customer, CustomerActivityRecord } from '../../types/customer';
 
+export const NO_CUSTOMER_FOLLOW_UP_OWNER = '暂无跟进';
+
 export function getLatestCustomerFollowUp(
   customer: Pick<Customer, 'activityRecords'>,
 ): CustomerActivityRecord | undefined {
@@ -10,4 +12,12 @@ export function getLatestCustomerFollowUp(
     const recordAt = Date.parse(record.createdAt) || 0;
     return recordAt > selectedAt ? record : selected;
   }, undefined);
+}
+
+export function getCustomerLastFollowUpOwner(
+  customer: Pick<Customer, 'activityRecords' | 'previousOwner'>,
+): string {
+  return getLatestCustomerFollowUp(customer)?.operator?.trim()
+    || customer.previousOwner?.trim()
+    || NO_CUSTOMER_FOLLOW_UP_OWNER;
 }

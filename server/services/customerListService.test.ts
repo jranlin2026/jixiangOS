@@ -567,7 +567,7 @@ for (const [filters, joiner] of filterCases) {
 capturedQueries.length = 0;
 const followUpOperators = await listService.listPublicPoolFollowUpOperators(salesActor);
 assert.deepEqual(followUpOperators.data, ['历史跟进人', '跟进人未知']);
-assert.match(capturedQueries[0], /SELECT DISTINCT latest_follow_up_operator/);
+assert.match(capturedQueries[0], /SELECT DISTINCT last_follow_up_owner/);
 assert.match(capturedQueries[0], /JSON_TABLE/);
 assert.match(capturedQueries[0], /JSON_UNQUOTE\(JSON_EXTRACT\(data, '\$\.owner'\)\) IN/);
 

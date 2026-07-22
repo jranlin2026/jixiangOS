@@ -1,9 +1,8 @@
 import type { Customer, CustomerManageableUser } from '../../types/customer';
-import { getLatestCustomerFollowUp } from '../../shared/utils/customerFollowUp';
+import { getCustomerLastFollowUpOwner } from '../../shared/utils/customerFollowUp';
 
-export function getLastFollowUpOperator(customer: Pick<Customer, 'activityRecords'>): string {
-  const latest = getLatestCustomerFollowUp(customer);
-  return latest?.operator?.trim() || '暂无跟进';
+export function getLastFollowUpOperator(customer: Pick<Customer, 'activityRecords' | 'previousOwner'>): string {
+  return getCustomerLastFollowUpOwner(customer);
 }
 
 export function getPreviousOwnerLabel(customer: Pick<Customer, 'previousOwner'>): string {
@@ -11,11 +10,11 @@ export function getPreviousOwnerLabel(customer: Pick<Customer, 'previousOwner'>)
 }
 
 export function buildLastFollowUpFilterUsers(
-  customers: Array<Pick<Customer, 'activityRecords'>>,
+  customers: Array<Pick<Customer, 'activityRecords' | 'previousOwner'>>,
   selectedName = '',
 ): CustomerManageableUser[] {
   const names = customers
-    .map((customer) => getLatestCustomerFollowUp(customer)?.operator?.trim() || '')
+    .map(getCustomerLastFollowUpOwner)
     .filter(Boolean);
   const selected = selectedName.trim();
   if (selected) names.push(selected);

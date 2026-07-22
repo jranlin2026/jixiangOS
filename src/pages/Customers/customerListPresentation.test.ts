@@ -12,10 +12,15 @@ const customer = {
 
 assert.equal(getLastFollowUpOperator(customer), '销售乙');
 assert.equal(getLastFollowUpOperator({ activityRecords: [] }), '暂无跟进');
+assert.equal(getLastFollowUpOperator({ activityRecords: [], previousOwner: '销售甲' }), '销售甲');
 assert.equal(getPreviousOwnerLabel({ previousOwner: '销售甲' }), '销售甲');
 assert.deepEqual(
-  buildLastFollowUpFilterUsers([customer], '已离职销售').map((user) => user.name),
-  ['销售乙', '已离职销售'],
+  buildLastFollowUpFilterUsers([
+    customer,
+    { activityRecords: [], previousOwner: '销售甲' },
+    { activityRecords: [] },
+  ], '已离职销售').map((user) => user.name),
+  ['销售乙', '销售甲', '暂无跟进', '已离职销售'],
 );
 
 console.log('customer list presentation: ok');
