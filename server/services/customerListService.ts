@@ -489,6 +489,8 @@ export function createCustomerListService(
           phone,
           wechat: wechat || null,
           ownerId: targetOwner?.id || null,
+          previousOwner: cleanText(input.previousOwner) || null,
+          originalSalesTransferBy: cleanText(input.originalSalesTransferBy) || null,
           importDestination: execution.importDestination || 'assigned',
           sourceType,
           manualTagIds: tagValidation.tagIds,

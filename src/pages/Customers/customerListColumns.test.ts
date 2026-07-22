@@ -15,7 +15,8 @@ const customer = {
 const columns = buildCustomerColumns([], 'public_pool');
 const byId = (id: string) => columns.find((column) => column.id === id)!;
 
-assert.equal(byId('originalSalesTransferBy').label, '原销转人员（归因）');
+assert.equal(byId('originalSalesTransferBy').label, '首个销售负责人');
+assert.equal(byId('previousOwner').label, '上一个销售负责人');
 assert.equal(byId('previousOwner').render(customer), '销售甲');
 assert.equal(byId('owner').label, '最后跟进人');
 assert.equal(byId('owner').render(customer), '销售丙');

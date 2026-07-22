@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import type { Role } from '../../src/types/role';
 import type { Customer } from '../../src/types/customer';
+import type { AuthenticatedUser } from '../../src/types/auth';
 import type { CustomerAccessContext } from './customerAccessPolicy';
 import type {
   CustomerAtomicCommand,
@@ -26,11 +27,14 @@ export type CustomerBatchJobExecutionItem = {
   targetKey: string;
   idempotencyKey: string;
   expectedUpdatedAt?: Date | string | null;
+  beforeSnapshot?: unknown;
+  afterSnapshot?: unknown;
 };
 
 export type CustomerBatchExecutionContext = {
   access: CustomerAccessContext;
   actor: { id: string; name: string };
+  user?: AuthenticatedUser;
   roles: Role[];
 };
 

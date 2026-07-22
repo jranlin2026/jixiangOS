@@ -6,6 +6,8 @@ import type { CustomerFilters } from './customer';
  * permission model, preventing a UI-only action from drifting from the server.
  */
 export type CustomerBatchOperation = CustomerMutationBatchOperation;
+export type CustomerBatchJobOperation = CustomerBatchOperation | 'import';
+export type CustomerBatchJobSelectionMode = CustomerBatchSelection['mode'] | 'file_rows';
 
 export type CustomerBatchJobStatus =
   | 'queued'
@@ -97,9 +99,9 @@ export type CustomerBatchJobSummary = {
   actorId: string;
   actorName: string;
   handlerKey: string;
-  operation: CustomerBatchOperation;
+  operation: CustomerBatchJobOperation;
   status: CustomerBatchJobStatus;
-  selectionMode: CustomerBatchSelection['mode'];
+  selectionMode: CustomerBatchJobSelectionMode;
   frozenCustomerCount: number;
   totalCount: number;
   successCount: number;

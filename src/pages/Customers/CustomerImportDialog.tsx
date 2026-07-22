@@ -23,7 +23,6 @@ import {
 } from '@mui/material';
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
-import { useNavigate } from 'react-router-dom';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import {
   createCustomerImportErrorWorkbook,
@@ -32,18 +31,17 @@ import {
   parseCustomerImportWorkbook,
 } from '../../api/customerDataExchangeApi';
 import type {
-  CustomerImportConfirmResult,
   CustomerImportDestination,
   CustomerImportPrecheckResult,
   CustomerImportRow,
   CustomerImportTemplateOptions,
 } from '../../types/customerDataExchange';
-import { ROUTES } from '../../shared/utils/constants';
+import type { CustomerBatchJobSummary } from '../../types/customerBatch';
 
 type Props = {
   open: boolean;
   onClose: () => void;
-  onImported: () => void;
+  onQueued: (job: CustomerBatchJobSummary) => void;
 };
 
 function downloadBuffer(fileName: string, buffer: ArrayBuffer): void {
@@ -55,14 +53,12 @@ function downloadBuffer(fileName: string, buffer: ArrayBuffer): void {
   URL.revokeObjectURL(url);
 }
 
-export default function CustomerImportDialog({ open, onClose, onImported }: Props) {
-  const navigate = useNavigate();
+export default function CustomerImportDialog({ open, onClose, onQueued }: Props) {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [options, setOptions] = useState<CustomerImportTemplateOptions | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [rows, setRows] = useState<CustomerImportRow[]>([]);
   const [precheck, setPrecheck] = useState<CustomerImportPrecheckResult | null>(null);
-  const [result, setResult] = useState<CustomerImportConfirmResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [destination, setDestination] = useState<CustomerImportDestination>('assigned');
@@ -74,7 +70,6 @@ export default function CustomerImportDialog({ open, onClose, onImported }: Prop
     setFile(null);
     setRows([]);
     setPrecheck(null);
-    setResult(null);
     setError('');
     setDestination('assigned');
     customerDataExchangeApi.templateOptions().then((response) => {
@@ -87,7 +82,8 @@ export default function CustomerImportDialog({ open, onClose, onImported }: Prop
     return () => { active = false; };
   }, [open]);
 
-  const visibleRows = result?.rows || precheck?.rows || [];
+  const visibleRows = precheck?.rows || [];
+  const suspectedDuplicateCount = precheck?.rows.filter((row) => row.status === 'ready' && row.reason.includes('客户名称')).length || 0;
   const handleDownloadTemplate = async () => {
     if (!options) return;
     setBusy(true);
@@ -105,7 +101,6 @@ export default function CustomerImportDialog({ open, onClose, onImported }: Prop
     setFile(null);
     setRows([]);
     setPrecheck(null);
-    setResult(null);
     setError('');
     if (!selected) return;
     if (!selected.name.toLowerCase().endsWith('.xlsx')) {
@@ -143,8 +138,8 @@ export default function CustomerImportDialog({ open, onClose, onImported }: Prop
     try {
       const response = await customerDataExchangeApi.confirmImport(rows, destination, precheck.confirmationToken);
       if (response.code !== 0 || !response.data) throw new Error(response.message || '客户导入失败');
-      setResult(response.data);
-      onImported();
+      onQueued(response.data);
+      onClose();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '客户导入失败');
     } finally { setBusy(false); }
@@ -160,7 +155,6 @@ export default function CustomerImportDialog({ open, onClose, onImported }: Prop
     if (next === 'public_pool' && !options?.canImportToPublicPool) return;
     setDestination(next);
     setPrecheck(null);
-    setResult(null);
     setError('');
   };
 
@@ -179,8 +173,8 @@ export default function CustomerImportDialog({ open, onClose, onImported }: Prop
               value={destination}
               onChange={(event) => handleDestinationChange(event.target.value as CustomerImportDestination)}
             >
-              <FormControlLabel value="assigned" control={<Radio />} label="导入客户列表" disabled={busy || Boolean(result)} />
-              <FormControlLabel value="public_pool" control={<Radio />} label="直接导入公海池" disabled={busy || Boolean(result) || !options?.canImportToPublicPool} />
+              <FormControlLabel value="assigned" control={<Radio />} label="导入客户列表" disabled={busy} />
+              <FormControlLabel value="public_pool" control={<Radio />} label="直接导入公海池" disabled={busy || !options?.canImportToPublicPool} />
             </RadioGroup>
             <Typography variant="body2" color="text.secondary">
               {destination === 'public_pool'
@@ -192,13 +186,11 @@ export default function CustomerImportDialog({ open, onClose, onImported }: Prop
             ) : null}
           </Paper>
           {error ? <Alert severity="error">{error}</Alert> : null}
-          {result ? (
-            <Alert severity={result.failureCount ? 'warning' : 'success'}>
-              导入完成：成功 {result.successCount} 条，失败 {result.failureCount} 条；已写入{destination === 'public_pool' ? '公海池' : '客户列表'}。
-            </Alert>
-          ) : precheck ? (
+          {precheck ? (
             <Alert severity={precheck.blockedCount ? 'warning' : 'success'}>
-              预检完成：可导入 {precheck.readyCount} 条，阻止 {precheck.blockedCount} 条。确认后将写入{destination === 'public_pool' ? '公海池' : '客户列表'}。
+              预检完成：可导入 {precheck.readyCount} 条，阻止 {precheck.blockedCount} 条
+              {suspectedDuplicateCount ? `，其中 ${suspectedDuplicateCount} 条客户名称疑似重复（仅提醒）` : ''}。
+              确认后将进入后台任务并写入{destination === 'public_pool' ? '公海池' : '客户列表'}。
             </Alert>
           ) : null}
           <Paper variant="outlined" sx={{ p: 2, bgcolor: '#f8fafc' }}>
@@ -207,7 +199,7 @@ export default function CustomerImportDialog({ open, onClose, onImported }: Prop
                 下载标准模板
               </Button>
               <input ref={fileRef} hidden type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => void handleFile(event)} />
-              <Button variant="outlined" startIcon={<UploadFileOutlinedIcon />} onClick={() => fileRef.current?.click()} disabled={busy || Boolean(result)}>
+              <Button variant="outlined" startIcon={<UploadFileOutlinedIcon />} onClick={() => fileRef.current?.click()} disabled={busy}>
                 {file ? '更换文件' : '选择文件'}
               </Button>
               <Typography variant="body2" color="text.secondary">
@@ -226,7 +218,7 @@ export default function CustomerImportDialog({ open, onClose, onImported }: Prop
                       <TableCell>{row.rowNumber}</TableCell>
                       <TableCell>{row.name || '未填写'}</TableCell>
                       <TableCell>
-                        <Chip size="small" color={row.status === 'ready' || row.status === 'imported' ? 'success' : 'error'} label={row.status === 'ready' ? '可导入' : row.status === 'imported' ? '已导入' : '已阻止'} />
+                        <Chip size="small" color={row.status === 'ready' ? (row.reason === '可导入' ? 'success' : 'warning') : 'error'} label={row.status === 'ready' ? (row.reason === '可导入' ? '可导入' : '疑似重复') : '已阻止'} />
                       </TableCell>
                       <TableCell>{row.reason}</TableCell>
                     </TableRow>
@@ -240,12 +232,9 @@ export default function CustomerImportDialog({ open, onClose, onImported }: Prop
       <DialogActions>
         {visibleRows.some((row) => row.status === 'blocked' || row.status === 'failed') ? <Button onClick={() => void downloadErrors()}>下载错误报告</Button> : null}
         <Box sx={{ flex: 1 }} />
-        <Button onClick={onClose} disabled={busy}>{result ? '完成' : '取消'}</Button>
-        {result && destination === 'public_pool' ? (
-          <Button variant="contained" onClick={() => { onClose(); navigate(`${ROUTES.CUSTOMERS}?tab=public_pool`); }}>查看公海池</Button>
-        ) : null}
+        <Button onClick={onClose} disabled={busy}>取消</Button>
         {!precheck ? <Button variant="contained" onClick={() => void handlePrecheck()} disabled={!rows.length || busy}>开始预检</Button> : null}
-        {precheck && !result ? <Button variant="contained" onClick={() => void handleConfirm()} disabled={!precheck.readyCount || busy}>确认导入 {precheck.readyCount} 条</Button> : null}
+        {precheck ? <Button variant="contained" onClick={() => void handleConfirm()} disabled={!precheck.readyCount || busy}>确认并后台导入 {precheck.readyCount} 条</Button> : null}
       </DialogActions>
     </Dialog>
   );

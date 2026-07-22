@@ -1,4 +1,5 @@
 import type { CustomerFilters } from './customer';
+import type { CustomerBatchJobSummary } from './customerBatch';
 
 export const CUSTOMER_IMPORT_MAX_ROWS = 2_000;
 
@@ -10,6 +11,8 @@ export const CUSTOMER_IMPORT_HEADERS = [
   '微信',
   '公司名称',
   '销售负责人',
+  '上一个销售负责人',
+  '首个销售负责人',
   '客户进度',
   '客户等级',
   '线索来源',
@@ -27,6 +30,8 @@ export type CustomerImportRow = {
   wechat: string;
   company: string;
   ownerName: string;
+  previousOwnerName?: string;
+  firstOwnerName?: string;
   lifecycleStatus: string;
   customerLevel: string;
   leadSource: string;
@@ -54,12 +59,7 @@ export type CustomerImportPrecheckResult = {
   rows: CustomerImportRowResult[];
 };
 
-export type CustomerImportConfirmResult = {
-  totalCount: number;
-  successCount: number;
-  failureCount: number;
-  rows: CustomerImportRowResult[];
-};
+export type CustomerImportConfirmResult = CustomerBatchJobSummary;
 
 export type CustomerImportTemplateOptions = {
   ownerNames: string[];

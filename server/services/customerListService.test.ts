@@ -235,6 +235,8 @@ const result = await service.create({
   customerLevel: 'L1',
   owner: '销售',
   ownerId: actor.id,
+  previousOwner: '销售乙',
+  originalSalesTransferBy: '销售丙',
   sourceType: '公司资源',
 }, actor);
 
@@ -258,12 +260,16 @@ const importedWithFollowUp = await service.create({
   customerLevel: 'L1',
   owner: '销售',
   ownerId: actor.id,
+  previousOwner: '销售乙',
+  originalSalesTransferBy: '销售丙',
   sourceType: '公司资源',
 }, actor, {
   importDestination: 'assigned',
   importedLastFollowUpRecord: '已确认报价，等待客户回复',
 });
 assert.equal(importedWithFollowUp.code, 0);
+assert.equal(importedWithFollowUp.data?.previousOwner, '销售乙');
+assert.equal(importedWithFollowUp.data?.originalSalesTransferBy, '销售丙');
 assert.deepEqual(importedWithFollowUp.data?.activityRecords?.map((record) => ({
   type: record.type,
   title: record.title,
@@ -288,12 +294,16 @@ const publicPoolCreated = await service.create({
   phone: '13800000099',
   customerLevel: 'L1',
   owner: '公海',
+  previousOwner: '历史销售乙',
+  originalSalesTransferBy: '首任销售甲',
   sourceType: '公司资源',
 }, publicPoolActor, { importDestination: 'public_pool', batchJobId: 'import-public-pool' });
 assert.equal(publicPoolCreated.code, 0);
 assert.equal(publicPoolCreated.data?.owner, '公海');
 assert.equal(publicPoolCreated.data?.ownerId, undefined);
 assert.equal(publicPoolCreated.data?.ownerIdentityStatus, 'public_pool');
+assert.equal(publicPoolCreated.data?.previousOwner, '历史销售乙');
+assert.equal(publicPoolCreated.data?.originalSalesTransferBy, '首任销售甲');
 assert.equal(publicPoolCreated.data?.lifecycleStatusCode, 'public_pool');
 assert.equal(publicPoolCreated.data?.releasedBy, actor.name);
 assert.equal(publicPoolCreated.data?.releaseReason, '批量导入至公海');

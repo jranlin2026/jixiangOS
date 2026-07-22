@@ -54,6 +54,8 @@ import {
   type CustomerLifecycleConfig,
 } from './customerLifecyclePolicy';
 import { mapPrismaDepartment, mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
+import { toAuthenticatedUser } from '../../src/shared/utils/permissions';
+import { mergeRoleWithDefaultAccess } from '../../src/shared/utils/organizationConfig';
 import { mapCustomerBusinessRecord, type CustomerBusinessRecordRow } from './customerBusinessRecordRepository';
 import { validateManualTagUpdateSelection } from './customerTagPolicy';
 
@@ -675,6 +677,7 @@ export async function lockServerCustomerDirectory(tx: BatchTx, actorId: string) 
   if (!actor) throw new BatchPrecheckAuthorizationError('当前用户不存在或已离职');
   return {
     actor: { id: actor.id, name: actor.name },
+    user: toAuthenticatedUser(actor, roles.map(mergeRoleWithDefaultAccess)),
     roles,
     access: buildCustomerAccessContextFromDirectory(
       currentActor(actorId),
@@ -1054,6 +1057,9 @@ export function createCustomerBatchService(
     const actorIsCreator = job.actorId === context.actorId;
     if (!actorIsCreator && !requiresAuditRead(context)) {
       throw new BatchPrecheckAuthorizationError('无权查看批量任务');
+    }
+    if (actorIsCreator && job.handlerKey === 'customer_import') {
+      return (await jobStore.listItems(client, job.id)).map(normalizeJobItem);
     }
     const readableIds = new Set(
       (await jobCustomers(client, jobCustomerIds(job)))

@@ -278,6 +278,8 @@ function applyLeavingUserCustomerHandoff(
         publicPoolAt: now,
         releasedBy: leavingUser.name,
         releaseReason: reason,
+        previousOwner: leavingUser.name,
+        originalSalesTransferBy: customer.originalSalesTransferBy || leavingUser.name,
         activityRecords: [activity, ...(customer.activityRecords || [])],
         updatedAt: now,
       };
@@ -286,7 +288,8 @@ function applyLeavingUserCustomerHandoff(
       ...customer,
       owner: nextOwner,
       ownerSince: now,
-      originalSalesTransferBy: leavingUser.name,
+      previousOwner: leavingUser.name,
+      originalSalesTransferBy: customer.originalSalesTransferBy || leavingUser.name,
       activityRecords: [activity, ...(customer.activityRecords || [])],
       updatedAt: now,
     };

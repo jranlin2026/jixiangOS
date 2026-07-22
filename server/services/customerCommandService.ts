@@ -687,7 +687,7 @@ const CUSTOMER_EDIT_FIELDS: Array<{ field: keyof Customer; label: string }> = [
   { field: 'sourceType', label: '资源归属' },
   { field: 'sourceName', label: '来源名称' },
   { field: 'sourceAccount', label: '来源账号' },
-  { field: 'originalSalesTransferBy', label: '原销转人员' },
+  { field: 'originalSalesTransferBy', label: '首个销售负责人' },
   { field: 'score', label: '线索评分' },
 ];
 

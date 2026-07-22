@@ -48,12 +48,15 @@ function parseRows(value: unknown): CustomerImportRow[] {
       wechat: String(row.wechat || ''),
       company: String(row.company || ''),
       ownerName: String(row.ownerName || ''),
+      previousOwnerName: String(row.previousOwnerName || ''),
+      firstOwnerName: String(row.firstOwnerName || ''),
       lifecycleStatus: String(row.lifecycleStatus || ''),
       customerLevel: String(row.customerLevel || ''),
       leadSource: String(row.leadSource || ''),
       industry: String(row.industry || ''),
       city: String(row.city || ''),
       tagNames: String(row.tagNames || ''),
+      lastFollowUpRecord: String(row.lastFollowUpRecord || ''),
       remark: String(row.remark || ''),
     };
   });

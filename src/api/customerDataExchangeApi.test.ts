@@ -28,6 +28,8 @@ assert.equal(
   true,
   '客户导入模板应包含最后跟进记录字段',
 );
+assert.equal(Array.isArray(templateHeaders) && templateHeaders.includes('上一个销售负责人'), true);
+assert.equal(Array.isArray(templateHeaders) && templateHeaders.includes('首个销售负责人'), true);
 assert.equal(templateBook.worksheets[0].getCell('E2').dataValidation.type, 'list');
 
 const publicPoolTemplate = await createCustomerImportTemplateWorkbook({
@@ -41,7 +43,9 @@ assert.doesNotMatch(
   /流失公海/,
 );
 assert.equal(publicPoolTemplateBook.worksheets[0].getCell('E2').dataValidation?.type, undefined);
+assert.equal(publicPoolTemplateBook.worksheets[0].getCell('H2').dataValidation?.type, undefined);
 assert.equal(publicPoolTemplateBook.worksheets[0].getCell('F2').dataValidation?.type, undefined);
+assert.equal(publicPoolTemplateBook.worksheets[0].getCell('G2').dataValidation?.type, undefined);
 assert.match(
   publicPoolTemplateBook.getWorksheet('填写说明')!.getColumn(2).values.join('|'),
   /销售负责人和客户进展必须留空|必须留空/,
@@ -50,15 +54,30 @@ assert.match(
 const inputBook = new ExcelJS.Workbook();
 const sheet = inputBook.addWorksheet('客户导入');
 sheet.addRow([...CUSTOMER_IMPORT_HEADERS]);
-sheet.addRow(['张三', '13800000000', '', '示例公司', '销售甲', '跟进中', 'L1-潜客', '市场品牌部-官网', '教育', '厦门', '高意向', '已确认报价', '重点跟进']);
+sheet.addRow(['张三', '13800000000', '', '示例公司', '销售甲', '销售乙', '销售丙', '跟进中', 'L1-潜客', '市场品牌部-官网', '教育', '厦门', '高意向', '已确认报价', '重点跟进']);
 const inputBuffer = await inputBook.xlsx.writeBuffer();
 const rows = await parseCustomerImportWorkbook(inputBuffer);
 assert.equal(rows.length, 1);
 assert.equal(rows[0].rowNumber, 2);
 assert.equal(rows[0].name, '张三');
 assert.equal(rows[0].leadSource, '市场品牌部-官网');
+assert.equal(rows[0].previousOwnerName, '销售乙');
+assert.equal(rows[0].firstOwnerName, '销售丙');
 assert.equal(rows[0].lastFollowUpRecord, '已确认报价');
 assert.equal(rows[0].remark, '重点跟进');
+
+const legacyHeaders = CUSTOMER_IMPORT_HEADERS.filter((header) => !['上一个销售负责人', '首个销售负责人'].includes(header));
+const legacyBook = new ExcelJS.Workbook();
+const legacySheet = legacyBook.addWorksheet('旧版客户导入');
+legacySheet.addRow(legacyHeaders);
+const legacyValues: Record<string, string> = {
+  '客户姓名*': '旧模板客户', 手机号: '13900000000', 公司名称: '旧模板公司', 销售负责人: '销售甲', 备注: '兼容导入',
+};
+legacySheet.addRow(legacyHeaders.map((header) => legacyValues[header] || ''));
+const legacyRows = await parseCustomerImportWorkbook(await legacyBook.xlsx.writeBuffer());
+assert.equal(legacyRows[0].name, '旧模板客户');
+assert.equal(legacyRows[0].previousOwnerName, '');
+assert.equal(legacyRows[0].firstOwnerName, '');
 
 const exportBuffer = await createCustomerExportWorkbook([{ 客户编号: 'c1', 客户姓名: '张三', 手机号: '+8613800000000' }]);
 const exportBook = new ExcelJS.Workbook();
@@ -74,6 +93,6 @@ await errorBook.xlsx.load(errorBuffer);
 const errorHeaders = errorBook.worksheets[0].getRow(1).values;
 assert.deepEqual(Array.isArray(errorHeaders) ? errorHeaders.slice(1) : [], [...CUSTOMER_IMPORT_HEADERS, '错误原因']);
 assert.equal(errorBook.worksheets[0].getCell('B2').value, '13800000000');
-assert.equal(errorBook.worksheets[0].getCell('L2').value, '已确认报价');
+assert.equal(errorBook.worksheets[0].getCell('N2').value, '已确认报价');
 
 console.log('customer data exchange workbook: ok');

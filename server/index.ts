@@ -42,6 +42,7 @@ import {
   CustomerBatchJobHandlerRegistry,
   createCustomerMutationBatchJobHandler,
 } from './services/customerBatchJobHandler';
+import { createCustomerImportBatchJobHandler } from './services/customerDataExchangeAdapter';
 import { loadCustomerAccessContext } from './services/customerAccessPolicy';
 import {
   backfillCustomerContactIdentitiesResult,
@@ -168,6 +169,7 @@ const customerBatchWorker = createCustomerBatchWorker({
   store: createPrismaCustomerBatchWorkerStore(prisma),
   handlers: new CustomerBatchJobHandlerRegistry([
     createCustomerMutationBatchJobHandler({ atomicService: customerAtomicCommandEngine }),
+    createCustomerImportBatchJobHandler(customerListService),
   ]),
   workerId: `${process.pid}-${randomUUID()}`,
   onError: (error) => console.error(

@@ -168,7 +168,7 @@ const CUSTOMER_CHANGE_FIELDS: Array<{ field: keyof Customer; label: string }> = 
   { field: 'remark', label: '备注' },
   { field: 'sourceType', label: '资源归属' },
   { field: 'sourceName', label: '来源名称' },
-  { field: 'originalSalesTransferBy', label: '原销转人员' },
+  { field: 'originalSalesTransferBy', label: '首个销售负责人' },
 ];
 
 const CUSTOMER_TO_LEAD_FIELDS: Array<{

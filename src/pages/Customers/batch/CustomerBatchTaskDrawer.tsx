@@ -172,7 +172,7 @@ const CustomerBatchTaskDrawer: React.FC<Props> = ({
               <Chip variant="outlined" label={`跳过 ${result.job.skippedCount}`} />
               <Chip variant="outlined" label={`取消 ${result.job.cancelledCount}`} />
             </Stack>
-            {canCancel && <Button color="error" variant="outlined" onClick={() => void cancel()} disabled={loading}>取消未开始的客户操作</Button>}
+            {canCancel && <Button color="error" variant="outlined" onClick={() => void cancel()} disabled={loading}>取消未开始的任务明细</Button>}
             <Divider />
             <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>执行明细</Typography>
             {result.items.length === 0 ? (
@@ -182,7 +182,9 @@ const CustomerBatchTaskDrawer: React.FC<Props> = ({
                 {result.items.map((item) => (
                   <Box key={item.id} sx={{ py: 1.25 }}>
                     <Stack direction="row" justifyContent="space-between" spacing={1}>
-                      <Typography variant="body2" sx={{ fontWeight: 700 }}>{item.targetKey.replace(/^customer:/, '客户 ')}</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>{item.targetKey.startsWith('row:')
+                        ? `Excel 行 ${Number(item.targetKey.match(/:excel:(\d+)$/)?.[1] || Number(item.targetKey.slice(4)) + 1)}`
+                        : item.targetKey.replace(/^customer:/, '客户 ')}</Typography>
                       <Chip size="small" variant="outlined" label={item.status} />
                     </Stack>
                     {item.errorMessage && <Typography variant="caption" color="error" display="block" sx={{ mt: 0.5 }}>{item.errorMessage}</Typography>}

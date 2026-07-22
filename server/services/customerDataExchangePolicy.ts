@@ -4,7 +4,11 @@ import { LIFECYCLE_STATUS_CODES, normalizeLifecycleStatusCode } from '../../src/
 import { getPhoneNumberError, normalizePhoneForStorage } from '../../src/shared/utils/phoneNumber';
 import { getLatestCustomerFollowUp } from '../../src/shared/utils/customerFollowUp';
 
-type NormalizedImportRow = Omit<CustomerImportRow, 'tagNames'> & { tagNames: string[] };
+type NormalizedImportRow = Omit<CustomerImportRow, 'tagNames' | 'previousOwnerName' | 'firstOwnerName'> & {
+  tagNames: string[];
+  previousOwnerName: string;
+  firstOwnerName: string;
+};
 
 type DirectoryOption = { id: string; name: string };
 type LifecycleOption = { code: string; name: string };
@@ -22,6 +26,7 @@ export type CustomerImportDirectory = {
   leadSources: LeadSourceOption[];
   tags: TagOption[];
   existingContactKeys: Set<string>;
+  existingCustomerNames?: Set<string>;
 };
 
 export type ValidatedCustomerImportRow = CustomerImportRowResult & {
@@ -50,6 +55,8 @@ export function normalizeCustomerImportRows(rows: CustomerImportRow[]): Normaliz
     wechat: cleanText(row.wechat),
     company: cleanText(row.company),
     ownerName: cleanText(row.ownerName),
+    previousOwnerName: cleanText(row.previousOwnerName),
+    firstOwnerName: cleanText(row.firstOwnerName),
     lifecycleStatus: cleanText(row.lifecycleStatus),
     customerLevel: cleanText(row.customerLevel),
     leadSource: cleanText(row.leadSource),
@@ -78,10 +85,20 @@ export function validateCustomerImportRows(
   destination: CustomerImportDestination,
 ): ValidatedCustomerImportRow[] {
   const encountered = new Set<string>();
+  const nameCounts = rows.reduce((counts, row) => {
+    const name = normalizedLookup(row.name);
+    if (name) counts.set(name, (counts.get(name) || 0) + 1);
+    return counts;
+  }, new Map<string, number>());
   return rows.map((row) => {
     const errors: string[] = [];
+    const warnings: string[] = [];
     if (!row.name) errors.push('客户姓名不能为空');
     if (row.name.length > 100) errors.push('客户姓名不能超过100个字符');
+    const normalizedName = normalizedLookup(row.name);
+    if (row.name && (directory.existingCustomerNames?.has(normalizedName) || (nameCounts.get(normalizedName) || 0) > 1)) {
+      warnings.push('客户名称与系统或本次文件中已有客户相同，请核对联系方式（仅提醒，不阻止导入）');
+    }
     if (!row.phone && !row.wechat) errors.push('手机号或微信至少填写一项');
     const phoneError = row.phone ? getPhoneNumberError(row.phone) : '';
     if (phoneError) errors.push(phoneError);
@@ -103,6 +120,13 @@ export function validateCustomerImportRows(
     if (!importingToPublicPool && !owner) errors.push(ownerCount > 1 ? `销售负责人姓名存在重名：${requestedOwnerName}` : `销售负责人不存在或已离职：${requestedOwnerName}`);
     if (!importingToPublicPool && owner && owner.id !== directory.currentOwnerId && !directory.canOverrideAttribution) {
       errors.push('无权覆盖销售负责人，请留空或填写本人');
+    }
+
+    const hasHistoryOwnerInput = Boolean(row.previousOwnerName || row.firstOwnerName);
+    if (row.previousOwnerName.length > 100) errors.push('上一个销售负责人不能超过100个字符');
+    if (row.firstOwnerName.length > 100) errors.push('首个销售负责人不能超过100个字符');
+    if (hasHistoryOwnerInput && !directory.canOverrideAttribution) {
+      errors.push('无权导入历史销售负责人，请将“上一个销售负责人”和“首个销售负责人”留空');
     }
 
     const lifecycle = row.lifecycleStatus
@@ -145,6 +169,8 @@ export function validateCustomerImportRows(
       owner: importingToPublicPool ? '公海' : owner?.name || requestedOwnerName,
       ownerId: importingToPublicPool ? undefined : owner?.id,
       ownerIdentityStatus: importingToPublicPool ? 'public_pool' : 'resolved',
+      previousOwner: directory.canOverrideAttribution ? row.previousOwnerName || undefined : undefined,
+      originalSalesTransferBy: directory.canOverrideAttribution ? row.firstOwnerName || undefined : undefined,
       customerLevel: (level?.value || 'L1') as Customer['customerLevel'],
       lifecycleStatusCode: (importingToPublicPool ? LIFECYCLE_STATUS_CODES.PUBLIC_POOL : lifecycle?.code || LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP) as Customer['lifecycleStatusCode'],
       leadSource: source?.value || row.leadSource || undefined,
@@ -161,7 +187,7 @@ export function validateCustomerImportRows(
       rowNumber: row.rowNumber,
       name: row.name,
       status: errors.length ? 'blocked' as const : 'ready' as const,
-      reason: errors.join('；') || '可导入',
+      reason: errors.join('；') || warnings.join('；') || '可导入',
       input,
     };
   });

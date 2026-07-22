@@ -159,8 +159,8 @@ export const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[], 
   { id: 'leadContributorName', label: '线索贡献人', render: (customer) => customer.leadContributorName || '-' },
   { id: 'industry', label: '行业', render: (customer) => customer.industry || '-' },
   { id: 'city', label: '城市', render: (customer) => customer.city || '-' },
-  { id: 'originalSalesTransferBy', label: '原销转人员（归因）', render: (customer) => customer.originalSalesTransferBy || '-' },
-  { id: 'previousOwner', label: '上一任销售负责人', render: (customer) => getPreviousOwnerLabel(customer) },
+  { id: 'originalSalesTransferBy', label: '首个销售负责人', render: (customer) => customer.originalSalesTransferBy || '-' },
+  { id: 'previousOwner', label: '上一个销售负责人', render: (customer) => getPreviousOwnerLabel(customer) },
   { id: 'totalSpent', label: '累计消费', render: (customer) => formatCurrency(customer.totalSpent) },
   { id: 'orderCount', label: '订单数', render: (customer) => customer.orderCount },
   {
@@ -1307,7 +1307,17 @@ const Customers: React.FC = () => {
         canCancelAny={canCancelAnyBatchTask}
         onSelectJob={setBatchTaskId}
         onClose={() => setBatchTaskDrawerOpen(false)}
-        onJobChanged={() => void fetchItems(scopedFilters())}
+        onJobChanged={() => {
+          void fetchItems(scopedFilters());
+          void customerBatchApi.list().then((response) => {
+            if (response.code === 0) setBatchTasks(response.data || []);
+          });
+          if (isPublicPoolScope) {
+            void customerApi.fetchPublicPoolFollowUpUsers().then((response) => {
+              if (response.code === 0) setPublicPoolFollowUpUsers(response.data || []);
+            });
+          }
+        }}
       />
 
       <CustomerMergeDialog
@@ -1341,9 +1351,11 @@ const Customers: React.FC = () => {
       <CustomerImportDialog
         open={importDialogOpen}
         onClose={() => setImportDialogOpen(false)}
-        onImported={() => {
+        onQueued={(job) => {
           setBatchSelection(clearCustomerBatchSelection());
-          void fetchItems(scopedFilters());
+          setBatchTasks((current) => [job, ...current.filter((item) => item.id !== job.id)]);
+          setBatchTaskId(job.id);
+          setBatchTaskDrawerOpen(true);
         }}
       />
       <CustomerExportDialog

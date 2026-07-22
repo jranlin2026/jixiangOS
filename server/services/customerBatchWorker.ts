@@ -65,6 +65,9 @@ export function classifyCustomerBatchItemFailure(error: unknown): { code: string
   if (/客户不存在/.test(message)) {
     return { code: 'CUSTOMER_NOT_FOUND', message: '客户不存在或已删除', retryable: false };
   }
+  if (/相同联系方式|手机号或微信在系统中已存在客户/.test(message)) {
+    return { code: 'CUSTOMER_CONTACT_DUPLICATE', message: message || '手机号或微信在系统中已存在客户', retryable: false };
+  }
   if (/存在关联/.test(message)) {
     return { code: 'CUSTOMER_ASSOCIATION_CONFLICT', message: '客户仍存在业务关联，无法执行', retryable: false };
   }
@@ -78,6 +81,13 @@ class RetryableBatchItemTransactionError extends Error {
   constructor(readonly itemId: string, readonly failure: ReturnType<typeof classifyCustomerBatchItemFailure>, readonly cause: unknown) {
     super(failure.message);
     this.name = 'RetryableBatchItemTransactionError';
+  }
+}
+
+class NonRetryableBatchItemTransactionError extends Error {
+  constructor(readonly itemId: string, readonly failure: ReturnType<typeof classifyCustomerBatchItemFailure>) {
+    super(failure.message);
+    this.name = 'NonRetryableBatchItemTransactionError';
   }
 }
 
@@ -128,7 +138,7 @@ export function createPrismaCustomerBatchWorkerStore(
   );
   const loadExecutionContext = options.loadExecutionContext || (async (tx: any, actorId: string) => {
     const directory = await lockServerCustomerDirectory(tx, actorId);
-    return { access: directory.access, actor: directory.actor, roles: directory.roles };
+    return { access: directory.access, actor: directory.actor, user: directory.user, roles: directory.roles };
   });
 
   const lockedLeaseJob = async (tx: any, lease: ClaimedCustomerBatchJob) => {
@@ -283,25 +293,35 @@ export function createPrismaCustomerBatchWorkerStore(
           } catch (error) {
             const failure = classifyCustomerBatchItemFailure(error);
             if (failure.retryable) throw new RetryableBatchItemTransactionError(item.id, failure, error);
-            await tx.customerBatchJobItem.updateMany({
-              where: { id: item.id, jobId: job.id, status: 'running' },
+            // Escape the business transaction first. This guarantees a failed
+            // handler cannot commit a partially written customer alongside a
+            // failed item marker.
+            throw new NonRetryableBatchItemTransactionError(item.id, failure);
+          }
+        });
+      } catch (error) {
+        if (error instanceof NonRetryableBatchItemTransactionError) {
+          return transaction(async (tx) => {
+            const job = await lockedLeaseJob(tx, lease);
+            if (!job || job.status !== 'running') return { kind: 'lease_lost' as const };
+            const saved = await tx.customerBatchJobItem.updateMany({
+              where: { id: error.itemId, jobId: job.id, status: 'queued' },
               data: {
-                status: 'failed',
-                retryable: false,
-                errorCode: failure.code,
-                errorMessage: failure.message,
-                finishedAt: currentTime(),
+                status: 'failed', retryable: false,
+                errorCode: error.failure.code, errorMessage: error.failure.message,
+                attemptCount: { increment: 1 }, startedAt: currentTime(), finishedAt: currentTime(),
               },
             });
+            if (saved.count !== 1) return { kind: 'lease_lost' as const };
             const progressed = await tx.customerBatchJob.updateMany({
               where: { id: job.id, leaseOwner: lease.workerId, leaseEpoch: lease.leaseEpoch, status: 'running' },
               data: { failedCount: { increment: 1 }, cursor: { increment: 1 } },
             });
-            if (progressed.count !== 1) throw new Error('批量任务租约已失效');
-            return { kind: 'processed' as const, itemId: item.id };
-          }
-        });
-      } catch (error) {
+            return progressed.count === 1
+              ? { kind: 'processed' as const, itemId: error.itemId }
+              : { kind: 'lease_lost' as const };
+          });
+        }
         if (error instanceof RetryableBatchItemTransactionError) {
           return { kind: 'retryable_failure' as const, itemId: error.itemId, error: error.cause };
         }

@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Customer, CustomerCreateInput } from '../../src/types/customer';
+import type { CustomerBatchJobSummary } from '../../src/types/customerBatch';
 import {
   CUSTOMER_IMPORT_MAX_ROWS,
   type CustomerImportDestination,
@@ -38,41 +39,22 @@ export type CustomerImportExecutionEvent = {
   rowsHash: string;
   totalCount: number;
   destination: CustomerImportDestination;
-};
-
-export type CustomerImportExecutionHandle = {
-  jobId: string;
-  leaseOwner: string;
-  terminal: boolean;
-  completedRows: Array<{ index: number; row: CustomerImportRowResult }>;
-};
-
-export type CustomerImportFinalizeEvent = {
-  jobId: string;
-  leaseOwner: string;
-  rowsHash: string;
-  rows: CustomerImportConfirmResult['rows'];
+  rows: Array<{
+    index: number;
+    row: CustomerImportRowResult;
+    input?: CustomerCreateInput;
+    lastFollowUpRecord?: string;
+  }>;
 };
 
 export type CustomerDataExchangeDependencies = {
   secret: string;
   now?: () => Date;
   loadDirectory(user: AuthenticatedUser, rows?: CustomerImportRow[]): Promise<CustomerImportDirectory>;
-  processImportRow(event: {
-    jobId: string;
-    leaseOwner: string;
-    index: number;
-    row: CustomerImportRowResult;
-    input?: CustomerCreateInput;
-    lastFollowUpRecord?: string;
-    destination: CustomerImportDestination;
-    user: AuthenticatedUser;
-  }): Promise<CustomerImportRowResult>;
+  enqueueImportExecution(event: CustomerImportExecutionEvent): Promise<CustomerBatchJobSummary>;
   readCustomers(selection: ExchangeSelection, user: AuthenticatedUser): Promise<Customer[]>;
   recordExportAudit(event: CustomerExportAuditEvent): Promise<void>;
   persistImportPrecheck(event: { token: string; actorId: string; rowsHash: string; expiresAt: string; totalCount: number; destination: CustomerImportDestination }): Promise<void>;
-  beginImportExecution(event: CustomerImportExecutionEvent): Promise<CustomerImportExecutionHandle>;
-  finalizeImportExecution(event: CustomerImportFinalizeEvent): Promise<void>;
 };
 
 export class CustomerDataExchangeError extends Error {
@@ -134,17 +116,6 @@ function assertImportDestinationPermission(destination: CustomerImportDestinatio
   if (destination === 'public_pool') {
     assertPermission(user, PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, '无权直接导入公海池');
   }
-}
-
-function importExecutionUser(user: AuthenticatedUser, canOverrideAttribution: boolean): AuthenticatedUser {
-  const permissions = [...(user.permissions || [])];
-  if (!hasPermission(user, PERMISSION_KEYS.CUSTOMER_CREATE, 'write')) {
-    permissions.push({ module: PERMISSION_KEYS.CUSTOMER_CREATE, actions: ['read', 'write'] });
-  }
-  if (canOverrideAttribution && !hasPermission(user, PERMISSION_KEYS.CUSTOMER_TRANSFER, 'write')) {
-    permissions.push({ module: PERMISSION_KEYS.CUSTOMER_TRANSFER, actions: ['read', 'write'] });
-  }
-  return { ...user, permissions };
 }
 
 export function createCustomerDataExchangeService(deps: CustomerDataExchangeDependencies) {
@@ -214,33 +185,14 @@ export function createCustomerDataExchangeService(deps: CustomerDataExchangeDepe
 
       const directory = await deps.loadDirectory(user, request.rows);
       const validated = validateCustomerImportRows(normalizedRows, directory, request.destination);
-      const execution = await deps.beginImportExecution({
+      return deps.enqueueImportExecution({
         token: request.confirmationToken,
         actorId: user.id,
         actorName: user.name || user.account,
         rowsHash: token.rowsHash,
         totalCount: validated.length,
         destination: request.destination,
-      });
-      const completed = new Map(execution.completedRows.map((item) => [item.index, item.row]));
-      if (execution.terminal) {
-        if (completed.size !== validated.length) throw new CustomerDataExchangeError('导入批次结果不完整，请联系管理员', 409);
-        const rows = Array.from(completed.entries()).sort(([left], [right]) => left - right).map(([, row]) => row);
-        const successCount = rows.filter((row) => row.status === 'imported').length;
-        return { totalCount: rows.length, successCount, failureCount: rows.length - successCount, rows };
-      }
-      const executionUser = importExecutionUser(user, directory.canOverrideAttribution);
-      const results: CustomerImportConfirmResult['rows'] = [];
-      for (let index = 0; index < validated.length; index += 1) {
-        const row = validated[index];
-        const existing = completed.get(index);
-        if (existing) {
-          results.push(existing);
-          continue;
-        }
-        const result = await deps.processImportRow({
-          jobId: execution.jobId,
-          leaseOwner: execution.leaseOwner,
+        rows: validated.map((row, index) => ({
           index,
           row: row.status === 'ready'
             ? { rowNumber: row.rowNumber, name: row.name, status: 'ready', reason: '可导入' }
@@ -249,19 +201,8 @@ export function createCustomerDataExchangeService(deps: CustomerDataExchangeDepe
           ...(row.status === 'ready' && normalizedRows[index].lastFollowUpRecord
             ? { lastFollowUpRecord: normalizedRows[index].lastFollowUpRecord }
             : {}),
-          destination: request.destination,
-          user: executionUser,
-        });
-        results.push(result);
-      }
-      const successCount = results.filter((row) => row.status === 'imported').length;
-      await deps.finalizeImportExecution({ jobId: execution.jobId, leaseOwner: execution.leaseOwner, rowsHash: token.rowsHash, rows: results });
-      return {
-        totalCount: results.length,
-        successCount,
-        failureCount: results.length - successCount,
-        rows: results,
-      };
+        })),
+      });
     },
 
     async exportCustomers(request: CustomerExportRequest, user: AuthenticatedUser): Promise<CustomerExportResult> {

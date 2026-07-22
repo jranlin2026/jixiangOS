@@ -107,7 +107,7 @@ export interface Customer {
   ownerId?: ID;
   /** 导入/历史数据的负责人解析状态 */
   ownerIdentityStatus?: 'resolved' | 'unresolved' | 'ambiguous' | 'public_pool';
-  /** 上一任销售负责人 */
+  /** 上一个销售负责人 */
   previousOwner?: string;
   /** 最近分配人 */
   assignedBy?: string;
@@ -136,7 +136,7 @@ export interface Customer {
   leadSource?: string;
   /** 客户备注 */
   remark?: string;
-  /** 原销转人员 */
+  /** 首个销售负责人（历史归因快照） */
   originalSalesTransferBy?: string;
   sourceType?: string;
   sourceName?: string;

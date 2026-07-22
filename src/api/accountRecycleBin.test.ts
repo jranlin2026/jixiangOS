@@ -82,6 +82,7 @@ storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([{
   phone: '13900008888',
   customerLevel: 'L1',
   owner: 'Lifecycle Sales',
+  originalSalesTransferBy: 'Founding Sales',
   totalSpent: 0,
   orderCount: 0,
   growthPath: [],
@@ -129,7 +130,8 @@ assert.ok(leaveRes.data?.leftAt);
 
 const transferredCustomers = JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]');
 assert.equal(transferredCustomers[0].owner, 'Handoff Receiver');
-assert.equal(transferredCustomers[0].originalSalesTransferBy, 'Lifecycle Sales');
+assert.equal(transferredCustomers[0].previousOwner, 'Lifecycle Sales');
+assert.equal(transferredCustomers[0].originalSalesTransferBy, 'Founding Sales');
 assert.equal(transferredCustomers[0].activityRecords[0].type, 'transfer');
 assert.match(transferredCustomers[0].activityRecords[0].content, /员工离职交接/);
 
@@ -200,6 +202,7 @@ storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([{
   phone: '13900009999',
   customerLevel: 'L1',
   owner: 'Lifecycle Sales',
+  originalSalesTransferBy: 'Public Founding Sales',
   totalSpent: 0,
   orderCount: 0,
   growthPath: [],
@@ -218,6 +221,8 @@ const publicPoolCustomers = JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) |
 assert.equal(publicPoolCustomers[0].owner, '公海');
 assert.equal(publicPoolCustomers[0].lifecycleStatusCode, 'public_pool');
 assert.equal(publicPoolCustomers[0].releasedBy, 'Lifecycle Sales');
+assert.equal(publicPoolCustomers[0].previousOwner, 'Lifecycle Sales');
+assert.equal(publicPoolCustomers[0].originalSalesTransferBy, 'Public Founding Sales');
 assert.match(publicPoolCustomers[0].activityRecords[0].content, /统一释放到公海/);
 const deleteRes = await settingsApi.deleteUser(created.data!.id);
 assert.equal(deleteRes.code, 0);

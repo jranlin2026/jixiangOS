@@ -405,6 +405,7 @@ function fakeStoreFixture(start = new Date('2026-07-18T08:00:00.000Z')) {
   const indexSource = readFileSync(new URL('../index.ts', import.meta.url), 'utf8');
   assert.match(indexSource, /createPrismaCustomerBatchWorkerStore\(prisma/);
   assert.match(indexSource, /createCustomerMutationBatchJobHandler/);
+  assert.match(indexSource, /createCustomerImportBatchJobHandler\(customerListService\)/);
   assert.match(indexSource, /customerBatchWorker\.start\(\)/);
   assert.match(indexSource, /const shutdown[\s\S]*customerBatchWorker\.stop\(\)/);
   assert.match(indexSource, /SIGTERM[\s\S]*shutdown\(\)/);

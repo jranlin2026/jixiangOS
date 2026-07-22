@@ -37,9 +37,11 @@ const precheck = validateCustomerImportRows(rows, {
   leadSources: [{ value: '市场品牌部', label: '市场品牌部-官网', sourceName: '官网' }],
   tags: [{ id: 't1', name: '高意向' }, { id: 't2', name: '复购' }],
   existingContactKeys: new Set<string>(),
+  existingCustomerNames: new Set(['张三']),
 }, 'assigned');
 
 assert.equal(precheck[0].status, 'ready');
+assert.match(precheck[0].reason, /客户名称与系统或本次文件中已有客户相同.*不阻止导入/);
 assert.equal(precheck[0].input.ownerId, 'u1');
 assert.equal(precheck[0].input.lifecycleStatusCode, 'following');
 assert.equal(precheck[0].input.customerLevel, 'L2');
@@ -67,6 +69,19 @@ assert.match(blocked[0].reason, /系统中已存在/);
 assert.match(blocked[1].reason, /无权覆盖销售负责人/);
 assert.match(blocked[2].reason, /手机号或微信至少填写一项/);
 
+const sameNameInFile = validateCustomerImportRows([
+  { ...rows[0], phone: '', wechat: 'wx-first' },
+  { ...rows[0], rowNumber: 3, phone: '', wechat: 'wx-second' },
+], {
+  currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: false,
+  owners: [{ id: 'u1', name: '销售甲' }], lifecycleStatuses: [{ code: 'following', name: '跟进中' }],
+  customerLevels: [{ value: 'L2', label: 'L2-意向' }], leadSources: [{ value: '市场品牌部', label: '市场品牌部-官网', sourceName: '官网' }],
+  tags: [{ id: 't1', name: '高意向' }, { id: 't2', name: '复购' }], existingContactKeys: new Set(),
+}, 'assigned');
+assert.equal(sameNameInFile[1].status, 'ready');
+assert.match(sameNameInFile[0].reason, /客户名称.*不阻止导入/);
+assert.match(sameNameInFile[1].reason, /客户名称.*不阻止导入/);
+
 const ambiguousSource = validateCustomerImportRows([{ ...rows[0], leadSource: '同名来源' }], {
   currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: false,
   owners: [{ id: 'u1', name: '销售甲' }], lifecycleStatuses: [], customerLevels: [], tags: [], existingContactKeys: new Set(),
@@ -83,6 +98,45 @@ assert.equal(publicPoolReady[0].input.owner, '公海');
 assert.equal(publicPoolReady[0].input.ownerId, undefined);
 assert.equal(publicPoolReady[0].input.ownerIdentityStatus, 'public_pool');
 assert.equal(publicPoolReady[0].input.lifecycleStatusCode, 'public_pool');
+
+const publicPoolHistoryOwners = validateCustomerImportRows(normalizeCustomerImportRows([{
+  ...rows[0], rowNumber: 5, ownerName: '', lifecycleStatus: '', tagNames: '高意向、复购', previousOwnerName: '销售乙', firstOwnerName: '销售丙',
+}]), {
+  currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: true,
+  owners: [{ id: 'u1', name: '销售甲' }, { id: 'u2', name: '销售乙' }, { id: 'u3', name: '销售丙' }],
+  lifecycleStatuses: [], customerLevels: [{ value: 'L2', label: 'L2-意向' }],
+  leadSources: [{ value: '市场品牌部', label: '市场品牌部-官网', sourceName: '官网' }],
+  tags: [{ id: 't1', name: '高意向' }, { id: 't2', name: '复购' }], existingContactKeys: new Set(),
+}, 'public_pool');
+assert.equal(publicPoolHistoryOwners[0].status, 'ready');
+assert.equal(publicPoolHistoryOwners[0].input.ownerId, undefined);
+assert.equal(publicPoolHistoryOwners[0].input.lifecycleStatusCode, 'public_pool');
+assert.equal(publicPoolHistoryOwners[0].input.previousOwner, '销售乙');
+assert.equal(publicPoolHistoryOwners[0].input.originalSalesTransferBy, '销售丙');
+
+const historyOwnerWithoutPermission = validateCustomerImportRows(normalizeCustomerImportRows([{
+  ...rows[0], ownerName: '', tagNames: '高意向、复购', previousOwnerName: '销售甲', firstOwnerName: '销售甲',
+}]), {
+  currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: false,
+  owners: [{ id: 'u1', name: '销售甲' }], lifecycleStatuses: [{ code: 'following', name: '跟进中' }],
+  customerLevels: [{ value: 'L2', label: 'L2-意向' }],
+  leadSources: [{ value: '市场品牌部', label: '市场品牌部-官网', sourceName: '官网' }],
+  tags: [{ id: 't1', name: '高意向' }, { id: 't2', name: '复购' }], existingContactKeys: new Set(),
+}, 'assigned');
+assert.equal(historyOwnerWithoutPermission[0].status, 'blocked');
+assert.match(historyOwnerWithoutPermission[0].reason, /无权导入历史销售负责人/);
+
+const departedHistoryOwner = validateCustomerImportRows(normalizeCustomerImportRows([{
+  ...rows[0], ownerName: '', tagNames: '高意向、复购', previousOwnerName: '已离职销售', firstOwnerName: '',
+}]), {
+  currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: true,
+  owners: [{ id: 'u1', name: '销售甲' }], lifecycleStatuses: [{ code: 'following', name: '跟进中' }],
+  customerLevels: [{ value: 'L2', label: 'L2-意向' }],
+  leadSources: [{ value: '市场品牌部', label: '市场品牌部-官网', sourceName: '官网' }],
+  tags: [{ id: 't1', name: '高意向' }, { id: 't2', name: '复购' }], existingContactKeys: new Set(),
+}, 'assigned');
+assert.equal(departedHistoryOwner[0].status, 'ready');
+assert.equal(departedHistoryOwner[0].input.previousOwner, '已离职销售');
 
 const publicPoolBlocked = validateCustomerImportRows([
   { ...rows[0], ownerName: '销售甲', lifecycleStatus: '', customerLevel: '', leadSource: '', tagNames: [] },

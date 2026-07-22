@@ -23,6 +23,7 @@ const ROOT = '/customer-data-exchange';
 const TEMPLATE_SHEET = '客户导入模板';
 const OPTIONS_SHEET = '字段选项';
 const INSTRUCTIONS_SHEET = '填写说明';
+const OPTIONAL_IMPORT_HEADERS = new Set<string>(['上一个销售负责人', '首个销售负责人']);
 let browserExcelJsPromise: Promise<ExcelJsNamespace> | null = null;
 
 const cleanText = (value: unknown): string => {
@@ -118,7 +119,7 @@ export async function createCustomerImportTemplateWorkbook(
   sheet.addRow([...CUSTOMER_IMPORT_HEADERS]);
   styleHeader(sheet.getRow(1));
   sheet.autoFilter = { from: 'A1', to: sheet.getRow(1).getCell(CUSTOMER_IMPORT_HEADERS.length).address };
-  sheet.columns = [18, 18, 20, 24, 18, 18, 16, 26, 18, 18, 28, 42, 36].map((width) => ({ width }));
+  sheet.columns = [18, 18, 20, 24, 18, 20, 20, 18, 16, 26, 18, 18, 28, 42, 36].map((width) => ({ width }));
 
   const ownerNames = destination === 'public_pool' ? [] : options.ownerNames;
   const lifecycleStatuses = destination === 'public_pool'
@@ -137,9 +138,9 @@ export async function createCustomerImportTemplateWorkbook(
   optionSheet.columns = optionColumns.map(() => ({ width: 28 }));
   optionSheet.state = 'hidden';
   applyValidation(sheet, 5, 'A', ownerNames.length);
-  applyValidation(sheet, 6, 'B', lifecycleStatuses.length);
-  applyValidation(sheet, 7, 'C', options.customerLevels.length);
-  applyValidation(sheet, 8, 'D', options.leadSources.length);
+  applyValidation(sheet, 8, 'B', lifecycleStatuses.length);
+  applyValidation(sheet, 9, 'C', options.customerLevels.length);
+  applyValidation(sheet, 10, 'D', options.leadSources.length);
 
   instructions.addRows([
     ['极享OS 客户批量导入说明'],
@@ -148,6 +149,9 @@ export async function createCustomerImportTemplateWorkbook(
     ['销售负责人', destination === 'public_pool'
       ? '必须留空，由系统直接写入公海归属。'
       : options.canOverrideAttribution ? '可从下拉列表选择数据范围内的销售负责人；留空默认导入人。' : '当前账号无导入覆盖归属权限，必须留空或填写本人。'],
+    ['历史销售负责人', options.canOverrideAttribution
+      ? '“上一个销售负责人”和“首个销售负责人”填写历史姓名；导入公海池时也允许填写，不要求人员当前仍在职。'
+      : '当前账号无导入覆盖归属权限，“上一个销售负责人”和“首个销售负责人”必须留空。'],
     ['客户进展', destination === 'public_pool' ? '必须留空，由系统设置为公海状态。' : '可从下拉列表选择；公海不属于客户进展。'],
     ['线索来源', '只填写“线索来源”一个字段，并从模板下拉选项选择。'],
     ['客户标签', '多个标签使用中文逗号、英文逗号或顿号分隔；标签必须已经存在。'],
@@ -177,10 +181,13 @@ export async function parseCustomerImportWorkbook(buffer: ArrayBuffer | ArrayBuf
   if (!sheet) throw new Error('Excel 文件中没有工作表');
   const headerIndexes = new Map<string, number>();
   sheet.getRow(1).eachCell((cell, column) => headerIndexes.set(cleanText(cell.value), column));
-  const missing = CUSTOMER_IMPORT_HEADERS.filter((header) => !headerIndexes.has(header));
+  const missing = CUSTOMER_IMPORT_HEADERS.filter((header) => !OPTIONAL_IMPORT_HEADERS.has(header) && !headerIndexes.has(header));
   if (missing.length) throw new Error(`导入模板缺少字段：${missing.join('、')}`);
 
-  const cell = (row: Row, header: (typeof CUSTOMER_IMPORT_HEADERS)[number]) => cleanText(row.getCell(headerIndexes.get(header)!).value);
+  const cell = (row: Row, header: (typeof CUSTOMER_IMPORT_HEADERS)[number]) => {
+    const column = headerIndexes.get(header);
+    return column ? cleanText(row.getCell(column).value) : '';
+  };
   const rows: CustomerImportRow[] = [];
   sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
     if (rowNumber === 1) return;
@@ -193,6 +200,8 @@ export async function parseCustomerImportWorkbook(buffer: ArrayBuffer | ArrayBuf
       wechat: cell(row, '微信'),
       company: cell(row, '公司名称'),
       ownerName: cell(row, '销售负责人'),
+      previousOwnerName: cell(row, '上一个销售负责人'),
+      firstOwnerName: cell(row, '首个销售负责人'),
       lifecycleStatus: cell(row, '客户进度'),
       customerLevel: cell(row, '客户等级'),
       leadSource: cell(row, '线索来源'),
@@ -236,6 +245,8 @@ export async function createCustomerImportErrorWorkbook(
       微信: row?.wechat || '',
       公司名称: row?.company || '',
       销售负责人: row?.ownerName || '',
+      上一个销售负责人: row?.previousOwnerName || '',
+      首个销售负责人: row?.firstOwnerName || '',
       客户进度: row?.lifecycleStatus || '',
       客户等级: row?.customerLevel || '',
       线索来源: row?.leadSource || '',

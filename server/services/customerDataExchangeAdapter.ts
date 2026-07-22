@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Customer, CustomerCreateInput, CustomerFilters } from '../../src/types/customer';
+import type { CustomerBatchJobSummary } from '../../src/types/customerBatch';
 import type { CustomerExportSelection, CustomerImportDestination, CustomerImportRow } from '../../src/types/customerDataExchange';
 import type { ApiResponse, PaginatedResponse } from '../../src/api/types';
 import type { CustomerCreateExecutionContext } from './customerListService';
@@ -16,12 +17,14 @@ import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissio
 import { loadCustomerAccessContext } from './customerAccessPolicy';
 import { loadCustomerTagCatalog } from './customerTagService';
 import { customerContactKeys } from './customerDataExchangePolicy';
-import { ContactIdentityConflictError } from './contactIdentityService';
+import { normalizeContactIdentity } from './contactIdentityService';
+import type { CustomerBatchJobHandler } from './customerBatchJobHandler';
 import {
   createCustomerDataExchangeService,
   CustomerDataExchangeError,
   type CustomerDataExchangeDependencies,
   type CustomerExportAuditEvent,
+  type CustomerImportExecutionEvent,
 } from './customerDataExchangeService';
 
 type CustomerReader = {
@@ -33,21 +36,6 @@ type CustomerReader = {
 const cleanText = (value: unknown) => String(value ?? '').trim();
 const tokenHash = (token: string) => createHash('sha256').update(token, 'utf8').digest('hex');
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
-
-function importResultFromItem(item: { targetKey: string; afterSnapshot: unknown; errorMessage?: string | null }) {
-  const snapshot = readStorageValue<any>(item.afterSnapshot, {});
-  const match = /^row:(\d+)$/.exec(item.targetKey);
-  return {
-    index: Math.max(0, Number(match?.[1] || 1) - 1),
-    row: {
-      rowNumber: Number(snapshot.rowNumber || 0),
-      name: cleanText(snapshot.name),
-      status: snapshot.status === 'imported' ? 'imported' as const : 'failed' as const,
-      reason: cleanText(snapshot.reason) || item.errorMessage || (snapshot.status === 'imported' ? '导入成功' : '导入失败'),
-      ...(cleanText(snapshot.customerId) ? { customerId: cleanText(snapshot.customerId) } : {}),
-    },
-  };
-}
 
 function readStorageValue<T>(value: unknown, fallback: T): T {
   if (value === null || value === undefined) return fallback;
@@ -71,30 +59,69 @@ function leadSourceOptions(configs: LeadSourceConfig[]) {
   });
 }
 
-async function existingContactKeys(prisma: PrismaClient, rows: CustomerImportRow[]): Promise<Set<string>> {
+export async function loadExistingCustomerImportFacts(
+  prisma: Pick<PrismaClient, '$queryRaw'>,
+  rows: CustomerImportRow[],
+): Promise<{ contactKeys: Set<string>; customerNames: Set<string> }> {
   const keys = Array.from(new Set(rows.flatMap(customerContactKeys)));
-  const phones = keys.filter((key) => key.startsWith('phone:')).map((key) => key.slice(6));
+  const normalizedPhones = Array.from(new Set(rows
+    .map((row) => normalizeContactIdentity('phone', cleanText(row.phone)))
+    .filter(Boolean)));
+  const mainlandPhones = normalizedPhones.filter((phone) => /^1[3-9]\d{9}$/.test(phone));
+  const otherPhoneDigits = normalizedPhones
+    .filter((phone) => !/^1[3-9]\d{9}$/.test(phone))
+    .map((phone) => phone.replace(/\D/g, ''))
+    .filter(Boolean);
   const wechats = keys.filter((key) => key.startsWith('wechat:')).map((key) => key.slice(7));
-  if (!phones.length && !wechats.length) return new Set();
-  const phoneClause = phones.length
-    ? Prisma.sql`JSON_UNQUOTE(JSON_EXTRACT(data, '$.phone')) IN (${Prisma.join(phones)})`
+  const names = Array.from(new Set(rows.map((row) => cleanText(row.name).toLocaleLowerCase('zh-CN')).filter(Boolean)));
+  if (!normalizedPhones.length && !wechats.length && !names.length) {
+    return { contactKeys: new Set(), customerNames: new Set() };
+  }
+  const storedPhone = Prisma.sql`COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.phone')), '')`;
+  const storedPhoneDigits = Prisma.sql`REGEXP_REPLACE(${storedPhone}, '[^0-9]', '')`;
+  const mainlandPhoneClause = mainlandPhones.length
+    ? Prisma.sql`CASE
+        WHEN TRIM(${storedPhone}) LIKE '+%' AND ${storedPhoneDigits} NOT LIKE '86%' THEN ''
+        WHEN ${storedPhoneDigits} REGEXP '^1[3-9][0-9]{9}$' THEN ${storedPhoneDigits}
+        WHEN ${storedPhoneDigits} REGEXP '^(86|0086)1[3-9][0-9]{9}$' THEN RIGHT(${storedPhoneDigits}, 11)
+        ELSE ''
+      END IN (${Prisma.join(mainlandPhones)})`
+    : Prisma.sql`FALSE`;
+  const otherPhoneClause = otherPhoneDigits.length
+    ? Prisma.sql`REGEXP_REPLACE(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.phone')), ''), '[^0-9]', '') IN (${Prisma.join(otherPhoneDigits)})`
     : Prisma.sql`FALSE`;
   const wechatClause = wechats.length
-    ? Prisma.sql`LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, '$.wechat'))) IN (${Prisma.join(wechats)})`
+    ? Prisma.sql`LOWER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.wechat')), ''))) IN (${Prisma.join(wechats)})`
     : Prisma.sql`FALSE`;
-  const found = await prisma.$queryRaw<Array<{ phone: string | null; wechat: string | null }>>(Prisma.sql`
+  const nameClause = names.length
+    ? Prisma.sql`LOWER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.name')), ''))) IN (${Prisma.join(names)})`
+    : Prisma.sql`FALSE`;
+  const found = await prisma.$queryRaw<Array<{ phone: string | null; wechat: string | null; name: string | null }>>(Prisma.sql`
     SELECT JSON_UNQUOTE(JSON_EXTRACT(data, '$.phone')) AS phone,
-           LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, '$.wechat'))) AS wechat
+           JSON_UNQUOTE(JSON_EXTRACT(data, '$.wechat')) AS wechat,
+           JSON_UNQUOTE(JSON_EXTRACT(data, '$.name')) AS name
     FROM business_records
     WHERE domain = ${STORAGE_KEYS.CUSTOMERS}
       AND mergedIntoId IS NULL
       AND JSON_EXTRACT(data, '$.deletedAt') IS NULL
-      AND (${phoneClause} OR ${wechatClause})
+      AND (${mainlandPhoneClause} OR ${otherPhoneClause} OR ${wechatClause} OR ${nameClause})
   `);
-  return new Set(found.flatMap((row) => [
-    row.phone ? `phone:${row.phone}` : '',
-    row.wechat ? `wechat:${row.wechat}` : '',
-  ]).filter(Boolean));
+  const foundContactKeys = found.flatMap((row) => {
+    const rawPhone = cleanText(row.phone);
+    const digits = rawPhone.replace(/\D/g, '');
+    const mainland = digits.slice(-11);
+    const explicitForeign = rawPhone.startsWith('+') && !digits.startsWith('86');
+    const domesticShape = /^1[3-9]\d{9}$/.test(digits) || /^(?:86|0086)1[3-9]\d{9}$/.test(digits);
+    const phoneKey = !explicitForeign && domesticShape && /^1[3-9]\d{9}$/.test(mainland)
+      ? `phone:+86${mainland}`
+      : customerContactKeys({ phone: row.phone || '', wechat: '' })[0] || '';
+    const wechat = cleanText(row.wechat).toLocaleLowerCase('zh-CN');
+    return [phoneKey, wechat ? `wechat:${wechat}` : ''].filter(Boolean);
+  });
+  return {
+    contactKeys: new Set(foundContactKeys),
+    customerNames: new Set(found.map((row) => cleanText(row.name).toLocaleLowerCase('zh-CN')).filter(Boolean)),
+  };
 }
 
 async function readSelection(reader: CustomerReader, selection: CustomerExportSelection, user: AuthenticatedUser): Promise<Customer[]> {
@@ -195,19 +222,28 @@ async function persistImportPrecheck(
   });
 }
 
-async function beginImportExecution(
+function importJobSummary(job: any): CustomerBatchJobSummary {
+  const iso = (value: unknown) => value ? new Date(value as string | Date).toISOString() : undefined;
+  return {
+    id: String(job.id), actorId: String(job.actorId), actorName: cleanText(job.actorName),
+    handlerKey: 'customer_import', operation: 'import', status: job.status,
+    selectionMode: 'file_rows', frozenCustomerCount: Number(job.frozenCustomerCount || 0),
+    totalCount: Number(job.totalCount || 0), successCount: Number(job.successCount || 0),
+    failedCount: Number(job.failedCount || 0), skippedCount: Number(job.skippedCount || 0),
+    cancelledCount: Number(job.cancelledCount || 0), createdAt: iso(job.createdAt) || new Date().toISOString(),
+    ...(iso(job.startedAt) ? { startedAt: iso(job.startedAt) } : {}),
+    ...(iso(job.finishedAt) ? { finishedAt: iso(job.finishedAt) } : {}),
+    ...(iso(job.cancelRequestedAt) ? { cancelRequestedAt: iso(job.cancelRequestedAt) } : {}),
+    ...(iso(job.cancelledAt) ? { cancelledAt: iso(job.cancelledAt) } : {}),
+  };
+}
+
+export async function enqueueCustomerImportExecution(
   prisma: PrismaClient,
-  event: { token: string; actorId: string; actorName: string; rowsHash: string; totalCount: number; destination: CustomerImportDestination },
-): Promise<{
-  jobId: string;
-  leaseOwner: string;
-  terminal: boolean;
-  completedRows: Array<{ index: number; row: { rowNumber: number; name: string; status: 'ready' | 'blocked' | 'imported' | 'failed'; reason: string; customerId?: string } }>;
-}> {
+  event: CustomerImportExecutionEvent,
+): Promise<CustomerBatchJobSummary> {
   return prisma.$transaction(async (tx) => {
     const now = new Date();
-    const leaseOwner = `import-run-${randomUUID()}`;
-    const leaseExpiresAt = new Date(now.getTime() + 2 * 60_000);
     const rows = await tx.$queryRaw<Array<{
       id: string;
       actorId: string;
@@ -235,14 +271,8 @@ async function beginImportExecution(
 
     if (precheck.consumedAt) {
       if (!precheck.consumedResultId) throw new CustomerDataExchangeError('导入批次记录已损坏，请联系管理员', 409);
-      const jobs = await tx.$queryRaw<Array<{
-        id: string;
-        actorId: string;
-        status: string;
-        inputHash: string;
-        leaseExpiresAt: Date | null;
-      }>>(Prisma.sql`
-        SELECT id, actorId, status, inputHash, leaseExpiresAt
+      const jobs = await tx.$queryRaw<any[]>(Prisma.sql`
+        SELECT *
         FROM customer_batch_jobs
         WHERE id = ${precheck.consumedResultId}
           AND handlerKey = 'customer_import'
@@ -254,28 +284,7 @@ async function beginImportExecution(
       if (!job || job.actorId !== event.actorId || job.inputHash !== event.rowsHash) {
         throw new CustomerDataExchangeError('导入批次与预检内容不一致，请联系管理员', 409);
       }
-      const items = await tx.customerBatchJobItem.findMany({ where: { jobId: job.id }, orderBy: { targetKey: 'asc' } });
-      const completedRows = items.map(importResultFromItem);
-      if (['succeeded', 'partial_failed', 'failed'].includes(job.status)) {
-        if (completedRows.length !== event.totalCount) throw new CustomerDataExchangeError('导入批次结果不完整，请联系管理员', 409);
-        return { jobId: job.id, leaseOwner: '', terminal: true, completedRows };
-      }
-      if (job.status !== 'running') throw new CustomerDataExchangeError('导入批次状态不允许继续处理，请查看批量任务', 409);
-      if (job.leaseExpiresAt && new Date(job.leaseExpiresAt).getTime() > now.getTime()) {
-        throw new CustomerDataExchangeError('该导入批次正在处理中，请勿重复提交', 409);
-      }
-      const claimed = await tx.customerBatchJob.updateMany({
-        where: { id: job.id, status: 'running' },
-        data: {
-          leaseOwner,
-          leaseEpoch: { increment: 1 },
-          leaseExpiresAt,
-          heartbeatAt: now,
-          attemptCount: { increment: 1 },
-        },
-      });
-      if (claimed.count !== 1) throw new CustomerDataExchangeError('导入批次正在被其他请求恢复，请稍后重试', 409);
-      return { jobId: job.id, leaseOwner, terminal: false, completedRows };
+      return importJobSummary(job);
     }
 
     if (new Date(precheck.expiresAt).getTime() <= now.getTime()) throw new CustomerDataExchangeError('导入预检凭证已过期，请重新预检', 409);
@@ -286,7 +295,7 @@ async function beginImportExecution(
         id: jobId,
         handlerKey: 'customer_import',
         operation: 'import',
-        status: 'running',
+        status: 'queued',
         selectionMode: 'file_rows',
         selectedCustomerIds: json([]),
         input: json({ rowsHash: event.rowsHash, destination: event.destination }),
@@ -298,14 +307,40 @@ async function beginImportExecution(
         actorName: event.actorName,
         frozenCustomerCount: event.totalCount,
         totalCount: event.totalCount,
-        leaseOwner,
-        leaseEpoch: 1,
-        leaseExpiresAt,
-        heartbeatAt: now,
-        attemptCount: 1,
-        startedAt: now,
       },
     });
+    const blockedRows = event.rows.filter((item) => !item.input);
+    for (let offset = 0; offset < event.rows.length; offset += 500) {
+      await tx.customerBatchJobItem.createMany({
+        data: event.rows.slice(offset, offset + 500).map((item) => {
+          const targetKey = `row:${String(item.index + 1).padStart(6, '0')}:excel:${String(item.row.rowNumber).padStart(6, '0')}`;
+          const blocked = !item.input;
+          return {
+            id: randomUUID(), jobId, targetKey, status: blocked ? 'failed' : 'queued',
+            errorCode: blocked ? 'CUSTOMER_IMPORT_PRECHECK_BLOCKED' : null,
+            errorMessage: blocked ? item.row.reason : null,
+            beforeSnapshot: blocked ? undefined : json({
+              rowNumber: item.row.rowNumber,
+              name: item.row.name,
+              input: item.input,
+              lastFollowUpRecord: item.lastFollowUpRecord || '',
+              destination: event.destination,
+            }),
+            afterSnapshot: blocked ? json({ ...item.row, status: 'failed' }) : undefined,
+            idempotencyKey: `${jobId}:${targetKey}`,
+            retryable: false,
+            attemptCount: 0,
+            finishedAt: blocked ? now : undefined,
+          };
+        }),
+      });
+    }
+    if (blockedRows.length) {
+      await tx.customerBatchJob.update({
+        where: { id: jobId },
+        data: { failedCount: blockedRows.length, cursor: blockedRows.length },
+      });
+    }
     await tx.customerBatchPrecheck.update({
       where: { id: precheck.id },
       data: {
@@ -316,137 +351,62 @@ async function beginImportExecution(
         consumedIdempotencyKey: precheck.id,
       },
     });
-    return { jobId, leaseOwner, terminal: false, completedRows: [] };
+    const job = await tx.customerBatchJob.findUnique({ where: { id: jobId } });
+    if (!job) throw new CustomerDataExchangeError('导入任务创建失败', 500);
+    return importJobSummary(job);
   }, { isolationLevel: 'ReadCommitted' });
 }
 
-async function processImportRow(
-  prisma: PrismaClient,
-  reader: CustomerReader,
-  event: {
-    jobId: string;
-    leaseOwner: string;
-    index: number;
-    row: { rowNumber: number; name: string; status: string; reason: string; customerId?: string };
-    input?: CustomerCreateInput;
-    lastFollowUpRecord?: string;
-    destination: CustomerImportDestination;
-    user: AuthenticatedUser;
-  },
-): Promise<{ rowNumber: number; name: string; status: 'ready' | 'blocked' | 'imported' | 'failed'; reason: string; customerId?: string }> {
-  const persist = async (tx: Prisma.TransactionClient, result: typeof event.row) => {
-    const at = new Date();
-    const targetKey = `row:${String(event.index + 1).padStart(6, '0')}`;
-    await tx.customerBatchJobItem.create({
-      data: {
-        id: randomUUID(),
-        jobId: event.jobId,
-        targetKey,
-        status: result.status === 'imported' ? 'succeeded' : 'failed',
-        errorCode: result.status === 'imported' ? null : 'CUSTOMER_IMPORT_ROW_FAILED',
-        errorMessage: result.status === 'imported' ? null : result.reason,
-        afterSnapshot: json(result),
-        idempotencyKey: `${event.jobId}:${targetKey}`,
-        attemptCount: 1,
-        retryable: false,
-        startedAt: at,
-        finishedAt: at,
-      },
-    });
-    const progressed = await tx.customerBatchJob.updateMany({
-      where: { id: event.jobId, handlerKey: 'customer_import', operation: 'import', status: 'running', leaseOwner: event.leaseOwner },
-      data: {
-        ...(result.status === 'imported' ? { successCount: { increment: 1 } } : { failedCount: { increment: 1 } }),
-        cursor: { increment: 1 },
-        heartbeatAt: at,
-        leaseExpiresAt: new Date(at.getTime() + 2 * 60_000),
-      },
-    });
-    if (progressed.count !== 1) throw new CustomerDataExchangeError('客户导入批次租约已失效，请重新确认以恢复处理', 409);
-    return result as { rowNumber: number; name: string; status: 'ready' | 'blocked' | 'imported' | 'failed'; reason: string; customerId?: string };
-  };
-
-  const run = () => prisma.$transaction(async (tx) => {
-    const jobs = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-      SELECT id
-      FROM customer_batch_jobs
-      WHERE id = ${event.jobId}
-        AND handlerKey = 'customer_import'
-        AND operation = 'import'
-        AND status = 'running'
-        AND leaseOwner = ${event.leaseOwner}
-      LIMIT 1
-      FOR UPDATE
-    `);
-    if (!jobs[0]) throw new CustomerDataExchangeError('客户导入批次租约已失效，请重新确认以恢复处理', 409);
-    let result = event.row;
-    if (event.input) {
-      const created = await reader.create(event.input, event.user, {
+export function createCustomerImportBatchJobHandler(reader: CustomerReader): CustomerBatchJobHandler {
+  return {
+    handlerKey: 'customer_import',
+    executionKind: 'itemized',
+    async processItem({ tx, job, item, executionContext }, lease) {
+      await lease.assertActive(tx);
+      const snapshot = readStorageValue<any>(item.beforeSnapshot, null);
+      if (!snapshot?.input || !['assigned', 'public_pool'].includes(snapshot.destination)) {
+        throw new Error('客户导入任务参数已损坏');
+      }
+      if (!executionContext.user) throw new Error('当前用户不存在或已离职');
+      if (!hasPermission(executionContext.user, PERMISSION_KEYS.CUSTOMER_IMPORT, 'write')) {
+        throw new Error('当前用户无权导入客户');
+      }
+      if (
+        (cleanText(snapshot.input.previousOwner) || cleanText(snapshot.input.originalSalesTransferBy))
+        && !hasPermission(executionContext.user, PERMISSION_KEYS.CUSTOMER_IMPORT_ATTRIBUTION_OVERRIDE, 'write')
+      ) {
+        throw new Error('当前用户无权导入历史销售负责人');
+      }
+      const permissions = [...(executionContext.user.permissions || [])];
+      if (!hasPermission(executionContext.user, PERMISSION_KEYS.CUSTOMER_CREATE, 'write')) {
+        permissions.push({ module: PERMISSION_KEYS.CUSTOMER_CREATE, actions: ['read', 'write'] });
+      }
+      if (
+        cleanText(snapshot.input.ownerId)
+        && snapshot.input.ownerId !== executionContext.user.id
+        && hasPermission(executionContext.user, PERMISSION_KEYS.CUSTOMER_IMPORT_ATTRIBUTION_OVERRIDE, 'write')
+        && !hasPermission(executionContext.user, PERMISSION_KEYS.CUSTOMER_TRANSFER, 'write')
+      ) {
+        permissions.push({ module: PERMISSION_KEYS.CUSTOMER_TRANSFER, actions: ['read', 'write'] });
+      }
+      const executionUser = { ...executionContext.user, permissions };
+      const created = await reader.create(snapshot.input, executionUser, {
         tx,
-        batchJobId: event.jobId,
-        requestId: `${event.jobId}:row:${event.index + 1}`,
-        idempotencyKey: `${event.jobId}:row:${event.index + 1}`,
-        importDestination: event.destination,
-        importedLastFollowUpRecord: event.lastFollowUpRecord,
+        batchJobId: job.id,
+        requestId: `${job.id}:${item.targetKey}`,
+        idempotencyKey: item.idempotencyKey,
+        importDestination: snapshot.destination,
+        importedLastFollowUpRecord: cleanText(snapshot.lastFollowUpRecord),
       });
-      result = created.code === 0 && created.data
-        ? { rowNumber: event.row.rowNumber, name: event.row.name, status: 'imported', reason: '导入成功', customerId: created.data.id }
-        : { rowNumber: event.row.rowNumber, name: event.row.name, status: 'failed', reason: created.message || '导入失败' };
-    }
-    return persist(tx, result);
-  }, { isolationLevel: 'ReadCommitted' });
-
-  try {
-    return await run();
-  } catch (error) {
-    if (error instanceof CustomerDataExchangeError) throw error;
-    const targetKey = `row:${String(event.index + 1).padStart(6, '0')}`;
-    const existing = await prisma.customerBatchJobItem.findFirst({ where: { jobId: event.jobId, targetKey } });
-    if (existing) return importResultFromItem(existing).row;
-    const failure = {
-      rowNumber: event.row.rowNumber,
-      name: event.row.name,
-      status: 'failed' as const,
-      reason: error instanceof ContactIdentityConflictError
-        ? error.safePayload.message
-        : '客户写入失败，请重新确认以恢复处理',
-    };
-    return prisma.$transaction(async (tx) => {
-      const jobs = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        SELECT id FROM customer_batch_jobs
-        WHERE id = ${event.jobId} AND status = 'running' AND leaseOwner = ${event.leaseOwner}
-        LIMIT 1 FOR UPDATE
-      `);
-      if (!jobs[0]) throw new CustomerDataExchangeError('客户导入批次租约已失效，请重新确认以恢复处理', 409);
-      return persist(tx, failure);
-    }, { isolationLevel: 'ReadCommitted' });
-  }
-}
-
-async function finalizeImportExecution(
-  prisma: PrismaClient,
-  event: { jobId: string; leaseOwner: string; rowsHash: string; rows: Array<{ rowNumber: number; name: string; status: string; reason: string; customerId?: string }> },
-): Promise<void> {
-  const successCount = event.rows.filter((row) => row.status === 'imported').length;
-  const failedCount = event.rows.length - successCount;
-  const status = failedCount === 0 ? 'succeeded' : successCount > 0 ? 'partial_failed' : 'failed';
-  const finishedAt = new Date();
-  await prisma.$transaction(async (tx) => {
-    const itemCount = await tx.customerBatchJobItem.count({ where: { jobId: event.jobId } });
-    if (itemCount !== event.rows.length) throw new CustomerDataExchangeError('客户导入批次尚未处理完成，请重新确认以恢复处理', 409);
-    const updated = await tx.customerBatchJob.updateMany({
-      where: {
-        id: event.jobId,
-        handlerKey: 'customer_import',
-        operation: 'import',
-        status: 'running',
-        inputHash: event.rowsHash,
-        leaseOwner: event.leaseOwner,
-      },
-      data: { status, successCount, failedCount, cursor: event.rows.length, finishedAt, leaseOwner: null, leaseExpiresAt: null },
-    });
-    if (updated.count !== 1) throw new CustomerDataExchangeError('客户导入批次状态已变化，请查看批量任务', 409);
-  }, { isolationLevel: 'ReadCommitted' });
+      if (created.code !== 0 || !created.data) throw new Error(created.message || '客户导入失败');
+      return {
+        afterSnapshot: {
+          rowNumber: Number(snapshot.rowNumber || 0), name: cleanText(snapshot.name),
+          status: 'imported', reason: '导入成功', customerId: created.data.id,
+        } as any,
+      };
+    },
+  };
 }
 
 export function createPrismaCustomerDataExchangeService(input: {
@@ -470,7 +430,7 @@ export function createPrismaCustomerDataExchangeService(input: {
           select: { key: true, value: true },
         }),
         loadCustomerTagCatalog(input.prisma, false),
-        existingContactKeys(input.prisma, rows),
+        loadExistingCustomerImportFacts(input.prisma, rows),
       ]);
       const storage = new Map(storageRows.map((row) => [row.key, row.value]));
       const lifecycle = readStorageValue<LifecycleStatusConfig[]>(storage.get(STORAGE_KEYS.LIFECYCLE_STATUS_CONFIGS), DEFAULT_LIFECYCLE_STATUS_CONFIGS)
@@ -494,15 +454,14 @@ export function createPrismaCustomerDataExchangeService(input: {
         customerLevels: levels.map((item) => ({ value: item.value, label: item.label })),
         leadSources: leadSourceOptions(sources),
         tags: catalog.tags.filter((tag) => tag.isActive !== false).map((tag) => ({ id: tag.id, name: tag.name })),
-        existingContactKeys: duplicateKeys,
+        existingContactKeys: duplicateKeys.contactKeys,
+        existingCustomerNames: duplicateKeys.customerNames,
       };
     },
-    processImportRow: (event) => processImportRow(input.prisma, input.customerReader, event),
+    enqueueImportExecution: (event) => enqueueCustomerImportExecution(input.prisma, event),
     readCustomers: (selection, user) => readSelection(input.customerReader, selection, user),
     recordExportAudit: (event) => recordExportAudit(input.prisma, event),
     persistImportPrecheck: (event) => persistImportPrecheck(input.prisma, event),
-    beginImportExecution: (event) => beginImportExecution(input.prisma, event),
-    finalizeImportExecution: (event) => finalizeImportExecution(input.prisma, event),
   };
   return createCustomerDataExchangeService(deps);
 }

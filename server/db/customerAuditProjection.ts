@@ -39,6 +39,7 @@ const AUDIT_BUSINESS_FIELDS = [
   'ownerId',
   'ownerIdentityStatus',
   'previousOwner',
+  'originalSalesTransferBy',
   'assignedBy',
   'assignedAt',
   'assignmentReason',

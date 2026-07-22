@@ -10,7 +10,7 @@ const listServiceSource = readFileSync(join(process.cwd(), 'server/services/cust
 assert.match(dialogSource, /导入客户列表/);
 assert.match(dialogSource, /直接导入公海池/);
 assert.match(dialogSource, /canImportToPublicPool/);
-assert.match(dialogSource, /查看公海池/);
+assert.match(dialogSource, /确认并后台导入/);
 assert.match(apiSource, /destination: CustomerImportDestination/);
 assert.match(adapterSource, /filter\(\(item\) => item\.code !== 'public_pool'\)/);
 assert.match(listServiceSource, /ownerIdentityStatus: importToPublicPool \? 'public_pool' : 'resolved'/);
