@@ -991,7 +991,8 @@ export function createCustomerAtomicCommandService(options: {
         const fromPool = isCanonicalPublicPoolCustomer(customer);
         next = {
           ...next,
-          owner: target.name, ownerId: target.id, ownerIdentityStatus: 'resolved', previousOwner: customer.owner,
+          owner: target.name, ownerId: target.id, ownerIdentityStatus: 'resolved',
+          previousOwner: fromPool ? customer.previousOwner : customer.owner,
           assignedBy: actor.name, assignedAt: atIso, assignmentReason: reason, ownerSince: atIso,
           ...(fromPool ? { lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP, lifecycleStatusUpdatedAt: atIso } : {}),
         };
@@ -2332,7 +2333,7 @@ export function createCustomerCommandService(
           owner: operator,
           ownerId: actor.id,
           ownerIdentityStatus: 'resolved',
-          previousOwner: customer.owner,
+          previousOwner: customer.previousOwner,
           assignedBy: operator,
           assignedAt: atIso,
           assignmentReason: '从公海领取',
@@ -2423,7 +2424,7 @@ export function createCustomerCommandService(
           owner,
           ownerId: target.id,
           ownerIdentityStatus: 'resolved',
-          previousOwner: customer.owner,
+          previousOwner: wasPublicPool ? customer.previousOwner : customer.owner,
           assignedBy: operator,
           assignedAt: atIso,
           assignmentReason: reason || customer.assignmentReason,

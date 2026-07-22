@@ -524,6 +524,11 @@ app.get('/api/customers', requireCustomerReadAccess, async (req: AuthenticatedRe
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
+app.get('/api/customers/public-pool-follow-up-operators', requireCustomerReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerListService.listPublicPoolFollowUpOperators(req.currentUser);
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
 app.use('/api/business-recycle-bin', createBusinessRecycleBinRouter({
   service: businessRecycleBinService,
   requireRead: requireDataMaintenanceReadAccess,

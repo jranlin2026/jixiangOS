@@ -129,6 +129,9 @@ export function releaseToPublicPool(target: { customerId?: string }, reason: str
       customers[idx] = {
         ...hydrateCustomerLifecycle(customers[idx]),
         owner: '公海',
+        previousOwner: customers[idx].owner && customers[idx].owner !== '公海'
+          ? customers[idx].owner
+          : customers[idx].previousOwner,
         lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL,
         lifecycleStatusUpdatedAt: now,
         publicPoolAt: now,

@@ -342,7 +342,14 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ open, onClose, customer, on
               </MenuItem>
             ))}
           </TextField>
-          <TextField select label="原销转人员" value={form.originalSalesTransferBy} onChange={handleChange('originalSalesTransferBy')} fullWidth>
+          <TextField
+            select
+            label="原销转人员（归因）"
+            value={form.originalSalesTransferBy}
+            onChange={handleChange('originalSalesTransferBy')}
+            helperText="记录原始销转归因，不随客户转让或进入公海自动变更"
+            fullWidth
+          >
             <MenuItem value="">无</MenuItem>
             {userOptions}
           </TextField>

@@ -2,6 +2,7 @@ import type { Customer, CustomerCreateInput } from '../../src/types/customer';
 import type { CustomerImportDestination, CustomerImportRow, CustomerImportRowResult, CustomerExportRow } from '../../src/types/customerDataExchange';
 import { LIFECYCLE_STATUS_CODES, normalizeLifecycleStatusCode } from '../../src/shared/utils/constants';
 import { getPhoneNumberError, normalizePhoneForStorage } from '../../src/shared/utils/phoneNumber';
+import { getLatestCustomerFollowUp } from '../../src/shared/utils/customerFollowUp';
 
 type NormalizedImportRow = Omit<CustomerImportRow, 'tagNames'> & { tagNames: string[] };
 
@@ -167,13 +168,7 @@ export function validateCustomerImportRows(
 }
 
 function latestFollowUpContent(customer: Customer): string {
-  const latest = (customer.activityRecords || []).reduce<NonNullable<Customer['activityRecords']>[number] | null>((selected, record) => {
-    if (record.type !== 'follow') return selected;
-    if (!selected) return record;
-    const selectedAt = Date.parse(selected.createdAt) || 0;
-    const recordAt = Date.parse(record.createdAt) || 0;
-    return recordAt > selectedAt ? record : selected;
-  }, null);
+  const latest = getLatestCustomerFollowUp(customer);
   return cleanText(latest?.content);
 }
 

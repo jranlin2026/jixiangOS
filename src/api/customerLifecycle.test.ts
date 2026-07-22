@@ -146,6 +146,7 @@ const releaseRes = await customerApi.releaseCustomerToPublicPool('customer-activ
 assert.equal(releaseRes.code, 0);
 assert.equal(releaseRes.data?.lifecycleStatusCode, 'public_pool');
 assert.equal(releaseRes.data?.releaseReason, 'No intent');
+assert.equal(releaseRes.data?.previousOwner, 'Wang');
 
 const leadsAfterRelease = JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]');
 const releasedLead = leadsAfterRelease.find((lead: { id: string }) => lead.id === 'lead-active');
@@ -159,3 +160,7 @@ storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify(leadsAfterRelease.map((lead: 
 const healedLead = await leadApi.fetchLeadById('lead-active');
 assert.equal(healedLead.code, 0);
 assert.equal(healedLead.data?.lifecycleStatusCode, 'public_pool');
+
+const assignedFromPool = await customerApi.assignCustomerOwner('customer-active', 'user-admin', 'Admin claim');
+assert.equal(assignedFromPool.code, 0);
+assert.equal(assignedFromPool.data?.previousOwner, 'Wang');

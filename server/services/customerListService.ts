@@ -141,6 +141,23 @@ function containsTagId(tagId: string) {
   return Prisma.sql`JSON_CONTAINS(COALESCE(JSON_EXTRACT(data, '$.manualTagIds'), JSON_ARRAY()), JSON_QUOTE(${tagId})) = 1`;
 }
 
+function latestFollowUpOperatorSql() {
+  return Prisma.sql`COALESCE((
+    SELECT TRIM(activity.activity_operator)
+    FROM JSON_TABLE(
+      COALESCE(JSON_EXTRACT(data, '$.activityRecords'), JSON_ARRAY()),
+      '$[*]' COLUMNS (
+        activity_type VARCHAR(32) PATH '$.type',
+        activity_operator VARCHAR(255) PATH '$.operator',
+        activity_created_at VARCHAR(64) PATH '$.createdAt'
+      )
+    ) AS activity
+    WHERE activity.activity_type = 'follow'
+    ORDER BY activity.activity_created_at DESC
+    LIMIT 1
+  ), '')`;
+}
+
 export function matchesCustomerTagFilters(customer: Pick<Customer, 'manualTagIds' | 'tags'>, filters: CustomerFilters, catalog: CustomerTagCatalog): boolean {
   const assigned = new Set(customer.manualTagIds || []);
   const ids = normalizeManualTagIds(filters.tagIds || []).slice(0, 20);
@@ -194,7 +211,7 @@ export function buildCustomerWhere(filters: CustomerFilters, catalog?: CustomerT
 
   if (filters.owner) {
     if (normalizeLifecycleStatusCode(filters.lifecycleStatusCode) === LIFECYCLE_STATUS_CODES.PUBLIC_POOL) {
-      conditions.push(Prisma.sql`(${jsonText('$.releasedBy')} = ${filters.owner} OR ${jsonText('$.owner')} = ${filters.owner})`);
+      conditions.push(Prisma.sql`${latestFollowUpOperatorSql()} = ${filters.owner.trim()}`);
     } else {
       conditions.push(Prisma.sql`${jsonText('$.owner')} = ${filters.owner}`);
     }
@@ -406,7 +423,7 @@ export function createCustomerListService(
             type: 'follow' as const,
             title: '历史最后跟进记录',
             content: importedLastFollowUpRecord,
-            operator: actorName,
+            operator: '跟进人未知',
             createdAt: now,
           }] : []),
           {
@@ -542,6 +559,23 @@ export function createCustomerListService(
         )),
         pagination: { page, pageSize, total, totalPages },
       });
+    },
+
+    async listPublicPoolFollowUpOperators(currentUser?: AuthenticatedUser | null) {
+      const visibility = await buildVisibilityWhere(prisma, currentUser);
+      const where = buildCustomerWhere({ lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL });
+      const latestOperator = latestFollowUpOperatorSql();
+      const rows = await prisma.$queryRaw<Array<{ name: string }>>(Prisma.sql`
+        SELECT DISTINCT latest_follow_up_operator AS name
+        FROM (
+          SELECT ${latestOperator} AS latest_follow_up_operator
+          FROM business_records
+          WHERE ${where} AND ${visibility.where}
+        ) AS public_pool_follow_ups
+        WHERE latest_follow_up_operator <> ''
+        ORDER BY latest_follow_up_operator
+      `);
+      return success(rows.map((row) => cleanText(row.name)).filter(Boolean));
     },
 
     async addFollowUp(customerId: string, input: CustomerActivityInput = {}, currentUser?: AuthenticatedUser | null) {

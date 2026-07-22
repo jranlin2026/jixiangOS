@@ -1163,8 +1163,10 @@ const serviceOptions = {
 
 // RED: 公海领取只能归属当前操作人，并同步关联线索。
 {
+  const pooledCustomer = customer('cust-claim', '公海', LIFECYCLE_STATUS_CODES.PUBLIC_POOL);
+  pooledCustomer.previousOwner = '销售乙';
   const fake = createFakePrisma({
-    businessRecords: [businessCustomer(customer('cust-claim', '公海', LIFECYCLE_STATUS_CODES.PUBLIC_POOL))],
+    businessRecords: [businessCustomer(pooledCustomer)],
     leads: [lead('lead-claim', '公海', 'cust-claim')],
   });
   const service = createCustomerCommandService(fake.prisma, serviceOptions);
@@ -1172,6 +1174,7 @@ const serviceOptions = {
 
   assert.equal(result.code, 0);
   assert.equal(result.data?.owner, salesA.name);
+  assert.equal(result.data?.previousOwner, '销售乙');
   assert.equal(result.data?.lifecycleStatusCode, LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP);
   const next = fake.getState();
   assert.equal(next.leads[0].owner, salesA.name);

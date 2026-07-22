@@ -1026,7 +1026,8 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               {renderInfoRow('线索录入人', 'leadInputBy', false)}
               {renderInfoRow('线索贡献人', 'leadContributorName', detailActions.actions.editAttribution)}
               {renderInfoRow('客户等级', 'customerLevel', detailActions.actions.editProfile)}
-              {renderInfoRow('原销转人员', 'originalSalesTransferBy', detailActions.actions.editAttribution)}
+              {renderInfoRow('原销转人员（归因）', 'originalSalesTransferBy', detailActions.actions.editAttribution)}
+              {renderInfoRow('上一任销售负责人', 'previousOwner', false)}
               {renderInfoRow('累计消费', 'totalSpent', false)}
               {renderInfoRow('订单数', 'orderCount', false)}
               {renderInfoRow('创建时间', 'createdAt', false)}

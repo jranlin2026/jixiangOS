@@ -205,6 +205,7 @@ assert.match(source, /const requireLeadFollowAccess = createRequireAuth\(authSer
 assert.match(source, /const requireLeadAssignAccess = createRequireAuth\(authService, PERMISSION_KEYS\.LEADS_FLOW_CONFIG, 'write'\);/);
 assert.match(source, /const requireLeadDeleteAccess = createRequireAuth\(authService, '全部', 'delete'\);/);
 assert.match(source, /app\.get\('\/api\/customers', requireCustomerReadAccess,/);
+assert.match(source, /app\.get\('\/api\/customers\/public-pool-follow-up-operators', requireCustomerReadAccess,/);
 assert.match(source, /app\.get\('\/api\/customers\/:id', requireCustomerReadAccess,/);
 assert.match(
   source,

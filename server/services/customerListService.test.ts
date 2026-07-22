@@ -268,9 +268,10 @@ assert.deepEqual(importedWithFollowUp.data?.activityRecords?.map((record) => ({
   type: record.type,
   title: record.title,
   content: record.content,
+  operator: record.operator,
 })), [
-  { type: 'follow', title: '历史最后跟进记录', content: '已确认报价，等待客户回复' },
-  { type: 'create', title: '创建了客户', content: undefined },
+  { type: 'follow', title: '历史最后跟进记录', content: '已确认报价，等待客户回复', operator: '跟进人未知' },
+  { type: 'create', title: '创建了客户', content: undefined, operator: actor.name },
 ]);
 
 const publicPoolActor = {
@@ -527,6 +528,7 @@ const listService = createCustomerListService({
   $queryRaw: async (...args: any[]) => {
     const sql = flattenSql(args);
     capturedQueries.push(sql);
+    if (sql.includes('public_pool_follow_ups')) return [{ name: '历史跟进人' }, { name: '跟进人未知' }];
     const filtered = listFixtures.filter((item) => item.owner === '销售甲' && matchesCustomerTagFilters(item, executingFilters, tagCatalog));
     if (sql.includes('COUNT(*)')) return [{ total: BigInt(filtered.length) }];
     const page = Number(executingFilters.page || 1); const pageSize = Number(executingFilters.pageSize || 10);
@@ -561,6 +563,13 @@ for (const [filters, joiner] of filterCases) {
   await listService.list(filters, salesActor);
   assert.match(capturedQueries[0], joiner === 'JSON_LENGTH' ? /JSON_LENGTH/ : new RegExp(joiner.trim()));
 }
+
+capturedQueries.length = 0;
+const followUpOperators = await listService.listPublicPoolFollowUpOperators(salesActor);
+assert.deepEqual(followUpOperators.data, ['历史跟进人', '跟进人未知']);
+assert.match(capturedQueries[0], /SELECT DISTINCT latest_follow_up_operator/);
+assert.match(capturedQueries[0], /JSON_TABLE/);
+assert.match(capturedQueries[0], /JSON_UNQUOTE\(JSON_EXTRACT\(data, '\$\.owner'\)\) IN/);
 
 const mirrorListDirectory = {
   businessRecord: { findMany: async () => [] },

@@ -17,6 +17,7 @@ import type { CustomerTag, CustomerTagCatalog } from '../types/tag';
 import type { Role } from '../types/role';
 import { groupTagIdsForFilter, normalizeManualTagIds, validateCustomerTagFilters } from '../shared/utils/customerTagPolicy';
 import { PERMISSION_KEYS } from '../shared/utils/permissions';
+import { getLatestCustomerFollowUp } from '../shared/utils/customerFollowUp';
 
 function ensureInit(): void {
   initializeMockData();
@@ -366,6 +367,19 @@ async function fetchManageableUsers(): Promise<ApiResponse<CustomerManageableUse
   }]);
 }
 
+async function fetchPublicPoolFollowUpUsers(): Promise<ApiResponse<CustomerManageableUser[]>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<string[]>('/customers/public-pool-follow-up-operators');
+    if (response.code !== 0) return createErrorResponse(response.message, response.code);
+    return createSuccessResponse((response.data || []).map((name) => ({ id: `last-follow-up:${name}`, name })));
+  }
+  const names = filterVisibleCustomers(getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [])
+    .filter((customer) => customer.lifecycleStatusCode === LIFECYCLE_STATUS_CODES.PUBLIC_POOL)
+    .map((customer) => getLatestCustomerFollowUp(customer)?.operator?.trim() || '')
+    .filter(Boolean);
+  return createSuccessResponse(Array.from(new Set(names)).map((name) => ({ id: `last-follow-up:${name}`, name })));
+}
+
 async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<PaginatedResponse<Customer>>> {
   if (shouldUseBackendApi()) {
     const params = new URLSearchParams();
@@ -407,10 +421,11 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
     filtered = filtered.filter((c) => c.lifecycleStatusCode !== 'public_pool');
   }
   if (filters?.owner) {
+    const owner = filters.owner.trim();
     filtered = filtered.filter((c) => (
       filters.lifecycleStatusCode === 'public_pool'
-        ? (c.releasedBy === filters.owner || c.owner === filters.owner)
-        : c.owner === filters.owner
+        ? getLatestCustomerFollowUp(c)?.operator?.trim() === owner
+        : c.owner === owner
     ));
   }
   if (filters?.followStatus) {
@@ -742,6 +757,9 @@ async function assignCustomerOwner(id: string, ownerId: string, reason = ''): Pr
   const existing = customers[idx];
   const now = new Date().toISOString();
   const previousOwner = existing.owner || '';
+  const previousSalesOwner = existing.lifecycleStatusCode === LIFECYCLE_STATUS_CODES.PUBLIC_POOL
+    ? existing.previousOwner
+    : previousOwner;
   const changed = previousOwner !== nextOwner;
   const operator = getCurrentOperatorName(previousOwner || nextOwner);
   const cleanReason = reason.trim();
@@ -759,7 +777,7 @@ async function assignCustomerOwner(id: string, ownerId: string, reason = ''): Pr
     owner: nextOwner,
     ownerId,
     ownerIdentityStatus: 'resolved',
-    previousOwner: changed ? previousOwner : existing.previousOwner,
+    previousOwner: changed ? previousSalesOwner : existing.previousOwner,
     assignedBy: operator,
     assignedAt: changed ? now : existing.assignedAt || now,
     assignmentReason: cleanReason || existing.assignmentReason,
@@ -891,6 +909,7 @@ async function fetchAIPortrait(customerId: string): Promise<ApiResponse<AICustom
 
 export const customerApi = {
   fetchManageableUsers,
+  fetchPublicPoolFollowUpUsers,
   fetchCustomers,
   fetchCustomerById,
   createCustomer,

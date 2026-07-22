@@ -95,6 +95,7 @@ import CustomerBatchTaskDrawer from './batch/CustomerBatchTaskDrawer';
 import CustomerMergeDialog from './CustomerMergeDialog';
 import CustomerImportDialog from './CustomerImportDialog';
 import CustomerExportDialog from './CustomerExportDialog';
+import { buildLastFollowUpFilterUsers, getLastFollowUpOperator, getPreviousOwnerLabel } from './customerListPresentation';
 
 type CustomerColumn = {
   id: string;
@@ -111,14 +112,14 @@ type CustomerViewConfig = {
   schemaVersion: number;
 };
 
-const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_view_v7';
-const CUSTOMER_VIEW_SCHEMA_VERSION = 7;
+const CUSTOMER_VIEW_STORAGE_KEY = 'aaos_customer_table_view_v8';
+const CUSTOMER_VIEW_SCHEMA_VERSION = 8;
 const CUSTOMER_WIDTH_STORAGE_KEY = 'aaos_customer_table_column_widths_v2';
 const CUSTOMER_ACTION_COLUMN_WIDTH = 190;
 const CUSTOMER_SELECTION_COLUMN_WIDTH = 52;
 const formatCustomerSource = (customer: Customer) => [customer.leadSource, customer.sourceName].filter(Boolean).join('-') || '-';
 
-const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[], scope: CustomerScope = 'active'): CustomerColumn[] => {
+export const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[], scope: CustomerScope = 'active'): CustomerColumn[] => {
   const getLifecycleConfig = (customer: Customer) => {
     const code = normalizeLifecycleStatusCode(customer.lifecycleStatusCode);
     return lifecycleConfigs.find((item) => item.code === code) || getLifecycleConfigByCode(code);
@@ -158,13 +159,14 @@ const buildCustomerColumns = (lifecycleConfigs: LifecycleStatusConfig[], scope: 
   { id: 'leadContributorName', label: '线索贡献人', render: (customer) => customer.leadContributorName || '-' },
   { id: 'industry', label: '行业', render: (customer) => customer.industry || '-' },
   { id: 'city', label: '城市', render: (customer) => customer.city || '-' },
-  { id: 'originalSalesTransferBy', label: '原销转人员', render: (customer) => customer.originalSalesTransferBy || '-' },
+  { id: 'originalSalesTransferBy', label: '原销转人员（归因）', render: (customer) => customer.originalSalesTransferBy || '-' },
+  { id: 'previousOwner', label: '上一任销售负责人', render: (customer) => getPreviousOwnerLabel(customer) },
   { id: 'totalSpent', label: '累计消费', render: (customer) => formatCurrency(customer.totalSpent) },
   { id: 'orderCount', label: '订单数', render: (customer) => customer.orderCount },
   {
     id: 'owner',
     label: scope === 'public_pool' ? '最后跟进人' : '销售负责人',
-    render: (customer) => (scope === 'public_pool' ? (customer.releasedBy || customer.owner) : customer.owner) || '-',
+    render: (customer) => scope === 'public_pool' ? getLastFollowUpOperator(customer) : customer.owner || '-',
   },
   { id: 'remark', label: '备注', render: (customer) => customer.remark || '-' },
   { id: 'createdAt', label: '创建时间', render: (customer) => formatDate(customer.createdAt, 'yyyy-MM-dd HH:mm:ss') },
@@ -183,7 +185,7 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'leadInputBy',
   'leadContributorName',
   'industry',
-  'originalSalesTransferBy',
+  'previousOwner',
   'totalSpent',
   'orderCount',
   'owner',
@@ -206,6 +208,7 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   industry: 140,
   city: 120,
   originalSalesTransferBy: 160,
+  previousOwner: 180,
   totalSpent: 140,
   orderCount: 120,
   owner: 140,
@@ -282,6 +285,7 @@ const Customers: React.FC = () => {
   const [ordersOpen, setOrdersOpen] = useState(false);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [manageableUsers, setManageableUsers] = useState<CustomerManageableUser[]>([]);
+  const [publicPoolFollowUpUsers, setPublicPoolFollowUpUsers] = useState<CustomerManageableUser[]>([]);
   const [lifecycleConfigs, setLifecycleConfigs] = useState<LifecycleStatusConfig[]>([]);
   const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
@@ -305,6 +309,7 @@ const Customers: React.FC = () => {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const { alert, dialog: feedbackDialog } = useAppFeedback();
+  const isPublicPoolScope = customerScope === 'public_pool';
   const columns = useMemo(() => buildCustomerColumns(lifecycleConfigs, customerScope), [customerScope, lifecycleConfigs]);
   const customerLevelOptions = useMemo(() => {
     const activeConfigs = customerLevelConfigs.filter((item) => item.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
@@ -326,6 +331,13 @@ const Customers: React.FC = () => {
       if (res.code === 0) setCustomerLevelConfigs(res.data);
     });
   }, [currentUser?.id, fetchItems]);
+
+  useEffect(() => {
+    if (!isPublicPoolScope) return;
+    customerApi.fetchPublicPoolFollowUpUsers().then((res) => {
+      setPublicPoolFollowUpUsers(res.code === 0 ? res.data : []);
+    });
+  }, [currentUser?.id, isPublicPoolScope]);
 
   useEffect(() => {
     const tagState = readCustomerTagFilterParams(searchParams);
@@ -356,7 +368,15 @@ const Customers: React.FC = () => {
     [orderedColumns, visibleColumnIds],
   );
   const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length);
-  const visibleOwnerUsers = manageableUsers;
+  const visiblePublicPoolFollowUpUsers = useMemo(
+    () => {
+      const selected = buildLastFollowUpFilterUsers([], filters.owner);
+      const byName = new Map([...publicPoolFollowUpUsers, ...selected].map((user) => [user.name, user]));
+      return Array.from(byName.values());
+    },
+    [publicPoolFollowUpUsers, filters.owner],
+  );
+  const visibleOwnerUsers = isPublicPoolScope ? visiblePublicPoolFollowUpUsers : manageableUsers;
   const transferableOwnerUsers = useMemo(
     () => manageableUsers.filter((user) => user.id !== assignTarget?.ownerId),
     [assignTarget?.ownerId, manageableUsers],
@@ -413,7 +433,6 @@ const Customers: React.FC = () => {
     permissions: customerWritePermissions,
     readOnly: false,
   }).actions;
-  const isPublicPoolScope = customerScope === 'public_pool';
   const ownerFilterLabel = isPublicPoolScope ? '最后跟进人' : '销售负责人';
   const hasAdvancedFilters = Boolean(filters.sourceType || filters.leadSource || filters.industry || filters.city || filters.tagIds?.length || filters.withoutTags || filters.missingTagGroupId);
   const hasAnyActiveFilter = Boolean(
