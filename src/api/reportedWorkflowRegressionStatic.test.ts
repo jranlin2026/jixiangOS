@@ -26,6 +26,16 @@ assert.match(
   /if \(res\.data && detailOrder\?\.id === res\.data\.id\) \{[\s\S]*?setDetailOrder\(res\.data\);[\s\S]*?setDetailCommissions\(await loadRecoveryCommissions\(res\.data\)\);[\s\S]*?\}/,
   '保存售后分账后必须立即用接口返回的待确认订单及分账明细刷新仍在显示的详情弹窗',
 );
+assert.doesNotMatch(
+  recoverySource,
+  /closeDetail\(\);\s*openSettlement\(detailOrder\);/,
+  '从详情处理售后分账时必须保留详情，保存后才能原地进入确认分账',
+);
+assert.match(
+  recoverySource,
+  /<Dialog open=\{Boolean\(detailOrder\) && !selected\} onClose=\{closeDetail\}/,
+  '编辑分账时应暂时隐藏但不能销毁详情弹窗',
+);
 assert.match(commissionApiSource, /await hydrateCommissionOrderCache\(\)/);
 assert.match(customerFormSource, /const saved =/);
 assert.match(customerFormSource, /if \(!saved\) return;/);

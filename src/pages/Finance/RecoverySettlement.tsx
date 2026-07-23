@@ -932,7 +932,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(detailOrder)} onClose={closeDetail} maxWidth="xl" fullWidth>
+      <Dialog open={Boolean(detailOrder) && !selected} onClose={closeDetail} maxWidth="xl" fullWidth>
         <DialogCloseTitle onClose={closeDetail}>售后挽回分账处理</DialogCloseTitle>
         <DialogContent dividers sx={{ bgcolor: '#f8fafc' }}>
           {detailOrder && (
@@ -1008,7 +1008,6 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                         startIcon={<EditIcon />}
                         disabled={isSourceRecoveryDeleted(detailOrder) || (getSettlementStatus(detailOrder) !== '待处理' && getSettlementStatus(detailOrder) !== '待确认')}
                         onClick={() => {
-                          closeDetail();
                           openSettlement(detailOrder);
                         }}
                         sx={{ whiteSpace: 'nowrap' }}
@@ -1112,7 +1111,6 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                               variant="contained"
                               startIcon={<EditIcon />}
                               onClick={() => {
-                                closeDetail();
                                 openSettlement(detailOrder);
                               }}
                             >
