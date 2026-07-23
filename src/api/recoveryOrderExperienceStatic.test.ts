@@ -76,6 +76,12 @@ assert.match(
   'Finance recovery settlement table should render the saved recovery time.',
 );
 
+assert.match(
+  recoverySettlementSource,
+  /handledViewSettingsTriggerRef\s*=\s*React\.useRef\(viewSettingsTrigger\)[\s\S]*?handledViewSettingsTriggerRef\.current === viewSettingsTrigger[\s\S]*?handledViewSettingsTriggerRef\.current = viewSettingsTrigger[\s\S]*?setViewSettingsOpen\(true\)/,
+  '售后挽回分账页首次挂载或切回页签时不得把旧的视图设置信号当成新点击。',
+);
+
 assert.doesNotMatch(
   recoverySettlementSource,
   /cleanupDeletedSourceRecoverySettlement|清理废弃分账/,

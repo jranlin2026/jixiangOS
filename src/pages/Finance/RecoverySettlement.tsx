@@ -237,6 +237,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   const [deleteReason, setDeleteReason] = useState('');
   const [withdrawTarget, setWithdrawTarget] = useState<RecoveryOrder | null>(null);
   const [withdrawReason, setWithdrawReason] = useState('');
+  const handledViewSettingsTriggerRef = React.useRef(viewSettingsTrigger);
   const handledCreateSettlementTriggerRef = React.useRef(createSettlementTrigger);
   const sourceDetailRequestRef = React.useRef(0);
 
@@ -392,7 +393,10 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   }, [search, status]);
 
   useEffect(() => {
-    if (viewSettingsTrigger > 0) setViewSettingsOpen(true);
+    if (viewSettingsTrigger <= 0) return;
+    if (handledViewSettingsTriggerRef.current === viewSettingsTrigger) return;
+    handledViewSettingsTriggerRef.current = viewSettingsTrigger;
+    setViewSettingsOpen(true);
   }, [viewSettingsTrigger]);
 
   useEffect(() => {
