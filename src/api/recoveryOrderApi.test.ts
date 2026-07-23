@@ -353,6 +353,24 @@ withdrawnCommissions[0] = { ...withdrawnCommissions[0], status: '已撤回', aud
 storage.setItem(STORAGE_KEYS.COMMISSIONS, JSON.stringify(withdrawnCommissions));
 const deletedWithdrawnOrder = await recoveryOrderApi.deleteRecoveryOrder(created.data.id);
 assert.equal(deletedWithdrawnOrder.code, 0, '本地模式全部提成已撤回后应允许删除订单');
+const formalListWithDeletedRequested = await recoveryOrderApi.fetchRecoveryOrders({
+  scopeDomain: 'recoveryOrders', includeDeleted: true, page: 1, pageSize: 20,
+});
+assert.equal(
+  formalListWithDeletedRequested.data.items.some((item) => item.id === created.data.id),
+  false,
+  '正式售后列表必须忽略外部传入的 includeDeleted',
+);
+setSession('user-finance');
+const retainedReviewHistory = await recoveryOrderApi.fetchRecoveryOrders({
+  scopeDomain: 'recoveryOrderApplications', includeDeleted: true, page: 1, pageSize: 20,
+});
+assert.equal(
+  retainedReviewHistory.data.items.some((item) => item.id === created.data.id),
+  true,
+  '审核台全部记录必须保留已删除业务单的留痕',
+);
+setSession('user-service');
 assert.equal(
   (JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as any[])[0]?.status,
   '已撤回',

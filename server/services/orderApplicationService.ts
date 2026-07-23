@@ -2,7 +2,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { failure, success, type ApiResponse } from '../api/response';
 import { STORAGE_KEYS, normalizeResourceOwnership } from '../../src/shared/utils/constants';
-import { isSuperAdmin } from '../../src/shared/utils/permissions';
 import {
   buildDataVisibilityScopeForUser,
   type DataVisibilityScope,
@@ -959,75 +958,12 @@ export function createOrderApplicationService(
 
     async cleanupDeletedSource(
       applicationId: string,
-      reason: string,
-      actor: AuthenticatedUser,
+      _reason: string,
+      _actor: AuthenticatedUser,
     ): Promise<ApiResponse<boolean | null>> {
       const cleanApplicationId = String(applicationId || '').trim();
-      const cleanReason = String(reason || '').trim();
       if (!cleanApplicationId) return failure<boolean>('订单申请ID不能为空', 400);
-      if (!cleanReason) return failure<boolean>('清理订单审核记录必须填写原因', 400);
-      if (!isSuperAdmin(actor)) return failure<boolean>('仅超级管理员可以清理订单审核记录', 403);
-
-      for (let attempt = 1; attempt <= MAX_TRANSACTION_ATTEMPTS; attempt += 1) {
-        try {
-          const cleaned = await prisma.$transaction(async (transaction) => {
-            const rows = await transaction.$queryRaw<LockedApplicationRow[]>`
-              SELECT id, domain, recordId, status, data
-              FROM business_records
-              WHERE domain = ${STORAGE_KEYS.ORDER_APPLICATIONS}
-                AND recordId = ${cleanApplicationId}
-              LIMIT 1
-              FOR UPDATE
-            `;
-            const row = rows[0];
-            if (!row) throw new OrderApprovalError(404, '订单申请不存在');
-            const application = parseJsonObject<OrderApplication>(row.data, '订单申请');
-            if (application.id !== cleanApplicationId) {
-              throw new OrderApprovalError(409, '订单申请标识与数据库记录不一致');
-            }
-            const sourceOrderId = String(application.orderId || '').trim();
-            if (application.status !== STATUS_APPROVED || !sourceOrderId) {
-              throw new OrderApprovalError(409, '只有已入库且正式订单已删除的申请记录可以清理');
-            }
-
-            const sourceOrderRow = await transaction.businessRecord.findUnique({
-              where: {
-                domain_recordId: {
-                  domain: STORAGE_KEYS.ORDERS,
-                  recordId: sourceOrderId,
-                },
-              },
-            });
-            if (sourceOrderRow) {
-              const sourceOrder = parseJsonObject<Order>(sourceOrderRow.data, '正式订单');
-              if (sourceOrder.id !== sourceOrderId || !sourceOrder.deletedAt) {
-                throw new OrderApprovalError(409, '正式订单仍存在，不能清理审核记录');
-              }
-            }
-
-            await transaction.businessRecord.delete({
-              where: {
-                domain_recordId: {
-                  domain: STORAGE_KEYS.ORDER_APPLICATIONS,
-                  recordId: cleanApplicationId,
-                },
-              },
-            });
-            return true;
-          }, {
-            isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
-            maxWait: 5_000,
-            timeout: 10_000,
-          });
-          return success(cleaned);
-        } catch (error) {
-          if (error instanceof OrderApprovalError) return failure<boolean>(error.message, error.responseCode);
-          if (prismaCode(error) === 'P2034' && attempt < MAX_TRANSACTION_ATTEMPTS) continue;
-          if (prismaCode(error) === 'P2034') return failure<boolean>('清理订单审核记录发生并发冲突，请刷新后重试', 409);
-          throw error;
-        }
-      }
-      return failure<boolean>('清理订单审核记录发生并发冲突，请刷新后重试', 409);
+      return failure<boolean>('订单审核记录为永久审计留痕，不能清理', 409);
     },
   };
 }

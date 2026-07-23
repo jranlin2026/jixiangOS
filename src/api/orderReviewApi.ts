@@ -18,7 +18,6 @@ import { getStorageData, setStorageCacheData, setStorageData } from './mock/stor
 import { DEFAULT_PAGE_SIZE, STORAGE_KEYS, normalizeResourceOwnership } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { getCurrentDataVisibilityScope } from '../shared/utils/dataVisibility';
-import { isSuperAdminRoleName } from '../shared/utils/roles';
 import { getUserRole, PERMISSION_KEYS, roleHasPermission } from '../shared/utils/permissions';
 import { initializeMockData } from './mock';
 import { orderApi } from './orderApi';
@@ -48,10 +47,6 @@ function getCurrentUser(): User | undefined {
   if (!session?.userId) return undefined;
   const users = readJson<User[]>(STORAGE_KEYS.USERS) || [];
   return users.find((user) => user.id === session.userId && user.isActive);
-}
-
-function isCurrentUserSuperAdmin(): boolean {
-  return isSuperAdminRoleName(getCurrentUser()?.role);
 }
 
 function getRole(user?: User): Role | undefined {
@@ -200,7 +195,11 @@ function applyFilters(applications: OrderApplication[], filters?: OrderApplicati
       || item.applicantName.toLowerCase().includes(q)
     ));
   }
-  if (filters?.status) filtered = filtered.filter((item) => item.status === filters.status);
+  if (filters?.statuses?.length) {
+    filtered = filtered.filter((item) => filters.statuses?.includes(item.status));
+  } else if (filters?.status) {
+    filtered = filtered.filter((item) => item.status === filters.status);
+  }
   if (filters?.applicantName) filtered = filtered.filter((item) => item.applicantName === filters.applicantName);
   if (filters?.reviewerName) filtered = filtered.filter((item) => item.reviewerName === filters.reviewerName);
   if (filters?.startDate) filtered = filtered.filter((item) => item.submittedAt >= filters.startDate!);
@@ -212,7 +211,9 @@ async function fetchOrderApplications(filters?: OrderApplicationFilters): Promis
   if (shouldUseBackendApi()) {
     const params = new URLSearchParams();
     Object.entries(filters || {}).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+      if (value !== undefined && value !== null && value !== '') {
+        params.set(key, Array.isArray(value) ? value.join(',') : String(value));
+      }
     });
     const response = await backendRequest<PaginatedResponse<OrderApplication>>(
       `/order-applications${params.size ? `?${params.toString()}` : ''}`,
@@ -455,41 +456,8 @@ async function rejectOrderApplication(id: string, reason: string): Promise<ApiRe
   return createSuccessResponse(applications[idx]);
 }
 
-async function cleanupDeletedSourceOrderApplication(id: string, reason: string): Promise<ApiResponse<boolean>> {
-  if (shouldUseBackendApi()) {
-    const response = await backendRequest<boolean>(`/order-applications/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      body: JSON.stringify({ reason }),
-    });
-    if (response.code !== 0 || !response.data) {
-      return createErrorResponse(response.message || '服务端未返回清理结果', response.code || -1);
-    }
-    setStorageCacheData(
-      STORAGE_KEYS.ORDER_APPLICATIONS,
-      getStoredApplications().filter((item) => item.id !== id),
-    );
-    return createSuccessResponse(true);
-  }
-
-  ensureInit();
-  await delay(120);
-  if (!isCurrentUserSuperAdmin()) return createErrorResponse('仅超级管理员可以清理订单审核记录', 403);
-  const normalizedReason = reason.trim();
-  if (!normalizedReason) return createErrorResponse('清理订单审核记录必须填写原因');
-
-  const applications = getStoredApplications();
-  const target = applications.find((item) => item.id === id);
-  if (!target) return createErrorResponse('订单申请不存在', 404);
-  if (target.status !== STATUS_APPROVED || !target.orderId) {
-    return createErrorResponse('只有已入库且正式订单已删除的申请记录可以清理');
-  }
-
-  const orders = readJson<Order[]>(STORAGE_KEYS.ORDERS) || [];
-  const activeOrder = orders.find((order) => order.id === target.orderId && !order.deletedAt);
-  if (activeOrder) return createErrorResponse('正式订单仍存在，不能清理审核记录');
-
-  saveApplications(applications.filter((item) => item.id !== id));
-  return createSuccessResponse(true);
+async function cleanupDeletedSourceOrderApplication(_id: string, _reason: string): Promise<ApiResponse<boolean>> {
+  return createErrorResponse('订单审核记录为永久审计留痕，不能清理', 409);
 }
 
 export const ORDER_APPLICATION_STATUSES = {

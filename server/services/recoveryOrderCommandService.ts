@@ -405,9 +405,23 @@ export function createRecoveryOrderCommandService(
       const financeSettlementStatuses = requestedFinanceStatuses.filter((status) => (
         financeAllowedStatuses.includes(status as typeof financeAllowedStatuses[number])
       ));
+      const hasExplicitFinanceSettlementFilter = Boolean(
+        filters.settlementStatuses?.some((status) => financeAllowedStatuses.includes(
+          status as typeof financeAllowedStatuses[number],
+        ))
+        || (filters.settlementStatus
+          && filters.settlementStatus !== '全部'
+          && financeAllowedStatuses.includes(filters.settlementStatus as typeof financeAllowedStatuses[number])),
+      );
+      const isFinanceSettlementQuery = scopeDomain === 'recoveryOrders'
+        && hasPermission(actor, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'read')
+        && hasExplicitFinanceSettlementFilter;
+      const includeDeleted = Boolean(filters.includeDeleted && (
+        scopeDomain === 'recoveryOrderApplications' || financeOnly || isFinanceSettlementQuery
+      ));
       const effectiveFilters: RecoveryOrderFilters = financeOnly
-        ? { ...filters, settlementStatus: undefined, settlementStatuses: financeSettlementStatuses }
-        : filters;
+        ? { ...filters, includeDeleted, settlementStatus: undefined, settlementStatuses: financeSettlementStatuses }
+        : { ...filters, includeDeleted };
       const compactListItem = financeOnly ? compactRecoverySettlementListItem : compactRecoveryOrderListItem;
       if (financeOnly && !financeSettlementStatuses.length) {
         const page = toPositiveInt(effectiveFilters.page, 1);
@@ -461,7 +475,9 @@ export function createRecoveryOrderCommandService(
       ]);
       if (!row) return failure<RecoveryOrder>('售后挽回订单不存在', 404);
       const order = parseObject<RecoveryOrder>(row.data, '售后挽回订单');
-      if (order.deletedAt && !financeOnly) return failure<RecoveryOrder>('售后挽回订单不存在', 404);
+      if (order.deletedAt && !financeOnly && scopeDomain !== 'recoveryOrderApplications') {
+        return failure<RecoveryOrder>('售后挽回订单不存在', 404);
+      }
       if (financeOnly && !['待处理', '待确认', '待发放', '已发放', '已撤回'].includes(recoverySettlementStatus(order))) {
         return failure<RecoveryOrder>('无权查看该售后挽回订单', 403);
       }

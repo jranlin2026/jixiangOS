@@ -25,9 +25,14 @@ function order(id: string, salesId: string | undefined, salesName: string, overr
   };
 }
 
-function application(id: string, applicantId: string | undefined, applicantName: string): OrderApplication {
+function application(
+  id: string,
+  applicantId: string | undefined,
+  applicantName: string,
+  status: OrderApplication['status'] = '待财务审核',
+): OrderApplication {
   return {
-    id, applicationNo: `OAPP-${id}`, status: '待财务审核',
+    id, applicationNo: `OAPP-${id}`, status,
     orderData: order(`draft-${id}`, applicantId, applicantName),
     applicantId, applicantName, submittedAt: now, reviewLogs: [], createdAt: now, updatedAt: now,
   };
@@ -80,6 +85,8 @@ const applications = [
   },
   application('application-legacy-self', undefined, sales.name),
   application('application-other', 'user-other', '销售B'),
+  application('application-approved', sales.id, sales.name, '已入库'),
+  application('application-rejected', sales.id, sales.name, '已驳回'),
 ];
 
 const prisma: any = {
@@ -135,7 +142,7 @@ assert.deepEqual(salesStats.data, {
   upgradeAmount: 0,
 });
 
-const salesApplications = await service.listApplications({ page: 1, pageSize: 10 }, sales);
+const salesApplications = await service.listApplications({ status: '待财务审核', page: 1, pageSize: 10 }, sales);
 assert.deepEqual(
   salesApplications.data?.items.map((item) => item.id).sort(),
   ['application-legacy-self', 'application-self'],
@@ -145,4 +152,15 @@ assert.equal(listedApplication?.orderData.dealEvidencePreview, undefined);
 assert.equal(listedApplication?.orderData.payments[0].voucherPreview, undefined);
 assert.equal((await service.getApplication('application-other', sales)).code, 403);
 assert.equal((await service.getApplication('application-self', sales)).data?.orderData.dealEvidencePreview, inlineProof);
-assert.equal((await service.listApplications({ page: 1, pageSize: 1 }, finance)).data?.pagination.total, 3);
+assert.equal((await service.listApplications({ page: 1, pageSize: 1 }, finance)).data?.pagination.total, 5);
+
+const processedApplications = await service.listApplications({
+  statuses: ['已入库', '已驳回'],
+  page: 1,
+  pageSize: 10,
+}, finance);
+assert.deepEqual(
+  processedApplications.data?.items.map((item) => item.status).sort(),
+  ['已入库', '已驳回'].sort(),
+  '已处理审核记录必须在服务端同时筛选已入库和已驳回',
+);

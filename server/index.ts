@@ -111,6 +111,7 @@ import { mapPrismaRole, mapPrismaUser } from './db/prismaMappers';
 import { mergeRoleWithDefaultAccess } from '../src/shared/utils/organizationConfig';
 import { PERMISSION_KEYS, hasPermission } from '../src/shared/utils/permissions';
 import { STORAGE_KEYS } from '../src/shared/utils/constants';
+import type { OrderApplicationFilters } from '../src/types/order';
 import type { RecoveryOrderFilters } from '../src/types/recoveryOrder';
 import {
   buildCustomerIntelPrompt,
@@ -710,9 +711,11 @@ app.post('/api/leads/:id/convert', requireLeadConvertAccess, async (req: Authent
 });
 
 app.get('/api/order-applications', requireOrderApplicationReadAccess, async (req: AuthenticatedRequest, res) => {
+  const statuses = queryParam(req.query.statuses).split(',').filter(Boolean);
   const result = await orderQueryService.listApplications({
     search: queryParam(req.query.search),
     status: queryParam(req.query.status) as any,
+    statuses: statuses as OrderApplicationFilters['statuses'],
     applicantName: queryParam(req.query.applicantName),
     reviewerName: queryParam(req.query.reviewerName),
     startDate: queryParam(req.query.startDate),

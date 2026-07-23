@@ -137,7 +137,8 @@ function matchesApplication(application: OrderApplication, filters: OrderApplica
     application.orderData?.customerName,
     application.orderNo,
   ].some((value) => lowerText(value).includes(search))) return false;
-  if (filters.status && application.status !== filters.status) return false;
+  if (filters.statuses?.length && !filters.statuses.includes(application.status)) return false;
+  if (!filters.statuses?.length && filters.status && application.status !== filters.status) return false;
   if (filters.applicantName && application.applicantName !== filters.applicantName) return false;
   if (filters.reviewerName && application.reviewerName !== filters.reviewerName) return false;
   return inDateRange(application.submittedAt || application.createdAt, filters.startDate, filters.endDate);
@@ -193,7 +194,8 @@ async function queryApplicationPage(
   const page = toPositiveInt(filters.page, 1);
   const pageSize = Math.min(toPositiveInt(filters.pageSize, DEFAULT_PAGE_SIZE), 100);
   const conditions: Prisma.Sql[] = [Prisma.sql`br.domain = ${STORAGE_KEYS.ORDER_APPLICATIONS}`];
-  if (filters.status) conditions.push(Prisma.sql`br.status = ${filters.status}`);
+  if (filters.statuses?.length) conditions.push(Prisma.sql`br.status IN (${Prisma.join(filters.statuses)})`);
+  else if (filters.status) conditions.push(Prisma.sql`br.status = ${filters.status}`);
   conditions.push(...exactJson('br', '$.applicantName', filters.applicantName));
   conditions.push(...exactJson('br', '$.reviewerName', filters.reviewerName));
   if (filters.startDate) conditions.push(Prisma.sql`COALESCE(${jsonText('br', '$.submittedAt')}, ${jsonText('br', '$.createdAt')}) >= ${filters.startDate}`);

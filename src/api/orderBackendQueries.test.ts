@@ -113,7 +113,7 @@ try {
   assert.equal((await orderApi.fetchOrderById('detail-order')).data?.id, 'detail-order');
   assert.deepEqual((await orderApi.fetchOrderStats()).data, backendStats);
 
-  const listedApplications = await orderReviewApi.fetchOrderApplications({ status: '待财务审核', page: 3, pageSize: 5 });
+  const listedApplications = await orderReviewApi.fetchOrderApplications({ statuses: ['已入库', '已驳回'], page: 3, pageSize: 5 });
   assert.equal(listedApplications.code, 0);
   assert.deepEqual(listedApplications.data.items.map((item) => item.id), ['listed-application']);
   assert.equal(listedApplications.data.pagination.total, 11);
@@ -126,7 +126,7 @@ try {
   assert.match(requests[0].url, /page=2/);
   assert.equal(requests[2].url, 'http://127.0.0.1:3001/api/orders/stats');
   assert.match(requests[3].url, /\/order-applications\?/);
-  assert.match(requests[3].url, /status=%E5%BE%85%E8%B4%A2%E5%8A%A1%E5%AE%A1%E6%A0%B8/);
+  assert.match(requests[3].url, /statuses=%E5%B7%B2%E5%85%A5%E5%BA%93%2C%E5%B7%B2%E9%A9%B3%E5%9B%9E/);
 
   const cachedOrders = JSON.parse(storage.getItem(STORAGE_KEYS.ORDERS) || '[]') as Order[];
   const cachedApplications = JSON.parse(storage.getItem(STORAGE_KEYS.ORDER_APPLICATIONS) || '[]') as OrderApplication[];

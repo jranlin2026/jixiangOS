@@ -442,12 +442,12 @@ const deferredEffects: OrderApprovalEffectState = {
   });
   const service = createOrderApplicationService(prisma as any, { now: () => new Date(NOW) });
 
-  assert.equal((await service.cleanupDeletedSource('oa-concurrent-1', '清理残留', reviewer)).code, 403);
-  assert.equal((await service.cleanupDeletedSource('oa-concurrent-1', '', superAdmin)).code, 400);
+  assert.equal((await service.cleanupDeletedSource('oa-concurrent-1', '清理残留', reviewer)).code, 409);
+  assert.equal((await service.cleanupDeletedSource('oa-concurrent-1', '', superAdmin)).code, 409);
   const result = await service.cleanupDeletedSource('oa-concurrent-1', '源订单已删除，清理残留', superAdmin);
-  assert.equal(result.code, 0, result.message);
-  assert.equal(result.data, true);
-  assert.equal(prisma.rows.has(rowKey(STORAGE_KEYS.ORDER_APPLICATIONS, 'oa-concurrent-1')), false);
+  assert.equal(result.code, 409);
+  assert.match(result.message, /永久审计留痕/);
+  assert.equal(prisma.rows.has(rowKey(STORAGE_KEYS.ORDER_APPLICATIONS, 'oa-concurrent-1')), true);
 }
 
 {

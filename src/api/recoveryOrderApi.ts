@@ -238,7 +238,17 @@ async function fetchRecoveryOrders(filters: RecoveryOrderFilters = {}): Promise<
       : '无权查看售后挽回订单列表', 403);
   }
   let items = filterVisibleRecoveryOrders(readRecoveryOrders(), filters.scopeDomain);
-  if (!filters.includeDeleted) {
+  const financeSettlementStatuses = ['待处理', '待确认', '待发放', '已发放', '已撤回'];
+  const hasExplicitFinanceSettlementFilter = Boolean(
+    filters.settlementStatuses?.some((status) => financeSettlementStatuses.includes(status))
+    || (filters.settlementStatus
+      && filters.settlementStatus !== '全部'
+      && financeSettlementStatuses.includes(filters.settlementStatus)),
+  );
+  const canIncludeDeleted = scopeDomain === 'recoveryOrderApplications'
+    || (canUseRecoveryPermission(PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'read')
+      && hasExplicitFinanceSettlementFilter);
+  if (!filters.includeDeleted || !canIncludeDeleted) {
     items = items.filter((item) => !item.deletedAt);
   }
   const q = normalizeText(filters.search);
@@ -302,7 +312,7 @@ async function fetchRecoveryOrderById(
   ensureInit();
   await delay(80);
   const order = filterVisibleRecoveryOrders(readRecoveryOrders(), scopeDomain)
-    .find((item) => item.id === id && !item.deletedAt);
+    .find((item) => item.id === id && (!item.deletedAt || scopeDomain === 'recoveryOrderApplications'));
   return createSuccessResponse(order || null);
 }
 

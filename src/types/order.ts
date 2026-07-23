@@ -180,6 +180,7 @@ export interface OrderFilters {
 export interface OrderApplicationFilters {
   search?: string;
   status?: OrderApplicationStatus;
+  statuses?: OrderApplicationStatus[];
   applicantName?: string;
   reviewerName?: string;
   startDate?: string;

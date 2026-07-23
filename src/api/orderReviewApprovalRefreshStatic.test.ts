@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const source = readFileSync(path.resolve('src/pages/OrderReview/index.tsx'), 'utf8');
-const submitReviewAction = source.match(/const submitReviewAction = async \(\) => \{([\s\S]*?)\n  \};\n\n  const handleCleanupApplication/ )?.[1];
+const submitReviewAction = source.match(/const submitReviewAction = async \(\) => \{([\s\S]*?)\n  \};\n\n  const viewFormalOrder/ )?.[1];
 
 assert.ok(submitReviewAction, 'Order review page should define submitReviewAction.');
 assert.match(submitReviewAction, /if \(res\.code !== 0 \|\| !res\.data\) \{[\s\S]*?await alert\(/,

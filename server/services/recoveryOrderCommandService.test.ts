@@ -496,8 +496,54 @@ const deleted = await service.softDelete(returnedSource.data!.id, '重复录入'
 assert.equal(deleted.code, 0);
 assert.equal(deleted.data?.deletedBy, reviewer.name);
 assert.equal(deleted.data?.deleteReason, '重复录入');
+const formalListWithDeletedRequested = await service.list({
+  scopeDomain: 'recoveryOrders',
+  includeDeleted: true,
+  page: 1,
+  pageSize: 100,
+}, staleReviewer);
+assert.equal(
+  formalListWithDeletedRequested.data?.items.some((item) => item.id === returnedSource.data!.id),
+  false,
+  'formal recovery list must ignore includeDeleted even when a caller sets it directly',
+);
+const dualPermissionActor: AuthenticatedUser = {
+  ...staleReviewer,
+  permissions: [
+    ...staleReviewer.permissions,
+    { module: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, actions: ['read', 'write'] },
+  ],
+};
+const formalListWithFakeFinanceFilter = await service.list({
+  scopeDomain: 'recoveryOrders',
+  includeDeleted: true,
+  settlementStatus: '全部',
+  page: 1,
+  pageSize: 100,
+}, dualPermissionActor);
+assert.equal(
+  formalListWithFakeFinanceFilter.data?.items.some((item) => item.id === returnedSource.data!.id),
+  false,
+  'settlementStatus=全部 must not bypass deleted-record protection for dual-permission users',
+);
+const permanentReviewHistory = await service.list({
+  scopeDomain: 'recoveryOrderApplications',
+  includeDeleted: true,
+  page: 1,
+  pageSize: 100,
+}, reviewer);
+assert.equal(
+  permanentReviewHistory.data?.items.some((item) => item.id === returnedSource.data!.id),
+  true,
+  'review all-records view must retain soft-deleted recovery evidence',
+);
 assert.equal(
   (await service.get(returnedSource.data!.id, reviewer, 'recoveryOrderApplications')).code,
-  404,
-  'soft-deleted recovery evidence must not be readable by id',
+  0,
+  'soft-deleted recovery evidence must remain readable from permanent review history',
+);
+assert.notEqual(
+  (await service.get(returnedSource.data!.id, reviewer, 'recoveryOrders')).code,
+  0,
+  'soft-deleted recovery evidence must stay hidden from the formal business list',
 );

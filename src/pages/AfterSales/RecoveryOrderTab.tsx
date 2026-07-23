@@ -50,6 +50,11 @@ import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
 import BusinessAttachmentPicker from '../../shared/components/BusinessAttachmentPicker';
 import BusinessAttachmentLinks from '../../shared/components/BusinessAttachmentLinks';
 import { subscribePageRefresh } from '../../shared/utils/pageRefresh';
+import {
+  REVIEW_QUEUE_OPTIONS,
+  getRecoveryOrderReviewStatuses,
+  type ReviewQueueView,
+} from '../../shared/utils/reviewQueue';
 
 const shell = {
   ink: '#0f172a',
@@ -148,7 +153,6 @@ const RECOVERY_ORDER_COLUMNS: Array<TableViewColumnConfig & { id: RecoveryOrderC
 const DEFAULT_VISIBLE_COLUMNS = RECOVERY_ORDER_COLUMNS.map((column) => column.id);
 const RECOVERY_ORDER_LIST_COLUMNS = RECOVERY_ORDER_COLUMNS.filter((column) => column.id !== 'status');
 const DEFAULT_LIST_VISIBLE_COLUMNS = RECOVERY_ORDER_LIST_COLUMNS.map((column) => column.id);
-const RECOVERY_REVIEW_STATUSES: RecoveryOrderStatus[] = ['待审核', '退回修改'];
 const RECOVERY_LIST_STATUSES: RecoveryOrderStatus[] = ['待分账', '已分账'];
 
 function isRecoveryOrderLocked(row: RecoveryOrder): boolean {
@@ -170,6 +174,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const [products, setProducts] = useState<Product[]>([]);
   const [sourceConfigs, setSourceConfigs] = useState<AfterSalesSourceConfig[]>([]);
   const [search, setSearch] = useState('');
+  const [reviewQueueView, setReviewQueueView] = useState<ReviewQueueView>('pending');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [total, setTotal] = useState(0);
@@ -205,12 +210,13 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
     search,
     status: '全部',
     statuses: mode === 'review'
-      ? RECOVERY_REVIEW_STATUSES
+      ? getRecoveryOrderReviewStatuses(reviewQueueView)
       : RECOVERY_LIST_STATUSES,
+    includeDeleted: mode === 'review' && reviewQueueView === 'all',
     scopeDomain: mode === 'review' ? 'recoveryOrderApplications' : 'recoveryOrders',
     page: page + 1,
     pageSize: rowsPerPage,
-  }), [mode, page, rowsPerPage, search]);
+  }), [mode, page, reviewQueueView, rowsPerPage, search]);
 
   const load = useCallback(async () => {
     const requestId = loadRequestIdRef.current + 1;
@@ -460,7 +466,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
     } else if (reviewAction.type === 'return') {
       setMessage({ type: 'success', text: '已退回修改，可在售后挽回审核台修改后重新提交审核' });
     } else {
-      setMessage({ type: 'success', text: '已驳回挽回订单，可在售后挽回订单列表中查看' });
+      setMessage({ type: 'success', text: '已驳回挽回订单，可在审核台“已处理”中查看' });
     }
     closeReviewDialog();
     await load();
@@ -511,14 +517,20 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       case 'status':
         return (
           <Box>
-            <Chip size="small" label={row.status} sx={{ ...getStatusSx(row.status), fontWeight: 900 }} />
+            <Chip
+              size="small"
+              label={row.deletedAt ? '已删除（留痕）' : row.status}
+              sx={row.deletedAt
+                ? { bgcolor: '#f1f5f9', color: shell.muted, fontWeight: 900 }
+                : { ...getStatusSx(row.status), fontWeight: 900 }}
+            />
           </Box>
         );
       case 'createdAt':
         return formatDate(row.createdAt, 'yyyy-MM-dd HH:mm');
       case 'actions':
         if (mode === 'review') {
-          if (row.status === '退回修改') {
+          if (row.status === '退回修改' && !row.deletedAt) {
             const canResubmit = canEdit || canResubmitReturnedOrder(row);
             return canResubmit ? (
               <Stack
@@ -542,7 +554,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
               <Typography variant="body2" sx={{ color: shell.muted }}>-</Typography>
             );
           }
-          return (
+          if (row.status === '待审核' && !row.deletedAt) return (
             <Stack
               direction="row"
               spacing={0.25}
@@ -579,6 +591,25 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                   </Tooltip>
                 </>
               )}
+            </Stack>
+          );
+          return (
+            <Stack
+              direction="row"
+              spacing={0.25}
+              justifyContent="center"
+              sx={{ minWidth: 148, flexWrap: 'nowrap', whiteSpace: 'nowrap' }}
+            >
+              <Tooltip title="查看">
+                <IconButton size="small" sx={{ color: shell.blue }} onClick={() => void openDetail(row)}>
+                  <VisibilityIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="审核历史">
+                <IconButton size="small" sx={{ color: shell.green }} onClick={() => setHistoryOrder(row)}>
+                  <HistoryIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
             </Stack>
           );
         }
@@ -655,6 +686,23 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
           onChange={(event) => setSearch(event.target.value)}
           sx={{ width: 240 }}
         />
+        {mode === 'review' && (
+          <TextField
+            select
+            size="small"
+            label="审核视图"
+            value={reviewQueueView}
+            onChange={(event) => {
+              setReviewQueueView(event.target.value as ReviewQueueView);
+              setPage(0);
+            }}
+            sx={{ width: 150 }}
+          >
+            {REVIEW_QUEUE_OPTIONS.map((option) => (
+              <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+            ))}
+          </TextField>
+        )}
       </Box>
 
       <TableContainer component={Paper} elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: '6px 6px 0 0' }}>
@@ -717,7 +765,11 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
             {!rows.length && (
               <TableRow>
                 <TableCell colSpan={visibleColumns.length || 1} align="center" sx={{ py: 6, color: '#9ca3af' }}>
-                  {loading ? '加载中...' : mode === 'review' ? '暂无待审核售后挽回订单' : '暂无售后挽回订单'}
+                  {loading ? '加载中...' : mode === 'review'
+                    ? reviewQueueView === 'pending'
+                      ? '暂无待处理售后挽回订单'
+                      : '当前审核视图暂无记录'
+                    : '暂无售后挽回订单'}
                 </TableCell>
               </TableRow>
             )}
@@ -926,6 +978,12 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                   time: historyOrder.updatedAt,
                   by: historyOrder.auditorName || '-',
                   note: `已生成 ${historyOrder.commissionIds?.length || 0} 条提成记录。`,
+                } : null,
+                historyOrder.deletedAt ? {
+                  title: '删除业务单（保留审核留痕）',
+                  time: historyOrder.deletedAt,
+                  by: historyOrder.deletedBy || '-',
+                  note: historyOrder.deleteReason || '业务单已删除，审核记录永久保留。',
                 } : null,
               ].filter(Boolean).map((item, index) => {
                 const event = item as { title: string; time: string; by: string; note: string };
