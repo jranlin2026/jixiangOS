@@ -203,15 +203,15 @@ assert.match(
   /label:\s*'线索录入人'/,
   'Lead intake records table must show who entered the lead.',
 );
-assert.doesNotMatch(
+assert.match(
   orderReviewApiSource,
   /businessRecord\.delete|saveApplications\(applications\.filter/,
-  'Order review API must never physically delete permanent audit records.',
+  'Order review API must support guarded cleanup after the formal order is deleted.',
 );
-assert.doesNotMatch(
+assert.match(
   orderReviewSource,
   /清理订单审核记录|cleanupDeletedSourceOrderApplication/,
-  'Order review page must not expose deletion for permanent audit records.',
+  'Order review page must expose guarded cleanup for super admins.',
 );
 assert.match(
   leadsPageSource,

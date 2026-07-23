@@ -49,6 +49,10 @@ export interface RecoveryOrder {
   deletedAt?: Timestamp;
   deletedBy?: string;
   deleteReason?: string;
+  /** 审核台清理只隐藏审核记录，不物理删除财务追溯所需的业务数据。 */
+  reviewCleanedAt?: Timestamp;
+  reviewCleanedBy?: string;
+  reviewCleanupReason?: string;
   createdBy: ID;
   createdByName: string;
   createdAt: Timestamp;

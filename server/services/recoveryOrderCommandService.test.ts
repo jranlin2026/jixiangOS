@@ -51,6 +51,16 @@ const reviewer: AuthenticatedUser = {
     { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, actions: ['read', 'delete'] },
   ],
 };
+const superAdmin: AuthenticatedUser = {
+  ...reviewer,
+  id: 'user-super-admin',
+  name: '超级管理员',
+  account: 'admin',
+  email: 'admin@example.com',
+  role: '超级管理员',
+  roleId: 'role-super-admin',
+  permissions: [{ module: '全部', actions: ['read', 'write', 'delete', 'admin'] }],
+};
 
 function dbUser(user: AuthenticatedUser) {
   return {
@@ -496,6 +506,21 @@ const deleted = await service.softDelete(returnedSource.data!.id, '重复录入'
 assert.equal(deleted.code, 0);
 assert.equal(deleted.data?.deletedBy, reviewer.name);
 assert.equal(deleted.data?.deleteReason, '重复录入');
+assert.equal(
+  (await service.cleanupDeletedReview(returnedSource.data!.id, '清理审核台残留', reviewer)).code,
+  403,
+  '只有超级管理员可以清理售后审核台记录',
+);
+assert.equal(
+  (await service.cleanupDeletedReview(returnedSource.data!.id, '', superAdmin)).code,
+  400,
+  '清理售后审核台记录必须填写原因',
+);
+const cleanedReview = await service.cleanupDeletedReview(returnedSource.data!.id, '清理审核台残留', superAdmin);
+assert.equal(cleanedReview.code, 0);
+assert.equal(cleanedReview.data?.reviewCleanedBy, superAdmin.name);
+assert.equal(cleanedReview.data?.reviewCleanupReason, '清理审核台残留');
+assert.equal(prisma.rows.has(key(STORAGE_KEYS.RECOVERY_ORDERS, returnedSource.data!.id)), true, '财务追溯记录不能物理删除');
 const formalListWithDeletedRequested = await service.list({
   scopeDomain: 'recoveryOrders',
   includeDeleted: true,
@@ -534,13 +559,13 @@ const permanentReviewHistory = await service.list({
 }, reviewer);
 assert.equal(
   permanentReviewHistory.data?.items.some((item) => item.id === returnedSource.data!.id),
-  true,
-  'review all-records view must retain soft-deleted recovery evidence',
+  false,
+  '清理后的售后审核记录必须从审核台移除',
 );
 assert.equal(
   (await service.get(returnedSource.data!.id, reviewer, 'recoveryOrderApplications')).code,
-  0,
-  'soft-deleted recovery evidence must remain readable from permanent review history',
+  404,
+  '清理后的售后审核记录详情也必须从审核台隐藏',
 );
 assert.notEqual(
   (await service.get(returnedSource.data!.id, reviewer, 'recoveryOrders')).code,

@@ -4,6 +4,7 @@ import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import type { LeadIntakeRecord } from '../types/lead';
 import type { Order, OrderApplication } from '../types/order';
+import type { Role } from '../types/role';
 import type { User } from '../types/settings';
 import {
   clearStorageSyncFailure,
@@ -123,9 +124,16 @@ function seed() {
   storage.clear();
   storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
   storage.setItem(STORAGE_KEYS.USERS, JSON.stringify([
-    user({ id: 'user-admin', name: 'Admin', role: zh.superAdmin }),
-    user({ id: 'user-sales', name: 'Sales A', role: zh.sales }),
+    user({ id: 'user-admin', name: 'Admin', role: zh.superAdmin, roleId: 'role-admin' }),
+    user({ id: 'user-sales', name: 'Sales A', role: zh.sales, roleId: 'role-sales' }),
   ]));
+  storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([{
+    id: 'role-admin', name: zh.superAdmin, code: 'super_admin', description: '', permissions: [{ module: '全部', actions: ['admin'] }],
+    dataScopes: {}, memberCount: 1, isActive: true, createdAt: now, updatedAt: now,
+  }, {
+    id: 'role-sales', name: zh.sales, code: 'sales_consultant', description: '', permissions: [],
+    dataScopes: {}, memberCount: 1, isActive: true, createdAt: now, updatedAt: now,
+  }] satisfies Role[]));
   storage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify([
     order({ id: 'order-active', orderNo: 'ORD-ACTIVE' }),
     order({ id: 'order-deleted', orderNo: 'ORD-DELETED', deletedAt: now, deletedBy: 'Admin', deleteReason: 'test cleanup' }),
@@ -158,11 +166,15 @@ const cleanupPendingApplication = await orderReviewApi.cleanupDeletedSourceOrder
 assert.notEqual(cleanupPendingApplication.code, 0);
 
 const cleanupApplication = await orderReviewApi.cleanupDeletedSourceOrderApplication('app-deleted', 'cleanup stale approved application');
-assert.equal(cleanupApplication.code, 409);
-assert.match(cleanupApplication.message, /永久审计留痕/);
+assert.equal(cleanupApplication.code, 0);
 const applicationsAfterCleanup = await orderReviewApi.fetchOrderApplications({ pageSize: 20 });
-assert.equal(applicationsAfterCleanup.data.items.some((item) => item.id === 'app-deleted'), true);
-assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.ORDER_APPLICATIONS) || '[]') as OrderApplication[]).some((item) => item.id === 'app-deleted'), true);
+assert.equal(applicationsAfterCleanup.data.items.some((item) => item.id === 'app-deleted'), false);
+const cleanedStoredApplication = (JSON.parse(storage.getItem(STORAGE_KEYS.ORDER_APPLICATIONS) || '[]') as OrderApplication[])
+  .find((item) => item.id === 'app-deleted');
+assert.ok(cleanedStoredApplication, '清理后应保留可审计记录');
+assert.equal(cleanedStoredApplication.reviewCleanedBy, 'Admin');
+assert.equal(cleanedStoredApplication.reviewCleanupReason, 'cleanup stale approved application');
+assert.ok(cleanedStoredApplication.reviewCleanedAt);
 
 const cleanupIntakeWithoutReason = await leadFlowApi.cleanupIntakeRecord('intake-a', '');
 assert.notEqual(cleanupIntakeWithoutReason.code, 0);
@@ -172,8 +184,8 @@ const intakeAfterCleanup = await leadFlowApi.fetchIntakeRecords({ pageSize: 20 }
 assert.equal(intakeAfterCleanup.data.items.some((item) => item.id === 'intake-a'), false);
 assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS) || '[]') as LeadIntakeRecord[]).some((item) => item.id === 'intake-a'), false);
 
-// Production must reject order-application cleanup before issuing any backend
-// request because review applications are permanent audit records.
+// Production cleanup must use the record-level command instead of a legacy
+// whole-table write.
 seed();
 loginAs('user-admin');
 process.env.VITE_USE_BACKEND_API = 'true';
@@ -203,8 +215,12 @@ unsubscribeSyncFailure();
 clearStorageSyncFailure();
 delete process.env.VITE_USE_BACKEND_API;
 globalThis.fetch = originalFetch;
-assert.equal(productionCleanup.code, 409);
-assert.deepEqual(backendRequests, []);
+assert.equal(productionCleanup.code, 0);
+assert.deepEqual(backendRequests, [{
+  url: '/api/order-applications/app-deleted',
+  method: 'DELETE',
+  body: JSON.stringify({ reason: 'cleanup stale approved application' }),
+}]);
 assert.equal(
   syncFailures.some((message) => message.includes('aaos_order_applications 只能通过记录级命令保存')),
   false,

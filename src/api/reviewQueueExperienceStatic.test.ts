@@ -35,8 +35,13 @@ assert.doesNotMatch(
   /已驳回挽回订单，可在售后挽回订单列表中查看/,
   '驳回记录应归入审核历史，不应误导用户去正式列表查看',
 );
-assert.doesNotMatch(
+assert.match(
   orderReviewSource,
-  /清理订单审核记录|cleanupDeletedSourceOrderApplication/,
-  '订单审核申请是永久审计留痕，不能提供物理清理入口',
+  /清理订单审核记录[\s\S]*cleanupDeletedSourceOrderApplication|cleanupDeletedSourceOrderApplication[\s\S]*清理订单审核记录/,
+  '订单审核台必须为超级管理员提供已删除源订单的安全清理入口',
+);
+assert.match(
+  recoveryReviewSource,
+  /清理售后审核记录[\s\S]*cleanupDeletedRecoveryOrderReview|cleanupDeletedRecoveryOrderReview[\s\S]*清理售后审核记录/,
+  '售后挽回审核台必须为超级管理员提供已删除业务单的安全清理入口',
 );

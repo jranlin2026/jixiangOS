@@ -39,6 +39,7 @@ import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog, { type TableViewColumnConfig } from '../../shared/components/TableViewSettingsDialog';
 import { useTableViewConfig } from '../../shared/hooks/useTableViewConfig';
 import { canReviewRecoveryOrders, hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { isSuperAdmin } from '../../shared/utils/permissions';
 import type { RecoveryOrder, RecoveryOrderFilters, RecoveryOrderInput, RecoveryOrderStatus } from '../../types/recoveryOrder';
 import { isRecoveryOrderDeletionLocked } from '../../shared/utils/recoveryOrderDeletion';
 import type { User } from '../../types/settings';
@@ -169,6 +170,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const canEdit = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT);
   const canDelete = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, 'delete');
   const canViewHistory = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY);
+  const canCleanupReview = isSuperAdmin(currentUser);
   const [rows, setRows] = useState<RecoveryOrder[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
@@ -188,6 +190,9 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const [detailOrder, setDetailOrder] = useState<RecoveryOrder | null>(null);
   const [historyOrder, setHistoryOrder] = useState<RecoveryOrder | null>(null);
   const [deleteConfirmOrder, setDeleteConfirmOrder] = useState<RecoveryOrder | null>(null);
+  const [cleanupReviewOrder, setCleanupReviewOrder] = useState<RecoveryOrder | null>(null);
+  const [cleanupReviewReason, setCleanupReviewReason] = useState('');
+  const [cleanupReviewSubmitting, setCleanupReviewSubmitting] = useState(false);
   const [reviewAction, setReviewAction] = useState<ReviewAction>(null);
   const [reviewReason, setReviewReason] = useState('');
   const [approvedOrder, setApprovedOrder] = useState<RecoveryOrder | null>(null);
@@ -442,6 +447,26 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
     await load();
   };
 
+  const cleanupDeletedRecoveryOrderReview = async () => {
+    if (!cleanupReviewOrder) return;
+    const reason = cleanupReviewReason.trim();
+    if (!reason) return;
+    setCleanupReviewSubmitting(true);
+    try {
+      const res = await recoveryOrderApi.cleanupDeletedRecoveryOrderReview(cleanupReviewOrder.id, reason);
+      if (res.code !== 0) {
+        showErrorDialog(res.message || '清理售后审核记录失败');
+        return;
+      }
+      setCleanupReviewOrder(null);
+      setCleanupReviewReason('');
+      setMessage({ type: 'success', text: '已清理售后审核记录' });
+      await load();
+    } finally {
+      setCleanupReviewSubmitting(false);
+    }
+  };
+
   const closeReviewDialog = () => {
     setReviewAction(null);
     setReviewReason('');
@@ -604,6 +629,21 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
               justifyContent="center"
               sx={{ minWidth: 148, flexWrap: 'nowrap', whiteSpace: 'nowrap' }}
             >
+              {canCleanupReview && row.deletedAt && (
+                <Tooltip title="清理已删除业务单的审核记录">
+                  <IconButton
+                    aria-label="清理售后审核记录"
+                    size="small"
+                    sx={{ color: shell.red }}
+                    onClick={() => {
+                      setCleanupReviewOrder(row);
+                      setCleanupReviewReason('');
+                    }}
+                  >
+                    <DeleteOutlineIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
               <Tooltip title="查看">
                 <IconButton size="small" sx={{ color: shell.blue }} onClick={() => void openDetail(row)}>
                   <VisibilityIcon fontSize="small" />
@@ -1114,6 +1154,52 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
         <DialogActions>
           <Button onClick={() => setDeleteConfirmOrder(null)}>取消</Button>
           <Button color="error" variant="contained" onClick={confirmDelete}>确认删除</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(cleanupReviewOrder)}
+        onClose={cleanupReviewSubmitting ? undefined : () => setCleanupReviewOrder(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>清理售后审核记录</DialogTitle>
+        <DialogContent dividers>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            仅清理审核台中的残留显示。售后业务和财务追溯数据仍会保留，不会破坏已撤回分账记录。
+          </Alert>
+          {cleanupReviewOrder && (
+            <Box sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 1.25, bgcolor: shell.soft, mb: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 900 }}>{cleanupReviewOrder.recoveryNo}</Typography>
+              <Typography variant="body2" sx={{ color: shell.muted }}>
+                {cleanupReviewOrder.customerName} · {cleanupReviewOrder.thirdPartyOrderNo || '-'}
+              </Typography>
+            </Box>
+          )}
+          <TextField
+            label="清理原因"
+            value={cleanupReviewReason}
+            onChange={(event) => setCleanupReviewReason(event.target.value)}
+            placeholder="例如：业务单已删除，清理审核台残留记录"
+            multiline
+            minRows={3}
+            required
+            fullWidth
+            autoFocus
+            error={!cleanupReviewReason.trim()}
+            helperText={!cleanupReviewReason.trim() ? '清理原因不能为空' : ' '}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCleanupReviewOrder(null)} disabled={cleanupReviewSubmitting}>取消</Button>
+          <Button
+            color="error"
+            variant="contained"
+            disabled={!cleanupReviewReason.trim() || cleanupReviewSubmitting}
+            onClick={cleanupDeletedRecoveryOrderReview}
+          >
+            确认清理
+          </Button>
         </DialogActions>
       </Dialog>
 

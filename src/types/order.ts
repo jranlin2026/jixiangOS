@@ -132,6 +132,9 @@ export interface OrderApplication {
   reason?: string;
   orderId?: ID;
   orderNo?: string;
+  reviewCleanedAt?: Timestamp;
+  reviewCleanedBy?: string;
+  reviewCleanupReason?: string;
   reviewLogs: OrderApplicationReviewLog[];
   createdAt: Timestamp;
   updatedAt: Timestamp;

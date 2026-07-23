@@ -8,7 +8,7 @@ import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../shared/utils/constants';
 import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { getCurrentOperatorName } from '../shared/utils/currentOperator';
 import { getCurrentDataVisibilityScope } from '../shared/utils/dataVisibility';
-import { PERMISSION_KEYS, normalizePermissionKey, roleHasPermission } from '../shared/utils/permissions';
+import { isSuperAdminUser, PERMISSION_KEYS, normalizePermissionKey, roleHasPermission } from '../shared/utils/permissions';
 import { normalizeUserRoleName } from '../shared/utils/roles';
 import {
   isInactiveRecoveryCommissionStatus,
@@ -168,6 +168,12 @@ function canUseRecoveryReviewAction(): boolean {
   return canUseDirectRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, 'write');
 }
 
+function isCurrentSessionSuperAdmin(): boolean {
+  const user = getCurrentSessionUser();
+  if (!user) return false;
+  return isSuperAdminUser(user, getStorageData<Role[]>(STORAGE_KEYS.ROLES) || []);
+}
+
 function canViewRecoveryOrder(order: RecoveryOrder, scopeDomain: NonNullable<RecoveryOrderFilters['scopeDomain']> = 'recoveryOrders'): boolean {
   const scope = getCurrentDataVisibilityScope(scopeDomain);
   if (scope.unrestricted) return true;
@@ -238,6 +244,9 @@ async function fetchRecoveryOrders(filters: RecoveryOrderFilters = {}): Promise<
       : '无权查看售后挽回订单列表', 403);
   }
   let items = filterVisibleRecoveryOrders(readRecoveryOrders(), filters.scopeDomain);
+  if (scopeDomain === 'recoveryOrderApplications') {
+    items = items.filter((item) => !item.reviewCleanedAt);
+  }
   const financeSettlementStatuses = ['待处理', '待确认', '待发放', '已发放', '已撤回'];
   const hasExplicitFinanceSettlementFilter = Boolean(
     filters.settlementStatuses?.some((status) => financeSettlementStatuses.includes(status))
@@ -312,7 +321,11 @@ async function fetchRecoveryOrderById(
   ensureInit();
   await delay(80);
   const order = filterVisibleRecoveryOrders(readRecoveryOrders(), scopeDomain)
-    .find((item) => item.id === id && (!item.deletedAt || scopeDomain === 'recoveryOrderApplications'));
+    .find((item) => (
+      item.id === id
+      && (!item.deletedAt || scopeDomain === 'recoveryOrderApplications')
+      && (scopeDomain !== 'recoveryOrderApplications' || !item.reviewCleanedAt)
+    ));
   return createSuccessResponse(order || null);
 }
 
@@ -533,6 +546,39 @@ async function deleteRecoveryOrder(id: string): Promise<ApiResponse<boolean>> {
   };
   writeRecoveryOrders(orders);
   return createSuccessResponse(true);
+}
+
+async function cleanupDeletedRecoveryOrderReview(id: string, reason: string): Promise<ApiResponse<RecoveryOrder | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<RecoveryOrder | null>(`/recovery-orders/${encodeURIComponent(id)}/cleanup-review`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '服务端未返回清理结果', response.code || -1);
+    }
+    return createSuccessResponse(cacheBackendRecoveryOrder(response.data), response.message);
+  }
+
+  ensureInit();
+  await delay(120);
+  if (!isCurrentSessionSuperAdmin()) return createErrorResponse('仅超级管理员可以清理售后审核记录', 403);
+  const cleanReason = reason.trim();
+  if (!cleanReason) return createErrorResponse('清理售后审核记录必须填写原因', 400);
+  const orders = readRecoveryOrders();
+  const index = orders.findIndex((item) => item.id === id);
+  if (index === -1) return createErrorResponse('售后挽回订单不存在', 404);
+  if (!orders[index].deletedAt) return createErrorResponse('只有业务单已经删除的售后审核记录可以清理', 409);
+  const cleanedAt = nowIso();
+  orders[index] = {
+    ...orders[index],
+    reviewCleanedAt: cleanedAt,
+    reviewCleanedBy: getCurrentOperatorName('超级管理员'),
+    reviewCleanupReason: cleanReason,
+    updatedAt: cleanedAt,
+  };
+  writeRecoveryOrders(orders);
+  return createSuccessResponse(orders[index]);
 }
 
 async function approveRecoveryOrder(id: string, auditorId: string, auditorName: string): Promise<ApiResponse<RecoveryOrder | null>> {
@@ -868,6 +914,7 @@ export const recoveryOrderApi = {
   createRecoveryOrder,
   updateRecoveryOrder,
   deleteRecoveryOrder,
+  cleanupDeletedRecoveryOrderReview,
   approveRecoveryOrder,
   returnRecoveryOrder,
   rejectRecoveryOrder,

@@ -1042,6 +1042,15 @@ app.delete('/api/recovery-orders/:id', requireStorageAccess, async (req: Authent
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
+app.post('/api/recovery-orders/:id/cleanup-review', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await recoveryOrderCommandService.cleanupDeletedReview(
+    routeParam(req.params.id),
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
 app.post('/api/auth/login', loginRateLimiter.guard, async (req, res) => {
   const result = await authService.login({
     account: String(req.body?.account || ''),

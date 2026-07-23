@@ -3,7 +3,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { failure, success, type ApiResponse } from '../api/response';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { buildDataVisibilityScopeForUser, type DataVisibilityScope } from '../../src/shared/utils/dataVisibility';
-import { PERMISSION_KEYS, canReviewRecoveryOrders, hasPermission } from '../../src/shared/utils/permissions';
+import { PERMISSION_KEYS, canReviewRecoveryOrders, hasPermission, isSuperAdmin } from '../../src/shared/utils/permissions';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Department } from '../../src/types/department';
 import type { RecoveryOrder, RecoveryOrderFilters, RecoveryOrderInput, RecoverySettlementCounts } from '../../src/types/recoveryOrder';
@@ -161,6 +161,7 @@ function recoverySettlementStatus(order: RecoveryOrder): string {
 }
 
 function matchesRecoveryOrder(order: RecoveryOrder, filters: RecoveryOrderFilters): boolean {
+  if (filters.scopeDomain === 'recoveryOrderApplications' && order.reviewCleanedAt) return false;
   if (!filters.includeDeleted && order.deletedAt) return false;
   const search = cleanText(filters.search).toLocaleLowerCase();
   if (search && ![
@@ -203,6 +204,9 @@ function recoverySettlementStatusSql(alias: string): Prisma.Sql {
 
 function recoverySqlConditions(filters: RecoveryOrderFilters, scope: DataVisibilityScope): Prisma.Sql[] {
   const conditions: Prisma.Sql[] = [Prisma.sql`br.domain = ${STORAGE_KEYS.RECOVERY_ORDERS}`];
+  if (filters.scopeDomain === 'recoveryOrderApplications') {
+    conditions.push(Prisma.sql`JSON_EXTRACT(br.data, '$.reviewCleanedAt') IS NULL`);
+  }
   if (!filters.includeDeleted) conditions.push(Prisma.sql`JSON_EXTRACT(br.data, '$.deletedAt') IS NULL`);
   if (filters.statuses?.length) conditions.push(Prisma.sql`br.status IN (${Prisma.join(filters.statuses)})`);
   else if (filters.status && filters.status !== '全部') conditions.push(Prisma.sql`br.status = ${filters.status}`);
@@ -477,6 +481,9 @@ export function createRecoveryOrderCommandService(
       const order = parseObject<RecoveryOrder>(row.data, '售后挽回订单');
       if (order.deletedAt && !financeOnly && scopeDomain !== 'recoveryOrderApplications') {
         return failure<RecoveryOrder>('售后挽回订单不存在', 404);
+      }
+      if (scopeDomain === 'recoveryOrderApplications' && order.reviewCleanedAt) {
+        return failure<RecoveryOrder>('售后审核记录不存在', 404);
       }
       if (financeOnly && !['待处理', '待确认', '待发放', '已发放', '已撤回'].includes(recoverySettlementStatus(order))) {
         return failure<RecoveryOrder>('无权查看该售后挽回订单', 403);
@@ -802,6 +809,35 @@ export function createRecoveryOrderCommandService(
           deletedBy: actor.name,
           deleteReason: cleanText(reason) || '售后挽回订单删除',
           updatedAt: deletedAt,
+        };
+        await writeRecoveryOrder(transaction, next);
+        return next;
+      }, {
+        isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+        maxWait: 5_000,
+        timeout: 10_000,
+      }));
+    },
+
+    async cleanupDeletedReview(orderId: string, reason: string, actor: AuthenticatedUser): Promise<ApiResponse<RecoveryOrder | null>> {
+      const cleanOrderId = cleanText(orderId);
+      const cleanReason = cleanText(reason);
+      if (!cleanOrderId) return failure('售后挽回订单ID不能为空', 400);
+      if (!cleanReason) return failure('清理售后审核记录必须填写原因', 400);
+      if (!isSuperAdmin(actor)) return failure('仅超级管理员可以清理售后审核记录', 403);
+      return run(() => prisma.$transaction(async (transaction) => {
+        const current = await lockRecoveryOrder(transaction, cleanOrderId);
+        if (!current.deletedAt) {
+          throw new RecoveryCommandError(409, '只有业务单已经删除的售后审核记录可以清理');
+        }
+        if (current.reviewCleanedAt) return current;
+        const cleanedAt = now().toISOString();
+        const next: RecoveryOrder = {
+          ...current,
+          reviewCleanedAt: cleanedAt,
+          reviewCleanedBy: actor.name,
+          reviewCleanupReason: cleanReason,
+          updatedAt: cleanedAt,
         };
         await writeRecoveryOrder(transaction, next);
         return next;

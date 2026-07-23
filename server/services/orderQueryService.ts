@@ -204,7 +204,10 @@ async function queryApplicationPage(
 ) {
   const page = toPositiveInt(filters.page, 1);
   const pageSize = Math.min(toPositiveInt(filters.pageSize, DEFAULT_PAGE_SIZE), 100);
-  const conditions: Prisma.Sql[] = [Prisma.sql`br.domain = ${STORAGE_KEYS.ORDER_APPLICATIONS}`];
+  const conditions: Prisma.Sql[] = [
+    Prisma.sql`br.domain = ${STORAGE_KEYS.ORDER_APPLICATIONS}`,
+    Prisma.sql`JSON_EXTRACT(br.data, '$.reviewCleanedAt') IS NULL`,
+  ];
   if (filters.statuses?.length) conditions.push(Prisma.sql`br.status IN (${Prisma.join(filters.statuses)})`);
   else if (filters.status) conditions.push(Prisma.sql`br.status = ${filters.status}`);
   conditions.push(...exactJson('br', '$.applicantName', filters.applicantName));
@@ -303,6 +306,7 @@ export function createOrderQueryService(
       const items = (rows as BusinessRecordRow[])
         .map((row) => parseRecord<OrderApplication>(row.data))
         .filter((application): application is OrderApplication => Boolean(application))
+        .filter((application) => !application.reviewCleanedAt)
         .filter((application) => applicationIsVisible(application, scope) && matchesApplication(application, filters))
         .sort((left, right) => timestamp(right.updatedAt || right.createdAt) - timestamp(left.updatedAt || left.createdAt));
       const result = paginate(items, filters.page, filters.pageSize);
@@ -378,6 +382,7 @@ export function createOrderQueryService(
       if (!row) return failure<OrderApplication>('订单申请不存在', 404);
       const application = parseRecord<OrderApplication>(row.data);
       if (!application) return failure<OrderApplication>('订单申请数据损坏，请先修复数据', 409);
+      if (application.reviewCleanedAt) return failure<OrderApplication>('订单申请不存在', 404);
       if (!applicationIsVisible(application, scope)) return failure<OrderApplication>('无权查看该订单申请', 403);
       return success(application);
     },
