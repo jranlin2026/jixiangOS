@@ -183,6 +183,7 @@ export interface CustomerFilters {
   followStatus?: 'has_follow' | 'no_follow';
   sourceType?: string;
   leadSource?: string;
+  sourceName?: string;
   industry?: string;
   city?: string;
   tagIds?: ID[];

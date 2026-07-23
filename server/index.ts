@@ -519,6 +519,7 @@ app.get('/api/customers', requireCustomerReadAccess, async (req: AuthenticatedRe
     followStatus: queryParam(req.query.followStatus) as any,
     sourceType: queryParam(req.query.sourceType),
     leadSource: queryParam(req.query.leadSource),
+    sourceName: queryParam(req.query.sourceName),
     industry: queryParam(req.query.industry),
     city: queryParam(req.query.city),
     tag: queryParam(req.query.tag),

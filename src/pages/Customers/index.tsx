@@ -7,7 +7,6 @@ import {
   Button,
   Checkbox,
   Chip,
-  Collapse,
   Dialog,
   DialogActions,
   DialogContent,
@@ -34,7 +33,6 @@ import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import FilterListIcon from '@mui/icons-material/FilterList';
 import PersonAddAltIcon from '@mui/icons-material/PersonAddAlt';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -46,7 +44,7 @@ import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import FileUploadOutlinedIcon from '@mui/icons-material/FileUploadOutlined';
 import useCustomerStore from '../../store/useCustomerStore';
 import { customerApi, customerBatchApi, orderApi, settingsApi } from '../../api';
-import { CUSTOMER_LEVELS, RESOURCE_OWNERSHIPS, ROUTES, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
+import { CUSTOMER_LEVELS, ROUTES, getLifecycleConfigByCode, getLifecycleStatusTagSx, getProductLevelRowSx, getProductLevelTagSx, normalizeLifecycleStatusCode, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
 import CustomerLevelBadge from '../../shared/components/CustomerLevelBadge';
 import CustomerDetail from './CustomerDetail';
@@ -77,6 +75,8 @@ import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { ModuleHeader, ModulePage, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
 import { ManualTagDisplay } from '../../shared/components/ManualTagSelector';
 import CustomerTagFilter from './CustomerTagFilter';
+import CustomerLeadSourceFilter from './CustomerLeadSourceFilter';
+import { normalizeCustomerToolbarFilters } from './customerLeadSourceFilterModel';
 import { customerTagRequestSource, readCustomerTagFilterParams, writeCustomerTagFilterParams } from './customerTagFilterState';
 import { buildCustomerWriteActionPolicy, buildManageableOwnerIds } from './customerDetailPolicy';
 import type { CustomerBatchJobSummary, CustomerBatchOperation } from '../../types/customerBatch';
@@ -266,11 +266,6 @@ const getCustomerScopeFromTab = (tab?: string | null): CustomerScope => (
   tab === 'public_pool' ? 'public_pool' : 'active'
 );
 
-const FOLLOW_STATUS_OPTIONS = [
-  { value: 'has_follow', label: '已跟进' },
-  { value: 'no_follow', label: '未跟进' },
-] as const;
-
 const Customers: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -289,7 +284,6 @@ const Customers: React.FC = () => {
   const [lifecycleConfigs, setLifecycleConfigs] = useState<LifecycleStatusConfig[]>([]);
   const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
-  const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
   const [customerScope, setCustomerScope] = useState<CustomerScope>(() => getCustomerScopeFromTab(searchParams.get('tab')));
   const [releaseTarget, setReleaseTarget] = useState<Customer | null>(null);
   const [releaseReason, setReleaseReason] = useState('');
@@ -341,7 +335,7 @@ const Customers: React.FC = () => {
 
   useEffect(() => {
     const tagState = readCustomerTagFilterParams(searchParams);
-    const nextFilters: CustomerFilters = { ...filters, ...tagState, productLevel: undefined, page: 1, lifecycleStatusCode: customerScope === 'public_pool' ? 'public_pool' : undefined };
+    const nextFilters = normalizeCustomerToolbarFilters({ ...filters, ...tagState, page: 1 }, customerScope);
     setFilters(nextFilters);
     fetchItems(nextFilters);
   }, [searchParams.toString(), customerScope, currentUser?.id, fetchItems]);
@@ -434,13 +428,15 @@ const Customers: React.FC = () => {
     readOnly: false,
   }).actions;
   const ownerFilterLabel = isPublicPoolScope ? '最后跟进人' : '销售负责人';
-  const hasAdvancedFilters = Boolean(filters.sourceType || filters.leadSource || filters.industry || filters.city || filters.tagIds?.length || filters.withoutTags || filters.missingTagGroupId);
   const hasAnyActiveFilter = Boolean(
     filters.search
     || filters.customerLevel
     || filters.owner
-    || filters.followStatus
-    || hasAdvancedFilters
+    || filters.leadSource
+    || filters.sourceName
+    || filters.tagIds?.length
+    || filters.withoutTags
+    || filters.missingTagGroupId
     || (!isPublicPoolScope && filters.lifecycleStatusCode),
   );
   const tableMinWidth = useMemo(
@@ -481,11 +477,9 @@ const Customers: React.FC = () => {
   const isPublicPoolCustomer = (customer: Customer) => normalizeLifecycleStatusCode(customer.lifecycleStatusCode) === 'public_pool';
   const canCreateOrderForCustomer = (customer: Customer) => !isPublicPoolCustomer(customer);
 
-  const scopedFilters = (baseFilters: CustomerFilters = filters, scope: CustomerScope = customerScope): CustomerFilters => ({
-    ...baseFilters,
-    productLevel: undefined,
-    lifecycleStatusCode: scope === 'public_pool' ? 'public_pool' : undefined,
-  });
+  const scopedFilters = (baseFilters: CustomerFilters = filters, scope: CustomerScope = customerScope): CustomerFilters => (
+    normalizeCustomerToolbarFilters(baseFilters, scope)
+  );
 
   useEffect(() => {
     const nextScope = getCustomerScopeFromTab(searchParams.get('tab'));
@@ -618,7 +612,7 @@ const Customers: React.FC = () => {
 
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     setBatchSelection(clearCustomerBatchSelection());
-    const newFilters = { ...filters, search: e.target.value, productLevel: undefined, page: 1, pageSize: pagination.pageSize || 10 };
+    const newFilters = scopedFilters({ ...filters, search: e.target.value, page: 1, pageSize: pagination.pageSize || 10 });
     setFilters(newFilters);
     fetchItems(newFilters);
   };
@@ -628,7 +622,7 @@ const Customers: React.FC = () => {
     if (key === 'lifecycleStatusCode') {
       setCustomerScope(value === 'public_pool' ? 'public_pool' : 'active');
     }
-    const newFilters = { ...filters, productLevel: undefined, [key]: value || undefined, page: 1, pageSize: pagination.pageSize || 10 };
+    const newFilters = scopedFilters({ ...filters, [key]: value || undefined, page: 1, pageSize: pagination.pageSize || 10 });
     setFilters(newFilters);
     fetchItems(newFilters);
   };
@@ -644,10 +638,17 @@ const Customers: React.FC = () => {
 
   const handleTagFilterApply = (tagFilters: Pick<CustomerFilters, 'tagIds' | 'tagMatch' | 'withoutTags' | 'missingTagGroupId'>) => {
     setBatchSelection(clearCustomerBatchSelection());
-    const newFilters = { ...filters, ...tagFilters, tag: undefined, productLevel: undefined, page: 1, pageSize: pagination.pageSize || 10 };
+    const newFilters = scopedFilters({ ...filters, ...tagFilters, tag: undefined, page: 1, pageSize: pagination.pageSize || 10 });
     const nextParams = writeCustomerTagFilterParams(searchParams, tagFilters);
     if (customerTagRequestSource(searchParams, nextParams) === 'url-effect') setSearchParams(nextParams, { replace: true });
     else { setFilters(newFilters); fetchItems(newFilters); }
+  };
+
+  const handleLeadSourceFilterApply = (sourceFilters: Pick<CustomerFilters, 'leadSource' | 'sourceName'>) => {
+    setBatchSelection(clearCustomerBatchSelection());
+    const newFilters = scopedFilters({ ...filters, ...sourceFilters, page: 1, pageSize: pagination.pageSize || 10 });
+    setFilters(newFilters);
+    fetchItems(newFilters);
   };
 
   const handlePageChange = (_: React.MouseEvent<HTMLButtonElement> | null, page: number) => {
@@ -840,27 +841,8 @@ const Customers: React.FC = () => {
             </Select>
           </FormControl>
         )}
-        <FormControl size="small" sx={{ minWidth: 140 }}>
-          <InputLabel>跟进状态</InputLabel>
-          <Select
-            value={filters.followStatus || ''}
-            label="跟进状态"
-            onChange={(e) => handleFilterChange('followStatus', e.target.value)}
-          >
-            <MenuItem value="">全部</MenuItem>
-            {FOLLOW_STATUS_OPTIONS.map((status) => (
-              <MenuItem key={status.value} value={status.value}>{status.label}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <Button
-          variant="outlined"
-          startIcon={<FilterListIcon />}
-          onClick={() => setMoreFiltersOpen((open) => !open)}
-          sx={{ height: 40, px: 1.75, fontWeight: 700 }}
-        >
-          更多筛选
-        </Button>
+        <CustomerTagFilter value={filters} onApply={handleTagFilterApply} />
+        <CustomerLeadSourceFilter value={filters} onApply={handleLeadSourceFilterApply} />
         <Box sx={{ flexGrow: 1, minWidth: { xs: '100%', md: 16 } }} />
         <Button
           variant="outlined"
@@ -871,45 +853,6 @@ const Customers: React.FC = () => {
         >
           重置
         </Button>
-        <Collapse in={moreFiltersOpen} sx={{ width: '100%' }}>
-          <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', pt: 0.5 }}>
-            <FormControl size="small" sx={{ minWidth: 140, bgcolor: '#fff' }}>
-              <InputLabel>资源归属</InputLabel>
-              <Select
-                value={filters.sourceType || ''}
-                label="资源归属"
-                onChange={(e) => handleFilterChange('sourceType', e.target.value)}
-              >
-                <MenuItem value="">全部</MenuItem>
-                {RESOURCE_OWNERSHIPS.map((item) => (
-                  <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField
-              label="线索来源"
-              value={filters.leadSource || ''}
-              onChange={(e) => handleFilterChange('leadSource', e.target.value)}
-              size="small"
-              sx={{ minWidth: 150 }}
-            />
-            <TextField
-              label="行业"
-              value={filters.industry || ''}
-              onChange={(e) => handleFilterChange('industry', e.target.value)}
-              size="small"
-              sx={{ minWidth: 130 }}
-            />
-            <TextField
-              label="城市"
-              value={filters.city || ''}
-              onChange={(e) => handleFilterChange('city', e.target.value)}
-              size="small"
-              sx={{ minWidth: 130 }}
-            />
-            <CustomerTagFilter value={filters} onApply={handleTagFilterApply} />
-          </Box>
-        </Collapse>
       </ModuleToolbar>
 
       {batchSelectionActive && (

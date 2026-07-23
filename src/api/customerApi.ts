@@ -440,8 +440,12 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
     filtered = filtered.filter((c) => normalizeResourceOwnership(c.sourceType) === normalizeResourceOwnership(filters.sourceType));
   }
   if (filters?.leadSource) {
-    const q = filters.leadSource.toLowerCase();
-    filtered = filtered.filter((c) => (c.leadSource || '').toLowerCase().includes(q));
+    const q = filters.leadSource.trim().toLowerCase();
+    filtered = filtered.filter((c) => (c.leadSource || '').trim().toLowerCase() === q);
+  }
+  if (filters?.sourceName) {
+    const q = filters.sourceName.trim().toLowerCase();
+    filtered = filtered.filter((c) => (c.sourceName || '').trim().toLowerCase() === q);
   }
   if (filters?.industry) {
     const q = filters.industry.toLowerCase();

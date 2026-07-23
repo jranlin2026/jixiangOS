@@ -36,6 +36,26 @@ const financeRuleEditor = {
 };
 assert.equal(isLegacyStorageKeyRegistered(STORAGE_KEYS.COMMISSION_PAYOUT_PLANS), true);
 assert.equal(canAccessLegacyStorageKey(financeRuleEditor, STORAGE_KEYS.COMMISSION_PAYOUT_PLANS, 'write'), true);
+const customerListReader = {
+  ...user,
+  id: 'user-customer-list-reader',
+  permissions: [{ module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] }],
+};
+assert.equal(canAccessLegacyStorageKey(customerListReader, STORAGE_KEYS.LEAD_SOURCE_CONFIGS, 'read'), true);
+assert.equal(canAccessLegacyStorageKey(customerListReader, STORAGE_KEYS.LEAD_SOURCE_CONFIGS, 'runtime'), true);
+assert.equal(canAccessLegacyStorageKey(customerListReader, STORAGE_KEYS.LEAD_SOURCE_CONFIGS, 'write'), false);
+const publicPoolReader = {
+  ...user,
+  id: 'user-public-pool-reader',
+  permissions: [{ module: PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW, actions: ['read'] }],
+};
+assert.equal(canAccessLegacyStorageKey(publicPoolReader, STORAGE_KEYS.LEAD_SOURCE_CONFIGS, 'runtime'), true);
+const leadSourceEditor = {
+  ...user,
+  id: 'user-lead-source-editor',
+  permissions: [{ module: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, actions: ['read', 'write'] }],
+};
+assert.equal(canAccessLegacyStorageKey(leadSourceEditor, STORAGE_KEYS.LEAD_SOURCE_CONFIGS, 'write'), true);
 for (const orderCreatePermission of [
   PERMISSION_KEYS.ORDER_CREATE,
   PERMISSION_KEYS.CUSTOMER_CREATE_ORDER,

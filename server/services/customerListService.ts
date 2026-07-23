@@ -142,6 +142,10 @@ function buildTextLikeCondition(path: string, value: string) {
   return Prisma.sql`LOWER(COALESCE(${jsonText(path)}, '')) LIKE ${value}`;
 }
 
+function buildTextEqualCondition(path: string, value: string) {
+  return Prisma.sql`LOWER(COALESCE(${jsonText(path)}, '')) = ${value.trim().toLowerCase()}`;
+}
+
 function containsTagId(tagId: string) {
   return Prisma.sql`JSON_CONTAINS(COALESCE(JSON_EXTRACT(data, '$.manualTagIds'), JSON_ARRAY()), JSON_QUOTE(${tagId})) = 1`;
 }
@@ -231,7 +235,10 @@ export function buildCustomerWhere(filters: CustomerFilters, catalog?: CustomerT
     conditions.push(Prisma.sql`${jsonText('$.sourceType')} = ${filters.sourceType}`);
   }
   if (filters.leadSource) {
-    conditions.push(buildTextLikeCondition('$.leadSource', `%${filters.leadSource.trim().toLowerCase()}%`));
+    conditions.push(buildTextEqualCondition('$.leadSource', filters.leadSource));
+  }
+  if (filters.sourceName) {
+    conditions.push(buildTextEqualCondition('$.sourceName', filters.sourceName));
   }
   if (filters.industry) {
     conditions.push(buildTextLikeCondition('$.industry', `%${filters.industry.trim().toLowerCase()}%`));
