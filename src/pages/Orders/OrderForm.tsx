@@ -192,12 +192,13 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     actualAmount: 0,
     officialPaymentChannel: '对公银行转账' as OfficialPaymentChannel,
     resourceOwnership: '公司资源' as ResourceOwnership,
-    originalOrderId: '',
     sourceType: '',
     leadInputBy: '',
     leadContributorId: '',
     leadContributorName: '',
+    salesId: '',
     owner: '张伟',
+    thirdPartyOrderNo: '',
     notes: '',
     refundStatus: '无' as Order['refundStatus'],
     customerId: '',
@@ -223,6 +224,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
         ...prev,
         customerId: customer?.id || '',
         customerName: getCustomerDisplayName(customer),
+        salesId: customer?.ownerId || '',
         owner: customer?.owner || prev.owner,
         productId: '',
         productName: '',
@@ -276,12 +278,13 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       actualAmount: sourceOrder.actualAmount || sourceOrder.amount,
       officialPaymentChannel: sourceOrder.officialPaymentChannel || prev.officialPaymentChannel,
       resourceOwnership: normalizeResourceOwnership(sourceOrder.resourceOwnership || sourceOrder.sourceType || prev.resourceOwnership),
-      originalOrderId: sourceOrder.originalOrderId || '',
       sourceType: sourceOrder.sourceType || prev.sourceType,
       leadInputBy: sourceOrder.leadInputBy || prev.leadInputBy,
       leadContributorId: sourceOrder.leadContributorId || prev.leadContributorId,
       leadContributorName: sourceOrder.leadContributorName || prev.leadContributorName,
+      salesId: sourceOrder.salesId || '',
       owner: sourceOrder.owner,
+      thirdPartyOrderNo: sourceOrder.thirdPartyOrderNo || '',
       notes: sourceOrder.notes || '',
       refundStatus: sourceOrder.refundStatus,
       paymentDate: toDateTimeInputValue(new Date(primaryPayment?.paidAt || order?.createdAt || application?.createdAt || new Date())),
@@ -325,7 +328,13 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       settingsApi.fetchOrderTypeConfigs(),
     ]).then(([userRes, orderTypeRes]) => {
       if (userRes.code === 0) {
-        setUsers(filterUsersByCurrentDataScope(userRes.data, 'orders', currentUser || undefined));
+        const visibleUsers = filterUsersByCurrentDataScope(userRes.data, 'orders', currentUser || undefined);
+        setUsers(visibleUsers);
+        setForm((prev) => {
+          if (prev.salesId) return prev;
+          const matches = visibleUsers.filter((user) => user.name === prev.owner);
+          return matches.length === 1 ? { ...prev, salesId: matches[0].id } : prev;
+        });
       }
       if (orderTypeRes.code === 0) {
         const configs = orderTypeRes.data;
@@ -415,7 +424,12 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   };
 
   const handleOwnerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setForm({ ...form, owner: e.target.value });
+    const selectedOwner = users.find((user) => user.id === e.target.value);
+    setForm({
+      ...form,
+      salesId: selectedOwner?.id || '',
+      owner: selectedOwner?.name || '',
+    });
   };
 
   const handleCustomerSelect = (_event: React.SyntheticEvent, selected: Customer | null) => {
@@ -427,6 +441,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       ...form,
       customerId: selected?.id || '',
       customerName: getCustomerDisplayName(selected),
+      salesId: selected?.ownerId || '',
       owner: selected?.owner || form.owner,
       productId: matchedProduct?.id || form.productId,
       productName: matchedProduct?.name || form.productName,
@@ -535,7 +550,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       leadInputBy: form.leadInputBy || undefined,
       leadContributorId: form.leadContributorId || undefined,
       leadContributorName: form.leadContributorName || undefined,
-      originalOrderId: form.originalOrderId || undefined,
       dealEvidenceName: dealEvidenceName || undefined,
       dealEvidencePreview: dealEvidencePreview || undefined,
       dealEvidenceAttachments,
@@ -543,7 +557,11 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
 
     let submittedApplication: OrderApplication | undefined;
     if (order) {
-      await update(order.id, payload);
+      await update(order.id, {
+        officialPaymentChannel: form.officialPaymentChannel,
+        thirdPartyOrderNo: form.thirdPartyOrderNo.trim() || undefined,
+        notes: form.notes || undefined,
+      });
     } else if (application) {
       const res = await orderReviewApi.updateReturnedOrderApplication(application.id, payload);
       submittedApplication = res.data || undefined;
@@ -569,6 +587,11 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
             {application
               ? '修改后会重新进入财务审核，审核通过后才生成正式订单、提成和交付记录。'
               : '提交后会进入订单审核台，财务审核通过后才生成正式订单、提成和交付记录。'}
+          </Typography>
+        )}
+        {order && (
+          <Typography variant="body2" sx={{ mb: 2, color: '#92400e', bgcolor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 1, px: 1.5, py: 1 }}>
+            正式订单仅允许修改官方收款渠道、第三方平台订单号和备注。收款渠道仅在全部提成仍为待确认时可更正，并会重新计算待确认提成。
           </Typography>
         )}
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
@@ -614,7 +637,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               )}
             />
           )}
-          <TextField select label="产品名称" value={form.productId} onChange={handleChange('productId')} fullWidth>
+          <TextField select label="产品名称" value={form.productId} onChange={handleChange('productId')} fullWidth disabled={Boolean(order)}>
             {productOptions.map((product) => (
               <MenuItem key={product.id} value={product.id}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -624,7 +647,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               </MenuItem>
             ))}
           </TextField>
-          <TextField select label="订单类型" value={form.orderType} onChange={handleChange('orderType')} fullWidth>
+          <TextField select label="订单类型" value={form.orderType} onChange={handleChange('orderType')} fullWidth disabled={Boolean(order)}>
             {orderTypeOptions.map((item) => (
               <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>
             ))}
@@ -634,16 +657,16 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
             ))}
           </TextField>
-          <TextField select label="资源归属" value={form.resourceOwnership} onChange={handleChange('resourceOwnership')} fullWidth disabled={!!form.customerId}>
+          <TextField select label="资源归属" value={form.resourceOwnership} onChange={handleChange('resourceOwnership')} fullWidth disabled={!!form.customerId || Boolean(order)}>
             {RESOURCE_OWNERSHIPS.map((item) => (
               <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
             ))}
           </TextField>
           <TextField label="线索录入人" value={form.leadInputBy || '-'} fullWidth InputProps={{ readOnly: true }} />
           <TextField label="线索贡献人" value={form.leadContributorName || '-'} fullWidth InputProps={{ readOnly: true }} />
-          <TextField label="实付金额" type="number" value={form.actualAmount} onChange={handleChange('actualAmount')} fullWidth />
-          <TextField label="付款时间" type="datetime-local" value={form.paymentDate} onChange={handleChange('paymentDate')} fullWidth InputLabelProps={{ shrink: true }} inputProps={{ step: 1 }} />
-          <TextField label="付款订单号" value={form.paymentOrderNo} onChange={handleChange('paymentOrderNo')} placeholder="上传截图识别后自动填写" fullWidth />
+          <TextField label="实付金额" type="number" value={form.actualAmount} onChange={handleChange('actualAmount')} fullWidth disabled={Boolean(order)} />
+          <TextField label="付款时间" type="datetime-local" value={form.paymentDate} onChange={handleChange('paymentDate')} fullWidth InputLabelProps={{ shrink: true }} inputProps={{ step: 1 }} disabled={Boolean(order)} />
+          <TextField label="付款订单号" value={form.paymentOrderNo} onChange={handleChange('paymentOrderNo')} placeholder="上传截图识别后自动填写" fullWidth disabled={Boolean(order)} />
           <Box sx={{ gridColumn: '1 / -1' }}>
             <BusinessAttachmentPicker
               title="付款截图"
@@ -656,20 +679,21 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               category="order-payment-proof"
               draftKey={attachmentDraftKey}
               maxCount={1}
+              disabled={Boolean(order)}
               rejectWholeBatchOnOverflow
               headerAction={(
                 <Button
                   variant="contained"
                   size="small"
                   onClick={handleRecognizePayment}
-                  disabled={(!paymentAttachments.length && !voucherName) || recognizing}
+                  disabled={Boolean(order) || (!paymentAttachments.length && !voucherName) || recognizing}
                 >
                   {recognizing ? '识别中...' : '确认识别付款截图'}
                 </Button>
               )}
             />
             {!!voucherName && !paymentAttachments.length && (
-              <Alert severity="info" sx={{ mt: 1 }} onClose={clearVoucherFile}>
+              <Alert severity="info" sx={{ mt: 1 }} onClose={order ? undefined : clearVoucherFile}>
                 历史付款截图：{voucherName}。重新上传后将使用新的安全附件。
               </Alert>
             )}
@@ -691,22 +715,23 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               category="order-deal-evidence"
               draftKey={attachmentDraftKey}
               maxCount={8}
+              disabled={Boolean(order)}
             />
             {!!dealEvidenceName && !dealEvidenceAttachments.length && (
-              <Alert severity="info" sx={{ mt: 1 }} onClose={clearDealEvidenceFile}>
+              <Alert severity="info" sx={{ mt: 1 }} onClose={order ? undefined : clearDealEvidenceFile}>
                 历史成交截图：{dealEvidenceName}。重新上传后将使用新的安全附件。
               </Alert>
             )}
           </Box>
-          <TextField select label="销售负责人" value={form.owner} onChange={handleOwnerChange} fullWidth>
-            {form.owner && !users.some((user) => user.name === form.owner) && (
-              <MenuItem value={form.owner}>{form.owner}（历史负责人）</MenuItem>
+          <TextField select label="销售负责人" value={form.salesId} onChange={handleOwnerChange} fullWidth disabled={Boolean(order)}>
+            {form.owner && !users.some((user) => user.id === form.salesId) && (
+              <MenuItem value={form.salesId}>{form.owner}（历史负责人）</MenuItem>
             )}
             {users.map((user) => (
-              <MenuItem key={user.id} value={user.name}>{formatEmployeeNameWithPosition(user)}</MenuItem>
+              <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>
             ))}
           </TextField>
-          <TextField label="第三方平台订单" value={form.originalOrderId} onChange={handleChange('originalOrderId')} placeholder="填写第三方平台订单号或订单ID" fullWidth />
+          <TextField label="第三方平台订单" value={form.thirdPartyOrderNo} onChange={handleChange('thirdPartyOrderNo')} placeholder="填写第三方平台订单号或订单ID" fullWidth />
           <TextField label="备注" value={form.notes} onChange={handleChange('notes')} fullWidth sx={{ gridColumn: '1 / -1' }} />
         </Box>
       </DialogContent>

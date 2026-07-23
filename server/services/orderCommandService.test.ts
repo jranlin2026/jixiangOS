@@ -138,6 +138,7 @@ class FakePrisma {
   constructor(options: {
     sourceOrder?: Order;
     commissionStatus?: string;
+    commissionManual?: boolean;
     deliveryStatus?: string;
     customerDataId?: string;
     forceCustomerVersionConflict?: boolean;
@@ -185,7 +186,11 @@ class FakePrisma {
         recordId: 'commission-1',
         orderId: sourceOrder.id,
         status: options.commissionStatus,
-        data: { id: 'commission-1', orderId: sourceOrder.id, status: options.commissionStatus },
+        data: {
+          id: 'commission-1', orderId: sourceOrder.id, status: options.commissionStatus,
+          sourceType: options.commissionManual ? '人工新增' : '自动规则',
+          isManualAdjusted: options.commissionManual || undefined,
+        },
       });
     }
     if (options.deliveryStatus) {
@@ -207,6 +212,11 @@ class FakePrisma {
         const values: unknown[] = Array.isArray(queryOrStrings)
           ? taggedValues
           : (queryOrStrings as { values?: unknown[] }).values || [];
+        if (values[0] === STORAGE_KEYS.COMMISSIONS) {
+          return Array.from(this.rows.values())
+            .filter((row) => row.domain === STORAGE_KEYS.COMMISSIONS && row.orderId === values[1])
+            .map(clone);
+        }
         const row = this.rows.get(key(String(values[0] || ''), String(values[1] || '')));
         return row ? [clone(row)] : [];
       },
@@ -219,6 +229,20 @@ class FakePrisma {
           .filter((row) => row.domain === where.domain)
           .filter((row) => !where.orderId || row.orderId === where.orderId)
           .map(clone),
+        create: async ({ data }: any) => {
+          const rowKey = key(data.domain, data.recordId);
+          if (this.rows.has(rowKey)) throw Object.assign(new Error('duplicate'), { code: 'P2002' });
+          const next = clone(data);
+          this.rows.set(rowKey, next);
+          return clone(next);
+        },
+        deleteMany: async ({ where }: any) => {
+          const matches = Array.from(this.rows.entries()).filter(([, row]) => (
+            row.domain === where.domain && (!where.orderId || row.orderId === where.orderId)
+          ));
+          matches.forEach(([rowKey]) => this.rows.delete(rowKey));
+          return { count: matches.length };
+        },
         update: async ({ where, data }: any) => {
           const target = where.domain_recordId;
           const rowKey = key(target.domain, target.recordId);
@@ -272,6 +296,64 @@ class FakePrisma {
   assert.equal(result.data?.notes, '服务端备注');
   assert.equal(result.data?.changeHistory?.[0].operator, sales.name);
   assert.equal(result.data?.changeHistory?.[0].action, 'update');
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '待确认' });
+  const result = await createOrderCommandService(prisma as any, { now: () => new Date(NOW) })
+    .update('order-1', { thirdPartyOrderNo: 'TP-20260723-001', notes: '已核对平台单号' } as any, sales);
+
+  assert.equal(result.code, 0, result.message);
+  assert.equal((result.data as any)?.thirdPartyOrderNo, 'TP-20260723-001');
+  assert.equal(result.data?.notes, '已核对平台单号');
+  assert.deepEqual(result.data?.changeHistory?.[0].changes?.map((change) => change.field), [
+    'thirdPartyOrderNo',
+    'notes',
+  ]);
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '待确认' });
+  let rebuiltFor: Order | undefined;
+  const result = await createOrderCommandService(prisma as any, {
+    now: () => new Date(NOW),
+    rebuildPendingCommissions: async (_transaction: any, nextOrder: Order) => {
+      rebuiltFor = clone(nextOrder);
+    },
+  } as any).update('order-1', { officialPaymentChannel: '企业支付宝转账' }, sales);
+
+  assert.equal(result.code, 0, result.message);
+  assert.equal(result.data?.officialPaymentChannel, '企业支付宝转账');
+  assert.equal(result.data?.paymentMethod, '支付宝');
+  assert.equal(rebuiltFor?.officialPaymentChannel, '企业支付宝转账');
+  assert.equal(prisma.rows.size > 0, true);
+  assert.equal(
+    Array.from(prisma.rows.values()).some((row) => row.domain === STORAGE_KEYS.COMMISSION_OPERATION_LOGS),
+    true,
+    '收款渠道更正必须留下分账操作日志',
+  );
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '已确认' });
+  const result = await createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+  } as any).update('order-1', { officialPaymentChannel: '企业支付宝转账' }, sales);
+
+  assert.equal(result.code, 409);
+  assert.match(result.message, /待确认/);
+  assert.equal(prisma.orderData().officialPaymentChannel, undefined);
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '待确认', commissionManual: true });
+  const result = await createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+  }).update('order-1', { officialPaymentChannel: '企业支付宝转账' }, sales);
+
+  assert.equal(result.code, 409);
+  assert.match(result.message, /人工/);
+  assert.equal(prisma.rows.has(key(STORAGE_KEYS.COMMISSIONS, 'commission-1')), true, '人工分账不得被重算删除');
 }
 
 {

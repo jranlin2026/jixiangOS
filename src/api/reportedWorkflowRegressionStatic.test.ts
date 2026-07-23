@@ -15,6 +15,9 @@ assert.match(ordersSource, /orderApi\.fetchOwnerCandidates/);
 assert.match(ordersSource, /filterUsersByCurrentDataScope\(users, 'orders', currentUser/);
 assert.match(orderFormSource, /orderApi\.fetchOwnerCandidates/);
 assert.match(orderFormSource, /filterUsersByCurrentDataScope\(userRes\.data, 'orders', currentUser/);
+assert.match(orderFormSource, /salesId:\s*''/);
+assert.match(orderFormSource, /value=\{form\.salesId\}[\s\S]{0,500}<MenuItem key=\{user\.id\} value=\{user\.id\}>/);
+assert.match(orderFormSource, /salesId:\s*selectedOwner\?\.id/);
 assert.match(commissionSource, /settingsApi\.fetchAssignableDirectory/);
 assert.match(recoverySource, /settingsApi\.fetchAssignableDirectory/);
 const recoverySettlementSubmitSource = recoverySource.slice(

@@ -10,6 +10,11 @@ import type { Product } from '../../src/types/product';
 import type { Department } from '../../src/types/department';
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
+import type {
+  Commission,
+  CommissionOperationLog,
+  OfficialPaymentChannel,
+} from '../../src/types/commission';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import {
   createCustomerBusinessRecordRepository,
@@ -33,6 +38,11 @@ type Directory = {
 
 export interface OrderCommandServiceOptions {
   now?: () => Date;
+  rebuildPendingCommissions?: (
+    transaction: Prisma.TransactionClient,
+    order: Order,
+    changedAt: string,
+  ) => Promise<void>;
 }
 
 const MAX_TRANSACTION_ATTEMPTS = 3;
@@ -71,7 +81,6 @@ const FINANCIAL_FIELDS = new Set([
   'amount',
   'actualAmount',
   'paymentMethod',
-  'officialPaymentChannel',
   'payments',
   'status',
   'refundStatus',
@@ -85,6 +94,19 @@ const FINANCIAL_FIELDS = new Set([
   'dealEvidencePreview',
   'dealEvidenceAttachments',
   'isExternalTalentOrder',
+]);
+const DIRECT_EDIT_FIELDS = new Set(['notes', 'thirdPartyOrderNo', 'officialPaymentChannel']);
+const EDIT_FIELD_LABELS: Record<string, string> = {
+  notes: '备注',
+  thirdPartyOrderNo: '第三方平台订单号',
+  officialPaymentChannel: '官方收款渠道',
+};
+const OFFICIAL_PAYMENT_CHANNEL_VALUES = new Set<OfficialPaymentChannel>([
+  '企业微信转账',
+  '企业支付宝转账',
+  '对公银行转账',
+  '公司自营小店',
+  '非官方渠道',
 ]);
 
 class OrderCommandError extends Error {
@@ -114,6 +136,12 @@ function hash(value: string, length = 12): string {
 
 function sameValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function auditValue(value: unknown): string | number | boolean | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+  return JSON.stringify(value);
 }
 
 function prismaCode(error: unknown): unknown {
@@ -166,9 +194,96 @@ function assertAllowedPatch(order: Order, patch: Partial<Order>): string[] {
   if (financialField) {
     throw new OrderCommandError(409, '金额、产品、付款和订单状态不能直接修改，请走财务更正流程');
   }
-  const unsupported = changed.find((field) => field !== 'notes');
+  const unsupported = changed.find((field) => !DIRECT_EDIT_FIELDS.has(field));
   if (unsupported) throw new OrderCommandError(400, `字段 ${unsupported} 不支持在正式订单中直接修改`);
+  if (
+    changed.includes('officialPaymentChannel')
+    && !OFFICIAL_PAYMENT_CHANNEL_VALUES.has(patch.officialPaymentChannel as OfficialPaymentChannel)
+  ) {
+    throw new OrderCommandError(400, '官方收款渠道无效');
+  }
   return changed;
+}
+
+function paymentMethodFromOfficialChannel(channel: OfficialPaymentChannel): Order['paymentMethod'] {
+  if (channel === '企业微信转账' || channel === '公司自营小店') return '微信支付';
+  if (channel === '企业支付宝转账') return '支付宝';
+  if (channel === '对公银行转账') return '对公转账';
+  return '银行转账';
+}
+
+async function replacePendingCommissions(
+  transaction: Prisma.TransactionClient,
+  current: Order,
+  next: Order,
+  changedAt: string,
+  operator: string,
+  rebuild?: OrderCommandServiceOptions['rebuildPendingCommissions'],
+): Promise<void> {
+  if (current.originalOrderId) {
+    throw new OrderCommandError(409, '该订单关联历史订单冲销，收款渠道请走财务更正流程');
+  }
+  const rows = await transaction.$queryRaw<Array<{ status: string | null; data: unknown }>>(Prisma.sql`
+    SELECT id, recordId, status, data
+    FROM business_records
+    WHERE domain = ${STORAGE_KEYS.COMMISSIONS}
+      AND orderId = ${current.id}
+    ORDER BY recordId ASC
+    FOR UPDATE
+  `);
+  const commissions = rows.map((row) => parseObject<Commission>(row.data, '提成'));
+  const locked = rows.find((row, index) => String(row.status || commissions[index].status || '') !== '待确认');
+  if (locked) throw new OrderCommandError(409, '只有全部处于待确认状态的提成，才允许更正官方收款渠道');
+  if (commissions.some((commission) => commission.isManualAdjusted || commission.sourceType === '人工新增')) {
+    throw new OrderCommandError(409, '该订单存在人工新增或人工调整的提成，请走财务更正流程');
+  }
+  if (!rebuild) throw new OrderCommandError(503, '提成重算服务不可用，暂不能修改官方收款渠道');
+  await transaction.businessRecord.deleteMany({
+    where: { domain: STORAGE_KEYS.COMMISSIONS, orderId: current.id },
+  });
+  await rebuild(transaction, next, changedAt);
+  const rebuiltRows = await transaction.businessRecord.findMany({
+    where: { domain: STORAGE_KEYS.COMMISSIONS, orderId: current.id },
+  });
+  const rebuilt = rebuiltRows.map((row) => parseObject<Commission>(row.data, '提成'));
+  const splitSnapshot = rebuilt.map((commission) => ({
+    role: commission.role,
+    owner: commission.owner,
+    ownerId: commission.ownerId,
+    department: commission.department,
+    commissionAmount: Number(commission.commissionAmount || 0),
+    status: commission.status,
+  }));
+  const totalCommissionAmount = Math.round(
+    splitSnapshot.reduce((sum, item) => sum + item.commissionAmount, 0) * 100,
+  ) / 100;
+  const log: CommissionOperationLog = {
+    id: `comm-log-${hash(`${current.id}:payment-channel:${changedAt}`)}`,
+    orderId: current.id,
+    orderNo: current.orderNo,
+    customerName: current.customerName,
+    action: '更正收款渠道',
+    operator,
+    operatedAt: changedAt,
+    reason: `官方收款渠道由${current.officialPaymentChannel || '-'}更正为${next.officialPaymentChannel || '-'}`,
+    summary: `已按新收款渠道重新计算 ${rebuilt.length} 条待确认提成，合计 ${totalCommissionAmount} 元`,
+    commissionCount: rebuilt.length,
+    totalCommissionAmount,
+    splitSnapshot,
+  };
+  await transaction.businessRecord.create({
+    data: {
+      id: `${STORAGE_KEYS.COMMISSION_OPERATION_LOGS}:${log.id}`,
+      domain: STORAGE_KEYS.COMMISSION_OPERATION_LOGS,
+      recordId: log.id,
+      title: `${current.orderNo}-更正收款渠道`,
+      status: log.action,
+      orderId: current.id,
+      amount: totalCommissionAmount,
+      eventAt: new Date(changedAt),
+      data: jsonValue(log),
+    },
+  });
 }
 
 async function validateStableOrderRelations(
@@ -310,39 +425,62 @@ export function createOrderCommandService(
             const changed = assertAllowedPatch(order, patch);
             if (!changed.length) return order;
             const changedAt = now().toISOString();
+            const nextChannel = changed.includes('officialPaymentChannel')
+              ? patch.officialPaymentChannel as OfficialPaymentChannel
+              : order.officialPaymentChannel;
+            const next: Order = {
+              ...order,
+              ...(changed.includes('notes') ? { notes: patch.notes } : {}),
+              ...(changed.includes('thirdPartyOrderNo') ? {
+                thirdPartyOrderNo: String(patch.thirdPartyOrderNo || '').trim() || undefined,
+              } : {}),
+              ...(changed.includes('officialPaymentChannel') ? {
+                officialPaymentChannel: nextChannel,
+                paymentMethod: paymentMethodFromOfficialChannel(nextChannel!),
+              } : {}),
+              updatedAt: changedAt,
+            };
+            if (changed.includes('officialPaymentChannel')) {
+              await replacePendingCommissions(
+                transaction,
+                order,
+                next,
+                changedAt,
+                actor.name,
+                options.rebuildPendingCommissions,
+              );
+            }
             const changeLog: OrderChangeLog = {
               id: `hist-${hash(`${order.id}:update:${changedAt}`)}`,
               action: 'update',
               operator: actor.name,
               changedAt,
-              summary: '修改了备注',
-              changes: [{
-                field: 'notes',
-                label: '备注',
-                oldValue: order.notes || null,
-                newValue: patch.notes || null,
-              }],
+              summary: `修改了${changed.map((field) => EDIT_FIELD_LABELS[field]).join('、')}`,
+              changes: changed.map((field) => ({
+                field,
+                label: EDIT_FIELD_LABELS[field],
+                oldValue: auditValue((order as unknown as Record<string, unknown>)[field]),
+                newValue: auditValue((next as unknown as Record<string, unknown>)[field]),
+              })),
             };
-            const next: Order = {
-              ...order,
-              notes: patch.notes,
+            const saved: Order = {
+              ...next,
               changeHistory: [changeLog, ...(order.changeHistory || [])],
-              updatedAt: changedAt,
             };
             await transaction.businessRecord.update({
               where: { domain_recordId: { domain: STORAGE_KEYS.ORDERS, recordId: cleanOrderId } },
               data: {
-                title: next.customerName || next.orderNo,
-                status: next.status,
-                owner: next.salesName || next.owner || null,
-                customerId: next.customerId,
-                orderId: next.id,
-                amount: next.actualAmount,
+                title: saved.customerName || saved.orderNo,
+                status: saved.status,
+                owner: saved.salesName || saved.owner || null,
+                customerId: saved.customerId,
+                orderId: saved.id,
+                amount: saved.actualAmount,
                 eventAt: new Date(changedAt),
-                data: jsonValue(next),
+                data: jsonValue(saved),
               },
             });
-            return next;
+            return saved;
           }, {
             isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
             maxWait: 5_000,

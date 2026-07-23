@@ -361,6 +361,14 @@ async function createCommissionRecords(transaction: Prisma.TransactionClient, or
   }
 }
 
+export async function rebuildPendingOrderCommissions(
+  transaction: Prisma.TransactionClient,
+  order: Order,
+  changedAt: string,
+): Promise<void> {
+  await createCommissionRecords(transaction, order, changedAt);
+}
+
 type DeliveryAssigner = {
   assignNext(transaction: Prisma.TransactionClient, assignedAt: string): Promise<{
     ownerId: string; owner: string; assignmentMode: 'auto'; assignedAt: string; assignedBy: 'system';

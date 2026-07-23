@@ -630,21 +630,20 @@ const deferredEffects: OrderApprovalEffectState = {
     salesName: '其他销售',
   }, salesApplicant);
 
-  assert.equal(result.code, 0, result.message);
-  assert.equal(result.data?.status, '待财务审核');
-  assert.equal(result.data?.applicantId, salesApplicant.id);
-  assert.equal(result.data?.applicantName, salesApplicant.name);
-  assert.equal(result.data?.orderData.customerName, '数据库客户');
-  assert.equal(result.data?.orderData.productName, '数据库产品');
-  assert.equal(result.data?.orderData.productLevel, '899');
-  assert.equal(result.data?.orderData.salesId, salesApplicant.id, '普通销售不得伪造订单归属');
-  assert.equal(result.data?.orderData.salesName, salesApplicant.name);
-  assert.equal(result.data?.orderData.owner, salesApplicant.name);
-  assert.equal(prisma.applicationRow(result.data!.id).data.applicantId, salesApplicant.id);
-  assert.ok(
-    prisma.associationLockKeys.includes('aaos_customer_association_lock:customer-1'),
-    '新建客户关联订单申请前必须取得客户关联锁，避免与客户删除并发穿插',
-  );
+  assert.equal(result.code, 403, '普通销售不得伪造订单归属，也不得静默回退为自己');
+  assert.equal(prisma.domainRows(STORAGE_KEYS.ORDER_APPLICATIONS).length, 1, '越权代录不得新增申请');
+}
+
+{
+  const prisma = new FakePrisma();
+  const result = await createOrderApplicationService(prisma as any, { now: () => new Date(NOW) }).submit({
+    ...application().orderData,
+    productId: 'product-1',
+    salesId: undefined,
+  }, salesApplicant);
+
+  assert.equal(result.code, 400, '缺少稳定销售负责人 ID 时必须拒绝，不能回退到提交人');
+  assert.match(result.message, /销售负责人/);
 }
 
 {
@@ -746,6 +745,33 @@ const deferredEffects: OrderApprovalEffectState = {
 }
 
 {
+  const prisma = new FakePrisma();
+  prisma.users.push(databaseUser(superAdmin));
+  prisma.roles.push({
+    ...role('all'),
+    id: superAdmin.roleId,
+    name: '超级管理员',
+    code: 'super_admin',
+    permissions: [{ module: '全部', actions: ['admin'] }],
+    dataScopes: { customers: 'all', orders: 'all', orderApplications: 'all' },
+  });
+  const result = await createOrderApplicationService(prisma as any, { now: () => new Date(NOW) }).submit({
+    ...application().orderData,
+    productId: 'product-1',
+    owner: salesApplicant.name,
+    salesId: salesApplicant.id,
+    salesName: salesApplicant.name,
+  }, superAdmin);
+
+  assert.equal(result.code, 0, result.message);
+  assert.equal(result.data?.applicantId, superAdmin.id, '管理员是提交人');
+  assert.equal(result.data?.applicantName, superAdmin.name);
+  assert.equal(result.data?.orderData.salesId, salesApplicant.id, '管理员代录不得覆盖选定销售负责人');
+  assert.equal(result.data?.orderData.salesName, salesApplicant.name);
+  assert.equal(result.data?.orderData.owner, salesApplicant.name);
+}
+
+{
   const returned = application({
     status: '退回修改',
     reviewerId: reviewer.id,
@@ -759,9 +785,9 @@ const deferredEffects: OrderApprovalEffectState = {
     ...returned.orderData,
     productId: 'product-1',
     notes: '已经补充',
-    owner: '伪造销售',
-    salesId: 'user-other',
-    salesName: '伪造销售',
+    owner: salesApplicant.name,
+    salesId: salesApplicant.id,
+    salesName: salesApplicant.name,
   }, salesApplicant);
 
   assert.equal(result.code, 0);

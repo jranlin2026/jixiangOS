@@ -264,9 +264,10 @@ function resolveSalesOwner(
   }
 
   const requestedId = String(input.salesId || '').trim();
-  if (!requestedId || requestedId === actor.id) return current;
+  if (!requestedId) throw new OrderApprovalError(400, '请选择有效的销售负责人');
+  if (requestedId === actor.id) return current;
   if (orderScope.dataScopeLevel === 'self') {
-    return current;
+    throw new OrderApprovalError(403, '无权为其他销售代录订单');
   }
 
   const target = directory.users.find((user) => user.id === requestedId && activeDirectoryUser(user));

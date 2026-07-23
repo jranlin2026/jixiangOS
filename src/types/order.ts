@@ -92,6 +92,8 @@ export interface Order {
   proofStatus?: ProofStatus;
   /** 原 899 订单关系，用于转代理时冲销基础提成 */
   originalOrderId?: ID;
+  /** 外部平台的展示订单号，不参与提成冲销关系 */
+  thirdPartyOrderNo?: string;
   /** 业绩核算基数，默认取 actualAmount */
   performanceBaseAmount?: number;
   commissionRuleId?: ID;

@@ -175,7 +175,7 @@ const ORDER_CHANGE_FIELDS: Array<{ field: keyof Order; label: string }> = [
   { field: 'isExternalTalentOrder', label: '外部达人成交' },
   { field: 'dealScene', label: '成交场景' },
   { field: 'proofStatus', label: '凭证状态' },
-  { field: 'originalOrderId', label: '第三方平台订单' },
+  { field: 'thirdPartyOrderNo', label: '第三方平台订单' },
   { field: 'performanceBaseAmount', label: '业绩核算基数' },
   { field: 'notes', label: '备注' },
   { field: 'payments', label: '付款记录' },

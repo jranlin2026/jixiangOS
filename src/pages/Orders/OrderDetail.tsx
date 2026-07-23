@@ -62,6 +62,10 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
               <Typography variant="body1">{order.officialPaymentChannel || '-'}</Typography>
             </Box>
             <Box>
+              <Typography variant="body2" sx={{ color: '#6b7280' }}>第三方平台订单</Typography>
+              <Typography variant="body1">{order.thirdPartyOrderNo || '-'}</Typography>
+            </Box>
+            <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>销售顾问</Typography>
               <Typography variant="body1">{order.salesName || order.owner}</Typography>
             </Box>

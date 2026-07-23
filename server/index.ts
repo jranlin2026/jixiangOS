@@ -63,7 +63,10 @@ import { createStorageService } from './services/storageService';
 import { createBusinessAttachmentService, createPrismaBusinessAttachmentRepository } from './services/businessAttachmentService';
 import { createAssetListService, isAssetListKind } from './services/assetListService';
 import { createOrderApplicationService } from './services/orderApplicationService';
-import { createOrderApprovalDownstreamEffects } from './services/orderApprovalEffectsService';
+import {
+  createOrderApprovalDownstreamEffects,
+  rebuildPendingOrderCommissions,
+} from './services/orderApprovalEffectsService';
 import { createOrderCommandService } from './services/orderCommandService';
 import { createOrderQueryService } from './services/orderQueryService';
 import { createDeliveryCommandService } from './services/deliveryCommandService';
@@ -192,7 +195,9 @@ const deliveryAssignmentService = createDeliveryAssignmentService(prisma);
 const orderApplicationService = createOrderApplicationService(prisma, {
   applyDownstreamEffects: createOrderApprovalDownstreamEffects(deliveryAssignmentService),
 });
-const orderCommandService = createOrderCommandService(prisma);
+const orderCommandService = createOrderCommandService(prisma, {
+  rebuildPendingCommissions: rebuildPendingOrderCommissions,
+});
 const orderQueryService = createOrderQueryService(prisma);
 const deliveryCommandService = createDeliveryCommandService(prisma, { assigner: deliveryAssignmentService });
 const deliveryQueryService = createDeliveryQueryService(prisma);

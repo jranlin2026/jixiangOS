@@ -77,7 +77,7 @@ type OrderViewConfig = {
 };
 
 const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_view_v7';
-const ORDER_VIEW_SCHEMA_VERSION = 7;
+const ORDER_VIEW_SCHEMA_VERSION = 8;
 const ORDER_WIDTH_STORAGE_KEY = 'aaos_order_table_column_widths_v1';
 const ORDER_ACTION_COLUMN_WIDTH = 160;
 
@@ -94,7 +94,7 @@ const ORDER_COLUMNS: OrderColumn[] = [
   { id: 'owner', label: '销售负责人' },
   { id: 'leadInputBy', label: '线索录入人' },
   { id: 'leadContributorName', label: '线索贡献人' },
-  { id: 'originalOrderId', label: '第三方平台订单' },
+  { id: 'thirdPartyOrderNo', label: '第三方平台订单' },
   { id: 'notes', label: '备注' },
   { id: 'createdAt', label: '创建时间' },
 ];
@@ -112,7 +112,7 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'owner',
   'leadInputBy',
   'leadContributorName',
-  'originalOrderId',
+  'thirdPartyOrderNo',
   'notes',
   'createdAt',
 ];
@@ -130,7 +130,7 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   owner: 140,
   leadInputBy: 140,
   leadContributorName: 150,
-  originalOrderId: 180,
+  thirdPartyOrderNo: 180,
   notes: 220,
   createdAt: 180,
 };
@@ -574,8 +574,8 @@ const Orders: React.FC = () => {
         return order.leadInputBy || '-';
       case 'leadContributorName':
         return order.leadContributorName || '-';
-      case 'originalOrderId':
-        return order.originalOrderId || '-';
+      case 'thirdPartyOrderNo':
+        return order.thirdPartyOrderNo || '-';
       case 'notes':
         return order.notes || '-';
       case 'createdAt':
