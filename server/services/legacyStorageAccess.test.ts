@@ -36,6 +36,37 @@ const financeRuleEditor = {
 };
 assert.equal(isLegacyStorageKeyRegistered(STORAGE_KEYS.COMMISSION_PAYOUT_PLANS), true);
 assert.equal(canAccessLegacyStorageKey(financeRuleEditor, STORAGE_KEYS.COMMISSION_PAYOUT_PLANS, 'write'), true);
+for (const orderCreatePermission of [
+  PERMISSION_KEYS.ORDER_CREATE,
+  PERMISSION_KEYS.CUSTOMER_CREATE_ORDER,
+]) {
+  const orderCreator = {
+    ...user,
+    id: `user-order-creator-${orderCreatePermission}`,
+    permissions: [{ module: orderCreatePermission, actions: ['read', 'write'] }],
+  };
+  for (const orderCatalogKey of [
+    STORAGE_KEYS.PRODUCTS,
+    STORAGE_KEYS.PRODUCT_LEVELS,
+    STORAGE_KEYS.ORDER_TYPE_CONFIGS,
+  ]) {
+    assert.equal(
+      canAccessLegacyStorageKey(orderCreator, orderCatalogKey, 'read'),
+      true,
+      `可新增订单的销售必须能读取下单基础目录: ${orderCreatePermission} -> ${orderCatalogKey}`,
+    );
+    assert.equal(
+      canAccessLegacyStorageKey(orderCreator, orderCatalogKey, 'runtime'),
+      true,
+      `可新增订单的销售必须在登录时加载下单基础目录: ${orderCreatePermission} -> ${orderCatalogKey}`,
+    );
+    assert.equal(
+      canAccessLegacyStorageKey(orderCreator, orderCatalogKey, 'write'),
+      false,
+      `销售不得修改下单基础目录: ${orderCreatePermission} -> ${orderCatalogKey}`,
+    );
+  }
+}
 const commandOnlyWriter = {
   ...user,
   id: 'user-command-only-writer',
