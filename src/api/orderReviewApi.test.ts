@@ -154,6 +154,8 @@ const ordersAfterApprove = await orderApi.fetchOrders({ pageSize: 20 });
 assert.equal(ordersAfterApprove.data.items.length, 1);
 assert.equal(ordersAfterApprove.data.items[0].customerName, zh.customerName);
 assert.equal(ordersAfterApprove.data.items[0].productName, zh.productName);
+assert.equal(ordersAfterApprove.data.items[0].createdById, 'user-sales');
+assert.equal(ordersAfterApprove.data.items[0].createdByName, 'Sales A');
 assert.equal(approveRes.data?.orderId, ordersAfterApprove.data.items[0].id);
 assert.equal(approveRes.data?.orderNo, ordersAfterApprove.data.items[0].orderNo);
 

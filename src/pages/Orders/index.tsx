@@ -77,7 +77,7 @@ type OrderViewConfig = {
 };
 
 const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_view_v7';
-const ORDER_VIEW_SCHEMA_VERSION = 8;
+const ORDER_VIEW_SCHEMA_VERSION = 9;
 const ORDER_WIDTH_STORAGE_KEY = 'aaos_order_table_column_widths_v1';
 const ORDER_ACTION_COLUMN_WIDTH = 160;
 
@@ -92,6 +92,7 @@ const ORDER_COLUMNS: OrderColumn[] = [
   { id: 'resourceOwnership', label: '资源归属' },
   { id: 'paymentDate', label: '付款时间' },
   { id: 'owner', label: '销售负责人' },
+  { id: 'createdByName', label: '订单创建人' },
   { id: 'leadInputBy', label: '线索录入人' },
   { id: 'leadContributorName', label: '线索贡献人' },
   { id: 'thirdPartyOrderNo', label: '第三方平台订单' },
@@ -110,6 +111,7 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'resourceOwnership',
   'paymentDate',
   'owner',
+  'createdByName',
   'leadInputBy',
   'leadContributorName',
   'thirdPartyOrderNo',
@@ -128,6 +130,7 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   resourceOwnership: 140,
   paymentDate: 180,
   owner: 140,
+  createdByName: 140,
   leadInputBy: 140,
   leadContributorName: 150,
   thirdPartyOrderNo: 180,
@@ -570,6 +573,8 @@ const Orders: React.FC = () => {
         return formatDate(order.payments?.[0]?.paidAt || order.createdAt, 'yyyy-MM-dd HH:mm:ss');
       case 'owner':
         return order.owner;
+      case 'createdByName':
+        return order.createdByName || '-';
       case 'leadInputBy':
         return order.leadInputBy || '-';
       case 'leadContributorName':

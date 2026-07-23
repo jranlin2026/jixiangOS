@@ -67,6 +67,7 @@ const departments = [
 
 const records = [
   order('order-self', sales.id, sales.name, {
+    sourceApplicationId: 'application-approved',
     dealEvidencePreview: inlineProof,
     payments: [{ id: 'payment-self', amount: 899, paymentMethod: '对公转账', paidAt: now, voucherPreview: inlineProof }],
   }),
@@ -85,9 +86,10 @@ const applications = [
   },
   application('application-legacy-self', undefined, sales.name),
   application('application-other', 'user-other', '销售B'),
-  application('application-approved', sales.id, sales.name, '已入库'),
+  application('application-approved', finance.id, finance.name, '已入库'),
   application('application-rejected', sales.id, sales.name, '已驳回'),
 ];
+const businessRecordFindManyWhere: any[] = [];
 
 const prisma: any = {
   user: { findMany: async () => [databaseUser(sales), databaseUser(finance)] },
@@ -95,8 +97,12 @@ const prisma: any = {
   department: { findMany: async () => departments },
   businessRecord: {
     findMany: async ({ where }: any) => {
+      businessRecordFindManyWhere.push(where);
       const rows = where.domain === STORAGE_KEYS.ORDERS ? records : applications;
-      return rows.map((data) => ({
+      const filteredRows = where.recordId?.in
+        ? rows.filter((data) => where.recordId.in.includes(data.id))
+        : rows;
+      return filteredRows.map((data) => ({
         domain: where.domain, recordId: data.id, data, eventAt: new Date(data.updatedAt), createdAt: new Date(data.createdAt),
       }));
     },
@@ -118,6 +124,13 @@ assert.equal(salesOrders.data?.pagination.total, 2);
 const listedOrder = salesOrders.data?.items.find((item) => item.id === 'order-self');
 assert.equal(listedOrder?.dealEvidencePreview, undefined);
 assert.equal(listedOrder?.payments[0].voucherPreview, undefined);
+assert.equal(listedOrder?.createdById, finance.id, '历史订单列表应从来源申请回溯创建人');
+assert.equal(listedOrder?.createdByName, finance.name);
+assert.deepEqual(
+  businessRecordFindManyWhere.find((where) => where.domain === STORAGE_KEYS.ORDER_APPLICATIONS)?.recordId?.in,
+  ['application-approved'],
+  '订单列表只能回溯当前页缺少创建人的来源申请',
+);
 
 const financeOrders = await service.listOrders({ search: 'order-other', page: 1, pageSize: 10 }, finance);
 assert.deepEqual(financeOrders.data?.items.map((item) => item.id), ['order-other']);
@@ -128,6 +141,8 @@ assert.equal(forbiddenOrder.data, null);
 const orderDetail = (await service.getOrder('order-self', sales)).data;
 assert.equal(orderDetail?.dealEvidencePreview, inlineProof, 'detail keeps the original evidence');
 assert.equal(orderDetail?.payments[0].voucherPreview, inlineProof);
+assert.equal(orderDetail?.createdById, finance.id, '历史订单详情应从来源申请回溯创建人');
+assert.equal(orderDetail?.createdByName, finance.name);
 
 const salesStats = await service.getOrderStats(sales);
 assert.equal(salesStats.code, 0);

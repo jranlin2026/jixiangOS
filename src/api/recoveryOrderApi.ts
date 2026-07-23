@@ -392,8 +392,11 @@ async function createRecoveryOrder(data: RecoveryOrderInput): Promise<ApiRespons
   }
 
   const now = nowIso();
+  const creator = getCurrentSessionUser();
   const next: RecoveryOrder = {
     ...data,
+    createdBy: creator?.id || '',
+    createdByName: creator?.name || '',
     id: `recovery-${uuidv4().slice(0, 8)}`,
     recoveryNo: `RCV-${now.slice(0, 10).replace(/-/g, '')}-${String(orders.length + 1).padStart(4, '0')}`,
     thirdPartyOrderNo: data.thirdPartyOrderNo.trim(),

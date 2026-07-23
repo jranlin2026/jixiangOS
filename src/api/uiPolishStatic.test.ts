@@ -63,8 +63,15 @@ const financeApiSource = readFileSync(join(projectRoot, 'src/api/financeApi.ts')
 const refundCenterSource = readFileSync(join(projectRoot, 'src/pages/RefundCenter/index.tsx'), 'utf8');
 const afterSalesSource = readFileSync(join(projectRoot, 'src/pages/AfterSales/index.tsx'), 'utf8');
 const recoveryOrderSource = readFileSync(join(projectRoot, 'src/pages/AfterSales/RecoveryOrderTab.tsx'), 'utf8');
+const recoverySettlementSource = readFileSync(join(projectRoot, 'src/pages/Finance/RecoverySettlement.tsx'), 'utf8');
 const serviceTicketSource = readFileSync(join(projectRoot, 'src/pages/RefundCenter/ServiceTicketTab.tsx'), 'utf8');
 const employeeDepartmentSource = readFileSync(join(projectRoot, 'src/pages/Settings/EmployeeDepartmentManagement.tsx'), 'utf8');
+
+assert.match(orderDetailSource, />订单创建人</, '订单详情应展示订单创建人');
+assert.match(ordersPageSource, /id: 'createdByName', label: '订单创建人'/, '订单列表视图设置应包含订单创建人');
+assert.match(commissionSource, /id: 'createdByName', label: '订单创建人'/, '订单分账视图设置应包含订单创建人');
+assert.match(recoveryOrderSource, /id: 'createdByName', label: '订单创建人'/, '售后挽回订单视图设置应包含订单创建人');
+assert.match(recoverySettlementSource, /id: 'createdByName', label: '订单创建人'/, '售后分账视图设置应包含订单创建人');
 const detailSplitEditorSource = commissionSource.slice(
   commissionSource.indexOf('const renderDetailSplitEditor'),
   commissionSource.indexOf('const renderSettlementDetailActions'),

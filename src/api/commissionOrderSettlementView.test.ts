@@ -145,6 +145,8 @@ function seed() {
       status: zh.confirmed,
       refundStatus: zh.none,
       owner: 'Sales A',
+      createdById: 'user-admin',
+      createdByName: 'Admin',
       sourceType: zh.companyResource,
       resourceOwnership: zh.companyResource,
       dealScene: zh.orderType,
@@ -301,6 +303,8 @@ assert.equal(orderA.totalCommissionAmount, 130);
 assert.equal(orderA.resourceOwnership, zh.companyResource);
 assert.equal(orderA.refundStatus, zh.none);
 assert.equal(orderA.salesOwner, 'Sales A');
+assert.equal(orderA.createdById, 'user-admin');
+assert.equal(orderA.createdByName, 'Admin');
 assert.equal(orderA.officialPaymentChannel, zh.officialChannel);
 assert.equal(orderA.createdAt, now);
 assert.deepEqual(orderA.splitSummary.map((item: any) => `${item.role}:${item.amount}`).sort(), [`${zh.salesRole}:100`, `${zh.leadRole}:30`].sort());

@@ -115,6 +115,7 @@ type RecoverySettlementColumnId =
   | 'originalAmount'
   | 'recoveryAmount'
   | 'recoveryUserName'
+  | 'createdByName'
   | 'recoveryAt'
   | 'status'
   | 'auditedAt'
@@ -128,6 +129,7 @@ const RECOVERY_SETTLEMENT_COLUMN_WIDTHS: Record<RecoverySettlementColumnId, numb
   originalAmount: 110,
   recoveryAmount: 120,
   recoveryUserName: 120,
+  createdByName: 140,
   recoveryAt: 145,
   status: 105,
   auditedAt: 140,
@@ -142,6 +144,7 @@ const RECOVERY_SETTLEMENT_COLUMNS: Array<TableViewColumnConfig & { id: RecoveryS
   { id: 'originalAmount', label: '原付款' },
   { id: 'recoveryAmount', label: '挽回金额' },
   { id: 'recoveryUserName', label: '挽回人员' },
+  { id: 'createdByName', label: '订单创建人' },
   { id: 'recoveryAt', label: '挽回时间' },
   { id: 'status', label: '分账状态' },
   { id: 'auditedAt', label: '审核时间' },
@@ -718,6 +721,8 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         return <Typography variant="body2" sx={{ fontWeight: 900, color: shell.teal }}>{formatCurrency(row.recoveryAmount)}</Typography>;
       case 'recoveryUserName':
         return row.recoveryUserName;
+      case 'createdByName':
+        return row.createdByName || '-';
       case 'recoveryAt':
         return formatDate(row.recoveryAt || row.createdAt, 'yyyy-MM-dd HH:mm');
       case 'status':

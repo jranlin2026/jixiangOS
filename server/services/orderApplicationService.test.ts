@@ -479,6 +479,9 @@ const deferredEffects: OrderApprovalEffectState = {
   assert.equal(result.data?.replayed, false);
   assert.match(result.data?.order.id || '', /^order-[a-f0-9]{16}$/);
   assert.match(result.data?.order.orderNo || '', /^ORD-20260712-[A-Z0-9]+$/);
+  assert.equal(result.data?.order.createdById, salesApplicant.id, '订单创建人必须固化为申请提交人');
+  assert.equal(result.data?.order.createdByName, salesApplicant.name, '订单创建人不能被财务审核人覆盖');
+  assert.equal(result.data?.order.salesId, salesApplicant.id, '销售负责人应与订单创建人独立保存');
   assert.deepEqual(result.data?.downstreamEffects, deferredEffects, 'service does not pretend legacy downstream effects ran');
   assert.equal(prisma.domainRows(STORAGE_KEYS.ORDERS).length, 1);
   assert.equal(prisma.domainRows(STORAGE_KEYS.ORDERS)[0].data.sourceApplicationId, 'oa-concurrent-1');
@@ -769,6 +772,16 @@ const deferredEffects: OrderApprovalEffectState = {
   assert.equal(result.data?.orderData.salesId, salesApplicant.id, '管理员代录不得覆盖选定销售负责人');
   assert.equal(result.data?.orderData.salesName, salesApplicant.name);
   assert.equal(result.data?.orderData.owner, salesApplicant.name);
+
+  const approved = await createOrderApplicationService(prisma as any, { now: () => new Date(NOW) }).approve(
+    result.data!.id,
+    reviewer,
+  );
+  assert.equal(approved.code, 0, approved.message);
+  assert.equal(approved.data?.order.createdById, superAdmin.id, '管理员代录时订单创建人应是管理员');
+  assert.equal(approved.data?.order.createdByName, superAdmin.name);
+  assert.equal(approved.data?.order.salesId, salesApplicant.id, '管理员代录不得覆盖所选销售负责人');
+  assert.equal(approved.data?.order.salesName, salesApplicant.name);
 }
 
 {

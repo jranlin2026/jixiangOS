@@ -66,8 +66,8 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
               <Typography variant="body1">{order.thirdPartyOrderNo || '-'}</Typography>
             </Box>
             <Box>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>销售顾问</Typography>
-              <Typography variant="body1">{order.salesName || order.owner}</Typography>
+              <Typography variant="body2" sx={{ color: '#6b7280' }}>订单创建人</Typography>
+              <Typography variant="body1">{order.createdByName || '-'}</Typography>
             </Box>
             <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>资源归属</Typography>

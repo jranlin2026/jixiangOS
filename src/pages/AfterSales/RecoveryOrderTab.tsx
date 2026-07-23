@@ -129,6 +129,7 @@ type RecoveryOrderColumnId =
   | 'originalAmount'
   | 'recoveryAmount'
   | 'recoveryUserName'
+  | 'createdByName'
   | 'recoveryAt'
   | 'status'
   | 'createdAt'
@@ -144,6 +145,7 @@ const RECOVERY_ORDER_COLUMNS: Array<TableViewColumnConfig & { id: RecoveryOrderC
   { id: 'originalAmount', label: '原付款' },
   { id: 'recoveryAmount', label: '挽回金额' },
   { id: 'recoveryUserName', label: '挽回人员' },
+  { id: 'createdByName', label: '订单创建人' },
   { id: 'recoveryAt', label: '挽回时间' },
   { id: 'status', label: '状态' },
   { id: 'createdAt', label: '创建时间' },
@@ -512,6 +514,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
         return <Typography variant="body2" sx={{ fontWeight: 900, color: shell.green }}>{formatCurrency(row.recoveryAmount)}</Typography>;
       case 'recoveryUserName':
         return row.recoveryUserName;
+      case 'createdByName':
+        return row.createdByName || '-';
       case 'recoveryAt':
         return formatDate(row.recoveryAt || row.createdAt, 'yyyy-MM-dd HH:mm');
       case 'status':
@@ -901,6 +905,10 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                 <Box>
                   <Typography variant="body2" sx={{ color: '#6b7280' }}>挽回人员</Typography>
                   <Typography variant="body1">{detailOrder.recoveryUserName}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>订单创建人</Typography>
+                  <Typography variant="body1">{detailOrder.createdByName || '-'}</Typography>
                 </Box>
                 <Box>
                   <Typography variant="body2" sx={{ color: '#6b7280' }}>挽回时间</Typography>

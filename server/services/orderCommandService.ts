@@ -51,6 +51,8 @@ const SERVER_FIELDS = new Set([
   'orderNo',
   'createdAt',
   'updatedAt',
+  'createdById',
+  'createdByName',
   'deletedAt',
   'deletedBy',
   'deleteReason',

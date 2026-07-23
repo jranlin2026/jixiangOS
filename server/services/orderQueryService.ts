@@ -80,6 +80,17 @@ function applicationIsVisible(application: OrderApplication, scope: DataVisibili
   return Boolean(applicantName && scope.visibleUserNames.includes(applicantName));
 }
 
+function enrichOrderCreator(order: Order, applications: Map<string, OrderApplication>): Order {
+  if (order.createdByName || !order.sourceApplicationId) return order;
+  const application = applications.get(order.sourceApplicationId);
+  if (!application?.applicantName) return order;
+  return {
+    ...order,
+    createdById: application.applicantId,
+    createdByName: application.applicantName,
+  };
+}
+
 async function loadScope(
   prisma: OrderQueryPrisma,
   actor: AuthenticatedUser,
@@ -224,8 +235,10 @@ export function createOrderQueryService(
 ) {
   return {
     async listOrders(filters: OrderFilters = {}, actor: AuthenticatedUser) {
-      const scope = await loadScope(prisma, actor, 'orders');
-      const rows = await prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDERS } });
+      const [scope, rows] = await Promise.all([
+        loadScope(prisma, actor, 'orders'),
+        prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDERS } }),
+      ]);
       const direction = filters.sortDirection === 'asc' ? 1 : -1;
       const items = (rows as BusinessRecordRow[])
         .map((row) => parseRecord<Order>(row.data))
@@ -233,7 +246,22 @@ export function createOrderQueryService(
         .filter((order) => orderIsVisible(order, scope) && matchesOrder(order, filters))
         .sort((left, right) => direction * (timestamp(left.updatedAt || left.createdAt) - timestamp(right.updatedAt || right.createdAt)));
       const result = paginate(items, filters.page, filters.pageSize);
-      return success({ ...result, items: result.items.map(compactOrderListItem) });
+      const sourceApplicationIds = result.items
+        .filter((order) => !order.createdByName && order.sourceApplicationId)
+        .map((order) => order.sourceApplicationId!);
+      const applicationRows = sourceApplicationIds.length
+        ? await prisma.businessRecord.findMany({
+          where: { domain: STORAGE_KEYS.ORDER_APPLICATIONS, recordId: { in: sourceApplicationIds } },
+        })
+        : [];
+      const applications = new Map((applicationRows as BusinessRecordRow[])
+        .map((row) => parseRecord<OrderApplication>(row.data))
+        .filter((application): application is OrderApplication => Boolean(application))
+        .map((application) => [application.id, application]));
+      return success({
+        ...result,
+        items: result.items.map((order) => compactOrderListItem(enrichOrderCreator(order, applications))),
+      });
     },
 
     async getOrder(orderId: string, actor: AuthenticatedUser) {
@@ -246,10 +274,17 @@ export function createOrderQueryService(
         loadScope(prisma, actor, 'orders'),
       ]);
       if (!row) return failure<Order>('订单不存在', 404);
-      const order = parseRecord<Order>(row.data);
+      let order = parseRecord<Order>(row.data);
       if (!order) return failure<Order>('订单数据损坏，请先修复数据', 409);
       if (order.deletedAt) return failure<Order>('订单不存在', 404);
       if (!orderIsVisible(order, scope)) return failure<Order>('无权查看该订单', 403);
+      if (!order.createdByName && order.sourceApplicationId) {
+        const applicationRow = await prisma.businessRecord.findUnique({
+          where: { domain_recordId: { domain: STORAGE_KEYS.ORDER_APPLICATIONS, recordId: order.sourceApplicationId } },
+        });
+        const application = applicationRow ? parseRecord<OrderApplication>(applicationRow.data) : null;
+        if (application) order = enrichOrderCreator(order, new Map([[application.id, application]]));
+      }
       return success(order);
     },
 

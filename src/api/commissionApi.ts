@@ -19,7 +19,7 @@ import type {
   CommissionStats,
   CommissionStatus,
 } from '../types/commission';
-import type { Order } from '../types/order';
+import type { Order, OrderApplication } from '../types/order';
 import type { Product } from '../types/product';
 import type { User } from '../types/settings';
 import type { Department } from '../types/department';
@@ -601,6 +601,10 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
     && !commission.sourceRecoveryOrderId
   ));
   const ordersById = new Map(getOrders().map((order) => [order.id, order]));
+  const applicationsById = new Map(
+    (getStorageData<OrderApplication[]>(STORAGE_KEYS.ORDER_APPLICATIONS) || [])
+      .map((application) => [application.id, application]),
+  );
   const roleOrder = ['线索', '销售', '客户成功', '售后', '招商主管', '销售主管'];
   const orderMap = new Map<string, Commission[]>();
   formalOrderCommissions.forEach((commission) => {
@@ -613,6 +617,9 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
     const sortedRows = rows.slice().sort((a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role));
     const first = sortedRows[0];
     const order = ordersById.get(orderId);
+    const sourceApplication = !order?.createdByName && order?.sourceApplicationId
+      ? applicationsById.get(order.sourceApplicationId)
+      : undefined;
     const paymentDate = getCommissionPaymentDate(first, order);
     const orderAmount = order?.actualAmount || order?.amount || first.orderAmount;
     return {
@@ -629,6 +636,8 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
       salesOwner: order?.salesName || order?.owner || '',
       salesId: order?.salesId,
       salesName: order?.salesName,
+      createdById: order?.createdById || sourceApplication?.applicantId,
+      createdByName: order?.createdByName || sourceApplication?.applicantName,
       leadInputBy: order?.leadInputBy,
       leadContributorName: order?.leadContributorName,
       sourceType: order?.sourceType,

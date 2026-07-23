@@ -369,6 +369,8 @@ export interface CommissionOrderSummary {
   salesOwner?: string;
   salesId?: ID;
   salesName?: string;
+  createdById?: ID;
+  createdByName?: string;
   leadInputBy?: string;
   leadContributorName?: string;
   sourceType?: string;

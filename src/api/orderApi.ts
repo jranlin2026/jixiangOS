@@ -1,4 +1,4 @@
-import type { Order, OrderFilters, OrderStats } from '../types/order';
+import type { Order, OrderApplication, OrderFilters, OrderStats } from '../types/order';
 import type { Customer } from '../types/customer';
 import type { Commission, CommissionRole } from '../types/commission';
 import type { Product } from '../types/product';
@@ -14,7 +14,7 @@ import { commissionRuleApi } from './commissionRuleApi';
 import { deliveryApi } from './deliveryApi';
 import { syncLifecycleByOrder } from './lifecycleSync';
 import { v4 as uuidv4 } from 'uuid';
-import { getCurrentOperatorName, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
+import { getCurrentOperatorName, getCurrentOperatorUser, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
 import { filterVisibleOrders } from '../shared/utils/dataVisibility';
 
 function ensureInit(): void {
@@ -43,8 +43,14 @@ function getProductName(productId?: string, productLevel?: string, fallback?: st
 }
 
 function normalizeOrder(order: Order): Order {
+  const sourceApplication = !order.createdByName && order.sourceApplicationId
+    ? (getStorageData<OrderApplication[]>(STORAGE_KEYS.ORDER_APPLICATIONS) || [])
+      .find((application) => application.id === order.sourceApplicationId)
+    : undefined;
   return {
     ...order,
+    createdById: order.createdById || sourceApplication?.applicantId,
+    createdByName: order.createdByName || sourceApplication?.applicantName,
     productName: getProductName(order.productId, order.productLevel, order.productName),
     resourceOwnership: normalizeResourceOwnership(order.resourceOwnership || order.sourceType),
   };
@@ -357,7 +363,10 @@ async function fetchOrderStats(): Promise<ApiResponse<OrderStats>> {
   return createSuccessResponse(stats);
 }
 
-async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'orderNo'>): Promise<ApiResponse<Order>> {
+async function createOrder(
+  data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'orderNo'>,
+  trustedCreator?: Pick<User, 'id' | 'name'>,
+): Promise<ApiResponse<Order>> {
   if (shouldUseBackendApi()) {
     return createErrorResponse('正式订单必须先提交订单申请并经财务审核入库', 409);
   }
@@ -370,10 +379,13 @@ async function createOrder(data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 
   const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
   const now = new Date().toISOString();
   const operator = getCurrentOperatorName(orderData.owner);
+  const creator = trustedCreator || getCurrentOperatorUser();
   const orderNo = `ORD-${now.slice(0, 10).replace(/-/g, '')}-${String(orders.filter((order) => !order.deletedAt).length + 1).padStart(4, '0')}`;
 
   const newOrder: Order = {
     ...orderData,
+    createdById: creator?.id,
+    createdByName: creator?.name,
     id: `order-${uuidv4().slice(0, 8)}`,
     orderNo,
     resourceOwnership: normalizeResourceOwnership(orderData.resourceOwnership || orderData.sourceType),

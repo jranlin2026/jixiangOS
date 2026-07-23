@@ -28,7 +28,7 @@ const STATUS_RETURNED: OrderApplicationStatus = '退回修改';
 const STATUS_APPROVED: OrderApplicationStatus = '已入库';
 const STATUS_REJECTED: OrderApplicationStatus = '已驳回';
 
-type OrderApplicationInput = Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'orderNo'>;
+type OrderApplicationInput = Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'orderNo' | 'createdById' | 'createdByName' | 'sourceApplicationId'>;
 
 function ensureInit(): void {
   initializeMockData();
@@ -357,7 +357,12 @@ async function approveOrderApplication(id: string): Promise<ApiResponse<OrderApp
   if (applications[idx].status !== STATUS_PENDING_REVIEW) return createErrorResponse('只有待财务审核的订单申请可以入库');
 
   const orderData = enrichOrderDataFromCustomer(applications[idx].orderData);
-  const created = await orderApi.createOrder(orderData);
+  const created = await orderApi.createOrder({
+    ...orderData,
+  }, {
+    id: applications[idx].applicantId || '',
+    name: applications[idx].applicantName,
+  });
   if (created.code !== 0) return createErrorResponse(created.message);
 
   const now = new Date().toISOString();

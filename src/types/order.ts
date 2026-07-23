@@ -70,6 +70,11 @@ export interface Order {
   owner: string;
   salesId?: ID;
   salesName?: string;
+  /** 订单申请的实际提交人快照，与销售负责人分开归因 */
+  createdById?: ID;
+  createdByName?: string;
+  /** 来源申请，用于历史订单创建人回溯 */
+  sourceApplicationId?: ID;
   /** 成交时的线索贡献人快照，用于线索分成，不随客户转交变化 */
   leadInputBy?: string;
   leadContributorId?: ID;
@@ -117,7 +122,7 @@ export interface OrderApplication {
   id: ID;
   applicationNo: string;
   status: OrderApplicationStatus;
-  orderData: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'orderNo'>;
+  orderData: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'orderNo' | 'createdById' | 'createdByName' | 'sourceApplicationId'>;
   applicantId?: ID;
   applicantName: string;
   submittedAt: Timestamp;

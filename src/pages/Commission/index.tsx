@@ -105,6 +105,7 @@ type OrderSplitColumnId =
   | 'resourceOwnership'
   | 'paymentDate'
   | 'salesOwner'
+  | 'createdByName'
   | 'leadInputBy'
   | 'leadContributorName'
   | 'officialPaymentChannel'
@@ -137,6 +138,7 @@ const ORDER_SPLIT_COLUMNS: OrderSplitColumnMeta[] = [
   { id: 'resourceOwnership', label: '资源归属', defaultWidth: 120 },
   { id: 'paymentDate', label: '付款时间', defaultWidth: 180 },
   { id: 'salesOwner', label: '销售负责人', defaultWidth: 130 },
+  { id: 'createdByName', label: '订单创建人', defaultWidth: 140 },
   { id: 'leadInputBy', label: '线索录入人', defaultWidth: 140 },
   { id: 'leadContributorName', label: '线索贡献人', defaultWidth: 150 },
   { id: 'originalOrderId', label: '第三方平台订单', defaultWidth: 180 },
@@ -160,6 +162,7 @@ const DEFAULT_ORDER_SPLIT_VISIBLE_COLUMNS: OrderSplitColumnId[] = [
   'resourceOwnership',
   'paymentDate',
   'salesOwner',
+  'createdByName',
   'leadInputBy',
   'leadContributorName',
   'originalOrderId',
@@ -201,8 +204,12 @@ function readOrderSplitViewConfig(): OrderSplitViewConfig {
     const parsed = JSON.parse(raw) as Partial<OrderSplitViewConfig>;
     const storedOrder = normalizeOrderSplitColumnIds(parsed.columnOrder, DEFAULT_ORDER_SPLIT_COLUMN_ORDER);
     const missingIds = DEFAULT_ORDER_SPLIT_COLUMN_ORDER.filter((id) => !storedOrder.includes(id));
+    const storedVisibleIds = normalizeOrderSplitColumnIds(parsed.visibleColumnIds, DEFAULT_ORDER_SPLIT_VISIBLE_COLUMNS);
+    const newDefaultVisibleIds = missingIds.filter((id) => (
+      DEFAULT_ORDER_SPLIT_VISIBLE_COLUMNS.includes(id) && !storedVisibleIds.includes(id)
+    ));
     return {
-      visibleColumnIds: normalizeOrderSplitColumnIds(parsed.visibleColumnIds, DEFAULT_ORDER_SPLIT_VISIBLE_COLUMNS),
+      visibleColumnIds: [...storedVisibleIds, ...newDefaultVisibleIds],
       columnOrder: [...storedOrder, ...missingIds],
       frozenColumnCount: Math.max(0, Math.min(Number(parsed.frozenColumnCount) || 0, ORDER_SPLIT_COLUMNS.length)),
     };
@@ -1116,6 +1123,8 @@ const Commission: React.FC<CommissionProps> = ({
         return summary.paymentDate ? formatDate(summary.paymentDate, 'yyyy-MM-dd HH:mm:ss') : '-';
       case 'salesOwner':
         return summary.salesOwner || summary.salesName || '-';
+      case 'createdByName':
+        return summary.createdByName || '-';
       case 'leadInputBy':
         return summary.leadInputBy || '-';
       case 'leadContributorName':
