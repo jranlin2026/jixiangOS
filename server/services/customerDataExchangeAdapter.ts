@@ -448,6 +448,7 @@ export function createPrismaCustomerDataExchangeService(input: {
         currentOwnerName: user.name || user.account,
         canOverrideAttribution,
         owners: users.filter((candidate) => allowedOwnerIds.has(candidate.id)),
+        attributionUsers: users,
         lifecycleStatuses: lifecycle
           .filter((item) => item.code !== 'public_pool')
           .map((item) => ({ code: item.code, name: item.name })),

@@ -4,10 +4,12 @@ import { LIFECYCLE_STATUS_CODES, normalizeLifecycleStatusCode } from '../../src/
 import { getPhoneNumberError, normalizePhoneForStorage } from '../../src/shared/utils/phoneNumber';
 import { getLatestCustomerFollowUp } from '../../src/shared/utils/customerFollowUp';
 
-type NormalizedImportRow = Omit<CustomerImportRow, 'tagNames' | 'previousOwnerName' | 'firstOwnerName'> & {
+type NormalizedImportRow = Omit<CustomerImportRow, 'tagNames' | 'previousOwnerName' | 'firstOwnerName' | 'leadInputByName' | 'leadContributorName'> & {
   tagNames: string[];
   previousOwnerName: string;
   firstOwnerName: string;
+  leadInputByName: string;
+  leadContributorName: string;
 };
 
 type DirectoryOption = { id: string; name: string };
@@ -21,6 +23,7 @@ export type CustomerImportDirectory = {
   currentOwnerName: string;
   canOverrideAttribution: boolean;
   owners: DirectoryOption[];
+  attributionUsers?: DirectoryOption[];
   lifecycleStatuses: LifecycleOption[];
   customerLevels: CustomerLevelOption[];
   leadSources: LeadSourceOption[];
@@ -57,6 +60,8 @@ export function normalizeCustomerImportRows(rows: CustomerImportRow[]): Normaliz
     ownerName: cleanText(row.ownerName),
     previousOwnerName: cleanText(row.previousOwnerName),
     firstOwnerName: cleanText(row.firstOwnerName),
+    leadInputByName: cleanText(row.leadInputByName),
+    leadContributorName: cleanText(row.leadContributorName),
     lifecycleStatus: cleanText(row.lifecycleStatus),
     customerLevel: cleanText(row.customerLevel),
     leadSource: cleanText(row.leadSource),
@@ -129,6 +134,21 @@ export function validateCustomerImportRows(
       errors.push('无权导入历史销售负责人，请将“上一个销售负责人”和“首个销售负责人”留空');
     }
 
+    const attributionUsers = directory.attributionUsers || directory.owners;
+    const requestedLeadInputByName = row.leadInputByName || directory.currentOwnerName;
+    const leadInputByUser = row.leadInputByName
+      ? exactlyOneByName(attributionUsers, requestedLeadInputByName, (item) => item.name)
+      : { id: directory.currentOwnerId, name: directory.currentOwnerName };
+    const leadContributorUser = row.leadContributorName
+      ? exactlyOneByName(attributionUsers, row.leadContributorName, (item) => item.name)
+      : null;
+    if (row.leadInputByName.length > 100) errors.push('线索录入人不能超过100个字符');
+    else if (!leadInputByUser) errors.push(`线索录入人不存在、已离职或姓名存在重名：${requestedLeadInputByName}`);
+    if (row.leadContributorName.length > 100) errors.push('线索贡献人不能超过100个字符');
+    else if (row.leadContributorName && !leadContributorUser) {
+      errors.push(`线索贡献人不存在、已离职或姓名存在重名：${row.leadContributorName}`);
+    }
+
     const lifecycle = row.lifecycleStatus
       ? exactlyOneByName(directory.lifecycleStatuses, row.lifecycleStatus, (item) => item.name)
         || directory.lifecycleStatuses.find((item) => normalizedLookup(item.code) === normalizedLookup(row.lifecycleStatus))
@@ -171,6 +191,9 @@ export function validateCustomerImportRows(
       ownerIdentityStatus: importingToPublicPool ? 'public_pool' : 'resolved',
       previousOwner: directory.canOverrideAttribution ? row.previousOwnerName || undefined : undefined,
       originalSalesTransferBy: directory.canOverrideAttribution ? row.firstOwnerName || undefined : undefined,
+      leadInputBy: leadInputByUser?.name || requestedLeadInputByName,
+      leadContributorId: leadContributorUser?.id,
+      leadContributorName: leadContributorUser?.name,
       customerLevel: (level?.value || 'L1') as Customer['customerLevel'],
       lifecycleStatusCode: (importingToPublicPool ? LIFECYCLE_STATUS_CODES.PUBLIC_POOL : lifecycle?.code || LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP) as Customer['lifecycleStatusCode'],
       leadSource: source?.value || row.leadSource || undefined,

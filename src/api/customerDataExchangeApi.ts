@@ -23,7 +23,12 @@ const ROOT = '/customer-data-exchange';
 const TEMPLATE_SHEET = '客户导入模板';
 const OPTIONS_SHEET = '字段选项';
 const INSTRUCTIONS_SHEET = '填写说明';
-const OPTIONAL_IMPORT_HEADERS = new Set<string>(['上一个销售负责人', '首个销售负责人']);
+const OPTIONAL_IMPORT_HEADERS = new Set<string>([
+  '上一个销售负责人',
+  '首个销售负责人',
+  '线索录入人',
+  '线索贡献人',
+]);
 let browserExcelJsPromise: Promise<ExcelJsNamespace> | null = null;
 
 const cleanText = (value: unknown): string => {
@@ -119,7 +124,7 @@ export async function createCustomerImportTemplateWorkbook(
   sheet.addRow([...CUSTOMER_IMPORT_HEADERS]);
   styleHeader(sheet.getRow(1));
   sheet.autoFilter = { from: 'A1', to: sheet.getRow(1).getCell(CUSTOMER_IMPORT_HEADERS.length).address };
-  sheet.columns = [18, 18, 20, 24, 18, 20, 20, 18, 16, 26, 18, 18, 28, 42, 36].map((width) => ({ width }));
+  sheet.columns = [18, 18, 20, 24, 18, 20, 20, 18, 18, 18, 16, 26, 18, 18, 28, 42, 36].map((width) => ({ width }));
 
   const ownerNames = destination === 'public_pool' ? [] : options.ownerNames;
   const lifecycleStatuses = destination === 'public_pool'
@@ -127,6 +132,7 @@ export async function createCustomerImportTemplateWorkbook(
     : options.lifecycleStatuses.filter((status) => status !== '流失公海');
   const optionColumns = [
     { title: '销售负责人', values: ownerNames },
+    { title: '在职员工', values: options.userNames },
     { title: '客户进度', values: lifecycleStatuses },
     { title: '客户等级', values: options.customerLevels },
     { title: '线索来源', values: options.leadSources },
@@ -138,9 +144,11 @@ export async function createCustomerImportTemplateWorkbook(
   optionSheet.columns = optionColumns.map(() => ({ width: 28 }));
   optionSheet.state = 'hidden';
   applyValidation(sheet, 5, 'A', ownerNames.length);
-  applyValidation(sheet, 8, 'B', lifecycleStatuses.length);
-  applyValidation(sheet, 9, 'C', options.customerLevels.length);
-  applyValidation(sheet, 10, 'D', options.leadSources.length);
+  applyValidation(sheet, 8, 'B', options.userNames.length);
+  applyValidation(sheet, 9, 'B', options.userNames.length);
+  applyValidation(sheet, 10, 'C', lifecycleStatuses.length);
+  applyValidation(sheet, 11, 'D', options.customerLevels.length);
+  applyValidation(sheet, 12, 'E', options.leadSources.length);
 
   instructions.addRows([
     ['极享OS 客户批量导入说明'],
@@ -152,6 +160,8 @@ export async function createCustomerImportTemplateWorkbook(
     ['历史销售负责人', options.canOverrideAttribution
       ? '“上一个销售负责人”和“首个销售负责人”填写历史姓名；导入公海池时也允许填写，不要求人员当前仍在职。'
       : '当前账号无导入覆盖归属权限，“上一个销售负责人”和“首个销售负责人”必须留空。'],
+    ['线索录入人', '可留空，留空时默认当前导入人；填写时必须选择系统内唯一的在职员工。'],
+    ['线索贡献人', '可留空；填写时必须选择系统内唯一的在职员工，用于资源归属和线索分成。'],
     ['客户进展', destination === 'public_pool' ? '必须留空，由系统设置为公海状态。' : '可从下拉列表选择；公海不属于客户进展。'],
     ['线索来源', '只填写“线索来源”一个字段，并从模板下拉选项选择。'],
     ['客户标签', '多个标签使用中文逗号、英文逗号或顿号分隔；标签必须已经存在。'],
@@ -202,6 +212,8 @@ export async function parseCustomerImportWorkbook(buffer: ArrayBuffer | ArrayBuf
       ownerName: cell(row, '销售负责人'),
       previousOwnerName: cell(row, '上一个销售负责人'),
       firstOwnerName: cell(row, '首个销售负责人'),
+      leadInputByName: cell(row, '线索录入人'),
+      leadContributorName: cell(row, '线索贡献人'),
       lifecycleStatus: cell(row, '客户进度'),
       customerLevel: cell(row, '客户等级'),
       leadSource: cell(row, '线索来源'),
@@ -247,6 +259,8 @@ export async function createCustomerImportErrorWorkbook(
       销售负责人: row?.ownerName || '',
       上一个销售负责人: row?.previousOwnerName || '',
       首个销售负责人: row?.firstOwnerName || '',
+      线索录入人: row?.leadInputByName || '',
+      线索贡献人: row?.leadContributorName || '',
       客户进度: row?.lifecycleStatus || '',
       客户等级: row?.customerLevel || '',
       线索来源: row?.leadSource || '',

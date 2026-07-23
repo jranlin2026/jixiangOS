@@ -13,6 +13,8 @@ export const CUSTOMER_IMPORT_HEADERS = [
   '销售负责人',
   '上一个销售负责人',
   '首个销售负责人',
+  '线索录入人',
+  '线索贡献人',
   '客户进度',
   '客户等级',
   '线索来源',
@@ -32,6 +34,8 @@ export type CustomerImportRow = {
   ownerName: string;
   previousOwnerName?: string;
   firstOwnerName?: string;
+  leadInputByName?: string;
+  leadContributorName?: string;
   lifecycleStatus: string;
   customerLevel: string;
   leadSource: string;
@@ -63,6 +67,7 @@ export type CustomerImportConfirmResult = CustomerBatchJobSummary;
 
 export type CustomerImportTemplateOptions = {
   ownerNames: string[];
+  userNames: string[];
   lifecycleStatuses: string[];
   customerLevels: string[];
   leadSources: string[];

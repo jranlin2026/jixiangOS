@@ -137,6 +137,7 @@ export function createCustomerDataExchangeService(deps: CustomerDataExchangeDepe
       const directory = await deps.loadDirectory(user);
       return {
         ownerNames: directory.owners.map((item) => item.name),
+        userNames: (directory.attributionUsers || directory.owners).map((item) => item.name),
         lifecycleStatuses: directory.lifecycleStatuses.map((item) => item.name),
         customerLevels: directory.customerLevels.map((item) => item.label),
         leadSources: directory.leadSources.map((item) => item.label),

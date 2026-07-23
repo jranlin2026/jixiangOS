@@ -13,6 +13,8 @@ const rows = normalizeCustomerImportRows([
     wechat: '',
     company: '示例公司',
     ownerName: '销售甲',
+    leadInputByName: '录入乙',
+    leadContributorName: '贡献丙',
     lifecycleStatus: '跟进中',
     customerLevel: 'L2-意向',
     leadSource: '市场品牌部-官网',
@@ -22,6 +24,11 @@ const rows = normalizeCustomerImportRows([
     remark: '重点客户',
   },
 ]);
+const attributionUsers = [
+  { id: 'u1', name: '销售甲' },
+  { id: 'u3', name: '录入乙' },
+  { id: 'u4', name: '贡献丙' },
+];
 
 assert.equal(rows[0].name, '张三');
 assert.equal(rows[0].phone, '+8613800000000');
@@ -32,6 +39,7 @@ const precheck = validateCustomerImportRows(rows, {
   currentOwnerName: '销售甲',
   canOverrideAttribution: false,
   owners: [{ id: 'u1', name: '销售甲' }, { id: 'u2', name: '销售乙' }],
+  attributionUsers,
   lifecycleStatuses: [{ code: 'following', name: '跟进中' }],
   customerLevels: [{ value: 'L2', label: 'L2-意向' }],
   leadSources: [{ value: '市场品牌部', label: '市场品牌部-官网', sourceName: '官网' }],
@@ -43,6 +51,9 @@ const precheck = validateCustomerImportRows(rows, {
 assert.equal(precheck[0].status, 'ready');
 assert.match(precheck[0].reason, /客户名称与系统或本次文件中已有客户相同.*不阻止导入/);
 assert.equal(precheck[0].input.ownerId, 'u1');
+assert.equal(precheck[0].input.leadInputBy, '录入乙');
+assert.equal(precheck[0].input.leadContributorId, 'u4');
+assert.equal(precheck[0].input.leadContributorName, '贡献丙');
 assert.equal(precheck[0].input.lifecycleStatusCode, 'following');
 assert.equal(precheck[0].input.customerLevel, 'L2');
 assert.equal(precheck[0].input.leadSource, '市场品牌部');
@@ -57,6 +68,7 @@ const blocked = validateCustomerImportRows([
   currentOwnerId: 'u1',
   currentOwnerName: '销售甲',
   canOverrideAttribution: false,
+  attributionUsers,
   owners: [{ id: 'u1', name: '销售甲' }, { id: 'u2', name: '销售乙' }],
   lifecycleStatuses: [{ code: 'following', name: '跟进中' }],
   customerLevels: [{ value: 'L2', label: 'L2-意向' }],
@@ -74,6 +86,7 @@ const sameNameInFile = validateCustomerImportRows([
   { ...rows[0], rowNumber: 3, phone: '', wechat: 'wx-second' },
 ], {
   currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: false,
+  attributionUsers,
   owners: [{ id: 'u1', name: '销售甲' }], lifecycleStatuses: [{ code: 'following', name: '跟进中' }],
   customerLevels: [{ value: 'L2', label: 'L2-意向' }], leadSources: [{ value: '市场品牌部', label: '市场品牌部-官网', sourceName: '官网' }],
   tags: [{ id: 't1', name: '高意向' }, { id: 't2', name: '复购' }], existingContactKeys: new Set(),
@@ -84,6 +97,7 @@ assert.match(sameNameInFile[1].reason, /客户名称.*不阻止导入/);
 
 const ambiguousSource = validateCustomerImportRows([{ ...rows[0], leadSource: '同名来源' }], {
   currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: false,
+  attributionUsers,
   owners: [{ id: 'u1', name: '销售甲' }], lifecycleStatuses: [], customerLevels: [], tags: [], existingContactKeys: new Set(),
   leadSources: [{ value: '来源A', label: '同名来源' }, { value: '来源B', label: '同名来源' }],
 }, 'assigned');
@@ -92,17 +106,43 @@ assert.match(ambiguousSource[0].reason, /线索来源存在重名/);
 const publicPoolReady = validateCustomerImportRows([{ ...rows[0], ownerName: '', lifecycleStatus: '', customerLevel: '', leadSource: '', tagNames: [] }], {
   currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: false,
   owners: [{ id: 'u1', name: '销售甲' }], lifecycleStatuses: [], customerLevels: [], leadSources: [], tags: [], existingContactKeys: new Set(),
+  attributionUsers,
 }, 'public_pool');
 assert.equal(publicPoolReady[0].status, 'ready');
 assert.equal(publicPoolReady[0].input.owner, '公海');
 assert.equal(publicPoolReady[0].input.ownerId, undefined);
 assert.equal(publicPoolReady[0].input.ownerIdentityStatus, 'public_pool');
 assert.equal(publicPoolReady[0].input.lifecycleStatusCode, 'public_pool');
+assert.equal(publicPoolReady[0].input.leadInputBy, '录入乙');
+assert.equal(publicPoolReady[0].input.leadContributorId, 'u4');
+
+const invalidAttributionUsers = validateCustomerImportRows([{ ...rows[0], leadInputByName: '离职录入人', leadContributorName: '离职贡献人' }], {
+  currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: false,
+  owners: [{ id: 'u1', name: '销售甲' }], attributionUsers: [{ id: 'u1', name: '销售甲' }],
+  lifecycleStatuses: [{ code: 'following', name: '跟进中' }], customerLevels: [{ value: 'L2', label: 'L2-意向' }],
+  leadSources: [{ value: '市场品牌部', label: '市场品牌部-官网', sourceName: '官网' }],
+  tags: [{ id: 't1', name: '高意向' }, { id: 't2', name: '复购' }], existingContactKeys: new Set(),
+}, 'assigned');
+assert.equal(invalidAttributionUsers[0].status, 'blocked');
+assert.match(invalidAttributionUsers[0].reason, /线索录入人不存在、已离职或姓名存在重名/);
+assert.match(invalidAttributionUsers[0].reason, /线索贡献人不存在、已离职或姓名存在重名/);
+
+const defaultLeadInputBy = validateCustomerImportRows([{ ...rows[0], ownerName: '', leadInputByName: '', leadContributorName: '' }], {
+  currentOwnerId: 'u1', currentOwnerName: '同名员工', canOverrideAttribution: false,
+  owners: [{ id: 'u1', name: '同名员工' }],
+  attributionUsers: [{ id: 'u1', name: '同名员工' }, { id: 'u2', name: '同名员工' }],
+  lifecycleStatuses: [{ code: 'following', name: '跟进中' }], customerLevels: [{ value: 'L2', label: 'L2-意向' }],
+  leadSources: [{ value: '市场品牌部', label: '市场品牌部-官网', sourceName: '官网' }],
+  tags: [{ id: 't1', name: '高意向' }, { id: 't2', name: '复购' }], existingContactKeys: new Set(),
+}, 'assigned');
+assert.equal(defaultLeadInputBy[0].status, 'ready');
+assert.equal(defaultLeadInputBy[0].input.leadInputBy, '同名员工');
 
 const publicPoolHistoryOwners = validateCustomerImportRows(normalizeCustomerImportRows([{
   ...rows[0], rowNumber: 5, ownerName: '', lifecycleStatus: '', tagNames: '高意向、复购', previousOwnerName: '销售乙', firstOwnerName: '销售丙',
 }]), {
   currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: true,
+  attributionUsers,
   owners: [{ id: 'u1', name: '销售甲' }, { id: 'u2', name: '销售乙' }, { id: 'u3', name: '销售丙' }],
   lifecycleStatuses: [], customerLevels: [{ value: 'L2', label: 'L2-意向' }],
   leadSources: [{ value: '市场品牌部', label: '市场品牌部-官网', sourceName: '官网' }],
@@ -118,6 +158,7 @@ const historyOwnerWithoutPermission = validateCustomerImportRows(normalizeCustom
   ...rows[0], ownerName: '', tagNames: '高意向、复购', previousOwnerName: '销售甲', firstOwnerName: '销售甲',
 }]), {
   currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: false,
+  attributionUsers,
   owners: [{ id: 'u1', name: '销售甲' }], lifecycleStatuses: [{ code: 'following', name: '跟进中' }],
   customerLevels: [{ value: 'L2', label: 'L2-意向' }],
   leadSources: [{ value: '市场品牌部', label: '市场品牌部-官网', sourceName: '官网' }],
@@ -130,6 +171,7 @@ const departedHistoryOwner = validateCustomerImportRows(normalizeCustomerImportR
   ...rows[0], ownerName: '', tagNames: '高意向、复购', previousOwnerName: '已离职销售', firstOwnerName: '',
 }]), {
   currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: true,
+  attributionUsers,
   owners: [{ id: 'u1', name: '销售甲' }], lifecycleStatuses: [{ code: 'following', name: '跟进中' }],
   customerLevels: [{ value: 'L2', label: 'L2-意向' }],
   leadSources: [{ value: '市场品牌部', label: '市场品牌部-官网', sourceName: '官网' }],
@@ -143,6 +185,7 @@ const publicPoolBlocked = validateCustomerImportRows([
   { ...rows[0], rowNumber: 3, phone: '', wechat: 'wx-public', ownerName: '', lifecycleStatus: '跟进中', customerLevel: '', leadSource: '', tagNames: [] },
 ], {
   currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: false,
+  attributionUsers,
   owners: [{ id: 'u1', name: '销售甲' }], lifecycleStatuses: [{ code: 'following', name: '跟进中' }], customerLevels: [], leadSources: [], tags: [], existingContactKeys: new Set(),
 }, 'public_pool');
 assert.match(publicPoolBlocked[0].reason, /导入公海池时销售负责人必须留空/);
@@ -150,6 +193,7 @@ assert.match(publicPoolBlocked[1].reason, /导入公海池时客户进展必须�
 
 const assignedPublicPoolStatus = validateCustomerImportRows([{ ...rows[0], lifecycleStatus: '流失公海', customerLevel: '', leadSource: '', tagNames: [] }], {
   currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: false,
+  attributionUsers,
   owners: [{ id: 'u1', name: '销售甲' }], lifecycleStatuses: [{ code: 'public_pool', name: '流失公海' }], customerLevels: [], leadSources: [], tags: [], existingContactKeys: new Set(),
 }, 'assigned');
 assert.match(assignedPublicPoolStatus[0].reason, /请选择直接导入公海池/);
