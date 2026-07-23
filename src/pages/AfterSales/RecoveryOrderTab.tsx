@@ -771,7 +771,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                 <TableCell colSpan={visibleColumns.length || 1} align="center" sx={{ py: 6, color: '#9ca3af' }}>
                   {loading ? '加载中...' : mode === 'review'
                     ? reviewQueueView === 'pending'
-                      ? '暂无待处理售后挽回订单'
+                      ? '暂无待处理/待修改售后挽回订单'
                       : '当前审核视图暂无记录'
                     : '暂无售后挽回订单'}
                 </TableCell>

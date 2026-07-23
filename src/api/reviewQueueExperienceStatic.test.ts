@@ -15,6 +15,7 @@ for (const [name, source] of [
     `${name}必须默认进入待处理队列`,
   );
   assert.match(source, /REVIEW_QUEUE_OPTIONS/, `${name}必须提供统一的审核视图选项`);
+  assert.match(source, /暂无待处理\/待修改/, `${name}的默认空状态必须同时说明待处理和待修改`);
 }
 
 assert.match(orderReviewSource, /getOrderApplicationReviewStatuses\(view\)/);

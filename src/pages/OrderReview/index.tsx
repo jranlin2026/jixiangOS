@@ -648,7 +648,11 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
             {!items.length && (
               <TableRow>
                 <TableCell colSpan={visibleColumns.length + 1} align="center" sx={{ py: 5, color: '#9ca3af' }}>
-                  {loading ? '加载中...' : '暂无订单申请'}
+                  {loading
+                    ? '加载中...'
+                    : reviewQueueView === 'pending'
+                      ? '暂无待处理/待修改订单申请'
+                      : '当前审核视图暂无订单申请'}
                 </TableCell>
               </TableRow>
             )}
