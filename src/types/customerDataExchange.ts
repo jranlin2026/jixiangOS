@@ -1,7 +1,7 @@
 import type { CustomerFilters } from './customer';
 import type { CustomerBatchJobSummary } from './customerBatch';
 
-export const CUSTOMER_IMPORT_MAX_ROWS = 2_000;
+export const CUSTOMER_IMPORT_MAX_ROWS = 5_000;
 
 export type CustomerImportDestination = 'assigned' | 'public_pool';
 

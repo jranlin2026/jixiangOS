@@ -10,6 +10,8 @@ const legacyDeploySource = readFileSync(legacyDeployPath, 'utf8');
 const backupSource = readFileSync(join(process.cwd(), 'scripts', 'mysql', 'backup-linux.sh'), 'utf8');
 const cloudDeployDoc = readFileSync(join(process.cwd(), 'docs', 'cloud-deployment-aliyun.md'), 'utf8');
 const minimalLaunchDoc = readFileSync(join(process.cwd(), 'docs', 'aliyun-minimal-launch.md'), 'utf8');
+const nginxSource = readFileSync(join(process.cwd(), 'deploy', 'nginx', 'jixiang-os.conf'), 'utf8');
+const nginxTimeoutSource = readFileSync(join(process.cwd(), 'deploy', 'nginx', 'jixiang-os-api-timeouts.conf'), 'utf8');
 const remoteStart = deploySource.indexOf('def build_remote_command');
 const remoteEnd = deploySource.indexOf('def public_health_check');
 assert.ok(remoteStart >= 0 && remoteEnd > remoteStart);
@@ -22,6 +24,14 @@ function assertBefore(first: string, second: string, message: string) {
 }
 
 assert.match(deploySource, /JIXIANG_REMOTE_NODE_ENV", "production"/);
+assert.match(nginxSource, /location \/api\/ \{[\s\S]*proxy_read_timeout\s+180s;/);
+assert.match(nginxSource, /location \/api\/ \{[\s\S]*proxy_send_timeout\s+180s;/);
+assert.match(nginxTimeoutSource, /proxy_read_timeout\s+180s;/);
+assert.match(nginxTimeoutSource, /proxy_send_timeout\s+180s;/);
+assert.match(remote, /install -m 644 "\$APP_DIR\/deploy\/nginx\/jixiang-os-api-timeouts\.conf" "\$NGINX_TIMEOUT_CONFIG"/);
+assert.match(remote, /NGINX_CONFIG_DUMP="\$\(nginx -T 2>&1\)"/);
+assert.match(remote, /proxy_read_timeout 180s/);
+assert.match(remote, /proxy_send_timeout 180s/);
 assert.doesNotMatch(deploySource, /JIXIANG_REMOTE_NODE_ENV", "development"/);
 assert.match(deploySource, /VITE_USE_BACKEND_API[^\n]*true/);
 assert.match(deploySource, /VITE_AI_API_BASE[^\n]*\/api/);
@@ -128,6 +138,9 @@ assert.doesNotMatch(remote, /(?:^|\n)umask 077(?:\n|$)/);
 assert.match(remote, /install -m 600 "\$APP_DIR\/\.env" "\$ENV_BACKUP"/);
 const rollbackBlock = remote.slice(remote.indexOf('rollback_release()'), remote.indexOf('trap rollback_release ERR'));
 assert.match(rollbackBlock, /rm -f "\$ENV_BACKUP"/);
+assert.match(rollbackBlock, /install -m 644 "\$NGINX_TIMEOUT_BACKUP" "\$NGINX_TIMEOUT_CONFIG"/);
+assert.match(rollbackBlock, /rm -f "\$NGINX_TIMEOUT_CONFIG"/);
+assert.match(rollbackBlock, /nginx -t[\s\S]*systemctl reload nginx/);
 const finalSync = remote.slice(
   remote.indexOf('Finalizing persistent uploads'),
   remote.indexOf('Switching release'),

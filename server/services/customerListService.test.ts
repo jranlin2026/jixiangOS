@@ -750,6 +750,12 @@ assert.deepEqual(searchMirrorResult.data?.pagination, {
 });
 
 const transactionCallsBeforeBatchCreate = transactionCalls;
+let batchDirectoryReads = 0;
+const originalBatchUserFindMany = servicePrisma.user.findMany;
+servicePrisma.user.findMany = async (...args: any[]) => {
+  batchDirectoryReads += 1;
+  return originalBatchUserFindMany(...args);
+};
 const batchCreated = await service.create({
   name: '批量导入事务客户', company: '', phone: '13500000088', customerLevel: 'L1',
   owner: actor.name, ownerId: actor.id, sourceType: '公司资源',
@@ -758,8 +764,20 @@ const batchCreated = await service.create({
   batchJobId: 'import-job-test',
   requestId: 'import-job-test:row:1',
   idempotencyKey: 'import-job-test:row:1',
+  accessContext: {
+    actorId: actor.id,
+    actorName: actor.name,
+    readableUserIds: new Set([actor.id]),
+    legacyReadableNames: new Set([actor.name]),
+    manageableOwnerIds: new Set([actor.id]),
+    canReadPublicPool: false,
+    canReadCustomerList: false,
+    grantedPermissions: new Set([PERMISSION_KEYS.CUSTOMER_CREATE]),
+  },
 });
 assert.equal(batchCreated.code, 0);
 assert.equal(transactionCalls, transactionCallsBeforeBatchCreate, 'existing transaction must not open a nested transaction');
+assert.equal(batchDirectoryReads, 0, 'batch create must reuse the transaction-authoritative access context');
+servicePrisma.user.findMany = originalBatchUserFindMany;
 assert.equal(auditEvents[auditEvents.length - 1]?.batchJobId, 'import-job-test');
 assert.equal(auditEvents[auditEvents.length - 1]?.requestId, 'import-job-test:row:1');

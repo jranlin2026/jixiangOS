@@ -177,6 +177,10 @@ OLD_MOVED="0"
 RELEASE_SWITCHED="0"
 API_WAS_RUNNING="0"
 API_STARTED="0"
+NGINX_TIMEOUT_CONFIG="/etc/nginx/conf.d/jixiang-os-api-timeouts.conf"
+NGINX_TIMEOUT_BACKUP="/tmp/jixiang-os-api-timeouts-${{TS}}.conf"
+NGINX_TIMEOUT_PREVIOUS="0"
+NGINX_TIMEOUT_CHANGED="0"
 
 rollback_release() {{
   exit_code="$?"
@@ -185,6 +189,17 @@ rollback_release() {{
   if [ "$API_STARTED" = "1" ]; then
     pm2 stop jixiang-os-api >/dev/null 2>&1 || true
   fi
+  if [ "$NGINX_TIMEOUT_CHANGED" = "1" ]; then
+    if [ "$NGINX_TIMEOUT_PREVIOUS" = "1" ] && [ -f "$NGINX_TIMEOUT_BACKUP" ]; then
+      install -m 644 "$NGINX_TIMEOUT_BACKUP" "$NGINX_TIMEOUT_CONFIG" || true
+    else
+      rm -f "$NGINX_TIMEOUT_CONFIG"
+    fi
+    if nginx -t >/dev/null 2>&1; then
+      systemctl reload nginx >/dev/null 2>&1 || true
+    fi
+  fi
+  rm -f "$NGINX_TIMEOUT_BACKUP"
   if [ "$RELEASE_SWITCHED" = "1" ] && [ -d "$BACKUP_DIR" ]; then
     mv "$APP_DIR" "${{NEW_DIR}}.failed" 2>/dev/null || true
     mv "$BACKUP_DIR" "$APP_DIR"
@@ -382,7 +397,22 @@ API_STARTED="1"
 pm2 save
 
 echo "Reloading nginx..."
+if [ -f "$NGINX_TIMEOUT_CONFIG" ]; then
+  install -m 600 "$NGINX_TIMEOUT_CONFIG" "$NGINX_TIMEOUT_BACKUP"
+  NGINX_TIMEOUT_PREVIOUS="1"
+fi
+NGINX_TIMEOUT_CHANGED="1"
+install -m 644 "$APP_DIR/deploy/nginx/jixiang-os-api-timeouts.conf" "$NGINX_TIMEOUT_CONFIG"
 nginx -t
+NGINX_CONFIG_DUMP="$(nginx -T 2>&1)"
+if ! grep -Fq "# configuration file /etc/nginx/conf.d/jixiang-os-api-timeouts.conf:" <<< "$NGINX_CONFIG_DUMP"; then
+  echo "JixiangOS nginx API timeout policy is not active." >&2
+  false
+fi
+if ! grep -Fq "proxy_read_timeout 180s;" <<< "$NGINX_CONFIG_DUMP" || ! grep -Fq "proxy_send_timeout 180s;" <<< "$NGINX_CONFIG_DUMP"; then
+  echo "JixiangOS nginx API timeout policy has unexpected values." >&2
+  false
+fi
 systemctl reload nginx
 
 echo "Checking local health..."
@@ -403,7 +433,7 @@ API_STARTED="0"
 echo
 echo "Cleaning old releases..."
 find "$(dirname "$APP_DIR")" -maxdepth 1 -type d -name "$(basename "$APP_DIR").prev-*" | sort | head -n -3 | xargs -r rm -rf
-rm -f "$RELEASE_ZIP" "$ENV_BACKUP"
+rm -f "$RELEASE_ZIP" "$ENV_BACKUP" "$NGINX_TIMEOUT_BACKUP"
 
 echo "Deploy finished."
 """

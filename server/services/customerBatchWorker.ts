@@ -42,6 +42,8 @@ export type CustomerBatchWorkerStore<Tx = unknown> = {
 };
 
 const LEASE_STATUSES = ['running', 'cancel_requested'] as const;
+const CUSTOMER_IMPORT_WORKER_BATCH_SIZE = 20;
+const CUSTOMER_BATCH_TRANSACTION_TIMEOUT_MS = 30_000;
 
 function retryableDatabaseError(error: unknown): boolean {
   const code = String((error as { code?: unknown } | null)?.code || '');
@@ -134,7 +136,7 @@ export function createPrismaCustomerBatchWorkerStore(
   const currentTime = () => options.now?.() || new Date();
   const transaction = <T>(operation: (tx: any) => Promise<T>) => prisma.$transaction(
     operation,
-    { isolationLevel: 'ReadCommitted' },
+    { isolationLevel: 'ReadCommitted', timeout: CUSTOMER_BATCH_TRANSACTION_TIMEOUT_MS },
   );
   const loadExecutionContext = options.loadExecutionContext || (async (tx: any, actorId: string) => {
     const directory = await lockServerCustomerDirectory(tx, actorId);
@@ -243,79 +245,88 @@ export function createPrismaCustomerBatchWorkerStore(
             data: { heartbeatAt: at, leaseExpiresAt: new Date(at.getTime() + (lease.leaseDurationMs || 60_000)) },
           });
           if (leaseUpdate.count !== 1) return { kind: 'lease_lost' as const };
+          const itemLimit = lease.handlerKey === 'customer_import' ? CUSTOMER_IMPORT_WORKER_BATCH_SIZE : 1;
           const items = await rawRows<any>(tx, Prisma.sql`
             SELECT *
             FROM customer_batch_job_items
             WHERE jobId = ${job.id}
               AND status = 'queued'
             ORDER BY targetKey ASC
-            LIMIT 1
+            LIMIT ${itemLimit}
             FOR UPDATE
           `);
-          const item = items[0];
-          if (!item) return { kind: 'empty' as const };
-          attemptedItemId = String(item.id);
-          await tx.customerBatchJobItem.updateMany({
-            where: { id: item.id, jobId: job.id, status: 'queued' },
-            data: {
-              status: 'running',
-              attemptCount: { increment: 1 },
-              retryable: false,
-              errorCode: null,
-              errorMessage: null,
-              startedAt: at,
-              finishedAt: null,
-            },
-          });
-          try {
-            const executionContext = await loadExecutionContext(tx, job.actorId);
-            const result = await processItem({ tx, job, item, executionContext });
-            const finishedAt = currentTime();
-            const saved = await tx.customerBatchJobItem.updateMany({
-              where: { id: item.id, jobId: job.id, status: 'running' },
+          if (!items.length) return { kind: 'empty' as const };
+          const executionContext = await loadExecutionContext(tx, job.actorId);
+          let processedCount = 0;
+          for (const item of items) {
+            attemptedItemId = String(item.id);
+            const claimedItem = await tx.customerBatchJobItem.updateMany({
+              where: { id: item.id, jobId: job.id, status: 'queued' },
               data: {
-                status: 'succeeded',
+                status: 'running',
+                attemptCount: { increment: 1 },
                 retryable: false,
-                beforeHash: result.beforeHash || null,
-                afterHash: result.afterHash || null,
-                beforeSnapshot: result.beforeSnapshot ? json(result.beforeSnapshot) : Prisma.JsonNull,
-                afterSnapshot: result.afterSnapshot ? json(result.afterSnapshot) : Prisma.JsonNull,
-                finishedAt,
+                errorCode: null,
+                errorMessage: null,
+                startedAt: at,
+                finishedAt: null,
               },
             });
-            if (saved.count !== 1) throw new Error('批量任务明细状态已变化');
-            const progressed = await tx.customerBatchJob.updateMany({
-              where: { id: job.id, leaseOwner: lease.workerId, leaseEpoch: lease.leaseEpoch, status: 'running' },
-              data: { successCount: { increment: 1 }, cursor: { increment: 1 } },
-            });
-            if (progressed.count !== 1) throw new Error('批量任务租约已失效');
-            return { kind: 'processed' as const, itemId: item.id };
-          } catch (error) {
-            const failure = classifyCustomerBatchItemFailure(error);
-            if (failure.retryable) throw new RetryableBatchItemTransactionError(item.id, failure, error);
-            // Escape the business transaction first. This guarantees a failed
-            // handler cannot commit a partially written customer alongside a
-            // failed item marker.
-            throw new NonRetryableBatchItemTransactionError(item.id, failure);
+            if (claimedItem.count !== 1) throw new Error('批量任务明细状态已变化');
+            try {
+              const result = await processItem({ tx, job, item, executionContext });
+              const finishedAt = currentTime();
+              const saved = await tx.customerBatchJobItem.updateMany({
+                where: { id: item.id, jobId: job.id, status: 'running' },
+                data: {
+                  status: 'succeeded',
+                  retryable: false,
+                  beforeHash: result.beforeHash || null,
+                  afterHash: result.afterHash || null,
+                  beforeSnapshot: result.beforeSnapshot ? json(result.beforeSnapshot) : Prisma.JsonNull,
+                  afterSnapshot: result.afterSnapshot ? json(result.afterSnapshot) : Prisma.JsonNull,
+                  finishedAt,
+                },
+              });
+              if (saved.count !== 1) throw new Error('批量任务明细状态已变化');
+              processedCount += 1;
+            } catch (error) {
+              const failure = classifyCustomerBatchItemFailure(error);
+              if (failure.retryable) throw new RetryableBatchItemTransactionError(item.id, failure, error);
+              // Escape the business transaction first. This guarantees a failed
+              // handler cannot commit a partially written customer alongside a
+              // failed item marker.
+              throw new NonRetryableBatchItemTransactionError(item.id, failure);
+            }
           }
+          const progressed = await tx.customerBatchJob.updateMany({
+            where: { id: job.id, leaseOwner: lease.workerId, leaseEpoch: lease.leaseEpoch, status: 'running' },
+            data: { successCount: { increment: processedCount }, cursor: { increment: processedCount } },
+          });
+          if (progressed.count !== 1) throw new Error('批量任务租约已失效');
+          return { kind: 'processed' as const, itemId: String(items[items.length - 1].id) };
         });
       } catch (error) {
         if (error instanceof NonRetryableBatchItemTransactionError) {
           return transaction(async (tx) => {
             const job = await lockedLeaseJob(tx, lease);
             if (!job || job.status !== 'running') return { kind: 'lease_lost' as const };
+            const at = currentTime();
             const saved = await tx.customerBatchJobItem.updateMany({
               where: { id: error.itemId, jobId: job.id, status: 'queued' },
               data: {
                 status: 'failed', retryable: false,
                 errorCode: error.failure.code, errorMessage: error.failure.message,
-                attemptCount: { increment: 1 }, startedAt: currentTime(), finishedAt: currentTime(),
+                attemptCount: { increment: 1 }, startedAt: at, finishedAt: at,
               },
             });
             if (saved.count !== 1) return { kind: 'lease_lost' as const };
             const progressed = await tx.customerBatchJob.updateMany({
               where: { id: job.id, leaseOwner: lease.workerId, leaseEpoch: lease.leaseEpoch, status: 'running' },
-              data: { failedCount: { increment: 1 }, cursor: { increment: 1 } },
+              data: {
+                failedCount: { increment: 1 }, cursor: { increment: 1 }, heartbeatAt: at,
+                leaseExpiresAt: new Date(at.getTime() + (lease.leaseDurationMs || 60_000)),
+              },
             });
             return progressed.count === 1
               ? { kind: 'processed' as const, itemId: error.itemId }
@@ -347,6 +358,7 @@ export function createPrismaCustomerBatchWorkerStore(
       if (['succeeded', 'failed', 'cancelled'].includes(String(item.status))) return true;
       const attempts = Number(item.attemptCount || 0) + 1;
       const failure = classifyCustomerBatchItemFailure(error);
+      const at = currentTime();
       await tx.customerBatchJobItem.updateMany({
         where: { id: item.id, jobId: job.id, status: { in: ['queued', 'running'] } },
         data: {
@@ -355,17 +367,20 @@ export function createPrismaCustomerBatchWorkerStore(
           retryable: true,
           errorCode: failure.code,
           errorMessage: failure.message,
-          finishedAt: attempts >= maxAttempts ? currentTime() : null,
+          finishedAt: attempts >= maxAttempts ? at : null,
         },
       });
-      if (attempts >= maxAttempts) {
-        const progressed = await tx.customerBatchJob.updateMany({
-          where: { id: job.id, leaseOwner: lease.workerId, leaseEpoch: lease.leaseEpoch, status: 'running' },
-          data: { failedCount: { increment: 1 }, cursor: { increment: 1 } },
-        });
-        if (progressed.count !== 1) return false;
-      }
-      return true;
+      const progressed = await tx.customerBatchJob.updateMany({
+        where: { id: job.id, leaseOwner: lease.workerId, leaseEpoch: lease.leaseEpoch, status: 'running' },
+        data: {
+          ...(attempts >= maxAttempts
+            ? { failedCount: { increment: 1 }, cursor: { increment: 1 } }
+            : {}),
+          heartbeatAt: at,
+          leaseExpiresAt: new Date(at.getTime() + (lease.leaseDurationMs || 60_000)),
+        },
+      });
+      return progressed.count === 1;
     }),
 
     settleCancelled: async (lease) => transaction(async (tx) => {
@@ -524,7 +539,6 @@ export function createCustomerBatchWorker<Tx = unknown>(options: {
     }
 
     while (!stopping) {
-      if (!await heartbeatBatchJob(lease)) return false;
       const outcome = await options.store.processNextItem(
         lease,
         (input) => handler.processItem!(input, context),
@@ -545,10 +559,6 @@ export function createCustomerBatchWorker<Tx = unknown>(options: {
           return false;
         }
       }
-      const current = await options.store.state(lease);
-      if (!current) return false;
-      if (current.status === 'cancel_requested') return options.store.settleCancelled(lease);
-      if (current.status !== 'running') return false;
     }
     return false;
   };

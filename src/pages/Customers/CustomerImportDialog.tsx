@@ -30,6 +30,7 @@ import {
   customerDataExchangeApi,
   parseCustomerImportWorkbook,
 } from '../../api/customerDataExchangeApi';
+import { CUSTOMER_IMPORT_MAX_ROWS } from '../../types/customerDataExchange';
 import type {
   CustomerImportDestination,
   CustomerImportPrecheckResult,
@@ -203,7 +204,7 @@ export default function CustomerImportDialog({ open, onClose, onQueued }: Props)
                 {file ? '更换文件' : '选择文件'}
               </Button>
               <Typography variant="body2" color="text.secondary">
-                {file ? `${file.name} · ${rows.length} 条客户` : '仅支持 .xlsx，单次最多 2,000 条'}
+                {file ? `${file.name} · ${rows.length} 条客户` : `仅支持 .xlsx，单次最多 ${CUSTOMER_IMPORT_MAX_ROWS.toLocaleString('zh-CN')} 条`}
               </Typography>
             </Stack>
           </Paper>

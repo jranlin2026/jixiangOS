@@ -27,6 +27,7 @@ assert.equal(classifyCustomerBatchItemFailure(new Error('客户当前状态不�
 
 function fakeStoreFixture(start = new Date('2026-07-18T08:00:00.000Z')) {
   let now = new Date(start);
+  let heartbeatCalls = 0;
   const job: any = {
     id: 'job-1', actorId: 'u-1', actorName: '员工甲', handlerKey: 'customer_mutation', operation: 'transfer',
     input: { targetOwnerId: 'u-2' }, reason: '团队调整', status: 'queued', leaseOwner: null, leaseEpoch: 0,
@@ -59,6 +60,7 @@ function fakeStoreFixture(start = new Date('2026-07-18T08:00:00.000Z')) {
       return { ...job, workerId, leaseEpoch: job.leaseEpoch };
     },
     heartbeat: async (lease, leaseMs) => {
+      heartbeatCalls += 1;
       if (!validLease(lease)) return false;
       job.leaseExpiresAt = new Date(now.getTime() + leaseMs);
       return true;
@@ -108,6 +110,7 @@ function fakeStoreFixture(start = new Date('2026-07-18T08:00:00.000Z')) {
   };
   return {
     store, job, items,
+    heartbeatCalls: () => heartbeatCalls,
     now: () => new Date(now),
     advance(ms: number) { now = new Date(now.getTime() + ms); },
     requestCancel() { if (job.status === 'running') job.status = 'cancel_requested'; },
@@ -131,6 +134,7 @@ function fakeStoreFixture(start = new Date('2026-07-18T08:00:00.000Z')) {
   assert.equal(await worker.runOnce(), 1);
   assert.equal(fake.job.status, 'partial_failed');
   assert.deepEqual(calls, ['customer:c-1', 'customer:c-2', 'customer:c-3']);
+  assert.equal(fake.heartbeatCalls(), 0, 'item transactions already extend the lease; do not add one heartbeat write per row');
   assert.equal(await worker.runOnce(), 0);
   assert.equal(calls.length, 3, 'terminal items must never execute twice');
 }
@@ -310,6 +314,73 @@ function fakeStoreFixture(start = new Date('2026-07-18T08:00:00.000Z')) {
   assert.equal(callbacks, 1);
 }
 
+// Customer imports amortize directory/lease overhead across a small transaction
+// while retaining the existing rollback-and-isolate path for a failing row.
+{
+  const job: any = {
+    id: 'job-import-batch', actorId: 'u-1', actorName: '员工甲', handlerKey: 'customer_import', operation: 'import',
+    input: {}, reason: '导入性能', status: 'running', leaseOwner: 'worker-import', leaseEpoch: 1,
+    totalCount: 3, successCount: 0, failedCount: 0, cursor: 0,
+  };
+  const items: any[] = [1, 2, 3].map((index) => ({
+    id: `item-import-${index}`, jobId: job.id, targetKey: `row:${index}`, status: 'queued',
+    attemptCount: 0, idempotencyKey: `${job.id}:row:${index}`,
+  }));
+  const queryText = (query: any) => Array.isArray(query?.strings) ? query.strings.join('?') : String(query || '');
+  const tx: any = {
+    $queryRaw: async (query: any) => queryText(query).includes('customer_batch_job_items')
+      ? items.filter((item) => item.status === 'queued').map((item) => ({ ...item }))
+      : [{ ...job }],
+    customerBatchJob: {
+      updateMany: async ({ data }: any) => {
+        for (const key of ['successCount', 'cursor']) {
+          if (data[key]?.increment) job[key] += data[key].increment;
+        }
+        Object.entries(data).forEach(([key, value]) => {
+          if (!['successCount', 'cursor'].includes(key)) job[key] = value;
+        });
+        return { count: 1 };
+      },
+    },
+    customerBatchJobItem: {
+      updateMany: async ({ where, data }: any) => {
+        const item = items.find((candidate) => candidate.id === where.id);
+        if (!item || (typeof where.status === 'string' && item.status !== where.status)) return { count: 0 };
+        if (data.attemptCount?.increment) item.attemptCount += data.attemptCount.increment;
+        Object.entries(data).forEach(([key, value]) => {
+          if (key !== 'attemptCount') item[key] = value;
+        });
+        return { count: 1 };
+      },
+    },
+  };
+  let directoryLoads = 0;
+  let transactionOptions: any;
+  const store = createPrismaCustomerBatchWorkerStore({
+    $transaction: async (operation: any, options: any) => {
+      transactionOptions = options;
+      return operation(tx);
+    },
+  } as any, {
+    loadExecutionContext: async () => {
+      directoryLoads += 1;
+      return { access: { actorId: 'u-1' } as any, actor: { id: 'u-1', name: '员工甲' }, roles: [] };
+    },
+  });
+  const processedIds: string[] = [];
+  const outcome = await store.processNextItem({ ...job, workerId: 'worker-import', leaseDurationMs: 60_000 }, async ({ item }) => {
+    processedIds.push(item.id);
+    return {};
+  });
+  assert.equal(outcome.kind, 'processed');
+  assert.deepEqual(processedIds, items.map((item) => item.id));
+  assert.equal(directoryLoads, 1, 'one import transaction must load the permission directory once');
+  assert.equal(job.successCount, 3);
+  assert.equal(job.cursor, 3);
+  assert.equal(items.every((item) => item.status === 'succeeded'), true);
+  assert.equal(transactionOptions.timeout, 30_000);
+}
+
 // RED: a transient error reported while committing the item transaction must
 // retain the selected item id so a fresh transaction can record/retry it.
 {
@@ -341,6 +412,45 @@ function fakeStoreFixture(start = new Date('2026-07-18T08:00:00.000Z')) {
     { kind: outcome.kind, itemId: 'itemId' in outcome ? outcome.itemId : undefined },
     { kind: 'retryable_failure', itemId: item.id },
   );
+}
+
+// Recording a retry happens after the item transaction has rolled back, so it
+// must also renew the job lease instead of relying on that rolled-back heartbeat.
+{
+  const now = new Date('2026-07-18T08:05:00.000Z');
+  const job: any = {
+    id: 'job-retry-heartbeat', status: 'running', leaseOwner: 'worker-a', leaseEpoch: 2,
+    heartbeatAt: new Date('2026-07-18T08:00:00.000Z'), leaseExpiresAt: new Date('2026-07-18T08:01:00.000Z'),
+  };
+  const item: any = {
+    id: 'item-retry-heartbeat', jobId: job.id, status: 'queued', attemptCount: 0,
+  };
+  const queryText = (query: any) => Array.isArray(query?.strings) ? query.strings.join('?') : String(query || '');
+  const tx: any = {
+    $queryRaw: async (query: any) => queryText(query).includes('customer_batch_job_items') ? [{ ...item }] : [{ ...job }],
+    customerBatchJobItem: {
+      updateMany: async ({ data }: any) => {
+        Object.assign(item, data, { attemptCount: data.attemptCount });
+        return { count: 1 };
+      },
+    },
+    customerBatchJob: {
+      updateMany: async ({ data }: any) => {
+        Object.assign(job, data);
+        return { count: 1 };
+      },
+    },
+  };
+  const store = createPrismaCustomerBatchWorkerStore(
+    { $transaction: async (operation: any) => operation(tx) } as any,
+    { now: () => now },
+  );
+  const lease = { ...job, workerId: 'worker-a', leaseDurationMs: 60_000 } as any;
+  assert.equal(await store.recordRetryableFailure(lease, item.id, 3, Object.assign(new Error('deadlock'), { code: 'P2034' })), true);
+  assert.equal(job.heartbeatAt.toISOString(), now.toISOString());
+  assert.equal(job.leaseExpiresAt.toISOString(), '2026-07-18T08:06:00.000Z');
+  assert.equal(item.status, 'queued');
+  assert.equal(item.attemptCount, 1);
 }
 
 // RED: finalization fails closed when persisted terminal counts do not match

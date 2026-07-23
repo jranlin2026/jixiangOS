@@ -66,6 +66,22 @@ const importRows = [{
   remark: '',
 }];
 
+const fiveThousandRows = Array.from({ length: 5_000 }, (_, index) => ({
+  ...importRows[0],
+  rowNumber: index + 2,
+  name: `客户${index + 1}`,
+  phone: `13${String(index).padStart(9, '0')}`,
+}));
+const maxRowsPrecheck = await service.precheckImport(fiveThousandRows, 'assigned', user);
+assert.equal(maxRowsPrecheck.totalCount, 5_000, '单次应允许预检 5000 条客户');
+await assert.rejects(
+  () => service.precheckImport([
+    ...fiveThousandRows,
+    { ...importRows[0], rowNumber: 5_002, name: '超出上限', phone: '13999999999' },
+  ], 'assigned', user),
+  /单次最多导入 5000 条客户/,
+);
+
 const precheck = await service.precheckImport(importRows, 'assigned', user);
 assert.equal(precheck.readyCount, 1);
 assert.match(precheck.confirmationToken, /^cx1\./);

@@ -17,7 +17,6 @@ import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissio
 import { loadCustomerAccessContext } from './customerAccessPolicy';
 import { loadCustomerTagCatalog } from './customerTagService';
 import { customerContactKeys } from './customerDataExchangePolicy';
-import { normalizeContactIdentity } from './contactIdentityService';
 import type { CustomerBatchJobHandler } from './customerBatchJobHandler';
 import {
   createCustomerDataExchangeService,
@@ -36,6 +35,8 @@ type CustomerReader = {
 const cleanText = (value: unknown) => String(value ?? '').trim();
 const tokenHash = (token: string) => createHash('sha256').update(token, 'utf8').digest('hex');
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+const CUSTOMER_IMPORT_FACT_SCAN_PAGE_SIZE = 5_000;
+const CUSTOMER_IMPORT_ENQUEUE_TRANSACTION_TIMEOUT_MS = 120_000;
 
 function readStorageValue<T>(value: unknown, fallback: T): T {
   if (value === null || value === undefined) return fallback;
@@ -59,69 +60,64 @@ function leadSourceOptions(configs: LeadSourceConfig[]) {
   });
 }
 
+function storedCustomerContactKeys(row: { phone: string | null; wechat: string | null }): string[] {
+  const rawPhone = cleanText(row.phone);
+  const digits = rawPhone.replace(/\D/g, '');
+  const mainland = digits.slice(-11);
+  const explicitForeign = rawPhone.startsWith('+') && !digits.startsWith('86');
+  const domesticShape = /^1[3-9]\d{9}$/.test(digits) || /^(?:86|0086)1[3-9]\d{9}$/.test(digits);
+  const phoneKey = !explicitForeign && domesticShape && /^1[3-9]\d{9}$/.test(mainland)
+    ? `phone:+86${mainland}`
+    : customerContactKeys({ phone: row.phone || '', wechat: '' })[0] || '';
+  const wechat = cleanText(row.wechat).toLocaleLowerCase('zh-CN');
+  return [phoneKey, wechat ? `wechat:${wechat}` : ''].filter(Boolean);
+}
+
 export async function loadExistingCustomerImportFacts(
   prisma: Pick<PrismaClient, '$queryRaw'>,
   rows: CustomerImportRow[],
 ): Promise<{ contactKeys: Set<string>; customerNames: Set<string> }> {
-  const keys = Array.from(new Set(rows.flatMap(customerContactKeys)));
-  const normalizedPhones = Array.from(new Set(rows
-    .map((row) => normalizeContactIdentity('phone', cleanText(row.phone)))
-    .filter(Boolean)));
-  const mainlandPhones = normalizedPhones.filter((phone) => /^1[3-9]\d{9}$/.test(phone));
-  const otherPhoneDigits = normalizedPhones
-    .filter((phone) => !/^1[3-9]\d{9}$/.test(phone))
-    .map((phone) => phone.replace(/\D/g, ''))
-    .filter(Boolean);
-  const wechats = keys.filter((key) => key.startsWith('wechat:')).map((key) => key.slice(7));
+  const keys = new Set(rows.flatMap(customerContactKeys));
   const names = Array.from(new Set(rows.map((row) => cleanText(row.name).toLocaleLowerCase('zh-CN')).filter(Boolean)));
-  if (!normalizedPhones.length && !wechats.length && !names.length) {
+  const nameSet = new Set(names);
+  if (!keys.size && !names.length) {
     return { contactKeys: new Set(), customerNames: new Set() };
   }
-  const storedPhone = Prisma.sql`COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.phone')), '')`;
-  const storedPhoneDigits = Prisma.sql`REGEXP_REPLACE(${storedPhone}, '[^0-9]', '')`;
-  const mainlandPhoneClause = mainlandPhones.length
-    ? Prisma.sql`CASE
-        WHEN TRIM(${storedPhone}) LIKE '+%' AND ${storedPhoneDigits} NOT LIKE '86%' THEN ''
-        WHEN ${storedPhoneDigits} REGEXP '^1[3-9][0-9]{9}$' THEN ${storedPhoneDigits}
-        WHEN ${storedPhoneDigits} REGEXP '^(86|0086)1[3-9][0-9]{9}$' THEN RIGHT(${storedPhoneDigits}, 11)
-        ELSE ''
-      END IN (${Prisma.join(mainlandPhones)})`
-    : Prisma.sql`FALSE`;
-  const otherPhoneClause = otherPhoneDigits.length
-    ? Prisma.sql`REGEXP_REPLACE(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.phone')), ''), '[^0-9]', '') IN (${Prisma.join(otherPhoneDigits)})`
-    : Prisma.sql`FALSE`;
-  const wechatClause = wechats.length
-    ? Prisma.sql`LOWER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.wechat')), ''))) IN (${Prisma.join(wechats)})`
-    : Prisma.sql`FALSE`;
-  const nameClause = names.length
-    ? Prisma.sql`LOWER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.name')), ''))) IN (${Prisma.join(names)})`
-    : Prisma.sql`FALSE`;
-  const found = await prisma.$queryRaw<Array<{ phone: string | null; wechat: string | null; name: string | null }>>(Prisma.sql`
-    SELECT JSON_UNQUOTE(JSON_EXTRACT(data, '$.phone')) AS phone,
-           JSON_UNQUOTE(JSON_EXTRACT(data, '$.wechat')) AS wechat,
-           JSON_UNQUOTE(JSON_EXTRACT(data, '$.name')) AS name
-    FROM business_records
-    WHERE domain = ${STORAGE_KEYS.CUSTOMERS}
-      AND mergedIntoId IS NULL
-      AND JSON_EXTRACT(data, '$.deletedAt') IS NULL
-      AND (${mainlandPhoneClause} OR ${otherPhoneClause} OR ${wechatClause} OR ${nameClause})
-  `);
-  const foundContactKeys = found.flatMap((row) => {
-    const rawPhone = cleanText(row.phone);
-    const digits = rawPhone.replace(/\D/g, '');
-    const mainland = digits.slice(-11);
-    const explicitForeign = rawPhone.startsWith('+') && !digits.startsWith('86');
-    const domesticShape = /^1[3-9]\d{9}$/.test(digits) || /^(?:86|0086)1[3-9]\d{9}$/.test(digits);
-    const phoneKey = !explicitForeign && domesticShape && /^1[3-9]\d{9}$/.test(mainland)
-      ? `phone:+86${mainland}`
-      : customerContactKeys({ phone: row.phone || '', wechat: '' })[0] || '';
-    const wechat = cleanText(row.wechat).toLocaleLowerCase('zh-CN');
-    return [phoneKey, wechat ? `wechat:${wechat}` : ''].filter(Boolean);
-  });
-  return {
-    contactKeys: new Set(foundContactKeys),
-    customerNames: new Set(found.map((row) => cleanText(row.name).toLocaleLowerCase('zh-CN')).filter(Boolean)),
-  };
+  const contactKeys = new Set<string>();
+  const customerNames = new Set<string>();
+  let cursor = '';
+  while (true) {
+    const found = await prisma.$queryRaw<Array<{
+      recordId: string;
+      phone: string | null;
+      wechat: string | null;
+      name: string | null;
+    }>>(Prisma.sql`
+      SELECT recordId,
+             JSON_UNQUOTE(JSON_EXTRACT(data, '$.phone')) AS phone,
+             JSON_UNQUOTE(JSON_EXTRACT(data, '$.wechat')) AS wechat,
+             JSON_UNQUOTE(JSON_EXTRACT(data, '$.name')) AS name
+      FROM business_records
+      WHERE domain = ${STORAGE_KEYS.CUSTOMERS}
+        AND recordId > ${cursor}
+        AND mergedIntoId IS NULL
+        AND JSON_EXTRACT(data, '$.deletedAt') IS NULL
+      ORDER BY recordId ASC
+      LIMIT ${CUSTOMER_IMPORT_FACT_SCAN_PAGE_SIZE}
+    `);
+    for (const row of found) {
+      storedCustomerContactKeys(row)
+        .filter((key) => keys.has(key))
+        .forEach((key) => contactKeys.add(key));
+      const name = cleanText(row.name).toLocaleLowerCase('zh-CN');
+      if (nameSet.has(name)) customerNames.add(name);
+    }
+    if (found.length < CUSTOMER_IMPORT_FACT_SCAN_PAGE_SIZE) break;
+    const nextCursor = cleanText(found[found.length - 1]?.recordId);
+    if (!nextCursor || nextCursor <= cursor) throw new Error('客户重复检测分页游标异常');
+    cursor = nextCursor;
+  }
+  return { contactKeys, customerNames };
 }
 
 async function readSelection(reader: CustomerReader, selection: CustomerExportSelection, user: AuthenticatedUser): Promise<Customer[]> {
@@ -354,7 +350,10 @@ export async function enqueueCustomerImportExecution(
     const job = await tx.customerBatchJob.findUnique({ where: { id: jobId } });
     if (!job) throw new CustomerDataExchangeError('导入任务创建失败', 500);
     return importJobSummary(job);
-  }, { isolationLevel: 'ReadCommitted' });
+  }, {
+    isolationLevel: 'ReadCommitted',
+    timeout: CUSTOMER_IMPORT_ENQUEUE_TRANSACTION_TIMEOUT_MS,
+  });
 }
 
 export function createCustomerImportBatchJobHandler(reader: CustomerReader): CustomerBatchJobHandler {
@@ -392,6 +391,7 @@ export function createCustomerImportBatchJobHandler(reader: CustomerReader): Cus
       const executionUser = { ...executionContext.user, permissions };
       const created = await reader.create(snapshot.input, executionUser, {
         tx,
+        accessContext: executionContext.access,
         batchJobId: job.id,
         requestId: `${job.id}:${item.targetKey}`,
         idempotencyKey: item.idempotencyKey,

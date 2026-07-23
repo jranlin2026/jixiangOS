@@ -53,6 +53,8 @@ type CustomerListServiceOptions = {
 
 export type CustomerCreateExecutionContext = {
   tx?: Prisma.TransactionClient;
+  /** Server-derived inside the same transaction; avoids re-reading the full directory for batch rows. */
+  accessContext?: CustomerAccessContext;
   batchJobId?: string;
   requestId?: string;
   idempotencyKey?: string;
@@ -361,7 +363,7 @@ export function createCustomerListService(
         if (!hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_TRANSFER, 'write')) {
           return failure<Customer>('无权把客户转让给其他负责人', 403);
         }
-        assignmentAccess = await loadCustomerAccessContext(database, currentUser);
+        assignmentAccess = execution.accessContext || await loadCustomerAccessContext(database, currentUser);
         if (!assignmentAccess.manageableOwnerIds.has(requestedOwnerId)) {
           return failure<Customer>('无权跨数据范围转让客户', 403);
         }
@@ -463,7 +465,7 @@ export function createCustomerListService(
       // Resolve disclosure scope from the same transaction as the identity
       // write, so a safe conflict summary never relies on an earlier role
       // directory snapshot.
-      const identityConflictAccess = await loadCustomerAccessContext(tx, currentUser);
+      const identityConflictAccess = execution.accessContext || await loadCustomerAccessContext(tx, currentUser);
       await upsertCustomerContactIdentities(tx, {
         customerId: customer.id,
         phone: customer.phone,

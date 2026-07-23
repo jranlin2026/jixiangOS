@@ -6,7 +6,9 @@ import {
   createCustomerImportTemplateWorkbook,
   parseCustomerImportWorkbook,
 } from './customerDataExchangeApi';
-import { CUSTOMER_IMPORT_HEADERS } from '../types/customerDataExchange';
+import { CUSTOMER_IMPORT_HEADERS, CUSTOMER_IMPORT_MAX_ROWS } from '../types/customerDataExchange';
+
+assert.equal(CUSTOMER_IMPORT_MAX_ROWS, 5_000);
 
 const options = {
   ownerNames: ['销售甲'],
@@ -31,6 +33,7 @@ assert.equal(
 assert.equal(Array.isArray(templateHeaders) && templateHeaders.includes('上一个销售负责人'), true);
 assert.equal(Array.isArray(templateHeaders) && templateHeaders.includes('首个销售负责人'), true);
 assert.equal(templateBook.worksheets[0].getCell('E2').dataValidation.type, 'list');
+assert.match(templateBook.getWorksheet('填写说明')!.getColumn(2).values.join('|'), /单次最多 5000 条/);
 
 const publicPoolTemplate = await createCustomerImportTemplateWorkbook({
   ...options,
@@ -78,6 +81,17 @@ const legacyRows = await parseCustomerImportWorkbook(await legacyBook.xlsx.write
 assert.equal(legacyRows[0].name, '旧模板客户');
 assert.equal(legacyRows[0].previousOwnerName, '');
 assert.equal(legacyRows[0].firstOwnerName, '');
+
+const boundaryBook = new ExcelJS.Workbook();
+const boundarySheet = boundaryBook.addWorksheet('客户导入');
+boundarySheet.addRow([...CUSTOMER_IMPORT_HEADERS]);
+for (let index = 0; index < 5_001; index += 1) {
+  boundarySheet.addRow([`边界客户${index + 1}`, `138${String(index).padStart(8, '0')}`]);
+}
+const overLimitBoundaryBuffer = await boundaryBook.xlsx.writeBuffer();
+boundarySheet.spliceRows(5_002, 1);
+assert.equal((await parseCustomerImportWorkbook(await boundaryBook.xlsx.writeBuffer())).length, 5_000);
+await assert.rejects(() => parseCustomerImportWorkbook(overLimitBoundaryBuffer), /单次最多导入 5000 条客户/);
 
 const exportBuffer = await createCustomerExportWorkbook([{ 客户编号: 'c1', 客户姓名: '张三', 手机号: '+8613800000000' }]);
 const exportBook = new ExcelJS.Workbook();
