@@ -456,6 +456,21 @@ async function rejectOrderApplication(id: string, reason: string): Promise<ApiRe
 }
 
 async function cleanupDeletedSourceOrderApplication(id: string, reason: string): Promise<ApiResponse<boolean>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<boolean>(`/order-applications/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ reason }),
+    });
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '服务端未返回清理结果', response.code || -1);
+    }
+    setStorageCacheData(
+      STORAGE_KEYS.ORDER_APPLICATIONS,
+      getStoredApplications().filter((item) => item.id !== id),
+    );
+    return createSuccessResponse(true);
+  }
+
   ensureInit();
   await delay(120);
   if (!isCurrentUserSuperAdmin()) return createErrorResponse('仅超级管理员可以清理订单审核记录', 403);

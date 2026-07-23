@@ -765,6 +765,15 @@ app.post('/api/order-applications/:id/approve', requireOrderReviewWriteAccess, a
   res.status(status).json(result);
 });
 
+app.delete('/api/order-applications/:id', requireOrderReviewWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderApplicationService.cleanupDeletedSource(
+    routeParam(req.params.id),
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
 app.get('/api/orders', requireOrderReadAccess, async (req: AuthenticatedRequest, res) => {
   const result = await orderQueryService.listOrders({
     search: queryParam(req.query.search),

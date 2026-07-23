@@ -75,6 +75,16 @@ const salesManager: AuthenticatedUser = {
   ],
 };
 
+const superAdmin: AuthenticatedUser = {
+  ...reviewer,
+  id: 'user-super-admin',
+  name: '超级管理员',
+  account: 'super_admin',
+  role: '超级管理员',
+  roleId: 'role-super-admin',
+  permissions: [{ module: '全部', actions: ['admin'] }],
+};
+
 function application(overrides: Partial<OrderApplication> = {}): OrderApplication {
   return {
     id: 'oa-concurrent-1',
@@ -334,6 +344,15 @@ class FakePrisma {
         this.rows.set(key, value);
         return clone(value);
       },
+      delete: async ({ where }: any) => {
+        const target = where.domain_recordId;
+        const key = rowKey(target.domain, target.recordId);
+        const current = this.rows.get(key);
+        if (!current) throw Object.assign(new Error('missing'), { code: 'P2025' });
+        remember(key);
+        this.rows.delete(key);
+        return clone(current);
+      },
     };
     const tx = {
       businessRecord,
@@ -395,6 +414,58 @@ const deferredEffects: OrderApprovalEffectState = {
   deliveryCreation: 'deferred',
   customerLifecycle: 'deferred',
 };
+
+{
+  const approvedApplication = application({
+    status: '已入库',
+    orderId: 'order-deleted',
+    orderNo: 'ORD-DELETED',
+  });
+  const prisma = new FakePrisma({ application: approvedApplication });
+  prisma.rows.set(rowKey(STORAGE_KEYS.ORDERS, 'order-deleted'), {
+    id: `${STORAGE_KEYS.ORDERS}:order-deleted`,
+    domain: STORAGE_KEYS.ORDERS,
+    recordId: 'order-deleted',
+    title: '已删除订单',
+    status: '已确认',
+    orderId: 'order-deleted',
+    data: {
+      ...approvedApplication.orderData,
+      id: 'order-deleted',
+      orderNo: 'ORD-DELETED',
+      deletedAt: NOW,
+      deletedBy: '超级管理员',
+      deleteReason: '测试删除',
+      createdAt: NOW,
+      updatedAt: NOW,
+    },
+  });
+  const service = createOrderApplicationService(prisma as any, { now: () => new Date(NOW) });
+
+  assert.equal((await service.cleanupDeletedSource('oa-concurrent-1', '清理残留', reviewer)).code, 403);
+  assert.equal((await service.cleanupDeletedSource('oa-concurrent-1', '', superAdmin)).code, 400);
+  const result = await service.cleanupDeletedSource('oa-concurrent-1', '源订单已删除，清理残留', superAdmin);
+  assert.equal(result.code, 0, result.message);
+  assert.equal(result.data, true);
+  assert.equal(prisma.rows.has(rowKey(STORAGE_KEYS.ORDER_APPLICATIONS, 'oa-concurrent-1')), false);
+}
+
+{
+  const approvedApplication = application({ status: '已入库', orderId: 'order-active', orderNo: 'ORD-ACTIVE' });
+  const prisma = new FakePrisma({ application: approvedApplication });
+  prisma.rows.set(rowKey(STORAGE_KEYS.ORDERS, 'order-active'), {
+    id: `${STORAGE_KEYS.ORDERS}:order-active`, domain: STORAGE_KEYS.ORDERS, recordId: 'order-active',
+    title: '活动订单', status: '已确认', orderId: 'order-active',
+    data: { ...approvedApplication.orderData, id: 'order-active', orderNo: 'ORD-ACTIVE', createdAt: NOW, updatedAt: NOW },
+  });
+  const result = await createOrderApplicationService(prisma as any).cleanupDeletedSource(
+    'oa-concurrent-1',
+    '不可清理活动订单',
+    superAdmin,
+  );
+  assert.equal(result.code, 409);
+  assert.equal(prisma.rows.has(rowKey(STORAGE_KEYS.ORDER_APPLICATIONS, 'oa-concurrent-1')), true);
+}
 
 {
   const prisma = new FakePrisma();

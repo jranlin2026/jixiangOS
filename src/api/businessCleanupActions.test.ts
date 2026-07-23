@@ -5,6 +5,10 @@ import { STORAGE_KEYS } from '../shared/utils/constants';
 import type { LeadIntakeRecord } from '../types/lead';
 import type { Order, OrderApplication } from '../types/order';
 import type { User } from '../types/settings';
+import {
+  clearStorageSyncFailure,
+  subscribeStorageSyncFailures,
+} from './storageSyncStatus';
 
 const storage = (() => {
   const values = new Map<string, string>();
@@ -166,3 +170,46 @@ assert.equal(cleanupIntake.code, 0);
 const intakeAfterCleanup = await leadFlowApi.fetchIntakeRecords({ pageSize: 20 });
 assert.equal(intakeAfterCleanup.data.items.some((item) => item.id === 'intake-a'), false);
 assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS) || '[]') as LeadIntakeRecord[]).some((item) => item.id === 'intake-a'), false);
+
+// Production uses command-only storage for order applications. Cleanup must
+// call a record-level backend command instead of attempting a legacy table save.
+seed();
+loginAs('user-admin');
+process.env.VITE_USE_BACKEND_API = 'true';
+const backendRequests: Array<{ url: string; method: string; body: string }> = [];
+const originalFetch = globalThis.fetch;
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  backendRequests.push({
+    url: String(input),
+    method: String(init?.method || 'GET'),
+    body: String(init?.body || ''),
+  });
+  return new Response(JSON.stringify({ code: 0, message: 'success', data: true }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}) as typeof fetch;
+const syncFailures: string[] = [];
+const unsubscribeSyncFailure = subscribeStorageSyncFailures((failure) => {
+  if (failure) syncFailures.push(failure.message);
+});
+const productionCleanup = await orderReviewApi.cleanupDeletedSourceOrderApplication(
+  'app-deleted',
+  'cleanup stale approved application',
+);
+await Promise.resolve();
+unsubscribeSyncFailure();
+clearStorageSyncFailure();
+delete process.env.VITE_USE_BACKEND_API;
+globalThis.fetch = originalFetch;
+assert.equal(productionCleanup.code, 0);
+assert.deepEqual(backendRequests, [{
+  url: '/api/order-applications/app-deleted',
+  method: 'DELETE',
+  body: JSON.stringify({ reason: 'cleanup stale approved application' }),
+}]);
+assert.equal(
+  syncFailures.some((message) => message.includes('aaos_order_applications 只能通过记录级命令保存')),
+  false,
+  '生产清理不得触发 command-only legacy 整表写错误',
+);

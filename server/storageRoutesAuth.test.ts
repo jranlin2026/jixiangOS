@@ -41,6 +41,7 @@ for (const [method, route] of [
   ['post', '/api/order-applications/:id/return'],
   ['post', '/api/order-applications/:id/reject'],
   ['post', '/api/order-applications/:id/approve'],
+  ['delete', '/api/order-applications/:id'],
   ['put', '/api/orders/:id'],
   ['get', '/api/orders'],
   ['get', '/api/orders/stats'],
@@ -249,6 +250,7 @@ assert.match(source, /app\.post\('\/api\/order-applications\/:id\/resubmit', req
 assert.match(source, /app\.post\('\/api\/order-applications\/:id\/return', requireOrderReviewWriteAccess,/);
 assert.match(source, /app\.post\('\/api\/order-applications\/:id\/reject', requireOrderReviewWriteAccess,/);
 assert.match(source, /app\.post\('\/api\/order-applications\/:id\/approve', requireOrderReviewWriteAccess,/);
+assert.match(source, /app\.delete\('\/api\/order-applications\/:id', requireOrderReviewWriteAccess,/);
 assert.match(source, /app\.put\('\/api\/orders\/:id', requireOrderEditWriteAccess,/);
 assert.match(source, /app\.get\('\/api\/orders', requireOrderReadAccess,/);
 assert.match(source, /app\.get\('\/api\/orders\/owner-candidates', requireOrderReadAccess,/);
