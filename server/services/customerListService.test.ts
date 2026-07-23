@@ -236,7 +236,6 @@ const result = await service.create({
   owner: '销售',
   ownerId: actor.id,
   previousOwner: '销售乙',
-  originalSalesTransferBy: '销售丙',
   sourceType: '公司资源',
 }, actor);
 
@@ -245,6 +244,7 @@ assert.equal(created.length, 1);
 assert.equal(created[0].data.domain, STORAGE_KEYS.CUSTOMERS);
 assert.equal(created[0].data.data.name, '新客户');
 assert.equal(auditEvents[0]?.operation, 'create_customer');
+assert.equal(result.data?.originalSalesTransferBy, actor.name, '客户首次获得销售归属时应自动记录首个销售负责人');
 assert.match(auditEvents[0]?.inputHash || '', /^[a-f0-9]{64}$/);
 assert.equal(contactIdentities.length, 1);
 assert.equal(contactLinks[0]?.entityId, result.data?.id);

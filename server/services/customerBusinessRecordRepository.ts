@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import type { Customer } from '../../src/types/customer';
+import { hydrateCustomerFirstSalesOwner } from '../../src/shared/utils/customerOwnership';
 
 export type CustomerBusinessRecordRow = {
   id: string;
@@ -58,7 +59,7 @@ export function mapCustomerBusinessRecord(row: CustomerBusinessRecordRow): Custo
   if (row.domain !== STORAGE_KEYS.CUSTOMERS) {
     throw new Error(`客户记录必须来自 ${STORAGE_KEYS.CUSTOMERS}`);
   }
-  const customer = parseCustomer(row.data);
+  const customer = hydrateCustomerFirstSalesOwner(parseCustomer(row.data));
   if (!customer.id || customer.id !== row.recordId) {
     throw new Error('客户ID与 BusinessRecord.recordId 不一致');
   }

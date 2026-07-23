@@ -404,6 +404,8 @@ export function createCustomerListService(
         owner: importToPublicPool ? '公海' : targetOwner!.name,
         ownerId: importToPublicPool ? undefined : targetOwner!.id,
         ownerIdentityStatus: importToPublicPool ? 'public_pool' : 'resolved',
+        originalSalesTransferBy: cleanText(input.originalSalesTransferBy)
+          || (importToPublicPool ? undefined : targetOwner!.name),
         customerLevel: input.customerLevel || 'L1',
         lifecycleStatusCode: importToPublicPool
           ? LIFECYCLE_STATUS_CODES.PUBLIC_POOL

@@ -981,6 +981,7 @@ const serviceOptions = {
   assert.equal(next.businessRecords[0].owner, '公海');
   assert.equal(next.businessRecords[0].status, LIFECYCLE_STATUS_CODES.PUBLIC_POOL);
   assert.equal(next.businessRecords[0].data.releaseReason, '暂时无意向');
+  assert.equal(next.businessRecords[0].data.originalSalesTransferBy, salesA.name);
   assert.equal(next.businessRecords[0].data.activityRecords.length, 1);
   assert.equal(next.leads[0].owner, '公海');
   assert.equal(next.leads[0].assignedTo, null);
@@ -1175,6 +1176,7 @@ const serviceOptions = {
   assert.equal(result.code, 0);
   assert.equal(result.data?.owner, salesA.name);
   assert.equal(result.data?.previousOwner, '销售乙');
+  assert.equal(result.data?.originalSalesTransferBy, '销售乙', '历史公海客户应优先恢复已有销售归属');
   assert.equal(result.data?.lifecycleStatusCode, LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP);
   const next = fake.getState();
   assert.equal(next.leads[0].owner, salesA.name);
@@ -1185,6 +1187,18 @@ const serviceOptions = {
   const replay = await service.claimFromPublicPool('cust-claim', claimOnlySales);
   assert.equal(replay.code, 0);
   assert.equal(fake.getState().businessRecords[0].data.activityRecords.length, 1, '重试领取不得重复写入活动');
+}
+
+// 从未分配过销售的公海客户，首次领取人就是首个销售负责人。
+{
+  const pooledCustomer = customer('cust-first-claim', '公海', LIFECYCLE_STATUS_CODES.PUBLIC_POOL);
+  pooledCustomer.previousOwner = undefined;
+  const fake = createFakePrisma({ businessRecords: [businessCustomer(pooledCustomer)], leads: [] });
+  const result = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .claimFromPublicPool(pooledCustomer.id, claimOnlySales);
+
+  assert.equal(result.code, 0);
+  assert.equal(result.data?.originalSalesTransferBy, salesA.name);
 }
 
 // 仅伪造展示姓名“公海”不得把普通客户变成可领取客户。
@@ -2203,6 +2217,7 @@ for (const targetType of ['customer', 'lead'] as const) {
   const autoCustomer = next.businessRecords.find((row) => row.domain === STORAGE_KEYS.CUSTOMERS)?.data;
   assert.equal(autoCustomer?.id, result.data?.customerId);
   assert.equal(autoCustomer?.owner, '销售甲');
+  assert.equal(autoCustomer?.originalSalesTransferBy, '销售甲');
   assert.deepEqual(autoCustomer?.manualTagIds, []);
   assert.deepEqual(autoCustomer?.tags, []);
   assert.equal(next.leads[0].data.manualTagIds, undefined);
@@ -2691,6 +2706,7 @@ for (const targetType of ['customer', 'lead'] as const) {
   const next = fake.getState();
   assert.equal(next.businessRecords[0].owner, manager.name);
   assert.equal(next.businessRecords[0].data.ownerId, manager.id);
+  assert.equal(next.businessRecords[0].data.originalSalesTransferBy, manager.name);
   assert.equal(next.leads[0].owner, manager.name);
   assert.equal(next.leads[0].assignedTo, manager.name);
   assert.equal(next.leads[0].data.ownerId, manager.id);

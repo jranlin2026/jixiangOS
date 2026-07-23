@@ -30,6 +30,7 @@ import {
   normalizePhoneForStorage,
 } from '../../src/shared/utils/phoneNumber';
 import { applyContactEditLock } from '../../src/shared/utils/contactEditLock';
+import { resolveFirstSalesOwner } from '../../src/shared/utils/customerOwnership';
 import { mapPrismaDepartment, mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { loadCustomerTagCatalog } from './customerTagService';
 import { validateManualTagUpdateSelection } from './customerTagPolicy';
@@ -992,6 +993,7 @@ export function createCustomerAtomicCommandService(options: {
         next = {
           ...next,
           owner: target.name, ownerId: target.id, ownerIdentityStatus: 'resolved',
+          originalSalesTransferBy: resolveFirstSalesOwner(customer, target.name),
           previousOwner: fromPool ? customer.previousOwner : customer.owner,
           assignedBy: actor.name, assignedAt: atIso, assignmentReason: reason, ownerSince: atIso,
           ...(fromPool ? { lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP, lifecycleStatusUpdatedAt: atIso } : {}),
@@ -1005,6 +1007,7 @@ export function createCustomerAtomicCommandService(options: {
         next = {
           ...next,
           owner: '公海', ownerId: undefined, ownerIdentityStatus: 'public_pool',
+          originalSalesTransferBy: resolveFirstSalesOwner(customer),
           previousOwner: customer.owner === '公海' ? customer.previousOwner : customer.owner,
           lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL,
           lifecycleStatusUpdatedAt: atIso, publicPoolAt: atIso, releasedBy: actor.name, releaseReason: reason,
@@ -1804,6 +1807,7 @@ export function createCustomerCommandService(
             owner: assignedTo,
             ownerId: assignedToId,
             ownerIdentityStatus: 'resolved',
+            originalSalesTransferBy: assignedTo,
             customerLevel: 'L1',
             lifecycleStatusCode: LIFECYCLE_STATUS_CODES.FOLLOWING,
             lifecycleStatusUpdatedAt: atIso,
@@ -2259,6 +2263,7 @@ export function createCustomerCommandService(
           owner: '公海',
           ownerId: undefined,
           ownerIdentityStatus: 'public_pool',
+          originalSalesTransferBy: resolveFirstSalesOwner(customer),
           previousOwner: previousOwner && previousOwner !== '公海' ? previousOwner : customer.previousOwner,
           lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL,
           lifecycleStatusUpdatedAt: atIso,
@@ -2333,6 +2338,7 @@ export function createCustomerCommandService(
           owner: operator,
           ownerId: actor.id,
           ownerIdentityStatus: 'resolved',
+          originalSalesTransferBy: resolveFirstSalesOwner(customer, operator),
           previousOwner: customer.previousOwner,
           assignedBy: operator,
           assignedAt: atIso,
@@ -2424,6 +2430,7 @@ export function createCustomerCommandService(
           owner,
           ownerId: target.id,
           ownerIdentityStatus: 'resolved',
+          originalSalesTransferBy: resolveFirstSalesOwner(customer, owner),
           previousOwner: wasPublicPool ? customer.previousOwner : customer.owner,
           assignedBy: operator,
           assignedAt: atIso,
@@ -2522,6 +2529,7 @@ export function createCustomerCommandService(
           owner: conversionOwner,
           ownerId: conversionOwnerId,
           ownerIdentityStatus: 'resolved',
+          originalSalesTransferBy: conversionOwner,
           customerLevel: 'L1',
           lifecycleStatusCode: LIFECYCLE_STATUS_CODES.FOLLOWING,
           lifecycleStatusUpdatedAt: atIso,

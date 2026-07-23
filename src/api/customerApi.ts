@@ -18,6 +18,7 @@ import type { Role } from '../types/role';
 import { groupTagIdsForFilter, normalizeManualTagIds, validateCustomerTagFilters } from '../shared/utils/customerTagPolicy';
 import { PERMISSION_KEYS } from '../shared/utils/permissions';
 import { getCustomerLastFollowUpOwner } from '../shared/utils/customerFollowUp';
+import { hydrateCustomerFirstSalesOwner, resolveFirstSalesOwner } from '../shared/utils/customerOwnership';
 
 function ensureInit(): void {
   initializeMockData();
@@ -53,12 +54,12 @@ function normalizeCustomer(customer: Customer): Customer {
   const legacyLeadSource = legacySourceType && legacySourceType !== '公司资源' && legacySourceType !== '个人资源' && legacySourceType !== '自拓'
     ? legacySourceType
     : undefined;
-  const normalized = hydrateCustomerLifecycle({
+  const normalized = hydrateCustomerFirstSalesOwner(hydrateCustomerLifecycle({
     ...customer,
     phone: normalizePhoneForStorage(customer.phone),
     leadSource: customer.leadSource || legacyLeadSource,
     sourceType: normalizedSourceType,
-  });
+  }));
   const hasOrder = (customer.orderCount || 0) > 0 || (customer.totalSpent || 0) > 0;
   if (hasOrder) return normalized;
 
@@ -524,6 +525,7 @@ async function createCustomer(data: CustomerCreateInput): Promise<ApiResponse<Cu
     customerLevel: data.customerLevel || 'L1',
     lifecycleStatusCode: data.lifecycleStatusCode || 'pending_followup',
     lifecycleStatusUpdatedAt: now,
+    originalSalesTransferBy: resolveFirstSalesOwner(normalizedData, data.owner),
     totalSpent: 0,
     orderCount: 0,
     growthPath: [],
@@ -777,6 +779,7 @@ async function assignCustomerOwner(id: string, ownerId: string, reason = ''): Pr
     owner: nextOwner,
     ownerId,
     ownerIdentityStatus: 'resolved',
+    originalSalesTransferBy: resolveFirstSalesOwner(existing, nextOwner),
     previousOwner: changed ? previousSalesOwner : existing.previousOwner,
     assignedBy: operator,
     assignedAt: changed ? now : existing.assignedAt || now,

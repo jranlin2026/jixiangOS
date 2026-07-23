@@ -26,9 +26,24 @@ const row = {
 
 const snapshot = mapCustomerBusinessRecord(row);
 assert.equal(snapshot.customer.id, value.id);
+assert.equal(snapshot.customer.originalSalesTransferBy, '销售', '历史客户读取时应恢复首个销售负责人');
 assert.equal(snapshot.rowId, row.id);
 assert.equal(snapshot.businessRecordUpdatedAt.getTime(), VERSION.getTime());
 assert.equal(snapshot.recordRevision, 0);
+const publicPoolSnapshot = mapCustomerBusinessRecord({
+  ...row,
+  recordId: 'customer-public-pool',
+  data: JSON.stringify({
+    ...value,
+    id: 'customer-public-pool',
+    owner: '公海',
+    ownerId: undefined,
+    ownerIdentityStatus: 'public_pool',
+    lifecycleStatusCode: 'public_pool',
+    previousOwner: '销售乙',
+  }),
+});
+assert.equal(publicPoolSnapshot.customer.originalSalesTransferBy, '销售乙');
 assert.throws(
   () => mapCustomerBusinessRecord({ ...row, domain: STORAGE_KEYS.ORDERS }),
   /aaos_customers/,

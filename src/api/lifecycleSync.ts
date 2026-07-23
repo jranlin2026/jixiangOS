@@ -5,6 +5,7 @@ import type { Order } from '../types/order';
 import type { LifecycleStatusCode } from '../types/settings';
 import { getLifecycleConfigByCode, LIFECYCLE_STATUS_CODES, normalizeLifecycleStatusCode, STORAGE_KEYS } from '../shared/utils/constants';
 import { getStorageData, setStorageData } from './mock/storage';
+import { resolveFirstSalesOwner } from '../shared/utils/customerOwnership';
 
 type LifecycleContext = {
   opportunityId?: string;
@@ -129,6 +130,7 @@ export function releaseToPublicPool(target: { customerId?: string }, reason: str
       customers[idx] = {
         ...hydrateCustomerLifecycle(customers[idx]),
         owner: '公海',
+        originalSalesTransferBy: resolveFirstSalesOwner(customers[idx]),
         previousOwner: customers[idx].owner && customers[idx].owner !== '公海'
           ? customers[idx].owner
           : customers[idx].previousOwner,
@@ -153,6 +155,7 @@ export function claimFromPublicPool(target: { customerId?: string }, userName: s
       customers[idx] = {
         ...hydrateCustomerLifecycle(customers[idx]),
         owner: userName,
+        originalSalesTransferBy: resolveFirstSalesOwner(customers[idx], userName),
         lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PENDING_FOLLOWUP,
         lifecycleStatusUpdatedAt: now,
         publicPoolAt: undefined,
