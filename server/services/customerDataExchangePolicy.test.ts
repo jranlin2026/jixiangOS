@@ -54,6 +54,7 @@ assert.equal(precheck[0].input.ownerId, 'u1');
 assert.equal(precheck[0].input.leadInputBy, '录入乙');
 assert.equal(precheck[0].input.leadContributorId, 'u4');
 assert.equal(precheck[0].input.leadContributorName, '贡献丙');
+assert.deepEqual(precheck[0].attribution, { leadInputById: 'u3', leadContributorId: 'u4' });
 assert.equal(precheck[0].input.lifecycleStatusCode, 'following');
 assert.equal(precheck[0].input.customerLevel, 'L2');
 assert.equal(precheck[0].input.leadSource, '市场品牌部');

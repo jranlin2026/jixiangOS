@@ -43,6 +43,10 @@ export type CustomerImportExecutionEvent = {
     index: number;
     row: CustomerImportRowResult;
     input?: CustomerCreateInput;
+    attribution?: {
+      leadInputById: string;
+      leadContributorId?: string;
+    };
     lastFollowUpRecord?: string;
   }>;
 };
@@ -168,7 +172,7 @@ export function createCustomerDataExchangeService(deps: CustomerDataExchangeDepe
         totalCount: prepared.validated.length,
         readyCount,
         blockedCount: prepared.validated.length - readyCount,
-        rows: prepared.validated.map(({ input: _input, ...row }) => row),
+        rows: prepared.validated.map(({ input: _input, attribution: _attribution, ...row }) => row),
       };
     },
 
@@ -198,7 +202,7 @@ export function createCustomerDataExchangeService(deps: CustomerDataExchangeDepe
           row: row.status === 'ready'
             ? { rowNumber: row.rowNumber, name: row.name, status: 'ready', reason: '可导入' }
             : { rowNumber: row.rowNumber, name: row.name, status: 'failed', reason: row.reason },
-          ...(row.status === 'ready' ? { input: row.input } : {}),
+          ...(row.status === 'ready' ? { input: row.input, attribution: row.attribution } : {}),
           ...(row.status === 'ready' && normalizedRows[index].lastFollowUpRecord
             ? { lastFollowUpRecord: normalizedRows[index].lastFollowUpRecord }
             : {}),

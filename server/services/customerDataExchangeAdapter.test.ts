@@ -68,13 +68,20 @@ const importHandler = createCustomerImportBatchJobHandler({
   },
 } as any);
 const handled = await importHandler.processItem!({
-  tx: { marker: 'same-transaction' } as any,
+  tx: {
+    marker: 'same-transaction',
+    user: { findMany: async () => [{ id: 'u-input', name: '最新录入人' }, { id: 'u-contributor', name: '最新贡献人' }] },
+  } as any,
   job: { id: 'import-job', actorId: 'u1', actorName: '销售甲', handlerKey: 'customer_import', operation: 'import', input: {}, inputHash: 'hash', reason: '批量导入客户' },
   item: {
     id: 'item-1', jobId: 'import-job', targetKey: 'row:000001', idempotencyKey: 'import-job:row:000001',
     beforeSnapshot: {
       rowNumber: 2, name: '醉一鸣官方号', destination: 'assigned', lastFollowUpRecord: '已确认报价',
-      input: { name: '醉一鸣官方号', phone: '+8613800000000', remark: '客户备注' },
+      attribution: { leadInputById: 'u-input', leadContributorId: 'u-contributor' },
+      input: {
+        name: '醉一鸣官方号', phone: '+8613800000000', remark: '客户备注',
+        leadInputBy: '旧录入人', leadContributorId: 'u-contributor', leadContributorName: '旧贡献人',
+      },
     },
   },
   executionContext: {
@@ -86,10 +93,30 @@ const handled = await importHandler.processItem!({
   assertActive: async () => undefined, heartbeat: async () => undefined, cancellationRequested: async () => false,
 });
 assert.equal(createCall.input.remark, '客户备注');
+assert.equal(createCall.input.leadInputBy, '最新录入人');
+assert.equal(createCall.input.leadContributorName, '最新贡献人');
 assert.equal(createCall.execution.importedLastFollowUpRecord, '已确认报价');
 assert.equal(createCall.execution.tx.marker, 'same-transaction');
 assert.equal(createCall.execution.accessContext, importAccessContext);
 assert.equal((handled.afterSnapshot as any).customerId, 'c-imported');
+await assert.rejects(() => importHandler.processItem!({
+  tx: { user: { findMany: async () => [] } } as any,
+  job: { id: 'import-job-drift', actorId: 'u1', actorName: '销售甲', handlerKey: 'customer_import', operation: 'import', input: {}, inputHash: 'hash', reason: '批量导入客户' },
+  item: {
+    id: 'item-drift', jobId: 'import-job-drift', targetKey: 'row:drift', idempotencyKey: 'import-job-drift:row:drift',
+    beforeSnapshot: {
+      rowNumber: 3, name: '状态漂移客户', destination: 'assigned', attribution: { leadInputById: 'u-departed' },
+      input: { name: '状态漂移客户', phone: '+8613800000002', leadInputBy: '已离职录入人' },
+    },
+  },
+  executionContext: {
+    access: {} as any, actor: { id: 'u1', name: '销售甲' }, roles: [],
+    user: { id: 'u1', name: '销售甲', account: 'sales', role: '销售', isActive: true, permissions: [{ module: PERMISSION_KEYS.CUSTOMER_IMPORT, actions: ['write'] }] } as any,
+  },
+}, {
+  jobId: 'import-job-drift', workerId: 'worker', leaseEpoch: 1,
+  assertActive: async () => undefined, heartbeat: async () => undefined, cancellationRequested: async () => false,
+}), /线索录入人不存在或已离职/);
 await assert.rejects(() => importHandler.processItem!({
   tx: {} as any,
   job: { id: 'import-job-2', actorId: 'u1', actorName: '销售甲', handlerKey: 'customer_import', operation: 'import', input: {}, inputHash: 'hash', reason: '批量导入客户' },

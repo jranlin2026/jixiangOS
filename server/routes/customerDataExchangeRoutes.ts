@@ -50,6 +50,8 @@ function parseRows(value: unknown): CustomerImportRow[] {
       ownerName: String(row.ownerName || ''),
       previousOwnerName: String(row.previousOwnerName || ''),
       firstOwnerName: String(row.firstOwnerName || ''),
+      leadInputByName: String(row.leadInputByName || ''),
+      leadContributorName: String(row.leadContributorName || ''),
       lifecycleStatus: String(row.lifecycleStatus || ''),
       customerLevel: String(row.customerLevel || ''),
       leadSource: String(row.leadSource || ''),

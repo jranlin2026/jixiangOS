@@ -91,6 +91,7 @@ assert.equal(confirmed.successCount, 0);
 assert.equal(confirmed.status, 'queued');
 assert.equal(queuedEvents.length, 1);
 assert.equal(queuedEvents[0].rows[0].lastFollowUpRecord, '已确认报价，等待客户回复');
+assert.deepEqual(queuedEvents[0].rows[0].attribution, { leadInputById: 'u1', leadContributorId: undefined });
 assert.notEqual(queuedEvents[0].rows[0].input.remark, '已确认报价，等待客户回复');
 
 const replayed = await service.confirmImport({ rows: importRows, destination: 'assigned', confirmationToken: precheck.confirmationToken }, user);

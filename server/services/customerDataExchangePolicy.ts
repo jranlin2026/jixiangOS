@@ -34,6 +34,10 @@ export type CustomerImportDirectory = {
 
 export type ValidatedCustomerImportRow = CustomerImportRowResult & {
   input: CustomerCreateInput;
+  attribution: {
+    leadInputById: string;
+    leadContributorId?: string;
+  };
 };
 
 const cleanText = (value: unknown) => String(value ?? '').trim();
@@ -212,6 +216,10 @@ export function validateCustomerImportRows(
       status: errors.length ? 'blocked' as const : 'ready' as const,
       reason: errors.join('；') || warnings.join('；') || '可导入',
       input,
+      attribution: {
+        leadInputById: leadInputByUser?.id || directory.currentOwnerId,
+        leadContributorId: leadContributorUser?.id,
+      },
     };
   });
 }

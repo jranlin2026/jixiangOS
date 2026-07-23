@@ -319,6 +319,7 @@ export async function enqueueCustomerImportExecution(
               rowNumber: item.row.rowNumber,
               name: item.row.name,
               input: item.input,
+              attribution: item.attribution,
               lastFollowUpRecord: item.lastFollowUpRecord || '',
               destination: event.destination,
             }),
@@ -375,6 +376,25 @@ export function createCustomerImportBatchJobHandler(reader: CustomerReader): Cus
         && !hasPermission(executionContext.user, PERMISSION_KEYS.CUSTOMER_IMPORT_ATTRIBUTION_OVERRIDE, 'write')
       ) {
         throw new Error('当前用户无权导入历史销售负责人');
+      }
+      const leadInputById = cleanText(snapshot.attribution?.leadInputById);
+      const leadContributorId = cleanText(snapshot.attribution?.leadContributorId);
+      const attributionUserIds = Array.from(new Set([leadInputById, leadContributorId].filter(Boolean)));
+      if (attributionUserIds.length) {
+        const activeUsers: Array<{ id: string; name: string }> = await tx.user.findMany({
+          where: { id: { in: attributionUserIds }, isActive: true, employmentStatus: 'active' },
+          select: { id: true, name: true },
+        });
+        const activeById = new Map(activeUsers.map((candidate) => [candidate.id, candidate]));
+        const leadInputByUser = activeById.get(leadInputById);
+        if (!leadInputByUser) throw new Error('线索录入人不存在或已离职，请重新预检');
+        snapshot.input.leadInputBy = leadInputByUser.name;
+        if (leadContributorId) {
+          const leadContributorUser = activeById.get(leadContributorId);
+          if (!leadContributorUser) throw new Error('线索贡献人不存在或已离职，请重新预检');
+          snapshot.input.leadContributorId = leadContributorUser.id;
+          snapshot.input.leadContributorName = leadContributorUser.name;
+        }
       }
       const permissions = [...(executionContext.user.permissions || [])];
       if (!hasPermission(executionContext.user, PERMISSION_KEYS.CUSTOMER_CREATE, 'write')) {
