@@ -17,6 +17,15 @@ assert.match(orderFormSource, /orderApi\.fetchOwnerCandidates/);
 assert.match(orderFormSource, /filterUsersByCurrentDataScope\(userRes\.data, 'orders', currentUser/);
 assert.match(commissionSource, /settingsApi\.fetchAssignableDirectory/);
 assert.match(recoverySource, /settingsApi\.fetchAssignableDirectory/);
+const recoverySettlementSubmitSource = recoverySource.slice(
+  recoverySource.indexOf('const submitSettlement = async'),
+  recoverySource.indexOf('const confirmSettlement = async'),
+);
+assert.match(
+  recoverySettlementSubmitSource,
+  /if \(res\.data && detailOrder\?\.id === res\.data\.id\) \{[\s\S]*?setDetailOrder\(res\.data\);[\s\S]*?setDetailCommissions\(await loadRecoveryCommissions\(res\.data\)\);[\s\S]*?\}/,
+  '保存售后分账后必须立即用接口返回的待确认订单及分账明细刷新仍在显示的详情弹窗',
+);
 assert.match(commissionApiSource, /await hydrateCommissionOrderCache\(\)/);
 assert.match(customerFormSource, /const saved =/);
 assert.match(customerFormSource, /if \(!saved\) return;/);

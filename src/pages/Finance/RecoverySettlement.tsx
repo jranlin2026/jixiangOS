@@ -564,6 +564,10 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         setMessage({ type: 'error', text: res.message || '保存售后挽回分账失败' });
         return;
       }
+      if (res.data && detailOrder?.id === res.data.id) {
+        setDetailOrder(res.data);
+        setDetailCommissions(await loadRecoveryCommissions(res.data));
+      }
       setSelected(null);
       setMessage({ type: 'success', text: '售后挽回分账已保存，当前状态为待确认' });
       await load();
