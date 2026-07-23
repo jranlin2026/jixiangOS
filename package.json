@@ -30,7 +30,8 @@
     "customer:association-cleanup": "tsx scripts/cleanup-legacy-orphan-customer-associations.ts",
     "customer:demo-fixture-cleanup": "tsx scripts/cleanup-demo-refund-fixtures.ts",
     "customer:batch-verify": "tsx scripts/verify-customer-batch-foundation.ts",
-    "customer:merge-release-gate": "tsx scripts/verify-customer-merge-release.ts"
+    "customer:merge-release-gate": "tsx scripts/verify-customer-merge-release.ts",
+    "test-data:reset-business": "tsx scripts/reset-business-test-data.ts"
   },
   "overrides": {
     "effect": "3.21.0"
