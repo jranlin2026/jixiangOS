@@ -18,6 +18,7 @@ type CatalogPrisma = {
 };
 
 type CatalogReadTx = Pick<Prisma.TransactionClient, 'businessRecord' | 'leadRecord'>;
+type TagDefinitionReadTx = Pick<Prisma.TransactionClient, 'businessRecord'>;
 
 type GroupInput = Partial<Pick<CustomerTagGroup, 'name' | 'color' | 'selectionMode' | 'scope' | 'isActive' | 'sortOrder'>>;
 type TagInput = Partial<Pick<CustomerTag, 'groupId' | 'name' | 'color' | 'isActive' | 'sortOrder'>>;
@@ -100,23 +101,13 @@ async function rowsFor(tx: Pick<Prisma.TransactionClient, 'businessRecord'>, dom
   return tx.businessRecord.findMany({ where: { domain } });
 }
 
-export async function loadCustomerTagCatalog(
-  tx: CatalogReadTx,
-  includeInactive = false,
-): Promise<CustomerTagCatalog> {
-  const [groupRows, tagRows, customerRows, leadRows, legacyLeadRows] = await Promise.all([
-    rowsFor(tx, STORAGE_KEYS.TAG_GROUPS), rowsFor(tx, STORAGE_KEYS.TAGS),
-    rowsFor(tx, STORAGE_KEYS.CUSTOMERS), tx.leadRecord.findMany(), rowsFor(tx, STORAGE_KEYS.LEADS),
-  ]);
+function buildCustomerTagCatalog(
+  groupRows: Array<{ data: unknown }>,
+  tagRows: Array<{ data: unknown }>,
+  includeInactive: boolean,
+  usage: ReadonlyMap<string, number>,
+): CustomerTagCatalog {
   const groups = groupRows.map((row) => object(row.data) as CustomerTagGroup);
-  const canonicalLeadIds = new Set(leadRows.map((row: any) => String(row.id || object(row.data).id)));
-  const usage = new Map<string, number>();
-  const liveLegacyLeads = legacyLeadRows.filter((row: any) => !isDeleted(row) && !canonicalLeadIds.has(String(row.recordId || object(row.data).id)));
-  for (const row of [...customerRows, ...leadRows, ...liveLegacyLeads]) {
-    for (const id of (Array.isArray(object(row.data).manualTagIds) ? object(row.data).manualTagIds : [])) {
-      usage.set(String(id), (usage.get(String(id)) || 0) + 1);
-    }
-  }
   const tags = tagRows.map((row) => {
     const tag = object(row.data) as CustomerTag;
     return { ...tag, usageCount: usage.get(tag.id) || 0 };
@@ -127,6 +118,40 @@ export async function loadCustomerTagCatalog(
     tags: tags.filter((tag) => includeInactive || (tag.isActive && activeGroupIds.has(tag.groupId)))
       .sort((a, b) => a.sortOrder - b.sortOrder),
   };
+}
+
+/**
+ * Loads only tag definitions for assignment validation. Unlike the management
+ * catalog, this deliberately avoids scanning every customer and lead merely to
+ * calculate usage counts that the write path never reads.
+ */
+export async function loadCustomerTagValidationCatalog(
+  tx: TagDefinitionReadTx,
+): Promise<CustomerTagCatalog> {
+  const [groupRows, tagRows] = await Promise.all([
+    rowsFor(tx, STORAGE_KEYS.TAG_GROUPS),
+    rowsFor(tx, STORAGE_KEYS.TAGS),
+  ]);
+  return buildCustomerTagCatalog(groupRows, tagRows, false, new Map());
+}
+
+export async function loadCustomerTagCatalog(
+  tx: CatalogReadTx,
+  includeInactive = false,
+): Promise<CustomerTagCatalog> {
+  const [groupRows, tagRows, customerRows, leadRows, legacyLeadRows] = await Promise.all([
+    rowsFor(tx, STORAGE_KEYS.TAG_GROUPS), rowsFor(tx, STORAGE_KEYS.TAGS),
+    rowsFor(tx, STORAGE_KEYS.CUSTOMERS), tx.leadRecord.findMany(), rowsFor(tx, STORAGE_KEYS.LEADS),
+  ]);
+  const canonicalLeadIds = new Set(leadRows.map((row: any) => String(row.id || object(row.data).id)));
+  const usage = new Map<string, number>();
+  const liveLegacyLeads = legacyLeadRows.filter((row: any) => !isDeleted(row) && !canonicalLeadIds.has(String(row.recordId || object(row.data).id)));
+  for (const row of [...customerRows, ...leadRows, ...liveLegacyLeads]) {
+    for (const id of (Array.isArray(object(row.data).manualTagIds) ? object(row.data).manualTagIds : [])) {
+      usage.set(String(id), (usage.get(String(id)) || 0) + 1);
+    }
+  }
+  return buildCustomerTagCatalog(groupRows, tagRows, includeInactive, usage);
 }
 
 function recordData(domain: string, value: { id: string; name: string; isActive: boolean }) {

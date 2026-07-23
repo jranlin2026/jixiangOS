@@ -3,6 +3,7 @@ import type { Role } from '../../src/types/role';
 import type { Customer } from '../../src/types/customer';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { CustomerAccessContext } from './customerAccessPolicy';
+import type { CustomerTagCatalog } from '../../src/types/tag';
 import type {
   CustomerAtomicCommand,
   CustomerAtomicCommandContext,
@@ -36,6 +37,8 @@ export type CustomerBatchExecutionContext = {
   actor: { id: string; name: string };
   user?: AuthenticatedUser;
   roles: Role[];
+  /** Lazily reused by all customer-import items in the same worker transaction. */
+  customerTagValidationCatalog?: CustomerTagCatalog;
 };
 
 export type ProcessBatchItemInput = {

@@ -1,10 +1,44 @@
 import assert from 'node:assert/strict';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
-import { createCustomerTagService, loadCustomerTagCatalog } from './customerTagService';
+import {
+  createCustomerTagService,
+  loadCustomerTagCatalog,
+  loadCustomerTagValidationCatalog,
+} from './customerTagService';
 
 const clone = <T>(value: T): T => structuredClone(value);
 const rowKey = (domain: string, recordId: string) => `${domain}:${recordId}`;
+
+{
+  const readDomains: string[] = [];
+  const validationCatalog = await loadCustomerTagValidationCatalog({
+    businessRecord: {
+      findMany: async ({ where }: any) => {
+        readDomains.push(where.domain);
+        if (where.domain === STORAGE_KEYS.TAG_GROUPS) return [{ data: {
+          id: 'active-group', name: '有效分组', color: '#1677ff', selectionMode: 'multiple',
+          scope: 'customer', isActive: true, sortOrder: 0, createdAt: '', updatedAt: '',
+        } }, { data: {
+          id: 'inactive-group', name: '停用分组', color: '#999999', selectionMode: 'multiple',
+          scope: 'customer', isActive: false, sortOrder: 1, createdAt: '', updatedAt: '',
+        } }];
+        if (where.domain === STORAGE_KEYS.TAGS) return [{ data: {
+          id: 'active-tag', groupId: 'active-group', name: '有效标签', isActive: true,
+          sortOrder: 0, usageCount: 999, createdAt: '', updatedAt: '',
+        } }, { data: {
+          id: 'inactive-parent-tag', groupId: 'inactive-group', name: '停用标签', isActive: true,
+          sortOrder: 1, usageCount: 999, createdAt: '', updatedAt: '',
+        } }];
+        throw new Error(`validation catalog must not scan assignment domain: ${where.domain}`);
+      },
+    },
+  } as any);
+  assert.deepEqual(readDomains.sort(), [STORAGE_KEYS.TAG_GROUPS, STORAGE_KEYS.TAGS].sort());
+  assert.deepEqual(validationCatalog.groups.map((group) => group.id), ['active-group']);
+  assert.deepEqual(validationCatalog.tags.map((tag) => tag.id), ['active-tag']);
+  assert.equal(validationCatalog.tags[0].usageCount, 0, 'validation-only catalog does not calculate global usage');
+}
 
 class FakePrisma {
   rows = new Map<string, any>();

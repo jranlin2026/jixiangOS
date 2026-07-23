@@ -15,7 +15,7 @@ import {
 } from '../../src/shared/utils/constants';
 import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import { loadCustomerAccessContext } from './customerAccessPolicy';
-import { loadCustomerTagCatalog } from './customerTagService';
+import { loadCustomerTagCatalog, loadCustomerTagValidationCatalog } from './customerTagService';
 import { customerContactKeys } from './customerDataExchangePolicy';
 import type { CustomerBatchJobHandler } from './customerBatchJobHandler';
 import {
@@ -409,9 +409,13 @@ export function createCustomerImportBatchJobHandler(reader: CustomerReader): Cus
         permissions.push({ module: PERMISSION_KEYS.CUSTOMER_TRANSFER, actions: ['read', 'write'] });
       }
       const executionUser = { ...executionContext.user, permissions };
+      const tagValidationCatalog = executionContext.customerTagValidationCatalog
+        || await loadCustomerTagValidationCatalog(tx);
+      executionContext.customerTagValidationCatalog = tagValidationCatalog;
       const created = await reader.create(snapshot.input, executionUser, {
         tx,
         accessContext: executionContext.access,
+        tagValidationCatalog,
         batchJobId: job.id,
         requestId: `${job.id}:${item.targetKey}`,
         idempotencyKey: item.idempotencyKey,

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createCustomerImportBatchJobHandler, enqueueCustomerImportExecution, loadExistingCustomerImportFacts } from './customerDataExchangeAdapter';
 import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
+import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 
 let sql = '';
 const prisma = {
@@ -60,7 +61,24 @@ await loadExistingCustomerImportFacts({
 assert.equal(duplicateLookupQueryCount, 2, '存量客户应按数据库页分页扫描，不得按导入行数重复扫表');
 
 let createCall: any;
+let importTagCatalogReadCount = 0;
 const importAccessContext = { marker: 'import-access-context' } as any;
+const importTransaction = {
+  marker: 'same-transaction',
+  user: { findMany: async () => [{ id: 'u-input', name: '最新录入人' }, { id: 'u-contributor', name: '最新贡献人' }] },
+  businessRecord: {
+    findMany: async ({ where }: any) => {
+      importTagCatalogReadCount += 1;
+      if (where.domain === STORAGE_KEYS.TAG_GROUPS) return [];
+      if (where.domain === STORAGE_KEYS.TAGS) return [];
+      throw new Error(`customer import tag validation must not scan ${where.domain}`);
+    },
+  },
+} as any;
+const importExecutionContext = {
+  access: importAccessContext, actor: { id: 'u1', name: '销售甲' }, roles: [],
+  user: { id: 'u1', name: '销售甲', account: 'sales', role: '销售', isActive: true, permissions: [{ module: PERMISSION_KEYS.CUSTOMER_IMPORT, actions: ['write'] }] } as any,
+};
 const importHandler = createCustomerImportBatchJobHandler({
   create: async (input: any, user: any, execution: any) => {
     createCall = { input, user, execution };
@@ -68,10 +86,7 @@ const importHandler = createCustomerImportBatchJobHandler({
   },
 } as any);
 const handled = await importHandler.processItem!({
-  tx: {
-    marker: 'same-transaction',
-    user: { findMany: async () => [{ id: 'u-input', name: '最新录入人' }, { id: 'u-contributor', name: '最新贡献人' }] },
-  } as any,
+  tx: importTransaction,
   job: { id: 'import-job', actorId: 'u1', actorName: '销售甲', handlerKey: 'customer_import', operation: 'import', input: {}, inputHash: 'hash', reason: '批量导入客户' },
   item: {
     id: 'item-1', jobId: 'import-job', targetKey: 'row:000001', idempotencyKey: 'import-job:row:000001',
@@ -84,10 +99,7 @@ const handled = await importHandler.processItem!({
       },
     },
   },
-  executionContext: {
-    access: importAccessContext, actor: { id: 'u1', name: '销售甲' }, roles: [],
-    user: { id: 'u1', name: '销售甲', account: 'sales', role: '销售', isActive: true, permissions: [{ module: PERMISSION_KEYS.CUSTOMER_IMPORT, actions: ['write'] }] } as any,
-  },
+  executionContext: importExecutionContext,
 }, {
   jobId: 'import-job', workerId: 'worker', leaseEpoch: 1,
   assertActive: async () => undefined, heartbeat: async () => undefined, cancellationRequested: async () => false,
@@ -98,7 +110,22 @@ assert.equal(createCall.input.leadContributorName, '最新贡献人');
 assert.equal(createCall.execution.importedLastFollowUpRecord, '已确认报价');
 assert.equal(createCall.execution.tx.marker, 'same-transaction');
 assert.equal(createCall.execution.accessContext, importAccessContext);
+assert.deepEqual(createCall.execution.tagValidationCatalog, { groups: [], tags: [] });
+assert.equal(importTagCatalogReadCount, 2, '同一批次事务只读取一次标签组和标签定义');
 assert.equal((handled.afterSnapshot as any).customerId, 'c-imported');
+await importHandler.processItem!({
+  tx: importTransaction,
+  job: { id: 'import-job', actorId: 'u1', actorName: '销售甲', handlerKey: 'customer_import', operation: 'import', input: {}, inputHash: 'hash', reason: '批量导入客户' },
+  item: {
+    id: 'item-2', jobId: 'import-job', targetKey: 'row:000002', idempotencyKey: 'import-job:row:000002',
+    beforeSnapshot: { rowNumber: 3, name: '第二位客户', destination: 'assigned', input: { name: '第二位客户', phone: '+8613800000001' } },
+  },
+  executionContext: importExecutionContext,
+}, {
+  jobId: 'import-job', workerId: 'worker', leaseEpoch: 1,
+  assertActive: async () => undefined, heartbeat: async () => undefined, cancellationRequested: async () => false,
+});
+assert.equal(importTagCatalogReadCount, 2, '同一批次事务后续客户必须复用标签定义');
 await assert.rejects(() => importHandler.processItem!({
   tx: { user: { findMany: async () => [] } } as any,
   job: { id: 'import-job-drift', actorId: 'u1', actorName: '销售甲', handlerKey: 'customer_import', operation: 'import', input: {}, inputHash: 'hash', reason: '批量导入客户' },

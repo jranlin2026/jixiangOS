@@ -17,7 +17,7 @@ import {
 } from '../../src/shared/utils/phoneNumber';
 import { PERMISSION_KEYS, hasExplicitPermission, hasPermission } from '../../src/shared/utils/permissions';
 import { NO_CUSTOMER_FOLLOW_UP_OWNER } from '../../src/shared/utils/customerFollowUp';
-import { loadCustomerTagCatalog } from './customerTagService';
+import { loadCustomerTagCatalog, loadCustomerTagValidationCatalog } from './customerTagService';
 import { validateManualTagSelection } from './customerTagPolicy';
 import { groupTagIdsForFilter, normalizeManualTagIds, validateCustomerTagFilters } from '../../src/shared/utils/customerTagPolicy';
 import type { CustomerTagCatalog } from '../../src/types/tag';
@@ -55,6 +55,8 @@ export type CustomerCreateExecutionContext = {
   tx?: Prisma.TransactionClient;
   /** Server-derived inside the same transaction; avoids re-reading the full directory for batch rows. */
   accessContext?: CustomerAccessContext;
+  /** Batch-scoped active tag definitions; usage counts are irrelevant to assignment validation. */
+  tagValidationCatalog?: CustomerTagCatalog;
   batchJobId?: string;
   requestId?: string;
   idempotencyKey?: string;
@@ -387,7 +389,7 @@ export function createCustomerListService(
         | 'user' | 'role' | 'department' | 'appStorage' | '$queryRaw'
       >): Promise<ApiResponse<Customer | null>> => {
       await lockContactIdentityMutationGate(tx);
-      const catalog = await loadCustomerTagCatalog(tx, false);
+      const catalog = execution.tagValidationCatalog || await loadCustomerTagValidationCatalog(tx);
       const tagValidation = validateManualTagSelection(catalog, 'customer', input.manualTagIds || []);
       if (!tagValidation.ok) return failure<Customer>(tagValidation.message, 400);
       const tagNames = tagValidation.tagIds.map((id) => catalog.tags.find((tag) => tag.id === id)!.name);
