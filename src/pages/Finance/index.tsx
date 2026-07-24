@@ -74,6 +74,8 @@ const Finance: React.FC = () => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const canManageSettlement = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_SETTLEMENT, 'write');
   const canManageRecoverySettlement = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'write');
+  const canExportOrderSettlements = hasPermission(currentUser, PERMISSION_KEYS.ORDER_SETTLEMENT_EXPORT);
+  const canExportRecoverySettlements = hasPermission(currentUser, PERMISSION_KEYS.RECOVERY_SETTLEMENT_EXPORT);
   const [flowPage, setFlowPage] = useState(0);
   const [flowRowsPerPage, setFlowRowsPerPage] = useState(10);
   const [flowSearch, setFlowSearch] = useState('');
@@ -87,8 +89,10 @@ const Finance: React.FC = () => {
   const [flowExporting, setFlowExporting] = useState(false);
   const [settlementViewSettingsTrigger, setSettlementViewSettingsTrigger] = useState(0);
   const [settlementCreateSplitTrigger, setSettlementCreateSplitTrigger] = useState(0);
+  const [settlementExportTrigger, setSettlementExportTrigger] = useState(0);
   const [recoverySettlementViewSettingsTrigger, setRecoverySettlementViewSettingsTrigger] = useState(0);
   const [recoverySettlementCreateTrigger, setRecoverySettlementCreateTrigger] = useState(0);
+  const [recoverySettlementExportTrigger, setRecoverySettlementExportTrigger] = useState(0);
 
   const visibleFinanceTabs = useMemo(
     () => FINANCE_TABS.filter((tab) => hasPermission(currentUser, tab.permissionKey)),
@@ -434,6 +438,15 @@ const Finance: React.FC = () => {
             >
               视图设置
             </Button>
+            {canExportOrderSettlements && (
+              <Button
+                variant="outlined"
+                startIcon={<FileDownloadIcon />}
+                onClick={() => setSettlementExportTrigger((value) => value + 1)}
+              >
+                导出订单分账
+              </Button>
+            )}
             {canManageSettlement && (
               <Button
                 variant="contained"
@@ -454,6 +467,15 @@ const Finance: React.FC = () => {
             >
               视图设置
             </Button>
+            {canExportRecoverySettlements && (
+              <Button
+                variant="outlined"
+                startIcon={<FileDownloadIcon />}
+                onClick={() => setRecoverySettlementExportTrigger((value) => value + 1)}
+              >
+                导出售后挽回分账
+              </Button>
+            )}
             {canManageRecoverySettlement && (
               <Button
                 variant="contained"
@@ -499,12 +521,14 @@ const Finance: React.FC = () => {
           hideEmbeddedOrderSplitViewButton
           orderSplitViewTrigger={settlementViewSettingsTrigger}
           orderSplitCreateTrigger={settlementCreateSplitTrigger}
+          orderSplitExportTrigger={settlementExportTrigger}
         />
       )}
       {activeTab === 'recovery-settlement' && (
         <RecoverySettlement
           viewSettingsTrigger={recoverySettlementViewSettingsTrigger}
           createSettlementTrigger={recoverySettlementCreateTrigger}
+          exportTrigger={recoverySettlementExportTrigger}
         />
       )}
       {activeTab === 'payout' && <Commission key="finance-payout" embedded initialTab={1} payoutMode="finance" />}

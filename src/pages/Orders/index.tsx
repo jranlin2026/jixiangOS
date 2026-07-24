@@ -34,9 +34,10 @@ import HistoryIcon from '@mui/icons-material/History';
 import SortIcon from '@mui/icons-material/Sort';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import { useSearchParams } from 'react-router-dom';
 import useOrderStore from '../../store/useOrderStore';
-import { customerApi, orderApi, productApi, settingsApi } from '../../api';
+import { businessExportApi, customerApi, orderApi, productApi, settingsApi } from '../../api';
 import { getProductLevelRowSx, getProductLevelTagSx, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
 import CustomerDetail from '../Customers/CustomerDetail';
@@ -63,6 +64,8 @@ import ResizableHeaderCell, {
 } from '../../shared/components/ResizableTable';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { ModuleHeader, ModulePage, ModuleTabs, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
+import BusinessExportDialog, { type BusinessExportDialogRequest } from '../../shared/components/BusinessExportDialog';
+import { buildBusinessExportBrowserRequest, unwrapBusinessExportResponse } from '../../shared/utils/businessExportPageRequest';
 
 type OrderColumn = {
   id: string;
@@ -218,6 +221,7 @@ const Orders: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [reviewViewSettingsOpen, setReviewViewSettingsOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [viewConfig, setViewConfig] = useState<OrderViewConfig>(readOrderViewConfig);
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(ORDER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
   const [orderLookupMessage, setOrderLookupMessage] = useState('');
@@ -514,6 +518,15 @@ const Orders: React.FC = () => {
     () => visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0) + ORDER_ACTION_COLUMN_WIDTH,
     [columnWidths, visibleColumns],
   );
+  const canExportOrders = hasPermission(currentUser, PERMISSION_KEYS.ORDER_EXPORT);
+
+  const handleExportOrders = async (request: BusinessExportDialogRequest) => {
+    const response = await businessExportApi.exportOrders(buildBusinessExportBrowserRequest(
+      filters,
+      { ...request, columnIds: visibleColumns.map((column) => column.id) },
+    ));
+    return unwrapBusinessExportResponse(response);
+  };
 
   const renderOrderCell = (order: Order, columnId: string) => {
     const customerDisplayName = order.customerName;
@@ -602,6 +615,11 @@ const Orders: React.FC = () => {
           {activeTab === 'list' && (
             <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
               视图设置
+            </Button>
+          )}
+          {activeTab === 'list' && canExportOrders && (
+            <Button variant="outlined" startIcon={<FileDownloadIcon />} onClick={() => setExportOpen(true)}>
+              导出订单
             </Button>
           )}
           {activeTab === 'review' && (
@@ -867,6 +885,14 @@ const Orders: React.FC = () => {
         onReorderColumn={handleReorderColumn}
         onFrozenColumnCountChange={handleFrozenColumnCountChange}
         onReset={handleResetViewConfig}
+      />
+      <BusinessExportDialog
+        open={exportOpen}
+        title="导出订单"
+        expectedCount={pagination.total}
+        currentColumnCount={visibleColumns.length}
+        onClose={() => setExportOpen(false)}
+        onRequestExport={handleExportOrders}
       />
 
       <Dialog open={customerOrdersOpen} onClose={() => setCustomerOrdersOpen(false)} maxWidth="md" fullWidth>

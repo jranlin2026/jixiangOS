@@ -32,7 +32,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import UndoIcon from '@mui/icons-material/Undo';
 import SearchIcon from '@mui/icons-material/Search';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import { commissionApi, commissionRuleApi, recoveryOrderApi, settingsApi } from '../../api';
+import { businessExportApi, commissionApi, commissionRuleApi, recoveryOrderApi, settingsApi } from '../../api';
 import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog, { type TableViewColumnConfig } from '../../shared/components/TableViewSettingsDialog';
@@ -50,6 +50,8 @@ import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
 import BusinessAttachmentLinks from '../../shared/components/BusinessAttachmentLinks';
 import { getActiveCommissions } from '../../shared/utils/financeSettlementPresentation';
 import { getRecoveryEvidenceAttachments } from '../../shared/utils/recoveryEvidence';
+import BusinessExportDialog, { type BusinessExportDialogRequest } from '../../shared/components/BusinessExportDialog';
+import { buildBusinessExportBrowserRequest, unwrapBusinessExportResponse } from '../../shared/utils/businessExportPageRequest';
 
 const shell = {
   ink: '#0f172a',
@@ -252,6 +254,7 @@ const DEFAULT_VISIBLE_COLUMNS: RecoverySettlementColumnId[] = [
 interface RecoverySettlementProps {
   viewSettingsTrigger?: number;
   createSettlementTrigger?: number;
+  exportTrigger?: number;
 }
 
 function formatPlan(plan: CommissionPayoutPlan): string {
@@ -302,9 +305,75 @@ function getSourcePlatformShop(order: RecoveryOrder): string {
     .join(' / ');
 }
 
+function CompactDetailItem({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <Box
+      data-testid="recovery-settlement-compact-detail-item"
+      sx={{
+        display: 'grid',
+        gridTemplateColumns: { xs: '96px minmax(0, 1fr)', sm: '112px minmax(0, 1fr)' },
+        columnGap: 1,
+        alignItems: 'baseline',
+        minWidth: 0,
+        py: 0.35,
+      }}
+    >
+      <Typography variant="caption" sx={{ color: shell.muted, whiteSpace: 'nowrap' }}>{label}</Typography>
+      <Box sx={{ color: shell.ink, fontSize: 14, fontWeight: 800, lineHeight: 1.45, minWidth: 0, overflowWrap: 'anywhere' }}>
+        {children}
+      </Box>
+    </Box>
+  );
+}
+
+function RecoverySettlementBusinessPaymentSummary({ order }: { order: RecoveryOrder }) {
+  return (
+    <Box
+      data-testid="recovery-settlement-business-payment-summary"
+      sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 1.5 }}
+    >
+      <Paper
+        data-testid="recovery-source-business-card"
+        elevation={0}
+        sx={{ border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5, bgcolor: '#fff' }}
+      >
+        <Typography variant="subtitle2" sx={{ color: shell.ink, fontWeight: 900, mb: 0.75 }}>源业务资料</Typography>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, columnGap: 2, rowGap: 0.25 }}>
+          <CompactDetailItem label="客户">{order.customerName || '-'}</CompactDetailItem>
+          <CompactDetailItem label="第三方平台订单">{order.thirdPartyOrderNo || '-'}</CompactDetailItem>
+          <CompactDetailItem label="来源平台 / 店铺">{getSourcePlatformShop(order) || '-'}</CompactDetailItem>
+          <CompactDetailItem label="原产品">{order.originalProduct || '-'}</CompactDetailItem>
+          <CompactDetailItem label="原产品等级">{order.originalProductLevel || '-'}</CompactDetailItem>
+          <CompactDetailItem label="原付款金额">{formatCurrency(order.originalAmount)}</CompactDetailItem>
+          <CompactDetailItem label="挽回人员">{order.recoveryUserName || '-'}</CompactDetailItem>
+          <CompactDetailItem label="订单创建人">{order.createdByName || '-'}</CompactDetailItem>
+        </Box>
+      </Paper>
+
+      <Paper
+        data-testid="recovery-payment-card"
+        elevation={0}
+        sx={{ border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5, bgcolor: '#fff' }}
+      >
+        <Typography variant="subtitle2" sx={{ color: shell.ink, fontWeight: 900, mb: 0.75 }}>付款资料</Typography>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, columnGap: 2, rowGap: 0.25 }}>
+          <CompactDetailItem label="挽回成交金额">{formatCurrency(order.recoveryAmount)}</CompactDetailItem>
+          <CompactDetailItem label="官方收款渠道">{order.officialPaymentChannel || '-'}</CompactDetailItem>
+          <CompactDetailItem label="付款订单号">{order.paymentOrderNo || '-'}</CompactDetailItem>
+          <CompactDetailItem label="付款时间">{order.paymentAt ? formatDate(order.paymentAt, 'yyyy-MM-dd HH:mm') : '-'}</CompactDetailItem>
+          <Box sx={{ gridColumn: { sm: '1 / -1' } }}>
+            <CompactDetailItem label="挽回凭证"><RecoveryEvidenceLinks order={order} /></CompactDetailItem>
+          </Box>
+        </Box>
+      </Paper>
+    </Box>
+  );
+}
+
 const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   viewSettingsTrigger = 0,
   createSettlementTrigger = 0,
+  exportTrigger = 0,
 }) => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const canManageRecoverySettlement = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'write');
@@ -334,6 +403,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [createSettlementOpen, setCreateSettlementOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [creatableRecoveryRows, setCreatableRecoveryRows] = useState<RecoveryOrder[]>([]);
   const [creatableRecoveryLoading, setCreatableRecoveryLoading] = useState(false);
   const [creatableRecoverySearch, setCreatableRecoverySearch] = useState('');
@@ -344,6 +414,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   const [withdrawReason, setWithdrawReason] = useState('');
   const handledViewSettingsTriggerRef = React.useRef(viewSettingsTrigger);
   const handledCreateSettlementTriggerRef = React.useRef(createSettlementTrigger);
+  const handledExportTriggerRef = React.useRef(exportTrigger);
   const sourceDetailRequestRef = React.useRef(0);
   const loadRequestRef = React.useRef(0);
 
@@ -577,6 +648,28 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     setCreateSettlementOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canManageRecoverySettlement, createSettlementTrigger]);
+
+  useEffect(() => {
+    if (exportTrigger <= 0) return;
+    if (handledExportTriggerRef.current === exportTrigger) return;
+    handledExportTriggerRef.current = exportTrigger;
+    setExportOpen(true);
+  }, [exportTrigger]);
+
+  const handleExportRecoverySettlements = async (request: BusinessExportDialogRequest) => {
+    const readyStatuses = ['待处理', '待确认', '待发放', '已发放', '已撤回'] as const;
+    const response = await businessExportApi.exportRecoverySettlements(buildBusinessExportBrowserRequest(
+      {
+        search: search || undefined,
+        settlementStatuses: status === '全部' ? [...readyStatuses] : [status],
+        includeDeleted: true,
+        page: page + 1,
+        pageSize: rowsPerPage,
+      },
+      { ...request, columnIds: visibleColumns.map((column) => column.id) },
+    ));
+    return unwrapBusinessExportResponse(response);
+  };
 
   useEffect(() => {
     if (!createSettlementOpen) return;
@@ -1269,47 +1362,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                 </Box>
               </Paper>
 
-              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 1.5 }}>
-                <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5, bgcolor: '#fff' }}>
-                  <Typography variant="subtitle2" sx={{ color: shell.ink, fontWeight: 900, mb: 1.25 }}>源业务资料</Typography>
-                  <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1.25 }}>
-                    {[
-                      { label: '客户', value: detailOrder.customerName || '-' },
-                      { label: '第三方平台订单', value: detailOrder.thirdPartyOrderNo || '-' },
-                      { label: '来源平台 / 店铺', value: getSourcePlatformShop(detailOrder) || '-' },
-                      { label: '原产品', value: detailOrder.originalProduct || '-' },
-                      { label: '原产品等级', value: detailOrder.originalProductLevel || '-' },
-                      { label: '原付款金额', value: formatCurrency(detailOrder.originalAmount) },
-                      { label: '挽回人员', value: detailOrder.recoveryUserName || '-' },
-                      { label: '订单创建人', value: detailOrder.createdByName || '-' },
-                    ].map((item) => (
-                      <Box key={item.label} sx={{ minWidth: 0 }}>
-                        <Typography variant="caption" sx={{ color: shell.muted }}>{item.label}</Typography>
-                        <Typography variant="body2" sx={{ color: shell.ink, fontWeight: 800, overflowWrap: 'anywhere' }}>{item.value}</Typography>
-                      </Box>
-                    ))}
-                  </Box>
-                </Paper>
-
-                <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5, bgcolor: '#fff' }}>
-                  <Typography variant="subtitle2" sx={{ color: shell.ink, fontWeight: 900, mb: 1.25 }}>付款资料</Typography>
-                  <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1.25, mb: 1.25 }}>
-                    {[
-                      { label: '挽回成交金额', value: formatCurrency(detailOrder.recoveryAmount) },
-                      { label: '官方收款渠道', value: detailOrder.officialPaymentChannel || '-' },
-                      { label: '付款订单号', value: detailOrder.paymentOrderNo || '-' },
-                      { label: '付款时间', value: detailOrder.paymentAt ? formatDate(detailOrder.paymentAt, 'yyyy-MM-dd HH:mm') : '-' },
-                    ].map((item) => (
-                      <Box key={item.label} sx={{ minWidth: 0 }}>
-                        <Typography variant="caption" sx={{ color: shell.muted }}>{item.label}</Typography>
-                        <Typography variant="body2" sx={{ color: shell.ink, fontWeight: 800, overflowWrap: 'anywhere' }}>{item.value}</Typography>
-                      </Box>
-                    ))}
-                  </Box>
-                  <Typography variant="caption" sx={{ color: shell.muted, display: 'block', mb: 0.75 }}>挽回凭证</Typography>
-                  <RecoveryEvidenceLinks order={detailOrder} />
-                </Paper>
-              </Box>
+              <RecoverySettlementBusinessPaymentSummary order={detailOrder} />
 
               <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1fr) 360px' }, gap: 1.5, minHeight: '58vh' }}>
                 <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', minWidth: 0 }}>
@@ -1704,7 +1757,9 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                 </Box>
               </Paper>
 
-              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1fr) 360px' }, gap: 1.5, minHeight: '58vh' }}>
+              <RecoverySettlementBusinessPaymentSummary order={selected} />
+
+              <Box data-testid="recovery-settlement-editor" sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1fr) 360px' }, gap: 1.5, minHeight: '58vh' }}>
                 <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', minWidth: 0 }}>
                   <Box
                     sx={{
@@ -2090,6 +2145,14 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         onReorderColumn={reorderColumn}
         onFrozenColumnCountChange={setFrozenColumnCount}
         onReset={resetViewConfig}
+      />
+      <BusinessExportDialog
+        open={exportOpen}
+        title="导出售后挽回分账"
+        expectedCount={total}
+        currentColumnCount={visibleColumns.length}
+        onClose={() => setExportOpen(false)}
+        onRequestExport={handleExportRecoverySettlements}
       />
     </Box>
   );

@@ -39,7 +39,7 @@ import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import PaymentsIcon from '@mui/icons-material/Payments';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
-import { commissionApi, commissionRuleApi, customerApi, orderApi, settingsApi } from '../../api';
+import { businessExportApi, commissionApi, commissionRuleApi, customerApi, orderApi, settingsApi } from '../../api';
 import { getProductLevelRowSx, getProductLevelTagSx, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
@@ -77,6 +77,8 @@ import type { Position } from '../../types/position';
 import type { User } from '../../types/settings';
 import { moduleRadius, moduleTablePaperSx, moduleTokens } from '../../shared/components/ModuleShell';
 import { getActiveCommissions } from '../../shared/utils/financeSettlementPresentation';
+import BusinessExportDialog, { type BusinessExportDialogRequest } from '../../shared/components/BusinessExportDialog';
+import { buildBusinessExportBrowserRequest, unwrapBusinessExportResponse } from '../../shared/utils/businessExportPageRequest';
 
 const ORDER_STATUS_OPTIONS: Array<{ value: CommissionOrderSummaryStatus | '全部'; label: string; important?: boolean }> = [
   { value: '全部', label: '全部' },
@@ -344,6 +346,7 @@ interface CommissionProps {
   hideEmbeddedOrderSplitViewButton?: boolean;
   orderSplitViewTrigger?: number;
   orderSplitCreateTrigger?: number;
+  orderSplitExportTrigger?: number;
 }
 
 type PayoutConfirmAction =
@@ -360,6 +363,7 @@ const Commission: React.FC<CommissionProps> = ({
   hideEmbeddedOrderSplitViewButton = false,
   orderSplitViewTrigger = 0,
   orderSplitCreateTrigger = 0,
+  orderSplitExportTrigger = 0,
 }) => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const canManageOrderSettlement = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_SETTLEMENT, 'write');
@@ -368,6 +372,7 @@ const Commission: React.FC<CommissionProps> = ({
   const [tabValue, setTabValue] = useState(initialTab);
   const lastOrderSplitViewTriggerRef = useRef(orderSplitViewTrigger);
   const lastOrderSplitCreateTriggerRef = useRef(orderSplitCreateTrigger);
+  const lastOrderSplitExportTriggerRef = useRef(orderSplitExportTrigger);
   const [orderRows, setOrderRows] = useState<CommissionOrderSummary[]>([]);
   const [orderLoading, setOrderLoading] = useState(false);
   const [orderPagination, setOrderPagination] = useState({ page: 1, pageSize: 10, total: 0 });
@@ -382,6 +387,7 @@ const Commission: React.FC<CommissionProps> = ({
   });
   const [orderStatusCounts, setOrderStatusCounts] = useState<CommissionOrderSummaryStatusCounts>(DEFAULT_ORDER_STATUS_COUNTS);
   const [orderSplitViewOpen, setOrderSplitViewOpen] = useState(false);
+  const [orderSplitExportOpen, setOrderSplitExportOpen] = useState(false);
   const [orderSplitViewConfig, setOrderSplitViewConfig] = useState<OrderSplitViewConfig>(() => readOrderSplitViewConfig());
   const [orderSplitColumnWidths, setOrderSplitColumnWidths] = useState<ColumnWidthMap>(() => (
     readColumnWidths(ORDER_SPLIT_WIDTH_STORAGE_KEY, DEFAULT_ORDER_SPLIT_COLUMN_WIDTHS)
@@ -750,6 +756,21 @@ const Commission: React.FC<CommissionProps> = ({
     lastOrderSplitCreateTriggerRef.current = orderSplitCreateTrigger;
     openCreateSplitDialog();
   }, [orderSplitCreateTrigger]);
+
+  useEffect(() => {
+    if (orderSplitExportTrigger <= 0) return;
+    if (lastOrderSplitExportTriggerRef.current === orderSplitExportTrigger) return;
+    lastOrderSplitExportTriggerRef.current = orderSplitExportTrigger;
+    setOrderSplitExportOpen(true);
+  }, [orderSplitExportTrigger]);
+
+  const handleExportOrderSettlements = async (request: BusinessExportDialogRequest) => {
+    const response = await businessExportApi.exportOrderSettlements(buildBusinessExportBrowserRequest(
+      buildOrderSummaryFilters(),
+      { ...request, columnIds: visibleOrderSplitColumns.map((column) => column.id) },
+    ));
+    return unwrapBusinessExportResponse(response);
+  };
 
   const updateOrderFilter = (key: keyof typeof orderFilters, value: string) => {
     setOrderPagination((prev) => ({ ...prev, page: 1 }));
@@ -3018,6 +3039,15 @@ const Commission: React.FC<CommissionProps> = ({
       {tabValue === 1 && renderMonthlyPayout()}
 
       {tabValue === 2 && <CommissionRuleConfig />}
+
+      <BusinessExportDialog
+        open={orderSplitExportOpen}
+        title="导出订单分账"
+        expectedCount={orderPagination.total}
+        currentColumnCount={visibleOrderSplitColumns.length}
+        onClose={() => setOrderSplitExportOpen(false)}
+        onRequestExport={handleExportOrderSettlements}
+      />
 
       <Dialog open={createSplitOpen} onClose={closeCreateSplitDialog} maxWidth="lg" fullWidth>
         <DialogCloseTitle onClose={closeCreateSplitDialog}>新建订单分账</DialogCloseTitle>
