@@ -214,9 +214,20 @@ function SnapshotField({ label, children, strong = false }: { label: string; chi
   return (
     <Box>
       <Typography variant="body2" sx={{ color: '#6b7280' }}>{label}</Typography>
-      <Typography variant="body1" sx={{ fontWeight: strong ? 700 : 500, color: strong ? '#1a1a2e' : 'inherit' }}>
+      <Box sx={{ fontSize: '1rem', lineHeight: 1.5, fontWeight: strong ? 700 : 500, color: strong ? '#1a1a2e' : 'inherit' }}>
         {children}
-      </Typography>
+      </Box>
+    </Box>
+  );
+}
+
+function SnapshotSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <Box component="section">
+      <Typography variant="h6" sx={{ mb: 2, fontWeight: 700 }}>{title}</Typography>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 2 }}>
+        {children}
+      </Box>
     </Box>
   );
 }
@@ -991,19 +1002,8 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
               </Box>
             </DialogCloseTitle>
             <DialogContent dividers>
-              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 2 }}>
+              <SnapshotSection title="客户资料">
                 <SnapshotField label="客户名称">{detailApplication.orderData.customerName}</SnapshotField>
-                <SnapshotField label="产品名称">{detailApplication.orderData.productName || detailApplication.orderData.productLevel || '-'}</SnapshotField>
-                <Box>
-                  <Typography variant="body2" sx={{ color: '#6b7280' }}>产品等级</Typography>
-                  <Chip label={detailApplication.orderData.productLevel || '-'} size="small" sx={getProductLevelTagSx(detailApplication.orderData.productLevel)} />
-                </Box>
-                <SnapshotField label="订单类型">{detailApplication.orderData.orderType || '-'}</SnapshotField>
-                <SnapshotField label="实付金额" strong>
-                  {formatCurrency(detailApplication.orderData.actualAmount || detailApplication.orderData.amount)}
-                </SnapshotField>
-                <SnapshotField label="官方收款渠道">{detailApplication.orderData.officialPaymentChannel || '-'}</SnapshotField>
-                <SnapshotField label="第三方平台订单">{detailApplication.orderData.thirdPartyOrderNo || '-'}</SnapshotField>
                 <SnapshotField label="资源归属">
                   {normalizeResourceOwnership(detailApplication.orderData.resourceOwnership || detailApplication.orderData.sourceType)}
                 </SnapshotField>
@@ -1011,16 +1011,22 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                   {formatLeadSourceLabel(detailApplication.orderData.leadSource, detailApplication.orderData.sourceName)}
                 </SnapshotField>
                 <SnapshotField label="销售负责人">{detailApplication.orderData.owner}</SnapshotField>
-                <SnapshotField label="订单创建人">{detailApplication.applicantName}</SnapshotField>
                 <SnapshotField label="线索录入人">{detailApplication.orderData.leadInputBy || '-'}</SnapshotField>
                 <SnapshotField label="线索贡献人">{detailApplication.orderData.leadContributorName || '-'}</SnapshotField>
+              </SnapshotSection>
+
+              <Divider sx={{ my: 2 }} />
+              <SnapshotSection title="订单资料">
+                <SnapshotField label="产品名称">{detailApplication.orderData.productName || detailApplication.orderData.productLevel || '-'}</SnapshotField>
+                <Box>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>产品等级</Typography>
+                  <Chip label={detailApplication.orderData.productLevel || '-'} size="small" sx={getProductLevelTagSx(detailApplication.orderData.productLevel)} />
+                </Box>
+                <SnapshotField label="订单类型">{detailApplication.orderData.orderType || '-'}</SnapshotField>
+                <SnapshotField label="第三方平台订单">{detailApplication.orderData.thirdPartyOrderNo || '-'}</SnapshotField>
                 <SnapshotField label="正式订单号">{detailApplication.orderNo || '-'}</SnapshotField>
-                <SnapshotField label="提交时间">{formatDate(detailApplication.submittedAt, 'yyyy-MM-dd HH:mm:ss')}</SnapshotField>
-                <SnapshotField label="审核人">{detailApplication.reviewerName || '-'}</SnapshotField>
-                <SnapshotField label="审核时间">{formatDate(detailApplication.reviewedAt, 'yyyy-MM-dd HH:mm:ss')}</SnapshotField>
-                <SnapshotField label="退回/驳回原因">{detailApplication.reason || '-'}</SnapshotField>
                 <SnapshotField label="备注">{detailApplication.orderData.notes || '-'}</SnapshotField>
-              </Box>
+              </SnapshotSection>
 
               {detailFormalOrder?.applicationId === detailApplication.id
                 && (detailFormalOrder.order.thirdPartyOrderNo || '') !== (detailApplication.orderData.thirdPartyOrderNo || '') && (
@@ -1031,8 +1037,14 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
               )}
 
               <Divider sx={{ my: 2 }} />
-              <Typography variant="subtitle2" sx={{ mb: 1, color: '#6b7280' }}>付款记录</Typography>
-              <TableContainer>
+              <SnapshotSection title="付款资料">
+                <SnapshotField label="实付金额" strong>
+                  {formatCurrency(detailApplication.orderData.actualAmount || detailApplication.orderData.amount)}
+                </SnapshotField>
+                <SnapshotField label="官方收款渠道">{detailApplication.orderData.officialPaymentChannel || '-'}</SnapshotField>
+              </SnapshotSection>
+
+              <TableContainer sx={{ mt: 2 }}>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
@@ -1040,7 +1052,6 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                       <TableCell>付款时间</TableCell>
                       <TableCell>付款订单号</TableCell>
                       <TableCell>付款截图</TableCell>
-                      <TableCell>成交路径截图</TableCell>
                       <TableCell>备注</TableCell>
                     </TableRow>
                   </TableHead>
@@ -1056,23 +1067,12 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                               ? <BusinessAttachmentLinks attachments={payment.attachments} />
                               : <AttachmentPreviewLink title="付款截图" fileName={payment.voucherName} src={payment.voucherPreview} />}
                           </TableCell>
-                          <TableCell>
-                            {detailApplication.orderData.dealEvidenceAttachments?.length
-                              ? <BusinessAttachmentLinks attachments={detailApplication.orderData.dealEvidenceAttachments} />
-                              : (
-                                <AttachmentPreviewLink
-                                  title="成交路径截图"
-                                  fileName={detailApplication.orderData.dealEvidenceName}
-                                  src={detailApplication.orderData.dealEvidencePreview}
-                                />
-                              )}
-                          </TableCell>
                           <TableCell>{payment.remark || '-'}</TableCell>
                         </TableRow>
                       ))
                     ) : (
                       <TableRow>
-                        <TableCell colSpan={6} align="center" sx={{ color: '#9ca3af', py: 3 }}>暂无付款记录</TableCell>
+                        <TableCell colSpan={5} align="center" sx={{ color: '#9ca3af', py: 3 }}>暂无付款记录</TableCell>
                       </TableRow>
                     )}
                   </TableBody>
@@ -1080,7 +1080,30 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
               </TableContainer>
 
               <Divider sx={{ my: 2 }} />
-              <Box>
+              <SnapshotSection title="成交资料">
+                <SnapshotField label="成交路径 / 聊天记录">
+                  {detailApplication.orderData.dealEvidenceAttachments?.length
+                    ? <BusinessAttachmentLinks attachments={detailApplication.orderData.dealEvidenceAttachments} />
+                    : (
+                      <AttachmentPreviewLink
+                        title="成交路径 / 聊天记录"
+                        fileName={detailApplication.orderData.dealEvidenceName}
+                        src={detailApplication.orderData.dealEvidencePreview}
+                      />
+                    )}
+                </SnapshotField>
+              </SnapshotSection>
+
+              <Divider sx={{ my: 2 }} />
+              <SnapshotSection title="审核资料">
+                <SnapshotField label="订单创建人">{detailApplication.applicantName}</SnapshotField>
+                <SnapshotField label="提交时间">{formatDate(detailApplication.submittedAt, 'yyyy-MM-dd HH:mm:ss')}</SnapshotField>
+                <SnapshotField label="审核人">{detailApplication.reviewerName || '-'}</SnapshotField>
+                <SnapshotField label="审核时间">{formatDate(detailApplication.reviewedAt, 'yyyy-MM-dd HH:mm:ss')}</SnapshotField>
+                <SnapshotField label="退回/驳回原因">{detailApplication.reason || '-'}</SnapshotField>
+              </SnapshotSection>
+
+              <Box sx={{ mt: 2 }}>
                 <Typography variant="subtitle2" sx={{ mb: 1, color: '#6b7280' }}>审核记录</Typography>
                 {detailApplication.reviewLogs.length ? (
                   detailApplication.reviewLogs.map((log) => (

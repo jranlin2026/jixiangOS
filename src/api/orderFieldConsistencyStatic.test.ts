@@ -61,3 +61,11 @@ for (const section of ['客户资料', '订单资料', '付款资料', '成交�
 for (const section of ['客户资料', '订单资料', '付款资料', '成交资料', '记录资料']) {
   assert.match(orderDetailSource, new RegExp(`title="${section}"`), `订单资料页应包含“${section}”分区`);
 }
+
+const orderReviewDetailSource = orderReviewSource.slice(
+  orderReviewSource.indexOf('<Dialog open={Boolean(detailApplication)}'),
+  orderReviewSource.indexOf('{feedbackDialog}'),
+);
+for (const section of ['客户资料', '订单资料', '付款资料', '成交资料', '审核资料']) {
+  assert.match(orderReviewDetailSource, new RegExp(`title="${section}"`), `订单审核资料应包含“${section}”分区`);
+}
