@@ -170,4 +170,3 @@ body: { customer: WechatCustomerInput, precheckToken: string }
 - [ ] Audit the branch for raw secrets/contact fixtures, unrestricted tools, unexpected migrations, unrelated files, and accidental lockfile noise.
 - [ ] Write release evidence separating automated proof, QA proof, Windows/OpenClaw pending actions, and production blockers.
 - [ ] Commit `test: verify WeChat customer automation v1`.
-
