@@ -76,6 +76,7 @@ import type { Order } from '../../types/order';
 import type { Position } from '../../types/position';
 import type { User } from '../../types/settings';
 import { moduleRadius, moduleTablePaperSx, moduleTokens } from '../../shared/components/ModuleShell';
+import { getActiveCommissions } from '../../shared/utils/financeSettlementPresentation';
 
 const ORDER_STATUS_OPTIONS: Array<{ value: CommissionOrderSummaryStatus | '全部'; label: string; important?: boolean }> = [
   { value: '全部', label: '全部' },
@@ -979,7 +980,7 @@ const Commission: React.FC<CommissionProps> = ({
       const res = await commissionApi.fetchCommissionsByOrder(summary.orderId);
       if (res.code !== 0) return;
       setSplitOrderId(summary.orderId);
-      setSplitRows(res.data.map(mapCommissionToSplitRow));
+      setSplitRows(getActiveCommissions(res.data).map(mapCommissionToSplitRow));
       setSplitReason('');
       setDetailEditMode(true);
     }
@@ -1158,7 +1159,7 @@ const Commission: React.FC<CommissionProps> = ({
     const res = await commissionApi.fetchCommissionsByOrder(summaryDetail.orderId);
     if (res.code !== 0) return;
     setSplitOrderId(summaryDetail.orderId);
-    setSplitRows(res.data.map(mapCommissionToSplitRow));
+    setSplitRows(getActiveCommissions(res.data).map(mapCommissionToSplitRow));
     setSplitReason('');
     setDetailEditMode(true);
   };
@@ -2732,18 +2733,18 @@ const Commission: React.FC<CommissionProps> = ({
           sx={{ minWidth: { xs: 'auto', sm: 300 } }}
         />
       </Stack>
-      <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
-        <Button onClick={() => (createSplitOpen ? closeCreateSplitDialog() : setDetailEditMode(false))}>
-          {createSplitOpen ? '取消新建' : '取消编辑'}
-        </Button>
-        <Button
-          variant="contained"
-          disabled={splitSaving || !splitReason.trim() || splitRows.length === 0 || splitRows.some((row) => !row.ownerId || !row.payoutPlanId)}
-          onClick={handleSaveSplitRows}
-        >
-          {splitSaving ? '保存中...' : createSplitOpen ? '保存分账' : '保存调整'}
-        </Button>
-      </Stack>
+      {!createSplitOpen && (
+        <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
+          <Button onClick={() => setDetailEditMode(false)}>取消编辑</Button>
+          <Button
+            variant="contained"
+            disabled={splitSaving || !splitReason.trim() || splitRows.length === 0 || splitRows.some((row) => !row.ownerId || !row.payoutPlanId)}
+            onClick={handleSaveSplitRows}
+          >
+            {splitSaving ? '保存中...' : '保存调整'}
+          </Button>
+        </Stack>
+      )}
     </Stack>
   );
 
@@ -3091,7 +3092,14 @@ const Commission: React.FC<CommissionProps> = ({
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={closeCreateSplitDialog}>关闭</Button>
+          <Button onClick={closeCreateSplitDialog} disabled={splitSaving}>取消</Button>
+          <Button
+            variant="contained"
+            disabled={splitSaving || !splitReason.trim() || splitRows.length === 0 || splitRows.some((row) => !row.ownerId || !row.payoutPlanId)}
+            onClick={handleSaveSplitRows}
+          >
+            {splitSaving ? '保存中...' : '保存分账'}
+          </Button>
         </DialogActions>
       </Dialog>
 

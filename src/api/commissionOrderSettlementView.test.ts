@@ -666,3 +666,39 @@ assert.equal(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-
 assert.equal(tieredSales.commissions.find((item: any) => item.id === 'fixed-comm-a').commissionAmount, 123);
 assert.match(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-a').formulaText || '', /销售角色月累计阶梯业绩 30000/);
 assert.match(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-a').formulaText || '', /10%/);
+
+seed();
+const firstSplitBeforeWithdraw = await (commissionApi as any).saveOrderCommissionAdjustments('order-d', [{
+  orderId: 'order-d',
+  role: zh.salesRole,
+  ownerId: 'user-sales',
+  commissionAmount: 30,
+  commissionRate: 0,
+  performanceAmount: 899,
+  calculationNote: 'first split before withdrawal',
+}], 'create split before withdrawal');
+assert.equal(firstSplitBeforeWithdraw.code, 0);
+const withdrawnBeforeRecreate = await (commissionApi as any).withdrawOrderCommissions('order-d', 'withdraw before recreate');
+assert.equal(withdrawnBeforeRecreate.code, 0);
+const creatableAfterWithdraw = await (commissionApi as any).fetchCreatableCommissionOrders({ pageSize: 20 });
+assert.equal(creatableAfterWithdraw.data.items.some((item: any) => item.orderId === 'order-d'), true);
+const recreatedAfterWithdraw = await (commissionApi as any).saveOrderCommissionAdjustments('order-d', [{
+  orderId: 'order-d',
+  role: zh.salesRole,
+  ownerId: 'user-sales',
+  commissionAmount: 30,
+  commissionRate: 0,
+  performanceAmount: 899,
+  calculationNote: 'recreated split after withdrawal',
+}], 'recreate after withdrawal');
+assert.equal(recreatedAfterWithdraw.code, 0, '已撤回订单分账后必须允许重新新建并保存分账');
+assert.equal((recreatedAfterWithdraw.data as Commission[]).some((item) => item.status === zh.pendingConfirm), true);
+assert.equal((recreatedAfterWithdraw.data as Commission[]).some((item) => item.status === zh.withdrawn), true, '重新新建分账后必须保留已撤回留痕');
+
+const createSplitDialogSource = commissionPageSource.slice(
+  commissionPageSource.indexOf('<Dialog open={createSplitOpen}'),
+  commissionPageSource.indexOf('<Dialog open={Boolean(deleteSummary)}'),
+);
+const createSplitDialogActionsSource = createSplitDialogSource.slice(createSplitDialogSource.indexOf('<DialogActions>'));
+assert.match(createSplitDialogActionsSource, /保存分账/, '新建订单分账弹窗底栏必须始终显示保存按钮');
+assert.match(commissionPageSource, /setSplitRows\(getActiveCommissions\(res\.data\)\.map\(mapCommissionToSplitRow\)\)/, '编辑新分账时不得把已撤回留痕重新带入可编辑行');

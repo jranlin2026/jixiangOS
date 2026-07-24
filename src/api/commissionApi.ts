@@ -899,10 +899,15 @@ async function saveOrderCommissionAdjustments(
   const now = new Date().toISOString();
   const operator = getCurrentOperatorName('财务');
   const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
+  const retainedInactiveRows = commissions.filter((commission) => (
+    commission.orderId === orderId && isInactiveCommission(normalizeCommission(commission))
+  ));
   const existingById = new Map(
     commissions
       .filter((commission) => commission.orderId === orderId)
-      .map((commission) => [commission.id, normalizeCommission(commission)]),
+      .map((commission) => normalizeCommission(commission))
+      .filter((commission) => !isInactiveCommission(commission))
+      .map((commission) => [commission.id, commission]),
   );
   const submittedIds = new Set(rows.map((row) => row.id).filter(Boolean));
   const removedLockedRow = Array.from(existingById.values()).find((commission) => (
@@ -910,17 +915,22 @@ async function saveOrderCommissionAdjustments(
   ));
   if (removedLockedRow) return createErrorResponse('只能删除待确认阶段的分账记录，已进入发放链路的分账请使用撤回流程');
 
-  const adjustedRows = resolvedRows.map(({ row, resolved }) => buildAdjustedCommission(
-    order,
-    row,
-    { user: resolved.user!, department: resolved.department },
-    row.id ? existingById.get(row.id) : undefined,
-    reason,
-    operator,
-    now,
-  ));
+  const adjustedRows = resolvedRows.map(({ row, resolved }) => {
+    const existing = row.id ? existingById.get(row.id) : undefined;
+    const editableRow = row.id && !existing ? { ...row, id: undefined } : row;
+    return buildAdjustedCommission(
+      order,
+      editableRow,
+      { user: resolved.user!, department: resolved.department },
+      existing,
+      reason,
+      operator,
+      now,
+    );
+  });
   const next = [
     ...adjustedRows,
+    ...retainedInactiveRows,
     ...commissions.filter((commission) => commission.orderId !== orderId),
   ];
   saveCommissions(next);
