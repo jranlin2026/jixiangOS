@@ -35,6 +35,9 @@ assert.equal(
 );
 assert.match(createDialogSource, /title="付款截图"/);
 assert.match(createDialogSource, /title="成交路径 \/ 聊天记录"/);
+for (const section of ['客户资料', '原订单资料', '挽回成交资料', '凭证资料', '补充资料']) {
+  assert.match(createDialogSource, new RegExp(`title="${section}"`), `新建售后挽回单应包含“${section}”填写分区。`);
+}
 
 const detailDialogSource = recoveryOrderSource.slice(
   recoveryOrderSource.indexOf('<Dialog open={Boolean(detailOrder)}'),

@@ -134,6 +134,17 @@ function DetailField({ label, children, wide = false }: { label: string; childre
   );
 }
 
+function RecoveryFormSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <Box component="section">
+      <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1.5 }}>{title}</Typography>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)' }, gap: 2 }}>
+        {children}
+      </Box>
+    </Box>
+  );
+}
+
 interface RecoveryOrderTabProps {
   mode: 'list' | 'review';
   createSignal?: number;
@@ -943,10 +954,15 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       <Dialog open={open} onClose={() => { setOpen(false); setEditingOrder(null); }} maxWidth="md" fullWidth>
         <DialogTitle>{editingOrder ? '编辑售后挽回订单' : '新建售后挽回订单'}</DialogTitle>
         <DialogContent dividers>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)' }, gap: 2, pt: 1 }}>
+          <Box sx={{ pt: 1 }}>
+          <RecoveryFormSection title="客户资料">
             <TextField label="客户姓名" value={form.customerName} onChange={(event) => setForm({ ...form, customerName: event.target.value })} required />
             <TextField label="客户手机号" value={form.customerPhone} onChange={(event) => setForm({ ...form, customerPhone: event.target.value })} />
             <TextField label="客户微信" value={form.customerWechat} onChange={(event) => setForm({ ...form, customerWechat: event.target.value })} />
+          </RecoveryFormSection>
+
+          <Divider sx={{ my: 2.5 }} />
+          <RecoveryFormSection title="原订单资料">
             <TextField label="第三方平台订单号" value={form.thirdPartyOrderNo} onChange={(event) => setForm({ ...form, thirdPartyOrderNo: event.target.value })} required />
             <TextField select label="来源平台" value={form.sourcePlatformId} onChange={(event) => {
               const platform = sourceConfigs.find((item) => item.id === event.target.value);
@@ -976,6 +992,10 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
               )}
             </TextField>
             <TextField label="原付款金额" type="number" value={form.originalAmount} onChange={(event) => setForm({ ...form, originalAmount: event.target.value })} />
+          </RecoveryFormSection>
+
+          <Divider sx={{ my: 2.5 }} />
+          <RecoveryFormSection title="挽回成交资料">
             <TextField label="挽回成交金额" type="number" value={form.recoveryAmount} onChange={(event) => setForm({ ...form, recoveryAmount: event.target.value })} required />
             <TextField label="挽回成交时间" type="datetime-local" value={form.recoveryAt} onChange={(event) => setForm({ ...form, recoveryAt: event.target.value })} required InputLabelProps={{ shrink: true }} inputProps={{ step: 1 }} />
             <TextField select label="官方收款渠道" value={form.officialPaymentChannel} onChange={(event) => setForm({ ...form, officialPaymentChannel: event.target.value })}>
@@ -991,13 +1011,22 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
               <MenuItem value="">无</MenuItem>
               {activeUsers.filter((user) => user.id !== form.recoveryUserId).map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
             </TextField>
+          </RecoveryFormSection>
+
+          <Divider sx={{ my: 2.5 }} />
+          <RecoveryFormSection title="凭证资料">
             <Box sx={{ gridColumn: { md: '1 / -1' } }}>
               <BusinessAttachmentPicker title="付款截图" description="用于核对挽回成交的付款事实，可多选、拖拽或直接粘贴。" value={form.paymentAttachments} onChange={(paymentAttachments) => setForm((current) => ({ ...current, paymentAttachments }))} category="recovery-payment-proof" draftKey={editingOrder?.id || `recovery-new-${currentUser?.id || 'unknown'}`} maxCount={8} />
             </Box>
             <Box sx={{ gridColumn: { md: '1 / -1' } }}>
               <BusinessAttachmentPicker title="成交路径 / 聊天记录" description="用于留存成交确认和沟通过程，可多选、拖拽或直接粘贴。" value={form.chatAttachments} onChange={(chatAttachments) => setForm((current) => ({ ...current, chatAttachments }))} category="recovery-chat-evidence" draftKey={editingOrder?.id || `recovery-new-${currentUser?.id || 'unknown'}`} maxCount={8} />
             </Box>
+          </RecoveryFormSection>
+
+          <Divider sx={{ my: 2.5 }} />
+          <RecoveryFormSection title="补充资料">
             <TextField label="备注" value={form.remark} onChange={(event) => setForm({ ...form, remark: event.target.value })} multiline minRows={3} sx={{ gridColumn: { md: '1 / -1' } }} />
+          </RecoveryFormSection>
           </Box>
         </DialogContent>
         <DialogActions>
