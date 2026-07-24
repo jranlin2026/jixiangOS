@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { createWechatCustomerAutomationRouter } from './wechatCustomerAutomationRoutes';
+import {
+  createWechatCustomerAutomationRouter,
+  readWechatAutomationQaDatabaseIdentity,
+} from './wechatCustomerAutomationRoutes';
 import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 
 const TOKEN = 'wechat-automation-token-that-is-at-least-32-characters';
@@ -16,7 +19,9 @@ function response() {
   return {
     statusCode: 200,
     body: null as unknown,
+    headers: new Map<string, string>(),
     status(code: number) { this.statusCode = code; return this; },
+    setHeader(name: string, value: string) { this.headers.set(name.toLowerCase(), value); return this; },
     json(body: unknown) { this.body = body; return this; },
   };
 }
@@ -37,12 +42,23 @@ async function post(router: any, path: string, headers: Record<string, string | 
 
 let currentActor: typeof actor | null = actor;
 const createCalls: any[] = [];
+let checkCalls = 0;
 let createError: unknown = null;
+const qaEnvironment = {
+  NODE_ENV: 'test',
+  QA_ALLOW_DESTRUCTIVE_DB: 'true',
+  QA_DATABASE_NAME: 'jixiang_os_qa',
+  DATABASE_URL: 'mysql://qa_user:qa_password@127.0.0.1:3306/jixiang_os_qa',
+};
 const router = createWechatCustomerAutomationRouter({
   config: () => ({ token: TOKEN, actorAccount: 'wechat-bot', signingKey: 'signing-key-that-is-at-least-32-characters', senderId: SENDER_ID }),
   resolveActor: async () => currentActor,
+  qaDatabaseIdentity: (declaredDatabaseName) => readWechatAutomationQaDatabaseIdentity(declaredDatabaseName, qaEnvironment),
   service: {
-    check: async () => ({ status: 'needs_input', field: 'name', message: '请提供客户姓名' }),
+    check: async () => {
+      checkCalls += 1;
+      return { status: 'needs_input', field: 'name', message: '请提供客户姓名' };
+    },
     create: async (customer, precheckToken, context) => {
       createCalls.push({ customer, precheckToken, context });
       if (createError) throw createError;
@@ -76,6 +92,42 @@ const checked = await post(router, '/customers/check', {
 }, { customer: {} });
 assert.equal(checked.statusCode, 200);
 assert.deepEqual(checked.body, { code: 0, data: { status: 'needs_input', field: 'name', message: '请提供客户姓名' }, message: 'success' });
+
+const qaProven = await post(router, '/customers/check', {
+  authorization: `Bearer ${TOKEN}`,
+  'x-jxos-wechat-sender': SENDER_ID,
+  'x-jxos-qa-database-proof': 'jixiang_os_qa',
+}, { customer: {} });
+assert.equal(qaProven.statusCode, 200);
+assert.equal(qaProven.headers.get('x-jxos-qa-database-proof'), 'jixiang_os_qa');
+
+const checksBeforeRejectedProof = checkCalls;
+const qaProofRejected = await post(router, '/customers/check', {
+  authorization: `Bearer ${TOKEN}`,
+  'x-jxos-wechat-sender': SENDER_ID,
+  'x-jxos-qa-database-proof': 'another_qa',
+}, { customer: {} });
+assert.equal(qaProofRejected.statusCode, 503);
+assert.deepEqual(qaProofRejected.body, { code: 503, data: null, message: 'WeChat customer automation is unavailable.' });
+assert.equal(checkCalls, checksBeforeRejectedProof, 'failed QA database proof must stop before the business service');
+
+assert.deepEqual(
+  readWechatAutomationQaDatabaseIdentity('jixiang_os_qa', qaEnvironment),
+  { databaseName: 'jixiang_os_qa' },
+  'proof returns only the safe database name, never the URL or credentials',
+);
+for (const unsafeEnvironment of [
+  { ...qaEnvironment, NODE_ENV: 'production' },
+  { ...qaEnvironment, NODE_ENV: 'PrOdUcTiOn' },
+  { ...qaEnvironment, NODE_ENV: undefined },
+  { ...qaEnvironment, QA_ALLOW_DESTRUCTIVE_DB: 'false' },
+  { ...qaEnvironment, QA_DATABASE_NAME: 'customerprod_qa', DATABASE_URL: 'mysql://qa_user:qa_password@127.0.0.1:3306/customerprod_qa' },
+  { ...qaEnvironment, DATABASE_URL: 'mysql://qa_user:qa_password@127.0.0.1:3306/another_qa' },
+  { ...qaEnvironment, DATABASE_URL: 'mysql://qa_user:qa_password@db.internal:3306/jixiang_os_qa' },
+]) {
+  assert.equal(readWechatAutomationQaDatabaseIdentity('jixiang_os_qa', unsafeEnvironment), null);
+}
+assert.equal(readWechatAutomationQaDatabaseIdentity('another_qa', qaEnvironment), null);
 
 for (const replacement of [
   { ...actor, isActive: false },

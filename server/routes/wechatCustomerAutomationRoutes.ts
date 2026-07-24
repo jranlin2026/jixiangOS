@@ -22,10 +22,43 @@ type WechatCustomerAutomationRouteService = {
 export type WechatCustomerAutomationRouterDependencies = {
   config(): WechatAutomationConfig | null;
   resolveActor(account: string): Promise<AuthenticatedUser | null>;
+  qaDatabaseIdentity(declaredDatabaseName: string): { databaseName: string } | null;
   service: WechatCustomerAutomationRouteService;
 };
 
 type AutomationRequest = Request & { automationActor?: AuthenticatedUser; automationSenderId?: string };
+
+const PRODUCTION_MARKERS = /(prod|production|live|main|primary)/i;
+const LOOPBACK_DATABASE_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+const QA_RUNTIME_ENVIRONMENTS = new Set(['development', 'test']);
+
+export function readWechatAutomationQaDatabaseIdentity(
+  declaredDatabaseName: string,
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
+): { databaseName: string } | null {
+  const expectedName = env.QA_DATABASE_NAME?.trim() || '';
+  const runtimeEnvironment = env.NODE_ENV?.trim().toLowerCase() || '';
+  if (!QA_RUNTIME_ENVIRONMENTS.has(runtimeEnvironment)
+    || env.QA_ALLOW_DESTRUCTIVE_DB !== 'true'
+    || !expectedName
+    || declaredDatabaseName !== expectedName
+    || PRODUCTION_MARKERS.test(expectedName)
+    || (!expectedName.toLowerCase().includes('_qa') && !expectedName.toLowerCase().includes('_test'))) {
+    return null;
+  }
+  try {
+    const databaseUrl = new URL(env.DATABASE_URL || '');
+    const actualName = decodeURIComponent(databaseUrl.pathname.replace(/^\//, ''));
+    if (!['mysql:', 'mysql2:'].includes(databaseUrl.protocol)
+      || !LOOPBACK_DATABASE_HOSTS.has(databaseUrl.hostname)
+      || actualName !== expectedName) {
+      return null;
+    }
+    return { databaseName: actualName };
+  } catch {
+    return null;
+  }
+}
 
 function unauthorized(response: Response): void {
   response.status(401).json(failure('Unauthorized', 401));
@@ -104,6 +137,15 @@ export function createWechatCustomerAutomationRouter(deps: WechatCustomerAutomat
 
   router.post('/customers/check', authenticate, async (request: AutomationRequest, response) => {
     try {
+      const proofHeader = request.headers['x-jxos-qa-database-proof'];
+      if (proofHeader !== undefined) {
+        const declaredDatabaseName = Array.isArray(proofHeader) ? '' : proofHeader.trim();
+        const identity = declaredDatabaseName ? deps.qaDatabaseIdentity(declaredDatabaseName) : null;
+        if (!identity || identity.databaseName !== declaredDatabaseName) {
+          throw Object.assign(new Error('QA database identity proof failed.'), { statusCode: 503 });
+        }
+        response.setHeader('x-jxos-qa-database-proof', identity.databaseName);
+      }
       response.status(200).json(success(await deps.service.check(parseCheckBody(request.body), context(request))));
     } catch (error) {
       sendError(response, error);

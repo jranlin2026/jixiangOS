@@ -35,7 +35,7 @@
 - Produces `WechatAutomationConfig`, `readWechatAutomationConfig(env)`, `validateWechatAutomationRuntimeConfig(env)`, `authenticateWechatAutomationToken(provided, configured)`, `issueWechatCustomerPrecheckToken(payload, signingKey, now?)`, and `verifyWechatCustomerPrecheckToken(token, signingKey, now?)`.
 - Token payload contains only `version`, `actorId`, `senderIdHash`, `inputHash`, `nonce`, `issuedAt`, and `expiresAt`; TTL is exactly ten minutes.
 
-- [ ] Write a failing public-interface test proving all three integration variables must be configured together, secrets require at least 32 characters, token comparison rejects wrong length/value, and production validation fails closed.
+- [ ] Write a failing public-interface test proving all four integration variables must be configured together, secrets require at least 32 characters, token comparison rejects wrong length/value, and production validation fails closed.
 - [ ] Run `npx tsx server/services/wechatAutomationSecurity.test.ts` and confirm RED.
 - [ ] Implement configuration parsing and constant-time bearer-token comparison with Node `timingSafeEqual`; add production runtime validation and documented `.env.example` entries.
 - [ ] Re-run the focused test and `npx tsx server/config/runtime.test.ts`; confirm GREEN.

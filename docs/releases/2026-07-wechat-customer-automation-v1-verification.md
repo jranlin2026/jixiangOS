@@ -1,9 +1,9 @@
 # 微信新增客户自动化 V1 验证记录
 
-> 验证日期：2026-07-25  
-> 分支：`codex/wechat-control-v1`  
-> 分支基线：`cb3be5e`  
-> 验证对象：`e25682fb8161d0b1ff2340773c49bf890e5530a3` 及本验证记录提交
+> 验证日期：2026-07-25
+> 分支：`codex/wechat-control-v1`
+> 分支基线：`cb3be5e`
+> 验证对象：`91a89fc0c01ccc21cb5b299d83a0655aafc29297` 及后续审查修复提交
 
 ## 结论
 
@@ -22,13 +22,13 @@
 | 生产构建 | 通过 | `npm run build` 退出 0，`tsc -b` 与 Vite 生产构建完成 |
 | Prisma schema | 通过 | 使用回环测试 URL 执行 `npx prisma validate`，`prisma/schema.prisma` 有效 |
 | 生产配置检查 | 通过 | 使用完整的非真实安全测试值执行 `npm run prod:check`，退出 0 |
-| 分支差异检查 | 通过 | `git diff --check cb3be5e` 无错误 |
+| 分支差异检查 | 通过 | `git diff --check cb3be5e` 无错误；`git diff --name-only cb3be5e | wc -l` 为 39 |
 
 `npm test` 中既有的实时数据库集成测试因当前未设置 `DATABASE_URL` 而跳过；这不能替代隔离 QA 数据库验收。
 
 ## 分支安全审计
 
-- 从基线到验证对象共变更 38 个路径；没有 Prisma schema 或 migration 变更。
+- 从基线到验证对象共变更 39 个路径；没有 Prisma schema 或 migration 变更。
 - `package-lock.json` 增加 289 行，对应显式加入的官方 MCP SDK 与传递依赖；未发现无关 lockfile 重写。
 - MCP 注册表面严格限定为 `jxos_customer_check` 和 `jxos_customer_create`，不包含 shell、文件、数据库、浏览器或任意 HTTP 能力。
 - 差异中未发现私钥文本或真实 Bearer 凭据。手机号、微信号、token 字符仅出现在合成测试夹具和脱敏回归断言中，不是真实客户或生产凭据。
@@ -45,7 +45,7 @@
 5. 客户详情和审计中可见 `create_customer_from_wechat`、自动化员工、request ID 和幂等键，且不含原始联系方式。
 6. 停用自动化员工或更换服务端密钥后，旧链路立即失败关闭。
 
-live verifier 只能在显式 `--live`、回环 API origin、含 `_qa`/`_test` 且不含生产标记的 target marker、以及第二次一次性写入确认同时满足时执行。
+live verifier 只能在显式 `--live`、回环 API origin、安全数据库名及第二次一次性写入确认同时满足时执行。create 前的已认证只读 check 还必须从 API 获得数据库身份证明：服务端当前 `DATABASE_URL` 的回环数据库名与服务端 `QA_DATABASE_NAME`、verifier 声明完全一致，包含 `_qa`/`_test`、不含生产词，且 `QA_ALLOW_DESTRUCTIVE_DB=true`。响应只回传安全库名，不回传或记录数据库 URL/凭据；证明失败时不得调用 create。
 
 ## Windows / OpenClaw：人工待验收
 

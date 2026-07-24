@@ -277,13 +277,15 @@ openclaw mcp doctor jixiangos-crm --probe
 }
 ```
 
-API 必须是 `localhost`/`127.0.0.1`/`::1`，且显式目标名称必须包含 `_qa` 或 `_test`。目标名称包含 `prod`、`production`、`live`、`main` 或 `primary` 时，即使同时包含 `_qa`/`_test` 也会被拒绝。先将 token 和 sender ID 从密钥管理器注入当前进程环境，再运行：
+API 必须是 `localhost`/`127.0.0.1`/`::1`。API 进程的 `DATABASE_URL` 也必须指向回环 MySQL，实际数据库名必须与 API 进程的 `QA_DATABASE_NAME` 以及 verifier 声明的名称完全一致，名称包含 `_qa` 或 `_test` 且任何位置都不含 `prod`、`production`、`live`、`main` 或 `primary`，并且 API 进程必须显式设置 `QA_ALLOW_DESTRUCTIVE_DB=true`。先将 token 和 sender ID 从密钥管理器注入当前进程环境，再运行：
 
 ```powershell
-npm run wechat:automation:verify -- --live --acknowledge-disposable-qa-write --api-origin=http://127.0.0.1:<LOOPBACK_PORT> --target-marker=<ISOLATED_DATABASE_QA_OR_TEST_MARKER> --qa-data=<DISPOSABLE_QA_JSON_PATH>
+npm run wechat:automation:verify -- --live --acknowledge-disposable-qa-write --api-origin=http://127.0.0.1:<LOOPBACK_PORT> --qa-database-name=<EXACT_QA_DATABASE_NAME> --qa-data=<DISPOSABLE_QA_JSON_PATH>
 ```
 
-live 模式在任何 fetch 前必须同时通过五个条件：`--live`、loopback origin、`_qa`/`_test` 标记且名称任何位置都不含生产词、第二确认 flag、调用者提供的 `disposableQa: true` 文件。它发出成功 check/create/replay 三个请求，校验 `ready`、`created`、`replayed` 和稳定客户 ID；随后使用固定非密钥负向凭据再发出一个只读 check，必须得到 401 并映射为含“未写入系统”的安全失败。负向检查不读取错误响应体，报告不输出 token、sender ID、客户字段或原始响应。四个请求都拒绝 HTTP redirect，避免凭据离开 loopback。
+live 模式先执行本地门禁：`--live`、loopback origin、安全的 `_qa`/`_test` 数据库名、第二确认 flag、调用者提供的 `disposableQa: true` 文件及进程环境中的 token/sender。首个已认证只读 check 会携带数据库证明请求头；服务端只有在非 production、破坏性 QA 开关开启、数据库主机回环、`DATABASE_URL` 实际库名与两侧 `QA_DATABASE_NAME` 完全一致时，才回传不含 URL/账号/密码的安全库名响应头。证明缺失或不一致时，verifier 在 create 前停止。
+
+证明通过后，它再校验 `ready`、`created`、`replayed` 和稳定客户 ID；随后使用固定非密钥负向凭据发出一个只读 check，必须得到 401。负向检查不读取错误响应体，报告不输出 token、sender ID、客户字段、数据库 URL、凭据或原始响应。四个请求都拒绝 HTTP redirect，避免凭据离开 loopback。一旦 check 表明 `duplicate`，或 create 请求已经发出，任何后续失败都只能提示“QA客户已经或可能存在，必须重置隔离库”，不得声称“未写入系统”。
 
 verifier 不删除、不覆盖也不合并客户。QA 清理只能通过**人工重置该独立数据库**完成，不得通过客户删除接口“清理”。
 

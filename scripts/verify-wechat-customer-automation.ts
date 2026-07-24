@@ -16,7 +16,7 @@ type LiveOptions = {
   mode: 'live';
   acknowledged: boolean;
   apiOrigin: string;
-  targetMarker: string;
+  qaDatabaseName: string;
   qaDataPath: string;
   configPath?: string;
 };
@@ -146,28 +146,28 @@ export function parseVerifierArgs(argv: string[]): VerifierOptions {
   let live = false;
   let acknowledged = false;
   let apiOrigin = '';
-  let targetMarker = '';
+  let qaDatabaseName = '';
   let qaDataPath = '';
   let configPath: string | undefined;
   for (const argument of argv) {
     if (argument === '--live') live = true;
     else if (argument === '--acknowledge-disposable-qa-write') acknowledged = true;
     else if (valueAfterEquals(argument, '--api-origin') !== null) apiOrigin = valueAfterEquals(argument, '--api-origin') || '';
-    else if (valueAfterEquals(argument, '--target-marker') !== null) targetMarker = valueAfterEquals(argument, '--target-marker') || '';
+    else if (valueAfterEquals(argument, '--qa-database-name') !== null) qaDatabaseName = valueAfterEquals(argument, '--qa-database-name') || '';
     else if (valueAfterEquals(argument, '--qa-data') !== null) qaDataPath = valueAfterEquals(argument, '--qa-data') || '';
     else if (valueAfterEquals(argument, '--config') !== null) configPath = valueAfterEquals(argument, '--config') || undefined;
     else throw new Error(`Unknown verifier flag: ${argument.split('=')[0]}`);
   }
   if (!live) {
-    if (acknowledged || apiOrigin || targetMarker || qaDataPath) {
+    if (acknowledged || apiOrigin || qaDatabaseName || qaDataPath) {
       throw new Error('Live-only flags require the explicit --live opt-in.');
     }
     return { mode: 'static', configPath };
   }
-  return { mode: 'live', acknowledged, apiOrigin, targetMarker, qaDataPath, configPath };
+  return { mode: 'live', acknowledged, apiOrigin, qaDatabaseName, qaDataPath, configPath };
 }
 
-function assertSafeLiveOptions(options: LiveOptions): URL {
+function assertSafeLiveOptions(options: LiveOptions, env: NodeJS.ProcessEnv): { origin: URL; qaDatabaseName: string } {
   if (!options.acknowledged) {
     throw new Error('Live QA requires --acknowledge-disposable-qa-write as the second explicit acknowledgement.');
   }
@@ -186,15 +186,16 @@ function assertSafeLiveOptions(options: LiveOptions): URL {
     || origin.hash) {
     throw new Error('Live QA requires a loopback API origin with no path, credentials, query, or fragment.');
   }
-  if (PRODUCTION_MARKERS.test(options.targetMarker)) {
-    throw new Error('Live QA target marker is production-like and is rejected.');
+  const qaDatabaseName = options.qaDatabaseName || env.QA_DATABASE_NAME?.trim() || '';
+  if (PRODUCTION_MARKERS.test(qaDatabaseName)) {
+    throw new Error('Live QA database name is production-like and is rejected.');
   }
-  const marker = options.targetMarker.toLowerCase();
-  if (!marker.includes('_qa') && !marker.includes('_test')) {
-    throw new Error('Live QA target marker must contain _qa or _test.');
+  const lowerName = qaDatabaseName.toLowerCase();
+  if (!lowerName.includes('_qa') && !lowerName.includes('_test')) {
+    throw new Error('Live QA database name must contain _qa or _test.');
   }
   if (!options.qaDataPath) throw new Error('Live QA requires caller-supplied --qa-data.');
-  return origin;
+  return { origin, qaDatabaseName };
 }
 
 function loadQaCustomer(text: string): JsonRecord {
@@ -243,7 +244,7 @@ async function postJson(
   operation: 'check' | 'create',
   headers: Record<string, string>,
   body: JsonRecord,
-): Promise<JsonRecord> {
+): Promise<{ data: JsonRecord; headers: Headers }> {
   let response: Response;
   try {
     response = await fetchImpl(url, {
@@ -264,7 +265,10 @@ async function postJson(
   }
   const envelope = requireRecord(payload, safeVerifierFailureMessage(operation, 0));
   if (envelope.code !== 0) throw new Error(safeVerifierFailureMessage(operation, response.status));
-  return requireRecord(envelope.data, safeVerifierFailureMessage(operation, 0));
+  return {
+    data: requireRecord(envelope.data, safeVerifierFailureMessage(operation, 0)),
+    headers: response.headers,
+  };
 }
 
 function staticPaths(projectRoot: string, configPath?: string) {
@@ -290,8 +294,8 @@ export async function runVerifier(
     return { mode: 'static', configPolicy: 'passed', networkRequests: 0, databaseWrites: 0 };
   }
 
-  const origin = assertSafeLiveOptions(options);
   const env = dependencies.env || process.env;
+  const { origin, qaDatabaseName } = assertSafeLiveOptions(options, env);
   const token = env.JIXIANG_OS_AUTOMATION_TOKEN?.trim() || '';
   const senderId = env.JIXIANG_OS_WECHAT_SENDER_ID?.trim() || '';
   if (!token || !senderId) {
@@ -306,36 +310,51 @@ export async function runVerifier(
   };
   const endpoint = (action: 'check' | 'create') => new URL(`/api/automation/wechat/customers/${action}`, origin);
 
-  const check = await postJson(fetchImpl, endpoint('check'), 'check', headers, { customer });
-  if (check.status !== 'ready' || typeof check.precheckToken !== 'string' || !check.precheckToken) {
-    throw new Error('预检未返回 ready；未写入系统');
-  }
-  const createBody = { customer, precheckToken: check.precheckToken };
-  const created = await postJson(fetchImpl, endpoint('create'), 'create', headers, createBody);
-  if (created.status !== 'created') throw new Error('首次创建未返回 created；未写入系统');
-  const replayed = await postJson(fetchImpl, endpoint('create'), 'create', headers, createBody);
-  if (replayed.status !== 'replayed') throw new Error('重放未返回 replayed；未写入系统');
-  const createdId = record(created.customer)?.id;
-  const replayedId = record(replayed.customer)?.id;
-  if (typeof createdId !== 'string' || !createdId || createdId !== replayedId) {
-    throw new Error('创建与重放的客户 ID 不稳定；未写入系统');
-  }
+  let resetRequired = false;
   try {
-    await postJson(fetchImpl, endpoint('check'), 'check', {
+    const checked = await postJson(fetchImpl, endpoint('check'), 'check', {
       ...headers,
-      authorization: 'Bearer [VERIFIER_NEGATIVE_PROBE]',
+      'x-jxos-qa-database-proof': qaDatabaseName,
     }, { customer });
-    throw new Error('负向认证检查意外成功；未写入系统');
-  } catch (error) {
-    if (!(error instanceof Error)
-      || error.message !== safeVerifierFailureMessage('check', 401)) {
-      throw new Error('负向认证检查未返回预期的安全失败；未写入系统');
+    if (checked.headers.get('x-jxos-qa-database-proof') !== qaDatabaseName) {
+      throw new Error('QA database identity proof failed; no create request was sent.');
     }
+    const check = checked.data;
+    if (check.status === 'duplicate') resetRequired = true;
+    if (check.status !== 'ready' || typeof check.precheckToken !== 'string' || !check.precheckToken) {
+      throw new Error('预检未返回 ready；未写入系统');
+    }
+    const createBody = { customer, precheckToken: check.precheckToken };
+    resetRequired = true;
+    const created = (await postJson(fetchImpl, endpoint('create'), 'create', headers, createBody)).data;
+    if (created.status !== 'created') throw new Error('首次创建未返回 created；未写入系统');
+    const replayed = (await postJson(fetchImpl, endpoint('create'), 'create', headers, createBody)).data;
+    if (replayed.status !== 'replayed') throw new Error('重放未返回 replayed；未写入系统');
+    const createdId = record(created.customer)?.id;
+    const replayedId = record(replayed.customer)?.id;
+    if (typeof createdId !== 'string' || !createdId || createdId !== replayedId) {
+      throw new Error('创建与重放的客户 ID 不稳定；未写入系统');
+    }
+    try {
+      await postJson(fetchImpl, endpoint('check'), 'check', {
+        ...headers,
+        authorization: 'Bearer [VERIFIER_NEGATIVE_PROBE]',
+      }, { customer });
+      throw new Error('负向认证检查意外成功；未写入系统');
+    } catch (error) {
+      if (!(error instanceof Error)
+        || error.message !== safeVerifierFailureMessage('check', 401)) {
+        throw new Error('负向认证检查未返回预期的安全失败；未写入系统');
+      }
+    }
+  } catch (error) {
+    if (resetRequired) throw new Error('QA客户已经或可能存在，必须重置隔离库');
+    throw error;
   }
 
   return {
     mode: 'live-qa',
-    targetSafety: 'loopback _qa/_test target acknowledged',
+    targetSafety: 'loopback API and authenticated QA database identity proven',
     checkStatus: 'ready',
     createStatus: 'created',
     replayStatus: 'replayed',

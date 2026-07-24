@@ -92,7 +92,10 @@ import { createCustomerMergeRouter } from './routes/customerMergeRoutes';
 import { createCustomerMergeService } from './services/customerMergeService';
 import { createPrismaCustomerDataExchangeService } from './services/customerDataExchangeAdapter';
 import { createCustomerDataExchangeRouter } from './routes/customerDataExchangeRoutes';
-import { createWechatCustomerAutomationRouter } from './routes/wechatCustomerAutomationRoutes';
+import {
+  createWechatCustomerAutomationRouter,
+  readWechatAutomationQaDatabaseIdentity,
+} from './routes/wechatCustomerAutomationRoutes';
 import { createWechatCustomerAutomationService } from './services/wechatCustomerAutomationService';
 import { readWechatAutomationConfig } from './services/wechatAutomationSecurity';
 import { resolveCanonicalCustomer } from './services/customerCanonicalService';
@@ -455,6 +458,7 @@ app.get('/api/ready', async (_req, res) => {
 app.use('/api/automation/wechat', createWechatCustomerAutomationRouter({
   config: () => readWechatAutomationConfig(),
   resolveActor: (account) => authService.getAutomationActor(account),
+  qaDatabaseIdentity: (declaredDatabaseName) => readWechatAutomationQaDatabaseIdentity(declaredDatabaseName),
   service: wechatCustomerAutomationService,
 }));
 app.use('/api/customer-tags', createCustomerTagMigrationRouter({
