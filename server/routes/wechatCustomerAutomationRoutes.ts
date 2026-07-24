@@ -54,7 +54,7 @@ function parseCreateBody(value: unknown): { customer: WechatCustomerInput; prech
 
 function statusForError(error: unknown): number {
   const code = Number((error as { statusCode?: unknown } | null)?.statusCode);
-  return code === 409 ? 409 : code === 400 ? 400 : 500;
+  return code === 503 ? 503 : code === 409 ? 409 : code === 400 ? 400 : 500;
 }
 
 function sendError(response: Response, error: unknown): void {

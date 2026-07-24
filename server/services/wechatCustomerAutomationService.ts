@@ -159,6 +159,7 @@ export type WechatCustomerAutomationDependencies = {
   contactIdentityCrypto?: ContactIdentityCrypto;
   now?: () => Date;
   nonce?: () => string;
+  idempotencyWaitTimeoutMs?: number;
 };
 
 type ResolvedCustomer = {
@@ -178,8 +179,8 @@ type Resolution =
 type WechatCreateIdempotencyRecord = {
   version: 1;
   inputHash: string;
-  state: 'in_progress' | 'completed';
-  resultStatus?: 'created';
+  state: 'in_progress' | 'completed' | 'failed';
+  resultStatus?: 'created' | 'duplicate';
   customerId?: string;
   createdAt: string;
   updatedAt: string;
@@ -229,8 +230,18 @@ function idempotencyConflict(): never {
   throw Object.assign(new Error('WeChat customer create idempotency conflict.'), { statusCode: 409 });
 }
 
+function idempotencyPending(): never {
+  throw Object.assign(new Error('WeChat customer create is still in progress.'), { statusCode: 503 });
+}
+
 function validHash(value: unknown): value is string {
   return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+}
+
+function canonicalTimestamp(value: unknown): number | null {
+  if (typeof value !== 'string' || !value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) || date.toISOString() !== value ? null : date.getTime();
 }
 
 function readIdempotencyRecord(value: unknown): WechatCreateIdempotencyRecord | null {
@@ -241,23 +252,33 @@ function readIdempotencyRecord(value: unknown): WechatCreateIdempotencyRecord | 
     'requestId', 'resultStatus', 'state', 'updatedAt', 'version', 'createStartedAt',
   ];
   if (Object.keys(record).some((key) => !expectedKeys.includes(key))) return null;
+  const createdAt = canonicalTimestamp(record.createdAt);
+  const updatedAt = canonicalTimestamp(record.updatedAt);
+  const createStartedAt = canonicalTimestamp(record.createStartedAt);
   if (
     record.version !== 1
     || !validHash(record.inputHash)
-    || (record.state !== 'in_progress' && record.state !== 'completed')
-    || typeof record.createdAt !== 'string'
-    || typeof record.updatedAt !== 'string'
+    || !['in_progress', 'completed', 'failed'].includes(String(record.state))
+    || createdAt === null
+    || updatedAt === null
+    || createStartedAt === null
+    || createdAt > createStartedAt
+    || createStartedAt > updatedAt
     || !Number.isInteger(record.attempts)
     || Number(record.attempts) < 1
     || typeof record.requestId !== 'string'
     || typeof record.idempotencyKey !== 'string'
-    || (record.createStartedAt !== undefined && typeof record.createStartedAt !== 'string')
   ) return null;
   if (record.state === 'completed' && (
     record.resultStatus !== 'created' || typeof record.customerId !== 'string' || !record.customerId
   )) return null;
+  if (record.state === 'failed' && (record.resultStatus !== 'duplicate' || record.customerId !== undefined)) return null;
   if (record.state === 'in_progress' && (record.resultStatus !== undefined || record.customerId !== undefined)) return null;
   return record as WechatCreateIdempotencyRecord;
+}
+
+function failedDuplicateRecord(record: WechatCreateIdempotencyRecord, updatedAt: string): WechatCreateIdempotencyRecord {
+  return { ...record, state: 'failed', resultStatus: 'duplicate', updatedAt };
 }
 
 function createIdentity(senderId: string, nonce: string) {
@@ -269,26 +290,22 @@ function createIdentity(senderId: string, nonce: string) {
   };
 }
 
-function storedCustomerSummary(row: any): WechatCustomerSummary | null {
-  const data = row?.data;
-  if (!data || typeof data !== 'object') return null;
-  const customer = data as Customer;
-  return typeof customer.id === 'string'
-    && typeof customer.name === 'string'
-    && typeof customer.company === 'string'
-    && typeof customer.owner === 'string'
-    ? summary(customer)
-    : null;
-}
-
-async function findCreatedCustomer(
+async function revalidateReplayCustomer(
   deps: WechatCustomerAutomationDependencies,
+  resolved: ResolvedCustomer,
   customerId: string,
-): Promise<WechatCustomerSummary | null> {
-  const row = await deps.prisma.businessRecord.findUnique({
-    where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: customerId } },
+): Promise<WechatCustomerSummary> {
+  const conflict = await findExactCustomerContactDuplicate(deps.prisma as any, {
+    phone: resolved.normalized.phone,
+    wechat: resolved.normalized.wechat,
+    crypto: deps.contactIdentityCrypto,
+    conflictViewer: {
+      canReadCustomerList: resolved.access.canReadCustomerList,
+      canReadCustomer: (customer) => canReadCustomer(resolved.access, customer),
+    },
   });
-  return storedCustomerSummary(row);
+  if (!conflict?.customer || conflict.customer.id !== customerId) idempotencyConflict();
+  return summary(conflict.customer as Customer);
 }
 
 function needsInput(field: string, message: string): Resolution {
@@ -650,8 +667,7 @@ export function createWechatCustomerAutomationService(
       }
 
       if (!ownsReservation && record.state === 'completed') {
-        const customer = await findCreatedCustomer(deps, record.customerId!);
-        if (!customer) idempotencyConflict();
+        const customer = await revalidateReplayCustomer(deps, resolution.value, record.customerId!);
         return {
           status: 'replayed',
           customer,
@@ -659,17 +675,21 @@ export function createWechatCustomerAutomationService(
         };
       }
 
+      if (!ownsReservation && record.state === 'failed') idempotencyConflict();
+
       if (!ownsReservation && record.createStartedAt) {
         let customer: WechatCustomerSummary | null = null;
-        for (let attempt = 0; attempt < 20 && !customer; attempt += 1) {
+        const waitDeadline = Date.now() + Math.max(100, deps.idempotencyWaitTimeoutMs ?? 5_000);
+        while (!customer && Date.now() <= waitDeadline) {
           const latestRow = await deps.prisma.appStorage.findUnique({ where: { key: identity.storageKey } });
           const latest = readIdempotencyRecord(latestRow?.value);
           if (!latest || latest.inputHash !== inputHash) idempotencyConflict();
           record = latest;
           if (latest.state === 'completed') {
-            customer = await findCreatedCustomer(deps, latest.customerId!);
+            customer = await revalidateReplayCustomer(deps, resolution.value, latest.customerId!);
             break;
           }
+          if (latest.state === 'failed') idempotencyConflict();
           const audit = await deps.prisma.customerAuditEvent?.findFirst({
             where: {
               idempotencyKey: identity.idempotencyKey,
@@ -679,10 +699,10 @@ export function createWechatCustomerAutomationService(
             orderBy: { createdAt: 'desc' },
             select: { customerId: true },
           });
-          customer = audit ? await findCreatedCustomer(deps, audit.customerId) : null;
-          if (!customer) await new Promise((resolve) => setTimeout(resolve, 5));
+          customer = audit ? await revalidateReplayCustomer(deps, resolution.value, audit.customerId) : null;
+          if (!customer) await new Promise((resolve) => setTimeout(resolve, 25));
         }
-        if (!customer) idempotencyConflict();
+        if (!customer) idempotencyPending();
         if (record.state === 'completed') return {
           status: 'replayed', customer, detailPath: `/customers/${encodeURIComponent(customer.id)}`,
         };
@@ -714,6 +734,10 @@ export function createWechatCustomerAutomationService(
         },
       });
       if (conflict) {
+        await deps.prisma.appStorage.update({
+          where: { key: identity.storageKey },
+          data: { value: failedDuplicateRecord(record, (deps.now?.() || new Date()).toISOString()) },
+        });
         return {
           status: 'duplicate',
           message: conflict.message,
@@ -747,6 +771,10 @@ export function createWechatCustomerAutomationService(
       });
 
       if (created.code === 409 && created.message === '系统中已存在相同联系方式') {
+        await deps.prisma.appStorage.update({
+          where: { key: identity.storageKey },
+          data: { value: failedDuplicateRecord(record, (deps.now?.() || new Date()).toISOString()) },
+        });
         return {
           status: 'duplicate',
           message: created.message || '系统中已存在相同联系方式',

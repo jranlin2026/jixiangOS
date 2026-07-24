@@ -197,6 +197,30 @@ function createHarness() {
       };
       if (result.code === 0 && result.data) {
         state.customers.push(businessRow(STORAGE_KEYS.CUSTOMERS, result.data.id, result.data));
+        for (const [type, value] of [
+          ['phone', String(result.data.phone || '').replace(/^\+86/u, '')],
+          ['wechat', String(result.data.wechat || '').trim().toLowerCase()],
+        ] as const) {
+          if (!value) continue;
+          const identityId = `ci-${type}-${result.data.id}`;
+          state.identities.push({
+            id: identityId,
+            type,
+            normalizedHash: hashContactIdentity(value, CONTACT_CRYPTO.hmacKey),
+            hashKeyVersion: 1,
+            status: 'active',
+            encryptedNormalizedValue: 'ci:v1:opaque',
+            canonicalCustomerId: result.data.id,
+            conflictReason: null,
+          });
+          state.links.push({
+            id: `cil-${type}-${result.data.id}`,
+            identityId,
+            entityType: 'customer',
+            entityId: result.data.id,
+            linkStatus: 'active',
+          });
+        }
         state.auditEvents.push({
           customerId: result.data.id,
           idempotencyKey: execution.idempotencyKey,
@@ -214,6 +238,7 @@ function createHarness() {
     contactIdentityCrypto: CONTACT_CRYPTO,
     now: () => new Date(state.currentTime),
     nonce: () => 'nonce-check-1',
+    idempotencyWaitTimeoutMs: 400,
   });
   const actor = {
     id: 'u-automation',
@@ -746,6 +771,22 @@ function createCustomerRaceIntegrationHarness() {
   });
   assert.equal(state.createCalls[0].execution.auditOperation, 'create_customer_from_wechat');
   assert.equal(state.createCalls[0].execution.auditReason, '微信自动化创建客户');
+  assert.deepEqual(Object.keys(state.createCalls[0].execution).sort(), [
+    'auditOperation', 'auditReason', 'idempotencyKey', 'requestId',
+  ]);
+  assert.match(state.createCalls[0].execution.requestId, /^wechat-request:[a-f0-9]{64}$/);
+  assert.match(state.createCalls[0].execution.idempotencyKey, /^wechat-create:[a-f0-9]{64}$/);
+  const executionMetadata = JSON.stringify(state.createCalls[0].execution);
+  for (const prohibited of [
+    context.senderId,
+    input.phone,
+    input.name,
+    input.company,
+    input.remark,
+    SIGNING_KEY,
+    checked.precheckToken,
+    'wechat-automation-token-that-is-at-least-32-characters',
+  ]) assert.equal(executionMetadata.includes(prohibited), false, `execution metadata must exclude ${prohibited}`);
   assert.equal(state.createCalls[0].execution.accessContext, undefined);
   assert.equal(state.createCalls[0].execution.tagValidationCatalog, undefined);
 }
@@ -985,10 +1026,116 @@ function createCustomerRaceIntegrationHarness() {
   const winner = service.create(input, checked.precheckToken, context);
   while (!state.createCalls.length) await new Promise((resolve) => setTimeout(resolve, 1));
   const follower = service.create(input, checked.precheckToken, context);
-  release();
+  setTimeout(release, 50);
   const results = await Promise.all([winner, follower]);
   assert.deepEqual(results.map((result) => result.status).sort(), ['created', 'replayed']);
   assert.equal(state.createCalls.length, 1, 'concurrent callers must create exactly once');
+}
+
+// Replay must revalidate the original exact contact against the current
+// contact index; a customer whose contact has changed cannot be replayed.
+{
+  const { state, service, context } = createHarness();
+  const input = { name: '联系方式已变化客户', phone: '13800138118', leadSource: '官网' };
+  const checked = await service.check(input, context);
+  assert.equal(checked.status, 'ready');
+  if (checked.status !== 'ready') throw new Error('expected changed-contact replay precheck');
+  assert.equal((await service.create(input, checked.precheckToken, context)).status, 'created');
+  state.identities.length = 0;
+  state.links.length = 0;
+  await assert.rejects(
+    () => service.create(input, checked.precheckToken, context),
+    /idempotency conflict/,
+  );
+  assert.equal(state.createCalls.length, 1);
+}
+
+// A realistic slow winner remains the sole creator; the follower waits for
+// the durable result instead of turning ordinary latency into a false 409.
+{
+  const { state, service, context } = createHarness();
+  const input = { name: '慢并发幂等客户', phone: '13800138119', leadSource: '官网' };
+  const checked = await service.check(input, context);
+  assert.equal(checked.status, 'ready');
+  if (checked.status !== 'ready') throw new Error('expected slow concurrent precheck');
+  let release!: () => void;
+  state.createGate = new Promise<void>((resolve) => { release = resolve; });
+  const winner = service.create(input, checked.precheckToken, context);
+  while (!state.createCalls.length) await new Promise((resolve) => setTimeout(resolve, 1));
+  const follower = service.create(input, checked.precheckToken, context);
+  setTimeout(release, 250);
+  const results = await Promise.all([winner, follower]);
+  assert.deepEqual(results.map((result) => result.status).sort(), ['created', 'replayed']);
+  assert.equal(state.createCalls.length, 1);
+}
+
+// Current visibility is revalidated for both completed replay and audit
+// recovery; a transfer outside the actor's live scope fails closed.
+for (const recoverFromAudit of [false, true]) {
+  const { state, service, context } = createHarness();
+  const input = { name: '转移后不可见客户', phone: recoverFromAudit ? '13800138122' : '13800138121', leadSource: '官网' };
+  const checked = await service.check(input, context);
+  assert.equal(checked.status, 'ready');
+  if (checked.status !== 'ready') throw new Error('expected visibility replay precheck');
+  if (recoverFromAudit) state.failStorageUpdateAt = 1;
+  if (recoverFromAudit) {
+    await assert.rejects(() => service.create(input, checked.precheckToken, context), /storage finalize unavailable/);
+  } else {
+    await service.create(input, checked.precheckToken, context);
+  }
+  state.roles[0].dataScopes = { customers: 'self' };
+  Object.assign(state.customers[0].data, {
+    owner: '销售甲', ownerId: 'u-sales-a', ownerIdentityStatus: 'resolved',
+  });
+  await assert.rejects(() => service.create(input, checked.precheckToken, context), /idempotency conflict/);
+  assert.equal(state.createCalls.length, 1);
+}
+
+// A follower that reaches the bounded coordination timeout receives a
+// retryable unavailable signal, never a false idempotency conflict.
+{
+  const { state, service, context } = createHarness();
+  const input = { name: '超时并发客户', phone: '13800138126', leadSource: '官网' };
+  const checked = await service.check(input, context);
+  assert.equal(checked.status, 'ready');
+  if (checked.status !== 'ready') throw new Error('expected timeout concurrency precheck');
+  let release!: () => void;
+  state.createGate = new Promise<void>((resolve) => { release = resolve; });
+  const winner = service.create(input, checked.precheckToken, context);
+  while (!state.createCalls.length) await new Promise((resolve) => setTimeout(resolve, 1));
+  const error = await service.create(input, checked.precheckToken, context).then(
+    () => null,
+    (caught) => caught as Error & { statusCode?: number },
+  );
+  assert.equal(error?.statusCode, 503);
+  assert.match(error?.message || '', /still in progress/);
+  release();
+  assert.equal((await winner).status, 'created');
+  assert.equal(state.createCalls.length, 1);
+}
+
+// A concurrent winner that terminates as duplicate wakes the follower as a
+// durable conflict instead of making it wait until generic timeout.
+{
+  const { state, service, context } = createHarness();
+  const input = { name: '并发重复终态客户', phone: '13800138127', leadSource: '官网' };
+  const checked = await service.check(input, context);
+  assert.equal(checked.status, 'ready');
+  if (checked.status !== 'ready') throw new Error('expected concurrent duplicate precheck');
+  state.createResult = {
+    code: 409,
+    message: '系统中已存在相同联系方式',
+    data: { id: 'unrelated-concurrent', name: '已有客户', company: '', owner: '销售甲' },
+  };
+  let release!: () => void;
+  state.createGate = new Promise<void>((resolve) => { release = resolve; });
+  const winner = service.create(input, checked.precheckToken, context);
+  while (!state.createCalls.length) await new Promise((resolve) => setTimeout(resolve, 1));
+  const follower = service.create(input, checked.precheckToken, context);
+  setTimeout(release, 50);
+  assert.equal((await winner).status, 'duplicate');
+  await assert.rejects(() => follower, /idempotency conflict/);
+  assert.equal(state.createCalls.length, 1);
 }
 
 // Failed reservation storage never reaches customer creation.
@@ -1064,6 +1211,117 @@ function createCustomerRaceIntegrationHarness() {
   assert.equal((await service.create(input, checked.precheckToken, context)).status, 'duplicate');
   await assert.rejects(() => service.create(input, checked.precheckToken, context), /idempotency conflict/);
   assert.equal(state.createCalls.length, 1, 'retry must not create or replay an unrelated duplicate');
+}
+
+// A contact that appears after check but before create terminally closes the
+// reservation as duplicate; retries conflict instead of polling forever.
+{
+  const { state, service, context } = createHarness();
+  const input = { name: '预创建重复客户', phone: '13800138128', leadSource: '官网' };
+  const checked = await service.check(input, context);
+  assert.equal(checked.status, 'ready');
+  if (checked.status !== 'ready') throw new Error('expected pre-create duplicate precheck');
+  state.customers.push(businessRow(STORAGE_KEYS.CUSTOMERS, 'external-duplicate', {
+    id: 'external-duplicate', name: '外部已建客户', company: '', phone: '+8613800138128',
+    owner: '微信录入', ownerId: context.actor.id, ownerIdentityStatus: 'resolved',
+  }));
+  state.identities.push({
+    id: 'ci-external-duplicate', type: 'phone',
+    normalizedHash: hashContactIdentity('13800138128', CONTACT_CRYPTO.hmacKey),
+    hashKeyVersion: 1, status: 'active', encryptedNormalizedValue: 'ci:v1:opaque',
+    canonicalCustomerId: 'external-duplicate', conflictReason: null,
+  });
+  state.links.push({
+    id: 'cil-external-duplicate', identityId: 'ci-external-duplicate', entityType: 'customer',
+    entityId: 'external-duplicate', linkStatus: 'active',
+  });
+  assert.equal((await service.create(input, checked.precheckToken, context)).status, 'duplicate');
+  await assert.rejects(() => service.create(input, checked.precheckToken, context), /idempotency conflict/);
+  assert.equal(state.createCalls.length, 0);
+}
+
+// Version-1 durable timestamps are canonical and ordered; malformed durable
+// state always fails closed before another customer write.
+for (const corrupt of [
+  (value: any) => { value.createdAt = ''; },
+  (value: any) => { value.updatedAt = 'not-a-date'; },
+  (value: any) => { delete value.createStartedAt; },
+  (value: any) => { value.updatedAt = '2026-07-25T07:59:59.000Z'; },
+  (value: any) => { value.createStartedAt = '2026-07-25T07:59:59.000Z'; },
+]) {
+  const { state, service, context } = createHarness();
+  const input = { name: '时间戳损坏客户', phone: '13800138120', leadSource: '官网' };
+  const checked = await service.check(input, context);
+  assert.equal(checked.status, 'ready');
+  if (checked.status !== 'ready') throw new Error('expected malformed timestamp precheck');
+  await service.create(input, checked.precheckToken, context);
+  corrupt(state.appStorage[0].value);
+  await assert.rejects(() => service.create(input, checked.precheckToken, context), /idempotency conflict/);
+  assert.equal(state.createCalls.length, 1);
+}
+
+// In-progress version-1 records also require a canonical create start time.
+{
+  const { state, service, context } = createHarness();
+  const input = { name: '进行中时间戳损坏客户', phone: '13800138123', leadSource: '官网' };
+  const checked = await service.check(input, context);
+  assert.equal(checked.status, 'ready');
+  if (checked.status !== 'ready') throw new Error('expected malformed in-progress precheck');
+  await service.create(input, checked.precheckToken, context);
+  const stored = state.appStorage[0].value;
+  stored.state = 'in_progress';
+  delete stored.resultStatus;
+  delete stored.customerId;
+  delete stored.createStartedAt;
+  await assert.rejects(() => service.create(input, checked.precheckToken, context), /idempotency conflict/);
+  assert.equal(state.createCalls.length, 1);
+}
+
+// The real audit append path keeps correlation metadata PII-free while the
+// legitimate customer afterSnapshot remains outside this metadata assertion.
+{
+  const { state, service, context } = createCustomerRaceIntegrationHarness();
+  const input = {
+    name: '敏感客户文本', company: '敏感公司文本', phone: '13800138124',
+    wechat: 'private-wechat-id', leadSource: '官网', remark: '原始微信消息内容',
+  };
+  const checked = await service.check(input, context);
+  assert.equal(checked.status, 'ready');
+  if (checked.status !== 'ready') throw new Error('expected sensitive metadata precheck');
+  assert.equal((await service.create(input, checked.precheckToken, context)).status, 'created');
+  const audit = state.auditEvents[state.auditEvents.length - 1]!;
+  assert.equal(audit.reason, '微信自动化创建客户');
+  const metadata = JSON.stringify({
+    operation: audit.operation,
+    reason: audit.reason,
+    requestId: audit.requestId,
+    idempotencyKey: audit.idempotencyKey,
+    inputHash: audit.inputHash,
+    actorId: audit.actorId,
+    actorName: audit.actorName,
+  });
+  const durable = JSON.stringify(state.appStorage);
+  const executionMetadata = JSON.stringify({
+    requestId: audit.requestId,
+    idempotencyKey: audit.idempotencyKey,
+    operation: audit.operation,
+    reason: audit.reason,
+  });
+  for (const prohibited of [
+    context.senderId,
+    input.phone,
+    input.wechat,
+    'wechat-automation-token-that-is-at-least-32-characters',
+    SIGNING_KEY,
+    checked.precheckToken,
+    input.name,
+    input.company,
+    input.remark,
+  ]) {
+    assert.equal(durable.includes(prohibited), false, `AppStorage must exclude ${prohibited}`);
+    assert.equal(metadata.includes(prohibited), false, `audit metadata must exclude ${prohibited}`);
+    assert.equal(executionMetadata.includes(prohibited), false, `execution metadata must exclude ${prohibited}`);
+  }
 }
 
 console.log('wechat customer automation service tests passed');

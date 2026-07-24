@@ -36,14 +36,28 @@ async function post(router: any, path: string, headers: Record<string, string | 
 }
 
 let currentActor: typeof actor | null = actor;
+const createCalls: any[] = [];
+let createError: unknown = null;
 const router = createWechatCustomerAutomationRouter({
   config: () => ({ token: TOKEN, actorAccount: 'wechat-bot', signingKey: 'signing-key-that-is-at-least-32-characters', senderId: SENDER_ID }),
   resolveActor: async () => currentActor,
   service: {
     check: async () => ({ status: 'needs_input', field: 'name', message: '请提供客户姓名' }),
-    create: async () => ({ status: 'created', customer: { id: 'c-1', name: '客户', company: '', owner: '微信录入' }, detailPath: '/customers/c-1' }),
+    create: async (customer, precheckToken, context) => {
+      createCalls.push({ customer, precheckToken, context });
+      if (createError) throw createError;
+      return { status: 'created', customer: { id: 'c-1', name: '客户', company: '', owner: '微信录入' }, detailPath: '/customers/c-1' };
+    },
   },
 });
+
+assert.deepEqual(router.stack.map((layer: any) => ({
+  path: layer.route?.path,
+  methods: Object.keys(layer.route?.methods || {}).sort(),
+})), [
+  { path: '/customers/check', methods: ['post'] },
+  { path: '/customers/create', methods: ['post'] },
+], 'automation router exposes exactly two POST routes');
 
 for (const headers of [
   {},
@@ -75,5 +89,57 @@ for (const replacement of [
   assert.equal(result.statusCode, 401, 'inactive or under-permissioned automation actors fail closed');
 }
 currentActor = actor;
+
+const createHeaders = {
+  authorization: `Bearer ${TOKEN}`,
+  'x-jxos-wechat-sender': SENDER_ID,
+};
+const customer = { name: '路由创建客户', phone: '13800138125', leadSource: '官网' };
+const created = await post(router, '/customers/create', createHeaders, {
+  customer,
+  precheckToken: 'opaque-precheck-token',
+});
+assert.equal(created.statusCode, 201);
+assert.deepEqual(created.body, {
+  code: 0,
+  data: {
+    status: 'created',
+    customer: { id: 'c-1', name: '客户', company: '', owner: '微信录入' },
+    detailPath: '/customers/c-1',
+  },
+  message: 'success',
+});
+assert.deepEqual(createCalls[0], {
+  customer,
+  precheckToken: 'opaque-precheck-token',
+  context: { actor, senderId: SENDER_ID },
+});
+
+createError = Object.assign(new Error('private conflict detail'), { statusCode: 409 });
+const conflicted = await post(router, '/customers/create', createHeaders, {
+  customer,
+  precheckToken: 'opaque-precheck-token',
+});
+assert.equal(conflicted.statusCode, 409);
+assert.deepEqual(conflicted.body, { code: 409, data: null, message: 'WeChat customer create conflict.' });
+createError = null;
+
+createError = Object.assign(new Error('winner still active'), { statusCode: 503 });
+const pending = await post(router, '/customers/create', createHeaders, {
+  customer,
+  precheckToken: 'opaque-precheck-token',
+});
+assert.equal(pending.statusCode, 503);
+assert.deepEqual(pending.body, { code: 503, data: null, message: 'WeChat customer automation is unavailable.' });
+createError = null;
+
+const callsBeforeInvalid = createCalls.length;
+const invalid = await post(router, '/customers/create', createHeaders, {
+  customer,
+  precheckToken: '',
+});
+assert.equal(invalid.statusCode, 400);
+assert.deepEqual(invalid.body, { code: 400, data: null, message: 'WeChat customer request is invalid.' });
+assert.equal(createCalls.length, callsBeforeInvalid, 'invalid create body must not reach the service');
 
 console.log('wechat customer automation route tests passed');
