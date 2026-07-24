@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import express from 'express';
 import { createBusinessImportRouter } from './businessImportRoutes';
+import { BusinessImportError } from '../services/businessImportService';
 
 const calls: string[] = [];
 const app = express();
@@ -11,7 +12,10 @@ app.use('/api/business-imports', createBusinessImportRouter({
   service: {
     templateOptions: async (type: string) => { calls.push(`template:${type}`); return { products: [] }; },
     precheck: async (input: any) => { calls.push(`precheck:${input.type}:${input.rows[0]?.customerPhone}`); return { readyCount: input.rows.length }; },
-    confirm: async (input: any) => { calls.push(`confirm:${input.type}:${input.confirmationToken}`); return { id: 'job-1', status: 'queued' }; },
+    confirm: async (input: any) => {
+      if (input.confirmationToken === 'invalid') throw new BusinessImportError('导入预检凭证无效或已过期', 409);
+      calls.push(`confirm:${input.type}:${input.confirmationToken}`); return { id: 'job-1', status: 'queued' };
+    },
   },
 }));
 
@@ -26,6 +30,8 @@ try {
   assert.equal((await fetch(`${base}/orders/precheck`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [row] }) })).status, 200);
   assert.equal((await fetch(`${base}/orders/confirm`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [row], confirmationToken: 'one-time', fileName: 'orders.xlsx' }) })).status, 201);
   assert.equal((await fetch(`${base}/recovery-orders/precheck`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [row] }) })).status, 200);
+  const invalidConfirm = await fetch(`${base}/orders/confirm`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [row], confirmationToken: 'invalid', fileName: 'orders.xlsx' }) });
+  assert.equal(invalidConfirm.status, 409, 'precheck conflicts are returned as JSON conflicts rather than generic 500 errors');
   const bad = await fetch(`${base}/orders/precheck`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [row], type: 'recovery_orders' }) });
   assert.equal(bad.status, 400, 'the public route owns the module discriminator');
   assert.deepEqual(calls, ['template:orders', 'precheck:orders:13800000000', 'confirm:orders:one-time', 'precheck:recovery_orders:13800000000']);

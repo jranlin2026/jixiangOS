@@ -129,6 +129,7 @@ export function validateBusinessImportRows(type: BusinessImportType, rows: Busin
     const errors: string[] = [];
     const orderNumber = lower(row.thirdPartyOrderNo);
     const existing = type === 'orders' ? directory.existingOrderNumbers : directory.existingRecoveryOrderNumbers;
+    if (type === 'recovery_orders' && !orderNumber) errors.push('第三方订单号不能为空');
     if (orderNumber && (existing.has(orderNumber) || encounteredNumbers.has(orderNumber))) errors.push('第三方订单号已存在或在本次文件中重复');
     if (orderNumber) encounteredNumbers.add(orderNumber);
     if (row.paymentChannel && !directory.paymentChannels.some((item) => lower(item) === lower(row.paymentChannel))) errors.push('官方收款渠道不存在或已停用');
@@ -139,11 +140,10 @@ export function validateBusinessImportRows(type: BusinessImportType, rows: Busin
       if (!product) errors.push('产品不存在、已停用或重名');
       if (!oneByName(directory.orderTypes, order.orderType)) errors.push('订单类型不存在、已停用或重名');
       if (!oneByName(directory.users, order.salesUserName)) errors.push('销售负责人不存在、已离职或重名');
-      if (!order.creatorName || !oneByName(directory.users, order.creatorName)) errors.push('订单创建人不存在、已离职或重名');
+      if (order.creatorName && !oneByName(directory.users, order.creatorName)) errors.push('订单创建人不存在、已离职或重名');
       if (!order.paymentChannel) errors.push('官方收款渠道不能为空');
       if (!Number.isFinite(amount(order.paymentAmount)) || amount(order.paymentAmount) <= 0) errors.push('付款金额必须大于0');
       if (!order.paidAt) errors.push('付款时间不能为空');
-      if (!order.paymentOrderNo) errors.push('付款订单号不能为空');
       const contacts = contactKeys(order);
       if (!contacts.length) errors.push('订单导入必须填写手机号或微信，以唯一匹配在用客户');
       const candidates = new Map<string, BusinessImportCustomerMatch>();
@@ -159,13 +159,19 @@ export function validateBusinessImportRows(type: BusinessImportType, rows: Busin
     if (recovery.sourcePlatform && !platform) errors.push('来源平台不存在、已停用或重名');
     if (recovery.sourceShop && (!platform || !directory.recoveryShops.some((shop) => shop.platformId === platform.id && lower(shop.name) === lower(recovery.sourceShop)))) errors.push('来源店铺不存在、已停用或不属于所选平台');
     if (!oneByName(directory.users, recovery.recoveryUserName)) errors.push('挽回人员不存在、已离职或重名');
+    if (recovery.assistUserName && !oneByName(directory.users, recovery.assistUserName)) errors.push('协助人员不存在、已离职或重名');
+    if (recovery.creatorName && !oneByName(directory.users, recovery.creatorName)) errors.push('订单创建人不存在、已离职或重名');
     if (text(recovery.originalAmount) && (!Number.isFinite(amount(recovery.originalAmount)) || amount(recovery.originalAmount) < 0)) errors.push('原付款金额无效');
     if (!Number.isFinite(amount(recovery.recoveryAmount)) || amount(recovery.recoveryAmount) <= 0) errors.push('挽回成交金额必须大于0');
     if (!recovery.recoveryAt) errors.push('挽回成交时间不能为空');
     const contacts = contactKeys(recovery);
-    const matched = contacts.some((key) => (directory.customerMatchesByContact.get(key) || []).length > 0);
-    const status = errors.length ? 'blocked' as const : matched ? 'ready' as const : 'warning' as const;
-    return { rowNumber: recovery.rowNumber, status, reason: errors.join('；') || (matched ? '可导入' : '未匹配客户，执行时将创建售后临时客户'), normalized: recovery };
+    const candidates = new Map<string, BusinessImportCustomerMatch>();
+    contacts.forEach((key) => (directory.customerMatchesByContact.get(key) || []).forEach((item) => candidates.set(item.id, item)));
+    if (contacts.length && candidates.size > 1) errors.push('手机号或微信匹配到多个客户，无法确定售后挽回订单归属');
+    const customer = candidates.values().next().value as BusinessImportCustomerMatch | undefined;
+    if (customer && !customer.inScope) errors.push('无权使用该客户创建售后挽回订单');
+    const status = errors.length ? 'blocked' as const : customer ? 'ready' as const : 'warning' as const;
+    return { rowNumber: recovery.rowNumber, status, reason: errors.join('；') || (customer ? '可导入' : '未匹配客户，执行时将创建售后临时客户'), normalized: recovery, ...(customer && !errors.length ? { customerId: customer.id } : {}) };
   });
 }
 
@@ -202,6 +208,7 @@ export function createBusinessImportService(deps: BusinessImportDependencies) {
       if (token.actorId !== user.id || token.type !== request.type || new Date(token.expiresAt).getTime() <= now().getTime()) throw new BusinessImportError('导入预检凭证无效或已过期', 409);
       const prepared = await prepare(request, user);
       if (token.rowsHash !== rowHash(request.type, prepared.normalized)) throw new BusinessImportError('导入文件与预检内容不一致，请重新预检', 409);
+      if (prepared.validated.some((row) => row.status === 'blocked')) throw new BusinessImportError('导入数据或配置已变化，请重新预检', 409);
       return deps.consumePrecheckAndCreateJob({ tokenHash: tokenHash(request.confirmationToken), actorId: user.id, type: request.type, rowsHash: token.rowsHash, expiresAt: token.expiresAt, fileName: text(request.fileName), rows: prepared.validated });
     },
   };

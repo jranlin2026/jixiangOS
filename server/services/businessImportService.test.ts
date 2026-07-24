@@ -82,7 +82,7 @@ const recovery = await service.precheck({
   rows: [{
     rowNumber: 2, customerName: '陌生客户', customerPhone: '13900000000', customerWechat: '', originalProduct: '历史产品',
     sourcePlatform: '', sourceShop: '', paymentChannel: '', originalAmount: '', paymentOrderNo: '', paymentAt: '', assistUserName: '', creatorName: '',
-    recoveryAmount: '999', recoveryAt: '2026-07-23', recoveryUserName: '销售甲', thirdPartyOrderNo: '', remark: '',
+    recoveryAmount: '999', recoveryAt: '2026-07-23', recoveryUserName: '销售甲', thirdPartyOrderNo: 'REC-1', remark: '',
   }],
 }, actor);
 assert.equal(recovery.warningCount, 1, 'unmatched recovery contacts are explicitly warned and become temporary customers only during later execution');
@@ -91,5 +91,56 @@ assert.equal(recovery.readyCount, 1, 'warnings are eligible for later review/job
 
 const optionalOrderNumber = await service.precheck({ type: 'orders', rows: [{ ...orderRow, rowNumber: 9, thirdPartyOrderNo: '' }] }, actor);
 assert.equal(optionalOrderNumber.readyCount, 1, 'order third-party order number is optional');
+
+const optionalOrderMetadata = await service.precheck({ type: 'orders', rows: [{ ...orderRow, rowNumber: 10, thirdPartyOrderNo: '', paymentOrderNo: '', creatorName: '' }] }, actor);
+assert.equal(optionalOrderMetadata.readyCount, 1, 'order payment order number and creator are optional');
+
+const missingRecoveryNumber = await service.precheck({ type: 'recovery_orders', rows: [{ ...recovery.rows[0], ...({
+  rowNumber: 3, customerName: '陌生客户', customerPhone: '13900000001', customerWechat: '', originalProduct: '历史产品', sourcePlatform: '', sourceShop: '', paymentChannel: '', originalAmount: '', paymentOrderNo: '', paymentAt: '', assistUserName: '', creatorName: '', recoveryAmount: '999', recoveryAt: '2026-07-23', recoveryUserName: '销售甲', thirdPartyOrderNo: '', remark: '',
+} as any) }] }, actor);
+assert.equal(missingRecoveryNumber.rows[0]?.status, 'blocked', 'recovery third-party order number is required');
+
+const blockedPrecheck = await service.precheck({ type: 'orders', rows: [{ ...orderRow, rowNumber: 11, thirdPartyOrderNo: 'TP-blocked', productName: '不存在产品' }] }, actor);
+await assert.rejects(
+  () => service.confirm({ type: 'orders', rows: [{ ...orderRow, rowNumber: 11, thirdPartyOrderNo: 'TP-blocked', productName: '不存在产品' }], confirmationToken: blockedPrecheck.confirmationToken, fileName: 'blocked.xlsx' }, actor),
+  (error: unknown) => error instanceof BusinessImportError && error.status === 409,
+  'confirm must not enqueue a precheck that contains blocked rows',
+);
+
+const changedConfig = await service.precheck({ type: 'orders', rows: [{ ...orderRow, rowNumber: 12, thirdPartyOrderNo: 'TP-config' }] }, actor);
+baseDirectory.paymentChannels = [];
+await assert.rejects(
+  () => service.confirm({ type: 'orders', rows: [{ ...orderRow, rowNumber: 12, thirdPartyOrderNo: 'TP-config' }], confirmationToken: changedConfig.confirmationToken, fileName: 'config.xlsx' }, actor),
+  (error: unknown) => error instanceof BusinessImportError && error.status === 409,
+  'confirm revalidates current configuration and refuses newly blocked rows',
+);
+baseDirectory.paymentChannels = ['企业微信转账'];
+
+const changedRows = await service.precheck({ type: 'orders', rows: [{ ...orderRow, rowNumber: 13, thirdPartyOrderNo: 'TP-hash' }] }, actor);
+await assert.rejects(
+  () => service.confirm({ type: 'orders', rows: [{ ...orderRow, rowNumber: 13, thirdPartyOrderNo: 'TP-hash', paymentAmount: '2000' }], confirmationToken: changedRows.confirmationToken, fileName: 'changed.xlsx' }, actor),
+  (error: unknown) => error instanceof BusinessImportError && error.status === 409,
+  'changed normalized rows invalidate the signed precheck hash',
+);
+await assert.rejects(
+  () => service.confirm({ type: 'orders', rows: [{ ...orderRow, rowNumber: 13, thirdPartyOrderNo: 'TP-hash' }], confirmationToken: changedRows.confirmationToken, fileName: 'actor.xlsx' }, { ...actor, id: 'other-user' }),
+  (error: unknown) => error instanceof BusinessImportError && error.status === 409,
+  'a signed precheck cannot be confirmed by another actor',
+);
+
+baseDirectory.customerMatchesByContact.set('phone:+8613900000002', [{ id: 'customer-outside', name: '范围外客户', inScope: false }]);
+const outOfScopeRecovery = await service.precheck({ type: 'recovery_orders', rows: [{
+  rowNumber: 14, customerName: '范围外客户', customerPhone: '13900000002', customerWechat: '', originalProduct: '', sourcePlatform: '', sourceShop: '', paymentChannel: '', originalAmount: '', paymentOrderNo: '', paymentAt: '', recoveryAmount: '1', recoveryAt: '2026-07-23', recoveryUserName: '销售甲', assistUserName: '', creatorName: '', thirdPartyOrderNo: 'REC-scope', remark: '',
+}] }, actor);
+assert.equal(outOfScopeRecovery.rows[0]?.status, 'blocked', 'existing recovery customers outside scope cannot be bypassed as temporary customers');
+baseDirectory.customerMatchesByContact.set('phone:+8613900000003', [{ id: 'customer-a', name: '客户甲', inScope: true }, { id: 'customer-b', name: '客户乙', inScope: true }]);
+const ambiguousRecovery = await service.precheck({ type: 'recovery_orders', rows: [{
+  rowNumber: 15, customerName: '冲突客户', customerPhone: '13900000003', customerWechat: '', originalProduct: '', sourcePlatform: '', sourceShop: '', paymentChannel: '', originalAmount: '', paymentOrderNo: '', paymentAt: '', recoveryAmount: '1', recoveryAt: '2026-07-23', recoveryUserName: '销售甲', assistUserName: '', creatorName: '', thirdPartyOrderNo: 'REC-ambiguous', remark: '',
+}] }, actor);
+assert.equal(ambiguousRecovery.rows[0]?.status, 'blocked', 'conflicting recovery matches cannot silently bind or create a temporary customer');
+const invalidRecoveryPeople = await service.precheck({ type: 'recovery_orders', rows: [{
+  rowNumber: 16, customerName: '陌生客户', customerPhone: '13900000004', customerWechat: '', originalProduct: '', sourcePlatform: '', sourceShop: '', paymentChannel: '', originalAmount: '', paymentOrderNo: '', paymentAt: '', recoveryAmount: '1', recoveryAt: '2026-07-23', recoveryUserName: '销售甲', assistUserName: '不存在', creatorName: '不存在', thirdPartyOrderNo: 'REC-people', remark: '',
+}] }, actor);
+assert.equal(invalidRecoveryPeople.rows[0]?.status, 'blocked', 'optional supplied recovery assistant/creator must be active and in scope');
 
 console.log('business import service: ok');

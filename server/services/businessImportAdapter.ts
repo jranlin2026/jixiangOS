@@ -10,6 +10,7 @@ import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { canReadCustomer, loadCustomerAccessContext } from './customerAccessPolicy';
 import {
   createBusinessImportService,
+  BusinessImportError,
   type BusinessImportDirectory,
   type BusinessImportPrecheckRecord,
   type ValidatedBusinessImportRow,
@@ -41,7 +42,7 @@ function thirdPartyNumber(record: { data: unknown }): string {
 }
 
 async function loadDirectory(prisma: PrismaClient, actor: AuthenticatedUser, _type: BusinessImportType): Promise<BusinessImportDirectory> {
-  const [storage, users, roles, departments, customers, orders, recoveries, context] = await Promise.all([
+  const [storage, users, roles, departments, customers, orders, recoveries, pendingJobs, context] = await Promise.all([
     prisma.appStorage.findMany({ where: { key: { in: [STORAGE_KEYS.PRODUCTS, STORAGE_KEYS.ORDER_TYPE_CONFIGS, STORAGE_KEYS.AFTER_SALES_SOURCE_CONFIGS] } } }),
     prisma.user.findMany({ where: { isActive: true, employmentStatus: 'active' }, orderBy: [{ name: 'asc' }, { id: 'asc' }] }),
     prisma.role.findMany({ where: { isActive: true } }),
@@ -49,6 +50,7 @@ async function loadDirectory(prisma: PrismaClient, actor: AuthenticatedUser, _ty
     prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.CUSTOMERS, mergedIntoId: null } }),
     prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDERS } }),
     prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } }),
+    prisma.businessImportJob.findMany({ where: { status: { in: ['queued', 'running'] } }, select: { importType: true, rows: true } }),
     loadCustomerAccessContext(prisma, actor),
   ]);
   const activeUsers = users.map(mapPrismaUser);
@@ -69,6 +71,11 @@ async function loadDirectory(prisma: PrismaClient, actor: AuthenticatedUser, _ty
     const match = { id: customer.id, name: customer.name || '', inScope: canReadCustomer(context, customer) };
     contactKeys(customer).forEach((key) => customerMatchesByContact.set(key, [...(customerMatchesByContact.get(key) || []), match]));
   });
+  const pendingNumbers = (type: BusinessImportType) => pendingJobs
+    .filter((job) => job.importType === type)
+    .flatMap((job) => readValue<Array<{ normalized?: { thirdPartyOrderNo?: unknown }; thirdPartyOrderNo?: unknown }>>(job.rows, []))
+    .map((row) => lower(row.normalized?.thirdPartyOrderNo ?? row.thirdPartyOrderNo))
+    .filter(Boolean);
   return {
     products,
     orderTypes,
@@ -77,8 +84,8 @@ async function loadDirectory(prisma: PrismaClient, actor: AuthenticatedUser, _ty
     recoveryPlatforms: platforms,
     recoveryShops: shops,
     customerMatchesByContact,
-    existingOrderNumbers: new Set(orders.map(thirdPartyNumber).filter(Boolean)),
-    existingRecoveryOrderNumbers: new Set(recoveries.map(thirdPartyNumber).filter(Boolean)),
+    existingOrderNumbers: new Set([...orders.map(thirdPartyNumber), ...pendingNumbers('orders')].filter(Boolean)),
+    existingRecoveryOrderNumbers: new Set([...recoveries.map(thirdPartyNumber), ...pendingNumbers('recovery_orders')].filter(Boolean)),
   };
 }
 
@@ -95,7 +102,7 @@ async function persistPrecheck(prisma: PrismaClient, record: BusinessImportPrech
   } });
 }
 
-async function consumePrecheckAndCreateJob(prisma: PrismaClient, input: {
+export async function consumePrecheckAndCreateJob(prisma: PrismaClient, input: {
   tokenHash: string; actorId: string; type: BusinessImportType; rowsHash: string; expiresAt: string; fileName: string; rows: ValidatedBusinessImportRow[];
 }) {
   return prisma.$transaction(async (tx) => {
@@ -104,11 +111,11 @@ async function consumePrecheckAndCreateJob(prisma: PrismaClient, input: {
       FROM business_import_batches WHERE tokenHash = ${input.tokenHash} LIMIT 1 FOR UPDATE`;
     const batch = batches[0];
     if (!batch || batch.actorId !== input.actorId || batch.importType !== input.type || batch.rowsHash !== input.rowsHash || batch.consumedAt || batch.expiresAt <= new Date()) {
-      throw new Error('BUSINESS_IMPORT_PRECHECK_INVALID');
+      throw new BusinessImportError('导入预检凭证无效或已过期', 409);
     }
     const jobId = `business-import-job-${randomUUID()}`;
     const actor = await tx.user.findUnique({ where: { id: input.actorId }, select: { name: true } });
-    if (!actor) throw new Error('BUSINESS_IMPORT_ACTOR_MISSING');
+    if (!actor) throw new BusinessImportError('当前导入用户不存在或已离职', 409);
     await tx.businessImportJob.create({ data: {
       id: jobId, batchId: batch.id, importType: input.type, status: 'queued', actorId: input.actorId,
       actorName: actor.name, rowsHash: input.rowsHash, sourceFileName: input.fileName, idempotencyKey: batch.id, totalCount: input.rows.length,
@@ -126,7 +133,7 @@ export function createPrismaBusinessImportService(input: { prisma: PrismaClient;
     loadDirectory: (actor, type) => loadDirectory(input.prisma, actor, type),
     persistPrecheck: async (record) => {
       const actor = await input.prisma.user.findUnique({ where: { id: record.actorId }, select: { name: true } });
-      if (!actor) throw new Error('BUSINESS_IMPORT_ACTOR_MISSING');
+      if (!actor) throw new BusinessImportError('当前导入用户不存在或已离职', 409);
       return persistPrecheck(input.prisma, record, actor.name);
     },
     consumePrecheckAndCreateJob: (payload) => consumePrecheckAndCreateJob(input.prisma, payload),
