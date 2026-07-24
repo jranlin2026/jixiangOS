@@ -73,5 +73,32 @@ assert.match(partialFailure, /执行失败/);
 assert.match(partialFailure, /任务已创建，但浏览器未能保存恢复标识/);
 assert.match(partialFailure, /下载错误报告/);
 
+const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+const previousConsoleError = console.error;
+const artificialBrowserWarnings: string[] = [];
+Object.defineProperty(globalThis, 'window', {
+  configurable: true,
+  value: {
+    location: { origin: 'https://tenant.example.test' },
+    get localStorage() {
+      throw new DOMException('blocked', 'SecurityError');
+    },
+  },
+});
+try {
+  console.error = (...args: unknown[]) => { artificialBrowserWarnings.push(args.map(String).join(' ')); };
+  const degradedStorage = render({ options });
+  assert.match(degradedStorage, /浏览器存储不可用/);
+  assert.match(degradedStorage, /当前窗口/);
+  assert.ok(
+    artificialBrowserWarnings.every((message) => message.includes('Invalid prop `children` supplied to `ForwardRef(Fade)`')),
+    'the throwing storage getter must not produce unexpected SSR errors',
+  );
+} finally {
+  console.error = previousConsoleError;
+  if (previousWindowDescriptor) Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+  else Reflect.deleteProperty(globalThis, 'window');
+}
+
 await vite.close();
 console.log('BusinessImportDialog real SSR render: ok');

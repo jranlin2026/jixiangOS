@@ -27,6 +27,13 @@
 - The dialog checks now render the real component through Vite SSR for blocked, warning, recovery, stale-storage, reopen, and download states. Workbook tests execute the browser lazy-loader contract with an emitted ExcelJS asset URL, and download behavior is exercised through its public interface instead of source-regex assertions.
 - Review RED evidence included CST date drift (`10:30` becoming `18:30`), acceptance of numeric `1.234`, unscoped storage, post-abort updates, and source-only dialog/lazy-loader tests. Each failed before its corresponding implementation change and passes afterward.
 
+### Second review hardening
+
+- `abortableDelay` now explicitly removes its abort listener on both timeout resolution and abort rejection. The RED test observed `0/20` explicit removals after resolved delays; GREEN stress checks cover 20 resolved delays plus 100 aborted delays and finish with zero active listeners, without `MaxListenersExceededWarning`.
+- Browser storage acquisition is guarded around the `window.localStorage` property access itself, including a getter that throws `SecurityError`. A real Vite SSR render verifies the dialog remains available and shows the degraded-persistence warning.
+- Active polling no longer depends on a storage adapter or storage key. Once confirmation places the job in in-memory state, fetches, updates, and the terminal callback continue normally; persistence affects only recovery after closing/reopening. The no-storage behavior test observes `running` then `succeeded` and exactly one completion callback.
+- TDD RED evidence: the listener cleanup assertion failed with `0 !== 20`, and the throwing `localStorage` getter crashed SSR with `DOMException [SecurityError]`. Both passed after the minimal cleanup and storage-decoupling changes.
+
 ## Verification
 
 - `npx tsx src/api/businessImportApi.test.ts && npx tsx src/api/businessImportWorkbook.test.ts && npx tsx src/shared/components/businessImportDialogModel.test.ts && npx tsx src/shared/components/BusinessImportDialog.test.ts` — passed.
@@ -39,6 +46,12 @@ Review-fix verification before the hardening commit:
 - `TZ=Asia/Shanghai npx tsx src/api/businessImportWorkbook.test.ts && npx tsx src/api/businessImportApi.test.ts && npx tsx src/shared/components/businessImportDialogModel.test.ts && npx tsx src/shared/components/BusinessImportDialog.test.ts && npx tsc -b --pretty false` — passed.
 - `npm run build` — passed; Vite transformed 13,436 modules and emitted ExcelJS as a separate production asset.
 - `npm test` — passed all 296 test files after the review commit. Database-dependent integration checks retained their documented skip because `DATABASE_URL` was not set.
+
+Second-review verification:
+
+- `TZ=Asia/Shanghai npx tsx src/api/businessImportWorkbook.test.ts && npx tsx src/api/businessImportApi.test.ts && npx tsx src/shared/components/businessImportDialogModel.test.ts && npx tsx src/shared/components/BusinessImportDialog.test.ts && npx tsc -b --pretty false` — passed, including the listener stress checks and throwing-storage Vite SSR render.
+- `npm run build` — passed; Vite transformed 13,436 modules and kept ExcelJS as a separate asset.
+- `npm test` — passed all 296 test files. Database-dependent integration checks retained their documented skip because `DATABASE_URL` was not set.
 
 ## Follow-up boundary
 

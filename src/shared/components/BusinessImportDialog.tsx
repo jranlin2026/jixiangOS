@@ -138,7 +138,19 @@ export default function BusinessImportDialog({
   const storageKey = currentUserId && tenantScope
     ? businessImportJobStorageKey(type, { tenantId: tenantScope, userId: currentUserId })
     : '';
-  const storageAdapter = storage || (typeof window !== 'undefined' ? window.localStorage : null);
+  let browserStorage: BusinessImportStorage | null = null;
+  let browserStorageUnavailable = false;
+  if (!storage && typeof window !== 'undefined') {
+    try {
+      browserStorage = window.localStorage;
+    } catch {
+      browserStorageUnavailable = true;
+    }
+  }
+  const storageAdapter = storage || browserStorage;
+  const storageDegradedWarning = browserStorageUnavailable
+    ? '浏览器存储不可用；导入仍会在当前窗口继续，但关闭后无法恢复进度。'
+    : '';
   const fileRef = useRef<HTMLInputElement | null>(null);
   const storedJobRef = useRef<StoredBusinessImportJob | null>(null);
   const onCompletedRef = useRef(onCompleted);
@@ -192,7 +204,7 @@ export default function BusinessImportDialog({
 
   const jobId = job?.id || '';
   useEffect(() => {
-    if (!open || !jobId || !storageAdapter || !storageKey) return;
+    if (!open || !jobId) return;
     const controller = new AbortController();
     setPolling(true);
     void runBusinessImportJobPolling({
@@ -204,8 +216,8 @@ export default function BusinessImportDialog({
         return responseData(response, '读取导入任务进度失败');
       },
       signal: controller.signal,
-      storage: storageAdapter,
-      storageKey,
+      storage: storageAdapter || undefined,
+      storageKey: storageKey || undefined,
       stored: storedJobRef.current,
       onUpdate: (next) => setJob(next),
       onCompleted: (terminal) => {
@@ -366,7 +378,9 @@ export default function BusinessImportDialog({
             请使用极享OS标准模板。系统会先在本地严格校验，再进行服务端预检；警告行可导入，被阻止行必须修正。
           </Alert>
           {error ? <Alert severity="error">{error}</Alert> : null}
-          {storageWarning ? <Alert severity="warning">{storageWarning}</Alert> : null}
+          {storageWarning || storageDegradedWarning
+            ? <Alert severity="warning">{storageWarning || storageDegradedWarning}</Alert>
+            : null}
 
           <Stepper activeStep={activeStep} alternativeLabel>
             {['下载模板', '上传文件', '本地校验', '服务端预检', '后台导入'].map((label) => (

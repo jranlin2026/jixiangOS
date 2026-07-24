@@ -105,11 +105,16 @@ function assertNotAborted(signal?: AbortSignal): void {
 function abortableDelay(signal?: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     if (signal?.aborted) return reject(abortError());
-    const timer = globalThis.setTimeout(resolve, 2_000);
-    signal?.addEventListener('abort', () => {
+    const onAbort = () => {
       globalThis.clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
       reject(abortError());
-    }, { once: true });
+    };
+    const timer = globalThis.setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, 2_000);
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 
@@ -134,9 +139,9 @@ export async function runBusinessImportJobPolling(input: {
   load: (signal?: AbortSignal) => Promise<BusinessImportJobResult>;
   signal?: AbortSignal;
   wait?: (signal?: AbortSignal) => Promise<void>;
-  storage: BusinessImportStorage;
-  storageKey: string;
-  stored: StoredBusinessImportJob | null;
+  storage?: BusinessImportStorage;
+  storageKey?: string;
+  stored?: StoredBusinessImportJob | null;
   onUpdate: (job: BusinessImportJobResult) => void;
   onCompleted?: (job: BusinessImportJobResult) => void;
   onUnavailable?: () => void;
@@ -149,14 +154,16 @@ export async function runBusinessImportJobPolling(input: {
     });
     assertNotAborted(input.signal);
     if (!input.stored?.completedNotified) {
-      writeStoredBusinessImportJob(input.storage, input.storageKey, { id: terminal.id, completedNotified: true });
+      if (input.storage && input.storageKey) {
+        writeStoredBusinessImportJob(input.storage, input.storageKey, { id: terminal.id, completedNotified: true });
+      }
       input.onCompleted?.(terminal);
     }
     return terminal;
   } catch (error) {
     assertNotAborted(input.signal);
     if (error instanceof BusinessImportJobUnavailableError) {
-      clearStoredBusinessImportJob(input.storage, input.storageKey);
+      if (input.storage && input.storageKey) clearStoredBusinessImportJob(input.storage, input.storageKey);
       input.onUnavailable?.();
       return null;
     }

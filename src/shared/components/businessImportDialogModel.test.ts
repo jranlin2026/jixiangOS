@@ -67,6 +67,64 @@ resolveAbortedFetch(status('succeeded'));
 await assert.rejects(abortedPoll, (error: unknown) => error instanceof DOMException && error.name === 'AbortError');
 assert.equal(abortedUpdates, 0, 'a response resolved after close must not update dialog state');
 
+function countAbortListeners(signal: AbortSignal, counter: { active: number; added: number; removed: number }): void {
+  const add = signal.addEventListener.bind(signal);
+  const remove = signal.removeEventListener.bind(signal);
+  Object.defineProperty(signal, 'addEventListener', {
+    configurable: true,
+    value: ((type: string, listener: EventListenerOrEventListenerObject, options?: AddEventListenerOptions | boolean) => {
+      if (type === 'abort') {
+        counter.active += 1;
+        counter.added += 1;
+      }
+      add(type, listener, options);
+    }) satisfies AbortSignal['addEventListener'],
+  });
+  Object.defineProperty(signal, 'removeEventListener', {
+    configurable: true,
+    value: ((type: string, listener: EventListenerOrEventListenerObject, options?: EventListenerOptions | boolean) => {
+      if (type === 'abort') {
+        counter.active -= 1;
+        counter.removed += 1;
+      }
+      remove(type, listener, options);
+    }) satisfies AbortSignal['removeEventListener'],
+  });
+}
+
+const timeoutListeners = { active: 0, added: 0, removed: 0 };
+const timeoutController = new AbortController();
+countAbortListeners(timeoutController.signal, timeoutListeners);
+const nativeSetTimeout = globalThis.setTimeout;
+try {
+  globalThis.setTimeout = (((handler: TimerHandler) => {
+    queueMicrotask(() => { if (typeof handler === 'function') handler(); });
+    return 1;
+  }) as unknown) as typeof globalThis.setTimeout;
+  let timeoutLoads = 0;
+  await pollBusinessImportJob(async () => status(++timeoutLoads > 20 ? 'succeeded' : 'running'), {
+    signal: timeoutController.signal,
+  });
+} finally {
+  globalThis.setTimeout = nativeSetTimeout;
+}
+assert.equal(timeoutListeners.added, 20);
+assert.equal(timeoutListeners.removed, 20, 'resolved delays must explicitly remove abort listeners');
+assert.equal(timeoutListeners.active, 0, 'repeated resolved delays must retain no abort listeners');
+
+const abortedDelayListeners = { active: 0, added: 0, removed: 0 };
+for (let index = 0; index < 100; index += 1) {
+  const controller = new AbortController();
+  countAbortListeners(controller.signal, abortedDelayListeners);
+  const polling = pollBusinessImportJob(async () => status('running'), { signal: controller.signal });
+  await Promise.resolve();
+  controller.abort();
+  await assert.rejects(polling, (error: unknown) => error instanceof DOMException && error.name === 'AbortError');
+}
+assert.equal(abortedDelayListeners.added, 100);
+assert.equal(abortedDelayListeners.removed, 100, 'aborted delays must explicitly remove abort listeners');
+assert.equal(abortedDelayListeners.active, 0, 'repeated aborted delays must retain no abort listeners');
+
 let confirmCalls = 0;
 let releaseConfirm!: () => void;
 const oneTimeConfirm = createBusinessImportSingleFlight(async () => {
@@ -168,3 +226,16 @@ rejectStaleLoad(new BusinessImportJobUnavailableError(404, 'old job missing'));
 await assert.rejects(staleRun, (error: unknown) => error instanceof DOMException && error.name === 'AbortError');
 assert.equal(staleUnavailableCalls, 0);
 assert.deepEqual(readStoredBusinessImportJob(storage, tenantAUser1), { id: 'new-session-job', completedNotified: false });
+
+const storageFreeUpdates: string[] = [];
+let storageFreeLoads = 0;
+let storageFreeCompletions = 0;
+const storageFreeTerminal = await runBusinessImportJobPolling({
+  load: async () => status(++storageFreeLoads === 1 ? 'running' : 'succeeded'),
+  onUpdate: (next) => { storageFreeUpdates.push(next.status); },
+  onCompleted: () => { storageFreeCompletions += 1; },
+  wait: async () => undefined,
+});
+assert.equal(storageFreeTerminal?.status, 'succeeded');
+assert.deepEqual(storageFreeUpdates, ['running', 'succeeded']);
+assert.equal(storageFreeCompletions, 1, 'storage availability must not gate terminal callbacks');
