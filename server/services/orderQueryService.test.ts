@@ -74,6 +74,14 @@ const records = [
   order('order-legacy-self', undefined, sales.name),
   order('order-other', 'user-other', '销售B'),
   order('order-deleted', sales.id, sales.name, { deletedAt: now }),
+  order('payment-sort-june', finance.id, finance.name, {
+    payments: [{ id: 'payment-june', amount: 899, paymentMethod: '对公转账', paidAt: '2026-06-24T00:38:48.000Z' }],
+    updatedAt: '2026-07-24T12:00:00.000Z',
+  }),
+  order('payment-sort-july', finance.id, finance.name, {
+    payments: [{ id: 'payment-july', amount: 899, paymentMethod: '对公转账', paidAt: '2026-07-24T10:55:13.000Z' }],
+    updatedAt: '2026-07-01T00:00:00.000Z',
+  }),
 ];
 const applications = [
   {
@@ -146,6 +154,19 @@ assert.deepEqual(
 
 const financeOrders = await service.listOrders({ search: 'order-other', page: 1, pageSize: 10 }, finance);
 assert.deepEqual(financeOrders.data?.items.map((item) => item.id), ['order-other']);
+
+const paymentDateDesc = await service.listOrders({
+  search: 'payment-sort', sortBy: 'paymentDate', sortDirection: 'desc', page: 1, pageSize: 10,
+}, finance);
+assert.deepEqual(
+  paymentDateDesc.data?.items.map((item) => item.id),
+  ['payment-sort-july', 'payment-sort-june'],
+  '付款时间降序应先显示7月，不得被订单更新时间影响',
+);
+const paymentDateAsc = await service.listOrders({
+  search: 'payment-sort', sortBy: 'paymentDate', sortDirection: 'asc', page: 1, pageSize: 10,
+}, finance);
+assert.deepEqual(paymentDateAsc.data?.items.map((item) => item.id), ['payment-sort-june', 'payment-sort-july']);
 
 const forbiddenOrder = await service.getOrder('order-other', sales);
 assert.equal(forbiddenOrder.code, 403);

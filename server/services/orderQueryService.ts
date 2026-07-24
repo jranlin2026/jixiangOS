@@ -54,6 +54,13 @@ function timestamp(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function orderSortTimestamp(order: Order, sortBy?: OrderFilters['sortBy']): number {
+  if (sortBy === 'paymentDate') {
+    return timestamp(order.payments?.[0]?.paidAt || order.createdAt);
+  }
+  return timestamp(order.updatedAt || order.createdAt);
+}
+
 function inDateRange(value: unknown, startDate?: string, endDate?: string): boolean {
   const time = timestamp(value);
   if (startDate && time < timestamp(startDate)) return false;
@@ -243,7 +250,9 @@ async function queryOrderPage(
   }
   return queryBusinessRecordPage<Order>(prisma, {
     from: 'business_records br', selectId: 'br.id', selectData: 'br.data', conditions,
-    orderBy: `COALESCE(br.eventAt, br.updatedAt, br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}`,
+    orderBy: filters.sortBy === 'paymentDate'
+      ? `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.payments[0].paidAt')), JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}`
+      : `COALESCE(br.eventAt, br.updatedAt, br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}`,
     page, pageSize,
   });
 }
@@ -298,7 +307,10 @@ export function createOrderQueryService(
         .map((row) => parseRecord<Order>(row.data))
         .filter((order): order is Order => Boolean(order && !order.deletedAt))
         .filter((order) => orderIsVisible(order, scope) && matchesOrder(order, filters))
-        .sort((left, right) => direction * (timestamp(left.updatedAt || left.createdAt) - timestamp(right.updatedAt || right.createdAt)));
+        .sort((left, right) => (
+          direction * (orderSortTimestamp(left, filters.sortBy) - orderSortTimestamp(right, filters.sortBy))
+          || left.id.localeCompare(right.id)
+        ));
       const result = paginate(items, filters.page, filters.pageSize);
       const sourceApplicationIds = result.items
         .filter((order) => !order.createdByName && order.sourceApplicationId)
