@@ -32,6 +32,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditIcon from '@mui/icons-material/Edit';
 import HistoryIcon from '@mui/icons-material/History';
 import SortIcon from '@mui/icons-material/Sort';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
@@ -344,6 +345,17 @@ const Orders: React.FC = () => {
   const handlePaymentDateSort = () => {
     const nextDirection: 'asc' | 'desc' = filters.sortBy === 'paymentDate' && filters.sortDirection === 'desc' ? 'asc' : 'desc';
     const newFilters = { ...filters, paymentMethod: undefined, sortBy: 'paymentDate' as const, sortDirection: nextDirection, page: 1, pageSize: pagination.pageSize || 10 };
+    setFilters(newFilters);
+    fetchItems(newFilters);
+  };
+
+  const handleResetFilters = () => {
+    const newFilters = {
+      page: 1,
+      pageSize: pagination.pageSize || 10,
+      sortBy: 'createdAt' as const,
+      sortDirection: 'desc' as const,
+    };
     setFilters(newFilters);
     fetchItems(newFilters);
   };
@@ -691,8 +703,29 @@ const Orders: React.FC = () => {
                 ))}
               </Select>
             </FormControl>
+            <TextField
+              label="付款开始"
+              type="date"
+              value={filters.paymentStartDate || ''}
+              onChange={(e) => handleFilterChange('paymentStartDate', e.target.value)}
+              size="small"
+              InputLabelProps={{ shrink: true }}
+            />
+            <TextField
+              label="付款结束"
+              type="date"
+              value={filters.paymentEndDate || ''}
+              onChange={(e) => handleFilterChange('paymentEndDate', e.target.value)}
+              size="small"
+              InputLabelProps={{ shrink: true }}
+            />
             <Button variant="outlined" startIcon={<SortIcon />} onClick={handlePaymentDateSort}>
-              付款时间{filters.sortBy === 'paymentDate' && filters.sortDirection === 'asc' ? '升序' : '降序'}
+              {filters.sortBy === 'paymentDate'
+                ? `付款时间${filters.sortDirection === 'asc' ? '升序' : '降序'}`
+                : '按付款时间排序'}
+            </Button>
+            <Button variant="outlined" startIcon={<RestartAltIcon />} onClick={handleResetFilters}>
+              重置
             </Button>
           </ModuleToolbar>
 

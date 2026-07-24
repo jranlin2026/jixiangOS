@@ -190,6 +190,8 @@ export interface OrderFilters {
   paymentMethod?: PaymentMethod;
   startDate?: string;
   endDate?: string;
+  paymentStartDate?: string;
+  paymentEndDate?: string;
   sortBy?: 'createdAt' | 'paymentDate';
   sortDirection?: 'asc' | 'desc';
   page?: number;

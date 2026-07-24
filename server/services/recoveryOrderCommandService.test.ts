@@ -86,6 +86,7 @@ const oldRecord: RecoveryOrder = {
   id: 'recovery-old', recoveryNo: 'RCV-OLD', thirdPartyOrderNo: 'TP-OLD', customerId: '',
   customerName: '历史客户', customerMatchStatus: '手工填写', originalProduct: '历史产品',
   originalAmount: 100, recoveryAmount: 200, recoveryUserId: other.id, recoveryUserName: other.name,
+  recoveryAt: '2026-07-10T10:00:00.000Z',
   status: '待审核', settlementStatus: '待处理', commissionIds: [], createdBy: other.id,
   createdByName: other.name, createdAt: NOW, updatedAt: NOW,
   paymentVoucherPreview: INLINE_PROOF,
@@ -112,6 +113,7 @@ const outsideDepartmentRecord: RecoveryOrder = {
   thirdPartyOrderNo: 'TP-OUTSIDE-DEPARTMENT',
   recoveryUserId: creator.id,
   recoveryUserName: creator.name,
+  recoveryAt: '2026-07-14T10:00:00.000Z',
   createdBy: outsideDepartmentCreator.id,
   createdByName: outsideDepartmentCreator.name,
 };
@@ -362,6 +364,18 @@ const reviewerList = await service.list({
   scopeDomain: 'recoveryOrderApplications', page: 1, pageSize: 20,
 }, reviewer);
 assert.equal(reviewerList.data?.pagination.total, 3, '审核台全部范围必须从数据库看到所有部门的待审核订单');
+const recoveryTimeDesc = await service.list({
+  scopeDomain: 'recoveryOrderApplications', sortBy: 'recoveryAt', sortDirection: 'desc', page: 1, pageSize: 20,
+}, reviewer);
+assert.deepEqual(
+  recoveryTimeDesc.data?.items.map((item) => item.id),
+  [outsideDepartmentRecord.id, created.data!.id, oldRecord.id],
+  '售后挽回订单应支持按挽回成交时间倒序',
+);
+const recoveryDateFiltered = await service.list({
+  scopeDomain: 'recoveryOrderApplications', recoveryStartDate: '2026-07-12', recoveryEndDate: '2026-07-12', page: 1, pageSize: 20,
+}, reviewer);
+assert.deepEqual(recoveryDateFiltered.data?.items.map((item) => item.id), [created.data!.id]);
 const listedOldRecord = reviewerList.data?.items.find((item) => item.id === oldRecord.id);
 assert.equal(listedOldRecord?.paymentVoucherPreview, undefined);
 assert.equal(listedOldRecord?.chatEvidencePreview, undefined);

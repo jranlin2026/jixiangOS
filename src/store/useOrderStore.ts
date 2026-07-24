@@ -21,6 +21,7 @@ interface OrderState {
 }
 
 const defaultPagination = { page: 1, pageSize: 10, total: 0, totalPages: 0 };
+const defaultFilters: OrderFilters = { page: 1, pageSize: 10, sortBy: 'createdAt', sortDirection: 'desc' };
 
 const useOrderStore = create<OrderState>((set, get) => ({
   items: [],
@@ -28,7 +29,7 @@ const useOrderStore = create<OrderState>((set, get) => ({
   stats: null,
   loading: false,
   error: null,
-  filters: { page: 1, pageSize: 10 },
+  filters: defaultFilters,
   pagination: defaultPagination,
 
   fetchItems: async (filters?: OrderFilters) => {
@@ -107,7 +108,7 @@ const useOrderStore = create<OrderState>((set, get) => ({
   },
 
   setFilters: (filters) => set({ filters }),
-  reset: () => set({ items: [], current: null, stats: null, loading: false, error: null, filters: { page: 1, pageSize: 10 }, pagination: defaultPagination }),
+  reset: () => set({ items: [], current: null, stats: null, loading: false, error: null, filters: defaultFilters, pagination: defaultPagination }),
 }));
 
 export default useOrderStore;

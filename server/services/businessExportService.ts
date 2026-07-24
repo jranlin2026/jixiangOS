@@ -214,9 +214,15 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
               && (!Array.isArray(filters.settlementStatuses) || !filters.settlementStatuses.length || filters.settlementStatuses.includes(recoveryStatus(order)))
               && (!Array.isArray(filters.statuses) || !filters.statuses.length || filters.statuses.includes(order.status))
               && (Array.isArray(filters.statuses) || !filters.status || filters.status === '全部' || filters.status === order.status)
-              && (!filters.ownerId || [order.createdBy, order.recoveryUserId, order.assistUserId].includes(String(filters.ownerId)));
+              && (!filters.ownerId || [order.createdBy, order.recoveryUserId, order.assistUserId].includes(String(filters.ownerId)))
+              && inRange(order.recoveryAt || order.createdAt, clean(filters.recoveryStartDate) || undefined, clean(filters.recoveryEndDate) || undefined);
           })
-          .sort((left, right) => timestamp(right.updatedAt || right.createdAt) - timestamp(left.updatedAt || left.createdAt));
+          .sort((left, right) => {
+            const direction = filters.sortDirection === 'asc' ? 1 : -1;
+            const leftTime = filters.sortBy === 'recoveryAt' ? timestamp(left.recoveryAt || left.createdAt) : timestamp(left.updatedAt || left.createdAt);
+            const rightTime = filters.sortBy === 'recoveryAt' ? timestamp(right.recoveryAt || right.createdAt) : timestamp(right.updatedAt || right.createdAt);
+            return direction * (leftTime - rightTime);
+          });
       } else {
         sourceOrders = rows.map((row) => asRecord((row as any).data) as Order | null).filter(nonNull)
           .filter((order) => request.module === 'order_settlements' || !order.deletedAt)
@@ -230,12 +236,13 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
               && (!filters.productLevel || order.productLevel === filters.productLevel)
               && (!filters.orderType || order.orderType === filters.orderType)
               && (!filters.paymentMethod || order.paymentMethod === filters.paymentMethod)
-              && (request.module !== 'orders' || inRange(order.createdAt, clean(filters.startDate) || undefined, clean(filters.endDate) || undefined));
+              && (request.module !== 'orders' || inRange(order.createdAt, clean(filters.startDate) || undefined, clean(filters.endDate) || undefined))
+              && (request.module !== 'orders' || inRange(order.payments?.[0]?.paidAt || order.createdAt, clean(filters.paymentStartDate) || undefined, clean(filters.paymentEndDate) || undefined));
           })
           .sort((left, right) => {
             const direction = filters.sortDirection === 'asc' ? 1 : -1;
-            const leftTime = filters.sortBy === 'paymentDate' ? timestamp(left.payments?.[0]?.paidAt || left.createdAt) : timestamp(left.updatedAt || left.createdAt);
-            const rightTime = filters.sortBy === 'paymentDate' ? timestamp(right.payments?.[0]?.paidAt || right.createdAt) : timestamp(right.updatedAt || right.createdAt);
+            const leftTime = filters.sortBy === 'paymentDate' ? timestamp(left.payments?.[0]?.paidAt || left.createdAt) : timestamp(left.createdAt);
+            const rightTime = filters.sortBy === 'paymentDate' ? timestamp(right.payments?.[0]?.paidAt || right.createdAt) : timestamp(right.createdAt);
             return direction * (leftTime - rightTime) || left.id.localeCompare(right.id);
           });
       }
@@ -269,8 +276,14 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
         }).sort((left, right) => {
           const leftSplits = byOrder.get(left.id) || [];
           const rightSplits = byOrder.get(right.id) || [];
-          return timestamp(rightSplits[0]?.paymentDate || right.payments?.[0]?.paidAt || right.createdAt)
-            - timestamp(leftSplits[0]?.paymentDate || left.payments?.[0]?.paidAt || left.createdAt);
+          const direction = filters.sortDirection === 'asc' ? 1 : -1;
+          const leftTime = filters.sortBy === 'paymentDate'
+            ? timestamp(leftSplits[0]?.paymentDate || left.payments?.[0]?.paidAt || left.createdAt)
+            : timestamp(left.createdAt);
+          const rightTime = filters.sortBy === 'paymentDate'
+            ? timestamp(rightSplits[0]?.paymentDate || right.payments?.[0]?.paidAt || right.createdAt)
+            : timestamp(right.createdAt);
+          return direction * (leftTime - rightTime);
         });
       }
       const summaryCount = request.module === 'recovery_settlements' ? sourceRecoveryOrders.length : sourceOrders.length;

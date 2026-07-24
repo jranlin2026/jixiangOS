@@ -281,18 +281,27 @@ async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<Paginate
   if (filters?.endDate) {
     filtered = filtered.filter((o) => o.createdAt <= filters.endDate!);
   }
+  if (filters?.paymentStartDate) {
+    filtered = filtered.filter((o) => getPrimaryPaymentDate(o) >= filters.paymentStartDate!);
+  }
+  if (filters?.paymentEndDate) {
+    const paymentEndDate = filters.paymentEndDate.length === 10
+      ? `${filters.paymentEndDate}T23:59:59.999Z`
+      : filters.paymentEndDate;
+    filtered = filtered.filter((o) => getPrimaryPaymentDate(o) <= paymentEndDate);
+  }
 
   if (filters?.sortBy === 'paymentDate') {
     filtered.sort((a, b) => {
       const aTime = new Date(getPrimaryPaymentDate(a)).getTime();
       const bTime = new Date(getPrimaryPaymentDate(b)).getTime();
-      return filters.sortDirection === 'asc' ? aTime - bTime : bTime - aTime;
+      return filters?.sortDirection === 'asc' ? aTime - bTime : bTime - aTime;
     });
-  } else if (filters?.sortBy === 'createdAt') {
+  } else {
     filtered.sort((a, b) => {
       const aTime = new Date(a.createdAt).getTime();
       const bTime = new Date(b.createdAt).getTime();
-      return filters.sortDirection === 'asc' ? aTime - bTime : bTime - aTime;
+      return filters?.sortDirection === 'asc' ? aTime - bTime : bTime - aTime;
     });
   }
 

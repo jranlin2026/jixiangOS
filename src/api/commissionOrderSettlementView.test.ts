@@ -178,8 +178,8 @@ function seed() {
       dealScene: zh.orderType,
       proofStatus: '\u5df2\u4e0a\u4f20',
       payments: [{ id: 'pay-b', amount: 19800, paidAt: '2026-05-25T10:00:00.000Z', method: zh.bankTransfer }],
-      createdAt: now,
-      updatedAt: now,
+      createdAt: '2026-06-01T08:00:00.000Z',
+      updatedAt: '2026-06-01T08:00:00.000Z',
     } as any,
     {
       id: 'order-c',
@@ -244,8 +244,8 @@ function seed() {
       dealScene: zh.orderType,
       proofStatus: '\u5df2\u4e0a\u4f20',
       payments: [{ id: 'pay-e', amount: 199, paidAt: '2026-06-28T10:00:00.000Z', method: zh.bankTransfer }],
-      createdAt: now,
-      updatedAt: now,
+      createdAt: '2026-06-20T08:00:00.000Z',
+      updatedAt: '2026-06-20T08:00:00.000Z',
     } as any,
   ];
   storage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
@@ -299,6 +299,19 @@ assert.notEqual((await orderApi.fetchOrderById('order-a')).data, null);
 const summariesRes = await (commissionApi as any).fetchCommissionOrderSummaries({ pageSize: 20 });
 assert.equal(summariesRes.code, 0);
 assert.equal(summariesRes.data.items.length, 3);
+assert.deepEqual(
+  summariesRes.data.items.map((item: any) => item.orderId),
+  ['order-e', 'order-a', 'order-b'],
+  '订单分账默认应按订单创建时间倒序',
+);
+const paymentSortedSummaries = await (commissionApi as any).fetchCommissionOrderSummaries({
+  sortBy: 'paymentDate', sortDirection: 'desc', pageSize: 20,
+});
+assert.deepEqual(paymentSortedSummaries.data.items.map((item: any) => item.orderId), ['order-e', 'order-b', 'order-a']);
+const mayPaymentSummaries = await (commissionApi as any).fetchCommissionOrderSummaries({
+  startDate: '2026-05-01', endDate: '2026-05-31', pageSize: 20,
+});
+assert.deepEqual(mayPaymentSummaries.data.items.map((item: any) => item.orderId).sort(), ['order-a', 'order-b'].sort());
 const orderA = summariesRes.data.items.find((item: any) => item.orderId === 'order-a');
 const orderB = summariesRes.data.items.find((item: any) => item.orderId === 'order-b');
 const orderE = summariesRes.data.items.find((item: any) => item.orderId === 'order-e');

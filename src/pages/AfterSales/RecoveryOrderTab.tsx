@@ -29,6 +29,8 @@ import EditIcon from '@mui/icons-material/Edit';
 import HistoryIcon from '@mui/icons-material/History';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ReplayIcon from '@mui/icons-material/Replay';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import SortIcon from '@mui/icons-material/Sort';
 import BlockIcon from '@mui/icons-material/Block';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useNavigate } from 'react-router-dom';
@@ -261,6 +263,10 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const [products, setProducts] = useState<Product[]>([]);
   const [sourceConfigs, setSourceConfigs] = useState<AfterSalesSourceConfig[]>([]);
   const [search, setSearch] = useState('');
+  const [recoveryStartDate, setRecoveryStartDate] = useState('');
+  const [recoveryEndDate, setRecoveryEndDate] = useState('');
+  const [sortBy, setSortBy] = useState<'updatedAt' | 'recoveryAt'>('updatedAt');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [reviewQueueView, setReviewQueueView] = useState<ReviewQueueView>('pending');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -304,9 +310,29 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       : RECOVERY_LIST_STATUSES,
     includeDeleted: mode === 'review' && reviewQueueView === 'all',
     scopeDomain: mode === 'review' ? 'recoveryOrderApplications' : 'recoveryOrders',
+    recoveryStartDate: recoveryStartDate || undefined,
+    recoveryEndDate: recoveryEndDate || undefined,
+    sortBy,
+    sortDirection,
     page: page + 1,
     pageSize: rowsPerPage,
-  }), [mode, page, reviewQueueView, rowsPerPage, search]);
+  }), [mode, page, recoveryEndDate, recoveryStartDate, reviewQueueView, rowsPerPage, search, sortBy, sortDirection]);
+
+  const handleRecoveryTimeSort = () => {
+    setSortDirection((current) => sortBy === 'recoveryAt' && current === 'desc' ? 'asc' : 'desc');
+    setSortBy('recoveryAt');
+    setPage(0);
+  };
+
+  const handleResetFilters = () => {
+    setSearch('');
+    setRecoveryStartDate('');
+    setRecoveryEndDate('');
+    setSortBy('updatedAt');
+    setSortDirection('desc');
+    if (mode === 'review') setReviewQueueView('pending');
+    setPage(0);
+  };
 
   const load = useCallback(async () => {
     const requestId = loadRequestIdRef.current + 1;
@@ -844,9 +870,42 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
           size="small"
           placeholder="搜索客户/订单号"
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={(event) => {
+            setSearch(event.target.value);
+            setPage(0);
+          }}
           sx={{ width: 240 }}
         />
+        <TextField
+          size="small"
+          label="挽回成交开始"
+          type="date"
+          value={recoveryStartDate}
+          onChange={(event) => {
+            setRecoveryStartDate(event.target.value);
+            setPage(0);
+          }}
+          InputLabelProps={{ shrink: true }}
+        />
+        <TextField
+          size="small"
+          label="挽回成交结束"
+          type="date"
+          value={recoveryEndDate}
+          onChange={(event) => {
+            setRecoveryEndDate(event.target.value);
+            setPage(0);
+          }}
+          InputLabelProps={{ shrink: true }}
+        />
+        <Button variant="outlined" startIcon={<SortIcon />} onClick={handleRecoveryTimeSort}>
+          {sortBy === 'recoveryAt'
+            ? `挽回成交时间${sortDirection === 'asc' ? '升序' : '降序'}`
+            : '按挽回成交时间排序'}
+        </Button>
+        <Button variant="outlined" startIcon={<RestartAltIcon />} onClick={handleResetFilters}>
+          重置
+        </Button>
         {mode === 'review' && (
           <TextField
             select

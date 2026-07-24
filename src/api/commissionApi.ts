@@ -682,7 +682,7 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
       })),
       commissions: sortedRows,
     };
-  }).sort((a, b) => new Date(b.paymentDate || '').getTime() - new Date(a.paymentDate || '').getTime());
+  });
 }
 
 function applyOrderSummaryFilters(summaries: CommissionOrderSummary[], filters?: CommissionOrderSummaryFilters): CommissionOrderSummary[] {
@@ -698,6 +698,13 @@ function applyOrderSummaryFilters(summaries: CommissionOrderSummary[], filters?:
   const { startDate, endDate } = normalizeDateRange(filters?.startDate, filters?.endDate);
   if (startDate) filtered = filtered.filter((item) => item.paymentDate >= startDate);
   if (endDate) filtered = filtered.filter((item) => item.paymentDate <= endDate);
+  const sortBy = filters?.sortBy || 'createdAt';
+  const direction = filters?.sortDirection === 'asc' ? 1 : -1;
+  filtered.sort((a, b) => {
+    const aValue = sortBy === 'paymentDate' ? a.paymentDate : a.createdAt;
+    const bValue = sortBy === 'paymentDate' ? b.paymentDate : b.createdAt;
+    return direction * (new Date(aValue || '').getTime() - new Date(bValue || '').getTime());
+  });
   return filtered;
 }
 

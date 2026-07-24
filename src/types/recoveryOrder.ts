@@ -135,6 +135,10 @@ export interface RecoveryOrderFilters {
   settlementStatus?: RecoveryOrderSettlementStatus | '全部';
   settlementStatuses?: RecoveryOrderSettlementStatus[];
   ownerId?: ID;
+  recoveryStartDate?: string;
+  recoveryEndDate?: string;
+  sortBy?: 'updatedAt' | 'createdAt' | 'recoveryAt';
+  sortDirection?: 'asc' | 'desc';
   includeDeleted?: boolean;
   scopeDomain?: Extract<DataScopeDomain, 'recoveryOrders' | 'recoveryOrderApplications'>;
   page?: number;

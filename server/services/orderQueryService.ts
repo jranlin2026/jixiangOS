@@ -58,7 +58,7 @@ function orderSortTimestamp(order: Order, sortBy?: OrderFilters['sortBy']): numb
   if (sortBy === 'paymentDate') {
     return timestamp(order.payments?.[0]?.paidAt || order.createdAt);
   }
-  return timestamp(order.updatedAt || order.createdAt);
+  return timestamp(order.createdAt);
 }
 
 function inDateRange(value: unknown, startDate?: string, endDate?: string): boolean {
@@ -194,7 +194,8 @@ function matchesOrder(order: Order, filters: OrderFilters): boolean {
   if (filters.owner && order.owner !== filters.owner && order.salesName !== filters.owner) return false;
   if (filters.orderType && order.orderType !== filters.orderType) return false;
   if (filters.paymentMethod && order.paymentMethod !== filters.paymentMethod) return false;
-  return inDateRange(order.createdAt, filters.startDate, filters.endDate);
+  return inDateRange(order.createdAt, filters.startDate, filters.endDate)
+    && inDateRange(order.payments?.[0]?.paidAt || order.createdAt, filters.paymentStartDate, filters.paymentEndDate);
 }
 
 function matchesApplication(application: OrderApplication, filters: OrderApplicationFilters): boolean {
@@ -236,6 +237,9 @@ async function queryOrderPage(
   if (filters.owner) conditions.push(Prisma.sql`(br.owner = ${filters.owner} OR ${jsonText('br', '$.salesName')} = ${filters.owner})`);
   if (filters.startDate) conditions.push(Prisma.sql`${jsonText('br', '$.createdAt')} >= ${filters.startDate}`);
   if (filters.endDate) conditions.push(Prisma.sql`${jsonText('br', '$.createdAt')} <= ${/^\d{4}-\d{2}-\d{2}$/.test(filters.endDate) ? `${filters.endDate}T23:59:59.999Z` : filters.endDate}`);
+  const paymentDate = Prisma.sql`COALESCE(${jsonText('br', '$.payments[0].paidAt')}, ${jsonText('br', '$.createdAt')}, br.createdAt)`;
+  if (filters.paymentStartDate) conditions.push(Prisma.sql`${paymentDate} >= ${filters.paymentStartDate}`);
+  if (filters.paymentEndDate) conditions.push(Prisma.sql`${paymentDate} <= ${/^\d{4}-\d{2}-\d{2}$/.test(filters.paymentEndDate) ? `${filters.paymentEndDate}T23:59:59.999Z` : filters.paymentEndDate}`);
   if (!scope.unrestricted) {
     const salesId = jsonText('br', '$.salesId');
     const ownerName = Prisma.sql`COALESCE(NULLIF(${jsonText('br', '$.salesName')}, ''), ${jsonText('br', '$.owner')})`;
@@ -252,7 +256,7 @@ async function queryOrderPage(
     from: 'business_records br', selectId: 'br.id', selectData: 'br.data', conditions,
     orderBy: filters.sortBy === 'paymentDate'
       ? `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.payments[0].paidAt')), JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}`
-      : `COALESCE(br.eventAt, br.updatedAt, br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}`,
+      : `br.createdAt ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}`,
     page, pageSize,
   });
 }

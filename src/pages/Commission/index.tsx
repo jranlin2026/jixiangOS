@@ -37,6 +37,8 @@ import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import PaymentsIcon from '@mui/icons-material/Payments';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import SortIcon from '@mui/icons-material/Sort';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import { businessExportApi, commissionApi, commissionRuleApi, customerApi, orderApi, settingsApi } from '../../api';
@@ -528,6 +530,8 @@ const Commission: React.FC<CommissionProps> = ({
     month: '',
     startDate: '',
     endDate: '',
+    sortBy: 'createdAt' as 'createdAt' | 'paymentDate',
+    sortDirection: 'desc' as 'asc' | 'desc',
   });
   const [orderStatusCounts, setOrderStatusCounts] = useState<CommissionOrderSummaryStatusCounts>(DEFAULT_ORDER_STATUS_COUNTS);
   const [orderSplitViewOpen, setOrderSplitViewOpen] = useState(false);
@@ -792,6 +796,8 @@ const Commission: React.FC<CommissionProps> = ({
     month: orderFilters.month || undefined,
     startDate: orderFilters.startDate || undefined,
     endDate: orderFilters.endDate || undefined,
+    sortBy: orderFilters.sortBy,
+    sortDirection: orderFilters.sortDirection,
     page: orderPagination.page,
     pageSize: orderPagination.pageSize,
   });
@@ -921,6 +927,30 @@ const Commission: React.FC<CommissionProps> = ({
   const updateOrderFilter = (key: keyof typeof orderFilters, value: string) => {
     setOrderPagination((prev) => ({ ...prev, page: 1 }));
     setOrderFilters((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleOrderPaymentDateSort = () => {
+    setOrderPagination((prev) => ({ ...prev, page: 1 }));
+    setOrderFilters((prev) => ({
+      ...prev,
+      sortBy: 'paymentDate',
+      sortDirection: prev.sortBy === 'paymentDate' && prev.sortDirection === 'desc' ? 'asc' : 'desc',
+    }));
+  };
+
+  const handleResetOrderFilters = () => {
+    setOrderPagination((prev) => ({ ...prev, page: 1 }));
+    setOrderFilters({
+      search: '',
+      status: '全部',
+      ownerId: '',
+      role: '',
+      month: '',
+      startDate: '',
+      endDate: '',
+      sortBy: 'createdAt',
+      sortDirection: 'desc',
+    });
   };
 
   const handleOrderPageChange = (_: React.MouseEvent<HTMLButtonElement> | null, page: number) => {
@@ -2614,6 +2644,14 @@ const Commission: React.FC<CommissionProps> = ({
         size="small"
         InputLabelProps={{ shrink: true }}
       />
+      <Button variant="outlined" startIcon={<SortIcon />} onClick={handleOrderPaymentDateSort}>
+        {orderFilters.sortBy === 'paymentDate'
+          ? `付款时间${orderFilters.sortDirection === 'asc' ? '升序' : '降序'}`
+          : '按付款时间排序'}
+      </Button>
+      <Button variant="outlined" startIcon={<RestartAltIcon />} onClick={handleResetOrderFilters}>
+        重置
+      </Button>
     </Stack>
   );
 

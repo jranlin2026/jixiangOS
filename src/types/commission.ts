@@ -416,6 +416,8 @@ export interface CommissionOrderSummaryFilters {
   startDate?: string;
   endDate?: string;
   month?: string;
+  sortBy?: 'createdAt' | 'paymentDate';
+  sortDirection?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;
 }

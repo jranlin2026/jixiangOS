@@ -810,6 +810,8 @@ app.get('/api/orders', requireOrderReadAccess, async (req: AuthenticatedRequest,
     paymentMethod: queryParam(req.query.paymentMethod) as any,
     startDate: queryParam(req.query.startDate),
     endDate: queryParam(req.query.endDate),
+    paymentStartDate: queryParam(req.query.paymentStartDate),
+    paymentEndDate: queryParam(req.query.paymentEndDate),
     sortBy: queryParam(req.query.sortBy) as any,
     sortDirection: queryParam(req.query.sortDirection) as any,
     page: Number(queryParam(req.query.page)),
@@ -1015,6 +1017,10 @@ app.get('/api/recovery-orders', requireStorageAccess, async (req: AuthenticatedR
     settlementStatus: queryParam(req.query.settlementStatus) as RecoveryOrderFilters['settlementStatus'] || undefined,
     settlementStatuses: queryParam(req.query.settlementStatuses).split(',').filter(Boolean) as RecoveryOrderFilters['settlementStatuses'],
     ownerId: queryParam(req.query.ownerId) || undefined,
+    recoveryStartDate: queryParam(req.query.recoveryStartDate) || undefined,
+    recoveryEndDate: queryParam(req.query.recoveryEndDate) || undefined,
+    sortBy: queryParam(req.query.sortBy) as RecoveryOrderFilters['sortBy'] || undefined,
+    sortDirection: queryParam(req.query.sortDirection) as RecoveryOrderFilters['sortDirection'] || undefined,
     includeDeleted: queryParam(req.query.includeDeleted) === 'true',
     scopeDomain: queryParam(req.query.scopeDomain) as RecoveryOrderFilters['scopeDomain'] || undefined,
     page: Number(queryParam(req.query.page)) || undefined,
@@ -1027,6 +1033,8 @@ app.get('/api/recovery-orders/settlement-counts', requireStorageAccess, async (r
   const result = await recoveryOrderCommandService.settlementCounts({
     search: queryParam(req.query.search) || undefined,
     includeDeleted: queryParam(req.query.includeDeleted) === 'true',
+    recoveryStartDate: queryParam(req.query.recoveryStartDate) || undefined,
+    recoveryEndDate: queryParam(req.query.recoveryEndDate) || undefined,
   }, req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });

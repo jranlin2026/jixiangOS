@@ -295,7 +295,25 @@ async function fetchRecoveryOrders(filters: RecoveryOrderFilters = {}): Promise<
       || item.assistUserId === filters.ownerId
     ));
   }
-  items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  if (filters.recoveryStartDate) {
+    items = items.filter((item) => (item.recoveryAt || item.createdAt) >= filters.recoveryStartDate!);
+  }
+  if (filters.recoveryEndDate) {
+    const recoveryEndDate = filters.recoveryEndDate.length === 10
+      ? `${filters.recoveryEndDate}T23:59:59.999Z`
+      : filters.recoveryEndDate;
+    items = items.filter((item) => (item.recoveryAt || item.createdAt) <= recoveryEndDate);
+  }
+  const sortDirection = filters.sortDirection === 'asc' ? 1 : -1;
+  items.sort((a, b) => {
+    const aValue = filters.sortBy === 'recoveryAt'
+      ? (a.recoveryAt || a.createdAt)
+      : filters.sortBy === 'createdAt' ? a.createdAt : (a.updatedAt || a.createdAt);
+    const bValue = filters.sortBy === 'recoveryAt'
+      ? (b.recoveryAt || b.createdAt)
+      : filters.sortBy === 'createdAt' ? b.createdAt : (b.updatedAt || b.createdAt);
+    return sortDirection * (new Date(aValue).getTime() - new Date(bValue).getTime());
+  });
   const page = filters.page || 1;
   const pageSize = filters.pageSize || DEFAULT_PAGE_SIZE;
   const total = items.length;
@@ -355,21 +373,32 @@ async function fetchRecoveryOrderStats(ownerId?: string): Promise<ApiResponse<Re
 }
 
 async function fetchRecoverySettlementCounts(
-  filters: Pick<RecoveryOrderFilters, 'search' | 'includeDeleted'> = {},
+  filters: Pick<RecoveryOrderFilters, 'search' | 'includeDeleted' | 'recoveryStartDate' | 'recoveryEndDate'> = {},
 ): Promise<ApiResponse<RecoverySettlementCounts>> {
   if (shouldUseBackendApi()) {
     const params = new URLSearchParams();
     if (filters.search) params.set('search', filters.search);
     if (filters.includeDeleted) params.set('includeDeleted', 'true');
+    if (filters.recoveryStartDate) params.set('recoveryStartDate', filters.recoveryStartDate);
+    if (filters.recoveryEndDate) params.set('recoveryEndDate', filters.recoveryEndDate);
     return backendRequest<RecoverySettlementCounts>(
       `/recovery-orders/settlement-counts${params.size ? `?${params.toString()}` : ''}`,
     );
   }
-  const items = filterVisibleRecoveryOrders(readRecoveryOrders(), 'recoveryOrders')
+  let items = filterVisibleRecoveryOrders(readRecoveryOrders(), 'recoveryOrders')
     .filter((item) => !item.settlementCleanedAt)
     .filter((item) => filters.includeDeleted || !item.deletedAt)
     .filter((item) => !filters.search || [item.recoveryNo, item.customerName, item.thirdPartyOrderNo]
       .some((value) => normalizeText(value).includes(normalizeText(filters.search))));
+  if (filters.recoveryStartDate) {
+    items = items.filter((item) => (item.recoveryAt || item.createdAt) >= filters.recoveryStartDate!);
+  }
+  if (filters.recoveryEndDate) {
+    const recoveryEndDate = filters.recoveryEndDate.length === 10
+      ? `${filters.recoveryEndDate}T23:59:59.999Z`
+      : filters.recoveryEndDate;
+    items = items.filter((item) => (item.recoveryAt || item.createdAt) <= recoveryEndDate);
+  }
   const statusCounts: Record<string, number> = { 待处理: 0, 待确认: 0, 待发放: 0, 已发放: 0, 已撤回: 0 };
   items.forEach((item) => {
     const value = String(item.settlementStatus || '');
