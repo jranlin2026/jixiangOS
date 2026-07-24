@@ -242,6 +242,57 @@ class FakePrisma {
 
 const prisma = new FakePrisma();
 const service = createRecoveryOrderCommandService(prisma as any, { now: () => new Date(NOW) });
+
+const realtimeSettlementOrder: RecoveryOrder = {
+  ...oldRecord,
+  id: 'recovery-realtime-settlement',
+  recoveryNo: 'RCV-REALTIME',
+  thirdPartyOrderNo: 'TP-REALTIME',
+  status: '待分账',
+  settlementStatus: '待处理',
+  commissionIds: [],
+};
+prisma.rows.set(key(STORAGE_KEYS.RECOVERY_ORDERS, realtimeSettlementOrder.id), {
+  id: `${STORAGE_KEYS.RECOVERY_ORDERS}:${realtimeSettlementOrder.id}`,
+  domain: STORAGE_KEYS.RECOVERY_ORDERS,
+  recordId: realtimeSettlementOrder.id,
+  status: realtimeSettlementOrder.status,
+  data: clone(realtimeSettlementOrder),
+});
+const settledRealtime = await service.settle(realtimeSettlementOrder.id, [{
+  role: '售后',
+  ownerId: finance.id,
+  payoutPlanName: '自定义金额',
+  commissionAmount: 30,
+  performanceAmount: 200,
+  ruleCalculationType: 'fixed',
+}], '测试实时保存', finance);
+assert.equal(settledRealtime.code, 0);
+assert.equal(settledRealtime.data?.settlementStatus, '待确认');
+assert.equal(
+  (await service.list({ settlementStatuses: ['待确认'], page: 1, pageSize: 20 }, finance))
+    .data?.items.some((item) => item.id === realtimeSettlementOrder.id),
+  true,
+  '保存分账后后端列表必须立即显示待确认',
+);
+const confirmedRealtime = await service.confirmSettlement(realtimeSettlementOrder.id, finance);
+assert.equal(confirmedRealtime.code, 0);
+assert.equal(confirmedRealtime.data?.settlementStatus, '待发放');
+const withdrawnRealtime = await service.withdrawSettlement(realtimeSettlementOrder.id, '测试实时撤回', finance);
+assert.equal(withdrawnRealtime.code, 0);
+assert.equal(withdrawnRealtime.data?.settlementStatus, '已撤回');
+assert.equal(
+  (await service.list({ settlementStatuses: ['已撤回'], page: 1, pageSize: 20 }, finance))
+    .data?.items.some((item) => item.id === realtimeSettlementOrder.id),
+  true,
+  '撤回成功后后端列表必须立即显示已撤回，不能继续显示待发放',
+);
+const realtimeCommission = Array.from(prisma.rows.values())
+  .find((row: any) => row.domain === STORAGE_KEYS.COMMISSIONS && row.data?.sourceRecoveryOrderId === realtimeSettlementOrder.id);
+assert.equal(realtimeCommission?.data.status, '已撤回', '撤回必须同时更新关联提成状态');
+prisma.rows.delete(key(STORAGE_KEYS.RECOVERY_ORDERS, realtimeSettlementOrder.id));
+if (realtimeCommission) prisma.rows.delete(key(STORAGE_KEYS.COMMISSIONS, realtimeCommission.recordId));
+
 const missingContact = await service.create(input({
   thirdPartyOrderNo: 'TP-NO-CONTACT', customerPhone: '', customerWechat: '',
 }), creator);

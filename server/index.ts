@@ -1037,6 +1037,39 @@ app.post('/api/recovery-orders/:id/reject', requireStorageAccess, async (req: Au
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
+app.post('/api/recovery-orders/:id/settle', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await recoveryOrderCommandService.settle(
+    routeParam(req.params.id),
+    Array.isArray(req.body?.rows) ? req.body.rows : [],
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/recovery-orders/:id/confirm-settlement', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await recoveryOrderCommandService.confirmSettlement(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/recovery-orders/:id/reset-settlement', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await recoveryOrderCommandService.resetSettlement(
+    routeParam(req.params.id),
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/recovery-orders/:id/withdraw-settlement', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await recoveryOrderCommandService.withdrawSettlement(
+    routeParam(req.params.id),
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
 app.delete('/api/recovery-orders/:id', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
   const result = await recoveryOrderCommandService.softDelete(routeParam(req.params.id), String(req.body?.reason || ''), req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);

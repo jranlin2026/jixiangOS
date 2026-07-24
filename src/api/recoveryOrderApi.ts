@@ -791,6 +791,15 @@ async function settleRecoveryOrder(
   operatorId: string,
   operatorName: string,
 ): Promise<ApiResponse<RecoveryOrder | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<RecoveryOrder | null>(`/recovery-orders/${encodeURIComponent(id)}/settle`, {
+      method: 'POST',
+      body: JSON.stringify({ rows, reason }),
+    });
+    if (response.code !== 0) return createErrorResponse(response.message, response.code);
+    return createSuccessResponse(response.data ? cacheBackendRecoveryOrder(response.data) : null, response.message);
+  }
+
   ensureInit();
   await delay(180);
   const normalizedReason = reason.trim();
@@ -841,6 +850,14 @@ async function settleRecoveryOrder(
 }
 
 async function confirmRecoverySettlement(id: string, operatorName: string): Promise<ApiResponse<RecoveryOrder | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<RecoveryOrder | null>(`/recovery-orders/${encodeURIComponent(id)}/confirm-settlement`, {
+      method: 'POST',
+    });
+    if (response.code !== 0) return createErrorResponse(response.message, response.code);
+    return createSuccessResponse(response.data ? cacheBackendRecoveryOrder(response.data) : null, response.message);
+  }
+
   ensureInit();
   await delay(140);
   const orders = readRecoveryOrders();
@@ -881,6 +898,15 @@ async function confirmRecoverySettlement(id: string, operatorName: string): Prom
 }
 
 async function resetRecoverySettlement(id: string, operatorName: string, reason?: string): Promise<ApiResponse<RecoveryOrder | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<RecoveryOrder | null>(`/recovery-orders/${encodeURIComponent(id)}/reset-settlement`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    if (response.code !== 0) return createErrorResponse(response.message, response.code);
+    return createSuccessResponse(response.data ? cacheBackendRecoveryOrder(response.data) : null, response.message);
+  }
+
   ensureInit();
   await delay(160);
   const orders = readRecoveryOrders();
@@ -910,6 +936,15 @@ async function resetRecoverySettlement(id: string, operatorName: string, reason?
 }
 
 async function withdrawRecoverySettlement(id: string, reason: string, operatorName: string): Promise<ApiResponse<RecoveryOrder | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<RecoveryOrder | null>(`/recovery-orders/${encodeURIComponent(id)}/withdraw-settlement`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    if (response.code !== 0) return createErrorResponse(response.message, response.code);
+    return createSuccessResponse(response.data ? cacheBackendRecoveryOrder(response.data) : null, response.message);
+  }
+
   ensureInit();
   await delay(140);
   const normalizedReason = reason.trim();

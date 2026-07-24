@@ -242,6 +242,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   const handledViewSettingsTriggerRef = React.useRef(viewSettingsTrigger);
   const handledCreateSettlementTriggerRef = React.useRef(createSettlementTrigger);
   const sourceDetailRequestRef = React.useRef(0);
+  const loadRequestRef = React.useRef(0);
 
   const {
     viewConfig,
@@ -287,6 +288,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   }), [getDefaultRecoveryOwnerId]);
 
   const load = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     const readyStatuses = ['待处理', '待确认', '待发放', '已发放', '已撤回'] as const;
     const [allRes, countsRes, directoryRes, rolesRes, plansRes] = await Promise.all([
       recoveryOrderApi.fetchRecoveryOrders({
@@ -301,6 +303,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       commissionRuleApi.getCommissionRoleConfigs({ isActive: true }),
       commissionRuleApi.getCommissionPayoutPlans(),
     ]);
+    if (requestId !== loadRequestRef.current) return;
     if (allRes.code === 0) {
       setRows(allRes.data.items);
       setTotal(allRes.data.pagination.total);
@@ -314,6 +317,22 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     if (rolesRes.code === 0) setRoles(rolesRes.data);
     if (plansRes.code === 0) setPlans(plansRes.data);
   }, [page, rowsPerPage, search, status]);
+
+  const applySettlementMutation = useCallback((previous: RecoveryOrder, next: RecoveryOrder) => {
+    const previousStatus = getSettlementStatus(previous);
+    const nextStatus = getSettlementStatus(next);
+    setRows((current) => current
+      .map((row) => (row.id === next.id ? next : row))
+      .filter((row) => status === '全部' || getSettlementStatus(row) === status));
+    setSettlementCounts((current) => {
+      if (previousStatus === nextStatus) return current;
+      return {
+        ...current,
+        [previousStatus]: Math.max(0, Number(current[previousStatus] || 0) - 1),
+        [nextStatus]: Number(current[nextStatus] || 0) + 1,
+      };
+    });
+  }, [status]);
 
   const getDepartmentName = (departmentId?: string) => {
     if (!departmentId) return '-';
@@ -577,6 +596,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         setDetailOrder(res.data);
         setDetailCommissions(await loadRecoveryCommissions(res.data));
       }
+      if (res.data) applySettlementMutation(selected, res.data);
       setSelected(null);
       setMessage({ type: 'success', text: '售后挽回分账已保存，当前状态为待确认' });
       await load();
@@ -597,6 +617,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       setMessage({ type: 'error', text: res.message || '确认售后挽回分账失败' });
       return;
     }
+    if (res.data) applySettlementMutation(row, res.data);
     setSelected(null);
     closeDetail();
     setMessage({ type: 'success', text: '已确认售后挽回分账，进入待发放' });
@@ -615,6 +636,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       setMessage({ type: 'error', text: res.message || '撤回售后挽回分账失败' });
       return;
     }
+    if (res.data) applySettlementMutation(row, res.data);
     setSelected(null);
     closeDetail();
     setWithdrawTarget(null);
@@ -655,6 +677,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       setMessage({ type: 'error', text: res.message || (cleanupDeletedSource ? '清理废弃售后挽回分账失败' : '删除售后挽回分账失败') });
       return;
     }
+    if (!cleanupDeletedSource && res.data) applySettlementMutation(deleteTarget, res.data);
     setDeleteTarget(null);
     setDeleteReason('');
     setMessage({
