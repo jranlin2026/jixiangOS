@@ -642,7 +642,7 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
       leadContributorName: order?.leadContributorName,
       sourceType: order?.sourceType,
       officialPaymentChannel: order?.officialPaymentChannel,
-      originalOrderId: order?.originalOrderId,
+      thirdPartyOrderNo: order?.thirdPartyOrderNo,
       notes: order?.notes,
       createdAt: order?.createdAt || first.createdAt,
       sourceOrderDeleted: !order,

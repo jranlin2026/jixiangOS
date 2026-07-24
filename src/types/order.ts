@@ -27,7 +27,7 @@ export interface OrderPayment {
 
 export interface OrderChangeLog {
   id: ID;
-  action: 'create' | 'update' | 'delete';
+  action: 'create' | 'update' | 'correct' | 'delete';
   operator: string;
   changedAt: Timestamp;
   summary: string;
@@ -37,6 +37,12 @@ export interface OrderChangeLog {
     oldValue?: string | number | boolean | null;
     newValue?: string | number | boolean | null;
   }>;
+}
+
+/** 超级管理员对已审核正式订单发起的受控更正。 */
+export interface OrderCorrectionInput {
+  reason: string;
+  data: Partial<Order>;
 }
 
 export type OrderApplicationStatus = '待财务审核' | '退回修改' | '已入库' | '已驳回';
@@ -80,6 +86,8 @@ export interface Order {
   leadContributorId?: ID;
   leadContributorName?: string;
   leadSource?: string;
+  /** 线索来源二级明细，与 leadSource 一起固化为订单快照。 */
+  sourceName?: string;
   successId?: ID;
   successName?: string;
   serviceId?: ID;

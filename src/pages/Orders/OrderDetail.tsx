@@ -15,7 +15,7 @@ import {
   Typography,
 } from '@mui/material';
 import { getProductLevelTagSx } from '../../shared/utils/constants';
-import { formatCurrency, formatDate } from '../../shared/utils/formatters';
+import { formatCurrency, formatDate, formatLeadSourceLabel } from '../../shared/utils/formatters';
 import { normalizeResourceOwnership } from '../../shared/utils/constants';
 import type { Order } from '../../types/order';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
@@ -80,7 +80,7 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
             </Box>
             <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>线索来源</Typography>
-              <Typography variant="body1">{order.leadSource || '-'}</Typography>
+              <Typography variant="body1">{formatLeadSourceLabel(order.leadSource, order.sourceName)}</Typography>
             </Box>
             <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>销售负责人</Typography>

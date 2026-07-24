@@ -391,6 +391,7 @@ async function canonicalizeOrderApplicationInput(
     salesName: sales.name,
     sourceType: customer.leadSource || input.sourceType,
     leadSource: customer.leadSource || input.leadSource,
+    sourceName: customer.sourceName || input.sourceName,
     leadInputBy: customer.leadInputBy || input.leadInputBy,
     leadContributorId: customer.leadContributorId || input.leadContributorId,
     leadContributorName: customer.leadContributorName || input.leadContributorName,

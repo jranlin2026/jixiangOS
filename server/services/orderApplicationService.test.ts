@@ -266,6 +266,7 @@ class FakePrisma {
         owner: '销售小王',
         sourceType: '公司资源',
         leadSource: '官网',
+        sourceName: '品牌官网',
         customerLevel: 'L1',
         lifecycleStatusCode: 'following',
         totalSpent: 0,
@@ -794,6 +795,7 @@ const deferredEffects: OrderApprovalEffectState = {
   assert.equal(result.data?.orderData.owner, salesApplicant.name);
   assert.equal(result.data?.orderData.thirdPartyOrderNo, 'TP-20260724-001', '审核快照必须保留第三方平台订单');
   assert.equal(result.data?.orderData.leadSource, '官网', '审核快照必须保留客户线索来源');
+  assert.equal((result.data?.orderData as any)?.sourceName, '品牌官网', '审核快照必须保留二级线索来源');
 
   const approved = await createOrderApplicationService(prisma as any, { now: () => new Date(NOW) }).approve(
     result.data!.id,
@@ -806,6 +808,7 @@ const deferredEffects: OrderApprovalEffectState = {
   assert.equal(approved.data?.order.salesName, salesApplicant.name);
   assert.equal(approved.data?.order.thirdPartyOrderNo, 'TP-20260724-001', '审核入库必须保留第三方平台订单');
   assert.equal(approved.data?.order.leadSource, '官网', '审核入库必须保留线索来源');
+  assert.equal((approved.data?.order as any)?.sourceName, '品牌官网', '审核入库必须保留二级线索来源');
 }
 
 {

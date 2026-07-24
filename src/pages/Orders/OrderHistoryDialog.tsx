@@ -90,8 +90,8 @@ const OrderHistoryDialog: React.FC<OrderHistoryDialogProps> = ({ order, open, on
                   </Box>
                   <Chip
                     size="small"
-                    label={item.action === 'create' ? '创建' : item.action === 'delete' ? '删除' : '编辑'}
-                    color={item.action === 'create' ? 'success' : item.action === 'delete' ? 'error' : 'primary'}
+                    label={item.action === 'create' ? '创建' : item.action === 'delete' ? '删除' : item.action === 'correct' ? '更正' : '编辑'}
+                    color={item.action === 'create' ? 'success' : item.action === 'delete' ? 'error' : item.action === 'correct' ? 'warning' : 'primary'}
                     variant="outlined"
                   />
                 </Box>

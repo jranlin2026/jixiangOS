@@ -43,6 +43,7 @@ for (const [method, route] of [
   ['post', '/api/order-applications/:id/approve'],
   ['delete', '/api/order-applications/:id'],
   ['put', '/api/orders/:id'],
+  ['post', '/api/orders/:id/correct'],
   ['get', '/api/orders'],
   ['get', '/api/orders/stats'],
   ['get', '/api/orders/:id'],
@@ -95,6 +96,7 @@ assert.match(source, /const requireOrderApplicationReadAccess = createRequireAut
 assert.match(source, /const requireOrderEditWriteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.ORDER_EDIT, 'write'\);/);
 assert.match(source, /const requireOrderDeleteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.ORDER_DELETE, 'delete'\);/);
 assert.match(source, /const requireOrderReviewWriteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.ORDER_REVIEW, 'write'\);/);
+assert.match(source, /app\.post\('\/api\/orders\/:id\/correct', requireOrderEditWriteAccess,/);
 assert.match(source, /const requireDeliveryReadAccess = createRequireAuth\(authService, PERMISSION_KEYS\.DELIVERY_CENTER\);/);
 assert.match(source, /const requireDeliveryWriteAccess = createRequireAnyPermission\(authService, \[PERMISSION_KEYS\.DELIVERY_MOVE_CARD, PERMISSION_KEYS\.DELIVERY_STAGE_CONFIG\], 'write'\);/);
 assert.match(source, /const requireRecoveryCreateAccess = createRequireAuth\(authService, PERMISSION_KEYS\.AFTER_SALES_RECOVERY_CREATE, 'write'\);/);

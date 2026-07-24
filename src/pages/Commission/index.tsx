@@ -109,7 +109,7 @@ type OrderSplitColumnId =
   | 'leadInputBy'
   | 'leadContributorName'
   | 'officialPaymentChannel'
-  | 'originalOrderId'
+  | 'thirdPartyOrderNo'
   | 'notes'
   | 'createdAt'
   | 'splitDetails'
@@ -124,7 +124,7 @@ type OrderSplitColumnMeta = {
   defaultWidth: number;
 };
 
-const ORDER_SPLIT_VIEW_STORAGE_KEY = 'aaos_commission_order_split_view_v3';
+const ORDER_SPLIT_VIEW_STORAGE_KEY = 'aaos_commission_order_split_view_v4';
 const ORDER_SPLIT_WIDTH_STORAGE_KEY = 'aaos_commission_order_split_widths_v3';
 
 const ORDER_SPLIT_COLUMNS: OrderSplitColumnMeta[] = [
@@ -141,7 +141,7 @@ const ORDER_SPLIT_COLUMNS: OrderSplitColumnMeta[] = [
   { id: 'createdByName', label: '订单创建人', defaultWidth: 140 },
   { id: 'leadInputBy', label: '线索录入人', defaultWidth: 140 },
   { id: 'leadContributorName', label: '线索贡献人', defaultWidth: 150 },
-  { id: 'originalOrderId', label: '第三方平台订单', defaultWidth: 180 },
+  { id: 'thirdPartyOrderNo', label: '第三方平台订单', defaultWidth: 180 },
   { id: 'notes', label: '备注', defaultWidth: 220 },
   { id: 'createdAt', label: '创建时间', defaultWidth: 160 },
   { id: 'splitDetails', label: '分账明细', defaultWidth: 310 },
@@ -165,7 +165,7 @@ const DEFAULT_ORDER_SPLIT_VISIBLE_COLUMNS: OrderSplitColumnId[] = [
   'createdByName',
   'leadInputBy',
   'leadContributorName',
-  'originalOrderId',
+  'thirdPartyOrderNo',
   'notes',
   'createdAt',
   'splitDetails',
@@ -1131,8 +1131,8 @@ const Commission: React.FC<CommissionProps> = ({
         return summary.leadContributorName || '-';
       case 'officialPaymentChannel':
         return summary.officialPaymentChannel || '-';
-      case 'originalOrderId':
-        return summary.originalOrderId || '-';
+      case 'thirdPartyOrderNo':
+        return summary.thirdPartyOrderNo || '-';
       case 'notes':
         return summary.notes || '-';
       case 'createdAt':

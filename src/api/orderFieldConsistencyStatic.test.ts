@@ -6,6 +6,7 @@ const read = (path: string) => readFileSync(join(process.cwd(), path), 'utf8');
 const orderListSource = read('src/pages/Orders/index.tsx');
 const orderDetailSource = read('src/pages/Orders/OrderDetail.tsx');
 const orderReviewSource = read('src/pages/OrderReview/index.tsx');
+const orderFormSource = read('src/pages/Orders/OrderForm.tsx');
 
 for (const [label, source] of [
   ['订单列表', orderListSource],
@@ -20,6 +21,12 @@ assert.match(orderReviewSource, /case 'thirdPartyOrderNo':[^]*application\.order
 assert.match(orderReviewSource, /id: 'applicantName', label: '订单创建人'/);
 assert.match(orderReviewSource, /id: 'reason', label: '退回\/驳回原因'/);
 assert.doesNotMatch(orderReviewSource, /label="销售顾问"/, '审核资料不应再显示与销售负责人重复的销售顾问');
+assert.match(orderDetailSource, /formatLeadSourceLabel\(order\.leadSource, order\.sourceName\)/);
+assert.match(orderReviewSource, /formatLeadSourceLabel\(detailApplication\.orderData\.leadSource, detailApplication\.orderData\.sourceName\)/);
+assert.match(orderFormSource, /isSuperAdmin\(currentUser\)/, '正式订单更正入口必须只向超级管理员开放');
+assert.match(orderFormSource, /进入订单更正/);
+assert.match(orderFormSource, /orderApi\.correctOrder/);
+assert.match(orderFormSource, /更正原因/);
 
 for (const [label, source] of [
   ['订单资料', orderDetailSource],

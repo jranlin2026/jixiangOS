@@ -38,6 +38,7 @@ import type { BusinessAttachment } from '../../types/businessAttachment';
 import useAuthStore from '../../store/useAuthStore';
 import { filterUsersByCurrentDataScope } from '../../shared/utils/dataVisibility';
 import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
+import { isSuperAdmin } from '../../shared/utils/permissions';
 
 interface OrderFormProps {
   open: boolean;
@@ -156,11 +157,11 @@ function getCustomerDisplayName(customer?: Customer | null): string {
 }
 
 function getCustomerOptionLabel(customer: Customer): string {
-  return [
+  return Array.from(new Set([
     customer.name,
     customer.company,
     customer.phone,
-  ].filter(Boolean).join(' · ');
+  ].filter(Boolean))).join(' · ');
 }
 
 const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, application, customer }) => {
@@ -182,6 +183,11 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   const [attachmentDraftKey] = useState(() => `order-${crypto.randomUUID()}`);
   const [recognitionMessage, setRecognitionMessage] = useState('');
   const [recognizing, setRecognizing] = useState(false);
+  const [correctionMode, setCorrectionMode] = useState(false);
+  const [correctionReason, setCorrectionReason] = useState('');
+  const [submitError, setSubmitError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const canCorrectFormalOrder = Boolean(order && isSuperAdmin(currentUser));
 
   const [form, setForm] = useState({
     customerName: '',
@@ -208,6 +214,9 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
 
   useEffect(() => {
     if (!open) return;
+    setCorrectionMode(false);
+    setCorrectionReason('');
+    setSubmitError('');
 
     if (!order && !application) {
       setVoucherName('');
@@ -258,6 +267,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       updatedAt: order?.updatedAt || application?.updatedAt || '',
     };
     setSelectedCustomer(lockedCustomer);
+    setCustomers([lockedCustomer]);
+    setCustomerSearch(getCustomerOptionLabel(lockedCustomer));
     setVoucherName(primaryPayment?.voucherName || '');
     setVoucherPreview(primaryPayment?.voucherPreview || '');
     setDealEvidenceName(sourceOrder.dealEvidenceName || '');
@@ -265,8 +276,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     setPaymentAttachments(primaryPayment?.attachments || []);
     setDealEvidenceAttachments(sourceOrder.dealEvidenceAttachments || []);
     setRecognitionMessage('');
-    setCustomers([]);
-    setCustomerSearch('');
     setForm((prev) => ({
       ...prev,
       customerName: sourceOrder.customerName,
@@ -378,7 +387,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   }, [form.orderType, order, orderTypeConfigs]);
 
   useEffect(() => {
-    if (!open || order || application || customer) return;
+    if (!open || application || customer || (order && !correctionMode)) return;
     const keyword = customerSearch.trim();
     if (keyword.length < 1) {
       setCustomers(selectedCustomer ? [selectedCustomer] : []);
@@ -405,7 +414,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       active = false;
       window.clearTimeout(timer);
     };
-  }, [open, order, application, customer, customerSearch, selectedCustomer]);
+  }, [open, order, application, customer, correctionMode, customerSearch, selectedCustomer]);
 
   const handleChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -433,7 +442,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   };
 
   const handleCustomerSelect = (_event: React.SyntheticEvent, selected: Customer | null) => {
-    const matchedProduct = selected?.productLevel
+    const matchedProduct = !order && selected?.productLevel
       ? products.find((product) => product.level === selected.productLevel)
       : undefined;
     setSelectedCustomer(selected);
@@ -522,9 +531,18 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   const handleSubmit = async () => {
     const actualAmount = Number(form.actualAmount) || 0;
     const paymentMethod = paymentMethodFromOfficialChannel(form.officialPaymentChannel);
+    const remainingPayments = order?.payments?.slice(1) || [];
+    const remainingPaymentTotal = remainingPayments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const primaryPaymentAmount = correctionMode
+      ? Math.round((actualAmount - remainingPaymentTotal) * 100) / 100
+      : actualAmount;
+    if (correctionMode && primaryPaymentAmount <= 0) {
+      setSubmitError('实付金额必须大于其余分笔付款合计');
+      return;
+    }
     const payment = {
       id: order?.payments?.[0]?.id || `pay-${Date.now()}`,
-      amount: actualAmount,
+      amount: primaryPaymentAmount,
       paymentMethod,
       paidAt: form.paymentDate ? new Date(form.paymentDate).toISOString() : new Date().toISOString(),
       paymentOrderNo: form.paymentOrderNo || undefined,
@@ -533,7 +551,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       attachments: paymentAttachments,
       remark: order?.payments?.[0]?.remark,
     };
-    const payments = order?.payments?.length ? [payment, ...order.payments.slice(1)] : [payment];
+    const payments = order?.payments?.length ? [payment, ...remainingPayments] : [payment];
 
     const payload = {
       ...form,
@@ -555,28 +573,65 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       dealEvidenceAttachments,
     };
 
-    let submittedApplication: OrderApplication | undefined;
-    if (order) {
-      await update(order.id, {
-        officialPaymentChannel: form.officialPaymentChannel,
-        thirdPartyOrderNo: form.thirdPartyOrderNo.trim() || undefined,
-        notes: form.notes || undefined,
-      });
-    } else if (application) {
-      const res = await orderReviewApi.updateReturnedOrderApplication(application.id, payload);
-      submittedApplication = res.data || undefined;
-    } else {
-      const res = await orderReviewApi.submitOrderApplication(payload);
-      submittedApplication = res.data;
+    setSubmitting(true);
+    setSubmitError('');
+    try {
+      let submittedApplication: OrderApplication | undefined;
+      if (order && correctionMode) {
+        const res = await orderApi.correctOrder(order.id, {
+          reason: correctionReason.trim(),
+          data: {
+            customerId: form.customerId,
+            productId: form.productId,
+            salesId: form.salesId,
+            orderType: form.orderType,
+            actualAmount,
+            officialPaymentChannel: form.officialPaymentChannel,
+            resourceOwnership: normalizeResourceOwnership(form.resourceOwnership),
+            payments,
+            thirdPartyOrderNo: form.thirdPartyOrderNo.trim() || undefined,
+            notes: form.notes || undefined,
+            dealEvidenceName: dealEvidenceName || undefined,
+            dealEvidencePreview: dealEvidencePreview || undefined,
+            dealEvidenceAttachments,
+          },
+        });
+        if (res.code !== 0 || !res.data) throw new Error(res.message || '订单更正失败');
+      } else if (order) {
+        await update(order.id, {
+          officialPaymentChannel: form.officialPaymentChannel,
+          thirdPartyOrderNo: form.thirdPartyOrderNo.trim() || undefined,
+          notes: form.notes || undefined,
+        });
+      } else if (application) {
+        const res = await orderReviewApi.updateReturnedOrderApplication(application.id, payload);
+        if (res.code !== 0) throw new Error(res.message || '订单申请修改失败');
+        submittedApplication = res.data || undefined;
+      } else {
+        const res = await orderReviewApi.submitOrderApplication(payload);
+        if (res.code !== 0) throw new Error(res.message || '订单申请提交失败');
+        submittedApplication = res.data;
+      }
+      onSuccess?.(submittedApplication);
+      onClose();
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : '订单保存失败');
+    } finally {
+      setSubmitting(false);
     }
-    onSuccess?.(submittedApplication);
-    onClose();
   };
 
-  const customerLocked = Boolean(order || application || customer);
-  const canSubmit = Boolean(form.customerId && form.customerName && form.productId && form.actualAmount > 0);
-  const formTitle = order ? '编辑订单' : application ? '修改订单申请' : '提交订单申请';
-  const actionText = order ? '保存修改' : application ? '重新提交审核' : '提交审核';
+  const formalFieldLocked = Boolean(order && !correctionMode);
+  const customerLocked = Boolean(application || customer || formalFieldLocked);
+  const canSubmit = Boolean(
+    form.customerId
+    && form.customerName
+    && form.productId
+    && form.actualAmount > 0
+    && (!correctionMode || correctionReason.trim()),
+  );
+  const formTitle = correctionMode ? '更正正式订单' : order ? '编辑订单' : application ? '修改订单申请' : '提交订单申请';
+  const actionText = correctionMode ? '确认更正并重算' : order ? '保存修改' : application ? '重新提交审核' : '提交审核';
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
@@ -589,10 +644,37 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               : '提交后会进入订单审核台，财务审核通过后才生成正式订单、提成和交付记录。'}
           </Typography>
         )}
-        {order && (
-          <Typography variant="body2" sx={{ mb: 2, color: '#92400e', bgcolor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 1, px: 1.5, py: 1 }}>
-            正式订单仅允许修改官方收款渠道、第三方平台订单号和备注。收款渠道仅在全部提成仍为待确认时可更正，并会重新计算待确认提成。
-          </Typography>
+        {order && !correctionMode && (
+          <Alert
+            severity="warning"
+            sx={{ mb: 2 }}
+            action={canCorrectFormalOrder ? (
+              <Button color="inherit" size="small" onClick={() => setCorrectionMode(true)}>
+                进入订单更正
+              </Button>
+            ) : undefined}
+          >
+            正式订单普通编辑仅允许修改官方收款渠道、第三方平台订单号和备注。超级管理员可进入受控更正，系统会自动处理未发放分账并保留修改记录。
+          </Alert>
+        )}
+        {order && correctionMode && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            更正后系统会自动撤回未发放分账、按新订单重算，并同步客户和未开始交付资料。已发放提成不能覆盖，需走订单冲正流程。
+          </Alert>
+        )}
+        {submitError && <Alert severity="error" sx={{ mb: 2 }}>{submitError}</Alert>}
+        {correctionMode && (
+          <TextField
+            label="更正原因"
+            value={correctionReason}
+            onChange={(event) => setCorrectionReason(event.target.value)}
+            required
+            fullWidth
+            multiline
+            minRows={2}
+            placeholder="请说明录入错误和更正依据，保存后将进入订单修改记录"
+            sx={{ mb: 2 }}
+          />
         )}
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
           {customerLocked ? (
@@ -637,7 +719,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               )}
             />
           )}
-          <TextField select label="产品名称" value={form.productId} onChange={handleChange('productId')} fullWidth disabled={Boolean(order)}>
+          <TextField select label="产品名称" value={form.productId} onChange={handleChange('productId')} fullWidth disabled={formalFieldLocked}>
             {productOptions.map((product) => (
               <MenuItem key={product.id} value={product.id}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -647,7 +729,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               </MenuItem>
             ))}
           </TextField>
-          <TextField select label="订单类型" value={form.orderType} onChange={handleChange('orderType')} fullWidth disabled={Boolean(order)}>
+          <TextField select label="订单类型" value={form.orderType} onChange={handleChange('orderType')} fullWidth disabled={formalFieldLocked}>
             {orderTypeOptions.map((item) => (
               <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>
             ))}
@@ -657,16 +739,16 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
             ))}
           </TextField>
-          <TextField select label="资源归属" value={form.resourceOwnership} onChange={handleChange('resourceOwnership')} fullWidth disabled={!!form.customerId || Boolean(order)}>
+          <TextField select label="资源归属" value={form.resourceOwnership} onChange={handleChange('resourceOwnership')} fullWidth disabled={formalFieldLocked || (!order && !!form.customerId)}>
             {RESOURCE_OWNERSHIPS.map((item) => (
               <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
             ))}
           </TextField>
           <TextField label="线索录入人" value={form.leadInputBy || '-'} fullWidth InputProps={{ readOnly: true }} />
           <TextField label="线索贡献人" value={form.leadContributorName || '-'} fullWidth InputProps={{ readOnly: true }} />
-          <TextField label="实付金额" type="number" value={form.actualAmount} onChange={handleChange('actualAmount')} fullWidth disabled={Boolean(order)} />
-          <TextField label="付款时间" type="datetime-local" value={form.paymentDate} onChange={handleChange('paymentDate')} fullWidth InputLabelProps={{ shrink: true }} inputProps={{ step: 1 }} disabled={Boolean(order)} />
-          <TextField label="付款订单号" value={form.paymentOrderNo} onChange={handleChange('paymentOrderNo')} placeholder="上传截图识别后自动填写" fullWidth disabled={Boolean(order)} />
+          <TextField label="实付金额" type="number" value={form.actualAmount} onChange={handleChange('actualAmount')} fullWidth disabled={formalFieldLocked} />
+          <TextField label="付款时间" type="datetime-local" value={form.paymentDate} onChange={handleChange('paymentDate')} fullWidth InputLabelProps={{ shrink: true }} inputProps={{ step: 1 }} disabled={formalFieldLocked} />
+          <TextField label="付款订单号" value={form.paymentOrderNo} onChange={handleChange('paymentOrderNo')} placeholder="上传截图识别后自动填写" fullWidth disabled={formalFieldLocked} />
           <Box sx={{ gridColumn: '1 / -1' }}>
             <BusinessAttachmentPicker
               title="付款截图"
@@ -679,14 +761,14 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               category="order-payment-proof"
               draftKey={attachmentDraftKey}
               maxCount={1}
-              disabled={Boolean(order)}
+              disabled={formalFieldLocked}
               rejectWholeBatchOnOverflow
               headerAction={(
                 <Button
                   variant="contained"
                   size="small"
                   onClick={handleRecognizePayment}
-                  disabled={Boolean(order) || (!paymentAttachments.length && !voucherName) || recognizing}
+                  disabled={formalFieldLocked || (!paymentAttachments.length && !voucherName) || recognizing}
                 >
                   {recognizing ? '识别中...' : '确认识别付款截图'}
                 </Button>
@@ -715,7 +797,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               category="order-deal-evidence"
               draftKey={attachmentDraftKey}
               maxCount={8}
-              disabled={Boolean(order)}
+              disabled={formalFieldLocked}
             />
             {!!dealEvidenceName && !dealEvidenceAttachments.length && (
               <Alert severity="info" sx={{ mt: 1 }} onClose={order ? undefined : clearDealEvidenceFile}>
@@ -723,7 +805,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               </Alert>
             )}
           </Box>
-          <TextField select label="销售负责人" value={form.salesId} onChange={handleOwnerChange} fullWidth disabled={Boolean(order)}>
+          <TextField select label="销售负责人" value={form.salesId} onChange={handleOwnerChange} fullWidth disabled={formalFieldLocked}>
             {form.owner && !users.some((user) => user.id === form.salesId) && (
               <MenuItem value={form.salesId}>{form.owner}（历史负责人）</MenuItem>
             )}
@@ -736,7 +818,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
         </Box>
       </DialogContent>
       <DialogActions>
-        <Button variant="contained" onClick={handleSubmit} disabled={!canSubmit}>
+        {correctionMode && <Button onClick={onClose} disabled={submitting}>取消更正</Button>}
+        <Button variant="contained" onClick={handleSubmit} disabled={!canSubmit || submitting}>
           {actionText}
         </Button>
       </DialogActions>

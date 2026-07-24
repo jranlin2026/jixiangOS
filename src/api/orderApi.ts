@@ -1,4 +1,4 @@
-import type { Order, OrderApplication, OrderFilters, OrderStats } from '../types/order';
+import type { Order, OrderApplication, OrderCorrectionInput, OrderFilters, OrderStats } from '../types/order';
 import type { Customer } from '../types/customer';
 import type { Commission, CommissionRole } from '../types/commission';
 import type { Product } from '../types/product';
@@ -82,6 +82,7 @@ function enrichOrderDataFromCustomer(data: Omit<Order, 'id' | 'createdAt' | 'upd
     ...data,
     sourceType: customer.leadSource || data.sourceType,
     leadSource: customer.leadSource || data.leadSource,
+    sourceName: customer.sourceName || data.sourceName,
     leadInputBy: customer.leadInputBy || data.leadInputBy,
     leadContributorId: customer.leadContributorId || data.leadContributorId,
     leadContributorName: customer.leadContributorName || data.leadContributorName,
@@ -580,6 +581,20 @@ async function updateOrder(id: string, data: Partial<Order>): Promise<ApiRespons
   return createSuccessResponse(orders[idx]);
 }
 
+async function correctOrder(id: string, input: OrderCorrectionInput): Promise<ApiResponse<Order | null>> {
+  if (!shouldUseBackendApi()) {
+    return createErrorResponse('订单受控更正仅支持服务端模式，请启动本地接口服务', 503);
+  }
+  const response = await backendRequest<Order>(`/orders/${encodeURIComponent(id)}/correct`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  if (response.code !== 0 || !response.data) {
+    return createErrorResponse(response.message || '服务端未返回订单更正结果', response.code || -1);
+  }
+  return createSuccessResponse(cacheBackendOrder(response.data));
+}
+
 async function deleteOrder(id: string, reason = ''): Promise<ApiResponse<boolean>> {
   if (shouldUseBackendApi()) {
     const response = await backendRequest<Order>(`/orders/${encodeURIComponent(id)}`, {
@@ -634,5 +649,6 @@ export const orderApi = {
   fetchOrderStats,
   createOrder,
   updateOrder,
+  correctOrder,
   deleteOrder,
 };

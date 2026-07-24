@@ -37,7 +37,7 @@ import { canReviewOrderApplications, customerApi, orderApi, orderReviewApi, ORDE
 import type { Order, OrderApplication, OrderApplicationFilters, OrderApplicationStatus } from '../../types/order';
 import type { Customer } from '../../types/customer';
 import type { Role } from '../../types/role';
-import { formatCurrency, formatPaginationRows } from '../../shared/utils/formatters';
+import { formatCurrency, formatLeadSourceLabel, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import CustomerDetail from '../Customers/CustomerDetail';
@@ -1007,7 +1007,9 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                 <SnapshotField label="资源归属">
                   {normalizeResourceOwnership(detailApplication.orderData.resourceOwnership || detailApplication.orderData.sourceType)}
                 </SnapshotField>
-                <SnapshotField label="线索来源">{detailApplication.orderData.leadSource || '-'}</SnapshotField>
+                <SnapshotField label="线索来源">
+                  {formatLeadSourceLabel(detailApplication.orderData.leadSource, detailApplication.orderData.sourceName)}
+                </SnapshotField>
                 <SnapshotField label="销售负责人">{detailApplication.orderData.owner}</SnapshotField>
                 <SnapshotField label="订单创建人">{detailApplication.applicantName}</SnapshotField>
                 <SnapshotField label="线索录入人">{detailApplication.orderData.leadInputBy || '-'}</SnapshotField>

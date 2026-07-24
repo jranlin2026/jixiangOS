@@ -11,6 +11,7 @@ import type {
   OrderStats,
 } from '../../src/types/order';
 import type { DataScopeDomain } from '../../src/types/role';
+import type { Customer } from '../../src/types/customer';
 import {
   buildDataVisibilityScopeForUser,
   type DataVisibilityScope,
@@ -88,6 +89,26 @@ function enrichOrderCreator(order: Order, applications: Map<string, OrderApplica
     ...order,
     createdById: application.applicantId,
     createdByName: application.applicantName,
+  };
+}
+
+async function enrichLegacyOrderLeadSource(
+  prisma: OrderQueryPrisma,
+  order: Order,
+): Promise<Order> {
+  if (cleanText(order.sourceName) || !cleanText(order.customerId)) return order;
+  const customerRow = await prisma.businessRecord.findUnique({
+    where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: order.customerId } },
+  });
+  const customer = customerRow ? parseRecord<Customer>(customerRow.data) : null;
+  if (!customer || customer.deletedAt) return order;
+  const orderLeadSource = cleanText(order.leadSource);
+  const customerLeadSource = cleanText(customer.leadSource);
+  if (orderLeadSource && customerLeadSource && orderLeadSource !== customerLeadSource) return order;
+  return {
+    ...order,
+    leadSource: orderLeadSource || customerLeadSource || undefined,
+    sourceName: cleanText(customer.sourceName) || undefined,
   };
 }
 
@@ -318,6 +339,7 @@ export function createOrderQueryService(
         const application = applicationRow ? parseRecord<OrderApplication>(applicationRow.data) : null;
         if (application) order = enrichOrderCreator(order, new Map([[application.id, application]]));
       }
+      order = await enrichLegacyOrderLeadSource(prisma, order);
       return success(order);
     },
 
@@ -417,7 +439,8 @@ export function createOrderQueryService(
       if (application.reviewCleanedAt) return failure<OrderApplication>('订单申请不存在', 404);
       if (!applicationIsVisible(application, scope)) return failure<OrderApplication>('无权查看该订单申请', 403);
       const [enrichedApplication] = await enrichApplicationSourceOrderState(prisma, [application]);
-      return success(enrichedApplication);
+      const orderData = await enrichLegacyOrderLeadSource(prisma, enrichedApplication.orderData as Order);
+      return success({ ...enrichedApplication, orderData: orderData as OrderApplication['orderData'] });
     },
   };
 }

@@ -164,6 +164,7 @@ function enrichOrderDataFromCustomer(data: OrderApplicationInput): OrderApplicat
     ...withProductName,
     sourceType: customer.leadSource || data.sourceType,
     leadSource: customer.leadSource || data.leadSource,
+    sourceName: customer.sourceName || data.sourceName,
     leadInputBy: customer.leadInputBy || data.leadInputBy,
     leadContributorId: customer.leadContributorId || data.leadContributorId,
     leadContributorName: customer.leadContributorName || data.leadContributorName,

@@ -30,6 +30,18 @@ const otherSales: AuthenticatedUser = {
   email: 'other@example.com',
 };
 
+const superAdmin: AuthenticatedUser = {
+  ...sales,
+  id: 'user-admin',
+  name: '超级管理员',
+  account: 'admin',
+  email: 'admin@example.com',
+  role: '超级管理员',
+  roleId: 'role-super-admin',
+  departmentId: 'dept-admin',
+  permissions: [{ module: '全部', actions: ['admin'] }],
+};
+
 function order(overrides: Partial<Order> = {}): Order {
   return {
     id: 'order-1',
@@ -99,6 +111,22 @@ function role() {
   };
 }
 
+function superAdminRole() {
+  return {
+    id: 'role-super-admin',
+    name: '超级管理员',
+    code: 'super_admin',
+    description: null,
+    departmentId: 'dept-admin',
+    permissions: superAdmin.permissions,
+    dataScopes: { orders: 'all' },
+    memberCount: 1,
+    isActive: true,
+    createdAt: new Date(NOW),
+    updatedAt: new Date(NOW),
+  };
+}
+
 type Row = {
   id: string;
   domain: string;
@@ -124,8 +152,8 @@ function clone<T>(value: T): T {
 class FakePrisma {
   readonly rows = new Map<string, Row>();
   readonly forceCustomerVersionConflict: boolean;
-  readonly users = [databaseUser(sales), databaseUser(otherSales)];
-  readonly roles = [role()];
+  readonly users = [databaseUser(sales), databaseUser(otherSales), databaseUser(superAdmin)];
+  readonly roles = [role(), superAdminRole()];
   readonly departments = [{
     id: 'dept-sales', name: '销售部', code: 'SALES', description: null, parentId: null,
     managerId: null, memberCount: 2, sortOrder: 1, isActive: true,
@@ -170,6 +198,21 @@ class FakePrisma {
         orderCount: 1, growthPath: [], growthRecords: [], activityRecords: [], createdAt: NOW, updatedAt: NOW,
       },
     });
+    this.rows.set(key(STORAGE_KEYS.CUSTOMERS, 'customer-2'), {
+      id: `${STORAGE_KEYS.CUSTOMERS}:customer-2`,
+      domain: STORAGE_KEYS.CUSTOMERS,
+      recordId: 'customer-2',
+      customerId: 'customer-2',
+      owner: otherSales.name,
+      amount: 0,
+      updatedAt: new Date(NOW),
+      data: {
+        id: 'customer-2', name: '更正后客户', company: '更正后公司', phone: '13800000000',
+        owner: otherSales.name, ownerId: otherSales.id, sourceType: '个人资源', leadSource: '个人线索',
+        sourceName: '合作伙伴', customerLevel: 'L1', lifecycleStatusCode: 'following', totalSpent: 0,
+        orderCount: 0, growthPath: [], growthRecords: [], activityRecords: [], createdAt: NOW, updatedAt: NOW,
+      },
+    });
     this.rows.set(key(STORAGE_KEYS.PRODUCTS, 'product-1'), {
       id: `${STORAGE_KEYS.PRODUCTS}:product-1`,
       domain: STORAGE_KEYS.PRODUCTS,
@@ -177,6 +220,15 @@ class FakePrisma {
       data: {
         id: 'product-1', name: '数据库产品', level: '899', price: 899,
         deliveryStages: [], isActive: true, sortOrder: 1, createdAt: NOW, updatedAt: NOW,
+      },
+    });
+    this.rows.set(key(STORAGE_KEYS.PRODUCTS, 'product-2'), {
+      id: `${STORAGE_KEYS.PRODUCTS}:product-2`,
+      domain: STORAGE_KEYS.PRODUCTS,
+      recordId: 'product-2',
+      data: {
+        id: 'product-2', name: '更正后产品', level: '贴牌', price: 29800,
+        deliveryStages: ['方案确认', '正式交付'], isActive: true, sortOrder: 2, createdAt: NOW, updatedAt: NOW,
       },
     });
     if (options.commissionStatus) {
@@ -282,9 +334,233 @@ class FakePrisma {
     return clone(this.rows.get(key(STORAGE_KEYS.ORDERS, 'order-1'))!.data);
   }
 
-  customerData(): any {
-    return clone(this.rows.get(key(STORAGE_KEYS.CUSTOMERS, 'customer-1'))!.data);
+  customerData(customerId = 'customer-1'): any {
+    return clone(this.rows.get(key(STORAGE_KEYS.CUSTOMERS, customerId))!.data);
   }
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '待确认' });
+  const correctedPayment = {
+    id: 'payment-1',
+    amount: 1299,
+    paymentMethod: '对公转账' as const,
+    paidAt: NOW,
+    paymentOrderNo: 'PAY-CORRECTED',
+  };
+  const result = await createOrderCommandService(prisma as any, {
+    now: () => new Date(NOW),
+    rebuildPendingCommissions: async () => undefined,
+  }).correct('order-1', {
+    reason: '录入金额错误',
+    data: {
+      actualAmount: 1299,
+      payments: [correctedPayment],
+    },
+  }, superAdmin);
+
+  assert.equal(result.code, 0, result.message);
+  assert.equal(result.data?.actualAmount, 1299);
+  assert.equal(result.data?.payments[0].paymentOrderNo, 'PAY-CORRECTED');
+  assert.equal(result.data?.changeHistory?.[0].action, 'correct');
+  assert.match(result.data?.changeHistory?.[0].summary || '', /录入金额错误/);
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '待发放' });
+  const result = await createOrderCommandService(prisma as any, {
+    now: () => new Date(NOW),
+    rebuildPendingCommissions: async (transaction: any, nextOrder: Order) => {
+      await transaction.businessRecord.create({
+        data: {
+          id: `${STORAGE_KEYS.COMMISSIONS}:commission-rebuilt`,
+          domain: STORAGE_KEYS.COMMISSIONS,
+          recordId: 'commission-rebuilt',
+          orderId: nextOrder.id,
+          status: '待确认',
+          amount: 100,
+          data: {
+            id: 'commission-rebuilt', orderId: nextOrder.id, orderNo: nextOrder.orderNo,
+            customerName: nextOrder.customerName, productLevel: nextOrder.productLevel,
+            orderAmount: nextOrder.actualAmount, commissionRate: 0, commissionAmount: 100,
+            role: '销售', owner: nextOrder.owner, department: '销售部', status: '待确认',
+          },
+        },
+      });
+    },
+  }).correct('order-1', {
+    reason: '付款金额录错',
+    data: {
+      actualAmount: 999,
+      payments: [{ id: 'pay-1', amount: 999, paymentMethod: '对公转账', paidAt: NOW }],
+    },
+  }, superAdmin);
+
+  assert.equal(result.code, 0, result.message);
+  assert.equal(prisma.rows.has(key(STORAGE_KEYS.COMMISSIONS, 'commission-1')), false, '原待发放分账应自动撤回并移除');
+  assert.equal(prisma.rows.has(key(STORAGE_KEYS.COMMISSIONS, 'commission-rebuilt')), true, '应按更正后的订单重新生成待确认分账');
+  const log = Array.from(prisma.rows.values()).find((row) => row.domain === STORAGE_KEYS.COMMISSION_OPERATION_LOGS);
+  assert.equal(log?.data.action, '更正订单');
+  assert.match(log?.data.reason || '', /付款金额录错/);
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '待确认', deliveryStatus: '待开始' });
+  const result = await createOrderCommandService(prisma as any, {
+    now: () => new Date(NOW),
+    rebuildPendingCommissions: async () => undefined,
+  }).correct('order-1', {
+    reason: '客户、产品和负责人录入错误',
+    data: {
+      customerId: 'customer-2',
+      productId: 'product-2',
+      salesId: otherSales.id,
+      orderType: '新代理',
+      actualAmount: 29800,
+      payments: [{ id: 'pay-1', amount: 29800, paymentMethod: '对公转账', paidAt: NOW }],
+    },
+  }, superAdmin);
+
+  assert.equal(result.code, 0, result.message);
+  assert.equal(result.data?.customerName, '更正后客户');
+  assert.equal(result.data?.productName, '更正后产品');
+  assert.equal(result.data?.productLevel, '贴牌');
+  assert.equal(result.data?.salesName, otherSales.name);
+  assert.equal(result.data?.owner, otherSales.name);
+  assert.equal(result.data?.leadSource, '个人线索');
+  assert.equal(result.data?.sourceName, '合作伙伴');
+  assert.equal(prisma.customerData('customer-1').orderCount, 0, '原客户订单投影应扣除该订单');
+  assert.equal(prisma.customerData('customer-2').orderCount, 1, '新客户订单投影应计入该订单');
+  const delivery = prisma.rows.get(key(STORAGE_KEYS.DELIVERIES, 'delivery-1'))?.data;
+  assert.equal(delivery.customerId, 'customer-2');
+  assert.equal(delivery.productName, '更正后产品');
+  assert.deepEqual(delivery.stages, ['方案确认', '正式交付'], '未开始交付应切换为更正后产品的交付阶段');
+  assert.equal(delivery.salesOwnerId, otherSales.id);
+  assert.equal(delivery.orderAmount, 29800);
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '待确认' });
+  const result = await createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+  }).correct('order-1', {
+    reason: '普通账号尝试更正',
+    data: { actualAmount: 999 },
+  }, sales);
+
+  assert.equal(result.code, 403);
+  assert.match(result.message, /超级管理员/);
+  assert.equal(prisma.orderData().actualAmount, 899);
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '已发放' });
+  const result = await createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+  }).correct('order-1', {
+    reason: '已发放后尝试覆盖金额',
+    data: { actualAmount: 999 },
+  }, superAdmin);
+
+  assert.equal(result.code, 409);
+  assert.match(result.message, /冲正/);
+  assert.equal(prisma.orderData().actualAmount, 899);
+  assert.equal(prisma.rows.has(key(STORAGE_KEYS.COMMISSIONS, 'commission-1')), true);
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '已撤回' });
+  const result = await createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+  }).correct('order-1', {
+    reason: '尝试复活已撤回分账',
+    data: { notes: '不应保存' },
+  }, superAdmin);
+
+  assert.equal(result.code, 409);
+  assert.match(result.message, /撤回|财务/);
+  assert.equal(prisma.rows.has(key(STORAGE_KEYS.COMMISSIONS, 'commission-1')), true);
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '待确认', commissionManual: true });
+  const result = await createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+  }).correct('order-1', {
+    reason: '尝试覆盖人工分账',
+    data: { notes: '不应保存' },
+  }, superAdmin);
+
+  assert.equal(result.code, 409);
+  assert.match(result.message, /人工|财务/);
+  assert.equal(prisma.rows.has(key(STORAGE_KEYS.COMMISSIONS, 'commission-1')), true);
+}
+
+{
+  const prisma = new FakePrisma({
+    sourceOrder: order({ originalOrderId: 'order-original' }),
+    commissionStatus: '待确认',
+  });
+  const result = await createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+  }).correct('order-1', {
+    reason: '尝试覆盖冲正关联订单',
+    data: { notes: '不应保存' },
+  }, superAdmin);
+
+  assert.equal(result.code, 409);
+  assert.match(result.message, /冲正/);
+}
+
+{
+  const prisma = new FakePrisma({
+    sourceOrder: order({ status: '退款中' }),
+    commissionStatus: '待确认',
+  });
+  const result = await createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+  }).correct('order-1', {
+    reason: '尝试覆盖退款订单',
+    data: { notes: '不应保存' },
+  }, superAdmin);
+
+  assert.equal(result.code, 409);
+  assert.match(result.message, /退款|冲正/);
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '待确认' });
+  const result = await createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+  }).correct('order-1', {
+    reason: '分笔付款合计错误',
+    data: {
+      actualAmount: 1000,
+      payments: [
+        { id: 'pay-1', amount: 600, paymentMethod: '对公转账', paidAt: NOW },
+        { id: 'pay-2', amount: 300, paymentMethod: '对公转账', paidAt: NOW },
+      ],
+    },
+  }, superAdmin);
+
+  assert.equal(result.code, 400);
+  assert.match(result.message, /付款.*合计|实付/);
+  assert.equal(prisma.orderData().actualAmount, 899);
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '待确认', deliveryStatus: '交付中' });
+  const result = await createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+  }).correct('order-1', {
+    reason: '交付中尝试换产品',
+    data: { productId: 'product-2' },
+  }, superAdmin);
+
+  assert.equal(result.code, 409);
+  assert.match(result.message, /交付已经开始/);
+  assert.equal(prisma.orderData().productId, 'product-1');
+  assert.equal(prisma.rows.has(key(STORAGE_KEYS.COMMISSIONS, 'commission-1')), true, '更正失败时原分账必须回滚保留');
 }
 
 {

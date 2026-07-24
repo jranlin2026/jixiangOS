@@ -91,6 +91,12 @@ const applications = [
   { ...application('application-missing-approved', finance.id, finance.name, '已入库'), orderId: 'order-missing', orderNo: 'ORD-order-missing' },
   application('application-rejected', sales.id, sales.name, '已驳回'),
 ];
+records[0].leadSource = '市场品牌部';
+applications[0].orderData.leadSource = '市场品牌部';
+const customers = [
+  { id: 'customer-order-self', leadSource: '市场品牌部', sourceName: '官网', createdAt: now, updatedAt: now },
+  { id: 'customer-draft-application-self', leadSource: '市场品牌部', sourceName: '搜索广告', createdAt: now, updatedAt: now },
+];
 const businessRecordFindManyWhere: any[] = [];
 
 const prisma: any = {
@@ -110,7 +116,11 @@ const prisma: any = {
     },
     findUnique: async ({ where }: any) => {
       const target = where.domain_recordId;
-      const rows = target.domain === STORAGE_KEYS.ORDERS ? records : applications;
+      const rows = target.domain === STORAGE_KEYS.ORDERS
+        ? records
+        : target.domain === STORAGE_KEYS.CUSTOMERS
+          ? customers
+          : applications;
       const data = rows.find((item) => item.id === target.recordId);
       return data ? { domain: target.domain, recordId: data.id, data } : null;
     },
@@ -145,6 +155,7 @@ assert.equal(orderDetail?.dealEvidencePreview, inlineProof, 'detail keeps the or
 assert.equal(orderDetail?.payments[0].voucherPreview, inlineProof);
 assert.equal(orderDetail?.createdById, finance.id, '历史订单详情应从来源申请回溯创建人');
 assert.equal(orderDetail?.createdByName, finance.name);
+assert.equal(orderDetail?.sourceName, '官网', '历史订单详情应从同一客户来源补齐二级来源');
 
 const salesStats = await service.getOrderStats(sales);
 assert.equal(salesStats.code, 0);
@@ -169,6 +180,11 @@ assert.equal(listedApplication?.orderData.dealEvidencePreview, undefined);
 assert.equal(listedApplication?.orderData.payments[0].voucherPreview, undefined);
 assert.equal((await service.getApplication('application-other', sales)).code, 403);
 assert.equal((await service.getApplication('application-self', sales)).data?.orderData.dealEvidencePreview, inlineProof);
+assert.equal(
+  (await service.getApplication('application-self', sales)).data?.orderData.sourceName,
+  '搜索广告',
+  '历史审核资料应从同一客户来源补齐二级来源',
+);
 assert.equal((await service.listApplications({ page: 1, pageSize: 1 }, finance)).data?.pagination.total, 7);
 
 const processedApplications = await service.listApplications({

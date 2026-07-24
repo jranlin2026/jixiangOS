@@ -142,6 +142,7 @@ function seed() {
       actualAmount: 9800,
       paymentMethod: zh.bankTransfer,
       officialPaymentChannel: zh.officialChannel,
+      thirdPartyOrderNo: 'TP-ORDER-A',
       status: zh.confirmed,
       refundStatus: zh.none,
       owner: 'Sales A',
@@ -306,6 +307,7 @@ assert.equal(orderA.salesOwner, 'Sales A');
 assert.equal(orderA.createdById, 'user-admin');
 assert.equal(orderA.createdByName, 'Admin');
 assert.equal(orderA.officialPaymentChannel, zh.officialChannel);
+assert.equal(orderA.thirdPartyOrderNo, 'TP-ORDER-A', '订单分账必须展示正式订单的第三方平台订单');
 assert.equal(orderA.createdAt, now);
 assert.deepEqual(orderA.splitSummary.map((item: any) => `${item.role}:${item.amount}`).sort(), [`${zh.salesRole}:100`, `${zh.leadRole}:30`].sort());
 assert.equal(orderB.status, '\u5f85\u5904\u7406');

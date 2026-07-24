@@ -121,6 +121,14 @@ export const formatNumber = (value: number): string => {
   return value.toLocaleString('zh-CN');
 };
 
+/** 按“一级 / 二级”展示完整线索来源，并避免同名重复。 */
+export const formatLeadSourceLabel = (leadSource?: string | null, sourceName?: string | null): string => {
+  const primary = String(leadSource || '').trim();
+  const secondary = String(sourceName || '').trim();
+  if (primary && secondary && primary !== secondary) return `${primary} / ${secondary}`;
+  return primary || secondary || '-';
+};
+
 export const formatPaginationRows = ({
   from,
   to,

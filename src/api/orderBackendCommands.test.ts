@@ -55,6 +55,7 @@ try {
   writeBackendToken('sales-session');
 
   const updatedOrder = { ...sourceOrder, notes: '服务端备注', updatedAt: '2026-07-12T14:01:00.000Z' };
+  const correctedOrder = { ...updatedOrder, actualAmount: 999, amount: 999, updatedAt: '2026-07-12T14:01:30.000Z' };
   const deletedOrder = {
     ...updatedOrder,
     deletedAt: '2026-07-12T14:02:00.000Z',
@@ -71,6 +72,7 @@ try {
 
     let data: unknown = null;
     if (method === 'PUT' && url.endsWith('/orders/order-backend')) data = updatedOrder;
+    if (method === 'POST' && url.endsWith('/orders/order-backend/correct')) data = correctedOrder;
     if (method === 'DELETE' && url.endsWith('/orders/order-backend')) data = deletedOrder;
     return new Response(JSON.stringify(data
       ? { code: 0, data, message: 'success' }
@@ -95,6 +97,13 @@ try {
   assert.equal(updated.code, 0);
   assert.equal(updated.data?.notes, '服务端备注');
 
+  const corrected = await orderApi.correctOrder(sourceOrder.id, {
+    reason: '金额录入错误',
+    data: { amount: 999, actualAmount: 999 },
+  });
+  assert.equal(corrected.code, 0);
+  assert.equal(corrected.data?.actualAmount, 999);
+
   const deleted = await orderApi.deleteOrder(sourceOrder.id, '重复订单');
   assert.equal(deleted.code, 0);
   assert.equal(deleted.data, true);
@@ -105,6 +114,11 @@ try {
       url: 'http://127.0.0.1:3001/api/orders/order-backend',
       method: 'PUT',
       body: { data: { notes: '服务端备注' } },
+    },
+    {
+      url: 'http://127.0.0.1:3001/api/orders/order-backend/correct',
+      method: 'POST',
+      body: { reason: '金额录入错误', data: { amount: 999, actualAmount: 999 } },
     },
     {
       url: 'http://127.0.0.1:3001/api/orders/order-backend',

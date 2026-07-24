@@ -826,6 +826,18 @@ app.put('/api/orders/:id', requireOrderEditWriteAccess, async (req: Authenticate
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
+app.post('/api/orders/:id/correct', requireOrderEditWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderCommandService.correct(
+    routeParam(req.params.id),
+    {
+      reason: String(req.body?.reason || ''),
+      data: req.body?.data || {},
+    },
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
 app.delete('/api/orders/:id', requireOrderDeleteAccess, async (req: AuthenticatedRequest, res) => {
   const result = await orderCommandService.softDelete(
     routeParam(req.params.id),

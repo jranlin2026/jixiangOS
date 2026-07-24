@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { formatEmployeeNameWithPosition, formatPaginationRows } from './formatters';
+import { formatEmployeeNameWithPosition, formatLeadSourceLabel, formatPaginationRows } from './formatters';
 
 assert.equal(formatPaginationRows({ from: 0, to: 0, count: 0 }), '0 / 共 0 条');
 assert.equal(formatPaginationRows({ from: 1, to: 10, count: 34 }), '1-10 / 共 34 条');
@@ -12,3 +12,7 @@ assert.equal(
   formatEmployeeNameWithPosition({ name: '李晓健', positionName: '  ' }),
   '李晓健（未设置职位）',
 );
+
+assert.equal(formatLeadSourceLabel('市场品牌部', '官网'), '市场品牌部 / 官网');
+assert.equal(formatLeadSourceLabel('官网', '官网'), '官网');
+assert.equal(formatLeadSourceLabel('', ''), '-');
