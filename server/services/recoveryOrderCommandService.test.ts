@@ -271,6 +271,8 @@ const settledRealtime = await service.settle(realtimeSettlementOrder.id, [{
 }], '测试实时保存', finance);
 assert.equal(settledRealtime.code, 0);
 assert.equal(settledRealtime.data?.settlementStatus, '待确认');
+assert.equal(settledRealtime.data?.settlementHandledBy, finance.name);
+assert.equal(settledRealtime.data?.settlementHandledAt, NOW);
 assert.equal(
   (await service.list({ settlementStatuses: ['待确认'], page: 1, pageSize: 20 }, finance))
     .data?.items.some((item) => item.id === realtimeSettlementOrder.id),
@@ -280,9 +282,14 @@ assert.equal(
 const confirmedRealtime = await service.confirmSettlement(realtimeSettlementOrder.id, finance);
 assert.equal(confirmedRealtime.code, 0);
 assert.equal(confirmedRealtime.data?.settlementStatus, '待发放');
+assert.equal(confirmedRealtime.data?.settlementConfirmedBy, finance.name);
+assert.equal(confirmedRealtime.data?.settlementConfirmedAt, NOW);
 const withdrawnRealtime = await service.withdrawSettlement(realtimeSettlementOrder.id, '测试实时撤回', finance);
 assert.equal(withdrawnRealtime.code, 0);
 assert.equal(withdrawnRealtime.data?.settlementStatus, '已撤回');
+assert.equal(withdrawnRealtime.data?.settlementWithdrawnBy, finance.name);
+assert.equal(withdrawnRealtime.data?.settlementWithdrawnAt, NOW);
+assert.equal(withdrawnRealtime.data?.settlementWithdrawReason, '测试实时撤回');
 assert.equal(
   (await service.list({ settlementStatuses: ['已撤回'], page: 1, pageSize: 20 }, finance))
     .data?.items.some((item) => item.id === realtimeSettlementOrder.id),

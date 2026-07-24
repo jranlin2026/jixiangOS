@@ -307,6 +307,8 @@ const settled = await recoveryOrderApi.settleRecoveryOrder(
   '财务专员',
 );
 assert.equal(settled.code, 0);
+assert.equal(settled.data?.settlementHandledBy, '财务专员');
+assert.ok(settled.data?.settlementHandledAt);
 const storedCommissions = JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as any[];
 assert.equal(storedCommissions.length, 1);
 assert.equal(storedCommissions[0].departmentId, 'dept-service');

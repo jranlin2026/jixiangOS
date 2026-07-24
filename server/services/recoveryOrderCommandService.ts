@@ -947,6 +947,14 @@ export function createRecoveryOrderCommandService(
           ...current,
           status: '待分账',
           settlementStatus: '待确认',
+          settlementHandledBy: actor.name,
+          settlementHandledAt: changedAt,
+          settlementConfirmedBy: undefined,
+          settlementConfirmedAt: undefined,
+          settlementPaidAt: undefined,
+          settlementWithdrawnBy: undefined,
+          settlementWithdrawnAt: undefined,
+          settlementWithdrawReason: undefined,
           commissionIds: commissions.map((commission) => commission.id),
           auditorId: current.auditorId || actor.id,
           auditorName: current.auditorName || actor.name,
@@ -1241,6 +1249,22 @@ export function createRecoveryOrderCommandService(
         ...current,
         status: action === 'reset' ? '待分账' : '已分账',
         settlementStatus: action === 'reset' ? '待处理' : action === 'confirm' ? '待发放' : '已撤回',
+        settlementHandledBy: action === 'reset' ? undefined : current.settlementHandledBy,
+        settlementHandledAt: action === 'reset' ? undefined : current.settlementHandledAt,
+        settlementConfirmedBy: action === 'confirm'
+          ? actor.name
+          : action === 'reset'
+            ? undefined
+            : current.settlementConfirmedBy,
+        settlementConfirmedAt: action === 'confirm'
+          ? changedAt
+          : action === 'reset'
+            ? undefined
+            : current.settlementConfirmedAt,
+        settlementPaidAt: action === 'reset' ? undefined : current.settlementPaidAt,
+        settlementWithdrawnBy: action === 'withdraw' ? actor.name : undefined,
+        settlementWithdrawnAt: action === 'withdraw' ? changedAt : undefined,
+        settlementWithdrawReason: action === 'withdraw' ? cleanText(reason) : undefined,
         commissionIds: action === 'reset' ? [] : current.commissionIds,
         auditReason: action === 'reset'
           ? `删除售后挽回分账：${cleanText(reason) || actor.name}`
