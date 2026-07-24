@@ -3,6 +3,7 @@ import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { verifyWechatCustomerPrecheckToken } from './wechatAutomationSecurity';
 import { hashContactIdentity } from './contactIdentityService';
+import { createCustomerListService } from './customerListService';
 import {
   createWechatCustomerAutomationService,
   type WechatCustomerAutomationContext,
@@ -167,6 +168,219 @@ function createHarness() {
     contactIdentityCrypto: CONTACT_CRYPTO,
     now: () => new Date(state.currentTime),
     nonce: () => 'nonce-check-1',
+  });
+  const actor = {
+    id: 'u-automation',
+    account: 'wechat-bot',
+    name: '微信录入',
+    email: '',
+    phone: '',
+    role: '销售顾问',
+    roleId: 'role-sales',
+    departmentId: 'dept-sales',
+    permissions: state.roles[0].permissions,
+    isActive: true,
+  };
+  const context: WechatCustomerAutomationContext = {
+    actor,
+    senderId: 'allowed-wechat-sender',
+  };
+  return { state, service, context };
+}
+
+function createCustomerRaceIntegrationHarness() {
+  const state = {
+    users: [user({ id: 'u-automation', account: 'wechat-bot', name: '微信录入' })],
+    roles: [role({})],
+    departments: [{
+      id: 'dept-sales', name: '销售部', parentId: null, isActive: true,
+      createdAt: NOW, updatedAt: NOW,
+    }],
+    leadSources: [{
+      id: 'source-website', name: '官网', isActive: true, sortOrder: 1,
+      createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(),
+    }],
+    businessRecords: [] as any[],
+    auditEvents: [] as any[],
+    identities: [] as any[],
+    links: [] as any[],
+    appStorage: [] as any[],
+    queryLog: [] as string[],
+  };
+
+  const clone = <T>(value: T): T => structuredClone(value);
+  const prisma: any = {
+    user: {
+      findMany: async () => clone(state.users),
+      findUnique: async ({ where }: any) => clone(
+        state.users.find((candidate) => candidate.id === where.id) || null,
+      ),
+    },
+    role: { findMany: async () => clone(state.roles) },
+    department: { findMany: async () => clone(state.departments) },
+    businessRecord: {
+      findMany: async ({ where }: any = {}) => clone(state.businessRecords.filter((row) => (
+        !where?.domain || row.domain === where.domain
+      ))),
+      findUnique: async ({ where }: any) => {
+        const compound = where.domain_recordId;
+        return clone(state.businessRecords.find((row) => (
+          row.domain === compound.domain && row.recordId === compound.recordId
+        )) || null);
+      },
+      create: async ({ data }: any) => {
+        if (state.businessRecords.some((row) => row.id === data.id)) {
+          throw Object.assign(new Error('duplicate business record'), { code: 'P2002' });
+        }
+        state.businessRecords.push(clone(data));
+        return clone(data);
+      },
+    },
+    leadRecord: { findMany: async () => [] },
+    customerAuditEvent: {
+      create: async ({ data }: any) => {
+        const event = {
+          ...clone(data),
+          eventSequence: BigInt(state.auditEvents.length + 1),
+          createdAt: new Date(NOW),
+        };
+        state.auditEvents.push(event);
+        return clone(event);
+      },
+    },
+    contactIdentity: {
+      findUnique: async ({ where }: any) => clone(state.identities.find((identity) => (
+        where.id
+          ? identity.id === where.id
+          : identity.type === where.type_normalizedHash.type
+            && identity.normalizedHash === where.type_normalizedHash.normalizedHash
+      )) || null),
+      create: async ({ data }: any) => {
+        if (state.identities.some((identity) => (
+          identity.id === data.id || (
+            identity.type === data.type && identity.normalizedHash === data.normalizedHash
+          )
+        ))) throw Object.assign(new Error('duplicate identity'), { code: 'P2002' });
+        state.identities.push(clone(data));
+        return clone(data);
+      },
+      update: async ({ where, data }: any) => {
+        const identity = state.identities.find((candidate) => candidate.id === where.id);
+        if (!identity) throw new Error('identity not found');
+        Object.assign(identity, clone(data));
+        return clone(identity);
+      },
+    },
+    contactIdentityLink: {
+      findMany: async ({ where }: any) => clone(state.links.filter((link) => (
+        Object.entries(where || {}).every(([key, value]) => link[key] === value)
+      ))),
+      upsert: async ({ where, create, update }: any) => {
+        const key = where.identityId_entityType_entityId;
+        const link = state.links.find((candidate) => (
+          candidate.identityId === key.identityId
+          && candidate.entityType === key.entityType
+          && candidate.entityId === key.entityId
+        ));
+        if (link) {
+          Object.assign(link, clone(update));
+          return clone(link);
+        }
+        state.links.push(clone(create));
+        return clone(create);
+      },
+      updateMany: async ({ where, data }: any) => {
+        let count = 0;
+        for (const link of state.links) {
+          if (!Object.entries(where || {}).every(([key, value]) => link[key] === value)) continue;
+          Object.assign(link, clone(data));
+          count += 1;
+        }
+        return { count };
+      },
+    },
+    appStorage: {
+      findUnique: async ({ where }: any) => {
+        if (where.key === STORAGE_KEYS.LEAD_SOURCE_CONFIGS) {
+          return { key: where.key, value: clone(state.leadSources) };
+        }
+        return clone(state.appStorage.find((row) => row.key === where.key) || null);
+      },
+      upsert: async ({ where, update, create }: any) => {
+        const row = state.appStorage.find((candidate) => candidate.key === where.key);
+        if (row) {
+          Object.assign(row, clone(update));
+          return clone(row);
+        }
+        state.appStorage.push(clone(create));
+        return clone(create);
+      },
+    },
+    $queryRaw: async (query: any) => {
+      const text = Array.isArray(query?.strings) ? query.strings.join('?') : String(query || '');
+      const values = query?.values || [];
+      state.queryLog.push(text);
+      if (text.includes('FROM app_storage')) {
+        return state.appStorage.length ? [{ key: state.appStorage[0].key }] : [];
+      }
+      if (text.includes('FROM business_records')) {
+        return clone(state.businessRecords.filter((row) => row.domain === STORAGE_KEYS.CUSTOMERS));
+      }
+      if (text.includes('FROM contact_identities')) {
+        if (text.includes('WHERE id =')) {
+          return clone(state.identities.filter((identity) => identity.id === values[0]));
+        }
+        return clone(state.identities.filter((identity) => (
+          identity.type === values[0] && identity.normalizedHash === values[1]
+        )));
+      }
+      if (text.includes('FROM contact_identity_links')) {
+        if (text.includes('WHERE identityId')) {
+          return clone(state.links.filter((link) => (
+            link.identityId === values[0]
+            && link.entityType === 'customer'
+            && link.linkStatus === 'active'
+          )).map((link) => ({ entityId: link.entityId })));
+        }
+        return clone(state.links.filter((link) => (
+          link.entityType === values[0]
+          && link.entityId === values[1]
+          && link.linkStatus === 'active'
+        )).map((link) => ({ identityId: link.identityId })));
+      }
+      return [];
+    },
+    $transaction: async (operation: any) => {
+      const snapshot = clone({
+        businessRecords: state.businessRecords,
+        auditEvents: state.auditEvents,
+        identities: state.identities,
+        links: state.links,
+        appStorage: state.appStorage,
+      });
+      try {
+        return await operation(prisma);
+      } catch (error) {
+        state.businessRecords.splice(0, state.businessRecords.length, ...snapshot.businessRecords);
+        state.auditEvents.splice(0, state.auditEvents.length, ...snapshot.auditEvents);
+        state.identities.splice(0, state.identities.length, ...snapshot.identities);
+        state.links.splice(0, state.links.length, ...snapshot.links);
+        state.appStorage.splice(0, state.appStorage.length, ...snapshot.appStorage);
+        throw error;
+      }
+    },
+  };
+
+  const customerService = createCustomerListService(prisma, {
+    contactIdentityCrypto: CONTACT_CRYPTO,
+  });
+  const service = createWechatCustomerAutomationService({
+    prisma,
+    customerService,
+    automationConfig: { actorAccount: 'wechat-bot', signingKey: SIGNING_KEY },
+    contactIdentityCrypto: CONTACT_CRYPTO,
+    now: () => new Date(NOW),
+    nonce: () => 'nonce-race-integration',
   });
   const actor = {
     id: 'u-automation',
@@ -575,10 +789,12 @@ function createHarness() {
   });
 }
 
-// The transactional customer creator remains the final identity arbiter. A
-// contact inserted after precheck is returned as duplicate, never as created.
+// The real transactional customer creator remains the final identity arbiter.
+// A legacy/racing customer inserted after check is deliberately missing its
+// identity-index backfill, so only the create transaction's locking identity
+// path can detect it. The tentative second customer and audit must roll back.
 {
-  const { state, service, context } = createHarness();
+  const { state, service, context } = createCustomerRaceIntegrationHarness();
   const input = {
     name: '并发重复客户',
     phone: '13800138009',
@@ -587,16 +803,25 @@ function createHarness() {
   const checked = await service.check(input, context);
   assert.equal(checked.status, 'ready');
   if (checked.status !== 'ready') throw new Error('expected race precheck');
-  state.createResult = {
-    code: 409,
-    message: '系统中已存在相同联系方式',
-    data: {
-      id: 'cust-race-winner',
-      name: '并发先创建客户',
-      company: '并发公司',
-      owner: '销售甲',
-    },
-  };
+
+  state.businessRecords.push(businessRow(STORAGE_KEYS.CUSTOMERS, 'cust-race-winner', {
+    id: 'cust-race-winner',
+    name: '并发先创建客户',
+    company: '并发公司',
+    phone: '+8613800138009',
+    owner: '微信录入',
+    ownerId: context.actor.id,
+    ownerIdentityStatus: 'resolved',
+    sourceType: '公司资源',
+    customerLevel: 'L1',
+    createdAt: NOW.toISOString(),
+    updatedAt: NOW.toISOString(),
+  }));
+  const customerCountBeforeCreate = state.businessRecords.filter((row) => (
+    row.domain === STORAGE_KEYS.CUSTOMERS
+  )).length;
+  const auditCountBeforeCreate = state.auditEvents.length;
+
   assert.deepEqual(await service.create(input, checked.precheckToken, context), {
     status: 'duplicate',
     message: '系统中已存在相同联系方式',
@@ -604,10 +829,28 @@ function createHarness() {
       id: 'cust-race-winner',
       name: '并发先创建客户',
       company: '并发公司',
-      owner: '销售甲',
+      owner: '微信录入',
     },
   });
-  assert.equal(state.createCalls.length, 1);
+  assert.ok(state.queryLog.some((query) => (
+    query.includes('FROM app_storage') && query.includes('FOR UPDATE')
+  )), 'customer create must take the transaction-wide contact mutation lock');
+  assert.ok(state.queryLog.some((query) => (
+    query.includes('FROM business_records') && query.includes('FOR UPDATE')
+  )), 'customer create must lock legacy contact source rows');
+  assert.ok(state.queryLog.some((query) => (
+    query.includes('FROM contact_identity_links') && query.includes('FOR UPDATE')
+  )), 'customer create must take the current identity-link lock before deciding duplicate');
+  assert.equal(state.businessRecords.filter((row) => (
+    row.domain === STORAGE_KEYS.CUSTOMERS
+  )).length, customerCountBeforeCreate, 'duplicate transaction must not commit a second customer');
+  assert.equal(
+    state.auditEvents.length,
+    auditCountBeforeCreate,
+    'duplicate transaction must not append a create audit event',
+  );
+  assert.equal(state.identities.length, 0, 'tentative identity reconciliation must roll back');
+  assert.equal(state.links.length, 0, 'tentative identity links must roll back');
 }
 
 // Owner selection fails closed for inactive accounts and active employees

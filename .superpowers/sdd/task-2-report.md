@@ -106,13 +106,22 @@ GREEN coverage proves:
   definitions are re-read;
 - the final customer transaction receives no precheck-era access/tag snapshot,
   so it reloads both authorization and tag validation inside the transaction;
-- an exact duplicate found after check returns `duplicate`;
-- the existing real customer-list concurrency test still proves the
-  transaction/identity-lock loser returns contact conflict;
+- an integration-style race fixture calls the real customer-list creator after
+  `check`, inserts a same-contact customer whose identity index has not yet
+  been backfilled, and proves the create transaction takes the mutation,
+  legacy-source, and current identity-link locks before returning `duplicate`;
+- the losing transaction commits neither a second customer nor a create audit,
+  and all tentative identity/link writes are rolled back;
 - a create-time contact `409` is mapped to `duplicate`, while unrelated `409`
   failures are not mislabeled;
 - automation audit operation/reason are applied and the first manual-create
   audit remains unchanged.
+
+The post-review integration regression passed on its first execution. This was
+a coverage defect rather than a production behavior defect: replacing the
+canned customer-service `409` with the real creator/identity fixture confirmed
+that the already-implemented transaction path satisfies the required race
+behavior without a production-code change.
 
 ## Changed files
 
@@ -145,6 +154,10 @@ npm test                                                          277 test files
 git diff --check                                                  PASS
 ```
 
+After the independent-review race fixture replaced the canned `409`, the
+automation, contact-identity, and customer-list focused tests, TypeScript build,
+and diff check were rerun and passed.
+
 The live-database integration test in the full suite was skipped because
 `DATABASE_URL` is not set; its static/in-memory foundation tests passed.
 
@@ -162,6 +175,12 @@ verification:
 
 The review also narrowed the direct user lookup to the six fields needed for
 resolution and excluded accountless employees from owner-name selection.
+
+A subsequent independent review found that the automation race test mocked the
+final `409` instead of exercising the real transaction. The test now uses the
+real customer creator and contact-identity implementation with a rollback-aware
+database adapter, proves all required locks were reached, and asserts no second
+customer, audit, identity, or link survives the conflict.
 
 Durable replay is intentionally not implemented here: Task 3 explicitly owns
 the AppStorage idempotency record, concurrent replay, recovery, and the
