@@ -15,7 +15,11 @@ const order = {
   id: 'order-1', orderNo: 'ORD-001', customerId: 'customer-1', customerName: '客户甲',
   productLevel: '899', orderType: '899成交', amount: 899, actualAmount: 799,
   paymentMethod: '对公转账', status: '已确认', refundStatus: '无', owner: '销售甲', salesId: 'sales-1',
-  payments: [{ id: 'payment-1', amount: 799, paymentMethod: '对公转账', paidAt: now, paymentOrderNo: 'PAY-1', voucherName: '付款凭证.png', attachments: [{ id: 'payment-proof', name: '付款附件.jpg' }] }],
+  payments: [
+    { id: 'payment-1', amount: 799, paymentMethod: '对公转账', paidAt: now, paymentOrderNo: 'PAY-1', voucherName: '付款凭证.png', attachments: [{ id: 'payment-proof', name: '付款附件.jpg' }] },
+    { id: 'payment-2', amount: 100, paymentMethod: '对公转账', paidAt: now, paymentOrderNo: 'PAY-2', voucherName: '历史凭证.png', attachments: [] },
+    { id: 'payment-3', amount: 100, paymentMethod: '对公转账', paidAt: now, paymentOrderNo: 'PAY-3', voucherName: '重复凭证.png', attachments: [{ id: 'payment-proof-duplicate', name: '重复凭证.png' }] },
+  ],
   leadSource: '抖音', sourceName: '直播',
   dealEvidenceAttachments: [{ id: 'proof-1', name: '成交凭证.png', mimeType: 'image/png', size: 12, category: 'order-deal-evidence' }],
   createdAt: now, updatedAt: now,
@@ -29,7 +33,7 @@ const commission = {
   createdAt: now, updatedAt: now,
 };
 const recovery = {
-  id: 'recovery-1', recoveryNo: 'RCV-001', thirdPartyOrderNo: 'TP-001', customerId: 'customer-2', customerName: '客户乙',
+  id: 'recovery-1', recoveryNo: 'RCV-001', thirdPartyOrderNo: 'TP-001', customerId: 'customer-2', customerName: '客户乙', customerPhone: '13800138000', customerWechat: 'wx_recovery',
   customerMatchStatus: '手工填写', originalProduct: '899课程', originalAmount: 899, recoveryAmount: 2980,
   recoveryUserId: 'sales-1', recoveryUserName: '售后甲', status: '已分账', settlementStatus: '待发放',
   recoveryAttachments: [{ id: 'recovery-proof', name: '挽回凭证.png', mimeType: 'image/png', size: 16, category: 'recovery-payment-proof' }],
@@ -78,8 +82,12 @@ assert.deepEqual(
 );
 assert.deepEqual(result.data?.detailRows[0], {
   orderNo: 'ORD-001', customerName: '客户甲', paymentSequence: 1, paymentOrderNo: 'PAY-1', amount: 799,
-  paymentMethod: '对公转账', paidAt: now, voucherName: '付款凭证.png', attachmentNames: '付款附件.jpg', attachmentCount: 1, remark: null,
+  paymentMethod: '对公转账', paidAt: now, voucherName: '付款凭证.png', attachmentNames: '付款凭证.png、付款附件.jpg', attachmentCount: 2, remark: null,
 });
+assert.deepEqual(result.data?.detailRows.slice(1).map((row) => [row.voucherName, row.attachmentNames, row.attachmentCount]), [
+  ['历史凭证.png', '历史凭证.png', 1],
+  ['重复凭证.png', '重复凭证.png', 1],
+], '历史 voucherName 必须纳入附件数量，与新附件同名时去重');
 assert.equal(auditEvents.length, 1, '投影成功后必须写入审计事件');
 assert.equal(auditEvents[0].module, 'orders');
 assert.equal(auditEvents[0].actorId, actor.id);
@@ -153,6 +161,8 @@ assert.equal(recoverySettlement.data?.detailRows[0]?.originalProduct, '899课程
 assert.equal(recoverySettlement.data?.detailRows[0]?.recoveryAmount, 2980);
 assert.equal(recoverySettlement.data?.detailColumns[0]?.id, 'recoveryNo', '挽回分账明细必须使用独立字段集');
 assert.equal(recoverySettlement.data?.detailColumns.some((column) => column.id === 'orderAmount'), false);
+assert.equal((await service.export({ module: 'recovery_settlements', reason: '手机号搜索', columnMode: 'current_view', columnIds: ['recoveryNo'], filters: { search: '13800138000' } }, actor)).code, 0);
+assert.equal((await service.export({ module: 'recovery_settlements', reason: '微信搜索', columnMode: 'current_view', columnIds: ['recoveryNo'], filters: { search: 'wx_recovery' } }, actor)).code, 0);
 
 assert.deepEqual(
   (await service.export({ module: 'orders', reason: '字段池检查', columnMode: 'all', filters: { search: 'ORD-001' } }, actor)).data?.summaryColumns.map((column) => column.id),

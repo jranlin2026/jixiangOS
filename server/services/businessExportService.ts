@@ -125,7 +125,9 @@ function inRange(value: unknown, start?: string, end?: string): boolean {
   if (end && time > localBoundary(end, true)) return false;
   return true;
 }
-function attachmentCount(attachments: unknown): number { return Array.isArray(attachments) ? attachments.length : 0; }
+function paymentEvidenceNames(payment: { voucherName?: string; attachments?: Array<{ name?: string }> }): string[] {
+  return [...new Set([payment.voucherName, ...(payment.attachments || []).map((attachment) => attachment.name)].map(clean).filter(Boolean))];
+}
 function commissionIssueText(commission: Commission): string {
   return [commission.auditReason, commission.frozenReason, commission.calculationNote, commission.formulaText, commission.payoutPlanName].filter(Boolean).join('；');
 }
@@ -206,7 +208,7 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
           .filter((order) => scope.unrestricted || (order.createdBy ? scope.visibleUserIds.includes(order.createdBy) : scope.visibleUserNames.includes(order.createdByName)))
           .filter((order) => {
             const search = clean(filters.search).toLocaleLowerCase();
-            return (!search || [order.recoveryNo, order.thirdPartyOrderNo, order.customerName, order.originalProduct, order.recoveryUserName]
+            return (!search || [order.recoveryNo, order.thirdPartyOrderNo, order.customerName, order.customerPhone, order.customerWechat, order.originalProduct, order.recoveryUserName]
               .some((value) => clean(value).toLocaleLowerCase().includes(search)))
               && (!filters.settlementStatus || filters.settlementStatus === '全部' || recoveryStatus(order) === filters.settlementStatus)
               && (!Array.isArray(filters.settlementStatuses) || !filters.settlementStatuses.length || filters.settlementStatuses.includes(recoveryStatus(order)))
@@ -329,11 +331,13 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
               attachmentCount: attachments.length, }, columns);
           });
       const detailRows = request.module === 'orders'
-        ? sourceOrders.flatMap((order) => (order.payments || []).map((payment, index) => ({ orderNo: order.orderNo, customerName: order.customerName,
-          paymentSequence: index + 1, paymentOrderNo: payment.paymentOrderNo || null, amount: payment.amount, paymentMethod: payment.paymentMethod,
-          paidAt: payment.paidAt, voucherName: payment.voucherName || null,
-          attachmentNames: (payment.attachments || []).map((attachment) => attachment.name).filter(Boolean).join('、') || null,
-          attachmentCount: attachmentCount(payment.attachments), remark: payment.remark || null })))
+        ? sourceOrders.flatMap((order) => (order.payments || []).map((payment, index) => {
+          const evidenceNames = paymentEvidenceNames(payment);
+          return { orderNo: order.orderNo, customerName: order.customerName,
+            paymentSequence: index + 1, paymentOrderNo: payment.paymentOrderNo || null, amount: payment.amount, paymentMethod: payment.paymentMethod,
+            paidAt: payment.paidAt, voucherName: payment.voucherName || null,
+            attachmentNames: evidenceNames.join('、') || null, attachmentCount: evidenceNames.length, remark: payment.remark || null };
+        }))
         : commissions.filter((commission) => exportedOrderIds.has(commission.orderId)).map((commission) => {
           const inactive = isInactiveCommission(commission);
           const common = {
