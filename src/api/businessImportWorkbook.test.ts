@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import ExcelJS from 'exceljs';
+import { createServer } from 'vite';
 import {
   createBusinessImportTemplateWorkbook,
   createBusinessImportErrorWorkbook,
+  downloadBusinessImportWorkbook,
   ORDER_IMPORT_HEADERS,
   RECOVERY_IMPORT_HEADERS,
   parseBusinessImportWorkbook,
   validateBusinessImportFile,
 } from './businessImportWorkbook';
 import type { BusinessImportTemplateOptions } from '../types/businessImport';
+import type { OrderImportRow } from '../types/businessImport';
 
 const options: BusinessImportTemplateOptions = {
   products: [{ id: 'p1', name: '增长训练营', level: '标准版' }],
@@ -90,6 +91,25 @@ assert.deepEqual(parsedOrders[0], {
   paymentOrderNo: '0000123', thirdPartyOrderNo: '0000456', creatorName: '销售乙', notes: '首单', remark: '',
 });
 
+const excelDateRows = [
+  [...validOrderRowForDate(), new Date(Date.UTC(2026, 6, 24, 10, 30, 0))],
+  [...validOrderRowForDate(), new Date(Date.UTC(2026, 6, 24, 23, 45, 0))],
+];
+function validOrderRowForDate(): unknown[] {
+  return ['客户甲', '013800000001', '', '增长训练营', '新购', 99, '企业微信转账'];
+}
+const datedWorkbook = new ExcelJS.Workbook();
+const datedSheet = datedWorkbook.addWorksheet('订单导入模板');
+datedSheet.addRow([...ORDER_IMPORT_HEADERS]);
+for (const [index, partial] of excelDateRows.entries()) {
+  const row = datedSheet.addRow([...partial, '销售甲']);
+  row.getCell(8).numFmt = 'yyyy-mm-dd hh:mm:ss';
+  assert.equal(row.number, index + 2);
+}
+const parsedExcelDates = await parseBusinessImportWorkbook('orders', await datedWorkbook.xlsx.writeBuffer());
+assert.equal((parsedExcelDates[0] as OrderImportRow).paidAt, '2026-07-24 10:30:00');
+assert.equal((parsedExcelDates[1] as OrderImportRow).paidAt, '2026-07-24 23:45:00', 'Excel wall-clock time must not cross into the next CST day');
+
 await assert.rejects(
   async () => parseBusinessImportWorkbook('orders', await workbookBuffer('订单导入模板', [...ORDER_IMPORT_HEADERS, '未知字段'], [])),
   /未知表头：未知字段/,
@@ -133,6 +153,22 @@ await assert.rejects(
   async () => parseBusinessImportWorkbook('orders', await invalidOrder(6, true)),
   /第 2 行.*实付金额.*数值/,
 );
+await assert.rejects(
+  async () => parseBusinessImportWorkbook('orders', await invalidOrder(6, 1.234)),
+  /第 2 行.*实付金额.*两位小数/,
+);
+await assert.rejects(
+  async () => parseBusinessImportWorkbook('orders', await invalidOrder(6, -1)),
+  /第 2 行.*实付金额.*大于 0/,
+);
+const preciseMoneyRows = [0.1 + 0.2, 999_999_999_999.99].map((amount) => {
+  const row = [...validOrderRow];
+  row[5] = amount;
+  return row;
+});
+const parsedPreciseMoney = await parseBusinessImportWorkbook('orders', await workbookBuffer('订单导入模板', ORDER_IMPORT_HEADERS, preciseMoneyRows));
+assert.equal((parsedPreciseMoney[0] as OrderImportRow).paymentAmount, 0.1 + 0.2, 'binary floating noise within a cent must remain valid');
+assert.equal((parsedPreciseMoney[1] as OrderImportRow).paymentAmount, 999_999_999_999.99);
 await assert.rejects(
   async () => parseBusinessImportWorkbook('orders', await invalidOrder(1, true)),
   /第 2 行.*客户姓名.*文本格式/,
@@ -199,7 +235,52 @@ const jobErrorSheet = jobErrorWorkbook.getWorksheet('售后挽回订单导入错
 assert.equal(jobErrorSheet.getCell('S2').value, '失败');
 assert.equal(jobErrorSheet.getCell('T2').value, "'=PRIVATE_FAILURE");
 
-const workbookSource = readFileSync(join(process.cwd(), 'src/api/businessImportWorkbook.ts'), 'utf8');
-assert.doesNotMatch(workbookSource, /^import\s+(?!type\b).*from\s+['"]exceljs['"]/mu);
-assert.doesNotMatch(workbookSource, /await\s+import\(['"]exceljs['"]\)/u);
-assert.match(workbookSource, /new Function\('specifier', 'return import\(specifier\)'\)/u);
+const downloadEvents: string[] = [];
+downloadBusinessImportWorkbook('错误报告.xlsx', new Uint8Array([1, 2, 3]).buffer, {
+  createObjectUrl: (blob) => { downloadEvents.push(`blob:${blob.type}:${blob.size}`); return 'blob:report'; },
+  revokeObjectUrl: (url) => { downloadEvents.push(`revoke:${url}`); },
+  clickAnchor: (url, fileName) => { downloadEvents.push(`click:${url}:${fileName}`); },
+});
+assert.deepEqual(downloadEvents, [
+  'blob:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:3',
+  'click:blob:report:错误报告.xlsx',
+  'revoke:blob:report',
+]);
+
+const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+let injectedScripts = 0;
+let injectedSource = '';
+const browserWindow: { ExcelJS?: typeof ExcelJS } = {};
+const browserDocument = {
+  createElement: (tag: string) => {
+    assert.equal(tag, 'script');
+    return { src: '', async: false, onload: undefined as undefined | (() => void), onerror: undefined as undefined | (() => void) };
+  },
+  head: {
+    appendChild: (script: { src: string; onload?: () => void }) => {
+      injectedScripts += 1;
+      injectedSource = script.src;
+      browserWindow.ExcelJS = ExcelJS;
+      script.onload?.();
+    },
+  },
+};
+Object.defineProperty(globalThis, 'window', { configurable: true, value: browserWindow });
+Object.defineProperty(globalThis, 'document', { configurable: true, value: browserDocument });
+try {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' });
+  const browserWorkbook = await vite.ssrLoadModule('/src/api/businessImportWorkbook.ts') as {
+    createBusinessImportTemplateWorkbook: typeof createBusinessImportTemplateWorkbook;
+  };
+  const browserTemplate = await browserWorkbook.createBusinessImportTemplateWorkbook('orders', options);
+  await vite.close();
+  assert.ok(browserTemplate.byteLength > 0);
+  assert.equal(injectedScripts, 1, 'the browser runtime must lazy-load ExcelJS only when a workbook action starts');
+  assert.match(injectedSource, /exceljs\.min/u);
+} finally {
+  if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+  else delete (globalThis as { window?: unknown }).window;
+  if (previousDocument) Object.defineProperty(globalThis, 'document', previousDocument);
+  else delete (globalThis as { document?: unknown }).document;
+}

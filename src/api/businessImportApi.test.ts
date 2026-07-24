@@ -20,7 +20,8 @@ await businessImportApi.templateOptions('orders');
 await businessImportApi.templateOptions('recovery_orders');
 await businessImportApi.precheck('orders', rows);
 await businessImportApi.confirm('recovery_orders', rows, 'token', '挽回.xlsx');
-await businessImportApi.job('job-1');
+const jobAbort = new AbortController();
+await businessImportApi.job('job-1', jobAbort.signal);
 
 assert.deepEqual(requests.map((request) => request.url), [
   '/api/business-imports/orders/template-options',
@@ -31,3 +32,4 @@ assert.deepEqual(requests.map((request) => request.url), [
 ]);
 assert.deepEqual(JSON.parse(String(requests[2].init?.body)), { rows });
 assert.deepEqual(JSON.parse(String(requests[3].init?.body)), { rows, confirmationToken: 'token', fileName: '挽回.xlsx' });
+assert.equal(requests[4].init?.signal, jobAbort.signal);

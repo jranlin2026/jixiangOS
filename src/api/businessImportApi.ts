@@ -33,7 +33,7 @@ export const businessImportApi = {
       method: 'POST', body: JSON.stringify({ rows, confirmationToken, fileName }),
     });
   },
-  job(id: string): Promise<ApiResponse<BusinessImportJobResult>> {
-    return backendRequest(`${ROOT}/jobs/${encodeURIComponent(id)}`);
+  job(id: string, signal?: AbortSignal): Promise<ApiResponse<BusinessImportJobResult>> {
+    return backendRequest(`${ROOT}/jobs/${encodeURIComponent(id)}`, { signal });
   },
 };

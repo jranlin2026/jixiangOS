@@ -1,22 +1,77 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { createServer } from 'vite';
+import type { BusinessImportPrecheckResult, BusinessImportTemplateOptions, OrderImportRow } from '../../types/businessImport';
+import type { BusinessImportDialogInitialState } from './BusinessImportDialog';
 
-const source = readFileSync(join(process.cwd(), 'src/shared/components/BusinessImportDialog.tsx'), 'utf8');
+const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' });
+const { default: BusinessImportDialog } = await vite.ssrLoadModule('/src/shared/components/BusinessImportDialog.tsx') as {
+  default: React.ComponentType<React.ComponentProps<any>>;
+};
 
-assert.match(source, /type: BusinessImportType/);
-assert.match(source, /批量导入订单/);
-assert.match(source, /批量导入售后挽回订单/);
-assert.match(source, /createBusinessImportTemplateWorkbook/);
-assert.match(source, /validateBusinessImportFile/);
-assert.match(source, /parseBusinessImportWorkbook/);
-assert.match(source, /businessImportApi\.precheck/);
-assert.match(source, /businessImportApi\.confirm/);
-assert.match(source, /pollBusinessImportJob/);
-assert.match(source, /localStorage\.setItem/);
-assert.match(source, /getBusinessImportConfirmDisabledReason/);
-assert.match(source, /createBusinessImportSingleFlight/);
-assert.match(source, /partial_failed/);
-assert.match(source, /TablePagination/);
-assert.match(source, /下载错误报告/);
-assert.doesNotMatch(source, /OrderReview|RecoveryOrderTab|导入订单.*onClick/);
+const options: BusinessImportTemplateOptions = {
+  products: [{ id: 'p1', name: '训练营' }], orderTypes: [{ id: 't1', name: '新购' }],
+  paymentChannels: ['企业微信转账'], users: [{ id: 'u1', name: '销售甲' }],
+  recoveryPlatforms: [], recoveryShops: [],
+};
+const row: OrderImportRow = {
+  rowNumber: 2, customerName: '客户甲', customerPhone: '013800000001', customerWechat: '',
+  productName: '训练营', orderType: '新购', paymentChannel: '企业微信转账', paymentAmount: 99,
+  paidAt: '2026-07-24 10:30:00', salesUserName: '销售甲', thirdPartyOrderNo: '', remark: '',
+};
+const precheck = (status: 'warning' | 'blocked'): BusinessImportPrecheckResult => ({
+  confirmationToken: 'token', expiresAt: '2026-07-24T10:00:00.000Z', totalCount: 1,
+  readyCount: status === 'blocked' ? 0 : 1,
+  warningCount: status === 'warning' ? 1 : 0,
+  blockedCount: status === 'blocked' ? 1 : 0,
+  rows: [{ rowNumber: 2, status, reason: status === 'blocked' ? '客户无法唯一匹配' : '将创建售后临时客户' }],
+});
+
+function render(initialState: BusinessImportDialogInitialState, type: 'orders' | 'recovery_orders' = 'orders'): string {
+  return renderToStaticMarkup(React.createElement(BusinessImportDialog, {
+    open: true,
+    type,
+    onClose: () => undefined,
+    tenantId: 'tenant-test',
+    disablePortal: true,
+    initialState,
+  }));
+}
+
+function buttonContaining(html: string, label: string): string {
+  return [...html.matchAll(/<button[^>]*>[\s\S]*?<\/button>/gu)]
+    .map((match) => match[0])
+    .find((button) => button.includes(label)) || '';
+}
+
+const blocked = render({ options, file: { name: 'orders.xlsx' } as File, rows: [row], precheck: precheck('blocked') });
+assert.match(blocked, /批量导入订单/);
+assert.match(blocked, /已阻止/);
+assert.match(blocked, /客户无法唯一匹配/);
+const blockedConfirm = buttonContaining(blocked, '确认并后台导入 0 条');
+assert.match(blockedConfirm, /disabled=""/, 'blocked precheck must render a disabled confirm button');
+
+const warning = render({ options, file: { name: 'recovery.xlsx' } as File, rows: [row], precheck: precheck('warning') }, 'recovery_orders');
+assert.match(warning, /批量导入售后挽回订单/);
+assert.match(warning, /警告/);
+assert.match(warning, /将创建售后临时客户/);
+const warningConfirm = buttonContaining(warning, '确认并后台导入 1 条');
+assert.doesNotMatch(warningConfirm, /disabled=""/, 'warning-only precheck must render an enabled confirm button');
+assert.match(warning, /下载标准模板/);
+assert.match(warning, /下载错误报告/);
+
+const partialFailure = render({
+  job: {
+    id: 'job-1', type: 'orders', status: 'partial_failed', totalCount: 1, successCount: 0, failedCount: 1,
+    rows: [{ rowNumber: 2, status: 'ready', reason: '可导入', normalized: row, executionStatus: 'failed', errorMessage: '执行失败' }],
+  },
+  storageWarning: '任务已创建，但浏览器未能保存恢复标识',
+});
+assert.match(partialFailure, /部分失败/);
+assert.match(partialFailure, /执行失败/);
+assert.match(partialFailure, /任务已创建，但浏览器未能保存恢复标识/);
+assert.match(partialFailure, /下载错误报告/);
+
+await vite.close();
+console.log('BusinessImportDialog real SSR render: ok');

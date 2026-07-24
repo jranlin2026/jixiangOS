@@ -24,10 +24,12 @@ import {
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
 import { businessImportApi } from '../../api/businessImportApi';
+import { getBackendBaseUrl } from '../../api/backendClient';
 import {
   BUSINESS_IMPORT_MAX_FILE_BYTES,
   createBusinessImportErrorWorkbook,
   createBusinessImportTemplateWorkbook,
+  downloadBusinessImportWorkbook,
   parseBusinessImportWorkbook,
   validateBusinessImportFile,
 } from '../../api/businessImportWorkbook';
@@ -43,21 +45,43 @@ import {
 } from '../../types/businessImport';
 import DialogCloseTitle from './DialogCloseTitle';
 import TablePagination from './TablePagination';
+import useAuthStore from '../../store/useAuthStore';
 import {
+  acceptQueuedBusinessImportJob,
+  BusinessImportJobUnavailableError,
+  businessImportJobStorageKey,
+  clearStoredBusinessImportJob,
   createBusinessImportSingleFlight,
   getBusinessImportConfirmDisabledReason,
   isTerminalBusinessImportJob,
-  pollBusinessImportJob,
+  readStoredBusinessImportJob,
+  runBusinessImportJobPolling,
+  type BusinessImportStorage,
+  type StoredBusinessImportJob,
 } from './businessImportDialogModel';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const PAGE_SIZE = 20;
+
+export type BusinessImportDialogInitialState = {
+  options?: BusinessImportTemplateOptions | null;
+  file?: File | null;
+  rows?: BusinessImportRow[];
+  precheck?: BusinessImportPrecheckResult | null;
+  job?: BusinessImportJobResult | null;
+  error?: string;
+  storageWarning?: string;
+};
 
 type Props = {
   open: boolean;
   type: BusinessImportType;
   onClose: () => void;
   onCompleted?: (job: BusinessImportJobResult) => void;
+  tenantId?: string;
+  storage?: BusinessImportStorage;
+  initialState?: BusinessImportDialogInitialState;
+  disablePortal?: boolean;
 };
 
 const moduleCopy = {
@@ -72,22 +96,6 @@ const moduleCopy = {
     templateName: '极享OS售后挽回订单批量导入模板.xlsx',
   },
 } as const;
-
-function jobStorageKey(type: BusinessImportType): string {
-  return `jixiangos_business_import_job_${type}`;
-}
-
-function downloadXlsx(fileName: string, buffer: ArrayBuffer): void {
-  const url = URL.createObjectURL(new Blob([buffer], { type: XLSX_MIME }));
-  try {
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = fileName;
-    anchor.click();
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
 
 function responseData<T>(response: { code: number; data: T; message: string }, fallback: string): T {
   if (response.code !== 0 || !response.data) throw new Error(response.message || fallback);
@@ -114,21 +122,40 @@ function resultStatus(result: BusinessImportRowResult | BusinessImportJobRow): {
   return { label: '可导入', color: 'success', reason: result.reason };
 }
 
-export default function BusinessImportDialog({ open, type, onClose, onCompleted }: Props) {
+export default function BusinessImportDialog({
+  open,
+  type,
+  onClose,
+  onCompleted,
+  tenantId,
+  storage,
+  initialState,
+  disablePortal = false,
+}: Props) {
   const copy = moduleCopy[type];
+  const currentUserId = useAuthStore((state) => state.currentUser?.id || '');
+  const tenantScope = String(tenantId || (typeof window !== 'undefined' ? window.location.origin : getBackendBaseUrl())).trim();
+  const storageKey = currentUserId && tenantScope
+    ? businessImportJobStorageKey(type, { tenantId: tenantScope, userId: currentUserId })
+    : '';
+  const storageAdapter = storage || (typeof window !== 'undefined' ? window.localStorage : null);
   const fileRef = useRef<HTMLInputElement | null>(null);
-  const [options, setOptions] = useState<BusinessImportTemplateOptions | null>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const [rows, setRows] = useState<BusinessImportRow[]>([]);
-  const [precheck, setPrecheck] = useState<BusinessImportPrecheckResult | null>(null);
-  const [job, setJob] = useState<BusinessImportJobResult | null>(null);
+  const storedJobRef = useRef<StoredBusinessImportJob | null>(null);
+  const onCompletedRef = useRef(onCompleted);
+  onCompletedRef.current = onCompleted;
+  const [options, setOptions] = useState<BusinessImportTemplateOptions | null>(initialState?.options || null);
+  const [file, setFile] = useState<File | null>(initialState?.file || null);
+  const [rows, setRows] = useState<BusinessImportRow[]>(initialState?.rows || []);
+  const [precheck, setPrecheck] = useState<BusinessImportPrecheckResult | null>(initialState?.precheck || null);
+  const [job, setJob] = useState<BusinessImportJobResult | null>(initialState?.job || null);
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [prechecking, setPrechecking] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [polling, setPolling] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(initialState?.error || '');
+  const [storageWarning, setStorageWarning] = useState(initialState?.storageWarning || '');
   const [page, setPage] = useState(0);
 
   const precheckTaskRef = useRef<() => Promise<void>>(async () => undefined);
@@ -146,9 +173,11 @@ export default function BusinessImportDialog({ open, type, onClose, onCompleted 
     setRows([]);
     setPrecheck(null);
     setError('');
+    setStorageWarning('');
     setPage(0);
-    const storedJobId = localStorage.getItem(jobStorageKey(type));
-    setJob(storedJobId ? { id: storedJobId, type, status: 'queued', totalCount: 0 } : null);
+    const storedJob = storageAdapter && storageKey ? readStoredBusinessImportJob(storageAdapter, storageKey) : null;
+    storedJobRef.current = storedJob;
+    setJob(storedJob ? { id: storedJob.id, type, status: 'queued', totalCount: 0 } : null);
     setLoadingOptions(true);
     businessImportApi.templateOptions(type).then((response) => {
       if (!active) return;
@@ -159,22 +188,35 @@ export default function BusinessImportDialog({ open, type, onClose, onCompleted 
       if (active) setLoadingOptions(false);
     });
     return () => { active = false; };
-  }, [open, type, copy.subject]);
+  }, [open, type, copy.subject, storageAdapter, storageKey]);
 
   const jobId = job?.id || '';
   useEffect(() => {
-    if (!open || !jobId) return;
+    if (!open || !jobId || !storageAdapter || !storageKey) return;
     const controller = new AbortController();
     setPolling(true);
-    void pollBusinessImportJob(async () => {
-      const response = await businessImportApi.job(jobId);
-      return responseData(response, '读取导入任务进度失败');
-    }, {
+    void runBusinessImportJobPolling({
+      load: async (signal) => {
+        const response = await businessImportApi.job(jobId, signal);
+        if ([403, 404, 410].includes(response.code)) {
+          throw new BusinessImportJobUnavailableError(response.code, response.message || '导入任务已失效');
+        }
+        return responseData(response, '读取导入任务进度失败');
+      },
       signal: controller.signal,
+      storage: storageAdapter,
+      storageKey,
+      stored: storedJobRef.current,
       onUpdate: (next) => setJob(next),
-    }).then((terminal) => {
-      setJob(terminal);
-      onCompleted?.(terminal);
+      onCompleted: (terminal) => {
+        storedJobRef.current = { id: terminal.id, completedNotified: true };
+        onCompletedRef.current?.(terminal);
+      },
+      onUnavailable: () => {
+        storedJobRef.current = null;
+        setJob(null);
+        setError('此前的导入任务已失效或无权访问，请重新选择文件导入。');
+      },
     }).catch((caught) => {
       if (!(caught instanceof DOMException && caught.name === 'AbortError')) {
         setError(caught instanceof Error ? caught.message : '读取导入任务进度失败');
@@ -183,7 +225,7 @@ export default function BusinessImportDialog({ open, type, onClose, onCompleted 
       if (!controller.signal.aborted) setPolling(false);
     });
     return () => controller.abort();
-  }, [open, jobId, onCompleted]);
+  }, [open, jobId, storageAdapter, storageKey]);
 
   const sourceByRow = useMemo(() => new Map(rows.map((row) => [row.rowNumber, row])), [rows]);
   const resultRows: Array<BusinessImportRowResult | BusinessImportJobRow> = job?.rows?.length ? job.rows : precheck?.rows || [];
@@ -211,9 +253,9 @@ export default function BusinessImportDialog({ open, type, onClose, onCompleted 
     setError('');
     try {
       if (kind === 'template') {
-        downloadXlsx(copy.templateName, await createBusinessImportTemplateWorkbook(type, options!));
+        downloadBusinessImportWorkbook(copy.templateName, await createBusinessImportTemplateWorkbook(type, options!));
       } else {
-        downloadXlsx(
+        downloadBusinessImportWorkbook(
           `${copy.subject}导入错误报告-${new Date().toISOString().slice(0, 10)}.xlsx`,
           await createBusinessImportErrorWorkbook(type, reportRows, rows),
         );
@@ -253,8 +295,19 @@ export default function BusinessImportDialog({ open, type, onClose, onCompleted 
         await businessImportApi.confirm(type, rows, precheck.confirmationToken, file.name),
         `${copy.subject}导入任务提交失败`,
       );
-      localStorage.setItem(jobStorageKey(type), queued.id);
-      setJob(queued);
+      if (!storageAdapter || !storageKey) {
+        setJob(queued);
+        setStorageWarning('任务已创建，但当前登录身份无法保存恢复标识；请保持当前窗口打开以查看进度。');
+      } else {
+        const warning = acceptQueuedBusinessImportJob({
+          job: queued,
+          storage: storageAdapter,
+          storageKey,
+          onJob: setJob,
+        });
+        storedJobRef.current = { id: queued.id, completedNotified: false };
+        setStorageWarning(warning);
+      }
       setPage(0);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : `${copy.subject}导入任务提交失败`);
@@ -292,18 +345,20 @@ export default function BusinessImportDialog({ open, type, onClose, onCompleted 
   };
 
   const resetCompletedJob = () => {
-    localStorage.removeItem(jobStorageKey(type));
+    if (storageAdapter && storageKey) clearStoredBusinessImportJob(storageAdapter, storageKey);
+    storedJobRef.current = null;
     setJob(null);
     setFile(null);
     setRows([]);
     setPrecheck(null);
     setError('');
+    setStorageWarning('');
     setPage(0);
     if (fileRef.current) fileRef.current.value = '';
   };
 
   return (
-    <Dialog open={open} onClose={operationBusy ? undefined : onClose} maxWidth="lg" fullWidth>
+    <Dialog open={open} onClose={operationBusy ? undefined : onClose} maxWidth="lg" fullWidth disablePortal={disablePortal}>
       <DialogCloseTitle onClose={() => { if (!operationBusy) onClose(); }}>{copy.title}</DialogCloseTitle>
       <DialogContent dividers>
         <Stack spacing={2}>
@@ -311,6 +366,7 @@ export default function BusinessImportDialog({ open, type, onClose, onCompleted 
             请使用极享OS标准模板。系统会先在本地严格校验，再进行服务端预检；警告行可导入，被阻止行必须修正。
           </Alert>
           {error ? <Alert severity="error">{error}</Alert> : null}
+          {storageWarning ? <Alert severity="warning">{storageWarning}</Alert> : null}
 
           <Stepper activeStep={activeStep} alternativeLabel>
             {['下载模板', '上传文件', '本地校验', '服务端预检', '后台导入'].map((label) => (

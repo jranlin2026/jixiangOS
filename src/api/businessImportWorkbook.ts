@@ -30,6 +30,39 @@ const FORMULA_PREFIX = /^\s*[=+\-@]/u;
 export const BUSINESS_IMPORT_MAX_FILE_BYTES = 20 * 1024 * 1024;
 let browserExcelJsPromise: Promise<ExcelJsNamespace> | null = null;
 
+export type BusinessImportDownloadEnvironment = {
+  createObjectUrl: (blob: Blob) => string;
+  revokeObjectUrl: (url: string) => void;
+  clickAnchor: (url: string, fileName: string) => void;
+};
+
+function browserDownloadEnvironment(): BusinessImportDownloadEnvironment {
+  if (typeof document === 'undefined' || typeof URL === 'undefined') throw new Error('当前环境无法下载文件');
+  return {
+    createObjectUrl: (blob) => URL.createObjectURL(blob),
+    revokeObjectUrl: (url) => URL.revokeObjectURL(url),
+    clickAnchor: (url, fileName) => {
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = fileName;
+      anchor.click();
+    },
+  };
+}
+
+export function downloadBusinessImportWorkbook(
+  fileName: string,
+  buffer: ArrayBuffer,
+  environment: BusinessImportDownloadEnvironment = browserDownloadEnvironment(),
+): void {
+  const url = environment.createObjectUrl(new Blob([buffer], { type: XLSX_MIME }));
+  try {
+    environment.clickAnchor(url, fileName);
+  } finally {
+    environment.revokeObjectUrl(url);
+  }
+}
+
 export function validateBusinessImportFile(file: Pick<File, 'name' | 'size' | 'type'>): void {
   if (!String(file.name || '').toLocaleLowerCase('en-US').endsWith('.xlsx')) {
     throw new Error('仅支持 .xlsx 文件');
@@ -166,9 +199,15 @@ function cellAmount(cell: Cell): string | number {
   return typeof cell.value === 'number' ? cell.value : cellText(cell);
 }
 
-function formatDate(value: Date): string {
+/**
+ * Excel dates are timezone-free serial wall-clock values. ExcelJS represents
+ * that serial as a Date whose UTC fields carry the original spreadsheet
+ * fields, so using local getters would apply the browser timezone a second
+ * time (for example 10:30 -> 18:30 in China Standard Time).
+ */
+function formatExcelSerialDate(value: Date): string {
   const pad = (part: number) => String(part).padStart(2, '0');
-  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`;
+  return `${value.getUTCFullYear()}-${pad(value.getUTCMonth() + 1)}-${pad(value.getUTCDate())} ${pad(value.getUTCHours())}:${pad(value.getUTCMinutes())}:${pad(value.getUTCSeconds())}`;
 }
 
 function validDateText(value: string): boolean {
@@ -189,15 +228,17 @@ function cellDate(cell: Cell, rowNumber: number, header: string, required: boole
     if (required) throw new Error(`第 ${rowNumber} 行：${header}不能为空`);
     return '';
   }
-  if (cell.value instanceof Date && !Number.isNaN(cell.value.getTime())) return formatDate(cell.value);
+  if (cell.value instanceof Date && !Number.isNaN(cell.value.getTime())) return formatExcelSerialDate(cell.value);
   if (typeof cell.value === 'string' && validDateText(cell.value.trim())) return cell.value.trim();
   throw new Error(`第 ${rowNumber} 行：${header}必须是有效日期或时间`);
 }
 
 function validMoney(value: string | number): boolean {
-  return typeof value === 'number'
-    ? Number.isFinite(value)
-    : /^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/u.test(value);
+  if (typeof value !== 'number') return /^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/u.test(value);
+  if (!Number.isFinite(value)) return false;
+  const cents = value * 100;
+  const floatingTolerance = Number.EPSILON * Math.max(1, Math.abs(cents)) * 4;
+  return Math.abs(cents - Math.round(cents)) <= floatingTolerance;
 }
 
 const TEXT_MAX_LENGTHS: Partial<Record<string, number>> = {
