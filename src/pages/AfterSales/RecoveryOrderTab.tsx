@@ -53,6 +53,7 @@ import BusinessAttachmentLinks from '../../shared/components/BusinessAttachmentL
 import { subscribePageRefresh } from '../../shared/utils/pageRefresh';
 import {
   REVIEW_QUEUE_OPTIONS,
+  getRecoveryOrderUnifiedReviewStatus,
   getRecoveryOrderReviewStatuses,
   type ReviewQueueView,
 } from '../../shared/utils/reviewQueue';
@@ -544,17 +545,21 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       case 'recoveryAt':
         return formatDate(row.recoveryAt || row.createdAt, 'yyyy-MM-dd HH:mm');
       case 'status':
-        return (
+        {
+          const unifiedStatus = getRecoveryOrderUnifiedReviewStatus(row.status, Boolean(row.deletedAt));
+          const displayStatus = mode === 'review' ? unifiedStatus : (row.deletedAt ? '已删除（留痕）' : row.status);
+          return (
           <Box>
             <Chip
               size="small"
-              label={row.deletedAt ? '已删除（留痕）' : row.status}
+              label={displayStatus}
               sx={row.deletedAt
                 ? { bgcolor: '#f1f5f9', color: shell.muted, fontWeight: 900 }
-                : { ...getStatusSx(row.status), fontWeight: 900 }}
+                : { ...getStatusSx(mode === 'review' && unifiedStatus === '已驳回' ? '审核驳回' : row.status), fontWeight: 900 }}
             />
           </Box>
-        );
+          );
+        }
       case 'createdAt':
         return formatDate(row.createdAt, 'yyyy-MM-dd HH:mm');
       case 'actions':
@@ -811,7 +816,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                 <TableCell colSpan={visibleColumns.length || 1} align="center" sx={{ py: 6, color: '#9ca3af' }}>
                   {loading ? '加载中...' : mode === 'review'
                     ? reviewQueueView === 'pending'
-                      ? '暂无待处理/待修改售后挽回订单'
+                      ? '暂无待审核/退回修改售后挽回订单'
                       : '当前审核视图暂无记录'
                     : '暂无售后挽回订单'}
                 </TableCell>
@@ -897,7 +902,13 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                 <Typography variant="h6" sx={{ fontWeight: 600 }}>{detailOrder.recoveryNo}</Typography>
                 <Typography variant="body2" sx={{ fontWeight: 600, color: '#374151' }}>{detailOrder.originalProduct}</Typography>
                 {mode === 'review' && (
-                  <Chip label={detailOrder.status} size="small" sx={{ ...getStatusSx(detailOrder.status), fontWeight: 700 }} />
+                  <Chip
+                    label={getRecoveryOrderUnifiedReviewStatus(detailOrder.status, Boolean(detailOrder.deletedAt))}
+                    size="small"
+                    sx={detailOrder.deletedAt
+                      ? { bgcolor: '#f1f5f9', color: shell.muted, fontWeight: 700 }
+                      : { ...getStatusSx(detailOrder.status), fontWeight: 700 }}
+                  />
                 )}
               </Box>
             </DialogCloseTitle>

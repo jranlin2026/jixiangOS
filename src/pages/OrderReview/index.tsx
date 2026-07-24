@@ -50,6 +50,7 @@ import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
 import BusinessAttachmentLinks from '../../shared/components/BusinessAttachmentLinks';
 import {
   REVIEW_QUEUE_OPTIONS,
+  getOrderApplicationUnifiedReviewStatus,
   getOrderApplicationReviewStatuses,
   type ReviewQueueView,
 } from '../../shared/utils/reviewQueue';
@@ -154,11 +155,12 @@ const readReviewViewConfig = () => {
   }
 };
 
-const statusColor: Record<OrderApplicationStatus, 'warning' | 'info' | 'success' | 'error'> = {
-  待财务审核: 'warning',
+const statusColor: Record<ReturnType<typeof getOrderApplicationUnifiedReviewStatus>, 'warning' | 'info' | 'success' | 'error' | 'default'> = {
+  待审核: 'warning',
   退回修改: 'info',
-  已入库: 'success',
+  已通过: 'success',
   已驳回: 'error',
+  '已删除（留痕）': 'default',
 };
 
 const reviewActionText: Record<OrderApplication['reviewLogs'][number]['action'], string> = {
@@ -513,7 +515,10 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
           </Button>
         ) : '-';
       case 'status':
-        return <Chip label={application.status} size="small" color={statusColor[application.status]} variant="outlined" />;
+        {
+          const unifiedStatus = getOrderApplicationUnifiedReviewStatus(application.status);
+          return <Chip label={unifiedStatus} size="small" color={statusColor[unifiedStatus]} variant="outlined" />;
+        }
       case 'customer':
         return (
           <Button
@@ -698,7 +703,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                   {loading
                     ? '加载中...'
                     : reviewQueueView === 'pending'
-                      ? '暂无待处理/待修改订单申请'
+                      ? '暂无待审核/退回修改订单申请'
                       : '当前审核视图暂无订单申请'}
                 </TableCell>
               </TableRow>
@@ -902,7 +907,12 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                 </Typography>
                 <Chip label={detailApplication.orderData.productLevel || '-'} size="small" sx={getProductLevelTagSx(detailApplication.orderData.productLevel)} />
                 <Chip label={detailApplication.orderData.orderType || '-'} size="small" variant="outlined" />
-                <Chip label={detailApplication.status} size="small" color={statusColor[detailApplication.status]} variant="outlined" />
+                <Chip
+                  label={getOrderApplicationUnifiedReviewStatus(detailApplication.status)}
+                  size="small"
+                  color={statusColor[getOrderApplicationUnifiedReviewStatus(detailApplication.status)]}
+                  variant="outlined"
+                />
               </Box>
             </DialogCloseTitle>
             <DialogContent dividers>

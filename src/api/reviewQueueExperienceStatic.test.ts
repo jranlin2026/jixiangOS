@@ -15,11 +15,23 @@ for (const [name, source] of [
     `${name}必须默认进入待处理队列`,
   );
   assert.match(source, /REVIEW_QUEUE_OPTIONS/, `${name}必须提供统一的审核视图选项`);
-  assert.match(source, /暂无待处理\/待修改/, `${name}的默认空状态必须同时说明待处理和待修改`);
+  assert.match(source, /暂无待审核\/退回修改/, `${name}的默认空状态必须同时说明待审核和退回修改`);
 }
 
 assert.match(orderReviewSource, /getOrderApplicationReviewStatuses\(view\)/);
 assert.match(recoveryReviewSource, /getRecoveryOrderReviewStatuses\(reviewQueueView\)/);
+assert.match(orderReviewSource, /getOrderApplicationUnifiedReviewStatus\(application\.status\)/);
+assert.match(recoveryReviewSource, /mode === 'review' \? unifiedStatus/);
+assert.match(
+  recoveryReviewSource,
+  /getRecoveryOrderUnifiedReviewStatus\(detailOrder\.status, Boolean\(detailOrder\.deletedAt\)\)/,
+  '售后审核台详情必须与列表使用同一套审核状态。',
+);
+assert.doesNotMatch(
+  orderReviewSource,
+  /<Chip label=\{application\.status\}/,
+  '普通订单审核台不得直接暴露已入库等业务状态。',
+);
 assert.match(
   recoveryReviewSource,
   /includeDeleted:\s*mode === 'review' && reviewQueueView === 'all'/,
