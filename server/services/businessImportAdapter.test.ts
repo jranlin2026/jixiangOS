@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { consumePrecheckAndCreateJob } from './businessImportAdapter';
+import { businessImportScopeDomain, consumePrecheckAndCreateJob } from './businessImportAdapter';
 import { BusinessImportError } from './businessImportService';
 
 const input = {
@@ -9,6 +9,9 @@ const input = {
     rowNumber: 2, customerName: '客户甲', customerPhone: '+8613800000000', customerWechat: '', productName: '训练营', orderType: '新购', paymentChannel: '企业微信转账', paymentAmount: '1', paidAt: '2026-07-23', salesUserName: '销售甲', thirdPartyOrderNo: '', remark: '',
   }, customerId: 'customer-1' }],
 };
+
+assert.equal(businessImportScopeDomain('orders'), 'orders');
+assert.equal(businessImportScopeDomain('recovery_orders'), 'recoveryOrderApplications', 'recovery template/precheck/execution use the review-application scope');
 
 function createLockedPrisma(overrides: Partial<{ expiresAt: Date; actorId: string }> = {}) {
   const batch: any = { id: 'batch-1', actorId: overrides.actorId ?? 'u-importer', importType: 'orders', rowsHash: input.rowsHash, expiresAt: overrides.expiresAt ?? new Date('2099-01-01T00:00:00.000Z'), consumedAt: null };
@@ -21,6 +24,7 @@ function createLockedPrisma(overrides: Partial<{ expiresAt: Date; actorId: strin
     },
     user: { findUnique: async () => ({ name: '导入员' }) },
     businessImportJob: { create: async ({ data }: any) => { jobs.push(data); return data; } },
+    businessImportJobItem: { createMany: async () => ({ count: input.rows.length }) },
     businessImportBatch: { update: async ({ data }: any) => { Object.assign(batch, data); return batch; } },
   };
   const prisma: any = {
@@ -41,6 +45,7 @@ const [first, second] = await Promise.allSettled([
   consumePrecheckAndCreateJob(locked.prisma, input),
 ]);
 assert.equal(first.status, 'fulfilled');
+assert.ok(first.status === 'fulfilled' && first.value.batchId === 'batch-1', 'adapter confirmation returns its consumed batch id');
 assert.equal(second.status, 'rejected');
 assert.ok(second.status === 'rejected' && second.reason instanceof BusinessImportError && second.reason.status === 409,
   'the locked batch permits only one job to consume a signed token');
@@ -76,6 +81,7 @@ function createReservationPrisma() {
       },
     },
     businessImportJob: { create: async ({ data }: any) => { jobs.push(data); return data; } },
+    businessImportJobItem: { createMany: async () => ({ count: input.rows.length }) },
     businessImportBatch: { update: async ({ where, data }: any) => {
       const batch = Array.from(batches.values()).find((candidate) => candidate.id === where.id);
       if (!batch) throw new Error('batch missing');
@@ -109,5 +115,6 @@ assert.ok(numberSecond.status === 'rejected' && numberSecond.reason instanceof B
 assert.equal(reservationPrisma.jobs.length, 1);
 assert.equal(reservationPrisma.reservations.get('orders:tp-concurrent')?.batchId, 'batch-a');
 assert.equal(reservationPrisma.reservations.get('orders:tp-concurrent')?.jobId, reservationPrisma.jobs[0]?.id);
+assert.equal(reservationPrisma.reservations.get('orders:tp-concurrent')?.rowNumber, 2);
 
 console.log('business import adapter: ok');

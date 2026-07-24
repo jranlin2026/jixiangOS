@@ -649,11 +649,31 @@ model BusinessImportJob {
 
   batch BusinessImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
   numberReservations BusinessImportNumberReservation[]
+  items BusinessImportJobItem[]
 
   @@unique([actorId, importType, idempotencyKey])
   @@index([importType, status, createdAt])
   @@index([status, leaseExpiresAt])
   @@map("business_import_jobs")
+}
+
+model BusinessImportJobItem {
+  id               String   @id @db.VarChar(64)
+  jobId            String   @db.VarChar(64)
+  rowNumber        Int
+  status           String   @db.VarChar(32)
+  payload          Json
+  reservedNumber   String?  @db.VarChar(191)
+  recordId         String?  @db.VarChar(80)
+  errorMessage     String?  @db.Text
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  job BusinessImportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, rowNumber], map: "business_import_job_items_job_row_uq")
+  @@index([jobId, status, rowNumber], map: "business_import_job_items_job_status_row_idx")
+  @@map("business_import_job_items")
 }
 
 model BusinessImportNumberReservation {
@@ -662,6 +682,7 @@ model BusinessImportNumberReservation {
   normalizedNumber String   @db.VarChar(191)
   batchId          String   @db.VarChar(64)
   jobId            String?  @db.VarChar(64)
+  rowNumber         Int?
   createdAt        DateTime @default(now())
 
   batch BusinessImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)

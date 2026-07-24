@@ -110,12 +110,12 @@ export type BusinessImportPrecheckResult = {
 
 export type BusinessImportJobResult = {
   id: string;
+  batchId: string;
   type: BusinessImportType;
   status: BusinessImportJobExecution['status'];
   totalCount: number;
   successCount?: number;
   failedCount?: number;
-  batchId?: string;
   rows?: BusinessImportJobRow[];
 };
 

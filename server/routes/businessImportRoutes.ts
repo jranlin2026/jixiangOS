@@ -43,18 +43,28 @@ function allowed(value: unknown, keys: string[]): Record<string, unknown> {
   return raw;
 }
 
-function rows(value: unknown): BusinessImportRow[] {
+const COMMON_ROW_KEYS = ['rowNumber', 'customerName', 'customerPhone', 'customerWechat', 'paymentChannel', 'paymentOrderNo', 'creatorName', 'thirdPartyOrderNo', 'remark'] as const;
+const ORDER_ROW_KEYS = [...COMMON_ROW_KEYS, 'productName', 'orderType', 'paymentAmount', 'paidAt', 'salesUserName', 'notes'] as const;
+const RECOVERY_ROW_KEYS = [...COMMON_ROW_KEYS, 'originalProduct', 'sourcePlatform', 'sourceShop', 'originalAmount', 'recoveryAmount', 'recoveryAt', 'paymentAt', 'recoveryUserName', 'assistUserName'] as const;
+
+function rows(type: BusinessImportType, value: unknown): BusinessImportRow[] {
   if (!Array.isArray(value)) throw new BusinessImportError('导入数据格式无效');
   return value.map((candidate, index) => {
-    const input = object(candidate);
-    return {
+    const input = allowed(candidate, type === 'orders' ? [...ORDER_ROW_KEYS] : [...RECOVERY_ROW_KEYS]);
+    const common = {
       rowNumber: Number(input.rowNumber || index + 2),
       customerName: String(input.customerName || ''), customerPhone: String(input.customerPhone || ''), customerWechat: String(input.customerWechat || ''),
-      productName: String(input.productName || ''), orderType: String(input.orderType || ''), paymentChannel: String(input.paymentChannel || ''),
-      paymentAmount: String(input.paymentAmount || ''), paidAt: String(input.paidAt || ''), paymentOrderNo: String(input.paymentOrderNo || ''), salesUserName: String(input.salesUserName || ''), creatorName: String(input.creatorName || ''), notes: String(input.notes || ''),
-      originalProduct: String(input.originalProduct || ''), sourcePlatform: String(input.sourcePlatform || ''), sourceShop: String(input.sourceShop || ''),
-      originalAmount: String(input.originalAmount || ''), recoveryAmount: String(input.recoveryAmount || ''), recoveryAt: String(input.recoveryAt || ''), paymentAt: String(input.paymentAt || ''), recoveryUserName: String(input.recoveryUserName || ''), assistUserName: String(input.assistUserName || ''),
+      paymentChannel: String(input.paymentChannel || ''), paymentOrderNo: String(input.paymentOrderNo || ''), creatorName: String(input.creatorName || ''),
       thirdPartyOrderNo: String(input.thirdPartyOrderNo || ''), remark: String(input.remark || ''),
+    };
+    return type === 'orders' ? {
+      ...common, productName: String(input.productName || ''), orderType: String(input.orderType || ''),
+      paymentAmount: String(input.paymentAmount || ''), paidAt: String(input.paidAt || ''),
+      salesUserName: String(input.salesUserName || ''), notes: String(input.notes || ''),
+    } : {
+      ...common, originalProduct: String(input.originalProduct || ''), sourcePlatform: String(input.sourcePlatform || ''), sourceShop: String(input.sourceShop || ''),
+      originalAmount: String(input.originalAmount || ''), recoveryAmount: String(input.recoveryAmount || ''), recoveryAt: String(input.recoveryAt || ''),
+      paymentAt: String(input.paymentAt || ''), recoveryUserName: String(input.recoveryUserName || ''), assistUserName: String(input.assistUserName || ''),
     } as BusinessImportRow;
   });
 }
@@ -75,12 +85,12 @@ function mount(type: BusinessImportType, access: RequestHandler, service: Busine
     try { response.json(success(await service.templateOptions(type, user(request)))); } catch (error) { sendError(response, error); }
   });
   router.post('/precheck', access, async (request: AuthenticatedRequest, response) => {
-    try { response.json(success(await service.precheck({ type, rows: rows(exact(request.body, ['rows']).rows) }, user(request)))); } catch (error) { sendError(response, error); }
+    try { response.json(success(await service.precheck({ type, rows: rows(type, exact(request.body, ['rows']).rows) }, user(request)))); } catch (error) { sendError(response, error); }
   });
   router.post('/confirm', access, async (request: AuthenticatedRequest, response) => {
     try {
       const body = exact(request.body, ['rows', 'confirmationToken', 'fileName']);
-      response.status(201).json(success(await service.confirm({ type, rows: rows(body.rows), confirmationToken: String(body.confirmationToken || ''), fileName: String(body.fileName || '') }, user(request))));
+      response.status(201).json(success(await service.confirm({ type, rows: rows(type, body.rows), confirmationToken: String(body.confirmationToken || ''), fileName: String(body.fileName || '') }, user(request))));
     } catch (error) { sendError(response, error); }
   });
   return router;

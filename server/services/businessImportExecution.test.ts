@@ -41,6 +41,9 @@ const orderRow: BusinessImportJobRow = {
   assert.equal(calls[0].applicant.id, actor.id, 'actual importer remains workflow applicant');
   assert.equal(calls[0].metadata.targetCreatorId, 'creator-1');
   assert.equal(calls[0].orderData.payments.length, 1, 'imports create exactly one payment');
+  assert.equal(calls[0].orderData.officialPaymentChannel, '企业微信转账');
+  assert.equal(calls[0].orderData.paymentMethod, '微信支付');
+  assert.equal(calls[0].orderData.payments[0].paymentMethod, '微信支付');
   assert.equal('createFormalOrder' in calls[0], false, 'execution cannot request formal/downstream records');
 }
 

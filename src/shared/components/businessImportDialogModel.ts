@@ -3,7 +3,7 @@ import type { BusinessImportJobResult, BusinessImportPrecheckResult } from '../.
 const TERMINAL_JOB_STATUSES = new Set<BusinessImportJobResult['status']>(['succeeded', 'partial_failed', 'failed']);
 
 export type BusinessImportStorageIdentity = { tenantId: string; userId: string };
-export type StoredBusinessImportJob = { id: string; completedNotified: boolean };
+export type StoredBusinessImportJob = { id: string; batchId?: string; completedNotified: boolean };
 export type BusinessImportStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 export function businessImportJobStorageKey(
@@ -25,7 +25,7 @@ export function readStoredBusinessImportJob(
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<StoredBusinessImportJob>;
     const id = String(parsed.id || '').trim();
-    return id ? { id, completedNotified: parsed.completedNotified === true } : null;
+    return id ? { id, ...(parsed.batchId ? { batchId: String(parsed.batchId) } : {}), completedNotified: parsed.completedNotified === true } : null;
   } catch {
     return null;
   }
@@ -62,6 +62,7 @@ export function acceptQueuedBusinessImportJob(input: {
   input.onJob(input.job);
   const stored = writeStoredBusinessImportJob(input.storage, input.storageKey, {
     id: input.job.id,
+    batchId: input.job.batchId,
     completedNotified: false,
   });
   return stored ? '' : '任务已创建，但浏览器未能保存恢复标识；请保持当前窗口打开以查看进度。';
@@ -155,7 +156,7 @@ export async function runBusinessImportJobPolling(input: {
     assertNotAborted(input.signal);
     if (!input.stored?.completedNotified) {
       if (input.storage && input.storageKey) {
-        writeStoredBusinessImportJob(input.storage, input.storageKey, { id: terminal.id, completedNotified: true });
+        writeStoredBusinessImportJob(input.storage, input.storageKey, { id: terminal.id, batchId: terminal.batchId, completedNotified: true });
       }
       input.onCompleted?.(terminal);
     }

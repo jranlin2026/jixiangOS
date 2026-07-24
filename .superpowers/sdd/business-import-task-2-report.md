@@ -39,7 +39,7 @@
 
 ## Notes
 
-- No live migration deployment was performed in this task; the migration and generated Prisma client were schema-validated and compile-verified.
+- The original Task 2 migration was schema-validated only. The final hardening migration described below was deployed to the local `jixiang_os` MySQL database and exercised by the live reservation integration test.
 
 ## Important review fixes
 
@@ -61,3 +61,32 @@
 - Focused Task 2 execution, persistence, review, route, order approval, and recovery tests: passed.
 - `npm run build`: passed.
 - Prisma schema validation and `git diff --check`: passed.
+
+## Final cross-task hardening
+
+- Corrected imported order payment semantics: the official channel is stored in `officialPaymentChannel`, while `paymentMethod` is normalized to the legal downstream enum (`微信支付` / `支付宝` / `对公转账` / `银行转账`). Approval, commission matching, and delivery therefore consume the same representation as manually submitted orders.
+- Made `batchId` mandatory in the confirm response contract and retained it in browser recovery storage without changing the existing polling flow.
+- Replaced per-row rewrites of the job's complete JSON snapshot with indexed `BusinessImportJobItem` rows. Claim/retry, row state transitions, final counts, and job/batch reads now use independent row records. Existing job JSON is retained as an immutable compatibility snapshot and migration backfill source.
+- Added job-level execution snapshot caching: importer permissions, visibility, customer matches, users, products, and configuration load once per claimed job and are released after processing. Active-number lookup reads the reservation table instead of scanning queued/running job JSON.
+- Added row ownership to number reservations. A lease-fenced failed row releases exactly its own reservation only when no imported business record exists; successful or already-created rows retain protection. The unique reservation index continues to serialize competing confirmations.
+- Corrected recovery import visibility to the `recoveryOrderApplications` scope domain for template, precheck, and execution directory loading.
+- Tightened imported recovery replay: idempotent success requires the exact import batch/row/importer/target-creator metadata. Manual records and records from another batch remain conflicts.
+- Added exact per-module request DTO allowlists. Unknown keys and order/recovery cross-module fields are rejected before precheck or confirm.
+
+### Final hardening TDD evidence
+
+- RED: imported order tests observed no `officialPaymentChannel`; GREEN: payment storage and an official-channel commission rule are asserted end to end through approval effects.
+- RED: confirm adapter/API contracts omitted `batchId`; GREEN: service, adapter, route, client API, dialog callback, and persisted recovery identity all require and assert it.
+- RED: cross-module and unknown row fields returned 200; GREEN: route tests assert 400 for each invalid DTO shape.
+- RED: recovery import used the wrong scope domain; GREEN: the shared domain selector asserts `recoveryOrderApplications`.
+- RED: manual recovery records could be accepted as imported replay; GREEN: manual and other-batch collisions both return 409, while exact imported metadata remains idempotent.
+- RED: persistence still issued `SELECT *` against the 5,000-row job blob; GREEN: the 5,000-row test asserts bounded indexed item operations, zero job-row rewrites, task-level directory loading once, lease fencing, exact release, corrected retry, and success/created-record retention.
+
+### Final hardening verification
+
+- Focused affected tests: passed.
+- `npm test`: 302 test files passed using the repository-default test environment. The live import integration is intentionally skipped in that invocation when `DATABASE_URL` is absent.
+- Live MySQL: `20260725010000_business_import_job_items` deployed successfully to local `jixiang_os`; `businessImportReservation.integration.test.ts` passed with independent job-item and reservation-row assertions.
+- `npx prisma validate` with the local development environment: passed.
+- `npm run build`: passed.
+- `git diff --check`: passed.

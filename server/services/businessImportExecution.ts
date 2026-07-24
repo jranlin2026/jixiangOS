@@ -8,6 +8,8 @@ import type {
 } from '../../src/types/businessImport';
 import type { OrderApplication } from '../../src/types/order';
 import type { RecoveryOrder, RecoveryOrderInput, RecoveryOrderMatchStatus } from '../../src/types/recoveryOrder';
+import type { OfficialPaymentChannel } from '../../src/types/commission';
+import type { PaymentMethod } from '../../src/types/common';
 import { safeBusinessImportErrorMessage } from './businessImportError';
 
 type DirectoryUser = { id: string; name: string };
@@ -42,6 +44,7 @@ type ImportedRecoveryInput = {
 
 export type BusinessImportRowExecutor = {
   execute(job: BusinessImportJobExecution, row: BusinessImportJobRow): Promise<{ recordId: string }>;
+  releaseJob?(job: BusinessImportJobExecution): void | Promise<void>;
 };
 
 export type BusinessImportJobLease = BusinessImportJobExecution & {
@@ -63,6 +66,12 @@ function number(value: unknown): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) throw new Error('导入金额无效');
   return parsed;
+}
+function paymentMethodFromOfficialChannel(channel: OfficialPaymentChannel): PaymentMethod {
+  if (channel === '企业微信转账' || channel === '公司自营小店') return '微信支付';
+  if (channel === '企业支付宝转账') return '支付宝';
+  if (channel === '对公银行转账') return '对公转账';
+  return '银行转账';
 }
 function uniqueByName(users: DirectoryUser[], name: string, label: string): DirectoryUser {
   const matches = users.filter((user) => user.name === name);
@@ -111,19 +120,21 @@ export function createBusinessImportRowExecutor(deps: {
         if (!context.paymentChannels.includes(clean(input.paymentChannel))) throw new Error('收款渠道已停用');
         const sales = uniqueByName(context.users, clean(input.salesUserName), '销售人员');
         const amount = number(input.paymentAmount);
+        const officialPaymentChannel = clean(input.paymentChannel) as OfficialPaymentChannel;
+        const paymentMethod = paymentMethodFromOfficialChannel(officialPaymentChannel);
         const result = await deps.submitImportedOrderApplication({
           idempotencyKey, applicant: context.actor, metadata: importMetadata,
           orderData: {
             customerId: customers[0].id, customerName: customers[0].name,
             productId: product.id, productName: product.name, productLevel: (product.level || '未分级') as any,
             orderType: clean(input.orderType) as any, amount, actualAmount: amount,
-            paymentMethod: clean(input.paymentChannel) as any, status: '已确认', refundStatus: '无',
+            paymentMethod, officialPaymentChannel, status: '已确认', refundStatus: '无',
             owner: sales.name, salesId: sales.id, salesName: sales.name,
             thirdPartyOrderNo: clean(input.thirdPartyOrderNo) || undefined,
             notes: clean(input.notes) || clean(input.remark) || undefined,
             payments: [{
               id: `import-payment-${job.id}-${row.rowNumber}`, amount,
-              paymentMethod: clean(input.paymentChannel) as any, paidAt: clean(input.paidAt),
+              paymentMethod, paidAt: clean(input.paidAt),
               paymentOrderNo: clean(input.paymentOrderNo) || undefined,
               remark: clean(input.remark) || undefined,
             }],
@@ -214,6 +225,7 @@ export function createBusinessImportWorker(options: {
       return false;
     } finally {
       await stopHeartbeat();
+      await options.executor.releaseJob?.(lease);
     }
   };
   const runOnce = (): Promise<number> => {

@@ -8,7 +8,7 @@ Object.defineProperty(globalThis, 'localStorage', {
 const requests: Array<{ url: string; init?: RequestInit }> = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   requests.push({ url: String(input), init });
-  return new Response(JSON.stringify({ code: 0, data: { id: 'job-1', status: 'queued' }, message: 'ok' }), {
+  return new Response(JSON.stringify({ code: 0, data: { id: 'job-1', batchId: 'batch-1', status: 'queued' }, message: 'ok' }), {
     status: 200,
     headers: { 'content-type': 'application/json' },
   });
@@ -19,7 +19,8 @@ const rows = [{ rowNumber: 2, customerName: '客户甲' }] as any;
 await businessImportApi.templateOptions('orders');
 await businessImportApi.templateOptions('recovery_orders');
 await businessImportApi.precheck('orders', rows);
-await businessImportApi.confirm('recovery_orders', rows, 'token', '挽回.xlsx');
+const confirmed = await businessImportApi.confirm('recovery_orders', rows, 'token', '挽回.xlsx');
+assert.equal(confirmed.data.batchId, 'batch-1');
 const jobAbort = new AbortController();
 await businessImportApi.job('job-1', jobAbort.signal);
 await businessImportApi.review({

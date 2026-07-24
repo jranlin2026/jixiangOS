@@ -66,6 +66,11 @@ if (!process.env.DATABASE_URL) {
     const reservations = await prisma.businessImportNumberReservation.findMany({ where: { batchId: { in: batchIds } } });
     assert.equal(reservations.length, 1);
     assert.equal(reservations[0]?.jobId, jobs[0]?.id, 'the reservation remains associated with the queued job for Task 2');
+    assert.equal(reservations[0]?.rowNumber, 2);
+    const items = await prisma.businessImportJobItem.findMany({ where: { jobId: jobs[0]?.id } });
+    assert.equal(items.length, 1, 'confirmed rows are persisted independently from the job JSON snapshot');
+    assert.equal(items[0]?.rowNumber, 2);
+    assert.equal(items[0]?.status, 'queued');
   } finally {
     if (batchIds.length) {
       await prisma.businessImportNumberReservation.deleteMany({ where: { batchId: { in: batchIds } } });

@@ -193,7 +193,7 @@ export default function BusinessImportDialog({
     setPage(0);
     const storedJob = storageAdapter && storageKey ? readStoredBusinessImportJob(storageAdapter, storageKey) : null;
     storedJobRef.current = storedJob;
-    setJob(storedJob ? { id: storedJob.id, type, status: 'queued', totalCount: 0 } : null);
+    setJob(storedJob ? { id: storedJob.id, batchId: storedJob.batchId || '', type, status: 'queued', totalCount: 0 } : null);
     setLoadingOptions(true);
     businessImportApi.templateOptions(type).then((response) => {
       if (!active) return;
@@ -225,7 +225,7 @@ export default function BusinessImportDialog({
       stored: storedJobRef.current,
       onUpdate: (next) => setJob(next),
       onCompleted: (terminal) => {
-        storedJobRef.current = { id: terminal.id, completedNotified: true };
+        storedJobRef.current = { id: terminal.id, batchId: terminal.batchId, completedNotified: true };
         onCompletedRef.current?.(terminal);
       },
       onUnavailable: () => {
@@ -321,7 +321,7 @@ export default function BusinessImportDialog({
           storageKey,
           onJob: setJob,
         });
-        storedJobRef.current = { id: queued.id, completedNotified: false };
+        storedJobRef.current = { id: queued.id, batchId: queued.batchId, completedNotified: false };
         setStorageWarning(warning);
       }
       onQueuedRef.current?.(queued);

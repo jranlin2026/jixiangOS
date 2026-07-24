@@ -34,7 +34,7 @@ const service = createBusinessImportService({
     const precheck = persisted.find((item) => item.tokenHash === input.tokenHash);
     if (!precheck || precheck.consumedAt) throw new BusinessImportError('导入预检凭证无效或已使用', 409);
     precheck.consumedAt = '2026-07-24T00:00:00.000Z';
-    const job = { id: `job-${jobs.length + 1}`, status: 'queued' as const, type: input.type, totalCount: input.rows.length, rows: input.rows };
+    const job = { id: `job-${jobs.length + 1}`, batchId: `batch-${jobs.length + 1}`, status: 'queued' as const, type: input.type, totalCount: input.rows.length, rows: input.rows };
     jobs.push(job);
     return job;
   },
@@ -53,6 +53,7 @@ assert.equal(persisted.length, 1, 'precheck must be persisted before confirmatio
 const confirmed = await service.confirm({ type: 'orders', rows: [orderRow], confirmationToken: precheck.confirmationToken, fileName: 'orders.xlsx' }, actor);
 assert.equal(confirmed.status, 'queued');
 assert.equal(confirmed.totalCount, 1);
+assert.equal(confirmed.batchId, 'batch-1', 'confirm must immediately return the review-navigation batch id');
 assert.equal(jobs[0].rows[0].customerId, 'customer-1', 'order imports bind a unique active customer at precheck/confirm time');
 
 const namedPrecheck = await service.precheck({ type: 'orders', rows: [{ ...orderRow, rowNumber: 8, thirdPartyOrderNo: 'TP-file-name' }] }, actor);

@@ -5,6 +5,7 @@ import { PERMISSION_KEYS, hasPermission, toAuthenticatedUser } from '../../src/s
 import { mergeRoleWithDefaultAccess } from '../../src/shared/utils/organizationConfig';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { businessImportContactKeys, loadBusinessImportDirectory } from './businessImportAdapter';
+import type { BusinessImportDirectory } from './businessImportService';
 import { createBusinessImportRowExecutor } from './businessImportExecution';
 
 async function currentActor(prisma: PrismaClient, actorId: string): Promise<AuthenticatedUser> {
@@ -26,6 +27,7 @@ function matchesForRow(directory: Awaited<ReturnType<typeof loadBusinessImportDi
 
 export function createPrismaBusinessImportRowExecutor(input: {
   prisma: PrismaClient;
+  loadExecutionSnapshot?: (job: BusinessImportJobExecution) => Promise<{ actor: AuthenticatedUser; directory: BusinessImportDirectory }>;
   orderApplications: {
     submitImported(data: any, actor: AuthenticatedUser, metadata: any, idempotencyKey: string): Promise<any>;
   };
@@ -34,13 +36,24 @@ export function createPrismaBusinessImportRowExecutor(input: {
   };
 }) {
   const actors = new Map<string, AuthenticatedUser>();
+  const snapshots = new Map<string, Promise<{ actor: AuthenticatedUser; directory: BusinessImportDirectory }>>();
+  const snapshot = (job: BusinessImportJobExecution) => {
+    let loaded = snapshots.get(job.id);
+    if (!loaded) {
+      loaded = input.loadExecutionSnapshot ? input.loadExecutionSnapshot(job) : (async () => {
+        const actor = await currentActor(input.prisma, job.actorId);
+        const permission = job.type === 'orders' ? PERMISSION_KEYS.ORDER_IMPORT : PERMISSION_KEYS.AFTER_SALES_RECOVERY_IMPORT;
+        if (!hasPermission(actor, permission, 'write')) throw new Error('导入人权限已变化，任务已停止');
+        return { actor, directory: await loadBusinessImportDirectory(input.prisma, actor, job.type) };
+      })();
+      snapshots.set(job.id, loaded);
+    }
+    return loaded;
+  };
   const executor = createBusinessImportRowExecutor({
     loadContext: async (job: BusinessImportJobExecution, row: BusinessImportJobRow) => {
-      const actor = await currentActor(input.prisma, job.actorId);
+      const { actor, directory } = await snapshot(job);
       actors.set(job.id, actor);
-      const permission = job.type === 'orders' ? PERMISSION_KEYS.ORDER_IMPORT : PERMISSION_KEYS.AFTER_SALES_RECOVERY_IMPORT;
-      if (!hasPermission(actor, permission, 'write')) throw new Error('导入人权限已变化，任务已停止');
-      const directory = await loadBusinessImportDirectory(input.prisma, actor, job.type);
       return {
         actor, users: directory.users, products: directory.products, orderTypes: directory.orderTypes,
         paymentChannels: directory.paymentChannels, recoveryPlatforms: directory.recoveryPlatforms,
@@ -64,7 +77,8 @@ export function createPrismaBusinessImportRowExecutor(input: {
   });
   return {
     async execute(job: BusinessImportJobExecution, row: BusinessImportJobRow) {
-      try { return await executor.execute(job, row); } finally { actors.delete(job.id); }
+      return executor.execute(job, row);
     },
+    releaseJob(job: BusinessImportJobExecution) { actors.delete(job.id); snapshots.delete(job.id); },
   };
 }

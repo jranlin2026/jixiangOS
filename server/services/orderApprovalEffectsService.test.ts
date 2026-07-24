@@ -208,6 +208,32 @@ function fakeTransaction(options: {
 }
 
 {
+  const importedOrder = {
+    ...order,
+    id: 'order-imported-channel',
+    orderNo: 'ORD-IMPORTED-CHANNEL',
+    importBatchId: 'batch-imported-channel',
+    importRowNumber: 2,
+    officialPaymentChannel: '对公银行转账' as const,
+    paymentMethod: '对公转账' as const,
+  };
+  const { tx, rows } = fakeTransaction({ rules: [{
+    id: 'rule-imported-official-channel', name: '导入订单对公提成', productLevel: '899', orderType: '899成交',
+    sourceType: '', resourceOwnership: '公司资源', role: '销售', commissionType: 'fixed', commissionValue: 88,
+    paymentChannels: ['对公银行转账'], isActive: true, priority: 1,
+  }] });
+  rows.delete(key(STORAGE_KEYS.ORDERS, order.id));
+  rows.set(key(STORAGE_KEYS.ORDERS, importedOrder.id), {
+    id: key(STORAGE_KEYS.ORDERS, importedOrder.id), domain: STORAGE_KEYS.ORDERS,
+    recordId: importedOrder.id, customerId: importedOrder.customerId, orderId: importedOrder.id, data: clone(importedOrder),
+  });
+  const apply = createOrderApprovalDownstreamEffects();
+  await apply({ transaction: tx, application, order: importedOrder, reviewer, approvedAt: now } as any);
+  const commission = Array.from(rows.values()).find((row) => row.domain === STORAGE_KEYS.COMMISSIONS);
+  assert.equal(commission?.data.commissionAmount, 88, '导入订单审批后必须按官方渠道命中提成规则');
+}
+
+{
   const fake = fakeTransaction();
   const { tx, rows } = fake;
   const apply = createOrderApprovalDownstreamEffects();

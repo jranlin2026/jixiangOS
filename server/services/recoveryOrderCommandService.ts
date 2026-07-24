@@ -238,6 +238,15 @@ function sameCreate(existing: RecoveryOrder, desired: RecoveryOrder, compareReco
     && (existing.paymentAt || '') === (desired.paymentAt || '');
 }
 
+function sameImportedIdentity(existing: RecoveryOrder, metadata: BusinessImportMetadata): boolean {
+  return existing.importBatchId === metadata.importBatchId
+    && existing.importRowNumber === metadata.importRowNumber
+    && existing.importedById === metadata.importedById
+    && existing.importedByName === metadata.importedByName
+    && existing.targetCreatorId === metadata.targetCreatorId
+    && existing.targetCreatorName === metadata.targetCreatorName;
+}
+
 function recoveryScope(
   directory: Directory,
   actor: AuthenticatedUser,
@@ -778,7 +787,9 @@ export function createRecoveryOrderCommandService(
             .map((row) => parseObject<RecoveryOrder>(row.data, '售后挽回订单'))
             .find((order) => normalizeOrderNo(order.thirdPartyOrderNo) === normalizedNo);
           if (duplicate) {
-            if (duplicate.id === id && sameCreate(duplicate, next, Boolean(cleanText(input.recoveryAt)))) return duplicate;
+            if (duplicate.id === id
+              && sameCreate(duplicate, next, Boolean(cleanText(input.recoveryAt)))
+              && (!imported || sameImportedIdentity(duplicate, imported.metadata))) return duplicate;
             throw new RecoveryCommandError(409, '该第三方平台订单号已经创建过售后挽回订单');
           }
           await transaction.businessRecord.create({
@@ -811,7 +822,8 @@ export function createRecoveryOrderCommandService(
           });
           if (concurrent) {
             const existing = parseObject<RecoveryOrder>(concurrent.data, '售后挽回订单');
-            if (sameCreate(existing, next, Boolean(cleanText(input.recoveryAt)))) return success(existing);
+            if (sameCreate(existing, next, Boolean(cleanText(input.recoveryAt)))
+              && (!imported || sameImportedIdentity(existing, imported.metadata))) return success(existing);
           }
           return failure('该第三方平台订单号已经创建过售后挽回订单', 409);
         }

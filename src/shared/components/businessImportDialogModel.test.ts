@@ -31,7 +31,7 @@ assert.equal(getBusinessImportConfirmDisabledReason(result({ warningCount: 1, ro
 assert.equal(getBusinessImportConfirmDisabledReason(result(), true), '导入任务正在提交');
 
 const status = (value: BusinessImportJobResult['status']): BusinessImportJobResult => ({
-  id: 'job-1', type: 'orders', status: value, totalCount: 2,
+  id: 'job-1', batchId: 'batch-1', type: 'orders', status: value, totalCount: 2,
 });
 const seen: string[] = [];
 const succeeded = await pollBusinessImportJob(
@@ -169,13 +169,15 @@ assert.deepEqual(readStoredBusinessImportJob(storage, tenantAUser1), { id: 'job-
 assert.equal(readStoredBusinessImportJob(storage, tenantAUser2), null, 'one user must never resume another user\'s job');
 
 const acceptOrder: string[] = [];
+let acceptedBatchId = '';
 const warning = acceptQueuedBusinessImportJob({
-  job: status('queued'),
+  job: { ...status('queued'), batchId: 'batch-immediate' },
   storage: { ...storage, setItem: () => { acceptOrder.push('storage'); throw new Error('quota'); } },
   storageKey: tenantAUser1,
-  onJob: () => { acceptOrder.push('job'); },
+  onJob: (job) => { acceptOrder.push('job'); acceptedBatchId = job.batchId || ''; },
 });
 assert.deepEqual(acceptOrder, ['job', 'storage']);
+assert.equal(acceptedBatchId, 'batch-immediate', 'dialog queued callback receives batchId immediately');
 assert.match(warning, /任务已创建.*未能保存恢复标识/);
 
 writeStoredBusinessImportJob(storage, tenantAUser1, { id: 'missing-job', completedNotified: false });

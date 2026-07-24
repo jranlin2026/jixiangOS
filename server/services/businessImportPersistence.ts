@@ -18,7 +18,15 @@ function read<T>(value: unknown, fallback: T): T {
   if (typeof value === 'string') { try { return JSON.parse(value) as T; } catch { return fallback; } }
   return (value ?? fallback) as T;
 }
-function json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
+function itemResult(item: any): BusinessImportJobRow {
+  const payload = read<BusinessImportJobRow>(item.payload, {} as BusinessImportJobRow);
+  return {
+    ...payload,
+    executionStatus: item.status,
+    recordId: item.recordId || undefined,
+    errorMessage: item.errorMessage ? safeBusinessImportErrorMessage(item.errorMessage) : undefined,
+  };
+}
 function job(row: any, workerId?: string): BusinessImportJobExecution {
   return {
     id: row.id, batchId: row.batchId, type: row.importType, status: row.status,
@@ -35,7 +43,7 @@ export function createPrismaBusinessImportJobStore(prisma: PrismaClient): Busine
   });
   const lock = async (tx: Prisma.TransactionClient, lease: BusinessImportJobLease) => {
     const rows = await tx.$queryRaw<any[]>`
-      SELECT * FROM business_import_jobs
+      SELECT id, batchId, status, leaseOwner, leaseEpoch, totalCount FROM business_import_jobs
       WHERE id = ${lease.id} AND leaseOwner = ${lease.leaseOwner} AND leaseEpoch = ${lease.leaseEpoch}
         AND status = 'running' LIMIT 1 FOR UPDATE`;
     return rows[0] || null;
@@ -44,23 +52,26 @@ export function createPrismaBusinessImportJobStore(prisma: PrismaClient): Busine
     claim: ({ workerId, jobId, now, leaseMs }) => transaction(async (tx) => {
       const constraint = jobId ? Prisma.sql`AND id = ${jobId}` : Prisma.empty;
       const rows = await tx.$queryRaw<any[]>(Prisma.sql`
-        SELECT * FROM business_import_jobs
+        SELECT id, batchId, importType, status, actorId, actorName, totalCount, successCount, failedCount,
+          leaseOwner, leaseEpoch, leaseExpiresAt, startedAt, finishedAt, createdAt
+        FROM business_import_jobs
         WHERE (status = 'queued' OR (status = 'running' AND leaseExpiresAt < ${now}))
         ${constraint}
         ORDER BY createdAt ASC, id ASC LIMIT 1 FOR UPDATE SKIP LOCKED`);
       const candidate = rows[0];
       if (!candidate) return null;
-      const executionRows = read<BusinessImportJobRow[]>(candidate.rows, []).map((row) => (
-        row.executionStatus === 'running' ? { ...row, executionStatus: 'queued' as const } : row
-      ));
       const updated = await tx.businessImportJob.updateMany({
         where: { id: candidate.id, status: candidate.status, leaseEpoch: Number(candidate.leaseEpoch || 0) },
         data: {
-          status: 'running', leaseOwner: workerId, leaseEpoch: { increment: 1 }, rows: json(executionRows),
+          status: 'running', leaseOwner: workerId, leaseEpoch: { increment: 1 },
           leaseExpiresAt: new Date(now.getTime() + leaseMs), heartbeatAt: now, startedAt: candidate.startedAt || now,
         },
       });
       if (updated.count !== 1) return null;
+      await tx.businessImportJobItem.updateMany({
+        where: { jobId: candidate.id, status: 'running' },
+        data: { status: 'queued' },
+      });
       const claimed = await tx.businessImportJob.findUnique({ where: { id: candidate.id } });
       return claimed ? job(claimed, workerId) as BusinessImportJobLease : null;
     }),
@@ -74,40 +85,63 @@ export function createPrismaBusinessImportJobStore(prisma: PrismaClient): Busine
     nextRow: (lease) => transaction(async (tx) => {
       const current = await lock(tx, lease);
       if (!current) return null;
-      const rows = read<BusinessImportJobRow[]>(current.rows, []);
-      const index = rows.findIndex((row) => row.status !== 'blocked' && (row.executionStatus || 'queued') === 'queued');
-      if (index < 0) return null;
-      rows[index] = { ...rows[index], executionStatus: 'running', errorMessage: undefined };
-      await tx.businessImportJob.update({ where: { id: current.id }, data: { rows: json(rows), heartbeatAt: new Date() } });
-      return rows[index];
+      const item = await tx.businessImportJobItem.findFirst({
+        where: { jobId: current.id, status: 'queued' }, orderBy: [{ rowNumber: 'asc' }, { id: 'asc' }],
+      });
+      if (!item) return null;
+      const claimed = await tx.businessImportJobItem.updateMany({
+        where: { id: item.id, jobId: current.id, status: 'queued' },
+        data: { status: 'running', errorMessage: null },
+      });
+      if (claimed.count !== 1) return null;
+      return itemResult({ ...item, status: 'running', errorMessage: null });
     }),
     markSucceeded: (lease, rowNumber, recordId) => transaction(async (tx) => {
       const current = await lock(tx, lease);
       if (!current) return false;
-      const rows = read<BusinessImportJobRow[]>(current.rows, []);
-      const index = rows.findIndex((row) => row.rowNumber === rowNumber && row.executionStatus === 'running');
-      if (index < 0) return false;
-      rows[index] = { ...rows[index], executionStatus: 'succeeded', recordId, errorMessage: undefined };
-      await tx.businessImportJob.update({ where: { id: current.id }, data: { rows: json(rows), successCount: { increment: 1 }, heartbeatAt: new Date() } });
+      const saved = await tx.businessImportJobItem.updateMany({
+        where: { jobId: current.id, rowNumber, status: 'running' },
+        data: { status: 'succeeded', recordId, errorMessage: null },
+      });
+      if (saved.count !== 1) return false;
+      await tx.businessImportJob.update({ where: { id: current.id }, data: { successCount: { increment: 1 }, heartbeatAt: new Date() } });
       return true;
     }),
     markFailed: (lease, rowNumber, message) => transaction(async (tx) => {
       const current = await lock(tx, lease);
       if (!current) return false;
-      const rows = read<BusinessImportJobRow[]>(current.rows, []);
-      const index = rows.findIndex((row) => row.rowNumber === rowNumber && row.executionStatus === 'running');
-      if (index < 0) return false;
-      rows[index] = { ...rows[index], executionStatus: 'failed', errorMessage: message.slice(0, 1_000) };
-      await tx.businessImportJob.update({ where: { id: current.id }, data: { rows: json(rows), failedCount: { increment: 1 }, heartbeatAt: new Date() } });
+      const item = await tx.businessImportJobItem.findUnique({ where: { jobId_rowNumber: { jobId: current.id, rowNumber } } });
+      if (!item || item.status !== 'running') return false;
+      const saved = await tx.businessImportJobItem.updateMany({
+        where: { id: item.id, jobId: current.id, status: 'running' },
+        data: { status: 'failed', errorMessage: message.slice(0, 1_000) },
+      });
+      if (saved.count !== 1) return false;
+      if (item.reservedNumber) {
+        const createdRecord = await tx.businessRecord.findFirst({ where: {
+          domain: { in: [STORAGE_KEYS.ORDER_APPLICATIONS, STORAGE_KEYS.RECOVERY_ORDERS] },
+          AND: [
+            { data: { path: '$.importBatchId', equals: current.batchId } },
+            { data: { path: '$.importRowNumber', equals: rowNumber } },
+          ],
+        }, select: { id: true } });
+        if (!createdRecord) {
+          await tx.businessImportNumberReservation.deleteMany({ where: {
+            jobId: current.id, rowNumber, normalizedNumber: item.reservedNumber,
+          } });
+        }
+      }
+      await tx.businessImportJob.update({ where: { id: current.id }, data: { failedCount: { increment: 1 }, heartbeatAt: new Date() } });
       return true;
     }),
     finalize: (lease) => transaction(async (tx) => {
       const current = await lock(tx, lease);
       if (!current) return false;
-      const rows = read<BusinessImportJobRow[]>(current.rows, []);
-      if (rows.some((row) => ['queued', 'running'].includes(row.executionStatus || 'queued'))) return false;
-      const successCount = rows.filter((row) => row.executionStatus === 'succeeded').length;
-      const failedCount = rows.filter((row) => row.executionStatus === 'failed' || row.status === 'blocked').length;
+      const grouped = await tx.businessImportJobItem.groupBy({ by: ['status'], where: { jobId: current.id }, _count: { _all: true } });
+      const count = (status: string) => Number(grouped.find((entry: any) => entry.status === status)?._count?._all || 0);
+      if (count('queued') + count('running') > 0) return false;
+      const successCount = count('succeeded');
+      const failedCount = count('failed');
       const status = failedCount === 0 ? 'succeeded' : successCount > 0 ? 'partial_failed' : 'failed';
       await tx.businessImportJob.update({ where: { id: current.id }, data: {
         status, successCount, failedCount, finishedAt: new Date(), leaseOwner: null, leaseExpiresAt: null, heartbeatAt: new Date(),
@@ -122,18 +156,20 @@ export function createBusinessImportReadRepository(prisma: PrismaClient) {
   const result = (row: any): BusinessImportJobResult => ({
     id: row.id, batchId: row.batchId, type: row.importType, status: row.status,
     totalCount: row.totalCount, successCount: row.successCount, failedCount: row.failedCount,
-    rows: read<BusinessImportJobRow[]>(row.rows, []).map((item) => ({
-      ...item,
-      ...(item.errorMessage ? { errorMessage: safeBusinessImportErrorMessage(item.errorMessage) } : {}),
-    })),
+    rows: Array.isArray(row.items)
+      ? row.items.map(itemResult)
+      : read<BusinessImportJobRow[]>(row.rows, []).map((item) => ({
+        ...item,
+        ...(item.errorMessage ? { errorMessage: safeBusinessImportErrorMessage(item.errorMessage) } : {}),
+      })),
   });
   return {
     async getJob(id: string, actor: AuthenticatedUser): Promise<BusinessImportJobResult | null> {
-      const row = await prisma.businessImportJob.findUnique({ where: { id } });
+      const row = await prisma.businessImportJob.findUnique({ where: { id }, include: { items: { orderBy: [{ rowNumber: 'asc' }, { id: 'asc' }] } } });
       return row && row.actorId === actor.id ? result(row) : null;
     },
     async getBatch(id: string, actor: AuthenticatedUser): Promise<BusinessImportBatchResult | null> {
-      const row = await prisma.businessImportBatch.findUnique({ where: { id }, include: { jobs: true } });
+      const row = await prisma.businessImportBatch.findUnique({ where: { id }, include: { jobs: { include: { items: { orderBy: [{ rowNumber: 'asc' }, { id: 'asc' }] } } } } });
       if (!row || row.actorId !== actor.id) return null;
       return {
         id: row.id, type: row.importType as BusinessImportType, status: row.status,

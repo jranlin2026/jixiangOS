@@ -3,64 +3,115 @@ import type { BusinessImportJobLease } from './businessImportExecution';
 import { createBusinessImportReadRepository, createPrismaBusinessImportJobStore } from './businessImportPersistence';
 
 const clone = <T>(value: T): T => structuredClone(value);
-const row: any = {
+const originalRowsBlob = Array.from({ length: 5_000 }, (_, index) => ({ rowNumber: index + 2, status: 'ready', normalized: {} }));
+const job: any = {
   id: 'job-stale', batchId: 'batch-stale', importType: 'orders', status: 'running', actorId: 'u1', actorName: '导入员',
-  rows: [{ rowNumber: 2, status: 'ready', reason: '', normalized: {}, executionStatus: 'running' }],
-  totalCount: 1, successCount: 0, failedCount: 0, leaseOwner: 'dead-worker', leaseEpoch: 1,
-  leaseExpiresAt: new Date('2026-07-20T00:00:00Z'), startedAt: new Date('2026-07-19T23:59:00Z'), createdAt: new Date('2026-07-19T23:59:00Z'),
+  rows: originalRowsBlob, totalCount: 5_000, successCount: 0, failedCount: 0,
+  leaseOwner: 'dead-worker', leaseEpoch: 1, leaseExpiresAt: new Date('2026-07-20T00:00:00Z'),
+  startedAt: new Date('2026-07-19T23:59:00Z'), createdAt: new Date('2026-07-19T23:59:00Z'),
 };
+const items: any[] = originalRowsBlob.map((payload, index) => ({
+  id: `item-${index + 2}`, jobId: job.id, rowNumber: index + 2,
+  status: index === 0 ? 'running' : 'queued', payload, reservedNumber: index === 0 ? 'tp-2' : null,
+  recordId: null, errorMessage: null,
+}));
+const reservations = new Map([['tp-2', { jobId: job.id, rowNumber: 2, normalizedNumber: 'tp-2' }]]);
 let batchStatus = 'queued';
+let jobRowsWrites = 0;
+let itemQueries = 0;
+let businessRecordExists = false;
+const apply = (target: any, data: any) => Object.entries(data).forEach(([key, value]: any) => {
+  if (key === 'rows') jobRowsWrites += 1;
+  target[key] = value?.increment !== undefined ? Number(target[key] || 0) + value.increment : clone(value);
+});
 const db: any = {
   $transaction: async (operation: any) => operation(db),
   $queryRaw: async (query: any, ...tagValues: any[]) => {
     const sql = (query.strings || query).join('');
-    if (sql.includes('ORDER BY createdAt')) return clone(row.status === 'queued' || (row.status === 'running' && row.leaseExpiresAt < new Date('2026-07-20T00:00:02Z')) ? [row] : []);
+    if (sql.includes('ORDER BY createdAt')) {
+      assert.doesNotMatch(sql, /SELECT\s+\*/i, 'claim must not fetch the 5000-row JSON blob');
+      return clone(job.status === 'queued' || (job.status === 'running' && job.leaseExpiresAt < new Date('2026-07-20T00:00:02Z')) ? [job] : []);
+    }
+    assert.doesNotMatch(sql, /SELECT\s+\*/i, 'per-row lease fencing must not fetch the 5000-row JSON blob');
     const [id, owner, epoch] = tagValues.length ? tagValues : (query.values || []);
-    return id === row.id && owner === row.leaseOwner && Number(epoch) === row.leaseEpoch && row.status === 'running' ? [clone(row)] : [];
+    return id === job.id && owner === job.leaseOwner && Number(epoch) === job.leaseEpoch && job.status === 'running' ? [clone(job)] : [];
   },
   businessImportJob: {
     updateMany: async ({ where, data }: any) => {
-      if (where.id !== row.id
-        || (where.leaseOwner !== undefined && where.leaseOwner !== row.leaseOwner)
-        || (where.leaseEpoch !== undefined && where.leaseEpoch !== row.leaseEpoch)
-        || (where.status && where.status !== row.status)) return { count: 0 };
-      Object.entries(data).forEach(([key, value]: any) => { row[key] = value?.increment !== undefined ? Number(row[key] || 0) + value.increment : clone(value); });
-      return { count: 1 };
+      if (where.id !== job.id || (where.leaseOwner !== undefined && where.leaseOwner !== job.leaseOwner)
+        || (where.leaseEpoch !== undefined && where.leaseEpoch !== job.leaseEpoch) || (where.status && where.status !== job.status)) return { count: 0 };
+      apply(job, data); return { count: 1 };
     },
-    findUnique: async () => clone(row),
-    update: async ({ data }: any) => {
-      Object.entries(data).forEach(([key, value]: any) => { row[key] = value?.increment !== undefined ? Number(row[key] || 0) + value.increment : clone(value); });
-      return clone(row);
+    findUnique: async () => ({ ...clone(job), items: clone(items).sort((a, b) => a.rowNumber - b.rowNumber) }),
+    update: async ({ data }: any) => { apply(job, data); return clone(job); },
+  },
+  businessImportJobItem: {
+    updateMany: async ({ where, data }: any) => {
+      itemQueries += 1;
+      const matches = items.filter((item) => (!where.id || item.id === where.id) && (!where.jobId || item.jobId === where.jobId)
+        && (where.rowNumber === undefined || item.rowNumber === where.rowNumber) && (!where.status || item.status === where.status));
+      matches.forEach((item) => apply(item, data)); return { count: matches.length };
+    },
+    findFirst: async ({ where }: any) => { itemQueries += 1; return clone(items.find((item) => item.jobId === where.jobId && item.status === where.status) || null); },
+    findUnique: async ({ where }: any) => { itemQueries += 1; const key = where.jobId_rowNumber; return clone(items.find((item) => item.jobId === key.jobId && item.rowNumber === key.rowNumber) || null); },
+    groupBy: async ({ where }: any) => {
+      itemQueries += 1;
+      return [...new Set(items.filter((item) => item.jobId === where.jobId).map((item) => item.status))]
+        .map((status) => ({ status, _count: { _all: items.filter((item) => item.jobId === where.jobId && item.status === status).length } }));
     },
   },
+  businessImportNumberReservation: {
+    deleteMany: async ({ where }: any) => {
+      const existing = reservations.get(where.normalizedNumber);
+      if (!existing || existing.jobId !== where.jobId || existing.rowNumber !== where.rowNumber) return { count: 0 };
+      reservations.delete(where.normalizedNumber); return { count: 1 };
+    },
+  },
+  businessRecord: { findFirst: async () => businessRecordExists ? { id: 'created-business-record' } : null },
   businessImportBatch: { update: async ({ data }: any) => { batchStatus = data.status; } },
 };
 
 const store = createPrismaBusinessImportJobStore(db);
 const lease = await store.claim({ workerId: 'restart-worker', now: new Date('2026-07-20T00:00:02Z'), leaseMs: 60_000 });
 assert.ok(lease, '过期 running 任务必须可被新 worker 接管');
-assert.equal(lease?.leaseEpoch, 2);
-assert.equal(row.rows[0].executionStatus, 'queued', '重启接管必须恢复未落盘完成的 running 行');
+assert.equal(items[0].status, 'queued', '重启只恢复独立 item，不重写 5000 行 JSON');
+assert.equal(jobRowsWrites, 0);
 const staleLease = { ...lease, leaseOwner: 'dead-worker', leaseEpoch: 1 } as BusinessImportJobLease;
-assert.equal(await store.heartbeat(staleLease, 60_000, new Date('2026-07-20T00:00:03Z')), false, 'heartbeat is fenced by owner and epoch');
+assert.equal(await store.heartbeat(staleLease, 60_000, new Date('2026-07-20T00:00:03Z')), false);
 assert.equal(await store.heartbeat(lease!, 60_000, new Date('2026-07-20T00:00:03Z')), true);
-assert.equal(row.leaseExpiresAt.toISOString(), '2026-07-20T00:01:03.000Z');
 assert.equal(await store.nextRow(staleLease), null, '旧租约不能继续写入');
 const next = await store.nextRow(lease!);
 assert.equal(next?.rowNumber, 2);
 assert.equal(await store.markSucceeded(lease!, 2, 'oa-imported'), true);
+assert.equal(items[0].recordId, 'oa-imported');
+assert.equal(reservations.has('tp-2'), true, '成功行保留号码保护');
+assert.equal(jobRowsWrites, 0, 'next/mark never rewrite the 5000-row job blob');
+assert.ok(itemQueries <= 4, 'one row uses bounded indexed item queries independent of 5000-row batch size');
+items.slice(1).forEach((item) => { item.status = 'succeeded'; });
 assert.equal(await store.finalize(lease!), true);
-assert.equal(row.status, 'succeeded');
+assert.equal(job.status, 'succeeded');
 assert.equal(batchStatus, 'succeeded');
 
-console.log('business import persistence: ok');
+job.status = 'running'; job.leaseOwner = 'restart-worker'; job.leaseEpoch = 2;
+items[0] = { ...items[0], status: 'running', recordId: null, reservedNumber: 'tp-2' };
+reservations.set('tp-2', { jobId: job.id, rowNumber: 2, normalizedNumber: 'tp-2' });
+assert.equal(await store.markFailed(staleLease, 2, '旧租约'), false);
+assert.equal(reservations.has('tp-2'), true, '旧租约不能释放号码');
+assert.equal(await store.markFailed(lease!, 2, '客户匹配结果已变化，订单导入已停止'), true);
+assert.equal(reservations.has('tp-2'), false, '未创建业务记录的失败行精确释放号码，便于修正后重导');
+reservations.set('tp-2', { jobId: 'corrected-job', rowNumber: 2, normalizedNumber: 'tp-2' });
+assert.equal(reservations.get('tp-2')?.jobId, 'corrected-job', '释放后修正批次可重新占用该号码');
+reservations.delete('tp-2');
+items[0] = { ...items[0], status: 'running', reservedNumber: 'tp-2' };
+reservations.set('tp-2', { jobId: job.id, rowNumber: 2, normalizedNumber: 'tp-2' });
+businessRecordExists = true;
+assert.equal(await store.markFailed(lease!, 2, '响应丢失'), true);
+assert.equal(reservations.has('tp-2'), true, '已创建业务记录的行必须保留号码保护');
 
-row.rows = [{
-  rowNumber: 9, status: 'ready', reason: '', normalized: {}, executionStatus: 'failed',
-  errorMessage: 'INSERT INTO business_records password=secret\nError at /private/server.ts:99',
-}];
-row.status = 'failed';
-const readRepository = createBusinessImportReadRepository(db);
-const publicJob = await readRepository.getJob(row.id, { id: 'u1' } as any);
+items[0].errorMessage = 'INSERT INTO business_records password=secret\nError at /private/server.ts:99';
+job.status = 'failed';
+const publicJob = await createBusinessImportReadRepository(db).getJob(job.id, { id: 'u1' } as any);
 assert.equal(publicJob?.rows?.[0].errorMessage, '导入执行失败，请重试或联系管理员');
 assert.doesNotMatch(JSON.stringify(publicJob), /INSERT|password|secret|private\/server/i);
+
+console.log('business import persistence: ok');

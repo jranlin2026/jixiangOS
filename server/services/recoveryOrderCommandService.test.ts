@@ -475,6 +475,17 @@ assert.equal(prisma.records().length, 3, '重试必须幂等');
 
 const importedPrisma = new FakePrisma();
 const importedService = createRecoveryOrderCommandService(importedPrisma as any, { now: () => new Date(NOW) });
+const manualCollision = await importedService.create(input({ thirdPartyOrderNo: 'TP-MANUAL-COLLISION' }), creator);
+assert.equal(manualCollision.code, 0);
+const importedOverManual = await importedService.createImported(
+  input({ thirdPartyOrderNo: 'TP-MANUAL-COLLISION' }), creator,
+  {
+    importBatchId: 'batch-over-manual', importRowNumber: 2, importedById: creator.id, importedByName: creator.name,
+    importedAt: NOW, targetCreatorId: other.id, targetCreatorName: other.name,
+  },
+  { id: '', matchStatus: '售后临时客户' },
+);
+assert.equal(importedOverManual.code, 409, 'an artificial/manual record with the same number is never accepted as this import replay');
 const imported = await importedService.createImported(
   input({ thirdPartyOrderNo: 'TP-IMPORTED-CREATOR' }),
   creator,
@@ -488,6 +499,16 @@ const imported = await importedService.createImported(
 assert.equal(imported.code, 0, imported.message);
 assert.equal(imported.data?.createdBy, creator.id, '待审阶段编辑人必须是实际导入人');
 assert.equal(imported.data?.customerMatchStatus, '售后临时客户');
+const otherBatchReplay = await importedService.createImported(
+  input({ thirdPartyOrderNo: 'TP-IMPORTED-CREATOR' }), creator,
+  {
+    importBatchId: 'batch-recovery-other', importRowNumber: 2,
+    importedById: creator.id, importedByName: creator.name, importedAt: NOW,
+    targetCreatorId: other.id, targetCreatorName: other.name,
+  },
+  { id: '', matchStatus: '售后临时客户' },
+);
+assert.equal(otherBatchReplay.code, 409, 'another import batch cannot claim an existing imported recovery record');
 const importedApproved = await importedService.approve(imported.data!.id, reviewer);
 assert.equal(importedApproved.code, 0, importedApproved.message);
 assert.equal(importedApproved.data?.createdBy, other.id, '审核通过后必须切换为目标正式创建人');

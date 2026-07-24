@@ -63,7 +63,7 @@ assert.match(warning, /下载错误报告/);
 
 const partialFailure = render({
   job: {
-    id: 'job-1', type: 'orders', status: 'partial_failed', totalCount: 1, successCount: 0, failedCount: 1,
+    id: 'job-1', batchId: 'batch-1', type: 'orders', status: 'partial_failed', totalCount: 1, successCount: 0, failedCount: 1,
     rows: [{ rowNumber: 2, status: 'ready', reason: '可导入', normalized: row, executionStatus: 'failed', errorMessage: '执行失败' }],
   },
   storageWarning: '任务已创建，但浏览器未能保存恢复标识',

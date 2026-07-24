@@ -20,6 +20,10 @@ const clean = (value: unknown) => String(value ?? '').trim();
 const lower = (value: unknown) => clean(value).toLocaleLowerCase('zh-CN');
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 
+export function businessImportScopeDomain(type: BusinessImportType): 'orders' | 'recoveryOrderApplications' {
+  return type === 'orders' ? 'orders' : 'recoveryOrderApplications';
+}
+
 function isUniqueConstraint(error: unknown): boolean {
   return (error as { code?: unknown } | null)?.code === 'P2002';
 }
@@ -46,7 +50,7 @@ function thirdPartyNumber(record: { data: unknown }): string {
 }
 
 export async function loadBusinessImportDirectory(prisma: PrismaClient, actor: AuthenticatedUser, _type: BusinessImportType): Promise<BusinessImportDirectory> {
-  const [storage, users, roles, departments, customers, orders, recoveries, pendingJobs, context] = await Promise.all([
+  const [storage, users, roles, departments, customers, orders, recoveries, pendingReservations, context] = await Promise.all([
     prisma.appStorage.findMany({ where: { key: { in: [STORAGE_KEYS.PRODUCTS, STORAGE_KEYS.ORDER_TYPE_CONFIGS, STORAGE_KEYS.AFTER_SALES_SOURCE_CONFIGS] } } }),
     prisma.user.findMany({ where: { isActive: true, employmentStatus: 'active' }, orderBy: [{ name: 'asc' }, { id: 'asc' }] }),
     prisma.role.findMany({ where: { isActive: true } }),
@@ -54,12 +58,15 @@ export async function loadBusinessImportDirectory(prisma: PrismaClient, actor: A
     prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.CUSTOMERS, mergedIntoId: null } }),
     prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDERS } }),
     prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } }),
-    prisma.businessImportJob.findMany({ where: { status: { in: ['queued', 'running'] } }, select: { importType: true, rows: true } }),
+    prisma.businessImportNumberReservation.findMany({
+      where: { job: { status: { in: ['queued', 'running'] } } },
+      select: { importType: true, normalizedNumber: true },
+    }),
     loadCustomerAccessContext(prisma, actor),
   ]);
   const activeUsers = users.map(mapPrismaUser);
   const scope = buildDataVisibilityScopeForUser(actor as any, activeUsers, roles.map(mapPrismaRole), departments as any,
-    _type === 'orders' ? 'orders' : 'recoveryOrders');
+    businessImportScopeDomain(_type));
   const values = new Map(storage.map((row) => [row.key, row.value]));
   const products = readValue<ProductConfig[]>(values.get(STORAGE_KEYS.PRODUCTS), []).filter((item) => item.isActive !== false)
     .map((item) => ({ id: item.id, name: item.name, level: item.level }));
@@ -75,10 +82,9 @@ export async function loadBusinessImportDirectory(prisma: PrismaClient, actor: A
     const match = { id: customer.id, name: customer.name || '', inScope: canReadCustomer(context, customer) };
     businessImportContactKeys(customer).forEach((key) => customerMatchesByContact.set(key, [...(customerMatchesByContact.get(key) || []), match]));
   });
-  const pendingNumbers = (type: BusinessImportType) => pendingJobs
-    .filter((job) => job.importType === type)
-    .flatMap((job) => readValue<Array<{ normalized?: { thirdPartyOrderNo?: unknown }; thirdPartyOrderNo?: unknown }>>(job.rows, []))
-    .map((row) => lower(row.normalized?.thirdPartyOrderNo ?? row.thirdPartyOrderNo))
+  const pendingNumbers = (type: BusinessImportType) => pendingReservations
+    .filter((reservation) => reservation.importType === type)
+    .map((reservation) => lower(reservation.normalizedNumber))
     .filter(Boolean);
   return {
     products,
@@ -120,17 +126,18 @@ export async function consumePrecheckAndCreateJob(prisma: PrismaClient, input: {
     const jobId = `business-import-job-${randomUUID()}`;
     const actor = await tx.user.findUnique({ where: { id: input.actorId }, select: { name: true } });
     if (!actor) throw new BusinessImportError('当前导入用户不存在或已离职', 409);
-    const numbers = Array.from(new Set(input.rows
-      .map((row) => lower(row.normalized.thirdPartyOrderNo))
-      .filter(Boolean)));
-    if (numbers.length) {
+    const numberedRows = input.rows
+      .map((row) => ({ rowNumber: row.rowNumber, normalizedNumber: lower(row.normalized.thirdPartyOrderNo) }))
+      .filter((row) => Boolean(row.normalizedNumber));
+    if (numberedRows.length) {
       try {
-        await tx.businessImportNumberReservation.createMany({ data: numbers.map((normalizedNumber) => ({
+        await tx.businessImportNumberReservation.createMany({ data: numberedRows.map(({ normalizedNumber, rowNumber }) => ({
           id: `business-import-number-${randomUUID()}`,
           importType: input.type,
           normalizedNumber,
           batchId: batch.id,
           jobId: null,
+          rowNumber,
         })) });
       } catch (error) {
         if (isUniqueConstraint(error)) throw new BusinessImportError('第三方订单号已在待处理导入任务中，请勿重复导入', 409);
@@ -147,14 +154,23 @@ export async function consumePrecheckAndCreateJob(prisma: PrismaClient, input: {
         ...(row.status === 'blocked' ? { errorMessage: row.reason } : {}),
       }))),
     } });
-    if (numbers.length) {
+    await tx.businessImportJobItem.createMany({ data: input.rows.map((row) => ({
+      id: `business-import-row-${randomUUID()}`,
+      jobId,
+      rowNumber: row.rowNumber,
+      status: row.status === 'blocked' ? 'failed' : 'queued',
+      payload: json({ rowNumber: row.rowNumber, status: row.status, reason: row.reason, normalized: row.normalized, customerId: row.customerId }),
+      reservedNumber: lower(row.normalized.thirdPartyOrderNo) || null,
+      errorMessage: row.status === 'blocked' ? row.reason : null,
+    })) });
+    if (numberedRows.length) {
       await tx.businessImportNumberReservation.updateMany({
         where: { batchId: batch.id, jobId: null },
         data: { jobId },
       });
     }
     await tx.businessImportBatch.update({ where: { id: batch.id }, data: { status: 'queued', sourceFileName: input.fileName, consumedAt: new Date() } });
-    return { id: jobId, type: input.type, status: 'queued' as const, totalCount: input.rows.length, failedCount: input.rows.filter((row) => row.status === 'blocked').length };
+    return { id: jobId, batchId: batch.id, type: input.type, status: 'queued' as const, totalCount: input.rows.length, failedCount: input.rows.filter((row) => row.status === 'blocked').length };
   });
 }
 
