@@ -23,8 +23,8 @@ assert.match(recoveryReviewSource, /getRecoveryOrderReviewStatuses\(reviewQueueV
 assert.match(orderReviewSource, /getOrderApplicationUnifiedReviewStatus\(application\.status, Boolean\(application\.sourceOrderDeleted\)\)/);
 assert.match(
   orderReviewSource,
-  /canCleanupApplication[^]{0,260}Boolean\(application\.sourceOrderDeleted\)/,
-  '普通订单审核台只能对源订单确实已删除的记录显示清理入口。',
+  /canCleanupApplication[^]{0,320}ORDER_APPLICATION_STATUSES\.REJECTED[^]{0,320}Boolean\(application\.sourceOrderDeleted\)/,
+  '普通订单审核台必须允许超级管理员清理已驳回记录或源订单已删除的记录。',
 );
 assert.match(
   orderReviewSource,
@@ -65,5 +65,10 @@ assert.match(
 assert.match(
   recoveryReviewSource,
   /清理售后审核记录[\s\S]*cleanupDeletedRecoveryOrderReview|cleanupDeletedRecoveryOrderReview[\s\S]*清理售后审核记录/,
-  '售后挽回审核台必须为超级管理员提供已删除业务单的安全清理入口',
+  '售后挽回审核台必须为超级管理员提供已驳回或已删除业务单的安全清理入口',
+);
+assert.match(
+  recoveryReviewSource,
+  /canCleanupReview[^]{0,220}row\.status === '审核驳回'[^]{0,220}row\.deletedAt/,
+  '售后挽回审核台必须允许超级管理员清理已驳回记录或已删除业务单记录',
 );

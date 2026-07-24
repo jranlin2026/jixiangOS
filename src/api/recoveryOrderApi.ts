@@ -572,7 +572,10 @@ async function cleanupDeletedRecoveryOrderReview(id: string, reason: string): Pr
   const orders = readRecoveryOrders();
   const index = orders.findIndex((item) => item.id === id);
   if (index === -1) return createErrorResponse('售后挽回订单不存在', 404);
-  if (!orders[index].deletedAt) return createErrorResponse('只有业务单已经删除的售后审核记录可以清理', 409);
+  if (orders[index].reviewCleanedAt) return createSuccessResponse(orders[index]);
+  if (orders[index].status !== '审核驳回' && !orders[index].deletedAt) {
+    return createErrorResponse('只有已驳回，或业务单已经删除的售后审核记录可以清理', 409);
+  }
   const cleanedAt = nowIso();
   orders[index] = {
     ...orders[index],

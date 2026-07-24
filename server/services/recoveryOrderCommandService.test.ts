@@ -594,6 +594,22 @@ prisma.rows.set(key(STORAGE_KEYS.COMMISSIONS, 'commission-source-linked'), {
 const sourceLinkedDelete = await service.softDelete(sourceLinkedOrder.data!.id, '尝试删除', reviewer);
 assert.equal(sourceLinkedDelete.code, 409, '仅通过 sourceRecoveryOrderId 关联的活动提成也必须阻止删除');
 
+const rejectedCleanupSource = await service.create(input({ thirdPartyOrderNo: 'TP-REJECTED-CLEANUP' }), creator);
+assert.equal((await service.reject(rejectedCleanupSource.data!.id, '审核驳回', reviewer)).code, 0);
+const cleanedRejectedReview = await service.cleanupDeletedReview(
+  rejectedCleanupSource.data!.id,
+  '清理已驳回测试申请',
+  superAdmin,
+);
+assert.equal(cleanedRejectedReview.code, 0, '超级管理员必须可以清理已驳回售后挽回申请');
+assert.equal(cleanedRejectedReview.data?.reviewCleanedAt, NOW);
+assert.equal(cleanedRejectedReview.data?.reviewCleanupReason, '清理已驳回测试申请');
+assert.equal(
+  prisma.rows.has(key(STORAGE_KEYS.RECOVERY_ORDERS, rejectedCleanupSource.data!.id)),
+  true,
+  '已驳回售后申请清理后仍须保留审计留痕',
+);
+
 const deleted = await service.softDelete(returnedSource.data!.id, '重复录入', reviewer);
 assert.equal(deleted.code, 0);
 assert.equal(deleted.data?.deletedBy, reviewer.name);

@@ -634,9 +634,10 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                 && Boolean(application.orderId)
                 && !application.sourceOrderDeleted;
               const canCleanupApplication = canCleanupReview
-                && application.status === ORDER_APPLICATION_STATUSES.APPROVED
-                && Boolean(application.orderId)
-                && Boolean(application.sourceOrderDeleted);
+                && (application.status === ORDER_APPLICATION_STATUSES.REJECTED
+                  || (application.status === ORDER_APPLICATION_STATUSES.APPROVED
+                    && Boolean(application.orderId)
+                    && Boolean(application.sourceOrderDeleted)));
               return (
                 <TableRow key={application.id} hover sx={getProductLevelRowSx(application.orderData.productLevel)}>
                   {visibleColumns.map((column, columnIndex) => (
@@ -658,7 +659,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                   <TableCell align="center" sx={actionColumnSx}>
                     <Box sx={{ display: 'flex', gap: 0.25, justifyContent: 'center', flexWrap: 'wrap' }}>
                       {canCleanupApplication && (
-                        <Tooltip title="清理已删除订单的审核记录">
+                        <Tooltip title={application.status === ORDER_APPLICATION_STATUSES.REJECTED ? '清理已驳回审核记录' : '清理已删除订单的审核记录'}>
                           <IconButton aria-label="清理订单审核记录" size="small" color="error" onClick={() => openCleanupDialog(application)}>
                             <DeleteOutlineIcon fontSize="small" />
                           </IconButton>
@@ -767,7 +768,9 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
         }}>清理订单审核记录</DialogCloseTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
-            仅用于清理正式订单已经删除后的审核台残留记录。正式订单仍存在或尚未入库的申请不会被清理。
+            {cleanupApplication?.status === ORDER_APPLICATION_STATUSES.REJECTED
+              ? '该申请已被驳回。清理后将从审核台隐藏，但仍保留清理人、原因和时间等审计留痕。'
+              : '仅用于清理正式订单已经删除后的审核台残留记录。正式订单仍存在或尚未入库的申请不会被清理。'}
           </Typography>
           {cleanupApplication && (
             <Box sx={{ p: 1.5, border: '1px solid #fee2e2', borderRadius: 1, bgcolor: '#fff7ed', mb: 2 }}>
@@ -780,7 +783,9 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
             label="清理原因"
             value={cleanupReason}
             onChange={(event) => setCleanupReason(event.target.value)}
-            placeholder="例如：正式订单已删除，清理审核台残留记录"
+            placeholder={cleanupApplication?.status === ORDER_APPLICATION_STATUSES.REJECTED
+              ? '例如：测试申请已驳回，清理审核台记录'
+              : '例如：正式订单已删除，清理审核台残留记录'}
             multiline
             minRows={3}
             required

@@ -990,23 +990,26 @@ export function createOrderApplicationService(
               throw new OrderApprovalError(409, '订单申请标识与数据库记录不一致');
             }
             if (application.reviewCleanedAt) throw new OrderApprovalError(404, '订单申请不存在');
+            const rejectedApplication = application.status === STATUS_REJECTED;
             const sourceOrderId = String(application.orderId || '').trim();
-            if (application.status !== STATUS_APPROVED || !sourceOrderId) {
-              throw new OrderApprovalError(409, '只有已入库且正式订单已删除的申请记录可以清理');
+            if (!rejectedApplication && (application.status !== STATUS_APPROVED || !sourceOrderId)) {
+              throw new OrderApprovalError(409, '只有已驳回，或已入库且正式订单已删除的申请记录可以清理');
             }
 
-            const sourceOrderRow = await transaction.businessRecord.findUnique({
-              where: {
-                domain_recordId: {
-                  domain: STORAGE_KEYS.ORDERS,
-                  recordId: sourceOrderId,
+            if (!rejectedApplication) {
+              const sourceOrderRow = await transaction.businessRecord.findUnique({
+                where: {
+                  domain_recordId: {
+                    domain: STORAGE_KEYS.ORDERS,
+                    recordId: sourceOrderId,
+                  },
                 },
-              },
-            });
-            if (sourceOrderRow) {
-              const sourceOrder = parseJsonObject<Order>(sourceOrderRow.data, '正式订单');
-              if (sourceOrder.id !== sourceOrderId || !sourceOrder.deletedAt) {
-                throw new OrderApprovalError(409, '正式订单仍存在，不能清理审核记录');
+              });
+              if (sourceOrderRow) {
+                const sourceOrder = parseJsonObject<Order>(sourceOrderRow.data, '正式订单');
+                if (sourceOrder.id !== sourceOrderId || !sourceOrder.deletedAt) {
+                  throw new OrderApprovalError(409, '正式订单仍存在，不能清理审核记录');
+                }
               }
             }
 

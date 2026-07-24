@@ -1014,8 +1014,8 @@ export function createRecoveryOrderCommandService(
       if (!isSuperAdmin(actor)) return failure('仅超级管理员可以清理售后审核记录', 403);
       return run(() => prisma.$transaction(async (transaction) => {
         const current = await lockRecoveryOrder(transaction, cleanOrderId);
-        if (!current.deletedAt) {
-          throw new RecoveryCommandError(409, '只有业务单已经删除的售后审核记录可以清理');
+        if (current.status !== '审核驳回' && !current.deletedAt) {
+          throw new RecoveryCommandError(409, '只有已驳回，或业务单已经删除的售后审核记录可以清理');
         }
         if (current.reviewCleanedAt) return current;
         const cleanedAt = now().toISOString();

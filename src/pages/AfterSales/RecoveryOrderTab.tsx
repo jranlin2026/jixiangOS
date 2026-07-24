@@ -634,8 +634,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
               justifyContent="center"
               sx={{ minWidth: 148, flexWrap: 'nowrap', whiteSpace: 'nowrap' }}
             >
-              {canCleanupReview && row.deletedAt && (
-                <Tooltip title="清理已删除业务单的审核记录">
+              {canCleanupReview && (row.status === '审核驳回' || Boolean(row.deletedAt)) && (
+                <Tooltip title={row.status === '审核驳回' ? '清理已驳回审核记录' : '清理已删除业务单的审核记录'}>
                   <IconButton
                     aria-label="清理售后审核记录"
                     size="small"
@@ -1177,7 +1177,9 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
         <DialogTitle>清理售后审核记录</DialogTitle>
         <DialogContent dividers>
           <Alert severity="warning" sx={{ mb: 2 }}>
-            仅清理审核台中的残留显示。售后业务和财务追溯数据仍会保留，不会破坏已撤回分账记录。
+            {cleanupReviewOrder?.status === '审核驳回'
+              ? '该申请已被驳回。清理后将从审核台隐藏，但仍保留清理人、原因和时间等审计留痕。'
+              : '仅清理审核台中的残留显示。售后业务和财务追溯数据仍会保留，不会破坏已撤回分账记录。'}
           </Alert>
           {cleanupReviewOrder && (
             <Box sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 1.25, bgcolor: shell.soft, mb: 2 }}>
@@ -1191,7 +1193,9 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
             label="清理原因"
             value={cleanupReviewReason}
             onChange={(event) => setCleanupReviewReason(event.target.value)}
-            placeholder="例如：业务单已删除，清理审核台残留记录"
+            placeholder={cleanupReviewOrder?.status === '审核驳回'
+              ? '例如：测试申请已驳回，清理审核台记录'
+              : '例如：业务单已删除，清理审核台残留记录'}
             multiline
             minRows={3}
             required

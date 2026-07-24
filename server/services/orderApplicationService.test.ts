@@ -472,6 +472,21 @@ const deferredEffects: OrderApprovalEffectState = {
 }
 
 {
+  const rejectedApplication = application({ status: '已驳回', orderId: undefined, orderNo: undefined });
+  const prisma = new FakePrisma({ application: rejectedApplication });
+  const result = await createOrderApplicationService(prisma as any, { now: () => new Date(NOW) }).cleanupDeletedSource(
+    'oa-concurrent-1',
+    '清理已驳回测试申请',
+    superAdmin,
+  );
+  assert.equal(result.code, 0, '超级管理员必须可以清理已驳回订单申请');
+  const cleanedApplication = prisma.applicationRow().data as OrderApplication;
+  assert.equal(cleanedApplication.reviewCleanedAt, NOW);
+  assert.equal(cleanedApplication.reviewCleanupReason, '清理已驳回测试申请');
+  assert.equal(prisma.rows.has(rowKey(STORAGE_KEYS.ORDER_APPLICATIONS, 'oa-concurrent-1')), true, '已驳回申请清理后仍须保留审计留痕');
+}
+
+{
   const prisma = new FakePrisma();
   const service = createOrderApplicationService(prisma as any, { now: () => new Date(NOW) });
   const result = await service.approve('oa-concurrent-1', reviewer);

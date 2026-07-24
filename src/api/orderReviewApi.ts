@@ -507,13 +507,17 @@ async function cleanupDeletedSourceOrderApplication(id: string, reason: string):
   const applications = getStoredApplications();
   const target = applications.find((item) => item.id === id);
   if (!target) return createErrorResponse('订单申请不存在', 404);
-  if (target.status !== STATUS_APPROVED || !target.orderId) {
-    return createErrorResponse('只有已入库且正式订单已删除的申请记录可以清理');
+  if (target.reviewCleanedAt) return createErrorResponse('订单申请不存在', 404);
+  const rejectedApplication = target.status === STATUS_REJECTED;
+  if (!rejectedApplication && (target.status !== STATUS_APPROVED || !target.orderId)) {
+    return createErrorResponse('只有已驳回，或已入库且正式订单已删除的申请记录可以清理');
   }
 
-  const orders = readJson<Order[]>(STORAGE_KEYS.ORDERS) || [];
-  const activeOrder = orders.find((order) => order.id === target.orderId && !order.deletedAt);
-  if (activeOrder) return createErrorResponse('正式订单仍存在，不能清理审核记录');
+  if (!rejectedApplication) {
+    const orders = readJson<Order[]>(STORAGE_KEYS.ORDERS) || [];
+    const activeOrder = orders.find((order) => order.id === target.orderId && !order.deletedAt);
+    if (activeOrder) return createErrorResponse('正式订单仍存在，不能清理审核记录');
+  }
 
   const cleanedAt = new Date().toISOString();
   saveApplications(applications.map((item) => item.id === id ? {

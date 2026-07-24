@@ -36,6 +36,7 @@ const zh = {
   sales: '\u9500\u552e',
   approved: '\u5df2\u5165\u5e93',
   pendingReview: '\u5f85\u8d22\u52a1\u5ba1\u6838',
+  rejected: '\u5df2\u9a73\u56de',
   confirmed: '\u5df2\u786e\u8ba4',
   refundNone: '\u65e0',
   bankTransfer: '\u5bf9\u516c\u8f6c\u8d26',
@@ -142,6 +143,7 @@ function seed() {
     application({ id: 'app-active', applicationNo: 'OAPP-ACTIVE', status: zh.approved, orderId: 'order-active', orderNo: 'ORD-ACTIVE' }),
     application({ id: 'app-deleted', applicationNo: 'OAPP-DELETED', status: zh.approved, orderId: 'order-deleted', orderNo: 'ORD-DELETED' }),
     application({ id: 'app-pending', applicationNo: 'OAPP-PENDING', status: zh.pendingReview }),
+    application({ id: 'app-rejected', applicationNo: 'OAPP-REJECTED', status: zh.rejected }),
   ]));
   storage.setItem(STORAGE_KEYS.LEAD_INTAKE_RECORDS, JSON.stringify([
     intakeRecord({ id: 'intake-a', name: 'Lead A', status: zh.success }),
@@ -164,6 +166,16 @@ const cleanupActiveApplication = await orderReviewApi.cleanupDeletedSourceOrderA
 assert.notEqual(cleanupActiveApplication.code, 0);
 const cleanupPendingApplication = await orderReviewApi.cleanupDeletedSourceOrderApplication('app-pending', 'not approved');
 assert.notEqual(cleanupPendingApplication.code, 0);
+const cleanupRejectedApplication = await orderReviewApi.cleanupDeletedSourceOrderApplication('app-rejected', 'cleanup rejected application');
+assert.equal(cleanupRejectedApplication.code, 0);
+const rejectedStoredApplication = (JSON.parse(storage.getItem(STORAGE_KEYS.ORDER_APPLICATIONS) || '[]') as OrderApplication[])
+  .find((item) => item.id === 'app-rejected');
+assert.equal(rejectedStoredApplication?.reviewCleanupReason, 'cleanup rejected application');
+const repeatRejectedCleanup = await orderReviewApi.cleanupDeletedSourceOrderApplication('app-rejected', 'overwrite audit trail');
+assert.notEqual(repeatRejectedCleanup.code, 0, '重复清理不得覆盖首次审计留痕');
+const rejectedStoredAfterRepeat = (JSON.parse(storage.getItem(STORAGE_KEYS.ORDER_APPLICATIONS) || '[]') as OrderApplication[])
+  .find((item) => item.id === 'app-rejected');
+assert.equal(rejectedStoredAfterRepeat?.reviewCleanupReason, 'cleanup rejected application');
 
 const cleanupApplication = await orderReviewApi.cleanupDeletedSourceOrderApplication('app-deleted', 'cleanup stale approved application');
 assert.equal(cleanupApplication.code, 0);
