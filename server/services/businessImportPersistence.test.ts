@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import type { BusinessImportJobLease } from './businessImportExecution';
-import { createPrismaBusinessImportJobStore } from './businessImportPersistence';
+import { createBusinessImportReadRepository, createPrismaBusinessImportJobStore } from './businessImportPersistence';
 
 const clone = <T>(value: T): T => structuredClone(value);
 const row: any = {
@@ -20,7 +20,10 @@ const db: any = {
   },
   businessImportJob: {
     updateMany: async ({ where, data }: any) => {
-      if (where.id !== row.id || (where.leaseEpoch !== undefined && where.leaseEpoch !== row.leaseEpoch) || (where.status && where.status !== row.status)) return { count: 0 };
+      if (where.id !== row.id
+        || (where.leaseOwner !== undefined && where.leaseOwner !== row.leaseOwner)
+        || (where.leaseEpoch !== undefined && where.leaseEpoch !== row.leaseEpoch)
+        || (where.status && where.status !== row.status)) return { count: 0 };
       Object.entries(data).forEach(([key, value]: any) => { row[key] = value?.increment !== undefined ? Number(row[key] || 0) + value.increment : clone(value); });
       return { count: 1 };
     },
@@ -39,6 +42,9 @@ assert.ok(lease, '过期 running 任务必须可被新 worker 接管');
 assert.equal(lease?.leaseEpoch, 2);
 assert.equal(row.rows[0].executionStatus, 'queued', '重启接管必须恢复未落盘完成的 running 行');
 const staleLease = { ...lease, leaseOwner: 'dead-worker', leaseEpoch: 1 } as BusinessImportJobLease;
+assert.equal(await store.heartbeat(staleLease, 60_000, new Date('2026-07-20T00:00:03Z')), false, 'heartbeat is fenced by owner and epoch');
+assert.equal(await store.heartbeat(lease!, 60_000, new Date('2026-07-20T00:00:03Z')), true);
+assert.equal(row.leaseExpiresAt.toISOString(), '2026-07-20T00:01:03.000Z');
 assert.equal(await store.nextRow(staleLease), null, '旧租约不能继续写入');
 const next = await store.nextRow(lease!);
 assert.equal(next?.rowNumber, 2);
@@ -48,3 +54,13 @@ assert.equal(row.status, 'succeeded');
 assert.equal(batchStatus, 'succeeded');
 
 console.log('business import persistence: ok');
+
+row.rows = [{
+  rowNumber: 9, status: 'ready', reason: '', normalized: {}, executionStatus: 'failed',
+  errorMessage: 'INSERT INTO business_records password=secret\nError at /private/server.ts:99',
+}];
+row.status = 'failed';
+const readRepository = createBusinessImportReadRepository(db);
+const publicJob = await readRepository.getJob(row.id, { id: 'u1' } as any);
+assert.equal(publicJob?.rows?.[0].errorMessage, '导入执行失败，请重试或联系管理员');
+assert.doesNotMatch(JSON.stringify(publicJob), /INSERT|password|secret|private\/server/i);

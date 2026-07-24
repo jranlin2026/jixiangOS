@@ -492,6 +492,7 @@ const deferredEffects: OrderApprovalEffectState = {
     importBatchId: 'batch-import-1', importRowNumber: 2,
     importedById: salesApplicant.id, importedByName: salesApplicant.name, importedAt: NOW,
     targetCreatorId: salesManager.id, targetCreatorName: salesManager.name,
+    importWarnings: ['导入时客户资料待复核'],
   });
   const prisma = new FakePrisma({ application: importedApplication });
   const result = await createOrderApplicationService(prisma as any, { now: () => new Date(NOW) })
@@ -499,6 +500,10 @@ const deferredEffects: OrderApprovalEffectState = {
   assert.equal(result.code, 0, result.message);
   assert.equal(result.data?.order.createdById, salesManager.id, '正式订单必须采用导入模板的目标创建人');
   assert.equal(result.data?.application.applicantId, salesApplicant.id, '工作流申请人仍是实际导入人');
+  for (const field of ['importBatchId', 'importRowNumber', 'importedById', 'importedByName', 'importedAt', 'targetCreatorId', 'targetCreatorName'] as const) {
+    assert.deepEqual(result.data?.order[field], importedApplication[field], `formal order must copy ${field}`);
+  }
+  assert.deepEqual(result.data?.order.importWarnings, importedApplication.importWarnings);
 }
 
 {

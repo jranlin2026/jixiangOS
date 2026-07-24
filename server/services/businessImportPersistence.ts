@@ -10,6 +10,7 @@ import type {
 } from '../../src/types/businessImport';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import type { BusinessImportJobLease, BusinessImportJobStore } from './businessImportExecution';
+import { safeBusinessImportErrorMessage } from './businessImportError';
 
 function read<T>(value: unknown, fallback: T): T {
   if (typeof value === 'string') { try { return JSON.parse(value) as T; } catch { return fallback; } }
@@ -61,6 +62,13 @@ export function createPrismaBusinessImportJobStore(prisma: PrismaClient): Busine
       const claimed = await tx.businessImportJob.findUnique({ where: { id: candidate.id } });
       return claimed ? job(claimed, workerId) as BusinessImportJobLease : null;
     }),
+    heartbeat: async (lease, leaseMs, now) => {
+      const updated = await prisma.businessImportJob.updateMany({
+        where: { id: lease.id, leaseOwner: lease.leaseOwner, leaseEpoch: lease.leaseEpoch, status: 'running' },
+        data: { heartbeatAt: now, leaseExpiresAt: new Date(now.getTime() + leaseMs) },
+      });
+      return updated.count === 1;
+    },
     nextRow: (lease) => transaction(async (tx) => {
       const current = await lock(tx, lease);
       if (!current) return null;
@@ -112,7 +120,10 @@ export function createBusinessImportReadRepository(prisma: PrismaClient) {
   const result = (row: any): BusinessImportJobResult => ({
     id: row.id, batchId: row.batchId, type: row.importType, status: row.status,
     totalCount: row.totalCount, successCount: row.successCount, failedCount: row.failedCount,
-    rows: read<BusinessImportJobRow[]>(row.rows, []),
+    rows: read<BusinessImportJobRow[]>(row.rows, []).map((item) => ({
+      ...item,
+      ...(item.errorMessage ? { errorMessage: safeBusinessImportErrorMessage(item.errorMessage) } : {}),
+    })),
   });
   return {
     async getJob(id: string, actor: AuthenticatedUser): Promise<BusinessImportJobResult | null> {

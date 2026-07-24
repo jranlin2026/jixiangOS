@@ -92,6 +92,7 @@ const orderRow: BusinessImportJobRow = {
       Object.assign(rows.find((row) => row.rowNumber === rowNumber)!, { executionStatus: 'succeeded', recordId }); return true;
     },
     markFailed: async () => true,
+    heartbeat: async () => true,
     finalize: async (lease) => { if (lease.leaseEpoch !== leaseEpoch) return false; status = 'succeeded'; return true; },
   };
   const workerA = createBusinessImportWorker({ store, executor: { execute: async () => { executions += 1; return { recordId: 'oa-once' }; } }, workerId: 'dead', now: () => new Date('2026-07-20T00:00:00Z'), leaseMs: 1000 });
@@ -103,6 +104,70 @@ const orderRow: BusinessImportJobRow = {
   assert.equal(executions, 1);
   assert.equal(await workerA.processJob(stale!), false, 'stale lease cannot replay the row');
   assert.equal(executions, 1, 'successful rows are idempotently skipped');
+}
+
+{
+  let current = new Date();
+  let leaseOwner: string | null = null;
+  let leaseEpoch = 0;
+  let leaseExpiresAt: Date | null = null;
+  let rowStatus = 'queued';
+  let releaseRow!: () => void;
+  const rowGate = new Promise<void>((resolve) => { releaseRow = resolve; });
+  let heartbeatCount = 0;
+  const store: BusinessImportJobStore = {
+    claim: async ({ workerId, now, leaseMs }) => {
+      current = now;
+      if (leaseOwner && leaseExpiresAt && leaseExpiresAt > now) return null;
+      leaseOwner = workerId; leaseEpoch += 1; leaseExpiresAt = new Date(now.getTime() + leaseMs);
+      return { ...baseJob, leaseOwner: workerId, leaseEpoch, status: 'running' };
+    },
+    heartbeat: async (lease, leaseMs, now) => {
+      if (lease.leaseOwner !== leaseOwner || lease.leaseEpoch !== leaseEpoch) return false;
+      heartbeatCount += 1; current = now; leaseExpiresAt = new Date(now.getTime() + leaseMs); return true;
+    },
+    nextRow: async (lease) => lease.leaseOwner === leaseOwner && lease.leaseEpoch === leaseEpoch && rowStatus === 'queued' ? (rowStatus = 'running', orderRow) : null,
+    markSucceeded: async (lease) => { if (lease.leaseOwner !== leaseOwner || lease.leaseEpoch !== leaseEpoch) return false; rowStatus = 'succeeded'; return true; },
+    markFailed: async () => true,
+    finalize: async () => { rowStatus = 'succeeded'; return true; },
+  };
+  const workerA = createBusinessImportWorker({
+    store, executor: { execute: async () => { await rowGate; return { recordId: 'oa-long' }; } },
+    workerId: 'worker-long-a', leaseMs: 40,
+  });
+  const running = workerA.runOnce();
+  await new Promise((resolve) => setTimeout(resolve, 70));
+  const workerB = createBusinessImportWorker({ store, executor: { execute: async () => ({ recordId: 'duplicate' }) }, workerId: 'worker-long-b', leaseMs: 40 });
+  assert.equal(await workerB.claimJob(), null, 'independent heartbeat keeps a long row from being reclaimed');
+  assert.ok(heartbeatCount >= 2, 'lease is renewed more than once while the row is still executing');
+  const stopping = workerA.stop();
+  let stopped = false;
+  void stopping.then(() => { stopped = true; });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(stopped, false, 'stop waits for the active row and its fenced persistence');
+  releaseRow();
+  await running;
+  await stopping;
+}
+
+{
+  let persisted = '';
+  const store: BusinessImportJobStore = {
+    claim: async ({ workerId }) => ({ ...baseJob, leaseOwner: workerId, leaseEpoch: 1, status: 'running' }),
+    heartbeat: async () => true,
+    nextRow: async () => persisted ? null : orderRow,
+    markSucceeded: async () => true,
+    markFailed: async (_lease, _rowNumber, message) => { persisted = message; return true; },
+    finalize: async () => true,
+  };
+  const worker = createBusinessImportWorker({
+    store,
+    executor: { execute: async () => { throw Object.assign(new Error('SELECT * FROM users WHERE password = secret\nstack trace'), { code: 'P2002' }); } },
+    workerId: 'worker-safe-error',
+  });
+  await worker.runOnce();
+  assert.equal(persisted, '导入执行失败，请重试或联系管理员');
+  assert.doesNotMatch(persisted, /SELECT|password|secret|P2002/i);
 }
 
 console.log('business import execution: ok');

@@ -8,7 +8,11 @@ const service = createBusinessImportReviewService({
     ? [{ id: 'oa-1', module: 'orders' }, { id: 'oa-hidden', module: 'orders' }, { id: 'oa-2', module: 'orders' }]
     : (request.ids || []).map((id) => ({ id, module: request.module })),
   orderApplications: {
-    approve: async (id) => { calls.push(`approve:${id}`); return id === 'oa-hidden' ? { code: 403, message: '无权操作该订单申请' } : { code: 0, data: { id } }; },
+    approve: async (id) => {
+      calls.push(`approve:${id}`);
+      if (id === 'oa-throws') throw new Error('SELECT token FROM auth_sessions\nsecret stack');
+      return id === 'oa-hidden' ? { code: 403, message: '无权操作该订单申请' } : { code: 0, data: { id } };
+    },
     returnApplication: async (id) => ({ code: 0, data: { id } }),
     reject: async (id) => ({ code: 0, data: { id } }),
   },
@@ -32,5 +36,12 @@ await assert.rejects(
   service.review({ module: 'orders', action: 'return', ids: ['oa-1'], reason: '' }, actor),
   /reason/i,
 );
+
+const thrown = await service.review({ module: 'orders', action: 'approve', ids: ['oa-throws', 'oa-2'] }, actor);
+assert.equal(thrown.successCount, 1, 'an exception does not stop later records');
+assert.equal(thrown.failedCount, 1);
+assert.equal(thrown.results[0].code, 500);
+assert.equal(thrown.results[0].message, '审核操作未完成，请重试');
+assert.doesNotMatch(thrown.results[0].message, /SELECT|token|secret|stack/i);
 
 console.log('business import batch review: ok');

@@ -8,6 +8,7 @@ import type {
 } from '../../src/types/businessImport';
 import type { OrderApplication } from '../../src/types/order';
 import type { RecoveryOrder, RecoveryOrderInput, RecoveryOrderMatchStatus } from '../../src/types/recoveryOrder';
+import { safeBusinessImportErrorMessage } from './businessImportError';
 
 type DirectoryUser = { id: string; name: string };
 type CustomerMatch = { id: string; name: string };
@@ -50,6 +51,7 @@ export type BusinessImportJobLease = BusinessImportJobExecution & {
 
 export type BusinessImportJobStore = {
   claim(input: { workerId: string; jobId?: string; now: Date; leaseMs: number }): Promise<BusinessImportJobLease | null>;
+  heartbeat(lease: BusinessImportJobLease, leaseMs: number, now: Date): Promise<boolean>;
   nextRow(lease: BusinessImportJobLease): Promise<BusinessImportJobRow | null>;
   markSucceeded(lease: BusinessImportJobLease, rowNumber: number, recordId: string): Promise<boolean>;
   markFailed(lease: BusinessImportJobLease, rowNumber: number, message: string): Promise<boolean>;
@@ -178,18 +180,41 @@ export function createBusinessImportWorker(options: {
   let stopping = false;
   const claimJob = (jobId?: string) => options.store.claim({ workerId: options.workerId, ...(jobId ? { jobId } : {}), now: now(), leaseMs });
   const processJob = async (lease: BusinessImportJobLease): Promise<boolean> => {
-    while (!stopping) {
-      const row = await options.store.nextRow(lease);
-      if (!row) return options.store.finalize(lease);
-      try {
-        const result = await options.executor.execute(lease, row);
-        if (!await options.store.markSucceeded(lease, row.rowNumber, result.recordId)) return false;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : '导入执行失败';
-        if (!await options.store.markFailed(lease, row.rowNumber, message)) return false;
+    const heartbeatIntervalMs = Math.max(1, Math.floor(leaseMs / 3));
+    let leaseLost = false;
+    let heartbeatRun: Promise<void> | null = null;
+    const heartbeat = () => {
+      if (heartbeatRun || leaseLost) return;
+      heartbeatRun = options.store.heartbeat(lease, leaseMs, now()).then((active) => {
+        if (!active) leaseLost = true;
+      }).catch((error) => {
+        leaseLost = true;
+        options.onError?.(error);
+      }).finally(() => { heartbeatRun = null; });
+    };
+    const heartbeatTimer = setInterval(heartbeat, heartbeatIntervalMs);
+    const stopHeartbeat = async () => {
+      clearInterval(heartbeatTimer);
+      if (heartbeatRun) await heartbeatRun;
+    };
+    try {
+      while (!stopping && !leaseLost) {
+        const row = await options.store.nextRow(lease);
+        if (!row) {
+          await stopHeartbeat();
+          return !stopping && !leaseLost ? options.store.finalize(lease) : false;
+        }
+        try {
+          const result = await options.executor.execute(lease, row);
+          if (leaseLost || !await options.store.markSucceeded(lease, row.rowNumber, result.recordId)) return false;
+        } catch (error) {
+          if (leaseLost || !await options.store.markFailed(lease, row.rowNumber, safeBusinessImportErrorMessage(error))) return false;
+        }
       }
+      return false;
+    } finally {
+      await stopHeartbeat();
     }
-    return false;
   };
   const runOnce = (): Promise<number> => {
     if (active) return active;

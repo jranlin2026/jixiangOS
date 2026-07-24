@@ -40,3 +40,24 @@
 ## Notes
 
 - No live migration deployment was performed in this task; the migration and generated Prisma client were schema-validated and compile-verified.
+
+## Important review fixes
+
+- Added an independent periodic heartbeat for every actively processed import job. It renews `leaseExpiresAt` through a production `updateMany` fenced by job ID, `leaseOwner`, `leaseEpoch`, and `running` status. The heartbeat remains active throughout a long row, stops before finalize, and is awaited during worker shutdown so a second worker cannot reclaim a healthy long row or long batch.
+- Wrapped each existing record-level review command in its own `try/catch`. An unexpected exception becomes a fixed one-line 500 item result, later records continue, and mixed results remain retryable.
+- Formal order creation now explicitly copies the complete import snapshot from its application: `importBatchId`, `importRowNumber`, `importedById`, `importedByName`, `importedAt`, `targetCreatorId`, `targetCreatorName`, and `importWarnings`.
+- Added a central allowlist-based import error sanitizer. Unknown, Prisma-like, SQL-like, multiline, stack, and secret-bearing messages are reduced to a fixed safe message before persistence. Job/batch GET projections sanitize persisted row errors again, including legacy unsafe values.
+
+### Review-fix TDD evidence
+
+- RED: the long-row test allowed worker B to reclaim worker A's active lease after expiry; GREEN: repeated independent heartbeats keep the lease active, owner/epoch fencing rejects stale heartbeats, and `stop()` waits for the active row's fenced persistence.
+- RED: a thrown order review command aborted the whole batch and exposed its exception; GREEN: it returns one sanitized failed result and the following record succeeds.
+- RED: imported application approval produced a formal order with no import metadata; GREEN: all eight metadata fields, including warning messages, are copied and asserted.
+- RED: Prisma/SQL sample errors were persisted and returned verbatim; GREEN: both worker persistence and GET projection return only `导入执行失败，请重试或联系管理员`.
+
+### Review-fix verification
+
+- `npm test`: passed repository-wide; database-dependent integration tests retained their documented skip without `DATABASE_URL`.
+- Focused Task 2 execution, persistence, review, route, order approval, and recovery tests: passed.
+- `npm run build`: passed.
+- Prisma schema validation and `git diff --check`: passed.

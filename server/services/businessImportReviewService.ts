@@ -4,6 +4,7 @@ import type {
   BusinessImportReviewResult,
   BusinessImportType,
 } from '../../src/types/businessImport';
+import { safeBusinessImportReviewException } from './businessImportError';
 
 type SelectedRecord = { id: string; module: BusinessImportType };
 type CommandResult = { code: number; message?: string; data?: unknown };
@@ -47,21 +48,25 @@ export function createBusinessImportReviewService(deps: {
           results.push({ id: record.id, success: false, code: 404, message: '导入审核记录不存在或不属于当前模块' });
           continue;
         }
-        let response: CommandResult;
-        if (record.module === 'orders') {
-          response = request.action === 'approve'
-            ? await deps.orderApplications.approve(record.id, actor)
-            : request.action === 'return'
-              ? await deps.orderApplications.returnApplication(record.id, reason, actor)
-              : await deps.orderApplications.reject(record.id, reason, actor);
-        } else {
-          response = request.action === 'approve'
-            ? await deps.recoveryOrders.approve(record.id, actor)
-            : request.action === 'return'
-              ? await deps.recoveryOrders.returnForChanges(record.id, reason, actor)
-              : await deps.recoveryOrders.reject(record.id, reason, actor);
+        try {
+          let response: CommandResult;
+          if (record.module === 'orders') {
+            response = request.action === 'approve'
+              ? await deps.orderApplications.approve(record.id, actor)
+              : request.action === 'return'
+                ? await deps.orderApplications.returnApplication(record.id, reason, actor)
+                : await deps.orderApplications.reject(record.id, reason, actor);
+          } else {
+            response = request.action === 'approve'
+              ? await deps.recoveryOrders.approve(record.id, actor)
+              : request.action === 'return'
+                ? await deps.recoveryOrders.returnForChanges(record.id, reason, actor)
+                : await deps.recoveryOrders.reject(record.id, reason, actor);
+          }
+          results.push({ id: record.id, success: response.code === 0, code: response.code, message: response.message || (response.code === 0 ? '操作成功' : '操作失败') });
+        } catch {
+          results.push({ id: record.id, success: false, code: 500, message: safeBusinessImportReviewException() });
         }
-        results.push({ id: record.id, success: response.code === 0, code: response.code, message: response.message || (response.code === 0 ? '操作成功' : '操作失败') });
       }
       return {
         totalCount: results.length,
