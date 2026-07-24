@@ -6,6 +6,7 @@ import {
   isImportedPendingReviewRecord,
   selectAllImportedReviewBatch,
   toggleImportedReviewId,
+  updateImportedReviewPageSelection,
   type BusinessImportReviewSelection,
 } from './businessImportReviewModel';
 
@@ -20,6 +21,21 @@ assert.equal(isImportedPendingReviewRecord({ status: '待财务审核' }, 'order
 assert.equal(isImportedPendingReviewRecord({ importBatchId: 'batch-1', status: '退回修改' }, 'orders'), false);
 assert.equal(isImportedPendingReviewRecord({ importBatchId: 'batch-1', status: '待审核' }, 'recovery_orders'), true);
 assert.equal(isImportedPendingReviewRecord({ importBatchId: 'batch-1', status: '待分账' }, 'recovery_orders'), false);
+
+const importedOrderPage = [
+  { id: 'imported-1', importBatchId: 'batch-1', status: '待财务审核' },
+  { id: 'manual-1', status: '待财务审核' },
+];
+assert.deepEqual(
+  updateImportedReviewPageSelection(empty, importedOrderPage, 'orders', true, false),
+  empty,
+  'a read-only reviewer cannot select imported records through the page-select handler',
+);
+assert.deepEqual(
+  updateImportedReviewPageSelection(empty, importedOrderPage, 'orders', true, true),
+  { mode: 'ids', ids: ['imported-1'] },
+  'a writable reviewer can select only imported pending records from the page',
+);
 
 const batchSelection = selectAllImportedReviewBatch('batch-1');
 assert.deepEqual(

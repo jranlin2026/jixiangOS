@@ -230,7 +230,11 @@ function applyFilters(applications: OrderApplication[], filters?: OrderApplicati
   return filtered.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
-async function fetchOrderApplications(filters?: OrderApplicationFilters): Promise<ApiResponse<PaginatedResponse<OrderApplication>>> {
+async function fetchOrderApplications(
+  filters?: OrderApplicationFilters,
+  signal?: AbortSignal,
+): Promise<ApiResponse<PaginatedResponse<OrderApplication>>> {
+  signal?.throwIfAborted();
   if (shouldUseBackendApi()) {
     const params = new URLSearchParams();
     Object.entries(filters || {}).forEach(([key, value]) => {
@@ -240,6 +244,7 @@ async function fetchOrderApplications(filters?: OrderApplicationFilters): Promis
     });
     const response = await backendRequest<PaginatedResponse<OrderApplication>>(
       `/order-applications${params.size ? `?${params.toString()}` : ''}`,
+      { signal },
     );
     if (response.code !== 0 || !response.data) {
       return createErrorResponse(response.message || '订单申请列表加载失败', response.code || -1);
@@ -251,6 +256,7 @@ async function fetchOrderApplications(filters?: OrderApplicationFilters): Promis
 
   ensureInit();
   await delay(120);
+  signal?.throwIfAborted();
   const filtered = applyFilters(filterVisibleApplications(enrichMockApplicationSourceOrderState(getStoredApplications())), filters);
   const page = filters?.page || 1;
   const pageSize = filters?.pageSize || DEFAULT_PAGE_SIZE;

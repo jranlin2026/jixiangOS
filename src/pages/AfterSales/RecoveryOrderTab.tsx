@@ -60,6 +60,7 @@ import {
   type ReviewQueueView,
 } from '../../shared/utils/reviewQueue';
 import BusinessImportReviewControls from '../../shared/components/BusinessImportReviewControls';
+import BusinessImportReviewPageCheckbox from '../../shared/components/BusinessImportReviewPageCheckbox';
 import {
   isImportedPendingReviewRecord,
   toggleImportedReviewId,
@@ -946,27 +947,13 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
             <TableRow>
               {mode === 'review' ? (
                 <TableCell padding="checkbox">
-                  <Checkbox
-                    aria-label="选择当前页导入待审记录"
-                    disabled={importSelection.mode === 'batch' || !rows.some((row) => isImportedPendingReviewRecord(row, 'recovery_orders'))}
-                    checked={importSelection.mode === 'ids'
-                      && rows.some((row) => isImportedPendingReviewRecord(row, 'recovery_orders'))
-                      && rows.filter((row) => isImportedPendingReviewRecord(row, 'recovery_orders'))
-                        .every((row) => importSelection.ids.includes(row.id))}
-                    indeterminate={importSelection.mode === 'ids'
-                      && rows.some((row) => isImportedPendingReviewRecord(row, 'recovery_orders') && importSelection.ids.includes(row.id))
-                      && !rows.filter((row) => isImportedPendingReviewRecord(row, 'recovery_orders'))
-                        .every((row) => importSelection.ids.includes(row.id))}
-                    onChange={(event) => {
-                      const pageIds = rows.filter((row) => isImportedPendingReviewRecord(row, 'recovery_orders')).map((row) => row.id);
-                      const currentIds = importSelection.mode === 'ids' ? importSelection.ids : [];
-                      setImportSelection({
-                        mode: 'ids',
-                        ids: event.target.checked
-                          ? Array.from(new Set([...currentIds, ...pageIds]))
-                          : currentIds.filter((id) => !pageIds.includes(id)),
-                      });
-                    }}
+                  <BusinessImportReviewPageCheckbox
+                    module="recovery_orders"
+                    canReview={canReviewAction}
+                    records={rows}
+                    selection={importSelection}
+                    onSelectionChange={setImportSelection}
+                    ariaLabel="选择当前页导入待审记录"
                   />
                 </TableCell>
               ) : null}
@@ -998,7 +985,10 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
                         ? row.importBatchId === importSelection.importBatchId
                           && isImportedPendingReviewRecord(row, 'recovery_orders')
                         : importSelection.ids.includes(row.id)}
-                      onChange={() => setImportSelection((selection) => toggleImportedReviewId(selection, row.id))}
+                      onChange={() => {
+                        if (!canReviewAction) return;
+                        setImportSelection((selection) => toggleImportedReviewId(selection, row.id));
+                      }}
                     />
                   </TableCell>
                 ) : null}

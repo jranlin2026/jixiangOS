@@ -29,6 +29,7 @@ const noop = () => undefined;
 const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' });
 const { default: BusinessImportEntryButton } = await vite.ssrLoadModule('/src/shared/components/BusinessImportEntryButton.tsx') as any;
 const { default: BusinessImportReviewControls } = await vite.ssrLoadModule('/src/shared/components/BusinessImportReviewControls.tsx') as any;
+const { default: BusinessImportReviewPageCheckbox } = await vite.ssrLoadModule('/src/shared/components/BusinessImportReviewPageCheckbox.tsx') as any;
 const { PERMISSION_KEYS } = await vite.ssrLoadModule('/src/shared/utils/permissions.ts') as any;
 
 const orderImporter = renderToStaticMarkup(React.createElement(BusinessImportEntryButton, {
@@ -91,6 +92,26 @@ const approveButton = [...manualOnlyControls.matchAll(/<button[^>]*>[\s\S]*?<\/b
   .map((match) => match[0])
   .find((button) => button.includes('批量通过')) || '';
 assert.match(approveButton, /disabled=""/, 'bulk review stays disabled without imported selections');
+
+const readOnlyOrderPageCheckbox = renderToStaticMarkup(React.createElement(BusinessImportReviewPageCheckbox, {
+  module: 'orders',
+  canReview: false,
+  records: [{ id: 'order-imported', importBatchId: 'batch-render', status: '待财务审核' }],
+  selection: { mode: 'ids', ids: [] },
+  onSelectionChange: noop,
+  ariaLabel: '选择当前页导入待审记录',
+}));
+assert.match(readOnlyOrderPageCheckbox, /disabled=""/, '只读订单审核人的表头全选必须禁用');
+
+const readOnlyRecoveryPageCheckbox = renderToStaticMarkup(React.createElement(BusinessImportReviewPageCheckbox, {
+  module: 'recovery_orders',
+  canReview: false,
+  records: [{ id: 'recovery-imported', importBatchId: 'batch-render', status: '待审核' }],
+  selection: { mode: 'ids', ids: [] },
+  onSelectionChange: noop,
+  ariaLabel: '选择当前页导入待审记录',
+}));
+assert.match(readOnlyRecoveryPageCheckbox, /disabled=""/, '只读售后审核人的表头全选必须禁用');
 
 console.log('business import entry and bulk controls real render: ok');
 await vite.close();

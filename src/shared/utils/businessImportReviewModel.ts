@@ -14,6 +14,8 @@ type PendingReviewRecord = {
   status?: string;
 };
 
+type PendingReviewPageRecord = PendingReviewRecord & { id: string };
+
 export function isImportedPendingReviewRecord(
   record: PendingReviewRecord,
   module: BusinessImportType,
@@ -34,6 +36,25 @@ export function toggleImportedReviewId(
   return ids.includes(normalizedId)
     ? { mode: 'ids', ids: ids.filter((selectedId) => selectedId !== normalizedId) }
     : { mode: 'ids', ids: [...ids, normalizedId] };
+}
+
+export function updateImportedReviewPageSelection(
+  selection: BusinessImportReviewSelection,
+  records: PendingReviewPageRecord[],
+  module: BusinessImportType,
+  checked: boolean,
+  canReview: boolean,
+): BusinessImportReviewSelection {
+  if (!canReview || selection.mode === 'batch') return selection;
+  const pageIds = records
+    .filter((record) => isImportedPendingReviewRecord(record, module))
+    .map((record) => record.id);
+  return {
+    mode: 'ids',
+    ids: checked
+      ? Array.from(new Set([...selection.ids, ...pageIds]))
+      : selection.ids.filter((id) => !pageIds.includes(id)),
+  };
 }
 
 export function selectAllImportedReviewBatch(importBatchId: string): BusinessImportReviewSelection {

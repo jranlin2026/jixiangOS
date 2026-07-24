@@ -11,6 +11,8 @@ import type {
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import type { BusinessImportJobLease, BusinessImportJobStore } from './businessImportExecution';
 import { safeBusinessImportErrorMessage } from './businessImportError';
+import { buildDataVisibilityScopeForUser } from '../../src/shared/utils/dataVisibility';
+import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 
 function read<T>(value: unknown, fallback: T): T {
   if (typeof value === 'string') { try { return JSON.parse(value) as T; } catch { return fallback; } }
@@ -144,18 +146,41 @@ export function createBusinessImportReadRepository(prisma: PrismaClient) {
 }
 
 export function createBusinessImportReviewSelector(prisma: PrismaClient) {
-  return async (request: BusinessImportReviewRequest, _actor: AuthenticatedUser) => {
+  return async (request: BusinessImportReviewRequest, actor: AuthenticatedUser) => {
     const domain = request.module === 'orders' ? STORAGE_KEYS.ORDER_APPLICATIONS : STORAGE_KEYS.RECOVERY_ORDERS;
-    const rows = await prisma.businessRecord.findMany({ where: {
-      domain,
-      ...(request.ids?.length ? { recordId: { in: request.ids } } : {}),
-    } });
+    const scopeDomain = request.module === 'orders' ? 'orderApplications' : 'recoveryOrderApplications';
+    const [users, roles, departments, rows] = await Promise.all([
+      prisma.user.findMany(),
+      prisma.role.findMany({ where: { isActive: true } }),
+      prisma.department.findMany(),
+      prisma.businessRecord.findMany({ where: {
+        domain,
+        ...(request.ids?.length ? { recordId: { in: request.ids } } : {}),
+      } }),
+    ]);
+    const scope = buildDataVisibilityScopeForUser(
+      actor,
+      users.map(mapPrismaUser),
+      roles.map(mapPrismaRole),
+      departments as any,
+      scopeDomain,
+    );
+    const visible = (data: Record<string, unknown>, idKey: string, nameKey: string): boolean => {
+      if (scope.unrestricted) return true;
+      const ownerId = String(data[idKey] || '').trim();
+      if (ownerId) return scope.visibleUserIds.includes(ownerId);
+      const ownerName = String(data[nameKey] || '').trim();
+      return Boolean(ownerName && scope.visibleUserNames.includes(ownerName));
+    };
     return rows.flatMap((row) => {
       const data = read<Record<string, unknown>>(row.data, {});
       const batchId = String(data.importBatchId || '');
       if (!batchId || (request.importBatchId && batchId !== request.importBatchId)) return [];
       const pendingStatus = request.module === 'orders' ? '待财务审核' : '待审核';
       if (String(data.status || '') !== pendingStatus) return [];
+      if (request.module === 'orders') {
+        if (!visible(data, 'applicantId', 'applicantName')) return [];
+      } else if (!visible(data, 'createdBy', 'createdByName')) return [];
       return [{ id: row.recordId, module: request.module }];
     });
   };

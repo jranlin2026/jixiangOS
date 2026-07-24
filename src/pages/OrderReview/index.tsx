@@ -63,6 +63,8 @@ import {
   type BusinessImportReviewSelection,
 } from '../../shared/utils/businessImportReviewModel';
 import useAuthStore from '../../store/useAuthStore';
+import BusinessImportReviewPageCheckbox from '../../shared/components/BusinessImportReviewPageCheckbox';
+import { createOrderReviewLoadGate } from './orderReviewLoadGate';
 
 type ReviewAction = {
   type: 'approve' | 'return' | 'reject';
@@ -282,6 +284,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({
   const [cleanupReason, setCleanupReason] = useState('');
   const [cleanupSubmitting, setCleanupSubmitting] = useState(false);
   const [importSelection, setImportSelection] = useState<BusinessImportReviewSelection>({ mode: 'ids', ids: [] });
+  const loadGateRef = React.useRef(createOrderReviewLoadGate());
   const currentAuthUser = useAuthStore((state) => state.currentUser);
   const reviewer = hasPermission(currentAuthUser, PERMISSION_KEYS.ORDER_REVIEW, 'write');
   const currentUser = currentAuthUser || getCurrentOperatorUser();
@@ -293,17 +296,24 @@ const OrderReview: React.FC<OrderReviewProps> = ({
   const navigate = useNavigate();
 
   const loadItems = async (nextFilters = filters) => {
+    const attempt = loadGateRef.current.begin();
     setLoading(true);
     try {
-      const res = await orderReviewApi.fetchOrderApplications(nextFilters);
+      const res = await orderReviewApi.fetchOrderApplications(nextFilters, attempt.signal);
+      if (!loadGateRef.current.isLatest(attempt.requestId)) return;
       if (res.code === 0) {
         setItems(res.data.items);
         setPagination(res.data.pagination);
       }
+    } catch (error) {
+      if (attempt.signal.aborted || !loadGateRef.current.isLatest(attempt.requestId)) return;
+      throw error;
     } finally {
-      setLoading(false);
+      if (loadGateRef.current.finish(attempt.requestId)) setLoading(false);
     }
   };
+
+  useEffect(() => () => loadGateRef.current.dispose(), []);
 
   useEffect(() => {
     const nextFilters: OrderApplicationFilters = {
@@ -752,27 +762,13 @@ const OrderReview: React.FC<OrderReviewProps> = ({
           <TableHead>
             <TableRow>
               <TableCell padding="checkbox">
-                <Checkbox
-                  aria-label="选择当前页导入待审记录"
-                  disabled={importSelection.mode === 'batch' || !items.some((item) => isImportedPendingReviewRecord(item, 'orders'))}
-                  checked={importSelection.mode === 'ids'
-                    && items.some((item) => isImportedPendingReviewRecord(item, 'orders'))
-                    && items.filter((item) => isImportedPendingReviewRecord(item, 'orders'))
-                      .every((item) => importSelection.ids.includes(item.id))}
-                  indeterminate={importSelection.mode === 'ids'
-                    && items.some((item) => isImportedPendingReviewRecord(item, 'orders') && importSelection.ids.includes(item.id))
-                    && !items.filter((item) => isImportedPendingReviewRecord(item, 'orders'))
-                      .every((item) => importSelection.ids.includes(item.id))}
-                  onChange={(event) => {
-                    const pageIds = items.filter((item) => isImportedPendingReviewRecord(item, 'orders')).map((item) => item.id);
-                    const currentIds = importSelection.mode === 'ids' ? importSelection.ids : [];
-                    setImportSelection({
-                      mode: 'ids',
-                      ids: event.target.checked
-                        ? Array.from(new Set([...currentIds, ...pageIds]))
-                        : currentIds.filter((id) => !pageIds.includes(id)),
-                    });
-                  }}
+                <BusinessImportReviewPageCheckbox
+                  module="orders"
+                  canReview={reviewer}
+                  records={items}
+                  selection={importSelection}
+                  onSelectionChange={setImportSelection}
+                  ariaLabel="选择当前页导入待审记录"
                 />
               </TableCell>
               {visibleColumns.map((column, columnIndex) => (
@@ -820,7 +816,10 @@ const OrderReview: React.FC<OrderReviewProps> = ({
                         ? application.importBatchId === importSelection.importBatchId
                           && isImportedPendingReviewRecord(application, 'orders')
                         : importSelection.ids.includes(application.id)}
-                      onChange={() => setImportSelection((selection) => toggleImportedReviewId(selection, application.id))}
+                      onChange={() => {
+                        if (!reviewer) return;
+                        setImportSelection((selection) => toggleImportedReviewId(selection, application.id));
+                      }}
                     />
                   </TableCell>
                   {visibleColumns.map((column, columnIndex) => (
