@@ -22,6 +22,14 @@ for (const partial of [
     JIXIANG_WECHAT_AUTOMATION_TOKEN: TOKEN,
     JIXIANG_WECHAT_AUTOMATION_ACTOR_ACCOUNT: 'wechat-automation',
   },
+  {
+    JIXIANG_WECHAT_AUTOMATION_TOKEN: TOKEN,
+    JIXIANG_WECHAT_AUTOMATION_SIGNING_KEY: SIGNING_KEY,
+  },
+  {
+    JIXIANG_WECHAT_AUTOMATION_ACTOR_ACCOUNT: 'wechat-automation',
+    JIXIANG_WECHAT_AUTOMATION_SIGNING_KEY: SIGNING_KEY,
+  },
 ]) {
   assert.throws(() => readWechatAutomationConfig(partial), /must be configured together/i);
 }
@@ -92,9 +100,30 @@ assert.throws(
   /invalid or expired/i,
   'a modified signature is rejected',
 );
+const base64urlAlphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+const finalSignatureCharacter = signature.at(-1)!;
+const nonCanonicalFinalCharacter = base64urlAlphabet[(base64urlAlphabet.indexOf(finalSignatureCharacter) & 0b111100) | 0b01];
+const nonCanonicalSignature = `${signature.slice(0, -1)}${nonCanonicalFinalCharacter}`;
+assert.notEqual(nonCanonicalSignature, signature);
+assert.deepEqual(
+  Buffer.from(nonCanonicalSignature, 'base64url'),
+  Buffer.from(signature, 'base64url'),
+  'the alternate spelling deliberately decodes to the same signature bytes',
+);
+assert.throws(
+  () => verifyWechatCustomerPrecheckToken(`${encodedPayload}.${nonCanonicalSignature}`, SIGNING_KEY, now),
+  /invalid or expired/i,
+  'non-canonical base64url signatures are rejected before signature comparison',
+);
 const changedBinding = issueWechatCustomerPrecheckToken({ ...tokenInput, inputHash: 'c'.repeat(64) }, SIGNING_KEY, now);
 assert.notEqual(changedBinding, precheckToken, 'actor, sender, and input bindings are signed into the token');
 assert.equal(verifyWechatCustomerPrecheckToken(changedBinding, SIGNING_KEY, now).inputHash, 'c'.repeat(64));
+const changedActorBinding = issueWechatCustomerPrecheckToken({ ...tokenInput, actorId: 'another-automation-user-id' }, SIGNING_KEY, now);
+assert.notEqual(changedActorBinding, precheckToken, 'actor identity is signed into the token');
+assert.equal(verifyWechatCustomerPrecheckToken(changedActorBinding, SIGNING_KEY, now).actorId, 'another-automation-user-id');
+const changedSenderBinding = issueWechatCustomerPrecheckToken({ ...tokenInput, senderIdHash: 'c'.repeat(64) }, SIGNING_KEY, now);
+assert.notEqual(changedSenderBinding, precheckToken, 'sender identity hash is signed into the token');
+assert.equal(verifyWechatCustomerPrecheckToken(changedSenderBinding, SIGNING_KEY, now).senderIdHash, 'c'.repeat(64));
 
 const payloadWithContact = Buffer.from(JSON.stringify({ ...decodedPayload, phone: '13800138000' }), 'utf8').toString('base64url');
 const signedPayloadWithContact = createHmac('sha256', SIGNING_KEY).update(payloadWithContact, 'utf8').digest('base64url');

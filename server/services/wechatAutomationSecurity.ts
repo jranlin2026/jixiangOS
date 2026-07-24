@@ -157,7 +157,11 @@ export function verifyWechatCustomerPrecheckToken(
 
   const expectedSignature = signTokenPayload(encodedPayload, signingKey);
   const actualSignature = Buffer.from(encodedSignature, 'base64url');
-  if (actualSignature.length !== expectedSignature.length || !timingSafeEqual(actualSignature, expectedSignature)) {
+  if (
+    actualSignature.toString('base64url') !== encodedSignature
+    || actualSignature.length !== expectedSignature.length
+    || !timingSafeEqual(actualSignature, expectedSignature)
+  ) {
     return invalidPrecheckToken();
   }
 
