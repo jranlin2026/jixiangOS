@@ -516,7 +516,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
         ) : '-';
       case 'status':
         {
-          const unifiedStatus = getOrderApplicationUnifiedReviewStatus(application.status);
+          const unifiedStatus = getOrderApplicationUnifiedReviewStatus(application.status, Boolean(application.sourceOrderDeleted));
           return <Chip label={unifiedStatus} size="small" color={statusColor[unifiedStatus]} variant="outlined" />;
         }
       case 'customer':
@@ -630,8 +630,13 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
             {items.map((application) => {
               const canFinanceOperate = reviewer && application.status === ORDER_APPLICATION_STATUSES.PENDING_REVIEW;
               const canResubmit = application.status === ORDER_APPLICATION_STATUSES.RETURNED && (!reviewer || isCurrentUserApplicant(application));
-              const canViewFormalOrder = application.status === ORDER_APPLICATION_STATUSES.APPROVED && Boolean(application.orderId);
-              const canCleanupApplication = canCleanupReview && application.status === ORDER_APPLICATION_STATUSES.APPROVED && Boolean(application.orderId);
+              const canViewFormalOrder = application.status === ORDER_APPLICATION_STATUSES.APPROVED
+                && Boolean(application.orderId)
+                && !application.sourceOrderDeleted;
+              const canCleanupApplication = canCleanupReview
+                && application.status === ORDER_APPLICATION_STATUSES.APPROVED
+                && Boolean(application.orderId)
+                && Boolean(application.sourceOrderDeleted);
               return (
                 <TableRow key={application.id} hover sx={getProductLevelRowSx(application.orderData.productLevel)}>
                   {visibleColumns.map((column, columnIndex) => (
@@ -908,9 +913,9 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                 <Chip label={detailApplication.orderData.productLevel || '-'} size="small" sx={getProductLevelTagSx(detailApplication.orderData.productLevel)} />
                 <Chip label={detailApplication.orderData.orderType || '-'} size="small" variant="outlined" />
                 <Chip
-                  label={getOrderApplicationUnifiedReviewStatus(detailApplication.status)}
+                  label={getOrderApplicationUnifiedReviewStatus(detailApplication.status, Boolean(detailApplication.sourceOrderDeleted))}
                   size="small"
-                  color={statusColor[getOrderApplicationUnifiedReviewStatus(detailApplication.status)]}
+                  color={statusColor[getOrderApplicationUnifiedReviewStatus(detailApplication.status, Boolean(detailApplication.sourceOrderDeleted))]}
                   variant="outlined"
                 />
               </Box>

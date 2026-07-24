@@ -28,7 +28,9 @@ export function getRecoveryOrderReviewStatuses(
 
 export function getOrderApplicationUnifiedReviewStatus(
   status: OrderApplicationStatus,
+  sourceOrderDeleted = false,
 ): UnifiedReviewStatus {
+  if (sourceOrderDeleted) return '已删除（留痕）';
   if (status === '待财务审核') return '待审核';
   if (status === '已入库') return '已通过';
   return status;

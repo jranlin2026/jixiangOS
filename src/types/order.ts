@@ -132,6 +132,9 @@ export interface OrderApplication {
   reason?: string;
   orderId?: ID;
   orderNo?: string;
+  /** 审核列表投影字段：正式源订单已软删除或已不存在。 */
+  sourceOrderDeleted?: boolean;
+  sourceOrderDeletedAt?: Timestamp;
   reviewCleanedAt?: Timestamp;
   reviewCleanedBy?: string;
   reviewCleanupReason?: string;

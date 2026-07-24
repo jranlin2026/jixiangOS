@@ -205,8 +205,8 @@ assert.match(
 );
 assert.match(
   orderReviewApiSource,
-  /businessRecord\.delete|saveApplications\(applications\.filter/,
-  'Order review API must support guarded cleanup after the formal order is deleted.',
+  /reviewCleanedAt/,
+  'Order review API must support guarded, auditable cleanup after the formal order is deleted.',
 );
 assert.match(
   orderReviewSource,

@@ -20,7 +20,17 @@ for (const [name, source] of [
 
 assert.match(orderReviewSource, /getOrderApplicationReviewStatuses\(view\)/);
 assert.match(recoveryReviewSource, /getRecoveryOrderReviewStatuses\(reviewQueueView\)/);
-assert.match(orderReviewSource, /getOrderApplicationUnifiedReviewStatus\(application\.status\)/);
+assert.match(orderReviewSource, /getOrderApplicationUnifiedReviewStatus\(application\.status, Boolean\(application\.sourceOrderDeleted\)\)/);
+assert.match(
+  orderReviewSource,
+  /canCleanupApplication[^]{0,260}Boolean\(application\.sourceOrderDeleted\)/,
+  '普通订单审核台只能对源订单确实已删除的记录显示清理入口。',
+);
+assert.match(
+  orderReviewSource,
+  /canViewFormalOrder[^;]+!application\.sourceOrderDeleted/,
+  '源订单已删除后不得继续显示无效的正式订单查看入口。',
+);
 assert.match(recoveryReviewSource, /mode === 'review' \? unifiedStatus/);
 assert.match(
   recoveryReviewSource,

@@ -91,6 +91,36 @@ function enrichOrderCreator(order: Order, applications: Map<string, OrderApplica
   };
 }
 
+async function enrichApplicationSourceOrderState(
+  prisma: OrderQueryPrisma,
+  applications: OrderApplication[],
+): Promise<OrderApplication[]> {
+  const sourceOrderIds = Array.from(new Set(applications
+    .map((application) => cleanText(application.orderId))
+    .filter(Boolean)));
+  if (!sourceOrderIds.length) return applications;
+  const rows = await prisma.businessRecord.findMany({
+    where: {
+      domain: STORAGE_KEYS.ORDERS,
+      recordId: { in: sourceOrderIds },
+    },
+  });
+  const sourceOrders = new Map((rows as Array<BusinessRecordRow & { recordId?: string }>)
+    .map((row) => [cleanText(row.recordId), parseRecord<Order>(row.data)] as const)
+    .filter((entry): entry is readonly [string, Order] => Boolean(entry[0] && entry[1])));
+  return applications.map((application) => {
+    const sourceOrderId = cleanText(application.orderId);
+    if (!sourceOrderId) return application;
+    const sourceOrder = sourceOrders.get(sourceOrderId);
+    const sourceOrderDeleted = !sourceOrder || Boolean(sourceOrder.deletedAt);
+    return {
+      ...application,
+      sourceOrderDeleted,
+      sourceOrderDeletedAt: sourceOrder?.deletedAt,
+    };
+  });
+}
+
 async function loadScope(
   prisma: OrderQueryPrisma,
   actor: AuthenticatedUser,
@@ -295,10 +325,11 @@ export function createOrderQueryService(
       const scope = await loadScope(prisma, actor, 'orderApplications');
       if (scope.unrestricted && typeof prisma.$queryRaw === 'function') {
         const result = await queryApplicationPage(prisma, filters, scope);
+        const enrichedItems = await enrichApplicationSourceOrderState(prisma, result.items);
         const page = toPositiveInt(filters.page, 1);
         const pageSize = Math.min(toPositiveInt(filters.pageSize, DEFAULT_PAGE_SIZE), 100);
         return success({
-          items: result.items.map(compactOrderApplicationListItem),
+          items: enrichedItems.map(compactOrderApplicationListItem),
           pagination: { page, pageSize, total: result.total, totalPages: Math.ceil(result.total / pageSize) },
         });
       }
@@ -310,7 +341,8 @@ export function createOrderQueryService(
         .filter((application) => applicationIsVisible(application, scope) && matchesApplication(application, filters))
         .sort((left, right) => timestamp(right.updatedAt || right.createdAt) - timestamp(left.updatedAt || left.createdAt));
       const result = paginate(items, filters.page, filters.pageSize);
-      return success({ ...result, items: result.items.map(compactOrderApplicationListItem) });
+      const enrichedItems = await enrichApplicationSourceOrderState(prisma, result.items);
+      return success({ ...result, items: enrichedItems.map(compactOrderApplicationListItem) });
     },
 
     async listOwnerCandidates(actor: AuthenticatedUser) {
@@ -384,7 +416,8 @@ export function createOrderQueryService(
       if (!application) return failure<OrderApplication>('订单申请数据损坏，请先修复数据', 409);
       if (application.reviewCleanedAt) return failure<OrderApplication>('订单申请不存在', 404);
       if (!applicationIsVisible(application, scope)) return failure<OrderApplication>('无权查看该订单申请', 403);
-      return success(application);
+      const [enrichedApplication] = await enrichApplicationSourceOrderState(prisma, [application]);
+      return success(enrichedApplication);
     },
   };
 }

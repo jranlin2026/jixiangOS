@@ -69,6 +69,20 @@ function getStoredApplications(): OrderApplication[] {
   return (readJson<OrderApplication[]>(STORAGE_KEYS.ORDER_APPLICATIONS) || []).map(normalizeApplicationProductName);
 }
 
+function enrichMockApplicationSourceOrderState(applications: OrderApplication[]): OrderApplication[] {
+  const orders = readJson<Order[]>(STORAGE_KEYS.ORDERS) || [];
+  const ordersById = new Map(orders.map((order) => [order.id, order]));
+  return applications.map((application) => {
+    if (!application.orderId) return application;
+    const sourceOrder = ordersById.get(application.orderId);
+    return {
+      ...application,
+      sourceOrderDeleted: !sourceOrder || Boolean(sourceOrder.deletedAt),
+      sourceOrderDeletedAt: sourceOrder?.deletedAt,
+    };
+  });
+}
+
 function getProductName(productId?: string, productLevel?: string, fallback?: string): string | undefined {
   const products = readJson<Product[]>(STORAGE_KEYS.PRODUCTS) || [];
   const matched = (productId ? products.find((product) => product.id === productId) : undefined)
@@ -235,7 +249,7 @@ async function fetchOrderApplications(filters?: OrderApplicationFilters): Promis
 
   ensureInit();
   await delay(120);
-  const filtered = applyFilters(filterVisibleApplications(getStoredApplications()), filters);
+  const filtered = applyFilters(filterVisibleApplications(enrichMockApplicationSourceOrderState(getStoredApplications())), filters);
   const page = filters?.page || 1;
   const pageSize = filters?.pageSize || DEFAULT_PAGE_SIZE;
   const total = filtered.length;
@@ -258,7 +272,7 @@ async function fetchOrderApplicationById(id: string): Promise<ApiResponse<OrderA
 
   ensureInit();
   await delay(100);
-  return createSuccessResponse(filterVisibleApplications(getStoredApplications()).find((item) => item.id === id) || null);
+  return createSuccessResponse(filterVisibleApplications(enrichMockApplicationSourceOrderState(getStoredApplications())).find((item) => item.id === id) || null);
 }
 
 async function submitOrderApplication(data: OrderApplicationInput): Promise<ApiResponse<OrderApplication>> {

@@ -86,7 +86,9 @@ const applications = [
   },
   application('application-legacy-self', undefined, sales.name),
   application('application-other', 'user-other', '销售B'),
-  application('application-approved', finance.id, finance.name, '已入库'),
+  { ...application('application-approved', finance.id, finance.name, '已入库'), orderId: 'order-self', orderNo: 'ORD-order-self' },
+  { ...application('application-deleted-approved', finance.id, finance.name, '已入库'), orderId: 'order-deleted', orderNo: 'ORD-order-deleted' },
+  { ...application('application-missing-approved', finance.id, finance.name, '已入库'), orderId: 'order-missing', orderNo: 'ORD-order-missing' },
   application('application-rejected', sales.id, sales.name, '已驳回'),
 ];
 const businessRecordFindManyWhere: any[] = [];
@@ -167,7 +169,7 @@ assert.equal(listedApplication?.orderData.dealEvidencePreview, undefined);
 assert.equal(listedApplication?.orderData.payments[0].voucherPreview, undefined);
 assert.equal((await service.getApplication('application-other', sales)).code, 403);
 assert.equal((await service.getApplication('application-self', sales)).data?.orderData.dealEvidencePreview, inlineProof);
-assert.equal((await service.listApplications({ page: 1, pageSize: 1 }, finance)).data?.pagination.total, 5);
+assert.equal((await service.listApplications({ page: 1, pageSize: 1 }, finance)).data?.pagination.total, 7);
 
 const processedApplications = await service.listApplications({
   statuses: ['已入库', '已驳回'],
@@ -176,6 +178,26 @@ const processedApplications = await service.listApplications({
 }, finance);
 assert.deepEqual(
   processedApplications.data?.items.map((item) => item.status).sort(),
-  ['已入库', '已驳回'].sort(),
+  ['已入库', '已入库', '已入库', '已驳回'].sort(),
   '已处理审核记录必须在服务端同时筛选已入库和已驳回',
+);
+assert.equal(
+  processedApplications.data?.items.find((item) => item.id === 'application-approved')?.sourceOrderDeletedAt,
+  undefined,
+  '正常源订单不得标记为已删除留痕',
+);
+assert.equal(
+  processedApplications.data?.items.find((item) => item.id === 'application-deleted-approved')?.sourceOrderDeletedAt,
+  now,
+  '源订单已删除时审核列表必须投影删除时间',
+);
+assert.equal(
+  processedApplications.data?.items.find((item) => item.id === 'application-missing-approved')?.sourceOrderDeleted,
+  true,
+  '源订单记录缺失时审核列表也必须标记为已删除留痕',
+);
+assert.equal(
+  processedApplications.data?.items.find((item) => item.id === 'application-missing-approved')?.sourceOrderDeletedAt,
+  undefined,
+  '源订单记录缺失时没有可投影的删除时间',
 );
