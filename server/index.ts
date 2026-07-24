@@ -59,6 +59,7 @@ import { createPrismaSystemSetupRepository } from './services/systemSetupReposit
 import { createSystemSetupService } from './services/systemSetupService';
 import { ensureSystemLifecycleDefaults } from './services/systemConfigMigrationService';
 import { createSettingsService } from './services/settingsService';
+import { createOrderTypeConfigCommandService } from './services/orderTypeConfigCommandService';
 import { createStorageService } from './services/storageService';
 import { createBusinessAttachmentService, createPrismaBusinessAttachmentRepository } from './services/businessAttachmentService';
 import { createAssetListService, isAssetListKind } from './services/assetListService';
@@ -186,6 +187,7 @@ const customerTagMigrationService = createCustomerTagMigrationService(prisma as 
 const leadListService = createLeadListService(prisma);
 const businessRecycleBinService = createBusinessRecycleBinService(createPrismaBusinessRecycleBinRepository(prisma));
 const settingsService = createSettingsService(prisma);
+const orderTypeConfigCommandService = createOrderTypeConfigCommandService(prisma);
 const storageService = createStorageService(prisma);
 const businessAttachmentService = createBusinessAttachmentService({
   repository: createPrismaBusinessAttachmentRepository(prisma),
@@ -216,6 +218,7 @@ const requireOrganizationDeleteAccess = createRequireAuth(authService, PERMISSIO
 const requireRoleReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_ROLES);
 const requireRoleWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_ROLES, 'write');
 const requireRoleDeleteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_ROLES, 'delete');
+const requireOrderTypeWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_ORDER_TYPES, 'write');
 const requireAiConfigReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_AI_CONFIG);
 const requireAiConfigWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_AI_CONFIG, 'write');
 const requireDataMaintenanceDeleteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'delete');
@@ -1212,6 +1215,11 @@ app.get('/api/settings/delivery-assignment', requireDeliveryAssignmentReadAccess
 app.put('/api/settings/delivery-assignment', requireDeliveryAssignmentWriteAccess, async (req: AuthenticatedRequest, res) => {
   const result = await deliveryAssignmentService.saveConfig(req.body || {}, req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code || 400).json(result);
+});
+
+app.put('/api/settings/order-types/:id', requireOrderTypeWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderTypeConfigCommandService.update(routeParam(req.params.id), req.body?.data || {});
+  res.status(result.code === 0 ? 200 : result.code >= 400 ? result.code : 400).json(result);
 });
 
 app.post('/api/settings/users/leave-customer-count', requireOrganizationReadAccess, async (req, res) => {

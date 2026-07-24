@@ -5,7 +5,7 @@ import type { Position, PositionFilters } from '../types/position';
 import type { Department } from '../types/department';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
-import { getStorageData, setStorageData } from './mock/storage';
+import { getStorageData, setStorageCacheData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE, COMMISSION_RATES, DEFAULT_ORDER_TYPE_CONFIGS, DEFAULT_LIFECYCLE_STATUS_CONFIGS, DEFAULT_LEAD_SOURCE_CONFIGS, DEFAULT_CUSTOMER_LEVEL_CONFIGS, LIFECYCLE_STATUS_CODES, normalizeLifecycleStatusCode } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
 import { v4 as uuidv4 } from 'uuid';
@@ -684,6 +684,19 @@ async function updateOrderTypeConfig(
   id: string,
   data: Partial<Omit<OrderTypeConfig, 'id' | 'createdAt' | 'updatedAt'>>,
 ): Promise<ApiResponse<OrderTypeConfig | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<OrderTypeConfig | null>(`/settings/order-types/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ data }),
+    });
+    if (response.code !== 0 || !response.data) return response;
+    const configs = getStorageData<OrderTypeConfig[]>(STORAGE_KEYS.ORDER_TYPE_CONFIGS) || [];
+    setStorageCacheData(STORAGE_KEYS.ORDER_TYPE_CONFIGS, configs
+      .map((config) => config.id === id ? response.data! : config)
+      .sort((a, b) => a.sortOrder - b.sortOrder));
+    return response;
+  }
+
   ensureInit();
   await delay(150);
   const configs = ensureOrderTypeConfigs();
