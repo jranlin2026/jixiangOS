@@ -1,9 +1,10 @@
 import type { ID, Timestamp } from './common';
 import type { DataScopeDomain } from './role';
 import type { BusinessAttachment } from './businessAttachment';
+import type { OfficialPaymentChannel } from './commission';
 
 export type RecoveryOrderStatus = '待审核' | '退回修改' | '审核驳回' | '待分账' | '已分账';
-export type RecoveryOrderSettlementStatus = '未分账' | '待处理' | '待确认' | '待发放' | '已撤回';
+export type RecoveryOrderSettlementStatus = '未分账' | '待处理' | '待确认' | '待发放' | '已发放' | '已撤回';
 export type RecoveryOrderMatchStatus = '手工填写' | '已绑定客户' | '售后临时客户';
 
 export interface RecoveryOrder {
@@ -21,11 +22,17 @@ export interface RecoveryOrder {
   sourceShopId?: ID;
   sourceShopName?: string;
   originalProduct: string;
+  /** 成交时的产品配置快照，避免产品改名或改等级后历史订单漂移。 */
+  originalProductId?: ID;
+  originalProductLevel?: string;
   originalAmount: number;
   /** @deprecated 第一版不再做退款流程，保留仅兼容历史数据 */
   refundStatus?: string;
   recoveryAmount: number;
   recoveryAt?: Timestamp;
+  officialPaymentChannel?: OfficialPaymentChannel;
+  paymentOrderNo?: string;
+  paymentAt?: Timestamp;
   paymentVoucher?: string;
   paymentVoucherName?: string;
   paymentVoucherPreview?: string;
@@ -75,11 +82,16 @@ export interface RecoveryOrderInput {
   sourceShopId?: ID;
   sourceShopName?: string;
   originalProduct: string;
+  originalProductId?: ID;
+  originalProductLevel?: string;
   originalAmount: number;
   /** @deprecated 第一版不再做退款流程，保留仅兼容历史数据 */
   refundStatus?: string;
   recoveryAmount: number;
   recoveryAt?: Timestamp;
+  officialPaymentChannel?: OfficialPaymentChannel;
+  paymentOrderNo?: string;
+  paymentAt?: Timestamp;
   paymentVoucher?: string;
   paymentVoucherName?: string;
   paymentVoucherPreview?: string;
@@ -102,7 +114,7 @@ export interface RecoveryOrderFilters {
   status?: RecoveryOrderStatus | '全部';
   statuses?: RecoveryOrderStatus[];
   settlementStatus?: RecoveryOrderSettlementStatus | '全部';
-  settlementStatuses?: Array<RecoveryOrderSettlementStatus | '已发放'>;
+  settlementStatuses?: RecoveryOrderSettlementStatus[];
   ownerId?: ID;
   includeDeleted?: boolean;
   scopeDomain?: Extract<DataScopeDomain, 'recoveryOrders' | 'recoveryOrderApplications'>;

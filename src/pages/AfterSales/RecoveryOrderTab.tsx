@@ -34,7 +34,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useNavigate } from 'react-router-dom';
 import { productApi, recoveryOrderApi, settingsApi } from '../../api';
 import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
-import { getProductLevelColor, getProductLevelTagSx, ROUTES } from '../../shared/utils/constants';
+import { getProductLevelColor, getProductLevelTagSx, OFFICIAL_PAYMENT_CHANNELS, ROUTES } from '../../shared/utils/constants';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog, { type TableViewColumnConfig } from '../../shared/components/TableViewSettingsDialog';
 import { useTableViewConfig } from '../../shared/hooks/useTableViewConfig';
@@ -86,9 +86,14 @@ const emptyForm = {
   sourceShopId: '',
   sourceShopName: '',
   originalProduct: '',
+  originalProductId: '',
+  originalProductLevel: '',
   originalAmount: '',
   recoveryAmount: '',
   recoveryAt: toDateTimeInputValue(),
+  officialPaymentChannel: '',
+  paymentOrderNo: '',
+  paymentAt: toDateTimeInputValue(),
   paymentVoucher: '',
   paymentVoucherName: '',
   paymentVoucherPreview: '',
@@ -98,16 +103,35 @@ const emptyForm = {
   paymentAttachments: [] as BusinessAttachment[],
   chatAttachments: [] as BusinessAttachment[],
   recoveryUserId: '',
+  assistUserId: '',
   remark: '',
 };
 
 type RecoveryOrderForm = typeof emptyForm;
 
-function getStatusSx(status: RecoveryOrderStatus) {
+function getStatusSx(status: string) {
   if (status === '已分账' || status === '待分账') return { bgcolor: '#ecfdf5', color: shell.green };
   if (status === '审核驳回') return { bgcolor: '#fff1f2', color: shell.red };
   if (status === '退回修改') return { bgcolor: '#eff6ff', color: shell.blue };
   return { bgcolor: '#fff7ed', color: shell.amber };
+}
+
+function getRecoveryOrderBusinessStatus(order: RecoveryOrder): string {
+  if (order.deletedAt) return '已删除（留痕）';
+  if (order.settlementStatus === '已撤回') return '已撤回';
+  if (order.settlementStatus === '已发放' || order.status === '已分账') return '已发放';
+  if (order.settlementStatus === '待发放') return '待发放';
+  if (order.settlementStatus === '待确认') return '待确认';
+  return '待分账';
+}
+
+function DetailField({ label, children, wide = false }: { label: string; children: React.ReactNode; wide?: boolean }) {
+  return (
+    <Box sx={wide ? { gridColumn: { md: '1 / -1' } } : undefined}>
+      <Typography variant="body2" sx={{ color: '#6b7280' }}>{label}</Typography>
+      <Box sx={{ mt: 0.25, fontWeight: 500 }}>{children}</Box>
+    </Box>
+  );
 }
 
 interface RecoveryOrderTabProps {
@@ -126,37 +150,90 @@ type RecoveryOrderColumnId =
   | 'customerName'
   | 'customerPhone'
   | 'customerWechat'
+  | 'customerMatchStatus'
   | 'thirdPartyOrderNo'
+  | 'sourcePlatformShop'
+  | 'sourcePlatformName'
+  | 'sourceShopName'
   | 'originalProduct'
+  | 'originalProductLevel'
   | 'originalAmount'
   | 'recoveryAmount'
+  | 'officialPaymentChannel'
+  | 'paymentOrderNo'
+  | 'paymentAt'
   | 'recoveryUserName'
+  | 'assistUserName'
   | 'createdByName'
   | 'recoveryAt'
   | 'status'
+  | 'auditorName'
+  | 'auditedAt'
+  | 'auditReason'
+  | 'remark'
   | 'createdAt'
+  | 'updatedAt'
   | 'actions';
 
-const RECOVERY_ORDER_COLUMNS: Array<TableViewColumnConfig & { id: RecoveryOrderColumnId }> = [
+const RECOVERY_ORDER_LIST_COLUMNS: Array<TableViewColumnConfig & { id: RecoveryOrderColumnId }> = [
   { id: 'recoveryNo', label: '挽回订单号' },
+  { id: 'status', label: '当前状态' },
   { id: 'customerName', label: '客户' },
-  { id: 'customerPhone', label: '手机号' },
-  { id: 'customerWechat', label: '微信' },
-  { id: 'thirdPartyOrderNo', label: '第三方订单' },
+  { id: 'thirdPartyOrderNo', label: '第三方平台订单' },
+  { id: 'sourcePlatformShop', label: '来源平台 / 店铺' },
   { id: 'originalProduct', label: '原产品' },
-  { id: 'originalAmount', label: '原付款' },
-  { id: 'recoveryAmount', label: '挽回金额' },
+  { id: 'originalProductLevel', label: '原产品等级' },
+  { id: 'originalAmount', label: '原付款金额' },
+  { id: 'recoveryAmount', label: '挽回成交金额' },
   { id: 'recoveryUserName', label: '挽回人员' },
   { id: 'createdByName', label: '订单创建人' },
-  { id: 'recoveryAt', label: '挽回时间' },
-  { id: 'status', label: '状态' },
+  { id: 'recoveryAt', label: '挽回成交时间' },
   { id: 'createdAt', label: '创建时间' },
-  { id: 'actions', label: '操作' },
+  { id: 'customerPhone', label: '手机号' },
+  { id: 'customerWechat', label: '微信' },
+  { id: 'customerMatchStatus', label: '客户匹配状态' },
+  { id: 'sourcePlatformName', label: '来源平台' },
+  { id: 'sourceShopName', label: '来源店铺' },
+  { id: 'officialPaymentChannel', label: '官方收款渠道' },
+  { id: 'paymentOrderNo', label: '付款订单号' },
+  { id: 'paymentAt', label: '付款时间' },
+  { id: 'assistUserName', label: '协助人员' },
+  { id: 'remark', label: '备注' },
+  { id: 'updatedAt', label: '更新时间' },
 ];
 
-const DEFAULT_VISIBLE_COLUMNS = RECOVERY_ORDER_COLUMNS.map((column) => column.id);
-const RECOVERY_ORDER_LIST_COLUMNS = RECOVERY_ORDER_COLUMNS.filter((column) => column.id !== 'status');
-const DEFAULT_LIST_VISIBLE_COLUMNS = RECOVERY_ORDER_LIST_COLUMNS.map((column) => column.id);
+const RECOVERY_ORDER_REVIEW_COLUMNS: Array<TableViewColumnConfig & { id: RecoveryOrderColumnId }> = [
+  { id: 'recoveryNo', label: '挽回订单号' },
+  { id: 'status', label: '审核状态' },
+  { id: 'customerName', label: '客户' },
+  { id: 'thirdPartyOrderNo', label: '第三方平台订单' },
+  { id: 'sourcePlatformShop', label: '来源平台 / 店铺' },
+  { id: 'originalProduct', label: '原产品' },
+  { id: 'originalAmount', label: '原付款金额' },
+  { id: 'recoveryAmount', label: '挽回成交金额' },
+  { id: 'recoveryUserName', label: '挽回人员' },
+  { id: 'createdByName', label: '订单创建人' },
+  { id: 'createdAt', label: '提交时间' },
+  { id: 'auditorName', label: '审核人' },
+  { id: 'auditedAt', label: '审核时间' },
+  { id: 'auditReason', label: '退回 / 驳回原因' },
+  { id: 'customerPhone', label: '手机号' },
+  { id: 'customerWechat', label: '微信' },
+  { id: 'customerMatchStatus', label: '客户匹配状态' },
+  { id: 'sourcePlatformName', label: '来源平台' },
+  { id: 'sourceShopName', label: '来源店铺' },
+  { id: 'originalProductLevel', label: '原产品等级' },
+  { id: 'recoveryAt', label: '挽回成交时间' },
+  { id: 'officialPaymentChannel', label: '官方收款渠道' },
+  { id: 'paymentOrderNo', label: '付款订单号' },
+  { id: 'paymentAt', label: '付款时间' },
+  { id: 'assistUserName', label: '协助人员' },
+  { id: 'remark', label: '备注' },
+  { id: 'updatedAt', label: '更新时间' },
+];
+
+const DEFAULT_LIST_VISIBLE_COLUMNS: RecoveryOrderColumnId[] = RECOVERY_ORDER_LIST_COLUMNS.slice(0, 13).map((column) => column.id);
+const DEFAULT_REVIEW_VISIBLE_COLUMNS: RecoveryOrderColumnId[] = RECOVERY_ORDER_REVIEW_COLUMNS.slice(0, 14).map((column) => column.id);
 const RECOVERY_LIST_STATUSES: RecoveryOrderStatus[] = ['待分账', '已分账'];
 
 function isRecoveryOrderLocked(row: RecoveryOrder): boolean {
@@ -201,8 +278,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const loadRequestIdRef = React.useRef(0);
   const handledCreateSignalRef = React.useRef(createSignal);
   const handledViewSettingsSignalRef = React.useRef(viewSettingsSignal);
-  const tableColumns = mode === 'list' ? RECOVERY_ORDER_LIST_COLUMNS : RECOVERY_ORDER_COLUMNS;
-  const defaultVisibleColumns = mode === 'list' ? DEFAULT_LIST_VISIBLE_COLUMNS : DEFAULT_VISIBLE_COLUMNS;
+  const tableColumns = mode === 'list' ? RECOVERY_ORDER_LIST_COLUMNS : RECOVERY_ORDER_REVIEW_COLUMNS;
+  const defaultVisibleColumns = mode === 'list' ? DEFAULT_LIST_VISIBLE_COLUMNS : DEFAULT_REVIEW_VISIBLE_COLUMNS;
 
   const {
     viewConfig,
@@ -212,7 +289,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
     reorderColumn,
     setFrozenColumnCount,
     resetViewConfig,
-  } = useTableViewConfig(`after_sales_recovery_${mode}_table_view`, tableColumns, defaultVisibleColumns);
+  } = useTableViewConfig(`after_sales_recovery_${mode}_table_view_v2`, tableColumns, defaultVisibleColumns);
 
   const filters = useMemo<RecoveryOrderFilters>(() => ({
     search,
@@ -348,9 +425,14 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       sourceShopId: detail.sourceShopId || '',
       sourceShopName: detail.sourceShopName || '',
       originalProduct: detail.originalProduct || '',
+      originalProductId: detail.originalProductId || '',
+      originalProductLevel: detail.originalProductLevel || '',
       originalAmount: String(detail.originalAmount || ''),
       recoveryAmount: String(detail.recoveryAmount || ''),
       recoveryAt: toDateTimeInputValue(detail.recoveryAt || detail.createdAt),
+      officialPaymentChannel: detail.officialPaymentChannel || '',
+      paymentOrderNo: detail.paymentOrderNo || '',
+      paymentAt: toDateTimeInputValue(detail.paymentAt || detail.recoveryAt || detail.createdAt),
       paymentVoucher: detail.paymentVoucher || '',
       paymentVoucherName: detail.paymentVoucherName || detail.paymentVoucher || '',
       paymentVoucherPreview: detail.paymentVoucherPreview || '',
@@ -360,6 +442,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       paymentAttachments: detail.paymentAttachments || [],
       chatAttachments: detail.chatAttachments || [],
       recoveryUserId: detail.recoveryUserId || '',
+      assistUserId: detail.assistUserId || '',
       remark: detail.remark || '',
     });
     setOpen(true);
@@ -370,6 +453,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
     setForm((prev) => ({
       ...prev,
       originalProduct: product?.name || productName,
+      originalProductId: product?.id || '',
+      originalProductLevel: product?.level || '',
       originalAmount: product && !prev.originalAmount ? String(product.price || '') : prev.originalAmount,
     }));
   };
@@ -388,9 +473,14 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       sourceShopId: form.sourceShopId,
       sourceShopName: form.sourceShopName,
       originalProduct: form.originalProduct,
+      originalProductId: form.originalProductId,
+      originalProductLevel: form.originalProductLevel,
       originalAmount: Number(form.originalAmount) || 0,
       recoveryAmount: Number(form.recoveryAmount) || 0,
       recoveryAt: form.recoveryAt ? new Date(form.recoveryAt).toISOString() : undefined,
+      officialPaymentChannel: form.officialPaymentChannel as RecoveryOrderInput['officialPaymentChannel'],
+      paymentOrderNo: form.paymentOrderNo,
+      paymentAt: form.paymentAt ? new Date(form.paymentAt).toISOString() : undefined,
       paymentVoucher: form.paymentVoucher,
       paymentVoucherName: form.paymentVoucherName,
       paymentVoucherPreview: form.paymentVoucherPreview,
@@ -401,6 +491,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       chatAttachments: form.chatAttachments,
       recoveryUserId: recoveryUser?.id || currentUser.id,
       recoveryUserName: recoveryUser?.name || currentUser.name,
+      assistUserId: form.assistUserId || undefined,
       remark: form.remark,
       createdBy: currentUser.id,
       createdByName: currentUser.name,
@@ -530,16 +621,30 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
         return row.customerPhone || '-';
       case 'customerWechat':
         return row.customerWechat || '-';
+      case 'customerMatchStatus':
+        return row.customerMatchStatus || '-';
       case 'thirdPartyOrderNo':
         return row.thirdPartyOrderNo;
+      case 'sourcePlatformShop':
+        return [row.sourcePlatformName || row.sourcePlatform, row.sourceShopName].filter(Boolean).join(' / ') || '-';
+      case 'sourcePlatformName':
+        return row.sourcePlatformName || row.sourcePlatform || '-';
+      case 'sourceShopName':
+        return row.sourceShopName || '-';
       case 'originalProduct':
         return row.originalProduct;
+      case 'originalProductLevel': {
+        const level = row.originalProductLevel || productOptions.find((item) => item.name === row.originalProduct)?.level;
+        return level ? <Chip label={level} size="small" sx={getProductLevelTagSx(level)} /> : '-';
+      }
       case 'originalAmount':
         return formatCurrency(row.originalAmount);
       case 'recoveryAmount':
         return <Typography variant="body2" sx={{ fontWeight: 900, color: shell.green }}>{formatCurrency(row.recoveryAmount)}</Typography>;
       case 'recoveryUserName':
         return row.recoveryUserName;
+      case 'assistUserName':
+        return row.assistUserName || '-';
       case 'createdByName':
         return row.createdByName || '-';
       case 'recoveryAt':
@@ -547,7 +652,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       case 'status':
         {
           const unifiedStatus = getRecoveryOrderUnifiedReviewStatus(row.status, Boolean(row.deletedAt));
-          const displayStatus = mode === 'review' ? unifiedStatus : (row.deletedAt ? '已删除（留痕）' : row.status);
+          const displayStatus = mode === 'review' ? unifiedStatus : getRecoveryOrderBusinessStatus(row);
           return (
           <Box>
             <Chip
@@ -560,8 +665,24 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
           </Box>
           );
         }
+      case 'officialPaymentChannel':
+        return row.officialPaymentChannel || '-';
+      case 'paymentOrderNo':
+        return row.paymentOrderNo || '-';
+      case 'paymentAt':
+        return row.paymentAt ? formatDate(row.paymentAt, 'yyyy-MM-dd HH:mm') : '-';
+      case 'auditorName':
+        return row.auditorName || '-';
+      case 'auditedAt':
+        return row.auditedAt ? formatDate(row.auditedAt, 'yyyy-MM-dd HH:mm') : '-';
+      case 'auditReason':
+        return row.auditReason || '-';
+      case 'remark':
+        return row.remark || '-';
       case 'createdAt':
         return formatDate(row.createdAt, 'yyyy-MM-dd HH:mm');
+      case 'updatedAt':
+        return formatDate(row.updatedAt, 'yyyy-MM-dd HH:mm');
       case 'actions':
         if (mode === 'review') {
           if (row.status === '退回修改' && !row.deletedAt) {
@@ -761,26 +882,15 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
               {visibleColumns.map((column) => (
                 <TableCell
                   key={column.id}
-                  align={column.id === 'actions' ? 'center' : 'left'}
+                  align="left"
                   sx={{
-                    ...(column.id === 'actions' ? {
-                      minWidth: mode === 'review' ? 176 : 156,
-                      width: mode === 'review' ? 176 : 156,
-                      whiteSpace: 'nowrap',
-                      ...(mode === 'review' ? {
-                        position: 'sticky',
-                        right: 0,
-                        zIndex: 4,
-                        bgcolor: '#f8fafc',
-                        boxShadow: `-1px 0 0 ${shell.line}`,
-                      } : {}),
-                    } : {}),
-                    ...(['recoveryAt', 'createdAt'].includes(column.id) ? { minWidth: mode === 'review' ? 170 : 150, whiteSpace: 'nowrap' } : {}),
+                    ...(['recoveryAt', 'paymentAt', 'createdAt', 'auditedAt', 'updatedAt'].includes(column.id) ? { minWidth: 170, whiteSpace: 'nowrap' } : {}),
                   }}
                 >
                   {column.label}
                 </TableCell>
               ))}
+              <TableCell align="center" sx={{ minWidth: mode === 'review' ? 176 : 156, width: mode === 'review' ? 176 : 156, whiteSpace: 'nowrap', position: 'sticky', right: 0, zIndex: 4, bgcolor: '#f8fafc', boxShadow: `-1px 0 0 ${shell.line}` }}>操作</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -789,31 +899,20 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                 {visibleColumns.map((column) => (
                   <TableCell
                     key={column.id}
-                    align={column.id === 'actions' ? 'center' : 'left'}
+                    align="left"
                     sx={{
-                      ...(column.id === 'actions' ? {
-                        minWidth: mode === 'review' ? 176 : 156,
-                        width: mode === 'review' ? 176 : 156,
-                        whiteSpace: 'nowrap',
-                        ...(mode === 'review' ? {
-                          position: 'sticky',
-                          right: 0,
-                          zIndex: 3,
-                          bgcolor: '#fff',
-                          boxShadow: `-1px 0 0 ${shell.line}`,
-                        } : {}),
-                      } : {}),
-                      ...(['recoveryAt', 'createdAt'].includes(column.id) ? { minWidth: mode === 'review' ? 170 : 150, whiteSpace: 'nowrap' } : {}),
+                      ...(['recoveryAt', 'paymentAt', 'createdAt', 'auditedAt', 'updatedAt'].includes(column.id) ? { minWidth: 170, whiteSpace: 'nowrap' } : {}),
                     }}
                   >
                     {renderCell(row, column.id as RecoveryOrderColumnId)}
                   </TableCell>
                 ))}
+                <TableCell align="center" sx={{ minWidth: mode === 'review' ? 176 : 156, width: mode === 'review' ? 176 : 156, whiteSpace: 'nowrap', position: 'sticky', right: 0, zIndex: 3, bgcolor: '#fff', boxShadow: `-1px 0 0 ${shell.line}` }}>{renderCell(row, 'actions')}</TableCell>
               </TableRow>
             ))}
             {!rows.length && (
               <TableRow>
-                <TableCell colSpan={visibleColumns.length || 1} align="center" sx={{ py: 6, color: '#9ca3af' }}>
+                <TableCell colSpan={visibleColumns.length + 1} align="center" sx={{ py: 6, color: '#9ca3af' }}>
                   {loading ? '加载中...' : mode === 'review'
                     ? reviewQueueView === 'pending'
                       ? '暂无待审核/退回修改售后挽回订单'
@@ -878,12 +977,25 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
             </TextField>
             <TextField label="原付款金额" type="number" value={form.originalAmount} onChange={(event) => setForm({ ...form, originalAmount: event.target.value })} />
             <TextField label="挽回成交金额" type="number" value={form.recoveryAmount} onChange={(event) => setForm({ ...form, recoveryAmount: event.target.value })} required />
-            <TextField label="挽回时间" type="datetime-local" value={form.recoveryAt} onChange={(event) => setForm({ ...form, recoveryAt: event.target.value })} required InputLabelProps={{ shrink: true }} inputProps={{ step: 1 }} />
+            <TextField label="挽回成交时间" type="datetime-local" value={form.recoveryAt} onChange={(event) => setForm({ ...form, recoveryAt: event.target.value })} required InputLabelProps={{ shrink: true }} inputProps={{ step: 1 }} />
+            <TextField select label="官方收款渠道" value={form.officialPaymentChannel} onChange={(event) => setForm({ ...form, officialPaymentChannel: event.target.value })}>
+              <MenuItem value="">未选择</MenuItem>
+              {OFFICIAL_PAYMENT_CHANNELS.map((channel) => <MenuItem key={channel.value} value={channel.value}>{channel.label}</MenuItem>)}
+            </TextField>
+            <TextField label="付款订单号" value={form.paymentOrderNo} onChange={(event) => setForm({ ...form, paymentOrderNo: event.target.value })} />
+            <TextField label="付款时间" type="datetime-local" value={form.paymentAt} onChange={(event) => setForm({ ...form, paymentAt: event.target.value })} InputLabelProps={{ shrink: true }} inputProps={{ step: 1 }} />
             <TextField select label="挽回人员" value={form.recoveryUserId} onChange={(event) => setForm({ ...form, recoveryUserId: event.target.value })} required>
               {activeUsers.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
             </TextField>
+            <TextField select label="协助人员（选填）" value={form.assistUserId} onChange={(event) => setForm({ ...form, assistUserId: event.target.value })}>
+              <MenuItem value="">无</MenuItem>
+              {activeUsers.filter((user) => user.id !== form.recoveryUserId).map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
+            </TextField>
             <Box sx={{ gridColumn: { md: '1 / -1' } }}>
-              <BusinessAttachmentPicker title="挽回凭证" description="用于上传付款、聊天或其他挽回过程截图，可多选、拖拽或直接粘贴。" value={form.paymentAttachments} onChange={(paymentAttachments) => setForm((current) => ({ ...current, paymentAttachments }))} category="recovery-payment-proof" draftKey={editingOrder?.id || `recovery-new-${currentUser?.id || 'unknown'}`} maxCount={8} />
+              <BusinessAttachmentPicker title="付款截图" description="用于核对挽回成交的付款事实，可多选、拖拽或直接粘贴。" value={form.paymentAttachments} onChange={(paymentAttachments) => setForm((current) => ({ ...current, paymentAttachments }))} category="recovery-payment-proof" draftKey={editingOrder?.id || `recovery-new-${currentUser?.id || 'unknown'}`} maxCount={8} />
+            </Box>
+            <Box sx={{ gridColumn: { md: '1 / -1' } }}>
+              <BusinessAttachmentPicker title="成交路径 / 聊天记录" description="用于留存成交确认和沟通过程，可多选、拖拽或直接粘贴。" value={form.chatAttachments} onChange={(chatAttachments) => setForm((current) => ({ ...current, chatAttachments }))} category="recovery-chat-evidence" draftKey={editingOrder?.id || `recovery-new-${currentUser?.id || 'unknown'}`} maxCount={8} />
             </Box>
             <TextField label="备注" value={form.remark} onChange={(event) => setForm({ ...form, remark: event.target.value })} multiline minRows={3} sx={{ gridColumn: { md: '1 / -1' } }} />
           </Box>
@@ -901,110 +1013,78 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                 <Typography variant="h6" sx={{ fontWeight: 600 }}>{detailOrder.recoveryNo}</Typography>
                 <Typography variant="body2" sx={{ fontWeight: 600, color: '#374151' }}>{detailOrder.originalProduct}</Typography>
-                {mode === 'review' && (
-                  <Chip
-                    label={getRecoveryOrderUnifiedReviewStatus(detailOrder.status, Boolean(detailOrder.deletedAt))}
-                    size="small"
-                    sx={detailOrder.deletedAt
-                      ? { bgcolor: '#f1f5f9', color: shell.muted, fontWeight: 700 }
-                      : { ...getStatusSx(detailOrder.status), fontWeight: 700 }}
-                  />
-                )}
+                <Chip
+                  label={mode === 'review'
+                    ? getRecoveryOrderUnifiedReviewStatus(detailOrder.status, Boolean(detailOrder.deletedAt))
+                    : getRecoveryOrderBusinessStatus(detailOrder)}
+                  size="small"
+                  sx={detailOrder.deletedAt
+                    ? { bgcolor: '#f1f5f9', color: shell.muted, fontWeight: 700 }
+                    : { ...getStatusSx(detailOrder.status), fontWeight: 700 }}
+                />
               </Box>
             </DialogCloseTitle>
             <DialogContent dividers>
+              <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>客户资料</Typography>
               <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 2 }}>
-                <Box>
-                  <Typography variant="body2" sx={{ color: '#6b7280' }}>客户名称</Typography>
-                  <Typography variant="body1" sx={{ fontWeight: 500 }}>{detailOrder.customerName}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" sx={{ color: '#6b7280' }}>客户手机号</Typography>
-                  <Typography variant="body1" sx={{ fontWeight: 500 }}>{detailOrder.customerPhone || '-'}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" sx={{ color: '#6b7280' }}>客户微信</Typography>
-                  <Typography variant="body1" sx={{ fontWeight: 500 }}>{detailOrder.customerWechat || '-'}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" sx={{ color: '#6b7280' }}>第三方平台订单号</Typography>
-                  <Typography variant="body1" sx={{ fontWeight: 500 }}>{detailOrder.thirdPartyOrderNo}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" sx={{ color: '#6b7280' }}>原产品</Typography>
-                  <Typography variant="body1" sx={{ fontWeight: 500 }}>{detailOrder.originalProduct}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" sx={{ color: '#6b7280' }}>产品等级</Typography>
-                  {(() => {
-                    const product = productOptions.find((item) => item.name === detailOrder.originalProduct);
-                    return product ? <Chip label={product.level} size="small" sx={getProductLevelTagSx(product.level)} /> : <Typography variant="body1">-</Typography>;
-                  })()}
-                </Box>
-                <Box>
-                  <Typography variant="body2" sx={{ color: '#6b7280' }}>原付款金额</Typography>
-                  <Typography variant="body1" sx={{ fontWeight: 700, color: '#1a1a2e' }}>{formatCurrency(detailOrder.originalAmount)}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" sx={{ color: '#6b7280' }}>挽回成交金额</Typography>
-                  <Typography variant="body1" sx={{ fontWeight: 700, color: shell.green }}>{formatCurrency(detailOrder.recoveryAmount)}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" sx={{ color: '#6b7280' }}>来源平台</Typography>
-                  <Typography variant="body1">{[detailOrder.sourcePlatformName || detailOrder.sourcePlatform, detailOrder.sourceShopName].filter(Boolean).join(' / ') || '-'}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" sx={{ color: '#6b7280' }}>挽回人员</Typography>
-                  <Typography variant="body1">{detailOrder.recoveryUserName}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" sx={{ color: '#6b7280' }}>订单创建人</Typography>
-                  <Typography variant="body1">{detailOrder.createdByName || '-'}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" sx={{ color: '#6b7280' }}>挽回时间</Typography>
-                  <Typography variant="body1">{formatDate(detailOrder.recoveryAt || detailOrder.createdAt, 'yyyy-MM-dd HH:mm:ss')}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" sx={{ color: '#6b7280' }}>审核人</Typography>
-                  <Typography variant="body1">{detailOrder.auditorName || '-'}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" sx={{ color: '#6b7280' }}>创建时间</Typography>
-                  <Typography variant="body1">{formatDate(detailOrder.createdAt, 'yyyy-MM-dd HH:mm:ss')}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" sx={{ color: '#6b7280' }}>审核时间</Typography>
-                  <Typography variant="body1">{detailOrder.auditedAt ? formatDate(detailOrder.auditedAt, 'yyyy-MM-dd HH:mm:ss') : '-'}</Typography>
-                </Box>
-                <Box sx={{ gridColumn: { md: '1 / -1' } }}>
-                  <Typography variant="body2" sx={{ color: '#6b7280' }}>备注</Typography>
-                  <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>{detailOrder.remark || '-'}</Typography>
-                </Box>
+                <DetailField label="客户名称">{detailOrder.customerName}</DetailField>
+                <DetailField label="客户手机号">{detailOrder.customerPhone || '-'}</DetailField>
+                <DetailField label="客户微信">{detailOrder.customerWechat || '-'}</DetailField>
+                <DetailField label="客户匹配状态">{detailOrder.customerMatchStatus || '-'}</DetailField>
               </Box>
 
               <Divider sx={{ my: 2 }} />
-              <Typography variant="subtitle2" sx={{ mb: 1, color: '#6b7280' }}>凭证记录</Typography>
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>挽回凭证</TableCell>
-                      <TableCell>审核说明</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    <TableRow>
-                      <TableCell>
-                        {[...(detailOrder.paymentAttachments || []), ...(detailOrder.chatAttachments || [])].length
-                          ? <BusinessAttachmentLinks attachments={[...(detailOrder.paymentAttachments || []), ...(detailOrder.chatAttachments || [])]} />
-                          : <AttachmentPreviewLink title="挽回凭证" fileName={detailOrder.paymentVoucherName || detailOrder.paymentVoucher || detailOrder.chatEvidenceName || detailOrder.chatEvidence} src={detailOrder.paymentVoucherPreview || detailOrder.chatEvidencePreview} />}
-                      </TableCell>
-                      <TableCell>{detailOrder.auditReason || '-'}</TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              </TableContainer>
+              <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>原订单资料</Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 2 }}>
+                <DetailField label="第三方平台订单号">{detailOrder.thirdPartyOrderNo || '-'}</DetailField>
+                <DetailField label="来源平台">{detailOrder.sourcePlatformName || detailOrder.sourcePlatform || '-'}</DetailField>
+                <DetailField label="来源店铺">{detailOrder.sourceShopName || '-'}</DetailField>
+                <DetailField label="原产品">{detailOrder.originalProduct}</DetailField>
+                <DetailField label="原产品等级">{(() => {
+                  const level = detailOrder.originalProductLevel || productOptions.find((item) => item.name === detailOrder.originalProduct)?.level;
+                  return level ? <Chip label={level} size="small" sx={getProductLevelTagSx(level)} /> : '-';
+                })()}</DetailField>
+                <DetailField label="原付款金额"><Typography sx={{ fontWeight: 700 }}>{formatCurrency(detailOrder.originalAmount)}</Typography></DetailField>
+              </Box>
+
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>挽回成交资料</Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 2 }}>
+                <DetailField label="挽回成交金额"><Typography sx={{ fontWeight: 700, color: shell.green }}>{formatCurrency(detailOrder.recoveryAmount)}</Typography></DetailField>
+                <DetailField label="挽回成交时间">{formatDate(detailOrder.recoveryAt || detailOrder.createdAt, 'yyyy-MM-dd HH:mm:ss')}</DetailField>
+                <DetailField label="官方收款渠道">{detailOrder.officialPaymentChannel || '-'}</DetailField>
+                <DetailField label="付款订单号">{detailOrder.paymentOrderNo || '-'}</DetailField>
+                <DetailField label="付款时间">{detailOrder.paymentAt ? formatDate(detailOrder.paymentAt, 'yyyy-MM-dd HH:mm:ss') : '-'}</DetailField>
+                <DetailField label="挽回人员">{detailOrder.recoveryUserName}</DetailField>
+                <DetailField label="协助人员">{detailOrder.assistUserName || '-'}</DetailField>
+                <DetailField label="备注" wide><Typography sx={{ whiteSpace: 'pre-wrap' }}>{detailOrder.remark || '-'}</Typography></DetailField>
+              </Box>
+
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>审核资料</Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 2 }}>
+                <DetailField label="订单创建人">{detailOrder.createdByName || '-'}</DetailField>
+                <DetailField label="审核状态">{getRecoveryOrderUnifiedReviewStatus(detailOrder.status, Boolean(detailOrder.deletedAt))}</DetailField>
+                <DetailField label="审核人">{detailOrder.auditorName || '-'}</DetailField>
+                <DetailField label="审核时间">{detailOrder.auditedAt ? formatDate(detailOrder.auditedAt, 'yyyy-MM-dd HH:mm:ss') : '-'}</DetailField>
+                <DetailField label="创建时间">{formatDate(detailOrder.createdAt, 'yyyy-MM-dd HH:mm:ss')}</DetailField>
+                <DetailField label="退回 / 驳回原因" wide>{detailOrder.auditReason || '-'}</DetailField>
+              </Box>
+
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>凭证资料</Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
+                <DetailField label="付款截图">
+                  {detailOrder.paymentAttachments?.length
+                    ? <BusinessAttachmentLinks attachments={detailOrder.paymentAttachments} />
+                    : <AttachmentPreviewLink title="付款截图" fileName={detailOrder.paymentVoucherName || detailOrder.paymentVoucher} src={detailOrder.paymentVoucherPreview} />}
+                </DetailField>
+                <DetailField label="成交路径 / 聊天记录">
+                  {detailOrder.chatAttachments?.length
+                    ? <BusinessAttachmentLinks attachments={detailOrder.chatAttachments} />
+                    : <AttachmentPreviewLink title="成交路径 / 聊天记录" fileName={detailOrder.chatEvidenceName || detailOrder.chatEvidence} src={detailOrder.chatEvidencePreview} />}
+                </DetailField>
+              </Box>
             </DialogContent>
           </>
         )}

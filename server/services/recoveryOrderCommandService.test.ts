@@ -75,7 +75,9 @@ function dbUser(user: AuthenticatedUser) {
 function input(overrides: Partial<RecoveryOrderInput> = {}): RecoveryOrderInput {
   return {
     customerName: '张三', thirdPartyOrderNo: 'TP-20260712-001', originalProduct: '899课程',
+    originalProductId: 'product-899', originalProductLevel: '899',
     originalAmount: 899, recoveryAmount: 2980, recoveryAt: '2026-07-12T15:30:00.000Z', recoveryUserId: creator.id,
+    officialPaymentChannel: '对公银行转账', paymentOrderNo: 'PAY-20260712-001', paymentAt: '2026-07-12T15:20:00.000Z',
     recoveryUserName: '伪造姓名', customerWechat: 'zhangsan', createdBy: other.id, createdByName: other.name, ...overrides,
   };
 }
@@ -299,6 +301,12 @@ const missingContact = await service.create(input({
 assert.equal(missingContact.code, 400);
 assert.equal(missingContact.message, '手机号或微信至少填写一项');
 
+const invalidPaymentChannel = await service.create(input({
+  thirdPartyOrderNo: 'TP-BAD-PAYMENT-CHANNEL', officialPaymentChannel: '私人收款码' as any,
+}), creator);
+assert.equal(invalidPaymentChannel.code, 400);
+assert.equal(invalidPaymentChannel.message, '官方收款渠道无效');
+
 const tooManyProofs = Array.from({ length: 9 }, (_, index) => ({
   id: `proof-${index}`, name: `${index}.png`, mimeType: 'image/png', size: 100,
   category: 'recovery-payment-proof' as const, uploadedById: creator.id,
@@ -316,6 +324,11 @@ assert.equal(created.data?.createdBy, creator.id, '操作人必须由会话确�
 assert.equal(created.data?.createdByName, creator.name);
 assert.equal(created.data?.recoveryUserName, creator.name, '姓名必须从员工目录解析');
 assert.equal(created.data?.recoveryAt, '2026-07-12T15:30:00.000Z', '挽回时间必须按提交值保存');
+assert.equal(created.data?.originalProductId, 'product-899');
+assert.equal(created.data?.originalProductLevel, '899', '原产品等级必须作为成交快照保存');
+assert.equal(created.data?.officialPaymentChannel, '对公银行转账');
+assert.equal(created.data?.paymentOrderNo, 'PAY-20260712-001');
+assert.equal(created.data?.paymentAt, '2026-07-12T15:20:00.000Z');
 assert.ok(prisma.records().some((item) => item.id === oldRecord.id), '新增不得覆盖或删除其他记录');
 
 const creatorList = await service.list({ page: 1, pageSize: 20 }, creator);

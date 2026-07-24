@@ -6,7 +6,7 @@ import { buildDataVisibilityScopeForUser, type DataVisibilityScope } from '../..
 import { PERMISSION_KEYS, canReviewRecoveryOrders, hasPermission, isSuperAdmin } from '../../src/shared/utils/permissions';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Department } from '../../src/types/department';
-import type { Commission } from '../../src/types/commission';
+import type { Commission, OfficialPaymentChannel } from '../../src/types/commission';
 import type { RecoveryOrder, RecoveryOrderFilters, RecoveryOrderInput, RecoverySettlementCounts, RecoverySettlementInput } from '../../src/types/recoveryOrder';
 import {
   isInactiveRecoveryCommissionStatus,
@@ -65,11 +65,30 @@ function cleanText(value: unknown): string {
   return String(value || '').trim();
 }
 
+const OFFICIAL_PAYMENT_CHANNEL_VALUES = new Set<OfficialPaymentChannel>([
+  '企业微信转账', '企业支付宝转账', '对公银行转账', '公司自营小店', '非官方渠道',
+]);
+
+function officialPaymentChannel(value: unknown): OfficialPaymentChannel | undefined {
+  const channel = cleanText(value) as OfficialPaymentChannel;
+  if (!channel) return undefined;
+  if (!OFFICIAL_PAYMENT_CHANNEL_VALUES.has(channel)) throw new RecoveryCommandError(400, '官方收款渠道无效');
+  return channel;
+}
+
 function recoveryTime(value: unknown, fallback: string): string {
   const text = cleanText(value);
   if (!text) return fallback;
   const parsed = new Date(text);
   if (Number.isNaN(parsed.getTime())) throw new RecoveryCommandError(400, '挽回时间格式无效');
+  return parsed.toISOString();
+}
+
+function optionalPaymentTime(value: unknown): string | undefined {
+  const text = cleanText(value);
+  if (!text) return undefined;
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) throw new RecoveryCommandError(400, '付款时间格式无效');
   return parsed.toISOString();
 }
 
@@ -129,7 +148,7 @@ function buildRecoveryCommission(
     orderId: order.id,
     orderNo: order.recoveryNo,
     customerName: order.customerName,
-    productLevel: order.originalProduct,
+    productLevel: order.originalProductLevel || order.originalProduct,
     orderAmount: order.recoveryAmount,
     performanceAmount,
     commissionRate,
@@ -185,11 +204,16 @@ function sameCreate(existing: RecoveryOrder, desired: RecoveryOrder, compareReco
     && normalizeOrderNo(existing.thirdPartyOrderNo) === normalizeOrderNo(desired.thirdPartyOrderNo)
     && existing.customerName === desired.customerName
     && existing.originalProduct === desired.originalProduct
+    && (existing.originalProductId || '') === (desired.originalProductId || '')
+    && (existing.originalProductLevel || '') === (desired.originalProductLevel || '')
     && Number(existing.originalAmount) === Number(desired.originalAmount)
     && Number(existing.recoveryAmount) === Number(desired.recoveryAmount)
     && (!compareRecoveryAt || (existing.recoveryAt || existing.createdAt) === (desired.recoveryAt || desired.createdAt))
     && existing.recoveryUserId === desired.recoveryUserId
-    && (existing.assistUserId || '') === (desired.assistUserId || '');
+    && (existing.assistUserId || '') === (desired.assistUserId || '')
+    && (existing.officialPaymentChannel || '') === (desired.officialPaymentChannel || '')
+    && (existing.paymentOrderNo || '') === (desired.paymentOrderNo || '')
+    && (existing.paymentAt || '') === (desired.paymentAt || '');
 }
 
 function recoveryScope(
@@ -641,9 +665,11 @@ export function createRecoveryOrderCommandService(
       if (recoveryAmount <= 0) return failure('挽回成交金额必须大于 0', 400);
       let paymentAttachments: BusinessAttachment[];
       let chatAttachments: BusinessAttachment[];
+      let paymentChannel: OfficialPaymentChannel | undefined;
       try {
         paymentAttachments = validateAttachments(input.paymentAttachments, 'recovery-payment-proof', '挽回凭证');
         chatAttachments = validateAttachments(input.chatAttachments, 'recovery-chat-evidence', '聊天记录');
+        paymentChannel = officialPaymentChannel(input.officialPaymentChannel);
       } catch (error) {
         if (error instanceof RecoveryCommandError) return failure(error.message, error.responseCode);
         throw error;
@@ -688,9 +714,14 @@ export function createRecoveryOrderCommandService(
         sourceShopId: cleanText(input.sourceShopId) || undefined,
         sourceShopName: cleanText(input.sourceShopName) || undefined,
         originalProduct,
+        originalProductId: cleanText(input.originalProductId) || undefined,
+        originalProductLevel: cleanText(input.originalProductLevel) || undefined,
         originalAmount: amount(input.originalAmount),
         recoveryAmount,
         recoveryAt: recoveryTime(input.recoveryAt, createdAt),
+        officialPaymentChannel: paymentChannel,
+        paymentOrderNo: cleanText(input.paymentOrderNo) || undefined,
+        paymentAt: optionalPaymentTime(input.paymentAt),
         paymentVoucher: input.paymentVoucher,
         paymentVoucherName: input.paymentVoucherName,
         paymentVoucherPreview: input.paymentVoucherPreview,
@@ -805,9 +836,14 @@ export function createRecoveryOrderCommandService(
           sourceShopId: cleanText(input.sourceShopId) || undefined,
           sourceShopName: cleanText(input.sourceShopName) || undefined,
           originalProduct: validated.originalProduct,
+          originalProductId: cleanText(input.originalProductId) || current.originalProductId,
+          originalProductLevel: cleanText(input.originalProductLevel) || current.originalProductLevel,
           originalAmount: validated.originalAmount,
           recoveryAmount: validated.recoveryAmount,
           recoveryAt: recoveryTime(input.recoveryAt, current.recoveryAt || current.createdAt),
+          officialPaymentChannel: officialPaymentChannel(input.officialPaymentChannel),
+          paymentOrderNo: cleanText(input.paymentOrderNo) || undefined,
+          paymentAt: optionalPaymentTime(input.paymentAt),
           paymentVoucher: input.paymentVoucher,
           paymentVoucherName: input.paymentVoucherName,
           paymentVoucherPreview: input.paymentVoucherPreview,

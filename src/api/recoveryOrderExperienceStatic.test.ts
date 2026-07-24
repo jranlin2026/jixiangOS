@@ -13,7 +13,7 @@ const recoverySettlementSource = readFileSync(
 
 assert.match(
   recoveryOrderSource,
-  /label="挽回时间"[\s\S]*?type="datetime-local"/,
+  /label="挽回成交时间"[\s\S]*?type="datetime-local"/,
   'Recovery order form should expose a recovery-time datetime field.',
 );
 
@@ -30,18 +30,35 @@ const createDialogSource = recoveryOrderSource.slice(
 
 assert.equal(
   (createDialogSource.match(/<BusinessAttachmentPicker/g) || []).length,
-  1,
-  'Recovery order form should render exactly one attachment upload window.',
+  2,
+  'Recovery order form should separate payment proof from deal/chat evidence.',
 );
-assert.match(createDialogSource, /title="挽回凭证"/);
-assert.doesNotMatch(createDialogSource, /title="聊天记录截图"/);
+assert.match(createDialogSource, /title="付款截图"/);
+assert.match(createDialogSource, /title="成交路径 \/ 聊天记录"/);
 
 const detailDialogSource = recoveryOrderSource.slice(
   recoveryOrderSource.indexOf('<Dialog open={Boolean(detailOrder)}'),
   recoveryOrderSource.indexOf('<Dialog open={Boolean(historyOrder)}'),
 );
-assert.match(detailDialogSource, /挽回凭证/);
-assert.doesNotMatch(detailDialogSource, /<TableCell>聊天记录截图<\/TableCell>/);
+for (const section of ['客户资料', '原订单资料', '挽回成交资料', '审核资料', '凭证资料']) {
+  assert.match(detailDialogSource, new RegExp(section), `售后资料弹窗应包含“${section}”分区。`);
+}
+assert.match(detailDialogSource, /付款截图/);
+assert.match(detailDialogSource, /成交路径 \/ 聊天记录/);
+
+for (const field of [
+  'originalProductLevel', 'sourcePlatformShop', 'customerMatchStatus',
+  'officialPaymentChannel', 'paymentOrderNo', 'paymentAt', 'assistUserName',
+  'auditorName', 'auditedAt', 'auditReason', 'updatedAt',
+]) {
+  assert.match(recoveryOrderSource, new RegExp(`\\| '${field}'`), `售后视图字段池应包含 ${field}。`);
+}
+assert.match(recoveryOrderSource, /const RECOVERY_ORDER_LIST_COLUMNS/);
+assert.match(recoveryOrderSource, /const RECOVERY_ORDER_REVIEW_COLUMNS/);
+assert.doesNotMatch(recoveryOrderSource.slice(
+  recoveryOrderSource.indexOf('const RECOVERY_ORDER_LIST_COLUMNS'),
+  recoveryOrderSource.indexOf('const RECOVERY_LIST_STATUSES'),
+), /id: 'actions'/, '操作列不应进入视图设置字段池。');
 
 const settlementRecoveryNoCell = recoverySettlementSource.slice(
   recoverySettlementSource.indexOf("case 'recoveryNo':"),
@@ -57,7 +74,7 @@ assert.match(recoverySettlementSource, /sourceDetailOrder\.recoveryAt/);
 
 assert.match(
   recoveryOrderSource,
-  /\| 'recoveryAt'[\s\S]*?\{ id: 'recoveryAt', label: '挽回时间' \}/,
+  /\| 'recoveryAt'[\s\S]*?\{ id: 'recoveryAt', label: '挽回成交时间' \}/,
   'Recovery order list and review table should expose a recovery-time column.',
 );
 assert.match(
