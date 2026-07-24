@@ -81,6 +81,12 @@
 - AppStorage and correlation/audit metadata contain hashes, IDs, states, timestamps, counters, and fixed labels only. Raw sender/contact/token/signing key/precheck token/customer message values are excluded.
 - No schema/migration, session reuse, permission widening, logging of sensitive diagnostics, or MCP work was introduced.
 
+## Final review closeout
+
+- Final task re-review: spec compliant and task quality approved; no Critical or Important findings remain.
+- Resolved the sole Minor finding by correcting `.env.example` from “all three” to “all four” required server-side automation values.
+- Final Minor-fix verification: `npx tsx server/services/wechatAutomationSecurity.test.ts`, `npx tsx server/config/runtime.test.ts`, `npx tsx server/config/productionConfigCheck.test.ts`, and `git diff --check` passed.
+
 ## Replay provenance second follow-up
 
 ### Implementation
