@@ -689,10 +689,12 @@ function applyOrderSummaryFilters(summaries: CommissionOrderSummary[], filters?:
   let filtered = [...summaries];
   if (filters?.search) {
     const q = filters.search.toLowerCase();
-    filtered = filtered.filter((item) => item.orderNo.toLowerCase().includes(q) || item.customerName.toLowerCase().includes(q));
+    filtered = filtered.filter((item) => [item.orderNo, item.customerName, item.thirdPartyOrderNo, item.paymentOrderNo]
+      .some((value) => String(value || '').toLowerCase().includes(q)));
   }
   if (filters?.status && filters.status !== '全部') filtered = filtered.filter((item) => item.status === filters.status);
   if (filters?.ownerId) filtered = filtered.filter((item) => item.commissions.some((commission) => commission.ownerId === filters.ownerId));
+  if (filters?.salesId) filtered = filtered.filter((item) => item.salesId === filters.salesId);
   if (filters?.role) filtered = filtered.filter((item) => item.commissions.some((commission) => commission.role === filters.role));
   if (filters?.month) filtered = filtered.filter((item) => item.paymentDate.startsWith(filters.month!));
   const { startDate, endDate } = normalizeDateRange(filters?.startDate, filters?.endDate);

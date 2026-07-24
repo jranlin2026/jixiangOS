@@ -1023,6 +1023,7 @@ app.get('/api/recovery-orders', requireStorageAccess, async (req: AuthenticatedR
     settlementStatus: queryParam(req.query.settlementStatus) as RecoveryOrderFilters['settlementStatus'] || undefined,
     settlementStatuses: queryParam(req.query.settlementStatuses).split(',').filter(Boolean) as RecoveryOrderFilters['settlementStatuses'],
     ownerId: queryParam(req.query.ownerId) || undefined,
+    recoveryUserId: queryParam(req.query.recoveryUserId) || undefined,
     recoveryStartDate: queryParam(req.query.recoveryStartDate) || undefined,
     recoveryEndDate: queryParam(req.query.recoveryEndDate) || undefined,
     sortBy: queryParam(req.query.sortBy) as RecoveryOrderFilters['sortBy'] || undefined,
@@ -1041,6 +1042,7 @@ app.get('/api/recovery-orders/settlement-counts', requireStorageAccess, async (r
     includeDeleted: queryParam(req.query.includeDeleted) === 'true',
     recoveryStartDate: queryParam(req.query.recoveryStartDate) || undefined,
     recoveryEndDate: queryParam(req.query.recoveryEndDate) || undefined,
+    recoveryUserId: queryParam(req.query.recoveryUserId) || undefined,
   }, req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });

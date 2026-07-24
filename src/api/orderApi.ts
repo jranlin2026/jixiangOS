@@ -254,7 +254,12 @@ async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<Paginate
   if (filters?.search) {
     const q = filters.search.toLowerCase();
     filtered = filtered.filter(
-      (o) => o.orderNo.toLowerCase().includes(q) || o.customerName.toLowerCase().includes(q),
+      (o) => [
+        o.orderNo,
+        o.customerName,
+        o.thirdPartyOrderNo,
+        o.payments?.[0]?.paymentOrderNo,
+      ].some((value) => String(value || '').toLowerCase().includes(q)),
     );
   }
   if (filters?.customerId) {

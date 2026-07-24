@@ -185,6 +185,8 @@ function matchesOrder(order: Order, filters: OrderFilters): boolean {
     order.orderNo,
     order.customerName,
     order.productName,
+    order.thirdPartyOrderNo,
+    order.payments?.[0]?.paymentOrderNo,
     order.salesName,
     order.owner,
   ].some((value) => lowerText(value).includes(search))) return false;
@@ -250,7 +252,7 @@ async function queryOrderPage(
   const search = lowerText(filters.search);
   if (search) {
     const pattern = `%${search}%`;
-    conditions.push(Prisma.sql`(LOWER(br.recordId) LIKE ${pattern} OR LOWER(COALESCE(br.title, '')) LIKE ${pattern} OR LOWER(COALESCE(br.owner, '')) LIKE ${pattern} OR LOWER(${jsonText('br', '$.orderNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.customerName')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.productName')}) LIKE ${pattern})`);
+    conditions.push(Prisma.sql`(LOWER(br.recordId) LIKE ${pattern} OR LOWER(COALESCE(br.title, '')) LIKE ${pattern} OR LOWER(COALESCE(br.owner, '')) LIKE ${pattern} OR LOWER(${jsonText('br', '$.orderNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.customerName')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.productName')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.thirdPartyOrderNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.payments[0].paymentOrderNo')}) LIKE ${pattern})`);
   }
   return queryBusinessRecordPage<Order>(prisma, {
     from: 'business_records br', selectId: 'br.id', selectData: 'br.data', conditions,

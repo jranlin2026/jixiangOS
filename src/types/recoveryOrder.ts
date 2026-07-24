@@ -135,6 +135,8 @@ export interface RecoveryOrderFilters {
   settlementStatus?: RecoveryOrderSettlementStatus | '全部';
   settlementStatuses?: RecoveryOrderSettlementStatus[];
   ownerId?: ID;
+  /** 仅按挽回人员筛选，避免把提交人和协助人员混入结果。 */
+  recoveryUserId?: ID;
   recoveryStartDate?: string;
   recoveryEndDate?: string;
   sortBy?: 'updatedAt' | 'createdAt' | 'recoveryAt';

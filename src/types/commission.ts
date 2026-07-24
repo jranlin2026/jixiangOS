@@ -412,6 +412,8 @@ export interface CommissionOrderSummaryFilters {
   search?: string;
   status?: CommissionOrderSummaryStatus | '全部';
   ownerId?: ID;
+  /** 正式订单的销售负责人，与提成人员分开筛选。 */
+  salesId?: ID;
   role?: CommissionRole;
   startDate?: string;
   endDate?: string;

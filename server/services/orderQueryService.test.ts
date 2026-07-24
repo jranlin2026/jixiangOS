@@ -72,7 +72,10 @@ const records = [
     payments: [{ id: 'payment-self', amount: 899, paymentMethod: '对公转账', paidAt: now, voucherPreview: inlineProof }],
   }),
   order('order-legacy-self', undefined, sales.name),
-  order('order-other', 'user-other', '销售B'),
+  order('order-other', 'user-other', '销售B', {
+    thirdPartyOrderNo: 'THIRD-PARTY-LOOKUP',
+    payments: [{ id: 'payment-other', amount: 899, paymentMethod: '对公转账', paidAt: now, paymentOrderNo: 'PAYMENT-LOOKUP' }],
+  }),
   order('order-deleted', sales.id, sales.name, { deletedAt: now }),
   order('payment-sort-june', finance.id, finance.name, {
     payments: [{ id: 'payment-june', amount: 899, paymentMethod: '对公转账', paidAt: '2026-06-24T00:38:48.000Z' }],
@@ -156,6 +159,16 @@ assert.deepEqual(
 
 const financeOrders = await service.listOrders({ search: 'order-other', page: 1, pageSize: 10 }, finance);
 assert.deepEqual(financeOrders.data?.items.map((item) => item.id), ['order-other']);
+assert.deepEqual(
+  (await service.listOrders({ search: 'third-party-lookup', page: 1, pageSize: 10 }, finance)).data?.items.map((item) => item.id),
+  ['order-other'],
+  '订单关键词应支持第三方平台订单号',
+);
+assert.deepEqual(
+  (await service.listOrders({ search: 'payment-lookup', page: 1, pageSize: 10 }, finance)).data?.items.map((item) => item.id),
+  ['order-other'],
+  '订单关键词应支持付款订单号',
+);
 
 const newestCreatedFirst = await service.listOrders({ search: 'payment-sort', page: 1, pageSize: 10 }, finance);
 assert.deepEqual(

@@ -54,6 +54,7 @@ import { getActiveCommissions } from '../../shared/utils/financeSettlementPresen
 import { getRecoveryEvidenceAttachments } from '../../shared/utils/recoveryEvidence';
 import BusinessExportDialog, { type BusinessExportDialogRequest } from '../../shared/components/BusinessExportDialog';
 import { buildBusinessExportBrowserRequest, unwrapBusinessExportResponse } from '../../shared/utils/businessExportPageRequest';
+import BusinessStatusChip from '../../shared/components/BusinessStatusChip';
 
 const shell = {
   ink: '#0f172a',
@@ -387,9 +388,10 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<RecoverySettlementFilterStatus>('全部');
+  const [recoveryUserId, setRecoveryUserId] = useState('');
   const [recoveryStartDate, setRecoveryStartDate] = useState('');
   const [recoveryEndDate, setRecoveryEndDate] = useState('');
-  const [sortBy, setSortBy] = useState<'updatedAt' | 'recoveryAt'>('updatedAt');
+  const [sortBy, setSortBy] = useState<'updatedAt' | 'recoveryAt'>('recoveryAt');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -477,6 +479,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         includeDeleted: true,
         recoveryStartDate: recoveryStartDate || undefined,
         recoveryEndDate: recoveryEndDate || undefined,
+        recoveryUserId: recoveryUserId || undefined,
         sortBy,
         sortDirection,
         page: page + 1,
@@ -487,6 +490,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         includeDeleted: true,
         recoveryStartDate: recoveryStartDate || undefined,
         recoveryEndDate: recoveryEndDate || undefined,
+        recoveryUserId: recoveryUserId || undefined,
       }),
       settingsApi.fetchAssignableDirectory(),
       commissionRuleApi.getCommissionRoleConfigs({ isActive: true }),
@@ -507,7 +511,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     if (rolesRes.code === 0) setRoles(rolesRes.data);
     if (plansRes.code === 0) setPlans(plansRes.data);
     if (commissionRes.code === 0) setSettlementCommissions(commissionRes.data.items);
-  }, [page, recoveryEndDate, recoveryStartDate, rowsPerPage, search, sortBy, sortDirection, status]);
+  }, [page, recoveryEndDate, recoveryStartDate, recoveryUserId, rowsPerPage, search, sortBy, sortDirection, status]);
 
   const applySettlementMutation = useCallback((previous: RecoveryOrder, next: RecoveryOrder) => {
     const previousStatus = getSettlementStatus(previous);
@@ -699,9 +703,10 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   const handleResetFilters = () => {
     setSearch('');
     setStatus('全部');
+    setRecoveryUserId('');
     setRecoveryStartDate('');
     setRecoveryEndDate('');
-    setSortBy('updatedAt');
+    setSortBy('recoveryAt');
     setSortDirection('desc');
     setPage(0);
   };
@@ -1063,7 +1068,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       case 'auditorName':
         return row.auditorName || '-';
       case 'status':
-        return <Chip size="small" label={settlementStatus} color={getStatusChipColor(settlementStatus)} sx={{ fontWeight: 900 }} />;
+        return <BusinessStatusChip status={settlementStatus} />;
       case 'auditedAt':
         return row.auditedAt ? formatDate(row.auditedAt, 'yyyy-MM-dd HH:mm') : '-';
       case 'remark':
@@ -1179,15 +1184,14 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
             InputProps={{ startAdornment: <SearchIcon fontSize="small" sx={{ mr: 1, color: shell.muted }} /> }}
             sx={{ minWidth: 240 }}
           />
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel>分账状态</InputLabel>
-            <Select label="分账状态" value={status} onChange={(event) => {
-              setStatus(event.target.value as RecoverySettlementFilterStatus);
+          <FormControl size="small" sx={{ minWidth: 170 }}>
+            <InputLabel>挽回人员</InputLabel>
+            <Select label="挽回人员" value={recoveryUserId} onChange={(event) => {
+              setRecoveryUserId(event.target.value);
               setPage(0);
             }}>
-              {STATUS_OPTIONS.map((option) => (
-                <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
-              ))}
+              <MenuItem value="">全部</MenuItem>
+              {activeUsers.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
             </Select>
           </FormControl>
           <TextField
@@ -1406,7 +1410,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                       <Typography variant="h6" sx={{ color: shell.ink, fontWeight: 900, letterSpacing: 0 }}>
                         {detailOrder.recoveryNo}
                       </Typography>
-                      <Chip label={getSettlementStatus(detailOrder)} size="small" color={getStatusChipColor(getSettlementStatus(detailOrder))} sx={{ fontWeight: 900 }} />
+                      <BusinessStatusChip status={getSettlementStatus(detailOrder)} />
                       {isSourceRecoveryDeleted(detailOrder) && <Chip label="源挽回单已删除" size="small" />}
                     </Stack>
                     <Typography variant="body2" sx={{ color: shell.muted, overflowWrap: 'anywhere' }}>
@@ -1802,7 +1806,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                       <Typography variant="h6" sx={{ color: shell.ink, fontWeight: 900, letterSpacing: 0 }}>
                         {selected.recoveryNo}
                       </Typography>
-                      <Chip label={getSettlementStatus(selected)} size="small" color={getStatusChipColor(getSettlementStatus(selected))} sx={{ fontWeight: 900 }} />
+                      <BusinessStatusChip status={getSettlementStatus(selected)} />
                     </Stack>
                     <Typography variant="body2" sx={{ color: shell.muted, overflowWrap: 'anywhere' }}>
                       {selected.customerName} · 售后挽回 · {selected.createdAt ? formatDate(selected.createdAt, 'yyyy-MM-dd HH:mm:ss') : '-'}

@@ -305,6 +305,7 @@ function matchesRecoveryOrder(order: RecoveryOrder, filters: RecoveryOrderFilter
   if (filters.settlementStatus && filters.settlementStatus !== '全部' && settlementStatus !== filters.settlementStatus) return false;
   if (filters.settlementStatuses?.length && !filters.settlementStatuses.includes(settlementStatus as any)) return false;
   if (filters.ownerId && ![order.createdBy, order.recoveryUserId, order.assistUserId].includes(filters.ownerId)) return false;
+  if (filters.recoveryUserId && order.recoveryUserId !== filters.recoveryUserId) return false;
   return inDateRange(order.recoveryAt || order.createdAt, filters.recoveryStartDate, filters.recoveryEndDate);
 }
 
@@ -348,6 +349,9 @@ function recoverySqlConditions(filters: RecoveryOrderFilters, scope: DataVisibil
   if (filters.ownerId) {
     conditions.push(Prisma.sql`(${jsonText('br', '$.createdBy')} = ${filters.ownerId} OR ${jsonText('br', '$.recoveryUserId')} = ${filters.ownerId} OR ${jsonText('br', '$.assistUserId')} = ${filters.ownerId})`);
   }
+  if (filters.recoveryUserId) {
+    conditions.push(Prisma.sql`${jsonText('br', '$.recoveryUserId')} = ${filters.recoveryUserId}`);
+  }
   const recoveryAt = Prisma.sql`COALESCE(${jsonText('br', '$.recoveryAt')}, ${jsonText('br', '$.createdAt')}, br.createdAt)`;
   if (filters.recoveryStartDate) conditions.push(Prisma.sql`${recoveryAt} >= ${filters.recoveryStartDate}`);
   if (filters.recoveryEndDate) conditions.push(Prisma.sql`${recoveryAt} <= ${/^\d{4}-\d{2}-\d{2}$/.test(filters.recoveryEndDate) ? `${filters.recoveryEndDate}T23:59:59.999Z` : filters.recoveryEndDate}`);
@@ -385,7 +389,7 @@ async function queryRecoveryPage(
 
 async function queryRecoverySettlementCounts(
   prisma: RecoveryCommandPrisma,
-  filters: Pick<RecoveryOrderFilters, 'search' | 'includeDeleted' | 'recoveryStartDate' | 'recoveryEndDate'>,
+  filters: Pick<RecoveryOrderFilters, 'search' | 'includeDeleted' | 'recoveryStartDate' | 'recoveryEndDate' | 'recoveryUserId'>,
   scope: DataVisibilityScope,
 ): Promise<RecoverySettlementCounts> {
   const conditions = recoverySqlConditions(filters, scope);
@@ -656,7 +660,7 @@ export function createRecoveryOrderCommandService(
     },
 
     async settlementCounts(
-      filters: Pick<RecoveryOrderFilters, 'search' | 'includeDeleted' | 'recoveryStartDate' | 'recoveryEndDate'>,
+      filters: Pick<RecoveryOrderFilters, 'search' | 'includeDeleted' | 'recoveryStartDate' | 'recoveryEndDate' | 'recoveryUserId'>,
       actor: AuthenticatedUser,
     ): Promise<ApiResponse<RecoverySettlementCounts | null>> {
       const canRead = hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY, 'read')

@@ -60,6 +60,7 @@ import {
   getRecoveryOrderReviewStatuses,
   type ReviewQueueView,
 } from '../../shared/utils/reviewQueue';
+import BusinessStatusChip from '../../shared/components/BusinessStatusChip';
 
 const shell = {
   ink: '#0f172a',
@@ -104,13 +105,6 @@ const emptyForm = {
 };
 
 type RecoveryOrderForm = typeof emptyForm;
-
-function getStatusSx(status: string) {
-  if (status === '已分账' || status === '待分账') return { bgcolor: '#ecfdf5', color: shell.green };
-  if (status === '审核驳回') return { bgcolor: '#fff1f2', color: shell.red };
-  if (status === '退回修改') return { bgcolor: '#eff6ff', color: shell.blue };
-  return { bgcolor: '#fff7ed', color: shell.amber };
-}
 
 function getRecoveryOrderBusinessStatus(order: RecoveryOrder): string {
   if (order.deletedAt) return '已删除（留痕）';
@@ -184,7 +178,7 @@ type RecoveryOrderColumnId =
 
 const RECOVERY_ORDER_LIST_COLUMNS: Array<TableViewColumnConfig & { id: RecoveryOrderColumnId }> = [
   { id: 'recoveryNo', label: '挽回订单号' },
-  { id: 'status', label: '当前状态' },
+  { id: 'status', label: '分账进度' },
   { id: 'customerName', label: '客户' },
   { id: 'thirdPartyOrderNo', label: '第三方平台订单' },
   { id: 'sourcePlatformShop', label: '来源平台 / 店铺' },
@@ -242,6 +236,7 @@ const RECOVERY_ORDER_REVIEW_COLUMNS: Array<TableViewColumnConfig & { id: Recover
 const DEFAULT_LIST_VISIBLE_COLUMNS: RecoveryOrderColumnId[] = RECOVERY_ORDER_LIST_COLUMNS.slice(0, 13).map((column) => column.id);
 const DEFAULT_REVIEW_VISIBLE_COLUMNS: RecoveryOrderColumnId[] = RECOVERY_ORDER_REVIEW_COLUMNS.slice(0, 14).map((column) => column.id);
 const RECOVERY_LIST_STATUSES: RecoveryOrderStatus[] = ['待分账', '已分账'];
+const RECOVERY_PROGRESS_OPTIONS = ['待分账', '待确认', '待发放', '已发放', '已撤回'] as const;
 
 function isRecoveryOrderLocked(row: RecoveryOrder): boolean {
   return row.status === '已分账' || ['待确认', '待发放', '已撤回'].includes(row.settlementStatus || '未分账');
@@ -263,9 +258,11 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const [products, setProducts] = useState<Product[]>([]);
   const [sourceConfigs, setSourceConfigs] = useState<AfterSalesSourceConfig[]>([]);
   const [search, setSearch] = useState('');
+  const [recoveryProgress, setRecoveryProgress] = useState('');
+  const [recoveryUserId, setRecoveryUserId] = useState('');
   const [recoveryStartDate, setRecoveryStartDate] = useState('');
   const [recoveryEndDate, setRecoveryEndDate] = useState('');
-  const [sortBy, setSortBy] = useState<'updatedAt' | 'recoveryAt'>('updatedAt');
+  const [sortBy, setSortBy] = useState<'updatedAt' | 'recoveryAt'>('recoveryAt');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [reviewQueueView, setReviewQueueView] = useState<ReviewQueueView>('pending');
   const [page, setPage] = useState(0);
@@ -308,6 +305,10 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
     statuses: mode === 'review'
       ? getRecoveryOrderReviewStatuses(reviewQueueView)
       : RECOVERY_LIST_STATUSES,
+    settlementStatuses: mode === 'list' && recoveryProgress
+      ? [recoveryProgress === '待分账' ? '待处理' : recoveryProgress] as RecoveryOrderFilters['settlementStatuses']
+      : undefined,
+    recoveryUserId: recoveryUserId || undefined,
     includeDeleted: mode === 'review' && reviewQueueView === 'all',
     scopeDomain: mode === 'review' ? 'recoveryOrderApplications' : 'recoveryOrders',
     recoveryStartDate: recoveryStartDate || undefined,
@@ -316,7 +317,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
     sortDirection,
     page: page + 1,
     pageSize: rowsPerPage,
-  }), [mode, page, recoveryEndDate, recoveryStartDate, reviewQueueView, rowsPerPage, search, sortBy, sortDirection]);
+  }), [mode, page, recoveryEndDate, recoveryProgress, recoveryStartDate, recoveryUserId, reviewQueueView, rowsPerPage, search, sortBy, sortDirection]);
 
   const handleRecoveryTimeSort = () => {
     setSortDirection((current) => sortBy === 'recoveryAt' && current === 'desc' ? 'asc' : 'desc');
@@ -326,9 +327,11 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
 
   const handleResetFilters = () => {
     setSearch('');
+    setRecoveryProgress('');
+    setRecoveryUserId('');
     setRecoveryStartDate('');
     setRecoveryEndDate('');
-    setSortBy('updatedAt');
+    setSortBy('recoveryAt');
     setSortDirection('desc');
     if (mode === 'review') setReviewQueueView('pending');
     setPage(0);
@@ -672,13 +675,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
           const displayStatus = mode === 'review' ? unifiedStatus : getRecoveryOrderBusinessStatus(row);
           return (
           <Box>
-            <Chip
-              size="small"
-              label={displayStatus}
-              sx={row.deletedAt
-                ? { bgcolor: '#f1f5f9', color: shell.muted, fontWeight: 900 }
-                : { ...getStatusSx(mode === 'review' && unifiedStatus === '已驳回' ? '审核驳回' : row.status), fontWeight: 900 }}
-            />
+            <BusinessStatusChip status={displayStatus} />
           </Box>
           );
         }
@@ -868,7 +865,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       <Box sx={{ display: 'flex', gap: 2, mt: 0.5, mb: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
         <TextField
           size="small"
-          placeholder="搜索客户/订单号"
+          placeholder="搜索挽回单号/客户/手机/微信/第三方订单"
           value={search}
           onChange={(event) => {
             setSearch(event.target.value);
@@ -876,6 +873,36 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
           }}
           sx={{ width: 240 }}
         />
+        {mode === 'list' && (
+          <TextField
+            select
+            size="small"
+            label="分账进度"
+            value={recoveryProgress}
+            onChange={(event) => {
+              setRecoveryProgress(event.target.value);
+              setPage(0);
+            }}
+            sx={{ width: 140 }}
+          >
+            <MenuItem value="">全部</MenuItem>
+            {RECOVERY_PROGRESS_OPTIONS.map((option) => <MenuItem key={option} value={option}>{option}</MenuItem>)}
+          </TextField>
+        )}
+        <TextField
+          select
+          size="small"
+          label="挽回人员"
+          value={recoveryUserId}
+          onChange={(event) => {
+            setRecoveryUserId(event.target.value);
+            setPage(0);
+          }}
+          sx={{ width: 170 }}
+        >
+          <MenuItem value="">全部</MenuItem>
+          {activeUsers.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
+        </TextField>
         <TextField
           size="small"
           label="挽回成交开始"
@@ -1078,14 +1105,10 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                 <Typography variant="h6" sx={{ fontWeight: 600 }}>{detailOrder.recoveryNo}</Typography>
                 <Typography variant="body2" sx={{ fontWeight: 600, color: '#374151' }}>{detailOrder.originalProduct}</Typography>
-                <Chip
-                  label={mode === 'review'
+                <BusinessStatusChip
+                  status={mode === 'review'
                     ? getRecoveryOrderUnifiedReviewStatus(detailOrder.status, Boolean(detailOrder.deletedAt))
                     : getRecoveryOrderBusinessStatus(detailOrder)}
-                  size="small"
-                  sx={detailOrder.deletedAt
-                    ? { bgcolor: '#f1f5f9', color: shell.muted, fontWeight: 700 }
-                    : { ...getStatusSx(detailOrder.status), fontWeight: 700 }}
                 />
               </Box>
             </DialogCloseTitle>

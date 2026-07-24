@@ -376,6 +376,15 @@ const recoveryDateFiltered = await service.list({
   scopeDomain: 'recoveryOrderApplications', recoveryStartDate: '2026-07-12', recoveryEndDate: '2026-07-12', page: 1, pageSize: 20,
 }, reviewer);
 assert.deepEqual(recoveryDateFiltered.data?.items.map((item) => item.id), [created.data!.id]);
+const recoveryOwnerFiltered = await service.list({
+  scopeDomain: 'recoveryOrderApplications', recoveryUserId: creator.id, page: 1, pageSize: 20,
+}, reviewer);
+assert.equal(recoveryOwnerFiltered.data?.items.length, 2);
+assert.equal(
+  recoveryOwnerFiltered.data?.items.every((item) => item.recoveryUserId === creator.id),
+  true,
+  '挽回人员筛选只能匹配 recoveryUserId，不能混入提交人或协助人员',
+);
 const listedOldRecord = reviewerList.data?.items.find((item) => item.id === oldRecord.id);
 assert.equal(listedOldRecord?.paymentVoucherPreview, undefined);
 assert.equal(listedOldRecord?.chatEvidencePreview, undefined);
@@ -425,6 +434,8 @@ assert.deepEqual(
   [oldRecord.id, outsideDepartmentRecord.id].sort(),
   'finance-only access must be limited to settlement-ready orders',
 );
+const financeOwnerCounts = await service.settlementCounts({ includeDeleted: true, recoveryUserId: creator.id }, finance);
+assert.equal(financeOwnerCounts.data?.total, 1, '财务分账数量必须与挽回人员筛选后的列表一致');
 financeList.data?.items.forEach((item) => {
   assert.equal(item.paymentVoucherPreview, undefined);
   assert.equal(item.chatEvidencePreview, undefined);

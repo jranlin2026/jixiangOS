@@ -295,6 +295,9 @@ async function fetchRecoveryOrders(filters: RecoveryOrderFilters = {}): Promise<
       || item.assistUserId === filters.ownerId
     ));
   }
+  if (filters.recoveryUserId) {
+    items = items.filter((item) => item.recoveryUserId === filters.recoveryUserId);
+  }
   if (filters.recoveryStartDate) {
     items = items.filter((item) => (item.recoveryAt || item.createdAt) >= filters.recoveryStartDate!);
   }
@@ -373,7 +376,7 @@ async function fetchRecoveryOrderStats(ownerId?: string): Promise<ApiResponse<Re
 }
 
 async function fetchRecoverySettlementCounts(
-  filters: Pick<RecoveryOrderFilters, 'search' | 'includeDeleted' | 'recoveryStartDate' | 'recoveryEndDate'> = {},
+  filters: Pick<RecoveryOrderFilters, 'search' | 'includeDeleted' | 'recoveryStartDate' | 'recoveryEndDate' | 'recoveryUserId'> = {},
 ): Promise<ApiResponse<RecoverySettlementCounts>> {
   if (shouldUseBackendApi()) {
     const params = new URLSearchParams();
@@ -381,6 +384,7 @@ async function fetchRecoverySettlementCounts(
     if (filters.includeDeleted) params.set('includeDeleted', 'true');
     if (filters.recoveryStartDate) params.set('recoveryStartDate', filters.recoveryStartDate);
     if (filters.recoveryEndDate) params.set('recoveryEndDate', filters.recoveryEndDate);
+    if (filters.recoveryUserId) params.set('recoveryUserId', filters.recoveryUserId);
     return backendRequest<RecoverySettlementCounts>(
       `/recovery-orders/settlement-counts${params.size ? `?${params.toString()}` : ''}`,
     );
@@ -399,6 +403,7 @@ async function fetchRecoverySettlementCounts(
       : filters.recoveryEndDate;
     items = items.filter((item) => (item.recoveryAt || item.createdAt) <= recoveryEndDate);
   }
+  if (filters.recoveryUserId) items = items.filter((item) => item.recoveryUserId === filters.recoveryUserId);
   const statusCounts: Record<string, number> = { 待处理: 0, 待确认: 0, 待发放: 0, 已发放: 0, 已撤回: 0 };
   items.forEach((item) => {
     const value = String(item.settlementStatus || '');

@@ -47,7 +47,7 @@ import OrderForm from './OrderForm';
 import OrderHistoryDialog from './OrderHistoryDialog';
 import OrderReview from '../OrderReview';
 import type { Customer } from '../../types/customer';
-import type { Order } from '../../types/order';
+import type { Order, OrderStatus } from '../../types/order';
 import type { OrderTypeConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
@@ -67,6 +67,7 @@ import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { ModuleHeader, ModulePage, ModuleTabs, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
 import BusinessExportDialog, { type BusinessExportDialogRequest } from '../../shared/components/BusinessExportDialog';
 import { buildBusinessExportBrowserRequest, unwrapBusinessExportResponse } from '../../shared/utils/businessExportPageRequest';
+import BusinessStatusChip from '../../shared/components/BusinessStatusChip';
 
 type OrderColumn = {
   id: string;
@@ -84,6 +85,7 @@ const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_view_v7';
 const ORDER_VIEW_SCHEMA_VERSION = 11;
 const ORDER_WIDTH_STORAGE_KEY = 'aaos_order_table_column_widths_v1';
 const ORDER_ACTION_COLUMN_WIDTH = 160;
+const ORDER_STATUS_OPTIONS: OrderStatus[] = ['待确认', '已确认', '处理中', '已完成', '退款中', '已退款', '已取消'];
 
 const ORDER_COLUMNS: OrderColumn[] = [
   { id: 'orderNo', label: '订单号' },
@@ -566,7 +568,7 @@ const Orders: React.FC = () => {
           </Button>
         );
       case 'status':
-        return <Chip label={order.status || '-'} size="small" variant="outlined" />;
+        return <BusinessStatusChip status={order.status} />;
       case 'customer':
         return (
           <Button
@@ -665,12 +667,19 @@ const Orders: React.FC = () => {
           )}
           <ModuleToolbar>
             <TextField
-              placeholder="搜索订单号/客户名"
+              placeholder="搜索订单号/客户/第三方订单/付款单号"
               value={filters.search || ''}
               onChange={(e) => handleFilterChange('search', e.target.value)}
               size="small"
               sx={{ minWidth: 240 }}
             />
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel>订单状态</InputLabel>
+              <Select value={filters.status || ''} label="订单状态" onChange={(e) => handleFilterChange('status', e.target.value)}>
+                <MenuItem value="">全部</MenuItem>
+                {ORDER_STATUS_OPTIONS.map((status) => <MenuItem key={status} value={status}>{status}</MenuItem>)}
+              </Select>
+            </FormControl>
             <FormControl size="small" sx={{ minWidth: 120 }}>
               <InputLabel>产品等级</InputLabel>
               <Select value={selectedProductLevel} label="产品等级" onChange={(e) => handleFilterChange('productLevel', e.target.value)}>
