@@ -12,6 +12,7 @@ import {
   getApiListenHost,
   getEnablementPrivateStorageDir,
   getCustomerDataExchangeSecret,
+  getBusinessImportSecret,
   validateRuntimeConfig,
 } from './config/runtime';
 import { getScopedStorageKeys } from './config/storageScopes';
@@ -94,6 +95,8 @@ import { createCustomerMergeRouter } from './routes/customerMergeRoutes';
 import { createCustomerMergeService } from './services/customerMergeService';
 import { createPrismaCustomerDataExchangeService } from './services/customerDataExchangeAdapter';
 import { createCustomerDataExchangeRouter } from './routes/customerDataExchangeRoutes';
+import { createBusinessImportRouter } from './routes/businessImportRoutes';
+import { createPrismaBusinessImportService } from './services/businessImportAdapter';
 import { resolveCanonicalCustomer } from './services/customerCanonicalService';
 import { createCoCreationService } from './services/coCreation/coCreationService';
 import {
@@ -172,6 +175,7 @@ const customerDataExchangeService = createPrismaCustomerDataExchangeService({
   customerReader: customerListService,
   secret: getCustomerDataExchangeSecret(),
 });
+const businessImportService = createPrismaBusinessImportService({ prisma, secret: getBusinessImportSecret() });
 const customerBatchWorker = createCustomerBatchWorker({
   store: createPrismaCustomerBatchWorkerStore(prisma),
   handlers: new CustomerBatchJobHandlerRegistry([
@@ -265,6 +269,8 @@ const requireCustomerMergeAccess = createRequireAuth(authService, PERMISSION_KEY
 const requireCustomerMergeUndoAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_MERGE_UNDO, 'write');
 const requireCustomerImportAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_IMPORT, 'write');
 const requireCustomerExportAccess = createRequireAuth(authService, PERMISSION_KEYS.CUSTOMER_EXPORT, 'write');
+const requireOrderImportAccess = createRequireAuth(authService, PERMISSION_KEYS.ORDER_IMPORT, 'write');
+const requireRecoveryImportAccess = createRequireAuth(authService, PERMISSION_KEYS.AFTER_SALES_RECOVERY_IMPORT, 'write');
 const requireLeadListAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_LIST);
 const requireLeadCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_CREATE, 'write');
 const requireLeadConvertAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_CONVERT, 'write');
@@ -471,6 +477,11 @@ app.use('/api/customer-data-exchange', createCustomerDataExchangeRouter({
   service: customerDataExchangeService,
   requireImport: requireCustomerImportAccess,
   requireExport: requireCustomerExportAccess,
+}));
+app.use('/api/business-imports', createBusinessImportRouter({
+  service: businessImportService,
+  requireOrderImport: requireOrderImportAccess,
+  requireRecoveryImport: requireRecoveryImportAccess,
 }));
 app.use('/api', createCustomerMergeRouter({
   service: customerMergeService,

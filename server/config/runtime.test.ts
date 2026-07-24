@@ -210,4 +210,5 @@ assert.doesNotThrow(() => validateRuntimeConfig({
   CUSTOMER_MERGE_SNAPSHOT_ACTIVE_KEY_VERSION: '1',
   CUSTOMER_MERGE_SNAPSHOT_KEYS_JSON: JSON.stringify({ 1: Buffer.alloc(32, 3).toString('base64') }),
   CUSTOMER_DATA_EXCHANGE_SIGNING_KEY: 'StrongCustomerDataExchangeSigningKey-123',
+  BUSINESS_IMPORT_SIGNING_KEY: 'StrongBusinessImportSigningKey-123',
 }));

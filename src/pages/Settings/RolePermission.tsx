@@ -91,6 +91,7 @@ const PERMISSION_TREE: PermissionNode[] = [
     children: [
       { label: '订单列表', key: PERMISSION_KEYS.ORDER_MANAGE },
       { label: '导出订单', key: PERMISSION_KEYS.ORDER_EXPORT },
+      { label: '导入订单', key: PERMISSION_KEYS.ORDER_IMPORT },
       { label: '订单审核列表', key: PERMISSION_KEYS.ORDER_REVIEW_LIST },
       { label: '订单审核操作', key: PERMISSION_KEYS.ORDER_REVIEW },
       { label: '新增订单', key: PERMISSION_KEYS.ORDER_CREATE },
@@ -118,6 +119,7 @@ const PERMISSION_TREE: PermissionNode[] = [
       { label: '编辑售后挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT },
       { label: '删除售后挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE },
       { label: '售后挽回订单修改记录', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY },
+      { label: '导入售后挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_IMPORT },
     ],
   },
   {

@@ -598,6 +598,55 @@ model CustomerBatchJobItem {
   @@map("customer_batch_job_items")
 }
 
+model BusinessImportBatch {
+  id           String   @id @db.VarChar(64)
+  importType   String   @db.VarChar(32)
+  status       String   @db.VarChar(32)
+  actorId      String   @db.VarChar(64)
+  actorName    String   @db.VarChar(100)
+  tokenHash    String   @unique @db.Char(64)
+  rowsHash     String   @db.Char(64)
+  sourceFileName String? @db.VarChar(255)
+  rows         Json
+  totalCount   Int
+  readyCount   Int
+  warningCount Int
+  blockedCount Int
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  jobs BusinessImportJob[]
+
+  @@index([actorId, importType, expiresAt])
+  @@map("business_import_batches")
+}
+
+model BusinessImportJob {
+  id             String   @id @db.VarChar(64)
+  batchId        String   @db.VarChar(64)
+  importType     String   @db.VarChar(32)
+  status         String   @db.VarChar(32)
+  actorId        String   @db.VarChar(64)
+  actorName      String   @db.VarChar(100)
+  rowsHash       String   @db.Char(64)
+  sourceFileName String   @db.VarChar(255)
+  rows           Json
+  idempotencyKey String   @db.VarChar(128)
+  totalCount     Int
+  failedCount    Int      @default(0)
+  createdAt      DateTime @default(now())
+  startedAt      DateTime?
+  finishedAt     DateTime?
+
+  batch BusinessImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([actorId, importType, idempotencyKey])
+  @@index([importType, status, createdAt])
+  @@map("business_import_jobs")
+}
+
 model CustomerAuditEvent {
   id             String   @id @db.VarChar(64)
   eventSequence  BigInt   @unique @default(autoincrement())

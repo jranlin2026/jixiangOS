@@ -56,6 +56,13 @@ export function getCustomerDataExchangeSecret(env: NodeJS.ProcessEnv = process.e
   return 'local-customer-data-exchange-signing-key-only';
 }
 
+export function getBusinessImportSecret(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = readEnv(env, 'BUSINESS_IMPORT_SIGNING_KEY');
+  if (configured) return configured;
+  if (isProductionRuntime(env)) throw new Error('BUSINESS_IMPORT_SIGNING_KEY must be configured before running jixiangOS in production.');
+  return 'local-business-import-signing-key-only';
+}
+
 /** Location for original enablement Markdown. This directory is never public. */
 export function getEnablementPrivateStorageDir(
   env: NodeJS.ProcessEnv = process.env,
@@ -166,5 +173,8 @@ export function validateRuntimeConfig(env: NodeJS.ProcessEnv = process.env): voi
   createCustomerMergeSnapshotKeyringFromEnv(env);
   if (getCustomerDataExchangeSecret(env).length < 32) {
     throw new Error('CUSTOMER_DATA_EXCHANGE_SIGNING_KEY must be at least 32 characters.');
+  }
+  if (getBusinessImportSecret(env).length < 32) {
+    throw new Error('BUSINESS_IMPORT_SIGNING_KEY must be at least 32 characters.');
   }
 }
