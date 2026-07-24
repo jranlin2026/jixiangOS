@@ -31,6 +31,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import { commissionRuleApi, settingsApi } from '../../api';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import TablePagination from '../../shared/components/TablePagination';
 import type {
   CommissionRole,
   CommissionPayoutPlan,
@@ -46,6 +47,22 @@ import type {
 import type { OrderTypeConfig } from '../../types/settings';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { clampCommissionConfigPage, paginateCommissionConfigRows } from './commissionRulePagination';
+
+type CommissionConfigView = 'rules' | 'plans' | 'roles';
+type CommissionConfigPagination = Record<CommissionConfigView, { page: number; rowsPerPage: number }>;
+
+const DEFAULT_CONFIG_PAGINATION: CommissionConfigPagination = {
+  rules: { page: 0, rowsPerPage: 10 },
+  plans: { page: 0, rowsPerPage: 10 },
+  roles: { page: 0, rowsPerPage: 10 },
+};
+
+const configPaginationSx = {
+  border: '1px solid #f0f0f0',
+  borderTop: 0,
+  bgcolor: '#fff',
+};
 
 const RESOURCE_OPTIONS: Array<{ value: ResourceOwnership; label: string }> = [
   { value: '公司资源', label: '公司资源' },
@@ -157,13 +174,14 @@ function cloneRuleForm(form: SimpleCommissionRuleGroupInput): SimpleCommissionRu
 const CommissionRuleConfig: React.FC = () => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const canManageRules = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_RULES, 'write');
-  const [view, setView] = useState<'rules' | 'plans' | 'roles'>('rules');
+  const [view, setView] = useState<CommissionConfigView>('rules');
   const [groups, setGroups] = useState<SimpleCommissionRuleGroup[]>([]);
   const [payoutPlans, setPayoutPlans] = useState<CommissionPayoutPlan[]>([]);
   const [roleConfigs, setRoleConfigs] = useState<CommissionRoleConfig[]>([]);
   const [orderTypeConfigs, setOrderTypeConfigs] = useState<OrderTypeConfig[]>([]);
   const [loading, setLoading] = useState(false);
   const [pageError, setPageError] = useState('');
+  const [tablePagination, setTablePagination] = useState<CommissionConfigPagination>(DEFAULT_CONFIG_PAGINATION);
 
   const [ruleFormOpen, setRuleFormOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<SimpleCommissionRuleGroup | null>(null);
@@ -200,6 +218,32 @@ const CommissionRuleConfig: React.FC = () => {
     () => payoutPlans.filter((item) => item.commissionType === 'tiered_percentage'),
     [payoutPlans],
   );
+  const pagedGroups = useMemo(
+    () => paginateCommissionConfigRows(groups, tablePagination.rules.page, tablePagination.rules.rowsPerPage),
+    [groups, tablePagination.rules],
+  );
+  const pagedPayoutPlans = useMemo(
+    () => paginateCommissionConfigRows(payoutPlans, tablePagination.plans.page, tablePagination.plans.rowsPerPage),
+    [payoutPlans, tablePagination.plans],
+  );
+  const pagedRoleConfigs = useMemo(
+    () => paginateCommissionConfigRows(roleConfigs, tablePagination.roles.page, tablePagination.roles.rowsPerPage),
+    [roleConfigs, tablePagination.roles],
+  );
+
+  const updateTablePage = (targetView: CommissionConfigView, page: number) => {
+    setTablePagination((prev) => ({
+      ...prev,
+      [targetView]: { ...prev[targetView], page },
+    }));
+  };
+
+  const updateRowsPerPage = (targetView: CommissionConfigView, value: string) => {
+    setTablePagination((prev) => ({
+      ...prev,
+      [targetView]: { page: 0, rowsPerPage: Number(value) || 10 },
+    }));
+  };
 
   const applyPlanToPayout = (payout: SimpleCommissionRulePayout, planId?: string, useDefault = false): SimpleCommissionRulePayout => {
     const legacyMatch = !planId
@@ -317,6 +361,27 @@ const CommissionRuleConfig: React.FC = () => {
   useEffect(() => {
     fetchAll();
   }, []);
+
+  useEffect(() => {
+    setTablePagination((prev) => {
+      const next = {
+        rules: {
+          ...prev.rules,
+          page: clampCommissionConfigPage(groups.length, prev.rules.page, prev.rules.rowsPerPage),
+        },
+        plans: {
+          ...prev.plans,
+          page: clampCommissionConfigPage(payoutPlans.length, prev.plans.page, prev.plans.rowsPerPage),
+        },
+        roles: {
+          ...prev.roles,
+          page: clampCommissionConfigPage(roleConfigs.length, prev.roles.page, prev.roles.rowsPerPage),
+        },
+      };
+      const unchanged = (Object.keys(next) as CommissionConfigView[]).every((key) => next[key].page === prev[key].page);
+      return unchanged ? prev : next;
+    });
+  }, [groups.length, payoutPlans.length, roleConfigs.length]);
 
   const roleOptionsForPayout = (currentRole: CommissionRole) => {
     const selectedRoles = new Set(ruleForm.payouts.map((payout) => payout.role));
@@ -710,6 +775,7 @@ const CommissionRuleConfig: React.FC = () => {
       {pageError && <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setPageError('')}>{pageError}</Alert>}
 
       {view === 'rules' && (
+        <>
         <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0' }}>
           <Table size="small">
             <TableHead>
@@ -722,7 +788,7 @@ const CommissionRuleConfig: React.FC = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {groups.map((group) => (
+              {pagedGroups.map((group) => (
                 <TableRow key={group.id} hover>
                   <TableCell sx={{ fontWeight: 500, minWidth: 180 }}>{group.name}</TableCell>
                   <TableCell sx={{ minWidth: 260 }}>
@@ -777,6 +843,16 @@ const CommissionRuleConfig: React.FC = () => {
             </TableBody>
           </Table>
         </TableContainer>
+        <TablePagination
+          count={groups.length}
+          page={tablePagination.rules.page}
+          rowsPerPage={tablePagination.rules.rowsPerPage}
+          rowsPerPageOptions={[10, 20, 50, 100]}
+          onPageChange={(_event, page) => updateTablePage('rules', page)}
+          onRowsPerPageChange={(event) => updateRowsPerPage('rules', event.target.value)}
+          sx={configPaginationSx}
+        />
+        </>
       )}
 
       {view === 'plans' && (
@@ -797,7 +873,7 @@ const CommissionRuleConfig: React.FC = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {payoutPlans.map((plan) => (
+                {pagedPayoutPlans.map((plan) => (
                   <TableRow key={plan.id} hover>
                     <TableCell sx={{ fontWeight: 500, minWidth: 180 }}>{plan.name}</TableCell>
                     <TableCell sx={{ minWidth: 140 }}>{formatPlanMethod(plan.commissionType)}</TableCell>
@@ -838,6 +914,15 @@ const CommissionRuleConfig: React.FC = () => {
               </TableBody>
             </Table>
           </TableContainer>
+          <TablePagination
+            count={payoutPlans.length}
+            page={tablePagination.plans.page}
+            rowsPerPage={tablePagination.plans.rowsPerPage}
+            rowsPerPageOptions={[10, 20, 50, 100]}
+            onPageChange={(_event, page) => updateTablePage('plans', page)}
+            onRowsPerPageChange={(event) => updateRowsPerPage('plans', event.target.value)}
+            sx={configPaginationSx}
+          />
         </>
       )}
 
@@ -858,7 +943,7 @@ const CommissionRuleConfig: React.FC = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {roleConfigs.map((config) => (
+              {pagedRoleConfigs.map((config) => (
                 <TableRow key={config.id} hover>
                   <TableCell sx={{ fontWeight: 500, minWidth: 140 }}>
                     {config.name}
@@ -900,6 +985,15 @@ const CommissionRuleConfig: React.FC = () => {
             </TableBody>
           </Table>
         </TableContainer>
+        <TablePagination
+          count={roleConfigs.length}
+          page={tablePagination.roles.page}
+          rowsPerPage={tablePagination.roles.rowsPerPage}
+          rowsPerPageOptions={[10, 20, 50, 100]}
+          onPageChange={(_event, page) => updateTablePage('roles', page)}
+          onRowsPerPageChange={(event) => updateRowsPerPage('roles', event.target.value)}
+          sx={configPaginationSx}
+        />
         </>
       )}
 
