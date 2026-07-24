@@ -51,8 +51,8 @@ CREATE TABLE `business_import_number_reservations` (
   `jobId` VARCHAR(64) NULL,
   `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
-  UNIQUE INDEX `business_import_number_reservations_importType_normalizedNumber_key` (`importType`, `normalizedNumber`),
-  INDEX `business_import_number_reservations_jobId_idx` (`jobId`),
+  UNIQUE INDEX `business_import_num_type_number_uq` (`importType`, `normalizedNumber`),
+  INDEX `business_import_num_job_idx` (`jobId`),
   CONSTRAINT `business_import_number_reservations_batchId_fkey` FOREIGN KEY (`batchId`) REFERENCES `business_import_batches`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `business_import_number_reservations_jobId_fkey` FOREIGN KEY (`jobId`) REFERENCES `business_import_jobs`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

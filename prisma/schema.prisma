@@ -660,8 +660,8 @@ model BusinessImportNumberReservation {
   batch BusinessImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
   job   BusinessImportJob?  @relation(fields: [jobId], references: [id], onDelete: SetNull)
 
-  @@unique([importType, normalizedNumber])
-  @@index([jobId])
+  @@unique([importType, normalizedNumber], map: "business_import_num_type_number_uq")
+  @@index([jobId], map: "business_import_num_job_idx")
   @@map("business_import_number_reservations")
 }
 
