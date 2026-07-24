@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { commissionApi } from './commissionApi';
 import { orderApi } from './orderApi';
 import { STORAGE_KEYS } from '../shared/utils/constants';
@@ -143,6 +144,8 @@ function seed() {
       paymentMethod: zh.bankTransfer,
       officialPaymentChannel: zh.officialChannel,
       thirdPartyOrderNo: 'TP-ORDER-A',
+      leadSource: '抖音',
+      sourceName: '直播',
       status: zh.confirmed,
       refundStatus: zh.none,
       owner: 'Sales A',
@@ -152,7 +155,7 @@ function seed() {
       resourceOwnership: zh.companyResource,
       dealScene: zh.orderType,
       proofStatus: '\u5df2\u4e0a\u4f20',
-      payments: [{ id: 'pay-a', amount: 9800, paidAt: '2026-05-20T10:00:00.000Z', method: zh.bankTransfer }],
+      payments: [{ id: 'pay-a', amount: 9800, paidAt: '2026-05-20T10:00:00.000Z', paymentOrderNo: 'PAY-A', method: zh.bankTransfer }],
       createdAt: now,
       updatedAt: now,
     } as any,
@@ -308,8 +311,18 @@ assert.equal(orderA.createdById, 'user-admin');
 assert.equal(orderA.createdByName, 'Admin');
 assert.equal(orderA.officialPaymentChannel, zh.officialChannel);
 assert.equal(orderA.thirdPartyOrderNo, 'TP-ORDER-A', '订单分账必须展示正式订单的第三方平台订单');
+assert.equal(orderA.paymentOrderNo, 'PAY-A');
+assert.equal(orderA.leadSourceFull, '抖音 / 直播');
+assert.equal(orderA.performanceAmount, 9800);
 assert.equal(orderA.createdAt, now);
 assert.deepEqual(orderA.splitSummary.map((item: any) => `${item.role}:${item.amount}`).sort(), [`${zh.salesRole}:100`, `${zh.leadRole}:30`].sort());
+
+const commissionPageSource = readFileSync(new URL('../pages/Commission/index.tsx', import.meta.url), 'utf8');
+assert.match(commissionPageSource, /aaos_commission_order_split_view_v5/);
+assert.match(commissionPageSource, /aaos_commission_order_split_widths_v4/);
+for (const id of ['leadSourceFull', 'paymentOrderNo', 'updatedAt', 'performanceAmount', 'settlementOperator', 'confirmedAt', 'paidAt', 'withdrawReason']) {
+  assert.match(commissionPageSource, new RegExp(`id: '${id}'`));
+}
 assert.equal(orderB.status, '\u5f85\u5904\u7406');
 assert.equal(orderB.pendingAssignCount, 1);
 assert.equal(orderE.status, '\u5f85\u5904\u7406');

@@ -97,26 +97,34 @@ const DEFAULT_ORDER_STATUS_COUNTS: CommissionOrderSummaryStatusCounts = {
 
 type OrderSplitColumnId =
   | 'orderNo'
+  | 'status'
   | 'customerName'
+  | 'thirdPartyOrderNo'
   | 'productName'
   | 'productLevel'
-  | 'orderType'
   | 'orderAmount'
-  | 'resourceOwnership'
+  | 'officialPaymentChannel'
   | 'paymentDate'
   | 'salesOwner'
   | 'createdByName'
-  | 'leadInputBy'
-  | 'leadContributorName'
-  | 'officialPaymentChannel'
-  | 'thirdPartyOrderNo'
-  | 'notes'
-  | 'createdAt'
   | 'splitDetails'
   | 'totalCommissionAmount'
+  | 'orderType'
+  | 'resourceOwnership'
+  | 'leadSourceFull'
+  | 'leadInputBy'
+  | 'leadContributorName'
+  | 'paymentOrderNo'
+  | 'notes'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'performanceAmount'
   | 'pendingAssignCount'
   | 'exceptionCount'
-  | 'status';
+  | 'settlementOperator'
+  | 'confirmedAt'
+  | 'paidAt'
+  | 'withdrawReason';
 
 type OrderSplitColumnMeta = {
   id: OrderSplitColumnId;
@@ -124,52 +132,55 @@ type OrderSplitColumnMeta = {
   defaultWidth: number;
 };
 
-const ORDER_SPLIT_VIEW_STORAGE_KEY = 'aaos_commission_order_split_view_v4';
-const ORDER_SPLIT_WIDTH_STORAGE_KEY = 'aaos_commission_order_split_widths_v3';
+const ORDER_SPLIT_VIEW_STORAGE_KEY = 'aaos_commission_order_split_view_v5';
+const ORDER_SPLIT_WIDTH_STORAGE_KEY = 'aaos_commission_order_split_widths_v4';
 
 const ORDER_SPLIT_COLUMNS: OrderSplitColumnMeta[] = [
   { id: 'orderNo', label: '订单号', defaultWidth: 170 },
+  { id: 'status', label: '分账状态', defaultWidth: 120 },
   { id: 'customerName', label: '客户', defaultWidth: 150 },
+  { id: 'thirdPartyOrderNo', label: '第三方平台订单', defaultWidth: 180 },
   { id: 'productName', label: '产品名称', defaultWidth: 180 },
   { id: 'productLevel', label: '产品等级', defaultWidth: 140 },
-  { id: 'orderType', label: '订单类型', defaultWidth: 140 },
   { id: 'orderAmount', label: '实付金额', defaultWidth: 130 },
   { id: 'officialPaymentChannel', label: '官方收款渠道', defaultWidth: 160 },
-  { id: 'resourceOwnership', label: '资源归属', defaultWidth: 120 },
   { id: 'paymentDate', label: '付款时间', defaultWidth: 180 },
   { id: 'salesOwner', label: '销售负责人', defaultWidth: 130 },
   { id: 'createdByName', label: '订单创建人', defaultWidth: 140 },
+  { id: 'splitDetails', label: '分账明细', defaultWidth: 330 },
+  { id: 'totalCommissionAmount', label: '分账总额', defaultWidth: 130 },
+  { id: 'orderType', label: '订单类型', defaultWidth: 140 },
+  { id: 'resourceOwnership', label: '资源归属', defaultWidth: 120 },
+  { id: 'leadSourceFull', label: '线索来源', defaultWidth: 180 },
   { id: 'leadInputBy', label: '线索录入人', defaultWidth: 140 },
   { id: 'leadContributorName', label: '线索贡献人', defaultWidth: 150 },
-  { id: 'thirdPartyOrderNo', label: '第三方平台订单', defaultWidth: 180 },
+  { id: 'paymentOrderNo', label: '付款订单号', defaultWidth: 180 },
   { id: 'notes', label: '备注', defaultWidth: 220 },
-  { id: 'createdAt', label: '创建时间', defaultWidth: 160 },
-  { id: 'splitDetails', label: '分账明细', defaultWidth: 310 },
-  { id: 'totalCommissionAmount', label: '分账总额', defaultWidth: 130 },
-  { id: 'pendingAssignCount', label: '待分配数', defaultWidth: 110 },
-  { id: 'exceptionCount', label: '撤回数', defaultWidth: 130 },
-  { id: 'status', label: '分账状态', defaultWidth: 120 },
+  { id: 'createdAt', label: '订单创建时间', defaultWidth: 180 },
+  { id: 'updatedAt', label: '分账更新时间', defaultWidth: 180 },
+  { id: 'performanceAmount', label: '业绩计算金额', defaultWidth: 140 },
+  { id: 'pendingAssignCount', label: '待分配人数', defaultWidth: 120 },
+  { id: 'exceptionCount', label: '已撤回人数', defaultWidth: 120 },
+  { id: 'settlementOperator', label: '分账经办人', defaultWidth: 140 },
+  { id: 'confirmedAt', label: '确认时间', defaultWidth: 180 },
+  { id: 'paidAt', label: '发放时间', defaultWidth: 180 },
+  { id: 'withdrawReason', label: '撤回原因', defaultWidth: 220 },
 ];
 
 const DEFAULT_ORDER_SPLIT_VISIBLE_COLUMNS: OrderSplitColumnId[] = [
   'orderNo',
+  'status',
   'customerName',
+  'thirdPartyOrderNo',
   'productName',
   'productLevel',
-  'orderType',
   'orderAmount',
   'officialPaymentChannel',
-  'resourceOwnership',
   'paymentDate',
   'salesOwner',
   'createdByName',
-  'leadInputBy',
-  'leadContributorName',
-  'thirdPartyOrderNo',
-  'notes',
-  'createdAt',
   'splitDetails',
-  'status',
+  'totalCommissionAmount',
 ];
 
 const DEFAULT_ORDER_SPLIT_COLUMN_ORDER = ORDER_SPLIT_COLUMNS.map((column) => column.id);
@@ -983,53 +994,26 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const renderSplitDetails = (summary: CommissionOrderSummary) => {
-    const rows = summary.splitSummary.slice(0, 3);
+    const rows = summary.splitSummary.slice(0, 2);
     return (
       <Stack spacing={0.6} sx={{ py: 0.5 }}>
-        {rows.map((item, index) => {
-          const isPendingOwner = !item.owner || item.owner === '待分配';
-          const isWithdrawn = ['已撤回', '待冲销', '已冲销'].includes(item.status);
-          return (
-            <Box
-              key={`${summary.orderId}-${item.role}-${item.owner || 'pending'}-${index}`}
-              sx={{
-                display: 'grid',
-                gridTemplateColumns: '72px minmax(72px, 1fr) 88px',
-                gap: 1,
-                alignItems: 'center',
-                lineHeight: 1.45,
-              }}
-            >
-              <Typography variant="caption" sx={{ fontWeight: 700, color: '#111827' }}>{item.role}</Typography>
-              <Typography
-                variant="caption"
-                sx={{
-                  color: isPendingOwner ? '#d32f2f' : '#374151',
-                  fontWeight: isPendingOwner ? 700 : 500,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {formatOwnerDisplayName(item.ownerId, item.owner)}
-              </Typography>
-              <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end', alignItems: 'center' }}>
-                {isWithdrawn && <Chip label="已撤回" size="small" color="default" sx={{ height: 20 }} />}
-                <Typography variant="caption" sx={{ fontWeight: 700, color: item.amount > 0 ? '#d32f2f' : '#6b7280' }}>
-                  {formatCurrency(item.amount)}
-                </Typography>
-              </Stack>
-            </Box>
-          );
-        })}
-        {summary.splitSummary.length > 3 && (
+        <Typography variant="caption" sx={{ color: '#374151', lineHeight: 1.6, overflowWrap: 'anywhere' }}>
+          {rows.map((item) => `${item.role}：${formatOwnerDisplayName(item.ownerId, item.owner)} ${formatCurrency(item.amount)}`).join('｜')}
+          {summary.splitSummary.length > 2 ? `｜另有 ${summary.splitSummary.length - 2} 人` : ''}
+        </Typography>
+        {summary.splitSummary.length > 2 && (
           <Button
             size="small"
             onClick={() => openSettlementDetail(summary)}
             sx={{ alignSelf: 'flex-start', minWidth: 0, px: 0.5, py: 0, lineHeight: 1.4 }}
           >
-            查看全部 {summary.splitSummary.length} 条
+            查看全部 {summary.splitSummary.length} 人
           </Button>
+        )}
+        {!!summary.splitSummary.length && (
+          <Typography variant="caption" sx={{ color: '#d32f2f', fontWeight: 800 }}>
+            共 {formatCurrency(summary.totalCommissionAmount)}
+          </Typography>
         )}
         {!summary.splitSummary.length && <Typography variant="caption" sx={{ color: '#9ca3af' }}>暂无分账</Typography>}
       </Stack>
@@ -1119,8 +1103,10 @@ const Commission: React.FC<CommissionProps> = ({
         return formatCurrency(summary.orderAmount);
       case 'resourceOwnership':
         return summary.resourceOwnership ? normalizeResourceOwnership(summary.resourceOwnership) : '-';
+      case 'leadSourceFull':
+        return summary.leadSourceFull || '-';
       case 'paymentDate':
-        return summary.paymentDate ? formatDate(summary.paymentDate, 'yyyy-MM-dd HH:mm:ss') : '-';
+        return summary.paymentDate ? formatDate(summary.paymentDate, 'yyyy-MM-dd HH:mm') : '-';
       case 'salesOwner':
         return summary.salesOwner || summary.salesName || '-';
       case 'createdByName':
@@ -1133,18 +1119,32 @@ const Commission: React.FC<CommissionProps> = ({
         return summary.officialPaymentChannel || '-';
       case 'thirdPartyOrderNo':
         return summary.thirdPartyOrderNo || '-';
+      case 'paymentOrderNo':
+        return summary.paymentOrderNo || '-';
       case 'notes':
         return summary.notes || '-';
       case 'createdAt':
-        return summary.createdAt ? formatDate(summary.createdAt) : '-';
+        return summary.createdAt ? formatDate(summary.createdAt, 'yyyy-MM-dd HH:mm') : '-';
+      case 'updatedAt':
+        return summary.updatedAt ? formatDate(summary.updatedAt, 'yyyy-MM-dd HH:mm') : '-';
       case 'splitDetails':
         return renderSplitDetails(summary);
       case 'totalCommissionAmount':
         return <Typography variant="body2" sx={{ fontWeight: 700, color: '#d32f2f' }}>{formatCurrency(summary.totalCommissionAmount)}</Typography>;
+      case 'performanceAmount':
+        return summary.performanceAmount === undefined ? '-' : formatCurrency(summary.performanceAmount);
       case 'pendingAssignCount':
         return summary.pendingAssignCount ? <Chip label={summary.pendingAssignCount} size="small" color="warning" /> : '0';
       case 'exceptionCount':
         return summary.exceptionCount ? <Chip label={summary.exceptionCount} size="small" color="error" /> : '0';
+      case 'settlementOperator':
+        return summary.settlementOperator || '-';
+      case 'confirmedAt':
+        return summary.confirmedAt ? formatDate(summary.confirmedAt, 'yyyy-MM-dd HH:mm') : '-';
+      case 'paidAt':
+        return summary.paidAt ? formatDate(summary.paidAt, 'yyyy-MM-dd HH:mm') : '-';
+      case 'withdrawReason':
+        return summary.withdrawReason || '-';
       case 'status':
         return <Chip label={summary.status} size="small" color={getOrderStatusColor(summary.status)} />;
       default:

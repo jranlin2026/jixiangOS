@@ -33,6 +33,11 @@ import { initializeMockData } from './mock';
 import { getCurrentOperatorName } from '../shared/utils/currentOperator';
 import { v4 as uuidv4 } from 'uuid';
 import { orderApi } from './orderApi';
+import {
+  formatLeadSourcePath,
+  getActiveCommissions,
+  summarizeCommissionProcessing,
+} from '../shared/utils/financeSettlementPresentation';
 
 const delay = (ms?: number) => baseDelay(ms, 'commissions');
 import { shouldUseBackendApi } from './backendClient';
@@ -615,6 +620,7 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
 
   return Array.from(orderMap.entries()).map(([orderId, rows]) => {
     const sortedRows = rows.slice().sort((a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role));
+    const activeRows = getActiveCommissions(sortedRows);
     const first = sortedRows[0];
     const order = ordersById.get(orderId);
     const sourceApplication = !order?.createdByName && order?.sourceApplicationId
@@ -622,6 +628,15 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
       : undefined;
     const paymentDate = getCommissionPaymentDate(first, order);
     const orderAmount = order?.actualAmount || order?.amount || first.orderAmount;
+    const latestPayment = [...(order?.payments || [])].sort((a, b) => (
+      new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime()
+    ))[0];
+    const operationLogs = getCommissionOperationLogs(orderId);
+    const processing = summarizeCommissionProcessing(sortedRows, operationLogs);
+    const updateDates = [...sortedRows.map((item) => item.updatedAt), ...operationLogs.map((log) => log.operatedAt)]
+      .filter(Boolean)
+      .sort();
+    const updatedAt = updateDates[updateDates.length - 1];
     return {
       orderId,
       orderNo: first.orderNo,
@@ -641,16 +656,24 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
       leadInputBy: order?.leadInputBy,
       leadContributorName: order?.leadContributorName,
       sourceType: order?.sourceType,
+      leadSourceFull: order ? formatLeadSourcePath(order) : '',
       officialPaymentChannel: order?.officialPaymentChannel,
       thirdPartyOrderNo: order?.thirdPartyOrderNo,
+      paymentOrderNo: latestPayment?.paymentOrderNo,
       notes: order?.notes,
       createdAt: order?.createdAt || first.createdAt,
+      updatedAt,
       sourceOrderDeleted: !order,
-      totalCommissionAmount: Math.round(sortedRows.reduce((sumValue, item) => sumValue + item.commissionAmount, 0) * 100) / 100,
+      totalCommissionAmount: processing.totalCommissionAmount,
+      performanceAmount: processing.performanceAmount,
       pendingAssignCount: sortedRows.filter(isPendingAssignment).length,
-      exceptionCount: sortedRows.filter(isInactiveCommission).length,
+      exceptionCount: processing.withdrawnCount,
+      settlementOperator: processing.settlementOperator,
+      confirmedAt: processing.confirmedAt,
+      paidAt: processing.paidAt,
+      withdrawReason: processing.withdrawReason,
       status: deriveOrderSummaryStatus(sortedRows),
-      splitSummary: sortedRows.map((item) => ({
+      splitSummary: activeRows.map((item) => ({
         role: item.role,
         amount: item.commissionAmount,
         owner: item.owner,
