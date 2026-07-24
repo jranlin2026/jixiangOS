@@ -53,6 +53,11 @@ export interface RecoveryOrder {
   reviewCleanedAt?: Timestamp;
   reviewCleanedBy?: string;
   reviewCleanupReason?: string;
+  /** 财务分账清理只隐藏已废弃列表项，底层业务及提成留痕仍保留。 */
+  settlementCleanedAt?: Timestamp;
+  settlementCleanedById?: ID;
+  settlementCleanedBy?: string;
+  settlementCleanupReason?: string;
   createdBy: ID;
   createdByName: string;
   createdAt: Timestamp;

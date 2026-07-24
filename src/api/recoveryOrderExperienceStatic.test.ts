@@ -82,12 +82,17 @@ assert.match(
   '售后挽回分账页首次挂载或切回页签时不得把旧的视图设置信号当成新点击。',
 );
 
-assert.doesNotMatch(
+assert.match(
   recoverySettlementSource,
-  /cleanupDeletedSourceRecoverySettlement|清理废弃分账/,
-  '已删除源订单的撤回分账必须保留为只读财务留痕，不能提供物理清理入口。',
+  /cleanupDeletedRecoverySettlement[^]*?清理废弃售后挽回分账/,
+  '超级管理员必须能清理源单已删除的废弃财务分账。',
 );
 assert.match(
   recoverySettlementSource,
-  /源售后挽回订单已删除，分账与撤回记录永久保留为只读留痕/,
+  /底层业务、提成及清理审计留痕仍保留/,
+);
+assert.match(
+  recoverySettlementSource,
+  /isSuperAdminRoleName\(currentUser\?\.role\)/,
+  '管理员和系统管理员别名也应显示废弃分账清理入口。',
 );

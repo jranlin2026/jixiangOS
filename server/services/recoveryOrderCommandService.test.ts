@@ -442,6 +442,34 @@ assert.equal(
   '删除源售后挽回订单必须保留已撤回分账留痕',
 );
 
+assert.equal(
+  (await (service as any).cleanupDeletedSettlement(withdrawnSource.data!.id, '清理废弃财务分账', reviewer)).code,
+  403,
+  '非超级管理员不得清理废弃财务分账',
+);
+const cleanedSettlement = await (service as any).cleanupDeletedSettlement(
+  withdrawnSource.data!.id,
+  '清理废弃财务分账',
+  superAdmin,
+);
+assert.equal(cleanedSettlement.code, 0, '超级管理员应能清理源单已删除的财务分账留痕');
+assert.equal(cleanedSettlement.data?.settlementCleanedById, superAdmin.id);
+assert.equal(cleanedSettlement.data?.settlementCleanedBy, superAdmin.name);
+assert.equal(cleanedSettlement.data?.settlementCleanupReason, '清理废弃财务分账');
+assert.equal(prisma.rows.has(key(STORAGE_KEYS.RECOVERY_ORDERS, withdrawnSource.data!.id)), true, '清理只隐藏财务列表，不物理删除审计数据');
+const financeListAfterCleanup = await service.list({
+  scopeDomain: 'recoveryOrders',
+  includeDeleted: true,
+  settlementStatuses: ['已撤回'],
+  page: 1,
+  pageSize: 100,
+}, superAdmin);
+assert.equal(
+  financeListAfterCleanup.data?.items.some((item) => item.id === withdrawnSource.data!.id),
+  false,
+  '已清理的废弃分账必须从财务售后分账列表移除',
+);
+
 const inconsistentWithdrawnSource = await service.create(input({ thirdPartyOrderNo: 'TP-WITHDRAWN-ACTIVE-COMMISSION' }), creator);
 const inconsistentWithdrawnRow = prisma.rows.get(key(STORAGE_KEYS.RECOVERY_ORDERS, inconsistentWithdrawnSource.data!.id))!;
 inconsistentWithdrawnRow.status = '已分账';
@@ -467,6 +495,19 @@ prisma.rows.set(key(STORAGE_KEYS.COMMISSIONS, 'commission-still-active'), {
 const inconsistentDelete = await service.softDelete(inconsistentWithdrawnSource.data!.id, '尝试删除', reviewer);
 assert.equal(inconsistentDelete.code, 409, '仍有关联活动提成时必须禁止删除');
 assert.match(inconsistentDelete.message, /活动提成|处理分账/);
+inconsistentWithdrawnRow.data = {
+  ...inconsistentWithdrawnRow.data,
+  deletedAt: NOW,
+  deletedBy: '历史管理员',
+  deleteReason: '模拟历史脏数据',
+};
+const cleanupWithActiveCommission = await service.cleanupDeletedSettlement(
+  inconsistentWithdrawnSource.data!.id,
+  '不应隐藏活动提成',
+  superAdmin,
+);
+assert.equal(cleanupWithActiveCommission.code, 409, '关联提成仍在发放链路时不得清理隐藏');
+assert.equal(inconsistentWithdrawnRow.data.settlementCleanedAt, undefined);
 assert.equal(
   prisma.businessFindManyWheres.some((where) => (
     where.domain === STORAGE_KEYS.COMMISSIONS

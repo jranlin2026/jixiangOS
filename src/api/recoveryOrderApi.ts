@@ -254,6 +254,9 @@ async function fetchRecoveryOrders(filters: RecoveryOrderFilters = {}): Promise<
       && filters.settlementStatus !== '全部'
       && financeSettlementStatuses.includes(filters.settlementStatus)),
   );
+  if (hasExplicitFinanceSettlementFilter) {
+    items = items.filter((item) => !item.settlementCleanedAt);
+  }
   const canIncludeDeleted = scopeDomain === 'recoveryOrderApplications'
     || (canUseRecoveryPermission(PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'read')
       && hasExplicitFinanceSettlementFilter);
@@ -363,6 +366,7 @@ async function fetchRecoverySettlementCounts(
     );
   }
   const items = filterVisibleRecoveryOrders(readRecoveryOrders(), 'recoveryOrders')
+    .filter((item) => !item.settlementCleanedAt)
     .filter((item) => filters.includeDeleted || !item.deletedAt)
     .filter((item) => !filters.search || [item.recoveryNo, item.customerName, item.thirdPartyOrderNo]
       .some((value) => normalizeText(value).includes(normalizeText(filters.search))));
@@ -575,6 +579,47 @@ async function cleanupDeletedRecoveryOrderReview(id: string, reason: string): Pr
     reviewCleanedAt: cleanedAt,
     reviewCleanedBy: getCurrentOperatorName('超级管理员'),
     reviewCleanupReason: cleanReason,
+    updatedAt: cleanedAt,
+  };
+  writeRecoveryOrders(orders);
+  return createSuccessResponse(orders[index]);
+}
+
+async function cleanupDeletedRecoverySettlement(id: string, reason: string): Promise<ApiResponse<RecoveryOrder | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<RecoveryOrder | null>(`/recovery-orders/${encodeURIComponent(id)}/cleanup-settlement`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    if (response.code !== 0 || !response.data) {
+      return createErrorResponse(response.message || '服务端未返回清理结果', response.code || -1);
+    }
+    return createSuccessResponse(cacheBackendRecoveryOrder(response.data), response.message);
+  }
+
+  ensureInit();
+  await delay(120);
+  if (!isCurrentSessionSuperAdmin()) return createErrorResponse('仅超级管理员可以清理废弃售后挽回分账', 403);
+  const cleanReason = reason.trim();
+  if (!cleanReason) return createErrorResponse('清理废弃售后挽回分账必须填写原因', 400);
+  const orders = readRecoveryOrders();
+  const index = orders.findIndex((item) => item.id === id);
+  if (index === -1) return createErrorResponse('售后挽回订单不存在', 404);
+  if (!orders[index].deletedAt) return createErrorResponse('只有源售后挽回订单已删除的分账记录可以清理', 409);
+  if (orders[index].settlementCleanedAt) return createSuccessResponse(orders[index]);
+  const commissionIds = new Set(orders[index].commissionIds || []);
+  const hasActiveCommission = readCommissions().some((commission) => (
+    isRecoveryCommissionRelatedToOrder(orders[index].id, commissionIds, commission)
+    && !isInactiveRecoveryCommissionStatus(commission.status)
+  ));
+  if (hasActiveCommission) return createErrorResponse('该废弃分账仍有活动提成，请先撤回或完成财务处理', 409);
+  const cleanedAt = nowIso();
+  orders[index] = {
+    ...orders[index],
+    settlementCleanedAt: cleanedAt,
+    settlementCleanedById: getCurrentSessionUser()?.id,
+    settlementCleanedBy: getCurrentOperatorName('超级管理员'),
+    settlementCleanupReason: cleanReason,
     updatedAt: cleanedAt,
   };
   writeRecoveryOrders(orders);
@@ -915,6 +960,7 @@ export const recoveryOrderApi = {
   updateRecoveryOrder,
   deleteRecoveryOrder,
   cleanupDeletedRecoveryOrderReview,
+  cleanupDeletedRecoverySettlement,
   approveRecoveryOrder,
   returnRecoveryOrder,
   rejectRecoveryOrder,

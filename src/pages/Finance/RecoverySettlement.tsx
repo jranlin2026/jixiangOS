@@ -43,7 +43,8 @@ import type { Department } from '../../types/department';
 import type { Position } from '../../types/position';
 import type { User } from '../../types/settings';
 import useAuthStore from '../../store/useAuthStore';
-import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import { StatusSegmentBar } from '../../shared/components/ModuleShell';
 import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
 import BusinessAttachmentLinks from '../../shared/components/BusinessAttachmentLinks';
@@ -205,6 +206,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
 }) => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const canManageRecoverySettlement = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'write');
+  const canCleanupDeletedSettlement = isSuperAdmin(currentUser) || isSuperAdminRoleName(currentUser?.role);
   const [rows, setRows] = useState<RecoveryOrder[]>([]);
   const [settlementCounts, setSettlementCounts] = useState<Record<string, number>>({});
   const [page, setPage] = useState(0);
@@ -622,11 +624,13 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   };
 
   const openResetSettlementDialog = (row: RecoveryOrder) => {
-    if (!canManageRecoverySettlement) return;
     if (isSourceRecoveryDeleted(row)) {
-      setMessage({ type: 'error', text: '源售后挽回订单已删除，分账与撤回记录必须保留为只读留痕' });
+      if (!canCleanupDeletedSettlement) return;
+      setDeleteTarget(row);
+      setDeleteReason('');
       return;
     }
+    if (!canManageRecoverySettlement) return;
     if (getSettlementStatus(row) !== '待确认') {
       setMessage({ type: 'error', text: '只有待确认的售后挽回分账可以删除' });
       return;
@@ -636,21 +640,27 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   };
 
   const handleResetSettlement = async () => {
-    if (!canManageRecoverySettlement) return;
     if (!currentUser) return;
     if (!deleteTarget) return;
+    const cleanupDeletedSource = isSourceRecoveryDeleted(deleteTarget);
+    if (cleanupDeletedSource ? !canCleanupDeletedSettlement : !canManageRecoverySettlement) return;
     if (!deleteReason.trim()) {
       setMessage({ type: 'error', text: '请填写删除原因' });
       return;
     }
-    const res = await recoveryOrderApi.resetRecoverySettlement(deleteTarget.id, currentUser.name, deleteReason);
+    const res = cleanupDeletedSource
+      ? await recoveryOrderApi.cleanupDeletedRecoverySettlement(deleteTarget.id, deleteReason)
+      : await recoveryOrderApi.resetRecoverySettlement(deleteTarget.id, currentUser.name, deleteReason);
     if (res.code !== 0) {
-      setMessage({ type: 'error', text: res.message || '删除售后挽回分账失败' });
+      setMessage({ type: 'error', text: res.message || (cleanupDeletedSource ? '清理废弃售后挽回分账失败' : '删除售后挽回分账失败') });
       return;
     }
     setDeleteTarget(null);
     setDeleteReason('');
-    setMessage({ type: 'success', text: '已删除售后挽回分账，订单已退回待处理' });
+    setMessage({
+      type: 'success',
+      text: cleanupDeletedSource ? '已清理废弃售后挽回分账' : '已删除售后挽回分账，订单已退回待处理',
+    });
     await load();
   };
 
@@ -661,7 +671,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   };
 
   const getAdjustDisabledReason = (row: RecoveryOrder) => {
-    if (isSourceRecoveryDeleted(row)) return '源售后挽回订单已删除，分账与撤回记录永久保留为只读留痕';
+    if (isSourceRecoveryDeleted(row)) return '源售后挽回订单已删除，不可调整；超级管理员可使用清理操作移出列表';
     const settlementStatus = getSettlementStatus(row);
     if (settlementStatus === '待处理') return '处理分账';
     if (settlementStatus === '待确认') return '调整分账';
@@ -671,12 +681,14 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   };
 
   const canDeleteSettlement = (row: RecoveryOrder) => (
-    !isSourceRecoveryDeleted(row) && getSettlementStatus(row) === '待确认'
+    isSourceRecoveryDeleted(row)
+      ? canCleanupDeletedSettlement
+      : canManageRecoverySettlement && getSettlementStatus(row) === '待确认'
   );
 
   const getDeleteDisabledReason = (row: RecoveryOrder) => (
     isSourceRecoveryDeleted(row)
-      ? '源挽回单已删除，财务记录永久保留为只读留痕'
+      ? (canCleanupDeletedSettlement ? '清理废弃售后挽回分账' : '仅超级管理员可清理废弃分账')
       : (canDeleteSettlement(row) ? '删除售后挽回分账' : '仅待确认阶段的分账可直接删除')
   );
 
@@ -741,7 +753,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                 <VisibilityIcon fontSize="small" />
               </IconButton>
             </Tooltip>
-            {canManageRecoverySettlement && (
+            {(canManageRecoverySettlement || canCleanupDeletedSettlement) && (
               <>
                 <Tooltip title={getAdjustDisabledReason(row)}>
                   <span>
@@ -763,7 +775,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                       sx={{ color: canDeleteSettlement(row) ? shell.red : '#cbd5e1' }}
                       disabled={!canDeleteSettlement(row)}
                       onClick={() => openResetSettlementDialog(row)}
-                      aria-label="删除售后挽回分账"
+                      aria-label={isSourceRecoveryDeleted(row) ? '清理废弃售后挽回分账' : '删除售后挽回分账'}
                     >
                       <DeleteOutlineIcon fontSize="small" />
                     </IconButton>
@@ -1650,13 +1662,15 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
             setDeleteReason('');
           }}
         >
-          删除售后挽回分账
+          {deleteTarget && isSourceRecoveryDeleted(deleteTarget) ? '清理废弃售后挽回分账' : '删除售后挽回分账'}
         </DialogCloseTitle>
         <DialogContent dividers>
           {deleteTarget && (
             <Stack spacing={1.25}>
               <Alert severity="warning">
-                删除后会清空该挽回单已保存的提成记录，并退回到“待处理”状态。
+                {isSourceRecoveryDeleted(deleteTarget)
+                  ? '清理后该记录将从财务售后挽回分账列表隐藏，底层业务、提成及清理审计留痕仍保留。'
+                  : '删除后会清空该挽回单已保存的提成记录，并退回到“待处理”状态。'}
               </Alert>
               <Box sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 1.25, bgcolor: shell.soft }}>
                 <Typography variant="body2" sx={{ fontWeight: 900 }}>{deleteTarget.recoveryNo}</Typography>
@@ -1666,10 +1680,10 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                 </Typography>
               </Box>
               <TextField
-                label="删除原因"
+                label={isSourceRecoveryDeleted(deleteTarget) ? '清理原因' : '删除原因'}
                 value={deleteReason}
                 onChange={(event) => setDeleteReason(event.target.value)}
-                placeholder="例如：人员选错、方案错误，需要重新处理"
+                placeholder={isSourceRecoveryDeleted(deleteTarget) ? '例如：源单已废弃，清理财务列表残留' : '例如：人员选错、方案错误，需要重新处理'}
                 multiline
                 minRows={3}
                 required
@@ -1685,9 +1699,9 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
           }}>
             取消
           </Button>
-          {canManageRecoverySettlement && (
+          {(canManageRecoverySettlement || canCleanupDeletedSettlement) && (
             <Button color="error" variant="contained" onClick={handleResetSettlement} disabled={!deleteReason.trim()}>
-              确认删除
+              {deleteTarget && isSourceRecoveryDeleted(deleteTarget) ? '确认清理' : '确认删除'}
             </Button>
           )}
         </DialogActions>

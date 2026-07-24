@@ -65,7 +65,6 @@ assert.match(
   'confirmSettlement',
   'withdrawSettlement',
   'openResetSettlementDialog',
-  'handleResetSettlement',
 ].forEach((handlerName) => {
   assert.match(
     recoverySettlementSource,
@@ -73,6 +72,12 @@ assert.match(
     `${handlerName} must fail closed without recovery-settlement write permission.`,
   );
 });
+
+assert.match(
+  recoverySettlementSource,
+  /const handleResetSettlement[^]{0,420}cleanupDeletedSource \? !canCleanupDeletedSettlement : !canManageRecoverySettlement/,
+  '废弃分账清理必须限定超级管理员，普通分账删除仍要求财务写权限。',
+);
 
 assert.ok(
   (recoverySettlementSource.match(/\{canManageRecoverySettlement &&/g) || []).length >= 4,

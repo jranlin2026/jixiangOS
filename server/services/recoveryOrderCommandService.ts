@@ -162,6 +162,7 @@ function recoverySettlementStatus(order: RecoveryOrder): string {
 
 function matchesRecoveryOrder(order: RecoveryOrder, filters: RecoveryOrderFilters): boolean {
   if (filters.scopeDomain === 'recoveryOrderApplications' && order.reviewCleanedAt) return false;
+  if ((filters.settlementStatuses?.length || (filters.settlementStatus && filters.settlementStatus !== '全部')) && order.settlementCleanedAt) return false;
   if (!filters.includeDeleted && order.deletedAt) return false;
   const search = cleanText(filters.search).toLocaleLowerCase();
   if (search && ![
@@ -206,6 +207,9 @@ function recoverySqlConditions(filters: RecoveryOrderFilters, scope: DataVisibil
   const conditions: Prisma.Sql[] = [Prisma.sql`br.domain = ${STORAGE_KEYS.RECOVERY_ORDERS}`];
   if (filters.scopeDomain === 'recoveryOrderApplications') {
     conditions.push(Prisma.sql`JSON_EXTRACT(br.data, '$.reviewCleanedAt') IS NULL`);
+  }
+  if (filters.settlementStatuses?.length || (filters.settlementStatus && filters.settlementStatus !== '全部')) {
+    conditions.push(Prisma.sql`JSON_EXTRACT(br.data, '$.settlementCleanedAt') IS NULL`);
   }
   if (!filters.includeDeleted) conditions.push(Prisma.sql`JSON_EXTRACT(br.data, '$.deletedAt') IS NULL`);
   if (filters.statuses?.length) conditions.push(Prisma.sql`br.status IN (${Prisma.join(filters.statuses)})`);
@@ -252,6 +256,7 @@ async function queryRecoverySettlementCounts(
   scope: DataVisibilityScope,
 ): Promise<RecoverySettlementCounts> {
   const conditions = recoverySqlConditions(filters, scope);
+  conditions.push(Prisma.sql`JSON_EXTRACT(br.data, '$.settlementCleanedAt') IS NULL`);
   const where = Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
   const statusExpression = recoverySettlementStatusSql('br');
   const rows = await prisma.$queryRaw<Array<{ settlementStatus: string; count: bigint | number }>>(
@@ -485,6 +490,9 @@ export function createRecoveryOrderCommandService(
       if (scopeDomain === 'recoveryOrderApplications' && order.reviewCleanedAt) {
         return failure<RecoveryOrder>('售后审核记录不存在', 404);
       }
+      if (financeOnly && order.settlementCleanedAt) {
+        return failure<RecoveryOrder>('售后挽回分账记录不存在', 404);
+      }
       if (financeOnly && !['待处理', '待确认', '待发放', '已发放', '已撤回'].includes(recoverySettlementStatus(order))) {
         return failure<RecoveryOrder>('无权查看该售后挽回订单', 403);
       }
@@ -518,6 +526,7 @@ export function createRecoveryOrderCommandService(
       };
       rows
         .map((row) => parseObject<RecoveryOrder>(row.data, '售后挽回订单'))
+        .filter((order) => !order.settlementCleanedAt)
         .filter((order) => recoveryVisible(order, scope) && matchesRecoveryOrder(order, filters))
         .forEach((order) => {
           const settlementStatus = recoverySettlementStatus(order);
@@ -837,6 +846,64 @@ export function createRecoveryOrderCommandService(
           reviewCleanedAt: cleanedAt,
           reviewCleanedBy: actor.name,
           reviewCleanupReason: cleanReason,
+          updatedAt: cleanedAt,
+        };
+        await writeRecoveryOrder(transaction, next);
+        return next;
+      }, {
+        isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+        maxWait: 5_000,
+        timeout: 10_000,
+      }));
+    },
+
+    async cleanupDeletedSettlement(orderId: string, reason: string, actor: AuthenticatedUser): Promise<ApiResponse<RecoveryOrder | null>> {
+      const cleanOrderId = cleanText(orderId);
+      const cleanReason = cleanText(reason);
+      if (!cleanOrderId) return failure('售后挽回订单ID不能为空', 400);
+      if (!cleanReason) return failure('清理废弃售后挽回分账必须填写原因', 400);
+      if (!isSuperAdmin(actor)) return failure('仅超级管理员可以清理废弃售后挽回分账', 403);
+      return run(() => prisma.$transaction(async (transaction) => {
+        const current = await lockRecoveryOrder(transaction, cleanOrderId);
+        if (!current.deletedAt) {
+          throw new RecoveryCommandError(409, '只有源售后挽回订单已删除的分账记录可以清理');
+        }
+        if (current.settlementCleanedAt) return current;
+        const commissionIds = new Set(current.commissionIds || []);
+        const commissionRows = await transaction.businessRecord.findMany({
+          where: {
+            domain: STORAGE_KEYS.COMMISSIONS,
+            OR: [
+              { orderId: current.id },
+              { data: { path: '$.sourceRecoveryOrderId', equals: current.id } },
+              ...(commissionIds.size ? [{ recordId: { in: Array.from(commissionIds) } }] : []),
+            ],
+          },
+        });
+        const hasActiveCommission = commissionRows.some((row) => {
+          const commission = parseObject<{
+            id?: string;
+            orderId?: string;
+            sourceRecoveryOrderId?: string;
+            status?: string;
+          }>(row.data, '售后挽回分账');
+          const related = isRecoveryCommissionRelatedToOrder(current.id, commissionIds, {
+            ...commission,
+            id: row.recordId || commission.id,
+            orderId: row.orderId || commission.orderId,
+          });
+          return related && !isInactiveRecoveryCommissionStatus(String(row.status || commission.status || ''));
+        });
+        if (hasActiveCommission) {
+          throw new RecoveryCommandError(409, '该废弃分账仍有活动提成，请先撤回或完成财务处理');
+        }
+        const cleanedAt = now().toISOString();
+        const next: RecoveryOrder = {
+          ...current,
+          settlementCleanedAt: cleanedAt,
+          settlementCleanedById: actor.id,
+          settlementCleanedBy: actor.name,
+          settlementCleanupReason: cleanReason,
           updatedAt: cleanedAt,
         };
         await writeRecoveryOrder(transaction, next);

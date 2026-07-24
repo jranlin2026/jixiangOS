@@ -55,7 +55,9 @@ try {
     const method = String(init?.method || 'GET');
     const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
     requests.push({ url, method, body });
-    const data = url.includes('/recovery-orders/recovery-backend/cleanup-review')
+    const data = url.includes('/recovery-orders/recovery-backend/cleanup-settlement')
+      ? { ...recovery, deletedAt: now, settlementCleanedAt: now, settlementCleanedBy: '超级管理员', settlementCleanupReason: '清理废弃分账' }
+      : url.includes('/recovery-orders/recovery-backend/cleanup-review')
       ? { ...recovery, deletedAt: now, reviewCleanedAt: now, reviewCleanedBy: '超级管理员', reviewCleanupReason: '清理残留' }
       : url.includes('/deliveries/creatable-orders')
       ? [{ orderId: 'order-2', orderNo: 'ORD-2', customerId: 'customer-2', customerName: '客户B', productType: '代理' }]
@@ -111,6 +113,7 @@ try {
   assert.equal((await recoveryOrderApi.rejectRecoveryOrder(recovery.id, 'forged', '伪造审核人', '凭证无效')).code, 0);
   assert.equal((await recoveryOrderApi.deleteRecoveryOrder(recovery.id)).code, 0);
   assert.equal((await recoveryOrderApi.cleanupDeletedRecoveryOrderReview(recovery.id, '清理残留')).code, 0);
+  assert.equal((await recoveryOrderApi.cleanupDeletedRecoverySettlement(recovery.id, '清理废弃分账')).code, 0);
   assert.equal((await recoveryOrderApi.createRecoveryOrder(recoveryInput)).code, 0);
 
   await flushBackendStorageWrites();
@@ -136,6 +139,7 @@ try {
     { url: '/recovery-orders/recovery-backend/reject', method: 'POST' },
     { url: '/recovery-orders/recovery-backend', method: 'DELETE' },
     { url: '/recovery-orders/recovery-backend/cleanup-review', method: 'POST' },
+    { url: '/recovery-orders/recovery-backend/cleanup-settlement', method: 'POST' },
     { url: '/recovery-orders', method: 'POST' },
   ]);
   assert.deepEqual(requests[3].body, { orderId: 'order-1' });
@@ -144,7 +148,8 @@ try {
   assert.deepEqual(requests[16].body, { reason: '补充材料' });
   assert.deepEqual(requests[17].body, { reason: '凭证无效' });
   assert.deepEqual(requests[19].body, { reason: '清理残留' });
-  assert.deepEqual(requests[20].body, { data: recoveryInput });
+  assert.deepEqual(requests[20].body, { reason: '清理废弃分账' });
+  assert.deepEqual(requests[21].body, { data: recoveryInput });
   const cachedRecoveries = JSON.parse(storage.getItem(STORAGE_KEYS.RECOVERY_ORDERS) || '[]') as RecoveryOrder[];
   assert.ok(cachedRecoveries.some((item) => item.id === recovery.id));
 } finally {
