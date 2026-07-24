@@ -204,7 +204,7 @@ const orderCommandService = createOrderCommandService(prisma, {
   rebuildPendingCommissions: rebuildPendingOrderCommissions,
 });
 const orderQueryService = createOrderQueryService(prisma);
-const businessExportService = createBusinessExportService(prisma);
+const businessExportService = createBusinessExportService(prisma as any);
 const deliveryCommandService = createDeliveryCommandService(prisma, { assigner: deliveryAssignmentService });
 const deliveryQueryService = createDeliveryQueryService(prisma);
 const recoveryOrderCommandService = createRecoveryOrderCommandService(prisma);
