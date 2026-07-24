@@ -5,6 +5,7 @@ import { customerApi } from '../../api';
 import { fetchCustomerTagCatalog } from '../../api/customerTagApi';
 import type { CustomerFilters, CustomerTagFacet } from '../../types/customer';
 import type { CustomerTagCatalog } from '../../types/tag';
+import { buildCustomerTagFilterHint } from './customerTagFilterPresentation';
 
 type TagFilterValue = Pick<CustomerFilters, 'tagIds' | 'tagMatch' | 'withoutTags' | 'missingTagGroupId'>;
 type Props = { value: TagFilterValue; scope: 'active' | 'public_pool'; onApply: (value: TagFilterValue) => void };
@@ -42,6 +43,7 @@ export default function CustomerTagFilter({ value, scope, onApply }: Props) {
       .sort((a, b) => a.sortOrder - b.sortOrder),
   ])), [activeGroups, catalog.tags, facetCounts]);
   const selectedCount = (value.tagIds?.length || 0) + (value.withoutTags ? 1 : 0) + (value.missingTagGroupId ? 1 : 0);
+  const matchRuleHint = useMemo(() => buildCustomerTagFilterHint(draft, catalog), [catalog, draft]);
   const toggle = (id: string) => setDraft((current) => ({ ...current, withoutTags: undefined, missingTagGroupId: undefined, tagIds: current.tagIds?.includes(id) ? current.tagIds.filter((item) => item !== id) : [...(current.tagIds || []), id] }));
   const clear = () => { const next = { tagIds: [], tagMatch: 'grouped' as const, withoutTags: undefined, missingTagGroupId: undefined }; setDraft(next); onApply(next); setAnchor(null); };
   return <>
@@ -53,16 +55,19 @@ export default function CustomerTagFilter({ value, scope, onApply }: Props) {
         <Typography fontWeight={700} sx={{ mb: 1 }}>客户标签筛选</Typography>
         <Box sx={{ mt: 1.5 }}>
           <Typography variant="caption" color="text.secondary">匹配规则</Typography>
-          <Box role="radiogroup" aria-label="客户标签匹配规则" sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mt: 0.5 }}>
+          <Box aria-label="客户标签匹配规则" sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mt: 0.5 }}>
             {([
-              ['grouped', '按分组匹配'],
-              ['any', '包含任意标签'],
-              ['all', '同时包含全部标签'],
+              ['grouped', '按分组筛选（推荐）'],
+              ['any', '满足任一标签'],
+              ['all', '满足全部标签'],
             ] as const).map(([mode, label]) => {
               const isSelected = (draft.tagMatch || 'grouped') === mode;
-              return <Chip key={mode} role="radio" aria-checked={isSelected} label={label} size="small" clickable color={isSelected ? 'primary' : 'default'} variant={isSelected ? 'filled' : 'outlined'} onClick={() => setDraft({ ...draft, tagMatch: mode })} />;
+              return <Chip key={mode} aria-pressed={isSelected} label={label} size="small" clickable color={isSelected ? 'primary' : 'default'} variant={isSelected ? 'filled' : 'outlined'} onClick={() => setDraft({ ...draft, tagMatch: mode })} />;
             })}
           </Box>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+            当前规则：{matchRuleHint}
+          </Typography>
         </Box>
         {loading && <CircularProgress size={20} />}
         {error && <Alert severity="error" action={<Button color="inherit" size="small" onClick={loadFilterOptions}>重试</Button>}>{error}</Alert>}
