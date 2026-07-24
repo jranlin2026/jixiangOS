@@ -39,11 +39,13 @@ const recovery = {
   remark: 'private remark',
   paymentVoucherPreview: inline,
   chatEvidencePreview: inline,
+  recoveryAttachments: [{ id: 'recovery-proof', name: 'recovery-proof.png', mimeType: 'image/png', size: 1, category: 'recovery-payment-proof', uploadedById: 'u1', uploadedByName: 'A', uploadedAt: '2026-01-01', storageName: 'secret.png' }],
   paymentAttachments: [{ id: 'proof', name: 'proof.png', mimeType: 'image/png', size: 1, category: 'recovery-payment-proof', uploadedById: 'u1', uploadedByName: 'A', uploadedAt: '2026-01-01', storageName: 'secret.png' }],
 } as any;
 const compactRecovery = compactRecoveryOrderListItem(recovery);
 assert.equal(compactRecovery.paymentVoucherPreview, undefined);
 assert.equal(compactRecovery.chatEvidencePreview, undefined);
+assert.equal((compactRecovery.recoveryAttachments?.[0] as any).storageName, undefined);
 assert.equal((compactRecovery.paymentAttachments?.[0] as any).storageName, undefined);
 assert.equal(recovery.paymentVoucherPreview, inline);
 assert.ok(JSON.stringify(compactRecovery).length < JSON.stringify(recovery).length / 10);

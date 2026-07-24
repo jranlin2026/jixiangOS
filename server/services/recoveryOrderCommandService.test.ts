@@ -320,10 +320,23 @@ const tooManyProofs = Array.from({ length: 9 }, (_, index) => ({
   uploadedByName: creator.name, uploadedAt: NOW,
 }));
 const tooManyProofsResult = await service.create(input({
-  thirdPartyOrderNo: 'TP-TOO-MANY-PROOFS', paymentAttachments: tooManyProofs,
+  thirdPartyOrderNo: 'TP-TOO-MANY-PROOFS', recoveryAttachments: tooManyProofs,
 }), creator);
 assert.equal(tooManyProofsResult.code, 400);
 assert.equal(tooManyProofsResult.message, '挽回凭证最多上传 8 张');
+
+const legacyChatProofs = tooManyProofs.slice(0, 4).map((item, index) => ({
+  ...item,
+  id: `chat-${index}`,
+  category: 'recovery-chat-evidence' as const,
+}));
+const tooManyLegacyProofsResult = await service.create(input({
+  thirdPartyOrderNo: 'TP-TOO-MANY-LEGACY-PROOFS',
+  paymentAttachments: tooManyProofs.slice(0, 5),
+  chatAttachments: legacyChatProofs,
+}), creator);
+assert.equal(tooManyLegacyProofsResult.code, 400);
+assert.equal(tooManyLegacyProofsResult.message, '挽回凭证最多上传 8 张');
 
 const created = await service.create(input(), creator);
 assert.equal(created.code, 0, '只有 create 权限的角色应能通过记录级命令新增');
@@ -355,6 +368,21 @@ assert.equal(listedOldRecord?.chatEvidencePreview, undefined);
 const oldRecordDetail = await service.get(oldRecord.id, reviewer, 'recoveryOrderApplications');
 assert.equal(oldRecordDetail.data?.paymentVoucherPreview, INLINE_PROOF);
 assert.equal(oldRecordDetail.data?.chatEvidencePreview, INLINE_PROOF);
+const updatedOldRecord = await service.update(oldRecord.id, input({
+  customerName: oldRecord.customerName,
+  customerPhone: oldRecord.customerPhone,
+  customerWechat: oldRecord.customerWechat,
+  thirdPartyOrderNo: oldRecord.thirdPartyOrderNo,
+  originalProduct: oldRecord.originalProduct,
+  originalAmount: oldRecord.originalAmount,
+  recoveryAmount: oldRecord.recoveryAmount,
+  recoveryUserId: oldRecord.recoveryUserId,
+  remark: oldRecord.remark,
+  recoveryAttachments: [],
+}), reviewer);
+assert.equal(updatedOldRecord.code, 0);
+assert.equal(updatedOldRecord.data?.paymentVoucherPreview, INLINE_PROOF, '编辑历史订单不得清空旧版付款凭证');
+assert.equal(updatedOldRecord.data?.chatEvidencePreview, INLINE_PROOF, '编辑历史订单不得清空旧版聊天凭证');
 
 const unauthorizedReviewList = await service.list({
   scopeDomain: 'recoveryOrderApplications', page: 1, pageSize: 20,

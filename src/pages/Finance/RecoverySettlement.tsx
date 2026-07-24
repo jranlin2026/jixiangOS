@@ -49,6 +49,7 @@ import { StatusSegmentBar } from '../../shared/components/ModuleShell';
 import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
 import BusinessAttachmentLinks from '../../shared/components/BusinessAttachmentLinks';
 import { getActiveCommissions } from '../../shared/utils/financeSettlementPresentation';
+import { getRecoveryEvidenceAttachments } from '../../shared/utils/recoveryEvidence';
 
 const shell = {
   ink: '#0f172a',
@@ -64,6 +65,18 @@ const shell = {
 
 const CUSTOM_PLAN_ID = '__custom_amount__';
 const DEFAULT_RECOVERY_ROLE = '挽回人员';
+
+function RecoveryEvidenceLinks({ order }: { order: RecoveryOrder }) {
+  const attachments = getRecoveryEvidenceAttachments(order);
+  if (attachments.length) return <BusinessAttachmentLinks attachments={attachments} />;
+  if (!order.paymentVoucherPreview && !order.chatEvidencePreview) return <>-</>;
+  return (
+    <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+      {order.paymentVoucherPreview && <AttachmentPreviewLink title="挽回凭证" fileName={order.paymentVoucherName || order.paymentVoucher} src={order.paymentVoucherPreview} />}
+      {order.chatEvidencePreview && <AttachmentPreviewLink title="挽回凭证" fileName={order.chatEvidenceName || order.chatEvidence} src={order.chatEvidencePreview} />}
+    </Stack>
+  );
+}
 
 type RecoverySettlementFilterStatus = RecoveryOrderSettlementStatus | '全部' | '已发放';
 
@@ -1200,17 +1213,8 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                     </Box>
                   ))}
                 </Box>
-                <Typography variant="subtitle2" sx={{ mb: 1, color: shell.muted }}>付款截图</Typography>
-                {sourceDetailOrder.paymentAttachments?.length
-                  ? <BusinessAttachmentLinks attachments={sourceDetailOrder.paymentAttachments} />
-                  : <AttachmentPreviewLink title="付款截图" fileName={sourceDetailOrder.paymentVoucherName || sourceDetailOrder.paymentVoucher} src={sourceDetailOrder.paymentVoucherPreview} />}
-              </Paper>
-
-              <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 2 }}>
-                <Typography variant="subtitle1" sx={{ mb: 1, color: shell.ink, fontWeight: 900 }}>成交路径 / 聊天记录</Typography>
-                {sourceDetailOrder.chatAttachments?.length
-                  ? <BusinessAttachmentLinks attachments={sourceDetailOrder.chatAttachments} />
-                  : <AttachmentPreviewLink title="成交路径 / 聊天记录" fileName={sourceDetailOrder.chatEvidenceName || sourceDetailOrder.chatEvidence} src={sourceDetailOrder.chatEvidencePreview} />}
+                <Typography variant="subtitle2" sx={{ mb: 1, color: shell.muted }}>挽回凭证</Typography>
+                <RecoveryEvidenceLinks order={sourceDetailOrder} />
               </Paper>
             </Stack>
           )}
@@ -1302,19 +1306,10 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                       </Box>
                     ))}
                   </Box>
-                  <Typography variant="caption" sx={{ color: shell.muted, display: 'block', mb: 0.75 }}>付款截图</Typography>
-                  {detailOrder.paymentAttachments?.length
-                    ? <BusinessAttachmentLinks attachments={detailOrder.paymentAttachments} />
-                    : <AttachmentPreviewLink title="付款截图" fileName={detailOrder.paymentVoucherName || detailOrder.paymentVoucher} src={detailOrder.paymentVoucherPreview} />}
+                  <Typography variant="caption" sx={{ color: shell.muted, display: 'block', mb: 0.75 }}>挽回凭证</Typography>
+                  <RecoveryEvidenceLinks order={detailOrder} />
                 </Paper>
               </Box>
-
-              <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5, bgcolor: '#fff' }}>
-                <Typography variant="subtitle2" sx={{ color: shell.ink, fontWeight: 900, mb: 1 }}>成交路径 / 聊天记录</Typography>
-                {detailOrder.chatAttachments?.length
-                  ? <BusinessAttachmentLinks attachments={detailOrder.chatAttachments} />
-                  : <AttachmentPreviewLink title="成交路径 / 聊天记录" fileName={detailOrder.chatEvidenceName || detailOrder.chatEvidence} src={detailOrder.chatEvidencePreview} />}
-              </Paper>
 
               <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1fr) 360px' }, gap: 1.5, minHeight: '58vh' }}>
                 <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', minWidth: 0 }}>

@@ -30,11 +30,10 @@ const createDialogSource = recoveryOrderSource.slice(
 
 assert.equal(
   (createDialogSource.match(/<BusinessAttachmentPicker/g) || []).length,
-  2,
-  'Recovery order form should separate payment proof from deal/chat evidence.',
+  1,
+  'Recovery order form should use one unified recovery evidence uploader.',
 );
-assert.match(createDialogSource, /title="付款截图"/);
-assert.match(createDialogSource, /title="成交路径 \/ 聊天记录"/);
+assert.match(createDialogSource, /title="挽回凭证"[\s\S]*?maxCount=\{8\}/);
 for (const section of ['客户资料', '原订单资料', '挽回成交资料', '凭证资料', '补充资料']) {
   assert.match(createDialogSource, new RegExp(`title="${section}"`), `新建售后挽回单应包含“${section}”填写分区。`);
 }
@@ -46,8 +45,7 @@ const detailDialogSource = recoveryOrderSource.slice(
 for (const section of ['客户资料', '原订单资料', '挽回成交资料', '审核资料', '凭证资料']) {
   assert.match(detailDialogSource, new RegExp(section), `售后资料弹窗应包含“${section}”分区。`);
 }
-assert.match(detailDialogSource, /付款截图/);
-assert.match(detailDialogSource, /成交路径 \/ 聊天记录/);
+assert.match(detailDialogSource, /label="挽回凭证"/);
 
 for (const field of [
   'originalProductLevel', 'sourcePlatformShop', 'customerMatchStatus',
@@ -92,8 +90,7 @@ assert.doesNotMatch(settlementColumnsSource, /id: 'actions'/, '售后分账操�
 for (const section of ['源业务资料', '付款资料', '分账明细', '处理记录']) {
   assert.match(recoverySettlementSource, new RegExp(section), `售后分账资料应包含“${section}”分区。`);
 }
-assert.match(recoverySettlementSource, /付款截图/);
-assert.match(recoverySettlementSource, /成交路径 \/ 聊天记录/);
+assert.match(recoverySettlementSource, /<RecoveryEvidenceLinks order=/);
 
 assert.match(
   recoveryOrderSource,

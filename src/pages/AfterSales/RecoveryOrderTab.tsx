@@ -51,6 +51,7 @@ import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
 import BusinessAttachmentPicker from '../../shared/components/BusinessAttachmentPicker';
 import BusinessAttachmentLinks from '../../shared/components/BusinessAttachmentLinks';
 import { subscribePageRefresh } from '../../shared/utils/pageRefresh';
+import { getRecoveryEvidenceAttachments } from '../../shared/utils/recoveryEvidence';
 import {
   REVIEW_QUEUE_OPTIONS,
   getRecoveryOrderUnifiedReviewStatus,
@@ -94,14 +95,7 @@ const emptyForm = {
   officialPaymentChannel: '',
   paymentOrderNo: '',
   paymentAt: toDateTimeInputValue(),
-  paymentVoucher: '',
-  paymentVoucherName: '',
-  paymentVoucherPreview: '',
-  chatEvidence: '',
-  chatEvidenceName: '',
-  chatEvidencePreview: '',
-  paymentAttachments: [] as BusinessAttachment[],
-  chatAttachments: [] as BusinessAttachment[],
+  recoveryAttachments: [] as BusinessAttachment[],
   recoveryUserId: '',
   assistUserId: '',
   remark: '',
@@ -444,14 +438,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       officialPaymentChannel: detail.officialPaymentChannel || '',
       paymentOrderNo: detail.paymentOrderNo || '',
       paymentAt: toDateTimeInputValue(detail.paymentAt || detail.recoveryAt || detail.createdAt),
-      paymentVoucher: detail.paymentVoucher || '',
-      paymentVoucherName: detail.paymentVoucherName || detail.paymentVoucher || '',
-      paymentVoucherPreview: detail.paymentVoucherPreview || '',
-      chatEvidence: detail.chatEvidence || '',
-      chatEvidenceName: detail.chatEvidenceName || detail.chatEvidence || '',
-      chatEvidencePreview: detail.chatEvidencePreview || '',
-      paymentAttachments: detail.paymentAttachments || [],
-      chatAttachments: detail.chatAttachments || [],
+      recoveryAttachments: getRecoveryEvidenceAttachments(detail),
       recoveryUserId: detail.recoveryUserId || '',
       assistUserId: detail.assistUserId || '',
       remark: detail.remark || '',
@@ -492,14 +479,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       officialPaymentChannel: form.officialPaymentChannel as RecoveryOrderInput['officialPaymentChannel'],
       paymentOrderNo: form.paymentOrderNo,
       paymentAt: form.paymentAt ? new Date(form.paymentAt).toISOString() : undefined,
-      paymentVoucher: form.paymentVoucher,
-      paymentVoucherName: form.paymentVoucherName,
-      paymentVoucherPreview: form.paymentVoucherPreview,
-      chatEvidence: form.chatEvidence,
-      chatEvidenceName: form.chatEvidenceName,
-      chatEvidencePreview: form.chatEvidencePreview,
-      paymentAttachments: form.paymentAttachments,
-      chatAttachments: form.chatAttachments,
+      recoveryAttachments: form.recoveryAttachments,
       recoveryUserId: recoveryUser?.id || currentUser.id,
       recoveryUserName: recoveryUser?.name || currentUser.name,
       assistUserId: form.assistUserId || undefined,
@@ -1016,10 +996,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
           <Divider sx={{ my: 2.5 }} />
           <RecoveryFormSection title="凭证资料">
             <Box sx={{ gridColumn: { md: '1 / -1' } }}>
-              <BusinessAttachmentPicker title="付款截图" description="用于核对挽回成交的付款事实，可多选、拖拽或直接粘贴。" value={form.paymentAttachments} onChange={(paymentAttachments) => setForm((current) => ({ ...current, paymentAttachments }))} category="recovery-payment-proof" draftKey={editingOrder?.id || `recovery-new-${currentUser?.id || 'unknown'}`} maxCount={8} />
-            </Box>
-            <Box sx={{ gridColumn: { md: '1 / -1' } }}>
-              <BusinessAttachmentPicker title="成交路径 / 聊天记录" description="用于留存成交确认和沟通过程，可多选、拖拽或直接粘贴。" value={form.chatAttachments} onChange={(chatAttachments) => setForm((current) => ({ ...current, chatAttachments }))} category="recovery-chat-evidence" draftKey={editingOrder?.id || `recovery-new-${currentUser?.id || 'unknown'}`} maxCount={8} />
+              <BusinessAttachmentPicker title="挽回凭证" description="用于留存付款事实、成交确认和沟通过程，可多选、拖拽或直接粘贴。最多 8 张。" value={form.recoveryAttachments} onChange={(recoveryAttachments) => setForm((current) => ({ ...current, recoveryAttachments }))} category="recovery-payment-proof" draftKey={editingOrder?.id || `recovery-new-${currentUser?.id || 'unknown'}`} maxCount={8} />
             </Box>
           </RecoveryFormSection>
 
@@ -1102,16 +1079,23 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
 
               <Divider sx={{ my: 2 }} />
               <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>凭证资料</Typography>
-              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
-                <DetailField label="付款截图">
-                  {detailOrder.paymentAttachments?.length
-                    ? <BusinessAttachmentLinks attachments={detailOrder.paymentAttachments} />
-                    : <AttachmentPreviewLink title="付款截图" fileName={detailOrder.paymentVoucherName || detailOrder.paymentVoucher} src={detailOrder.paymentVoucherPreview} />}
-                </DetailField>
-                <DetailField label="成交路径 / 聊天记录">
-                  {detailOrder.chatAttachments?.length
-                    ? <BusinessAttachmentLinks attachments={detailOrder.chatAttachments} />
-                    : <AttachmentPreviewLink title="成交路径 / 聊天记录" fileName={detailOrder.chatEvidenceName || detailOrder.chatEvidence} src={detailOrder.chatEvidencePreview} />}
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr', gap: 2 }}>
+                <DetailField label="挽回凭证" wide>
+                  {(() => {
+                    const attachments = getRecoveryEvidenceAttachments(detailOrder);
+                    if (attachments.length) return <BusinessAttachmentLinks attachments={attachments} />;
+                    if (!detailOrder.paymentVoucherPreview && !detailOrder.chatEvidencePreview) return '-';
+                    return (
+                      <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                        {detailOrder.paymentVoucherPreview && (
+                          <AttachmentPreviewLink title="挽回凭证" fileName={detailOrder.paymentVoucherName || detailOrder.paymentVoucher} src={detailOrder.paymentVoucherPreview} />
+                        )}
+                        {detailOrder.chatEvidencePreview && (
+                          <AttachmentPreviewLink title="挽回凭证" fileName={detailOrder.chatEvidenceName || detailOrder.chatEvidence} src={detailOrder.chatEvidencePreview} />
+                        )}
+                      </Stack>
+                    );
+                  })()}
                 </DetailField>
               </Box>
             </DialogContent>

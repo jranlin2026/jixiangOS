@@ -115,6 +115,26 @@ function validateAttachments(
   });
 }
 
+function resolveRecoveryAttachments(input: Pick<RecoveryOrderInput, 'recoveryAttachments' | 'paymentAttachments' | 'chatAttachments'>): BusinessAttachment[] {
+  if (input.recoveryAttachments !== undefined) {
+    return validateAttachments(input.recoveryAttachments, 'recovery-payment-proof', '挽回凭证');
+  }
+
+  const legacyAttachments = [
+    ...validateAttachments(input.paymentAttachments, 'recovery-payment-proof', '挽回凭证'),
+    ...validateAttachments(input.chatAttachments, 'recovery-chat-evidence', '挽回凭证'),
+  ];
+  const seen = new Set<string>();
+  const merged = legacyAttachments.reduce<BusinessAttachment[]>((result, attachment) => {
+    if (seen.has(attachment.id)) return result;
+    seen.add(attachment.id);
+    result.push({ ...attachment, category: 'recovery-payment-proof' });
+    return result;
+  }, []);
+  if (merged.length > 8) throw new RecoveryCommandError(400, '挽回凭证最多上传 8 张');
+  return merged;
+}
+
 function amount(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.round(parsed * 100) / 100 : 0;
@@ -154,7 +174,8 @@ function buildRecoveryCommission(
     commissionRate,
     commissionAmount,
     scene: '售后挽回',
-    proofStatus: order.paymentVoucher || order.paymentVoucherName || order.chatEvidence || order.chatEvidenceName ? '已上传' : '待补充',
+    proofStatus: order.recoveryAttachments?.length || order.paymentAttachments?.length || order.chatAttachments?.length
+      || order.paymentVoucher || order.paymentVoucherName || order.chatEvidence || order.chatEvidenceName ? '已上传' : '待补充',
     formulaText: calculationType === 'percentage'
       ? `${payoutPlanName}：挽回金额 ${performanceAmount} × ${amount(commissionRate * 100)}% = ${commissionAmount} 元`
       : `${payoutPlanName}：售后挽回提成 ${commissionAmount} 元`,
@@ -663,12 +684,10 @@ export function createRecoveryOrderCommandService(
       if (!thirdPartyOrderNo) return failure('请填写第三方平台订单号', 400);
       if (!originalProduct) return failure('请填写原购买产品', 400);
       if (recoveryAmount <= 0) return failure('挽回成交金额必须大于 0', 400);
-      let paymentAttachments: BusinessAttachment[];
-      let chatAttachments: BusinessAttachment[];
+      let recoveryAttachments: BusinessAttachment[];
       let paymentChannel: OfficialPaymentChannel | undefined;
       try {
-        paymentAttachments = validateAttachments(input.paymentAttachments, 'recovery-payment-proof', '挽回凭证');
-        chatAttachments = validateAttachments(input.chatAttachments, 'recovery-chat-evidence', '聊天记录');
+        recoveryAttachments = resolveRecoveryAttachments(input);
         paymentChannel = officialPaymentChannel(input.officialPaymentChannel);
       } catch (error) {
         if (error instanceof RecoveryCommandError) return failure(error.message, error.responseCode);
@@ -728,8 +747,7 @@ export function createRecoveryOrderCommandService(
         chatEvidence: input.chatEvidence,
         chatEvidenceName: input.chatEvidenceName,
         chatEvidencePreview: input.chatEvidencePreview,
-        paymentAttachments,
-        chatAttachments,
+        recoveryAttachments,
         recoveryUserId: recoveryUser.id,
         recoveryUserName: recoveryUser.name,
         assistUserId: assistUser?.id,
@@ -815,8 +833,7 @@ export function createRecoveryOrderCommandService(
           throw new RecoveryCommandError(409, '已进入分账链路的售后挽回订单不能修改');
         }
         const validated = validateInput(input, actor, directory, scope);
-        const paymentAttachments = validateAttachments(input.paymentAttachments, 'recovery-payment-proof', '挽回凭证');
-        const chatAttachments = validateAttachments(input.chatAttachments, 'recovery-chat-evidence', '聊天记录');
+        const recoveryAttachments = resolveRecoveryAttachments(input);
         const rows = await transaction.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } });
         const duplicate = rows
           .map((row) => parseObject<RecoveryOrder>(row.data, '售后挽回订单'))
@@ -844,14 +861,15 @@ export function createRecoveryOrderCommandService(
           officialPaymentChannel: officialPaymentChannel(input.officialPaymentChannel),
           paymentOrderNo: cleanText(input.paymentOrderNo) || undefined,
           paymentAt: optionalPaymentTime(input.paymentAt),
-          paymentVoucher: input.paymentVoucher,
-          paymentVoucherName: input.paymentVoucherName,
-          paymentVoucherPreview: input.paymentVoucherPreview,
-          chatEvidence: input.chatEvidence,
-          chatEvidenceName: input.chatEvidenceName,
-          chatEvidencePreview: input.chatEvidencePreview,
-          paymentAttachments,
-          chatAttachments,
+          paymentVoucher: input.paymentVoucher ?? current.paymentVoucher,
+          paymentVoucherName: input.paymentVoucherName ?? current.paymentVoucherName,
+          paymentVoucherPreview: input.paymentVoucherPreview ?? current.paymentVoucherPreview,
+          chatEvidence: input.chatEvidence ?? current.chatEvidence,
+          chatEvidenceName: input.chatEvidenceName ?? current.chatEvidenceName,
+          chatEvidencePreview: input.chatEvidencePreview ?? current.chatEvidencePreview,
+          recoveryAttachments,
+          paymentAttachments: undefined,
+          chatAttachments: undefined,
           recoveryUserId: validated.recoveryUser.id,
           recoveryUserName: validated.recoveryUser.name,
           assistUserId: validated.assistUser?.id,

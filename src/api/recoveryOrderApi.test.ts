@@ -275,6 +275,10 @@ const resubmitted = await recoveryOrderApi.updateRecoveryOrder(created.data.id, 
   recoveryAmount: 1980,
   paymentVoucher: 'pay.png',
   chatEvidence: 'chat-updated.png',
+  recoveryAttachments: [{
+    id: 'recovery-proof-1', name: '挽回凭证.png', mimeType: 'image/png', size: 3,
+    category: 'recovery-payment-proof', uploadedById: 'user-service', uploadedByName: '售后小陈', uploadedAt: now,
+  }],
   recoveryUserId: 'user-service',
   recoveryUserName: '售后小陈',
   createdBy: 'user-service',
@@ -282,6 +286,7 @@ const resubmitted = await recoveryOrderApi.updateRecoveryOrder(created.data.id, 
 });
 assert.equal(resubmitted.code, 0);
 assert.equal(resubmitted.data?.status, '待审核');
+assert.deepEqual(resubmitted.data?.recoveryAttachments?.map((item) => item.id), ['recovery-proof-1']);
 
 setSession('user-finance');
 const approved = await recoveryOrderApi.approveRecoveryOrder(created.data.id, 'user-finance', '财务专员');

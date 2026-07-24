@@ -46,6 +46,7 @@ export function compactRecoveryOrderListItem(order: RecoveryOrder): RecoveryOrde
     ...order,
     paymentVoucherPreview: withoutInlinePayload(order.paymentVoucherPreview),
     chatEvidencePreview: withoutInlinePayload(order.chatEvidencePreview),
+    recoveryAttachments: order.recoveryAttachments?.map(compactBusinessAttachment),
     paymentAttachments: order.paymentAttachments?.map(compactBusinessAttachment),
     chatAttachments: order.chatAttachments?.map(compactBusinessAttachment),
   };

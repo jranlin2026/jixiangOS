@@ -39,7 +39,11 @@ export interface RecoveryOrder {
   chatEvidence?: string;
   chatEvidenceName?: string;
   chatEvidencePreview?: string;
+  /** 挽回付款、成交确认和沟通记录的统一凭证，最多 8 张图片。 */
+  recoveryAttachments?: BusinessAttachment[];
+  /** @deprecated 仅用于兼容历史数据 */
   paymentAttachments?: BusinessAttachment[];
+  /** @deprecated 仅用于兼容历史数据 */
   chatAttachments?: BusinessAttachment[];
   recoveryUserId: ID;
   recoveryUserName: string;
@@ -110,7 +114,10 @@ export interface RecoveryOrderInput {
   chatEvidence?: string;
   chatEvidenceName?: string;
   chatEvidencePreview?: string;
+  recoveryAttachments?: BusinessAttachment[];
+  /** @deprecated 仅用于兼容历史数据 */
   paymentAttachments?: BusinessAttachment[];
+  /** @deprecated 仅用于兼容历史数据 */
   chatAttachments?: BusinessAttachment[];
   recoveryUserId: ID;
   recoveryUserName: string;

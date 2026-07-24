@@ -19,6 +19,14 @@ const outsider: AuthenticatedUser = {
   id: 'other-1', name: '其他人', account: 'other1', email: '', phone: '', role: '员工', isActive: true,
   permissions: [],
 };
+const recoveryUploader: AuthenticatedUser = {
+  ...uploader,
+  permissions: [{ module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, actions: ['read', 'write'] }],
+};
+const recoveryFinance: AuthenticatedUser = {
+  ...reviewer,
+  permissions: [{ module: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, actions: ['read', 'write'] }],
+};
 
 class MemoryRepository {
   records = new Map<string, BusinessAttachmentRecord>();
@@ -59,6 +67,14 @@ try {
   assert.equal((await service.remove('attachment-1', outsider)).code, 403);
   assert.equal((await service.remove('attachment-1', uploader)).code, 0);
   assert.equal(await repository.find('attachment-1'), null);
+
+  const recoveryProof = await service.upload({
+    draftKey: 'draft-recovery-1',
+    category: 'recovery-payment-proof',
+    file: { originalName: '挽回凭证.png', mimeType: 'image/png', size: 3, buffer: Buffer.from('png') },
+  }, recoveryUploader);
+  assert.equal(recoveryProof.code, 0);
+  assert.equal((await service.open('attachment-1', recoveryFinance)).code, 0, '财务分账人员应能打开挽回凭证');
 
   const invalid = await service.upload({
     draftKey: 'draft-order-2',
