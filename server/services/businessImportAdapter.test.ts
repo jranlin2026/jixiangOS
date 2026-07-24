@@ -45,10 +45,69 @@ assert.equal(second.status, 'rejected');
 assert.ok(second.status === 'rejected' && second.reason instanceof BusinessImportError && second.reason.status === 409,
   'the locked batch permits only one job to consume a signed token');
 assert.equal(locked.jobs.length, 1);
+assert.equal((locked as any).reservations?.size || 0, 0, 'blank ordinary-order numbers do not reserve a business number');
 
 const expired = createLockedPrisma({ expiresAt: new Date('2000-01-01T00:00:00.000Z') });
 await assert.rejects(() => consumePrecheckAndCreateJob(expired.prisma, input), (error: unknown) => error instanceof BusinessImportError && error.status === 409);
 const wrongActor = createLockedPrisma({ actorId: 'other-user' });
 await assert.rejects(() => consumePrecheckAndCreateJob(wrongActor.prisma, input), (error: unknown) => error instanceof BusinessImportError && error.status === 409);
+
+function createReservationPrisma() {
+  const batches = new Map([
+    ['token-a', { id: 'batch-a', actorId: 'u-importer', importType: 'orders', rowsHash: input.rowsHash, expiresAt: new Date('2099-01-01T00:00:00.000Z'), consumedAt: null }],
+    ['token-b', { id: 'batch-b', actorId: 'u-importer', importType: 'orders', rowsHash: input.rowsHash, expiresAt: new Date('2099-01-01T00:00:00.000Z'), consumedAt: null }],
+  ]);
+  const reservations = new Map<string, any>();
+  const jobs: any[] = [];
+  let tail = Promise.resolve();
+  const tx: any = {
+    $queryRaw: async (_strings: TemplateStringsArray, token: string) => [batches.get(token)],
+    user: { findUnique: async () => ({ name: '导入员' }) },
+    businessImportNumberReservation: {
+      createMany: async ({ data }: any) => {
+        for (const reservation of data) {
+          const key = `${reservation.importType}:${reservation.normalizedNumber}`;
+          if (reservations.has(key)) throw Object.assign(new Error('duplicate'), { code: 'P2002' });
+          reservations.set(key, reservation);
+        }
+      },
+      updateMany: async ({ where, data }: any) => {
+        for (const reservation of reservations.values()) if (reservation.batchId === where.batchId && reservation.jobId === null) Object.assign(reservation, data);
+      },
+    },
+    businessImportJob: { create: async ({ data }: any) => { jobs.push(data); return data; } },
+    businessImportBatch: { update: async ({ where, data }: any) => {
+      const batch = Array.from(batches.values()).find((candidate) => candidate.id === where.id);
+      if (!batch) throw new Error('batch missing');
+      Object.assign(batch, data);
+    } },
+  };
+  return {
+    prisma: {
+      $transaction: async (operation: any) => {
+        const previous = tail;
+        let release!: () => void;
+        tail = new Promise<void>((resolve) => { release = resolve; });
+        await previous;
+        try { return await operation(tx); } finally { release(); }
+      },
+    } as any,
+    reservations,
+    jobs,
+  };
+}
+
+const reservationPrisma = createReservationPrisma();
+const numbered = { ...input, rows: [{ ...input.rows[0], normalized: { ...input.rows[0].normalized, thirdPartyOrderNo: 'TP-CONCURRENT' } }] };
+const [numberFirst, numberSecond] = await Promise.allSettled([
+  consumePrecheckAndCreateJob(reservationPrisma.prisma, { ...numbered, tokenHash: 'token-a' }),
+  consumePrecheckAndCreateJob(reservationPrisma.prisma, { ...numbered, tokenHash: 'token-b' }),
+]);
+assert.equal(numberFirst.status, 'fulfilled');
+assert.ok(numberSecond.status === 'rejected' && numberSecond.reason instanceof BusinessImportError && numberSecond.reason.status === 409,
+  'two valid prechecks for the same normalized number produce one queued job and one sanitized conflict');
+assert.equal(reservationPrisma.jobs.length, 1);
+assert.equal(reservationPrisma.reservations.get('orders:tp-concurrent')?.batchId, 'batch-a');
+assert.equal(reservationPrisma.reservations.get('orders:tp-concurrent')?.jobId, reservationPrisma.jobs[0]?.id);
 
 console.log('business import adapter: ok');

@@ -618,6 +618,7 @@ model BusinessImportBatch {
   updatedAt    DateTime @updatedAt
 
   jobs BusinessImportJob[]
+  numberReservations BusinessImportNumberReservation[]
 
   @@index([actorId, importType, expiresAt])
   @@map("business_import_batches")
@@ -641,10 +642,27 @@ model BusinessImportJob {
   finishedAt     DateTime?
 
   batch BusinessImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  numberReservations BusinessImportNumberReservation[]
 
   @@unique([actorId, importType, idempotencyKey])
   @@index([importType, status, createdAt])
   @@map("business_import_jobs")
+}
+
+model BusinessImportNumberReservation {
+  id               String   @id @db.VarChar(64)
+  importType       String   @db.VarChar(32)
+  normalizedNumber String   @db.VarChar(191)
+  batchId          String   @db.VarChar(64)
+  jobId            String?  @db.VarChar(64)
+  createdAt        DateTime @default(now())
+
+  batch BusinessImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  job   BusinessImportJob?  @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@unique([importType, normalizedNumber])
+  @@index([jobId])
+  @@map("business_import_number_reservations")
 }
 
 model CustomerAuditEvent {

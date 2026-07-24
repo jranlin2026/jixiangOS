@@ -20,6 +20,10 @@ const clean = (value: unknown) => String(value ?? '').trim();
 const lower = (value: unknown) => clean(value).toLocaleLowerCase('zh-CN');
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 
+function isUniqueConstraint(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === 'P2002';
+}
+
 function readValue<T>(value: unknown, fallback: T): T {
   if (value === undefined || value === null) return fallback;
   if (typeof value === 'string') {
@@ -116,12 +120,35 @@ export async function consumePrecheckAndCreateJob(prisma: PrismaClient, input: {
     const jobId = `business-import-job-${randomUUID()}`;
     const actor = await tx.user.findUnique({ where: { id: input.actorId }, select: { name: true } });
     if (!actor) throw new BusinessImportError('当前导入用户不存在或已离职', 409);
+    const numbers = Array.from(new Set(input.rows
+      .map((row) => lower(row.normalized.thirdPartyOrderNo))
+      .filter(Boolean)));
+    if (numbers.length) {
+      try {
+        await tx.businessImportNumberReservation.createMany({ data: numbers.map((normalizedNumber) => ({
+          id: `business-import-number-${randomUUID()}`,
+          importType: input.type,
+          normalizedNumber,
+          batchId: batch.id,
+          jobId: null,
+        })) });
+      } catch (error) {
+        if (isUniqueConstraint(error)) throw new BusinessImportError('第三方订单号已在待处理导入任务中，请勿重复导入', 409);
+        throw error;
+      }
+    }
     await tx.businessImportJob.create({ data: {
       id: jobId, batchId: batch.id, importType: input.type, status: 'queued', actorId: input.actorId,
       actorName: actor.name, rowsHash: input.rowsHash, sourceFileName: input.fileName, idempotencyKey: batch.id, totalCount: input.rows.length,
       failedCount: input.rows.filter((row) => row.status === 'blocked').length,
       rows: json(input.rows.map((row) => ({ rowNumber: row.rowNumber, status: row.status, reason: row.reason, normalized: row.normalized, customerId: row.customerId }))),
     } });
+    if (numbers.length) {
+      await tx.businessImportNumberReservation.updateMany({
+        where: { batchId: batch.id, jobId: null },
+        data: { jobId },
+      });
+    }
     await tx.businessImportBatch.update({ where: { id: batch.id }, data: { status: 'queued', sourceFileName: input.fileName, consumedAt: new Date() } });
     return { id: jobId, type: input.type, status: 'queued' as const, totalCount: input.rows.length, failedCount: input.rows.filter((row) => row.status === 'blocked').length };
   });
