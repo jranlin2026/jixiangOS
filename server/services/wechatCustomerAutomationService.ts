@@ -128,13 +128,20 @@ type WechatCustomerAutomationPrisma = {
   };
   role: { findMany(args?: any): Promise<any[]> };
   department: { findMany(args?: any): Promise<any[]> };
-  appStorage: { findUnique(args: any): Promise<{ value: unknown } | null> };
+  appStorage: {
+    findUnique(args: any): Promise<{ value: unknown } | null>;
+    create(args: any): Promise<{ value: unknown }>;
+    update(args: any): Promise<{ value: unknown }>;
+  };
   businessRecord: {
     findMany(args?: any): Promise<any[]>;
     findUnique(args: any): Promise<any | null>;
   };
   contactIdentity: { findUnique(args: any): Promise<any | null> };
   contactIdentityLink: { findMany(args: any): Promise<any[]> };
+  customerAuditEvent?: {
+    findFirst(args: any): Promise<{ customerId: string } | null>;
+  };
 };
 
 type CustomerCreator = {
@@ -168,6 +175,22 @@ type Resolution =
   | { status: 'needs_input'; field: string; message: string; candidates?: Array<{ account: string; name: string }> }
   | { status: 'resolved'; value: ResolvedCustomer };
 
+type WechatCreateIdempotencyRecord = {
+  version: 1;
+  inputHash: string;
+  state: 'in_progress' | 'completed';
+  resultStatus?: 'created';
+  customerId?: string;
+  createdAt: string;
+  updatedAt: string;
+  attempts: number;
+  requestId: string;
+  idempotencyKey: string;
+  createStartedAt?: string;
+};
+
+const WECHAT_CREATE_INTEGRATION_ID = 'jixiang-wechat-customer-automation-v1';
+
 const cleanText = (value: unknown): string => String(value ?? '').trim();
 
 function readStorageArray<T>(value: unknown): T[] | null {
@@ -200,6 +223,72 @@ function resolvedInputHash(resolved: ResolvedCustomer): string {
 
 function invalidPrecheckToken(): never {
   throw new Error('WeChat customer precheck token is invalid or expired.');
+}
+
+function idempotencyConflict(): never {
+  throw Object.assign(new Error('WeChat customer create idempotency conflict.'), { statusCode: 409 });
+}
+
+function validHash(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+}
+
+function readIdempotencyRecord(value: unknown): WechatCreateIdempotencyRecord | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const expectedKeys = [
+    'attempts', 'createdAt', 'customerId', 'idempotencyKey', 'inputHash',
+    'requestId', 'resultStatus', 'state', 'updatedAt', 'version', 'createStartedAt',
+  ];
+  if (Object.keys(record).some((key) => !expectedKeys.includes(key))) return null;
+  if (
+    record.version !== 1
+    || !validHash(record.inputHash)
+    || (record.state !== 'in_progress' && record.state !== 'completed')
+    || typeof record.createdAt !== 'string'
+    || typeof record.updatedAt !== 'string'
+    || !Number.isInteger(record.attempts)
+    || Number(record.attempts) < 1
+    || typeof record.requestId !== 'string'
+    || typeof record.idempotencyKey !== 'string'
+    || (record.createStartedAt !== undefined && typeof record.createStartedAt !== 'string')
+  ) return null;
+  if (record.state === 'completed' && (
+    record.resultStatus !== 'created' || typeof record.customerId !== 'string' || !record.customerId
+  )) return null;
+  if (record.state === 'in_progress' && (record.resultStatus !== undefined || record.customerId !== undefined)) return null;
+  return record as WechatCreateIdempotencyRecord;
+}
+
+function createIdentity(senderId: string, nonce: string) {
+  const idempotencyDigest = sha256(`${WECHAT_CREATE_INTEGRATION_ID}\u0000${sha256(senderId)}\u0000${nonce}`);
+  return {
+    storageKey: `wechat:customer-create:v1:${idempotencyDigest}`,
+    idempotencyKey: `wechat-create:${idempotencyDigest}`,
+    requestId: `wechat-request:${idempotencyDigest}`,
+  };
+}
+
+function storedCustomerSummary(row: any): WechatCustomerSummary | null {
+  const data = row?.data;
+  if (!data || typeof data !== 'object') return null;
+  const customer = data as Customer;
+  return typeof customer.id === 'string'
+    && typeof customer.name === 'string'
+    && typeof customer.company === 'string'
+    && typeof customer.owner === 'string'
+    ? summary(customer)
+    : null;
+}
+
+async function findCreatedCustomer(
+  deps: WechatCustomerAutomationDependencies,
+  customerId: string,
+): Promise<WechatCustomerSummary | null> {
+  const row = await deps.prisma.businessRecord.findUnique({
+    where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: customerId } },
+  });
+  return storedCustomerSummary(row);
 }
 
 function needsInput(field: string, message: string): Resolution {
@@ -523,8 +612,96 @@ export function createWechatCustomerAutomationService(
       if (resolution.status === 'needs_input') {
         throw new Error(`WeChat customer precheck is stale: ${resolution.message}`);
       }
-      if (payload.inputHash !== resolvedInputHash(resolution.value)) {
-        invalidPrecheckToken();
+      const identity = createIdentity(context.senderId, payload.nonce);
+      const inputHash = resolvedInputHash(resolution.value);
+      const priorRow = await deps.prisma.appStorage.findUnique({ where: { key: identity.storageKey } });
+      if (priorRow) {
+        const prior = readIdempotencyRecord(priorRow.value);
+        if (!prior || prior.inputHash !== inputHash) idempotencyConflict();
+      }
+      if (payload.inputHash !== inputHash) invalidPrecheckToken();
+      const nowIso = now.toISOString();
+      const pending: WechatCreateIdempotencyRecord = {
+        version: 1,
+        inputHash,
+        state: 'in_progress',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        attempts: 1,
+        requestId: identity.requestId,
+        idempotencyKey: identity.idempotencyKey,
+        createStartedAt: nowIso,
+      };
+      let record = pending;
+      let ownsReservation = true;
+      try {
+        await deps.prisma.appStorage.create({
+          data: { key: identity.storageKey, value: pending },
+        });
+      } catch (error) {
+        ownsReservation = false;
+        const existingRow = await deps.prisma.appStorage.findUnique({ where: { key: identity.storageKey } });
+        if (!existingRow) throw error;
+        const existing = readIdempotencyRecord(existingRow?.value);
+        if (!existing || existing.inputHash !== inputHash
+          || existing.idempotencyKey !== identity.idempotencyKey
+          || existing.requestId !== identity.requestId) idempotencyConflict();
+        record = existing;
+      }
+
+      if (!ownsReservation && record.state === 'completed') {
+        const customer = await findCreatedCustomer(deps, record.customerId!);
+        if (!customer) idempotencyConflict();
+        return {
+          status: 'replayed',
+          customer,
+          detailPath: `/customers/${encodeURIComponent(customer.id)}`,
+        };
+      }
+
+      if (!ownsReservation && record.createStartedAt) {
+        let customer: WechatCustomerSummary | null = null;
+        for (let attempt = 0; attempt < 20 && !customer; attempt += 1) {
+          const latestRow = await deps.prisma.appStorage.findUnique({ where: { key: identity.storageKey } });
+          const latest = readIdempotencyRecord(latestRow?.value);
+          if (!latest || latest.inputHash !== inputHash) idempotencyConflict();
+          record = latest;
+          if (latest.state === 'completed') {
+            customer = await findCreatedCustomer(deps, latest.customerId!);
+            break;
+          }
+          const audit = await deps.prisma.customerAuditEvent?.findFirst({
+            where: {
+              idempotencyKey: identity.idempotencyKey,
+              operation: 'create_customer_from_wechat',
+              result: 'succeeded',
+            },
+            orderBy: { createdAt: 'desc' },
+            select: { customerId: true },
+          });
+          customer = audit ? await findCreatedCustomer(deps, audit.customerId) : null;
+          if (!customer) await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        if (!customer) idempotencyConflict();
+        if (record.state === 'completed') return {
+          status: 'replayed', customer, detailPath: `/customers/${encodeURIComponent(customer.id)}`,
+        };
+        const completed: WechatCreateIdempotencyRecord = {
+          ...record,
+          state: 'completed',
+          resultStatus: 'created',
+          customerId: customer.id,
+          updatedAt: (deps.now?.() || new Date()).toISOString(),
+        };
+        await deps.prisma.appStorage.update({
+          where: { key: identity.storageKey },
+          data: { value: completed },
+        });
+        return {
+          status: 'replayed',
+          customer,
+          detailPath: `/customers/${encodeURIComponent(customer.id)}`,
+        };
       }
 
       const conflict = await findExactCustomerContactDuplicate(deps.prisma as any, {
@@ -563,8 +740,8 @@ export function createWechatCustomerAutomationService(
         manualTagIds: resolution.value.tagIds,
         remark: normalized.remark,
       }, context.actor, {
-        requestId: context.requestId,
-        idempotencyKey: context.idempotencyKey,
+        requestId: identity.requestId,
+        idempotencyKey: identity.idempotencyKey,
         auditOperation: 'create_customer_from_wechat',
         auditReason: '微信自动化创建客户',
       });
@@ -580,6 +757,17 @@ export function createWechatCustomerAutomationService(
         throw new Error(created.message || '客户创建失败');
       }
       const customer = summary(created.data);
+      const completed: WechatCreateIdempotencyRecord = {
+        ...record,
+        state: 'completed',
+        resultStatus: 'created',
+        customerId: customer.id,
+        updatedAt: (deps.now?.() || new Date()).toISOString(),
+      };
+      await deps.prisma.appStorage.update({
+        where: { key: identity.storageKey },
+        data: { value: completed },
+      });
       return {
         status: 'created',
         customer,

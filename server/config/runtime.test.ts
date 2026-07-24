@@ -14,6 +14,7 @@ const WECHAT_AUTOMATION_CONFIG = {
   JIXIANG_WECHAT_AUTOMATION_TOKEN: 'wechat-automation-token-that-is-at-least-32-characters',
   JIXIANG_WECHAT_AUTOMATION_ACTOR_ACCOUNT: 'wechat-automation',
   JIXIANG_WECHAT_AUTOMATION_SIGNING_KEY: 'wechat-precheck-signing-key-that-is-at-least-32-characters',
+  JIXIANG_WECHAT_AUTOMATION_SENDER_ID: 'fixed-wechat-sender',
 };
 
 assert.deepEqual(parseCorsOrigins({ CORS_ORIGINS: 'https://crm.example.com, https://ops.example.com' }), [

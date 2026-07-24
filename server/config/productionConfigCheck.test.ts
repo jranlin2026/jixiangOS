@@ -22,6 +22,7 @@ const validProductionEnv: NodeJS.ProcessEnv = {
   JIXIANG_WECHAT_AUTOMATION_TOKEN: 'wechat-automation-token-that-is-at-least-32-characters',
   JIXIANG_WECHAT_AUTOMATION_ACTOR_ACCOUNT: 'wechat-automation',
   JIXIANG_WECHAT_AUTOMATION_SIGNING_KEY: 'wechat-precheck-signing-key-that-is-at-least-32-characters',
+  JIXIANG_WECHAT_AUTOMATION_SENDER_ID: 'fixed-wechat-sender',
   JIXIANG_DEPLOY_BACKUP: 'true',
   JIXIANG_MYSQL_PASSWORD: 'StrongDatabasePassword123!',
   JIXIANG_BACKUP_DIR: '/var/backups/jixiang-os',

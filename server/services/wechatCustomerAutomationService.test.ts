@@ -98,8 +98,14 @@ function createHarness() {
     identities: [] as any[],
     links: [] as any[],
     customers: [] as any[],
+    appStorage: [] as any[],
     createCalls: [] as any[],
     createResult: null as any,
+    auditEvents: [] as any[],
+    failStorageCreateOnce: false,
+    failStorageUpdateAt: 0,
+    storageUpdateCalls: 0,
+    createGate: null as Promise<void> | null,
     currentTime: new Date(NOW),
   };
 
@@ -115,7 +121,36 @@ function createHarness() {
     appStorage: {
       findUnique: async ({ where }: any) => where.key === STORAGE_KEYS.LEAD_SOURCE_CONFIGS
         ? { key: where.key, value: structuredClone(state.leadSources) }
-        : null,
+        : structuredClone(state.appStorage.find((row) => row.key === where.key) || null),
+      create: async ({ data }: any) => {
+        if (state.failStorageCreateOnce) {
+          state.failStorageCreateOnce = false;
+          throw new Error('storage unavailable');
+        }
+        if (state.appStorage.some((row) => row.key === data.key)) {
+          throw Object.assign(new Error('duplicate app storage key'), { code: 'P2002' });
+        }
+        const row = structuredClone(data);
+        state.appStorage.push(row);
+        return row;
+      },
+      update: async ({ where, data }: any) => {
+        state.storageUpdateCalls += 1;
+        if (state.failStorageUpdateAt === state.storageUpdateCalls) {
+          throw new Error('storage finalize unavailable');
+        }
+        const row = state.appStorage.find((candidate) => candidate.key === where.key);
+        if (!row) throw new Error('app storage key missing');
+        Object.assign(row, structuredClone(data));
+        return structuredClone(row);
+      },
+    },
+    customerAuditEvent: {
+      findFirst: async ({ where }: any) => structuredClone(state.auditEvents.find((event) => (
+        event.idempotencyKey === where.idempotencyKey
+        && event.operation === where.operation
+        && event.result === where.result
+      )) || null),
     },
     businessRecord: {
       findMany: async ({ where }: any = {}) => {
@@ -145,7 +180,8 @@ function createHarness() {
   const customerService = {
     create: async (input: any, actor: any, execution: any) => {
       state.createCalls.push(structuredClone({ input, actor, execution }));
-      return state.createResult || {
+      if (state.createGate) await state.createGate;
+      const result = state.createResult || {
         code: 0,
         data: {
           ...input,
@@ -159,6 +195,16 @@ function createHarness() {
           updatedAt: NOW.toISOString(),
         },
       };
+      if (result.code === 0 && result.data) {
+        state.customers.push(businessRow(STORAGE_KEYS.CUSTOMERS, result.data.id, result.data));
+        state.auditEvents.push({
+          customerId: result.data.id,
+          idempotencyKey: execution.idempotencyKey,
+          operation: execution.auditOperation,
+          result: 'succeeded',
+        });
+      }
+      return result;
     },
   };
   const service = createWechatCustomerAutomationService({
@@ -314,6 +360,19 @@ function createCustomerRaceIntegrationHarness() {
         }
         state.appStorage.push(clone(create));
         return clone(create);
+      },
+      create: async ({ data }: any) => {
+        if (state.appStorage.some((row) => row.key === data.key)) {
+          throw Object.assign(new Error('duplicate app storage key'), { code: 'P2002' });
+        }
+        state.appStorage.push(clone(data));
+        return clone(data);
+      },
+      update: async ({ where, data }: any) => {
+        const row = state.appStorage.find((candidate) => candidate.key === where.key);
+        if (!row) throw new Error('missing app storage key');
+        Object.assign(row, clone(data));
+        return clone(row);
       },
     },
     $queryRaw: async (query: any) => {
@@ -889,6 +948,122 @@ function createCustomerRaceIntegrationHarness() {
     field: 'ownerAccount',
     message: '请提供可分配的负责人账号',
   });
+}
+
+// A confirmation token is a server-side idempotency boundary: a second
+// matching create returns the first result without invoking customer creation.
+{
+  const { state, service, context } = createHarness();
+  const input = {
+    name: '幂等创建客户',
+    phone: '13800138111',
+    leadSource: '官网',
+  };
+  const checked = await service.check(input, context);
+  assert.equal(checked.status, 'ready');
+  if (checked.status !== 'ready') throw new Error('expected ready idempotency precheck');
+
+  assert.equal((await service.create(input, checked.precheckToken, context)).status, 'created');
+  assert.equal((await service.create(input, checked.precheckToken, context)).status, 'replayed');
+  assert.equal(state.createCalls.length, 1, 'matching retry must not create a second customer');
+  const stored = JSON.stringify(state.appStorage);
+  assert.equal(stored.includes('13800138111'), false, 'AppStorage must not retain contact PII');
+  assert.equal(stored.includes('幂等创建客户'), false, 'AppStorage must not retain customer text');
+  assert.equal(JSON.stringify(state.auditEvents).includes('13800138111'), false, 'audit metadata must not retain contact PII');
+}
+
+// The AppStorage key is the concurrency gate: a follower waits for the
+// winning create and returns its stored result without another write.
+{
+  const { state, service, context } = createHarness();
+  const input = { name: '并发幂等客户', phone: '13800138112', leadSource: '官网' };
+  const checked = await service.check(input, context);
+  assert.equal(checked.status, 'ready');
+  if (checked.status !== 'ready') throw new Error('expected concurrent ready precheck');
+  let release!: () => void;
+  state.createGate = new Promise<void>((resolve) => { release = resolve; });
+  const winner = service.create(input, checked.precheckToken, context);
+  while (!state.createCalls.length) await new Promise((resolve) => setTimeout(resolve, 1));
+  const follower = service.create(input, checked.precheckToken, context);
+  release();
+  const results = await Promise.all([winner, follower]);
+  assert.deepEqual(results.map((result) => result.status).sort(), ['created', 'replayed']);
+  assert.equal(state.createCalls.length, 1, 'concurrent callers must create exactly once');
+}
+
+// Failed reservation storage never reaches customer creation.
+{
+  const { state, service, context } = createHarness();
+  const input = { name: '存储失败客户', phone: '13800138113', leadSource: '官网' };
+  const checked = await service.check(input, context);
+  assert.equal(checked.status, 'ready');
+  if (checked.status !== 'ready') throw new Error('expected storage failure precheck');
+  state.failStorageCreateOnce = true;
+  await assert.rejects(() => service.create(input, checked.precheckToken, context), /storage unavailable/);
+  assert.equal(state.createCalls.length, 0);
+}
+
+// A create that committed its audit but missed final AppStorage persistence
+// reconciles deterministically on retry instead of issuing another create.
+{
+  const { state, service, context } = createHarness();
+  const input = { name: '恢复幂等客户', phone: '13800138114', leadSource: '官网' };
+  const checked = await service.check(input, context);
+  assert.equal(checked.status, 'ready');
+  if (checked.status !== 'ready') throw new Error('expected recovery precheck');
+  state.failStorageUpdateAt = 1;
+  await assert.rejects(() => service.create(input, checked.precheckToken, context), /storage finalize unavailable/);
+  assert.equal(state.createCalls.length, 1);
+  assert.equal((await service.create(input, checked.precheckToken, context)).status, 'replayed');
+  assert.equal(state.createCalls.length, 1);
+}
+
+// Reusing a nonce-backed confirmation with a different normalized input is a
+// durable conflict, never permission to write a second customer.
+{
+  const { state, service, context } = createHarness();
+  const input = { name: '指纹原始客户', phone: '13800138116', leadSource: '官网' };
+  const checked = await service.check(input, context);
+  assert.equal(checked.status, 'ready');
+  if (checked.status !== 'ready') throw new Error('expected fingerprint precheck');
+  await service.create(input, checked.precheckToken, context);
+  await assert.rejects(
+    () => service.create({ ...input, name: '指纹变更客户' }, checked.precheckToken, context),
+    /idempotency conflict/,
+  );
+  assert.equal(state.createCalls.length, 1);
+}
+
+// Existing malformed durable state is fail-closed and cannot authorize a
+// second customer creation.
+{
+  const { state, service, context } = createHarness();
+  const input = { name: '损坏状态客户', phone: '13800138115', leadSource: '官网' };
+  const checked = await service.check(input, context);
+  assert.equal(checked.status, 'ready');
+  if (checked.status !== 'ready') throw new Error('expected malformed record precheck');
+  await service.create(input, checked.precheckToken, context);
+  state.appStorage[0].value = { version: 1, state: 'completed' };
+  await assert.rejects(() => service.create(input, checked.precheckToken, context), /idempotency conflict/);
+  assert.equal(state.createCalls.length, 1);
+}
+
+// A failed create that reports an unrelated duplicate has no matching audit
+// provenance, so a retry remains conflict-only and never calls it replayed.
+{
+  const { state, service, context } = createHarness();
+  const input = { name: '非本次重复客户', phone: '13800138117', leadSource: '官网' };
+  const checked = await service.check(input, context);
+  assert.equal(checked.status, 'ready');
+  if (checked.status !== 'ready') throw new Error('expected duplicate recovery precheck');
+  state.createResult = {
+    code: 409,
+    message: '系统中已存在相同联系方式',
+    data: { id: 'unrelated-customer', name: '已有客户', company: '', owner: '销售甲' },
+  };
+  assert.equal((await service.create(input, checked.precheckToken, context)).status, 'duplicate');
+  await assert.rejects(() => service.create(input, checked.precheckToken, context), /idempotency conflict/);
+  assert.equal(state.createCalls.length, 1, 'retry must not create or replay an unrelated duplicate');
 }
 
 console.log('wechat customer automation service tests passed');

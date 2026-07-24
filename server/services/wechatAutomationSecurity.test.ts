@@ -18,6 +18,7 @@ for (const partial of [
   { JIXIANG_WECHAT_AUTOMATION_TOKEN: TOKEN },
   { JIXIANG_WECHAT_AUTOMATION_ACTOR_ACCOUNT: 'wechat-automation' },
   { JIXIANG_WECHAT_AUTOMATION_SIGNING_KEY: SIGNING_KEY },
+  { JIXIANG_WECHAT_AUTOMATION_SENDER_ID: 'fixed-sender' },
   {
     JIXIANG_WECHAT_AUTOMATION_TOKEN: TOKEN,
     JIXIANG_WECHAT_AUTOMATION_ACTOR_ACCOUNT: 'wechat-automation',
@@ -38,22 +39,26 @@ assert.throws(() => readWechatAutomationConfig({
   JIXIANG_WECHAT_AUTOMATION_TOKEN: 'too-short',
   JIXIANG_WECHAT_AUTOMATION_ACTOR_ACCOUNT: 'wechat-automation',
   JIXIANG_WECHAT_AUTOMATION_SIGNING_KEY: SIGNING_KEY,
+  JIXIANG_WECHAT_AUTOMATION_SENDER_ID: 'fixed-sender',
 }), /at least 32 characters/i);
 
 assert.throws(() => readWechatAutomationConfig({
   JIXIANG_WECHAT_AUTOMATION_TOKEN: TOKEN,
   JIXIANG_WECHAT_AUTOMATION_ACTOR_ACCOUNT: 'wechat-automation',
   JIXIANG_WECHAT_AUTOMATION_SIGNING_KEY: 'too-short',
+  JIXIANG_WECHAT_AUTOMATION_SENDER_ID: 'fixed-sender',
 }), /at least 32 characters/i);
 
 assert.deepEqual(readWechatAutomationConfig({
   JIXIANG_WECHAT_AUTOMATION_TOKEN: TOKEN,
   JIXIANG_WECHAT_AUTOMATION_ACTOR_ACCOUNT: '  wechat-automation  ',
   JIXIANG_WECHAT_AUTOMATION_SIGNING_KEY: SIGNING_KEY,
+  JIXIANG_WECHAT_AUTOMATION_SENDER_ID: ' fixed-sender ',
 }), {
   token: TOKEN,
   actorAccount: 'wechat-automation',
   signingKey: SIGNING_KEY,
+  senderId: 'fixed-sender',
 });
 
 assert.equal(authenticateWechatAutomationToken(TOKEN, TOKEN), true);

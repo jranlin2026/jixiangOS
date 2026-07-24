@@ -8,6 +8,9 @@ const runtimeStorageRouteSource = readFileSync(
   'utf8',
 );
 
+assert.match(source, /app\.use\('\/api\/automation\/wechat', createWechatCustomerAutomationRouter\(\{\s*config: \(\) => readWechatAutomationConfig\(\),\s*resolveActor: \(account\) => authService\.getAutomationActor\(account\),\s*service: wechatCustomerAutomationService,\s*\}\)\);/);
+assert.equal(source.split("app.use('/api/automation/wechat',").length - 1, 1, 'WeChat automation router must mount exactly once');
+
 for (const [method, route] of [
   ['get', '/api/settings/users'],
   ['get', '/api/settings/assignable-users'],

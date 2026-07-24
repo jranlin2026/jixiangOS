@@ -7,6 +7,7 @@ export type WechatAutomationConfig = {
   token: string;
   actorAccount: string;
   signingKey: string;
+  senderId: string;
 };
 
 export type WechatCustomerPrecheckTokenPayload = {
@@ -93,21 +94,22 @@ export function readWechatAutomationConfig(env: NodeJS.ProcessEnv = process.env)
   const token = readEnv(env, 'JIXIANG_WECHAT_AUTOMATION_TOKEN');
   const actorAccount = readEnv(env, 'JIXIANG_WECHAT_AUTOMATION_ACTOR_ACCOUNT');
   const signingKey = readEnv(env, 'JIXIANG_WECHAT_AUTOMATION_SIGNING_KEY');
-  const configured = [token, actorAccount, signingKey].filter(Boolean).length;
+  const senderId = readEnv(env, 'JIXIANG_WECHAT_AUTOMATION_SENDER_ID');
+  const configured = [token, actorAccount, signingKey, senderId].filter(Boolean).length;
   if (!configured) return null;
-  if (configured !== 3) {
-    throw new Error('JIXIANG_WECHAT_AUTOMATION_TOKEN, JIXIANG_WECHAT_AUTOMATION_ACTOR_ACCOUNT, and JIXIANG_WECHAT_AUTOMATION_SIGNING_KEY must be configured together.');
+  if (configured !== 4) {
+    throw new Error('JIXIANG_WECHAT_AUTOMATION_TOKEN, JIXIANG_WECHAT_AUTOMATION_ACTOR_ACCOUNT, JIXIANG_WECHAT_AUTOMATION_SIGNING_KEY, and JIXIANG_WECHAT_AUTOMATION_SENDER_ID must be configured together.');
   }
   assertStrongSecret(token, 'JIXIANG_WECHAT_AUTOMATION_TOKEN');
   assertStrongSecret(signingKey, 'JIXIANG_WECHAT_AUTOMATION_SIGNING_KEY');
-  return { token, actorAccount, signingKey };
+  return { token, actorAccount, signingKey, senderId };
 }
 
 /** Production treats this optional integration as an explicit allowlist: absent configuration disables startup. */
 export function validateWechatAutomationRuntimeConfig(env: NodeJS.ProcessEnv = process.env): WechatAutomationConfig | null {
   const config = readWechatAutomationConfig(env);
   if (readEnv(env, 'NODE_ENV') === 'production' && !config) {
-    throw new Error('JIXIANG_WECHAT_AUTOMATION_TOKEN, JIXIANG_WECHAT_AUTOMATION_ACTOR_ACCOUNT, and JIXIANG_WECHAT_AUTOMATION_SIGNING_KEY must be configured together before running jixiangOS in production.');
+    throw new Error('JIXIANG_WECHAT_AUTOMATION_TOKEN, JIXIANG_WECHAT_AUTOMATION_ACTOR_ACCOUNT, JIXIANG_WECHAT_AUTOMATION_SIGNING_KEY, and JIXIANG_WECHAT_AUTOMATION_SENDER_ID must be configured together before running jixiangOS in production.');
   }
   return config;
 }
