@@ -21,8 +21,12 @@ export function createBusinessExportRouter(deps: { service: ExportService; requi
       response.status(401).json(failure('Unauthorized', 401));
       return;
     }
-    const result = await deps.service.export({ module, reason: body.reason, filters: body.filters, columnMode: body.columnMode, columnIds: body.columnIds }, request.currentUser);
-    response.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+    try {
+      const result = await deps.service.export({ module, reason: body.reason, filters: body.filters, columnMode: body.columnMode, columnIds: body.columnIds }, request.currentUser);
+      response.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+    } catch {
+      response.status(500).json(failure('业务导出服务暂时不可用', 500));
+    }
   });
   return router;
 }

@@ -16,6 +16,7 @@ const order = {
   productLevel: '899', orderType: '899成交', amount: 899, actualAmount: 799,
   paymentMethod: '对公转账', status: '已确认', refundStatus: '无', owner: '销售甲', salesId: 'sales-1',
   payments: [{ id: 'payment-1', amount: 799, paymentMethod: '对公转账', paidAt: now, paymentOrderNo: 'PAY-1', voucherName: '付款凭证.png', attachments: [{ id: 'payment-proof', name: '付款附件.jpg' }] }],
+  leadSource: '抖音', sourceName: '直播',
   dealEvidenceAttachments: [{ id: 'proof-1', name: '成交凭证.png', mimeType: 'image/png', size: 12, category: 'order-deal-evidence' }],
   createdAt: now, updatedAt: now,
 };
@@ -98,7 +99,12 @@ records.push(
   { domain: STORAGE_KEYS.ORDERS, recordId: 'order-without-commission', data: { ...order, id: 'order-without-commission', orderNo: 'ORD-NO-COMMISSION' } },
   { domain: STORAGE_KEYS.COMMISSIONS, recordId: 'commission-withdrawn', orderId: order.id, data: { ...commission, id: 'commission-withdrawn', commissionAmount: 20, performanceAmount: 500, status: '已撤回' } },
   { domain: STORAGE_KEYS.COMMISSIONS, recordId: 'commission-legacy-exception', orderId: order.id, data: { ...commission, id: 'commission-legacy-exception', commissionAmount: 30, performanceAmount: 500, status: '异常' } },
+  { domain: STORAGE_KEYS.COMMISSIONS, recordId: 'commission-cancelled', orderId: order.id, data: { ...commission, id: 'commission-cancelled', commissionAmount: 40, performanceAmount: 500, status: '已取消' } },
+  { domain: STORAGE_KEYS.COMMISSIONS, recordId: 'commission-chargeback-pending', orderId: order.id, data: { ...commission, id: 'commission-chargeback-pending', commissionAmount: 50, performanceAmount: 500, status: '待冲销' } },
+  { domain: STORAGE_KEYS.COMMISSIONS, recordId: 'commission-chargeback-done', orderId: order.id, data: { ...commission, id: 'commission-chargeback-done', commissionAmount: 60, performanceAmount: 500, status: '已冲销' } },
   { domain: STORAGE_KEYS.COMMISSIONS, recordId: 'commission-active-2', orderId: order.id, data: { ...commission, id: 'commission-active-2', role: '线索', commissionAmount: 10, performanceAmount: 600 } },
+  { domain: STORAGE_KEYS.COMMISSION_OPERATION_LOGS, recordId: 'log-confirm', orderId: order.id, data: { id: 'log-confirm', orderId: order.id, orderNo: order.orderNo, customerName: order.customerName, action: '确认分账', operator: '财务甲', operatedAt: '2026-07-24T10:00:00.000Z', summary: '确认分账' } },
+  { domain: STORAGE_KEYS.COMMISSION_OPERATION_LOGS, recordId: 'log-withdraw', orderId: order.id, data: { id: 'log-withdraw', orderId: order.id, orderNo: order.orderNo, customerName: order.customerName, action: '撤回提成', operator: '财务乙', operatedAt: '2026-07-24T11:00:00.000Z', reason: '金额有误', summary: '撤回提成' } },
 );
 const settlement = await service.export({
   module: 'order_settlements', reason: '月度对账', columnMode: 'current_view',
@@ -110,10 +116,18 @@ assert.equal(settlement.data?.summaryRows[0]?.totalCommissionAmount, 89.9, '分�
 assert.equal(settlement.data?.summaryRows[0]?.performanceAmount, 799, '业绩口径取有效提成最大值，不得累加');
 assert.equal(settlement.data?.detailRows.some((row) => 'ownerId' in row), false, '固定明细不得泄露内部人员 ID');
 assert.deepEqual(
+  settlement.data?.detailRows.map((row) => row.status).sort(),
+  ['已撤回', '已撤回', '已撤回', '待冲销', '已冲销', '待确认', '待确认'].sort(),
+  '人员明细必须保留撤回、取消、异常和冲销留痕，并返回归一化状态',
+);
+assert.deepEqual(
   settlement.data?.detailColumns.map((column) => column.id),
-  ['orderNo', 'customerName', 'role', 'owner', 'department', 'commissionAmount', 'performanceAmount', 'commissionRate', 'status', 'paymentDate', 'payoutPlanName', 'ruleCalculationType', 'formulaText', 'calculationNote', 'evidenceStatus', 'auditReason'],
+  ['orderNo', 'customerName', 'orderAmount', 'role', 'owner', 'department', 'commissionAmount', 'performanceAmount', 'commissionRate', 'status', 'paymentDate', 'payoutPlanName', 'ruleCalculationType', 'formulaText', 'calculationNote', 'evidenceStatus', 'auditReason', 'confirmedAt', 'paidAt', 'withdrawStatus', 'withdrawReason'],
   '人员分账明细必须包含方案与计算依据字段',
 );
+assert.equal(settlement.data?.detailRows[0]?.orderAmount, 799);
+assert.equal(settlement.data?.detailRows[0]?.confirmedAt, '2026-07-24T10:00:00.000Z');
+assert.equal(settlement.data?.detailRows.find((row) => row.status === '已撤回')?.withdrawReason, '金额有误');
 assert.equal(settlement.data?.summaryColumns.every((column) => !/^[A-Za-z]/.test(column.label)), true, '汇总表头必须全部中文');
 assert.equal(settlement.data?.detailColumns.every((column) => !/^[A-Za-z]/.test(column.label)), true, '明细表头必须全部中文');
 
@@ -134,19 +148,29 @@ const recoverySettlement = await service.export({
   module: 'recovery_settlements', reason: '售后复核', columnMode: 'current_view', columnIds: ['recoveryNo', 'splitDetails', 'totalCommissionAmount'], filters: { settlementStatus: '待发放' },
 }, actor);
 assert.deepEqual(recoverySettlement.data?.summaryRows, [{ recoveryNo: 'RCV-001', splitDetails: '销售：销售甲 298', totalCommissionAmount: 298 }]);
-assert.equal(recoverySettlement.data?.detailRows[0]?.orderNo, 'RCV-001');
+assert.equal(recoverySettlement.data?.detailRows[0]?.recoveryNo, 'RCV-001');
+assert.equal(recoverySettlement.data?.detailRows[0]?.originalProduct, '899课程');
+assert.equal(recoverySettlement.data?.detailRows[0]?.recoveryAmount, 2980);
+assert.equal(recoverySettlement.data?.detailColumns[0]?.id, 'recoveryNo', '挽回分账明细必须使用独立字段集');
+assert.equal(recoverySettlement.data?.detailColumns.some((column) => column.id === 'orderAmount'), false);
 
 assert.deepEqual(
   (await service.export({ module: 'orders', reason: '字段池检查', columnMode: 'all', filters: { search: 'ORD-001' } }, actor)).data?.summaryColumns.map((column) => column.id),
-  ['orderNo', 'status', 'customer', 'productName', 'productLevel', 'orderType', 'actualAmount', 'officialPaymentChannel', 'thirdPartyOrderNo', 'resourceOwnership', 'owner', 'createdByName', 'paymentDate', 'leadInputBy', 'leadContributorName', 'notes', 'createdAt'],
+  ['orderNo', 'status', 'customer', 'productName', 'productLevel', 'orderType', 'actualAmount', 'officialPaymentChannel', 'thirdPartyOrderNo', 'resourceOwnership', 'owner', 'createdByName', 'paymentDate', 'leadInputBy', 'leadContributorName', 'notes', 'createdAt', 'leadSourceFull', 'updatedAt'],
   '订单全部字段必须与 ORDER_COLUMNS 完全一致',
 );
+const orderAllFields = await service.export({ module: 'orders', reason: '全部字段值', columnMode: 'all', filters: { search: 'ORD-001' } }, actor);
+assert.equal(orderAllFields.data?.summaryRows[0]?.leadSourceFull, '抖音 / 直播');
+assert.equal(orderAllFields.data?.summaryRows[0]?.updatedAt, now);
 assert.deepEqual(
   (await service.export({ module: 'order_settlements', reason: '字段池检查', columnMode: 'all', filters: { search: 'ORD-001' } }, actor)).data?.summaryColumns.map((column) => column.id),
   ['orderNo', 'status', 'customerName', 'thirdPartyOrderNo', 'productName', 'productLevel', 'orderAmount', 'officialPaymentChannel', 'paymentDate', 'salesOwner', 'createdByName', 'splitDetails', 'totalCommissionAmount', 'orderType', 'resourceOwnership', 'leadSourceFull', 'leadInputBy', 'leadContributorName', 'paymentOrderNo', 'notes', 'createdAt', 'updatedAt', 'performanceAmount', 'pendingAssignCount', 'exceptionCount', 'settlementOperator', 'confirmedAt', 'paidAt', 'withdrawReason'],
   '订单分账全部字段必须与 ORDER_SPLIT_COLUMNS 完全一致',
 );
 assert.equal(recoverySettlement.data?.summaryColumns.every((column) => !/^[A-Za-z]/.test(column.label)), true);
+const recoveryAllFields = await service.export({ module: 'recovery_settlements', reason: '全部字段值', columnMode: 'all', filters: { search: 'RCV-001', settlementStatus: '待发放' } }, actor);
+assert.equal(recoveryAllFields.data?.summaryRows[0]?.attachmentNames, '挽回凭证.png');
+assert.equal(recoveryAllFields.data?.summaryRows[0]?.attachmentCount, 1);
 
 records.push(
   { domain: STORAGE_KEYS.RECOVERY_ORDERS, recordId: 'recovery-deleted', data: { ...recovery, id: 'recovery-deleted', recoveryNo: 'RCV-DELETED', deletedAt: now } },
@@ -164,10 +188,8 @@ const empty = await service.export({
 assert.equal(empty.code, 400, '空结果必须由后端拒绝');
 
 const noAuditService = createBusinessExportService({ ...prisma, businessExportAudit: undefined } as any, { now: () => new Date(now) });
-await assert.rejects(
-  () => noAuditService.export({ module: 'orders', reason: '审计检查', columnMode: 'current_view', columnIds: ['orderNo'], filters: { search: 'ORD-001' } }, actor),
-  '审计写入必须是成功导出的强制步骤',
-);
+const auditFailure = await noAuditService.export({ module: 'orders', reason: '审计检查', columnMode: 'current_view', columnIds: ['orderNo'], filters: { search: 'ORD-001' } }, actor);
+assert.deepEqual(auditFailure, { code: 500, data: null, message: '业务导出服务暂时不可用' }, '审计失败必须阻止成功并返回脱敏 JSON 错误');
 
 records.push({
   domain: STORAGE_KEYS.ORDERS,

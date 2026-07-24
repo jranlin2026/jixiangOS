@@ -10,6 +10,7 @@ import type { BusinessExportColumn, BusinessExportModule, BusinessExportRequest,
 import type { Order } from '../../src/types/order';
 import type { RecoveryOrder } from '../../src/types/recoveryOrder';
 import { formatLeadSourcePath, getActiveCommissions, summarizeCommissionProcessing } from '../../src/shared/utils/financeSettlementPresentation';
+import { getRecoveryEvidenceAttachments } from '../../src/shared/utils/recoveryEvidence';
 
 type BusinessExportPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department'> & {
   businessExportAudit: { create(args: { data: Record<string, unknown> }): Promise<unknown> };
@@ -39,6 +40,11 @@ const ORDER_COLUMNS = [
   col('owner', '销售负责人'), col('createdByName', '订单创建人'), col('paymentDate', '付款时间', 'date'),
   col('leadInputBy', '线索录入人'), col('leadContributorName', '线索贡献人'), col('notes', '备注'), col('createdAt', '创建时间', 'date'),
 ];
+const ORDER_ALL_COLUMNS = [
+  ...ORDER_COLUMNS,
+  col('leadSourceFull', '线索来源'),
+  col('updatedAt', '更新时间', 'date'),
+];
 const ORDER_SETTLEMENT_COLUMNS = [
   col('orderNo', '订单号'), col('status', '分账状态'), col('customerName', '客户'), col('thirdPartyOrderNo', '第三方平台订单'),
   col('productName', '产品名称'), col('productLevel', '产品等级'), col('orderAmount', '实付金额', 'currency'),
@@ -62,16 +68,30 @@ const RECOVERY_SETTLEMENT_COLUMNS = [
   col('settlementHandledBy', '分账经办人'), col('settlementConfirmedAt', '确认时间', 'date'), col('settlementPaidAt', '发放时间', 'date'),
   col('settlementWithdrawReason', '撤回原因'),
 ];
+const RECOVERY_SETTLEMENT_ALL_COLUMNS = [
+  ...RECOVERY_SETTLEMENT_COLUMNS,
+  col('attachmentNames', '挽回凭证文件名'),
+  col('attachmentCount', '挽回凭证数量', 'number'),
+];
 const ORDER_PAYMENT_DETAIL_COLUMNS = [
   col('orderNo', '订单号'), col('customerName', '客户'), col('paymentSequence', '付款序号', 'number'), col('paymentOrderNo', '付款订单号'),
   col('amount', '付款金额', 'currency'), col('paymentMethod', '支付方式'), col('paidAt', '付款时间', 'date'), col('voucherName', '凭证文件名'),
   col('attachmentNames', '附件文件名'), col('attachmentCount', '附件数量', 'number'), col('remark', '付款备注'),
 ];
-const SETTLEMENT_DETAIL_COLUMNS = [
-  col('orderNo', '订单号'), col('customerName', '客户'), col('role', '分账角色'), col('owner', '分账人员'), col('department', '所属部门'),
+const ORDER_SETTLEMENT_DETAIL_COLUMNS = [
+  col('orderNo', '订单号'), col('customerName', '客户'), col('orderAmount', '实付金额', 'currency'), col('role', '分账角色'), col('owner', '分账人员'), col('department', '所属部门'),
   col('commissionAmount', '分账金额', 'currency'), col('performanceAmount', '业绩计算金额', 'currency'), col('commissionRate', '提成比例', 'number'),
   col('status', '分账状态'), col('paymentDate', '付款时间', 'date'), col('payoutPlanName', '提成方案'), col('ruleCalculationType', '计算类型'),
   col('formulaText', '计算公式'), col('calculationNote', '计算说明'), col('evidenceStatus', '凭证校验状态'), col('auditReason', '审核原因'),
+  col('confirmedAt', '确认时间', 'date'), col('paidAt', '发放时间', 'date'), col('withdrawStatus', '撤回状态'), col('withdrawReason', '撤回原因'),
+];
+const RECOVERY_SETTLEMENT_DETAIL_COLUMNS = [
+  col('recoveryNo', '挽回订单号'), col('customerName', '客户'), col('originalProduct', '原产品'), col('recoveryAmount', '挽回成交金额', 'currency'),
+  col('role', '分账角色'), col('owner', '分账人员'), col('department', '所属部门'), col('commissionAmount', '分账金额', 'currency'),
+  col('performanceAmount', '业绩计算金额', 'currency'), col('commissionRate', '提成比例', 'number'), col('status', '分账状态'),
+  col('paymentDate', '付款时间', 'date'), col('payoutPlanName', '提成方案'), col('ruleCalculationType', '计算类型'), col('formulaText', '计算公式'),
+  col('calculationNote', '计算说明'), col('evidenceStatus', '凭证校验状态'), col('auditReason', '审核原因'), col('confirmedAt', '确认时间', 'date'),
+  col('paidAt', '发放时间', 'date'), col('withdrawStatus', '撤回状态'), col('withdrawReason', '撤回原因'),
 ];
 
 export class BusinessExportError extends Error {
@@ -94,7 +114,9 @@ function dateToken(value: Date): string { return value.toISOString().slice(0, 10
 function timestamp(value: unknown): number { const parsed = new Date(String(value || '')).getTime(); return Number.isFinite(parsed) ? parsed : 0; }
 function localBoundary(value: string, end: boolean): number {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return timestamp(value);
-  return timestamp(`${value}T${end ? '23:59:59.999' : '00:00:00.000'}`);
+  const [year, month, day] = value.split('-').map(Number);
+  const shanghaiStart = Date.UTC(year, month - 1, day, -8, 0, 0, 0);
+  return end ? shanghaiStart + 24 * 60 * 60 * 1000 - 1 : shanghaiStart;
 }
 function inRange(value: unknown, start?: string, end?: string): boolean {
   const time = timestamp(value);
@@ -131,6 +153,9 @@ function normalizeCommissionForExport(commission: Commission): Commission {
   if (rawStatus === '待审核') return { ...commission, status: '待确认' };
   if (rawStatus === '已取消' || rawStatus === '异常') return { ...commission, status: '已撤回' };
   return commission;
+}
+function isInactiveCommission(commission: Commission): boolean {
+  return ['已撤回', '待冲销', '已冲销'].includes(String(commission.status));
 }
 
 function validateRequest(input: BusinessExportRequest): Required<Pick<BusinessExportRequest, 'module' | 'reason' | 'columnMode' | 'filters'>> & { columnIds: string[] } {
@@ -249,7 +274,8 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
       if (!summaryCount) throw new BusinessExportError(400, '当前筛选条件下没有可导出的数据');
       if (summaryCount > MAX_SUMMARY_ROWS) throw new BusinessExportError(400, `导出结果超过 ${MAX_SUMMARY_ROWS} 行上限`);
       const exportedOrderIds = new Set(request.module === 'recovery_settlements' ? sourceRecoveryOrders.map((order) => order.id) : sourceOrders.map((order) => order.id));
-      const summaryColumnPool = request.module === 'orders' ? ORDER_COLUMNS : request.module === 'order_settlements' ? ORDER_SETTLEMENT_COLUMNS : RECOVERY_SETTLEMENT_COLUMNS;
+      const summaryColumnPool = request.module === 'orders' ? ORDER_ALL_COLUMNS
+        : request.module === 'order_settlements' ? ORDER_SETTLEMENT_COLUMNS : RECOVERY_SETTLEMENT_ALL_COLUMNS;
       const columns = request.columnMode === 'all' ? summaryColumnPool.map((column) => column.id) : request.columnIds;
       const summaryRows = request.module === 'orders'
         ? sourceOrders.map((order) => project({
@@ -259,6 +285,7 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
           officialPaymentChannel: order.officialPaymentChannel, thirdPartyOrderNo: order.thirdPartyOrderNo, resourceOwnership: order.resourceOwnership,
           owner: order.salesName || order.owner, createdByName: order.createdByName, paymentDate: order.payments?.[0]?.paidAt || order.createdAt,
           leadInputBy: order.leadInputBy, leadContributorName: order.leadContributorName, notes: order.notes, createdAt: order.createdAt,
+          leadSourceFull: formatLeadSourcePath(order), updatedAt: order.updatedAt,
         }, columns))
         : request.module === 'order_settlements'
           ? sourceOrders.map((order) => {
@@ -283,6 +310,7 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
           : sourceRecoveryOrders.map((order) => {
             const splits = byOrder.get(order.id) || [];
             const activeSplits = getActiveCommissions(splits);
+            const attachments = getRecoveryEvidenceAttachments(order);
             const totalCommissionAmount = Math.round(activeSplits.reduce((sum, item) => sum + Number(item.commissionAmount || 0), 0) * 100) / 100;
             const performanceAmount = Math.max(0, ...activeSplits.map((item) => Number(item.performanceAmount || 0)));
             return project({ recoveryNo: order.recoveryNo, status: recoveryStatus(order), customerName: order.customerName, thirdPartyOrderNo: order.thirdPartyOrderNo,
@@ -295,7 +323,9 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
               splitDetails: activeSplits.map((item) => `${item.role}：${item.owner} ${item.commissionAmount}`).join('；'), customerPhone: order.customerPhone,
               customerWechat: order.customerWechat, customerMatchStatus: order.customerMatchStatus, sourcePlatform: order.sourcePlatformName || order.sourcePlatform,
               sourceShop: order.sourceShopName, paymentOrderNo: order.paymentOrderNo, recoveryAt: order.recoveryAt, assistUserName: order.assistUserName,
-              auditorName: order.auditorName, auditedAt: order.auditedAt, remark: order.remark, createdAt: order.createdAt, updatedAt: order.updatedAt, }, columns);
+              auditorName: order.auditorName, auditedAt: order.auditedAt, remark: order.remark, createdAt: order.createdAt, updatedAt: order.updatedAt,
+              attachmentNames: attachments.map((attachment) => attachment.name).filter(Boolean).join('、') || null,
+              attachmentCount: attachments.length, }, columns);
           });
       const detailRows = request.module === 'orders'
         ? sourceOrders.flatMap((order) => (order.payments || []).map((payment, index) => ({ orderNo: order.orderNo, customerName: order.customerName,
@@ -303,24 +333,48 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
           paidAt: payment.paidAt, voucherName: payment.voucherName || null,
           attachmentNames: (payment.attachments || []).map((attachment) => attachment.name).filter(Boolean).join('、') || null,
           attachmentCount: attachmentCount(payment.attachments), remark: payment.remark || null })))
-        : getActiveCommissions(commissions.filter((commission) => exportedOrderIds.has(commission.orderId))).map((commission) => ({
-          orderNo: commission.orderNo, customerName: commission.customerName, role: commission.role, owner: commission.owner,
-          department: commission.department, commissionAmount: commission.commissionAmount, performanceAmount: commission.performanceAmount || null,
-          commissionRate: commission.commissionRate, status: commission.status, paymentDate: commission.paymentDate || null,
-          payoutPlanName: commission.payoutPlanName || null, ruleCalculationType: commission.ruleCalculationType || null,
-          formulaText: commission.formulaText || null, calculationNote: commission.calculationNote || null,
-          evidenceStatus: commission.evidenceStatus || null, auditReason: commission.auditReason || null,
-        }));
+        : commissions.filter((commission) => exportedOrderIds.has(commission.orderId)).map((commission) => {
+          const inactive = isInactiveCommission(commission);
+          const common = {
+            customerName: commission.customerName, role: commission.role, owner: commission.owner,
+            department: commission.department, commissionAmount: commission.commissionAmount, performanceAmount: commission.performanceAmount || null,
+            commissionRate: commission.commissionRate, status: commission.status, paymentDate: commission.paymentDate || null,
+            payoutPlanName: commission.payoutPlanName || null, ruleCalculationType: commission.ruleCalculationType || null,
+            formulaText: commission.formulaText || null, calculationNote: commission.calculationNote || null,
+            evidenceStatus: commission.evidenceStatus || null, auditReason: commission.auditReason || null,
+          };
+          if (request.module === 'order_settlements') {
+            const order = sourceOrders.find((item) => item.id === commission.orderId);
+            const processing = summarizeCommissionProcessing(byOrder.get(commission.orderId) || [], logsByOrder.get(commission.orderId) || []);
+            return {
+              ...common, orderNo: order?.orderNo || commission.orderNo, customerName: order?.customerName || common.customerName,
+              orderAmount: order?.actualAmount || order?.amount || commission.orderAmount,
+              confirmedAt: processing.confirmedAt || null, paidAt: commission.paidAt || processing.paidAt || null,
+              withdrawStatus: inactive ? commission.status : null,
+              withdrawReason: inactive ? processing.withdrawReason || commission.adjustReason || commission.auditReason || null : null,
+            };
+          }
+          const recoveryOrder = sourceRecoveryOrders.find((item) => item.id === commission.orderId);
+          return {
+            ...common, recoveryNo: recoveryOrder?.recoveryNo || commission.orderNo, customerName: recoveryOrder?.customerName || common.customerName,
+            originalProduct: recoveryOrder?.originalProduct || null, recoveryAmount: recoveryOrder?.recoveryAmount || null,
+            paymentDate: commission.paymentDate || recoveryOrder?.paymentAt || null,
+            confirmedAt: recoveryOrder?.settlementConfirmedAt || null, paidAt: commission.paidAt || recoveryOrder?.settlementPaidAt || null,
+            withdrawStatus: inactive ? commission.status : null,
+            withdrawReason: inactive ? recoveryOrder?.settlementWithdrawReason || commission.adjustReason || commission.auditReason || null : null,
+          };
+        });
       const createdAt = now().toISOString();
       const filename = `${FILENAMES[request.module]}_${dateToken(new Date(createdAt))}.xlsx`;
-      const detailColumns = request.module === 'orders' ? ORDER_PAYMENT_DETAIL_COLUMNS : SETTLEMENT_DETAIL_COLUMNS;
+      const detailColumns = request.module === 'orders' ? ORDER_PAYMENT_DETAIL_COLUMNS
+        : request.module === 'order_settlements' ? ORDER_SETTLEMENT_DETAIL_COLUMNS : RECOVERY_SETTLEMENT_DETAIL_COLUMNS;
       await prisma.businessExportAudit.create({ data: { module: request.module, actorId: actor.id, actorName: actor.name, reason: request.reason,
         filtersSnapshot: JSON.parse(JSON.stringify(request.filters)), columnMode: request.columnMode, columns: columns,
         summaryRowCount: summaryRows.length, detailRowCount: detailRows.length, filename, createdAt: new Date(createdAt) } });
       return success({ filename, sheetNames: SHEETS[request.module], summaryColumns: selectColumns(summaryColumnPool, columns), detailColumns, summaryRows, detailRows, audit: { module: request.module, reason: request.reason, summaryRowCount: summaryRows.length, detailRowCount: detailRows.length, createdAt } });
     } catch (error) {
       if (error instanceof BusinessExportError) return failure(error.message, error.statusCode);
-      throw error;
+      return failure('业务导出服务暂时不可用', 500);
     }
   };
   return { export: exportRows };
