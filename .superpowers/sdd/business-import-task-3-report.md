@@ -38,7 +38,7 @@ Review-fix verification before the hardening commit:
 
 - `TZ=Asia/Shanghai npx tsx src/api/businessImportWorkbook.test.ts && npx tsx src/api/businessImportApi.test.ts && npx tsx src/shared/components/businessImportDialogModel.test.ts && npx tsx src/shared/components/BusinessImportDialog.test.ts && npx tsc -b --pretty false` — passed.
 - `npm run build` — passed; Vite transformed 13,436 modules and emitted ExcelJS as a separate production asset.
-- The full `npm test` suite will be rerun after the review commit; the 296-file result above is from the initial Task 3 implementation commit.
+- `npm test` — passed all 296 test files after the review commit. Database-dependent integration checks retained their documented skip because `DATABASE_URL` was not set.
 
 ## Follow-up boundary
 
