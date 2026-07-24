@@ -2,6 +2,29 @@ import type { Prisma } from '@prisma/client';
 
 export type AuditSnapshot = Record<string, Prisma.InputJsonValue>;
 
+/** Closed vocabulary for append-only customer audit writers. */
+export type CustomerAuditOperation =
+  | 'transfer'
+  | 'release_to_pool'
+  | 'set_progress'
+  | 'update_tags'
+  | 'add_todo'
+  | 'soft_delete'
+  | 'create_customer'
+  | 'create_customer_from_wechat'
+  | 'import_customer_to_public_pool'
+  | 'update_profile'
+  | 'claim_from_pool'
+  | 'add_follow_up'
+  | 'create_todo'
+  | 'update_todo'
+  | 'complete_todo'
+  | 'reopen_todo'
+  | 'cancel_todo'
+  | 'merge_customer_main'
+  | 'merge_customer_secondary'
+  | 'undo_customer_merge';
+
 type CustomerAuditEventLike = {
   id: string;
   eventSequence: bigint | number | string;

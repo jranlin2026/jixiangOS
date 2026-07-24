@@ -1,104 +1,174 @@
-# Task 2 report — versioned customer permission and scope migration
+# Task 2 report — WeChat customer check/create deep module
 
 ## Outcome
 
-Implemented the versioned, one-time customer permission/scope migration required by Task 2. The migration is serializable, idempotent after its marker is written, validates an immutable checksummed and HMAC-signed manifest before making changes, and never derives delete access from a role name or role code at runtime.
+Implemented the customer automation business module behind only `check(input,
+context)` and `create(input, token, context)`.
 
-The release path now fails closed when the signing key, prerequisite role baseline, manifest signature/checksum, role-data hash, captured role IDs, marker, compare-and-swap update, or final full-role-set verification is invalid.
+The module now owns required-field and phone normalization, fail-closed
+lead-source resolution, active/scope-safe owner resolution, exact customer-tag
+resolution, personal-resource contributor resolution, permission-safe duplicate
+prechecks, signed input/config bindings, execution-time authorization/config
+revalidation, and delegation to the existing transactional customer creator.
+
+No schema or migration was added. Manual customer creation keeps its original
+`create_customer` / `创建客户` audit behavior; automation creation uses
+`create_customer_from_wechat` / `微信自动化创建客户`.
+
+## RED / GREEN evidence
+
+### Exact read-only contact duplicate lookup
+
+RED:
+
+```text
+npx tsx server/services/contactIdentityService.test.ts
+SyntaxError: ... does not provide an export named
+'findExactCustomerContactDuplicate'
+```
+
+GREEN:
+
+```text
+npx tsx server/services/contactIdentityService.test.ts
+exit 0
+```
+
+The public helper normalizes phone and WeChat with the existing HMAC
+representation, reads only active customer links, takes no lock, reuses the
+existing visibility-safe conflict projection, and never returns the raw
+contact value.
+
+### Initial check tracer
+
+RED:
+
+```text
+npx tsx server/services/wechatCustomerAutomationService.test.ts
+ERR_MODULE_NOT_FOUND: .../wechatCustomerAutomationService
+```
+
+The first implementation run then exposed the existing storage normalization
+as `+8613800138000`; the test expectation was corrected to the repository's
+authoritative `normalizePhoneForStorage` behavior.
+
+GREEN:
+
+```text
+npx tsx server/services/wechatCustomerAutomationService.test.ts
+wechat customer automation service tests passed
+```
+
+This proves one-question required-field results, normalized phone storage,
+default `公司资源`, default automation-actor owner, exact active source
+resolution, and a ten-minute signed precheck without raw contacts in its token
+payload.
+
+### Directory, tags, attribution, and duplicates
+
+Incremental RED runs showed:
+
+```text
+owner account: expected ready, received needs_input
+unique owner name: expected ready, received needs_input
+ambiguous owner: candidates/message missing
+exact tag name: expected ready, received needs_input
+personal resource: missing contributor was incorrectly ready as 公司资源
+```
+
+Each behavior was implemented and returned to GREEN before the next slice.
+Final coverage includes exact owner account, unique owner name, ambiguous
+account candidates, inactive/out-of-scope/accountless owners, exact active tag
+names, personal-resource contributor account, exact active hierarchical lead
+sources, malformed source configuration, and permission-safe duplicate
+summaries.
+
+### Create, token security, revalidation, race, and audit
+
+RED:
+
+```text
+Error: WeChat customer creation is not implemented.
+```
+
+The execution-time role regression then produced:
+
+```text
+AssertionError: Missing expected rejection.
+```
+
+GREEN coverage proves:
+
+- expired, signature-tampered, input-swapped, and sender-swapped tokens reject;
+- the token binds resolved owner/contributor/source/tag stable IDs as well as
+  the normalized customer, so same-name config rebinding invalidates it;
+- current persisted create permission, owner scope, source state, and tag
+  definitions are re-read;
+- the final customer transaction receives no precheck-era access/tag snapshot,
+  so it reloads both authorization and tag validation inside the transaction;
+- an exact duplicate found after check returns `duplicate`;
+- the existing real customer-list concurrency test still proves the
+  transaction/identity-lock loser returns contact conflict;
+- a create-time contact `409` is mapped to `duplicate`, while unrelated `409`
+  failures are not mislabeled;
+- automation audit operation/reason are applied and the first manual-create
+  audit remains unchanged.
 
 ## Changed files
 
-- `server/services/roleMigrationService.ts`
-  - Added `CUSTOMER_PERMISSION_SCOPE_BASELINE_VERSION = 1` and marker key `aaos_customer_permission_scope_baseline_version`.
-  - Added canonical raw-role hashing, HMAC-SHA256 signing/verification, and strict manifest/marker validation.
-  - Added a serializable, idempotent legacy permission and customer-scope migration.
-  - Added row CAS plus a pre-marker full-set canonical hash/ID/`updatedAt` verification.
-  - Added fixed, redacted migration error codes.
-- `server/services/roleMigrationService.test.ts`
-  - Added migration, manifest, rollback, idempotency, cache-hydration, CLI, and compatibility-capture regressions.
-- `scripts/prepare-customer-permission-migration.ts`
-  - Added `capture --out <path>` and `apply-manifest --file <path>` workflows.
-  - Requires `CUSTOMER_PERMISSION_MIGRATION_SIGNING_KEY`, writes capture files atomically with owner-only permissions, and rejects mutable or stale evidence.
-  - Runs the frozen legacy name/code adapter only during capture; apply verifies signed evidence without re-running it.
-- `server/index.ts`
-  - Runs the existing role baseline and the new customer baseline before serving HTTP traffic.
-  - Logs only migration version/count or a fixed redacted failure code.
-  - Delegates runtime role hydration to the behavior-tested runtime storage handler.
-- `server/routes/runtimeStorageRoutes.ts` and `.test.ts`
-  - Hydrate roles from authoritative Prisma rows and return either the full authorized set or only the resolved immutable current role.
-  - Exercise the production handler over HTTP with the real auth middleware/service chain.
-- `src/shared/utils/permissions.ts`
-  - Makes `CUSTOMER_DELETE` explicit-module-only even for `全部/admin`, `全部/delete`, and `super_admin` code paths.
-  - Resolves a legacy `roleId=null` account to one unambiguous active role at the authentication boundary and persists its immutable ID in the authenticated user.
-- `src/shared/utils/organizationConfig.ts`
-  - Removed name/code-based super-administrator matching from runtime default-access merging.
-  - Preserves database explicit permissions when merging the immutable default administrator seed.
-  - Added an isolated compatibility-only capture adapter that requires both the old authorization entry and the old command path's unrestricted customer scope.
-- `.env.example`
-  - Documents the required server-only HMAC key.
-- `.gitignore`
-  - Ignores the default private manifest output directory.
+- `server/services/wechatCustomerAutomationService.ts`
+- `server/services/wechatCustomerAutomationService.test.ts`
+- `server/services/contactIdentityService.ts`
+- `server/services/contactIdentityService.test.ts`
+- `server/services/customerListService.ts`
+- `server/services/customerListService.test.ts`
+- `server/db/customerAuditProjection.ts`
+- `server/services/customerCommandService.ts`
+- `server/services/wechatAutomationSecurity.test.ts`
 
-## Migration behavior
+`customerCommandService.ts` now imports/re-exports the shared closed audit
+operation vocabulary from `customerAuditProjection.ts`. The security test
+changed `String.prototype.at(-1)` to indexed access only to retain the existing
+non-canonical-signature regression under the repository's TypeScript target.
 
-- Legacy `CUSTOMERS/read` grants customer list/detail only.
-- Legacy `CUSTOMER_ASSIGN` grants transfer and release-to-pool.
-- Legacy `CUSTOMER_EDIT` with an effective write-class action grants profile, tags, todos, and attribution only; it never grants progress editing.
-- Legacy `CUSTOMER_EDIT/read` does not manufacture write access.
-- `CUSTOMER_DELETE` is granted only to immutable role IDs in the verified manifest. Every customer-delete module is removed from roles not named by that manifest, including whitespace variants.
-- Customer deletion requires an explicit `CUSTOMER_DELETE` module at runtime; wildcard, parent, legacy, or role-code grants cannot recreate it.
-- Customer scope `department` migrates to `department_and_descendants`; unrelated domain scopes are preserved.
-- A completed marker makes later starts a zero-change no-op, preserving administrator edits made after migration.
-- The transaction uses Prisma `Serializable` isolation. A concurrent edit to any role, including an otherwise unchanged role, or a phantom role insert causes the whole transaction to roll back before the marker is written.
-
-## TDD evidence
-
-RED was recorded before implementation:
+## Final verification
 
 ```text
-SyntaxError: requested module './roleMigrationService' does not provide export CUSTOMER_PERMISSION_SCOPE_BASELINE_KEY
-
-SyntaxError: requested module './roleMigrationService' does not provide export createCustomerPermissionMigrationManifestAuthenticator
-
-AssertionError: CUSTOMER_DELETE 必须有显式叶子，全部/delete 不得隐式授权
-
-AssertionError: Missing expected rejection: hash 后无需迁移的角色若被并发加入 CUSTOMER_DELETE，完整角色集复核必须中止
-
-Error [ERR_MODULE_NOT_FOUND]: Cannot find module 'server/routes/runtimeStorageRoutes'
-
-AssertionError: 迁移写入默认超级管理员的显式 CUSTOMER_DELETE 必须穿过真实 authService 链保留
+npx tsx server/services/wechatCustomerAutomationService.test.ts  PASS
+npx tsx server/services/contactIdentityService.test.ts           PASS
+npx tsx server/services/customerListService.test.ts               PASS
+npx tsx server/services/customerAuditService.test.ts              PASS
+npx tsx server/services/customerCommandService.test.ts            PASS
+npx tsx server/services/wechatAutomationSecurity.test.ts          PASS
+npx tsc -b --pretty false                                         PASS
+npm test                                                          277 test files passed
+git diff --check                                                  PASS
 ```
 
-GREEN verification from the final implementation:
+The live-database integration test in the full suite was skipped because
+`DATABASE_URL` is not set; its static/in-memory foundation tests passed.
 
-```text
-pnpm exec tsx server/services/roleMigrationService.test.ts
-exit 0
+## Self-review
 
-pnpm test
-182 test files passed.
-exit 0
+Two-axis review found two important issues that were fixed before final
+verification:
 
-pnpm run build
-tsc -b && vite build
-exit 0
+1. the automation layer initially passed precheck-era access/tag snapshots
+   into the customer transaction; these are now deliberately omitted so the
+   authoritative transaction reloads them;
+2. source configuration initially inherited a general import fallback; this
+   automation path now fails closed unless stored source rows are well-formed,
+   uniquely named, and explicitly active.
 
-git diff --check
-exit 0
-```
+The review also narrowed the direct user lookup to the six fields needed for
+resolution and excluded accountless employees from owner-name selection.
 
-The repository runtime's Node binary was added to `PATH` for these commands because the ambient shell did not expose `node`.
+Durable replay is intentionally not implemented here: Task 3 explicitly owns
+the AppStorage idempotency record, concurrent replay, recovery, and the
+`replayed` result. Task 2 forwards request/idempotency metadata to the existing
+audit path without inventing a competing store.
 
-## Release procedure and safety boundary
+## Concerns
 
-1. Confirm the existing role-permission baseline is at version 4.
-2. Generate at least 32 random bytes for the server-only `CUSTOMER_PERMISSION_MIGRATION_SIGNING_KEY`; provide the same secret to capture, apply, and release startup without writing it into the manifest or logs.
-3. On a production-data copy that exactly matches the role data to be released, run `capture --out private_reports/customer-permission-manifest.json`.
-4. Apply that exact file with `apply-manifest --file private_reports/customer-permission-manifest.json` before starting the new release.
-5. Keep role writes frozen and stop old writers during the release window.
-6. Stop the release if the role data changed, the signature/checksum is invalid, an ID is missing/added/unknown, or the manifest/marker is malformed.
-7. Start the server; it completes the serializable customer migration and full-set verification before accepting HTTP traffic.
-
-Task 2 migrates persisted roles but intentionally does not replace the remaining live legacy `CUSTOMER_EDIT` / `CUSTOMER_ASSIGN` route and service gates. Task 3 must wire every customer operation to its explicit permission leaf, including the live delete command path, before the permission split is considered fully released.
-
-No push or deployment was performed.
+No Task 2 implementation blocker. Task 3 must add the planned durable
+idempotency/replay state before the HTTP create endpoint is exposed.

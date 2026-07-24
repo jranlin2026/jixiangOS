@@ -13,6 +13,7 @@ import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Customer, CustomerActivityRecord } from '../../src/types/customer';
 import type { FollowUpRecord, Lead, LeadChangeLog, LeadFlowConfig, LeadIntakeRecord } from '../../src/types/lead';
 import type { Role } from '../../src/types/role';
+import type { CustomerAuditOperation } from '../db/customerAuditProjection';
 import {
   buildDataVisibilityScopeForUser,
   type DataVisibilityScope,
@@ -87,20 +88,7 @@ export type CustomerAtomicCommand =
   | { action: 'add_todo'; customerId: string; title: string; content: string; dueAt: string; executionMethod: string; reason: string }
   | { action: 'soft_delete'; customerId: string; reason: string; confirmed: true };
 
-export type CustomerAuditOperation = CustomerAtomicCommand['action']
-  | 'create_customer'
-  | 'import_customer_to_public_pool'
-  | 'update_profile'
-  | 'claim_from_pool'
-  | 'add_follow_up'
-  | 'create_todo'
-  | 'update_todo'
-  | 'complete_todo'
-  | 'reopen_todo'
-  | 'cancel_todo'
-  | 'merge_customer_main'
-  | 'merge_customer_secondary'
-  | 'undo_customer_merge';
+export type { CustomerAuditOperation } from '../db/customerAuditProjection';
 
 export interface CustomerAuditEventInput {
   /** Optional caller-provided correlation ID; normal single commands generate one. */

@@ -68,6 +68,8 @@ export type CustomerCreateExecutionContext = {
   idempotencyKey?: string;
   importDestination?: 'assigned' | 'public_pool';
   importedLastFollowUpRecord?: string;
+  auditOperation?: 'create_customer_from_wechat';
+  auditReason?: string;
 };
 
 type CustomerRow = CustomerBusinessRecordRow;
@@ -492,17 +494,23 @@ export function createCustomerListService(
           canReadCustomer: (candidate) => canReadCustomer(identityConflictAccess, candidate),
         },
       });
+      const auditOperation = importToPublicPool
+        ? 'import_customer_to_public_pool'
+        : execution.auditOperation || 'create_customer';
+      const auditReason = importToPublicPool
+        ? '批量导入至公海'
+        : cleanText(execution.auditReason) || '创建客户';
       await appendCustomerAuditEvent(tx, {
-        operation: importToPublicPool ? 'import_customer_to_public_pool' : 'create_customer',
+        operation: auditOperation,
         customerId: customer.id,
         batchJobId: execution.batchJobId,
         requestId: execution.requestId,
         idempotencyKey: execution.idempotencyKey,
         actor: { id: currentUser.id, name: actorName },
-        reason: importToPublicPool ? '批量导入至公海' : '创建客户',
+        reason: auditReason,
         afterSnapshot: customer,
         canonicalInput: {
-          operation: importToPublicPool ? 'import_customer_to_public_pool' : 'create_customer',
+          operation: auditOperation,
           name,
           company: cleanText(input.company),
           phone,

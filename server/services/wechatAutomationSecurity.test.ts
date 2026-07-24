@@ -101,7 +101,7 @@ assert.throws(
   'a modified signature is rejected',
 );
 const base64urlAlphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
-const finalSignatureCharacter = signature.at(-1)!;
+const finalSignatureCharacter = signature[signature.length - 1];
 const nonCanonicalFinalCharacter = base64urlAlphabet[(base64urlAlphabet.indexOf(finalSignatureCharacter) & 0b111100) | 0b01];
 const nonCanonicalSignature = `${signature.slice(0, -1)}${nonCanonicalFinalCharacter}`;
 assert.notEqual(nonCanonicalSignature, signature);

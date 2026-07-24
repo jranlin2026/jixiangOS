@@ -4,6 +4,7 @@ import {
   CONTACT_IDENTITY_MUTATION_GATE_KEY,
   ContactIdentityConflictError,
   backfillContactIdentities,
+  findExactCustomerContactDuplicate,
   hashContactIdentity,
   linkLeadAndCustomerIdentity,
   normalizeContactIdentity,
@@ -210,6 +211,92 @@ function createStore(
     }
   };
   return { store, state };
+}
+
+// RED: automation prechecks need an exact, non-locking customer duplicate
+// lookup. It must reuse normalized HMAC identities, disclose only a customer
+// already visible to the caller, and never return raw contact values.
+{
+  const phoneHash = hashContactIdentity('13800138000', crypto.hmacKey);
+  const wechatHash = hashContactIdentity('wechat_exact', crypto.hmacKey);
+  const queryLog: string[] = [];
+  const { store } = createStore({
+    identities: [
+      {
+        id: 'ci-phone-exact', type: 'phone', normalizedHash: phoneHash, hashKeyVersion: 1,
+        status: 'active', encryptedNormalizedValue: 'ci:v1:opaque',
+        canonicalCustomerId: 'c-exact', conflictReason: null,
+      },
+      {
+        id: 'ci-wechat-exact', type: 'wechat', normalizedHash: wechatHash, hashKeyVersion: 1,
+        status: 'active', encryptedNormalizedValue: 'ci:v1:opaque',
+        canonicalCustomerId: 'c-exact', conflictReason: null,
+      },
+    ],
+    links: [
+      {
+        id: 'cil-phone-exact', identityId: 'ci-phone-exact', entityType: 'customer',
+        entityId: 'c-exact', linkStatus: 'active',
+      },
+      {
+        id: 'cil-wechat-exact', identityId: 'ci-wechat-exact', entityType: 'customer',
+        entityId: 'c-exact', linkStatus: 'active',
+      },
+    ],
+    customers: [{
+      id: 'aaos_customers:c-exact', domain: 'aaos_customers', recordId: 'c-exact',
+      data: {
+        id: 'c-exact', name: '已存在客户', company: '示例公司', owner: '销售甲',
+        phone: '13800138000', wechat: 'wechat_exact',
+      },
+    }],
+  }, { queryLog });
+
+  const hidden = await findExactCustomerContactDuplicate(store, {
+    phone: '+86 138 0013 8000',
+    wechat: ' WeChat_Exact ',
+    crypto,
+    conflictViewer: {
+      canReadCustomerList: false,
+      canReadCustomer: () => true,
+    },
+  });
+  assert.deepEqual(hidden, { message: '系统中已存在相同联系方式' });
+
+  const visible = await findExactCustomerContactDuplicate(store, {
+    phone: '+86 138 0013 8000',
+    wechat: ' WeChat_Exact ',
+    crypto,
+    conflictViewer: {
+      canReadCustomerList: true,
+      canReadCustomer: (customer) => customer.id === 'c-exact',
+    },
+  });
+  assert.deepEqual(visible, {
+    message: '系统中已存在相同联系方式',
+    customer: { id: 'c-exact', name: '已存在客户', company: '示例公司', owner: '销售甲' },
+  });
+  assert.deepEqual(await findExactCustomerContactDuplicate(store, {
+    wechat: ' WeChat_Exact ',
+    crypto,
+    conflictViewer: {
+      canReadCustomerList: true,
+      canReadCustomer: (customer) => customer.id === 'c-exact',
+    },
+  }), visible, 'a normalized WeChat-only exact lookup must find the same safe duplicate');
+  assert.equal(JSON.stringify(visible).includes('13800138000'), false);
+  assert.equal(JSON.stringify(visible).includes('wechat_exact'), false);
+  assert.equal(queryLog.some((query) => query.includes('FOR UPDATE')), false);
+
+  assert.equal(await findExactCustomerContactDuplicate(store, {
+    phone: '13900139000',
+    wechat: 'another_wechat',
+    crypto,
+    conflictViewer: {
+      canReadCustomerList: true,
+      canReadCustomer: () => true,
+    },
+  }), null);
 }
 
 // RED: identity primary keys must include the contact type. A phone and a
