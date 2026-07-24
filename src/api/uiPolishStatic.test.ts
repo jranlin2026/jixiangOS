@@ -384,7 +384,6 @@ assert.match(
   ['orderReviewSource', orderReviewSource],
   ['customersPageSource', customersPageSource],
   ['customerDetailSource', customerDetailSource],
-  ['commissionSource', commissionSource],
   ['financeSource', financeSource],
   ['deliverySource', deliverySource],
   ['orderHistorySource', orderHistorySource],
@@ -422,8 +421,8 @@ assert.match(
 );
 assert.match(
   commissionSource,
-  /case 'paymentDate':[\s\S]*formatDate\(summary\.paymentDate,\s*'yyyy-MM-dd HH:mm:ss'\)/,
-  'Commission order split payment date should be precise to seconds.',
+  /case 'paymentDate':[\s\S]*formatDate\(summary\.paymentDate,\s*'yyyy-MM-dd HH:mm'\)/,
+  'Commission order split payment date should use the approved finance minute precision.',
 );
 assert.match(
   financeSource,
@@ -692,8 +691,8 @@ assert.match(
 );
 assert.match(
   commissionSource,
-  /case 'paymentDate':[\s\S]*formatDate\(summary\.paymentDate,\s*'yyyy-MM-dd HH:mm:ss'\)/,
-  'Commission order split should render payment date with the same second precision as the order list.',
+  /case 'paymentDate':[\s\S]*formatDate\(summary\.paymentDate,\s*'yyyy-MM-dd HH:mm'\)/,
+  'Commission order split should render payment date with the approved finance minute precision.',
 );
 assert.match(
   commissionSource,
