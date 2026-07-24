@@ -202,6 +202,12 @@ export interface CustomerLeadSourceFacet {
   count: number;
 }
 
+/** 当前账号在指定客户列表范围内实际可筛选的客户标签。 */
+export interface CustomerTagFacet {
+  tagId: ID;
+  count: number;
+}
+
 export type CustomerCreateInput = Omit<
   Customer,
   'id' | 'createdAt' | 'updatedAt' | 'growthPath' | 'growthRecords' | 'orderCount' | 'totalSpent' | 'productLevel'

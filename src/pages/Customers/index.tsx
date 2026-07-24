@@ -841,7 +841,7 @@ const Customers: React.FC = () => {
             </Select>
           </FormControl>
         )}
-        <CustomerTagFilter value={filters} onApply={handleTagFilterApply} />
+        <CustomerTagFilter value={filters} scope={customerScope} onApply={handleTagFilterApply} />
         <CustomerLeadSourceFilter
           value={filters}
           scope={customerScope}

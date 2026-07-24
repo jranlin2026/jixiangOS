@@ -14,6 +14,7 @@ import type {
   CustomerCreateInput,
   CustomerFilters,
   CustomerLeadSourceFacet,
+  CustomerTagFacet,
 } from '../../src/types/customer';
 import type { ApiResponse, PaginatedResponse } from '../../src/api/types';
 import type { AuthenticatedUser } from '../../src/types/auth';
@@ -616,6 +617,36 @@ export function createCustomerListService(
         sourceName: cleanText(row.sourceName),
         count: Number(row.total || 0),
       })).filter((row) => row.leadSource && row.count > 0));
+    },
+
+    async listTagFacets(
+      scope: 'active' | 'public_pool',
+      currentUser?: AuthenticatedUser | null,
+    ) {
+      const visibility = await buildVisibilityWhere(prisma, currentUser);
+      const where = buildCustomerWhere(scope === 'public_pool'
+        ? { lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL }
+        : {});
+      const rows = await prisma.$queryRaw<Array<{
+        tagId: string;
+        total: bigint | number;
+      }>>(Prisma.sql`
+        SELECT customer_tag_facets.tag_id AS tagId, COUNT(DISTINCT business_records.id) AS total
+        FROM business_records
+        JOIN JSON_TABLE(
+          COALESCE(JSON_EXTRACT(data, '$.manualTagIds'), JSON_ARRAY()),
+          '$[*]' COLUMNS (tag_id VARCHAR(191) PATH '$')
+        ) AS customer_tag_facets
+        WHERE ${where}
+          AND ${visibility.where}
+          AND TRIM(customer_tag_facets.tag_id) <> ''
+        GROUP BY customer_tag_facets.tag_id
+        ORDER BY customer_tag_facets.tag_id
+      `);
+      return success<CustomerTagFacet[]>(rows.map((row) => ({
+        tagId: cleanText(row.tagId),
+        count: Number(row.total || 0),
+      })).filter((row) => row.tagId && row.count > 0));
     },
 
     async listPublicPoolFollowUpOperators(currentUser?: AuthenticatedUser | null) {
