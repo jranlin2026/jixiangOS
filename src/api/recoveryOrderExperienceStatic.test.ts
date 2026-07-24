@@ -71,6 +71,26 @@ assert.match(
 );
 assert.match(recoverySettlementSource, /售后挽回订单资料/);
 assert.match(recoverySettlementSource, /sourceDetailOrder\.recoveryAt/);
+assert.match(recoverySettlementSource, /finance_recovery_settlement_table_view_v2/);
+for (const field of [
+  'sourcePlatformShop', 'originalProductLevel', 'officialPaymentChannel', 'paymentAt',
+  'splitDetails', 'totalCommissionAmount', 'customerPhone', 'customerWechat',
+  'customerMatchStatus', 'sourcePlatform', 'sourceShop', 'paymentOrderNo',
+  'assistUserName', 'auditorName', 'remark', 'updatedAt', 'performanceAmount',
+  'settlementHandledBy', 'settlementConfirmedAt', 'settlementPaidAt', 'settlementWithdrawReason',
+]) {
+  assert.match(recoverySettlementSource, new RegExp(`\\| '${field}'`), `售后分账视图字段池应包含 ${field}。`);
+}
+const settlementColumnsSource = recoverySettlementSource.slice(
+  recoverySettlementSource.indexOf('const RECOVERY_SETTLEMENT_COLUMNS'),
+  recoverySettlementSource.indexOf('const DEFAULT_VISIBLE_COLUMNS'),
+);
+assert.doesNotMatch(settlementColumnsSource, /id: 'actions'/, '售后分账操作列不应进入视图设置字段池。');
+for (const section of ['源业务资料', '付款资料', '分账明细', '处理记录']) {
+  assert.match(recoverySettlementSource, new RegExp(section), `售后分账资料应包含“${section}”分区。`);
+}
+assert.match(recoverySettlementSource, /付款截图/);
+assert.match(recoverySettlementSource, /成交路径 \/ 聊天记录/);
 
 assert.match(
   recoveryOrderSource,
@@ -84,13 +104,13 @@ assert.match(
 );
 assert.match(
   recoverySettlementSource,
-  /\| 'recoveryAt'[\s\S]*?\{ id: 'recoveryAt', label: '挽回时间' \}/,
-  'Finance recovery settlement table should expose a recovery-time column.',
+  /\| 'recoveryAt'[\s\S]*?\{ id: 'recoveryAt', label: '挽回成交时间' \}/,
+  'Finance recovery settlement table should expose the approved recovery transaction time column.',
 );
 assert.match(
   recoverySettlementSource,
-  /case 'recoveryAt':[\s\S]*?formatDate\(row\.recoveryAt \|\| row\.createdAt, 'yyyy-MM-dd HH:mm'\)/,
-  'Finance recovery settlement table should render the saved recovery time.',
+  /case 'recoveryAt':[\s\S]*?row\.recoveryAt \? formatDate\(row\.recoveryAt, 'yyyy-MM-dd HH:mm'\) : '-'/,
+  'Finance recovery settlement table should render the saved recovery transaction time without substituting creation time.',
 );
 
 assert.match(
