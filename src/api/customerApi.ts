@@ -1,4 +1,12 @@
-import type { Customer, CustomerActivityRecord, CustomerCreateInput, CustomerFilters, AICustomerPortrait, CustomerManageableUser } from '../types/customer';
+import type {
+  Customer,
+  CustomerActivityRecord,
+  CustomerCreateInput,
+  CustomerFilters,
+  AICustomerPortrait,
+  CustomerManageableUser,
+  CustomerLeadSourceFacet,
+} from '../types/customer';
 import type { Lead, LeadChangeLog } from '../types/lead';
 import type { Order } from '../types/order';
 import type { ApiResponse, PaginatedResponse } from './types';
@@ -379,6 +387,32 @@ async function fetchPublicPoolFollowUpUsers(): Promise<ApiResponse<CustomerManag
     .map(getCustomerLastFollowUpOwner)
     .filter(Boolean);
   return createSuccessResponse(Array.from(new Set(names)).map((name) => ({ id: `last-follow-up:${name}`, name })));
+}
+
+async function fetchCustomerLeadSourceFacets(
+  scope: 'active' | 'public_pool',
+): Promise<ApiResponse<CustomerLeadSourceFacet[]>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<CustomerLeadSourceFacet[]>(`/customers/lead-source-facets?scope=${scope}`);
+  }
+  ensureInit();
+  const grouped = new Map<string, CustomerLeadSourceFacet>();
+  filterVisibleCustomers(getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [])
+    .filter((customer) => !customer.deletedAt)
+    .filter((customer) => (
+      scope === 'public_pool'
+        ? customer.lifecycleStatusCode === LIFECYCLE_STATUS_CODES.PUBLIC_POOL
+        : customer.lifecycleStatusCode !== LIFECYCLE_STATUS_CODES.PUBLIC_POOL
+    ))
+    .forEach((customer) => {
+      const leadSource = String(customer.leadSource || '').trim();
+      const sourceName = String(customer.sourceName || '').trim();
+      if (!leadSource) return;
+      const key = `${leadSource}\u0000${sourceName}`;
+      const current = grouped.get(key);
+      grouped.set(key, { leadSource, sourceName, count: (current?.count || 0) + 1 });
+    });
+  return createSuccessResponse(Array.from(grouped.values()));
 }
 
 async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<PaginatedResponse<Customer>>> {
@@ -917,6 +951,7 @@ async function fetchAIPortrait(customerId: string): Promise<ApiResponse<AICustom
 export const customerApi = {
   fetchManageableUsers,
   fetchPublicPoolFollowUpUsers,
+  fetchCustomerLeadSourceFacets,
   fetchCustomers,
   fetchCustomerById,
   createCustomer,

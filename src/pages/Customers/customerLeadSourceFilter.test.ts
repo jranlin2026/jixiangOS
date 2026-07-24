@@ -17,6 +17,15 @@ assert.deepEqual(buildCustomerLeadSourceOptions(configs), [
   { key: 'parent-live:child-video', parentName: '直播', childName: '视频号', label: '直播 / 视频号' },
 ]);
 
+assert.deepEqual(buildCustomerLeadSourceOptions(configs, [
+  { leadSource: '直播', sourceName: '抖音', count: 12 },
+  { leadSource: '转介绍', sourceName: '', count: 5 },
+]), [
+  { key: 'parent-referral', parentName: '转介绍', childName: '', label: '转介绍', count: 5 },
+  { key: 'parent-live', parentName: '直播', childName: '', label: '直播', count: 12 },
+  { key: 'parent-live:child-douyin', parentName: '直播', childName: '抖音', label: '直播 / 抖音', count: 12 },
+]);
+
 assert.deepEqual(normalizeCustomerToolbarFilters({
   search: '客户',
   followStatus: 'has_follow',

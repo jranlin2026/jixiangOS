@@ -842,7 +842,11 @@ const Customers: React.FC = () => {
           </FormControl>
         )}
         <CustomerTagFilter value={filters} onApply={handleTagFilterApply} />
-        <CustomerLeadSourceFilter value={filters} onApply={handleLeadSourceFilterApply} />
+        <CustomerLeadSourceFilter
+          value={filters}
+          scope={customerScope}
+          onApply={handleLeadSourceFilterApply}
+        />
         <Box sx={{ flexGrow: 1, minWidth: { xs: '100%', md: 16 } }} />
         <Button
           variant="outlined"

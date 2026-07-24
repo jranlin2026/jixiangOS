@@ -8,7 +8,13 @@ import {
   normalizeLifecycleStatusCode,
   normalizeResourceOwnership,
 } from '../../src/shared/utils/constants';
-import type { Customer, CustomerActivityAttachment, CustomerCreateInput, CustomerFilters } from '../../src/types/customer';
+import type {
+  Customer,
+  CustomerActivityAttachment,
+  CustomerCreateInput,
+  CustomerFilters,
+  CustomerLeadSourceFacet,
+} from '../../src/types/customer';
 import type { ApiResponse, PaginatedResponse } from '../../src/api/types';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import {
@@ -575,6 +581,41 @@ export function createCustomerListService(
         )),
         pagination: { page, pageSize, total, totalPages },
       });
+    },
+
+    async listLeadSourceFacets(
+      scope: 'active' | 'public_pool',
+      currentUser?: AuthenticatedUser | null,
+    ) {
+      const visibility = await buildVisibilityWhere(prisma, currentUser);
+      const where = buildCustomerWhere(scope === 'public_pool'
+        ? { lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL }
+        : {});
+      const leadSource = jsonText('$.leadSource');
+      const sourceName = jsonText('$.sourceName');
+      const rows = await prisma.$queryRaw<Array<{
+        leadSource: string;
+        sourceName: string | null;
+        total: bigint | number;
+      }>>(Prisma.sql`
+        SELECT
+          TRIM(COALESCE(${leadSource}, '')) AS leadSource,
+          TRIM(COALESCE(${sourceName}, '')) AS sourceName,
+          COUNT(*) AS total
+        FROM business_records
+        WHERE ${where}
+          AND ${visibility.where}
+          AND TRIM(COALESCE(${leadSource}, '')) <> ''
+        GROUP BY
+          TRIM(COALESCE(${leadSource}, '')),
+          TRIM(COALESCE(${sourceName}, ''))
+        ORDER BY leadSource, sourceName
+      `);
+      return success<CustomerLeadSourceFacet[]>(rows.map((row) => ({
+        leadSource: cleanText(row.leadSource),
+        sourceName: cleanText(row.sourceName),
+        count: Number(row.total || 0),
+      })).filter((row) => row.leadSource && row.count > 0));
     },
 
     async listPublicPoolFollowUpOperators(currentUser?: AuthenticatedUser | null) {

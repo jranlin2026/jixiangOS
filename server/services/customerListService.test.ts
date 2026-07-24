@@ -539,6 +539,9 @@ const listService = createCustomerListService({
     const sql = flattenSql(args);
     capturedQueries.push(sql);
     if (sql.includes('public_pool_follow_ups')) return [{ name: '历史跟进人' }, { name: '跟进人未知' }];
+    if (sql.includes('GROUP BY') && sql.includes('leadSource')) {
+      return [{ leadSource: '直播', sourceName: '抖音', total: BigInt(2) }];
+    }
     const filtered = listFixtures.filter((item) => item.owner === '销售甲' && matchesCustomerTagFilters(item, executingFilters, tagCatalog));
     if (sql.includes('COUNT(*)')) return [{ total: BigInt(filtered.length) }];
     const page = Number(executingFilters.page || 1); const pageSize = Number(executingFilters.pageSize || 10);
@@ -573,6 +576,13 @@ for (const [filters, joiner] of filterCases) {
   await listService.list(filters, salesActor);
   assert.match(capturedQueries[0], joiner === 'JSON_LENGTH' ? /JSON_LENGTH/ : new RegExp(joiner.trim()));
 }
+
+capturedQueries.length = 0;
+const leadSourceFacets = await listService.listLeadSourceFacets('active', salesActor);
+assert.deepEqual(leadSourceFacets.data, [{ leadSource: '直播', sourceName: '抖音', count: 2 }]);
+assert.match(capturedQueries[0], /GROUP BY/);
+assert.match(capturedQueries[0], /sourceName/);
+assert.match(capturedQueries[0], /JSON_UNQUOTE\(JSON_EXTRACT\(data, '\$\.owner'\)\) IN/);
 
 capturedQueries.length = 0;
 const followUpOperators = await listService.listPublicPoolFollowUpOperators(salesActor);

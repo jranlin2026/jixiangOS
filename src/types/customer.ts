@@ -195,6 +195,13 @@ export interface CustomerFilters {
   pageSize?: number;
 }
 
+/** 当前账号在指定客户列表范围内实际可筛选的线索来源。 */
+export interface CustomerLeadSourceFacet {
+  leadSource: string;
+  sourceName: string;
+  count: number;
+}
+
 export type CustomerCreateInput = Omit<
   Customer,
   'id' | 'createdAt' | 'updatedAt' | 'growthPath' | 'growthRecords' | 'orderCount' | 'totalSpent' | 'productLevel'

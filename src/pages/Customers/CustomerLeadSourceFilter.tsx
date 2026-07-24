@@ -1,21 +1,26 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Box, Button, Chip, CircularProgress, Popover, Typography } from '@mui/material';
 import FilterListIcon from '@mui/icons-material/FilterList';
-import { settingsApi } from '../../api';
-import type { CustomerFilters } from '../../types/customer';
+import { customerApi, settingsApi } from '../../api';
+import type { CustomerFilters, CustomerLeadSourceFacet } from '../../types/customer';
 import type { LeadSourceConfig } from '../../types/settings';
 import { buildCustomerLeadSourceOptions } from './customerLeadSourceFilterModel';
 
 type LeadSourceFilterValue = Pick<CustomerFilters, 'leadSource' | 'sourceName'>;
-type Props = { value: LeadSourceFilterValue; onApply: (value: LeadSourceFilterValue) => void };
+type Props = {
+  value: LeadSourceFilterValue;
+  scope: 'active' | 'public_pool';
+  onApply: (value: LeadSourceFilterValue) => void;
+};
 
-export default function CustomerLeadSourceFilter({ value, onApply }: Props) {
+export default function CustomerLeadSourceFilter({ value, scope, onApply }: Props) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [configs, setConfigs] = useState<LeadSourceConfig[]>([]);
+  const [facets, setFacets] = useState<CustomerLeadSourceFacet[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [draft, setDraft] = useState<LeadSourceFilterValue>(value);
-  const options = useMemo(() => buildCustomerLeadSourceOptions(configs), [configs]);
+  const options = useMemo(() => buildCustomerLeadSourceOptions(configs, facets), [configs, facets]);
   const groups = useMemo(() => Array.from(new Set(options.map((option) => option.parentName))), [options]);
   const selected = options.find((option) => (
     option.parentName === value.leadSource && option.childName === (value.sourceName || '')
@@ -26,16 +31,21 @@ export default function CustomerLeadSourceFilter({ value, onApply }: Props) {
   const loadConfigs = () => {
     setLoading(true);
     setError('');
-    void settingsApi.fetchLeadSourceConfigs()
-      .then((response) => {
-        if (response.code !== 0) throw new Error(response.message || '线索来源加载失败');
-        setConfigs(response.data);
+    void Promise.all([
+      settingsApi.fetchLeadSourceConfigs(),
+      customerApi.fetchCustomerLeadSourceFacets(scope),
+    ])
+      .then(([configResponse, facetResponse]) => {
+        if (configResponse.code !== 0) throw new Error(configResponse.message || '线索来源加载失败');
+        if (facetResponse.code !== 0) throw new Error(facetResponse.message || '线索来源统计加载失败');
+        setConfigs(configResponse.data);
+        setFacets(facetResponse.data);
       })
       .catch((cause) => setError(cause instanceof Error ? cause.message : '线索来源加载失败'))
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { loadConfigs(); }, []);
+  useEffect(() => { loadConfigs(); }, [scope]);
 
   const clear = () => {
     const next = { leadSource: undefined, sourceName: undefined };
@@ -74,7 +84,7 @@ export default function CustomerLeadSourceFilter({ value, onApply }: Props) {
                 return (
                   <Chip
                     key={option.key}
-                    label={option.childName || option.parentName}
+                    label={`${option.childName || option.parentName}（${option.count}）`}
                     size="small"
                     clickable
                     color={isSelected ? 'primary' : 'default'}

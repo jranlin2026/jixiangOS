@@ -541,6 +541,12 @@ app.get('/api/customers/public-pool-follow-up-operators', requireCustomerReadAcc
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
+app.get('/api/customers/lead-source-facets', requireCustomerReadAccess, async (req: AuthenticatedRequest, res) => {
+  const scope = queryParam(req.query.scope) === 'public_pool' ? 'public_pool' : 'active';
+  const result = await customerListService.listLeadSourceFacets(scope, req.currentUser);
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
 app.use('/api/business-recycle-bin', createBusinessRecycleBinRouter({
   service: businessRecycleBinService,
   requireRead: requireDataMaintenanceReadAccess,
