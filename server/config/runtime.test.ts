@@ -10,6 +10,12 @@ import {
   validateRuntimeConfig,
 } from './runtime';
 
+const WECHAT_AUTOMATION_CONFIG = {
+  JIXIANG_WECHAT_AUTOMATION_TOKEN: 'wechat-automation-token-that-is-at-least-32-characters',
+  JIXIANG_WECHAT_AUTOMATION_ACTOR_ACCOUNT: 'wechat-automation',
+  JIXIANG_WECHAT_AUTOMATION_SIGNING_KEY: 'wechat-precheck-signing-key-that-is-at-least-32-characters',
+};
+
 assert.deepEqual(parseCorsOrigins({ CORS_ORIGINS: 'https://crm.example.com, https://ops.example.com' }), [
   'https://crm.example.com',
   'https://ops.example.com',
@@ -192,6 +198,24 @@ assert.throws(() => validateRuntimeConfig({
   CUSTOMER_PERMISSION_MIGRATION_SIGNING_KEY: 'StrongPermissionMigrationSigningKey-123',
 }), /CUSTOMER_MERGE_SNAPSHOT_ACTIVE_KEY_VERSION/);
 
+assert.throws(() => validateRuntimeConfig({
+  NODE_ENV: 'production',
+  DATABASE_URL: 'mysql://user:StrongDatabasePassword!@127.0.0.1:3306/db',
+  AI_PROXY_HOST: '127.0.0.1',
+  AI_PROXY_PORT: '3001',
+  JIXIANG_DEFAULT_ADMIN_PASSWORD: 'StrongAdminPassword!',
+  JIXIANG_DEFAULT_USER_PASSWORD: 'StrongUserPassword!',
+  CORS_ORIGINS: 'https://crm.jixiang-ai.com',
+  CONTACT_IDENTITY_HMAC_KEY: Buffer.alloc(32, 1).toString('base64'),
+  CONTACT_IDENTITY_HMAC_KEY_VERSION: '1',
+  CONTACT_IDENTITY_ENCRYPTION_KEY: Buffer.alloc(32, 2).toString('base64'),
+  CONTACT_IDENTITY_ENCRYPTION_KEY_VERSION: '1',
+  CUSTOMER_PERMISSION_MIGRATION_SIGNING_KEY: 'StrongPermissionMigrationSigningKey-123',
+  CUSTOMER_MERGE_SNAPSHOT_ACTIVE_KEY_VERSION: '1',
+  CUSTOMER_MERGE_SNAPSHOT_KEYS_JSON: JSON.stringify({ 1: Buffer.alloc(32, 3).toString('base64') }),
+  CUSTOMER_DATA_EXCHANGE_SIGNING_KEY: 'StrongCustomerDataExchangeSigningKey-123',
+}), /JIXIANG_WECHAT_AUTOMATION_TOKEN/);
+
 assert.doesNotThrow(() => validateRuntimeConfig({
   NODE_ENV: 'production',
   DATABASE_URL: 'mysql://user:StrongDatabasePassword!@127.0.0.1:3306/db',
@@ -210,4 +234,5 @@ assert.doesNotThrow(() => validateRuntimeConfig({
   CUSTOMER_MERGE_SNAPSHOT_ACTIVE_KEY_VERSION: '1',
   CUSTOMER_MERGE_SNAPSHOT_KEYS_JSON: JSON.stringify({ 1: Buffer.alloc(32, 3).toString('base64') }),
   CUSTOMER_DATA_EXCHANGE_SIGNING_KEY: 'StrongCustomerDataExchangeSigningKey-123',
+  ...WECHAT_AUTOMATION_CONFIG,
 }));
