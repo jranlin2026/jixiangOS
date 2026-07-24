@@ -48,6 +48,18 @@ export interface RecoveryOrder {
   remark?: string;
   status: RecoveryOrderStatus;
   settlementStatus?: RecoveryOrderSettlementStatus;
+  /** 最近一次保存或调整分账的经办人和时间。 */
+  settlementHandledBy?: string;
+  settlementHandledAt?: Timestamp;
+  /** 分账确认留痕。 */
+  settlementConfirmedBy?: string;
+  settlementConfirmedAt?: Timestamp;
+  /** 提成发放时间；历史数据可从关联提成记录只读聚合。 */
+  settlementPaidAt?: Timestamp;
+  /** 撤回留痕，避免复用业务审核意见。 */
+  settlementWithdrawnBy?: string;
+  settlementWithdrawnAt?: Timestamp;
+  settlementWithdrawReason?: string;
   auditReason?: string;
   auditorId?: ID;
   auditorName?: string;
