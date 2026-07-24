@@ -783,6 +783,7 @@ const deferredEffects: OrderApprovalEffectState = {
     owner: salesApplicant.name,
     salesId: salesApplicant.id,
     salesName: salesApplicant.name,
+    thirdPartyOrderNo: 'TP-20260724-001',
   }, superAdmin);
 
   assert.equal(result.code, 0, result.message);
@@ -791,6 +792,8 @@ const deferredEffects: OrderApprovalEffectState = {
   assert.equal(result.data?.orderData.salesId, salesApplicant.id, '管理员代录不得覆盖选定销售负责人');
   assert.equal(result.data?.orderData.salesName, salesApplicant.name);
   assert.equal(result.data?.orderData.owner, salesApplicant.name);
+  assert.equal(result.data?.orderData.thirdPartyOrderNo, 'TP-20260724-001', '审核快照必须保留第三方平台订单');
+  assert.equal(result.data?.orderData.leadSource, '官网', '审核快照必须保留客户线索来源');
 
   const approved = await createOrderApplicationService(prisma as any, { now: () => new Date(NOW) }).approve(
     result.data!.id,
@@ -801,6 +804,8 @@ const deferredEffects: OrderApprovalEffectState = {
   assert.equal(approved.data?.order.createdByName, superAdmin.name);
   assert.equal(approved.data?.order.salesId, salesApplicant.id, '管理员代录不得覆盖所选销售负责人');
   assert.equal(approved.data?.order.salesName, salesApplicant.name);
+  assert.equal(approved.data?.order.thirdPartyOrderNo, 'TP-20260724-001', '审核入库必须保留第三方平台订单');
+  assert.equal(approved.data?.order.leadSource, '官网', '审核入库必须保留线索来源');
 }
 
 {

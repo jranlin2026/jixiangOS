@@ -1,5 +1,6 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Box,
   Button,
   Chip,
@@ -33,7 +34,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { canReviewOrderApplications, customerApi, orderApi, orderReviewApi, ORDER_APPLICATION_STATUSES } from '../../api';
-import type { OrderApplication, OrderApplicationFilters, OrderApplicationStatus } from '../../types/order';
+import type { Order, OrderApplication, OrderApplicationFilters, OrderApplicationStatus } from '../../types/order';
 import type { Customer } from '../../types/customer';
 import type { Role } from '../../types/role';
 import { formatCurrency, formatPaginationRows } from '../../shared/utils/formatters';
@@ -79,39 +80,68 @@ type ReviewViewConfig = {
 };
 
 const REVIEW_VIEW_STORAGE_KEY = 'aaos_order_review_table_view_v1';
-const REVIEW_VIEW_SCHEMA_VERSION = 1;
+const REVIEW_VIEW_SCHEMA_VERSION = 2;
 const REVIEW_ACTION_COLUMN_WIDTH = 148;
 
 const REVIEW_COLUMNS: ReviewColumn[] = [
   { id: 'applicationNo', label: '申请编号' },
-  { id: 'orderNo', label: '正式订单号' },
-  { id: 'status', label: '状态' },
+  { id: 'status', label: '审核状态' },
   { id: 'customer', label: '客户' },
   { id: 'productName', label: '产品名称' },
   { id: 'productLevel', label: '产品等级' },
   { id: 'orderType', label: '订单类型' },
   { id: 'amount', label: '实付金额' },
-  { id: 'applicantName', label: '提交人' },
+  { id: 'officialPaymentChannel', label: '官方收款渠道' },
+  { id: 'thirdPartyOrderNo', label: '第三方平台订单' },
+  { id: 'resourceOwnership', label: '资源归属' },
+  { id: 'owner', label: '销售负责人' },
+  { id: 'applicantName', label: '订单创建人' },
   { id: 'submittedAt', label: '提交时间' },
+  { id: 'orderNo', label: '正式订单号' },
+  { id: 'leadInputBy', label: '线索录入人' },
+  { id: 'leadContributorName', label: '线索贡献人' },
   { id: 'reviewerName', label: '审核人' },
-  { id: 'reason', label: '原因' },
+  { id: 'reviewedAt', label: '审核时间' },
+  { id: 'reason', label: '退回/驳回原因' },
+  { id: 'notes', label: '备注' },
 ];
 
-const REVIEW_DEFAULT_VISIBLE_COLUMNS = REVIEW_COLUMNS.map((column) => column.id);
+const REVIEW_DEFAULT_VISIBLE_COLUMNS = [
+  'applicationNo',
+  'status',
+  'customer',
+  'productName',
+  'productLevel',
+  'orderType',
+  'amount',
+  'officialPaymentChannel',
+  'thirdPartyOrderNo',
+  'owner',
+  'applicantName',
+  'submittedAt',
+];
 
 const REVIEW_COLUMN_WIDTHS: Record<string, number> = {
   applicationNo: 180,
-  orderNo: 180,
   status: 110,
   customer: 140,
   productName: 180,
   productLevel: 130,
   orderType: 150,
   amount: 130,
+  officialPaymentChannel: 160,
+  thirdPartyOrderNo: 180,
+  resourceOwnership: 140,
+  owner: 140,
   applicantName: 130,
   submittedAt: 160,
+  orderNo: 180,
+  leadInputBy: 140,
+  leadContributorName: 150,
   reviewerName: 130,
+  reviewedAt: 160,
   reason: 180,
+  notes: 220,
 };
 
 const getDefaultReviewViewConfig = (): ReviewViewConfig => ({
@@ -204,6 +234,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
   const [viewConfig, setViewConfig] = useState<ReviewViewConfig>(readReviewViewConfig);
   const [editingApplication, setEditingApplication] = useState<OrderApplication | null>(null);
   const [detailApplication, setDetailApplication] = useState<OrderApplication | null>(null);
+  const [detailFormalOrder, setDetailFormalOrder] = useState<{ applicationId: string; order: Order } | null>(null);
   const [reviewAction, setReviewAction] = useState<ReviewAction>(null);
   const [reviewReason, setReviewReason] = useState('');
   const [approvedApplication, setApprovedApplication] = useState<OrderApplication | null>(null);
@@ -321,12 +352,26 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
 
   const openApplicationDetail = async (application: OrderApplication) => {
     setDetailApplication(application);
+    setDetailFormalOrder(null);
     const detail = await loadApplicationDetail(application);
     if (!detail) {
       setDetailApplication((current) => current?.id === application.id ? null : current);
       return;
     }
     setDetailApplication((current) => current?.id === application.id ? detail : current);
+    if (detail.orderId && !detail.sourceOrderDeleted) {
+      const formalOrderResponse = await orderApi.fetchOrderById(detail.orderId);
+      if (formalOrderResponse.code === 0
+        && formalOrderResponse.data
+        && formalOrderResponse.data.sourceApplicationId === application.id) {
+        setDetailFormalOrder({ applicationId: application.id, order: formalOrderResponse.data });
+      }
+    }
+  };
+
+  const closeApplicationDetail = () => {
+    setDetailApplication(null);
+    setDetailFormalOrder(null);
   };
 
   const openApplicationEdit = async (application: OrderApplication) => {
@@ -544,16 +589,36 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
         return <Chip label={application.orderData.orderType || '-'} size="small" variant="outlined" />;
       case 'amount':
         return formatCurrency(application.orderData.actualAmount || application.orderData.amount);
+      case 'officialPaymentChannel':
+        return application.orderData.officialPaymentChannel || '-';
+      case 'thirdPartyOrderNo':
+        return application.orderData.thirdPartyOrderNo || '-';
+      case 'resourceOwnership':
+        return normalizeResourceOwnership(application.orderData.resourceOwnership || application.orderData.sourceType);
+      case 'owner':
+        return application.orderData.owner || '-';
       case 'applicantName':
         return application.applicantName;
       case 'submittedAt':
         return formatDate(application.submittedAt);
+      case 'leadInputBy':
+        return application.orderData.leadInputBy || '-';
+      case 'leadContributorName':
+        return application.orderData.leadContributorName || '-';
       case 'reviewerName':
         return application.reviewerName || '-';
+      case 'reviewedAt':
+        return formatDate(application.reviewedAt);
       case 'reason':
         return (
           <Tooltip title={application.reason || ''}>
             <Typography variant="body2" noWrap>{application.reason || '-'}</Typography>
+          </Tooltip>
+        );
+      case 'notes':
+        return (
+          <Tooltip title={application.orderData.notes || ''}>
+            <Typography variant="body2" noWrap>{application.orderData.notes || '-'}</Typography>
           </Tooltip>
         );
       default:
@@ -906,10 +971,10 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
         </DialogActions>
       </Dialog>
 
-      <Dialog open={Boolean(detailApplication)} onClose={() => setDetailApplication(null)} maxWidth="md" fullWidth>
+      <Dialog open={Boolean(detailApplication)} onClose={closeApplicationDetail} maxWidth="md" fullWidth>
         {detailApplication && (
           <>
-            <DialogCloseTitle onClose={() => setDetailApplication(null)}>
+            <DialogCloseTitle onClose={closeApplicationDetail}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                 <Typography variant="h6" sx={{ fontWeight: 600 }}>{detailApplication.applicationNo}</Typography>
                 <Typography variant="body2" sx={{ fontWeight: 600, color: '#374151' }}>
@@ -933,25 +998,35 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                   <Typography variant="body2" sx={{ color: '#6b7280' }}>产品等级</Typography>
                   <Chip label={detailApplication.orderData.productLevel || '-'} size="small" sx={getProductLevelTagSx(detailApplication.orderData.productLevel)} />
                 </Box>
+                <SnapshotField label="订单类型">{detailApplication.orderData.orderType || '-'}</SnapshotField>
                 <SnapshotField label="实付金额" strong>
                   {formatCurrency(detailApplication.orderData.actualAmount || detailApplication.orderData.amount)}
                 </SnapshotField>
                 <SnapshotField label="官方收款渠道">{detailApplication.orderData.officialPaymentChannel || '-'}</SnapshotField>
-                <SnapshotField label="销售顾问">{detailApplication.orderData.salesName || detailApplication.orderData.owner}</SnapshotField>
+                <SnapshotField label="第三方平台订单">{detailApplication.orderData.thirdPartyOrderNo || '-'}</SnapshotField>
                 <SnapshotField label="资源归属">
                   {normalizeResourceOwnership(detailApplication.orderData.resourceOwnership || detailApplication.orderData.sourceType)}
                 </SnapshotField>
+                <SnapshotField label="线索来源">{detailApplication.orderData.leadSource || '-'}</SnapshotField>
                 <SnapshotField label="销售负责人">{detailApplication.orderData.owner}</SnapshotField>
+                <SnapshotField label="订单创建人">{detailApplication.applicantName}</SnapshotField>
                 <SnapshotField label="线索录入人">{detailApplication.orderData.leadInputBy || '-'}</SnapshotField>
                 <SnapshotField label="线索贡献人">{detailApplication.orderData.leadContributorName || '-'}</SnapshotField>
                 <SnapshotField label="正式订单号">{detailApplication.orderNo || '-'}</SnapshotField>
-                <SnapshotField label="提交人">{detailApplication.applicantName}</SnapshotField>
                 <SnapshotField label="提交时间">{formatDate(detailApplication.submittedAt, 'yyyy-MM-dd HH:mm:ss')}</SnapshotField>
                 <SnapshotField label="审核人">{detailApplication.reviewerName || '-'}</SnapshotField>
                 <SnapshotField label="审核时间">{formatDate(detailApplication.reviewedAt, 'yyyy-MM-dd HH:mm:ss')}</SnapshotField>
-                <SnapshotField label="申请原因">{detailApplication.reason || '-'}</SnapshotField>
+                <SnapshotField label="退回/驳回原因">{detailApplication.reason || '-'}</SnapshotField>
                 <SnapshotField label="备注">{detailApplication.orderData.notes || '-'}</SnapshotField>
               </Box>
+
+              {detailFormalOrder?.applicationId === detailApplication.id
+                && (detailFormalOrder.order.thirdPartyOrderNo || '') !== (detailApplication.orderData.thirdPartyOrderNo || '') && (
+                <Alert severity="info" sx={{ mt: 2 }}>
+                  提交审核时的第三方平台订单为“{detailApplication.orderData.thirdPartyOrderNo || '-'}”；
+                  正式订单当前第三方平台订单为“{detailFormalOrder.order.thirdPartyOrderNo || '-'}”。
+                </Alert>
+              )}
 
               <Divider sx={{ my: 2 }} />
               <Typography variant="subtitle2" sx={{ mb: 1, color: '#6b7280' }}>付款记录</Typography>
@@ -1017,7 +1092,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
               </Box>
             </DialogContent>
             <DialogActions sx={{ px: 2.5, py: 1.5 }}>
-              <Button onClick={() => setDetailApplication(null)}>关闭</Button>
+              <Button onClick={closeApplicationDetail}>关闭</Button>
               {reviewer && detailApplication.status === ORDER_APPLICATION_STATUSES.PENDING_REVIEW && (
                 <>
                   <Button
@@ -1025,7 +1100,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                     color="error"
                     onClick={() => {
                       const target = detailApplication;
-                      setDetailApplication(null);
+                      closeApplicationDetail();
                       openRejectDialog(target);
                     }}
                   >
@@ -1036,7 +1111,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                     color="info"
                     onClick={() => {
                       const target = detailApplication;
-                      setDetailApplication(null);
+                      closeApplicationDetail();
                       openReturnDialog(target);
                     }}
                   >
@@ -1046,7 +1121,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                     variant="contained"
                     onClick={() => {
                       const target = detailApplication;
-                      setDetailApplication(null);
+                      closeApplicationDetail();
                       openApproveDialog(target);
                     }}
                   >

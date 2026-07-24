@@ -77,63 +77,63 @@ type OrderViewConfig = {
 };
 
 const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_view_v7';
-const ORDER_VIEW_SCHEMA_VERSION = 9;
+const ORDER_VIEW_SCHEMA_VERSION = 11;
 const ORDER_WIDTH_STORAGE_KEY = 'aaos_order_table_column_widths_v1';
 const ORDER_ACTION_COLUMN_WIDTH = 160;
 
 const ORDER_COLUMNS: OrderColumn[] = [
   { id: 'orderNo', label: '订单号' },
+  { id: 'status', label: '订单状态' },
   { id: 'customer', label: '客户' },
   { id: 'productName', label: '产品名称' },
   { id: 'productLevel', label: '产品等级' },
   { id: 'orderType', label: '订单类型' },
   { id: 'actualAmount', label: '实付金额' },
   { id: 'officialPaymentChannel', label: '官方收款渠道' },
+  { id: 'thirdPartyOrderNo', label: '第三方平台订单' },
   { id: 'resourceOwnership', label: '资源归属' },
-  { id: 'paymentDate', label: '付款时间' },
   { id: 'owner', label: '销售负责人' },
   { id: 'createdByName', label: '订单创建人' },
+  { id: 'paymentDate', label: '付款时间' },
   { id: 'leadInputBy', label: '线索录入人' },
   { id: 'leadContributorName', label: '线索贡献人' },
-  { id: 'thirdPartyOrderNo', label: '第三方平台订单' },
   { id: 'notes', label: '备注' },
   { id: 'createdAt', label: '创建时间' },
 ];
 
 const DEFAULT_VISIBLE_COLUMNS = [
   'orderNo',
+  'status',
   'customer',
   'productName',
   'productLevel',
   'orderType',
   'actualAmount',
   'officialPaymentChannel',
+  'thirdPartyOrderNo',
   'resourceOwnership',
-  'paymentDate',
   'owner',
   'createdByName',
-  'leadInputBy',
-  'leadContributorName',
-  'thirdPartyOrderNo',
-  'notes',
+  'paymentDate',
   'createdAt',
 ];
 
 const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   orderNo: 180,
+  status: 120,
   customer: 180,
   productName: 180,
   productLevel: 140,
   orderType: 140,
   actualAmount: 140,
   officialPaymentChannel: 160,
+  thirdPartyOrderNo: 180,
   resourceOwnership: 140,
   paymentDate: 180,
   owner: 140,
   createdByName: 140,
   leadInputBy: 140,
   leadContributorName: 150,
-  thirdPartyOrderNo: 180,
   notes: 220,
   createdAt: 180,
 };
@@ -540,6 +540,8 @@ const Orders: React.FC = () => {
             </Box>
           </Button>
         );
+      case 'status':
+        return <Chip label={order.status || '-'} size="small" variant="outlined" />;
       case 'customer':
         return (
           <Button
@@ -567,6 +569,8 @@ const Orders: React.FC = () => {
         return formatCurrency(order.actualAmount || order.amount);
       case 'officialPaymentChannel':
         return order.officialPaymentChannel || '-';
+      case 'thirdPartyOrderNo':
+        return order.thirdPartyOrderNo || '-';
       case 'resourceOwnership':
         return normalizeResourceOwnership(order.resourceOwnership || order.sourceType);
       case 'paymentDate':
@@ -579,8 +583,6 @@ const Orders: React.FC = () => {
         return order.leadInputBy || '-';
       case 'leadContributorName':
         return order.leadContributorName || '-';
-      case 'thirdPartyOrderNo':
-        return order.thirdPartyOrderNo || '-';
       case 'notes':
         return order.notes || '-';
       case 'createdAt':

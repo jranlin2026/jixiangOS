@@ -37,6 +37,7 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
             <Typography variant="body2" sx={{ fontWeight: 600, color: '#374151' }}>{order.productName || order.productLevel}</Typography>
             <Chip label={order.productLevel} size="small" sx={getProductLevelTagSx(order.productLevel)} />
             <Chip label={order.orderType} size="small" variant="outlined" />
+            <Chip label={order.status} size="small" variant="outlined" />
           </Box>
         </DialogCloseTitle>
         <DialogContent dividers>
@@ -54,6 +55,14 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
               <Chip label={order.productLevel} size="small" sx={getProductLevelTagSx(order.productLevel)} />
             </Box>
             <Box>
+              <Typography variant="body2" sx={{ color: '#6b7280' }}>订单类型</Typography>
+              <Typography variant="body1">{order.orderType || '-'}</Typography>
+            </Box>
+            <Box>
+              <Typography variant="body2" sx={{ color: '#6b7280' }}>订单状态</Typography>
+              <Typography variant="body1">{order.status || '-'}</Typography>
+            </Box>
+            <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>实付金额</Typography>
               <Typography variant="body1" sx={{ fontWeight: 700, color: '#1a1a2e' }}>{formatCurrency(order.actualAmount || order.amount)}</Typography>
             </Box>
@@ -66,16 +75,20 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
               <Typography variant="body1">{order.thirdPartyOrderNo || '-'}</Typography>
             </Box>
             <Box>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>订单创建人</Typography>
-              <Typography variant="body1">{order.createdByName || '-'}</Typography>
-            </Box>
-            <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>资源归属</Typography>
               <Typography variant="body1">{normalizeResourceOwnership(order.resourceOwnership || order.sourceType)}</Typography>
             </Box>
             <Box>
+              <Typography variant="body2" sx={{ color: '#6b7280' }}>线索来源</Typography>
+              <Typography variant="body1">{order.leadSource || '-'}</Typography>
+            </Box>
+            <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>销售负责人</Typography>
               <Typography variant="body1">{order.owner}</Typography>
+            </Box>
+            <Box>
+              <Typography variant="body2" sx={{ color: '#6b7280' }}>订单创建人</Typography>
+              <Typography variant="body1">{order.createdByName || '-'}</Typography>
             </Box>
             <Box>
               <Typography variant="body2" sx={{ color: '#6b7280' }}>线索录入人</Typography>
@@ -91,56 +104,52 @@ const OrderDetail: React.FC<OrderDetailProps> = ({ order, open, onClose }) => {
             </Box>
           </Box>
 
-          {order.payments && order.payments.length > 0 && (
-            <>
-              <Divider sx={{ my: 2 }} />
-              <Typography variant="subtitle2" sx={{ mb: 1, color: '#6b7280' }}>付款记录</Typography>
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>金额</TableCell>
-                      <TableCell>付款时间</TableCell>
-                      <TableCell>付款订单号</TableCell>
-                      <TableCell>付款截图</TableCell>
-                      <TableCell>成交路径截图</TableCell>
-                      <TableCell>备注</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {order.payments.map((payment) => (
-                      <TableRow key={payment.id}>
-                        <TableCell>{formatCurrency(payment.amount)}</TableCell>
-                        <TableCell>{formatDate(payment.paidAt, 'yyyy-MM-dd HH:mm:ss')}</TableCell>
-                        <TableCell>{payment.paymentOrderNo || '-'}</TableCell>
-                        <TableCell>
-                          {payment.attachments?.length
-                            ? <BusinessAttachmentLinks attachments={payment.attachments} />
-                            : <AttachmentPreviewLink title="付款截图" fileName={payment.voucherName} src={payment.voucherPreview} />}
-                        </TableCell>
-                        <TableCell>
-                          {order.dealEvidenceAttachments?.length
-                            ? <BusinessAttachmentLinks attachments={order.dealEvidenceAttachments} />
-                            : <AttachmentPreviewLink title="成交路径截图" fileName={order.dealEvidenceName} src={order.dealEvidencePreview} />}
-                        </TableCell>
-                        <TableCell>{payment.remark || '-'}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </>
-          )}
+          <Divider sx={{ my: 2 }} />
+          <Typography variant="subtitle2" sx={{ mb: 1, color: '#6b7280' }}>付款记录</Typography>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>金额</TableCell>
+                  <TableCell>付款时间</TableCell>
+                  <TableCell>付款订单号</TableCell>
+                  <TableCell>付款截图</TableCell>
+                  <TableCell>成交路径截图</TableCell>
+                  <TableCell>备注</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {order.payments?.length ? order.payments.map((payment) => (
+                  <TableRow key={payment.id}>
+                    <TableCell>{formatCurrency(payment.amount)}</TableCell>
+                    <TableCell>{formatDate(payment.paidAt, 'yyyy-MM-dd HH:mm:ss')}</TableCell>
+                    <TableCell>{payment.paymentOrderNo || '-'}</TableCell>
+                    <TableCell>
+                      {payment.attachments?.length
+                        ? <BusinessAttachmentLinks attachments={payment.attachments} />
+                        : <AttachmentPreviewLink title="付款截图" fileName={payment.voucherName} src={payment.voucherPreview} />}
+                    </TableCell>
+                    <TableCell>
+                      {order.dealEvidenceAttachments?.length
+                        ? <BusinessAttachmentLinks attachments={order.dealEvidenceAttachments} />
+                        : <AttachmentPreviewLink title="成交路径截图" fileName={order.dealEvidenceName} src={order.dealEvidencePreview} />}
+                    </TableCell>
+                    <TableCell>{payment.remark || '-'}</TableCell>
+                  </TableRow>
+                )) : (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center" sx={{ color: '#9ca3af', py: 3 }}>暂无付款记录</TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
 
-          {order.notes && (
-            <>
-              <Divider sx={{ my: 2 }} />
-              <Box>
-                <Typography variant="subtitle2" sx={{ color: '#6b7280', mb: 0.5 }}>备注</Typography>
-                <Typography variant="body2">{order.notes}</Typography>
-              </Box>
-            </>
-          )}
+          <Divider sx={{ my: 2 }} />
+          <Box>
+            <Typography variant="subtitle2" sx={{ color: '#6b7280', mb: 0.5 }}>备注</Typography>
+            <Typography variant="body2">{order.notes || '-'}</Typography>
+          </Box>
         </DialogContent>
       </Dialog>
   );
