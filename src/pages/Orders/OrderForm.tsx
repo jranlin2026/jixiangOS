@@ -529,6 +529,14 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   };
 
   const handleSubmit = async () => {
+    if (correctionMode && !correctionReason.trim()) {
+      setSubmitError('请先填写更正原因');
+      return;
+    }
+    if (!form.customerId || !form.customerName || !form.productId || Number(form.actualAmount) <= 0) {
+      setSubmitError('请完整填写客户、产品和实付金额');
+      return;
+    }
     const actualAmount = Number(form.actualAmount) || 0;
     const paymentMethod = paymentMethodFromOfficialChannel(form.officialPaymentChannel);
     const remainingPayments = order?.payments?.slice(1) || [];
@@ -627,8 +635,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     form.customerId
     && form.customerName
     && form.productId
-    && form.actualAmount > 0
-    && (!correctionMode || correctionReason.trim()),
+    && form.actualAmount > 0,
   );
   const formTitle = correctionMode ? '更正正式订单' : order ? '编辑订单' : application ? '修改订单申请' : '提交订单申请';
   const actionText = correctionMode ? '确认更正并重算' : order ? '保存修改' : application ? '重新提交审核' : '提交审核';
@@ -819,7 +826,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       </DialogContent>
       <DialogActions>
         {correctionMode && <Button onClick={onClose} disabled={submitting}>取消更正</Button>}
-        <Button variant="contained" onClick={handleSubmit} disabled={!canSubmit || submitting}>
+        <Button variant="contained" onClick={handleSubmit} disabled={submitting || (!correctionMode && !canSubmit)}>
           {actionText}
         </Button>
       </DialogActions>

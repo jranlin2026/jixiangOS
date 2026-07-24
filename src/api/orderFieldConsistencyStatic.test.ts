@@ -27,6 +27,16 @@ assert.match(orderFormSource, /isSuperAdmin\(currentUser\)/, '正式订单更正
 assert.match(orderFormSource, /进入订单更正/);
 assert.match(orderFormSource, /orderApi\.correctOrder/);
 assert.match(orderFormSource, /更正原因/);
+assert.match(
+  orderFormSource,
+  /if \(correctionMode && !correctionReason\.trim\(\)\)/,
+  '未填更正原因时应在点击后明确提示',
+);
+assert.match(
+  orderFormSource,
+  /disabled=\{submitting \|\| \(!correctionMode && !canSubmit\)\}/,
+  '更正按钮不应因必填项缺失无说明地变灰',
+);
 
 for (const [label, source] of [
   ['订单资料', orderDetailSource],
