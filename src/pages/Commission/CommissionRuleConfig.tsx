@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -47,7 +47,9 @@ import type {
 import type { OrderTypeConfig } from '../../types/settings';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { subscribeCommissionRuleAutoRefresh } from './commissionRuleAutoRefresh';
 import { clampCommissionConfigPage, paginateCommissionConfigRows } from './commissionRulePagination';
+import { createLatestCommissionRuleRequestGate } from './commissionRuleRequestGate';
 
 type CommissionConfigView = 'rules' | 'plans' | 'roles';
 type CommissionConfigPagination = Record<CommissionConfigView, { page: number; rowsPerPage: number }>;
@@ -182,6 +184,7 @@ const CommissionRuleConfig: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [pageError, setPageError] = useState('');
   const [tablePagination, setTablePagination] = useState<CommissionConfigPagination>(DEFAULT_CONFIG_PAGINATION);
+  const requestGateRef = useRef(createLatestCommissionRuleRequestGate());
 
   const [ruleFormOpen, setRuleFormOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<SimpleCommissionRuleGroup | null>(null);
@@ -337,9 +340,13 @@ const CommissionRuleConfig: React.FC = () => {
     return '';
   }, [editingPlan?.id, payoutPlans, planForm]);
 
-  const fetchAll = async () => {
-    setLoading(true);
-    setPageError('');
+  const fetchAll = async ({ silent = false }: { silent?: boolean } = {}) => {
+    const requestId = requestGateRef.current.begin({ silent });
+    if (requestId === null) return;
+    if (!silent) {
+      setLoading(true);
+      setPageError('');
+    }
     try {
       const [groupsRes, orderTypeRes, roleRes, planRes] = await Promise.all([
         commissionRuleApi.getSimpleCommissionRuleGroups(),
@@ -347,19 +354,24 @@ const CommissionRuleConfig: React.FC = () => {
         commissionRuleApi.getCommissionRoleConfigs(),
         commissionRuleApi.getCommissionPayoutPlans(),
       ]);
+      if (!requestGateRef.current.isLatest(requestId)) return;
       if (groupsRes.code === 0) setGroups(groupsRes.data);
       if (orderTypeRes.code === 0) setOrderTypeConfigs(orderTypeRes.data);
       if (roleRes.code === 0) setRoleConfigs(roleRes.data);
       if (planRes.code === 0) setPayoutPlans(planRes.data);
     } catch {
-      setPageError('配置加载失败，请稍后再试');
+      if (requestGateRef.current.isLatest(requestId) && !silent) setPageError('配置加载失败，请稍后再试');
     } finally {
-      setLoading(false);
+      if (requestGateRef.current.isLatest(requestId)) setLoading(false);
+      requestGateRef.current.finish();
     }
   };
 
   useEffect(() => {
-    fetchAll();
+    void fetchAll();
+    return subscribeCommissionRuleAutoRefresh(() => {
+      void fetchAll({ silent: true });
+    });
   }, []);
 
   useEffect(() => {
