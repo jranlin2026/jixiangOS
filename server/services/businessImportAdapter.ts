@@ -32,7 +32,7 @@ function readValue<T>(value: unknown, fallback: T): T {
   return value as T;
 }
 
-function contactKeys(customer: Pick<Customer, 'phone' | 'wechat'>): string[] {
+export function businessImportContactKeys(customer: Pick<Customer, 'phone' | 'wechat'>): string[] {
   const phone = clean(customer.phone);
   const normalizedPhone = phone.replace(/\D/g, '');
   const mainland = normalizedPhone.slice(-11);
@@ -45,7 +45,7 @@ function thirdPartyNumber(record: { data: unknown }): string {
   return lower(data.thirdPartyOrderNo);
 }
 
-async function loadDirectory(prisma: PrismaClient, actor: AuthenticatedUser, _type: BusinessImportType): Promise<BusinessImportDirectory> {
+export async function loadBusinessImportDirectory(prisma: PrismaClient, actor: AuthenticatedUser, _type: BusinessImportType): Promise<BusinessImportDirectory> {
   const [storage, users, roles, departments, customers, orders, recoveries, pendingJobs, context] = await Promise.all([
     prisma.appStorage.findMany({ where: { key: { in: [STORAGE_KEYS.PRODUCTS, STORAGE_KEYS.ORDER_TYPE_CONFIGS, STORAGE_KEYS.AFTER_SALES_SOURCE_CONFIGS] } } }),
     prisma.user.findMany({ where: { isActive: true, employmentStatus: 'active' }, orderBy: [{ name: 'asc' }, { id: 'asc' }] }),
@@ -73,7 +73,7 @@ async function loadDirectory(prisma: PrismaClient, actor: AuthenticatedUser, _ty
     const customer = readValue<Customer>(row.data, {} as Customer);
     if (!customer?.id || customer.deletedAt) return;
     const match = { id: customer.id, name: customer.name || '', inScope: canReadCustomer(context, customer) };
-    contactKeys(customer).forEach((key) => customerMatchesByContact.set(key, [...(customerMatchesByContact.get(key) || []), match]));
+    businessImportContactKeys(customer).forEach((key) => customerMatchesByContact.set(key, [...(customerMatchesByContact.get(key) || []), match]));
   });
   const pendingNumbers = (type: BusinessImportType) => pendingJobs
     .filter((job) => job.importType === type)
@@ -141,7 +141,11 @@ export async function consumePrecheckAndCreateJob(prisma: PrismaClient, input: {
       id: jobId, batchId: batch.id, importType: input.type, status: 'queued', actorId: input.actorId,
       actorName: actor.name, rowsHash: input.rowsHash, sourceFileName: input.fileName, idempotencyKey: batch.id, totalCount: input.rows.length,
       failedCount: input.rows.filter((row) => row.status === 'blocked').length,
-      rows: json(input.rows.map((row) => ({ rowNumber: row.rowNumber, status: row.status, reason: row.reason, normalized: row.normalized, customerId: row.customerId }))),
+      rows: json(input.rows.map((row) => ({
+        rowNumber: row.rowNumber, status: row.status, reason: row.reason, normalized: row.normalized, customerId: row.customerId,
+        executionStatus: row.status === 'blocked' ? 'failed' : 'queued',
+        ...(row.status === 'blocked' ? { errorMessage: row.reason } : {}),
+      }))),
     } });
     if (numbers.length) {
       await tx.businessImportNumberReservation.updateMany({
@@ -157,7 +161,7 @@ export async function consumePrecheckAndCreateJob(prisma: PrismaClient, input: {
 export function createPrismaBusinessImportService(input: { prisma: PrismaClient; secret: string }) {
   return createBusinessImportService({
     secret: input.secret,
-    loadDirectory: (actor, type) => loadDirectory(input.prisma, actor, type),
+    loadDirectory: (actor, type) => loadBusinessImportDirectory(input.prisma, actor, type),
     persistPrecheck: async (record) => {
       const actor = await input.prisma.user.findUnique({ where: { id: record.actorId }, select: { name: true } });
       if (!actor) throw new BusinessImportError('当前导入用户不存在或已离职', 409);

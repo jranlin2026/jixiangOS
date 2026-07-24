@@ -2,12 +2,13 @@ import type { ID, Timestamp } from './common';
 import type { DataScopeDomain } from './role';
 import type { BusinessAttachment } from './businessAttachment';
 import type { OfficialPaymentChannel } from './commission';
+import type { BusinessImportMetadata } from './businessImport';
 
 export type RecoveryOrderStatus = '待审核' | '退回修改' | '审核驳回' | '待分账' | '已分账';
 export type RecoveryOrderSettlementStatus = '未分账' | '待处理' | '待确认' | '待发放' | '已发放' | '已撤回';
 export type RecoveryOrderMatchStatus = '手工填写' | '已绑定客户' | '售后临时客户';
 
-export interface RecoveryOrder {
+export interface RecoveryOrder extends Partial<BusinessImportMetadata> {
   id: ID;
   recoveryNo: string;
   thirdPartyOrderNo: string;

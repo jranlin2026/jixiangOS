@@ -454,6 +454,25 @@ assert.equal(replayed.code, 0);
 assert.equal(replayed.data?.id, created.data?.id);
 assert.equal(prisma.records().length, 3, '重试必须幂等');
 
+const importedPrisma = new FakePrisma();
+const importedService = createRecoveryOrderCommandService(importedPrisma as any, { now: () => new Date(NOW) });
+const imported = await importedService.createImported(
+  input({ thirdPartyOrderNo: 'TP-IMPORTED-CREATOR' }),
+  creator,
+  {
+    importBatchId: 'batch-recovery-1', importRowNumber: 2,
+    importedById: creator.id, importedByName: creator.name, importedAt: NOW,
+    targetCreatorId: other.id, targetCreatorName: other.name,
+  },
+  { id: '', matchStatus: '售后临时客户' },
+);
+assert.equal(imported.code, 0, imported.message);
+assert.equal(imported.data?.createdBy, creator.id, '待审阶段编辑人必须是实际导入人');
+assert.equal(imported.data?.customerMatchStatus, '售后临时客户');
+const importedApproved = await importedService.approve(imported.data!.id, reviewer);
+assert.equal(importedApproved.code, 0, importedApproved.message);
+assert.equal(importedApproved.data?.createdBy, other.id, '审核通过后必须切换为目标正式创建人');
+
 const legacyRetryPrisma = new FakePrisma();
 let legacyRetryNow = new Date('2026-07-12T18:00:00.000Z');
 const legacyRetryService = createRecoveryOrderCommandService(legacyRetryPrisma as any, { now: () => legacyRetryNow });

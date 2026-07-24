@@ -1,6 +1,7 @@
 import type { ID, Timestamp, ProductLevel, OrderType, PaymentMethod, RefundStatus } from './common';
 import type { CommissionScene, OfficialPaymentChannel, ProofStatus, ResourceOwnership } from './commission';
 import type { BusinessAttachment } from './businessAttachment';
+import type { BusinessImportMetadata } from './businessImport';
 
 /** 订单状态 */
 export type OrderStatus =
@@ -57,7 +58,7 @@ export interface OrderApplicationReviewLog {
 }
 
 /** 订单 */
-export interface Order {
+export interface Order extends Partial<BusinessImportMetadata> {
   id: ID;
   orderNo: string;
   customerId: ID;
@@ -126,7 +127,7 @@ export interface Order {
   updatedAt: Timestamp;
 }
 
-export interface OrderApplication {
+export interface OrderApplication extends Partial<BusinessImportMetadata> {
   id: ID;
   applicationNo: string;
   status: OrderApplicationStatus;

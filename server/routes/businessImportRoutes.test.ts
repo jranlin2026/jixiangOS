@@ -7,6 +7,7 @@ const calls: string[] = [];
 const app = express();
 app.use(express.json());
 app.use('/api/business-imports', createBusinessImportRouter({
+  requireAuthenticated: (request: any, _response, next) => { request.currentUser = { id: 'u1', name: '导入员', isActive: true, permissions: [] }; next(); },
   requireOrderImport: (request: any, _response, next) => { request.currentUser = { id: 'u1', name: '导入员', isActive: true, permissions: [] }; next(); },
   requireRecoveryImport: (request: any, _response, next) => { request.currentUser = { id: 'u1', name: '导入员', isActive: true, permissions: [] }; next(); },
   service: {
@@ -16,6 +17,13 @@ app.use('/api/business-imports', createBusinessImportRouter({
       if (input.confirmationToken === 'invalid') throw new BusinessImportError('导入预检凭证无效或已过期', 409);
       calls.push(`confirm:${input.type}:${input.confirmationToken}`); return { id: 'job-1', status: 'queued' };
     },
+  },
+  readService: {
+    getJob: async (id) => id === 'job-1' ? { id, type: 'orders', status: 'succeeded' } : null,
+    getBatch: async (id) => id === 'batch-1' ? { id, type: 'recovery_orders', status: 'partial_failed' } : null,
+  },
+  reviewService: {
+    review: async (input) => { calls.push(`review:${input.module}:${input.action}`); return { totalCount: 2, successCount: 1, failedCount: 1, results: [] }; },
   },
 }));
 
@@ -34,7 +42,14 @@ try {
   assert.equal(invalidConfirm.status, 409, 'precheck conflicts are returned as JSON conflicts rather than generic 500 errors');
   const bad = await fetch(`${base}/orders/precheck`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [row], type: 'recovery_orders' }) });
   assert.equal(bad.status, 400, 'the public route owns the module discriminator');
-  assert.deepEqual(calls, ['template:orders', 'precheck:orders:13800000000', 'confirm:orders:one-time', 'precheck:recovery_orders:13800000000']);
+  assert.equal((await fetch(`${base}/jobs/job-1`)).status, 200);
+  assert.equal((await fetch(`${base}/jobs/missing`)).status, 404);
+  assert.equal((await fetch(`${base}/batches/batch-1`)).status, 200);
+  const review = await fetch(`${base}/reviews`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ module: 'orders', action: 'approve', importBatchId: 'batch-1' }) });
+  assert.equal(review.status, 200);
+  const reviewBody = await review.json() as any;
+  assert.equal(reviewBody.data.failedCount, 1);
+  assert.deepEqual(calls, ['template:orders', 'precheck:orders:13800000000', 'confirm:orders:one-time', 'precheck:recovery_orders:13800000000', 'review:orders:approve']);
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }

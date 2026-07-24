@@ -488,6 +488,20 @@ const deferredEffects: OrderApprovalEffectState = {
 }
 
 {
+  const importedApplication = application({
+    importBatchId: 'batch-import-1', importRowNumber: 2,
+    importedById: salesApplicant.id, importedByName: salesApplicant.name, importedAt: NOW,
+    targetCreatorId: salesManager.id, targetCreatorName: salesManager.name,
+  });
+  const prisma = new FakePrisma({ application: importedApplication });
+  const result = await createOrderApplicationService(prisma as any, { now: () => new Date(NOW) })
+    .approve(importedApplication.id, reviewer);
+  assert.equal(result.code, 0, result.message);
+  assert.equal(result.data?.order.createdById, salesManager.id, '正式订单必须采用导入模板的目标创建人');
+  assert.equal(result.data?.application.applicantId, salesApplicant.id, '工作流申请人仍是实际导入人');
+}
+
+{
   const prisma = new FakePrisma();
   const service = createOrderApplicationService(prisma as any, { now: () => new Date(NOW) });
   const result = await service.approve('oa-concurrent-1', reviewer);

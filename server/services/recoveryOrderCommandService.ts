@@ -15,6 +15,7 @@ import {
 } from '../../src/shared/utils/recoveryOrderDeletion';
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
+import type { BusinessImportMetadata } from '../../src/types/businessImport';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { jsonText, queryBusinessRecordPage, visibleJsonCondition } from './businessRecordPageService';
 import { compactRecoveryOrderListItem, compactRecoverySettlementListItem } from '../../src/shared/utils/listPayload';
@@ -666,8 +667,9 @@ export function createRecoveryOrderCommandService(
     async create(
       input: RecoveryOrderInput,
       actor: AuthenticatedUser,
+      imported?: { metadata: BusinessImportMetadata; customerId: string; customerMatchStatus: RecoveryOrder['customerMatchStatus'] },
     ): Promise<ApiResponse<RecoveryOrder | null>> {
-      if (!hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, 'write')) {
+      if (!imported && !hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, 'write')) {
         return failure('无权新增售后挽回订单', 403);
       }
       if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -722,11 +724,11 @@ export function createRecoveryOrderCommandService(
         id,
         recoveryNo: `RCV-${createdAt.slice(0, 10).replace(/-/g, '')}-${hash(normalizedNo, 8).toUpperCase()}`,
         thirdPartyOrderNo,
-        customerId: '',
+        customerId: imported?.customerId || '',
         customerName,
         customerPhone: cleanText(input.customerPhone) || undefined,
         customerWechat: cleanText(input.customerWechat) || undefined,
-        customerMatchStatus: '手工填写',
+        customerMatchStatus: imported?.customerMatchStatus || '手工填写',
         sourcePlatform: cleanText(input.sourcePlatform) || undefined,
         sourcePlatformId: cleanText(input.sourcePlatformId) || undefined,
         sourcePlatformName: cleanText(input.sourcePlatformName) || cleanText(input.sourcePlatform) || undefined,
@@ -760,6 +762,7 @@ export function createRecoveryOrderCommandService(
         createdByName: actor.name,
         createdAt,
         updatedAt: createdAt,
+        ...(imported?.metadata || {}),
       };
 
       try {
@@ -782,7 +785,7 @@ export function createRecoveryOrderCommandService(
               title: next.customerName,
               status: next.status,
               owner: next.recoveryUserName,
-              customerId: null,
+              customerId: next.customerId || null,
               orderId: null,
               amount: next.recoveryAmount,
               eventAt: new Date(next.recoveryAt || createdAt),
@@ -810,6 +813,15 @@ export function createRecoveryOrderCommandService(
         }
         throw error;
       }
+    },
+
+    async createImported(
+      input: RecoveryOrderInput,
+      actor: AuthenticatedUser,
+      metadata: BusinessImportMetadata,
+      customer: { id: string; matchStatus: RecoveryOrder['customerMatchStatus'] },
+    ): Promise<ApiResponse<RecoveryOrder | null>> {
+      return this.create(input, actor, { metadata, customerId: customer.id, customerMatchStatus: customer.matchStatus });
     },
 
     async update(
@@ -1177,6 +1189,12 @@ export function createRecoveryOrderCommandService(
       if (action === 'return' && current.status === '退回修改' && current.auditReason === normalizedReason) return current;
       if (action === 'reject' && current.status === '审核驳回' && current.auditReason === normalizedReason) return current;
       if (current.status !== '待审核') throw new RecoveryCommandError(409, '只有待审核售后挽回订单可以执行该操作');
+      if (action === 'approve' && current.importBatchId) {
+        const targetCreator = directory.users.find((user) => user.id === current.targetCreatorId && activeUser(user));
+        if (!targetCreator || targetCreator.name !== current.targetCreatorName) {
+          throw new RecoveryCommandError(409, '导入挽回单的目标创建人已变化，请退回处理');
+        }
+      }
       const changedAt = now().toISOString();
       const next: RecoveryOrder = {
         ...current,
@@ -1186,6 +1204,8 @@ export function createRecoveryOrderCommandService(
         auditorName: actor.name,
         auditedAt: changedAt,
         auditReason: action === 'approve' ? `审核通过：${actor.name}` : normalizedReason,
+        createdBy: action === 'approve' && current.targetCreatorId ? current.targetCreatorId : current.createdBy,
+        createdByName: action === 'approve' && current.targetCreatorName ? current.targetCreatorName : current.createdByName,
         updatedAt: changedAt,
       };
       await writeRecoveryOrder(transaction, next);

@@ -60,6 +60,44 @@ export type BusinessImportRowResult = {
   reason: string;
 };
 
+export type BusinessImportExecutionStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+
+export type BusinessImportMetadata = {
+  importBatchId: string;
+  importRowNumber: number;
+  importedById: string;
+  importedByName: string;
+  importedAt: string;
+  targetCreatorId: string;
+  targetCreatorName: string;
+  importWarnings?: string[];
+};
+
+export type BusinessImportJobRow = BusinessImportRowResult & {
+  normalized: BusinessImportRow;
+  customerId?: string;
+  executionStatus?: BusinessImportExecutionStatus;
+  recordId?: string;
+  errorMessage?: string;
+};
+
+export type BusinessImportJobExecution = {
+  id: string;
+  batchId: string;
+  type: BusinessImportType;
+  status: BusinessImportExecutionStatus | 'partial_failed';
+  actorId: string;
+  actorName: string;
+  totalCount: number;
+  successCount: number;
+  failedCount: number;
+  leaseOwner?: string | null;
+  leaseEpoch: number;
+  leaseExpiresAt?: string | Date | null;
+  startedAt?: string | Date | null;
+  finishedAt?: string | Date | null;
+};
+
 export type BusinessImportPrecheckResult = {
   confirmationToken: string;
   expiresAt: string;
@@ -73,9 +111,41 @@ export type BusinessImportPrecheckResult = {
 export type BusinessImportJobResult = {
   id: string;
   type: BusinessImportType;
-  status: 'queued';
+  status: BusinessImportJobExecution['status'];
   totalCount: number;
+  successCount?: number;
   failedCount?: number;
+  batchId?: string;
+  rows?: BusinessImportJobRow[];
+};
+
+export type BusinessImportBatchResult = {
+  id: string;
+  type: BusinessImportType;
+  status: string;
+  sourceFileName?: string;
+  totalCount: number;
+  readyCount: number;
+  warningCount: number;
+  blockedCount: number;
+  createdAt: string;
+  jobs: BusinessImportJobResult[];
+};
+
+export type BusinessImportReviewAction = 'approve' | 'return' | 'reject';
+export type BusinessImportReviewRequest = {
+  module: BusinessImportType;
+  action: BusinessImportReviewAction;
+  ids?: string[];
+  importBatchId?: string;
+  reason?: string;
+};
+export type BusinessImportReviewItemResult = { id: string; success: boolean; code: number; message: string };
+export type BusinessImportReviewResult = {
+  totalCount: number;
+  successCount: number;
+  failedCount: number;
+  results: BusinessImportReviewItemResult[];
 };
 
 export type BusinessImportTemplateOptions = {

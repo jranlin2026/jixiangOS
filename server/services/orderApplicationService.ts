@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { failure, success, type ApiResponse } from '../api/response';
 import { STORAGE_KEYS, normalizeResourceOwnership } from '../../src/shared/utils/constants';
-import { isSuperAdmin } from '../../src/shared/utils/permissions';
+import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import {
   buildDataVisibilityScopeForUser,
   type DataVisibilityScope,
@@ -15,6 +15,7 @@ import type { DataScopeDomain, Role } from '../../src/types/role';
 import type { Department } from '../../src/types/department';
 import type { User } from '../../src/types/settings';
 import type { BusinessAttachment, BusinessAttachmentCategory } from '../../src/types/businessAttachment';
+import type { BusinessImportMetadata } from '../../src/types/businessImport';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import {
   buildCustomerAccessContextFromDirectory,
@@ -444,6 +445,12 @@ async function validateStoredApplicationSnapshot(
   if (!applicant || applicant.name !== application.applicantName) {
     throw new OrderApprovalError(409, '待审申请申请人与申请人稳定ID不一致');
   }
+  if (application.importBatchId) {
+    const targetCreator = directory.users.find((user) => user.id === application.targetCreatorId && activeDirectoryUser(user));
+    if (!targetCreator || targetCreator.name !== application.targetCreatorName) {
+      throw new OrderApprovalError(409, '导入订单的目标创建人已变化，请退回处理');
+    }
+  }
   if (!Array.isArray(application.orderData.payments)) {
     throw new OrderApprovalError(409, '待审申请付款记录无效');
   }
@@ -473,8 +480,8 @@ function buildOrder(
       application.orderData.resourceOwnership || application.orderData.sourceType,
     ),
     sourceApplicationId: application.id,
-    createdById: application.applicantId,
-    createdByName: application.applicantName,
+    createdById: application.targetCreatorId || application.applicantId,
+    createdByName: application.targetCreatorName || application.applicantName,
     approvalDownstreamEffects: DEFERRED_EFFECTS,
     createdAt: approvedAt,
     updatedAt: approvedAt,
@@ -543,10 +550,13 @@ export function createOrderApplicationService(
   async function submit(
     input: OrderApplicationInput,
     applicant: AuthenticatedUser,
+    imported?: { metadata: BusinessImportMetadata; idempotencyKey: string },
   ): Promise<ApiResponse<OrderApplication | null>> {
     const directory = await loadCommandDirectory(prisma);
     const createdAt = now().toISOString();
-    const rawId = String(idFactory() || '').replace(/[^a-zA-Z0-9-]/g, '').slice(0, 48);
+    const rawId = imported
+      ? `import-${hashSuffix(imported.idempotencyKey, 32)}`
+      : String(idFactory() || '').replace(/[^a-zA-Z0-9-]/g, '').slice(0, 48);
     const applicationId = `oa-${rawId || hashSuffix(`${applicant.id}:${createdAt}`)}`;
     const applicationNo = `OAPP-${createdAt.slice(0, 10).replace(/-/g, '')}-${hashSuffix(applicationId, 10).toUpperCase()}`;
 
@@ -575,6 +585,7 @@ export function createOrderApplicationService(
           }],
           createdAt,
           updatedAt: createdAt,
+          ...(imported?.metadata || {}),
         };
         await transaction.businessRecord.create({
           data: {
@@ -600,6 +611,17 @@ export function createOrderApplicationService(
       return success<OrderApplication | null>(created);
     } catch (error) {
       if (error instanceof OrderApprovalError) return failure<OrderApplication>(error.message, error.responseCode);
+      if (prismaCode(error) === 'P2002' && imported) {
+        const existing = await prisma.businessRecord.findUnique({
+          where: { domain_recordId: { domain: STORAGE_KEYS.ORDER_APPLICATIONS, recordId: applicationId } },
+        });
+        if (existing) {
+          const application = parseJsonObject<OrderApplication>(existing.data, '订单申请');
+          if (application.importBatchId === imported.metadata.importBatchId
+            && application.importRowNumber === imported.metadata.importRowNumber
+            && application.importedById === imported.metadata.importedById) return success(application);
+        }
+      }
       if (prismaCode(error) === 'P2002') return failure<OrderApplication>('订单申请编号冲突，请重新提交', 409);
       if (prismaCode(error) === 'P2034') return failure<OrderApplication>('订单申请发生并发冲突，请重试', 409);
       throw error;
@@ -711,6 +733,7 @@ export function createOrderApplicationService(
     const cleanApplicationId = String(applicationId || '').trim();
     const cleanReason = String(reason || '').trim();
     if (!cleanApplicationId) return failure<OrderApplication>('订单申请ID不能为空', 400);
+    if (!hasPermission(reviewer, PERMISSION_KEYS.ORDER_REVIEW, 'write')) return failure<OrderApplication>('无权审核订单申请', 403);
     if (!cleanReason) return failure<OrderApplication>(action === 'return' ? '退回原因不能为空' : '驳回原因不能为空', 400);
     const scope = await loadApplicationScope(prisma, reviewer);
 
@@ -789,6 +812,9 @@ export function createOrderApplicationService(
 
   return {
     submit,
+    async submitImported(input: OrderApplicationInput, applicant: AuthenticatedUser, metadata: BusinessImportMetadata, idempotencyKey: string) {
+      return submit(input, applicant, { metadata, idempotencyKey });
+    },
     resubmit,
     returnApplication(applicationId: string, reason: string, reviewer: AuthenticatedUser) {
       return reviewTransition(applicationId, reason, reviewer, 'return');
@@ -802,6 +828,7 @@ export function createOrderApplicationService(
     ): Promise<ApiResponse<OrderApprovalResult | null>> {
       const cleanApplicationId = String(applicationId || '').trim();
       if (!cleanApplicationId) return failure<OrderApprovalResult>('订单申请ID不能为空', 400);
+      if (!hasPermission(reviewer, PERMISSION_KEYS.ORDER_REVIEW, 'write')) return failure<OrderApprovalResult>('无权审核订单申请', 403);
       const directory = await loadCommandDirectory(prisma);
       const scope = commandScope(directory, reviewer, 'orderApplications');
 

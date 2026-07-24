@@ -636,7 +636,13 @@ model BusinessImportJob {
   rows           Json
   idempotencyKey String   @db.VarChar(128)
   totalCount     Int
+  successCount   Int      @default(0)
   failedCount    Int      @default(0)
+  leaseOwner     String?  @db.VarChar(64)
+  leaseEpoch     Int      @default(0)
+  leaseExpiresAt DateTime?
+  heartbeatAt    DateTime?
+  errorMessage   String?  @db.Text
   createdAt      DateTime @default(now())
   startedAt      DateTime?
   finishedAt     DateTime?
@@ -646,6 +652,7 @@ model BusinessImportJob {
 
   @@unique([actorId, importType, idempotencyKey])
   @@index([importType, status, createdAt])
+  @@index([status, leaseExpiresAt])
   @@map("business_import_jobs")
 }
 

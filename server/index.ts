@@ -97,6 +97,14 @@ import { createPrismaCustomerDataExchangeService } from './services/customerData
 import { createCustomerDataExchangeRouter } from './routes/customerDataExchangeRoutes';
 import { createBusinessImportRouter } from './routes/businessImportRoutes';
 import { createPrismaBusinessImportService } from './services/businessImportAdapter';
+import { createBusinessImportWorker } from './services/businessImportExecution';
+import { createPrismaBusinessImportRowExecutor } from './services/businessImportExecutionAdapter';
+import {
+  createBusinessImportReadRepository,
+  createBusinessImportReviewSelector,
+  createPrismaBusinessImportJobStore,
+} from './services/businessImportPersistence';
+import { createBusinessImportReviewService } from './services/businessImportReviewService';
 import { resolveCanonicalCustomer } from './services/customerCanonicalService';
 import { createCoCreationService } from './services/coCreation/coCreationService';
 import {
@@ -212,6 +220,20 @@ const businessExportService = createBusinessExportService(prisma as any);
 const deliveryCommandService = createDeliveryCommandService(prisma, { assigner: deliveryAssignmentService });
 const deliveryQueryService = createDeliveryQueryService(prisma);
 const recoveryOrderCommandService = createRecoveryOrderCommandService(prisma);
+const businessImportReadService = createBusinessImportReadRepository(prisma);
+const businessImportReviewService = createBusinessImportReviewService({
+  selectImportedRecords: createBusinessImportReviewSelector(prisma),
+  orderApplications: orderApplicationService,
+  recoveryOrders: recoveryOrderCommandService,
+});
+const businessImportWorker = createBusinessImportWorker({
+  store: createPrismaBusinessImportJobStore(prisma),
+  executor: createPrismaBusinessImportRowExecutor({
+    prisma, orderApplications: orderApplicationService, recoveryOrders: recoveryOrderCommandService,
+  }),
+  workerId: `business-import-${process.pid}-${randomUUID()}`,
+  onError: (error) => console.error('Business import worker failed:', String((error as Error)?.message || 'WORKER_ERROR')),
+});
 const knowledgeRepository = createPrismaKnowledgeRepository(prisma as any);
 const knowledgeFileStore = createKnowledgeFileStore(getEnablementPrivateStorageDir(process.env, uploadRoot));
 const knowledgeService = createKnowledgeService({
@@ -480,6 +502,9 @@ app.use('/api/customer-data-exchange', createCustomerDataExchangeRouter({
 }));
 app.use('/api/business-imports', createBusinessImportRouter({
   service: businessImportService,
+  readService: businessImportReadService,
+  reviewService: businessImportReviewService,
+  requireAuthenticated: requireStorageAccess,
   requireOrderImport: requireOrderImportAccess,
   requireRecoveryImport: requireRecoveryImportAccess,
 }));
@@ -1661,11 +1686,13 @@ async function startServer() {
     console.log(`AI proxy listening on http://${host}:${port}`);
   });
   customerBatchWorker.start();
+  businessImportWorker.start();
   let shuttingDown = false;
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
     await customerBatchWorker.stop();
+    await businessImportWorker.stop();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await prisma.$disconnect();
   };
