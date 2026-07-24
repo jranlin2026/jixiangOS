@@ -90,6 +90,7 @@ const PERMISSION_TREE: PermissionNode[] = [
     label: '订单',
     children: [
       { label: '订单列表', key: PERMISSION_KEYS.ORDER_MANAGE },
+      { label: '导出订单', key: PERMISSION_KEYS.ORDER_EXPORT },
       { label: '订单审核列表', key: PERMISSION_KEYS.ORDER_REVIEW_LIST },
       { label: '订单审核操作', key: PERMISSION_KEYS.ORDER_REVIEW },
       { label: '新增订单', key: PERMISSION_KEYS.ORDER_CREATE },
@@ -124,7 +125,9 @@ const PERMISSION_TREE: PermissionNode[] = [
     children: [
       { label: '我的提成', key: PERMISSION_KEYS.FINANCE_MY_COMMISSION },
       { label: '订单分账', key: PERMISSION_KEYS.FINANCE_SETTLEMENT },
+      { label: '导出订单分账', key: PERMISSION_KEYS.ORDER_SETTLEMENT_EXPORT },
       { label: '售后挽回分账', key: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT },
+      { label: '导出售后挽回分账', key: PERMISSION_KEYS.RECOVERY_SETTLEMENT_EXPORT },
       { label: '员工提成月报', key: PERMISSION_KEYS.FINANCE_PAYOUT },
       { label: '收支流水', key: PERMISSION_KEYS.FINANCE_FLOW },
       { label: '提成规则', key: PERMISSION_KEYS.FINANCE_RULES },

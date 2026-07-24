@@ -336,6 +336,25 @@ model BusinessRecord {
   @@map("business_records")
 }
 
+model BusinessExportAudit {
+  id              String   @id @default(cuid()) @db.VarChar(64)
+  module          String   @db.VarChar(40)
+  actorId         String   @db.VarChar(64)
+  actorName       String   @db.VarChar(100)
+  reason          String   @db.Text
+  filtersSnapshot Json
+  columnMode      String   @db.VarChar(20)
+  columns         Json
+  summaryRowCount Int
+  detailRowCount  Int
+  filename        String   @db.VarChar(255)
+  createdAt       DateTime @default(now())
+
+  @@index([module, createdAt])
+  @@index([actorId, createdAt])
+  @@map("business_export_audits")
+}
+
 enum CustomerTodoStatus {
   PENDING
   COMPLETED

@@ -54,6 +54,7 @@ import { createLeadListService } from './services/leadListService';
 import { createBusinessRecycleBinService } from './services/businessRecycleBinService';
 import { createPrismaBusinessRecycleBinRepository } from './services/businessRecycleBinRepository';
 import { createBusinessRecycleBinRouter } from './routes/businessRecycleBinRoutes';
+import { createBusinessExportRouter } from './routes/businessExportRoutes';
 import { createSystemSetupRouter } from './routes/systemSetupRoutes';
 import { createPrismaSystemSetupRepository } from './services/systemSetupRepository';
 import { createSystemSetupService } from './services/systemSetupService';
@@ -70,6 +71,7 @@ import {
 } from './services/orderApprovalEffectsService';
 import { createOrderCommandService } from './services/orderCommandService';
 import { createOrderQueryService } from './services/orderQueryService';
+import { createBusinessExportService } from './services/businessExportService';
 import { createDeliveryCommandService } from './services/deliveryCommandService';
 import { createDeliveryQueryService } from './services/deliveryQueryService';
 import { createDeliveryAssignmentService } from './services/deliveryAssignmentService';
@@ -202,6 +204,7 @@ const orderCommandService = createOrderCommandService(prisma, {
   rebuildPendingCommissions: rebuildPendingOrderCommissions,
 });
 const orderQueryService = createOrderQueryService(prisma);
+const businessExportService = createBusinessExportService(prisma);
 const deliveryCommandService = createDeliveryCommandService(prisma, { assigner: deliveryAssignmentService });
 const deliveryQueryService = createDeliveryQueryService(prisma);
 const recoveryOrderCommandService = createRecoveryOrderCommandService(prisma);
@@ -349,6 +352,10 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: getApiJsonBodyLimit() }));
+app.use('/api/business-exports', createBusinessExportRouter({
+  service: businessExportService,
+  requireAuthenticated: requireStorageAccess,
+}));
 app.use('/api/system/setup', createSystemSetupRouter({ service: systemSetupService }));
 app.use(createSystemInstallationGate(systemSetupService));
 app.use('/uploads', express.static(uploadRoot, { index: false }));
