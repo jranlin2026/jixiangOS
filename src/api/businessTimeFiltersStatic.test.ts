@@ -6,7 +6,7 @@ const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), 'utf8');
 
 const orders = read('src/pages/Orders/index.tsx');
-assert.match(orders, /label="订单状态"/);
+assert.match(orders, /label="分账进度"/);
 assert.match(orders, /label="付款开始"/);
 assert.match(orders, /label="付款结束"/);
 assert.match(orders, /按付款时间排序/);

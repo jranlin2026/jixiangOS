@@ -12,6 +12,9 @@ export type OrderStatus =
   | '已退款'
   | '已取消';
 
+/** 正式订单列表的分账进度，与售后挽回订单列表保持一致。 */
+export type OrderSettlementProgress = '待分账' | '待确认' | '待发放' | '已发放' | '已撤回';
+
 /** 订单支付记录 */
 export interface OrderPayment {
   id: ID;
@@ -70,6 +73,8 @@ export interface Order {
   actualAmount: number;
   paymentMethod: PaymentMethod;
   status: OrderStatus;
+  /** 由当前有效分账记录汇总得出，仅用于列表和财务视图。 */
+  settlementStatus?: OrderSettlementProgress;
   refundStatus: RefundStatus;
   refundAmount?: number;
   refundReason?: string;
@@ -185,6 +190,7 @@ export interface OrderFilters {
   customerId?: ID;
   productLevel?: ProductLevel;
   status?: OrderStatus;
+  settlementStatus?: OrderSettlementProgress;
   owner?: string;
   orderType?: OrderType;
   paymentMethod?: PaymentMethod;

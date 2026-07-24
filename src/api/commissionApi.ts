@@ -19,6 +19,7 @@ import type {
   CommissionStats,
   CommissionStatus,
 } from '../types/commission';
+import { deriveOrderSettlementProgress } from '../shared/utils/orderSettlementProgress';
 import type { Order, OrderApplication } from '../types/order';
 import type { Product } from '../types/product';
 import type { User } from '../types/settings';
@@ -591,14 +592,6 @@ async function fetchCommissionsByOrder(orderId: string): Promise<ApiResponse<Com
   return createSuccessResponse(getOrderCommissions(orderId));
 }
 
-function deriveOrderSummaryStatus(commissions: Commission[]): CommissionOrderSummary['status'] {
-  if (commissions.some(isCommissionPendingHandling)) return '待处理';
-  if (commissions.every(isInactiveCommission)) return '已撤回';
-  if (commissions.every((commission) => commission.status === '已发放')) return '已发放';
-  if (commissions.every((commission) => commission.status === '待发放' || commission.status === '已发放')) return '待发放';
-  return '待确认';
-}
-
 function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrderSummary[] {
   const formalOrderCommissions = commissions.filter((commission) => (
     commission.sourceBusinessType !== 'after_sales_recovery'
@@ -672,7 +665,7 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
       confirmedAt: processing.confirmedAt,
       paidAt: processing.paidAt,
       withdrawReason: processing.withdrawReason,
-      status: deriveOrderSummaryStatus(sortedRows),
+      status: deriveOrderSettlementProgress(sortedRows),
       splitSummary: activeRows.map((item) => ({
         role: item.role,
         amount: item.commissionAmount,

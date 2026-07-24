@@ -16,6 +16,7 @@ import { syncLifecycleByOrder } from './lifecycleSync';
 import { v4 as uuidv4 } from 'uuid';
 import { getCurrentOperatorName, getCurrentOperatorUser, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
 import { filterVisibleOrders } from '../shared/utils/dataVisibility';
+import { deriveOrderListSettlementProgress } from '../shared/utils/orderSettlementProgress';
 
 function ensureInit(): void {
   initializeMockData();
@@ -249,7 +250,21 @@ async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<Paginate
   const raw = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
   const all = raw.map(normalizeOrder);
   if (JSON.stringify(raw) !== JSON.stringify(all)) setStorageData(STORAGE_KEYS.ORDERS, all, { persist: false });
-  let filtered = filterVisibleOrders(all.filter((order) => !order.deletedAt));
+  const commissionsByOrder = new Map<string, Commission[]>();
+  (getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [])
+    .filter((commission) => (
+      commission.sourceBusinessType !== 'after_sales_recovery'
+      && commission.sourceBusinessType !== 'refund_recovery'
+      && !commission.sourceRecoveryOrderId
+    ))
+    .forEach((commission) => commissionsByOrder.set(
+      commission.orderId,
+      [...(commissionsByOrder.get(commission.orderId) || []), commission],
+    ));
+  let filtered = filterVisibleOrders(all.filter((order) => !order.deletedAt).map((order) => ({
+    ...order,
+    settlementStatus: deriveOrderListSettlementProgress(commissionsByOrder.get(order.id) || []),
+  })));
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
@@ -270,6 +285,9 @@ async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<Paginate
   }
   if (filters?.status) {
     filtered = filtered.filter((o) => o.status === filters.status);
+  }
+  if (filters?.settlementStatus) {
+    filtered = filtered.filter((o) => o.settlementStatus === filters.settlementStatus);
   }
   if (filters?.owner) {
     filtered = filtered.filter((o) => o.owner === filters.owner);

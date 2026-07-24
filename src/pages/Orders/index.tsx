@@ -47,7 +47,7 @@ import OrderForm from './OrderForm';
 import OrderHistoryDialog from './OrderHistoryDialog';
 import OrderReview from '../OrderReview';
 import type { Customer } from '../../types/customer';
-import type { Order, OrderStatus } from '../../types/order';
+import type { Order, OrderSettlementProgress } from '../../types/order';
 import type { OrderTypeConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
@@ -82,14 +82,14 @@ type OrderViewConfig = {
 };
 
 const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_view_v7';
-const ORDER_VIEW_SCHEMA_VERSION = 11;
+const ORDER_VIEW_SCHEMA_VERSION = 12;
 const ORDER_WIDTH_STORAGE_KEY = 'aaos_order_table_column_widths_v1';
 const ORDER_ACTION_COLUMN_WIDTH = 160;
-const ORDER_STATUS_OPTIONS: OrderStatus[] = ['待确认', '已确认', '处理中', '已完成', '退款中', '已退款', '已取消'];
+const ORDER_SETTLEMENT_STATUS_OPTIONS: OrderSettlementProgress[] = ['待分账', '待确认', '待发放', '已发放', '已撤回'];
 
 const ORDER_COLUMNS: OrderColumn[] = [
   { id: 'orderNo', label: '订单号' },
-  { id: 'status', label: '订单状态' },
+  { id: 'settlementStatus', label: '分账进度' },
   { id: 'customer', label: '客户' },
   { id: 'productName', label: '产品名称' },
   { id: 'productLevel', label: '产品等级' },
@@ -109,7 +109,7 @@ const ORDER_COLUMNS: OrderColumn[] = [
 
 const DEFAULT_VISIBLE_COLUMNS = [
   'orderNo',
-  'status',
+  'settlementStatus',
   'customer',
   'productName',
   'productLevel',
@@ -126,7 +126,7 @@ const DEFAULT_VISIBLE_COLUMNS = [
 
 const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   orderNo: 180,
-  status: 120,
+  settlementStatus: 120,
   customer: 180,
   productName: 180,
   productLevel: 140,
@@ -567,8 +567,8 @@ const Orders: React.FC = () => {
             </Box>
           </Button>
         );
-      case 'status':
-        return <BusinessStatusChip status={order.status} />;
+      case 'settlementStatus':
+        return <BusinessStatusChip status={order.settlementStatus || '待分账'} />;
       case 'customer':
         return (
           <Button
@@ -673,11 +673,11 @@ const Orders: React.FC = () => {
               size="small"
               sx={{ minWidth: 240 }}
             />
-            <FormControl size="small" sx={{ minWidth: 120 }}>
-              <InputLabel>订单状态</InputLabel>
-              <Select value={filters.status || ''} label="订单状态" onChange={(e) => handleFilterChange('status', e.target.value)}>
+            <FormControl size="small" sx={{ minWidth: 130 }}>
+              <InputLabel>分账进度</InputLabel>
+              <Select value={filters.settlementStatus || ''} label="分账进度" onChange={(e) => handleFilterChange('settlementStatus', e.target.value)}>
                 <MenuItem value="">全部</MenuItem>
-                {ORDER_STATUS_OPTIONS.map((status) => <MenuItem key={status} value={status}>{status}</MenuItem>)}
+                {ORDER_SETTLEMENT_STATUS_OPTIONS.map((status) => <MenuItem key={status} value={status}>{status}</MenuItem>)}
               </Select>
             </FormControl>
             <FormControl size="small" sx={{ minWidth: 120 }}>

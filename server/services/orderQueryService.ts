@@ -12,6 +12,7 @@ import type {
 } from '../../src/types/order';
 import type { DataScopeDomain } from '../../src/types/role';
 import type { Customer } from '../../src/types/customer';
+import type { Commission } from '../../src/types/commission';
 import {
   buildDataVisibilityScopeForUser,
   type DataVisibilityScope,
@@ -19,6 +20,7 @@ import {
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { jsonText, queryBusinessRecordPage, visibleJsonCondition } from './businessRecordPageService';
 import { compactOrderApplicationListItem, compactOrderListItem } from '../../src/shared/utils/listPayload';
+import { deriveOrderListSettlementProgress } from '../../src/shared/utils/orderSettlementProgress';
 
 type OrderQueryPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$queryRaw'>;
 
@@ -193,6 +195,7 @@ function matchesOrder(order: Order, filters: OrderFilters): boolean {
   if (filters.customerId && order.customerId !== filters.customerId) return false;
   if (filters.productLevel && order.productLevel !== filters.productLevel) return false;
   if (filters.status && order.status !== filters.status) return false;
+  if (filters.settlementStatus && order.settlementStatus !== filters.settlementStatus) return false;
   if (filters.owner && order.owner !== filters.owner && order.salesName !== filters.owner) return false;
   if (filters.orderType && order.orderType !== filters.orderType) return false;
   if (filters.paymentMethod && order.paymentMethod !== filters.paymentMethod) return false;
@@ -304,14 +307,32 @@ export function createOrderQueryService(
 ) {
   return {
     async listOrders(filters: OrderFilters = {}, actor: AuthenticatedUser) {
-      const [scope, rows] = await Promise.all([
+      const [scope, rows, commissionRows] = await Promise.all([
         loadScope(prisma, actor, 'orders'),
         prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDERS } }),
+        prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSIONS } }),
       ]);
+      const commissionsByOrder = new Map<string, Commission[]>();
+      (commissionRows as BusinessRecordRow[])
+        .map((row) => parseRecord<Commission>(row.data))
+        .filter((commission): commission is Commission => Boolean(
+          commission
+          && commission.sourceBusinessType !== 'after_sales_recovery'
+          && commission.sourceBusinessType !== 'refund_recovery'
+          && !commission.sourceRecoveryOrderId,
+        ))
+        .forEach((commission) => commissionsByOrder.set(
+          commission.orderId,
+          [...(commissionsByOrder.get(commission.orderId) || []), commission],
+        ));
       const direction = filters.sortDirection === 'asc' ? 1 : -1;
       const items = (rows as BusinessRecordRow[])
         .map((row) => parseRecord<Order>(row.data))
         .filter((order): order is Order => Boolean(order && !order.deletedAt))
+        .map((order) => ({
+          ...order,
+          settlementStatus: deriveOrderListSettlementProgress(commissionsByOrder.get(order.id) || []),
+        }))
         .filter((order) => orderIsVisible(order, scope) && matchesOrder(order, filters))
         .sort((left, right) => (
           direction * (orderSortTimestamp(left, filters.sortBy) - orderSortTimestamp(right, filters.sortBy))

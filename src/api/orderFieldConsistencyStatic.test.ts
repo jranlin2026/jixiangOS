@@ -8,13 +8,11 @@ const orderDetailSource = read('src/pages/Orders/OrderDetail.tsx');
 const orderReviewSource = read('src/pages/OrderReview/index.tsx');
 const orderFormSource = read('src/pages/Orders/OrderForm.tsx');
 
-for (const [label, source] of [
-  ['订单列表', orderListSource],
-  ['订单审核台', orderReviewSource],
-] as const) {
+for (const [label, source] of [['订单列表', orderListSource], ['订单审核台', orderReviewSource]] as const) {
   assert.match(source, /id: 'thirdPartyOrderNo', label: '第三方平台订单'/, `${label}必须提供第三方平台订单列`);
-  assert.match(source, /id: 'status', label: /, `${label}必须提供状态列`);
 }
+assert.match(orderListSource, /id: 'settlementStatus', label: '分账进度'/, '订单列表必须显示分账进度');
+assert.match(orderReviewSource, /id: 'status', label: /, '订单审核台必须保留审核状态');
 
 assert.match(orderListSource, /case 'thirdPartyOrderNo':[^]*order\.thirdPartyOrderNo \|\| '-'/);
 assert.match(orderReviewSource, /case 'thirdPartyOrderNo':[^]*application\.orderData\.thirdPartyOrderNo \|\| '-'/);

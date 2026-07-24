@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Order, OrderApplication } from '../../src/types/order';
+import type { Commission } from '../../src/types/commission';
 import { createOrderQueryService } from './orderQueryService';
 
 const now = '2026-07-12T15:00:00.000Z';
@@ -110,6 +111,12 @@ const customers = [
   { id: 'customer-order-self', leadSource: '市场品牌部', sourceName: '官网', createdAt: now, updatedAt: now },
   { id: 'customer-draft-application-self', leadSource: '市场品牌部', sourceName: '搜索广告', createdAt: now, updatedAt: now },
 ];
+const commissions: Commission[] = [{
+  id: 'commission-order-self', orderId: 'order-self', orderNo: 'ORD-order-self', customerName: '客户-order-self',
+  productLevel: '899', orderAmount: 899, commissionRate: 0.1, commissionAmount: 89.9,
+  role: '销售', owner: sales.name, ownerId: sales.id, department: '销售部', status: '待确认',
+  payoutPlanId: 'plan-899', payoutPlanName: '899销售方案', createdAt: now, updatedAt: now,
+}];
 const businessRecordFindManyWhere: any[] = [];
 
 const prisma: any = {
@@ -119,7 +126,11 @@ const prisma: any = {
   businessRecord: {
     findMany: async ({ where }: any) => {
       businessRecordFindManyWhere.push(where);
-      const rows = where.domain === STORAGE_KEYS.ORDERS ? records : applications;
+      const rows = where.domain === STORAGE_KEYS.ORDERS
+        ? records
+        : where.domain === STORAGE_KEYS.COMMISSIONS
+          ? commissions
+          : applications;
       const filteredRows = where.recordId?.in
         ? rows.filter((data) => where.recordId.in.includes(data.id))
         : rows;
@@ -151,10 +162,21 @@ assert.equal(listedOrder?.dealEvidencePreview, undefined);
 assert.equal(listedOrder?.payments[0].voucherPreview, undefined);
 assert.equal(listedOrder?.createdById, finance.id, '历史订单列表应从来源申请回溯创建人');
 assert.equal(listedOrder?.createdByName, finance.name);
+assert.equal(listedOrder?.settlementStatus, '待确认', '订单列表应显示分账进度而非固定的已确认');
+assert.equal(
+  salesOrders.data?.items.find((item) => item.id === 'order-legacy-self')?.settlementStatus,
+  '待分账',
+  '没有分账记录的正式订单应标记为待分账',
+);
 assert.deepEqual(
   businessRecordFindManyWhere.find((where) => where.domain === STORAGE_KEYS.ORDER_APPLICATIONS)?.recordId?.in,
   ['application-approved'],
   '订单列表只能回溯当前页缺少创建人的来源申请',
+);
+assert.deepEqual(
+  (await service.listOrders({ settlementStatus: '待确认', page: 1, pageSize: 10 }, sales)).data?.items.map((item) => item.id),
+  ['order-self'],
+  '分账进度筛选应在分页前生效',
 );
 
 const financeOrders = await service.listOrders({ search: 'order-other', page: 1, pageSize: 10 }, finance);
