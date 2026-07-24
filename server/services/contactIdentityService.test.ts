@@ -4,6 +4,7 @@ import {
   CONTACT_IDENTITY_MUTATION_GATE_KEY,
   ContactIdentityConflictError,
   backfillContactIdentities,
+  exactCustomerContactsBelongExclusivelyTo,
   findExactCustomerContactDuplicate,
   hashContactIdentity,
   linkLeadAndCustomerIdentity,
@@ -297,6 +298,43 @@ function createStore(
       canReadCustomer: () => true,
     },
   }), null);
+}
+
+// Replay provenance must validate every supplied identity independently;
+// unioning phone and WeChat links can hide a split owner behind sort order.
+{
+  const phoneHash = hashContactIdentity('13800138129', crypto.hmacKey);
+  const wechatHash = hashContactIdentity('split-wechat-id', crypto.hmacKey);
+  const { store } = createStore({
+    identities: [
+      {
+        id: 'ci-phone-provenance', type: 'phone', normalizedHash: phoneHash, hashKeyVersion: 1,
+        status: 'active', encryptedNormalizedValue: 'ci:v1:opaque',
+        canonicalCustomerId: 'a-original', conflictReason: null,
+      },
+      {
+        id: 'ci-wechat-provenance', type: 'wechat', normalizedHash: wechatHash, hashKeyVersion: 1,
+        status: 'active', encryptedNormalizedValue: 'ci:v1:opaque',
+        canonicalCustomerId: 'a-original', conflictReason: null,
+      },
+    ],
+    links: [
+      { id: 'l-phone-original', identityId: 'ci-phone-provenance', entityType: 'customer', entityId: 'a-original', linkStatus: 'active' },
+      { id: 'l-wechat-original', identityId: 'ci-wechat-provenance', entityType: 'customer', entityId: 'a-original', linkStatus: 'active' },
+      { id: 'l-wechat-unrelated', identityId: 'ci-wechat-provenance', entityType: 'customer', entityId: 'z-unrelated', linkStatus: 'active' },
+    ],
+  });
+  assert.equal(await exactCustomerContactsBelongExclusivelyTo(store, {
+    phone: '+86 138 0013 8129',
+    wechat: ' Split-WeChat-ID ',
+    expectedCustomerId: 'a-original',
+    crypto,
+  }), false);
+  assert.equal(await exactCustomerContactsBelongExclusivelyTo(store, {
+    phone: '+86 138 0013 8129',
+    expectedCustomerId: 'a-original',
+    crypto,
+  }), true);
 }
 
 // RED: identity primary keys must include the contact type. A phone and a

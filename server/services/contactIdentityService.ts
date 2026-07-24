@@ -95,6 +95,10 @@ export type ContactIdentityDuplicateLookupInput = ContactInput & {
   conflictViewer?: ConflictViewer;
 };
 
+export type ExactCustomerContactProvenanceInput = ContactInput & {
+  expectedCustomerId: string;
+};
+
 export type CustomerIdentityInput = ContactInput & {
   customerId: string;
   source?: string;
@@ -432,6 +436,40 @@ export async function findExactCustomerContactDuplicate(
   return customerIds.size
     ? safeConflictPayload(tx, [...customerIds], input.conflictViewer)
     : null;
+}
+
+/**
+ * Verifies replay provenance without returning contact values or linked IDs.
+ * Every supplied normalized identity must exist and its complete active
+ * customer-link set must be exactly the expected customer.
+ */
+export async function exactCustomerContactsBelongExclusivelyTo(
+  tx: ContactIdentityStore,
+  input: ExactCustomerContactProvenanceInput,
+): Promise<boolean> {
+  const crypto = requireCrypto(input.crypto);
+  const expectedCustomerId = String(input.expectedCustomerId || '').trim();
+  const candidates = candidatesFromContact(input, crypto);
+  if (!expectedCustomerId || !candidates.length) return false;
+  for (const candidate of candidates) {
+    const identity = await tx.contactIdentity.findUnique({
+      where: {
+        type_normalizedHash: {
+          type: candidate.type,
+          normalizedHash: candidate.normalizedHash,
+        },
+      },
+    });
+    if (!identity) return false;
+    assertIdentityKeyVersion(identity, crypto);
+    const activeCustomerLinks = await tx.contactIdentityLink.findMany({
+      where: { identityId: identity.id, entityType: 'customer', linkStatus: 'active' },
+      select: { entityId: true },
+    });
+    const linkedCustomerIds = new Set(activeCustomerLinks.map((link) => String(link.entityId)));
+    if (linkedCustomerIds.size !== 1 || !linkedCustomerIds.has(expectedCustomerId)) return false;
+  }
+  return true;
 }
 
 async function assertIdentityCanAcceptCustomer(

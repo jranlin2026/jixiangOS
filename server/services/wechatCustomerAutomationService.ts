@@ -25,6 +25,7 @@ import {
   type CustomerAccessContext,
 } from './customerAccessPolicy';
 import {
+  exactCustomerContactsBelongExclusivelyTo,
   findExactCustomerContactDuplicate,
   type ContactIdentityCrypto,
 } from './contactIdentityService';
@@ -295,17 +296,24 @@ async function revalidateReplayCustomer(
   resolved: ResolvedCustomer,
   customerId: string,
 ): Promise<WechatCustomerSummary> {
-  const conflict = await findExactCustomerContactDuplicate(deps.prisma as any, {
+  const provenanceMatches = await exactCustomerContactsBelongExclusivelyTo(deps.prisma as any, {
     phone: resolved.normalized.phone,
     wechat: resolved.normalized.wechat,
+    expectedCustomerId: customerId,
     crypto: deps.contactIdentityCrypto,
-    conflictViewer: {
-      canReadCustomerList: resolved.access.canReadCustomerList,
-      canReadCustomer: (customer) => canReadCustomer(resolved.access, customer),
-    },
   });
-  if (!conflict?.customer || conflict.customer.id !== customerId) idempotencyConflict();
-  return summary(conflict.customer as Customer);
+  if (!provenanceMatches) idempotencyConflict();
+  const row = await deps.prisma.businessRecord.findUnique({
+    where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: customerId } },
+    select: { data: true },
+  });
+  let value = row?.data;
+  if (typeof value === 'string') {
+    try { value = JSON.parse(value); } catch { idempotencyConflict(); }
+  }
+  const customer = value && typeof value === 'object' && !Array.isArray(value) ? value as Customer : null;
+  if (!customer || customer.id !== customerId || !canReadCustomer(resolved.access, customer)) idempotencyConflict();
+  return summary(customer);
 }
 
 function needsInput(field: string, message: string): Resolution {
@@ -627,7 +635,7 @@ export function createWechatCustomerAutomationService(
 
       const resolution = await resolveInput(deps, input, context);
       if (resolution.status === 'needs_input') {
-        throw new Error(`WeChat customer precheck is stale: ${resolution.message}`);
+        throw new Error('WeChat customer precheck is stale.');
       }
       const identity = createIdentity(context.senderId, payload.nonce);
       const inputHash = resolvedInputHash(resolution.value);

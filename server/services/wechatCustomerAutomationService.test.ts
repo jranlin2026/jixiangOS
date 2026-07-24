@@ -889,6 +889,28 @@ function createCustomerRaceIntegrationHarness() {
   });
 }
 
+// Stale-precheck diagnostics are fixed and never echo arbitrary tag text,
+// contact-like PII, or the original WeChat message marker.
+{
+  const { service, context } = createHarness();
+  const tagMarker = 'PRIVATE_TAG_PHONE_13800138130';
+  const originalMessageMarker = 'PRIVATE_ORIGINAL_WECHAT_MESSAGE';
+  const input = {
+    name: '错误诊断客户', phone: '13800138130', leadSource: '官网', remark: originalMessageMarker,
+  };
+  const checked = await service.check(input, context);
+  assert.equal(checked.status, 'ready');
+  if (checked.status !== 'ready') throw new Error('expected stale diagnostic precheck');
+  const error = await service.create({ ...input, tagNames: [tagMarker] }, checked.precheckToken, context).then(
+    () => null,
+    (caught) => caught as Error,
+  );
+  assert.equal(error?.message, 'WeChat customer precheck is stale.');
+  assert.equal(error?.message.includes(tagMarker), false);
+  assert.equal(error?.message.includes('13800138130'), false);
+  assert.equal(error?.message.includes(originalMessageMarker), false);
+}
+
 // The real transactional customer creator remains the final identity arbiter.
 // A legacy/racing customer inserted after check is deliberately missing its
 // identity-index backfill, so only the create transaction's locking identity
@@ -1043,6 +1065,34 @@ function createCustomerRaceIntegrationHarness() {
   assert.equal((await service.create(input, checked.precheckToken, context)).status, 'created');
   state.identities.length = 0;
   state.links.length = 0;
+  await assert.rejects(
+    () => service.create(input, checked.precheckToken, context),
+    /idempotency conflict/,
+  );
+  assert.equal(state.createCalls.length, 1);
+}
+
+// Every supplied contact must have the same complete provenance. A phone
+// owned only by the original and a WeChat ID also linked elsewhere cannot
+// replay merely because the original customer sorts first.
+{
+  const { state, service, context } = createHarness();
+  const input = {
+    name: '双联系方式分裂客户', phone: '13800138129', wechat: 'split-wechat-id', leadSource: '官网',
+  };
+  const checked = await service.check(input, context);
+  assert.equal(checked.status, 'ready');
+  if (checked.status !== 'ready') throw new Error('expected split-contact replay precheck');
+  assert.equal((await service.create(input, checked.precheckToken, context)).status, 'created');
+  state.customers.push(businessRow(STORAGE_KEYS.CUSTOMERS, 'zz-unrelated-customer', {
+    id: 'zz-unrelated-customer', name: '无关客户', company: '', wechat: input.wechat,
+    owner: '微信录入', ownerId: context.actor.id, ownerIdentityStatus: 'resolved',
+  }));
+  const wechatIdentity = state.identities.find((identity) => identity.type === 'wechat')!;
+  state.links.push({
+    id: 'cil-wechat-unrelated', identityId: wechatIdentity.id, entityType: 'customer',
+    entityId: 'zz-unrelated-customer', linkStatus: 'active',
+  });
   await assert.rejects(
     () => service.create(input, checked.precheckToken, context),
     /idempotency conflict/,

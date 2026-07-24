@@ -80,3 +80,33 @@
 - All customer-create paths reserve before create and never allow followers to create. Slow or indeterminate state returns retryable unavailable, while known duplicate/malformed state is a conflict.
 - AppStorage and correlation/audit metadata contain hashes, IDs, states, timestamps, counters, and fixed labels only. Raw sender/contact/token/signing key/precheck token/customer message values are excluded.
 - No schema/migration, session reuse, permission widening, logging of sensitive diagnostics, or MCP work was introduced.
+
+## Replay provenance second follow-up
+
+### Implementation
+
+- Added `exactCustomerContactsBelongExclusivelyTo`, a boolean-only contact identity query. Every supplied normalized contact must exist and its complete active customer-link set must be exactly the expected original customer ID.
+- Replay/recovery now checks that per-contact provenance first, then independently loads the original customer, applies the freshly resolved `canReadCustomer` policy, and returns only the safe customer summary.
+- Create-time stale-precheck errors now use the fixed message `WeChat customer precheck is stale.` and never append dynamic resolution/tag text.
+
+### RED evidence
+
+- `npx tsx server/services/wechatCustomerAutomationService.test.ts` — RED: `Missing expected rejection` when phone mapped only to the original customer while WeChat linked both the lexicographically first original and a later unrelated customer; the old union/projection replayed the original.
+- `npx tsx server/services/contactIdentityService.test.ts` — RED: module export error because the wished-for boolean provenance helper did not exist.
+- `npx tsx server/services/wechatCustomerAutomationService.test.ts` — RED: expected fixed stale message but received `WeChat customer precheck is stale: 标签“PRIVATE_TAG_PHONE_13800138130”...`, proving raw arbitrary input reached diagnostics.
+
+### GREEN and verification evidence
+
+- `npx tsx server/services/contactIdentityService.test.ts` — GREEN: per-contact exclusive provenance helper passed split-contact and phone-only cases without returning identity data.
+- `npx tsx server/services/wechatCustomerAutomationService.test.ts` — GREEN: split-contact replay fails closed; fixed stale diagnostic excludes tag/contact/original-message markers.
+- `npx tsx server/services/wechatCustomerAutomationService.test.ts && npx tsx server/services/contactIdentityService.test.ts && npx tsx server/routes/wechatCustomerAutomationRoutes.test.ts && npx tsx server/services/authService.test.ts && npx tsx server/services/customerAccessPolicy.test.ts && npx tsx server/services/customerListService.test.ts && npx tsx server/services/wechatAutomationSecurity.test.ts && npx tsx server/storageRoutesAuth.test.ts` — GREEN: all focused service, contact identity, route, authorization, access-policy, customer-list, security, and storage-route tests passed.
+- `npx tsc -b --pretty false` and `git diff --check` — GREEN: both passed without diagnostics.
+- `npm test` — GREEN: full suite passed; only the existing live-database verification was skipped because `DATABASE_URL` is not set.
+
+### Self-review
+
+- Provenance no longer depends on union ordering or the first readable customer; every supplied contact is checked independently.
+- The provenance helper returns only a boolean and never exposes/logs raw normalized identities, hashes, or linked customer IDs.
+- Visibility remains a separate fresh policy check against the exact original customer record.
+- Dynamic `needs_input` messages remain useful for check responses, while create stale-precheck diagnostics are fixed and PII-free.
+- No MCP, schema, migration, session, logging, or permission-scope changes were introduced.
