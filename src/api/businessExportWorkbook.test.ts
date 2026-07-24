@@ -22,6 +22,8 @@ const result: BusinessExportResult = {
   summaryRows: [
     { orderNo: 'ORD-2', amount: 20, paidAt: '2026-07-24T02:00:00.000Z', remark: '=HYPERLINK("https://invalid")' },
     { orderNo: 'ORD-1', amount: 10, paidAt: '2026-07-23T02:00:00.000Z', remark: '+SUM(1,1)' },
+    { orderNo: 'ORD-LF', amount: 1, paidAt: '2026-07-22T02:00:00.000Z', remark: '\n=1+1' },
+    { orderNo: 'ORD-CRLF', amount: 1, paidAt: '2026-07-21T02:00:00.000Z', remark: '\r\n@SUM(1,1)' },
   ],
   detailRows: [
     { orderNo: 'ORD-2', sequence: 1, amount: 8, voucherCount: 2, voucherNames: 'a.png；b.png' },
@@ -30,7 +32,7 @@ const result: BusinessExportResult = {
   audit: {
     module: 'orders',
     reason: '财务核对',
-    summaryRowCount: 2,
+    summaryRowCount: 4,
     detailRowCount: 2,
     createdAt: '2026-07-24T03:00:00.000Z',
   },
@@ -47,13 +49,15 @@ const summary = workbook.getWorksheet('订单汇总')!;
 assert.deepEqual(rowValues(summary.getRow(1)), ['订单号', '实付金额', '付款时间', '备注']);
 assert.equal(summary.views[0]?.state, 'frozen');
 assert.equal(summary.views[0]?.ySplit, 1);
-assert.deepEqual(summary.autoFilter, 'A1:D3');
+assert.deepEqual(summary.autoFilter, 'A1:D5');
 assert.equal(summary.getCell('B2').value, 20);
 assert.match(summary.getCell('B2').numFmt, /#,/);
 assert.ok(summary.getCell('C2').value instanceof Date);
 assert.equal(summary.getCell('C2').numFmt, 'yyyy-mm-dd hh:mm:ss');
 assert.equal(summary.getCell('D2').value, "'=HYPERLINK(\"https://invalid\")");
 assert.equal(summary.getCell('D3').value, "'+SUM(1,1)");
+assert.equal(summary.getCell('D4').value, "'\n=1+1");
+assert.equal(summary.getCell('D5').value, "'\n@SUM(1,1)", 'ExcelJS 会将 CRLF 规范化为 LF，但必须保留安全前缀');
 
 const detail = workbook.getWorksheet('付款明细')!;
 assert.equal(detail.rowCount, 3, '多笔付款应逐笔展开');

@@ -8,7 +8,7 @@ type WindowWithExcelJs = Window & { ExcelJS?: ExcelJsNamespace };
 const WORKBOOK_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const DATE_FORMAT = 'yyyy-mm-dd hh:mm:ss';
 const CURRENCY_FORMAT = '¥#,##0.00;[Red]-¥#,##0.00';
-const FORMULA_PREFIX = /^[\t\r ]*[=+\-@]/;
+const FORMULA_PREFIX = /^\s*[=+\-@]/u;
 
 let browserExcelJsPromise: Promise<ExcelJsNamespace> | null = null;
 
