@@ -34,7 +34,9 @@
     "test-data:reset-business": "tsx scripts/reset-business-test-data.ts",
     "mcp:openclaw:test": "tsx integrations/openclaw-jixiangos/src/client.test.ts && tsx integrations/openclaw-jixiangos/src/index.test.ts",
     "mcp:openclaw:typecheck": "tsc -p integrations/openclaw-jixiangos/tsconfig.json",
-    "mcp:openclaw:start": "tsx integrations/openclaw-jixiangos/src/index.ts"
+    "mcp:openclaw:start": "tsx integrations/openclaw-jixiangos/src/index.ts",
+    "wechat:automation:static": "tsx integrations/openclaw-jixiangos/openclaw/openclawConfig.test.ts && tsx scripts/verify-wechat-customer-automation.test.ts",
+    "wechat:automation:verify": "tsx scripts/verify-wechat-customer-automation.ts"
   },
   "overrides": {
     "effect": "3.21.0"
