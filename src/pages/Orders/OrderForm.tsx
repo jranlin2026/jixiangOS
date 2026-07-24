@@ -8,6 +8,7 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
+  Divider,
   MenuItem,
   TextField,
   Typography,
@@ -162,6 +163,17 @@ function getCustomerOptionLabel(customer: Customer): string {
     customer.company,
     customer.phone,
   ].filter(Boolean))).join(' · ');
+}
+
+function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <Box component="section">
+      <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1.5 }}>{title}</Typography>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
+        {children}
+      </Box>
+    </Box>
+  );
 }
 
 const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, application, customer }) => {
@@ -683,7 +695,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
             sx={{ mb: 2 }}
           />
         )}
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
+        <Box sx={{ mt: 1 }}>
+        <FormSection title="客户资料">
           {customerLocked ? (
             <TextField
               label="客户"
@@ -726,6 +739,25 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               )}
             />
           )}
+          <TextField select label="资源归属" value={form.resourceOwnership} onChange={handleChange('resourceOwnership')} fullWidth disabled={formalFieldLocked || (!order && !!form.customerId)}>
+            {RESOURCE_OWNERSHIPS.map((item) => (
+              <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
+            ))}
+          </TextField>
+          <TextField label="线索录入人" value={form.leadInputBy || '-'} fullWidth InputProps={{ readOnly: true }} />
+          <TextField label="线索贡献人" value={form.leadContributorName || '-'} fullWidth InputProps={{ readOnly: true }} />
+          <TextField select label="销售负责人" value={form.salesId} onChange={handleOwnerChange} fullWidth disabled={formalFieldLocked}>
+            {form.owner && !users.some((user) => user.id === form.salesId) && (
+              <MenuItem value={form.salesId}>{form.owner}（历史负责人）</MenuItem>
+            )}
+            {users.map((user) => (
+              <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>
+            ))}
+          </TextField>
+        </FormSection>
+
+        <Divider sx={{ my: 2.5 }} />
+        <FormSection title="订单资料">
           <TextField select label="产品名称" value={form.productId} onChange={handleChange('productId')} fullWidth disabled={formalFieldLocked}>
             {productOptions.map((product) => (
               <MenuItem key={product.id} value={product.id}>
@@ -741,18 +773,16 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>
             ))}
           </TextField>
+          <TextField label="第三方平台订单" value={form.thirdPartyOrderNo} onChange={handleChange('thirdPartyOrderNo')} placeholder="填写第三方平台订单号或订单ID" fullWidth />
+        </FormSection>
+
+        <Divider sx={{ my: 2.5 }} />
+        <FormSection title="付款资料">
           <TextField select label="官方收款渠道" value={form.officialPaymentChannel} onChange={handleChange('officialPaymentChannel')} fullWidth>
             {OFFICIAL_PAYMENT_CHANNELS.map((item) => (
               <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
             ))}
           </TextField>
-          <TextField select label="资源归属" value={form.resourceOwnership} onChange={handleChange('resourceOwnership')} fullWidth disabled={formalFieldLocked || (!order && !!form.customerId)}>
-            {RESOURCE_OWNERSHIPS.map((item) => (
-              <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
-            ))}
-          </TextField>
-          <TextField label="线索录入人" value={form.leadInputBy || '-'} fullWidth InputProps={{ readOnly: true }} />
-          <TextField label="线索贡献人" value={form.leadContributorName || '-'} fullWidth InputProps={{ readOnly: true }} />
           <TextField label="实付金额" type="number" value={form.actualAmount} onChange={handleChange('actualAmount')} fullWidth disabled={formalFieldLocked} />
           <TextField label="付款时间" type="datetime-local" value={form.paymentDate} onChange={handleChange('paymentDate')} fullWidth InputLabelProps={{ shrink: true }} inputProps={{ step: 1 }} disabled={formalFieldLocked} />
           <TextField label="付款订单号" value={form.paymentOrderNo} onChange={handleChange('paymentOrderNo')} placeholder="上传截图识别后自动填写" fullWidth disabled={formalFieldLocked} />
@@ -792,6 +822,10 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               </Typography>
             )}
           </Box>
+        </FormSection>
+
+        <Divider sx={{ my: 2.5 }} />
+        <FormSection title="成交资料">
           <Box sx={{ gridColumn: '1 / -1' }}>
             <BusinessAttachmentPicker
               title="成交路径 / 聊天记录"
@@ -812,16 +846,12 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
               </Alert>
             )}
           </Box>
-          <TextField select label="销售负责人" value={form.salesId} onChange={handleOwnerChange} fullWidth disabled={formalFieldLocked}>
-            {form.owner && !users.some((user) => user.id === form.salesId) && (
-              <MenuItem value={form.salesId}>{form.owner}（历史负责人）</MenuItem>
-            )}
-            {users.map((user) => (
-              <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>
-            ))}
-          </TextField>
-          <TextField label="第三方平台订单" value={form.thirdPartyOrderNo} onChange={handleChange('thirdPartyOrderNo')} placeholder="填写第三方平台订单号或订单ID" fullWidth />
-          <TextField label="备注" value={form.notes} onChange={handleChange('notes')} fullWidth sx={{ gridColumn: '1 / -1' }} />
+        </FormSection>
+
+        <Divider sx={{ my: 2.5 }} />
+        <FormSection title="补充资料">
+          <TextField label="备注" value={form.notes} onChange={handleChange('notes')} fullWidth multiline minRows={2} sx={{ gridColumn: '1 / -1' }} />
+        </FormSection>
         </Box>
       </DialogContent>
       <DialogActions>

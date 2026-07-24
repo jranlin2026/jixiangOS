@@ -67,7 +67,7 @@ const recoverySettlementSource = readFileSync(join(projectRoot, 'src/pages/Finan
 const serviceTicketSource = readFileSync(join(projectRoot, 'src/pages/RefundCenter/ServiceTicketTab.tsx'), 'utf8');
 const employeeDepartmentSource = readFileSync(join(projectRoot, 'src/pages/Settings/EmployeeDepartmentManagement.tsx'), 'utf8');
 
-assert.match(orderDetailSource, />订单创建人</, '订单详情应展示订单创建人');
+assert.match(orderDetailSource, /label="订单创建人"/, '订单详情应展示订单创建人');
 assert.match(ordersPageSource, /id: 'createdByName', label: '订单创建人'/, '订单列表视图设置应包含订单创建人');
 assert.match(commissionSource, /id: 'createdByName', label: '订单创建人'/, '订单分账视图设置应包含订单创建人');
 assert.match(recoveryOrderSource, /id: 'createdByName', label: '订单创建人'/, '售后挽回订单视图设置应包含订单创建人');

@@ -53,3 +53,11 @@ assert.match(
   /正式订单当前第三方平台订单/,
   '审核资料必须在正式订单修改后提示当前值',
 );
+
+for (const section of ['客户资料', '订单资料', '付款资料', '成交资料', '补充资料']) {
+  assert.match(orderFormSource, new RegExp(`title="${section}"`), `订单填写页应包含“${section}”分区`);
+}
+
+for (const section of ['客户资料', '订单资料', '付款资料', '成交资料', '记录资料']) {
+  assert.match(orderDetailSource, new RegExp(`title="${section}"`), `订单资料页应包含“${section}”分区`);
+}
