@@ -79,6 +79,9 @@ import { moduleRadius, moduleTablePaperSx, moduleTokens } from '../../shared/com
 import { getActiveCommissions } from '../../shared/utils/financeSettlementPresentation';
 import BusinessExportDialog, { type BusinessExportDialogRequest } from '../../shared/components/BusinessExportDialog';
 import { buildBusinessExportBrowserRequest, unwrapBusinessExportResponse } from '../../shared/utils/businessExportPageRequest';
+import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
+import BusinessAttachmentLinks from '../../shared/components/BusinessAttachmentLinks';
+import { getOrderSettlementEvidenceStatus, getOrderSettlementRisks } from '../../shared/utils/orderSettlementPresentation';
 
 const ORDER_STATUS_OPTIONS: Array<{ value: CommissionOrderSummaryStatus | '全部'; label: string; important?: boolean }> = [
   { value: '全部', label: '全部' },
@@ -354,6 +357,148 @@ type PayoutConfirmAction =
   | { type: 'payOwner'; ownerId: string; title: string; message: string; confirmText: string }
   | { type: 'payBatch'; title: string; message: string; confirmText: string };
 
+function SettlementCompactDetailItem({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '96px minmax(0, 1fr)', sm: '112px minmax(0, 1fr)' }, gap: 1, py: 0.55, minWidth: 0 }}>
+      <Typography variant="caption" sx={{ color: '#64748b', lineHeight: 1.6 }}>{label}</Typography>
+      <Box sx={{ color: '#0f172a', fontSize: 14, fontWeight: 700, lineHeight: 1.6, minWidth: 0, overflowWrap: 'anywhere' }}>
+        {children}
+      </Box>
+    </Box>
+  );
+}
+
+function OrderPaymentEvidence({ order }: { order: Order }) {
+  if (!order.payments.length) return <Typography variant="body2" sx={{ color: '#94a3b8' }}>暂无付款记录</Typography>;
+  return (
+    <Stack spacing={0.75}>
+      {order.payments.map((payment, index) => (
+        <Box
+          key={payment.id || `${payment.paidAt}-${index}`}
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', sm: '130px 110px minmax(120px, 1fr) minmax(150px, 1.2fr)' },
+            gap: 1,
+            alignItems: 'center',
+            px: 1,
+            py: 0.8,
+            border: '1px solid #e5e7eb',
+            borderRadius: 1,
+            bgcolor: '#f8fafc',
+          }}
+        >
+          <Typography variant="caption" sx={{ color: '#475569' }}>{payment.paidAt ? formatDate(payment.paidAt, 'yyyy-MM-dd HH:mm') : '-'}</Typography>
+          <Typography variant="body2" sx={{ color: '#0f172a', fontWeight: 900 }}>{formatCurrency(payment.amount)}</Typography>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="caption" sx={{ display: 'block', color: '#475569' }}>
+              {payment.paymentMethod || (payment as typeof payment & { method?: string }).method || '-'}
+            </Typography>
+            <Typography variant="caption" sx={{ display: 'block', color: '#64748b', overflowWrap: 'anywhere' }}>
+              {payment.paymentOrderNo || '-'}
+            </Typography>
+          </Box>
+          <Box sx={{ minWidth: 0 }}>
+            {payment.attachments?.length
+              ? <BusinessAttachmentLinks attachments={payment.attachments} />
+              : <AttachmentPreviewLink title="付款凭证" fileName={payment.voucherName} src={payment.voucherPreview} />}
+          </Box>
+        </Box>
+      ))}
+    </Stack>
+  );
+}
+
+function OrderSettlementBusinessPaymentSummary({
+  summary,
+  order,
+  loading,
+  formatPerson,
+  onViewCustomer,
+  onViewOrder,
+}: {
+  summary: CommissionOrderSummary;
+  order: Order | null;
+  loading: boolean;
+  formatPerson: (id?: string, name?: string) => string;
+  onViewCustomer: () => void;
+  onViewOrder: () => void;
+}) {
+  const paymentTotal = order?.payments.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0) || 0;
+  const sourceText = summary.leadSourceFull || summary.sourceType || '-';
+  return (
+    <Box
+      data-testid="order-settlement-business-payment-summary"
+      sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 1.5 }}
+    >
+      <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5, bgcolor: '#fff', minWidth: 0 }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
+          <Typography variant="subtitle2" sx={{ color: '#0f172a', fontWeight: 900 }}>源业务资料</Typography>
+          {!summary.sourceOrderDeleted && (
+            <Stack direction="row" spacing={0.5}>
+              <Button size="small" variant="text" onClick={onViewCustomer}>客户资料</Button>
+              <Button size="small" variant="text" onClick={onViewOrder}>订单资料</Button>
+            </Stack>
+          )}
+        </Stack>
+        {loading ? (
+          <Typography variant="body2" sx={{ color: '#64748b', py: 3 }}>正在加载正式订单资料...</Typography>
+        ) : (
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, columnGap: 2, rowGap: 0.1 }}>
+            <SettlementCompactDetailItem label="客户">{summary.customerName || '-'}</SettlementCompactDetailItem>
+            <SettlementCompactDetailItem label="正式订单号">{summary.orderNo || '-'}</SettlementCompactDetailItem>
+            <SettlementCompactDetailItem label="订单类型">{summary.orderType || '-'}</SettlementCompactDetailItem>
+            <SettlementCompactDetailItem label="产品">{summary.productName || order?.productName || summary.productLevel || '-'}</SettlementCompactDetailItem>
+            <SettlementCompactDetailItem label="产品等级">{summary.productLevel || '-'}</SettlementCompactDetailItem>
+            <SettlementCompactDetailItem label="第三方订单">{summary.thirdPartyOrderNo || '-'}</SettlementCompactDetailItem>
+            <SettlementCompactDetailItem label="资源归属">{summary.resourceOwnership || '-'}</SettlementCompactDetailItem>
+            <SettlementCompactDetailItem label="线索来源">{sourceText}</SettlementCompactDetailItem>
+            <SettlementCompactDetailItem label="销售负责人">{formatPerson(summary.salesId, summary.salesName || summary.salesOwner)}</SettlementCompactDetailItem>
+            <SettlementCompactDetailItem label="线索贡献人">
+              {summary.leadContributorName || summary.leadInputBy
+                ? formatPerson(undefined, summary.leadContributorName || summary.leadInputBy)
+                : '-'}
+            </SettlementCompactDetailItem>
+            <SettlementCompactDetailItem label="订单提交人">{formatPerson(summary.createdById, summary.createdByName)}</SettlementCompactDetailItem>
+            <SettlementCompactDetailItem label="订单创建时间">{summary.createdAt ? formatDate(summary.createdAt, 'yyyy-MM-dd HH:mm') : '-'}</SettlementCompactDetailItem>
+            <Box sx={{ gridColumn: { sm: '1 / -1' } }}>
+              <SettlementCompactDetailItem label="备注">{summary.notes || '-'}</SettlementCompactDetailItem>
+            </Box>
+          </Box>
+        )}
+      </Paper>
+
+      <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5, bgcolor: '#fff', minWidth: 0 }}>
+        <Typography variant="subtitle2" sx={{ color: '#0f172a', fontWeight: 900, mb: 0.5 }}>付款资料</Typography>
+        {loading ? (
+          <Typography variant="body2" sx={{ color: '#64748b', py: 3 }}>正在加载付款及凭证资料...</Typography>
+        ) : order ? (
+          <Stack spacing={1}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, columnGap: 2, rowGap: 0.1 }}>
+              <SettlementCompactDetailItem label="订单实付">{formatCurrency(order.actualAmount)}</SettlementCompactDetailItem>
+              <SettlementCompactDetailItem label="付款合计">{formatCurrency(paymentTotal)}</SettlementCompactDetailItem>
+              <SettlementCompactDetailItem label="收款渠道">{summary.officialPaymentChannel || order.officialPaymentChannel || '-'}</SettlementCompactDetailItem>
+              <SettlementCompactDetailItem label="付款笔数">{`${order.payments.length} 笔`}</SettlementCompactDetailItem>
+            </Box>
+            <Box>
+              <Typography variant="caption" sx={{ display: 'block', color: '#64748b', fontWeight: 700, mb: 0.5 }}>付款记录</Typography>
+              <OrderPaymentEvidence order={order} />
+            </Box>
+            <SettlementCompactDetailItem label="成交凭证">
+              {order.dealEvidenceAttachments?.length
+                ? <BusinessAttachmentLinks attachments={order.dealEvidenceAttachments} />
+                : <AttachmentPreviewLink title="成交路径 / 聊天记录" fileName={order.dealEvidenceName} src={order.dealEvidencePreview} />}
+            </SettlementCompactDetailItem>
+          </Stack>
+        ) : (
+          <Typography variant="body2" sx={{ color: '#64748b', py: 3 }}>
+            {summary.sourceOrderDeleted ? '源订单已删除，付款资料不可用。' : '未能加载付款资料，请关闭后重试。'}
+          </Typography>
+        )}
+      </Paper>
+    </Box>
+  );
+}
+
 const Commission: React.FC<CommissionProps> = ({
   embedded = false,
   initialTab = 0,
@@ -426,6 +571,8 @@ const Commission: React.FC<CommissionProps> = ({
   const [detailActionLoading, setDetailActionLoading] = useState(false);
   const [detailActionReason, setDetailActionReason] = useState('');
   const [orderDetail, setOrderDetail] = useState<Order | null>(null);
+  const [settlementOrderDetail, setSettlementOrderDetail] = useState<Order | null>(null);
+  const [settlementOrderLoading, setSettlementOrderLoading] = useState(false);
   const [operationLogs, setOperationLogs] = useState<CommissionOperationLog[]>([]);
   const [customerDetail, setCustomerDetail] = useState<Customer | null>(null);
 
@@ -928,6 +1075,13 @@ const Commission: React.FC<CommissionProps> = ({
     setDetailActionReason('');
   };
 
+  const closeSettlementDetail = () => {
+    setSummaryDetail(null);
+    setSettlementOrderDetail(null);
+    setSettlementOrderLoading(false);
+    resetSettlementDetailForms();
+  };
+
   const canAdjustSettlementSummary = (summary: CommissionOrderSummary) => (
     !summary.sourceOrderDeleted && !['已发放', '已撤回'].includes(summary.status)
   );
@@ -995,8 +1149,17 @@ const Commission: React.FC<CommissionProps> = ({
   const openSettlementDetail = async (summary: CommissionOrderSummary, options?: { edit?: boolean }) => {
     if (options?.edit && !canManageOrderSettlement) return;
     setSummaryDetail(summary);
+    setSettlementOrderDetail(null);
+    setSettlementOrderLoading(!summary.sourceOrderDeleted);
     resetSettlementDetailForms();
-    await loadOperationLogs(summary.orderId);
+    await Promise.all([
+      loadOperationLogs(summary.orderId),
+      summary.sourceOrderDeleted
+        ? Promise.resolve()
+        : orderApi.fetchOrderById(summary.orderId).then((res) => {
+          if (res.code === 0) setSettlementOrderDetail(res.data);
+        }).finally(() => setSettlementOrderLoading(false)),
+    ]);
     if (options?.edit && canAdjustSettlementSummary(summary)) {
       const res = await commissionApi.fetchCommissionsByOrder(summary.orderId);
       if (res.code !== 0) return;
@@ -1012,7 +1175,18 @@ const Commission: React.FC<CommissionProps> = ({
     if (res.code !== 0) return;
     const nextSummary = res.data.items.find((item) => item.orderId === orderId) || null;
     setSummaryDetail(nextSummary);
-    await loadOperationLogs(orderId);
+    setSettlementOrderLoading(Boolean(nextSummary && !nextSummary.sourceOrderDeleted));
+    await Promise.all([
+      loadOperationLogs(orderId),
+      nextSummary && !nextSummary.sourceOrderDeleted
+        ? orderApi.fetchOrderById(orderId).then((orderRes) => {
+          setSettlementOrderDetail(orderRes.code === 0 ? orderRes.data : null);
+        }).finally(() => setSettlementOrderLoading(false))
+        : Promise.resolve().then(() => {
+          setSettlementOrderDetail(null);
+          setSettlementOrderLoading(false);
+        }),
+    ]);
   };
 
   const renderSplitDetails = (summary: CommissionOrderSummary) => {
@@ -2105,7 +2279,8 @@ const Commission: React.FC<CommissionProps> = ({
   const renderSplitSummaryCard = (commission: Commission) => {
     const note = commission.calculationNote || commission.formulaText || '-';
     const performanceAmount = commission.performanceAmount || commission.orderAmount;
-    const planName = commission.payoutPlanName || '历史分账未记录方案';
+    const planName = commission.payoutPlanName
+      || (commission.commissionRuleId ? '历史记录未保存方案快照' : '未匹配提成方案');
     const planSummary = commission.payoutPlanName
       ? formatPayoutPlanValue({
         commissionType: commission.ruleCalculationType || 'fixed',
@@ -2114,7 +2289,7 @@ const Commission: React.FC<CommissionProps> = ({
           : commission.commissionAmount,
         tiers: commission.tierSnapshot?.tiers,
       })
-      : '旧数据未保存方案快照';
+      : (commission.commissionRuleId ? '-' : '需要财务核对规则和金额');
     const displayStatus = getCommissionDisplayStatus(commission);
     const statusColor = getCommissionStatusColor(displayStatus);
 
@@ -2183,8 +2358,63 @@ const Commission: React.FC<CommissionProps> = ({
               {note}
             </Typography>
           </Box>
+
+          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mt: 'auto' }}>
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="caption" sx={{ display: 'block', color: '#6b7280', mb: 0.25 }}>分账来源</Typography>
+              <Typography variant="caption" sx={{ color: '#374151', fontWeight: 700 }}>
+                {commission.isManualAdjusted ? '人工调整' : (commission.sourceType || (commission.commissionRuleId ? '系统规则' : '-'))}
+              </Typography>
+            </Box>
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="caption" sx={{ display: 'block', color: '#6b7280', mb: 0.25 }}>凭证状态</Typography>
+              <Typography variant="caption" sx={{ color: '#374151', fontWeight: 700 }}>
+                {commission.evidenceStatus || '-'}
+              </Typography>
+            </Box>
+          </Box>
         </Stack>
       </Box>
+    );
+  };
+
+  const renderOrderSettlementRisks = (summary: CommissionOrderSummary) => {
+    const risks = getOrderSettlementRisks(summary, settlementOrderDetail);
+    return (
+      <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
+        <Box sx={{ px: 1.5, py: 1, borderBottom: '1px solid #eef2f7', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+          <Typography variant="subtitle2" sx={{ color: '#0f172a', fontWeight: 900 }}>财务核对</Typography>
+          <Chip
+            size="small"
+            label={settlementOrderLoading ? '核对中' : (risks.length ? `${risks.length} 项需关注` : '核对通过')}
+            color={settlementOrderLoading ? 'default' : (risks.some((risk) => risk.severity === 'error') ? 'error' : risks.length ? 'warning' : 'success')}
+          />
+        </Box>
+        <Stack spacing={0.75} sx={{ p: 1.25 }}>
+          {settlementOrderLoading ? (
+            <Typography variant="body2" sx={{ color: '#64748b' }}>正在核对付款金额、凭证、退款状态和分账规则...</Typography>
+          ) : risks.length ? risks.map((risk, index) => (
+            <Box
+              key={`${risk.severity}-${index}-${risk.message}`}
+              sx={{
+                px: 1.25,
+                py: 0.85,
+                borderRadius: 1,
+                border: `1px solid ${risk.severity === 'error' ? '#fecaca' : '#fde68a'}`,
+                bgcolor: risk.severity === 'error' ? '#fef2f2' : '#fffbeb',
+              }}
+            >
+              <Typography variant="body2" sx={{ color: risk.severity === 'error' ? '#991b1b' : '#92400e', fontWeight: 700 }}>
+                {risk.message}
+              </Typography>
+            </Box>
+          )) : (
+            <Typography variant="body2" sx={{ color: '#047857', fontWeight: 700 }}>
+              订单金额、付款凭证、退款状态及分账规则核对通过。
+            </Typography>
+          )}
+        </Stack>
+      </Paper>
     );
   };
 
@@ -3169,8 +3399,8 @@ const Commission: React.FC<CommissionProps> = ({
         </DialogActions>
       </Dialog>
 
-      <Dialog open={Boolean(summaryDetail)} onClose={() => { setSummaryDetail(null); resetSettlementDetailForms(); }} maxWidth="xl" fullWidth>
-        <DialogCloseTitle onClose={() => { setSummaryDetail(null); resetSettlementDetailForms(); }}>订单分账处理</DialogCloseTitle>
+      <Dialog open={Boolean(summaryDetail)} onClose={closeSettlementDetail} maxWidth="xl" fullWidth>
+        <DialogCloseTitle onClose={closeSettlementDetail}>订单分账处理</DialogCloseTitle>
         <DialogContent dividers sx={{ bgcolor: '#f8fafc' }}>
           {summaryDetail && (
             <Stack spacing={1.5}>
@@ -3206,8 +3436,12 @@ const Commission: React.FC<CommissionProps> = ({
                   {[
                     { label: '实付金额', value: formatCurrency(summaryDetail.orderAmount), color: '#0f172a' },
                     { label: '分账总额', value: formatCurrency(summaryDetail.totalCommissionAmount), color: '#d97706' },
-                    { label: '提成角色', value: `${summaryDetail.commissions.length} 个`, color: '#2563eb' },
-                    { label: '已撤回', value: `${summaryDetail.exceptionCount} 条`, color: summaryDetail.exceptionCount ? '#64748b' : '#64748b' },
+                    { label: '提成角色', value: `${summaryDetail.splitSummary.length} 个`, color: '#2563eb' },
+                    {
+                      label: '凭证状态',
+                      value: settlementOrderLoading ? '加载中' : getOrderSettlementEvidenceStatus(summaryDetail, settlementOrderDetail),
+                      color: getOrderSettlementRisks(summaryDetail, settlementOrderDetail).length ? '#d97706' : '#059669',
+                    },
                   ].map((item) => (
                     <Box
                       key={item.label}
@@ -3224,6 +3458,17 @@ const Commission: React.FC<CommissionProps> = ({
                   ))}
                 </Box>
               </Paper>
+
+              <OrderSettlementBusinessPaymentSummary
+                summary={summaryDetail}
+                order={settlementOrderDetail}
+                loading={settlementOrderLoading}
+                formatPerson={formatOwnerDisplayName}
+                onViewCustomer={() => void viewCustomer(summaryDetail)}
+                onViewOrder={() => void viewOrder(summaryDetail)}
+              />
+
+              {renderOrderSettlementRisks(summaryDetail)}
 
               <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1fr) 360px' }, gap: 1.5, minHeight: '58vh' }}>
                 <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', minWidth: 0 }}>
@@ -3296,9 +3541,24 @@ const Commission: React.FC<CommissionProps> = ({
 
                   <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
                     <Box sx={{ px: 1.5, py: 1.1, borderBottom: '1px solid #eef2f7' }}>
-                      <Typography variant="subtitle2" sx={{ color: '#0f172a', fontWeight: 900 }}>操作历史</Typography>
+                      <Typography variant="subtitle2" sx={{ color: '#0f172a', fontWeight: 900 }}>处理记录</Typography>
                     </Box>
                     <Box sx={{ p: 1.5 }}>
+                      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mb: 1.5 }}>
+                        {[
+                          ['当前状态', summaryDetail.status],
+                          ['分账经办人', summaryDetail.settlementOperator || '-'],
+                          ['分账更新时间', summaryDetail.updatedAt ? formatDate(summaryDetail.updatedAt, 'yyyy-MM-dd HH:mm') : '-'],
+                          ['确认时间', summaryDetail.confirmedAt ? formatDate(summaryDetail.confirmedAt, 'yyyy-MM-dd HH:mm') : '-'],
+                          ['发放时间', summaryDetail.paidAt ? formatDate(summaryDetail.paidAt, 'yyyy-MM-dd HH:mm') : '-'],
+                          ['撤回原因', summaryDetail.withdrawReason || '-'],
+                        ].map(([label, value]) => (
+                          <Box key={label} sx={{ minWidth: 0 }}>
+                            <Typography variant="caption" sx={{ display: 'block', color: '#64748b' }}>{label}</Typography>
+                            <Typography variant="body2" sx={{ color: '#0f172a', fontWeight: 700, overflowWrap: 'anywhere' }}>{value}</Typography>
+                          </Box>
+                        ))}
+                      </Box>
                       {operationLogs.length === 0 ? (
                         <Typography variant="body2" sx={{ color: '#9ca3af' }}>暂无分账修改记录</Typography>
                       ) : (
