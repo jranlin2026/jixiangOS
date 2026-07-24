@@ -169,6 +169,9 @@ assert.deepEqual(
 );
 assert.equal(recoverySettlement.data?.summaryColumns.every((column) => !/^[A-Za-z]/.test(column.label)), true);
 const recoveryAllFields = await service.export({ module: 'recovery_settlements', reason: '全部字段值', columnMode: 'all', filters: { search: 'RCV-001', settlementStatus: '待发放' } }, actor);
+assert.equal(recoveryAllFields.data?.summaryColumns.find((column) => column.id === 'auditStatus')?.label, '审核状态');
+assert.equal(recoveryAllFields.data?.summaryRows[0]?.status, '待发放', 'status 必须保留分账状态');
+assert.equal(recoveryAllFields.data?.summaryRows[0]?.auditStatus, '已分账', 'auditStatus 必须投影挽回订单审核状态');
 assert.equal(recoveryAllFields.data?.summaryRows[0]?.attachmentNames, '挽回凭证.png');
 assert.equal(recoveryAllFields.data?.summaryRows[0]?.attachmentCount, 1);
 

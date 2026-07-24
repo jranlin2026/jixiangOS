@@ -70,6 +70,7 @@ const RECOVERY_SETTLEMENT_COLUMNS = [
 ];
 const RECOVERY_SETTLEMENT_ALL_COLUMNS = [
   ...RECOVERY_SETTLEMENT_COLUMNS,
+  col('auditStatus', '审核状态'),
   col('attachmentNames', '挽回凭证文件名'),
   col('attachmentCount', '挽回凭证数量', 'number'),
 ];
@@ -313,7 +314,7 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
             const attachments = getRecoveryEvidenceAttachments(order);
             const totalCommissionAmount = Math.round(activeSplits.reduce((sum, item) => sum + Number(item.commissionAmount || 0), 0) * 100) / 100;
             const performanceAmount = Math.max(0, ...activeSplits.map((item) => Number(item.performanceAmount || 0)));
-            return project({ recoveryNo: order.recoveryNo, status: recoveryStatus(order), customerName: order.customerName, thirdPartyOrderNo: order.thirdPartyOrderNo,
+            return project({ recoveryNo: order.recoveryNo, status: recoveryStatus(order), auditStatus: order.status, customerName: order.customerName, thirdPartyOrderNo: order.thirdPartyOrderNo,
               sourcePlatformShop: [order.sourcePlatformName || order.sourcePlatform, order.sourceShopName].filter(Boolean).join(' / '),
               originalProduct: order.originalProduct, originalProductLevel: order.originalProductLevel, originalAmount: order.originalAmount, recoveryAmount: order.recoveryAmount,
               officialPaymentChannel: order.officialPaymentChannel, paymentAt: order.paymentAt, recoveryUserName: order.recoveryUserName, createdByName: order.createdByName,
