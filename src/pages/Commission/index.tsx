@@ -445,7 +445,6 @@ function OrderSettlementBusinessPaymentSummary({
         ) : (
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, columnGap: 2, rowGap: 0.1 }}>
             <SettlementCompactDetailItem label="客户">{summary.customerName || '-'}</SettlementCompactDetailItem>
-            <SettlementCompactDetailItem label="正式订单号">{summary.orderNo || '-'}</SettlementCompactDetailItem>
             <SettlementCompactDetailItem label="订单类型">{summary.orderType || '-'}</SettlementCompactDetailItem>
             <SettlementCompactDetailItem label="产品">{summary.productName || order?.productName || summary.productLevel || '-'}</SettlementCompactDetailItem>
             <SettlementCompactDetailItem label="产品等级">{summary.productLevel || '-'}</SettlementCompactDetailItem>
