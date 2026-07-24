@@ -66,6 +66,9 @@ import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { ModuleHeader, ModulePage, ModuleTabs, ModuleToolbar, moduleTablePaperSx } from '../../shared/components/ModuleShell';
 import BusinessExportDialog, { type BusinessExportDialogRequest } from '../../shared/components/BusinessExportDialog';
 import { buildBusinessExportBrowserRequest, unwrapBusinessExportResponse } from '../../shared/utils/businessExportPageRequest';
+import BusinessImportDialog from '../../shared/components/BusinessImportDialog';
+import type { BusinessImportJobResult } from '../../types/businessImport';
+import BusinessImportEntryButton from '../../shared/components/BusinessImportEntryButton';
 
 type OrderColumn = {
   id: string;
@@ -206,6 +209,7 @@ const Orders: React.FC = () => {
     ? requestedTab
     : visibleTabs[0]?.value || false;
   const orderIdParam = searchParams.get('orderId');
+  const importBatchId = searchParams.get('importBatchId') || '';
   const [detailOpen, setDetailOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -222,10 +226,25 @@ const Orders: React.FC = () => {
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const [reviewViewSettingsOpen, setReviewViewSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [reviewRefreshSignal, setReviewRefreshSignal] = useState(0);
   const [viewConfig, setViewConfig] = useState<OrderViewConfig>(readOrderViewConfig);
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(ORDER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
   const [orderLookupMessage, setOrderLookupMessage] = useState('');
   const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
+
+  const navigateToImportedOrderReview = (job: BusinessImportJobResult) => {
+    if (!job.batchId) return;
+    if (!hasPermission(currentUser, PERMISSION_KEYS.ORDER_REVIEW_LIST)) {
+      setOrderLookupMessage(`导入任务已创建：${job.id}；当前账号无订单审核台查看权限。`);
+      return;
+    }
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('tab', 'review');
+    nextParams.set('importBatchId', job.batchId);
+    nextParams.delete('orderId');
+    setSearchParams(nextParams, { replace: true });
+  };
 
   useEffect(() => {
     productApi.getProductLevelConfigs().then((res) => {
@@ -622,6 +641,12 @@ const Orders: React.FC = () => {
               导出订单
             </Button>
           )}
+          <BusinessImportEntryButton
+            type="orders"
+            active={activeTab === 'list'}
+            user={currentUser}
+            onClick={() => setImportOpen(true)}
+          />
           {activeTab === 'review' && (
             <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setReviewViewSettingsOpen(true)}>
               视图设置
@@ -814,6 +839,13 @@ const Orders: React.FC = () => {
       ) : activeTab === 'review' ? (
         <OrderReview
           embedded
+          importBatchId={importBatchId}
+          refreshSignal={reviewRefreshSignal}
+          onImportBatchClear={() => {
+            const nextParams = new URLSearchParams(searchParams);
+            nextParams.delete('importBatchId');
+            setSearchParams(nextParams, { replace: true });
+          }}
           viewSettingsOpen={reviewViewSettingsOpen}
           onViewSettingsClose={() => setReviewViewSettingsOpen(false)}
         />
@@ -893,6 +925,16 @@ const Orders: React.FC = () => {
         currentColumnCount={visibleColumns.length}
         onClose={() => setExportOpen(false)}
         onRequestExport={handleExportOrders}
+      />
+      <BusinessImportDialog
+        open={importOpen}
+        type="orders"
+        onClose={() => setImportOpen(false)}
+        onQueued={navigateToImportedOrderReview}
+        onCompleted={(job) => {
+          navigateToImportedOrderReview(job);
+          setReviewRefreshSignal((value) => value + 1);
+        }}
       />
 
       <Dialog open={customerOrdersOpen} onClose={() => setCustomerOrdersOpen(false)} maxWidth="md" fullWidth>

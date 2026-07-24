@@ -3,6 +3,8 @@ import type { ApiResponse } from './types';
 import type {
   BusinessImportJobResult,
   BusinessImportPrecheckResult,
+  BusinessImportReviewRequest,
+  BusinessImportReviewResult,
   BusinessImportRow,
   BusinessImportTemplateOptions,
   BusinessImportType,
@@ -35,5 +37,11 @@ export const businessImportApi = {
   },
   job(id: string, signal?: AbortSignal): Promise<ApiResponse<BusinessImportJobResult>> {
     return backendRequest(`${ROOT}/jobs/${encodeURIComponent(id)}`, { signal });
+  },
+  review(request: BusinessImportReviewRequest): Promise<ApiResponse<BusinessImportReviewResult>> {
+    return backendRequest(`${ROOT}/reviews`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
   },
 };

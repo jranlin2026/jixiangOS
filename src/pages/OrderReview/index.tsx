@@ -3,6 +3,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   Dialog,
   DialogActions,
@@ -33,7 +34,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { canReviewOrderApplications, customerApi, orderApi, orderReviewApi, ORDER_APPLICATION_STATUSES } from '../../api';
+import { customerApi, orderApi, orderReviewApi, ORDER_APPLICATION_STATUSES } from '../../api';
 import type { Order, OrderApplication, OrderApplicationFilters, OrderApplicationStatus } from '../../types/order';
 import type { Customer } from '../../types/customer';
 import type { Role } from '../../types/role';
@@ -44,7 +45,7 @@ import CustomerDetail from '../Customers/CustomerDetail';
 import OrderForm from '../Orders/OrderForm';
 import { getProductLevelRowSx, getProductLevelTagSx, normalizeResourceOwnership, ROUTES, STORAGE_KEYS } from '../../shared/utils/constants';
 import { getCurrentOperatorUser } from '../../shared/utils/currentOperator';
-import { isSuperAdminUser } from '../../shared/utils/permissions';
+import { hasPermission, isSuperAdminUser, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { getStorageData } from '../../api/mock/storage';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
@@ -55,6 +56,13 @@ import {
   getOrderApplicationReviewStatuses,
   type ReviewQueueView,
 } from '../../shared/utils/reviewQueue';
+import BusinessImportReviewControls from '../../shared/components/BusinessImportReviewControls';
+import {
+  isImportedPendingReviewRecord,
+  toggleImportedReviewId,
+  type BusinessImportReviewSelection,
+} from '../../shared/utils/businessImportReviewModel';
+import useAuthStore from '../../store/useAuthStore';
 
 type ReviewAction = {
   type: 'approve' | 'return' | 'reject';
@@ -63,6 +71,9 @@ type ReviewAction = {
 
 type OrderReviewProps = {
   embedded?: boolean;
+  importBatchId?: string;
+  refreshSignal?: number;
+  onImportBatchClear?: () => void;
   viewSettingsOpen?: boolean;
   onViewSettingsClose?: () => void;
 };
@@ -104,6 +115,10 @@ const REVIEW_COLUMNS: ReviewColumn[] = [
   { id: 'reviewedAt', label: '审核时间' },
   { id: 'reason', label: '退回/驳回原因' },
   { id: 'notes', label: '备注' },
+  { id: 'importBatchId', label: '导入批次' },
+  { id: 'importRowNumber', label: 'Excel 行号' },
+  { id: 'importedByName', label: '导入人' },
+  { id: 'importedAt', label: '导入时间' },
 ];
 
 const REVIEW_DEFAULT_VISIBLE_COLUMNS = [
@@ -142,6 +157,10 @@ const REVIEW_COLUMN_WIDTHS: Record<string, number> = {
   reviewedAt: 160,
   reason: 180,
   notes: 220,
+  importBatchId: 220,
+  importRowNumber: 110,
+  importedByName: 140,
+  importedAt: 180,
 };
 
 const getDefaultReviewViewConfig = (): ReviewViewConfig => ({
@@ -232,11 +251,19 @@ function SnapshotSection({ title, children }: { title: string; children: React.R
   );
 }
 
-const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSettingsOpen = false, onViewSettingsClose }) => {
+const OrderReview: React.FC<OrderReviewProps> = ({
+  embedded = false,
+  importBatchId = '',
+  refreshSignal = 0,
+  onImportBatchClear,
+  viewSettingsOpen = false,
+  onViewSettingsClose,
+}) => {
   const [items, setItems] = useState<OrderApplication[]>([]);
   const [reviewQueueView, setReviewQueueView] = useState<ReviewQueueView>('pending');
   const [filters, setFilters] = useState<OrderApplicationFilters>({
     statuses: getOrderApplicationReviewStatuses('pending'),
+    importBatchId: importBatchId || undefined,
     page: 1,
     pageSize: 10,
   });
@@ -254,8 +281,10 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
   const [cleanupApplication, setCleanupApplication] = useState<OrderApplication | null>(null);
   const [cleanupReason, setCleanupReason] = useState('');
   const [cleanupSubmitting, setCleanupSubmitting] = useState(false);
-  const reviewer = useMemo(() => canReviewOrderApplications(), []);
-  const currentUser = useMemo(() => getCurrentOperatorUser(), []);
+  const [importSelection, setImportSelection] = useState<BusinessImportReviewSelection>({ mode: 'ids', ids: [] });
+  const currentAuthUser = useAuthStore((state) => state.currentUser);
+  const reviewer = hasPermission(currentAuthUser, PERMISSION_KEYS.ORDER_REVIEW, 'write');
+  const currentUser = currentAuthUser || getCurrentOperatorUser();
   const canCleanupReview = Boolean(currentUser && isSuperAdminUser(
     currentUser,
     getStorageData<Role[]>(STORAGE_KEYS.ROLES) || [],
@@ -277,9 +306,16 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
   };
 
   useEffect(() => {
-    loadItems();
+    const nextFilters: OrderApplicationFilters = {
+      ...filters,
+      importBatchId: importBatchId || undefined,
+      page: 1,
+    };
+    setFilters(nextFilters);
+    setImportSelection({ mode: 'ids', ids: [] });
+    void loadItems(nextFilters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [importBatchId, refreshSignal]);
 
   useEffect(() => {
     localStorage.setItem(REVIEW_VIEW_STORAGE_KEY, JSON.stringify(viewConfig));
@@ -288,6 +324,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
   const handleFilterChange = (key: keyof OrderApplicationFilters, value: string) => {
     const nextFilters = { ...filters, [key]: value || undefined, page: 1, pageSize: pagination.pageSize };
     setFilters(nextFilters);
+    setImportSelection({ mode: 'ids', ids: [] });
     loadItems(nextFilters);
   };
 
@@ -301,6 +338,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
     };
     setReviewQueueView(view);
     setFilters(nextFilters);
+    setImportSelection({ mode: 'ids', ids: [] });
     loadItems(nextFilters);
   };
 
@@ -632,6 +670,14 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
             <Typography variant="body2" noWrap>{application.orderData.notes || '-'}</Typography>
           </Tooltip>
         );
+      case 'importBatchId':
+        return application.importBatchId || '-';
+      case 'importRowNumber':
+        return application.importRowNumber || '-';
+      case 'importedByName':
+        return application.importedByName || '-';
+      case 'importedAt':
+        return formatDate(application.importedAt);
       default:
         return null;
     }
@@ -675,12 +721,60 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
             ))}
           </Select>
         </FormControl>
+        <TextField
+          size="small"
+          label="导入批次"
+          placeholder="按导入批次筛选"
+          value={filters.importBatchId || ''}
+          onChange={(event) => {
+            handleFilterChange('importBatchId', event.target.value);
+            if (!event.target.value) onImportBatchClear?.();
+          }}
+          sx={{ minWidth: 260 }}
+        />
       </Box>
+
+      {reviewer ? (
+        <Box sx={{ mb: 2 }}>
+          <BusinessImportReviewControls
+            module="orders"
+            importBatchId={filters.importBatchId || ''}
+            selection={importSelection}
+            canReview={reviewer}
+            onSelectionChange={setImportSelection}
+            onRefresh={() => loadItems()}
+          />
+        </Box>
+      ) : null}
 
       <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
         <Table sx={{ tableLayout: 'fixed', minWidth: tableMinWidth }}>
           <TableHead>
             <TableRow>
+              <TableCell padding="checkbox">
+                <Checkbox
+                  aria-label="选择当前页导入待审记录"
+                  disabled={importSelection.mode === 'batch' || !items.some((item) => isImportedPendingReviewRecord(item, 'orders'))}
+                  checked={importSelection.mode === 'ids'
+                    && items.some((item) => isImportedPendingReviewRecord(item, 'orders'))
+                    && items.filter((item) => isImportedPendingReviewRecord(item, 'orders'))
+                      .every((item) => importSelection.ids.includes(item.id))}
+                  indeterminate={importSelection.mode === 'ids'
+                    && items.some((item) => isImportedPendingReviewRecord(item, 'orders') && importSelection.ids.includes(item.id))
+                    && !items.filter((item) => isImportedPendingReviewRecord(item, 'orders'))
+                      .every((item) => importSelection.ids.includes(item.id))}
+                  onChange={(event) => {
+                    const pageIds = items.filter((item) => isImportedPendingReviewRecord(item, 'orders')).map((item) => item.id);
+                    const currentIds = importSelection.mode === 'ids' ? importSelection.ids : [];
+                    setImportSelection({
+                      mode: 'ids',
+                      ids: event.target.checked
+                        ? Array.from(new Set([...currentIds, ...pageIds]))
+                        : currentIds.filter((id) => !pageIds.includes(id)),
+                    });
+                  }}
+                />
+              </TableCell>
               {visibleColumns.map((column, columnIndex) => (
                 <TableCell
                   key={column.id}
@@ -716,6 +810,19 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                     && Boolean(application.sourceOrderDeleted)));
               return (
                 <TableRow key={application.id} hover sx={getProductLevelRowSx(application.orderData.productLevel)}>
+                  <TableCell padding="checkbox">
+                    <Checkbox
+                      aria-label={`选择导入申请 ${application.applicationNo}`}
+                      disabled={!reviewer
+                        || importSelection.mode === 'batch'
+                        || !isImportedPendingReviewRecord(application, 'orders')}
+                      checked={importSelection.mode === 'batch'
+                        ? application.importBatchId === importSelection.importBatchId
+                          && isImportedPendingReviewRecord(application, 'orders')
+                        : importSelection.ids.includes(application.id)}
+                      onChange={() => setImportSelection((selection) => toggleImportedReviewId(selection, application.id))}
+                    />
+                  </TableCell>
                   {visibleColumns.map((column, columnIndex) => (
                     <TableCell
                       key={column.id}
@@ -781,7 +888,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
             })}
             {!items.length && (
               <TableRow>
-                <TableCell colSpan={visibleColumns.length + 1} align="center" sx={{ py: 5, color: '#9ca3af' }}>
+                <TableCell colSpan={visibleColumns.length + 2} align="center" sx={{ py: 5, color: '#9ca3af' }}>
                   {loading
                     ? '加载中...'
                     : reviewQueueView === 'pending'
@@ -1093,6 +1200,39 @@ const OrderReview: React.FC<OrderReviewProps> = ({ embedded = false, viewSetting
                     )}
                 </SnapshotField>
               </SnapshotSection>
+
+              {detailApplication.importBatchId ? (
+                <>
+                  <Divider sx={{ my: 2 }} />
+                  <SnapshotSection title="导入信息">
+                    <SnapshotField label="导入批次">{detailApplication.importBatchId}</SnapshotField>
+                    <SnapshotField label="Excel 行号">{detailApplication.importRowNumber || '-'}</SnapshotField>
+                    <SnapshotField label="导入人">{detailApplication.importedByName || '-'}</SnapshotField>
+                    <SnapshotField label="导入时间">{formatDate(detailApplication.importedAt, 'yyyy-MM-dd HH:mm:ss')}</SnapshotField>
+                    <SnapshotField label="目标订单创建人">{detailApplication.targetCreatorName || '-'}</SnapshotField>
+                    <SnapshotField label="客户匹配状态">已唯一匹配正式客户</SnapshotField>
+                    <SnapshotField label="凭证状态">
+                      {detailApplication.orderData.payments?.some((payment) => (
+                        Boolean(payment.attachments?.length || payment.voucherPreview)
+                      )) || Boolean(
+                        detailApplication.orderData.dealEvidenceAttachments?.length
+                        || detailApplication.orderData.dealEvidencePreview,
+                      ) ? '已上传凭证' : '凭证缺失'}
+                    </SnapshotField>
+                    <SnapshotField label="预检警告">
+                      {detailApplication.importWarnings?.length ? detailApplication.importWarnings.join('；') : '无'}
+                    </SnapshotField>
+                  </SnapshotSection>
+                  {!detailApplication.orderData.payments?.some((payment) => (
+                    Boolean(payment.attachments?.length || payment.voucherPreview)
+                  )) && !detailApplication.orderData.dealEvidenceAttachments?.length
+                    && !detailApplication.orderData.dealEvidencePreview ? (
+                    <Alert severity="warning" sx={{ mt: 2 }}>
+                      该导入订单缺少付款或成交凭证，请审核人核验后再通过。
+                    </Alert>
+                  ) : null}
+                </>
+              ) : null}
 
               <Divider sx={{ my: 2 }} />
               <SnapshotSection title="审核资料">

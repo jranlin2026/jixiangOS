@@ -773,6 +773,7 @@ app.get('/api/order-applications', requireOrderApplicationReadAccess, async (req
     reviewerName: queryParam(req.query.reviewerName),
     startDate: queryParam(req.query.startDate),
     endDate: queryParam(req.query.endDate),
+    importBatchId: queryParam(req.query.importBatchId),
     page: Number(queryParam(req.query.page)),
     pageSize: Number(queryParam(req.query.pageSize)),
   }, req.currentUser!);
@@ -1053,6 +1054,7 @@ app.get('/api/recovery-orders', requireStorageAccess, async (req: AuthenticatedR
     ownerId: queryParam(req.query.ownerId) || undefined,
     includeDeleted: queryParam(req.query.includeDeleted) === 'true',
     scopeDomain: queryParam(req.query.scopeDomain) as RecoveryOrderFilters['scopeDomain'] || undefined,
+    importBatchId: queryParam(req.query.importBatchId) || undefined,
     page: Number(queryParam(req.query.page)) || undefined,
     pageSize: Number(queryParam(req.query.pageSize)) || undefined,
   }, req.currentUser!);

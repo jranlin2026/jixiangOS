@@ -210,6 +210,7 @@ function matchesApplication(application: OrderApplication, filters: OrderApplica
   if (!filters.statuses?.length && filters.status && application.status !== filters.status) return false;
   if (filters.applicantName && application.applicantName !== filters.applicantName) return false;
   if (filters.reviewerName && application.reviewerName !== filters.reviewerName) return false;
+  if (filters.importBatchId && application.importBatchId !== filters.importBatchId) return false;
   return inDateRange(application.submittedAt || application.createdAt, filters.startDate, filters.endDate);
 }
 
@@ -272,6 +273,7 @@ async function queryApplicationPage(
   else if (filters.status) conditions.push(Prisma.sql`br.status = ${filters.status}`);
   conditions.push(...exactJson('br', '$.applicantName', filters.applicantName));
   conditions.push(...exactJson('br', '$.reviewerName', filters.reviewerName));
+  conditions.push(...exactJson('br', '$.importBatchId', filters.importBatchId));
   if (filters.startDate) conditions.push(Prisma.sql`COALESCE(${jsonText('br', '$.submittedAt')}, ${jsonText('br', '$.createdAt')}) >= ${filters.startDate}`);
   if (filters.endDate) conditions.push(Prisma.sql`COALESCE(${jsonText('br', '$.submittedAt')}, ${jsonText('br', '$.createdAt')}) <= ${/^\d{4}-\d{2}-\d{2}$/.test(filters.endDate) ? `${filters.endDate}T23:59:59.999Z` : filters.endDate}`);
   if (!scope.unrestricted) conditions.push(visibleJsonCondition(

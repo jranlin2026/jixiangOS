@@ -7,6 +7,9 @@ import RecoveryOrderTab from './RecoveryOrderTab';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import useAuthStore from '../../store/useAuthStore';
 import { ModuleHeader, ModulePage, ModuleTabs } from '../../shared/components/ModuleShell';
+import BusinessImportDialog from '../../shared/components/BusinessImportDialog';
+import type { BusinessImportJobResult } from '../../types/businessImport';
+import BusinessImportEntryButton from '../../shared/components/BusinessImportEntryButton';
 
 type AfterSalesTab = 'recovery-list' | 'recovery-review';
 
@@ -25,6 +28,8 @@ const AfterSales: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [createSignal, setCreateSignal] = React.useState(0);
   const [viewSettingsSignal, setViewSettingsSignal] = React.useState(0);
+  const [importOpen, setImportOpen] = React.useState(false);
+  const [reviewRefreshSignal, setReviewRefreshSignal] = React.useState(0);
   const requestedTab = getTab(searchParams.get('tab'));
   const canCreate = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE);
   const canSeeAllAfterSalesTabs = isSuperAdmin(currentUser);
@@ -39,7 +44,18 @@ const AfterSales: React.FC = () => {
   if (!visibleTabs.length) return <Navigate to="/no-permission" replace />;
 
   const handleTabChange = (_event: React.SyntheticEvent, value: AfterSalesTab) => {
-    setSearchParams({ tab: value });
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('tab', value);
+    if (value !== 'recovery-review') nextParams.delete('importBatchId');
+    setSearchParams(nextParams);
+  };
+
+  const navigateToImportedRecoveryReview = (job: BusinessImportJobResult) => {
+    if (!job.batchId || !hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST)) return;
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('tab', 'recovery-review');
+    nextParams.set('importBatchId', job.batchId);
+    setSearchParams(nextParams, { replace: true });
   };
 
   return (
@@ -57,6 +73,12 @@ const AfterSales: React.FC = () => {
               新建售后挽回订单
             </Button>
           )}
+          <BusinessImportEntryButton
+            type="recovery_orders"
+            active={activeTab === 'recovery-list'}
+            user={currentUser}
+            onClick={() => setImportOpen(true)}
+          />
           </>
         )}
       />
@@ -71,7 +93,29 @@ const AfterSales: React.FC = () => {
       </ModuleTabs>
 
       {activeTab === 'recovery-list' && <RecoveryOrderTab mode="list" createSignal={createSignal} viewSettingsSignal={viewSettingsSignal} />}
-      {activeTab === 'recovery-review' && <RecoveryOrderTab mode="review" viewSettingsSignal={viewSettingsSignal} />}
+      {activeTab === 'recovery-review' && (
+        <RecoveryOrderTab
+          mode="review"
+          importBatchId={searchParams.get('importBatchId') || ''}
+          refreshSignal={reviewRefreshSignal}
+          onImportBatchClear={() => {
+            const nextParams = new URLSearchParams(searchParams);
+            nextParams.delete('importBatchId');
+            setSearchParams(nextParams, { replace: true });
+          }}
+          viewSettingsSignal={viewSettingsSignal}
+        />
+      )}
+      <BusinessImportDialog
+        open={importOpen}
+        type="recovery_orders"
+        onClose={() => setImportOpen(false)}
+        onQueued={navigateToImportedRecoveryReview}
+        onCompleted={(job) => {
+          navigateToImportedRecoveryReview(job);
+          setReviewRefreshSignal((value) => value + 1);
+        }}
+      />
     </ModulePage>
   );
 };

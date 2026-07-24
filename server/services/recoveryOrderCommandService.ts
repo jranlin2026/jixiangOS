@@ -289,6 +289,7 @@ function matchesRecoveryOrder(order: RecoveryOrder, filters: RecoveryOrderFilter
   if (filters.settlementStatus && filters.settlementStatus !== '全部' && settlementStatus !== filters.settlementStatus) return false;
   if (filters.settlementStatuses?.length && !filters.settlementStatuses.includes(settlementStatus as any)) return false;
   if (filters.ownerId && ![order.createdBy, order.recoveryUserId, order.assistUserId].includes(filters.ownerId)) return false;
+  if (filters.importBatchId && order.importBatchId !== filters.importBatchId) return false;
   return true;
 }
 
@@ -331,6 +332,9 @@ function recoverySqlConditions(filters: RecoveryOrderFilters, scope: DataVisibil
   }
   if (filters.ownerId) {
     conditions.push(Prisma.sql`(${jsonText('br', '$.createdBy')} = ${filters.ownerId} OR ${jsonText('br', '$.recoveryUserId')} = ${filters.ownerId} OR ${jsonText('br', '$.assistUserId')} = ${filters.ownerId})`);
+  }
+  if (filters.importBatchId) {
+    conditions.push(Prisma.sql`${jsonText('br', '$.importBatchId')} = ${filters.importBatchId}`);
   }
   if (!scope.unrestricted) conditions.push(visibleJsonCondition(
     'br', ['$.createdBy'], ['$.createdByName'], scope.visibleUserIds, scope.visibleUserNames,

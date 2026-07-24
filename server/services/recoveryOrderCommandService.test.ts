@@ -93,6 +93,13 @@ const oldRecord: RecoveryOrder = {
   customerPhone: '13800000000',
   customerWechat: 'private-wechat',
   remark: 'finance list must not expose this note',
+  importBatchId: 'batch-visible',
+  importRowNumber: 2,
+  importedById: creator.id,
+  importedByName: creator.name,
+  importedAt: NOW,
+  targetCreatorId: other.id,
+  targetCreatorName: other.name,
 };
 const finance: AuthenticatedUser = {
   ...creator,
@@ -114,6 +121,8 @@ const outsideDepartmentRecord: RecoveryOrder = {
   recoveryUserName: creator.name,
   createdBy: outsideDepartmentCreator.id,
   createdByName: outsideDepartmentCreator.name,
+  importBatchId: 'batch-outside',
+  importRowNumber: 3,
 };
 
 const key = (domain: string, id: string) => `${domain}\u0000${id}`;
@@ -362,6 +371,16 @@ const reviewerList = await service.list({
   scopeDomain: 'recoveryOrderApplications', page: 1, pageSize: 20,
 }, reviewer);
 assert.equal(reviewerList.data?.pagination.total, 3, '审核台全部范围必须从数据库看到所有部门的待审核订单');
+assert.deepEqual(
+  (await service.list({
+    scopeDomain: 'recoveryOrderApplications',
+    importBatchId: 'batch-visible',
+    page: 1,
+    pageSize: 20,
+  }, reviewer)).data?.items.map((item) => item.id),
+  [oldRecord.id],
+  '售后审核台必须在服务端按导入批次筛选',
+);
 const listedOldRecord = reviewerList.data?.items.find((item) => item.id === oldRecord.id);
 assert.equal(listedOldRecord?.paymentVoucherPreview, undefined);
 assert.equal(listedOldRecord?.chatEvidencePreview, undefined);

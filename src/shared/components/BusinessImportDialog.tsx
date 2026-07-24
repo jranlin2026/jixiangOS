@@ -77,6 +77,7 @@ type Props = {
   open: boolean;
   type: BusinessImportType;
   onClose: () => void;
+  onQueued?: (job: BusinessImportJobResult) => void;
   onCompleted?: (job: BusinessImportJobResult) => void;
   tenantId?: string;
   storage?: BusinessImportStorage;
@@ -126,6 +127,7 @@ export default function BusinessImportDialog({
   open,
   type,
   onClose,
+  onQueued,
   onCompleted,
   tenantId,
   storage,
@@ -155,6 +157,8 @@ export default function BusinessImportDialog({
   const storedJobRef = useRef<StoredBusinessImportJob | null>(null);
   const onCompletedRef = useRef(onCompleted);
   onCompletedRef.current = onCompleted;
+  const onQueuedRef = useRef(onQueued);
+  onQueuedRef.current = onQueued;
   const [options, setOptions] = useState<BusinessImportTemplateOptions | null>(initialState?.options || null);
   const [file, setFile] = useState<File | null>(initialState?.file || null);
   const [rows, setRows] = useState<BusinessImportRow[]>(initialState?.rows || []);
@@ -320,6 +324,7 @@ export default function BusinessImportDialog({
         storedJobRef.current = { id: queued.id, completedNotified: false };
         setStorageWarning(warning);
       }
+      onQueuedRef.current?.(queued);
       setPage(0);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : `${copy.subject}导入任务提交失败`);
@@ -444,6 +449,9 @@ export default function BusinessImportDialog({
                     label={jobStatusLabel(job.status)}
                   />
                   <Typography variant="caption" color="text.secondary">{job.id}</Typography>
+                  {job.batchId ? (
+                    <Typography variant="caption" color="text.secondary">导入批次：{job.batchId}</Typography>
+                  ) : null}
                 </Stack>
                 <LinearProgress variant="determinate" value={isTerminalBusinessImportJob(job.status) ? 100 : progress} />
                 <Stack direction="row" spacing={1} flexWrap="wrap">

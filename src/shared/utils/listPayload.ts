@@ -37,6 +37,10 @@ export function compactOrderListItem(order: Order): Order {
 export function compactOrderApplicationListItem(application: OrderApplication): OrderApplication {
   return {
     ...application,
+    importedById: undefined,
+    targetCreatorId: undefined,
+    targetCreatorName: undefined,
+    importWarnings: undefined,
     orderData: compactOrderListItem(application.orderData as Order) as OrderApplication['orderData'],
   };
 }
@@ -44,6 +48,10 @@ export function compactOrderApplicationListItem(application: OrderApplication): 
 export function compactRecoveryOrderListItem(order: RecoveryOrder): RecoveryOrder {
   return {
     ...order,
+    importedById: undefined,
+    targetCreatorId: undefined,
+    targetCreatorName: undefined,
+    importWarnings: undefined,
     paymentVoucherPreview: withoutInlinePayload(order.paymentVoucherPreview),
     chatEvidencePreview: withoutInlinePayload(order.chatEvidencePreview),
     recoveryAttachments: order.recoveryAttachments?.map(compactBusinessAttachment),

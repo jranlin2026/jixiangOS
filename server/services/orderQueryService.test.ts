@@ -86,6 +86,13 @@ const records = [
 const applications = [
   {
     ...application('application-self', sales.id, sales.name),
+    importBatchId: 'batch-visible',
+    importRowNumber: 2,
+    importedById: sales.id,
+    importedByName: sales.name,
+    importedAt: now,
+    targetCreatorId: sales.id,
+    targetCreatorName: sales.name,
     orderData: {
       ...application('application-self', sales.id, sales.name).orderData,
       dealEvidencePreview: inlineProof,
@@ -93,7 +100,16 @@ const applications = [
     },
   },
   application('application-legacy-self', undefined, sales.name),
-  application('application-other', 'user-other', '销售B'),
+  {
+    ...application('application-other', 'user-other', '销售B'),
+    importBatchId: 'batch-visible',
+    importRowNumber: 3,
+    importedById: finance.id,
+    importedByName: finance.name,
+    importedAt: now,
+    targetCreatorId: 'user-other',
+    targetCreatorName: '销售B',
+  },
   { ...application('application-approved', finance.id, finance.name, '已入库'), orderId: 'order-self', orderNo: 'ORD-order-self' },
   { ...application('application-deleted-approved', finance.id, finance.name, '已入库'), orderId: 'order-deleted', orderNo: 'ORD-order-deleted' },
   { ...application('application-missing-approved', finance.id, finance.name, '已入库'), orderId: 'order-missing', orderNo: 'ORD-order-missing' },
@@ -207,6 +223,18 @@ assert.equal(
   '历史审核资料应从同一客户来源补齐二级来源',
 );
 assert.equal((await service.listApplications({ page: 1, pageSize: 1 }, finance)).data?.pagination.total, 7);
+assert.deepEqual(
+  (await service.listApplications({ importBatchId: 'batch-visible', page: 1, pageSize: 20 }, finance))
+    .data?.items.map((item) => item.id).sort(),
+  ['application-other', 'application-self'],
+  '导入批次筛选必须在服务端执行',
+);
+assert.deepEqual(
+  (await service.listApplications({ importBatchId: 'batch-visible', page: 1, pageSize: 20 }, sales))
+    .data?.items.map((item) => item.id),
+  ['application-self'],
+  '导入批次筛选不得绕过订单申请数据范围',
+);
 
 const processedApplications = await service.listApplications({
   statuses: ['已入库', '已驳回'],

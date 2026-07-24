@@ -295,6 +295,9 @@ async function fetchRecoveryOrders(filters: RecoveryOrderFilters = {}): Promise<
       || item.assistUserId === filters.ownerId
     ));
   }
+  if (filters.importBatchId) {
+    items = items.filter((item) => item.importBatchId === filters.importBatchId);
+  }
   items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const page = filters.page || 1;
   const pageSize = filters.pageSize || DEFAULT_PAGE_SIZE;

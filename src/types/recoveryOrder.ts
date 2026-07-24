@@ -138,6 +138,7 @@ export interface RecoveryOrderFilters {
   ownerId?: ID;
   includeDeleted?: boolean;
   scopeDomain?: Extract<DataScopeDomain, 'recoveryOrders' | 'recoveryOrderApplications'>;
+  importBatchId?: string;
   page?: number;
   pageSize?: number;
 }

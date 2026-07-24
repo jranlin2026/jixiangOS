@@ -22,6 +22,12 @@ await businessImportApi.precheck('orders', rows);
 await businessImportApi.confirm('recovery_orders', rows, 'token', '挽回.xlsx');
 const jobAbort = new AbortController();
 await businessImportApi.job('job-1', jobAbort.signal);
+await businessImportApi.review({
+  module: 'orders',
+  action: 'return',
+  ids: ['oa-1', 'oa-2'],
+  reason: '资料不完整',
+});
 
 assert.deepEqual(requests.map((request) => request.url), [
   '/api/business-imports/orders/template-options',
@@ -29,7 +35,15 @@ assert.deepEqual(requests.map((request) => request.url), [
   '/api/business-imports/orders/precheck',
   '/api/business-imports/recovery-orders/confirm',
   '/api/business-imports/jobs/job-1',
+  '/api/business-imports/reviews',
 ]);
 assert.deepEqual(JSON.parse(String(requests[2].init?.body)), { rows });
 assert.deepEqual(JSON.parse(String(requests[3].init?.body)), { rows, confirmationToken: 'token', fileName: '挽回.xlsx' });
 assert.equal(requests[4].init?.signal, jobAbort.signal);
+assert.equal(requests[5].init?.method, 'POST');
+assert.deepEqual(JSON.parse(String(requests[5].init?.body)), {
+  module: 'orders',
+  action: 'return',
+  ids: ['oa-1', 'oa-2'],
+  reason: '资料不完整',
+});

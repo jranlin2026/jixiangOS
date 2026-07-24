@@ -226,6 +226,7 @@ function applyFilters(applications: OrderApplication[], filters?: OrderApplicati
   if (filters?.reviewerName) filtered = filtered.filter((item) => item.reviewerName === filters.reviewerName);
   if (filters?.startDate) filtered = filtered.filter((item) => item.submittedAt >= filters.startDate!);
   if (filters?.endDate) filtered = filtered.filter((item) => item.submittedAt <= filters.endDate!);
+  if (filters?.importBatchId) filtered = filtered.filter((item) => item.importBatchId === filters.importBatchId);
   return filtered.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 

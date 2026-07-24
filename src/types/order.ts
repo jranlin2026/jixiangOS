@@ -205,6 +205,7 @@ export interface OrderApplicationFilters {
   reviewerName?: string;
   startDate?: string;
   endDate?: string;
+  importBatchId?: string;
   page?: number;
   pageSize?: number;
 }

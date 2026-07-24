@@ -154,6 +154,8 @@ export function createBusinessImportReviewSelector(prisma: PrismaClient) {
       const data = read<Record<string, unknown>>(row.data, {});
       const batchId = String(data.importBatchId || '');
       if (!batchId || (request.importBatchId && batchId !== request.importBatchId)) return [];
+      const pendingStatus = request.module === 'orders' ? '待财务审核' : '待审核';
+      if (String(data.status || '') !== pendingStatus) return [];
       return [{ id: row.recordId, module: request.module }];
     });
   };

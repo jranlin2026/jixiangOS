@@ -3,6 +3,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   Dialog,
   DialogActions,
@@ -58,6 +59,12 @@ import {
   getRecoveryOrderReviewStatuses,
   type ReviewQueueView,
 } from '../../shared/utils/reviewQueue';
+import BusinessImportReviewControls from '../../shared/components/BusinessImportReviewControls';
+import {
+  isImportedPendingReviewRecord,
+  toggleImportedReviewId,
+  type BusinessImportReviewSelection,
+} from '../../shared/utils/businessImportReviewModel';
 
 const shell = {
   ink: '#0f172a',
@@ -141,6 +148,9 @@ function RecoveryFormSection({ title, children }: { title: string; children: Rea
 
 interface RecoveryOrderTabProps {
   mode: 'list' | 'review';
+  importBatchId?: string;
+  refreshSignal?: number;
+  onImportBatchClear?: () => void;
   createSignal?: number;
   viewSettingsSignal?: number;
 }
@@ -178,6 +188,10 @@ type RecoveryOrderColumnId =
   | 'remark'
   | 'createdAt'
   | 'updatedAt'
+  | 'importBatchId'
+  | 'importRowNumber'
+  | 'importedByName'
+  | 'importedAt'
   | 'actions';
 
 const RECOVERY_ORDER_LIST_COLUMNS: Array<TableViewColumnConfig & { id: RecoveryOrderColumnId }> = [
@@ -205,6 +219,10 @@ const RECOVERY_ORDER_LIST_COLUMNS: Array<TableViewColumnConfig & { id: RecoveryO
   { id: 'assistUserName', label: '协助人员' },
   { id: 'remark', label: '备注' },
   { id: 'updatedAt', label: '更新时间' },
+  { id: 'importBatchId', label: '导入批次' },
+  { id: 'importRowNumber', label: 'Excel 行号' },
+  { id: 'importedByName', label: '导入人' },
+  { id: 'importedAt', label: '导入时间' },
 ];
 
 const RECOVERY_ORDER_REVIEW_COLUMNS: Array<TableViewColumnConfig & { id: RecoveryOrderColumnId }> = [
@@ -235,6 +253,10 @@ const RECOVERY_ORDER_REVIEW_COLUMNS: Array<TableViewColumnConfig & { id: Recover
   { id: 'assistUserName', label: '协助人员' },
   { id: 'remark', label: '备注' },
   { id: 'updatedAt', label: '更新时间' },
+  { id: 'importBatchId', label: '导入批次' },
+  { id: 'importRowNumber', label: 'Excel 行号' },
+  { id: 'importedByName', label: '导入人' },
+  { id: 'importedAt', label: '导入时间' },
 ];
 
 const DEFAULT_LIST_VISIBLE_COLUMNS: RecoveryOrderColumnId[] = RECOVERY_ORDER_LIST_COLUMNS.slice(0, 13).map((column) => column.id);
@@ -245,7 +267,14 @@ function isRecoveryOrderLocked(row: RecoveryOrder): boolean {
   return row.status === '已分账' || ['待确认', '待发放', '已撤回'].includes(row.settlementStatus || '未分账');
 }
 
-const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal = 0, viewSettingsSignal = 0 }) => {
+const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
+  mode,
+  importBatchId = '',
+  refreshSignal = 0,
+  onImportBatchClear,
+  createSignal = 0,
+  viewSettingsSignal = 0,
+}) => {
   const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.currentUser);
   const canCreate = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE);
@@ -262,6 +291,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const [sourceConfigs, setSourceConfigs] = useState<AfterSalesSourceConfig[]>([]);
   const [search, setSearch] = useState('');
   const [reviewQueueView, setReviewQueueView] = useState<ReviewQueueView>('pending');
+  const [reviewImportBatchId, setReviewImportBatchId] = useState(importBatchId);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [total, setTotal] = useState(0);
@@ -278,6 +308,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
   const [cleanupReviewSubmitting, setCleanupReviewSubmitting] = useState(false);
   const [reviewAction, setReviewAction] = useState<ReviewAction>(null);
   const [reviewReason, setReviewReason] = useState('');
+  const [importSelection, setImportSelection] = useState<BusinessImportReviewSelection>({ mode: 'ids', ids: [] });
   const [approvedOrder, setApprovedOrder] = useState<RecoveryOrder | null>(null);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
   const loadRequestIdRef = React.useRef(0);
@@ -304,9 +335,10 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       : RECOVERY_LIST_STATUSES,
     includeDeleted: mode === 'review' && reviewQueueView === 'all',
     scopeDomain: mode === 'review' ? 'recoveryOrderApplications' : 'recoveryOrders',
+    importBatchId: mode === 'review' ? reviewImportBatchId || undefined : undefined,
     page: page + 1,
     pageSize: rowsPerPage,
-  }), [mode, page, reviewQueueView, rowsPerPage, search]);
+  }), [mode, page, reviewImportBatchId, reviewQueueView, rowsPerPage, search]);
 
   const load = useCallback(async () => {
     const requestId = loadRequestIdRef.current + 1;
@@ -345,7 +377,16 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
       unsubscribe();
       loadRequestIdRef.current += 1;
     };
-  }, [load]);
+  }, [load, refreshSignal]);
+
+  useEffect(() => {
+    setReviewImportBatchId(importBatchId);
+    setPage(0);
+  }, [importBatchId]);
+
+  useEffect(() => {
+    setImportSelection({ mode: 'ids', ids: [] });
+  }, [mode, reviewImportBatchId, reviewQueueView, search]);
 
   useEffect(() => {
     setPage(0);
@@ -674,6 +715,14 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
         return formatDate(row.createdAt, 'yyyy-MM-dd HH:mm');
       case 'updatedAt':
         return formatDate(row.updatedAt, 'yyyy-MM-dd HH:mm');
+      case 'importBatchId':
+        return row.importBatchId || '-';
+      case 'importRowNumber':
+        return row.importRowNumber || '-';
+      case 'importedByName':
+        return row.importedByName || '-';
+      case 'importedAt':
+        return row.importedAt ? formatDate(row.importedAt, 'yyyy-MM-dd HH:mm') : '-';
       case 'actions':
         if (mode === 'review') {
           if (row.status === '退回修改' && !row.deletedAt) {
@@ -864,12 +913,63 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
             ))}
           </TextField>
         )}
+        {mode === 'review' && (
+          <TextField
+            size="small"
+            label="导入批次"
+            placeholder="按导入批次筛选"
+            value={reviewImportBatchId}
+            onChange={(event) => {
+              setReviewImportBatchId(event.target.value);
+              setPage(0);
+              if (!event.target.value) onImportBatchClear?.();
+            }}
+            sx={{ minWidth: 260 }}
+          />
+        )}
       </Box>
+
+      {mode === 'review' && canReviewAction ? (
+        <BusinessImportReviewControls
+          module="recovery_orders"
+          importBatchId={reviewImportBatchId}
+          selection={importSelection}
+          canReview={canReviewAction}
+          onSelectionChange={setImportSelection}
+          onRefresh={load}
+        />
+      ) : null}
 
       <TableContainer component={Paper} elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: '6px 6px 0 0' }}>
         <Table sx={{ minWidth: 1360 }}>
           <TableHead>
             <TableRow>
+              {mode === 'review' ? (
+                <TableCell padding="checkbox">
+                  <Checkbox
+                    aria-label="选择当前页导入待审记录"
+                    disabled={importSelection.mode === 'batch' || !rows.some((row) => isImportedPendingReviewRecord(row, 'recovery_orders'))}
+                    checked={importSelection.mode === 'ids'
+                      && rows.some((row) => isImportedPendingReviewRecord(row, 'recovery_orders'))
+                      && rows.filter((row) => isImportedPendingReviewRecord(row, 'recovery_orders'))
+                        .every((row) => importSelection.ids.includes(row.id))}
+                    indeterminate={importSelection.mode === 'ids'
+                      && rows.some((row) => isImportedPendingReviewRecord(row, 'recovery_orders') && importSelection.ids.includes(row.id))
+                      && !rows.filter((row) => isImportedPendingReviewRecord(row, 'recovery_orders'))
+                        .every((row) => importSelection.ids.includes(row.id))}
+                    onChange={(event) => {
+                      const pageIds = rows.filter((row) => isImportedPendingReviewRecord(row, 'recovery_orders')).map((row) => row.id);
+                      const currentIds = importSelection.mode === 'ids' ? importSelection.ids : [];
+                      setImportSelection({
+                        mode: 'ids',
+                        ids: event.target.checked
+                          ? Array.from(new Set([...currentIds, ...pageIds]))
+                          : currentIds.filter((id) => !pageIds.includes(id)),
+                      });
+                    }}
+                  />
+                </TableCell>
+              ) : null}
               {visibleColumns.map((column) => (
                 <TableCell
                   key={column.id}
@@ -887,6 +987,21 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
           <TableBody>
             {rows.map((row) => (
               <TableRow key={row.id} hover>
+                {mode === 'review' ? (
+                  <TableCell padding="checkbox">
+                    <Checkbox
+                      aria-label={`选择导入售后挽回订单 ${row.recoveryNo}`}
+                      disabled={!canReviewAction
+                        || importSelection.mode === 'batch'
+                        || !isImportedPendingReviewRecord(row, 'recovery_orders')}
+                      checked={importSelection.mode === 'batch'
+                        ? row.importBatchId === importSelection.importBatchId
+                          && isImportedPendingReviewRecord(row, 'recovery_orders')
+                        : importSelection.ids.includes(row.id)}
+                      onChange={() => setImportSelection((selection) => toggleImportedReviewId(selection, row.id))}
+                    />
+                  </TableCell>
+                ) : null}
                 {visibleColumns.map((column) => (
                   <TableCell
                     key={column.id}
@@ -903,7 +1018,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
             ))}
             {!rows.length && (
               <TableRow>
-                <TableCell colSpan={visibleColumns.length + 1} align="center" sx={{ py: 6, color: '#9ca3af' }}>
+                <TableCell colSpan={visibleColumns.length + (mode === 'review' ? 2 : 1)} align="center" sx={{ py: 6, color: '#9ca3af' }}>
                   {loading ? '加载中...' : mode === 'review'
                     ? reviewQueueView === 'pending'
                       ? '暂无待审核/退回修改售后挽回订单'
@@ -1065,6 +1180,35 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({ mode, createSignal 
                 <DetailField label="协助人员">{detailOrder.assistUserName || '-'}</DetailField>
                 <DetailField label="备注" wide><Typography sx={{ whiteSpace: 'pre-wrap' }}>{detailOrder.remark || '-'}</Typography></DetailField>
               </Box>
+
+              {detailOrder.importBatchId ? (
+                <>
+                  <Divider sx={{ my: 2 }} />
+                  <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>导入信息</Typography>
+                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 2 }}>
+                    <DetailField label="导入批次">{detailOrder.importBatchId}</DetailField>
+                    <DetailField label="Excel 行号">{detailOrder.importRowNumber || '-'}</DetailField>
+                    <DetailField label="导入人">{detailOrder.importedByName || '-'}</DetailField>
+                    <DetailField label="导入时间">{detailOrder.importedAt ? formatDate(detailOrder.importedAt, 'yyyy-MM-dd HH:mm:ss') : '-'}</DetailField>
+                    <DetailField label="目标订单创建人">{detailOrder.targetCreatorName || '-'}</DetailField>
+                    <DetailField label="客户匹配状态">{detailOrder.customerMatchStatus || '-'}</DetailField>
+                    <DetailField label="凭证状态">{getRecoveryEvidenceAttachments(detailOrder).length ? '已上传凭证' : '凭证缺失'}</DetailField>
+                    <DetailField label="预检警告" wide>
+                      {detailOrder.importWarnings?.length ? detailOrder.importWarnings.join('；') : '无'}
+                    </DetailField>
+                  </Box>
+                  {detailOrder.customerMatchStatus === '售后临时客户' ? (
+                    <Alert severity="warning" sx={{ mt: 2 }}>
+                      该记录使用售后临时客户，审核前请确认联系方式和客户归属。
+                    </Alert>
+                  ) : null}
+                  {!getRecoveryEvidenceAttachments(detailOrder).length ? (
+                    <Alert severity="warning" sx={{ mt: 2 }}>
+                      该导入记录缺少挽回凭证，请审核人核验后再通过。
+                    </Alert>
+                  ) : null}
+                </>
+              ) : null}
 
               <Divider sx={{ my: 2 }} />
               <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>审核资料</Typography>
