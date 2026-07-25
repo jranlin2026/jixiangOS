@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import mysql from 'mysql2/promise';
 
 if (!process.env.DATABASE_URL) {
@@ -79,10 +79,9 @@ if (!process.env.DATABASE_URL) {
       { rowNumber: 2, status: 'ready', executionStatus: 'failed', normalized: { rowNumber: 2, thirdPartyOrderNo: 'FAIL-2' } },
       { status: 'ready', executionStatus: 'failed', normalized: { thirdPartyOrderNo: 'FAIL-3' } },
       { rowNumber: null, status: 'ready', executionStatus: 'failed', normalized: { rowNumber: null, thirdPartyOrderNo: 'FAIL-4' } },
-      { rowNumber: 2147483647, status: 'ready', executionStatus: 'failed', normalized: { rowNumber: 2147483647, thirdPartyOrderNo: 'FAIL-5' } },
     ];
     await insertJob('job-legacy-failed', 'batch-legacy-failed', 'failed', duplicateRows);
-    for (let index = 1; index <= 5; index += 1) await reserve(`reservation-fail-${index}`, 'batch-legacy-failed', 'job-legacy-failed', `FAIL-${index}`);
+    for (let index = 1; index <= 4; index += 1) await reserve(`reservation-fail-${index}`, 'batch-legacy-failed', 'job-legacy-failed', `FAIL-${index}`);
 
     await insertBatch('batch-legacy-partial');
     await insertJob('job-legacy-partial', 'batch-legacy-partial', 'partial_failed', [
@@ -106,8 +105,8 @@ if (!process.env.DATABASE_URL) {
       `SELECT rowNumber, JSON_EXTRACT(payload, '$.rowNumber') AS payloadRowNumber
        FROM \`${itemsTable}\` WHERE jobId = 'job-legacy-failed' ORDER BY rowNumber`,
     );
-    assert.deepEqual(backfilled.map((row) => Number(row.rowNumber)), [2, 3, 4, 5, 6]);
-    assert.deepEqual(backfilled.map((row) => Number(row.payloadRowNumber)), [2, 3, 4, 5, 6]);
+    assert.deepEqual(backfilled.map((row) => Number(row.rowNumber)), [2, 4, 5, 6]);
+    assert.deepEqual(backfilled.map((row) => Number(row.payloadRowNumber)), [2, 4, 5, 6]);
     const [reservations] = await connection.query<any[]>(
       `SELECT normalizedNumber FROM \`${reservationsTable}\` ORDER BY normalizedNumber`,
     );
@@ -126,18 +125,63 @@ if (!process.env.DATABASE_URL) {
       [usersTable, rolesTable, departmentsTable, storageTable, recordsTable, `${scratchPrefix}%`],
     );
     assert.equal(revisionIndexes.length, 5, '关键事实的 MAX(updatedAt) 失效检查必须全部走有界索引');
+    await connection.query(await migration('20260725030000_business_import_job_item_repair'));
+    const legacy010 = await readFile(new URL('../../prisma/migrations/20260725010000_business_import_job_items/migration.sql', import.meta.url));
+    const legacy030 = await readFile(new URL('../../prisma/migrations/20260725030000_business_import_job_item_repair/migration.sql', import.meta.url));
+    assert.equal(createHash('sha256').update(legacy010).digest('hex'), '334fb9df6a4fa452d83f5f554afb112eb74f371bc2acb65b7aff7c3c6d2fd179');
+    assert.equal(createHash('sha256').update(legacy030).digest('hex'), '9cf034e891ac7d2c46bca95978a969e1d89f3bfe6e7fce93bb287fcff3de90fb');
+
+    const [dirtyBefore] = await connection.query<any[]>(
+      `SELECT id, reservedNumber FROM \`${itemsTable}\`
+       WHERE jobId = 'job-legacy-failed' AND reservedNumber IN ('fail-1', 'fail-2') ORDER BY reservedNumber`,
+    );
+    await connection.query(
+      `UPDATE \`${itemsTable}\` SET rowNumber = 2147483647, recordId = 'dirty-created',
+         payload = JSON_SET(payload, '$.rowNumber', 2147483647, '$.normalized.rowNumber', 2147483647)
+       WHERE jobId = 'job-legacy-failed' AND reservedNumber = 'fail-1'`,
+    );
+    await connection.query(
+      `UPDATE \`${itemsTable}\` SET rowNumber = 0,
+         payload = JSON_SET(payload, '$.rowNumber', 0, '$.normalized.rowNumber', 0)
+       WHERE jobId = 'job-legacy-failed' AND reservedNumber = 'fail-2'`,
+    );
+    await connection.query(
+      `INSERT INTO \`${reservationsTable}\` (id, importType, normalizedNumber, batchId, jobId, rowNumber)
+       VALUES ('dirty-created-reservation', 'orders', 'fail-1', 'batch-legacy-failed', 'job-legacy-failed', 2147483647),
+              ('dirty-failed-reservation', 'orders', 'fail-2', 'batch-legacy-failed', 'job-legacy-failed', 0)`,
+    );
+    await connection.query(
+      `INSERT INTO \`${recordsTable}\` (id, domain, recordId, data)
+       VALUES ('dirty-created', 'aaos_order_applications', 'dirty-created',
+         JSON_OBJECT('importBatchId', 'batch-legacy-failed', 'importRowNumber', 2147483647))`,
+    );
+
     await assert.doesNotReject(
-      async () => connection.query(await migration('20260725030000_business_import_job_item_repair')),
-      '已应用旧版 job-item 迁移的环境必须有可重入的升级修复',
+      async () => connection.query(await migration('20260725040000_business_import_job_item_safe_repair')),
+      '040 必须能从已应用旧 010/030 的真实库升级',
     );
     await assert.doesNotReject(
-      async () => connection.query(await migration('20260725030000_business_import_job_item_repair')),
-      '修复迁移重复执行不得依赖 INSERT IGNORE 吞掉冲突',
+      async () => connection.query(await migration('20260725040000_business_import_job_item_safe_repair')),
+      '040 重复执行必须可重入',
     );
     const [repairedAgain] = await connection.query<any[]>(
-      `SELECT rowNumber FROM \`${itemsTable}\` WHERE jobId = 'job-legacy-failed' ORDER BY rowNumber`,
+      `SELECT id, rowNumber, reservedNumber, JSON_EXTRACT(payload, '$.rowNumber') AS payloadRowNumber
+       FROM \`${itemsTable}\` WHERE jobId = 'job-legacy-failed' ORDER BY rowNumber`,
     );
-    assert.deepEqual(repairedAgain.map((row) => Number(row.rowNumber)), [2, 3, 4, 5, 6], '升级修复可重入且不重复行');
+    assert.deepEqual(repairedAgain.map((row) => Number(row.rowNumber)), [2, 3, 5, 6], '040 只修复非法行号并保持唯一');
+    assert.deepEqual(repairedAgain.map((row) => Number(row.payloadRowNumber)), [2, 3, 5, 6], 'item payload 行号必须与稳定映射同步');
+    assert.equal(new Set(repairedAgain.map((row) => `${row.rowNumber}`)).size, repairedAgain.length, '修复后不得产生重复 item 行号');
+    assert.deepEqual(repairedAgain.filter((row) => ['fail-1', 'fail-2'].includes(row.reservedNumber)).map((row) => row.id).sort(),
+      dirtyBefore.map((row) => row.id).sort(), '修复必须保留已有 item 身份');
+    const [dirtyRecord] = await connection.query<any[]>(
+      `SELECT JSON_EXTRACT(data, '$.importRowNumber') AS importRowNumber FROM \`${recordsTable}\` WHERE id = 'dirty-created'`,
+    );
+    assert.equal(Number(dirtyRecord[0].importRowNumber), 3, '已创建业务记录的 importRowNumber 必须同步稳定映射');
+    const [dirtyReservations] = await connection.query<any[]>(
+      `SELECT normalizedNumber, rowNumber FROM \`${reservationsTable}\` WHERE id LIKE 'dirty-%' ORDER BY normalizedNumber`,
+    );
+    assert.deepEqual(dirtyReservations.map((row) => [row.normalizedNumber, Number(row.rowNumber)]), [['fail-1', 3]],
+      '已创建行保留预留并同步行号，无业务记录的失败行释放预留');
   } finally {
     await connection.query(`DROP TABLE IF EXISTS \`${itemsTable}\`, \`${reservationsTable}\`, \`${jobsTable}\`, \`${batchesTable}\`, \`${recordsTable}\`, \`${usersTable}\`, \`${rolesTable}\`, \`${departmentsTable}\`, \`${storageTable}\``);
     await connection.end();

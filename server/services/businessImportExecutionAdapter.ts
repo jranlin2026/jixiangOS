@@ -2,19 +2,40 @@ import type { PrismaClient } from '@prisma/client';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { BusinessImportJobExecution, BusinessImportJobRow } from '../../src/types/businessImport';
 import { PERMISSION_KEYS, hasPermission, toAuthenticatedUser } from '../../src/shared/utils/permissions';
-import { mergeRoleWithDefaultAccess } from '../../src/shared/utils/organizationConfig';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { businessImportContactKeys, loadBusinessImportDirectory } from './businessImportAdapter';
 import type { BusinessImportDirectory } from './businessImportService';
 import { createBusinessImportRowExecutor } from './businessImportExecution';
 
 async function currentActor(prisma: PrismaClient, actorId: string): Promise<AuthenticatedUser> {
-  const [row, roles] = await Promise.all([
-    prisma.user.findUnique({ where: { id: actorId } }),
-    prisma.role.findMany({ where: { isActive: true } }),
-  ]);
+  const rows = await prisma.$queryRaw<Array<any>>`
+    SELECT u.id, u.name, u.account, u.email, u.phone, u.role, u.avatar,
+      u.departmentId, u.positionId, u.positionName, u.roleId,
+      u.mustChangePassword, u.lastLoginAt, u.isActive, u.employmentStatus,
+      u.createdAt, u.updatedAt,
+      r.id AS authorityRoleId, r.name AS authorityRoleName, r.code AS authorityRoleCode,
+      r.description AS authorityRoleDescription, r.departmentId AS authorityRoleDepartmentId,
+      r.permissions AS authorityRolePermissions, r.dataScopes AS authorityRoleDataScopes,
+      r.memberCount AS authorityRoleMemberCount, r.isActive AS authorityRoleIsActive,
+      r.createdAt AS authorityRoleCreatedAt, r.updatedAt AS authorityRoleUpdatedAt
+    FROM users u
+    LEFT JOIN roles r ON r.id = u.roleId
+      OR (u.roleId IS NULL AND r.normalizedName = u.role)
+    WHERE u.id = ${actorId}
+    LIMIT 1`;
+  const row = rows[0];
   if (!row || !row.isActive || (row.employmentStatus || 'active') !== 'active') throw new Error('导入人不存在或已停用');
-  return toAuthenticatedUser(mapPrismaUser(row), roles.map(mapPrismaRole).map(mergeRoleWithDefaultAccess));
+  const roles = row.authorityRoleId ? [mapPrismaRole({
+    id: row.authorityRoleId, name: row.authorityRoleName, code: row.authorityRoleCode,
+    description: row.authorityRoleDescription, departmentId: row.authorityRoleDepartmentId,
+    permissions: row.authorityRolePermissions, dataScopes: row.authorityRoleDataScopes,
+    memberCount: row.authorityRoleMemberCount, isActive: Boolean(row.authorityRoleIsActive),
+    createdAt: row.authorityRoleCreatedAt, updatedAt: row.authorityRoleUpdatedAt,
+  })] : [];
+  return toAuthenticatedUser(mapPrismaUser({
+    ...row, passwordHash: null, passwordSalt: null, passwordUpdatedAt: null,
+    leftAt: null, leftBy: null,
+  }), roles);
 }
 
 export async function loadBusinessImportDirectoryRevision(prisma: PrismaClient): Promise<string> {
@@ -44,7 +65,6 @@ export function createPrismaBusinessImportRowExecutor(input: {
   loadExecutionSnapshot?: (job: BusinessImportJobExecution) => Promise<{ actor: AuthenticatedUser; directory: BusinessImportDirectory }>;
   now?: () => number;
   revalidateEveryRows?: number;
-  revalidateAfterMs?: number;
   orderApplications: {
     submitImported(data: any, actor: AuthenticatedUser, metadata: any, idempotencyKey: string): Promise<any>;
   };
@@ -54,23 +74,21 @@ export function createPrismaBusinessImportRowExecutor(input: {
 }) {
   const actors = new Map<string, AuthenticatedUser>();
   const snapshots = new Map<string, { revision: string; loaded: Promise<{ actor: AuthenticatedUser; directory: BusinessImportDirectory }> }>();
-  const validations = new Map<string, { actor: AuthenticatedUser; revision: string; checkedAt: number; rowsSinceCheck: number }>();
-  const now = input.now || Date.now;
+  const revisions = new Map<string, { revision: string; rowsSinceCheck: number }>();
   const revalidateEveryRows = input.revalidateEveryRows || 25;
-  const revalidateAfterMs = input.revalidateAfterMs || 500;
-  const validate = async (job: BusinessImportJobExecution) => {
-    const cached = validations.get(job.id);
-    const timestamp = now();
-    if (cached && cached.rowsSinceCheck < revalidateEveryRows && timestamp - cached.checkedAt < revalidateAfterMs) {
+  const loadActor = async (job: BusinessImportJobExecution) => (
+    input.loadExecutionActor ? input.loadExecutionActor(job) : currentActor(input.prisma, job.actorId)
+  );
+  const revision = async (job: BusinessImportJobExecution) => {
+    const cached = revisions.get(job.id);
+    if (cached && cached.rowsSinceCheck < revalidateEveryRows) {
       cached.rowsSinceCheck += 1;
-      return cached;
+      return cached.revision;
     }
-    const actor = input.loadExecutionActor ? await input.loadExecutionActor(job) : await currentActor(input.prisma, job.actorId);
-    const revision = String(input.loadExecutionRevision
+    const current = String(input.loadExecutionRevision
       ? await input.loadExecutionRevision(job)
       : await loadBusinessImportDirectoryRevision(input.prisma));
-    const current = { actor, revision, checkedAt: timestamp, rowsSinceCheck: 1 };
-    validations.set(job.id, current);
+    revisions.set(job.id, { revision: current, rowsSinceCheck: 1 });
     return current;
   };
   const snapshot = async (job: BusinessImportJobExecution, actor: AuthenticatedUser, revision: string) => {
@@ -86,12 +104,11 @@ export function createPrismaBusinessImportRowExecutor(input: {
   };
   const executor = createBusinessImportRowExecutor({
     loadContext: async (job: BusinessImportJobExecution, row: BusinessImportJobRow) => {
-      const validation = await validate(job);
-      const { actor, revision } = validation;
+      const [actor, currentRevision] = await Promise.all([loadActor(job), revision(job)]);
       if (!actor.isActive) throw new Error('导入人不存在或已停用');
       const permission = job.type === 'orders' ? PERMISSION_KEYS.ORDER_IMPORT : PERMISSION_KEYS.AFTER_SALES_RECOVERY_IMPORT;
       if (!hasPermission(actor, permission, 'write')) throw new Error('导入人权限已变化，任务已停止');
-      const { directory } = await snapshot(job, actor, revision);
+      const { directory } = await snapshot(job, actor, currentRevision);
       actors.set(job.id, actor);
       return {
         actor, users: directory.users, products: directory.products, orderTypes: directory.orderTypes,
@@ -118,6 +135,6 @@ export function createPrismaBusinessImportRowExecutor(input: {
     async execute(job: BusinessImportJobExecution, row: BusinessImportJobRow) {
       return executor.execute(job, row);
     },
-    releaseJob(job: BusinessImportJobExecution) { actors.delete(job.id); snapshots.delete(job.id); validations.delete(job.id); },
+    releaseJob(job: BusinessImportJobExecution) { actors.delete(job.id); snapshots.delete(job.id); revisions.delete(job.id); },
   };
 }
