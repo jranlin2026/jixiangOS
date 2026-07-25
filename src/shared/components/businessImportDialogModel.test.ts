@@ -57,28 +57,35 @@ const retryUpdates: string[] = [];
 let transientFetches = 0;
 const recoveredAfterTransientErrors = await pollBusinessImportJob(async () => {
   transientFetches += 1;
-  if (transientFetches <= 2) throw new BusinessImportJobRetryableError(503, '服务暂时不可用');
+  if ([1, 2, 4].includes(transientFetches)) throw new BusinessImportJobRetryableError(503, '服务暂时不可用');
   return status(transientFetches === 3 ? 'running' : 'succeeded');
 }, {
   wait: async (_signal, delayMs) => { retryDelays.push(delayMs || 0); },
   onUpdate: (job) => { retryUpdates.push(job.status); },
 });
 assert.equal(recoveredAfterTransientErrors.status, 'succeeded');
-assert.equal(transientFetches, 4);
+assert.equal(transientFetches, 5);
 assert.deepEqual(retryUpdates, ['running', 'succeeded']);
-assert.deepEqual(retryDelays, [500, 1_000, 2_000], 'transient errors back off before normal polling resumes');
-
-const exhaustedRetryDelays: number[] = [];
-let exhaustedFetches = 0;
-await assert.rejects(
-  pollBusinessImportJob(async () => {
-    exhaustedFetches += 1;
-    throw new BusinessImportJobRetryableError(503, '服务持续不可用');
-  }, { wait: async (_signal, delayMs) => { exhaustedRetryDelays.push(delayMs || 0); } }),
-  (error: unknown) => error instanceof BusinessImportJobRetryableError && error.code === 503,
+assert.deepEqual(
+  retryDelays,
+  [500, 1_000, 2_000, 500],
+  'a successful read resets backoff before a later transient error',
 );
-assert.equal(exhaustedFetches, 4, 'the initial request plus three retries is the hard limit');
-assert.deepEqual(exhaustedRetryDelays, [500, 1_000, 2_000]);
+
+const longOutageRetryDelays: number[] = [];
+let longOutageFetches = 0;
+const recoveredAfterLongOutage = await pollBusinessImportJob(async () => {
+  longOutageFetches += 1;
+  if (longOutageFetches <= 10) throw new BusinessImportJobRetryableError(503, '服务长时间不可用');
+  return status('succeeded');
+}, { wait: async (_signal, delayMs) => { longOutageRetryDelays.push(delayMs || 0); } });
+assert.equal(recoveredAfterLongOutage.status, 'succeeded');
+assert.equal(longOutageFetches, 11, 'persistent jobs keep polling beyond the former three-retry limit');
+assert.deepEqual(
+  longOutageRetryDelays,
+  [500, 1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000, 30_000],
+  'retry noise is bounded by a 30-second maximum cadence without ending the polling lifecycle',
+);
 
 const retryAbortController = new AbortController();
 let retryAbortFetches = 0;

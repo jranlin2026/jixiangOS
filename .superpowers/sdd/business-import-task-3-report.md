@@ -36,10 +36,10 @@
 
 ### Final review hardening: transient polling recovery
 
-- Job polling now distinguishes retryable network/5xx failures from terminal permission or missing-job responses. Network failures and HTTP-style `500–599` responses use cancellable exponential backoff at 500 ms, 1,000 ms, and 2,000 ms; the fourth consecutive failure is surfaced instead of retrying indefinitely.
-- A successful read resets the consecutive-failure counter. Behavior tests prove two temporary 503 failures recover into `running` and then `succeeded`, while updates and completion behavior remain unchanged.
+- Job polling now distinguishes retryable network/5xx failures from terminal permission or missing-job responses. Network failures and HTTP-style `500–599` responses use cancellable exponential backoff starting at 500 ms and capped at 30 seconds, while the persistent polling lifecycle continues until a terminal job response or cancellation.
+- A successful read resets the consecutive-failure counter. Behavior tests prove recovery after ten consecutive 503 failures, verify the long-outage cadence `[500, 1000, 2000, 4000, 8000, 16000, 30000, ...]`, and confirm a later transient error restarts at 500 ms.
 - Aborting during retry backoff rejects immediately with `AbortError` and prevents another fetch. `403`, `404`, and `410` remain non-retryable terminal states, invoke unavailable handling once, and clear the persisted recovery record.
-- TDD RED evidence: the recovery test first failed because `BusinessImportJobRetryableError` and the retry-aware load boundary did not exist. The completed suite also covers retry exhaustion, backoff durations, network-error classification, cancellation, and terminal cleanup.
+- TDD RED evidence: the initial recovery test first failed because `BusinessImportJobRetryableError` and the retry-aware load boundary did not exist. Final closure then reproduced the fourth-failure exit with `BusinessImportJobRetryableError`; GREEN removes the retry-count terminal condition while retaining bounded cadence, cancellation, network-error classification, and terminal cleanup.
 
 ## Verification
 
@@ -62,7 +62,7 @@ Second-review verification:
 
 Final-review verification:
 
-- `npx tsx src/api/businessImportApi.test.ts && npx tsx src/shared/components/businessImportDialogModel.test.ts && npx tsx src/shared/components/BusinessImportDialog.test.ts` — passed, including transient recovery, bounded retry, abort-during-backoff, and 403/404/410 cleanup behavior.
+- `npx tsx src/api/businessImportApi.test.ts && npx tsx src/shared/components/businessImportDialogModel.test.ts && npx tsx src/shared/components/BusinessImportDialog.test.ts` — passed, including sustained transient recovery, 30-second capped cadence, reset-after-success, abort-during-backoff, and 403/404/410 cleanup behavior.
 - `npm run build` — passed TypeScript and Vite production build; Vite transformed 13,446 modules.
 - `git diff --check` — passed.
 

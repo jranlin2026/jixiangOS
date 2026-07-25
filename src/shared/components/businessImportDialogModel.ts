@@ -169,8 +169,8 @@ export async function pollBusinessImportJob(
       job = await load(options.signal);
     } catch (error) {
       assertNotAborted(options.signal);
-      if (!(error instanceof BusinessImportJobRetryableError) || transientRetryCount >= 3) throw error;
-      const retryDelayMs = 500 * (2 ** transientRetryCount);
+      if (!(error instanceof BusinessImportJobRetryableError)) throw error;
+      const retryDelayMs = Math.min(30_000, 500 * (2 ** transientRetryCount));
       transientRetryCount += 1;
       await wait(options.signal, retryDelayMs);
       assertNotAborted(options.signal);
