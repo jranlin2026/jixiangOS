@@ -420,6 +420,9 @@ export default function BusinessImportDialog({
         <Stack spacing={2}>
           <Alert severity="info">
             请使用极享OS标准模板。无图资料可直接上传 Excel；需导入图片时，请上传包含 Excel 和对应图片的 ZIP 导入包。
+            {type === 'recovery_orders'
+              ? '售后导入只在后台识别客户身份，不会返回客户库资料；未识别记录审核通过后会自动进入 CRM 待分配线索。'
+              : null}
           </Alert>
           {error ? <Alert severity="error">{error}</Alert> : null}
           {storageWarning || storageDegradedWarning

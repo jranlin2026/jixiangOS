@@ -48,6 +48,8 @@ export function compactOrderApplicationListItem(application: OrderApplication): 
 export function compactRecoveryOrderListItem(order: RecoveryOrder): RecoveryOrder {
   return {
     ...order,
+    customerId: '',
+    linkedLeadId: undefined,
     importedById: undefined,
     targetCreatorId: undefined,
     targetCreatorName: undefined,

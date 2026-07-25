@@ -77,7 +77,7 @@ const orderRow: BusinessImportJobRow = {
   const recoveryRow = (rowNumber: number): BusinessImportJobRow => ({
     rowNumber, status: rowNumber === 2 ? 'warning' : 'ready', reason: '', executionStatus: 'queued',
     normalized: {
-      rowNumber, customerName: '存量客户', customerPhone: '13900000000', customerWechat: '',
+      rowNumber, customerName: rowNumber === 3 ? '售后现场称呼' : '存量客户', customerPhone: '13900000000', customerWechat: '',
       originalProduct: '老课程', sourcePlatform: '抖音', sourceShop: '旗舰店', paymentChannel: '对公银行转账',
       originalAmount: 899, recoveryAmount: 299, recoveryAt: '2026-07-20T00:00:00.000Z',
       recoveryUserName: '销售甲', creatorName: '', thirdPartyOrderNo: `RCV-${rowNumber}`, remark: '',
@@ -90,6 +90,7 @@ const orderRow: BusinessImportJobRow = {
   assert.equal(recoveries[0].customer.id, '');
   assert.equal(recoveries[1].customer.matchStatus, '已绑定客户');
   assert.equal(recoveries[1].customer.id, 'customer-existing');
+  assert.equal(recoveries[1].data.customerName, '售后现场称呼', '导入数据应保留 Excel 填报名称，不得替换为 CRM 名称');
   assert.equal(recoveries[0].data.recoveryAttachments[0].id, 'recovery-proof');
   assert.equal(recoveries[0].metadata.targetCreatorId, actor.id, 'blank creator defaults to importer');
 }

@@ -157,7 +157,7 @@ export function createBusinessImportRowExecutor(deps: {
       const input = row.normalized as RecoveryImportRow;
       if (context.customerMatches.length > 1) throw new Error('客户匹配结果不唯一，导入已停止');
       const customer = context.customerMatches[0]
-        ? { id: context.customerMatches[0].id, name: context.customerMatches[0].name, matchStatus: '已绑定客户' as const }
+        ? { id: context.customerMatches[0].id, name: clean(input.customerName), matchStatus: '已绑定客户' as const }
         : { id: '', name: clean(input.customerName), matchStatus: '售后临时客户' as const };
       const recoveryUser = uniqueByName(context.users, clean(input.recoveryUserName), '挽回人员');
       const assistUser = clean(input.assistUserName) ? uniqueByName(context.users, clean(input.assistUserName), '协助人员') : undefined;

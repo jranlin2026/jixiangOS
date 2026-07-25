@@ -22,6 +22,8 @@ assert.match(afterSales, /tab', 'recovery-review'/);
 assert.match(afterSales, /importBatchId/);
 
 assert.match(dialog, /onQueued/);
+assert.match(dialog, /售后导入只在后台识别客户身份/);
+assert.match(dialog, /自动进入 CRM 待分配线索/);
 assert.match(entryButton, /PERMISSION_KEYS\.ORDER_IMPORT/);
 assert.match(entryButton, /PERMISSION_KEYS\.AFTER_SALES_RECOVERY_IMPORT/);
 assert.match(entryButton, /hasPermission\(user, permission, 'write'\)/);
@@ -44,5 +46,6 @@ assert.match(reviewControls, /批量退回/);
 assert.match(reviewControls, /批量驳回/);
 assert.match(reviewControls, /failedBusinessImportReviewSelection/);
 
-assert.match(recoveryReview, /售后临时客户/);
+assert.match(recoveryReview, /CRM识别状态/);
+assert.match(recoveryReview, /审核通过时系统会再次查重/);
 assert.match(recoveryReview, /缺少挽回凭证/);

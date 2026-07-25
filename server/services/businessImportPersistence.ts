@@ -18,8 +18,12 @@ function read<T>(value: unknown, fallback: T): T {
   if (typeof value === 'string') { try { return JSON.parse(value) as T; } catch { return fallback; } }
   return (value ?? fallback) as T;
 }
+function publicJobRow(payload: BusinessImportJobRow): BusinessImportJobRow {
+  const { customerId: _internalCustomerId, ...safe } = payload;
+  return safe;
+}
 function itemResult(item: any): BusinessImportJobRow {
-  const payload = read<BusinessImportJobRow>(item.payload, {} as BusinessImportJobRow);
+  const payload = publicJobRow(read<BusinessImportJobRow>(item.payload, {} as BusinessImportJobRow));
   return {
     ...payload,
     executionStatus: item.status,
@@ -163,7 +167,7 @@ export function createBusinessImportReadRepository(prisma: PrismaClient) {
     rows: Array.isArray(row.items)
       ? row.items.map(itemResult)
       : row.includeLegacyRows ? read<BusinessImportJobRow[]>(row.rows, []).map((item) => ({
-        ...item,
+        ...publicJobRow(item),
         ...(item.errorMessage ? { errorMessage: safeBusinessImportErrorMessage(item.errorMessage) } : {}),
       })) : undefined,
     ...(Array.isArray(row.failedItems) && row.failedItems.length

@@ -134,6 +134,14 @@ assert.equal(recovery.warningCount, 1, 'unmatched recovery contacts are explicit
 assert.equal(recovery.rows[0]?.status, 'warning');
 assert.equal(recovery.readyCount, 1, 'warnings are eligible for later review/job creation');
 
+const invalidRecoveryPhone = await service.precheck({ type: 'recovery_orders', rows: [{
+  rowNumber: 18, customerName: '非法号码客户', customerPhone: '12345', customerWechat: '', originalProduct: '历史产品',
+  sourcePlatform: '', sourceShop: '', paymentChannel: '', originalAmount: '', paymentOrderNo: '', paymentAt: '', assistUserName: '', creatorName: '',
+  recoveryAmount: '999', recoveryAt: '2026-07-23', recoveryUserName: '销售甲', thirdPartyOrderNo: 'REC-INVALID-PHONE', remark: '',
+}] }, actor);
+assert.equal(invalidRecoveryPhone.rows[0]?.status, 'blocked', '非法手机号必须在预检阶段阻止，不能留到后台任务失败');
+assert.match(invalidRecoveryPhone.rows[0]?.reason || '', /手机号/);
+
 const optionalOrderNumber = await service.precheck({ type: 'orders', rows: [{ ...orderRow, rowNumber: 9, thirdPartyOrderNo: '' }] }, actor);
 assert.equal(optionalOrderNumber.readyCount, 1, 'order third-party order number is optional');
 
@@ -177,7 +185,8 @@ baseDirectory.customerMatchesByContact.set('phone:+8613900000002', [{ id: 'custo
 const outOfScopeRecovery = await service.precheck({ type: 'recovery_orders', rows: [{
   rowNumber: 14, customerName: '范围外客户', customerPhone: '13900000002', customerWechat: '', originalProduct: '', sourcePlatform: '', sourceShop: '', paymentChannel: '', originalAmount: '', paymentOrderNo: '', paymentAt: '', recoveryAmount: '1', recoveryAt: '2026-07-23', recoveryUserName: '销售甲', assistUserName: '', creatorName: '', thirdPartyOrderNo: 'REC-scope', remark: '',
 }] }, actor);
-assert.equal(outOfScopeRecovery.rows[0]?.status, 'blocked', 'existing recovery customers outside scope cannot be bypassed as temporary customers');
+assert.notEqual(outOfScopeRecovery.rows[0]?.status, 'blocked', '售后导入只做后台盲匹配，不应因客户不在售后数据范围而泄露或阻止');
+assert.equal(outOfScopeRecovery.rows[0]?.reason, '已完成后台身份识别');
 baseDirectory.customerMatchesByContact.set('phone:+8613900000003', [{ id: 'customer-a', name: '客户甲', inScope: true }, { id: 'customer-b', name: '客户乙', inScope: true }]);
 const ambiguousRecovery = await service.precheck({ type: 'recovery_orders', rows: [{
   rowNumber: 15, customerName: '冲突客户', customerPhone: '13900000003', customerWechat: '', originalProduct: '', sourcePlatform: '', sourceShop: '', paymentChannel: '', originalAmount: '', paymentOrderNo: '', paymentAt: '', recoveryAmount: '1', recoveryAt: '2026-07-23', recoveryUserName: '销售甲', assistUserName: '', creatorName: '', thirdPartyOrderNo: 'REC-ambiguous', remark: '',
@@ -187,5 +196,10 @@ const invalidRecoveryPeople = await service.precheck({ type: 'recovery_orders', 
   rowNumber: 16, customerName: '陌生客户', customerPhone: '13900000004', customerWechat: '', originalProduct: '', sourcePlatform: '', sourceShop: '', paymentChannel: '', originalAmount: '', paymentOrderNo: '', paymentAt: '', recoveryAmount: '1', recoveryAt: '2026-07-23', recoveryUserName: '销售甲', assistUserName: '不存在', creatorName: '不存在', thirdPartyOrderNo: 'REC-people', remark: '',
 }] }, actor);
 assert.equal(invalidRecoveryPeople.rows[0]?.status, 'blocked', 'optional supplied recovery assistant/creator must be active and in scope');
+const oversizedRecoveryIdentity = await service.precheck({ type: 'recovery_orders', rows: [{
+  rowNumber: 17, customerName: '客'.repeat(121), customerPhone: '13900000005', customerWechat: '', originalProduct: '', sourcePlatform: '', sourceShop: '', paymentChannel: '', originalAmount: '', paymentOrderNo: '', paymentAt: '', recoveryAmount: '1', recoveryAt: '2026-07-23', recoveryUserName: '销售甲', assistUserName: '', creatorName: '', thirdPartyOrderNo: 'REC-long-name', remark: '',
+}] }, actor);
+assert.equal(oversizedRecoveryIdentity.rows[0]?.status, 'blocked', '导入预检应拦截无法写入 LeadRecord 的超长身份字段');
+assert.match(oversizedRecoveryIdentity.rows[0]?.reason || '', /120/);
 
 console.log('business import service: ok');

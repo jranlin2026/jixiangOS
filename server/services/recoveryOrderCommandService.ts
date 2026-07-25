@@ -20,6 +20,8 @@ import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { jsonText, queryBusinessRecordPage, visibleJsonCondition } from './businessRecordPageService';
 import { compactRecoveryOrderListItem, compactRecoverySettlementListItem } from '../../src/shared/utils/listPayload';
 import type { BusinessAttachment, BusinessAttachmentCategory } from '../../src/types/businessAttachment';
+import type { RecoveryCrmBridge, RecoveryCrmResolution } from './recoveryCrmBridge';
+import { getPhoneNumberError } from '../../src/shared/utils/phoneNumber';
 
 type RecoveryCommandPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$transaction' | '$queryRaw'>;
 type Directory = { users: User[]; roles: Role[]; departments: Department[] };
@@ -31,6 +33,25 @@ type RecoveryOrderPage = {
 
 export interface RecoveryOrderCommandServiceOptions {
   now?: () => Date;
+  crmBridge?: RecoveryCrmBridge;
+}
+
+function crmPatch(resolution: RecoveryCrmResolution): Pick<RecoveryOrder, 'customerId' | 'customerMatchStatus' | 'crmIdentityStatus' | 'linkedLeadId' | 'leadSyncStatus'> {
+  if (resolution.status === '已匹配客户') return {
+    customerId: resolution.customerId, customerMatchStatus: '已绑定客户', crmIdentityStatus: '已匹配客户', linkedLeadId: undefined, leadSyncStatus: '不需要',
+  };
+  if (resolution.status === '已匹配线索') return {
+    customerId: '', customerMatchStatus: '售后临时客户', crmIdentityStatus: '已匹配线索', linkedLeadId: resolution.leadId, leadSyncStatus: '已关联',
+  };
+  return {
+    customerId: '', customerMatchStatus: '售后临时客户', crmIdentityStatus: resolution.status,
+    linkedLeadId: undefined,
+    leadSyncStatus: resolution.status === '身份冲突' ? '失败' : '待同步',
+  };
+}
+
+function publicRecoveryOrder(order: RecoveryOrder): RecoveryOrder {
+  return { ...order, customerId: '', linkedLeadId: undefined };
 }
 
 class RecoveryCommandError extends Error {
@@ -64,6 +85,13 @@ function normalizeOrderNo(value: unknown): string {
 
 function cleanText(value: unknown): string {
   return String(value || '').trim();
+}
+
+function recoveryContactFieldError(input: Pick<RecoveryOrderInput, 'customerName' | 'customerPhone' | 'customerWechat'>): string {
+  if (cleanText(input.customerName).length > 120) return '客户姓名不能超过120个字符';
+  if (cleanText(input.customerPhone).length > 50) return '客户手机号不能超过50个字符';
+  if (cleanText(input.customerWechat).length > 100) return '客户微信不能超过100个字符';
+  return '';
 }
 
 const OFFICIAL_PAYMENT_CHANNEL_VALUES = new Set<OfficialPaymentChannel>([
@@ -504,6 +532,10 @@ function validateInput(
   if (!cleanText(input.customerPhone) && !cleanText(input.customerWechat)) {
     throw new RecoveryCommandError(400, '手机号或微信至少填写一项');
   }
+  const contactFieldError = recoveryContactFieldError(input);
+  if (contactFieldError) throw new RecoveryCommandError(400, contactFieldError);
+  const phoneError = getPhoneNumberError(cleanText(input.customerPhone));
+  if (phoneError) throw new RecoveryCommandError(400, phoneError);
   if (!thirdPartyOrderNo) throw new RecoveryCommandError(400, '请填写第三方平台订单号');
   if (!originalProduct) throw new RecoveryCommandError(400, '请填写原购买产品');
   if (recoveryAmount <= 0) throw new RecoveryCommandError(400, '挽回成交金额必须大于 0');
@@ -670,7 +702,7 @@ export function createRecoveryOrderCommandService(
       if (!recoveryVisible(order, recoveryScope(directory, actor, scopeDomain))) {
         return failure<RecoveryOrder>('无权查看该售后挽回订单', 403);
       }
-      return success(order);
+      return success(publicRecoveryOrder(order));
     },
 
     async settlementCounts(
@@ -728,6 +760,10 @@ export function createRecoveryOrderCommandService(
       if (!cleanText(input.customerPhone) && !cleanText(input.customerWechat)) {
         return failure('手机号或微信至少填写一项', 400);
       }
+      const contactFieldError = recoveryContactFieldError(input);
+      if (contactFieldError) return failure(contactFieldError, 400);
+      const phoneError = getPhoneNumberError(cleanText(input.customerPhone));
+      if (phoneError) return failure(phoneError, 400);
       if (!thirdPartyOrderNo) return failure('请填写第三方平台订单号', 400);
       if (!originalProduct) return failure('请填写原购买产品', 400);
       if (recoveryAmount <= 0) return failure('挽回成交金额必须大于 0', 400);
@@ -771,6 +807,7 @@ export function createRecoveryOrderCommandService(
         thirdPartyOrderNo,
         customerId: imported?.customerId || '',
         customerName,
+        submittedCustomerName: customerName,
         customerPhone: cleanText(input.customerPhone) || undefined,
         customerWechat: cleanText(input.customerWechat) || undefined,
         customerMatchStatus: imported?.customerMatchStatus || '手工填写',
@@ -824,28 +861,31 @@ export function createRecoveryOrderCommandService(
               && (!imported || sameImportedIdentity(duplicate, imported.metadata))) return duplicate;
             throw new RecoveryCommandError(409, '该第三方平台订单号已经创建过售后挽回订单');
           }
+          const persisted = options.crmBridge
+            ? { ...next, ...crmPatch(await options.crmBridge.resolve(transaction, next)) }
+            : next;
           await transaction.businessRecord.create({
             data: {
               id: `${STORAGE_KEYS.RECOVERY_ORDERS}:${id}`,
               domain: STORAGE_KEYS.RECOVERY_ORDERS,
               recordId: id,
-              title: next.customerName,
-              status: next.status,
-              owner: next.recoveryUserName,
-              customerId: next.customerId || null,
+              title: persisted.customerName,
+              status: persisted.status,
+              owner: persisted.recoveryUserName,
+              customerId: persisted.customerId || null,
               orderId: null,
-              amount: next.recoveryAmount,
-              eventAt: new Date(next.recoveryAt || createdAt),
-              data: jsonValue(next),
+              amount: persisted.recoveryAmount,
+              eventAt: new Date(persisted.recoveryAt || createdAt),
+              data: jsonValue(persisted),
             },
           });
-          return next;
+          return persisted;
         }, {
           isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
           maxWait: 5_000,
           timeout: 10_000,
         });
-        return success(created);
+        return success(publicRecoveryOrder(created));
       } catch (error) {
         if (error instanceof RecoveryCommandError) return failure(error.message, error.responseCode);
         if ((error as { code?: unknown } | null)?.code === 'P2002') {
@@ -855,7 +895,7 @@ export function createRecoveryOrderCommandService(
           if (concurrent) {
             const existing = parseObject<RecoveryOrder>(concurrent.data, '售后挽回订单');
             if (sameCreate(existing, next, Boolean(cleanText(input.recoveryAt)))
-              && (!imported || sameImportedIdentity(existing, imported.metadata))) return success(existing);
+              && (!imported || sameImportedIdentity(existing, imported.metadata))) return success(publicRecoveryOrder(existing));
           }
           return failure('该第三方平台订单号已经创建过售后挽回订单', 409);
         }
@@ -904,6 +944,7 @@ export function createRecoveryOrderCommandService(
         const next: RecoveryOrder = {
           ...current,
           customerName: validated.customerName,
+          submittedCustomerName: validated.customerName,
           customerPhone: cleanText(input.customerPhone) || undefined,
           customerWechat: cleanText(input.customerWechat) || undefined,
           thirdPartyOrderNo: validated.thirdPartyOrderNo,
@@ -943,8 +984,11 @@ export function createRecoveryOrderCommandService(
           auditedAt: resubmitted ? undefined : current.auditedAt,
           updatedAt: changedAt,
         };
-        await writeRecoveryOrder(transaction, next);
-        return next;
+        const persisted = options.crmBridge
+          ? { ...next, ...crmPatch(await options.crmBridge.resolve(transaction, next)) }
+          : next;
+        await writeRecoveryOrder(transaction, persisted);
+        return publicRecoveryOrder(persisted);
       }, {
         isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
         maxWait: 5_000,
@@ -1040,7 +1084,7 @@ export function createRecoveryOrderCommandService(
           updatedAt: changedAt,
         };
         await writeRecoveryOrder(transaction, next);
-        return next;
+        return publicRecoveryOrder(next);
       }, {
         isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
         maxWait: 5_000,
@@ -1079,7 +1123,7 @@ export function createRecoveryOrderCommandService(
       return run(() => prisma.$transaction(async (transaction) => {
         const current = await lockRecoveryOrder(transaction, orderId);
         if (!recoveryVisible(current, scope)) throw new RecoveryCommandError(403, '无权删除该售后挽回订单');
-        if (current.deletedAt) return current;
+        if (current.deletedAt) return publicRecoveryOrder(current);
         const commissionIds = new Set(current.commissionIds || []);
         const commissionRows = await transaction.businessRecord.findMany({
           where: {
@@ -1120,7 +1164,7 @@ export function createRecoveryOrderCommandService(
           updatedAt: deletedAt,
         };
         await writeRecoveryOrder(transaction, next);
-        return next;
+        return publicRecoveryOrder(next);
       }, {
         isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
         maxWait: 5_000,
@@ -1139,7 +1183,7 @@ export function createRecoveryOrderCommandService(
         if (current.status !== '审核驳回' && !current.deletedAt) {
           throw new RecoveryCommandError(409, '只有已驳回，或业务单已经删除的售后审核记录可以清理');
         }
-        if (current.reviewCleanedAt) return current;
+        if (current.reviewCleanedAt) return publicRecoveryOrder(current);
         const cleanedAt = now().toISOString();
         const next: RecoveryOrder = {
           ...current,
@@ -1149,7 +1193,7 @@ export function createRecoveryOrderCommandService(
           updatedAt: cleanedAt,
         };
         await writeRecoveryOrder(transaction, next);
-        return next;
+        return publicRecoveryOrder(next);
       }, {
         isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
         maxWait: 5_000,
@@ -1168,7 +1212,7 @@ export function createRecoveryOrderCommandService(
         if (!current.deletedAt) {
           throw new RecoveryCommandError(409, '只有源售后挽回订单已删除的分账记录可以清理');
         }
-        if (current.settlementCleanedAt) return current;
+        if (current.settlementCleanedAt) return publicRecoveryOrder(current);
         const commissionIds = new Set(current.commissionIds || []);
         const commissionRows = await transaction.businessRecord.findMany({
           where: {
@@ -1207,7 +1251,7 @@ export function createRecoveryOrderCommandService(
           updatedAt: cleanedAt,
         };
         await writeRecoveryOrder(transaction, next);
-        return next;
+        return publicRecoveryOrder(next);
       }, {
         isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
         maxWait: 5_000,
@@ -1233,9 +1277,9 @@ export function createRecoveryOrderCommandService(
       const current = await lockRecoveryOrder(transaction, orderId);
       if (!recoveryVisible(current, scope)) throw new RecoveryCommandError(403, '无权审核该售后挽回订单');
       if (current.deletedAt) throw new RecoveryCommandError(409, '已删除售后挽回订单不能审核');
-      if (action === 'approve' && ['待分账', '已分账'].includes(current.status)) return current;
-      if (action === 'return' && current.status === '退回修改' && current.auditReason === normalizedReason) return current;
-      if (action === 'reject' && current.status === '审核驳回' && current.auditReason === normalizedReason) return current;
+      if (action === 'approve' && ['待分账', '已分账'].includes(current.status)) return publicRecoveryOrder(current);
+      if (action === 'return' && current.status === '退回修改' && current.auditReason === normalizedReason) return publicRecoveryOrder(current);
+      if (action === 'reject' && current.status === '审核驳回' && current.auditReason === normalizedReason) return publicRecoveryOrder(current);
       if (current.status !== '待审核') throw new RecoveryCommandError(409, '只有待审核售后挽回订单可以执行该操作');
       if (action === 'approve' && current.importBatchId) {
         const targetCreator = directory.users.find((user) => user.id === current.targetCreatorId && activeUser(user));
@@ -1244,8 +1288,15 @@ export function createRecoveryOrderCommandService(
         }
       }
       const changedAt = now().toISOString();
+      const crmResult = action === 'approve' && options.crmBridge
+        ? await options.crmBridge.resolveAndSyncLead(transaction, { ...current, auditedAt: changedAt, auditorId: actor.id, auditorName: actor.name })
+        : null;
+      if (crmResult?.crmIdentityStatus === '身份冲突') {
+        throw new RecoveryCommandError(409, '客户手机号或微信存在身份冲突，请退回修改联系方式后再审核');
+      }
       const next: RecoveryOrder = {
         ...current,
+        ...(crmResult || {}),
         status: action === 'approve' ? '待分账' : action === 'return' ? '退回修改' : '审核驳回',
         settlementStatus: action === 'approve' ? '待处理' : '未分账',
         auditorId: actor.id,
@@ -1257,7 +1308,7 @@ export function createRecoveryOrderCommandService(
         updatedAt: changedAt,
       };
       await writeRecoveryOrder(transaction, next);
-      return next;
+      return publicRecoveryOrder(next);
     }, {
       isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
       maxWait: 5_000,
@@ -1360,7 +1411,7 @@ export function createRecoveryOrderCommandService(
         updatedAt: changedAt,
       };
       await writeRecoveryOrder(transaction, next);
-      return next;
+      return publicRecoveryOrder(next);
     }, {
       isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
       maxWait: 5_000,

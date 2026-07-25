@@ -64,6 +64,8 @@ export interface Lead {
   lifecycleStatusUpdatedAt?: Timestamp;
   opportunityId?: ID;
   orderId?: ID;
+  /** 来源于售后挽回审核的线索与原业务单关联。 */
+  recoveryOrderId?: ID;
   intakeStatus?: LeadIntakeStatus;
   intakeFailureReason?: string;
   /** 线索录入人：操作留痕，不等同于贡献人 */

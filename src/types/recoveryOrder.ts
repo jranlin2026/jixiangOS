@@ -7,6 +7,7 @@ import type { BusinessImportMetadata } from './businessImport';
 export type RecoveryOrderStatus = '待审核' | '退回修改' | '审核驳回' | '待分账' | '已分账';
 export type RecoveryOrderSettlementStatus = '未分账' | '待处理' | '待确认' | '待发放' | '已发放' | '已撤回';
 export type RecoveryOrderMatchStatus = '手工填写' | '已绑定客户' | '售后临时客户';
+export type RecoveryCrmIdentityStatus = '待识别' | '已匹配客户' | '已匹配线索' | '待创建线索' | '身份冲突' | '已创建线索';
 
 export interface RecoveryOrder extends Partial<BusinessImportMetadata> {
   id: ID;
@@ -17,6 +18,12 @@ export interface RecoveryOrder extends Partial<BusinessImportMetadata> {
   customerPhone?: string;
   customerWechat?: string;
   customerMatchStatus: RecoveryOrderMatchStatus;
+  /** 售后原始填报快照；不得被 CRM 标准名称覆盖。 */
+  submittedCustomerName?: string;
+  /** 盲匹配只向售后暴露抽象状态，不暴露 CRM 客户资料。 */
+  crmIdentityStatus?: RecoveryCrmIdentityStatus;
+  linkedLeadId?: ID;
+  leadSyncStatus?: '不需要' | '待同步' | '已关联' | '已创建' | '失败';
   sourcePlatform?: string;
   sourcePlatformId?: ID;
   sourcePlatformName?: string;

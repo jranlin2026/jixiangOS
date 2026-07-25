@@ -15,6 +15,7 @@ const items: any[] = originalRowsBlob.map((payload, index) => ({
   status: index === 0 ? 'running' : 'queued', payload, reservedNumber: index === 0 ? 'tp-2' : null,
   recordId: null, errorMessage: null,
 }));
+items[0].payload.customerId = 'internal-customer-id';
 const reservations = new Map([['tp-2', { jobId: job.id, rowNumber: 2, normalizedNumber: 'tp-2' }]]);
 let batchStatus = 'queued';
 let jobRowsWrites = 0;
@@ -137,5 +138,6 @@ job.status = 'failed';
 const publicJob = await createBusinessImportReadRepository(db).getJob(job.id, { id: 'u1' } as any);
 assert.equal(publicJob?.rows?.[0].errorMessage, '导入执行失败，请重试或联系管理员');
 assert.doesNotMatch(JSON.stringify(publicJob), /INSERT|password|secret|private\/server/i);
+assert.doesNotMatch(JSON.stringify(publicJob), /internal-customer-id/, '导入任务查询不得向售后返回内部 CRM 客户 ID');
 
 console.log('business import persistence: ok');

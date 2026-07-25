@@ -538,6 +538,62 @@ const importedApproved = await importedService.approve(imported.data!.id, review
 assert.equal(importedApproved.code, 0, importedApproved.message);
 assert.equal(importedApproved.data?.createdBy, other.id, '审核通过后必须切换为目标正式创建人');
 
+const blindMatchPrisma = new FakePrisma();
+let approvalSyncMode: 'customer' | 'lead' | 'conflict' = 'customer';
+const blindMatchService = createRecoveryOrderCommandService(blindMatchPrisma as any, {
+  now: () => new Date(NOW),
+  crmBridge: {
+    resolve: async () => ({ status: '已匹配客户', customerId: 'crm-customer-secret' }),
+    resolveAndSyncLead: async () => approvalSyncMode === 'customer'
+      ? { customerId: 'crm-customer-secret', crmIdentityStatus: '已匹配客户', leadSyncStatus: '不需要' }
+      : approvalSyncMode === 'lead'
+        ? { customerId: '', linkedLeadId: 'lead-recovery-new', crmIdentityStatus: '已创建线索', leadSyncStatus: '已创建' }
+        : { customerId: '', crmIdentityStatus: '身份冲突', leadSyncStatus: '失败' },
+  },
+});
+const blindMatched = await blindMatchService.create(input({
+  thirdPartyOrderNo: 'TP-BLIND-MATCH', customerName: '售后现场称呼', customerPhone: '13800000000',
+}), creator);
+assert.equal(blindMatched.code, 0);
+assert.equal(blindMatched.data?.customerName, '售后现场称呼', '盲匹配不得用 CRM 标准名称覆盖售后原始填报');
+assert.equal(blindMatched.data?.submittedCustomerName, '售后现场称呼');
+assert.equal(blindMatched.data?.customerId, '', '创建响应不得向售后人员泄露 CRM 客户 ID');
+assert.equal(blindMatchPrisma.records().find((item) => item.id === blindMatched.data?.id)?.customerId, 'crm-customer-secret', '内部记录仍须保留盲匹配结果');
+assert.equal(blindMatched.data?.crmIdentityStatus, '已匹配客户');
+const invalidRecoveryPhone = await blindMatchService.create(input({
+  thirdPartyOrderNo: 'TP-INVALID-PHONE', customerPhone: '12345', customerWechat: '',
+}), creator);
+assert.equal(invalidRecoveryPhone.code, 400, '手工售后单也必须在建立 CRM 身份前校验手机号');
+const oversizedRecoveryName = await blindMatchService.create(input({
+  thirdPartyOrderNo: 'TP-OVERSIZED-NAME', customerName: '客'.repeat(121),
+}), creator);
+assert.equal(oversizedRecoveryName.code, 400, '应在提交时拦截无法写入 LeadRecord 的超长客户姓名');
+const blindMatchedEdited = await blindMatchService.update(blindMatched.data!.id, input({
+  thirdPartyOrderNo: 'TP-BLIND-MATCH', customerName: '售后修正称呼', customerPhone: '13800000001',
+}), reviewer);
+assert.equal(blindMatchedEdited.code, 0);
+assert.equal(blindMatchedEdited.data?.submittedCustomerName, '售后修正称呼', '编辑后应同步保留最新售后填报名称');
+
+approvalSyncMode = 'lead';
+const leadBackflow = await blindMatchService.create(input({
+  thirdPartyOrderNo: 'TP-LEAD-BACKFLOW', customerName: '外部新客', customerPhone: '13600000000',
+}), creator);
+const leadBackflowApproved = await blindMatchService.approve(leadBackflow.data!.id, reviewer);
+assert.equal(leadBackflowApproved.code, 0);
+assert.equal(leadBackflowApproved.data?.linkedLeadId, undefined, '审核响应不得泄露 CRM 线索 ID');
+assert.equal(blindMatchPrisma.records().find((item) => item.id === leadBackflow.data?.id)?.linkedLeadId, 'lead-recovery-new', '内部记录仍须保留线索关联');
+assert.equal(leadBackflowApproved.data?.crmIdentityStatus, '已创建线索');
+assert.equal(leadBackflowApproved.data?.leadSyncStatus, '已创建');
+const safeBlindDetail = await blindMatchService.get(blindMatched.data!.id, reviewer, 'recoveryOrderApplications');
+assert.equal(safeBlindDetail.data?.customerId, '', '售后详情响应不得下发内部 CRM 客户 ID');
+assert.equal(safeBlindDetail.data?.linkedLeadId, undefined, '售后详情响应不得下发内部 CRM 线索 ID');
+
+approvalSyncMode = 'conflict';
+const conflicted = await blindMatchService.create(input({ thirdPartyOrderNo: 'TP-IDENTITY-CONFLICT' }), creator);
+const conflictApproval = await blindMatchService.approve(conflicted.data!.id, reviewer);
+assert.equal(conflictApproval.code, 409, '审核时重新查重发现身份冲突必须阻止进入分账');
+assert.match(conflictApproval.message, /退回修改联系方式/);
+
 const legacyRetryPrisma = new FakePrisma();
 let legacyRetryNow = new Date('2026-07-12T18:00:00.000Z');
 const legacyRetryService = createRecoveryOrderCommandService(legacyRetryPrisma as any, { now: () => legacyRetryNow });

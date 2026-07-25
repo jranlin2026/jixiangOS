@@ -53,6 +53,8 @@ assert.equal(compactApplication.importWarnings, undefined);
 
 const recovery = {
   id: 'recovery-1',
+  customerId: 'internal-customer-id',
+  linkedLeadId: 'internal-lead-id',
   customerPhone: '13800000000',
   customerWechat: 'private-wechat',
   remark: 'private remark',
@@ -83,6 +85,8 @@ assert.equal(compactRecovery.importedById, undefined);
 assert.equal(compactRecovery.targetCreatorId, undefined);
 assert.equal(compactRecovery.targetCreatorName, undefined);
 assert.equal(compactRecovery.importWarnings, undefined);
+assert.equal(compactRecovery.customerId, '');
+assert.equal(compactRecovery.linkedLeadId, undefined);
 assert.ok(JSON.stringify(compactRecovery).length < JSON.stringify(recovery).length / 10);
 const compactSettlement = compactRecoverySettlementListItem(recovery);
 assert.equal(compactSettlement.customerPhone, undefined);

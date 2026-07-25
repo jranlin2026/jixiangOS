@@ -207,7 +207,7 @@ const RECOVERY_ORDER_LIST_COLUMNS: Array<TableViewColumnConfig & { id: RecoveryO
   { id: 'createdAt', label: '创建时间' },
   { id: 'customerPhone', label: '手机号' },
   { id: 'customerWechat', label: '微信' },
-  { id: 'customerMatchStatus', label: '客户匹配状态' },
+  { id: 'customerMatchStatus', label: 'CRM识别状态' },
   { id: 'sourcePlatformName', label: '来源平台' },
   { id: 'sourceShopName', label: '来源店铺' },
   { id: 'officialPaymentChannel', label: '官方收款渠道' },
@@ -239,7 +239,7 @@ const RECOVERY_ORDER_REVIEW_COLUMNS: Array<TableViewColumnConfig & { id: Recover
   { id: 'auditReason', label: '退回 / 驳回原因' },
   { id: 'customerPhone', label: '手机号' },
   { id: 'customerWechat', label: '微信' },
-  { id: 'customerMatchStatus', label: '客户匹配状态' },
+  { id: 'customerMatchStatus', label: 'CRM识别状态' },
   { id: 'sourcePlatformName', label: '来源平台' },
   { id: 'sourceShopName', label: '来源店铺' },
   { id: 'originalProductLevel', label: '原产品等级' },
@@ -684,7 +684,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
       case 'customerWechat':
         return row.customerWechat || '-';
       case 'customerMatchStatus':
-        return row.customerMatchStatus || '-';
+        return row.crmIdentityStatus || row.customerMatchStatus || '-';
       case 'thirdPartyOrderNo':
         return row.thirdPartyOrderNo;
       case 'sourcePlatformShop':
@@ -1127,6 +1127,9 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
         <DialogContent dividers>
           <Box sx={{ pt: 1 }}>
           <RecoveryFormSection title="客户资料">
+            <Alert severity="info" sx={{ gridColumn: '1 / -1' }}>
+              请仅填写已掌握的客户信息。系统只在后台按手机号和微信进行身份识别，不会向售后展示客户库资料；未识别记录在审核通过后会自动进入 CRM 待分配线索。
+            </Alert>
             <TextField label="客户姓名" value={form.customerName} onChange={(event) => setForm({ ...form, customerName: event.target.value })} required />
             <TextField label="客户手机号" value={form.customerPhone} onChange={(event) => setForm({ ...form, customerPhone: event.target.value })} />
             <TextField label="客户微信" value={form.customerWechat} onChange={(event) => setForm({ ...form, customerWechat: event.target.value })} />
@@ -1220,10 +1223,10 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
             <DialogContent dividers>
               <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>客户资料</Typography>
               <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 2 }}>
-                <DetailField label="客户名称">{detailOrder.customerName}</DetailField>
+                <DetailField label="售后填报客户名称">{detailOrder.submittedCustomerName || detailOrder.customerName}</DetailField>
                 <DetailField label="客户手机号">{detailOrder.customerPhone || '-'}</DetailField>
                 <DetailField label="客户微信">{detailOrder.customerWechat || '-'}</DetailField>
-                <DetailField label="客户匹配状态">{detailOrder.customerMatchStatus || '-'}</DetailField>
+                <DetailField label="CRM识别状态">{detailOrder.crmIdentityStatus || detailOrder.customerMatchStatus || '-'}</DetailField>
               </Box>
 
               <Divider sx={{ my: 2 }} />
@@ -1263,15 +1266,17 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
                     <DetailField label="导入人">{detailOrder.importedByName || '-'}</DetailField>
                     <DetailField label="导入时间">{detailOrder.importedAt ? formatDate(detailOrder.importedAt, 'yyyy-MM-dd HH:mm:ss') : '-'}</DetailField>
                     <DetailField label="目标订单创建人">{detailOrder.targetCreatorName || '-'}</DetailField>
-                    <DetailField label="客户匹配状态">{detailOrder.customerMatchStatus || '-'}</DetailField>
+                    <DetailField label="CRM识别状态">{detailOrder.crmIdentityStatus || detailOrder.customerMatchStatus || '-'}</DetailField>
                     <DetailField label="凭证状态">{getRecoveryEvidenceAttachments(detailOrder).length ? '已上传凭证' : '凭证缺失'}</DetailField>
                     <DetailField label="预检警告" wide>
                       {detailOrder.importWarnings?.length ? detailOrder.importWarnings.join('；') : '无'}
                     </DetailField>
                   </Box>
-                  {detailOrder.customerMatchStatus === '售后临时客户' ? (
+                  {['待创建线索', '身份冲突'].includes(detailOrder.crmIdentityStatus || '') ? (
                     <Alert severity="warning" sx={{ mt: 2 }}>
-                      该记录使用售后临时客户，审核前请确认联系方式和客户归属。
+                      {detailOrder.crmIdentityStatus === '身份冲突'
+                        ? '手机号或微信存在身份冲突，请退回修改后再审核。'
+                        : '当前未识别现有客户或线索；审核通过时系统会再次查重，并自动沉淀为待分配线索。'}
                     </Alert>
                   ) : null}
                   {!getRecoveryEvidenceAttachments(detailOrder).length ? (

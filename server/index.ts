@@ -77,6 +77,7 @@ import { createDeliveryCommandService } from './services/deliveryCommandService'
 import { createDeliveryQueryService } from './services/deliveryQueryService';
 import { createDeliveryAssignmentService } from './services/deliveryAssignmentService';
 import { createRecoveryOrderCommandService } from './services/recoveryOrderCommandService';
+import { createRecoveryCrmBridge } from './services/recoveryCrmBridge';
 import { createKnowledgeService } from './services/enablement/knowledgeService';
 import { createKnowledgeFileStore } from './services/enablement/knowledgeFileStore';
 import { createPrismaKnowledgeRepository } from './services/enablement/prismaKnowledgeRepository';
@@ -219,7 +220,9 @@ const orderQueryService = createOrderQueryService(prisma);
 const businessExportService = createBusinessExportService(prisma as any);
 const deliveryCommandService = createDeliveryCommandService(prisma, { assigner: deliveryAssignmentService });
 const deliveryQueryService = createDeliveryQueryService(prisma);
-const recoveryOrderCommandService = createRecoveryOrderCommandService(prisma);
+const recoveryOrderCommandService = createRecoveryOrderCommandService(prisma, {
+  crmBridge: createRecoveryCrmBridge({ contactIdentityCrypto }),
+});
 const businessImportReadService = createBusinessImportReadRepository(prisma);
 const businessImportReviewService = createBusinessImportReviewService({
   selectImportedRecords: createBusinessImportReviewSelector(prisma),

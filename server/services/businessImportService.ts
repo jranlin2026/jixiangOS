@@ -15,7 +15,7 @@ import {
   type RecoveryImportRow,
 } from '../../src/types/businessImport';
 import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
-import { normalizePhoneForStorage } from '../../src/shared/utils/phoneNumber';
+import { getPhoneNumberError, normalizePhoneForStorage } from '../../src/shared/utils/phoneNumber';
 
 export type BusinessImportCustomerMatch = { id: string; name: string; inScope: boolean };
 export type BusinessImportDirectory = BusinessImportTemplateOptions & {
@@ -240,7 +240,12 @@ export function validateBusinessImportRows(type: BusinessImportType, rows: Busin
       return { rowNumber: order.rowNumber, status: errors.length ? 'blocked' : 'ready', reason: errors.join('；') || '可导入', normalized: order, ...(customer && !errors.length ? { customerId: customer.id } : {}) };
     }
     const recovery = row as RecoveryImportRow;
-    if (!contactKeys(recovery).length) errors.push('售后挽回订单导入必须填写手机号或微信；未匹配客户时将创建售后临时客户');
+    if (recovery.customerName.length > 120) errors.push('客户姓名不能超过120个字符');
+    if (recovery.customerPhone.length > 50) errors.push('客户手机号不能超过50个字符');
+    if (recovery.customerWechat.length > 100) errors.push('客户微信不能超过100个字符');
+    const phoneError = getPhoneNumberError(recovery.customerPhone);
+    if (phoneError) errors.push(phoneError);
+    if (!contactKeys(recovery).length) errors.push('售后挽回订单导入必须填写手机号或微信');
     const platform = recovery.sourcePlatform ? oneByName(directory.recoveryPlatforms, recovery.sourcePlatform) : undefined;
     if (recovery.sourcePlatform && !platform) errors.push('来源平台不存在、已停用或重名');
     if (recovery.sourceShop && (!platform || !directory.recoveryShops.some((shop) => shop.platformId === platform.id && lower(shop.name) === lower(recovery.sourceShop)))) errors.push('来源店铺不存在、已停用或不属于所选平台');
@@ -255,9 +260,14 @@ export function validateBusinessImportRows(type: BusinessImportType, rows: Busin
     contacts.forEach((key) => (directory.customerMatchesByContact.get(key) || []).forEach((item) => candidates.set(item.id, item)));
     if (contacts.length && candidates.size > 1) errors.push('手机号或微信匹配到多个客户，无法确定售后挽回订单归属');
     const customer = candidates.values().next().value as BusinessImportCustomerMatch | undefined;
-    if (customer && !customer.inScope) errors.push('无权使用该客户创建售后挽回订单');
     const status = errors.length ? 'blocked' as const : customer ? 'ready' as const : 'warning' as const;
-    return { rowNumber: recovery.rowNumber, status, reason: errors.join('；') || (customer ? '可导入' : '未匹配客户，执行时将创建售后临时客户'), normalized: recovery, ...(customer && !errors.length ? { customerId: customer.id } : {}) };
+    return {
+      rowNumber: recovery.rowNumber,
+      status,
+      reason: errors.join('；') || (customer ? '已完成后台身份识别' : '未识别现有客户，审核通过后将查重并沉淀为线索'),
+      normalized: recovery,
+      ...(customer && !errors.length ? { customerId: customer.id } : {}),
+    };
   });
 }
 
