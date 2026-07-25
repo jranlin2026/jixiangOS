@@ -90,3 +90,29 @@
 - `npx prisma validate` with the local development environment: passed.
 - `npm run build`: passed.
 - `git diff --check`: passed.
+
+## Final standard re-review
+
+- Long-running jobs now re-read the importer and effective permissions before every row. The expensive directory/customer/config index remains job-cached only while an indexed `MAX(updatedAt)` revision across users, roles, departments, configuration, and customers is unchanged. Employee/customer/config changes invalidate the snapshot before the next row; imported order/recovery writes do not invalidate it, so a stable 5,000-row job remains linear and loads the full directory once.
+- Duplicate normalized `rowNumber` values are rejected both at the route DTO boundary and in service precheck/confirm before the `(jobId, rowNumber)` unique constraint.
+- Historical job-item backfill retains the first valid row number and deterministically reassigns duplicate, missing, invalid, or sub-2 row numbers above the historical maximum. The rewritten payload and normalized payload receive the assigned value.
+- Added an idempotent follow-up repair migration so environments that already applied the first job-item migration receive the same missing-row backfill and reservation cleanup safely.
+- Migration cleanup releases reservations belonging to terminal failed rows only when no exact imported order-application/recovery business record exists. Successful rows and failed rows with an already-created business record retain number protection.
+- Running/queued job reads no longer join or return all job items. Poll responses retain counts, omit full `rows`, and query at most 20 failed-row samples. Terminal job reads load complete rows on demand, preserving the existing completion page and failure-report behavior; batch reads remain summary-only.
+
+### Re-review TDD evidence
+
+- RED: after the first row, removing the importer's permission still allowed the second row to submit; GREEN: actor/permission loads occur for every row and the second row is rejected.
+- RED: disabling the selected salesperson during a job still used the cached directory; GREEN: a changed indexed directory revision reloads facts before the next row, while 5,000 stable rows load the directory once.
+- RED: duplicate row numbers reached precheck and route services; GREEN: both direct service and HTTP DTO tests return a 400 error.
+- RED: the real MySQL migration failed with duplicate historical row numbers; GREEN: the same isolated real migration test backfills duplicate/null rows as deterministic unique values and validates payload row numbers.
+- RED: a running 5,000-row job returned every item; GREEN: database-level `take: 20`, omitted full rows, and a bounded serialized response are asserted while terminal full rows remain available.
+- The real migration test also proves terminal failed-row reservation cleanup, successful/created-row retention, and the five revision-query indexes.
+
+### Re-review verification
+
+- `npm test`: 303 test files passed in the repository-default environment.
+- Focused execution, persistence, DTO/service, adapter, and route tests: passed.
+- Real local MySQL migration/backfill/cleanup and reservation-concurrency integration tests: passed.
+- Migrations `20260725020000_business_import_directory_revision` and `20260725030000_business_import_job_item_repair` deployed successfully to local `jixiang_os`.
+- Prisma validation/client generation, production build, and `git diff --check`: passed.

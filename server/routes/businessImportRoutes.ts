@@ -49,7 +49,7 @@ const RECOVERY_ROW_KEYS = [...COMMON_ROW_KEYS, 'originalProduct', 'sourcePlatfor
 
 function rows(type: BusinessImportType, value: unknown): BusinessImportRow[] {
   if (!Array.isArray(value)) throw new BusinessImportError('导入数据格式无效');
-  return value.map((candidate, index) => {
+  const parsed = value.map((candidate, index) => {
     const input = allowed(candidate, type === 'orders' ? [...ORDER_ROW_KEYS] : [...RECOVERY_ROW_KEYS]);
     const common = {
       rowNumber: Number(input.rowNumber || index + 2),
@@ -67,6 +67,10 @@ function rows(type: BusinessImportType, value: unknown): BusinessImportRow[] {
       paymentAt: String(input.paymentAt || ''), recoveryUserName: String(input.recoveryUserName || ''), assistUserName: String(input.assistUserName || ''),
     } as BusinessImportRow;
   });
+  if (new Set(parsed.map((row) => row.rowNumber)).size !== parsed.length) {
+    throw new BusinessImportError('导入数据 rowNumber 行号不能重复');
+  }
+  return parsed;
 }
 
 function user(request: AuthenticatedRequest) {

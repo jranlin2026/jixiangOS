@@ -19,6 +19,7 @@ const reservations = new Map([['tp-2', { jobId: job.id, rowNumber: 2, normalized
 let batchStatus = 'queued';
 let jobRowsWrites = 0;
 let itemQueries = 0;
+let itemReadTake: number | undefined;
 let businessRecordExists = false;
 const apply = (target: any, data: any) => Object.entries(data).forEach(([key, value]: any) => {
   if (key === 'rows') jobRowsWrites += 1;
@@ -42,7 +43,7 @@ const db: any = {
         || (where.leaseEpoch !== undefined && where.leaseEpoch !== job.leaseEpoch) || (where.status && where.status !== job.status)) return { count: 0 };
       apply(job, data); return { count: 1 };
     },
-    findUnique: async () => ({ ...clone(job), items: clone(items).sort((a, b) => a.rowNumber - b.rowNumber) }),
+    findUnique: async () => clone(job),
     update: async ({ data }: any) => { apply(job, data); return clone(job); },
   },
   businessImportJobItem: {
@@ -58,6 +59,11 @@ const db: any = {
       itemQueries += 1;
       return [...new Set(items.filter((item) => item.jobId === where.jobId).map((item) => item.status))]
         .map((status) => ({ status, _count: { _all: items.filter((item) => item.jobId === where.jobId && item.status === status).length } }));
+    },
+    findMany: async ({ where, take }: any) => {
+      itemReadTake = take;
+      const matched = items.filter((item) => item.jobId === where.jobId && (!where.status || item.status === where.status));
+      return clone(take === undefined ? matched : matched.slice(0, take));
     },
   },
   businessImportNumberReservation: {
@@ -107,6 +113,14 @@ reservations.set('tp-2', { jobId: job.id, rowNumber: 2, normalizedNumber: 'tp-2'
 businessRecordExists = true;
 assert.equal(await store.markFailed(lease!, 2, '响应丢失'), true);
 assert.equal(reservations.has('tp-2'), true, '已创建业务记录的行必须保留号码保护');
+
+job.status = 'running';
+items.slice(0, 100).forEach((item) => { item.status = 'failed'; item.errorMessage = '执行失败'; });
+const runningJob = await createBusinessImportReadRepository(db).getJob(job.id, { id: 'u1' } as any);
+assert.equal(runningJob?.rows, undefined, '轮询中不得返回 5000 行完整 payload');
+assert.ok((((runningJob as any)?.failedRowSample as any[] | undefined)?.length || 0) <= 20, '运行中失败摘要有固定上限');
+assert.equal(itemReadTake, 20, '运行中查询必须在数据库层限制行数');
+assert.ok(Buffer.byteLength(JSON.stringify(runningJob), 'utf8') < 50_000, '5000 行运行中轮询响应必须保持有界');
 
 items[0].errorMessage = 'INSERT INTO business_records password=secret\nError at /private/server.ts:99';
 job.status = 'failed';

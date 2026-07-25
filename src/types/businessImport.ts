@@ -117,6 +117,7 @@ export type BusinessImportJobResult = {
   successCount?: number;
   failedCount?: number;
   rows?: BusinessImportJobRow[];
+  failedRowSample?: BusinessImportJobRow[];
 };
 
 export type BusinessImportBatchResult = {

@@ -158,18 +158,30 @@ export function createBusinessImportReadRepository(prisma: PrismaClient) {
     totalCount: row.totalCount, successCount: row.successCount, failedCount: row.failedCount,
     rows: Array.isArray(row.items)
       ? row.items.map(itemResult)
-      : read<BusinessImportJobRow[]>(row.rows, []).map((item) => ({
+      : row.includeLegacyRows ? read<BusinessImportJobRow[]>(row.rows, []).map((item) => ({
         ...item,
         ...(item.errorMessage ? { errorMessage: safeBusinessImportErrorMessage(item.errorMessage) } : {}),
-      })),
+      })) : undefined,
+    ...(Array.isArray(row.failedItems) && row.failedItems.length
+      ? { failedRowSample: row.failedItems.map(itemResult) }
+      : {}),
   });
+  const terminal = (status: string) => ['succeeded', 'partial_failed', 'failed'].includes(status);
   return {
     async getJob(id: string, actor: AuthenticatedUser): Promise<BusinessImportJobResult | null> {
-      const row = await prisma.businessImportJob.findUnique({ where: { id }, include: { items: { orderBy: [{ rowNumber: 'asc' }, { id: 'asc' }] } } });
-      return row && row.actorId === actor.id ? result(row) : null;
+      const row = await prisma.businessImportJob.findUnique({ where: { id } });
+      if (!row || row.actorId !== actor.id) return null;
+      if (terminal(row.status)) {
+        const items = await prisma.businessImportJobItem.findMany({ where: { jobId: row.id }, orderBy: [{ rowNumber: 'asc' }, { id: 'asc' }] });
+        return result({ ...row, items, includeLegacyRows: items.length === 0 });
+      }
+      const failedItems = await prisma.businessImportJobItem.findMany({
+        where: { jobId: row.id, status: 'failed' }, orderBy: [{ rowNumber: 'asc' }, { id: 'asc' }], take: 20,
+      });
+      return result({ ...row, failedItems });
     },
     async getBatch(id: string, actor: AuthenticatedUser): Promise<BusinessImportBatchResult | null> {
-      const row = await prisma.businessImportBatch.findUnique({ where: { id }, include: { jobs: { include: { items: { orderBy: [{ rowNumber: 'asc' }, { id: 'asc' }] } } } } });
+      const row = await prisma.businessImportBatch.findUnique({ where: { id }, include: { jobs: true } });
       if (!row || row.actorId !== actor.id) return null;
       return {
         id: row.id, type: row.importType as BusinessImportType, status: row.status,

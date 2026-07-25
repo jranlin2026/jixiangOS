@@ -17,6 +17,18 @@ async function currentActor(prisma: PrismaClient, actorId: string): Promise<Auth
   return toAuthenticatedUser(mapPrismaUser(row), roles.map(mapPrismaRole).map(mergeRoleWithDefaultAccess));
 }
 
+async function currentDirectoryRevision(prisma: PrismaClient): Promise<string> {
+  const rows = await prisma.$queryRaw<Array<{ revision: string }>>`
+    SELECT CONCAT_WS('|',
+      COALESCE((SELECT DATE_FORMAT(MAX(updatedAt), '%Y-%m-%dT%H:%i:%s.%f') FROM users), ''),
+      COALESCE((SELECT DATE_FORMAT(MAX(updatedAt), '%Y-%m-%dT%H:%i:%s.%f') FROM roles), ''),
+      COALESCE((SELECT DATE_FORMAT(MAX(updatedAt), '%Y-%m-%dT%H:%i:%s.%f') FROM departments), ''),
+      COALESCE((SELECT DATE_FORMAT(MAX(updatedAt), '%Y-%m-%dT%H:%i:%s.%f') FROM app_storage), ''),
+      COALESCE((SELECT DATE_FORMAT(MAX(updatedAt), '%Y-%m-%dT%H:%i:%s.%f') FROM business_records WHERE domain = 'aaos_customers'), '')
+    ) AS revision`;
+  return String(rows[0]?.revision || 'empty');
+}
+
 function matchesForRow(directory: Awaited<ReturnType<typeof loadBusinessImportDirectory>>, row: BusinessImportJobRow) {
   const keys = businessImportContactKeys({ phone: String(row.normalized.customerPhone || ''), wechat: String(row.normalized.customerWechat || '') });
   const matches = new Map<string, { id: string; name: string; inScope: boolean }>();
@@ -27,6 +39,8 @@ function matchesForRow(directory: Awaited<ReturnType<typeof loadBusinessImportDi
 
 export function createPrismaBusinessImportRowExecutor(input: {
   prisma: PrismaClient;
+  loadExecutionActor?: (job: BusinessImportJobExecution) => Promise<AuthenticatedUser>;
+  loadExecutionRevision?: (job: BusinessImportJobExecution) => Promise<bigint | number | string>;
   loadExecutionSnapshot?: (job: BusinessImportJobExecution) => Promise<{ actor: AuthenticatedUser; directory: BusinessImportDirectory }>;
   orderApplications: {
     submitImported(data: any, actor: AuthenticatedUser, metadata: any, idempotencyKey: string): Promise<any>;
@@ -36,23 +50,28 @@ export function createPrismaBusinessImportRowExecutor(input: {
   };
 }) {
   const actors = new Map<string, AuthenticatedUser>();
-  const snapshots = new Map<string, Promise<{ actor: AuthenticatedUser; directory: BusinessImportDirectory }>>();
-  const snapshot = (job: BusinessImportJobExecution) => {
-    let loaded = snapshots.get(job.id);
-    if (!loaded) {
-      loaded = input.loadExecutionSnapshot ? input.loadExecutionSnapshot(job) : (async () => {
-        const actor = await currentActor(input.prisma, job.actorId);
-        const permission = job.type === 'orders' ? PERMISSION_KEYS.ORDER_IMPORT : PERMISSION_KEYS.AFTER_SALES_RECOVERY_IMPORT;
-        if (!hasPermission(actor, permission, 'write')) throw new Error('导入人权限已变化，任务已停止');
+  const snapshots = new Map<string, { revision: string; loaded: Promise<{ actor: AuthenticatedUser; directory: BusinessImportDirectory }> }>();
+  const snapshot = async (job: BusinessImportJobExecution, actor: AuthenticatedUser) => {
+    const revision = String(input.loadExecutionRevision
+      ? await input.loadExecutionRevision(job)
+      : await currentDirectoryRevision(input.prisma));
+    let cached = snapshots.get(job.id);
+    if (!cached || cached.revision !== revision) {
+      const loaded = input.loadExecutionSnapshot ? input.loadExecutionSnapshot(job) : (async () => {
         return { actor, directory: await loadBusinessImportDirectory(input.prisma, actor, job.type) };
       })();
-      snapshots.set(job.id, loaded);
+      cached = { revision, loaded };
+      snapshots.set(job.id, cached);
     }
-    return loaded;
+    return cached.loaded;
   };
   const executor = createBusinessImportRowExecutor({
     loadContext: async (job: BusinessImportJobExecution, row: BusinessImportJobRow) => {
-      const { actor, directory } = await snapshot(job);
+      const actor = input.loadExecutionActor ? await input.loadExecutionActor(job) : await currentActor(input.prisma, job.actorId);
+      if (!actor.isActive) throw new Error('导入人不存在或已停用');
+      const permission = job.type === 'orders' ? PERMISSION_KEYS.ORDER_IMPORT : PERMISSION_KEYS.AFTER_SALES_RECOVERY_IMPORT;
+      if (!hasPermission(actor, permission, 'write')) throw new Error('导入人权限已变化，任务已停止');
+      const { directory } = await snapshot(job, actor);
       actors.set(job.id, actor);
       return {
         actor, users: directory.users, products: directory.products, orderTypes: directory.orderTypes,

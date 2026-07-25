@@ -69,6 +69,15 @@ await assert.rejects(
   'the same signed precheck can only create one persistent job',
 );
 
+await assert.rejects(
+  () => service.precheck({ type: 'orders', rows: [
+    { ...orderRow, rowNumber: 21, thirdPartyOrderNo: 'TP-row-a' },
+    { ...orderRow, rowNumber: 21, thirdPartyOrderNo: 'TP-row-b' },
+  ] }, actor),
+  (error: unknown) => error instanceof BusinessImportError && error.status === 400 && /rowNumber|行号/.test(error.message),
+  '服务层在写入 job item 唯一约束前拒绝重复行号',
+);
+
 const ambiguous = await service.precheck({
   type: 'orders',
   rows: [

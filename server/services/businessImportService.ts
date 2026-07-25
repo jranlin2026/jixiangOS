@@ -78,6 +78,14 @@ function assertRows(rows: BusinessImportRow[]): void {
   if (rows.length > BUSINESS_IMPORT_MAX_ROWS) throw new BusinessImportError(`单次最多导入 ${BUSINESS_IMPORT_MAX_ROWS} 条数据，请拆分文件后重试`);
 }
 
+function assertUniqueRowNumbers(rows: BusinessImportRow[]): void {
+  const seen = new Set<number>();
+  for (const row of rows) {
+    if (seen.has(row.rowNumber)) throw new BusinessImportError('导入数据 rowNumber 行号不能重复');
+    seen.add(row.rowNumber);
+  }
+}
+
 function normalizeRow(type: BusinessImportType, row: BusinessImportRow, index: number): BusinessImportRow {
   const common = {
     rowNumber: Number.isFinite(Number(row.rowNumber)) ? Math.max(2, Math.floor(Number(row.rowNumber))) : index + 2,
@@ -181,6 +189,7 @@ export function createBusinessImportService(deps: BusinessImportDependencies) {
   const prepare = async (request: BusinessImportRequest, user: AuthenticatedUser) => {
     assertPermission(user, request.type); assertRows(request.rows);
     const normalized = request.rows.map((row, index) => normalizeRow(request.type, row, index));
+    assertUniqueRowNumbers(normalized);
     const directory = await deps.loadDirectory(user, request.type, normalized);
     return { normalized, validated: validateBusinessImportRows(request.type, normalized, directory) };
   };

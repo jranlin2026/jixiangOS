@@ -21,6 +21,7 @@ model Department {
   updatedAt   DateTime @updatedAt
 
   @@index([parentId])
+  @@index([updatedAt], map: "departments_updatedAt_idx")
   @@map("departments")
 }
 
@@ -54,6 +55,7 @@ model Role {
   updatedAt    DateTime @updatedAt
 
   @@index([departmentId])
+  @@index([updatedAt], map: "roles_updatedAt_idx")
   @@map("roles")
 }
 
@@ -85,6 +87,7 @@ model User {
 
   @@index([departmentId])
   @@index([roleId])
+  @@index([updatedAt], map: "users_updatedAt_idx")
   @@map("users")
 }
 
@@ -108,6 +111,7 @@ model AppStorage {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([updatedAt], map: "app_storage_updatedAt_idx")
   @@map("app_storage")
 }
 
@@ -333,6 +337,7 @@ model BusinessRecord {
   @@index([eventAt])
   @@index([domain, mergedIntoId])
   @@index([domain, mergeLedgerId])
+  @@index([domain, updatedAt], map: "business_records_domain_updatedAt_idx")
   @@map("business_records")
 }
 

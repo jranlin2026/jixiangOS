@@ -1,24 +1,4 @@
-CREATE TABLE `business_import_job_items` (
-  `id` VARCHAR(64) NOT NULL,
-  `jobId` VARCHAR(64) NOT NULL,
-  `rowNumber` INTEGER NOT NULL,
-  `status` VARCHAR(32) NOT NULL,
-  `payload` JSON NOT NULL,
-  `reservedNumber` VARCHAR(191) NULL,
-  `recordId` VARCHAR(80) NULL,
-  `errorMessage` TEXT NULL,
-  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  `updatedAt` DATETIME(3) NOT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE INDEX `business_import_job_items_job_row_uq` (`jobId`, `rowNumber`),
-  INDEX `business_import_job_items_job_status_row_idx` (`jobId`, `status`, `rowNumber`),
-  CONSTRAINT `business_import_job_items_jobId_fkey` FOREIGN KEY (`jobId`) REFERENCES `business_import_jobs`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-ALTER TABLE `business_import_number_reservations`
-  ADD COLUMN `rowNumber` INTEGER NULL;
-
-INSERT INTO `business_import_job_items`
+INSERT IGNORE INTO `business_import_job_items`
   (`id`, `jobId`, `rowNumber`, `status`, `payload`, `reservedNumber`, `recordId`, `errorMessage`, `createdAt`, `updatedAt`)
 WITH parsed AS (
   SELECT
