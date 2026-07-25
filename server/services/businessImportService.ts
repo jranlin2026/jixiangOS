@@ -53,6 +53,8 @@ export type BusinessImportDependencies = {
     fileName: string;
     rows: ValidatedBusinessImportRow[];
   }): Promise<BusinessImportJobResult>;
+  /** 确认阶段从私有附件存储重新校验附件所有权、分类和文件名。 */
+  validateAttachments?(user: AuthenticatedUser, type: BusinessImportType, rows: BusinessImportRow[], expectedDraftId: string): Promise<void>;
 };
 
 type TokenPayload = { actorId: string; type: BusinessImportType; rowsHash: string; expiresAt: string; nonce: string };
@@ -102,14 +104,86 @@ function normalizeRow(type: BusinessImportType, row: BusinessImportRow, index: n
   };
   if (type === 'orders') {
     const input = row as OrderImportRow;
-    return { ...common, productName: text(input.productName), orderType: text(input.orderType), paymentAmount: text(input.paymentAmount), paidAt: normalizeDate(input.paidAt), paymentOrderNo: text(input.paymentOrderNo), salesUserName: text(input.salesUserName), creatorName: text(input.creatorName), notes: text(input.notes) };
+    return {
+      ...common, productName: text(input.productName), orderType: text(input.orderType), paymentAmount: text(input.paymentAmount),
+      paidAt: normalizeDate(input.paidAt), paymentOrderNo: text(input.paymentOrderNo), salesUserName: text(input.salesUserName),
+      creatorName: text(input.creatorName), notes: text(input.notes), paymentProofFileName: text(input.paymentProofFileName),
+      dealEvidenceFileNames: text(input.dealEvidenceFileNames),
+      paymentProofAttachmentIds: normalizeAttachmentIds(input.paymentProofAttachmentIds),
+      dealEvidenceAttachmentIds: normalizeAttachmentIds(input.dealEvidenceAttachmentIds),
+    };
   }
   const input = row as RecoveryImportRow;
-  return { ...common, originalProduct: text(input.originalProduct), sourcePlatform: text(input.sourcePlatform), sourceShop: text(input.sourceShop), originalAmount: text(input.originalAmount), recoveryAmount: text(input.recoveryAmount), recoveryAt: normalizeDate(input.recoveryAt), paymentOrderNo: text(input.paymentOrderNo), paymentAt: normalizeDate(input.paymentAt), recoveryUserName: text(input.recoveryUserName), assistUserName: text(input.assistUserName), creatorName: text(input.creatorName) };
+  return {
+    ...common, originalProduct: text(input.originalProduct), sourcePlatform: text(input.sourcePlatform), sourceShop: text(input.sourceShop),
+    originalAmount: text(input.originalAmount), recoveryAmount: text(input.recoveryAmount), recoveryAt: normalizeDate(input.recoveryAt),
+    paymentOrderNo: text(input.paymentOrderNo), paymentAt: normalizeDate(input.paymentAt), recoveryUserName: text(input.recoveryUserName),
+    assistUserName: text(input.assistUserName), creatorName: text(input.creatorName),
+    recoveryEvidenceFileNames: text(input.recoveryEvidenceFileNames),
+    recoveryEvidenceAttachmentIds: normalizeAttachmentIds(input.recoveryEvidenceAttachmentIds),
+  };
 }
 
 function rowHash(type: BusinessImportType, rows: BusinessImportRow[]): string {
-  return createHash('sha256').update(JSON.stringify({ type, rows }), 'utf8').digest('hex');
+  const signableRows = rows.map((row) => {
+    const signable = { ...row } as Record<string, unknown>;
+    delete signable.paymentProofAttachmentIds;
+    delete signable.dealEvidenceAttachmentIds;
+    delete signable.recoveryEvidenceAttachmentIds;
+    return signable;
+  });
+  return createHash('sha256').update(JSON.stringify({ type, rows: signableRows }), 'utf8').digest('hex');
+}
+
+function normalizeAttachmentIds(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new BusinessImportError('导入图片上传结果无效');
+  const ids = value.map(text);
+  if (ids.some((id) => !id) || new Set(ids).size !== ids.length) throw new BusinessImportError('导入图片上传结果无效');
+  return ids;
+}
+
+function attachmentNames(value: unknown, max: number): string[] {
+  const raw = text(value);
+  if (!raw) return [];
+  const names = raw.split(/[;；\n\r]+/u).map(text).filter(Boolean);
+  if (names.length > max || new Set(names.map(lower)).size !== names.length) return [];
+  return names;
+}
+
+function attachmentManifestErrors(type: BusinessImportType, row: BusinessImportRow): string[] {
+  const errors: string[] = [];
+  if (type === 'orders') {
+    const order = row as OrderImportRow;
+    const paymentNames = attachmentNames(order.paymentProofFileName, 1);
+    const dealNames = attachmentNames(order.dealEvidenceFileNames, 8);
+    if (text(order.paymentProofFileName) && !paymentNames.length) errors.push('付款截图文件名无效、重复或超过 1 张');
+    if (text(order.dealEvidenceFileNames) && !dealNames.length) errors.push('成交资料图片文件名无效、重复或超过 8 张');
+    return errors;
+  }
+  const recovery = row as RecoveryImportRow;
+  const names = attachmentNames(recovery.recoveryEvidenceFileNames, 8);
+  if (text(recovery.recoveryEvidenceFileNames) && !names.length) errors.push('挽回凭证文件名无效、重复或超过 8 张');
+  return errors;
+}
+
+function assertUploadedAttachmentIds(type: BusinessImportType, rows: BusinessImportRow[]): void {
+  for (const row of rows) {
+    if (type === 'orders') {
+      const order = row as OrderImportRow;
+      if (attachmentNames(order.paymentProofFileName, 1).length !== (order.paymentProofAttachmentIds || []).length) {
+        throw new BusinessImportError(`第 ${row.rowNumber} 行：付款截图上传结果不完整`, 409);
+      }
+      if (attachmentNames(order.dealEvidenceFileNames, 8).length !== (order.dealEvidenceAttachmentIds || []).length) {
+        throw new BusinessImportError(`第 ${row.rowNumber} 行：成交资料上传结果不完整`, 409);
+      }
+      continue;
+    }
+    const recovery = row as RecoveryImportRow;
+    if (attachmentNames(recovery.recoveryEvidenceFileNames, 8).length !== (recovery.recoveryEvidenceAttachmentIds || []).length) {
+      throw new BusinessImportError(`第 ${row.rowNumber} 行：挽回凭证上传结果不完整`, 409);
+    }
+  }
 }
 
 function sign(payload: TokenPayload, secret: string): string {
@@ -138,7 +212,7 @@ function contactKeys(row: Pick<BusinessImportRow, 'customerPhone' | 'customerWec
 export function validateBusinessImportRows(type: BusinessImportType, rows: BusinessImportRow[], directory: BusinessImportDirectory): ValidatedBusinessImportRow[] {
   const encounteredNumbers = new Set<string>();
   return rows.map((row) => {
-    const errors: string[] = [];
+    const errors: string[] = attachmentManifestErrors(type, row);
     const orderNumber = lower(row.thirdPartyOrderNo);
     const existing = type === 'orders' ? directory.existingOrderNumbers : directory.existingRecoveryOrderNumbers;
     if (type === 'recovery_orders' && !orderNumber) errors.push('第三方订单号不能为空');
@@ -190,10 +264,19 @@ export function validateBusinessImportRows(type: BusinessImportType, rows: Busin
 export function createBusinessImportService(deps: BusinessImportDependencies) {
   if (text(deps.secret).length < 16) throw new Error('业务导入签名密钥至少需要16个字符');
   const now = () => deps.now?.() || new Date();
-  const prepare = async (request: BusinessImportRequest, user: AuthenticatedUser) => {
+  const prepare = async (request: BusinessImportRequest, user: AuthenticatedUser, requireUploadedAttachments = false, expectedDraftId = '') => {
     assertPermission(user, request.type); assertRows(request.rows);
     const normalized = request.rows.map((row, index) => normalizeRow(request.type, row, index));
     assertUniqueRowNumbers(normalized);
+    if (requireUploadedAttachments) {
+      assertUploadedAttachmentIds(request.type, normalized);
+      const hasAttachments = normalized.some((row) => (
+        (row as OrderImportRow).paymentProofAttachmentIds?.length
+        || (row as OrderImportRow).dealEvidenceAttachmentIds?.length
+        || (row as RecoveryImportRow).recoveryEvidenceAttachmentIds?.length
+      ));
+      if (hasAttachments) await deps.validateAttachments?.(user, request.type, normalized, expectedDraftId);
+    }
     const directory = await deps.loadDirectory(user, request.type, normalized);
     return { normalized, validated: validateBusinessImportRows(request.type, normalized, directory) };
   };
@@ -219,7 +302,7 @@ export function createBusinessImportService(deps: BusinessImportDependencies) {
       if (!text(request.fileName)) throw new BusinessImportError('导入文件名不能为空');
       const token = parseToken(request.confirmationToken, deps.secret);
       if (token.actorId !== user.id || token.type !== request.type || new Date(token.expiresAt).getTime() <= now().getTime()) throw new BusinessImportError('导入预检凭证无效或已过期', 409);
-      const prepared = await prepare(request, user);
+      const prepared = await prepare(request, user, true, tokenHash(request.confirmationToken));
       if (token.rowsHash !== rowHash(request.type, prepared.normalized)) throw new BusinessImportError('导入文件与预检内容不一致，请重新预检', 409);
       if (prepared.validated.some((row) => row.status === 'blocked')) throw new BusinessImportError('导入数据或配置已变化，请重新预检', 409);
       return deps.consumePrecheckAndCreateJob({ tokenHash: tokenHash(request.confirmationToken), actorId: user.id, type: request.type, rowsHash: token.rowsHash, expiresAt: token.expiresAt, fileName: text(request.fileName), rows: prepared.validated });

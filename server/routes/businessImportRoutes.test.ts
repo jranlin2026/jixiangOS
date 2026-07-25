@@ -15,7 +15,7 @@ app.use('/api/business-imports', createBusinessImportRouter({
     precheck: async (input: any) => { calls.push(`precheck:${input.type}:${input.rows[0]?.customerPhone}`); return { readyCount: input.rows.length }; },
     confirm: async (input: any) => {
       if (input.confirmationToken === 'invalid') throw new BusinessImportError('导入预检凭证无效或已过期', 409);
-      calls.push(`confirm:${input.type}:${input.confirmationToken}`); return { id: 'job-1', batchId: 'batch-1', status: 'queued' };
+      calls.push(`confirm:${input.type}:${input.confirmationToken}:${input.rows[0]?.paymentProofAttachmentIds?.length || 0}`); return { id: 'job-1', batchId: 'batch-1', status: 'queued' };
     },
   },
   readService: {
@@ -37,7 +37,9 @@ try {
   const row = { rowNumber: 2, customerPhone: '13800000000', customerWechat: '', productName: '训练营', orderType: '新购', paymentChannel: '企业微信转账', paymentAmount: '1999', paidAt: '2026-07-23', salesUserName: '销售甲', thirdPartyOrderNo: 'TP-1', remark: '' };
   const recoveryRow = { rowNumber: 2, customerName: '客户甲', customerPhone: '13800000000', customerWechat: '', originalProduct: '训练营', sourcePlatform: '抖音', sourceShop: '旗舰店', paymentChannel: '对公银行转账', originalAmount: '1999', recoveryAmount: '299', recoveryAt: '2026-07-23', paymentOrderNo: '', paymentAt: '', recoveryUserName: '销售甲', assistUserName: '', creatorName: '', thirdPartyOrderNo: 'RCV-1', remark: '' };
   assert.equal((await fetch(`${base}/orders/precheck`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [row] }) })).status, 200);
-  const confirmedResponse = await fetch(`${base}/orders/confirm`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [row], confirmationToken: 'one-time', fileName: 'orders.xlsx' }) });
+  const confirmedResponse = await fetch(`${base}/orders/confirm`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [{
+    ...row, paymentProofFileName: '付款.jpg', paymentProofAttachmentIds: ['attachment-1'],
+  }], confirmationToken: 'one-time', fileName: 'orders.zip' }) });
   assert.equal(confirmedResponse.status, 201);
   assert.equal((await confirmedResponse.json() as any).data.batchId, 'batch-1');
   assert.equal((await fetch(`${base}/recovery-orders/precheck`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [recoveryRow] }) })).status, 200);
@@ -57,7 +59,7 @@ try {
   assert.equal(review.status, 200);
   const reviewBody = await review.json() as any;
   assert.equal(reviewBody.data.failedCount, 1);
-  assert.deepEqual(calls, ['template:orders', 'precheck:orders:13800000000', 'confirm:orders:one-time', 'precheck:recovery_orders:13800000000', 'review:orders:approve']);
+  assert.deepEqual(calls, ['template:orders', 'precheck:orders:13800000000', 'confirm:orders:one-time:1', 'precheck:recovery_orders:13800000000', 'review:orders:approve']);
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }

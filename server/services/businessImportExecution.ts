@@ -10,6 +10,7 @@ import type { OrderApplication } from '../../src/types/order';
 import type { RecoveryOrder, RecoveryOrderInput, RecoveryOrderMatchStatus } from '../../src/types/recoveryOrder';
 import type { OfficialPaymentChannel } from '../../src/types/commission';
 import type { PaymentMethod } from '../../src/types/common';
+import type { BusinessAttachment } from '../../src/types/businessAttachment';
 import { safeBusinessImportErrorMessage } from './businessImportError';
 
 type DirectoryUser = { id: string; name: string };
@@ -93,6 +94,11 @@ function metadata(job: BusinessImportJobExecution, row: BusinessImportJobRow, co
 
 export function createBusinessImportRowExecutor(deps: {
   loadContext(job: BusinessImportJobExecution, row: BusinessImportJobRow): Promise<BusinessImportExecutionContext>;
+  loadAttachments?(job: BusinessImportJobExecution, row: BusinessImportJobRow): Promise<{
+    paymentProof: BusinessAttachment[];
+    dealEvidence: BusinessAttachment[];
+    recoveryEvidence: BusinessAttachment[];
+  }>;
   submitImportedOrderApplication(input: ImportedOrderInput): Promise<{ id: string }>;
   createImportedRecoveryOrder(input: ImportedRecoveryInput): Promise<{ id: string }>;
 }): BusinessImportRowExecutor {
@@ -107,6 +113,9 @@ export function createBusinessImportRowExecutor(deps: {
         : context.actor;
       const importMetadata = metadata(job, row, context, targetCreator);
       const idempotencyKey = `${job.id}:${row.rowNumber}`;
+      const attachments = deps.loadAttachments
+        ? await deps.loadAttachments(job, row)
+        : { paymentProof: [], dealEvidence: [], recoveryEvidence: [] };
 
       if (job.type === 'orders') {
         const input = row.normalized as OrderImportRow;
@@ -132,10 +141,12 @@ export function createBusinessImportRowExecutor(deps: {
             owner: sales.name, salesId: sales.id, salesName: sales.name,
             thirdPartyOrderNo: clean(input.thirdPartyOrderNo) || undefined,
             notes: clean(input.notes) || clean(input.remark) || undefined,
+            dealEvidenceAttachments: attachments.dealEvidence,
             payments: [{
               id: `import-payment-${job.id}-${row.rowNumber}`, amount,
               paymentMethod, paidAt: clean(input.paidAt),
               paymentOrderNo: clean(input.paymentOrderNo) || undefined,
+              attachments: attachments.paymentProof,
               remark: clean(input.remark) || undefined,
             }],
           },
@@ -166,6 +177,7 @@ export function createBusinessImportRowExecutor(deps: {
           paymentOrderNo: clean(input.paymentOrderNo) || undefined, paymentAt: clean(input.paymentAt) || undefined,
           recoveryUserId: recoveryUser.id, recoveryUserName: recoveryUser.name,
           assistUserId: assistUser?.id, assistUserName: assistUser?.name,
+          recoveryAttachments: attachments.recoveryEvidence,
           remark: clean(input.remark) || undefined, createdBy: context.actor.id, createdByName: context.actor.name,
         },
       });

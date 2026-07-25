@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 import { createServer } from 'vite';
 import {
   createBusinessImportTemplateWorkbook,
@@ -8,6 +9,7 @@ import {
   ORDER_IMPORT_HEADERS,
   RECOVERY_IMPORT_HEADERS,
   parseBusinessImportWorkbook,
+  parseBusinessImportPackage,
   validateBusinessImportFile,
 } from './businessImportWorkbook';
 import type { BusinessImportTemplateOptions } from '../types/businessImport';
@@ -42,7 +44,8 @@ assert.equal(sheet.getCell('J2').numFmt, '@');
 assert.equal(sheet.getCell('K2').numFmt, '@');
 assert.equal(workbook.getWorksheet('字段选项')?.state, 'hidden');
 assert.ok(workbook.getWorksheet('填写说明'));
-assert.equal(ORDER_IMPORT_HEADERS.some((header) => /凭证|图片/u.test(header)), false);
+assert.ok(ORDER_IMPORT_HEADERS.includes('付款截图文件名'));
+assert.ok(ORDER_IMPORT_HEADERS.includes('成交资料图片文件名'));
 
 const recoveryBuffer = await createBusinessImportTemplateWorkbook('recovery_orders', options);
 const recoveryWorkbook = new ExcelJS.Workbook();
@@ -57,7 +60,7 @@ assert.match(recoverySheet.getCell('F2').numFmt, /0\.00/);
 assert.match(recoverySheet.getCell('G2').numFmt, /yyyy/);
 assert.equal(recoverySheet.getCell('B2').numFmt, '@');
 assert.equal(recoverySheet.getCell('D2').numFmt, '@');
-assert.equal(RECOVERY_IMPORT_HEADERS.some((header) => /凭证|图片/u.test(header)), false);
+assert.ok(RECOVERY_IMPORT_HEADERS.includes('挽回凭证文件名'));
 
 const xlsxMime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 assert.doesNotThrow(() => validateBusinessImportFile({ name: '订单.XLSX', size: 1024, type: xlsxMime }));
@@ -79,7 +82,7 @@ const parsedOrders = await parseBusinessImportWorkbook('orders', await workbookB
   ORDER_IMPORT_HEADERS,
   [[
     '客户甲', '013800000001', 'wx_001', '增长训练营', '新购', 1999.5, '企业微信转账',
-    '2026-07-24 10:30:00', '销售甲', '0000123', '0000456', '销售乙', '首单',
+    '2026-07-24 10:30:00', '销售甲', '0000123', '0000456', '销售乙', '首单', '付款001.jpg', '聊天01.jpg;聊天02.png',
   ]],
 ));
 assert.equal(parsedOrders.length, 1);
@@ -88,8 +91,21 @@ assert.deepEqual(parsedOrders[0], {
   customerName: '客户甲', customerPhone: '013800000001', customerWechat: 'wx_001',
   productName: '增长训练营', orderType: '新购', paymentAmount: 1999.5,
   paymentChannel: '企业微信转账', paidAt: '2026-07-24 10:30:00', salesUserName: '销售甲',
-  paymentOrderNo: '0000123', thirdPartyOrderNo: '0000456', creatorName: '销售乙', notes: '首单', remark: '',
+  paymentOrderNo: '0000123', thirdPartyOrderNo: '0000456', creatorName: '销售乙', notes: '首单',
+  paymentProofFileName: '付款001.jpg', dealEvidenceFileNames: '聊天01.jpg;聊天02.png', remark: '',
 });
+
+const numericPhoneWorkbook = new ExcelJS.Workbook();
+const numericPhoneSheet = numericPhoneWorkbook.addWorksheet('订单导入模板');
+numericPhoneSheet.addRow([...ORDER_IMPORT_HEADERS]);
+numericPhoneSheet.addRow([
+  '客户乙', 17791873333, '', '增长训练营', '新购', 900, '企业微信转账',
+  '2026-07-24 10:30:00', '销售甲', '', '', '', '',
+]);
+numericPhoneSheet.getCell('B2').numFmt = '@';
+const parsedNumericPhone = await parseBusinessImportWorkbook('orders', await numericPhoneWorkbook.xlsx.writeBuffer());
+assert.equal(parsedNumericPhone[0]?.customerPhone, '17791873333',
+  'Excel/WPS may persist a valid 11-digit phone as a safe integer even when the cell number format is text');
 
 const excelDateRows = [
   [...validOrderRowForDate(), new Date(Date.UTC(2026, 6, 24, 10, 30, 0))],
@@ -137,14 +153,19 @@ const validOrderRow: unknown[] = [
   '2026-07-24', '销售甲', '', '', '', '',
 ];
 await assert.rejects(
-  async () => parseBusinessImportWorkbook('orders', await workbookBuffer('订单导入模板', [...ORDER_IMPORT_HEADERS, ''], [[...validOrderRow, '未映射数据']])),
-  /第 2 行.*第 14 列.*表头/,
+  async () => parseBusinessImportWorkbook('orders', await workbookBuffer('订单导入模板', [...ORDER_IMPORT_HEADERS, ''], [[...validOrderRow, '', '', '未映射数据']])),
+  /第 2 行.*第 16 列.*表头/,
 );
 const invalidOrder = async (column: number, value: unknown) => {
   const row = [...validOrderRow];
   row[column - 1] = value;
   return workbookBuffer('订单导入模板', ORDER_IMPORT_HEADERS, [row]);
 };
+await assert.rejects(
+  async () => parseBusinessImportWorkbook('orders', await invalidOrder(2, 12345678901)),
+  /第 2 行.*手机号.*文本格式/,
+  '非法的数值手机号不得利用自动转文本绕过校验',
+);
 await assert.rejects(
   async () => parseBusinessImportWorkbook('orders', await workbookBuffer('订单导入模板', ORDER_IMPORT_HEADERS, [[...validOrderRow.slice(0, 1), '', '', ...validOrderRow.slice(3)]])),
   /第 2 行.*手机号或微信/,
@@ -187,7 +208,7 @@ const parsedRecovery = await parseBusinessImportWorkbook('recovery_orders', awai
   RECOVERY_IMPORT_HEADERS,
   [[
     '客户乙', '', 'wx_0002', '0000789', '旧课程', 800, '2026-07-24', '销售甲',
-    '抖音', '旗舰店', '1200.00', '企业微信转账', '0000999', '2026-07-20 09:00', '销售乙', '', '再次成交',
+    '抖音', '旗舰店', '1200.00', '企业微信转账', '0000999', '2026-07-20 09:00', '销售乙', '', '再次成交', '挽回01.jpg;挽回02.webp',
   ]],
 ));
 assert.deepEqual(parsedRecovery[0], {
@@ -196,7 +217,50 @@ assert.deepEqual(parsedRecovery[0], {
   originalProduct: '旧课程', recoveryAmount: 800, recoveryAt: '2026-07-24', recoveryUserName: '销售甲',
   sourcePlatform: '抖音', sourceShop: '旗舰店', originalAmount: '1200.00', paymentChannel: '企业微信转账',
   paymentOrderNo: '0000999', paymentAt: '2026-07-20 09:00', assistUserName: '销售乙', creatorName: '', remark: '再次成交',
+  recoveryEvidenceFileNames: '挽回01.jpg;挽回02.webp',
 });
+
+const packageOrderWorkbook = await workbookBuffer('订单导入模板', ORDER_IMPORT_HEADERS, [[
+  '客户丙', '13800000000', '', '增长训练营', '新购', 399, '企业微信转账',
+  '2026-07-24', '销售甲', '', 'TP-ZIP', '', '', '付款001.jpg', '图片/聊天01.png;聊天02.webp',
+]]);
+await assert.rejects(
+  () => parseBusinessImportPackage('orders', '订单.xlsx', packageOrderWorkbook),
+  /图片文件名.*ZIP/,
+  '纯 Excel 可以继续导入无图记录，但引用图片时必须上传 ZIP 包',
+);
+const orderZip = new JSZip();
+orderZip.file('订单导入.xlsx', packageOrderWorkbook);
+orderZip.file('付款001.jpg', Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]));
+orderZip.file('图片/聊天01.png', Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+orderZip.file('聊天02.webp', Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]));
+const parsedOrderPackage = await parseBusinessImportPackage('orders', '订单导入.zip', await orderZip.generateAsync({ type: 'arraybuffer' }));
+assert.equal(parsedOrderPackage.rows.length, 1);
+assert.deepEqual(parsedOrderPackage.images.map((image) => [image.rowNumber, image.category, image.name]), [
+  [2, 'order-payment-proof', '付款001.jpg'],
+  [2, 'order-deal-evidence', '图片/聊天01.png'],
+  [2, 'order-deal-evidence', '聊天02.webp'],
+]);
+
+const recoveryPackageWorkbook = await workbookBuffer('售后挽回订单导入模板', RECOVERY_IMPORT_HEADERS, [[
+  '客户丁', '', 'wx-4', 'RCV-ZIP', '老产品', 299, '2026-07-24', '销售甲',
+  '', '', '', '', '', '', '', '', '', '凭证1.jpg;凭证2.png',
+]]);
+const recoveryZip = new JSZip();
+recoveryZip.file('售后挽回.xlsx', recoveryPackageWorkbook);
+recoveryZip.file('凭证1.jpg', Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]));
+recoveryZip.file('凭证2.png', Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+const parsedRecoveryPackage = await parseBusinessImportPackage('recovery_orders', '售后挽回.zip', await recoveryZip.generateAsync({ type: 'arraybuffer' }));
+assert.deepEqual(parsedRecoveryPackage.images.map((image) => image.category), ['recovery-payment-proof', 'recovery-payment-proof']);
+assert.equal((parsedRecoveryPackage.rows[0] as any).recoveryEvidenceFileNames, '凭证1.jpg;凭证2.png');
+
+const missingImageZip = new JSZip();
+missingImageZip.file('订单导入.xlsx', packageOrderWorkbook);
+const missingImageZipBuffer = await missingImageZip.generateAsync({ type: 'arraybuffer' });
+await assert.rejects(
+  () => parseBusinessImportPackage('orders', '订单导入.zip', missingImageZipBuffer),
+  /第 2 行.*付款001\.jpg.*ZIP 中不存在/,
+);
 
 await assert.rejects(
   async () => parseBusinessImportWorkbook('orders', await workbookBuffer(
@@ -217,7 +281,7 @@ assert.ok(errorSheet.autoFilter);
 assert.deepEqual(rowValues(errorSheet.getRow(1)), ['Excel行', ...ORDER_IMPORT_HEADERS, '状态', '警告/错误原因']);
 assert.equal(errorSheet.getCell('B2').value, "'=2+2");
 assert.equal(errorSheet.getCell('N2').value, "'\n-1+1");
-assert.equal(errorSheet.getCell('P2').value, "'@SUM(1,1)");
+assert.equal(errorSheet.getCell('R2').value, "'@SUM(1,1)");
 assert.match(errorSheet.getCell('G2').numFmt, /0\.00/);
 assert.match(errorSheet.getCell('I2').numFmt, /yyyy/);
 
@@ -232,8 +296,8 @@ const jobErrorBuffer = await createBusinessImportErrorWorkbook('recovery_orders'
 const jobErrorWorkbook = new ExcelJS.Workbook();
 await jobErrorWorkbook.xlsx.load(jobErrorBuffer);
 const jobErrorSheet = jobErrorWorkbook.getWorksheet('售后挽回订单导入错误报告')!;
-assert.equal(jobErrorSheet.getCell('S2').value, '失败');
-assert.equal(jobErrorSheet.getCell('T2').value, "'=PRIVATE_FAILURE");
+assert.equal(jobErrorSheet.getCell('T2').value, '失败');
+assert.equal(jobErrorSheet.getCell('U2').value, "'=PRIVATE_FAILURE");
 
 const downloadEvents: string[] = [];
 downloadBusinessImportWorkbook('错误报告.xlsx', new Uint8Array([1, 2, 3]).buffer, {

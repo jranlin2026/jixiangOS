@@ -24,14 +24,18 @@ import {
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
 import { businessImportApi } from '../../api/businessImportApi';
+import { businessAttachmentApi } from '../../api/businessAttachmentApi';
+import { businessImportAttachmentDraftId, uploadBusinessImportPackageImages } from '../../api/businessImportPackageUpload';
 import { getBackendBaseUrl } from '../../api/backendClient';
 import {
   BUSINESS_IMPORT_MAX_FILE_BYTES,
+  BUSINESS_IMPORT_MAX_PACKAGE_BYTES,
   createBusinessImportErrorWorkbook,
   createBusinessImportTemplateWorkbook,
   downloadBusinessImportWorkbook,
-  parseBusinessImportWorkbook,
+  parseBusinessImportPackage,
   validateBusinessImportFile,
+  type BusinessImportPackageImage,
 } from '../../api/businessImportWorkbook';
 import {
   BUSINESS_IMPORT_MAX_ROWS,
@@ -103,6 +107,10 @@ function responseData<T>(response: { code: number; data: T; message: string }, f
   return response.data;
 }
 
+export function isDefinitiveBusinessImportRejection(code: number): boolean {
+  return code >= 400 && code < 500;
+}
+
 function jobStatusLabel(status: BusinessImportJobResult['status']): string {
   return ({ queued: '排队中', running: '执行中', succeeded: '导入完成', partial_failed: '部分失败', failed: '导入失败' } as const)[status];
 }
@@ -162,6 +170,7 @@ export default function BusinessImportDialog({
   const [options, setOptions] = useState<BusinessImportTemplateOptions | null>(initialState?.options || null);
   const [file, setFile] = useState<File | null>(initialState?.file || null);
   const [rows, setRows] = useState<BusinessImportRow[]>(initialState?.rows || []);
+  const [packageImages, setPackageImages] = useState<BusinessImportPackageImage[]>([]);
   const [precheck, setPrecheck] = useState<BusinessImportPrecheckResult | null>(initialState?.precheck || null);
   const [job, setJob] = useState<BusinessImportJobResult | null>(initialState?.job || null);
   const [loadingOptions, setLoadingOptions] = useState(false);
@@ -187,6 +196,7 @@ export default function BusinessImportDialog({
     setOptions(null);
     setFile(null);
     setRows([]);
+    setPackageImages([]);
     setPrecheck(null);
     setError('');
     setStorageWarning('');
@@ -303,11 +313,36 @@ export default function BusinessImportDialog({
     }
     setConfirming(true);
     setError('');
+    let uploadedAttachmentIds: string[] = [];
+    let confirmationMayHaveBeenAccepted = false;
     try {
-      const queued = responseData(
-        await businessImportApi.confirm(type, rows, precheck.confirmationToken, file.name),
-        `${copy.subject}导入任务提交失败`,
-      );
+      const draftId = await businessImportAttachmentDraftId(precheck.confirmationToken);
+      const uploaded = await uploadBusinessImportPackageImages({
+        type, rows, images: packageImages, draftId,
+        upload: async (image, draftKey) => {
+          const displayName = image.name.replace(/\\/gu, '/').split('/').pop() || image.name;
+          const fileBytes = new Uint8Array(image.bytes.byteLength);
+          fileBytes.set(image.bytes);
+          const response = await businessAttachmentApi.upload(
+            new File([fileBytes.buffer], displayName, { type: image.mimeType }),
+            { draftKey, category: image.category },
+          );
+          return responseData(response, `图片 ${image.name} 上传失败`);
+        },
+        remove: (id) => businessAttachmentApi.remove(id),
+      });
+      uploadedAttachmentIds = uploaded.attachmentIds;
+      confirmationMayHaveBeenAccepted = true;
+      const confirmResponse = await businessImportApi.confirm(type, uploaded.rows, precheck.confirmationToken, file.name);
+      if (confirmResponse.code !== 0 || !confirmResponse.data) {
+        confirmationMayHaveBeenAccepted = !isDefinitiveBusinessImportRejection(confirmResponse.code);
+        if (!confirmationMayHaveBeenAccepted) {
+          await Promise.allSettled(uploadedAttachmentIds.map((id) => businessAttachmentApi.remove(id)));
+          uploadedAttachmentIds = [];
+        }
+      }
+      const queued = responseData(confirmResponse, `${copy.subject}导入任务提交失败`);
+      setRows(uploaded.rows);
       if (!storageAdapter || !storageKey) {
         setJob(queued);
         setStorageWarning('任务已创建，但当前登录身份无法保存恢复标识；请保持当前窗口打开以查看进度。');
@@ -324,7 +359,11 @@ export default function BusinessImportDialog({
       onQueuedRef.current?.(queued);
       setPage(0);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : `${copy.subject}导入任务提交失败`);
+      if (uploadedAttachmentIds.length && !confirmationMayHaveBeenAccepted) {
+        await Promise.allSettled(uploadedAttachmentIds.map((id) => businessAttachmentApi.remove(id)));
+      }
+      const message = caught instanceof Error ? caught.message : `${copy.subject}导入任务提交失败`;
+      setError(confirmationMayHaveBeenAccepted ? `${message}；服务器处理结果暂不确定，请勿重复提交并稍后刷新审核台确认` : message);
     } finally {
       setConfirming(false);
     }
@@ -334,6 +373,7 @@ export default function BusinessImportDialog({
     const selected = event.target.files?.[0] || null;
     setFile(null);
     setRows([]);
+    setPackageImages([]);
     setPrecheck(null);
     setError('');
     setPage(0);
@@ -347,9 +387,10 @@ export default function BusinessImportDialog({
     }
     setParsing(true);
     try {
-      const parsed = await parseBusinessImportWorkbook(type, await selected.arrayBuffer());
+      const parsed = await parseBusinessImportPackage(type, selected.name, await selected.arrayBuffer());
       setFile(selected);
-      setRows(parsed);
+      setRows(parsed.rows);
+      setPackageImages(parsed.images);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '读取 Excel 失败');
       event.target.value = '';
@@ -364,6 +405,7 @@ export default function BusinessImportDialog({
     setJob(null);
     setFile(null);
     setRows([]);
+    setPackageImages([]);
     setPrecheck(null);
     setError('');
     setStorageWarning('');
@@ -377,7 +419,7 @@ export default function BusinessImportDialog({
       <DialogContent dividers>
         <Stack spacing={2}>
           <Alert severity="info">
-            请使用极享OS标准模板。系统会先在本地严格校验，再进行服务端预检；警告行可导入，被阻止行必须修正。
+            请使用极享OS标准模板。无图资料可直接上传 Excel；需导入图片时，请上传包含 Excel 和对应图片的 ZIP 导入包。
           </Alert>
           {error ? <Alert severity="error">{error}</Alert> : null}
           {storageWarning || storageDegradedWarning
@@ -405,7 +447,7 @@ export default function BusinessImportDialog({
                   ref={fileRef}
                   hidden
                   type="file"
-                  accept={`.xlsx,${XLSX_MIME}`}
+                  accept={`.xlsx,.zip,${XLSX_MIME},application/zip,application/x-zip-compressed`}
                   onChange={(event) => void handleFile(event)}
                 />
                 <Button
@@ -418,8 +460,8 @@ export default function BusinessImportDialog({
                 </Button>
                 <Typography variant="body2" color="text.secondary">
                   {file
-                    ? `${file.name} · ${rows.length.toLocaleString('zh-CN')} 条`
-                    : `仅支持 .xlsx，不超过 ${BUSINESS_IMPORT_MAX_FILE_BYTES / 1024 / 1024} MB，最多 ${BUSINESS_IMPORT_MAX_ROWS.toLocaleString('zh-CN')} 条`}
+                    ? `${file.name} · ${rows.length.toLocaleString('zh-CN')} 条${packageImages.length ? ` · ${packageImages.length.toLocaleString('zh-CN')} 张图片` : ''}`
+                    : `支持 .xlsx（最大 ${BUSINESS_IMPORT_MAX_FILE_BYTES / 1024 / 1024} MB）或 .zip（最大 ${BUSINESS_IMPORT_MAX_PACKAGE_BYTES / 1024 / 1024} MB），最多 ${BUSINESS_IMPORT_MAX_ROWS.toLocaleString('zh-CN')} 条`}
                 </Typography>
               </Stack>
             </Paper>

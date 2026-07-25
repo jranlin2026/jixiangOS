@@ -25,11 +25,13 @@ const baseDirectory = {
 
 const persisted: any[] = [];
 const jobs: any[] = [];
+const attachmentValidationCalls: any[] = [];
 const service = createBusinessImportService({
   secret: 'business-import-test-signing-secret',
   now: () => new Date('2026-07-24T00:00:00.000Z'),
   loadDirectory: async () => structuredClone(baseDirectory),
   persistPrecheck: async (record) => { persisted.push(record); },
+  validateAttachments: async (user, type, rows) => { attachmentValidationCalls.push({ user, type, rows }); },
   consumePrecheckAndCreateJob: async (input) => {
     const precheck = persisted.find((item) => item.tokenHash === input.tokenHash);
     if (!precheck || precheck.consumedAt) throw new BusinessImportError('导入预检凭证无效或已使用', 409);
@@ -55,6 +57,34 @@ assert.equal(confirmed.status, 'queued');
 assert.equal(confirmed.totalCount, 1);
 assert.equal(confirmed.batchId, 'batch-1', 'confirm must immediately return the review-navigation batch id');
 assert.equal(jobs[0].rows[0].customerId, 'customer-1', 'order imports bind a unique active customer at precheck/confirm time');
+
+const imageOrderRow = {
+  ...orderRow,
+  rowNumber: 6,
+  thirdPartyOrderNo: 'TP-IMAGE',
+  paymentProofFileName: '付款001.jpg',
+  dealEvidenceFileNames: '聊天01.png;聊天02.webp',
+};
+const imagePrecheck = await service.precheck({ type: 'orders', rows: [imageOrderRow] }, actor);
+assert.equal(imagePrecheck.readyCount, 1, '预检依据文件名校验，不要求图片已提前上传');
+await assert.rejects(
+  () => service.confirm({ type: 'orders', rows: [imageOrderRow], confirmationToken: imagePrecheck.confirmationToken, fileName: 'orders.zip' }, actor),
+  /付款截图.*上传结果不完整/,
+  '确认导入前必须上传 ZIP 中引用的全部图片',
+);
+const imageConfirmed = await service.confirm({
+  type: 'orders',
+  rows: [{
+    ...imageOrderRow,
+    paymentProofAttachmentIds: ['attachment-payment'],
+    dealEvidenceAttachmentIds: ['attachment-deal-1', 'attachment-deal-2'],
+  }],
+  confirmationToken: imagePrecheck.confirmationToken,
+  fileName: 'orders.zip',
+}, actor);
+assert.equal(imageConfirmed.status, 'queued');
+assert.equal(attachmentValidationCalls.length, 1, '只有确认阶段需要从私有存储校验附件真实性与归属');
+assert.deepEqual(jobs[jobs.length - 1].rows[0].normalized.paymentProofAttachmentIds, ['attachment-payment']);
 
 const namedPrecheck = await service.precheck({ type: 'orders', rows: [{ ...orderRow, rowNumber: 8, thirdPartyOrderNo: 'TP-file-name' }] }, actor);
 await assert.rejects(

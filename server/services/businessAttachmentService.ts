@@ -18,7 +18,7 @@ const DELIVERY_MIME_TYPES = new Set([
 ]);
 const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 const DELIVERY_MAX_BYTES = 20 * 1024 * 1024;
-const ATTACHMENT_DOMAIN = 'jixiang_os_business_attachments';
+export const BUSINESS_ATTACHMENT_DOMAIN = 'jixiang_os_business_attachments';
 const CATEGORIES = new Set<BusinessAttachmentCategory>([
   'order-payment-proof',
   'order-deal-evidence',
@@ -69,7 +69,7 @@ function permissionsFor(category: BusinessAttachmentCategory): { read: string[];
   if (category.startsWith('order-')) {
     return {
       read: [PERMISSION_KEYS.ORDER_MANAGE, PERMISSION_KEYS.ORDER_REVIEW_LIST, PERMISSION_KEYS.ORDER_CREATE],
-      write: [PERMISSION_KEYS.ORDER_EDIT, PERMISSION_KEYS.ORDER_REVIEW, PERMISSION_KEYS.ORDER_CREATE],
+      write: [PERMISSION_KEYS.ORDER_EDIT, PERMISSION_KEYS.ORDER_REVIEW, PERMISSION_KEYS.ORDER_CREATE, PERMISSION_KEYS.ORDER_IMPORT],
     };
   }
   if (category.startsWith('recovery-')) {
@@ -80,13 +80,26 @@ function permissionsFor(category: BusinessAttachmentCategory): { read: string[];
         PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
         PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT,
       ],
-      write: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT, PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE],
+      write: [
+        PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT,
+        PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW,
+        PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE,
+        PERMISSION_KEYS.AFTER_SALES_RECOVERY_IMPORT,
+      ],
     };
   }
   return {
     read: [PERMISSION_KEYS.DELIVERY_CENTER, PERMISSION_KEYS.DELIVERY_MOVE_CARD],
     write: [PERMISSION_KEYS.DELIVERY_MOVE_CARD, PERMISSION_KEYS.DELIVERY_STAGE_CONFIG],
   };
+}
+
+function imageContentMatchesMime(mimeType: string, buffer: Buffer): boolean {
+  if (mimeType === 'image/jpeg') return buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  if (mimeType === 'image/png') return buffer.length >= 8 && Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).equals(buffer.subarray(0, 8));
+  if (mimeType === 'image/webp') return buffer.length >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP';
+  if (mimeType === 'image/gif') return buffer.length >= 6 && ['GIF87a', 'GIF89a'].includes(buffer.subarray(0, 6).toString('ascii'));
+  return false;
 }
 
 function allowed(actor: AuthenticatedUser, keys: string[], action: 'read' | 'write'): boolean {
@@ -100,6 +113,9 @@ function validateUpload(upload: BusinessAttachmentUpload): string | null {
   const delivery = upload.category === 'delivery-task-file';
   const types = delivery ? DELIVERY_MIME_TYPES : IMAGE_MIME_TYPES;
   if (!types.has(upload.file.mimeType)) return delivery ? '文件类型不支持' : '凭证只支持图片';
+  if (IMAGE_MIME_TYPES.has(upload.file.mimeType) && !imageContentMatchesMime(upload.file.mimeType, upload.file.buffer)) {
+    return '图片内容与文件类型不匹配';
+  }
   const maxBytes = delivery ? DELIVERY_MAX_BYTES : IMAGE_MAX_BYTES;
   if (upload.file.size > maxBytes) return `文件不能超过 ${delivery ? 20 : 10} MB`;
   return null;
@@ -112,8 +128,8 @@ export function createPrismaBusinessAttachmentRepository(
     async create(record) {
       await prisma.businessRecord.create({
         data: {
-          id: `${ATTACHMENT_DOMAIN}:${record.id}`,
-          domain: ATTACHMENT_DOMAIN,
+          id: `${BUSINESS_ATTACHMENT_DOMAIN}:${record.id}`,
+          domain: BUSINESS_ATTACHMENT_DOMAIN,
           recordId: record.id,
           title: record.name,
           owner: record.uploadedByName,
@@ -124,13 +140,13 @@ export function createPrismaBusinessAttachmentRepository(
     },
     async find(id) {
       const row = await prisma.businessRecord.findUnique({
-        where: { domain_recordId: { domain: ATTACHMENT_DOMAIN, recordId: id } },
+        where: { domain_recordId: { domain: BUSINESS_ATTACHMENT_DOMAIN, recordId: id } },
       });
       return row?.data ? row.data as unknown as BusinessAttachmentRecord : null;
     },
     async remove(id) {
       await prisma.businessRecord.delete({
-        where: { domain_recordId: { domain: ATTACHMENT_DOMAIN, recordId: id } },
+        where: { domain_recordId: { domain: BUSINESS_ATTACHMENT_DOMAIN, recordId: id } },
       });
     },
   };

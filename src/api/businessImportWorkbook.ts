@@ -1,5 +1,7 @@
 import excelJsBrowserUrl from 'exceljs/dist/exceljs.min.js?url';
 import type { Cell, Row, Worksheet } from 'exceljs';
+import JSZip from 'jszip';
+import type { BusinessAttachmentCategory } from '../types/businessAttachment';
 import {
   BUSINESS_IMPORT_MAX_ROWS,
   type BusinessImportJobRow,
@@ -16,18 +18,22 @@ type WindowWithExcelJs = Window & { ExcelJS?: ExcelJsNamespace };
 export const ORDER_IMPORT_HEADERS = [
   '客户姓名', '手机号', '微信', '产品名称', '订单类型', '实付金额', '官方收款渠道',
   '付款时间', '销售负责人', '付款订单号', '第三方平台订单号', '订单创建人', '备注',
+  '付款截图文件名', '成交资料图片文件名',
 ] as const;
 
 export const RECOVERY_IMPORT_HEADERS = [
   '客户姓名', '手机号', '微信', '第三方平台订单号', '原产品', '挽回成交金额', '挽回时间',
   '挽回人员', '来源平台', '来源店铺', '原付款金额', '官方收款渠道', '付款订单号',
-  '付款时间', '协助人员', '订单创建人', '备注',
+  '付款时间', '协助人员', '订单创建人', '备注', '挽回凭证文件名',
 ] as const;
 
 const OPTIONS_SHEET = '字段选项';
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const FORMULA_PREFIX = /^\s*[=+\-@]/u;
 export const BUSINESS_IMPORT_MAX_FILE_BYTES = 20 * 1024 * 1024;
+export const BUSINESS_IMPORT_MAX_PACKAGE_BYTES = 200 * 1024 * 1024;
+export const BUSINESS_IMPORT_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const BUSINESS_IMPORT_MAX_ZIP_ENTRIES = BUSINESS_IMPORT_MAX_ROWS * 9 + 1;
 let browserExcelJsPromise: Promise<ExcelJsNamespace> | null = null;
 
 export type BusinessImportDownloadEnvironment = {
@@ -64,16 +70,152 @@ export function downloadBusinessImportWorkbook(
 }
 
 export function validateBusinessImportFile(file: Pick<File, 'name' | 'size' | 'type'>): void {
-  if (!String(file.name || '').toLocaleLowerCase('en-US').endsWith('.xlsx')) {
-    throw new Error('仅支持 .xlsx 文件');
-  }
+  const lowerName = String(file.name || '').toLocaleLowerCase('en-US');
+  const isWorkbook = lowerName.endsWith('.xlsx');
+  const isPackage = lowerName.endsWith('.zip');
+  if (!isWorkbook && !isPackage) throw new Error('仅支持 .xlsx 文件或 .zip 导入包');
   const mime = String(file.type || '').toLocaleLowerCase('en-US');
-  if (mime && mime !== XLSX_MIME && mime !== 'application/octet-stream') {
-    throw new Error('文件类型与 .xlsx 不匹配，请重新选择标准模板');
+  const allowedMimes = isWorkbook
+    ? new Set([XLSX_MIME, 'application/octet-stream'])
+    : new Set(['application/zip', 'application/x-zip-compressed', 'application/octet-stream']);
+  if (mime && !allowedMimes.has(mime)) {
+    throw new Error(`文件类型与 ${isWorkbook ? '.xlsx' : '.zip'} 不匹配，请重新选择导入文件`);
   }
-  if (file.size > BUSINESS_IMPORT_MAX_FILE_BYTES) {
-    throw new Error('文件不能超过 20 MB，请拆分后重试');
+  const maxBytes = isWorkbook ? BUSINESS_IMPORT_MAX_FILE_BYTES : BUSINESS_IMPORT_MAX_PACKAGE_BYTES;
+  if (file.size > maxBytes) {
+    throw new Error(`文件不能超过 ${maxBytes / 1024 / 1024} MB，请拆分后重试`);
   }
+}
+
+export type BusinessImportPackageImage = {
+  rowNumber: number;
+  category: Extract<BusinessAttachmentCategory, 'order-payment-proof' | 'order-deal-evidence' | 'recovery-payment-proof'>;
+  name: string;
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+  bytes: Uint8Array;
+};
+
+export type BusinessImportPackage = {
+  rows: BusinessImportRow[];
+  images: BusinessImportPackageImage[];
+};
+
+function attachmentNames(value: unknown, max: number, rowNumber: number, label: string): string[] {
+  const raw = String(value || '').trim();
+  if (!raw) return [];
+  const names = raw.split(/[;；\n\r]+/u).map((item) => item.trim()).filter(Boolean);
+  if (names.length > max) throw new Error(`第 ${rowNumber} 行：${label}最多填写 ${max} 张图片`);
+  if (new Set(names.map((name) => name.toLocaleLowerCase('zh-CN'))).size !== names.length) {
+    throw new Error(`第 ${rowNumber} 行：${label}不能重复填写同一文件`);
+  }
+  return names;
+}
+
+function rowAttachmentReferences(type: BusinessImportType, row: BusinessImportRow) {
+  if (type === 'orders') {
+    const order = row as Extract<BusinessImportRow, { productName: string }>;
+    return [
+      ...attachmentNames(order.paymentProofFileName, 1, row.rowNumber, '付款截图').map((name) => ({ name, category: 'order-payment-proof' as const })),
+      ...attachmentNames(order.dealEvidenceFileNames, 8, row.rowNumber, '成交资料').map((name) => ({ name, category: 'order-deal-evidence' as const })),
+    ];
+  }
+  const recovery = row as Extract<BusinessImportRow, { originalProduct: string }>;
+  return attachmentNames(recovery.recoveryEvidenceFileNames, 8, row.rowNumber, '挽回凭证')
+    .map((name) => ({ name, category: 'recovery-payment-proof' as const }));
+}
+
+function normalizePackagePath(value: string): string {
+  const normalized = value.replace(/\\/gu, '/').replace(/^\.\//u, '').replace(/\/{2,}/gu, '/').trim();
+  if (!normalized || normalized.startsWith('/') || normalized.split('/').some((part) => !part || part === '.' || part === '..')) {
+    throw new Error(`ZIP 中包含不安全的文件路径：${value || '未命名文件'}`);
+  }
+  return normalized;
+}
+
+function imageMime(name: string, bytes: Uint8Array): BusinessImportPackageImage['mimeType'] {
+  const extension = name.split('.').pop()?.toLocaleLowerCase('en-US');
+  if ((extension === 'jpg' || extension === 'jpeg') && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
+  if (extension === 'png' && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((value, index) => bytes[index] === value)) return 'image/png';
+  if (extension === 'webp'
+    && String.fromCharCode(...bytes.slice(0, 4)) === 'RIFF'
+    && String.fromCharCode(...bytes.slice(8, 12)) === 'WEBP') return 'image/webp';
+  throw new Error(`图片文件格式不支持或内容与扩展名不匹配：${name}`);
+}
+
+function declaredUncompressedSize(entry: JSZip.JSZipObject): number {
+  const size = (entry as unknown as { _data?: { uncompressedSize?: unknown } })._data?.uncompressedSize;
+  return typeof size === 'number' && Number.isFinite(size) && size >= 0 ? size : 0;
+}
+
+export async function parseBusinessImportPackage(
+  type: BusinessImportType,
+  fileName: string,
+  buffer: ArrayBuffer | ArrayBufferView,
+): Promise<BusinessImportPackage> {
+  const lowerName = String(fileName || '').toLocaleLowerCase('en-US');
+  if (lowerName.endsWith('.xlsx')) {
+    const rows = await parseBusinessImportWorkbook(type, buffer);
+    if (rows.some((row) => rowAttachmentReferences(type, row).length)) {
+      throw new Error('已填写图片文件名时，请将 Excel 和对应图片一起压缩为 ZIP 导入包后上传');
+    }
+    return { rows, images: [] };
+  }
+  if (!lowerName.endsWith('.zip')) throw new Error('仅支持 .xlsx 文件或 .zip 导入包');
+  let zip: JSZip;
+  try {
+    // Do not enable JSZip's checkCRC32 here: it inflates every entry before our
+    // size checks and turns an otherwise bounded import into a decompression-bomb risk.
+    zip = await JSZip.loadAsync(toArrayBuffer(buffer), { checkCRC32: false, createFolders: false });
+  } catch {
+    throw new Error('无法读取 ZIP 导入包，请重新压缩后上传');
+  }
+  const entries = Object.values(zip.files).filter((entry) => !entry.dir && !entry.name.startsWith('__MACOSX/'));
+  if (entries.length > BUSINESS_IMPORT_MAX_ZIP_ENTRIES) throw new Error('ZIP 中的文件数量过多，请拆分后重试');
+  const workbookEntries = entries.filter((entry) => entry.name.toLocaleLowerCase('en-US').endsWith('.xlsx'));
+  if (workbookEntries.length !== 1) throw new Error('ZIP 导入包必须且只能包含 1 个 .xlsx 标准模板');
+  if (declaredUncompressedSize(workbookEntries[0]) > BUSINESS_IMPORT_MAX_FILE_BYTES) throw new Error('ZIP 中的 Excel 文件不能超过 20 MB');
+  const workbookBuffer = await workbookEntries[0].async('arraybuffer');
+  if (workbookBuffer.byteLength > BUSINESS_IMPORT_MAX_FILE_BYTES) throw new Error('ZIP 中的 Excel 文件不能超过 20 MB');
+  const rows = await parseBusinessImportWorkbook(type, workbookBuffer);
+  const imagesByPath = new Map<string, JSZip.JSZipObject>();
+  const imagesByBaseName = new Map<string, JSZip.JSZipObject[]>();
+  for (const entry of entries) {
+    if (entry === workbookEntries[0]) continue;
+    const path = normalizePackagePath(entry.name);
+    const key = path.toLocaleLowerCase('zh-CN');
+    if (imagesByPath.has(key)) throw new Error(`ZIP 中存在重复文件路径：${path}`);
+    imagesByPath.set(key, entry);
+    const baseName = path.split('/').pop()!.toLocaleLowerCase('zh-CN');
+    imagesByBaseName.set(baseName, [...(imagesByBaseName.get(baseName) || []), entry]);
+  }
+  const usedEntries = new Set<string>();
+  const images: BusinessImportPackageImage[] = [];
+  let totalImageBytes = 0;
+  for (const row of rows) {
+    for (const reference of rowAttachmentReferences(type, row)) {
+      const requested = normalizePackagePath(reference.name);
+      const exactEntry = imagesByPath.get(requested.toLocaleLowerCase('zh-CN'));
+      const baseMatches = imagesByBaseName.get(requested.split('/').pop()!.toLocaleLowerCase('zh-CN')) || [];
+      const entry = exactEntry || (baseMatches.length === 1 ? baseMatches[0] : undefined);
+      if (!entry) {
+        if (baseMatches.length > 1) throw new Error(`第 ${row.rowNumber} 行：图片 ${reference.name} 在 ZIP 中有多个同名文件，请填写完整相对路径`);
+        throw new Error(`第 ${row.rowNumber} 行：图片 ${reference.name} 在 ZIP 中不存在`);
+      }
+      const entryKey = entry.name.toLocaleLowerCase('zh-CN');
+      if (usedEntries.has(entryKey)) throw new Error(`第 ${row.rowNumber} 行：图片 ${reference.name} 已被其他导入行引用，每张图片只能对应一条记录`);
+      usedEntries.add(entryKey);
+      const declaredBytes = declaredUncompressedSize(entry);
+      if (declaredBytes > BUSINESS_IMPORT_MAX_IMAGE_BYTES) throw new Error(`第 ${row.rowNumber} 行：图片 ${reference.name} 不能超过 10 MB`);
+      if (totalImageBytes + declaredBytes > BUSINESS_IMPORT_MAX_PACKAGE_BYTES) throw new Error('ZIP 中实际使用的图片解压后不能超过 200 MB');
+      const bytes = await entry.async('uint8array');
+      if (!bytes.length) throw new Error(`第 ${row.rowNumber} 行：图片 ${reference.name} 内容为空`);
+      if (bytes.byteLength > BUSINESS_IMPORT_MAX_IMAGE_BYTES) throw new Error(`第 ${row.rowNumber} 行：图片 ${reference.name} 不能超过 10 MB`);
+      totalImageBytes += bytes.byteLength;
+      if (totalImageBytes > BUSINESS_IMPORT_MAX_PACKAGE_BYTES) throw new Error('ZIP 中实际使用的图片解压后不能超过 200 MB');
+      images.push({ rowNumber: row.rowNumber, category: reference.category, name: requested, mimeType: imageMime(requested, bytes), bytes });
+    }
+  }
+  return { rows, images };
 }
 
 function loadBrowserExcelJs(): Promise<ExcelJsNamespace> {
@@ -128,6 +270,7 @@ function rowValues(type: BusinessImportType, row?: BusinessImportRow): Array<str
       input.customerName, input.customerPhone, input.customerWechat, input.productName, input.orderType,
       input.paymentAmount, input.paymentChannel, input.paidAt, input.salesUserName, input.paymentOrderNo,
       input.thirdPartyOrderNo, input.creatorName, input.notes || input.remark,
+      input.paymentProofFileName, input.dealEvidenceFileNames,
     ].map(safeWorkbookValue);
   }
   const input = row as Extract<BusinessImportRow, { originalProduct: string }>;
@@ -135,7 +278,7 @@ function rowValues(type: BusinessImportType, row?: BusinessImportRow): Array<str
     input.customerName, input.customerPhone, input.customerWechat, input.thirdPartyOrderNo, input.originalProduct,
     input.recoveryAmount, input.recoveryAt, input.recoveryUserName, input.sourcePlatform, input.sourceShop,
     input.originalAmount, input.paymentChannel, input.paymentOrderNo, input.paymentAt, input.assistUserName,
-    input.creatorName, input.remark,
+    input.creatorName, input.remark, input.recoveryEvidenceFileNames,
   ].map(safeWorkbookValue);
 }
 
@@ -246,7 +389,13 @@ const TEXT_MAX_LENGTHS: Partial<Record<string, number>> = {
   订单类型: 100, 官方收款渠道: 100, 销售负责人: 100, 挽回人员: 100,
   协助人员: 100, 订单创建人: 100, 来源平台: 100, 来源店铺: 100,
   付款订单号: 191, 第三方平台订单号: 191, 备注: 2000,
+  付款截图文件名: 255, 成交资料图片文件名: 2000, 挽回凭证文件名: 2000,
 };
+
+function isSafeNumericMainlandMobile(cell: Cell): boolean {
+  if (typeof cell.value !== 'number' || !Number.isSafeInteger(cell.value)) return false;
+  return /^1[3-9]\d{9}$/u.test(String(cell.value));
+}
 
 function assertTextCells(row: Row, rowNumber: number, headers: readonly string[], indexes: Map<string, number>): void {
   const typedHeaders = new Set(['实付金额', '挽回成交金额', '原付款金额', '付款时间', '挽回时间']);
@@ -256,6 +405,12 @@ function assertTextCells(row: Row, rowNumber: number, headers: readonly string[]
     if (!column) continue;
     const cell = row.getCell(column);
     if (cell.value !== null && cell.value !== undefined && typeof cell.value !== 'string') {
+      // Excel/WPS can persist a manually entered mainland mobile number as a
+      // numeric cell even when the template column uses the text format (`@`).
+      // Eleven digits are within JS's safe-integer range, so this conversion is
+      // lossless. Other numeric identifiers remain blocked to avoid precision or
+      // leading-zero loss.
+      if (header === '手机号' && isSafeNumericMainlandMobile(cell)) continue;
       throw new Error(`第 ${rowNumber} 行：${header}必须使用文本格式`);
     }
     const limit = TEXT_MAX_LENGTHS[header];
@@ -371,7 +526,8 @@ export async function parseBusinessImportWorkbook(
         productName: requireText('产品名称'), orderType: requireText('订单类型'), paymentAmount,
         paymentChannel: requireText('官方收款渠道'), paidAt: date('付款时间', true), salesUserName: requireText('销售负责人'),
         paymentOrderNo: read(row, '付款订单号'), thirdPartyOrderNo: read(row, '第三方平台订单号'),
-        creatorName: read(row, '订单创建人'), notes: read(row, '备注'), remark: '',
+        creatorName: read(row, '订单创建人'), notes: read(row, '备注'),
+        paymentProofFileName: read(row, '付款截图文件名'), dealEvidenceFileNames: read(row, '成交资料图片文件名'), remark: '',
       });
       return;
     }
@@ -387,6 +543,7 @@ export async function parseBusinessImportWorkbook(
       sourcePlatform: read(row, '来源平台'), sourceShop: read(row, '来源店铺'), originalAmount,
       paymentChannel: read(row, '官方收款渠道'), paymentOrderNo: read(row, '付款订单号'), paymentAt: date('付款时间', false),
       assistUserName: read(row, '协助人员'), creatorName: read(row, '订单创建人'), remark: read(row, '备注'),
+      recoveryEvidenceFileNames: read(row, '挽回凭证文件名'),
     });
   });
   if (!rows.length) throw new Error('导入文件没有可处理的数据');
@@ -436,8 +593,8 @@ export async function createBusinessImportTemplateWorkbook(
   styleHeader(sheet.getRow(1));
   sheet.autoFilter = `A1:${sheet.getRow(1).getCell(headers.length).address}`;
   sheet.columns = (isOrder
-    ? [18, 18, 20, 24, 18, 16, 22, 20, 20, 22, 24, 20, 40]
-    : [18, 18, 20, 24, 24, 18, 20, 20, 18, 22, 18, 22, 22, 20, 20, 20, 40]
+    ? [18, 18, 20, 24, 18, 16, 22, 20, 20, 22, 24, 20, 40, 30, 48]
+    : [18, 18, 20, 24, 24, 18, 20, 20, 18, 22, 18, 22, 22, 20, 20, 20, 40, 48]
   ).map((width) => ({ width }));
   headers.forEach((_header, index) => { sheet.getColumn(index + 1).numFmt = '@'; });
 
@@ -484,7 +641,10 @@ export async function createBusinessImportTemplateWorkbook(
       : '客户姓名、第三方平台订单号、原产品、挽回成交金额、挽回时间、挽回人员；手机号和微信至少填写一项。'],
     ['文本字段', '手机号、微信、付款订单号和第三方平台订单号请设置为文本，保留前导零。'],
     ['导入流程', '上传后先本地校验和服务端预检。被阻止的行必须修正；警告行可以确认导入。'],
-    ['文件限制', `仅支持 .xlsx；请勿修改表头；不得使用公式；单次最多 ${BUSINESS_IMPORT_MAX_ROWS} 条。`],
+    ['图片资料', isOrder
+      ? '如需导入图片，请填写付款截图文件名（最多1张）、成交资料图片文件名（最多8张，英文分号分隔），并将 Excel 和图片一起压缩为 ZIP 上传。'
+      : '如需导入图片，请填写挽回凭证文件名（最多8张，英文分号分隔），并将 Excel 和图片一起压缩为 ZIP 上传。'],
+    ['文件限制', `支持标准 .xlsx 或包含标准 Excel 的 .zip；请勿修改表头；不得使用公式；单次最多 ${BUSINESS_IMPORT_MAX_ROWS} 条。`],
   ]);
   instructions.getColumn(1).width = 20;
   instructions.getColumn(2).width = 96;

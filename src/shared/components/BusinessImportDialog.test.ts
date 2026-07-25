@@ -6,9 +6,13 @@ import type { BusinessImportPrecheckResult, BusinessImportTemplateOptions, Order
 import type { BusinessImportDialogInitialState } from './BusinessImportDialog';
 
 const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' });
-const { default: BusinessImportDialog } = await vite.ssrLoadModule('/src/shared/components/BusinessImportDialog.tsx') as {
+const { default: BusinessImportDialog, isDefinitiveBusinessImportRejection } = await vite.ssrLoadModule('/src/shared/components/BusinessImportDialog.tsx') as {
   default: React.ComponentType<React.ComponentProps<any>>;
+  isDefinitiveBusinessImportRejection: (code: number) => boolean;
 };
+assert.equal(isDefinitiveBusinessImportRejection(409), true, '明确的业务拒绝可以清理未绑定附件');
+assert.equal(isDefinitiveBusinessImportRejection(504), false, '网关超时结果不确定，不能删除可能已入队的附件');
+assert.equal(isDefinitiveBusinessImportRejection(-1), false, '网络异常结果不确定，不能删除附件');
 
 const options: BusinessImportTemplateOptions = {
   products: [{ id: 'p1', name: '训练营' }], orderTypes: [{ id: 't1', name: '新购' }],

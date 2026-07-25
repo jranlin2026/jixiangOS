@@ -27,6 +27,11 @@ const recoveryFinance: AuthenticatedUser = {
   ...reviewer,
   permissions: [{ module: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, actions: ['read', 'write'] }],
 };
+const orderImporter: AuthenticatedUser = {
+  ...uploader,
+  id: 'order-importer',
+  permissions: [{ module: PERMISSION_KEYS.ORDER_IMPORT, actions: ['read', 'write'] }],
+};
 
 class MemoryRepository {
   records = new Map<string, BusinessAttachmentRecord>();
@@ -36,6 +41,7 @@ class MemoryRepository {
 }
 
 const rootDir = await mkdtemp(path.join(os.tmpdir(), 'jixiang-attachment-'));
+const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
 try {
   const repository = new MemoryRepository();
   const service = createBusinessAttachmentService({
@@ -51,15 +57,15 @@ try {
     file: {
       originalName: '../聊天截图.png',
       mimeType: 'image/png',
-      size: 3,
-      buffer: Buffer.from('png'),
+      size: pngBytes.length,
+      buffer: pngBytes,
     },
   }, uploader);
   assert.equal(uploaded.code, 0);
   assert.equal(uploaded.data?.name, '聊天截图.png');
   assert.equal(uploaded.data?.uploadedById, uploader.id);
   assert.equal('storageName' in uploaded.data!, false, '响应不得泄露磁盘文件名');
-  assert.equal((await readFile(path.join(rootDir, repository.records.get('attachment-1')!.storageName))).toString(), 'png');
+  assert.deepEqual(await readFile(path.join(rootDir, repository.records.get('attachment-1')!.storageName)), pngBytes);
 
   assert.equal((await service.open('attachment-1', uploader)).code, 0);
   assert.equal((await service.open('attachment-1', reviewer)).code, 0);
@@ -71,7 +77,7 @@ try {
   const recoveryProof = await service.upload({
     draftKey: 'draft-recovery-1',
     category: 'recovery-payment-proof',
-    file: { originalName: '挽回凭证.png', mimeType: 'image/png', size: 3, buffer: Buffer.from('png') },
+    file: { originalName: '挽回凭证.png', mimeType: 'image/png', size: pngBytes.length, buffer: pngBytes },
   }, recoveryUploader);
   assert.equal(recoveryProof.code, 0);
   assert.equal((await service.open('attachment-1', recoveryFinance)).code, 0, '财务分账人员应能打开挽回凭证');
@@ -83,6 +89,21 @@ try {
   }, uploader);
   assert.equal(invalid.code, 400);
   assert.match(invalid.message, /图片/);
+
+  const disguised = await service.upload({
+    draftKey: 'business-import:orders:draft-1:2',
+    category: 'order-payment-proof',
+    file: { originalName: '伪造.jpg', mimeType: 'image/jpeg', size: 4, buffer: Buffer.from('text') },
+  }, orderImporter);
+  assert.equal(disguised.code, 400);
+  assert.match(disguised.message, /内容与文件类型不匹配/);
+
+  const importProof = await service.upload({
+    draftKey: 'business-import:orders:draft-1:2',
+    category: 'order-payment-proof',
+    file: { originalName: '导入付款.jpg', mimeType: 'image/jpeg', size: 4, buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) },
+  }, orderImporter);
+  assert.equal(importProof.code, 0, '独立订单导入权限应允许上传导入包图片');
 } finally {
   await rm(rootDir, { recursive: true, force: true });
 }

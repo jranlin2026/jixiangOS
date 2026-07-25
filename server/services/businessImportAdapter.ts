@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Customer } from '../../src/types/customer';
-import type { AfterSalesSourceConfig, OrderTypeConfig, ProductConfig } from '../../src/types/settings';
-import type { BusinessImportType } from '../../src/types/businessImport';
+import type { Product } from '../../src/types/product';
+import type { AfterSalesSourceConfig, OrderTypeConfig } from '../../src/types/settings';
+import type { BusinessImportRow, BusinessImportType, OrderImportRow, RecoveryImportRow } from '../../src/types/businessImport';
+import type { BusinessAttachment } from '../../src/types/businessAttachment';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { buildDataVisibilityScopeForUser } from '../../src/shared/utils/dataVisibility';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
@@ -15,10 +17,126 @@ import {
   type BusinessImportPrecheckRecord,
   type ValidatedBusinessImportRow,
 } from './businessImportService';
+import { BUSINESS_ATTACHMENT_DOMAIN, type BusinessAttachmentRecord } from './businessAttachmentService';
 
 const clean = (value: unknown) => String(value ?? '').trim();
 const lower = (value: unknown) => clean(value).toLocaleLowerCase('zh-CN');
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+
+type AttachmentPrisma = Pick<PrismaClient, 'businessRecord'>;
+type ImportAttachmentGroups = {
+  paymentProof: BusinessAttachment[];
+  dealEvidence: BusinessAttachment[];
+  recoveryEvidence: BusinessAttachment[];
+};
+const BUSINESS_IMPORT_ATTACHMENT_BATCH_MAX_BYTES = 200 * 1024 * 1024;
+
+function importAttachmentNames(value: unknown): string[] {
+  return clean(value).split(/[;；\n\r]+/u).map(clean).filter(Boolean);
+}
+
+function attachmentBaseName(value: string): string {
+  return value.replace(/\\/gu, '/').split('/').pop() || value;
+}
+
+function importAttachmentManifest(type: BusinessImportType, row: BusinessImportRow) {
+  if (type === 'orders') {
+    const order = row as OrderImportRow;
+    return [
+      { label: '付款截图', category: 'order-payment-proof' as const, names: importAttachmentNames(order.paymentProofFileName), ids: order.paymentProofAttachmentIds || [] },
+      { label: '成交资料', category: 'order-deal-evidence' as const, names: importAttachmentNames(order.dealEvidenceFileNames), ids: order.dealEvidenceAttachmentIds || [] },
+    ];
+  }
+  const recovery = row as RecoveryImportRow;
+  return [{
+    label: '挽回凭证', category: 'recovery-payment-proof' as const,
+    names: importAttachmentNames(recovery.recoveryEvidenceFileNames), ids: recovery.recoveryEvidenceAttachmentIds || [],
+  }];
+}
+
+async function importAttachmentRecords(prisma: AttachmentPrisma, ids: string[]): Promise<Map<string, BusinessAttachmentRecord>> {
+  if (!ids.length) return new Map();
+  const rows = await prisma.businessRecord.findMany({
+    where: { domain: BUSINESS_ATTACHMENT_DOMAIN, recordId: { in: [...new Set(ids)] } },
+    select: { recordId: true, data: true },
+  });
+  return new Map(rows.flatMap((row) => {
+    const record = readValue<BusinessAttachmentRecord | null>(row.data, null);
+    return record && record.id === row.recordId ? [[record.id, record] as const] : [];
+  }));
+}
+
+function publicImportAttachment(record: BusinessAttachmentRecord): BusinessAttachment {
+  const { storageName: _storageName, draftKey: _draftKey, ...attachment } = record;
+  return attachment;
+}
+
+function importDraftIdentity(record: BusinessAttachmentRecord, type: BusinessImportType): { draftId: string; rowNumber: number } | null {
+  const match = record.draftKey.match(new RegExp(`^business-import:${type}:([^:]+):(\\d+)$`, 'u'));
+  return match ? { draftId: match[1], rowNumber: Number(match[2]) } : null;
+}
+
+function verifiedImportAttachmentGroups(
+  records: Map<string, BusinessAttachmentRecord>,
+  actor: Pick<AuthenticatedUser, 'id'>,
+  type: BusinessImportType,
+  row: BusinessImportRow,
+): ImportAttachmentGroups {
+  const result: ImportAttachmentGroups = { paymentProof: [], dealEvidence: [], recoveryEvidence: [] };
+  for (const group of importAttachmentManifest(type, row)) {
+    if (group.names.length !== group.ids.length) throw new BusinessImportError(`第 ${row.rowNumber} 行：${group.label}上传结果不完整`, 409);
+    group.ids.forEach((id, index) => {
+      const record = records.get(id);
+      if (!record) throw new BusinessImportError(`第 ${row.rowNumber} 行：${group.label}附件不存在或已删除`, 409);
+      if (record.uploadedById !== actor.id) throw new BusinessImportError(`第 ${row.rowNumber} 行：${group.label}附件不属于当前导入人`, 409);
+      const draft = importDraftIdentity(record, type);
+      if (!draft || draft.rowNumber !== row.rowNumber) throw new BusinessImportError(`第 ${row.rowNumber} 行：${group.label}附件与 Excel 行号不匹配`, 409);
+      if (record.category !== group.category || !record.mimeType.startsWith('image/')) {
+        throw new BusinessImportError(`第 ${row.rowNumber} 行：${group.label}附件分类无效`, 409);
+      }
+      if (lower(record.name) !== lower(attachmentBaseName(group.names[index]))) {
+        throw new BusinessImportError(`第 ${row.rowNumber} 行：${group.label}附件文件名不一致`, 409);
+      }
+      const target = group.category === 'order-payment-proof'
+        ? result.paymentProof
+        : group.category === 'order-deal-evidence'
+          ? result.dealEvidence
+          : result.recoveryEvidence;
+      target.push(publicImportAttachment(record));
+    });
+  }
+  return result;
+}
+
+export async function validateBusinessImportAttachments(
+  prisma: AttachmentPrisma,
+  actor: AuthenticatedUser,
+  type: BusinessImportType,
+  rows: BusinessImportRow[],
+  expectedDraftId: string,
+): Promise<void> {
+  const ids = rows.flatMap((row) => importAttachmentManifest(type, row).flatMap((group) => group.ids));
+  if (new Set(ids).size !== ids.length) throw new BusinessImportError('同一张导入图片不能绑定到多条记录', 409);
+  const records = await importAttachmentRecords(prisma, ids);
+  const totalBytes = [...records.values()].reduce((sum, record) => sum + Number(record.size || 0), 0);
+  if (totalBytes > BUSINESS_IMPORT_ATTACHMENT_BATCH_MAX_BYTES) throw new BusinessImportError('导入图片总大小不能超过 200 MB', 409);
+  ids.forEach((id) => {
+    const record = records.get(id);
+    const draft = record ? importDraftIdentity(record, type) : null;
+    if (draft && draft.draftId !== expectedDraftId) throw new BusinessImportError('导入图片不属于本次预检文件', 409);
+  });
+  rows.forEach((row) => { verifiedImportAttachmentGroups(records, actor, type, row); });
+}
+
+export async function loadVerifiedBusinessImportAttachments(
+  prisma: AttachmentPrisma,
+  actor: Pick<AuthenticatedUser, 'id'>,
+  type: BusinessImportType,
+  row: BusinessImportRow,
+): Promise<ImportAttachmentGroups> {
+  const ids = importAttachmentManifest(type, row).flatMap((group) => group.ids);
+  return verifiedImportAttachmentGroups(await importAttachmentRecords(prisma, ids), actor, type, row);
+}
 
 export function businessImportScopeDomain(type: BusinessImportType): 'orders' | 'recoveryOrderApplications' {
   return type === 'orders' ? 'orders' : 'recoveryOrderApplications';
@@ -50,8 +168,9 @@ function thirdPartyNumber(record: { data: unknown }): string {
 }
 
 export async function loadBusinessImportDirectory(prisma: PrismaClient, actor: AuthenticatedUser, _type: BusinessImportType): Promise<BusinessImportDirectory> {
-  const [storage, users, roles, departments, customers, orders, recoveries, pendingReservations, context] = await Promise.all([
-    prisma.appStorage.findMany({ where: { key: { in: [STORAGE_KEYS.PRODUCTS, STORAGE_KEYS.ORDER_TYPE_CONFIGS, STORAGE_KEYS.AFTER_SALES_SOURCE_CONFIGS] } } }),
+  const [storage, productRecords, users, roles, departments, customers, orders, recoveries, pendingReservations, context] = await Promise.all([
+    prisma.appStorage.findMany({ where: { key: { in: [STORAGE_KEYS.ORDER_TYPE_CONFIGS, STORAGE_KEYS.AFTER_SALES_SOURCE_CONFIGS] } } }),
+    prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.PRODUCTS } }),
     prisma.user.findMany({ where: { isActive: true, employmentStatus: 'active' }, orderBy: [{ name: 'asc' }, { id: 'asc' }] }),
     prisma.role.findMany({ where: { isActive: true } }),
     prisma.department.findMany(),
@@ -68,7 +187,11 @@ export async function loadBusinessImportDirectory(prisma: PrismaClient, actor: A
   const scope = buildDataVisibilityScopeForUser(actor as any, activeUsers, roles.map(mapPrismaRole), departments as any,
     businessImportScopeDomain(_type));
   const values = new Map(storage.map((row) => [row.key, row.value]));
-  const products = readValue<ProductConfig[]>(values.get(STORAGE_KEYS.PRODUCTS), []).filter((item) => item.isActive !== false)
+  // Product settings use record-level persistence. appStorage may still contain
+  // a stale pre-migration snapshot, so the import directory must never read it.
+  const productConfigs = productRecords.map((row) => readValue<Product>(row.data, {} as Product));
+  const products = productConfigs.filter((item) => item.isActive !== false)
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
     .map((item) => ({ id: item.id, name: item.name, level: item.level }));
   const orderTypes = readValue<OrderTypeConfig[]>(values.get(STORAGE_KEYS.ORDER_TYPE_CONFIGS), []).filter((item) => item.isActive !== false)
     .sort((a, b) => a.sortOrder - b.sortOrder).map((item) => ({ id: item.id, name: item.name }));
@@ -183,6 +306,7 @@ export function createPrismaBusinessImportService(input: { prisma: PrismaClient;
       if (!actor) throw new BusinessImportError('当前导入用户不存在或已离职', 409);
       return persistPrecheck(input.prisma, record, actor.name);
     },
+    validateAttachments: (actor, type, rows, expectedDraftId) => validateBusinessImportAttachments(input.prisma, actor, type, rows, expectedDraftId),
     consumePrecheckAndCreateJob: (payload) => consumePrecheckAndCreateJob(input.prisma, payload),
   });
 }

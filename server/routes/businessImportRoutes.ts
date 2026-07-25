@@ -45,8 +45,20 @@ function allowed(value: unknown, keys: string[]): Record<string, unknown> {
 }
 
 const COMMON_ROW_KEYS = ['rowNumber', 'customerName', 'customerPhone', 'customerWechat', 'paymentChannel', 'paymentOrderNo', 'creatorName', 'thirdPartyOrderNo', 'remark'] as const;
-const ORDER_ROW_KEYS = [...COMMON_ROW_KEYS, 'productName', 'orderType', 'paymentAmount', 'paidAt', 'salesUserName', 'notes'] as const;
-const RECOVERY_ROW_KEYS = [...COMMON_ROW_KEYS, 'originalProduct', 'sourcePlatform', 'sourceShop', 'originalAmount', 'recoveryAmount', 'recoveryAt', 'paymentAt', 'recoveryUserName', 'assistUserName'] as const;
+const ORDER_ROW_KEYS = [
+  ...COMMON_ROW_KEYS, 'productName', 'orderType', 'paymentAmount', 'paidAt', 'salesUserName', 'notes',
+  'paymentProofFileName', 'dealEvidenceFileNames', 'paymentProofAttachmentIds', 'dealEvidenceAttachmentIds',
+] as const;
+const RECOVERY_ROW_KEYS = [
+  ...COMMON_ROW_KEYS, 'originalProduct', 'sourcePlatform', 'sourceShop', 'originalAmount', 'recoveryAmount', 'recoveryAt',
+  'paymentAt', 'recoveryUserName', 'assistUserName', 'recoveryEvidenceFileNames', 'recoveryEvidenceAttachmentIds',
+] as const;
+
+function optionalIds(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new BusinessImportError('导入图片上传结果无效');
+  return value.map((item) => item.trim());
+}
 
 function rows(type: BusinessImportType, value: unknown): BusinessImportRow[] {
   if (!Array.isArray(value)) throw new BusinessImportError('导入数据格式无效');
@@ -62,10 +74,13 @@ function rows(type: BusinessImportType, value: unknown): BusinessImportRow[] {
       ...common, productName: String(input.productName || ''), orderType: String(input.orderType || ''),
       paymentAmount: String(input.paymentAmount || ''), paidAt: String(input.paidAt || ''),
       salesUserName: String(input.salesUserName || ''), notes: String(input.notes || ''),
+      paymentProofFileName: String(input.paymentProofFileName || ''), dealEvidenceFileNames: String(input.dealEvidenceFileNames || ''),
+      paymentProofAttachmentIds: optionalIds(input.paymentProofAttachmentIds), dealEvidenceAttachmentIds: optionalIds(input.dealEvidenceAttachmentIds),
     } : {
       ...common, originalProduct: String(input.originalProduct || ''), sourcePlatform: String(input.sourcePlatform || ''), sourceShop: String(input.sourceShop || ''),
       originalAmount: String(input.originalAmount || ''), recoveryAmount: String(input.recoveryAmount || ''), recoveryAt: String(input.recoveryAt || ''),
       paymentAt: String(input.paymentAt || ''), recoveryUserName: String(input.recoveryUserName || ''), assistUserName: String(input.assistUserName || ''),
+      recoveryEvidenceFileNames: String(input.recoveryEvidenceFileNames || ''), recoveryEvidenceAttachmentIds: optionalIds(input.recoveryEvidenceAttachmentIds),
     } as BusinessImportRow;
   });
   if (parsed.some((row) => !Number.isSafeInteger(row.rowNumber) || row.rowNumber < 2 || row.rowNumber > BUSINESS_IMPORT_MAX_ROW_NUMBER)) {

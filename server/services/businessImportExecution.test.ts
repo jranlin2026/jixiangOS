@@ -21,6 +21,8 @@ const orderRow: BusinessImportJobRow = {
     productName: '课程A', orderType: '新单', paymentChannel: '企业微信转账', paymentAmount: 100,
     paidAt: '2026-07-20T00:00:00.000Z', paymentOrderNo: 'PAY-1', salesUserName: '销售甲',
     creatorName: '目标创建人', notes: '', thirdPartyOrderNo: 'TP-1', remark: '',
+    paymentProofFileName: '付款.jpg', dealEvidenceFileNames: '聊天.png',
+    paymentProofAttachmentIds: ['attachment-payment'], dealEvidenceAttachmentIds: ['attachment-deal'],
   },
 };
 
@@ -31,6 +33,11 @@ const orderRow: BusinessImportJobRow = {
       actor, users, products: [{ id: 'product-1', name: '课程A', level: '标准' }],
       orderTypes: [{ id: 'type-1', name: '新单' }], paymentChannels: ['企业微信转账'],
       customerMatches: [{ id: 'customer-1', name: '客户甲' }], recoveryPlatforms: [], recoveryShops: [],
+    }),
+    loadAttachments: async () => ({
+      paymentProof: [{ id: 'attachment-payment', name: '付款.jpg', mimeType: 'image/jpeg', size: 10, category: 'order-payment-proof', uploadedById: actor.id, uploadedByName: actor.name, uploadedAt: '2026-07-20' }],
+      dealEvidence: [{ id: 'attachment-deal', name: '聊天.png', mimeType: 'image/png', size: 10, category: 'order-deal-evidence', uploadedById: actor.id, uploadedByName: actor.name, uploadedAt: '2026-07-20' }],
+      recoveryEvidence: [],
     }),
     submitImportedOrderApplication: async (input) => { calls.push(input); return { id: 'oa-imported' }; },
     createImportedRecoveryOrder: async () => { throw new Error('wrong module'); },
@@ -44,6 +51,8 @@ const orderRow: BusinessImportJobRow = {
   assert.equal(calls[0].orderData.officialPaymentChannel, '企业微信转账');
   assert.equal(calls[0].orderData.paymentMethod, '微信支付');
   assert.equal(calls[0].orderData.payments[0].paymentMethod, '微信支付');
+  assert.equal(calls[0].orderData.payments[0].attachments[0].id, 'attachment-payment');
+  assert.equal(calls[0].orderData.dealEvidenceAttachments[0].id, 'attachment-deal');
   assert.equal('createFormalOrder' in calls[0], false, 'execution cannot request formal/downstream records');
 }
 
@@ -55,6 +64,13 @@ const orderRow: BusinessImportJobRow = {
       customerMatches: row.rowNumber === 3 ? [{ id: 'customer-existing', name: '存量客户' }] : [],
       recoveryPlatforms: [{ id: 'platform-1', name: '抖音' }], recoveryShops: [{ id: 'shop-1', platformId: 'platform-1', name: '旗舰店' }],
     }),
+    loadAttachments: async (_job, row) => ({
+      paymentProof: [], dealEvidence: [],
+      recoveryEvidence: row.rowNumber === 2 ? [{
+        id: 'recovery-proof', name: '挽回.jpg', mimeType: 'image/jpeg', size: 10, category: 'recovery-payment-proof',
+        uploadedById: actor.id, uploadedByName: actor.name, uploadedAt: '2026-07-20',
+      }] : [],
+    }),
     submitImportedOrderApplication: async () => { throw new Error('wrong module'); },
     createImportedRecoveryOrder: async (input) => { recoveries.push(input); return { id: `recovery-${input.row.rowNumber}` }; },
   });
@@ -65,6 +81,7 @@ const orderRow: BusinessImportJobRow = {
       originalProduct: '老课程', sourcePlatform: '抖音', sourceShop: '旗舰店', paymentChannel: '对公银行转账',
       originalAmount: 899, recoveryAmount: 299, recoveryAt: '2026-07-20T00:00:00.000Z',
       recoveryUserName: '销售甲', creatorName: '', thirdPartyOrderNo: `RCV-${rowNumber}`, remark: '',
+      recoveryEvidenceFileNames: rowNumber === 2 ? '挽回.jpg' : '', recoveryEvidenceAttachmentIds: rowNumber === 2 ? ['recovery-proof'] : [],
     },
   });
   await executor.execute({ ...baseJob, type: 'recovery_orders' }, recoveryRow(2));
@@ -73,6 +90,7 @@ const orderRow: BusinessImportJobRow = {
   assert.equal(recoveries[0].customer.id, '');
   assert.equal(recoveries[1].customer.matchStatus, '已绑定客户');
   assert.equal(recoveries[1].customer.id, 'customer-existing');
+  assert.equal(recoveries[0].data.recoveryAttachments[0].id, 'recovery-proof');
   assert.equal(recoveries[0].metadata.targetCreatorId, actor.id, 'blank creator defaults to importer');
 }
 

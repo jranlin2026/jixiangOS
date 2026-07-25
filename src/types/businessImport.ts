@@ -19,6 +19,13 @@ export type OrderImportRow = {
   creatorName?: string;
   notes?: string;
   thirdPartyOrderNo: string;
+  /** ZIP 导入包中与该行匹配的付款截图文件名，最多 1 张。 */
+  paymentProofFileName?: string;
+  /** ZIP 导入包中与该行匹配的成交资料文件名，英文分号分隔，最多 8 张。 */
+  dealEvidenceFileNames?: string;
+  /** 确认导入前已上传到私有附件存储的记录 ID。 */
+  paymentProofAttachmentIds?: string[];
+  dealEvidenceAttachmentIds?: string[];
   remark: string;
 };
 
@@ -40,6 +47,10 @@ export type RecoveryImportRow = {
   assistUserName?: string;
   creatorName?: string;
   thirdPartyOrderNo: string;
+  /** ZIP 导入包中的统一挽回凭证文件名，英文分号分隔，最多 8 张。 */
+  recoveryEvidenceFileNames?: string;
+  /** 确认导入前已上传到私有附件存储的记录 ID。 */
+  recoveryEvidenceAttachmentIds?: string[];
   remark: string;
 };
 

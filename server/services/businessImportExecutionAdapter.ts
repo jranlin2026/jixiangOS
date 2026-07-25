@@ -3,7 +3,7 @@ import type { AuthenticatedUser } from '../../src/types/auth';
 import type { BusinessImportJobExecution, BusinessImportJobRow } from '../../src/types/businessImport';
 import { PERMISSION_KEYS, hasPermission, toAuthenticatedUser } from '../../src/shared/utils/permissions';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
-import { businessImportContactKeys, loadBusinessImportDirectory } from './businessImportAdapter';
+import { businessImportContactKeys, loadBusinessImportDirectory, loadVerifiedBusinessImportAttachments } from './businessImportAdapter';
 import type { BusinessImportDirectory } from './businessImportService';
 import { createBusinessImportRowExecutor } from './businessImportExecution';
 
@@ -115,6 +115,11 @@ export function createPrismaBusinessImportRowExecutor(input: {
         paymentChannels: directory.paymentChannels, recoveryPlatforms: directory.recoveryPlatforms,
         recoveryShops: directory.recoveryShops, customerMatches: matchesForRow(directory, row),
       };
+    },
+    loadAttachments: async (job, row) => {
+      const actor = actors.get(job.id);
+      if (!actor) throw new Error('导入执行上下文已失效');
+      return loadVerifiedBusinessImportAttachments(input.prisma, actor, job.type, row.normalized);
     },
     submitImportedOrderApplication: async ({ applicant: _applicant, metadata, idempotencyKey, orderData }) => {
       const actor = actors.get(idempotencyKey.split(':').slice(0, -1).join(':'));
