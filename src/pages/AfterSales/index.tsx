@@ -68,17 +68,17 @@ const AfterSales: React.FC = () => {
           <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsSignal((value) => value + 1)}>
             视图设置
           </Button>
-          {activeTab === 'recovery-list' && canCreate && (
-            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateSignal((value) => value + 1)}>
-              新建售后挽回订单
-            </Button>
-          )}
           <BusinessImportEntryButton
             type="recovery_orders"
             active={activeTab === 'recovery-list'}
             user={currentUser}
             onClick={() => setImportOpen(true)}
           />
+          {activeTab === 'recovery-list' && canCreate && (
+            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateSignal((value) => value + 1)}>
+              新建售后挽回订单
+            </Button>
+          )}
           </>
         )}
       />

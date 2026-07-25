@@ -14,6 +14,10 @@ assert.match(orders, /tab', 'review'/);
 assert.match(orders, /importBatchId/);
 
 assert.match(afterSales, /<BusinessImportEntryButton[\s\S]*type="recovery_orders"[\s\S]*active=\{activeTab === 'recovery-list'\}/);
+assert.ok(
+  afterSales.indexOf('<BusinessImportEntryButton') < afterSales.indexOf('新建售后挽回订单'),
+  '导入售后挽回订单应显示在新建售后挽回订单左侧',
+);
 assert.match(afterSales, /tab', 'recovery-review'/);
 assert.match(afterSales, /importBatchId/);
 
