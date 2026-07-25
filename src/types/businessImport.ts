@@ -1,4 +1,5 @@
 export const BUSINESS_IMPORT_MAX_ROWS = 5_000;
+export const BUSINESS_IMPORT_MAX_ROW_NUMBER = 1_048_576;
 
 export type BusinessImportType = 'orders' | 'recovery_orders';
 export type BusinessImportRowStatus = 'ready' | 'warning' | 'blocked';

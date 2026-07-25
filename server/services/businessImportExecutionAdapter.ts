@@ -17,14 +17,14 @@ async function currentActor(prisma: PrismaClient, actorId: string): Promise<Auth
   return toAuthenticatedUser(mapPrismaUser(row), roles.map(mapPrismaRole).map(mergeRoleWithDefaultAccess));
 }
 
-async function currentDirectoryRevision(prisma: PrismaClient): Promise<string> {
+export async function loadBusinessImportDirectoryRevision(prisma: PrismaClient): Promise<string> {
   const rows = await prisma.$queryRaw<Array<{ revision: string }>>`
     SELECT CONCAT_WS('|',
-      COALESCE((SELECT DATE_FORMAT(MAX(updatedAt), '%Y-%m-%dT%H:%i:%s.%f') FROM users), ''),
-      COALESCE((SELECT DATE_FORMAT(MAX(updatedAt), '%Y-%m-%dT%H:%i:%s.%f') FROM roles), ''),
-      COALESCE((SELECT DATE_FORMAT(MAX(updatedAt), '%Y-%m-%dT%H:%i:%s.%f') FROM departments), ''),
-      COALESCE((SELECT DATE_FORMAT(MAX(updatedAt), '%Y-%m-%dT%H:%i:%s.%f') FROM app_storage), ''),
-      COALESCE((SELECT DATE_FORMAT(MAX(updatedAt), '%Y-%m-%dT%H:%i:%s.%f') FROM business_records WHERE domain = 'aaos_customers'), '')
+      (SELECT CONCAT(COUNT(*), ':', COALESCE(DATE_FORMAT(MAX(updatedAt), '%Y-%m-%dT%H:%i:%s.%f'), '')) FROM users),
+      (SELECT CONCAT(COUNT(*), ':', COALESCE(DATE_FORMAT(MAX(updatedAt), '%Y-%m-%dT%H:%i:%s.%f'), '')) FROM roles),
+      (SELECT CONCAT(COUNT(*), ':', COALESCE(DATE_FORMAT(MAX(updatedAt), '%Y-%m-%dT%H:%i:%s.%f'), '')) FROM departments),
+      (SELECT CONCAT(COUNT(*), ':', COALESCE(DATE_FORMAT(MAX(updatedAt), '%Y-%m-%dT%H:%i:%s.%f'), '')) FROM app_storage),
+      (SELECT CONCAT(COUNT(*), ':', COALESCE(DATE_FORMAT(MAX(updatedAt), '%Y-%m-%dT%H:%i:%s.%f'), '')) FROM business_records WHERE domain = 'aaos_customers')
     ) AS revision`;
   return String(rows[0]?.revision || 'empty');
 }
@@ -42,6 +42,9 @@ export function createPrismaBusinessImportRowExecutor(input: {
   loadExecutionActor?: (job: BusinessImportJobExecution) => Promise<AuthenticatedUser>;
   loadExecutionRevision?: (job: BusinessImportJobExecution) => Promise<bigint | number | string>;
   loadExecutionSnapshot?: (job: BusinessImportJobExecution) => Promise<{ actor: AuthenticatedUser; directory: BusinessImportDirectory }>;
+  now?: () => number;
+  revalidateEveryRows?: number;
+  revalidateAfterMs?: number;
   orderApplications: {
     submitImported(data: any, actor: AuthenticatedUser, metadata: any, idempotencyKey: string): Promise<any>;
   };
@@ -51,10 +54,26 @@ export function createPrismaBusinessImportRowExecutor(input: {
 }) {
   const actors = new Map<string, AuthenticatedUser>();
   const snapshots = new Map<string, { revision: string; loaded: Promise<{ actor: AuthenticatedUser; directory: BusinessImportDirectory }> }>();
-  const snapshot = async (job: BusinessImportJobExecution, actor: AuthenticatedUser) => {
+  const validations = new Map<string, { actor: AuthenticatedUser; revision: string; checkedAt: number; rowsSinceCheck: number }>();
+  const now = input.now || Date.now;
+  const revalidateEveryRows = input.revalidateEveryRows || 25;
+  const revalidateAfterMs = input.revalidateAfterMs || 500;
+  const validate = async (job: BusinessImportJobExecution) => {
+    const cached = validations.get(job.id);
+    const timestamp = now();
+    if (cached && cached.rowsSinceCheck < revalidateEveryRows && timestamp - cached.checkedAt < revalidateAfterMs) {
+      cached.rowsSinceCheck += 1;
+      return cached;
+    }
+    const actor = input.loadExecutionActor ? await input.loadExecutionActor(job) : await currentActor(input.prisma, job.actorId);
     const revision = String(input.loadExecutionRevision
       ? await input.loadExecutionRevision(job)
-      : await currentDirectoryRevision(input.prisma));
+      : await loadBusinessImportDirectoryRevision(input.prisma));
+    const current = { actor, revision, checkedAt: timestamp, rowsSinceCheck: 1 };
+    validations.set(job.id, current);
+    return current;
+  };
+  const snapshot = async (job: BusinessImportJobExecution, actor: AuthenticatedUser, revision: string) => {
     let cached = snapshots.get(job.id);
     if (!cached || cached.revision !== revision) {
       const loaded = input.loadExecutionSnapshot ? input.loadExecutionSnapshot(job) : (async () => {
@@ -67,11 +86,12 @@ export function createPrismaBusinessImportRowExecutor(input: {
   };
   const executor = createBusinessImportRowExecutor({
     loadContext: async (job: BusinessImportJobExecution, row: BusinessImportJobRow) => {
-      const actor = input.loadExecutionActor ? await input.loadExecutionActor(job) : await currentActor(input.prisma, job.actorId);
+      const validation = await validate(job);
+      const { actor, revision } = validation;
       if (!actor.isActive) throw new Error('导入人不存在或已停用');
       const permission = job.type === 'orders' ? PERMISSION_KEYS.ORDER_IMPORT : PERMISSION_KEYS.AFTER_SALES_RECOVERY_IMPORT;
       if (!hasPermission(actor, permission, 'write')) throw new Error('导入人权限已变化，任务已停止');
-      const { directory } = await snapshot(job, actor);
+      const { directory } = await snapshot(job, actor, revision);
       actors.set(job.id, actor);
       return {
         actor, users: directory.users, products: directory.products, orderTypes: directory.orderTypes,
@@ -98,6 +118,6 @@ export function createPrismaBusinessImportRowExecutor(input: {
     async execute(job: BusinessImportJobExecution, row: BusinessImportJobRow) {
       return executor.execute(job, row);
     },
-    releaseJob(job: BusinessImportJobExecution) { actors.delete(job.id); snapshots.delete(job.id); },
+    releaseJob(job: BusinessImportJobExecution) { actors.delete(job.id); snapshots.delete(job.id); validations.delete(job.id); },
   };
 }

@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import {
+  BUSINESS_IMPORT_MAX_ROW_NUMBER,
   BUSINESS_IMPORT_MAX_ROWS,
   type BusinessImportConfirmRequest,
   type BusinessImportJobResult,
@@ -76,6 +77,9 @@ function assertPermission(user: AuthenticatedUser, type: BusinessImportType): vo
 function assertRows(rows: BusinessImportRow[]): void {
   if (!Array.isArray(rows) || !rows.length) throw new BusinessImportError('导入文件没有可处理的数据');
   if (rows.length > BUSINESS_IMPORT_MAX_ROWS) throw new BusinessImportError(`单次最多导入 ${BUSINESS_IMPORT_MAX_ROWS} 条数据，请拆分文件后重试`);
+  if (rows.some((row) => !Number.isSafeInteger(row.rowNumber) || row.rowNumber < 2 || row.rowNumber > BUSINESS_IMPORT_MAX_ROW_NUMBER)) {
+    throw new BusinessImportError(`导入数据 rowNumber 行号必须是 2 到 ${BUSINESS_IMPORT_MAX_ROW_NUMBER} 之间的整数`);
+  }
 }
 
 function assertUniqueRowNumbers(rows: BusinessImportRow[]): void {
@@ -88,7 +92,7 @@ function assertUniqueRowNumbers(rows: BusinessImportRow[]): void {
 
 function normalizeRow(type: BusinessImportType, row: BusinessImportRow, index: number): BusinessImportRow {
   const common = {
-    rowNumber: Number.isFinite(Number(row.rowNumber)) ? Math.max(2, Math.floor(Number(row.rowNumber))) : index + 2,
+    rowNumber: row.rowNumber ?? index + 2,
     customerName: text((row as any).customerName),
     customerPhone: normalizePhoneForStorage((row as any).customerPhone),
     customerWechat: lower((row as any).customerWechat),

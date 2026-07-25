@@ -153,6 +153,10 @@ export function createPrismaBusinessImportJobStore(prisma: PrismaClient): Busine
 }
 
 export function createBusinessImportReadRepository(prisma: PrismaClient) {
+  const jobSummarySelect = {
+    id: true, batchId: true, importType: true, status: true, actorId: true,
+    totalCount: true, successCount: true, failedCount: true,
+  } as const;
   const result = (row: any): BusinessImportJobResult => ({
     id: row.id, batchId: row.batchId, type: row.importType, status: row.status,
     totalCount: row.totalCount, successCount: row.successCount, failedCount: row.failedCount,
@@ -169,11 +173,13 @@ export function createBusinessImportReadRepository(prisma: PrismaClient) {
   const terminal = (status: string) => ['succeeded', 'partial_failed', 'failed'].includes(status);
   return {
     async getJob(id: string, actor: AuthenticatedUser): Promise<BusinessImportJobResult | null> {
-      const row = await prisma.businessImportJob.findUnique({ where: { id } });
+      const row = await prisma.businessImportJob.findUnique({ where: { id }, select: jobSummarySelect });
       if (!row || row.actorId !== actor.id) return null;
       if (terminal(row.status)) {
         const items = await prisma.businessImportJobItem.findMany({ where: { jobId: row.id }, orderBy: [{ rowNumber: 'asc' }, { id: 'asc' }] });
-        return result({ ...row, items, includeLegacyRows: items.length === 0 });
+        if (items.length) return result({ ...row, items });
+        const legacy = await prisma.businessImportJob.findUnique({ where: { id }, select: { rows: true } });
+        return result({ ...row, rows: legacy?.rows, includeLegacyRows: true });
       }
       const failedItems = await prisma.businessImportJobItem.findMany({
         where: { jobId: row.id, status: 'failed' }, orderBy: [{ rowNumber: 'asc' }, { id: 'asc' }], take: 20,
@@ -181,7 +187,11 @@ export function createBusinessImportReadRepository(prisma: PrismaClient) {
       return result({ ...row, failedItems });
     },
     async getBatch(id: string, actor: AuthenticatedUser): Promise<BusinessImportBatchResult | null> {
-      const row = await prisma.businessImportBatch.findUnique({ where: { id }, include: { jobs: true } });
+      const row = await prisma.businessImportBatch.findUnique({ where: { id }, select: {
+        id: true, importType: true, status: true, actorId: true, sourceFileName: true,
+        totalCount: true, readyCount: true, warningCount: true, blockedCount: true, createdAt: true,
+        jobs: { select: jobSummarySelect },
+      } });
       if (!row || row.actorId !== actor.id) return null;
       return {
         id: row.id, type: row.importType as BusinessImportType, status: row.status,

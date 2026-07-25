@@ -3,11 +3,14 @@ import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { createBusinessImportService, BusinessImportError } from './businessImportService';
 import { consumePrecheckAndCreateJob } from './businessImportAdapter';
+import { createBusinessImportReadRepository } from './businessImportPersistence';
 
 if (!process.env.DATABASE_URL) {
   console.log('business import reservation integration skipped: DATABASE_URL is not set');
 } else {
-  const prisma = new PrismaClient();
+  const prisma = new PrismaClient({ log: [{ emit: 'event', level: 'query' }] });
+  const queries: string[] = [];
+  prisma.$on('query', (event) => queries.push(event.query));
   const runId = randomUUID();
   const actorId = `business-import-it-${runId}`;
   const batchIds: string[] = [];
@@ -71,6 +74,14 @@ if (!process.env.DATABASE_URL) {
     assert.equal(items.length, 1, 'confirmed rows are persisted independently from the job JSON snapshot');
     assert.equal(items[0]?.rowNumber, 2);
     assert.equal(items[0]?.status, 'queued');
+    queries.length = 0;
+    const reads = createBusinessImportReadRepository(prisma);
+    await reads.getJob(jobs[0]!.id, actor);
+    await reads.getBatch(jobs[0]!.batchId, actor);
+    const jobSelects = queries.filter((query) => /^SELECT\b/i.test(query.trim()) && /business_import_jobs/i.test(query));
+    assert.ok(jobSelects.length >= 2, '真实 Prisma 必须执行 getJob 与 getBatch 的任务摘要查询');
+    jobSelects.forEach((query) => assert.doesNotMatch(query, /`rows`/i,
+      'running getJob/getBatch 的真实 SQL 不得读取 jobs.rows'));
   } finally {
     if (batchIds.length) {
       await prisma.businessImportNumberReservation.deleteMany({ where: { batchId: { in: batchIds } } });

@@ -77,6 +77,11 @@ await assert.rejects(
   (error: unknown) => error instanceof BusinessImportError && error.status === 400 && /rowNumber|行号/.test(error.message),
   '服务层在写入 job item 唯一约束前拒绝重复行号',
 );
+await assert.rejects(
+  () => service.precheck({ type: 'orders', rows: [{ ...orderRow, rowNumber: 2_147_483_647, thirdPartyOrderNo: 'TP-row-overflow' }] }, actor),
+  (error: unknown) => error instanceof BusinessImportError && error.status === 400 && /行号/.test(error.message),
+  '服务层拒绝可使迁移或数据库 INT 溢出的极端行号',
+);
 
 const ambiguous = await service.precheck({
   type: 'orders',

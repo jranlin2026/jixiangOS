@@ -28,8 +28,6 @@ WITH parsed AS (
     j.`finishedAt`,
     jt.*,
     JSON_EXTRACT(j.`rows`, CONCAT('$[', jt.`ordinality` - 1, ']')) AS `payload`,
-    MAX(CASE WHEN jt.`originalRowNumber` >= 2 THEN jt.`originalRowNumber` ELSE 1 END)
-      OVER (PARTITION BY j.`id`) AS `maxOriginalRowNumber`,
     ROW_NUMBER() OVER (
       PARTITION BY j.`id`, jt.`originalRowNumber`
       ORDER BY jt.`ordinality`
@@ -37,21 +35,29 @@ WITH parsed AS (
   FROM `business_import_jobs` j
   JOIN JSON_TABLE(j.`rows`, '$[*]' COLUMNS(
     `ordinality` FOR ORDINALITY,
-    `originalRowNumber` INTEGER PATH '$.rowNumber' NULL ON EMPTY NULL ON ERROR,
+    `originalRowNumber` BIGINT PATH '$.rowNumber' NULL ON EMPTY NULL ON ERROR,
     `executionStatus` VARCHAR(32) PATH '$.executionStatus' NULL ON EMPTY,
     `precheckStatus` VARCHAR(32) PATH '$.status' NULL ON EMPTY,
     `thirdPartyOrderNo` VARCHAR(191) PATH '$.normalized.thirdPartyOrderNo' NULL ON EMPTY,
     `recordId` VARCHAR(80) PATH '$.recordId' NULL ON EMPTY,
     `errorMessage` VARCHAR(1000) PATH '$.errorMessage' NULL ON EMPTY
   )) jt
-), numbered AS (
+), assessed AS (
   SELECT
     parsed.*,
-    CASE
-      WHEN `originalRowNumber` >= 2 AND `duplicateOrdinal` = 1 THEN `originalRowNumber`
-      ELSE `maxOriginalRowNumber` + `ordinality`
-    END AS `assignedRowNumber`
+    MAX(CASE
+      WHEN `originalRowNumber` IS NULL OR `originalRowNumber` < 2 OR `originalRowNumber` > 1048576 OR `duplicateOrdinal` > 1 THEN 1
+      ELSE 0
+    END) OVER (PARTITION BY `jobId`) AS `requiresRenumber`
   FROM parsed
+), numbered AS (
+  SELECT
+    assessed.*,
+    CASE
+      WHEN `requiresRenumber` = 1 THEN `ordinality` + 1
+      ELSE `originalRowNumber`
+    END AS `assignedRowNumber`
+  FROM assessed
 )
 SELECT
   CONCAT('bir-', LEFT(SHA2(CONCAT(`jobId`, ':', `assignedRowNumber`), 256), 40)),

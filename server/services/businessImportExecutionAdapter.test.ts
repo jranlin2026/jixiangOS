@@ -38,6 +38,7 @@ const makeRow = (index: number): BusinessImportJobRow => ({
 
 let importerEnabled = true;
 let revocationSubmissions = 0;
+let revocationNow = 0;
 const revocationExecutor = createPrismaBusinessImportRowExecutor({
   prisma: {} as any,
   loadExecutionActor: async () => ({
@@ -46,6 +47,7 @@ const revocationExecutor = createPrismaBusinessImportRowExecutor({
     permissions: importerEnabled ? [{ module: '订单/订单列表/导入订单', actions: ['read', 'write'] }] : [],
   }),
   loadExecutionRevision: async () => 1,
+  now: () => revocationNow,
   loadExecutionSnapshot: async () => ({ actor, directory: {
     products: [{ id: 'p1', name: '训练营', level: '899' }], orderTypes: [{ id: 'ot1', name: '新购' }],
     paymentChannels: ['企业微信转账'], users: [{ id: actor.id, name: actor.name }, { id: 'sales-1', name: '销售甲' }],
@@ -57,6 +59,7 @@ const revocationExecutor = createPrismaBusinessImportRowExecutor({
 } as any);
 await revocationExecutor.execute(job, makeRow(0));
 importerEnabled = false;
+revocationNow = 501;
 await assert.rejects(
   () => revocationExecutor.execute(job, makeRow(1)),
   /导入人不存在或已停用|权限已变化/,
@@ -68,10 +71,12 @@ let directoryRevision = 1;
 let salesEnabled = true;
 let invalidationSnapshotLoads = 0;
 let invalidationSubmissions = 0;
+let invalidationNow = 0;
 const invalidationExecutor = createPrismaBusinessImportRowExecutor({
   prisma: {} as any,
   loadExecutionActor: async () => actor,
   loadExecutionRevision: async () => directoryRevision,
+  now: () => invalidationNow,
   loadExecutionSnapshot: async () => {
     invalidationSnapshotLoads += 1;
     return { actor, directory: {
@@ -87,6 +92,7 @@ const invalidationExecutor = createPrismaBusinessImportRowExecutor({
 await invalidationExecutor.execute(job, makeRow(0));
 salesEnabled = false;
 directoryRevision += 1;
+invalidationNow = 501;
 await assert.rejects(
   () => invalidationExecutor.execute(job, makeRow(1)),
   /销售人员不存在、已停用或姓名不唯一/,
@@ -98,8 +104,8 @@ assert.equal(invalidationSubmissions, 1);
 for (let index = 0; index < 5_000; index += 1) await executor.execute(job, makeRow(index));
 assert.equal(submissions, 5_000);
 assert.equal(snapshotLoads, 1, 'a 5000-row job preloads actor/directory/customer maps once rather than once per row');
-assert.equal(actorLoads, 5_000, '每行重新校验导入人与权限');
-assert.equal(revisionLoads, 5_000, '每行只执行有界的关键事实版本检查');
+assert.equal(actorLoads, 200, '5000 行按有界分块重新校验导入人与权限');
+assert.equal(revisionLoads, 200, '5000 行按有界分块执行关键事实版本检查');
 executor.releaseJob(job);
 await executor.execute(job, makeRow(0));
 assert.equal(snapshotLoads, 2, 'job cache is explicitly released after finalize/stop');

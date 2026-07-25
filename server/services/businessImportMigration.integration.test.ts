@@ -79,9 +79,10 @@ if (!process.env.DATABASE_URL) {
       { rowNumber: 2, status: 'ready', executionStatus: 'failed', normalized: { rowNumber: 2, thirdPartyOrderNo: 'FAIL-2' } },
       { status: 'ready', executionStatus: 'failed', normalized: { thirdPartyOrderNo: 'FAIL-3' } },
       { rowNumber: null, status: 'ready', executionStatus: 'failed', normalized: { rowNumber: null, thirdPartyOrderNo: 'FAIL-4' } },
+      { rowNumber: 2147483647, status: 'ready', executionStatus: 'failed', normalized: { rowNumber: 2147483647, thirdPartyOrderNo: 'FAIL-5' } },
     ];
     await insertJob('job-legacy-failed', 'batch-legacy-failed', 'failed', duplicateRows);
-    for (let index = 1; index <= 4; index += 1) await reserve(`reservation-fail-${index}`, 'batch-legacy-failed', 'job-legacy-failed', `FAIL-${index}`);
+    for (let index = 1; index <= 5; index += 1) await reserve(`reservation-fail-${index}`, 'batch-legacy-failed', 'job-legacy-failed', `FAIL-${index}`);
 
     await insertBatch('batch-legacy-partial');
     await insertJob('job-legacy-partial', 'batch-legacy-partial', 'partial_failed', [
@@ -105,8 +106,8 @@ if (!process.env.DATABASE_URL) {
       `SELECT rowNumber, JSON_EXTRACT(payload, '$.rowNumber') AS payloadRowNumber
        FROM \`${itemsTable}\` WHERE jobId = 'job-legacy-failed' ORDER BY rowNumber`,
     );
-    assert.deepEqual(backfilled.map((row) => Number(row.rowNumber)), [2, 4, 5, 6]);
-    assert.deepEqual(backfilled.map((row) => Number(row.payloadRowNumber)), [2, 4, 5, 6]);
+    assert.deepEqual(backfilled.map((row) => Number(row.rowNumber)), [2, 3, 4, 5, 6]);
+    assert.deepEqual(backfilled.map((row) => Number(row.payloadRowNumber)), [2, 3, 4, 5, 6]);
     const [reservations] = await connection.query<any[]>(
       `SELECT normalizedNumber FROM \`${reservationsTable}\` ORDER BY normalizedNumber`,
     );
@@ -129,10 +130,14 @@ if (!process.env.DATABASE_URL) {
       async () => connection.query(await migration('20260725030000_business_import_job_item_repair')),
       '已应用旧版 job-item 迁移的环境必须有可重入的升级修复',
     );
+    await assert.doesNotReject(
+      async () => connection.query(await migration('20260725030000_business_import_job_item_repair')),
+      '修复迁移重复执行不得依赖 INSERT IGNORE 吞掉冲突',
+    );
     const [repairedAgain] = await connection.query<any[]>(
       `SELECT rowNumber FROM \`${itemsTable}\` WHERE jobId = 'job-legacy-failed' ORDER BY rowNumber`,
     );
-    assert.deepEqual(repairedAgain.map((row) => Number(row.rowNumber)), [2, 4, 5, 6], '升级修复可重入且不重复行');
+    assert.deepEqual(repairedAgain.map((row) => Number(row.rowNumber)), [2, 3, 4, 5, 6], '升级修复可重入且不重复行');
   } finally {
     await connection.query(`DROP TABLE IF EXISTS \`${itemsTable}\`, \`${reservationsTable}\`, \`${jobsTable}\`, \`${batchesTable}\`, \`${recordsTable}\`, \`${usersTable}\`, \`${rolesTable}\`, \`${departmentsTable}\`, \`${storageTable}\``);
     await connection.end();

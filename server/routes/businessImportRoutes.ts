@@ -6,6 +6,7 @@ import type {
   BusinessImportType,
   BusinessImportReviewRequest,
 } from '../../src/types/businessImport';
+import { BUSINESS_IMPORT_MAX_ROW_NUMBER } from '../../src/types/businessImport';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { failure, success } from '../api/response';
 import { BusinessImportError } from '../services/businessImportService';
@@ -52,7 +53,7 @@ function rows(type: BusinessImportType, value: unknown): BusinessImportRow[] {
   const parsed = value.map((candidate, index) => {
     const input = allowed(candidate, type === 'orders' ? [...ORDER_ROW_KEYS] : [...RECOVERY_ROW_KEYS]);
     const common = {
-      rowNumber: Number(input.rowNumber || index + 2),
+      rowNumber: input.rowNumber === undefined || input.rowNumber === null || input.rowNumber === '' ? index + 2 : Number(input.rowNumber),
       customerName: String(input.customerName || ''), customerPhone: String(input.customerPhone || ''), customerWechat: String(input.customerWechat || ''),
       paymentChannel: String(input.paymentChannel || ''), paymentOrderNo: String(input.paymentOrderNo || ''), creatorName: String(input.creatorName || ''),
       thirdPartyOrderNo: String(input.thirdPartyOrderNo || ''), remark: String(input.remark || ''),
@@ -67,6 +68,9 @@ function rows(type: BusinessImportType, value: unknown): BusinessImportRow[] {
       paymentAt: String(input.paymentAt || ''), recoveryUserName: String(input.recoveryUserName || ''), assistUserName: String(input.assistUserName || ''),
     } as BusinessImportRow;
   });
+  if (parsed.some((row) => !Number.isSafeInteger(row.rowNumber) || row.rowNumber < 2 || row.rowNumber > BUSINESS_IMPORT_MAX_ROW_NUMBER)) {
+    throw new BusinessImportError(`导入数据 rowNumber 行号必须是 2 到 ${BUSINESS_IMPORT_MAX_ROW_NUMBER} 之间的整数`);
+  }
   if (new Set(parsed.map((row) => row.rowNumber)).size !== parsed.length) {
     throw new BusinessImportError('导入数据 rowNumber 行号不能重复');
   }

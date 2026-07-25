@@ -21,6 +21,8 @@ let jobRowsWrites = 0;
 let itemQueries = 0;
 let itemReadTake: number | undefined;
 let businessRecordExists = false;
+let jobReadArgs: any;
+let batchReadArgs: any;
 const apply = (target: any, data: any) => Object.entries(data).forEach(([key, value]: any) => {
   if (key === 'rows') jobRowsWrites += 1;
   target[key] = value?.increment !== undefined ? Number(target[key] || 0) + value.increment : clone(value);
@@ -43,7 +45,7 @@ const db: any = {
         || (where.leaseEpoch !== undefined && where.leaseEpoch !== job.leaseEpoch) || (where.status && where.status !== job.status)) return { count: 0 };
       apply(job, data); return { count: 1 };
     },
-    findUnique: async () => clone(job),
+    findUnique: async (args: any) => { jobReadArgs = args; return clone(job); },
     update: async ({ data }: any) => { apply(job, data); return clone(job); },
   },
   businessImportJobItem: {
@@ -74,7 +76,10 @@ const db: any = {
     },
   },
   businessRecord: { findFirst: async () => businessRecordExists ? { id: 'created-business-record' } : null },
-  businessImportBatch: { update: async ({ data }: any) => { batchStatus = data.status; } },
+  businessImportBatch: {
+    update: async ({ data }: any) => { batchStatus = data.status; },
+    findUnique: async (args: any) => { batchReadArgs = args; return { id: 'batch-stale', importType: 'orders', status: job.status, actorId: 'u1', sourceFileName: 'large.xlsx', totalCount: 5_000, readyCount: 5_000, warningCount: 0, blockedCount: 0, createdAt: new Date(), jobs: [clone(job)] }; },
+  },
 };
 
 const store = createPrismaBusinessImportJobStore(db);
@@ -117,10 +122,15 @@ assert.equal(reservations.has('tp-2'), true, '已创建业务记录的行必须�
 job.status = 'running';
 items.slice(0, 100).forEach((item) => { item.status = 'failed'; item.errorMessage = '执行失败'; });
 const runningJob = await createBusinessImportReadRepository(db).getJob(job.id, { id: 'u1' } as any);
+assert.ok(jobReadArgs?.select, 'running getJob 必须使用 select 排除 jobs.rows');
+assert.equal(jobReadArgs.select.rows, undefined, 'running getJob 不得读取 5000 行 JSON');
 assert.equal(runningJob?.rows, undefined, '轮询中不得返回 5000 行完整 payload');
 assert.ok((((runningJob as any)?.failedRowSample as any[] | undefined)?.length || 0) <= 20, '运行中失败摘要有固定上限');
 assert.equal(itemReadTake, 20, '运行中查询必须在数据库层限制行数');
 assert.ok(Buffer.byteLength(JSON.stringify(runningJob), 'utf8') < 50_000, '5000 行运行中轮询响应必须保持有界');
+await createBusinessImportReadRepository(db).getBatch('batch-stale', { id: 'u1' } as any);
+assert.ok(batchReadArgs?.select?.jobs?.select, 'getBatch 的 jobs 必须使用 select');
+assert.equal(batchReadArgs.select.jobs.select.rows, undefined, 'getBatch 不得读取任务的大 JSON');
 
 items[0].errorMessage = 'INSERT INTO business_records password=secret\nError at /private/server.ts:99';
 job.status = 'failed';
