@@ -62,7 +62,6 @@ const enhanceTable = (table: HTMLTableElement, pathname: string, tableIndex: num
   if (container) container.style.overflowX = 'auto';
 
   headers.forEach((header, columnIndex) => {
-    if (header.querySelector('[role="separator"]')) return;
     if (header.colSpan > 1) return;
 
     const columnId = getAutoColumnId(header.textContent || '', columnIndex);
@@ -70,7 +69,14 @@ const enhanceTable = (table: HTMLTableElement, pathname: string, tableIndex: num
     const currentWidth = Math.round(header.getBoundingClientRect().width);
     const width = clampColumnWidth(widths[columnId] ?? (currentWidth || 140));
     widths[columnId] = width;
+
+    // React may replace tbody rows after filtering, pagination, or async loading
+    // while preserving the already-enhanced header. Reapply the saved width and
+    // overflow rules to every current cell before deciding whether a new resize
+    // handle is needed; otherwise newly rendered cells can paint into neighbors.
     applyColumnWidth(table, columnIndex, width);
+
+    if (header.querySelector('[role="separator"]')) return;
 
     header.style.position = 'relative';
     header.style.paddingRight = '20px';
