@@ -20,79 +20,35 @@ ALTER TABLE `business_import_number_reservations`
 
 INSERT INTO `business_import_job_items`
   (`id`, `jobId`, `rowNumber`, `status`, `payload`, `reservedNumber`, `recordId`, `errorMessage`, `createdAt`, `updatedAt`)
-WITH parsed AS (
-  SELECT
-    j.`id` AS `jobId`,
-    j.`createdAt`,
-    j.`startedAt`,
-    j.`finishedAt`,
-    jt.*,
-    JSON_EXTRACT(j.`rows`, CONCAT('$[', jt.`ordinality` - 1, ']')) AS `payload`,
-    MAX(CASE WHEN jt.`originalRowNumber` >= 2 THEN jt.`originalRowNumber` ELSE 1 END)
-      OVER (PARTITION BY j.`id`) AS `maxOriginalRowNumber`,
-    ROW_NUMBER() OVER (
-      PARTITION BY j.`id`, jt.`originalRowNumber`
-      ORDER BY jt.`ordinality`
-    ) AS `duplicateOrdinal`
-  FROM `business_import_jobs` j
-  JOIN JSON_TABLE(j.`rows`, '$[*]' COLUMNS(
-    `ordinality` FOR ORDINALITY,
-    `originalRowNumber` INTEGER PATH '$.rowNumber' NULL ON EMPTY NULL ON ERROR,
-    `executionStatus` VARCHAR(32) PATH '$.executionStatus' NULL ON EMPTY,
-    `precheckStatus` VARCHAR(32) PATH '$.status' NULL ON EMPTY,
-    `thirdPartyOrderNo` VARCHAR(191) PATH '$.normalized.thirdPartyOrderNo' NULL ON EMPTY,
-    `recordId` VARCHAR(80) PATH '$.recordId' NULL ON EMPTY,
-    `errorMessage` VARCHAR(1000) PATH '$.errorMessage' NULL ON EMPTY
-  )) jt
-), numbered AS (
-  SELECT
-    parsed.*,
-    CASE
-      WHEN `originalRowNumber` >= 2 AND `duplicateOrdinal` = 1 THEN `originalRowNumber`
-      ELSE `maxOriginalRowNumber` + `ordinality`
-    END AS `assignedRowNumber`
-  FROM parsed
-)
 SELECT
-  CONCAT('bir-', LEFT(SHA2(CONCAT(`jobId`, ':', `assignedRowNumber`), 256), 40)),
-  `jobId`,
-  `assignedRowNumber`,
+  CONCAT('bir-', LEFT(SHA2(CONCAT(j.`id`, ':', jt.`rowNumber`), 256), 40)),
+  j.`id`,
+  jt.`rowNumber`,
   CASE
-    WHEN `executionStatus` IN ('queued', 'running', 'succeeded', 'failed') THEN `executionStatus`
-    WHEN `precheckStatus` = 'blocked' THEN 'failed'
+    WHEN jt.`executionStatus` IN ('queued', 'running', 'succeeded', 'failed') THEN jt.`executionStatus`
+    WHEN jt.`precheckStatus` = 'blocked' THEN 'failed'
     ELSE 'queued'
   END,
-  JSON_SET(`payload`, '$.rowNumber', `assignedRowNumber`, '$.normalized.rowNumber', `assignedRowNumber`),
-  NULLIF(LOWER(TRIM(`thirdPartyOrderNo`)), ''),
-  NULLIF(`recordId`, ''),
-  NULLIF(`errorMessage`, ''),
-  `createdAt`,
-  COALESCE(`finishedAt`, `startedAt`, `createdAt`)
-FROM numbered;
+  JSON_EXTRACT(j.`rows`, CONCAT('$[', jt.`ordinality` - 1, ']')),
+  NULLIF(LOWER(TRIM(jt.`thirdPartyOrderNo`)), ''),
+  NULLIF(jt.`recordId`, ''),
+  NULLIF(jt.`errorMessage`, ''),
+  j.`createdAt`,
+  COALESCE(j.`finishedAt`, j.`startedAt`, j.`createdAt`)
+FROM `business_import_jobs` j
+JOIN JSON_TABLE(j.`rows`, '$[*]' COLUMNS(
+  `ordinality` FOR ORDINALITY,
+  `rowNumber` INTEGER PATH '$.rowNumber',
+  `executionStatus` VARCHAR(32) PATH '$.executionStatus' NULL ON EMPTY,
+  `precheckStatus` VARCHAR(32) PATH '$.status' NULL ON EMPTY,
+  `thirdPartyOrderNo` VARCHAR(191) PATH '$.normalized.thirdPartyOrderNo' NULL ON EMPTY,
+  `recordId` VARCHAR(80) PATH '$.recordId' NULL ON EMPTY,
+  `errorMessage` VARCHAR(1000) PATH '$.errorMessage' NULL ON EMPTY
+)) jt
+WHERE jt.`rowNumber` IS NOT NULL;
 
 UPDATE `business_import_number_reservations` r
-JOIN (
-  SELECT `jobId`, `reservedNumber`, MIN(`rowNumber`) AS `rowNumber`
-  FROM `business_import_job_items`
-  WHERE `reservedNumber` IS NOT NULL
-  GROUP BY `jobId`, `reservedNumber`
-) i ON i.`jobId` = r.`jobId` AND i.`reservedNumber` = r.`normalizedNumber`
+JOIN `business_import_job_items` i
+  ON i.`jobId` = r.`jobId` AND i.`reservedNumber` = r.`normalizedNumber`
 SET r.`rowNumber` = i.`rowNumber`
 WHERE r.`jobId` IS NOT NULL;
-
-DELETE r
-FROM `business_import_number_reservations` r
-JOIN `business_import_jobs` j ON j.`id` = r.`jobId`
-JOIN `business_import_job_items` i
-  ON i.`jobId` = r.`jobId`
-  AND i.`rowNumber` = r.`rowNumber`
-  AND i.`reservedNumber` = r.`normalizedNumber`
-WHERE j.`status` IN ('succeeded', 'partial_failed', 'failed')
-  AND i.`status` = 'failed'
-  AND NOT EXISTS (
-    SELECT 1
-    FROM `business_records` br
-    WHERE br.`domain` IN ('aaos_order_applications', 'aaos_recovery_orders')
-      AND JSON_UNQUOTE(JSON_EXTRACT(br.`data`, '$.importBatchId')) = j.`batchId`
-      AND CAST(JSON_UNQUOTE(JSON_EXTRACT(br.`data`, '$.importRowNumber')) AS UNSIGNED) = i.`rowNumber`
-  );

@@ -74,13 +74,13 @@ if (!process.env.DATABASE_URL) {
     );
 
     await insertBatch('batch-legacy-failed');
-    const duplicateRows = [
+    const legacyRows = [
       { rowNumber: 2, status: 'ready', executionStatus: 'failed', normalized: { rowNumber: 2, thirdPartyOrderNo: 'FAIL-1' } },
-      { rowNumber: 2, status: 'ready', executionStatus: 'failed', normalized: { rowNumber: 2, thirdPartyOrderNo: 'FAIL-2' } },
-      { status: 'ready', executionStatus: 'failed', normalized: { thirdPartyOrderNo: 'FAIL-3' } },
-      { rowNumber: null, status: 'ready', executionStatus: 'failed', normalized: { rowNumber: null, thirdPartyOrderNo: 'FAIL-4' } },
+      { rowNumber: 4, status: 'ready', executionStatus: 'failed', normalized: { rowNumber: 4, thirdPartyOrderNo: 'FAIL-2' } },
+      { rowNumber: 5, status: 'ready', executionStatus: 'failed', normalized: { rowNumber: 5, thirdPartyOrderNo: 'FAIL-3' } },
+      { rowNumber: 6, status: 'ready', executionStatus: 'failed', normalized: { rowNumber: 6, thirdPartyOrderNo: 'FAIL-4' } },
     ];
-    await insertJob('job-legacy-failed', 'batch-legacy-failed', 'failed', duplicateRows);
+    await insertJob('job-legacy-failed', 'batch-legacy-failed', 'failed', legacyRows);
     for (let index = 1; index <= 4; index += 1) await reserve(`reservation-fail-${index}`, 'batch-legacy-failed', 'job-legacy-failed', `FAIL-${index}`);
 
     await insertBatch('batch-legacy-partial');
@@ -99,7 +99,7 @@ if (!process.env.DATABASE_URL) {
 
     await assert.doesNotReject(
       async () => connection.query(await migration('20260725010000_business_import_job_items')),
-      '历史 JSON 含重复或空行号时迁移不得因唯一约束中止',
+      '必须先以真实已部署的 010 版本建立历史 item',
     );
     const [backfilled] = await connection.query<any[]>(
       `SELECT rowNumber, JSON_EXTRACT(payload, '$.rowNumber') AS payloadRowNumber
@@ -107,12 +107,6 @@ if (!process.env.DATABASE_URL) {
     );
     assert.deepEqual(backfilled.map((row) => Number(row.rowNumber)), [2, 4, 5, 6]);
     assert.deepEqual(backfilled.map((row) => Number(row.payloadRowNumber)), [2, 4, 5, 6]);
-    const [reservations] = await connection.query<any[]>(
-      `SELECT normalizedNumber FROM \`${reservationsTable}\` ORDER BY normalizedNumber`,
-    );
-    assert.deepEqual(reservations.map((row) => row.normalizedNumber), ['keep-created', 'keep-success'],
-      '升级只释放无业务记录的终态失败行，成功行与已创建行保留占号');
-
     await assert.doesNotReject(
       async () => connection.query(await migration('20260725020000_business_import_directory_revision')),
       '目录版本迁移必须可在真实 MySQL 执行',
@@ -128,8 +122,13 @@ if (!process.env.DATABASE_URL) {
     await connection.query(await migration('20260725030000_business_import_job_item_repair'));
     const legacy010 = await readFile(new URL('../../prisma/migrations/20260725010000_business_import_job_items/migration.sql', import.meta.url));
     const legacy030 = await readFile(new URL('../../prisma/migrations/20260725030000_business_import_job_item_repair/migration.sql', import.meta.url));
-    assert.equal(createHash('sha256').update(legacy010).digest('hex'), '334fb9df6a4fa452d83f5f554afb112eb74f371bc2acb65b7aff7c3c6d2fd179');
+    assert.equal(createHash('sha256').update(legacy010).digest('hex'), 'b475dcc883c69b1da397f408706410aec73a697a820ed3d0283d56861f4e8629');
     assert.equal(createHash('sha256').update(legacy030).digest('hex'), '9cf034e891ac7d2c46bca95978a969e1d89f3bfe6e7fce93bb287fcff3de90fb');
+    const [reservations] = await connection.query<any[]>(
+      `SELECT normalizedNumber FROM \`${reservationsTable}\` ORDER BY normalizedNumber`,
+    );
+    assert.deepEqual(reservations.map((row) => row.normalizedNumber), ['keep-created', 'keep-success'],
+      '旧 030 只释放无业务记录的终态失败行，成功行与已创建行保留占号');
 
     const [dirtyBefore] = await connection.query<any[]>(
       `SELECT id, reservedNumber FROM \`${itemsTable}\`
