@@ -106,11 +106,27 @@ boundarySheet.spliceRows(5_002, 1);
 assert.equal((await parseCustomerImportWorkbook(await boundaryBook.xlsx.writeBuffer())).length, 5_000);
 await assert.rejects(() => parseCustomerImportWorkbook(overLimitBoundaryBuffer), /单次最多导入 5000 条客户/);
 
-const exportBuffer = await createCustomerExportWorkbook([{ 客户编号: 'c1', 客户姓名: '张三', 手机号: '+8613800000000' }]);
+const exportBuffer = await createCustomerExportWorkbook([{
+  客户编号: 'c1',
+  客户姓名: '张三',
+  手机号: '+8613800000000',
+  上一个销售负责人: '销售乙',
+  首个销售负责人: '销售丙',
+  线索录入人: '录入丁',
+  线索贡献人: '贡献戊',
+}]);
 const exportBook = new ExcelJS.Workbook();
 await exportBook.xlsx.load(exportBuffer);
 const exportHeaders = exportBook.worksheets[0].getRow(1).values;
-assert.deepEqual(Array.isArray(exportHeaders) ? exportHeaders.slice(1) : [], ['客户编号', '客户姓名', '手机号']);
+assert.deepEqual(Array.isArray(exportHeaders) ? exportHeaders.slice(1) : [], [
+  '客户编号',
+  '客户姓名',
+  '手机号',
+  '上一个销售负责人',
+  '首个销售负责人',
+  '线索录入人',
+  '线索贡献人',
+]);
 
 const errorBuffer = await createCustomerImportErrorWorkbook([
   { rowNumber: 2, name: '张三', status: 'failed', reason: '手机号重复' },

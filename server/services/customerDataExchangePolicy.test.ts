@@ -206,6 +206,10 @@ const exportRows = projectCustomerExportRows([{
   wechat: 'wx-a',
   company: '示例公司',
   owner: '销售甲',
+  previousOwner: '销售乙',
+  originalSalesTransferBy: '销售丙',
+  leadInputBy: '录入丁',
+  leadContributorName: '贡献戊',
   customerLevel: 'L2',
   lifecycleStatusCode: 'following',
   leadSource: '市场品牌部',
@@ -226,6 +230,10 @@ const exportRows = projectCustomerExportRows([{
 }], false);
 
 assert.equal(exportRows[0]['客户姓名'], '张三');
+assert.equal(exportRows[0]['上一个销售负责人'], '销售乙');
+assert.equal(exportRows[0]['首个销售负责人'], '销售丙');
+assert.equal(exportRows[0]['线索录入人'], '录入丁');
+assert.equal(exportRows[0]['线索贡献人'], '贡献戊');
 assert.equal(exportRows[0]['线索来源'], '市场品牌部-官网');
 assert.equal(exportRows[0]['最后跟进记录'], '客户已确认报价');
 assert.equal(Object.prototype.hasOwnProperty.call(exportRows[0], '手机号'), false);
