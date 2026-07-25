@@ -74,6 +74,27 @@ export class BusinessImportJobUnavailableError extends Error {
   }
 }
 
+export class BusinessImportJobRetryableError extends Error {
+  constructor(readonly code: number, message: string) {
+    super(message);
+  }
+}
+
+export function businessImportJobResultFromResponse(response: {
+  code: number;
+  data: BusinessImportJobResult;
+  message: string;
+}): BusinessImportJobResult {
+  if ([403, 404, 410].includes(response.code)) {
+    throw new BusinessImportJobUnavailableError(response.code, response.message || '导入任务已失效');
+  }
+  if (response.code === -1 || (response.code >= 500 && response.code <= 599)) {
+    throw new BusinessImportJobRetryableError(response.code, response.message || '读取导入任务进度失败');
+  }
+  if (response.code !== 0 || !response.data) throw new Error(response.message || '读取导入任务进度失败');
+  return response.data;
+}
+
 export function createBusinessImportSingleFlight<Args extends unknown[], Result>(
   task: (...args: Args) => Promise<Result>,
 ): (...args: Args) => Promise<Result> {
@@ -90,7 +111,7 @@ export function isTerminalBusinessImportJob(status: BusinessImportJobResult['sta
 }
 
 type PollOptions = {
-  wait?: (signal?: AbortSignal) => Promise<void>;
+  wait?: (signal?: AbortSignal, delayMs?: number) => Promise<void>;
   onUpdate?: (job: BusinessImportJobResult) => void;
   signal?: AbortSignal;
 };
@@ -103,7 +124,7 @@ function assertNotAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw abortError();
 }
 
-function abortableDelay(signal?: AbortSignal): Promise<void> {
+function abortableDelay(signal?: AbortSignal, delayMs = 2_000): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     if (signal?.aborted) return reject(abortError());
     const onAbort = () => {
@@ -114,9 +135,25 @@ function abortableDelay(signal?: AbortSignal): Promise<void> {
     const timer = globalThis.setTimeout(() => {
       signal?.removeEventListener('abort', onAbort);
       resolve();
-    }, 2_000);
+    }, delayMs);
     signal?.addEventListener('abort', onAbort, { once: true });
   });
+}
+
+export async function loadBusinessImportJobResult(
+  request: (signal?: AbortSignal) => Promise<{ code: number; data: BusinessImportJobResult; message: string }>,
+  signal?: AbortSignal,
+): Promise<BusinessImportJobResult> {
+  let response: { code: number; data: BusinessImportJobResult; message: string };
+  try {
+    response = await request(signal);
+  } catch (error) {
+    assertNotAborted(signal);
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    throw new BusinessImportJobRetryableError(-1, error instanceof Error ? error.message : '网络连接失败');
+  }
+  assertNotAborted(signal);
+  return businessImportJobResultFromResponse(response);
 }
 
 export async function pollBusinessImportJob(
@@ -124,14 +161,27 @@ export async function pollBusinessImportJob(
   options: PollOptions = {},
 ): Promise<BusinessImportJobResult> {
   const wait = options.wait || abortableDelay;
+  let transientRetryCount = 0;
   while (true) {
     assertNotAborted(options.signal);
-    const job = await load(options.signal);
+    let job: BusinessImportJobResult;
+    try {
+      job = await load(options.signal);
+    } catch (error) {
+      assertNotAborted(options.signal);
+      if (!(error instanceof BusinessImportJobRetryableError) || transientRetryCount >= 3) throw error;
+      const retryDelayMs = 500 * (2 ** transientRetryCount);
+      transientRetryCount += 1;
+      await wait(options.signal, retryDelayMs);
+      assertNotAborted(options.signal);
+      continue;
+    }
     assertNotAborted(options.signal);
+    transientRetryCount = 0;
     options.onUpdate?.(job);
     assertNotAborted(options.signal);
     if (isTerminalBusinessImportJob(job.status)) return job;
-    await wait(options.signal);
+    await wait(options.signal, 2_000);
     assertNotAborted(options.signal);
   }
 }
@@ -139,7 +189,7 @@ export async function pollBusinessImportJob(
 export async function runBusinessImportJobPolling(input: {
   load: (signal?: AbortSignal) => Promise<BusinessImportJobResult>;
   signal?: AbortSignal;
-  wait?: (signal?: AbortSignal) => Promise<void>;
+  wait?: (signal?: AbortSignal, delayMs?: number) => Promise<void>;
   storage?: BusinessImportStorage;
   storageKey?: string;
   stored?: StoredBusinessImportJob | null;

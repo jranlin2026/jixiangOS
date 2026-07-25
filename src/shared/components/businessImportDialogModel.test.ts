@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
 import {
   acceptQueuedBusinessImportJob,
+  businessImportJobResultFromResponse,
   businessImportJobStorageKey,
   createBusinessImportSingleFlight,
   getBusinessImportConfirmDisabledReason,
   readStoredBusinessImportJob,
   runBusinessImportJobPolling,
   BusinessImportJobUnavailableError,
+  BusinessImportJobRetryableError,
+  loadBusinessImportJobResult,
   pollBusinessImportJob,
   writeStoredBusinessImportJob,
 } from './businessImportDialogModel';
@@ -48,6 +51,60 @@ const partial = await pollBusinessImportJob(async () => {
 }, { wait: async () => { throw new Error('terminal job must not wait'); } });
 assert.equal(partial.status, 'partial_failed');
 assert.equal(partialFetches, 1);
+
+const retryDelays: number[] = [];
+const retryUpdates: string[] = [];
+let transientFetches = 0;
+const recoveredAfterTransientErrors = await pollBusinessImportJob(async () => {
+  transientFetches += 1;
+  if (transientFetches <= 2) throw new BusinessImportJobRetryableError(503, '服务暂时不可用');
+  return status(transientFetches === 3 ? 'running' : 'succeeded');
+}, {
+  wait: async (_signal, delayMs) => { retryDelays.push(delayMs || 0); },
+  onUpdate: (job) => { retryUpdates.push(job.status); },
+});
+assert.equal(recoveredAfterTransientErrors.status, 'succeeded');
+assert.equal(transientFetches, 4);
+assert.deepEqual(retryUpdates, ['running', 'succeeded']);
+assert.deepEqual(retryDelays, [500, 1_000, 2_000], 'transient errors back off before normal polling resumes');
+
+const exhaustedRetryDelays: number[] = [];
+let exhaustedFetches = 0;
+await assert.rejects(
+  pollBusinessImportJob(async () => {
+    exhaustedFetches += 1;
+    throw new BusinessImportJobRetryableError(503, '服务持续不可用');
+  }, { wait: async (_signal, delayMs) => { exhaustedRetryDelays.push(delayMs || 0); } }),
+  (error: unknown) => error instanceof BusinessImportJobRetryableError && error.code === 503,
+);
+assert.equal(exhaustedFetches, 4, 'the initial request plus three retries is the hard limit');
+assert.deepEqual(exhaustedRetryDelays, [500, 1_000, 2_000]);
+
+const retryAbortController = new AbortController();
+let retryAbortFetches = 0;
+const abortedDuringBackoff = pollBusinessImportJob(async () => {
+  retryAbortFetches += 1;
+  throw new BusinessImportJobRetryableError(502, '网关暂时异常');
+}, { signal: retryAbortController.signal });
+await Promise.resolve();
+retryAbortController.abort();
+await assert.rejects(abortedDuringBackoff, (error: unknown) => error instanceof DOMException && error.name === 'AbortError');
+assert.equal(retryAbortFetches, 1, 'abort during backoff must prevent another fetch');
+
+assert.throws(
+  () => businessImportJobResultFromResponse({ code: 500, data: null as unknown as BusinessImportJobResult, message: '服务异常' }),
+  (error: unknown) => error instanceof BusinessImportJobRetryableError && error.code === 500,
+);
+for (const code of [403, 404, 410]) {
+  assert.throws(
+    () => businessImportJobResultFromResponse({ code, data: null as unknown as BusinessImportJobResult, message: '任务不可用' }),
+    (error: unknown) => error instanceof BusinessImportJobUnavailableError && error.code === code,
+  );
+}
+await assert.rejects(
+  loadBusinessImportJobResult(async () => { throw new TypeError('fetch failed'); }),
+  (error: unknown) => error instanceof BusinessImportJobRetryableError && error.code === -1,
+);
 
 const abortController = new AbortController();
 let resolveAbortedFetch!: (job: BusinessImportJobResult) => void;
@@ -180,20 +237,27 @@ assert.deepEqual(acceptOrder, ['job', 'storage']);
 assert.equal(acceptedBatchId, 'batch-immediate', 'dialog queued callback receives batchId immediately');
 assert.match(warning, /任务已创建.*未能保存恢复标识/);
 
-writeStoredBusinessImportJob(storage, tenantAUser1, { id: 'missing-job', completedNotified: false });
-let unavailableCalls = 0;
-const missing = await runBusinessImportJobPolling({
-  load: async () => { throw new BusinessImportJobUnavailableError(404, '任务不存在'); },
-  storage,
-  storageKey: tenantAUser1,
-  stored: { id: 'missing-job', completedNotified: false },
-  onUpdate: () => { throw new Error('missing job must not update'); },
-  onUnavailable: () => { unavailableCalls += 1; },
-  wait: async () => undefined,
-});
-assert.equal(missing, null);
-assert.equal(unavailableCalls, 1);
-assert.equal(readStoredBusinessImportJob(storage, tenantAUser1), null);
+for (const unavailableCode of [403, 404, 410]) {
+  writeStoredBusinessImportJob(storage, tenantAUser1, { id: `unavailable-${unavailableCode}`, completedNotified: false });
+  let unavailableCalls = 0;
+  let unavailableFetches = 0;
+  const unavailable = await runBusinessImportJobPolling({
+    load: async () => {
+      unavailableFetches += 1;
+      throw new BusinessImportJobUnavailableError(unavailableCode, '任务不可用');
+    },
+    storage,
+    storageKey: tenantAUser1,
+    stored: { id: `unavailable-${unavailableCode}`, completedNotified: false },
+    onUpdate: () => { throw new Error('unavailable job must not update'); },
+    onUnavailable: () => { unavailableCalls += 1; },
+    wait: async () => { throw new Error('unavailable job must not retry'); },
+  });
+  assert.equal(unavailable, null);
+  assert.equal(unavailableFetches, 1);
+  assert.equal(unavailableCalls, 1);
+  assert.equal(readStoredBusinessImportJob(storage, tenantAUser1), null);
+}
 
 writeStoredBusinessImportJob(storage, tenantAUser1, { id: 'done-job', completedNotified: true });
 let repeatedCompletionCalls = 0;

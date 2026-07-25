@@ -34,6 +34,13 @@
 - Active polling no longer depends on a storage adapter or storage key. Once confirmation places the job in in-memory state, fetches, updates, and the terminal callback continue normally; persistence affects only recovery after closing/reopening. The no-storage behavior test observes `running` then `succeeded` and exactly one completion callback.
 - TDD RED evidence: the listener cleanup assertion failed with `0 !== 20`, and the throwing `localStorage` getter crashed SSR with `DOMException [SecurityError]`. Both passed after the minimal cleanup and storage-decoupling changes.
 
+### Final review hardening: transient polling recovery
+
+- Job polling now distinguishes retryable network/5xx failures from terminal permission or missing-job responses. Network failures and HTTP-style `500–599` responses use cancellable exponential backoff at 500 ms, 1,000 ms, and 2,000 ms; the fourth consecutive failure is surfaced instead of retrying indefinitely.
+- A successful read resets the consecutive-failure counter. Behavior tests prove two temporary 503 failures recover into `running` and then `succeeded`, while updates and completion behavior remain unchanged.
+- Aborting during retry backoff rejects immediately with `AbortError` and prevents another fetch. `403`, `404`, and `410` remain non-retryable terminal states, invoke unavailable handling once, and clear the persisted recovery record.
+- TDD RED evidence: the recovery test first failed because `BusinessImportJobRetryableError` and the retry-aware load boundary did not exist. The completed suite also covers retry exhaustion, backoff durations, network-error classification, cancellation, and terminal cleanup.
+
 ## Verification
 
 - `npx tsx src/api/businessImportApi.test.ts && npx tsx src/api/businessImportWorkbook.test.ts && npx tsx src/shared/components/businessImportDialogModel.test.ts && npx tsx src/shared/components/BusinessImportDialog.test.ts` — passed.
@@ -52,6 +59,12 @@ Second-review verification:
 - `TZ=Asia/Shanghai npx tsx src/api/businessImportWorkbook.test.ts && npx tsx src/api/businessImportApi.test.ts && npx tsx src/shared/components/businessImportDialogModel.test.ts && npx tsx src/shared/components/BusinessImportDialog.test.ts && npx tsc -b --pretty false` — passed, including the listener stress checks and throwing-storage Vite SSR render.
 - `npm run build` — passed; Vite transformed 13,436 modules and kept ExcelJS as a separate asset.
 - `npm test` — passed all 296 test files. Database-dependent integration checks retained their documented skip because `DATABASE_URL` was not set.
+
+Final-review verification:
+
+- `npx tsx src/api/businessImportApi.test.ts && npx tsx src/shared/components/businessImportDialogModel.test.ts && npx tsx src/shared/components/BusinessImportDialog.test.ts` — passed, including transient recovery, bounded retry, abort-during-backoff, and 403/404/410 cleanup behavior.
+- `npm run build` — passed TypeScript and Vite production build; Vite transformed 13,446 modules.
+- `git diff --check` — passed.
 
 ## Follow-up boundary
 

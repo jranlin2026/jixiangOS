@@ -48,12 +48,12 @@ import TablePagination from './TablePagination';
 import useAuthStore from '../../store/useAuthStore';
 import {
   acceptQueuedBusinessImportJob,
-  BusinessImportJobUnavailableError,
   businessImportJobStorageKey,
   clearStoredBusinessImportJob,
   createBusinessImportSingleFlight,
   getBusinessImportConfirmDisabledReason,
   isTerminalBusinessImportJob,
+  loadBusinessImportJobResult,
   readStoredBusinessImportJob,
   runBusinessImportJobPolling,
   type BusinessImportStorage,
@@ -212,13 +212,10 @@ export default function BusinessImportDialog({
     const controller = new AbortController();
     setPolling(true);
     void runBusinessImportJobPolling({
-      load: async (signal) => {
-        const response = await businessImportApi.job(jobId, signal);
-        if ([403, 404, 410].includes(response.code)) {
-          throw new BusinessImportJobUnavailableError(response.code, response.message || '导入任务已失效');
-        }
-        return responseData(response, '读取导入任务进度失败');
-      },
+      load: (signal) => loadBusinessImportJobResult(
+        (activeSignal) => businessImportApi.job(jobId, activeSignal),
+        signal,
+      ),
       signal: controller.signal,
       storage: storageAdapter || undefined,
       storageKey: storageKey || undefined,
