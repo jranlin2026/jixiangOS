@@ -542,6 +542,7 @@ const listService = createCustomerListService({
     if (sql.includes('GROUP BY') && sql.includes('leadSource')) {
       return [{ leadSource: '直播', sourceName: '抖音', total: BigInt(2) }];
     }
+    if (sql.includes('customer_tag_facets')) return [{ tagId: 't-agent', total: BigInt(2) }];
     const filtered = listFixtures.filter((item) => item.owner === '销售甲' && matchesCustomerTagFilters(item, executingFilters, tagCatalog));
     if (sql.includes('COUNT(*)')) return [{ total: BigInt(filtered.length) }];
     const page = Number(executingFilters.page || 1); const pageSize = Number(executingFilters.pageSize || 10);
@@ -582,6 +583,13 @@ const leadSourceFacets = await listService.listLeadSourceFacets('active', salesA
 assert.deepEqual(leadSourceFacets.data, [{ leadSource: '直播', sourceName: '抖音', count: 2 }]);
 assert.match(capturedQueries[0], /GROUP BY/);
 assert.match(capturedQueries[0], /sourceName/);
+assert.match(capturedQueries[0], /JSON_UNQUOTE\(JSON_EXTRACT\(data, '\$\.owner'\)\) IN/);
+
+capturedQueries.length = 0;
+const tagFacets = await listService.listTagFacets('active', salesActor);
+assert.deepEqual(tagFacets.data, [{ tagId: 't-agent', count: 2 }]);
+assert.match(capturedQueries[0], /JSON_TABLE/);
+assert.match(capturedQueries[0], /customer_tag_facets/);
 assert.match(capturedQueries[0], /JSON_UNQUOTE\(JSON_EXTRACT\(data, '\$\.owner'\)\) IN/);
 
 capturedQueries.length = 0;

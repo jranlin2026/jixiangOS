@@ -31,6 +31,8 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditIcon from '@mui/icons-material/Edit';
 import UndoIcon from '@mui/icons-material/Undo';
 import SearchIcon from '@mui/icons-material/Search';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import SortIcon from '@mui/icons-material/Sort';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import { businessExportApi, commissionApi, commissionRuleApi, recoveryOrderApi, settingsApi } from '../../api';
 import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
@@ -52,6 +54,7 @@ import { getActiveCommissions } from '../../shared/utils/financeSettlementPresen
 import { getRecoveryEvidenceAttachments } from '../../shared/utils/recoveryEvidence';
 import BusinessExportDialog, { type BusinessExportDialogRequest } from '../../shared/components/BusinessExportDialog';
 import { buildBusinessExportBrowserRequest, unwrapBusinessExportResponse } from '../../shared/utils/businessExportPageRequest';
+import BusinessStatusChip from '../../shared/components/BusinessStatusChip';
 
 const shell = {
   ink: '#0f172a',
@@ -385,6 +388,11 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<RecoverySettlementFilterStatus>('全部');
+  const [recoveryUserId, setRecoveryUserId] = useState('');
+  const [recoveryStartDate, setRecoveryStartDate] = useState('');
+  const [recoveryEndDate, setRecoveryEndDate] = useState('');
+  const [sortBy, setSortBy] = useState<'updatedAt' | 'recoveryAt'>('recoveryAt');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
@@ -469,10 +477,21 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         search,
         settlementStatuses: status === '全部' ? [...readyStatuses] : [status],
         includeDeleted: true,
+        recoveryStartDate: recoveryStartDate || undefined,
+        recoveryEndDate: recoveryEndDate || undefined,
+        recoveryUserId: recoveryUserId || undefined,
+        sortBy,
+        sortDirection,
         page: page + 1,
         pageSize: rowsPerPage,
       }),
-      recoveryOrderApi.fetchRecoverySettlementCounts({ search, includeDeleted: true }),
+      recoveryOrderApi.fetchRecoverySettlementCounts({
+        search,
+        includeDeleted: true,
+        recoveryStartDate: recoveryStartDate || undefined,
+        recoveryEndDate: recoveryEndDate || undefined,
+        recoveryUserId: recoveryUserId || undefined,
+      }),
       settingsApi.fetchAssignableDirectory(),
       commissionRuleApi.getCommissionRoleConfigs({ isActive: true }),
       commissionRuleApi.getCommissionPayoutPlans(),
@@ -492,7 +511,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     if (rolesRes.code === 0) setRoles(rolesRes.data);
     if (plansRes.code === 0) setPlans(plansRes.data);
     if (commissionRes.code === 0) setSettlementCommissions(commissionRes.data.items);
-  }, [page, rowsPerPage, search, status]);
+  }, [page, recoveryEndDate, recoveryStartDate, recoveryUserId, rowsPerPage, search, sortBy, sortDirection, status]);
 
   const applySettlementMutation = useCallback((previous: RecoveryOrder, next: RecoveryOrder) => {
     const previousStatus = getSettlementStatus(previous);
@@ -663,12 +682,33 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         search: search || undefined,
         settlementStatuses: status === '全部' ? [...readyStatuses] : [status],
         includeDeleted: true,
+        recoveryStartDate: recoveryStartDate || undefined,
+        recoveryEndDate: recoveryEndDate || undefined,
+        sortBy,
+        sortDirection,
         page: page + 1,
         pageSize: rowsPerPage,
       },
       { ...request, columnIds: visibleColumns.map((column) => column.id) },
     ));
     return unwrapBusinessExportResponse(response);
+  };
+
+  const handleRecoveryTimeSort = () => {
+    setSortDirection((current) => sortBy === 'recoveryAt' && current === 'desc' ? 'asc' : 'desc');
+    setSortBy('recoveryAt');
+    setPage(0);
+  };
+
+  const handleResetFilters = () => {
+    setSearch('');
+    setStatus('全部');
+    setRecoveryUserId('');
+    setRecoveryStartDate('');
+    setRecoveryEndDate('');
+    setSortBy('recoveryAt');
+    setSortDirection('desc');
+    setPage(0);
   };
 
   useEffect(() => {
@@ -1028,7 +1068,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       case 'auditorName':
         return row.auditorName || '-';
       case 'status':
-        return <Chip size="small" label={settlementStatus} color={getStatusChipColor(settlementStatus)} sx={{ fontWeight: 900 }} />;
+        return <BusinessStatusChip status={settlementStatus} />;
       case 'auditedAt':
         return row.auditedAt ? formatDate(row.auditedAt, 'yyyy-MM-dd HH:mm') : '-';
       case 'remark':
@@ -1114,7 +1154,10 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
 
       <StatusSegmentBar
         value={status}
-        onChange={setStatus}
+        onChange={(value) => {
+          setStatus(value);
+          setPage(0);
+        }}
         size="small"
         sx={{ mb: 1.25 }}
         items={STATUS_OPTIONS.map((option) => ({
@@ -1134,18 +1177,53 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
             size="small"
             placeholder="搜索挽回单号、客户、第三方订单号"
             value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(0);
+            }}
             InputProps={{ startAdornment: <SearchIcon fontSize="small" sx={{ mr: 1, color: shell.muted }} /> }}
             sx={{ minWidth: 240 }}
           />
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel>分账状态</InputLabel>
-            <Select label="分账状态" value={status} onChange={(event) => setStatus(event.target.value as RecoverySettlementFilterStatus)}>
-              {STATUS_OPTIONS.map((option) => (
-                <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
-              ))}
+          <FormControl size="small" sx={{ minWidth: 170 }}>
+            <InputLabel>挽回人员</InputLabel>
+            <Select label="挽回人员" value={recoveryUserId} onChange={(event) => {
+              setRecoveryUserId(event.target.value);
+              setPage(0);
+            }}>
+              <MenuItem value="">全部</MenuItem>
+              {activeUsers.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
             </Select>
           </FormControl>
+          <TextField
+            size="small"
+            label="挽回成交开始"
+            type="date"
+            value={recoveryStartDate}
+            onChange={(event) => {
+              setRecoveryStartDate(event.target.value);
+              setPage(0);
+            }}
+            InputLabelProps={{ shrink: true }}
+          />
+          <TextField
+            size="small"
+            label="挽回成交结束"
+            type="date"
+            value={recoveryEndDate}
+            onChange={(event) => {
+              setRecoveryEndDate(event.target.value);
+              setPage(0);
+            }}
+            InputLabelProps={{ shrink: true }}
+          />
+          <Button variant="outlined" startIcon={<SortIcon />} onClick={handleRecoveryTimeSort}>
+            {sortBy === 'recoveryAt'
+              ? `挽回成交时间${sortDirection === 'asc' ? '升序' : '降序'}`
+              : '按挽回成交时间排序'}
+          </Button>
+          <Button variant="outlined" startIcon={<RestartAltIcon />} onClick={handleResetFilters}>
+            重置
+          </Button>
       </Stack>
 
       <TableContainer component={Paper} elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: '6px 6px 0 0', overflowX: 'auto' }}>
@@ -1332,7 +1410,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                       <Typography variant="h6" sx={{ color: shell.ink, fontWeight: 900, letterSpacing: 0 }}>
                         {detailOrder.recoveryNo}
                       </Typography>
-                      <Chip label={getSettlementStatus(detailOrder)} size="small" color={getStatusChipColor(getSettlementStatus(detailOrder))} sx={{ fontWeight: 900 }} />
+                      <BusinessStatusChip status={getSettlementStatus(detailOrder)} />
                       {isSourceRecoveryDeleted(detailOrder) && <Chip label="源挽回单已删除" size="small" />}
                     </Stack>
                     <Typography variant="body2" sx={{ color: shell.muted, overflowWrap: 'anywhere' }}>
@@ -1728,7 +1806,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                       <Typography variant="h6" sx={{ color: shell.ink, fontWeight: 900, letterSpacing: 0 }}>
                         {selected.recoveryNo}
                       </Typography>
-                      <Chip label={getSettlementStatus(selected)} size="small" color={getStatusChipColor(getSettlementStatus(selected))} sx={{ fontWeight: 900 }} />
+                      <BusinessStatusChip status={getSettlementStatus(selected)} />
                     </Stack>
                     <Typography variant="body2" sx={{ color: shell.muted, overflowWrap: 'anywhere' }}>
                       {selected.customerName} · 售后挽回 · {selected.createdAt ? formatDate(selected.createdAt, 'yyyy-MM-dd HH:mm:ss') : '-'}

@@ -14,6 +14,11 @@ assert.match(commissionSource, /getOrderSettlementRisks/);
 assert.match(commissionSource, /BusinessAttachmentLinks/);
 assert.match(commissionSource, /AttachmentPreviewLink/);
 assert.doesNotMatch(
+  commissionSource,
+  /SettlementCompactDetailItem label="正式订单号"/,
+  '顶部已展示正式订单号，源业务资料不应重复展示同一字段。',
+);
+assert.doesNotMatch(
   commissionSource.slice(commissionSource.indexOf('<Dialog open={Boolean(summaryDetail)}'), commissionSource.indexOf('<Dialog open={orderSplitViewOpen}')),
   /label: '已撤回'/,
   '订单分账详情顶部摘要不应再以已撤回数量替代凭证状态。',

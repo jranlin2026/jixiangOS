@@ -166,12 +166,17 @@ assert.equal((await service.export({ module: 'recovery_settlements', reason: '�
 
 assert.deepEqual(
   (await service.export({ module: 'orders', reason: '字段池检查', columnMode: 'all', filters: { search: 'ORD-001' } }, actor)).data?.summaryColumns.map((column) => column.id),
-  ['orderNo', 'status', 'customer', 'productName', 'productLevel', 'orderType', 'actualAmount', 'officialPaymentChannel', 'thirdPartyOrderNo', 'resourceOwnership', 'owner', 'createdByName', 'paymentDate', 'leadInputBy', 'leadContributorName', 'notes', 'createdAt', 'leadSourceFull', 'updatedAt'],
+  ['orderNo', 'settlementStatus', 'customer', 'productName', 'productLevel', 'orderType', 'actualAmount', 'officialPaymentChannel', 'thirdPartyOrderNo', 'resourceOwnership', 'owner', 'createdByName', 'paymentDate', 'leadInputBy', 'leadContributorName', 'notes', 'createdAt', 'leadSourceFull', 'updatedAt'],
   '订单全部字段必须与 ORDER_COLUMNS 完全一致',
 );
 const orderAllFields = await service.export({ module: 'orders', reason: '全部字段值', columnMode: 'all', filters: { search: 'ORD-001' } }, actor);
 assert.equal(orderAllFields.data?.summaryRows[0]?.leadSourceFull, '抖音 / 直播');
 assert.equal(orderAllFields.data?.summaryRows[0]?.updatedAt, now);
+assert.equal(orderAllFields.data?.summaryRows[0]?.settlementStatus, '待确认');
+assert.equal(
+  (await service.export({ module: 'orders', reason: '分账进度筛选', columnMode: 'current_view', columnIds: ['orderNo', 'settlementStatus'], filters: { settlementStatus: '待确认' } }, actor)).code,
+  0,
+);
 assert.deepEqual(
   (await service.export({ module: 'order_settlements', reason: '字段池检查', columnMode: 'all', filters: { search: 'ORD-001' } }, actor)).data?.summaryColumns.map((column) => column.id),
   ['orderNo', 'status', 'customerName', 'thirdPartyOrderNo', 'productName', 'productLevel', 'orderAmount', 'officialPaymentChannel', 'paymentDate', 'salesOwner', 'createdByName', 'splitDetails', 'totalCommissionAmount', 'orderType', 'resourceOwnership', 'leadSourceFull', 'leadInputBy', 'leadContributorName', 'paymentOrderNo', 'notes', 'createdAt', 'updatedAt', 'performanceAmount', 'pendingAssignCount', 'exceptionCount', 'settlementOperator', 'confirmedAt', 'paidAt', 'withdrawReason'],

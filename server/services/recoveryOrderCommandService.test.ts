@@ -86,6 +86,7 @@ const oldRecord: RecoveryOrder = {
   id: 'recovery-old', recoveryNo: 'RCV-OLD', thirdPartyOrderNo: 'TP-OLD', customerId: '',
   customerName: '历史客户', customerMatchStatus: '手工填写', originalProduct: '历史产品',
   originalAmount: 100, recoveryAmount: 200, recoveryUserId: other.id, recoveryUserName: other.name,
+  recoveryAt: '2026-07-10T10:00:00.000Z',
   status: '待审核', settlementStatus: '待处理', commissionIds: [], createdBy: other.id,
   createdByName: other.name, createdAt: NOW, updatedAt: NOW,
   paymentVoucherPreview: INLINE_PROOF,
@@ -119,6 +120,7 @@ const outsideDepartmentRecord: RecoveryOrder = {
   thirdPartyOrderNo: 'TP-OUTSIDE-DEPARTMENT',
   recoveryUserId: creator.id,
   recoveryUserName: creator.name,
+  recoveryAt: '2026-07-14T10:00:00.000Z',
   createdBy: outsideDepartmentCreator.id,
   createdByName: outsideDepartmentCreator.name,
   importBatchId: 'batch-outside',
@@ -381,6 +383,27 @@ assert.deepEqual(
   [oldRecord.id],
   '售后审核台必须在服务端按导入批次筛选',
 );
+const recoveryTimeDesc = await service.list({
+  scopeDomain: 'recoveryOrderApplications', sortBy: 'recoveryAt', sortDirection: 'desc', page: 1, pageSize: 20,
+}, reviewer);
+assert.deepEqual(
+  recoveryTimeDesc.data?.items.map((item) => item.id),
+  [outsideDepartmentRecord.id, created.data!.id, oldRecord.id],
+  '售后挽回订单应支持按挽回成交时间倒序',
+);
+const recoveryDateFiltered = await service.list({
+  scopeDomain: 'recoveryOrderApplications', recoveryStartDate: '2026-07-12', recoveryEndDate: '2026-07-12', page: 1, pageSize: 20,
+}, reviewer);
+assert.deepEqual(recoveryDateFiltered.data?.items.map((item) => item.id), [created.data!.id]);
+const recoveryOwnerFiltered = await service.list({
+  scopeDomain: 'recoveryOrderApplications', recoveryUserId: creator.id, page: 1, pageSize: 20,
+}, reviewer);
+assert.equal(recoveryOwnerFiltered.data?.items.length, 2);
+assert.equal(
+  recoveryOwnerFiltered.data?.items.every((item) => item.recoveryUserId === creator.id),
+  true,
+  '挽回人员筛选只能匹配 recoveryUserId，不能混入提交人或协助人员',
+);
 const listedOldRecord = reviewerList.data?.items.find((item) => item.id === oldRecord.id);
 assert.equal(listedOldRecord?.paymentVoucherPreview, undefined);
 assert.equal(listedOldRecord?.chatEvidencePreview, undefined);
@@ -430,6 +453,8 @@ assert.deepEqual(
   [oldRecord.id, outsideDepartmentRecord.id].sort(),
   'finance-only access must be limited to settlement-ready orders',
 );
+const financeOwnerCounts = await service.settlementCounts({ includeDeleted: true, recoveryUserId: creator.id }, finance);
+assert.equal(financeOwnerCounts.data?.total, 1, '财务分账数量必须与挽回人员筛选后的列表一致');
 financeList.data?.items.forEach((item) => {
   assert.equal(item.paymentVoucherPreview, undefined);
   assert.equal(item.chatEvidencePreview, undefined);

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Order, OrderApplication } from '../../src/types/order';
+import type { Commission } from '../../src/types/commission';
 import { createOrderQueryService } from './orderQueryService';
 
 const now = '2026-07-12T15:00:00.000Z';
@@ -72,14 +73,19 @@ const records = [
     payments: [{ id: 'payment-self', amount: 899, paymentMethod: '对公转账', paidAt: now, voucherPreview: inlineProof }],
   }),
   order('order-legacy-self', undefined, sales.name),
-  order('order-other', 'user-other', '销售B'),
+  order('order-other', 'user-other', '销售B', {
+    thirdPartyOrderNo: 'THIRD-PARTY-LOOKUP',
+    payments: [{ id: 'payment-other', amount: 899, paymentMethod: '对公转账', paidAt: now, paymentOrderNo: 'PAYMENT-LOOKUP' }],
+  }),
   order('order-deleted', sales.id, sales.name, { deletedAt: now }),
   order('payment-sort-june', finance.id, finance.name, {
     payments: [{ id: 'payment-june', amount: 899, paymentMethod: '对公转账', paidAt: '2026-06-24T00:38:48.000Z' }],
+    createdAt: '2026-07-24T12:00:00.000Z',
     updatedAt: '2026-07-24T12:00:00.000Z',
   }),
   order('payment-sort-july', finance.id, finance.name, {
     payments: [{ id: 'payment-july', amount: 899, paymentMethod: '对公转账', paidAt: '2026-07-24T10:55:13.000Z' }],
+    createdAt: '2026-07-01T00:00:00.000Z',
     updatedAt: '2026-07-01T00:00:00.000Z',
   }),
 ];
@@ -121,6 +127,12 @@ const customers = [
   { id: 'customer-order-self', leadSource: '市场品牌部', sourceName: '官网', createdAt: now, updatedAt: now },
   { id: 'customer-draft-application-self', leadSource: '市场品牌部', sourceName: '搜索广告', createdAt: now, updatedAt: now },
 ];
+const commissions: Commission[] = [{
+  id: 'commission-order-self', orderId: 'order-self', orderNo: 'ORD-order-self', customerName: '客户-order-self',
+  productLevel: '899', orderAmount: 899, commissionRate: 0.1, commissionAmount: 89.9,
+  role: '销售', owner: sales.name, ownerId: sales.id, department: '销售部', status: '待确认',
+  payoutPlanId: 'plan-899', payoutPlanName: '899销售方案', createdAt: now, updatedAt: now,
+}];
 const businessRecordFindManyWhere: any[] = [];
 
 const prisma: any = {
@@ -130,7 +142,11 @@ const prisma: any = {
   businessRecord: {
     findMany: async ({ where }: any) => {
       businessRecordFindManyWhere.push(where);
-      const rows = where.domain === STORAGE_KEYS.ORDERS ? records : applications;
+      const rows = where.domain === STORAGE_KEYS.ORDERS
+        ? records
+        : where.domain === STORAGE_KEYS.COMMISSIONS
+          ? commissions
+          : applications;
       const filteredRows = where.recordId?.in
         ? rows.filter((data) => where.recordId.in.includes(data.id))
         : rows;
@@ -162,14 +178,42 @@ assert.equal(listedOrder?.dealEvidencePreview, undefined);
 assert.equal(listedOrder?.payments[0].voucherPreview, undefined);
 assert.equal(listedOrder?.createdById, finance.id, '历史订单列表应从来源申请回溯创建人');
 assert.equal(listedOrder?.createdByName, finance.name);
+assert.equal(listedOrder?.settlementStatus, '待确认', '订单列表应显示分账进度而非固定的已确认');
+assert.equal(
+  salesOrders.data?.items.find((item) => item.id === 'order-legacy-self')?.settlementStatus,
+  '待分账',
+  '没有分账记录的正式订单应标记为待分账',
+);
 assert.deepEqual(
   businessRecordFindManyWhere.find((where) => where.domain === STORAGE_KEYS.ORDER_APPLICATIONS)?.recordId?.in,
   ['application-approved'],
   '订单列表只能回溯当前页缺少创建人的来源申请',
 );
+assert.deepEqual(
+  (await service.listOrders({ settlementStatus: '待确认', page: 1, pageSize: 10 }, sales)).data?.items.map((item) => item.id),
+  ['order-self'],
+  '分账进度筛选应在分页前生效',
+);
 
 const financeOrders = await service.listOrders({ search: 'order-other', page: 1, pageSize: 10 }, finance);
 assert.deepEqual(financeOrders.data?.items.map((item) => item.id), ['order-other']);
+assert.deepEqual(
+  (await service.listOrders({ search: 'third-party-lookup', page: 1, pageSize: 10 }, finance)).data?.items.map((item) => item.id),
+  ['order-other'],
+  '订单关键词应支持第三方平台订单号',
+);
+assert.deepEqual(
+  (await service.listOrders({ search: 'payment-lookup', page: 1, pageSize: 10 }, finance)).data?.items.map((item) => item.id),
+  ['order-other'],
+  '订单关键词应支持付款订单号',
+);
+
+const newestCreatedFirst = await service.listOrders({ search: 'payment-sort', page: 1, pageSize: 10 }, finance);
+assert.deepEqual(
+  newestCreatedFirst.data?.items.map((item) => item.id),
+  ['payment-sort-june', 'payment-sort-july'],
+  '默认应按订单创建时间倒序，新建订单排在第一行',
+);
 
 const paymentDateDesc = await service.listOrders({
   search: 'payment-sort', sortBy: 'paymentDate', sortDirection: 'desc', page: 1, pageSize: 10,
@@ -183,6 +227,10 @@ const paymentDateAsc = await service.listOrders({
   search: 'payment-sort', sortBy: 'paymentDate', sortDirection: 'asc', page: 1, pageSize: 10,
 }, finance);
 assert.deepEqual(paymentDateAsc.data?.items.map((item) => item.id), ['payment-sort-june', 'payment-sort-july']);
+const julyPaymentDateOnly = await service.listOrders({
+  search: 'payment-sort', paymentStartDate: '2026-07-01', paymentEndDate: '2026-07-31', page: 1, pageSize: 10,
+}, finance);
+assert.deepEqual(julyPaymentDateOnly.data?.items.map((item) => item.id), ['payment-sort-july']);
 
 const forbiddenOrder = await service.getOrder('order-other', sales);
 assert.equal(forbiddenOrder.code, 403);

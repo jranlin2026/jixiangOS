@@ -19,6 +19,7 @@ import type {
   CommissionStats,
   CommissionStatus,
 } from '../types/commission';
+import { deriveOrderSettlementProgress } from '../shared/utils/orderSettlementProgress';
 import type { Order, OrderApplication } from '../types/order';
 import type { Product } from '../types/product';
 import type { User } from '../types/settings';
@@ -591,14 +592,6 @@ async function fetchCommissionsByOrder(orderId: string): Promise<ApiResponse<Com
   return createSuccessResponse(getOrderCommissions(orderId));
 }
 
-function deriveOrderSummaryStatus(commissions: Commission[]): CommissionOrderSummary['status'] {
-  if (commissions.some(isCommissionPendingHandling)) return '待处理';
-  if (commissions.every(isInactiveCommission)) return '已撤回';
-  if (commissions.every((commission) => commission.status === '已发放')) return '已发放';
-  if (commissions.every((commission) => commission.status === '待发放' || commission.status === '已发放')) return '待发放';
-  return '待确认';
-}
-
 function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrderSummary[] {
   const formalOrderCommissions = commissions.filter((commission) => (
     commission.sourceBusinessType !== 'after_sales_recovery'
@@ -672,7 +665,7 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
       confirmedAt: processing.confirmedAt,
       paidAt: processing.paidAt,
       withdrawReason: processing.withdrawReason,
-      status: deriveOrderSummaryStatus(sortedRows),
+      status: deriveOrderSettlementProgress(sortedRows),
       splitSummary: activeRows.map((item) => ({
         role: item.role,
         amount: item.commissionAmount,
@@ -682,22 +675,31 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
       })),
       commissions: sortedRows,
     };
-  }).sort((a, b) => new Date(b.paymentDate || '').getTime() - new Date(a.paymentDate || '').getTime());
+  });
 }
 
 function applyOrderSummaryFilters(summaries: CommissionOrderSummary[], filters?: CommissionOrderSummaryFilters): CommissionOrderSummary[] {
   let filtered = [...summaries];
   if (filters?.search) {
     const q = filters.search.toLowerCase();
-    filtered = filtered.filter((item) => item.orderNo.toLowerCase().includes(q) || item.customerName.toLowerCase().includes(q));
+    filtered = filtered.filter((item) => [item.orderNo, item.customerName, item.thirdPartyOrderNo, item.paymentOrderNo]
+      .some((value) => String(value || '').toLowerCase().includes(q)));
   }
   if (filters?.status && filters.status !== '全部') filtered = filtered.filter((item) => item.status === filters.status);
   if (filters?.ownerId) filtered = filtered.filter((item) => item.commissions.some((commission) => commission.ownerId === filters.ownerId));
+  if (filters?.salesId) filtered = filtered.filter((item) => item.salesId === filters.salesId);
   if (filters?.role) filtered = filtered.filter((item) => item.commissions.some((commission) => commission.role === filters.role));
   if (filters?.month) filtered = filtered.filter((item) => item.paymentDate.startsWith(filters.month!));
   const { startDate, endDate } = normalizeDateRange(filters?.startDate, filters?.endDate);
   if (startDate) filtered = filtered.filter((item) => item.paymentDate >= startDate);
   if (endDate) filtered = filtered.filter((item) => item.paymentDate <= endDate);
+  const sortBy = filters?.sortBy || 'createdAt';
+  const direction = filters?.sortDirection === 'asc' ? 1 : -1;
+  filtered.sort((a, b) => {
+    const aValue = sortBy === 'paymentDate' ? a.paymentDate : a.createdAt;
+    const bValue = sortBy === 'paymentDate' ? b.paymentDate : b.createdAt;
+    return direction * (new Date(aValue || '').getTime() - new Date(bValue || '').getTime());
+  });
   return filtered;
 }
 

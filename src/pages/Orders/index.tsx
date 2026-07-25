@@ -32,6 +32,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditIcon from '@mui/icons-material/Edit';
 import HistoryIcon from '@mui/icons-material/History';
 import SortIcon from '@mui/icons-material/Sort';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
@@ -46,7 +47,7 @@ import OrderForm from './OrderForm';
 import OrderHistoryDialog from './OrderHistoryDialog';
 import OrderReview from '../OrderReview';
 import type { Customer } from '../../types/customer';
-import type { Order } from '../../types/order';
+import type { Order, OrderSettlementProgress } from '../../types/order';
 import type { OrderTypeConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
@@ -69,6 +70,7 @@ import { buildBusinessExportBrowserRequest, unwrapBusinessExportResponse } from 
 import BusinessImportDialog from '../../shared/components/BusinessImportDialog';
 import type { BusinessImportJobResult } from '../../types/businessImport';
 import BusinessImportEntryButton from '../../shared/components/BusinessImportEntryButton';
+import BusinessStatusChip from '../../shared/components/BusinessStatusChip';
 
 type OrderColumn = {
   id: string;
@@ -83,13 +85,14 @@ type OrderViewConfig = {
 };
 
 const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_view_v7';
-const ORDER_VIEW_SCHEMA_VERSION = 11;
+const ORDER_VIEW_SCHEMA_VERSION = 12;
 const ORDER_WIDTH_STORAGE_KEY = 'aaos_order_table_column_widths_v1';
 const ORDER_ACTION_COLUMN_WIDTH = 160;
+const ORDER_SETTLEMENT_STATUS_OPTIONS: OrderSettlementProgress[] = ['待分账', '待确认', '待发放', '已发放', '已撤回'];
 
 const ORDER_COLUMNS: OrderColumn[] = [
   { id: 'orderNo', label: '订单号' },
-  { id: 'status', label: '订单状态' },
+  { id: 'settlementStatus', label: '分账进度' },
   { id: 'customer', label: '客户' },
   { id: 'productName', label: '产品名称' },
   { id: 'productLevel', label: '产品等级' },
@@ -109,7 +112,7 @@ const ORDER_COLUMNS: OrderColumn[] = [
 
 const DEFAULT_VISIBLE_COLUMNS = [
   'orderNo',
-  'status',
+  'settlementStatus',
   'customer',
   'productName',
   'productLevel',
@@ -126,7 +129,7 @@ const DEFAULT_VISIBLE_COLUMNS = [
 
 const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   orderNo: 180,
-  status: 120,
+  settlementStatus: 120,
   customer: 180,
   productName: 180,
   productLevel: 140,
@@ -367,6 +370,17 @@ const Orders: React.FC = () => {
     fetchItems(newFilters);
   };
 
+  const handleResetFilters = () => {
+    const newFilters = {
+      page: 1,
+      pageSize: pagination.pageSize || 10,
+      sortBy: 'createdAt' as const,
+      sortDirection: 'desc' as const,
+    };
+    setFilters(newFilters);
+    fetchItems(newFilters);
+  };
+
   const handlePageChange = (_: React.MouseEvent<HTMLButtonElement> | null, page: number) => {
     const newFilters = { ...filters, page: page + 1, pageSize: pagination.pageSize || 10 };
     setFilters(newFilters);
@@ -572,8 +586,8 @@ const Orders: React.FC = () => {
             </Box>
           </Button>
         );
-      case 'status':
-        return <Chip label={order.status || '-'} size="small" variant="outlined" />;
+      case 'settlementStatus':
+        return <BusinessStatusChip status={order.settlementStatus || '待分账'} />;
       case 'customer':
         return (
           <Button
@@ -678,12 +692,19 @@ const Orders: React.FC = () => {
           )}
           <ModuleToolbar>
             <TextField
-              placeholder="搜索订单号/客户名"
+              placeholder="搜索订单号/客户/第三方订单/付款单号"
               value={filters.search || ''}
               onChange={(e) => handleFilterChange('search', e.target.value)}
               size="small"
               sx={{ minWidth: 240 }}
             />
+            <FormControl size="small" sx={{ minWidth: 130 }}>
+              <InputLabel>分账进度</InputLabel>
+              <Select value={filters.settlementStatus || ''} label="分账进度" onChange={(e) => handleFilterChange('settlementStatus', e.target.value)}>
+                <MenuItem value="">全部</MenuItem>
+                {ORDER_SETTLEMENT_STATUS_OPTIONS.map((status) => <MenuItem key={status} value={status}>{status}</MenuItem>)}
+              </Select>
+            </FormControl>
             <FormControl size="small" sx={{ minWidth: 120 }}>
               <InputLabel>产品等级</InputLabel>
               <Select value={selectedProductLevel} label="产品等级" onChange={(e) => handleFilterChange('productLevel', e.target.value)}>
@@ -716,8 +737,29 @@ const Orders: React.FC = () => {
                 ))}
               </Select>
             </FormControl>
+            <TextField
+              label="付款开始"
+              type="date"
+              value={filters.paymentStartDate || ''}
+              onChange={(e) => handleFilterChange('paymentStartDate', e.target.value)}
+              size="small"
+              InputLabelProps={{ shrink: true }}
+            />
+            <TextField
+              label="付款结束"
+              type="date"
+              value={filters.paymentEndDate || ''}
+              onChange={(e) => handleFilterChange('paymentEndDate', e.target.value)}
+              size="small"
+              InputLabelProps={{ shrink: true }}
+            />
             <Button variant="outlined" startIcon={<SortIcon />} onClick={handlePaymentDateSort}>
-              付款时间{filters.sortBy === 'paymentDate' && filters.sortDirection === 'asc' ? '升序' : '降序'}
+              {filters.sortBy === 'paymentDate'
+                ? `付款时间${filters.sortDirection === 'asc' ? '升序' : '降序'}`
+                : '按付款时间排序'}
+            </Button>
+            <Button variant="outlined" startIcon={<RestartAltIcon />} onClick={handleResetFilters}>
+              重置
             </Button>
           </ModuleToolbar>
 

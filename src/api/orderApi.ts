@@ -16,6 +16,7 @@ import { syncLifecycleByOrder } from './lifecycleSync';
 import { v4 as uuidv4 } from 'uuid';
 import { getCurrentOperatorName, getCurrentOperatorUser, SYSTEM_OPERATOR } from '../shared/utils/currentOperator';
 import { filterVisibleOrders } from '../shared/utils/dataVisibility';
+import { deriveOrderListSettlementProgress } from '../shared/utils/orderSettlementProgress';
 
 function ensureInit(): void {
   initializeMockData();
@@ -249,12 +250,31 @@ async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<Paginate
   const raw = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
   const all = raw.map(normalizeOrder);
   if (JSON.stringify(raw) !== JSON.stringify(all)) setStorageData(STORAGE_KEYS.ORDERS, all, { persist: false });
-  let filtered = filterVisibleOrders(all.filter((order) => !order.deletedAt));
+  const commissionsByOrder = new Map<string, Commission[]>();
+  (getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [])
+    .filter((commission) => (
+      commission.sourceBusinessType !== 'after_sales_recovery'
+      && commission.sourceBusinessType !== 'refund_recovery'
+      && !commission.sourceRecoveryOrderId
+    ))
+    .forEach((commission) => commissionsByOrder.set(
+      commission.orderId,
+      [...(commissionsByOrder.get(commission.orderId) || []), commission],
+    ));
+  let filtered = filterVisibleOrders(all.filter((order) => !order.deletedAt).map((order) => ({
+    ...order,
+    settlementStatus: deriveOrderListSettlementProgress(commissionsByOrder.get(order.id) || []),
+  })));
 
   if (filters?.search) {
     const q = filters.search.toLowerCase();
     filtered = filtered.filter(
-      (o) => o.orderNo.toLowerCase().includes(q) || o.customerName.toLowerCase().includes(q),
+      (o) => [
+        o.orderNo,
+        o.customerName,
+        o.thirdPartyOrderNo,
+        o.payments?.[0]?.paymentOrderNo,
+      ].some((value) => String(value || '').toLowerCase().includes(q)),
     );
   }
   if (filters?.customerId) {
@@ -265,6 +285,9 @@ async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<Paginate
   }
   if (filters?.status) {
     filtered = filtered.filter((o) => o.status === filters.status);
+  }
+  if (filters?.settlementStatus) {
+    filtered = filtered.filter((o) => o.settlementStatus === filters.settlementStatus);
   }
   if (filters?.owner) {
     filtered = filtered.filter((o) => o.owner === filters.owner);
@@ -281,18 +304,27 @@ async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<Paginate
   if (filters?.endDate) {
     filtered = filtered.filter((o) => o.createdAt <= filters.endDate!);
   }
+  if (filters?.paymentStartDate) {
+    filtered = filtered.filter((o) => getPrimaryPaymentDate(o) >= filters.paymentStartDate!);
+  }
+  if (filters?.paymentEndDate) {
+    const paymentEndDate = filters.paymentEndDate.length === 10
+      ? `${filters.paymentEndDate}T23:59:59.999Z`
+      : filters.paymentEndDate;
+    filtered = filtered.filter((o) => getPrimaryPaymentDate(o) <= paymentEndDate);
+  }
 
   if (filters?.sortBy === 'paymentDate') {
     filtered.sort((a, b) => {
       const aTime = new Date(getPrimaryPaymentDate(a)).getTime();
       const bTime = new Date(getPrimaryPaymentDate(b)).getTime();
-      return filters.sortDirection === 'asc' ? aTime - bTime : bTime - aTime;
+      return filters?.sortDirection === 'asc' ? aTime - bTime : bTime - aTime;
     });
-  } else if (filters?.sortBy === 'createdAt') {
+  } else {
     filtered.sort((a, b) => {
       const aTime = new Date(a.createdAt).getTime();
       const bTime = new Date(b.createdAt).getTime();
-      return filters.sortDirection === 'asc' ? aTime - bTime : bTime - aTime;
+      return filters?.sortDirection === 'asc' ? aTime - bTime : bTime - aTime;
     });
   }
 

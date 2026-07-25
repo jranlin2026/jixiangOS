@@ -37,6 +37,8 @@ import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import PaymentsIcon from '@mui/icons-material/Payments';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import SortIcon from '@mui/icons-material/Sort';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import { businessExportApi, commissionApi, commissionRuleApi, customerApi, orderApi, settingsApi } from '../../api';
@@ -82,6 +84,7 @@ import { buildBusinessExportBrowserRequest, unwrapBusinessExportResponse } from 
 import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
 import BusinessAttachmentLinks from '../../shared/components/BusinessAttachmentLinks';
 import { getOrderSettlementEvidenceStatus, getOrderSettlementRisks } from '../../shared/utils/orderSettlementPresentation';
+import BusinessStatusChip from '../../shared/components/BusinessStatusChip';
 
 const ORDER_STATUS_OPTIONS: Array<{ value: CommissionOrderSummaryStatus | '全部'; label: string; important?: boolean }> = [
   { value: '全部', label: '全部' },
@@ -237,15 +240,6 @@ function readOrderSplitViewConfig(): OrderSplitViewConfig {
       frozenColumnCount: 0,
     };
   }
-}
-
-function getOrderStatusColor(status: CommissionOrderSummaryStatus): 'default' | 'primary' | 'success' | 'error' | 'warning' | 'info' {
-  if (status === '已发放') return 'success';
-  if (status === '已撤回') return 'default';
-  if (status === '待处理') return 'warning';
-  if (status === '待确认') return 'info';
-  if (status === '待发放') return 'primary';
-  return 'default';
 }
 
 function getOrderStatusButtonColor(status: CommissionOrderSummaryStatus | '全部'): 'primary' | 'warning' | 'info' | 'success' | 'inherit' {
@@ -445,7 +439,6 @@ function OrderSettlementBusinessPaymentSummary({
         ) : (
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, columnGap: 2, rowGap: 0.1 }}>
             <SettlementCompactDetailItem label="客户">{summary.customerName || '-'}</SettlementCompactDetailItem>
-            <SettlementCompactDetailItem label="正式订单号">{summary.orderNo || '-'}</SettlementCompactDetailItem>
             <SettlementCompactDetailItem label="订单类型">{summary.orderType || '-'}</SettlementCompactDetailItem>
             <SettlementCompactDetailItem label="产品">{summary.productName || order?.productName || summary.productLevel || '-'}</SettlementCompactDetailItem>
             <SettlementCompactDetailItem label="产品等级">{summary.productLevel || '-'}</SettlementCompactDetailItem>
@@ -525,10 +518,13 @@ const Commission: React.FC<CommissionProps> = ({
     search: '',
     status: '全部' as CommissionOrderSummaryStatus | '全部',
     ownerId: '',
+    salesId: '',
     role: '' as CommissionRole | '',
     month: '',
     startDate: '',
     endDate: '',
+    sortBy: 'createdAt' as 'createdAt' | 'paymentDate',
+    sortDirection: 'desc' as 'asc' | 'desc',
   });
   const [orderStatusCounts, setOrderStatusCounts] = useState<CommissionOrderSummaryStatusCounts>(DEFAULT_ORDER_STATUS_COUNTS);
   const [orderSplitViewOpen, setOrderSplitViewOpen] = useState(false);
@@ -789,10 +785,13 @@ const Commission: React.FC<CommissionProps> = ({
     search: orderFilters.search || undefined,
     status,
     ownerId: orderFilters.ownerId || undefined,
+    salesId: orderFilters.salesId || undefined,
     role: orderFilters.role || undefined,
     month: orderFilters.month || undefined,
     startDate: orderFilters.startDate || undefined,
     endDate: orderFilters.endDate || undefined,
+    sortBy: orderFilters.sortBy,
+    sortDirection: orderFilters.sortDirection,
     page: orderPagination.page,
     pageSize: orderPagination.pageSize,
   });
@@ -867,6 +866,7 @@ const Commission: React.FC<CommissionProps> = ({
   }, [
     orderFilters.search,
     orderFilters.ownerId,
+    orderFilters.salesId,
     orderFilters.role,
     orderFilters.month,
     orderFilters.startDate,
@@ -922,6 +922,31 @@ const Commission: React.FC<CommissionProps> = ({
   const updateOrderFilter = (key: keyof typeof orderFilters, value: string) => {
     setOrderPagination((prev) => ({ ...prev, page: 1 }));
     setOrderFilters((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleOrderPaymentDateSort = () => {
+    setOrderPagination((prev) => ({ ...prev, page: 1 }));
+    setOrderFilters((prev) => ({
+      ...prev,
+      sortBy: 'paymentDate',
+      sortDirection: prev.sortBy === 'paymentDate' && prev.sortDirection === 'desc' ? 'asc' : 'desc',
+    }));
+  };
+
+  const handleResetOrderFilters = () => {
+    setOrderPagination((prev) => ({ ...prev, page: 1 }));
+    setOrderFilters({
+      search: '',
+      status: '全部',
+      ownerId: '',
+      salesId: '',
+      role: '',
+      month: '',
+      startDate: '',
+      endDate: '',
+      sortBy: 'createdAt',
+      sortDirection: 'desc',
+    });
   };
 
   const handleOrderPageChange = (_: React.MouseEvent<HTMLButtonElement> | null, page: number) => {
@@ -1342,7 +1367,7 @@ const Commission: React.FC<CommissionProps> = ({
       case 'withdrawReason':
         return summary.withdrawReason || '-';
       case 'status':
-        return <Chip label={summary.status} size="small" color={getOrderStatusColor(summary.status)} />;
+        return <BusinessStatusChip status={summary.status} />;
       default:
         return '-';
     }
@@ -2577,12 +2602,21 @@ const Commission: React.FC<CommissionProps> = ({
   const renderOrderToolbar = () => (
     <Stack direction="row" spacing={1.25} sx={{ mb: 2, flexWrap: 'wrap', rowGap: 1 }}>
       <TextField
-        placeholder="搜索订单号/客户"
+        placeholder="搜索订单号/客户/第三方订单/付款单号"
         value={orderFilters.search}
         onChange={(event) => updateOrderFilter('search', event.target.value)}
         size="small"
         sx={{ minWidth: 240 }}
       />
+      <FormControl size="small" sx={{ minWidth: 150 }}>
+        <InputLabel>销售负责人</InputLabel>
+        <Select value={orderFilters.salesId} label="销售负责人" onChange={(event) => updateOrderFilter('salesId', event.target.value)}>
+          <MenuItem value="">全部</MenuItem>
+          {activeEmployees.map((employee) => (
+            <MenuItem key={employee.id} value={employee.id}>{formatEmployeeDisplayName(employee)}</MenuItem>
+          ))}
+        </Select>
+      </FormControl>
       <FormControl size="small" sx={{ minWidth: 130 }}>
         <InputLabel>提成角色</InputLabel>
         <Select value={orderFilters.role} label="提成角色" onChange={(event) => updateOrderFilter('role', event.target.value)}>
@@ -2591,8 +2625,8 @@ const Commission: React.FC<CommissionProps> = ({
         </Select>
       </FormControl>
       <FormControl size="small" sx={{ minWidth: 130 }}>
-        <InputLabel>人员</InputLabel>
-        <Select value={orderFilters.ownerId} label="人员" onChange={(event) => updateOrderFilter('ownerId', event.target.value)}>
+        <InputLabel>提成人员</InputLabel>
+        <Select value={orderFilters.ownerId} label="提成人员" onChange={(event) => updateOrderFilter('ownerId', event.target.value)}>
           <MenuItem value="">全部</MenuItem>
           {activeEmployees.map((employee) => (
             <MenuItem key={employee.id} value={employee.id}>{formatEmployeeDisplayName(employee)}</MenuItem>
@@ -2615,6 +2649,14 @@ const Commission: React.FC<CommissionProps> = ({
         size="small"
         InputLabelProps={{ shrink: true }}
       />
+      <Button variant="outlined" startIcon={<SortIcon />} onClick={handleOrderPaymentDateSort}>
+        {orderFilters.sortBy === 'paymentDate'
+          ? `付款时间${orderFilters.sortDirection === 'asc' ? '升序' : '降序'}`
+          : '按付款时间排序'}
+      </Button>
+      <Button variant="outlined" startIcon={<RestartAltIcon />} onClick={handleResetOrderFilters}>
+        重置
+      </Button>
     </Stack>
   );
 
@@ -3426,7 +3468,7 @@ const Commission: React.FC<CommissionProps> = ({
                       <Typography variant="h6" sx={{ color: '#0f172a', fontWeight: 900, letterSpacing: 0 }}>
                         {summaryDetail.orderNo}
                       </Typography>
-                      <Chip label={summaryDetail.status} size="small" color={getOrderStatusColor(summaryDetail.status)} />
+                      <BusinessStatusChip status={summaryDetail.status} />
                       {summaryDetail.sourceOrderDeleted && <Chip label="源订单已删除" size="small" />}
                     </Stack>
                     <Typography variant="body2" sx={{ color: '#64748b', overflowWrap: 'anywhere' }}>

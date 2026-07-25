@@ -6,6 +6,7 @@ import type {
   AICustomerPortrait,
   CustomerManageableUser,
   CustomerLeadSourceFacet,
+  CustomerTagFacet,
 } from '../types/customer';
 import type { Lead, LeadChangeLog } from '../types/lead';
 import type { Order } from '../types/order';
@@ -413,6 +414,27 @@ async function fetchCustomerLeadSourceFacets(
       grouped.set(key, { leadSource, sourceName, count: (current?.count || 0) + 1 });
     });
   return createSuccessResponse(Array.from(grouped.values()));
+}
+
+async function fetchCustomerTagFacets(
+  scope: 'active' | 'public_pool',
+): Promise<ApiResponse<CustomerTagFacet[]>> {
+  if (shouldUseBackendApi()) {
+    return backendRequest<CustomerTagFacet[]>(`/customers/tag-facets?scope=${scope}`);
+  }
+  ensureInit();
+  const counts = new Map<string, number>();
+  filterVisibleCustomers(getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [])
+    .filter((customer) => !customer.deletedAt)
+    .filter((customer) => (
+      scope === 'public_pool'
+        ? customer.lifecycleStatusCode === LIFECYCLE_STATUS_CODES.PUBLIC_POOL
+        : customer.lifecycleStatusCode !== LIFECYCLE_STATUS_CODES.PUBLIC_POOL
+    ))
+    .forEach((customer) => {
+      new Set(customer.manualTagIds || []).forEach((tagId) => counts.set(tagId, (counts.get(tagId) || 0) + 1));
+    });
+  return createSuccessResponse(Array.from(counts, ([tagId, count]) => ({ tagId, count })));
 }
 
 async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<PaginatedResponse<Customer>>> {
@@ -952,6 +974,7 @@ export const customerApi = {
   fetchManageableUsers,
   fetchPublicPoolFollowUpUsers,
   fetchCustomerLeadSourceFacets,
+  fetchCustomerTagFacets,
   fetchCustomers,
   fetchCustomerById,
   createCustomer,

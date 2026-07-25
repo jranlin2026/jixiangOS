@@ -12,6 +12,7 @@ import type {
 } from '../../src/types/order';
 import type { DataScopeDomain } from '../../src/types/role';
 import type { Customer } from '../../src/types/customer';
+import type { Commission } from '../../src/types/commission';
 import {
   buildDataVisibilityScopeForUser,
   type DataVisibilityScope,
@@ -19,6 +20,7 @@ import {
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { jsonText, queryBusinessRecordPage, visibleJsonCondition } from './businessRecordPageService';
 import { compactOrderApplicationListItem, compactOrderListItem } from '../../src/shared/utils/listPayload';
+import { deriveOrderListSettlementProgress } from '../../src/shared/utils/orderSettlementProgress';
 
 type OrderQueryPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$queryRaw'>;
 
@@ -58,7 +60,7 @@ function orderSortTimestamp(order: Order, sortBy?: OrderFilters['sortBy']): numb
   if (sortBy === 'paymentDate') {
     return timestamp(order.payments?.[0]?.paidAt || order.createdAt);
   }
-  return timestamp(order.updatedAt || order.createdAt);
+  return timestamp(order.createdAt);
 }
 
 function inDateRange(value: unknown, startDate?: string, endDate?: string): boolean {
@@ -185,16 +187,20 @@ function matchesOrder(order: Order, filters: OrderFilters): boolean {
     order.orderNo,
     order.customerName,
     order.productName,
+    order.thirdPartyOrderNo,
+    order.payments?.[0]?.paymentOrderNo,
     order.salesName,
     order.owner,
   ].some((value) => lowerText(value).includes(search))) return false;
   if (filters.customerId && order.customerId !== filters.customerId) return false;
   if (filters.productLevel && order.productLevel !== filters.productLevel) return false;
   if (filters.status && order.status !== filters.status) return false;
+  if (filters.settlementStatus && order.settlementStatus !== filters.settlementStatus) return false;
   if (filters.owner && order.owner !== filters.owner && order.salesName !== filters.owner) return false;
   if (filters.orderType && order.orderType !== filters.orderType) return false;
   if (filters.paymentMethod && order.paymentMethod !== filters.paymentMethod) return false;
-  return inDateRange(order.createdAt, filters.startDate, filters.endDate);
+  return inDateRange(order.createdAt, filters.startDate, filters.endDate)
+    && inDateRange(order.payments?.[0]?.paidAt || order.createdAt, filters.paymentStartDate, filters.paymentEndDate);
 }
 
 function matchesApplication(application: OrderApplication, filters: OrderApplicationFilters): boolean {
@@ -237,6 +243,9 @@ async function queryOrderPage(
   if (filters.owner) conditions.push(Prisma.sql`(br.owner = ${filters.owner} OR ${jsonText('br', '$.salesName')} = ${filters.owner})`);
   if (filters.startDate) conditions.push(Prisma.sql`${jsonText('br', '$.createdAt')} >= ${filters.startDate}`);
   if (filters.endDate) conditions.push(Prisma.sql`${jsonText('br', '$.createdAt')} <= ${/^\d{4}-\d{2}-\d{2}$/.test(filters.endDate) ? `${filters.endDate}T23:59:59.999Z` : filters.endDate}`);
+  const paymentDate = Prisma.sql`COALESCE(${jsonText('br', '$.payments[0].paidAt')}, ${jsonText('br', '$.createdAt')}, br.createdAt)`;
+  if (filters.paymentStartDate) conditions.push(Prisma.sql`${paymentDate} >= ${filters.paymentStartDate}`);
+  if (filters.paymentEndDate) conditions.push(Prisma.sql`${paymentDate} <= ${/^\d{4}-\d{2}-\d{2}$/.test(filters.paymentEndDate) ? `${filters.paymentEndDate}T23:59:59.999Z` : filters.paymentEndDate}`);
   if (!scope.unrestricted) {
     const salesId = jsonText('br', '$.salesId');
     const ownerName = Prisma.sql`COALESCE(NULLIF(${jsonText('br', '$.salesName')}, ''), ${jsonText('br', '$.owner')})`;
@@ -247,13 +256,13 @@ async function queryOrderPage(
   const search = lowerText(filters.search);
   if (search) {
     const pattern = `%${search}%`;
-    conditions.push(Prisma.sql`(LOWER(br.recordId) LIKE ${pattern} OR LOWER(COALESCE(br.title, '')) LIKE ${pattern} OR LOWER(COALESCE(br.owner, '')) LIKE ${pattern} OR LOWER(${jsonText('br', '$.orderNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.customerName')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.productName')}) LIKE ${pattern})`);
+    conditions.push(Prisma.sql`(LOWER(br.recordId) LIKE ${pattern} OR LOWER(COALESCE(br.title, '')) LIKE ${pattern} OR LOWER(COALESCE(br.owner, '')) LIKE ${pattern} OR LOWER(${jsonText('br', '$.orderNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.customerName')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.productName')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.thirdPartyOrderNo')}) LIKE ${pattern} OR LOWER(${jsonText('br', '$.payments[0].paymentOrderNo')}) LIKE ${pattern})`);
   }
   return queryBusinessRecordPage<Order>(prisma, {
     from: 'business_records br', selectId: 'br.id', selectData: 'br.data', conditions,
     orderBy: filters.sortBy === 'paymentDate'
       ? `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.payments[0].paidAt')), JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}`
-      : `COALESCE(br.eventAt, br.updatedAt, br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}`,
+      : `br.createdAt ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}`,
     page, pageSize,
   });
 }
@@ -300,14 +309,32 @@ export function createOrderQueryService(
 ) {
   return {
     async listOrders(filters: OrderFilters = {}, actor: AuthenticatedUser) {
-      const [scope, rows] = await Promise.all([
+      const [scope, rows, commissionRows] = await Promise.all([
         loadScope(prisma, actor, 'orders'),
         prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDERS } }),
+        prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSIONS } }),
       ]);
+      const commissionsByOrder = new Map<string, Commission[]>();
+      (commissionRows as BusinessRecordRow[])
+        .map((row) => parseRecord<Commission>(row.data))
+        .filter((commission): commission is Commission => Boolean(
+          commission
+          && commission.sourceBusinessType !== 'after_sales_recovery'
+          && commission.sourceBusinessType !== 'refund_recovery'
+          && !commission.sourceRecoveryOrderId,
+        ))
+        .forEach((commission) => commissionsByOrder.set(
+          commission.orderId,
+          [...(commissionsByOrder.get(commission.orderId) || []), commission],
+        ));
       const direction = filters.sortDirection === 'asc' ? 1 : -1;
       const items = (rows as BusinessRecordRow[])
         .map((row) => parseRecord<Order>(row.data))
         .filter((order): order is Order => Boolean(order && !order.deletedAt))
+        .map((order) => ({
+          ...order,
+          settlementStatus: deriveOrderListSettlementProgress(commissionsByOrder.get(order.id) || []),
+        }))
         .filter((order) => orderIsVisible(order, scope) && matchesOrder(order, filters))
         .sort((left, right) => (
           direction * (orderSortTimestamp(left, filters.sortBy) - orderSortTimestamp(right, filters.sortBy))

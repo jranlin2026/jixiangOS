@@ -1,32 +1,49 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Box, Button, Checkbox, Chip, CircularProgress, FormControl, FormControlLabel, InputLabel, MenuItem, Popover, Radio, RadioGroup, Select, Typography } from '@mui/material';
+import { Alert, Box, Button, Chip, CircularProgress, Popover, Typography } from '@mui/material';
 import FilterListIcon from '@mui/icons-material/FilterList';
+import { customerApi } from '../../api';
 import { fetchCustomerTagCatalog } from '../../api/customerTagApi';
-import type { CustomerFilters } from '../../types/customer';
+import type { CustomerFilters, CustomerTagFacet } from '../../types/customer';
 import type { CustomerTagCatalog } from '../../types/tag';
+import { buildCustomerTagFilterHint } from './customerTagFilterPresentation';
 
 type TagFilterValue = Pick<CustomerFilters, 'tagIds' | 'tagMatch' | 'withoutTags' | 'missingTagGroupId'>;
-type Props = { value: TagFilterValue; onApply: (value: TagFilterValue) => void };
+type Props = { value: TagFilterValue; scope: 'active' | 'public_pool'; onApply: (value: TagFilterValue) => void };
 const emptyCatalog: CustomerTagCatalog = { groups: [], tags: [] };
 
-export default function CustomerTagFilter({ value, onApply }: Props) {
+export default function CustomerTagFilter({ value, scope, onApply }: Props) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [catalog, setCatalog] = useState(emptyCatalog);
+  const [facets, setFacets] = useState<CustomerTagFacet[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [draft, setDraft] = useState<TagFilterValue>(value);
   useEffect(() => setDraft(value), [value]);
-  const loadCatalog = () => {
+  const loadFilterOptions = () => {
     setLoading(true);
     setError('');
-    void fetchCustomerTagCatalog('customer', false).then((response) => {
-      if (response.code !== 0) throw new Error(response.message || '标签目录加载失败');
-      setCatalog(response.data);
+    void Promise.all([
+      fetchCustomerTagCatalog('customer', false),
+      customerApi.fetchCustomerTagFacets(scope),
+    ]).then(([catalogResponse, facetResponse]) => {
+      if (catalogResponse.code !== 0) throw new Error(catalogResponse.message || '标签目录加载失败');
+      if (facetResponse.code !== 0) throw new Error(facetResponse.message || '标签统计加载失败');
+      setCatalog(catalogResponse.data);
+      setFacets(facetResponse.data);
     }).catch((cause) => setError(cause instanceof Error ? cause.message : '标签目录加载失败')).finally(() => setLoading(false));
   };
-  useEffect(() => { loadCatalog(); }, []);
+  useEffect(() => { loadFilterOptions(); }, [scope]);
   const activeGroups = useMemo(() => catalog.groups.filter((group) => group.isActive && (group.scope === 'customer' || group.scope === 'both')).sort((a, b) => a.sortOrder - b.sortOrder), [catalog]);
+  const facetCounts = useMemo(() => new Map(facets.map((facet) => [facet.tagId, facet.count])), [facets]);
+  const activeTagsByGroup = useMemo(() => new Map(activeGroups.map((group) => [
+    group.id,
+    catalog.tags
+      .filter((tag) => tag.isActive && tag.groupId === group.id)
+      .filter((tag) => (facetCounts.get(tag.id) || 0) > 0)
+      .sort((a, b) => a.sortOrder - b.sortOrder),
+  ])), [activeGroups, catalog.tags, facetCounts]);
   const selectedCount = (value.tagIds?.length || 0) + (value.withoutTags ? 1 : 0) + (value.missingTagGroupId ? 1 : 0);
+  const matchRuleHint = useMemo(() => buildCustomerTagFilterHint(draft, catalog), [catalog, draft]);
   const toggle = (id: string) => setDraft((current) => ({ ...current, withoutTags: undefined, missingTagGroupId: undefined, tagIds: current.tagIds?.includes(id) ? current.tagIds.filter((item) => item !== id) : [...(current.tagIds || []), id] }));
   const clear = () => { const next = { tagIds: [], tagMatch: 'grouped' as const, withoutTags: undefined, missingTagGroupId: undefined }; setDraft(next); onApply(next); setAnchor(null); };
   return <>
@@ -36,21 +53,56 @@ export default function CustomerTagFilter({ value, onApply }: Props) {
     <Popover open={Boolean(anchor)} anchorEl={anchor} onClose={() => setAnchor(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}>
       <Box sx={{ width: { xs: 'calc(100vw - 32px)', sm: 420 }, maxHeight: '70vh', overflowY: 'auto', p: 2 }}>
         <Typography fontWeight={700} sx={{ mb: 1 }}>客户标签筛选</Typography>
-        <RadioGroup row value={draft.tagMatch || 'grouped'} onChange={(event) => { const mode = event.target.value; if (mode === 'grouped' || mode === 'any' || mode === 'all') setDraft({ ...draft, tagMatch: mode }); }} sx={{ flexDirection: { xs: 'column', sm: 'row' }, flexWrap: 'wrap' }}>
-          <FormControlLabel value="grouped" control={<Radio size="small" />} label="按分组匹配" />
-          <FormControlLabel value="any" control={<Radio size="small" />} label="包含任意标签" />
-          <FormControlLabel value="all" control={<Radio size="small" />} label="同时包含全部标签" />
-        </RadioGroup>
-        {loading && <CircularProgress size={20} />}
-        {error && <Alert severity="error" action={<Button color="inherit" size="small" onClick={loadCatalog}>重试</Button>}>{error}</Alert>}
-        {!loading && !error && activeGroups.map((group) => <Box key={group.id} sx={{ mt: 1.5 }}>
-          <Typography variant="caption" color="text.secondary">{group.name}</Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mt: 0.5 }}>
-            {catalog.tags.filter((tag) => tag.isActive && tag.groupId === group.id).map((tag) => <Chip key={tag.id} label={tag.name} size="small" clickable color={draft.tagIds?.includes(tag.id) ? 'primary' : 'default'} variant={draft.tagIds?.includes(tag.id) ? 'filled' : 'outlined'} onClick={() => toggle(tag.id)} />)}
+        <Box sx={{ mt: 1.5 }}>
+          <Typography variant="caption" color="text.secondary">匹配规则</Typography>
+          <Box aria-label="客户标签匹配规则" sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mt: 0.5 }}>
+            {([
+              ['grouped', '按分组筛选（推荐）'],
+              ['any', '满足任一标签'],
+              ['all', '满足全部标签'],
+            ] as const).map(([mode, label]) => {
+              const isSelected = (draft.tagMatch || 'grouped') === mode;
+              return <Chip key={mode} aria-pressed={isSelected} label={label} size="small" clickable color={isSelected ? 'primary' : 'default'} variant={isSelected ? 'filled' : 'outlined'} onClick={() => setDraft({ ...draft, tagMatch: mode })} />;
+            })}
           </Box>
-        </Box>)}
-        <FormControlLabel sx={{ mt: 1 }} control={<Checkbox disabled={loading || Boolean(error)} checked={Boolean(draft.withoutTags)} onChange={(event) => setDraft({ tagIds: [], tagMatch: draft.tagMatch || 'grouped', withoutTags: event.target.checked || undefined, missingTagGroupId: undefined })} />} label="无人工标签" />
-        <FormControl disabled={loading || Boolean(error)} fullWidth size="small" sx={{ mt: 1 }}><InputLabel>未设置某分组</InputLabel><Select label="未设置某分组" value={draft.missingTagGroupId || ''} onChange={(event) => setDraft({ tagIds: [], tagMatch: draft.tagMatch || 'grouped', withoutTags: undefined, missingTagGroupId: event.target.value || undefined })}><MenuItem value="">不限</MenuItem>{activeGroups.map((group) => <MenuItem key={group.id} value={group.id}>{group.name}</MenuItem>)}</Select></FormControl>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+            当前规则：{matchRuleHint}
+          </Typography>
+        </Box>
+        {loading && <CircularProgress size={20} />}
+        {error && <Alert severity="error" action={<Button color="inherit" size="small" onClick={loadFilterOptions}>重试</Button>}>{error}</Alert>}
+        {!loading && !error && !activeGroups.some((group) => (activeTagsByGroup.get(group.id) || []).length) && <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>暂无可用客户标签</Typography>}
+        {!loading && !error && activeGroups.map((group) => {
+          const tags = activeTagsByGroup.get(group.id) || [];
+          if (!tags.length) return null;
+          return <Box key={group.id} sx={{ mt: 1.5 }}>
+            <Typography variant="caption" color="text.secondary">{group.name}</Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mt: 0.5 }}>
+              {tags.map((tag) => {
+                const isSelected = Boolean(draft.tagIds?.includes(tag.id));
+                return <Chip key={tag.id} aria-pressed={isSelected} label={`${tag.name}（${facetCounts.get(tag.id) || 0}）`} size="small" clickable color={isSelected ? 'primary' : 'default'} variant={isSelected ? 'filled' : 'outlined'} onClick={() => toggle(tag.id)} />;
+              })}
+            </Box>
+          </Box>;
+        })}
+        {!loading && !error && <Box sx={{ mt: 1.5 }}>
+          <Typography variant="caption" color="text.secondary">特殊筛选</Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mt: 0.5 }}>
+            <Chip
+              label="无人工标签"
+              aria-pressed={Boolean(draft.withoutTags)}
+              size="small"
+              clickable
+              color={draft.withoutTags ? 'primary' : 'default'}
+              variant={draft.withoutTags ? 'filled' : 'outlined'}
+              onClick={() => setDraft({ tagIds: [], tagMatch: draft.tagMatch || 'grouped', withoutTags: draft.withoutTags ? undefined : true, missingTagGroupId: undefined })}
+            />
+            {activeGroups.map((group) => {
+              const isSelected = draft.missingTagGroupId === group.id;
+              return <Chip key={group.id} aria-pressed={isSelected} label={`未设置：${group.name}`} size="small" clickable color={isSelected ? 'primary' : 'default'} variant={isSelected ? 'filled' : 'outlined'} onClick={() => setDraft({ tagIds: [], tagMatch: draft.tagMatch || 'grouped', withoutTags: undefined, missingTagGroupId: isSelected ? undefined : group.id })} />;
+            })}
+          </Box>
+        </Box>}
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 2 }}><Button onClick={clear}>清除筛选</Button><Button disabled={loading || Boolean(error)} variant="contained" onClick={() => { onApply(draft); setAnchor(null); }}>应用</Button></Box>
       </Box>
     </Popover>

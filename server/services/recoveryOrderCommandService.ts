@@ -271,6 +271,23 @@ function timestamp(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function inDateRange(value: unknown, startDate?: string, endDate?: string): boolean {
+  const time = timestamp(value);
+  if (startDate && time < timestamp(startDate)) return false;
+  if (endDate) {
+    const end = new Date(endDate);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(endDate)) end.setHours(23, 59, 59, 999);
+    if (time > end.getTime()) return false;
+  }
+  return true;
+}
+
+function recoverySortTimestamp(order: RecoveryOrder, sortBy?: RecoveryOrderFilters['sortBy']): number {
+  if (sortBy === 'recoveryAt') return timestamp(order.recoveryAt || order.createdAt);
+  if (sortBy === 'createdAt') return timestamp(order.createdAt);
+  return timestamp(order.updatedAt || order.createdAt);
+}
+
 function recoverySettlementStatus(order: RecoveryOrder): string {
   const raw = String(order.settlementStatus || '');
   if (raw === '待分账') return '待处理';
@@ -299,7 +316,8 @@ function matchesRecoveryOrder(order: RecoveryOrder, filters: RecoveryOrderFilter
   if (filters.settlementStatuses?.length && !filters.settlementStatuses.includes(settlementStatus as any)) return false;
   if (filters.ownerId && ![order.createdBy, order.recoveryUserId, order.assistUserId].includes(filters.ownerId)) return false;
   if (filters.importBatchId && order.importBatchId !== filters.importBatchId) return false;
-  return true;
+  if (filters.recoveryUserId && order.recoveryUserId !== filters.recoveryUserId) return false;
+  return inDateRange(order.recoveryAt || order.createdAt, filters.recoveryStartDate, filters.recoveryEndDate);
 }
 
 function recoveryVisible(order: RecoveryOrder, scope: DataVisibilityScope): boolean {
@@ -345,6 +363,12 @@ function recoverySqlConditions(filters: RecoveryOrderFilters, scope: DataVisibil
   if (filters.importBatchId) {
     conditions.push(Prisma.sql`${jsonText('br', '$.importBatchId')} = ${filters.importBatchId}`);
   }
+  if (filters.recoveryUserId) {
+    conditions.push(Prisma.sql`${jsonText('br', '$.recoveryUserId')} = ${filters.recoveryUserId}`);
+  }
+  const recoveryAt = Prisma.sql`COALESCE(${jsonText('br', '$.recoveryAt')}, ${jsonText('br', '$.createdAt')}, br.createdAt)`;
+  if (filters.recoveryStartDate) conditions.push(Prisma.sql`${recoveryAt} >= ${filters.recoveryStartDate}`);
+  if (filters.recoveryEndDate) conditions.push(Prisma.sql`${recoveryAt} <= ${/^\d{4}-\d{2}-\d{2}$/.test(filters.recoveryEndDate) ? `${filters.recoveryEndDate}T23:59:59.999Z` : filters.recoveryEndDate}`);
   if (!scope.unrestricted) conditions.push(visibleJsonCondition(
     'br', ['$.createdBy'], ['$.createdByName'], scope.visibleUserIds, scope.visibleUserNames,
   ));
@@ -368,13 +392,18 @@ async function queryRecoveryPage(
     from: 'business_records br',
     pageFrom: 'business_records br FORCE INDEX (business_records_domain_eventAt_createdAt_idx)',
     selectId: 'br.id', selectData: 'br.data', conditions,
-    orderBy: 'br.eventAt DESC, br.createdAt DESC', page, pageSize,
+    orderBy: filters.sortBy === 'recoveryAt'
+      ? `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.recoveryAt')), JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}`
+      : filters.sortBy === 'createdAt'
+        ? `br.createdAt ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}`
+        : `br.eventAt ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}, br.createdAt ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}`,
+    page, pageSize,
   });
 }
 
 async function queryRecoverySettlementCounts(
   prisma: RecoveryCommandPrisma,
-  filters: Pick<RecoveryOrderFilters, 'search' | 'includeDeleted'>,
+  filters: Pick<RecoveryOrderFilters, 'search' | 'includeDeleted' | 'recoveryStartDate' | 'recoveryEndDate' | 'recoveryUserId'>,
   scope: DataVisibilityScope,
 ): Promise<RecoverySettlementCounts> {
   const conditions = recoverySqlConditions(filters, scope);
@@ -589,7 +618,10 @@ export function createRecoveryOrderCommandService(
       const items = rows
         .map((row) => parseObject<RecoveryOrder>(row.data, '售后挽回订单'))
         .filter((order) => recoveryVisible(order, scope) && matchesRecoveryOrder(order, effectiveFilters))
-        .sort((left, right) => timestamp(right.updatedAt || right.createdAt) - timestamp(left.updatedAt || left.createdAt));
+        .sort((left, right) => {
+          const direction = effectiveFilters.sortDirection === 'asc' ? 1 : -1;
+          return direction * (recoverySortTimestamp(left, effectiveFilters.sortBy) - recoverySortTimestamp(right, effectiveFilters.sortBy));
+        });
       const page = toPositiveInt(filters.page, 1);
       const pageSize = Math.min(toPositiveInt(filters.pageSize, 10), 100);
       const total = items.length;
@@ -642,7 +674,7 @@ export function createRecoveryOrderCommandService(
     },
 
     async settlementCounts(
-      filters: Pick<RecoveryOrderFilters, 'search' | 'includeDeleted'>,
+      filters: Pick<RecoveryOrderFilters, 'search' | 'includeDeleted' | 'recoveryStartDate' | 'recoveryEndDate' | 'recoveryUserId'>,
       actor: AuthenticatedUser,
     ): Promise<ApiResponse<RecoverySettlementCounts | null>> {
       const canRead = hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY, 'read')

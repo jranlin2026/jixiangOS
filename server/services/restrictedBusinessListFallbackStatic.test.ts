@@ -14,9 +14,9 @@ assert.doesNotMatch(orderList, /queryOrderPage|\$queryRaw/,
 assert.match(recoveryList, /queryRecoveryPage|\$queryRaw/,
   'unrestricted recovery lists should use indexed ID-first database pagination');
 const recoveryPage = recoverySource.slice(recoverySource.indexOf('async function queryRecoveryPage'), recoverySource.indexOf('async function queryRecoverySettlementCounts'));
-assert.match(recoveryPage, /orderBy: 'br\.eventAt DESC, br\.createdAt DESC'/,
-  'recovery database pagination must use the domain/eventAt/createdAt index order');
-assert.doesNotMatch(recoveryPage, /orderBy: 'COALESCE/,
-  'recovery database pagination must not reintroduce the filesort expression that exhausted production sort memory');
+assert.match(recoveryPage, /br\.eventAt.*br\.createdAt/,
+  'recovery database pagination default must keep the domain/eventAt/createdAt index order');
+assert.match(recoveryPage, /filters\.sortBy === 'recoveryAt'/,
+  'recovery database pagination must support explicit recovery-time sorting');
 assert.doesNotMatch(deliveryList, /queryDeliveryPage|\$queryRaw/,
   'delivery list must avoid sorting joined JSON rows in MySQL');

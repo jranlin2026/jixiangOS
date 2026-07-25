@@ -11,6 +11,7 @@ import type { Order } from '../../src/types/order';
 import type { RecoveryOrder } from '../../src/types/recoveryOrder';
 import { formatLeadSourcePath, getActiveCommissions, summarizeCommissionProcessing } from '../../src/shared/utils/financeSettlementPresentation';
 import { getRecoveryEvidenceAttachments } from '../../src/shared/utils/recoveryEvidence';
+import { deriveOrderListSettlementProgress, deriveOrderSettlementProgress } from '../../src/shared/utils/orderSettlementProgress';
 
 type BusinessExportPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department'> & {
   businessExportAudit: { create(args: { data: Record<string, unknown> }): Promise<unknown> };
@@ -34,7 +35,7 @@ const FILENAMES: Record<BusinessExportModule, string> = {
 };
 const col = (id: string, label: string, type: BusinessExportColumn['type'] = 'text'): BusinessExportColumn => ({ id, label, type });
 const ORDER_COLUMNS = [
-  col('orderNo', '订单号'), col('status', '订单状态'), col('customer', '客户'), col('productName', '产品名称'),
+  col('orderNo', '订单号'), col('settlementStatus', '分账进度'), col('customer', '客户'), col('productName', '产品名称'),
   col('productLevel', '产品等级'), col('orderType', '订单类型'), col('actualAmount', '实付金额', 'currency'),
   col('officialPaymentChannel', '官方收款渠道'), col('thirdPartyOrderNo', '第三方平台订单'), col('resourceOwnership', '资源归属'),
   col('owner', '销售负责人'), col('createdByName', '订单创建人'), col('paymentDate', '付款时间', 'date'),
@@ -128,22 +129,8 @@ function inRange(value: unknown, start?: string, end?: string): boolean {
 function paymentEvidenceNames(payment: { voucherName?: string; attachments?: Array<{ name?: string }> }): string[] {
   return [...new Set([payment.voucherName, ...(payment.attachments || []).map((attachment) => attachment.name)].map(clean).filter(Boolean))];
 }
-function commissionIssueText(commission: Commission): string {
-  return [commission.auditReason, commission.frozenReason, commission.calculationNote, commission.formulaText, commission.payoutPlanName].filter(Boolean).join('；');
-}
-function pendingHandling(commission: Commission): boolean {
-  const issueText = commissionIssueText(commission);
-  const manual = commission.isManualAdjusted || commission.sourceType === '人工新增' || /自定义金额|财务人工|人工新增/.test(issueText);
-  const resolved = Boolean(commission.payoutPlanId || commission.payoutPlanName || manual);
-  return commission.owner === '待分配' || !commission.ownerId || Boolean(commission.frozenReason) || issueText.includes('冻结') || !resolved
-    || (Number(commission.commissionAmount || 0) === 0 && /未匹配|未命中|暂不计算|缺少|不可用/.test(issueText));
-}
 function settlementStatus(commissions: Commission[]): string {
-  if (!commissions.length || commissions.some(pendingHandling)) return '待处理';
-  if (commissions.every((item) => ['已撤回', '待冲销', '已冲销', '已取消'].includes(item.status))) return '已撤回';
-  if (commissions.every((item) => item.status === '已发放')) return '已发放';
-  if (commissions.every((item) => item.status === '待发放' || item.status === '已发放')) return '待发放';
-  return '待确认';
+  return deriveOrderSettlementProgress(commissions);
 }
 function recoveryStatus(order: RecoveryOrder): string {
   const value = clean(order.settlementStatus);
@@ -214,9 +201,15 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
               && (!Array.isArray(filters.settlementStatuses) || !filters.settlementStatuses.length || filters.settlementStatuses.includes(recoveryStatus(order)))
               && (!Array.isArray(filters.statuses) || !filters.statuses.length || filters.statuses.includes(order.status))
               && (Array.isArray(filters.statuses) || !filters.status || filters.status === '全部' || filters.status === order.status)
-              && (!filters.ownerId || [order.createdBy, order.recoveryUserId, order.assistUserId].includes(String(filters.ownerId)));
+              && (!filters.ownerId || [order.createdBy, order.recoveryUserId, order.assistUserId].includes(String(filters.ownerId)))
+              && inRange(order.recoveryAt || order.createdAt, clean(filters.recoveryStartDate) || undefined, clean(filters.recoveryEndDate) || undefined);
           })
-          .sort((left, right) => timestamp(right.updatedAt || right.createdAt) - timestamp(left.updatedAt || left.createdAt));
+          .sort((left, right) => {
+            const direction = filters.sortDirection === 'asc' ? 1 : -1;
+            const leftTime = filters.sortBy === 'recoveryAt' ? timestamp(left.recoveryAt || left.createdAt) : timestamp(left.updatedAt || left.createdAt);
+            const rightTime = filters.sortBy === 'recoveryAt' ? timestamp(right.recoveryAt || right.createdAt) : timestamp(right.updatedAt || right.createdAt);
+            return direction * (leftTime - rightTime);
+          });
       } else {
         sourceOrders = rows.map((row) => asRecord((row as any).data) as Order | null).filter(nonNull)
           .filter((order) => request.module === 'order_settlements' || !order.deletedAt)
@@ -230,12 +223,13 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
               && (!filters.productLevel || order.productLevel === filters.productLevel)
               && (!filters.orderType || order.orderType === filters.orderType)
               && (!filters.paymentMethod || order.paymentMethod === filters.paymentMethod)
-              && (request.module !== 'orders' || inRange(order.createdAt, clean(filters.startDate) || undefined, clean(filters.endDate) || undefined));
+              && (request.module !== 'orders' || inRange(order.createdAt, clean(filters.startDate) || undefined, clean(filters.endDate) || undefined))
+              && (request.module !== 'orders' || inRange(order.payments?.[0]?.paidAt || order.createdAt, clean(filters.paymentStartDate) || undefined, clean(filters.paymentEndDate) || undefined));
           })
           .sort((left, right) => {
             const direction = filters.sortDirection === 'asc' ? 1 : -1;
-            const leftTime = filters.sortBy === 'paymentDate' ? timestamp(left.payments?.[0]?.paidAt || left.createdAt) : timestamp(left.updatedAt || left.createdAt);
-            const rightTime = filters.sortBy === 'paymentDate' ? timestamp(right.payments?.[0]?.paidAt || right.createdAt) : timestamp(right.updatedAt || right.createdAt);
+            const leftTime = filters.sortBy === 'paymentDate' ? timestamp(left.payments?.[0]?.paidAt || left.createdAt) : timestamp(left.createdAt);
+            const rightTime = filters.sortBy === 'paymentDate' ? timestamp(right.payments?.[0]?.paidAt || right.createdAt) : timestamp(right.createdAt);
             return direction * (leftTime - rightTime) || left.id.localeCompare(right.id);
           });
       }
@@ -269,9 +263,20 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
         }).sort((left, right) => {
           const leftSplits = byOrder.get(left.id) || [];
           const rightSplits = byOrder.get(right.id) || [];
-          return timestamp(rightSplits[0]?.paymentDate || right.payments?.[0]?.paidAt || right.createdAt)
-            - timestamp(leftSplits[0]?.paymentDate || left.payments?.[0]?.paidAt || left.createdAt);
+          const direction = filters.sortDirection === 'asc' ? 1 : -1;
+          const leftTime = filters.sortBy === 'paymentDate'
+            ? timestamp(leftSplits[0]?.paymentDate || left.payments?.[0]?.paidAt || left.createdAt)
+            : timestamp(left.createdAt);
+          const rightTime = filters.sortBy === 'paymentDate'
+            ? timestamp(rightSplits[0]?.paymentDate || right.payments?.[0]?.paidAt || right.createdAt)
+            : timestamp(right.createdAt);
+          return direction * (leftTime - rightTime);
         });
+      }
+      if (request.module === 'orders' && filters.settlementStatus) {
+        sourceOrders = sourceOrders.filter((order) => (
+          deriveOrderListSettlementProgress(byOrder.get(order.id) || []) === filters.settlementStatus
+        ));
       }
       const summaryCount = request.module === 'recovery_settlements' ? sourceRecoveryOrders.length : sourceOrders.length;
       if (!summaryCount) throw new BusinessExportError(400, '当前筛选条件下没有可导出的数据');
@@ -282,7 +287,7 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
       const columns = request.columnMode === 'all' ? summaryColumnPool.map((column) => column.id) : request.columnIds;
       const summaryRows = request.module === 'orders'
         ? sourceOrders.map((order) => project({
-          orderNo: order.orderNo, status: order.status, customer: order.customerName,
+          orderNo: order.orderNo, settlementStatus: deriveOrderListSettlementProgress(byOrder.get(order.id) || []), customer: order.customerName,
           productName: order.productName || order.productLevel, productLevel: order.productLevel, orderType: order.orderType,
           actualAmount: order.actualAmount,
           officialPaymentChannel: order.officialPaymentChannel, thirdPartyOrderNo: order.thirdPartyOrderNo, resourceOwnership: order.resourceOwnership,
