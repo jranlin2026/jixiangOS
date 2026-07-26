@@ -43,16 +43,16 @@ values.set(STORAGE_KEYS.CUSTOMERS, JSON.stringify([
 ]));
 values.set(STORAGE_KEYS.ORDERS, '[]');
 
-const users = await customerApi.fetchPublicPoolFollowUpUsers();
-assert.deepEqual(users.data.map((user) => user.name).sort(), ['暂无跟进', '销售乙', '销售甲']);
+const users = await customerApi.fetchPublicPoolPreviousOwnerUsers();
+assert.deepEqual(users.data.map((user) => user.name).sort(), ['销售甲']);
 
 const fallbackCustomers = await customerApi.fetchCustomers({ lifecycleStatusCode: 'public_pool', owner: '销售甲' });
-assert.deepEqual(fallbackCustomers.data.items.map((customer) => customer.id), ['fallback']);
+assert.deepEqual(fallbackCustomers.data.items.map((customer) => customer.id), ['fallback', 'followed']);
 
 const followedCustomers = await customerApi.fetchCustomers({ lifecycleStatusCode: 'public_pool', owner: '销售乙' });
-assert.deepEqual(followedCustomers.data.items.map((customer) => customer.id), ['followed']);
+assert.deepEqual(followedCustomers.data.items.map((customer) => customer.id), []);
 
 const unknownCustomers = await customerApi.fetchCustomers({ lifecycleStatusCode: 'public_pool', owner: '暂无跟进' });
-assert.deepEqual(unknownCustomers.data.items.map((customer) => customer.id), ['unknown']);
+assert.deepEqual(unknownCustomers.data.items.map((customer) => customer.id), []);
 
-console.log('customer public-pool follow-up fallback: ok');
+console.log('customer public-pool previous-owner fallback: ok');

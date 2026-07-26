@@ -26,7 +26,6 @@ import type { CustomerTag, CustomerTagCatalog } from '../types/tag';
 import type { Role } from '../types/role';
 import { groupTagIdsForFilter, normalizeManualTagIds, validateCustomerTagFilters } from '../shared/utils/customerTagPolicy';
 import { PERMISSION_KEYS } from '../shared/utils/permissions';
-import { getCustomerLastFollowUpOwner } from '../shared/utils/customerFollowUp';
 import { hydrateCustomerFirstSalesOwner, resolveFirstSalesOwner } from '../shared/utils/customerOwnership';
 
 function ensureInit(): void {
@@ -377,17 +376,17 @@ async function fetchManageableUsers(): Promise<ApiResponse<CustomerManageableUse
   }]);
 }
 
-async function fetchPublicPoolFollowUpUsers(): Promise<ApiResponse<CustomerManageableUser[]>> {
+async function fetchPublicPoolPreviousOwnerUsers(): Promise<ApiResponse<CustomerManageableUser[]>> {
   if (shouldUseBackendApi()) {
-    const response = await backendRequest<string[]>('/customers/public-pool-follow-up-operators');
+    const response = await backendRequest<string[]>('/customers/public-pool-previous-owners');
     if (response.code !== 0) return createErrorResponse(response.message, response.code);
-    return createSuccessResponse((response.data || []).map((name) => ({ id: `last-follow-up:${name}`, name })));
+    return createSuccessResponse((response.data || []).map((name) => ({ id: `previous-owner:${name}`, name })));
   }
   const names = filterVisibleCustomers(getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [])
     .filter((customer) => customer.lifecycleStatusCode === LIFECYCLE_STATUS_CODES.PUBLIC_POOL)
-    .map(getCustomerLastFollowUpOwner)
+    .map((customer) => customer.previousOwner?.trim() || '')
     .filter(Boolean);
-  return createSuccessResponse(Array.from(new Set(names)).map((name) => ({ id: `last-follow-up:${name}`, name })));
+  return createSuccessResponse(Array.from(new Set(names)).map((name) => ({ id: `previous-owner:${name}`, name })));
 }
 
 async function fetchCustomerLeadSourceFacets(
@@ -481,7 +480,7 @@ async function fetchCustomers(filters?: CustomerFilters): Promise<ApiResponse<Pa
     const owner = filters.owner.trim();
     filtered = filtered.filter((c) => (
       filters.lifecycleStatusCode === 'public_pool'
-        ? getCustomerLastFollowUpOwner(c) === owner
+        ? c.previousOwner?.trim() === owner
         : c.owner === owner
     ));
   }
@@ -972,7 +971,7 @@ async function fetchAIPortrait(customerId: string): Promise<ApiResponse<AICustom
 
 export const customerApi = {
   fetchManageableUsers,
-  fetchPublicPoolFollowUpUsers,
+  fetchPublicPoolPreviousOwnerUsers,
   fetchCustomerLeadSourceFacets,
   fetchCustomerTagFacets,
   fetchCustomers,

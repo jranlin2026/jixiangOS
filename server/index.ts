@@ -582,8 +582,14 @@ app.get('/api/customers', requireCustomerReadAccess, async (req: AuthenticatedRe
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
+app.get('/api/customers/public-pool-previous-owners', requireCustomerReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await customerListService.listPublicPoolPreviousOwners(req.currentUser);
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+// 兼容部署期间仍缓存旧前端资源的浏览器；返回内容已统一为上一个销售负责人。
 app.get('/api/customers/public-pool-follow-up-operators', requireCustomerReadAccess, async (req: AuthenticatedRequest, res) => {
-  const result = await customerListService.listPublicPoolFollowUpOperators(req.currentUser);
+  const result = await customerListService.listPublicPoolPreviousOwners(req.currentUser);
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 

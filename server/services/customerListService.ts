@@ -23,7 +23,6 @@ import {
   normalizePhoneForStorage,
 } from '../../src/shared/utils/phoneNumber';
 import { PERMISSION_KEYS, hasExplicitPermission, hasPermission } from '../../src/shared/utils/permissions';
-import { NO_CUSTOMER_FOLLOW_UP_OWNER } from '../../src/shared/utils/customerFollowUp';
 import { loadCustomerTagCatalog, loadCustomerTagValidationCatalog } from './customerTagService';
 import { validateManualTagSelection } from './customerTagPolicy';
 import { groupTagIdsForFilter, normalizeManualTagIds, validateCustomerTagFilters } from '../../src/shared/utils/customerTagPolicy';
@@ -157,23 +156,6 @@ function containsTagId(tagId: string) {
   return Prisma.sql`JSON_CONTAINS(COALESCE(JSON_EXTRACT(data, '$.manualTagIds'), JSON_ARRAY()), JSON_QUOTE(${tagId})) = 1`;
 }
 
-function publicPoolLastFollowUpOwnerSql() {
-  return Prisma.sql`COALESCE(NULLIF((
-    SELECT TRIM(activity.activity_operator)
-    FROM JSON_TABLE(
-      COALESCE(JSON_EXTRACT(data, '$.activityRecords'), JSON_ARRAY()),
-      '$[*]' COLUMNS (
-        activity_type VARCHAR(32) PATH '$.type',
-        activity_operator VARCHAR(255) PATH '$.operator',
-        activity_created_at VARCHAR(64) PATH '$.createdAt'
-      )
-    ) AS activity
-    WHERE activity.activity_type = 'follow'
-    ORDER BY activity.activity_created_at DESC
-    LIMIT 1
-  ), ''), NULLIF(TRIM(${jsonText('$.previousOwner')}), ''), ${NO_CUSTOMER_FOLLOW_UP_OWNER})`;
-}
-
 export function matchesCustomerTagFilters(customer: Pick<Customer, 'manualTagIds' | 'tags'>, filters: CustomerFilters, catalog: CustomerTagCatalog): boolean {
   const assigned = new Set(customer.manualTagIds || []);
   const ids = normalizeManualTagIds(filters.tagIds || []).slice(0, 20);
@@ -227,7 +209,7 @@ export function buildCustomerWhere(filters: CustomerFilters, catalog?: CustomerT
 
   if (filters.owner) {
     if (normalizeLifecycleStatusCode(filters.lifecycleStatusCode) === LIFECYCLE_STATUS_CODES.PUBLIC_POOL) {
-      conditions.push(Prisma.sql`${publicPoolLastFollowUpOwnerSql()} = ${filters.owner.trim()}`);
+      conditions.push(Prisma.sql`TRIM(COALESCE(${jsonText('$.previousOwner')}, '')) = ${filters.owner.trim()}`);
     } else {
       conditions.push(Prisma.sql`${jsonText('$.owner')} = ${filters.owner}`);
     }
@@ -649,19 +631,16 @@ export function createCustomerListService(
       })).filter((row) => row.tagId && row.count > 0));
     },
 
-    async listPublicPoolFollowUpOperators(currentUser?: AuthenticatedUser | null) {
+    async listPublicPoolPreviousOwners(currentUser?: AuthenticatedUser | null) {
       const visibility = await buildVisibilityWhere(prisma, currentUser);
       const where = buildCustomerWhere({ lifecycleStatusCode: LIFECYCLE_STATUS_CODES.PUBLIC_POOL });
-      const lastFollowUpOwner = publicPoolLastFollowUpOwnerSql();
       const rows = await prisma.$queryRaw<Array<{ name: string }>>(Prisma.sql`
-        SELECT DISTINCT last_follow_up_owner AS name
-        FROM (
-          SELECT ${lastFollowUpOwner} AS last_follow_up_owner
-          FROM business_records
-          WHERE ${where} AND ${visibility.where}
-        ) AS public_pool_follow_ups
-        WHERE last_follow_up_owner <> ''
-        ORDER BY last_follow_up_owner
+        SELECT DISTINCT TRIM(${jsonText('$.previousOwner')}) AS name
+        FROM business_records
+        WHERE ${where}
+          AND ${visibility.where}
+          AND TRIM(COALESCE(${jsonText('$.previousOwner')}, '')) <> ''
+        ORDER BY name
       `);
       return success(rows.map((row) => cleanText(row.name)).filter(Boolean));
     },

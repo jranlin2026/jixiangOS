@@ -95,7 +95,7 @@ import CustomerBatchTaskDrawer from './batch/CustomerBatchTaskDrawer';
 import CustomerMergeDialog from './CustomerMergeDialog';
 import CustomerImportDialog from './CustomerImportDialog';
 import CustomerExportDialog from './CustomerExportDialog';
-import { buildLastFollowUpFilterUsers, getLastFollowUpOperator, getPreviousOwnerLabel } from './customerListPresentation';
+import { buildPreviousOwnerFilterUsers, getLastFollowUpOperator, getPreviousOwnerLabel } from './customerListPresentation';
 
 type CustomerColumn = {
   id: string;
@@ -280,7 +280,7 @@ const Customers: React.FC = () => {
   const [ordersOpen, setOrdersOpen] = useState(false);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [manageableUsers, setManageableUsers] = useState<CustomerManageableUser[]>([]);
-  const [publicPoolFollowUpUsers, setPublicPoolFollowUpUsers] = useState<CustomerManageableUser[]>([]);
+  const [publicPoolPreviousOwnerUsers, setPublicPoolPreviousOwnerUsers] = useState<CustomerManageableUser[]>([]);
   const [lifecycleConfigs, setLifecycleConfigs] = useState<LifecycleStatusConfig[]>([]);
   const [customerLevelConfigs, setCustomerLevelConfigs] = useState<CustomerLevelConfig[]>([]);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
@@ -328,8 +328,8 @@ const Customers: React.FC = () => {
 
   useEffect(() => {
     if (!isPublicPoolScope) return;
-    customerApi.fetchPublicPoolFollowUpUsers().then((res) => {
-      setPublicPoolFollowUpUsers(res.code === 0 ? res.data : []);
+    customerApi.fetchPublicPoolPreviousOwnerUsers().then((res) => {
+      setPublicPoolPreviousOwnerUsers(res.code === 0 ? res.data : []);
     });
   }, [currentUser?.id, isPublicPoolScope]);
 
@@ -362,15 +362,15 @@ const Customers: React.FC = () => {
     [orderedColumns, visibleColumnIds],
   );
   const frozenColumnCount = Math.min(viewConfig.frozenColumnCount, visibleColumns.length);
-  const visiblePublicPoolFollowUpUsers = useMemo(
+  const visiblePublicPoolPreviousOwnerUsers = useMemo(
     () => {
-      const selected = buildLastFollowUpFilterUsers([], filters.owner);
-      const byName = new Map([...publicPoolFollowUpUsers, ...selected].map((user) => [user.name, user]));
+      const selected = buildPreviousOwnerFilterUsers([], filters.owner);
+      const byName = new Map([...publicPoolPreviousOwnerUsers, ...selected].map((user) => [user.name, user]));
       return Array.from(byName.values());
     },
-    [publicPoolFollowUpUsers, filters.owner],
+    [publicPoolPreviousOwnerUsers, filters.owner],
   );
-  const visibleOwnerUsers = isPublicPoolScope ? visiblePublicPoolFollowUpUsers : manageableUsers;
+  const visibleOwnerUsers = isPublicPoolScope ? visiblePublicPoolPreviousOwnerUsers : manageableUsers;
   const transferableOwnerUsers = useMemo(
     () => manageableUsers.filter((user) => user.id !== assignTarget?.ownerId),
     [assignTarget?.ownerId, manageableUsers],
@@ -427,7 +427,7 @@ const Customers: React.FC = () => {
     permissions: customerWritePermissions,
     readOnly: false,
   }).actions;
-  const ownerFilterLabel = isPublicPoolScope ? '最后跟进人' : '销售负责人';
+  const ownerFilterLabel = isPublicPoolScope ? '上一个销售负责人' : '销售负责人';
   const hasAnyActiveFilter = Boolean(
     filters.search
     || filters.customerLevel
@@ -1260,8 +1260,8 @@ const Customers: React.FC = () => {
             if (response.code === 0) setBatchTasks(response.data || []);
           });
           if (isPublicPoolScope) {
-            void customerApi.fetchPublicPoolFollowUpUsers().then((response) => {
-              if (response.code === 0) setPublicPoolFollowUpUsers(response.data || []);
+            void customerApi.fetchPublicPoolPreviousOwnerUsers().then((response) => {
+              if (response.code === 0) setPublicPoolPreviousOwnerUsers(response.data || []);
             });
           }
         }}

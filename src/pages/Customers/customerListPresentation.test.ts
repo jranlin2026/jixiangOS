@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import type { Customer } from '../../types/customer';
-import { buildLastFollowUpFilterUsers, getLastFollowUpOperator, getPreviousOwnerLabel } from './customerListPresentation';
+import { buildPreviousOwnerFilterUsers, getLastFollowUpOperator, getPreviousOwnerLabel } from './customerListPresentation';
 
 const customer = {
   activityRecords: [
@@ -15,12 +15,12 @@ assert.equal(getLastFollowUpOperator({ activityRecords: [] }), '暂无跟进');
 assert.equal(getLastFollowUpOperator({ activityRecords: [], previousOwner: '销售甲' }), '销售甲');
 assert.equal(getPreviousOwnerLabel({ previousOwner: '销售甲' }), '销售甲');
 assert.deepEqual(
-  buildLastFollowUpFilterUsers([
+  buildPreviousOwnerFilterUsers([
     customer,
-    { activityRecords: [], previousOwner: '销售甲' },
-    { activityRecords: [] },
+    { previousOwner: '销售甲' },
+    {},
   ], '已离职销售').map((user) => user.name),
-  ['销售乙', '销售甲', '暂无跟进', '已离职销售'],
+  ['销售甲', '已离职销售'],
 );
 
 console.log('customer list presentation: ok');

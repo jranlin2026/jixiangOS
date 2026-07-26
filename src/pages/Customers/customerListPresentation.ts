@@ -9,14 +9,14 @@ export function getPreviousOwnerLabel(customer: Pick<Customer, 'previousOwner'>)
   return customer.previousOwner?.trim() || '-';
 }
 
-export function buildLastFollowUpFilterUsers(
-  customers: Array<Pick<Customer, 'activityRecords' | 'previousOwner'>>,
+export function buildPreviousOwnerFilterUsers(
+  customers: Array<Pick<Customer, 'previousOwner'>>,
   selectedName = '',
 ): CustomerManageableUser[] {
   const names = customers
-    .map(getCustomerLastFollowUpOwner)
+    .map((customer) => customer.previousOwner?.trim() || '')
     .filter(Boolean);
   const selected = selectedName.trim();
   if (selected) names.push(selected);
-  return Array.from(new Set(names)).map((name) => ({ id: `last-follow-up:${name}`, name }));
+  return Array.from(new Set(names)).map((name) => ({ id: `previous-owner:${name}`, name }));
 }

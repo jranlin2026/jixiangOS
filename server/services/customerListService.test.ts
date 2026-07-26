@@ -538,7 +538,7 @@ const listService = createCustomerListService({
   $queryRaw: async (...args: any[]) => {
     const sql = flattenSql(args);
     capturedQueries.push(sql);
-    if (sql.includes('public_pool_follow_ups')) return [{ name: '历史跟进人' }, { name: '跟进人未知' }];
+    if (sql.includes('SELECT DISTINCT') && sql.includes('previousOwner')) return [{ name: '历史跟进人' }, { name: '跟进人未知' }];
     if (sql.includes('GROUP BY') && sql.includes('leadSource')) {
       return [{ leadSource: '直播', sourceName: '抖音', total: BigInt(2) }];
     }
@@ -593,10 +593,10 @@ assert.match(capturedQueries[0], /customer_tag_facets/);
 assert.match(capturedQueries[0], /JSON_UNQUOTE\(JSON_EXTRACT\(data, '\$\.owner'\)\) IN/);
 
 capturedQueries.length = 0;
-const followUpOperators = await listService.listPublicPoolFollowUpOperators(salesActor);
-assert.deepEqual(followUpOperators.data, ['历史跟进人', '跟进人未知']);
-assert.match(capturedQueries[0], /SELECT DISTINCT last_follow_up_owner/);
-assert.match(capturedQueries[0], /JSON_TABLE/);
+const previousOwners = await listService.listPublicPoolPreviousOwners(salesActor);
+assert.deepEqual(previousOwners.data, ['历史跟进人', '跟进人未知']);
+assert.match(capturedQueries[0], /SELECT DISTINCT.*previousOwner/s);
+assert.doesNotMatch(capturedQueries[0], /JSON_TABLE/);
 assert.match(capturedQueries[0], /JSON_UNQUOTE\(JSON_EXTRACT\(data, '\$\.owner'\)\) IN/);
 
 const mirrorListDirectory = {
