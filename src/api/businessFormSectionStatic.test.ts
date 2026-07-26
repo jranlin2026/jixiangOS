@@ -22,6 +22,7 @@ for (const step of [1, 2, 3, 4, 5]) {
 }
 
 assert.doesNotMatch(orderForm, /function FormSection/);
+assert.match(orderForm, /<Dialog open=\{open\} onClose=\{onClose\} maxWidth="md" fullWidth>/, '订单申请弹窗桌面宽度应保持紧凑');
 assert.match(orderForm, /<FormLabel[^>]*required[\s\S]{0,200}客户（搜索选择）[\s\S]{0,80}<\/FormLabel>/, 'C 方案客户字段名应显示在输入框上方');
 assert.match(orderForm, /<FormLabel[^>]*>[\s\S]{0,80}销售负责人[\s\S]{0,20}<\/FormLabel>/, 'C 方案销售负责人字段名应显示在输入框上方');
 assert.match(orderForm, /'aria-label': '客户（搜索选择）'/, '外置字段名后仍需保留输入框无障碍名称');

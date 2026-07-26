@@ -755,7 +755,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
 
   return (
     <>
-    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogCloseTitle onClose={onClose}>{formTitle}</DialogCloseTitle>
       <DialogContent>
         {!order && (
