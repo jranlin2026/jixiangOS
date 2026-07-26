@@ -9,6 +9,8 @@ import {
   type CustomerExportRequest,
   type CustomerExportResult,
   type CustomerImportConfirmResult,
+  type CustomerImportConfigSyncKind,
+  type CustomerImportConfigSyncResult,
   type CustomerImportPrecheckResult,
   type CustomerImportRow,
   type CustomerImportRowResult,
@@ -280,6 +282,9 @@ export const customerDataExchangeApi = {
   },
   precheckImport(rows: CustomerImportRow[], destination: CustomerImportDestination): Promise<ApiResponse<CustomerImportPrecheckResult>> {
     return backendRequest(`${ROOT}/import/precheck`, { method: 'POST', body: JSON.stringify({ rows, destination }) });
+  },
+  syncImportConfigs(rows: CustomerImportRow[], destination: CustomerImportDestination, confirmationToken: string, kind: CustomerImportConfigSyncKind): Promise<ApiResponse<CustomerImportConfigSyncResult>> {
+    return backendRequest(`${ROOT}/import/sync-configs`, { method: 'POST', body: JSON.stringify({ rows, destination, confirmationToken, kind }) });
   },
   confirmImport(rows: CustomerImportRow[], destination: CustomerImportDestination, confirmationToken: string): Promise<ApiResponse<CustomerImportConfirmResult>> {
     return backendRequest(`${ROOT}/import/confirm`, { method: 'POST', body: JSON.stringify({ rows, destination, confirmationToken }) });

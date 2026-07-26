@@ -1,6 +1,6 @@
 import { Router, type RequestHandler } from 'express';
 import type { AuthenticatedUser } from '../../src/types/auth';
-import type { CustomerExportRequest, CustomerImportDestination, CustomerImportRow } from '../../src/types/customerDataExchange';
+import type { CustomerExportRequest, CustomerImportConfigSyncKind, CustomerImportDestination, CustomerImportRow } from '../../src/types/customerDataExchange';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { failure, success } from '../api/response';
 import { CustomerDataExchangeError } from '../services/customerDataExchangeService';
@@ -8,6 +8,7 @@ import { CustomerDataExchangeError } from '../services/customerDataExchangeServi
 type CustomerDataExchangeRouteService = {
   templateOptions(user: AuthenticatedUser): Promise<unknown>;
   precheckImport(rows: CustomerImportRow[], destination: CustomerImportDestination, user: AuthenticatedUser): Promise<unknown>;
+  syncImportConfigs(input: { rows: CustomerImportRow[]; destination: CustomerImportDestination; confirmationToken: string; kind: CustomerImportConfigSyncKind }, user: AuthenticatedUser): Promise<unknown>;
   confirmImport(input: { rows: CustomerImportRow[]; destination: CustomerImportDestination; confirmationToken: string }, user: AuthenticatedUser): Promise<unknown>;
   exportCustomers(input: CustomerExportRequest, user: AuthenticatedUser): Promise<unknown>;
 };
@@ -69,6 +70,16 @@ function parseDestination(value: unknown): CustomerImportDestination {
   throw new CustomerDataExchangeError('客户导入去向无效');
 }
 
+function parseConfigSyncKind(value: unknown): CustomerImportConfigSyncKind {
+  if (value === 'lead_sources' || value === 'tags') return value;
+  throw new CustomerDataExchangeError('客户导入配置同步类型无效');
+}
+
+function parseConfirmationToken(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  throw new CustomerDataExchangeError('导入预检凭证无效或已过期', 409);
+}
+
 function parseSelection(value: unknown): CustomerExportRequest['selection'] {
   const raw = object(value);
   if (raw.mode === 'ids') {
@@ -98,6 +109,17 @@ export function createCustomerDataExchangeRouter(deps: CustomerDataExchangeRoute
     try {
       const raw = exact(request.body, ['rows', 'destination']);
       response.json(success(await deps.service.precheckImport(parseRows(raw.rows), parseDestination(raw.destination), currentUser(request))));
+    } catch (error) { sendError(response, error); }
+  });
+  router.post('/import/sync-configs', deps.requireImport, async (request: AuthenticatedRequest, response) => {
+    try {
+      const raw = exact(request.body, ['rows', 'destination', 'confirmationToken', 'kind']);
+      response.json(success(await deps.service.syncImportConfigs({
+        rows: parseRows(raw.rows),
+        destination: parseDestination(raw.destination),
+        confirmationToken: parseConfirmationToken(raw.confirmationToken),
+        kind: parseConfigSyncKind(raw.kind),
+      }, currentUser(request))));
     } catch (error) { sendError(response, error); }
   });
   router.post('/import/confirm', deps.requireImport, async (request: AuthenticatedRequest, response) => {

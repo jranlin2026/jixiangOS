@@ -8,6 +8,9 @@ import {
   type CustomerExportRequest,
   type CustomerExportResult,
   type CustomerImportConfirmResult,
+  type CustomerImportConfigSyncKind,
+  type CustomerImportConfigSyncResult,
+  type CustomerImportLeadSourceCandidate,
   type CustomerImportPrecheckResult,
   type CustomerImportRow,
   type CustomerImportRowResult,
@@ -16,10 +19,13 @@ import {
 import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import {
   normalizeCustomerImportRows,
+  collectCustomerImportConfigGaps,
   projectCustomerExportRows,
   validateCustomerImportRows,
   type CustomerImportDirectory,
 } from './customerDataExchangePolicy';
+
+const CUSTOMER_IMPORT_CONFIG_SYNC_MAX_ITEMS = 500;
 
 type ExchangeSelection = CustomerExportRequest['selection'];
 
@@ -59,6 +65,8 @@ export type CustomerDataExchangeDependencies = {
   readCustomers(selection: ExchangeSelection, user: AuthenticatedUser): Promise<Customer[]>;
   recordExportAudit(event: CustomerExportAuditEvent): Promise<void>;
   persistImportPrecheck(event: { token: string; actorId: string; rowsHash: string; expiresAt: string; totalCount: number; destination: CustomerImportDestination }): Promise<void>;
+  syncLeadSources(items: CustomerImportLeadSourceCandidate[], user: AuthenticatedUser): Promise<{ createdCount: number; updatedCount: number }>;
+  syncTags(names: string[], user: AuthenticatedUser): Promise<{ createdCount: number; updatedCount: number }>;
 };
 
 export class CustomerDataExchangeError extends Error {
@@ -116,6 +124,22 @@ function assertPermission(user: AuthenticatedUser, key: string, message: string)
   if (!hasPermission(user, key, 'write')) throw new CustomerDataExchangeError(message, 403);
 }
 
+function assertPrecheckToken(
+  confirmationToken: string,
+  rows: CustomerImportRow[],
+  destination: CustomerImportDestination,
+  user: AuthenticatedUser,
+  secret: string,
+  currentTime: Date,
+): TokenPayload {
+  const normalizedRows = normalizeCustomerImportRows(rows);
+  const token = decodeToken(confirmationToken, secret);
+  if (token.actorId !== user.id) throw new CustomerDataExchangeError('导入预检凭证不属于当前用户', 403);
+  if (new Date(token.expiresAt).getTime() <= currentTime.getTime()) throw new CustomerDataExchangeError('导入预检凭证已过期，请重新预检', 409);
+  if (token.rowsHash !== hashRows(normalizedRows, destination)) throw new CustomerDataExchangeError('导入文件或导入去向与预检内容不一致，请重新预检', 409);
+  return token;
+}
+
 function assertImportDestinationPermission(destination: CustomerImportDestination, user: AuthenticatedUser): void {
   if (destination === 'public_pool') {
     assertPermission(user, PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, '无权直接导入公海池');
@@ -156,6 +180,7 @@ export function createCustomerDataExchangeService(deps: CustomerDataExchangeDepe
       const prepared = await prepare(rows, destination, user);
       const expiresAt = new Date(now().getTime() + 15 * 60_000).toISOString();
       const readyCount = prepared.validated.filter((row) => row.status === 'ready').length;
+      const gaps = collectCustomerImportConfigGaps(prepared.normalizedRows, prepared.directory);
       const rowsHash = hashRows(prepared.normalizedRows, destination);
       const confirmationToken = encodeToken({ actorId: user.id, rowsHash, expiresAt, nonce: randomUUID() }, deps.secret);
       await deps.persistImportPrecheck({
@@ -172,8 +197,45 @@ export function createCustomerDataExchangeService(deps: CustomerDataExchangeDepe
         totalCount: prepared.validated.length,
         readyCount,
         blockedCount: prepared.validated.length - readyCount,
+        ...gaps,
+        canSyncLeadSources: hasPermission(user, PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, 'write'),
+        canSyncTags: hasPermission(user, PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS, 'write'),
         rows: prepared.validated.map(({ input: _input, attribution: _attribution, ...row }) => row),
       };
+    },
+
+    async syncImportConfigs(
+      request: { rows: CustomerImportRow[]; destination: CustomerImportDestination; confirmationToken: string; kind: CustomerImportConfigSyncKind },
+      user: AuthenticatedUser,
+    ): Promise<CustomerImportConfigSyncResult> {
+      assertPermission(user, PERMISSION_KEYS.CUSTOMER_IMPORT, '无权导入客户');
+      assertRows(request.rows);
+      assertImportDestinationPermission(request.destination, user);
+      assertPrecheckToken(request.confirmationToken, request.rows, request.destination, user, deps.secret, now());
+      const normalizedRows = normalizeCustomerImportRows(request.rows);
+      const directory = await deps.loadDirectory(user, request.rows);
+      const gaps = collectCustomerImportConfigGaps(normalizedRows, directory);
+      if (request.kind === 'lead_sources') {
+        assertPermission(user, PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, '无权同步线索来源，请联系系统管理员');
+        if (gaps.missingLeadSources.length > CUSTOMER_IMPORT_CONFIG_SYNC_MAX_ITEMS) {
+          throw new CustomerDataExchangeError(`单次最多同步 ${CUSTOMER_IMPORT_CONFIG_SYNC_MAX_ITEMS} 个缺失线索来源，请拆分文件后重试`);
+        }
+        if (gaps.missingLeadSources.some((item) => item.leadSource.length > 80 || (item.sourceName?.length || 0) > 80)) {
+          throw new CustomerDataExchangeError('线索来源名称不能超过 80 个字符');
+        }
+        const result = await deps.syncLeadSources(gaps.missingLeadSources, user);
+        return { kind: request.kind, ...result };
+      }
+      if (request.kind === 'tags') {
+        assertPermission(user, PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS, '无权同步客户标签，请联系系统管理员');
+        if (gaps.missingTagNames.length > CUSTOMER_IMPORT_CONFIG_SYNC_MAX_ITEMS) {
+          throw new CustomerDataExchangeError(`单次最多同步 ${CUSTOMER_IMPORT_CONFIG_SYNC_MAX_ITEMS} 个缺失客户标签，请拆分文件后重试`);
+        }
+        if (gaps.missingTagNames.some((name) => name.length > 80)) throw new CustomerDataExchangeError('客户标签名称不能超过 80 个字符');
+        const result = await deps.syncTags(gaps.missingTagNames, user);
+        return { kind: request.kind, ...result };
+      }
+      throw new CustomerDataExchangeError('客户导入配置同步类型无效');
     },
 
     async confirmImport(
@@ -184,9 +246,7 @@ export function createCustomerDataExchangeService(deps: CustomerDataExchangeDepe
       assertRows(request.rows);
       assertImportDestinationPermission(request.destination, user);
       const normalizedRows = normalizeCustomerImportRows(request.rows);
-      const token = decodeToken(request.confirmationToken, deps.secret);
-      if (token.actorId !== user.id) throw new CustomerDataExchangeError('导入预检凭证不属于当前用户', 403);
-      if (token.rowsHash !== hashRows(normalizedRows, request.destination)) throw new CustomerDataExchangeError('导入文件或导入去向与预检内容不一致，请重新预检', 409);
+      const token = assertPrecheckToken(request.confirmationToken, request.rows, request.destination, user, deps.secret, now());
 
       const directory = await deps.loadDirectory(user, request.rows);
       const validated = validateCustomerImportRows(normalizedRows, directory, request.destination);

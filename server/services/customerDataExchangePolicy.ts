@@ -1,10 +1,16 @@
 import type { Customer, CustomerCreateInput } from '../../src/types/customer';
-import type { CustomerImportDestination, CustomerImportRow, CustomerImportRowResult, CustomerExportRow } from '../../src/types/customerDataExchange';
+import type {
+  CustomerExportRow,
+  CustomerImportDestination,
+  CustomerImportLeadSourceCandidate,
+  CustomerImportRow,
+  CustomerImportRowResult,
+} from '../../src/types/customerDataExchange';
 import { LIFECYCLE_STATUS_CODES, normalizeLifecycleStatusCode } from '../../src/shared/utils/constants';
 import { getPhoneNumberError, normalizePhoneForStorage } from '../../src/shared/utils/phoneNumber';
 import { getLatestCustomerFollowUp } from '../../src/shared/utils/customerFollowUp';
 
-type NormalizedImportRow = Omit<CustomerImportRow, 'tagNames' | 'previousOwnerName' | 'firstOwnerName' | 'leadInputByName' | 'leadContributorName'> & {
+export type NormalizedCustomerImportRow = Omit<CustomerImportRow, 'tagNames' | 'previousOwnerName' | 'firstOwnerName' | 'leadInputByName' | 'leadContributorName'> & {
   tagNames: string[];
   previousOwnerName: string;
   firstOwnerName: string;
@@ -54,7 +60,7 @@ export function customerContactKeys(input: Pick<CustomerImportRow, 'phone' | 'we
   return [phone ? `phone:${phone}` : '', wechat ? `wechat:${wechat}` : ''].filter(Boolean);
 }
 
-export function normalizeCustomerImportRows(rows: CustomerImportRow[]): NormalizedImportRow[] {
+export function normalizeCustomerImportRows(rows: CustomerImportRow[]): NormalizedCustomerImportRow[] {
   return rows.map((row, index) => ({
     rowNumber: Number.isFinite(Number(row.rowNumber)) ? Math.max(2, Math.floor(Number(row.rowNumber))) : index + 2,
     name: cleanText(row.name),
@@ -77,6 +83,46 @@ export function normalizeCustomerImportRows(rows: CustomerImportRow[]): Normaliz
   }));
 }
 
+function parseImportLeadSource(value: string): CustomerImportLeadSourceCandidate | null {
+  const source = cleanText(value).replace(/\s*[-－]\s*/g, '-').replace(/\s*[\/／]\s*/g, '/');
+  if (!source) return null;
+  const separator = source.includes('/') ? '/' : source.includes('-') ? '-' : '';
+  if (!separator) return { leadSource: source, label: source };
+  const parts = source.split(separator).map(cleanText).filter(Boolean);
+  if (parts.length < 2) return { leadSource: source, label: source };
+  const leadSource = parts[0];
+  const sourceName = parts.slice(1).join('-');
+  return { leadSource, sourceName, label: `${leadSource}-${sourceName}` };
+}
+
+export function collectCustomerImportConfigGaps(
+  rows: NormalizedCustomerImportRow[],
+  directory: Pick<CustomerImportDirectory, 'leadSources' | 'tags'>,
+): { missingLeadSources: CustomerImportLeadSourceCandidate[]; missingTagNames: string[] } {
+  const sourceKeys = new Set(directory.leadSources.flatMap((item) => [item.label, item.value].map(normalizedLookup)));
+  const missingLeadSources = new Map<string, CustomerImportLeadSourceCandidate>();
+  rows.forEach((row) => {
+    const candidate = parseImportLeadSource(row.leadSource);
+    if (!candidate || sourceKeys.has(normalizedLookup(candidate.label)) || sourceKeys.has(normalizedLookup(row.leadSource))) return;
+    if (candidate) missingLeadSources.set(normalizedLookup(candidate.label), candidate);
+  });
+
+  const tagCounts = directory.tags.reduce((counts, tag) => {
+    const key = normalizedLookup(tag.name);
+    counts.set(key, (counts.get(key) || 0) + 1);
+    return counts;
+  }, new Map<string, number>());
+  const missingTagNames = new Map<string, string>();
+  rows.flatMap((row) => row.tagNames).forEach((name) => {
+    const key = normalizedLookup(name);
+    if (key && !tagCounts.has(key)) missingTagNames.set(key, name);
+  });
+  return {
+    missingLeadSources: Array.from(missingLeadSources.values()).sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')),
+    missingTagNames: Array.from(missingTagNames.values()).sort((a, b) => a.localeCompare(b, 'zh-CN')),
+  };
+}
+
 function exactlyOneByName<T>(items: T[], value: string, name: (item: T) => string): T | null {
   const target = normalizedLookup(value);
   const matches = items.filter((item) => normalizedLookup(name(item)) === target);
@@ -89,7 +135,7 @@ function duplicateNameCount<T>(items: T[], value: string, name: (item: T) => str
 }
 
 export function validateCustomerImportRows(
-  rows: NormalizedImportRow[],
+  rows: NormalizedCustomerImportRow[],
   directory: CustomerImportDirectory,
   destination: CustomerImportDestination,
 ): ValidatedCustomerImportRow[] {
@@ -166,8 +212,9 @@ export function validateCustomerImportRows(
       : null;
     if (row.customerLevel && !level) errors.push(`客户等级不存在：${row.customerLevel}`);
 
+    const canonicalSourceLabel = parseImportLeadSource(row.leadSource)?.label || row.leadSource;
     const sourceLabelMatches = row.leadSource
-      ? directory.leadSources.filter((item) => normalizedLookup(item.label) === normalizedLookup(row.leadSource))
+      ? directory.leadSources.filter((item) => normalizedLookup(item.label) === normalizedLookup(canonicalSourceLabel))
       : [];
     const sourceValueMatches = row.leadSource
       ? directory.leadSources.filter((item) => normalizedLookup(item.value) === normalizedLookup(row.leadSource))

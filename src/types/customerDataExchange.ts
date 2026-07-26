@@ -54,12 +54,30 @@ export type CustomerImportRowResult = {
   customerId?: string;
 };
 
+export type CustomerImportLeadSourceCandidate = {
+  leadSource: string;
+  sourceName?: string;
+  label: string;
+};
+
+export type CustomerImportConfigSyncKind = 'lead_sources' | 'tags';
+
+export type CustomerImportConfigSyncResult = {
+  kind: CustomerImportConfigSyncKind;
+  createdCount: number;
+  updatedCount: number;
+};
+
 export type CustomerImportPrecheckResult = {
   confirmationToken: string;
   expiresAt: string;
   totalCount: number;
   readyCount: number;
   blockedCount: number;
+  missingLeadSources: CustomerImportLeadSourceCandidate[];
+  missingTagNames: string[];
+  canSyncLeadSources: boolean;
+  canSyncTags: boolean;
   rows: CustomerImportRowResult[];
 };
 

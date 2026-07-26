@@ -7,6 +7,7 @@ import type { CustomerExportSelection, CustomerImportDestination, CustomerImport
 import type { ApiResponse, PaginatedResponse } from '../../src/api/types';
 import type { CustomerCreateExecutionContext } from './customerListService';
 import type { CustomerLevelConfig, LeadSourceConfig, LifecycleStatusConfig } from '../../src/types/settings';
+import type { CustomerTag, CustomerTagGroup } from '../../src/types/tag';
 import {
   CUSTOMER_LEVELS,
   DEFAULT_LEAD_SOURCE_CONFIGS,
@@ -15,7 +16,8 @@ import {
 } from '../../src/shared/utils/constants';
 import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import { loadCustomerAccessContext } from './customerAccessPolicy';
-import { loadCustomerTagCatalog, loadCustomerTagValidationCatalog } from './customerTagService';
+import { catalogWriteTransaction, loadCustomerTagCatalog, loadCustomerTagValidationCatalog } from './customerTagService';
+import { ensureLeadSourceConfigsInTransaction } from './leadSourceConfigSyncService';
 import { customerContactKeys } from './customerDataExchangePolicy';
 import type { CustomerBatchJobHandler } from './customerBatchJobHandler';
 import {
@@ -37,6 +39,17 @@ const tokenHash = (token: string) => createHash('sha256').update(token, 'utf8').
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 const CUSTOMER_IMPORT_FACT_SCAN_PAGE_SIZE = 5_000;
 const CUSTOMER_IMPORT_ENQUEUE_TRANSACTION_TIMEOUT_MS = 120_000;
+
+function tagCatalogRecord(domain: string, value: CustomerTag | CustomerTagGroup) {
+  return {
+    id: `${domain}:${value.id}`,
+    domain,
+    recordId: value.id,
+    title: value.name,
+    status: value.isActive ? 'active' : 'inactive',
+    data: json(value),
+  };
+}
 
 function readStorageValue<T>(value: unknown, fallback: T): T {
   if (value === null || value === undefined) return fallback;
@@ -467,6 +480,9 @@ export function createPrismaCustomerDataExchangeService(input: {
         .sort((a, b) => a.sortOrder - b.sortOrder);
       const sources = readStorageValue<LeadSourceConfig[]>(storage.get(STORAGE_KEYS.LEAD_SOURCE_CONFIGS), DEFAULT_LEAD_SOURCE_CONFIGS);
       const allowedOwnerIds = canOverrideAttribution ? context.manageableOwnerIds : new Set([user.id]);
+      const customerTagGroupIds = new Set(catalog.groups
+        .filter((group) => group.isActive !== false && (group.scope === 'customer' || group.scope === 'both'))
+        .map((group) => group.id));
       return {
         currentOwnerId: user.id,
         currentOwnerName: user.name || user.account,
@@ -478,7 +494,9 @@ export function createPrismaCustomerDataExchangeService(input: {
           .map((item) => ({ code: item.code, name: item.name })),
         customerLevels: levels.map((item) => ({ value: item.value, label: item.label })),
         leadSources: leadSourceOptions(sources),
-        tags: catalog.tags.filter((tag) => tag.isActive !== false).map((tag) => ({ id: tag.id, name: tag.name })),
+        tags: catalog.tags
+          .filter((tag) => tag.isActive !== false && customerTagGroupIds.has(tag.groupId))
+          .map((tag) => ({ id: tag.id, name: tag.name })),
         existingContactKeys: duplicateKeys.contactKeys,
         existingCustomerNames: duplicateKeys.customerNames,
       };
@@ -487,6 +505,93 @@ export function createPrismaCustomerDataExchangeService(input: {
     readCustomers: (selection, user) => readSelection(input.customerReader, selection, user),
     recordExportAudit: (event) => recordExportAudit(input.prisma, event),
     persistImportPrecheck: (event) => persistImportPrecheck(input.prisma, event),
+    async syncLeadSources(items) {
+      if (!items.length) return { createdCount: 0, updatedCount: 0 };
+      return input.prisma.$transaction(async (tx) => {
+        const current = await tx.appStorage.findUnique({ where: { key: STORAGE_KEYS.LEAD_SOURCE_CONFIGS } });
+        const before = readStorageValue<LeadSourceConfig[]>(current?.value, []);
+        const configs = await ensureLeadSourceConfigsInTransaction(tx as any, items);
+        const activeLabels = new Set(leadSourceOptions(configs).flatMap((item) => [item.label, item.value].map((value) => cleanText(value).toLocaleLowerCase('zh-CN'))));
+        const unresolved = items.filter((item) => !activeLabels.has(cleanText(item.label).toLocaleLowerCase('zh-CN')));
+        if (unresolved.length) {
+          throw new CustomerDataExchangeError(`以下线索来源已存在但未启用，请到系统设置启用：${unresolved.map((item) => item.label).join('、')}`, 409);
+        }
+        return { createdCount: Math.max(0, configs.length - before.length), updatedCount: 0 };
+      });
+    },
+    async syncTags(names, user) {
+      if (!names.length) return { createdCount: 0, updatedCount: 0 };
+      const result = await catalogWriteTransaction(input.prisma as any, async (tx) => {
+        const catalog = await loadCustomerTagCatalog(tx as any, true);
+        const timestamp = new Date().toISOString();
+        const normalizedNames = Array.from(new Map(names.map((name) => [cleanText(name).toLocaleLowerCase('zh-CN'), cleanText(name)])).values());
+        let group = catalog.groups.find((item) => cleanText(item.name).toLocaleLowerCase('zh-CN') === '历史未归类');
+        let createdCount = 0;
+        let updatedCount = 0;
+        if (!group) {
+          group = {
+            id: randomUUID(), name: '历史未归类', color: '#64748b', selectionMode: 'multiple', scope: 'both',
+            isActive: true, sortOrder: catalog.groups.length, createdAt: timestamp, updatedAt: timestamp,
+          };
+          await tx.businessRecord.create({ data: tagCatalogRecord(STORAGE_KEYS.TAG_GROUPS, group) });
+          catalog.groups.push(group);
+        } else if (!group.isActive || group.scope !== 'both' || group.selectionMode !== 'multiple') {
+          group = { ...group, isActive: true, scope: 'both', selectionMode: 'multiple', updatedAt: timestamp };
+          await tx.businessRecord.update({
+            where: { domain_recordId: { domain: STORAGE_KEYS.TAG_GROUPS, recordId: group.id } },
+            data: tagCatalogRecord(STORAGE_KEYS.TAG_GROUPS, group),
+          });
+          catalog.groups = catalog.groups.map((item) => item.id === group!.id ? group! : item);
+          updatedCount += 1;
+        }
+
+        const customerGroupIds = new Set(catalog.groups
+          .filter((candidate) => candidate.scope === 'customer' || candidate.scope === 'both')
+          .map((candidate) => candidate.id));
+        for (const name of normalizedNames) {
+          const matches = catalog.tags.filter((tag) => (
+            customerGroupIds.has(tag.groupId)
+            && cleanText(tag.name).toLocaleLowerCase('zh-CN') === cleanText(name).toLocaleLowerCase('zh-CN')
+          ));
+          if (matches.length > 1) throw new CustomerDataExchangeError(`客户标签名称不唯一，请先在设置中整理：${name}`, 409);
+          if (matches.length === 1) {
+            const existing = matches[0];
+            const matchedGroup = catalog.groups.find((candidate) => candidate.id === existing.groupId);
+            if (!matchedGroup) throw new CustomerDataExchangeError(`客户标签分组不存在：${name}`, 409);
+            if (!matchedGroup.isActive) {
+              const nextGroup = { ...matchedGroup, isActive: true, updatedAt: timestamp };
+              await tx.businessRecord.update({
+                where: { domain_recordId: { domain: STORAGE_KEYS.TAG_GROUPS, recordId: matchedGroup.id } },
+                data: tagCatalogRecord(STORAGE_KEYS.TAG_GROUPS, nextGroup),
+              });
+              catalog.groups = catalog.groups.map((item) => item.id === nextGroup.id ? nextGroup : item);
+              updatedCount += 1;
+            }
+            if (!existing.isActive) {
+              const nextTag = { ...existing, isActive: true, updatedAt: timestamp };
+              await tx.businessRecord.update({
+                where: { domain_recordId: { domain: STORAGE_KEYS.TAGS, recordId: existing.id } },
+                data: tagCatalogRecord(STORAGE_KEYS.TAGS, nextTag),
+              });
+              catalog.tags = catalog.tags.map((item) => item.id === nextTag.id ? nextTag : item);
+              updatedCount += 1;
+            }
+            continue;
+          }
+          const tag: CustomerTag = {
+            id: randomUUID(), groupId: group.id, name, color: '#64748b', isActive: true,
+            sortOrder: catalog.tags.filter((item) => item.groupId === group!.id).length,
+            usageCount: 0, createdAt: timestamp, updatedAt: timestamp,
+          };
+          await tx.businessRecord.create({ data: tagCatalogRecord(STORAGE_KEYS.TAGS, tag) });
+          catalog.tags.push(tag);
+          createdCount += 1;
+        }
+        return { code: 0, message: '操作成功', data: { createdCount, updatedCount } };
+      });
+      if (result.code !== 0 || !result.data) throw new CustomerDataExchangeError(result.message || '同步客户标签失败', result.code || 500);
+      return result.data;
+    },
   };
   return createCustomerDataExchangeService(deps);
 }

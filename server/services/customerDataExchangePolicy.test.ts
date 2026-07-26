@@ -61,6 +61,17 @@ assert.equal(precheck[0].input.leadSource, '市场品牌部');
 assert.equal(precheck[0].input.sourceName, '官网');
 assert.deepEqual(precheck[0].input.manualTagIds, ['t1', 't2']);
 
+const slashSourceReady = validateCustomerImportRows([{ ...rows[0], leadSource: '市场品牌部/官网' }], {
+  currentOwnerId: 'u1', currentOwnerName: '销售甲', canOverrideAttribution: false,
+  owners: [{ id: 'u1', name: '销售甲' }], attributionUsers,
+  lifecycleStatuses: [{ code: 'following', name: '跟进中' }], customerLevels: [{ value: 'L2', label: 'L2-意向' }],
+  leadSources: [{ value: '市场品牌部', label: '市场品牌部-官网', sourceName: '官网' }],
+  tags: [{ id: 't1', name: '高意向' }, { id: 't2', name: '复购' }], existingContactKeys: new Set(),
+}, 'assigned');
+assert.equal(slashSourceReady[0].status, 'ready');
+assert.equal(slashSourceReady[0].input.leadSource, '市场品牌部');
+assert.equal(slashSourceReady[0].input.sourceName, '官网');
+
 const blocked = validateCustomerImportRows([
   ...rows,
   { ...rows[0], rowNumber: 3, name: '李四', phone: '', wechat: 'wx-a', ownerName: '销售乙', tagNames: [] },

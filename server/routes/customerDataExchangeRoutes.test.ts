@@ -15,6 +15,7 @@ app.use('/api/customer-data-exchange', createCustomerDataExchangeRouter({
   service: {
     templateOptions: async () => ({ ownerNames: [] }),
     precheckImport: async (rows, destination) => { calls.push(`precheck:${destination}:${rows[0]?.previousOwnerName}:${rows[0]?.firstOwnerName}:${rows[0]?.leadInputByName}:${rows[0]?.leadContributorName}:${rows[0]?.lastFollowUpRecord}:${rows[0]?.remark}`); return { readyCount: rows.length }; },
+    syncImportConfigs: async (input) => { calls.push(`sync:${input.kind}:${input.destination}:${input.confirmationToken}:${input.rows[0]?.leadSource}:${input.rows[0]?.tagNames}`); return { kind: input.kind, createdCount: 1, updatedCount: 0 }; },
     confirmImport: async ({ rows, destination }) => { calls.push(`confirm:${destination}:${rows[0]?.previousOwnerName}:${rows[0]?.firstOwnerName}:${rows[0]?.leadInputByName}:${rows[0]?.leadContributorName}:${rows[0]?.lastFollowUpRecord}:${rows[0]?.remark}`); return { successCount: rows.length }; },
     exportCustomers: async (input) => { calls.push(`export:${input.selection.mode}`); return { rows: [] }; },
   },
@@ -32,12 +33,16 @@ try {
   };
   const precheck = await fetch(`${base}/import/precheck`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [row], destination: 'public_pool' }) });
   assert.equal(precheck.status, 200);
+  const sync = await fetch(`${base}/import/sync-configs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [row], destination: 'public_pool', confirmationToken: 'token', kind: 'tags' }) });
+  assert.equal(sync.status, 200);
+  assert.match(calls.find((call) => call.startsWith('sync:')) || '', /^sync:tags:/);
   const confirm = await fetch(`${base}/import/confirm`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [row], destination: 'public_pool', confirmationToken: 'token' }) });
   assert.equal(confirm.status, 201);
   const exported = await fetch(`${base}/export`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ selection: { mode: 'ids', customerIds: ['c1'] }, includeSensitive: false, reason: '备份' }) });
   assert.equal(exported.status, 200);
   assert.deepEqual(calls, [
     'precheck:public_pool:销售乙:销售甲:录入乙:贡献丙:已确认报价:重点客户',
+    'sync:tags:public_pool:token::',
     'confirm:public_pool:销售乙:销售甲:录入乙:贡献丙:已确认报价:重点客户',
     'export:ids',
   ]);

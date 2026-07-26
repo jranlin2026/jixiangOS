@@ -23,6 +23,8 @@ import {
 } from '@mui/material';
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
+import LabelOutlinedIcon from '@mui/icons-material/LabelOutlined';
+import SourceOutlinedIcon from '@mui/icons-material/SourceOutlined';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import {
   createCustomerImportErrorWorkbook,
@@ -62,6 +64,7 @@ export default function CustomerImportDialog({ open, onClose, onQueued }: Props)
   const [precheck, setPrecheck] = useState<CustomerImportPrecheckResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [syncMessage, setSyncMessage] = useState('');
   const [destination, setDestination] = useState<CustomerImportDestination>('assigned');
 
   useEffect(() => {
@@ -72,6 +75,7 @@ export default function CustomerImportDialog({ open, onClose, onQueued }: Props)
     setRows([]);
     setPrecheck(null);
     setError('');
+    setSyncMessage('');
     setDestination('assigned');
     customerDataExchangeApi.templateOptions().then((response) => {
       if (!active) return;
@@ -89,6 +93,7 @@ export default function CustomerImportDialog({ open, onClose, onQueued }: Props)
     if (!options) return;
     setBusy(true);
     setError('');
+    setSyncMessage('');
     try {
       const fileName = destination === 'public_pool' ? '极享OS公海客户批量导入模板.xlsx' : '极享OS客户批量导入模板.xlsx';
       downloadBuffer(fileName, await createCustomerImportTemplateWorkbook(options, destination));
@@ -146,6 +151,28 @@ export default function CustomerImportDialog({ open, onClose, onQueued }: Props)
     } finally { setBusy(false); }
   };
 
+  const handleSyncConfigs = async (kind: 'lead_sources' | 'tags') => {
+    if (!precheck) return;
+    setBusy(true);
+    setError('');
+    setSyncMessage('');
+    try {
+      const response = await customerDataExchangeApi.syncImportConfigs(rows, destination, precheck.confirmationToken, kind);
+      if (response.code !== 0 || !response.data) throw new Error(response.message || '同步导入配置失败');
+      const [optionResponse, precheckResponse] = await Promise.all([
+        customerDataExchangeApi.templateOptions(),
+        customerDataExchangeApi.precheckImport(rows, destination),
+      ]);
+      if (optionResponse.code === 0 && optionResponse.data) setOptions(optionResponse.data);
+      if (precheckResponse.code !== 0 || !precheckResponse.data) throw new Error(precheckResponse.message || '同步后重新预检失败');
+      setPrecheck(precheckResponse.data);
+      const changed = response.data.createdCount + response.data.updatedCount;
+      setSyncMessage(`${kind === 'lead_sources' ? '线索来源' : '客户标签'}同步完成：处理 ${changed} 项，已自动重新预检。`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '同步导入配置失败');
+    } finally { setBusy(false); }
+  };
+
   const downloadErrors = async () => {
     const failed = visibleRows.filter((row) => row.status === 'blocked' || row.status === 'failed');
     if (!failed.length) return;
@@ -157,7 +184,11 @@ export default function CustomerImportDialog({ open, onClose, onQueued }: Props)
     setDestination(next);
     setPrecheck(null);
     setError('');
+    setSyncMessage('');
   };
+
+  const missingLeadSources = precheck?.missingLeadSources || [];
+  const missingTagNames = precheck?.missingTagNames || [];
 
   return (
     <Dialog open={open} onClose={busy ? undefined : onClose} maxWidth="lg" fullWidth>
@@ -187,12 +218,63 @@ export default function CustomerImportDialog({ open, onClose, onQueued }: Props)
             ) : null}
           </Paper>
           {error ? <Alert severity="error">{error}</Alert> : null}
+          {syncMessage ? <Alert severity="success">{syncMessage}</Alert> : null}
           {precheck ? (
             <Alert severity={precheck.blockedCount ? 'warning' : 'success'}>
               预检完成：可导入 {precheck.readyCount} 条，阻止 {precheck.blockedCount} 条
               {suspectedDuplicateCount ? `，其中 ${suspectedDuplicateCount} 条客户名称疑似重复（仅提醒）` : ''}。
               确认后将进入后台任务并写入{destination === 'public_pool' ? '公海池' : '客户列表'}。
             </Alert>
+          ) : null}
+          {precheck && (missingLeadSources.length || missingTagNames.length) ? (
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Stack spacing={1.5}>
+                <Box>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>基础资料预同步</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    仅同步本次 Excel 中系统尚未配置的来源和标签；同步后系统会自动重新预检。
+                  </Typography>
+                </Box>
+                {missingLeadSources.length ? (
+                  <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }} justifyContent="space-between">
+                    <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+                      <Typography variant="body2" sx={{ fontWeight: 700, alignSelf: 'center' }}>缺失来源：</Typography>
+                      {missingLeadSources.slice(0, 20).map((item) => <Chip key={item.label} size="small" label={item.label} color="warning" variant="outlined" />)}
+                      {missingLeadSources.length > 20 ? <Chip size="small" label={`另有 ${missingLeadSources.length - 20} 项`} /> : null}
+                    </Stack>
+                    <Button
+                      variant="outlined"
+                      startIcon={<SourceOutlinedIcon />}
+                      disabled={busy || !precheck.canSyncLeadSources}
+                      onClick={() => void handleSyncConfigs('lead_sources')}
+                    >
+                      同步缺失来源
+                    </Button>
+                  </Stack>
+                ) : null}
+                {missingTagNames.length ? (
+                  <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }} justifyContent="space-between">
+                    <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+                      <Typography variant="body2" sx={{ fontWeight: 700, alignSelf: 'center' }}>缺失标签：</Typography>
+                      {missingTagNames.slice(0, 20).map((name) => <Chip key={name} size="small" label={name} color="warning" variant="outlined" />)}
+                      {missingTagNames.length > 20 ? <Chip size="small" label={`另有 ${missingTagNames.length - 20} 项`} /> : null}
+                    </Stack>
+                    <Button
+                      variant="outlined"
+                      startIcon={<LabelOutlinedIcon />}
+                      disabled={busy || !precheck.canSyncTags}
+                      onClick={() => void handleSyncConfigs('tags')}
+                    >
+                      同步缺失标签
+                    </Button>
+                  </Stack>
+                ) : null}
+                {(((missingLeadSources.length && !precheck.canSyncLeadSources)
+                  || (missingTagNames.length && !precheck.canSyncTags))) ? (
+                  <Alert severity="warning">当前账号缺少对应的系统设置权限，请联系系统管理员同步后重新预检。</Alert>
+                ) : null}
+              </Stack>
+            </Paper>
           ) : null}
           <Paper variant="outlined" sx={{ p: 2, bgcolor: '#f8fafc' }}>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }}>

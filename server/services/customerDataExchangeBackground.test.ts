@@ -42,6 +42,8 @@ const service = createCustomerDataExchangeService({
   readCustomers: async () => [],
   recordExportAudit: async () => undefined,
   persistImportPrecheck: async () => undefined,
+  syncLeadSources: async (items: any[]) => ({ createdCount: items.length, updatedCount: 0 }),
+  syncTags: async (names: string[]) => ({ createdCount: names.length, updatedCount: 0 }),
 } as any);
 
 const precheck = await service.precheckImport(rows, 'assigned', user);

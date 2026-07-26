@@ -21,6 +21,8 @@ const user: AuthenticatedUser = {
 const exportAudit: unknown[] = [];
 const persistedTokens = new Set<string>();
 const queuedEvents: any[] = [];
+const syncedSources: any[] = [];
+const syncedTags: string[] = [];
 const queuedJob = {
   id: 'import-job-1', actorId: 'u1', actorName: '销售甲', handlerKey: 'customer_import', operation: 'import' as const,
   status: 'queued' as const, selectionMode: 'file_rows' as const, frozenCustomerCount: 1, totalCount: 1,
@@ -47,6 +49,8 @@ const service = createCustomerDataExchangeService({
   }],
   recordExportAudit: async (event) => { exportAudit.push(event); },
   persistImportPrecheck: async (event) => { persistedTokens.add(event.token); },
+  syncLeadSources: async (items) => { syncedSources.push(...items); return { createdCount: items.length, updatedCount: 0 }; },
+  syncTags: async (names) => { syncedTags.push(...names); return { createdCount: names.length, updatedCount: 0 }; },
 });
 
 const importRows = [{
@@ -85,6 +89,38 @@ await assert.rejects(
 const precheck = await service.precheckImport(importRows, 'assigned', user);
 assert.equal(precheck.readyCount, 1);
 assert.match(precheck.confirmationToken, /^cx1\./);
+
+const configUser: AuthenticatedUser = {
+  ...user,
+  permissions: [
+    ...(user.permissions || []),
+    { module: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS, actions: ['read', 'write'] },
+  ],
+};
+const rowsWithMissingConfigs = [{ ...importRows[0], leadSource: '直播部-视频号01', tagNames: '重点客户、历史成交' }];
+const missingConfigPrecheck = await service.precheckImport(rowsWithMissingConfigs, 'assigned', configUser);
+assert.deepEqual(missingConfigPrecheck.missingLeadSources, [{ leadSource: '直播部', sourceName: '视频号01', label: '直播部-视频号01' }]);
+assert.deepEqual(missingConfigPrecheck.missingTagNames, ['历史成交', '重点客户']);
+assert.equal(missingConfigPrecheck.canSyncLeadSources, true);
+assert.equal(missingConfigPrecheck.canSyncTags, true);
+assert.equal(missingConfigPrecheck.blockedCount, 1);
+await service.syncImportConfigs({ rows: rowsWithMissingConfigs, destination: 'assigned', confirmationToken: missingConfigPrecheck.confirmationToken, kind: 'lead_sources' }, configUser);
+await service.syncImportConfigs({ rows: rowsWithMissingConfigs, destination: 'assigned', confirmationToken: missingConfigPrecheck.confirmationToken, kind: 'tags' }, configUser);
+assert.equal(syncedSources[0]?.label, '直播部-视频号01');
+assert.deepEqual(syncedTags, ['历史成交', '重点客户']);
+await assert.rejects(
+  () => service.syncImportConfigs({ rows: [{ ...rowsWithMissingConfigs[0], tagNames: '被篡改' }], destination: 'assigned', confirmationToken: missingConfigPrecheck.confirmationToken, kind: 'tags' }, configUser),
+  /预检内容不一致/,
+);
+await assert.rejects(
+  () => service.syncImportConfigs({ rows: rowsWithMissingConfigs, destination: 'assigned', confirmationToken: missingConfigPrecheck.confirmationToken, kind: 'tags' }, user),
+  /无权同步客户标签/,
+);
+
+const slashSourceRows = [{ ...importRows[0], leadSource: '直播部/视频号01' }];
+const slashSourcePrecheck = await service.precheckImport(slashSourceRows, 'assigned', configUser);
+assert.deepEqual(slashSourcePrecheck.missingLeadSources, [{ leadSource: '直播部', sourceName: '视频号01', label: '直播部-视频号01' }]);
 
 const confirmed = await service.confirmImport({ rows: importRows, destination: 'assigned', confirmationToken: precheck.confirmationToken }, user);
 assert.equal(confirmed.successCount, 0);
