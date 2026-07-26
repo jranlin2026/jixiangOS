@@ -38,6 +38,5 @@ export function deriveOrderSettlementProgress(commissions: Commission[]): Commis
 }
 
 export function deriveOrderListSettlementProgress(commissions: Commission[]): OrderSettlementProgress {
-  const status = deriveOrderSettlementProgress(commissions);
-  return status === '待处理' ? '待分账' : status;
+  return deriveOrderSettlementProgress(commissions);
 }

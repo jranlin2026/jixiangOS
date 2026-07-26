@@ -225,9 +225,25 @@ function applyFilters(applications: OrderApplication[], filters?: OrderApplicati
   if (filters?.applicantName) filtered = filtered.filter((item) => item.applicantName === filters.applicantName);
   if (filters?.reviewerName) filtered = filtered.filter((item) => item.reviewerName === filters.reviewerName);
   if (filters?.startDate) filtered = filtered.filter((item) => item.submittedAt >= filters.startDate!);
-  if (filters?.endDate) filtered = filtered.filter((item) => item.submittedAt <= filters.endDate!);
+  if (filters?.endDate) {
+    const endDate = filters.endDate.length === 10 ? `${filters.endDate}T23:59:59.999Z` : filters.endDate;
+    filtered = filtered.filter((item) => item.submittedAt <= endDate);
+  }
+  const getPaymentDate = (item: OrderApplication) => item.orderData.payments?.[0]?.paidAt || item.createdAt;
+  if (filters?.paymentStartDate) filtered = filtered.filter((item) => getPaymentDate(item) >= filters.paymentStartDate!);
+  if (filters?.paymentEndDate) {
+    const paymentEndDate = filters.paymentEndDate.length === 10
+      ? `${filters.paymentEndDate}T23:59:59.999Z`
+      : filters.paymentEndDate;
+    filtered = filtered.filter((item) => getPaymentDate(item) <= paymentEndDate);
+  }
   if (filters?.importBatchId) filtered = filtered.filter((item) => item.importBatchId === filters.importBatchId);
-  return filtered.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  return filtered.sort((a, b) => {
+    const aValue = filters?.sortBy === 'paymentDate' ? getPaymentDate(a) : a.createdAt;
+    const bValue = filters?.sortBy === 'paymentDate' ? getPaymentDate(b) : b.createdAt;
+    const direction = filters?.sortDirection === 'asc' ? 1 : -1;
+    return direction * (new Date(aValue).getTime() - new Date(bValue).getTime()) || a.id.localeCompare(b.id);
+  });
 }
 
 async function fetchOrderApplications(

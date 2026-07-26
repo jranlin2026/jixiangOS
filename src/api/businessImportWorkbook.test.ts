@@ -13,7 +13,7 @@ import {
   validateBusinessImportFile,
 } from './businessImportWorkbook';
 import type { BusinessImportTemplateOptions } from '../types/businessImport';
-import type { OrderImportRow } from '../types/businessImport';
+import type { OrderImportRow, RecoveryImportRow } from '../types/businessImport';
 
 const options: BusinessImportTemplateOptions = {
   products: [{ id: 'p1', name: '增长训练营', level: '标准版' }],
@@ -60,6 +60,7 @@ assert.match(recoverySheet.getCell('F2').numFmt, /0\.00/);
 assert.match(recoverySheet.getCell('G2').numFmt, /yyyy/);
 assert.equal(recoverySheet.getCell('B2').numFmt, '@');
 assert.equal(recoverySheet.getCell('D2').numFmt, '@');
+assert.ok(RECOVERY_IMPORT_HEADERS.includes('原产品付款金额'));
 assert.ok(RECOVERY_IMPORT_HEADERS.includes('挽回凭证文件名'));
 
 const xlsxMime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -106,6 +107,17 @@ numericPhoneSheet.getCell('B2').numFmt = '@';
 const parsedNumericPhone = await parseBusinessImportWorkbook('orders', await numericPhoneWorkbook.xlsx.writeBuffer());
 assert.equal(parsedNumericPhone[0]?.customerPhone, '17791873333',
   'Excel/WPS may persist a valid 11-digit phone as a safe integer even when the cell number format is text');
+
+const parsedNumericOrderIdentifier = await parseBusinessImportWorkbook('orders', await workbookBuffer(
+  '订单导入模板',
+  ORDER_IMPORT_HEADERS,
+  [[
+    '客户乙', 17791873333, '', '增长训练营', '新购', 900, '企业微信转账',
+    '2026-07-24 10:30:00', '销售甲', '', 123456, '', '', '', '',
+  ]],
+));
+assert.equal(parsedNumericOrderIdentifier[0]?.customerPhone, '17791873333');
+assert.equal(parsedNumericOrderIdentifier[0]?.thirdPartyOrderNo, '123456');
 
 const excelDateRows = [
   [...validOrderRowForDate(), new Date(Date.UTC(2026, 6, 24, 10, 30, 0))],
@@ -219,6 +231,31 @@ assert.deepEqual(parsedRecovery[0], {
   paymentOrderNo: '0000999', paymentAt: '2026-07-20 09:00', assistUserName: '销售乙', creatorName: '', remark: '再次成交',
   recoveryEvidenceFileNames: '挽回01.jpg;挽回02.webp',
 });
+
+const parsedNumericRecoveryIdentifiers = await parseBusinessImportWorkbook('recovery_orders', await workbookBuffer(
+  '售后挽回订单导入模板',
+  RECOVERY_IMPORT_HEADERS,
+  [[
+    '客户丙', 17791873333, '', 789, '旧课程', 800, '2026-07-24', '销售甲',
+    '', '', 1200, '', '', '', '', '', '', '',
+  ]],
+));
+assert.equal(parsedNumericRecoveryIdentifiers[0]?.customerPhone, '17791873333');
+assert.equal(parsedNumericRecoveryIdentifiers[0]?.thirdPartyOrderNo, '789');
+assert.equal((parsedNumericRecoveryIdentifiers[0] as RecoveryImportRow).originalAmount, 1200);
+
+const legacyRecoveryHeaders = RECOVERY_IMPORT_HEADERS.map((header) => (
+  header === '原产品付款金额' ? '原付款金额' : header
+));
+const parsedLegacyRecovery = await parseBusinessImportWorkbook('recovery_orders', await workbookBuffer(
+  '售后挽回订单导入模板',
+  legacyRecoveryHeaders,
+  [[
+    '客户丁', '', 'wx_legacy', 'LEGACY-1', '旧课程', 800, '2026-07-24', '销售甲',
+    '', '', 1200, '', '', '', '', '', '', '',
+  ]],
+));
+assert.equal((parsedLegacyRecovery[0] as RecoveryImportRow).originalAmount, 1200, '旧模板的“原付款金额”表头仍应可导入');
 
 const packageOrderWorkbook = await workbookBuffer('订单导入模板', ORDER_IMPORT_HEADERS, [[
   '客户丙', '13800000000', '', '增长训练营', '新购', 399, '企业微信转账',

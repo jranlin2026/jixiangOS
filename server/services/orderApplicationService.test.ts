@@ -105,7 +105,12 @@ function application(overrides: Partial<OrderApplication> = {}): OrderApplicatio
       owner: '销售小王',
       salesId: 'user-sales',
       salesName: '销售小王',
-      payments: [],
+      payments: [{
+        id: 'payment-1',
+        amount: 899,
+        paymentMethod: '对公转账',
+        paidAt: NOW,
+      }],
     },
     applicantId: 'user-sales',
     applicantName: '销售小王',
@@ -723,6 +728,81 @@ const deferredEffects: OrderApprovalEffectState = {
   assert.equal(invalid.code, 400);
   assert.equal(missingProduct.code, 409);
   assert.equal(invalidListAmount.code, 400);
+}
+
+{
+  const prisma = new FakePrisma();
+  const service = createOrderApplicationService(prisma as any, { now: () => new Date(NOW) });
+  const emptyPayments = await service.submit({
+    ...application().orderData,
+    productId: 'product-1',
+    payments: [],
+  }, salesApplicant);
+  const mismatchedPayments = await service.submit({
+    ...application().orderData,
+    productId: 'product-1',
+    payments: [{ id: 'payment-1', amount: 1, paymentMethod: '对公转账', paidAt: NOW }],
+  }, salesApplicant);
+  const invalidPaymentDate = await service.submit({
+    ...application().orderData,
+    productId: 'product-1',
+    payments: [{ id: 'payment-1', amount: 899, paymentMethod: '对公转账', paidAt: 'not-a-date' }],
+  }, salesApplicant);
+
+  assert.equal(emptyPayments.code, 400);
+  assert.match(emptyPayments.message, /至少填写一笔付款/);
+  assert.equal(mismatchedPayments.code, 400);
+  assert.match(mismatchedPayments.message, /合计必须等于.*实付金额/);
+  assert.equal(invalidPaymentDate.code, 400);
+  assert.match(invalidPaymentDate.message, /付款时间无效/);
+}
+
+{
+  const prisma = new FakePrisma();
+  const productRow = prisma.rows.get(rowKey(STORAGE_KEYS.PRODUCTS, 'product-1'))!;
+  productRow.data.price = 0;
+  const result = await createOrderApplicationService(prisma as any, { now: () => new Date(NOW) }).submit({
+    ...application().orderData,
+    productId: 'product-1',
+    amount: 1,
+    actualAmount: 1,
+    payments: [{ id: 'payment-1', amount: 1, paymentMethod: '对公转账', paidAt: NOW }],
+  }, salesApplicant);
+
+  assert.equal(result.code, 400);
+  assert.match(result.message, /产品总计/);
+}
+
+{
+  const prisma = new FakePrisma();
+  prisma.rows.set(rowKey(STORAGE_KEYS.PRODUCTS, 'product-2'), {
+    id: `${STORAGE_KEYS.PRODUCTS}:product-2`,
+    domain: STORAGE_KEYS.PRODUCTS,
+    recordId: 'product-2',
+    data: {
+      id: 'product-2', name: '29800贴牌', level: '贴牌', price: 29800,
+      description: '', features: [], deliveryStages: ['交付'], isActive: true,
+      sortOrder: 2, createdAt: NOW, updatedAt: NOW,
+    },
+  });
+  const result = await createOrderApplicationService(prisma as any, { now: () => new Date(NOW) }).submit({
+    ...application().orderData,
+    productId: 'product-1',
+    amount: 1,
+    actualAmount: 30000,
+    payments: [{ id: 'payment-1', amount: 30000, paymentMethod: '对公转账', paidAt: NOW }],
+    items: [
+      { productId: 'product-1', quantity: 2, isPrimary: true } as any,
+      { productId: 'product-2', quantity: 1 } as any,
+    ],
+  }, salesApplicant);
+
+  assert.equal(result.code, 0);
+  assert.equal(result.data?.orderData.standardTotalAmount, 31598);
+  assert.equal(result.data?.orderData.amount, 31598, '订单标准金额必须由后端产品价格计算');
+  assert.equal(result.data?.orderData.items?.length, 2);
+  assert.equal(result.data?.orderData.productName, '数据库产品', 'legacy 字段应投影主产品');
+  assert.equal(result.data?.orderData.items?.reduce((sum, item) => sum + Number(item.allocatedActualAmount || 0), 0), 30000);
 }
 
 {

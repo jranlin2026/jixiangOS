@@ -39,7 +39,7 @@ import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPagin
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog, { type TableViewColumnConfig } from '../../shared/components/TableViewSettingsDialog';
 import { useTableViewConfig } from '../../shared/hooks/useTableViewConfig';
-import type { Commission, CommissionPayoutPlan, CommissionRoleConfig } from '../../types/commission';
+import type { Commission, CommissionPayoutPlan, CommissionRoleConfig, SettlementStatus, SimpleCommissionRuleGroup } from '../../types/commission';
 import type { RecoveryOrder, RecoveryOrderSettlementStatus, RecoverySettlementInput } from '../../types/recoveryOrder';
 import type { Department } from '../../types/department';
 import type { Position } from '../../types/position';
@@ -47,14 +47,17 @@ import type { User } from '../../types/settings';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { isSuperAdminRoleName } from '../../shared/utils/roles';
-import { StatusSegmentBar } from '../../shared/components/ModuleShell';
+import { moduleTablePaperSx, moduleTableSx, StatusSegmentBar } from '../../shared/components/ModuleShell';
 import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
 import BusinessAttachmentLinks from '../../shared/components/BusinessAttachmentLinks';
 import { getActiveCommissions } from '../../shared/utils/financeSettlementPresentation';
 import { getRecoveryEvidenceAttachments } from '../../shared/utils/recoveryEvidence';
+import { buildCommissionPayoutPlanSnapshot } from '../../shared/utils/commissionConfiguration';
 import BusinessExportDialog, { type BusinessExportDialogRequest } from '../../shared/components/BusinessExportDialog';
 import { buildBusinessExportBrowserRequest, unwrapBusinessExportResponse } from '../../shared/utils/businessExportPageRequest';
-import BusinessStatusChip from '../../shared/components/BusinessStatusChip';
+import SettlementStatusChip from '../../shared/components/SettlementStatusChip';
+import { SettlementCompactDetailItem, SettlementDetailCard } from '../../shared/components/SettlementDetailUi';
+import { SETTLEMENT_STATUSES, normalizeSettlementStatus } from '../../shared/utils/settlementStatus';
 
 const shell = {
   ink: '#0f172a',
@@ -83,7 +86,7 @@ function RecoveryEvidenceLinks({ order }: { order: RecoveryOrder }) {
   );
 }
 
-type RecoverySettlementFilterStatus = RecoveryOrderSettlementStatus | '全部' | '已发放';
+type RecoverySettlementFilterStatus = SettlementStatus | '全部';
 
 type SettlementRow = {
   role: string;
@@ -120,11 +123,7 @@ type SettlementDetailRow = {
 
 const STATUS_OPTIONS: Array<{ value: RecoverySettlementFilterStatus; label: string }> = [
   { value: '全部', label: '全部' },
-  { value: '待处理', label: '待处理' },
-  { value: '待确认', label: '待确认' },
-  { value: '待发放', label: '待发放' },
-  { value: '已发放', label: '已发放' },
-  { value: '已撤回', label: '已撤回' },
+  ...SETTLEMENT_STATUSES.map((value) => ({ value, label: value })),
 ];
 
 type RecoverySettlementColumnId =
@@ -258,6 +257,7 @@ interface RecoverySettlementProps {
   viewSettingsTrigger?: number;
   createSettlementTrigger?: number;
   exportTrigger?: number;
+  initialSearch?: string;
 }
 
 function formatPlan(plan: CommissionPayoutPlan): string {
@@ -273,11 +273,8 @@ function getPlanAmount(plan: CommissionPayoutPlan | undefined, baseAmount: numbe
   return 0;
 }
 
-function getSettlementStatus(order: RecoveryOrder): RecoveryOrderSettlementStatus {
-  const raw = String(order.settlementStatus || '');
-  if (raw === '待分账') return '待处理';
-  if (raw === '已分账') return '待发放';
-  return order.settlementStatus || (order.status === '已分账' ? '待发放' : order.status === '待分账' ? '待处理' : '未分账');
+function getSettlementStatus(order: RecoveryOrder): SettlementStatus {
+  return normalizeSettlementStatus(order.settlementStatus, '待处理');
 }
 
 function getStatusChipColor(status: RecoveryOrderSettlementStatus | string): 'default' | 'primary' | 'success' | 'error' | 'warning' | 'info' {
@@ -308,67 +305,36 @@ function getSourcePlatformShop(order: RecoveryOrder): string {
     .join(' / ');
 }
 
-function CompactDetailItem({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <Box
-      data-testid="recovery-settlement-compact-detail-item"
-      sx={{
-        display: 'grid',
-        gridTemplateColumns: { xs: '96px minmax(0, 1fr)', sm: '112px minmax(0, 1fr)' },
-        columnGap: 1,
-        alignItems: 'baseline',
-        minWidth: 0,
-        py: 0.35,
-      }}
-    >
-      <Typography variant="caption" sx={{ color: shell.muted, whiteSpace: 'nowrap' }}>{label}</Typography>
-      <Box sx={{ color: shell.ink, fontSize: 14, fontWeight: 800, lineHeight: 1.45, minWidth: 0, overflowWrap: 'anywhere' }}>
-        {children}
-      </Box>
-    </Box>
-  );
-}
-
 function RecoverySettlementBusinessPaymentSummary({ order }: { order: RecoveryOrder }) {
   return (
     <Box
       data-testid="recovery-settlement-business-payment-summary"
       sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 1.5 }}
     >
-      <Paper
-        data-testid="recovery-source-business-card"
-        elevation={0}
-        sx={{ border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5, bgcolor: '#fff' }}
-      >
-        <Typography variant="subtitle2" sx={{ color: shell.ink, fontWeight: 900, mb: 0.75 }}>源业务资料</Typography>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, columnGap: 2, rowGap: 0.25 }}>
-          <CompactDetailItem label="客户">{order.customerName || '-'}</CompactDetailItem>
-          <CompactDetailItem label="第三方平台订单">{order.thirdPartyOrderNo || '-'}</CompactDetailItem>
-          <CompactDetailItem label="来源平台 / 店铺">{getSourcePlatformShop(order) || '-'}</CompactDetailItem>
-          <CompactDetailItem label="原产品">{order.originalProduct || '-'}</CompactDetailItem>
-          <CompactDetailItem label="原产品等级">{order.originalProductLevel || '-'}</CompactDetailItem>
-          <CompactDetailItem label="原付款金额">{formatCurrency(order.originalAmount)}</CompactDetailItem>
-          <CompactDetailItem label="挽回人员">{order.recoveryUserName || '-'}</CompactDetailItem>
-          <CompactDetailItem label="订单创建人">{order.createdByName || '-'}</CompactDetailItem>
+      <SettlementDetailCard title="源业务资料" testId="recovery-source-business-card">
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, columnGap: 2, rowGap: 0.1 }}>
+          <SettlementCompactDetailItem label="客户">{order.customerName || '-'}</SettlementCompactDetailItem>
+          <SettlementCompactDetailItem label="第三方平台订单">{order.thirdPartyOrderNo || '-'}</SettlementCompactDetailItem>
+          <SettlementCompactDetailItem label="来源平台 / 店铺">{getSourcePlatformShop(order) || '-'}</SettlementCompactDetailItem>
+          <SettlementCompactDetailItem label="原产品">{order.originalProduct || '-'}</SettlementCompactDetailItem>
+          <SettlementCompactDetailItem label="原产品等级">{order.originalProductLevel || '-'}</SettlementCompactDetailItem>
+          <SettlementCompactDetailItem label="原付款金额">{formatCurrency(order.originalAmount)}</SettlementCompactDetailItem>
+          <SettlementCompactDetailItem label="挽回人员">{order.recoveryUserName || '-'}</SettlementCompactDetailItem>
+          <SettlementCompactDetailItem label="订单创建人">{order.createdByName || '-'}</SettlementCompactDetailItem>
         </Box>
-      </Paper>
+      </SettlementDetailCard>
 
-      <Paper
-        data-testid="recovery-payment-card"
-        elevation={0}
-        sx={{ border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5, bgcolor: '#fff' }}
-      >
-        <Typography variant="subtitle2" sx={{ color: shell.ink, fontWeight: 900, mb: 0.75 }}>付款资料</Typography>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, columnGap: 2, rowGap: 0.25 }}>
-          <CompactDetailItem label="挽回成交金额">{formatCurrency(order.recoveryAmount)}</CompactDetailItem>
-          <CompactDetailItem label="官方收款渠道">{order.officialPaymentChannel || '-'}</CompactDetailItem>
-          <CompactDetailItem label="付款订单号">{order.paymentOrderNo || '-'}</CompactDetailItem>
-          <CompactDetailItem label="付款时间">{order.paymentAt ? formatDate(order.paymentAt, 'yyyy-MM-dd HH:mm') : '-'}</CompactDetailItem>
+      <SettlementDetailCard title="付款资料" testId="recovery-payment-card">
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, columnGap: 2, rowGap: 0.1 }}>
+          <SettlementCompactDetailItem label="挽回成交金额">{formatCurrency(order.recoveryAmount)}</SettlementCompactDetailItem>
+          <SettlementCompactDetailItem label="官方收款渠道">{order.officialPaymentChannel || '-'}</SettlementCompactDetailItem>
+          <SettlementCompactDetailItem label="付款订单号">{order.paymentOrderNo || '-'}</SettlementCompactDetailItem>
+          <SettlementCompactDetailItem label="付款时间">{order.paymentAt ? formatDate(order.paymentAt, 'yyyy-MM-dd HH:mm') : '-'}</SettlementCompactDetailItem>
           <Box sx={{ gridColumn: { sm: '1 / -1' } }}>
-            <CompactDetailItem label="挽回凭证"><RecoveryEvidenceLinks order={order} /></CompactDetailItem>
+            <SettlementCompactDetailItem label="挽回凭证"><RecoveryEvidenceLinks order={order} /></SettlementCompactDetailItem>
           </Box>
         </Box>
-      </Paper>
+      </SettlementDetailCard>
     </Box>
   );
 }
@@ -377,6 +343,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   viewSettingsTrigger = 0,
   createSettlementTrigger = 0,
   exportTrigger = 0,
+  initialSearch = '',
 }) => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const canManageRecoverySettlement = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'write');
@@ -386,18 +353,19 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [total, setTotal] = useState(0);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(initialSearch);
   const [status, setStatus] = useState<RecoverySettlementFilterStatus>('全部');
   const [recoveryUserId, setRecoveryUserId] = useState('');
   const [recoveryStartDate, setRecoveryStartDate] = useState('');
   const [recoveryEndDate, setRecoveryEndDate] = useState('');
-  const [sortBy, setSortBy] = useState<'updatedAt' | 'recoveryAt'>('recoveryAt');
+  const [sortBy, setSortBy] = useState<'updatedAt' | 'createdAt' | 'recoveryAt'>('createdAt');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
   const [roles, setRoles] = useState<CommissionRoleConfig[]>([]);
   const [plans, setPlans] = useState<CommissionPayoutPlan[]>([]);
+  const [ruleGroups, setRuleGroups] = useState<SimpleCommissionRuleGroup[]>([]);
   const [settlementCommissions, setSettlementCommissions] = useState<Commission[]>([]);
   const [detailOrder, setDetailOrder] = useState<RecoveryOrder | null>(null);
   const [sourceDetailOrder, setSourceDetailOrder] = useState<RecoveryOrder | null>(null);
@@ -462,17 +430,40 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       || '';
   }, [activeUsers]);
 
-  const getDefaultSettlementRow = useCallback((order: RecoveryOrder): SettlementRow => ({
-    ...emptyRow,
-    ownerId: getDefaultRecoveryOwnerId(order),
-    performanceAmount: String(order.recoveryAmount || 0),
-    calculationNote: '默认带入挽回人员，财务确认方案和金额后保存。',
-  }), [getDefaultRecoveryOwnerId]);
+  const getDefaultSettlementRow = useCallback((order: RecoveryOrder): SettlementRow => {
+    const recoveryRule = ruleGroups.find((group) => (
+      group.isActive && group.businessSource === 'after_sales_recovery'
+    ));
+    const payout = recoveryRule?.payouts.find((item) => item.role === DEFAULT_RECOVERY_ROLE)
+      || recoveryRule?.payouts[0];
+    const plan = activePlans.find((item) => item.id === payout?.payoutPlanId);
+    const performanceAmount = Number(order.recoveryAmount || 0);
+    const configuredOwnerId = payout?.assigneeSource === 'recovery_assistant'
+      ? order.assistUserId
+      : payout?.assigneeSource === 'business_creator'
+        ? order.createdBy
+        : payout?.assigneeSource === 'manual'
+          ? ''
+          : order.recoveryUserId;
+    return {
+      ...emptyRow,
+      role: payout?.role || DEFAULT_RECOVERY_ROLE,
+      ownerId: payout?.assigneeSource === 'manual'
+        ? ''
+        : configuredOwnerId || getDefaultRecoveryOwnerId(order),
+      payoutPlanId: plan?.id || CUSTOM_PLAN_ID,
+      commissionAmount: String(plan ? getPlanAmount(plan, performanceAmount) : 0),
+      performanceAmount: String(performanceAmount),
+      calculationNote: plan
+        ? `按售后挽回分账规则「${recoveryRule?.name}」自动带入，财务确认后保存。`
+        : '默认带入挽回人员，财务确认方案和金额后保存。',
+    };
+  }, [activePlans, getDefaultRecoveryOwnerId, ruleGroups]);
 
   const load = useCallback(async () => {
     const requestId = ++loadRequestRef.current;
     const readyStatuses = ['待处理', '待确认', '待发放', '已发放', '已撤回'] as const;
-    const [allRes, countsRes, directoryRes, rolesRes, plansRes, commissionRes] = await Promise.all([
+    const [allRes, countsRes, directoryRes, rolesRes, plansRes, groupsRes, commissionRes] = await Promise.all([
       recoveryOrderApi.fetchRecoveryOrders({
         search,
         settlementStatuses: status === '全部' ? [...readyStatuses] : [status],
@@ -495,6 +486,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       settingsApi.fetchAssignableDirectory(),
       commissionRuleApi.getCommissionRoleConfigs({ isActive: true }),
       commissionRuleApi.getCommissionPayoutPlans(),
+      commissionRuleApi.getSimpleCommissionRuleGroups(),
       commissionApi.fetchCommissions({ page: 1, pageSize: 5000 }),
     ]);
     if (requestId !== loadRequestRef.current) return;
@@ -510,6 +502,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     }
     if (rolesRes.code === 0) setRoles(rolesRes.data);
     if (plansRes.code === 0) setPlans(plansRes.data);
+    if (groupsRes.code === 0) setRuleGroups(groupsRes.data);
     if (commissionRes.code === 0) setSettlementCommissions(commissionRes.data.items);
   }, [page, recoveryEndDate, recoveryStartDate, recoveryUserId, rowsPerPage, search, sortBy, sortDirection, status]);
 
@@ -706,7 +699,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     setRecoveryUserId('');
     setRecoveryStartDate('');
     setRecoveryEndDate('');
-    setSortBy('recoveryAt');
+    setSortBy('createdAt');
     setSortDirection('desc');
     setPage(0);
   };
@@ -848,17 +841,26 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     if (!selected || !currentUser) return;
     const payload: RecoverySettlementInput[] = settlementRows.map((row) => {
       const plan = activePlans.find((item) => item.id === row.payoutPlanId);
+      const roleConfig = activeRoles.find((item) => item.name === row.role);
       const isCustom = row.payoutPlanId === CUSTOM_PLAN_ID;
       return {
         role: row.role,
+        roleId: roleConfig?.id,
+        roleCode: roleConfig?.code,
+        roleNameSnapshot: roleConfig?.name || row.role,
         ownerId: row.ownerId,
         payoutPlanId: isCustom ? undefined : row.payoutPlanId,
         payoutPlanName: isCustom ? '自定义金额' : plan?.name,
+        payoutPlanVersion: isCustom ? undefined : plan?.version,
+        payoutPlanSnapshot: !isCustom && plan ? buildCommissionPayoutPlanSnapshot(plan) : undefined,
         commissionAmount: Number(row.commissionAmount) || 0,
         performanceAmount: Number(row.performanceAmount) || selected.recoveryAmount,
         commissionRate: plan?.commissionType === 'percentage' ? plan.commissionValue / 100 : 0,
         calculationNote: row.calculationNote,
         ruleCalculationType: isCustom ? 'fixed' : plan?.commissionType,
+        tierSnapshot: !isCustom && plan?.commissionType === 'tiered_percentage'
+          ? { tiers: plan.tiers || [], baseAmount: Number(row.performanceAmount) || selected.recoveryAmount, gapToNext: 0 }
+          : undefined,
       };
     });
     if (payload.some((row) => !row.role || !row.ownerId)) {
@@ -1011,7 +1013,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                 border: 0,
                 bgcolor: 'transparent',
                 font: 'inherit',
-                fontWeight: 900,
+                fontWeight: 700,
                 color: shell.blue,
                 cursor: 'pointer',
                 textAlign: 'left',
@@ -1024,7 +1026,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
           </Stack>
         );
       case 'customerName':
-        return <Typography variant="body2" sx={{ fontWeight: 800 }}>{row.customerName || '-'}</Typography>;
+        return <Typography variant="body2" sx={{ fontWeight: 500 }}>{row.customerName || '-'}</Typography>;
       case 'thirdPartyOrderNo':
         return row.thirdPartyOrderNo || '-';
       case 'sourcePlatformShop':
@@ -1068,7 +1070,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       case 'auditorName':
         return row.auditorName || '-';
       case 'status':
-        return <BusinessStatusChip status={settlementStatus} />;
+        return <SettlementStatusChip status={settlementStatus} />;
       case 'auditedAt':
         return row.auditedAt ? formatDate(row.auditedAt, 'yyyy-MM-dd HH:mm') : '-';
       case 'remark':
@@ -1226,16 +1228,18 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
           </Button>
       </Stack>
 
-      <TableContainer component={Paper} elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: '6px 6px 0 0', overflowX: 'auto' }}>
+      <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { borderRadius: '6px 6px 0 0', overflowX: 'auto' }]}>
         <Table
           size="small"
-          sx={{
-            tableLayout: 'fixed',
-            width: recoverySettlementTableWidth,
-            minWidth: recoverySettlementTableWidth,
-            '& .MuiTableCell-root': { py: 1, height: 44 },
-            '& .MuiTableHead-root .MuiTableCell-root': { bgcolor: '#f1f5f9', fontWeight: 800 },
-          }}
+          sx={[
+            moduleTableSx,
+            {
+              tableLayout: 'fixed',
+              width: recoverySettlementTableWidth,
+              minWidth: recoverySettlementTableWidth,
+              '& .MuiTableCell-root': { py: 1, height: 44, fontSize: 13 },
+            },
+          ]}
         >
           <TableHead>
             <TableRow>
@@ -1410,7 +1414,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                       <Typography variant="h6" sx={{ color: shell.ink, fontWeight: 900, letterSpacing: 0 }}>
                         {detailOrder.recoveryNo}
                       </Typography>
-                      <BusinessStatusChip status={getSettlementStatus(detailOrder)} />
+                      <SettlementStatusChip status={getSettlementStatus(detailOrder)} />
                       {isSourceRecoveryDeleted(detailOrder) && <Chip label="源挽回单已删除" size="small" />}
                     </Stack>
                     <Typography variant="body2" sx={{ color: shell.muted, overflowWrap: 'anywhere' }}>
@@ -1806,7 +1810,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                       <Typography variant="h6" sx={{ color: shell.ink, fontWeight: 900, letterSpacing: 0 }}>
                         {selected.recoveryNo}
                       </Typography>
-                      <BusinessStatusChip status={getSettlementStatus(selected)} />
+                      <SettlementStatusChip status={getSettlementStatus(selected)} />
                     </Stack>
                     <Typography variant="body2" sx={{ color: shell.muted, overflowWrap: 'anywhere' }}>
                       {selected.customerName} · 售后挽回 · {selected.createdAt ? formatDate(selected.createdAt, 'yyyy-MM-dd HH:mm:ss') : '-'}

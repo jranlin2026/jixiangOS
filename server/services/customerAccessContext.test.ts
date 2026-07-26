@@ -98,6 +98,20 @@ assert.equal(invalid.canReadPublicPool, false);
 
 const globalOnly = await loadCustomerAccessContext(directory('all', [{ module: '全部', actions: ['admin', 'delete'] }]) as any, actor);
 assert.equal(globalOnly.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_TRANSFER), true, '非删除权限仍可由全局 admin 授予');
-assert.equal(globalOnly.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_DELETE), false, '客户删除必须遵守 Task 2 explicit-only 规则');
+assert.equal(globalOnly.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_DELETE), false, '普通角色的全局 admin 不得隐式获得客户删除权限');
+
+const superAdminRole = role('all', [{ module: '全部', actions: ['admin', 'delete'] }]);
+superAdminRole.code = 'super_admin';
+const superAdminDirectory = {
+  user: { findMany: async () => users },
+  role: { findMany: async () => [superAdminRole] },
+  department: { findMany: async () => departments },
+};
+const superAdminAccess = await loadCustomerAccessContext(superAdminDirectory as any, actor);
+assert.equal(
+  superAdminAccess.grantedPermissions.has(PERMISSION_KEYS.CUSTOMER_DELETE),
+  true,
+  '超级管理员必须能够单条删除无业务关联的客户',
+);
 
 console.log('customer access context tests passed');

@@ -60,6 +60,7 @@ import PermissionGate from '../../shared/auth/PermissionGate';
 import {
   CUSTOMER_BATCH_ACTION_PERMISSION_MAP,
   PERMISSION_KEYS,
+  hasPermission,
   hasExplicitPermission,
 } from '../../shared/utils/permissions';
 import useAuthStore from '../../store/useAuthStore';
@@ -383,7 +384,7 @@ const Customers: React.FC = () => {
     setProgress: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_SET_PROGRESS, 'write'),
     transfer: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_TRANSFER, 'write'),
     release: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_RELEASE_TO_POOL, 'write'),
-    delete: hasExplicitPermission(currentUser, PERMISSION_KEYS.CUSTOMER_DELETE, 'delete'),
+    delete: hasPermission(currentUser, PERMISSION_KEYS.CUSTOMER_DELETE, 'delete'),
   }), [currentUser]);
   const manageableOwnerIds = useMemo(
     () => buildManageableOwnerIds(currentUser?.id, manageableUsers),

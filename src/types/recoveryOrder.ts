@@ -1,13 +1,43 @@
 import type { ID, Timestamp } from './common';
 import type { DataScopeDomain } from './role';
 import type { BusinessAttachment } from './businessAttachment';
-import type { OfficialPaymentChannel } from './commission';
+import type { OfficialPaymentChannel, SettlementStatus } from './commission';
 import type { BusinessImportMetadata } from './businessImport';
 
 export type RecoveryOrderStatus = '待审核' | '退回修改' | '审核驳回' | '待分账' | '已分账';
-export type RecoveryOrderSettlementStatus = '未分账' | '待处理' | '待确认' | '待发放' | '已发放' | '已撤回';
+/** “未分账”仅用于兼容历史存储；对外展示必须归一化为五态分账状态。 */
+export type RecoveryOrderSettlementStatus = '未分账' | SettlementStatus;
 export type RecoveryOrderMatchStatus = '手工填写' | '已绑定客户' | '售后临时客户';
 export type RecoveryCrmIdentityStatus = '待识别' | '已匹配客户' | '已匹配线索' | '待创建线索' | '身份冲突' | '已创建线索';
+
+export type RecoveryOrderChangeAction = 'create' | 'edit' | 'correct' | 'review' | 'settlement' | 'delete';
+
+export interface RecoveryOrderChangeLog {
+  id: ID;
+  action: RecoveryOrderChangeAction;
+  operatorId?: ID;
+  operator: string;
+  changedAt: Timestamp;
+  reason?: string;
+  summary: string;
+  changes?: Array<{ field: string; label: string; before?: unknown; after?: unknown }>;
+}
+
+export type RecoveryOrderCorrectionBlockReason =
+  | 'not_approved'
+  | 'order_deleted'
+  | 'payout_started'
+  | 'settlement_processing'
+  | 'unsupported_settlement_status';
+
+export interface RecoveryOrderCorrectionPrecheck {
+  allowed: boolean;
+  reasonCode?: RecoveryOrderCorrectionBlockReason;
+  message: string;
+  commissionCount: number;
+  commissionStatuses: string[];
+  settlementStatus: RecoveryOrderSettlementStatus;
+}
 
 export interface RecoveryOrder extends Partial<BusinessImportMetadata> {
   id: ID;
@@ -91,8 +121,27 @@ export interface RecoveryOrder extends Partial<BusinessImportMetadata> {
   settlementCleanupReason?: string;
   createdBy: ID;
   createdByName: string;
+  changeHistory?: RecoveryOrderChangeLog[];
   createdAt: Timestamp;
   updatedAt: Timestamp;
+}
+
+/** 审核通过后的非核算资料编辑，不改变审核和分账状态。 */
+export interface RecoveryOrderMetadataEditInput {
+  sourcePlatform?: string;
+  sourcePlatformId?: ID;
+  sourcePlatformName?: string;
+  sourceShopId?: ID;
+  sourceShopName?: string;
+  paymentOrderNo?: string;
+  recoveryAttachments?: BusinessAttachment[];
+  remark?: string;
+}
+
+/** 正式售后挽回单更正；data 使用完整表单以便服务端重新执行全量校验。 */
+export interface RecoveryOrderCorrectionInput {
+  reason: string;
+  data: RecoveryOrderInput;
 }
 
 export interface RecoveryOrderInput {
@@ -173,9 +222,15 @@ export interface RecoveryOrderStats {
 
 export interface RecoverySettlementInput {
   role: string;
+  roleId?: ID;
+  roleCode?: string;
+  roleNameSnapshot?: string;
   ownerId: ID;
   payoutPlanId?: ID;
   payoutPlanName?: string;
+  payoutPlanVersion?: number;
+  payoutPlanSnapshot?: import('./commission').CommissionPayoutPlanSnapshot;
+  tierSnapshot?: import('./commission').CommissionTierSnapshot;
   commissionAmount: number;
   commissionRate?: number;
   performanceAmount?: number;

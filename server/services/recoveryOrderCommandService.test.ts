@@ -49,6 +49,8 @@ const reviewer: AuthenticatedUser = {
     { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST, actions: ['read'] },
     { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW, actions: ['read', 'write'] },
     { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, actions: ['read', 'delete'] },
+    { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CORRECT, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY, actions: ['read'] },
   ],
 };
 const superAdmin: AuthenticatedUser = {
@@ -155,7 +157,7 @@ class FakePrisma {
       recordId: outsideDepartmentRecord.id, status: outsideDepartmentRecord.status, data: clone(outsideDepartmentRecord),
     }],
   ]);
-  readonly user = { findMany: async () => [dbUser(creator), dbUser(other), dbUser(outsideDepartmentCreator), dbUser(staleReviewer), dbUser(reviewer), dbUser(finance)] };
+  readonly user = { findMany: async () => [dbUser(creator), dbUser(other), dbUser(outsideDepartmentCreator), dbUser(staleReviewer), dbUser(reviewer), dbUser(finance), dbUser(superAdmin)] };
   readonly role = { findMany: async () => [{
     id: 'role-delivery', name: '交付工程师', code: 'delivery_engineer', departmentId: 'dept-delivery',
     permissions: creator.permissions, dataScopes: { recoveryOrderApplications: 'self' }, memberCount: 2,
@@ -167,6 +169,10 @@ class FakePrisma {
   }, {
     id: 'role-finance', name: '财务专员', code: 'finance_specialist', departmentId: 'dept-finance',
     permissions: finance.permissions, dataScopes: { recoveryOrders: 'all' }, memberCount: 1,
+    isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW), description: null,
+  }, {
+    id: 'role-super-admin', name: '超级管理员', code: 'super_admin', departmentId: null,
+    permissions: superAdmin.permissions, dataScopes: { recoveryOrders: 'all', recoveryOrderApplications: 'all' }, memberCount: 1,
     isActive: true, createdAt: new Date(NOW), updatedAt: new Date(NOW), description: null,
   }, {
     id: 'role-stale-reviewer', name: 'customer-success-manager', code: 'customer_success_manager', departmentId: 'dept-delivery',
@@ -237,8 +243,21 @@ class FakePrisma {
         return clone(current);
       },
     },
-    $queryRaw: async (_strings: TemplateStringsArray, ...values: unknown[]) => {
-      const row = staged.get(key(String(values[0] || ''), String(values[1] || '')));
+    $queryRaw: async (query: { values?: unknown[] } | TemplateStringsArray, ...values: unknown[]) => {
+      const boundValues = Array.isArray((query as { values?: unknown[] })?.values)
+        ? (query as { values: unknown[] }).values
+        : values;
+      const domain = String(boundValues[0] || '');
+      const recordOrOrderId = String(boundValues[1] || '');
+      if (domain === STORAGE_KEYS.COMMISSIONS) {
+        const rows = Array.from(staged.values())
+          .filter((row: any) => row.domain === domain && row.orderId === recordOrOrderId)
+          .map((row: any) => ({ recordId: row.recordId, status: row.status, data: clone(row.data) }));
+        if (rows.length) return rows;
+        const direct = staged.get(key(domain, recordOrOrderId));
+        return direct ? [{ recordId: direct.recordId, status: direct.status, data: clone(direct.data) }] : [];
+      }
+      const row = staged.get(key(domain, recordOrOrderId));
       return row ? [clone(row)] : [];
     } };
     const result = await callback(tx);
@@ -279,11 +298,39 @@ const settledRealtime = await service.settle(realtimeSettlementOrder.id, [{
   commissionAmount: 30,
   performanceAmount: 200,
   ruleCalculationType: 'fixed',
+}, {
+  role: '挽回人员',
+  ownerId: finance.id,
+  payoutPlanId: 'plan-recovery-tiered',
+  payoutPlanName: '售后挽回阶梯奖',
+  payoutPlanVersion: 3,
+  payoutPlanSnapshot: {
+    id: 'plan-recovery-tiered',
+    name: '售后挽回阶梯奖',
+    version: 3,
+    commissionType: 'tiered_percentage',
+    commissionValue: 0,
+    tiers: [{ minAmount: 0, maxAmount: 10000, rate: 5 }, { minAmount: 10000, rate: 8 }],
+  },
+  tierSnapshot: {
+    tiers: [{ minAmount: 0, maxAmount: 10000, rate: 5 }, { minAmount: 10000, rate: 8 }],
+    baseAmount: 200,
+    gapToNext: 9800,
+  },
+  commissionAmount: 0,
+  performanceAmount: 200,
+  ruleCalculationType: 'tiered_percentage',
 }], '测试实时保存', finance);
 assert.equal(settledRealtime.code, 0);
 assert.equal(settledRealtime.data?.settlementStatus, '待确认');
 assert.equal(settledRealtime.data?.settlementHandledBy, finance.name);
 assert.equal(settledRealtime.data?.settlementHandledAt, NOW);
+const tieredRecoveryCommission = Array.from(prisma.rows.values())
+  .map((row: any) => row.data)
+  .find((row: any) => row?.payoutPlanId === 'plan-recovery-tiered');
+assert.equal(tieredRecoveryCommission?.role, '挽回人员');
+assert.equal(tieredRecoveryCommission?.commissionAmount, 0, '月度阶梯在月度汇总前不应按固定金额结算');
+assert.equal(tieredRecoveryCommission?.payoutPlanSnapshot?.version, 3, '售后挽回提成必须保留方案版本快照');
 assert.equal(
   (await service.list({ settlementStatuses: ['待确认'], page: 1, pageSize: 20 }, finance))
     .data?.items.some((item) => item.id === realtimeSettlementOrder.id),
@@ -309,6 +356,11 @@ assert.equal(
 );
 const realtimeCommission = Array.from(prisma.rows.values())
   .find((row: any) => row.domain === STORAGE_KEYS.COMMISSIONS && row.data?.sourceRecoveryOrderId === realtimeSettlementOrder.id);
+assert.equal(
+  realtimeCommission?.data.paymentDate,
+  realtimeSettlementOrder.recoveryAt,
+  '售后挽回提成必须按挽回成交时间归属员工提成月报，不能按审核或分账时间',
+);
 assert.equal(realtimeCommission?.data.status, '已撤回', '撤回必须同时更新关联提成状态');
 prisma.rows.delete(key(STORAGE_KEYS.RECOVERY_ORDERS, realtimeSettlementOrder.id));
 if (realtimeCommission) prisma.rows.delete(key(STORAGE_KEYS.COMMISSIONS, realtimeCommission.recordId));
@@ -366,9 +418,39 @@ const creatorList = await service.list({ page: 1, pageSize: 20 }, creator);
 assert.equal(creatorList.code, 0);
 assert.deepEqual(
   creatorList.data?.items.map((item) => item.id),
-  [created.data!.id],
-  '切换账号后必须从数据库读取，并且普通员工只能看到自己提交的售后挽回订单',
+  [outsideDepartmentRecord.id, created.data!.id].sort(),
+  '普通员工应能看到自己提交或由自己负责挽回的售后挽回订单',
 );
+assert.equal(
+  (await service.get(outsideDepartmentRecord.id, creator)).code,
+  0,
+  '挽回人员从列表进入后应能读取订单详情',
+);
+const assistedRecord: RecoveryOrder = {
+  ...oldRecord,
+  id: 'recovery-assisted-by-creator',
+  recoveryNo: 'RCV-ASSISTED-BY-CREATOR',
+  thirdPartyOrderNo: 'TP-ASSISTED-BY-CREATOR',
+  createdBy: outsideDepartmentCreator.id,
+  createdByName: outsideDepartmentCreator.name,
+  recoveryUserId: other.id,
+  recoveryUserName: other.name,
+  assistUserId: creator.id,
+  assistUserName: creator.name,
+};
+prisma.rows.set(key(STORAGE_KEYS.RECOVERY_ORDERS, assistedRecord.id), {
+  id: `${STORAGE_KEYS.RECOVERY_ORDERS}:${assistedRecord.id}`,
+  domain: STORAGE_KEYS.RECOVERY_ORDERS,
+  recordId: assistedRecord.id,
+  status: assistedRecord.status,
+  data: clone(assistedRecord),
+});
+assert.equal(
+  (await service.list({ page: 1, pageSize: 20 }, creator)).data?.items.some((item) => item.id === assistedRecord.id),
+  true,
+  '协助人员应能看到自己参与的售后挽回订单',
+);
+prisma.rows.delete(key(STORAGE_KEYS.RECOVERY_ORDERS, assistedRecord.id));
 const reviewerList = await service.list({
   scopeDomain: 'recoveryOrderApplications', page: 1, pageSize: 20,
 }, reviewer);
@@ -436,16 +518,16 @@ const staleReviewerList = await service.list({
 }, staleReviewer);
 assert.equal(
   staleReviewerList.data?.pagination.total,
-  2,
-  'recovery order list must honor department data scope',
+  3,
+  '售后挽回列表应按提交人、挽回人员和协助人员共同匹配部门数据范围',
 );
 const settlementPage = await service.list({
   scopeDomain: 'recoveryOrders', settlementStatuses: ['待处理'], page: 1, pageSize: 20,
 }, staleReviewer);
-assert.deepEqual(settlementPage.data?.items.map((item) => item.id), [oldRecord.id]);
+assert.deepEqual(settlementPage.data?.items.map((item) => item.id), [oldRecord.id, outsideDepartmentRecord.id]);
 const settlementCounts = await service.settlementCounts({ includeDeleted: true }, staleReviewer);
-assert.equal(settlementCounts.data?.total, 1);
-assert.equal(settlementCounts.data?.statusCounts['待处理'], 1);
+assert.equal(settlementCounts.data?.total, 2);
+assert.equal(settlementCounts.data?.statusCounts['待处理'], 2);
 const financeList = await service.list({}, finance);
 assert.equal(financeList.code, 0);
 assert.deepEqual(
@@ -568,6 +650,21 @@ const oversizedRecoveryName = await blindMatchService.create(input({
   thirdPartyOrderNo: 'TP-OVERSIZED-NAME', customerName: '客'.repeat(121),
 }), creator);
 assert.equal(oversizedRecoveryName.code, 400, '应在提交时拦截无法写入 LeadRecord 的超长客户姓名');
+const missingOriginalAmount = await blindMatchService.create(input({
+  thirdPartyOrderNo: 'TP-MISSING-ORIGINAL-AMOUNT', originalAmount: 0,
+}), creator);
+assert.equal(missingOriginalAmount.code, 400, '原付款金额必须是有效正数');
+assert.match(missingOriginalAmount.message, /原付款金额/);
+const futureRecoveryTime = await blindMatchService.create(input({
+  thirdPartyOrderNo: 'TP-FUTURE-RECOVERY', recoveryAt: '2026-07-12T19:00:00.000Z',
+}), creator);
+assert.equal(futureRecoveryTime.code, 400, '挽回成交时间不得晚于当前时间');
+assert.match(futureRecoveryTime.message, /不能晚于当前时间/);
+const futurePaymentTime = await blindMatchService.create(input({
+  thirdPartyOrderNo: 'TP-FUTURE-PAYMENT', paymentAt: '2026-07-12T19:00:00.000Z',
+}), creator);
+assert.equal(futurePaymentTime.code, 400, '付款时间不得晚于当前时间');
+assert.match(futurePaymentTime.message, /付款时间不能晚于当前时间/);
 const blindMatchedEdited = await blindMatchService.update(blindMatched.data!.id, input({
   thirdPartyOrderNo: 'TP-BLIND-MATCH', customerName: '售后修正称呼', customerPhone: '13800000001',
 }), reviewer);
@@ -624,6 +721,123 @@ assert.equal(approved.data?.status, '待分账');
 assert.equal(approved.data?.auditorId, reviewer.id);
 assert.equal((await service.approve(created.data!.id, reviewer)).code, 0, '重复审核应幂等');
 
+const metadataEdited = await service.editMetadata(created.data!.id, {
+  paymentOrderNo: 'PAY-METADATA-UPDATED',
+  remark: '补充售后资料',
+}, reviewer);
+assert.equal(metadataEdited.code, 0, metadataEdited.message);
+assert.equal(metadataEdited.data?.paymentOrderNo, 'PAY-METADATA-UPDATED');
+assert.equal(metadataEdited.data?.sourcePlatform, approved.data?.sourcePlatform, 'PATCH 未传来源平台时必须保留原值');
+assert.equal(metadataEdited.data?.sourceShopName, approved.data?.sourceShopName, 'PATCH 未传来源店铺时必须保留原值');
+assert.equal(metadataEdited.data?.recoveryAmount, approved.data?.recoveryAmount, '资料编辑不得改变挽回成交金额');
+assert.equal(metadataEdited.data?.status, '待分账', '资料编辑不得改变审核状态');
+assert.equal(metadataEdited.data?.settlementStatus, '待处理', '资料编辑不得改变分账状态');
+assert.equal(metadataEdited.data?.changeHistory?.[0]?.action, 'edit');
+const detailWithoutHistoryPermission = await service.get(created.data!.id, creator, 'recoveryOrders');
+assert.equal(detailWithoutHistoryPermission.code, 0);
+assert.equal(detailWithoutHistoryPermission.data?.changeHistory, undefined, '无修改记录权限时详情接口不得下发 changeHistory');
+
+const correctionCommissionId = 'commission-recovery-correction';
+const approvedRowKey = key(STORAGE_KEYS.RECOVERY_ORDERS, created.data!.id);
+const approvedRow = prisma.rows.get(approvedRowKey)!;
+approvedRow.status = '待分账';
+approvedRow.data = {
+  ...approvedRow.data,
+  status: '待分账',
+  settlementStatus: '待确认',
+  commissionIds: [correctionCommissionId],
+};
+prisma.rows.set(key(STORAGE_KEYS.COMMISSIONS, correctionCommissionId), {
+  id: `${STORAGE_KEYS.COMMISSIONS}:${correctionCommissionId}`,
+  domain: STORAGE_KEYS.COMMISSIONS,
+  recordId: correctionCommissionId,
+  orderId: created.data!.id,
+  status: '待确认',
+  data: {
+    id: correctionCommissionId,
+    orderId: created.data!.id,
+    sourceRecoveryOrderId: created.data!.id,
+    status: '待确认',
+    commissionAmount: 88,
+  },
+});
+const correctionPrecheck = await service.precheckCorrection(created.data!.id, reviewer);
+assert.equal(correctionPrecheck.code, 0, correctionPrecheck.message);
+assert.equal(correctionPrecheck.data?.allowed, true);
+assert.equal(correctionPrecheck.data?.commissionCount, 1);
+const corrected = await service.correct(created.data!.id, {
+  reason: '修正挽回成交金额',
+  data: input({
+    customerName: metadataEdited.data!.customerName,
+    customerPhone: metadataEdited.data!.customerPhone,
+    customerWechat: metadataEdited.data!.customerWechat,
+    thirdPartyOrderNo: metadataEdited.data!.thirdPartyOrderNo,
+    originalProduct: metadataEdited.data!.originalProduct,
+    originalProductId: metadataEdited.data!.originalProductId,
+    originalProductLevel: metadataEdited.data!.originalProductLevel,
+    originalAmount: metadataEdited.data!.originalAmount,
+    recoveryAmount: 3180,
+    recoveryUserId: metadataEdited.data!.recoveryUserId,
+    paymentOrderNo: metadataEdited.data!.paymentOrderNo,
+  }),
+}, reviewer);
+assert.equal(corrected.code, 0, corrected.message);
+assert.equal(corrected.data?.recoveryAmount, 3180);
+assert.equal(corrected.data?.settlementStatus, '待处理');
+assert.deepEqual(corrected.data?.commissionIds, []);
+assert.equal(corrected.data?.changeHistory?.[0]?.action, 'correct');
+assert.equal(corrected.data?.changeHistory?.[0]?.reason, '修正挽回成交金额');
+assert.equal(
+  prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, correctionCommissionId))?.data?.status,
+  '已撤回',
+  '更正应自动撤回尚未发放的售后分账',
+);
+const resettledAfterCorrection = await service.settle(created.data!.id, [{
+  role: '挽回人员',
+  ownerId: finance.id,
+  payoutPlanName: '自定义金额',
+  commissionAmount: 30,
+  performanceAmount: 3180,
+  ruleCalculationType: 'fixed',
+}], '更正后重新分账', finance);
+assert.equal(resettledAfterCorrection.code, 0, resettledAfterCorrection.message);
+assert.equal(resettledAfterCorrection.data?.settlementStatus, '待确认', '已撤回历史分账不得阻止重新分账');
+assert.equal(
+  prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, correctionCommissionId))?.data?.status,
+  '已撤回',
+  '重新分账必须保留更正前的已撤回提成留痕',
+);
+
+const sourceLinkedPaidSource = await service.create(input({ thirdPartyOrderNo: 'TP-SOURCE-LINKED-PAID-CORRECTION' }), creator);
+assert.equal((await service.approve(sourceLinkedPaidSource.data!.id, reviewer)).code, 0);
+prisma.rows.set(key(STORAGE_KEYS.COMMISSIONS, 'commission-source-linked-paid'), {
+  id: `${STORAGE_KEYS.COMMISSIONS}:commission-source-linked-paid`,
+  domain: STORAGE_KEYS.COMMISSIONS,
+  recordId: 'commission-source-linked-paid',
+  orderId: null,
+  status: '已发放',
+  data: {
+    id: 'commission-source-linked-paid',
+    sourceRecoveryOrderId: sourceLinkedPaidSource.data!.id,
+    status: '已发放',
+    commissionAmount: 66,
+  },
+});
+const sourceLinkedPaidPrecheck = await service.precheckCorrection(sourceLinkedPaidSource.data!.id, reviewer);
+assert.equal(sourceLinkedPaidPrecheck.data?.allowed, false, '历史 sourceRecoveryOrderId 关联的已发放提成必须阻止更正');
+assert.equal(sourceLinkedPaidPrecheck.data?.reasonCode, 'payout_started');
+
+const paidSource = await service.create(input({ thirdPartyOrderNo: 'TP-PAID-CORRECTION-BLOCK' }), creator);
+assert.equal((await service.approve(paidSource.data!.id, reviewer)).code, 0);
+const paidRowKey = key(STORAGE_KEYS.RECOVERY_ORDERS, paidSource.data!.id);
+const paidRow = prisma.rows.get(paidRowKey)!;
+paidRow.status = '已分账';
+paidRow.data = { ...paidRow.data, status: '已分账', settlementStatus: '已发放' };
+const paidPrecheck = await service.precheckCorrection(paidSource.data!.id, reviewer);
+assert.equal(paidPrecheck.code, 0);
+assert.equal(paidPrecheck.data?.allowed, false, '已发放售后分账必须阻止直接更正');
+assert.equal(paidPrecheck.data?.reasonCode, 'payout_started');
+
 assert.equal(
   (await service.approve(oldRecord.id, staleReviewer)).code,
   403,
@@ -644,6 +858,11 @@ const rejectedSource = await service.create(input({ thirdPartyOrderNo: 'TP-REJEC
 const rejected = await service.reject(rejectedSource.data!.id, '凭证无效', reviewer);
 assert.equal(rejected.code, 0);
 assert.equal(rejected.data?.status, '审核驳回');
+const rejectedResubmit = await service.update(rejectedSource.data!.id, input({
+  thirdPartyOrderNo: 'TP-REJECT', remark: '补齐资料后重新提交',
+}), creator);
+assert.equal(rejectedResubmit.code, 0, '创建人可以修改并重新提交审核驳回记录');
+assert.equal(rejectedResubmit.data?.status, '待审核');
 
 const withdrawnSource = await service.create(input({ thirdPartyOrderNo: 'TP-WITHDRAWN-DELETE' }), creator);
 const withdrawnRow = prisma.rows.get(key(STORAGE_KEYS.RECOVERY_ORDERS, withdrawnSource.data!.id))!;

@@ -5,6 +5,7 @@ import { hasPermission, PERMISSION_KEYS } from '../shared/utils/permissions';
 const exportPermissionKeys = [
   'ORDER_EXPORT',
   'ORDER_SETTLEMENT_EXPORT',
+  'AFTER_SALES_RECOVERY_EXPORT',
   'RECOVERY_SETTLEMENT_EXPORT',
 ] as const;
 
@@ -29,3 +30,9 @@ for (const key of exportPermissionKeys) {
   const permission = (PERMISSION_KEYS as Record<string, string>)[key];
   assert.equal(hasPermission({ ...superAdmin, role: superAdmin!.name, isActive: true }, permission), true);
 }
+
+assert.equal(
+  hasPermission({ role: '旧售后角色', isActive: true, permissions: [{ module: PERMISSION_KEYS.AFTER_SALES, actions: ['read'] }] }, PERMISSION_KEYS.AFTER_SALES_RECOVERY_EXPORT),
+  false,
+  '售后父权限不得隐式获得独立导出权限',
+);

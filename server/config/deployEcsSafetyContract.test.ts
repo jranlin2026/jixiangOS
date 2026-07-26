@@ -117,6 +117,11 @@ assert.match(remote, /initial-setup-token/);
 assert.match(remote, /export JIXIANG_SETUP_TOKEN="\$SETUP_TOKEN_VALUE"/, '部署进程必须获得实际生成的初始化码');
 assertBefore('npm run prod:check', 'backup-linux.sh', '生产配置检查必须先于数据库备份');
 assertBefore('backup-linux.sh', 'npm run db:deploy', 'SQL 备份必须先于数据库迁移');
+assertBefore('npm run db:deploy', 'Auditing immutable finance transaction backfill', '资金流水回填必须在迁移后执行');
+assertBefore('Auditing immutable finance transaction backfill', 'echo "Switching release...', '资金流水回填必须在版本切换前完成');
+assert.match(remote, /JIXIANG_FINANCE_BACKFILL_APPLY/);
+assert.match(remote, /--apply --confirm=BACKFILL_FINANCE_TRANSACTIONS/);
+assert.match(remote, /JIXIANG_VERIFIED_BACKUP_SHA256/);
 
 assert.match(remote, /PERSISTENT_DATA_DIR/);
 assert.match(remote, /readlink -m/);
@@ -124,8 +129,10 @@ assert.match(remote, /PERSISTENT_DATA_DIR must be absolute/);
 assert.match(remote, /PERSISTENT_DATA_DIR must be outside APP_DIR/);
 assert.match(remote, /mkdir -p[^\n]*uploads/);
 assert.match(remote, /mkdir -p[^\n]*private_uploads/);
+assert.match(remote, /mkdir -p[^\n]*uploads-private/);
 assert.match(remote, /ln -s[^\n]*PERSISTENT_DATA_DIR[^\n]*uploads[^\n]*NEW_DIR[^\n]*uploads/);
 assert.match(remote, /ln -s[^\n]*PERSISTENT_DATA_DIR[^\n]*private_uploads[^\n]*NEW_DIR[^\n]*private_uploads/);
+assert.match(remote, /ln -s[^\n]*PERSISTENT_DATA_DIR[^\n]*uploads-private[^\n]*NEW_DIR[^\n]*uploads-private/);
 assertBefore('PERSISTENT_DATA_DIR', 'echo "Switching release...', '持久目录必须在版本切换前准备');
 
 assert.match(remote, /npm install[^\n]*--include=dev[^\n]*--prefer-offline/);
@@ -148,6 +155,7 @@ const finalSync = remote.slice(
 assert.match(finalSync, /pm2 stop jixiang-os-api/);
 assert.match(finalSync, /rsync -a --delete "\$APP_DIR\/uploads\/" "\$PERSISTENT_DATA_DIR\/uploads\/"/);
 assert.match(finalSync, /rsync -a --delete "\$APP_DIR\/private_uploads\/" "\$PERSISTENT_DATA_DIR\/private_uploads\/"/);
+assert.match(finalSync, /rsync -a "\$APP_DIR\/uploads-private\/" "\$PERSISTENT_DATA_DIR\/uploads-private\/"/);
 assert.ok(
   finalSync.indexOf('pm2 stop jixiang-os-api') < finalSync.indexOf('rsync -a --delete'),
   '必须先停止 API 再做最终上传目录同步',

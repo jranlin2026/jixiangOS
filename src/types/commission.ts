@@ -8,6 +8,7 @@ export type CommissionRolePersonSource =
   | 'lead_contributor'
   | 'customer_success'
   | 'after_sales'
+  | 'department_manager'
   | 'manual';
 
 export interface CommissionRoleConfig {
@@ -41,7 +42,9 @@ export interface CommissionRoleConfigFilters {
 /** 提成状态 — 含审核流程 */
 export type CommissionStatus = '待确认' | '待发放' | '已发放' | '已取消' | '已撤回' | '待冲销' | '已冲销';
 export type LegacyCommissionStatus = CommissionStatus | '待审核' | '异常';
-export type CommissionOrderSummaryStatus = '待处理' | '待确认' | '待发放' | '已发放' | '已撤回';
+/** 跨订单、售后与财务模块共用的五态分账口径。 */
+export type SettlementStatus = '待处理' | '待确认' | '待发放' | '已发放' | '已撤回';
+export type CommissionOrderSummaryStatus = SettlementStatus;
 
 export type CommissionScene =
   | '899成交'
@@ -70,6 +73,17 @@ export type CommissionEvidenceType = '付款截图' | '成交路径截图' | '�
 export type CommissionScenarioGroup = '新客成交' | '代理转化' | '升单复购' | '转介绍' | '售后挽回' | '服务激励' | '个人资源';
 export type CommissionSettlementMode = '自动结算' | '人工审核' | '仅计业绩';
 export type CommissionRuleCalculationType = 'fixed' | 'percentage' | 'tiered_percentage';
+export type CommissionBusinessSource = 'formal_order' | 'after_sales_recovery';
+export type CommissionAssigneeSource =
+  | 'sales_owner'
+  | 'lead_contributor'
+  | 'customer_success'
+  | 'after_sales'
+  | 'recovery_owner'
+  | 'recovery_assistant'
+  | 'business_creator'
+  | 'department_manager'
+  | 'manual';
 
 export interface CommissionTier {
   minAmount: number;
@@ -93,6 +107,10 @@ export interface CommissionRule {
   ruleGroupId?: ID;
   /** 简化 IF/DO 规则组名称 */
   ruleGroupName?: string;
+  /** 规则应用的业务来源，历史规则默认正式订单 */
+  businessSource?: CommissionBusinessSource;
+  /** 该动作从业务对象的哪个字段取得提成人员 */
+  assigneeSource?: CommissionAssigneeSource;
   /** 产品等级，空=通用 */
   productLevel: ProductLevel | '';
   /** 订单类型，空=通用 */
@@ -151,11 +169,24 @@ export interface CommissionRule {
 
 export interface SimpleCommissionRulePayout {
   role: CommissionRole;
+  assigneeSource?: CommissionAssigneeSource;
   payoutPlanId?: ID;
   payoutPlanName?: string;
   commissionType: CommissionRuleCalculationType;
   commissionValue: number;
   tiers?: CommissionTier[];
+}
+
+export interface CommissionPayoutPlanRevision {
+  id: ID;
+  name: string;
+  version: number;
+  commissionType: CommissionRuleCalculationType;
+  commissionValue: number;
+  tiers?: CommissionTier[];
+  description?: string;
+  effectiveFrom: Timestamp;
+  effectiveTo?: Timestamp;
 }
 
 export interface CommissionPayoutPlan {
@@ -166,15 +197,30 @@ export interface CommissionPayoutPlan {
   tiers?: CommissionTier[];
   isActive: boolean;
   description?: string;
+  /** 每次编辑生成新版本，历史提成保留使用时的版本 */
+  version?: number;
+  effectiveFrom?: Timestamp;
+  /** 已结束生效的不可变历史版本，不包含当前版本 */
+  revisions?: CommissionPayoutPlanRevision[];
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
 
-export type CommissionPayoutPlanInput = Omit<CommissionPayoutPlan, 'id' | 'createdAt' | 'updatedAt'>;
+export interface CommissionPayoutPlanSnapshot {
+  id: ID;
+  name: string;
+  version: number;
+  commissionType: CommissionRuleCalculationType;
+  commissionValue: number;
+  tiers?: CommissionTier[];
+}
+
+export type CommissionPayoutPlanInput = Omit<CommissionPayoutPlan, 'id' | 'createdAt' | 'updatedAt' | 'revisions'>;
 
 export interface SimpleCommissionRuleGroup {
   id: ID;
   name: string;
+  businessSource?: CommissionBusinessSource;
   orderType: string;
   resourceOwnership: ResourceOwnership;
   isActive: boolean;
@@ -230,6 +276,8 @@ export interface Commission {
   payoutPlanId?: ID;
   /** 提成方案名称快照 */
   payoutPlanName?: string;
+  payoutPlanVersion?: number;
+  payoutPlanSnapshot?: CommissionPayoutPlanSnapshot;
   /** 分账规则计算方式，用于月度阶梯提成等结算口径 */
   ruleCalculationType?: CommissionRuleCalculationType;
   /** 生成/调整分账时保留的阶梯规则快照 */
@@ -242,6 +290,9 @@ export interface Commission {
   clawbackFromCommissionId?: ID;
   /** 提成角色 */
   role: CommissionRole;
+  roleId?: ID;
+  roleCode?: string;
+  roleNameSnapshot?: string;
   /** 人员姓名 */
   owner: string;
   /** 部门 */
@@ -336,6 +387,79 @@ export interface CommissionSettlementBatch {
   commissionIds: ID[];
   byOwner: Array<{ owner: string; department: string; count: number; amount: number }>;
   byRole: Array<{ role: CommissionRole; count: number; amount: number }>;
+}
+
+export type CommissionPayoutRecordStatus = '已发放' | '已撤销';
+
+export interface CommissionPayoutBatchOwnerSnapshot {
+  ownerId?: ID;
+  owner: string;
+  departmentId?: ID;
+  department: string;
+  count: number;
+  amount: number;
+}
+
+/** 一次真实提成发放的不可变记录；不是用户需要预先创建和锁定的工作批次。 */
+export interface CommissionPayoutRecord {
+  id: ID;
+  payoutNo: string;
+  period: string;
+  status: CommissionPayoutRecordStatus;
+  totalCount: number;
+  totalAmount: number;
+  commissionIds: ID[];
+  /** 发放时的逐笔提成快照，确保历史凭据不依赖后续可变数据。 */
+  commissionSnapshots?: Commission[];
+  byOwner: CommissionPayoutBatchOwnerSnapshot[];
+  createdAt: Timestamp;
+  createdById: ID;
+  createdByName: string;
+  issuedAt: Timestamp;
+  issuedById: ID;
+  issuedByName: string;
+  paymentMethod?: string;
+  paymentReference?: string;
+  reversedAt?: Timestamp;
+  reversedById?: ID;
+  reversedByName?: string;
+  reverseReason?: string;
+  note?: string;
+}
+
+export interface CommissionPayoutEmployeeRow {
+  ownerId: ID;
+  owner: string;
+  departmentId?: ID;
+  department: string;
+  orderCount: number;
+  commissionCount: number;
+  pendingConfirmAmount: number;
+  pendingPayAmount: number;
+  paidAmount: number;
+  totalAmount: number;
+  commissions: Commission[];
+}
+
+export interface CommissionPayoutWorkspace {
+  period: string;
+  summary: {
+    pendingEmployeeCount: number;
+    pendingPayAmount: number;
+    pendingConfirmAmount: number;
+    paidEmployeeCount: number;
+    paidAmount: number;
+  };
+  employees: CommissionPayoutEmployeeRow[];
+  records: CommissionPayoutRecord[];
+}
+
+export interface IssueCommissionPayoutInput {
+  ownerIds: ID[];
+  issuedAt: Timestamp;
+  paymentMethod: string;
+  paymentReference?: string;
+  note?: string;
 }
 
 /** 提成筛选参数 */
@@ -465,6 +589,9 @@ export interface MonthlyCommissionRoleSummary {
   totalAmount: number;
   status: MonthlyCommissionPayout['status'];
   isTiered: boolean;
+  payoutPlanId?: ID;
+  payoutPlanName?: string;
+  payoutPlanVersion?: number;
   tierSnapshot?: CommissionTierSnapshot;
   commissions: Commission[];
 }
@@ -485,6 +612,8 @@ export interface CommissionAdjustmentInput {
   commissionRuleId?: ID;
   payoutPlanId?: ID;
   payoutPlanName?: string;
+  payoutPlanVersion?: number;
+  payoutPlanSnapshot?: CommissionPayoutPlanSnapshot;
   ruleCalculationType?: CommissionRuleCalculationType;
   tierSnapshot?: CommissionTierSnapshot;
 }
@@ -506,11 +635,17 @@ export interface CommissionStats {
 export interface CommissionCalcResult {
   ruleId: string;
   role: CommissionRole;
+  roleId?: ID;
+  roleCode?: string;
+  roleNameSnapshot?: string;
+  assigneeSource?: CommissionAssigneeSource;
   commissionType: CommissionRuleCalculationType;
   commissionValue: number;
   tiers?: CommissionTier[];
   payoutPlanId?: ID;
   payoutPlanName?: string;
+  payoutPlanVersion?: number;
+  payoutPlanSnapshot?: CommissionPayoutPlanSnapshot;
   commissionAmount: number;
   commissionRate: number;
   performanceAmount: number;

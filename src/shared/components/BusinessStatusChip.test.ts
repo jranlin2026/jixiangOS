@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { getBusinessStatusTone } from './BusinessStatusChip';
 
-assert.equal(getBusinessStatusTone('待审核'), 'amber');
+assert.equal(getBusinessStatusTone('待审核'), 'purple');
 assert.equal(getBusinessStatusTone('退回修改'), 'blue');
 assert.equal(getBusinessStatusTone('已通过'), 'green');
 assert.equal(getBusinessStatusTone('已驳回'), 'red');

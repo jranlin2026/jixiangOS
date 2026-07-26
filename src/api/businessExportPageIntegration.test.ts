@@ -8,6 +8,8 @@ const ordersSource = readFileSync(join(root, 'src/pages/Orders/index.tsx'), 'utf
 const financeSource = readFileSync(join(root, 'src/pages/Finance/index.tsx'), 'utf8');
 const commissionSource = readFileSync(join(root, 'src/pages/Commission/index.tsx'), 'utf8');
 const recoverySource = readFileSync(join(root, 'src/pages/Finance/RecoverySettlement.tsx'), 'utf8');
+const afterSalesSource = readFileSync(join(root, 'src/pages/AfterSales/index.tsx'), 'utf8');
+const recoveryOrderSource = readFileSync(join(root, 'src/pages/AfterSales/RecoveryOrderTab.tsx'), 'utf8');
 
 const request = buildBusinessExportBrowserRequest(
   { search: '关键', status: '已完成', sortBy: 'paymentDate', sortDirection: 'asc', page: 3, pageSize: 50 },
@@ -52,5 +54,12 @@ assert.match(commissionSource, /expectedCount=\{orderPagination\.total\}/);
 assert.match(recoverySource, /businessExportApi\.exportRecoverySettlements/);
 assert.match(recoverySource, /columnIds:\s*visibleColumns\.map\(\(column\) => column\.id\)/);
 assert.match(recoverySource, /expectedCount=\{total\}/);
+
+assert.match(afterSalesSource, /PERMISSION_KEYS\.AFTER_SALES_RECOVERY_EXPORT/);
+assert.match(afterSalesSource, />\s*导出售后挽回订单\s*</);
+assert.match(afterSalesSource, /exportSignal=\{exportSignal\}/);
+assert.match(recoveryOrderSource, /businessExportApi\.exportRecoveryOrders/);
+assert.match(recoveryOrderSource, /columnIds:\s*visibleColumns\.map\(\(column\) => column\.id\)/);
+assert.match(recoveryOrderSource, /expectedCount=\{total\}/);
 
 console.log('business export page integration tests passed');

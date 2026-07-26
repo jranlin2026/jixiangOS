@@ -60,6 +60,7 @@ const commissionSource = readFileSync(join(projectRoot, 'src/pages/Commission/in
 const commissionRuleConfigSource = readFileSync(join(projectRoot, 'src/pages/Commission/CommissionRuleConfig.tsx'), 'utf8');
 const financeSource = readFileSync(join(projectRoot, 'src/pages/Finance/index.tsx'), 'utf8');
 const financeApiSource = readFileSync(join(projectRoot, 'src/api/financeApi.ts'), 'utf8');
+const financeTransactionServiceSource = readFileSync(join(projectRoot, 'server/services/financeTransactionService.ts'), 'utf8');
 const refundCenterSource = readFileSync(join(projectRoot, 'src/pages/RefundCenter/index.tsx'), 'utf8');
 const afterSalesSource = readFileSync(join(projectRoot, 'src/pages/AfterSales/index.tsx'), 'utf8');
 const recoveryOrderSource = readFileSync(join(projectRoot, 'src/pages/AfterSales/RecoveryOrderTab.tsx'), 'utf8');
@@ -275,7 +276,7 @@ assert.match(
 );
 assert.match(
   orderFormSource,
-  /label="产品名称"[\s\S]*value=\{form\.productId\}|value=\{form\.productId\}[\s\S]*label="产品名称"/,
+  /<TableCell[^>]*>产品名称 \*<\/TableCell>[\s\S]*value=\{item\.productId\}/,
   'Order submit form should select a concrete product by productId, not choose a product level.',
 );
 assert.doesNotMatch(
@@ -314,10 +315,11 @@ assert.match(
   'Order review must display product name with product level as fallback.',
 );
 assert.match(
-  financeApiSource,
-  /productName\s*\|\|[\s\S]*productLevel/,
-  'Finance flow generation must show product name with product level as fallback.',
+  financeTransactionServiceSource,
+  /productName:\s*order\.productName[\s\S]*productLevel:\s*order\.productLevel/,
+  'Finance flow must snapshot the formal order product identity on the server.',
 );
+assert.doesNotMatch(financeApiSource, /buildFinanceTransactions/, 'Finance flow must not be assembled from browser storage.');
 assert.match(
   financeSource,
   /业务核账流水[\s\S]*流水编号[\s\S]*关联业务[\s\S]*流水详情/,
@@ -656,12 +658,13 @@ assert.doesNotMatch(
 );
 assert.match(
   financeSource,
-  /value:\s*'payout',\s*label:\s*'员工提成月报'/,
-  'Finance payout tab should use the employee monthly commission report wording.',
+  /value:\s*'disbursement',\s*label:\s*'提成发放'/,
+  'Finance should expose one employee-centric payout workspace.',
 );
+assert.doesNotMatch(financeSource, /value:\s*'payout',\s*label:\s*'员工提成月报'/);
 assert.match(
   commissionRuleConfigSource,
-  /value="tiered_percentage"[\s\S]*销售月累计阶梯提成|销售月累计阶梯提成[\s\S]*value="tiered_percentage"/,
+  /value="tiered_percentage"[\s\S]*月度累计阶梯|月度累计阶梯[\s\S]*value="tiered_percentage"/,
   'Commission rule config should expose sales monthly tiered commission as a calculation type.',
 );
 assert.match(

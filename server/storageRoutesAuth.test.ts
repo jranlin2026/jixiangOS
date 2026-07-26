@@ -43,6 +43,7 @@ for (const [method, route] of [
   ['post', '/api/order-applications/:id/approve'],
   ['delete', '/api/order-applications/:id'],
   ['put', '/api/orders/:id'],
+  ['get', '/api/orders/:id/correction-precheck'],
   ['post', '/api/orders/:id/correct'],
   ['get', '/api/orders'],
   ['get', '/api/orders/stats'],
@@ -63,6 +64,9 @@ for (const [method, route] of [
   ['post', '/api/deliveries/:id/confirm'],
   ['delete', '/api/deliveries/:id'],
   ['post', '/api/recovery-orders'],
+  ['patch', '/api/recovery-orders/:id/metadata'],
+  ['get', '/api/recovery-orders/:id/correction-precheck'],
+  ['post', '/api/recovery-orders/:id/correct'],
   ['post', '/api/customers/:id/claim'],
   ['post', '/api/customers/:id/assign'],
   ['put', '/api/customers/:id'],
@@ -94,16 +98,25 @@ assert.match(source, /const requireOrderCreateWriteAccess = createRequireAuth\(a
 assert.match(source, /const requireOrderReadAccess = createRequireAuth\(authService, PERMISSION_KEYS\.ORDER_MANAGE\);/);
 assert.match(source, /const requireOrderApplicationReadAccess = createRequireAuth\(authService, PERMISSION_KEYS\.ORDER_REVIEW_LIST\);/);
 assert.match(source, /const requireOrderEditWriteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.ORDER_EDIT, 'write'\);/);
+assert.match(source, /const requireOrderCorrectWriteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.ORDER_CORRECT, 'write'\);/);
 assert.match(source, /const requireOrderDeleteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.ORDER_DELETE, 'delete'\);/);
 assert.match(source, /const requireOrderReviewWriteAccess = createRequireAuth\(authService, PERMISSION_KEYS\.ORDER_REVIEW, 'write'\);/);
-assert.match(source, /app\.post\('\/api\/orders\/:id\/correct', requireOrderEditWriteAccess,/);
+assert.match(source, /app\.get\('\/api\/orders\/:id\/correction-precheck', requireOrderCorrectWriteAccess,/);
+assert.match(source, /app\.post\('\/api\/orders\/:id\/correct', requireOrderCorrectWriteAccess,/);
 assert.match(source, /const requireDeliveryReadAccess = createRequireAuth\(authService, PERMISSION_KEYS\.DELIVERY_CENTER\);/);
 assert.match(source, /const requireDeliveryWriteAccess = createRequireAnyPermission\(authService, \[PERMISSION_KEYS\.DELIVERY_MOVE_CARD, PERMISSION_KEYS\.DELIVERY_STAGE_CONFIG\], 'write'\);/);
 assert.match(source, /const requireRecoveryCreateAccess = createRequireAuth\(authService, PERMISSION_KEYS\.AFTER_SALES_RECOVERY_CREATE, 'write'\);/);
+assert.match(source, /const requireRecoveryEditAccess = createRequireAuth\(authService, PERMISSION_KEYS\.AFTER_SALES_RECOVERY_EDIT, 'write'\);/);
+assert.match(source, /const requireRecoveryCorrectAccess = createRequireAuth\(authService, PERMISSION_KEYS\.AFTER_SALES_RECOVERY_CORRECT, 'write'\);/);
 assert.match(
   source,
-  /createOrderApplicationService\(prisma,\s*\{\s*applyDownstreamEffects: createOrderApprovalDownstreamEffects\(deliveryAssignmentService\)/,
+  /const orderApprovalEffects = createOrderApprovalDownstreamEffects\(deliveryAssignmentService\);/,
   '订单审核服务必须注入客户、提成和交付的同事务副作用',
+);
+assert.match(
+  source,
+  /createOrderApplicationService\(prisma,\s*\{\s*applyDownstreamEffects:\s*async \(context\) => \{[\s\S]*?orderApprovalEffects\(context\)/,
+  '订单审核服务包装财务流水副作用时仍必须执行原有客户、提成和交付副作用',
 );
 
 assert.match(source, /app\.get\('\/api\/settings\/users', requireOrganizationReadAccess,/);
@@ -283,6 +296,9 @@ assert.match(source, /app\.post\('\/api\/deliveries\/:id\/exceptions\/:exception
 assert.match(source, /app\.post\('\/api\/deliveries\/:id\/confirm', requireDeliveryWriteAccess,/);
 assert.match(source, /app\.delete\('\/api\/deliveries\/:id', requireDeliveryWriteAccess,/);
 assert.match(source, /app\.post\('\/api\/recovery-orders', requireRecoveryCreateAccess,/);
+assert.match(source, /app\.patch\('\/api\/recovery-orders\/:id\/metadata', requireRecoveryEditAccess,/);
+assert.match(source, /app\.get\('\/api\/recovery-orders\/:id\/correction-precheck', requireRecoveryCorrectAccess,/);
+assert.match(source, /app\.post\('\/api\/recovery-orders\/:id\/correct', requireRecoveryCorrectAccess,/);
 assert.match(source, /canAccessLegacyStorageKey\(req\.currentUser, key, 'read'\)/);
 assert.match(source, /canAccessLegacyStorageKey\(req\.currentUser, key, 'write'\)/);
 assert.match(source, /getScopedStorageKeys\('assets'\)/);

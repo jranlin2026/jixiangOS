@@ -225,7 +225,10 @@ const CUSTOMER_MUTATION_PERMISSION_ACTION = new Map<string, string>([
 function preflightCustomerAccess(user: AuthenticatedUser): CustomerAccessContext {
   const grantedPermissions = new Set<string>();
   for (const [permissionKey, action] of CUSTOMER_MUTATION_PERMISSION_ACTION) {
-    if (hasExplicitPermission(user, permissionKey, action)) grantedPermissions.add(permissionKey);
+    const granted = permissionKey === PERMISSION_KEYS.CUSTOMER_DELETE
+      ? hasPermission(user, permissionKey, action)
+      : hasExplicitPermission(user, permissionKey, action);
+    if (granted) grantedPermissions.add(permissionKey);
   }
   return {
     actorId: user.id,

@@ -48,13 +48,10 @@ export interface FinanceExpense {
   paidAt?: Timestamp;
 }
 
-export type FinanceTransactionDirection = 'income' | 'expense' | 'reversal' | 'freeze';
+export type FinanceTransactionDirection = 'income' | 'expense';
 
 export type FinanceTransactionSourceType =
   | 'order_payment'
-  | 'manual_income'
-  | 'manual_expense'
-  | 'refund_expense'
   | 'commission_payout';
 
 export interface FinanceTransaction {
@@ -63,7 +60,9 @@ export interface FinanceTransaction {
   type: string;
   direction: FinanceTransactionDirection;
   sourceType: FinanceTransactionSourceType;
+  sourceDomain: string;
   sourceId: ID;
+  sourceEventId: string;
   sourceModule: string;
   amount: number;
   status: string;
@@ -75,9 +74,15 @@ export interface FinanceTransaction {
   productName?: string;
   productLevel?: ProductLevel;
   paymentMethod?: PaymentMethod;
+  paymentReference?: string;
+  operatorId?: ID;
   operatorName?: string;
   occurredAt: Timestamp;
   reason?: string;
+  attachmentIds?: ID[];
+  reversalOfId?: ID;
+  sourceStatus?: string;
+  createdAt: Timestamp;
 }
 
 export interface FinanceTransactionFilters {
@@ -89,6 +94,19 @@ export interface FinanceTransactionFilters {
   endDate?: string;
   page?: number;
   pageSize?: number;
+}
+
+export interface FinanceTransactionSummary {
+  incomeAmount: number;
+  expenseAmount: number;
+  netAmount: number;
+  transactionCount: number;
+}
+
+export interface FinanceTransactionPage {
+  items: FinanceTransaction[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+  summary: FinanceTransactionSummary;
 }
 
 /** 财务统计 */

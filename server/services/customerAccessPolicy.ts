@@ -36,7 +36,8 @@ export interface CustomerAccessContext {
   canReadCustomerList: boolean;
   /**
    * Contains only permissions granted for their authoritative mutation action.
-   * In particular CUSTOMER_DELETE is added only for an explicit `delete` grant.
+   * CUSTOMER_DELETE requires an explicit `delete` grant, except for the
+   * authoritative super_admin role which owns system cleanup duties.
    */
   grantedPermissions: ReadonlySet<string>;
 }

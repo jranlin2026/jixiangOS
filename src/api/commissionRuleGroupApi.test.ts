@@ -90,6 +90,14 @@ assert.equal(typeof (commissionRuleApi as any).updateSimpleCommissionRuleGroup, 
 assert.equal(typeof (commissionRuleApi as any).deleteSimpleCommissionRuleGroup, 'function');
 assert.equal(typeof (commissionRuleApi as any).getCommissionPayoutPlans, 'function');
 
+const defaultRolesRes = await (commissionRuleApi as any).getCommissionRoleConfigs();
+assert.equal(defaultRolesRes.code, 0);
+assert.equal(
+  defaultRolesRes.data.some((role: any) => role.code === 'recovery_operator' && role.name === '挽回人员'),
+  true,
+  '初始化必须包含售后挽回业务使用的挽回人员角色',
+);
+
 async function createPlan(name: string, commissionType: 'fixed' | 'percentage' | 'tiered_percentage', commissionValue: number) {
   const res = await (commissionRuleApi as any).createCommissionPayoutPlan({
     name,
@@ -211,6 +219,23 @@ const tieredRule = storedRules()[0];
 assert.equal(tieredRule.commissionType, 'tiered_percentage');
 assert.equal(tieredRule.tiers?.length, 3);
 
+const recoveryTieredGroupRes = await (commissionRuleApi as any).createSimpleCommissionRuleGroup({
+  name: '售后挽回-月度阶梯',
+  businessSource: 'after_sales_recovery',
+  orderType: '售后挽回',
+  resourceOwnership: '公司资源',
+  isActive: true,
+  payouts: [{
+    role: '挽回人员',
+    assigneeSource: 'recovery_owner',
+    payoutPlanId: tieredPlan.id,
+    commissionType: 'tiered_percentage',
+    commissionValue: 0,
+  }],
+});
+assert.equal(recoveryTieredGroupRes.code, 0, '月度累计阶梯方案不得限制为销售角色');
+assert.equal(recoveryTieredGroupRes.data.businessSource, 'after_sales_recovery');
+
 seedOrders([
   buildOrder({
     id: 'order-existing-1',
@@ -260,7 +285,10 @@ assert.equal(tieredCalcRes.data[0].commissionType, 'tiered_percentage');
 assert.equal(tieredCalcRes.data[0].commissionValue, 0);
 assert.equal(tieredCalcRes.data[0].commissionRate, 0);
 assert.equal(tieredCalcRes.data[0].commissionAmount, 0);
-assert.match(tieredCalcRes.data[0].formulaText || '', /月度提成/);
+assert.equal(tieredCalcRes.data[0].payoutPlanVersion, 1);
+assert.equal(tieredCalcRes.data[0].payoutPlanSnapshot?.id, tieredPlan.id);
+assert.equal(tieredCalcRes.data[0].payoutPlanSnapshot?.tiers?.length, 3);
+assert.match(tieredCalcRes.data[0].formulaText || '', /月度累计阶梯/);
 
 seedOrders([
   buildOrder({

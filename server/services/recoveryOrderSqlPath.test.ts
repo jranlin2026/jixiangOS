@@ -141,8 +141,11 @@ assert.equal(page.data?.items[0]?.chatEvidencePreview, undefined);
 const listSql = sqlStatements.join('\n');
 assert.ok(sqlValues.includes('$.recoveryNo'), '生产 SQL 搜索必须支持挽回单号');
 assert.match(listSql, /CASE/, '生产 SQL 必须归一化历史分账状态');
-assert.match(listSql, /br\.eventAt DESC, br\.createdAt DESC/, '列表默认必须使用可索引排序');
-assert.doesNotMatch(listSql, /COALESCE\(br\.eventAt/, '列表排序不得引入 filesort 表达式');
+assert.match(
+  listSql,
+  /COALESCE\(JSON_UNQUOTE\(JSON_EXTRACT\(br\.data, '\$\.createdAt'\)\), br\.createdAt\) DESC, br\.id ASC/,
+  '列表默认必须按业务创建时间降序，并使用记录 ID 保证分页稳定',
+);
 
 sqlStatements.length = 0;
 sqlValues.length = 0;

@@ -1,5 +1,5 @@
 import type { ID, Timestamp, ProductLevel, OrderType, PaymentMethod, RefundStatus } from './common';
-import type { CommissionScene, OfficialPaymentChannel, ProofStatus, ResourceOwnership } from './commission';
+import type { CommissionScene, OfficialPaymentChannel, ProofStatus, ResourceOwnership, SettlementStatus } from './commission';
 import type { BusinessAttachment } from './businessAttachment';
 import type { BusinessImportMetadata } from './businessImport';
 
@@ -13,8 +13,8 @@ export type OrderStatus =
   | '已退款'
   | '已取消';
 
-/** 正式订单列表的分账进度，与售后挽回订单列表保持一致。 */
-export type OrderSettlementProgress = '待分账' | '待确认' | '待发放' | '已发放' | '已撤回';
+/** 正式订单列表的分账状态，与售后挽回和财务分账保持一致。 */
+export type OrderSettlementProgress = SettlementStatus;
 
 /** 订单支付记录 */
 export interface OrderPayment {
@@ -27,6 +27,29 @@ export interface OrderPayment {
   voucherPreview?: string;
   attachments?: BusinessAttachment[];
   remark?: string;
+}
+
+/** 订单产品明细；名称、等级和单价均为提交时快照。 */
+export interface OrderItem {
+  id: ID;
+  productId: ID;
+  productName: string;
+  productLevel: ProductLevel;
+  unitPrice: number;
+  quantity: number;
+  subtotal: number;
+  isPrimary: boolean;
+  sortOrder: number;
+  /** 审核通过后按标准小计分摊的实付金额。 */
+  allocatedActualAmount?: number;
+}
+
+export interface OrderItemInput {
+  /** 已存在明细的稳定 ID，用于正式订单更正时保持交付关联。 */
+  id?: ID;
+  productId: ID;
+  quantity: number;
+  isPrimary?: boolean;
 }
 
 export interface OrderChangeLog {
@@ -49,6 +72,24 @@ export interface OrderCorrectionInput {
   data: Partial<Order>;
 }
 
+export type OrderCorrectionBlockReason =
+  | 'order_deleted'
+  | 'refund_in_progress'
+  | 'manual_commission'
+  | 'payout_started'
+  | 'commission_withdrawn'
+  | 'unsupported_commission_status'
+  | 'rebuild_unavailable';
+
+export interface OrderCorrectionPrecheck {
+  allowed: boolean;
+  reasonCode?: OrderCorrectionBlockReason;
+  message: string;
+  commissionCount: number;
+  manualCommissionCount: number;
+  commissionStatuses: string[];
+}
+
 export type OrderApplicationStatus = '待财务审核' | '退回修改' | '已入库' | '已驳回';
 
 export interface OrderApplicationReviewLog {
@@ -69,6 +110,9 @@ export interface Order extends Partial<BusinessImportMetadata> {
   productName?: string;
   productLevel: ProductLevel;
   productId?: ID;
+  /** 多产品订单明细；legacy product* 字段始终投影主产品。 */
+  items?: OrderItem[];
+  standardTotalAmount?: number;
   orderType: OrderType;
   amount: number;
   actualAmount: number;
@@ -123,6 +167,7 @@ export interface Order extends Partial<BusinessImportMetadata> {
   payments: OrderPayment[];
   commissionId?: ID;
   deliveryId?: ID;
+  deliveryIds?: ID[];
   notes?: string;
   changeHistory?: OrderChangeLog[];
   deletedAt?: Timestamp;
@@ -191,6 +236,7 @@ export interface OrderFilters {
   customerId?: ID;
   productLevel?: ProductLevel;
   status?: OrderStatus;
+  refundStatus?: RefundStatus;
   settlementStatus?: OrderSettlementProgress;
   owner?: string;
   orderType?: OrderType;
@@ -213,6 +259,10 @@ export interface OrderApplicationFilters {
   reviewerName?: string;
   startDate?: string;
   endDate?: string;
+  paymentStartDate?: string;
+  paymentEndDate?: string;
+  sortBy?: 'createdAt' | 'paymentDate';
+  sortDirection?: 'asc' | 'desc';
   importBatchId?: string;
   page?: number;
   pageSize?: number;

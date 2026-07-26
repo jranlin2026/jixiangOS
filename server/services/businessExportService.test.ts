@@ -164,6 +164,91 @@ assert.equal(recoverySettlement.data?.detailColumns.some((column) => column.id =
 assert.equal((await service.export({ module: 'recovery_settlements', reason: '手机号搜索', columnMode: 'current_view', columnIds: ['recoveryNo'], filters: { search: '13800138000' } }, actor)).code, 0);
 assert.equal((await service.export({ module: 'recovery_settlements', reason: '微信搜索', columnMode: 'current_view', columnIds: ['recoveryNo'], filters: { search: 'wx_recovery' } }, actor)).code, 0);
 
+const recoveryOrders = await service.export({
+  module: 'recovery_orders' as any,
+  reason: '售后订单归档',
+  columnMode: 'current_view',
+  columnIds: ['recoveryNo', 'customerName', 'status', 'recoveryAmount'],
+  filters: { search: 'RCV-001' },
+}, actor);
+assert.equal(recoveryOrders.code, 0, '售后挽回订单列表应支持独立导出');
+const recoveryOrdersWithCustomizedView = await service.export({
+  module: 'recovery_orders',
+  reason: '自定义视图导出',
+  columnMode: 'current_view',
+  columnIds: [
+    'recoveryNo', 'status', 'customerName', 'thirdPartyOrderNo', 'sourcePlatformShop',
+    'originalProduct', 'originalProductLevel', 'originalAmount', 'recoveryAmount',
+    'recoveryUserName', 'createdByName', 'recoveryAt', 'createdAt', 'customerPhone', 'customerWechat',
+  ],
+  filters: { search: 'RCV-001' },
+}, actor);
+assert.equal(
+  recoveryOrdersWithCustomizedView.code,
+  0,
+  '售后挽回订单导出必须接受视图设置中的全部合法列表字段',
+);
+assert.deepEqual(recoveryOrders.data?.sheetNames, ['售后挽回订单汇总', '挽回凭证明细']);
+assert.deepEqual(recoveryOrders.data?.summaryRows, [{
+  recoveryNo: 'RCV-001', customerName: '客户乙', status: '待发放', recoveryAmount: 2980,
+}]);
+assert.equal(
+  (await service.export({
+    module: 'recovery_orders', reason: '分账状态筛选', columnMode: 'current_view', columnIds: ['recoveryNo'],
+    filters: { settlementStatuses: ['待发放'], recoveryUserId: 'sales-1' },
+  }, actor)).code,
+  0,
+  '售后挽回订单导出必须复用列表的分账状态和挽回人员筛选',
+);
+assert.equal(
+  (await service.export({
+    module: 'recovery_orders', reason: '不匹配筛选', columnMode: 'current_view', columnIds: ['recoveryNo'],
+    filters: { settlementStatuses: ['待处理'], recoveryUserId: 'sales-1' },
+  }, actor)).code,
+  400,
+  '售后挽回订单导出不得忽略列表筛选',
+);
+assert.deepEqual(recoveryOrders.data?.detailRows, [{
+  recoveryNo: 'RCV-001', customerName: '客户乙', evidenceSequence: 1,
+  fileName: '挽回凭证.png', mimeType: 'image/png', fileSize: 16,
+}]);
+
+const scopedActor: AuthenticatedUser = {
+  ...actor,
+  id: 'sales-1',
+  name: '销售甲',
+  role: '销售顾问',
+  roleId: 'role-sales',
+  permissions: [{ module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_EXPORT, actions: ['read'] }],
+};
+const scopedRecoveries = [
+  recovery,
+  { ...recovery, id: 'recovery-assist', recoveryNo: 'RCV-ASSIST', createdBy: 'admin-1', recoveryUserId: 'other-1', assistUserId: 'sales-1' },
+  { ...recovery, id: 'recovery-created', recoveryNo: 'RCV-CREATED', createdBy: 'sales-1', recoveryUserId: 'other-1', assistUserId: '' },
+];
+const scopedPrisma: any = {
+  ...prisma,
+  user: { findMany: async () => [scopedActor, { ...actor, id: 'admin-1' }, { ...actor, id: 'other-1', roleId: 'role-other' }] },
+  role: { findMany: async () => [{
+    id: 'role-sales', name: '销售顾问', code: 'sales_consultant',
+    permissions: scopedActor.permissions, dataScopes: { recoveryOrders: 'self' }, isActive: true,
+  }] },
+  businessRecord: {
+    findMany: async ({ where }: any) => scopedRecoveries
+      .map((item) => ({ domain: STORAGE_KEYS.RECOVERY_ORDERS, recordId: item.id, data: item }))
+      .filter((row) => !where?.domain || row.domain === where.domain),
+  },
+  businessExportAudit: { create: async ({ data }: any) => data },
+};
+const scopedRecoveryExport = await createBusinessExportService(scopedPrisma, { now: () => new Date(now) }).export({
+  module: 'recovery_orders', reason: '个人范围导出', columnMode: 'current_view', columnIds: ['recoveryNo'], filters: {},
+}, scopedActor);
+assert.deepEqual(
+  scopedRecoveryExport.data?.summaryRows.map((row) => row.recoveryNo).sort(),
+  ['RCV-001', 'RCV-ASSIST', 'RCV-CREATED'],
+  '售后挽回订单导出应与列表一致，创建人、挽回人员或协助人员任一可见即允许导出',
+);
+
 assert.deepEqual(
   (await service.export({ module: 'orders', reason: '字段池检查', columnMode: 'all', filters: { search: 'ORD-001' } }, actor)).data?.summaryColumns.map((column) => column.id),
   ['orderNo', 'settlementStatus', 'customer', 'productName', 'productLevel', 'orderType', 'actualAmount', 'officialPaymentChannel', 'thirdPartyOrderNo', 'resourceOwnership', 'owner', 'createdByName', 'paymentDate', 'leadInputBy', 'leadContributorName', 'notes', 'createdAt', 'leadSourceFull', 'updatedAt'],
@@ -174,7 +259,7 @@ assert.equal(orderAllFields.data?.summaryRows[0]?.leadSourceFull, '抖音 / 直�
 assert.equal(orderAllFields.data?.summaryRows[0]?.updatedAt, now);
 assert.equal(orderAllFields.data?.summaryRows[0]?.settlementStatus, '待确认');
 assert.equal(
-  (await service.export({ module: 'orders', reason: '分账进度筛选', columnMode: 'current_view', columnIds: ['orderNo', 'settlementStatus'], filters: { settlementStatus: '待确认' } }, actor)).code,
+  (await service.export({ module: 'orders', reason: '分账状态筛选', columnMode: 'current_view', columnIds: ['orderNo', 'settlementStatus'], filters: { settlementStatus: '待确认' } }, actor)).code,
   0,
 );
 assert.deepEqual(

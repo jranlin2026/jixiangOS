@@ -220,3 +220,53 @@ assert.equal(positionDepartmentAdjust.data[0].owner, 'Position Success A');
 assert.equal(positionDepartmentAdjust.data[0].ownerId, 'user-success-position');
 assert.equal(positionDepartmentAdjust.data[0].department, zh.successDept);
 assert.equal(positionDepartmentAdjust.data[0].departmentId, 'dept-success');
+
+const createManagerAssignmentOrder = async (customerId: string, paymentId: string) => orderApi.createOrder({
+  customerId,
+  customerName: `Customer ${customerId}`,
+  productLevel: zh.product,
+  orderType: zh.orderType,
+  amount: 9800,
+  actualAmount: 9800,
+  paymentMethod: zh.bankTransfer,
+  officialPaymentChannel: zh.officialChannel,
+  status: zh.confirmed,
+  refundStatus: zh.none,
+  owner: 'Sales A',
+  salesId: 'user-sales',
+  salesName: 'Sales A',
+  leadContributorName: 'Lead A',
+  resourceOwnership: zh.companyResource,
+  dealScene: zh.orderType,
+  proofStatus: zh.uploaded,
+  payments: [{ id: paymentId, amount: 9800, paidAt, method: zh.bankTransfer }],
+} as any);
+
+const departmentsWithoutManager = JSON.parse(storage.getItem(STORAGE_KEYS.DEPARTMENTS) || '[]');
+departmentsWithoutManager.find((item: any) => item.id === 'dept-sales').managerId = undefined;
+storage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify(departmentsWithoutManager));
+const missingManagerOrder = await createManagerAssignmentOrder('cust-missing-manager', 'pay-missing-manager');
+assert.equal(missingManagerOrder.code, 0);
+const missingManagerCommissions = ((await commissionApi.fetchCommissionsByOrder(missingManagerOrder.data.id)).data || []) as Commission[];
+assert.equal(byRole(missingManagerCommissions, zh.salesManager).owner, zh.pendingAssign);
+
+const departmentsWithManager = JSON.parse(storage.getItem(STORAGE_KEYS.DEPARTMENTS) || '[]');
+departmentsWithManager.find((item: any) => item.id === 'dept-sales').managerId = 'user-manager';
+storage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify(departmentsWithManager));
+const usersWithDisabledManager = JSON.parse(storage.getItem(STORAGE_KEYS.USERS) || '[]');
+usersWithDisabledManager.find((item: any) => item.id === 'user-manager').isActive = false;
+storage.setItem(STORAGE_KEYS.USERS, JSON.stringify(usersWithDisabledManager));
+const disabledManagerOrder = await createManagerAssignmentOrder('cust-disabled-manager', 'pay-disabled-manager');
+assert.equal(disabledManagerOrder.code, 0);
+const disabledManagerCommissions = ((await commissionApi.fetchCommissionsByOrder(disabledManagerOrder.data.id)).data || []) as Commission[];
+assert.equal(byRole(disabledManagerCommissions, zh.salesManager).owner, zh.pendingAssign);
+
+usersWithDisabledManager.find((item: any) => item.id === 'user-manager').isActive = true;
+storage.setItem(STORAGE_KEYS.USERS, JSON.stringify(usersWithDisabledManager));
+const rulesWithExplicitOverride = JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSION_RULES) || '[]');
+rulesWithExplicitOverride.find((item: any) => item.role === zh.salesManager).assigneeSource = 'sales_owner';
+storage.setItem(STORAGE_KEYS.COMMISSION_RULES, JSON.stringify(rulesWithExplicitOverride));
+const explicitOverrideOrder = await createManagerAssignmentOrder('cust-explicit-manager-source', 'pay-explicit-manager-source');
+assert.equal(explicitOverrideOrder.code, 0);
+const explicitOverrideCommissions = ((await commissionApi.fetchCommissionsByOrder(explicitOverrideOrder.data.id)).data || []) as Commission[];
+assert.equal(byRole(explicitOverrideCommissions, zh.salesManager).ownerId, 'user-sales', '规则显式人员来源必须优先于销售主管默认部门经理');

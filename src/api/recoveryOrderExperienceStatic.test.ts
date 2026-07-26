@@ -22,6 +22,16 @@ assert.match(
   /recoveryAt:\s*form\.recoveryAt/,
   'Recovery order submission should include the selected recovery time.',
 );
+assert.match(
+  recoveryOrderSource,
+  /recoveryStartDate:\s*localDateBoundaryIso\(recoveryStartDate\)[\s\S]*?recoveryEndDate:\s*localDateBoundaryIso\(recoveryEndDate, true\)/,
+  '售后日期筛选应按浏览器本地自然日转换为明确的 ISO 时间边界。',
+);
+assert.match(
+  recoveryOrderSource,
+  /paymentAt:\s*detail\.paymentAt\s*\?\s*toDateTimeInputValue\(detail\.paymentAt\)\s*:\s*''/,
+  '未记录付款时间的售后单在编辑时不得伪造付款时间。',
+);
 
 const createDialogSource = recoveryOrderSource.slice(
   recoveryOrderSource.indexOf('<Dialog open={open}'),
@@ -34,7 +44,7 @@ assert.equal(
   'Recovery order form should use one unified recovery evidence uploader.',
 );
 assert.match(createDialogSource, /title="挽回凭证"[\s\S]*?maxCount=\{8\}/);
-for (const section of ['客户资料', '原订单资料', '挽回成交资料', '凭证资料', '补充资料']) {
+for (const section of ['客户信息', '原订单信息', '挽回信息', '收款与凭证', '补充信息']) {
   assert.match(createDialogSource, new RegExp(`title="${section}"`), `新建售后挽回单应包含“${section}”填写分区。`);
 }
 assert.match(createDialogSource, /只在后台按手机号和微信进行身份识别/);
@@ -45,7 +55,7 @@ const detailDialogSource = recoveryOrderSource.slice(
   recoveryOrderSource.indexOf('<Dialog open={Boolean(detailOrder)}'),
   recoveryOrderSource.indexOf('<Dialog open={Boolean(historyOrder)}'),
 );
-for (const section of ['客户资料', '原订单资料', '挽回成交资料', '审核资料', '凭证资料']) {
+for (const section of ['客户信息', '原订单与来源信息', '挽回成交信息', '审核与系统信息', '付款与挽回凭证']) {
   assert.match(detailDialogSource, new RegExp(section), `售后资料弹窗应包含“${section}”分区。`);
 }
 assert.match(detailDialogSource, /label="挽回凭证"/);

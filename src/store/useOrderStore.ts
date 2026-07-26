@@ -22,6 +22,7 @@ interface OrderState {
 
 const defaultPagination = { page: 1, pageSize: 10, total: 0, totalPages: 0 };
 const defaultFilters: OrderFilters = { page: 1, pageSize: 10, sortBy: 'createdAt', sortDirection: 'desc' };
+let orderListRequestSequence = 0;
 
 const useOrderStore = create<OrderState>((set, get) => ({
   items: [],
@@ -33,17 +34,20 @@ const useOrderStore = create<OrderState>((set, get) => ({
   pagination: defaultPagination,
 
   fetchItems: async (filters?: OrderFilters) => {
+    const requestSequence = ++orderListRequestSequence;
     set({ loading: true, error: null });
     try {
       const f = filters || get().filters;
       const res = await orderApi.fetchOrders(f);
+      if (requestSequence !== orderListRequestSequence) return;
       if (res.code === 0) {
         set({ items: res.data.items, pagination: res.data.pagination, loading: false });
       } else {
         set({ error: res.message, loading: false });
       }
-    } catch (e: any) {
-      set({ error: e.message, loading: false });
+    } catch (e: unknown) {
+      if (requestSequence !== orderListRequestSequence) return;
+      set({ error: e instanceof Error ? e.message : String(e), loading: false });
     }
   },
 
@@ -99,7 +103,11 @@ const useOrderStore = create<OrderState>((set, get) => ({
     try {
       const res = await orderApi.deleteOrder(id);
       if (res.code !== 0) throw new Error(res.message || '删除订单失败');
-      await get().fetchItems();
+      const { filters, items, pagination } = get();
+      const targetPage = items.length <= 1 && pagination.page > 1 ? pagination.page - 1 : pagination.page;
+      const nextFilters = { ...filters, page: targetPage };
+      if (targetPage !== filters.page) set({ filters: nextFilters });
+      await get().fetchItems(nextFilters);
       await get().fetchStats();
     } catch (e: any) {
       set({ error: e.message, loading: false });

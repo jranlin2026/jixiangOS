@@ -31,7 +31,7 @@ assert.doesNotMatch(rolePermissionSource, /label:\s*'提成'/);
 assert.doesNotMatch(rolePermissionSource, /label:\s*'退款中心'/);
 assert.match(rolePermissionSource, /财务中心/);
 assert.match(rolePermissionSource, /订单分账/);
-assert.match(rolePermissionSource, /员工提成月报/);
+assert.match(rolePermissionSource, /提成发放/);
 assert.match(rolePermissionSource, /提成规则/);
 assert.match(rolePermissionSource, /订单审核列表/);
 assert.match(rolePermissionSource, /订单审核操作/);

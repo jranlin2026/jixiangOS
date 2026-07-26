@@ -15,4 +15,5 @@ export const businessExportApi = {
   exportOrders: (request: BrowserBusinessExportRequest) => requestExport('orders', request),
   exportOrderSettlements: (request: BrowserBusinessExportRequest) => requestExport('order_settlements', request),
   exportRecoverySettlements: (request: BrowserBusinessExportRequest) => requestExport('recovery_settlements', request),
+  exportRecoveryOrders: (request: BrowserBusinessExportRequest) => requestExport('recovery_orders', request),
 };

@@ -31,6 +31,9 @@
     "customer:demo-fixture-cleanup": "tsx scripts/cleanup-demo-refund-fixtures.ts",
     "customer:batch-verify": "tsx scripts/verify-customer-batch-foundation.ts",
     "customer:merge-release-gate": "tsx scripts/verify-customer-merge-release.ts",
+    "finance:backfill": "tsx scripts/backfill-finance-transactions.ts",
+    "clone:sanitize": "tsx scripts/sanitize-production-clone.ts",
+    "clone:attachments-report": "tsx scripts/report-clone-missing-attachments.ts",
     "test-data:reset-business": "tsx scripts/reset-business-test-data.ts"
   },
   "overrides": {

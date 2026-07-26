@@ -14,6 +14,7 @@ const scopedStorageKeys: Readonly<Record<string, readonly string[]>> = {
     STORAGE_KEYS.COMMISSIONS,
     STORAGE_KEYS.COMMISSION_OPERATION_LOGS,
     STORAGE_KEYS.COMMISSION_SETTLEMENT_BATCHES,
+    STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES,
   ],
   'finance-flow': [
     STORAGE_KEYS.ORDERS,

@@ -229,11 +229,53 @@ async function writeOrderLink(
   deliveryId: string | undefined,
   updatedAt: string,
 ): Promise<Order> {
-  if (deliveryId && order.deliveryId && order.deliveryId !== deliveryId) {
+  const linkedDeliveryIds = Array.from(new Set([
+    ...(order.deliveryIds || []),
+    ...(order.deliveryId ? [order.deliveryId] : []),
+  ]));
+  const alreadyLinked = Boolean(deliveryId && linkedDeliveryIds.includes(deliveryId));
+  if (deliveryId && linkedDeliveryIds.length && !alreadyLinked) {
     throw new DeliveryCommandError(409, '订单已关联其他交付单');
   }
+  if (alreadyLinked && order.deliveryId) return order;
   if (order.deliveryId === deliveryId) return order;
-  const next = { ...order, deliveryId, updatedAt };
+  const next = {
+    ...order,
+    deliveryId,
+    deliveryIds: deliveryId ? (alreadyLinked ? linkedDeliveryIds : [deliveryId]) : [],
+    updatedAt,
+  };
+  await transaction.businessRecord.update({
+    where: { domain_recordId: { domain: STORAGE_KEYS.ORDERS, recordId: order.id } },
+    data: {
+      status: next.status,
+      owner: next.salesName || next.owner || null,
+      customerId: next.customerId,
+      orderId: next.id,
+      amount: next.actualAmount,
+      eventAt: new Date(updatedAt),
+      data: jsonValue(next),
+    },
+  });
+  return next;
+}
+
+async function removeOrderDeliveryLink(
+  transaction: Prisma.TransactionClient,
+  order: Order,
+  deliveryId: string,
+  updatedAt: string,
+): Promise<Order> {
+  const remainingIds = Array.from(new Set([
+    ...(order.deliveryIds || []),
+    ...(order.deliveryId ? [order.deliveryId] : []),
+  ])).filter((id) => id !== deliveryId);
+  const next = {
+    ...order,
+    deliveryId: order.deliveryId === deliveryId ? remainingIds[0] : order.deliveryId,
+    deliveryIds: remainingIds,
+    updatedAt,
+  };
   await transaction.businessRecord.update({
     where: { domain_recordId: { domain: STORAGE_KEYS.ORDERS, recordId: order.id } },
     data: {
@@ -373,13 +415,23 @@ export function createDeliveryCommandService(
         const existingRows = await transaction.businessRecord.findMany({
           where: { domain: STORAGE_KEYS.DELIVERIES, orderId: order.id },
         });
-        const existing = existingRows.map((row) => parseObject<Delivery>(row.data, '交付单'))
-          .find((delivery) => delivery.orderId === order.id);
+        const existingDeliveries = existingRows
+          .map((row) => parseObject<Delivery>(row.data, '交付单'))
+          .filter((delivery) => delivery.orderId === order.id);
+        const primaryExisting = order.deliveryId
+          ? existingDeliveries.find((delivery) => delivery.id === order.deliveryId)
+          : undefined;
+        const listedExisting = (order.deliveryIds || [])
+          .map((deliveryId) => existingDeliveries.find((delivery) => delivery.id === deliveryId))
+          .find((delivery): delivery is Delivery => Boolean(delivery));
+        const existing = primaryExisting || listedExisting || (!order.deliveryId ? existingDeliveries[0] : undefined);
         if (existing) {
-          if (order.deliveryId && order.deliveryId !== existing.id) {
-            throw new DeliveryCommandError(409, '订单交付关联冲突，请先修复数据');
-          }
-          await writeOrderLink(transaction, order, existing.id, now().toISOString());
+          await writeOrderLink(
+            transaction,
+            primaryExisting ? order : { ...order, deliveryId: undefined },
+            existing.id,
+            now().toISOString(),
+          );
           return existing;
         }
         if (order.deliveryId) throw new DeliveryCommandError(409, '订单关联的交付单不存在，请先修复数据');
@@ -742,7 +794,7 @@ export function createDeliveryCommandService(
         await transaction.businessRecord.delete({
           where: { domain_recordId: { domain: STORAGE_KEYS.DELIVERIES, recordId: delivery.id } },
         });
-        await writeOrderLink(transaction, order, undefined, now().toISOString());
+        await removeOrderDeliveryLink(transaction, order, delivery.id, now().toISOString());
         return true;
       }, {
         isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,

@@ -71,7 +71,16 @@ export function classifyCustomerBatchItemFailure(error: unknown): { code: string
     return { code: 'CUSTOMER_CONTACT_DUPLICATE', message: message || '手机号或微信在系统中已存在客户', retryable: false };
   }
   if (/存在关联/.test(message)) {
-    return { code: 'CUSTOMER_ASSOCIATION_CONFLICT', message: '客户仍存在业务关联，无法执行', retryable: false };
+    const associationDetail = message
+      .replace(/^存在关联业务，不能删除[:：]?\s*/, '')
+      .trim();
+    return {
+      code: 'CUSTOMER_ASSOCIATION_CONFLICT',
+      message: associationDetail
+        ? `客户仍存在业务关联，无法删除：${associationDetail}`
+        : '客户仍存在业务关联，无法删除',
+      retryable: false,
+    };
   }
   if (/状态|进展|标签|目标销售|目标员工|公海|待办|参数|不允许/.test(message)) {
     return { code: 'CUSTOMER_STATE_CONFLICT', message: '客户当前状态不允许执行此操作', retryable: false };

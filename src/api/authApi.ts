@@ -170,7 +170,10 @@ async function login(payload: LoginPayload): Promise<ApiResponse<AuthenticatedUs
 async function getCurrentUser(): Promise<ApiResponse<AuthenticatedUser | null>> {
   if (shouldUseBackendApi()) {
     const response = await backendRequest<AuthenticatedUser | null>('/auth/me');
-    if (response.code === 0 && response.data) cacheBackendAuthenticatedUser(response.data);
+    if (response.code === 0 && response.data) {
+      cacheBackendAuthenticatedUser(response.data);
+      await syncBackendStorageFromServer(0);
+    }
     return response;
   }
 

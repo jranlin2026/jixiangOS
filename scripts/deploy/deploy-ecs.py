@@ -53,6 +53,7 @@ EXCLUDE_DIRS = {
     "node_modules",
     "uploads",
     "private_uploads",
+    "uploads-private",
 }
 
 EXCLUDE_FILES = {
@@ -259,12 +260,15 @@ if ! command -v rsync >/dev/null 2>&1; then
   echo "rsync is required for lossless upload migration" >&2
   exit 1
 fi
-mkdir -p "$PERSISTENT_DATA_DIR/uploads" "$PERSISTENT_DATA_DIR/private_uploads"
+mkdir -p "$PERSISTENT_DATA_DIR/uploads" "$PERSISTENT_DATA_DIR/private_uploads" "$PERSISTENT_DATA_DIR/uploads-private"
 if [ -d "$APP_DIR/uploads" ] && [ ! -L "$APP_DIR/uploads" ]; then
   rsync -a --delete "$APP_DIR/uploads/" "$PERSISTENT_DATA_DIR/uploads/"
 fi
 if [ -d "$APP_DIR/private_uploads" ] && [ ! -L "$APP_DIR/private_uploads" ]; then
   rsync -a --delete "$APP_DIR/private_uploads/" "$PERSISTENT_DATA_DIR/private_uploads/"
+fi
+if [ -d "$APP_DIR/uploads-private" ] && [ ! -L "$APP_DIR/uploads-private" ]; then
+  rsync -a "$APP_DIR/uploads-private/" "$PERSISTENT_DATA_DIR/uploads-private/"
 fi
 
 install -m 600 "$APP_DIR/.env" "$ENV_BACKUP"
@@ -272,9 +276,10 @@ rm -rf "$NEW_DIR"
 mkdir -p "$NEW_DIR"
 python3 -m zipfile -e "$RELEASE_ZIP" "$NEW_DIR"
 install -m 600 "$ENV_BACKUP" "$NEW_DIR/.env"
-rm -rf "$NEW_DIR/uploads" "$NEW_DIR/private_uploads"
+rm -rf "$NEW_DIR/uploads" "$NEW_DIR/private_uploads" "$NEW_DIR/uploads-private"
 ln -s "$PERSISTENT_DATA_DIR/uploads" "$NEW_DIR/uploads"
 ln -s "$PERSISTENT_DATA_DIR/private_uploads" "$NEW_DIR/private_uploads"
+ln -s "$PERSISTENT_DATA_DIR/uploads-private" "$NEW_DIR/uploads-private"
 
 SETUP_TOKEN_FILE="$PERSISTENT_DATA_DIR/initial-setup-token"
 SETUP_TOKEN_VALUE="$(
@@ -309,7 +314,13 @@ npm install --include=dev --prefer-offline --no-audit --no-fund
 NODE_ENV="production" AI_PROXY_HOST="127.0.0.1" AI_PROXY_PORT="3001" npm run prod:check
 
 echo "Creating database backup before migration..."
-bash "$NEW_DIR/scripts/mysql/backup-linux.sh"
+BACKUP_OUTPUT="$(bash "$NEW_DIR/scripts/mysql/backup-linux.sh")"
+echo "$BACKUP_OUTPUT"
+BACKUP_FILE="${{BACKUP_OUTPUT##*Backup created: }}"
+if [ ! -f "$BACKUP_FILE" ] || [ ! -f "${{BACKUP_FILE}}.sha256" ]; then
+  echo "Verified deployment backup could not be located" >&2
+  false
+fi
 
 npm run db:generate
 EXPECTED_BASELINE="20260710010000_enablement_knowledge_foundation"
@@ -345,6 +356,20 @@ npm run db:deploy
 npx --no-install prisma migrate status
 npx --no-install prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma --exit-code
 
+echo "Auditing immutable finance transaction backfill..."
+FINANCE_BACKFILL_REPORT="$(npm run --silent finance:backfill)"
+echo "$FINANCE_BACKFILL_REPORT"
+if ! echo "$FINANCE_BACKFILL_REPORT" | grep -Eq '"missingCount"[[:space:]]*:[[:space:]]*0'; then
+  if [ "${{JIXIANG_FINANCE_BACKFILL_APPLY:-}}" != "YES" ]; then
+    echo "Finance backfill is required. Set JIXIANG_FINANCE_BACKFILL_APPLY=YES only after reviewing the dry-run reconciliation." >&2
+    false
+  fi
+  export JIXIANG_VERIFIED_BACKUP_SHA256="$(sha256sum "$BACKUP_FILE" | awk '{{print $1}}')"
+  npm run finance:backfill -- --apply --confirm=BACKFILL_FINANCE_TRANSACTIONS
+  unset JIXIANG_VERIFIED_BACKUP_SHA256
+fi
+npm run finance:backfill -- --require-complete
+
 echo "Finalizing persistent uploads..."
 if pm2 describe jixiang-os-api >/dev/null 2>&1; then
   API_WAS_RUNNING="1"
@@ -377,6 +402,9 @@ if [ -d "$APP_DIR/uploads" ] && [ ! -L "$APP_DIR/uploads" ]; then
 fi
 if [ -d "$APP_DIR/private_uploads" ] && [ ! -L "$APP_DIR/private_uploads" ]; then
   rsync -a --delete "$APP_DIR/private_uploads/" "$PERSISTENT_DATA_DIR/private_uploads/"
+fi
+if [ -d "$APP_DIR/uploads-private" ] && [ ! -L "$APP_DIR/uploads-private" ]; then
+  rsync -a "$APP_DIR/uploads-private/" "$PERSISTENT_DATA_DIR/uploads-private/"
 fi
 
 echo "Switching release..."

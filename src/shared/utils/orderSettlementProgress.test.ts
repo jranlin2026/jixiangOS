@@ -29,4 +29,4 @@ assert.equal(deriveOrderSettlementProgress([split('待确认')]), '待确认');
 assert.equal(deriveOrderSettlementProgress([split('待发放'), split('已发放')]), '待发放');
 assert.equal(deriveOrderSettlementProgress([split('已发放')]), '已发放');
 assert.equal(deriveOrderSettlementProgress([split('已撤回')]), '已撤回');
-assert.equal(deriveOrderListSettlementProgress([]), '待分账', '订单列表用词应与售后挽回列表一致');
+assert.equal(deriveOrderListSettlementProgress([]), '待处理', '订单列表应使用统一的五态分账口径');

@@ -72,7 +72,7 @@ const records = [
     dealEvidencePreview: inlineProof,
     payments: [{ id: 'payment-self', amount: 899, paymentMethod: '对公转账', paidAt: now, voucherPreview: inlineProof }],
   }),
-  order('order-legacy-self', undefined, sales.name),
+  order('order-legacy-self', undefined, sales.name, { actualAmount: 799 }),
   order('order-other', 'user-other', '销售B', {
     thirdPartyOrderNo: 'THIRD-PARTY-LOOKUP',
     payments: [{ id: 'payment-other', amount: 899, paymentMethod: '对公转账', paidAt: now, paymentOrderNo: 'PAYMENT-LOOKUP' }],
@@ -99,10 +99,12 @@ const applications = [
     importedAt: now,
     targetCreatorId: sales.id,
     targetCreatorName: sales.name,
+    createdAt: '2026-07-24T12:00:00.000Z',
+    updatedAt: '2026-06-01T00:00:00.000Z',
     orderData: {
       ...application('application-self', sales.id, sales.name).orderData,
       dealEvidencePreview: inlineProof,
-      payments: [{ id: 'payment-application', amount: 899, paymentMethod: '对公转账', paidAt: now, voucherPreview: inlineProof }],
+      payments: [{ id: 'payment-application', amount: 899, paymentMethod: '对公转账', paidAt: '2026-06-24T00:38:48.000Z', voucherPreview: inlineProof }],
     },
   },
   application('application-legacy-self', undefined, sales.name),
@@ -115,6 +117,12 @@ const applications = [
     importedAt: now,
     targetCreatorId: 'user-other',
     targetCreatorName: '销售B',
+    createdAt: '2026-07-01T00:00:00.000Z',
+    updatedAt: '2026-07-25T00:00:00.000Z',
+    orderData: {
+      ...application('application-other', 'user-other', '销售B').orderData,
+      payments: [{ id: 'payment-application-other', amount: 899, paymentMethod: '对公转账', paidAt: '2026-07-24T10:55:13.000Z' }],
+    },
   },
   { ...application('application-approved', finance.id, finance.name, '已入库'), orderId: 'order-self', orderNo: 'ORD-order-self' },
   { ...application('application-deleted-approved', finance.id, finance.name, '已入库'), orderId: 'order-deleted', orderNo: 'ORD-order-deleted' },
@@ -178,11 +186,11 @@ assert.equal(listedOrder?.dealEvidencePreview, undefined);
 assert.equal(listedOrder?.payments[0].voucherPreview, undefined);
 assert.equal(listedOrder?.createdById, finance.id, '历史订单列表应从来源申请回溯创建人');
 assert.equal(listedOrder?.createdByName, finance.name);
-assert.equal(listedOrder?.settlementStatus, '待确认', '订单列表应显示分账进度而非固定的已确认');
+assert.equal(listedOrder?.settlementStatus, '待确认', '订单列表应显示分账状态而非固定的已确认');
 assert.equal(
   salesOrders.data?.items.find((item) => item.id === 'order-legacy-self')?.settlementStatus,
-  '待分账',
-  '没有分账记录的正式订单应标记为待分账',
+  '待处理',
+  '没有分账记录的正式订单应标记为待处理',
 );
 assert.deepEqual(
   businessRecordFindManyWhere.find((where) => where.domain === STORAGE_KEYS.ORDER_APPLICATIONS)?.recordId?.in,
@@ -192,7 +200,7 @@ assert.deepEqual(
 assert.deepEqual(
   (await service.listOrders({ settlementStatus: '待确认', page: 1, pageSize: 10 }, sales)).data?.items.map((item) => item.id),
   ['order-self'],
-  '分账进度筛选应在分页前生效',
+  '分账状态筛选应在分页前生效',
 );
 
 const financeOrders = await service.listOrders({ search: 'order-other', page: 1, pageSize: 10 }, finance);
@@ -241,13 +249,14 @@ assert.equal(orderDetail?.payments[0].voucherPreview, inlineProof);
 assert.equal(orderDetail?.createdById, finance.id, '历史订单详情应从来源申请回溯创建人');
 assert.equal(orderDetail?.createdByName, finance.name);
 assert.equal(orderDetail?.sourceName, '官网', '历史订单详情应从同一客户来源补齐二级来源');
+assert.equal(orderDetail?.settlementStatus, '待确认', '订单详情必须返回与列表一致的分账状态');
 
 const salesStats = await service.getOrderStats(sales);
 assert.equal(salesStats.code, 0);
 assert.deepEqual(salesStats.data, {
-  todayAmount: 1798,
+  todayAmount: 1698,
   todayCount: 2,
-  monthAmount: 1798,
+  monthAmount: 1698,
   monthCount: 2,
   refundCount: 0,
   refundAmount: 0,
@@ -276,6 +285,26 @@ assert.deepEqual(
     .data?.items.map((item) => item.id).sort(),
   ['application-other', 'application-self'],
   '导入批次筛选必须在服务端执行',
+);
+assert.deepEqual(
+  (await service.listApplications({ importBatchId: 'batch-visible', page: 1, pageSize: 20 }, finance))
+    .data?.items.map((item) => item.id),
+  ['application-self', 'application-other'],
+  '订单审核台默认应按创建时间降序，不应被更新时间干扰',
+);
+assert.deepEqual(
+  (await service.listApplications({
+    importBatchId: 'batch-visible', sortBy: 'paymentDate', sortDirection: 'desc', page: 1, pageSize: 20,
+  }, finance)).data?.items.map((item) => item.id),
+  ['application-other', 'application-self'],
+  '订单审核台付款时间降序应先显示7月付款',
+);
+assert.deepEqual(
+  (await service.listApplications({
+    importBatchId: 'batch-visible', paymentStartDate: '2026-07-01', paymentEndDate: '2026-07-31', page: 1, pageSize: 20,
+  }, finance)).data?.items.map((item) => item.id),
+  ['application-other'],
+  '订单审核台应按付款时间段筛选',
 );
 assert.deepEqual(
   (await service.listApplications({ importBatchId: 'batch-visible', page: 1, pageSize: 20 }, sales))

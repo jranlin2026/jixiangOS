@@ -17,13 +17,17 @@ import {
 } from '../shared/utils/recoveryOrderDeletion';
 import type { AuthSession } from '../types/auth';
 import type { Commission, CommissionPayoutPlan } from '../types/commission';
+import { buildCommissionPayoutPlanSnapshot } from '../shared/utils/commissionConfiguration';
 import type { Department } from '../types/department';
 import type { Role } from '../types/role';
 import type { User } from '../types/settings';
 import type {
   RecoveryOrder,
+  RecoveryOrderCorrectionInput,
+  RecoveryOrderCorrectionPrecheck,
   RecoveryOrderFilters,
   RecoveryOrderInput,
+  RecoveryOrderMetadataEditInput,
   RecoverySettlementInput,
   RecoveryOrderSettlementStatus,
   RecoveryOrderStats,
@@ -177,16 +181,22 @@ function isCurrentSessionSuperAdmin(): boolean {
 function canViewRecoveryOrder(order: RecoveryOrder, scopeDomain: NonNullable<RecoveryOrderFilters['scopeDomain']> = 'recoveryOrders'): boolean {
   const scope = getCurrentDataVisibilityScope(scopeDomain);
   if (scope.unrestricted) return true;
-  return order.createdBy
-    ? scope.visibleUserIds.includes(order.createdBy)
-    : Boolean(order.createdByName && scope.visibleUserNames.includes(order.createdByName));
+  return [
+    [order.createdBy, order.createdByName],
+    [order.recoveryUserId, order.recoveryUserName],
+    [order.assistUserId, order.assistUserName],
+  ].some(([userId, userName]) => (
+    userId
+      ? scope.visibleUserIds.includes(userId)
+      : Boolean(userName && scope.visibleUserNames.includes(userName))
+  ));
 }
 
 function canResubmitReturnedRecoveryOrder(order: RecoveryOrder): boolean {
-  if (order.status !== '退回修改') return false;
+  if (!['退回修改', '审核驳回'].includes(order.status)) return false;
   const user = getCurrentSessionUser();
   if (!user) return false;
-  return order.createdBy === user.id || order.recoveryUserId === user.id;
+  return order.createdBy === user.id;
 }
 
 function filterVisibleRecoveryOrders(
@@ -560,6 +570,39 @@ async function updateRecoveryOrder(id: string, data: RecoveryOrderInput): Promis
   return createSuccessResponse(orders[idx]);
 }
 
+async function editRecoveryOrderMetadata(
+  id: string,
+  data: RecoveryOrderMetadataEditInput,
+): Promise<ApiResponse<RecoveryOrder | null>> {
+  if (!shouldUseBackendApi()) return createErrorResponse('售后挽回资料编辑仅支持服务端模式', 503);
+  const response = await backendRequest<RecoveryOrder | null>(`/recovery-orders/${encodeURIComponent(id)}/metadata`, {
+    method: 'PATCH',
+    body: JSON.stringify({ data }),
+  });
+  if (response.code !== 0) return createErrorResponse(response.message, response.code);
+  return createSuccessResponse(response.data ? cacheBackendRecoveryOrder(response.data) : null, response.message);
+}
+
+async function precheckRecoveryOrderCorrection(
+  id: string,
+): Promise<ApiResponse<RecoveryOrderCorrectionPrecheck | null>> {
+  if (!shouldUseBackendApi()) return createErrorResponse('售后挽回订单更正预检仅支持服务端模式', 503);
+  return backendRequest<RecoveryOrderCorrectionPrecheck>(`/recovery-orders/${encodeURIComponent(id)}/correction-precheck`);
+}
+
+async function correctRecoveryOrder(
+  id: string,
+  input: RecoveryOrderCorrectionInput,
+): Promise<ApiResponse<RecoveryOrder | null>> {
+  if (!shouldUseBackendApi()) return createErrorResponse('售后挽回订单更正仅支持服务端模式', 503);
+  const response = await backendRequest<RecoveryOrder | null>(`/recovery-orders/${encodeURIComponent(id)}/correct`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  if (response.code !== 0) return createErrorResponse(response.message, response.code);
+  return createSuccessResponse(response.data ? cacheBackendRecoveryOrder(response.data) : null, response.message);
+}
+
 async function deleteRecoveryOrder(id: string): Promise<ApiResponse<boolean>> {
   if (shouldUseBackendApi()) {
     const response = await backendRequest<RecoveryOrder | null>(`/recovery-orders/${encodeURIComponent(id)}`, {
@@ -792,14 +835,19 @@ function buildRecoveryCommission(order: RecoveryOrder, input: RecoverySettlement
   const commissionRate = calculationType === 'percentage'
     ? Number(input.commissionRate ?? (plan ? plan.commissionValue / 100 : 0))
     : 0;
-  const amount = calculationType === 'percentage'
-    ? roundMoney(performanceAmount * commissionRate)
-    : roundMoney(input.commissionAmount);
+  const amount = calculationType === 'tiered_percentage'
+    ? 0
+    : calculationType === 'percentage'
+      ? roundMoney(performanceAmount * commissionRate)
+      : roundMoney(input.commissionAmount);
   if (amount < 0) return createErrorResponse('提成金额不能小于 0');
   const payoutPlanName = input.payoutPlanName || plan?.name || '自定义金额';
-  const formulaText = calculationType === 'percentage'
-    ? `${payoutPlanName}：挽回金额 ${performanceAmount} × ${roundMoney(commissionRate * 100)}% = ${amount} 元`
-    : `${payoutPlanName}：售后挽回提成 ${amount} 元`;
+  const payoutPlanSnapshot = input.payoutPlanSnapshot || (plan ? buildCommissionPayoutPlanSnapshot(plan) : undefined);
+  const formulaText = calculationType === 'tiered_percentage'
+    ? `${payoutPlanName}：按挽回人员与方案版本汇总月度挽回业绩后计算`
+    : calculationType === 'percentage'
+      ? `${payoutPlanName}：挽回金额 ${performanceAmount} × ${roundMoney(commissionRate * 100)}% = ${amount} 元`
+      : `${payoutPlanName}：售后挽回提成 ${amount} 元`;
   return createSuccessResponse({
     id: `comm-${uuidv4().slice(0, 8)}`,
     orderId: order.id,
@@ -816,17 +864,27 @@ function buildRecoveryCommission(order: RecoveryOrder, input: RecoverySettlement
     formulaText,
     calculationNote: input.calculationNote || `售后挽回订单 ${order.recoveryNo} 财务分账：${operatorName}`,
     role: input.role,
+    roleId: input.roleId,
+    roleCode: input.roleCode,
+    roleNameSnapshot: input.roleNameSnapshot || input.role,
     owner: user.name,
     ownerId: user.id,
     department: department?.name || '',
     departmentId: department?.id || user.departmentId,
-    paymentDate: order.auditedAt || now,
+    paymentDate: order.recoveryAt || now,
     status: '待确认',
     sourceType: '人工新增',
     commissionType: 'recovery',
     payoutPlanId: input.payoutPlanId,
     payoutPlanName,
+    payoutPlanVersion: input.payoutPlanVersion || payoutPlanSnapshot?.version,
+    payoutPlanSnapshot,
     ruleCalculationType: calculationType,
+    tierSnapshot: calculationType === 'tiered_percentage'
+      ? (input.tierSnapshot || (payoutPlanSnapshot?.tiers?.length
+        ? { tiers: payoutPlanSnapshot.tiers, baseAmount: performanceAmount, gapToNext: 0 }
+        : undefined))
+      : undefined,
     sourceRecoveryOrderId: order.id,
     sourceBusinessType: 'after_sales_recovery',
     isRecoveryBonus: true,
@@ -1071,6 +1129,9 @@ export const recoveryOrderApi = {
   fetchRecoverySettlementCounts,
   createRecoveryOrder,
   updateRecoveryOrder,
+  editRecoveryOrderMetadata,
+  precheckRecoveryOrderCorrection,
+  correctRecoveryOrder,
   deleteRecoveryOrder,
   cleanupDeletedRecoveryOrderReview,
   cleanupDeletedRecoverySettlement,

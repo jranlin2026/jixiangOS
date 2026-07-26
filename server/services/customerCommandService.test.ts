@@ -1710,7 +1710,7 @@ const serviceOptions = {
   assert.equal(fake.getState().businessRecords[0].data.deletedAt, FIXED_NOW.toISOString());
 }
 
-// RED: “全部”的 delete/admin 不得绕过 Task 2 客户删除 explicit-only 规则。
+// 超级管理员拥有系统清理职责；即使角色只保留全局 admin，也应能删除无业务关联客户。
 {
   const value = customer('cust-delete-global-only');
   const globalOnlySuperRole = {
@@ -1721,10 +1721,10 @@ const serviceOptions = {
     { businessRecords: [businessCustomer(value)], leads: [] },
     { roleRows: [salesRole, managerRole, financeRole, globalOnlySuperRole] },
   );
-  const denied = await createCustomerCommandService(fake.prisma, serviceOptions)
-    .deleteCustomer(value.id, '不应删除', superAdmin);
-  assert.equal(denied.code, 403);
-  assert.equal(fake.businessRecordCompareAndSaveCalls, 0);
+  const deleted = await createCustomerCommandService(fake.prisma, serviceOptions)
+    .deleteCustomer(value.id, '超级管理员清理无关联客户', superAdmin);
+  assert.equal(deleted.code, 0, deleted.message);
+  assert.equal(fake.businessRecordCompareAndSaveCalls, 1);
 }
 
 // RED: 存在有效关联订单的客户不得删除。

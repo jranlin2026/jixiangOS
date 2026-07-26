@@ -926,36 +926,66 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
 
   return (
     <>
-    <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
-      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, pr: 6 }}>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth={false}
+      PaperProps={{
+        sx: {
+          width: { xs: 'calc(100vw - 24px)', md: 'calc(100vw - 64px)' },
+          maxWidth: 1320,
+          height: { xs: 'calc(100dvh - 24px)', lg: 'min(820px, calc(100dvh - 64px))' },
+          maxHeight: 'calc(100dvh - 24px)',
+          borderRadius: 2,
+          overflow: 'hidden',
+        },
+      }}
+    >
+      <DialogTitle sx={{ display: 'flex', alignItems: 'center', minHeight: 86, px: { xs: 2, sm: 2.5 }, py: 1.75, pr: 7 }}>
         <Box sx={{ minWidth: 0 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
-            <Typography variant="h6" sx={{ fontWeight: 700 }}>{currentCustomer.name}</Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', columnGap: 1, rowGap: 0.75, minWidth: 0 }}>
+            <Typography variant="h6" sx={{ fontWeight: 750, mr: 0.25 }}>{currentCustomer.name}</Typography>
             <CustomerLevelBadge level={currentCustomer.customerLevel} />
             <Chip label={lifecycleConfig.name} size="small" sx={getLifecycleStatusTagSx(`${lifecycleCode} ${lifecycleConfig.name}`)} />
-          </Box>
-          <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>
-            {currentCustomer.owner || '未分配'} 跟进 · {formatCustomerSource(currentCustomer)}
-          </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.75, mt: 1 }}>
-            <ManualTagDisplay ids={currentCustomer.manualTagIds} legacyNames={currentCustomer.tags} />
+            {Boolean(currentCustomer.manualTagIds?.length || currentCustomer.tags?.length) && (
+              <ManualTagDisplay ids={currentCustomer.manualTagIds} legacyNames={currentCustomer.tags} />
+            )}
             {detailActions.actions.setTags && (
-              <Button size="small" variant="outlined" onClick={() => setTagDialogOpen(true)}>+ 标签</Button>
+              <Button size="small" variant="outlined" onClick={() => setTagDialogOpen(true)} sx={{ minWidth: 0, height: 28, px: 1.25 }}>
+                + 标签
+              </Button>
             )}
           </Box>
+          <Typography variant="body2" sx={{ color: '#64748b', mt: 0.75 }}>
+            {currentCustomer.owner || '未分配'} 跟进 · {formatCustomerSource(currentCustomer)}
+          </Typography>
         </Box>
         <IconButton
           aria-label="关闭"
           onClick={onClose}
-          sx={{ position: 'absolute', right: 12, top: 12 }}
+          sx={{ position: 'absolute', right: 14, top: 14 }}
         >
           <CloseIcon fontSize="small" />
         </IconButton>
       </DialogTitle>
-      <DialogContent dividers sx={{ bgcolor: '#f8fafc' }}>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '0.82fr 1.18fr' }, gap: 2, minHeight: '72vh' }}>
-          <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', alignSelf: 'start' }}>
-            <Box sx={{ p: 2, borderBottom: '1px solid #eef2f7', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <DialogContent
+        dividers
+        sx={{
+          bgcolor: '#f8fafc',
+          p: { xs: 1.5, sm: 2 },
+          overflow: { xs: 'auto', lg: 'hidden' },
+          '&.MuiDialogContent-dividers': { borderBottom: 0 },
+        }}
+      >
+        <Box sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', lg: '380px minmax(0, 1fr)', xl: '410px minmax(0, 1fr)' },
+          gap: 2,
+          height: { lg: '100%' },
+          minHeight: 0,
+        }}>
+          <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1.5, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <Box sx={{ px: 1.75, py: 1.5, borderBottom: '1px solid #eef2f7', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <Typography variant="subtitle2" sx={{ color: '#2196F3', fontWeight: 700 }}>资料</Typography>
                 {editing && !detailActions.actions.editAttribution && (
@@ -1012,7 +1042,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
                 </Box>
               )}
             </Box>
-            <Box>
+            <Box sx={{ minHeight: 0, overflowY: { lg: 'auto' } }}>
               {renderInfoRow('客户全名', 'name', detailActions.actions.editProfile)}
               {renderInfoRow('公司', 'company', detailActions.actions.editProfile)}
               {renderInfoRow('手机', 'phone', detailActions.actions.editProfile && (canEditLockedContact || canCompletePhoneField(currentCustomer.phone)))}
@@ -1035,8 +1065,14 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
             </Box>
           </Paper>
 
-          <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', minWidth: 0 }}>
-            <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ px: 2, borderBottom: '1px solid #eef2f7' }}>
+          <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1.5, overflow: 'hidden', minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <Tabs
+              value={activeTab}
+              onChange={(_, value) => setActiveTab(value)}
+              variant="scrollable"
+              scrollButtons="auto"
+              sx={{ px: 1.25, minHeight: 48, borderBottom: '1px solid #eef2f7', '& .MuiTab-root': { minHeight: 48 } }}
+            >
               <Tab icon={<HistoryIcon fontSize="small" />} iconPosition="start" label="动态" />
               <Tab label="待办" icon={<TaskAltOutlinedIcon fontSize="small" />} iconPosition="start" />
               <Tab icon={<ReceiptLongIcon fontSize="small" />} iconPosition="start" label="订单" />
@@ -1044,7 +1080,7 @@ const CustomerDetail: React.FC<CustomerDetailProps> = ({
               <Tab icon={<AutoAwesomeIcon fontSize="small" />} iconPosition="start" label="AI名片" />
               <Tab icon={<UploadFileIcon fontSize="small" />} iconPosition="start" label="电子合同" />
             </Tabs>
-            <Box sx={{ p: 2, maxHeight: '68vh', overflowY: 'auto' }}>
+            <Box sx={{ p: { xs: 1.5, sm: 2 }, flex: 1, minHeight: 0, overflowY: 'auto' }}>
               {activeTab === 0 && renderActivityTab()}
               {activeTab === 1 && (
                 <CustomerTodoPanel

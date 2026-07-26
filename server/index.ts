@@ -78,6 +78,9 @@ import { createDeliveryQueryService } from './services/deliveryQueryService';
 import { createDeliveryAssignmentService } from './services/deliveryAssignmentService';
 import { createRecoveryOrderCommandService } from './services/recoveryOrderCommandService';
 import { createRecoveryCrmBridge } from './services/recoveryCrmBridge';
+import { createCommissionPayoutService } from './services/commissionPayoutService';
+import { createFinanceTransactionService } from './services/financeTransactionService';
+import { collectLeadSourcePairs, ensureLeadSourceConfigsInTransaction } from './services/leadSourceConfigSyncService';
 import { createKnowledgeService } from './services/enablement/knowledgeService';
 import { createKnowledgeFileStore } from './services/enablement/knowledgeFileStore';
 import { createPrismaKnowledgeRepository } from './services/enablement/prismaKnowledgeRepository';
@@ -210,8 +213,14 @@ const businessAttachmentService = createBusinessAttachmentService({
 });
 const assetListService = createAssetListService(storageService, assetStorageContext);
 const deliveryAssignmentService = createDeliveryAssignmentService(prisma);
+const financeTransactionService = createFinanceTransactionService(prisma);
+const orderApprovalEffects = createOrderApprovalDownstreamEffects(deliveryAssignmentService);
 const orderApplicationService = createOrderApplicationService(prisma, {
-  applyDownstreamEffects: createOrderApprovalDownstreamEffects(deliveryAssignmentService),
+  applyDownstreamEffects: async (context) => {
+    const effects = await orderApprovalEffects(context);
+    await financeTransactionService.recordOrderPayments(context.transaction, context.order, context.reviewer, context.approvedAt);
+    return effects;
+  },
 });
 const orderCommandService = createOrderCommandService(prisma, {
   rebuildPendingCommissions: rebuildPendingOrderCommissions,
@@ -222,6 +231,13 @@ const deliveryCommandService = createDeliveryCommandService(prisma, { assigner: 
 const deliveryQueryService = createDeliveryQueryService(prisma);
 const recoveryOrderCommandService = createRecoveryOrderCommandService(prisma, {
   crmBridge: createRecoveryCrmBridge({ contactIdentityCrypto }),
+  syncLeadSources: (transaction) => ensureLeadSourceConfigsInTransaction(transaction, [{
+    leadSource: '售后服务',
+    sourceName: '售后挽回',
+  }]),
+});
+const commissionPayoutService = createCommissionPayoutService(prisma, {
+  recordFinanceTransaction: (transaction, payout) => financeTransactionService.recordCommissionPayout(transaction, payout),
 });
 const businessImportReadService = createBusinessImportReadRepository(prisma);
 const businessImportReviewService = createBusinessImportReviewService({
@@ -307,11 +323,17 @@ const requireOrderCreateWriteAccess = createRequireAuth(authService, PERMISSION_
 const requireOrderReadAccess = createRequireAuth(authService, PERMISSION_KEYS.ORDER_MANAGE);
 const requireOrderApplicationReadAccess = createRequireAuth(authService, PERMISSION_KEYS.ORDER_REVIEW_LIST);
 const requireOrderEditWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.ORDER_EDIT, 'write');
+const requireOrderCorrectWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.ORDER_CORRECT, 'write');
 const requireOrderDeleteAccess = createRequireAuth(authService, PERMISSION_KEYS.ORDER_DELETE, 'delete');
 const requireOrderReviewWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.ORDER_REVIEW, 'write');
 const requireDeliveryReadAccess = createRequireAuth(authService, PERMISSION_KEYS.DELIVERY_CENTER);
 const requireDeliveryWriteAccess = createRequireAnyPermission(authService, [PERMISSION_KEYS.DELIVERY_MOVE_CARD, PERMISSION_KEYS.DELIVERY_STAGE_CONFIG], 'write');
 const requireRecoveryCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, 'write');
+const requireRecoveryEditAccess = createRequireAuth(authService, PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT, 'write');
+const requireRecoveryCorrectAccess = createRequireAuth(authService, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CORRECT, 'write');
+const requireFinancePayoutReadAccess = createRequireAuth(authService, PERMISSION_KEYS.FINANCE_PAYOUT);
+const requireFinancePayoutWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.FINANCE_PAYOUT, 'write');
+const requireFinanceFlowReadAccess = createRequireAuth(authService, PERMISSION_KEYS.FINANCE_FLOW);
 const requireMatrixPublishUploadAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write');
 const requireAssetReadAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS);
 const requireAiChatAccess = createRequireAuth(authService, PERMISSION_KEYS.AI_CHAT);
@@ -788,6 +810,10 @@ app.get('/api/order-applications', requireOrderApplicationReadAccess, async (req
     reviewerName: queryParam(req.query.reviewerName),
     startDate: queryParam(req.query.startDate),
     endDate: queryParam(req.query.endDate),
+    paymentStartDate: queryParam(req.query.paymentStartDate),
+    paymentEndDate: queryParam(req.query.paymentEndDate),
+    sortBy: queryParam(req.query.sortBy) as OrderApplicationFilters['sortBy'],
+    sortDirection: queryParam(req.query.sortDirection) as OrderApplicationFilters['sortDirection'],
     importBatchId: queryParam(req.query.importBatchId),
     page: Number(queryParam(req.query.page)),
     pageSize: Number(queryParam(req.query.pageSize)),
@@ -857,6 +883,7 @@ app.get('/api/orders', requireOrderReadAccess, async (req: AuthenticatedRequest,
     customerId: queryParam(req.query.customerId),
     productLevel: queryParam(req.query.productLevel) as any,
     status: queryParam(req.query.status) as any,
+    refundStatus: queryParam(req.query.refundStatus) as any,
     settlementStatus: queryParam(req.query.settlementStatus) as any,
     owner: queryParam(req.query.owner),
     orderType: queryParam(req.query.orderType) as any,
@@ -897,7 +924,12 @@ app.put('/api/orders/:id', requireOrderEditWriteAccess, async (req: Authenticate
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
-app.post('/api/orders/:id/correct', requireOrderEditWriteAccess, async (req: AuthenticatedRequest, res) => {
+app.get('/api/orders/:id/correction-precheck', requireOrderCorrectWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderCommandService.precheckCorrection(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/orders/:id/correct', requireOrderCorrectWriteAccess, async (req: AuthenticatedRequest, res) => {
   const result = await orderCommandService.correct(
     routeParam(req.params.id),
     {
@@ -1114,6 +1146,24 @@ app.put('/api/recovery-orders/:id', requireStorageAccess, async (req: Authentica
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
+app.patch('/api/recovery-orders/:id/metadata', requireRecoveryEditAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await recoveryOrderCommandService.editMetadata(routeParam(req.params.id), req.body?.data || req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.get('/api/recovery-orders/:id/correction-precheck', requireRecoveryCorrectAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await recoveryOrderCommandService.precheckCorrection(routeParam(req.params.id), req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/recovery-orders/:id/correct', requireRecoveryCorrectAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await recoveryOrderCommandService.correct(routeParam(req.params.id), {
+    reason: String(req.body?.reason || ''),
+    data: req.body?.data || {},
+  }, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
 app.post('/api/recovery-orders/:id/approve', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
   const result = await recoveryOrderCommandService.approve(routeParam(req.params.id), req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
@@ -1183,6 +1233,53 @@ app.post('/api/recovery-orders/:id/cleanup-settlement', requireStorageAccess, as
     req.currentUser!,
   );
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.get('/api/commission-payout-workspace', requireFinancePayoutReadAccess, async (req: AuthenticatedRequest, res) => {
+  const scope = queryParam(req.query.scope);
+  const result = scope === 'pending'
+    ? await commissionPayoutService.getPendingWorkspace()
+    : scope === 'records'
+      ? await commissionPayoutService.getRecordsWorkspace()
+      : await commissionPayoutService.getPeriodWorkspace(queryParam(req.query.period));
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/commission-payouts/issue', requireFinancePayoutWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await commissionPayoutService.issue(req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 201 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/commission-payout-records/:id/reverse', requireFinancePayoutWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await commissionPayoutService.reverse(
+    routeParam(req.params.id),
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.get('/api/finance-transactions', requireFinanceFlowReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await financeTransactionService.list({
+    search: queryParam(req.query.search), type: queryParam(req.query.type),
+    direction: queryParam(req.query.direction) as any, status: queryParam(req.query.status),
+    startDate: queryParam(req.query.startDate), endDate: queryParam(req.query.endDate),
+    page: Number(queryParam(req.query.page) || 1), pageSize: Number(queryParam(req.query.pageSize) || 10),
+  });
+  res.json(result);
+});
+
+app.get('/api/finance-transactions/export', requireFinanceFlowReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await financeTransactionService.exportCsv({
+    search: queryParam(req.query.search), type: queryParam(req.query.type), direction: queryParam(req.query.direction) as any,
+    startDate: queryParam(req.query.startDate), endDate: queryParam(req.query.endDate),
+  });
+  res.json(result);
+});
+
+app.get('/api/finance-transactions/:id', requireFinanceFlowReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await financeTransactionService.getById(routeParam(req.params.id));
+  res.status(result.code === 0 ? 200 : 404).json(result);
 });
 
 app.post('/api/auth/login', loginRateLimiter.guard, async (req, res) => {
@@ -1503,6 +1600,28 @@ app.get('/api/storage/:key', requireStorageAccess, async (req: AuthenticatedRequ
       req.currentUser,
     );
     res.status(result.code === 0 ? 200 : 400).json({ ...result, data });
+    return;
+  }
+  if (key === STORAGE_KEYS.LEAD_SOURCE_CONFIGS) {
+    const [configResult, activeCustomerResult, publicPoolResult, leadResult, orderResult] = await Promise.all([
+      storageService.get(STORAGE_KEYS.LEAD_SOURCE_CONFIGS),
+      customerListService.listLeadSourceFacets('active', req.currentUser),
+      customerListService.listLeadSourceFacets('public_pool', req.currentUser),
+      storageService.get(STORAGE_KEYS.LEADS),
+      storageService.get(STORAGE_KEYS.ORDERS),
+    ]);
+    const customerPairs = [activeCustomerResult, publicPoolResult].flatMap((result) => (
+      result.code === 0 && Array.isArray(result.data) ? result.data : []
+    ));
+    const sourcePairs = [
+      ...customerPairs,
+      ...collectLeadSourcePairs(leadResult.code === 0 ? leadResult.data : []),
+      ...collectLeadSourcePairs(orderResult.code === 0 ? orderResult.data : []),
+    ];
+    const configs = await prisma.$transaction((transaction) => (
+      ensureLeadSourceConfigsInTransaction(transaction, sourcePairs)
+    ));
+    res.status(configResult.code === 0 ? 200 : 400).json({ ...configResult, data: configs });
     return;
   }
   const result = await storageService.get(key);

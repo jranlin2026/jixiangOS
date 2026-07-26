@@ -24,18 +24,23 @@ import {
   TableRow,
   Tabs,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
+import HistoryIcon from '@mui/icons-material/History';
 import { commissionRuleApi, settingsApi } from '../../api';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TablePagination from '../../shared/components/TablePagination';
 import type {
   CommissionRole,
+  CommissionAssigneeSource,
+  CommissionBusinessSource,
   CommissionPayoutPlan,
   CommissionPayoutPlanInput,
+  CommissionPayoutPlanRevision,
   CommissionRoleConfig,
   CommissionRoleConfigInput,
   CommissionTier,
@@ -53,6 +58,9 @@ import { createLatestCommissionRuleRequestGate } from './commissionRuleRequestGa
 
 type CommissionConfigView = 'rules' | 'plans' | 'roles';
 type CommissionConfigPagination = Record<CommissionConfigView, { page: number; rowsPerPage: number }>;
+type CommissionPlanFormState = Omit<CommissionPayoutPlanInput, 'commissionValue'> & {
+  commissionValue: number | '';
+};
 
 const DEFAULT_CONFIG_PAGINATION: CommissionConfigPagination = {
   rules: { page: 0, rowsPerPage: 10 },
@@ -71,14 +79,33 @@ const RESOURCE_OPTIONS: Array<{ value: ResourceOwnership; label: string }> = [
   { value: '个人资源', label: '个人资源' },
 ];
 
+const BUSINESS_SOURCE_OPTIONS: Array<{ value: CommissionBusinessSource; label: string }> = [
+  { value: 'formal_order', label: '正式订单' },
+  { value: 'after_sales_recovery', label: '售后挽回' },
+];
+
+const ASSIGNEE_SOURCE_OPTIONS: Array<{ value: CommissionAssigneeSource; label: string }> = [
+  { value: 'sales_owner', label: '销售负责人' },
+  { value: 'lead_contributor', label: '线索贡献人' },
+  { value: 'customer_success', label: '客户成功人员' },
+  { value: 'after_sales', label: '售后人员' },
+  { value: 'recovery_owner', label: '挽回人员' },
+  { value: 'recovery_assistant', label: '挽回协作人' },
+  { value: 'business_creator', label: '业务提交人' },
+  { value: 'department_manager', label: '部门负责人' },
+  { value: 'manual', label: '财务手动指定' },
+];
+
 const emptyPayout: SimpleCommissionRulePayout = {
   role: '销售',
+  assigneeSource: 'sales_owner',
   commissionType: 'percentage',
   commissionValue: 0,
 };
 
 const emptyRuleForm: SimpleCommissionRuleGroupInput = {
   name: '',
+  businessSource: 'formal_order',
   orderType: '',
   resourceOwnership: '公司资源',
   isActive: true,
@@ -94,10 +121,10 @@ const emptyRoleForm: CommissionRoleConfigInput = {
   description: '',
 };
 
-const emptyPlanForm: CommissionPayoutPlanInput = {
+const emptyPlanForm: CommissionPlanFormState = {
   name: '',
   commissionType: 'percentage',
-  commissionValue: 0,
+  commissionValue: '',
   tiers: undefined,
   isActive: true,
   description: '',
@@ -142,25 +169,76 @@ function validateTierRows(tiers: CommissionTier[]): string {
 
 function formatPayout(payout: SimpleCommissionRulePayout): string {
   if (payout.payoutPlanName) return `${payout.role} · ${payout.payoutPlanName}`;
-  if (payout.commissionType === 'tiered_percentage') return `${payout.role} 销售月累计阶梯`;
+  if (payout.commissionType === 'tiered_percentage') return `${payout.role} 月度累计阶梯`;
   return payout.commissionType === 'percentage'
     ? `${payout.role} ${payout.commissionValue}%`
     : `${payout.role} ¥${payout.commissionValue}`;
 }
 
 function formatPlanMethod(type: CommissionPayoutPlan['commissionType']): string {
-  if (type === 'tiered_percentage') return '销售月累计阶梯';
+  if (type === 'tiered_percentage') return '月度累计阶梯';
   if (type === 'percentage') return '固定比例';
   return '固定金额';
 }
 
 function formatPlanValue(plan: Pick<CommissionPayoutPlan, 'commissionType' | 'commissionValue' | 'tiers'>): string {
   if (plan.commissionType === 'tiered_percentage') {
-    return `销售阶梯 · ${normalizeTierRowsForEditor(plan.tiers).length} 档`;
+    return `月度阶梯 · ${normalizeTierRowsForEditor(plan.tiers).length} 档`;
   }
   return plan.commissionType === 'percentage'
     ? `${plan.commissionValue}%`
     : `¥${plan.commissionValue}`;
+}
+
+function formatVersionTime(value?: string): string {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+function getPayoutPlanHistory(plan: CommissionPayoutPlan): CommissionPayoutPlanRevision[] {
+  const current: CommissionPayoutPlanRevision = {
+    id: plan.id,
+    name: plan.name,
+    version: Math.max(1, Number(plan.version) || 1),
+    commissionType: plan.commissionType,
+    commissionValue: plan.commissionValue,
+    tiers: plan.tiers,
+    description: plan.description,
+    effectiveFrom: plan.effectiveFrom || plan.createdAt,
+  };
+  return [current, ...(plan.revisions || [])]
+    .sort((left, right) => right.version - left.version);
+}
+
+function describePlanVersionChange(
+  revision: CommissionPayoutPlanRevision,
+  previous?: CommissionPayoutPlanRevision,
+): string {
+  if (!previous) return '初始版本';
+  const changes: string[] = [];
+  if (revision.name !== previous.name) changes.push(`名称：${previous.name} → ${revision.name}`);
+  if (revision.commissionType !== previous.commissionType) {
+    changes.push(`计算方式：${formatPlanMethod(previous.commissionType)} → ${formatPlanMethod(revision.commissionType)}`);
+  }
+  if (
+    revision.commissionType !== 'tiered_percentage'
+    && Number(revision.commissionValue) !== Number(previous.commissionValue)
+  ) {
+    changes.push(`方案数值：${formatPlanValue(previous)} → ${formatPlanValue(revision)}`);
+  }
+  if (JSON.stringify(revision.tiers || []) !== JSON.stringify(previous.tiers || [])) {
+    changes.push('阶梯档位已调整');
+  }
+  return changes.join('；') || '方案信息更新';
 }
 
 function cloneRuleForm(form: SimpleCommissionRuleGroupInput): SimpleCommissionRuleGroupInput {
@@ -171,6 +249,18 @@ function cloneRuleForm(form: SimpleCommissionRuleGroupInput): SimpleCommissionRu
       tiers: undefined,
     })),
   };
+}
+
+function defaultAssigneeSourceForRole(role: CommissionRole, businessSource: CommissionBusinessSource): CommissionAssigneeSource {
+  if (businessSource === 'after_sales_recovery') {
+    if (role === '挽回人员') return 'recovery_owner';
+    return role === '销售' ? 'sales_owner' : 'manual';
+  }
+  if (role === '销售') return 'sales_owner';
+  if (role === '线索') return 'lead_contributor';
+  if (role === '客户成功') return 'customer_success';
+  if (role === '售后') return 'after_sales';
+  return 'manual';
 }
 
 const CommissionRuleConfig: React.FC = () => {
@@ -200,9 +290,10 @@ const CommissionRuleConfig: React.FC = () => {
 
   const [planFormOpen, setPlanFormOpen] = useState(false);
   const [editingPlan, setEditingPlan] = useState<CommissionPayoutPlan | null>(null);
-  const [planForm, setPlanForm] = useState<CommissionPayoutPlanInput>(emptyPlanForm);
+  const [planForm, setPlanForm] = useState<CommissionPlanFormState>(emptyPlanForm);
   const [planFormError, setPlanFormError] = useState('');
   const [showPlanValidation, setShowPlanValidation] = useState(false);
+  const [historyPlan, setHistoryPlan] = useState<CommissionPayoutPlan | null>(null);
   const [tierConfigOpen, setTierConfigOpen] = useState(false);
   const [tierConfigPlanId, setTierConfigPlanId] = useState('');
   const [tierConfigRows, setTierConfigRows] = useState<CommissionTier[]>(DEFAULT_TIER_CONFIG_ROWS);
@@ -294,31 +385,26 @@ const CommissionRuleConfig: React.FC = () => {
 
   const duplicatedCondition = useMemo(() => groups.some((group) => (
     group.id !== editingGroup?.id
+    && (group.businessSource || 'formal_order') === (ruleForm.businessSource || 'formal_order')
     && group.orderType === ruleForm.orderType
     && group.resourceOwnership === ruleForm.resourceOwnership
-  )), [editingGroup?.id, groups, ruleForm.orderType, ruleForm.resourceOwnership]);
-
-  const isSalesRole = (role: CommissionRole) => {
-    const config = roleConfigs.find((item) => item.name === role);
-    return role === '销售' || config?.code === 'sales' || config?.personSource === 'sales_owner';
-  };
+  )), [editingGroup?.id, groups, ruleForm.businessSource, ruleForm.orderType, ruleForm.resourceOwnership]);
 
   const ruleValidationMessage = useMemo(() => {
     if (!ruleForm.name.trim()) return '请填写规则名称';
+    if (!ruleForm.businessSource) return '请选择业务来源';
     if (!ruleForm.orderType) return '请选择订单类型';
-    if (!ruleForm.resourceOwnership) return '请选择资源来源';
+    if (ruleForm.businessSource === 'formal_order' && !ruleForm.resourceOwnership) return '请选择资源来源';
     if (!ruleForm.payouts.length) return '至少添加一条分润角色';
     if (duplicateRuleRoles) return '同一规则内不能重复配置提成角色';
     for (const payout of ruleForm.payouts) {
       const plan = payoutPlans.find((item) => item.id === payout.payoutPlanId);
       if (!plan) return '请选择提成方案';
-      if (plan.commissionType === 'tiered_percentage') {
-        if (!isSalesRole(payout.role)) return '销售月累计阶梯提成只能配置给销售角色';
-      }
+      if (!payout.assigneeSource) return `请为「${payout.role}」选择人员来源`;
     }
-    if (duplicatedCondition) return '相同订单类型和资源来源的规则已存在';
+    if (duplicatedCondition) return '相同业务来源、订单类型和资源来源的规则已存在';
     return '';
-  }, [duplicateRuleRoles, duplicatedCondition, payoutPlans, roleConfigs, ruleForm]);
+  }, [duplicateRuleRoles, duplicatedCondition, payoutPlans, ruleForm]);
 
   const roleValidationMessage = useMemo(() => {
     if (!roleForm.name.trim()) return '请填写角色名称';
@@ -335,6 +421,9 @@ const CommissionRuleConfig: React.FC = () => {
     if (!planForm.name.trim()) return '请填写方案名称';
     const duplicateName = payoutPlans.some((item) => item.id !== editingPlan?.id && item.name === planForm.name.trim());
     if (duplicateName) return '方案名称已存在';
+    if (planForm.commissionType !== 'tiered_percentage' && planForm.commissionValue === '') {
+      return planForm.commissionType === 'percentage' ? '请填写固定比例' : '请填写固定金额';
+    }
     if (planForm.commissionType !== 'tiered_percentage' && Number(planForm.commissionValue) < 0) return '方案数值不能小于 0';
     if (planForm.commissionType === 'tiered_percentage') return validateTierRows(planForm.tiers || DEFAULT_TIER_CONFIG_ROWS);
     return '';
@@ -502,12 +591,12 @@ const CommissionRuleConfig: React.FC = () => {
     setTierConfigSaving(true);
     const currentPlan = tierConfigPlanId ? payoutPlans.find((item) => item.id === tierConfigPlanId) : undefined;
     const payload: CommissionPayoutPlanInput = {
-      name: currentPlan?.name || '销售阶梯提成',
+      name: currentPlan?.name || '月度累计阶梯提成',
       commissionType: 'tiered_percentage',
       commissionValue: 0,
       tiers: rows,
       isActive: currentPlan?.isActive ?? true,
-      description: currentPlan?.description || '销售角色按月累计阶梯业绩自动结算',
+      description: currentPlan?.description || '按提成角色与方案版本汇总月度业绩后自动结算',
     };
     const res = currentPlan
       ? await commissionRuleApi.updateCommissionPayoutPlan(currentPlan.id, payload)
@@ -528,10 +617,14 @@ const CommissionRuleConfig: React.FC = () => {
       setEditingGroup(group);
       setRuleForm({
         name: group.name,
+        businessSource: group.businessSource || 'formal_order',
         orderType: group.orderType,
         resourceOwnership: group.resourceOwnership,
         isActive: group.isActive,
-        payouts: group.payouts.map((payout) => applyPlanToPayout({ ...payout }, payout.payoutPlanId)),
+        payouts: group.payouts.map((payout) => applyPlanToPayout({
+          ...payout,
+          assigneeSource: payout.assigneeSource || defaultAssigneeSourceForRole(payout.role, group.businessSource || 'formal_order'),
+        }, payout.payoutPlanId)),
       });
     } else {
       setEditingGroup(null);
@@ -554,7 +647,13 @@ const CommissionRuleConfig: React.FC = () => {
         payoutIndex === index
           ? (key === 'payoutPlanId'
             ? applyPlanToPayout({ ...payout, payoutPlanId: value as string }, value as string)
-            : { ...payout, [key]: value })
+            : key === 'role'
+              ? {
+                ...payout,
+                role: value as CommissionRole,
+                assigneeSource: defaultAssigneeSourceForRole(value as CommissionRole, prev.businessSource || 'formal_order'),
+              }
+              : { ...payout, [key]: value })
           : payout
       )),
     }));
@@ -566,7 +665,11 @@ const CommissionRuleConfig: React.FC = () => {
     if (!nextRole) return;
     setRuleForm((prev) => ({
       ...prev,
-      payouts: [...prev.payouts, applyPlanToPayout({ ...emptyPayout, role: nextRole }, undefined, true)],
+      payouts: [...prev.payouts, applyPlanToPayout({
+        ...emptyPayout,
+        role: nextRole,
+        assigneeSource: defaultAssigneeSourceForRole(nextRole, prev.businessSource || 'formal_order'),
+      }, undefined, true)],
     }));
   };
 
@@ -760,7 +863,7 @@ const CommissionRuleConfig: React.FC = () => {
             提成规则配置
           </Typography>
           <Typography variant="body2" sx={{ color: '#6b7280', mt: 0.5 }}>
-            提成角色仅用于分账口径和订单人员归属，不影响系统登录角色和页面权限。
+            分账规则决定业务来源、人员来源和提成方案；提成角色仅表示业务身份，不影响系统登录权限。
           </Typography>
         </Box>
         {canManageRules && (view === 'rules' ? (
@@ -805,8 +908,16 @@ const CommissionRuleConfig: React.FC = () => {
                   <TableCell sx={{ fontWeight: 500, minWidth: 180 }}>{group.name}</TableCell>
                   <TableCell sx={{ minWidth: 260 }}>
                     <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
+                      <Chip
+                        label={`业务来源 = ${group.businessSource === 'after_sales_recovery' ? '售后挽回' : '正式订单'}`}
+                        size="small"
+                        color="primary"
+                        variant="outlined"
+                      />
                       <Chip label={`订单类型 = ${group.orderType}`} size="small" variant="outlined" />
-                      <Chip label={`资源来源 = ${group.resourceOwnership}`} size="small" variant="outlined" />
+                      {(group.businessSource || 'formal_order') === 'formal_order' && (
+                        <Chip label={`资源来源 = ${group.resourceOwnership}`} size="small" variant="outlined" />
+                      )}
                     </Box>
                   </TableCell>
                   <TableCell sx={{ minWidth: 280 }}>
@@ -870,7 +981,7 @@ const CommissionRuleConfig: React.FC = () => {
       {view === 'plans' && (
         <>
           <Alert severity="info" sx={{ mb: 2 }}>
-            提成方案统一维护固定金额、固定比例和销售阶梯算法；分账规则里的每个提成角色只引用一个方案。
+            提成方案只定义固定金额、固定比例和月度累计阶梯算法，不限制用于哪类业务或哪种提成角色。
           </Alert>
           <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0' }}>
             <Table size="small">
@@ -887,7 +998,9 @@ const CommissionRuleConfig: React.FC = () => {
               <TableBody>
                 {pagedPayoutPlans.map((plan) => (
                   <TableRow key={plan.id} hover>
-                    <TableCell sx={{ fontWeight: 500, minWidth: 180 }}>{plan.name}</TableCell>
+                    <TableCell sx={{ fontWeight: 500, minWidth: 180 }}>
+                      {plan.name}
+                    </TableCell>
                     <TableCell sx={{ minWidth: 140 }}>{formatPlanMethod(plan.commissionType)}</TableCell>
                     <TableCell sx={{ minWidth: 260, color: '#374151' }}>{formatPlanValue(plan)}</TableCell>
                     <TableCell sx={{ minWidth: 220, color: plan.description ? '#4b5563' : '#9ca3af' }}>
@@ -902,6 +1015,16 @@ const CommissionRuleConfig: React.FC = () => {
                       />
                     </TableCell>
                     <TableCell align="center">
+                      <Tooltip title="查看历史版本">
+                        <IconButton
+                          size="small"
+                          color="primary"
+                          aria-label={`查看${plan.name}历史版本`}
+                          onClick={() => setHistoryPlan(plan)}
+                        >
+                          <HistoryIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                       {canManageRules && (
                         <>
                       <Switch checked={plan.isActive} size="small" onChange={() => handleTogglePlanActive(plan)} />
@@ -941,7 +1064,7 @@ const CommissionRuleConfig: React.FC = () => {
       {view === 'roles' && (
         <>
         <Alert severity="info" sx={{ mb: 2 }}>
-          系统会按内置订单字段自动匹配分润人员，匹配不到时进入待分配；此处角色仅用于分账，不影响系统登录权限。
+          提成角色只表示“以什么业务身份获得提成”，不绑定算法、人员或系统权限；实际人员来源和提成方案均在分账规则中选择。
         </Alert>
         <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0' }}>
           <Table size="small">
@@ -1014,6 +1137,9 @@ const CommissionRuleConfig: React.FC = () => {
           {editingGroup ? '编辑提成规则' : '新增提成规则'}
         </DialogCloseTitle>
         <DialogContent dividers>
+          <Alert severity="info" sx={{ mb: 2 }}>
+            规则负责决定“什么业务、由谁、使用什么方案”；提成角色是业务身份，人员来源决定实际拿提成的人。
+          </Alert>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1fr) 240px' }, gap: 2, pt: 0.5 }}>
             <TextField
               label="规则名称"
@@ -1022,6 +1148,30 @@ const CommissionRuleConfig: React.FC = () => {
               fullWidth
               required
             />
+            <FormControl fullWidth required>
+              <InputLabel>业务来源</InputLabel>
+              <Select
+                label="业务来源"
+                value={ruleForm.businessSource || 'formal_order'}
+                onChange={(event) => {
+                  const businessSource = event.target.value as CommissionBusinessSource;
+                  setRuleForm((prev) => ({
+                    ...prev,
+                    businessSource,
+                    orderType: businessSource === 'after_sales_recovery' ? '售后挽回' : '',
+                    resourceOwnership: businessSource === 'after_sales_recovery' ? '公司资源' : prev.resourceOwnership,
+                    payouts: prev.payouts.map((payout) => ({
+                      ...payout,
+                      assigneeSource: defaultAssigneeSourceForRole(payout.role, businessSource),
+                    })),
+                  }));
+                }}
+              >
+                {BUSINESS_SOURCE_OPTIONS.map((item) => (
+                  <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             <FormControl fullWidth required sx={{ maxWidth: { md: 240 }, justifySelf: { md: 'end' } }}>
               <InputLabel>订单类型</InputLabel>
               <Select
@@ -1029,12 +1179,14 @@ const CommissionRuleConfig: React.FC = () => {
                 value={ruleForm.orderType}
                 onChange={(event) => setRuleForm((prev) => ({ ...prev, orderType: event.target.value }))}
               >
-                {orderTypeOptions.map((item) => (
-                  <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>
-                ))}
+                {ruleForm.businessSource === 'after_sales_recovery'
+                  ? <MenuItem value="售后挽回">售后挽回</MenuItem>
+                  : orderTypeOptions.map((item) => (
+                    <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>
+                  ))}
               </Select>
             </FormControl>
-            <FormControl fullWidth required>
+            {ruleForm.businessSource !== 'after_sales_recovery' && <FormControl fullWidth required>
               <InputLabel>资源来源</InputLabel>
               <Select
                 label="资源来源"
@@ -1048,7 +1200,7 @@ const CommissionRuleConfig: React.FC = () => {
                   <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
                 ))}
               </Select>
-            </FormControl>
+            </FormControl>}
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minHeight: 56 }}>
               <Switch
                 checked={ruleForm.isActive}
@@ -1077,6 +1229,7 @@ const CommissionRuleConfig: React.FC = () => {
                 <TableHead>
                   <TableRow sx={{ bgcolor: '#fafafa' }}>
                     <TableCell sx={{ fontWeight: 600 }}>提成角色</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>人员来源</TableCell>
                     <TableCell sx={{ fontWeight: 600 }}>提成方案</TableCell>
                     <TableCell sx={{ fontWeight: 600 }}>方案摘要</TableCell>
                     <TableCell align="center" sx={{ fontWeight: 600 }}>操作</TableCell>
@@ -1095,6 +1248,18 @@ const CommissionRuleConfig: React.FC = () => {
                               <MenuItem key={item.id} value={item.name}>
                                 {item.name}{item.isActive ? '' : '（已停用）'}
                               </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      </TableCell>
+                      <TableCell sx={{ width: '24%' }}>
+                        <FormControl fullWidth size="small">
+                          <Select
+                            value={payout.assigneeSource || 'manual'}
+                            onChange={(event) => updatePayout(index, 'assigneeSource', event.target.value as CommissionAssigneeSource)}
+                          >
+                            {ASSIGNEE_SOURCE_OPTIONS.map((item) => (
+                              <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
                             ))}
                           </Select>
                         </FormControl>
@@ -1163,7 +1328,7 @@ const CommissionRuleConfig: React.FC = () => {
         <DialogContent dividers>
           <Stack spacing={2}>
             <Alert severity="info">
-              这里配置销售阶梯提成方案的档位。分账规则里的销售角色选择阶梯方案后，会按这里的档位进行月累计阶梯结算。
+              这里配置月度累计阶梯方案的档位。任意提成角色引用后，都会按“人员 + 角色 + 方案版本”分别汇总月度业绩。
             </Alert>
             <Stack spacing={1}>
               {normalizeTierRowsForEditor(tierConfigRows).map((tier, index) => (
@@ -1236,6 +1401,11 @@ const CommissionRuleConfig: React.FC = () => {
           {editingPlan ? '编辑提成方案' : '新增提成方案'}
         </DialogCloseTitle>
         <DialogContent dividers>
+          {editingPlan && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              保存算法变更会生成新版本，并重新核算引用该方案的未发放提成；已发放记录继续保留原版本和原金额。
+            </Alert>
+          )}
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2, pt: 0.5 }}>
             <TextField
               label="方案名称"
@@ -1254,7 +1424,11 @@ const CommissionRuleConfig: React.FC = () => {
                   setPlanForm((prev) => ({
                     ...prev,
                     commissionType,
-                    commissionValue: commissionType === 'tiered_percentage' ? 0 : prev.commissionValue,
+                    commissionValue: commissionType === 'tiered_percentage'
+                      ? 0
+                      : prev.commissionType === 'tiered_percentage'
+                        ? ''
+                        : prev.commissionValue,
                     tiers: commissionType === 'tiered_percentage'
                       ? normalizeTierRowsForEditor(prev.tiers || DEFAULT_TIER_CONFIG_ROWS)
                       : undefined,
@@ -1263,7 +1437,7 @@ const CommissionRuleConfig: React.FC = () => {
               >
                 <MenuItem value="percentage">固定比例</MenuItem>
                 <MenuItem value="fixed">固定金额</MenuItem>
-                <MenuItem value="tiered_percentage">销售月累计阶梯</MenuItem>
+                <MenuItem value="tiered_percentage">月度累计阶梯</MenuItem>
               </Select>
             </FormControl>
             {planForm.commissionType !== 'tiered_percentage' && (
@@ -1271,7 +1445,14 @@ const CommissionRuleConfig: React.FC = () => {
                 label={planForm.commissionType === 'percentage' ? '固定比例' : '固定金额'}
                 type="number"
                 value={planForm.commissionValue}
-                onChange={(event) => setPlanForm((prev) => ({ ...prev, commissionValue: Number(event.target.value) }))}
+                onChange={(event) => {
+                  const inputValue = event.target.value;
+                  setPlanForm((prev) => ({
+                    ...prev,
+                    commissionValue: inputValue === '' ? '' : Number(inputValue),
+                  }));
+                }}
+                placeholder={planForm.commissionType === 'percentage' ? '请输入比例' : '请输入金额'}
                 inputProps={{ min: 0, step: planForm.commissionType === 'percentage' ? 0.1 : 1 }}
                 InputProps={{
                   startAdornment: planForm.commissionType === 'fixed' ? '¥' : undefined,
@@ -1284,16 +1465,16 @@ const CommissionRuleConfig: React.FC = () => {
             )}
             {planForm.commissionType === 'tiered_percentage' && (
               <Alert severity="info" sx={{ gridColumn: '1 / -1' }}>
-                销售月累计阶梯的档位和比例在提成方案中维护，分账规则只需要选择对应方案。
+                月度累计阶梯的档位和比例在提成方案中维护，分账规则只负责选择业务角色、人员来源和方案。
               </Alert>
             )}
             {planForm.commissionType === 'tiered_percentage' && (
               <Box sx={{ gridColumn: '1 / -1', border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5 }}>
                 <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
                   <Box>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>销售阶梯档位</Typography>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>月度阶梯档位</Typography>
                     <Typography variant="caption" sx={{ color: '#64748b' }}>
-                      按销售角色月累计阶梯业绩命中档位，最后一档上限留空。
+                      按提成角色与方案版本汇总月度业绩并命中档位，最后一档上限留空。
                     </Typography>
                   </Box>
                   <Button size="small" startIcon={<AddIcon />} onClick={addPlanFormTierRow}>
@@ -1383,6 +1564,67 @@ const CommissionRuleConfig: React.FC = () => {
           <Button variant="contained" onClick={handleSubmitPlan} disabled={loading}>
             保存
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(historyPlan)} onClose={() => setHistoryPlan(null)} maxWidth="lg" fullWidth>
+        <DialogCloseTitle onClose={() => setHistoryPlan(null)}>
+          {historyPlan ? `${historyPlan.name} · 历史版本` : '提成方案历史版本'}
+        </DialogCloseTitle>
+        <DialogContent dividers sx={{ bgcolor: '#f8fafc' }}>
+          {historyPlan && (() => {
+            const history = getPayoutPlanHistory(historyPlan);
+            const ascendingHistory = history.slice().sort((left, right) => left.version - right.version);
+            return (
+              <Stack spacing={1.5}>
+                <Alert severity="info">
+                  当前版本用于新核算和未发放提成；已发放记录继续保留其实际使用的方案快照。
+                </Alert>
+                <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #dbe3ef' }}>
+                  <Table size="small" sx={{ minWidth: 980 }}>
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: '#f1f5f9' }}>
+                        <TableCell sx={{ fontWeight: 800 }}>版本</TableCell>
+                        <TableCell sx={{ fontWeight: 800 }}>计算方式</TableCell>
+                        <TableCell sx={{ fontWeight: 800 }}>方案数值</TableCell>
+                        <TableCell sx={{ fontWeight: 800 }}>生效时间</TableCell>
+                        <TableCell sx={{ fontWeight: 800 }}>结束时间</TableCell>
+                        <TableCell sx={{ fontWeight: 800 }}>变更内容</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {history.map((revision, index) => {
+                        const previous = ascendingHistory.find((item) => item.version === revision.version - 1);
+                        return (
+                          <TableRow key={`${revision.id}-v${revision.version}`} hover>
+                            <TableCell>
+                              <Stack direction="row" spacing={0.75} alignItems="center">
+                                <Typography variant="body2" fontWeight={900}>v{revision.version}</Typography>
+                                {index === 0 && <Chip label="当前生效" size="small" color="success" />}
+                              </Stack>
+                            </TableCell>
+                            <TableCell>{formatPlanMethod(revision.commissionType)}</TableCell>
+                            <TableCell>{formatPlanValue(revision)}</TableCell>
+                            <TableCell>{formatVersionTime(revision.effectiveFrom)}</TableCell>
+                            <TableCell>{revision.effectiveTo ? formatVersionTime(revision.effectiveTo) : '当前生效'}</TableCell>
+                            <TableCell sx={{ minWidth: 260 }}>{describePlanVersionChange(revision, previous)}</TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+                {history.length === 1 && (
+                  <Typography variant="body2" color="text.secondary">
+                    当前只有初始版本；修改方案算法后，旧版本会自动保留在这里。
+                  </Typography>
+                )}
+              </Stack>
+            );
+          })()}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setHistoryPlan(null)}>关闭</Button>
         </DialogActions>
       </Dialog>
 

@@ -1,10 +1,10 @@
 import React from 'react';
 import { Chip, type ChipProps, type SxProps, type Theme } from '@mui/material';
 
-export type BusinessStatusTone = 'neutral' | 'amber' | 'blue' | 'green' | 'red' | 'gray';
+export type BusinessStatusTone = 'neutral' | 'purple' | 'amber' | 'blue' | 'green' | 'red' | 'gray';
 
 const STATUS_TONES: Record<string, BusinessStatusTone> = {
-  待审核: 'amber',
+  待审核: 'purple',
   待处理: 'amber',
   待分账: 'amber',
   退回修改: 'blue',
@@ -27,6 +27,7 @@ const STATUS_TONES: Record<string, BusinessStatusTone> = {
 
 const TONE_STYLES: Record<BusinessStatusTone, { color: string; borderColor: string; bgcolor: string }> = {
   neutral: { color: '#334155', borderColor: '#94a3b8', bgcolor: '#ffffff' },
+  purple: { color: '#ffffff', borderColor: '#7e22ce', bgcolor: '#7e22ce' },
   amber: { color: '#9a6700', borderColor: '#d59b20', bgcolor: '#fffbeb' },
   blue: { color: '#1d4ed8', borderColor: '#60a5fa', bgcolor: '#eff6ff' },
   green: { color: '#047857', borderColor: '#34d399', bgcolor: '#ecfdf5' },
@@ -52,7 +53,7 @@ export default function BusinessStatusChip({ status, label, tone, sx, ...props }
       {...props}
       label={label ?? status ?? '-'}
       size={props.size || 'small'}
-      variant="outlined"
+      variant={resolvedTone === 'purple' ? 'filled' : 'outlined'}
       sx={[
         {
           height: 28,

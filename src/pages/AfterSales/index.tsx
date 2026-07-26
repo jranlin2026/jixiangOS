@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Button, Tab } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import { Navigate, useSearchParams } from 'react-router-dom';
 import RecoveryOrderTab from './RecoveryOrderTab';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
@@ -28,10 +29,12 @@ const AfterSales: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [createSignal, setCreateSignal] = React.useState(0);
   const [viewSettingsSignal, setViewSettingsSignal] = React.useState(0);
+  const [exportSignal, setExportSignal] = React.useState(0);
   const [importOpen, setImportOpen] = React.useState(false);
   const [reviewRefreshSignal, setReviewRefreshSignal] = React.useState(0);
   const requestedTab = getTab(searchParams.get('tab'));
   const canCreate = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE);
+  const canExport = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_EXPORT);
   const canSeeAllAfterSalesTabs = isSuperAdmin(currentUser);
   const visibleTabs = useMemo(() => AFTER_SALES_TABS.filter((tab) => (
     canSeeAllAfterSalesTabs
@@ -74,6 +77,11 @@ const AfterSales: React.FC = () => {
             user={currentUser}
             onClick={() => setImportOpen(true)}
           />
+          {activeTab === 'recovery-list' && canExport && (
+            <Button variant="outlined" startIcon={<FileDownloadIcon />} onClick={() => setExportSignal((value) => value + 1)}>
+              导出售后挽回订单
+            </Button>
+          )}
           {activeTab === 'recovery-list' && canCreate && (
             <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateSignal((value) => value + 1)}>
               新建售后挽回订单
@@ -92,7 +100,14 @@ const AfterSales: React.FC = () => {
         ))}
       </ModuleTabs>
 
-      {activeTab === 'recovery-list' && <RecoveryOrderTab mode="list" createSignal={createSignal} viewSettingsSignal={viewSettingsSignal} />}
+      {activeTab === 'recovery-list' && (
+        <RecoveryOrderTab
+          mode="list"
+          createSignal={createSignal}
+          viewSettingsSignal={viewSettingsSignal}
+          exportSignal={exportSignal}
+        />
+      )}
       {activeTab === 'recovery-review' && (
         <RecoveryOrderTab
           mode="review"

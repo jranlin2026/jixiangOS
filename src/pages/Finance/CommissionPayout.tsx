@@ -1,0 +1,470 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Box,
+  Button,
+  Checkbox,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  FormControl,
+  IconButton,
+  InputLabel,
+  MenuItem,
+  Paper,
+  Select,
+  Stack,
+  Tab,
+  Tabs,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  Tooltip,
+  Typography,
+} from '@mui/material';
+import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
+import PaymentsOutlinedIcon from '@mui/icons-material/PaymentsOutlined';
+import UndoOutlinedIcon from '@mui/icons-material/UndoOutlined';
+import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
+import { commissionPayoutApi } from '../../api/commissionPayoutApi';
+import useAuthStore from '../../store/useAuthStore';
+import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { formatCurrency, formatDateTime, formatPaginationRows } from '../../shared/utils/formatters';
+import TablePagination from '../../shared/components/TablePagination';
+import { subscribePageRefresh } from '../../shared/utils/pageRefresh';
+import type {
+  CommissionPayoutEmployeeRow,
+  CommissionPayoutRecord,
+  CommissionPayoutWorkspace,
+} from '../../types/commission';
+import Commission from '../Commission';
+
+type PayoutView = 'pending' | 'records' | 'summary';
+
+const todayInput = () => {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+};
+
+const commissionMonth = (value: { paymentDate?: string; createdAt: string }) => (
+  String(value.paymentDate || value.createdAt).slice(0, 7)
+);
+
+const commissionTypeLabel = (commission: CommissionPayoutEmployeeRow['commissions'][number]) => {
+  const isRecovery = commission.sourceBusinessType === 'after_sales_recovery'
+    || commission.sourceBusinessType === 'refund_recovery'
+    || Boolean(commission.sourceRecoveryOrderId);
+  if (isRecovery) return '售后挽回提成';
+  if (commission.ruleCalculationType === 'tiered_percentage') return '月度阶梯提成';
+  return '普通订单提成';
+};
+
+const commissionCalculationText = (commission: CommissionPayoutEmployeeRow['commissions'][number]) => (
+  commission.formulaText || commission.calculationNote || commission.payoutPlanName || '-'
+);
+
+const employeeMonthLabel = (row: CommissionPayoutEmployeeRow) => {
+  const months = [...new Set(row.commissions.map(commissionMonth))].sort();
+  if (!months.length) return '归属月份未知';
+  if (months.length === 1) return `${months[0]} 归属`;
+  return `${months[0]} 至 ${months[months.length - 1]} · ${months.length}个月`;
+};
+
+const metricCard = (label: string, value: string, hint: string, color = '#0f172a') => (
+  <Paper variant="outlined" sx={{ p: 2, minWidth: 210, flex: 1 }}>
+    <Typography variant="body2" color="text.secondary">{label}</Typography>
+    <Typography variant="h5" sx={{ mt: 0.5, fontWeight: 800, color }}>{value}</Typography>
+    <Typography variant="caption" color="text.secondary">{hint}</Typography>
+  </Paper>
+);
+
+const CommissionPayout: React.FC = () => {
+  const currentUser = useAuthStore((state) => state.currentUser);
+  const canManage = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_PAYOUT, 'write');
+  const canReverse = Boolean(currentUser) && (
+    isSuperAdmin(currentUser)
+    || /财务.*(经理|主管|负责人)|(经理|主管|负责人).*财务/.test(String(currentUser?.role || ''))
+  );
+  const [view, setView] = useState<PayoutView>('pending');
+  const [workspace, setWorkspace] = useState<CommissionPayoutWorkspace | null>(null);
+  const [error, setError] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [detailEmployee, setDetailEmployee] = useState<CommissionPayoutEmployeeRow | null>(null);
+  const [detailRecord, setDetailRecord] = useState<CommissionPayoutRecord | null>(null);
+  const [issueOpen, setIssueOpen] = useState(false);
+  const [issueAt, setIssueAt] = useState(todayInput);
+  const [paymentMethod, setPaymentMethod] = useState('银行转账');
+  const [paymentReference, setPaymentReference] = useState('');
+  const [note, setNote] = useState('');
+  const [reverseRecord, setReverseRecord] = useState<CommissionPayoutRecord | null>(null);
+  const [reverseReason, setReverseReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [pendingPage, setPendingPage] = useState(0);
+  const [pendingRowsPerPage, setPendingRowsPerPage] = useState(10);
+  const [recordPage, setRecordPage] = useState(0);
+  const [recordRowsPerPage, setRecordRowsPerPage] = useState(10);
+
+  const load = useCallback(async () => {
+    if (view === 'summary') return;
+    setError('');
+    const response = view === 'pending'
+      ? await commissionPayoutApi.fetchPendingWorkspace()
+      : await commissionPayoutApi.fetchRecordsWorkspace();
+    if (response.code === 0 && response.data) setWorkspace(response.data);
+    else setError(response.message || '提成发放数据加载失败');
+  }, [view]);
+
+  useEffect(() => {
+    void load();
+    if (view === 'summary') return undefined;
+    const unsubscribe = subscribePageRefresh(() => { void load(); });
+    const timer = window.setInterval(() => { void load(); }, 30_000);
+    return () => {
+      unsubscribe();
+      window.clearInterval(timer);
+    };
+  }, [load, view]);
+  useEffect(() => {
+    setSelectedIds([]);
+    setPendingPage(0);
+    setRecordPage(0);
+  }, [view]);
+
+  const selectable = useMemo(
+    () => workspace?.employees.filter((item) => item.pendingPayAmount > 0) || [],
+    [workspace],
+  );
+  const selectedRows = useMemo(
+    () => selectable.filter((item) => selectedIds.includes(item.ownerId)),
+    [selectable, selectedIds],
+  );
+  const selectedAmount = selectedRows.reduce((sum, item) => sum + item.pendingPayAmount, 0);
+  const selectedCount = selectedRows.reduce((sum, item) => sum + item.commissions.filter((row) => row.status === '待发放').length, 0);
+  const allSelected = selectable.length > 0 && selectable.every((item) => selectedIds.includes(item.ownerId));
+  const pendingRows = workspace?.employees || [];
+  const recordRows = workspace?.records || [];
+  const visiblePendingRows = pendingRows.slice(pendingPage * pendingRowsPerPage, (pendingPage + 1) * pendingRowsPerPage);
+  const visibleRecordRows = recordRows.slice(recordPage * recordRowsPerPage, (recordPage + 1) * recordRowsPerPage);
+
+  const toggleAll = () => setSelectedIds(allSelected ? [] : selectable.map((item) => item.ownerId));
+  const toggleOne = (ownerId: string) => setSelectedIds((current) => (
+    current.includes(ownerId) ? current.filter((id) => id !== ownerId) : [...current, ownerId]
+  ));
+
+  const submitIssue = async () => {
+    setSubmitting(true);
+    const response = await commissionPayoutApi.issue({
+      ownerIds: selectedIds,
+      issuedAt: new Date(issueAt).toISOString(),
+      paymentMethod,
+      paymentReference: paymentReference.trim() || undefined,
+      note: note.trim() || undefined,
+    });
+    setSubmitting(false);
+    if (response.code !== 0) return setError(response.message || '发放失败');
+    setIssueOpen(false);
+    setSelectedIds([]);
+    setPaymentReference('');
+    setNote('');
+    await load();
+  };
+
+  const submitReverse = async () => {
+    if (!reverseRecord) return;
+    setSubmitting(true);
+    const response = await commissionPayoutApi.reverse(reverseRecord.id, reverseReason);
+    setSubmitting(false);
+    if (response.code !== 0) return setError(response.message || '撤销失败');
+    setReverseRecord(null);
+    setReverseReason('');
+    await load();
+  };
+
+  const exportRecord = (record: CommissionPayoutRecord) => {
+    const lines = [
+      ['发放单号', '月份', '员工', '部门', '提成笔数', '发放金额', '发放时间', '方式', '流水号'],
+      ...record.byOwner.map((owner) => [
+        record.payoutNo, record.period, owner.owner, owner.department || '', String(owner.count),
+        String(owner.amount), record.issuedAt, record.paymentMethod || '', record.paymentReference || '',
+      ]),
+    ];
+    const csv = `\uFEFF${lines.map((line) => line.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\n')}`;
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${record.payoutNo}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const renderPending = () => (
+    <Stack spacing={2}>
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
+        {metricCard('待发放员工', `${workspace?.summary.pendingEmployeeCount || 0} 人`, '全部月份中有提成尚未发放')}
+        {metricCard('待发放金额', formatCurrency(workspace?.summary.pendingPayAmount || 0), '全部可执行发放', '#d97706')}
+        {metricCard('待确认金额', formatCurrency(workspace?.summary.pendingConfirmAmount || 0), '确认后才进入待发放')}
+      </Stack>
+      <Paper variant="outlined">
+        <Box sx={{ p: 2, display: 'flex', gap: 1.5, justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
+          <Box>
+            <Typography variant="h6" fontWeight={800}>全部员工待发放清单</Typography>
+            <Typography variant="body2" color="text.secondary">跨月汇总全部待确认、待发放提成；发放后系统自动生成不可覆盖的发放记录。</Typography>
+          </Box>
+          {canManage && (
+            <Button
+              variant="contained"
+              startIcon={<PaymentsOutlinedIcon />}
+              disabled={!selectedIds.length}
+              onClick={() => { setIssueAt(todayInput()); setIssueOpen(true); }}
+              sx={{ width: { xs: '100%', sm: 'auto' } }}
+            >
+              发放选中员工（{selectedIds.length}）
+            </Button>
+          )}
+        </Box>
+        <Divider />
+        <Box sx={{ display: { xs: 'block', md: 'none' } }}>
+          {visiblePendingRows.map((row) => (
+            <Box key={row.ownerId} sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Stack direction="row" alignItems="center" spacing={1.25}>
+                {canManage && (
+                  <Checkbox
+                    disabled={row.pendingPayAmount <= 0}
+                    checked={selectedIds.includes(row.ownerId)}
+                    onChange={() => toggleOne(row.ownerId)}
+                    sx={{ p: 0.5 }}
+                  />
+                )}
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography fontWeight={800}>{row.owner}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {row.department || '-'} · {row.orderCount} 个订单 / {row.commissionCount} 笔提成 · {employeeMonthLabel(row)}
+                  </Typography>
+                </Box>
+                {row.pendingPayAmount > 0 && <Chip size="small" color="warning" label="待发放" />}
+              </Stack>
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1, mt: 2 }}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">待确认</Typography>
+                  <Typography fontWeight={700}>{formatCurrency(row.pendingConfirmAmount)}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">待发放</Typography>
+                  <Typography fontWeight={900} color="warning.main">{formatCurrency(row.pendingPayAmount)}</Typography>
+                </Box>
+              </Box>
+              <Button fullWidth size="small" variant="outlined" startIcon={<VisibilityOutlinedIcon />} sx={{ mt: 2 }} onClick={() => setDetailEmployee(row)}>
+                查看提成明细
+              </Button>
+            </Box>
+          ))}
+          {!pendingRows.length && <Box sx={{ py: 7, textAlign: 'center', color: 'text.secondary' }}>暂无待确认或待发放提成</Box>}
+        </Box>
+        <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}>
+          <Table size="small">
+            <TableHead><TableRow>
+              <TableCell sx={{ minWidth: 150 }}>
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  {canManage && <Checkbox size="small" checked={allSelected} indeterminate={selectedIds.length > 0 && !allSelected} onChange={toggleAll} sx={{ p: 0 }} />}
+                  <Typography component="span" variant="body2" fontWeight={700}>员工</Typography>
+                </Stack>
+              </TableCell><TableCell>部门</TableCell><TableCell align="right">订单 / 提成</TableCell>
+              <TableCell align="right">待确认</TableCell><TableCell align="right">待发放</TableCell><TableCell align="center">操作</TableCell>
+            </TableRow></TableHead>
+            <TableBody>
+              {visiblePendingRows.map((row) => (
+                <TableRow key={row.ownerId} hover>
+                  <TableCell>
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      {canManage && <Checkbox size="small" disabled={row.pendingPayAmount <= 0} checked={selectedIds.includes(row.ownerId)} onChange={() => toggleOne(row.ownerId)} sx={{ p: 0 }} />}
+                      <Typography fontWeight={700}>{row.owner}</Typography>
+                    </Stack>
+                  </TableCell>
+                  <TableCell>{row.department || '-'}</TableCell>
+                  <TableCell align="right">{row.orderCount} / {row.commissionCount}</TableCell>
+                  <TableCell align="right">{formatCurrency(row.pendingConfirmAmount)}</TableCell>
+                  <TableCell align="right"><Typography fontWeight={800} color="warning.main">{formatCurrency(row.pendingPayAmount)}</Typography></TableCell>
+                  <TableCell align="center"><Button size="small" startIcon={<VisibilityOutlinedIcon />} onClick={() => setDetailEmployee(row)}>查看明细</Button></TableCell>
+                </TableRow>
+              ))}
+              {!pendingRows.length && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 7, color: 'text.secondary' }}>暂无待确认或待发放提成</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        <TablePagination
+          count={pendingRows.length}
+          page={pendingPage}
+          rowsPerPage={pendingRowsPerPage}
+          rowsPerPageOptions={[10, 20, 50]}
+          onPageChange={(_, nextPage) => setPendingPage(nextPage)}
+          onRowsPerPageChange={(event) => { setPendingRowsPerPage(Number(event.target.value)); setPendingPage(0); }}
+          labelRowsPerPage="每页条数"
+          labelDisplayedRows={formatPaginationRows}
+          sx={{ borderTop: '1px solid', borderColor: 'divider', bgcolor: '#fff' }}
+        />
+      </Paper>
+    </Stack>
+  );
+
+  const renderRecords = () => (
+    <Paper variant="outlined">
+      <Box sx={{ p: 2 }}>
+        <Typography variant="h6" fontWeight={800}>发放记录</Typography>
+        <Typography variant="body2" color="text.secondary">每次确认发放自动生成记录；撤销保留原记录和操作原因。</Typography>
+      </Box>
+      <Divider />
+      <Box sx={{ display: { xs: 'block', md: 'none' } }}>
+        {visibleRecordRows.map((record) => (
+          <Box key={record.id} sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+            <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="flex-start">
+              <Box sx={{ minWidth: 0 }}>
+                <Typography fontWeight={800} sx={{ wordBreak: 'break-all' }}>{record.payoutNo}</Typography>
+                <Typography variant="caption" color="text.secondary">{formatDateTime(record.issuedAt)} · {record.issuedByName || '-'}</Typography>
+              </Box>
+              <Chip size="small" label={record.status} color={record.status === '已发放' ? 'success' : 'default'} />
+            </Stack>
+            <Stack direction="row" justifyContent="space-between" alignItems="flex-end" sx={{ mt: 2 }}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">{record.byOwner.length} 名员工 · {record.totalCount} 笔提成</Typography>
+                <Typography variant="h6" fontWeight={900}>{formatCurrency(record.totalAmount)}</Typography>
+              </Box>
+              <Typography variant="body2" color="text.secondary">{record.paymentMethod || '-'}</Typography>
+            </Stack>
+            <Stack direction="row" spacing={0.5} justifyContent="flex-end" sx={{ mt: 1.5 }}>
+              <Tooltip title="查看详情"><IconButton size="small" color="primary" aria-label="查看发放详情" onClick={() => setDetailRecord(record)}><VisibilityOutlinedIcon fontSize="small" /></IconButton></Tooltip>
+              <Tooltip title="导出发放单"><IconButton size="small" color="primary" aria-label="导出发放单" onClick={() => exportRecord(record)}><FileDownloadOutlinedIcon fontSize="small" /></IconButton></Tooltip>
+              {canReverse && record.status === '已发放' && <Tooltip title="撤销发放"><IconButton size="small" color="error" aria-label="撤销发放" onClick={() => setReverseRecord(record)}><UndoOutlinedIcon fontSize="small" /></IconButton></Tooltip>}
+            </Stack>
+          </Box>
+        ))}
+        {!recordRows.length && <Box sx={{ py: 7, textAlign: 'center', color: 'text.secondary' }}>暂无发放记录</Box>}
+      </Box>
+      <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}><Table size="small">
+        <TableHead><TableRow>
+          <TableCell sx={{ minWidth: 180 }}>发放单号</TableCell><TableCell sx={{ minWidth: 145 }}>发放时间</TableCell><TableCell align="center" sx={{ minWidth: 100 }}>员工 / 提成</TableCell>
+          <TableCell align="right" sx={{ minWidth: 110 }}>发放金额</TableCell><TableCell sx={{ minWidth: 140 }}>发放信息</TableCell><TableCell sx={{ minWidth: 90 }}>状态</TableCell><TableCell align="center" sx={{ width: 132, minWidth: 132 }}>操作</TableCell>
+        </TableRow></TableHead>
+        <TableBody>
+          {visibleRecordRows.map((record) => <TableRow key={record.id} hover>
+            <TableCell><Typography fontWeight={700}>{record.payoutNo}</Typography></TableCell>
+            <TableCell>{formatDateTime(record.issuedAt)}</TableCell>
+            <TableCell align="center">{record.byOwner.length} 人 / {record.totalCount} 笔</TableCell>
+            <TableCell align="right"><Typography fontWeight={800}>{formatCurrency(record.totalAmount)}</Typography></TableCell>
+            <TableCell><Typography variant="body2">{record.issuedByName || '-'}</Typography><Typography variant="caption" color="text.secondary">{record.paymentMethod || '-'}</Typography></TableCell>
+            <TableCell><Chip size="small" label={record.status} color={record.status === '已发放' ? 'success' : 'default'} /></TableCell>
+            <TableCell align="center"><Stack direction="row" spacing={0.5} justifyContent="center">
+              <Tooltip title="查看详情"><IconButton size="small" color="primary" aria-label="查看发放详情" onClick={() => setDetailRecord(record)}><VisibilityOutlinedIcon fontSize="small" /></IconButton></Tooltip>
+              <Tooltip title="导出发放单"><IconButton size="small" color="primary" aria-label="导出发放单" onClick={() => exportRecord(record)}><FileDownloadOutlinedIcon fontSize="small" /></IconButton></Tooltip>
+              {canReverse && record.status === '已发放' && <Tooltip title="撤销发放"><IconButton size="small" color="error" aria-label="撤销发放" onClick={() => setReverseRecord(record)}><UndoOutlinedIcon fontSize="small" /></IconButton></Tooltip>}
+            </Stack></TableCell>
+          </TableRow>)}
+          {!recordRows.length && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 7, color: 'text.secondary' }}>暂无发放记录</TableCell></TableRow>}
+        </TableBody>
+      </Table></TableContainer>
+      <TablePagination
+        count={recordRows.length}
+        page={recordPage}
+        rowsPerPage={recordRowsPerPage}
+        rowsPerPageOptions={[10, 20, 50]}
+        onPageChange={(_, nextPage) => setRecordPage(nextPage)}
+        onRowsPerPageChange={(event) => { setRecordRowsPerPage(Number(event.target.value)); setRecordPage(0); }}
+        labelRowsPerPage="每页条数"
+        labelDisplayedRows={formatPaginationRows}
+        sx={{ borderTop: '1px solid', borderColor: 'divider', bgcolor: '#fff' }}
+      />
+    </Paper>
+  );
+
+  return <Stack spacing={2}>
+    <Paper variant="outlined" sx={{ p: 2 }}>
+      <Box>
+        <Typography variant="h5" fontWeight={900}>提成发放</Typography>
+        <Typography variant="body2" color="text.secondary">核对员工应发提成、执行发放，并保留完整发放与撤销记录。数据会自动保持更新。</Typography>
+      </Box>
+      <Tabs value={view} onChange={(_: React.SyntheticEvent, value: PayoutView) => setView(value)} sx={{ mt: 1.5 }}>
+        <Tab value="pending" label="待发放" /><Tab value="records" label="发放记录" /><Tab value="summary" label="月度报告" />
+      </Tabs>
+    </Paper>
+    {error && <Alert severity="error" onClose={() => setError('')}>{error}</Alert>}
+    {view === 'pending' && renderPending()}
+    {view === 'records' && renderRecords()}
+    {view === 'summary' && <Commission key="payout-summary" embedded initialTab={1} payoutMode="finance" />}
+
+    <Dialog open={issueOpen} onClose={() => !submitting && setIssueOpen(false)} fullWidth maxWidth="sm">
+      <DialogTitle>确认发放提成</DialogTitle>
+      <DialogContent dividers><Stack spacing={2}>
+        <Alert severity="info">本次将向 {selectedIds.length} 名员工发放其全部月份中处于待发放状态的 {selectedCount} 笔提成，共 {formatCurrency(selectedAmount)}。确认后系统会自动生成发放记录。</Alert>
+        <TextField label="发放时间" type="datetime-local" value={issueAt} onChange={(event) => setIssueAt(event.target.value)} fullWidth slotProps={{ inputLabel: { shrink: true } }} />
+        <FormControl fullWidth><InputLabel>发放方式</InputLabel><Select label="发放方式" value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
+          <MenuItem value="银行转账">银行转账</MenuItem><MenuItem value="企业支付宝">企业支付宝</MenuItem><MenuItem value="现金">现金</MenuItem><MenuItem value="其他">其他</MenuItem>
+        </Select></FormControl>
+        <TextField label="付款流水号（选填）" value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} />
+        <TextField label="备注（选填）" value={note} onChange={(event) => setNote(event.target.value)} multiline minRows={2} />
+      </Stack></DialogContent>
+      <DialogActions><Button onClick={() => setIssueOpen(false)} disabled={submitting}>取消</Button><Button variant="contained" onClick={() => void submitIssue()} disabled={submitting || !issueAt || !paymentMethod}>确认发放</Button></DialogActions>
+    </Dialog>
+
+    <Dialog open={Boolean(detailEmployee)} onClose={() => setDetailEmployee(null)} fullWidth maxWidth="md">
+      <DialogTitle>{detailEmployee?.owner} · 全部待办提成明细</DialogTitle>
+      <DialogContent dividers>
+        <Stack divider={<Divider flexItem />} sx={{ display: { xs: 'flex', md: 'none' } }}>
+          {detailEmployee?.commissions.map((row) => (
+            <Box key={row.id} sx={{ py: 1.5 }}>
+              <Stack direction="row" justifyContent="space-between" spacing={1}>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="caption" color="text.secondary">{commissionTypeLabel(row)} · {row.role}</Typography>
+                  <Typography fontWeight={800}>{row.customerName || '未命名客户'}</Typography>
+                  <Typography variant="caption" color="text.secondary" display="block" sx={{ wordBreak: 'break-all' }}>{row.orderNo}</Typography>
+                </Box>
+                <Chip size="small" label={row.status} />
+              </Stack>
+              <Typography sx={{ mt: 1 }} variant="h6" fontWeight={900}>{formatCurrency(row.commissionAmount)}</Typography>
+              <Box sx={{ mt: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
+                <Box><Typography variant="caption" color="text.secondary">业绩金额</Typography><Typography variant="body2" fontWeight={800}>{formatCurrency(Number(row.performanceAmount || row.orderAmount || 0))}</Typography></Box>
+                <Box><Typography variant="caption" color="text.secondary">归属月份</Typography><Typography variant="body2" fontWeight={800}>{commissionMonth(row)}</Typography></Box>
+              </Box>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1, overflowWrap: 'anywhere' }}>{commissionCalculationText(row)}</Typography>
+            </Box>
+          ))}
+        </Stack>
+        <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}><Table size="small" sx={{ minWidth: 1180 }}><TableHead><TableRow><TableCell>提成类型</TableCell><TableCell>客户</TableCell><TableCell>订单号</TableCell><TableCell>角色</TableCell><TableCell align="right">业绩金额</TableCell><TableCell>计算方案</TableCell><TableCell align="right">提成金额</TableCell><TableCell>归属月份 / 时间</TableCell><TableCell>状态</TableCell></TableRow></TableHead><TableBody>
+          {detailEmployee?.commissions.map((row) => <TableRow key={row.id}><TableCell>{commissionTypeLabel(row)}</TableCell><TableCell>{row.customerName || '未命名客户'}</TableCell><TableCell><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{row.orderNo}</Typography></TableCell><TableCell>{row.role}</TableCell><TableCell align="right">{formatCurrency(Number(row.performanceAmount || row.orderAmount || 0))}</TableCell><TableCell sx={{ maxWidth: 260 }}><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{commissionCalculationText(row)}</Typography></TableCell><TableCell align="right"><Typography fontWeight={900}>{formatCurrency(row.commissionAmount)}</Typography></TableCell><TableCell>{commissionMonth(row)} · {formatDateTime(row.paymentDate || row.createdAt)}</TableCell><TableCell><Chip size="small" label={row.status} /></TableCell></TableRow>)}
+        </TableBody></Table></TableContainer>
+      </DialogContent><DialogActions><Button onClick={() => setDetailEmployee(null)}>关闭</Button></DialogActions>
+    </Dialog>
+
+    <Dialog open={Boolean(detailRecord)} onClose={() => setDetailRecord(null)} fullWidth maxWidth="lg">
+      <DialogTitle>发放记录详情</DialogTitle><DialogContent dividers><Stack spacing={1.5}>
+        <Typography>发放单号：{detailRecord?.payoutNo}</Typography><Typography>发放月份：{detailRecord?.period}</Typography><Typography>发放时间：{detailRecord ? formatDateTime(detailRecord.issuedAt) : '-'}</Typography>
+        <Typography>发放金额：{formatCurrency(detailRecord?.totalAmount || 0)}</Typography><Typography>发放方式：{detailRecord?.paymentMethod || '-'}</Typography><Typography>付款流水号：{detailRecord?.paymentReference || '-'}</Typography>
+        {detailRecord?.status === '已撤销' && <Alert severity="warning">已由 {detailRecord.reversedByName} 于 {formatDateTime(detailRecord.reversedAt || '')} 撤销。原因：{detailRecord.reverseReason}</Alert>}
+        <Divider />{detailRecord?.byOwner.map((owner) => <Stack key={owner.ownerId || owner.owner} direction="row" justifyContent="space-between"><Typography>{owner.owner} · {owner.department || '-'}</Typography><Typography fontWeight={700}>{owner.count} 笔 / {formatCurrency(owner.amount)}</Typography></Stack>)}
+        {detailRecord?.commissionSnapshots?.length ? (
+          <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}><Table size="small" sx={{ minWidth: 980 }}>
+            <TableHead><TableRow><TableCell>提成类型</TableCell><TableCell>员工</TableCell><TableCell>客户</TableCell><TableCell>订单号</TableCell><TableCell>角色</TableCell><TableCell align="right">业绩金额</TableCell><TableCell align="right">发放金额</TableCell><TableCell>归属月份</TableCell></TableRow></TableHead>
+            <TableBody>{detailRecord.commissionSnapshots.map((row) => <TableRow key={row.id}><TableCell>{commissionTypeLabel(row)}</TableCell><TableCell>{row.owner}</TableCell><TableCell>{row.customerName || '未命名客户'}</TableCell><TableCell><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{row.orderNo}</Typography></TableCell><TableCell>{row.role}</TableCell><TableCell align="right">{formatCurrency(Number(row.performanceAmount || row.orderAmount || 0))}</TableCell><TableCell align="right"><Typography fontWeight={900}>{formatCurrency(row.commissionAmount)}</Typography></TableCell><TableCell>{commissionMonth(row)}</TableCell></TableRow>)}</TableBody>
+          </Table></TableContainer>
+        ) : detailRecord ? (
+          <Alert severity="info">该历史发放记录创建时尚未保存逐笔提成快照，当前仅能核对员工汇总和提成ID。</Alert>
+        ) : null}
+      </Stack></DialogContent><DialogActions><Button onClick={() => setDetailRecord(null)}>关闭</Button></DialogActions>
+    </Dialog>
+
+    <Dialog open={Boolean(reverseRecord)} onClose={() => !submitting && setReverseRecord(null)} fullWidth maxWidth="sm">
+      <DialogTitle>撤销发放</DialogTitle><DialogContent dividers><Stack spacing={2}>
+        <Alert severity="warning">撤销后，相关提成会恢复为“待发放”。系统会保留原发放记录和本次撤销原因。该操作不代表追回已经转出的资金。</Alert>
+        <TextField label="撤销原因" required value={reverseReason} onChange={(event) => setReverseReason(event.target.value)} multiline minRows={3} fullWidth />
+      </Stack></DialogContent><DialogActions><Button onClick={() => setReverseRecord(null)} disabled={submitting}>取消</Button><Button color="error" variant="contained" disabled={submitting || !reverseReason.trim()} onClick={() => void submitReverse()}>确认撤销</Button></DialogActions>
+    </Dialog>
+  </Stack>;
+};
+
+export default CommissionPayout;

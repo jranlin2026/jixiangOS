@@ -23,9 +23,13 @@ export const ORDER_IMPORT_HEADERS = [
 
 export const RECOVERY_IMPORT_HEADERS = [
   '客户姓名', '手机号', '微信', '第三方平台订单号', '原产品', '挽回成交金额', '挽回时间',
-  '挽回人员', '来源平台', '来源店铺', '原付款金额', '官方收款渠道', '付款订单号',
+  '挽回人员', '来源平台', '来源店铺', '原产品付款金额', '官方收款渠道', '付款订单号',
   '付款时间', '协助人员', '订单创建人', '备注', '挽回凭证文件名',
 ] as const;
+
+const RECOVERY_IMPORT_HEADER_ALIASES = new Map<string, string>([
+  ['原付款金额', '原产品付款金额'],
+]);
 
 const OPTIONS_SHEET = '字段选项';
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -397,8 +401,12 @@ function isSafeNumericMainlandMobile(cell: Cell): boolean {
   return /^1[3-9]\d{9}$/u.test(String(cell.value));
 }
 
+function isSafeNumericIdentifier(cell: Cell): boolean {
+  return typeof cell.value === 'number' && Number.isSafeInteger(cell.value) && cell.value >= 0;
+}
+
 function assertTextCells(row: Row, rowNumber: number, headers: readonly string[], indexes: Map<string, number>): void {
-  const typedHeaders = new Set(['实付金额', '挽回成交金额', '原付款金额', '付款时间', '挽回时间']);
+  const typedHeaders = new Set(['实付金额', '挽回成交金额', '原产品付款金额', '付款时间', '挽回时间']);
   for (const header of headers) {
     if (typedHeaders.has(header)) continue;
     const column = indexes.get(header);
@@ -411,6 +419,7 @@ function assertTextCells(row: Row, rowNumber: number, headers: readonly string[]
       // lossless. Other numeric identifiers remain blocked to avoid precision or
       // leading-zero loss.
       if (header === '手机号' && isSafeNumericMainlandMobile(cell)) continue;
+      if (header === '第三方平台订单号' && isSafeNumericIdentifier(cell)) continue;
       throw new Error(`第 ${rowNumber} 行：${header}必须使用文本格式`);
     }
     const limit = TEXT_MAX_LENGTHS[header];
@@ -441,16 +450,21 @@ const REQUIRED_HEADERS: Record<BusinessImportType, readonly string[]> = {
 };
 
 function readHeaderIndexes(sheet: Worksheet, type: BusinessImportType): Map<string, number> {
-  const allowed = new Set<string>(type === 'orders' ? ORDER_IMPORT_HEADERS : RECOVERY_IMPORT_HEADERS);
+  const allowed = new Set<string>(type === 'orders'
+    ? ORDER_IMPORT_HEADERS
+    : [...RECOVERY_IMPORT_HEADERS, ...RECOVERY_IMPORT_HEADER_ALIASES.keys()]);
   const indexes = new Map<string, number>();
   const unknown: string[] = [];
   const duplicate: string[] = [];
   sheet.getRow(1).eachCell({ includeEmpty: false }, (cell, column) => {
-    const header = cellText(cell);
-    if (!header) return;
-    if (!allowed.has(header)) unknown.push(header);
-    else if (indexes.has(header)) duplicate.push(header);
-    else indexes.set(header, column);
+    const rawHeader = cellText(cell);
+    if (!rawHeader) return;
+    if (!allowed.has(rawHeader)) unknown.push(rawHeader);
+    else {
+      const header = RECOVERY_IMPORT_HEADER_ALIASES.get(rawHeader) || rawHeader;
+      if (indexes.has(header)) duplicate.push(header);
+      else indexes.set(header, column);
+    }
   });
   if (duplicate.length) throw new Error(`重复表头：${[...new Set(duplicate)].join('、')}`);
   if (unknown.length) throw new Error(`未知表头：${[...new Set(unknown)].join('、')}`);
@@ -532,9 +546,9 @@ export async function parseBusinessImportWorkbook(
       return;
     }
     const recoveryAmount = readAmount(row, '挽回成交金额');
-    const originalAmount = readAmount(row, '原付款金额');
+    const originalAmount = readAmount(row, '原产品付款金额');
     assertMoney(recoveryAmount, rowNumber, '挽回成交金额', true, true);
-    assertMoney(originalAmount, rowNumber, '原付款金额', false, false);
+    assertMoney(originalAmount, rowNumber, '原产品付款金额', false, false);
     rows.push({
       rowNumber,
       customerName: requireText('客户姓名'), customerPhone, customerWechat,
@@ -639,7 +653,7 @@ export async function createBusinessImportTemplateWorkbook(
     ['必填字段', isOrder
       ? '客户姓名、产品名称、订单类型、实付金额、官方收款渠道、付款时间、销售负责人；手机号和微信至少填写一项。'
       : '客户姓名、第三方平台订单号、原产品、挽回成交金额、挽回时间、挽回人员；手机号和微信至少填写一项。'],
-    ['文本字段', '手机号、微信、付款订单号和第三方平台订单号请设置为文本，保留前导零。'],
+    ['编号字段', '手机号和第三方平台订单号可直接填写常规数字，系统会自动转为文本；需保留前导零或超长编号时，请使用文本格式。'],
     ['导入流程', '上传后先本地校验和服务端预检。被阻止的行必须修正；警告行可以确认导入。'],
     ['图片资料', isOrder
       ? '如需导入图片，请填写付款截图文件名（最多1张）、成交资料图片文件名（最多8张，英文分号分隔），并将 Excel 和图片一起压缩为 ZIP 上传。'

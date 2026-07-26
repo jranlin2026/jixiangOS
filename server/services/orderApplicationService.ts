@@ -9,8 +9,9 @@ import {
 } from '../../src/shared/utils/dataVisibility';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Customer } from '../../src/types/customer';
-import type { Order, OrderApplication, OrderApplicationReviewLog } from '../../src/types/order';
+import type { Order, OrderApplication, OrderApplicationReviewLog, OrderItemInput } from '../../src/types/order';
 import type { Product } from '../../src/types/product';
+import { allocateOrderItemActualAmounts, canonicalizeOrderItems } from '../../src/shared/utils/orderItems';
 import type { DataScopeDomain, Role } from '../../src/types/role';
 import type { Department } from '../../src/types/department';
 import type { User } from '../../src/types/settings';
@@ -129,6 +130,31 @@ function parseJsonObject<T extends object>(value: unknown, label: string): T {
 function finiteAmount(value: unknown): number | null {
   const amount = Number(value);
   return Number.isFinite(amount) ? amount : null;
+}
+
+function validateOrderPayments(paymentsInput: unknown, paidAmount: number): asserts paymentsInput is NonNullable<Order['payments']> {
+  if (!Array.isArray(paymentsInput) || paymentsInput.length === 0) {
+    throw new OrderApprovalError(400, '请至少填写一笔付款记录');
+  }
+  let paymentTotalInCents = 0;
+  paymentsInput.forEach((payment, index) => {
+    if (!payment || typeof payment !== 'object' || Array.isArray(payment)) {
+      throw new OrderApprovalError(400, `第 ${index + 1} 笔付款记录无效`);
+    }
+    const amount = finiteAmount((payment as { amount?: unknown }).amount);
+    if (amount === null || amount <= 0) {
+      throw new OrderApprovalError(400, `第 ${index + 1} 笔付款金额必须大于0`);
+    }
+    const paidAt = String((payment as { paidAt?: unknown }).paidAt || '').trim();
+    if (!paidAt || Number.isNaN(Date.parse(paidAt))) {
+      throw new OrderApprovalError(400, `第 ${index + 1} 笔付款时间无效`);
+    }
+    paymentTotalInCents += Math.round(amount * 100);
+  });
+  const paidAmountInCents = Math.round(paidAmount * 100);
+  if (paymentTotalInCents !== paidAmountInCents) {
+    throw new OrderApprovalError(400, '付款记录合计必须等于订单实付金额');
+  }
 }
 
 function validateAttachmentList(
@@ -342,14 +368,26 @@ async function canonicalizeOrderApplicationInput(
   const customerId = String(input.customerId || '').trim();
   const productId = String(input.productId || '').trim();
   if (!customerId) throw new OrderApprovalError(400, '客户ID不能为空');
-  if (!productId) throw new OrderApprovalError(400, '产品ID不能为空');
+  const requestedItems: OrderItemInput[] = Array.isArray(input.items) && input.items.length
+    ? input.items.map((item) => ({
+      id: item.id,
+      productId: item.productId,
+      quantity: item.quantity,
+      isPrimary: item.isPrimary,
+    }))
+    : [{ productId, quantity: 1, isPrimary: true }];
+  if (!requestedItems.some((item) => String(item.productId || '').trim())) {
+    throw new OrderApprovalError(400, '请至少添加一个产品');
+  }
   if (!String(input.orderType || '').trim()) throw new OrderApprovalError(400, '订单类型不能为空');
   if (!String(input.paymentMethod || '').trim()) throw new OrderApprovalError(400, '支付方式不能为空');
-  const listedAmount = finiteAmount(input.amount);
+  const requestedListedAmount = finiteAmount(input.amount);
+  if (requestedListedAmount === null || requestedListedAmount <= 0) {
+    throw new OrderApprovalError(400, '订单金额必须大于0');
+  }
   const paidAmount = finiteAmount(input.actualAmount ?? input.amount);
-  if (listedAmount === null || listedAmount <= 0) throw new OrderApprovalError(400, '订单金额必须大于0');
   if (paidAmount === null || paidAmount <= 0) throw new OrderApprovalError(400, '订单实付金额必须大于0');
-  if (!Array.isArray(input.payments)) throw new OrderApprovalError(400, '付款记录必须是数组');
+  validateOrderPayments(input.payments, paidAmount);
   input.payments.forEach((payment) => validateAttachmentList(payment.attachments, {
     label: '付款截图', max: 1, category: 'order-payment-proof',
   }));
@@ -357,15 +395,29 @@ async function canonicalizeOrderApplicationInput(
     label: '聊天记录', max: 8, category: 'order-deal-evidence',
   });
 
-  const [customer, productRow] = await Promise.all([
+  const [customer, productRows] = await Promise.all([
     requireActiveOrderApplicationCustomer(transaction, customerId, '客户不存在或已删除'),
-    transaction.businessRecord.findUnique({
-      where: { domain_recordId: { domain: STORAGE_KEYS.PRODUCTS, recordId: productId } },
-    }),
+    Promise.all(Array.from(new Set(requestedItems.map((item) => String(item.productId || '').trim())))
+      .filter(Boolean)
+      .map((recordId) => transaction.businessRecord.findUnique({
+        where: { domain_recordId: { domain: STORAGE_KEYS.PRODUCTS, recordId } },
+      }))),
   ]);
-  if (!productRow) throw new OrderApprovalError(409, '产品不存在');
-  const product = parseJsonObject<Product>(productRow.data, '产品');
-  if (product.id !== productId || product.isActive === false) throw new OrderApprovalError(409, '产品不存在或已停用');
+  const availableProducts = productRows
+    .filter((row): row is NonNullable<typeof row> => Boolean(row))
+    .map((row) => parseJsonObject<Product>(row.data, '产品'));
+  let canonicalItems;
+  try {
+    canonicalItems = canonicalizeOrderItems(requestedItems, availableProducts);
+  } catch (error) {
+    throw new OrderApprovalError(409, error instanceof Error ? error.message : '订单产品无效');
+  }
+  const items = allocateOrderItemActualAmounts(canonicalItems.items, paidAmount);
+  if (canonicalItems.standardTotalAmount <= 0) {
+    throw new OrderApprovalError(400, '产品总计必须大于0，请先检查产品价格');
+  }
+  const product = availableProducts.find((item) => item.id === items.find((item) => item.isPrimary)?.productId);
+  if (!product) throw new OrderApprovalError(409, '主产品不存在或已停用');
 
   const customerAccess = buildCustomerAccessContextFromDirectory(
     actor,
@@ -383,7 +435,9 @@ async function canonicalizeOrderApplicationInput(
     productId: product.id,
     productName: product.name,
     productLevel: product.level,
-    amount: listedAmount,
+    items,
+    standardTotalAmount: canonicalItems.standardTotalAmount,
+    amount: canonicalItems.standardTotalAmount,
     actualAmount: paidAmount,
     status: '已确认',
     refundStatus: input.refundStatus || '无',
@@ -413,6 +467,18 @@ async function validateStoredApplicationSnapshot(
   if (!productId) throw new OrderApprovalError(409, '待审申请缺少产品稳定ID，请退回销售重新提交');
   if (!salesId) throw new OrderApprovalError(409, '待审申请缺少销售稳定ID，请退回销售重新提交');
   if (!applicantId) throw new OrderApprovalError(409, '待审申请缺少申请人稳定ID，请退回销售重新提交');
+  const storedPaidAmount = finiteAmount(application.orderData.actualAmount ?? application.orderData.amount);
+  if (storedPaidAmount === null || storedPaidAmount <= 0) {
+    throw new OrderApprovalError(409, '待审申请实付金额无效，请退回销售重新提交');
+  }
+  try {
+    validateOrderPayments(application.orderData.payments, storedPaidAmount);
+  } catch (error) {
+    if (error instanceof OrderApprovalError) {
+      throw new OrderApprovalError(409, `待审申请${error.message}，请退回销售重新提交`);
+    }
+    throw error;
+  }
 
   const [customer, productRow] = await Promise.all([
     requireActiveOrderApplicationCustomer(transaction, customerId, '待审申请关联客户不存在或已删除'),
@@ -431,6 +497,20 @@ async function validateStoredApplicationSnapshot(
   }
   if (application.orderData.productName !== product.name || application.orderData.productLevel !== product.level) {
     throw new OrderApprovalError(409, '待审申请产品名称或等级与产品稳定ID不一致，请退回销售处理');
+  }
+  if (application.orderData.items?.length) {
+    const itemRows = await Promise.all(application.orderData.items.map((item) => transaction.businessRecord.findUnique({
+      where: { domain_recordId: { domain: STORAGE_KEYS.PRODUCTS, recordId: item.productId } },
+    })));
+    application.orderData.items.forEach((item, index) => {
+      const row = itemRows[index];
+      if (!row) throw new OrderApprovalError(409, `待审申请第 ${index + 1} 项产品不存在，请退回销售处理`);
+      const current = parseJsonObject<Product>(row.data, '产品');
+      if (current.isActive === false) throw new OrderApprovalError(409, `产品“${current.name}”已停用，请退回销售处理`);
+      if (current.name !== item.productName || current.level !== item.productLevel || finiteAmount(current.price) !== finiteAmount(item.unitPrice)) {
+        throw new OrderApprovalError(409, `产品“${item.productName}”的名称、等级或价格已变更，请退回销售刷新后重新提交`);
+      }
+    });
   }
 
   const sales = directory.users.find((user) => user.id === salesId && activeDirectoryUser(user));

@@ -188,6 +188,7 @@ const created = await recoveryOrderApi.createRecoveryOrder({
   originalProduct: '代理服务',
   originalAmount: 2980,
   recoveryAmount: 1980,
+  recoveryAt: '2026-06-15T10:00:00.000Z',
   paymentVoucher: 'pay.png',
   chatEvidence: 'chat.png',
   recoveryUserId: 'user-service',
@@ -231,7 +232,20 @@ const readerAssignedOrder = {
   recoveryUserId: 'user-recovery-reader',
   recoveryUserName: '售后只读员工',
 };
-storage.setItem(STORAGE_KEYS.RECOVERY_ORDERS, JSON.stringify([created.data, readerOwnOrder, readerAssignedOrder]));
+const readerAssistedOrder = {
+  ...created.data,
+  id: 'recovery-reader-assisted-order',
+  orderNo: 'RCV-READER-ASSISTED',
+  thirdPartyOrderNo: 'TP-READER-ASSISTED',
+  assistUserId: 'user-recovery-reader',
+  assistUserName: '售后只读员工',
+};
+storage.setItem(STORAGE_KEYS.RECOVERY_ORDERS, JSON.stringify([
+  created.data,
+  readerOwnOrder,
+  readerAssignedOrder,
+  readerAssistedOrder,
+]));
 
 setSession('user-recovery-reader');
 const readerReviewList = await recoveryOrderApi.fetchRecoveryOrders({
@@ -239,7 +253,11 @@ const readerReviewList = await recoveryOrderApi.fetchRecoveryOrders({
   scopeDomain: 'recoveryOrderApplications',
   pageSize: 20,
 });
-assert.deepEqual(readerReviewList.data.items.map((item) => item.id), [readerOwnOrder.id]);
+assert.deepEqual(
+  readerReviewList.data.items.map((item) => item.id),
+  [readerOwnOrder.id, readerAssignedOrder.id, readerAssistedOrder.id],
+  '挽回人员和协助人员应能看到由其他员工提交但自己参与的售后挽回订单',
+);
 const readerApproveAttempt = await recoveryOrderApi.approveRecoveryOrder(
   readerOwnOrder.id,
   'user-recovery-reader',
@@ -316,14 +334,23 @@ assert.equal(settled.data?.settlementHandledBy, '财务专员');
 assert.ok(settled.data?.settlementHandledAt);
 const storedCommissions = JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as any[];
 assert.equal(storedCommissions.length, 1);
+assert.equal(
+  storedCommissions[0].paymentDate,
+  created.data.recoveryAt,
+  '本地兼容链路也必须按挽回成交时间归属员工提成月报',
+);
 assert.equal(storedCommissions[0].departmentId, 'dept-service');
 assert.equal(storedCommissions[0].department, '售后服务部');
 
-const period = new Date().toISOString().slice(0, 7);
+storage.setItem(STORAGE_KEYS.COMMISSIONS, JSON.stringify([{
+  ...storedCommissions[0],
+  paymentDate: '2026-07-01T10:00:00.000Z',
+}]));
+const period = created.data.recoveryAt!.slice(0, 7);
 const payouts = await commissionApi.fetchMonthlyCommissionPayouts(period);
 assert.equal(payouts.code, 0);
 const servicePayout = payouts.data.find((item) => item.ownerId === 'user-service');
-assert.equal(Boolean(servicePayout), true);
+assert.equal(Boolean(servicePayout), true, '历史售后挽回提成也应按关联挽回单的挽回成交月份展示');
 assert.equal(servicePayout?.pendingConfirmAmount, 120);
 assert.equal(servicePayout?.roleSummaries?.some((item) => (
   item.role === '售后'

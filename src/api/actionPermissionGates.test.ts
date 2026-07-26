@@ -6,6 +6,7 @@ const projectRoot = process.cwd();
 const deliverySource = readFileSync(join(projectRoot, 'src/pages/Delivery/index.tsx'), 'utf8');
 const financeSource = readFileSync(join(projectRoot, 'src/pages/Finance/index.tsx'), 'utf8');
 const commissionSource = readFileSync(join(projectRoot, 'src/pages/Commission/index.tsx'), 'utf8');
+const commissionPayoutSource = readFileSync(join(projectRoot, 'src/pages/Finance/CommissionPayout.tsx'), 'utf8');
 const commissionRuleSource = readFileSync(join(projectRoot, 'src/pages/Commission/CommissionRuleConfig.tsx'), 'utf8');
 const recoverySettlementSource = readFileSync(join(projectRoot, 'src/pages/Finance/RecoverySettlement.tsx'), 'utf8');
 const assetsSource = readFileSync(join(projectRoot, 'src/pages/Assets/index.tsx'), 'utf8');
@@ -120,18 +121,10 @@ assert.match(
   'Order-settlement mutations must require explicit settlement write permission.',
 );
 
-['generateMonthlyBatch', 'payOwner', 'payBatch', 'confirmPayoutAction'].forEach((handlerName) => {
-  assert.match(
-    commissionSource,
-    new RegExp(`const ${handlerName}[\\s\\S]{0,260}if \\(!canManagePayout\\) return;`),
-    `${handlerName} must fail closed without payout write permission.`,
-  );
-});
-
 assert.match(
-  commissionSource,
-  /const showPayoutFinanceActions\s*=\s*canManagePayout\s*&&\s*!hidePayoutFinanceActions/,
-  'Read-only payout users must not see finance payout actions.',
+  commissionPayoutSource,
+  /const canManage\s*=\s*hasPermission\(currentUser,\s*PERMISSION_KEYS\.FINANCE_PAYOUT,\s*'write'\)/,
+  'Payout batch mutations must require explicit payout write permission.',
 );
 
 [
@@ -155,9 +148,15 @@ assert.ok(
 );
 
 assert.match(
-  commissionSource,
-  /const canManagePayout\s*=\s*hasPermission\(currentUser,\s*PERMISSION_KEYS\.FINANCE_PAYOUT,\s*'write'\)/,
-  'Monthly payout mutations must require explicit payout write permission.',
+  commissionPayoutSource,
+  /\{canManage && \(/,
+  'Read-only payout users must not see issue controls.',
+);
+
+assert.match(
+  commissionPayoutSource,
+  /\{canReverse && record\.status === '已发放' &&/,
+  'Only payout reversers must see reversal controls.',
 );
 
 assert.match(

@@ -8,6 +8,7 @@ export { orderApi } from './orderApi';
 export { orderReviewApi, ORDER_APPLICATION_STATUSES, canReviewOrderApplications } from './orderReviewApi';
 export { deliveryApi } from './deliveryApi';
 export { commissionApi } from './commissionApi';
+export { commissionPayoutApi } from './commissionPayoutApi';
 export { financeApi } from './financeApi';
 export { aiApi } from './aiApi';
 export { aiConfigApi } from './aiConfigApi';

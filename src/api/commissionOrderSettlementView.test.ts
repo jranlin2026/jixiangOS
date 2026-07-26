@@ -424,7 +424,7 @@ assert.equal(fixedRow?.commissionAmount, 30);
 assert.equal(tieredRow?.ruleCalculationType, 'tiered_percentage');
 assert.equal(tieredRow?.commissionRate, 0);
 assert.equal(tieredRow?.commissionAmount, 0);
-assert.match(tieredRow?.formulaText || '', /缺少销售阶梯规则/);
+assert.match(tieredRow?.formulaText || '', /缺少月度阶梯档位/);
 
 const removePendingConfirmLineRes = await (commissionApi as any).saveOrderCommissionAdjustments('order-a', [
   {
@@ -677,7 +677,7 @@ assert.equal(tieredSales.totalAmount, 3123);
 assert.equal(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-a').commissionAmount, 1000);
 assert.equal(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-b').commissionAmount, 2000);
 assert.equal(tieredSales.commissions.find((item: any) => item.id === 'fixed-comm-a').commissionAmount, 123);
-assert.match(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-a').formulaText || '', /销售角色月累计阶梯业绩 30000/);
+assert.match(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-a').formulaText || '', /销售.*本月累计业绩 30000/);
 assert.match(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-a').formulaText || '', /10%/);
 
 seed();
@@ -715,3 +715,17 @@ const createSplitDialogSource = commissionPageSource.slice(
 const createSplitDialogActionsSource = createSplitDialogSource.slice(createSplitDialogSource.indexOf('<DialogActions>'));
 assert.match(createSplitDialogActionsSource, /保存分账/, '新建订单分账弹窗底栏必须始终显示保存按钮');
 assert.match(commissionPageSource, /setSplitRows\(getActiveCommissions\(res\.data\)\.map\(mapCommissionToSplitRow\)\)/, '编辑新分账时不得把已撤回留痕重新带入可编辑行');
+assert.match(
+  commissionPageSource,
+  /getCommissionSplitAmountPresentation\(summary\.commissions\)/,
+  '订单分账列表必须区分确定金额和待月结阶梯提成，不得把待月结显示为零元',
+);
+const splitDetailsRendererSource = commissionPageSource.slice(
+  commissionPageSource.indexOf('const renderSplitDetails'),
+  commissionPageSource.indexOf('const getSourceOrderDeletedReason'),
+);
+assert.doesNotMatch(
+  splitDetailsRendererSource,
+  /getCommissionSplitAmountPresentation/,
+  '分账明细列只能展示人员与计算方式，汇总金额只放在分账总额列',
+);

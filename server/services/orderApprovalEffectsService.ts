@@ -258,25 +258,49 @@ async function createCommissionRecords(transaction: Prisma.TransactionClient, or
   ]);
   const users = activeUsers(userRows as unknown as DirectoryUser[]);
   const departments = departmentRows as unknown as DirectoryDepartment[];
-  const matched = rules.filter((rule) => ruleMatches(rule, order)).sort((left, right) => left.priority - right.priority);
-  const sourceRules: Array<CommissionRule | null> = matched.length ? matched : [null];
+  const globalRules = rules.filter((rule) => !rule.productLevel && ruleMatches(rule, order));
+  const commissionItems = order.items?.length ? order.items : [{
+    id: 'legacy-primary', productId: order.productId || '', productName: order.productName || order.productLevel,
+    productLevel: order.productLevel, unitPrice: order.amount, quantity: 1, subtotal: order.amount,
+    allocatedActualAmount: order.actualAmount, isPrimary: true, sortOrder: 1,
+  }];
+  const itemScopes = commissionItems.flatMap((item) => {
+    const scopedOrder: Order = {
+      ...order,
+      productId: item.productId,
+      productName: item.productName,
+      productLevel: item.productLevel,
+      amount: item.subtotal,
+      actualAmount: item.allocatedActualAmount ?? item.subtotal,
+      performanceBaseAmount: item.allocatedActualAmount ?? item.subtotal,
+    };
+    return rules
+      .filter((rule) => Boolean(rule.productLevel) && ruleMatches(rule, scopedOrder))
+      .map((rule) => ({ rule, scopedOrder, scopeId: item.id }));
+  });
+  const scopes: Array<{ rule: CommissionRule | null; scopedOrder: Order; scopeId: string }> = [
+    ...globalRules.map((rule) => ({ rule, scopedOrder: order, scopeId: 'order' })),
+    ...itemScopes,
+  ].sort((left, right) => Number(left.rule?.priority || 0) - Number(right.rule?.priority || 0));
+  if (!scopes.length) scopes.push({ rule: null, scopedOrder: order, scopeId: 'unmatched' });
+  const matched = scopes.flatMap((scope) => scope.rule ? [scope.rule] : []);
 
-  for (const rule of sourceRules) {
+  for (const { rule, scopedOrder, scopeId } of scopes) {
     const role = rule?.role || '销售';
-    const recordId = `commission-${shortHash(`${order.id}:${rule?.id || 'unmatched'}:${role}`)}`;
+    const recordId = `commission-${shortHash(`${order.id}:${scopeId}:${rule?.id || 'unmatched'}:${role}`)}`;
     const existing = await transaction.businessRecord.findUnique({
       where: { domain_recordId: { domain: STORAGE_KEYS.COMMISSIONS, recordId } },
     });
     if (existing) continue;
 
-    const baseAmount = roundMoney(amount(order.performanceBaseAmount ?? order.actualAmount ?? order.amount) * ((rule?.performanceRate ?? 100) / 100));
+    const baseAmount = roundMoney(amount(scopedOrder.performanceBaseAmount ?? scopedOrder.actualAmount ?? scopedOrder.amount) * ((rule?.performanceRate ?? 100) / 100));
     const commissionAmount = !rule || rule.commissionType === 'tiered_percentage'
       ? 0
       : rule.commissionType === 'fixed'
         ? roundMoney(rule.commissionValue)
         : roundMoney(baseAmount * (rule.commissionValue / 100));
-    const assignee = assigneeForRole(order, role, roleConfigs, users, departments);
-    const evidence = rule ? evidenceState(rule, order) : {
+    const assignee = assigneeForRole(scopedOrder, role, roleConfigs, users, departments);
+    const evidence = rule ? evidenceState(rule, scopedOrder) : {
       evidenceRequired: true,
       evidenceStatus: '已齐全' as const,
       proofStatus: '已上传' as const,
@@ -286,8 +310,8 @@ async function createCommissionRecords(transaction: Prisma.TransactionClient, or
       orderId: order.id,
       orderNo: order.orderNo,
       customerName: order.customerName,
-      productLevel: order.productLevel,
-      orderAmount: amount(order.actualAmount ?? order.amount),
+      productLevel: scopedOrder.productLevel,
+      orderAmount: amount(scopedOrder.actualAmount ?? scopedOrder.amount),
       commissionRate: rule?.commissionType === 'percentage' ? rule.commissionValue / 100 : 0,
       commissionAmount,
       performanceAmount: baseAmount,
@@ -381,84 +405,80 @@ async function createDeliveryProjection(
   approvedAt: string,
   assigner?: DeliveryAssigner,
 ): Promise<void> {
-  let productRow = order.productId
-    ? await transaction.businessRecord.findUnique({
-      where: { domain_recordId: { domain: STORAGE_KEYS.PRODUCTS, recordId: order.productId } },
-    })
-    : null;
-  if (!productRow) {
-    const products = await transaction.businessRecord.findMany({ where: { domain: STORAGE_KEYS.PRODUCTS } });
-    productRow = products.find((row) => {
-      const product = parseJson<Product>(row.data, '产品');
-      return product.level === order.productLevel && product.isActive;
-    }) || null;
-  }
-  if (!productRow) throw new Error(`订单产品 ${order.productName || order.productLevel} 不存在，不能创建交付单`);
-  const product = parseJson<Product>(productRow.data, '产品');
-
-  const recordId = `delivery-${shortHash(order.id)}`;
-  const existing = await transaction.businessRecord.findUnique({
-    where: { domain_recordId: { domain: STORAGE_KEYS.DELIVERIES, recordId } },
-  });
-  if (existing) {
-    order.deliveryId = recordId;
-    await transaction.businessRecord.update({
-      where: { domain_recordId: { domain: STORAGE_KEYS.ORDERS, recordId: order.id } },
-      data: { data: jsonValue(order), eventAt: new Date(approvedAt) },
+  const sourceItems = order.items?.length ? order.items : [{
+    id: `item-${shortHash(order.id)}`,
+    productId: order.productId || '',
+    productName: order.productName || order.productLevel,
+    productLevel: order.productLevel,
+    unitPrice: order.amount,
+    quantity: 1,
+    subtotal: order.amount,
+    allocatedActualAmount: order.actualAmount,
+    isPrimary: true,
+    sortOrder: 1,
+  }];
+  const deliveryIds: string[] = [];
+  let primaryDeliveryId: string | undefined;
+  for (const item of sourceItems) {
+    const productRow = item.productId ? await transaction.businessRecord.findUnique({
+      where: { domain_recordId: { domain: STORAGE_KEYS.PRODUCTS, recordId: item.productId } },
+    }) : null;
+    if (!productRow) throw new Error(`订单产品 ${item.productName} 不存在，不能创建交付单`);
+    const product = parseJson<Product>(productRow.data, '产品');
+    const stages = resolveProductDeliveryStages(product);
+    if (!stages.length) continue;
+    const recordId = item.isPrimary ? `delivery-${shortHash(order.id)}` : `delivery-${shortHash(`${order.id}:${item.id}`)}`;
+    deliveryIds.push(recordId);
+    if (item.isPrimary) primaryDeliveryId = recordId;
+    const existing = await transaction.businessRecord.findUnique({
+      where: { domain_recordId: { domain: STORAGE_KEYS.DELIVERIES, recordId } },
     });
-    return;
-  }
-  const stages = resolveProductDeliveryStages(product);
-  if (!stages.length) return;
-  const automaticAssignment = assigner ? await assigner.assignNext(transaction, approvedAt) : undefined;
-  const fallbackAssignment = automaticAssignment === undefined
-    ? { owner: order.successName || order.serviceName || '待分配', ownerId: order.successId || order.serviceId }
-    : automaticAssignment || { owner: '待分配', ownerId: undefined };
-  const delivery: Delivery = {
-    id: recordId,
-    orderId: order.id,
-    orderNo: order.orderNo,
-    customerId: order.customerId,
-    customerName: order.customerName,
-    productName: order.productName,
-    productType: order.productLevel,
-    currentStage: stages[0],
-    stages,
-    tasks: stages.map((stage, index) => ({
-      id: `task-${shortHash(`${order.id}:${index}`, 12)}`,
-      title: stage,
-      description: `${stage}任务`,
-      status: index === 0 ? '进行中' : '待开始',
-      records: [],
-    })),
-    ...fallbackAssignment,
-    salesOwner: order.salesName || order.owner,
-    salesOwnerId: order.salesId,
-    orderAmount: amount(order.actualAmount ?? order.amount),
-    paymentDate: paymentDate(order),
-    orderType: order.orderType || order.dealScene,
-    status: '待开始',
-    priority: 'normal',
-    progressPercent: 0,
-    createdAt: approvedAt,
-    updatedAt: approvedAt,
-  };
-  await transaction.businessRecord.create({
-    data: {
-      id: `${STORAGE_KEYS.DELIVERIES}:${recordId}`,
-      domain: STORAGE_KEYS.DELIVERIES,
-      recordId,
-      title: `${order.orderNo}-${order.customerName}`,
-      status: delivery.status || null,
-      owner: delivery.owner,
-      customerId: order.customerId,
+    if (existing) continue;
+    const automaticAssignment = assigner ? await assigner.assignNext(transaction, approvedAt) : undefined;
+    const fallbackAssignment = automaticAssignment === undefined
+      ? { owner: order.successName || order.serviceName || '待分配', ownerId: order.successId || order.serviceId }
+      : automaticAssignment || { owner: '待分配', ownerId: undefined };
+    const delivery: Delivery = {
+      id: recordId,
       orderId: order.id,
-      amount: delivery.orderAmount || null,
-      eventAt: new Date(approvedAt),
-      data: jsonValue(delivery),
-    },
-  });
-  order.deliveryId = recordId;
+      orderItemId: item.id,
+      orderNo: order.orderNo,
+      customerId: order.customerId,
+      customerName: order.customerName,
+      productName: item.productName,
+      productType: item.productLevel,
+      productQuantity: item.quantity,
+      currentStage: stages[0],
+      stages,
+      tasks: stages.map((stage, index) => ({
+        id: `task-${shortHash(`${recordId}:${index}`, 12)}`,
+        title: stage,
+        description: `${stage}任务（数量 ${item.quantity}）`,
+        status: index === 0 ? '进行中' : '待开始',
+        records: [],
+      })),
+      ...fallbackAssignment,
+      salesOwner: order.salesName || order.owner,
+      salesOwnerId: order.salesId,
+      orderAmount: amount(item.allocatedActualAmount ?? order.actualAmount ?? order.amount),
+      paymentDate: paymentDate(order),
+      orderType: order.orderType || order.dealScene,
+      status: '待开始',
+      priority: 'normal',
+      progressPercent: 0,
+      createdAt: approvedAt,
+      updatedAt: approvedAt,
+    };
+    await transaction.businessRecord.create({ data: {
+      id: `${STORAGE_KEYS.DELIVERIES}:${recordId}`, domain: STORAGE_KEYS.DELIVERIES, recordId,
+      title: `${order.orderNo}-${item.productName}`, status: delivery.status || null, owner: delivery.owner,
+      customerId: order.customerId, orderId: order.id, amount: delivery.orderAmount || null,
+      eventAt: new Date(approvedAt), data: jsonValue(delivery),
+    } });
+  }
+  if (!deliveryIds.length) return;
+  order.deliveryId = primaryDeliveryId || deliveryIds[0];
+  order.deliveryIds = deliveryIds;
   await transaction.businessRecord.update({
     where: { domain_recordId: { domain: STORAGE_KEYS.ORDERS, recordId: order.id } },
     data: { data: jsonValue(order), eventAt: new Date(approvedAt) },

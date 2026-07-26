@@ -377,3 +377,30 @@ function fakeTransaction(options: {
   assert.equal(delivery.ownerId, 'user-cs-auto');
   assert.equal(delivery.assignmentMode, 'auto');
 }
+
+{
+  const { tx, rows } = fakeTransaction();
+  rows.set(key(STORAGE_KEYS.PRODUCTS, 'product-2'), {
+    id: key(STORAGE_KEYS.PRODUCTS, 'product-2'), domain: STORAGE_KEYS.PRODUCTS, recordId: 'product-2',
+    data: { id: 'product-2', name: '29800贴牌', level: '贴牌', price: 29800, deliveryStages: ['贴牌交付'], isActive: true },
+  });
+  const multiProductOrder: Order = {
+    ...order,
+    items: [
+      { id: 'item-1', productId: order.productId!, productName: order.productName!, productLevel: order.productLevel, unitPrice: 899, quantity: 1, subtotal: 899, allocatedActualAmount: 899, isPrimary: false, sortOrder: 1 },
+      { id: 'item-2', productId: 'product-2', productName: '29800贴牌', productLevel: '贴牌', unitPrice: 29800, quantity: 1, subtotal: 29800, allocatedActualAmount: 29800, isPrimary: true, sortOrder: 2 },
+    ],
+    standardTotalAmount: 30699,
+    amount: 30699,
+    actualAmount: 30699,
+  };
+  rows.get(key(STORAGE_KEYS.ORDERS, order.id))!.data = clone(multiProductOrder);
+  await createOrderApprovalDownstreamEffects()({ transaction: tx, application, order: multiProductOrder, reviewer, approvedAt: now } as any);
+  const deliveries = Array.from(rows.values()).filter((row) => row.domain === STORAGE_KEYS.DELIVERIES).map((row) => row.data);
+  assert.equal(deliveries.length, 2, '多产品订单应为每个有交付阶段的产品生成交付记录');
+  assert.deepEqual(new Set(deliveries.map((delivery) => delivery.orderItemId)), new Set(['item-1', 'item-2']));
+  const storedOrder = rows.get(key(STORAGE_KEYS.ORDERS, order.id))!.data as Order;
+  const primaryDelivery = deliveries.find((delivery) => delivery.orderItemId === 'item-2');
+  assert.equal(storedOrder.deliveryId, primaryDelivery?.id, '兼容单交付入口应指向主产品交付单');
+  assert.equal(storedOrder.deliveryIds?.length, 2);
+}

@@ -142,6 +142,30 @@ class FakePrisma {
 {
   const prisma = new FakePrisma();
   const service = createDeliveryCommandService(prisma as any, { now: () => new Date(NOW) });
+  const primary = (await service.createFromOrder('order-delivery', engineer)).data!;
+  const primaryKey = rowKey(STORAGE_KEYS.DELIVERIES, primary.id);
+  const primaryRow = prisma.rows.get(primaryKey)!;
+  const secondaryId = 'delivery-secondary-first';
+  prisma.rows.set(rowKey(STORAGE_KEYS.DELIVERIES, secondaryId), {
+    ...clone(primaryRow),
+    id: `${STORAGE_KEYS.DELIVERIES}:${secondaryId}`,
+    recordId: secondaryId,
+    data: { ...clone(primary), id: secondaryId, orderItemId: 'item-secondary' },
+  });
+  prisma.rows.delete(primaryKey);
+  prisma.rows.set(primaryKey, primaryRow);
+  const orderRow = prisma.rows.get(rowKey(STORAGE_KEYS.ORDERS, 'order-delivery'))!;
+  orderRow.data.deliveryId = primary.id;
+  orderRow.data.deliveryIds = [primary.id, secondaryId];
+
+  const replayed = await service.createFromOrder('order-delivery', engineer);
+  assert.equal(replayed.code, 0, replayed.message);
+  assert.equal(replayed.data?.id, primary.id, '多交付重试应优先返回订单的主交付单');
+}
+
+{
+  const prisma = new FakePrisma();
+  const service = createDeliveryCommandService(prisma as any, { now: () => new Date(NOW) });
   const created = await service.createFromOrder('order-delivery', engineer);
   assert.equal(created.code, 0);
   assert.equal(prisma.deliveries().length, 1);
@@ -168,6 +192,24 @@ class FakePrisma {
   assert.equal(prisma.deliveries()[0].data.notes, undefined);
   const forgedAssignment = await service.updateCard(created.data!.id, { ownerId: otherEngineer.id }, engineer);
   assert.equal(forgedAssignment.code, 403, 'self scope 不得把交付单分配给其他员工');
+
+  const secondaryId = 'delivery-secondary';
+  const secondary = { ...clone(created.data!), id: secondaryId, orderItemId: 'item-secondary', productName: '次要产品' };
+  prisma.rows.set(rowKey(STORAGE_KEYS.DELIVERIES, secondaryId), {
+    id: `${STORAGE_KEYS.DELIVERIES}:${secondaryId}`,
+    domain: STORAGE_KEYS.DELIVERIES,
+    recordId: secondaryId,
+    orderId: secondary.orderId,
+    status: secondary.status,
+    data: secondary,
+  });
+  const linkedOrderRow = prisma.rows.get(rowKey(STORAGE_KEYS.ORDERS, 'order-delivery'))!;
+  linkedOrderRow.data.deliveryIds = [created.data!.id, secondaryId];
+  const advancedSecondary = await service.advance(secondaryId, '账号搭建', engineer);
+  assert.equal(advancedSecondary.code, 0, '多产品订单的次要交付单也应可正常操作');
+  assert.equal(prisma.order().deliveryId, created.data!.id, '操作次要交付不应改写主交付指针');
+  assert.equal((await service.delete(secondaryId, engineer)).code, 0);
+  assert.deepEqual(prisma.order().deliveryIds, [created.data!.id]);
 
   const deleted = await service.delete(created.data!.id, engineer);
   assert.equal(deleted.code, 0);

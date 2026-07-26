@@ -63,6 +63,16 @@ function orderSortTimestamp(order: Order, sortBy?: OrderFilters['sortBy']): numb
   return timestamp(order.createdAt);
 }
 
+function applicationSortTimestamp(
+  application: OrderApplication,
+  sortBy?: OrderApplicationFilters['sortBy'],
+): number {
+  if (sortBy === 'paymentDate') {
+    return timestamp(application.orderData?.payments?.[0]?.paidAt || application.createdAt);
+  }
+  return timestamp(application.createdAt);
+}
+
 function inDateRange(value: unknown, startDate?: string, endDate?: string): boolean {
   const time = timestamp(value);
   if (startDate && time < timestamp(startDate)) return false;
@@ -195,6 +205,7 @@ function matchesOrder(order: Order, filters: OrderFilters): boolean {
   if (filters.customerId && order.customerId !== filters.customerId) return false;
   if (filters.productLevel && order.productLevel !== filters.productLevel) return false;
   if (filters.status && order.status !== filters.status) return false;
+  if (filters.refundStatus && order.refundStatus !== filters.refundStatus) return false;
   if (filters.settlementStatus && order.settlementStatus !== filters.settlementStatus) return false;
   if (filters.owner && order.owner !== filters.owner && order.salesName !== filters.owner) return false;
   if (filters.orderType && order.orderType !== filters.orderType) return false;
@@ -217,7 +228,12 @@ function matchesApplication(application: OrderApplication, filters: OrderApplica
   if (filters.applicantName && application.applicantName !== filters.applicantName) return false;
   if (filters.reviewerName && application.reviewerName !== filters.reviewerName) return false;
   if (filters.importBatchId && application.importBatchId !== filters.importBatchId) return false;
-  return inDateRange(application.submittedAt || application.createdAt, filters.startDate, filters.endDate);
+  if (!inDateRange(application.submittedAt || application.createdAt, filters.startDate, filters.endDate)) return false;
+  return inDateRange(
+    application.orderData?.payments?.[0]?.paidAt || application.createdAt,
+    filters.paymentStartDate,
+    filters.paymentEndDate,
+  );
 }
 
 function exactJson(alias: string, path: string, value?: string): Prisma.Sql[] {
@@ -261,8 +277,8 @@ async function queryOrderPage(
   return queryBusinessRecordPage<Order>(prisma, {
     from: 'business_records br', selectId: 'br.id', selectData: 'br.data', conditions,
     orderBy: filters.sortBy === 'paymentDate'
-      ? `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.payments[0].paidAt')), JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}`
-      : `br.createdAt ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}`,
+      ? `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.payments[0].paidAt')), JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}, br.id ASC`
+      : `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}, br.id ASC`,
     page, pageSize,
   });
 }
@@ -285,6 +301,9 @@ async function queryApplicationPage(
   conditions.push(...exactJson('br', '$.importBatchId', filters.importBatchId));
   if (filters.startDate) conditions.push(Prisma.sql`COALESCE(${jsonText('br', '$.submittedAt')}, ${jsonText('br', '$.createdAt')}) >= ${filters.startDate}`);
   if (filters.endDate) conditions.push(Prisma.sql`COALESCE(${jsonText('br', '$.submittedAt')}, ${jsonText('br', '$.createdAt')}) <= ${/^\d{4}-\d{2}-\d{2}$/.test(filters.endDate) ? `${filters.endDate}T23:59:59.999Z` : filters.endDate}`);
+  const paymentDate = Prisma.sql`COALESCE(${jsonText('br', '$.orderData.payments[0].paidAt')}, ${jsonText('br', '$.createdAt')}, br.createdAt)`;
+  if (filters.paymentStartDate) conditions.push(Prisma.sql`${paymentDate} >= ${filters.paymentStartDate}`);
+  if (filters.paymentEndDate) conditions.push(Prisma.sql`${paymentDate} <= ${/^\d{4}-\d{2}-\d{2}$/.test(filters.paymentEndDate) ? `${filters.paymentEndDate}T23:59:59.999Z` : filters.paymentEndDate}`);
   if (!scope.unrestricted) conditions.push(visibleJsonCondition(
     'br', ['$.applicantId'], ['$.applicantName'], scope.visibleUserIds, scope.visibleUserNames,
   ));
@@ -295,7 +314,10 @@ async function queryApplicationPage(
   }
   return queryBusinessRecordPage<OrderApplication>(prisma, {
     from: 'business_records br', selectId: 'br.id', selectData: 'br.data', conditions,
-    orderBy: 'COALESCE(br.eventAt, br.updatedAt, br.createdAt) DESC', page, pageSize,
+    orderBy: filters.sortBy === 'paymentDate'
+      ? `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.orderData.payments[0].paidAt')), JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}, br.id ASC`
+      : `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(br.data, '$.createdAt')), br.createdAt) ${filters.sortDirection === 'asc' ? 'ASC' : 'DESC'}, br.id ASC`,
+    page, pageSize,
   });
 }
 
@@ -362,11 +384,14 @@ export function createOrderQueryService(
     async getOrder(orderId: string, actor: AuthenticatedUser) {
       const id = cleanText(orderId);
       if (!id) return failure<Order>('订单ID不能为空', 400);
-      const [row, scope] = await Promise.all([
+      const [row, scope, commissionRows] = await Promise.all([
         prisma.businessRecord.findUnique({
           where: { domain_recordId: { domain: STORAGE_KEYS.ORDERS, recordId: id } },
         }),
         loadScope(prisma, actor, 'orders'),
+        prisma.businessRecord.findMany({
+          where: { domain: STORAGE_KEYS.COMMISSIONS, orderId: id },
+        }),
       ]);
       if (!row) return failure<Order>('订单不存在', 404);
       let order = parseRecord<Order>(row.data);
@@ -381,6 +406,16 @@ export function createOrderQueryService(
         if (application) order = enrichOrderCreator(order, new Map([[application.id, application]]));
       }
       order = await enrichLegacyOrderLeadSource(prisma, order);
+      const commissions = (commissionRows as BusinessRecordRow[])
+        .map((commissionRow) => parseRecord<Commission>(commissionRow.data))
+        .filter((commission): commission is Commission => Boolean(
+          commission
+          && commission.orderId === id
+          && commission.sourceBusinessType !== 'after_sales_recovery'
+          && commission.sourceBusinessType !== 'refund_recovery'
+          && !commission.sourceRecoveryOrderId,
+        ));
+      order = { ...order, settlementStatus: deriveOrderListSettlementProgress(commissions) };
       return success(order);
     },
 
@@ -402,7 +437,13 @@ export function createOrderQueryService(
         .filter((application): application is OrderApplication => Boolean(application))
         .filter((application) => !application.reviewCleanedAt)
         .filter((application) => applicationIsVisible(application, scope) && matchesApplication(application, filters))
-        .sort((left, right) => timestamp(right.updatedAt || right.createdAt) - timestamp(left.updatedAt || left.createdAt));
+        .sort((left, right) => {
+          const direction = filters.sortDirection === 'asc' ? 1 : -1;
+          return direction * (
+            applicationSortTimestamp(left, filters.sortBy)
+            - applicationSortTimestamp(right, filters.sortBy)
+          ) || left.id.localeCompare(right.id);
+        });
       const result = paginate(items, filters.page, filters.pageSize);
       const enrichedItems = await enrichApplicationSourceOrderState(prisma, result.items);
       return success({ ...result, items: enrichedItems.map(compactOrderApplicationListItem) });
@@ -451,7 +492,8 @@ export function createOrderQueryService(
       const upgradeOrders = orders.filter((order) => (
         order.orderType === '升级' || order.orderType === '代理升单'
       ));
-      const amount = (order: Order) => Number(order.amount) || 0;
+      // 订单统计必须与列表、详情统一采用实际成交金额；标准价仅作为旧数据兜底。
+      const amount = (order: Order) => Number(order.actualAmount ?? order.amount) || 0;
       const refundAmount = (order: Order) => Number(order.refundAmount ?? order.actualAmount ?? order.amount) || 0;
       return success<OrderStats>({
         todayAmount: todayOrders.reduce((sum, order) => sum + amount(order), 0),

@@ -11,6 +11,7 @@ import type {
   CommissionSettlementBatch,
   CommissionChargebackCompleteInput,
   CommissionRule,
+  CommissionPayoutPlan,
   CommissionTier,
   CommissionTierSnapshot,
   MonthlyCommissionTierConfig,
@@ -19,8 +20,14 @@ import type {
   CommissionStats,
   CommissionStatus,
 } from '../types/commission';
+import {
+  buildCommissionPayoutPlanSnapshot,
+  getCommissionTierBucketKey,
+  resolveCommissionTierSnapshotSource,
+} from '../shared/utils/commissionConfiguration';
 import { deriveOrderSettlementProgress } from '../shared/utils/orderSettlementProgress';
 import type { Order, OrderApplication } from '../types/order';
+import type { RecoveryOrder } from '../types/recoveryOrder';
 import type { Product } from '../types/product';
 import type { User } from '../types/settings';
 import type { Department } from '../types/department';
@@ -52,6 +59,7 @@ const ROLE_DEPARTMENT_MAP: Record<Commission['role'], string> = {
   '线索': '市场部',
   '客户成功': '客户成功部',
   '售后': '售后服务部',
+  '挽回人员': '售后服务部',
   '招商主管': '招商部',
   '销售主管': '销售部',
 };
@@ -170,6 +178,7 @@ function getActiveRoles(): Role[] {
 
 type CommissionNormalizeContext = {
   ordersById: Map<string, Order>;
+  recoveryOrdersById: Map<string, RecoveryOrder>;
   users: User[];
   departments: Department[];
 };
@@ -177,6 +186,11 @@ type CommissionNormalizeContext = {
 function createCommissionNormalizeContext(): CommissionNormalizeContext {
   return {
     ordersById: new Map(getOrders().map((order) => [order.id, order])),
+    recoveryOrdersById: new Map(
+      (getStorageData<RecoveryOrder[]>(STORAGE_KEYS.RECOVERY_ORDERS) || [])
+        .filter((order) => !order.deletedAt)
+        .map((order) => [order.id, order]),
+    ),
     users: getActiveUsers(),
     departments: getActiveDepartments(),
   };
@@ -202,7 +216,10 @@ function getDepartmentByUser(user?: User, departments = getActiveDepartments()):
   return departments.find((department) => department.id === role?.departmentId);
 }
 
-function getCommissionPaymentDate(commission: Commission, order?: Order): string {
+function getCommissionPaymentDate(commission: Commission, order?: Order, recoveryOrder?: RecoveryOrder): string {
+  if (commission.sourceBusinessType === 'after_sales_recovery' || commission.sourceRecoveryOrderId) {
+    return recoveryOrder?.recoveryAt || commission.paymentDate || commission.createdAt;
+  }
   return commission.paymentDate || order?.payments?.[0]?.paidAt || order?.createdAt || commission.createdAt;
 }
 
@@ -286,7 +303,8 @@ function resolveRuleCalculationType(c: Commission): Commission['ruleCalculationT
 }
 
 function resolveRuleTiers(c: Commission): CommissionTier[] {
-  const snapshotTiers = normalizeExplicitCommissionTiers(c.tierSnapshot?.tiers);
+  const plans = getStorageData<CommissionPayoutPlan[]>(STORAGE_KEYS.COMMISSION_PAYOUT_PLANS) || [];
+  const snapshotTiers = normalizeExplicitCommissionTiers(resolveCommissionTierSnapshotSource(c, plans));
   if (snapshotTiers.length) return snapshotTiers;
   if (!c.commissionRuleId) return [];
   const rule = (getStorageData<CommissionRule[]>(STORAGE_KEYS.COMMISSION_RULES) || [])
@@ -298,9 +316,15 @@ function normalizeCommission(c: Commission, context = createCommissionNormalizeC
   const normalizedStatus = normalizeCommissionStatus(c);
   const evidenceStatus = c.evidenceStatus || '无需凭证';
   const order = context.ordersById.get(c.orderId);
+  const recoveryOrderId = c.sourceRecoveryOrderId
+    || (c.sourceBusinessType === 'after_sales_recovery' ? c.orderId : undefined);
+  const recoveryOrder = recoveryOrderId ? context.recoveryOrdersById.get(recoveryOrderId) : undefined;
   const ownerUser = findUserByIdOrName(c.ownerId, c.owner, context.users);
   const ownerDepartment = getDepartmentByUser(ownerUser, context.departments);
   const ruleCalculationType = resolveRuleCalculationType(c);
+  const payoutPlans = getStorageData<CommissionPayoutPlan[]>(STORAGE_KEYS.COMMISSION_PAYOUT_PLANS) || [];
+  const fallbackPlan = c.payoutPlanId ? payoutPlans.find((plan) => plan.id === c.payoutPlanId) : undefined;
+  const payoutPlanSnapshot = c.payoutPlanSnapshot || (fallbackPlan ? buildCommissionPayoutPlanSnapshot(fallbackPlan) : undefined);
   return {
     ...c,
     status: normalizedStatus,
@@ -312,10 +336,12 @@ function normalizeCommission(c: Commission, context = createCommissionNormalizeC
     owner: c.owner || ownerUser?.name || PENDING_ASSIGN_TEXT,
     ownerId: c.ownerId || ownerUser?.id,
     departmentId: c.departmentId || ownerDepartment?.id,
-    paymentDate: getCommissionPaymentDate(c, order),
+    paymentDate: getCommissionPaymentDate(c, order, recoveryOrder),
     evidenceStatus,
     evidenceRequired: c.evidenceRequired ?? evidenceStatus !== '无需凭证',
     ruleCalculationType,
+    payoutPlanVersion: c.payoutPlanVersion || payoutPlanSnapshot?.version,
+    payoutPlanSnapshot,
     tierSnapshot: c.tierSnapshot || (
       ruleCalculationType === 'tiered_percentage'
         ? buildTierSnapshot(resolveRuleTiers(c), Number(c.performanceAmount || c.orderAmount || 0))
@@ -418,17 +444,16 @@ function shouldRecalculateTieredCommission(commission: Commission): boolean {
 
 function applyMonthlyTieredCommissions(period: string, commissions: Commission[]): Commission[] {
   const rows = commissions.map((commission) => normalizeCommission(commission));
-  const monthlyBaseByOwnerRole = new Map<string, number>();
+  const monthlyBaseByBucket = new Map<string, number>();
 
   rows.forEach((commission) => {
     if (!countsTowardTieredMonthlyBase(commission)) return;
     const paymentDate = commission.paymentDate || commission.createdAt;
     if (!paymentDate.startsWith(period)) return;
-    const ownerKey = commission.ownerId || `name:${commission.owner}`;
-    const key = `${ownerKey}::${commission.role}`;
-    monthlyBaseByOwnerRole.set(
+    const key = getCommissionTierBucketKey(commission);
+    monthlyBaseByBucket.set(
       key,
-      roundMoney((monthlyBaseByOwnerRole.get(key) || 0) + Number(commission.performanceAmount || commission.orderAmount || 0)),
+      roundMoney((monthlyBaseByBucket.get(key) || 0) + Number(commission.performanceAmount || commission.orderAmount || 0)),
     );
   });
 
@@ -436,11 +461,10 @@ function applyMonthlyTieredCommissions(period: string, commissions: Commission[]
     if (!shouldRecalculateTieredCommission(commission)) return commission;
     const paymentDate = commission.paymentDate || commission.createdAt;
     if (!paymentDate.startsWith(period)) return commission;
-    const ownerKey = commission.ownerId || `name:${commission.owner}`;
-    const monthlyPaidAmount = monthlyBaseByOwnerRole.get(`${ownerKey}::${commission.role}`) || 0;
+    const monthlyPaidAmount = monthlyBaseByBucket.get(getCommissionTierBucketKey(commission)) || 0;
     const tiers = resolveRuleTiers(commission);
     if (!tiers.length) {
-      const formulaText = '缺少销售阶梯规则，请在提成规则中补充阶梯档位后重新确认分账';
+      const formulaText = '当前提成方案缺少月度阶梯档位，请补充方案配置后重新确认分账';
       return {
         ...commission,
         commissionRate: 0,
@@ -457,12 +481,14 @@ function applyMonthlyTieredCommissions(period: string, commissions: Commission[]
     const rate = tier?.rate || 0;
     const performanceAmount = Number(commission.performanceAmount || commission.orderAmount || 0);
     const commissionAmount = roundMoney(performanceAmount * (rate / 100));
-    const formulaText = `销售角色月累计阶梯业绩 ${monthlyPaidAmount} 元，命中 ${formatTierRange(tier)} × ${rate}%；本单业绩 ${performanceAmount} × ${rate}% = ${commissionAmount} 元`;
+    const formulaText = `${commission.role} · ${commission.payoutPlanSnapshot?.name || commission.payoutPlanName || '月度累计阶梯提成'}：本月累计业绩 ${monthlyPaidAmount} 元，命中 ${formatTierRange(tier)} × ${rate}%；本笔业绩 ${performanceAmount} × ${rate}% = ${commissionAmount} 元`;
     return {
       ...commission,
       commissionRate: rate / 100,
       commissionAmount,
       tierSnapshot,
+      payoutPlanSnapshot: commission.payoutPlanSnapshot,
+      payoutPlanVersion: commission.payoutPlanSnapshot?.version || commission.payoutPlanVersion,
       formulaText,
       calculationNote: [commission.calculationNote, formulaText].filter(Boolean).join('；'),
     };
@@ -823,7 +849,15 @@ function buildAdjustedCommission(
     ? (getStorageData<CommissionRule[]>(STORAGE_KEYS.COMMISSION_RULES) || []).find((rule) => rule.id === input.commissionRuleId)
     : undefined;
   const payoutPlanName = input.payoutPlanName || existing?.payoutPlanName || matchedRule?.payoutPlanName;
-  const tierSource = normalizeExplicitCommissionTiers(input.tierSnapshot?.tiers || existing?.tierSnapshot?.tiers || matchedRule?.tiers);
+  const payoutPlanId = input.payoutPlanId || existing?.payoutPlanId || matchedRule?.payoutPlanId;
+  const payoutPlans = getStorageData<CommissionPayoutPlan[]>(STORAGE_KEYS.COMMISSION_PAYOUT_PLANS) || [];
+  const currentPlan = payoutPlanId ? payoutPlans.find((plan) => plan.id === payoutPlanId) : undefined;
+  const payoutPlanSnapshot = input.payoutPlanSnapshot
+    || existing?.payoutPlanSnapshot
+    || (currentPlan ? buildCommissionPayoutPlanSnapshot(currentPlan) : undefined);
+  const tierSource = normalizeExplicitCommissionTiers(
+    payoutPlanSnapshot?.tiers || input.tierSnapshot?.tiers || existing?.tierSnapshot?.tiers || matchedRule?.tiers,
+  );
   const tierSnapshot = calculationType === 'tiered_percentage'
     ? buildTierSnapshot(tierSource, performanceAmount)
     : undefined;
@@ -835,8 +869,8 @@ function buildAdjustedCommission(
       : roundMoney(input.commissionAmount || 0);
   const formulaText = calculationType === 'tiered_percentage'
     ? (tierSource.length
-      ? `${payoutPlanName || '销售月累计阶梯提成'}，金额由员工提成月报按销售角色阶梯业绩自动结算`
-      : `${payoutPlanName || '销售月累计阶梯提成'} 缺少销售阶梯规则，请绑定一条销售阶梯规则`)
+      ? `${payoutPlanName || '月度累计阶梯提成'}，按提成角色与方案版本汇总月度业绩后自动结算`
+      : `${payoutPlanName || '月度累计阶梯提成'} 缺少月度阶梯档位，请补充方案配置`)
     : calculationType === 'percentage'
       ? `${payoutPlanName ? `${payoutPlanName}：` : ''}业绩金额 ${performanceAmount} × ${roundMoney(commissionRate * 100)}% = ${amount} 元`
       : `${payoutPlanName ? `${payoutPlanName}：` : ''}固定提成 ${amount} 元`;
@@ -858,8 +892,10 @@ function buildAdjustedCommission(
     auditReason: undefined,
     evidenceRequired: existing?.evidenceRequired,
     evidenceStatus: existing?.evidenceStatus || '无需凭证',
-    payoutPlanId: input.payoutPlanId || existing?.payoutPlanId || matchedRule?.payoutPlanId,
+    payoutPlanId,
     payoutPlanName,
+    payoutPlanVersion: input.payoutPlanVersion || existing?.payoutPlanVersion || payoutPlanSnapshot?.version,
+    payoutPlanSnapshot,
     ruleCalculationType: calculationType,
     tierSnapshot,
     formulaText,
@@ -1432,6 +1468,9 @@ function buildMonthlyRoleSummary(role: string, rows: Commission[]): MonthlyCommi
 
   return {
     role,
+    payoutPlanId: tierSource?.payoutPlanSnapshot?.id || tierSource?.payoutPlanId,
+    payoutPlanName: tierSource?.payoutPlanSnapshot?.name || tierSource?.payoutPlanName,
+    payoutPlanVersion: tierSource?.payoutPlanSnapshot?.version || tierSource?.payoutPlanVersion,
     orderCount: new Set(rows.map((commission) => commission.orderId)).size,
     monthlyPaidAmount: activeTierBase,
     pendingConfirmAmount: roundMoney(pendingConfirmAmount),
@@ -1460,10 +1499,13 @@ function buildMonthlyPayouts(period: string): MonthlyCommissionPayout[] {
     const first = rows[0];
     const roleMap = new Map<string, Commission[]>();
     rows.forEach((commission) => {
-      roleMap.set(commission.role, [...(roleMap.get(commission.role) || []), commission]);
+      const roleKey = commission.ruleCalculationType === 'tiered_percentage'
+        ? getCommissionTierBucketKey(commission)
+        : `${commission.role}::simple`;
+      roleMap.set(roleKey, [...(roleMap.get(roleKey) || []), commission]);
     });
     const roleSummaries = Array.from(roleMap.entries())
-      .map(([role, roleRows]) => buildMonthlyRoleSummary(role, roleRows))
+      .map(([, roleRows]) => buildMonthlyRoleSummary(roleRows[0].role, roleRows))
       .sort((a, b) => b.totalAmount - a.totalAmount || a.role.localeCompare(b.role, 'zh-CN'));
     const pendingConfirmAmount = roleSummaries.reduce((sumValue, item) => sumValue + item.pendingConfirmAmount, 0);
     const pendingPayAmount = roleSummaries.reduce((sumValue, item) => sumValue + item.pendingPayAmount, 0);

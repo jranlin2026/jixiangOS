@@ -54,7 +54,7 @@ try {
 
   assert.deepEqual(requestedUrls, [
     'http://127.0.0.1:3001/api/storage?scope=commissions',
-    'http://127.0.0.1:3001/api/storage?scope=finance-flow',
+    'http://127.0.0.1:3001/api/finance-transactions?page=1&pageSize=20',
   ]);
 } finally {
   globalThis.fetch = originalFetch;

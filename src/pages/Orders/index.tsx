@@ -36,7 +36,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import useOrderStore from '../../store/useOrderStore';
 import { businessExportApi, customerApi, orderApi, productApi, settingsApi } from '../../api';
 import { getProductLevelRowSx, getProductLevelTagSx, normalizeResourceOwnership } from '../../shared/utils/constants';
@@ -47,7 +47,7 @@ import OrderForm from './OrderForm';
 import OrderHistoryDialog from './OrderHistoryDialog';
 import OrderReview from '../OrderReview';
 import type { Customer } from '../../types/customer';
-import type { Order, OrderSettlementProgress } from '../../types/order';
+import type { Order, OrderCorrectionPrecheck, OrderSettlementProgress } from '../../types/order';
 import type { OrderTypeConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
@@ -70,7 +70,9 @@ import { buildBusinessExportBrowserRequest, unwrapBusinessExportResponse } from 
 import BusinessImportDialog from '../../shared/components/BusinessImportDialog';
 import type { BusinessImportJobResult } from '../../types/businessImport';
 import BusinessImportEntryButton from '../../shared/components/BusinessImportEntryButton';
-import BusinessStatusChip from '../../shared/components/BusinessStatusChip';
+import SettlementStatusChip from '../../shared/components/SettlementStatusChip';
+import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
+import { SETTLEMENT_STATUSES } from '../../shared/utils/settlementStatus';
 
 type OrderColumn = {
   id: string;
@@ -85,14 +87,17 @@ type OrderViewConfig = {
 };
 
 const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_view_v7';
-const ORDER_VIEW_SCHEMA_VERSION = 12;
+// 状态与退款状态成为上线必备默认列，升级配置版本以迁移旧的本地视图。
+const ORDER_VIEW_SCHEMA_VERSION = 13;
 const ORDER_WIDTH_STORAGE_KEY = 'aaos_order_table_column_widths_v1';
 const ORDER_ACTION_COLUMN_WIDTH = 160;
-const ORDER_SETTLEMENT_STATUS_OPTIONS: OrderSettlementProgress[] = ['待分账', '待确认', '待发放', '已发放', '已撤回'];
+const ORDER_SETTLEMENT_STATUS_OPTIONS: OrderSettlementProgress[] = [...SETTLEMENT_STATUSES];
 
 const ORDER_COLUMNS: OrderColumn[] = [
   { id: 'orderNo', label: '订单号' },
-  { id: 'settlementStatus', label: '分账进度' },
+  { id: 'status', label: '订单状态' },
+  { id: 'refundStatus', label: '退款状态' },
+  { id: 'settlementStatus', label: '分账状态' },
   { id: 'customer', label: '客户' },
   { id: 'productName', label: '产品名称' },
   { id: 'productLevel', label: '产品等级' },
@@ -112,6 +117,8 @@ const ORDER_COLUMNS: OrderColumn[] = [
 
 const DEFAULT_VISIBLE_COLUMNS = [
   'orderNo',
+  'status',
+  'refundStatus',
   'settlementStatus',
   'customer',
   'productName',
@@ -129,6 +136,8 @@ const DEFAULT_VISIBLE_COLUMNS = [
 
 const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   orderNo: 180,
+  status: 120,
+  refundStatus: 130,
   settlementStatus: 120,
   customer: 180,
   productName: 180,
@@ -196,6 +205,7 @@ const readOrderViewConfig = () => {
 const Orders: React.FC = () => {
   const { items, filters, pagination, loading, error, fetchItems, setFilters, delete: deleteOrder } = useOrderStore();
   const currentUser = useAuthStore((state) => state.currentUser);
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const visibleTabs = useMemo<Array<{ value: 'list' | 'review'; label: string }>>(() => {
     const tabs: Array<{ value: 'list' | 'review'; label: string }> = [];
@@ -219,6 +229,8 @@ const Orders: React.FC = () => {
   const [customerOpen, setCustomerOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const [orderFormMode, setOrderFormMode] = useState<'edit' | 'correction'>('edit');
+  const [correctionBlocker, setCorrectionBlocker] = useState<{ order: Order; precheck: OrderCorrectionPrecheck } | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [orderCustomer, setOrderCustomer] = useState<Customer | null>(null);
   const [customerOrdersOpen, setCustomerOrdersOpen] = useState(false);
@@ -329,21 +341,63 @@ const Orders: React.FC = () => {
 
   const handleCreateOrder = () => {
     setEditingOrder(null);
+    setOrderFormMode('edit');
     setFormOpen(true);
   };
 
-  const handleEditOrder = async (order: Order) => {
+  const correctionBlockerGuidance = correctionBlocker ? (() => {
+    switch (correctionBlocker.precheck.reasonCode) {
+      case 'manual_commission':
+        return '请先在财务中心撤回或清理相关人工分账，再返回订单管理重新发起订单更正。';
+      case 'payout_started':
+        return '该订单已有提成进入发放或冲销流程，请先在财务中心完成提成冲正，再重新发起订单更正。';
+      case 'commission_withdrawn':
+      case 'unsupported_commission_status':
+        return '当前分账状态不支持自动重算，请先到财务中心完成处理，再重新发起订单更正。';
+      case 'refund_in_progress':
+        return '请先完成或终止当前退款流程，再重新发起订单更正。';
+      case 'order_deleted':
+        return '已删除订单仅保留业务留痕，不能再执行订单更正。';
+      case 'rebuild_unavailable':
+        return '当前提成重算服务不可用，请稍后重试；无需先修改财务分账。';
+      default:
+        return '请根据上方原因处理后，再重新发起订单更正。';
+    }
+  })() : '';
+  const correctionBlockerHasFinanceResolution = Boolean(correctionBlocker && [
+    'manual_commission',
+    'payout_started',
+    'commission_withdrawn',
+    'unsupported_commission_status',
+  ].includes(correctionBlocker.precheck.reasonCode || ''));
+
+  const handleEditOrder = async (order: Order, mode: 'edit' | 'correction' = 'edit') => {
+    if (mode === 'correction') {
+      const precheck = await orderApi.precheckOrderCorrection(order.id);
+      if (precheck.code !== 0 || !precheck.data) {
+        await alert(precheck.message || '订单更正预检失败，请稍后重试');
+        return;
+      }
+      if (!precheck.data.allowed) {
+        setCorrectionBlocker({ order, precheck: precheck.data });
+        setDetailOpen(false);
+        return;
+      }
+    }
     const res = await orderApi.fetchOrderById(order.id);
     if (res.code !== 0 || !res.data) {
       await alert(res.message || '订单详情加载失败，暂时不能编辑');
       return;
     }
     setEditingOrder(res.data);
+    setOrderFormMode(mode);
+    setDetailOpen(false);
     setFormOpen(true);
   };
 
   const handleViewHistory = (order: Order) => {
     setSelectedOrder(order);
+    setDetailOpen(false);
     setHistoryOpen(true);
   };
 
@@ -587,7 +641,11 @@ const Orders: React.FC = () => {
           </Button>
         );
       case 'settlementStatus':
-        return <BusinessStatusChip status={order.settlementStatus || '待分账'} />;
+        return <SettlementStatusChip status={order.settlementStatus} />;
+      case 'status':
+        return <Chip label={order.status} size="small" variant="outlined" />;
+      case 'refundStatus':
+        return <RefundStatusBadge status={order.refundStatus} />;
       case 'customer':
         return (
           <Button
@@ -600,7 +658,7 @@ const Orders: React.FC = () => {
           </Button>
         );
       case 'productName':
-        return order.productName || order.productLevel || '-';
+        return `${order.productName || order.productLevel || '-'}${(order.items?.length || 0) > 1 ? ` 等${order.items!.length}项` : ''}`;
       case 'productLevel':
         return (
           <Chip
@@ -666,11 +724,13 @@ const Orders: React.FC = () => {
               视图设置
             </Button>
           )}
-          <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_CREATE} action="write">
-            <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateOrder}>
-              提交订单申请
-            </Button>
-          </PermissionGate>
+          {activeTab === 'list' && (
+            <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_CREATE} action="write">
+              <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreateOrder}>
+                提交订单申请
+              </Button>
+            </PermissionGate>
+          )}
           </>
         )}
       />
@@ -699,8 +759,22 @@ const Orders: React.FC = () => {
               sx={{ minWidth: 240 }}
             />
             <FormControl size="small" sx={{ minWidth: 130 }}>
-              <InputLabel>分账进度</InputLabel>
-              <Select value={filters.settlementStatus || ''} label="分账进度" onChange={(e) => handleFilterChange('settlementStatus', e.target.value)}>
+              <InputLabel>订单状态</InputLabel>
+              <Select value={filters.status || ''} label="订单状态" onChange={(e) => handleFilterChange('status', e.target.value)}>
+                <MenuItem value="">全部</MenuItem>
+                {['待确认', '已确认', '处理中', '已完成', '退款中', '已退款', '已取消'].map((status) => <MenuItem key={status} value={status}>{status}</MenuItem>)}
+              </Select>
+            </FormControl>
+            <FormControl size="small" sx={{ minWidth: 140 }}>
+              <InputLabel>退款状态</InputLabel>
+              <Select value={filters.refundStatus || ''} label="退款状态" onChange={(e) => handleFilterChange('refundStatus', e.target.value)}>
+                <MenuItem value="">全部</MenuItem>
+                {['无', '待分配', '挽回中', '挽回成功', '待财务退款', '退款申请中', '退款已批准', '退款已完成', '退款已拒绝'].map((status) => <MenuItem key={status} value={status}>{status}</MenuItem>)}
+              </Select>
+            </FormControl>
+            <FormControl size="small" sx={{ minWidth: 130 }}>
+              <InputLabel>分账状态</InputLabel>
+              <Select value={filters.settlementStatus || ''} label="分账状态" onChange={(e) => handleFilterChange('settlementStatus', e.target.value)}>
                 <MenuItem value="">全部</MenuItem>
                 {ORDER_SETTLEMENT_STATUS_OPTIONS.map((status) => <MenuItem key={status} value={status}>{status}</MenuItem>)}
               </Select>
@@ -896,8 +970,61 @@ const Orders: React.FC = () => {
       )}
 
       {selectedOrder && (
-        <OrderDetail order={selectedOrder} open={detailOpen} onClose={handleCloseDetail} />
+        <OrderDetail
+          order={selectedOrder}
+          open={detailOpen}
+          onClose={handleCloseDetail}
+          canEdit={hasPermission(currentUser, PERMISSION_KEYS.ORDER_EDIT, 'write')}
+          canCorrect={hasPermission(currentUser, PERMISSION_KEYS.ORDER_CORRECT, 'write')}
+          canViewHistory={hasPermission(currentUser, PERMISSION_KEYS.ORDER_HISTORY)}
+          onEdit={() => void handleEditOrder(selectedOrder, 'edit')}
+          onCorrect={() => void handleEditOrder(selectedOrder, 'correction')}
+          onHistory={() => handleViewHistory(selectedOrder)}
+        />
       )}
+
+      <Dialog open={Boolean(correctionBlocker)} onClose={() => setCorrectionBlocker(null)} maxWidth="sm" fullWidth>
+        <DialogCloseTitle onClose={() => setCorrectionBlocker(null)}>暂不能更正订单</DialogCloseTitle>
+        <DialogContent dividers>
+          {correctionBlocker ? (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Alert severity="warning">
+                {correctionBlocker.precheck.message}
+              </Alert>
+              <Box sx={{ p: 2, borderRadius: 1.5, bgcolor: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>{correctionBlocker.order.orderNo}</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  当前共 {correctionBlocker.precheck.commissionCount} 条分账
+                  {correctionBlocker.precheck.manualCommissionCount > 0
+                    ? `，其中 ${correctionBlocker.precheck.manualCommissionCount} 条为人工新增或人工调整`
+                    : ''}
+                  {correctionBlocker.precheck.commissionStatuses.length
+                    ? `；状态：${correctionBlocker.precheck.commissionStatuses.join('、')}`
+                    : '。'}
+                </Typography>
+              </Box>
+              <Typography variant="body2" color="text.secondary">
+                {correctionBlockerGuidance}
+              </Typography>
+            </Box>
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCorrectionBlocker(null)}>关闭</Button>
+          {correctionBlocker && correctionBlockerHasFinanceResolution && hasPermission(currentUser, PERMISSION_KEYS.FINANCE_SETTLEMENT) ? (
+            <Button
+              variant="contained"
+              onClick={() => {
+                const search = encodeURIComponent(correctionBlocker.order.orderNo);
+                setCorrectionBlocker(null);
+                navigate(`/finance?tab=settlement&search=${search}`);
+              }}
+            >
+              前往订单分账处理
+            </Button>
+          ) : null}
+        </DialogActions>
+      </Dialog>
 
       {selectedCustomer && (
         <CustomerDetail
@@ -917,8 +1044,9 @@ const Orders: React.FC = () => {
       <OrderForm
         open={formOpen}
         order={editingOrder}
+        initialMode={orderFormMode}
         customer={orderCustomer}
-        onClose={() => { setFormOpen(false); setEditingOrder(null); }}
+        onClose={() => { setFormOpen(false); setEditingOrder(null); setOrderFormMode('edit'); }}
         onSuccess={(application) => {
           fetchItems({ ...filters, paymentMethod: undefined });
           setOrderCustomer(null);

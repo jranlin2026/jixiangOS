@@ -8,6 +8,7 @@ import type {
   CommissionRoleConfigInput,
   CommissionPayoutPlan,
   CommissionPayoutPlanInput,
+  CommissionPayoutPlanRevision,
   CommissionRule,
   CommissionTier,
   OfficialPaymentChannel,
@@ -15,6 +16,7 @@ import type {
   SimpleCommissionRuleGroupInput,
   SimpleCommissionRulePayout,
 } from '../types/commission';
+import { buildCommissionPayoutPlanSnapshot } from '../shared/utils/commissionConfiguration';
 import type { Order } from '../types/order';
 import type { User } from '../types/settings';
 import type { Department } from '../types/department';
@@ -44,12 +46,14 @@ function buildDefaultPayoutPlans(now = new Date().toISOString()): CommissionPayo
   return [
     {
       id: 'plan-sales-tiered',
-      name: '销售阶梯提成',
+      name: '月度累计阶梯提成',
       commissionType: 'tiered_percentage',
       commissionValue: 0,
       tiers: DEFAULT_SALES_COMMISSION_TIERS,
       isActive: true,
-      description: '销售角色按月累计阶梯业绩自动结算',
+      description: '按提成角色与方案版本汇总月度业绩后自动结算',
+      version: 1,
+      effectiveFrom: now,
       createdAt: now,
       updatedAt: now,
     },
@@ -60,6 +64,8 @@ function buildDefaultPayoutPlans(now = new Date().toISOString()): CommissionPayo
       commissionValue: 10,
       isActive: true,
       description: '按订单实付业绩金额的 10% 计算',
+      version: 1,
+      effectiveFrom: now,
       createdAt: now,
       updatedAt: now,
     },
@@ -70,6 +76,8 @@ function buildDefaultPayoutPlans(now = new Date().toISOString()): CommissionPayo
       commissionValue: 30,
       isActive: true,
       description: '线索贡献固定金额',
+      version: 1,
+      effectiveFrom: now,
       createdAt: now,
       updatedAt: now,
     },
@@ -77,15 +85,68 @@ function buildDefaultPayoutPlans(now = new Date().toISOString()): CommissionPayo
 }
 
 function normalizePayoutPlan(plan: CommissionPayoutPlan): CommissionPayoutPlan {
+  const isLegacyDefaultTieredPlan = plan.id === 'plan-sales-tiered' && plan.commissionType === 'tiered_percentage';
   return {
     ...plan,
-    name: plan.name.trim(),
+    name: isLegacyDefaultTieredPlan && plan.name.trim() === '销售阶梯提成'
+      ? '月度累计阶梯提成'
+      : plan.name.trim(),
+    description: isLegacyDefaultTieredPlan && plan.description === '销售角色按月累计阶梯业绩自动结算'
+      ? '按提成角色与方案版本汇总月度业绩后自动结算'
+      : plan.description,
     commissionValue: plan.commissionType === 'tiered_percentage' ? 0 : Number(plan.commissionValue) || 0,
     tiers: plan.commissionType === 'tiered_percentage'
       ? normalizeCommissionTiers(plan.tiers, true)
       : undefined,
     isActive: plan.isActive !== false,
+    version: Math.max(1, Number(plan.version) || 1),
+    effectiveFrom: plan.effectiveFrom || plan.createdAt,
+    revisions: (plan.revisions || [])
+      .map((revision) => ({
+        ...revision,
+        id: revision.id || plan.id,
+        name: revision.name.trim(),
+        version: Math.max(1, Number(revision.version) || 1),
+        commissionValue: revision.commissionType === 'tiered_percentage' ? 0 : Number(revision.commissionValue) || 0,
+        tiers: revision.commissionType === 'tiered_percentage'
+          ? normalizeCommissionTiers(revision.tiers, true)
+          : undefined,
+        effectiveFrom: revision.effectiveFrom || plan.createdAt,
+      }))
+      .sort((left, right) => left.version - right.version),
   };
+}
+
+function buildPayoutPlanRevision(
+  plan: CommissionPayoutPlan,
+  effectiveTo: string,
+): CommissionPayoutPlanRevision {
+  return {
+    id: plan.id,
+    name: plan.name,
+    version: Math.max(1, Number(plan.version) || 1),
+    commissionType: plan.commissionType,
+    commissionValue: plan.commissionType === 'tiered_percentage' ? 0 : Number(plan.commissionValue) || 0,
+    tiers: plan.commissionType === 'tiered_percentage'
+      ? normalizeCommissionTiers(plan.tiers, true)
+      : undefined,
+    description: plan.description,
+    effectiveFrom: plan.effectiveFrom || plan.createdAt,
+    effectiveTo,
+  };
+}
+
+async function persistPayoutPlans(
+  next: CommissionPayoutPlan[],
+  rollback: CommissionPayoutPlan[],
+): Promise<string | null> {
+  try {
+    await setStorageData(COMMISSION_PAYOUT_PLANS_STORAGE_KEY, next, { reportFailure: false });
+    return null;
+  } catch (error) {
+    await setStorageData(COMMISSION_PAYOUT_PLANS_STORAGE_KEY, rollback, { persist: false });
+    return error instanceof Error ? error.message : '提成方案保存失败';
+  }
 }
 
 function readPayoutPlans(): CommissionPayoutPlan[] {
@@ -111,7 +172,7 @@ function resolvePayoutPlan(planId?: string): CommissionPayoutPlan | undefined {
 }
 
 function inferPlanName(commissionType: CommissionRule['commissionType'], commissionValue: number): string {
-  if (commissionType === 'tiered_percentage') return '销售阶梯提成';
+  if (commissionType === 'tiered_percentage') return '月度累计阶梯提成';
   if (commissionType === 'percentage') return `固定比例 ${commissionValue}%`;
   return `固定金额 ${commissionValue} 元`;
 }
@@ -134,27 +195,28 @@ function normalizeCommissionTiers(tiers?: CommissionTier[], useDefault = false):
 
 function validateCommissionTiers(tiers?: CommissionTier[]): string | null {
   const normalized = normalizeCommissionTiers(tiers);
-  if (!normalized.length) return '销售阶梯提成至少需要配置一个档位';
-  if (normalized[0].minAmount !== 0) return '销售阶梯第一档下限必须为 0';
+  if (!normalized.length) return '月度累计阶梯提成至少需要配置一个档位';
+  if (normalized[0].minAmount !== 0) return '月度阶梯第一档下限必须为 0';
   for (let index = 0; index < normalized.length; index += 1) {
     const tier = normalized[index];
-    if (tier.minAmount < 0) return '销售阶梯下限不能小于 0';
-    if (tier.rate < 0) return '销售阶梯比例不能小于 0';
-    if (tier.maxAmount !== undefined && tier.maxAmount <= tier.minAmount) return '销售阶梯上限必须大于下限';
+    if (tier.minAmount < 0) return '月度阶梯下限不能小于 0';
+    if (tier.rate < 0) return '月度阶梯比例不能小于 0';
+    if (tier.maxAmount !== undefined && tier.maxAmount <= tier.minAmount) return '月度阶梯上限必须大于下限';
     const next = normalized[index + 1];
-    if (next && tier.maxAmount !== next.minAmount) return '销售阶梯档位必须连续';
-    if (!next && tier.maxAmount !== undefined) return '最后一个销售阶梯档位不能设置上限';
+    if (next && tier.maxAmount !== next.minAmount) return '月度阶梯档位必须连续';
+    if (!next && tier.maxAmount !== undefined) return '最后一个月度阶梯档位不能设置上限';
   }
   return null;
 }
 
 const DEFAULT_COMMISSION_ROLE_CONFIGS: CommissionRoleConfigInput[] = [
-  { name: '销售', code: 'sales', personSource: 'sales_owner', isActive: true, sortOrder: 10, description: '取订单销售负责人，用于销售分成' },
-  { name: '线索', code: 'lead', personSource: 'lead_contributor', isActive: true, sortOrder: 20, description: '取订单线索贡献人，用于线索分成' },
-  { name: '客户成功', code: 'customer_success', personSource: 'customer_success', isActive: true, sortOrder: 30, description: '取订单客户成功人员' },
-  { name: '售后', code: 'after_sales', personSource: 'after_sales', isActive: true, sortOrder: 40, description: '取订单售后人员' },
-  { name: '招商主管', code: 'investment_manager', personSource: 'manual', isActive: true, sortOrder: 50, description: '默认待分配，由财务手动指定' },
-  { name: '销售主管', code: 'sales_manager', personSource: 'manual', isActive: true, sortOrder: 60, description: '默认待分配，由财务手动指定' },
+  { name: '销售', code: 'sales', personSource: 'sales_owner', isActive: true, sortOrder: 10, description: '正式订单中的销售提成身份' },
+  { name: '线索', code: 'lead', personSource: 'lead_contributor', isActive: true, sortOrder: 20, description: '线索贡献对应的提成身份' },
+  { name: '客户成功', code: 'customer_success', personSource: 'customer_success', isActive: true, sortOrder: 30, description: '客户成功业务对应的提成身份' },
+  { name: '售后', code: 'after_sales', personSource: 'after_sales', isActive: true, sortOrder: 40, description: '售后服务业务对应的提成身份' },
+  { name: '挽回人员', code: 'recovery_operator', personSource: 'manual', isActive: true, sortOrder: 50, description: '售后挽回业务对应的提成身份' },
+  { name: '招商主管', code: 'investment_manager', personSource: 'manual', isActive: true, sortOrder: 60, description: '默认待分配，由财务手动指定' },
+  { name: '销售主管', code: 'sales_manager', personSource: 'department_manager', isActive: true, sortOrder: 70, description: '默认取订单销售所属部门经理，缺失时待分配' },
 ];
 
 function buildDefaultCommissionRoleConfigs(now = new Date().toISOString()): CommissionRoleConfig[] {
@@ -167,6 +229,13 @@ function buildDefaultCommissionRoleConfigs(now = new Date().toISOString()): Comm
 }
 
 function normalizeCommissionRoleConfig(config: CommissionRoleConfig): CommissionRoleConfig {
+  const legacyDescriptions: Record<string, string> = {
+    '取订单销售负责人，用于销售分成': '正式订单中的销售提成身份',
+    '取订单线索贡献人，用于线索分成': '线索贡献对应的提成身份',
+    '取订单客户成功人员': '客户成功业务对应的提成身份',
+    '取订单售后人员': '售后服务业务对应的提成身份',
+    '售后挽回业务的实际挽回人员': '售后挽回业务对应的提成身份',
+  };
   return {
     ...config,
     id: config.id || config.code,
@@ -175,6 +244,7 @@ function normalizeCommissionRoleConfig(config: CommissionRoleConfig): Commission
     personSource: config.personSource || 'manual',
     sortOrder: Number(config.sortOrder) || 100,
     isActive: config.isActive !== false,
+    description: legacyDescriptions[config.description || ''] || config.description,
   };
 }
 
@@ -191,7 +261,11 @@ function ensureCommissionRoleConfigs(): CommissionRoleConfig[] {
     setStorageData(STORAGE_KEYS.COMMISSION_ROLE_CONFIGS, defaults, { persist: false });
     return defaults;
   }
-  const normalized = sortCommissionRoleConfigs(raw);
+  const recoveryDefault = buildDefaultCommissionRoleConfigs().find((item) => item.code === 'recovery_operator')!;
+  const withRequiredRoles = raw.some((item) => item.code === recoveryDefault.code)
+    ? raw
+    : [...raw, recoveryDefault];
+  const normalized = sortCommissionRoleConfigs(withRequiredRoles);
   setStorageData(STORAGE_KEYS.COMMISSION_ROLE_CONFIGS, normalized, { persist: false });
   return normalized;
 }
@@ -306,6 +380,8 @@ function normalizeRule(rule: CommissionRule): CommissionRule {
     settlementMode: '自动结算',
     description: '',
     ...rule,
+    businessSource: rule.businessSource || 'formal_order',
+    assigneeSource: rule.assigneeSource || inferAssigneeSource(rule.role, rule.businessSource || 'formal_order'),
     resourceOwnership: rule.resourceOwnership ? normalizeResourceOwnership(rule.resourceOwnership) : '',
     commissionValue: rule.commissionType === 'tiered_percentage' ? 0 : Number(rule.commissionValue) || 0,
     tiers: rule.commissionType === 'tiered_percentage'
@@ -365,11 +441,13 @@ function groupSimpleRules(rules: CommissionRule[]): SimpleCommissionRuleGroup[] 
     return {
       id,
       name: first.ruleGroupName || first.name,
+      businessSource: first.businessSource || 'formal_order',
       orderType: first.orderType,
       resourceOwnership: first.resourceOwnership || '公司资源',
       isActive: sorted.every((rule) => rule.isActive),
       payouts: sorted.map((rule) => ({
         role: rule.role,
+        assigneeSource: rule.assigneeSource,
         payoutPlanId: rule.payoutPlanId,
         payoutPlanName: rule.payoutPlanName || inferPlanName(rule.commissionType, rule.commissionValue),
         commissionType: rule.commissionType,
@@ -382,15 +460,10 @@ function groupSimpleRules(rules: CommissionRule[]): SimpleCommissionRuleGroup[] 
   }).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
 }
 
-function isSalesCommissionRole(role: CommissionRole): boolean {
-  const config = getCommissionRoleConfigByName(role);
-  return role === ROLE_MATCH_TEXT.sales || config?.code === 'sales' || config?.personSource === 'sales_owner';
-}
-
 function validateSimpleRuleGroup(data: SimpleCommissionRuleGroupInput): string | null {
   if (!data.name.trim()) return '规则名称不能为空';
   if (!data.orderType) return '请选择订单类型';
-  if (!data.resourceOwnership) return '请选择资源来源';
+  if (data.businessSource === 'formal_order' && !data.resourceOwnership) return '请选择资源来源';
   if (!data.payouts.length) return '至少配置一个提成角色';
   const roles = data.payouts.map((item) => item.role);
   if (new Set(roles).size !== roles.length) return '同一规则内不能重复配置提成角色';
@@ -402,7 +475,6 @@ function validateSimpleRuleGroup(data: SimpleCommissionRuleGroupInput): string |
     if (plan.commissionType === 'tiered_percentage') {
       const tierError = validateCommissionTiers(normalizeCommissionTiers(plan.tiers, true));
       if (tierError) return tierError;
-      if (!isSalesCommissionRole(payout.role)) return '销售月累计阶梯提成只能配置给销售角色';
     }
   }
   const activeRoles = new Set(ensureCommissionRoleConfigs().filter((item) => item.isActive).map((item) => item.name));
@@ -411,9 +483,20 @@ function validateSimpleRuleGroup(data: SimpleCommissionRuleGroupInput): string |
   return null;
 }
 
+function inferAssigneeSource(role: CommissionRole, businessSource: SimpleCommissionRuleGroupInput['businessSource']): SimpleCommissionRulePayout['assigneeSource'] {
+  if (businessSource === 'after_sales_recovery') return role === '挽回人员' ? 'recovery_owner' : 'manual';
+  if (role === '销售') return 'sales_owner';
+  if (role === '线索') return 'lead_contributor';
+  if (role === '客户成功') return 'customer_success';
+  if (role === '售后') return 'after_sales';
+  if (role === '销售主管') return 'department_manager';
+  return 'manual';
+}
+
 function hasDuplicateSimpleCondition(groups: SimpleCommissionRuleGroup[], data: SimpleCommissionRuleGroupInput, currentId?: string): boolean {
   return groups.some((group) => (
     group.id !== currentId
+    && (group.businessSource || 'formal_order') === (data.businessSource || 'formal_order')
     && group.orderType === data.orderType
     && group.resourceOwnership === data.resourceOwnership
   ));
@@ -434,6 +517,8 @@ function buildSimpleRule(
     name: `${data.name}-${payout.role}`,
     ruleGroupId: groupId,
     ruleGroupName: data.name,
+    businessSource: data.businessSource || 'formal_order',
+    assigneeSource: payout.assigneeSource || inferAssigneeSource(payout.role, data.businessSource),
     productLevel: '',
     orderType: data.orderType,
     sourceType: '',
@@ -537,10 +622,13 @@ async function createCommissionPayoutPlan(data: CommissionPayoutPlanInput): Prom
     id: `plan-${uuidv4().slice(0, 8)}`,
     ...data,
     name: data.name.trim(),
+    version: 1,
+    effectiveFrom: now,
     createdAt: now,
     updatedAt: now,
   });
-  setStorageData(COMMISSION_PAYOUT_PLANS_STORAGE_KEY, [...existing, plan]);
+  const persistError = await persistPayoutPlans([...existing, plan], existing);
+  if (persistError) return createErrorResponse(persistError);
   return createSuccessResponse(plan);
 }
 
@@ -552,14 +640,66 @@ async function updateCommissionPayoutPlan(id: string, data: CommissionPayoutPlan
   if (idx === -1) return createSuccessResponse(null);
   const validation = validatePayoutPlan(data, existing, id);
   if (validation) return createErrorResponse(validation);
+  const previous = existing[idx];
+  const algorithmChanged = previous.name !== data.name.trim()
+    || previous.commissionType !== data.commissionType
+    || Number(previous.commissionValue || 0) !== Number(data.commissionValue || 0)
+    || JSON.stringify(normalizeCommissionTiers(previous.tiers)) !== JSON.stringify(normalizeCommissionTiers(data.tiers));
+  const changedAt = new Date().toISOString();
+  const previousVersion = Math.max(1, Number(previous.version) || 1);
+  const revisions = algorithmChanged
+    ? [
+      ...(previous.revisions || []).filter((revision) => revision.version !== previousVersion),
+      buildPayoutPlanRevision(previous, changedAt),
+    ]
+    : previous.revisions;
   const plan = normalizePayoutPlan({
-    ...existing[idx],
+    ...previous,
     ...data,
     name: data.name.trim(),
-    updatedAt: new Date().toISOString(),
+    version: algorithmChanged ? previousVersion + 1 : previous.version,
+    effectiveFrom: algorithmChanged ? changedAt : previous.effectiveFrom,
+    revisions,
+    updatedAt: changedAt,
   });
   const next = existing.map((item) => (item.id === id ? plan : item));
-  setStorageData(COMMISSION_PAYOUT_PLANS_STORAGE_KEY, next);
+  const persistError = await persistPayoutPlans(next, existing);
+  if (persistError) return createErrorResponse(persistError);
+  const rules = getStorageData<CommissionRule[]>(STORAGE_KEYS.COMMISSION_RULES) || [];
+  setStorageData(STORAGE_KEYS.COMMISSION_RULES, rules.map((rule) => (
+    rule.payoutPlanId === id
+      ? {
+        ...rule,
+        payoutPlanName: plan.name,
+        commissionType: plan.commissionType,
+        commissionValue: plan.commissionType === 'tiered_percentage' ? 0 : plan.commissionValue,
+        tiers: plan.commissionType === 'tiered_percentage' ? plan.tiers : undefined,
+        updatedAt: new Date().toISOString(),
+      }
+      : rule
+  )));
+  if (algorithmChanged) {
+    const snapshot = buildCommissionPayoutPlanSnapshot(plan);
+    const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
+    setStorageData(STORAGE_KEYS.COMMISSIONS, commissions.map((commission) => (
+      commission.payoutPlanId === id && commission.status !== '已发放'
+        ? {
+          ...commission,
+          payoutPlanName: plan.name,
+          payoutPlanVersion: snapshot.version,
+          payoutPlanSnapshot: snapshot,
+          ruleCalculationType: plan.commissionType,
+          tierSnapshot: plan.commissionType === 'tiered_percentage' && plan.tiers?.length
+            ? { tiers: plan.tiers, baseAmount: Number(commission.performanceAmount || commission.orderAmount || 0), gapToNext: 0 }
+            : undefined,
+          commissionAmount: plan.commissionType === 'tiered_percentage' ? 0 : commission.commissionAmount,
+          status: commission.status === '已撤回' ? commission.status : '待确认',
+          auditReason: '提成方案已更新，当前未发放记录按新版本重新核算',
+          updatedAt: new Date().toISOString(),
+        }
+        : commission
+    )));
+  }
   return createSuccessResponse(plan);
 }
 
@@ -568,7 +708,9 @@ async function deleteCommissionPayoutPlan(id: string): Promise<ApiResponse<boole
   await delay(120);
   const rules = getStorageData<CommissionRule[]>(STORAGE_KEYS.COMMISSION_RULES) || [];
   if (rules.some((rule) => rule.payoutPlanId === id)) return createErrorResponse('该提成方案已被规则使用，不能删除');
-  setStorageData(COMMISSION_PAYOUT_PLANS_STORAGE_KEY, readPayoutPlans().filter((plan) => plan.id !== id));
+  const existing = readPayoutPlans();
+  const persistError = await persistPayoutPlans(existing.filter((plan) => plan.id !== id), existing);
+  if (persistError) return createErrorResponse(persistError);
   return createSuccessResponse(true);
 }
 
@@ -677,11 +819,44 @@ function resolveCommissionRoleOwner(order: Order, role: CommissionRole): string 
   return order.owner || '';
 }
 
-function resolveCommissionRoleAssignee(order: Order, role: CommissionRole): CommissionRoleAssignee {
+function resolveCommissionRoleAssignee(
+  order: Order,
+  role: CommissionRole,
+  assigneeSource?: SimpleCommissionRulePayout['assigneeSource'],
+): CommissionRoleAssignee {
   const users = readActiveUsers();
   const departments = readActiveDepartments();
   const roleName = String(role);
   const fallbackDepartment = DEFAULT_ROLE_DEPARTMENTS[roleName] || '';
+
+  if (assigneeSource === 'sales_owner') {
+    return buildAssignee(findUser(users, order.salesId, order.salesName || order.owner), departments, order.salesName || order.owner, fallbackDepartment);
+  }
+  if (assigneeSource === 'lead_contributor') {
+    return buildAssignee(findUser(users, order.leadContributorId, order.leadContributorName), departments, order.leadContributorName, fallbackDepartment);
+  }
+  if (assigneeSource === 'customer_success') {
+    return buildAssignee(findUser(users, order.successId, order.successName), departments, order.successName, fallbackDepartment);
+  }
+  if (assigneeSource === 'after_sales') {
+    return buildAssignee(findUser(users, order.serviceId, order.serviceName), departments, order.serviceName, fallbackDepartment);
+  }
+  if (assigneeSource === 'business_creator') {
+    return buildAssignee(findUser(users, order.createdById, order.createdByName), departments, order.createdByName, fallbackDepartment);
+  }
+  if (assigneeSource === 'department_manager') {
+    const salesUser = findUser(users, order.salesId, order.salesName || order.owner);
+    const salesDepartment = salesUser?.departmentId
+      ? departments.find((department) => department.id === salesUser.departmentId)
+      : undefined;
+    const manager = salesDepartment?.managerId
+      ? users.find((user) => user.id === salesDepartment.managerId)
+      : undefined;
+    return buildAssignee(manager, departments, undefined, fallbackDepartment);
+  }
+  if (assigneeSource === 'manual' || assigneeSource === 'recovery_owner' || assigneeSource === 'recovery_assistant') {
+    return buildAssignee(undefined, departments, undefined, fallbackDepartment);
+  }
 
   if (roleName === ROLE_MATCH_TEXT.sales) {
     return buildAssignee(findUser(users, (order as any).salesId, order.salesName || order.owner), departments, order.salesName || order.owner, fallbackDepartment);
@@ -766,6 +941,7 @@ function matchesRule(rule: CommissionRule, order: Order): boolean {
   const orderAmount = order.actualAmount || order.amount;
 
   if (!normalized.isActive) return false;
+  if ((normalized.businessSource || 'formal_order') !== 'formal_order') return false;
   if (normalized.role === ROLE_MATCH_TEXT.lead && !hasLeadContributor(order)) return false;
   if (normalized.excludeExternalTalent && order.isExternalTalentOrder) return false;
   if (channel === '非官方渠道') return false;
@@ -859,7 +1035,7 @@ function buildFormulaText(
   const base = rule.commissionType === 'fixed'
     ? `固定提成 ${rule.commissionValue} 元`
     : rule.commissionType === 'tiered_percentage'
-      ? `销售月累计阶梯提成，月度提成金额将在员工提成月报按月度总实付金额计算`
+      ? `月度累计阶梯提成，按提成角色与方案版本汇总本月业绩后计算`
       : `业绩金额 ${performanceAmount} × ${rule.commissionValue}% = ${amount} 元`;
   const performance = rule.performanceRate && rule.performanceRate !== 100
     ? `，业绩按实付金额 ${rule.performanceRate}% 核算`
@@ -886,17 +1062,28 @@ function buildResult(
     rule.clawbackBaseCommission ? '需冲销历史 899 基础提成' : '',
     splitNote || '',
   ].filter(Boolean).join('；');
+  const payoutPlan = resolvePayoutPlan(rule.payoutPlanId);
+  const payoutPlanSnapshot = payoutPlan
+    ? buildCommissionPayoutPlanSnapshot(payoutPlan)
+    : undefined;
+  const roleConfig = getCommissionRoleConfigByName(role);
 
   return {
     ruleId: rule.id,
     role,
+    roleId: roleConfig?.id,
+    roleCode: roleConfig?.code,
+    roleNameSnapshot: roleConfig?.name || role,
+    assigneeSource: rule.assigneeSource,
     commissionType: rule.commissionType,
     commissionValue: calculation.commissionValue,
     tiers: rule.commissionType === 'tiered_percentage'
       ? normalizeCommissionTiers(rule.tiers, true)
       : undefined,
     payoutPlanId: rule.payoutPlanId,
-    payoutPlanName: rule.payoutPlanName,
+    payoutPlanName: payoutPlanSnapshot?.name || rule.payoutPlanName,
+    payoutPlanVersion: payoutPlanSnapshot?.version,
+    payoutPlanSnapshot,
     commissionAmount: amount,
     commissionRate: calculation.commissionRate,
     performanceAmount,

@@ -168,13 +168,13 @@ const wildcardAdminRole = {
 };
 assert.equal(
   roleHasPermission(wildcardAdminRole, PERMISSION_KEYS.CUSTOMER_DELETE, 'delete'),
-  false,
-  '角色 code 或 全部/admin 都不得绕过显式 CUSTOMER_DELETE 叶子',
+  true,
+  'super_admin 负责系统清理，应能删除无业务关联客户',
 );
 assert.equal(
   hasPermission({ role: '旧超级管理员', isActive: true, permissions: [{ module: '全部', actions: ['admin'] }] }, PERMISSION_KEYS.CUSTOMER_DELETE, 'delete'),
-  false,
-  '无 live role 的登录态 fallback 也必须拒绝 wildcard 客户删除',
+  true,
+  '无 live role 时，认证态超级管理员仍应获得客户删除入口',
 );
 assert.equal(
   hasExplicitPermission({ isActive: true, permissions: [{ module: '全部', actions: ['admin'] }] }, PERMISSION_KEYS.CUSTOMER_DELETE, 'delete'),

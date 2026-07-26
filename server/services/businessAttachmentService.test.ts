@@ -32,6 +32,11 @@ const orderImporter: AuthenticatedUser = {
   id: 'order-importer',
   permissions: [{ module: PERMISSION_KEYS.ORDER_IMPORT, actions: ['read', 'write'] }],
 };
+const orderCorrector: AuthenticatedUser = {
+  ...uploader,
+  id: 'order-corrector',
+  permissions: [{ module: PERMISSION_KEYS.ORDER_CORRECT, actions: ['read', 'write'] }],
+};
 
 class MemoryRepository {
   records = new Map<string, BusinessAttachmentRecord>();
@@ -104,6 +109,19 @@ try {
     file: { originalName: '导入付款.jpg', mimeType: 'image/jpeg', size: 4, buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) },
   }, orderImporter);
   assert.equal(importProof.code, 0, '独立订单导入权限应允许上传导入包图片');
+
+  const correctionService = createBusinessAttachmentService({
+    repository,
+    rootDir,
+    now: () => new Date(NOW),
+    id: () => 'attachment-correction',
+  });
+  const correctionProof = await correctionService.upload({
+    draftKey: 'draft-order-correction-1',
+    category: 'order-payment-proof',
+    file: { originalName: '更正付款.png', mimeType: 'image/png', size: pngBytes.length, buffer: pngBytes },
+  }, orderCorrector);
+  assert.equal(correctionProof.code, 0, '独立订单更正权限应允许补充订单凭证');
 } finally {
   await rm(rootDir, { recursive: true, force: true });
 }

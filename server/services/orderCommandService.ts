@@ -5,19 +5,20 @@ import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { buildDataVisibilityScopeForUser, type DataVisibilityScope } from '../../src/shared/utils/dataVisibility';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Customer } from '../../src/types/customer';
-import type { Order, OrderChangeLog, OrderCorrectionInput } from '../../src/types/order';
+import type { Order, OrderChangeLog, OrderCorrectionInput, OrderCorrectionPrecheck } from '../../src/types/order';
 import type { Product } from '../../src/types/product';
 import type { Department } from '../../src/types/department';
 import type { Role } from '../../src/types/role';
 import type { User } from '../../src/types/settings';
 import type { Delivery } from '../../src/types/delivery';
+import { allocateOrderItemActualAmounts, canonicalizeOrderItems } from '../../src/shared/utils/orderItems';
 import type {
   Commission,
   CommissionOperationLog,
   OfficialPaymentChannel,
 } from '../../src/types/commission';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
-import { isSuperAdminUser } from '../../src/shared/utils/permissions';
+import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import {
   createCustomerBusinessRecordRepository,
   CustomerWriteConflictError,
@@ -82,11 +83,12 @@ const FINANCIAL_FIELDS = new Set([
   'productId',
   'productName',
   'productLevel',
+  'items',
+  'standardTotalAmount',
   'orderType',
   'amount',
   'actualAmount',
   'paymentMethod',
-  'payments',
   'status',
   'refundStatus',
   'refundAmount',
@@ -95,20 +97,29 @@ const FINANCIAL_FIELDS = new Set([
   'proofStatus',
   'originalOrderId',
   'performanceBaseAmount',
+  'isExternalTalentOrder',
+]);
+const DIRECT_EDIT_FIELDS = new Set([
+  'notes',
+  'thirdPartyOrderNo',
+  'payments',
   'dealEvidenceName',
   'dealEvidencePreview',
   'dealEvidenceAttachments',
-  'isExternalTalentOrder',
 ]);
-const DIRECT_EDIT_FIELDS = new Set(['notes', 'thirdPartyOrderNo', 'officialPaymentChannel']);
 const EDIT_FIELD_LABELS: Record<string, string> = {
   notes: '备注',
   thirdPartyOrderNo: '第三方平台订单号',
-  officialPaymentChannel: '官方收款渠道',
+  payments: '付款订单号或付款凭证',
+  dealEvidenceName: '成交路径附件名称',
+  dealEvidencePreview: '成交路径附件',
+  dealEvidenceAttachments: '成交路径附件',
 };
 const CORRECTION_INPUT_FIELDS = new Set([
   'customerId',
   'productId',
+  'items',
+  'standardTotalAmount',
   'salesId',
   'orderType',
   'actualAmount',
@@ -127,6 +138,8 @@ const CORRECTION_FIELD_LABELS: Record<string, string> = {
   productId: '产品',
   productName: '产品名称',
   productLevel: '产品等级',
+  items: '产品明细',
+  standardTotalAmount: '产品总计',
   salesId: '销售负责人',
   salesName: '销售负责人',
   owner: '销售负责人',
@@ -248,11 +261,9 @@ function orderScope(directory: Directory, actor: AuthenticatedUser): DataVisibil
 
 function orderIsVisible(order: Order, scope: DataVisibilityScope): boolean {
   if (scope.unrestricted) return true;
-  if (order.salesId) return scope.visibleUserIds.includes(order.salesId);
-  return Boolean(
-    (order.salesName && scope.visibleUserNames.includes(order.salesName))
-    || (order.owner && scope.visibleUserNames.includes(order.owner)),
-  );
+  // 权限判断只认稳定员工 ID。同名员工或历史姓名快照不能成为授权依据；
+  // 缺少 salesId 的历史订单应先完成归属迁移，再开放写操作。
+  return Boolean(order.salesId && scope.visibleUserIds.includes(order.salesId));
 }
 
 function changedFields(order: Order, patch: Partial<Order>): string[] {
@@ -262,11 +273,49 @@ function changedFields(order: Order, patch: Partial<Order>): string[] {
   ));
 }
 
+function assertPaymentMetadataOnly(order: Order, patch: Partial<Order>): void {
+  if (!Object.prototype.hasOwnProperty.call(patch, 'payments')) return;
+  if (!Array.isArray(patch.payments)) {
+    throw new OrderCommandError(409, '普通资料编辑不能增删付款记录，请走订单更正');
+  }
+  const currentPayments = order.payments || [];
+  if (!currentPayments.length && patch.payments.length === 1) {
+    const payment = patch.payments[0];
+    if (
+      !payment?.id
+      || !sameValue(payment.amount, order.actualAmount)
+      || !sameValue(payment.paymentMethod, order.paymentMethod)
+      || !sameValue(payment.paidAt, order.createdAt)
+    ) {
+      throw new OrderCommandError(409, '历史订单补充首笔付款资料时，金额、方式和时间必须保持订单原值');
+    }
+    return;
+  }
+  if (patch.payments.length !== currentPayments.length) {
+    throw new OrderCommandError(409, '普通资料编辑不能增删付款记录，请走订单更正');
+  }
+  patch.payments.forEach((payment, index) => {
+    const current = currentPayments[index];
+    if (!current || [
+      'id',
+      'amount',
+      'paymentMethod',
+      'paidAt',
+    ].some((field) => !sameValue(
+      (current as unknown as Record<string, unknown>)[field],
+      (payment as unknown as Record<string, unknown>)[field],
+    ))) {
+      throw new OrderCommandError(409, '付款金额、方式和时间不能在资料编辑中修改，请走订单更正');
+    }
+  });
+}
+
 function assertAllowedPatch(order: Order, patch: Partial<Order>): string[] {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
     throw new OrderCommandError(400, '订单修改数据无效');
   }
   const changed = changedFields(order, patch);
+  assertPaymentMetadataOnly(order, patch);
   const serverField = changed.find((field) => SERVER_FIELDS.has(field));
   if (serverField) throw new OrderCommandError(400, `字段 ${serverField} 由服务端维护，不能修改`);
   const relationField = changed.find((field) => IMMUTABLE_RELATION_FIELDS.has(field));
@@ -277,12 +326,6 @@ function assertAllowedPatch(order: Order, patch: Partial<Order>): string[] {
   }
   const unsupported = changed.find((field) => !DIRECT_EDIT_FIELDS.has(field));
   if (unsupported) throw new OrderCommandError(400, `字段 ${unsupported} 不支持在正式订单中直接修改`);
-  if (
-    changed.includes('officialPaymentChannel')
-    && !OFFICIAL_PAYMENT_CHANNEL_VALUES.has(patch.officialPaymentChannel as OfficialPaymentChannel)
-  ) {
-    throw new OrderCommandError(400, '官方收款渠道无效');
-  }
   return changed;
 }
 
@@ -506,7 +549,25 @@ async function buildCorrectedOrder(
     next.resourceOwnership = (customer.sourceType as Order['resourceOwnership']) || next.resourceOwnership;
   }
 
-  if (patch.productId && patch.productId !== order.productId) {
+  if (Array.isArray(patch.items) && patch.items.length) {
+    const productRows = await Promise.all(patch.items.map((item) => transaction.businessRecord.findUnique({
+      where: { domain_recordId: { domain: STORAGE_KEYS.PRODUCTS, recordId: item.productId } },
+    })));
+    const products = productRows.filter(Boolean).map((row) => parseObject<Product>(row!.data, '产品'));
+    let canonical;
+    try {
+      canonical = canonicalizeOrderItems(patch.items, products);
+    } catch (error) {
+      throw new OrderCommandError(409, error instanceof Error ? error.message : '更正后的产品明细无效');
+    }
+    const primary = canonical.items.find((item) => item.isPrimary) || canonical.items[0];
+    next.items = allocateOrderItemActualAmounts(canonical.items, Number(patch.actualAmount ?? next.actualAmount));
+    next.standardTotalAmount = canonical.standardTotalAmount;
+    next.amount = canonical.standardTotalAmount;
+    next.productId = primary.productId;
+    next.productName = primary.productName;
+    next.productLevel = primary.productLevel;
+  } else if (patch.productId && patch.productId !== order.productId) {
     const productRow = await transaction.businessRecord.findUnique({
       where: { domain_recordId: { domain: STORAGE_KEYS.PRODUCTS, recordId: patch.productId } },
     });
@@ -531,7 +592,7 @@ async function buildCorrectedOrder(
   }
 
   for (const field of CORRECTION_INPUT_FIELDS) {
-    if (['customerId', 'productId', 'salesId'].includes(field)) continue;
+    if (['customerId', 'productId', 'salesId', 'items', 'standardTotalAmount'].includes(field)) continue;
     if (!Object.prototype.hasOwnProperty.call(patch, field)) continue;
     (next as unknown as Record<string, unknown>)[field] = (patch as unknown as Record<string, unknown>)[field];
   }
@@ -551,7 +612,8 @@ async function buildCorrectedOrder(
   const paymentsChanged = Object.prototype.hasOwnProperty.call(patch, 'payments');
   const amountChanged = !sameValue(order.actualAmount, next.actualAmount);
   if (amountChanged) {
-    next.amount = next.actualAmount;
+    if (!next.items?.length) next.amount = next.actualAmount;
+    else next.items = allocateOrderItemActualAmounts(next.items, next.actualAmount);
     next.performanceBaseAmount = next.actualAmount;
   }
   if (Object.prototype.hasOwnProperty.call(patch, 'orderType')) {
@@ -607,23 +669,69 @@ async function lockOrderCommissions(
   return rows.map((row) => ({ row, commission: parseObject<Commission>(row.data, '提成') }));
 }
 
-function assertCorrectableCommissions(
+function orderHasActiveRefundOrReversal(order: Order): boolean {
+  return Boolean(
+    order.originalOrderId
+    || ['退款中', '已退款'].includes(order.status)
+    || !['', '无', '退款已拒绝'].includes(String(order.refundStatus || '')),
+  );
+}
+
+function inspectCorrectionEligibility(
+  order: Order,
   lockedCommissions: Array<{ row: { status: string | null }; commission: Commission }>,
-): Commission[] {
+  rebuildAvailable: boolean,
+): OrderCorrectionPrecheck {
   const commissions = lockedCommissions.map(({ commission }) => commission);
-  if (commissions.some((commission) => commission.isManualAdjusted || commission.sourceType === '人工新增')) {
-    throw new OrderCommandError(409, '该订单存在人工新增或人工调整的分账，请走财务更正流程');
-  }
   const statuses = lockedCommissions.map(({ row, commission }) => String(row.status || commission.status || ''));
+  const uniqueStatuses = Array.from(new Set(statuses.filter(Boolean)));
+  const manualCommissionCount = commissions.filter((commission) => (
+    commission.isManualAdjusted || commission.sourceType === '人工新增'
+  )).length;
+  const blocked = (
+    reasonCode: NonNullable<OrderCorrectionPrecheck['reasonCode']>,
+    message: string,
+  ): OrderCorrectionPrecheck => ({
+    allowed: false,
+    reasonCode,
+    message,
+    commissionCount: commissions.length,
+    manualCommissionCount,
+    commissionStatuses: uniqueStatuses,
+  });
+  if (order.deletedAt) return blocked('order_deleted', '已删除订单不能更正');
+  if (orderHasActiveRefundOrReversal(order)) {
+    return blocked('refund_in_progress', '该订单已进入退款或冲正链路，请走订单冲正流程');
+  }
+  if (manualCommissionCount > 0) {
+    return blocked('manual_commission', `该订单存在 ${manualCommissionCount} 条人工新增或人工调整的分账，请先到财务中心处理`);
+  }
   if (statuses.some((status) => ['已发放', '待冲销', '已冲销'].includes(status))) {
-    throw new OrderCommandError(409, '该订单提成已进入发放或冲销阶段，请走订单冲正流程');
+    return blocked('payout_started', '该订单提成已进入发放或冲销阶段，请走订单冲正流程');
   }
   if (statuses.some((status) => ['已撤回', '已取消'].includes(status))) {
-    throw new OrderCommandError(409, '该订单分账已撤回或取消，请先在财务中心处理');
+    return blocked('commission_withdrawn', '该订单分账已撤回或取消，请先在财务中心处理');
   }
   const unsupported = statuses.find((status) => status && !['待确认', '待发放'].includes(status));
-  if (unsupported) throw new OrderCommandError(409, `分账状态“${unsupported}”不支持自动重算，请走财务更正流程`);
-  return commissions;
+  if (unsupported) return blocked('unsupported_commission_status', `分账状态“${unsupported}”不支持自动重算，请先到财务中心处理`);
+  if (!rebuildAvailable) return blocked('rebuild_unavailable', '提成重算服务不可用，暂不能更正订单');
+  return {
+    allowed: true,
+    message: commissions.length ? '当前分账可以随订单更正自动撤回并重算' : '当前订单可以更正',
+    commissionCount: commissions.length,
+    manualCommissionCount,
+    commissionStatuses: uniqueStatuses,
+  };
+}
+
+function assertCorrectableCommissions(
+  order: Order,
+  lockedCommissions: Array<{ row: { status: string | null }; commission: Commission }>,
+  rebuildAvailable: boolean,
+): Commission[] {
+  const eligibility = inspectCorrectionEligibility(order, lockedCommissions, rebuildAvailable);
+  if (!eligibility.allowed) throw new OrderCommandError(409, eligibility.message);
+  return lockedCommissions.map(({ commission }) => commission);
 }
 
 async function syncCorrectedDelivery(
@@ -635,32 +743,90 @@ async function syncCorrectedDelivery(
   const rows = await transaction.businessRecord.findMany({
     where: { domain: STORAGE_KEYS.DELIVERIES, orderId: current.id },
   });
-  const relationChanged = current.customerId !== next.customerId || current.productId !== next.productId;
-  let correctedProduct: Product | null = null;
-  if (current.productId !== next.productId && next.productId) {
-    const productRow = await transaction.businessRecord.findUnique({
-      where: { domain_recordId: { domain: STORAGE_KEYS.PRODUCTS, recordId: next.productId } },
-    });
-    correctedProduct = productRow ? parseObject<Product>(productRow.data, '产品') : null;
+  const currentItems = current.items?.length ? current.items : [{
+    id: 'legacy-primary',
+    productId: current.productId || '',
+    productName: current.productName || current.productLevel,
+    productLevel: current.productLevel,
+    unitPrice: current.amount,
+    quantity: 1,
+    subtotal: current.amount,
+    allocatedActualAmount: current.actualAmount,
+    isPrimary: true,
+    sortOrder: 1,
+  }];
+  const nextItems = next.items?.length ? next.items : [{
+    id: 'legacy-primary',
+    productId: next.productId || '',
+    productName: next.productName || next.productLevel,
+    productLevel: next.productLevel,
+    unitPrice: next.amount,
+    quantity: 1,
+    subtotal: next.amount,
+    allocatedActualAmount: next.actualAmount,
+    isPrimary: true,
+    sortOrder: 1,
+  }];
+  const parsedRows = rows.map((row) => ({ row, delivery: parseObject<Delivery>(row.data, '交付') }));
+  const currentIds = new Set(currentItems.map((item) => item.id));
+  const nextIds = new Set(nextItems.map((item) => item.id));
+  if (rows.length && (
+    currentIds.size !== nextIds.size
+    || [...currentIds].some((id) => !nextIds.has(id))
+  )) {
+    throw new OrderCommandError(409, '该订单已生成交付单，不能增删产品明细；可更正已有明细的产品或数量');
   }
-  for (const row of rows) {
-    const delivery = parseObject<Delivery>(row.data, '交付');
+  const currentById = new Map(currentItems.map((item) => [item.id, item]));
+  const nextById = new Map(nextItems.map((item) => [item.id, item]));
+  const currentPrimary = currentItems.find((item) => item.isPrimary) || currentItems[0];
+  const nextPrimary = nextItems.find((item) => item.isPrimary) || nextItems[0];
+  const deliveryByItemId = new Map(parsedRows.map(({ row, delivery }) => [
+    delivery.orderItemId || currentPrimary.id,
+    row.recordId,
+  ]));
+  for (const nextItem of nextItems) {
+    const currentItem = currentById.get(nextItem.id);
+    if (currentItem?.productId === nextItem.productId || deliveryByItemId.has(nextItem.id)) continue;
+    const productRow = await transaction.businessRecord.findUnique({
+      where: { domain_recordId: { domain: STORAGE_KEYS.PRODUCTS, recordId: nextItem.productId } },
+    });
+    const product = productRow ? parseObject<Product>(productRow.data, '产品') : null;
+    if (product?.deliveryStages?.some(Boolean)) {
+      throw new OrderCommandError(409, '更正后的产品需要新建交付单，请先删除并重新提交订单');
+    }
+  }
+  for (const { row, delivery } of parsedRows) {
+    const itemId = delivery.orderItemId || currentPrimary.id;
+    const currentItem = currentById.get(itemId) || currentPrimary;
+    const nextItem = nextById.get(itemId) || (delivery.orderItemId ? undefined : nextPrimary);
+    if (!nextItem) throw new OrderCommandError(409, '交付单关联的产品明细已不存在，请先处理交付单');
+    const productChanged = currentItem.productId !== nextItem.productId;
+    const relationChanged = current.customerId !== next.customerId || productChanged;
     if (relationChanged && delivery.status !== '待开始') {
       throw new OrderCommandError(409, '交付已经开始，客户或产品不能直接更正，请先处理交付单');
     }
+    let correctedProduct: Product | null = null;
+    if (productChanged && nextItem.productId) {
+      const productRow = await transaction.businessRecord.findUnique({
+        where: { domain_recordId: { domain: STORAGE_KEYS.PRODUCTS, recordId: nextItem.productId } },
+      });
+      correctedProduct = productRow ? parseObject<Product>(productRow.data, '产品') : null;
+    }
     const correctedStages = correctedProduct?.deliveryStages?.filter(Boolean) || [];
-    if (current.productId !== next.productId && !correctedStages.length) {
+    if (productChanged && !correctedStages.length) {
       throw new OrderCommandError(409, '更正后的产品未配置交付阶段，不能同步现有交付单');
     }
     const corrected: Delivery = {
       ...delivery,
+      orderItemId: nextItem.id,
       customerId: next.customerId,
       customerName: next.customerName,
-      productName: next.productName,
-      productType: next.productLevel,
+      productName: nextItem.productName,
+      productType: nextItem.productLevel,
+      productQuantity: nextItem.quantity,
       salesOwner: next.salesName || next.owner,
       salesOwnerId: next.salesId,
-      orderAmount: next.actualAmount,
+      orderAmount: nextItem.allocatedActualAmount ?? nextItem.subtotal,
       paymentDate: next.payments?.[0]?.paidAt || delivery.paymentDate,
       orderType: next.orderType,
       ...(correctedStages.length ? {
@@ -669,7 +835,7 @@ async function syncCorrectedDelivery(
         tasks: correctedStages.map((stage, index) => ({
           id: `task-${hash(`${next.id}:${index}`, 12)}`,
           title: stage,
-          description: `${stage}任务`,
+          description: `${stage}任务（数量 ${nextItem.quantity}）`,
           status: index === 0 ? '进行中' : '待开始',
           records: [],
         })),
@@ -680,17 +846,20 @@ async function syncCorrectedDelivery(
     await transaction.businessRecord.update({
       where: { domain_recordId: { domain: STORAGE_KEYS.DELIVERIES, recordId: row.recordId } },
       data: {
-        title: `${next.orderNo}-${next.customerName}`,
+        title: `${next.orderNo}-${nextItem.productName}`,
         status: corrected.status || null,
         owner: corrected.owner,
         customerId: next.customerId,
         orderId: next.id,
-        amount: next.actualAmount,
+        amount: corrected.orderAmount,
         eventAt: new Date(changedAt),
         data: jsonValue(corrected),
       },
     });
   }
+  const primaryDeliveryRecordId = deliveryByItemId.get(nextPrimary.id);
+  if (primaryDeliveryRecordId) next.deliveryId = primaryDeliveryRecordId;
+  if (parsedRows.length) next.deliveryIds = parsedRows.map(({ row }) => row.recordId);
 }
 
 export function createOrderCommandService(
@@ -700,6 +869,35 @@ export function createOrderCommandService(
   const now = options.now || (() => new Date());
 
   return {
+    async precheckCorrection(
+      orderId: string,
+      actor: AuthenticatedUser,
+    ): Promise<ApiResponse<OrderCorrectionPrecheck | null>> {
+      const cleanOrderId = String(orderId || '').trim();
+      if (!cleanOrderId) return failure<OrderCorrectionPrecheck>('订单ID不能为空', 400);
+      const directory = await loadDirectory(prisma);
+      if (!hasPermission(actor, PERMISSION_KEYS.ORDER_CORRECT, 'write')) {
+        return failure<OrderCorrectionPrecheck>('无订单更正权限', 403);
+      }
+      const scope = orderScope(directory, actor);
+      try {
+        const eligibility = await prisma.$transaction(async (transaction) => {
+          const order = await lockOrder(transaction, cleanOrderId);
+          if (!orderIsVisible(order, scope)) throw new OrderCommandError(403, '无权更正该订单');
+          const lockedCommissionRows = await lockOrderCommissions(transaction, order.id);
+          return inspectCorrectionEligibility(order, lockedCommissionRows, Boolean(options.rebuildPendingCommissions));
+        }, {
+          isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+          maxWait: 5_000,
+          timeout: 10_000,
+        });
+        return success<OrderCorrectionPrecheck | null>(eligibility);
+      } catch (error) {
+        if (error instanceof OrderCommandError) return failure<OrderCorrectionPrecheck>(error.message, error.responseCode);
+        throw error;
+      }
+    },
+
     async update(
       orderId: string,
       patch: Partial<Order>,
@@ -720,30 +918,23 @@ export function createOrderCommandService(
             const changed = assertAllowedPatch(order, patch);
             if (!changed.length) return order;
             const changedAt = now().toISOString();
-            const nextChannel = changed.includes('officialPaymentChannel')
-              ? patch.officialPaymentChannel as OfficialPaymentChannel
-              : order.officialPaymentChannel;
             const next: Order = {
               ...order,
               ...(changed.includes('notes') ? { notes: patch.notes } : {}),
               ...(changed.includes('thirdPartyOrderNo') ? {
                 thirdPartyOrderNo: String(patch.thirdPartyOrderNo || '').trim() || undefined,
               } : {}),
-              ...(changed.includes('officialPaymentChannel') ? {
-                officialPaymentChannel: nextChannel,
-                paymentMethod: paymentMethodFromOfficialChannel(nextChannel!),
-              } : {}),
+              ...(changed.includes('payments') ? { payments: patch.payments! } : {}),
+              ...(changed.includes('dealEvidenceName') ? { dealEvidenceName: patch.dealEvidenceName } : {}),
+              ...(changed.includes('dealEvidencePreview') ? { dealEvidencePreview: patch.dealEvidencePreview } : {}),
+              ...(changed.includes('dealEvidenceAttachments') ? { dealEvidenceAttachments: patch.dealEvidenceAttachments } : {}),
               updatedAt: changedAt,
             };
-            if (changed.includes('officialPaymentChannel')) {
-              await replacePendingCommissions(
-                transaction,
-                order,
-                next,
-                changedAt,
-                actor.name,
-                options.rebuildPendingCommissions,
-              );
+            if (changed.some((field) => ['payments', 'dealEvidenceName', 'dealEvidencePreview', 'dealEvidenceAttachments'].includes(field))) {
+              const hasProof = next.payments?.some((payment) => (
+                Boolean(payment.voucherName || payment.voucherPreview || payment.attachments?.length)
+              )) || Boolean(next.dealEvidenceName || next.dealEvidencePreview || next.dealEvidenceAttachments?.length);
+              next.proofStatus = hasProof ? '已上传' : '待补充';
             }
             const changeLog: OrderChangeLog = {
               id: `hist-${hash(`${order.id}:update:${changedAt}`)}`,
@@ -802,22 +993,16 @@ export function createOrderCommandService(
       if (!cleanOrderId) return failure<Order>('订单ID不能为空', 400);
       if (!reason) return failure<Order>('订单更正必须填写原因', 400);
       const directory = await loadDirectory(prisma);
-      if (!isSuperAdminUser(actor, directory.roles)) {
-        return failure<Order>('仅超级管理员可以更正正式订单', 403);
+      if (!hasPermission(actor, PERMISSION_KEYS.ORDER_CORRECT, 'write')) {
+        return failure<Order>('无订单更正权限', 403);
       }
+      const scope = orderScope(directory, actor);
 
       for (let attempt = 1; attempt <= MAX_TRANSACTION_ATTEMPTS; attempt += 1) {
         try {
           const corrected = await prisma.$transaction(async (transaction) => {
           const order = await lockOrder(transaction, cleanOrderId);
-          if (order.deletedAt) throw new OrderCommandError(409, '已删除订单不能更正');
-          if (
-            order.originalOrderId
-            || ['退款中', '已退款'].includes(order.status)
-            || !['', '无', '退款已拒绝'].includes(String(order.refundStatus || ''))
-          ) {
-            throw new OrderCommandError(409, '该订单已进入退款或冲正链路，请走订单冲正流程');
-          }
+          if (!orderIsVisible(order, scope)) throw new OrderCommandError(403, '无权更正该订单');
           await validateStableOrderRelations(transaction, order, directory);
           const patch = input?.data || {};
           const changed = changedFields(order, patch);
@@ -828,10 +1013,8 @@ export function createOrderCommandService(
           if (!changed.length) return order;
 
           const lockedCommissionRows = await lockOrderCommissions(transaction, order.id);
-          const originalCommissions = assertCorrectableCommissions(lockedCommissionRows);
-          if (!options.rebuildPendingCommissions) {
-            throw new OrderCommandError(503, '提成重算服务不可用，暂不能更正订单');
-          }
+          const rebuildPendingCommissions = options.rebuildPendingCommissions;
+          const originalCommissions = assertCorrectableCommissions(order, lockedCommissionRows, Boolean(rebuildPendingCommissions));
 
           const changedAt = now().toISOString();
           const next = await buildCorrectedOrder(transaction, order, patch, directory, changedAt);
@@ -843,7 +1026,7 @@ export function createOrderCommandService(
           await transaction.businessRecord.deleteMany({
             where: { domain: STORAGE_KEYS.COMMISSIONS, orderId: order.id },
           });
-          await options.rebuildPendingCommissions(transaction, next, changedAt);
+          await rebuildPendingCommissions!(transaction, next, changedAt);
           const rebuiltRows = await transaction.businessRecord.findMany({
             where: { domain: STORAGE_KEYS.COMMISSIONS, orderId: order.id },
           });
@@ -946,7 +1129,9 @@ export function createOrderCommandService(
             const order = await lockOrder(transaction, cleanOrderId);
             if (!orderIsVisible(order, scope)) throw new OrderCommandError(403, '无权删除该订单');
             if (order.deletedAt) return order;
-            if (order.status === '退款中') throw new OrderCommandError(409, '退款流程中的订单不能删除');
+            if (orderHasActiveRefundOrReversal(order)) {
+              throw new OrderCommandError(409, '已进入退款、挽回或冲正流程的订单不能删除');
+            }
 
             const [commissionRows, deliveryRows] = await Promise.all([
               transaction.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSIONS, orderId: order.id } }),

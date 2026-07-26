@@ -2,7 +2,7 @@ import type { CommissionOrderSummaryFilters } from './commission';
 import type { OrderFilters } from './order';
 import type { RecoveryOrderFilters } from './recoveryOrder';
 
-export const BUSINESS_EXPORT_MODULES = ['orders', 'order_settlements', 'recovery_settlements'] as const;
+export const BUSINESS_EXPORT_MODULES = ['orders', 'order_settlements', 'recovery_orders', 'recovery_settlements'] as const;
 export type BusinessExportModule = typeof BUSINESS_EXPORT_MODULES[number];
 export type BusinessExportColumnMode = 'current_view' | 'all';
 

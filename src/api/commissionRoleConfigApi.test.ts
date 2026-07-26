@@ -46,10 +46,11 @@ assert.equal(typeof (commissionRuleApi as any).deleteCommissionRoleConfig, 'func
 
 const defaultRolesRes = await (commissionRuleApi as any).getCommissionRoleConfigs();
 assert.equal(defaultRolesRes.code, 0);
-assert.equal(defaultRolesRes.data.length, 6);
-assert.deepEqual(defaultRolesRes.data.map((item: any) => item.name), ['销售', '线索', '客户成功', '售后', '招商主管', '销售主管']);
+assert.equal(defaultRolesRes.data.length, 7);
+assert.deepEqual(defaultRolesRes.data.map((item: any) => item.name), ['销售', '线索', '客户成功', '售后', '挽回人员', '招商主管', '销售主管']);
 assert.equal(defaultRolesRes.data.find((item: any) => item.code === 'sales')?.personSource, 'sales_owner');
 assert.equal(defaultRolesRes.data.find((item: any) => item.code === 'lead')?.personSource, 'lead_contributor');
+assert.equal(defaultRolesRes.data.find((item: any) => item.code === 'sales_manager')?.personSource, 'department_manager');
 
 const customRoleRes = await (commissionRuleApi as any).createCommissionRoleConfig({
   name: '渠道伙伴',
@@ -134,4 +135,3 @@ assert.equal(byRole.get('线索'), '李娜');
 assert.equal(byRole.get('客户成功'), '王芳');
 assert.equal(byRole.get('售后'), '赵售后');
 assert.equal(byRole.get('招商主管'), '待分配');
-

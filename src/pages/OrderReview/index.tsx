@@ -32,6 +32,8 @@ import BlockIcon from '@mui/icons-material/Block';
 import EditIcon from '@mui/icons-material/Edit';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import SortIcon from '@mui/icons-material/Sort';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { customerApi, orderApi, orderReviewApi, ORDER_APPLICATION_STATUSES } from '../../api';
@@ -40,6 +42,7 @@ import type { Customer } from '../../types/customer';
 import type { Role } from '../../types/role';
 import { formatCurrency, formatLeadSourceLabel, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import { BusinessDetailField, BusinessDetailSection } from '../../shared/components/BusinessDetailSection';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import CustomerDetail from '../Customers/CustomerDetail';
 import OrderForm from '../Orders/OrderForm';
@@ -56,6 +59,7 @@ import {
   getOrderApplicationReviewStatuses,
   type ReviewQueueView,
 } from '../../shared/utils/reviewQueue';
+import BusinessStatusChip from '../../shared/components/BusinessStatusChip';
 import BusinessImportReviewControls from '../../shared/components/BusinessImportReviewControls';
 import {
   isImportedPendingReviewRecord,
@@ -206,14 +210,6 @@ const readReviewViewConfig = () => {
   }
 };
 
-const statusColor: Record<ReturnType<typeof getOrderApplicationUnifiedReviewStatus>, 'warning' | 'info' | 'success' | 'error' | 'default'> = {
-  待审核: 'warning',
-  退回修改: 'info',
-  已通过: 'success',
-  已驳回: 'error',
-  '已删除（留痕）': 'default',
-};
-
 const reviewActionText: Record<OrderApplication['reviewLogs'][number]['action'], string> = {
   submit: '提交申请',
   resubmit: '重新提交',
@@ -232,25 +228,11 @@ function formatDate(value?: string, pattern = 'yyyy-MM-dd HH:mm') {
 }
 
 function SnapshotField({ label, children, strong = false }: { label: string; children: React.ReactNode; strong?: boolean }) {
-  return (
-    <Box>
-      <Typography variant="body2" sx={{ color: '#6b7280' }}>{label}</Typography>
-      <Box sx={{ fontSize: '1rem', lineHeight: 1.5, fontWeight: strong ? 700 : 500, color: strong ? '#1a1a2e' : 'inherit' }}>
-        {children}
-      </Box>
-    </Box>
-  );
+  return <BusinessDetailField label={label} strong={strong}>{children}</BusinessDetailField>;
 }
 
-function SnapshotSection({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <Box component="section">
-      <Typography variant="h6" sx={{ mb: 2, fontWeight: 700 }}>{title}</Typography>
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 2 }}>
-        {children}
-      </Box>
-    </Box>
-  );
+function SnapshotSection({ title, children, defaultExpanded = true }: { title: string; children: React.ReactNode; defaultExpanded?: boolean }) {
+  return <BusinessDetailSection title={title} defaultExpanded={defaultExpanded}>{children}</BusinessDetailSection>;
 }
 
 const OrderReview: React.FC<OrderReviewProps> = ({
@@ -266,6 +248,8 @@ const OrderReview: React.FC<OrderReviewProps> = ({
   const [filters, setFilters] = useState<OrderApplicationFilters>({
     statuses: getOrderApplicationReviewStatuses('pending'),
     importBatchId: importBatchId || undefined,
+    sortBy: 'createdAt',
+    sortDirection: 'desc',
     page: 1,
     pageSize: 10,
   });
@@ -349,6 +333,34 @@ const OrderReview: React.FC<OrderReviewProps> = ({
     setReviewQueueView(view);
     setFilters(nextFilters);
     setImportSelection({ mode: 'ids', ids: [] });
+    loadItems(nextFilters);
+  };
+
+  const handlePaymentDateSort = () => {
+    const nextFilters: OrderApplicationFilters = {
+      ...filters,
+      sortBy: 'paymentDate',
+      sortDirection: filters.sortBy === 'paymentDate' && filters.sortDirection === 'desc' ? 'asc' : 'desc',
+      page: 1,
+      pageSize: pagination.pageSize,
+    };
+    setFilters(nextFilters);
+    setImportSelection({ mode: 'ids', ids: [] });
+    loadItems(nextFilters);
+  };
+
+  const handleResetFilters = () => {
+    const nextFilters: OrderApplicationFilters = {
+      statuses: getOrderApplicationReviewStatuses('pending'),
+      sortBy: 'createdAt',
+      sortDirection: 'desc',
+      page: 1,
+      pageSize: pagination.pageSize,
+    };
+    setReviewQueueView('pending');
+    setFilters(nextFilters);
+    setImportSelection({ mode: 'ids', ids: [] });
+    onImportBatchClear?.();
     loadItems(nextFilters);
   };
 
@@ -621,7 +633,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({
       case 'status':
         {
           const unifiedStatus = getOrderApplicationUnifiedReviewStatus(application.status, Boolean(application.sourceOrderDeleted));
-          return <Chip label={unifiedStatus} size="small" color={statusColor[unifiedStatus]} variant="outlined" />;
+          return <BusinessStatusChip status={unifiedStatus} />;
         }
       case 'customer':
         return (
@@ -635,7 +647,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({
           </Button>
         );
       case 'productName':
-        return application.orderData.productName || application.orderData.productLevel || '-';
+        return `${application.orderData.productName || application.orderData.productLevel || '-'}${(application.orderData.items?.length || 0) > 1 ? ` 等${application.orderData.items!.length}项` : ''}`;
       case 'productLevel':
         return (
           <Chip
@@ -733,15 +745,28 @@ const OrderReview: React.FC<OrderReviewProps> = ({
         </FormControl>
         <TextField
           size="small"
-          label="导入批次"
-          placeholder="按导入批次筛选"
-          value={filters.importBatchId || ''}
-          onChange={(event) => {
-            handleFilterChange('importBatchId', event.target.value);
-            if (!event.target.value) onImportBatchClear?.();
-          }}
-          sx={{ minWidth: 260 }}
+          label="付款开始"
+          type="date"
+          value={filters.paymentStartDate || ''}
+          onChange={(event) => handleFilterChange('paymentStartDate', event.target.value)}
+          InputLabelProps={{ shrink: true }}
         />
+        <TextField
+          size="small"
+          label="付款结束"
+          type="date"
+          value={filters.paymentEndDate || ''}
+          onChange={(event) => handleFilterChange('paymentEndDate', event.target.value)}
+          InputLabelProps={{ shrink: true }}
+        />
+        <Button variant="outlined" startIcon={<SortIcon />} onClick={handlePaymentDateSort}>
+          {filters.sortBy === 'paymentDate'
+            ? `付款时间${filters.sortDirection === 'asc' ? '升序' : '降序'}`
+            : '按付款时间排序'}
+        </Button>
+        <Button variant="outlined" startIcon={<RestartAltIcon />} onClick={handleResetFilters}>
+          重置
+        </Button>
       </Box>
 
       {reviewer ? (
@@ -1012,9 +1037,18 @@ const OrderReview: React.FC<OrderReviewProps> = ({
                 <Typography variant="body2">客户：{reviewAction.application.orderData.customerName}</Typography>
                 <Typography variant="body2">
                   产品名称：{reviewAction.application.orderData.productName || reviewAction.application.orderData.productLevel || '-'}
+                  {(reviewAction.application.orderData.items?.length || 0) > 1
+                    ? ` 等 ${reviewAction.application.orderData.items!.length} 项`
+                    : ''}
                 </Typography>
                 <Typography variant="body2">
                   产品等级/类型：{reviewAction.application.orderData.productLevel || '-'} / {reviewAction.application.orderData.orderType || '-'}
+                </Typography>
+                <Typography variant="body2">
+                  产品总计：{formatCurrency(
+                    reviewAction.application.orderData.standardTotalAmount
+                    || reviewAction.application.orderData.amount,
+                  )}
                 </Typography>
                 <Typography variant="body2">
                   实付金额：{formatCurrency(reviewAction.application.orderData.actualAmount || reviewAction.application.orderData.amount)}
@@ -1099,39 +1133,59 @@ const OrderReview: React.FC<OrderReviewProps> = ({
                 </Typography>
                 <Chip label={detailApplication.orderData.productLevel || '-'} size="small" sx={getProductLevelTagSx(detailApplication.orderData.productLevel)} />
                 <Chip label={detailApplication.orderData.orderType || '-'} size="small" variant="outlined" />
-                <Chip
-                  label={getOrderApplicationUnifiedReviewStatus(detailApplication.status, Boolean(detailApplication.sourceOrderDeleted))}
-                  size="small"
-                  color={statusColor[getOrderApplicationUnifiedReviewStatus(detailApplication.status, Boolean(detailApplication.sourceOrderDeleted))]}
-                  variant="outlined"
+                <BusinessStatusChip
+                  status={getOrderApplicationUnifiedReviewStatus(detailApplication.status, Boolean(detailApplication.sourceOrderDeleted))}
                 />
               </Box>
             </DialogCloseTitle>
-            <DialogContent dividers>
-              <SnapshotSection title="客户资料">
-                <SnapshotField label="客户名称">{detailApplication.orderData.customerName}</SnapshotField>
+            <DialogContent dividers sx={{ bgcolor: '#f8fafc' }}>
+              <SnapshotSection title="客户信息">
+                <SnapshotField label="客户">{detailApplication.orderData.customerName}</SnapshotField>
+                <SnapshotField label="销售负责人">{detailApplication.orderData.owner}</SnapshotField>
+              </SnapshotSection>
+
+              <SnapshotSection title="客户归因快照" defaultExpanded={false}>
                 <SnapshotField label="资源归属">
                   {normalizeResourceOwnership(detailApplication.orderData.resourceOwnership || detailApplication.orderData.sourceType)}
                 </SnapshotField>
                 <SnapshotField label="线索来源">
                   {formatLeadSourceLabel(detailApplication.orderData.leadSource, detailApplication.orderData.sourceName)}
                 </SnapshotField>
-                <SnapshotField label="销售负责人">{detailApplication.orderData.owner}</SnapshotField>
                 <SnapshotField label="线索录入人">{detailApplication.orderData.leadInputBy || '-'}</SnapshotField>
                 <SnapshotField label="线索贡献人">{detailApplication.orderData.leadContributorName || '-'}</SnapshotField>
               </SnapshotSection>
 
-              <Divider sx={{ my: 2 }} />
-              <SnapshotSection title="订单资料">
+              <SnapshotSection title="产品信息">
                 <SnapshotField label="产品名称">{detailApplication.orderData.productName || detailApplication.orderData.productLevel || '-'}</SnapshotField>
                 <Box>
                   <Typography variant="body2" sx={{ color: '#6b7280' }}>产品等级</Typography>
                   <Chip label={detailApplication.orderData.productLevel || '-'} size="small" sx={getProductLevelTagSx(detailApplication.orderData.productLevel)} />
                 </Box>
+                {!!detailApplication.orderData.items?.length && (
+                  <Box sx={{ gridColumn: { md: '1 / -1' } }}>
+                    <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1.5 }}>
+                      <Table size="small">
+                        <TableHead><TableRow>
+                          <TableCell>产品名称</TableCell><TableCell>产品等级</TableCell><TableCell align="right">产品价格</TableCell><TableCell align="right">数量</TableCell><TableCell align="right">小计</TableCell>
+                        </TableRow></TableHead>
+                        <TableBody>{detailApplication.orderData.items.map((item) => <TableRow key={item.id}>
+                          <TableCell>{item.productName}{item.isPrimary ? ' · 主产品' : ''}</TableCell>
+                          <TableCell>{item.productLevel}</TableCell>
+                          <TableCell align="right">{formatCurrency(item.unitPrice)}</TableCell>
+                          <TableCell align="right">{item.quantity}</TableCell>
+                          <TableCell align="right">{formatCurrency(item.subtotal)}</TableCell>
+                        </TableRow>)}</TableBody>
+                        <TableBody><TableRow><TableCell colSpan={4} align="right" sx={{ fontWeight: 700 }}>产品总计</TableCell><TableCell align="right" sx={{ fontWeight: 800 }}>{formatCurrency(detailApplication.orderData.standardTotalAmount || detailApplication.orderData.amount)}</TableCell></TableRow></TableBody>
+                      </Table>
+                    </TableContainer>
+                  </Box>
+                )}
+              </SnapshotSection>
+
+              <SnapshotSection title="订单信息">
                 <SnapshotField label="订单类型">{detailApplication.orderData.orderType || '-'}</SnapshotField>
                 <SnapshotField label="第三方平台订单">{detailApplication.orderData.thirdPartyOrderNo || '-'}</SnapshotField>
                 <SnapshotField label="正式订单号">{detailApplication.orderNo || '-'}</SnapshotField>
-                <SnapshotField label="备注">{detailApplication.orderData.notes || '-'}</SnapshotField>
               </SnapshotSection>
 
               {detailFormalOrder?.applicationId === detailApplication.id
@@ -1142,15 +1196,12 @@ const OrderReview: React.FC<OrderReviewProps> = ({
                 </Alert>
               )}
 
-              <Divider sx={{ my: 2 }} />
-              <SnapshotSection title="付款资料">
+              <SnapshotSection title="付款信息">
                 <SnapshotField label="实付金额" strong>
                   {formatCurrency(detailApplication.orderData.actualAmount || detailApplication.orderData.amount)}
                 </SnapshotField>
                 <SnapshotField label="官方收款渠道">{detailApplication.orderData.officialPaymentChannel || '-'}</SnapshotField>
-              </SnapshotSection>
-
-              <TableContainer sx={{ mt: 2 }}>
+              <TableContainer sx={{ gridColumn: { md: '1 / -1' }, mt: 0.5 }}>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
@@ -1158,12 +1209,13 @@ const OrderReview: React.FC<OrderReviewProps> = ({
                       <TableCell>付款时间</TableCell>
                       <TableCell>付款订单号</TableCell>
                       <TableCell>付款截图</TableCell>
+                      <TableCell>成交路径截图</TableCell>
                       <TableCell>备注</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {detailApplication.orderData.payments?.length ? (
-                      detailApplication.orderData.payments.map((payment) => (
+                      detailApplication.orderData.payments.map((payment, index) => (
                         <TableRow key={payment.id}>
                           <TableCell>{formatCurrency(payment.amount)}</TableCell>
                           <TableCell>{formatDate(payment.paidAt, 'yyyy-MM-dd HH:mm:ss')}</TableCell>
@@ -1173,36 +1225,50 @@ const OrderReview: React.FC<OrderReviewProps> = ({
                               ? <BusinessAttachmentLinks attachments={payment.attachments} />
                               : <AttachmentPreviewLink title="付款截图" fileName={payment.voucherName} src={payment.voucherPreview} />}
                           </TableCell>
+                          {index === 0 && (
+                            <TableCell rowSpan={detailApplication.orderData.payments.length}>
+                              {detailApplication.orderData.dealEvidenceAttachments?.length
+                                ? <BusinessAttachmentLinks attachments={detailApplication.orderData.dealEvidenceAttachments} />
+                                : (
+                                  <AttachmentPreviewLink
+                                    title="成交路径 / 聊天记录"
+                                    fileName={detailApplication.orderData.dealEvidenceName}
+                                    src={detailApplication.orderData.dealEvidencePreview}
+                                  />
+                                )}
+                            </TableCell>
+                          )}
                           <TableCell>{payment.remark || '-'}</TableCell>
                         </TableRow>
                       ))
                     ) : (
                       <TableRow>
-                        <TableCell colSpan={5} align="center" sx={{ color: '#9ca3af', py: 3 }}>暂无付款记录</TableCell>
+                        <TableCell colSpan={4} align="center" sx={{ color: '#9ca3af', py: 3 }}>暂无付款记录</TableCell>
+                        <TableCell>
+                          {detailApplication.orderData.dealEvidenceAttachments?.length
+                            ? <BusinessAttachmentLinks attachments={detailApplication.orderData.dealEvidenceAttachments} />
+                            : (
+                              <AttachmentPreviewLink
+                                title="成交路径 / 聊天记录"
+                                fileName={detailApplication.orderData.dealEvidenceName}
+                                src={detailApplication.orderData.dealEvidencePreview}
+                              />
+                            )}
+                        </TableCell>
+                        <TableCell>-</TableCell>
                       </TableRow>
                     )}
                   </TableBody>
                 </Table>
               </TableContainer>
+              </SnapshotSection>
 
-              <Divider sx={{ my: 2 }} />
-              <SnapshotSection title="成交资料">
-                <SnapshotField label="成交路径 / 聊天记录">
-                  {detailApplication.orderData.dealEvidenceAttachments?.length
-                    ? <BusinessAttachmentLinks attachments={detailApplication.orderData.dealEvidenceAttachments} />
-                    : (
-                      <AttachmentPreviewLink
-                        title="成交路径 / 聊天记录"
-                        fileName={detailApplication.orderData.dealEvidenceName}
-                        src={detailApplication.orderData.dealEvidencePreview}
-                      />
-                    )}
-                </SnapshotField>
+              <SnapshotSection title="补充信息">
+                <SnapshotField label="备注">{detailApplication.orderData.notes || '-'}</SnapshotField>
               </SnapshotSection>
 
               {detailApplication.importBatchId ? (
                 <>
-                  <Divider sx={{ my: 2 }} />
                   <SnapshotSection title="导入信息">
                     <SnapshotField label="导入批次">{detailApplication.importBatchId}</SnapshotField>
                     <SnapshotField label="Excel 行号">{detailApplication.importRowNumber || '-'}</SnapshotField>
@@ -1233,8 +1299,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({
                 </>
               ) : null}
 
-              <Divider sx={{ my: 2 }} />
-              <SnapshotSection title="审核资料">
+              <SnapshotSection title="审核与系统信息" defaultExpanded={false}>
                 <SnapshotField label="订单创建人">{detailApplication.applicantName}</SnapshotField>
                 <SnapshotField label="提交时间">{formatDate(detailApplication.submittedAt, 'yyyy-MM-dd HH:mm:ss')}</SnapshotField>
                 <SnapshotField label="审核人">{detailApplication.reviewerName || '-'}</SnapshotField>

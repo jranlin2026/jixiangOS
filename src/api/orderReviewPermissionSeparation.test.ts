@@ -39,6 +39,11 @@ assert.match(
   '只有新增订单权限时不得回退渲染无权查看的订单列表',
 );
 assert.match(
+  ordersPageSource,
+  /activeTab === 'list' && \(\s*<PermissionGate permissionKey=\{PERMISSION_KEYS\.ORDER_CREATE\}/,
+  '提交订单申请按钮只能在订单列表页显示，订单审核台不得出现',
+);
+assert.match(
   dashboardSource,
   /currentUserHasPermission\(PERMISSION_KEYS\.ORDER_REVIEW_LIST\)/,
   '首页待办和统计不得绕过订单审核列表权限读取申请数据',

@@ -24,6 +24,15 @@ assert.deepEqual(
 assert.equal(classifyCustomerBatchItemFailure(Object.assign(new Error('changed'), { code: 'CUSTOMER_WRITE_CONFLICT' })).retryable, false);
 assert.equal(classifyCustomerBatchItemFailure(new Error('无权管理该客户')).code, 'CUSTOMER_PERMISSION_REVOKED');
 assert.equal(classifyCustomerBatchItemFailure(new Error('客户当前状态不允许')).code, 'CUSTOMER_STATE_CONFLICT');
+assert.deepEqual(
+  classifyCustomerBatchItemFailure(new Error('存在关联业务，不能删除：订单关联、交付关联')),
+  {
+    code: 'CUSTOMER_ASSOCIATION_CONFLICT',
+    message: '客户仍存在业务关联，无法删除：订单关联、交付关联',
+    retryable: false,
+  },
+  '批量删除失败必须保留具体关联业务，不能只返回笼统提示',
+);
 
 function fakeStoreFixture(start = new Date('2026-07-18T08:00:00.000Z')) {
   let now = new Date(start);

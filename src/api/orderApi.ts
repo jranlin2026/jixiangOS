@@ -1,4 +1,4 @@
-import type { Order, OrderApplication, OrderCorrectionInput, OrderFilters, OrderStats } from '../types/order';
+import type { Order, OrderApplication, OrderCorrectionInput, OrderCorrectionPrecheck, OrderFilters, OrderStats } from '../types/order';
 import type { Customer } from '../types/customer';
 import type { Commission, CommissionRole } from '../types/commission';
 import type { Product } from '../types/product';
@@ -286,6 +286,9 @@ async function fetchOrders(filters?: OrderFilters): Promise<ApiResponse<Paginate
   if (filters?.status) {
     filtered = filtered.filter((o) => o.status === filters.status);
   }
+  if (filters?.refundStatus) {
+    filtered = filtered.filter((o) => o.refundStatus === filters.refundStatus);
+  }
   if (filters?.settlementStatus) {
     filtered = filtered.filter((o) => o.settlementStatus === filters.settlementStatus);
   }
@@ -445,7 +448,7 @@ async function createOrder(
     const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
 
     for (const calc of calcRes.data) {
-      const assignee = commissionRuleApi.resolveCommissionRoleAssignee(newOrder, calc.role);
+      const assignee = commissionRuleApi.resolveCommissionRoleAssignee(newOrder, calc.role, calc.assigneeSource);
       const resolvedPersonName = calc.ownerOverride || assignee.owner;
       const personName = calc.ownerOverride || commissionRuleApi.resolveCommissionRoleOwner(newOrder, calc.role) || '待分配';
       commissions.unshift({
@@ -468,6 +471,8 @@ async function createOrder(
         formulaText: calc.formulaText,
         payoutPlanId: calc.payoutPlanId,
         payoutPlanName: calc.payoutPlanName,
+        payoutPlanVersion: calc.payoutPlanVersion,
+        payoutPlanSnapshot: calc.payoutPlanSnapshot,
         ruleCalculationType: calc.commissionType,
         tierSnapshot: calc.commissionType === 'tiered_percentage' && calc.tiers?.length
           ? {
@@ -478,6 +483,9 @@ async function createOrder(
           }
           : undefined,
         role: calc.role,
+        roleId: calc.roleId,
+        roleCode: calc.roleCode,
+        roleNameSnapshot: calc.roleNameSnapshot,
         owner: resolvedPersonName,
         ownerId: calc.ownerOverride ? undefined : assignee.ownerId,
         department: calc.departmentOverride || assignee.department || ROLE_DEPARTMENT_MAP[calc.role],
@@ -627,6 +635,17 @@ async function correctOrder(id: string, input: OrderCorrectionInput): Promise<Ap
   return createSuccessResponse(cacheBackendOrder(response.data));
 }
 
+async function precheckOrderCorrection(id: string): Promise<ApiResponse<OrderCorrectionPrecheck | null>> {
+  if (!shouldUseBackendApi()) {
+    return createErrorResponse('订单更正预检仅支持服务端模式，请启动本地接口服务', 503);
+  }
+  const response = await backendRequest<OrderCorrectionPrecheck>(`/orders/${encodeURIComponent(id)}/correction-precheck`);
+  if (response.code !== 0 || !response.data) {
+    return createErrorResponse(response.message || '服务端未返回订单更正预检结果', response.code || -1);
+  }
+  return createSuccessResponse(response.data);
+}
+
 async function deleteOrder(id: string, reason = ''): Promise<ApiResponse<boolean>> {
   if (shouldUseBackendApi()) {
     const response = await backendRequest<Order>(`/orders/${encodeURIComponent(id)}`, {
@@ -681,6 +700,7 @@ export const orderApi = {
   fetchOrderStats,
   createOrder,
   updateOrder,
+  precheckOrderCorrection,
   correctOrder,
   deleteOrder,
 };

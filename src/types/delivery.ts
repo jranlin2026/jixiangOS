@@ -117,11 +117,13 @@ export interface DeliveryCreatableOrderSummary {
 export interface Delivery {
   id: ID;
   orderId: ID;
+  orderItemId?: ID;
   orderNo: string;
   customerId: ID;
   customerName: string;
   productName?: string;
   productType: DeliveryProductType;
+  productQuantity?: number;
   currentStage: DeliveryStage;
   stages: DeliveryStage[];
   tasks: DeliveryTask[];

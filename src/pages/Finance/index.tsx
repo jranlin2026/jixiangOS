@@ -4,6 +4,7 @@ import {
   useSearchParams } from 'react-router-dom';
 import {
   Box,
+  Alert,
   Button,
   Chip,
   FormControl,
@@ -32,12 +33,13 @@ import { formatCurrency, formatDate, formatPaginationRows } from '../../shared/u
 import { ROUTES } from '../../shared/utils/constants';
 import Commission from '../Commission';
 import RecoverySettlement from './RecoverySettlement';
+import CommissionPayout from './CommissionPayout';
 import { ModuleHeader, ModulePage, ModuleTabs } from '../../shared/components/ModuleShell';
-import type { FinanceTransaction, FinanceTransactionDirection, FinanceTransactionFilters } from '../../types/finance';
+import type { FinanceTransaction, FinanceTransactionDirection, FinanceTransactionFilters, FinanceTransactionSummary } from '../../types/finance';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 
-type FinanceTab = 'mine' | 'settlement' | 'recovery-settlement' | 'payout' | 'flow' | 'rules';
+type FinanceTab = 'mine' | 'settlement' | 'recovery-settlement' | 'disbursement' | 'flow' | 'rules';
 
 const shell = {
   ink: '#0f172a',
@@ -56,7 +58,7 @@ const FINANCE_TABS: Array<{ value: FinanceTab; label: string; permissionKey: str
   { value: 'mine', label: '我的提成', permissionKey: PERMISSION_KEYS.FINANCE_MY_COMMISSION },
   { value: 'settlement', label: '订单分账', permissionKey: PERMISSION_KEYS.FINANCE_SETTLEMENT },
   { value: 'recovery-settlement', label: '售后挽回分账', permissionKey: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT },
-  { value: 'payout', label: '员工提成月报', permissionKey: PERMISSION_KEYS.FINANCE_PAYOUT },
+  { value: 'disbursement', label: '提成发放', permissionKey: PERMISSION_KEYS.FINANCE_PAYOUT },
   { value: 'flow', label: '收支流水', permissionKey: PERMISSION_KEYS.FINANCE_FLOW },
   { value: 'rules', label: '提成规则', permissionKey: PERMISSION_KEYS.FINANCE_RULES },
 ];
@@ -64,6 +66,7 @@ const FINANCE_TABS: Array<{ value: FinanceTab; label: string; permissionKey: str
 const VALID_TABS = new Set(FINANCE_TABS.map((item) => item.value));
 
 function getTabFromSearch(value: string | null): FinanceTab {
+  if (value === 'payout') return 'disbursement';
   return value && VALID_TABS.has(value as FinanceTab) ? (value as FinanceTab) : 'mine';
 }
 
@@ -81,12 +84,16 @@ const Finance: React.FC = () => {
   const [flowSearch, setFlowSearch] = useState('');
   const [flowTypeFilter, setFlowTypeFilter] = useState('');
   const [flowDirectionFilter, setFlowDirectionFilter] = useState('');
+  const [flowStartDate, setFlowStartDate] = useState('');
+  const [flowEndDate, setFlowEndDate] = useState('');
   const [selectedFlowId, setSelectedFlowId] = useState('');
   const [selectedFlow, setSelectedFlow] = useState<FinanceTransaction | null>(null);
   const [flowRows, setFlowRows] = useState<FinanceTransaction[]>([]);
   const [flowLoading, setFlowLoading] = useState(false);
+  const [flowError, setFlowError] = useState('');
   const [flowTotal, setFlowTotal] = useState(0);
   const [flowExporting, setFlowExporting] = useState(false);
+  const [flowSummary, setFlowSummary] = useState<FinanceTransactionSummary>({ incomeAmount: 0, expenseAmount: 0, netAmount: 0, transactionCount: 0 });
   const [settlementViewSettingsTrigger, setSettlementViewSettingsTrigger] = useState(0);
   const [settlementCreateSplitTrigger, setSettlementCreateSplitTrigger] = useState(0);
   const [settlementExportTrigger, setSettlementExportTrigger] = useState(0);
@@ -106,38 +113,52 @@ const Finance: React.FC = () => {
     search: flowSearch,
     type: flowTypeFilter,
     direction: flowDirectionFilter as FinanceTransactionDirection | '',
+    startDate: flowStartDate,
+    endDate: flowEndDate,
     page: flowPage + 1,
     pageSize: flowRowsPerPage,
-  }), [flowDirectionFilter, flowPage, flowRowsPerPage, flowSearch, flowTypeFilter]);
+  }), [flowDirectionFilter, flowEndDate, flowPage, flowRowsPerPage, flowSearch, flowStartDate, flowTypeFilter]);
 
   const flowExportFilters = useMemo<FinanceTransactionFilters>(() => ({
     search: flowSearch,
     type: flowTypeFilter,
     direction: flowDirectionFilter as FinanceTransactionDirection | '',
-  }), [flowDirectionFilter, flowSearch, flowTypeFilter]);
+    startDate: flowStartDate,
+    endDate: flowEndDate,
+  }), [flowDirectionFilter, flowEndDate, flowSearch, flowStartDate, flowTypeFilter]);
 
-  const flowTypeOptions = ['订单收款', '其他收入', '业务支出', '提成发放'];
+  const flowTypeOptions = ['订单实收', '提成发放'];
 
   useEffect(() => {
     if (activeTab !== 'flow') return;
     let mounted = true;
     setFlowLoading(true);
+    setFlowError('');
     financeApi.fetchFinanceTransactions(flowQueryFilters).then((res) => {
-      if (!mounted || res.code !== 0) return;
+      if (!mounted) return;
+      if (res.code !== 0) {
+        setFlowError(res.message || '收支流水加载失败');
+        setFlowRows([]);
+        setFlowTotal(0);
+        setFlowSummary({ incomeAmount: 0, expenseAmount: 0, netAmount: 0, transactionCount: 0 });
+        setSelectedFlowId('');
+        setSelectedFlow(null);
+        return;
+      }
       setFlowRows(res.data.items);
       setFlowTotal(res.data.pagination.total);
-      const nextSelectedId = res.data.items.some((row) => row.id === selectedFlowId)
-        ? selectedFlowId
-        : (res.data.items[0]?.id || '');
-      setSelectedFlowId(nextSelectedId);
-      if (!nextSelectedId) setSelectedFlow(null);
+      setFlowSummary(res.data.summary);
+      setSelectedFlowId((currentId) => (
+        res.data.items.some((row) => row.id === currentId) ? currentId : (res.data.items[0]?.id || '')
+      ));
+      if (!res.data.items.length) setSelectedFlow(null);
     }).finally(() => {
       if (mounted) setFlowLoading(false);
     });
     return () => {
       mounted = false;
     };
-  }, [activeTab, flowQueryFilters, selectedFlowId]);
+  }, [activeTab, flowQueryFilters]);
 
   useEffect(() => {
     if (activeTab !== 'flow' || !selectedFlowId) return;
@@ -153,29 +174,16 @@ const Finance: React.FC = () => {
 
   useEffect(() => {
     setFlowPage(0);
-  }, [flowSearch, flowTypeFilter, flowDirectionFilter]);
-
-  const flowSummary = useMemo(() => {
-    const incomeTotal = flowRows
-      .filter((row) => row.direction === 'income')
-      .reduce((sum, row) => sum + row.amount, 0);
-    const expenseTotal = flowRows
-      .filter((row) => row.direction === 'expense')
-      .reduce((sum, row) => sum + row.amount, 0);
-    const pendingCount = flowRows.filter((row) => row.status !== '已确认').length;
-    return {
-      incomeTotal,
-      expenseTotal,
-      netAmount: incomeTotal - expenseTotal,
-      pendingCount,
-    };
-  }, [flowRows]);
+  }, [flowSearch, flowTypeFilter, flowDirectionFilter, flowStartDate, flowEndDate]);
 
   const exportCurrentFlowRows = async () => {
     setFlowExporting(true);
     try {
       const res = await financeApi.exportFinanceTransactionsCsv(flowExportFilters);
-      if (res.code !== 0 || !res.data) return;
+      if (res.code !== 0 || !res.data) {
+        setFlowError(res.message || '收支流水导出失败');
+        return;
+      }
       const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
@@ -214,18 +222,18 @@ const Finance: React.FC = () => {
     const directionMeta: Record<FinanceTransactionDirection, { label: string; color: string; mark: string }> = {
       income: { label: '收入', color: shell.green, mark: '+' },
       expense: { label: '支出', color: shell.red, mark: '-' },
-      reversal: { label: '冲减', color: shell.amber, mark: '-' },
-      freeze: { label: '冻结', color: shell.muted, mark: '' },
     };
     const summaryCards = [
-      { label: '收入合计', value: formatCurrency(flowSummary.incomeTotal), color: shell.green },
-      { label: '支出合计', value: formatCurrency(flowSummary.expenseTotal), color: shell.red },
+      { label: '收入合计', value: formatCurrency(flowSummary.incomeAmount), color: shell.green },
+      { label: '支出合计', value: formatCurrency(flowSummary.expenseAmount), color: shell.red },
       { label: '净流入', value: formatCurrency(flowSummary.netAmount), color: flowSummary.netAmount >= 0 ? shell.blue : shell.red },
-      { label: '待确认', value: `${flowSummary.pendingCount} 笔`, color: flowSummary.pendingCount ? shell.amber : shell.muted },
+      { label: '流水笔数', value: `${flowSummary.transactionCount} 笔`, color: shell.blue },
     ];
 
     return (
       <Box sx={{ display: 'grid', gap: 1.5 }}>
+        <Alert severity="info" variant="outlined">当前流水包含订单实收和提成实际发放；退款及其他经营支出暂未纳入。</Alert>
+        {flowError && <Alert severity="error" variant="outlined">{flowError}</Alert>}
         <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1.5, bgcolor: '#fff', overflow: 'hidden' }}>
           <Box sx={{ display: 'grid', gridTemplateColumns: '6px 1fr' }}>
             <Box sx={{ bgcolor: shell.ink }} />
@@ -236,7 +244,7 @@ const Finance: React.FC = () => {
                     业务核账流水
                   </Typography>
                   <Typography variant="caption" sx={{ color: shell.muted }}>
-                    订单收款、业务支出和提成发放会在这里形成同一条核账线。
+                    仅记录已经真实发生的订单收款和提成发放，不展示预计金额。
                   </Typography>
                 </Box>
                 <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, minmax(118px, 1fr))' }, gap: 0.75, minWidth: { lg: 560 } }}>
@@ -277,10 +285,10 @@ const Finance: React.FC = () => {
                 <MenuItem value="">全部</MenuItem>
                 <MenuItem value="income">收入</MenuItem>
                 <MenuItem value="expense">支出</MenuItem>
-                <MenuItem value="reversal">冲减</MenuItem>
-                <MenuItem value="freeze">冻结</MenuItem>
               </Select>
             </FormControl>
+            <TextField size="small" label="开始日期" type="date" value={flowStartDate} onChange={(event) => setFlowStartDate(event.target.value)} InputLabelProps={{ shrink: true }} />
+            <TextField size="small" label="结束日期" type="date" value={flowEndDate} onChange={(event) => setFlowEndDate(event.target.value)} InputLabelProps={{ shrink: true }} />
             <Button
               variant="outlined"
               startIcon={<FileDownloadIcon />}
@@ -339,11 +347,11 @@ const Finance: React.FC = () => {
                         <TableCell>
                           <Chip
                             size="small"
-                            label={row.status}
-                            variant={row.status === '已确认' ? 'filled' : 'outlined'}
+                            label={row.sourceStatus || row.status}
+                            variant={(row.sourceStatus || row.status) === '已确认' ? 'filled' : 'outlined'}
                             sx={{
-                              bgcolor: row.status === '已确认' ? '#ecfdf5' : '#fff7ed',
-                              color: row.status === '已确认' ? shell.green : shell.amber,
+                              bgcolor: (row.sourceStatus || row.status) === '已确认' ? '#ecfdf5' : '#fff7ed',
+                              color: (row.sourceStatus || row.status) === '已确认' ? shell.green : shell.amber,
                               fontWeight: 800,
                             }}
                           />
@@ -394,10 +402,14 @@ const Finance: React.FC = () => {
                       ['方向', directionMeta[selectedFlow.direction].label],
                       ['金额', `${directionMeta[selectedFlow.direction].mark}${formatCurrency(selectedFlow.amount)}`],
                       ['关联业务', selectedFlow.relatedBusiness || '-'],
+                      ['订单号', selectedFlow.orderNo || '-'],
                       ['客户/对象', selectedFlow.customerName || '-'],
                       ['产品名称', selectedFlow.productName || '-'],
                       ['来源模块', selectedFlow.sourceModule],
                       ['经办人', selectedFlow.operatorName || '-'],
+                      ['付款方式', selectedFlow.paymentMethod || '-'],
+                      ['付款流水号', selectedFlow.paymentReference || '-'],
+                      ['来源状态', selectedFlow.sourceStatus || selectedFlow.status],
                       ['发生时间', selectedFlow.occurredAt ? formatDate(selectedFlow.occurredAt, 'yyyy-MM-dd HH:mm:ss') : '-'],
                       ['原因', selectedFlow.reason || '-'],
                     ].map(([label, value]) => (
@@ -426,7 +438,7 @@ const Finance: React.FC = () => {
     <ModulePage>
       <ModuleHeader
         title="财务中心"
-        description="聚焦我的提成、订单分账、员工月报、收支流水和提成规则。"
+        description="聚焦提成核算、员工发放、月度对账、收支流水和规则配置。"
         actions={(
           <>
         {activeTab === 'settlement' && (
@@ -510,7 +522,6 @@ const Finance: React.FC = () => {
           initialTab={1}
           payoutScope="mine"
           payoutMode="mine"
-          hidePayoutFinanceActions
         />
       )}
       {activeTab === 'settlement' && (
@@ -522,6 +533,7 @@ const Finance: React.FC = () => {
           orderSplitViewTrigger={settlementViewSettingsTrigger}
           orderSplitCreateTrigger={settlementCreateSplitTrigger}
           orderSplitExportTrigger={settlementExportTrigger}
+          orderSplitInitialSearch={searchParams.get('search') || ''}
         />
       )}
       {activeTab === 'recovery-settlement' && (
@@ -529,9 +541,10 @@ const Finance: React.FC = () => {
           viewSettingsTrigger={recoverySettlementViewSettingsTrigger}
           createSettlementTrigger={recoverySettlementCreateTrigger}
           exportTrigger={recoverySettlementExportTrigger}
+          initialSearch={searchParams.get('search') || ''}
         />
       )}
-      {activeTab === 'payout' && <Commission key="finance-payout" embedded initialTab={1} payoutMode="finance" />}
+      {activeTab === 'disbursement' && <CommissionPayout />}
       {activeTab === 'flow' && renderFlow()}
       {activeTab === 'rules' && <Commission key="finance-rules" embedded initialTab={2} />}
     </ModulePage>
