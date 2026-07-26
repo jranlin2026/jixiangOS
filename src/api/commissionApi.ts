@@ -38,7 +38,8 @@ import { createErrorResponse, createSuccessResponse, delay as baseDelay } from '
 import { getStorageData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../shared/utils/constants';
 import { initializeMockData } from './mock';
-import { getCurrentOperatorName } from '../shared/utils/currentOperator';
+import { getCurrentOperatorName, getCurrentOperatorUser } from '../shared/utils/currentOperator';
+import { isSuperAdmin } from '../shared/utils/permissions';
 import { v4 as uuidv4 } from 'uuid';
 import { orderApi } from './orderApi';
 import {
@@ -48,7 +49,7 @@ import {
 } from '../shared/utils/financeSettlementPresentation';
 
 const delay = (ms?: number) => baseDelay(ms, 'commissions');
-import { shouldUseBackendApi } from './backendClient';
+import { backendRequest, shouldUseBackendApi, syncBackendStorageFromServer } from './backendClient';
 
 function ensureInit(): void {
   initializeMockData();
@@ -637,71 +638,76 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
     orderMap.set(commission.orderId, rows);
   });
 
-  return Array.from(orderMap.entries()).map(([orderId, rows]) => {
-    const sortedRows = rows.slice().sort((a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role));
-    const activeRows = getActiveCommissions(sortedRows);
-    const first = sortedRows[0];
-    const order = ordersById.get(orderId);
-    const sourceApplication = !order?.createdByName && order?.sourceApplicationId
-      ? applicationsById.get(order.sourceApplicationId)
-      : undefined;
-    const paymentDate = getCommissionPaymentDate(first, order);
-    const orderAmount = order?.actualAmount || order?.amount || first.orderAmount;
-    const latestPayment = [...(order?.payments || [])].sort((a, b) => (
-      new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime()
-    ))[0];
-    const operationLogs = getCommissionOperationLogs(orderId);
-    const processing = summarizeCommissionProcessing(sortedRows, operationLogs);
-    const updateDates = [...sortedRows.map((item) => item.updatedAt), ...operationLogs.map((log) => log.operatedAt)]
-      .filter(Boolean)
-      .sort();
-    const updatedAt = updateDates[updateDates.length - 1];
-    return {
-      orderId,
-      orderNo: first.orderNo,
-      customerName: first.customerName,
-      productName: getProductName(order?.productId, order?.productLevel || first.productLevel, order?.productName),
-      productLevel: first.productLevel,
-      orderType: order?.orderType || first.scene || '',
-      paymentDate,
-      orderAmount,
-      resourceOwnership: order?.resourceOwnership || first.resourceOwnership,
-      refundStatus: order?.refundStatus,
-      salesOwner: order?.salesName || order?.owner || '',
-      salesId: order?.salesId,
-      salesName: order?.salesName,
-      createdById: order?.createdById || sourceApplication?.applicantId,
-      createdByName: order?.createdByName || sourceApplication?.applicantName,
-      leadInputBy: order?.leadInputBy,
-      leadContributorName: order?.leadContributorName,
-      sourceType: order?.sourceType,
-      leadSourceFull: order ? formatLeadSourcePath(order) : '',
-      officialPaymentChannel: order?.officialPaymentChannel,
-      thirdPartyOrderNo: order?.thirdPartyOrderNo,
-      paymentOrderNo: latestPayment?.paymentOrderNo,
-      notes: order?.notes,
-      createdAt: order?.createdAt || first.createdAt,
-      updatedAt,
-      sourceOrderDeleted: !order,
-      totalCommissionAmount: processing.totalCommissionAmount,
-      performanceAmount: processing.performanceAmount,
-      pendingAssignCount: sortedRows.filter(isPendingAssignment).length,
-      exceptionCount: processing.withdrawnCount,
-      settlementOperator: processing.settlementOperator,
-      confirmedAt: processing.confirmedAt,
-      paidAt: processing.paidAt,
-      withdrawReason: processing.withdrawReason,
-      status: deriveOrderSettlementProgress(sortedRows),
-      splitSummary: activeRows.map((item) => ({
-        role: item.role,
-        amount: item.commissionAmount,
-        owner: item.owner,
-        ownerId: item.ownerId,
-        status: item.status,
-      })),
-      commissions: sortedRows,
-    };
-  });
+  return Array.from(orderMap.entries())
+    .filter(([orderId]) => (
+      ordersById.has(orderId)
+      || !getCommissionOperationLogs(orderId).some((log) => log.action === '清理废弃分账')
+    ))
+    .map(([orderId, rows]) => {
+      const sortedRows = rows.slice().sort((a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role));
+      const activeRows = getActiveCommissions(sortedRows);
+      const first = sortedRows[0];
+      const order = ordersById.get(orderId);
+      const sourceApplication = !order?.createdByName && order?.sourceApplicationId
+        ? applicationsById.get(order.sourceApplicationId)
+        : undefined;
+      const paymentDate = getCommissionPaymentDate(first, order);
+      const orderAmount = order?.actualAmount || order?.amount || first.orderAmount;
+      const latestPayment = [...(order?.payments || [])].sort((a, b) => (
+        new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime()
+      ))[0];
+      const operationLogs = getCommissionOperationLogs(orderId);
+      const processing = summarizeCommissionProcessing(sortedRows, operationLogs);
+      const updateDates = [...sortedRows.map((item) => item.updatedAt), ...operationLogs.map((log) => log.operatedAt)]
+        .filter(Boolean)
+        .sort();
+      const updatedAt = updateDates[updateDates.length - 1];
+      return {
+        orderId,
+        orderNo: first.orderNo,
+        customerName: first.customerName,
+        productName: getProductName(order?.productId, order?.productLevel || first.productLevel, order?.productName),
+        productLevel: first.productLevel,
+        orderType: order?.orderType || first.scene || '',
+        paymentDate,
+        orderAmount,
+        resourceOwnership: order?.resourceOwnership || first.resourceOwnership,
+        refundStatus: order?.refundStatus,
+        salesOwner: order?.salesName || order?.owner || '',
+        salesId: order?.salesId,
+        salesName: order?.salesName,
+        createdById: order?.createdById || sourceApplication?.applicantId,
+        createdByName: order?.createdByName || sourceApplication?.applicantName,
+        leadInputBy: order?.leadInputBy,
+        leadContributorName: order?.leadContributorName,
+        sourceType: order?.sourceType,
+        leadSourceFull: order ? formatLeadSourcePath(order) : '',
+        officialPaymentChannel: order?.officialPaymentChannel,
+        thirdPartyOrderNo: order?.thirdPartyOrderNo,
+        paymentOrderNo: latestPayment?.paymentOrderNo,
+        notes: order?.notes,
+        createdAt: order?.createdAt || first.createdAt,
+        updatedAt,
+        sourceOrderDeleted: !order,
+        totalCommissionAmount: processing.totalCommissionAmount,
+        performanceAmount: processing.performanceAmount,
+        pendingAssignCount: sortedRows.filter(isPendingAssignment).length,
+        exceptionCount: processing.withdrawnCount,
+        settlementOperator: processing.settlementOperator,
+        confirmedAt: processing.confirmedAt,
+        paidAt: processing.paidAt,
+        withdrawReason: processing.withdrawReason,
+        status: deriveOrderSettlementProgress(sortedRows),
+        splitSummary: activeRows.map((item) => ({
+          role: item.role,
+          amount: item.commissionAmount,
+          owner: item.owner,
+          ownerId: item.ownerId,
+          status: item.status,
+        })),
+        commissions: sortedRows,
+      };
+    });
 }
 
 function applyOrderSummaryFilters(summaries: CommissionOrderSummary[], filters?: CommissionOrderSummaryFilters): CommissionOrderSummary[] {
@@ -976,11 +982,19 @@ async function saveOrderCommissionAdjustments(
   return createSuccessResponse(getOrderCommissions(orderId));
 }
 
-async function deleteOrderCommissions(orderId: string, reason: string): Promise<ApiResponse<boolean>> {
+async function resetOrderCommissions(orderId: string, reason: string): Promise<ApiResponse<boolean>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<boolean>(`/order-settlements/${encodeURIComponent(orderId)}/reset`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    if (response.code === 0) await syncBackendStorageFromServer(0);
+    return response;
+  }
   ensureInit();
   await delay(160);
   const normalizedReason = reason.trim();
-  if (!normalizedReason) return createErrorResponse('删除订单分账必须填写原因');
+  if (!normalizedReason) return createErrorResponse('重置订单分账必须填写原因');
   const order = getOrderById(orderId);
   if (!order) return createErrorResponse('订单不存在', 404);
 
@@ -988,17 +1002,20 @@ async function deleteOrderCommissions(orderId: string, reason: string): Promise<
   const orderCommissions = commissions
     .filter((commission) => commission.orderId === orderId)
     .map((commission) => normalizeCommission(commission));
-  if (!orderCommissions.length) return createErrorResponse('该订单没有可删除的分账记录');
+  if (!orderCommissions.length) return createErrorResponse('该订单没有可重置的分账记录');
 
   const lockedCommission = orderCommissions.find((commission) => commission.status !== '待确认');
-  if (lockedCommission) return createErrorResponse('只能删除待确认阶段的订单分账，已进入发放链路的分账请使用撤回流程');
+  if (lockedCommission) return createErrorResponse('只能重置待确认阶段的订单分账，已进入发放链路的分账请使用撤回流程');
 
   const now = new Date().toISOString();
   const operator = getCurrentOperatorName('财务');
   saveCommissions(commissions.filter((commission) => commission.orderId !== orderId));
-  appendCommissionOperationLog(order, '删除分账', normalizedReason, orderCommissions, operator, now);
+  appendCommissionOperationLog(order, '重置分账', normalizedReason, orderCommissions, operator, now);
   return createSuccessResponse(true);
 }
+
+// 兼容旧调用方；新界面和新代码统一使用“重置分账”语义。
+const deleteOrderCommissions = resetOrderCommissions;
 
 function buildDeletedSourceOrderFromCommissions(orderId: string, commissions: Commission[]): Pick<Order, 'id' | 'orderNo' | 'customerName'> {
   const first = commissions[0];
@@ -1010,10 +1027,24 @@ function buildDeletedSourceOrderFromCommissions(orderId: string, commissions: Co
 }
 
 async function cleanupDeletedSourceOrderCommissions(orderId: string, reason: string): Promise<ApiResponse<boolean>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<boolean>(`/order-settlements/${encodeURIComponent(orderId)}/cleanup`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    if (response.code === 0) await syncBackendStorageFromServer(0);
+    return response;
+  }
   ensureInit();
   await delay(160);
   const normalizedReason = reason.trim();
   if (!normalizedReason) return createErrorResponse('清理废弃分账必须填写原因');
+  const currentOperator = getCurrentOperatorUser();
+  if (!isSuperAdmin(currentOperator ? {
+    role: currentOperator.role,
+    roleId: currentOperator.roleId,
+    permissions: [],
+  } : null)) return createErrorResponse('仅超级管理员可以清理废弃订单分账', 403);
   if (getOrderById(orderId)) return createErrorResponse('源订单仍存在，不能作为废弃分账清理');
 
   const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
@@ -1022,17 +1053,14 @@ async function cleanupDeletedSourceOrderCommissions(orderId: string, reason: str
     .map((commission) => normalizeCommission(commission));
   if (!orderCommissions.length) return createErrorResponse('没有可清理的废弃分账记录');
 
-  const locked = orderCommissions.find((commission) => (
-    commission.status === '已发放'
-    || commission.status === '待冲销'
-    || commission.status === '已冲销'
-  ));
-  if (locked) return createErrorResponse('已发放的分账不能清理；第一版不支持系统内冲销，请财务线下处理。');
+  const active = orderCommissions.find((commission) => !['已撤回', '已取消', '已冲销'].includes(commission.status));
+  if (active) return createErrorResponse('该废弃分账仍有活动提成，请先撤回或完成财务处理');
 
   const now = new Date().toISOString();
   const operator = getCurrentOperatorName('财务');
   const deletedOrder = buildDeletedSourceOrderFromCommissions(orderId, orderCommissions);
-  saveCommissions(commissions.filter((commission) => commission.orderId !== orderId));
+  const existingCleanupLog = getCommissionOperationLogs(orderId).some((log) => log.action === '清理废弃分账');
+  if (existingCleanupLog) return createSuccessResponse(true);
   appendCommissionOperationLog(deletedOrder, '清理废弃分账', normalizedReason, orderCommissions, operator, now);
   return createSuccessResponse(true);
 }
@@ -1075,6 +1103,14 @@ async function confirmOrderCommissions(orderId: string, reason?: string): Promis
 }
 
 async function withdrawOrderCommissions(orderId: string, reason: string): Promise<ApiResponse<Commission[]>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Commission[]>(`/order-settlements/${encodeURIComponent(orderId)}/withdraw`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    if (response.code === 0) await syncBackendStorageFromServer(0);
+    return response;
+  }
   ensureInit();
   await delay(160);
   const normalizedReason = reason.trim();
@@ -1653,6 +1689,7 @@ export const commissionApi = {
   payMonthlyCommissionBatch,
   fetchCommissionDetail,
   saveOrderCommissionAdjustments,
+  resetOrderCommissions,
   deleteOrderCommissions,
   cleanupDeletedSourceOrderCommissions,
   confirmOrderCommissions,

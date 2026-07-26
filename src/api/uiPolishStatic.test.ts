@@ -533,14 +533,16 @@ assert.match(
 );
 assert.match(
   commissionSource,
-  /aria-label="删除订单分账"/,
-  'Order split table should expose an icon-only entry for deleting a pending order split.',
+  /aria-label=\{summary\.sourceOrderDeleted \? '清理废弃记录' : '重置订单分账'\}/,
+  'Order split table should distinguish cleanup from resetting a pending order split.',
 );
 assert.match(
   commissionSource,
-  /deleteOrderCommissions/,
-  'Order split delete action should call the order-level delete API.',
+  /resetOrderCommissions/,
+  'Order split reset action should call the order-level reset API.',
 );
+assert.match(commissionSource, /<RestartAltIcon fontSize="small" \/>/);
+assert.match(commissionSource, /<DeleteSweepIcon fontSize="small" \/>/);
 assert.match(
   commissionSource,
   /新建订单分账/,

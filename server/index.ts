@@ -77,6 +77,7 @@ import { createDeliveryCommandService } from './services/deliveryCommandService'
 import { createDeliveryQueryService } from './services/deliveryQueryService';
 import { createDeliveryAssignmentService } from './services/deliveryAssignmentService';
 import { createRecoveryOrderCommandService } from './services/recoveryOrderCommandService';
+import { createOrderSettlementCommandService } from './services/orderSettlementCommandService';
 import { createRecoveryCrmBridge } from './services/recoveryCrmBridge';
 import { createCommissionPayoutService } from './services/commissionPayoutService';
 import { createFinanceTransactionService } from './services/financeTransactionService';
@@ -236,6 +237,7 @@ const recoveryOrderCommandService = createRecoveryOrderCommandService(prisma, {
     sourceName: '售后挽回',
   }]),
 });
+const orderSettlementCommandService = createOrderSettlementCommandService(prisma);
 const commissionPayoutService = createCommissionPayoutService(prisma, {
   recordFinanceTransaction: (transaction, payout) => financeTransactionService.recordCommissionPayout(transaction, payout),
 });
@@ -1228,6 +1230,33 @@ app.post('/api/recovery-orders/:id/cleanup-review', requireStorageAccess, async 
 
 app.post('/api/recovery-orders/:id/cleanup-settlement', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
   const result = await recoveryOrderCommandService.cleanupDeletedSettlement(
+    routeParam(req.params.id),
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/order-settlements/:id/reset', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderSettlementCommandService.reset(
+    routeParam(req.params.id),
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/order-settlements/:id/withdraw', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderSettlementCommandService.withdraw(
+    routeParam(req.params.id),
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/order-settlements/:id/cleanup', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderSettlementCommandService.cleanup(
     routeParam(req.params.id),
     String(req.body?.reason || ''),
     req.currentUser!,

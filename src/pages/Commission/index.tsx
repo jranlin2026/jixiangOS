@@ -31,6 +31,7 @@ import {
 } from '@mui/material';
 import TablePagination from '../../shared/components/TablePagination';
 import AddIcon from '@mui/icons-material/Add';
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import EditIcon from '@mui/icons-material/Edit';
@@ -57,7 +58,7 @@ import CommissionRuleConfig from './CommissionRuleConfig';
 import OrderDetail from '../Orders/OrderDetail';
 import CustomerDetail from '../Customers/CustomerDetail';
 import useAuthStore from '../../store/useAuthStore';
-import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import type {
   Commission,
   CommissionAdjustmentInput,
@@ -537,6 +538,7 @@ const Commission: React.FC<CommissionProps> = ({
 }) => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const canManageOrderSettlement = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_SETTLEMENT, 'write');
+  const canCleanupDeletedOrderSettlement = isSuperAdmin(currentUser);
   const [tabValue, setTabValue] = useState(initialTab);
   const lastOrderSplitViewTriggerRef = useRef(orderSplitViewTrigger);
   const lastOrderSplitCreateTriggerRef = useRef(orderSplitCreateTrigger);
@@ -1167,26 +1169,28 @@ const Commission: React.FC<CommissionProps> = ({
     return '调整分账';
   };
 
-  const canDeleteOrderSplitSummary = (summary: CommissionOrderSummary) => (
+  const canResetOrCleanupOrderSplitSummary = (summary: CommissionOrderSummary) => (
     summary.commissions.length > 0
     && (
       summary.sourceOrderDeleted
-        ? summary.commissions.every((commission) => !['已发放', '待冲销', '已冲销'].includes(commission.status))
+        ? canCleanupDeletedOrderSettlement
+          && summary.commissions.every((commission) => ['已撤回', '已取消', '已冲销'].includes(commission.status))
         : ['待处理', '待确认'].includes(summary.status)
           && summary.commissions.every((commission) => commission.status === '待确认')
     )
   );
 
-  const getDeleteOrderSplitDisabledReason = (summary: CommissionOrderSummary) => {
+  const getResetOrCleanupOrderSplitDisabledReason = (summary: CommissionOrderSummary) => {
     if (summary.sourceOrderDeleted) {
+      if (!canCleanupDeletedOrderSettlement) return '仅超级管理员可以清理废弃记录';
       if (!summary.commissions.length) return '没有可清理的废弃分账';
-      if (!summary.commissions.every((commission) => !['已发放', '待冲销', '已冲销'].includes(commission.status))) return '已发放的分账不能清理；第一版不支持系统内冲销，请财务线下处理';
-      return '清理废弃分账';
+      if (!summary.commissions.every((commission) => ['已撤回', '已取消', '已冲销'].includes(commission.status))) return '仍有活动提成，请先撤回或完成财务处理';
+      return '清理废弃记录';
     }
-    if (!summary.commissions.length) return '该订单没有可删除的分账';
+    if (!summary.commissions.length) return '该订单没有可重置的分账';
     if (!['待处理', '待确认'].includes(summary.status)) return '已进入发放链路，请使用撤回流程';
-    if (!summary.commissions.every((commission) => commission.status === '待确认')) return '仅待确认阶段的分账可直接删除';
-    return '删除订单分账';
+    if (!summary.commissions.every((commission) => commission.status === '待确认')) return '仅待确认阶段的分账可重置';
+    return '重置订单分账';
   };
 
   const loadOperationLogs = async (orderId: string) => {
@@ -1549,7 +1553,7 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const openDeleteOrderSplitDialog = (summary: CommissionOrderSummary) => {
-    if (!canManageOrderSettlement) return;
+    if (summary.sourceOrderDeleted ? !canCleanupDeletedOrderSettlement : !canManageOrderSettlement) return;
     setDeleteSummary(summary);
     setDeleteReason('');
   };
@@ -1561,15 +1565,15 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const confirmDeleteOrderSplit = async () => {
-    if (!canManageOrderSettlement) return;
     if (!deleteSummary || !deleteReason.trim()) return;
+    if (deleteSummary.sourceOrderDeleted ? !canCleanupDeletedOrderSettlement : !canManageOrderSettlement) return;
     const deletingOrderId = deleteSummary.orderId;
     const shouldCleanupDeletedSource = deleteSummary.sourceOrderDeleted;
     setDeleteLoading(true);
     try {
       const res = shouldCleanupDeletedSource
         ? await commissionApi.cleanupDeletedSourceOrderCommissions(deletingOrderId, deleteReason)
-        : await commissionApi.deleteOrderCommissions(deletingOrderId, deleteReason);
+        : await commissionApi.resetOrderCommissions(deletingOrderId, deleteReason);
       if (res.code === 0) {
         setDeleteSummary(null);
         setDeleteReason('');
@@ -3139,16 +3143,18 @@ const Commission: React.FC<CommissionProps> = ({
                         </IconButton>
                       </span>
                     </Tooltip>
-                    <Tooltip title={getDeleteOrderSplitDisabledReason(summary)}>
+                    <Tooltip title={getResetOrCleanupOrderSplitDisabledReason(summary)}>
                       <span>
                         <IconButton
                           size="small"
-                          color="error"
-                          disabled={!canDeleteOrderSplitSummary(summary)}
+                          color={summary.sourceOrderDeleted ? 'error' : 'warning'}
+                          disabled={!canResetOrCleanupOrderSplitSummary(summary)}
                           onClick={() => openDeleteOrderSplitDialog(summary)}
-                          aria-label="删除订单分账"
+                          aria-label={summary.sourceOrderDeleted ? '清理废弃记录' : '重置订单分账'}
                         >
-                          <DeleteOutlineIcon fontSize="small" />
+                          {summary.sourceOrderDeleted
+                            ? <DeleteSweepIcon fontSize="small" />
+                            : <RestartAltIcon fontSize="small" />}
                         </IconButton>
                       </span>
                     </Tooltip>
@@ -3877,17 +3883,17 @@ const Commission: React.FC<CommissionProps> = ({
       </Dialog>
 
       <Dialog open={Boolean(deleteSummary)} onClose={closeDeleteOrderSplitDialog} maxWidth="sm" fullWidth>
-        <DialogCloseTitle onClose={closeDeleteOrderSplitDialog}>{deleteSummary?.sourceOrderDeleted ? '清理废弃分账' : '删除订单分账'}</DialogCloseTitle>
+        <DialogCloseTitle onClose={closeDeleteOrderSplitDialog}>{deleteSummary?.sourceOrderDeleted ? '清理废弃记录' : '重置订单分账'}</DialogCloseTitle>
         <DialogContent dividers>
           {deleteSummary && (
             <Stack spacing={2}>
               <Typography variant="body2" sx={{ color: '#374151', lineHeight: 1.8 }}>
                 {deleteSummary.sourceOrderDeleted
-                  ? `将清理 ${deleteSummary.orderNo} / ${deleteSummary.customerName} 的废弃分账记录。清理后只保留操作日志，已发放后的分账不会允许清理。`
-                  : `将删除 ${deleteSummary.orderNo} / ${deleteSummary.customerName} 的全部待确认分账记录。删除后，该订单会重新出现在“新建订单分账”可选范围内。`}
+                  ? `将把 ${deleteSummary.orderNo} / ${deleteSummary.customerName} 的废弃分账从工作列表中清理。已撤回的人员分账和操作历史会永久保留，便于财务追溯。`
+                  : `将重置 ${deleteSummary.orderNo} / ${deleteSummary.customerName} 的全部待确认分账草稿。重置后，该订单会重新出现在“新建订单分账”可选范围内。`}
               </Typography>
               <TextField
-                label={deleteSummary.sourceOrderDeleted ? '清理原因' : '删除原因'}
+                label={deleteSummary.sourceOrderDeleted ? '清理原因' : '重置原因'}
                 value={deleteReason}
                 onChange={(event) => setDeleteReason(event.target.value)}
                 required
@@ -3902,12 +3908,12 @@ const Commission: React.FC<CommissionProps> = ({
         <DialogActions>
           <Button onClick={closeDeleteOrderSplitDialog} disabled={deleteLoading}>取消</Button>
           <Button
-            color="error"
+            color={deleteSummary?.sourceOrderDeleted ? 'error' : 'warning'}
             variant="contained"
             onClick={confirmDeleteOrderSplit}
             disabled={deleteLoading || !deleteReason.trim()}
           >
-            {deleteLoading ? (deleteSummary?.sourceOrderDeleted ? '清理中...' : '删除中...') : (deleteSummary?.sourceOrderDeleted ? '确认清理' : '确认删除')}
+            {deleteLoading ? (deleteSummary?.sourceOrderDeleted ? '清理中...' : '重置中...') : (deleteSummary?.sourceOrderDeleted ? '确认清理' : '确认重置')}
           </Button>
         </DialogActions>
       </Dialog>

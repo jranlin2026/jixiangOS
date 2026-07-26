@@ -285,7 +285,7 @@ assert.equal(typeof (commissionApi as any).fetchCommissionOrderSummaryStatusCoun
 assert.equal(typeof (commissionApi as any).fetchCreatableCommissionOrders, 'function');
 assert.equal(typeof (commissionApi as any).startCommissionChargeback, 'function');
 assert.equal(typeof (commissionApi as any).completeCommissionChargeback, 'function');
-assert.equal(typeof (commissionApi as any).deleteOrderCommissions, 'function');
+assert.equal(typeof (commissionApi as any).resetOrderCommissions, 'function');
 
 const deleteNoCommissionOrder = await orderApi.deleteOrder('order-c');
 assert.equal(deleteNoCommissionOrder.code, 0);
@@ -459,18 +459,18 @@ const removePendingPayLineRes = await (commissionApi as any).saveOrderCommission
 assert.notEqual(removePendingPayLineRes.code, 0);
 assert.match(removePendingPayLineRes.message || '', /待确认/);
 
-const deletePendingOrderSplitRes = await (commissionApi as any).deleteOrderCommissions('order-a', 'Delete pending order split');
-assert.equal(deletePendingOrderSplitRes.code, 0);
-assert.equal(deletePendingOrderSplitRes.data, true);
+const resetPendingOrderSplitRes = await (commissionApi as any).resetOrderCommissions('order-a', 'Reset pending order split');
+assert.equal(resetPendingOrderSplitRes.code, 0);
+assert.equal(resetPendingOrderSplitRes.data, true);
 assert.deepEqual(((await commissionApi.fetchCommissionsByOrder('order-a')).data || []).map((item: Commission) => item.id), []);
-let deleteLogs = ((await (commissionApi as any).fetchCommissionOperationLogs('order-a')).data || []);
+let resetLogs = ((await (commissionApi as any).fetchCommissionOperationLogs('order-a')).data || []);
 assert.ok(
-  deleteLogs.some((item: any) => item.action === '删除分账' && item.reason === 'Delete pending order split'),
-  '删除整笔订单分账后应写入操作历史',
+  resetLogs.some((item: any) => item.action === '重置分账' && item.reason === 'Reset pending order split'),
+  '重置整笔订单分账后应写入操作历史',
 );
-const deleteLockedOrderSplitRes = await (commissionApi as any).deleteOrderCommissions('order-b', 'Try deleting payable split');
-assert.notEqual(deleteLockedOrderSplitRes.code, 0);
-assert.match(deleteLockedOrderSplitRes.message || '', /待确认/);
+const resetLockedOrderSplitRes = await (commissionApi as any).resetOrderCommissions('order-b', 'Try resetting payable split');
+assert.notEqual(resetLockedOrderSplitRes.code, 0);
+assert.match(resetLockedOrderSplitRes.message || '', /待确认/);
 assert.equal(((await commissionApi.fetchCommissionsByOrder('order-b')).data || []).length, 2);
 
 seed();
@@ -543,6 +543,11 @@ const cleanupWithdrawnRes = await (commissionApi as any).cleanupDeletedSourceOrd
 assert.equal(cleanupWithdrawnRes.code, 0);
 const cleanedSummaries = await (commissionApi as any).fetchCommissionOrderSummaries({ status: zh.withdrawn, pageSize: 20 });
 assert.equal(cleanedSummaries.data.items.some((item: any) => item.orderId === 'order-a'), false);
+assert.equal(
+  ((await commissionApi.fetchCommissionsByOrder('order-a')).data || []).length,
+  2,
+  '清理废弃记录必须保留已撤回的分账明细用于财务追溯',
+);
 const cleanupLogs = ((await (commissionApi as any).fetchCommissionOperationLogs('order-a')).data || []);
 assert.equal(cleanupLogs.some((item: any) => item.action === '清理废弃分账' && item.reason === '清理已废弃测试分账'), true);
 

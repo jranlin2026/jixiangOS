@@ -130,8 +130,6 @@ assert.match(
 [
   'openCreateSplitDialog',
   'handleSaveSplitRows',
-  'openDeleteOrderSplitDialog',
-  'confirmDeleteOrderSplit',
   'confirmOrderFromDetail',
   'withdrawOrderFromDetail',
 ].forEach((handlerName) => {
@@ -141,6 +139,14 @@ assert.match(
     `${handlerName} must fail closed without order-settlement write permission.`,
   );
 });
+
+for (const handlerName of ['openDeleteOrderSplitDialog', 'confirmDeleteOrderSplit']) {
+  assert.match(
+    commissionSource,
+    new RegExp(`const ${handlerName}[\\s\\S]{0,420}sourceOrderDeleted \\? !canCleanupDeletedOrderSettlement : !canManageOrderSettlement`),
+    `${handlerName} must require super-admin cleanup permission for deleted sources and settlement write permission for reset.`,
+  );
+}
 
 assert.ok(
   (commissionSource.match(/\{canManageOrderSettlement &&/g) || []).length >= 4,
