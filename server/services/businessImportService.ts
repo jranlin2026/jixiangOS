@@ -52,6 +52,7 @@ export type BusinessImportDependencies = {
     expiresAt: string;
     fileName: string;
     rows: ValidatedBusinessImportRow[];
+    mode?: BusinessImportConfirmRequest['mode'];
   }): Promise<BusinessImportJobResult>;
   /** 确认阶段从私有附件存储重新校验附件所有权、分类和文件名。 */
   validateAttachments?(user: AuthenticatedUser, type: BusinessImportType, rows: BusinessImportRow[], expectedDraftId: string): Promise<void>;
@@ -274,19 +275,10 @@ export function validateBusinessImportRows(type: BusinessImportType, rows: Busin
 export function createBusinessImportService(deps: BusinessImportDependencies) {
   if (text(deps.secret).length < 16) throw new Error('业务导入签名密钥至少需要16个字符');
   const now = () => deps.now?.() || new Date();
-  const prepare = async (request: BusinessImportRequest, user: AuthenticatedUser, requireUploadedAttachments = false, expectedDraftId = '') => {
+  const prepare = async (request: BusinessImportRequest, user: AuthenticatedUser) => {
     assertPermission(user, request.type); assertRows(request.rows);
     const normalized = request.rows.map((row, index) => normalizeRow(request.type, row, index));
     assertUniqueRowNumbers(normalized);
-    if (requireUploadedAttachments) {
-      assertUploadedAttachmentIds(request.type, normalized);
-      const hasAttachments = normalized.some((row) => (
-        (row as OrderImportRow).paymentProofAttachmentIds?.length
-        || (row as OrderImportRow).dealEvidenceAttachmentIds?.length
-        || (row as RecoveryImportRow).recoveryEvidenceAttachmentIds?.length
-      ));
-      if (hasAttachments) await deps.validateAttachments?.(user, request.type, normalized, expectedDraftId);
-    }
     const directory = await deps.loadDirectory(user, request.type, normalized);
     return { normalized, validated: validateBusinessImportRows(request.type, normalized, directory) };
   };
@@ -312,10 +304,28 @@ export function createBusinessImportService(deps: BusinessImportDependencies) {
       if (!text(request.fileName)) throw new BusinessImportError('导入文件名不能为空');
       const token = parseToken(request.confirmationToken, deps.secret);
       if (token.actorId !== user.id || token.type !== request.type || new Date(token.expiresAt).getTime() <= now().getTime()) throw new BusinessImportError('导入预检凭证无效或已过期', 409);
-      const prepared = await prepare(request, user, true, tokenHash(request.confirmationToken));
+      const prepared = await prepare(request, user);
       if (token.rowsHash !== rowHash(request.type, prepared.normalized)) throw new BusinessImportError('导入文件与预检内容不一致，请重新预检', 409);
-      if (prepared.validated.some((row) => row.status === 'blocked')) throw new BusinessImportError('导入数据或配置已变化，请重新预检', 409);
-      return deps.consumePrecheckAndCreateJob({ tokenHash: tokenHash(request.confirmationToken), actorId: user.id, type: request.type, rowsHash: token.rowsHash, expiresAt: token.expiresAt, fileName: text(request.fileName), rows: prepared.validated });
+      const eligibleRows = prepared.validated.filter((row) => row.status !== 'blocked');
+      if (request.mode !== 'eligible_only' && eligibleRows.length !== prepared.validated.length) {
+        throw new BusinessImportError('导入数据或配置已变化，请重新预检', 409);
+      }
+      if (!eligibleRows.length) throw new BusinessImportError('没有可导入的数据');
+      const eligibleNormalized = eligibleRows.map((row) => row.normalized);
+      assertUploadedAttachmentIds(request.type, eligibleNormalized);
+      const hasEligibleAttachments = eligibleNormalized.some((row) => (
+        (row as OrderImportRow).paymentProofAttachmentIds?.length
+        || (row as OrderImportRow).dealEvidenceAttachmentIds?.length
+        || (row as RecoveryImportRow).recoveryEvidenceAttachmentIds?.length
+      ));
+      if (hasEligibleAttachments) {
+        await deps.validateAttachments?.(user, request.type, eligibleNormalized, tokenHash(request.confirmationToken));
+      }
+      return deps.consumePrecheckAndCreateJob({
+        tokenHash: tokenHash(request.confirmationToken), actorId: user.id, type: request.type,
+        rowsHash: token.rowsHash, expiresAt: token.expiresAt, fileName: text(request.fileName),
+        rows: prepared.validated, mode: request.mode,
+      });
     },
   };
 }

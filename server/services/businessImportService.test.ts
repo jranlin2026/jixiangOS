@@ -36,7 +36,7 @@ const service = createBusinessImportService({
     const precheck = persisted.find((item) => item.tokenHash === input.tokenHash);
     if (!precheck || precheck.consumedAt) throw new BusinessImportError('导入预检凭证无效或已使用', 409);
     precheck.consumedAt = '2026-07-24T00:00:00.000Z';
-    const job = { id: `job-${jobs.length + 1}`, batchId: `batch-${jobs.length + 1}`, status: 'queued' as const, type: input.type, totalCount: input.rows.length, rows: input.rows };
+    const job = { id: `job-${jobs.length + 1}`, batchId: `batch-${jobs.length + 1}`, status: 'queued' as const, type: input.type, totalCount: input.rows.length, rows: input.rows, mode: input.mode };
     jobs.push(job);
     return job;
   },
@@ -158,6 +158,52 @@ await assert.rejects(
   () => service.confirm({ type: 'orders', rows: [{ ...orderRow, rowNumber: 11, thirdPartyOrderNo: 'TP-blocked', productName: '不存在产品' }], confirmationToken: blockedPrecheck.confirmationToken, fileName: 'blocked.xlsx' }, actor),
   (error: unknown) => error instanceof BusinessImportError && error.status === 409,
   'confirm must not enqueue a precheck that contains blocked rows',
+);
+
+const mixedRows = [
+  { ...orderRow, rowNumber: 31, thirdPartyOrderNo: 'TP-READY' },
+  { ...orderRow, rowNumber: 32, thirdPartyOrderNo: 'TP-BLOCKED', productName: '不存在产品' },
+];
+const mixedPrecheck = await service.precheck({ type: 'orders', rows: mixedRows }, actor);
+await assert.rejects(
+  () => service.confirm({ type: 'orders', rows: mixedRows, confirmationToken: mixedPrecheck.confirmationToken, fileName: 'mixed.xlsx' }, actor),
+  (error: unknown) => error instanceof BusinessImportError && error.status === 409,
+  'legacy callers keep the all-or-nothing confirmation behavior',
+);
+const mixedConfirmed = await service.confirm({
+  type: 'orders', rows: mixedRows, confirmationToken: mixedPrecheck.confirmationToken, fileName: 'mixed.xlsx', mode: 'eligible_only',
+}, actor);
+assert.equal(mixedConfirmed.status, 'queued');
+assert.equal(jobs.at(-1).mode, 'eligible_only');
+assert.deepEqual(jobs.at(-1).rows.map((item: any) => item.status), ['ready', 'blocked'], 'persistence receives the complete revalidated workbook');
+
+const mixedImageRows = [
+  {
+    ...imageOrderRow, rowNumber: 41, thirdPartyOrderNo: 'TP-IMAGE-READY',
+    paymentProofAttachmentIds: ['attachment-payment-ready'],
+    dealEvidenceAttachmentIds: ['attachment-deal-ready-1', 'attachment-deal-ready-2'],
+  },
+  {
+    ...imageOrderRow, rowNumber: 42, thirdPartyOrderNo: 'TP-IMAGE-BLOCKED', productName: '不存在产品',
+  },
+];
+const mixedImagePrecheck = await service.precheck({ type: 'orders', rows: mixedImageRows }, actor);
+await service.confirm({
+  type: 'orders', rows: mixedImageRows, confirmationToken: mixedImagePrecheck.confirmationToken, fileName: 'mixed-images.zip', mode: 'eligible_only',
+}, actor);
+assert.deepEqual(
+  attachmentValidationCalls.at(-1).rows.map((item: any) => item.rowNumber),
+  [41],
+  'only eligible rows require uploaded attachment validation',
+);
+
+const allBlockedPrecheck = await service.precheck({ type: 'orders', rows: [{ ...orderRow, rowNumber: 43, productName: '不存在产品' }] }, actor);
+await assert.rejects(
+  () => service.confirm({
+    type: 'orders', rows: [{ ...orderRow, rowNumber: 43, productName: '不存在产品' }],
+    confirmationToken: allBlockedPrecheck.confirmationToken, fileName: 'all-blocked.xlsx', mode: 'eligible_only',
+  }, actor),
+  (error: unknown) => error instanceof BusinessImportError && error.status === 400 && /没有可导入的数据/.test(error.message),
 );
 
 const changedConfig = await service.precheck({ type: 'orders', rows: [{ ...orderRow, rowNumber: 12, thirdPartyOrderNo: 'TP-config' }] }, actor);
