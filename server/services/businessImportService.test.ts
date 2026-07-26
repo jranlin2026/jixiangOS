@@ -174,8 +174,8 @@ const mixedConfirmed = await service.confirm({
   type: 'orders', rows: mixedRows, confirmationToken: mixedPrecheck.confirmationToken, fileName: 'mixed.xlsx', mode: 'eligible_only',
 }, actor);
 assert.equal(mixedConfirmed.status, 'queued');
-assert.equal(jobs.at(-1).mode, 'eligible_only');
-assert.deepEqual(jobs.at(-1).rows.map((item: any) => item.status), ['ready', 'blocked'], 'persistence receives the complete revalidated workbook');
+assert.equal(jobs[jobs.length - 1].mode, 'eligible_only');
+assert.deepEqual(jobs[jobs.length - 1].rows.map((item: any) => item.status), ['ready', 'blocked'], 'persistence receives the complete revalidated workbook');
 
 const mixedImageRows = [
   {
@@ -192,7 +192,7 @@ await service.confirm({
   type: 'orders', rows: mixedImageRows, confirmationToken: mixedImagePrecheck.confirmationToken, fileName: 'mixed-images.zip', mode: 'eligible_only',
 }, actor);
 assert.deepEqual(
-  attachmentValidationCalls.at(-1).rows.map((item: any) => item.rowNumber),
+  attachmentValidationCalls[attachmentValidationCalls.length - 1].rows.map((item: any) => item.rowNumber),
   [41],
   'only eligible rows require uploaded attachment validation',
 );
