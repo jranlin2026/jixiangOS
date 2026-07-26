@@ -12,6 +12,8 @@ const toolbarSource = customerPageSource.slice(
 
 assert.match(toolbarSource, /<CustomerTagFilter[\s\S]*<CustomerLeadSourceFilter/);
 assert.doesNotMatch(toolbarSource, /\u66f4\u591a\u7b5b\u9009|\u8ddf\u8fdb\u72b6\u6001|\u8d44\u6e90\u5f52\u5c5e|label="\u884c\u4e1a"|label="\u57ce\u5e02"/);
+assert.match(toolbarSource, /startIcon=\{<RestartAltIcon \/>\}[\s\S]{0,160}onClick=\{handleResetFilters\}[\s\S]{0,160}color="primary"/);
+assert.doesNotMatch(toolbarSource, /color=\{hasAnyActiveFilter/);
 assert.match(serverSource, /sourceName: queryParam\(req\.query\.sourceName\)/);
 assert.match(listServiceSource, /buildTextEqualCondition\('\$\.leadSource', filters\.leadSource\)/);
 assert.match(listServiceSource, /buildTextEqualCondition\('\$\.sourceName', filters\.sourceName\)/);

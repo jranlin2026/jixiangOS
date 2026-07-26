@@ -428,17 +428,6 @@ const Customers: React.FC = () => {
     readOnly: false,
   }).actions;
   const ownerFilterLabel = isPublicPoolScope ? '上一个销售负责人' : '销售负责人';
-  const hasAnyActiveFilter = Boolean(
-    filters.search
-    || filters.customerLevel
-    || filters.owner
-    || filters.leadSource
-    || filters.sourceName
-    || filters.tagIds?.length
-    || filters.withoutTags
-    || filters.missingTagGroupId
-    || (!isPublicPoolScope && filters.lifecycleStatusCode),
-  );
   const tableMinWidth = useMemo(
     () => visibleColumns.reduce((sum, column) => sum + (columnWidths[column.id] || 0), 0)
       + CUSTOMER_ACTION_COLUMN_WIDTH
@@ -852,7 +841,7 @@ const Customers: React.FC = () => {
           variant="outlined"
           startIcon={<RestartAltIcon />}
           onClick={handleResetFilters}
-          color={hasAnyActiveFilter ? 'primary' : 'inherit'}
+          color="primary"
           sx={{ height: 40, px: 1.75, fontWeight: 700 }}
         >
           重置
