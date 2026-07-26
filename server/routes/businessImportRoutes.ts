@@ -112,8 +112,16 @@ function mount(type: BusinessImportType, access: RequestHandler, service: Busine
   });
   router.post('/confirm', access, async (request: AuthenticatedRequest, response) => {
     try {
-      const body = exact(request.body, ['rows', 'confirmationToken', 'fileName']);
-      response.status(201).json(success(await service.confirm({ type, rows: rows(type, body.rows), confirmationToken: String(body.confirmationToken || ''), fileName: String(body.fileName || '') }, user(request))));
+      const body = allowed(request.body, ['rows', 'confirmationToken', 'fileName', 'mode']);
+      if (!['rows', 'confirmationToken', 'fileName'].every((key) => key in body)) throw new BusinessImportError('业务导入请求无效');
+      if (body.mode !== undefined && body.mode !== 'eligible_only') throw new BusinessImportError('业务导入模式无效');
+      response.status(201).json(success(await service.confirm({
+        type,
+        rows: rows(type, body.rows),
+        confirmationToken: String(body.confirmationToken || ''),
+        fileName: String(body.fileName || ''),
+        ...(body.mode === 'eligible_only' ? { mode: 'eligible_only' as const } : {}),
+      }, user(request))));
     } catch (error) { sendError(response, error); }
   });
   return router;

@@ -418,6 +418,7 @@ export default function BusinessImportDialog({
   };
 
   return (
+    <>
     <Dialog open={open} onClose={operationBusy ? undefined : onClose} maxWidth="lg" fullWidth disablePortal={disablePortal}>
       <DialogCloseTitle onClose={() => { if (!operationBusy) onClose(); }}>{copy.title}</DialogCloseTitle>
       <DialogContent dividers>
@@ -429,7 +430,6 @@ export default function BusinessImportDialog({
               ? '售后导入只在后台识别客户身份，不会返回客户库资料；未识别记录审核通过后会自动进入 CRM 待分配线索。'
               : null}
           </Alert>
-          {error ? <Alert severity="error">{error}</Alert> : null}
           {storageWarning || storageDegradedWarning
             ? <Alert severity="warning">{storageWarning || storageDegradedWarning}</Alert>
             : null}
@@ -582,5 +582,17 @@ export default function BusinessImportDialog({
         ) : null}
       </DialogActions>
     </Dialog>
+    <Dialog open={Boolean(error)} onClose={() => setError('')} maxWidth="xs" fullWidth disablePortal={disablePortal}>
+      <DialogCloseTitle onClose={() => setError('')}>操作失败</DialogCloseTitle>
+      <DialogContent dividers>
+        <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', color: '#374151' }}>
+          {error}
+        </Typography>
+      </DialogContent>
+      <DialogActions>
+        <Button variant="contained" onClick={() => setError('')}>确定</Button>
+      </DialogActions>
+    </Dialog>
+    </>
   );
 }

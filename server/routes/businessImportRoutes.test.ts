@@ -15,7 +15,7 @@ app.use('/api/business-imports', createBusinessImportRouter({
     precheck: async (input: any) => { calls.push(`precheck:${input.type}:${input.rows[0]?.customerPhone}`); return { readyCount: input.rows.length }; },
     confirm: async (input: any) => {
       if (input.confirmationToken === 'invalid') throw new BusinessImportError('导入预检凭证无效或已过期', 409);
-      calls.push(`confirm:${input.type}:${input.confirmationToken}:${input.rows[0]?.paymentProofAttachmentIds?.length || 0}`); return { id: 'job-1', batchId: 'batch-1', status: 'queued' };
+      calls.push(`confirm:${input.type}:${input.confirmationToken}:${input.mode}:${input.rows[0]?.paymentProofAttachmentIds?.length || 0}`); return { id: 'job-1', batchId: 'batch-1', status: 'queued' };
     },
   },
   readService: {
@@ -39,9 +39,10 @@ try {
   assert.equal((await fetch(`${base}/orders/precheck`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [row] }) })).status, 200);
   const confirmedResponse = await fetch(`${base}/orders/confirm`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [{
     ...row, paymentProofFileName: '付款.jpg', paymentProofAttachmentIds: ['attachment-1'],
-  }], confirmationToken: 'one-time', fileName: 'orders.zip' }) });
-  assert.equal(confirmedResponse.status, 201);
-  assert.equal((await confirmedResponse.json() as any).data.batchId, 'batch-1');
+  }], confirmationToken: 'one-time', fileName: 'orders.zip', mode: 'eligible_only' }) });
+  const confirmedBody = await confirmedResponse.json() as any;
+  assert.equal(confirmedResponse.status, 201, confirmedBody.message);
+  assert.equal(confirmedBody.data.batchId, 'batch-1');
   assert.equal((await fetch(`${base}/recovery-orders/precheck`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [recoveryRow] }) })).status, 200);
   assert.equal((await fetch(`${base}/orders/precheck`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [{ ...row, sourcePlatform: '跨模块' }] }) })).status, 400, 'order rows reject recovery-only fields');
   assert.equal((await fetch(`${base}/recovery-orders/precheck`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [{ ...recoveryRow, productName: '跨模块' }] }) })).status, 400, 'recovery rows reject order-only fields');
@@ -50,6 +51,10 @@ try {
   assert.equal((await fetch(`${base}/orders/precheck`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [{ ...row, rowNumber: 2_147_483_647 }] }) })).status, 400, 'DTO rejects unsafe rowNumber values before service normalization');
   const invalidConfirm = await fetch(`${base}/orders/confirm`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [row], confirmationToken: 'invalid', fileName: 'orders.xlsx' }) });
   assert.equal(invalidConfirm.status, 409, 'precheck conflicts are returned as JSON conflicts rather than generic 500 errors');
+  const invalidMode = await fetch(`${base}/orders/confirm`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+    rows: [row], confirmationToken: 'one-time', fileName: 'orders.xlsx', mode: 'force_all',
+  }) });
+  assert.equal(invalidMode.status, 400, 'unknown confirmation modes are rejected rather than silently downgraded');
   const bad = await fetch(`${base}/orders/precheck`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rows: [row], type: 'recovery_orders' }) });
   assert.equal(bad.status, 400, 'the public route owns the module discriminator');
   assert.equal((await fetch(`${base}/jobs/job-1`)).status, 200);
@@ -59,7 +64,7 @@ try {
   assert.equal(review.status, 200);
   const reviewBody = await review.json() as any;
   assert.equal(reviewBody.data.failedCount, 1);
-  assert.deepEqual(calls, ['template:orders', 'precheck:orders:13800000000', 'confirm:orders:one-time:1', 'precheck:recovery_orders:13800000000', 'review:orders:approve']);
+  assert.deepEqual(calls, ['template:orders', 'precheck:orders:13800000000', 'confirm:orders:one-time:eligible_only:1', 'precheck:recovery_orders:13800000000', 'review:orders:approve']);
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }

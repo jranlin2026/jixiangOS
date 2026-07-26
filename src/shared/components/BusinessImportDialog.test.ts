@@ -82,6 +82,11 @@ assert.doesNotMatch(warningConfirm, /disabled=""/, 'warning-only precheck must r
 assert.match(warning, /下载标准模板/);
 assert.match(warning, /下载错误报告/);
 
+const requestFailure = render({ options, error: '业务导入请求包含不允许的字段' });
+assert.equal((requestFailure.match(/role="dialog"/gu) || []).length, 2, 'operation errors must open a separate feedback dialog');
+assert.match(requestFailure, /操作失败/);
+assert.match(buttonContaining(requestFailure, '确定'), /button/u);
+
 const partialFailure = render({
   job: {
     id: 'job-1', batchId: 'batch-1', type: 'orders', status: 'partial_failed', totalCount: 1, successCount: 0, failedCount: 1,
