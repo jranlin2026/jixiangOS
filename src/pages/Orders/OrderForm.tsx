@@ -9,6 +9,8 @@ import {
   DialogActions,
   DialogContent,
   Divider,
+  FormControl,
+  FormLabel,
   IconButton,
   MenuItem,
   Radio,
@@ -789,56 +791,74 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
         )}
         <Box sx={{ mt: 1 }}>
         <BusinessFormSection step={1} title="客户信息" summary={form.customerName ? `${form.customerName} / ${form.owner || '待选择负责人'}` : '待选择客户'} errorCount={customerErrorCount}>
-          {customerLocked ? (
-            <TextField
-              label="客户"
-              value={form.customerName}
-              required
-              fullWidth
-              InputProps={{ readOnly: true }}
-              helperText={customer ? '从客户中心创建订单，客户已自动带入' : '编辑订单时客户关系保持不变'}
-            />
-          ) : (
-            <Autocomplete
-              options={selectedCustomer && !customers.some((item) => item.id === selectedCustomer.id) ? [selectedCustomer, ...customers] : customers}
-              value={selectedCustomer}
-              inputValue={customerSearch}
-              onInputChange={(_event, value, reason) => {
-                if (reason === 'input' || reason === 'clear') setCustomerSearch(value);
-              }}
-              onChange={handleCustomerSelect}
-              loading={customerLoading}
-              filterOptions={(options) => options}
-              getOptionLabel={getCustomerOptionLabel}
-              isOptionEqualToValue={(option, value) => option.id === value.id}
-              noOptionsText={customerSearch.trim() ? '未找到客户' : '输入客户姓名、公司、电话或微信搜索'}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="客户（搜索选择）"
-                  required
-                  placeholder="输入客户名/公司/电话/微信"
-                  InputProps={{
-                    ...params.InputProps,
-                    endAdornment: (
-                      <>
-                        {customerLoading ? <CircularProgress color="inherit" size={18} /> : null}
-                        {params.InputProps.endAdornment}
-                      </>
-                    ),
-                  }}
-                />
-              )}
-            />
-          )}
-          <TextField select label="销售负责人" value={form.salesId} onChange={handleOwnerChange} fullWidth disabled={formalFieldLocked}>
-            {form.owner && !users.some((user) => user.id === form.salesId) && (
-              <MenuItem value={form.salesId}>{form.owner}（历史负责人）</MenuItem>
+          <FormControl fullWidth>
+            <FormLabel htmlFor="order-customer-field" required sx={{ mb: 0.75, color: '#334155', fontSize: 13, fontWeight: 700 }}>
+              {customerLocked ? '客户' : '客户（搜索选择）'}
+            </FormLabel>
+            {customerLocked ? (
+              <TextField
+                id="order-customer-field"
+                value={form.customerName}
+                required
+                fullWidth
+                inputProps={{ 'aria-label': '客户' }}
+                InputProps={{ readOnly: true }}
+                helperText={customer ? '从客户中心创建订单，客户已自动带入' : '编辑订单时客户关系保持不变'}
+              />
+            ) : (
+              <Autocomplete
+                id="order-customer-field"
+                options={selectedCustomer && !customers.some((item) => item.id === selectedCustomer.id) ? [selectedCustomer, ...customers] : customers}
+                value={selectedCustomer}
+                inputValue={customerSearch}
+                onInputChange={(_event, value, reason) => {
+                  if (reason === 'input' || reason === 'clear') setCustomerSearch(value);
+                }}
+                onChange={handleCustomerSelect}
+                loading={customerLoading}
+                filterOptions={(options) => options}
+                getOptionLabel={getCustomerOptionLabel}
+                isOptionEqualToValue={(option, value) => option.id === value.id}
+                noOptionsText={customerSearch.trim() ? '未找到客户' : '输入客户姓名、公司、电话或微信搜索'}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    required
+                    placeholder="输入客户名/公司/电话/微信"
+                    inputProps={{ ...params.inputProps, 'aria-label': '客户（搜索选择）' }}
+                    InputProps={{
+                      ...params.InputProps,
+                      endAdornment: (
+                        <>
+                          {customerLoading ? <CircularProgress color="inherit" size={18} /> : null}
+                          {params.InputProps.endAdornment}
+                        </>
+                      ),
+                    }}
+                  />
+                )}
+              />
             )}
-            {users.map((user) => (
-              <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>
-            ))}
-          </TextField>
+          </FormControl>
+          <FormControl fullWidth>
+            <FormLabel htmlFor="order-sales-owner-field" sx={{ mb: 0.75, color: '#334155', fontSize: 13, fontWeight: 700 }}>销售负责人</FormLabel>
+            <TextField
+              id="order-sales-owner-field"
+              select
+              value={form.salesId}
+              onChange={handleOwnerChange}
+              fullWidth
+              disabled={formalFieldLocked}
+              SelectProps={{ inputProps: { 'aria-label': '销售负责人' } }}
+            >
+              {form.owner && !users.some((user) => user.id === form.salesId) && (
+                <MenuItem value={form.salesId}>{form.owner}（历史负责人）</MenuItem>
+              )}
+              {users.map((user) => (
+                <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>
+              ))}
+            </TextField>
+          </FormControl>
         </BusinessFormSection>
 
         <BusinessFormSection

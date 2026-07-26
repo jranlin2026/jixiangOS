@@ -33,8 +33,8 @@ const BusinessFormSection: React.FC<BusinessFormSectionProps> = ({
   }, [errorCount]);
 
   const hasError = errorCount > 0;
-  const borderColor = hasError ? '#ef4444' : '#93b4ee';
-  const headerBackground = hasError ? '#fff1f2' : expanded ? '#eaf2ff' : '#f1f6ff';
+  const borderColor = hasError ? '#fecaca' : '#d6e4f5';
+  const headerBackground = hasError ? '#fff1f2' : '#eff6ff';
 
   return (
     <Accordion
@@ -46,16 +46,16 @@ const BusinessFormSection: React.FC<BusinessFormSectionProps> = ({
       sx={{
         border: '1px solid',
         borderColor,
-        borderLeft: '4px solid',
-        borderLeftColor: hasError ? '#dc2626' : '#2563eb',
-        borderRadius: '12px !important',
+        borderRadius: '14px !important',
         overflow: 'hidden',
         bgcolor: '#fff',
-        boxShadow: expanded ? '0 8px 22px rgba(37, 99, 235, 0.08)' : 'none',
-        transition: 'border-color 160ms ease, box-shadow 160ms ease',
+        boxShadow: expanded
+          ? '0 10px 28px rgba(15, 23, 42, 0.06)'
+          : '0 3px 10px rgba(15, 23, 42, 0.035)',
+        transition: 'border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease',
         '&:before': { display: 'none' },
         '& + &': { mt: 2 },
-        '&:focus-within': { boxShadow: '0 0 0 3px rgba(37, 99, 235, 0.14)' },
+        '&:hover': { borderColor: hasError ? '#fca5a5' : '#bfd3ee' },
       }}
     >
       <AccordionSummary
@@ -64,13 +64,11 @@ const BusinessFormSection: React.FC<BusinessFormSectionProps> = ({
             sx={{
               width: 32,
               height: 32,
-              borderRadius: '50%',
+              borderRadius: 1.5,
               display: 'grid',
               placeItems: 'center',
               color: hasError ? '#b91c1c' : '#1d4ed8',
-              bgcolor: hasError ? '#fee2e2' : '#dbeafe',
-              border: '1px solid',
-              borderColor: hasError ? '#fecaca' : '#bfdbfe',
+              bgcolor: 'transparent',
             }}
           >
             <ExpandMoreIcon fontSize="small" />
@@ -78,31 +76,34 @@ const BusinessFormSection: React.FC<BusinessFormSectionProps> = ({
         )}
         sx={{
           px: { xs: 1.5, sm: 2.25 },
-          minHeight: 68,
+          minHeight: 64,
           bgcolor: headerBackground,
           borderBottom: expanded ? '1px solid' : '0 solid',
-          borderBottomColor: hasError ? '#fecaca' : '#bfdbfe',
+          borderBottomColor: hasError ? '#fecaca' : '#dbe7f5',
           cursor: 'pointer',
           transition: 'background-color 160ms ease',
-          '&:hover': { bgcolor: hasError ? '#ffe4e6' : '#dfeaff' },
-          '&.Mui-expanded': { minHeight: 68 },
+          '&:hover': { bgcolor: hasError ? '#ffe4e6' : '#e8f2ff' },
+          '&.Mui-expanded': { minHeight: 64 },
           '& .MuiAccordionSummary-content': { my: 1.25, minWidth: 0 },
           '& .MuiAccordionSummary-content.Mui-expanded': { my: 1.25 },
-          '& .MuiAccordionSummary-expandIconWrapper': { gap: 0.75 },
+          '& .MuiAccordionSummary-expandIconWrapper': { ml: 1 },
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, minWidth: 0, flex: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 1.5 }, minWidth: 0, flex: 1 }}>
           <Box
             aria-hidden
             sx={{
-              width: 30,
-              height: 30,
-              flex: '0 0 30px',
-              borderRadius: 1.25,
+              width: 34,
+              height: 34,
+              flex: '0 0 34px',
+              borderRadius: 1.5,
               display: 'grid',
               placeItems: 'center',
-              bgcolor: hasError ? '#dc2626' : '#2563eb',
-              color: '#fff',
+              bgcolor: '#fff',
+              color: hasError ? '#dc2626' : '#2563eb',
+              border: '1.5px solid',
+              borderColor: hasError ? '#f87171' : '#3b82f6',
+              boxShadow: '0 2px 5px rgba(37, 99, 235, 0.08)',
               fontSize: 14,
               fontWeight: 900,
               fontVariantNumeric: 'tabular-nums',
@@ -110,27 +111,38 @@ const BusinessFormSection: React.FC<BusinessFormSectionProps> = ({
           >
             {step}
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.25, minWidth: 0, flex: 1 }}>
-            <Typography variant="subtitle1" sx={{ color: '#0f172a', fontWeight: 900, whiteSpace: 'nowrap' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, minWidth: 0, flex: 1 }}>
+            <Typography variant="subtitle1" sx={{ color: '#0f172a', fontWeight: 800, whiteSpace: 'nowrap' }}>
               {title}
             </Typography>
             <Typography
-              variant="body2"
+              component="span"
+              variant="caption"
               noWrap
-              sx={{ minWidth: 0, color: hasError ? '#b91c1c' : '#52647d', fontWeight: hasError ? 700 : 500 }}
+              sx={{
+                minWidth: 0,
+                maxWidth: '100%',
+                px: 1,
+                py: 0.35,
+                borderRadius: '999px',
+                color: hasError ? '#b91c1c' : '#52647d',
+                bgcolor: hasError ? '#fee2e2' : '#e4edf8',
+                fontWeight: 700,
+                lineHeight: 1.35,
+              }}
             >
               {hasError ? `缺少 ${errorCount} 项必填` : summary || '待填写'}
             </Typography>
           </Box>
           <Typography
-            variant="caption"
-            sx={{ display: { xs: 'none', sm: 'block' }, mr: 0.5, color: hasError ? '#b91c1c' : '#1d4ed8', fontWeight: 800 }}
+            component="span"
+            sx={{ position: 'absolute', width: 1, height: 1, p: 0, m: -1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0 }}
           >
             {expanded ? '收起' : '展开'}
           </Typography>
         </Box>
       </AccordionSummary>
-      <AccordionDetails sx={{ p: { xs: 1.75, sm: 2.5 } }}>
+      <AccordionDetails sx={{ p: { xs: 2, sm: 2.5 }, bgcolor: '#fff' }}>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
           {children}
         </Box>

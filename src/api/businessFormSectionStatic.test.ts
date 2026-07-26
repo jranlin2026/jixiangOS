@@ -7,7 +7,10 @@ const section = fs.readFileSync(path.join(root, 'src/shared/components/BusinessF
 const orderForm = fs.readFileSync(path.join(root, 'src/pages/Orders/OrderForm.tsx'), 'utf8');
 const recoveryForm = fs.readFileSync(path.join(root, 'src/pages/AfterSales/RecoveryOrderTab.tsx'), 'utf8');
 
-assert.match(section, /borderLeft: '4px solid'/, '统一业务表单分段应有清晰的左侧蓝色识别条');
+assert.match(section, /borderRadius: '14px !important'/, '统一业务表单分段应使用 C 方案轻量圆角卡片');
+assert.match(section, /const borderColor = hasError \? '#fecaca' : '#d6e4f5'/, '卡片应使用轻量边框而非厚重蓝框');
+assert.match(section, /borderRadius: '999px'/, '摘要状态应使用轻量胶囊标签');
+assert.doesNotMatch(section, /borderLeft: '4px solid'/, 'C 方案不应保留左侧粗蓝色识别条');
 assert.match(section, /收起/);
 assert.match(section, /展开/);
 assert.match(section, /errorCount/);
@@ -19,6 +22,12 @@ for (const step of [1, 2, 3, 4, 5]) {
 }
 
 assert.doesNotMatch(orderForm, /function FormSection/);
+assert.match(orderForm, /<FormLabel[^>]*required[\s\S]{0,200}客户（搜索选择）[\s\S]{0,80}<\/FormLabel>/, 'C 方案客户字段名应显示在输入框上方');
+assert.match(orderForm, /<FormLabel[^>]*>[\s\S]{0,80}销售负责人[\s\S]{0,20}<\/FormLabel>/, 'C 方案销售负责人字段名应显示在输入框上方');
+assert.match(orderForm, /'aria-label': '客户（搜索选择）'/, '外置字段名后仍需保留输入框无障碍名称');
+assert.match(orderForm, /htmlFor="order-customer-field" required/, '客户标签必须关联必填输入框');
+assert.match(orderForm, /id="order-customer-field"[\s\S]{0,300}required/, '客户输入框必须保留必填语义');
+assert.match(orderForm, /htmlFor="order-sales-owner-field"/, '销售负责人标签必须关联选择框');
 assert.doesNotMatch(recoveryForm, /function RecoveryFormSection/);
 assert.match(recoveryForm, /title="客户信息"/);
 assert.match(recoveryForm, /title="原订单信息"/);
