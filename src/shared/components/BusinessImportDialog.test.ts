@@ -31,6 +31,16 @@ const precheck = (status: 'warning' | 'blocked'): BusinessImportPrecheckResult =
   blockedCount: status === 'blocked' ? 1 : 0,
   rows: [{ rowNumber: 2, status, reason: status === 'blocked' ? '客户无法唯一匹配' : '将创建售后临时客户' }],
 });
+const mixedPrecheck: BusinessImportPrecheckResult = {
+  confirmationToken: 'mixed-token', expiresAt: '2026-07-24T10:00:00.000Z', totalCount: 3,
+  readyCount: 2, warningCount: 1, blockedCount: 1,
+  rows: [
+    { rowNumber: 2, status: 'ready', reason: '可导入' },
+    { rowNumber: 3, status: 'warning', reason: '允许导入但需关注' },
+    { rowNumber: 4, status: 'blocked', reason: '订单号重复' },
+  ],
+};
+const mixedRows = [row, { ...row, rowNumber: 3 }, { ...row, rowNumber: 4 }];
 
 function render(initialState: BusinessImportDialogInitialState, type: 'orders' | 'recovery_orders' = 'orders'): string {
   return renderToStaticMarkup(React.createElement(BusinessImportDialog, {
@@ -53,8 +63,15 @@ const blocked = render({ options, file: { name: 'orders.xlsx' } as File, rows: [
 assert.match(blocked, /批量导入订单/);
 assert.match(blocked, /已阻止/);
 assert.match(blocked, /客户无法唯一匹配/);
-const blockedConfirm = buttonContaining(blocked, '确认并后台导入 0 条');
+const blockedConfirm = buttonContaining(blocked, '跳过 1 条并后台导入 0 条');
 assert.match(blockedConfirm, /disabled=""/, 'blocked precheck must render a disabled confirm button');
+
+for (const [type, fileName] of [['orders', 'orders.xlsx'], ['recovery_orders', 'recovery.xlsx']] as const) {
+  const mixed = render({ options, file: { name: fileName } as File, rows: mixedRows, precheck: mixedPrecheck }, type);
+  assert.match(mixed, /确认后将跳过被阻止记录，仅导入可导入记录/);
+  const mixedConfirm = buttonContaining(mixed, '跳过 1 条并后台导入 2 条');
+  assert.doesNotMatch(mixedConfirm, /disabled=""/, `${type} mixed precheck must allow eligible-only confirmation`);
+}
 
 const warning = render({ options, file: { name: 'recovery.xlsx' } as File, rows: [row], precheck: precheck('warning') }, 'recovery_orders');
 assert.match(warning, /批量导入售后挽回订单/);

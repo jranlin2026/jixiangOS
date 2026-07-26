@@ -33,6 +33,26 @@ assert.deepEqual((result.rows[0] as any).paymentProofAttachmentIds, ['attachment
 assert.deepEqual((result.rows[0] as any).dealEvidenceAttachmentIds, ['attachment-2', 'attachment-3']);
 assert.deepEqual(uploadedDraftKeys, Array(3).fill('business-import:orders:draft-1:2'));
 
+const subsetUploads: number[] = [];
+const subsetRows = [rows[0], {
+  ...rows[0], rowNumber: 3, paymentProofFileName: '被阻止付款.jpg', dealEvidenceFileNames: '',
+}];
+const subset = await uploadBusinessImportPackageImages({
+  type: 'orders', rows: subsetRows, images: [images[0]], draftId: 'draft-subset',
+  upload: async (image) => {
+    subsetUploads.push(image.rowNumber);
+    return {
+      id: 'attachment-eligible', name: image.name, mimeType: image.mimeType, size: 1,
+      category: image.category, uploadedById: 'u1', uploadedByName: '导入人', uploadedAt: '2026-07-25',
+    };
+  },
+  remove: async () => undefined,
+});
+assert.equal(subset.rows.length, 2, 'eligible image filtering must preserve the complete workbook rows');
+assert.deepEqual((subset.rows[0] as any).paymentProofAttachmentIds, ['attachment-eligible']);
+assert.deepEqual((subset.rows[1] as any).paymentProofAttachmentIds, []);
+assert.deepEqual(subsetUploads, [2], 'only the eligible row image is uploaded');
+
 const removed: string[] = [];
 await assert.rejects(
   () => uploadBusinessImportPackageImages({

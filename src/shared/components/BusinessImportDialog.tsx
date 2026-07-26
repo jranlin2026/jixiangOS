@@ -52,9 +52,11 @@ import TablePagination from './TablePagination';
 import useAuthStore from '../../store/useAuthStore';
 import {
   acceptQueuedBusinessImportJob,
+  businessImportConfirmLabel,
   businessImportJobStorageKey,
   clearStoredBusinessImportJob,
   createBusinessImportSingleFlight,
+  eligibleBusinessImportRowNumbers,
   getBusinessImportConfirmDisabledReason,
   isTerminalBusinessImportJob,
   loadBusinessImportJobResult,
@@ -317,8 +319,10 @@ export default function BusinessImportDialog({
     let confirmationMayHaveBeenAccepted = false;
     try {
       const draftId = await businessImportAttachmentDraftId(precheck.confirmationToken);
+      const eligibleRowNumbers = eligibleBusinessImportRowNumbers(precheck);
+      const eligibleImages = packageImages.filter((image) => eligibleRowNumbers.has(image.rowNumber));
       const uploaded = await uploadBusinessImportPackageImages({
-        type, rows, images: packageImages, draftId,
+        type, rows, images: eligibleImages, draftId,
         upload: async (image, draftKey) => {
           const displayName = image.name.replace(/\\/gu, '/').split('/').pop() || image.name;
           const fileBytes = new Uint8Array(image.bytes.byteLength);
@@ -333,7 +337,7 @@ export default function BusinessImportDialog({
       });
       uploadedAttachmentIds = uploaded.attachmentIds;
       confirmationMayHaveBeenAccepted = true;
-      const confirmResponse = await businessImportApi.confirm(type, uploaded.rows, precheck.confirmationToken, file.name);
+      const confirmResponse = await businessImportApi.confirm(type, uploaded.rows, precheck.confirmationToken, file.name, 'eligible_only');
       if (confirmResponse.code !== 0 || !confirmResponse.data) {
         confirmationMayHaveBeenAccepted = !isDefinitiveBusinessImportRejection(confirmResponse.code);
         if (!confirmationMayHaveBeenAccepted) {
@@ -477,7 +481,7 @@ export default function BusinessImportDialog({
             <Alert severity={precheck.blockedCount ? 'warning' : 'success'}>
               预检完成：可导入 {Math.max(0, precheck.readyCount - precheck.warningCount)} 条，
               警告 {precheck.warningCount} 条，被阻止 {precheck.blockedCount} 条。
-              {precheck.blockedCount ? '请修正文件后重新上传预检。' : '确认后将创建持久后台任务。'}
+              {precheck.blockedCount ? '确认后将跳过被阻止记录，仅导入可导入记录。' : '确认后将创建持久后台任务。'}
             </Alert>
           ) : null}
 
@@ -570,7 +574,7 @@ export default function BusinessImportDialog({
             onClick={() => void confirmOnceRef.current()}
             disabled={Boolean(confirmDisabledReason) || operationBusy}
           >
-            {confirming ? '提交中…' : `确认并后台导入 ${precheck.readyCount} 条`}
+            {confirming ? '提交中…' : businessImportConfirmLabel(precheck)}
           </Button>
         ) : null}
         {job && isTerminalBusinessImportJob(job.status) ? (
