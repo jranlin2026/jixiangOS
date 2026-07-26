@@ -13,9 +13,14 @@ const input = {
 assert.equal(businessImportScopeDomain('orders'), 'orders');
 assert.equal(businessImportScopeDomain('recovery_orders'), 'recoveryOrderApplications', 'recovery template/precheck/execution use the review-application scope');
 
-function createLockedPrisma(overrides: Partial<{ expiresAt: Date; actorId: string }> = {}) {
-  const batch: any = { id: 'batch-1', actorId: overrides.actorId ?? 'u-importer', importType: 'orders', rowsHash: input.rowsHash, expiresAt: overrides.expiresAt ?? new Date('2099-01-01T00:00:00.000Z'), consumedAt: null };
+function createLockedPrisma(overrides: Partial<{ expiresAt: Date; actorId: string; rows: unknown }> = {}) {
+  const batch: any = {
+    id: 'batch-1', actorId: overrides.actorId ?? 'u-importer', importType: 'orders', rowsHash: input.rowsHash,
+    expiresAt: overrides.expiresAt ?? new Date('2099-01-01T00:00:00.000Z'), consumedAt: null,
+    totalCount: 1, readyCount: 1, warningCount: 0, blockedCount: 0, rows: overrides.rows ?? input.rows,
+  };
   const jobs: any[] = [];
+  const createdItems: any[] = [];
   let tail = Promise.resolve();
   const tx: any = {
     $queryRaw: async (strings: TemplateStringsArray) => {
@@ -24,7 +29,7 @@ function createLockedPrisma(overrides: Partial<{ expiresAt: Date; actorId: strin
     },
     user: { findUnique: async () => ({ name: '导入员' }) },
     businessImportJob: { create: async ({ data }: any) => { jobs.push(data); return data; } },
-    businessImportJobItem: { createMany: async () => ({ count: input.rows.length }) },
+    businessImportJobItem: { createMany: async ({ data }: any) => { createdItems.push(...data); return { count: data.length }; } },
     businessImportBatch: { update: async ({ data }: any) => { Object.assign(batch, data); return batch; } },
   };
   const prisma: any = {
@@ -36,7 +41,7 @@ function createLockedPrisma(overrides: Partial<{ expiresAt: Date; actorId: strin
       try { return await operation(tx); } finally { release(); }
     },
   };
-  return { prisma, batch, jobs };
+  return { prisma, batch, jobs, createdItems };
 }
 
 const locked = createLockedPrisma();
@@ -57,10 +62,50 @@ await assert.rejects(() => consumePrecheckAndCreateJob(expired.prisma, input), (
 const wrongActor = createLockedPrisma({ actorId: 'other-user' });
 await assert.rejects(() => consumePrecheckAndCreateJob(wrongActor.prisma, input), (error: unknown) => error instanceof BusinessImportError && error.status === 409);
 
+const mixedRows = [
+  input.rows[0],
+  {
+    ...input.rows[0], rowNumber: 3, status: 'blocked' as const, reason: '订单号重复',
+    normalized: { ...input.rows[0].normalized, rowNumber: 3, thirdPartyOrderNo: '' },
+  },
+];
+const mixedLocked = createLockedPrisma({ rows: mixedRows });
+mixedLocked.batch.totalCount = 2;
+mixedLocked.batch.blockedCount = 1;
+const mixedResult = await consumePrecheckAndCreateJob(mixedLocked.prisma, { ...input, rows: mixedRows, mode: 'eligible_only' });
+assert.equal(mixedResult.totalCount, 1);
+assert.equal(mixedResult.failedCount, 0);
+assert.equal(mixedLocked.jobs[0].totalCount, 1);
+assert.equal(mixedLocked.jobs[0].failedCount, 0);
+assert.deepEqual(mixedLocked.createdItems.map((item) => item.rowNumber), [2]);
+assert.equal(mixedLocked.batch.totalCount, 2, 'batch keeps the full source-file count');
+assert.equal(mixedLocked.batch.blockedCount, 1, 'batch keeps the precheck blocked count');
+
+const eligibilityChanged = createLockedPrisma({ rows: input.rows });
+await assert.rejects(
+  () => consumePrecheckAndCreateJob(eligibilityChanged.prisma, {
+    ...input,
+    mode: 'eligible_only',
+    rows: [{ ...input.rows[0], status: 'blocked', reason: '确认时已被占用' }],
+  }),
+  (error: unknown) => error instanceof BusinessImportError && error.status === 409 && /重新预检/.test(error.message),
+);
+assert.equal(eligibilityChanged.jobs.length, 0);
+assert.equal(eligibilityChanged.batch.consumedAt, null);
+
+const zeroEligible = createLockedPrisma({ rows: [{ ...input.rows[0], status: 'blocked', reason: '错误' }] });
+await assert.rejects(
+  () => consumePrecheckAndCreateJob(zeroEligible.prisma, {
+    ...input, mode: 'eligible_only', rows: [{ ...input.rows[0], status: 'blocked', reason: '错误' }],
+  }),
+  (error: unknown) => error instanceof BusinessImportError && /没有可导入的数据/.test(error.message),
+);
+assert.equal(zeroEligible.jobs.length, 0);
+
 function createReservationPrisma() {
   const batches = new Map([
-    ['token-a', { id: 'batch-a', actorId: 'u-importer', importType: 'orders', rowsHash: input.rowsHash, expiresAt: new Date('2099-01-01T00:00:00.000Z'), consumedAt: null }],
-    ['token-b', { id: 'batch-b', actorId: 'u-importer', importType: 'orders', rowsHash: input.rowsHash, expiresAt: new Date('2099-01-01T00:00:00.000Z'), consumedAt: null }],
+    ['token-a', { id: 'batch-a', actorId: 'u-importer', importType: 'orders', rowsHash: input.rowsHash, expiresAt: new Date('2099-01-01T00:00:00.000Z'), consumedAt: null, rows: input.rows }],
+    ['token-b', { id: 'batch-b', actorId: 'u-importer', importType: 'orders', rowsHash: input.rowsHash, expiresAt: new Date('2099-01-01T00:00:00.000Z'), consumedAt: null, rows: input.rows }],
   ]);
   const reservations = new Map<string, any>();
   const jobs: any[] = [];

@@ -4,7 +4,7 @@ import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Customer } from '../../src/types/customer';
 import type { Product } from '../../src/types/product';
 import type { AfterSalesSourceConfig, OrderTypeConfig } from '../../src/types/settings';
-import type { BusinessImportRow, BusinessImportType, OrderImportRow, RecoveryImportRow } from '../../src/types/businessImport';
+import type { BusinessImportConfirmMode, BusinessImportRow, BusinessImportType, OrderImportRow, RecoveryImportRow } from '../../src/types/businessImport';
 import type { BusinessAttachment } from '../../src/types/businessAttachment';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { buildDataVisibilityScopeForUser } from '../../src/shared/utils/dataVisibility';
@@ -235,21 +235,55 @@ async function persistPrecheck(prisma: PrismaClient, record: BusinessImportPrech
   } });
 }
 
+function eligibleRowNumbersFromSnapshot(value: unknown): number[] {
+  let parsed = value;
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed); } catch { throw new BusinessImportError('导入预检记录无效，请重新预检', 409); }
+  }
+  if (!Array.isArray(parsed)) throw new BusinessImportError('导入预检记录无效，请重新预检', 409);
+  const rowNumbers = parsed.map((value) => {
+    if (!value || typeof value !== 'object') throw new BusinessImportError('导入预检记录无效，请重新预检', 409);
+    const row = value as { rowNumber?: unknown; status?: unknown };
+    const rowNumber = Number(row.rowNumber);
+    if (!Number.isSafeInteger(rowNumber) || !['ready', 'warning', 'blocked'].includes(String(row.status))) {
+      throw new BusinessImportError('导入预检记录无效，请重新预检', 409);
+    }
+    return { rowNumber, status: String(row.status) };
+  });
+  return rowNumbers.filter((row) => row.status !== 'blocked').map((row) => row.rowNumber).sort((a, b) => a - b);
+}
+
+function sameRowNumbers(left: number[], right: number[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 export async function consumePrecheckAndCreateJob(prisma: PrismaClient, input: {
-  tokenHash: string; actorId: string; type: BusinessImportType; rowsHash: string; expiresAt: string; fileName: string; rows: ValidatedBusinessImportRow[];
+  tokenHash: string; actorId: string; type: BusinessImportType; rowsHash: string; expiresAt: string; fileName: string;
+  rows: ValidatedBusinessImportRow[]; mode?: BusinessImportConfirmMode;
 }) {
   return prisma.$transaction(async (tx) => {
-    const batches = await tx.$queryRaw<Array<{ id: string; actorId: string; importType: string; rowsHash: string; expiresAt: Date; consumedAt: Date | null }>>`
-      SELECT id, actorId, importType, rowsHash, expiresAt, consumedAt
+    const batches = await tx.$queryRaw<Array<{ id: string; actorId: string; importType: string; rowsHash: string; expiresAt: Date; consumedAt: Date | null; rows: unknown }>>`
+      SELECT id, actorId, importType, rowsHash, expiresAt, consumedAt, \`rows\`
       FROM business_import_batches WHERE tokenHash = ${input.tokenHash} LIMIT 1 FOR UPDATE`;
     const batch = batches[0];
     if (!batch || batch.actorId !== input.actorId || batch.importType !== input.type || batch.rowsHash !== input.rowsHash || batch.consumedAt || batch.expiresAt <= new Date()) {
       throw new BusinessImportError('导入预检凭证无效或已过期', 409);
     }
+    const submittedRows = input.mode === 'eligible_only'
+      ? input.rows.filter((row) => row.status !== 'blocked')
+      : input.rows;
+    if (input.mode === 'eligible_only') {
+      const originalEligibleRows = eligibleRowNumbersFromSnapshot(batch.rows);
+      const currentEligibleRows = submittedRows.map((row) => row.rowNumber).sort((a, b) => a - b);
+      if (!sameRowNumbers(originalEligibleRows, currentEligibleRows)) {
+        throw new BusinessImportError('可导入数据已变化，请重新预检', 409);
+      }
+    }
+    if (!submittedRows.length) throw new BusinessImportError('没有可导入的数据');
     const jobId = `business-import-job-${randomUUID()}`;
     const actor = await tx.user.findUnique({ where: { id: input.actorId }, select: { name: true } });
     if (!actor) throw new BusinessImportError('当前导入用户不存在或已离职', 409);
-    const numberedRows = input.rows
+    const numberedRows = submittedRows
       .map((row) => ({ rowNumber: row.rowNumber, normalizedNumber: lower(row.normalized.thirdPartyOrderNo) }))
       .filter((row) => Boolean(row.normalizedNumber));
     if (numberedRows.length) {
@@ -269,22 +303,21 @@ export async function consumePrecheckAndCreateJob(prisma: PrismaClient, input: {
     }
     await tx.businessImportJob.create({ data: {
       id: jobId, batchId: batch.id, importType: input.type, status: 'queued', actorId: input.actorId,
-      actorName: actor.name, rowsHash: input.rowsHash, sourceFileName: input.fileName, idempotencyKey: batch.id, totalCount: input.rows.length,
-      failedCount: input.rows.filter((row) => row.status === 'blocked').length,
-      rows: json(input.rows.map((row) => ({
+      actorName: actor.name, rowsHash: input.rowsHash, sourceFileName: input.fileName, idempotencyKey: batch.id, totalCount: submittedRows.length,
+      failedCount: 0,
+      rows: json(submittedRows.map((row) => ({
         rowNumber: row.rowNumber, status: row.status, reason: row.reason, normalized: row.normalized, customerId: row.customerId,
-        executionStatus: row.status === 'blocked' ? 'failed' : 'queued',
-        ...(row.status === 'blocked' ? { errorMessage: row.reason } : {}),
+        executionStatus: 'queued',
       }))),
     } });
-    await tx.businessImportJobItem.createMany({ data: input.rows.map((row) => ({
+    await tx.businessImportJobItem.createMany({ data: submittedRows.map((row) => ({
       id: `business-import-row-${randomUUID()}`,
       jobId,
       rowNumber: row.rowNumber,
-      status: row.status === 'blocked' ? 'failed' : 'queued',
+      status: 'queued',
       payload: json({ rowNumber: row.rowNumber, status: row.status, reason: row.reason, normalized: row.normalized, customerId: row.customerId }),
       reservedNumber: lower(row.normalized.thirdPartyOrderNo) || null,
-      errorMessage: row.status === 'blocked' ? row.reason : null,
+      errorMessage: null,
     })) });
     if (numberedRows.length) {
       await tx.businessImportNumberReservation.updateMany({
@@ -293,7 +326,7 @@ export async function consumePrecheckAndCreateJob(prisma: PrismaClient, input: {
       });
     }
     await tx.businessImportBatch.update({ where: { id: batch.id }, data: { status: 'queued', sourceFileName: input.fileName, consumedAt: new Date() } });
-    return { id: jobId, batchId: batch.id, type: input.type, status: 'queued' as const, totalCount: input.rows.length, failedCount: input.rows.filter((row) => row.status === 'blocked').length };
+    return { id: jobId, batchId: batch.id, type: input.type, status: 'queued' as const, totalCount: submittedRows.length, failedCount: 0 };
   });
 }
 

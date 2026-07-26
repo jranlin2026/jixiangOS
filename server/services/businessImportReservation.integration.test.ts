@@ -60,7 +60,10 @@ if (!process.env.DATABASE_URL) {
       service.confirm({ type: 'recovery_orders', rows: [row], confirmationToken: secondPrecheck.confirmationToken, fileName: 'second.xlsx' }, actor),
     ]);
     const outcomes = [first, second];
-    assert.equal(outcomes.filter((result) => result.status === 'fulfilled').length, 1);
+    const outcomeSummary = outcomes.map((result) => result.status === 'fulfilled'
+      ? `fulfilled:${result.value.id}`
+      : `rejected:${result.reason instanceof Error ? result.reason.message : String(result.reason)}`).join(' | ');
+    assert.equal(outcomes.filter((result) => result.status === 'fulfilled').length, 1, outcomeSummary);
     const rejected = outcomes.find((result) => result.status === 'rejected');
     assert.ok(rejected?.status === 'rejected' && rejected.reason instanceof BusinessImportError && rejected.reason.status === 409,
       'the actual MySQL unique reservation index must reject the competing confirmation with 409');
