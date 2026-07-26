@@ -228,9 +228,16 @@ export function getBusinessImportConfirmDisabledReason(
 ): string {
   if (submitting) return '导入任务正在提交';
   if (!precheck) return '请先完成导入预检';
-  if (precheck.blockedCount || precheck.rows.some((row) => row.status === 'blocked')) {
-    return '请先修正所有被阻止的行并重新预检';
-  }
   if (!precheck.totalCount || !precheck.readyCount) return '没有可导入的数据';
   return '';
+}
+
+export function eligibleBusinessImportRowNumbers(precheck: BusinessImportPrecheckResult): Set<number> {
+  return new Set(precheck.rows.filter((row) => row.status !== 'blocked').map((row) => row.rowNumber));
+}
+
+export function businessImportConfirmLabel(precheck: BusinessImportPrecheckResult): string {
+  return precheck.blockedCount > 0
+    ? `跳过 ${precheck.blockedCount} 条并后台导入 ${precheck.readyCount} 条`
+    : `确认并后台导入 ${precheck.readyCount} 条`;
 }

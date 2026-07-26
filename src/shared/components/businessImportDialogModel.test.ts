@@ -4,6 +4,8 @@ import {
   businessImportJobResultFromResponse,
   businessImportJobStorageKey,
   createBusinessImportSingleFlight,
+  businessImportConfirmLabel,
+  eligibleBusinessImportRowNumbers,
   getBusinessImportConfirmDisabledReason,
   readStoredBusinessImportJob,
   runBusinessImportJobPolling,
@@ -28,10 +30,24 @@ const result = (overrides: Partial<BusinessImportPrecheckResult> = {}): Business
 
 assert.equal(getBusinessImportConfirmDisabledReason(null), '请先完成导入预检');
 assert.equal(getBusinessImportConfirmDisabledReason(result({ totalCount: 0, readyCount: 0, rows: [] })), '没有可导入的数据');
-assert.equal(getBusinessImportConfirmDisabledReason(result({ blockedCount: 1, rows: [{ rowNumber: 2, status: 'blocked', reason: '客户姓名不能为空' }] })), '请先修正所有被阻止的行并重新预检');
-assert.equal(getBusinessImportConfirmDisabledReason(result({ readyCount: 0, blockedCount: 1, rows: [{ rowNumber: 2, status: 'blocked', reason: '客户姓名不能为空' }] })), '请先修正所有被阻止的行并重新预检');
+const mixed = result({
+  totalCount: 3,
+  readyCount: 2,
+  warningCount: 1,
+  blockedCount: 1,
+  rows: [
+    { rowNumber: 2, status: 'ready', reason: '可导入' },
+    { rowNumber: 3, status: 'warning', reason: '允许导入但需关注' },
+    { rowNumber: 4, status: 'blocked', reason: '订单号重复' },
+  ],
+});
+assert.equal(getBusinessImportConfirmDisabledReason(mixed), '');
+assert.equal(businessImportConfirmLabel(mixed), '跳过 1 条并后台导入 2 条');
+assert.deepEqual([...eligibleBusinessImportRowNumbers(mixed)], [2, 3]);
+assert.equal(getBusinessImportConfirmDisabledReason(result({ readyCount: 0, blockedCount: 1, rows: [{ rowNumber: 2, status: 'blocked', reason: '客户姓名不能为空' }] })), '没有可导入的数据');
 assert.equal(getBusinessImportConfirmDisabledReason(result({ warningCount: 1, rows: [{ rowNumber: 2, status: 'warning', reason: '将创建临时客户' }] })), '');
 assert.equal(getBusinessImportConfirmDisabledReason(result(), true), '导入任务正在提交');
+assert.equal(businessImportConfirmLabel(result()), '确认并后台导入 1 条');
 
 const status = (value: BusinessImportJobResult['status']): BusinessImportJobResult => ({
   id: 'job-1', batchId: 'batch-1', type: 'orders', status: value, totalCount: 2,

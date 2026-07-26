@@ -2,6 +2,7 @@ import { backendRequest } from './backendClient';
 import type { ApiResponse } from './types';
 import type {
   BusinessImportJobResult,
+  BusinessImportConfirmMode,
   BusinessImportPrecheckResult,
   BusinessImportReviewRequest,
   BusinessImportReviewResult,
@@ -30,9 +31,10 @@ export const businessImportApi = {
     rows: BusinessImportRow[],
     confirmationToken: string,
     fileName: string,
+    mode: BusinessImportConfirmMode,
   ): Promise<ApiResponse<BusinessImportJobResult>> {
     return backendRequest(`${ROOT}/${modulePath(type)}/confirm`, {
-      method: 'POST', body: JSON.stringify({ rows, confirmationToken, fileName }),
+      method: 'POST', body: JSON.stringify({ rows, confirmationToken, fileName, mode }),
     });
   },
   job(id: string, signal?: AbortSignal): Promise<ApiResponse<BusinessImportJobResult>> {

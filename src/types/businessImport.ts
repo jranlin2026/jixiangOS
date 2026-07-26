@@ -2,6 +2,7 @@ export const BUSINESS_IMPORT_MAX_ROWS = 5_000;
 export const BUSINESS_IMPORT_MAX_ROW_NUMBER = 1_048_576;
 
 export type BusinessImportType = 'orders' | 'recovery_orders';
+export type BusinessImportConfirmMode = 'eligible_only';
 export type BusinessImportRowStatus = 'ready' | 'warning' | 'blocked';
 
 export type OrderImportRow = {
@@ -64,6 +65,7 @@ export type BusinessImportRequest = {
 export type BusinessImportConfirmRequest = BusinessImportRequest & {
   confirmationToken: string;
   fileName: string;
+  mode?: BusinessImportConfirmMode;
 };
 
 export type BusinessImportRowResult = {
