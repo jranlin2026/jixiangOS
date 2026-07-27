@@ -102,15 +102,6 @@ export function createAuthService(prisma: AuthPrisma) {
       return success(toAuthenticatedUser(mapPrismaUser(session.user), roles));
     },
 
-    /** Fresh directory lookup for server integrations; intentionally creates no employee session. */
-    async getAutomationActor(account: string): Promise<AuthenticatedUser | null> {
-      const user = await prisma.user.findFirst({ where: { account } });
-      if (!user || !user.isActive || (user.employmentStatus || 'active') !== 'active') return null;
-      const roles = await readRoles();
-      const actor = toAuthenticatedUser(mapPrismaUser(user), roles);
-      return actor.isActive ? actor : null;
-    },
-
     async logout(token?: string) {
       if (token) await prisma.authSession.deleteMany({ where: { token } });
       return success(true);
