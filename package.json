@@ -32,11 +32,12 @@
     "customer:batch-verify": "tsx scripts/verify-customer-batch-foundation.ts",
     "customer:merge-release-gate": "tsx scripts/verify-customer-merge-release.ts",
     "test-data:reset-business": "tsx scripts/reset-business-test-data.ts",
-    "mcp:openclaw:test": "tsx integrations/openclaw-jixiangos/src/client.test.ts && tsx integrations/openclaw-jixiangos/src/index.test.ts",
+    "mcp:openclaw:test": "tsx integrations/openclaw-jixiangos/src/client.test.ts && tsx integrations/openclaw-jixiangos/src/index.test.ts && tsx integrations/openclaw-jixiangos/src/entrypoint.test.ts",
     "mcp:openclaw:typecheck": "tsc -p integrations/openclaw-jixiangos/tsconfig.json",
     "mcp:openclaw:start": "tsx integrations/openclaw-jixiangos/src/index.ts",
-    "wechat:automation:static": "tsx integrations/openclaw-jixiangos/openclaw/openclawConfig.test.ts && tsx scripts/verify-wechat-customer-automation.test.ts",
-    "wechat:automation:verify": "tsx scripts/verify-wechat-customer-automation.ts"
+    "wechat:automation:static": "tsx integrations/openclaw-jixiangos/openclaw/openclawConfig.test.ts && tsx scripts/verify-wechat-customer-automation.test.ts && tsx scripts/start-wechat-qa.test.ts",
+    "wechat:automation:verify": "tsx scripts/verify-wechat-customer-automation.ts",
+    "wechat:qa:start": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/start-wechat-qa.ps1"
   },
   "overrides": {
     "effect": "3.21.0"

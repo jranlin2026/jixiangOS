@@ -1,6 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { pathToFileURL } from 'node:url';
+import { realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import {
   CUSTOMER_FIELD_LIMITS,
@@ -121,7 +123,16 @@ export async function start(): Promise<void> {
   await server.connect(new StdioServerTransport());
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+function isMainModule(moduleUrl: string, entrypoint: string | undefined): boolean {
+  if (!entrypoint) return false;
+  try {
+    return realpathSync(fileURLToPath(moduleUrl)) === realpathSync(resolve(entrypoint));
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule(import.meta.url, process.argv[1])) {
   start().catch((error: unknown) => {
     process.stderr.write(formatStartupDiagnostic(error));
     process.exitCode = 1;

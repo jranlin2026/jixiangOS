@@ -27,8 +27,11 @@ assert.equal(getApiListenHost({}), '127.0.0.1');
 assert.equal(getApiJsonBodyLimit({}), '50mb');
 assert.equal(getApiJsonBodyLimit({ API_JSON_BODY_LIMIT: '100mb' }), '100mb');
 assert.match(getCustomerDataExchangeSecret({}), /local-customer-data-exchange/);
-assert.equal(getEnablementPrivateStorageDir({ ENABLEMENT_PRIVATE_STORAGE_DIR: '/tmp/enablement' }), '/tmp/enablement');
-assert.ok(getEnablementPrivateStorageDir({}).endsWith('private_uploads/enablement'));
+assert.equal(
+  getEnablementPrivateStorageDir({ ENABLEMENT_PRIVATE_STORAGE_DIR: '/tmp/enablement' }),
+  path.resolve('/tmp/enablement'),
+);
+assert.ok(getEnablementPrivateStorageDir({}).endsWith(path.join('private_uploads', 'enablement')));
 
 const publicUploadRoot = path.resolve('uploads');
 assert.throws(
