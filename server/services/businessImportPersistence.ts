@@ -22,14 +22,17 @@ function publicJobRow(payload: BusinessImportJobRow): BusinessImportJobRow {
   const { customerId: _internalCustomerId, ...safe } = payload;
   return safe;
 }
-function itemResult(item: any): BusinessImportJobRow {
-  const payload = publicJobRow(read<BusinessImportJobRow>(item.payload, {} as BusinessImportJobRow));
+function storedJobRow(item: any): BusinessImportJobRow {
+  const payload = read<BusinessImportJobRow>(item.payload, {} as BusinessImportJobRow);
   return {
     ...payload,
     executionStatus: item.status,
     recordId: item.recordId || undefined,
     errorMessage: item.errorMessage ? safeBusinessImportErrorMessage(item.errorMessage) : undefined,
   };
+}
+function publicItemResult(item: any): BusinessImportJobRow {
+  return publicJobRow(storedJobRow(item));
 }
 function job(row: any, workerId?: string): BusinessImportJobExecution {
   return {
@@ -98,7 +101,7 @@ export function createPrismaBusinessImportJobStore(prisma: PrismaClient): Busine
         data: { status: 'running', errorMessage: null },
       });
       if (claimed.count !== 1) return null;
-      return itemResult({ ...item, status: 'running', errorMessage: null });
+      return storedJobRow({ ...item, status: 'running', errorMessage: null });
     }),
     markSucceeded: (lease, rowNumber, recordId) => transaction(async (tx) => {
       const current = await lock(tx, lease);
@@ -165,13 +168,13 @@ export function createBusinessImportReadRepository(prisma: PrismaClient) {
     id: row.id, batchId: row.batchId, type: row.importType, status: row.status,
     totalCount: row.totalCount, successCount: row.successCount, failedCount: row.failedCount,
     rows: Array.isArray(row.items)
-      ? row.items.map(itemResult)
+      ? row.items.map(publicItemResult)
       : row.includeLegacyRows ? read<BusinessImportJobRow[]>(row.rows, []).map((item) => ({
         ...publicJobRow(item),
         ...(item.errorMessage ? { errorMessage: safeBusinessImportErrorMessage(item.errorMessage) } : {}),
       })) : undefined,
     ...(Array.isArray(row.failedItems) && row.failedItems.length
-      ? { failedRowSample: row.failedItems.map(itemResult) }
+      ? { failedRowSample: row.failedItems.map(publicItemResult) }
       : {}),
   });
   const terminal = (status: string) => ['succeeded', 'partial_failed', 'failed'].includes(status);

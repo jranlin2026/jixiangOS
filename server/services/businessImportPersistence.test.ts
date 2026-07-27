@@ -94,6 +94,7 @@ assert.equal(await store.heartbeat(lease!, 60_000, new Date('2026-07-20T00:00:03
 assert.equal(await store.nextRow(staleLease), null, '旧租约不能继续写入');
 const next = await store.nextRow(lease!);
 assert.equal(next?.rowNumber, 2);
+assert.equal(next?.customerId, 'internal-customer-id', '后台执行读取必须保留预检锁定的客户 ID');
 assert.equal(await store.markSucceeded(lease!, 2, 'oa-imported'), true);
 assert.equal(items[0].recordId, 'oa-imported');
 assert.equal(reservations.has('tp-2'), true, '成功行保留号码保护');
