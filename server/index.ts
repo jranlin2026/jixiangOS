@@ -1263,6 +1263,15 @@ app.post('/api/order-settlements/:id/reset', requireStorageAccess, async (req: A
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
+app.post('/api/order-settlements/:id/confirm', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderSettlementCommandService.confirm(
+    routeParam(req.params.id),
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
 app.post('/api/order-settlements/:id/withdraw', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
   const result = await orderSettlementCommandService.withdraw(
     routeParam(req.params.id),

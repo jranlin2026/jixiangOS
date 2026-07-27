@@ -613,6 +613,7 @@ const Commission: React.FC<CommissionProps> = ({
   const [detailEditMode, setDetailEditMode] = useState(false);
   const [detailActionLoading, setDetailActionLoading] = useState(false);
   const [detailActionReason, setDetailActionReason] = useState('');
+  const [settlementActionMessage, setSettlementActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [orderDetail, setOrderDetail] = useState<Order | null>(null);
   const [settlementOrderDetail, setSettlementOrderDetail] = useState<Order | null>(null);
   const [settlementOrderLoading, setSettlementOrderLoading] = useState(false);
@@ -1592,6 +1593,7 @@ const Commission: React.FC<CommissionProps> = ({
         ? await commissionApi.cleanupDeletedSourceOrderCommissions(deletingOrderId, deleteReason)
         : await commissionApi.resetOrderCommissions(deletingOrderId, deleteReason);
       if (res.code === 0) {
+        setSettlementActionMessage({ type: 'success', text: shouldCleanupDeletedSource ? '废弃分账记录已清理' : '订单分账已重置，可重新处理分账' });
         setDeleteSummary(null);
         setDeleteReason('');
         if (summaryDetail?.orderId === deletingOrderId) {
@@ -1599,6 +1601,8 @@ const Commission: React.FC<CommissionProps> = ({
           resetSettlementDetailForms();
         }
         await refreshAll();
+      } else {
+        setSettlementActionMessage({ type: 'error', text: res.message || (shouldCleanupDeletedSource ? '清理废弃分账失败' : '重置订单分账失败') });
       }
     } finally {
       setDeleteLoading(false);
@@ -1616,6 +1620,9 @@ const Commission: React.FC<CommissionProps> = ({
         setReopenReason('');
         if (summaryDetail?.orderId === orderId) closeSettlementDetail();
         await refreshAll();
+        setSettlementActionMessage({ type: 'success', text: '已进入新一轮待处理分账，旧轮次继续只读保留' });
+      } else {
+        setSettlementActionMessage({ type: 'error', text: response.message || '重新分账失败' });
       }
     } finally {
       setReopenLoading(false);
@@ -1631,6 +1638,9 @@ const Commission: React.FC<CommissionProps> = ({
       if (res.code === 0) {
         await refreshAll();
         await reloadSettlementDetail(summaryDetail.orderId);
+        setSettlementActionMessage({ type: 'success', text: '分账已确认并进入待发放' });
+      } else {
+        setSettlementActionMessage({ type: 'error', text: res.message || '确认分账失败' });
       }
     } finally {
       setDetailActionLoading(false);
@@ -1647,6 +1657,9 @@ const Commission: React.FC<CommissionProps> = ({
         setDetailActionReason('');
         await refreshAll();
         await reloadSettlementDetail(summaryDetail.orderId);
+        setSettlementActionMessage({ type: 'success', text: '提成已撤回，原分账轮次已只读保留' });
+      } else {
+        setSettlementActionMessage({ type: 'error', text: res.message || '撤回提成失败' });
       }
     } finally {
       setDetailActionLoading(false);
@@ -3759,6 +3772,15 @@ const Commission: React.FC<CommissionProps> = ({
 
       {tabValue === 0 && (
         <>
+          {settlementActionMessage && (
+            <Alert
+              severity={settlementActionMessage.type}
+              onClose={() => setSettlementActionMessage(null)}
+              sx={{ mb: 1.5 }}
+            >
+              {settlementActionMessage.text}
+            </Alert>
+          )}
           {renderOrderStatusBar()}
           {renderOrderToolbar()}
           {renderOrderSplitTable()}

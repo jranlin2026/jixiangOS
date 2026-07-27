@@ -20,6 +20,27 @@ const jsonValue = (value: unknown) => value as Prisma.InputJsonValue;
 const cleanText = (value: unknown) => String(value || '').trim();
 const inactiveStatuses = new Set<Commission['status']>(['已撤回', '已取消', '已冲销']);
 
+function requiresHandling(commission: Commission): boolean {
+  const note = [
+    commission.auditReason,
+    commission.frozenReason,
+    commission.calculationNote,
+    commission.formulaText,
+    commission.payoutPlanName,
+  ].filter(Boolean).join('；');
+  const manual = Boolean(commission.isManualAdjusted)
+    || commission.sourceType === '人工新增'
+    || ['自定义金额', '财务人工', '人工新增'].some((keyword) => note.includes(keyword));
+  const hasBasis = Boolean(commission.payoutPlanId || commission.payoutPlanName || manual);
+  const unresolved = ['未匹配', '未命中', '暂不计算', '缺少', '不可用'].some((keyword) => note.includes(keyword));
+  return commission.owner === '待分配'
+    || !commission.ownerId
+    || Boolean(commission.frozenReason)
+    || note.includes('冻结')
+    || !hasBasis
+    || ((Number(commission.commissionAmount) || 0) === 0 && unresolved);
+}
+
 function parseObject<T>(value: unknown, label: string): T {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new OrderSettlementCommandError(500, `${label}数据损坏`);
@@ -204,6 +225,41 @@ export function createOrderSettlementCommandService(
   const now = options.now || (() => new Date());
 
   return {
+    async confirm(orderId: string, reason: string, actor: AuthenticatedUser): Promise<ApiResponse<Commission[] | null>> {
+      const id = cleanText(orderId);
+      const cleanReason = cleanText(reason) || '财务确认';
+      if (!id) return failure('订单ID不能为空', 400);
+      return run(() => prisma.$transaction(async (transaction) => {
+        requireSettlementWrite(actor);
+        const order = await readOrder(transaction, id);
+        if (!order || order.deletedAt) throw new OrderSettlementCommandError(409, '源订单不存在，不能确认分账');
+        const commissions = await readCommissions(transaction, id);
+        const active = commissions.filter((commission) => !inactiveStatuses.has(commission.status));
+        if (!active.length || active.some((commission) => commission.status !== '待确认')) {
+          throw new OrderSettlementCommandError(409, '该订单没有可确认的待确认分账');
+        }
+        if (active.some(requiresHandling)) {
+          throw new OrderSettlementCommandError(409, '该订单分账仍有未处理项，请先处理分账后再确认');
+        }
+        const changedAt = now().toISOString();
+        const confirmed = active.map((commission) => ({
+          ...commission,
+          status: '待发放' as const,
+          auditReason: undefined,
+          calculationNote: [commission.calculationNote, `财务确认：${cleanReason}`].filter(Boolean).join('；'),
+          adjustedBy: commission.adjustedBy || actor.name,
+          adjustedAt: commission.adjustedAt || changedAt,
+          updatedAt: changedAt,
+        }));
+        await Promise.all(confirmed.map((commission) => transaction.businessRecord.update({
+          where: { domain_recordId: { domain: STORAGE_KEYS.COMMISSIONS, recordId: commission.id } },
+          data: { status: commission.status, data: jsonValue(commission), updatedAt: new Date(changedAt) },
+        })));
+        await appendLog(transaction, id, order, confirmed, '确认分账', cleanReason, actor, changedAt);
+        return confirmed;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted }));
+    },
+
     async reset(orderId: string, reason: string, actor: AuthenticatedUser): Promise<ApiResponse<boolean | null>> {
       const id = cleanText(orderId);
       const cleanReason = cleanText(reason);

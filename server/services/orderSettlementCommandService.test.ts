@@ -213,6 +213,25 @@ function put(prisma: FakePrisma, domain: string, recordId: string, data: any) {
   const prisma = new FakePrisma();
   put(prisma, STORAGE_KEYS.ORDERS, 'order-1', order());
   put(prisma, STORAGE_KEYS.COMMISSIONS, 'commission-1', {
+    ...commission('待确认'),
+    payoutPlanId: 'plan-1',
+    payoutPlanName: '销售固定提成',
+  });
+  const service = createOrderSettlementCommandService(prisma as any, { now: () => new Date(now) });
+  const confirmed = await service.confirm('order-1', '财务核对通过', finance);
+  assert.equal(confirmed.code, 0, confirmed.message);
+  assert.equal(prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'commission-1'))?.data.status, '待发放');
+  assert.equal(
+    Array.from(prisma.rows.values()).some((row) => row.domain === STORAGE_KEYS.COMMISSION_OPERATION_LOGS && row.status === '确认分账'),
+    true,
+    '确认分账必须通过记录级命令写入操作留痕',
+  );
+}
+
+{
+  const prisma = new FakePrisma();
+  put(prisma, STORAGE_KEYS.ORDERS, 'order-1', order());
+  put(prisma, STORAGE_KEYS.COMMISSIONS, 'commission-1', {
     ...commission('已撤回'),
     settlementVersion: 1,
     settlementRoundId: 'order-1-round-1',

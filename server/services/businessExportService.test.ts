@@ -181,6 +181,15 @@ assert.equal(settlement.data?.detailRows.find((row) => row.status === '已撤回
 assert.equal(settlement.data?.summaryColumns.every((column) => !/^[A-Za-z]/.test(column.label)), true, '汇总表头必须全部中文');
 assert.equal(settlement.data?.detailColumns.every((column) => !/^[A-Za-z]/.test(column.label)), true, '明细表头必须全部中文');
 
+(order as typeof order & { settlementReopenPending?: boolean }).settlementReopenPending = true;
+const reopenedSettlement = await service.export({
+  module: 'order_settlements', reason: '重新分账状态核对', columnMode: 'current_view', columnIds: ['orderNo', 'status'],
+  filters: { search: 'ORD-001', status: '待处理' },
+}, actor);
+assert.equal(reopenedSettlement.code, 0, '重新分账后的订单必须能按待处理状态导出');
+assert.equal(reopenedSettlement.data?.summaryRows[0]?.status, '待处理', '导出状态必须与列表的重新分账状态一致');
+delete (order as typeof order & { settlementReopenPending?: boolean }).settlementReopenPending;
+
 const oldCreatedOrder = {
   ...order, id: 'order-old-created', orderNo: 'ORD-OLD-CREATED', createdAt: '2026-07-01T00:00:00.000Z', updatedAt: now,
 };

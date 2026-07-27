@@ -49,7 +49,11 @@ import {
 } from '../shared/utils/financeSettlementPresentation';
 
 const delay = (ms?: number) => baseDelay(ms, 'commissions');
-import { backendRequest, shouldUseBackendApi, syncBackendStorageFromServer } from './backendClient';
+import {
+  backendRequest,
+  shouldUseBackendApi,
+  syncBackendStorageScopeFromServer,
+} from './backendClient';
 
 function ensureInit(): void {
   initializeMockData();
@@ -708,7 +712,9 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
         confirmedAt: processing.confirmedAt,
         paidAt: processing.paidAt,
         withdrawReason: processing.withdrawReason,
-        status: deriveOrderSettlementProgress(sortedRows),
+        status: (order as (Order & { settlementReopenPending?: boolean }) | undefined)?.settlementReopenPending
+          ? '待处理'
+          : deriveOrderSettlementProgress(sortedRows),
         splitSummary: activeRows.map((item) => ({
           role: item.role,
           amount: item.commissionAmount,
@@ -1005,7 +1011,7 @@ async function saveOrderCommissionAdjustments(
       method: 'POST',
       body: JSON.stringify({ rows, reason: adjustReason }),
     });
-    if (response.code === 0) await syncBackendStorageFromServer(0);
+    if (response.code === 0) await syncBackendStorageScopeFromServer('commissions', 0);
     return response;
   }
   ensureInit();
@@ -1078,7 +1084,7 @@ async function resetOrderCommissions(orderId: string, reason: string): Promise<A
       method: 'POST',
       body: JSON.stringify({ reason }),
     });
-    if (response.code === 0) await syncBackendStorageFromServer(0);
+    if (response.code === 0) await syncBackendStorageScopeFromServer('commissions', 0);
     return response;
   }
   ensureInit();
@@ -1122,7 +1128,7 @@ async function cleanupDeletedSourceOrderCommissions(orderId: string, reason: str
       method: 'POST',
       body: JSON.stringify({ reason }),
     });
-    if (response.code === 0) await syncBackendStorageFromServer(0);
+    if (response.code === 0) await syncBackendStorageScopeFromServer('commissions', 0);
     return response;
   }
   ensureInit();
@@ -1163,6 +1169,14 @@ async function cleanupDeletedSourceOrderCommissions(orderId: string, reason: str
 }
 
 async function confirmOrderCommissions(orderId: string, reason?: string): Promise<ApiResponse<Commission[]>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Commission[]>(`/order-settlements/${encodeURIComponent(orderId)}/confirm`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    if (response.code === 0) await syncBackendStorageScopeFromServer('commissions', 0);
+    return response;
+  }
   ensureInit();
   await delay(160);
   const order = getOrderById(orderId);
@@ -1205,7 +1219,7 @@ async function withdrawOrderCommissions(orderId: string, reason: string): Promis
       method: 'POST',
       body: JSON.stringify({ reason }),
     });
-    if (response.code === 0) await syncBackendStorageFromServer(0);
+    if (response.code === 0) await syncBackendStorageScopeFromServer('commissions', 0);
     return response;
   }
   ensureInit();
@@ -1253,7 +1267,7 @@ async function reopenOrderCommissions(orderId: string, reason: string): Promise<
       method: 'POST',
       body: JSON.stringify({ reason }),
     });
-    if (response.code === 0) await syncBackendStorageFromServer(0);
+    if (response.code === 0) await syncBackendStorageScopeFromServer('commissions', 0);
     return response;
   }
   ensureInit();

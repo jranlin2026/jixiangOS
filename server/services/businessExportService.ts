@@ -171,7 +171,8 @@ function inRange(value: unknown, start?: string, end?: string): boolean {
 function paymentEvidenceNames(payment: { voucherName?: string; attachments?: Array<{ name?: string }> }): string[] {
   return [...new Set([payment.voucherName, ...(payment.attachments || []).map((attachment) => attachment.name)].map(clean).filter(Boolean))];
 }
-function settlementStatus(commissions: Commission[]): string {
+function settlementStatus(commissions: Commission[], order?: Order): string {
+  if ((order as (Order & { settlementReopenPending?: boolean }) | undefined)?.settlementReopenPending) return '待处理';
   return deriveOrderSettlementProgress(commissions);
 }
 function recoveryStatus(order: RecoveryOrder): string {
@@ -361,7 +362,7 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
           if (!splits.length) return false;
           const paymentDate = splits[0]?.paymentDate || order.payments?.[0]?.paidAt || order.createdAt;
           return (!filters.search || [order.orderNo, order.customerName].some((value) => clean(value).toLocaleLowerCase().includes(clean(filters.search).toLocaleLowerCase())))
-            && (!filters.status || filters.status === '全部' || settlementStatus(splits) === filters.status)
+            && (!filters.status || filters.status === '全部' || settlementStatus(splits, order) === filters.status)
             && (!filters.ownerId || splits.some((commission) => commission.ownerId === filters.ownerId))
             && (!filters.role || splits.some((commission) => commission.role === filters.role))
             && (!filters.month || String(paymentDate).startsWith(String(filters.month)))
@@ -424,7 +425,7 @@ export function createBusinessExportService(prisma: BusinessExportPrisma, option
             const updateDates = [...splits.map((item) => item.updatedAt), ...(logsByOrder.get(order.id) || []).map((log) => log.operatedAt)].filter(Boolean).sort();
             return project({ orderNo: order.orderNo, customerName: order.customerName, productName: order.productName || order.productLevel,
               productLevel: order.productLevel, orderType: order.orderType, paymentDate,
-              orderAmount: order.actualAmount || order.amount, status: settlementStatus(splits), salesOwner: order.salesName || order.owner,
+              orderAmount: order.actualAmount || order.amount, status: settlementStatus(splits, order), salesOwner: order.salesName || order.owner,
               resourceOwnership: order.resourceOwnership, totalCommissionAmount: processing.totalCommissionAmount,
               performanceAmount: processing.performanceAmount, pendingAssignCount: splits.filter((item) => item.owner === '待分配' || !item.ownerId).length,
               exceptionCount: processing.withdrawnCount, settlementOperator: processing.settlementOperator, confirmedAt: processing.confirmedAt, paidAt: processing.paidAt,

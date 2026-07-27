@@ -30,7 +30,7 @@ try {
     const method = String(init?.method || 'GET');
     const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
     requests.push({ url, method, body });
-    const data = url.includes('/storage?scope=runtime')
+    const data = url.includes('/storage?scope=commissions')
       ? { [STORAGE_KEYS.COMMISSIONS]: [], [STORAGE_KEYS.COMMISSION_OPERATION_LOGS]: [] }
       : url.endsWith('/withdraw')
         ? []
@@ -45,6 +45,7 @@ try {
   assert.equal((await commissionApi.withdrawOrderCommissions('order-2', '订单退款')).code, 0);
   assert.equal((await commissionApi.cleanupDeletedSourceOrderCommissions('order-3', '清理废弃留痕')).code, 0);
   assert.equal((await commissionApi.reopenOrderCommissions('order-4', '重新核对人员')).code, 0);
+  assert.equal((await commissionApi.confirmOrderCommissions('order-5', '财务确认')).code, 0);
   assert.equal((await commissionApi.saveOrderCommissionAdjustments('order-4', [{
     orderId: 'order-4', role: '销售', owner: '销售甲', ownerId: 'sales-1', department: '销售部', commissionAmount: 99,
   }], '保存第二轮')).code, 0);
@@ -59,11 +60,12 @@ try {
     { path: '/order-settlements/order-2/withdraw', method: 'POST', body: { reason: '订单退款' } },
     { path: '/order-settlements/order-3/cleanup', method: 'POST', body: { reason: '清理废弃留痕' } },
     { path: '/order-settlements/order-4/reopen', method: 'POST', body: { reason: '重新核对人员' } },
+    { path: '/order-settlements/order-5/confirm', method: 'POST', body: { reason: '财务确认' } },
     { path: '/order-settlements/order-4/save', method: 'POST', body: { rows: [{ orderId: 'order-4', role: '销售', owner: '销售甲', ownerId: 'sales-1', department: '销售部', commissionAmount: 99 }], reason: '保存第二轮' } },
   ]);
   assert.equal(
-    requests.filter((request) => request.url.includes('/storage?scope=runtime')).length,
-    5,
+    requests.filter((request) => request.url.includes('/storage?scope=commissions')).length,
+    6,
     '每个记录级命令成功后都应重新水合财务缓存',
   );
 } finally {
