@@ -79,7 +79,7 @@ type ContactIdentityStore = {
   $executeRaw?(query: Prisma.Sql): Promise<number>;
 };
 
-type ConflictViewer = {
+export type ConflictViewer = {
   /** Server-derived list-read capability; data scope alone must not disclose. */
   canReadCustomerList: boolean;
   canReadCustomer(customer: Customer): boolean;
@@ -89,6 +89,14 @@ type ContactInput = {
   phone?: string | null;
   wechat?: string | null;
   crypto?: ContactIdentityCrypto;
+};
+
+export type ContactIdentityDuplicateLookupInput = ContactInput & {
+  conflictViewer?: ConflictViewer;
+};
+
+export type ExactCustomerContactProvenanceInput = ContactInput & {
+  expectedCustomerId: string;
 };
 
 export type CustomerIdentityInput = ContactInput & {
@@ -394,6 +402,74 @@ async function safeConflictPayload(
     };
   }
   return { message: GENERIC_CONFLICT_MESSAGE };
+}
+
+/**
+ * Performs an exact read-only lookup against the normalized HMAC identity
+ * index. The result deliberately shares the write-conflict projection so a
+ * precheck cannot disclose raw contact values or customers outside the
+ * caller's current read scope.
+ */
+export async function findExactCustomerContactDuplicate(
+  tx: ContactIdentityStore,
+  input: ContactIdentityDuplicateLookupInput,
+): Promise<SafeContactIdentityConflictPayload | null> {
+  const crypto = requireCrypto(input.crypto);
+  const customerIds = new Set<string>();
+  for (const candidate of candidatesFromContact(input, crypto)) {
+    const identity = await tx.contactIdentity.findUnique({
+      where: {
+        type_normalizedHash: {
+          type: candidate.type,
+          normalizedHash: candidate.normalizedHash,
+        },
+      },
+    });
+    if (!identity) continue;
+    assertIdentityKeyVersion(identity, crypto);
+    const activeCustomerLinks = await tx.contactIdentityLink.findMany({
+      where: { identityId: identity.id, entityType: 'customer', linkStatus: 'active' },
+      select: { entityId: true },
+    });
+    for (const link of activeCustomerLinks) customerIds.add(String(link.entityId));
+  }
+  return customerIds.size
+    ? safeConflictPayload(tx, [...customerIds], input.conflictViewer)
+    : null;
+}
+
+/**
+ * Verifies replay provenance without returning contact values or linked IDs.
+ * Every supplied normalized identity must exist and its complete active
+ * customer-link set must be exactly the expected customer.
+ */
+export async function exactCustomerContactsBelongExclusivelyTo(
+  tx: ContactIdentityStore,
+  input: ExactCustomerContactProvenanceInput,
+): Promise<boolean> {
+  const crypto = requireCrypto(input.crypto);
+  const expectedCustomerId = String(input.expectedCustomerId || '').trim();
+  const candidates = candidatesFromContact(input, crypto);
+  if (!expectedCustomerId || !candidates.length) return false;
+  for (const candidate of candidates) {
+    const identity = await tx.contactIdentity.findUnique({
+      where: {
+        type_normalizedHash: {
+          type: candidate.type,
+          normalizedHash: candidate.normalizedHash,
+        },
+      },
+    });
+    if (!identity) return false;
+    assertIdentityKeyVersion(identity, crypto);
+    const activeCustomerLinks = await tx.contactIdentityLink.findMany({
+      where: { identityId: identity.id, entityType: 'customer', linkStatus: 'active' },
+      select: { entityId: true },
+    });
+    const linkedCustomerIds = new Set(activeCustomerLinks.map((link) => String(link.entityId)));
+    if (linkedCustomerIds.size !== 1 || !linkedCustomerIds.has(expectedCustomerId)) return false;
+  }
+  return true;
 }
 
 async function assertIdentityCanAcceptCustomer(

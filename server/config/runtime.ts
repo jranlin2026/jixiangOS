@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createContactIdentityCryptoFromEnv } from '../services/contactIdentityService';
 import { createCustomerPermissionMigrationManifestAuthenticatorFromEnv } from '../services/roleMigrationService';
 import { createCustomerMergeSnapshotKeyringFromEnv } from '../services/customerMergeSnapshotCrypto';
+import { validateWechatAutomationRuntimeConfig } from '../services/wechatAutomationSecurity';
 
 const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 const LOCALHOST_LISTEN_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
@@ -171,6 +172,7 @@ export function validateRuntimeConfig(env: NodeJS.ProcessEnv = process.env): voi
   createContactIdentityCryptoFromEnv(env);
   createCustomerPermissionMigrationManifestAuthenticatorFromEnv(env);
   createCustomerMergeSnapshotKeyringFromEnv(env);
+  validateWechatAutomationRuntimeConfig(env);
   if (getCustomerDataExchangeSecret(env).length < 32) {
     throw new Error('CUSTOMER_DATA_EXCHANGE_SIGNING_KEY must be at least 32 characters.');
   }

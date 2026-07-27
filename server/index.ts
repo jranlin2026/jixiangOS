@@ -111,6 +111,12 @@ import {
   createPrismaBusinessImportJobStore,
 } from './services/businessImportPersistence';
 import { createBusinessImportReviewService } from './services/businessImportReviewService';
+import {
+  createWechatCustomerAutomationRouter,
+  readWechatAutomationQaDatabaseIdentity,
+} from './routes/wechatCustomerAutomationRoutes';
+import { createWechatCustomerAutomationService } from './services/wechatCustomerAutomationService';
+import { readWechatAutomationConfig } from './services/wechatAutomationSecurity';
 import { resolveCanonicalCustomer } from './services/customerCanonicalService';
 import { createCoCreationService } from './services/coCreation/coCreationService';
 import {
@@ -170,6 +176,13 @@ const aiConfigService = createAiConfigService(prisma as any);
 const aiChatClient = createAiChatClient({ configReader: aiConfigService });
 const coCreationService = createCoCreationService({ prisma, aiClient: aiChatClient });
 const customerListService = createCustomerListService(prisma, { contactIdentityCrypto });
+const wechatAutomationConfig = readWechatAutomationConfig();
+const wechatCustomerAutomationService = createWechatCustomerAutomationService({
+  prisma,
+  customerService: customerListService,
+  automationConfig: wechatAutomationConfig || { actorAccount: '', signingKey: '' },
+  contactIdentityCrypto,
+});
 const customerCommandService = createCustomerCommandService(prisma, { contactIdentityCrypto });
 // Transfer/release/delete use the shared atomic command engine. Profile,
 // todo, claim, creation, and follow-up services retain their dedicated
@@ -506,6 +519,12 @@ app.get('/api/ready', async (_req, res) => {
   const payload = await healthPayload();
   res.status(payload.database ? 200 : 503).json(payload);
 });
+app.use('/api/automation/wechat', createWechatCustomerAutomationRouter({
+  config: () => readWechatAutomationConfig(),
+  resolveActor: (account) => authService.getAutomationActor(account),
+  qaDatabaseIdentity: (declaredDatabaseName) => readWechatAutomationQaDatabaseIdentity(declaredDatabaseName),
+  service: wechatCustomerAutomationService,
+}));
 app.use('/api/customer-tags', createCustomerTagMigrationRouter({
   service: customerTagMigrationService,
   requireAuth: requireDataMaintenanceWriteAccess,

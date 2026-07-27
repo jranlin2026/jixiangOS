@@ -1,149 +1,118 @@
-# Task 3 report — customer read/manage policy and authoritative single-record commands
+# Task 3 report: WeChat customer automation routes
 
-## Outcome
+## Implementation summary
 
-Implemented one server-authoritative customer access boundary that separates reading from managing. Customer reads now allow the configured owner range, contributor compatibility, and public-pool visibility without turning any of those read paths into write authority. Customer writes require a resolved stable `ownerId`, a manageable owner range derived from the fresh server directory, and the exact action/field permission leaf.
+- Added the two bearer-authenticated WeChat customer POST routes and mounted them at `/api/automation/wechat`.
+- Added the required fixed sender configuration `JIXIANG_WECHAT_AUTOMATION_SENDER_ID`; partial/weak configuration fails closed.
+- Added fresh, session-free automation actor resolution. Routes require active actor status plus current customer list/read and create/write permissions.
+- Added durable AppStorage idempotency records. Keys, request IDs, and audit idempotency keys are SHA-256 server derivations of the fixed integration ID, verified sender, and signed nonce. Records retain only version, hashes, state, result customer ID, timestamps, attempts, and derived IDs.
+- Added recovery by matching successful `create_customer_from_wechat` audit idempotency key. An unrelated duplicate cannot become a replay.
 
-All current single-customer writes, customer todo writes, and discovered derived customer writers now use a `BusinessRecord` repository with row locking and compare-and-save conflict detection. No Prisma `Customer` model was introduced.
+## Files changed
 
-## Main implementation
-
-- Added `customerAccessPolicy.ts`:
-  - builds `CustomerAccessContext` from active users, roles, and departments queried on the server;
-  - requires the actor's stable `roleId` and fails closed for an inactive/missing role, invalid customer scope, missing department identity, deleted customer, unresolved owner identity, or missing `ownerId`;
-  - implements `self`, `department_only`, `department_and_descendants`, and `all` manage ranges;
-  - keeps legacy owner/contributor names read-only and never uses them for manageability;
-  - separates `canReadCustomer` from `canManageCustomer`;
-  - maps field groups and commands to explicit leaves, including explicit `CUSTOMER_DELETE/delete` and the dedicated public-pool claim leaf.
-- Added `customerBusinessRecordRepository.ts`:
-  - validates `aaos_customers` rows and `recordId === customer.id`;
-  - supports ordinary reads and `SELECT ... FOR UPDATE`;
-  - saves only with the locked row's top-level `BusinessRecord.updatedAt` and raises `CustomerWriteConflictError` when the compare-and-save count is not exactly one.
-- Updated customer list/detail/follow-up, command, todo, tag, tag migration, owner-identity backfill, order application, order approval effects, and order command flows to share the access policy and repository boundary.
-- Replaced live customer `CUSTOMER_EDIT` / `CUSTOMER_ASSIGN` route gates with exact profile/progress/tag/attribution/todo/transfer/release/claim/delete leaves.
-- Preserved the narrow todo exception: an assignee may complete their own todo only when they can read its customer; creating, editing, reopening, cancelling, or completing someone else's todo requires todo permission plus manageability.
-- Defined public-pool state canonically as public-pool lifecycle plus public-pool owner identity plus no stable owner ID. The display text `owner === '公海'` is not a runtime customer authorization signal.
-- Disabled legacy whole-array customer storage reads, writes, and runtime access. The key stays registered so callers fail explicitly.
-- Removed customer JSON rewrites from employee leave/handoff. An employee who still owns customers is now blocked until customer transfer/release is completed through customer commands; the later batch task supplies that bulk workflow.
-- Updated customer UI gates and the local mock's locked-contact override to use explicit leaves. A role display name alone no longer grants the override.
-- Customer browser visibility now treats a passed user without trusted department identity as self-only instead of hydrating authority from `localStorage`; explicitly supplied directory data retains the new customer scopes, while every non-customer legacy `department` scope retains descendant behavior.
-
-## Review hardening
-
-- Protected `aaos_customers` from every raw maintenance path, not only runtime storage: raw list omits it, single-key get/remove return 403, and prefix clear preserves it while continuing to clear unrelated storage/lead/business domains.
-- Retired the old per-CRM customer import endpoint. `POST /api/crm-migration/import` now always returns HTTP 410 and directs callers to the unified customer import template; no live route invokes `storageService.importCrmMigration`.
-- Added one shared `CustomerWriteConflictError` mapper and applied it to customer commands, follow-ups, all todo mutations, tag merge, owner identity backfill, and order-approval customer projection. Existing tag migration and order command projection behavior remains HTTP 409. A real Express route test proves follow-up conflicts stay HTTP 409 instead of being collapsed to 400.
-- Made Customer Detail profile saves permission-aware deltas. A profile-only rename submits only `name`; unchanged, attribution, and locked-contact fields are not smuggled into the request. Attribution controls remain visibly read-only without the explicit attribution leaf.
-- Made attribution editing independently reachable: a role with only the explicit attribution leaf can open the editor for a manageable customer, sees profile fields read-only, and submits only changed attribution fields. A profile-only role cannot alter attribution fields.
-- Made follow-up controls require explicit profile-edit permission plus stable-ID manageability. Todo create/edit/cancel/reopen require explicit todo permission plus manageability, while the readable assignee's own pending todo completion remains available.
-- Added one shared client write-action policy for profile/attribution edits, tags, follow-ups, todos, progress, transfer, release, and delete. Customer Detail and Customer List now require both the exact explicit leaf and stable-owner manageability; contributor-only and public-pool read paths expose none of those ordinary writes. List open/confirm handlers and already-open dialog buttons re-check the same policy. Public-pool claim remains the deliberate separate exception.
-- Added the dedicated `GET /api/customers/manageable-users` bootstrap path. It accepts every customer manage leaf with the authoritative action (`delete` for customer delete, `write` for the others), rebuilds customer access from the fresh server directory, and returns only the minimal `id`, `name`, and optional `positionName` DTO. It never exposes email, phone, role, or the shared assignable-user payload.
-- Restored the shared `/api/settings/assignable-users` and `/api/settings/assignable-directory` permissions and cross-module semantics. Delivery, leads, after-sales, finance, and existing customer-todo/transfer consumers still receive every active employee candidate; customer scope no longer filters these shared APIs.
-- Customer Detail and Customer List now consume only the dedicated customer directory. Transfer options and the submit-time allowlist are exactly the server response; stale browser users cannot expand it. The authenticated user's stable ID remains a manageability fallback only, so profile-only self management does not disappear while the directory is loading, but it does not create a transfer candidate.
-- Removed customer list/count reliance on stale `BusinessRecord.owner` and `title` mirrors. Visibility, owner filters, and search use the authoritative customer JSON, so mismatched mirrors cannot produce short pages or incorrect totals. Pagination remains one `COUNT` plus one `LIMIT/OFFSET` query; the core stable-owner visibility path already used JSON before this correction.
-
-## Changed areas
-
-- Access/repository: `customerAccessPolicy*`, `customerBusinessRecordRepository*`
-- Customer commands and reads: `customerCommandService*`, `customerListService*`, `customerTodoService*`, `server/index.ts`
-- Derived customer writes: owner identity, customer tags/migration, order application/approval/command services and tests
-- Safety boundaries: `legacyStorageAccess*`, `storageRoutesAuth.test.ts`, `settingsService*`
-- Client compatibility/UI: `customerApi*`, customer list/detail pages, `dataVisibility.ts`, assignment/data-visibility/UI static regressions
+- `.env.example`, `server/config/runtime.test.ts`, `server/config/productionConfigCheck.test.ts`
+- `server/index.ts`, `server/storageRoutesAuth.test.ts`
+- `server/services/authService.ts`, `server/services/wechatAutomationSecurity.ts`, `server/services/wechatAutomationSecurity.test.ts`
+- `server/services/wechatCustomerAutomationService.ts`, `server/services/wechatCustomerAutomationService.test.ts`
+- `server/routes/wechatCustomerAutomationRoutes.ts`, `server/routes/wechatCustomerAutomationRoutes.test.ts`
 
 ## TDD evidence
 
-The focused suites were written or extended around the missing policy/repository behavior before the implementation. RED coverage included:
+- RED: `npx tsx server/services/wechatCustomerAutomationService.test.ts` failed with `actual 'created' / expected 'replayed'` for the sequential replay behavior before idempotency existed.
+- GREEN: the same focused service test passes after adding the AppStorage reservation/replay implementation.
+- RED: `npx tsx server/routes/wechatCustomerAutomationRoutes.test.ts` failed with `ERR_MODULE_NOT_FOUND` before the route adapter existed.
+- GREEN: route test passes after implementing constant-time token/sender auth and fresh actor authorization.
+- RED: `npx tsx server/services/wechatAutomationSecurity.test.ts` initially reported the sender-only partial configuration was accepted.
+- GREEN: security test passes after extending the all-or-nothing runtime configuration.
 
-- contributor/public-pool reads being coupled to management;
-- unresolved owners and customer department scopes lacking a fail-closed policy;
-- public-pool claim using generic manageability;
-- missing `BusinessRecord` row locking/version comparison;
-- mixed-field updates and todo mutations reaching writes without all required leaves;
-- derived order/tag/backfill paths writing customer JSON outside the repository;
-- role display names and legacy storage paths retaining customer authority.
-- raw maintenance list/get/remove/prefix-clear exposing or deleting the protected customer asset;
-- the legacy CRM import route remaining a live customer write bypass;
-- compare-and-save conflicts escaping or being converted to an incorrect HTTP status;
-- profile-only UI saves carrying attribution fields, missing action/manage gates, and the own-todo completion exception disappearing;
-- customer UI sourcing transfer candidates from shared settings, lead-flow configuration, or stale browser users instead of a dedicated server upper bound;
-- profile-only self access being rejected by the dedicated directory route, department candidates being returned outside fresh customer scope, and the endpoint leaking the shared user payload;
-- customer-only scope/permission changes contaminating shared delivery, leads, and after-sales assignment directories;
-- attribution-only editors being unable to open while profile-only editors could smuggle attribution changes;
-- customer-list delete/transfer/release controls and their handlers relying on a permission leaf without stable-ID manageability;
-- contributor/public-pool readable customers exposing ordinary write controls when the user held the corresponding leaf;
-- top-level owner/title mirrors disagreeing with customer JSON and corrupting visible items or pagination totals.
+## Verification
 
-Final focused verification passed for:
+- `npx tsx server/services/wechatCustomerAutomationService.test.ts` — passed (sequential/concurrent replay, fingerprint conflict, malformed record, pre-write failure, finalize recovery, audit provenance, PII assertions).
+- `npx tsx server/routes/wechatCustomerAutomationRoutes.test.ts` — passed (credential/sender, active/permission, and check behavior).
+- `npx tsx server/services/wechatAutomationSecurity.test.ts` — passed.
+- `npx tsx server/storageRoutesAuth.test.ts` — passed.
+- `npx tsc -b --pretty false` — passed.
+- `git diff --check` — passed.
+- `npm test` — passed; the existing `customer batch live database verification skipped: DATABASE_URL is not set` environment-only skip remains.
 
-```text
-server/services/customerAccessContext.test.ts
-server/services/customerAccessPolicy.test.ts
-server/services/customerBusinessRecordRepository.test.ts
-server/services/customerCommandService.test.ts
-server/services/customerListAccessPolicy.test.ts
-server/services/customerListService.test.ts
-server/services/customerOwnerIdentityService.test.ts
-server/services/customerTagMigrationService.test.ts
-server/services/customerTagService.test.ts
-server/services/customerTodoAccessPolicy.test.ts
-server/services/customerTodoService.test.ts
-server/services/legacyStorageAccess.test.ts
-server/services/orderApplicationService.test.ts
-server/services/orderApprovalEffectsService.test.ts
-server/services/orderCommandService.test.ts
-server/middleware/auth.test.ts
-server/routes/customerManageableUsersRoutes.test.ts
-server/services/customerManageableUsersService.test.ts
-server/services/settingsAssignableUsers.test.ts
-server/services/settingsService.test.ts
-server/services/storageService.test.ts
-server/storageRoutesAuth.test.ts
-server/routes/crmMigrationRoutes.test.ts
-server/routes/customerFollowUpRoutes.test.ts
-src/api/customerApi.test.ts
-src/api/customerManageableUsers.test.ts
-src/api/customerLeadProfileSecurityStatic.test.ts
-src/api/customerTodoFeatureStatic.test.ts
-src/api/customerWriteManageabilityStatic.test.ts
-src/api/leadAssignmentCandidates.test.ts
-src/api/uiPolishStatic.test.ts
-src/pages/Customers/customerDetailPolicy.test.ts
-src/shared/utils/dataVisibilityScope.test.ts
-```
+## Self-review and risks
 
-## Full verification
+- No raw token, sender, precheck token, phone, WeChat ID, customer text, or audit free text is persisted by idempotency records.
+- Create uses server-derived request/idempotency IDs and the existing `create_customer_from_wechat` audit operation.
+- AppStorage primary-key reservation prevents double creation; followers await the winner/audit and fail closed rather than replaying an unrelated duplicate.
+- No employee login/session is created or reused. No MCP/Task 4 work was added.
 
-Using the bundled Node runtime:
+## Review hardening follow-up
 
-```sh
-pnpm test
-# 196 test files passed.
+### Implementation
 
-pnpm build
-# tsc -b && vite build; 13,400 modules transformed.
+- Replaced direct BusinessRecord replay reads with fresh exact-contact lookup using the current customer access context. Completed records and matching audit recovery now replay only when the same customer ID is still exact-contact matched and currently visible.
+- Replaced the ~100 ms follower window with durable polling (5-second production default). A live winner can complete normally; an unresolved bounded timeout produces HTTP 503 generic unavailable semantics, never a false 409. Duplicate terminal state is persisted and followers fail closed immediately.
+- Tightened version-1 record parsing: canonical ISO timestamps are mandatory, `createStartedAt` is required, and ordering must be `createdAt <= createStartedAt <= updatedAt`.
+- Expanded PII/secret assertions across AppStorage key/value, the actual customer create execution object, and the real audit append metadata path. Legitimate audit `afterSnapshot` customer fields are intentionally outside the metadata assertion.
+- Expanded the route contract test to the exact two-POST surface plus create forwarding, 201 success, generic 409, retryable 503, and invalid-body 400.
+- `attempts` remains the durable customer-creation attempt count. Followers do not rewrite it because an unguarded AppStorage JSON update could overwrite a concurrently completed winner; concurrency remains fail-closed without a race-prone counter update.
 
-git diff --check
-# exit 0
-```
+### Follow-up RED evidence
 
-Two full-suite compatibility findings were corrected before the final green run:
+- `npx tsx server/services/wechatCustomerAutomationService.test.ts` — RED: `Missing expected rejection` after the created customer's exact contact mapping was removed; old replay bypassed contact/visibility checks.
+- `npx tsx server/services/wechatCustomerAutomationService.test.ts` — RED: slow 250 ms winner caused `WeChat customer create idempotency conflict` in the follower under the old 20x5 ms loop.
+- `npx tsx server/services/wechatCustomerAutomationService.test.ts` — RED: malformed timestamp cases reported `Missing expected rejection`; old parsing accepted empty/non-canonical/missing/out-of-order timestamps.
+- `npx tsx server/routes/wechatCustomerAutomationRoutes.test.ts` — RED: retryable pending error returned HTTP 500 instead of expected HTTP 503.
+- `npx tsx server/services/wechatCustomerAutomationService.test.ts` — RED: a follower observing a newly failed duplicate timed out as `still in progress` instead of immediately returning idempotency conflict.
+- `npx tsx server/services/wechatCustomerAutomationService.test.ts` — RED: a duplicate discovered after check left an in-progress reservation and retry timed out as `still in progress` instead of terminal conflict.
 
-1. The local customer API test still expected the display role name `超级管理员` to override locked contact fields. It now proves the display name is inert and a stable role ID with explicit `CUSTOMER_DELETE/delete` is required.
-2. A customer assignment-candidate regression expected a passed user missing `departmentId` to recover authority from browser storage. It now proves that customer scope fails closed to self; explicit department identity/directory tests cover `department_only` and descendants. The non-customer leads scope remains unchanged.
+### Follow-up GREEN and verification evidence
 
-The review pass also caught a TypeScript generic mismatch in the shared conflict result and the extracted follow-up route handler. Their nullable API result types were corrected before the successful build.
+- `npx tsx server/services/wechatCustomerAutomationService.test.ts` — GREEN: passed all replay/contact/visibility, slow concurrency, timeout, failed terminal, strict record, storage recovery, and sensitive metadata scenarios.
+- `npx tsx server/routes/wechatCustomerAutomationRoutes.test.ts` — GREEN: passed complete two-route create/check contract and generic error mapping.
+- `npx tsx server/services/wechatAutomationSecurity.test.ts` — GREEN: passed.
+- `npx tsx server/services/authService.test.ts` — GREEN: passed.
+- `npx tsx server/services/customerListService.test.ts` — GREEN: passed.
+- `npx tsx server/storageRoutesAuth.test.ts` — GREEN: passed.
+- `npx tsc -b --pretty false` — GREEN: passed after replacing the test-only unsupported `Array.at` use.
+- `git diff --check` — GREEN: passed.
+- `npm test` — GREEN: passed; only the existing `DATABASE_URL is not set` live integration skip remains.
 
-## Live authorization audit
+### Follow-up self-review
 
-- No live customer route or customer service authorization uses `CUSTOMER_EDIT` or `CUSTOMER_ASSIGN`.
-- Remaining old-key references are compatibility definitions/default seed data or the one-time signed role migration; they are not runtime customer command gates.
-- Remaining customer owner-name checks are limited to read/display compatibility and owner-identity migration. Manage/write authorization uses stable owner IDs only.
-- Remaining `super_admin` checks in `customerCommandService.ts` govern lead editing/deletion, not customer authorization.
-- All discovered server-side customer JSON mutation paths use the repository lock/compare-and-save boundary.
-- All discovered `CustomerWriteConflictError` paths return a 409 API result, and live HTTP routes preserve that status.
+- Replay provenance and current contact/visibility must both agree; neither can substitute for the other.
+- All customer-create paths reserve before create and never allow followers to create. Slow or indeterminate state returns retryable unavailable, while known duplicate/malformed state is a conflict.
+- AppStorage and correlation/audit metadata contain hashes, IDs, states, timestamps, counters, and fixed labels only. Raw sender/contact/token/signing key/precheck token/customer message values are excluded.
+- No schema/migration, session reuse, permission widening, logging of sensitive diagnostics, or MCP work was introduced.
 
-## Follow-up boundary
+## Final review closeout
 
-Task 3 intentionally blocks employee deactivation/handoff while customers remain assigned. Task 6 must provide the supported batch transfer/release prerequisite; this task does not recreate the unsafe legacy name-based partial handoff.
+- Final task re-review: spec compliant and task quality approved; no Critical or Important findings remain.
+- Resolved the sole Minor finding by correcting `.env.example` from “all three” to “all four” required server-side automation values.
+- Final Minor-fix verification: `npx tsx server/services/wechatAutomationSecurity.test.ts`, `npx tsx server/config/runtime.test.ts`, `npx tsx server/config/productionConfigCheck.test.ts`, and `git diff --check` passed.
 
-No push or deployment was performed.
+## Replay provenance second follow-up
+
+### Implementation
+
+- Added `exactCustomerContactsBelongExclusivelyTo`, a boolean-only contact identity query. Every supplied normalized contact must exist and its complete active customer-link set must be exactly the expected original customer ID.
+- Replay/recovery now checks that per-contact provenance first, then independently loads the original customer, applies the freshly resolved `canReadCustomer` policy, and returns only the safe customer summary.
+- Create-time stale-precheck errors now use the fixed message `WeChat customer precheck is stale.` and never append dynamic resolution/tag text.
+
+### RED evidence
+
+- `npx tsx server/services/wechatCustomerAutomationService.test.ts` — RED: `Missing expected rejection` when phone mapped only to the original customer while WeChat linked both the lexicographically first original and a later unrelated customer; the old union/projection replayed the original.
+- `npx tsx server/services/contactIdentityService.test.ts` — RED: module export error because the wished-for boolean provenance helper did not exist.
+- `npx tsx server/services/wechatCustomerAutomationService.test.ts` — RED: expected fixed stale message but received `WeChat customer precheck is stale: 标签“PRIVATE_TAG_PHONE_13800138130”...`, proving raw arbitrary input reached diagnostics.
+
+### GREEN and verification evidence
+
+- `npx tsx server/services/contactIdentityService.test.ts` — GREEN: per-contact exclusive provenance helper passed split-contact and phone-only cases without returning identity data.
+- `npx tsx server/services/wechatCustomerAutomationService.test.ts` — GREEN: split-contact replay fails closed; fixed stale diagnostic excludes tag/contact/original-message markers.
+- `npx tsx server/services/wechatCustomerAutomationService.test.ts && npx tsx server/services/contactIdentityService.test.ts && npx tsx server/routes/wechatCustomerAutomationRoutes.test.ts && npx tsx server/services/authService.test.ts && npx tsx server/services/customerAccessPolicy.test.ts && npx tsx server/services/customerListService.test.ts && npx tsx server/services/wechatAutomationSecurity.test.ts && npx tsx server/storageRoutesAuth.test.ts` — GREEN: all focused service, contact identity, route, authorization, access-policy, customer-list, security, and storage-route tests passed.
+- `npx tsc -b --pretty false` and `git diff --check` — GREEN: both passed without diagnostics.
+- `npm test` — GREEN: full suite passed; only the existing live-database verification was skipped because `DATABASE_URL` is not set.
+
+### Self-review
+
+- Provenance no longer depends on union ordering or the first readable customer; every supplied contact is checked independently.
+- The provenance helper returns only a boolean and never exposes/logs raw normalized identities, hashes, or linked customer IDs.
+- Visibility remains a separate fresh policy check against the exact original customer record.
+- Dynamic `needs_input` messages remain useful for check responses, while create stale-precheck diagnostics are fixed and PII-free.
+- No MCP, schema, migration, session, logging, or permission-scope changes were introduced.

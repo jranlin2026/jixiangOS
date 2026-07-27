@@ -799,3 +799,16 @@ assert.equal(batchDirectoryReads, 0, 'batch create must reuse the transaction-au
 servicePrisma.user.findMany = originalBatchUserFindMany;
 assert.equal(auditEvents[auditEvents.length - 1]?.batchJobId, 'import-job-test');
 assert.equal(auditEvents[auditEvents.length - 1]?.requestId, 'import-job-test:row:1');
+
+const wechatAuditCreated = await service.create({
+  name: '微信自动化审计客户', company: '', phone: '13500000089', customerLevel: 'L1',
+  owner: actor.name, ownerId: actor.id, sourceType: '公司资源',
+}, actor, {
+  auditOperation: 'create_customer_from_wechat',
+  auditReason: '微信自动化创建客户',
+});
+assert.equal(wechatAuditCreated.code, 0);
+assert.equal(auditEvents[auditEvents.length - 1]?.operation, 'create_customer_from_wechat');
+assert.equal(auditEvents[auditEvents.length - 1]?.reason, '微信自动化创建客户');
+assert.equal(auditEvents[0]?.operation, 'create_customer', 'manual customer creation audit behavior must remain unchanged');
+assert.equal(auditEvents[0]?.reason, '创建客户');
