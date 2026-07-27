@@ -28,6 +28,7 @@ import TablePagination from '../../shared/components/TablePagination';
 import AddIcon from '@mui/icons-material/Add';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import EditIcon from '@mui/icons-material/Edit';
 import UndoIcon from '@mui/icons-material/Undo';
 import SearchIcon from '@mui/icons-material/Search';
@@ -118,6 +119,8 @@ type SettlementDetailRow = {
   payoutPlanName: string;
   formulaText?: string;
   calculationNote?: string;
+  settlementVersion?: number;
+  settlementRoundId?: string;
   isDefaultPreview?: boolean;
 };
 
@@ -388,6 +391,9 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   const [deleteReason, setDeleteReason] = useState('');
   const [withdrawTarget, setWithdrawTarget] = useState<RecoveryOrder | null>(null);
   const [withdrawReason, setWithdrawReason] = useState('');
+  const [reopenTarget, setReopenTarget] = useState<RecoveryOrder | null>(null);
+  const [reopenReason, setReopenReason] = useState('');
+  const [reopenLoading, setReopenLoading] = useState(false);
   const handledViewSettingsTriggerRef = React.useRef(viewSettingsTrigger);
   const handledCreateSettlementTriggerRef = React.useRef(createSettlementTrigger);
   const handledExportTriggerRef = React.useRef(exportTrigger);
@@ -549,6 +555,8 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         payoutPlanName: commission.payoutPlanName || '自定义金额',
         formulaText: commission.formulaText,
         calculationNote: commission.calculationNote,
+        settlementVersion: commission.settlementVersion || 1,
+        settlementRoundId: commission.settlementRoundId,
       }));
     }
     const ownerId = getDefaultRecoveryOwnerId(order);
@@ -564,6 +572,8 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       status: '待处理',
       payoutPlanName: '待选择',
       formulaText: '默认带入挽回人员，财务确认方案和金额后保存。',
+      settlementVersion: order.settlementVersion || 1,
+      settlementRoundId: order.settlementRoundId,
       isDefaultPreview: true,
     }];
   };
@@ -615,7 +625,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     try {
       const res = await recoveryOrderApi.fetchRecoveryOrders({
         search: nextSearch,
-        statuses: ['待分账'],
+        statuses: ['审核通过', '待分账', '已分账'],
         settlementStatus: '待处理',
         page: 1,
         pageSize: 100,
@@ -927,6 +937,23 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     await load();
   };
 
+  const reopenSettlement = async () => {
+    if (!canManageRecoverySettlement || !currentUser || !reopenTarget || !reopenReason.trim()) return;
+    setReopenLoading(true);
+    const response = await recoveryOrderApi.reopenRecoverySettlement(reopenTarget.id, reopenReason, currentUser.name);
+    setReopenLoading(false);
+    if (response.code !== 0 || !response.data) {
+      setMessage({ type: 'error', text: response.message || '重新分账失败' });
+      return;
+    }
+    applySettlementMutation(reopenTarget, response.data);
+    setReopenTarget(null);
+    setReopenReason('');
+    setDetailOrder(null);
+    setMessage({ type: 'success', text: '已创建新的分账轮次，售后挽回订单已退回待处理' });
+    await load();
+  };
+
   const openResetSettlementDialog = (row: RecoveryOrder) => {
     if (isSourceRecoveryDeleted(row)) {
       if (!canCleanupDeletedSettlement) return;
@@ -936,7 +963,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     }
     if (!canManageRecoverySettlement) return;
     if (getSettlementStatus(row) !== '待确认') {
-      setMessage({ type: 'error', text: '只有待确认的售后挽回分账可以删除' });
+      setMessage({ type: 'error', text: '只有待确认的售后挽回分账可以重置' });
       return;
     }
     setDeleteTarget(row);
@@ -949,14 +976,14 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     const cleanupDeletedSource = isSourceRecoveryDeleted(deleteTarget);
     if (cleanupDeletedSource ? !canCleanupDeletedSettlement : !canManageRecoverySettlement) return;
     if (!deleteReason.trim()) {
-      setMessage({ type: 'error', text: '请填写删除原因' });
+      setMessage({ type: 'error', text: cleanupDeletedSource ? '请填写清理原因' : '请填写重置原因' });
       return;
     }
     const res = cleanupDeletedSource
       ? await recoveryOrderApi.cleanupDeletedRecoverySettlement(deleteTarget.id, deleteReason)
       : await recoveryOrderApi.resetRecoverySettlement(deleteTarget.id, currentUser.name, deleteReason);
     if (res.code !== 0) {
-      setMessage({ type: 'error', text: res.message || (cleanupDeletedSource ? '清理废弃售后挽回分账失败' : '删除售后挽回分账失败') });
+      setMessage({ type: 'error', text: res.message || (cleanupDeletedSource ? '清理废弃售后挽回分账失败' : '重置售后挽回分账失败') });
       return;
     }
     if (!cleanupDeletedSource && res.data) applySettlementMutation(deleteTarget, res.data);
@@ -964,7 +991,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     setDeleteReason('');
     setMessage({
       type: 'success',
-      text: cleanupDeletedSource ? '已清理废弃售后挽回分账' : '已删除售后挽回分账，订单已退回待处理',
+      text: cleanupDeletedSource ? '已清理废弃售后挽回分账' : '已重置售后挽回分账，订单已退回待处理',
     });
     await load();
   };
@@ -981,7 +1008,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     if (settlementStatus === '待处理') return '处理分账';
     if (settlementStatus === '待确认') return '调整分账';
     if (settlementStatus === '待发放') return '已进入发放链路，不能直接调整';
-    if (settlementStatus === '已撤回') return '提成已撤回，只能查看留痕';
+    if (settlementStatus === '已撤回') return '提成已撤回，可使用重新分账创建新轮次';
     return '不可调整';
   };
 
@@ -993,8 +1020,8 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
 
   const getDeleteDisabledReason = (row: RecoveryOrder) => (
     isSourceRecoveryDeleted(row)
-      ? (canCleanupDeletedSettlement ? '清理废弃售后挽回分账' : '仅超级管理员可清理废弃分账')
-      : (canDeleteSettlement(row) ? '删除售后挽回分账' : '仅待确认阶段的分账可直接删除')
+      ? (canCleanupDeletedSettlement ? '清理废弃记录' : '仅超级管理员可清理废弃记录')
+      : (canDeleteSettlement(row) ? '重置分账' : '仅待确认阶段的分账可重置')
   );
 
   const renderCell = (row: RecoveryOrder, columnId: RecoverySettlementColumnId) => {
@@ -1118,16 +1145,37 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
               </IconButton>
             </span>
           </Tooltip>
+          {getSettlementStatus(row) === '已撤回' && !isSourceRecoveryDeleted(row) && (
+            <Tooltip title="重新分账">
+              <span>
+                <IconButton
+                  size="small"
+                  sx={{ color: canManageRecoverySettlement ? shell.blue : '#94a3b8' }}
+                  disabled={!canManageRecoverySettlement}
+                  onClick={() => { setReopenTarget(row); setReopenReason(''); }}
+                  aria-label="重新分账"
+                >
+                  <RestartAltIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          )}
           <Tooltip title={getDeleteDisabledReason(row)}>
             <span>
               <IconButton
                 size="small"
-                sx={{ color: canDeleteSettlement(row) ? shell.red : '#cbd5e1' }}
+                sx={{
+                  color: canDeleteSettlement(row)
+                    ? (isSourceRecoveryDeleted(row) ? shell.red : shell.amber)
+                    : '#cbd5e1',
+                }}
                 disabled={!canDeleteSettlement(row)}
                 onClick={() => openResetSettlementDialog(row)}
-                aria-label={isSourceRecoveryDeleted(row) ? '清理废弃售后挽回分账' : '删除售后挽回分账'}
+                aria-label={isSourceRecoveryDeleted(row) ? '清理废弃记录' : '重置售后挽回分账'}
               >
-                <DeleteOutlineIcon fontSize="small" />
+                {isSourceRecoveryDeleted(row)
+                  ? <DeleteSweepIcon fontSize="small" />
+                  : <RestartAltIcon fontSize="small" />}
               </IconButton>
             </span>
           </Tooltip>
@@ -1496,14 +1544,25 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                           justifyContent: 'start',
                         }}
                       >
-                        {getDetailRows(detailOrder).map((commission, index) => (
+                        {[...getDetailRows(detailOrder)]
+                          .sort((left, right) => (right.settlementVersion || 1) - (left.settlementVersion || 1))
+                          .flatMap((commission, index, allRows) => {
+                            const version = commission.settlementVersion || 1;
+                            const previousVersion = index > 0 ? (allRows[index - 1].settlementVersion || 1) : undefined;
+                            const header = previousVersion !== version ? (
+                              <Stack key={`round-${version}`} direction="row" spacing={1} alignItems="center" sx={{ gridColumn: '1 / -1' }}>
+                                <Typography variant="subtitle2" fontWeight={900}>第 {version} 轮分账</Typography>
+                                <Chip size="small" label={index === 0 ? '当前/最新轮次' : '历史轮次'} color={index === 0 ? 'primary' : 'default'} variant={index === 0 ? 'filled' : 'outlined'} />
+                              </Stack>
+                            ) : null;
+                            const card = (
                           <Paper key={commission.id} elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
                             <Box sx={{ px: 1.25, py: 1, borderBottom: '1px solid #eef2f7', bgcolor: '#fff' }}>
                               <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
                                 <Box sx={{ minWidth: 0 }}>
                                   <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 0.5 }}>
                                     <Chip label={commission.role || DEFAULT_RECOVERY_ROLE} size="small" color="primary" sx={{ fontWeight: 900 }} />
-                                    <Typography variant="caption" sx={{ color: shell.muted }}>分账 {index + 1}</Typography>
+                                    <Chip label={`第 ${version} 轮`} size="small" variant="outlined" sx={{ height: 22 }} />
                                   </Stack>
                                   <Typography variant="body2" sx={{ fontWeight: 900, color: shell.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {commission.owner || '-'}
@@ -1547,7 +1606,9 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                               </Box>
                             </Box>
                           </Paper>
-                        ))}
+                            );
+                            return header ? [header, card] : [card];
+                          })}
                       </Box>
                     )}
                   </Box>
@@ -1568,7 +1629,9 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                             ? '确认后，本单提成进入待发放。'
                             : getSettlementStatus(detailOrder) === '待发放'
                               ? '本单已进入发放链路，如有错误可撤回。'
-                              : '本单提成已撤回，只保留历史记录。'}
+                              : getSettlementStatus(detailOrder) === '已撤回'
+                                ? '本轮提成已撤回并保留为只读历史，可重新分账创建新轮次。'
+                                : '提成已发放，第一版不支持系统内撤回或冲销，请在线下处理并保留说明。'}
                       </Typography>
                       {canManageRecoverySettlement && (
                         <>
@@ -1585,6 +1648,17 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                           )}
                           {!isSourceRecoveryDeleted(detailOrder) && getSettlementStatus(detailOrder) === '待确认' && (
                             <>
+                              <Button variant="outlined" startIcon={<EditIcon />} onClick={() => openSettlement(detailOrder)}>
+                                调整分账
+                              </Button>
+                              <Button
+                                variant="outlined"
+                                color="warning"
+                                startIcon={<RestartAltIcon />}
+                                onClick={() => { setDeleteTarget(detailOrder); setDeleteReason(''); }}
+                              >
+                                重置分账
+                              </Button>
                               <Button variant="contained" color="success" startIcon={<CheckCircleOutlineIcon />} onClick={() => confirmSettlement(detailOrder)}>
                                 确认分账
                               </Button>
@@ -1626,6 +1700,15 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                                 撤回提成
                               </Button>
                             </>
+                          )}
+                          {!isSourceRecoveryDeleted(detailOrder) && getSettlementStatus(detailOrder) === '已撤回' && (
+                            <Button
+                              variant="contained"
+                              startIcon={<RestartAltIcon />}
+                              onClick={() => { setReopenTarget(detailOrder); setReopenReason(''); }}
+                            >
+                              重新分账
+                            </Button>
                           )}
                         </>
                       )}
@@ -2126,7 +2209,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
             setDeleteReason('');
           }}
         >
-          {deleteTarget && isSourceRecoveryDeleted(deleteTarget) ? '清理废弃售后挽回分账' : '删除售后挽回分账'}
+          {deleteTarget && isSourceRecoveryDeleted(deleteTarget) ? '清理废弃记录' : '重置售后挽回分账'}
         </DialogCloseTitle>
         <DialogContent dividers>
           {deleteTarget && (
@@ -2134,7 +2217,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
               <Alert severity="warning">
                 {isSourceRecoveryDeleted(deleteTarget)
                   ? '清理后该记录将从财务售后挽回分账列表隐藏，底层业务、提成及清理审计留痕仍保留。'
-                  : '删除后会清空该挽回单已保存的提成记录，并退回到“待处理”状态。'}
+                  : '重置后会清空该挽回单当前保存的人员分账明细，并退回到“待处理”状态，之后可重新处理分账。'}
               </Alert>
               <Box sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 1.25, bgcolor: shell.soft }}>
                 <Typography variant="body2" sx={{ fontWeight: 900 }}>{deleteTarget.recoveryNo}</Typography>
@@ -2144,10 +2227,10 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                 </Typography>
               </Box>
               <TextField
-                label={isSourceRecoveryDeleted(deleteTarget) ? '清理原因' : '删除原因'}
+                label={isSourceRecoveryDeleted(deleteTarget) ? '清理原因' : '重置原因'}
                 value={deleteReason}
                 onChange={(event) => setDeleteReason(event.target.value)}
-                placeholder={isSourceRecoveryDeleted(deleteTarget) ? '例如：源单已废弃，清理财务列表残留' : '例如：人员选错、方案错误，需要重新处理'}
+                placeholder={isSourceRecoveryDeleted(deleteTarget) ? '例如：源单已废弃，清理财务列表残留' : '例如：人员选错、方案错误，需要重新分账'}
                 multiline
                 minRows={3}
                 required
@@ -2165,7 +2248,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
           </Button>
           {(canManageRecoverySettlement || canCleanupDeletedSettlement) && (
             <Button color="error" variant="contained" onClick={handleResetSettlement} disabled={!deleteReason.trim()}>
-              {deleteTarget && isSourceRecoveryDeleted(deleteTarget) ? '确认清理' : '确认删除'}
+              {deleteTarget && isSourceRecoveryDeleted(deleteTarget) ? '确认清理' : '确认重置'}
             </Button>
           )}
         </DialogActions>
@@ -2210,6 +2293,32 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
               确认撤回
             </Button>
           )}
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(reopenTarget)}
+        onClose={() => { if (!reopenLoading) { setReopenTarget(null); setReopenReason(''); } }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogCloseTitle onClose={() => { if (!reopenLoading) { setReopenTarget(null); setReopenReason(''); } }}>重新分账</DialogCloseTitle>
+        <DialogContent dividers>
+          {reopenTarget && (
+            <Stack spacing={1.25}>
+              <Alert severity="warning">重新分账会保留已撤回轮次作为只读历史，并将挽回订单退回“待处理”。保存新分账时会创建新的分账轮次。</Alert>
+              <Box sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 1.25, bgcolor: shell.soft }}>
+                <Typography variant="body2" sx={{ fontWeight: 900 }}>{reopenTarget.recoveryNo}</Typography>
+                <Typography variant="body2" sx={{ color: shell.muted }}>{reopenTarget.customerName} · {reopenTarget.thirdPartyOrderNo || '-'}</Typography>
+                <Typography variant="body2" sx={{ mt: 0.5 }}>挽回金额：<Box component="span" sx={{ color: shell.teal, fontWeight: 900 }}>{formatCurrency(reopenTarget.recoveryAmount)}</Box></Typography>
+              </Box>
+              <TextField label="重新分账原因" value={reopenReason} onChange={(event) => setReopenReason(event.target.value)} multiline minRows={3} required fullWidth autoFocus />
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setReopenTarget(null); setReopenReason(''); }} disabled={reopenLoading}>取消</Button>
+          <Button variant="contained" onClick={() => void reopenSettlement()} disabled={reopenLoading || !reopenReason.trim()}>{reopenLoading ? '处理中...' : '确认重新分账'}</Button>
         </DialogActions>
       </Dialog>
 

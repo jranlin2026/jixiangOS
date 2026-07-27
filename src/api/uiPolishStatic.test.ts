@@ -681,8 +681,8 @@ assert.doesNotMatch(
 );
 assert.match(
   commissionSource,
-  /headers = \[[\s\S]*'总实付金额'/,
-  'Monthly payout export should include total paid amount.',
+  /\{ label: '总实付金额', value: monthlyPayoutSummary\.monthlyPaidAmount/,
+  'Monthly payout workspace should expose the total paid amount used by the server-generated report.',
 );
 assert.doesNotMatch(
   commissionSource,

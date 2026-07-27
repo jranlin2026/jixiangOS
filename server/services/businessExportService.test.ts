@@ -15,6 +15,7 @@ const order = {
   id: 'order-1', orderNo: 'ORD-001', customerId: 'customer-1', customerName: '客户甲',
   productLevel: '899', orderType: '899成交', amount: 899, actualAmount: 799,
   paymentMethod: '对公转账', status: '已确认', refundStatus: '无', owner: '销售甲', salesId: 'sales-1',
+  thirdPartyOrderNo: '202607240001', standardTotalAmount: 899, sourceApplicationId: 'application-1', notes: '订单备注',
   payments: [
     { id: 'payment-1', amount: 799, paymentMethod: '对公转账', paidAt: now, paymentOrderNo: 'PAY-1', voucherName: '付款凭证.png', attachments: [{ id: 'payment-proof', name: '付款附件.jpg' }] },
     { id: 'payment-2', amount: 100, paymentMethod: '对公转账', paidAt: now, paymentOrderNo: 'PAY-2', voucherName: '历史凭证.png', attachments: [] },
@@ -46,6 +47,8 @@ const recoveryCommission = {
 
 const auditEvents: any[] = [];
 const records: any[] = [
+  { domain: STORAGE_KEYS.CUSTOMERS, recordId: 'customer-1', data: { id: 'customer-1', name: '客户甲', phone: '13800138000', wechat: 'wx_order' } },
+  { domain: STORAGE_KEYS.ORDER_APPLICATIONS, recordId: 'application-1', data: { id: 'application-1', applicantId: 'admin-1', applicantName: '超级管理员' } },
   { domain: STORAGE_KEYS.ORDERS, recordId: order.id, data: order },
   { domain: STORAGE_KEYS.COMMISSIONS, recordId: commission.id, orderId: order.id, data: commission },
   { domain: STORAGE_KEYS.RECOVERY_ORDERS, recordId: recovery.id, data: recovery },
@@ -73,7 +76,7 @@ const result = await service.export({
 assert.equal(result.code, 0);
 assert.equal(result.data?.summaryRows.length, 1);
 assert.deepEqual(result.data?.summaryRows[0], {
-  orderNo: 'ORD-001', customer: '客户甲', notes: null,
+  orderNo: 'ORD-001', customer: '客户甲', notes: '订单备注',
 });
 assert.deepEqual(
   result.data?.summaryColumns.map((column) => column.label),
@@ -92,6 +95,45 @@ assert.equal(auditEvents.length, 1, '投影成功后必须写入审计事件');
 assert.equal(auditEvents[0].module, 'orders');
 assert.equal(auditEvents[0].actorId, actor.id);
 assert.equal(auditEvents[0].summaryRowCount, 1);
+
+const standardOrderExport = await service.export({
+  module: 'orders', reason: '标准业务归档', columnMode: 'standard', filters: { search: 'ORD-001' },
+}, actor);
+assert.deepEqual(
+  standardOrderExport.data?.summaryColumns.map((column) => column.id),
+  [
+    'orderNo', 'thirdPartyOrderNo', 'customer', 'customerPhone', 'customerWechat',
+    'productName', 'productLevel', 'orderType', 'standardTotalAmount', 'actualAmount',
+    'officialPaymentChannel', 'paymentDate', 'paymentOrderNo', 'owner', 'createdByName',
+    'leadSourceFull', 'leadInputBy', 'leadContributorName', 'resourceOwnership', 'status',
+    'refundStatus', 'refundAmount', 'refundReason', 'settlementStatus', 'notes', 'createdAt', 'updatedAt',
+  ],
+  '订单标准导出必须稳定包含业务交接所需字段，不受当前列表视图影响',
+);
+assert.equal(standardOrderExport.data?.summaryRows[0]?.customerPhone, '13800138000');
+assert.equal(standardOrderExport.data?.summaryRows[0]?.customerWechat, 'wx_order');
+assert.equal(standardOrderExport.data?.summaryRows[0]?.createdByName, '超级管理员');
+assert.equal(standardOrderExport.data?.summaryRows[0]?.notes, '订单备注');
+assert.equal(standardOrderExport.data?.summaryRows[0]?.paymentOrderNo, 'PAY-1');
+
+const limitedExporter: AuthenticatedUser = {
+  ...actor,
+  id: 'exporter-1', name: '订单导出员', role: '订单导出员', roleId: 'role-exporter',
+  permissions: [{ module: PERMISSION_KEYS.ORDER_EXPORT, actions: ['read'] }],
+};
+const limitedExportPrisma: any = {
+  ...prisma,
+  user: { findMany: async () => [limitedExporter, { ...actor, id: 'sales-1', name: '销售甲', role: '销售顾问', roleId: 'role-sales' }] },
+  role: { findMany: async () => [{
+    id: 'role-exporter', name: '订单导出员', code: 'order_exporter', permissions: limitedExporter.permissions,
+    dataScopes: { orders: 'all' }, isActive: true,
+  }] },
+};
+const maskedStandardOrderExport = await createBusinessExportService(limitedExportPrisma, { now: () => new Date(now) }).export({
+  module: 'orders', reason: '标准业务归档', columnMode: 'standard', filters: { search: 'ORD-001' },
+}, limitedExporter);
+assert.equal(maskedStandardOrderExport.data?.summaryRows[0]?.customerPhone, '138****8000');
+assert.equal(maskedStandardOrderExport.data?.summaryRows[0]?.customerWechat, 'wx****er');
 
 const denied = await service.export({
   module: 'order_settlements', reason: '月度对账', columnMode: 'all', columnIds: [], filters: {},
@@ -172,6 +214,14 @@ const recoveryOrders = await service.export({
   filters: { search: 'RCV-001' },
 }, actor);
 assert.equal(recoveryOrders.code, 0, '售后挽回订单列表应支持独立导出');
+const standardRecoveryExport = await service.export({
+  module: 'recovery_orders', reason: '售后标准归档', columnMode: 'standard', filters: { search: 'RCV-001' },
+}, actor);
+assert.equal(standardRecoveryExport.code, 0);
+assert.equal(standardRecoveryExport.data?.summaryColumns.some((column) => column.id === 'remark'), true);
+assert.equal(standardRecoveryExport.data?.summaryColumns.some((column) => column.id === 'createdByName'), true);
+assert.equal(standardRecoveryExport.data?.summaryColumns.some((column) => column.id === 'customerPhone'), true);
+assert.equal(standardRecoveryExport.data?.summaryColumns.some((column) => column.id === 'customerWechat'), true);
 const recoveryOrdersWithCustomizedView = await service.export({
   module: 'recovery_orders',
   reason: '自定义视图导出',
@@ -251,7 +301,7 @@ assert.deepEqual(
 
 assert.deepEqual(
   (await service.export({ module: 'orders', reason: '字段池检查', columnMode: 'all', filters: { search: 'ORD-001' } }, actor)).data?.summaryColumns.map((column) => column.id),
-  ['orderNo', 'settlementStatus', 'customer', 'productName', 'productLevel', 'orderType', 'actualAmount', 'officialPaymentChannel', 'thirdPartyOrderNo', 'resourceOwnership', 'owner', 'createdByName', 'paymentDate', 'leadInputBy', 'leadContributorName', 'notes', 'createdAt', 'leadSourceFull', 'updatedAt'],
+  ['orderNo', 'settlementStatus', 'customer', 'productName', 'productLevel', 'orderType', 'actualAmount', 'officialPaymentChannel', 'thirdPartyOrderNo', 'resourceOwnership', 'owner', 'createdByName', 'paymentDate', 'leadInputBy', 'leadContributorName', 'notes', 'createdAt', 'customerPhone', 'customerWechat', 'standardTotalAmount', 'paymentOrderNo', 'status', 'refundStatus', 'refundAmount', 'refundReason', 'leadSourceFull', 'updatedAt'],
   '订单全部字段必须与 ORDER_COLUMNS 完全一致',
 );
 const orderAllFields = await service.export({ module: 'orders', reason: '全部字段值', columnMode: 'all', filters: { search: 'ORD-001' } }, actor);

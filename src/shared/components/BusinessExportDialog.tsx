@@ -27,6 +27,7 @@ type Props = {
   title: string;
   expectedCount: number;
   currentColumnCount?: number;
+  enableStandardMode?: boolean;
   onClose: () => void;
   onRequestExport: (request: BusinessExportDialogRequest) => Promise<BusinessExportResult>;
 };
@@ -36,21 +37,22 @@ export default function BusinessExportDialog({
   title,
   expectedCount,
   currentColumnCount,
+  enableStandardMode = false,
   onClose,
   onRequestExport,
 }: Props) {
-  const [columnMode, setColumnMode] = useState<BusinessExportColumnMode>('current_view');
+  const [columnMode, setColumnMode] = useState<BusinessExportColumnMode>(enableStandardMode ? 'standard' : 'current_view');
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (!open) return;
-    setColumnMode('current_view');
+    setColumnMode(enableStandardMode ? 'standard' : 'current_view');
     setReason('');
     setBusy(false);
     setError('');
-  }, [open]);
+  }, [enableStandardMode, open]);
 
   const disabledReason = getBusinessExportDisabledReason({ expectedCount, reason, busy });
   const countOutOfRange = expectedCount <= 0 || expectedCount > BUSINESS_EXPORT_MAX_ROWS;
@@ -97,6 +99,9 @@ export default function BusinessExportDialog({
             value={columnMode}
             onChange={(event) => setColumnMode(event.target.value as BusinessExportColumnMode)}
           >
+            {enableStandardMode ? (
+              <FormControlLabel value="standard" control={<Radio />} label="标准业务字段（推荐）" />
+            ) : null}
             <FormControlLabel
               value="current_view"
               control={<Radio />}

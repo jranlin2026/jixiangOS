@@ -31,11 +31,10 @@ import {
 } from '@mui/material';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import PaymentsOutlinedIcon from '@mui/icons-material/PaymentsOutlined';
-import UndoOutlinedIcon from '@mui/icons-material/UndoOutlined';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import { commissionPayoutApi } from '../../api/commissionPayoutApi';
 import useAuthStore from '../../store/useAuthStore';
-import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { formatCurrency, formatDateTime, formatPaginationRows } from '../../shared/utils/formatters';
 import TablePagination from '../../shared/components/TablePagination';
 import { subscribePageRefresh } from '../../shared/utils/pageRefresh';
@@ -89,10 +88,6 @@ const metricCard = (label: string, value: string, hint: string, color = '#0f172a
 const CommissionPayout: React.FC = () => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const canManage = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_PAYOUT, 'write');
-  const canReverse = Boolean(currentUser) && (
-    isSuperAdmin(currentUser)
-    || /财务.*(经理|主管|负责人)|(经理|主管|负责人).*财务/.test(String(currentUser?.role || ''))
-  );
   const [view, setView] = useState<PayoutView>('pending');
   const [workspace, setWorkspace] = useState<CommissionPayoutWorkspace | null>(null);
   const [error, setError] = useState('');
@@ -104,8 +99,6 @@ const CommissionPayout: React.FC = () => {
   const [paymentMethod, setPaymentMethod] = useState('银行转账');
   const [paymentReference, setPaymentReference] = useState('');
   const [note, setNote] = useState('');
-  const [reverseRecord, setReverseRecord] = useState<CommissionPayoutRecord | null>(null);
-  const [reverseReason, setReverseReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [pendingPage, setPendingPage] = useState(0);
   const [pendingRowsPerPage, setPendingRowsPerPage] = useState(10);
@@ -174,17 +167,6 @@ const CommissionPayout: React.FC = () => {
     setSelectedIds([]);
     setPaymentReference('');
     setNote('');
-    await load();
-  };
-
-  const submitReverse = async () => {
-    if (!reverseRecord) return;
-    setSubmitting(true);
-    const response = await commissionPayoutApi.reverse(reverseRecord.id, reverseReason);
-    setSubmitting(false);
-    if (response.code !== 0) return setError(response.message || '撤销失败');
-    setReverseRecord(null);
-    setReverseReason('');
     await load();
   };
 
@@ -318,7 +300,7 @@ const CommissionPayout: React.FC = () => {
     <Paper variant="outlined">
       <Box sx={{ p: 2 }}>
         <Typography variant="h6" fontWeight={800}>发放记录</Typography>
-        <Typography variant="body2" color="text.secondary">每次确认发放自动生成记录；撤销保留原记录和操作原因。</Typography>
+        <Typography variant="body2" color="text.secondary">每次确认发放自动生成记录；已发放为系统终态，如需调整请在线下处理。</Typography>
       </Box>
       <Divider />
       <Box sx={{ display: { xs: 'block', md: 'none' } }}>
@@ -341,7 +323,6 @@ const CommissionPayout: React.FC = () => {
             <Stack direction="row" spacing={0.5} justifyContent="flex-end" sx={{ mt: 1.5 }}>
               <Tooltip title="查看详情"><IconButton size="small" color="primary" aria-label="查看发放详情" onClick={() => setDetailRecord(record)}><VisibilityOutlinedIcon fontSize="small" /></IconButton></Tooltip>
               <Tooltip title="导出发放单"><IconButton size="small" color="primary" aria-label="导出发放单" onClick={() => exportRecord(record)}><FileDownloadOutlinedIcon fontSize="small" /></IconButton></Tooltip>
-              {canReverse && record.status === '已发放' && <Tooltip title="撤销发放"><IconButton size="small" color="error" aria-label="撤销发放" onClick={() => setReverseRecord(record)}><UndoOutlinedIcon fontSize="small" /></IconButton></Tooltip>}
             </Stack>
           </Box>
         ))}
@@ -363,7 +344,6 @@ const CommissionPayout: React.FC = () => {
             <TableCell align="center"><Stack direction="row" spacing={0.5} justifyContent="center">
               <Tooltip title="查看详情"><IconButton size="small" color="primary" aria-label="查看发放详情" onClick={() => setDetailRecord(record)}><VisibilityOutlinedIcon fontSize="small" /></IconButton></Tooltip>
               <Tooltip title="导出发放单"><IconButton size="small" color="primary" aria-label="导出发放单" onClick={() => exportRecord(record)}><FileDownloadOutlinedIcon fontSize="small" /></IconButton></Tooltip>
-              {canReverse && record.status === '已发放' && <Tooltip title="撤销发放"><IconButton size="small" color="error" aria-label="撤销发放" onClick={() => setReverseRecord(record)}><UndoOutlinedIcon fontSize="small" /></IconButton></Tooltip>}
             </Stack></TableCell>
           </TableRow>)}
           {!recordRows.length && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 7, color: 'text.secondary' }}>暂无发放记录</TableCell></TableRow>}
@@ -387,7 +367,7 @@ const CommissionPayout: React.FC = () => {
     <Paper variant="outlined" sx={{ p: 2 }}>
       <Box>
         <Typography variant="h5" fontWeight={900}>提成发放</Typography>
-        <Typography variant="body2" color="text.secondary">核对员工应发提成、执行发放，并保留完整发放与撤销记录。数据会自动保持更新。</Typography>
+        <Typography variant="body2" color="text.secondary">核对员工应发提成、执行发放，并保留完整发放记录。已发放为系统终态，数据会自动保持更新。</Typography>
       </Box>
       <Tabs value={view} onChange={(_: React.SyntheticEvent, value: PayoutView) => setView(value)} sx={{ mt: 1.5 }}>
         <Tab value="pending" label="待发放" /><Tab value="records" label="发放记录" /><Tab value="summary" label="月度报告" />
@@ -445,7 +425,6 @@ const CommissionPayout: React.FC = () => {
       <DialogTitle>发放记录详情</DialogTitle><DialogContent dividers><Stack spacing={1.5}>
         <Typography>发放单号：{detailRecord?.payoutNo}</Typography><Typography>发放月份：{detailRecord?.period}</Typography><Typography>发放时间：{detailRecord ? formatDateTime(detailRecord.issuedAt) : '-'}</Typography>
         <Typography>发放金额：{formatCurrency(detailRecord?.totalAmount || 0)}</Typography><Typography>发放方式：{detailRecord?.paymentMethod || '-'}</Typography><Typography>付款流水号：{detailRecord?.paymentReference || '-'}</Typography>
-        {detailRecord?.status === '已撤销' && <Alert severity="warning">已由 {detailRecord.reversedByName} 于 {formatDateTime(detailRecord.reversedAt || '')} 撤销。原因：{detailRecord.reverseReason}</Alert>}
         <Divider />{detailRecord?.byOwner.map((owner) => <Stack key={owner.ownerId || owner.owner} direction="row" justifyContent="space-between"><Typography>{owner.owner} · {owner.department || '-'}</Typography><Typography fontWeight={700}>{owner.count} 笔 / {formatCurrency(owner.amount)}</Typography></Stack>)}
         {detailRecord?.commissionSnapshots?.length ? (
           <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}><Table size="small" sx={{ minWidth: 980 }}>
@@ -458,12 +437,6 @@ const CommissionPayout: React.FC = () => {
       </Stack></DialogContent><DialogActions><Button onClick={() => setDetailRecord(null)}>关闭</Button></DialogActions>
     </Dialog>
 
-    <Dialog open={Boolean(reverseRecord)} onClose={() => !submitting && setReverseRecord(null)} fullWidth maxWidth="sm">
-      <DialogTitle>撤销发放</DialogTitle><DialogContent dividers><Stack spacing={2}>
-        <Alert severity="warning">撤销后，相关提成会恢复为“待发放”。系统会保留原发放记录和本次撤销原因。该操作不代表追回已经转出的资金。</Alert>
-        <TextField label="撤销原因" required value={reverseReason} onChange={(event) => setReverseReason(event.target.value)} multiline minRows={3} fullWidth />
-      </Stack></DialogContent><DialogActions><Button onClick={() => setReverseRecord(null)} disabled={submitting}>取消</Button><Button color="error" variant="contained" disabled={submitting || !reverseReason.trim()} onClick={() => void submitReverse()}>确认撤销</Button></DialogActions>
-    </Dialog>
   </Stack>;
 };
 

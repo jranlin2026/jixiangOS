@@ -257,6 +257,7 @@ export interface OrderApplicationFilters {
   statuses?: OrderApplicationStatus[];
   applicantName?: string;
   reviewerName?: string;
+  owner?: string;
   startDate?: string;
   endDate?: string;
   paymentStartDate?: string;

@@ -215,7 +215,7 @@ function buildRecoveryCommission(
   if (commissionAmount < 0) throw new RecoveryCommandError(400, '提成金额不能小于 0');
   const payoutPlanName = cleanText(input.payoutPlanName) || '自定义金额';
   return {
-    id: `comm-recovery-${hash(`${order.id}:${role}:${owner.id}:${createdAt}:${index}`, 12)}`,
+    id: `comm-recovery-${hash(`${order.id}:${order.settlementVersion || 1}:${role}:${owner.id}:${createdAt}:${index}`, 12)}`,
     orderId: order.id,
     orderNo: order.recoveryNo,
     customerName: order.customerName,
@@ -257,6 +257,8 @@ function buildRecoveryCommission(
     adjustReason: '售后挽回分账',
     adjustedBy: actor.name,
     adjustedAt: createdAt,
+    settlementRoundId: order.settlementRoundId || `recovery-settlement-${order.id}-v${order.settlementVersion || 1}`,
+    settlementVersion: order.settlementVersion || 1,
     createdAt,
     updatedAt: createdAt,
   };
@@ -347,7 +349,8 @@ function recoverySortTimestamp(order: RecoveryOrder, sortBy?: RecoveryOrderFilte
 }
 
 function recoverySettlementStatus(order: RecoveryOrder): string {
-  const raw = String(order.settlementStatus || '');
+  const raw = String(order.settlementStatus
+    || (order.status === '待分账' ? '待处理' : order.status === '已分账' ? '待发放' : ''));
   if (raw === '待分账') return '待处理';
   if (raw === '已分账') return '待发放';
   return raw || '待处理';
@@ -399,10 +402,13 @@ function recoveryWritable(order: RecoveryOrder, scope: DataVisibilityScope): boo
 
 function recoverySettlementStatusSql(alias: string): Prisma.Sql {
   const value = jsonText(alias, '$.settlementStatus');
+  const status = jsonText(alias, '$.status');
   return Prisma.sql`CASE
     WHEN ${value} = '待分账' THEN '待处理'
     WHEN ${value} = '已分账' THEN '待发放'
     WHEN COALESCE(${value}, '') <> '' THEN ${value}
+    WHEN ${status} = '待分账' THEN '待处理'
+    WHEN ${status} = '已分账' THEN '待发放'
     ELSE '待处理'
   END`;
 }
@@ -643,7 +649,7 @@ function inspectRecoveryCorrection(
     settlementStatus,
   });
   if (order.deletedAt) return blocked('order_deleted', '已删除的售后挽回订单不能更正');
-  if (!['待分账', '已分账'].includes(order.status)) {
+  if (!['审核通过', '待分账', '已分账'].includes(order.status)) {
     return blocked('not_approved', '该记录尚未审核通过，请在审核台修改并重新提交');
   }
   if (statuses.some((status) => ['已发放', '待冲销', '已冲销'].includes(status)) || settlementStatus === '已发放') {
@@ -969,8 +975,8 @@ export function createRecoveryOrderCommandService(
       }
 
       const normalizedNo = normalizeOrderNo(thirdPartyOrderNo);
-      const id = `recovery-${hash(normalizedNo)}`;
-      const next: RecoveryOrder = {
+      const baseId = `recovery-${hash(normalizedNo)}`;
+      const buildNext = (id: string): RecoveryOrder => ({
         id,
         recoveryNo: `RCV-${createdAt.slice(0, 10).replace(/-/g, '')}-${hash(normalizedNo, 8).toUpperCase()}`,
         thirdPartyOrderNo,
@@ -1022,30 +1028,39 @@ export function createRecoveryOrderCommandService(
         createdAt,
         updatedAt: createdAt,
         ...(imported?.metadata || {}),
-      };
+      });
+      let attemptedId = baseId;
+      let attemptedNext = buildNext(baseId);
 
       try {
         const created = await prisma.$transaction(async (transaction) => {
           const rows = await transaction.businessRecord.findMany({
             where: { domain: STORAGE_KEYS.RECOVERY_ORDERS },
           });
-          const duplicate = rows
-            .map((row) => parseObject<RecoveryOrder>(row.data, '售后挽回订单'))
-            .find((order) => normalizeOrderNo(order.thirdPartyOrderNo) === normalizedNo);
+          const orders = rows.map((row) => parseObject<RecoveryOrder>(row.data, '售后挽回订单'));
+          const duplicate = orders.find((order) => (
+            !order.deletedAt && normalizeOrderNo(order.thirdPartyOrderNo) === normalizedNo
+          ));
           if (duplicate) {
-            if (duplicate.id === id
-              && sameCreate(duplicate, next, Boolean(cleanText(input.recoveryAt)))
+            const desired = buildNext(duplicate.id);
+            if (sameCreate(duplicate, desired, Boolean(cleanText(input.recoveryAt)))
               && (!imported || sameImportedIdentity(duplicate, imported.metadata))) return duplicate;
             throw new RecoveryCommandError(409, '该第三方平台订单号已经创建过售后挽回订单');
           }
+          const occupiedIds = new Set(rows.flatMap((row) => [row.recordId, parseObject<RecoveryOrder>(row.data, '售后挽回订单').id]));
+          attemptedId = baseId;
+          for (let replacement = 1; occupiedIds.has(attemptedId); replacement += 1) {
+            attemptedId = `recovery-${hash(`${normalizedNo}:replacement:${replacement}`, 24)}`;
+          }
+          attemptedNext = buildNext(attemptedId);
           const persisted = options.crmBridge
-            ? { ...next, ...crmPatch(await options.crmBridge.resolve(transaction, next)) }
-            : next;
+            ? { ...attemptedNext, ...crmPatch(await options.crmBridge.resolve(transaction, attemptedNext)) }
+            : attemptedNext;
           await transaction.businessRecord.create({
             data: {
-              id: `${STORAGE_KEYS.RECOVERY_ORDERS}:${id}`,
+              id: `${STORAGE_KEYS.RECOVERY_ORDERS}:${attemptedId}`,
               domain: STORAGE_KEYS.RECOVERY_ORDERS,
-              recordId: id,
+              recordId: attemptedId,
               title: persisted.customerName,
               status: persisted.status,
               owner: persisted.recoveryUserName,
@@ -1067,11 +1082,11 @@ export function createRecoveryOrderCommandService(
         if (error instanceof RecoveryCommandError) return failure(error.message, error.responseCode);
         if ((error as { code?: unknown } | null)?.code === 'P2002') {
           const concurrent = await prisma.businessRecord.findUnique({
-            where: { domain_recordId: { domain: STORAGE_KEYS.RECOVERY_ORDERS, recordId: id } },
+            where: { domain_recordId: { domain: STORAGE_KEYS.RECOVERY_ORDERS, recordId: attemptedId } },
           });
           if (concurrent) {
             const existing = parseObject<RecoveryOrder>(concurrent.data, '售后挽回订单');
-            if (sameCreate(existing, next, Boolean(cleanText(input.recoveryAt)))
+            if (sameCreate(existing, attemptedNext, Boolean(cleanText(input.recoveryAt)))
               && (!imported || sameImportedIdentity(existing, imported.metadata))) return success(publicRecoveryOrder(existing, actor));
           }
           return failure('该第三方平台订单号已经创建过售后挽回订单', 409);
@@ -1126,7 +1141,7 @@ export function createRecoveryOrderCommandService(
         const current = await lockRecoveryOrder(transaction, cleanText(orderId));
         if (!recoveryWritable(current, scope)) throw new RecoveryCommandError(403, '无权编辑该售后挽回订单');
         if (current.deletedAt) throw new RecoveryCommandError(409, '已删除售后挽回订单不能编辑');
-        if (!['待分账', '已分账'].includes(current.status)) {
+        if (!['审核通过', '待分账', '已分账'].includes(current.status)) {
           throw new RecoveryCommandError(409, '审核前资料请在审核台修改并重新提交');
         }
         const attachments = input.recoveryAttachments === undefined
@@ -1237,7 +1252,7 @@ export function createRecoveryOrderCommandService(
           assistUserId: validated.assistUser?.id,
           assistUserName: validated.assistUser?.name,
           remark: cleanText(data.remark) || undefined,
-          status: '待分账',
+          status: '审核通过',
           settlementStatus: '待处理',
           settlementHandledBy: undefined,
           settlementHandledAt: undefined,
@@ -1404,7 +1419,7 @@ export function createRecoveryOrderCommandService(
       return run(() => prisma.$transaction(async (transaction) => {
         const current = await lockRecoveryOrder(transaction, orderId);
         if (current.deletedAt) throw new RecoveryCommandError(409, '源售后挽回订单已删除，不能处理分账');
-        if (current.status !== '待分账') throw new RecoveryCommandError(409, '只有审核通过的售后挽回订单才能分账');
+        if (!['审核通过', '待分账'].includes(current.status)) throw new RecoveryCommandError(409, '只有审核通过的售后挽回订单才能分账');
         if (!['待处理', '待确认'].includes(recoverySettlementStatus(current))) {
           throw new RecoveryCommandError(409, '只有待处理或待确认的售后挽回订单可以调整分账');
         }
@@ -1450,8 +1465,10 @@ export function createRecoveryOrderCommandService(
         }
         const next: RecoveryOrder = {
           ...current,
-          status: '待分账',
+          status: '审核通过',
           settlementStatus: '待确认',
+          settlementVersion: current.settlementVersion || 1,
+          settlementRoundId: current.settlementRoundId || `recovery-settlement-${current.id}-v${current.settlementVersion || 1}`,
           settlementHandledBy: actor.name,
           settlementHandledAt: changedAt,
           settlementConfirmedBy: undefined,
@@ -1490,9 +1507,64 @@ export function createRecoveryOrderCommandService(
       return transitionSettlement(orderId, 'confirm', '', actor);
     },
 
+    async reopenSettlement(orderId: string, reason: string, actor: AuthenticatedUser): Promise<ApiResponse<RecoveryOrder | null>> {
+      if (!hasPermission(actor, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'write')) {
+        return failure('无权重新分账售后挽回订单', 403);
+      }
+      const cleanReason = cleanText(reason);
+      if (!cleanReason) return failure('重新分账必须填写原因', 400);
+      return run(() => prisma.$transaction(async (transaction) => {
+        const current = await lockRecoveryOrder(transaction, orderId);
+        if (current.deletedAt) throw new RecoveryCommandError(409, '源售后挽回订单已删除，不能重新分账');
+        if (recoverySettlementStatus(current) !== '已撤回') {
+          throw new RecoveryCommandError(409, '只有已撤回的售后挽回分账可以重新分账');
+        }
+        const records = await findRecoveryCommissionRows(transaction, current);
+        const relatedRows = records.filter((record) => relatedRecoveryCommission(
+          current,
+          parseObject<Commission>(record.data, '售后挽回分账'),
+        ));
+        if (!relatedRows.length || relatedRows.some((record) => parseObject<Commission>(record.data, '售后挽回分账').status !== '已撤回')) {
+          throw new RecoveryCommandError(409, '只有已撤回的售后挽回分账可以重新分账');
+        }
+        const changedAt = now().toISOString();
+        const version = Math.max(...relatedRows.map((record) => {
+          const value = Number(parseObject<Commission>(record.data, '售后挽回分账').settlementVersion || 1);
+          return Number.isInteger(value) && value > 0 ? value : 1;
+        })) + 1;
+        const next: RecoveryOrder = {
+          ...current,
+          status: '审核通过',
+          settlementStatus: '待处理',
+          settlementVersion: version,
+          settlementRoundId: `recovery-settlement-${current.id}-v${version}`,
+          commissionIds: [],
+          settlementHandledBy: undefined,
+          settlementHandledAt: undefined,
+          settlementConfirmedBy: undefined,
+          settlementConfirmedAt: undefined,
+          settlementPaidAt: undefined,
+          settlementWithdrawnBy: undefined,
+          settlementWithdrawnAt: undefined,
+          settlementWithdrawReason: undefined,
+          auditReason: `重新分账：${cleanReason}`,
+          updatedAt: changedAt,
+        };
+        next.changeHistory = appendRecoveryChange(
+          current, actor, changedAt, 'settlement', '重新打开售后挽回订单分账', cleanReason,
+        );
+        await writeRecoveryOrder(transaction, next);
+        return publicRecoveryOrder(next, actor);
+      }, {
+        isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+        maxWait: 5_000,
+        timeout: 10_000,
+      }));
+    },
+
     async resetSettlement(orderId: string, reason: string, actor: AuthenticatedUser): Promise<ApiResponse<RecoveryOrder | null>> {
       if (!hasPermission(actor, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'write')) {
-        return failure('无权删除售后挽回分账', 403);
+        return failure('无权重置售后挽回分账', 403);
       }
       return transitionSettlement(orderId, 'reset', reason, actor);
     },
@@ -1540,8 +1612,11 @@ export function createRecoveryOrderCommandService(
           });
           return related ? [String(row.status || commission.status || '')] : [];
         });
+        if (relatedCommissionStatuses.some((status) => status === '已发放')) {
+          throw new RecoveryCommandError(409, '提成已发放，请财务线下处理');
+        }
         if (relatedCommissionStatuses.some((status) => !isInactiveRecoveryCommissionStatus(status))) {
-          throw new RecoveryCommandError(409, '该售后挽回订单仍有活动提成，请先在财务中心处理');
+          throw new RecoveryCommandError(409, '该售后挽回订单仍有活动提成，请先撤回后再处理');
         }
         if (isRecoveryOrderDeletionLocked(current)) {
           throw new RecoveryCommandError(409, '该售后挽回订单已有分账，请先处理分账记录');
@@ -1623,7 +1698,7 @@ export function createRecoveryOrderCommandService(
             ],
           },
         });
-        const hasActiveCommission = commissionRows.some((row) => {
+        const relatedCommissionStatuses = commissionRows.flatMap((row) => {
           const commission = parseObject<{
             id?: string;
             orderId?: string;
@@ -1635,10 +1710,13 @@ export function createRecoveryOrderCommandService(
             id: row.recordId || commission.id,
             orderId: row.orderId || commission.orderId,
           });
-          return related && !isInactiveRecoveryCommissionStatus(String(row.status || commission.status || ''));
+          return related ? [String(row.status || commission.status || '')] : [];
         });
-        if (hasActiveCommission) {
-          throw new RecoveryCommandError(409, '该废弃分账仍有活动提成，请先撤回或完成财务处理');
+        if (relatedCommissionStatuses.some((status) => status === '已发放')) {
+          throw new RecoveryCommandError(409, '提成已发放，请财务线下处理');
+        }
+        if (relatedCommissionStatuses.some((status) => !isInactiveRecoveryCommissionStatus(status))) {
+          throw new RecoveryCommandError(409, '该废弃分账仍有活动提成，请先撤回后再处理');
         }
         const cleanedAt = now().toISOString();
         const next: RecoveryOrder = {
@@ -1676,7 +1754,7 @@ export function createRecoveryOrderCommandService(
       const current = await lockRecoveryOrder(transaction, orderId);
       if (!recoveryVisible(current, scope)) throw new RecoveryCommandError(403, '无权审核该售后挽回订单');
       if (current.deletedAt) throw new RecoveryCommandError(409, '已删除售后挽回订单不能审核');
-      if (action === 'approve' && ['待分账', '已分账'].includes(current.status)) return publicRecoveryOrder(current, actor);
+      if (action === 'approve' && ['审核通过', '待分账', '已分账'].includes(current.status)) return publicRecoveryOrder(current, actor);
       if (action === 'return' && current.status === '退回修改' && current.auditReason === normalizedReason) return publicRecoveryOrder(current, actor);
       if (action === 'reject' && current.status === '审核驳回' && current.auditReason === normalizedReason) return publicRecoveryOrder(current, actor);
       if (current.status !== '待审核') throw new RecoveryCommandError(409, '只有待审核售后挽回订单可以执行该操作');
@@ -1699,7 +1777,7 @@ export function createRecoveryOrderCommandService(
       const next: RecoveryOrder = {
         ...current,
         ...(crmResult || {}),
-        status: action === 'approve' ? '待分账' : action === 'return' ? '退回修改' : '审核驳回',
+        status: action === 'approve' ? '审核通过' : action === 'return' ? '退回修改' : '审核驳回',
         settlementStatus: action === 'approve' ? '待处理' : '未分账',
         auditorId: actor.id,
         auditorName: actor.name,
@@ -1740,7 +1818,7 @@ export function createRecoveryOrderCommandService(
         throw new RecoveryCommandError(409, '只有待确认的售后挽回分账可以确认');
       }
       if (action === 'reset' && currentStatus !== '待确认') {
-        throw new RecoveryCommandError(409, '只有待确认的售后挽回分账才能删除');
+        throw new RecoveryCommandError(409, '只有待确认的售后挽回分账才能重置');
       }
       if (action === 'withdraw' && !['待确认', '待发放'].includes(currentStatus)) {
         throw new RecoveryCommandError(409, '只有待确认或待发放的售后挽回分账可以撤回');
@@ -1750,22 +1828,27 @@ export function createRecoveryOrderCommandService(
         current,
         parseObject<Commission>(record.data, '售后挽回分账'),
       ));
-      if (!relatedRows.length) throw new RecoveryCommandError(409, '该售后挽回订单没有分账明细');
+      const activeRelatedRows = relatedRows.filter((record) => !isInactiveRecoveryCommissionStatus(
+        parseObject<Commission>(record.data, '售后挽回分账').status,
+      ));
+      if (!activeRelatedRows.length) throw new RecoveryCommandError(409, '该售后挽回订单没有分账明细');
       const changedAt = now().toISOString();
       if (action === 'reset') {
-        if (relatedRows.some((record) => parseObject<Commission>(record.data, '售后挽回分账').status !== '待确认')) {
-          throw new RecoveryCommandError(409, '该售后挽回分账已进入发放链路，不能直接删除');
+        if (activeRelatedRows.some((record) => parseObject<Commission>(record.data, '售后挽回分账').status !== '待确认')) {
+          throw new RecoveryCommandError(409, '该售后挽回分账已进入发放链路，不能直接重置');
         }
-        for (const record of relatedRows) {
+        for (const record of activeRelatedRows) {
           await transaction.businessRecord.delete({
             where: { domain_recordId: { domain: STORAGE_KEYS.COMMISSIONS, recordId: record.recordId } },
           });
         }
       } else {
         let changed = false;
-        for (const record of relatedRows) {
+        for (const record of activeRelatedRows) {
           const commission = parseObject<Commission>(record.data, '售后挽回分账');
-          const canChange = action === 'confirm' ? commission.status === '待确认' : commission.status !== '已撤回';
+          const canChange = action === 'confirm'
+            ? commission.status === '待确认'
+            : ['待确认', '待发放'].includes(commission.status);
           if (!canChange) continue;
           changed = true;
           const nextCommission: Commission = {
@@ -1794,7 +1877,7 @@ export function createRecoveryOrderCommandService(
       }
       const next: RecoveryOrder = {
         ...current,
-        status: action === 'reset' ? '待分账' : '已分账',
+        status: '审核通过',
         settlementStatus: action === 'reset' ? '待处理' : action === 'confirm' ? '待发放' : '已撤回',
         settlementHandledBy: action === 'reset' ? undefined : current.settlementHandledBy,
         settlementHandledAt: action === 'reset' ? undefined : current.settlementHandledAt,
@@ -1814,7 +1897,7 @@ export function createRecoveryOrderCommandService(
         settlementWithdrawReason: action === 'withdraw' ? cleanText(reason) : undefined,
         commissionIds: action === 'reset' ? [] : current.commissionIds,
         auditReason: action === 'reset'
-          ? `删除售后挽回分账：${cleanText(reason) || actor.name}`
+          ? `重置售后挽回分账：${cleanText(reason) || actor.name}`
           : action === 'confirm'
             ? `确认售后挽回分账：${actor.name}`
             : cleanText(reason),
@@ -1825,7 +1908,7 @@ export function createRecoveryOrderCommandService(
         actor,
         changedAt,
         'settlement',
-        action === 'confirm' ? '确认售后挽回订单分账' : action === 'reset' ? '删除售后挽回订单分账并回到待处理' : '撤回售后挽回订单分账',
+        action === 'confirm' ? '确认售后挽回订单分账' : action === 'reset' ? '重置售后挽回订单分账并回到待处理' : '撤回售后挽回订单分账',
         cleanText(reason) || undefined,
       );
       await writeRecoveryOrder(transaction, next);

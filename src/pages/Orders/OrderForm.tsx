@@ -4,11 +4,11 @@ import {
   Autocomplete,
   Box,
   Button,
+  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
-  Divider,
   FormControl,
   FormLabel,
   IconButton,
@@ -28,8 +28,6 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import useOrderStore from '../../store/useOrderStore';
 import {
   OFFICIAL_PAYMENT_CHANNELS,
-  RESOURCE_OWNERSHIPS,
-  getProductLevelColor,
   normalizeResourceOwnership,
 } from '../../shared/utils/constants';
 import { customerApi, orderApi, orderReviewApi, productApi, settingsApi } from '../../api';
@@ -188,6 +186,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   const [products, setProducts] = useState<Product[]>([]);
   const [orderTypeConfigs, setOrderTypeConfigs] = useState<OrderTypeConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [applicantDepartmentName, setApplicantDepartmentName] = useState('');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [customerSearch, setCustomerSearch] = useState('');
@@ -203,7 +202,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   const [recognizing, setRecognizing] = useState(false);
   const [correctionMode, setCorrectionMode] = useState(false);
   const [correctionReason, setCorrectionReason] = useState('');
-  const [submitError, setSubmitError] = useState('');
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [orderItems, setOrderItems] = useState<OrderItemInput[]>([]);
@@ -211,12 +209,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   const canCorrectFormalOrder = Boolean(order && hasPermission(currentUser, PERMISSION_KEYS.ORDER_CORRECT, 'write'));
 
   const showFormIssue = async (message: string) => {
-    if (correctionMode) {
-      setSubmitError('');
-      await alert(message, '订单更正无法提交');
-      return;
-    }
-    setSubmitError(message);
+    await alert(message, correctionMode ? '订单更正无法提交' : '订单申请无法提交');
   };
 
   const [form, setForm] = useState({
@@ -246,7 +239,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     if (!open) return;
     setCorrectionMode(Boolean(order && initialMode === 'correction' && canCorrectFormalOrder));
     setCorrectionReason('');
-    setSubmitError('');
     setSubmitAttempted(false);
     setProductItemsEdited(false);
 
@@ -376,7 +368,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     Promise.all([
       orderApi.fetchOwnerCandidates(),
       settingsApi.fetchOrderTypeConfigs(),
-    ]).then(([userRes, orderTypeRes]) => {
+      settingsApi.fetchAssignableDirectory(),
+    ]).then(([userRes, orderTypeRes, directoryRes]) => {
       if (userRes.code === 0) {
         const visibleUsers = filterUsersByCurrentDataScope(userRes.data, 'orders', currentUser || undefined);
         setUsers(visibleUsers);
@@ -397,6 +390,11 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
             return { ...prev, orderType: (activeTypes[0]?.name || '') as OrderType };
           });
         }
+      }
+      if (directoryRes.code === 0 && currentUser?.departmentId) {
+        setApplicantDepartmentName(directoryRes.data.departments.find((item) => item.id === currentUser.departmentId)?.name || '');
+      } else {
+        setApplicantDepartmentName('');
       }
     });
   }, [currentUser, open, order]);
@@ -522,7 +520,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       void showFormIssue(productOptions.length ? '所有启用产品都已添加' : '暂无可用产品，请先到系统设置启用产品');
       return;
     }
-    setSubmitError('');
     setProductItemsEdited(true);
     setOrderItems((items) => [...items, {
       productId: available.id,
@@ -536,7 +533,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     setOrderItems((items) => items.map((item, itemIndex) => (
       itemIndex === index ? { ...item, ...patch } : item
     )));
-    setSubmitError('');
   };
 
   const setPrimaryProductItem = (index: number) => {
@@ -688,7 +684,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     };
 
     setSubmitting(true);
-    setSubmitError('');
     try {
       let submittedApplication: OrderApplication | undefined;
       if (order && correctionMode) {
@@ -752,18 +747,63 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     : 0;
   const formTitle = correctionMode ? '订单更正' : order ? '编辑订单资料' : application ? '修改订单申请' : '提交订单申请';
   const actionText = correctionMode ? '确认更正并重算' : order ? '保存资料' : application ? '重新提交审核' : '提交审核';
+  const applicationDate = toDateTimeInputValue(new Date(application?.createdAt || order?.createdAt || Date.now())).slice(0, 10);
+  const dialogSubtitle = correctionMode
+    ? '更正后将重新计算订单分账，并完整保留修改记录。'
+    : order
+      ? '补充和更新订单资料，不改变已生成的订单业务结果。'
+      : '提交后进入订单审核台，财务审核通过后生成正式订单、提成和交付记录。';
 
   return (
     <>
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogCloseTitle onClose={onClose}>{formTitle}</DialogCloseTitle>
-      <DialogContent>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="md"
+      fullWidth
+      PaperProps={{ sx: { maxHeight: '94vh', bgcolor: '#f8fafc' } }}
+    >
+      <DialogCloseTitle onClose={onClose} sx={{ px: { xs: 2, sm: 3 }, py: 2.25, bgcolor: '#fff' }}>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="h6" sx={{ color: '#0f172a', fontWeight: 850 }}>{formTitle}</Typography>
+          <Typography variant="body2" sx={{ mt: 0.35, color: '#64748b' }}>{dialogSubtitle}</Typography>
+        </Box>
+      </DialogCloseTitle>
+      <DialogContent sx={{ px: { xs: 1.5, sm: 3 }, py: 2.5, bgcolor: '#f8fafc' }}>
         {!order && (
-          <Typography variant="body2" sx={{ mb: 2, color: '#1d4ed8', bgcolor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 1, px: 1.5, py: 1 }}>
-            {application
-              ? '修改后会重新进入财务审核，审核通过后才生成正式订单、提成和交付记录。'
-              : '提交后会进入订单审核台，财务审核通过后才生成正式订单、提成和交付记录。'}
-          </Typography>
+          <Box
+            aria-label="订单申请人信息"
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(4, 1fr)' },
+              gap: 0,
+              mb: 2.5,
+              border: '1px solid #bfdbfe',
+              borderRadius: 2,
+              bgcolor: '#f4f8ff',
+              overflow: 'hidden',
+            }}
+          >
+            {[
+              ['申请人', currentUser?.name || '未知用户'],
+              ['部门', applicantDepartmentName || '未归属部门'],
+              ['角色', currentUser?.role || '-'],
+              ['申请日期', applicationDate],
+            ].map(([label, value], index) => (
+              <Box
+                key={label}
+                sx={{
+                  px: { xs: 1.5, sm: 2 },
+                  py: 1.35,
+                  borderLeft: { xs: index % 2 ? '1px solid #dbeafe' : 0, sm: index ? '1px solid #dbeafe' : 0 },
+                  borderTop: { xs: index > 1 ? '1px solid #dbeafe' : 0, sm: 0 },
+                }}
+              >
+                <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700 }}>{label}</Typography>
+                <Typography variant="body2" noWrap sx={{ mt: 0.25, color: '#0f172a', fontWeight: 700 }}>{value}</Typography>
+              </Box>
+            ))}
+          </Box>
         )}
         {order && !correctionMode && (
           <Alert severity="info" sx={{ mb: 2 }}>
@@ -775,7 +815,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
             更正后系统会自动撤回未发放分账、按新订单重算，并同步客户和未开始交付资料。已发放提成不能覆盖，需走订单冲正流程。
           </Alert>
         )}
-        {submitError && !correctionMode && <Alert severity="error" sx={{ mb: 2 }}>{submitError}</Alert>}
         {correctionMode && (
           <TextField
             label="更正原因"
@@ -790,7 +829,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
           />
         )}
         <Box sx={{ mt: 1 }}>
-        <BusinessFormSection step={1} title="客户信息" summary={form.customerName ? `${form.customerName} / ${form.owner || '待选择负责人'}` : '待选择客户'} errorCount={customerErrorCount}>
+        <BusinessFormSection step={1} solidStep title="客户信息" summary={form.customerName ? `${form.customerName} / ${form.owner || '待选择负责人'}` : '待选择客户'} errorCount={customerErrorCount}>
           <FormControl fullWidth>
             <FormLabel htmlFor="order-customer-field" required sx={{ mb: 0.75, color: '#334155', fontSize: 13, fontWeight: 700 }}>
               {customerLocked ? '客户' : '客户（搜索选择）'}
@@ -863,6 +902,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
 
         <BusinessFormSection
           step={2}
+          solidStep
           title="产品信息"
           summary={orderItems.length ? `${orderItems.length} 项 / 产品总计 ¥${productSummary.standardTotalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}` : '待添加产品'}
           errorCount={productErrorCount}
@@ -871,22 +911,21 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
             <Button startIcon={<AddIcon />} variant="outlined" onClick={addProductItem} disabled={formalFieldLocked} sx={{ mb: 1.5 }}>
               添加产品
             </Button>
-            <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1.5 }}>
-              <Table size="small" sx={{ minWidth: 820 }}>
+            <TableContainer sx={{ border: '1px solid #dbe3ef', borderRadius: 1.5, bgcolor: '#fff' }}>
+              <Table size="small" sx={{ width: '100%', tableLayout: 'fixed', '& .MuiTableCell-root': { px: 1.25 } }}>
                 <TableHead>
                   <TableRow sx={{ bgcolor: '#f8fafc' }}>
-                    <TableCell align="center" sx={{ width: 86 }}>主产品</TableCell>
-                    <TableCell sx={{ minWidth: 240 }}>产品名称 *</TableCell>
-                    <TableCell sx={{ width: 120 }}>产品等级</TableCell>
-                    <TableCell align="right" sx={{ width: 140 }}>产品价格</TableCell>
-                    <TableCell sx={{ width: 130 }}>数量 *</TableCell>
-                    <TableCell align="right" sx={{ width: 150 }}>小计</TableCell>
-                    <TableCell align="center" sx={{ width: 72 }}>操作</TableCell>
+                    <TableCell sx={{ width: '32%' }}>产品名称 *</TableCell>
+                    <TableCell sx={{ width: '13%' }}>产品等级</TableCell>
+                    <TableCell align="right" sx={{ width: '15%' }}>产品价格</TableCell>
+                    <TableCell align="center" sx={{ width: '18%' }}>数量 *</TableCell>
+                    <TableCell align="right" sx={{ width: '14%' }}>小计</TableCell>
+                    <TableCell align="center" sx={{ width: '8%' }}>操作</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {!orderItems.length && (
-                    <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5, color: 'text.secondary' }}>点击“添加产品”关联订单产品</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>点击“添加产品”关联订单产品</TableCell></TableRow>
                   )}
                   {orderItems.map((item, index) => {
                     const selectedProduct = productById.get(item.productId);
@@ -899,36 +938,39 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
                     const subtotal = Number(storedItem?.subtotal ?? (displayUnitPrice * Number(item.quantity || 0)));
                     return (
                       <TableRow key={item.id || `${item.productId}-${index}`}>
-                        <TableCell align="center">
-                          <Radio checked={Boolean(item.isPrimary)} onChange={() => setPrimaryProductItem(index)} disabled={formalFieldLocked} inputProps={{ 'aria-label': `设为第 ${index + 1} 项主产品` }} />
-                        </TableCell>
                         <TableCell>
-                          <TextField
-                            select size="small" value={item.productId}
-                            onChange={(event) => {
-                              const productId = event.target.value;
-                              if (orderItems.some((other, otherIndex) => otherIndex !== index && other.productId === productId)) {
-                                void showFormIssue('同一产品不能重复添加，请直接修改数量');
-                                return;
-                              }
-                              changeProductItem(index, { productId });
-                            }}
-                            fullWidth disabled={formalFieldLocked}
-                          >
-                            {!productOptions.some((product) => product.id === item.productId) && (
-                              <MenuItem value={item.productId}>{displayProductName}（历史产品）</MenuItem>
-                            )}
-                            {productOptions.map((product) => <MenuItem key={product.id} value={product.id}>{product.name}</MenuItem>)}
-                          </TextField>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Radio size="small" checked={Boolean(item.isPrimary)} onChange={() => setPrimaryProductItem(index)} disabled={formalFieldLocked} inputProps={{ 'aria-label': `设为第 ${index + 1} 项主产品` }} />
+                            <Box sx={{ minWidth: 0, flex: 1 }}>
+                              <TextField
+                                select size="small" value={item.productId}
+                                onChange={(event) => {
+                                  const productId = event.target.value;
+                                  if (orderItems.some((other, otherIndex) => otherIndex !== index && other.productId === productId)) {
+                                    void showFormIssue('同一产品不能重复添加，请直接修改数量');
+                                    return;
+                                  }
+                                  changeProductItem(index, { productId });
+                                }}
+                                fullWidth disabled={formalFieldLocked}
+                              >
+                                {!productOptions.some((product) => product.id === item.productId) && (
+                                  <MenuItem value={item.productId}>{displayProductName}（历史产品）</MenuItem>
+                                )}
+                                {productOptions.map((product) => <MenuItem key={product.id} value={product.id}>{product.name}</MenuItem>)}
+                              </TextField>
+                              {item.isPrimary && <Chip label="主产品" size="small" color="primary" variant="outlined" sx={{ mt: 0.5, height: 20, fontSize: 11 }} />}
+                            </Box>
+                          </Box>
                         </TableCell>
                         <TableCell>{displayProductLevel}</TableCell>
                         <TableCell align="right">¥{displayUnitPrice.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</TableCell>
-                        <TableCell>
-                          <TextField
-                            size="small" type="number" value={item.quantity}
-                            onChange={(event) => changeProductItem(index, { quantity: Number(event.target.value) })}
-                            inputProps={{ min: 1, max: 999, step: 1 }} disabled={formalFieldLocked}
-                          />
+                        <TableCell align="center">
+                          <Box sx={{ display: 'inline-flex', alignItems: 'center', border: '1px solid #dbe3ef', borderRadius: 1.25, overflow: 'hidden', bgcolor: '#fff' }}>
+                            <IconButton size="small" aria-label="减少数量" disabled={formalFieldLocked || Number(item.quantity) <= 1} onClick={() => changeProductItem(index, { quantity: Math.max(1, Number(item.quantity) - 1) })} sx={{ borderRadius: 0 }}>-</IconButton>
+                            <Typography sx={{ minWidth: 34, textAlign: 'center', fontWeight: 700 }}>{item.quantity}</Typography>
+                            <IconButton size="small" aria-label="增加数量" disabled={formalFieldLocked || Number(item.quantity) >= 999} onClick={() => changeProductItem(index, { quantity: Math.min(999, Number(item.quantity) + 1) })} sx={{ borderRadius: 0 }}>+</IconButton>
+                          </Box>
                         </TableCell>
                         <TableCell align="right" sx={{ fontWeight: 700 }}>¥{subtotal.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</TableCell>
                         <TableCell align="center">
@@ -939,7 +981,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
                   })}
                   {!!orderItems.length && (
                     <TableRow>
-                      <TableCell colSpan={5} align="right" sx={{ fontWeight: 700 }}>产品总计</TableCell>
+                      <TableCell colSpan={4} align="right" sx={{ fontWeight: 700 }}>产品合计（{orderItems.length}项）</TableCell>
                       <TableCell align="right" sx={{ fontSize: 17, fontWeight: 800, color: 'primary.main' }}>
                         ¥{productSummary.standardTotalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
                       </TableCell>
@@ -953,16 +995,17 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
           </Box>
         </BusinessFormSection>
 
-        <BusinessFormSection step={3} title="订单信息" summary={[form.orderType, form.thirdPartyOrderNo].filter(Boolean).join(' / ') || '待填写'} errorCount={orderErrorCount}>
+        <BusinessFormSection step={3} solidStep title="订单信息" summary={[form.orderType, form.thirdPartyOrderNo].filter(Boolean).join(' / ') || '待填写'} errorCount={orderErrorCount}>
           <TextField select label="订单类型" value={form.orderType} onChange={handleChange('orderType')} fullWidth disabled={formalFieldLocked} required>
             {orderTypeOptions.map((item) => (
               <MenuItem key={item.id} value={item.name}>{item.name}</MenuItem>
             ))}
           </TextField>
           <TextField label="第三方平台订单" value={form.thirdPartyOrderNo} onChange={handleChange('thirdPartyOrderNo')} placeholder="填写第三方平台订单号或订单ID" fullWidth />
+          <TextField label="备注信息" value={form.notes} onChange={handleChange('notes')} placeholder="请输入订单补充说明（选填）" fullWidth multiline minRows={2} sx={{ gridColumn: '1 / -1' }} />
         </BusinessFormSection>
 
-        <BusinessFormSection step={4} title="付款信息" summary={form.actualAmount > 0 ? `实付 ¥${Number(form.actualAmount).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}` : '待填写付款'} errorCount={paymentErrorCount}>
+        <BusinessFormSection step={4} solidStep title="收款与凭证" summary={form.actualAmount > 0 ? `实付 ¥${Number(form.actualAmount).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}` : '待填写付款'} errorCount={paymentErrorCount}>
           <TextField select label="官方收款渠道" value={form.officialPaymentChannel} onChange={handleChange('officialPaymentChannel')} fullWidth disabled={formalFieldLocked} required>
             {OFFICIAL_PAYMENT_CHANNELS.map((item) => (
               <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
@@ -1029,14 +1072,35 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
           </Box>
         </BusinessFormSection>
 
-        <BusinessFormSection step={5} title="补充信息" summary={form.notes ? '已填写备注' : '无备注'}>
-          <TextField label="备注" value={form.notes} onChange={handleChange('notes')} fullWidth multiline minRows={2} sx={{ gridColumn: '1 / -1' }} />
-        </BusinessFormSection>
         </Box>
       </DialogContent>
-      <DialogActions>
+      <DialogActions
+        sx={{
+          position: 'sticky',
+          bottom: 0,
+          zIndex: 2,
+          gap: 1.5,
+          px: { xs: 2, sm: 3 },
+          py: 1.5,
+          bgcolor: 'rgba(255, 255, 255, 0.98)',
+          borderTop: '1px solid #dbe3ef',
+          boxShadow: '0 -8px 24px rgba(15, 23, 42, 0.06)',
+        }}
+      >
+        <Box sx={{ mr: 'auto', display: 'flex', alignItems: 'center', gap: { xs: 1.5, sm: 3 } }}>
+          <Box>
+            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700 }}>产品合计（{orderItems.length}项）</Typography>
+            <Typography sx={{ color: '#2563eb', fontSize: { xs: 18, sm: 22 }, lineHeight: 1.25, fontWeight: 850 }}>
+              ¥{productSummary.standardTotalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+            </Typography>
+          </Box>
+          <Box sx={{ display: { xs: 'none', sm: 'block' }, pl: 3, borderLeft: '1px solid #dbe3ef' }}>
+            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700 }}>实付金额</Typography>
+            <Typography sx={{ color: '#0f172a', fontWeight: 750 }}>¥{Number(form.actualAmount || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</Typography>
+          </Box>
+        </Box>
         {correctionMode && <Button onClick={onClose} disabled={submitting}>取消更正</Button>}
-        <Button variant="contained" onClick={handleSubmit} disabled={submitting}>
+        <Button variant="contained" size="large" onClick={handleSubmit} disabled={submitting} sx={{ minWidth: { xs: 112, sm: 148 }, fontWeight: 800 }}>
           {actionText}
         </Button>
       </DialogActions>

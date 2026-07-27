@@ -80,6 +80,7 @@ import { createRecoveryOrderCommandService } from './services/recoveryOrderComma
 import { createOrderSettlementCommandService } from './services/orderSettlementCommandService';
 import { createRecoveryCrmBridge } from './services/recoveryCrmBridge';
 import { createCommissionPayoutService } from './services/commissionPayoutService';
+import { createCommissionMonthlyReportService } from './services/commissionMonthlyReportService';
 import { createFinanceTransactionService } from './services/financeTransactionService';
 import { collectLeadSourcePairs, ensureLeadSourceConfigsInTransaction } from './services/leadSourceConfigSyncService';
 import { createKnowledgeService } from './services/enablement/knowledgeService';
@@ -241,6 +242,7 @@ const orderSettlementCommandService = createOrderSettlementCommandService(prisma
 const commissionPayoutService = createCommissionPayoutService(prisma, {
   recordFinanceTransaction: (transaction, payout) => financeTransactionService.recordCommissionPayout(transaction, payout),
 });
+const commissionMonthlyReportService = createCommissionMonthlyReportService(prisma);
 const businessImportReadService = createBusinessImportReadRepository(prisma);
 const businessImportReviewService = createBusinessImportReviewService({
   selectImportedRecords: createBusinessImportReviewSelector(prisma),
@@ -810,6 +812,7 @@ app.get('/api/order-applications', requireOrderApplicationReadAccess, async (req
     statuses: statuses as OrderApplicationFilters['statuses'],
     applicantName: queryParam(req.query.applicantName),
     reviewerName: queryParam(req.query.reviewerName),
+    owner: queryParam(req.query.owner),
     startDate: queryParam(req.query.startDate),
     endDate: queryParam(req.query.endDate),
     paymentStartDate: queryParam(req.query.paymentStartDate),
@@ -820,6 +823,11 @@ app.get('/api/order-applications', requireOrderApplicationReadAccess, async (req
     page: Number(queryParam(req.query.page)),
     pageSize: Number(queryParam(req.query.pageSize)),
   }, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.get('/api/order-applications/owner-candidates', requireOrderApplicationReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderQueryService.listApplicationOwnerCandidates(req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
@@ -1214,6 +1222,15 @@ app.post('/api/recovery-orders/:id/withdraw-settlement', requireStorageAccess, a
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
+app.post('/api/recovery-orders/:id/reopen-settlement', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await recoveryOrderCommandService.reopenSettlement(
+    routeParam(req.params.id),
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
 app.delete('/api/recovery-orders/:id', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
   const result = await recoveryOrderCommandService.softDelete(routeParam(req.params.id), String(req.body?.reason || ''), req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
@@ -1255,6 +1272,25 @@ app.post('/api/order-settlements/:id/withdraw', requireStorageAccess, async (req
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
+app.post('/api/order-settlements/:id/reopen', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderSettlementCommandService.reopen(
+    routeParam(req.params.id),
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/order-settlements/:id/save', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderSettlementCommandService.save(
+    routeParam(req.params.id),
+    Array.isArray(req.body?.rows) ? req.body.rows : [],
+    String(req.body?.reason || ''),
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
 app.post('/api/order-settlements/:id/cleanup', requireStorageAccess, async (req: AuthenticatedRequest, res) => {
   const result = await orderSettlementCommandService.cleanup(
     routeParam(req.params.id),
@@ -1272,6 +1308,19 @@ app.get('/api/commission-payout-workspace', requireFinancePayoutReadAccess, asyn
       ? await commissionPayoutService.getRecordsWorkspace()
       : await commissionPayoutService.getPeriodWorkspace(queryParam(req.query.period));
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/commission-payout-reports/export', requireFinancePayoutReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await commissionMonthlyReportService.exportWorkbook(req.body || {}, req.currentUser!);
+  if (result.code !== 0 || !result.data) {
+    res.status(result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+    return;
+  }
+  const payload = result.data as { filename: string; buffer: Buffer };
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(payload.filename)}`);
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(payload.buffer);
 });
 
 app.post('/api/commission-payouts/issue', requireFinancePayoutWriteAccess, async (req: AuthenticatedRequest, res) => {

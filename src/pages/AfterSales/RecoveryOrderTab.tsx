@@ -254,11 +254,11 @@ const RECOVERY_ORDER_REVIEW_COLUMNS: Array<TableViewColumnConfig & { id: Recover
 
 const DEFAULT_LIST_VISIBLE_COLUMNS: RecoveryOrderColumnId[] = RECOVERY_ORDER_LIST_COLUMNS.slice(0, 13).map((column) => column.id);
 const DEFAULT_REVIEW_VISIBLE_COLUMNS: RecoveryOrderColumnId[] = RECOVERY_ORDER_REVIEW_COLUMNS.slice(0, 14).map((column) => column.id);
-const RECOVERY_LIST_STATUSES: RecoveryOrderStatus[] = ['待分账', '已分账'];
+const RECOVERY_LIST_STATUSES: RecoveryOrderStatus[] = ['审核通过', '待分账', '已分账'];
 const RECOVERY_PROGRESS_OPTIONS = SETTLEMENT_STATUSES;
 
 function isRecoveryOrderLocked(row: RecoveryOrder): boolean {
-  return row.status === '已分账' || ['待确认', '待发放', '已撤回'].includes(row.settlementStatus || '未分账');
+  return ['待确认', '待发放', '已发放', '已撤回'].includes(row.settlementStatus || '未分账');
 }
 
 const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
@@ -1543,13 +1543,13 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
                     title: historyOrder.status === '审核驳回' ? '审核驳回' : historyOrder.status === '退回修改' ? '退回修改' : '审核通过',
                     time: historyOrder.auditedAt,
                     by: historyOrder.auditorName || '-',
-                    note: historyOrder.auditReason || (historyOrder.status === '已分账' || historyOrder.status === '待分账' ? '进入售后挽回分账。' : '-'),
+                    note: historyOrder.auditReason || (historyOrder.status === '审核通过' ? '审核通过，进入售后挽回分账流程。' : '-'),
                   } : null,
-                  historyOrder.status === '已分账' ? {
-                    title: '售后挽回分账完成',
+                  historyOrder.status === '审核通过' && historyOrder.settlementStatus !== '待处理' ? {
+                    title: '售后挽回分账进度',
                     time: historyOrder.updatedAt,
                     by: historyOrder.auditorName || '-',
-                    note: `已生成 ${historyOrder.commissionIds?.length || 0} 条提成记录。`,
+                    note: `当前状态：${historyOrder.settlementStatus || '待处理'}，共 ${historyOrder.commissionIds?.length || 0} 条提成记录。`,
                   } : null,
                   historyOrder.deletedAt ? {
                     title: '删除业务单（保留审核留痕）',
@@ -1801,6 +1801,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
         title="导出售后挽回订单"
         expectedCount={total}
         currentColumnCount={visibleColumns.length}
+        enableStandardMode
         onClose={() => setExportOpen(false)}
         onRequestExport={handleExportRecoveryOrders}
       />

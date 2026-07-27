@@ -127,6 +127,38 @@ function put(prisma: FakePrisma, domain: string, recordId: string, data: any) {
 {
   const prisma = new FakePrisma();
   put(prisma, STORAGE_KEYS.ORDERS, 'order-1', order());
+  put(prisma, STORAGE_KEYS.COMMISSIONS, 'commission-withdrawn', {
+    ...commission('已撤回'), settlementVersion: 1, settlementRoundId: 'settlement-order-1-v1',
+  });
+  const service = createOrderSettlementCommandService(prisma as any, { now: () => new Date(now) });
+  const rows = [{
+    orderId: 'order-1', role: '销售' as const, owner: '销售甲', ownerId: 'sales-1', department: '销售部',
+    commissionAmount: 99.9, performanceAmount: 899, ruleCalculationType: 'fixed' as const,
+  }];
+  assert.equal((await service.save('order-1', rows, '调整人员', finance)).code, 409, '已撤回的分账必须先重新分账');
+  assert.equal((await service.reopen('order-1', '调整人员', finance)).code, 0);
+  const saved = await service.save('order-1', rows, '调整人员', finance);
+  assert.equal(saved.code, 0, saved.message);
+  assert.equal(saved.data?.[0]?.settlementVersion, 2);
+  assert.equal(prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'commission-withdrawn'))?.data.status, '已撤回', '旧轮次不得删除');
+  assert.equal(
+    Array.from(prisma.rows.values()).some((row) => row.domain === STORAGE_KEYS.COMMISSIONS && row.data.status === '待确认' && row.data.settlementVersion === 2),
+    true,
+    '重新分账保存必须创建新轮次',
+  );
+  const resetNewRound = await service.reset('order-1', '重置第二轮', finance);
+  assert.equal(resetNewRound.code, 0, resetNewRound.message);
+  assert.equal(prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'commission-withdrawn'))?.data.status, '已撤回', '重置当前轮次不得删除旧轮次');
+  assert.equal(
+    Array.from(prisma.rows.values()).some((row) => row.domain === STORAGE_KEYS.COMMISSIONS && row.data.status === '待确认'),
+    false,
+    '重置当前轮次必须删除当前待确认明细',
+  );
+}
+
+{
+  const prisma = new FakePrisma();
+  put(prisma, STORAGE_KEYS.ORDERS, 'order-1', order());
   put(prisma, STORAGE_KEYS.COMMISSIONS, 'commission-1', commission('待发放'));
   const service = createOrderSettlementCommandService(prisma as any, { now: () => new Date(now) });
   assert.equal((await service.withdraw('order-1', '订单退款', finance)).code, 0);
@@ -143,5 +175,25 @@ function put(prisma: FakePrisma, domain: string, recordId: string, data: any) {
   assert.equal(
     Array.from(prisma.rows.values()).some((row) => row.domain === STORAGE_KEYS.COMMISSION_OPERATION_LOGS && row.status === '清理废弃分账'),
     true,
+  );
+}
+
+{
+  const prisma = new FakePrisma();
+  put(prisma, STORAGE_KEYS.ORDERS, 'order-1', order());
+  put(prisma, STORAGE_KEYS.COMMISSIONS, 'commission-1', {
+    ...commission('已撤回'),
+    settlementVersion: 1,
+    settlementRoundId: 'order-1-round-1',
+  });
+  const service = createOrderSettlementCommandService(prisma as any, { now: () => new Date(now) });
+  assert.equal((await service.reopen('order-1', '', finance)).code, 400, '重新分账必须填写原因');
+  const reopened = await service.reopen('order-1', '调整分账人员', finance);
+  assert.equal(reopened.code, 0, reopened.message);
+  assert.equal(prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'commission-1'))?.data.status, '已撤回', '重新分账不得覆盖旧明细');
+  assert.equal(
+    Array.from(prisma.rows.values()).some((row) => row.domain === STORAGE_KEYS.COMMISSION_OPERATION_LOGS && row.status === '重新分账'),
+    true,
+    '重新分账必须留下可追溯的命令留痕',
   );
 }

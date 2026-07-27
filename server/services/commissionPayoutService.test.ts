@@ -161,6 +161,7 @@ function fakePrisma(seed: any[]) {
   assert.equal(workspace.data?.summary.pendingPayAmount, 339.9, '待发放池必须跨月汇总');
   assert.equal(workspace.data?.summary.pendingConfirmAmount, 89.9);
   assert.equal(workspace.data?.employees.find((row) => row.ownerId === 'sales-1')?.pendingPayAmount, 139.9);
+  assert.equal(workspace.data?.employees.find((row) => row.ownerId === 'sales-1')?.commissions[0]?.settlementVersion, 1, '旧提成明细未标记轮次时按第一轮读取');
   assert.equal(workspace.data?.summary.paidAmount, 0, '已发放历史不能混入待办池');
 }
 
@@ -260,13 +261,10 @@ function fakePrisma(seed: any[]) {
   const service = createCommissionPayoutService(db.prisma, { now: () => new Date(NOW) });
   assert.equal((await service.reverse('legacy-payout', '测试误操作', finance)).code, 403, '普通财务不能撤销发放');
   const reversed = await service.reverse('legacy-payout', '测试误操作', financeManager);
-  assert.equal(reversed.code, 0, reversed.message);
-  assert.equal(reversed.data?.status, '已撤销');
-  assert.equal((db.rows.get(key(STORAGE_KEYS.COMMISSIONS, paid.id))?.data as Commission).status, '待发放');
-  assert.equal((db.rows.get(key(STORAGE_KEYS.RECOVERY_ORDERS, recovery.id))?.data as any).settlementStatus, '待发放');
-  assert.equal((db.rows.get(key(STORAGE_KEYS.RECOVERY_ORDERS, recovery.id))?.data as any).settlementPaidAt, undefined);
-  assert.equal((db.rows.get(key(STORAGE_KEYS.RECOVERY_ORDERS, recovery.id))?.data as any).changeHistory?.[0]?.action, 'settlement');
-  assert.match((db.rows.get(key(STORAGE_KEYS.RECOVERY_ORDERS, recovery.id))?.data as any).changeHistory?.[0]?.summary || '', /撤销/);
+  assert.equal(reversed.code, 409, reversed.message);
+  assert.match(reversed.message, /线下处理/);
+  assert.equal((db.rows.get(key(STORAGE_KEYS.COMMISSIONS, paid.id))?.data as Commission).status, '已发放');
+  assert.equal((db.rows.get(key(STORAGE_KEYS.RECOVERY_ORDERS, recovery.id))?.data as any).settlementStatus, '已发放');
 }
 
 {

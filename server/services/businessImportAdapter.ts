@@ -167,6 +167,11 @@ function thirdPartyNumber(record: { data: unknown }): string {
   return lower(data.thirdPartyOrderNo);
 }
 
+function activeThirdPartyNumber(record: { data: unknown }): string {
+  const data = readValue<Record<string, unknown>>(record.data, {});
+  return data.deletedAt ? '' : lower(data.thirdPartyOrderNo);
+}
+
 export async function loadBusinessImportDirectory(prisma: PrismaClient, actor: AuthenticatedUser, _type: BusinessImportType): Promise<BusinessImportDirectory> {
   const [storage, productRecords, users, roles, departments, customers, orders, recoveries, pendingReservations, context] = await Promise.all([
     prisma.appStorage.findMany({ where: { key: { in: [STORAGE_KEYS.ORDER_TYPE_CONFIGS, STORAGE_KEYS.AFTER_SALES_SOURCE_CONFIGS] } } }),
@@ -218,7 +223,7 @@ export async function loadBusinessImportDirectory(prisma: PrismaClient, actor: A
     recoveryShops: shops,
     customerMatchesByContact,
     existingOrderNumbers: new Set([...orders.map(thirdPartyNumber), ...pendingNumbers('orders')].filter(Boolean)),
-    existingRecoveryOrderNumbers: new Set([...recoveries.map(thirdPartyNumber), ...pendingNumbers('recovery_orders')].filter(Boolean)),
+    existingRecoveryOrderNumbers: new Set([...recoveries.map(activeThirdPartyNumber), ...pendingNumbers('recovery_orders')].filter(Boolean)),
   };
 }
 

@@ -35,6 +35,15 @@ const periodOf = (commission: Commission) => String(commission.paymentDate || co
 const ownerKey = (commission: Commission) => commission.ownerId || `name:${commission.owner}`;
 const recordData = (value: Commission | CommissionPayoutRecord | RecoveryOrder) => value as unknown as Prisma.InputJsonValue;
 
+function normalizeCommissionRound(value: unknown): Commission {
+  const commission = asObject(value) as unknown as Commission;
+  const version = Number(commission.settlementVersion || 1);
+  return {
+    ...commission,
+    settlementVersion: Number.isInteger(version) && version > 0 ? version : 1,
+  };
+}
+
 function normalizePayoutRecord(value: unknown): CommissionPayoutRecord | null {
   const data = asObject(value);
   const id = String(data.id || '').trim();
@@ -144,7 +153,7 @@ async function syncRecoverySettlementStatuses(
       tx.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSIONS, orderId: recoveryId } }),
     ]);
     if (!recoveryRow) continue;
-    const related = relatedRows.map((row) => asObject(row.data) as unknown as Commission);
+    const related = relatedRows.map((row) => normalizeCommissionRound(row.data));
     const active = related.filter((item) => !['已取消', '已撤回', '已冲销'].includes(item.status));
     const settlementStatus = active.some((item) => item.status === '待确认')
       ? '待确认'
@@ -238,7 +247,7 @@ export function createCommissionPayoutService(prisma: PayoutPrisma, options: Com
       listRecords(period),
     ]);
     const commissions = commissionRows
-      .map((row) => asObject(row.data) as unknown as Commission)
+      .map((row) => normalizeCommissionRound(row.data))
       .filter((item) => periodOf(item) === period && INCLUDED_WORKSPACE_STATUSES.has(item.status));
     const employees = employeeRows(commissions);
     return success<CommissionPayoutWorkspace>({
@@ -260,7 +269,7 @@ export function createCommissionPayoutService(prisma: PayoutPrisma, options: Com
       where: { domain: STORAGE_KEYS.COMMISSIONS, status: { in: ['待确认', '待发放'] } },
     });
     const commissions = commissionRows
-      .map((row) => asObject(row.data) as unknown as Commission)
+      .map((row) => normalizeCommissionRound(row.data))
       .filter((item) => item.status === '待确认' || item.status === '待发放');
     const employees = employeeRows(commissions);
     return success<CommissionPayoutWorkspace>({
@@ -309,7 +318,7 @@ export function createCommissionPayoutService(prisma: PayoutPrisma, options: Com
       });
       const requested = new Set(requestedOwnerIds);
       const eligible = rows
-        .map((row) => asObject(row.data) as unknown as Commission)
+        .map((row) => normalizeCommissionRound(row.data))
         .filter((item) => requested.has(ownerKey(item)));
       const foundOwners = new Set(eligible.map(ownerKey));
       if (requestedOwnerIds.some((id) => !foundOwners.has(id))) {
@@ -379,50 +388,8 @@ export function createCommissionPayoutService(prisma: PayoutPrisma, options: Com
   const reverse = async (id: string, reason: string, actor: AuthenticatedUser) => {
     if (!canReversePayout(actor)) return failure<CommissionPayoutRecord>('只有超级管理员或财务负责人可以撤销发放', 403);
     if (!String(reason || '').trim()) return failure<CommissionPayoutRecord>('请填写撤销原因', 400);
-    return prisma.$transaction(async (tx) => {
-      await lockCommissionRows(tx);
-      const row = await tx.businessRecord.findUnique({
-        where: { domain_recordId: { domain: STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES, recordId: id } },
-      });
-      const payout = normalizePayoutRecord(row?.data);
-      if (!payout) return failure<CommissionPayoutRecord>('发放记录不存在', 404);
-      if (payout.status === '已撤销') return failure<CommissionPayoutRecord>('该发放记录已经撤销', 409);
-      const rows = await tx.businessRecord.findMany({
-        where: { domain: STORAGE_KEYS.COMMISSIONS, recordId: { in: payout.commissionIds } },
-      });
-      const commissions = rows.map((item) => asObject(item.data) as unknown as Commission);
-      if (commissions.length !== payout.commissionIds.length) return failure<CommissionPayoutRecord>('发放记录中的提成明细已不完整', 409);
-
-      for (const commission of commissions) {
-        if (commission.status !== '已发放' || commission.batchId !== id) {
-          return failure<CommissionPayoutRecord>('发放记录中的提成状态已变化，不能直接撤销', 409);
-        }
-      }
-      for (const commission of commissions) {
-        const restored = { ...commission, status: '待发放' as const, updatedAt: now().toISOString() } as Commission & Record<string, unknown>;
-        delete restored.batchId;
-        delete restored.paidAt;
-        delete restored.payoutRecordId;
-        await tx.businessRecord.update({
-          where: { domain_recordId: { domain: STORAGE_KEYS.COMMISSIONS, recordId: commission.id } },
-          data: commissionRecordUpdate(restored as Commission, now()),
-        });
-      }
-      await syncRecoverySettlementStatuses(tx, recoveryIdsFor(commissions), now(), actor, reason);
-      const reversed: CommissionPayoutRecord = {
-        ...payout,
-        status: '已撤销',
-        reversedAt: now().toISOString(),
-        reversedById: actor.id,
-        reversedByName: actor.name,
-        reverseReason: String(reason).trim(),
-      };
-      await tx.businessRecord.update({
-        where: { domain_recordId: { domain: STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES, recordId: id } },
-        data: payoutRecordUpdate(reversed, now()),
-      });
-      return success(reversed, '发放已撤销，相关提成已恢复为待发放');
-    });
+    void id;
+    return failure<CommissionPayoutRecord>('本版不支持撤销发放，请线下处理', 409);
   };
 
   return { getPendingWorkspace, getRecordsWorkspace, getPeriodWorkspace, listRecords, issue, reverse };

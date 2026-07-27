@@ -165,24 +165,23 @@ export function buildCustomerAccessContextFromDirectory(
   const rawScope = explicitCustomerScope(role.dataScopes?.customers);
   if (rawScope === null) return emptyContext(actor.id, actor.name);
   const scope = rawScope ?? normalizeRoleDataScopes(role).customers;
-  const activeUsers = users.filter((user) => (
-    user.isActive && (user.employmentStatus || 'active') === 'active'
-  ));
-
-  let manageableUsers: typeof activeUsers = [];
+  let readableUsers: typeof users = [];
   if (scope === 'self') {
-    manageableUsers = [actor];
+    readableUsers = [actor];
   } else if (scope === 'all') {
-    manageableUsers = activeUsers;
+    readableUsers = users;
   } else if (actor.departmentId && scope === 'department') {
     const departmentIds = new Set([
       actor.departmentId,
       ...getDepartmentDescendantIds(departments, actor.departmentId),
     ]);
-    manageableUsers = activeUsers.filter((user) => Boolean(
+    readableUsers = users.filter((user) => Boolean(
       user.departmentId && departmentIds.has(user.departmentId),
     ));
   }
+  const manageableUsers = readableUsers.filter((user) => (
+    user.isActive && (user.employmentStatus || 'active') === 'active'
+  ));
 
   const grantedPermissions = new Set<string>();
   for (const [permissionKey, action] of CUSTOMER_MUTATION_PERMISSION_ACTIONS) {
@@ -191,8 +190,8 @@ export function buildCustomerAccessContextFromDirectory(
   return {
     actorId: actor.id,
     actorName: actor.name,
-    readableUserIds: new Set(manageableUsers.map((user) => user.id)),
-    legacyReadableNames: new Set(manageableUsers.map((user) => user.name).filter(Boolean)),
+    readableUserIds: new Set(readableUsers.map((user) => user.id)),
+    legacyReadableNames: new Set(readableUsers.map((user) => user.name).filter(Boolean)),
     manageableOwnerIds: new Set(manageableUsers.map((user) => user.id)),
     canReadPublicPool: roleHasPermission(role, PERMISSION_KEYS.CUSTOMER_PUBLIC_POOL_VIEW, 'read'),
     canReadCustomerList: roleHasPermission(role, PERMISSION_KEYS.CUSTOMER_LIST, 'read'),

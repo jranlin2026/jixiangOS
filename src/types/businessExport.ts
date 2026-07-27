@@ -4,7 +4,7 @@ import type { RecoveryOrderFilters } from './recoveryOrder';
 
 export const BUSINESS_EXPORT_MODULES = ['orders', 'order_settlements', 'recovery_orders', 'recovery_settlements'] as const;
 export type BusinessExportModule = typeof BUSINESS_EXPORT_MODULES[number];
-export type BusinessExportColumnMode = 'current_view' | 'all';
+export type BusinessExportColumnMode = 'standard' | 'current_view' | 'all';
 
 export type BusinessExportFilters = OrderFilters | CommissionOrderSummaryFilters | RecoveryOrderFilters;
 export type BusinessExportRow = Record<string, string | number | boolean | null | undefined>;

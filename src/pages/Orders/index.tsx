@@ -759,20 +759,6 @@ const Orders: React.FC = () => {
               sx={{ minWidth: 240 }}
             />
             <FormControl size="small" sx={{ minWidth: 130 }}>
-              <InputLabel>订单状态</InputLabel>
-              <Select value={filters.status || ''} label="订单状态" onChange={(e) => handleFilterChange('status', e.target.value)}>
-                <MenuItem value="">全部</MenuItem>
-                {['待确认', '已确认', '处理中', '已完成', '退款中', '已退款', '已取消'].map((status) => <MenuItem key={status} value={status}>{status}</MenuItem>)}
-              </Select>
-            </FormControl>
-            <FormControl size="small" sx={{ minWidth: 140 }}>
-              <InputLabel>退款状态</InputLabel>
-              <Select value={filters.refundStatus || ''} label="退款状态" onChange={(e) => handleFilterChange('refundStatus', e.target.value)}>
-                <MenuItem value="">全部</MenuItem>
-                {['无', '待分配', '挽回中', '挽回成功', '待财务退款', '退款申请中', '退款已批准', '退款已完成', '退款已拒绝'].map((status) => <MenuItem key={status} value={status}>{status}</MenuItem>)}
-              </Select>
-            </FormControl>
-            <FormControl size="small" sx={{ minWidth: 130 }}>
               <InputLabel>分账状态</InputLabel>
               <Select value={filters.settlementStatus || ''} label="分账状态" onChange={(e) => handleFilterChange('settlementStatus', e.target.value)}>
                 <MenuItem value="">全部</MenuItem>
@@ -1093,6 +1079,7 @@ const Orders: React.FC = () => {
         title="导出订单"
         expectedCount={pagination.total}
         currentColumnCount={visibleColumns.length}
+        enableStandardMode
         onClose={() => setExportOpen(false)}
         onRequestExport={handleExportOrders}
       />

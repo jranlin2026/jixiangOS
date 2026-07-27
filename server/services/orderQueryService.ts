@@ -227,6 +227,9 @@ function matchesApplication(application: OrderApplication, filters: OrderApplica
   if (!filters.statuses?.length && filters.status && application.status !== filters.status) return false;
   if (filters.applicantName && application.applicantName !== filters.applicantName) return false;
   if (filters.reviewerName && application.reviewerName !== filters.reviewerName) return false;
+  if (filters.owner
+    && application.orderData?.owner !== filters.owner
+    && application.orderData?.salesName !== filters.owner) return false;
   if (filters.importBatchId && application.importBatchId !== filters.importBatchId) return false;
   if (!inDateRange(application.submittedAt || application.createdAt, filters.startDate, filters.endDate)) return false;
   return inDateRange(
@@ -298,6 +301,9 @@ async function queryApplicationPage(
   else if (filters.status) conditions.push(Prisma.sql`br.status = ${filters.status}`);
   conditions.push(...exactJson('br', '$.applicantName', filters.applicantName));
   conditions.push(...exactJson('br', '$.reviewerName', filters.reviewerName));
+  if (filters.owner) {
+    conditions.push(Prisma.sql`(${jsonText('br', '$.orderData.owner')} = ${filters.owner} OR ${jsonText('br', '$.orderData.salesName')} = ${filters.owner})`);
+  }
   conditions.push(...exactJson('br', '$.importBatchId', filters.importBatchId));
   if (filters.startDate) conditions.push(Prisma.sql`COALESCE(${jsonText('br', '$.submittedAt')}, ${jsonText('br', '$.createdAt')}) >= ${filters.startDate}`);
   if (filters.endDate) conditions.push(Prisma.sql`COALESCE(${jsonText('br', '$.submittedAt')}, ${jsonText('br', '$.createdAt')}) <= ${/^\d{4}-\d{2}-\d{2}$/.test(filters.endDate) ? `${filters.endDate}T23:59:59.999Z` : filters.endDate}`);
@@ -462,6 +468,25 @@ export function createOrderQueryService(
         roleRows.map(mapPrismaRole),
         departments as any,
         'orders',
+      );
+      return success(scope.unrestricted
+        ? users
+        : users.filter((user) => scope.visibleUserIds.includes(user.id) || scope.visibleUserNames.includes(user.name)));
+    },
+
+    async listApplicationOwnerCandidates(actor: AuthenticatedUser) {
+      const [userRows, roleRows, departments] = await Promise.all([
+        prisma.user.findMany({ where: { isActive: true, employmentStatus: 'active' }, orderBy: { createdAt: 'asc' } }),
+        prisma.role.findMany({ where: { isActive: true } }),
+        prisma.department.findMany(),
+      ]);
+      const users = userRows.map(mapPrismaUser);
+      const scope = buildDataVisibilityScopeForUser(
+        actor,
+        users,
+        roleRows.map(mapPrismaRole),
+        departments as any,
+        'orderApplications',
       );
       return success(scope.unrestricted
         ? users

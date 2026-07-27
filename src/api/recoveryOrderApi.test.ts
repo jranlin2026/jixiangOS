@@ -309,7 +309,7 @@ assert.deepEqual(resubmitted.data?.recoveryAttachments?.map((item) => item.id), 
 setSession('user-finance');
 const approved = await recoveryOrderApi.approveRecoveryOrder(created.data.id, 'user-finance', '财务专员');
 assert.equal(approved.code, 0);
-assert.equal(approved.data?.status, '待分账');
+assert.equal(approved.data?.status, '审核通过');
 assert.equal(approved.data?.settlementStatus, '待处理');
 assert.deepEqual(approved.data?.commissionIds, []);
 assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as unknown[]).length, 0);

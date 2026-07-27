@@ -14,6 +14,7 @@ interface BusinessFormSectionProps {
   summary?: string;
   errorCount?: number;
   defaultExpanded?: boolean;
+  solidStep?: boolean;
   children: React.ReactNode;
 }
 
@@ -24,6 +25,7 @@ const BusinessFormSection: React.FC<BusinessFormSectionProps> = ({
   summary,
   errorCount = 0,
   defaultExpanded = true,
+  solidStep = false,
   children,
 }) => {
   const [expanded, setExpanded] = useState(defaultExpanded);
@@ -99,8 +101,8 @@ const BusinessFormSection: React.FC<BusinessFormSectionProps> = ({
               borderRadius: 1.5,
               display: 'grid',
               placeItems: 'center',
-              bgcolor: '#fff',
-              color: hasError ? '#dc2626' : '#2563eb',
+              bgcolor: solidStep ? (hasError ? '#dc2626' : '#2563eb') : '#fff',
+              color: solidStep ? '#fff' : (hasError ? '#dc2626' : '#2563eb'),
               border: '1.5px solid',
               borderColor: hasError ? '#f87171' : '#3b82f6',
               boxShadow: '0 2px 5px rgba(37, 99, 235, 0.08)',

@@ -22,7 +22,7 @@ export function getRecoveryOrderReviewStatuses(
   view: ReviewQueueView,
 ): RecoveryOrderStatus[] | undefined {
   if (view === 'pending') return ['待审核', '退回修改'];
-  if (view === 'processed') return ['待分账', '已分账', '审核驳回'];
+  if (view === 'processed') return ['审核通过', '待分账', '已分账', '审核驳回'];
   return undefined;
 }
 
@@ -42,6 +42,6 @@ export function getRecoveryOrderUnifiedReviewStatus(
 ): UnifiedReviewStatus {
   if (deleted) return '已删除（留痕）';
   if (status === '审核驳回') return '已驳回';
-  if (status === '待分账' || status === '已分账') return '已通过';
+  if (status === '审核通过' || status === '待分账' || status === '已分账') return '已通过';
   return status;
 }

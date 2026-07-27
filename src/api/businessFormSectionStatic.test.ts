@@ -16,13 +16,15 @@ assert.match(section, /展开/);
 assert.match(section, /errorCount/);
 assert.match(section, /setExpanded\(true\)/, '校验失败时应自动展开错误分段');
 
-for (const step of [1, 2, 3, 4, 5]) {
+for (const step of [1, 2, 3, 4]) {
   assert.match(orderForm, new RegExp(`BusinessFormSection[\\s\\S]{0,120}step=\\{${step}\\}`), `订单表单缺少第 ${step} 段`);
+}
+for (const step of [1, 2, 3, 4, 5]) {
   assert.match(recoveryForm, new RegExp(`BusinessFormSection[\\s\\S]{0,120}step=\\{${step}\\}`), `售后挽回表单缺少第 ${step} 段`);
 }
 
 assert.doesNotMatch(orderForm, /function FormSection/);
-assert.match(orderForm, /<Dialog open=\{open\} onClose=\{onClose\} maxWidth="md" fullWidth>/, '订单申请弹窗桌面宽度应保持紧凑');
+assert.match(orderForm, /<Dialog[\s\S]{0,160}open=\{open\}[\s\S]{0,160}maxWidth="md"[\s\S]{0,80}fullWidth/, '订单申请弹窗桌面宽度应保持紧凑');
 assert.match(orderForm, /<FormLabel[^>]*required[\s\S]{0,200}客户（搜索选择）[\s\S]{0,80}<\/FormLabel>/, 'C 方案客户字段名应显示在输入框上方');
 assert.match(orderForm, /<FormLabel[^>]*>[\s\S]{0,80}销售负责人[\s\S]{0,20}<\/FormLabel>/, 'C 方案销售负责人字段名应显示在输入框上方');
 assert.match(orderForm, /'aria-label': '客户（搜索选择）'/, '外置字段名后仍需保留输入框无障碍名称');

@@ -159,10 +159,10 @@ assert.match(
   'Read-only payout users must not see issue controls.',
 );
 
-assert.match(
+assert.doesNotMatch(
   commissionPayoutSource,
-  /\{canReverse && record\.status === '已发放' &&/,
-  'Only payout reversers must see reversal controls.',
+  /aria-label="撤销发放"|>确认撤销</,
+  'The first release must not expose an in-system payout reversal control.',
 );
 
 assert.match(

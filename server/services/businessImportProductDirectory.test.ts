@@ -25,6 +25,13 @@ const currentProductRecords = [{
   id: 'product-current',
   data: { id: 'product-current', name: 'IP口播智能体', level: '899', isActive: true, sortOrder: 1 },
 }];
+const recoveryRecords = [{
+  id: 'recovery-active',
+  data: { id: 'recovery-active', thirdPartyOrderNo: 'RECOVERY-ACTIVE' },
+}, {
+  id: 'recovery-deleted',
+  data: { id: 'recovery-deleted', thirdPartyOrderNo: 'RECOVERY-DELETED', deletedAt: NOW.toISOString() },
+}];
 
 function createPrisma(productRecords: typeof currentProductRecords) {
   return {
@@ -39,7 +46,11 @@ function createPrisma(productRecords: typeof currentProductRecords) {
     role: { findMany: async () => roles },
     department: { findMany: async () => [] },
     businessRecord: { findMany: async ({ where }: { where: { domain: string } }) => (
-      where.domain === STORAGE_KEYS.PRODUCTS ? productRecords : []
+      where.domain === STORAGE_KEYS.PRODUCTS
+        ? productRecords
+        : where.domain === STORAGE_KEYS.RECOVERY_ORDERS
+          ? recoveryRecords
+          : []
     ) },
     businessImportNumberReservation: { findMany: async () => [] },
   };
@@ -48,6 +59,11 @@ function createPrisma(productRecords: typeof currentProductRecords) {
 const currentDirectory = await loadBusinessImportDirectory(createPrisma(currentProductRecords) as any, actor, 'orders');
 assert.deepEqual(currentDirectory.products, [{ id: 'product-current', name: 'IP口播智能体', level: '899' }],
   '导入模板必须使用当前产品设置，不能使用旧的整表缓存');
+assert.deepEqual(
+  [...currentDirectory.existingRecoveryOrderNumbers],
+  ['recovery-active'],
+  '已删除的售后挽回单不能继续占用第三方平台订单号',
+);
 
 const legacyDirectory = await loadBusinessImportDirectory(createPrisma([]) as any, actor, 'orders');
 assert.deepEqual(legacyDirectory.products, [],

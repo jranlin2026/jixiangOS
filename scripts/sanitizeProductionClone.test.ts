@@ -30,4 +30,5 @@ assert.match(source, /AI_SESSIONS/);
 assert.match(source, /apiProviderConfig|aiProviderConfig/);
 assert.match(source, /enabled: false/);
 assert.match(source, /isActive: false/);
+assert.match(source, /timeout:\s*300_000/);
 console.log('production clone sanitizer safety tests passed');

@@ -88,7 +88,7 @@ try {
         const title = row.domain === STORAGE_KEYS.CUSTOMERS ? customerAlias(row.recordId) : row.title;
         await tx.businessRecord.update({ where: { id: row.id }, data: { title, data: data as Prisma.InputJsonValue } });
       }
-    });
+    }, { maxWait: 10_000, timeout: 300_000 });
     console.log(JSON.stringify({ status: 'completed', database: 'jixiang_os_prod_clone_test' }));
   }
 } finally {

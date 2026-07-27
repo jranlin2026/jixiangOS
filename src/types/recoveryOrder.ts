@@ -4,7 +4,8 @@ import type { BusinessAttachment } from './businessAttachment';
 import type { OfficialPaymentChannel, SettlementStatus } from './commission';
 import type { BusinessImportMetadata } from './businessImport';
 
-export type RecoveryOrderStatus = '待审核' | '退回修改' | '审核驳回' | '待分账' | '已分账';
+/** 新单审核通过后统一写“审核通过”；“待分账/已分账”仅兼容历史存储。 */
+export type RecoveryOrderStatus = '待审核' | '退回修改' | '审核驳回' | '审核通过' | '待分账' | '已分账';
 /** “未分账”仅用于兼容历史存储；对外展示必须归一化为五态分账状态。 */
 export type RecoveryOrderSettlementStatus = '未分账' | SettlementStatus;
 export type RecoveryOrderMatchStatus = '手工填写' | '已绑定客户' | '售后临时客户';
@@ -102,6 +103,10 @@ export interface RecoveryOrder extends Partial<BusinessImportMetadata> {
   settlementWithdrawnBy?: string;
   settlementWithdrawnAt?: Timestamp;
   settlementWithdrawReason?: string;
+  /** 当前保存轮次；历史未标记记录默认第一轮。 */
+  settlementVersion?: number;
+  /** 当前保存轮次的标识；用于关联同一轮的提成明细。 */
+  settlementRoundId?: ID;
   auditReason?: string;
   auditorId?: ID;
   auditorName?: string;

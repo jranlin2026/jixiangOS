@@ -118,6 +118,22 @@ assert.equal(
   false,
   '正式订单只能通过记录级命令写入，旧 storage PUT 必须关闭',
 );
+
+for (const financeCommandOnlyKey of [
+  STORAGE_KEYS.COMMISSIONS,
+  STORAGE_KEYS.COMMISSION_OPERATION_LOGS,
+  STORAGE_KEYS.COMMISSION_SETTLEMENT_BATCHES,
+  STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES,
+  STORAGE_KEYS.FINANCE_TRANSACTIONS,
+  STORAGE_KEYS.FINANCE,
+  STORAGE_KEYS.REFUNDS,
+]) {
+  assert.equal(
+    canAccessLegacyStorageKey(catalogSuperAdmin, financeCommandOnlyKey, 'write'),
+    false,
+    `${financeCommandOnlyKey} 只能通过记录级命令写入，超级管理员也不得绕过`,
+  );
+}
 assert.equal(
   canAccessLegacyStorageKey(commandOnlyWriter, STORAGE_KEYS.ORDER_APPLICATIONS, 'write'),
   false,

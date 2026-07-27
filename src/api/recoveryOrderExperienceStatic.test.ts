@@ -139,6 +139,21 @@ assert.match(
 );
 assert.match(
   recoverySettlementSource,
+  /aria-label=\{isSourceRecoveryDeleted\(row\) \? '清理废弃记录' : '重置售后挽回分账'\}[\s\S]*?isSourceRecoveryDeleted\(row\)[\s\S]*?<DeleteSweepIcon[\s\S]*?:[\s\S]*?<RestartAltIcon/,
+  '待确认分账应使用“重置分账”及重置图标，废弃记录清理应使用独立的清理名称和图标。',
+);
+assert.doesNotMatch(
+  recoverySettlementSource,
+  /aria-label=\{isSourceRecoveryDeleted\(row\) \? '清理废弃售后挽回分账' : '删除售后挽回分账'\}/,
+  '操作列不得继续用删除图标混淆重置分账和废弃记录清理。',
+);
+assert.match(
+  recoverySettlementSource,
+  /重置后会清空该挽回单当前保存的人员分账明细，并退回到“待处理”状态/,
+  '重置分账确认框必须明确说明它清空当前明细并退回待处理。',
+);
+assert.match(
+  recoverySettlementSource,
   /底层业务、提成及清理审计留痕仍保留/,
 );
 assert.match(
