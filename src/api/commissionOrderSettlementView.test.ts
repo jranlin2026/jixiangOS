@@ -479,10 +479,30 @@ assert.equal(
   true,
   '重置订单分账后，源订单应继续保留在订单分账列表并回到待处理状态',
 );
+const deleteResetSourceOrderRes = await orderApi.deleteOrder('order-a');
+assert.equal(deleteResetSourceOrderRes.code, 0);
+const summariesAfterResetSourceDeleted = await (commissionApi as any).fetchCommissionOrderSummaries({ pageSize: 20 });
+const deletedResetSourceSummary = summariesAfterResetSourceDeleted.data.items.find((item: any) => item.orderId === 'order-a');
+assert.equal(
+  deletedResetSourceSummary?.sourceOrderDeleted,
+  true,
+  '重置分账后再删除源订单，财务列表应保留“源订单已删除”的废弃记录等待超级管理员清理',
+);
 let resetLogs = ((await (commissionApi as any).fetchCommissionOperationLogs('order-a')).data || []);
 assert.ok(
   resetLogs.some((item: any) => item.action === '重置分账' && item.reason === 'Reset pending order split'),
   '重置整笔订单分账后应写入操作历史',
+);
+const cleanupResetSourceOrderRes = await (commissionApi as any).cleanupDeletedSourceOrderCommissions(
+  'order-a',
+  'Cleanup deleted reset source',
+);
+assert.equal(cleanupResetSourceOrderRes.code, 0, cleanupResetSourceOrderRes.message);
+const summariesAfterCleanup = await (commissionApi as any).fetchCommissionOrderSummaries({ pageSize: 20 });
+assert.equal(
+  summariesAfterCleanup.data.items.some((item: any) => item.orderId === 'order-a'),
+  false,
+  '只有超级管理员执行清理后，废弃订单分账才应从财务列表隐藏',
 );
 const resetLockedOrderSplitRes = await (commissionApi as any).resetOrderCommissions('order-b', 'Try resetting payable split');
 assert.notEqual(resetLockedOrderSplitRes.code, 0);

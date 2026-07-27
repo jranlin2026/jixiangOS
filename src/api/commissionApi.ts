@@ -367,8 +367,12 @@ function saveCommissions(commissions: Commission[]): void {
   setStorageData(STORAGE_KEYS.COMMISSIONS, commissions);
 }
 
+function getAllOrders(): Order[] {
+  return getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
+}
+
 function getOrders(): Order[] {
-  return (getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).filter((order) => !order.deletedAt);
+  return getAllOrders().filter((order) => !order.deletedAt);
 }
 
 let orderHydrationPromise: Promise<void> | null = null;
@@ -625,7 +629,8 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
     && commission.sourceBusinessType !== 'refund_recovery'
     && !commission.sourceRecoveryOrderId
   ));
-  const ordersById = new Map(getOrders().map((order) => [order.id, order]));
+  const allOrders = getAllOrders();
+  const ordersById = new Map(allOrders.filter((order) => !order.deletedAt).map((order) => [order.id, order]));
   const applicationsById = new Map(
     (getStorageData<OrderApplication[]>(STORAGE_KEYS.ORDER_APPLICATIONS) || [])
       .map((application) => [application.id, application]),
@@ -720,10 +725,14 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
   // 这里只补回已经执行过“重置分账”的订单；从未配置过分账的订单仍由
   // “新建订单分账”入口承接，避免改变现有列表收录范围。
   const summarizedOrderIds = new Set(summaries.map((summary) => summary.orderId));
-  getOrders()
+  allOrders
     .filter((order) => !summarizedOrderIds.has(order.id))
     .filter((order) => isCreatableCommissionOrder(order, orderMap.get(order.id) || []))
-    .filter((order) => (operationLogsByOrderId.get(order.id) || []).some((log) => log.action === '重置分账'))
+    .filter((order) => {
+      const logs = operationLogsByOrderId.get(order.id) || [];
+      return logs.some((log) => log.action === '重置分账')
+        && !logs.some((log) => log.action === '清理废弃分账');
+    })
     .forEach((order) => {
       const latestPayment = [...(order.payments || [])].sort((a, b) => (
         new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime()
@@ -758,7 +767,7 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
         notes: order.notes,
         createdAt: order.createdAt,
         updatedAt: latestLog?.operatedAt || order.updatedAt,
-        sourceOrderDeleted: false,
+        sourceOrderDeleted: Boolean(order.deletedAt),
         totalCommissionAmount: 0,
         performanceAmount: order.performanceBaseAmount || order.actualAmount || order.amount,
         pendingAssignCount: 0,
@@ -1132,15 +1141,22 @@ async function cleanupDeletedSourceOrderCommissions(orderId: string, reason: str
   const orderCommissions = commissions
     .filter((commission) => commission.orderId === orderId)
     .map((commission) => normalizeCommission(commission));
-  if (!orderCommissions.length) return createErrorResponse('没有可清理的废弃分账记录');
+  const operationLogs = getCommissionOperationLogs(orderId);
+  const resetLog = operationLogs.find((log) => log.action === '重置分账');
+  if (!orderCommissions.length && !resetLog) return createErrorResponse('没有可清理的废弃分账记录');
 
   const active = orderCommissions.find((commission) => !['已撤回', '已取消', '已冲销'].includes(commission.status));
   if (active) return createErrorResponse('该废弃分账仍有活动提成，请先撤回或完成财务处理');
 
   const now = new Date().toISOString();
   const operator = getCurrentOperatorName('财务');
-  const deletedOrder = buildDeletedSourceOrderFromCommissions(orderId, orderCommissions);
-  const existingCleanupLog = getCommissionOperationLogs(orderId).some((log) => log.action === '清理废弃分账');
+  const deletedSourceOrder = getAllOrders().find((order) => order.id === orderId);
+  const deletedOrder = deletedSourceOrder
+    ? { id: deletedSourceOrder.id, orderNo: deletedSourceOrder.orderNo, customerName: deletedSourceOrder.customerName }
+    : orderCommissions.length
+      ? buildDeletedSourceOrderFromCommissions(orderId, orderCommissions)
+      : { id: orderId, orderNo: resetLog?.orderNo || orderId, customerName: resetLog?.customerName || '源订单已删除' };
+  const existingCleanupLog = operationLogs.some((log) => log.action === '清理废弃分账');
   if (existingCleanupLog) return createSuccessResponse(true);
   appendCommissionOperationLog(deletedOrder, '清理废弃分账', normalizedReason, orderCommissions, operator, now);
   return createSuccessResponse(true);

@@ -384,17 +384,20 @@ export function createOrderSettlementCommandService(
         const order = await readOrder(transaction, id);
         if (order && !order.deletedAt) throw new OrderSettlementCommandError(409, '源订单仍存在，不能清理废弃记录');
         const commissions = await readCommissions(transaction, id);
-        if (!commissions.length) throw new OrderSettlementCommandError(409, '没有可清理的废弃分账记录');
+        const existing = await transaction.businessRecord.findFirst({
+          where: { domain: STORAGE_KEYS.COMMISSION_OPERATION_LOGS, orderId: id, status: '清理废弃分账' },
+        });
+        if (existing) return true;
+        const resetLog = await transaction.businessRecord.findFirst({
+          where: { domain: STORAGE_KEYS.COMMISSION_OPERATION_LOGS, orderId: id, status: '重置分账' },
+        });
+        if (!commissions.length && !resetLog) throw new OrderSettlementCommandError(409, '没有可清理的废弃分账记录');
         if (commissions.some((commission) => commission.status === '已发放')) {
           throw new OrderSettlementCommandError(409, '提成已发放，请财务线下处理');
         }
         if (commissions.some((commission) => !inactiveStatuses.has(commission.status))) {
           throw new OrderSettlementCommandError(409, '该废弃分账仍有活动提成，请先撤回后再处理');
         }
-        const existing = await transaction.businessRecord.findFirst({
-          where: { domain: STORAGE_KEYS.COMMISSION_OPERATION_LOGS, orderId: id, status: '清理废弃分账' },
-        });
-        if (existing) return true;
         await appendLog(transaction, id, order, commissions, '清理废弃分账', cleanReason, actor, now().toISOString());
         return true;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted }));

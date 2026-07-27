@@ -126,6 +126,37 @@ function put(prisma: FakePrisma, domain: string, recordId: string, data: any) {
 
 {
   const prisma = new FakePrisma();
+  put(prisma, STORAGE_KEYS.ORDERS, 'order-1', order(true));
+  put(prisma, STORAGE_KEYS.COMMISSION_OPERATION_LOGS, 'reset-log-1', {
+    id: 'reset-log-1',
+    orderId: 'order-1',
+    orderNo: 'ORD-1',
+    customerName: '客户甲',
+    action: '重置分账',
+    operator: '财务甲',
+    operatedAt: now,
+    reason: '重新配置人员',
+    summary: '重置分账',
+    commissionCount: 1,
+    totalCommissionAmount: 89.9,
+    splitSnapshot: [],
+    status: '重置分账',
+  });
+  const resetLogRow = prisma.rows.get(key(STORAGE_KEYS.COMMISSION_OPERATION_LOGS, 'reset-log-1'))!;
+  resetLogRow.orderId = 'order-1';
+  resetLogRow.status = '重置分账';
+  const service = createOrderSettlementCommandService(prisma as any, { now: () => new Date(now) });
+  const cleaned = await service.cleanup('order-1', '清理已删除的待处理记录', admin);
+  assert.equal(cleaned.code, 0, cleaned.message);
+  assert.equal(
+    Array.from(prisma.rows.values()).some((row) => row.domain === STORAGE_KEYS.COMMISSION_OPERATION_LOGS && row.status === '清理废弃分账'),
+    true,
+    '重置后已无人员分账明细时，仍应允许超级管理员清理已删除源订单的废弃记录',
+  );
+}
+
+{
+  const prisma = new FakePrisma();
   put(prisma, STORAGE_KEYS.ORDERS, 'order-1', order());
   put(prisma, STORAGE_KEYS.COMMISSIONS, 'commission-withdrawn', {
     ...commission('已撤回'), settlementVersion: 1, settlementRoundId: 'settlement-order-1-v1',
