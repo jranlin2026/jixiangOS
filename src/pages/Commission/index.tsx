@@ -1241,8 +1241,9 @@ const Commission: React.FC<CommissionProps> = ({
     if (options?.edit && canAdjustSettlementSummary(summary)) {
       const res = await commissionApi.fetchCommissionsByOrder(summary.orderId);
       if (res.code !== 0) return;
+      const activeRows = getActiveCommissions(res.data).map(mapCommissionToSplitRow);
       setSplitOrderId(summary.orderId);
-      setSplitRows(getActiveCommissions(res.data).map(mapCommissionToSplitRow));
+      setSplitRows(activeRows.length ? activeRows : [buildNewSplitRow(summary.orderId, summary.orderAmount)]);
       setSplitReason('');
       setDetailEditMode(true);
     }
@@ -1448,8 +1449,9 @@ const Commission: React.FC<CommissionProps> = ({
     if (!summaryDetail || !canAdjustSettlementSummary(summaryDetail)) return;
     const res = await commissionApi.fetchCommissionsByOrder(summaryDetail.orderId);
     if (res.code !== 0) return;
+    const activeRows = getActiveCommissions(res.data).map(mapCommissionToSplitRow);
     setSplitOrderId(summaryDetail.orderId);
-    setSplitRows(getActiveCommissions(res.data).map(mapCommissionToSplitRow));
+    setSplitRows(activeRows.length ? activeRows : [buildNewSplitRow(summaryDetail.orderId, summaryDetail.orderAmount)]);
     setSplitReason('');
     setDetailEditMode(true);
   };
@@ -3886,20 +3888,30 @@ const Commission: React.FC<CommissionProps> = ({
         <DialogCloseTitle onClose={closeDeleteOrderSplitDialog}>{deleteSummary?.sourceOrderDeleted ? '清理废弃记录' : '重置订单分账'}</DialogCloseTitle>
         <DialogContent dividers>
           {deleteSummary && (
-            <Stack spacing={2}>
-              <Typography variant="body2" sx={{ color: '#374151', lineHeight: 1.8 }}>
+            <Stack spacing={1.25}>
+              <Alert severity="warning">
                 {deleteSummary.sourceOrderDeleted
-                  ? `将把 ${deleteSummary.orderNo} / ${deleteSummary.customerName} 的废弃分账从工作列表中清理。已撤回的人员分账和操作历史会永久保留，便于财务追溯。`
-                  : `将重置 ${deleteSummary.orderNo} / ${deleteSummary.customerName} 的全部待确认分账草稿。重置后，该订单会重新出现在“新建订单分账”可选范围内。`}
-              </Typography>
+                  ? '清理后该记录将从财务订单分账列表隐藏，底层业务、提成及清理审计留痕仍保留。'
+                  : '重置后会清空该订单当前保存的人员分账明细，并退回到“待处理”状态，之后可重新处理分账。'}
+              </Alert>
+              <Box sx={{ border: `1px solid ${moduleTokens.line}`, borderRadius: moduleRadius, p: 1.25, bgcolor: moduleTokens.subtle }}>
+                <Typography variant="body2" sx={{ fontWeight: 900 }}>{deleteSummary.orderNo}</Typography>
+                <Typography variant="body2" sx={{ color: moduleTokens.muted }}>
+                  {deleteSummary.customerName} · {deleteSummary.thirdPartyOrderNo || '-'}
+                </Typography>
+                <Typography variant="body2" sx={{ mt: 0.5 }}>
+                  实付金额：<Box component="span" sx={{ color: moduleTokens.green, fontWeight: 900 }}>{formatCurrency(deleteSummary.orderAmount)}</Box>
+                </Typography>
+              </Box>
               <TextField
                 label={deleteSummary.sourceOrderDeleted ? '清理原因' : '重置原因'}
                 value={deleteReason}
                 onChange={(event) => setDeleteReason(event.target.value)}
+                placeholder={deleteSummary.sourceOrderDeleted ? '例如：源订单已废弃，清理财务列表残留' : '例如：人员选错、方案错误，需要重新分账'}
                 required
                 fullWidth
                 multiline
-                minRows={2}
+                minRows={3}
                 autoFocus
               />
             </Stack>
@@ -3908,7 +3920,7 @@ const Commission: React.FC<CommissionProps> = ({
         <DialogActions>
           <Button onClick={closeDeleteOrderSplitDialog} disabled={deleteLoading}>取消</Button>
           <Button
-            color={deleteSummary?.sourceOrderDeleted ? 'error' : 'warning'}
+            color="error"
             variant="contained"
             onClick={confirmDeleteOrderSplit}
             disabled={deleteLoading || !deleteReason.trim()}

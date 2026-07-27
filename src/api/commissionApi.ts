@@ -632,16 +632,22 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
   );
   const roleOrder = ['线索', '销售', '客户成功', '售后', '招商主管', '销售主管'];
   const orderMap = new Map<string, Commission[]>();
+  const operationLogsByOrderId = new Map<string, CommissionOperationLog[]>();
   formalOrderCommissions.forEach((commission) => {
     const rows = orderMap.get(commission.orderId) || [];
     rows.push(commission);
     orderMap.set(commission.orderId, rows);
   });
+  getCommissionOperationLogs().forEach((log) => {
+    const rows = operationLogsByOrderId.get(log.orderId) || [];
+    rows.push(log);
+    operationLogsByOrderId.set(log.orderId, rows);
+  });
 
-  return Array.from(orderMap.entries())
+  const summaries: CommissionOrderSummary[] = Array.from(orderMap.entries())
     .filter(([orderId]) => (
       ordersById.has(orderId)
-      || !getCommissionOperationLogs(orderId).some((log) => log.action === '清理废弃分账')
+      || !(operationLogsByOrderId.get(orderId) || []).some((log) => log.action === '清理废弃分账')
     ))
     .map(([orderId, rows]) => {
       const sortedRows = rows.slice().sort((a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role));
@@ -656,7 +662,7 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
       const latestPayment = [...(order?.payments || [])].sort((a, b) => (
         new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime()
       ))[0];
-      const operationLogs = getCommissionOperationLogs(orderId);
+      const operationLogs = operationLogsByOrderId.get(orderId) || [];
       const processing = summarizeCommissionProcessing(sortedRows, operationLogs);
       const updateDates = [...sortedRows.map((item) => item.updatedAt), ...operationLogs.map((log) => log.operatedAt)]
         .filter(Boolean)
@@ -708,6 +714,63 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
         commissions: sortedRows,
       };
     });
+
+  // 与售后挽回分账保持一致：分账明细被重置后，源业务单仍应作为
+  // “待处理”记录留在列表中，而不是因为没有 commission 行就从列表消失。
+  // 这里只补回已经执行过“重置分账”的订单；从未配置过分账的订单仍由
+  // “新建订单分账”入口承接，避免改变现有列表收录范围。
+  const summarizedOrderIds = new Set(summaries.map((summary) => summary.orderId));
+  getOrders()
+    .filter((order) => !summarizedOrderIds.has(order.id))
+    .filter((order) => isCreatableCommissionOrder(order, orderMap.get(order.id) || []))
+    .filter((order) => (operationLogsByOrderId.get(order.id) || []).some((log) => log.action === '重置分账'))
+    .forEach((order) => {
+      const latestPayment = [...(order.payments || [])].sort((a, b) => (
+        new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime()
+      ))[0];
+      const sourceApplication = !order.createdByName && order.sourceApplicationId
+        ? applicationsById.get(order.sourceApplicationId)
+        : undefined;
+      const latestLog = (operationLogsByOrderId.get(order.id) || [])[0];
+      summaries.push({
+        orderId: order.id,
+        orderNo: order.orderNo,
+        customerName: order.customerName,
+        productName: getProductName(order.productId, order.productLevel, order.productName),
+        productLevel: order.productLevel,
+        orderType: order.orderType || '',
+        paymentDate: latestPayment?.paidAt || order.createdAt,
+        orderAmount: order.actualAmount || order.amount,
+        resourceOwnership: order.resourceOwnership,
+        refundStatus: order.refundStatus,
+        salesOwner: order.salesName || order.owner || '',
+        salesId: order.salesId,
+        salesName: order.salesName,
+        createdById: order.createdById || sourceApplication?.applicantId,
+        createdByName: order.createdByName || sourceApplication?.applicantName,
+        leadInputBy: order.leadInputBy,
+        leadContributorName: order.leadContributorName,
+        sourceType: order.sourceType,
+        leadSourceFull: formatLeadSourcePath(order),
+        officialPaymentChannel: order.officialPaymentChannel,
+        thirdPartyOrderNo: order.thirdPartyOrderNo,
+        paymentOrderNo: latestPayment?.paymentOrderNo,
+        notes: order.notes,
+        createdAt: order.createdAt,
+        updatedAt: latestLog?.operatedAt || order.updatedAt,
+        sourceOrderDeleted: false,
+        totalCommissionAmount: 0,
+        performanceAmount: order.performanceBaseAmount || order.actualAmount || order.amount,
+        pendingAssignCount: 0,
+        exceptionCount: 0,
+        settlementOperator: latestLog?.operator,
+        status: '待处理',
+        splitSummary: [],
+        commissions: [],
+      });
+    });
+
+  return summaries;
 }
 
 function applyOrderSummaryFilters(summaries: CommissionOrderSummary[], filters?: CommissionOrderSummaryFilters): CommissionOrderSummary[] {

@@ -333,6 +333,16 @@ assert.deepEqual(orderA.splitSummary.map((item: any) => `${item.role}:${item.amo
 const commissionPageSource = readFileSync(new URL('../pages/Commission/index.tsx', import.meta.url), 'utf8');
 assert.match(commissionPageSource, /aaos_commission_order_split_view_v5/);
 assert.match(commissionPageSource, /aaos_commission_order_split_widths_v4/);
+assert.match(
+  commissionPageSource,
+  /重置后会清空该订单当前保存的人员分账明细，并退回到“待处理”状态，之后可重新处理分账。/,
+  '订单分账重置弹窗应与售后挽回分账统一展示待处理回退说明',
+);
+assert.doesNotMatch(
+  commissionPageSource,
+  /重新出现在“新建订单分账”可选范围内/,
+  '订单分账重置后应留在当前列表，不应再提示去新建分账入口查找',
+);
 for (const id of ['leadSourceFull', 'paymentOrderNo', 'updatedAt', 'performanceAmount', 'settlementOperator', 'confirmedAt', 'paidAt', 'withdrawReason']) {
   assert.match(commissionPageSource, new RegExp(`id: '${id}'`));
 }
@@ -463,6 +473,12 @@ const resetPendingOrderSplitRes = await (commissionApi as any).resetOrderCommiss
 assert.equal(resetPendingOrderSplitRes.code, 0);
 assert.equal(resetPendingOrderSplitRes.data, true);
 assert.deepEqual(((await commissionApi.fetchCommissionsByOrder('order-a')).data || []).map((item: Commission) => item.id), []);
+const pendingSummariesAfterReset = await (commissionApi as any).fetchCommissionOrderSummaries({ status: '\u5f85\u5904\u7406', pageSize: 20 });
+assert.equal(
+  pendingSummariesAfterReset.data.items.some((item: any) => item.orderId === 'order-a'),
+  true,
+  '重置订单分账后，源订单应继续保留在订单分账列表并回到待处理状态',
+);
 let resetLogs = ((await (commissionApi as any).fetchCommissionOperationLogs('order-a')).data || []);
 assert.ok(
   resetLogs.some((item: any) => item.action === '重置分账' && item.reason === 'Reset pending order split'),
@@ -719,7 +735,7 @@ const createSplitDialogSource = commissionPageSource.slice(
 );
 const createSplitDialogActionsSource = createSplitDialogSource.slice(createSplitDialogSource.indexOf('<DialogActions>'));
 assert.match(createSplitDialogActionsSource, /保存分账/, '新建订单分账弹窗底栏必须始终显示保存按钮');
-assert.match(commissionPageSource, /setSplitRows\(getActiveCommissions\(res\.data\)\.map\(mapCommissionToSplitRow\)\)/, '编辑新分账时不得把已撤回留痕重新带入可编辑行');
+assert.match(commissionPageSource, /const activeRows = getActiveCommissions\(res\.data\)\.map\(mapCommissionToSplitRow\)/, '编辑新分账时不得把已撤回留痕重新带入可编辑行');
 assert.match(
   commissionPageSource,
   /getCommissionSplitAmountPresentation\(summary\.commissions\)/,
