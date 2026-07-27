@@ -991,6 +991,14 @@ async function saveOrderCommissionAdjustments(
   rows: CommissionAdjustmentInput[],
   adjustReason: string,
 ): Promise<ApiResponse<Commission[]>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<Commission[]>(`/order-settlements/${encodeURIComponent(orderId)}/save`, {
+      method: 'POST',
+      body: JSON.stringify({ rows, reason: adjustReason }),
+    });
+    if (response.code === 0) await syncBackendStorageFromServer(0);
+    return response;
+  }
   ensureInit();
   await delay(160);
   const reason = adjustReason.trim();
@@ -1022,10 +1030,17 @@ async function saveOrderCommissionAdjustments(
   ));
   if (removedLockedRow) return createErrorResponse('只能删除待确认阶段的分账记录，已进入发放链路的分账请使用撤回流程');
 
+  const settlementVersion = existingById.size
+    ? Math.max(1, ...Array.from(existingById.values()).map((item) => item.settlementVersion || 1))
+    : retainedInactiveRows.length
+      ? Math.max(...retainedInactiveRows.map((item) => item.settlementVersion || 1)) + 1
+      : 1;
+  const settlementRoundId = `order-settlement-${orderId}-v${settlementVersion}`;
   const adjustedRows = resolvedRows.map(({ row, resolved }) => {
     const existing = row.id ? existingById.get(row.id) : undefined;
     const editableRow = row.id && !existing ? { ...row, id: undefined } : row;
-    return buildAdjustedCommission(
+    return {
+      ...buildAdjustedCommission(
       order,
       editableRow,
       { user: resolved.user!, department: resolved.department },
@@ -1033,7 +1048,10 @@ async function saveOrderCommissionAdjustments(
       reason,
       operator,
       now,
-    );
+      ),
+      settlementVersion,
+      settlementRoundId,
+    };
   });
   const next = [
     ...adjustedRows,
@@ -1211,6 +1229,36 @@ async function withdrawOrderCommissions(orderId: string, reason: string): Promis
   saveCommissions(next);
   appendCommissionOperationLog(order, '撤回提成', normalizedReason, withdrawnCommissions, operator, now);
   return createSuccessResponse(getOrderCommissions(orderId));
+}
+
+async function reopenOrderCommissions(orderId: string, reason: string): Promise<ApiResponse<boolean>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<boolean>(`/order-settlements/${encodeURIComponent(orderId)}/reopen`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    if (response.code === 0) await syncBackendStorageFromServer(0);
+    return response;
+  }
+  ensureInit();
+  await delay(120);
+  const normalizedReason = reason.trim();
+  if (!normalizedReason) return createErrorResponse('重新分账必须填写原因');
+  const order = getOrderById(orderId);
+  if (!order) return createErrorResponse('订单不存在', 404);
+  const commissions = getOrderCommissions(orderId);
+  if (!commissions.length || commissions.some((commission) => commission.status !== '已撤回')) {
+    return createErrorResponse('只有已撤回的订单分账可以重新分账');
+  }
+  appendCommissionOperationLog(
+    order,
+    '重新分账',
+    normalizedReason,
+    commissions,
+    getCurrentOperatorName('财务'),
+    new Date().toISOString(),
+  );
+  return createSuccessResponse(true);
 }
 
 async function startCommissionChargeback(orderId: string, reason: string): Promise<ApiResponse<Commission[]>> {
@@ -1757,6 +1805,7 @@ export const commissionApi = {
   cleanupDeletedSourceOrderCommissions,
   confirmOrderCommissions,
   withdrawOrderCommissions,
+  reopenOrderCommissions,
   startCommissionChargeback,
   completeCommissionChargeback,
   updateCommissionStatus,

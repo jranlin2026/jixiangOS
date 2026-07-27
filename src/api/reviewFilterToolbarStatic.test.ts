@@ -12,6 +12,11 @@ const orderToolbar = orderReview.slice(
 );
 
 assert.doesNotMatch(orderToolbar, /label="导入批次"/, '订单审核台筛选栏不应显示导入批次输入框');
+const orderOwnerIndex = orderToolbar.indexOf('label="销售负责人"');
+const orderReviewViewIndex = orderToolbar.indexOf('label="审核视图"');
+assert.notEqual(orderOwnerIndex, -1, '订单审核台应提供销售负责人筛选');
+assert.notEqual(orderReviewViewIndex, -1, '订单审核台应保留审核视图筛选');
+assert.ok(orderOwnerIndex < orderReviewViewIndex, '订单审核台的销售负责人筛选应位于审核视图左侧');
 assert.match(orderReview, /\{ id: 'importBatchId', label: '导入批次' \}/, '订单审核台应保留导入批次列表列');
 assert.match(orderReview, /<SnapshotField label="导入批次">/, '订单审核台详情应保留导入批次信息');
 assert.match(orderReview, /<BusinessImportReviewControls[\s\S]*module="orders"/, '订单审核台应保留批量审核能力');

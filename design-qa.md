@@ -41,7 +41,6 @@
 售后挽回的真实截图点击验收需要一条已上传凭证的本地测试数据；不影响订单审核已完成的交互验收。
 
 final result: passed
-
 ---
 
 # Design QA — 客户合并字段批注修订
@@ -125,5 +124,50 @@ final result: passed
 1. Initial build placed all field decisions and safety checks inside one modal.
 2. Browser verification confirmed the field selector state change and precheck transition.
 3. Side-by-side review found no blocking layout, spacing, cropping, or hierarchy issues.
+
+final result: passed
+
+---
+
+# Order application design QA
+
+## Evidence
+
+- Source visual truth: `/Users/nge/.codex/generated_images/019f999c-681e-72c3-948c-bae066ac4282/exec-b4e792f6-6e45-412a-baf0-65cee36e25b0.png`
+- Browser-rendered implementation: `/Users/nge/.codex/visualizations/2026/07/25/019f999c-681e-72c3-948c-bae066ac4282/order-application-final-solid.png`
+- Narrow-screen implementation: `/Users/nge/.codex/visualizations/2026/07/25/019f999c-681e-72c3-948c-bae066ac4282/order-application-narrow-newest.png`
+- Combined comparison: `/Users/nge/.codex/visualizations/2026/07/25/019f999c-681e-72c3-948c-bae066ac4282/order-application-design-qa-final.png`
+- Source pixels: 971 x 1620.
+- Implementation pixels and CSS viewport: 1440 x 1000 at 1x density; narrow viewport 768 x 1000 at 1x density.
+- State: new order application, all four sections expanded, empty customer/product/payment values. The source uses populated sample data, so data-dependent chips and rows were compared as component treatments rather than content equality.
+- Normalization: the full-view comparison uses the corresponding upper content region from both artifacts, normalized to 940 px height. Browser chrome is excluded.
+
+## Fidelity review
+
+- Typography: system Chinese UI font, weights, line height and hierarchy match the existing OS and the reference. Long labels use the existing truncation behavior.
+- Spacing and layout: header, applicant strip, four cards, compact product table and fixed summary footer reproduce the reference rhythm without the previous oversized whitespace.
+- Colors and tokens: white surfaces, pale blue section headers, blue primary actions and semantic status colors use existing MUI/system tokens.
+- Image and asset quality: this form has no non-standard raster assets. Existing icon components remain sharp and consistent.
+- Copy and content: all existing business fields and submit semantics are preserved. “保存草稿” is intentionally absent by explicit product decision; notes are merged into “订单信息”, and “付款信息” is renamed “收款与凭证”.
+
+Focused comparison was performed on the applicant strip, section headers, product table and sticky footer because these carry the main fidelity risk. No additional image-focused region was needed because the screen contains no photography or branded raster art.
+
+## Comparison history
+
+1. P2: the product table retained a forced wide minimum and hid late columns at the narrow breakpoint. Fix: removed the forced minimum, switched to fixed proportional columns and tightened cell padding. Post-fix evidence: narrow-screen capture above; the table remains horizontally scrollable only when content requires it, while persistent actions remain visible.
+2. P2: step markers were outlined while the source used solid blue markers. Fix: added an opt-in `solidStep` treatment and enabled it only for the order form. Post-fix browser computed styles are blue `rgb(37, 99, 235)` with white text.
+3. Intentional difference: source mock contained two “保存草稿” actions. Both are omitted per the user's final scope decision.
+
+## Interaction and runtime checks
+
+- Opened the order application from the order list.
+- Verified all four sections, the sticky totals and the single submit action.
+- Triggered an invalid submit and verified the app-style “订单申请无法提交” dialog.
+- Checked desktop and narrow viewports.
+- Checked browser console errors: none.
+
+## Follow-up polish
+
+- P3: a future phone-specific renderer could replace the horizontally scrollable product table with product cards below 600 px. This is not blocking the current desktop/tablet modal.
 
 final result: passed

@@ -21,7 +21,7 @@ assert.deepEqual(getOrderApplicationReviewStatuses('processed'), ['已入库', '
 assert.equal(getOrderApplicationReviewStatuses('all'), undefined);
 
 assert.deepEqual(getRecoveryOrderReviewStatuses('pending'), ['待审核', '退回修改']);
-assert.deepEqual(getRecoveryOrderReviewStatuses('processed'), ['待分账', '已分账', '审核驳回']);
+assert.deepEqual(getRecoveryOrderReviewStatuses('processed'), ['审核通过', '待分账', '已分账', '审核驳回']);
 assert.equal(getRecoveryOrderReviewStatuses('all'), undefined);
 
 assert.equal(getOrderApplicationUnifiedReviewStatus('待财务审核'), '待审核');
@@ -33,6 +33,7 @@ assert.equal(getOrderApplicationUnifiedReviewStatus('已入库', true), '已删�
 assert.equal(getRecoveryOrderUnifiedReviewStatus('待审核'), '待审核');
 assert.equal(getRecoveryOrderUnifiedReviewStatus('退回修改'), '退回修改');
 assert.equal(getRecoveryOrderUnifiedReviewStatus('审核驳回'), '已驳回');
+assert.equal(getRecoveryOrderUnifiedReviewStatus('审核通过'), '已通过');
 assert.equal(getRecoveryOrderUnifiedReviewStatus('待分账'), '已通过');
 assert.equal(getRecoveryOrderUnifiedReviewStatus('已分账'), '已通过');
 assert.equal(getRecoveryOrderUnifiedReviewStatus('已分账', true), '已删除（留痕）');

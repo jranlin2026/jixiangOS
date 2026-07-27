@@ -42,7 +42,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SortIcon from '@mui/icons-material/Sort';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
-import { businessExportApi, commissionApi, commissionRuleApi, customerApi, orderApi, settingsApi } from '../../api';
+import { businessExportApi, commissionApi, commissionPayoutApi, commissionRuleApi, customerApi, orderApi, settingsApi } from '../../api';
 import { getProductLevelRowSx, getProductLevelTagSx, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { buildCommissionPayoutPlanSnapshot, getCommissionTierBucketKey } from '../../shared/utils/commissionConfiguration';
 import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
@@ -579,6 +579,14 @@ const Commission: React.FC<CommissionProps> = ({
   const [mineDetailPageSize, setMineDetailPageSize] = useState(10);
   const [mineDetailRow, setMineDetailRow] = useState<MineCommissionDisplayRow | null>(null);
   const [mineExporting, setMineExporting] = useState(false);
+  const [financeReportOpen, setFinanceReportOpen] = useState(false);
+  const [financeReportScope, setFinanceReportScope] = useState<'all' | 'department' | 'employee'>('all');
+  const [financeReportDepartmentId, setFinanceReportDepartmentId] = useState('');
+  const [financeReportOwnerId, setFinanceReportOwnerId] = useState('');
+  const [financeReportReason, setFinanceReportReason] = useState('');
+  const [financeReportIncludeWithdrawn, setFinanceReportIncludeWithdrawn] = useState(true);
+  const [financeReportExporting, setFinanceReportExporting] = useState(false);
+  const [financeReportError, setFinanceReportError] = useState('');
 
   const [commissionRoleConfigs, setCommissionRoleConfigs] = useState<CommissionRoleConfig[]>([]);
   const [payoutPlans, setPayoutPlans] = useState<CommissionPayoutPlan[]>([]);
@@ -599,6 +607,9 @@ const Commission: React.FC<CommissionProps> = ({
   const [deleteSummary, setDeleteSummary] = useState<CommissionOrderSummary | null>(null);
   const [deleteReason, setDeleteReason] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [reopenSummary, setReopenSummary] = useState<CommissionOrderSummary | null>(null);
+  const [reopenReason, setReopenReason] = useState('');
+  const [reopenLoading, setReopenLoading] = useState(false);
   const [detailEditMode, setDetailEditMode] = useState(false);
   const [detailActionLoading, setDetailActionLoading] = useState(false);
   const [detailActionReason, setDetailActionReason] = useState('');
@@ -1162,10 +1173,14 @@ const Commission: React.FC<CommissionProps> = ({
     !summary.sourceOrderDeleted && !['已发放', '已撤回'].includes(summary.status)
   );
 
+  const canReopenSettlementSummary = (summary: CommissionOrderSummary) => (
+    canManageOrderSettlement && !summary.sourceOrderDeleted && summary.status === '已撤回'
+  );
+
   const getAdjustDisabledReason = (summary: CommissionOrderSummary) => {
     if (summary.sourceOrderDeleted) return '源订单已删除，只能查看明细和历史';
     if (summary.status === '已发放') return '已发放提成不能直接调整，第一版不支持系统内冲销，请财务线下处理';
-    if (summary.status === '已撤回') return '提成已撤回，只能查看留痕';
+    if (summary.status === '已撤回') return '提成已撤回，可使用重新分账创建新轮次';
     return '调整分账';
   };
 
@@ -1590,6 +1605,23 @@ const Commission: React.FC<CommissionProps> = ({
     }
   };
 
+  const confirmReopenOrderSplit = async () => {
+    if (!reopenSummary || !reopenReason.trim() || !canReopenSettlementSummary(reopenSummary)) return;
+    setReopenLoading(true);
+    try {
+      const response = await commissionApi.reopenOrderCommissions(reopenSummary.orderId, reopenReason);
+      if (response.code === 0) {
+        const orderId = reopenSummary.orderId;
+        setReopenSummary(null);
+        setReopenReason('');
+        if (summaryDetail?.orderId === orderId) closeSettlementDetail();
+        await refreshAll();
+      }
+    } finally {
+      setReopenLoading(false);
+    }
+  };
+
   const confirmOrderFromDetail = async () => {
     if (!canManageOrderSettlement) return;
     if (!summaryDetail || summaryDetail.sourceOrderDeleted) return;
@@ -1678,28 +1710,35 @@ const Commission: React.FC<CommissionProps> = ({
       }
       return;
     }
-    const headers = ['月份', '员工', '部门', '订单数', '总实付金额', '应发提成', '待确认', '待发放', '已发放', '已撤回', '状态'];
-    const rows = payoutRows.map((row) => [
-      row.period,
-      formatOwnerDisplayName(row.ownerId, row.owner),
-      row.department || '-',
-      row.orderCount,
-      row.monthlyPaidAmount,
-      row.totalAmount,
-      row.pendingConfirmAmount,
-      row.pendingPayAmount,
-      row.paidAmount,
-      row.withdrawnAmount,
-      row.status,
-    ]);
-    const csv = [headers, ...rows].map((row) => row.map(escapeCsvValue).join(',')).join('\n');
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `员工提成月报-${payoutPeriod}.csv`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    setFinanceReportError('');
+    setFinanceReportOpen(true);
+  };
+
+  const financeReportRows = payoutRows.filter((row) => (
+    financeReportScope === 'all'
+    || (financeReportScope === 'department' && (row.departmentId === financeReportDepartmentId || row.department === financeReportDepartmentId))
+    || (financeReportScope === 'employee' && (row.ownerId === financeReportOwnerId || row.owner === financeReportOwnerId))
+  ));
+
+  const submitFinanceMonthlyReport = async () => {
+    setFinanceReportExporting(true);
+    setFinanceReportError('');
+    try {
+      await commissionPayoutApi.downloadMonthlyReport({
+        period: payoutPeriod,
+        reason: financeReportReason.trim(),
+        scope: financeReportScope,
+        departmentId: financeReportScope === 'department' ? financeReportDepartmentId : undefined,
+        ownerId: financeReportScope === 'employee' ? financeReportOwnerId : undefined,
+        includeWithdrawn: financeReportIncludeWithdrawn,
+      });
+      setFinanceReportOpen(false);
+      setFinanceReportReason('');
+    } catch (reportError) {
+      setFinanceReportError(reportError instanceof Error ? reportError.message : '提成月度报告导出失败');
+    } finally {
+      setFinanceReportExporting(false);
+    }
   };
 
   const exportFinanceEmployeeStatement = async (row: MonthlyCommissionPayout) => {
@@ -2738,7 +2777,10 @@ const Commission: React.FC<CommissionProps> = ({
         <Box sx={{ px: 1.35, py: 1.15, borderBottom: '1px solid #eef2f7', bgcolor: '#f8fafc' }}>
           <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start', justifyContent: 'space-between', gap: 1 }}>
             <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start', minWidth: 0 }}>
-              <Chip label={commission.role} size="small" color="primary" sx={{ height: 22, mt: 0.1 }} />
+              <Stack spacing={0.5} alignItems="flex-start">
+                <Chip label={commission.role} size="small" color="primary" sx={{ height: 22, mt: 0.1 }} />
+                <Chip label={`第 ${commission.settlementVersion || 1} 轮`} size="small" variant="outlined" sx={{ height: 20 }} />
+              </Stack>
               <Box sx={{ minWidth: 0 }}>
                 <Typography variant="body2" sx={{ color: '#111827', fontWeight: 900, overflowWrap: 'anywhere', lineHeight: 1.35 }}>
                   {formatOwnerDisplayName(commission.ownerId, commission.owner)}
@@ -3145,6 +3187,21 @@ const Commission: React.FC<CommissionProps> = ({
                         </IconButton>
                       </span>
                     </Tooltip>
+                    {summary.status === '已撤回' && !summary.sourceOrderDeleted && (
+                      <Tooltip title="重新分账">
+                        <span>
+                          <IconButton
+                            size="small"
+                            color="primary"
+                            disabled={!canReopenSettlementSummary(summary)}
+                            onClick={() => { setReopenSummary(summary); setReopenReason(''); }}
+                            aria-label="重新分账"
+                          >
+                            <RestartAltIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    )}
                     <Tooltip title={getResetOrCleanupOrderSplitDisabledReason(summary)}>
                       <span>
                         <IconButton
@@ -3446,7 +3503,7 @@ const Commission: React.FC<CommissionProps> = ({
     if (!canManageOrderSettlement) {
       return <Typography variant="body2" sx={{ color: '#64748b' }}>当前账号只能查看分账信息。</Typography>;
     }
-    if (summaryDetail.sourceOrderDeleted || summaryDetail.status === '已撤回') {
+    if (summaryDetail.sourceOrderDeleted) {
       const text = summaryDetail.sourceOrderDeleted
         ? '源订单已删除，仅保留分账明细和历史记录。'
         : '提成已撤回，该订单分账进入只读留痕状态。';
@@ -3457,10 +3514,26 @@ const Commission: React.FC<CommissionProps> = ({
       );
     }
 
+    if (summaryDetail.status === '已撤回') {
+      return (
+        <Stack spacing={1.25}>
+          <Typography variant="body2" sx={{ color: '#64748b' }}>本轮提成已撤回并永久保留。重新分账会创建新轮次，不会覆盖旧记录。</Typography>
+          <Button
+            variant="contained"
+            startIcon={<RestartAltIcon />}
+            onClick={() => { setReopenSummary(summaryDetail); setReopenReason(''); }}
+          >
+            重新分账
+          </Button>
+        </Stack>
+      );
+    }
+
     if (summaryDetail.status === '待处理') {
       return (
         <Stack spacing={1.25}>
           <Typography variant="body2" sx={{ color: '#64748b' }}>先在左侧调整分账，补齐人员或异常信息后，再进入确认流程。</Typography>
+          <Button variant="contained" startIcon={<EditIcon />} onClick={() => setDetailEditMode(true)}>处理分账</Button>
         </Stack>
       );
     }
@@ -3469,6 +3542,15 @@ const Commission: React.FC<CommissionProps> = ({
       return (
         <Stack spacing={1.25}>
           <Typography variant="body2" sx={{ color: '#64748b' }}>确认后，本订单提成会进入待发放。</Typography>
+          <Button variant="outlined" startIcon={<EditIcon />} onClick={() => setDetailEditMode(true)}>调整分账</Button>
+          <Button
+            variant="outlined"
+            color="warning"
+            startIcon={<RestartAltIcon />}
+            onClick={() => { setDeleteSummary(summaryDetail); setDeleteReason(''); }}
+          >
+            重置分账
+          </Button>
           <Button variant="contained" color="success" onClick={confirmOrderFromDetail} disabled={detailActionLoading}>确认分账</Button>
           <TextField label="撤回原因" value={detailActionReason} onChange={(event) => setDetailActionReason(event.target.value)} size="small" placeholder="例如：线下调整、规则错误" fullWidth />
           <Button color="error" variant="outlined" onClick={withdrawOrderFromDetail} disabled={detailActionLoading || !detailActionReason.trim()}>撤回提成</Button>
@@ -3508,7 +3590,7 @@ const Commission: React.FC<CommissionProps> = ({
           size="small"
           InputLabelProps={{ shrink: true }}
         />
-        <Tooltip title={payoutRows.length ? (payoutMode === 'mine' ? '导出当前月份的提成汇总与逐笔明细' : '导出员工提成月报') : '暂无可导出的提成数据'}>
+        <Tooltip title={payoutRows.length ? (payoutMode === 'mine' ? '导出当前月份的提成汇总与逐笔明细' : '导出六张工作表的财务提成核对包') : '暂无可导出的提成数据'}>
           <span>
             <Button
               variant="outlined"
@@ -3516,7 +3598,7 @@ const Commission: React.FC<CommissionProps> = ({
               disabled={!payoutRows.length || mineExporting}
               onClick={() => void exportMonthlyStatement()}
             >
-              {payoutMode === 'mine' ? (mineExporting ? '导出中...' : '导出提成明细') : '导出月度总表'}
+              {payoutMode === 'mine' ? (mineExporting ? '导出中...' : '导出提成明细') : '导出财务核对表'}
             </Button>
           </span>
         </Tooltip>
@@ -3686,6 +3768,108 @@ const Commission: React.FC<CommissionProps> = ({
       {tabValue === 1 && renderMonthlyPayout()}
 
       {tabValue === 2 && <CommissionRuleConfig />}
+
+      <Dialog
+        open={financeReportOpen}
+        onClose={() => { if (!financeReportExporting) setFinanceReportOpen(false); }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogCloseTitle onClose={() => { if (!financeReportExporting) setFinanceReportOpen(false); }}>导出财务提成月度核对表</DialogCloseTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <Alert severity="info">
+              将生成包含“月度核对总览、员工汇总、逐笔明细、正式订单阶梯核对、发放与撤销记录、异常与口径说明”的Excel财务核对包。
+            </Alert>
+            <TextField label="统计月份" value={payoutPeriod} size="small" fullWidth InputProps={{ readOnly: true }} />
+            <FormControl size="small" fullWidth>
+              <InputLabel>导出范围</InputLabel>
+              <Select
+                label="导出范围"
+                value={financeReportScope}
+                onChange={(event) => {
+                  setFinanceReportScope(event.target.value as 'all' | 'department' | 'employee');
+                  setFinanceReportDepartmentId('');
+                  setFinanceReportOwnerId('');
+                }}
+              >
+                <MenuItem value="all">全部员工</MenuItem>
+                <MenuItem value="department">指定部门</MenuItem>
+                <MenuItem value="employee">指定员工</MenuItem>
+              </Select>
+            </FormControl>
+            {financeReportScope === 'department' && (
+              <FormControl size="small" fullWidth>
+                <InputLabel>选择部门</InputLabel>
+                <Select label="选择部门" value={financeReportDepartmentId} onChange={(event) => setFinanceReportDepartmentId(event.target.value)}>
+                  {departments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
+                </Select>
+              </FormControl>
+            )}
+            {financeReportScope === 'employee' && (
+              <FormControl size="small" fullWidth>
+                <InputLabel>选择员工</InputLabel>
+                <Select label="选择员工" value={financeReportOwnerId} onChange={(event) => setFinanceReportOwnerId(event.target.value)}>
+                  {activeEmployees.map((employee) => <MenuItem key={employee.id} value={employee.id}>{formatEmployeeDisplayName(employee)}</MenuItem>)}
+                </Select>
+              </FormControl>
+            )}
+            <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, px: 1.5, py: 1 }}>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Checkbox checked={financeReportIncludeWithdrawn} onChange={(event) => setFinanceReportIncludeWithdrawn(event.target.checked)} />
+                <Box>
+                  <Typography variant="body2" fontWeight={800}>包含已撤回及历史发放记录</Typography>
+                  <Typography variant="caption" color="text.secondary">建议保持勾选，便于财务追溯旧分账轮次和历史发放留痕。
+                  </Typography>
+                </Box>
+              </Stack>
+            </Box>
+            <TextField
+              label="导出原因 *"
+              value={financeReportReason}
+              onChange={(event) => setFinanceReportReason(event.target.value)}
+              placeholder="例如：2026年7月员工提成与工资发放核对"
+              multiline
+              minRows={2}
+              inputProps={{ maxLength: 500 }}
+              fullWidth
+            />
+            <Paper variant="outlined" sx={{ p: 1.5, bgcolor: '#f8fafc' }}>
+              <Typography variant="body2" fontWeight={800}>预计导出 {financeReportRows.length} 名员工的月度提成</Typography>
+              <Typography variant="caption" color="text.secondary">实际逐笔数量、异常数量和发放记录以服务端生成时的完整数据为准。</Typography>
+            </Paper>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setFinanceReportOpen(false)} disabled={financeReportExporting}>取消</Button>
+          <Button
+            variant="contained"
+            startIcon={<FileDownloadIcon />}
+            disabled={financeReportExporting || !financeReportReason.trim() || (financeReportScope === 'department' && !financeReportDepartmentId) || (financeReportScope === 'employee' && !financeReportOwnerId)}
+            onClick={() => void submitFinanceMonthlyReport()}
+          >
+            {financeReportExporting ? '生成中...' : '生成并下载Excel'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(financeReportError)} onClose={() => setFinanceReportError('')} maxWidth="xs" fullWidth>
+        <DialogCloseTitle onClose={() => setFinanceReportError('')}>月度报告导出失败</DialogCloseTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <Alert severity="error">{financeReportError}</Alert>
+            <Box>
+              <Typography variant="subtitle2" sx={{ mb: 0.75 }}>处理建议</Typography>
+              <Typography variant="body2" color="text.secondary">
+                请核对统计月份、导出范围和网络连接后重试；如果重复出现，请记录统计月份并联系系统管理员。
+              </Typography>
+            </Box>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="contained" onClick={() => setFinanceReportError('')}>知道了</Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={Boolean(mineDetailRow)} onClose={() => setMineDetailRow(null)} maxWidth="lg" fullWidth>
         <DialogCloseTitle onClose={() => setMineDetailRow(null)}>
@@ -3930,6 +4114,32 @@ const Commission: React.FC<CommissionProps> = ({
         </DialogActions>
       </Dialog>
 
+      <Dialog
+        open={Boolean(reopenSummary)}
+        onClose={() => { if (!reopenLoading) { setReopenSummary(null); setReopenReason(''); } }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogCloseTitle onClose={() => { if (!reopenLoading) { setReopenSummary(null); setReopenReason(''); } }}>重新分账</DialogCloseTitle>
+        <DialogContent dividers>
+          {reopenSummary && (
+            <Stack spacing={1.25}>
+              <Alert severity="warning">重新分账会保留已撤回轮次作为只读历史，并将订单退回“待处理”。保存新分账时会创建新的分账轮次。</Alert>
+              <Box sx={{ border: `1px solid ${moduleTokens.line}`, borderRadius: moduleRadius, p: 1.25, bgcolor: moduleTokens.subtle }}>
+                <Typography variant="body2" sx={{ fontWeight: 900 }}>{reopenSummary.orderNo}</Typography>
+                <Typography variant="body2" sx={{ color: moduleTokens.muted }}>{reopenSummary.customerName} · {reopenSummary.thirdPartyOrderNo || '-'}</Typography>
+                <Typography variant="body2" sx={{ mt: 0.5 }}>实付金额：<Box component="span" sx={{ color: moduleTokens.green, fontWeight: 900 }}>{formatCurrency(reopenSummary.orderAmount)}</Box></Typography>
+              </Box>
+              <TextField label="重新分账原因" value={reopenReason} onChange={(event) => setReopenReason(event.target.value)} multiline minRows={3} required fullWidth autoFocus />
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setReopenSummary(null); setReopenReason(''); }} disabled={reopenLoading}>取消</Button>
+          <Button variant="contained" onClick={() => void confirmReopenOrderSplit()} disabled={reopenLoading || !reopenReason.trim()}>{reopenLoading ? '处理中...' : '确认重新分账'}</Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog open={Boolean(summaryDetail)} onClose={closeSettlementDetail} maxWidth="xl" fullWidth>
         <DialogCloseTitle onClose={closeSettlementDetail}>订单分账处理</DialogCloseTitle>
         <DialogContent dividers sx={{ bgcolor: '#f8fafc' }}>
@@ -4045,17 +4255,25 @@ const Commission: React.FC<CommissionProps> = ({
                     {detailEditMode ? (
                       renderDetailSplitEditor()
                     ) : (
-                      <Box
-                        sx={{
-                          display: 'grid',
-                          gridTemplateColumns: { xs: '1fr', sm: 'repeat(auto-fill, minmax(260px, 310px))' },
-                          gap: 1.25,
-                          alignItems: 'stretch',
-                          justifyContent: 'start',
-                        }}
-                      >
-                        {summaryDetail.commissions.map((commission) => renderSplitSummaryCard(commission))}
-                      </Box>
+                      <Stack spacing={1.5}>
+                        {Array.from(summaryDetail.commissions.reduce((groups, commission) => {
+                          const version = commission.settlementVersion || 1;
+                          groups.set(version, [...(groups.get(version) || []), commission]);
+                          return groups;
+                        }, new Map<number, Commission[]>()).entries())
+                          .sort(([left], [right]) => right - left)
+                          .map(([version, commissions], groupIndex) => (
+                            <Box key={version}>
+                              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+                                <Typography variant="subtitle2" fontWeight={900}>第 {version} 轮分账</Typography>
+                                <Chip size="small" label={groupIndex === 0 ? '当前/最新轮次' : '历史轮次'} color={groupIndex === 0 ? 'primary' : 'default'} variant={groupIndex === 0 ? 'filled' : 'outlined'} />
+                              </Stack>
+                              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(auto-fill, minmax(260px, 310px))' }, gap: 1.25, alignItems: 'stretch', justifyContent: 'start' }}>
+                                {commissions.map((commission) => renderSplitSummaryCard(commission))}
+                              </Box>
+                            </Box>
+                          ))}
+                      </Stack>
                     )}
                   </Box>
                 </Paper>

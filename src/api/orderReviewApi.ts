@@ -224,6 +224,11 @@ function applyFilters(applications: OrderApplication[], filters?: OrderApplicati
   }
   if (filters?.applicantName) filtered = filtered.filter((item) => item.applicantName === filters.applicantName);
   if (filters?.reviewerName) filtered = filtered.filter((item) => item.reviewerName === filters.reviewerName);
+  if (filters?.owner) {
+    filtered = filtered.filter((item) => (
+      item.orderData.owner === filters.owner || item.orderData.salesName === filters.owner
+    ));
+  }
   if (filters?.startDate) filtered = filtered.filter((item) => item.submittedAt >= filters.startDate!);
   if (filters?.endDate) {
     const endDate = filters.endDate.length === 10 ? `${filters.endDate}T23:59:59.999Z` : filters.endDate;
@@ -280,6 +285,16 @@ async function fetchOrderApplications(
   const totalPages = Math.ceil(total / pageSize);
   const items = filtered.slice((page - 1) * pageSize, page * pageSize);
   return createSuccessResponse({ items, pagination: { page, pageSize, total, totalPages } });
+}
+
+async function fetchOwnerCandidates(): Promise<ApiResponse<User[]>> {
+  if (shouldUseBackendApi()) return backendRequest<User[]>('/order-applications/owner-candidates');
+  ensureInit();
+  const users = (readJson<User[]>(STORAGE_KEYS.USERS) || []).filter((user) => user.isActive);
+  const scope = getCurrentDataVisibilityScope('orderApplications');
+  return createSuccessResponse(scope.unrestricted
+    ? users
+    : users.filter((user) => scope.visibleUserIds.includes(user.id) || scope.visibleUserNames.includes(user.name)));
 }
 
 async function fetchOrderApplicationById(id: string): Promise<ApiResponse<OrderApplication | null>> {
@@ -562,6 +577,7 @@ export const ORDER_APPLICATION_STATUSES = {
 } as const;
 
 export const orderReviewApi = {
+  fetchOwnerCandidates,
   fetchOrderApplications,
   fetchOrderApplicationById,
   submitOrderApplication,

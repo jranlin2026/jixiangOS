@@ -362,8 +362,30 @@ assert.equal(
   '售后挽回提成必须按挽回成交时间归属员工提成月报，不能按审核或分账时间',
 );
 assert.equal(realtimeCommission?.data.status, '已撤回', '撤回必须同时更新关联提成状态');
+assert.equal((await service.reopenSettlement(realtimeSettlementOrder.id, '', finance)).code, 400, '重新分账必须填写原因');
+const reopenedRealtime = await service.reopenSettlement(realtimeSettlementOrder.id, '重新核对售后分账', finance);
+assert.equal(reopenedRealtime.code, 0, reopenedRealtime.message);
+assert.equal(reopenedRealtime.data?.settlementStatus, '待处理');
+assert.equal(reopenedRealtime.data?.settlementVersion, 2, '历史未标记轮次的撤回分账应从第一轮递增到第二轮');
+const resettledRealtime = await service.settle(realtimeSettlementOrder.id, [{
+  role: '售后', ownerId: finance.id, payoutPlanName: '自定义金额', commissionAmount: 35,
+  performanceAmount: 200, ruleCalculationType: 'fixed',
+}], '重新分账保存', finance);
+assert.equal(resettledRealtime.code, 0, resettledRealtime.message);
+const recoveryRounds = Array.from(prisma.rows.values())
+  .filter((row: any) => row.domain === STORAGE_KEYS.COMMISSIONS && row.data?.sourceRecoveryOrderId === realtimeSettlementOrder.id)
+  .map((row: any) => row.data);
+assert.equal(recoveryRounds.some((item: any) => item.status === '已撤回' && item.settlementVersion === 1), true, '旧轮次必须保留');
+assert.equal(recoveryRounds.some((item: any) => item.status === '待确认' && item.settlementVersion === 2), true, '下一次保存必须创建新轮次');
+const resetResettledRealtime = await service.resetSettlement(realtimeSettlementOrder.id, '重置第二轮', finance);
+assert.equal(resetResettledRealtime.code, 0, resetResettledRealtime.message);
+const recoveryRoundsAfterReset = Array.from(prisma.rows.values())
+  .filter((row: any) => row.domain === STORAGE_KEYS.COMMISSIONS && row.data?.sourceRecoveryOrderId === realtimeSettlementOrder.id)
+  .map((row: any) => row.data);
+assert.equal(recoveryRoundsAfterReset.some((item: any) => item.status === '已撤回' && item.settlementVersion === 1), true, '重置当前轮次不得删除旧轮次');
+assert.equal(recoveryRoundsAfterReset.some((item: any) => item.status === '待确认'), false, '重置当前轮次必须删除当前待确认明细');
 prisma.rows.delete(key(STORAGE_KEYS.RECOVERY_ORDERS, realtimeSettlementOrder.id));
-if (realtimeCommission) prisma.rows.delete(key(STORAGE_KEYS.COMMISSIONS, realtimeCommission.recordId));
+for (const row of recoveryRounds) prisma.rows.delete(key(STORAGE_KEYS.COMMISSIONS, row.id));
 
 const missingContact = await service.create(input({
   thirdPartyOrderNo: 'TP-NO-CONTACT', customerPhone: '', customerWechat: '',
@@ -616,6 +638,59 @@ const otherBatchReplay = await importedService.createImported(
   { id: '', matchStatus: '售后临时客户' },
 );
 assert.equal(otherBatchReplay.code, 409, 'another import batch cannot claim an existing imported recovery record');
+
+const deletedCollisionPrisma = new FakePrisma();
+const deletedCollisionService = createRecoveryOrderCommandService(deletedCollisionPrisma as any, { now: () => new Date(NOW) });
+const deletedOriginal = await deletedCollisionService.create(
+  input({ thirdPartyOrderNo: 'TP-DELETED-REIMPORT' }), creator,
+);
+assert.equal(deletedOriginal.code, 0, deletedOriginal.message);
+const deletedOriginalKey = key(STORAGE_KEYS.RECOVERY_ORDERS, deletedOriginal.data!.id);
+const deletedOriginalRow = deletedCollisionPrisma.rows.get(deletedOriginalKey)!;
+deletedCollisionPrisma.rows.set(deletedOriginalKey, {
+  ...deletedOriginalRow,
+  data: { ...deletedOriginalRow.data, deletedAt: NOW, deletedBy: reviewer.name },
+});
+const reimportedAfterDelete = await deletedCollisionService.createImported(
+  input({ thirdPartyOrderNo: 'TP-DELETED-REIMPORT' }), creator,
+  {
+    importBatchId: 'batch-after-delete', importRowNumber: 3,
+    importedById: creator.id, importedByName: creator.name, importedAt: NOW,
+    targetCreatorId: other.id, targetCreatorName: other.name,
+  },
+  { id: '', matchStatus: '售后临时客户' },
+);
+assert.equal(reimportedAfterDelete.code, 0, `已删除的售后挽回单必须允许重新导入：${reimportedAfterDelete.message}`);
+assert.notEqual(reimportedAfterDelete.data?.id, deletedOriginal.data?.id, '重新导入必须生成新的活动记录，保留已删除历史');
+assert.equal(
+  deletedCollisionPrisma.records().filter((item) => item.thirdPartyOrderNo === 'TP-DELETED-REIMPORT').length,
+  2,
+  '已删除历史和重新导入的新记录必须同时保留',
+);
+
+const staleIdCollisionPrisma = new FakePrisma();
+const staleIdCollisionService = createRecoveryOrderCommandService(staleIdCollisionPrisma as any, { now: () => new Date(NOW) });
+const staleIdOriginal = await staleIdCollisionService.create(
+  input({ thirdPartyOrderNo: 'TP-STALE-ID' }), creator,
+);
+assert.equal(staleIdOriginal.code, 0, staleIdOriginal.message);
+const staleIdOriginalKey = key(STORAGE_KEYS.RECOVERY_ORDERS, staleIdOriginal.data!.id);
+const staleIdOriginalRow = staleIdCollisionPrisma.rows.get(staleIdOriginalKey)!;
+staleIdCollisionPrisma.rows.set(staleIdOriginalKey, {
+  ...staleIdOriginalRow,
+  data: { ...staleIdOriginalRow.data, thirdPartyOrderNo: 'TP-SANITIZED-DIFFERENT-NUMBER' },
+});
+const importedAcrossStaleId = await staleIdCollisionService.createImported(
+  input({ thirdPartyOrderNo: 'TP-STALE-ID' }), creator,
+  {
+    importBatchId: 'batch-stale-id', importRowNumber: 4,
+    importedById: creator.id, importedByName: creator.name, importedAt: NOW,
+    targetCreatorId: other.id, targetCreatorName: other.name,
+  },
+  { id: '', matchStatus: '售后临时客户' },
+);
+assert.equal(importedAcrossStaleId.code, 0, '第三方订单号未重复时，历史记录 ID 冲突不能阻止导入');
+assert.notEqual(importedAcrossStaleId.data?.id, staleIdOriginal.data?.id, '记录 ID 冲突时必须选择新的安全 ID');
 const importedApproved = await importedService.approve(imported.data!.id, reviewer);
 assert.equal(importedApproved.code, 0, importedApproved.message);
 assert.equal(importedApproved.data?.createdBy, other.id, '审核通过后必须切换为目标正式创建人');
@@ -717,7 +792,7 @@ assert.equal(updated.data?.updatedAt, NOW);
 
 const approved = await service.approve(created.data!.id, reviewer);
 assert.equal(approved.code, 0);
-assert.equal(approved.data?.status, '待分账');
+assert.equal(approved.data?.status, '审核通过');
 assert.equal(approved.data?.auditorId, reviewer.id);
 assert.equal((await service.approve(created.data!.id, reviewer)).code, 0, '重复审核应幂等');
 
@@ -730,7 +805,7 @@ assert.equal(metadataEdited.data?.paymentOrderNo, 'PAY-METADATA-UPDATED');
 assert.equal(metadataEdited.data?.sourcePlatform, approved.data?.sourcePlatform, 'PATCH 未传来源平台时必须保留原值');
 assert.equal(metadataEdited.data?.sourceShopName, approved.data?.sourceShopName, 'PATCH 未传来源店铺时必须保留原值');
 assert.equal(metadataEdited.data?.recoveryAmount, approved.data?.recoveryAmount, '资料编辑不得改变挽回成交金额');
-assert.equal(metadataEdited.data?.status, '待分账', '资料编辑不得改变审核状态');
+assert.equal(metadataEdited.data?.status, '审核通过', '资料编辑不得改变审核状态');
 assert.equal(metadataEdited.data?.settlementStatus, '待处理', '资料编辑不得改变分账状态');
 assert.equal(metadataEdited.data?.changeHistory?.[0]?.action, 'edit');
 const detailWithoutHistoryPermission = await service.get(created.data!.id, creator, 'recoveryOrders');

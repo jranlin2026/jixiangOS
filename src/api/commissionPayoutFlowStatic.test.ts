@@ -10,13 +10,14 @@ const serviceSource = readFileSync(new URL('../../server/services/commissionPayo
 assert.match(financeSource, /value:\s*'disbursement',\s*label:\s*'提成发放'/);
 assert.doesNotMatch(financeSource, /value:\s*'payout',\s*label:\s*'员工提成月报'/);
 assert.doesNotMatch(commissionSource, /生成发放单|确认本月已发放|确认此人已发/);
-assert.match(commissionSource, /导出月度总表/);
+assert.match(commissionSource, /导出财务提成月度核对表/);
 
 assert.match(payoutSource, /待发放/);
 assert.match(payoutSource, /发放记录/);
 assert.match(payoutSource, /label="月度报告"/);
 assert.match(payoutSource, /确认发放/);
-assert.match(payoutSource, /撤销发放/);
+assert.doesNotMatch(payoutSource, /aria-label="撤销发放"|>确认撤销</);
+assert.match(payoutSource, /已发放为系统终态/);
 assert.match(payoutSource, /付款流水号/);
 assert.match(payoutSource, /fetchRecordsWorkspace/);
 assert.match(payoutSource, /subscribePageRefresh/);
@@ -33,7 +34,7 @@ assert.match(serverSource, /\/api\/commission-payouts\/issue/);
 assert.match(serverSource, /\/api\/commission-payout-records\/:id\/reverse/);
 assert.match(serviceSource, /STORAGE_KEYS\.COMMISSION_PAYOUT_BATCHES/);
 assert.match(serviceSource, /status:\s*'已发放' as const/);
-assert.match(serviceSource, /status:\s*'已撤销'/);
+assert.match(serviceSource, /本版不支持撤销发放，请线下处理/);
 assert.match(serviceSource, /active\.every[\s\S]{0,120}\? '已发放'/);
 
 console.log('commission payout flow static tests passed');

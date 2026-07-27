@@ -53,19 +53,26 @@ function normalizeText(value?: string): string {
 }
 
 function normalizeRecoveryOrder(order: RecoveryOrder): RecoveryOrder {
-  if ((order.status as string) === '已生成提成') {
-    return { ...order, status: '已分账', settlementStatus: '待发放' };
-  }
-  if ((order.status as string) === '审核通过') {
-    return { ...order, status: '待分账', settlementStatus: order.settlementStatus || '待处理' };
-  }
+  const rawStatus = String(order.status || '');
   const rawSettlementStatus = String(order.settlementStatus || '');
   const settlementStatus = rawSettlementStatus === '待分账'
     ? '待处理'
     : rawSettlementStatus === '已分账'
       ? '待发放'
-      : order.settlementStatus || (order.status === '待分账' ? '待处理' : order.status === '已分账' ? '待发放' : '未分账');
-  return { ...order, settlementStatus: settlementStatus as RecoveryOrderSettlementStatus };
+      : order.settlementStatus
+        || (rawStatus === '已生成提成' || rawStatus === '已分账'
+          ? '待发放'
+          : rawStatus === '审核通过' || rawStatus === '待分账'
+            ? '待处理'
+            : '未分账');
+  const status = ['已生成提成', '待分账', '已分账'].includes(rawStatus)
+    ? '审核通过'
+    : order.status;
+  return {
+    ...order,
+    status: status as RecoveryOrder['status'],
+    settlementStatus: settlementStatus as RecoveryOrderSettlementStatus,
+  };
 }
 
 function readRecoveryOrders(): RecoveryOrder[] {
@@ -378,7 +385,7 @@ async function fetchRecoveryOrderStats(ownerId?: string): Promise<ApiResponse<Re
   return createSuccessResponse({
     total: items.length,
     pendingReview: items.filter((item) => item.status === '待审核').length,
-    approved: items.filter((item) => item.status === '待分账' || item.status === '已分账').length,
+    approved: items.filter((item) => item.status === '审核通过').length,
     rejected: items.filter((item) => item.status === '审核驳回').length,
     waitingSettlement: items.filter((item) => (item.settlementStatus || '未分账') === '待处理').length,
     settled: items.filter((item) => ['待确认', '待发放'].includes(item.settlementStatus || '未分账')).length,
@@ -517,7 +524,7 @@ async function updateRecoveryOrder(id: string, data: RecoveryOrderInput): Promis
   if (!canUseRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT, 'write') && !canResubmitReturnedRecoveryOrder(current)) {
     return createErrorResponse('无权编辑售后挽回订单', 403);
   }
-  if (['待确认', '待发放', '已撤回'].includes(current.settlementStatus || '未分账') || current.status === '已分账') {
+  if (['待确认', '待发放', '已发放', '已撤回'].includes(current.settlementStatus || '未分账')) {
     return createErrorResponse('已分账的售后挽回订单不能修改');
   }
   if (orders.some((item) => item.id !== id && item.thirdPartyOrderNo === data.thirdPartyOrderNo.trim())) {
@@ -740,11 +747,11 @@ async function approveRecoveryOrder(id: string, auditorId: string, auditorName: 
   const idx = orders.findIndex((item) => item.id === id);
   if (idx === -1) return createSuccessResponse(null);
   if (orders[idx].status === '审核驳回') return createErrorResponse('已驳回的挽回单不能直接审核通过');
-  if (orders[idx].status === '已分账') return createErrorResponse('已分账的挽回单不能重复审核');
+  if (orders[idx].status === '审核通过') return createErrorResponse('审核通过的挽回单不能重复审核');
   const now = nowIso();
   orders[idx] = {
     ...orders[idx],
-    status: '待分账',
+    status: '审核通过',
     settlementStatus: '待处理',
     auditorId,
     auditorName,
@@ -775,7 +782,7 @@ async function returnRecoveryOrder(id: string, auditorId: string, auditorName: s
   const idx = orders.findIndex((item) => item.id === id);
   if (idx === -1) return createSuccessResponse(null);
   if (!reason.trim()) return createErrorResponse('请填写退回修改原因');
-  if (orders[idx].status === '已分账') return createErrorResponse('已分账的挽回单不能退回修改');
+  if (orders[idx].status === '审核通过') return createErrorResponse('审核通过的挽回单不能退回修改');
   const now = nowIso();
   orders[idx] = {
     ...orders[idx],
@@ -923,33 +930,43 @@ async function settleRecoveryOrder(
   const order = orders[idx];
   const currentSettlementStatus = order.settlementStatus || '未分账';
   if (!['待处理', '待确认'].includes(currentSettlementStatus)) return createErrorResponse('只有待处理或待确认的售后挽回订单可以调整分账');
-  if (order.status !== '待分账') return createErrorResponse('只有审核通过的售后挽回订单才能分账');
+  if (!['审核通过', '待分账', '已分账'].includes(order.status)) return createErrorResponse('只有审核通过的售后挽回订单才能分账');
 
   const now = nowIso();
+  const commissions = readCommissions();
+  const existingIds = new Set(order.commissionIds || []);
+  const relatedCommissions = commissions.filter((commission) => (
+    existingIds.has(commission.id) || commission.sourceRecoveryOrderId === order.id
+  ));
+  const activeRelatedCommissions = relatedCommissions.filter((commission) => (
+    !isInactiveRecoveryCommissionStatus(commission.status)
+  ));
+  const lockedCommission = activeRelatedCommissions.find((commission) => commission.status !== '待确认');
+  if (lockedCommission) return createErrorResponse('该售后挽回分账已进入发放链路，不能直接调整');
+  const maxHistoricalVersion = Math.max(0, ...relatedCommissions.map((commission) => commission.settlementVersion || 1));
+  const settlementVersion = order.settlementVersion
+    || (activeRelatedCommissions.length
+      ? Math.max(1, ...activeRelatedCommissions.map((commission) => commission.settlementVersion || 1))
+      : Math.max(1, maxHistoricalVersion + (relatedCommissions.length ? 1 : 0)));
+  const settlementRoundId = order.settlementRoundId || `recovery-settlement-${order.id}-v${settlementVersion}`;
+  const orderForSettlement = { ...order, settlementVersion, settlementRoundId };
   const built: Commission[] = [];
   for (const row of rows) {
     if (!row.role) return createErrorResponse('请选择提成角色');
     if (!row.ownerId) return createErrorResponse('请选择分账人员');
-    const res = buildRecoveryCommission(order, row, operatorName, now);
+    const res = buildRecoveryCommission(orderForSettlement, row, operatorName, now);
     if (res.code !== 0) return createErrorResponse(res.message || '生成分账失败');
-    built.push(res.data);
+    built.push({ ...res.data, settlementVersion, settlementRoundId });
   }
 
-  const commissions = readCommissions();
-  const existingIds = new Set(order.commissionIds || []);
-  const lockedCommission = commissions.find((commission) => (
-    (existingIds.has(commission.id) || commission.sourceRecoveryOrderId === order.id)
-    && commission.status !== '待确认'
-  ));
-  if (lockedCommission) return createErrorResponse('该售后挽回分账已进入发放链路，不能直接调整');
   const remainingCommissions = commissions.filter((commission) => (
-    !existingIds.has(commission.id)
-    && commission.sourceRecoveryOrderId !== order.id
+    (!existingIds.has(commission.id) && commission.sourceRecoveryOrderId !== order.id)
+    || isInactiveRecoveryCommissionStatus(commission.status)
   ));
   writeCommissions([...built, ...remainingCommissions]);
   orders[idx] = {
     ...order,
-    status: '待分账',
+    status: '审核通过',
     settlementStatus: '待确认',
     settlementHandledBy: operatorName,
     settlementHandledAt: now,
@@ -959,6 +976,8 @@ async function settleRecoveryOrder(
     settlementWithdrawnBy: undefined,
     settlementWithdrawnAt: undefined,
     settlementWithdrawReason: undefined,
+    settlementVersion,
+    settlementRoundId,
     commissionIds: built.map((commission) => commission.id),
     auditorId: order.auditorId || operatorId,
     auditorName: order.auditorName || operatorName,
@@ -1008,7 +1027,7 @@ async function confirmRecoverySettlement(id: string, operatorName: string): Prom
   writeCommissions(nextCommissions);
   orders[idx] = {
     ...order,
-    status: '已分账',
+    status: '审核通过',
     settlementStatus: '待发放',
     settlementConfirmedBy: operatorName,
     settlementConfirmedAt: now,
@@ -1038,7 +1057,7 @@ async function resetRecoverySettlement(id: string, operatorName: string, reason?
   const idx = orders.findIndex((item) => item.id === id);
   if (idx === -1) return createSuccessResponse(null);
   const order = orders[idx];
-  if ((order.settlementStatus || '未分账') !== '待确认') return createErrorResponse('只有待确认的售后挽回分账才能删除');
+  if ((order.settlementStatus || '未分账') !== '待确认') return createErrorResponse('只有待确认的售后挽回分账才能重置');
 
   const commissionIds = new Set(order.commissionIds || []);
   const commissions = readCommissions();
@@ -1050,7 +1069,7 @@ async function resetRecoverySettlement(id: string, operatorName: string, reason?
   const now = nowIso();
   orders[idx] = {
     ...order,
-    status: '待分账',
+    status: '审核通过',
     settlementStatus: '待处理',
     settlementHandledBy: undefined,
     settlementHandledAt: undefined,
@@ -1061,7 +1080,7 @@ async function resetRecoverySettlement(id: string, operatorName: string, reason?
     settlementWithdrawnAt: undefined,
     settlementWithdrawReason: undefined,
     commissionIds: [],
-    auditReason: reason?.trim() ? `删除售后挽回分账：${reason.trim()} · ${operatorName}` : `删除售后挽回分账：${operatorName}`,
+    auditReason: reason?.trim() ? `重置售后挽回分账：${reason.trim()} · ${operatorName}` : `重置售后挽回分账：${operatorName}`,
     updatedAt: now,
   };
   writeRecoveryOrders(orders);
@@ -1110,12 +1129,65 @@ async function withdrawRecoverySettlement(id: string, reason: string, operatorNa
   writeCommissions(nextCommissions);
   orders[idx] = {
     ...order,
-    status: '已分账',
+    status: '审核通过',
     settlementStatus: '已撤回',
     settlementWithdrawnBy: operatorName,
     settlementWithdrawnAt: now,
     settlementWithdrawReason: normalizedReason,
     auditReason: normalizedReason,
+    updatedAt: now,
+  };
+  writeRecoveryOrders(orders);
+  return createSuccessResponse(orders[idx]);
+}
+
+async function reopenRecoverySettlement(
+  id: string,
+  reason: string,
+  operatorName: string,
+): Promise<ApiResponse<RecoveryOrder | null>> {
+  if (shouldUseBackendApi()) {
+    const response = await backendRequest<RecoveryOrder | null>(`/recovery-orders/${encodeURIComponent(id)}/reopen-settlement`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    if (response.code !== 0) return createErrorResponse(response.message, response.code);
+    return createSuccessResponse(response.data ? cacheBackendRecoveryOrder(response.data) : null, response.message);
+  }
+  ensureInit();
+  await delay(120);
+  const normalizedReason = reason.trim();
+  if (!normalizedReason) return createErrorResponse('重新分账必须填写原因');
+  const orders = readRecoveryOrders();
+  const idx = orders.findIndex((item) => item.id === id);
+  if (idx === -1) return createErrorResponse('售后挽回订单不存在', 404);
+  const order = orders[idx];
+  if (order.deletedAt) return createErrorResponse('源售后挽回订单已删除，不能重新分账');
+  if ((order.settlementStatus || '未分账') !== '已撤回') return createErrorResponse('只有已撤回的售后挽回分账可以重新分账');
+  const related = readCommissions().filter((commission) => (
+    (order.commissionIds || []).includes(commission.id)
+    || commission.sourceRecoveryOrderId === order.id
+  ));
+  if (!related.length || related.some((commission) => commission.status !== '已撤回')) {
+    return createErrorResponse('该售后挽回订单仍有活动提成，不能重新分账');
+  }
+  const now = nowIso();
+  const version = Math.max(1, ...related.map((commission) => commission.settlementVersion || 1)) + 1;
+  orders[idx] = {
+    ...order,
+    status: '审核通过',
+    settlementStatus: '待处理',
+    settlementVersion: version,
+    settlementRoundId: `recovery-settlement-${order.id}-v${version}`,
+    commissionIds: [],
+    settlementHandledBy: undefined,
+    settlementHandledAt: undefined,
+    settlementConfirmedBy: undefined,
+    settlementConfirmedAt: undefined,
+    settlementWithdrawnBy: undefined,
+    settlementWithdrawnAt: undefined,
+    settlementWithdrawReason: undefined,
+    auditReason: `重新分账：${normalizedReason} · ${operatorName}`,
     updatedAt: now,
   };
   writeRecoveryOrders(orders);
@@ -1142,4 +1214,5 @@ export const recoveryOrderApi = {
   confirmRecoverySettlement,
   resetRecoverySettlement,
   withdrawRecoverySettlement,
+  reopenRecoverySettlement,
 };

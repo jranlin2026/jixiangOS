@@ -29,6 +29,14 @@ assert.deepEqual(
   { filters: { search: '关键' }, columnMode: 'all', reason: '备份' },
   '全部字段模式不应向后端传递当前视图字段。',
 );
+assert.deepEqual(
+  buildBusinessExportBrowserRequest(
+    { search: '关键', page: 2, pageSize: 20 },
+    { columnMode: 'standard', reason: '业务归档', columnIds: ['orderNo'] },
+  ),
+  { filters: { search: '关键' }, columnMode: 'standard', reason: '业务归档' },
+  '标准字段模式不应依赖当前视图字段。',
+);
 assert.throws(
   () => unwrapBusinessExportResponse({ code: 403, data: null as never, message: '无权导出' }),
   /无权导出/,
@@ -39,6 +47,7 @@ assert.match(ordersSource, />\s*导出订单\s*</);
 assert.match(ordersSource, /businessExportApi\.exportOrders/);
 assert.match(ordersSource, /columnIds:\s*visibleColumns\.map\(\(column\) => column\.id\)/);
 assert.match(ordersSource, /expectedCount=\{pagination\.total\}/);
+assert.match(ordersSource, /enableStandardMode/);
 
 assert.match(financeSource, /PERMISSION_KEYS\.ORDER_SETTLEMENT_EXPORT/);
 assert.match(financeSource, /PERMISSION_KEYS\.RECOVERY_SETTLEMENT_EXPORT/);
@@ -61,5 +70,6 @@ assert.match(afterSalesSource, /exportSignal=\{exportSignal\}/);
 assert.match(recoveryOrderSource, /businessExportApi\.exportRecoveryOrders/);
 assert.match(recoveryOrderSource, /columnIds:\s*visibleColumns\.map\(\(column\) => column\.id\)/);
 assert.match(recoveryOrderSource, /expectedCount=\{total\}/);
+assert.match(recoveryOrderSource, /enableStandardMode/);
 
 console.log('business export page integration tests passed');

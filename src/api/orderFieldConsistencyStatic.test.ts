@@ -14,8 +14,12 @@ for (const [label, source] of [['订单列表', orderListSource], ['订单审核
 assert.match(orderListSource, /id: 'settlementStatus', label: '分账状态'/, '订单列表必须显示统一分账状态');
 assert.match(orderListSource, /id: 'status', label: '订单状态'/, '订单列表必须显示订单业务状态');
 assert.match(orderListSource, /id: 'refundStatus', label: '退款状态'/, '订单列表必须显示退款状态');
-assert.match(orderListSource, /handleFilterChange\('status'/, '订单列表必须支持订单状态筛选');
-assert.match(orderListSource, /handleFilterChange\('refundStatus'/, '订单列表必须支持退款状态筛选');
+const orderListToolbarSource = orderListSource.slice(
+  orderListSource.indexOf('<ModuleToolbar>'),
+  orderListSource.indexOf('</ModuleToolbar>'),
+);
+assert.doesNotMatch(orderListToolbarSource, /label="订单状态"/, '订单列表筛选栏不应再显示订单状态');
+assert.doesNotMatch(orderListToolbarSource, /label="退款状态"/, '订单列表筛选栏不应再显示退款状态');
 assert.match(orderReviewSource, /id: 'status', label: /, '订单审核台必须保留审核状态');
 
 assert.match(orderListSource, /case 'thirdPartyOrderNo':[^]*order\.thirdPartyOrderNo \|\| '-'/);
@@ -57,11 +61,12 @@ assert.doesNotMatch(
   '订单更正不应提交由后端根据产品派生的名称和等级字段',
 );
 assert.match(orderFormSource, /useAppFeedback\(\)/, '订单更正的提交问题应使用统一弹窗反馈');
-assert.match(
+assert.doesNotMatch(
   orderFormSource,
   /\{submitError && !correctionMode && <Alert/,
-  '订单更正页不应在表单顶部常驻显示提交错误',
+  '订单表单不应在顶部常驻显示提交错误',
 );
+assert.match(orderFormSource, /await alert\(message, correctionMode \?/, '订单表单提交错误应使用统一弹窗反馈');
 
 for (const [label, source] of [
   ['订单资料', orderDetailSource],
@@ -79,7 +84,7 @@ assert.match(
   '审核资料必须在正式订单修改后提示当前值',
 );
 
-for (const section of ['客户信息', '产品信息', '订单信息', '付款信息', '补充信息']) {
+for (const section of ['客户信息', '产品信息', '订单信息', '收款与凭证']) {
   assert.match(orderFormSource, new RegExp(`title="${section}"`), `订单填写页应包含“${section}”分区`);
 }
 assert.match(orderFormSource, /<BusinessFormSection/, '订单填写页应使用默认展开且可折叠的统一业务表单分段');
@@ -90,8 +95,8 @@ const customerFormSection = orderFormSource.slice(
 );
 assert.doesNotMatch(customerFormSection, /label="资源归属"|label="线索录入人"|label="线索贡献人"/);
 const paymentFormSection = orderFormSource.slice(
-  orderFormSource.indexOf('title="付款信息"'),
-  orderFormSource.indexOf('title="补充信息"'),
+  orderFormSource.indexOf('title="收款与凭证"'),
+  orderFormSource.indexOf('</BusinessFormSection>', orderFormSource.indexOf('title="收款与凭证"')),
 );
 assert.doesNotMatch(paymentFormSection, /label="产品总计"|label="优惠"/);
 

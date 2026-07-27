@@ -35,6 +35,7 @@ for (const [method, route] of [
   ['post', '/api/ai/config/test'],
   ['post', '/api/order-applications'],
   ['get', '/api/order-applications'],
+  ['get', '/api/order-applications/owner-candidates'],
   ['get', '/api/orders/owner-candidates'],
   ['get', '/api/order-applications/:id'],
   ['post', '/api/order-applications/:id/resubmit'],
@@ -261,6 +262,7 @@ assert.match(source, /app\.post\('\/api\/leads\/:id\/follow-ups', requireLeadFol
 assert.match(source, /app\.post\('\/api\/leads\/:id\/assign', requireLeadAssignAccess,/);
 assert.match(source, /app\.post\('\/api\/order-applications', requireOrderCreateWriteAccess,/);
 assert.match(source, /app\.get\('\/api\/order-applications', requireOrderApplicationReadAccess,/);
+assert.match(source, /app\.get\('\/api\/order-applications\/owner-candidates', requireOrderApplicationReadAccess,/);
 assert.match(source, /app\.get\('\/api\/order-applications\/:id', requireOrderApplicationReadAccess,/);
 assert.match(source, /app\.post\('\/api\/order-applications\/:id\/resubmit', requireOrderCreateWriteAccess,/);
 assert.match(source, /app\.post\('\/api\/order-applications\/:id\/return', requireOrderReviewWriteAccess,/);

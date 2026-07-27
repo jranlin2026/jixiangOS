@@ -40,7 +40,7 @@ import { customerApi, orderApi, orderReviewApi, ORDER_APPLICATION_STATUSES } fro
 import type { Order, OrderApplication, OrderApplicationFilters, OrderApplicationStatus } from '../../types/order';
 import type { Customer } from '../../types/customer';
 import type { Role } from '../../types/role';
-import { formatCurrency, formatLeadSourceLabel, formatPaginationRows } from '../../shared/utils/formatters';
+import { formatCurrency, formatEmployeeNameWithPosition, formatLeadSourceLabel, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import { BusinessDetailField, BusinessDetailSection } from '../../shared/components/BusinessDetailSection';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
@@ -69,6 +69,7 @@ import {
 import useAuthStore from '../../store/useAuthStore';
 import BusinessImportReviewPageCheckbox from '../../shared/components/BusinessImportReviewPageCheckbox';
 import { createOrderReviewLoadGate } from './orderReviewLoadGate';
+import type { User } from '../../types/settings';
 
 type ReviewAction = {
   type: 'approve' | 'return' | 'reject';
@@ -254,6 +255,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({
     pageSize: 10,
   });
   const [pagination, setPagination] = useState({ page: 1, pageSize: 10, total: 0, totalPages: 0 });
+  const [ownerCandidates, setOwnerCandidates] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
   const [viewConfig, setViewConfig] = useState<ReviewViewConfig>(readReviewViewConfig);
   const [editingApplication, setEditingApplication] = useState<OrderApplication | null>(null);
@@ -298,6 +300,18 @@ const OrderReview: React.FC<OrderReviewProps> = ({
   };
 
   useEffect(() => () => loadGateRef.current.dispose(), []);
+
+  useEffect(() => {
+    let active = true;
+    orderReviewApi.fetchOwnerCandidates().then((response) => {
+      if (active && response.code === 0) {
+        setOwnerCandidates(response.data.filter((user) => user.isActive));
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const nextFilters: OrderApplicationFilters = {
@@ -731,6 +745,19 @@ const OrderReview: React.FC<OrderReviewProps> = ({
           onChange={(event) => handleFilterChange('search', event.target.value)}
           sx={{ minWidth: 280 }}
         />
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <InputLabel>销售负责人</InputLabel>
+          <Select
+            label="销售负责人"
+            value={filters.owner || ''}
+            onChange={(event) => handleFilterChange('owner', event.target.value)}
+          >
+            <MenuItem value="">全部</MenuItem>
+            {ownerCandidates.map((user) => (
+              <MenuItem key={user.id} value={user.name}>{formatEmployeeNameWithPosition(user)}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
         <FormControl size="small" sx={{ minWidth: 150 }}>
           <InputLabel>审核视图</InputLabel>
           <Select

@@ -8,6 +8,7 @@ import {
   assertCustomerActionPermission,
   assertCustomerClaimPermission,
   assertCustomerFieldPermissions,
+  buildCustomerAccessContextFromDirectory,
   canManageCustomer,
   canManageHistoricalMergedCustomer,
   canReadCustomer,
@@ -82,6 +83,25 @@ const legacyReadContext = access({
 });
 assert.equal(canReadCustomer(legacyReadContext, unresolved), true, '未解析负责人仅保留旧姓名规则的只读兼容');
 assert.equal(canManageCustomer(legacyReadContext, unresolved), false, '未解析负责人的写入必须 fail closed');
+
+const allScopeRole: Role = {
+  id: 'role-all', name: '全部客户管理员', code: 'super_admin',
+  permissions: [{ module: PERMISSION_KEYS.CUSTOMER_LIST, actions: ['read'] }],
+  dataScopes: { customers: 'all' }, memberCount: 2, isActive: true, createdAt: NOW, updatedAt: NOW,
+};
+const allScopeContext = buildCustomerAccessContextFromDirectory(
+  { id: 'user-actor', name: '管理员', account: 'admin', role: '超级管理员', roleId: 'role-all', isActive: true } as any,
+  [
+    { id: 'user-actor', name: '管理员', account: 'admin', role: '超级管理员', roleId: 'role-all', isActive: true, employmentStatus: 'active' },
+    { id: 'user-former', name: '离职销售', account: 'former', role: '销售顾问', roleId: 'role-sales', isActive: false, employmentStatus: 'left' },
+  ] as any,
+  [allScopeRole],
+  [],
+);
+assert.equal(allScopeContext.readableUserIds.has('user-former'), true, '全部客户读取范围必须包含停用负责人的历史客户');
+assert.equal(allScopeContext.manageableOwnerIds.has('user-former'), false, '停用负责人不得成为可写入或可分配目标');
+assert.equal(canReadCustomer(allScopeContext, customer({ owner: '离职销售', ownerId: 'user-former' })), true);
+assert.equal(canManageCustomer(allScopeContext, customer({ owner: '离职销售', ownerId: 'user-former' })), false);
 
 const profileOnly = access({ grantedPermissions: new Set([PERMISSION_KEYS.CUSTOMER_EDIT_PROFILE]) });
 assert.doesNotThrow(() => assertCustomerFieldPermissions(profileOnly, { name: '新名称' }));

@@ -274,6 +274,16 @@ assert.equal(listedApplication?.orderData.dealEvidencePreview, undefined);
 assert.equal(listedApplication?.orderData.payments[0].voucherPreview, undefined);
 assert.equal((await service.getApplication('application-other', sales)).code, 403);
 assert.equal((await service.getApplication('application-self', sales)).data?.orderData.dealEvidencePreview, inlineProof);
+assert.deepEqual(
+  (await service.listApplicationOwnerCandidates(sales)).data?.map((user) => user.name),
+  [sales.name],
+  '订单审核台负责人候选必须遵循订单申请数据范围，而不是订单列表权限范围',
+);
+assert.deepEqual(
+  (await service.listApplicationOwnerCandidates(finance)).data?.map((user) => user.name),
+  [sales.name, finance.name],
+  '拥有全部订单申请数据范围的审核人应看到全部在职候选人',
+);
 assert.equal(
   (await service.getApplication('application-self', sales)).data?.orderData.sourceName,
   '搜索广告',
@@ -292,6 +302,15 @@ assert.deepEqual(
   ['application-self', 'application-other'],
   '订单审核台默认应按创建时间降序，不应被更新时间干扰',
 );
+const ownerFilteredApplications = await service.listApplications({
+  owner: '销售B', page: 1, pageSize: 20,
+}, finance);
+assert.deepEqual(
+  ownerFilteredApplications.data?.items.map((item) => item.id),
+  ['application-other'],
+  '订单审核台销售负责人筛选必须按申请快照中的负责人执行',
+);
+assert.equal(ownerFilteredApplications.data?.pagination.total, 1, '负责人筛选后的分页总数必须同步更新');
 assert.deepEqual(
   (await service.listApplications({
     importBatchId: 'batch-visible', sortBy: 'paymentDate', sortDirection: 'desc', page: 1, pageSize: 20,
