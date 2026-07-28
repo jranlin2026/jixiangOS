@@ -146,8 +146,13 @@ async function fetchRecycleBinItems(filters: BusinessRecycleBinFilters = {}): Pr
 async function restoreRecycleBinItem(type: BusinessRecycleBinType, id: string): Promise<ApiResponse<boolean>> {
   const forbidden = requireSuperAdmin();
   if (forbidden) return createErrorResponse(forbidden.message || '仅超级管理员可以管理业务回收站');
-  if (shouldUseBackendApi() && (type === 'lead' || type === 'customer')) {
-    return createErrorResponse('服务器模式暂不支持恢复线索或客户；记录级恢复命令完成前已安全禁用', 409);
+  if (shouldUseBackendApi()) {
+    if (type === 'lead' || type === 'customer') {
+      return createErrorResponse('服务器模式暂不支持恢复线索或客户；记录级恢复命令完成前已安全禁用', 409);
+    }
+    return backendRequest<boolean>(`/business-recycle-bin/${type}/${encodeURIComponent(id)}/restore`, {
+      method: 'POST',
+    });
   }
   ensureInit();
   await delay(120);
@@ -195,8 +200,14 @@ async function permanentlyDeleteRecycleBinItem(type: BusinessRecycleBinType, id:
   const normalizedReason = reason.trim();
   if (!normalizedReason) return createErrorResponse('永久删除必须填写原因');
 
-  if (shouldUseBackendApi() && (type === 'lead' || type === 'customer')) {
-    return createErrorResponse('服务器模式暂不支持永久删除线索或客户，请先保留在业务回收站');
+  if (shouldUseBackendApi()) {
+    if (type === 'lead' || type === 'customer') {
+      return createErrorResponse('服务器模式暂不支持永久删除线索或客户，请先保留在业务回收站');
+    }
+    return backendRequest<boolean>(`/business-recycle-bin/${type}/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ reason: normalizedReason }),
+    });
   }
 
   const rows = readRows(type);

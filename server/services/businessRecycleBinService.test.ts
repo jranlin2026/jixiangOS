@@ -16,6 +16,12 @@ const repository = {
     },
   ] };
   },
+  restoreOrder: async (id: string, actorName: string) => {
+    repositoryInput = { action: 'restore', id, actorName };
+  },
+  purgeOrder: async (id: string, reason: string, actorName: string) => {
+    repositoryInput = { action: 'purge', id, reason, actorName };
+  },
 };
 const superAdmin = {
   id: 'admin', name: '管理员', account: 'admin', role: '超级管理员',
@@ -33,5 +39,21 @@ assert.deepEqual(repositoryInput, { type: 'customer', search: '测试', offset: 
 
 const forbidden = await service.list({}, { ...superAdmin, role: '销售顾问', permissions: [] });
 assert.equal(forbidden.code, 403);
+
+const restored = await service.restore('order', 'order-deleted', superAdmin);
+assert.equal(restored.code, 0);
+assert.deepEqual(repositoryInput, { action: 'restore', id: 'order-deleted', actorName: '管理员' });
+
+const purged = await service.purge('order', 'order-deleted', '确认清理测试订单', superAdmin);
+assert.equal(purged.code, 0);
+assert.deepEqual(repositoryInput, {
+  action: 'purge', id: 'order-deleted', reason: '确认清理测试订单', actorName: '管理员',
+});
+
+const missingReason = await service.purge('order', 'order-deleted', '  ', superAdmin);
+assert.equal(missingReason.code, 400);
+
+const unsupportedCustomerPurge = await service.purge('customer', 'customer-deleted', '清理', superAdmin);
+assert.equal(unsupportedCustomerPurge.code, 409);
 
 console.log('business recycle bin service tests passed');

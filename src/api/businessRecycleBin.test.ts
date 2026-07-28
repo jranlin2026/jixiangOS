@@ -227,5 +227,31 @@ assert.equal(
   (JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]') as Lead[]).some((item) => item.id === 'lead-backend-purge'),
   true,
 );
+
+const originalFetch = globalThis.fetch;
+let backendCommand: { url: string; method: string; body: string } | null = null;
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  backendCommand = {
+    url: String(input),
+    method: String(init?.method || 'GET'),
+    body: String(init?.body || ''),
+  };
+  return new Response(JSON.stringify({ code: 0, data: true, message: 'success' }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}) as typeof fetch;
+const backendOrderPurge = await businessRecycleBinApi.permanentlyDeleteRecycleBinItem(
+  'order',
+  'order-backend-purge',
+  '确认清理',
+);
+assert.equal(backendOrderPurge.code, 0);
+assert.deepEqual(backendCommand, {
+  url: '/api/business-recycle-bin/order/order-backend-purge',
+  method: 'DELETE',
+  body: JSON.stringify({ reason: '确认清理' }),
+});
+globalThis.fetch = originalFetch;
 if (previousBackendFlag === undefined) delete process.env.VITE_USE_BACKEND_API;
 else process.env.VITE_USE_BACKEND_API = previousBackendFlag;

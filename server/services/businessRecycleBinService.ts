@@ -11,7 +11,10 @@ import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Customer } from '../../src/types/customer';
 import type { Lead } from '../../src/types/lead';
 import type { Order } from '../../src/types/order';
-import type { BusinessRecycleBinRepository } from './businessRecycleBinRepository';
+import {
+  BusinessRecycleBinCommandError,
+  type BusinessRecycleBinRepository,
+} from './businessRecycleBinRepository';
 
 type RecyclableRecord = Customer | Lead | Order;
 
@@ -102,6 +105,43 @@ export function createBusinessRecycleBinService(repository: BusinessRecycleBinRe
         items,
         pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
       });
+    },
+    async restore(
+      type: BusinessRecycleBinType,
+      id: string,
+      currentUser?: AuthenticatedUser | null,
+    ): Promise<ApiResponse<boolean | null>> {
+      if (!isSuperAdmin(currentUser)) return failure<boolean>('仅超级管理员可以管理业务回收站', 403);
+      if (type !== 'order') return failure<boolean>('服务器模式暂不支持恢复线索或客户', 409);
+      const cleanId = String(id || '').trim();
+      if (!cleanId) return failure<boolean>('订单ID不能为空', 400);
+      try {
+        await repository.restoreOrder(cleanId, currentUser!.name);
+        return success(true);
+      } catch (error) {
+        if (error instanceof BusinessRecycleBinCommandError) return failure<boolean>(error.message, error.responseCode);
+        throw error;
+      }
+    },
+    async purge(
+      type: BusinessRecycleBinType,
+      id: string,
+      reason: string,
+      currentUser?: AuthenticatedUser | null,
+    ): Promise<ApiResponse<boolean | null>> {
+      if (!isSuperAdmin(currentUser)) return failure<boolean>('仅超级管理员可以管理业务回收站', 403);
+      if (type !== 'order') return failure<boolean>('服务器模式暂不支持永久删除线索或客户', 409);
+      const cleanId = String(id || '').trim();
+      const cleanReason = String(reason || '').trim();
+      if (!cleanId) return failure<boolean>('订单ID不能为空', 400);
+      if (!cleanReason) return failure<boolean>('永久删除必须填写原因', 400);
+      try {
+        await repository.purgeOrder(cleanId, cleanReason, currentUser!.name);
+        return success(true);
+      } catch (error) {
+        if (error instanceof BusinessRecycleBinCommandError) return failure<boolean>(error.message, error.responseCode);
+        throw error;
+      }
     },
   };
 }

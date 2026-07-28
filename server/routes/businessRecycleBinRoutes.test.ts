@@ -20,6 +20,14 @@ const service = {
       message: 'success',
     };
   },
+  restore: async (type: string, id: string, currentUser: any) => {
+    receivedUserId = `${type}:${id}:${currentUser?.id || ''}`;
+    return { code: 0, data: true, message: 'success' };
+  },
+  purge: async (type: string, id: string, reason: string, currentUser: any) => {
+    receivedUserId = `${type}:${id}:${reason}:${currentUser?.id || ''}`;
+    return { code: 0, data: true, message: 'success' };
+  },
 };
 const auth = createRequireAuth({
   getCurrentUser: async (token) => ({
@@ -27,16 +35,45 @@ const auth = createRequireAuth({
     data: token ? {
       id: token, name: token, account: token, role: token === 'admin' ? '超级管理员' : '销售顾问',
       permissions: token === 'admin'
-        ? [{ module: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, actions: ['read'] }]
+        ? [{ module: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, actions: ['read', 'write', 'delete'] }]
         : [],
       isActive: true,
     } as any : null,
     message: 'success',
   }),
 }, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'read');
+const writeAuth = createRequireAuth({
+  getCurrentUser: async (token) => ({
+    code: 0,
+    data: token ? {
+      id: token, name: token, account: token, role: token === 'admin' ? '超级管理员' : '销售顾问',
+      permissions: token === 'admin'
+        ? [{ module: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, actions: ['write'] }]
+        : [],
+      isActive: true,
+    } as any : null,
+    message: 'success',
+  }),
+}, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'write');
+const deleteAuth = createRequireAuth({
+  getCurrentUser: async (token) => ({
+    code: 0,
+    data: token ? {
+      id: token, name: token, account: token, role: token === 'admin' ? '超级管理员' : '销售顾问',
+      permissions: token === 'admin'
+        ? [{ module: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, actions: ['delete'] }]
+        : [],
+      isActive: true,
+    } as any : null,
+    message: 'success',
+  }),
+}, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE, 'delete');
 
 const app = express();
-app.use('/api/business-recycle-bin', createBusinessRecycleBinRouter({ service, requireRead: auth }));
+app.use(express.json());
+app.use('/api/business-recycle-bin', createBusinessRecycleBinRouter({
+  service, requireRead: auth, requireWrite: writeAuth, requireDelete: deleteAuth,
+}));
 const listener = app.listen(0, '127.0.0.1');
 await once(listener, 'listening');
 const address = listener.address() as AddressInfo;
@@ -48,6 +85,20 @@ try {
   const allowed = await fetch(url, { headers: { authorization: 'Bearer admin' } });
   assert.equal(allowed.status, 200);
   assert.equal(receivedUserId, 'admin', '服务器当前会话用户必须传给回收站服务');
+
+  const restored = await fetch(`${url}/order/order-deleted/restore`, {
+    method: 'POST', headers: { authorization: 'Bearer admin' },
+  });
+  assert.equal(restored.status, 200);
+  assert.equal(receivedUserId, 'order:order-deleted:admin');
+
+  const purged = await fetch(`${url}/order/order-deleted`, {
+    method: 'DELETE',
+    headers: { authorization: 'Bearer admin', 'content-type': 'application/json' },
+    body: JSON.stringify({ reason: '确认清理' }),
+  });
+  assert.equal(purged.status, 200);
+  assert.equal(receivedUserId, 'order:order-deleted:确认清理:admin');
 } finally {
   await new Promise<void>((resolve, reject) => listener.close((error) => error ? reject(error) : resolve()));
 }

@@ -636,6 +636,8 @@ app.get('/api/customers/tag-facets', requireCustomerReadAccess, async (req: Auth
 app.use('/api/business-recycle-bin', createBusinessRecycleBinRouter({
   service: businessRecycleBinService,
   requireRead: requireDataMaintenanceReadAccess,
+  requireWrite: requireDataMaintenanceWriteAccess,
+  requireDelete: requireDataMaintenanceDeleteAccess,
 }));
 
 app.get('/api/customers/manageable-users', requireCustomerManageableUsersAccess, createCustomerManageableUsersHandler(customerManageableUsersService));
