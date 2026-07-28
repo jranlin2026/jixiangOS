@@ -32,7 +32,11 @@ function parseRecord(data: unknown): RecyclableRecord | null {
   }
 }
 
-function toItem(type: BusinessRecycleBinType, record: RecyclableRecord): BusinessRecycleBinItem {
+function toItem(
+  type: BusinessRecycleBinType,
+  record: RecyclableRecord,
+  linkedCustomerExists = false,
+): BusinessRecycleBinItem {
   if (type === 'lead') {
     const lead = record as Lead;
     return {
@@ -44,7 +48,8 @@ function toItem(type: BusinessRecycleBinType, record: RecyclableRecord): Busines
       deletedAt: lead.deletedAt || '',
       deletedBy: lead.deletedBy,
       deleteReason: lead.deleteReason,
-      relationStatus: lead.customerId ? '已关联客户' : '未关联客户',
+      relationStatus: linkedCustomerExists ? '已关联客户' : '未关联客户',
+      purgeBlockedReason: linkedCustomerExists ? '请从关联客户统一永久删除' : undefined,
     };
   }
   if (type === 'customer') {
@@ -95,11 +100,21 @@ export function createBusinessRecycleBinService(repository: BusinessRecycleBinRe
         limit: pageSize,
       });
       const items = rows
-        .map((row) => ({ type: row.type, record: parseRecord(row.data) }))
-        .filter((entry): entry is { type: BusinessRecycleBinType; record: RecyclableRecord } => (
+        .map((row) => ({
+          type: row.type,
+          record: parseRecord(row.data),
+          linkedCustomerExists: row.linkedCustomerExists,
+        }))
+        .filter((entry): entry is {
+          type: BusinessRecycleBinType;
+          record: RecyclableRecord;
+          linkedCustomerExists: boolean | undefined;
+        } => (
           Boolean(entry.record?.id && entry.record.deletedAt)
         ))
-        .map(({ type, record }) => toItem(type, record))
+        .map(({ type, record, linkedCustomerExists }) => (
+          toItem(type, record, linkedCustomerExists)
+        ))
         .sort((left, right) => new Date(right.deletedAt).getTime() - new Date(left.deletedAt).getTime());
       return success({
         items,
@@ -130,13 +145,13 @@ export function createBusinessRecycleBinService(repository: BusinessRecycleBinRe
       currentUser?: AuthenticatedUser | null,
     ): Promise<ApiResponse<boolean | null>> {
       if (!isSuperAdmin(currentUser)) return failure<boolean>('仅超级管理员可以管理业务回收站', 403);
-      if (type !== 'order') return failure<boolean>('服务器模式暂不支持永久删除线索或客户', 409);
+      if (!['lead', 'customer', 'order'].includes(type)) return failure<boolean>('不支持的业务记录类型', 400);
       const cleanId = String(id || '').trim();
       const cleanReason = String(reason || '').trim();
-      if (!cleanId) return failure<boolean>('订单ID不能为空', 400);
+      if (!cleanId) return failure<boolean>('业务记录ID不能为空', 400);
       if (!cleanReason) return failure<boolean>('永久删除必须填写原因', 400);
       try {
-        await repository.purgeOrder(cleanId, cleanReason, currentUser!.name);
+        await repository.purge(type, cleanId, cleanReason, currentUser!.name);
         return success(true);
       } catch (error) {
         if (error instanceof BusinessRecycleBinCommandError) return failure<boolean>(error.message, error.responseCode);

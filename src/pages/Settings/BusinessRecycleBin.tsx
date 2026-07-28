@@ -227,10 +227,17 @@ const BusinessRecycleBin: React.FC = () => {
                       <RestoreIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
-                  <Tooltip title="永久删除">
-                    <IconButton size="small" color="error" onClick={() => openPurgeDialog(item)}>
-                      <DeleteForeverIcon fontSize="small" />
-                    </IconButton>
+                  <Tooltip title={item.purgeBlockedReason || '永久删除'}>
+                    <span>
+                      <IconButton
+                        size="small"
+                        color="error"
+                        disabled={Boolean(item.purgeBlockedReason)}
+                        onClick={() => openPurgeDialog(item)}
+                      >
+                        <DeleteForeverIcon fontSize="small" />
+                      </IconButton>
+                    </span>
                   </Tooltip>
                 </TableCell>
               </TableRow>
@@ -273,7 +280,9 @@ const BusinessRecycleBin: React.FC = () => {
           {purgeTarget && (
             <Stack spacing={2}>
               <Alert severity="warning">
-                将永久删除 {getTypeLabel(purgeTarget.type)}「{purgeTarget.title}」。该操作不可恢复，请确认不是误删。
+                {purgeTarget.type === 'customer'
+                  ? `将永久删除客户「${purgeTarget.title}」，并同步永久删除所有仍关联且已在回收站的线索（如有）。该操作不可恢复，请确认不是误删。`
+                  : `将永久删除 ${getTypeLabel(purgeTarget.type)}「${purgeTarget.title}」。该操作不可恢复，请确认不是误删。`}
               </Alert>
               <TextField
                 label="永久删除原因"
@@ -301,4 +310,3 @@ const BusinessRecycleBin: React.FC = () => {
 };
 
 export default BusinessRecycleBin;
-

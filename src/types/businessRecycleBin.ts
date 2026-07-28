@@ -12,6 +12,7 @@ export interface BusinessRecycleBinItem {
   deletedBy?: string;
   deleteReason?: string;
   relationStatus: string;
+  purgeBlockedReason?: string;
 }
 
 export interface BusinessRecycleBinFilters {
@@ -20,4 +21,3 @@ export interface BusinessRecycleBinFilters {
   page?: number;
   pageSize?: number;
 }
-

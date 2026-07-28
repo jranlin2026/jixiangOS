@@ -171,6 +171,43 @@ assert.equal(recycleList.code, 0);
 assert.equal(recycleList.data.items.length, 1);
 assert.equal(recycleList.data.items[0].id, 'lead-a');
 assert.equal(recycleList.data.items[0].deleteReason, 'duplicate lead');
+assert.equal(recycleList.data.items[0].purgeBlockedReason, undefined);
+
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([
+  ...JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]'),
+  lead({
+    id: 'lead-linked-existing-customer',
+    name: 'Linked Lead',
+    phone: '13900000004',
+    customerId: 'cust-a',
+    deletedAt: now,
+    deletedBy: 'Admin',
+    deleteReason: 'linked test',
+  }),
+  lead({
+    id: 'lead-orphan-customer-id',
+    name: 'Orphan Lead',
+    phone: '13900000005',
+    customerId: 'customer-no-longer-exists',
+    deletedAt: now,
+    deletedBy: 'Admin',
+    deleteReason: 'orphan test',
+  }),
+]));
+recycleList = await businessRecycleBinApi.fetchRecycleBinItems({ type: 'lead', pageSize: 50 });
+assert.equal(
+  recycleList.data.items.find((item) => item.id === 'lead-linked-existing-customer')?.purgeBlockedReason,
+  '请从关联客户统一永久删除',
+);
+assert.equal(
+  recycleList.data.items.find((item) => item.id === 'lead-orphan-customer-id')?.purgeBlockedReason,
+  undefined,
+);
+storage.setItem(
+  STORAGE_KEYS.LEADS,
+  JSON.stringify((JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]') as Lead[])
+    .filter((item) => !['lead-linked-existing-customer', 'lead-orphan-customer-id'].includes(item.id))),
+);
 
 const restoreLeadRes = await businessRecycleBinApi.restoreRecycleBinItem('lead', 'lead-a');
 assert.equal(restoreLeadRes.code, 0);
@@ -182,6 +219,45 @@ assert.equal(purgeLeadRes.code, 0);
 recycleList = await businessRecycleBinApi.fetchRecycleBinItems({ type: 'lead', pageSize: 50 });
 assert.equal(recycleList.data.items.length, 0);
 assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]') as Lead[]).some((item) => item.id === 'lead-a'), false);
+
+const localCascadeId = 'delete-cascade-local';
+storage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify([
+  customer({
+    id: 'cust-local-purge',
+    name: 'Local Purge Customer',
+    phone: '13900000011',
+    deletedAt: now,
+    deletedBy: 'Admin',
+    deleteReason: 'local cascade purge',
+    deletionCascadeId: localCascadeId,
+    cascadeDeletedLeadIds: ['lead-local-purge'],
+  }),
+]));
+storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([
+  lead({
+    id: 'lead-local-purge',
+    name: 'Local Purge Lead',
+    phone: '13900000012',
+    customerId: 'cust-local-purge',
+    deletedAt: now,
+    deletedBy: 'Admin',
+    deleteReason: 'local cascade purge',
+    deletionCascadeId: localCascadeId,
+  }),
+]));
+const localCustomerPurge = await businessRecycleBinApi.permanentlyDeleteRecycleBinItem(
+  'customer',
+  'cust-local-purge',
+  'confirmed local cleanup',
+);
+assert.equal(localCustomerPurge.code, 0);
+assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]') as Customer[]).length, 0);
+assert.equal(
+  (JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]') as Lead[]).length,
+  0,
+  '本地模式永久删除客户也必须同步清理已删除的稳定关联线索',
+);
+seed();
 
 const deleteCustomerWithOrder = await customerApi.deleteCustomer('cust-a', 'has order');
 assert.notEqual(deleteCustomerWithOrder.code, 0);
@@ -216,18 +292,6 @@ storage.setItem(STORAGE_KEYS.LEADS, JSON.stringify([
     deleteReason: 'backend purge guard',
   }),
 ]));
-const blockedBackendPurge = await businessRecycleBinApi.permanentlyDeleteRecycleBinItem(
-  'lead',
-  'lead-backend-purge',
-  'confirmed cleanup',
-);
-assert.notEqual(blockedBackendPurge.code, 0);
-assert.match(blockedBackendPurge.message || '', /服务器|暂不支持/);
-assert.equal(
-  (JSON.parse(storage.getItem(STORAGE_KEYS.LEADS) || '[]') as Lead[]).some((item) => item.id === 'lead-backend-purge'),
-  true,
-);
-
 const originalFetch = globalThis.fetch;
 let backendCommand: { url: string; method: string; body: string } | null = null;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -241,6 +305,28 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     headers: { 'content-type': 'application/json' },
   });
 }) as typeof fetch;
+const backendLeadPurge = await businessRecycleBinApi.permanentlyDeleteRecycleBinItem(
+  'lead',
+  'lead-backend-purge',
+  'confirmed cleanup',
+);
+assert.equal(backendLeadPurge.code, 0);
+assert.deepEqual(backendCommand, {
+  url: '/api/business-recycle-bin/lead/lead-backend-purge',
+  method: 'DELETE',
+  body: JSON.stringify({ reason: 'confirmed cleanup' }),
+});
+const backendCustomerPurge = await businessRecycleBinApi.permanentlyDeleteRecycleBinItem(
+  'customer',
+  'customer-backend-purge',
+  '确认清理客户及关联线索',
+);
+assert.equal(backendCustomerPurge.code, 0);
+assert.deepEqual(backendCommand, {
+  url: '/api/business-recycle-bin/customer/customer-backend-purge',
+  method: 'DELETE',
+  body: JSON.stringify({ reason: '确认清理客户及关联线索' }),
+});
 const backendOrderPurge = await businessRecycleBinApi.permanentlyDeleteRecycleBinItem(
   'order',
   'order-backend-purge',

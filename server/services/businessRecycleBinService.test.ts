@@ -19,8 +19,8 @@ const repository = {
   restoreOrder: async (id: string, actorName: string) => {
     repositoryInput = { action: 'restore', id, actorName };
   },
-  purgeOrder: async (id: string, reason: string, actorName: string) => {
-    repositoryInput = { action: 'purge', id, reason, actorName };
+  purge: async (type: string, id: string, reason: string, actorName: string) => {
+    repositoryInput = { action: 'purge', type, id, reason, actorName };
   },
 };
 const superAdmin = {
@@ -47,13 +47,54 @@ assert.deepEqual(repositoryInput, { action: 'restore', id: 'order-deleted', acto
 const purged = await service.purge('order', 'order-deleted', '确认清理测试订单', superAdmin);
 assert.equal(purged.code, 0);
 assert.deepEqual(repositoryInput, {
-  action: 'purge', id: 'order-deleted', reason: '确认清理测试订单', actorName: '管理员',
+  action: 'purge', type: 'order', id: 'order-deleted', reason: '确认清理测试订单', actorName: '管理员',
 });
 
 const missingReason = await service.purge('order', 'order-deleted', '  ', superAdmin);
 assert.equal(missingReason.code, 400);
 
-const unsupportedCustomerPurge = await service.purge('customer', 'customer-deleted', '清理', superAdmin);
-assert.equal(unsupportedCustomerPurge.code, 409);
+const customerPurge = await service.purge('customer', 'customer-deleted', '清理测试客户', superAdmin);
+assert.equal(customerPurge.code, 0);
+assert.deepEqual(repositoryInput, {
+  action: 'purge', type: 'customer', id: 'customer-deleted', reason: '清理测试客户', actorName: '管理员',
+});
+
+const unsupportedType = await service.purge('unknown' as any, 'record-1', '清理', superAdmin);
+assert.equal(unsupportedType.code, 400);
+
+const leadRelationService = createBusinessRecycleBinService({
+  ...repository,
+  listDeleted: async () => ({
+    total: 2,
+    rows: [
+      {
+        type: 'lead',
+        data: {
+          id: 'lead-linked', name: '仍有关联客户', customerId: 'customer-existing',
+          deletedAt, deletedBy: '管理员', deleteReason: '测试',
+        },
+        linkedCustomerExists: true,
+      },
+      {
+        type: 'lead',
+        data: {
+          id: 'lead-orphan', name: '客户已不存在', customerId: 'customer-missing',
+          deletedAt, deletedBy: '管理员', deleteReason: '测试',
+        },
+        linkedCustomerExists: false,
+      },
+    ],
+  }),
+} as any);
+const leadRelationResult = await leadRelationService.list({ type: 'lead' }, superAdmin);
+assert.equal(
+  leadRelationResult.data?.items.find((item) => item.id === 'lead-linked')?.purgeBlockedReason,
+  '请从关联客户统一永久删除',
+);
+assert.equal(
+  leadRelationResult.data?.items.find((item) => item.id === 'lead-orphan')?.purgeBlockedReason,
+  undefined,
+  '只保留历史 customerId、但客户已不存在的孤儿线索必须允许永久删除',
+);
 
 console.log('business recycle bin service tests passed');

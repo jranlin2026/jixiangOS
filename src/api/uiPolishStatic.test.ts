@@ -56,6 +56,7 @@ const sidebarSource = readFileSync(join(projectRoot, 'src/layouts/Sidebar.tsx'),
 const deliverySource = readFileSync(join(projectRoot, 'src/pages/Delivery/index.tsx'), 'utf8');
 const rolePermissionSource = readFileSync(join(projectRoot, 'src/pages/Settings/RolePermission.tsx'), 'utf8');
 const settingsSource = readFileSync(join(projectRoot, 'src/pages/Settings/index.tsx'), 'utf8');
+const businessRecycleBinSource = readFileSync(join(projectRoot, 'src/pages/Settings/BusinessRecycleBin.tsx'), 'utf8');
 const commissionSource = readFileSync(join(projectRoot, 'src/pages/Commission/index.tsx'), 'utf8');
 const commissionRuleConfigSource = readFileSync(join(projectRoot, 'src/pages/Commission/CommissionRuleConfig.tsx'), 'utf8');
 const financeSource = readFileSync(join(projectRoot, 'src/pages/Finance/index.tsx'), 'utf8');
@@ -69,6 +70,16 @@ const settlementOperationTimelineSource = readFileSync(join(projectRoot, 'src/sh
 const serviceTicketSource = readFileSync(join(projectRoot, 'src/pages/RefundCenter/ServiceTicketTab.tsx'), 'utf8');
 const employeeDepartmentSource = readFileSync(join(projectRoot, 'src/pages/Settings/EmployeeDepartmentManagement.tsx'), 'utf8');
 
+assert.match(
+  businessRecycleBinSource,
+  /title=\{item\.purgeBlockedReason \|\| '永久删除'\}[\s\S]*disabled=\{Boolean\(item\.purgeBlockedReason\)\}/,
+  '已关联客户的线索必须引导管理员从客户记录统一永久删除',
+);
+assert.match(
+  businessRecycleBinSource,
+  /同步永久删除所有仍关联且已在回收站的线索/,
+  '永久删除客户前必须明确提示关联线索会被同步清理',
+);
 assert.match(orderDetailSource, /label="订单创建人"/, '订单详情应展示订单创建人');
 assert.match(ordersPageSource, /id: 'createdByName', label: '订单创建人'/, '订单列表视图设置应包含订单创建人');
 assert.match(commissionSource, /id: 'createdByName', label: '订单创建人'/, '订单分账视图设置应包含订单创建人');

@@ -479,6 +479,16 @@ async function reconcileIdentityAfterCustomerLinkEnd(
   });
 }
 
+export async function reconcileContactIdentitiesAfterEntityPurge(
+  tx: ContactIdentityStore,
+  identityIds: string[],
+): Promise<void> {
+  for (const identityId of [...new Set(identityIds)].sort()) {
+    await lockIdentity(tx, identityId);
+    await reconcileIdentityAfterCustomerLinkEnd(tx, identityId);
+  }
+}
+
 async function endObsoleteEntityLinks(
   tx: ContactIdentityStore,
   entityType: 'customer' | 'lead',

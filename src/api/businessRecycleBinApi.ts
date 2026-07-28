@@ -54,6 +54,11 @@ function countRelatedOrders(customer: Customer): number {
 function toRecycleItem(type: BusinessRecycleBinType, record: RecyclableRecord): BusinessRecycleBinItem {
   if (type === 'lead') {
     const lead = record as Lead;
+    const linkedCustomerExists = Boolean(
+      lead.customerId
+      && (getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [])
+        .some((customer) => customer.id === lead.customerId),
+    );
     return {
       id: lead.id,
       type,
@@ -63,7 +68,8 @@ function toRecycleItem(type: BusinessRecycleBinType, record: RecyclableRecord): 
       deletedAt: lead.deletedAt || '',
       deletedBy: lead.deletedBy,
       deleteReason: lead.deleteReason,
-      relationStatus: lead.customerId ? '已关联客户' : '未关联客户',
+      relationStatus: linkedCustomerExists ? '已关联客户' : '未关联客户',
+      purgeBlockedReason: linkedCustomerExists ? '请从关联客户统一永久删除' : undefined,
     };
   }
 
@@ -201,9 +207,6 @@ async function permanentlyDeleteRecycleBinItem(type: BusinessRecycleBinType, id:
   if (!normalizedReason) return createErrorResponse('永久删除必须填写原因');
 
   if (shouldUseBackendApi()) {
-    if (type === 'lead' || type === 'customer') {
-      return createErrorResponse('服务器模式暂不支持永久删除线索或客户，请先保留在业务回收站');
-    }
     return backendRequest<boolean>(`/business-recycle-bin/${type}/${encodeURIComponent(id)}`, {
       method: 'DELETE',
       body: JSON.stringify({ reason: normalizedReason }),
@@ -214,6 +217,25 @@ async function permanentlyDeleteRecycleBinItem(type: BusinessRecycleBinType, id:
   const target = rows.find((item) => item.id === id);
   if (!target || !isDeleted(target)) return createErrorResponse(`${getTypeLabel(type)}不在业务回收站中`);
 
+  if (type === 'customer') {
+    const leads = getStorageData<Lead[]>(STORAGE_KEYS.LEADS) || [];
+    const linkedLeads = leads.filter((lead) => lead.customerId === id);
+    if (linkedLeads.some((lead) => !isDeleted(lead))) {
+      return createErrorResponse('客户仍有关联的有效线索，不能永久删除');
+    }
+    setStorageData(
+      STORAGE_KEYS.LEADS,
+      leads.filter((lead) => lead.customerId !== id),
+    );
+  }
+  if (type === 'lead') {
+    const lead = target as Lead;
+    const linkedCustomerId = String(lead.customerId || '').trim();
+    const customers = getStorageData<Customer[]>(STORAGE_KEYS.CUSTOMERS) || [];
+    if (linkedCustomerId && customers.some((customer) => customer.id === linkedCustomerId)) {
+      return createErrorResponse('该线索仍关联客户，请从关联客户统一永久删除');
+    }
+  }
   saveRows(type, rows.filter((item) => item.id !== id));
   return createSuccessResponse(true);
 }

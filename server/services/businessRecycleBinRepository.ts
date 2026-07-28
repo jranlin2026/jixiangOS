@@ -3,12 +3,22 @@ import { randomUUID } from 'node:crypto';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import type { BusinessRecycleBinType } from '../../src/types/businessRecycleBin';
 import type { Customer } from '../../src/types/customer';
+import type { Lead } from '../../src/types/lead';
 import type { Order } from '../../src/types/order';
+import {
+  lockContactIdentityMutationGate,
+  reconcileContactIdentitiesAfterEntityPurge,
+} from './contactIdentityService';
+import {
+  lockCustomerAssociationScope,
+} from './customerAssociationRegistry';
+import { assertCustomerCanBeSoftDeleted } from './customerDeletePolicy';
 import { createCustomerBusinessRecordRepository } from './customerBusinessRecordRepository';
 
 export type BusinessRecycleBinDeletedRow = {
   type: BusinessRecycleBinType;
   data: unknown;
+  linkedCustomerExists?: boolean;
 };
 
 export type BusinessRecycleBinRepository = {
@@ -19,7 +29,7 @@ export type BusinessRecycleBinRepository = {
     limit: number;
   }): Promise<{ rows: BusinessRecycleBinDeletedRow[]; total: number }>;
   restoreOrder(id: string, actorName: string): Promise<void>;
-  purgeOrder(id: string, reason: string, actorName: string): Promise<void>;
+  purge(type: BusinessRecycleBinType, id: string, reason: string, actorName: string): Promise<void>;
 };
 
 type RecycleBinPrisma = Pick<PrismaClient, '$queryRaw' | '$transaction'>;
@@ -59,6 +69,215 @@ async function lockDeletedOrder(transaction: Prisma.TransactionClient, id: strin
   if (order.id !== id) throw new BusinessRecycleBinCommandError(409, '订单标识与数据库记录不一致');
   if (!order.deletedAt) throw new BusinessRecycleBinCommandError(409, '订单不在业务回收站中');
   return order;
+}
+
+async function lockDeletedCustomer(transaction: Prisma.TransactionClient, id: string): Promise<Customer> {
+  const rows = await transaction.$queryRaw<Array<{ data: unknown }>>(Prisma.sql`
+    SELECT data
+    FROM business_records
+    WHERE domain = ${STORAGE_KEYS.CUSTOMERS}
+      AND recordId = ${id}
+    LIMIT 1
+    FOR UPDATE
+  `);
+  if (!rows[0]) throw new BusinessRecycleBinCommandError(404, '客户不存在');
+  const customer = parseObject<Customer>(rows[0].data, '客户');
+  if (customer.id !== id) throw new BusinessRecycleBinCommandError(409, '客户标识与数据库记录不一致');
+  if (!customer.deletedAt) throw new BusinessRecycleBinCommandError(409, '客户不在业务回收站中');
+  return customer;
+}
+
+async function lockDeletedLead(
+  transaction: Prisma.TransactionClient,
+  id: string,
+): Promise<{ rowId: string; lead: Lead }> {
+  const rows = await transaction.$queryRaw<Array<{ id: string; data: unknown }>>(Prisma.sql`
+    SELECT id, data
+    FROM lead_records
+    WHERE id = ${id}
+    LIMIT 1
+    FOR UPDATE
+  `);
+  if (!rows[0]) throw new BusinessRecycleBinCommandError(404, '线索不存在');
+  const lead = parseObject<Lead>(rows[0].data, '线索');
+  if (lead.id !== id) throw new BusinessRecycleBinCommandError(409, '线索标识与数据库记录不一致');
+  if (!lead.deletedAt) throw new BusinessRecycleBinCommandError(409, '线索不在业务回收站中');
+  return { rowId: rows[0].id, lead };
+}
+
+async function lockedLinkedLeadRows(
+  transaction: Prisma.TransactionClient,
+  customerId: string,
+): Promise<Array<{ id: string; data: unknown }>> {
+  return transaction.$queryRaw<Array<{ id: string; data: unknown }>>(Prisma.sql`
+    SELECT id, data
+    FROM lead_records
+    WHERE JSON_UNQUOTE(JSON_EXTRACT(data, '$.customerId')) = ${customerId}
+    ORDER BY id
+    FOR UPDATE
+  `);
+}
+
+async function purgeContactIdentityArtifacts(
+  transaction: Prisma.TransactionClient,
+  customerIds: string[],
+  leadIds: string[],
+): Promise<{ removedLinkCount: number; removedOrphanIdentityCount: number }> {
+  const subjects = [
+    ...customerIds.map((entityId) => ({ entityType: 'customer', entityId })),
+    ...leadIds.map((entityId) => ({ entityType: 'lead', entityId })),
+  ];
+  if (!subjects.length) return { removedLinkCount: 0, removedOrphanIdentityCount: 0 };
+  const links = await transaction.contactIdentityLink.findMany({
+    where: { OR: subjects },
+    select: { identityId: true },
+  });
+  const identityIds = [...new Set(links.map((link) => link.identityId))];
+  const removedLinks = await transaction.contactIdentityLink.deleteMany({
+    where: { OR: subjects },
+  });
+  if (!identityIds.length) {
+    return { removedLinkCount: removedLinks.count, removedOrphanIdentityCount: 0 };
+  }
+  const orphanRows = await transaction.contactIdentity.findMany({
+    where: { id: { in: identityIds }, links: { none: {} } },
+    select: { id: true },
+  });
+  const orphanIds = orphanRows.map((row) => row.id);
+  const retainedIdentityIds = identityIds.filter((identityId) => !orphanIds.includes(identityId));
+  await reconcileContactIdentitiesAfterEntityPurge(transaction, retainedIdentityIds);
+  if (!orphanIds.length) {
+    return { removedLinkCount: removedLinks.count, removedOrphanIdentityCount: 0 };
+  }
+  await transaction.customerDuplicateGroup.deleteMany({
+    where: { contactIdentityId: { in: orphanIds } },
+  });
+  const removedIdentities = await transaction.contactIdentity.deleteMany({
+    where: { id: { in: orphanIds }, links: { none: {} } },
+  });
+  return {
+    removedLinkCount: removedLinks.count,
+    removedOrphanIdentityCount: removedIdentities.count,
+  };
+}
+
+async function purgeDeletedCustomer(
+  transaction: Prisma.TransactionClient,
+  id: string,
+  reason: string,
+  actorName: string,
+): Promise<void> {
+  await lockContactIdentityMutationGate(transaction);
+  await lockCustomerAssociationScope(transaction, [id]);
+  const customer = await lockDeletedCustomer(transaction, id);
+  try {
+    await assertCustomerCanBeSoftDeleted(transaction, id, { cascadeLinkedLeads: true });
+  } catch (error) {
+    throw new BusinessRecycleBinCommandError(
+      409,
+      error instanceof Error ? error.message : '客户存在关联业务，不能永久删除',
+    );
+  }
+  const linkedRows = await lockedLinkedLeadRows(transaction, id);
+  const linkedLeads = linkedRows.map((row) => ({
+    rowId: row.id,
+    lead: parseObject<Lead>(row.data, '线索'),
+  }));
+  if (linkedLeads.some(({ lead }) => !lead.deletedAt)) {
+    throw new BusinessRecycleBinCommandError(409, '客户仍有关联的有效线索，不能永久删除');
+  }
+
+  const identityCleanup = await purgeContactIdentityArtifacts(
+    transaction,
+    [id],
+    linkedLeads.map(({ rowId }) => rowId),
+  );
+  const removedCustomerAudits = await transaction.customerAuditEvent.deleteMany({
+    where: { customerId: id },
+  });
+  const purgedAt = new Date().toISOString();
+  const auditId = `recycle-purge-${randomUUID()}`;
+  await transaction.businessRecord.create({
+    data: {
+      id: `business-recycle-bin-audit:${auditId}`,
+      domain: STORAGE_KEYS.BUSINESS_RECYCLE_BIN_AUDITS,
+      recordId: auditId,
+      title: id,
+      status: '已永久删除',
+      owner: actorName,
+      eventAt: new Date(purgedAt),
+      data: jsonValue({
+        id: auditId,
+        targetType: 'customer',
+        targetId: id,
+        reason,
+        operator: actorName,
+        removedLinkedLeadCount: linkedLeads.length,
+        removedCustomerAuditEventCount: removedCustomerAudits.count,
+        removedContactIdentityLinkCount: identityCleanup.removedLinkCount,
+        removedOrphanIdentityCount: identityCleanup.removedOrphanIdentityCount,
+        purgedAt,
+      }),
+    },
+  });
+  if (linkedLeads.length) {
+    await transaction.leadRecord.deleteMany({
+      where: { id: { in: linkedLeads.map(({ rowId }) => rowId) } },
+    });
+  }
+  await transaction.businessRecord.delete({
+    where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: id } },
+  });
+}
+
+async function purgeDeletedLead(
+  transaction: Prisma.TransactionClient,
+  id: string,
+  reason: string,
+  actorName: string,
+): Promise<void> {
+  await lockContactIdentityMutationGate(transaction);
+  const { rowId, lead } = await lockDeletedLead(transaction, id);
+  const customerId = String(lead.customerId || '').trim();
+  if (customerId) {
+    await lockCustomerAssociationScope(transaction, [customerId], { allowMerged: true });
+    const customerRow = await transaction.businessRecord.findUnique({
+      where: { domain_recordId: { domain: STORAGE_KEYS.CUSTOMERS, recordId: customerId } },
+      select: { recordId: true },
+    });
+    if (customerRow) {
+      throw new BusinessRecycleBinCommandError(
+        409,
+        '该线索仍关联客户，请从关联客户统一永久删除',
+      );
+    }
+  }
+
+  const identityCleanup = await purgeContactIdentityArtifacts(transaction, [], [rowId]);
+  const purgedAt = new Date().toISOString();
+  const auditId = `recycle-purge-${randomUUID()}`;
+  await transaction.businessRecord.create({
+    data: {
+      id: `business-recycle-bin-audit:${auditId}`,
+      domain: STORAGE_KEYS.BUSINESS_RECYCLE_BIN_AUDITS,
+      recordId: auditId,
+      title: id,
+      status: '已永久删除',
+      owner: actorName,
+      eventAt: new Date(purgedAt),
+      data: jsonValue({
+        id: auditId,
+        targetType: 'lead',
+        targetId: id,
+        reason,
+        operator: actorName,
+        removedContactIdentityLinkCount: identityCleanup.removedLinkCount,
+        removedOrphanIdentityCount: identityCleanup.removedOrphanIdentityCount,
+        purgedAt,
+      }),
+    },
+  });
+  await transaction.leadRecord.delete({ where: { id: rowId } });
 }
 
 async function recalculateCustomerProjection(
@@ -136,8 +355,24 @@ export function createPrismaBusinessRecycleBinRepository(prisma: RecycleBinPrism
         prisma.$queryRaw<Array<{ total: bigint | number }>>(Prisma.sql`
           SELECT COUNT(*) AS total FROM ${deletedRecordsSql()} ${where}
         `),
-        prisma.$queryRaw<Array<{ recordType: BusinessRecycleBinType; data: unknown }>>(Prisma.sql`
-          SELECT recordType, data
+        prisma.$queryRaw<Array<{
+          recordType: BusinessRecycleBinType;
+          data: unknown;
+          linkedCustomerExists: bigint | number;
+        }>>(Prisma.sql`
+          SELECT recordType, data,
+            CASE
+              WHEN recordType = 'lead'
+                AND EXISTS (
+                  SELECT 1
+                  FROM business_records AS linked_customer
+                  WHERE linked_customer.domain = ${STORAGE_KEYS.CUSTOMERS}
+                    AND linked_customer.recordId =
+                      JSON_UNQUOTE(JSON_EXTRACT(deleted_records.data, '$.customerId'))
+                )
+              THEN 1
+              ELSE 0
+            END AS linkedCustomerExists
           FROM ${deletedRecordsSql()}
           ${where}
           ORDER BY JSON_UNQUOTE(JSON_EXTRACT(data, '$.deletedAt')) DESC,
@@ -148,7 +383,11 @@ export function createPrismaBusinessRecycleBinRepository(prisma: RecycleBinPrism
       ]);
       return {
         total: Number(countRows[0]?.total || 0),
-        rows: rows.map((row) => ({ type: row.recordType, data: row.data })),
+        rows: rows.map((row) => ({
+          type: row.recordType,
+          data: row.data,
+          linkedCustomerExists: Number(row.linkedCustomerExists || 0) === 1,
+        })),
       };
     },
     async restoreOrder(id, actorName) {
@@ -184,7 +423,19 @@ export function createPrismaBusinessRecycleBinRepository(prisma: RecycleBinPrism
         await recalculateCustomerProjection(transaction, next.customerId, changedAt);
       });
     },
-    async purgeOrder(id, _reason, _actorName) {
+    async purge(type, id, _reason, _actorName) {
+      if (type === 'customer') {
+        await prisma.$transaction((transaction) => (
+          purgeDeletedCustomer(transaction, id, _reason, _actorName)
+        ));
+        return;
+      }
+      if (type === 'lead') {
+        await prisma.$transaction((transaction) => (
+          purgeDeletedLead(transaction, id, _reason, _actorName)
+        ));
+        return;
+      }
       await prisma.$transaction(async (transaction) => {
         const order = await lockDeletedOrder(transaction, id);
         const [dependencies, operationLogs] = await Promise.all([
