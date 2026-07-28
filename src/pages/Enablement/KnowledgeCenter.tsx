@@ -20,7 +20,7 @@ import {
   Typography,
   useMediaQuery,
 } from '@mui/material';
-import { useTheme } from '@mui/material/styles';
+import type { Theme } from '@mui/material/styles';
 import { enablementApi } from '../../api';
 import { moduleTokens } from '../../shared/components/ModuleShell';
 import useEnablementStore from '../../store/useEnablementStore';
@@ -35,8 +35,7 @@ const formatTime = (value?: string) => {
 };
 
 const KnowledgeCenter: React.FC = () => {
-  const theme = useTheme();
-  const mobileDetail = useMediaQuery(theme.breakpoints.down('sm'));
+  const mobileDetail = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
   const [query, setQuery] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);

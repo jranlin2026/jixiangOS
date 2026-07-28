@@ -15,7 +15,7 @@ import {
   Typography,
   useMediaQuery,
 } from '@mui/material';
-import { useTheme } from '@mui/material/styles';
+import type { Theme } from '@mui/material/styles';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import PublishedWithChangesOutlinedIcon from '@mui/icons-material/PublishedWithChangesOutlined';
 import HistoryIcon from '@mui/icons-material/History';
@@ -80,8 +80,7 @@ const OrderDetail: React.FC<OrderDetailProps> = ({
   canCorrect = false,
   canViewHistory = false,
 }) => {
-  const theme = useTheme();
-  const mobileFullScreen = useMediaQuery(theme.breakpoints.down('sm'));
+  const mobileFullScreen = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
   const operationSectionRef = useRef<HTMLDivElement>(null);
   const productItems = order.items?.length ? order.items : [{
     id: 'legacy-primary',

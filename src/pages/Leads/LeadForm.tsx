@@ -11,7 +11,7 @@ import {
   Typography,
   useMediaQuery,
 } from '@mui/material';
-import { useTheme } from '@mui/material/styles';
+import type { Theme } from '@mui/material/styles';
 import useLeadStore from '../../store/useLeadStore';
 import type { Lead } from '../../types/lead';
 import type { LeadSourceConfig, User } from '../../types/settings';
@@ -38,8 +38,7 @@ interface LeadFormProps {
 const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) => {
   const { create, update } = useLeadStore();
   const currentUser = useAuthStore((state) => state.currentUser);
-  const theme = useTheme();
-  const mobileFullScreen = useMediaQuery(theme.breakpoints.down('sm'));
+  const mobileFullScreen = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
   const isEdit = Boolean(lead);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);

@@ -24,7 +24,7 @@ import {
   Typography,
   useMediaQuery,
 } from '@mui/material';
-import { useTheme } from '@mui/material/styles';
+import type { Theme } from '@mui/material/styles';
 import TablePagination from '../../shared/components/TablePagination';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditIcon from '@mui/icons-material/Edit';
@@ -303,8 +303,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
   exportSignal = 0,
 }) => {
   const navigate = useNavigate();
-  const theme = useTheme();
-  const mobileFullScreen = useMediaQuery(theme.breakpoints.down('sm'));
+  const mobileFullScreen = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
   const currentUser = useAuthStore((state) => state.currentUser);
   const canCreate = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, 'write');
   const canReviewAction = canReviewRecoveryOrders(currentUser);

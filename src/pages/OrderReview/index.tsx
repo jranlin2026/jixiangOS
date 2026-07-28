@@ -26,7 +26,7 @@ import {
   Typography,
   useMediaQuery,
 } from '@mui/material';
-import { useTheme } from '@mui/material/styles';
+import type { Theme } from '@mui/material/styles';
 import TablePagination from '../../shared/components/TablePagination';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ReplayIcon from '@mui/icons-material/Replay';
@@ -246,8 +246,7 @@ const OrderReview: React.FC<OrderReviewProps> = ({
   viewSettingsOpen = false,
   onViewSettingsClose,
 }) => {
-  const theme = useTheme();
-  const mobileFullScreen = useMediaQuery(theme.breakpoints.down('sm'));
+  const mobileFullScreen = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'));
   const [items, setItems] = useState<OrderApplication[]>([]);
   const [reviewQueueView, setReviewQueueView] = useState<ReviewQueueView>('pending');
   const [filters, setFilters] = useState<OrderApplicationFilters>({
