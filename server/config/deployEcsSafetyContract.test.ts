@@ -98,7 +98,7 @@ assert.match(remote, /Skipping legacy production data gates for an uninitialized
 assert.match(remote, /npm test/);
 assert.match(
   remote,
-  /NODE_ENV=test VITE_USE_BACKEND_API=false VITE_AI_API_BASE=\/api JIXIANG_DEFAULT_ADMIN_PASSWORD= JIXIANG_DEFAULT_USER_PASSWORD= npm test/,
+  /NODE_ENV=test VITE_USE_BACKEND_API=false VITE_AI_API_BASE=\/api JIXIANG_DEFAULT_ADMIN_PASSWORD= JIXIANG_DEFAULT_USER_PASSWORD= JIXIANG_SKIP_BUSINESS_RECYCLE_PURGE_INTEGRATION=YES npm test/,
   '发布测试必须隔离浏览器后端配置与生产默认密码，避免生产环境污染测试夹具',
 );
 assertBefore('customer:demo-fixture-cleanup', 'npm run customer:association-audit', '已知演示数据必须先备份清理再做关联审计');

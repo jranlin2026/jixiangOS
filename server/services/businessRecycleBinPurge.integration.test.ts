@@ -4,7 +4,9 @@ import { PrismaClient } from '@prisma/client';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { createPrismaBusinessRecycleBinRepository } from './businessRecycleBinRepository';
 
-if (!process.env.DATABASE_URL) {
+if (process.env.JIXIANG_SKIP_BUSINESS_RECYCLE_PURGE_INTEGRATION === 'YES') {
+  console.log('business recycle bin purge integration skipped by explicit production deployment gate');
+} else if (!process.env.DATABASE_URL) {
   console.log('business recycle bin purge integration skipped: DATABASE_URL is not set');
 } else {
   const databaseUrl = new URL(process.env.DATABASE_URL);
