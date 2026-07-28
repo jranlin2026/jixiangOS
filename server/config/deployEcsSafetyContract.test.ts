@@ -136,6 +136,7 @@ assert.match(remote, /ln -s[^\n]*PERSISTENT_DATA_DIR[^\n]*uploads-private[^\n]*N
 assertBefore('PERSISTENT_DATA_DIR', 'echo "Switching release...', '持久目录必须在版本切换前准备');
 
 assert.match(remote, /npm install[^\n]*--include=dev[^\n]*--prefer-offline/);
+assert.match(remote, /NPM_CONFIG_JOBS=1[^\n]*NODE_OPTIONS="--max-old-space-size=640"[^\n]*nice -n 15[^\n]*npm install/);
 assert.match(remote, /business-records:repair -- --apply --confirm-production/);
 assertBefore('pm2 stop jixiang-os-api', 'business-records:repair', 'legacy repair must run after writes are stopped');
 assertBefore('business-records:repair', 'echo "Switching release...', 'legacy repair must finish before release switch');

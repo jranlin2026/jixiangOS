@@ -310,7 +310,8 @@ if [ "$REUSE_NODE_MODULES" = "1" ] && [ -d "$APP_DIR/node_modules" ]; then
   echo "Reusing existing node_modules with hard links..."
   cp -al "$APP_DIR/node_modules" "$NEW_DIR/node_modules" 2>/dev/null || cp -a "$APP_DIR/node_modules" "$NEW_DIR/node_modules"
 fi
-npm install --include=dev --prefer-offline --no-audit --no-fund
+echo "Installing dependencies with constrained resources to keep the active release responsive..."
+NPM_CONFIG_JOBS=1 NODE_OPTIONS="--max-old-space-size=640" nice -n 15 npm install --include=dev --prefer-offline --no-audit --no-fund
 NODE_ENV="production" AI_PROXY_HOST="127.0.0.1" AI_PROXY_PORT="3001" npm run prod:check
 
 echo "Creating database backup before migration..."
