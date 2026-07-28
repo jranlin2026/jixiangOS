@@ -508,7 +508,14 @@ def main() -> int:
                 "VITE_USE_BACKEND_API": "true",
                 "VITE_AI_API_BASE": "/api",
             }
-            test_env = {**os.environ, "NODE_ENV": "test"}
+            test_env = {
+                **os.environ,
+                "NODE_ENV": "test",
+                "VITE_USE_BACKEND_API": "false",
+                "VITE_AI_API_BASE": "/api",
+                "JIXIANG_DEFAULT_ADMIN_PASSWORD": "",
+                "JIXIANG_DEFAULT_USER_PASSWORD": "",
+            }
             npm = "npm.cmd" if os.name == "nt" else "npm"
             run_local([npm, "test"], env=test_env)
             run_local([npm, "run", "build"], env=build_env)

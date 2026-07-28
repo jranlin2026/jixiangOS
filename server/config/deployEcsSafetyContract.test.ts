@@ -35,6 +35,8 @@ assert.match(remote, /proxy_send_timeout 180s/);
 assert.doesNotMatch(deploySource, /JIXIANG_REMOTE_NODE_ENV", "development"/);
 assert.match(deploySource, /VITE_USE_BACKEND_API[^\n]*true/);
 assert.match(deploySource, /VITE_AI_API_BASE[^\n]*\/api/);
+assert.match(deploySource, /test_env = \{[\s\S]*?"NODE_ENV": "test"[\s\S]*?"VITE_USE_BACKEND_API": "false"/);
+assert.match(deploySource, /test_env = \{[\s\S]*?"JIXIANG_DEFAULT_ADMIN_PASSWORD": ""[\s\S]*?"JIXIANG_DEFAULT_USER_PASSWORD": ""/);
 const archiveExcludes = deploySource.slice(deploySource.indexOf('EXCLUDE_DIRS'), deploySource.indexOf('EXCLUDE_FILES'));
 assert.match(archiveExcludes, /"uploads"/);
 assert.match(archiveExcludes, /"private_uploads"/);
