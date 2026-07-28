@@ -171,6 +171,7 @@ const auditBusinessRows: any[] = [
   { id: 'legacy-application', domain: STORAGE_KEYS.ORDER_APPLICATIONS, recordId: 'legacy-application', customerId: null, updatedAt: AUDIT_AT, data: { orderData: { customerName: '唯一客户' } } },
   { id: 'legacy-commission', domain: STORAGE_KEYS.COMMISSIONS, recordId: 'legacy-commission', customerId: null, updatedAt: AUDIT_AT, data: { customerName: '重名客户' } },
   { id: 'known-unknown-path', domain: STORAGE_KEYS.ORDERS, recordId: 'known-unknown-path', customerId: null, updatedAt: AUDIT_AT, data: { orderData: { customerId: 'c-1' } } },
+  { id: 'recycle-audit', domain: STORAGE_KEYS.BUSINESS_RECYCLE_BIN_AUDITS, recordId: 'recycle-audit', customerId: 'c-1', updatedAt: AUDIT_AT, data: { customerId: 'c-1', targetType: 'order' } },
 ];
 let financeValue: any = {
   incomes: [
@@ -257,6 +258,11 @@ assert.equal(dryAudit.repairRows.some((row) => (
   && row.pathKey === 'data.orderData.customerId'
   && row.reason === 'UNREGISTERED_CUSTOMER_ASSOCIATION_PATH'
 )), true);
+assert.equal(
+  dryAudit.repairRows.some((row) => row.storageDomain === STORAGE_KEYS.BUSINESS_RECYCLE_BIN_AUDITS),
+  false,
+  '历史关联审计不得把回收站操作留痕当成待修复业务关联',
+);
 assert.equal((auditBusinessRows[3].data as any).orderData.customerId, undefined);
 assert.equal(financeValue.incomes[0].customerId, undefined);
 assert.equal(auditTodoRows[0].customerId, null);

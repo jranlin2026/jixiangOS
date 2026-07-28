@@ -570,6 +570,7 @@ export async function auditHistoricalCustomerAssociationIds(
   };
 
   for (const row of businessRows) {
+    if (NON_BLOCKING_AUDIT_STORAGE_DOMAINS.has(String(row.domain || ''))) continue;
     const data = readObject(row.data);
     const recordId = String(row.recordId || row.id);
     const explicitStableReferences = [
@@ -680,6 +681,7 @@ export async function auditHistoricalCustomerAssociationIds(
   };
 
   for (const row of businessRows) {
+    if (NON_BLOCKING_AUDIT_STORAGE_DOMAINS.has(String(row.domain || ''))) continue;
     for (const registered of CUSTOMER_ASSOCIATION_DEFINITIONS) {
       if (registered.storageModel !== 'business_record' || registered.storageDomain !== row.domain) continue;
       if (!['customerId', 'data.customerId', 'data.orderData.customerId'].includes(registered.pathKey)) continue;
