@@ -20,7 +20,7 @@ assert.doesNotMatch(page, /financeReportError && <Alert severity="error">/, '错
 assert.match(client, /commission-payout-reports\/export/);
 assert.match(client, /Authorization/);
 assert.match(client, /content-disposition/);
-assert.match(server, /app\.post\('\/api\/commission-payout-reports\/export', requireFinancePayoutReadAccess/);
+assert.match(server, /app\.post\('\/api\/commission-payout-reports\/export', requireFinancePayoutReportExportAccess/);
 
 for (const sheetName of ['月度核对总览', '员工提成汇总', '逐笔提成明细', '正式订单阶梯核对', '发放与撤销记录', '异常与口径说明']) {
   assert.match(report, new RegExp(sheetName));

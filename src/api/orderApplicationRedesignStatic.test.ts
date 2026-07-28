@@ -13,5 +13,10 @@ assert.match(source, /实付金额/);
 assert.doesNotMatch(source, /保存草稿/, '本版订单申请不提供保存草稿');
 assert.doesNotMatch(source, /minWidth: 820/, '产品区不应强制宽表格');
 assert.doesNotMatch(source, /<BusinessFormSection step=\{5\}/, '备注应并入订单信息，不再单独占一段');
+assert.match(
+  source,
+  /data-testid="order-product-name-stack"[\s\S]*?flexDirection: 'column'/,
+  '产品选择器与主产品标识应纵向排列，避免窄屏时挤入产品等级列',
+);
 
 console.log('order application redesign static tests passed');

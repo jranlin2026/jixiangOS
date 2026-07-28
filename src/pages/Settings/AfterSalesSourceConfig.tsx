@@ -4,12 +4,13 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { settingsApi } from '../../api';
 import type { AfterSalesSourceConfig } from '../../types/settings';
+import OperationFeedbackDialog, { type OperationFeedbackSeverity } from '../../shared/components/OperationFeedbackDialog';
 
 const AfterSalesSourceConfigPage: React.FC = () => {
   const [items, setItems] = useState<AfterSalesSourceConfig[]>([]);
   const [newPlatform, setNewPlatform] = useState('');
   const [shopDrafts, setShopDrafts] = useState<Record<string, string>>({});
-  const [message, setMessage] = useState('');
+  const [feedback, setFeedback] = useState<{ severity: OperationFeedbackSeverity; message: string } | null>(null);
   const platforms = useMemo(() => items.filter((item) => !item.parentId).sort((a, b) => a.sortOrder - b.sortOrder), [items]);
   const load = async () => {
     const response = await settingsApi.fetchAfterSalesSourceConfigs();
@@ -20,7 +21,7 @@ const AfterSalesSourceConfigPage: React.FC = () => {
   const add = async (name: string, parentId?: string) => {
     const siblings = items.filter((item) => (item.parentId || '') === (parentId || ''));
     const response = await settingsApi.createAfterSalesSourceConfig({ name, parentId, isActive: true, sortOrder: siblings.length + 1 });
-    setMessage(response.code === 0 ? '已保存' : response.message);
+    setFeedback({ severity: response.code === 0 ? 'success' : 'error', message: response.code === 0 ? '来源配置已保存' : response.message });
     if (response.code === 0) {
       if (parentId) setShopDrafts((current) => ({ ...current, [parentId]: '' }));
       else setNewPlatform('');
@@ -33,7 +34,7 @@ const AfterSalesSourceConfigPage: React.FC = () => {
   };
   const remove = async (id: string) => {
     const response = await settingsApi.deleteAfterSalesSourceConfig(id);
-    setMessage(response.code === 0 ? '已删除' : response.message);
+    setFeedback({ severity: response.code === 0 ? 'success' : 'error', message: response.code === 0 ? '来源配置已删除' : response.message });
     if (response.code === 0) await load();
   };
 
@@ -53,7 +54,6 @@ const AfterSalesSourceConfigPage: React.FC = () => {
         添加
       </Button>
     </Box>
-    {message && <Typography variant="body2" sx={{ mb: 1, color: message === '已保存' || message === '已删除' ? '#059669' : '#dc2626' }}>{message}</Typography>}
     <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e2e8f0' }}>
       <Table>
         <TableHead><TableRow><TableCell>平台</TableCell><TableCell>店铺</TableCell><TableCell>状态</TableCell><TableCell align="right">操作</TableCell></TableRow></TableHead>
@@ -74,6 +74,7 @@ const AfterSalesSourceConfigPage: React.FC = () => {
         })}</TableBody>
       </Table>
     </TableContainer>
+    <OperationFeedbackDialog open={Boolean(feedback)} severity={feedback?.severity} message={feedback?.message || ''} onClose={() => setFeedback(null)} />
   </Box>;
 };
 

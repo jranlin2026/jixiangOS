@@ -85,7 +85,17 @@ function seed(userId = 'user-sales') {
     { id: 'user-finance', name: 'Finance A', account: 'finance', email: '', phone: '', role: zh.finance, roleId: 'role-finance', departmentId: 'dept-finance', isActive: true, createdAt: now, updatedAt: now },
   ]));
   storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([
-    { id: 'role-sales', name: zh.sales, code: 'sales_consultant', permissions: [], memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
+    {
+      id: 'role-sales',
+      name: zh.sales,
+      code: 'sales_consultant',
+      permissions: [{ module: PERMISSION_KEYS.ORDER_CREATE, actions: ['read', 'write'] }],
+      dataScopes: { orderApplications: 'self', orders: 'self' },
+      memberCount: 1,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    },
     { id: 'role-finance', name: zh.finance, code: 'finance_specialist', permissions: [{ module: zh.all, actions: ['admin'] }], memberCount: 1, isActive: true, createdAt: now, updatedAt: now },
   ]));
   storage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify([
@@ -136,7 +146,56 @@ const returnRes = await orderReviewApi.returnOrderApplication(submitRes.data.id,
 assert.equal(returnRes.code, 0);
 assert.equal(returnRes.data?.status, zh.returned);
 
+const rolesBeforeGlobalCreatorAttempt = storage.getItem(STORAGE_KEYS.ROLES) || '[]';
+storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(
+  (JSON.parse(rolesBeforeGlobalCreatorAttempt) as any[]).map((role) => (
+    role.code === 'sales_consultant'
+      ? { ...role, dataScopes: { ...role.dataScopes, orderApplications: 'all', orders: 'all' } }
+      : role
+  )),
+));
+storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({ userId: 'user-sales-b', token: 'token-user-sales-b', remember: true, createdAt: now }));
+assert.equal(
+  (await orderReviewApi.fetchOrderApplications({ pageSize: 20 })).data.items.some((item) => item.id === submitRes.data.id),
+  true,
+  '全局数据范围的订单创建人必须真实可见其他人的退回申请',
+);
+const nonApplicantResubmit = await orderReviewApi.updateReturnedOrderApplication(submitRes.data.id, {
+  ...orderPayload,
+  notes: 'Global creator tried to bypass applicant ownership',
+});
+assert.equal(nonApplicantResubmit.code, 403, '即使具有新增订单写权限且全局可见，也只有原申请人可以重提');
+assert.equal(
+  (await orderReviewApi.fetchOrderApplicationById(submitRes.data.id)).data?.status,
+  zh.returned,
+  '非申请人的失败重提不得改变申请状态或数据',
+);
+storage.setItem(STORAGE_KEYS.ROLES, rolesBeforeGlobalCreatorAttempt);
+
 storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({ userId: 'user-sales', token: 'token-user-sales', remember: true, createdAt: now }));
+const rolesBeforeOrderCreatePermissionRevocation = storage.getItem(STORAGE_KEYS.ROLES) || '[]';
+storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(
+  (JSON.parse(rolesBeforeOrderCreatePermissionRevocation) as any[]).map((role) => (
+    role.code === 'sales_consultant'
+      ? {
+          ...role,
+          permissions: role.permissions.filter((permission: { module: string }) => permission.module !== PERMISSION_KEYS.ORDER_CREATE),
+        }
+      : role
+  )),
+));
+const applicantWithoutCreateWrite = await orderReviewApi.updateReturnedOrderApplication(submitRes.data.id, {
+  ...orderPayload,
+  notes: 'Applicant without create permission',
+});
+assert.equal(applicantWithoutCreateWrite.code, 403, '原申请人失去新增订单写权限后不得重提');
+assert.equal(
+  (await orderReviewApi.fetchOrderApplicationById(submitRes.data.id)).data?.status,
+  zh.returned,
+  '权限拒绝不得改变退回申请',
+);
+storage.setItem(STORAGE_KEYS.ROLES, rolesBeforeOrderCreatePermissionRevocation);
+
 const resubmitRes = await orderReviewApi.updateReturnedOrderApplication(submitRes.data.id, {
   ...orderPayload,
   notes: 'Voucher added',
@@ -145,22 +204,40 @@ assert.equal(resubmitRes.code, 0);
 assert.equal(resubmitRes.data?.status, zh.pendingReview);
 
 storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({ userId: 'user-finance', token: 'token-user-finance', remember: true, createdAt: now }));
-const approveRes = await orderReviewApi.approveOrderApplication(submitRes.data.id);
+const [approveRes, concurrentApproveRes] = await Promise.all([
+  orderReviewApi.approveOrderApplication(submitRes.data.id),
+  orderReviewApi.approveOrderApplication(submitRes.data.id),
+]);
 assert.equal(approveRes.code, 0);
+assert.equal(concurrentApproveRes.code, 0);
 assert.equal(approveRes.data?.status, zh.approved);
+assert.equal(concurrentApproveRes.data?.status, zh.approved);
 assert.ok(approveRes.data?.orderId);
+assert.equal(concurrentApproveRes.data?.orderId, approveRes.data?.orderId, '并发审核必须返回同一入库结果');
+assert.equal(concurrentApproveRes.data?.orderNo, approveRes.data?.orderNo, '并发审核必须返回同一正式订单号');
 
 const ordersAfterApprove = await orderApi.fetchOrders({ pageSize: 20 });
-assert.equal(ordersAfterApprove.data.items.length, 1);
+assert.equal(ordersAfterApprove.data.items.length, 1, '并发审核不得生成重复正式订单');
 assert.equal(ordersAfterApprove.data.items[0].customerName, zh.customerName);
 assert.equal(ordersAfterApprove.data.items[0].productName, zh.productName);
 assert.equal(ordersAfterApprove.data.items[0].createdById, 'user-sales');
 assert.equal(ordersAfterApprove.data.items[0].createdByName, 'Sales A');
+assert.equal(ordersAfterApprove.data.items[0].sourceApplicationId, submitRes.data.id);
 assert.equal(approveRes.data?.orderId, ordersAfterApprove.data.items[0].id);
 assert.equal(approveRes.data?.orderNo, ordersAfterApprove.data.items[0].orderNo);
 
 const storedCommissions = JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as Commission[];
 assert.equal(storedCommissions.length > 0, true);
+assert.equal(
+  new Set(storedCommissions.map((commission) => commission.orderId)).size,
+  1,
+  '并发审核不得为同一申请产生多套提成副作用',
+);
+assert.equal(
+  (JSON.parse(storage.getItem(STORAGE_KEYS.DELIVERIES) || '[]') as Array<{ orderId: string }>).length,
+  1,
+  '并发审核不得为同一申请产生重复交付副作用',
+);
 
 const rejectSubmit = await orderReviewApi.submitOrderApplication({
   ...orderPayload,
@@ -229,6 +306,298 @@ assert.equal(unpaidCompleteRefundRes.code, 0);
 const unpaidCommissionsAfterRefund = JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as Commission[];
 assert.equal(unpaidCommissionsAfterRefund.length > 0, true);
 assert.equal(unpaidCommissionsAfterRefund.every((commission) => commission.status === zh.withdrawn), true);
+
+seed('user-sales');
+const parallelSubmitA = await orderReviewApi.submitOrderApplication({
+  ...orderPayload,
+  customerId: 'cust-parallel-a',
+  customerName: 'Parallel Customer A',
+});
+const parallelSubmitB = await orderReviewApi.submitOrderApplication({
+  ...orderPayload,
+  customerId: 'cust-parallel-b',
+  customerName: 'Parallel Customer B',
+});
+storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({ userId: 'user-finance', token: 'token-user-finance', remember: true, createdAt: now }));
+const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+Object.defineProperty(globalThis, 'navigator', { value: {}, configurable: true });
+const [parallelApproveA, parallelApproveB] = await (async () => {
+  try {
+    return await Promise.all([
+      orderReviewApi.approveOrderApplication(parallelSubmitA.data.id),
+      orderReviewApi.approveOrderApplication(parallelSubmitB.data.id),
+    ]);
+  } finally {
+    if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+  }
+})();
+assert.equal(parallelApproveA.code, 0);
+assert.equal(parallelApproveB.code, 0);
+const parallelApplications = (await orderReviewApi.fetchOrderApplications({ pageSize: 20 })).data.items
+  .filter((application) => [parallelSubmitA.data.id, parallelSubmitB.data.id].includes(application.id));
+assert.equal(parallelApplications.length, 2, '不同申请并发通过后不得整数组覆盖丢失申请');
+assert.equal(parallelApplications.every((application) => application.status === zh.approved && Boolean(application.orderId)), true);
+const parallelOrders = (await orderApi.fetchOrders({ pageSize: 20 })).data.items;
+assert.equal(parallelOrders.length, 2, '不同申请并发通过必须各生成一张正式订单');
+assert.equal(new Set(parallelOrders.map((order) => order.sourceApplicationId)).size, 2);
+const parallelDeliveries = JSON.parse(storage.getItem(STORAGE_KEYS.DELIVERIES) || '[]') as Array<{ orderId: string }>;
+assert.equal(parallelDeliveries.length, 2, '不同申请并发通过必须各生成一套交付副作用');
+assert.equal(new Set(parallelDeliveries.map((delivery) => delivery.orderId)).size, 2);
+const parallelCommissions = JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as Commission[];
+const parallelCommissionCounts = parallelOrders.map((order) => (
+  parallelCommissions.filter((commission) => commission.orderId === order.id).length
+));
+assert.equal(parallelCommissionCounts.every((count) => count > 0), true, '不同申请并发通过必须各生成提成副作用');
+assert.equal(new Set(parallelCommissionCounts).size, 1, '相同订单数据并发通过不得重复或丢失任一套提成');
+
+seed('user-sales');
+const approveReturnRaceSubmit = await orderReviewApi.submitOrderApplication({
+  ...orderPayload,
+  customerId: 'cust-approve-return-race',
+  customerName: 'Approve Return Race Customer',
+});
+storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({ userId: 'user-finance', token: 'token-user-finance', remember: true, createdAt: now }));
+const approveBeforeReturn = orderReviewApi.approveOrderApplication(approveReturnRaceSubmit.data.id);
+await new Promise((resolve) => setTimeout(resolve, 200));
+const [approveRaceResult, returnRaceResult] = await Promise.all([
+  approveBeforeReturn,
+  orderReviewApi.returnOrderApplication(approveReturnRaceSubmit.data.id, '并发退回'),
+]);
+assert.equal(approveRaceResult.code, 0, '先进入全局审核锁的通过操作应成功');
+assert.notEqual(returnRaceResult.code, 0, '同一申请通过后，并发退回必须在锁内重读并失败');
+const approveReturnRaceApplication = await orderReviewApi.fetchOrderApplicationById(approveReturnRaceSubmit.data.id);
+assert.equal(approveReturnRaceApplication.data?.status, zh.approved);
+assert.deepEqual(approveReturnRaceApplication.data?.reviewLogs.map((log) => log.action), ['approve', 'submit']);
+assert.equal((await orderApi.fetchOrders({ pageSize: 20 })).data.items.length, 1);
+assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.DELIVERIES) || '[]') as unknown[]).length, 1);
+assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as Commission[]).length > 0, true);
+
+seed('user-sales');
+const approveRejectRaceSubmit = await orderReviewApi.submitOrderApplication({
+  ...orderPayload,
+  customerId: 'cust-approve-reject-race',
+  customerName: 'Approve Reject Race Customer',
+});
+storage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify({ userId: 'user-finance', token: 'token-user-finance', remember: true, createdAt: now }));
+const approveBeforeReject = orderReviewApi.approveOrderApplication(approveRejectRaceSubmit.data.id);
+await new Promise((resolve) => setTimeout(resolve, 200));
+const [approveRejectResult, rejectRaceResult] = await Promise.all([
+  approveBeforeReject,
+  orderReviewApi.rejectOrderApplication(approveRejectRaceSubmit.data.id, '并发驳回'),
+]);
+assert.equal(approveRejectResult.code, 0, '先进入全局审核锁的通过操作应成功');
+assert.notEqual(rejectRaceResult.code, 0, '同一申请通过后，并发驳回必须在锁内重读并失败');
+const approveRejectRaceApplication = await orderReviewApi.fetchOrderApplicationById(approveRejectRaceSubmit.data.id);
+assert.equal(approveRejectRaceApplication.data?.status, zh.approved);
+assert.deepEqual(approveRejectRaceApplication.data?.reviewLogs.map((log) => log.action), ['approve', 'submit']);
+assert.equal((await orderApi.fetchOrders({ pageSize: 20 })).data.items.length, 1);
+assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.DELIVERIES) || '[]') as unknown[]).length, 1);
+assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as Commission[]).length > 0, true);
+
+seed('user-sales');
+const directOrderNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+Object.defineProperty(globalThis, 'navigator', { value: {}, configurable: true });
+const [directSameSourceA, directSameSourceB] = await (async () => {
+  try {
+    return await Promise.all([
+      orderApi.createOrder({
+        ...orderPayload,
+        sourceApplicationId: 'oa-direct-concurrent-same-source',
+      }),
+      orderApi.createOrder({
+        ...orderPayload,
+        sourceApplicationId: 'oa-direct-concurrent-same-source',
+      }),
+    ]);
+  } finally {
+    if (directOrderNavigatorDescriptor) Object.defineProperty(globalThis, 'navigator', directOrderNavigatorDescriptor);
+  }
+})();
+assert.equal(directSameSourceA.code, 0);
+assert.equal(directSameSourceB.code, 0);
+assert.equal(directSameSourceB.data.id, directSameSourceA.data.id, '同源并发直接建单必须返回同一张正式订单');
+const directSameSourceOrders = (await orderApi.fetchOrders({ pageSize: 20 })).data.items;
+assert.equal(directSameSourceOrders.length, 1, '同源并发直接建单只能生成一张正式订单');
+const directSameSourceDeliveries = JSON.parse(storage.getItem(STORAGE_KEYS.DELIVERIES) || '[]') as Array<{ orderId: string }>;
+assert.equal(directSameSourceDeliveries.length, 1, '同源并发直接建单只能生成一套交付副作用');
+assert.equal(directSameSourceDeliveries[0].orderId, directSameSourceOrders[0].id);
+const directSameSourceCommissions = JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as Commission[];
+assert.equal(directSameSourceCommissions.length > 0, true);
+assert.deepEqual(
+  [...new Set(directSameSourceCommissions.map((commission) => commission.orderId))],
+  [directSameSourceOrders[0].id],
+  '同源并发直接建单只能生成一套提成副作用',
+);
+const directSameSourceCustomer = (JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]') as any[])
+  .find((customer) => customer.id === orderPayload.customerId);
+assert.equal(directSameSourceCustomer.orderCount, 1);
+assert.equal(directSameSourceCustomer.growthPath.length, 1);
+assert.equal(directSameSourceCustomer.activityRecords.length, 1);
+
+seed('user-sales');
+const concurrentFailureOriginalSetItem = storage.setItem;
+let concurrentFirstDeliveryWriteFailed = false;
+storage.setItem = (key: string, value: string) => {
+  if (!concurrentFirstDeliveryWriteFailed && key === STORAGE_KEYS.DELIVERIES) {
+    concurrentFirstDeliveryWriteFailed = true;
+    throw new Error('injected first concurrent delivery write failure');
+  }
+  return concurrentFailureOriginalSetItem(key, value);
+};
+const [directFailedSource, directSuccessfulSource] = await Promise.all([
+  orderApi.createOrder({
+    ...orderPayload,
+    sourceApplicationId: 'oa-direct-concurrent-failed-source',
+  }),
+  orderApi.createOrder({
+    ...orderPayload,
+    sourceApplicationId: 'oa-direct-concurrent-success-source',
+  }),
+]);
+storage.setItem = concurrentFailureOriginalSetItem;
+assert.equal(concurrentFirstDeliveryWriteFailed, true);
+assert.notEqual(directFailedSource.code, 0, '首个直接建单故障必须返回失败');
+assert.equal(directSuccessfulSource.code, 0, directSuccessfulSource.message);
+const directAfterFailureOrders = (await orderApi.fetchOrders({ pageSize: 20 })).data.items;
+assert.equal(directAfterFailureOrders.length, 1, '首个事务回滚不得覆盖随后成功的不同来源订单');
+assert.equal(directAfterFailureOrders[0].sourceApplicationId, 'oa-direct-concurrent-success-source');
+const directAfterFailureDeliveries = JSON.parse(storage.getItem(STORAGE_KEYS.DELIVERIES) || '[]') as Array<{ orderId: string }>;
+assert.equal(directAfterFailureDeliveries.length, 1);
+assert.equal(directAfterFailureDeliveries[0].orderId, directSuccessfulSource.data.id);
+const directAfterFailureCommissions = JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as Commission[];
+assert.equal(directAfterFailureCommissions.length > 0, true, '旧快照回滚不得清掉随后成功订单的提成');
+assert.equal(directAfterFailureCommissions.every((commission) => commission.orderId === directSuccessfulSource.data.id), true);
+const directAfterFailureCustomer = (JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]') as any[])
+  .find((customer) => customer.id === orderPayload.customerId);
+assert.equal(directAfterFailureCustomer.orderCount, 1);
+assert.equal(directAfterFailureCustomer.growthPath.length, 1);
+assert.equal(directAfterFailureCustomer.activityRecords.length, 1);
+
+seed('user-sales');
+const concurrentUpdateTarget = await orderApi.createOrder({
+  ...orderPayload,
+  sourceApplicationId: 'oa-concurrent-update-target',
+});
+assert.equal(concurrentUpdateTarget.code, 0);
+const concurrentUpdateOriginalSetItem = storage.setItem;
+let concurrentUpdateCreateFailed = false;
+storage.setItem = (key: string, value: string) => {
+  if (!concurrentUpdateCreateFailed && key === STORAGE_KEYS.DELIVERIES) {
+    concurrentUpdateCreateFailed = true;
+    throw new Error('injected create failure during concurrent update');
+  }
+  return concurrentUpdateOriginalSetItem(key, value);
+};
+const [concurrentFailedCreate, concurrentSuccessfulUpdate] = await Promise.all([
+  orderApi.createOrder({
+    ...orderPayload,
+    sourceApplicationId: 'oa-concurrent-update-failed-create',
+  }),
+  orderApi.updateOrder(concurrentUpdateTarget.data.id, {
+    notes: '并发修改必须在建单回滚后保留',
+  }),
+]);
+storage.setItem = concurrentUpdateOriginalSetItem;
+assert.equal(concurrentUpdateCreateFailed, true);
+assert.notEqual(concurrentFailedCreate.code, 0);
+assert.equal(concurrentSuccessfulUpdate.code, 0);
+assert.equal(concurrentSuccessfulUpdate.data?.notes, '并发修改必须在建单回滚后保留');
+const persistedConcurrentUpdate = await orderApi.fetchOrderById(concurrentUpdateTarget.data.id);
+assert.equal(
+  persistedConcurrentUpdate.data?.notes,
+  '并发修改必须在建单回滚后保留',
+  '建单事务的旧快照回滚不得覆盖同时成功的订单修改',
+);
+assert.equal((await orderApi.fetchOrders({ pageSize: 20 })).data.items.length, 1);
+
+seed('user-sales');
+const atomicStorageKeys = [
+  STORAGE_KEYS.ORDERS,
+  STORAGE_KEYS.COMMISSIONS,
+  STORAGE_KEYS.DELIVERIES,
+  STORAGE_KEYS.CUSTOMERS,
+  STORAGE_KEYS.LEADS,
+] as const;
+const atomicSnapshot = new Map(atomicStorageKeys.map((key) => [key, storage.getItem(key)]));
+const originalStorageSetItem = storage.setItem;
+let deliveryWriteFailed = false;
+storage.setItem = (key: string, value: string) => {
+  if (!deliveryWriteFailed && key === STORAGE_KEYS.DELIVERIES) {
+    deliveryWriteFailed = true;
+    throw new Error('injected delivery write failure');
+  }
+  return originalStorageSetItem(key, value);
+};
+const failedAtomicCreate = await orderApi.createOrder({
+  ...orderPayload,
+  sourceApplicationId: 'oa-atomic-create',
+}).catch((error: unknown) => ({
+  code: -1,
+  data: null,
+  message: error instanceof Error ? error.message : 'injected failure',
+}));
+storage.setItem = originalStorageSetItem;
+assert.equal(deliveryWriteFailed, true, '故障必须发生在客户统计和提成写入之后的交付写入阶段');
+assert.notEqual(failedAtomicCreate.code, 0);
+atomicStorageKeys.forEach((key) => {
+  assert.equal(storage.getItem(key), atomicSnapshot.get(key), `建单失败后 ${key} 必须精确回滚`);
+});
+
+let customerWriteCount = 0;
+let lifecycleWriteFailed = false;
+storage.setItem = (key: string, value: string) => {
+  if (key === STORAGE_KEYS.CUSTOMERS) {
+    customerWriteCount += 1;
+    if (customerWriteCount === 2) {
+      lifecycleWriteFailed = true;
+      throw new Error('injected lifecycle write failure');
+    }
+  }
+  return originalStorageSetItem(key, value);
+};
+const failedLifecycleCreate = await orderApi.createOrder({
+  ...orderPayload,
+  sourceApplicationId: 'oa-atomic-lifecycle-create',
+}).catch((error: unknown) => ({
+  code: -1,
+  data: null,
+  message: error instanceof Error ? error.message : 'injected failure',
+}));
+storage.setItem = originalStorageSetItem;
+assert.equal(lifecycleWriteFailed, true, '故障必须发生在订单、交付和客户统计均已写入后的生命周期阶段');
+assert.notEqual(failedLifecycleCreate.code, 0);
+atomicStorageKeys.forEach((key) => {
+  assert.equal(storage.getItem(key), atomicSnapshot.get(key), `生命周期写入失败后 ${key} 必须精确回滚`);
+});
+
+const atomicRetry = await orderApi.createOrder({
+  ...orderPayload,
+  sourceApplicationId: 'oa-atomic-create',
+});
+assert.equal(atomicRetry.code, 0, atomicRetry.message);
+assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.ORDERS) || '[]') as unknown[]).length, 1);
+const atomicRetryDeliveries = JSON.parse(storage.getItem(STORAGE_KEYS.DELIVERIES) || '[]') as Array<{ orderId: string }>;
+assert.equal(atomicRetryDeliveries.length, 1);
+assert.equal(atomicRetryDeliveries[0].orderId, atomicRetry.data.id);
+const atomicRetryCommissions = JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as Commission[];
+assert.equal(atomicRetryCommissions.length > 0, true);
+assert.equal(atomicRetryCommissions.every((commission) => commission.orderId === atomicRetry.data.id), true);
+const atomicRetryCustomer = (JSON.parse(storage.getItem(STORAGE_KEYS.CUSTOMERS) || '[]') as any[])
+  .find((customer) => customer.id === orderPayload.customerId);
+assert.equal(atomicRetryCustomer.orderCount, 1);
+assert.equal(atomicRetryCustomer.totalSpent, orderPayload.actualAmount);
+assert.equal(atomicRetryCustomer.growthPath.filter((item: { orderId?: string }) => item.orderId === atomicRetry.data.id).length, 1);
+assert.equal(atomicRetryCustomer.activityRecords.filter((item: { relatedId?: string }) => item.relatedId === atomicRetry.data.id).length, 1);
+const successfulAtomicSnapshot = new Map(atomicStorageKeys.map((key) => [key, storage.getItem(key)]));
+const atomicIdempotentRetry = await orderApi.createOrder({
+  ...orderPayload,
+  sourceApplicationId: 'oa-atomic-create',
+});
+assert.equal(atomicIdempotentRetry.code, 0);
+assert.equal(atomicIdempotentRetry.data.id, atomicRetry.data.id);
+atomicStorageKeys.forEach((key) => {
+  assert.equal(storage.getItem(key), successfulAtomicSnapshot.get(key), `幂等重试不得重复写入 ${key}`);
+});
 
 seed('user-sales');
 storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([

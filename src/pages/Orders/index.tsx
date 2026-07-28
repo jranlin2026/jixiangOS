@@ -12,7 +12,6 @@ import {
   MenuItem,
   Paper,
   Select,
-  Snackbar,
   Tab,
   Table,
   TableBody,
@@ -29,8 +28,6 @@ import {
 import TablePagination from '../../shared/components/TablePagination';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import EditIcon from '@mui/icons-material/Edit';
-import HistoryIcon from '@mui/icons-material/History';
 import SortIcon from '@mui/icons-material/Sort';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import VisibilityIcon from '@mui/icons-material/Visibility';
@@ -44,12 +41,12 @@ import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPagin
 import CustomerDetail from '../Customers/CustomerDetail';
 import OrderDetail from './OrderDetail';
 import OrderForm from './OrderForm';
-import OrderHistoryDialog from './OrderHistoryDialog';
 import OrderReview from '../OrderReview';
 import type { Customer } from '../../types/customer';
-import type { Order, OrderCorrectionPrecheck, OrderSettlementProgress } from '../../types/order';
+import type { Order, OrderApplication, OrderCorrectionPrecheck, OrderSettlementProgress } from '../../types/order';
 import type { OrderTypeConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import OperationFeedbackDialog from '../../shared/components/OperationFeedbackDialog';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import PermissionGate from '../../shared/auth/PermissionGate';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
@@ -73,6 +70,7 @@ import BusinessImportEntryButton from '../../shared/components/BusinessImportEnt
 import SettlementStatusChip from '../../shared/components/SettlementStatusChip';
 import RefundStatusBadge from '../../shared/components/RefundStatusBadge';
 import { SETTLEMENT_STATUSES } from '../../shared/utils/settlementStatus';
+import BusinessSubmissionResultDialog from '../../shared/components/BusinessSubmissionResultDialog';
 
 type OrderColumn = {
   id: string;
@@ -90,7 +88,7 @@ const ORDER_VIEW_STORAGE_KEY = 'aaos_order_table_view_v7';
 // 状态与退款状态成为上线必备默认列，升级配置版本以迁移旧的本地视图。
 const ORDER_VIEW_SCHEMA_VERSION = 13;
 const ORDER_WIDTH_STORAGE_KEY = 'aaos_order_table_column_widths_v1';
-const ORDER_ACTION_COLUMN_WIDTH = 160;
+const ORDER_ACTION_COLUMN_WIDTH = 96;
 const ORDER_SETTLEMENT_STATUS_OPTIONS: OrderSettlementProgress[] = [...SETTLEMENT_STATUSES];
 
 const ORDER_COLUMNS: OrderColumn[] = [
@@ -225,7 +223,6 @@ const Orders: React.FC = () => {
   const importBatchId = searchParams.get('importBatchId') || '';
   const [detailOpen, setDetailOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
@@ -246,6 +243,7 @@ const Orders: React.FC = () => {
   const [viewConfig, setViewConfig] = useState<OrderViewConfig>(readOrderViewConfig);
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(ORDER_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
   const [orderLookupMessage, setOrderLookupMessage] = useState('');
+  const [submittedOrderApplication, setSubmittedOrderApplication] = useState<OrderApplication | null>(null);
   const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
 
   const navigateToImportedOrderReview = (job: BusinessImportJobResult) => {
@@ -393,12 +391,6 @@ const Orders: React.FC = () => {
     setOrderFormMode(mode);
     setDetailOpen(false);
     setFormOpen(true);
-  };
-
-  const handleViewHistory = (order: Order) => {
-    setSelectedOrder(order);
-    setDetailOpen(false);
-    setHistoryOpen(true);
   };
 
   const handleDeleteOrder = async (order: Order) => {
@@ -865,20 +857,6 @@ const Orders: React.FC = () => {
                               <VisibilityIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
-                          <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_EDIT} action="write">
-                            <Tooltip title="编辑">
-                              <IconButton size="small" color="info" aria-label="编辑" onClick={() => handleEditOrder(order)}>
-                                <EditIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          </PermissionGate>
-                          <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_HISTORY}>
-                            <Tooltip title="修改记录">
-                              <IconButton size="small" color="secondary" aria-label="修改记录" onClick={() => handleViewHistory(order)}>
-                                <HistoryIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          </PermissionGate>
                           <PermissionGate permissionKey={PERMISSION_KEYS.ORDER_DELETE} action="delete">
                             <Tooltip title="删除">
                               <IconButton size="small" color="error" aria-label="删除" onClick={() => handleDeleteOrder(order)}>
@@ -965,7 +943,6 @@ const Orders: React.FC = () => {
           canViewHistory={hasPermission(currentUser, PERMISSION_KEYS.ORDER_HISTORY)}
           onEdit={() => void handleEditOrder(selectedOrder, 'edit')}
           onCorrect={() => void handleEditOrder(selectedOrder, 'correction')}
-          onHistory={() => handleViewHistory(selectedOrder)}
         />
       )}
 
@@ -1036,29 +1013,38 @@ const Orders: React.FC = () => {
         onSuccess={(application) => {
           fetchItems({ ...filters, paymentMethod: undefined });
           setOrderCustomer(null);
-          if (application && hasPermission(currentUser, PERMISSION_KEYS.ORDER_REVIEW_LIST)) {
-            const nextParams = new URLSearchParams(searchParams);
-            nextParams.set('tab', 'review');
-            nextParams.delete('orderId');
-            setSearchParams(nextParams, { replace: true });
-          }
+          if (application) setSubmittedOrderApplication(application);
         }}
       />
-      <OrderHistoryDialog
-        order={selectedOrder}
-        open={historyOpen}
-        onClose={() => setHistoryOpen(false)}
+      <BusinessSubmissionResultDialog
+        open={Boolean(submittedOrderApplication)}
+        title="订单申请已提交"
+        description="该订单已进入财务审核，审核通过后才会生成正式订单、提成和交付记录。"
+        fields={submittedOrderApplication ? [
+          { label: '申请编号', value: submittedOrderApplication.applicationNo },
+          { label: '客户', value: submittedOrderApplication.orderData.customerName },
+          { label: '产品名称', value: submittedOrderApplication.orderData.productName || submittedOrderApplication.orderData.productLevel || '-' },
+          { label: '产品等级', value: submittedOrderApplication.orderData.productLevel || '-' },
+          { label: '订单类型', value: submittedOrderApplication.orderData.orderType },
+          { label: '实付金额', value: formatCurrency(submittedOrderApplication.orderData.actualAmount ?? submittedOrderApplication.orderData.amount) },
+          { label: '当前状态', value: submittedOrderApplication.status },
+        ] : []}
+        onClose={() => setSubmittedOrderApplication(null)}
+        onViewReview={hasPermission(currentUser, PERMISSION_KEYS.ORDER_REVIEW_LIST) ? () => {
+          setSubmittedOrderApplication(null);
+          const nextParams = new URLSearchParams(searchParams);
+          nextParams.set('tab', 'review');
+          nextParams.delete('orderId');
+          setSearchParams(nextParams, { replace: true });
+        } : undefined}
+        reviewActionLabel="查看订单审核台"
       />
-      <Snackbar
+      <OperationFeedbackDialog
         open={Boolean(orderLookupMessage)}
-        autoHideDuration={3000}
+        severity="warning"
+        message={orderLookupMessage}
         onClose={() => setOrderLookupMessage('')}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-      >
-        <Alert severity="warning" variant="filled" onClose={() => setOrderLookupMessage('')}>
-          {orderLookupMessage}
-        </Alert>
-      </Snackbar>
+      />
       <TableViewSettingsDialog
         open={viewSettingsOpen}
         title="订单列表视图设置"

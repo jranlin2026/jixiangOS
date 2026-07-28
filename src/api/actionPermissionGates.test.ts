@@ -148,9 +148,49 @@ for (const handlerName of ['openDeleteOrderSplitDialog', 'confirmDeleteOrderSpli
   );
 }
 
-assert.ok(
-  (commissionSource.match(/\{canManageOrderSettlement &&/g) || []).length >= 4,
-  'Read-only settlement users must not see create, adjust, delete, or detail mutation controls.',
+const orderSettlementRowActionsStart = commissionSource.indexOf('<Tooltip title="查看分账">');
+const orderSettlementRowActionsEnd = commissionSource.indexOf('</TableCell>', orderSettlementRowActionsStart);
+const orderSettlementRowActions = commissionSource.slice(orderSettlementRowActionsStart, orderSettlementRowActionsEnd);
+const guardedOrderSettlementRowActions = orderSettlementRowActions.match(
+  /\{canManageOrderSettlement && \(\s*<>([\s\S]*?)<\/>\s*\)\}/,
+)?.[1];
+assert.ok(guardedOrderSettlementRowActions, '订单分账行操作必须整体受分账写权限控制。');
+for (const actionLabel of ['调整分账', '重新分账', '重置订单分账', '清理废弃记录']) {
+  assert.match(
+    guardedOrderSettlementRowActions,
+    new RegExp(actionLabel),
+    `订单分账行操作“${actionLabel}”不得出现在写权限门禁之外。`,
+  );
+}
+
+const standaloneOrderSettlementHeader = commissionSource.slice(
+  commissionSource.indexOf('{!embedded && ('),
+  commissionSource.indexOf('{embedded && tabValue === 0 && !hideEmbeddedOrderSplitViewButton'),
+);
+assert.match(
+  standaloneOrderSettlementHeader,
+  /\{canManageOrderSettlement && \([\s\S]*?onClick=\{openCreateSplitDialog\}[\s\S]*?>\s*新建订单分账\s*<\/Button>[\s\S]*?\)\}/,
+  '独立订单分账页的新建入口必须要求分账写权限。',
+);
+
+const embeddedOrderSettlementHeader = commissionSource.slice(
+  commissionSource.indexOf('{embedded && tabValue === 0 && !hideEmbeddedOrderSplitViewButton'),
+  commissionSource.indexOf('{tabValue === 0 && (', commissionSource.indexOf('{embedded && tabValue === 0 && !hideEmbeddedOrderSplitViewButton')),
+);
+assert.match(
+  embeddedOrderSettlementHeader,
+  /\{canManageOrderSettlement && \([\s\S]*?onClick=\{openCreateSplitDialog\}[\s\S]*?>\s*新建订单分账\s*<\/Button>[\s\S]*?\)\}/,
+  '嵌入式订单分账页的新建入口必须要求分账写权限。',
+);
+
+const orderSettlementDetailActions = commissionSource.slice(
+  commissionSource.indexOf('const renderSettlementDetailActions = () => {'),
+  commissionSource.indexOf('const renderMonthlyPayout = () => ('),
+);
+assert.match(
+  orderSettlementDetailActions,
+  /const renderSettlementDetailActions = \(\) => \{\s*if \(!summaryDetail\) return null;\s*if \(!canManageOrderSettlement\) \{\s*return <Typography[^;]+>当前账号只能查看分账信息。<\/Typography>;\s*\}\s*if \(summaryDetail\.sourceOrderDeleted\)/,
+  '详情操作必须在任何状态分支之前对无分账写权限用户整体早返回。',
 );
 
 assert.match(

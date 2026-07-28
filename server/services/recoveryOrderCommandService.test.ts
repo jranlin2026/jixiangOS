@@ -936,8 +936,16 @@ assert.equal(rejected.data?.status, '审核驳回');
 const rejectedResubmit = await service.update(rejectedSource.data!.id, input({
   thirdPartyOrderNo: 'TP-REJECT', remark: '补齐资料后重新提交',
 }), creator);
-assert.equal(rejectedResubmit.code, 0, '创建人可以修改并重新提交审核驳回记录');
-assert.equal(rejectedResubmit.data?.status, '待审核');
+assert.equal(rejectedResubmit.code, 409, '审核驳回是终态，创建人不能修改或重新提交');
+assert.match(rejectedResubmit.message, /审核驳回.*不能修改或重新提交/);
+const rejectedPersisted = prisma.rows.get(key(STORAGE_KEYS.RECOVERY_ORDERS, rejectedSource.data!.id))!;
+assert.equal(rejectedPersisted.status, '审核驳回', '失败重提不得改变审核驳回状态');
+assert.equal((rejectedPersisted.data as RecoveryOrder).auditReason, '凭证无效', '失败重提不得覆盖原驳回审计原因');
+const rejectedEditAttempt = await service.update(rejectedSource.data!.id, input({
+  thirdPartyOrderNo: 'TP-REJECT', remark: '普通编辑权限尝试修改已驳回记录',
+}), reviewer);
+assert.equal(rejectedEditAttempt.code, 409, '普通编辑权限也不能修改审核驳回记录');
+assert.match(rejectedEditAttempt.message, /审核驳回.*不能修改或重新提交/);
 
 const withdrawnSource = await service.create(input({ thirdPartyOrderNo: 'TP-WITHDRAWN-DELETE' }), creator);
 const withdrawnRow = prisma.rows.get(key(STORAGE_KEYS.RECOVERY_ORDERS, withdrawnSource.data!.id))!;

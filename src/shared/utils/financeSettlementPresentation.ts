@@ -38,6 +38,38 @@ export function getActiveCommissions(rows: Commission[]): Commission[] {
   return rows.filter((row) => !INACTIVE_COMMISSION_STATUSES.has(String(row.status)));
 }
 
+export interface CurrentSettlementRoundRef {
+  settlementVersion?: number;
+  settlementRoundId?: string;
+}
+
+export function getCurrentSettlementRoundCommissions<T extends {
+  status: string;
+  settlementVersion?: number;
+  settlementRoundId?: string;
+}>(
+  rows: T[],
+  currentRound: CurrentSettlementRoundRef = {},
+): T[] {
+  const active = rows.filter((row) => !INACTIVE_COMMISSION_STATUSES.has(String(row.status)));
+  if (!active.length) return [];
+
+  if (currentRound.settlementRoundId) {
+    const matchingRound = active.filter((row) => row.settlementRoundId === currentRound.settlementRoundId);
+    if (matchingRound.length) return matchingRound;
+  }
+
+  if (currentRound.settlementVersion) {
+    const matchingVersion = active.filter((row) => (
+      Number(row.settlementVersion || 1) === Number(currentRound.settlementVersion)
+    ));
+    if (matchingVersion.length) return matchingVersion;
+  }
+
+  const latestVersion = Math.max(...active.map((row) => Number(row.settlementVersion || 1)));
+  return active.filter((row) => Number(row.settlementVersion || 1) === latestVersion);
+}
+
 function isPendingMonthlyTieredCommission(row: Commission): boolean {
   return row.ruleCalculationType === 'tiered_percentage'
     && row.status !== '已发放'

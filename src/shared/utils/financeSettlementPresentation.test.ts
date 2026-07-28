@@ -6,6 +6,7 @@ import {
   getCommissionSplitAmountPresentation,
   formatLeadSourcePath,
   getActiveCommissions,
+  getCurrentSettlementRoundCommissions,
   summarizeCommissionSplitAmounts,
   summarizeCommissionProcessing,
 } from './financeSettlementPresentation';
@@ -72,6 +73,39 @@ test('只汇总有效分账并提取最新处理留痕', () => {
   assert.equal(summary.confirmedAt, '2026-07-24T10:00:00.000Z');
   assert.equal(summary.paidAt, '2026-07-24T11:00:00.000Z');
   assert.equal(summary.withdrawReason, '金额录入错误');
+});
+
+test('调整售后挽回分账时只读取当前有效轮次', () => {
+  const historicalWithdrawn: Commission = {
+    ...baseCommission,
+    id: 'commission-history-v1',
+    status: '已撤回',
+    settlementVersion: 1,
+    settlementRoundId: 'recovery-order-1-v1',
+  };
+  const staleActiveRound: Commission = {
+    ...baseCommission,
+    id: 'commission-stale-v2',
+    status: '待确认',
+    settlementVersion: 2,
+    settlementRoundId: 'recovery-order-1-v2',
+  };
+  const currentRound: Commission = {
+    ...baseCommission,
+    id: 'commission-current-v3',
+    status: '待确认',
+    commissionAmount: 2,
+    settlementVersion: 3,
+    settlementRoundId: 'recovery-order-1-v3',
+  };
+
+  assert.deepEqual(
+    getCurrentSettlementRoundCommissions(
+      [historicalWithdrawn, staleActiveRound, currentRound],
+      { settlementVersion: 3, settlementRoundId: 'recovery-order-1-v3' },
+    ).map((row) => row.id),
+    ['commission-current-v3'],
+  );
 });
 
 test('完整线索来源去重并保留层级', () => {

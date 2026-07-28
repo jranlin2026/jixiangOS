@@ -11,6 +11,7 @@ import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { coCreationApi } from '../../api/coCreationApi';
 import type { CoCreationRequestDto, CoCreationStatus } from '../../types/coCreation';
+import OperationFeedbackDialog from '../../shared/components/OperationFeedbackDialog';
 
 type TabKey = 'mine' | 'supervise' | 'decision' | 'validation';
 const statusText: Record<CoCreationStatus, string> = {
@@ -30,6 +31,7 @@ const CoCreation: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [loadError, setLoadError] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [interviewRequest, setInterviewRequest] = useState<CoCreationRequestDto | null>(null);
   const [title, setTitle] = useState('');
@@ -48,9 +50,10 @@ const CoCreation: React.FC = () => {
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setLoadError('');
     const result = await coCreationApi.list().catch((error) => ({ code: -1, data: [], message: String(error) }));
     setLoading(false);
-    if (result.code !== 0) { setMessage({ type: 'error', text: result.message || '读取需求失败' }); return; }
+    if (result.code !== 0) { setLoadError(result.message || '读取需求失败'); return; }
     setItems(result.data || []);
     if (selected) {
       const detail = await coCreationApi.get(selected.id);
@@ -128,7 +131,7 @@ const CoCreation: React.FC = () => {
   return (
     <ModulePage sx={{ p: { xs: 2, md: 3 } }}>
       <ModuleHeader title="AI共创中心" description="从真实工作问题出发，让AI逐问逐答形成可验证的候选需求。" />
-      {message && <Alert severity={message.type} sx={{ mb: 2 }} onClose={() => setMessage(null)}>{message.text}</Alert>}
+      {loadError && <Alert severity="error" sx={{ mb: 2 }}>{loadError}。当前列表未更新，请重试。</Alert>}
       <ModuleTabs value={tab} onChange={(_, value: TabKey) => { setTab(value); setSelected(null); }} variant="scrollable" allowScrollButtonsMobile>
         {tabs.map((item) => <Tab key={item.value} value={item.value} label={item.label} />)}
       </ModuleTabs>
@@ -215,6 +218,7 @@ const CoCreation: React.FC = () => {
           )}
         </DialogActions>
       </Dialog>
+      <OperationFeedbackDialog open={Boolean(message)} severity={message?.type} message={message?.text || ''} onClose={() => setMessage(null)} />
     </ModulePage>
   );
 };

@@ -51,14 +51,18 @@ import { isSuperAdminRoleName } from '../../shared/utils/roles';
 import { moduleTablePaperSx, moduleTableSx, StatusSegmentBar } from '../../shared/components/ModuleShell';
 import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
 import BusinessAttachmentLinks from '../../shared/components/BusinessAttachmentLinks';
-import { getActiveCommissions } from '../../shared/utils/financeSettlementPresentation';
+import { getCurrentSettlementRoundCommissions } from '../../shared/utils/financeSettlementPresentation';
 import { getRecoveryEvidenceAttachments } from '../../shared/utils/recoveryEvidence';
 import { buildCommissionPayoutPlanSnapshot } from '../../shared/utils/commissionConfiguration';
 import BusinessExportDialog, { type BusinessExportDialogRequest } from '../../shared/components/BusinessExportDialog';
 import { buildBusinessExportBrowserRequest, unwrapBusinessExportResponse } from '../../shared/utils/businessExportPageRequest';
 import SettlementStatusChip from '../../shared/components/SettlementStatusChip';
+import OperationFeedbackDialog from '../../shared/components/OperationFeedbackDialog';
 import { SettlementCompactDetailItem, SettlementDetailCard } from '../../shared/components/SettlementDetailUi';
+import SettlementOperationTimeline from '../../shared/components/SettlementOperationTimeline';
 import { SETTLEMENT_STATUSES, normalizeSettlementStatus } from '../../shared/utils/settlementStatus';
+import { getSettlementRowActionVisibility } from '../../shared/settlementListActions';
+import RecoveryOrderDetailContent from '../../shared/components/RecoveryOrderDetailContent';
 
 const shell = {
   ink: '#0f172a',
@@ -308,6 +312,76 @@ function getSourcePlatformShop(order: RecoveryOrder): string {
     .join(' / ');
 }
 
+function buildRecoverySettlementEvents(order: RecoveryOrder) {
+  const histories = (order.changeHistory || [])
+    .filter((history) => history.action === 'settlement' || history.action === 'review')
+    .slice()
+    .sort((left, right) => new Date(left.changedAt).getTime() - new Date(right.changedAt).getTime());
+  let round = 1;
+  const events = histories.map((history) => {
+    if (history.summary.includes('重新打开')) round += 1;
+    const action = history.summary.includes('重新打开')
+      ? '重新分账'
+      : history.summary.includes('重置')
+        ? '重置分账'
+        : history.summary.includes('确认')
+          ? '确认分账'
+          : history.summary.includes('撤回')
+            ? '撤回提成'
+            : history.summary.includes('调整')
+              ? '调整分账'
+              : history.summary.includes('创建')
+                ? '创建分账'
+                : '审核通过';
+    const statusTransition = action === '重新分账'
+      ? '已撤回 → 待处理'
+      : action === '重置分账'
+        ? '待确认 → 待处理'
+        : action === '确认分账'
+          ? '待确认 → 待发放'
+          : action === '撤回提成'
+            ? '未发放 → 已撤回'
+            : action === '审核通过'
+              ? '待审核 → 待处理'
+              : action === '创建分账'
+                ? '待处理 → 待确认'
+                : '待确认 → 待确认';
+    return {
+      id: history.id,
+      action,
+      summary: history.summary,
+      operator: history.operator,
+      operatedAt: formatDate(history.changedAt, 'yyyy-MM-dd HH:mm'),
+      roundLabel: action === '审核通过' ? '进入分账前' : `第 ${round} 轮`,
+      statusTransition,
+      reason: history.reason,
+      changes: history.changes?.length
+        ? history.changes.map((change) => ({
+          label: change.label,
+          before: String(change.before ?? '-'),
+          after: String(change.after ?? '-'),
+        }))
+        : action === '审核通过'
+          ? []
+          : [{ label: '历史记录', value: '历史记录仅保留操作结果，暂无调整前后差异。' }],
+    };
+  });
+  if (!events.length && order.auditedAt) {
+    events.push({
+      id: `audit-${order.id}`,
+      action: '审核通过',
+      summary: '售后挽回订单已进入待处理',
+      operator: order.auditorName || '-',
+      operatedAt: formatDate(order.auditedAt, 'yyyy-MM-dd HH:mm'),
+      roundLabel: '进入分账前',
+      statusTransition: '待审核 → 待处理',
+      reason: undefined,
+      changes: [],
+    });
+  }
+  return events.reverse();
+}
+
 function RecoverySettlementBusinessPaymentSummary({ order }: { order: RecoveryOrder }) {
   return (
     <Box
@@ -350,6 +424,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
 }) => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const canManageRecoverySettlement = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'write');
+  const canViewRecoveryHistory = hasPermission(currentUser, PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY, 'read');
   const canCleanupDeletedSettlement = isSuperAdmin(currentUser) || isSuperAdminRoleName(currentUser?.role);
   const [rows, setRows] = useState<RecoveryOrder[]>([]);
   const [settlementCounts, setSettlementCounts] = useState<Record<string, number>>({});
@@ -389,6 +464,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   const [selectedCreatableRecoveryId, setSelectedCreatableRecoveryId] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<RecoveryOrder | null>(null);
   const [deleteReason, setDeleteReason] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [withdrawTarget, setWithdrawTarget] = useState<RecoveryOrder | null>(null);
   const [withdrawReason, setWithdrawReason] = useState('');
   const [reopenTarget, setReopenTarget] = useState<RecoveryOrder | null>(null);
@@ -578,6 +654,10 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     }];
   };
 
+  const getCurrentDetailRows = (order: RecoveryOrder): SettlementDetailRow[] => (
+    getCurrentSettlementRoundCommissions(getDetailRows(order), order)
+  );
+
   const getSettlementCommissionsForOrder = (order: RecoveryOrder): Commission[] => {
     const commissionIds = new Set(order.commissionIds || []);
     return settlementCommissions.filter((commission) => (
@@ -590,7 +670,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
 
   const getRowFinanceSummary = (order: RecoveryOrder) => {
     const all = getSettlementCommissionsForOrder(order);
-    const active = getActiveCommissions(all);
+    const active = getCurrentSettlementRoundCommissions(all, order);
     const paidDates = active
       .map((commission) => commission.paidAt)
       .filter((value): value is string => Boolean(value))
@@ -731,7 +811,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
   const loadRecoveryCommissions = async (order: RecoveryOrder): Promise<Commission[]> => {
     try {
       const commissionIds = new Set(order.commissionIds || []);
-      const res = await commissionApi.fetchCommissions({ page: 1, pageSize: 500 });
+      const res = await commissionApi.fetchCommissions({ page: 1, pageSize: 5000 });
       if (res.code !== 0) {
         setMessage({ type: 'error', text: res.message || '读取售后挽回分账明细失败' });
         return [];
@@ -811,8 +891,9 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     setReason(rowStatus === '待确认' ? order.auditReason || '' : '');
     if (rowStatus === '待确认') {
       const commissions = await loadRecoveryCommissions(order);
-      if (commissions.length) {
-        setSettlementRows(commissions.map((commission) => ({
+      const currentCommissions = getCurrentSettlementRoundCommissions(commissions, order);
+      if (currentCommissions.length) {
+        setSettlementRows(currentCommissions.map((commission) => ({
           role: commission.role || DEFAULT_RECOVERY_ROLE,
           ownerId: commission.ownerId || '',
           payoutPlanId: commission.payoutPlanId || CUSTOM_PLAN_ID,
@@ -909,9 +990,19 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       setMessage({ type: 'error', text: res.message || '确认售后挽回分账失败' });
       return;
     }
-    if (res.data) applySettlementMutation(row, res.data);
+    if (res.data) {
+      applySettlementMutation(row, res.data);
+      if (detailOrder?.id === row.id) {
+        setDetailOrder(res.data);
+        setDetailLoading(true);
+        try {
+          setDetailCommissions(await loadRecoveryCommissions(res.data));
+        } finally {
+          setDetailLoading(false);
+        }
+      }
+    }
     setSelected(null);
-    closeDetail();
     setMessage({ type: 'success', text: '已确认售后挽回分账，进入待发放' });
     await load();
   };
@@ -928,9 +1019,19 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       setMessage({ type: 'error', text: res.message || '撤回售后挽回分账失败' });
       return;
     }
-    if (res.data) applySettlementMutation(row, res.data);
+    if (res.data) {
+      applySettlementMutation(row, res.data);
+      if (detailOrder?.id === row.id) {
+        setDetailOrder(res.data);
+        setDetailLoading(true);
+        try {
+          setDetailCommissions(await loadRecoveryCommissions(res.data));
+        } finally {
+          setDetailLoading(false);
+        }
+      }
+    }
     setSelected(null);
-    closeDetail();
     setWithdrawTarget(null);
     setWithdrawReason('');
     setMessage({ type: 'success', text: '已撤回售后挽回分账' });
@@ -946,10 +1047,19 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       setMessage({ type: 'error', text: response.message || '重新分账失败' });
       return;
     }
+    const keepDetailOpen = detailOrder?.id === reopenTarget.id;
     applySettlementMutation(reopenTarget, response.data);
     setReopenTarget(null);
     setReopenReason('');
-    setDetailOrder(null);
+    if (keepDetailOpen) {
+      setDetailOrder(response.data);
+      setDetailLoading(true);
+      try {
+        setDetailCommissions(await loadRecoveryCommissions(response.data));
+      } finally {
+        setDetailLoading(false);
+      }
+    }
     setMessage({ type: 'success', text: '已创建新的分账轮次，售后挽回订单已退回待处理' });
     await load();
   };
@@ -974,26 +1084,50 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     if (!currentUser) return;
     if (!deleteTarget) return;
     const cleanupDeletedSource = isSourceRecoveryDeleted(deleteTarget);
+    const keepDetailOpen = detailOrder?.id === deleteTarget.id;
     if (cleanupDeletedSource ? !canCleanupDeletedSettlement : !canManageRecoverySettlement) return;
     if (!deleteReason.trim()) {
       setMessage({ type: 'error', text: cleanupDeletedSource ? '请填写清理原因' : '请填写重置原因' });
       return;
     }
-    const res = cleanupDeletedSource
-      ? await recoveryOrderApi.cleanupDeletedRecoverySettlement(deleteTarget.id, deleteReason)
-      : await recoveryOrderApi.resetRecoverySettlement(deleteTarget.id, currentUser.name, deleteReason);
-    if (res.code !== 0) {
-      setMessage({ type: 'error', text: res.message || (cleanupDeletedSource ? '清理废弃售后挽回分账失败' : '重置售后挽回分账失败') });
-      return;
+    setDeleteLoading(true);
+    try {
+      const res = cleanupDeletedSource
+        ? await recoveryOrderApi.cleanupDeletedRecoverySettlement(deleteTarget.id, deleteReason)
+        : await recoveryOrderApi.resetRecoverySettlement(deleteTarget.id, currentUser.name, deleteReason);
+      if (res.code !== 0) {
+        setMessage({ type: 'error', text: res.message || (cleanupDeletedSource ? '清理废弃售后挽回分账失败' : '重置售后挽回分账失败') });
+        return;
+      }
+      if (!cleanupDeletedSource && res.data) applySettlementMutation(deleteTarget, res.data);
+      setDeleteTarget(null);
+      setDeleteReason('');
+      setSelected(null);
+      if (cleanupDeletedSource) closeDetail();
+      if (!cleanupDeletedSource && res.data && keepDetailOpen) {
+        setDetailOrder(res.data);
+        setDetailLoading(true);
+        try {
+          setDetailCommissions(await loadRecoveryCommissions(res.data));
+        } finally {
+          setDetailLoading(false);
+        }
+      }
+      setMessage({
+        type: 'success',
+        text: cleanupDeletedSource ? '已清理废弃售后挽回分账' : '已重置售后挽回分账，订单已退回待处理',
+      });
+      await load();
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: error instanceof Error
+          ? error.message
+          : (cleanupDeletedSource ? '清理废弃售后挽回分账失败' : '重置售后挽回分账失败'),
+      });
+    } finally {
+      setDeleteLoading(false);
     }
-    if (!cleanupDeletedSource && res.data) applySettlementMutation(deleteTarget, res.data);
-    setDeleteTarget(null);
-    setDeleteReason('');
-    setMessage({
-      type: 'success',
-      text: cleanupDeletedSource ? '已清理废弃售后挽回分账' : '已重置售后挽回分账，订单已退回待处理',
-    });
-    await load();
   };
 
   const canAdjustSettlement = (row: RecoveryOrder) => {
@@ -1123,7 +1257,9 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
     }
   };
 
-  const renderActions = (row: RecoveryOrder) => (
+  const renderActions = (row: RecoveryOrder) => {
+    const actionVisibility = getSettlementRowActionVisibility(getSettlementStatus(row), isSourceRecoveryDeleted(row));
+    return (
     <Stack direction="row" spacing={0.25} justifyContent="center">
       <Tooltip title="查看">
         <IconButton size="small" sx={{ color: shell.blue }} onClick={() => openDetail(row)} aria-label="查看分账">
@@ -1132,7 +1268,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       </Tooltip>
       {(canManageRecoverySettlement || canCleanupDeletedSettlement) && (
         <>
-          <Tooltip title={getAdjustDisabledReason(row)}>
+          {actionVisibility.showAdjust && <Tooltip title={getAdjustDisabledReason(row)}>
             <span>
               <IconButton
                 size="small"
@@ -1144,8 +1280,8 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                 <EditIcon fontSize="small" />
               </IconButton>
             </span>
-          </Tooltip>
-          {getSettlementStatus(row) === '已撤回' && !isSourceRecoveryDeleted(row) && (
+          </Tooltip>}
+          {actionVisibility.showReopen && (
             <Tooltip title="重新分账">
               <span>
                 <IconButton
@@ -1160,7 +1296,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
               </span>
             </Tooltip>
           )}
-          <Tooltip title={getDeleteDisabledReason(row)}>
+          {actionVisibility.showResetOrCleanup && <Tooltip title={getDeleteDisabledReason(row)}>
             <span>
               <IconButton
                 size="small"
@@ -1178,11 +1314,12 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                   : <RestartAltIcon fontSize="small" />}
               </IconButton>
             </span>
-          </Tooltip>
+          </Tooltip>}
         </>
       )}
     </Stack>
-  );
+    );
+  };
 
   const getFrozenColumnSx = (columnIndex: number, header = false) => {
     if (columnIndex >= viewConfig.frozenColumnCount) return {};
@@ -1200,7 +1337,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
 
   return (
     <Box sx={{ display: 'grid', gap: 0 }}>
-      {message && <Alert severity={message.type} onClose={() => setMessage(null)}>{message.text}</Alert>}
+      <OperationFeedbackDialog open={Boolean(message)} severity={message?.type} message={message?.text || ''} onClose={() => setMessage(null)} />
 
       <StatusSegmentBar
         value={status}
@@ -1380,71 +1517,36 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         sx={{ border: `1px solid ${shell.line}`, borderTop: 0, bgcolor: '#fff', '& .MuiTablePagination-toolbar': { minHeight: 44 }, '& .MuiTablePagination-selectLabel, & .MuiTablePagination-displayedRows': { my: 0 } }}
       />
 
-      <Dialog open={Boolean(sourceDetailOrder)} onClose={closeSourceDetail} maxWidth="md" fullWidth>
-        <DialogCloseTitle onClose={closeSourceDetail}>售后挽回订单资料</DialogCloseTitle>
-        <DialogContent dividers>
-          {sourceDetailOrder && (
-            <Stack spacing={2}>
-              {sourceDetailLoading && <Typography variant="body2" sx={{ color: shell.muted }}>正在加载完整资料...</Typography>}
-              <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 2 }}>
-                <Typography variant="subtitle1" sx={{ mb: 1.5, color: shell.ink, fontWeight: 900 }}>源业务资料</Typography>
-                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 2 }}>
-                  {[
-                    { label: '挽回订单号', value: sourceDetailOrder.recoveryNo },
-                    { label: '客户名称', value: sourceDetailOrder.customerName },
-                    { label: '客户匹配状态', value: sourceDetailOrder.customerMatchStatus || '-' },
-                    { label: '客户手机号', value: sourceDetailOrder.customerPhone || '-' },
-                    { label: '客户微信', value: sourceDetailOrder.customerWechat || '-' },
-                    { label: '第三方平台订单号', value: sourceDetailOrder.thirdPartyOrderNo || '-' },
-                    { label: '来源平台 / 店铺', value: getSourcePlatformShop(sourceDetailOrder) || '-' },
-                    { label: '原购买产品', value: sourceDetailOrder.originalProduct || '-' },
-                    { label: '原产品等级', value: sourceDetailOrder.originalProductLevel || '-' },
-                    { label: '原付款金额', value: formatCurrency(sourceDetailOrder.originalAmount) },
-                    { label: '挽回人员', value: sourceDetailOrder.recoveryUserName || '-' },
-                    { label: '协助人员', value: sourceDetailOrder.assistUserName || '-' },
-                    { label: '挽回成交时间', value: sourceDetailOrder.recoveryAt ? formatDate(sourceDetailOrder.recoveryAt, 'yyyy-MM-dd HH:mm') : '-' },
-                    { label: '订单状态', value: sourceDetailOrder.status || '-' },
-                    { label: '订单创建人', value: sourceDetailOrder.createdByName || '-' },
-                    { label: '创建时间', value: formatDate(sourceDetailOrder.createdAt, 'yyyy-MM-dd HH:mm') },
-                    { label: '审核人', value: sourceDetailOrder.auditorName || '-' },
-                    { label: '审核时间', value: sourceDetailOrder.auditedAt ? formatDate(sourceDetailOrder.auditedAt, 'yyyy-MM-dd HH:mm') : '-' },
-                  ].map((item) => (
-                    <Box key={item.label}>
-                      <Typography variant="body2" sx={{ color: shell.muted }}>{item.label}</Typography>
-                      <Typography variant="body1" sx={{ color: shell.ink, fontWeight: 700, overflowWrap: 'anywhere' }}>{item.value}</Typography>
-                    </Box>
-                  ))}
-                  <Box sx={{ gridColumn: { md: '1 / -1' } }}>
-                    <Typography variant="body2" sx={{ color: shell.muted }}>备注</Typography>
-                    <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>{sourceDetailOrder.remark || '-'}</Typography>
-                  </Box>
-                </Box>
-              </Paper>
-
-              <Paper elevation={0} sx={{ border: `1px solid ${shell.line}`, borderRadius: 1, p: 2 }}>
-                <Typography variant="subtitle1" sx={{ mb: 1.5, color: shell.ink, fontWeight: 900 }}>付款资料</Typography>
-                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, 1fr)' }, gap: 2, mb: 2 }}>
-                  {[
-                    { label: '挽回成交金额', value: formatCurrency(sourceDetailOrder.recoveryAmount) },
-                    { label: '官方收款渠道', value: sourceDetailOrder.officialPaymentChannel || '-' },
-                    { label: '付款订单号', value: sourceDetailOrder.paymentOrderNo || '-' },
-                    { label: '付款时间', value: sourceDetailOrder.paymentAt ? formatDate(sourceDetailOrder.paymentAt, 'yyyy-MM-dd HH:mm') : '-' },
-                  ].map((item) => (
-                    <Box key={item.label}>
-                      <Typography variant="body2" sx={{ color: shell.muted }}>{item.label}</Typography>
-                      <Typography variant="body1" sx={{ color: shell.ink, fontWeight: 700, overflowWrap: 'anywhere' }}>{item.value}</Typography>
-                    </Box>
-                  ))}
-                </Box>
-                <Typography variant="subtitle2" sx={{ mb: 1, color: shell.muted }}>挽回凭证</Typography>
-                <RecoveryEvidenceLinks order={sourceDetailOrder} />
-              </Paper>
-            </Stack>
-          )}
+      <Dialog
+        open={Boolean(sourceDetailOrder)}
+        onClose={closeSourceDetail}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{ sx: { maxHeight: { xs: '100dvh', sm: '94vh' }, bgcolor: '#f8fafc' } }}
+      >
+        <DialogCloseTitle onClose={closeSourceDetail} sx={{ px: { xs: 2, sm: 3 }, py: 2, bgcolor: '#fff' }}>
+          <Typography variant="h6" sx={{ color: '#0f172a', fontWeight: 850 }}>售后挽回订单详情</Typography>
+        </DialogCloseTitle>
+        <DialogContent sx={{ px: { xs: 1.5, sm: 3 }, py: 2.5, bgcolor: '#f8fafc' }}>
+          {sourceDetailLoading ? (
+            <Typography variant="body2" sx={{ color: shell.muted, mb: 2 }}>正在加载完整资料...</Typography>
+          ) : null}
+          {sourceDetailOrder ? (
+            <RecoveryOrderDetailContent
+              order={sourceDetailOrder}
+              canViewHistory={canViewRecoveryHistory}
+            />
+          ) : null}
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(detailOrder) && !selected} onClose={closeDetail} maxWidth="xl" fullWidth>
+      <Dialog
+        open={Boolean(detailOrder) && !selected}
+        onClose={closeDetail}
+        maxWidth={false}
+        fullWidth
+        PaperProps={{ sx: { width: '1480px', maxWidth: 'calc(100% - 32px)' } }}
+      >
         <DialogCloseTitle onClose={closeDetail}>售后挽回分账处理</DialogCloseTitle>
         <DialogContent dividers sx={{ bgcolor: '#f8fafc' }}>
           {detailOrder && (
@@ -1471,8 +1573,8 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                   </Box>
                   {[
                     { label: '挽回成交金额', value: formatCurrency(detailOrder.recoveryAmount), color: shell.teal },
-                    { label: '分账总额', value: formatCurrency(getDetailRows(detailOrder).reduce((sum, item) => sum + item.commissionAmount, 0)), color: '#d97706' },
-                    { label: '提成角色', value: `${getDetailRows(detailOrder).length} 个`, color: shell.blue },
+                    { label: '分账总额', value: formatCurrency(getCurrentDetailRows(detailOrder).reduce((sum, item) => sum + item.commissionAmount, 0)), color: '#d97706' },
+                    { label: '提成角色', value: `${getCurrentDetailRows(detailOrder).length} 个`, color: shell.blue },
                     { label: '第三方订单', value: detailOrder.thirdPartyOrderNo || '-', color: shell.muted },
                   ].map((item) => (
                     <Box
@@ -1515,20 +1617,6 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                         按角色核对人员、方案和金额，售后挽回分账只保留在售后挽回链路。
                       </Typography>
                     </Box>
-                    {canManageRecoverySettlement && (
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<EditIcon />}
-                        disabled={isSourceRecoveryDeleted(detailOrder) || (getSettlementStatus(detailOrder) !== '待处理' && getSettlementStatus(detailOrder) !== '待确认')}
-                        onClick={() => {
-                          openSettlement(detailOrder);
-                        }}
-                        sx={{ whiteSpace: 'nowrap' }}
-                      >
-                        调整分账
-                      </Button>
-                    )}
                   </Box>
 
                   <Box sx={{ p: 1.5, bgcolor: '#f8fafc', minHeight: '48vh' }}>
@@ -1614,7 +1702,11 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                   </Box>
                 </Paper>
 
-                <Stack spacing={1.5} sx={{ minWidth: 0 }}>
+                <Stack
+                  data-testid="recovery-settlement-detail-sidebar"
+                  spacing={1.5}
+                  sx={{ minWidth: 0, minHeight: 0, height: { xs: 'auto', lg: '100%' } }}
+                >
                   <Paper elevation={0} sx={{ border: '1px solid #dbeafe', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
                     <Box sx={{ px: 1.5, py: 1.1, borderBottom: '1px solid #dbeafe', bgcolor: '#f8fbff' }}>
                       <Typography variant="subtitle2" sx={{ color: shell.blue, fontWeight: 900 }}>当前动作</Typography>
@@ -1633,6 +1725,20 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                                 ? '本轮提成已撤回并保留为只读历史，可重新分账创建新轮次。'
                                 : '提成已发放，第一版不支持系统内撤回或冲销，请在线下处理并保留说明。'}
                       </Typography>
+                      {isSourceRecoveryDeleted(detailOrder) && canCleanupDeletedSettlement && (
+                        <Button
+                          variant="contained"
+                          color="error"
+                          startIcon={<DeleteSweepIcon />}
+                          disabled={!canDeleteSettlement(detailOrder)}
+                          onClick={() => openResetSettlementDialog(detailOrder)}
+                        >
+                          清理废弃记录
+                        </Button>
+                      )}
+                      {isSourceRecoveryDeleted(detailOrder) && !canDeleteSettlement(detailOrder) && (
+                        <Typography variant="caption" sx={{ color: shell.amber }}>{getDeleteDisabledReason(detailOrder)}</Typography>
+                      )}
                       {canManageRecoverySettlement && (
                         <>
                           {!isSourceRecoveryDeleted(detailOrder) && getSettlementStatus(detailOrder) === '待处理' && (
@@ -1715,59 +1821,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                     </Stack>
                   </Paper>
 
-                  <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
-                    <Box sx={{ px: 1.5, py: 1.1, borderBottom: '1px solid #eef2f7' }}>
-                      <Typography variant="subtitle2" sx={{ color: shell.ink, fontWeight: 900 }}>处理记录</Typography>
-                    </Box>
-                    <Box sx={{ p: 1.5 }}>
-                      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1, mb: 1.5 }}>
-                        {[
-                          { label: '当前状态', value: getSettlementStatus(detailOrder) },
-                          { label: '分账经办人', value: detailOrder.settlementHandledBy || '-' },
-                          { label: '保存时间', value: detailOrder.settlementHandledAt ? formatDate(detailOrder.settlementHandledAt, 'yyyy-MM-dd HH:mm') : '-' },
-                          { label: '确认时间', value: detailOrder.settlementConfirmedAt ? formatDate(detailOrder.settlementConfirmedAt, 'yyyy-MM-dd HH:mm') : '-' },
-                          { label: '发放时间', value: getRowFinanceSummary(detailOrder).paidAt ? formatDate(getRowFinanceSummary(detailOrder).paidAt!, 'yyyy-MM-dd HH:mm') : '-' },
-                          { label: '撤回人', value: detailOrder.settlementWithdrawnBy || '-' },
-                          { label: '撤回时间', value: detailOrder.settlementWithdrawnAt ? formatDate(detailOrder.settlementWithdrawnAt, 'yyyy-MM-dd HH:mm') : '-' },
-                          { label: '撤回原因', value: detailOrder.settlementWithdrawReason || (getSettlementStatus(detailOrder) === '已撤回' ? detailOrder.auditReason : '') || '-' },
-                        ].map((item) => (
-                          <Box key={item.label} sx={{ minWidth: 0 }}>
-                            <Typography variant="caption" sx={{ color: shell.muted }}>{item.label}</Typography>
-                            <Typography variant="body2" sx={{ color: shell.ink, fontWeight: 800, overflowWrap: 'anywhere' }}>{item.value}</Typography>
-                          </Box>
-                        ))}
-                      </Box>
-                      <Stack spacing={1.25} sx={{ maxHeight: '42vh', overflowY: 'auto', overflowX: 'hidden', pr: 0.5, minWidth: 0 }}>
-                        {detailOrder.auditedAt && (
-                          <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderLeft: `3px solid ${shell.green}`, borderRadius: 1, p: 1.1 }}>
-                            <Stack direction="row" justifyContent="space-between" spacing={1}>
-                              <Chip label="审核通过" size="small" color="success" sx={{ height: 22 }} />
-                              <Typography variant="caption" sx={{ color: shell.muted }}>{formatDate(detailOrder.auditedAt, 'MM-dd HH:mm')}</Typography>
-                            </Stack>
-                            <Typography variant="body2" sx={{ mt: 0.75, color: shell.ink, fontWeight: 700 }}>
-                              售后挽回订单已进入待处理
-                            </Typography>
-                            <Typography variant="caption" sx={{ color: shell.muted }}>{detailOrder.auditorName || '-'}</Typography>
-                          </Paper>
-                        )}
-                        {(getSettlementStatus(detailOrder) === '待确认' || getSettlementStatus(detailOrder) === '待发放' || getSettlementStatus(detailOrder) === '已撤回') && (
-                          <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderLeft: `3px solid ${shell.blue}`, borderRadius: 1, p: 1.1 }}>
-                            <Stack direction="row" justifyContent="space-between" spacing={1}>
-                              <Chip label={getSettlementStatus(detailOrder) === '待确认' ? '保存分账' : getSettlementStatus(detailOrder) === '待发放' ? '确认分账' : '撤回提成'} size="small" color="primary" sx={{ height: 22 }} />
-                              <Typography variant="caption" sx={{ color: shell.muted }}>{formatDate(detailOrder.updatedAt, 'MM-dd HH:mm')}</Typography>
-                            </Stack>
-                            <Typography variant="body2" sx={{ mt: 0.75, color: shell.ink, fontWeight: 700 }}>
-                              {getDetailRows(detailOrder).length} 个角色 · 合计 {formatCurrency(getDetailRows(detailOrder).reduce((sum, item) => sum + item.commissionAmount, 0))}
-                            </Typography>
-                            <Typography variant="caption" sx={{ color: shell.muted }}>{detailOrder.auditReason || '-'}</Typography>
-                          </Paper>
-                        )}
-                        {!detailOrder.auditedAt && getSettlementStatus(detailOrder) === '待处理' && (
-                          <Typography variant="body2" sx={{ color: '#9ca3af' }}>暂无分账修改记录</Typography>
-                        )}
-                      </Stack>
-                    </Box>
-                  </Paper>
+                  <SettlementOperationTimeline compact events={buildRecoverySettlementEvents(detailOrder)} />
                 </Stack>
               </Box>
             </Stack>
@@ -1875,7 +1929,13 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         </DialogActions>
       </Dialog>
 
-      <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} maxWidth="xl" fullWidth>
+      <Dialog
+        open={Boolean(selected)}
+        onClose={() => setSelected(null)}
+        maxWidth={false}
+        fullWidth
+        PaperProps={{ sx: { width: '1480px', maxWidth: 'calc(100% - 32px)' } }}
+      >
         <DialogCloseTitle onClose={() => setSelected(null)}>售后挽回分账处理</DialogCloseTitle>
         <DialogContent dividers sx={{ bgcolor: '#f8fafc' }}>
           {selected && (
@@ -2197,6 +2257,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       <Dialog
         open={Boolean(deleteTarget)}
         onClose={() => {
+          if (deleteLoading) return;
           setDeleteTarget(null);
           setDeleteReason('');
         }}
@@ -2205,6 +2266,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
       >
         <DialogCloseTitle
           onClose={() => {
+            if (deleteLoading) return;
             setDeleteTarget(null);
             setDeleteReason('');
           }}
@@ -2230,6 +2292,7 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
                 label={isSourceRecoveryDeleted(deleteTarget) ? '清理原因' : '重置原因'}
                 value={deleteReason}
                 onChange={(event) => setDeleteReason(event.target.value)}
+                disabled={deleteLoading}
                 placeholder={isSourceRecoveryDeleted(deleteTarget) ? '例如：源单已废弃，清理财务列表残留' : '例如：人员选错、方案错误，需要重新分账'}
                 multiline
                 minRows={3}
@@ -2241,14 +2304,15 @@ const RecoverySettlement: React.FC<RecoverySettlementProps> = ({
         </DialogContent>
         <DialogActions>
           <Button onClick={() => {
+            if (deleteLoading) return;
             setDeleteTarget(null);
             setDeleteReason('');
-          }}>
+          }} disabled={deleteLoading}>
             取消
           </Button>
           {(canManageRecoverySettlement || canCleanupDeletedSettlement) && (
-            <Button color="error" variant="contained" onClick={handleResetSettlement} disabled={!deleteReason.trim()}>
-              {deleteTarget && isSourceRecoveryDeleted(deleteTarget) ? '确认清理' : '确认重置'}
+            <Button color="error" variant="contained" onClick={handleResetSettlement} disabled={!deleteReason.trim() || deleteLoading}>
+              {deleteLoading ? '处理中…' : deleteTarget && isSourceRecoveryDeleted(deleteTarget) ? '确认清理' : '确认重置'}
             </Button>
           )}
         </DialogActions>

@@ -21,6 +21,7 @@ import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { jsonText, queryBusinessRecordPage, visibleJsonCondition } from './businessRecordPageService';
 import { compactOrderApplicationListItem, compactOrderListItem } from '../../src/shared/utils/listPayload';
 import { deriveOrderListSettlementProgress } from '../../src/shared/utils/orderSettlementProgress';
+import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 
 type OrderQueryPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$queryRaw'>;
 
@@ -404,12 +405,16 @@ export function createOrderQueryService(
       if (!order) return failure<Order>('订单数据损坏，请先修复数据', 409);
       if (order.deletedAt) return failure<Order>('订单不存在', 404);
       if (!orderIsVisible(order, scope)) return failure<Order>('无权查看该订单', 403);
-      if (!order.createdByName && order.sourceApplicationId) {
+      const canViewHistory = hasPermission(actor, PERMISSION_KEYS.ORDER_HISTORY);
+      let sourceApplication: OrderApplication | null = null;
+      if (order.sourceApplicationId && (!order.createdByName || canViewHistory)) {
         const applicationRow = await prisma.businessRecord.findUnique({
           where: { domain_recordId: { domain: STORAGE_KEYS.ORDER_APPLICATIONS, recordId: order.sourceApplicationId } },
         });
-        const application = applicationRow ? parseRecord<OrderApplication>(applicationRow.data) : null;
-        if (application) order = enrichOrderCreator(order, new Map([[application.id, application]]));
+        sourceApplication = applicationRow ? parseRecord<OrderApplication>(applicationRow.data) : null;
+        if (sourceApplication && !order.createdByName) {
+          order = enrichOrderCreator(order, new Map([[sourceApplication.id, sourceApplication]]));
+        }
       }
       order = await enrichLegacyOrderLeadSource(prisma, order);
       const commissions = (commissionRows as BusinessRecordRow[])
@@ -421,7 +426,12 @@ export function createOrderQueryService(
           && commission.sourceBusinessType !== 'refund_recovery'
           && !commission.sourceRecoveryOrderId,
         ));
-      order = { ...order, settlementStatus: deriveOrderListSettlementProgress(commissions) };
+      order = {
+        ...order,
+        settlementStatus: deriveOrderListSettlementProgress(commissions),
+        changeHistory: canViewHistory ? order.changeHistory || [] : undefined,
+        reviewLogs: canViewHistory ? sourceApplication?.reviewLogs || [] : undefined,
+      };
       return success(order);
     },
 

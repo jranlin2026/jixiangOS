@@ -44,7 +44,7 @@ function getProductName(productId?: string, productLevel?: string, fallback?: st
 }
 
 function normalizeOrder(order: Order): Order {
-  const sourceApplication = !order.createdByName && order.sourceApplicationId
+  const sourceApplication = order.sourceApplicationId
     ? (getStorageData<OrderApplication[]>(STORAGE_KEYS.ORDER_APPLICATIONS) || [])
       .find((application) => application.id === order.sourceApplicationId)
     : undefined;
@@ -52,6 +52,7 @@ function normalizeOrder(order: Order): Order {
     ...order,
     createdById: order.createdById || sourceApplication?.applicantId,
     createdByName: order.createdByName || sourceApplication?.applicantName,
+    reviewLogs: shouldUseBackendApi() ? order.reviewLogs : order.reviewLogs || sourceApplication?.reviewLogs,
     productName: getProductName(order.productId, order.productLevel, order.productName),
     resourceOwnership: normalizeResourceOwnership(order.resourceOwnership || order.sourceType),
   };
@@ -399,20 +400,64 @@ async function fetchOrderStats(): Promise<ApiResponse<OrderStats>> {
   return createSuccessResponse(stats);
 }
 
-async function createOrder(
+const LOCAL_ORDER_CREATE_TRANSACTION_KEYS = [
+  STORAGE_KEYS.ORDERS,
+  STORAGE_KEYS.COMMISSIONS,
+  STORAGE_KEYS.DELIVERIES,
+  STORAGE_KEYS.CUSTOMERS,
+  STORAGE_KEYS.LEADS,
+] as const;
+
+const LOCAL_ORDER_MUTATION_LOCK = 'jixiangos:local-order-mutation';
+let localOrderMutationTail: Promise<void> = Promise.resolve();
+
+type LocalOrderCreateStorageKey = typeof LOCAL_ORDER_CREATE_TRANSACTION_KEYS[number];
+
+async function withLocalOrderMutationLock<T>(operation: () => Promise<T>): Promise<T> {
+  if (typeof navigator !== 'undefined' && navigator.locks?.request) {
+    return navigator.locks.request(LOCAL_ORDER_MUTATION_LOCK, { mode: 'exclusive' }, operation);
+  }
+
+  const previous = localOrderMutationTail;
+  let releaseCurrent!: () => void;
+  const current = new Promise<void>((resolve) => {
+    releaseCurrent = resolve;
+  });
+  localOrderMutationTail = previous.catch(() => undefined).then(() => current);
+  await previous.catch(() => undefined);
+  try {
+    return await operation();
+  } finally {
+    releaseCurrent();
+  }
+}
+
+function captureLocalOrderCreateSnapshot(): Map<LocalOrderCreateStorageKey, string | null> {
+  return new Map(LOCAL_ORDER_CREATE_TRANSACTION_KEYS.map((key) => [key, localStorage.getItem(key)]));
+}
+
+function restoreLocalOrderCreateSnapshot(snapshot: Map<LocalOrderCreateStorageKey, string | null>): void {
+  LOCAL_ORDER_CREATE_TRANSACTION_KEYS.forEach((key) => {
+    const value = snapshot.get(key);
+    if (value === null || value === undefined) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  });
+}
+
+async function createLocalOrderUnlocked(
   data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'orderNo'>,
   trustedCreator?: Pick<User, 'id' | 'name'>,
 ): Promise<ApiResponse<Order>> {
-  if (shouldUseBackendApi()) {
-    return createErrorResponse('正式订单必须先提交订单申请并经财务审核入库', 409);
-  }
-
   ensureInit();
   await delay(200);
   const orderData = enrichOrderProductData(enrichOrderDataFromCustomer(data));
   const validationError = validateOrderAttribution(orderData);
   if (validationError) return createErrorResponse(validationError);
   const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
+  const existingSourceOrder = orderData.sourceApplicationId
+    ? orders.find((order) => order.sourceApplicationId === orderData.sourceApplicationId && !order.deletedAt)
+    : undefined;
+  if (existingSourceOrder) return createSuccessResponse(existingSourceOrder);
   const now = new Date().toISOString();
   const operator = getCurrentOperatorName(orderData.owner);
   const creator = trustedCreator || getCurrentOperatorUser();
@@ -435,145 +480,163 @@ async function createOrder(
       summary: '创建订单',
     }],
   };
-  orders.unshift(newOrder);
-  syncCustomerOrderStats(newOrder, orders, operator);
-  const commissionPaymentDate = newOrder.payments?.[0]?.paidAt || newOrder.createdAt;
+  const storageSnapshot = captureLocalOrderCreateSnapshot();
+  try {
+    orders.unshift(newOrder);
+    syncCustomerOrderStats(newOrder, orders, operator);
+    const commissionPaymentDate = newOrder.payments?.[0]?.paidAt || newOrder.createdAt;
 
-  // ===== 多角色自动分佣引擎 =====
-  // 根据订单制度字段匹配所有适用规则
-  const calcRes = await commissionRuleApi.calculateCommissionsForOrder(newOrder);
+    // ===== 多角色自动分佣引擎 =====
+    // 根据订单制度字段匹配所有适用规则
+    const calcRes = await commissionRuleApi.calculateCommissionsForOrder(newOrder);
 
-  if (calcRes.code === 0) {
-    commissionRuleApi.clawbackBaseCommissions(newOrder, calcRes.data);
-    const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
+    if (calcRes.code === 0) {
+      commissionRuleApi.clawbackBaseCommissions(newOrder, calcRes.data);
+      const commissions = getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [];
 
-    for (const calc of calcRes.data) {
-      const assignee = commissionRuleApi.resolveCommissionRoleAssignee(newOrder, calc.role, calc.assigneeSource);
-      const resolvedPersonName = calc.ownerOverride || assignee.owner;
-      const personName = calc.ownerOverride || commissionRuleApi.resolveCommissionRoleOwner(newOrder, calc.role) || '待分配';
-      commissions.unshift({
-        id: `comm-${uuidv4().slice(0, 8)}`,
-        orderId: newOrder.id,
-        orderNo: newOrder.orderNo,
-        customerName: newOrder.customerName,
-        productLevel: newOrder.productLevel,
-        orderAmount: newOrder.actualAmount || newOrder.amount,
-        commissionRate: calc.commissionRate,
-        commissionAmount: calc.commissionAmount,
-        performanceAmount: calc.performanceAmount,
-        scene: calc.scene,
-        resourceOwnership: calc.resourceOwnership,
-        proofStatus: calc.proofStatus,
-        calculationNote: calc.calculationNote,
-        auditReason: calc.auditReason,
-        evidenceRequired: calc.evidenceRequired,
-        evidenceStatus: calc.evidenceStatus,
-        formulaText: calc.formulaText,
-        payoutPlanId: calc.payoutPlanId,
-        payoutPlanName: calc.payoutPlanName,
-        payoutPlanVersion: calc.payoutPlanVersion,
-        payoutPlanSnapshot: calc.payoutPlanSnapshot,
-        ruleCalculationType: calc.commissionType,
-        tierSnapshot: calc.commissionType === 'tiered_percentage' && calc.tiers?.length
-          ? {
-            tiers: calc.tiers,
-            baseAmount: calc.performanceAmount,
-            nextTier: calc.tiers[0],
-            gapToNext: 0,
-          }
-          : undefined,
-        role: calc.role,
-        roleId: calc.roleId,
-        roleCode: calc.roleCode,
-        roleNameSnapshot: calc.roleNameSnapshot,
-        owner: resolvedPersonName,
-        ownerId: calc.ownerOverride ? undefined : assignee.ownerId,
-        department: calc.departmentOverride || assignee.department || ROLE_DEPARTMENT_MAP[calc.role],
-        departmentId: calc.departmentOverride ? undefined : assignee.departmentId,
-        paymentDate: commissionPaymentDate,
-        status: calc.status,
-        commissionRuleId: calc.ruleId,
-        sourceType: '自动规则',
-        createdAt: now,
-        updatedAt: now,
-      });
+      for (const calc of calcRes.data) {
+        const assignee = commissionRuleApi.resolveCommissionRoleAssignee(newOrder, calc.role, calc.assigneeSource);
+        const resolvedPersonName = calc.ownerOverride || assignee.owner;
+        const personName = calc.ownerOverride || commissionRuleApi.resolveCommissionRoleOwner(newOrder, calc.role) || '待分配';
+        commissions.unshift({
+          id: `comm-${uuidv4().slice(0, 8)}`,
+          orderId: newOrder.id,
+          orderNo: newOrder.orderNo,
+          customerName: newOrder.customerName,
+          productLevel: newOrder.productLevel,
+          orderAmount: newOrder.actualAmount || newOrder.amount,
+          commissionRate: calc.commissionRate,
+          commissionAmount: calc.commissionAmount,
+          performanceAmount: calc.performanceAmount,
+          scene: calc.scene,
+          resourceOwnership: calc.resourceOwnership,
+          proofStatus: calc.proofStatus,
+          calculationNote: calc.calculationNote,
+          auditReason: calc.auditReason,
+          evidenceRequired: calc.evidenceRequired,
+          evidenceStatus: calc.evidenceStatus,
+          formulaText: calc.formulaText,
+          payoutPlanId: calc.payoutPlanId,
+          payoutPlanName: calc.payoutPlanName,
+          payoutPlanVersion: calc.payoutPlanVersion,
+          payoutPlanSnapshot: calc.payoutPlanSnapshot,
+          ruleCalculationType: calc.commissionType,
+          tierSnapshot: calc.commissionType === 'tiered_percentage' && calc.tiers?.length
+            ? {
+              tiers: calc.tiers,
+              baseAmount: calc.performanceAmount,
+              nextTier: calc.tiers[0],
+              gapToNext: 0,
+            }
+            : undefined,
+          role: calc.role,
+          roleId: calc.roleId,
+          roleCode: calc.roleCode,
+          roleNameSnapshot: calc.roleNameSnapshot,
+          owner: resolvedPersonName,
+          ownerId: calc.ownerOverride ? undefined : assignee.ownerId,
+          department: calc.departmentOverride || assignee.department || ROLE_DEPARTMENT_MAP[calc.role],
+          departmentId: calc.departmentOverride ? undefined : assignee.departmentId,
+          paymentDate: commissionPaymentDate,
+          status: calc.status,
+          commissionRuleId: calc.ruleId,
+          sourceType: '自动规则',
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+
+      if (calcRes.data.length === 0) {
+        const salesAssignee = commissionRuleApi.resolveCommissionRoleAssignee(newOrder, '销售');
+        commissions.unshift({
+          id: `comm-${uuidv4().slice(0, 8)}`,
+          orderId: newOrder.id,
+          orderNo: newOrder.orderNo,
+          customerName: newOrder.customerName,
+          productLevel: newOrder.productLevel,
+          orderAmount: newOrder.actualAmount || newOrder.amount,
+          commissionRate: 0,
+          commissionAmount: 0,
+          performanceAmount: newOrder.performanceBaseAmount || newOrder.actualAmount || newOrder.amount,
+          scene: newOrder.dealScene,
+          resourceOwnership: newOrder.resourceOwnership,
+          proofStatus: newOrder.proofStatus,
+          calculationNote: '订单已付款，但当前规则配置未匹配到可用提成规则，需要财务检查产品等级、订单类型、成交场景、资源归属和收款渠道。',
+          auditReason: '规则未命中',
+          evidenceRequired: true,
+          evidenceStatus: '已齐全',
+          formulaText: '未匹配规则，暂不计算金额',
+          role: '销售',
+          owner: salesAssignee.owner || newOrder.salesName || newOrder.owner,
+          ownerId: salesAssignee.ownerId,
+          departmentId: salesAssignee.departmentId,
+          paymentDate: commissionPaymentDate,
+          department: ROLE_DEPARTMENT_MAP['销售'],
+          status: '待确认',
+          sourceType: '自动规则',
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      setStorageData(STORAGE_KEYS.COMMISSIONS, commissions);
     }
 
-    if (calcRes.data.length === 0) {
-      const salesAssignee = commissionRuleApi.resolveCommissionRoleAssignee(newOrder, '销售');
-      commissions.unshift({
-        id: `comm-${uuidv4().slice(0, 8)}`,
-        orderId: newOrder.id,
-        orderNo: newOrder.orderNo,
-        customerName: newOrder.customerName,
-        productLevel: newOrder.productLevel,
-        orderAmount: newOrder.actualAmount || newOrder.amount,
-        commissionRate: 0,
-        commissionAmount: 0,
-        performanceAmount: newOrder.performanceBaseAmount || newOrder.actualAmount || newOrder.amount,
-        scene: newOrder.dealScene,
-        resourceOwnership: newOrder.resourceOwnership,
-        proofStatus: newOrder.proofStatus,
-        calculationNote: '订单已付款，但当前规则配置未匹配到可用提成规则，需要财务检查产品等级、订单类型、成交场景、资源归属和收款渠道。',
-        auditReason: '规则未命中',
-        evidenceRequired: true,
-        evidenceStatus: '已齐全',
-        formulaText: '未匹配规则，暂不计算金额',
-        role: '销售',
-        owner: salesAssignee.owner || newOrder.salesName || newOrder.owner,
-        ownerId: salesAssignee.ownerId,
-        departmentId: salesAssignee.departmentId,
-        paymentDate: commissionPaymentDate,
-        department: ROLE_DEPARTMENT_MAP['销售'],
-        status: '待确认',
-        sourceType: '自动规则',
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
-    setStorageData(STORAGE_KEYS.COMMISSIONS, commissions);
+    // 自动创建交付
+    const deliveries = getStorageData<any[]>(STORAGE_KEYS.DELIVERIES) || [];
+    const stagesRes = await deliveryApi.fetchDeliveryStagesByProductType(data.productLevel);
+    const stages = stagesRes.code === 0 && stagesRes.data.length
+      ? stagesRes.data
+      : ['合同签订', '需求确认', '系统部署', '验收完成'];
+
+    deliveries.unshift({
+      id: `delivery-${uuidv4().slice(0, 8)}`,
+      orderId: newOrder.id,
+      orderNo: newOrder.orderNo,
+      customerId: newOrder.customerId,
+      customerName: newOrder.customerName,
+      productType: data.productLevel,
+      currentStage: stages[0],
+      stages,
+      tasks: stages.map((stage: string, index: number) => ({
+        id: `task-${uuidv4().slice(0, 8)}`,
+        title: stage,
+        description: `${stage}任务`,
+        status: index === 0 ? '进行中' : '待开始',
+        records: [],
+      })),
+      owner: '待分配',
+      salesOwner: newOrder.salesName || newOrder.owner,
+      salesOwnerId: newOrder.salesId,
+      orderAmount: newOrder.actualAmount,
+      paymentDate: newOrder.payments?.[0]?.paidAt || newOrder.createdAt,
+      orderType: newOrder.orderType || newOrder.dealScene,
+      status: '待开始',
+      priority: 'normal',
+      progressPercent: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    setStorageData(STORAGE_KEYS.DELIVERIES, deliveries);
+
+    setStorageData(STORAGE_KEYS.ORDERS, orders);
+    syncLifecycleByOrder(newOrder, 'ordered');
+    return createSuccessResponse(newOrder);
+  } catch (error) {
+    restoreLocalOrderCreateSnapshot(storageSnapshot);
+    const message = error instanceof Error && error.message.trim() ? error.message : '未知错误';
+    return createErrorResponse(`创建订单失败：${message}`);
+  }
+}
+
+async function createOrder(
+  data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'orderNo'>,
+  trustedCreator?: Pick<User, 'id' | 'name'>,
+): Promise<ApiResponse<Order>> {
+  if (shouldUseBackendApi()) {
+    return createErrorResponse('正式订单必须先提交订单申请并经财务审核入库', 409);
   }
 
-  // 自动创建交付
-  const deliveries = getStorageData<any[]>(STORAGE_KEYS.DELIVERIES) || [];
-  const stagesRes = await deliveryApi.fetchDeliveryStagesByProductType(data.productLevel);
-  const stages = stagesRes.code === 0 && stagesRes.data.length
-    ? stagesRes.data
-    : ['合同签订', '需求确认', '系统部署', '验收完成'];
-
-  deliveries.unshift({
-    id: `delivery-${uuidv4().slice(0, 8)}`,
-    orderId: newOrder.id,
-    orderNo: newOrder.orderNo,
-    customerId: newOrder.customerId,
-    customerName: newOrder.customerName,
-    productType: data.productLevel,
-    currentStage: stages[0],
-    stages,
-    tasks: stages.map((stage: string, index: number) => ({
-      id: `task-${uuidv4().slice(0, 8)}`,
-      title: stage,
-      description: `${stage}任务`,
-      status: index === 0 ? '进行中' : '待开始',
-      records: [],
-    })),
-    owner: '待分配',
-    salesOwner: newOrder.salesName || newOrder.owner,
-    salesOwnerId: newOrder.salesId,
-    orderAmount: newOrder.actualAmount,
-    paymentDate: newOrder.payments?.[0]?.paidAt || newOrder.createdAt,
-    orderType: newOrder.orderType || newOrder.dealScene,
-    status: '待开始',
-    priority: 'normal',
-    progressPercent: 0,
-    createdAt: now,
-    updatedAt: now,
-  });
-  setStorageData(STORAGE_KEYS.DELIVERIES, deliveries);
-
-  setStorageData(STORAGE_KEYS.ORDERS, orders);
-  syncLifecycleByOrder(newOrder, 'ordered');
-  return createSuccessResponse(newOrder);
+  return withLocalOrderMutationLock(() => createLocalOrderUnlocked(data, trustedCreator));
 }
 
 async function updateOrder(id: string, data: Partial<Order>): Promise<ApiResponse<Order | null>> {
@@ -588,37 +651,39 @@ async function updateOrder(id: string, data: Partial<Order>): Promise<ApiRespons
     return createSuccessResponse(cacheBackendOrder(response.data));
   }
 
-  ensureInit();
-  await delay(200);
-  const orders = (getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).map(normalizeOrder);
-  const idx = orders.findIndex((o) => o.id === id);
-  if (idx === -1) return createSuccessResponse(null);
-  const now = new Date().toISOString();
-  const existing = orders[idx];
-  const nextData = enrichOrderProductData(data);
-  const changes = buildOrderChanges(existing, nextData);
-  const history = existing.changeHistory || [];
-  const operator = getCurrentOperatorName(existing.owner);
-  orders[idx] = {
-    ...existing,
-    ...nextData,
-    resourceOwnership: normalizeResourceOwnership(nextData.resourceOwnership || nextData.sourceType || existing.resourceOwnership || existing.sourceType),
-    changeHistory: changes.length > 0
-      ? [{
-        id: `hist-${uuidv4().slice(0, 8)}`,
-        action: 'update',
-        operator,
-        changedAt: now,
-        summary: `修改了 ${changes.map((item) => item.label).join('、')}`,
-        changes,
-      }, ...history]
-      : history,
-    updatedAt: now,
-  };
-  setStorageData(STORAGE_KEYS.ORDERS, orders);
-  syncCustomerOrderStats(orders[idx], orders, operator);
-  syncLifecycleByOrder(orders[idx], 'ordered');
-  return createSuccessResponse(orders[idx]);
+  return withLocalOrderMutationLock(async () => {
+    ensureInit();
+    await delay(200);
+    const orders = (getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || []).map(normalizeOrder);
+    const idx = orders.findIndex((o) => o.id === id);
+    if (idx === -1) return createSuccessResponse(null);
+    const now = new Date().toISOString();
+    const existing = orders[idx];
+    const nextData = enrichOrderProductData(data);
+    const changes = buildOrderChanges(existing, nextData);
+    const history = existing.changeHistory || [];
+    const operator = getCurrentOperatorName(existing.owner);
+    orders[idx] = {
+      ...existing,
+      ...nextData,
+      resourceOwnership: normalizeResourceOwnership(nextData.resourceOwnership || nextData.sourceType || existing.resourceOwnership || existing.sourceType),
+      changeHistory: changes.length > 0
+        ? [{
+          id: `hist-${uuidv4().slice(0, 8)}`,
+          action: 'update',
+          operator,
+          changedAt: now,
+          summary: `修改了 ${changes.map((item) => item.label).join('、')}`,
+          changes,
+        }, ...history]
+        : history,
+      updatedAt: now,
+    };
+    setStorageData(STORAGE_KEYS.ORDERS, orders);
+    syncCustomerOrderStats(orders[idx], orders, operator);
+    syncLifecycleByOrder(orders[idx], 'ordered');
+    return createSuccessResponse(orders[idx]);
+  });
 }
 
 async function correctOrder(id: string, input: OrderCorrectionInput): Promise<ApiResponse<Order | null>> {
@@ -659,38 +724,40 @@ async function deleteOrder(id: string, reason = ''): Promise<ApiResponse<boolean
     return createSuccessResponse(true);
   }
 
-  ensureInit();
-  await delay(150);
-  const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
-  const index = orders.findIndex((o) => o.id === id);
-  const target = index >= 0 ? orders[index] : undefined;
-  if (!target) return createSuccessResponse(true);
-  const relatedCommissions = (getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [])
-    .filter((commission) => commission.orderId === id);
-  const hasPaidOrChargeback = relatedCommissions.some((commission) => (
-    commission.status === '已发放' || commission.status === '待冲销'
-  ));
-  if (hasPaidOrChargeback) {
-    return createErrorResponse('该订单已有已发放提成，第一版不支持系统内冲销，请财务线下处理后再删除');
-  }
-  const hasActiveCommission = relatedCommissions.some((commission) => (
-    commission.status !== '已撤回' && String(commission.status) !== '已取消'
-    && commission.status !== '已冲销'
-  ));
-  if (hasActiveCommission) {
-    return createErrorResponse('该订单已有分账记录，不能直接删除。请先到财务中心处理提成撤回。');
-  }
-  const now = new Date().toISOString();
-  orders[index] = {
-    ...target,
-    deletedAt: now,
-    deletedBy: getCurrentOperatorName(target.owner || target.salesName),
-    deleteReason: reason.trim() || '业务删除',
-    updatedAt: now,
-  };
-  setStorageData(STORAGE_KEYS.ORDERS, orders);
-  syncCustomerOrderStats(orders[index], orders);
-  return createSuccessResponse(true);
+  return withLocalOrderMutationLock(async () => {
+    ensureInit();
+    await delay(150);
+    const orders = getStorageData<Order[]>(STORAGE_KEYS.ORDERS) || [];
+    const index = orders.findIndex((o) => o.id === id);
+    const target = index >= 0 ? orders[index] : undefined;
+    if (!target) return createSuccessResponse(true);
+    const relatedCommissions = (getStorageData<Commission[]>(STORAGE_KEYS.COMMISSIONS) || [])
+      .filter((commission) => commission.orderId === id);
+    const hasPaidOrChargeback = relatedCommissions.some((commission) => (
+      commission.status === '已发放' || commission.status === '待冲销'
+    ));
+    if (hasPaidOrChargeback) {
+      return createErrorResponse('该订单已有已发放提成，第一版不支持系统内冲销，请财务线下处理后再删除');
+    }
+    const hasActiveCommission = relatedCommissions.some((commission) => (
+      commission.status !== '已撤回' && String(commission.status) !== '已取消'
+      && commission.status !== '已冲销'
+    ));
+    if (hasActiveCommission) {
+      return createErrorResponse('该订单已有分账记录，不能直接删除。请先到财务中心处理提成撤回。');
+    }
+    const now = new Date().toISOString();
+    orders[index] = {
+      ...target,
+      deletedAt: now,
+      deletedBy: getCurrentOperatorName(target.owner || target.salesName),
+      deleteReason: reason.trim() || '业务删除',
+      updatedAt: now,
+    };
+    setStorageData(STORAGE_KEYS.ORDERS, orders);
+    syncCustomerOrderStats(orders[index], orders);
+    return createSuccessResponse(true);
+  });
 }
 
 export const orderApi = {

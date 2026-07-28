@@ -65,6 +65,7 @@ const refundCenterSource = readFileSync(join(projectRoot, 'src/pages/RefundCente
 const afterSalesSource = readFileSync(join(projectRoot, 'src/pages/AfterSales/index.tsx'), 'utf8');
 const recoveryOrderSource = readFileSync(join(projectRoot, 'src/pages/AfterSales/RecoveryOrderTab.tsx'), 'utf8');
 const recoverySettlementSource = readFileSync(join(projectRoot, 'src/pages/Finance/RecoverySettlement.tsx'), 'utf8');
+const settlementOperationTimelineSource = readFileSync(join(projectRoot, 'src/shared/components/SettlementOperationTimeline.tsx'), 'utf8');
 const serviceTicketSource = readFileSync(join(projectRoot, 'src/pages/RefundCenter/ServiceTicketTab.tsx'), 'utf8');
 const employeeDepartmentSource = readFileSync(join(projectRoot, 'src/pages/Settings/EmployeeDepartmentManagement.tsx'), 'utf8');
 
@@ -160,8 +161,8 @@ assert.match(
 assert.doesNotMatch(customersPageSource, /CUSTOMER_ASSIGN|isSuperAdminRoleName/);
 assert.doesNotMatch(customerDetailSource, /isSuperAdminRoleName/);
 assert.match(
-  rolePermissionSource,
-  /订单审核列表[\s\S]*订单审核操作/,
+  `${rolePermissionSource}\n${readFileSync(join(projectRoot, 'src/pages/Settings/corePermissionCatalog.ts'), 'utf8')}`,
+  /查看订单审核列表[\s\S]*执行订单审核/,
   'Role permission tree should separate order review list visibility from review operations.',
 );
 assert.match(
@@ -306,7 +307,7 @@ assert.match(
 );
 assert.match(
   orderDetailSource,
-  /产品名称[\s\S]*order\.productName/,
+  /产品名称[\s\S]*item\.productName/,
   'Order detail must show product name separately from product level.',
 );
 assert.match(
@@ -345,10 +346,10 @@ assert.match(
   /field:\s*'leadInputBy',\s*label:\s*'线索录入人'/,
   'Order change history must label leadInputBy as lead input person.',
 );
-assert.match(
+assert.doesNotMatch(
   orderDetailSource,
-  /线索录入人[\s\S]*order\.leadInputBy[\s\S]*线索贡献人[\s\S]*order\.leadContributorName/,
-  'Order detail must show lead input person and lead contributor as separate fields.',
+  /线索录入人|线索贡献人/,
+  'Order detail customer section must omit lead input and contributor fields.',
 );
 assert.doesNotMatch(
   orderDetailSource,
@@ -701,9 +702,10 @@ assert.match(
 );
 assert.match(
   commissionSource,
-  /renderOperationLogCard/,
-  'Commission operation history should use compact summary cards.',
+  /<SettlementOperationTimeline compact events=\{buildOrderSettlementEvents\(\)\}/,
+  'Commission operation history should use the shared compact timeline.',
 );
+assert.match(settlementOperationTimelineSource, /data-testid="settlement-operation-event"/);
 assert.match(
   commissionSource,
   /splitSnapshot/,
@@ -716,9 +718,10 @@ assert.doesNotMatch(
 );
 assert.match(
   commissionSource,
-  /本次分账结果|本次记录/,
-  'Commission operation history should explain what the split was changed to.',
+  /summary: `\$\{splitSnapshot\.length \|\| log\.commissionCount \|\| 0\} 个角色 · 合计 \$\{amountText\}`[\s\S]*changes: splitSnapshot\.length/,
+  'Commission operation history should summarize each result and expose per-role changes.',
 );
+assert.match(settlementOperationTimelineSource, /查看变更/);
 assert.doesNotMatch(
   commissionSource,
   /open=\{Boolean\(operationHistorySummary\)\}[\s\S]*?<Table size="small">[\s\S]*?log\.summary/,

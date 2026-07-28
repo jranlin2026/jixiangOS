@@ -207,10 +207,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   const canClaimLead = !currentLead.customerId
     && hasPermission(currentUser, PERMISSION_KEYS.LEADS_FOLLOW, 'write');
   const canEditProfile = canEditLeadProfile(currentLead)
-    && (
-      hasPermission(currentUser, PERMISSION_KEYS.LEADS_CREATE, 'write')
-      || hasPermission(currentUser, PERMISSION_KEYS.LEADS_DETAIL, 'write')
-    );
+    && hasPermission(currentUser, PERMISSION_KEYS.LEADS_EDIT, 'write');
   const canAssignLead = !currentLead.customerId
     && hasPermission(currentUser, PERMISSION_KEYS.LEADS_FLOW_CONFIG, 'write');
   const assignableUsers = getScopedLeadAssignmentCandidates(users, leadFlowConfig, 'leads', currentUser);

@@ -387,12 +387,17 @@ async function hydrateCommissionOrderCache(): Promise<void> {
   orderHydrationPromise = (async () => {
     let page = 1;
     let totalPages = 1;
+    const hydratedOrders: Order[] = [];
     do {
       const response = await orderApi.fetchOrders({ page, pageSize: 100 });
       if (response.code !== 0) return;
+      hydratedOrders.push(...response.data.items);
       totalPages = Math.max(response.data.pagination.totalPages || 1, 1);
       page += 1;
     } while (page <= totalPages);
+    // 分账页必须以服务端当前订单全集为准。仅合并缓存会让已经删除的
+    // 源订单继续残留，继而错误显示“重新分账”而不是“清理废弃记录”。
+    setStorageData(STORAGE_KEYS.ORDERS, hydratedOrders, { persist: false });
   })().finally(() => {
     orderHydrationPromise = null;
   });
@@ -549,6 +554,7 @@ function appendCommissionOperationLog(
   const totalCommissionAmount = Math.round(
     splitSnapshot.reduce((sum, item) => sum + Number(item.commissionAmount || 0), 0) * 100,
   ) / 100;
+  const settlementVersion = Math.max(0, ...commissions.map((commission) => Number(commission.settlementVersion || 0))) || undefined;
   const normalizedReason = reason?.trim();
   const splitText = splitSnapshot
     .map((item) => `${item.role}：${item.owner} ${item.commissionAmount} 元`)
@@ -572,6 +578,7 @@ function appendCommissionOperationLog(
     summary,
     commissionCount: splitSnapshot.length,
     totalCommissionAmount,
+    settlementVersion,
     splitSnapshot,
   }, ...logs]);
 }

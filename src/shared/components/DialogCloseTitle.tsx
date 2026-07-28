@@ -5,12 +5,14 @@ import { Box, DialogTitle, IconButton, type DialogTitleProps } from '@mui/materi
 interface DialogCloseTitleProps extends DialogTitleProps {
   onClose: () => void;
   closeLabel?: string;
+  closeDisabled?: boolean;
 }
 
 const DialogCloseTitle: React.FC<DialogCloseTitleProps> = ({
   children,
   onClose,
   closeLabel = '关闭',
+  closeDisabled = false,
   sx,
   ...props
 }) => (
@@ -32,6 +34,7 @@ const DialogCloseTitle: React.FC<DialogCloseTitleProps> = ({
       aria-label={closeLabel}
       size="small"
       onClick={onClose}
+      disabled={closeDisabled}
       sx={{ position: 'absolute', top: 12, right: 12 }}
     >
       <CloseIcon fontSize="small" />

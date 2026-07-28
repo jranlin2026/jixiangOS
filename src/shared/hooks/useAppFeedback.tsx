@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Button, Dialog, DialogActions, DialogContent, Typography } from '@mui/material';
 import DialogCloseTitle from '../components/DialogCloseTitle';
+import OperationFeedbackDialog from '../components/OperationFeedbackDialog';
 
 type FeedbackState =
   | {
@@ -40,7 +41,15 @@ export const useAppFeedback = () => {
     })
   ), []);
 
-  const dialog = useMemo(() => (
+  const dialog = useMemo(() => feedback?.type === 'alert' ? (
+    <OperationFeedbackDialog
+      open
+      title={feedback.title}
+      severity={/失败|错误|未保存|异常/.test(feedback.title) ? 'error' : /成功|完成|已保存/.test(feedback.title) ? 'success' : 'info'}
+      message={feedback.message}
+      onClose={() => close(false)}
+    />
+  ) : (
     <Dialog open={Boolean(feedback)} onClose={() => close(false)} maxWidth="xs" fullWidth>
       <DialogCloseTitle onClose={() => close(false)}>
         {feedback?.title || '提示'}

@@ -357,6 +357,8 @@ export interface CommissionOperationLog {
   summary: string;
   commissionCount?: number;
   totalCommissionAmount?: number;
+  /** 本次操作所属的分账轮次；旧记录缺失时按历史记录展示。 */
+  settlementVersion?: number;
   splitSnapshot?: CommissionOperationSplitSnapshot[];
 }
 

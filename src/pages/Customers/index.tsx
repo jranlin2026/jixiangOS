@@ -97,6 +97,7 @@ import CustomerMergeDialog from './CustomerMergeDialog';
 import CustomerImportDialog from './CustomerImportDialog';
 import CustomerExportDialog from './CustomerExportDialog';
 import { buildPreviousOwnerFilterUsers, getLastFollowUpOperator, getPreviousOwnerLabel } from './customerListPresentation';
+import BusinessSubmissionResultDialog from '../../shared/components/BusinessSubmissionResultDialog';
 
 type CustomerColumn = {
   id: string;
@@ -751,7 +752,7 @@ const Customers: React.FC = () => {
           <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
             视图设置
           </Button>
-          {canReadBatchTasks && (
+          {!isPublicPoolScope && canReadBatchTasks && (
             <Button variant="outlined" startIcon={<TaskAltOutlinedIcon />} onClick={() => void handleOpenLatestBatchTask()}>
               批量任务
             </Button>
@@ -1064,42 +1065,26 @@ const Customers: React.FC = () => {
         }}
       />
 
-      <Dialog
+      <BusinessSubmissionResultDialog
         open={Boolean(submittedOrderApplication)}
+        title="订单申请已提交"
+        description="该订单已进入财务审核，审核通过后才会生成正式订单、提成和交付记录。"
+        fields={submittedOrderApplication ? [
+          { label: '申请编号', value: submittedOrderApplication.applicationNo },
+          { label: '客户', value: submittedOrderApplication.orderData.customerName },
+          { label: '产品名称', value: submittedOrderApplication.orderData.productName || submittedOrderApplication.orderData.productLevel || '-' },
+          { label: '产品等级', value: submittedOrderApplication.orderData.productLevel || '-' },
+          { label: '订单类型', value: submittedOrderApplication.orderData.orderType },
+          { label: '实付金额', value: formatCurrency(submittedOrderApplication.orderData.actualAmount ?? submittedOrderApplication.orderData.amount) },
+          { label: '当前状态', value: submittedOrderApplication.status },
+        ] : []}
         onClose={() => setSubmittedOrderApplication(null)}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogCloseTitle onClose={() => setSubmittedOrderApplication(null)}>订单申请已提交</DialogCloseTitle>
-        <DialogContent dividers>
-          <Typography variant="body2" sx={{ color: '#374151', mb: 2 }}>
-            该订单已进入财务审核，审核通过后才会生成正式订单、提成和交付记录。
-          </Typography>
-          {submittedOrderApplication && (
-            <Box sx={{ display: 'grid', gap: 1, bgcolor: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5 }}>
-              <Typography variant="body2">申请编号：{submittedOrderApplication.applicationNo}</Typography>
-              <Typography variant="body2">客户：{submittedOrderApplication.orderData.customerName}</Typography>
-              <Typography variant="body2">产品名称：{submittedOrderApplication.orderData.productName || submittedOrderApplication.orderData.productLevel || '-'}</Typography>
-              <Typography variant="body2">产品等级：{submittedOrderApplication.orderData.productLevel || '-'}</Typography>
-              <Typography variant="body2">订单类型：{submittedOrderApplication.orderData.orderType}</Typography>
-              <Typography variant="body2">实付金额：{formatCurrency(submittedOrderApplication.orderData.actualAmount || submittedOrderApplication.orderData.amount)}</Typography>
-              <Typography variant="body2">当前状态：{submittedOrderApplication.status}</Typography>
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setSubmittedOrderApplication(null)}>知道了</Button>
-          <Button
-            variant="contained"
-            onClick={() => {
-              setSubmittedOrderApplication(null);
-              navigate(`${ROUTES.ORDERS}?tab=review`);
-            }}
-          >
-            查看审核进度
-          </Button>
-        </DialogActions>
-      </Dialog>
+        onViewReview={hasPermission(currentUser, PERMISSION_KEYS.ORDER_REVIEW_LIST) ? () => {
+          setSubmittedOrderApplication(null);
+          navigate(`${ROUTES.ORDERS}?tab=review`);
+        } : undefined}
+        reviewActionLabel="查看订单审核台"
+      />
 
       <Dialog open={Boolean(releaseTarget)} onClose={() => setReleaseTarget(null)} maxWidth="xs" fullWidth>
         <DialogCloseTitle onClose={() => setReleaseTarget(null)}>放弃到公海</DialogCloseTitle>
@@ -1307,6 +1292,7 @@ const Customers: React.FC = () => {
           filters: scopedFilters(),
         }}
         canExportSensitive={canExportSensitiveCustomers}
+        fileNamePrefix={isPublicPoolScope ? '公海池客户资料' : undefined}
         onClose={() => setExportDialogOpen(false)}
       />
 

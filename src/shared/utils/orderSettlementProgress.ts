@@ -30,10 +30,13 @@ function requiresHandling(commission: Commission): boolean {
 
 /** 正式订单列表与财务订单分账共用的进度口径。 */
 export function deriveOrderSettlementProgress(commissions: Commission[]): CommissionOrderSummaryStatus {
-  if (!commissions.length || commissions.some(requiresHandling)) return '待处理';
-  if (commissions.every((commission) => INACTIVE_STATUSES.has(String(commission.status)))) return '已撤回';
-  if (commissions.every((commission) => commission.status === '已发放')) return '已发放';
-  if (commissions.every((commission) => commission.status === '待发放' || commission.status === '已发放')) return '待发放';
+  if (!commissions.length) return '待处理';
+  // 历史轮次只用于追溯，不应把当前轮次的待发放/已发放状态拉回待确认。
+  const activeCommissions = commissions.filter((commission) => !INACTIVE_STATUSES.has(String(commission.status)));
+  if (!activeCommissions.length) return '已撤回';
+  if (activeCommissions.some(requiresHandling)) return '待处理';
+  if (activeCommissions.every((commission) => commission.status === '已发放')) return '已发放';
+  if (activeCommissions.every((commission) => commission.status === '待发放' || commission.status === '已发放')) return '待发放';
   return '待确认';
 }
 

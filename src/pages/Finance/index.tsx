@@ -79,6 +79,7 @@ const Finance: React.FC = () => {
   const canManageRecoverySettlement = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'write');
   const canExportOrderSettlements = hasPermission(currentUser, PERMISSION_KEYS.ORDER_SETTLEMENT_EXPORT);
   const canExportRecoverySettlements = hasPermission(currentUser, PERMISSION_KEYS.RECOVERY_SETTLEMENT_EXPORT);
+  const canExportFinanceFlow = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_FLOW_EXPORT);
   const [flowPage, setFlowPage] = useState(0);
   const [flowRowsPerPage, setFlowRowsPerPage] = useState(10);
   const [flowSearch, setFlowSearch] = useState('');
@@ -289,15 +290,17 @@ const Finance: React.FC = () => {
             </FormControl>
             <TextField size="small" label="开始日期" type="date" value={flowStartDate} onChange={(event) => setFlowStartDate(event.target.value)} InputLabelProps={{ shrink: true }} />
             <TextField size="small" label="结束日期" type="date" value={flowEndDate} onChange={(event) => setFlowEndDate(event.target.value)} InputLabelProps={{ shrink: true }} />
-            <Button
-              variant="outlined"
-              startIcon={<FileDownloadIcon />}
-              disabled={flowExporting || flowTotal === 0}
-              onClick={exportCurrentFlowRows}
-              sx={{ height: 40, alignSelf: { xs: 'stretch', lg: 'center' } }}
-            >
-              导出流水
-            </Button>
+            {canExportFinanceFlow && (
+              <Button
+                variant="outlined"
+                startIcon={<FileDownloadIcon />}
+                disabled={flowExporting || flowTotal === 0}
+                onClick={exportCurrentFlowRows}
+                sx={{ height: 40, alignSelf: { xs: 'stretch', lg: 'center' } }}
+              >
+                导出流水
+              </Button>
+            )}
           </Stack>
         </Paper>
 

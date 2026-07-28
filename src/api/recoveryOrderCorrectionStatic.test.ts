@@ -6,7 +6,10 @@ const apiSource = readFileSync(join(process.cwd(), 'src/api/recoveryOrderApi.ts'
 const pageSource = readFileSync(join(process.cwd(), 'src/pages/AfterSales/RecoveryOrderTab.tsx'), 'utf8');
 const financeSource = readFileSync(join(process.cwd(), 'src/pages/Finance/index.tsx'), 'utf8');
 const serverSource = readFileSync(join(process.cwd(), 'server/index.ts'), 'utf8');
-const rolePermissionSource = readFileSync(join(process.cwd(), 'src/pages/Settings/RolePermission.tsx'), 'utf8');
+const rolePermissionSource = [
+  readFileSync(join(process.cwd(), 'src/pages/Settings/RolePermission.tsx'), 'utf8'),
+  readFileSync(join(process.cwd(), 'src/pages/Settings/corePermissionCatalog.ts'), 'utf8'),
+].join('\n');
 
 assert.match(apiSource, /editRecoveryOrderMetadata[\s\S]*\/metadata/);
 assert.match(apiSource, /precheckRecoveryOrderCorrection[\s\S]*correction-precheck/);

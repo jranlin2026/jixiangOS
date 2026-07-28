@@ -6,13 +6,15 @@ const settings = readFileSync(join(process.cwd(), 'src/pages/Settings/index.tsx'
 const sidebar = readFileSync(join(process.cwd(), 'src/layouts/Sidebar.tsx'), 'utf8');
 const delivery = readFileSync(join(process.cwd(), 'src/pages/Delivery/index.tsx'), 'utf8');
 const rolePermission = readFileSync(join(process.cwd(), 'src/pages/Settings/RolePermission.tsx'), 'utf8');
+const permissionCatalog = readFileSync(join(process.cwd(), 'src/pages/Settings/corePermissionCatalog.ts'), 'utf8');
 const componentPath = join(process.cwd(), 'src/pages/Settings/DeliveryAssignmentConfig.tsx');
 
 assert.match(settings, /DeliveryAssignmentConfig/);
 assert.match(sidebar, /group=delivery/);
 assert.match(sidebar, /SETTINGS_DELIVERY_ASSIGNMENT/);
-const deliveryPermissionGroup = rolePermission.match(/label: '交付',[\s\S]*?label: '售后服务'/)?.[0] || '';
-const settingsPermissionGroup = rolePermission.match(/label: '系统设置',[\s\S]*?const defaultPermission/)?.[0] || '';
+assert.match(rolePermission, /getCoreRolePermissionTree/);
+const deliveryPermissionGroup = permissionCatalog.match(/label: '交付',[\s\S]*?label: '售后服务'/)?.[0] || '';
+const settingsPermissionGroup = permissionCatalog.match(/label: '系统设置',[\s\S]*?\n\];/)?.[0] || '';
 assert.doesNotMatch(
   deliveryPermissionGroup,
   /SETTINGS_DELIVERY_ASSIGNMENT/,

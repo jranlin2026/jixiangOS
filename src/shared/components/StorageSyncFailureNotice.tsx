@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Snackbar } from '@mui/material';
+import OperationFeedbackDialog from './OperationFeedbackDialog';
 import {
   clearStorageSyncFailure,
   subscribeStorageSyncFailures,
@@ -12,16 +12,13 @@ const StorageSyncFailureNotice: React.FC = () => {
   useEffect(() => subscribeStorageSyncFailures(setFailure), []);
 
   return (
-    <Snackbar
-      anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      autoHideDuration={8000}
+    <OperationFeedbackDialog
       open={Boolean(failure)}
+      severity="error"
+      title="数据保存失败"
+      message={`数据未保存：${failure?.message || '请重试'}`}
       onClose={clearStorageSyncFailure}
-    >
-      <Alert severity="error" variant="filled" onClose={clearStorageSyncFailure}>
-        数据未保存：{failure?.message || '请重试'}
-      </Alert>
-    </Snackbar>
+    />
   );
 };
 

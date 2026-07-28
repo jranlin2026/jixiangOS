@@ -11,7 +11,10 @@ import type { Role } from '../types/role';
 const appSource = readFileSync(join(process.cwd(), 'src', 'App.tsx'), 'utf8');
 const sidebarSource = readFileSync(join(process.cwd(), 'src', 'layouts', 'Sidebar.tsx'), 'utf8');
 const settingsSource = readFileSync(join(process.cwd(), 'src', 'pages', 'Settings', 'index.tsx'), 'utf8');
-const rolePermissionSource = readFileSync(join(process.cwd(), 'src', 'pages', 'Settings', 'RolePermission.tsx'), 'utf8');
+const rolePermissionSource = [
+  readFileSync(join(process.cwd(), 'src', 'pages', 'Settings', 'RolePermission.tsx'), 'utf8'),
+  readFileSync(join(process.cwd(), 'src', 'pages', 'Settings', 'corePermissionCatalog.ts'), 'utf8'),
+].join('\n');
 assert.match(appSource, /ProtectedRoute permissionKey=\{PERMISSION_KEYS\.CUSTOMERS\}/);
 assert.match(appSource, /ROUTES\.GEO/);
 assert.match(sidebarSource, /ROUTES\.GEO/);
@@ -34,11 +37,11 @@ assert.match(rolePermissionSource, /订单分账/);
 assert.match(rolePermissionSource, /提成发放/);
 assert.match(rolePermissionSource, /提成规则/);
 assert.match(rolePermissionSource, /订单审核列表/);
-assert.match(rolePermissionSource, /订单审核操作/);
+assert.match(rolePermissionSource, /执行订单审核/);
 assert.match(rolePermissionSource, /售后服务/);
 assert.match(rolePermissionSource, /售后挽回订单列表/);
-assert.match(rolePermissionSource, /售后挽回订单审核列表/);
-assert.match(rolePermissionSource, /售后挽回订单审核操作/);
+assert.match(rolePermissionSource, /查看售后挽回审核列表/);
+assert.match(rolePermissionSource, /执行售后挽回审核/);
 assert.match(rolePermissionSource, /新增售后挽回订单/);
 assert.match(rolePermissionSource, /编辑售后挽回订单/);
 assert.match(rolePermissionSource, /删除售后挽回订单/);
@@ -64,9 +67,9 @@ assert.match(rolePermissionSource, /label:\s*'导入导出'/);
 assert.match(rolePermissionSource, /业务回收与CRM迁移/);
 assert.doesNotMatch(rolePermissionSource, /数据维护/);
 assert.match(rolePermissionSource, /label:\s*'线索列表'/);
-assert.match(rolePermissionSource, /label:\s*'入库情况'/);
+assert.match(rolePermissionSource, /label:\s*'查看入库情况'/);
 assert.match(rolePermissionSource, /label:\s*'查看线索资料'/);
-assert.match(rolePermissionSource, /label:\s*'新建线索'/);
+assert.match(rolePermissionSource, /label:\s*'新增及批量入库'/);
 assert.match(rolePermissionSource, /label:\s*'开始跟进并加入客户'/);
 assert.match(rolePermissionSource, /label:\s*'分配销售'/);
 assert.doesNotMatch(rolePermissionSource, /label:\s*'接收\/领取线索'|label:\s*'分配线索能力'|label:\s*'线索跟进'|label:\s*'线索转客户'/);

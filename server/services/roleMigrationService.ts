@@ -48,7 +48,9 @@ export type CustomerPermissionMigrationManifestAuthenticator =
   & CustomerPermissionMigrationManifestVerifier;
 
 export const ROLE_PERMISSION_ACTION_BASELINE_KEY = 'aaos_role_permission_action_baseline_version';
-export const ROLE_PERMISSION_ACTION_BASELINE_VERSION = 4;
+export const ROLE_PERMISSION_ACTION_BASELINE_VERSION = 5;
+const DEFAULT_ROLE_PERMISSION_BASELINE_VERSION = 4;
+const CORE_PERMISSION_TREE_BASELINE_VERSION = 5;
 
 export function toSafeCustomerPermissionMigrationErrorCode(error: unknown): string {
   const message = error instanceof Error ? error.message : '';
@@ -415,6 +417,38 @@ function grantStoredPermission(
   ));
 }
 
+function hasStoredReadablePermission(permissions: Permission[], module: string): boolean {
+  return permissions.some((permission) => (
+    storedPermissionModuleEquals(permission, module)
+    && (permission.actions || []).some((action) => ['read', 'write', 'delete', 'admin'].includes(action))
+  ));
+}
+
+export function migrateCorePermissionTreeRole(role: Role): Role {
+  const storedPermissions = (role.permissions || []).map((permission) => ({
+    ...permission,
+    actions: [...(permission.actions || [])],
+  }));
+  let permissions = storedPermissions;
+
+  const hadLeadEditAccess = [
+    PERMISSION_KEYS.LEADS,
+    PERMISSION_KEYS.LEADS_CREATE,
+    PERMISSION_KEYS.LEADS_DETAIL,
+  ].some((permissionKey) => hasStoredWritePermission(storedPermissions, permissionKey));
+  if (hadLeadEditAccess) {
+    permissions = grantStoredPermission(permissions, PERMISSION_KEYS.LEADS_EDIT, ['read', 'write']);
+  }
+  if (hasStoredReadablePermission(storedPermissions, PERMISSION_KEYS.FINANCE_PAYOUT)) {
+    permissions = grantStoredPermission(permissions, PERMISSION_KEYS.FINANCE_PAYOUT_REPORT_EXPORT, ['read']);
+  }
+  if (hasStoredReadablePermission(storedPermissions, PERMISSION_KEYS.FINANCE_FLOW)) {
+    permissions = grantStoredPermission(permissions, PERMISSION_KEYS.FINANCE_FLOW_EXPORT, ['read']);
+  }
+
+  return { ...role, permissions: sanitizeRolePermissions(permissions) };
+}
+
 function migrateLegacyCustomerRole(role: Role, deleteRoleIds: ReadonlySet<string>): Role {
   const storedPermissions = (role.permissions || []).map((permission) => ({
     ...permission,
@@ -512,17 +546,19 @@ function assertCustomerPermissionMigrationRoleSet(
   }
 }
 
-async function migrateRoleRows(store: RoleMigrationStore, applyPermissionBaseline: boolean): Promise<number> {
+async function migrateRoleRows(store: RoleMigrationStore, baselineVersion: number): Promise<number> {
   const rows = await store.role.findMany();
   let changed = 0;
 
   for (const row of rows) {
     const current = mapPrismaRole(row);
-    const migrated = mergeRoleWithDefaultAccess(
-      applyPermissionBaseline
-        ? migrateLegacyOrderReviewListPermission(migrateLegacyRecoveryReviewListPermission(mergeDefaultRolePermissionBaseline(current)))
-        : current,
-    );
+    const defaultRoleMigrated = baselineVersion < DEFAULT_ROLE_PERMISSION_BASELINE_VERSION
+      ? migrateLegacyOrderReviewListPermission(migrateLegacyRecoveryReviewListPermission(mergeDefaultRolePermissionBaseline(current)))
+      : current;
+    const corePermissionMigrated = baselineVersion < CORE_PERMISSION_TREE_BASELINE_VERSION
+      ? migrateCorePermissionTreeRole(defaultRoleMigrated)
+      : defaultRoleMigrated;
+    const migrated = mergeRoleWithDefaultAccess(corePermissionMigrated);
     const permissionsChanged = permissionsSignature(current.permissions) !== permissionsSignature(migrated.permissions);
     const scopesChanged = dataScopesSignature(current.dataScopes) !== dataScopesSignature(migrated.dataScopes);
 
@@ -539,7 +575,7 @@ async function migrateRoleRows(store: RoleMigrationStore, applyPermissionBaselin
     changed += 1;
   }
 
-  if (applyPermissionBaseline && store.appStorage) {
+  if (baselineVersion < ROLE_PERMISSION_ACTION_BASELINE_VERSION && store.appStorage) {
     await store.appStorage.upsert({
       where: { key: ROLE_PERMISSION_ACTION_BASELINE_KEY },
       create: {
@@ -566,13 +602,13 @@ export async function migrateDefaultRoleAccess(prisma: RoleMigrationPrisma): Pro
   const marker = prisma.appStorage
     ? await prisma.appStorage.findUnique({ where: { key: ROLE_PERMISSION_ACTION_BASELINE_KEY } })
     : null;
-  const applyPermissionBaseline = readBaselineVersion(marker?.value) < ROLE_PERMISSION_ACTION_BASELINE_VERSION;
-  if (!applyPermissionBaseline) return 0;
+  const baselineVersion = readBaselineVersion(marker?.value);
+  if (baselineVersion >= ROLE_PERMISSION_ACTION_BASELINE_VERSION) return 0;
 
   if (prisma.$transaction && prisma.appStorage) {
-    return prisma.$transaction((transaction) => migrateRoleRows(transaction as RoleMigrationStore, true));
+    return prisma.$transaction((transaction) => migrateRoleRows(transaction as RoleMigrationStore, baselineVersion));
   }
-  return migrateRoleRows(prisma, true);
+  return migrateRoleRows(prisma, baselineVersion);
 }
 
 export async function migrateCustomerPermissionAndScopeBaseline(

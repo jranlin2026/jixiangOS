@@ -100,23 +100,26 @@ const paymentFormSection = orderFormSource.slice(
 );
 assert.doesNotMatch(paymentFormSection, /label="产品总计"|label="优惠"/);
 
-for (const section of ['客户信息', '产品信息', '订单信息', '付款信息', '补充信息', '审核与系统信息']) {
+for (const section of ['客户信息', '产品信息', '订单信息', '收款与凭证', '审核与系统记录']) {
   assert.match(orderDetailSource, new RegExp(`title="${section}"`), `订单资料页应包含“${section}”分区`);
 }
 assert.doesNotMatch(orderDetailSource, /title="成交资料"/, '订单资料页不应再单独展示成交资料');
-assert.match(orderDetailSource, /<TableCell>成交路径 \/ 聊天记录<\/TableCell>/, '付款明细必须包含成交路径和聊天记录');
-assert.match(orderDetailSource, /<BusinessDetailField label="分账状态">[^]*<SettlementStatusChip/, '正式订单资料必须显示统一分账状态');
-assert.match(orderDetailSource, /<BusinessDetailField label="订单状态">/, '正式订单资料必须显示订单业务状态');
-assert.match(orderDetailSource, /<BusinessDetailField label="退款状态">/, '正式订单资料必须显示退款状态');
+assert.match(orderDetailSource, /成交路径 \/ 聊天记录/, '付款明细必须包含成交路径和聊天记录');
+assert.match(orderDetailSource, /label: '分账状态'[^]*<SettlementStatusChip/, '正式订单资料顶部必须显示统一分账状态');
+const formalOrderInfoSection = orderDetailSource.slice(
+  orderDetailSource.indexOf('title="订单信息"'),
+  orderDetailSource.indexOf('title="收款与凭证"'),
+);
+assert.doesNotMatch(formalOrderInfoSection, /订单状态|退款状态/, '正式订单资料的订单信息不再重复显示订单状态和退款状态');
 
 const orderReviewDetailSource = orderReviewSource.slice(
-  orderReviewSource.indexOf('<Dialog open={Boolean(detailApplication)}'),
+  orderReviewSource.indexOf('open={Boolean(detailApplication)}'),
   orderReviewSource.indexOf('{feedbackDialog}'),
 );
-for (const section of ['客户信息', '客户归因快照', '产品信息', '订单信息', '付款信息', '补充信息', '审核与系统信息']) {
+for (const section of ['客户信息', '产品信息', '订单信息', '收款与凭证', '审核与系统记录']) {
   assert.match(orderReviewDetailSource, new RegExp(`title="${section}"`), `订单审核资料应包含“${section}”分区`);
 }
 assert.doesNotMatch(orderReviewDetailSource, /title="成交资料"/, '订单审核资料不应再单独展示成交资料');
-assert.match(orderReviewDetailSource, /<TableCell>成交路径截图<\/TableCell>/, '订单审核的付款明细必须包含成交路径截图');
+assert.match(orderReviewDetailSource, /成交路径 \/ 聊天记录/, '订单审核的付款明细必须包含成交路径和聊天记录');
 assert.match(orderDetailSource, /暂无付款记录[^]*dealEvidenceAttachments/, '无付款记录时订单资料仍须显示成交路径截图');
 assert.match(orderReviewDetailSource, /暂无付款记录[^]*dealEvidenceAttachments/, '无付款记录时审核资料仍须显示成交路径截图');

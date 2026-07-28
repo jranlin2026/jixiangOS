@@ -20,6 +20,39 @@ for (const [name, source] of [
 
 assert.match(orderReviewSource, /getOrderApplicationReviewStatuses\(view\)/);
 assert.match(recoveryReviewSource, /getRecoveryOrderReviewStatuses\(reviewQueueView\)/);
+
+assert.match(
+  orderReviewSource,
+  /\{ id: 'applicationNo', label: '内部单据编号' \}/,
+  '订单审核台应将技术性申请号统一命名为内部单据编号',
+);
+assert.match(
+  recoveryReviewSource,
+  /const RECOVERY_ORDER_REVIEW_COLUMNS[^]*\{ id: 'recoveryNo', label: '内部单据编号' \}/,
+  '售后挽回审核台应使用相同的内部单据编号术语',
+);
+assert.doesNotMatch(
+  orderReviewSource.slice(
+    orderReviewSource.indexOf('const REVIEW_DEFAULT_VISIBLE_COLUMNS'),
+    orderReviewSource.indexOf('const REVIEW_COLUMN_WIDTHS'),
+  ),
+  /'applicationNo'/,
+  '订单审核台默认视图不应突出内部单据编号',
+);
+assert.doesNotMatch(
+  recoveryReviewSource.slice(
+    recoveryReviewSource.indexOf('const DEFAULT_REVIEW_VISIBLE_COLUMNS'),
+    recoveryReviewSource.indexOf('const RECOVERY_LIST_STATUSES'),
+  ),
+  /'recoveryNo'/,
+  '售后挽回审核台默认视图不应突出内部单据编号',
+);
+for (const [name, source, ariaLabel] of [
+  ['订单审核台', orderReviewSource, '查看审核详情'],
+  ['售后挽回审核台', recoveryReviewSource, '查看审核详情'],
+] as const) {
+  assert.match(source, new RegExp(`aria-label="${ariaLabel}"`), `${name}必须不依赖编号列也能打开审核详情`);
+}
 assert.match(orderReviewSource, /getOrderApplicationUnifiedReviewStatus\(application\.status, Boolean\(application\.sourceOrderDeleted\)\)/);
 assert.match(
   orderReviewSource,

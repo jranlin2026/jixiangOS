@@ -170,6 +170,8 @@ export interface Order extends Partial<BusinessImportMetadata> {
   deliveryIds?: ID[];
   notes?: string;
   changeHistory?: OrderChangeLog[];
+  /** 来源订单申请的真实审核记录；仅在拥有订单修改记录权限时由详情接口返回。 */
+  reviewLogs?: OrderApplicationReviewLog[];
   deletedAt?: Timestamp;
   deletedBy?: string;
   deleteReason?: string;

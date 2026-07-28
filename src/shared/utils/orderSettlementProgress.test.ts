@@ -29,4 +29,20 @@ assert.equal(deriveOrderSettlementProgress([split('待确认')]), '待确认');
 assert.equal(deriveOrderSettlementProgress([split('待发放'), split('已发放')]), '待发放');
 assert.equal(deriveOrderSettlementProgress([split('已发放')]), '已发放');
 assert.equal(deriveOrderSettlementProgress([split('已撤回')]), '已撤回');
+assert.equal(
+  deriveOrderSettlementProgress([
+    split('已撤回', { id: 'history-v1', settlementVersion: 1, ownerId: undefined }),
+    split('待发放', { id: 'current-v2', settlementVersion: 2 }),
+  ]),
+  '待发放',
+  '历史已撤回轮次不应覆盖当前轮次的待发放状态',
+);
+assert.equal(
+  deriveOrderSettlementProgress([
+    split('已撤回', { id: 'history-v1', settlementVersion: 1 }),
+    split('已发放', { id: 'current-v2', settlementVersion: 2 }),
+  ]),
+  '已发放',
+  '已发放的当前轮次应保持终态',
+);
 assert.equal(deriveOrderListSettlementProgress([]), '待处理', '订单列表应使用统一的五态分账口径');

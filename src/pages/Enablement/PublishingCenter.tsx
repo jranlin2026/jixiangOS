@@ -28,6 +28,7 @@ import type {
   KnowledgeWorkflowItemDto,
   VisibilitySubjectType,
 } from '../../types/enablement';
+import OperationFeedbackDialog from '../../shared/components/OperationFeedbackDialog';
 
 const statusMeta: Record<KnowledgeVersionStatus, { label: string; color: string; bg: string }> = {
   DRAFT: { label: '草稿', color: '#475467', bg: '#F2F4F7' },
@@ -414,7 +415,6 @@ const PublishingCenter: React.FC = () => {
 
   return (
     <Stack spacing={2}>
-      {notice ? <Alert severity={notice.severity} onClose={() => setNotice(null)}>{notice.message}</Alert> : null}
       {error ? <Alert severity="error">{error}。队列可能不是最新状态，请重试。</Alert> : null}
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: canPublishPermission ? 'minmax(320px, 0.8fr) minmax(0, 1.2fr)' : '1fr' }, gap: 2, alignItems: 'start' }}>
@@ -564,6 +564,7 @@ const PublishingCenter: React.FC = () => {
           ) : null}
         </Stack>
       </Box>
+      <OperationFeedbackDialog open={Boolean(notice)} severity={notice?.severity} message={notice?.message || ''} onClose={() => setNotice(null)} />
     </Stack>
   );
 };

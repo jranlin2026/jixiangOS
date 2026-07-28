@@ -319,7 +319,7 @@ const requireRecoveryImportAccess = createRequireAuth(authService, PERMISSION_KE
 const requireLeadListAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_LIST);
 const requireLeadCreateAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_CREATE, 'write');
 const requireLeadConvertAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_CONVERT, 'write');
-const requireLeadEditAccess = createRequireAnyPermission(authService, [PERMISSION_KEYS.LEADS_CREATE, PERMISSION_KEYS.LEADS_DETAIL], 'write');
+const requireLeadEditAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_EDIT, 'write');
 const requireLeadFollowAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_FOLLOW, 'write');
 const requireLeadAssignAccess = createRequireAuth(authService, PERMISSION_KEYS.LEADS_FLOW_CONFIG, 'write');
 const requireLeadDeleteAccess = createRequireAuth(authService, '全部', 'delete');
@@ -337,7 +337,9 @@ const requireRecoveryEditAccess = createRequireAuth(authService, PERMISSION_KEYS
 const requireRecoveryCorrectAccess = createRequireAuth(authService, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CORRECT, 'write');
 const requireFinancePayoutReadAccess = createRequireAuth(authService, PERMISSION_KEYS.FINANCE_PAYOUT);
 const requireFinancePayoutWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.FINANCE_PAYOUT, 'write');
+const requireFinancePayoutReportExportAccess = createRequireAuth(authService, PERMISSION_KEYS.FINANCE_PAYOUT_REPORT_EXPORT);
 const requireFinanceFlowReadAccess = createRequireAuth(authService, PERMISSION_KEYS.FINANCE_FLOW);
+const requireFinanceFlowExportAccess = createRequireAuth(authService, PERMISSION_KEYS.FINANCE_FLOW_EXPORT);
 const requireMatrixPublishUploadAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, 'write');
 const requireAssetReadAccess = createRequireAuth(authService, PERMISSION_KEYS.ASSETS);
 const requireAiChatAccess = createRequireAuth(authService, PERMISSION_KEYS.AI_CHAT);
@@ -1319,7 +1321,7 @@ app.get('/api/commission-payout-workspace', requireFinancePayoutReadAccess, asyn
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
-app.post('/api/commission-payout-reports/export', requireFinancePayoutReadAccess, async (req: AuthenticatedRequest, res) => {
+app.post('/api/commission-payout-reports/export', requireFinancePayoutReportExportAccess, async (req: AuthenticatedRequest, res) => {
   const result = await commissionMonthlyReportService.exportWorkbook(req.body || {}, req.currentUser!);
   if (result.code !== 0 || !result.data) {
     res.status(result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
@@ -1356,7 +1358,7 @@ app.get('/api/finance-transactions', requireFinanceFlowReadAccess, async (req: A
   res.json(result);
 });
 
-app.get('/api/finance-transactions/export', requireFinanceFlowReadAccess, async (req: AuthenticatedRequest, res) => {
+app.get('/api/finance-transactions/export', requireFinanceFlowExportAccess, async (req: AuthenticatedRequest, res) => {
   const result = await financeTransactionService.exportCsv({
     search: queryParam(req.query.search), type: queryParam(req.query.type), direction: queryParam(req.query.direction) as any,
     startDate: queryParam(req.query.startDate), endDate: queryParam(req.query.endDate),

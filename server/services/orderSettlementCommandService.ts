@@ -189,6 +189,7 @@ async function appendLog(
   const totalCommissionAmount = Math.round(
     splitSnapshot.reduce((sum, item) => sum + item.commissionAmount, 0) * 100,
   ) / 100;
+  const settlementVersion = Math.max(0, ...commissions.map((commission) => Number(commission.settlementVersion || 0))) || undefined;
   const log: CommissionOperationLog = {
     id: `comm-log-${randomUUID().slice(0, 8)}`,
     orderId,
@@ -201,6 +202,7 @@ async function appendLog(
     summary: `${action}，共 ${commissions.length} 条分账，合计 ${totalCommissionAmount} 元，原因：${reason}`,
     commissionCount: commissions.length,
     totalCommissionAmount,
+    settlementVersion,
     splitSnapshot,
   };
   await transaction.businessRecord.create({

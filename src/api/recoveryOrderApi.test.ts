@@ -5,6 +5,7 @@ import { AUTH_SESSION_STORAGE_KEY } from '../shared/utils/auth';
 import { STORAGE_KEYS } from '../shared/utils/constants';
 import { PERMISSION_KEYS } from '../shared/utils/permissions';
 import type { Customer } from '../types/customer';
+import type { RecoveryOrderInput } from '../types/recoveryOrder';
 import type { Role } from '../types/role';
 import type { User } from '../types/settings';
 
@@ -97,6 +98,47 @@ const roles: Role[] = [
     createdAt: now,
     updatedAt: now,
   },
+  {
+    id: 'role-recovery-editor',
+    name: '售后挽回编辑员',
+    code: 'recovery_editor',
+    departmentId: 'dept-service',
+    permissions: [
+      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY, actions: ['read'] },
+      { module: PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT, actions: ['read', 'write'] },
+    ],
+    dataScopes: {
+      leads: 'self',
+      customers: 'self',
+      orders: 'self',
+      orderApplications: 'self',
+      recoveryOrders: 'all',
+      recoveryOrderApplications: 'all',
+    },
+    memberCount: 1,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+  {
+    id: 'role-no-recovery-permission',
+    name: '无售后挽回权限',
+    code: 'no_recovery_permission',
+    departmentId: 'dept-service',
+    permissions: [],
+    dataScopes: {
+      leads: 'self',
+      customers: 'self',
+      orders: 'self',
+      orderApplications: 'self',
+      recoveryOrders: 'self',
+      recoveryOrderApplications: 'self',
+    },
+    memberCount: 1,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
 ];
 
 const users: User[] = [
@@ -133,6 +175,32 @@ const users: User[] = [
     phone: '',
     role: '售后只读员工',
     roleId: 'role-recovery-reader',
+    departmentId: 'dept-service',
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+  {
+    id: 'user-recovery-editor',
+    name: '售后挽回编辑员',
+    account: 'recovery-editor',
+    email: 'recovery-editor@test.local',
+    phone: '',
+    role: '售后挽回编辑员',
+    roleId: 'role-recovery-editor',
+    departmentId: 'dept-service',
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+  {
+    id: 'user-no-recovery-permission',
+    name: '无售后挽回权限',
+    account: 'no-recovery-permission',
+    email: 'no-recovery-permission@test.local',
+    phone: '',
+    role: '无售后挽回权限',
+    roleId: 'role-no-recovery-permission',
     departmentId: 'dept-service',
     isActive: true,
     createdAt: now,
@@ -280,9 +348,30 @@ assert.notEqual(rejectWithoutReason.code, 0);
 const returned = await recoveryOrderApi.returnRecoveryOrder(created.data.id, 'user-finance', '财务专员', '补充聊天截图');
 assert.equal(returned.code, 0);
 assert.equal(returned.data?.status, '退回修改');
+assert.equal(returned.data?.changeHistory?.length, 1, '首次退回必须追加一条真实审核历史');
+assert.deepEqual(
+  returned.data?.changeHistory?.[0],
+  {
+    id: returned.data?.changeHistory?.[0].id,
+    action: 'review',
+    operatorId: 'user-finance',
+    operator: '财务专员',
+    changedAt: returned.data?.auditedAt,
+    reason: '补充聊天截图',
+    summary: '退回售后挽回订单修改',
+  },
+);
+const returnedSnapshot = returned.data;
+const returnedIdempotentRetry = await recoveryOrderApi.returnRecoveryOrder(
+  created.data.id,
+  'user-finance',
+  '财务专员',
+  '补充聊天截图',
+);
+assert.deepEqual(returnedIdempotentRetry.data, returnedSnapshot, '相同原因退回重试不得重复追加审核历史');
 
 setSession('user-service');
-const resubmitted = await recoveryOrderApi.updateRecoveryOrder(created.data.id, {
+const returnedResubmitInput: RecoveryOrderInput = {
   customerName: '第三方客户',
   customerPhone: '13900000000',
   customerWechat: 'third-party',
@@ -301,16 +390,176 @@ const resubmitted = await recoveryOrderApi.updateRecoveryOrder(created.data.id, 
   recoveryUserName: '售后小陈',
   createdBy: 'user-service',
   createdByName: '售后小陈',
-});
+};
+const rolesBeforeCreatePermissionRevocation = storage.getItem(STORAGE_KEYS.ROLES) || '[]';
+const currentRoles = JSON.parse(rolesBeforeCreatePermissionRevocation) as Role[];
+const currentServiceUser = (JSON.parse(storage.getItem(STORAGE_KEYS.USERS) || '[]') as User[])
+  .find((user) => user.id === 'user-service')!;
+storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(currentRoles.map((role) => (
+  role.id === currentServiceUser.roleId || role.name === currentServiceUser.role
+) ? {
+  ...role,
+  permissions: role.permissions.filter((permission) => permission.module !== PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE),
+} : role)));
+const resubmitWithoutCreateWrite = await recoveryOrderApi.updateRecoveryOrder(created.data.id, returnedResubmitInput);
+assert.equal(resubmitWithoutCreateWrite.code, 403, '原创建人失去新增售后挽回订单写权限后不得重提退回记录');
+assert.equal(
+  (await recoveryOrderApi.fetchRecoveryOrderById(created.data.id)).data?.status,
+  '退回修改',
+  '权限拒绝不得改变退回修改状态',
+);
+storage.setItem(STORAGE_KEYS.ROLES, rolesBeforeCreatePermissionRevocation);
+
+const resubmitted = await recoveryOrderApi.updateRecoveryOrder(created.data.id, returnedResubmitInput);
 assert.equal(resubmitted.code, 0);
 assert.equal(resubmitted.data?.status, '待审核');
 assert.deepEqual(resubmitted.data?.recoveryAttachments?.map((item) => item.id), ['recovery-proof-1']);
+
+const rejectedSource = await recoveryOrderApi.createRecoveryOrder({
+  customerName: '终态客户',
+  customerPhone: '13700000000',
+  customerWechat: 'terminal-customer',
+  thirdPartyOrderNo: 'TP-REJECTED-TERMINAL',
+  sourcePlatform: '抖音',
+  originalProduct: '代理服务',
+  originalAmount: 2980,
+  recoveryAmount: 1980,
+  recoveryUserId: 'user-service',
+  recoveryUserName: '售后小陈',
+  createdBy: 'user-service',
+  createdByName: '售后小陈',
+});
+assert.equal(rejectedSource.code, 0);
+
+setSession('user-finance');
+const rejectedTerminal = await recoveryOrderApi.rejectRecoveryOrder(rejectedSource.data!.id, 'user-finance', '财务专员', '凭证无效');
+assert.equal(rejectedTerminal.code, 0);
+assert.equal(rejectedTerminal.data?.status, '审核驳回');
+assert.equal(rejectedTerminal.data?.changeHistory?.length, 1, '首次驳回必须追加一条真实审核历史');
+assert.deepEqual(
+  rejectedTerminal.data?.changeHistory?.[0],
+  {
+    id: rejectedTerminal.data?.changeHistory?.[0].id,
+    action: 'review',
+    operatorId: 'user-finance',
+    operator: '财务专员',
+    changedAt: rejectedTerminal.data?.auditedAt,
+    reason: '凭证无效',
+    summary: '驳回售后挽回订单',
+  },
+);
+
+const rejectedRowsWithHistory = JSON.parse(storage.getItem(STORAGE_KEYS.RECOVERY_ORDERS) || '[]') as typeof rejectedSource.data[];
+const rejectedIndex = rejectedRowsWithHistory.findIndex((item) => item.id === rejectedSource.data!.id);
+rejectedRowsWithHistory[rejectedIndex] = {
+  ...rejectedRowsWithHistory[rejectedIndex],
+  crmIdentityStatus: '已匹配线索',
+  linkedLeadId: 'lead-terminal-preserved',
+  commissionIds: ['commission-terminal-preserved'],
+};
+storage.setItem(STORAGE_KEYS.RECOVERY_ORDERS, JSON.stringify(rejectedRowsWithHistory));
+const rejectedTerminalSnapshot = rejectedRowsWithHistory[rejectedIndex];
+
+const rejectedThenReturned = await recoveryOrderApi.returnRecoveryOrder(
+  rejectedSource.data!.id,
+  'user-finance',
+  '财务专员',
+  '改为退回修改',
+);
+assert.equal(rejectedThenReturned.code, 409, '审核驳回后不得通过退回操作绕回可重提状态');
+assert.deepEqual(
+  (await recoveryOrderApi.fetchRecoveryOrderById(rejectedSource.data!.id, 'recoveryOrderApplications')).data,
+  rejectedTerminalSnapshot,
+  '非法退回不得改写审核终态、原因、CRM/分账字段或历史',
+);
+
+const rejectedWithDifferentReason = await recoveryOrderApi.rejectRecoveryOrder(
+  rejectedSource.data!.id,
+  'user-finance',
+  '财务专员',
+  '换一个驳回原因',
+);
+assert.equal(rejectedWithDifferentReason.code, 409, '审核驳回后不得用不同原因覆盖原驳回审计');
+assert.deepEqual(
+  (await recoveryOrderApi.fetchRecoveryOrderById(rejectedSource.data!.id, 'recoveryOrderApplications')).data,
+  rejectedTerminalSnapshot,
+  '不同原因重复驳回不得改写原记录',
+);
+
+const rejectedIdempotentRetry = await recoveryOrderApi.rejectRecoveryOrder(
+  rejectedSource.data!.id,
+  'user-finance',
+  '财务专员',
+  '凭证无效',
+);
+assert.equal(rejectedIdempotentRetry.code, 0, '相同原因的驳回重试应幂等返回原记录');
+assert.deepEqual(rejectedIdempotentRetry.data, rejectedTerminalSnapshot);
+assert.deepEqual(
+  (await recoveryOrderApi.fetchRecoveryOrderById(rejectedSource.data!.id, 'recoveryOrderApplications')).data,
+  rejectedTerminalSnapshot,
+  '幂等重试不得改写时间、原因或历史',
+);
+
+const rejectedThenApproved = await recoveryOrderApi.approveRecoveryOrder(
+  rejectedSource.data!.id,
+  'user-finance',
+  '财务专员',
+);
+assert.equal(rejectedThenApproved.code, 409, '审核驳回后不得改为审核通过');
+assert.deepEqual(
+  (await recoveryOrderApi.fetchRecoveryOrderById(rejectedSource.data!.id, 'recoveryOrderApplications')).data,
+  rejectedTerminalSnapshot,
+  '非法审核通过不得改写终态记录',
+);
+
+setSession('user-service');
+const rejectedLocalEdit = await recoveryOrderApi.updateRecoveryOrder(rejectedSource.data!.id, {
+  ...rejectedSource.data!,
+  remark: '尝试重新提交已驳回记录',
+});
+assert.equal(rejectedLocalEdit.code, 409, '本地兼容 API 必须阻止创建人重提审核驳回记录');
+assert.match(rejectedLocalEdit.message, /审核驳回.*不能修改或重新提交/);
+const rejectedLocalPersisted = await recoveryOrderApi.fetchRecoveryOrderById(rejectedSource.data!.id);
+assert.equal(rejectedLocalPersisted.data?.status, '审核驳回', '本地兼容 API 失败重提不得改变审核驳回状态');
+
+setSession('user-no-recovery-permission');
+const rejectedNoPermissionAttempt = await recoveryOrderApi.updateRecoveryOrder(rejectedSource.data!.id, {
+  ...rejectedSource.data!,
+  remark: '无编辑或创建权限尝试探测已驳回记录',
+});
+assert.equal(rejectedNoPermissionAttempt.code, 403, '完全无编辑或创建权限时必须先返回 403，不泄露审核状态');
+
+setSession('user-recovery-editor');
+const rejectedLocalEditorAttempt = await recoveryOrderApi.updateRecoveryOrder(rejectedSource.data!.id, {
+  ...rejectedSource.data!,
+  remark: '编辑权限尝试修改已驳回记录',
+});
+assert.equal(rejectedLocalEditorAttempt.code, 409, '真正具备编辑写权限的账号也不得绕过审核驳回终态');
+storage.setItem(
+  STORAGE_KEYS.RECOVERY_ORDERS,
+  JSON.stringify((JSON.parse(storage.getItem(STORAGE_KEYS.RECOVERY_ORDERS) || '[]') as typeof rejectedSource.data[])
+    .filter((item) => item.id !== rejectedSource.data!.id)),
+);
 
 setSession('user-finance');
 const approved = await recoveryOrderApi.approveRecoveryOrder(created.data.id, 'user-finance', '财务专员');
 assert.equal(approved.code, 0);
 assert.equal(approved.data?.status, '审核通过');
 assert.equal(approved.data?.settlementStatus, '待处理');
+assert.equal(approved.data?.changeHistory?.length, 2, '首次通过必须在已有退回历史前追加一条真实审核历史');
+assert.deepEqual(
+  approved.data?.changeHistory?.[0],
+  {
+    id: approved.data?.changeHistory?.[0].id,
+    action: 'review',
+    operatorId: 'user-finance',
+    operator: '财务专员',
+    changedAt: approved.data?.auditedAt,
+    summary: '审核通过售后挽回订单',
+  },
+);
+const approvedIdempotentRetry = await recoveryOrderApi.approveRecoveryOrder(created.data.id, 'user-finance', '财务专员');
+assert.deepEqual(approvedIdempotentRetry.data, approved.data, '审核通过重试不得重复追加审核历史');
 assert.deepEqual(approved.data?.commissionIds, []);
 assert.equal((JSON.parse(storage.getItem(STORAGE_KEYS.COMMISSIONS) || '[]') as unknown[]).length, 0);
 

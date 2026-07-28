@@ -10,11 +10,15 @@ const inlineProof = `data:image/png;base64,${'A'.repeat(10_000)}`;
 const sales: AuthenticatedUser = {
   id: 'user-sales', name: '销售A', account: 'sales', email: 'sales@example.com', phone: '',
   role: '销售顾问', roleId: 'role-sales', departmentId: 'dept-sales', isActive: true,
-  permissions: [{ module: '订单/订单列表', actions: ['read'] }],
+  permissions: [
+    { module: '订单/订单列表', actions: ['read'] },
+    { module: '订单/订单修改记录', actions: ['read'] },
+  ],
 };
 const finance: AuthenticatedUser = {
   ...sales, id: 'user-finance', name: '财务A', account: 'finance', email: 'finance@example.com',
   role: '财务专员', roleId: 'role-finance', departmentId: 'dept-finance',
+  permissions: [{ module: '订单/订单列表', actions: ['read'] }],
 };
 
 function order(id: string, salesId: string | undefined, salesName: string, overrides: Partial<Order> = {}): Order {
@@ -70,6 +74,10 @@ const records = [
   order('order-self', sales.id, sales.name, {
     sourceApplicationId: 'application-approved',
     dealEvidencePreview: inlineProof,
+    changeHistory: [{
+      id: 'change-order-self', action: 'update', operator: finance.name,
+      changedAt: now, summary: '更新订单资料',
+    }],
     payments: [{ id: 'payment-self', amount: 899, paymentMethod: '对公转账', paidAt: now, voucherPreview: inlineProof }],
   }),
   order('order-legacy-self', undefined, sales.name, { actualAmount: 799 }),
@@ -124,7 +132,15 @@ const applications = [
       payments: [{ id: 'payment-application-other', amount: 899, paymentMethod: '对公转账', paidAt: '2026-07-24T10:55:13.000Z' }],
     },
   },
-  { ...application('application-approved', finance.id, finance.name, '已入库'), orderId: 'order-self', orderNo: 'ORD-order-self' },
+  {
+    ...application('application-approved', finance.id, finance.name, '已入库'),
+    orderId: 'order-self',
+    orderNo: 'ORD-order-self',
+    reviewLogs: [{
+      id: 'review-approved', action: 'approve' as const, operatorId: finance.id,
+      operatorName: finance.name, createdAt: now,
+    }],
+  },
   { ...application('application-deleted-approved', finance.id, finance.name, '已入库'), orderId: 'order-deleted', orderNo: 'ORD-order-deleted' },
   { ...application('application-missing-approved', finance.id, finance.name, '已入库'), orderId: 'order-missing', orderNo: 'ORD-order-missing' },
   application('application-rejected', sales.id, sales.name, '已驳回'),
@@ -184,6 +200,8 @@ assert.equal(salesOrders.data?.pagination.total, 2);
 const listedOrder = salesOrders.data?.items.find((item) => item.id === 'order-self');
 assert.equal(listedOrder?.dealEvidencePreview, undefined);
 assert.equal(listedOrder?.payments[0].voucherPreview, undefined);
+assert.equal(listedOrder?.changeHistory, undefined, '订单列表不得返回修改记录');
+assert.equal(listedOrder?.reviewLogs, undefined, '订单列表不得返回审核记录');
 assert.equal(listedOrder?.createdById, finance.id, '历史订单列表应从来源申请回溯创建人');
 assert.equal(listedOrder?.createdByName, finance.name);
 assert.equal(listedOrder?.settlementStatus, '待确认', '订单列表应显示分账状态而非固定的已确认');
@@ -250,6 +268,23 @@ assert.equal(orderDetail?.createdById, finance.id, '历史订单详情应从来�
 assert.equal(orderDetail?.createdByName, finance.name);
 assert.equal(orderDetail?.sourceName, '官网', '历史订单详情应从同一客户来源补齐二级来源');
 assert.equal(orderDetail?.settlementStatus, '待确认', '订单详情必须返回与列表一致的分账状态');
+assert.deepEqual(
+  orderDetail?.reviewLogs?.map((log) => log.id),
+  ['review-approved'],
+  '拥有订单修改记录权限时，详情应直接返回来源申请的真实审核日志',
+);
+assert.deepEqual(orderDetail?.changeHistory?.map((log) => log.id), ['change-order-self']);
+const orderDetailWithoutHistory = (await service.getOrder('order-self', finance)).data;
+assert.equal(
+  orderDetailWithoutHistory?.reviewLogs,
+  undefined,
+  '没有订单修改记录权限时，详情不得返回来源申请审核日志',
+);
+assert.equal(
+  orderDetailWithoutHistory?.changeHistory,
+  undefined,
+  '没有订单修改记录权限时，详情不得返回订单变更历史',
+);
 
 const salesStats = await service.getOrderStats(sales);
 assert.equal(salesStats.code, 0);

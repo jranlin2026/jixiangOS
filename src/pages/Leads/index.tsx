@@ -243,6 +243,7 @@ const Leads: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [leadFlowConfig, setLeadFlowConfig] = useState<LeadFlowConfig | null>(null);
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
+  const [intakeViewSettingsSignal, setIntakeViewSettingsSignal] = useState(0);
   const [assignLead, setAssignLead] = useState<Lead | null>(null);
   const [assignSalesName, setAssignSalesName] = useState('');
   const [templateDownloading, setTemplateDownloading] = useState(false);
@@ -529,6 +530,11 @@ const Leads: React.FC = () => {
             )}
           </>
         )}
+        {activeTab === 1 && canViewLeadIntake && (
+          <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setIntakeViewSettingsSignal((signal) => signal + 1)}>
+            视图设置
+          </Button>
+        )}
           </>
         )}
       />
@@ -685,7 +691,7 @@ const Leads: React.FC = () => {
         </>
       )}
 
-      {activeTab === 1 && canViewLeadIntake && <LeadIntakeTab />}
+      {activeTab === 1 && canViewLeadIntake && <LeadIntakeTab viewSettingsSignal={intakeViewSettingsSignal} />}
       {!canViewLeadList && !canViewLeadIntake && (
         <Typography variant="body2" sx={{ color: '#6b7280', py: 4, textAlign: 'center' }}>
           暂无可访问的线索板块

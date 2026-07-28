@@ -10,6 +10,10 @@ const recoverySettlementSource = readFileSync(
   join(process.cwd(), 'src/pages/Finance/RecoverySettlement.tsx'),
   'utf8',
 );
+const recoveryOrderDetailSource = readFileSync(
+  join(process.cwd(), 'src/shared/components/RecoveryOrderDetailContent.tsx'),
+  'utf8',
+);
 
 assert.match(
   recoveryOrderSource,
@@ -34,8 +38,8 @@ assert.match(
 );
 
 const createDialogSource = recoveryOrderSource.slice(
-  recoveryOrderSource.indexOf('<Dialog open={open}'),
-  recoveryOrderSource.indexOf('<Dialog open={Boolean(detailOrder)}'),
+  recoveryOrderSource.indexOf('<Dialog\n        open={open}'),
+  recoveryOrderSource.indexOf('<Dialog\n        open={Boolean(detailOrder)}'),
 );
 
 assert.equal(
@@ -44,7 +48,7 @@ assert.equal(
   'Recovery order form should use one unified recovery evidence uploader.',
 );
 assert.match(createDialogSource, /title="挽回凭证"[\s\S]*?maxCount=\{8\}/);
-for (const section of ['客户信息', '原订单信息', '挽回信息', '收款与凭证', '补充信息']) {
+for (const section of ['客户信息', '原订单信息', '挽回成交信息', '收款与凭证', '补充信息']) {
   assert.match(createDialogSource, new RegExp(`title="${section}"`), `新建售后挽回单应包含“${section}”填写分区。`);
 }
 assert.match(createDialogSource, /只在后台按手机号和微信进行身份识别/);
@@ -52,10 +56,10 @@ assert.match(createDialogSource, /不会向售后展示客户库资料/);
 assert.match(createDialogSource, /自动进入 CRM 待分配线索/);
 
 const detailDialogSource = recoveryOrderSource.slice(
-  recoveryOrderSource.indexOf('<Dialog open={Boolean(detailOrder)}'),
+  recoveryOrderSource.indexOf('<Dialog\n        open={Boolean(detailOrder)}'),
   recoveryOrderSource.indexOf('<Dialog open={Boolean(historyOrder)}'),
 );
-for (const section of ['客户信息', '原订单与来源信息', '挽回成交信息', '审核与系统信息', '付款与挽回凭证']) {
+for (const section of ['客户信息', '原订单与来源', '挽回成交信息', '收款与凭证', '审核与系统记录']) {
   assert.match(detailDialogSource, new RegExp(section), `售后资料弹窗应包含“${section}”分区。`);
 }
 assert.match(detailDialogSource, /label="挽回凭证"/);
@@ -84,7 +88,12 @@ assert.match(
   'Finance recovery order number should open the recovery detail when clicked.',
 );
 assert.match(recoverySettlementSource, /售后挽回订单资料/);
-assert.match(recoverySettlementSource, /sourceDetailOrder\.recoveryAt/);
+assert.match(
+  recoverySettlementSource,
+  /<RecoveryOrderDetailContent[\s\S]*?order=\{sourceDetailOrder\}/,
+  '财务售后分账应复用完整的售后挽回订单资料组件。',
+);
+assert.match(recoveryOrderDetailSource, /order\.recoveryAt \|\| order\.createdAt/);
 assert.match(recoverySettlementSource, /finance_recovery_settlement_table_view_v2/);
 for (const field of [
   'sourcePlatformShop', 'originalProductLevel', 'officialPaymentChannel', 'paymentAt',
@@ -100,9 +109,14 @@ const settlementColumnsSource = recoverySettlementSource.slice(
   recoverySettlementSource.indexOf('const DEFAULT_VISIBLE_COLUMNS'),
 );
 assert.doesNotMatch(settlementColumnsSource, /id: 'actions'/, '售后分账操作列不应进入视图设置字段池。');
-for (const section of ['源业务资料', '付款资料', '分账明细', '处理记录']) {
+for (const section of ['源业务资料', '付款资料', '分账明细']) {
   assert.match(recoverySettlementSource, new RegExp(section), `售后分账资料应包含“${section}”分区。`);
 }
+assert.match(
+  recoverySettlementSource,
+  /<SettlementOperationTimeline\s+compact\s+events=\{buildRecoverySettlementEvents\(detailOrder\)\}\s*\/>/,
+  '售后分账资料应使用统一处理记录时间线。',
+);
 assert.match(recoverySettlementSource, /<RecoveryEvidenceLinks order=/);
 
 assert.match(

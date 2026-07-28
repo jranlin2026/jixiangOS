@@ -9,6 +9,7 @@ import {
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 
 interface BusinessDetailSectionProps {
+  step?: number;
   title: string;
   summary?: string;
   children: React.ReactNode;
@@ -16,6 +17,7 @@ interface BusinessDetailSectionProps {
   columns?: 1 | 2 | 3;
 }
 export function BusinessDetailSection({
+  step,
   title,
   summary,
   children,
@@ -39,9 +41,33 @@ export function BusinessDetailSection({
     >
       <AccordionSummary
         expandIcon={<ExpandMoreIcon />}
-        sx={{ px: 2.5, minHeight: 58, bgcolor: '#f8fafc' }}
+        sx={{
+          px: { xs: 1.5, sm: 2.5 },
+          minHeight: 58,
+          bgcolor: step ? '#eff6ff' : '#f8fafc',
+          borderBottom: step ? '1px solid #dbeafe' : undefined,
+        }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5, minWidth: 0 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
+          {step ? (
+            <Box
+              aria-hidden="true"
+              sx={{
+                width: 32,
+                height: 32,
+                borderRadius: 1.25,
+                display: 'grid',
+                placeItems: 'center',
+                flexShrink: 0,
+                bgcolor: '#2563eb',
+                color: '#fff',
+                fontWeight: 800,
+                boxShadow: '0 4px 10px rgba(37, 99, 235, 0.2)',
+              }}
+            >
+              {step}
+            </Box>
+          ) : null}
           <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>{title}</Typography>
           {summary ? <Typography variant="body2" color="text.secondary" noWrap>{summary}</Typography> : null}
         </Box>

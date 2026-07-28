@@ -36,7 +36,7 @@ assert.doesNotMatch(
 );
 assert.match(
   recoverySource,
-  /<Dialog open=\{Boolean\(detailOrder\) && !selected\} onClose=\{closeDetail\}/,
+  /<Dialog\s+open=\{Boolean\(detailOrder\) && !selected\}\s+onClose=\{closeDetail\}/,
   '编辑分账时应暂时隐藏但不能销毁详情弹窗',
 );
 assert.match(commissionApiSource, /await hydrateCommissionOrderCache\(\)/);

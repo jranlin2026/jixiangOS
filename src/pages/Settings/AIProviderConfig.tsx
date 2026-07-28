@@ -19,6 +19,7 @@ import SaveIcon from '@mui/icons-material/Save';
 import ScienceIcon from '@mui/icons-material/Science';
 import { aiConfigApi } from '../../api/aiConfigApi';
 import type { AiProviderConfig } from '../../types/aiConfig';
+import OperationFeedbackDialog from '../../shared/components/OperationFeedbackDialog';
 
 const defaultForm = {
   provider: 'deepseek' as const,
@@ -34,11 +35,12 @@ const AIProviderConfig: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   const loadConfig = async () => {
     setLoading(true);
-    setMessage(null);
+    setLoadError('');
     const res = await aiConfigApi.getConfig().catch((error) => ({
       code: -1,
       data: null,
@@ -54,7 +56,7 @@ const AIProviderConfig: React.FC = () => {
         enabled: res.data.enabled,
       });
     } else {
-      setMessage({ type: 'error', text: res.message || '读取AI配置失败' });
+      setLoadError(res.message || '读取AI配置失败');
     }
     setLoading(false);
   };
@@ -123,7 +125,7 @@ const AIProviderConfig: React.FC = () => {
         </Stack>
       </Stack>
 
-      {message && <Alert severity={message.type} sx={{ mb: 2 }}>{message.text}</Alert>}
+      {loadError && <Alert severity="error" sx={{ mb: 2 }}>{loadError}。请检查服务后重试。</Alert>}
 
       <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1.5, p: 2.5 }}>
         <Stack spacing={2.5}>
@@ -180,6 +182,12 @@ const AIProviderConfig: React.FC = () => {
           />
         </Stack>
       </Paper>
+      <OperationFeedbackDialog
+        open={Boolean(message)}
+        severity={message?.type}
+        message={message?.text || ''}
+        onClose={() => setMessage(null)}
+      />
     </Box>
   );
 };

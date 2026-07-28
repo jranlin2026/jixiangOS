@@ -23,7 +23,6 @@ import {
   Typography,
 } from '@mui/material';
 import TablePagination from '../../shared/components/TablePagination';
-import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { leadFlowApi } from '../../api';
 import type { LeadIntakeRecord } from '../../types/lead';
@@ -116,11 +115,16 @@ const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   createdAt: 180,
 };
 
-const LeadIntakeTab: React.FC = () => {
+type LeadIntakeTabProps = {
+  viewSettingsSignal?: number;
+};
+
+const LeadIntakeTab: React.FC<LeadIntakeTabProps> = ({ viewSettingsSignal = 0 }) => {
   const [items, setItems] = useState<LeadIntakeRecord[]>([]);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [viewSettingsOpen, setViewSettingsOpen] = useState(false);
+  const handledViewSettingsSignalRef = React.useRef(viewSettingsSignal);
   const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readColumnWidths(INTAKE_WIDTH_STORAGE_KEY, DEFAULT_COLUMN_WIDTHS));
   const currentUser = useAuthStore((state) => state.currentUser);
   const isSuperAdmin = isSuperAdminRoleName(currentUser?.role);
@@ -144,6 +148,12 @@ const LeadIntakeTab: React.FC = () => {
     total: 0,
     totalPages: 0,
   });
+
+  useEffect(() => {
+    if (viewSettingsSignal === handledViewSettingsSignalRef.current) return;
+    handledViewSettingsSignalRef.current = viewSettingsSignal;
+    setViewSettingsOpen(true);
+  }, [viewSettingsSignal]);
 
   const fetchData = async (
     nextSearch = search,
@@ -239,7 +249,7 @@ const LeadIntakeTab: React.FC = () => {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, mb: 3, flexWrap: 'wrap' }}>
+      <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
         <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
         <TextField
           size="small"
@@ -268,9 +278,6 @@ const LeadIntakeTab: React.FC = () => {
           </Select>
         </FormControl>
         </Box>
-        <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setViewSettingsOpen(true)}>
-          视图设置
-        </Button>
       </Box>
 
       <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #f0f0f0', overflowX: 'auto' }}>
@@ -419,4 +426,3 @@ const LeadIntakeTab: React.FC = () => {
 };
 
 export default LeadIntakeTab;
-

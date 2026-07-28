@@ -28,6 +28,8 @@ function compactPayment(payment: OrderPayment): OrderPayment {
 export function compactOrderListItem(order: Order): Order {
   return {
     ...order,
+    changeHistory: undefined,
+    reviewLogs: undefined,
     dealEvidencePreview: withoutInlinePayload(order.dealEvidencePreview),
     dealEvidenceAttachments: order.dealEvidenceAttachments?.map(compactBusinessAttachment),
     payments: (order.payments || []).map(compactPayment),

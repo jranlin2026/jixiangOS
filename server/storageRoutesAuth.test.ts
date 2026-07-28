@@ -217,7 +217,7 @@ assert.doesNotMatch(source, /const requireCustomer(?:Edit|Assign)Access/);
 assert.match(source, /const requireLeadListAccess = createRequireAuth\(authService, PERMISSION_KEYS\.LEADS_LIST\);/);
 assert.match(source, /const requireLeadCreateAccess = createRequireAuth\(authService, PERMISSION_KEYS\.LEADS_CREATE, 'write'\);/);
 assert.match(source, /const requireLeadConvertAccess = createRequireAuth\(authService, PERMISSION_KEYS\.LEADS_CONVERT, 'write'\);/);
-assert.match(source, /const requireLeadEditAccess = createRequireAnyPermission\(authService, \[PERMISSION_KEYS\.LEADS_CREATE, PERMISSION_KEYS\.LEADS_DETAIL\], 'write'\);/);
+assert.match(source, /const requireLeadEditAccess = createRequireAuth\(authService, PERMISSION_KEYS\.LEADS_EDIT, 'write'\);/);
 assert.match(source, /const requireLeadFollowAccess = createRequireAuth\(authService, PERMISSION_KEYS\.LEADS_FOLLOW, 'write'\);/);
 assert.match(source, /const requireLeadAssignAccess = createRequireAuth\(authService, PERMISSION_KEYS\.LEADS_FLOW_CONFIG, 'write'\);/);
 assert.match(source, /const requireLeadDeleteAccess = createRequireAuth\(authService, '全部', 'delete'\);/);

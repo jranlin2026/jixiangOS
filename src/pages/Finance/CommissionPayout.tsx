@@ -45,6 +45,7 @@ import type {
   CommissionPayoutWorkspace,
 } from '../../types/commission';
 import Commission from '../Commission';
+import OperationFeedbackDialog, { type OperationFeedbackSeverity } from '../../shared/components/OperationFeedbackDialog';
 
 type PayoutView = 'pending' | 'records' | 'summary';
 
@@ -91,7 +92,8 @@ const CommissionPayout: React.FC = () => {
   const canManage = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_PAYOUT, 'write');
   const [view, setView] = useState<PayoutView>('pending');
   const [workspace, setWorkspace] = useState<CommissionPayoutWorkspace | null>(null);
-  const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [feedback, setFeedback] = useState<{ severity: OperationFeedbackSeverity; message: string } | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [detailEmployee, setDetailEmployee] = useState<CommissionPayoutEmployeeRow | null>(null);
   const [detailRecord, setDetailRecord] = useState<CommissionPayoutRecord | null>(null);
@@ -114,12 +116,12 @@ const CommissionPayout: React.FC = () => {
 
   const load = useCallback(async () => {
     if (view === 'summary') return;
-    setError('');
+    setLoadError('');
     const response = view === 'pending'
       ? await commissionPayoutApi.fetchPendingWorkspace()
       : await commissionPayoutApi.fetchRecordsWorkspace();
     if (response.code === 0 && response.data) setWorkspace(response.data);
-    else setError(response.message || '提成发放数据加载失败');
+    else setLoadError(response.message || '提成发放数据加载失败');
   }, [view]);
 
   useEffect(() => {
@@ -207,12 +209,16 @@ const CommissionPayout: React.FC = () => {
       note: note.trim() || undefined,
     });
     setSubmitting(false);
-    if (response.code !== 0) return setError(response.message || '发放失败');
+    if (response.code !== 0) {
+      setFeedback({ severity: 'error', message: response.message || '发放失败' });
+      return;
+    }
     setIssueOpen(false);
     setSelectedIds([]);
     setPaymentReference('');
     setNote('');
     await load();
+    setFeedback({ severity: 'success', message: '提成发放成功，发放记录和资金流水已生成' });
   };
 
   const exportRecord = (record: CommissionPayoutRecord) => {
@@ -418,7 +424,7 @@ const CommissionPayout: React.FC = () => {
         <Tab value="pending" label="待发放" /><Tab value="records" label="发放记录" /><Tab value="summary" label="月度报告" />
       </Tabs>
     </Paper>
-    {error && <Alert severity="error" onClose={() => setError('')}>{error}</Alert>}
+    {loadError && <Alert severity="error" onClose={() => setLoadError('')}>{loadError}</Alert>}
     {view === 'pending' && renderPending()}
     {view === 'records' && renderRecords()}
     {view === 'summary' && <Commission key="payout-summary" embedded initialTab={1} payoutMode="finance" />}
@@ -534,6 +540,8 @@ const CommissionPayout: React.FC = () => {
         ) : null}
       </Stack></DialogContent><DialogActions><Button onClick={() => setDetailRecord(null)}>关闭</Button></DialogActions>
     </Dialog>
+
+    <OperationFeedbackDialog open={Boolean(feedback)} severity={feedback?.severity} message={feedback?.message || ''} onClose={() => setFeedback(null)} />
 
   </Stack>;
 };

@@ -34,10 +34,10 @@ assert.match(orderForm, /htmlFor="order-sales-owner-field"/, '销售负责人标
 assert.doesNotMatch(recoveryForm, /function RecoveryFormSection/);
 assert.match(recoveryForm, /title="客户信息"/);
 assert.match(recoveryForm, /title="原订单信息"/);
-assert.match(recoveryForm, /title="挽回信息"/);
+assert.match(recoveryForm, /title="挽回成交信息"/);
 assert.match(recoveryForm, /title="收款与凭证"/);
 assert.match(recoveryForm, /title="补充信息"/);
-assert.match(recoveryForm, /maxWidth="lg"/);
+assert.match(recoveryForm, /<Dialog[\s\S]{0,100}open=\{open\}[\s\S]{0,180}maxWidth="md"/, '售后挽回表单应与订单申请使用相同宽度');
 assert.match(recoveryForm, /title="收款与凭证"[\s\S]*label="官方收款渠道"[\s\S]*BusinessAttachmentPicker[\s\S]*<\/BusinessFormSection>/);
 assert.match(recoveryForm, /submitAttempted/);
 

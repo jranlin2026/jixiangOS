@@ -22,6 +22,7 @@ type Props = {
   selectedSelection: CustomerExportSelection | null;
   filterSelection: CustomerExportSelection;
   canExportSensitive: boolean;
+  fileNamePrefix?: string;
   onClose: () => void;
 };
 
@@ -34,7 +35,7 @@ function downloadBuffer(fileName: string, buffer: ArrayBuffer): void {
   URL.revokeObjectURL(url);
 }
 
-export default function CustomerExportDialog({ open, selectedSelection, filterSelection, canExportSensitive, onClose }: Props) {
+export default function CustomerExportDialog({ open, selectedSelection, filterSelection, canExportSensitive, fileNamePrefix, onClose }: Props) {
   const [scope, setScope] = useState<'selected' | 'filtered'>('filtered');
   const [includeSensitive, setIncludeSensitive] = useState(false);
   const [reason, setReason] = useState('客户资料备份');
@@ -59,7 +60,10 @@ export default function CustomerExportDialog({ open, selectedSelection, filterSe
         : filterSelection;
       const response = await customerDataExchangeApi.exportCustomers({ selection, includeSensitive, reason });
       if (response.code !== 0 || !response.data) throw new Error(response.message || '客户导出失败');
-      downloadBuffer(response.data.fileName, await createCustomerExportWorkbook(response.data.rows));
+      const fileName = fileNamePrefix && response.data.fileName.startsWith('客户资料-')
+        ? response.data.fileName.replace('客户资料-', `${fileNamePrefix}-`)
+        : response.data.fileName;
+      downloadBuffer(fileName, await createCustomerExportWorkbook(response.data.rows));
       onClose();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '客户导出失败');

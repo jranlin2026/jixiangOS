@@ -486,7 +486,7 @@ export function createCommissionMonthlyReportService(prisma: ReportPrisma, optio
   const exportWorkbook = async (input: CommissionMonthlyReportRequest, actor: AuthenticatedUser) => {
     try {
       const request = validateRequest(input);
-      if (!hasPermission(actor, PERMISSION_KEYS.FINANCE_PAYOUT, 'read')) throw new CommissionMonthlyReportError(403, '无权导出提成月度报告');
+      if (!hasPermission(actor, PERMISSION_KEYS.FINANCE_PAYOUT_REPORT_EXPORT, 'read')) throw new CommissionMonthlyReportError(403, '无权导出提成月度报告');
       const [commissionRows, payoutRows, orderRows] = await Promise.all([
         prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSIONS } }),
         prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES } }),

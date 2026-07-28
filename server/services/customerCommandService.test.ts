@@ -274,7 +274,10 @@ const customerEditor = {
 
 const leadEditor = {
   ...salesA,
-  permissions: [{ module: PERMISSION_KEYS.LEADS_CREATE, actions: ['read', 'write'] }],
+  permissions: [
+    { module: PERMISSION_KEYS.LEADS_CREATE, actions: ['read', 'write'] },
+    { module: PERMISSION_KEYS.LEADS_EDIT, actions: ['read', 'write'] },
+  ],
 };
 
 const leadFollower = {

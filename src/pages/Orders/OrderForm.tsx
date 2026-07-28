@@ -939,9 +939,12 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
                     return (
                       <TableRow key={item.id || `${item.productId}-${index}`}>
                         <TableCell>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <Radio size="small" checked={Boolean(item.isPrimary)} onChange={() => setPrimaryProductItem(index)} disabled={formalFieldLocked} inputProps={{ 'aria-label': `设为第 ${index + 1} 项主产品` }} />
-                            <Box sx={{ minWidth: 0, flex: 1 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
+                            <Radio size="small" checked={Boolean(item.isPrimary)} onChange={() => setPrimaryProductItem(index)} disabled={formalFieldLocked} inputProps={{ 'aria-label': `设为第 ${index + 1} 项主产品` }} sx={{ mt: 0.5, flexShrink: 0 }} />
+                            <Box
+                              data-testid="order-product-name-stack"
+                              sx={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}
+                            >
                               <TextField
                                 select size="small" value={item.productId}
                                 onChange={(event) => {
@@ -952,14 +955,14 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
                                   }
                                   changeProductItem(index, { productId });
                                 }}
-                                fullWidth disabled={formalFieldLocked}
+                                fullWidth disabled={formalFieldLocked} sx={{ display: 'block' }}
                               >
                                 {!productOptions.some((product) => product.id === item.productId) && (
                                   <MenuItem value={item.productId}>{displayProductName}（历史产品）</MenuItem>
                                 )}
                                 {productOptions.map((product) => <MenuItem key={product.id} value={product.id}>{product.name}</MenuItem>)}
                               </TextField>
-                              {item.isPrimary && <Chip label="主产品" size="small" color="primary" variant="outlined" sx={{ mt: 0.5, height: 20, fontSize: 11 }} />}
+                              {item.isPrimary && <Chip label="主产品" size="small" color="primary" variant="outlined" sx={{ mt: 0.75, height: 20, fontSize: 11, alignSelf: 'flex-start' }} />}
                             </Box>
                           </Box>
                         </TableCell>

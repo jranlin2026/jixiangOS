@@ -45,6 +45,7 @@ import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import { businessExportApi, commissionApi, commissionPayoutApi, commissionRuleApi, customerApi, orderApi, settingsApi } from '../../api';
 import { getProductLevelRowSx, getProductLevelTagSx, normalizeResourceOwnership } from '../../shared/utils/constants';
 import { buildCommissionPayoutPlanSnapshot, getCommissionTierBucketKey } from '../../shared/utils/commissionConfiguration';
+import { getSettlementRowActionVisibility } from '../../shared/settlementListActions';
 import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import ResizableHeaderCell, {
@@ -91,7 +92,9 @@ import AttachmentPreviewLink from '../../shared/components/AttachmentPreview';
 import BusinessAttachmentLinks from '../../shared/components/BusinessAttachmentLinks';
 import { getOrderSettlementEvidenceStatus, getOrderSettlementRisks } from '../../shared/utils/orderSettlementPresentation';
 import SettlementStatusChip from '../../shared/components/SettlementStatusChip';
+import OperationFeedbackDialog from '../../shared/components/OperationFeedbackDialog';
 import { SettlementCompactDetailItem, SettlementDetailCard } from '../../shared/components/SettlementDetailUi';
+import SettlementOperationTimeline from '../../shared/components/SettlementOperationTimeline';
 import { SETTLEMENT_STATUSES } from '../../shared/utils/settlementStatus';
 import { downloadMineCommissionStatement } from './mineCommissionExport';
 import {
@@ -481,12 +484,11 @@ function OrderSettlementBusinessPaymentSummary({
             <SettlementCompactDetailItem label="线索来源">{sourceText}</SettlementCompactDetailItem>
             <SettlementCompactDetailItem label="销售负责人">{formatPerson(summary.salesId, summary.salesName || summary.salesOwner)}</SettlementCompactDetailItem>
             <SettlementCompactDetailItem label="线索贡献人">
-              {summary.leadContributorName || summary.leadInputBy
-                ? formatPerson(undefined, summary.leadContributorName || summary.leadInputBy)
+              {summary.leadContributorName
+                ? formatPerson(undefined, summary.leadContributorName)
                 : '-'}
             </SettlementCompactDetailItem>
-            <SettlementCompactDetailItem label="订单提交人">{formatPerson(summary.createdById, summary.createdByName)}</SettlementCompactDetailItem>
-            <SettlementCompactDetailItem label="订单创建时间">{summary.createdAt ? formatDate(summary.createdAt, 'yyyy-MM-dd HH:mm') : '-'}</SettlementCompactDetailItem>
+            <SettlementCompactDetailItem label="订单创建人">{formatPerson(summary.createdById, summary.createdByName)}</SettlementCompactDetailItem>
             <Box sx={{ gridColumn: { sm: '1 / -1' } }}>
               <SettlementCompactDetailItem label="备注">{summary.notes || '-'}</SettlementCompactDetailItem>
             </Box>
@@ -538,6 +540,7 @@ const Commission: React.FC<CommissionProps> = ({
 }) => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const canManageOrderSettlement = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_SETTLEMENT, 'write');
+  const canExportFinanceMonthlyReport = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_PAYOUT_REPORT_EXPORT);
   const canCleanupDeletedOrderSettlement = isSuperAdmin(currentUser);
   const [tabValue, setTabValue] = useState(initialTab);
   const lastOrderSplitViewTriggerRef = useRef(orderSplitViewTrigger);
@@ -1279,6 +1282,7 @@ const Commission: React.FC<CommissionProps> = ({
 
   const openSettlementDetail = async (summary: CommissionOrderSummary, options?: { edit?: boolean }) => {
     if (options?.edit && !canManageOrderSettlement) return;
+    let sourceOrderDeleted = summary.sourceOrderDeleted;
     setSummaryDetail(summary);
     setSettlementOrderDetail(null);
     setSettlementOrderLoading(!summary.sourceOrderDeleted);
@@ -1288,10 +1292,17 @@ const Commission: React.FC<CommissionProps> = ({
       summary.sourceOrderDeleted
         ? Promise.resolve()
         : orderApi.fetchOrderById(summary.orderId).then((res) => {
-          if (res.code === 0) setSettlementOrderDetail(res.data);
+          if (res.code === 0) {
+            setSettlementOrderDetail(res.data);
+            return;
+          }
+          sourceOrderDeleted = true;
+          const deletedSummary = { ...summary, sourceOrderDeleted: true };
+          setSummaryDetail(deletedSummary);
+          setOrderRows((rows) => rows.map((row) => (row.orderId === summary.orderId ? deletedSummary : row)));
         }).finally(() => setSettlementOrderLoading(false)),
     ]);
-    if (options?.edit && canAdjustSettlementSummary(summary)) {
+    if (options?.edit && !sourceOrderDeleted && canAdjustSettlementSummary(summary)) {
       const res = await commissionApi.fetchCommissionsByOrder(summary.orderId);
       if (res.code !== 0) return;
       const activeRows = getActiveCommissions(res.data).map(mapCommissionToSplitRow);
@@ -1601,7 +1612,12 @@ const Commission: React.FC<CommissionProps> = ({
         if (createSplitOpen) closeCreateSplitDialog();
         await refreshAll();
         if (summaryDetail) await reloadSettlementDetail(splitOrderId);
+        setSettlementActionMessage({ type: 'success', text: '分账调整已保存，当前状态为待确认' });
+      } else {
+        setSettlementActionMessage({ type: 'error', text: res.message || '保存分账调整失败' });
       }
+    } catch (error) {
+      setSettlementActionMessage({ type: 'error', text: error instanceof Error ? error.message : '保存分账调整失败' });
     } finally {
       setSplitSaving(false);
     }
@@ -1624,6 +1640,7 @@ const Commission: React.FC<CommissionProps> = ({
     if (deleteSummary.sourceOrderDeleted ? !canCleanupDeletedOrderSettlement : !canManageOrderSettlement) return;
     const deletingOrderId = deleteSummary.orderId;
     const shouldCleanupDeletedSource = deleteSummary.sourceOrderDeleted;
+    const openDetailSummary = summaryDetail?.orderId === deletingOrderId ? summaryDetail : null;
     setDeleteLoading(true);
     try {
       const res = shouldCleanupDeletedSource
@@ -1633,11 +1650,29 @@ const Commission: React.FC<CommissionProps> = ({
         setSettlementActionMessage({ type: 'success', text: shouldCleanupDeletedSource ? '废弃分账记录已清理' : '订单分账已重置，可重新处理分账' });
         setDeleteSummary(null);
         setDeleteReason('');
-        if (summaryDetail?.orderId === deletingOrderId) {
-          setSummaryDetail(null);
+        if (openDetailSummary) {
+          if (shouldCleanupDeletedSource) {
+            closeSettlementDetail();
+          } else {
+            const resetSummary: CommissionOrderSummary = {
+              ...openDetailSummary,
+              status: '待处理',
+              totalCommissionAmount: 0,
+              pendingAssignCount: 0,
+              exceptionCount: 0,
+              settlementOperator: undefined,
+              confirmedAt: undefined,
+              paidAt: undefined,
+              withdrawReason: undefined,
+              splitSummary: [],
+              commissions: [],
+            };
+            setSummaryDetail(resetSummary);
+          }
           resetSettlementDetailForms();
         }
         await refreshAll();
+        if (openDetailSummary && !shouldCleanupDeletedSource) await loadOperationLogs(deletingOrderId);
       } else {
         setSettlementActionMessage({ type: 'error', text: res.message || (shouldCleanupDeletedSource ? '清理废弃分账失败' : '重置订单分账失败') });
       }
@@ -1653,10 +1688,11 @@ const Commission: React.FC<CommissionProps> = ({
       const response = await commissionApi.reopenOrderCommissions(reopenSummary.orderId, reopenReason);
       if (response.code === 0) {
         const orderId = reopenSummary.orderId;
+        const keepDetailOpen = summaryDetail?.orderId === orderId;
         setReopenSummary(null);
         setReopenReason('');
-        if (summaryDetail?.orderId === orderId) closeSettlementDetail();
         await refreshAll();
+        if (keepDetailOpen) await reloadSettlementDetail(orderId);
         setSettlementActionMessage({ type: 'success', text: '已进入新一轮待处理分账，旧轮次继续只读保留' });
       } else {
         setSettlementActionMessage({ type: 'error', text: response.message || '重新分账失败' });
@@ -1679,6 +1715,8 @@ const Commission: React.FC<CommissionProps> = ({
       } else {
         setSettlementActionMessage({ type: 'error', text: res.message || '确认分账失败' });
       }
+    } catch (error) {
+      setSettlementActionMessage({ type: 'error', text: error instanceof Error ? error.message : '确认分账失败' });
     } finally {
       setDetailActionLoading(false);
     }
@@ -2939,117 +2977,39 @@ const Commission: React.FC<CommissionProps> = ({
     );
   };
 
-  const renderOperationLogCard = (log: CommissionOperationLog) => {
-    const amountText = log.totalCommissionAmount === undefined ? '-' : formatCurrency(log.totalCommissionAmount);
-    const splitSnapshot = log.splitSnapshot || [];
-    const operationTitle = log.action === '调整分账'
-      ? '调整了订单分账'
-      : log.action === '确认分账'
-        ? '确认了订单分账'
-        : log.action;
-
-    return (
-      <Box
-        key={log.id}
-        sx={{
-          minWidth: 0,
-        }}
-      >
-        <Box
-          sx={{
-            border: '1px solid #e5e7eb',
-            borderLeft: `3px solid ${log.action === '确认分账' ? '#16a34a' : '#2563eb'}`,
-            borderRadius: 1,
-            bgcolor: '#fff',
-            px: 1.25,
-            py: 1,
-            minWidth: 0,
-            overflow: 'hidden',
-          }}
-        >
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start', justifyContent: 'space-between', gap: 1, minWidth: 0 }}>
-            <Box sx={{ minWidth: 0, flex: 1 }}>
-              <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', minWidth: 0, mb: 0.25, flexWrap: 'wrap', rowGap: 0.25 }}>
-                <Chip label={log.action} size="small" color={log.action === '确认分账' ? 'success' : 'primary'} sx={{ height: 22 }} />
-                <Typography variant="body2" sx={{ color: '#111827', fontWeight: 800, overflowWrap: 'anywhere', minWidth: 0 }}>
-                  {operationTitle}
-                </Typography>
-              </Stack>
-              <Typography variant="caption" sx={{ color: '#64748b', overflowWrap: 'anywhere', display: 'block' }}>
-                {splitSnapshot.length || log.commissionCount || 0} 个角色 · 合计 {amountText} · {log.operator || '-'}
-              </Typography>
-            </Box>
-            <Typography variant="caption" sx={{ color: '#64748b', flexShrink: 0 }}>
-              {formatDate(log.operatedAt, 'MM-dd HH:mm')}
-            </Typography>
-          </Stack>
-
-          <Box
-            component="details"
-            sx={{
-              mt: 0.75,
-              minWidth: 0,
-              '& summary': {
-                cursor: 'pointer',
-                color: '#2563eb',
-                fontSize: 12,
-                fontWeight: 700,
-                outline: 'none',
-              },
-            }}
-          >
-            <Box component="summary">查看明细</Box>
-            <Stack spacing={0.75} sx={{ mt: 0.75, minWidth: 0 }}>
-              {log.reason && (
-                <Box sx={{ bgcolor: '#f8fafc', borderRadius: 1, px: 1, py: 0.75 }}>
-                  <Typography variant="caption" sx={{ display: 'block', color: '#6b7280', mb: 0.25 }}>原因</Typography>
-                  <Typography variant="body2" sx={{ color: '#374151', overflowWrap: 'anywhere' }}>{log.reason}</Typography>
-                </Box>
-              )}
-              <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700 }}>
-                本次记录
-              </Typography>
-              {splitSnapshot.length > 0 ? (
-                splitSnapshot.map((item, index) => (
-                  <Box
-                    key={`${log.id}-${item.role}-${item.ownerId || item.owner}-${index}`}
-                    sx={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr auto',
-                      gap: 0.75,
-                      alignItems: 'start',
-                      bgcolor: '#f8fafc',
-                      border: '1px solid #eef2f7',
-                      borderRadius: 1,
-                      px: 1,
-                      py: 0.65,
-                    }}
-                  >
-                    <Box sx={{ minWidth: 0 }}>
-                      <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 0.25 }}>
-                        <Chip label={item.role} size="small" variant="outlined" sx={{ height: 22 }} />
-                        <Chip label={item.status} size="small" sx={{ height: 22 }} />
-                      </Stack>
-                      <Typography variant="caption" sx={{ display: 'block', color: '#111827', fontWeight: 700, overflowWrap: 'anywhere', mt: 0.35 }}>
-                        {formatOwnerDisplayName(item.ownerId, item.owner)}{item.department ? ` / ${item.department}` : ''}
-                      </Typography>
-                    </Box>
-                    <Typography variant="caption" sx={{ color: '#111827', fontWeight: 900, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      {formatCurrency(item.commissionAmount)}
-                    </Typography>
-                  </Box>
-                ))
-              ) : (
-                <Typography variant="caption" sx={{ color: '#64748b' }}>
-                  旧记录未保存人员明细。
-                </Typography>
-              )}
-            </Stack>
-          </Box>
-        </Box>
-      </Box>
-    );
+  const getOperationStatusTransition = (action: CommissionOperationLog['action']) => {
+    const transitions: Partial<Record<CommissionOperationLog['action'], string>> = {
+      调整分账: '待确认 → 待确认',
+      确认分账: '待确认 → 待发放',
+      重置分账: '待确认 → 待处理',
+      重新分账: '已撤回 → 待处理',
+      撤回提成: '未发放 → 已撤回',
+      发放提成: '待发放 → 已发放',
+      清理废弃分账: '源订单已删除 → 已清理',
+    };
+    return transitions[action] || '-';
   };
+
+  const buildOrderSettlementEvents = () => operationLogs.map((log) => {
+    const splitSnapshot = log.splitSnapshot || [];
+    const amountText = log.totalCommissionAmount === undefined ? '-' : formatCurrency(log.totalCommissionAmount);
+    return {
+      id: log.id,
+      action: log.action,
+      summary: `${splitSnapshot.length || log.commissionCount || 0} 个角色 · 合计 ${amountText}`,
+      operator: log.operator,
+      operatedAt: formatDate(log.operatedAt, 'yyyy-MM-dd HH:mm'),
+      roundLabel: log.settlementVersion ? `第 ${log.settlementVersion} 轮` : '历史记录',
+      statusTransition: getOperationStatusTransition(log.action),
+      reason: log.reason,
+      changes: splitSnapshot.length
+        ? splitSnapshot.map((item) => ({
+          label: item.role,
+          value: `${formatOwnerDisplayName(item.ownerId, item.owner)}${item.department ? ` / ${item.department}` : ''} · ${formatCurrency(item.commissionAmount)} · ${item.status}`,
+        }))
+        : [{ label: '历史记录', value: '历史记录仅保留操作结果，暂无人员变更明细。' }],
+    };
+  });
 
   const togglePayoutExpanded = (ownerKey: string) => {
     setExpandedPayoutOwners((prev) => {
@@ -3185,6 +3145,7 @@ const Commission: React.FC<CommissionProps> = ({
           </TableHead>
           <TableBody>
             {orderRows.map((summary) => {
+              const actionVisibility = getSettlementRowActionVisibility(summary.status, Boolean(summary.sourceOrderDeleted));
               return (
               <TableRow key={summary.orderId} hover>
                 {visibleOrderSplitColumns.map((column, columnIndex) => (
@@ -3224,7 +3185,7 @@ const Commission: React.FC<CommissionProps> = ({
                     </Tooltip>
                     {canManageOrderSettlement && (
                       <>
-                    <Tooltip title={getAdjustDisabledReason(summary)}>
+                    {actionVisibility.showAdjust && <Tooltip title={getAdjustDisabledReason(summary)}>
                       <span>
                         <IconButton
                           size="small"
@@ -3236,8 +3197,8 @@ const Commission: React.FC<CommissionProps> = ({
                           <EditIcon fontSize="small" />
                         </IconButton>
                       </span>
-                    </Tooltip>
-                    {summary.status === '已撤回' && !summary.sourceOrderDeleted && (
+                    </Tooltip>}
+                    {actionVisibility.showReopen && (
                       <Tooltip title="重新分账">
                         <span>
                           <IconButton
@@ -3252,7 +3213,7 @@ const Commission: React.FC<CommissionProps> = ({
                         </span>
                       </Tooltip>
                     )}
-                    <Tooltip title={getResetOrCleanupOrderSplitDisabledReason(summary)}>
+                    {actionVisibility.showResetOrCleanup && <Tooltip title={getResetOrCleanupOrderSplitDisabledReason(summary)}>
                       <span>
                         <IconButton
                           size="small"
@@ -3266,7 +3227,7 @@ const Commission: React.FC<CommissionProps> = ({
                             : <RestartAltIcon fontSize="small" />}
                         </IconButton>
                       </span>
-                    </Tooltip>
+                    </Tooltip>}
                       </>
                     )}
                   </Stack>
@@ -3554,13 +3515,24 @@ const Commission: React.FC<CommissionProps> = ({
       return <Typography variant="body2" sx={{ color: '#64748b' }}>当前账号只能查看分账信息。</Typography>;
     }
     if (summaryDetail.sourceOrderDeleted) {
-      const text = summaryDetail.sourceOrderDeleted
-        ? '源订单已删除，仅保留分账明细和历史记录。'
-        : '提成已撤回，该订单分账进入只读留痕状态。';
       return (
-        <Box sx={{ bgcolor: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 1, p: 1.5 }}>
-          <Typography variant="body2" sx={{ color: '#64748b' }}>{text}</Typography>
-        </Box>
+        <Stack spacing={1.25}>
+          <Typography variant="body2" sx={{ color: '#64748b' }}>源订单已删除，仅保留分账明细和历史记录，不允许继续调整或重新分账。</Typography>
+          {canCleanupDeletedOrderSettlement && (
+            <Button
+              variant="contained"
+              color="error"
+              startIcon={<DeleteSweepIcon />}
+              disabled={!canResetOrCleanupOrderSplitSummary(summaryDetail)}
+              onClick={() => openDeleteOrderSplitDialog(summaryDetail)}
+            >
+              清理废弃记录
+            </Button>
+          )}
+          {!canResetOrCleanupOrderSplitSummary(summaryDetail) && (
+            <Typography variant="caption" sx={{ color: '#b45309' }}>{getResetOrCleanupOrderSplitDisabledReason(summaryDetail)}</Typography>
+          )}
+        </Stack>
       );
     }
 
@@ -3583,7 +3555,7 @@ const Commission: React.FC<CommissionProps> = ({
       return (
         <Stack spacing={1.25}>
           <Typography variant="body2" sx={{ color: '#64748b' }}>先在左侧调整分账，补齐人员或异常信息后，再进入确认流程。</Typography>
-          <Button variant="contained" startIcon={<EditIcon />} onClick={() => setDetailEditMode(true)}>处理分账</Button>
+          <Button variant="contained" startIcon={<EditIcon />} onClick={beginDetailAdjust}>处理分账</Button>
         </Stack>
       );
     }
@@ -3592,7 +3564,7 @@ const Commission: React.FC<CommissionProps> = ({
       return (
         <Stack spacing={1.25}>
           <Typography variant="body2" sx={{ color: '#64748b' }}>确认后，本订单提成会进入待发放。</Typography>
-          <Button variant="outlined" startIcon={<EditIcon />} onClick={() => setDetailEditMode(true)}>调整分账</Button>
+          <Button variant="outlined" startIcon={<EditIcon />} onClick={beginDetailAdjust}>调整分账</Button>
           <Button
             variant="outlined"
             color="warning"
@@ -3640,18 +3612,20 @@ const Commission: React.FC<CommissionProps> = ({
           size="small"
           InputLabelProps={{ shrink: true }}
         />
-        <Tooltip title={payoutRows.length ? (payoutMode === 'mine' ? '导出当前月份的提成汇总与逐笔明细' : '导出六张工作表的财务提成核对包') : '暂无可导出的提成数据'}>
-          <span>
-            <Button
-              variant="outlined"
-              startIcon={<FileDownloadIcon />}
-              disabled={!payoutRows.length || mineExporting}
-              onClick={() => void exportMonthlyStatement()}
-            >
-              {payoutMode === 'mine' ? (mineExporting ? '导出中...' : '导出提成明细') : '导出财务核对表'}
-            </Button>
-          </span>
-        </Tooltip>
+        {(payoutMode === 'mine' || canExportFinanceMonthlyReport) && (
+          <Tooltip title={payoutRows.length ? (payoutMode === 'mine' ? '导出当前月份的提成汇总与逐笔明细' : '导出六张工作表的财务提成核对包') : '暂无可导出的提成数据'}>
+            <span>
+              <Button
+                variant="outlined"
+                startIcon={<FileDownloadIcon />}
+                disabled={!payoutRows.length || mineExporting}
+                onClick={() => void exportMonthlyStatement()}
+              >
+                {payoutMode === 'mine' ? (mineExporting ? '导出中...' : '导出提成明细') : '导出财务核对表'}
+              </Button>
+            </span>
+          </Tooltip>
+        )}
       </Stack>
 
       {payoutMode === 'mine' ? (
@@ -3762,9 +3736,11 @@ const Commission: React.FC<CommissionProps> = ({
                     <Typography variant="h6" fontWeight={900}>{formatOwnerDisplayName(selectedFinancePayoutRow.ownerId, selectedFinancePayoutRow.owner)} · {payoutPeriod} 月度报告</Typography>
                     <Typography variant="body2" color="text.secondary">{selectedFinancePayoutRow.department || '-'} · 与员工“我的提成”保持同一计算和展示口径</Typography>
                   </Box>
-                  <Button variant="outlined" startIcon={<FileDownloadIcon />} disabled={mineExporting} onClick={() => void exportFinanceEmployeeStatement(selectedFinancePayoutRow)}>
-                    {mineExporting ? '导出中...' : '导出员工明细'}
-                  </Button>
+                  {canExportFinanceMonthlyReport && (
+                    <Button variant="outlined" startIcon={<FileDownloadIcon />} disabled={mineExporting} onClick={() => void exportFinanceEmployeeStatement(selectedFinancePayoutRow)}>
+                      {mineExporting ? '导出中...' : '导出员工明细'}
+                    </Button>
+                  )}
                 </Stack>
               </Paper>
               {renderMinePayoutWorkspace([selectedFinancePayoutRow])}
@@ -3824,15 +3800,6 @@ const Commission: React.FC<CommissionProps> = ({
 
       {tabValue === 0 && (
         <>
-          {settlementActionMessage && (
-            <Alert
-              severity={settlementActionMessage.type}
-              onClose={() => setSettlementActionMessage(null)}
-              sx={{ mb: 1.5 }}
-            >
-              {settlementActionMessage.text}
-            </Alert>
-          )}
           {renderOrderStatusBar()}
           {renderOrderToolbar()}
           {renderOrderSplitTable()}
@@ -4073,6 +4040,13 @@ const Commission: React.FC<CommissionProps> = ({
         onRequestExport={handleExportOrderSettlements}
       />
 
+      <OperationFeedbackDialog
+        open={Boolean(settlementActionMessage)}
+        severity={settlementActionMessage?.type}
+        message={settlementActionMessage?.text || ''}
+        onClose={() => setSettlementActionMessage(null)}
+      />
+
       <Dialog open={createSplitOpen} onClose={closeCreateSplitDialog} maxWidth="lg" fullWidth>
         <DialogCloseTitle onClose={closeCreateSplitDialog}>新建订单分账</DialogCloseTitle>
         <DialogContent dividers sx={{ bgcolor: '#f8fafc' }}>
@@ -4229,7 +4203,13 @@ const Commission: React.FC<CommissionProps> = ({
         </DialogActions>
       </Dialog>
 
-      <Dialog open={Boolean(summaryDetail)} onClose={closeSettlementDetail} maxWidth="xl" fullWidth>
+      <Dialog
+        open={Boolean(summaryDetail)}
+        onClose={closeSettlementDetail}
+        maxWidth={false}
+        fullWidth
+        PaperProps={{ sx: { width: '1480px', maxWidth: 'calc(100% - 32px)' } }}
+      >
         <DialogCloseTitle onClose={closeSettlementDetail}>订单分账处理</DialogCloseTitle>
         <DialogContent dividers sx={{ bgcolor: '#f8fafc' }}>
           {summaryDetail && (
@@ -4323,22 +4303,6 @@ const Commission: React.FC<CommissionProps> = ({
                         按角色核对人员、方案和金额，确认无误后进入右侧操作。
                       </Typography>
                     </Box>
-                    {canManageOrderSettlement && (
-                    <Tooltip title={detailEditMode ? '正在调整分账' : getAdjustDisabledReason(summaryDetail)}>
-                      <span>
-                        <Button
-                          size="small"
-                          variant={detailEditMode ? 'contained' : 'outlined'}
-                          startIcon={<EditIcon />}
-                          disabled={detailEditMode || !canAdjustSettlementSummary(summaryDetail)}
-                          onClick={beginDetailAdjust}
-                          sx={{ whiteSpace: 'nowrap' }}
-                        >
-                          {detailEditMode ? '正在调整' : '调整分账'}
-                        </Button>
-                      </span>
-                    </Tooltip>
-                    )}
                   </Box>
                   <Box sx={{ p: 1.5, bgcolor: '#f8fafc' }}>
                     {detailEditMode ? (
@@ -4367,7 +4331,11 @@ const Commission: React.FC<CommissionProps> = ({
                   </Box>
                 </Paper>
 
-                <Stack spacing={1.5} sx={{ minWidth: 0 }}>
+                <Stack
+                  data-testid="order-settlement-detail-sidebar"
+                  spacing={1.5}
+                  sx={{ minWidth: 0, minHeight: 0, height: { xs: 'auto', lg: '100%' } }}
+                >
                   <Paper elevation={0} sx={{ border: '1px solid #dbeafe', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
                     <Box sx={{ px: 1.5, py: 1.1, borderBottom: '1px solid #dbeafe', bgcolor: '#f8fbff' }}>
                       <Typography variant="subtitle2" sx={{ color: '#2563eb', fontWeight: 900 }}>当前动作</Typography>
@@ -4377,35 +4345,7 @@ const Commission: React.FC<CommissionProps> = ({
                     </Box>
                   </Paper>
 
-                  <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
-                    <Box sx={{ px: 1.5, py: 1.1, borderBottom: '1px solid #eef2f7' }}>
-                      <Typography variant="subtitle2" sx={{ color: '#0f172a', fontWeight: 900 }}>处理记录</Typography>
-                    </Box>
-                    <Box sx={{ p: 1.5 }}>
-                      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mb: 1.5 }}>
-                        {[
-                          ['当前状态', summaryDetail.status],
-                          ['分账经办人', summaryDetail.settlementOperator || '-'],
-                          ['分账更新时间', summaryDetail.updatedAt ? formatDate(summaryDetail.updatedAt, 'yyyy-MM-dd HH:mm') : '-'],
-                          ['确认时间', summaryDetail.confirmedAt ? formatDate(summaryDetail.confirmedAt, 'yyyy-MM-dd HH:mm') : '-'],
-                          ['发放时间', summaryDetail.paidAt ? formatDate(summaryDetail.paidAt, 'yyyy-MM-dd HH:mm') : '-'],
-                          ['撤回原因', summaryDetail.withdrawReason || '-'],
-                        ].map(([label, value]) => (
-                          <Box key={label} sx={{ minWidth: 0 }}>
-                            <Typography variant="caption" sx={{ display: 'block', color: '#64748b' }}>{label}</Typography>
-                            <Typography variant="body2" sx={{ color: '#0f172a', fontWeight: 700, overflowWrap: 'anywhere' }}>{value}</Typography>
-                          </Box>
-                        ))}
-                      </Box>
-                      {operationLogs.length === 0 ? (
-                        <Typography variant="body2" sx={{ color: '#9ca3af' }}>暂无分账修改记录</Typography>
-                      ) : (
-                        <Stack spacing={1.25} sx={{ maxHeight: '42vh', overflowY: 'auto', overflowX: 'hidden', pr: 0.5, minWidth: 0 }}>
-                          {operationLogs.map((log) => renderOperationLogCard(log))}
-                        </Stack>
-                      )}
-                    </Box>
-                  </Paper>
+                  <SettlementOperationTimeline compact events={buildOrderSettlementEvents()} />
                 </Stack>
               </Box>
             </Stack>

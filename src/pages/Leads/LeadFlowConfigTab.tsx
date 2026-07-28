@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
   Box,
   Button,
   Checkbox,
@@ -35,6 +34,7 @@ import type { User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 import { getLeadReceiveEligibleUsers, NO_LEAD_FLOW_PARTICIPANTS_MARKER } from '../../shared/utils/leadAssignment';
+import OperationFeedbackDialog, { type OperationFeedbackSeverity } from '../../shared/components/OperationFeedbackDialog';
 
 const LEAD_UNIQUE_KEY_MODE = 'phone_or_wechat' as const;
 const MAX_PARTICIPANTS = 500;
@@ -48,7 +48,7 @@ const LeadFlowConfigTab: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
-  const [saved, setSaved] = useState(false);
+  const [feedback, setFeedback] = useState<{ severity: OperationFeedbackSeverity; message: string } | null>(null);
   const [participantDialogOpen, setParticipantDialogOpen] = useState(false);
   const [participantSearch, setParticipantSearch] = useState('');
   const [expandedDepartmentIds, setExpandedDepartmentIds] = useState<Set<string>>(new Set());
@@ -97,7 +97,7 @@ const LeadFlowConfigTab: React.FC = () => {
 
   const updateConfig = <K extends keyof LeadFlowConfig>(key: K, value: LeadFlowConfig[K]) => {
     setConfig((current) => (current ? { ...current, [key]: value } : current));
-    setSaved(false);
+    setFeedback(null);
   };
 
   const getParticipantRoleLabel = (user: User) => (
@@ -168,7 +168,9 @@ const LeadFlowConfigTab: React.FC = () => {
     const res = await leadFlowApi.updateLeadFlowConfig({ ...config, uniqueKeyMode: LEAD_UNIQUE_KEY_MODE });
     if (res.code === 0) {
       setConfig(res.data);
-      setSaved(true);
+      setFeedback({ severity: 'success', message: '流转配置已保存并生效' });
+    } else {
+      setFeedback({ severity: 'error', message: res.message || '流转配置保存失败' });
     }
   };
 
@@ -286,8 +288,6 @@ const LeadFlowConfigTab: React.FC = () => {
 
   return (
     <Paper elevation={0} sx={{ border: '1px solid #f0f0f0', p: 3 }}>
-      {saved && <Alert severity="success" sx={{ mb: 2 }}>流转配置已保存并生效</Alert>}
-
       <Box sx={{ display: 'flex', gap: 3, alignItems: 'center', mb: 2, flexWrap: 'wrap' }}>
         <Typography sx={{ minWidth: 120, fontWeight: 600 }}>线索唯一标识</Typography>
         <Typography variant="body2" sx={{ color: '#374151' }}>手机号和微信二选一</Typography>
@@ -504,6 +504,7 @@ const LeadFlowConfigTab: React.FC = () => {
           <Button onClick={() => setParticipantDialogOpen(false)}>完成</Button>
         </DialogActions>
       </Dialog>
+      <OperationFeedbackDialog open={Boolean(feedback)} severity={feedback?.severity} message={feedback?.message || ''} onClose={() => setFeedback(null)} />
     </Paper>
   );
 };

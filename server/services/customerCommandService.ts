@@ -1936,8 +1936,7 @@ export function createCustomerCommandService(
     },
 
     async updateLead(leadId: string, input: Partial<Lead>, currentUser: AuthenticatedUser) {
-      const canEdit = hasPermission(currentUser, PERMISSION_KEYS.LEADS_CREATE, 'write')
-        || hasPermission(currentUser, PERMISSION_KEYS.LEADS_DETAIL, 'write');
+      const canEdit = hasPermission(currentUser, PERMISSION_KEYS.LEADS_EDIT, 'write');
       if (!canEdit) return failure<Lead>('无权编辑线索', 403);
       return runTransaction(async (tx) => {
         await lockContactIdentityMutationGate(tx);

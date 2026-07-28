@@ -30,6 +30,28 @@ const STATUS_REJECTED: OrderApplicationStatus = '已驳回';
 
 type OrderApplicationInput = Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'orderNo' | 'createdById' | 'createdByName' | 'sourceApplicationId'>;
 
+const ORDER_APPLICATION_REVIEW_MUTATION_LOCK = 'jixiangos:order-application-review-mutation';
+let localReviewMutationTail: Promise<void> = Promise.resolve();
+
+async function withOrderApplicationReviewMutationLock<T>(operation: () => Promise<T>): Promise<T> {
+  if (typeof navigator !== 'undefined' && navigator.locks?.request) {
+    return navigator.locks.request(ORDER_APPLICATION_REVIEW_MUTATION_LOCK, { mode: 'exclusive' }, operation);
+  }
+
+  const previous = localReviewMutationTail;
+  let releaseCurrent!: () => void;
+  const current = new Promise<void>((resolve) => {
+    releaseCurrent = resolve;
+  });
+  localReviewMutationTail = previous.catch(() => undefined).then(() => current);
+  await previous.catch(() => undefined);
+  try {
+    return await operation();
+  } finally {
+    releaseCurrent();
+  }
+}
+
 function ensureInit(): void {
   initializeMockData();
 }
@@ -372,9 +394,16 @@ async function updateReturnedOrderApplication(id: string, data: OrderApplication
 
   ensureInit();
   await delay(150);
+  const currentUser = getCurrentUser();
+  if (!currentUser || !roleHasPermission(getRole(currentUser), PERMISSION_KEYS.ORDER_CREATE, 'write')) {
+    return createErrorResponse('无权重新提交订单申请', 403);
+  }
   const applications = getStoredApplications();
   const idx = applications.findIndex((item) => item.id === id);
   if (idx === -1) return createSuccessResponse(null);
+  if (applications[idx].applicantId !== currentUser.id) {
+    return createErrorResponse('只有原申请人可以重新提交退回修改的订单申请', 403);
+  }
   if (applications[idx].status !== STATUS_RETURNED) return createErrorResponse('只有退回修改的订单申请可以重新提交');
   const visible = filterVisibleApplications([applications[idx]]);
   if (!visible.length) return createErrorResponse('无权操作该订单申请', 403);
@@ -410,37 +439,42 @@ async function approveOrderApplication(id: string): Promise<ApiResponse<OrderApp
   ensureInit();
   await delay(150);
   if (!canReviewOrderApplications()) return createErrorResponse('无权审核订单申请', 403);
-  const applications = getStoredApplications();
-  const idx = applications.findIndex((item) => item.id === id);
-  if (idx === -1) return createSuccessResponse(null);
-  if (!canAccessApplication(applications[idx])) return createErrorResponse('无权操作该订单申请', 403);
-  if (applications[idx].status !== STATUS_PENDING_REVIEW) return createErrorResponse('只有待财务审核的订单申请可以入库');
+  return withOrderApplicationReviewMutationLock(async () => {
+    const applications = getStoredApplications();
+    const idx = applications.findIndex((item) => item.id === id);
+    if (idx === -1) return createSuccessResponse(null);
+    const current = applications[idx];
+    if (!canAccessApplication(current)) return createErrorResponse('无权操作该订单申请', 403);
+    if (current.status === STATUS_APPROVED && current.orderId) return createSuccessResponse(current);
+    if (current.status !== STATUS_PENDING_REVIEW) return createErrorResponse('只有待财务审核的订单申请可以入库');
 
-  const orderData = enrichOrderDataFromCustomer(applications[idx].orderData);
-  const created = await orderApi.createOrder({
-    ...orderData,
-  }, {
-    id: applications[idx].applicantId || '',
-    name: applications[idx].applicantName,
+    const orderData = enrichOrderDataFromCustomer(current.orderData);
+    const created = await orderApi.createOrder({
+      ...orderData,
+      sourceApplicationId: current.id,
+    }, {
+      id: current.applicantId || '',
+      name: current.applicantName,
+    });
+    if (created.code !== 0) return createErrorResponse(created.message, created.code);
+
+    const now = new Date().toISOString();
+    const reviewer = currentOperator();
+    applications[idx] = {
+      ...current,
+      status: STATUS_APPROVED,
+      orderData,
+      reviewerId: reviewer.id,
+      reviewerName: reviewer.name,
+      reviewedAt: now,
+      orderId: created.data.id,
+      orderNo: created.data.orderNo,
+      reviewLogs: [buildLog('approve'), ...current.reviewLogs],
+      updatedAt: now,
+    };
+    saveApplications(applications);
+    return createSuccessResponse(applications[idx]);
   });
-  if (created.code !== 0) return createErrorResponse(created.message);
-
-  const now = new Date().toISOString();
-  const reviewer = currentOperator();
-  applications[idx] = {
-    ...applications[idx],
-    status: STATUS_APPROVED,
-    orderData,
-    reviewerId: reviewer.id,
-    reviewerName: reviewer.name,
-    reviewedAt: now,
-    orderId: created.data.id,
-    orderNo: created.data.orderNo,
-    reviewLogs: [buildLog('approve'), ...applications[idx].reviewLogs],
-    updatedAt: now,
-  };
-  saveApplications(applications);
-  return createSuccessResponse(applications[idx]);
 }
 
 async function returnOrderApplication(id: string, reason: string): Promise<ApiResponse<OrderApplication | null>> {
@@ -461,25 +495,28 @@ async function returnOrderApplication(id: string, reason: string): Promise<ApiRe
   ensureInit();
   await delay(120);
   if (!canReviewOrderApplications()) return createErrorResponse('无权退回订单申请', 403);
-  const applications = getStoredApplications();
-  const idx = applications.findIndex((item) => item.id === id);
-  if (idx === -1) return createSuccessResponse(null);
-  if (!canAccessApplication(applications[idx])) return createErrorResponse('无权操作该订单申请', 403);
-  if (applications[idx].status !== STATUS_PENDING_REVIEW) return createErrorResponse('只有待财务审核的订单申请可以退回');
-  const now = new Date().toISOString();
-  const reviewer = currentOperator();
-  applications[idx] = {
-    ...applications[idx],
-    status: STATUS_RETURNED,
-    reviewerId: reviewer.id,
-    reviewerName: reviewer.name,
-    reviewedAt: now,
-    reason,
-    reviewLogs: [buildLog('return', reason), ...applications[idx].reviewLogs],
-    updatedAt: now,
-  };
-  saveApplications(applications);
-  return createSuccessResponse(applications[idx]);
+  return withOrderApplicationReviewMutationLock(async () => {
+    const applications = getStoredApplications();
+    const idx = applications.findIndex((item) => item.id === id);
+    if (idx === -1) return createSuccessResponse(null);
+    const current = applications[idx];
+    if (!canAccessApplication(current)) return createErrorResponse('无权操作该订单申请', 403);
+    if (current.status !== STATUS_PENDING_REVIEW) return createErrorResponse('只有待财务审核的订单申请可以退回');
+    const now = new Date().toISOString();
+    const reviewer = currentOperator();
+    applications[idx] = {
+      ...current,
+      status: STATUS_RETURNED,
+      reviewerId: reviewer.id,
+      reviewerName: reviewer.name,
+      reviewedAt: now,
+      reason,
+      reviewLogs: [buildLog('return', reason), ...current.reviewLogs],
+      updatedAt: now,
+    };
+    saveApplications(applications);
+    return createSuccessResponse(applications[idx]);
+  });
 }
 
 async function rejectOrderApplication(id: string, reason: string): Promise<ApiResponse<OrderApplication | null>> {
@@ -500,25 +537,28 @@ async function rejectOrderApplication(id: string, reason: string): Promise<ApiRe
   ensureInit();
   await delay(120);
   if (!canReviewOrderApplications()) return createErrorResponse('无权驳回订单申请', 403);
-  const applications = getStoredApplications();
-  const idx = applications.findIndex((item) => item.id === id);
-  if (idx === -1) return createSuccessResponse(null);
-  if (!canAccessApplication(applications[idx])) return createErrorResponse('无权操作该订单申请', 403);
-  if (applications[idx].status !== STATUS_PENDING_REVIEW) return createErrorResponse('只有待财务审核的订单申请可以驳回');
-  const now = new Date().toISOString();
-  const reviewer = currentOperator();
-  applications[idx] = {
-    ...applications[idx],
-    status: STATUS_REJECTED,
-    reviewerId: reviewer.id,
-    reviewerName: reviewer.name,
-    reviewedAt: now,
-    reason,
-    reviewLogs: [buildLog('reject', reason), ...applications[idx].reviewLogs],
-    updatedAt: now,
-  };
-  saveApplications(applications);
-  return createSuccessResponse(applications[idx]);
+  return withOrderApplicationReviewMutationLock(async () => {
+    const applications = getStoredApplications();
+    const idx = applications.findIndex((item) => item.id === id);
+    if (idx === -1) return createSuccessResponse(null);
+    const current = applications[idx];
+    if (!canAccessApplication(current)) return createErrorResponse('无权操作该订单申请', 403);
+    if (current.status !== STATUS_PENDING_REVIEW) return createErrorResponse('只有待财务审核的订单申请可以驳回');
+    const now = new Date().toISOString();
+    const reviewer = currentOperator();
+    applications[idx] = {
+      ...current,
+      status: STATUS_REJECTED,
+      reviewerId: reviewer.id,
+      reviewerName: reviewer.name,
+      reviewedAt: now,
+      reason,
+      reviewLogs: [buildLog('reject', reason), ...current.reviewLogs],
+      updatedAt: now,
+    };
+    saveApplications(applications);
+    return createSuccessResponse(applications[idx]);
+  });
 }
 
 async function cleanupDeletedSourceOrderApplication(id: string, reason: string): Promise<ApiResponse<boolean>> {

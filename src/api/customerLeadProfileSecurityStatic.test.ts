@@ -29,7 +29,7 @@ assert.match(
 );
 assert.match(
   leadDetailSource,
-  /const canEditProfile\s*=\s*canEditLeadProfile\(currentLead\)[\s\S]{0,180}PERMISSION_KEYS\.LEADS_CREATE,\s*'write'[\s\S]{0,180}PERMISSION_KEYS\.LEADS_DETAIL,\s*'write'/,
+  /const canEditProfile\s*=\s*canEditLeadProfile\(currentLead\)[\s\S]{0,180}PERMISSION_KEYS\.LEADS_EDIT,\s*'write'/,
   'Lead profile controls must require an explicit profile write permission.',
 );
 assert.match(

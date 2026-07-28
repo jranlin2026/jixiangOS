@@ -30,14 +30,26 @@ assert.match(entryButton, /hasPermission\(user, permission, 'write'\)/);
 assert.match(entryButton, /导入订单/);
 assert.match(entryButton, /导入售后挽回订单/);
 
-for (const source of [orderReview, recoveryReview]) {
+for (const { source, importRecordName } of [
+  { source: orderReview, importRecordName: 'detailApplication' },
+  { source: recoveryReview, importRecordName: 'detailOrder' },
+]) {
   assert.match(source, /importBatchId/);
   assert.match(source, /导入批次/);
   assert.match(source, /Excel 行号/);
   assert.match(source, /导入人/);
   assert.match(source, /导入时间/);
-  assert.match(source, /导入信息/);
   assert.match(source, /BusinessImportReviewControls/);
+
+  const auditSectionStart = source.indexOf('title="审核与系统记录"');
+  const auditSectionEnd = source.indexOf('</BusinessDetailSection>', auditSectionStart);
+  assert.ok(auditSectionStart >= 0 && auditSectionEnd > auditSectionStart, '审核详情应保留“审核与系统记录”区块');
+  const auditSection = source.slice(auditSectionStart, auditSectionEnd);
+  assert.match(auditSection, new RegExp(`${importRecordName}\\.importBatchId \\?`));
+  assert.match(auditSection, /label="导入批次"/);
+  assert.match(auditSection, /label="Excel 行号"/);
+  assert.match(auditSection, /label="导入人"/);
+  assert.match(auditSection, /label="导入时间"/);
 }
 
 assert.match(reviewControls, /选择当前导入批次全部待审记录/);

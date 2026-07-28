@@ -33,6 +33,7 @@ import type {
 import { ModuleHeader, ModulePage, moduleTablePaperSx, moduleTableSx, moduleTokens } from '../../shared/components/ModuleShell';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import useAuthStore from '../../store/useAuthStore';
+import OperationFeedbackDialog from '../../shared/components/OperationFeedbackDialog';
 
 type StoreDraft = {
   id: string;
@@ -621,7 +622,6 @@ const EcommerceSettlement: React.FC = () => {
         )}
       />
 
-      {message && <Alert severity={message.type} sx={{ mb: 2 }} onClose={() => setMessage(null)}>{message.text}</Alert>}
       {batchProcessing && <LinearProgress sx={{ mb: 2, borderRadius: 1 }} />}
 
       <Stack spacing={2}>
@@ -833,6 +833,7 @@ const EcommerceSettlement: React.FC = () => {
           导出的单店工作簿保留订单明细融合表、达人结算汇总表、资金流水明细核对和异常核对表；全部汇总工作簿会额外添加全部店铺利润总览、店铺利润汇总和全部达人利润明细。
         </Alert>
       </Stack>
+      <OperationFeedbackDialog open={Boolean(message)} severity={message?.type} message={message?.text || ''} onClose={() => setMessage(null)} />
     </ModulePage>
   );
 };

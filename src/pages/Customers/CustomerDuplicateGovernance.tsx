@@ -22,6 +22,7 @@ import type { CustomerDuplicateGroupView } from '../../api/customerMergeApi';
 import { PERMISSION_KEYS, hasExplicitPermission } from '../../shared/utils/permissions';
 import useAuthStore from '../../store/useAuthStore';
 import { ROUTES } from '../../shared/utils/constants';
+import OperationFeedbackDialog from '../../shared/components/OperationFeedbackDialog';
 
 const fields: Array<{ key: CustomerMergeField; label: string }> = [
   { key: 'name', label: '客户姓名' },
@@ -262,7 +263,6 @@ const CustomerDuplicateGovernance: React.FC = () => {
         <Button startIcon={<ArrowBackIcon />} onClick={() => navigate(ROUTES.CUSTOMERS)}>返回客户列表</Button>
       </Stack>
 
-      {notice && <Alert severity={notice.type} sx={{ mb: 2 }} onClose={() => setNotice(null)}>{notice.text}</Alert>}
       <Paper sx={{ mb: 2 }}>
         <Tabs value={tab} onChange={(_, value) => setTab(value)}>
           <Tab value="candidates" label={`待处理重复资料 ${candidates.length}`} />
@@ -535,6 +535,7 @@ const CustomerDuplicateGovernance: React.FC = () => {
           <Button variant="contained" color="warning" disabled={busy} onClick={() => void confirmUndoMerge()}>确认撤销</Button>
         </DialogActions>
       </Dialog>
+      <OperationFeedbackDialog open={Boolean(notice)} severity={notice?.type} message={notice?.text || ''} onClose={() => setNotice(null)} />
     </Box>
   );
 };

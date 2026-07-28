@@ -223,6 +223,7 @@ const navItems: NavItem[] = [
         path: `${ROUTES.SETTINGS}?group=leadCustomer`,
         permissionKeys: [
           PERMISSION_KEYS.SETTINGS_CUSTOMER_LEVELS,
+          PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS,
           PERMISSION_KEYS.SETTINGS_LIFECYCLE,
           PERMISSION_KEYS.SETTINGS_LEAD_SOURCES,
           PERMISSION_KEYS.SETTINGS_LEAD_FLOW,
@@ -241,7 +242,7 @@ const navItems: NavItem[] = [
       {
         label: '系统维护',
         path: `${ROUTES.SETTINGS}?group=maintenance`,
-        permissionKeys: [PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE],
+        permissionKeys: [PERMISSION_KEYS.SETTINGS_AI_CONFIG, PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE],
       },
     ],
   },

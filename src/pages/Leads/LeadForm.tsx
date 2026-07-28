@@ -8,7 +8,10 @@ import {
   DialogContent,
   MenuItem,
   TextField,
+  Typography,
+  useMediaQuery,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import useLeadStore from '../../store/useLeadStore';
 import type { Lead } from '../../types/lead';
 import type { LeadSourceConfig, User } from '../../types/settings';
@@ -23,6 +26,7 @@ import useAuthStore from '../../store/useAuthStore';
 import type { LeadFlowConfig } from '../../types/lead';
 import { getScopedLeadAssignmentCandidates } from '../../shared/utils/leadAssignment';
 import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
+import BusinessFormSection from '../../shared/components/BusinessFormSection';
 
 interface LeadFormProps {
   open: boolean;
@@ -34,6 +38,8 @@ interface LeadFormProps {
 const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) => {
   const { create, update } = useLeadStore();
   const currentUser = useAuthStore((state) => state.currentUser);
+  const theme = useTheme();
+  const mobileFullScreen = useMediaQuery(theme.breakpoints.down('sm'));
   const isEdit = Boolean(lead);
   const [sourceConfigs, setSourceConfigs] = useState<LeadSourceConfig[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -200,9 +206,95 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
   const canSubmit = !!form.name.trim() && !missingContact && !phoneError && !missingContributor && !!form.source && !!form.inputBy;
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogCloseTitle onClose={onClose}>{isEdit ? '编辑线索资料' : '新增线索入库'}</DialogCloseTitle>
-      <DialogContent>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="md"
+      fullWidth
+      fullScreen={mobileFullScreen}
+      PaperProps={{ sx: { maxHeight: { xs: '100dvh', sm: '94vh' }, bgcolor: isEdit ? '#fff' : '#f8fafc' } }}
+    >
+      <DialogCloseTitle onClose={onClose} sx={!isEdit ? { px: { xs: 2, sm: 3 }, py: 2.25, bgcolor: '#fff' } : undefined}>
+        {!isEdit ? (
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="h6" sx={{ color: '#0f172a', fontWeight: 850 }}>新增线索入库</Typography>
+            <Typography variant="body2" sx={{ mt: 0.35, color: '#64748b' }}>录入客户信息、来源与分配信息，入库后进入线索管理。</Typography>
+          </Box>
+        ) : '编辑线索资料'}
+      </DialogCloseTitle>
+      <DialogContent sx={!isEdit ? { px: { xs: 1.5, sm: 3 }, py: 2.5, bgcolor: '#f8fafc' } : undefined}>
+        {!isEdit ? (
+          <Box sx={{ pt: 1 }}>
+            {submitError && <Alert severity="error" sx={{ mb: 2 }}>{submitError}</Alert>}
+            <BusinessFormSection
+              step={1}
+              solidStep
+              title="客户信息"
+              summary={[form.name || '待填写姓名', form.company, form.city].filter(Boolean).join(' / ')}
+            >
+              <TextField label="姓名" value={form.name} onChange={handleChange('name')} required fullWidth />
+              <TextField label="公司" value={form.company} onChange={handleChange('company')} fullWidth />
+              <PhoneNumberInput
+                label="手机号"
+                value={form.phone}
+                onChange={(value) => setForm({ ...form, phone: value })}
+                error={showContactError}
+                helperText={showContactError ? '手机号或微信至少填写一项' : ''}
+                fullWidth
+                size="small"
+              />
+              <TextField label="微信" value={form.wechat} onChange={handleChange('wechat')} error={showContactError} helperText={showContactError ? '手机号或微信至少填写一项' : '用于查重和客户同步'} fullWidth />
+              <TextField label="行业" value={form.industry} onChange={handleChange('industry')} fullWidth />
+              <TextField label="城市" value={form.city} onChange={handleChange('city')} fullWidth />
+            </BusinessFormSection>
+
+            <BusinessFormSection
+              step={2}
+              solidStep
+              title="来源与分配"
+              summary={[normalizeResourceOwnership(form.sourceType), form.source, form.owner || '待分配'].filter(Boolean).join(' / ')}
+            >
+              <TextField select label="资源归属" value={form.sourceType} onChange={handleChange('sourceType')} fullWidth>
+                {RESOURCE_OWNERSHIPS.map((item) => <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>)}
+              </TextField>
+              <TextField select label="线索来源" value={selectedSourceKey} onChange={handleSourceSelect} required fullWidth>
+                <MenuItem value="" disabled>请选择线索来源</MenuItem>
+                {parentSources.flatMap((parent) => {
+                  const options = sourceOptions.filter((option) => option.parentId === parent.id);
+                  return [
+                    <MenuItem key={`${parent.id}-group`} disabled sx={{ fontWeight: 700, color: 'text.primary' }}>{parent.name}</MenuItem>,
+                    ...options.map((option) => <MenuItem key={option.key} value={option.key} sx={{ pl: 4 }}>{option.label}</MenuItem>),
+                  ];
+                })}
+              </TextField>
+              <TextField
+                select
+                label="线索贡献人"
+                value={form.leadContributorId}
+                onChange={handleContributorSelect}
+                required={normalizeResourceOwnership(form.sourceType) === '个人资源'}
+                helperText={missingContributor ? '个人资源必须填写线索贡献人' : '用于线索分成归属，可与录入人不同'}
+                error={missingContributor}
+                fullWidth
+              >
+                <MenuItem value="">无</MenuItem>
+                {users.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
+              </TextField>
+              {canAssignLeads ? (
+                <TextField select label="分配销售" value={form.owner} onChange={handleChange('owner')} fullWidth helperText={assignmentHelpText}>
+                  <MenuItem value="待分配">待分配</MenuItem>
+                  {assignableUsers.map((user) => <MenuItem key={user.id} value={user.name}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
+                </TextField>
+              ) : (
+                <TextField label="分配销售" value="待分配" fullWidth InputProps={{ readOnly: true }} helperText={assignmentHelpText} />
+              )}
+            </BusinessFormSection>
+
+            <BusinessFormSection step={3} solidStep title="补充信息" summary={form.remark ? '已填写备注' : '无备注'}>
+              <TextField label="备注" value={form.remark} onChange={handleChange('remark')} fullWidth multiline minRows={3} sx={{ gridColumn: '1 / -1' }} />
+            </BusinessFormSection>
+          </Box>
+        ) : (
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2, mt: 1 }}>
           {submitError && (
             <Alert severity="error" sx={{ gridColumn: '1 / -1' }}>
@@ -300,10 +392,12 @@ const LeadForm: React.FC<LeadFormProps> = ({ open, onClose, lead, onSuccess }) =
           )}
           <TextField label="备注" value={form.remark} onChange={handleChange('remark')} fullWidth multiline minRows={3} sx={{ gridColumn: '1 / -1' }} />
         </Box>
+        )}
       </DialogContent>
-      <DialogActions>
+      <DialogActions sx={!isEdit ? { px: { xs: 2, sm: 3 }, py: 2, bgcolor: '#fff', borderTop: '1px solid #e2e8f0' } : undefined}>
+        {!isEdit ? <Button onClick={onClose}>取消</Button> : null}
         <Button variant="contained" onClick={handleSubmit} disabled={!canSubmit}>
-          {isEdit ? '保存' : '入库'}
+          {isEdit ? '保存' : '确认入库'}
         </Button>
       </DialogActions>
     </Dialog>

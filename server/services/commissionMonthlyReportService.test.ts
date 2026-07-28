@@ -139,7 +139,7 @@ const service = createCommissionMonthlyReportService({
 } as never, { now: () => new Date('2026-07-31T10:00:00.000Z') });
 const financeActor = {
   id: 'finance-1', name: '财务甲', account: 'finance', email: '', phone: '', role: '财务', isActive: true,
-  permissions: [{ module: PERMISSION_KEYS.FINANCE_PAYOUT, actions: ['read'] }],
+  permissions: [{ module: PERMISSION_KEYS.FINANCE_PAYOUT_REPORT_EXPORT, actions: ['read'] }],
 } as AuthenticatedUser;
 const exportResult = await service.exportWorkbook({ period: '2026-07', reason: '月度财务核对', scope: 'all' }, financeActor);
 assert.equal(exportResult.code, 0);

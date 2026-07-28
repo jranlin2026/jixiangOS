@@ -1309,13 +1309,20 @@ export function createRecoveryOrderCommandService(
         const current = await lockRecoveryOrder(transaction, orderId);
         if (!recoveryWritable(current, scope)) throw new RecoveryCommandError(403, '无权编辑该售后挽回订单');
         if (current.deletedAt) throw new RecoveryCommandError(409, '已删除售后挽回订单不能编辑');
-        const canResubmitOwnReview = canCreate
-          && ['退回修改', '审核驳回'].includes(current.status)
-          && current.createdBy === actor.id;
-        if (!canEdit && !canResubmitOwnReview) {
-          throw new RecoveryCommandError(403, '只有创建人可以修改并重新提交退回或驳回的挽回单');
+        if (current.status === '审核驳回') {
+          throw new RecoveryCommandError(409, '审核驳回的售后挽回订单已终止，不能修改或重新提交；如需重新办理请新建申请');
         }
-        if (!['待审核', '退回修改', '审核驳回'].includes(current.status)) {
+        const isReturnedForChanges = current.status === '退回修改';
+        const canResubmitOwnReturn = canCreate
+          && isReturnedForChanges
+          && current.createdBy === actor.id;
+        if (isReturnedForChanges && !canResubmitOwnReturn) {
+          throw new RecoveryCommandError(403, '只有原创建人可以修改并重新提交退回修改的挽回单');
+        }
+        if (!isReturnedForChanges && !canEdit) {
+          throw new RecoveryCommandError(403, '无权编辑售后挽回订单');
+        }
+        if (!['待审核', '退回修改'].includes(current.status)) {
           throw new RecoveryCommandError(409, '审核通过后的记录请使用“编辑资料”或“挽回单更正”');
         }
         const validated = validateInput(input, actor, directory, scope);
@@ -1326,7 +1333,7 @@ export function createRecoveryOrderCommandService(
           .find((order) => order.id !== current.id && normalizeOrderNo(order.thirdPartyOrderNo) === normalizeOrderNo(validated.thirdPartyOrderNo));
         if (duplicate) throw new RecoveryCommandError(409, '该第三方平台订单号已经创建过售后挽回订单');
         const changedAt = now().toISOString();
-        const resubmitted = ['退回修改', '审核驳回'].includes(current.status);
+        const resubmitted = isReturnedForChanges;
         const next: RecoveryOrder = {
           ...current,
           customerName: validated.customerName,

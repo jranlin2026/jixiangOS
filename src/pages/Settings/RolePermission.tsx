@@ -1,6 +1,5 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
   Box,
   Button,
   Checkbox,
@@ -36,11 +35,15 @@ import type { User } from '../../types/settings';
 import {
   CAPABILITY_KEYS,
   PERMISSION_KEYS,
-  getCustomerPermissionTree,
-  getPermissionLeafDisplayLabel,
 } from '../../shared/utils/permissions';
 import { normalizeUserRoleName } from '../../shared/utils/roles';
 import { buildRoleEditorPermissions, hasDuplicateRoleName, normalizeRoleEditorDataScopes } from './rolePermissionModel';
+import OperationFeedbackDialog from '../../shared/components/OperationFeedbackDialog';
+import {
+  getCoreDataScopeRows,
+  getCoreRolePermissionTree,
+  type RolePermissionNode,
+} from './corePermissionCatalog';
 
 type RoleForm = {
   name: string;
@@ -51,93 +54,19 @@ type RoleForm = {
   dataScopes: RoleDataScopes;
 };
 
-type PermissionNode = {
-  label: string;
-  key?: string;
-  children?: PermissionNode[];
-};
+const corePermissionTree = getCoreRolePermissionTree();
+const corePermissionNode = (label: string) => corePermissionTree.find((node) => node.label === label)!;
 
-const PERMISSION_TREE: PermissionNode[] = [
+const PERMISSION_TREE: RolePermissionNode[] = [
   { label: '全部' },
   { label: '首页', key: PERMISSION_KEYS.HOME },
   { label: '驾驶舱', key: PERMISSION_KEYS.DASHBOARD },
-  {
-    label: '线索',
-    children: [
-      {
-        label: '线索列表',
-        children: [
-          { label: '查看线索资料', key: PERMISSION_KEYS.LEADS_DETAIL },
-          { label: '新建线索', key: PERMISSION_KEYS.LEADS_CREATE },
-          { label: '开始跟进并加入客户', key: PERMISSION_KEYS.LEADS_FOLLOW },
-          { label: '分配销售', key: PERMISSION_KEYS.LEADS_FLOW_CONFIG },
-        ],
-      },
-      { label: '入库情况', key: PERMISSION_KEYS.LEADS_INTAKE_STATUS },
-    ],
-  },
-  {
-    label: '客户',
-    children: getCustomerPermissionTree().map((group) => ({
-      label: group.label,
-      children: group.leafKeys.map((key) => ({
-        label: getPermissionLeafDisplayLabel(key),
-        key,
-      })),
-    })),
-  },
-  {
-    label: '订单',
-    children: [
-      { label: '订单列表', key: PERMISSION_KEYS.ORDER_MANAGE },
-      { label: '导出订单', key: PERMISSION_KEYS.ORDER_EXPORT },
-      { label: '导入订单', key: PERMISSION_KEYS.ORDER_IMPORT },
-      { label: '订单审核列表', key: PERMISSION_KEYS.ORDER_REVIEW_LIST },
-      { label: '订单审核操作', key: PERMISSION_KEYS.ORDER_REVIEW },
-      { label: '新增订单', key: PERMISSION_KEYS.ORDER_CREATE },
-      { label: '编辑订单', key: PERMISSION_KEYS.ORDER_EDIT },
-      { label: '订单更正', key: PERMISSION_KEYS.ORDER_CORRECT },
-      { label: '删除订单', key: PERMISSION_KEYS.ORDER_DELETE },
-      { label: '订单修改记录', key: PERMISSION_KEYS.ORDER_HISTORY },
-      { label: '付款截图识别', key: PERMISSION_KEYS.ORDER_PAYMENT_SCREENSHOT },
-    ],
-  },
-  {
-    label: '交付',
-    children: [
-      { label: '交付中心', key: PERMISSION_KEYS.DELIVERY_CENTER },
-      { label: '移动交付卡片', key: PERMISSION_KEYS.DELIVERY_MOVE_CARD },
-      { label: '交付阶段配置', key: PERMISSION_KEYS.DELIVERY_STAGE_CONFIG },
-    ],
-  },
-  {
-    label: '售后服务',
-    children: [
-      { label: '售后挽回订单列表', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY },
-      { label: '售后挽回订单审核列表', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST },
-      { label: '售后挽回订单审核操作', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW },
-      { label: '新增售后挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE },
-      { label: '编辑售后挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT },
-      { label: '更正售后挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_CORRECT },
-      { label: '删除售后挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE },
-      { label: '售后挽回订单修改记录', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY },
-      { label: '导出售后挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_EXPORT },
-      { label: '导入售后挽回订单', key: PERMISSION_KEYS.AFTER_SALES_RECOVERY_IMPORT },
-    ],
-  },
-  {
-    label: '财务中心',
-    children: [
-      { label: '我的提成', key: PERMISSION_KEYS.FINANCE_MY_COMMISSION },
-      { label: '订单分账', key: PERMISSION_KEYS.FINANCE_SETTLEMENT },
-      { label: '导出订单分账', key: PERMISSION_KEYS.ORDER_SETTLEMENT_EXPORT },
-      { label: '售后挽回分账', key: PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT },
-      { label: '导出售后挽回分账', key: PERMISSION_KEYS.RECOVERY_SETTLEMENT_EXPORT },
-      { label: '提成发放', key: PERMISSION_KEYS.FINANCE_PAYOUT },
-      { label: '收支流水', key: PERMISSION_KEYS.FINANCE_FLOW },
-      { label: '提成规则', key: PERMISSION_KEYS.FINANCE_RULES },
-    ],
-  },
+  corePermissionNode('线索'),
+  corePermissionNode('客户'),
+  corePermissionNode('订单'),
+  corePermissionNode('交付'),
+  corePermissionNode('售后服务'),
+  corePermissionNode('财务中心'),
   {
     label: '电商结算中心',
     children: [
@@ -189,54 +118,7 @@ const PERMISSION_TREE: PermissionNode[] = [
       { label: '查看敏感知识', key: PERMISSION_KEYS.ENABLEMENT_SENSITIVE },
     ],
   },
-  {
-    label: '系统设置',
-    children: [
-      {
-        label: '组织架构',
-        children: [
-          { label: '员工&部门', key: PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS },
-          { label: '角色权限', key: PERMISSION_KEYS.SETTINGS_ROLES },
-          { label: '账号回收站', key: PERMISSION_KEYS.SETTINGS_ACCOUNT_RECYCLE },
-        ],
-      },
-      {
-        label: '产品设置',
-        children: [
-          { label: '产品配置', key: PERMISSION_KEYS.SETTINGS_PRODUCTS },
-          { label: '订单类型', key: PERMISSION_KEYS.SETTINGS_ORDER_TYPES },
-        ],
-      },
-      {
-        label: '客户设置',
-        children: [
-          { label: '客户等级', key: PERMISSION_KEYS.SETTINGS_CUSTOMER_LEVELS },
-          { label: '客户生命周期', key: PERMISSION_KEYS.SETTINGS_LIFECYCLE },
-          { label: '线索来源', key: PERMISSION_KEYS.SETTINGS_LEAD_SOURCES },
-          { label: '线索流转', key: PERMISSION_KEYS.SETTINGS_LEAD_FLOW },
-        ],
-      },
-      {
-        label: '交付设置',
-        children: [
-          { label: '客户成功分配', key: PERMISSION_KEYS.SETTINGS_DELIVERY_ASSIGNMENT },
-        ],
-      },
-      {
-        label: '售后设置',
-        children: [
-          { label: '来源平台与店铺', key: PERMISSION_KEYS.SETTINGS_AFTER_SALES_SOURCES },
-        ],
-      },
-      {
-        label: '系统维护',
-        children: [
-          { label: 'AI大脑', key: PERMISSION_KEYS.SETTINGS_AI_CONFIG },
-          { label: '业务回收与CRM迁移', key: PERMISSION_KEYS.SETTINGS_DATA_MAINTENANCE },
-        ],
-      },
-    ],
-  },
+  corePermissionNode('系统设置'),
 ];
 
 const defaultPermission: Permission = { module: PERMISSION_KEYS.HOME, actions: ['read'] };
@@ -272,19 +154,13 @@ const CUSTOMER_SCOPE_OPTIONS = [
 ] as const;
 
 const dataScopeRows: Array<{ domain: DataScopeDomain; label: string; description: string; permissionKeys: string[] }> = [
-  { domain: 'leads', label: '线索数据', description: '控制线索列表、入库情况和线索统计的数据范围', permissionKeys: [PERMISSION_KEYS.LEADS_LIST, PERMISSION_KEYS.LEADS_DETAIL, PERMISSION_KEYS.LEADS_CREATE, PERMISSION_KEYS.LEADS_FOLLOW, PERMISSION_KEYS.LEADS_FLOW_CONFIG, PERMISSION_KEYS.LEADS_INTAKE_STATUS] },
-  { domain: 'customers', label: '客户数据', description: '控制客户列表、客户资料和客户统计的数据范围', permissionKeys: getCustomerPermissionTree().flatMap((node) => node.leafKeys) },
-  { domain: 'orders', label: '订单数据', description: '控制正式订单列表、订单筛选和订单统计的数据范围', permissionKeys: [PERMISSION_KEYS.ORDER_MANAGE, PERMISSION_KEYS.ORDER_CREATE, PERMISSION_KEYS.ORDER_EDIT, PERMISSION_KEYS.ORDER_CORRECT, PERMISSION_KEYS.ORDER_DELETE, PERMISSION_KEYS.ORDER_HISTORY, PERMISSION_KEYS.ORDER_PAYMENT_SCREENSHOT] },
-  { domain: 'deliveries', label: '交付数据', description: '控制交付中心列表、详情、统计和可创建交付订单的数据范围', permissionKeys: [PERMISSION_KEYS.DELIVERY, PERMISSION_KEYS.DELIVERY_CENTER, PERMISSION_KEYS.DELIVERY_MOVE_CARD, PERMISSION_KEYS.DELIVERY_STAGE_CONFIG] },
-  { domain: 'orderApplications', label: '订单审核台数据', description: '控制订单审核台能看到哪些订单申请；审核列表权限控制入口，审核操作权限控制通过、退回和驳回', permissionKeys: [PERMISSION_KEYS.ORDER_REVIEW_LIST] },
-  { domain: 'recoveryOrders', label: '售后挽回订单数据', description: '控制售后挽回订单列表、筛选和统计的数据范围', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CORRECT, PERMISSION_KEYS.AFTER_SALES_RECOVERY_DELETE, PERMISSION_KEYS.AFTER_SALES_RECOVERY_HISTORY] },
-  { domain: 'recoveryOrderApplications', label: '售后挽回订单审核台数据', description: '控制售后挽回审核台能看到哪些挽回订单；审核列表权限控制入口，审核操作权限控制通过、退回和驳回', permissionKeys: [PERMISSION_KEYS.AFTER_SALES_RECOVERY_REVIEW_LIST] },
+  ...getCoreDataScopeRows(),
   { domain: 'assets', label: '资产数据', description: '控制设备资产、手机号资产、互联网账号、矩阵发布、风险提醒和离职回收的数据范围', permissionKeys: [PERMISSION_KEYS.ASSETS, PERMISSION_KEYS.ASSETS_OVERVIEW, PERMISSION_KEYS.ASSETS_DEVICES, PERMISSION_KEYS.ASSETS_PHONES, PERMISSION_KEYS.ASSETS_ACCOUNTS, PERMISSION_KEYS.ASSETS_MATRIX_PUBLISH, PERMISSION_KEYS.ASSETS_RISKS, PERMISSION_KEYS.ASSETS_LOGS, PERMISSION_KEYS.ASSETS_OFFBOARDING] },
 ];
 
 const getNodeKey = (path: string[]) => path.join('/');
 
-const collectLeafKeys = (node: PermissionNode, path: string[] = []): string[] => {
+const collectLeafKeys = (node: RolePermissionNode, path: string[] = []): string[] => {
   const currentPath = [...path, node.label];
   if (!node.children?.length) return [node.key || getNodeKey(currentPath)];
   return node.children.flatMap((child) => collectLeafKeys(child, currentPath));
@@ -296,7 +172,7 @@ const getAllSelectablePermissionKeys = () => (
     .flatMap((category) => collectLeafKeys(category, []))
 );
 
-const getSelectableNodeKeys = (node: PermissionNode, path: string[] = []): string[] => {
+const getSelectableNodeKeys = (node: RolePermissionNode, path: string[] = []): string[] => {
   if (node.label === '全部') return getAllSelectablePermissionKeys();
   return collectLeafKeys(node, path);
 };
@@ -305,7 +181,7 @@ const getPermissionAliasMap = () => {
   const aliases = new Map<string, string[]>();
   aliases.set('全部', getAllSelectablePermissionKeys());
 
-  const walk = (node: PermissionNode, path: string[] = []) => {
+  const walk = (node: RolePermissionNode, path: string[] = []) => {
     const currentPath = [...path, node.label];
     const selectableKeys = getSelectableNodeKeys(node, path);
     aliases.set(getNodeKey(currentPath), selectableKeys);
@@ -369,13 +245,13 @@ const normalizePermissionKeys = (permissions: Permission[]) => {
   return normalized;
 };
 
-const isNodeChecked = (permissions: Permission[], node: PermissionNode, path: string[] = []) => {
+const isNodeChecked = (permissions: Permission[], node: RolePermissionNode, path: string[] = []) => {
   const permissionSet = normalizePermissionKeys(permissions);
   const keys = getSelectableNodeKeys(node, path);
   return keys.length > 0 && keys.every((key) => permissionSet.has(key));
 };
 
-const isNodeIndeterminate = (permissions: Permission[], node: PermissionNode, path: string[] = []) => {
+const isNodeIndeterminate = (permissions: Permission[], node: RolePermissionNode, path: string[] = []) => {
   const permissionSet = normalizePermissionKeys(permissions);
   const keys = getSelectableNodeKeys(node, path);
   const checkedCount = keys.filter((key) => permissionSet.has(key)).length;
@@ -415,12 +291,10 @@ const RolePermission: React.FC = () => {
   const [mode, setMode] = useState<'edit' | 'create'>('edit');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'enabled' | 'disabled'>('all');
-  const [error, setError] = useState('');
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [rolePendingDelete, setRolePendingDelete] = useState<Role | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [noticeMessage, setNoticeMessage] = useState('');
 
   useEffect(() => {
     fetchItems();
@@ -457,7 +331,6 @@ const RolePermission: React.FC = () => {
   const activeBoundUsers = boundUsers.filter((user) => user.isActive && (user.employmentStatus || 'active') === 'active');
 
   const handleSelectRole = (role: Role) => {
-    setError('');
     setSaveMessage(null);
     setMode('edit');
     setSelectedRoleId(role.id);
@@ -466,7 +339,6 @@ const RolePermission: React.FC = () => {
   };
 
   const handleCreate = () => {
-    setError('');
     setSaveMessage(null);
     setMode('create');
     setSelectedRoleId('');
@@ -475,15 +347,13 @@ const RolePermission: React.FC = () => {
   };
 
   const handleSubmit = async () => {
-    setError('');
     setSaveMessage(null);
     if (!form.name.trim()) {
       setSaveMessage({ type: 'error', text: '请先填写角色名称' });
       return;
     }
     if (hasDuplicateRoleName(form.name, items, editRole?.id)) {
-      setSaveMessage({ type: 'error', text: '角色名称已存在' });
-      setNoticeMessage('角色名称已存在，请使用其他名称');
+      setSaveMessage({ type: 'error', text: '角色名称已存在，请使用其他名称' });
       return;
     }
     const permissions = buildRoleEditorPermissions(normalizePermissionKeys(form.permissions));
@@ -509,9 +379,7 @@ const RolePermission: React.FC = () => {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : '保存失败';
-      setError(message);
       setSaveMessage({ type: 'error', text: message });
-      if (message.includes('角色名称已存在')) setNoticeMessage('角色名称已存在，请使用其他名称');
       setSaving(false);
       return;
     }
@@ -521,7 +389,7 @@ const RolePermission: React.FC = () => {
     setSaving(false);
   };
 
-  const handlePermissionToggle = (node: PermissionNode, path: string[] = []) => {
+  const handlePermissionToggle = (node: RolePermissionNode, path: string[] = []) => {
     setForm((prev) => {
       const nextKeys = normalizePermissionKeys(prev.permissions);
       const nodeKeys = getSelectableNodeKeys(node, path);
@@ -550,14 +418,13 @@ const RolePermission: React.FC = () => {
 
   const handleConfirmDelete = async () => {
     if (!rolePendingDelete) return;
-    setError('');
     setDeleting(true);
     try {
       await deleteRole(rolePendingDelete.id);
       setRolePendingDelete(null);
       await fetchItems();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除失败');
+      setSaveMessage({ type: 'error', text: err instanceof Error ? err.message : '删除失败' });
     } finally {
       setDeleting(false);
     }
@@ -675,8 +542,6 @@ const RolePermission: React.FC = () => {
 
         <Box sx={{ minWidth: 0, bgcolor: '#fbfcfe' }}>
           <Box sx={{ p: { xs: 2, md: 3 }, display: 'grid', gap: 2 }}>
-            {error && <Typography variant="body2" sx={{ color: '#d32f2f' }}>{error}</Typography>}
-
             <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 1.12fr) minmax(360px, 0.88fr)' }, gap: 2 }}>
               <Box sx={{ bgcolor: '#fff', border: '1px solid #dfe7f1', borderRadius: 1.25, overflow: 'hidden' }}>
                 <Box sx={{ px: 2.5, py: 2, borderBottom: '1px solid #edf2f7', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
@@ -997,11 +862,6 @@ const RolePermission: React.FC = () => {
               >
                 {editRole ? '保存权限' : '创建角色'}
               </Button>
-              {saveMessage && (
-                <Alert severity={saveMessage.type} sx={{ width: '100%' }} onClose={() => setSaveMessage(null)}>
-                  {saveMessage.text}
-                </Alert>
-              )}
             </Box>
           </Box>
         </Box>
@@ -1026,15 +886,12 @@ const RolePermission: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
-      <Dialog open={Boolean(noticeMessage)} onClose={() => setNoticeMessage('')} maxWidth="xs" fullWidth>
-        <DialogTitle>提示</DialogTitle>
-        <DialogContent dividers>
-          <Typography variant="body2" sx={{ color: '#52677f' }}>{noticeMessage}</Typography>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, py: 2 }}>
-          <Button variant="contained" onClick={() => setNoticeMessage('')}>确定</Button>
-        </DialogActions>
-      </Dialog>
+      <OperationFeedbackDialog
+        open={Boolean(saveMessage)}
+        severity={saveMessage?.type}
+        message={saveMessage?.text || ''}
+        onClose={() => setSaveMessage(null)}
+      />
     </>
   );
 };

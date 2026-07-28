@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { ApiResponse, PaginatedResponse } from './types';
 import { createErrorResponse, createSuccessResponse, delay } from './types';
-import { backendRequest, shouldUseBackendApi } from './backendClient';
+import { backendRequest, shouldUseBackendApi, syncBackendStorageScopeFromServer } from './backendClient';
 import { initializeMockData } from './mock';
 import { getStorageData, setStorageCacheData, setStorageData } from './mock/storage';
 import { STORAGE_KEYS, DEFAULT_PAGE_SIZE } from '../shared/utils/constants';
@@ -40,6 +40,26 @@ function ensureInit(): void {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function appendLocalRecoveryReview(
+  order: RecoveryOrder,
+  auditorId: string,
+  auditorName: string,
+  changedAt: string,
+  summary: string,
+  reason?: string,
+): NonNullable<RecoveryOrder['changeHistory']> {
+  const normalizedReason = reason?.trim();
+  return [{
+    id: `rch-${uuidv4().slice(0, 16)}`,
+    action: 'review',
+    operatorId: auditorId,
+    operator: auditorName,
+    changedAt,
+    ...(normalizedReason ? { reason: normalizedReason } : {}),
+    summary,
+  }, ...(order.changeHistory || [])];
 }
 
 function normalizeRecoveryTime(value: string | undefined, fallback: string): string {
@@ -200,10 +220,11 @@ function canViewRecoveryOrder(order: RecoveryOrder, scopeDomain: NonNullable<Rec
 }
 
 function canResubmitReturnedRecoveryOrder(order: RecoveryOrder): boolean {
-  if (!['退回修改', '审核驳回'].includes(order.status)) return false;
+  if (order.status !== '退回修改') return false;
   const user = getCurrentSessionUser();
   if (!user) return false;
-  return order.createdBy === user.id;
+  return order.createdBy === user.id
+    && canUseRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, 'write');
 }
 
 function filterVisibleRecoveryOrders(
@@ -512,6 +533,11 @@ async function updateRecoveryOrder(id: string, data: RecoveryOrderInput): Promis
 
   ensureInit();
   await delay(160);
+  const canEdit = canUseRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT, 'write');
+  const canCreate = canUseRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_CREATE, 'write');
+  if (!canEdit && !canCreate) {
+    return createErrorResponse('无权编辑售后挽回订单', 403);
+  }
   if (!data.customerName.trim()) return createErrorResponse('请填写客户姓名');
   if (!data.thirdPartyOrderNo.trim()) return createErrorResponse('请填写第三方平台订单号');
   if (!data.originalProduct.trim()) return createErrorResponse('请填写原购买产品');
@@ -521,7 +547,17 @@ async function updateRecoveryOrder(id: string, data: RecoveryOrderInput): Promis
   const idx = orders.findIndex((item) => item.id === id);
   if (idx === -1) return createSuccessResponse(null);
   const current = orders[idx];
-  if (!canUseRecoveryPermission(PERMISSION_KEYS.AFTER_SALES_RECOVERY_EDIT, 'write') && !canResubmitReturnedRecoveryOrder(current)) {
+  if (current.status === '审核驳回') {
+    return createErrorResponse('审核驳回的售后挽回订单已终止，不能修改或重新提交；如需重新办理请新建申请', 409);
+  }
+  if (!['待审核', '退回修改'].includes(current.status)) {
+    return createErrorResponse('审核通过后的记录请使用“编辑资料”或“挽回单更正”', 409);
+  }
+  const isReturnedForChanges = current.status === '退回修改';
+  if (isReturnedForChanges && !canResubmitReturnedRecoveryOrder(current)) {
+    return createErrorResponse('只有原创建人可以修改并重新提交退回修改的挽回单', 403);
+  }
+  if (!isReturnedForChanges && !canEdit) {
     return createErrorResponse('无权编辑售后挽回订单', 403);
   }
   if (['待确认', '待发放', '已发放', '已撤回'].includes(current.settlementStatus || '未分账')) {
@@ -534,7 +570,7 @@ async function updateRecoveryOrder(id: string, data: RecoveryOrderInput): Promis
   const now = nowIso();
   const recoveryUser = getUsers().find((item) => item.id === data.recoveryUserId);
   const assistUser = data.assistUserId ? getUsers().find((item) => item.id === data.assistUserId) : undefined;
-  const nextStatus: RecoveryOrder['status'] = current.status === '退回修改' || current.status === '审核驳回'
+  const nextStatus: RecoveryOrder['status'] = current.status === '退回修改'
     ? '待审核'
     : current.status;
 
@@ -746,17 +782,24 @@ async function approveRecoveryOrder(id: string, auditorId: string, auditorName: 
   const orders = readRecoveryOrders();
   const idx = orders.findIndex((item) => item.id === id);
   if (idx === -1) return createSuccessResponse(null);
-  if (orders[idx].status === '审核驳回') return createErrorResponse('已驳回的挽回单不能直接审核通过');
-  if (orders[idx].status === '审核通过') return createErrorResponse('审核通过的挽回单不能重复审核');
+  const current = orders[idx];
+  if (current.status === '审核通过') return createSuccessResponse(current);
+  if (current.status !== '待审核') return createErrorResponse('只有待审核售后挽回订单可以执行该操作', 409);
   const now = nowIso();
   orders[idx] = {
-    ...orders[idx],
+    ...current,
     status: '审核通过',
     settlementStatus: '待处理',
     auditorId,
     auditorName,
     auditedAt: now,
-    auditReason: undefined,
+    changeHistory: appendLocalRecoveryReview(
+      current,
+      auditorId,
+      auditorName,
+      now,
+      '审核通过售后挽回订单',
+    ),
     updatedAt: now,
   };
   writeRecoveryOrders(orders);
@@ -781,17 +824,28 @@ async function returnRecoveryOrder(id: string, auditorId: string, auditorName: s
   const orders = readRecoveryOrders();
   const idx = orders.findIndex((item) => item.id === id);
   if (idx === -1) return createSuccessResponse(null);
-  if (!reason.trim()) return createErrorResponse('请填写退回修改原因');
-  if (orders[idx].status === '审核通过') return createErrorResponse('审核通过的挽回单不能退回修改');
+  const normalizedReason = reason.trim();
+  if (!normalizedReason) return createErrorResponse('请填写退回修改原因');
+  const current = orders[idx];
+  if (current.status === '退回修改' && current.auditReason === normalizedReason) return createSuccessResponse(current);
+  if (current.status !== '待审核') return createErrorResponse('只有待审核售后挽回订单可以执行该操作', 409);
   const now = nowIso();
   orders[idx] = {
-    ...orders[idx],
+    ...current,
     status: '退回修改',
     settlementStatus: '未分账',
     auditorId,
     auditorName,
-    auditReason: reason.trim(),
+    auditReason: normalizedReason,
     auditedAt: now,
+    changeHistory: appendLocalRecoveryReview(
+      current,
+      auditorId,
+      auditorName,
+      now,
+      '退回售后挽回订单修改',
+      normalizedReason,
+    ),
     updatedAt: now,
   };
   writeRecoveryOrders(orders);
@@ -816,16 +870,28 @@ async function rejectRecoveryOrder(id: string, auditorId: string, auditorName: s
   const orders = readRecoveryOrders();
   const idx = orders.findIndex((item) => item.id === id);
   if (idx === -1) return createSuccessResponse(null);
-  if (!reason.trim()) return createErrorResponse('请填写驳回原因');
+  const normalizedReason = reason.trim();
+  if (!normalizedReason) return createErrorResponse('请填写驳回原因');
+  const current = orders[idx];
+  if (current.status === '审核驳回' && current.auditReason === normalizedReason) return createSuccessResponse(current);
+  if (current.status !== '待审核') return createErrorResponse('只有待审核售后挽回订单可以执行该操作', 409);
   const now = nowIso();
   orders[idx] = {
-    ...orders[idx],
+    ...current,
     status: '审核驳回',
     settlementStatus: '未分账',
     auditorId,
     auditorName,
-    auditReason: reason.trim(),
+    auditReason: normalizedReason,
     auditedAt: now,
+    changeHistory: appendLocalRecoveryReview(
+      current,
+      auditorId,
+      auditorName,
+      now,
+      '驳回售后挽回订单',
+      normalizedReason,
+    ),
     updatedAt: now,
   };
   writeRecoveryOrders(orders);
@@ -916,6 +982,7 @@ async function settleRecoveryOrder(
       body: JSON.stringify({ rows, reason }),
     });
     if (response.code !== 0) return createErrorResponse(response.message, response.code);
+    await syncBackendStorageScopeFromServer('commissions', 0);
     return createSuccessResponse(response.data ? cacheBackendRecoveryOrder(response.data) : null, response.message);
   }
 
@@ -994,6 +1061,7 @@ async function confirmRecoverySettlement(id: string, operatorName: string): Prom
       method: 'POST',
     });
     if (response.code !== 0) return createErrorResponse(response.message, response.code);
+    await syncBackendStorageScopeFromServer('commissions', 0);
     return createSuccessResponse(response.data ? cacheBackendRecoveryOrder(response.data) : null, response.message);
   }
 
@@ -1048,6 +1116,7 @@ async function resetRecoverySettlement(id: string, operatorName: string, reason?
       body: JSON.stringify({ reason }),
     });
     if (response.code !== 0) return createErrorResponse(response.message, response.code);
+    await syncBackendStorageScopeFromServer('commissions', 0);
     return createSuccessResponse(response.data ? cacheBackendRecoveryOrder(response.data) : null, response.message);
   }
 
@@ -1094,6 +1163,7 @@ async function withdrawRecoverySettlement(id: string, reason: string, operatorNa
       body: JSON.stringify({ reason }),
     });
     if (response.code !== 0) return createErrorResponse(response.message, response.code);
+    await syncBackendStorageScopeFromServer('commissions', 0);
     return createSuccessResponse(response.data ? cacheBackendRecoveryOrder(response.data) : null, response.message);
   }
 
@@ -1152,6 +1222,7 @@ async function reopenRecoverySettlement(
       body: JSON.stringify({ reason }),
     });
     if (response.code !== 0) return createErrorResponse(response.message, response.code);
+    await syncBackendStorageScopeFromServer('commissions', 0);
     return createSuccessResponse(response.data ? cacheBackendRecoveryOrder(response.data) : null, response.message);
   }
   ensureInit();
