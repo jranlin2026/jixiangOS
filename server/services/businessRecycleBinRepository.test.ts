@@ -97,7 +97,7 @@ assert.equal(purgeFixture.calls.some((call) => (
 )), true, '永久删除订单必须同步删除来源订单申请');
 assert.equal(purgeFixture.calls.some((call) => (
   call.action === 'create'
-  && call.input.data.domain === 'aaos_business_recycle_bin_audit'
+  && call.input.data.domain === STORAGE_KEYS.BUSINESS_RECYCLE_BIN_AUDITS
   && call.input.data.data.reason === '确认清理测试数据'
 )), true, '永久删除必须保留操作人和原因审计');
 

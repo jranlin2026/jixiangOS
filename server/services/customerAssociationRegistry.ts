@@ -158,6 +158,11 @@ const DEFINITION_BY_PAIR = new Map(
   CUSTOMER_ASSOCIATION_DEFINITIONS.map((item) => [`${item.storageDomain}\u0000${item.pathKey}`, item]),
 );
 
+/** Immutable historical evidence may retain IDs for traceability but never owns live customer relations. */
+const NON_BLOCKING_AUDIT_STORAGE_DOMAINS = new Set<string>([
+  STORAGE_KEYS.BUSINESS_RECYCLE_BIN_AUDITS,
+]);
+
 function readObject(value: unknown): Record<string, any> {
   if (typeof value === 'string') {
     try {
@@ -240,6 +245,7 @@ export async function discoverCustomerAssociationDomains(
     : [];
   for (const row of businessRows) {
     const storageDomain = String(row.domain || '');
+    if (NON_BLOCKING_AUDIT_STORAGE_DOMAINS.has(storageDomain)) continue;
     const recordId = String(row.recordId || row.id || '');
     const data = readObject(row.data);
     pushIfTarget(output, customerIds, row.customerId, storageDomain, 'customerId', recordId);

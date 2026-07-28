@@ -40,6 +40,10 @@ const businessRows = [
     id: 'unknown-domain', domain: 'aaos_future_business', recordId: 'future-1', customerId: 'c-1',
     data: { customerId: 'c-1', orderData: { customerId: 'c-1' }, subjectType: 'customer', subjectId: 'c-1' },
   },
+  {
+    id: 'recycle-audit', domain: STORAGE_KEYS.BUSINESS_RECYCLE_BIN_AUDITS, recordId: 'recycle-audit-1', customerId: 'c-1',
+    data: { customerId: 'c-1', targetType: 'order', targetId: 'order-deleted' },
+  },
 ];
 
 await assert.rejects(() => lockCustomerAssociationScope({
@@ -114,6 +118,11 @@ assert.equal(
   discovered.find((item) => item.recordId === 'future-1')?.definitionId,
   undefined,
   '未知域匹配稳定形状必须 fail closed',
+);
+assert.equal(
+  discovered.some((item) => item.recordId === 'recycle-audit'),
+  false,
+  '回收站永久删除审计只是历史凭证，不能反向阻断客户删除',
 );
 assert.deepEqual(
   discovered.filter((item) => item.recordId === 'future-1').map((item) => item.pathKey).sort(),

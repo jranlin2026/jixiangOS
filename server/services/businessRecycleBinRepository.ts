@@ -216,7 +216,7 @@ export function createPrismaBusinessRecycleBinRepository(prisma: RecycleBinPrism
         await transaction.businessRecord.create({
           data: {
             id: `business-recycle-bin-audit:${auditId}`,
-            domain: 'aaos_business_recycle_bin_audit',
+            domain: STORAGE_KEYS.BUSINESS_RECYCLE_BIN_AUDITS,
             recordId: auditId,
             title: order.orderNo,
             status: '已永久删除',
