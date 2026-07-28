@@ -124,6 +124,10 @@ assertBefore('Auditing immutable finance transaction backfill', 'echo "Switching
 assert.match(remote, /JIXIANG_FINANCE_BACKFILL_APPLY/);
 assert.match(remote, /--apply --confirm=BACKFILL_FINANCE_TRANSACTIONS/);
 assert.match(remote, /JIXIANG_VERIFIED_BACKUP_SHA256/);
+assert.match(deploySource, /--skip-finance-backfill/);
+assert.match(remote, /SKIP_FINANCE_BACKFILL/);
+assert.match(remote, /if \[ "\$SKIP_FINANCE_BACKFILL" = "1" \]; then[\s\S]*Skipping historical finance transaction backfill/);
+assertBefore('SKIP_FINANCE_BACKFILL" = "1"', 'finance:backfill -- --apply', '显式跳过判断必须先于回填写入');
 
 assert.match(remote, /PERSISTENT_DATA_DIR/);
 assert.match(remote, /readlink -m/);

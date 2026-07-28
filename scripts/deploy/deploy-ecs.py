@@ -163,13 +163,21 @@ def upload_release(client: paramiko.SSHClient, local_zip: Path) -> str:
     return remote_path
 
 
-def build_remote_command(remote_zip: str, app_dir: str, node_env: str, fresh_install: bool) -> str:
+def build_remote_command(
+    remote_zip: str,
+    app_dir: str,
+    node_env: str,
+    fresh_install: bool,
+    skip_finance_backfill: bool,
+) -> str:
     reuse_node_modules = "0" if fresh_install else "1"
+    skip_finance_backfill_value = "1" if skip_finance_backfill else "0"
     return f"""set -euo pipefail
 APP_DIR="{app_dir}"
 RELEASE_ZIP="{remote_zip}"
 NODE_ENV_VALUE="{node_env}"
 REUSE_NODE_MODULES="{reuse_node_modules}"
+SKIP_FINANCE_BACKFILL="{skip_finance_backfill_value}"
 TS="$(date +%Y%m%d-%H%M%S)"
 NEW_DIR="${{APP_DIR}}.new-${{TS}}"
 BACKUP_DIR="${{APP_DIR}}.prev-${{TS}}"
@@ -360,16 +368,20 @@ npx --no-install prisma migrate diff --from-schema-datasource prisma/schema.pris
 echo "Auditing immutable finance transaction backfill..."
 FINANCE_BACKFILL_REPORT="$(npm run --silent finance:backfill)"
 echo "$FINANCE_BACKFILL_REPORT"
-if ! echo "$FINANCE_BACKFILL_REPORT" | grep -Eq '"missingCount"[[:space:]]*:[[:space:]]*0'; then
-  if [ "${{JIXIANG_FINANCE_BACKFILL_APPLY:-}}" != "YES" ]; then
-    echo "Finance backfill is required. Set JIXIANG_FINANCE_BACKFILL_APPLY=YES only after reviewing the dry-run reconciliation." >&2
-    false
+if [ "$SKIP_FINANCE_BACKFILL" = "1" ]; then
+  echo "Skipping historical finance transaction backfill by explicit deployment request."
+else
+  if ! echo "$FINANCE_BACKFILL_REPORT" | grep -Eq '"missingCount"[[:space:]]*:[[:space:]]*0'; then
+    if [ "${{JIXIANG_FINANCE_BACKFILL_APPLY:-}}" != "YES" ]; then
+      echo "Finance backfill is required. Set JIXIANG_FINANCE_BACKFILL_APPLY=YES only after reviewing the dry-run reconciliation." >&2
+      false
+    fi
+    export JIXIANG_VERIFIED_BACKUP_SHA256="$(sha256sum "$BACKUP_FILE" | awk '{{print $1}}')"
+    npm run finance:backfill -- --apply --confirm=BACKFILL_FINANCE_TRANSACTIONS
+    unset JIXIANG_VERIFIED_BACKUP_SHA256
   fi
-  export JIXIANG_VERIFIED_BACKUP_SHA256="$(sha256sum "$BACKUP_FILE" | awk '{{print $1}}')"
-  npm run finance:backfill -- --apply --confirm=BACKFILL_FINANCE_TRANSACTIONS
-  unset JIXIANG_VERIFIED_BACKUP_SHA256
+  npm run finance:backfill -- --require-complete
 fi
-npm run finance:backfill -- --require-complete
 
 echo "Finalizing persistent uploads..."
 if pm2 describe jixiang-os-api >/dev/null 2>&1; then
@@ -490,6 +502,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-build", action="store_true", help="Skip local npm build.")
     parser.add_argument("--skip-public-health", action="store_true", help="Skip public /api/health check.")
     parser.add_argument("--fresh-install", action="store_true", help="Do not reuse server node_modules.")
+    parser.add_argument(
+        "--skip-finance-backfill",
+        action="store_true",
+        help="Deploy code without creating historical finance transaction records.",
+    )
     return parser.parse_args()
 
 
@@ -524,7 +541,13 @@ def main() -> int:
         client = ssh_connect(args.host, args.user, password, args.port)
         try:
             remote_zip = upload_release(client, release_zip)
-            command = build_remote_command(remote_zip, args.app_dir, args.node_env, args.fresh_install)
+            command = build_remote_command(
+                remote_zip,
+                args.app_dir,
+                args.node_env,
+                args.fresh_install,
+                args.skip_finance_backfill,
+            )
             run_remote(client, command)
         finally:
             client.close()
