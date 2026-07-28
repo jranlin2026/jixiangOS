@@ -88,7 +88,6 @@ async function recalculateCustomerProjection(
 
 const DEPENDENCY_LABELS: Record<string, string> = {
   [STORAGE_KEYS.COMMISSIONS]: '提成记录',
-  [STORAGE_KEYS.COMMISSION_OPERATION_LOGS]: '分账操作记录',
   [STORAGE_KEYS.DELIVERIES]: '交付记录',
   [STORAGE_KEYS.REFUNDS]: '退款记录',
   [STORAGE_KEYS.RECOVERY_ORDERS]: '售后挽回记录',
@@ -188,13 +187,23 @@ export function createPrismaBusinessRecycleBinRepository(prisma: RecycleBinPrism
     async purgeOrder(id, _reason, _actorName) {
       await prisma.$transaction(async (transaction) => {
         const order = await lockDeletedOrder(transaction, id);
-        const dependencies = await transaction.businessRecord.findMany({
-          where: {
-            orderId: id,
-            domain: { notIn: [STORAGE_KEYS.ORDERS, STORAGE_KEYS.ORDER_APPLICATIONS] },
-          },
-          select: { domain: true },
-        });
+        const [dependencies, operationLogs] = await Promise.all([
+          transaction.businessRecord.findMany({
+            where: {
+              orderId: id,
+              domain: { notIn: [
+                STORAGE_KEYS.ORDERS,
+                STORAGE_KEYS.ORDER_APPLICATIONS,
+                STORAGE_KEYS.COMMISSION_OPERATION_LOGS,
+              ] },
+            },
+            select: { domain: true },
+          }),
+          transaction.businessRecord.findMany({
+            where: { domain: STORAGE_KEYS.COMMISSION_OPERATION_LOGS, orderId: id },
+            select: { recordId: true },
+          }),
+        ]);
         if (dependencies.length) {
           const labels = [...new Set(dependencies.map((row) => DEPENDENCY_LABELS[row.domain] || '关联业务记录'))];
           throw new BusinessRecycleBinCommandError(
@@ -223,6 +232,7 @@ export function createPrismaBusinessRecycleBinRepository(prisma: RecycleBinPrism
               customerName: order.customerName,
               reason: _reason,
               operator: _actorName,
+              removedOperationLogCount: operationLogs.length,
               purgedAt,
             }),
           },
@@ -235,6 +245,9 @@ export function createPrismaBusinessRecycleBinRepository(prisma: RecycleBinPrism
               ...(order.sourceApplicationId ? [{ recordId: order.sourceApplicationId }] : []),
             ],
           },
+        });
+        await transaction.businessRecord.deleteMany({
+          where: { domain: STORAGE_KEYS.COMMISSION_OPERATION_LOGS, orderId: id },
         });
         await transaction.businessRecord.delete({
           where: { domain_recordId: { domain: STORAGE_KEYS.ORDERS, recordId: id } },

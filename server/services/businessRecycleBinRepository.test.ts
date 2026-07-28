@@ -64,7 +64,14 @@ function commandFixture(dependencyDomains: string[] = []) {
     },
     businessRecord: {
       findMany: async ({ where }: any) => {
-        if (where?.orderId === deletedOrder.id) return dependencyDomains.map((domain) => ({ domain }));
+        if (where?.orderId === deletedOrder.id) {
+          const domains = where?.domain?.notIn
+            ? dependencyDomains.filter((domain) => !where.domain.notIn.includes(domain))
+            : where?.domain
+              ? dependencyDomains.filter((domain) => domain === where.domain)
+              : dependencyDomains;
+          return domains.map((domain, index) => ({ domain, recordId: `dependency-${index + 1}` }));
+        }
         if (where?.domain === STORAGE_KEYS.ORDERS) return orderPresent ? [{ data: deletedOrder }] : [];
         return [];
       },
@@ -100,5 +107,13 @@ await assert.rejects(
   /资金流水.*不能永久删除/,
 );
 assert.equal(blockedFixture.calls.some((call) => call.action === 'delete'), false);
+
+const operationLogOnlyFixture = commandFixture([STORAGE_KEYS.COMMISSION_OPERATION_LOGS]);
+await operationLogOnlyFixture.repository.purgeOrder('order-deleted', '清理测试分账日志', '管理员');
+assert.equal(operationLogOnlyFixture.calls.some((call) => (
+  call.action === 'deleteMany'
+  && call.input.where.domain === STORAGE_KEYS.COMMISSION_OPERATION_LOGS
+  && call.input.where.orderId === 'order-deleted'
+)), true, '只剩分账操作日志时应跟随测试订单一并清理');
 
 console.log('business recycle bin repository tests passed');
