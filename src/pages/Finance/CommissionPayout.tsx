@@ -37,6 +37,7 @@ import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { formatCurrency, formatDateTime, formatPaginationRows } from '../../shared/utils/formatters';
 import TablePagination from '../../shared/components/TablePagination';
+import { moduleTablePaperSx, moduleTableSx } from '../../shared/components/ModuleShell';
 import { subscribePageRefresh } from '../../shared/utils/pageRefresh';
 import type {
   CommissionPayoutEmployeeRow,
@@ -104,6 +105,12 @@ const CommissionPayout: React.FC = () => {
   const [pendingRowsPerPage, setPendingRowsPerPage] = useState(10);
   const [recordPage, setRecordPage] = useState(0);
   const [recordRowsPerPage, setRecordRowsPerPage] = useState(10);
+  const [employeeDetailPage, setEmployeeDetailPage] = useState(0);
+  const [employeeDetailRowsPerPage, setEmployeeDetailRowsPerPage] = useState(10);
+  const [recordOwnerPage, setRecordOwnerPage] = useState(0);
+  const [recordOwnerRowsPerPage, setRecordOwnerRowsPerPage] = useState(10);
+  const [recordCommissionPage, setRecordCommissionPage] = useState(0);
+  const [recordCommissionRowsPerPage, setRecordCommissionRowsPerPage] = useState(10);
 
   const load = useCallback(async () => {
     if (view === 'summary') return;
@@ -130,6 +137,13 @@ const CommissionPayout: React.FC = () => {
     setPendingPage(0);
     setRecordPage(0);
   }, [view]);
+  useEffect(() => {
+    setEmployeeDetailPage(0);
+  }, [detailEmployee?.ownerId]);
+  useEffect(() => {
+    setRecordOwnerPage(0);
+    setRecordCommissionPage(0);
+  }, [detailRecord?.id]);
 
   const selectable = useMemo(
     () => workspace?.employees.filter((item) => item.pendingPayAmount > 0) || [],
@@ -144,8 +158,39 @@ const CommissionPayout: React.FC = () => {
   const allSelected = selectable.length > 0 && selectable.every((item) => selectedIds.includes(item.ownerId));
   const pendingRows = workspace?.employees || [];
   const recordRows = workspace?.records || [];
-  const visiblePendingRows = pendingRows.slice(pendingPage * pendingRowsPerPage, (pendingPage + 1) * pendingRowsPerPage);
-  const visibleRecordRows = recordRows.slice(recordPage * recordRowsPerPage, (recordPage + 1) * recordRowsPerPage);
+  const pendingTotalPages = Math.max(1, Math.ceil(pendingRows.length / pendingRowsPerPage));
+  const currentPendingPage = Math.min(pendingPage, pendingTotalPages - 1);
+  const recordTotalPages = Math.max(1, Math.ceil(recordRows.length / recordRowsPerPage));
+  const currentRecordPage = Math.min(recordPage, recordTotalPages - 1);
+  const visiblePendingRows = pendingRows.slice(
+    currentPendingPage * pendingRowsPerPage,
+    (currentPendingPage + 1) * pendingRowsPerPage,
+  );
+  const visibleRecordRows = recordRows.slice(
+    currentRecordPage * recordRowsPerPage,
+    (currentRecordPage + 1) * recordRowsPerPage,
+  );
+  const employeeDetailRows = detailEmployee?.commissions || [];
+  const employeeDetailTotalPages = Math.max(1, Math.ceil(employeeDetailRows.length / employeeDetailRowsPerPage));
+  const currentEmployeeDetailPage = Math.min(employeeDetailPage, employeeDetailTotalPages - 1);
+  const visibleEmployeeDetailRows = employeeDetailRows.slice(
+    currentEmployeeDetailPage * employeeDetailRowsPerPage,
+    (currentEmployeeDetailPage + 1) * employeeDetailRowsPerPage,
+  );
+  const recordOwnerRows = detailRecord?.byOwner || [];
+  const recordOwnerTotalPages = Math.max(1, Math.ceil(recordOwnerRows.length / recordOwnerRowsPerPage));
+  const currentRecordOwnerPage = Math.min(recordOwnerPage, recordOwnerTotalPages - 1);
+  const visibleRecordOwnerRows = recordOwnerRows.slice(
+    currentRecordOwnerPage * recordOwnerRowsPerPage,
+    (currentRecordOwnerPage + 1) * recordOwnerRowsPerPage,
+  );
+  const recordCommissionRows = detailRecord?.commissionSnapshots || [];
+  const recordCommissionTotalPages = Math.max(1, Math.ceil(recordCommissionRows.length / recordCommissionRowsPerPage));
+  const currentRecordCommissionPage = Math.min(recordCommissionPage, recordCommissionTotalPages - 1);
+  const visibleRecordCommissionRows = recordCommissionRows.slice(
+    currentRecordCommissionPage * recordCommissionRowsPerPage,
+    (currentRecordCommissionPage + 1) * recordCommissionRowsPerPage,
+  );
 
   const toggleAll = () => setSelectedIds(allSelected ? [] : selectable.map((item) => item.ownerId));
   const toggleOne = (ownerId: string) => setSelectedIds((current) => (
@@ -251,7 +296,7 @@ const CommissionPayout: React.FC = () => {
           {!pendingRows.length && <Box sx={{ py: 7, textAlign: 'center', color: 'text.secondary' }}>暂无待确认或待发放提成</Box>}
         </Box>
         <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}>
-          <Table size="small">
+          <Table size="small" sx={moduleTableSx}>
             <TableHead><TableRow>
               <TableCell sx={{ minWidth: 150 }}>
                 <Stack direction="row" alignItems="center" spacing={1}>
@@ -283,7 +328,7 @@ const CommissionPayout: React.FC = () => {
         </TableContainer>
         <TablePagination
           count={pendingRows.length}
-          page={pendingPage}
+          page={currentPendingPage}
           rowsPerPage={pendingRowsPerPage}
           rowsPerPageOptions={[10, 20, 50]}
           onPageChange={(_, nextPage) => setPendingPage(nextPage)}
@@ -328,7 +373,7 @@ const CommissionPayout: React.FC = () => {
         ))}
         {!recordRows.length && <Box sx={{ py: 7, textAlign: 'center', color: 'text.secondary' }}>暂无发放记录</Box>}
       </Box>
-      <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}><Table size="small">
+      <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}><Table size="small" sx={moduleTableSx}>
         <TableHead><TableRow>
           <TableCell sx={{ minWidth: 180 }}>发放单号</TableCell><TableCell sx={{ minWidth: 145 }}>发放时间</TableCell><TableCell align="center" sx={{ minWidth: 100 }}>员工 / 提成</TableCell>
           <TableCell align="right" sx={{ minWidth: 110 }}>发放金额</TableCell><TableCell sx={{ minWidth: 140 }}>发放信息</TableCell><TableCell sx={{ minWidth: 90 }}>状态</TableCell><TableCell align="center" sx={{ width: 132, minWidth: 132 }}>操作</TableCell>
@@ -351,7 +396,7 @@ const CommissionPayout: React.FC = () => {
       </Table></TableContainer>
       <TablePagination
         count={recordRows.length}
-        page={recordPage}
+        page={currentRecordPage}
         rowsPerPage={recordRowsPerPage}
         rowsPerPageOptions={[10, 20, 50]}
         onPageChange={(_, nextPage) => setRecordPage(nextPage)}
@@ -392,11 +437,11 @@ const CommissionPayout: React.FC = () => {
       <DialogActions><Button onClick={() => setIssueOpen(false)} disabled={submitting}>取消</Button><Button variant="contained" onClick={() => void submitIssue()} disabled={submitting || !issueAt || !paymentMethod}>确认发放</Button></DialogActions>
     </Dialog>
 
-    <Dialog open={Boolean(detailEmployee)} onClose={() => setDetailEmployee(null)} fullWidth maxWidth="md">
+    <Dialog open={Boolean(detailEmployee)} onClose={() => setDetailEmployee(null)} fullWidth maxWidth="lg">
       <DialogTitle>{detailEmployee?.owner} · 全部待办提成明细</DialogTitle>
       <DialogContent dividers>
         <Stack divider={<Divider flexItem />} sx={{ display: { xs: 'flex', md: 'none' } }}>
-          {detailEmployee?.commissions.map((row) => (
+          {visibleEmployeeDetailRows.map((row) => (
             <Box key={row.id} sx={{ py: 1.5 }}>
               <Stack direction="row" justifyContent="space-between" spacing={1}>
                 <Box sx={{ minWidth: 0 }}>
@@ -414,10 +459,28 @@ const CommissionPayout: React.FC = () => {
               <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1, overflowWrap: 'anywhere' }}>{commissionCalculationText(row)}</Typography>
             </Box>
           ))}
+          {!employeeDetailRows.length && <Box sx={{ py: 6, textAlign: 'center', color: 'text.secondary' }}>暂无待办提成明细</Box>}
         </Stack>
-        <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}><Table size="small" sx={{ minWidth: 1180 }}><TableHead><TableRow><TableCell>提成类型</TableCell><TableCell>客户</TableCell><TableCell>订单号</TableCell><TableCell>角色</TableCell><TableCell align="right">业绩金额</TableCell><TableCell>计算方案</TableCell><TableCell align="right">提成金额</TableCell><TableCell>归属月份 / 时间</TableCell><TableCell>状态</TableCell></TableRow></TableHead><TableBody>
-          {detailEmployee?.commissions.map((row) => <TableRow key={row.id}><TableCell>{commissionTypeLabel(row)}</TableCell><TableCell>{row.customerName || '未命名客户'}</TableCell><TableCell><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{row.orderNo}</Typography></TableCell><TableCell>{row.role}</TableCell><TableCell align="right">{formatCurrency(Number(row.performanceAmount || row.orderAmount || 0))}</TableCell><TableCell sx={{ maxWidth: 260 }}><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{commissionCalculationText(row)}</Typography></TableCell><TableCell align="right"><Typography fontWeight={900}>{formatCurrency(row.commissionAmount)}</Typography></TableCell><TableCell>{commissionMonth(row)} · {formatDateTime(row.paymentDate || row.createdAt)}</TableCell><TableCell><Chip size="small" label={row.status} /></TableCell></TableRow>)}
-        </TableBody></Table></TableContainer>
+        <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { display: { xs: 'none', md: 'block' }, borderRadius: '6px 6px 0 0', overflowX: 'auto' }]}>
+          <Table size="small" sx={[moduleTableSx, { minWidth: 1180 }]}>
+            <TableHead><TableRow><TableCell>提成类型</TableCell><TableCell>客户</TableCell><TableCell>订单号</TableCell><TableCell>角色</TableCell><TableCell align="right">业绩金额</TableCell><TableCell>计算方案</TableCell><TableCell align="right">提成金额</TableCell><TableCell>归属月份 / 时间</TableCell><TableCell>状态</TableCell></TableRow></TableHead>
+            <TableBody>
+              {visibleEmployeeDetailRows.map((row) => <TableRow key={row.id} hover><TableCell>{commissionTypeLabel(row)}</TableCell><TableCell>{row.customerName || '未命名客户'}</TableCell><TableCell><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{row.orderNo}</Typography></TableCell><TableCell>{row.role}</TableCell><TableCell align="right">{formatCurrency(Number(row.performanceAmount || row.orderAmount || 0))}</TableCell><TableCell sx={{ maxWidth: 260 }}><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{commissionCalculationText(row)}</Typography></TableCell><TableCell align="right"><Typography fontWeight={900}>{formatCurrency(row.commissionAmount)}</Typography></TableCell><TableCell>{commissionMonth(row)} · {formatDateTime(row.paymentDate || row.createdAt)}</TableCell><TableCell><Chip size="small" label={row.status} /></TableCell></TableRow>)}
+              {!employeeDetailRows.length && <TableRow><TableCell colSpan={9} align="center" sx={{ py: 6, color: 'text.secondary' }}>暂无待办提成明细</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        <TablePagination
+          count={employeeDetailRows.length}
+          page={currentEmployeeDetailPage}
+          rowsPerPage={employeeDetailRowsPerPage}
+          rowsPerPageOptions={[10, 20, 50]}
+          onPageChange={(_, nextPage) => setEmployeeDetailPage(nextPage)}
+          onRowsPerPageChange={(event) => { setEmployeeDetailRowsPerPage(Number(event.target.value)); setEmployeeDetailPage(0); }}
+          labelRowsPerPage="每页条数"
+          labelDisplayedRows={formatPaginationRows}
+          sx={{ border: '1px solid', borderColor: 'divider', borderTop: 0, bgcolor: '#fff' }}
+        />
       </DialogContent><DialogActions><Button onClick={() => setDetailEmployee(null)}>关闭</Button></DialogActions>
     </Dialog>
 
@@ -425,12 +488,47 @@ const CommissionPayout: React.FC = () => {
       <DialogTitle>发放记录详情</DialogTitle><DialogContent dividers><Stack spacing={1.5}>
         <Typography>发放单号：{detailRecord?.payoutNo}</Typography><Typography>发放月份：{detailRecord?.period}</Typography><Typography>发放时间：{detailRecord ? formatDateTime(detailRecord.issuedAt) : '-'}</Typography>
         <Typography>发放金额：{formatCurrency(detailRecord?.totalAmount || 0)}</Typography><Typography>发放方式：{detailRecord?.paymentMethod || '-'}</Typography><Typography>付款流水号：{detailRecord?.paymentReference || '-'}</Typography>
-        <Divider />{detailRecord?.byOwner.map((owner) => <Stack key={owner.ownerId || owner.owner} direction="row" justifyContent="space-between"><Typography>{owner.owner} · {owner.department || '-'}</Typography><Typography fontWeight={700}>{owner.count} 笔 / {formatCurrency(owner.amount)}</Typography></Stack>)}
+        <Divider />
+        <Typography variant="subtitle1" fontWeight={800}>员工发放汇总</Typography>
+        <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { borderRadius: '6px 6px 0 0' }]}>
+          <Table size="small" sx={moduleTableSx}>
+            <TableHead><TableRow><TableCell>员工</TableCell><TableCell>部门</TableCell><TableCell align="right">提成笔数</TableCell><TableCell align="right">发放金额</TableCell></TableRow></TableHead>
+            <TableBody>
+              {visibleRecordOwnerRows.map((owner) => <TableRow key={owner.ownerId || owner.owner} hover><TableCell>{owner.owner}</TableCell><TableCell>{owner.department || '-'}</TableCell><TableCell align="right">{owner.count}</TableCell><TableCell align="right"><Typography fontWeight={800}>{formatCurrency(owner.amount)}</Typography></TableCell></TableRow>)}
+              {!recordOwnerRows.length && <TableRow><TableCell colSpan={4} align="center" sx={{ py: 5, color: 'text.secondary' }}>暂无员工发放汇总</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        <TablePagination
+          count={recordOwnerRows.length}
+          page={currentRecordOwnerPage}
+          rowsPerPage={recordOwnerRowsPerPage}
+          rowsPerPageOptions={[10, 20, 50]}
+          onPageChange={(_, nextPage) => setRecordOwnerPage(nextPage)}
+          onRowsPerPageChange={(event) => { setRecordOwnerRowsPerPage(Number(event.target.value)); setRecordOwnerPage(0); }}
+          labelRowsPerPage="每页条数"
+          labelDisplayedRows={formatPaginationRows}
+          sx={{ border: '1px solid', borderColor: 'divider', borderTop: 0, bgcolor: '#fff' }}
+        />
         {detailRecord?.commissionSnapshots?.length ? (
-          <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}><Table size="small" sx={{ minWidth: 980 }}>
-            <TableHead><TableRow><TableCell>提成类型</TableCell><TableCell>员工</TableCell><TableCell>客户</TableCell><TableCell>订单号</TableCell><TableCell>角色</TableCell><TableCell align="right">业绩金额</TableCell><TableCell align="right">发放金额</TableCell><TableCell>归属月份</TableCell></TableRow></TableHead>
-            <TableBody>{detailRecord.commissionSnapshots.map((row) => <TableRow key={row.id}><TableCell>{commissionTypeLabel(row)}</TableCell><TableCell>{row.owner}</TableCell><TableCell>{row.customerName || '未命名客户'}</TableCell><TableCell><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{row.orderNo}</Typography></TableCell><TableCell>{row.role}</TableCell><TableCell align="right">{formatCurrency(Number(row.performanceAmount || row.orderAmount || 0))}</TableCell><TableCell align="right"><Typography fontWeight={900}>{formatCurrency(row.commissionAmount)}</Typography></TableCell><TableCell>{commissionMonth(row)}</TableCell></TableRow>)}</TableBody>
-          </Table></TableContainer>
+          <Box>
+            <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 1.5 }}>逐笔提成明细</Typography>
+            <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { borderRadius: '6px 6px 0 0', overflowX: 'auto' }]}><Table size="small" sx={[moduleTableSx, { minWidth: 980 }]}>
+              <TableHead><TableRow><TableCell>提成类型</TableCell><TableCell>员工</TableCell><TableCell>客户</TableCell><TableCell>订单号</TableCell><TableCell>角色</TableCell><TableCell align="right">业绩金额</TableCell><TableCell align="right">发放金额</TableCell><TableCell>归属月份</TableCell></TableRow></TableHead>
+              <TableBody>{visibleRecordCommissionRows.map((row) => <TableRow key={row.id} hover><TableCell>{commissionTypeLabel(row)}</TableCell><TableCell>{row.owner}</TableCell><TableCell>{row.customerName || '未命名客户'}</TableCell><TableCell><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{row.orderNo}</Typography></TableCell><TableCell>{row.role}</TableCell><TableCell align="right">{formatCurrency(Number(row.performanceAmount || row.orderAmount || 0))}</TableCell><TableCell align="right"><Typography fontWeight={900}>{formatCurrency(row.commissionAmount)}</Typography></TableCell><TableCell>{commissionMonth(row)}</TableCell></TableRow>)}</TableBody>
+            </Table></TableContainer>
+            <TablePagination
+              count={recordCommissionRows.length}
+              page={currentRecordCommissionPage}
+              rowsPerPage={recordCommissionRowsPerPage}
+              rowsPerPageOptions={[10, 20, 50]}
+              onPageChange={(_, nextPage) => setRecordCommissionPage(nextPage)}
+              onRowsPerPageChange={(event) => { setRecordCommissionRowsPerPage(Number(event.target.value)); setRecordCommissionPage(0); }}
+              labelRowsPerPage="每页条数"
+              labelDisplayedRows={formatPaginationRows}
+              sx={{ border: '1px solid', borderColor: 'divider', borderTop: 0, bgcolor: '#fff' }}
+            />
+          </Box>
         ) : detailRecord ? (
           <Alert severity="info">该历史发放记录创建时尚未保存逐笔提成快照，当前仅能核对员工汇总和提成ID。</Alert>
         ) : null}

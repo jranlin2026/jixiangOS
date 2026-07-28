@@ -27,6 +27,22 @@ assert.doesNotMatch(payoutSource, /新建发放批次|核对并锁定|确认已�
 assert.match(commissionSource, /renderMinePayoutWorkspace\(\[selectedFinancePayoutRow\]\)/);
 assert.match(commissionSource, /导出员工明细/);
 assert.match(payoutSource, /commissionSnapshots/);
+assert.match(payoutSource, /visibleEmployeeDetailRows\.map/, '员工待发放明细必须按页渲染');
+assert.match(payoutSource, /count=\{employeeDetailRows\.length\}/, '员工待发放明细必须显示统一分页');
+assert.match(payoutSource, /visibleRecordOwnerRows\.map/, '发放单员工汇总必须按页渲染');
+assert.match(payoutSource, /count=\{recordOwnerRows\.length\}/, '发放单员工汇总必须显示统一分页');
+assert.match(payoutSource, /visibleRecordCommissionRows\.map/, '发放单逐笔提成必须按页渲染');
+assert.match(payoutSource, /count=\{recordCommissionRows\.length\}/, '发放单逐笔提成必须显示统一分页');
+assert.match(payoutSource, /currentPendingPage \* pendingRowsPerPage/, '待发放清单数据缩减后必须按有效页码切片');
+assert.match(payoutSource, /page=\{currentEmployeeDetailPage\}/, '切换员工或明细缩减后必须使用有效页码');
+assert.match(payoutSource, /page=\{currentRecordOwnerPage\}/, '发放单员工汇总必须使用有效页码');
+assert.match(payoutSource, /page=\{currentRecordCommissionPage\}/, '发放单逐笔提成必须使用有效页码');
+assert.ok((payoutSource.match(/moduleTableSx/g) || []).length >= 5, '提成发放主列表和详情表格必须统一复用系统表格样式');
+assert.match(commissionSource, /visibleFinancePayoutRows\.map/, '财务员工月度报告必须按页渲染');
+assert.match(commissionSource, /count=\{payoutRows\.length\}[\s\S]{0,160}page=\{currentFinanceMonthlyPage\}/, '财务员工月度报告必须显示统一分页');
+assert.match(commissionSource, /Table size="small" sx=\{\[moduleTableSx, \{ minWidth: 1240 \}\]\}/, '提成明细桌面表格必须复用系统统一样式');
+assert.match(commissionSource, /visibleMineCalculationDetailRows\.map/, '参与计算明细必须按页渲染');
+assert.match(commissionSource, /count=\{mineCalculationDetailRows\.length\}[\s\S]{0,160}page=\{currentMineCalculationDetailPage\}/, '参与计算明细必须显示统一分页');
 
 assert.match(serverSource, /\/api\/commission-payout-workspace/);
 assert.match(serverSource, /scope === 'records'/);

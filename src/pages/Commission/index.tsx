@@ -577,6 +577,10 @@ const Commission: React.FC<CommissionProps> = ({
   const [minePayoutCategory, setMinePayoutCategory] = useState<MinePayoutCategory>('all');
   const [mineDetailPage, setMineDetailPage] = useState(0);
   const [mineDetailPageSize, setMineDetailPageSize] = useState(10);
+  const [financeMonthlyPage, setFinanceMonthlyPage] = useState(0);
+  const [financeMonthlyPageSize, setFinanceMonthlyPageSize] = useState(10);
+  const [mineCalculationDetailPage, setMineCalculationDetailPage] = useState(0);
+  const [mineCalculationDetailPageSize, setMineCalculationDetailPageSize] = useState(10);
   const [mineDetailRow, setMineDetailRow] = useState<MineCommissionDisplayRow | null>(null);
   const [mineExporting, setMineExporting] = useState(false);
   const [financeReportOpen, setFinanceReportOpen] = useState(false);
@@ -652,6 +656,39 @@ const Commission: React.FC<CommissionProps> = ({
     || payoutRows[0]
     || null
   ), [payoutRows, selectedFinancePayoutOwnerKey]);
+  const financeMonthlyTotalPages = Math.max(1, Math.ceil(payoutRows.length / financeMonthlyPageSize));
+  const currentFinanceMonthlyPage = Math.min(financeMonthlyPage, financeMonthlyTotalPages - 1);
+  const visibleFinancePayoutRows = payoutRows.slice(
+    currentFinanceMonthlyPage * financeMonthlyPageSize,
+    (currentFinanceMonthlyPage + 1) * financeMonthlyPageSize,
+  );
+
+  useEffect(() => {
+    setFinanceMonthlyPage(0);
+  }, [payoutPeriod, payoutMode]);
+  useEffect(() => {
+    const firstVisibleRow = visibleFinancePayoutRows[0];
+    if (payoutMode !== 'finance') return;
+    if (!firstVisibleRow) {
+      if (selectedFinancePayoutOwnerKey) setSelectedFinancePayoutOwnerKey('');
+      return;
+    }
+    const selectedIsVisible = visibleFinancePayoutRows.some(
+      (row) => monthlyPayoutOwnerKey(row) === selectedFinancePayoutOwnerKey,
+    );
+    if (!selectedIsVisible) setSelectedFinancePayoutOwnerKey(monthlyPayoutOwnerKey(firstVisibleRow));
+  }, [currentFinanceMonthlyPage, financeMonthlyPageSize, payoutMode, payoutRows, selectedFinancePayoutOwnerKey]);
+  useEffect(() => {
+    setMineCalculationDetailPage(0);
+  }, [mineDetailRow?.id]);
+
+  const mineCalculationDetailRows = mineDetailRow?.commissions || [];
+  const mineCalculationDetailTotalPages = Math.max(1, Math.ceil(mineCalculationDetailRows.length / mineCalculationDetailPageSize));
+  const currentMineCalculationDetailPage = Math.min(mineCalculationDetailPage, mineCalculationDetailTotalPages - 1);
+  const visibleMineCalculationDetailRows = mineCalculationDetailRows.slice(
+    currentMineCalculationDetailPage * mineCalculationDetailPageSize,
+    (currentMineCalculationDetailPage + 1) * mineCalculationDetailPageSize,
+  );
 
   const findDepartment = (departmentId?: string) => departments.find((item) => item.id === departmentId);
   const getDepartmentName = (departmentId?: string) => findDepartment(departmentId)?.name || '';
@@ -2692,7 +2729,7 @@ const Commission: React.FC<CommissionProps> = ({
             ))}
           </Box>
           <TableContainer sx={{ display: { xs: 'none', md: 'block' }, borderTop: '1px solid #e5e7eb' }}>
-            <Table size="small" sx={{ minWidth: 1240 }}>
+            <Table size="small" sx={[moduleTableSx, { minWidth: 1240 }]}>
               <TableHead><TableRow>
                 <TableCell>提成类型</TableCell>
                 <TableCell>客户</TableCell>
@@ -3650,7 +3687,7 @@ const Commission: React.FC<CommissionProps> = ({
               <Typography variant="body2" color="text.secondary">先选择员工，再按“我的提成”相同口径核对阶梯、普通与售后挽回提成。</Typography>
             </Box>
             <Box sx={{ display: { xs: 'block', md: 'none' } }}>
-              {payoutRows.map((row) => {
+              {visibleFinancePayoutRows.map((row) => {
                 const ownerKey = monthlyPayoutOwnerKey(row);
                 const selected = monthlyPayoutOwnerKey(selectedFinancePayoutRow || row) === ownerKey;
                 return (
@@ -3674,14 +3711,14 @@ const Commission: React.FC<CommissionProps> = ({
               })}
             </Box>
             <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}>
-              <Table size="small" sx={{ minWidth: 980 }}>
+              <Table size="small" sx={[moduleTableSx, { minWidth: 980 }]}>
                 <TableHead><TableRow>
                   <TableCell>员工</TableCell><TableCell>部门</TableCell><TableCell align="right">订单数</TableCell>
                   <TableCell align="right">关联实付</TableCell><TableCell align="right">应发提成</TableCell>
                   <TableCell align="right">待发放</TableCell><TableCell align="center">状态</TableCell><TableCell align="center">操作</TableCell>
                 </TableRow></TableHead>
                 <TableBody>
-                  {payoutRows.map((row) => {
+                  {visibleFinancePayoutRows.map((row) => {
                     const ownerKey = monthlyPayoutOwnerKey(row);
                     const selected = monthlyPayoutOwnerKey(selectedFinancePayoutRow || row) === ownerKey;
                     return (
@@ -3701,6 +3738,21 @@ const Commission: React.FC<CommissionProps> = ({
                 </TableBody>
               </Table>
             </TableContainer>
+            <TablePagination
+              component="div"
+              count={payoutRows.length}
+              page={currentFinanceMonthlyPage}
+              rowsPerPage={financeMonthlyPageSize}
+              rowsPerPageOptions={[10, 20, 50]}
+              onPageChange={(_event, page) => setFinanceMonthlyPage(page)}
+              onRowsPerPageChange={(event) => {
+                setFinanceMonthlyPageSize(Number(event.target.value));
+                setFinanceMonthlyPage(0);
+              }}
+              labelRowsPerPage="每页条数"
+              labelDisplayedRows={formatPaginationRows}
+              sx={{ borderTop: '1px solid #e5e7eb', bgcolor: '#fff' }}
+            />
           </Paper>
           {selectedFinancePayoutRow && (
             <Stack spacing={1.5}>
@@ -3944,8 +3996,8 @@ const Commission: React.FC<CommissionProps> = ({
                   <Typography variant="subtitle1" fontWeight={900}>参与计算明细</Typography>
                   <Typography variant="caption" color="text.secondary">共 {mineDetailRow.commissions.length} 笔</Typography>
                 </Box>
-                <TableContainer>
-                  <Table size="small" sx={{ minWidth: 1000 }}>
+                <TableContainer sx={{ overflowX: 'auto' }}>
+                  <Table size="small" sx={[moduleTableSx, { minWidth: 1000 }]}>
                     <TableHead>
                       <TableRow>
                         <TableCell>客户</TableCell>
@@ -3959,7 +4011,7 @@ const Commission: React.FC<CommissionProps> = ({
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {mineDetailRow.commissions.map((commission) => (
+                      {visibleMineCalculationDetailRows.map((commission) => (
                         <TableRow key={commission.id} hover>
                           <TableCell><Typography variant="body2" fontWeight={800}>{commission.customerName || '未命名客户'}</Typography></TableCell>
                           <TableCell><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{commission.orderNo || '-'}</Typography></TableCell>
@@ -3988,6 +4040,21 @@ const Commission: React.FC<CommissionProps> = ({
                     </TableBody>
                   </Table>
                 </TableContainer>
+                <TablePagination
+                  component="div"
+                  count={mineCalculationDetailRows.length}
+                  page={currentMineCalculationDetailPage}
+                  rowsPerPage={mineCalculationDetailPageSize}
+                  rowsPerPageOptions={[10, 20, 50]}
+                  onPageChange={(_event, page) => setMineCalculationDetailPage(page)}
+                  onRowsPerPageChange={(event) => {
+                    setMineCalculationDetailPageSize(Number(event.target.value));
+                    setMineCalculationDetailPage(0);
+                  }}
+                  labelRowsPerPage="每页条数"
+                  labelDisplayedRows={formatPaginationRows}
+                  sx={{ borderTop: '1px solid #e5e7eb', bgcolor: '#fff' }}
+                />
               </Paper>
             </Stack>
           )}
