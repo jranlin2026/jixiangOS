@@ -132,6 +132,83 @@ assert.deepEqual(
   '正式订单历史撤回轮次不得重复出现在当前月报明细',
 );
 
+const legacyFormalRoundData = buildCommissionMonthlyReportData({
+  period: '2026-07', reason: '旧正式订单无轮次号核对', scope: 'all', includeWithdrawn: true,
+  generatedAt: '2026-07-31T10:00:00.000Z', actor: { id: 'finance-1', name: '财务甲' },
+  commissions: [
+    baseCommission({
+      id: 'legacy-formal-withdrawn', orderId: 'legacy-formal-order', orderNo: 'ORD-LEGACY-FORMAL',
+      settlementVersion: undefined, status: '已撤回', commissionAmount: 120, sourceType: '自动规则', ownerId: undefined,
+    }),
+    baseCommission({
+      id: 'legacy-formal-current', orderId: 'legacy-formal-order', orderNo: 'ORD-LEGACY-FORMAL',
+      settlementVersion: undefined, status: '待发放', commissionAmount: 120, sourceType: '人工新增',
+    }),
+  ],
+  payoutRecords: [], orders: [],
+});
+assert.deepEqual(
+  legacyFormalRoundData.sheets.find((sheet) => sheet.name === '逐笔提成明细')?.rows.map((row) => row.commissionId),
+  ['legacy-formal-current'],
+  '旧正式订单缺少轮次号时，当前月报也只能展示有效分账，撤回记录保留在操作历史',
+);
+assert.equal(legacyFormalRoundData.employeeRows[0]?.statusDistribution, '待发放1笔');
+assert.equal(legacyFormalRoundData.summary.withdrawnAmount, 0, '被当前分账替代的撤回历史不得进入当前月报汇总');
+
+const legacyAllWithdrawnData = buildCommissionMonthlyReportData({
+  period: '2026-07', reason: '旧正式订单全部撤回核对', scope: 'all', includeWithdrawn: true,
+  generatedAt: '2026-07-31T10:00:00.000Z', actor: { id: 'finance-1', name: '财务甲' },
+  commissions: [
+    baseCommission({
+      id: 'legacy-formal-withdrawn-old', orderId: 'legacy-all-withdrawn', orderNo: 'ORD-LEGACY-WITHDRAWN',
+      settlementVersion: undefined, status: '已撤回', commissionAmount: 120,
+      createdAt: '2026-07-20T02:00:00.000Z', updatedAt: '2026-07-20T03:00:00.000Z',
+    }),
+    baseCommission({
+      id: 'legacy-formal-withdrawn-latest', orderId: 'legacy-all-withdrawn', orderNo: 'ORD-LEGACY-WITHDRAWN',
+      settlementVersion: undefined, status: '已撤回', commissionAmount: 80,
+      createdAt: '2026-07-24T02:00:00.000Z', updatedAt: '2026-07-24T03:00:00.000Z',
+    }),
+    baseCommission({
+      id: 'legacy-formal-other-role', orderId: 'legacy-all-withdrawn', orderNo: 'ORD-LEGACY-WITHDRAWN',
+      settlementVersion: undefined, status: '已撤回', commissionAmount: 30,
+      role: '销售主管', owner: '经理B', ownerId: 'user-b',
+      createdAt: '2026-07-24T02:00:00.000Z', updatedAt: '2026-07-24T03:00:00.000Z',
+    }),
+  ],
+  payoutRecords: [], orders: [],
+});
+assert.deepEqual(
+  legacyAllWithdrawnData.sheets.find((sheet) => sheet.name === '逐笔提成明细')?.rows.map((row) => row.commissionId),
+  ['legacy-formal-withdrawn-latest', 'legacy-formal-other-role'],
+  '旧订单多次全部撤回时，同一角色员工只保留最后结果，不同角色的真实撤回仍保留',
+);
+assert.equal(legacyAllWithdrawnData.summary.withdrawnAmount, 110);
+
+const tiedLegacyWithdrawals = [
+  baseCommission({
+    id: 'legacy-tie-a', orderId: 'legacy-tie-order', orderNo: 'ORD-LEGACY-TIE',
+    settlementVersion: undefined, status: '已撤回', commissionAmount: 40,
+    createdAt: '2026-07-24T02:00:00.000Z', updatedAt: '2026-07-24T03:00:00.000Z',
+  }),
+  baseCommission({
+    id: 'legacy-tie-b', orderId: 'legacy-tie-order', orderNo: 'ORD-LEGACY-TIE',
+    settlementVersion: undefined, status: '已撤回', commissionAmount: 60,
+    createdAt: '2026-07-24T02:00:00.000Z', updatedAt: '2026-07-24T03:00:00.000Z',
+  }),
+];
+const tiedWithdrawalResult = (rows: Commission[]) => buildCommissionMonthlyReportData({
+  period: '2026-07', reason: '同时间撤回稳定性核对', scope: 'all', includeWithdrawn: true,
+  generatedAt: '2026-07-31T10:00:00.000Z', actor: { id: 'finance-1', name: '财务甲' },
+  commissions: rows, payoutRecords: [], orders: [],
+}).sheets.find((sheet) => sheet.name === '逐笔提成明细')?.rows.map((row) => row.commissionId);
+assert.deepEqual(tiedWithdrawalResult(tiedLegacyWithdrawals), ['legacy-tie-b']);
+assert.deepEqual(
+  tiedWithdrawalResult(tiedLegacyWithdrawals.slice().reverse()),
+  ['legacy-tie-b'],
+  '历史时间完全相同时，反转数据库返回顺序也必须得到同一条撤回记录',
+);
+
 const mixedStatusData = buildCommissionMonthlyReportData({
   period: '2026-07', reason: '混合状态核对', scope: 'all', includeWithdrawn: true,
   generatedAt: '2026-07-31T10:00:00.000Z', actor: { id: 'finance-1', name: '财务甲' },

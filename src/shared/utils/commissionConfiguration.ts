@@ -70,6 +70,37 @@ export function isCommissionPendingHandling(commission: Commission): boolean {
     || ((Number(commission.commissionAmount) || 0) === 0 && hasUnresolvedRuleText);
 }
 
+function isSameCommissionSplit(left: Commission, right: Commission): boolean {
+  if (left.role !== right.role) return false;
+  if (left.ownerId && right.ownerId) return left.ownerId === right.ownerId;
+  return String(left.owner || '').trim() === String(right.owner || '').trim();
+}
+
+function commissionHistoryTime(commission: Commission): number {
+  return Math.max(
+    Date.parse(commission.adjustedAt || '') || 0,
+    Date.parse(commission.updatedAt || '') || 0,
+    Date.parse(commission.createdAt || '') || 0,
+  );
+}
+
+function latestCommissionPerSplit(commissions: Commission[]): Commission[] {
+  return commissions.reduce<Commission[]>((selected, commission) => {
+    const existingIndex = selected.findIndex((item) => isSameCommissionSplit(item, commission));
+    if (existingIndex < 0) return [...selected, commission];
+    const existing = selected[existingIndex];
+    const candidateTime = commissionHistoryTime(commission);
+    const existingTime = commissionHistoryTime(existing);
+    if (
+      candidateTime > existingTime
+      || (candidateTime === existingTime && commission.id.localeCompare(existing.id) > 0)
+    ) {
+      selected[existingIndex] = commission;
+    }
+    return selected;
+  }, []);
+}
+
 /**
  * 售后挽回提成按业务实际发生的挽回成交时间归月。
  * 历史记录可能曾把分账创建时间写入 paymentDate，因此读取时以源挽回单快照纠正；
@@ -109,14 +140,22 @@ export function selectCurrentCommissionRounds(commissions: Commission[]): Commis
   const selectedIds = new Set<string>();
   businessGroups.forEach((rows) => {
     const latestVersion = Math.max(...rows.map((row) => Math.max(1, Number(row.settlementVersion || 1))));
-    const recovery = rows.some(isRecoveryCommission);
-    if (!recovery && latestVersion === 1) {
-      rows.forEach((row) => selectedIds.add(row.id));
-      return;
-    }
     const latest = rows.filter((row) => Math.max(1, Number(row.settlementVersion || 1)) === latestVersion);
     const active = latest.filter((row) => !INACTIVE_COMMISSION_STATUSES.has(row.status));
-    (active.length ? active : latest).forEach((row) => selectedIds.add(row.id));
+    if (!active.length) {
+      latestCommissionPerSplit(latest).forEach((row) => selectedIds.add(row.id));
+      return;
+    }
+    const retainedInactiveIds = new Set(latestCommissionPerSplit(latest.filter((row) => (
+      INACTIVE_COMMISSION_STATUSES.has(row.status)
+      && !active.some((activeRow) => isSameCommissionSplit(activeRow, row))
+    ))).map((row) => row.id));
+    latest
+      .filter((row) => (
+        !INACTIVE_COMMISSION_STATUSES.has(row.status)
+        || retainedInactiveIds.has(row.id)
+      ))
+      .forEach((row) => selectedIds.add(row.id));
   });
 
   return commissions.filter((commission) => selectedIds.has(commission.id));
