@@ -52,6 +52,7 @@ const PositionGovernance: React.FC = () => {
   const [historyRowsPerPage, setHistoryRowsPerPage] = useState(10);
   const [historyType, setHistoryType] = useState('');
   const [loading, setLoading] = useState(false);
+  const batchRequestId = useRef(0);
   const readinessRequestId = useRef(0);
   const reconciliationRequestId = useRef(0);
   const { alert, confirm, dialog } = useAppFeedback();
@@ -66,7 +67,9 @@ const PositionGovernance: React.FC = () => {
   useEffect(() => {
     const batchId = window.localStorage.getItem(LAST_GOVERNANCE_BATCH_KEY);
     if (!batchId) return;
+    const requestId = ++batchRequestId.current;
     positionGovernanceApi.getBatch(batchId).then((response) => {
+      if (requestId !== batchRequestId.current) return;
       if (response.code !== 0 || !response.data) return;
       setBatch(response.data);
       setSelections(Object.fromEntries(response.data.items
@@ -115,9 +118,11 @@ const PositionGovernance: React.FC = () => {
   }, [tab, historyPage, historyRowsPerPage, historyType]);
 
   const generatePreview = async () => {
+    const requestId = ++batchRequestId.current;
     reconciliationRequestId.current += 1;
     setLoading(true);
     const response = await positionGovernanceApi.createPreview({ departmentId: departmentId || undefined, search: search.trim() || undefined, employmentStatus: 'active' });
+    if (requestId !== batchRequestId.current) return;
     setLoading(false);
     if (response.code !== 0) {
       await alert(response.message || '生成岗位映射预览失败', '生成失败');
@@ -167,6 +172,9 @@ const PositionGovernance: React.FC = () => {
     }
     setBatch(response.data);
     window.localStorage.setItem(LAST_GOVERNANCE_BATCH_KEY, response.data.id);
+    setReconciliation(null);
+    setReconciliationPage(0);
+    await loadReconciliation(response.data.id, 0);
     await alert(`已完成 ${response.data.appliedCount} 名员工的岗位回填。`, '回填完成');
   };
 
