@@ -6,7 +6,12 @@ import { createPositionGovernanceService } from './positionGovernance';
 if (!process.env.DATABASE_URL) {
   console.log('position governance integration skipped: DATABASE_URL is not set');
 } else {
-  const databaseUrl = new URL(process.env.DATABASE_URL);
+  let databaseUrl: URL;
+  try {
+    databaseUrl = new URL(process.env.DATABASE_URL);
+  } catch {
+    throw new Error('position governance integration requires a valid DATABASE_URL');
+  }
   const databaseName = decodeURIComponent(databaseUrl.pathname.replace(/^\/+/, ''));
   if (!['127.0.0.1', 'localhost'].includes(databaseUrl.hostname)) {
     throw new Error('position governance integration requires a loopback MySQL host');
