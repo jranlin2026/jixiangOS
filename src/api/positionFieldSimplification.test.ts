@@ -46,33 +46,86 @@ const users = await settingsApi.fetchUsers();
 assert.equal(users.code, 0);
 const legacyUser = users.data.find((user) => user.id === 'user-legacy');
 assert.ok(legacyUser);
-assert.equal(legacyUser.positionId, undefined);
-assert.equal(legacyUser.positionName, undefined);
+assert.equal(legacyUser.positionId, 'pos-legacy');
+assert.equal(legacyUser.positionName, 'Legacy Position');
+
+const createdPosition = await settingsApi.createPosition({
+  name: 'Account Executive',
+  code: 'account_executive',
+  departmentId: 'dept-custom',
+  description: 'Owns customer conversion',
+  sortOrder: 3,
+  isActive: true,
+});
+assert.equal(createdPosition.code, 0);
+assert.equal(createdPosition.data?.name, 'Account Executive');
+
+const renamedPosition = await settingsApi.updatePosition(createdPosition.data!.id, {
+  name: 'Senior Account Executive',
+});
+assert.equal(renamedPosition.code, 0);
+assert.equal(renamedPosition.data?.name, 'Senior Account Executive');
+
+const mismatchedUser = await settingsApi.createUser({
+  name: 'Mismatched Position User',
+  account: 'mismatched_position_user',
+  email: 'mismatched_position_user@example.com',
+  phone: '13900001112',
+  role: 'Sales Consultant',
+  roleId: 'role-sales-consultant',
+  departmentId: 'dept-position-only',
+  positionId: 'pos-legacy',
+  isActive: true,
+  password: DEFAULT_USER_PASSWORD,
+});
+assert.notEqual(mismatchedUser.code, 0);
+assert.match(mismatchedUser.message || '', /不属于所选部门/);
 
 const createdUser = await settingsApi.createUser({
-  name: 'Manual Position User',
-  account: 'manual_position_user',
-  email: 'manual_position_user@example.com',
+  name: 'Canonical Position User',
+  account: 'canonical_position_user',
+  email: 'canonical_position_user@example.com',
   phone: '13900001111',
   role: 'Sales Consultant',
   roleId: 'role-sales-consultant',
   departmentId: 'dept-custom',
-  positionName: 'Hand Written Consultant',
+  positionId: 'pos-legacy',
   isActive: true,
   password: DEFAULT_USER_PASSWORD,
 });
 assert.equal(createdUser.code, 0);
-assert.equal(createdUser.data?.positionId, undefined);
-assert.equal(createdUser.data?.positionName, 'Hand Written Consultant');
+assert.equal(createdUser.data?.positionId, 'pos-legacy');
+assert.equal(createdUser.data?.positionName, 'Legacy Position');
 
-const updatedUser = await settingsApi.updateUser(createdUser.data!.id, { positionName: 'Senior Hand Written Consultant' });
+const movedBoundPosition = await settingsApi.updatePosition('pos-legacy', { departmentId: 'dept-position-only' });
+assert.notEqual(movedBoundPosition.code, 0);
+assert.match(movedBoundPosition.message || '', /已有员工使用/);
+
+const updatedUser = await settingsApi.updateUser(createdUser.data!.id, {
+  departmentId: 'dept-position-only',
+  positionId: 'pos-hidden-reference',
+});
 assert.equal(updatedUser.code, 0);
-assert.equal(updatedUser.data?.positionId, undefined);
-assert.equal(updatedUser.data?.positionName, 'Senior Hand Written Consultant');
+assert.equal(updatedUser.data?.positionId, 'pos-hidden-reference');
+assert.equal(updatedUser.data?.positionName, 'Hidden Reference');
 
 const storedUsers = JSON.parse(storage.getItem(STORAGE_KEYS.USERS) || '[]') as User[];
-assert.equal(storedUsers.find((user) => user.id === 'user-legacy')?.positionId, undefined);
-assert.equal(storedUsers.find((user) => user.id === createdUser.data!.id)?.positionName, 'Senior Hand Written Consultant');
+assert.equal(storedUsers.find((user) => user.id === 'user-legacy')?.positionId, 'pos-legacy');
+assert.equal(storedUsers.find((user) => user.id === createdUser.data!.id)?.positionName, 'Hidden Reference');
+
+const deleteBoundPosition = await settingsApi.deletePosition('pos-hidden-reference');
+assert.notEqual(deleteBoundPosition.code, 0);
+assert.match(deleteBoundPosition.message || '', /停用/);
+
+const deleteUnusedPosition = await settingsApi.deletePosition(createdPosition.data!.id);
+assert.equal(deleteUnusedPosition.code, 0);
+assert.equal(deleteUnusedPosition.data, true);
+
+const clearedPositionUser = await settingsApi.updateUser('user-legacy', { positionId: '' });
+assert.equal(clearedPositionUser.code, 0);
+assert.equal(clearedPositionUser.data?.positionId, undefined);
+assert.equal(clearedPositionUser.data?.positionName, undefined);
 
 const deleteDepartment = await departmentApi.deleteDepartment('dept-position-only');
-assert.equal(deleteDepartment.code, 0);
+assert.notEqual(deleteDepartment.code, 0);
+assert.match(deleteDepartment.message || '', /岗位/);

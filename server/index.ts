@@ -1564,6 +1564,21 @@ app.get('/api/settings/positions', requireOrganizationReadAccess, async (_req, r
   res.json(await settingsService.listPositions());
 });
 
+app.post('/api/settings/positions', requireOrganizationWriteAccess, async (req, res) => {
+  const result = await settingsService.createPosition(req.body || {});
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.put('/api/settings/positions/:id', requireOrganizationWriteAccess, async (req, res) => {
+  const result = await settingsService.updatePosition(routeParam(req.params.id), req.body || {});
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.delete('/api/settings/positions/:id', requireOrganizationDeleteAccess, async (req, res) => {
+  const result = await settingsService.deletePosition(routeParam(req.params.id));
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
 app.get('/api/ai/config', requireAiConfigReadAccess, async (_req, res) => {
   res.json(await aiConfigService.getPublicConfig());
 });

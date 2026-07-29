@@ -30,6 +30,9 @@ for (const [method, route] of [
   ['put', '/api/settings/departments/:id'],
   ['delete', '/api/settings/departments/:id'],
   ['get', '/api/settings/positions'],
+  ['post', '/api/settings/positions'],
+  ['put', '/api/settings/positions/:id'],
+  ['delete', '/api/settings/positions/:id'],
   ['get', '/api/ai/config'],
   ['put', '/api/ai/config'],
   ['post', '/api/ai/config/test'],
@@ -188,6 +191,9 @@ assert.match(source, /app\.post\('\/api\/settings\/departments', requireOrganiza
 assert.match(source, /app\.put\('\/api\/settings\/departments\/:id', requireOrganizationWriteAccess,/);
 assert.match(source, /app\.delete\('\/api\/settings\/departments\/:id', requireOrganizationDeleteAccess,/);
 assert.match(source, /app\.get\('\/api\/settings\/positions', requireOrganizationReadAccess,/);
+assert.match(source, /app\.post\('\/api\/settings\/positions', requireOrganizationWriteAccess,/);
+assert.match(source, /app\.put\('\/api\/settings\/positions\/:id', requireOrganizationWriteAccess,/);
+assert.match(source, /app\.delete\('\/api\/settings\/positions\/:id', requireOrganizationDeleteAccess,/);
 
 assert.match(source, /app\.get\('\/api\/ai\/config', requireAiConfigReadAccess,/);
 assert.match(source, /app\.put\('\/api\/ai\/config', requireAiConfigWriteAccess,/);

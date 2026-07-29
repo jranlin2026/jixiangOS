@@ -78,7 +78,7 @@ const AccountRecycleBin: React.FC = () => {
       setError('内置管理员账号不能删除');
       return;
     }
-    if (!await confirm(`确认永久删除账号 ${user.name} 吗？该操作不可恢复，但不会清除历史线索、客户、订单等业务记录。`, '永久删除账号')) return;
+    if (!await confirm(`确认永久删除账号 ${user.name} 吗？只有未被历史业务数据引用的账号才能删除，该操作不可恢复。`, '永久删除账号')) return;
     const res = await settingsApi.deleteUser(user.id);
     if (res.code !== 0) {
       await alert(res.message || '永久删除账号失败', '删除失败');
@@ -92,7 +92,7 @@ const AccountRecycleBin: React.FC = () => {
       <Box sx={{ mb: 2 }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>账号回收站</Typography>
         <Typography variant="body2" sx={{ color: '#64748b' }}>
-          离职账号不会从历史业务数据中消失，可在这里恢复或永久删除。
+          离职账号会保留岗位和历史业务关系；已被历数据引用的账号只能恢复，不能永久删除。
         </Typography>
       </Box>
 
@@ -172,4 +172,3 @@ const AccountRecycleBin: React.FC = () => {
 };
 
 export default AccountRecycleBin;
-

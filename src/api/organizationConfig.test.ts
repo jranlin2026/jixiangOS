@@ -40,9 +40,15 @@ assert.deepEqual(
 
 const existingUsers = await settingsApi.fetchUsers();
 assert.equal(existingUsers.code, 0);
+const positions = await settingsApi.fetchPositions();
+assert.equal(positions.code, 0);
 for (const user of existingUsers.data) {
   assert.ok(user.roleId, `user must carry roleId: ${user.name}`);
-  assert.equal(user.positionId, undefined, `user must not carry positionId: ${user.name}`);
+  if (user.positionId) {
+    const position = positions.data.find((item) => item.id === user.positionId);
+    assert.ok(position, `user position must resolve: ${user.name}`);
+    assert.equal(user.positionName, position.name, `user position name must be canonical: ${user.name}`);
+  }
 }
 
 const createdUser = await settingsApi.createUser({
@@ -51,15 +57,15 @@ const createdUser = await settingsApi.createUser({
   email: 'org_config_user@company.com',
   phone: '13900009999',
   departmentId: 'dept-sales',
-  positionName: '高级销售顾问',
+  positionId: 'pos-sales-consultant',
   role: '销售顾问',
   roleId: 'role-sales-consultant',
   isActive: true,
   password: DEFAULT_USER_PASSWORD,
 });
 assert.equal(createdUser.code, 0);
-assert.equal(createdUser.data?.positionId, undefined);
-assert.equal(createdUser.data?.positionName, '高级销售顾问');
+assert.equal(createdUser.data?.positionId, 'pos-sales-consultant');
+assert.equal(createdUser.data?.positionName, '销售顾问');
 assert.equal(createdUser.data?.role, '销售顾问');
 assert.equal(createdUser.data?.roleId, 'role-sales-consultant');
 
@@ -84,9 +90,9 @@ const migratedUsers = await settingsApi.fetchUsers();
 const legacyUser = migratedUsers.data.find((user) => user.id === 'user-legacy-sales');
 assert.equal(legacyUser?.role, '销售顾问');
 assert.equal(legacyUser?.roleId, 'role-sales-consultant');
-assert.equal(legacyUser?.positionId, undefined);
-assert.equal(legacyUser?.positionName, undefined);
-assert.equal(legacyUser?.departmentId, undefined);
+assert.equal(legacyUser?.positionId, 'pos-sales-consultant');
+assert.equal(legacyUser?.positionName, '销售顾问');
+assert.equal(legacyUser?.departmentId, 'dept-sales');
 
 const migratedRoles = await roleApi.getRoles({ isActive: true });
 const salesRole = migratedRoles.data.find((role) => role.code === 'sales_consultant');
@@ -96,4 +102,4 @@ const migratedDepartments = await departmentApi.getDepartments();
 assert.ok(migratedDepartments.data.some((department) => department.id === 'dept-custom' && department.name === '自定义部门'));
 
 assert.notEqual((await roleApi.deleteRole('role-sales-consultant')).code, 0);
-assert.equal((await departmentApi.deleteDepartment('dept-sales')).code, 0);
+assert.notEqual((await departmentApi.deleteDepartment('dept-sales')).code, 0);

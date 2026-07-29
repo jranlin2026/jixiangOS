@@ -18,7 +18,7 @@ import { normalizeUserRoleName } from './roles';
 import { getStorageData, setStorageData } from '../../api/mock/storage';
 
 const now = '2026-06-01T00:00:00.000Z';
-const ORGANIZATION_SCHEMA_VERSION = 9;
+const ORGANIZATION_SCHEMA_VERSION = 10;
 const NON_CUSTOMER_DATA_SCOPE_DOMAINS: NonCustomerDataScopeDomain[] = [
   'leads',
   'orders',
@@ -562,16 +562,29 @@ function sortPositions(positions: Position[]): Position[] {
 function migrateStoredUsersWithIdMaps(
   users: User[] | null | undefined,
   roles: Role[],
-  idMaps: { roles: Record<string, string> },
+  positions: Position[],
+  departments: Department[],
+  idMaps: {
+    roles: Record<string, string>;
+    positions: Record<string, string>;
+    departments: Record<string, string>;
+  },
 ): User[] | null {
   if (!users?.length) return null;
   return users.map((user) => {
     const roleId = user.roleId ? idMaps.roles[user.roleId] || user.roleId : user.roleId;
+    const positionId = user.positionId ? idMaps.positions[user.positionId] || user.positionId : user.positionId;
+    const departmentId = user.departmentId ? idMaps.departments[user.departmentId] || user.departmentId : user.departmentId;
     const role = resolveRoleForUser({ role: user.role, roleId }, roles);
+    const position = positions.find((item) => item.id === positionId);
+    const department = departments.find((item) => item.id === departmentId);
     return {
       ...user,
       role: role?.name || normalizeUserRoleName(user.role),
       roleId: role?.id || roleId,
+      positionId: position?.id,
+      positionName: position?.name || user.positionName,
+      departmentId: department?.id,
       employmentStatus: user.employmentStatus || 'active',
     };
   });
@@ -695,7 +708,17 @@ export function ensureOrganizationConfigData() {
     departmentId: role.departmentId ? departmentResult.idMap[role.departmentId] || role.departmentId : role.departmentId,
   }));
   const migratedUsers = storedVersion < ORGANIZATION_SCHEMA_VERSION
-    ? migrateStoredUsersWithIdMaps(getStorageData<User[]>(STORAGE_KEYS.USERS), roles, { roles: rolesResult.idMap })
+    ? migrateStoredUsersWithIdMaps(
+      getStorageData<User[]>(STORAGE_KEYS.USERS),
+      roles,
+      positions,
+      departments,
+      {
+        roles: rolesResult.idMap,
+        positions: positionResult.idMap,
+        departments: departmentResult.idMap,
+      },
+    )
     : null;
 
   // This helper runs during ordinary page reads (for example, the sidebar).
@@ -726,22 +749,24 @@ export function resolveRoleForUser(user: Pick<User, 'role' | 'roleId'>, roles = 
 }
 
 export function migrateUsersWithOrganization(users: User[]): User[] {
-  const { departments, roles, idMaps } = ensureOrganizationConfigData();
+  const { departments, positions, roles, idMaps } = ensureOrganizationConfigData();
   return users.map((user) => {
     const normalizedRole = normalizeUserRoleName(user.role);
     const roleId = user.roleId ? idMaps.roles[user.roleId] || user.roleId : user.roleId;
     const departmentId = user.departmentId ? idMaps.departments[user.departmentId] || user.departmentId : user.departmentId;
+    const positionId = user.positionId ? idMaps.positions[user.positionId] || user.positionId : user.positionId;
     const role = resolveRoleForUser({ role: normalizedRole, roleId }, roles);
+    const position = positions.find((item) => item.id === positionId);
     const hasValidDepartment = Boolean(departmentId && departments.some((department) => department.id === departmentId));
-    const positionName = user.positionId
-      ? undefined
-      : (typeof user.positionName === 'string' ? user.positionName.trim() || undefined : user.positionName);
+    const legacyPositionName = typeof user.positionName === 'string'
+      ? user.positionName.trim() || undefined
+      : user.positionName;
     return {
       ...user,
       role: role?.name || normalizedRole,
       roleId: role?.id || user.roleId,
-      positionId: undefined,
-      positionName,
+      positionId: position?.id,
+      positionName: position?.name || legacyPositionName,
       departmentId: hasValidDepartment ? departmentId : undefined,
       employmentStatus: user.employmentStatus || 'active',
     };

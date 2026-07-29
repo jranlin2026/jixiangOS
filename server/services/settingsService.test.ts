@@ -104,6 +104,20 @@ const departments: any[] = [
   },
 ];
 
+const positions: any[] = [
+  {
+    id: 'pos-sales-consultant',
+    name: 'Sales Consultant',
+    code: 'sales_consultant',
+    departmentId: 'dept-sales',
+    description: null,
+    sortOrder: 1,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+];
+
 const roles: any[] = [
   {
     id: 'role-super-admin',
@@ -187,10 +201,10 @@ const prisma = {
   user: createModel(users),
   role: createModel(roles),
   department: createModel(departments),
-  position: { findMany: async () => [] },
+  position: createModel(positions),
   authSession: { deleteMany: async () => ({ count: 1 }) },
   businessRecord: {
-    findMany: async ({ where }: any) => (where.domain === 'aaos_customers' ? [customerRecord] : []),
+    findMany: async (args?: any) => (!args?.where?.domain || args.where.domain === 'aaos_customers' ? [customerRecord] : []),
     update: async ({ data }: any) => {
       customerRecord = { ...customerRecord, ...data };
       return customerRecord;
@@ -208,6 +222,21 @@ const prisma = {
 
 const service = createSettingsService(prisma);
 
+const mismatchedPositionUser = await service.createUser({
+  name: 'Mismatched Position User',
+  account: 'mismatched_position_user',
+  email: 'mismatched_position_user@company.com',
+  phone: '13000000009',
+  role: 'Sales',
+  roleId: 'role-sales',
+  departmentId: 'dept-general',
+  positionId: 'pos-sales-consultant',
+  isActive: true,
+  password: 'Secret123',
+} as any);
+assert.notEqual(mismatchedPositionUser.code, 0);
+assert.match(mismatchedPositionUser.message || '', /不属于所选部门/);
+
 const createdUser = await service.createUser({
   name: 'Created User',
   account: 'created_user',
@@ -216,7 +245,7 @@ const createdUser = await service.createUser({
   role: 'Sales',
   roleId: 'role-sales',
   departmentId: 'dept-sales',
-  positionName: 'Sales',
+  positionId: 'pos-sales-consultant',
   isActive: true,
   password: 'Secret123',
 } as any);
@@ -226,6 +255,8 @@ assert.equal(createdUserData.account, 'created_user');
 const persistedCreatedUser = users.find((item) => item.id === createdUserData.id)!;
 assert.ok(persistedCreatedUser.passwordHash);
 assert.ok(persistedCreatedUser.passwordSalt);
+assert.equal(persistedCreatedUser.positionId, 'pos-sales-consultant');
+assert.equal(persistedCreatedUser.positionName, 'Sales Consultant');
 assert.equal('passwordHash' in createdUserData, false);
 assert.equal('passwordSalt' in createdUserData, false);
 assert.equal('passwordUpdatedAt' in createdUserData, false);
@@ -369,6 +400,10 @@ assert.equal(leadRecords[0].assignedTo, 'Receiver User');
 assert.equal(leadRecords[0].data.owner, 'Receiver User');
 assert.match(leadRecords[0].data.changeHistory[0].summary, /lead handoff/);
 
+const referencedUserDelete = await service.deleteUser('user-sales');
+assert.notEqual(referencedUserDelete.code, 0);
+assert.match(referencedUserDelete.message || '', /历史业务数据/);
+
 await service.restoreUser('user-sales');
 leadRecords = [];
 
@@ -398,6 +433,41 @@ assert.equal(updatedDepartmentData.sortOrder, 4);
 const deletedDepartment = await service.deleteDepartment(createdDepartmentData.id);
 assert.equal(deletedDepartment.code, 0);
 assert.equal(departments.some((department) => department.id === createdDepartmentData.id), false);
+
+const createdPosition = await service.createPosition({
+  name: 'Sales Manager',
+  code: 'sales_manager',
+  departmentId: 'dept-sales',
+  description: 'Owns the sales team standard',
+  sortOrder: 2,
+  isActive: true,
+});
+assert.equal(createdPosition.code, 0);
+const createdPositionData = createdPosition.data as any;
+assert.equal(createdPositionData.name, 'Sales Manager');
+assert.equal(createdPositionData.departmentId, 'dept-sales');
+assert.ok(positions.some((position) => position.id === createdPositionData.id));
+
+const boundSalesUser = await service.updateUser('user-sales', { positionId: 'pos-sales-consultant' });
+assert.equal(boundSalesUser.code, 0);
+assert.equal((boundSalesUser.data as any).positionName, 'Sales Consultant');
+
+const movedBoundPosition = await service.updatePosition('pos-sales-consultant', { departmentId: 'dept-general' });
+assert.notEqual(movedBoundPosition.code, 0);
+assert.match(movedBoundPosition.message || '', /已有员工使用/);
+
+const updatedPosition = await service.updatePosition('pos-sales-consultant', { name: 'Senior Sales Consultant' });
+assert.equal(updatedPosition.code, 0);
+assert.equal((updatedPosition.data as any).name, 'Senior Sales Consultant');
+assert.equal(users.find((user) => user.id === 'user-sales')?.positionName, 'Senior Sales Consultant');
+
+const boundPositionDelete = await service.deletePosition('pos-sales-consultant');
+assert.notEqual(boundPositionDelete.code, 0);
+assert.match(boundPositionDelete.message || '', /员工使用/);
+
+const unusedPositionDelete = await service.deletePosition(createdPositionData.id);
+assert.equal(unusedPositionDelete.code, 0);
+assert.equal(positions.some((position) => position.id === createdPositionData.id), false);
 
 const createdRole = await service.createRole({
   name: 'Backend Role',

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { PrismaClient } from '@prisma/client';
+import type { Position, PrismaClient } from '@prisma/client';
 import { failure, success } from '../api/response';
 import {
   mapPrismaDepartment,
@@ -42,6 +42,14 @@ function nullableText(value: unknown): string | null {
   return text || null;
 }
 
+function containsHistoricalUserReference(value: unknown, userId: string, userName: string): boolean {
+  if (typeof value === 'string') return value === userId || value === userName;
+  if (Array.isArray(value)) return value.some((item) => containsHistoricalUserReference(item, userId, userName));
+  if (!value || typeof value !== 'object') return false;
+  return Object.values(value as Record<string, unknown>)
+    .some((item) => containsHistoricalUserReference(item, userId, userName));
+}
+
 function isNormalizedRoleNameConflict(error: unknown): boolean {
   const record = asRecord(error);
   if (record.code !== 'P2002') return false;
@@ -50,6 +58,15 @@ function isNormalizedRoleNameConflict(error: unknown): boolean {
 }
 
 export function createSettingsService(prisma: SettingsPrisma) {
+  const resolveActivePosition = async (value: unknown): Promise<ReturnType<typeof success<Position | null>>> => {
+    const positionId = nullableText(value);
+    if (!positionId) return success(null);
+    const position = await prisma.position.findUnique({ where: { id: positionId } });
+    if (!position) return failure('岗位不存在，请刷新岗位列表后重试');
+    if (!position.isActive) return failure('该岗位已停用，请选择其他岗位');
+    return success(position);
+  };
+
   const customerOwners = (row: { owner?: string | null; data: unknown }): string[] => {
     const owners = [
       nullableText(row.owner),
@@ -232,6 +249,86 @@ export function createSettingsService(prisma: SettingsPrisma) {
       return success(rows.map(mapPrismaPosition));
     },
 
+    async createPosition(data: Record<string, any>) {
+      const name = String(data.name || '').trim();
+      const code = String(data.code || name || compactId('position')).trim();
+      if (!name) return failure('岗位名称不能为空');
+      const positions = await prisma.position.findMany();
+      if (positions.some((position) => position.code.toLowerCase() === code.toLowerCase())) {
+        return failure('岗位编码已存在');
+      }
+      if (data.departmentId) {
+        const department = await prisma.department.findUnique({ where: { id: data.departmentId } });
+        if (!department || !department.isActive) return failure('所属部门不存在或已停用');
+      }
+      const row = await prisma.position.create({
+        data: {
+          id: compactId('position'),
+          name,
+          code,
+          departmentId: data.departmentId || null,
+          description: data.description || null,
+          sortOrder: Number(data.sortOrder || positions.length + 1),
+          isActive: data.isActive ?? true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+      return success(mapPrismaPosition(row));
+    },
+
+    async updatePosition(id: string, data: Record<string, any>) {
+      const position = await prisma.position.findUnique({ where: { id } });
+      if (!position) return success(null);
+      const name = data.name !== undefined ? String(data.name).trim() : position.name;
+      const code = data.code !== undefined ? String(data.code).trim() : position.code;
+      if (!name) return failure('岗位名称不能为空');
+      if (!code) return failure('岗位编码不能为空');
+      const positions = await prisma.position.findMany();
+      if (positions.some((item) => item.id !== id && item.code.toLowerCase() === code.toLowerCase())) {
+        return failure('岗位编码已存在');
+      }
+      if (data.departmentId) {
+        const department = await prisma.department.findUnique({ where: { id: data.departmentId } });
+        if (!department || !department.isActive) return failure('所属部门不存在或已停用');
+      }
+      const nextDepartmentId = data.departmentId !== undefined ? nullableText(data.departmentId) : position.departmentId;
+      const boundUsers = (await prisma.user.findMany()).filter((user) => user.positionId === id);
+      if (nextDepartmentId !== position.departmentId && boundUsers.some((user) => user.departmentId !== nextDepartmentId)) {
+        return failure('已有员工使用该岗位，请先调整员工部门或岗位');
+      }
+      const row = await prisma.position.update({
+        where: { id },
+        data: {
+          name,
+          code,
+          departmentId: data.departmentId !== undefined ? data.departmentId || null : undefined,
+          description: data.description !== undefined ? data.description || null : undefined,
+          sortOrder: data.sortOrder !== undefined ? Number(data.sortOrder) : undefined,
+          isActive: data.isActive,
+          updatedAt: new Date(),
+        },
+      });
+      if (name !== position.name) {
+        await Promise.all(boundUsers.map((user) => prisma.user.update({
+          where: { id: user.id },
+          data: { positionName: name, updatedAt: new Date() },
+        })));
+      }
+      return success(mapPrismaPosition(row));
+    },
+
+    async deletePosition(id: string) {
+      const position = await prisma.position.findUnique({ where: { id } });
+      if (!position) return success(false);
+      const users = await prisma.user.findMany();
+      if (users.some((user) => user.positionId === id)) {
+        return failure('已有员工使用该岗位，不能删除，请改为停用');
+      }
+      await prisma.position.deleteMany({ where: { id } });
+      return success(true);
+    },
+
     async countLeaveOwnedCustomers(userIds: string[]) {
       const targetIds = new Set((Array.isArray(userIds) ? userIds : []).map((id) => String(id || '').trim()).filter(Boolean));
       if (!targetIds.size) return success(0);
@@ -254,6 +351,12 @@ export function createSettingsService(prisma: SettingsPrisma) {
       if (!account) return failure('账号不能为空');
       const existing = await prisma.user.findMany();
       if (existing.some((user) => normalizeAccount(user.account || undefined) === account)) return failure('账号已存在');
+      const positionResult = await resolveActivePosition(data.positionId);
+      if (positionResult.code !== 0) return failure(positionResult.message || '岗位不可用');
+      const selectedPosition = positionResult.data;
+      if (selectedPosition?.departmentId && selectedPosition.departmentId !== nullableText(data.departmentId)) {
+        return failure('该岗位不属于所选部门');
+      }
       const now = new Date();
       const id = compactId('user');
       const password = String(data.password || getDefaultUserPassword());
@@ -268,8 +371,8 @@ export function createSettingsService(prisma: SettingsPrisma) {
           role: String(data.role || ''),
           avatar: data.avatar || null,
           departmentId: data.departmentId || null,
-          positionId: data.positionId || null,
-          positionName: data.positionName || null,
+          positionId: selectedPosition?.id || null,
+          positionName: selectedPosition?.name || data.positionName || null,
           roleId: data.roleId || null,
           passwordHash: hashPassword(password, passwordSalt),
           passwordSalt,
@@ -293,6 +396,17 @@ export function createSettingsService(prisma: SettingsPrisma) {
       if (!nextAccount) return failure('账号不能为空');
       const existing = await prisma.user.findMany();
       if (existing.some((item) => item.id !== id && normalizeAccount(item.account || undefined) === nextAccount)) return failure('账号已存在');
+      const positionResult = data.positionId !== undefined
+        ? await resolveActivePosition(data.positionId)
+        : success(null);
+      if (positionResult.code !== 0) return failure(positionResult.message || '岗位不可用');
+      const selectedPosition = data.positionId !== undefined
+        ? positionResult.data
+        : user.positionId ? await prisma.position.findUnique({ where: { id: user.positionId } }) : null;
+      const nextDepartmentId = data.departmentId !== undefined ? nullableText(data.departmentId) : user.departmentId;
+      if (selectedPosition?.departmentId && selectedPosition.departmentId !== nextDepartmentId) {
+        return failure('该岗位不属于所选部门');
+      }
       const row = await prisma.user.update({
         where: { id },
         data: {
@@ -303,8 +417,12 @@ export function createSettingsService(prisma: SettingsPrisma) {
           role: data.role !== undefined ? String(data.role) : undefined,
           avatar: data.avatar !== undefined ? data.avatar || null : undefined,
           departmentId: data.departmentId !== undefined ? data.departmentId || null : undefined,
-          positionId: data.positionId !== undefined ? data.positionId || null : undefined,
-          positionName: data.positionName !== undefined ? data.positionName || null : undefined,
+          positionId: data.positionId !== undefined ? selectedPosition?.id || null : undefined,
+          positionName: data.positionId !== undefined
+            ? selectedPosition?.name || null
+            : user.positionId
+              ? undefined
+              : data.positionName !== undefined ? data.positionName || null : undefined,
           roleId: data.roleId !== undefined ? data.roleId || null : undefined,
           isActive: data.isActive,
           employmentStatus: data.employmentStatus,
@@ -357,6 +475,19 @@ export function createSettingsService(prisma: SettingsPrisma) {
       if (!user) return success(false);
       if (isAdminAccount(user.account)) return failure('内置管理员账号不能删除');
       if ((user.employmentStatus || 'active') !== 'left') return failure('请先办理离职，再到账号回收站永久删除');
+      const [businessRows, leadRows] = await Promise.all([
+        prisma.businessRecord.findMany(),
+        prisma.leadRecord.findMany(),
+      ]);
+      const hasBusinessHistory = businessRows.some((row) => (
+        containsHistoricalUserReference(row.owner, user.id, user.name)
+        || containsHistoricalUserReference(row.data, user.id, user.name)
+      )) || leadRows.some((row) => (
+        containsHistoricalUserReference(row.owner, user.id, user.name)
+        || containsHistoricalUserReference(row.assignedTo, user.id, user.name)
+        || containsHistoricalUserReference(row.data, user.id, user.name)
+      ));
+      if (hasBusinessHistory) return failure('该员工已被历史业务数据引用，不能永久删除，请保留在账号回收站');
       await prisma.authSession.deleteMany({ where: { userId: id } });
       await prisma.user.deleteMany({ where: { id } });
       return success(true);
@@ -406,8 +537,11 @@ export function createSettingsService(prisma: SettingsPrisma) {
       const departments = await prisma.department.findMany();
       const users = await prisma.user.findMany();
       const roles = await prisma.role.findMany();
+      const positions = await prisma.position.findMany();
       const hasChildren = departments.some((department: any) => department.parentId === id);
       const hasUsers = users.some((user) => user.departmentId === id && (user.employmentStatus || 'active') !== 'left');
+      const hasPositions = positions.some((position) => position.departmentId === id);
+      if (hasPositions) return failure('该部门已有岗位引用，不能删除，请先调整岗位或改为停用');
       if (hasChildren || hasUsers) return failure('该部门已有员工或子部门引用，不能删除，请改为停用');
       await Promise.all(roles.filter((role) => role.departmentId === id).map((role) => (
         prisma.role.update({ where: { id: role.id }, data: { departmentId: null, updatedAt: new Date() } })

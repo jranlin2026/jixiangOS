@@ -43,6 +43,7 @@ import useDepartmentStore from '../../store/useDepartmentStore';
 import { departmentApi, roleApi, settingsApi } from '../../api';
 import type { Department } from '../../types/department';
 import type { Role } from '../../types/role';
+import type { Position } from '../../types/position';
 import type { OrganizationProfile, User, UserRole } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
@@ -60,7 +61,7 @@ type UserForm = {
   email: string;
   phone: string;
   role: UserRole;
-  positionName: string;
+  positionId: string;
   departmentId: string;
   isActive: boolean;
   password: string;
@@ -79,7 +80,7 @@ const emptyUserForm: UserForm = {
   email: '',
   phone: '',
   role: DEFAULT_USER_ROLE,
-  positionName: '',
+  positionId: '',
   departmentId: '',
   isActive: true,
   password: '',
@@ -112,6 +113,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const [companyExpanded, setCompanyExpanded] = useState(true);
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState(COMPANY_ROOT);
   const [search, setSearch] = useState('');
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
@@ -144,6 +146,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
     fetchItems();
     loadUsers();
     loadRoles();
+    loadPositions();
     loadOrganizationProfile();
   }, [fetchItems]);
 
@@ -155,6 +158,11 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const loadRoles = async () => {
     const res = await roleApi.getRoles({ isActive: true });
     if (res.code === 0) setRoles(res.data.filter((role) => role.isActive));
+  };
+
+  const loadPositions = async () => {
+    const res = await settingsApi.fetchPositions();
+    if (res.code === 0) setPositions(res.data);
   };
 
   const loadOrganizationProfile = async () => {
@@ -169,6 +177,10 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const departmentByParent = useMemo(() => buildDepartmentTree(activeDepartments), [activeDepartments]);
   const selectedDepartment = activeDepartments.find((department) => department.id === selectedNodeId) || null;
   const roleOptions = roles.length ? roles : [{ id: 'fallback-role', name: DEFAULT_USER_ROLE }] as Role[];
+  const availablePositions = positions.filter((position) => (
+    (position.isActive || position.id === userForm.positionId)
+    && (!userForm.departmentId || !position.departmentId || position.departmentId === userForm.departmentId)
+  ));
   const selectedScopeIds = useMemo(() => (
     selectedDepartment
       ? [selectedDepartment.id, ...getDepartmentDescendantIds(activeDepartments, selectedDepartment.id)]
@@ -235,7 +247,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
   ));
 
   const resolveRoleId = (roleName: string) => roles.find((role) => role.name === roleName)?.id || '';
-  const getPositionName = (user: User) => user.positionName || '-';
+  const getPositionName = (user: User) => positions.find((position) => position.id === user.positionId)?.name || user.positionName || '-';
   const getDepartmentName = (departmentId?: string) => activeDepartments.find((department) => department.id === departmentId)?.name || '-';
   const clearSelection = () => setSelectedUserIds([]);
 
@@ -293,7 +305,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
       email: user.email || '',
       phone: user.phone || '',
       role: normalizeUserRoleName(user.role),
-      positionName: user.positionName || '',
+      positionId: user.positionId || '',
       departmentId: user.departmentId || '',
       isActive: user.isActive,
       password: '',
@@ -318,7 +330,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
       phone: userForm.phone.trim(),
       role: userForm.role,
       roleId: resolveRoleId(userForm.role),
-      positionName: userForm.positionName.trim() || undefined,
+      positionId: userForm.positionId,
       departmentId: userForm.departmentId || undefined,
       isActive: userForm.isActive,
       password: userForm.password,
@@ -513,9 +525,11 @@ const EmployeeDepartmentManagement: React.FC = () => {
   };
 
   const handleDepartmentChange = (departmentId: string) => {
+    const selectedPosition = positions.find((position) => position.id === userForm.positionId);
     setUserForm({
       ...userForm,
       departmentId,
+      positionId: selectedPosition?.departmentId && selectedPosition.departmentId !== departmentId ? '' : userForm.positionId,
     });
   };
 
@@ -972,7 +986,19 @@ const EmployeeDepartmentManagement: React.FC = () => {
               <MenuItem value="">未分配</MenuItem>
               {activeDepartments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
             </TextField>
-            <TextField label="职位" value={userForm.positionName} onChange={(event) => setUserForm({ ...userForm, positionName: event.target.value })} fullWidth />
+            <TextField
+              select
+              label="岗位"
+              value={userForm.positionId}
+              onChange={(event) => setUserForm({ ...userForm, positionId: event.target.value })}
+              helperText={userForm.departmentId ? '只显示当前部门可用岗位' : '请先选择部门'}
+              fullWidth
+            >
+              <MenuItem value="">未指定</MenuItem>
+              {availablePositions.map((position) => (
+                <MenuItem key={position.id} value={position.id}>{position.name}</MenuItem>
+              ))}
+            </TextField>
             <TextField select label="角色权限" value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value as UserRole })} fullWidth>
               {roleOptions.map((role) => <MenuItem key={role.id} value={role.name}>{role.name}</MenuItem>)}
             </TextField>
