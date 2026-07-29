@@ -54,7 +54,8 @@ assert.equal(initialDepartments.code, 0);
 assert.equal(initialDepartments.data.some((item) => item.id === 'dept-delivery'), true);
 
 const deleteDefaultDepartment = await departmentApi.deleteDepartment('dept-delivery');
-assert.equal(deleteDefaultDepartment.code, 0);
+assert.notEqual(deleteDefaultDepartment.code, 0);
+assert.match(deleteDefaultDepartment.message || '', /岗位/);
 
 const departmentsAfterDefaultDelete = await departmentApi.getDepartments();
-assert.equal(departmentsAfterDefaultDelete.data.some((item) => item.id === 'dept-delivery'), false);
+assert.equal(departmentsAfterDefaultDelete.data.some((item) => item.id === 'dept-delivery'), true);
