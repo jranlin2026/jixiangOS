@@ -461,6 +461,80 @@ export function createPositionGovernanceService(prisma: any) {
       return this.getBatch(batchId);
     },
 
+    async getReconciliation(batchId: string, filters: { page?: number; pageSize?: number } = {}) {
+      const batch = await prisma.positionMappingBatch.findUnique({ where: { id: batchId }, include: { items: true } });
+      if (!batch) return failure('岗位映射批次不存在');
+      const employeeIds = batch.items.map((item: any) => item.employeeId);
+      const [users, positions, historyCount] = await Promise.all([
+        prisma.user.findMany({
+          where: { id: { in: employeeIds } },
+          select: { id: true, name: true, departmentId: true, employmentStatus: true, positionId: true, positionName: true },
+        }),
+        prisma.position.findMany({ select: { id: true, name: true, departmentId: true, isActive: true } }),
+        prisma.employeePositionHistory.count({
+          where: { idempotencyKey: { in: employeeIds.map((employeeId: string) => `position-mapping:${batchId}:${employeeId}`) } },
+        }),
+      ]);
+      const usersById = new Map<string, any>(users.map((user: any) => [user.id, user]));
+      const positionsById = new Map<string, any>(positions.map((position: any) => [position.id, position]));
+      const unresolved = batch.items.flatMap((item: any) => {
+        const user: any = usersById.get(item.employeeId);
+        const position: any = user?.positionId ? positionsById.get(user.positionId) : undefined;
+        const bindingValid = Boolean(
+          user
+          && (user.employmentStatus || 'active') === 'active'
+          && position?.isActive
+          && (!position.departmentId || position.departmentId === user.departmentId)
+          && item.applyStatus === 'APPLIED'
+          && item.confirmedPositionId === user.positionId,
+        );
+        if (bindingValid) return [];
+        let reason = '映射批次尚未完成回填';
+        if (!user) reason = '员工记录不存在';
+        else if ((user.employmentStatus || 'active') !== 'active') reason = '员工已非在职状态';
+        else if (!user.positionId) reason = '员工尚未绑定正式岗位';
+        else if (!position || !position.isActive) reason = '员工绑定的正式岗位不可用';
+        else if (position.departmentId && position.departmentId !== user.departmentId) reason = '员工岗位与所属部门不一致';
+        else if (item.confirmedPositionId !== user.positionId) reason = '当前岗位与本批次人工确认结果不一致';
+        return [{
+          employeeId: item.employeeId,
+          employeeName: user?.name || item.employeeName,
+          departmentId: user?.departmentId || item.originalDepartmentId || undefined,
+          originalPositionName: item.originalPositionName || '',
+          currentPositionId: user?.positionId || undefined,
+          currentPositionName: user?.positionName || position?.name || undefined,
+          applyStatus: item.applyStatus,
+          reason,
+        }];
+      });
+      const coveredCount = batch.items.length - unresolved.length;
+      const totalCount = batch.items.length;
+      const page = Math.max(1, Number(filters.page) || 1);
+      const pageSize = Math.min(100, Math.max(1, Number(filters.pageSize) || 10));
+      const originalDepartments = new Set(batch.items.map((item: any) => item.originalDepartmentId).filter(Boolean));
+      const currentDepartments = new Set(users.map((user: any) => user.departmentId).filter(Boolean));
+      return success({
+        batchId,
+        batchStatus: batch.status,
+        summary: {
+          totalCount,
+          existingEmployeeCount: users.length,
+          activeEmployeeCount: users.filter((user: any) => (user.employmentStatus || 'active') === 'active').length,
+          coveredCount,
+          unresolvedCount: unresolved.length,
+          historyCount,
+          departmentCountBefore: originalDepartments.size,
+          departmentCountAfter: currentDepartments.size,
+          coverageRate: totalCount ? Number(((coveredCount / totalCount) * 100).toFixed(2)) : 100,
+          passed: totalCount > 0 && coveredCount === totalCount && historyCount === totalCount,
+        },
+        items: unresolved.slice((page - 1) * pageSize, page * pageSize),
+        total: unresolved.length,
+        page,
+        pageSize,
+      });
+    },
+
     async listHistory(filters: { employeeId?: string; changeType?: string; page?: number; pageSize?: number }) {
       const page = Math.max(Number(filters.page || 1), 1);
       const pageSize = Math.min(Math.max(Number(filters.pageSize || 10), 1), 100);

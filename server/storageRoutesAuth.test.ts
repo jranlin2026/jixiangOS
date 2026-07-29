@@ -36,6 +36,7 @@ for (const [method, route] of [
   ['get', '/api/settings/position-governance/readiness'],
   ['post', '/api/settings/position-governance/previews'],
   ['get', '/api/settings/position-governance/batches/:id'],
+  ['get', '/api/settings/position-governance/batches/:id/reconciliation'],
   ['post', '/api/settings/position-governance/batches/:id/apply'],
   ['get', '/api/settings/position-history'],
   ['get', '/api/ai/config'],
@@ -202,6 +203,7 @@ assert.match(source, /app\.delete\('\/api\/settings\/positions\/:id', requireOrg
 assert.match(source, /app\.get\('\/api\/settings\/position-governance\/readiness', requireOrganizationReadAccess,/);
 assert.match(source, /app\.post\('\/api\/settings\/position-governance\/previews', requireOrganizationWriteAccess,/);
 assert.match(source, /app\.get\('\/api\/settings\/position-governance\/batches\/:id', requireOrganizationReadAccess,/);
+assert.match(source, /app\.get\('\/api\/settings\/position-governance\/batches\/:id\/reconciliation', requireOrganizationReadAccess,/);
 assert.match(source, /app\.post\('\/api\/settings\/position-governance\/batches\/:id\/apply', requireOrganizationWriteAccess,/);
 assert.match(source, /app\.get\('\/api\/settings\/position-history', requireOrganizationReadAccess,/);
 

@@ -32,6 +32,8 @@ if (!process.env.DATABASE_URL) {
     `qa-preview-consultant-${runId}`,
     `qa-preview-manager-a-${runId}`,
     `qa-preview-manager-b-${runId}`,
+    `qa-preview-service-${runId}`,
+    `qa-preview-assistant-${runId}`,
   ];
   const userIds = [
     `qa-preview-unique-${runId}`,
@@ -49,6 +51,8 @@ if (!process.env.DATABASE_URL) {
       { id: positionIds[0], name: consultantName, code: `qa_consultant_${runId}`, departmentId: departmentIds[0] },
       { id: positionIds[1], name: managerName, code: `qa_manager_a_${runId}`, departmentId: departmentIds[0] },
       { id: positionIds[2], name: managerName, code: `qa_manager_b_${runId}`, departmentId: departmentIds[0] },
+      { id: positionIds[3], name: `客户成功顾问-${nameSuffix}`, code: `qa_service_position_${runId}`, departmentId: departmentIds[1] },
+      { id: positionIds[4], name: `销售助理-${nameSuffix}`, code: `qa_assistant_${runId}`, departmentId: departmentIds[0] },
     ] });
     await prisma.user.createMany({ data: [
       { id: userIds[0], name: `预览唯一-${runId}`, email: `${userIds[0]}@example.test`, phone: '', role: '销售', departmentId: departmentIds[0], positionName: consultantName },
@@ -95,7 +99,48 @@ if (!process.env.DATABASE_URL) {
     ]);
     assert.deepEqual(afterUsers, beforeUsers, '生成预览不得修改员工表中的任何字段');
     assert.equal(historyCount, 0, '生成预览不得写入岗位历史');
-    console.log('position governance preview integration: ok');
+
+    const pendingReconciliation = await service.getReconciliation(preview.data.id, { page: 1, pageSize: 2 });
+    const pendingData: any = pendingReconciliation.data;
+    assert.equal(pendingReconciliation.code, 0);
+    assert.equal(pendingData.summary.passed, false);
+    assert.equal(pendingData.summary.unresolvedCount, 4);
+    assert.equal(pendingData.total, 4);
+    assert.equal(pendingData.items.length, 2, '未完成明细必须使用服务端分页');
+
+    const selections = [
+      { employeeId: userIds[0], positionId: positionIds[0] },
+      { employeeId: userIds[1], positionId: positionIds[3] },
+      { employeeId: userIds[2], positionId: positionIds[1] },
+      { employeeId: userIds[3], positionId: positionIds[4] },
+    ];
+    const applied = await service.applyBatch(preview.data.id, selections, { id: actorId, name: '集成测试管理员' });
+    assert.equal(applied.code, 0);
+    const appliedData: any = applied.data;
+    assert.equal(appliedData?.status, 'APPLIED');
+    assert.equal(appliedData?.appliedCount, 4);
+
+    const reconciliation = await service.getReconciliation(preview.data.id, { page: 1, pageSize: 10 });
+    assert.equal(reconciliation.code, 0);
+    const reconciliationData: any = reconciliation.data;
+    assert.deepEqual(reconciliationData?.summary, {
+      totalCount: 4,
+      existingEmployeeCount: 4,
+      activeEmployeeCount: 4,
+      coveredCount: 4,
+      unresolvedCount: 0,
+      historyCount: 4,
+      departmentCountBefore: 2,
+      departmentCountAfter: 2,
+      coverageRate: 100,
+      passed: true,
+    });
+    assert.deepEqual(reconciliationData?.items, []);
+
+    const replay = await service.applyBatch(preview.data.id, selections, { id: actorId, name: '集成测试管理员' });
+    assert.equal(replay.code, 0);
+    assert.equal(await prisma.employeePositionHistory.count({ where: { employeeId: { in: userIds } } }), 4, '重复执行不得重复写入历史');
+    console.log('position governance local exit integration: ok');
   } finally {
     await prisma.positionMappingBatch.deleteMany({ where: { createdById: actorId } });
     await prisma.employeePositionHistory.deleteMany({ where: { employeeId: { in: userIds } } });

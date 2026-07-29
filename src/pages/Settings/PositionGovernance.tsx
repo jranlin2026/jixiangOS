@@ -7,7 +7,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import PlaylistAddCheckIcon from '@mui/icons-material/PlaylistAddCheck';
 import { positionGovernanceApi, settingsApi } from '../../api';
 import type { Position } from '../../types/position';
-import type { EmployeePositionHistory, PositionGovernanceReadiness, PositionGovernanceReadinessStatus, PositionMappingBatch } from '../../types/positionGovernance';
+import type { EmployeePositionHistory, PositionGovernanceReadiness, PositionGovernanceReadinessStatus, PositionGovernanceReconciliation, PositionMappingBatch } from '../../types/positionGovernance';
 import useDepartmentStore from '../../store/useDepartmentStore';
 import TablePagination from '../../shared/components/TablePagination';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
@@ -39,6 +39,9 @@ const PositionGovernance: React.FC = () => {
   const [search, setSearch] = useState('');
   const [departmentId, setDepartmentId] = useState('');
   const [batch, setBatch] = useState<PositionMappingBatch | null>(null);
+  const [reconciliation, setReconciliation] = useState<PositionGovernanceReconciliation | null>(null);
+  const [reconciliationPage, setReconciliationPage] = useState(0);
+  const [reconciliationRowsPerPage, setReconciliationRowsPerPage] = useState(10);
   const [selections, setSelections] = useState<Record<string, string>>({});
   const [previewPage, setPreviewPage] = useState(0);
   const [previewRowsPerPage, setPreviewRowsPerPage] = useState(10);
@@ -106,9 +109,27 @@ const PositionGovernance: React.FC = () => {
       return;
     }
     setBatch(response.data);
+    setReconciliation(null);
     setPreviewPage(0);
     setSelections(Object.fromEntries(response.data.items.filter((item) => item.suggestedPositionId).map((item) => [item.employeeId, item.suggestedPositionId!])))
   };
+
+  const loadReconciliation = async (batchId = batch?.id) => {
+    if (!batchId) return;
+    const response = await positionGovernanceApi.getReconciliation(batchId, {
+      page: reconciliationPage + 1,
+      pageSize: reconciliationRowsPerPage,
+    });
+    if (response.code !== 0) {
+      await alert(response.message || '加载岗位治理对账失败', '加载失败');
+      return;
+    }
+    setReconciliation(response.data);
+  };
+
+  useEffect(() => {
+    if (tab === 1 && batch?.status === 'APPLIED') loadReconciliation(batch.id);
+  }, [tab, batch?.id, batch?.status, reconciliationPage, reconciliationRowsPerPage]);
 
   const applyPreview = async () => {
     if (!batch) return;
@@ -181,6 +202,7 @@ const PositionGovernance: React.FC = () => {
         </Paper>
         {batch && <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center', mb: 2 }}>
           <Chip label={`共 ${batch.totalCount} 人`} /><Chip color="success" label={`唯一匹配 ${batch.matchedCount}`} /><Chip color="warning" label={`待人工处理 ${batch.conflictCount}`} />
+          <Button variant="outlined" onClick={() => loadReconciliation()}>查看退出对账</Button>
           <Button sx={{ ml: { md: 'auto' } }} variant="contained" disabled={loading || batch.status === 'APPLIED'} onClick={applyPreview}>{batch.status === 'APPLIED' ? '已完成回填' : '确认所选回填'}</Button>
         </Box>}
         <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb', overflowX: 'auto' }}>
@@ -189,6 +211,22 @@ const PositionGovernance: React.FC = () => {
           </Table>
         </TableContainer>
         <TablePagination count={previewItems.length} page={previewPage} rowsPerPage={previewRowsPerPage} onPageChange={(_event, page) => setPreviewPage(page)} onRowsPerPageChange={(event) => { setPreviewRowsPerPage(Number(event.target.value)); setPreviewPage(0); }} sx={{ mt: 2 }} />
+        {reconciliation && <Paper elevation={0} sx={{ p: 2, mt: 2, border: `1px solid ${reconciliation.summary.passed ? '#86efac' : '#fbbf24'}` }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>阶段0-C退出对账</Typography>
+          <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5, mb: 1.5 }}>只对账当前人工确认批次，不会再次修改员工数据。</Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: reconciliation.total ? 2 : 0 }}>
+            <Chip color={reconciliation.summary.passed ? 'success' : 'warning'} label={reconciliation.summary.passed ? '本地退出验收通过' : '尚未通过'} />
+            <Chip label={`覆盖率 ${reconciliation.summary.coverageRate}%`} />
+            <Chip label={`已覆盖 ${reconciliation.summary.coveredCount}/${reconciliation.summary.totalCount}`} />
+            <Chip label={`未完成 ${reconciliation.summary.unresolvedCount}`} />
+            <Chip label={`新增历史 ${reconciliation.summary.historyCount}`} />
+            <Chip label={`部门数 ${reconciliation.summary.departmentCountBefore} → ${reconciliation.summary.departmentCountAfter}`} />
+          </Box>
+          {reconciliation.total > 0 && <>
+            <TableContainer sx={{ border: '1px solid #e5e7eb', overflowX: 'auto' }}><Table sx={{ minWidth: 760 }}><TableHead><TableRow><TableCell>员工</TableCell><TableCell>原岗位</TableCell><TableCell>当前岗位</TableCell><TableCell>处理状态</TableCell><TableCell>未完成原因</TableCell></TableRow></TableHead><TableBody>{reconciliation.items.map((item) => <TableRow key={item.employeeId} hover><TableCell sx={{ fontWeight: 600 }}>{item.employeeName}</TableCell><TableCell>{item.originalPositionName || '-'}</TableCell><TableCell>{item.currentPositionName || '-'}</TableCell><TableCell>{item.applyStatus === 'APPLIED' ? '已回填' : '待处理'}</TableCell><TableCell>{item.reason}</TableCell></TableRow>)}</TableBody></Table></TableContainer>
+            <TablePagination count={reconciliation.total} page={reconciliationPage} rowsPerPage={reconciliationRowsPerPage} onPageChange={(_event, page) => setReconciliationPage(page)} onRowsPerPageChange={(event) => { setReconciliationRowsPerPage(Number(event.target.value)); setReconciliationPage(0); }} sx={{ mt: 1 }} />
+          </>}
+        </Paper>}
       </>}
 
       {tab === 2 && <>

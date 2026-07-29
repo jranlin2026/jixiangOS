@@ -65,6 +65,38 @@ export interface PositionMappingBatch {
   items: PositionMappingItem[];
 }
 
+export interface PositionGovernanceReconciliationItem {
+  employeeId: string;
+  employeeName: string;
+  departmentId?: string;
+  originalPositionName: string;
+  currentPositionId?: string;
+  currentPositionName?: string;
+  applyStatus: PositionMappingApplyStatus;
+  reason: string;
+}
+
+export interface PositionGovernanceReconciliation {
+  batchId: string;
+  batchStatus: PositionMappingBatch['status'];
+  summary: {
+    totalCount: number;
+    existingEmployeeCount: number;
+    activeEmployeeCount: number;
+    coveredCount: number;
+    unresolvedCount: number;
+    historyCount: number;
+    departmentCountBefore: number;
+    departmentCountAfter: number;
+    coverageRate: number;
+    passed: boolean;
+  };
+  items: PositionGovernanceReconciliationItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface EmployeePositionHistory {
   id: string;
   employeeId: string;

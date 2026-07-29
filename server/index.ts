@@ -1603,6 +1603,13 @@ app.get('/api/settings/position-governance/batches/:id', requireOrganizationRead
   res.json(await positionGovernanceService.getBatch(routeParam(req.params.id)));
 });
 
+app.get('/api/settings/position-governance/batches/:id/reconciliation', requireOrganizationReadAccess, async (req, res) => {
+  res.json(await positionGovernanceService.getReconciliation(routeParam(req.params.id), {
+    page: Number(queryParam(req.query.page) || 1),
+    pageSize: Number(queryParam(req.query.pageSize) || 10),
+  }));
+});
+
 app.post('/api/settings/position-governance/batches/:id/apply', requireOrganizationWriteAccess, async (req: AuthenticatedRequest, res) => {
   const result = await positionGovernanceService.applyBatch(
     routeParam(req.params.id),
