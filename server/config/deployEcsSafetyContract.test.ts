@@ -14,6 +14,8 @@ assert.match(backupSource, /TABLE_COUNT/);
 assert.match(backupSource, /USER_COUNT/);
 assert.match(backupSource, /POSITION_COUNT/);
 assert.match(backupSource, /\.manifest/);
+assert.match(backupSource, /JIXIANG_BACKUP_WRITES_PAUSED/);
+assert.match(backupSource, /COUNT_CONSISTENCY/);
 const cloudDeployDoc = readFileSync(join(process.cwd(), 'docs', 'cloud-deployment-aliyun.md'), 'utf8');
 const minimalLaunchDoc = readFileSync(join(process.cwd(), 'docs', 'aliyun-minimal-launch.md'), 'utf8');
 const nginxSource = readFileSync(join(process.cwd(), 'deploy', 'nginx', 'jixiang-os.conf'), 'utf8');

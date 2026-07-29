@@ -46,9 +46,14 @@ manifest_value() {
   awk -F= -v key="$1" '$1 == key { print substr($0, length(key) + 2); exit }' "$MANIFEST_FILE"
 }
 EXPECTED_TABLE_COUNT="$(manifest_value TABLE_COUNT)"
+COUNT_CONSISTENCY="$(manifest_value COUNT_CONSISTENCY)"
 EXPECTED_USER_COUNT="$(manifest_value USER_COUNT)"
 EXPECTED_POSITION_COUNT="$(manifest_value POSITION_COUNT)"
 EXPECTED_MIGRATION_COUNT="$(manifest_value MIGRATION_COUNT)"
+if [[ "$COUNT_CONSISTENCY" != "WRITE_PAUSED" ]]; then
+  echo "Clone restore verification failed: backup counts were not captured during an approved write pause" >&2
+  exit 1
+fi
 
 export MYSQL_PWD="$MYSQL_PASSWORD"
 trap 'unset MYSQL_PWD' EXIT

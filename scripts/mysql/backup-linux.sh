@@ -9,6 +9,7 @@ MYSQL_PASSWORD="${JIXIANG_MYSQL_PASSWORD:-}"
 BACKUP_DIR="${JIXIANG_BACKUP_DIR:-/var/backups/jixiang-os}"
 KEEP_DAYS="${JIXIANG_BACKUP_KEEP_DAYS:-14}"
 PRUNE_BACKUPS="${JIXIANG_BACKUP_PRUNE:-YES}"
+WRITES_PAUSED="${JIXIANG_BACKUP_WRITES_PAUSED:-NO}"
 
 if [[ -z "$MYSQL_PASSWORD" ]]; then
   echo "JIXIANG_MYSQL_PASSWORD is required" >&2
@@ -92,8 +93,12 @@ mv "$partial_output" "$output"
 sha256sum "$output" > "$partial_checksum"
 chmod 600 "$output" "$partial_checksum"
 mv "$partial_checksum" "$checksum"
-printf 'DATABASE=%s\nCREATED_AT=%s\nTABLE_COUNT=%s\nUSER_COUNT=%s\nPOSITION_COUNT=%s\nMIGRATION_COUNT=%s\nFAILED_MIGRATION_COUNT=%s\nROLLED_BACK_MIGRATION_COUNT=%s\n' \
-  "$MYSQL_DATABASE" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TABLE_COUNT" "$USER_COUNT" "$POSITION_COUNT" \
+COUNT_CONSISTENCY="UNVERIFIED"
+if [[ "$WRITES_PAUSED" == "YES" ]]; then
+  COUNT_CONSISTENCY="WRITE_PAUSED"
+fi
+printf 'DATABASE=%s\nCREATED_AT=%s\nCOUNT_CONSISTENCY=%s\nTABLE_COUNT=%s\nUSER_COUNT=%s\nPOSITION_COUNT=%s\nMIGRATION_COUNT=%s\nFAILED_MIGRATION_COUNT=%s\nROLLED_BACK_MIGRATION_COUNT=%s\n' \
+  "$MYSQL_DATABASE" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$COUNT_CONSISTENCY" "$TABLE_COUNT" "$USER_COUNT" "$POSITION_COUNT" \
   "$MIGRATION_COUNT" "$FAILED_MIGRATION_COUNT" "$ROLLED_BACK_MIGRATION_COUNT" > "$partial_manifest"
 mv "$partial_manifest" "$manifest"
 sha256sum "$manifest" > "$partial_manifest_checksum"

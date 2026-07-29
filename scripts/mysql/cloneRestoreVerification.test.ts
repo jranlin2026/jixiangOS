@@ -14,6 +14,8 @@ assert.match(source, /sha256sum -c/);
 assert.match(source, /EXPECTED_USER_COUNT/);
 assert.match(source, /EXPECTED_POSITION_COUNT/);
 assert.match(source, /JIXIANG_VERIFICATION_ACTOR/);
+assert.match(source, /COUNT_CONSISTENCY/);
+assert.match(source, /WRITE_PAUSED/);
 assert.match(source, /rolled_back_at IS NULL/);
 assert.match(source, /finished_at IS NULL/);
 assert.match(source, /Clone restore verification passed/);
