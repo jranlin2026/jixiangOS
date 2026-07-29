@@ -65,6 +65,9 @@ const renamedPosition = await settingsApi.updatePosition(createdPosition.data!.i
 });
 assert.equal(renamedPosition.code, 0);
 assert.equal(renamedPosition.data?.name, 'Senior Account Executive');
+const clearedPositionDepartment = await settingsApi.updatePosition(createdPosition.data!.id, { departmentId: '' });
+assert.equal(clearedPositionDepartment.code, 0);
+assert.equal(clearedPositionDepartment.data?.departmentId, undefined);
 
 const mismatchedUser = await settingsApi.createUser({
   name: 'Mismatched Position User',
@@ -108,6 +111,14 @@ const updatedUser = await settingsApi.updateUser(createdUser.data!.id, {
 assert.equal(updatedUser.code, 0);
 assert.equal(updatedUser.data?.positionId, 'pos-hidden-reference');
 assert.equal(updatedUser.data?.positionName, 'Hidden Reference');
+
+await settingsApi.updatePosition('pos-hidden-reference', { isActive: false });
+const inactivePositionProfileUpdate = await settingsApi.updateUser(createdUser.data!.id, {
+  name: 'Canonical Position User Updated',
+  positionId: 'pos-hidden-reference',
+});
+assert.equal(inactivePositionProfileUpdate.code, 0);
+await settingsApi.updatePosition('pos-hidden-reference', { isActive: true });
 
 const storedUsers = JSON.parse(storage.getItem(STORAGE_KEYS.USERS) || '[]') as User[];
 assert.equal(storedUsers.find((user) => user.id === 'user-legacy')?.positionId, 'pos-legacy');

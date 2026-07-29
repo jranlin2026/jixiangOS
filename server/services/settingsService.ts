@@ -17,7 +17,7 @@ import { LIFECYCLE_STATUS_CODES, STORAGE_KEYS } from '../../src/shared/utils/con
 import { mergeRoleWithDefaultAccess, normalizeRoleDataScopes } from '../../src/shared/utils/organizationConfig';
 import { normalizeRoleNameForComparison } from '../../src/shared/utils/roles';
 
-type SettingsPrisma = Pick<PrismaClient, 'user' | 'role' | 'department' | 'position' | 'authSession' | 'businessRecord' | 'leadRecord'>;
+type SettingsPrisma = Pick<PrismaClient, 'user' | 'role' | 'department' | 'position' | 'authSession' | 'businessRecord' | 'leadRecord' | 'knowledgeVisibility'>;
 
 type LeaveUserCustomerHandoff = {
   customerAction?: 'transfer' | 'public_pool';
@@ -48,6 +48,34 @@ function containsHistoricalUserReference(value: unknown, userId: string, userNam
   if (!value || typeof value !== 'object') return false;
   return Object.values(value as Record<string, unknown>)
     .some((item) => containsHistoricalUserReference(item, userId, userName));
+}
+
+async function hasNormalizedUserReference(prisma: unknown, userId: string): Promise<boolean> {
+  const client = prisma as Record<string, { findFirst?: (args: Record<string, unknown>) => Promise<unknown> }>;
+  const lookups: Array<[string, Record<string, unknown>]> = [
+    ['department', { managerId: userId }],
+    ['coCreationRequest', { OR: [{ requesterId: userId }, { supervisorId: userId }] }],
+    ['coCreationValidation', { ownerId: userId }],
+    ['coCreationEvent', { actorId: userId }],
+    ['businessExportAudit', { actorId: userId }],
+    ['customerTodo', { OR: [{ assigneeId: userId }, { createdById: userId }, { completedById: userId }, { canceledById: userId }] }],
+    ['knowledgeDocument', { OR: [{ ownerUserId: userId }, { createdById: userId }] }],
+    ['knowledgeVersion', { OR: [{ publishedById: userId }, { createdById: userId }] }],
+    ['knowledgeAttachment', { createdById: userId }],
+    ['contentReview', { reviewerUserId: userId }],
+    ['customerBatchPrecheck', { actorId: userId }],
+    ['customerBatchJob', { actorId: userId }],
+    ['businessImportBatch', { actorId: userId }],
+    ['businessImportJob', { actorId: userId }],
+    ['customerAuditEvent', { actorId: userId }],
+    ['customerDuplicateGroup', { createdById: userId }],
+    ['customerMergeLedger', { OR: [{ actorId: userId }, { undoneById: userId }] }],
+  ];
+  for (const [model, where] of lookups) {
+    const findFirst = client[model]?.findFirst;
+    if (findFirst && await findFirst.call(client[model], { where, select: { id: true } })) return true;
+  }
+  return false;
 }
 
 function isNormalizedRoleNameConflict(error: unknown): boolean {
@@ -297,24 +325,31 @@ export function createSettingsService(prisma: SettingsPrisma) {
       if (nextDepartmentId !== position.departmentId && boundUsers.some((user) => user.departmentId !== nextDepartmentId)) {
         return failure('已有员工使用该岗位，请先调整员工部门或岗位');
       }
-      const row = await prisma.position.update({
-        where: { id },
-        data: {
-          name,
-          code,
-          departmentId: data.departmentId !== undefined ? data.departmentId || null : undefined,
-          description: data.description !== undefined ? data.description || null : undefined,
-          sortOrder: data.sortOrder !== undefined ? Number(data.sortOrder) : undefined,
-          isActive: data.isActive,
-          updatedAt: new Date(),
-        },
-      });
-      if (name !== position.name) {
-        await Promise.all(boundUsers.map((user) => prisma.user.update({
-          where: { id: user.id },
-          data: { positionName: name, updatedAt: new Date() },
-        })));
-      }
+      const persistPosition = async (client: Pick<PrismaClient, 'position' | 'user'>) => {
+        const row = await client.position.update({
+          where: { id },
+          data: {
+            name,
+            code,
+            departmentId: data.departmentId !== undefined ? data.departmentId || null : undefined,
+            description: data.description !== undefined ? data.description || null : undefined,
+            sortOrder: data.sortOrder !== undefined ? Number(data.sortOrder) : undefined,
+            isActive: data.isActive,
+            updatedAt: new Date(),
+          },
+        });
+        if (name !== position.name) {
+          await Promise.all(boundUsers.map((user) => client.user.update({
+            where: { id: user.id },
+            data: { positionName: name, updatedAt: new Date() },
+          })));
+        }
+        return row;
+      };
+      const transaction = (prisma as PrismaClient).$transaction.bind(prisma);
+      const row = name !== position.name
+        ? await transaction((tx) => persistPosition(tx))
+        : await persistPosition(prisma);
       return success(mapPrismaPosition(row));
     },
 
@@ -324,6 +359,12 @@ export function createSettingsService(prisma: SettingsPrisma) {
       const users = await prisma.user.findMany();
       if (users.some((user) => user.positionId === id)) {
         return failure('已有员工使用该岗位，不能删除，请改为停用');
+      }
+      const visibilityRules = await prisma.knowledgeVisibility.findMany({
+        where: { subjectType: 'POSITION', subjectId: id },
+      });
+      if (visibilityRules.some((rule) => rule.subjectType === 'POSITION' && rule.subjectId === id)) {
+        return failure('该岗位已用于知识可见范围，不能删除，请改为停用');
       }
       await prisma.position.deleteMany({ where: { id } });
       return success(true);
@@ -396,12 +437,16 @@ export function createSettingsService(prisma: SettingsPrisma) {
       if (!nextAccount) return failure('账号不能为空');
       const existing = await prisma.user.findMany();
       if (existing.some((item) => item.id !== id && normalizeAccount(item.account || undefined) === nextAccount)) return failure('账号已存在');
-      const positionResult = data.positionId !== undefined
+      const requestedPositionId = data.positionId !== undefined ? nullableText(data.positionId) : user.positionId;
+      const positionChanged = data.positionId !== undefined && requestedPositionId !== user.positionId;
+      const positionResult = positionChanged
         ? await resolveActivePosition(data.positionId)
         : success(null);
       if (positionResult.code !== 0) return failure(positionResult.message || '岗位不可用');
       const selectedPosition = data.positionId !== undefined
-        ? positionResult.data
+        ? positionChanged
+          ? positionResult.data
+          : user.positionId ? await prisma.position.findUnique({ where: { id: user.positionId } }) : null
         : user.positionId ? await prisma.position.findUnique({ where: { id: user.positionId } }) : null;
       const nextDepartmentId = data.departmentId !== undefined ? nullableText(data.departmentId) : user.departmentId;
       if (selectedPosition?.departmentId && selectedPosition.departmentId !== nextDepartmentId) {
@@ -479,14 +524,9 @@ export function createSettingsService(prisma: SettingsPrisma) {
         prisma.businessRecord.findMany(),
         prisma.leadRecord.findMany(),
       ]);
-      const hasBusinessHistory = businessRows.some((row) => (
-        containsHistoricalUserReference(row.owner, user.id, user.name)
-        || containsHistoricalUserReference(row.data, user.id, user.name)
-      )) || leadRows.some((row) => (
-        containsHistoricalUserReference(row.owner, user.id, user.name)
-        || containsHistoricalUserReference(row.assignedTo, user.id, user.name)
-        || containsHistoricalUserReference(row.data, user.id, user.name)
-      ));
+      const hasBusinessHistory = businessRows.some((row) => containsHistoricalUserReference(row, user.id, user.name))
+        || leadRows.some((row) => containsHistoricalUserReference(row, user.id, user.name))
+        || await hasNormalizedUserReference(prisma, user.id);
       if (hasBusinessHistory) return failure('该员工已被历史业务数据引用，不能永久删除，请保留在账号回收站');
       await prisma.authSession.deleteMany({ where: { userId: id } });
       await prisma.user.deleteMany({ where: { id } });

@@ -517,7 +517,23 @@ const EmployeeDepartmentManagement: React.FC = () => {
 
   const handleMoveUsers = async () => {
     if (!moveDepartmentId) return;
-    await Promise.all(selectedUsers.map((user) => settingsApi.updateUser(user.id, { departmentId: moveDepartmentId })));
+    const incompatibleUserIds = new Set(selectedUsers.filter((user) => {
+      const position = positions.find((item) => item.id === user.positionId);
+      return Boolean(position?.departmentId && position.departmentId !== moveDepartmentId);
+    }).map((user) => user.id));
+    if (incompatibleUserIds.size > 0 && !await confirm(
+      `有 ${incompatibleUserIds.size} 名员工的原岗位不属于目标部门，转移后将清空这些员工的岗位，是否继续？`,
+      '批量转部门',
+    )) return;
+    const results = await Promise.all(selectedUsers.map((user) => settingsApi.updateUser(user.id, {
+      departmentId: moveDepartmentId,
+      ...(incompatibleUserIds.has(user.id) ? { positionId: '' } : {}),
+    })));
+    const failed = results.filter((result) => result.code !== 0);
+    if (failed.length > 0) {
+      await alert(failed[0].message || `有 ${failed.length} 名员工转部门失败`, '批量转部门失败');
+      return;
+    }
     setMoveOpen(false);
     clearSelection();
     await loadUsers();

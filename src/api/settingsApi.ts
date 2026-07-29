@@ -538,7 +538,7 @@ async function updatePosition(id: string, data: Partial<PositionInput>): Promise
   if (organization.positions.some((item) => item.id !== id && item.code.toLowerCase() === code.toLowerCase())) {
     return createErrorResponse('岗位编码已存在');
   }
-  const departmentId = data.departmentId !== undefined ? data.departmentId : current.departmentId;
+  const departmentId = data.departmentId !== undefined ? data.departmentId || undefined : current.departmentId;
   const departmentResult = validatePositionDepartment(departmentId);
   if (departmentResult.code !== 0) return createErrorResponse(departmentResult.message || '所属部门不可用');
   const boundUsers = ensureUsersWithAuth().filter((user) => user.positionId === id);
@@ -636,7 +636,11 @@ async function updateUser(id: string, data: Partial<User>): Promise<ApiResponse<
   if (data.positionId !== undefined || data.departmentId !== undefined) {
     const nextPositionId = data.positionId !== undefined ? data.positionId : users[idx].positionId;
     const nextDepartmentId = data.departmentId !== undefined ? data.departmentId : users[idx].departmentId;
-    const positionResult = validateUserPositionAssignment(nextPositionId, nextDepartmentId, data.positionId !== undefined);
+    const positionResult = validateUserPositionAssignment(
+      nextPositionId,
+      nextDepartmentId,
+      data.positionId !== undefined && data.positionId !== users[idx].positionId,
+    );
     if (positionResult.code !== 0) return createErrorResponse(positionResult.message || '岗位不可用');
   }
   const safeData = withResolvedUserOrganization({ ...users[idx], ...data, account: nextAccount });

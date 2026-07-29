@@ -110,7 +110,7 @@ const PositionManagement: React.FC = () => {
       ...form,
       name: form.name.trim(),
       code: form.code.trim(),
-      departmentId: form.departmentId || undefined,
+      departmentId: form.departmentId,
       description: form.description?.trim() || undefined,
       sortOrder: Number(form.sortOrder),
     };
