@@ -27,6 +27,15 @@ type FinanceBackfillReport = {
   errors: string[];
 };
 
+type OrderPaymentAdjustmentInput = {
+  order: Order;
+  paymentId: string;
+  actor: AuthenticatedUser;
+  reason: string;
+  occurredAt?: string;
+  createdAt?: string;
+};
+
 const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 const asObject = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const sourceRecordId = (sourceType: FinanceTransaction['sourceType'], sourceEventId: string) => {
@@ -85,7 +94,7 @@ async function createOnce(tx: FinanceTransactionClient, input: Omit<FinanceTrans
 export function createFinanceTransactionService(prisma: FinancePrisma) {
   const hydrateSourceStatuses = async (items: FinanceTransaction[]) => {
     if (!items.length) return items;
-    const orderIds = [...new Set(items.filter((item) => item.sourceType === 'order_payment').map((item) => item.sourceId))];
+    const orderIds = [...new Set(items.filter((item) => item.sourceType === 'order_payment' || item.sourceType === 'order_payment_adjustment').map((item) => item.sourceId))];
     const payoutIds = [...new Set(items.filter((item) => item.sourceType === 'commission_payout').map((item) => item.sourceId))];
     const clauses: Prisma.BusinessRecordWhereInput[] = [];
     if (orderIds.length) clauses.push({ domain: STORAGE_KEYS.ORDERS, recordId: { in: orderIds } });
@@ -128,6 +137,44 @@ export function createFinanceTransactionService(prisma: FinancePrisma) {
     operatorId: payout.issuedById, operatorName: payout.issuedByName, occurredAt: payout.issuedAt,
     reason: `向 ${payout.byOwner.length} 名员工发放 ${payout.totalCount} 笔提成`, attachmentIds: [],
   }, payout.createdAt);
+
+  const recordOrderPaymentAdjustment = async (tx: FinanceTransactionClient, input: OrderPaymentAdjustmentInput) => {
+    const payment = (input.order.payments || []).find((item) => item.id === input.paymentId);
+    if (!payment || !(Number(payment.amount) > 0)) throw new Error(`订单 ${input.order.orderNo} 找不到有效付款 ${input.paymentId}`);
+    const originalRecordId = sourceRecordId('order_payment', `${input.order.id}:${input.paymentId}`);
+    const originalRecord = await tx.businessRecord.findUnique({
+      where: { domain_recordId: { domain: STORAGE_KEYS.FINANCE_TRANSACTIONS, recordId: originalRecordId } },
+    });
+    const original = normalize(originalRecord?.data);
+    if (!original || original.sourceType !== 'order_payment' || original.direction !== 'income') {
+      throw new Error(`订单 ${input.order.orderNo} 的原实收流水不存在`);
+    }
+    const records = await tx.businessRecord.findMany({ where: { domain: STORAGE_KEYS.FINANCE_TRANSACTIONS } });
+    const priorAdjustments = records
+      .map((record) => normalize(record.data))
+      .filter((row): row is FinanceTransaction => row !== null && row.sourceType === 'order_payment_adjustment' && row.reversalOfId === original.id);
+    if (priorAdjustments.some((row) => row.direction !== 'expense' || row.sourceId !== input.order.id || !(Number(row.amount) > 0))) {
+      throw new Error(`订单 ${input.order.orderNo} 存在无效实收冲正流水`);
+    }
+    const adjustedAmount = roundMoney(priorAdjustments.reduce((sum, row) => sum + Number(row.amount), 0));
+    const currentNetAmount = roundMoney(Number(original.amount) - adjustedAmount);
+    const targetAmount = roundMoney(Number(payment.amount));
+    const adjustmentAmount = roundMoney(currentNetAmount - targetAmount);
+    if (adjustmentAmount < 0) throw new Error(`订单 ${input.order.orderNo} 当前实收高于不可变流水净额，不能用冲正支出修复`);
+    if (adjustmentAmount === 0) return null;
+    const occurredAt = input.occurredAt || new Date().toISOString();
+    return createOnce(tx, {
+      type: '订单实收冲正', direction: 'expense', sourceType: 'order_payment_adjustment',
+      sourceDomain: STORAGE_KEYS.ORDERS, sourceId: input.order.id,
+      sourceEventId: `${input.order.id}:${input.paymentId}:${targetAmount}`,
+      sourceModule: '订单', amount: adjustmentAmount, status: '已确认', relatedBusiness: input.order.orderNo,
+      orderId: input.order.id, orderNo: input.order.orderNo, customerId: input.order.customerId, customerName: input.order.customerName,
+      productName: input.order.productName, productLevel: input.order.productLevel,
+      paymentMethod: payment.paymentMethod || input.order.paymentMethod, paymentReference: payment.paymentOrderNo,
+      operatorId: input.actor.id, operatorName: input.actor.name, occurredAt,
+      reason: input.reason, attachmentIds: [], reversalOfId: original.id,
+    }, input.createdAt || occurredAt);
+  };
 
   const list = async (filters: FinanceTransactionFilters = {}) => {
     const records = await prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.FINANCE_TRANSACTIONS }, orderBy: [{ eventAt: 'desc' }, { createdAt: 'desc' }] });
@@ -214,6 +261,8 @@ export function createFinanceTransactionService(prisma: FinancePrisma) {
       payouts.push(payout);
     }
     const seenFinanceSources = new Set<string>();
+    const financeBySource = new Map<string, FinanceTransaction>();
+    const adjustmentsByOriginalId = new Map<string, FinanceTransaction[]>();
     for (const record of financeRecords) {
       const row = normalize(record.data);
       if (!row) {
@@ -226,18 +275,61 @@ export function createFinanceTransactionService(prisma: FinancePrisma) {
         continue;
       }
       seenFinanceSources.add(sourceKey);
-      const expected = expectedSources.get(sourceKey);
-      if (!expected) {
+      if (row.sourceType === 'order_payment_adjustment') {
+        if (!row.reversalOfId) {
+          errors.push(`资金流水 ${row.transactionNo || row.id} 缺少原流水关联`);
+          continue;
+        }
+        const linked = adjustmentsByOriginalId.get(row.reversalOfId) || [];
+        linked.push(row);
+        adjustmentsByOriginalId.set(row.reversalOfId, linked);
+        continue;
+      }
+      if (!expectedSources.has(sourceKey)) {
         errors.push(`资金流水 ${row.transactionNo || row.id} 找不到对应真实来源`);
         continue;
       }
-      if (expected.direction !== row.direction || expected.amount !== roundMoney(Number(row.amount))) {
+      financeBySource.set(sourceKey, row);
+    }
+    const usedAdjustmentIds = new Set<string>();
+    for (const [sourceKey, expected] of expectedSources) {
+      const row = financeBySource.get(sourceKey);
+      if (!row) continue;
+      if (sourceKey.startsWith('commission_payout:')) {
+        if (expected.direction !== row.direction || expected.amount !== roundMoney(Number(row.amount))) {
+          errors.push(`资金流水 ${row.transactionNo || row.id} 与来源金额或方向不一致`);
+          continue;
+        }
+        existingCount += 1;
+        existingExpenseAmount = roundMoney(existingExpenseAmount + Number(row.amount));
+        continue;
+      }
+      const adjustments = adjustmentsByOriginalId.get(row.id) || [];
+      let adjustmentAmount = 0;
+      let adjustmentInvalid = false;
+      for (const adjustment of adjustments) {
+        usedAdjustmentIds.add(adjustment.id);
+        if (adjustment.direction !== 'expense' || adjustment.sourceId !== row.sourceId || adjustment.orderId !== row.orderId || !(Number(adjustment.amount) > 0)) {
+          errors.push(`资金流水 ${adjustment.transactionNo || adjustment.id} 不是有效的订单实收冲正`);
+          adjustmentInvalid = true;
+          continue;
+        }
+        adjustmentAmount = roundMoney(adjustmentAmount + Number(adjustment.amount));
+      }
+      const originalAmount = roundMoney(Number(row.amount));
+      const netAmount = roundMoney(originalAmount - adjustmentAmount);
+      if (row.direction !== 'income' || adjustmentInvalid || adjustmentAmount > originalAmount || netAmount !== expected.amount) {
         errors.push(`资金流水 ${row.transactionNo || row.id} 与来源金额或方向不一致`);
         continue;
       }
       existingCount += 1;
-      if (row.direction === 'income') existingIncomeAmount = roundMoney(existingIncomeAmount + row.amount);
-      else existingExpenseAmount = roundMoney(existingExpenseAmount + row.amount);
+      existingIncomeAmount = roundMoney(existingIncomeAmount + originalAmount);
+      existingExpenseAmount = roundMoney(existingExpenseAmount + adjustmentAmount);
+    }
+    for (const adjustments of adjustmentsByOriginalId.values()) {
+      for (const adjustment of adjustments) {
+        if (!usedAdjustmentIds.has(adjustment.id)) errors.push(`资金流水 ${adjustment.transactionNo || adjustment.id} 找不到对应原实收流水`);
+      }
     }
     if (apply && errors.length) return failure<FinanceBackfillReport>(`存在异常数据，拒绝执行资金流水回填：${errors.join('；')}`, 409);
     if (apply) {
@@ -272,5 +364,5 @@ export function createFinanceTransactionService(prisma: FinancePrisma) {
     return success(`\uFEFF${[['流水编号', '流水类型', '方向', '金额', '客户', '订单号', '付款方式', '付款流水号', '经办人', '发生时间', '来源状态'], ...body].map((row) => row.map(escape).join(',')).join('\n')}`);
   };
 
-  return { recordOrderPayments, recordCommissionPayout, list, getById, exportCsv, backfill };
+  return { recordOrderPayments, recordOrderPaymentAdjustment, recordCommissionPayout, list, getById, exportCsv, backfill };
 }

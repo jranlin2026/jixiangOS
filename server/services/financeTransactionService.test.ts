@@ -71,6 +71,46 @@ const applied = await service.backfill(true, actor);
 assert.equal(applied.code, 0);
 assert.equal(applied.data?.createdCount, 0, '重复回填必须幂等');
 
+const originalPaymentRecordId = 'order_payment:order-1:payment-1';
+const originalPaymentRow = rows.get(key(STORAGE_KEYS.FINANCE_TRANSACTIONS, originalPaymentRecordId));
+assert.ok(originalPaymentRow, '测试前提：原订单实收流水必须存在');
+rows.set(key(STORAGE_KEYS.ORDERS, order.id), {
+  domain: STORAGE_KEYS.ORDERS,
+  recordId: order.id,
+  data: {
+    ...order,
+    payments: [
+      { ...order.payments[0], amount: 50 },
+      order.payments[1],
+    ],
+  },
+});
+const correctedOrder = rows.get(key(STORAGE_KEYS.ORDERS, order.id)).data as Order;
+const adjustment = await prisma.$transaction((tx: any) => service.recordOrderPaymentAdjustment(tx, {
+  order: correctedOrder,
+  paymentId: 'payment-1',
+  actor,
+  reason: '订单付款由100元修正为50元',
+  occurredAt: '2026-07-05T00:00:00.000Z',
+}));
+assert.equal(adjustment?.amount, 50);
+assert.equal(adjustment?.reversalOfId, originalPaymentRecordId);
+const duplicateAdjustment = await prisma.$transaction((tx: any) => service.recordOrderPaymentAdjustment(tx, {
+  order: correctedOrder,
+  paymentId: 'payment-1',
+  actor,
+  reason: '重复执行不应再次冲正',
+  occurredAt: '2026-07-05T00:00:00.000Z',
+}));
+assert.equal(duplicateAdjustment, null, '同一目标金额重复执行必须幂等');
+const correctedDryRun = await service.backfill(false, actor);
+assert.equal(correctedDryRun.code, 0);
+assert.deepEqual(correctedDryRun.data?.errors, [], '原收入减去冲正支出等于当前付款时必须通过对账');
+assert.equal(correctedDryRun.data?.missingCount, 0);
+assert.equal(correctedDryRun.data?.incomeAmount, 250);
+assert.equal(correctedDryRun.data?.existingIncomeAmount, 300, '原收入流水必须保持不可变');
+assert.equal(correctedDryRun.data?.existingExpenseAmount, 100, '冲正和提成发放都应计入实际支出');
+
 rows.set(key(STORAGE_KEYS.ORDERS, 'bad-order'), { domain: STORAGE_KEYS.ORDERS, recordId: 'bad-order', data: { ...order, id: 'bad-order', orderNo: 'BAD', payments: [{ id: '', amount: 0, paidAt: '' }] } });
 const rejected = await service.backfill(true, actor);
 assert.equal(rejected.code, 409, '存在异常付款时必须拒绝 apply');

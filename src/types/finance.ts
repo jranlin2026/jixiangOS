@@ -52,6 +52,7 @@ export type FinanceTransactionDirection = 'income' | 'expense';
 
 export type FinanceTransactionSourceType =
   | 'order_payment'
+  | 'order_payment_adjustment'
   | 'commission_payout';
 
 export interface FinanceTransaction {
