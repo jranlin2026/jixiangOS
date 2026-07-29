@@ -529,9 +529,16 @@ const EmployeeDepartmentManagement: React.FC = () => {
       departmentId: moveDepartmentId,
       ...(incompatibleUserIds.has(user.id) ? { positionId: '' } : {}),
     })));
-    const failed = results.filter((result) => result.code !== 0);
+    const failed = results.map((result, index) => ({ result, user: selectedUsers[index] }))
+      .filter(({ result }) => result.code !== 0);
     if (failed.length > 0) {
-      await alert(failed[0].message || `有 ${failed.length} 名员工转部门失败`, '批量转部门失败');
+      await loadUsers();
+      await fetchItems();
+      clearSelection();
+      setMoveOpen(false);
+      const succeededCount = results.length - failed.length;
+      const failedNames = failed.map(({ user }) => user.name).join('、');
+      await alert(`已成功转移 ${succeededCount} 人；失败 ${failed.length} 人：${failedNames}。${failed[0].result.message ? `\n${failed[0].result.message}` : ''}`, '批量转部门结果');
       return;
     }
     setMoveOpen(false);

@@ -24,12 +24,20 @@ function ensureInit(): void {
   ensureOrganizationConfigData();
 }
 
-function containsHistoricalUserReference(value: unknown, userId: string, userName: string): boolean {
-  if (typeof value === 'string') return value === userId || value === userName;
-  if (Array.isArray(value)) return value.some((item) => containsHistoricalUserReference(item, userId, userName));
+function isUserReferenceKey(key: string): boolean {
+  return /(owner|assignee|assignedTo|createdBy|updatedBy|operator|actor|reviewer|sales|releasedBy|previousOwner|leftBy|transferBy|inputBy|employee)/i.test(key);
+}
+
+function containsHistoricalUserReference(value: unknown, userId: string, userName: string, key = ''): boolean {
+  if (typeof value === 'string') return value === userId || (value === userName && isUserReferenceKey(key));
+  if (Array.isArray(value)) return value.some((item) => containsHistoricalUserReference(item, userId, userName, key));
   if (!value || typeof value !== 'object') return false;
-  return Object.values(value as Record<string, unknown>)
-    .some((item) => containsHistoricalUserReference(item, userId, userName));
+  const record = value as Record<string, unknown>;
+  if (typeof record.field === 'string' && isUserReferenceKey(record.field)) {
+    if (record.oldValue === userName || record.newValue === userName || record.oldValue === userId || record.newValue === userId) return true;
+  }
+  return Object.entries(record)
+    .some(([entryKey, item]) => containsHistoricalUserReference(item, userId, userName, entryKey));
 }
 
 async function fetchBackendStorageValue<T>(key: string): Promise<T | null> {
@@ -542,7 +550,7 @@ async function updatePosition(id: string, data: Partial<PositionInput>): Promise
   const departmentResult = validatePositionDepartment(departmentId);
   if (departmentResult.code !== 0) return createErrorResponse(departmentResult.message || '所属部门不可用');
   const boundUsers = ensureUsersWithAuth().filter((user) => user.positionId === id);
-  if (departmentId !== current.departmentId && boundUsers.some((user) => user.departmentId !== departmentId)) {
+  if (departmentId && departmentId !== current.departmentId && boundUsers.some((user) => user.departmentId !== departmentId)) {
     return createErrorResponse('已有员工使用该岗位，请先调整员工部门或岗位');
   }
   const nextPosition: Position = {

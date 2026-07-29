@@ -42,12 +42,20 @@ function nullableText(value: unknown): string | null {
   return text || null;
 }
 
-function containsHistoricalUserReference(value: unknown, userId: string, userName: string): boolean {
-  if (typeof value === 'string') return value === userId || value === userName;
-  if (Array.isArray(value)) return value.some((item) => containsHistoricalUserReference(item, userId, userName));
+function isUserReferenceKey(key: string): boolean {
+  return /(owner|assignee|assignedTo|createdBy|updatedBy|operator|actor|reviewer|sales|releasedBy|previousOwner|leftBy|transferBy|inputBy|employee)/i.test(key);
+}
+
+function containsHistoricalUserReference(value: unknown, userId: string, userName: string, key = ''): boolean {
+  if (typeof value === 'string') return value === userId || (value === userName && isUserReferenceKey(key));
+  if (Array.isArray(value)) return value.some((item) => containsHistoricalUserReference(item, userId, userName, key));
   if (!value || typeof value !== 'object') return false;
-  return Object.values(value as Record<string, unknown>)
-    .some((item) => containsHistoricalUserReference(item, userId, userName));
+  const record = value as Record<string, unknown>;
+  if (typeof record.field === 'string' && isUserReferenceKey(record.field)) {
+    if (record.oldValue === userName || record.newValue === userName || record.oldValue === userId || record.newValue === userId) return true;
+  }
+  return Object.entries(record)
+    .some(([entryKey, item]) => containsHistoricalUserReference(item, userId, userName, entryKey));
 }
 
 async function hasNormalizedUserReference(prisma: unknown, userId: string): Promise<boolean> {
@@ -56,6 +64,7 @@ async function hasNormalizedUserReference(prisma: unknown, userId: string): Prom
     ['department', { managerId: userId }],
     ['coCreationRequest', { OR: [{ requesterId: userId }, { supervisorId: userId }] }],
     ['coCreationValidation', { ownerId: userId }],
+    ['coCreationBrief', { factsConfirmedBy: userId }],
     ['coCreationEvent', { actorId: userId }],
     ['businessExportAudit', { actorId: userId }],
     ['customerTodo', { OR: [{ assigneeId: userId }, { createdById: userId }, { completedById: userId }, { canceledById: userId }] }],
@@ -322,7 +331,7 @@ export function createSettingsService(prisma: SettingsPrisma) {
       }
       const nextDepartmentId = data.departmentId !== undefined ? nullableText(data.departmentId) : position.departmentId;
       const boundUsers = (await prisma.user.findMany()).filter((user) => user.positionId === id);
-      if (nextDepartmentId !== position.departmentId && boundUsers.some((user) => user.departmentId !== nextDepartmentId)) {
+      if (nextDepartmentId && nextDepartmentId !== position.departmentId && boundUsers.some((user) => user.departmentId !== nextDepartmentId)) {
         return failure('已有员工使用该岗位，请先调整员工部门或岗位');
       }
       const persistPosition = async (client: Pick<PrismaClient, 'position' | 'user'>) => {

@@ -103,6 +103,11 @@ assert.equal(createdUser.data?.positionName, 'Legacy Position');
 const movedBoundPosition = await settingsApi.updatePosition('pos-legacy', { departmentId: 'dept-position-only' });
 assert.notEqual(movedBoundPosition.code, 0);
 assert.match(movedBoundPosition.message || '', /已有员工使用/);
+const clearedBoundPositionDepartment = await settingsApi.updatePosition('pos-legacy', { departmentId: '' });
+assert.equal(clearedBoundPositionDepartment.code, 0);
+assert.equal(clearedBoundPositionDepartment.data?.departmentId, undefined);
+const restoredBoundPositionDepartment = await settingsApi.updatePosition('pos-legacy', { departmentId: 'dept-custom' });
+assert.equal(restoredBoundPositionDepartment.code, 0);
 
 const updatedUser = await settingsApi.updateUser(createdUser.data!.id, {
   departmentId: 'dept-position-only',

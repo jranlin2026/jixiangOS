@@ -166,6 +166,7 @@ let customerRecord: any = {
 };
 let leadRecords: any[] = [];
 let normalizedReferenceUserId: string | null = null;
+let coCreationBriefReferenceUserId: string | null = null;
 let transactionCalls = 0;
 
 function createModel<T extends { id: string }>(items: T[]) {
@@ -188,7 +189,8 @@ function createModel<T extends { id: string }>(items: T[]) {
         || (where.code !== undefined && item.code === where.code)
         || (where.account !== undefined && item.account === where.account)
       ));
-      items[idx] = { ...items[idx], ...data };
+      const definedData = Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined));
+      items[idx] = { ...items[idx], ...definedData };
       return items[idx];
     },
     deleteMany: async ({ where }: any) => {
@@ -213,6 +215,9 @@ const prisma = {
   knowledgeVisibility: createModel(knowledgeVisibilities),
   customerTodo: {
     findFirst: async () => normalizedReferenceUserId ? { id: 'todo-user-reference' } : null,
+  },
+  coCreationBrief: {
+    findFirst: async () => coCreationBriefReferenceUserId ? { id: 'brief-user-reference' } : null,
   },
   authSession: { deleteMany: async () => ({ count: 1 }) },
   businessRecord: {
@@ -425,6 +430,15 @@ const normalizedReferenceDelete = await service.deleteUser(createdUserData.id);
 assert.notEqual(normalizedReferenceDelete.code, 0);
 assert.match(normalizedReferenceDelete.message || '', /历史业务数据/);
 normalizedReferenceUserId = null;
+coCreationBriefReferenceUserId = createdUserData.id;
+const coCreationBriefReferenceDelete = await service.deleteUser(createdUserData.id);
+assert.notEqual(coCreationBriefReferenceDelete.code, 0);
+assert.match(coCreationBriefReferenceDelete.message || '', /历史业务数据/);
+coCreationBriefReferenceUserId = null;
+customerRecord = {
+  ...customerRecord,
+  data: { ...customerRecord.data, name: createdUserData.name },
+};
 const deletedUser = await service.deleteUser(createdUserData.id);
 assert.equal(deletedUser.code, 0);
 assert.equal(users.some((user) => user.id === createdUserData.id), false);
@@ -475,6 +489,11 @@ assert.equal((boundSalesUser.data as any).positionName, 'Sales Consultant');
 const movedBoundPosition = await service.updatePosition('pos-sales-consultant', { departmentId: 'dept-general' });
 assert.notEqual(movedBoundPosition.code, 0);
 assert.match(movedBoundPosition.message || '', /已有员工使用/);
+const clearedBoundPositionDepartment = await service.updatePosition('pos-sales-consultant', { departmentId: '' });
+assert.equal(clearedBoundPositionDepartment.code, 0);
+assert.equal((clearedBoundPositionDepartment.data as any).departmentId, undefined);
+const restoredBoundPositionDepartment = await service.updatePosition('pos-sales-consultant', { departmentId: 'dept-sales' });
+assert.equal(restoredBoundPositionDepartment.code, 0, restoredBoundPositionDepartment.message);
 
 const updatedPosition = await service.updatePosition('pos-sales-consultant', { name: 'Senior Sales Consultant' });
 assert.equal(updatedPosition.code, 0);
