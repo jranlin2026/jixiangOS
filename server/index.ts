@@ -81,6 +81,7 @@ import { createOrderSettlementCommandService } from './services/orderSettlementC
 import { createRecoveryCrmBridge } from './services/recoveryCrmBridge';
 import { createCommissionPayoutService } from './services/commissionPayoutService';
 import { createCommissionMonthlyReportService } from './services/commissionMonthlyReportService';
+import { enrichCommissionStorageScope } from './services/commissionBusinessTimeService';
 import { createFinanceTransactionService } from './services/financeTransactionService';
 import { collectLeadSourcePairs, ensureLeadSourceConfigsInTransaction } from './services/leadSourceConfigSyncService';
 import { createKnowledgeService } from './services/enablement/knowledgeService';
@@ -1641,7 +1642,14 @@ app.get('/api/storage', requireStorageAccess, runtimeStorageGetHandler, async (r
       const result = await storageService.get(key);
       return [key, result.code === 0 ? result.data : null] as const;
       }));
-    const data = Object.fromEntries(entries);
+    let data = Object.fromEntries(entries);
+    if (requestedScope === 'commissions') {
+      const recoveryResult = await storageService.get(STORAGE_KEYS.RECOVERY_ORDERS);
+      const recoveryOrders = recoveryResult.code === 0 && Array.isArray(recoveryResult.data)
+        ? recoveryResult.data
+        : [];
+      data = enrichCommissionStorageScope(data, recoveryOrders);
+    }
     const context = await assetStorageContext();
     const assetFilteredData = filterAssetStorageData(data, req.currentUser!, context);
     res.json({

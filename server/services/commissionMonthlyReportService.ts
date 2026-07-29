@@ -2,7 +2,10 @@ import ExcelJS from 'exceljs';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { failure, success } from '../api/response';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
-import { selectCurrentCommissionRounds } from '../../src/shared/utils/commissionConfiguration';
+import {
+  applyRecoveryCommissionBusinessTimes,
+  selectCurrentCommissionRounds,
+} from '../../src/shared/utils/commissionConfiguration';
 import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type {
@@ -12,6 +15,7 @@ import type {
   CommissionTierSnapshot,
 } from '../../src/types/commission';
 import type { Order } from '../../src/types/order';
+import type { RecoveryOrder } from '../../src/types/recoveryOrder';
 
 type ReportPrisma = Pick<PrismaClient, 'businessRecord' | 'businessExportAudit'>;
 type ReportScope = 'all' | 'department' | 'employee';
@@ -489,12 +493,17 @@ export function createCommissionMonthlyReportService(prisma: ReportPrisma, optio
     try {
       const request = validateRequest(input);
       if (!hasPermission(actor, PERMISSION_KEYS.FINANCE_PAYOUT_REPORT_EXPORT, 'read')) throw new CommissionMonthlyReportError(403, '无权导出提成月度报告');
-      const [commissionRows, payoutRows, orderRows] = await Promise.all([
+      const [commissionRows, payoutRows, orderRows, recoveryRows] = await Promise.all([
         prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSIONS } }),
         prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES } }),
         prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDERS } }),
+        prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } }),
       ]);
-      const commissions = commissionRows.map((row) => asObject(row.data) as unknown as Commission);
+      const recoveryOrders = recoveryRows.map((row) => asObject(row.data) as unknown as RecoveryOrder);
+      const commissions = applyRecoveryCommissionBusinessTimes(
+        commissionRows.map((row) => asObject(row.data) as unknown as Commission),
+        recoveryOrders,
+      );
       const payoutRecords = payoutRows.map((row) => normalizePayoutRecord(row.data)).filter((row): row is CommissionPayoutRecord => Boolean(row));
       const orders = orderRows.map((row) => asObject(row.data) as unknown as Order);
       const generatedAt = now().toISOString();

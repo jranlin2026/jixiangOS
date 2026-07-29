@@ -3,6 +3,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { failure, success } from '../api/response';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import {
+  applyRecoveryCommissionBusinessTimes,
   getCommissionTierBucketKey,
   selectCurrentCommissionRounds,
 } from '../../src/shared/utils/commissionConfiguration';
@@ -294,12 +295,16 @@ export function createCommissionPayoutService(prisma: PayoutPrisma, options: Com
 
   const getPeriodWorkspace = async (period: string) => {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) return failure<CommissionPayoutWorkspace>('请选择正确的提成月份', 400);
-    const [commissionRows, recordResult] = await Promise.all([
+    const [commissionRows, recoveryRows, recordResult] = await Promise.all([
       prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSIONS } }),
+      prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } }),
       listRecords(period),
     ]);
-    const commissions = resolveTieredPayoutAmounts(commissionRows
-      .map((row) => normalizeCommissionRound(row.data)))
+    const recoveryOrders = recoveryRows.map((row) => asObject(row.data) as unknown as RecoveryOrder);
+    const commissions = resolveTieredPayoutAmounts(applyRecoveryCommissionBusinessTimes(
+      commissionRows.map((row) => normalizeCommissionRound(row.data)),
+      recoveryOrders,
+    ))
       .filter((item) => periodOf(item) === period && INCLUDED_WORKSPACE_STATUSES.has(item.status));
     const employees = employeeRows(commissions);
     return success<CommissionPayoutWorkspace>({
@@ -317,9 +322,15 @@ export function createCommissionPayoutService(prisma: PayoutPrisma, options: Com
   };
 
   const getPendingWorkspace = async () => {
-    const commissionRows = await prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSIONS } });
-    const commissions = resolveTieredPayoutAmounts(commissionRows
-      .map((row) => normalizeCommissionRound(row.data)))
+    const [commissionRows, recoveryRows] = await Promise.all([
+      prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSIONS } }),
+      prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } }),
+    ]);
+    const recoveryOrders = recoveryRows.map((row) => asObject(row.data) as unknown as RecoveryOrder);
+    const commissions = resolveTieredPayoutAmounts(applyRecoveryCommissionBusinessTimes(
+      commissionRows.map((row) => normalizeCommissionRound(row.data)),
+      recoveryOrders,
+    ))
       .filter((item) => item.status === '待确认' || item.status === '待发放');
     const employees = employeeRows(commissions);
     return success<CommissionPayoutWorkspace>({
@@ -362,13 +373,19 @@ export function createCommissionPayoutService(prisma: PayoutPrisma, options: Com
 
     return prisma.$transaction(async (tx) => {
       await lockCommissionRows(tx);
-      const rows = await tx.businessRecord.findMany({
-        where: { domain: STORAGE_KEYS.COMMISSIONS },
-        orderBy: [{ eventAt: 'asc' }, { createdAt: 'asc' }],
-      });
+      const [rows, recoveryRows] = await Promise.all([
+        tx.businessRecord.findMany({
+          where: { domain: STORAGE_KEYS.COMMISSIONS },
+          orderBy: [{ eventAt: 'asc' }, { createdAt: 'asc' }],
+        }),
+        tx.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } }),
+      ]);
       const requested = new Set(requestedOwnerIds);
-      const eligible = resolveTieredPayoutAmounts(rows
-        .map((row) => normalizeCommissionRound(row.data)))
+      const recoveryOrders = recoveryRows.map((row) => asObject(row.data) as unknown as RecoveryOrder);
+      const eligible = resolveTieredPayoutAmounts(applyRecoveryCommissionBusinessTimes(
+        rows.map((row) => normalizeCommissionRound(row.data)),
+        recoveryOrders,
+      ))
         .filter((item) => item.status === '待发放' && requested.has(ownerKey(item)));
       const foundOwners = new Set(eligible.map(ownerKey));
       if (requestedOwnerIds.some((id) => !foundOwners.has(id))) {

@@ -201,4 +201,45 @@ const unauthorized = await service.exportWorkbook(
 );
 assert.equal(unauthorized.code, 403);
 
+const recoveryBusinessTimeAuditRows: Array<Record<string, unknown>> = [];
+const historicalRecoveryCommission = baseCommission({
+  id: 'historical-recovery-created-in-july',
+  orderId: 'historical-recovery-order',
+  orderNo: 'RCV-BUSINESS-IN-JUNE',
+  sourceBusinessType: 'after_sales_recovery',
+  sourceRecoveryOrderId: 'historical-recovery-order',
+  paymentDate: '2026-07-25T12:36:40.000Z',
+  createdAt: '2026-07-25T12:36:40.000Z',
+});
+const recoveryBusinessTimeService = createCommissionMonthlyReportService({
+  businessRecord: {
+    findMany: async ({ where }: { where: { domain: string } }) => {
+      if (where.domain === STORAGE_KEYS.COMMISSIONS) return [{ data: historicalRecoveryCommission }];
+      if (where.domain === STORAGE_KEYS.RECOVERY_ORDERS) return [{ data: {
+        id: 'historical-recovery-order',
+        recoveryAt: '2026-06-15T08:00:00.000Z',
+      } }];
+      return [];
+    },
+  },
+  businessExportAudit: {
+    create: async ({ data: audit }: { data: Record<string, unknown> }) => {
+      recoveryBusinessTimeAuditRows.push(audit);
+      return audit;
+    },
+  },
+} as never, { now: () => new Date('2026-07-31T10:00:00.000Z') });
+const julyRecoveryExport = await recoveryBusinessTimeService.exportWorkbook(
+  { period: '2026-07', reason: '核对售后归月', scope: 'all' },
+  financeActor,
+);
+assert.equal(julyRecoveryExport.code, 400, '导出也不得按分账创建月份纳入售后挽回');
+const juneRecoveryExport = await recoveryBusinessTimeService.exportWorkbook(
+  { period: '2026-06', reason: '核对售后归月', scope: 'all' },
+  financeActor,
+);
+assert.equal(juneRecoveryExport.code, 0, juneRecoveryExport.message);
+assert.equal((juneRecoveryExport.data as { summary?: { recoveryOrderCount?: number } })?.summary?.recoveryOrderCount, 1, '导出必须按挽回成交月份纳入售后订单');
+assert.equal(recoveryBusinessTimeAuditRows.length, 1, '没有数据的错误月份不能写入导出审计');
+
 console.log('commission monthly report service tests passed');

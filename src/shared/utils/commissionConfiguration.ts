@@ -4,6 +4,7 @@ import type {
   CommissionPayoutPlanSnapshot,
   CommissionTier,
 } from '../../types/commission';
+import type { RecoveryOrder } from '../../types/recoveryOrder';
 
 function cloneTiers(tiers?: CommissionTier[]): CommissionTier[] | undefined {
   if (!tiers?.length) return undefined;
@@ -42,6 +43,29 @@ export function isRecoveryCommission(commission: Commission): boolean {
     || commission.sourceBusinessType === 'refund_recovery'
     || Boolean(commission.sourceRecoveryOrderId)
     || String(commission.orderNo || '').startsWith('RCV-');
+}
+
+/**
+ * 售后挽回提成按业务实际发生的挽回成交时间归月。
+ * 历史记录可能曾把分账创建时间写入 paymentDate，因此读取时以源挽回单快照纠正；
+ * 正式订单及无法关联源挽回单的记录保持不变。
+ */
+export function applyRecoveryCommissionBusinessTimes(
+  commissions: Commission[],
+  recoveryOrders: RecoveryOrder[],
+): Commission[] {
+  const recoveryAtById = new Map(recoveryOrders
+    .filter((order) => Boolean(order.id && order.recoveryAt))
+    .map((order) => [order.id, order.recoveryAt]));
+
+  return commissions.map((commission) => {
+    if (!isRecoveryCommission(commission)) return commission;
+    const recoveryId = commission.sourceRecoveryOrderId || commission.orderId;
+    const recoveryAt = recoveryAtById.get(recoveryId);
+    return recoveryAt && recoveryAt !== commission.paymentDate
+      ? { ...commission, paymentDate: recoveryAt }
+      : commission;
+  });
 }
 
 /**

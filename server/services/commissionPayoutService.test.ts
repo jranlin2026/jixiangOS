@@ -359,4 +359,39 @@ function fakePrisma(seed: any[]) {
   );
 }
 
+{
+  const recoveryId = 'recovery-created-after-business-month';
+  const historicalDateCommission = commission('recovery-wrong-created-month', '待发放', {
+    orderId: recoveryId,
+    orderNo: 'RCV-20260725-BUSINESS-JUNE',
+    sourceRecoveryOrderId: recoveryId,
+    sourceBusinessType: 'after_sales_recovery',
+    paymentDate: '2026-07-25T12:36:40.000Z',
+    createdAt: '2026-07-25T12:36:40.000Z',
+    updatedAt: '2026-07-25T12:49:00.000Z',
+  });
+  const recovery = {
+    id: recoveryId,
+    recoveryNo: historicalDateCommission.orderNo,
+    recoveryAt: '2026-06-15T08:00:00.000Z',
+    recoveryAmount: historicalDateCommission.orderAmount,
+    commissionIds: [historicalDateCommission.id],
+    createdAt: historicalDateCommission.createdAt,
+    updatedAt: historicalDateCommission.updatedAt,
+  };
+  const db = fakePrisma([
+    record(STORAGE_KEYS.COMMISSIONS, historicalDateCommission as unknown as Record<string, unknown>),
+    record(STORAGE_KEYS.RECOVERY_ORDERS, recovery),
+  ]);
+  const service = createCommissionPayoutService(db.prisma, { now: () => new Date(NOW) });
+  const july = await service.getPeriodWorkspace('2026-07');
+  const june = await service.getPeriodWorkspace('2026-06');
+  assert.equal(july.data?.employees.length, 0, '售后挽回不得按分账创建月份归入月报');
+  assert.deepEqual(
+    june.data?.employees.flatMap((employee) => employee.commissions.map((item) => item.paymentDate)),
+    ['2026-06-15T08:00:00.000Z'],
+    '售后挽回必须按关联挽回单的成交时间归月',
+  );
+}
+
 console.log('commission payout service tests passed');
