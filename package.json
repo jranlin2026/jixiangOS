@@ -33,6 +33,7 @@
     "customer:merge-release-gate": "tsx scripts/verify-customer-merge-release.ts",
     "finance:backfill": "tsx scripts/backfill-finance-transactions.ts",
     "clone:sanitize": "tsx scripts/sanitize-production-clone.ts",
+    "clone:restore-verify": "bash scripts/mysql/verify-clone-restore.sh",
     "clone:attachments-report": "tsx scripts/report-clone-missing-attachments.ts",
     "test-data:reset-business": "tsx scripts/reset-business-test-data.ts"
   },

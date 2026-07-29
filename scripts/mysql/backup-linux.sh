@@ -8,6 +8,7 @@ MYSQL_USER="${JIXIANG_MYSQL_USER:-jixiang_os}"
 MYSQL_PASSWORD="${JIXIANG_MYSQL_PASSWORD:-}"
 BACKUP_DIR="${JIXIANG_BACKUP_DIR:-/var/backups/jixiang-os}"
 KEEP_DAYS="${JIXIANG_BACKUP_KEEP_DAYS:-14}"
+PRUNE_BACKUPS="${JIXIANG_BACKUP_PRUNE:-YES}"
 
 if [[ -z "$MYSQL_PASSWORD" ]]; then
   echo "JIXIANG_MYSQL_PASSWORD is required" >&2
@@ -77,7 +78,9 @@ chmod 600 "$output" "$partial_checksum"
 mv "$partial_checksum" "$checksum"
 completed=1
 trap - EXIT
-find "$BACKUP_DIR" -name "$MYSQL_DATABASE-*.sql.gz" -type f -mtime +"$KEEP_DAYS" -delete
-find "$BACKUP_DIR" -name "$MYSQL_DATABASE-*.sql.gz.sha256" -type f -mtime +"$KEEP_DAYS" -delete
+if [[ "$PRUNE_BACKUPS" == "YES" ]]; then
+  find "$BACKUP_DIR" -name "$MYSQL_DATABASE-*.sql.gz" -type f -mtime +"$KEEP_DAYS" -delete
+  find "$BACKUP_DIR" -name "$MYSQL_DATABASE-*.sql.gz.sha256" -type f -mtime +"$KEEP_DAYS" -delete
+fi
 
 echo "Backup created: $output"

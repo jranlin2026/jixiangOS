@@ -1,5 +1,39 @@
 export type PositionMappingMatchStatus = 'UNIQUE_MATCH' | 'MULTIPLE_MATCHES' | 'DEPARTMENT_CONFLICT' | 'NO_MATCH';
 export type PositionMappingApplyStatus = 'PENDING' | 'APPLIED' | 'FAILED';
+export type PositionGovernanceReadinessStatus = 'BOUND_VALID' | 'INVALID_BINDING' | PositionMappingMatchStatus;
+
+export interface PositionGovernanceReadinessItem {
+  employeeId: string;
+  employeeName: string;
+  departmentId?: string;
+  departmentName?: string;
+  roleName: string;
+  originalPositionName: string;
+  boundPositionId?: string;
+  boundPositionName?: string;
+  suggestedPositionId?: string;
+  candidatePositionIds: string[];
+  status: PositionGovernanceReadinessStatus;
+  warnings: Array<'ROLE_POSITION_SUSPECTED'>;
+  reason: string;
+}
+
+export interface PositionGovernanceReadiness {
+  items: PositionGovernanceReadinessItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  summary: {
+    total: number;
+    boundValid: number;
+    invalidBinding: number;
+    uniqueMatch: number;
+    multipleMatches: number;
+    departmentConflict: number;
+    noMatch: number;
+    rolePositionSuspected: number;
+  };
+}
 
 export interface PositionMappingItem {
   id: string;

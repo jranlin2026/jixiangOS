@@ -1581,6 +1581,19 @@ app.delete('/api/settings/positions/:id', requireOrganizationDeleteAccess, async
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
+app.get('/api/settings/position-governance/readiness', requireOrganizationReadAccess, async (req, res) => {
+  const result = await positionGovernanceService.getReadiness({
+    departmentId: typeof req.query.departmentId === 'string' ? req.query.departmentId : undefined,
+    search: typeof req.query.search === 'string' ? req.query.search : undefined,
+    employmentStatus: typeof req.query.employmentStatus === 'string' ? req.query.employmentStatus : undefined,
+    status: typeof req.query.status === 'string' ? req.query.status as any : undefined,
+    warning: req.query.warning === 'ROLE_POSITION_SUSPECTED' ? 'ROLE_POSITION_SUSPECTED' : undefined,
+    page: Number(req.query.page) || 1,
+    pageSize: Number(req.query.pageSize) || 10,
+  });
+  res.json(result);
+});
+
 app.post('/api/settings/position-governance/previews', requireOrganizationWriteAccess, async (req: AuthenticatedRequest, res) => {
   const result = await positionGovernanceService.createPreview(req.body || {}, req.currentUser!);
   res.status(result.code === 0 ? 200 : 400).json(result);

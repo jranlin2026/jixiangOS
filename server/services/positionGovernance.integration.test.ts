@@ -59,6 +59,24 @@ if (!process.env.DATABASE_URL) {
     const beforeUsers = await prisma.user.findMany({ where: { id: { in: userIds } }, orderBy: { id: 'asc' } });
 
     const service = createPositionGovernanceService(prisma);
+    const beforeBatchCount = await prisma.positionMappingBatch.count();
+    const readiness = await service.getReadiness({ search: runId, employmentStatus: 'active', page: 1, pageSize: 2 });
+    assert.equal(readiness.code, 0);
+    assert.ok(readiness.data);
+    assert.equal(readiness.data.total, 4);
+    assert.equal(readiness.data.items.length, 2, '盘点必须遵循服务端分页');
+    assert.deepEqual(readiness.data.summary, {
+      total: 4,
+      boundValid: 0,
+      invalidBinding: 0,
+      uniqueMatch: 1,
+      multipleMatches: 1,
+      departmentConflict: 1,
+      noMatch: 1,
+      rolePositionSuspected: 0,
+    });
+    assert.equal(await prisma.positionMappingBatch.count(), beforeBatchCount, '只读盘点不得创建映射批次');
+
     const preview = await service.createPreview(
       { search: runId, employmentStatus: 'active' },
       { id: actorId, name: '集成测试管理员' },

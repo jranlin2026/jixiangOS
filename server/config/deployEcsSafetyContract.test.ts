@@ -8,6 +8,8 @@ const deploySource = readFileSync(join(process.cwd(), 'scripts', 'deploy', 'depl
 const legacyDeployPath = join(process.cwd(), 'scripts', 'deploy', 'deploy-linux.sh');
 const legacyDeploySource = readFileSync(legacyDeployPath, 'utf8');
 const backupSource = readFileSync(join(process.cwd(), 'scripts', 'mysql', 'backup-linux.sh'), 'utf8');
+assert.match(backupSource, /JIXIANG_BACKUP_PRUNE/);
+assert.match(backupSource, /if \[\[ "\$PRUNE_BACKUPS" == "YES" \]\]/);
 const cloudDeployDoc = readFileSync(join(process.cwd(), 'docs', 'cloud-deployment-aliyun.md'), 'utf8');
 const minimalLaunchDoc = readFileSync(join(process.cwd(), 'docs', 'aliyun-minimal-launch.md'), 'utf8');
 const nginxSource = readFileSync(join(process.cwd(), 'deploy', 'nginx', 'jixiang-os.conf'), 'utf8');

@@ -1,5 +1,37 @@
 import assert from 'node:assert/strict';
-import { buildPositionMappingPreview, createPositionGovernanceService } from './positionGovernance';
+import { buildPositionGovernanceReadiness, buildPositionMappingPreview, createPositionGovernanceService } from './positionGovernance';
+
+const readiness = buildPositionGovernanceReadiness({
+  users: [
+    { id: 'bound', name: '已绑定', departmentId: 'dept-sales', positionId: 'position-sales', positionName: '销售顾问', role: '员工' },
+    { id: 'invalid', name: '无效绑定', departmentId: 'dept-customer', positionId: 'position-sales', positionName: '销售顾问', role: '员工' },
+    { id: 'unique', name: '唯一匹配', departmentId: 'dept-sales', positionId: null, positionName: '销售顾问', role: '员工' },
+    { id: 'multiple', name: '多个候选', departmentId: 'dept-sales', positionId: null, positionName: '销售主管', role: '销售主管' },
+    { id: 'conflict', name: '部门冲突', departmentId: 'dept-customer', positionId: null, positionName: '销售顾问', role: '员工' },
+    { id: 'missing', name: '无匹配', departmentId: 'dept-sales', positionId: null, positionName: '未知岗位', role: '系统管理员' },
+  ],
+  positions: [
+    { id: 'position-sales', name: '销售顾问', departmentId: 'dept-sales', isActive: true },
+    { id: 'position-manager-a', name: '销售主管', departmentId: 'dept-sales', isActive: true },
+    { id: 'position-manager-b', name: '销售主管', departmentId: 'dept-sales', isActive: true },
+  ],
+  departments: [
+    { id: 'dept-sales', name: '销售部' },
+    { id: 'dept-customer', name: '客户成功部' },
+  ],
+  roles: [{ id: 'role-manager', name: '销售主管' }],
+});
+
+assert.deepEqual(readiness.map((item) => [item.employeeId, item.status]), [
+  ['bound', 'BOUND_VALID'],
+  ['invalid', 'INVALID_BINDING'],
+  ['unique', 'UNIQUE_MATCH'],
+  ['multiple', 'MULTIPLE_MATCHES'],
+  ['conflict', 'DEPARTMENT_CONFLICT'],
+  ['missing', 'NO_MATCH'],
+]);
+assert.deepEqual(readiness.find((item) => item.employeeId === 'multiple')?.warnings, ['ROLE_POSITION_SUSPECTED']);
+assert.match(readiness.find((item) => item.employeeId === 'invalid')?.reason || '', /部门/);
 
 const preview = buildPositionMappingPreview({
   users: [
@@ -50,6 +82,7 @@ const service = createPositionGovernanceService({
   },
   position: { findMany: async () => [{ id: 'position-sales', name: '销售顾问', departmentId: 'dept-sales', isActive: true }] },
   department: { findMany: async () => [{ id: 'dept-sales', name: '销售部' }] },
+  role: { findMany: async () => [{ id: 'role-employee', name: '员工' }] },
   positionMappingBatch: {
     create: async ({ data }: any) => { storedBatches.push(data); return data; },
   },
@@ -64,6 +97,15 @@ assert.equal(persistedPreview.data?.items.length, 1);
 assert.equal(storedBatches.length, 1);
 assert.equal(storedItems.length, 1);
 assert.equal(employeeWriteCount, 0, '生成预览不得修改员工');
+
+const readinessResult = await service.getReadiness({ page: 1, pageSize: 1, status: 'UNIQUE_MATCH' });
+assert.equal(readinessResult.code, 0);
+assert.equal(readinessResult.data?.total, 1);
+assert.equal(readinessResult.data?.items[0].employeeId, 'user-preview');
+assert.equal(readinessResult.data?.summary.total, 1);
+assert.equal(readinessResult.data?.summary.uniqueMatch, 1);
+assert.equal(storedBatches.length, 1, '只读盘点不得创建映射批次');
+assert.equal(storedItems.length, 1, '只读盘点不得创建映射明细');
 
 const employee = {
   id: 'user-apply', name: '回填员工', departmentId: 'dept-sales', positionId: null, positionName: '销售顾问',

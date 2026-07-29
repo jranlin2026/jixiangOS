@@ -155,10 +155,11 @@ export JIXIANG_MYSQL_USER=jixiang_os_clone
 read -s -p 'Local clone DB password: ' JIXIANG_MYSQL_PASSWORD; export JIXIANG_MYSQL_PASSWORD; echo
 export JIXIANG_CONFIRM_RESTORE=YES
 bash scripts/mysql/restore-clone.sh /绝对路径/jixiang-migration-staging/jixiang_os-时间.sql.gz
+npm run clone:restore-verify
 unset JIXIANG_MYSQL_PASSWORD JIXIANG_CONFIRM_RESTORE
 ```
 
-`restore-clone.sh` 已强制 loopback、固定库名 `jixiang_os_prod_clone_test`、非 root 最小权限账号、空库、SHA-256、gzip 和明确确认值。通用灾备脚本 `restore-linux.sh` 不承担克隆职责。
+`restore-clone.sh` 已强制 loopback、固定库名 `jixiang_os_prod_clone_test`、非 root 最小权限账号、空库、SHA-256、gzip 和明确确认值。`clone:restore-verify` 会继续以只读方式确认克隆库非空、Prisma 迁移表存在且没有未完成迁移；未通过时不得进入净化和岗位预览。通用灾备脚本 `restore-linux.sh` 不承担克隆职责。
 
 ## 9. 本地数据去凭证与副作用隔离
 
