@@ -100,6 +100,22 @@ const inheritedPositionUser = await settingsApi.createUser({
 assert.equal(inheritedPositionUser.code, 0);
 assert.equal(inheritedPositionUser.data?.positionId, 'pos-legacy');
 
+const freeTextPositionUser = await settingsApi.createUser({
+  name: 'Free Text Position User',
+  account: 'free_text_position_user',
+  email: 'free_text_position_user@example.com',
+  phone: '13900001114',
+  role: 'Sales Consultant',
+  roleId: 'role-sales-consultant',
+  departmentId: 'dept-custom',
+  positionName: 'Legacy Free Text Position',
+  isActive: true,
+  password: DEFAULT_USER_PASSWORD,
+});
+assert.equal(freeTextPositionUser.code, 0);
+assert.equal(freeTextPositionUser.data?.positionId, undefined);
+assert.equal(freeTextPositionUser.data?.positionName, undefined);
+
 const createdUser = await settingsApi.createUser({
   name: 'Canonical Position User',
   account: 'canonical_position_user',

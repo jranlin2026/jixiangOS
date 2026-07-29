@@ -904,7 +904,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
                       <TableCell>账号</TableCell>
                       <TableCell>手机号</TableCell>
                       <TableCell>角色</TableCell>
-                      <TableCell>职务</TableCell>
+                      <TableCell>岗位</TableCell>
                       <TableCell>部门</TableCell>
                       <TableCell>状态</TableCell>
                       <TableCell align="center">操作</TableCell>
@@ -1109,7 +1109,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
         <DialogCloseTitle onClose={() => setMoveOpen(false)}>移动员工</DialogCloseTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
-            已选择 {selectedUserIds.length} 名员工，选择目标部门后会统一更新所属部门。职位是员工资料中的文本字段，不会随部门自动变更。
+            已选择 {selectedUserIds.length} 名员工，选择目标部门后会统一更新所属部门。已绑定岗位仅在适用于目标部门时保留，不适用的岗位将清空。
           </Typography>
           <TextField select label="目标部门" value={moveDepartmentId} onChange={(event) => setMoveDepartmentId(event.target.value)} fullWidth>
             {activeDepartments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}

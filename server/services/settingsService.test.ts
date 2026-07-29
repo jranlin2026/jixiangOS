@@ -320,6 +320,22 @@ assert.equal('passwordHash' in createdUserData, false);
 assert.equal('passwordSalt' in createdUserData, false);
 assert.equal('passwordUpdatedAt' in createdUserData, false);
 
+const freeTextPositionUser = await service.createUser({
+  name: 'Free Text Position User',
+  account: 'free_text_position_user',
+  email: 'free_text_position_user@company.com',
+  phone: '13000000007',
+  role: 'Sales',
+  roleId: 'role-sales',
+  departmentId: 'dept-sales',
+  positionName: '自由文本职务',
+  isActive: true,
+  password: 'Secret123',
+} as any);
+assert.equal(freeTextPositionUser.code, 0);
+assert.equal((freeTextPositionUser.data as any).positionId, undefined);
+assert.equal((freeTextPositionUser.data as any).positionName, undefined);
+
 const updatedUser = await service.updateUser(createdUserData.id, { name: 'Updated User', account: 'updated_user' });
 const updatedUserData = updatedUser.data as any;
 assert.equal(updatedUser.code, 0);

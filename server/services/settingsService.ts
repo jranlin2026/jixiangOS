@@ -440,7 +440,7 @@ export function createSettingsService(prisma: SettingsPrisma) {
           avatar: data.avatar || null,
           departmentId: data.departmentId || null,
           positionId: selectedPosition?.id || null,
-          positionName: selectedPosition?.name || data.positionName || null,
+          positionName: selectedPosition?.name || null,
           roleId: data.roleId || null,
           passwordHash: hashPassword(password, passwordSalt),
           passwordSalt,
@@ -492,9 +492,7 @@ export function createSettingsService(prisma: SettingsPrisma) {
           positionId: data.positionId !== undefined ? selectedPosition?.id || null : undefined,
           positionName: data.positionId !== undefined
             ? selectedPosition?.name || null
-            : user.positionId
-              ? undefined
-              : data.positionName !== undefined ? data.positionName || null : undefined,
+            : undefined,
           roleId: data.roleId !== undefined ? data.roleId || null : undefined,
           isActive: data.isActive,
           employmentStatus: data.employmentStatus,

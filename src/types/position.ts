@@ -3,7 +3,7 @@ import type { PositionDepartmentScope } from '../shared/utils/positionApplicabil
 
 export type { PositionDepartmentScope } from '../shared/utils/positionApplicability';
 
-/** 职位配置：只表达岗位职责，不控制系统权限 */
+/** 岗位配置：只表达岗位职责，不控制系统权限 */
 export interface Position {
   id: ID;
   name: string;

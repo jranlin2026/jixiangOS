@@ -10,7 +10,7 @@ assert.equal(
 );
 assert.equal(
   formatEmployeeNameWithPosition({ name: '李晓健', positionName: '  ' }),
-  '李晓健（未设置职位）',
+  '李晓健（未设置岗位）',
 );
 
 assert.equal(formatLeadSourceLabel('市场品牌部', '官网'), '市场品牌部 / 官网');

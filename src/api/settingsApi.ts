@@ -81,14 +81,12 @@ function withResolvedUserOrganization<T extends Partial<User>>(data: T): T {
   const { positions, roles } = ensureOrganizationConfigData();
   const role = resolveRoleForUser({ role: data.role || DEFAULT_USER_ROLE, roleId: data.roleId }, roles);
   const position = data.positionId ? positions.find((item) => item.id === data.positionId) : undefined;
-  const hasPositionSelection = data.positionId !== undefined;
-  const legacyPositionName = typeof data.positionName === 'string' ? data.positionName.trim() || undefined : data.positionName;
   return {
     ...data,
     role: role?.name || data.role,
     roleId: role?.id || data.roleId,
     positionId: position?.id,
-    positionName: position?.name || (hasPositionSelection ? undefined : legacyPositionName),
+    positionName: position?.name,
   };
 }
 
@@ -660,6 +658,7 @@ async function updateUser(id: string, data: Partial<User> & { reason?: string })
     if (positionResult.code !== 0) return createErrorResponse(positionResult.message || '岗位不可用');
   }
   const safeData = withResolvedUserOrganization({ ...users[idx], ...data, account: nextAccount });
+  if (data.positionId === undefined) safeData.positionName = users[idx].positionName;
   delete safeData.passwordHash;
   delete safeData.passwordSalt;
   delete safeData.passwordUpdatedAt;

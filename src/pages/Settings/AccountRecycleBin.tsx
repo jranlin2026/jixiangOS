@@ -18,6 +18,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import RestoreIcon from '@mui/icons-material/Restore';
 import { departmentApi, settingsApi } from '../../api';
 import type { Department } from '../../types/department';
+import type { Position } from '../../types/position';
 import type { User } from '../../types/settings';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import { formatDate } from '../../shared/utils/formatters';
@@ -25,6 +26,7 @@ import { formatDate } from '../../shared/utils/formatters';
 const AccountRecycleBin: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
   const [error, setError] = useState('');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -40,6 +42,9 @@ const AccountRecycleBin: React.FC = () => {
     departmentApi.getDepartments().then((res) => {
       if (res.code === 0) setDepartments(res.data);
     });
+    settingsApi.fetchPositions().then((res) => {
+      if (res.code === 0) setPositions(res.data);
+    });
   }, []);
 
   useEffect(() => {
@@ -52,6 +57,7 @@ const AccountRecycleBin: React.FC = () => {
   ), [page, rowsPerPage, users]);
 
   const getDepartmentName = (departmentId?: string) => departments.find((department) => department.id === departmentId)?.name || '-';
+  const getPositionName = (user: User) => positions.find((position) => position.id === user.positionId)?.name || user.positionName || '-';
 
   const handlePageChange = (_event: unknown, nextPage: number) => {
     setPage(nextPage);
@@ -106,7 +112,7 @@ const AccountRecycleBin: React.FC = () => {
               <TableCell>账号</TableCell>
               <TableCell>手机</TableCell>
               <TableCell>部门</TableCell>
-              <TableCell>职位</TableCell>
+              <TableCell>岗位</TableCell>
               <TableCell>角色</TableCell>
               <TableCell>离职时间</TableCell>
               <TableCell>状态</TableCell>
@@ -120,7 +126,7 @@ const AccountRecycleBin: React.FC = () => {
                 <TableCell>{user.account || '-'}</TableCell>
                 <TableCell>{user.phone || '-'}</TableCell>
                 <TableCell>{getDepartmentName(user.departmentId)}</TableCell>
-                <TableCell>{user.positionName || '-'}</TableCell>
+                <TableCell>{getPositionName(user)}</TableCell>
                 <TableCell>{user.role || '-'}</TableCell>
                 <TableCell>{user.leftAt ? formatDate(user.leftAt) : '-'}</TableCell>
                 <TableCell><Chip label="离职" size="small" /></TableCell>
