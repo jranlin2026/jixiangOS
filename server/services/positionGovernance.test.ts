@@ -3,7 +3,7 @@ import { buildPositionGovernanceReadiness, buildPositionMappingPreview, createPo
 
 const readiness = buildPositionGovernanceReadiness({
   users: [
-    { id: 'bound', name: '已绑定', departmentId: 'dept-sales', positionId: 'position-sales', positionName: '销售顾问', role: '员工' },
+    { id: 'bound', name: '已绑定', departmentId: 'dept-sales', positionId: 'position-sales', positionName: '销售顾问', roleId: 'role-employee', role: '旧角色', employmentStatus: 'active' },
     { id: 'invalid', name: '无效绑定', departmentId: 'dept-customer', positionId: 'position-sales', positionName: '销售顾问', role: '员工' },
     { id: 'unique', name: '唯一匹配', departmentId: 'dept-sales', positionId: null, positionName: '销售顾问', role: '员工' },
     { id: 'multiple', name: '多个候选', departmentId: 'dept-sales', positionId: null, positionName: '销售主管', role: '销售主管' },
@@ -19,7 +19,7 @@ const readiness = buildPositionGovernanceReadiness({
     { id: 'dept-sales', name: '销售部' },
     { id: 'dept-customer', name: '客户成功部' },
   ],
-  roles: [{ id: 'role-manager', name: '销售主管' }],
+  roles: [{ id: 'role-manager', name: '销售主管' }, { id: 'role-employee', name: '员工' }],
 });
 
 assert.deepEqual(readiness.map((item) => [item.employeeId, item.status]), [
@@ -32,6 +32,9 @@ assert.deepEqual(readiness.map((item) => [item.employeeId, item.status]), [
 ]);
 assert.deepEqual(readiness.find((item) => item.employeeId === 'multiple')?.warnings, ['ROLE_POSITION_SUSPECTED']);
 assert.match(readiness.find((item) => item.employeeId === 'invalid')?.reason || '', /部门/);
+assert.equal(readiness[0].roleId, 'role-employee');
+assert.equal(readiness[0].roleName, '员工', '应优先使用正式 roleId 关联的角色名');
+assert.equal(readiness[0].employmentStatus, 'active');
 
 const preview = buildPositionMappingPreview({
   users: [

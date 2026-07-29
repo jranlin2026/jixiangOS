@@ -10,6 +10,10 @@ const legacyDeploySource = readFileSync(legacyDeployPath, 'utf8');
 const backupSource = readFileSync(join(process.cwd(), 'scripts', 'mysql', 'backup-linux.sh'), 'utf8');
 assert.match(backupSource, /JIXIANG_BACKUP_PRUNE/);
 assert.match(backupSource, /if \[\[ "\$PRUNE_BACKUPS" == "YES" \]\]/);
+assert.match(backupSource, /TABLE_COUNT/);
+assert.match(backupSource, /USER_COUNT/);
+assert.match(backupSource, /POSITION_COUNT/);
+assert.match(backupSource, /\.manifest/);
 const cloudDeployDoc = readFileSync(join(process.cwd(), 'docs', 'cloud-deployment-aliyun.md'), 'utf8');
 const minimalLaunchDoc = readFileSync(join(process.cwd(), 'docs', 'aliyun-minimal-launch.md'), 'utf8');
 const nginxSource = readFileSync(join(process.cwd(), 'deploy', 'nginx', 'jixiang-os.conf'), 'utf8');
@@ -234,6 +238,9 @@ try {
   const fakeDump = join(fakeBin, 'mysqldump');
   writeFileSync(fakeDump, '#!/usr/bin/env bash\n: > "$JIXIANG_FAKE_DUMP_CALLED"\nexit 1\n', 'utf8');
   chmodSync(fakeDump, 0o755);
+  const fakeMysql = join(fakeBin, 'mysql');
+  writeFileSync(fakeMysql, '#!/usr/bin/env bash\nprintf "1\\n"\n', 'utf8');
+  chmodSync(fakeMysql, 0o755);
   const failedBackup = spawnSync('bash', [join(process.cwd(), 'scripts', 'mysql', 'backup-linux.sh')], {
     encoding: 'utf8',
     env: {

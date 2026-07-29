@@ -7,6 +7,8 @@ export interface PositionGovernanceReadinessItem {
   employeeName: string;
   departmentId?: string;
   departmentName?: string;
+  employmentStatus: string;
+  roleId?: string;
   roleName: string;
   originalPositionName: string;
   boundPositionId?: string;

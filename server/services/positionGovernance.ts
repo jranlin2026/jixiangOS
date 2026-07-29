@@ -9,7 +9,9 @@ type PreviewUser = {
   departmentId?: string | null;
   positionId?: string | null;
   positionName?: string | null;
+  roleId?: string | null;
   role?: string | null;
+  employmentStatus?: string | null;
 };
 
 type PreviewPosition = {
@@ -32,6 +34,8 @@ export type PositionGovernanceReadinessItem = {
   employeeName: string;
   departmentId?: string;
   departmentName?: string;
+  employmentStatus: string;
+  roleId?: string;
   roleName: string;
   originalPositionName: string;
   boundPositionId?: string;
@@ -66,11 +70,12 @@ export function buildPositionGovernanceReadiness(input: {
 }): PositionGovernanceReadinessItem[] {
   const positionsById = new Map(input.positions.map((item) => [item.id, item]));
   const departmentsById = new Map(input.departments.map((item) => [item.id, item.name]));
+  const rolesById = new Map(input.roles.map((item) => [item.id, item.name]));
   const roleNames = new Set(input.roles.map((item) => normalizeName(item.name)).filter(Boolean));
   const mappingByEmployee = new Map(buildPositionMappingPreview(input).map((item) => [item.employeeId, item]));
 
   return input.users.map((user) => {
-    const roleName = String(user.role || '').trim();
+    const roleName = String((user.roleId && rolesById.get(user.roleId)) || user.role || '').trim();
     const originalPositionName = String(user.positionName || '').trim();
     const normalizedPositionName = normalizeName(originalPositionName);
     const warnings: Array<'ROLE_POSITION_SUSPECTED'> = [];
@@ -84,6 +89,8 @@ export function buildPositionGovernanceReadiness(input: {
       employeeName: user.name,
       departmentId: user.departmentId || undefined,
       departmentName: user.departmentId ? departmentsById.get(user.departmentId) : undefined,
+      employmentStatus: String(user.employmentStatus || 'active'),
+      roleId: user.roleId || undefined,
       roleName,
       originalPositionName,
       boundPositionId: user.positionId || undefined,
@@ -211,7 +218,7 @@ export function createPositionGovernanceService(prisma: any) {
       const [allUsers, positions, departments, roles] = await Promise.all([
         prisma.user.findMany({
           where: userWhere,
-          select: { id: true, name: true, departmentId: true, positionId: true, positionName: true, role: true, employmentStatus: true },
+          select: { id: true, name: true, departmentId: true, positionId: true, positionName: true, roleId: true, role: true, employmentStatus: true },
         }),
         prisma.position.findMany({ select: { id: true, name: true, departmentId: true, isActive: true } }),
         prisma.department.findMany({ select: { id: true, name: true } }),

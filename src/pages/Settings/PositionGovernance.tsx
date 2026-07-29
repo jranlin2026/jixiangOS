@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Box, Button, Chip, MenuItem, Paper, Tab, Tabs, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, TextField, Typography,
@@ -48,6 +48,7 @@ const PositionGovernance: React.FC = () => {
   const [historyRowsPerPage, setHistoryRowsPerPage] = useState(10);
   const [historyType, setHistoryType] = useState('');
   const [loading, setLoading] = useState(false);
+  const readinessRequestId = useRef(0);
   const { alert, confirm, dialog } = useAppFeedback();
 
   useEffect(() => {
@@ -57,7 +58,8 @@ const PositionGovernance: React.FC = () => {
     });
   }, [fetchDepartments]);
 
-  const loadReadiness = async () => {
+  const loadReadiness = async (pageIndex = readinessPage) => {
+    const requestId = ++readinessRequestId.current;
     setLoading(true);
     const response = await positionGovernanceApi.getReadiness({
       departmentId: departmentId || undefined,
@@ -65,9 +67,10 @@ const PositionGovernance: React.FC = () => {
       employmentStatus: 'active',
       status: readinessStatus || undefined,
       warning: readinessWarning || undefined,
-      page: readinessPage + 1,
+      page: pageIndex + 1,
       pageSize: readinessRowsPerPage,
     });
+    if (requestId !== readinessRequestId.current) return;
     setLoading(false);
     if (response.code !== 0) {
       await alert(response.message || '加载岗位治理盘点失败', '加载失败');
@@ -149,7 +152,7 @@ const PositionGovernance: React.FC = () => {
             <TextField select size="small" label="部门" value={departmentId} onChange={(event) => { setDepartmentId(event.target.value); setReadinessPage(0); }}><MenuItem value="">全部部门</MenuItem>{departments.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}</TextField>
             <TextField select size="small" label="治理状态" value={readinessStatus} onChange={(event) => { setReadinessStatus(event.target.value as PositionGovernanceReadinessStatus | ''); setReadinessPage(0); }}><MenuItem value="">全部状态</MenuItem>{Object.entries(readinessLabels).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}</TextField>
             <TextField select size="small" label="风险标记" value={readinessWarning} onChange={(event) => { setReadinessWarning(event.target.value as '' | 'ROLE_POSITION_SUSPECTED'); setReadinessPage(0); }}><MenuItem value="">全部标记</MenuItem><MenuItem value="ROLE_POSITION_SUSPECTED">角色岗位疑似混用</MenuItem></TextField>
-            <Button variant="contained" disabled={loading} onClick={() => { setReadinessPage(0); loadReadiness(); }}>查询盘点</Button>
+            <Button variant="contained" disabled={loading} onClick={() => { if (readinessPage === 0) loadReadiness(0); else setReadinessPage(0); }}>查询盘点</Button>
           </Box>
         </Paper>
         {readiness && <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
@@ -161,8 +164,8 @@ const PositionGovernance: React.FC = () => {
           <Chip color="warning" variant="outlined" label={`角色/岗位疑似混用 ${readiness.summary.rolePositionSuspected}`} />
         </Box>}
         <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb', overflowX: 'auto' }}>
-          <Table sx={{ minWidth: 1050 }}><TableHead><TableRow><TableCell>员工</TableCell><TableCell>部门</TableCell><TableCell>角色</TableCell><TableCell>原岗位</TableCell><TableCell>正式岗位</TableCell><TableCell>盘点结果</TableCell><TableCell>风险说明</TableCell></TableRow></TableHead>
-            <TableBody>{(readiness?.items || []).map((item) => <TableRow key={item.employeeId} hover><TableCell sx={{ fontWeight: 600 }}>{item.employeeName}</TableCell><TableCell>{item.departmentName || '-'}</TableCell><TableCell>{item.roleName || '-'}</TableCell><TableCell>{item.originalPositionName || '-'}</TableCell><TableCell>{item.boundPositionName || (item.suggestedPositionId ? positions.find((position) => position.id === item.suggestedPositionId)?.name : '-') || '-'}</TableCell><TableCell><Chip size="small" label={readinessLabels[item.status]} color={item.status === 'BOUND_VALID' ? 'success' : item.status === 'UNIQUE_MATCH' ? 'info' : item.status === 'INVALID_BINDING' ? 'error' : 'warning'} /></TableCell><TableCell>{item.reason}{item.warnings.includes('ROLE_POSITION_SUSPECTED') ? '；角色与岗位名称重合' : ''}</TableCell></TableRow>)}</TableBody>
+          <Table sx={{ minWidth: 1200 }}><TableHead><TableRow><TableCell>员工</TableCell><TableCell>在职状态</TableCell><TableCell>部门</TableCell><TableCell>角色</TableCell><TableCell>原岗位</TableCell><TableCell>正式岗位</TableCell><TableCell>建议岗位</TableCell><TableCell>盘点结果</TableCell><TableCell>风险说明</TableCell></TableRow></TableHead>
+            <TableBody>{(readiness?.items || []).map((item) => <TableRow key={item.employeeId} hover><TableCell sx={{ fontWeight: 600 }}>{item.employeeName}</TableCell><TableCell>{item.employmentStatus === 'active' ? '在职' : item.employmentStatus}</TableCell><TableCell>{item.departmentName || '-'}</TableCell><TableCell>{item.roleName || '-'}</TableCell><TableCell>{item.originalPositionName || '-'}</TableCell><TableCell>{item.boundPositionName || '-'}</TableCell><TableCell>{item.suggestedPositionId ? positions.find((position) => position.id === item.suggestedPositionId)?.name || '-' : '-'}</TableCell><TableCell><Chip size="small" label={readinessLabels[item.status]} color={item.status === 'BOUND_VALID' ? 'success' : item.status === 'UNIQUE_MATCH' ? 'info' : item.status === 'INVALID_BINDING' ? 'error' : 'warning'} /></TableCell><TableCell>{item.reason}{item.warnings.includes('ROLE_POSITION_SUSPECTED') ? '；角色与岗位名称重合' : ''}</TableCell></TableRow>)}</TableBody>
           </Table>
         </TableContainer>
         <TablePagination count={readiness?.total || 0} page={readinessPage} rowsPerPage={readinessRowsPerPage} onPageChange={(_event, page) => setReadinessPage(page)} onRowsPerPageChange={(event) => { setReadinessRowsPerPage(Number(event.target.value)); setReadinessPage(0); }} sx={{ mt: 2 }} />
