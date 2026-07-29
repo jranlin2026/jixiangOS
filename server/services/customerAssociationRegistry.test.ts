@@ -34,6 +34,7 @@ const businessRows = [
   { id: 'ticket-top', domain: STORAGE_KEYS.SERVICE_TICKETS, recordId: 'ticket-1', customerId: 'c-1', data: {} },
   { id: 'opportunity-json', domain: STORAGE_KEYS.OPPORTUNITIES, recordId: 'opportunity-1', customerId: null, data: { customerId: 'c-1' } },
   { id: 'commission-json', domain: STORAGE_KEYS.COMMISSIONS, recordId: 'commission-1', customerId: null, data: { customerId: 'c-1' } },
+  { id: 'finance-transaction', domain: STORAGE_KEYS.FINANCE_TRANSACTIONS, recordId: 'order_payment:order-1:pay-1', customerId: 'c-1', data: { customerId: 'c-1', customerName: '唯一客户' } },
   { id: 'ai-customer', domain: STORAGE_KEYS.AI_CARDS, recordId: 'ai-1', customerId: null, data: { subjectType: 'customer', subjectId: 'c-1' } },
   { id: 'ai-lead', domain: STORAGE_KEYS.AI_CARDS, recordId: 'ai-2', customerId: null, data: { subjectType: 'lead', subjectId: 'c-1' } },
   {
@@ -96,6 +97,8 @@ for (const expected of [
   `${STORAGE_KEYS.ORDERS}:data.customerId:order-1`,
   `${STORAGE_KEYS.ORDER_APPLICATIONS}:data.orderData.customerId:application-1`,
   `${STORAGE_KEYS.AI_CARDS}:data.subjectId|data.subjectType=customer:ai-1`,
+  `${STORAGE_KEYS.FINANCE_TRANSACTIONS}:customerId:order_payment:order-1:pay-1`,
+  `${STORAGE_KEYS.FINANCE_TRANSACTIONS}:data.customerId:order_payment:order-1:pay-1`,
   'lead_records:data.customerId:lead-1',
   'customer_todos:customerId:todo-1',
   `${STORAGE_KEYS.FINANCE}:value.incomes[].customerId:income-1`,
@@ -140,6 +143,7 @@ for (const label of ['订单关联', '订单申请关联', '交付关联', '退�
   assert.equal(blockers.includes(label), true, `missing blocker ${label}`);
 }
 assert.equal(blockers.some((label) => /跟进|成长|标签/.test(label)), false, 'intrinsic 子记录不能永久阻断删除');
+assert.equal(blockers.includes('资金流水历史引用'), false, '不可变资金流水快照不能阻止客户软删除');
 assert.equal(blockers.some((label) => label.includes('aaos_orders:data.orderData.customerId')), true);
 assert.equal(blockers.some((label) => label.includes('aaos_future_business:data.customerId')), true);
 

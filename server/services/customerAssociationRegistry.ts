@@ -121,6 +121,10 @@ export const CUSTOMER_ASSOCIATION_DEFINITIONS: readonly CustomerAssociationDefin
   ...businessStableDefinitions('service_tickets', 'service_tickets', STORAGE_KEYS.SERVICE_TICKETS, '售后工单关联', ['customerId', 'data.customerId']),
   ...businessStableDefinitions('opportunities', 'opportunities', STORAGE_KEYS.OPPORTUNITIES, '商机关联', ['customerId', 'data.customerId']),
   ...businessStableDefinitions('commissions', 'commissions_finance', STORAGE_KEYS.COMMISSIONS, '佣金/财务关联', ['customerId', 'data.customerId'], ['data.customerName'], []),
+  // 资金流水是已发生资金事件的不可变历史快照。客户 ID 只用于追溯，
+  // 不阻止客户软删除，也不得在客户合并时改写历史流水。
+  definition('finance_transactions:customerId', 'commissions_finance', 'business_record', STORAGE_KEYS.FINANCE_TRANSACTIONS, 'customerId', '资金流水历史引用', false, 'none'),
+  definition('finance_transactions:data.customerId', 'commissions_finance', 'business_record', STORAGE_KEYS.FINANCE_TRANSACTIONS, 'data.customerId', '资金流水历史引用', false, 'none'),
   definition('finance:incomes', 'commissions_finance', 'app_storage', STORAGE_KEYS.FINANCE, 'value.incomes[].customerId', '佣金/财务关联', true, 'stable_id', ['value.incomes[].customerName'], 'legacy_identity'),
   definition('finance:expenses', 'commissions_finance', 'app_storage', STORAGE_KEYS.FINANCE, 'value.expenses[].customerId', '佣金/财务关联', true, 'stable_id', ['value.expenses[].customerName'], 'legacy_identity'),
   definition('finance:transactions', 'commissions_finance', 'app_storage', STORAGE_KEYS.FINANCE, 'value.transactions[].customerId', '佣金/财务关联', true, 'stable_id', ['value.transactions[].customerName'], 'legacy_identity'),

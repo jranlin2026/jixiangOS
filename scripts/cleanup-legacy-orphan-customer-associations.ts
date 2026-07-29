@@ -7,7 +7,10 @@ import { prisma } from '../server/db/client';
 import { STORAGE_KEYS } from '../src/shared/utils/constants';
 
 const CLEANUP_MARKER = 'aaos_cleanup_legacy_orphan_customer_associations_v1';
-const CLEANUP_VERSION = 2;
+// v3 reruns the incremental orphan scan after customer recycle-bin purge was
+// introduced. A v2 marker only proves the earlier snapshot was clean; it does
+// not cover leads detached from customers deleted later.
+const CLEANUP_VERSION = 3;
 const LEGACY_MIGRATION_MARKER = 'aaos_migration_legacy_business_records_v1';
 const EXPECTED_ORDER_IDS = Array.from({ length: 40 }, (_, index) => `order-${String(index + 1).padStart(3, '0')}`);
 
@@ -137,7 +140,7 @@ export async function cleanupLegacyOrphanCustomerAssociations(outputPath: string
     );
   });
   await writePrivateBackup(outputPath, {
-    version: 1,
+    version: CLEANUP_VERSION,
     createdAt: new Date().toISOString(),
     orders,
     commissions: dependentCommissions,
