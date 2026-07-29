@@ -23,6 +23,8 @@ import type {
 import {
   buildCommissionPayoutPlanSnapshot,
   getCommissionTierBucketKey,
+  isCommissionPendingAssignment,
+  isCommissionPendingHandling,
   resolveCommissionTierSnapshotSource,
   selectCurrentCommissionRounds,
 } from '../shared/utils/commissionConfiguration';
@@ -257,47 +259,6 @@ function isChargedBackCommission(commission: Commission): boolean {
 
 function isInactiveCommission(commission: Commission): boolean {
   return isWithdrawnCommission(commission) || isChargebackPendingCommission(commission) || isChargedBackCommission(commission);
-}
-
-function getCommissionIssueText(commission: Commission): string {
-  return [
-    commission.auditReason,
-    commission.frozenReason,
-    commission.calculationNote,
-    commission.formulaText,
-    commission.payoutPlanName,
-  ].filter(Boolean).join('；');
-}
-
-function isManualOrCustomCommission(commission: Commission): boolean {
-  const issueText = getCommissionIssueText(commission);
-  return Boolean(commission.isManualAdjusted)
-    || commission.sourceType === '人工新增'
-    || issueText.includes('自定义金额')
-    || issueText.includes('财务人工')
-    || issueText.includes('人工新增');
-}
-
-function hasResolvedCommissionBasis(commission: Commission): boolean {
-  return Boolean(
-    commission.payoutPlanId
-    || commission.payoutPlanName
-    || isManualOrCustomCommission(commission),
-  );
-}
-
-function isCommissionPendingHandling(commission: Commission): boolean {
-  const note = getCommissionIssueText(commission);
-  const hasUnresolvedRuleText = ['未匹配', '未命中', '暂不计算', '缺少', '不可用'].some((keyword) => note.includes(keyword));
-  return isPendingAssignment(commission)
-    || Boolean(commission.frozenReason)
-    || note.includes('冻结')
-    || !hasResolvedCommissionBasis(commission)
-    || ((Number(commission.commissionAmount) || 0) === 0 && hasUnresolvedRuleText);
-}
-
-function isPendingAssignment(commission: Commission): boolean {
-  return commission.owner === PENDING_ASSIGN_TEXT || !commission.ownerId;
 }
 
 function resolveRuleCalculationType(c: Commission): Commission['ruleCalculationType'] {
@@ -714,7 +675,7 @@ function buildCommissionOrderSummaries(commissions: Commission[]): CommissionOrd
         sourceOrderDeleted: !order,
         totalCommissionAmount: processing.totalCommissionAmount,
         performanceAmount: processing.performanceAmount,
-        pendingAssignCount: sortedRows.filter(isPendingAssignment).length,
+        pendingAssignCount: sortedRows.filter(isCommissionPendingAssignment).length,
         exceptionCount: processing.withdrawnCount,
         settlementOperator: processing.settlementOperator,
         confirmedAt: processing.confirmedAt,

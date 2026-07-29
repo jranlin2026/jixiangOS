@@ -45,6 +45,31 @@ export function isRecoveryCommission(commission: Commission): boolean {
     || String(commission.orderNo || '').startsWith('RCV-');
 }
 
+export function isCommissionPendingAssignment(commission: Commission): boolean {
+  return commission.owner === '待分配' || !commission.ownerId;
+}
+
+export function isCommissionPendingHandling(commission: Commission): boolean {
+  const issueText = [
+    commission.auditReason,
+    commission.frozenReason,
+    commission.calculationNote,
+    commission.formulaText,
+    commission.payoutPlanName,
+  ].filter(Boolean).join('；');
+  const isManualOrCustom = Boolean(commission.isManualAdjusted)
+    || commission.sourceType === '人工新增'
+    || ['自定义金额', '财务人工', '人工新增'].some((keyword) => issueText.includes(keyword));
+  const hasResolvedBasis = Boolean(commission.payoutPlanId || commission.payoutPlanName || isManualOrCustom);
+  const hasUnresolvedRuleText = ['未匹配', '未命中', '暂不计算', '缺少', '不可用']
+    .some((keyword) => issueText.includes(keyword));
+  return isCommissionPendingAssignment(commission)
+    || Boolean(commission.frozenReason)
+    || issueText.includes('冻结')
+    || !hasResolvedBasis
+    || ((Number(commission.commissionAmount) || 0) === 0 && hasUnresolvedRuleText);
+}
+
 /**
  * 售后挽回提成按业务实际发生的挽回成交时间归月。
  * 历史记录可能曾把分账创建时间写入 paymentDate，因此读取时以源挽回单快照纠正；

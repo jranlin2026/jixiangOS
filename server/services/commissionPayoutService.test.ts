@@ -143,7 +143,9 @@ function fakePrisma(seed: any[]) {
 {
   const db = fakePrisma([
     record(STORAGE_KEYS.COMMISSIONS, commission('pending-a', '待发放') as unknown as Record<string, unknown>),
-    record(STORAGE_KEYS.COMMISSIONS, commission('review-a', '待确认') as unknown as Record<string, unknown>),
+    record(STORAGE_KEYS.COMMISSIONS, commission('review-a', '待确认', {
+      payoutPlanId: 'plan-review-a',
+    }) as unknown as Record<string, unknown>),
     record(STORAGE_KEYS.COMMISSIONS, commission('pending-b', '待发放', {
       ownerId: 'sales-2', owner: '销售B', commissionAmount: 200,
     }) as unknown as Record<string, unknown>),
@@ -392,6 +394,91 @@ function fakePrisma(seed: any[]) {
     ['2026-06-15T08:00:00.000Z'],
     '售后挽回必须按关联挽回单的成交时间归月',
   );
+  assert.equal(june.data?.employees[0]?.recoveryBusinessAmount, 899, '售后员工必须显示关联挽回成交额');
+  assert.equal(june.data?.employees[0]?.recoveryOrderCount, 1);
+  assert.equal(june.data?.employees[0]?.formalOrderCount, 0);
+  assert.equal(june.data?.summary.recoveryBusinessAmount, 899, '顶部售后挽回成交额必须按挽回单全局去重');
+}
+
+{
+  const fixedCommission = commission('fixed-formal-business-amount', '待发放', {
+    orderId: 'fixed-formal-order',
+    orderNo: 'ORD-FIXED-BUSINESS-AMOUNT',
+    ruleCalculationType: 'fixed',
+    commissionAmount: 50,
+    orderAmount: 899,
+    performanceAmount: 899,
+    sourceBusinessType: 'formal_order',
+  });
+  const formalOrder = {
+    id: 'fixed-formal-order',
+    orderNo: fixedCommission.orderNo,
+    actualAmount: 899,
+    payments: [{ id: 'payment-fixed', amount: 899, paidAt: fixedCommission.paymentDate }],
+    createdAt: fixedCommission.paymentDate,
+    updatedAt: fixedCommission.paymentDate,
+  };
+  const db = fakePrisma([
+    record(STORAGE_KEYS.COMMISSIONS, fixedCommission as unknown as Record<string, unknown>),
+    record(STORAGE_KEYS.ORDERS, formalOrder),
+  ]);
+  const service = createCommissionPayoutService(db.prisma, { now: () => new Date(NOW) });
+  const workspace = await service.getPeriodWorkspace('2026-07');
+  const employee = workspace.data?.employees.find((row) => row.ownerId === fixedCommission.ownerId);
+  assert.equal(employee?.formalOrderPaidAmount, 899, '固定提成员工也必须显示关联正式订单实付');
+  assert.equal(employee?.formalOrderCount, 1);
+  assert.equal(employee?.recoveryOrderCount, 0);
+  assert.equal(workspace.data?.summary.formalOrderPaidAmount, 899, '顶部正式订单实付必须来自业务订单而不是阶梯业绩');
+}
+
+{
+  const mixed = [
+    commission('mixed-handling', '待确认', {
+      orderId: 'mixed-order-handling', commissionAmount: 80,
+      payoutPlanId: undefined, payoutPlanName: undefined, calculationNote: '缺少提成方案，暂不计算',
+    }),
+    commission('mixed-confirm', '待确认', {
+      orderId: 'mixed-order-confirm', commissionAmount: 20, payoutPlanId: 'plan-confirm',
+    }),
+    commission('mixed-pay', '待发放', {
+      orderId: 'mixed-order-pay', commissionAmount: 30, payoutPlanId: 'plan-pay',
+    }),
+    commission('mixed-paid', '已发放', {
+      orderId: 'mixed-order-paid', commissionAmount: 40, payoutPlanId: 'plan-paid',
+    }),
+    commission('mixed-withdrawn', '已撤回', {
+      orderId: 'mixed-order-withdrawn', commissionAmount: 50, payoutPlanId: 'plan-withdrawn',
+    }),
+  ];
+  const pendingSnapshot = { ...mixed[2], commissionAmount: 25 };
+  const paidSnapshot = { ...mixed[3], commissionAmount: 35 };
+  const payoutBatch = {
+    id: 'mixed-payout', payoutNo: 'FF-202608-MIXED', period: '2026-08', status: '已发放',
+    totalCount: 2, totalAmount: 60, commissionIds: [mixed[2].id, mixed[3].id], commissionSnapshots: [pendingSnapshot, paidSnapshot],
+    byOwner: [{ ownerId: 'sales-1', owner: '销售A', department: '销售部', count: 1, amount: 35 }],
+    issuedAt: '2026-08-01T08:00:00.000Z', issuedById: finance.id, issuedByName: finance.name, paymentMethod: '银行转账', createdAt: '2026-08-01T08:00:00.000Z',
+  };
+  const db = fakePrisma([
+    ...mixed.map((item) => record(STORAGE_KEYS.COMMISSIONS, item as unknown as Record<string, unknown>)),
+    record(STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES, payoutBatch),
+  ]);
+  const service = createCommissionPayoutService(db.prisma, { now: () => new Date(NOW) });
+  const workspace = await service.getPeriodWorkspace('2026-07');
+  const employee = workspace.data?.employees[0];
+  assert.deepEqual(employee?.statusCounts, {
+    pendingHandling: 1,
+    pendingConfirm: 1,
+    pendingPay: 1,
+    paid: 1,
+    withdrawn: 1,
+  }, '员工混合状态必须逐类展示，不能折叠成一个标签');
+  assert.equal(employee?.pendingConfirmAmount, 20, '待处理即使保存了临时金额也不能进入待确认金额');
+  assert.equal(employee?.pendingPayAmount, 30, '待发放金额必须使用当前金额，不得沿用历史发放快照');
+  assert.equal(employee?.paidAmount, 35, '已发放金额必须使用发放时快照');
+  assert.equal(employee?.commissions.find((item) => item.id === 'mixed-paid')?.commissionAmount, 35);
+  assert.equal(employee?.withdrawnAmount, 50);
+  assert.equal(employee?.totalAmount, 85, '本月提成总额只包含待确认、待发放和已发放');
+  assert.equal(workspace.data?.summary.pendingHandlingCount, 1);
 }
 
 console.log('commission payout service tests passed');

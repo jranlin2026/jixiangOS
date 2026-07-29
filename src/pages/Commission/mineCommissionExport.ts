@@ -11,19 +11,26 @@ import type {
   MonthlyCommissionPayout,
 } from '../../types/commission';
 import { resolveMineTierSnapshot } from './mineCommissionPresentation';
+import {
+  isCommissionPendingHandling,
+  isRecoveryCommission,
+} from '../../shared/utils/commissionConfiguration';
 
 const summaryColumns: BusinessExportColumn[] = [
   { id: 'period', label: '月份', type: 'text' },
   { id: 'employee', label: '员工', type: 'text' },
   { id: 'department', label: '部门', type: 'text' },
-  { id: 'orderCount', label: '关联订单数', type: 'number' },
+  { id: 'formalOrderCount', label: '正式订单数', type: 'number' },
+  { id: 'recoveryOrderCount', label: '售后挽回单数', type: 'number' },
   { id: 'commissionCount', label: '提成笔数', type: 'number' },
-  { id: 'orderPaidAmount', label: '关联订单实付金额', type: 'currency' },
+  { id: 'formalOrderPaidAmount', label: '正式订单实付', type: 'currency' },
+  { id: 'recoveryBusinessAmount', label: '售后挽回成交额', type: 'currency' },
   { id: 'totalAmount', label: '本月提成', type: 'currency' },
   { id: 'pendingConfirmAmount', label: '待确认', type: 'currency' },
   { id: 'pendingPayAmount', label: '待发放', type: 'currency' },
   { id: 'paidAmount', label: '已发放', type: 'currency' },
   { id: 'withdrawnAmount', label: '已撤回', type: 'currency' },
+  { id: 'statusDistribution', label: '状态分布', type: 'text' },
   { id: 'tierPerformanceAmount', label: '月度阶梯业绩', type: 'currency' },
   { id: 'tierRate', label: '最终/当前档位', type: 'text' },
   { id: 'tierCommissionAmount', label: '月度阶梯提成', type: 'currency' },
@@ -55,12 +62,6 @@ const detailColumns: BusinessExportColumn[] = [
   { id: 'adjustReason', label: '调整原因', type: 'text' },
   { id: 'calculationNote', label: '计算说明', type: 'text' },
 ];
-
-const isRecoveryCommission = (commission: Commission) => (
-  commission.sourceBusinessType === 'after_sales_recovery'
-  || commission.sourceBusinessType === 'refund_recovery'
-  || Boolean(commission.sourceRecoveryOrderId)
-);
 
 const isWithdrawnStatus = (status: Commission['status']) => (
   ['已撤回', '待冲销', '已冲销', '已取消'].includes(status)
@@ -96,6 +97,7 @@ function displayCommissionAmount(
   payoutPlans: CommissionPayoutPlan[],
   useLivePlan: boolean,
 ): number {
+  if (commission.status === '已发放') return Number(commission.commissionAmount || 0);
   if (commission.ruleCalculationType !== 'tiered_percentage') return Number(commission.commissionAmount || 0);
   const snapshot = tierSnapshotFor(row, commission, payoutPlans, useLivePlan);
   const rate = snapshot?.currentTier?.rate ?? Number(commission.commissionRate || 0) * 100;
@@ -103,13 +105,17 @@ function displayCommissionAmount(
   return Math.round(Number(commission.performanceAmount || commission.orderAmount || 0) * rate) / 100;
 }
 
-function uniqueOrderPaidAmount(commissions: Commission[]): number {
+function uniqueBusinessAmount(commissions: Commission[]): number {
   const orders = new Map<string, number>();
   commissions.forEach((commission) => {
     const key = commission.orderId || commission.orderNo;
     orders.set(key, Math.max(orders.get(key) || 0, Number(commission.orderAmount || 0)));
   });
   return Math.round([...orders.values()].reduce((sum, value) => sum + value, 0) * 100) / 100;
+}
+
+function countUniqueBusinesses(commissions: Commission[]): number {
+  return new Set(commissions.map((commission) => commission.orderId || commission.orderNo)).size;
 }
 
 function commissionTypeLabel(commission: Commission): string {
@@ -166,22 +172,36 @@ export function buildMineCommissionExportResult(
       ))
       .filter((snapshot): snapshot is CommissionTierSnapshot => Boolean(snapshot));
     const amountFor = (commission: Commission) => displayCommissionAmount(row, commission, payoutPlans, useLivePlan);
-    const pendingConfirmAmount = row.commissions.filter((commission) => commission.status === '待确认').reduce((sum, commission) => sum + amountFor(commission), 0);
+    const pendingConfirmAmount = row.commissions
+      .filter((commission) => commission.status === '待确认' && !isCommissionPendingHandling(commission))
+      .reduce((sum, commission) => sum + amountFor(commission), 0);
     const pendingPayAmount = row.commissions.filter((commission) => commission.status === '待发放').reduce((sum, commission) => sum + amountFor(commission), 0);
     const paidAmount = row.commissions.filter((commission) => commission.status === '已发放').reduce((sum, commission) => sum + amountFor(commission), 0);
     const withdrawnAmount = row.commissions.filter((commission) => isWithdrawnStatus(commission.status)).reduce((sum, commission) => sum + amountFor(commission), 0);
+    const statusCounts = row.statusCounts || {
+      pendingHandling: row.commissions.filter((commission) => (
+        commission.status === '待确认' && isCommissionPendingHandling(commission)
+      )).length,
+      pendingConfirm: row.commissions.filter((commission) => commission.status === '待确认' && !isCommissionPendingHandling(commission)).length,
+      pendingPay: row.commissions.filter((commission) => commission.status === '待发放').length,
+      paid: row.commissions.filter((commission) => commission.status === '已发放').length,
+      withdrawn: row.commissions.filter((commission) => isWithdrawnStatus(commission.status)).length,
+    };
     return {
       period,
       employee: row.owner || employeeName,
       department: row.department || '-',
-      orderCount: row.orderCount,
+      formalOrderCount: row.formalOrderCount ?? countUniqueBusinesses([...tierCommissions, ...ordinaryCommissions]),
+      recoveryOrderCount: row.recoveryOrderCount ?? countUniqueBusinesses(recoveryCommissions),
       commissionCount: row.commissions.length,
-      orderPaidAmount: uniqueOrderPaidAmount(row.commissions),
+      formalOrderPaidAmount: row.formalOrderPaidAmount ?? uniqueBusinessAmount([...tierCommissions, ...ordinaryCommissions]),
+      recoveryBusinessAmount: row.recoveryBusinessAmount ?? uniqueBusinessAmount(recoveryCommissions),
       totalAmount: pendingConfirmAmount + pendingPayAmount + paidAmount,
       pendingConfirmAmount,
       pendingPayAmount,
       paidAmount,
       withdrawnAmount,
+      statusDistribution: `待处理${statusCounts.pendingHandling} / 待确认${statusCounts.pendingConfirm} / 待发放${statusCounts.pendingPay} / 已发放${statusCounts.paid} / 已撤回${statusCounts.withdrawn}`,
       tierPerformanceAmount: tierSnapshots.reduce((sum, snapshot) => sum + Number(snapshot.baseAmount || 0), 0),
       tierRate: [...new Set(tierSnapshots.map((snapshot) => snapshot.currentTier?.rate).filter((rate) => rate !== undefined))]
         .map((rate) => `${rate}%`).join('、') || '-',

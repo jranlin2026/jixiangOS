@@ -4,8 +4,15 @@ import { failure, success } from '../api/response';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import {
   applyRecoveryCommissionBusinessTimes,
+  isCommissionPendingHandling,
   selectCurrentCommissionRounds,
 } from '../../src/shared/utils/commissionConfiguration';
+import {
+  calculateCommissionBusinessMetrics,
+  calculateCommissionStatusMetrics,
+  resolveFormalOrderPaidAmount,
+  resolveRecoveryBusinessAmount,
+} from '../../src/shared/utils/commissionMonthlyMetrics';
 import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type {
@@ -54,6 +61,7 @@ export interface CommissionMonthlyReportBuildInput extends CommissionMonthlyRepo
   commissions: Commission[];
   payoutRecords: CommissionPayoutRecord[];
   orders: Order[];
+  recoveryOrders?: RecoveryOrder[];
 }
 
 export interface CommissionMonthlyReportSummary {
@@ -71,6 +79,8 @@ export interface CommissionMonthlyReportSummary {
   tierPerformanceAmount: number;
   tierCommissionAmount: number;
   recoveryCommissionAmount: number;
+  recoveryBusinessAmount: number;
+  pendingHandlingCount: number;
   exceptionCount: number;
 }
 
@@ -142,13 +152,6 @@ function displayAmount(commission: Commission, tierSnapshots: Map<string, Commis
   return roundMoney(Number(commission.performanceAmount || commission.orderAmount || 0) * rate / 100);
 }
 
-function orderPaidAmount(order: Order | undefined): number | null {
-  if (!order) return null;
-  const payments = Array.isArray(order.payments) ? order.payments.filter((payment) => Number(payment.amount) > 0) : [];
-  if (payments.length) return roundMoney(payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
-  return null;
-}
-
 function normalizePayoutRecord(value: unknown): CommissionPayoutRecord | null {
   const data = asObject(value);
   const id = clean(data.id);
@@ -174,10 +177,6 @@ function normalizePayoutRecord(value: unknown): CommissionPayoutRecord | null {
   };
 }
 
-function statusAmount(commissions: Commission[], status: Commission['status'], amountFor: (commission: Commission) => number): number {
-  return roundMoney(commissions.filter((item) => item.status === status).reduce((sum, item) => sum + amountFor(item), 0));
-}
-
 function reportColumns(): Record<ReportSheet['name'], ReportColumn[]> {
   return {
     '月度核对总览': [
@@ -187,17 +186,19 @@ function reportColumns(): Record<ReportSheet['name'], ReportColumn[]> {
       { key: 'employeeId', label: '员工ID' }, { key: 'employee', label: '员工' }, { key: 'department', label: '部门' }, { key: 'role', label: '提成角色' },
       { key: 'orderCount', label: '关联订单数', type: 'number' }, { key: 'commissionCount', label: '提成笔数', type: 'number' },
       { key: 'orderPaidAmount', label: '关联正式订单实付（不可跨员工求和）', type: 'currency', width: 28 },
+      { key: 'recoveryBusinessAmount', label: '关联售后挽回成交额（不可跨员工求和）', type: 'currency', width: 30 },
       { key: 'ordinaryAmount', label: '普通订单提成', type: 'currency' }, { key: 'tierPerformanceAmount', label: '正式订单阶梯业绩', type: 'currency' },
       { key: 'tierRate', label: '阶梯档位' }, { key: 'tierAmount', label: '正式订单阶梯提成', type: 'currency' },
       { key: 'recoveryAmount', label: '售后挽回提成', type: 'currency' }, { key: 'effectiveAmount', label: '有效应发', type: 'currency' },
       { key: 'pendingConfirmAmount', label: '待确认', type: 'currency' }, { key: 'pendingPayAmount', label: '待发放', type: 'currency' },
       { key: 'paidAmount', label: '已发放', type: 'currency' }, { key: 'withdrawnAmount', label: '已撤回', type: 'currency' },
+      { key: 'pendingHandlingCount', label: '待处理笔数', type: 'number' }, { key: 'statusDistribution', label: '状态分布', width: 34 },
       { key: 'lastPaidAt', label: '最后发放时间', type: 'date' }, { key: 'checkStatus', label: '核对状态' }, { key: 'exceptionNote', label: '异常说明', width: 36 },
     ],
     '逐笔提成明细': [
       { key: 'commissionId', label: '提成ID' }, { key: 'period', label: '归属月份' }, { key: 'commissionType', label: '提成类型' },
       { key: 'customerName', label: '客户' }, { key: 'orderNo', label: '订单号' }, { key: 'productLevel', label: '产品/项目' }, { key: 'businessSource', label: '业务类型' },
-      { key: 'businessAt', label: '业务成交/付款时间', type: 'date' }, { key: 'orderPaidAmount', label: '订单实付', type: 'currency' }, { key: 'performanceAmount', label: '业绩核算金额', type: 'currency' },
+      { key: 'businessAt', label: '业务成交/付款时间', type: 'date' }, { key: 'orderPaidAmount', label: '关联业务金额', type: 'currency' }, { key: 'performanceAmount', label: '业绩核算金额', type: 'currency' },
       { key: 'employeeId', label: '员工ID' }, { key: 'employee', label: '提成员工' }, { key: 'department', label: '部门' }, { key: 'role', label: '提成角色' },
       { key: 'planName', label: '提成方案' }, { key: 'planId', label: '方案ID' }, { key: 'planVersion', label: '方案版本', type: 'number' }, { key: 'calculationType', label: '计算方式' },
       { key: 'rateOrFixed', label: '比例/固定金额' }, { key: 'tierRate', label: '阶梯档位' }, { key: 'formula', label: '计算公式', width: 38 },
@@ -236,6 +237,8 @@ export function buildCommissionMonthlyReportData(input: CommissionMonthlyReportB
     .filter((commission) => input.scope !== 'department' || commission.departmentId === input.departmentId || commission.department === input.departmentId)
     .filter((commission) => input.scope !== 'employee' || commission.ownerId === input.ownerId || commission.owner === input.ownerId);
   const ordersById = new Map(input.orders.map((order) => [order.id, order]));
+  const recoveryOrders = input.recoveryOrders || [];
+  const recoveryOrdersById = new Map(recoveryOrders.map((order) => [order.id, order]));
   const payoutByCommission = new Map<string, CommissionPayoutRecord>();
   const payoutSnapshotByCommission = new Map<string, Commission>();
   const duplicatePayoutCommissionIds = new Set<string>();
@@ -255,14 +258,11 @@ export function buildCommissionMonthlyReportData(input: CommissionMonthlyReportB
       ? roundMoney(Number(payoutSnapshot.commissionAmount || 0))
       : displayAmount(commission, tierSnapshots);
   };
-  const effective = scoped.filter((commission) => EFFECTIVE_STATUSES.has(commission.status));
-  const formal = scoped.filter((commission) => !isRecovery(commission));
+  const effective = scoped.filter((commission) => (
+    EFFECTIVE_STATUSES.has(commission.status)
+    && !(commission.status === '待确认' && isCommissionPendingHandling(commission))
+  ));
   const recovery = scoped.filter(isRecovery);
-  const uniqueFormalOrders = new Map<string, Commission>();
-  formal.forEach((commission) => uniqueFormalOrders.set(commission.orderId, commission));
-  const formalOrderPaidAmount = roundMoney([...uniqueFormalOrders.entries()].reduce((sum, [orderId, commission]) => (
-    sum + (orderPaidAmount(ordersById.get(orderId)) ?? Number(commission.orderAmount || 0))
-  ), 0));
 
   const exceptionRows: Array<Record<string, CellValue>> = [];
   const addException = (commission: Commission | undefined, issue: string, suggestion: string, level = '需处理') => exceptionRows.push({
@@ -283,14 +283,21 @@ export function buildCommissionMonthlyReportData(input: CommissionMonthlyReportB
     if (isTiered(commission) && Math.abs(finalAmount - Number(commission.commissionAmount || 0)) >= 0.01) addException(commission, `阶梯复算金额 ${finalAmount.toFixed(2)} 与保存金额 ${Number(commission.commissionAmount || 0).toFixed(2)} 不一致`, '以方案快照和本月阶梯业绩人工复核');
     if (commission.status === '已发放' && !payout) addException(commission, '已发放提成缺少发放单', '查找历史发放记录或标记历史数据缺失');
     if (commission.status === '已发放' && payout && !payout.paymentReference) addException(commission, '已发放但缺少付款流水号', '财务核对付款凭证');
-    const actualPaid = isRecovery(commission) ? Number(commission.orderAmount || 0) : orderPaidAmount(order);
-    if (!isRecovery(commission) && actualPaid === null) addException(commission, '正式订单缺少可核验付款明细', '当前仅能参考提成快照中的订单金额');
+    const actualPaid = isRecovery(commission)
+      ? resolveRecoveryBusinessAmount(recoveryOrdersById.get(commission.sourceRecoveryOrderId || commission.orderId), commission)
+      : resolveFormalOrderPaidAmount(order, commission);
+    const hasVerifiableFormalPayment = Boolean(order)
+      && Array.isArray(order?.payments)
+      && order.payments.some((payment) => Number(payment.amount) > 0);
+    if (!isRecovery(commission) && !hasVerifiableFormalPayment) {
+      addException(commission, '正式订单缺少可核验付款明细', '当前仅能参考订单实付或提成快照金额');
+    }
     return {
       commissionId: commission.id, period: input.period,
       commissionType: isRecovery(commission) ? '售后挽回提成' : isTiered(commission) ? '正式订单月度阶梯提成' : '普通订单提成',
       customerName: commission.customerName || '-', orderNo: commission.orderNo || '-', productLevel: commission.productLevel || '-',
       businessSource: isRecovery(commission) ? '售后挽回' : '正式订单', businessAt: commission.paymentDate || commission.createdAt,
-      orderPaidAmount: actualPaid ?? Number(commission.orderAmount || 0), performanceAmount: Number(commission.performanceAmount || commission.orderAmount || 0),
+      orderPaidAmount: actualPaid, performanceAmount: Number(commission.performanceAmount || commission.orderAmount || 0),
       employeeId: commission.ownerId || '', employee: commission.owner || '待分配', department: commission.department || '-', role: commission.role,
       planName: commission.payoutPlanSnapshot?.name || commission.payoutPlanName || '-', planId: commission.payoutPlanSnapshot?.id || commission.payoutPlanId || '',
       planVersion: commission.payoutPlanSnapshot?.version || commission.payoutPlanVersion || '',
@@ -298,7 +305,8 @@ export function buildCommissionMonthlyReportData(input: CommissionMonthlyReportB
       rateOrFixed: commission.ruleCalculationType === 'percentage' ? `${roundMoney(Number(commission.commissionRate || 0) * 100)}%` : commission.ruleCalculationType === 'fixed' ? `¥${Number(commission.commissionAmount || 0).toFixed(2)}` : `${snapshot?.currentTier?.rate ?? '-'}%`,
       tierRate: snapshot?.currentTier?.rate === undefined ? '-' : `${snapshot.currentTier.rate}%`, formula: commission.formulaText || commission.calculationNote || '-',
       storedAmount: Number(commission.commissionAmount || 0), finalAmount, manualAdjusted: commission.isManualAdjusted ? '是' : '否', adjustReason: commission.adjustReason || '',
-      adjustedBy: commission.adjustedBy || '', adjustedAt: commission.adjustedAt || '', status: isWithdrawn(commission) ? '已撤回' : commission.status,
+      adjustedBy: commission.adjustedBy || '', adjustedAt: commission.adjustedAt || '',
+      status: isWithdrawn(commission) ? '已撤回' : commission.status === '待确认' && isCommissionPendingHandling(commission) ? '待处理' : commission.status,
       paidAt: commission.paidAt || payout?.issuedAt || '', payoutNo: payout?.payoutNo || '', paymentMethod: payout?.paymentMethod || '',
       paymentReference: payout?.paymentReference || '', issuedBy: payout?.issuedByName || '', reverseStatus: payout?.status === '已撤销' ? '系统已撤销' : '',
       reverseReason: payout?.reverseReason || '', calculationNote: commission.formulaText || commission.calculationNote || '',
@@ -309,29 +317,43 @@ export function buildCommissionMonthlyReportData(input: CommissionMonthlyReportB
 
   const employeeGroups = new Map<string, Commission[]>();
   scoped.forEach((commission) => {
-    const key = `${ownerKey(commission)}::${commission.role}`;
+    const key = ownerKey(commission);
     employeeGroups.set(key, [...(employeeGroups.get(key) || []), commission]);
   });
   const employeeRows: CommissionMonthlyEmployeeRow[] = [...employeeGroups.values()].map((rows) => {
     const first = rows[0];
-    const rowFormal = rows.filter((item) => !isRecovery(item));
-    const uniqueOrders = new Map<string, Commission>(); rowFormal.forEach((item) => uniqueOrders.set(item.orderId, item));
-    const orderPaid = roundMoney([...uniqueOrders.entries()].reduce((sum, [orderId, commission]) => sum + (orderPaidAmount(ordersById.get(orderId)) ?? Number(commission.orderAmount || 0)), 0));
     const tierRows = rows.filter(isTiered); const tierSnapshotsForRow = [...new Set(tierRows.map(tierBucketKey))].map((key) => tierSnapshots.get(key)).filter(Boolean) as CommissionTierSnapshot[];
     const issues = exceptionRows.filter((issue) => issue.employee === first.owner).map((issue) => issue.issue);
     const paidDates = rows.map((item) => payoutByCommission.get(item.id)?.issuedAt || item.paidAt || '').filter(Boolean).sort();
     const lastPaidAt = paidDates[paidDates.length - 1] || '';
+    const businessMetrics = calculateCommissionBusinessMetrics(rows, input.orders, recoveryOrders);
+    const statusMetrics = calculateCommissionStatusMetrics(rows, amountFor);
+    const effectiveRows = rows.filter((commission) => (
+      EFFECTIVE_STATUSES.has(commission.status)
+      && !(commission.status === '待确认' && isCommissionPendingHandling(commission))
+    ));
+    const statusDistribution = [
+      ['待处理', statusMetrics.statusCounts.pendingHandling],
+      ['待确认', statusMetrics.statusCounts.pendingConfirm],
+      ['待发放', statusMetrics.statusCounts.pendingPay],
+      ['已发放', statusMetrics.statusCounts.paid],
+      ['已撤回', statusMetrics.statusCounts.withdrawn],
+    ].filter(([, count]) => Number(count) > 0).map(([label, count]) => `${label}${count}笔`).join('、');
     return {
-      employeeId: first.ownerId || '', employee: first.owner || '待分配', department: first.department || '-', role: first.role,
-      orderCount: new Set(rows.map((item) => item.orderId)).size, commissionCount: rows.length, orderPaidAmount: orderPaid,
-      ordinaryAmount: roundMoney(rows.filter((item) => !isRecovery(item) && !isTiered(item) && EFFECTIVE_STATUSES.has(item.status)).reduce((sum, item) => sum + amountFor(item), 0)),
+      employeeId: first.ownerId || '', employee: first.owner || '待分配', department: first.department || '-',
+      role: [...new Set(rows.map((item) => item.role).filter(Boolean))].join('、') || '-',
+      orderCount: new Set(rows.map((item) => item.orderId)).size, commissionCount: rows.length,
+      orderPaidAmount: businessMetrics.formalOrderPaidAmount,
+      recoveryBusinessAmount: businessMetrics.recoveryBusinessAmount,
+      ordinaryAmount: roundMoney(effectiveRows.filter((item) => !isRecovery(item) && !isTiered(item)).reduce((sum, item) => sum + amountFor(item), 0)),
       tierPerformanceAmount: roundMoney(tierSnapshotsForRow.reduce((sum, snapshot) => sum + Number(snapshot.baseAmount || 0), 0)),
       tierRate: [...new Set(tierSnapshotsForRow.map((snapshot) => snapshot.currentTier?.rate).filter((rate) => rate !== undefined))].map((rate) => `${rate}%`).join('、') || '-',
-      tierAmount: roundMoney(tierRows.filter((item) => EFFECTIVE_STATUSES.has(item.status)).reduce((sum, item) => sum + amountFor(item), 0)),
-      recoveryAmount: roundMoney(rows.filter((item) => isRecovery(item) && EFFECTIVE_STATUSES.has(item.status)).reduce((sum, item) => sum + amountFor(item), 0)),
-      effectiveAmount: roundMoney(rows.filter((item) => EFFECTIVE_STATUSES.has(item.status)).reduce((sum, item) => sum + amountFor(item), 0)),
-      pendingConfirmAmount: statusAmount(rows, '待确认', amountFor), pendingPayAmount: statusAmount(rows, '待发放', amountFor), paidAmount: statusAmount(rows, '已发放', amountFor),
-      withdrawnAmount: roundMoney(rows.filter(isWithdrawn).reduce((sum, item) => sum + amountFor(item), 0)), lastPaidAt,
+      tierAmount: roundMoney(effectiveRows.filter(isTiered).reduce((sum, item) => sum + amountFor(item), 0)),
+      recoveryAmount: roundMoney(effectiveRows.filter(isRecovery).reduce((sum, item) => sum + amountFor(item), 0)),
+      effectiveAmount: statusMetrics.totalAmount,
+      pendingConfirmAmount: statusMetrics.pendingConfirmAmount, pendingPayAmount: statusMetrics.pendingPayAmount, paidAmount: statusMetrics.paidAmount,
+      withdrawnAmount: statusMetrics.withdrawnAmount, pendingHandlingCount: statusMetrics.statusCounts.pendingHandling,
+      statusDistribution, lastPaidAt,
       chargebackAmount: roundMoney(rows.reduce((sum, item) => sum + Number(item.chargebackAmount || 0), 0)),
       checkStatus: issues.length ? '存在异常' : '一致', exceptionNote: [...new Set(issues)].join('；'),
     };
@@ -384,11 +406,18 @@ export function buildCommissionMonthlyReportData(input: CommissionMonthlyReportB
     if (commission) addException(commission, '同一提成进入多个发放单', '停止发放并核对重复记账', '阻断');
   });
 
+  const businessMetrics = calculateCommissionBusinessMetrics(scoped, input.orders, recoveryOrders);
+  const statusMetrics = calculateCommissionStatusMetrics(scoped, amountFor);
   const summary: CommissionMonthlyReportSummary = {
-    employeeCount: new Set(scoped.map(ownerKey)).size, formalOrderCount: uniqueFormalOrders.size, recoveryOrderCount: new Set(recovery.map((item) => item.orderId)).size,
-    formalOrderPaidAmount, effectiveCommissionAmount: roundMoney(effective.reduce((sum, item) => sum + amountFor(item), 0)),
-    pendingConfirmAmount: statusAmount(scoped, '待确认', amountFor), pendingPayAmount: statusAmount(scoped, '待发放', amountFor), paidAmount: statusAmount(scoped, '已发放', amountFor),
-    withdrawnAmount: roundMoney(scoped.filter(isWithdrawn).reduce((sum, item) => sum + amountFor(item), 0)),
+    employeeCount: new Set(scoped.map(ownerKey)).size,
+    formalOrderCount: businessMetrics.formalOrderCount,
+    recoveryOrderCount: businessMetrics.recoveryOrderCount,
+    formalOrderPaidAmount: businessMetrics.formalOrderPaidAmount,
+    recoveryBusinessAmount: businessMetrics.recoveryBusinessAmount,
+    pendingHandlingCount: statusMetrics.statusCounts.pendingHandling,
+    effectiveCommissionAmount: statusMetrics.totalAmount,
+    pendingConfirmAmount: statusMetrics.pendingConfirmAmount, pendingPayAmount: statusMetrics.pendingPayAmount, paidAmount: statusMetrics.paidAmount,
+    withdrawnAmount: statusMetrics.withdrawnAmount,
     chargebackAmount: roundMoney(scoped.reduce((sum, item) => sum + Number(item.chargebackAmount || 0), 0)),
     ordinaryCommissionAmount: roundMoney(effective.filter((item) => !isRecovery(item) && !isTiered(item)).reduce((sum, item) => sum + amountFor(item), 0)),
     tierPerformanceAmount: roundMoney([...tierSnapshots.values()].reduce((sum, snapshot) => sum + Number(snapshot?.baseAmount || 0), 0)),
@@ -405,7 +434,10 @@ export function buildCommissionMonthlyReportData(input: CommissionMonthlyReportB
     ['统计月份', input.period, '按提成归属月份统计，不等同于当月现金支出'], ['数据截止时间', input.generatedAt, '报表生成时的服务器数据快照'],
     ['导出人', input.actor.name, `导出原因：${input.reason}`], ['员工人数', summary.employeeCount, '按员工ID去重'],
     ['关联正式订单数', summary.formalOrderCount, '按订单ID去重'], ['售后挽回业务数', summary.recoveryOrderCount, '不计入正式订单阶梯'],
-    ['正式订单实付总额', summary.formalOrderPaidAmount, '按订单去重；不可直接求和员工表中的关联实付'], ['本月有效应发', summary.effectiveCommissionAmount, '待确认+待发放+已发放'],
+    ['正式订单实付总额', summary.formalOrderPaidAmount, '按正式订单ID全局去重；不可直接求和员工表'],
+    ['售后挽回成交额', summary.recoveryBusinessAmount, '按售后挽回单ID全局去重；不可直接求和员工表'],
+    ['本月提成总额', summary.effectiveCommissionAmount, '待确认+待发放+已发放；待处理不计入'],
+    ['待处理笔数', summary.pendingHandlingCount, '尚未形成可确认金额，不计入本月提成总额'],
     ['待确认', summary.pendingConfirmAmount, '未进入实际发放'], ['待发放', summary.pendingPayAmount, '已确认、尚未实际发放'], ['已发放', summary.paidAmount, '按归属本月的提成统计'],
     ['已撤回', summary.withdrawnAmount, '不计入有效应发，保留历史'], ['普通订单提成', summary.ordinaryCommissionAmount, '不含阶梯和售后挽回'],
     ['正式订单阶梯业绩', summary.tierPerformanceAmount, '仅纳入正式订单有效阶梯明细'], ['正式订单阶梯提成', summary.tierCommissionAmount, '按方案快照复算'],
@@ -507,7 +539,15 @@ export function createCommissionMonthlyReportService(prisma: ReportPrisma, optio
       const payoutRecords = payoutRows.map((row) => normalizePayoutRecord(row.data)).filter((row): row is CommissionPayoutRecord => Boolean(row));
       const orders = orderRows.map((row) => asObject(row.data) as unknown as Order);
       const generatedAt = now().toISOString();
-      const report = buildCommissionMonthlyReportData({ ...request, generatedAt, actor: { id: actor.id, name: actor.name }, commissions, payoutRecords, orders });
+      const report = buildCommissionMonthlyReportData({
+        ...request,
+        generatedAt,
+        actor: { id: actor.id, name: actor.name },
+        commissions,
+        payoutRecords,
+        orders,
+        recoveryOrders,
+      });
       if (!report.sheets[2].rows.length) throw new CommissionMonthlyReportError(400, '当前筛选范围没有可导出的提成数据');
       if (report.sheets[2].rows.length > 50_000) throw new CommissionMonthlyReportError(400, '提成明细超过50000行，请按部门或员工分批导出');
       const buffer = Buffer.from(await createCommissionMonthlyReportWorkbook(report));

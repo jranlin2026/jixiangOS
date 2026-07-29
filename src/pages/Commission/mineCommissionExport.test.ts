@@ -49,6 +49,17 @@ const payout: MonthlyCommissionPayout = {
   chargebackAmount: 0,
   totalAmount: 4_530,
   status: '待发放',
+  formalOrderCount: 2,
+  recoveryOrderCount: 1,
+  formalOrderPaidAmount: 20_000,
+  recoveryBusinessAmount: 699,
+  statusCounts: {
+    pendingHandling: 0,
+    pendingConfirm: 0,
+    pendingPay: 3,
+    paid: 0,
+    withdrawn: 0,
+  },
   commissions: [tiered, ordinary, recovery],
   roleSummaries: [{
     role: '销售',
@@ -81,8 +92,48 @@ assert.equal(result.summaryRows[0].tierRate, '5%');
 assert.equal(result.summaryRows[0].tierCommissionAmount, 4_000);
 assert.equal(result.summaryRows[0].ordinaryCommissionAmount, 500);
 assert.equal(result.summaryRows[0].recoveryCommissionAmount, 30);
+assert.equal(result.summaryRows[0].formalOrderPaidAmount, 20_000);
+assert.equal(result.summaryRows[0].recoveryBusinessAmount, 699);
+assert.equal(result.summaryRows[0].formalOrderCount, 2);
+assert.equal(result.summaryRows[0].recoveryOrderCount, 1);
+assert.equal(result.summaryRows[0].statusDistribution, '待处理0 / 待确认0 / 待发放3 / 已发放0 / 已撤回0');
+assert.equal(result.summaryColumns.some((column) => column.label === '关联订单实付金额'), false);
 assert.equal(result.detailRows.length, 3);
 assert.equal(result.detailRows.find((row) => row.commissionType === '月度阶梯提成')?.commissionAmount, 4_000);
 assert.equal(result.detailRows.find((row) => row.commissionType === '售后挽回提成')?.businessSource, '售后挽回');
+
+const historicalRecovery = commission('historical-recovery', {
+  orderNo: 'RCV-HISTORICAL',
+  status: '已发放',
+  payoutPlanId: undefined,
+  payoutPlanName: undefined,
+});
+const fallbackResult = buildMineCommissionExportResult('2026-07', [{
+  ...payout,
+  formalOrderCount: undefined,
+  recoveryOrderCount: undefined,
+  formalOrderPaidAmount: undefined,
+  recoveryBusinessAmount: undefined,
+  statusCounts: undefined,
+  commissions: [historicalRecovery],
+}], '测试员工');
+assert.equal(fallbackResult.summaryRows[0].formalOrderCount, 0, 'RCV 历史单号不得误归正式订单');
+assert.equal(fallbackResult.summaryRows[0].recoveryOrderCount, 1);
+assert.equal(fallbackResult.summaryRows[0].statusDistribution, '待处理0 / 待确认0 / 待发放0 / 已发放1 / 已撤回0');
+
+const paidTiered = { ...tiered, status: '已发放' as const, commissionAmount: 3_500 };
+const paidTieredResult = buildMineCommissionExportResult('2026-07', [{
+  ...payout,
+  paidAmount: 3_500,
+  pendingPayAmount: 0,
+  totalAmount: 3_500,
+  status: '已发放',
+  commissions: [paidTiered],
+}], '测试员工');
+assert.equal(
+  paidTieredResult.detailRows[0].commissionAmount,
+  3_500,
+  '已发放阶梯提成必须保留发放快照金额，不得按当前档位重算',
+);
 
 console.log('mine commission export tests passed');

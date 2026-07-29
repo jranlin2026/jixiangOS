@@ -693,9 +693,11 @@ assert.doesNotMatch(
 );
 assert.match(
   commissionSource,
-  /\{ label: '总实付金额', value: monthlyPayoutSummary\.monthlyPaidAmount/,
-  'Monthly payout workspace should expose the total paid amount used by the server-generated report.',
+  /正式订单实付总额[\s\S]*financePeriodSummary\?\.formalOrderPaidAmount/,
+  '财务月报必须展示服务端按正式订单全局去重的实付金额',
 );
+assert.match(commissionSource, /售后挽回成交额[\s\S]*financePeriodSummary\?\.recoveryBusinessAmount/);
+assert.match(commissionSource, /状态分布[\s\S]*monthlyPayoutStatusDistribution/);
 assert.doesNotMatch(
   commissionSource,
   /RefundStatusBadge/,

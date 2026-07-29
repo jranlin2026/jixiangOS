@@ -5,8 +5,15 @@ import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import {
   applyRecoveryCommissionBusinessTimes,
   getCommissionTierBucketKey,
+  isRecoveryCommission,
   selectCurrentCommissionRounds,
 } from '../../src/shared/utils/commissionConfiguration';
+import {
+  calculateCommissionBusinessMetrics,
+  calculateCommissionStatusMetrics,
+  resolveFormalOrderPaidAmount,
+  resolveRecoveryBusinessAmount,
+} from '../../src/shared/utils/commissionMonthlyMetrics';
 import { isSuperAdmin } from '../../src/shared/utils/permissions';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type {
@@ -17,6 +24,7 @@ import type {
   IssueCommissionPayoutInput,
 } from '../../src/types/commission';
 import type { RecoveryOrder } from '../../src/types/recoveryOrder';
+import type { Order } from '../../src/types/order';
 
 type PayoutPrisma = Pick<PrismaClient, 'businessRecord' | '$transaction'>;
 type PayoutTransaction = Prisma.TransactionClient;
@@ -28,7 +36,9 @@ export interface CommissionPayoutServiceOptions {
 }
 
 const FINAL_COMMISSION_STATUSES = new Set<Commission['status']>(['已发放', '已取消', '已撤回', '已冲销']);
-const INCLUDED_WORKSPACE_STATUSES = new Set<Commission['status']>(['待确认', '待发放', '已发放']);
+const INCLUDED_PERIOD_WORKSPACE_STATUSES = new Set<Commission['status']>([
+  '待确认', '待发放', '已发放', '已取消', '已撤回', '待冲销', '已冲销',
+]);
 const INACTIVE_COMMISSION_STATUSES = new Set<Commission['status']>(['已取消', '已撤回', '待冲销', '已冲销']);
 
 const asObject = (value: unknown): Record<string, unknown> => (
@@ -246,7 +256,12 @@ async function syncRecoverySettlementStatuses(
   }
 }
 
-function employeeRows(commissions: Commission[]): CommissionPayoutEmployeeRow[] {
+function employeeRows(
+  commissions: Commission[],
+  orders: Order[] = [],
+  recoveryOrders: RecoveryOrder[] = [],
+  amountFor?: (commission: Commission) => number,
+): CommissionPayoutEmployeeRow[] {
   const grouped = new Map<string, CommissionPayoutEmployeeRow & { orderIds: Set<string> }>();
   commissions.forEach((commission) => {
     const key = ownerKey(commission);
@@ -257,9 +272,15 @@ function employeeRows(commissions: Commission[]): CommissionPayoutEmployeeRow[] 
       department: commission.department,
       orderCount: 0,
       commissionCount: 0,
+      formalOrderCount: 0,
+      recoveryOrderCount: 0,
+      formalOrderPaidAmount: 0,
+      recoveryBusinessAmount: 0,
+      statusCounts: { pendingHandling: 0, pendingConfirm: 0, pendingPay: 0, paid: 0, withdrawn: 0 },
       pendingConfirmAmount: 0,
       pendingPayAmount: 0,
       paidAmount: 0,
+      withdrawnAmount: 0,
       totalAmount: 0,
       commissions: [],
       orderIds: new Set<string>(),
@@ -267,14 +288,18 @@ function employeeRows(commissions: Commission[]): CommissionPayoutEmployeeRow[] 
     row.commissionCount += 1;
     row.orderIds.add(commission.orderId);
     row.commissions.push(commission);
-    const amount = Number(commission.commissionAmount || 0);
-    if (commission.status === '待确认') row.pendingConfirmAmount = roundMoney(row.pendingConfirmAmount + amount);
-    if (commission.status === '待发放') row.pendingPayAmount = roundMoney(row.pendingPayAmount + amount);
-    if (commission.status === '已发放') row.paidAmount = roundMoney(row.paidAmount + amount);
-    row.totalAmount = roundMoney(row.totalAmount + amount);
     grouped.set(key, row);
   });
-  return [...grouped.values()].map(({ orderIds, ...row }) => ({ ...row, orderCount: orderIds.size }))
+  return [...grouped.values()].map(({ orderIds, ...row }) => {
+    const businessMetrics = calculateCommissionBusinessMetrics(row.commissions, orders, recoveryOrders);
+    const statusMetrics = calculateCommissionStatusMetrics(row.commissions, amountFor);
+    return {
+      ...row,
+      ...businessMetrics,
+      ...statusMetrics,
+      orderCount: orderIds.size,
+    };
+  })
     .sort((left, right) => right.pendingPayAmount - left.pendingPayAmount || left.owner.localeCompare(right.owner, 'zh-CN'));
 }
 
@@ -295,18 +320,43 @@ export function createCommissionPayoutService(prisma: PayoutPrisma, options: Com
 
   const getPeriodWorkspace = async (period: string) => {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) return failure<CommissionPayoutWorkspace>('请选择正确的提成月份', 400);
-    const [commissionRows, recoveryRows, recordResult] = await Promise.all([
+    const [commissionRows, recoveryRows, orderRows, recordResult] = await Promise.all([
       prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSIONS } }),
       prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } }),
-      listRecords(period),
+      prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDERS } }),
+      listRecords(),
     ]);
     const recoveryOrders = recoveryRows.map((row) => asObject(row.data) as unknown as RecoveryOrder);
+    const orders = orderRows.map((row) => asObject(row.data) as unknown as Order);
     const commissions = resolveTieredPayoutAmounts(applyRecoveryCommissionBusinessTimes(
       commissionRows.map((row) => normalizeCommissionRound(row.data)),
       recoveryOrders,
     ))
-      .filter((item) => periodOf(item) === period && INCLUDED_WORKSPACE_STATUSES.has(item.status));
-    const employees = employeeRows(commissions);
+      .filter((item) => periodOf(item) === period && INCLUDED_PERIOD_WORKSPACE_STATUSES.has(item.status));
+    const payoutSnapshotByCommission = new Map<string, Commission>();
+    (recordResult.data || []).forEach((record) => (record.commissionSnapshots || []).forEach((snapshot) => {
+      if (!payoutSnapshotByCommission.has(snapshot.id)) payoutSnapshotByCommission.set(snapshot.id, snapshot);
+    }));
+    const ordersById = new Map(orders.map((order) => [order.id, order]));
+    const recoveryOrdersById = new Map(recoveryOrders.map((order) => [order.id, order]));
+    const displayCommissions = commissions.map((commission) => {
+      const snapshot = commission.status === '已发放' ? payoutSnapshotByCommission.get(commission.id) : undefined;
+      const businessAmount = isRecoveryCommission(commission)
+        ? resolveRecoveryBusinessAmount(recoveryOrdersById.get(commission.sourceRecoveryOrderId || commission.orderId), commission)
+        : resolveFormalOrderPaidAmount(ordersById.get(commission.orderId), commission);
+      return {
+        ...commission,
+        orderAmount: businessAmount,
+        commissionAmount: snapshot?.commissionAmount ?? commission.commissionAmount,
+      };
+    });
+    const amountFor = (commission: Commission) => Number(
+      (commission.status === '已发放' ? payoutSnapshotByCommission.get(commission.id)?.commissionAmount : undefined)
+      ?? commission.commissionAmount
+      ?? 0,
+    );
+    const employees = employeeRows(displayCommissions, orders, recoveryOrders, amountFor);
+    const businessMetrics = calculateCommissionBusinessMetrics(displayCommissions, orders, recoveryOrders);
     return success<CommissionPayoutWorkspace>({
       period,
       summary: {
@@ -315,9 +365,16 @@ export function createCommissionPayoutService(prisma: PayoutPrisma, options: Com
         pendingConfirmAmount: roundMoney(employees.reduce((sum, row) => sum + row.pendingConfirmAmount, 0)),
         paidEmployeeCount: employees.filter((row) => row.paidAmount > 0).length,
         paidAmount: roundMoney(employees.reduce((sum, row) => sum + row.paidAmount, 0)),
+        formalOrderPaidAmount: businessMetrics.formalOrderPaidAmount,
+        recoveryBusinessAmount: businessMetrics.recoveryBusinessAmount,
+        pendingHandlingCount: employees.reduce((sum, row) => sum + row.statusCounts.pendingHandling, 0),
+        withdrawnAmount: roundMoney(employees.reduce((sum, row) => sum + row.withdrawnAmount, 0)),
+        totalCommissionAmount: roundMoney(employees.reduce((sum, row) => sum + row.totalAmount, 0)),
+        formalOrderCount: businessMetrics.formalOrderCount,
+        recoveryOrderCount: businessMetrics.recoveryOrderCount,
       },
       employees,
-      records: recordResult.data || [],
+      records: (recordResult.data || []).filter((record) => record.period === period),
     });
   };
 
@@ -341,6 +398,13 @@ export function createCommissionPayoutService(prisma: PayoutPrisma, options: Com
         pendingConfirmAmount: roundMoney(employees.reduce((sum, row) => sum + row.pendingConfirmAmount, 0)),
         paidEmployeeCount: 0,
         paidAmount: 0,
+        formalOrderPaidAmount: 0,
+        recoveryBusinessAmount: 0,
+        pendingHandlingCount: employees.reduce((sum, row) => sum + row.statusCounts.pendingHandling, 0),
+        withdrawnAmount: 0,
+        totalCommissionAmount: roundMoney(employees.reduce((sum, row) => sum + row.totalAmount, 0)),
+        formalOrderCount: 0,
+        recoveryOrderCount: 0,
       },
       employees,
       records: [],
@@ -357,6 +421,13 @@ export function createCommissionPayoutService(prisma: PayoutPrisma, options: Com
         pendingConfirmAmount: 0,
         paidEmployeeCount: 0,
         paidAmount: 0,
+        formalOrderPaidAmount: 0,
+        recoveryBusinessAmount: 0,
+        pendingHandlingCount: 0,
+        withdrawnAmount: 0,
+        totalCommissionAmount: 0,
+        formalOrderCount: 0,
+        recoveryOrderCount: 0,
       },
       employees: [],
       records: recordResult.data || [],

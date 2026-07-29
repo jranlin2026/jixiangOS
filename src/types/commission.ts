@@ -433,6 +433,14 @@ export interface CommissionPayoutRecord {
   note?: string;
 }
 
+export interface CommissionPayoutStatusCounts {
+  pendingHandling: number;
+  pendingConfirm: number;
+  pendingPay: number;
+  paid: number;
+  withdrawn: number;
+}
+
 export interface CommissionPayoutEmployeeRow {
   ownerId: ID;
   owner: string;
@@ -440,9 +448,17 @@ export interface CommissionPayoutEmployeeRow {
   department: string;
   orderCount: number;
   commissionCount: number;
+  formalOrderCount: number;
+  recoveryOrderCount: number;
+  /** 员工关联正式订单实付；员工内按订单去重，不可跨员工求和。 */
+  formalOrderPaidAmount: number;
+  /** 员工关联售后挽回成交额；员工内按挽回单去重，不可跨员工求和。 */
+  recoveryBusinessAmount: number;
+  statusCounts: CommissionPayoutStatusCounts;
   pendingConfirmAmount: number;
   pendingPayAmount: number;
   paidAmount: number;
+  withdrawnAmount: number;
   totalAmount: number;
   commissions: Commission[];
 }
@@ -455,6 +471,15 @@ export interface CommissionPayoutWorkspace {
     pendingConfirmAmount: number;
     paidEmployeeCount: number;
     paidAmount: number;
+    /** 当前月份正式订单按订单 ID 全局去重后的实付。 */
+    formalOrderPaidAmount: number;
+    /** 当前月份售后挽回按挽回单 ID 全局去重后的成交额。 */
+    recoveryBusinessAmount: number;
+    pendingHandlingCount: number;
+    withdrawnAmount: number;
+    totalCommissionAmount: number;
+    formalOrderCount: number;
+    recoveryOrderCount: number;
   };
   employees: CommissionPayoutEmployeeRow[];
   records: CommissionPayoutRecord[];
@@ -564,6 +589,14 @@ export interface MonthlyCommissionPayout {
   departmentId?: ID;
   orderCount: number;
   monthlyPaidAmount: number;
+  /** 财务月报：员工关联正式订单实付，员工内去重。 */
+  formalOrderPaidAmount?: number;
+  /** 财务月报：员工关联售后挽回成交额，员工内去重。 */
+  recoveryBusinessAmount?: number;
+  formalOrderCount?: number;
+  recoveryOrderCount?: number;
+  /** 财务月报：员工各分账阶段的笔数分布。 */
+  statusCounts?: CommissionPayoutStatusCounts;
   pendingConfirmAmount: number;
   pendingPayAmount: number;
   paidAmount: number;

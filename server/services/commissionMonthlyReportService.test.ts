@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { buildCommissionMonthlyReportData, createCommissionMonthlyReportService, createCommissionMonthlyReportWorkbook } from './commissionMonthlyReportService';
 import type { Commission, CommissionPayoutRecord } from '../../src/types/commission';
 import type { Order } from '../../src/types/order';
+import type { RecoveryOrder } from '../../src/types/recoveryOrder';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
@@ -39,8 +40,8 @@ const order = {
   id: 'order-1',
   orderNo: 'ORD-001',
   customerName: '客户甲',
-  actualAmount: 1000,
-  payments: [{ id: 'payment-1', amount: 1000, paidAt: '2026-07-10T02:00:00.000Z' }],
+  actualAmount: 900,
+  payments: [],
 } as unknown as Order;
 
 const commissions: Commission[] = [
@@ -63,16 +64,29 @@ const data = buildCommissionMonthlyReportData({
   commissions,
   payoutRecords: [] as CommissionPayoutRecord[],
   orders: [order],
+  recoveryOrders: [{ id: 'recovery-1', recoveryAmount: 699 } as RecoveryOrder],
 });
 
 assert.deepEqual(data.sheets.map((sheet) => sheet.name), [
   '月度核对总览', '员工提成汇总', '逐笔提成明细', '正式订单阶梯核对', '发放与撤销记录', '异常与口径说明',
 ]);
-assert.equal(data.summary.formalOrderPaidAmount, 1000, '月度总览必须按订单去重实付');
+assert.equal(data.summary.formalOrderPaidAmount, 900, '月度总览必须按订单去重实付');
 assert.equal(data.summary.recoveryCommissionAmount, 50);
+assert.equal(data.summary.recoveryBusinessAmount, 699, '导出总览必须单独展示售后挽回成交额');
 assert.equal(data.summary.tierPerformanceAmount, 0, '售后挽回不得进入正式订单阶梯业绩');
 assert.equal(data.summary.effectiveCommissionAmount, 180);
-assert.equal(data.employeeRows.filter((row) => row.orderPaidAmount === 1000).length, 2, '员工可各自查看关联订单实付');
+assert.equal(data.employeeRows.filter((row) => row.orderPaidAmount === 900).length, 2, '员工可各自查看关联订单实付');
+assert.equal(data.employeeRows.length, 2, '员工汇总必须每人一行，不得按角色拆行');
+assert.equal(data.employeeRows.find((row) => row.employee === '员工A')?.role, '销售、售后挽回');
+assert.equal(data.employeeRows.find((row) => row.employee === '员工A')?.recoveryBusinessAmount, 699);
+const initialDetailRows = data.sheets.find((sheet) => sheet.name === '逐笔提成明细')!.rows;
+assert.equal(initialDetailRows.find((row) => row.commissionId === 'sales')?.orderPaidAmount, 900, '正式订单逐笔金额必须与源订单一致');
+assert.equal(initialDetailRows.find((row) => row.commissionId === 'recovery')?.orderPaidAmount, 699, '售后逐笔金额必须与源挽回单一致');
+assert.equal(
+  data.sheets.find((sheet) => sheet.name === '异常与口径说明')?.rows.some((row) => row.issue === '正式订单缺少可核验付款明细'),
+  true,
+  '没有付款明细时可回退展示实付，但必须保留财务异常提示',
+);
 
 const recoveryRoundData = buildCommissionMonthlyReportData({
   period: '2026-07', reason: '售后挽回轮次核对', scope: 'all', includeWithdrawn: true,
@@ -117,6 +131,26 @@ assert.deepEqual(
   ['formal-v2'],
   '正式订单历史撤回轮次不得重复出现在当前月报明细',
 );
+
+const mixedStatusData = buildCommissionMonthlyReportData({
+  period: '2026-07', reason: '混合状态核对', scope: 'all', includeWithdrawn: true,
+  generatedAt: '2026-07-31T10:00:00.000Z', actor: { id: 'finance-1', name: '财务甲' },
+  commissions: [
+    baseCommission({
+      id: 'handling-row', orderId: 'handling-order', commissionAmount: 80,
+      payoutPlanId: undefined, payoutPlanName: undefined, calculationNote: '缺少提成方案，暂不计算', status: '待确认',
+    }),
+    baseCommission({
+      id: 'confirm-row', orderId: 'confirm-order', commissionAmount: 20, payoutPlanId: 'plan-confirm', status: '待确认',
+    }),
+  ],
+  payoutRecords: [], orders: [], recoveryOrders: [],
+});
+assert.equal(mixedStatusData.summary.pendingHandlingCount, 1);
+assert.equal(mixedStatusData.summary.pendingConfirmAmount, 20, '导出不得把待处理临时金额混入待确认');
+assert.equal(mixedStatusData.summary.effectiveCommissionAmount, 20);
+assert.match(String(mixedStatusData.employeeRows[0].statusDistribution), /待处理1笔/);
+assert.match(String(mixedStatusData.employeeRows[0].statusDistribution), /待确认1笔/);
 
 const tiers = [
   { minAmount: 0, maxAmount: 30_000, rate: 8 },

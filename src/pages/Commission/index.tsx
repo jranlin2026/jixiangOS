@@ -44,7 +44,12 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import { businessExportApi, commissionApi, commissionPayoutApi, commissionRuleApi, customerApi, orderApi, settingsApi } from '../../api';
 import { getProductLevelRowSx, getProductLevelTagSx, normalizeResourceOwnership } from '../../shared/utils/constants';
-import { buildCommissionPayoutPlanSnapshot, getCommissionTierBucketKey } from '../../shared/utils/commissionConfiguration';
+import {
+  buildCommissionPayoutPlanSnapshot,
+  getCommissionTierBucketKey,
+  isCommissionPendingHandling,
+  isRecoveryCommission,
+} from '../../shared/utils/commissionConfiguration';
 import { getSettlementRowActionVisibility } from '../../shared/settlementListActions';
 import { formatCurrency, formatDate, formatEmployeeNameWithPosition, formatPaginationRows } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
@@ -70,6 +75,7 @@ import type {
   CommissionOrderSummaryStatusCounts,
   CommissionOperationLog,
   CommissionPayoutPlan,
+  CommissionPayoutWorkspace,
   CommissionRole,
   CommissionRoleConfig,
   MonthlyCommissionRoleSummary,
@@ -272,48 +278,9 @@ function getCommissionStatusColor(status: Commission['status'] | '待处理' | '
   return 'default';
 }
 
-function getCommissionIssueText(commission: Commission): string {
-  return [
-    commission.auditReason,
-    commission.frozenReason,
-    commission.calculationNote,
-    commission.formulaText,
-    commission.payoutPlanName,
-  ].filter(Boolean).join('；');
-}
-
-function isManualOrCustomCommission(commission: Commission): boolean {
-  const issueText = getCommissionIssueText(commission);
-  return Boolean(commission.isManualAdjusted)
-    || commission.sourceType === '人工新增'
-    || issueText.includes('自定义金额')
-    || issueText.includes('财务人工')
-    || issueText.includes('人工新增');
-}
-
-function hasResolvedCommissionBasis(commission: Commission): boolean {
-  return Boolean(
-    commission.payoutPlanId
-    || commission.payoutPlanName
-    || isManualOrCustomCommission(commission),
-  );
-}
-
 function getCommissionDisplayStatus(commission: Commission): Commission['status'] | '待处理' {
   if (commission.status !== '待确认') return commission.status;
-  const issueText = getCommissionIssueText(commission);
-  const hasUnresolvedRuleText = ['未匹配', '未命中', '暂不计算', '缺少', '不可用'].some((keyword) => issueText.includes(keyword));
-  const isPendingAssignment = !commission.ownerId || commission.owner === '待分配';
-  if (
-    isPendingAssignment
-    || Boolean(commission.frozenReason)
-    || issueText.includes('冻结')
-    || !hasResolvedCommissionBasis(commission)
-    || ((Number(commission.commissionAmount) || 0) === 0 && hasUnresolvedRuleText)
-  ) {
-    return '待处理';
-  }
-  return commission.status;
+  return isCommissionPendingHandling(commission) ? '待处理' : commission.status;
 }
 
 function escapeCsvValue(value: unknown): string {
@@ -387,6 +354,14 @@ type MineCommissionDisplayRow = {
 };
 
 const monthlyPayoutOwnerKey = (row: MonthlyCommissionPayout) => row.ownerId || row.owner;
+
+const monthlyPayoutStatusDistribution = (row: MonthlyCommissionPayout) => ([
+  { label: '待处理', count: row.statusCounts?.pendingHandling || 0, color: 'default' as const },
+  { label: '待确认', count: row.statusCounts?.pendingConfirm || 0, color: 'info' as const },
+  { label: '待发放', count: row.statusCounts?.pendingPay || 0, color: 'warning' as const },
+  { label: '已发放', count: row.statusCounts?.paid || 0, color: 'success' as const },
+  { label: '已撤回', count: row.statusCounts?.withdrawn || 0, color: 'default' as const },
+]).filter((item) => item.count > 0);
 
 interface CommissionProps {
   embedded?: boolean;
@@ -573,6 +548,7 @@ const Commission: React.FC<CommissionProps> = ({
 
   const [payoutPeriod, setPayoutPeriod] = useState(new Date().toISOString().slice(0, 7));
   const [payoutRows, setPayoutRows] = useState<MonthlyCommissionPayout[]>([]);
+  const [financePeriodSummary, setFinancePeriodSummary] = useState<CommissionPayoutWorkspace['summary'] | null>(null);
   const [selectedFinancePayoutOwnerKey, setSelectedFinancePayoutOwnerKey] = useState('');
   const [expandedPayoutOwners, setExpandedPayoutOwners] = useState<Set<string>>(new Set());
   const [expandedMinePayoutGroups, setExpandedMinePayoutGroups] = useState<Set<string>>(new Set());
@@ -945,8 +921,50 @@ const Commission: React.FC<CommissionProps> = ({
     if (!period) return;
     setPayoutLoading(true);
     try {
+      if (payoutMode === 'finance') {
+        setFinancePeriodSummary(null);
+        setPayoutRows([]);
+        const res = await commissionPayoutApi.fetchPeriodWorkspace(period);
+        if (res.code === 0 && res.data) {
+          const rows: MonthlyCommissionPayout[] = res.data.employees.map((employee) => ({
+            period,
+            owner: employee.owner,
+            ownerId: employee.ownerId,
+            department: employee.department,
+            departmentId: employee.departmentId,
+            orderCount: employee.orderCount,
+            monthlyPaidAmount: 0,
+            formalOrderPaidAmount: employee.formalOrderPaidAmount,
+            recoveryBusinessAmount: employee.recoveryBusinessAmount,
+            formalOrderCount: employee.formalOrderCount,
+            recoveryOrderCount: employee.recoveryOrderCount,
+            statusCounts: employee.statusCounts,
+            pendingConfirmAmount: employee.pendingConfirmAmount,
+            pendingPayAmount: employee.pendingPayAmount,
+            paidAmount: employee.paidAmount,
+            exceptionAmount: 0,
+            withdrawnAmount: employee.withdrawnAmount,
+            chargebackAmount: 0,
+            totalAmount: employee.totalAmount,
+            status: employee.pendingConfirmAmount > 0
+              ? '待确认'
+              : employee.pendingPayAmount > 0
+                ? '待发放'
+                : employee.paidAmount > 0
+                  ? '已发放'
+                  : '无应发',
+            commissions: employee.commissions,
+          }));
+          setFinancePeriodSummary(res.data.summary);
+          setPayoutRows(filterPayoutRowsForScope(rows));
+        }
+        return;
+      }
       const res = await commissionApi.fetchMonthlyCommissionPayouts(period);
-      if (res.code === 0) setPayoutRows(filterPayoutRowsForScope(res.data));
+      if (res.code === 0) {
+        setFinancePeriodSummary(null);
+        setPayoutRows(filterPayoutRowsForScope(res.data));
+      }
     } finally {
       setPayoutLoading(false);
     }
@@ -1844,6 +1862,7 @@ const Commission: React.FC<CommissionProps> = ({
   };
 
   const getDisplayCommissionAmount = (commission: Commission, tierSnapshot?: Commission['tierSnapshot']) => {
+    if (commission.status === '已发放') return commission.commissionAmount;
     if (commission.ruleCalculationType !== 'tiered_percentage') return commission.commissionAmount;
     const rate = tierSnapshot?.currentTier?.rate ?? commission.tierSnapshot?.currentTier?.rate ?? Number(commission.commissionRate || 0) * 100;
     if (!rate) return commission.commissionAmount;
@@ -1875,7 +1894,7 @@ const Commission: React.FC<CommissionProps> = ({
     return Array.from(roleBucketMap.values()).map(({ role, isTiered, commissions }) => {
       const tierSnapshot = isTiered ? buildTierSnapshotForSummary(commissions) : undefined;
       const pendingConfirmAmount = commissions
-        .filter((commission) => commission.status === '待确认')
+        .filter((commission) => commission.status === '待确认' && !isCommissionPendingHandling(commission))
         .reduce((sum, commission) => sum + getDisplayCommissionAmount(commission, tierSnapshot), 0);
       const pendingPayAmount = commissions
         .filter((commission) => commission.status === '待发放')
@@ -2084,7 +2103,7 @@ const Commission: React.FC<CommissionProps> = ({
     const note = commission.auditReason || commission.adjustReason || commission.calculationNote || '-';
     const formulaText = commission.formulaText || commission.payoutPlanName || commission.calculationNote || '-';
     const displayCommissionAmount = getDisplayCommissionAmount(commission, tierSnapshot);
-    const sourceLabel = commission.sourceBusinessType === 'after_sales_recovery' || commission.sourceBusinessType === 'refund_recovery'
+    const sourceLabel = isRecoveryCommission(commission)
       ? '售后挽回分账'
       : '正式订单分账';
 
@@ -3639,18 +3658,27 @@ const Commission: React.FC<CommissionProps> = ({
       ) : (
         <>
           <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 1, mb: 1.5 }}>
-            {[
-              { label: '总实付金额', value: monthlyPayoutSummary.monthlyPaidAmount, color: '#0f766e' },
-              { label: '本月应发', value: monthlyPayoutSummary.totalAmount, color: '#111827' },
-              { label: '待确认', value: monthlyPayoutSummary.pendingConfirmAmount, color: '#2563eb' },
-              { label: '待发放', value: monthlyPayoutSummary.pendingPayAmount, color: '#d97706' },
-              { label: '已发放', value: monthlyPayoutSummary.paidAmount, color: '#16a34a' },
-              { label: '已撤回', value: monthlyPayoutSummary.withdrawnAmount, color: '#6b7280' },
-            ].map((item) => (
+            {(payoutMode === 'finance' ? [
+              { label: '正式订单实付总额', display: formatCurrency(financePeriodSummary?.formalOrderPaidAmount || 0), color: '#0f766e' },
+              { label: '售后挽回成交额', display: formatCurrency(financePeriodSummary?.recoveryBusinessAmount || 0), color: '#7c3aed' },
+              { label: '本月提成总额', display: formatCurrency(financePeriodSummary?.totalCommissionAmount || 0), color: '#111827' },
+              { label: '待处理', display: `${financePeriodSummary?.pendingHandlingCount || 0} 笔`, color: '#64748b' },
+              { label: '待确认', display: formatCurrency(financePeriodSummary?.pendingConfirmAmount || 0), color: '#2563eb' },
+              { label: '待发放', display: formatCurrency(financePeriodSummary?.pendingPayAmount || 0), color: '#d97706' },
+              { label: '已发放', display: formatCurrency(financePeriodSummary?.paidAmount || 0), color: '#16a34a' },
+              { label: '已撤回', display: formatCurrency(financePeriodSummary?.withdrawnAmount || 0), color: '#6b7280' },
+            ] : [
+              { label: '阶梯核算业绩', display: formatCurrency(monthlyPayoutSummary.monthlyPaidAmount), color: '#0f766e' },
+              { label: '本月提成总额', display: formatCurrency(monthlyPayoutSummary.totalAmount), color: '#111827' },
+              { label: '待确认', display: formatCurrency(monthlyPayoutSummary.pendingConfirmAmount), color: '#2563eb' },
+              { label: '待发放', display: formatCurrency(monthlyPayoutSummary.pendingPayAmount), color: '#d97706' },
+              { label: '已发放', display: formatCurrency(monthlyPayoutSummary.paidAmount), color: '#16a34a' },
+              { label: '已撤回', display: formatCurrency(monthlyPayoutSummary.withdrawnAmount), color: '#6b7280' },
+            ]).map((item) => (
               <Box key={item.label} sx={{ border: `1px solid ${moduleTokens.softLine}`, borderRadius: moduleRadius, px: 1.25, py: 0.85, bgcolor: '#fff' }}>
                 <Typography variant="caption" sx={{ color: '#6b7280' }}>{item.label}</Typography>
                 <Typography variant="subtitle1" sx={{ color: item.color, fontWeight: 800, lineHeight: 1.25 }}>
-                  {formatCurrency(item.value)}
+                  {item.display}
                 </Typography>
               </Box>
             ))}
@@ -3671,12 +3699,21 @@ const Commission: React.FC<CommissionProps> = ({
                         <Typography fontWeight={900}>{formatOwnerDisplayName(row.ownerId, row.owner)}</Typography>
                         <Typography variant="caption" color="text.secondary">{row.department || '-'} · {row.orderCount} 个订单</Typography>
                       </Box>
-                      <Chip label={row.status} size="small" color={getPayoutStatusColor(row.status)} />
+                      <Typography variant="caption" color="text.secondary">{row.orderCount} 笔业务</Typography>
                     </Stack>
                     <Box sx={{ mt: 1.25, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
-                      <Box><Typography variant="caption" color="text.secondary">应发提成</Typography><Typography fontWeight={900}>{formatCurrency(row.totalAmount)}</Typography></Box>
+                      <Box><Typography variant="caption" color="text.secondary">正式订单实付</Typography><Typography fontWeight={900}>{formatCurrency(row.formalOrderPaidAmount || 0)}</Typography></Box>
+                      <Box><Typography variant="caption" color="text.secondary">挽回成交额</Typography><Typography fontWeight={900}>{formatCurrency(row.recoveryBusinessAmount || 0)}</Typography></Box>
+                      <Box><Typography variant="caption" color="text.secondary">本月提成总额</Typography><Typography fontWeight={900}>{formatCurrency(row.totalAmount)}</Typography></Box>
+                      <Box><Typography variant="caption" color="text.secondary">待确认</Typography><Typography fontWeight={900} color="info.main">{formatCurrency(row.pendingConfirmAmount)}</Typography></Box>
                       <Box><Typography variant="caption" color="text.secondary">待发放</Typography><Typography fontWeight={900} color="warning.main">{formatCurrency(row.pendingPayAmount)}</Typography></Box>
+                      <Box><Typography variant="caption" color="text.secondary">已发放</Typography><Typography fontWeight={900} color="success.main">{formatCurrency(row.paidAmount)}</Typography></Box>
                     </Box>
+                    <Stack direction="row" spacing={0.6} sx={{ mt: 1.1, flexWrap: 'wrap', rowGap: 0.6 }}>
+                      {monthlyPayoutStatusDistribution(row).map((item) => (
+                        <Chip key={item.label} label={`${item.label} ${item.count}笔`} size="small" color={item.color} variant={item.label === '已撤回' ? 'outlined' : 'filled'} />
+                      ))}
+                    </Stack>
                     <Button fullWidth size="small" variant={selected ? 'contained' : 'outlined'} startIcon={<VisibilityIcon />} sx={{ mt: 1.25 }} onClick={() => setSelectedFinancePayoutOwnerKey(ownerKey)}>
                       {selected ? '正在查看' : '查看月报'}
                     </Button>
@@ -3685,11 +3722,12 @@ const Commission: React.FC<CommissionProps> = ({
               })}
             </Box>
             <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}>
-              <Table size="small" sx={[moduleTableSx, { minWidth: 980 }]}>
+              <Table size="small" sx={[moduleTableSx, { minWidth: 1540 }]}>
                 <TableHead><TableRow>
-                  <TableCell>员工</TableCell><TableCell>部门</TableCell><TableCell align="right">订单数</TableCell>
-                  <TableCell align="right">关联实付</TableCell><TableCell align="right">应发提成</TableCell>
-                  <TableCell align="right">待发放</TableCell><TableCell align="center">状态</TableCell><TableCell align="center">操作</TableCell>
+                  <TableCell>员工</TableCell><TableCell>部门</TableCell><TableCell>业务构成</TableCell>
+                  <TableCell align="right">正式订单实付</TableCell><TableCell align="right">挽回成交额</TableCell><TableCell align="right">本月提成总额</TableCell>
+                  <TableCell align="right">待确认</TableCell><TableCell align="right">待发放</TableCell><TableCell align="right">已发放</TableCell>
+                  <TableCell>状态分布</TableCell><TableCell align="center">操作</TableCell>
                 </TableRow></TableHead>
                 <TableBody>
                   {visibleFinancePayoutRows.map((row) => {
@@ -3699,16 +3737,28 @@ const Commission: React.FC<CommissionProps> = ({
                       <TableRow key={ownerKey} hover selected={selected} sx={{ '& td:first-of-type': { borderLeft: selected ? '4px solid #2563eb' : '4px solid transparent' } }}>
                         <TableCell><Typography fontWeight={900}>{formatOwnerDisplayName(row.ownerId, row.owner)}</Typography></TableCell>
                         <TableCell>{row.department || '-'}</TableCell>
-                        <TableCell align="right">{row.orderCount}</TableCell>
-                        <TableCell align="right">{formatCurrency(row.monthlyPaidAmount)}</TableCell>
+                        <TableCell>
+                          <Typography variant="body2">正式 {row.formalOrderCount || 0} 笔</Typography>
+                          <Typography variant="caption" color="text.secondary">挽回 {row.recoveryOrderCount || 0} 笔</Typography>
+                        </TableCell>
+                        <TableCell align="right">{formatCurrency(row.formalOrderPaidAmount || 0)}</TableCell>
+                        <TableCell align="right">{formatCurrency(row.recoveryBusinessAmount || 0)}</TableCell>
                         <TableCell align="right"><Typography fontWeight={900}>{formatCurrency(row.totalAmount)}</Typography></TableCell>
+                        <TableCell align="right"><Typography fontWeight={row.pendingConfirmAmount > 0 ? 900 : 500} color={row.pendingConfirmAmount > 0 ? 'info.main' : 'text.primary'}>{formatCurrency(row.pendingConfirmAmount)}</Typography></TableCell>
                         <TableCell align="right"><Typography fontWeight={row.pendingPayAmount > 0 ? 900 : 500} color={row.pendingPayAmount > 0 ? 'warning.main' : 'text.primary'}>{formatCurrency(row.pendingPayAmount)}</Typography></TableCell>
-                        <TableCell align="center"><Chip label={row.status} size="small" color={getPayoutStatusColor(row.status)} /></TableCell>
+                        <TableCell align="right"><Typography fontWeight={row.paidAmount > 0 ? 900 : 500} color={row.paidAmount > 0 ? 'success.main' : 'text.primary'}>{formatCurrency(row.paidAmount)}</Typography></TableCell>
+                        <TableCell>
+                          <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, maxWidth: 280 }}>
+                            {monthlyPayoutStatusDistribution(row).map((item) => (
+                              <Chip key={item.label} label={`${item.label} ${item.count}`} size="small" color={item.color} variant={item.label === '已撤回' ? 'outlined' : 'filled'} />
+                            ))}
+                          </Stack>
+                        </TableCell>
                         <TableCell align="center"><Button size="small" startIcon={<VisibilityIcon />} onClick={() => setSelectedFinancePayoutOwnerKey(ownerKey)}>{selected ? '正在查看' : '查看月报'}</Button></TableCell>
                       </TableRow>
                     );
                   })}
-                  {!payoutRows.length && <TableRow><TableCell colSpan={8} align="center" sx={{ py: 5, color: 'text.secondary' }}>{payoutLoading ? '加载中...' : '暂无员工提成月报数据'}</TableCell></TableRow>}
+                  {!payoutRows.length && <TableRow><TableCell colSpan={11} align="center" sx={{ py: 5, color: 'text.secondary' }}>{payoutLoading ? '加载中...' : '暂无员工提成月报数据'}</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </TableContainer>
@@ -3741,6 +3791,28 @@ const Commission: React.FC<CommissionProps> = ({
                       {mineExporting ? '导出中...' : '导出员工明细'}
                     </Button>
                   )}
+                </Stack>
+              </Paper>
+              <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, border: '1px solid #dbe3ef', borderRadius: 1.5 }}>
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: 0.8 }}>
+                  {[
+                    { label: `正式订单 ${selectedFinancePayoutRow.formalOrderCount || 0} 笔`, value: formatCurrency(selectedFinancePayoutRow.formalOrderPaidAmount || 0), color: '#0f766e' },
+                    { label: `售后挽回 ${selectedFinancePayoutRow.recoveryOrderCount || 0} 笔`, value: formatCurrency(selectedFinancePayoutRow.recoveryBusinessAmount || 0), color: '#7c3aed' },
+                    { label: '本月提成总额', value: formatCurrency(selectedFinancePayoutRow.totalAmount), color: '#111827' },
+                    { label: '待确认', value: formatCurrency(selectedFinancePayoutRow.pendingConfirmAmount), color: '#2563eb' },
+                    { label: '待发放', value: formatCurrency(selectedFinancePayoutRow.pendingPayAmount), color: '#d97706' },
+                    { label: '已发放', value: formatCurrency(selectedFinancePayoutRow.paidAmount), color: '#16a34a' },
+                  ].map((item) => (
+                    <Box key={item.label} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, px: 1.1, py: 0.9, bgcolor: '#f8fafc' }}>
+                      <Typography variant="caption" color="text.secondary">{item.label}</Typography>
+                      <Typography fontWeight={900} sx={{ color: item.color }}>{item.value}</Typography>
+                    </Box>
+                  ))}
+                </Box>
+                <Stack direction="row" spacing={0.6} sx={{ mt: 1.1, flexWrap: 'wrap', rowGap: 0.6 }}>
+                  {monthlyPayoutStatusDistribution(selectedFinancePayoutRow).map((item) => (
+                    <Chip key={item.label} label={`${item.label} ${item.count}笔`} size="small" color={item.color} variant={item.label === '已撤回' ? 'outlined' : 'filled'} />
+                  ))}
                 </Stack>
               </Paper>
               {renderMinePayoutWorkspace([selectedFinancePayoutRow])}
