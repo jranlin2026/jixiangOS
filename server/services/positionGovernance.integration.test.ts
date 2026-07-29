@@ -40,6 +40,7 @@ if (!process.env.DATABASE_URL) {
     `qa-preview-conflict-${runId}`,
     `qa-preview-multiple-${runId}`,
     `qa-preview-missing-${runId}`,
+    `qa-preview-bound-${runId}`,
   ];
 
   try {
@@ -59,6 +60,7 @@ if (!process.env.DATABASE_URL) {
       { id: userIds[1], name: `预览冲突-${runId}`, email: `${userIds[1]}@example.test`, phone: '', role: '客服', departmentId: departmentIds[1], positionName: consultantName },
       { id: userIds[2], name: `预览多选-${runId}`, email: `${userIds[2]}@example.test`, phone: '', role: '销售', departmentId: departmentIds[0], positionName: managerName },
       { id: userIds[3], name: `预览缺失-${runId}`, email: `${userIds[3]}@example.test`, phone: '', role: '销售', departmentId: departmentIds[0], positionName: missingName },
+      { id: userIds[4], name: `已绑定-${runId}`, email: `${userIds[4]}@example.test`, phone: '', role: '销售', departmentId: departmentIds[0], positionId: positionIds[0], positionName: consultantName },
     ] });
     const beforeUsers = await prisma.user.findMany({ where: { id: { in: userIds } }, orderBy: { id: 'asc' } });
 
@@ -67,11 +69,11 @@ if (!process.env.DATABASE_URL) {
     const readiness = await service.getReadiness({ search: runId, employmentStatus: 'active', page: 1, pageSize: 2 });
     assert.equal(readiness.code, 0);
     assert.ok(readiness.data);
-    assert.equal(readiness.data.total, 4);
+    assert.equal(readiness.data.total, 5);
     assert.equal(readiness.data.items.length, 2, '盘点必须遵循服务端分页');
     assert.deepEqual(readiness.data.summary, {
-      total: 4,
-      boundValid: 0,
+      total: 5,
+      boundValid: 1,
       invalidBinding: 0,
       uniqueMatch: 1,
       multipleMatches: 1,
@@ -105,6 +107,9 @@ if (!process.env.DATABASE_URL) {
     assert.equal(pendingReconciliation.code, 0);
     assert.equal(pendingData.summary.passed, false);
     assert.equal(pendingData.summary.unresolvedCount, 4);
+    assert.equal(pendingData.summary.totalCount, 5);
+    assert.equal(pendingData.summary.coveredCount, 1);
+    assert.equal(pendingData.summary.migrationTargetCount, 4);
     assert.equal(pendingData.total, 4);
     assert.equal(pendingData.items.length, 2, '未完成明细必须使用服务端分页');
 
@@ -124,14 +129,23 @@ if (!process.env.DATABASE_URL) {
     assert.equal(reconciliation.code, 0);
     const reconciliationData: any = reconciliation.data;
     assert.deepEqual(reconciliationData?.summary, {
-      totalCount: 4,
-      existingEmployeeCount: 4,
-      activeEmployeeCount: 4,
-      coveredCount: 4,
+      totalCount: 5,
+      migrationTargetCount: 4,
+      baselineAvailable: true,
+      existingEmployeeCountBefore: 5,
+      existingEmployeeCount: 5,
+      activeEmployeeCountBefore: 5,
+      activeEmployeeCount: 5,
+      coveredCount: 5,
       unresolvedCount: 0,
       historyCount: 4,
       departmentCountBefore: 2,
       departmentCountAfter: 2,
+      employmentStatusChangedCount: 0,
+      departmentChangedCount: 0,
+      roleChangedCount: 0,
+      rolePositionSuspectedCountBefore: 0,
+      rolePositionSuspectedCount: 0,
       coverageRate: 100,
       passed: true,
     });
@@ -140,6 +154,15 @@ if (!process.env.DATABASE_URL) {
     const replay = await service.applyBatch(preview.data.id, selections, { id: actorId, name: '集成测试管理员' });
     assert.equal(replay.code, 0);
     assert.equal(await prisma.employeePositionHistory.count({ where: { employeeId: { in: userIds } } }), 4, '重复执行不得重复写入历史');
+
+    await prisma.employeePositionHistory.deleteMany({
+      where: { idempotencyKey: `position-mapping:${preview.data.id}:${userIds[0]}` },
+    });
+    const missingHistory = await service.getReconciliation(preview.data.id, { page: 1, pageSize: 10 });
+    const missingHistoryData: any = missingHistory.data;
+    assert.equal(missingHistoryData?.summary.passed, false, '回填历史缺失时不得通过退出验收');
+    assert.equal(missingHistoryData?.summary.unresolvedCount, 1);
+    assert.equal(missingHistoryData?.items[0]?.reason, '岗位回填历史缺失');
     console.log('position governance local exit integration: ok');
   } finally {
     await prisma.positionMappingBatch.deleteMany({ where: { createdById: actorId } });

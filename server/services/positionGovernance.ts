@@ -24,6 +24,20 @@ type PreviewPosition = {
 type PreviewDepartment = { id: string; name: string };
 type PreviewRole = { id: string; name: string };
 
+type ReconciliationBaselineEmployee = {
+  employeeId: string;
+  employmentStatus: string;
+  departmentId?: string | null;
+  roleId?: string | null;
+  roleName?: string | null;
+  rolePositionSuspected: boolean;
+};
+
+type ReconciliationBaseline = {
+  capturedAt: string;
+  employees: ReconciliationBaselineEmployee[];
+};
+
 export type PositionGovernanceReadinessStatus =
   | 'BOUND_VALID'
   | 'INVALID_BINDING'
@@ -260,24 +274,40 @@ export function createPositionGovernanceService(prisma: any) {
     },
 
     async createPreview(filters: { departmentId?: string; search?: string; employmentStatus?: string }, actor: GovernanceActor) {
-      const [allUsers, positions, departments] = await Promise.all([
+      const [allUsers, positions, departments, roles] = await Promise.all([
         prisma.user.findMany(),
         prisma.position.findMany(),
         prisma.department.findMany(),
+        prisma.role.findMany(),
       ]);
       const keyword = String(filters.search || '').trim().toLowerCase();
-      const users = allUsers.filter((user: any) => (
-        !user.positionId
-        && (filters.employmentStatus === 'all' || (user.employmentStatus || 'active') === (filters.employmentStatus || 'active'))
+      const scopedUsers = allUsers.filter((user: any) => (
+        (filters.employmentStatus === 'all' || (user.employmentStatus || 'active') === (filters.employmentStatus || 'active'))
         && (!filters.departmentId || user.departmentId === filters.departmentId)
         && (!keyword || user.name.toLowerCase().includes(keyword) || String(user.positionName || '').toLowerCase().includes(keyword))
       ));
+      const users = scopedUsers.filter((user: any) => !user.positionId);
       const preview = buildPositionMappingPreview({ users, positions, departments });
       const now = new Date();
       const batchId = compactId('position-map');
       const matchedCount = preview.filter((item) => item.matchStatus === 'UNIQUE_MATCH').length;
       const conflictCount = preview.length - matchedCount;
       const usersById = new Map<string, any>(users.map((user: any) => [user.id, user]));
+      const readinessByEmployee = new Map(
+        buildPositionGovernanceReadiness({ users: scopedUsers, positions, departments, roles })
+          .map((item) => [item.employeeId, item]),
+      );
+      const reconciliationBaseline: ReconciliationBaseline = {
+        capturedAt: now.toISOString(),
+        employees: scopedUsers.map((user: any) => ({
+          employeeId: user.id,
+          employmentStatus: String(user.employmentStatus || 'active'),
+          departmentId: user.departmentId || null,
+          roleId: user.roleId || null,
+          roleName: String(user.role || '').trim() || null,
+          rolePositionSuspected: Boolean(readinessByEmployee.get(user.id)?.warnings.includes('ROLE_POSITION_SUSPECTED')),
+        })),
+      };
       const itemRows = preview.map((item) => ({
         id: compactId('position-map-item'),
         batchId,
@@ -300,7 +330,7 @@ export function createPositionGovernanceService(prisma: any) {
         const createdBatch = await tx.positionMappingBatch.create({ data: {
           id: batchId,
           status: 'PREVIEW',
-          scope: filters,
+          scope: { ...filters, reconciliationBaseline },
           totalCount: preview.length,
           matchedCount,
           conflictCount,
@@ -464,69 +494,153 @@ export function createPositionGovernanceService(prisma: any) {
     async getReconciliation(batchId: string, filters: { page?: number; pageSize?: number } = {}) {
       const batch = await prisma.positionMappingBatch.findUnique({ where: { id: batchId }, include: { items: true } });
       if (!batch) return failure('岗位映射批次不存在');
-      const employeeIds = batch.items.map((item: any) => item.employeeId);
-      const [users, positions, historyCount] = await Promise.all([
+      const baseline = (batch.scope as any)?.reconciliationBaseline as ReconciliationBaseline | undefined;
+      const baselineAvailable = Boolean(baseline && Array.isArray(baseline.employees));
+      const baselineEmployees: ReconciliationBaselineEmployee[] = baselineAvailable
+        ? baseline!.employees
+        : batch.items.map((item: any) => ({
+          employeeId: item.employeeId,
+          employmentStatus: 'active',
+          departmentId: item.originalDepartmentId || null,
+          rolePositionSuspected: false,
+        }));
+      const employeeIds = baselineEmployees.map((item) => item.employeeId);
+      const historyKeys = batch.items.map((item: any) => `position-mapping:${batchId}:${item.employeeId}`);
+      const [users, positions, roles, histories] = await Promise.all([
         prisma.user.findMany({
           where: { id: { in: employeeIds } },
-          select: { id: true, name: true, departmentId: true, employmentStatus: true, positionId: true, positionName: true },
+          select: { id: true, name: true, departmentId: true, employmentStatus: true, positionId: true, positionName: true, roleId: true, role: true },
         }),
         prisma.position.findMany({ select: { id: true, name: true, departmentId: true, isActive: true } }),
-        prisma.employeePositionHistory.count({
-          where: { idempotencyKey: { in: employeeIds.map((employeeId: string) => `position-mapping:${batchId}:${employeeId}`) } },
+        prisma.role.findMany({ select: { id: true, name: true } }),
+        prisma.employeePositionHistory.findMany({
+          where: { idempotencyKey: { in: historyKeys } },
+          select: { employeeId: true, idempotencyKey: true },
         }),
       ]);
       const usersById = new Map<string, any>(users.map((user: any) => [user.id, user]));
       const positionsById = new Map<string, any>(positions.map((position: any) => [position.id, position]));
-      const unresolved = batch.items.flatMap((item: any) => {
-        const user: any = usersById.get(item.employeeId);
+      const roleNamesById = new Map<string, string>(roles.map((role: any) => [role.id, role.name]));
+      const normalizedRoleNames = new Set(roles.map((role: any) => normalizeName(role.name)).filter(Boolean));
+      const batchItemsByEmployee = new Map<string, any>(batch.items.map((item: any) => [item.employeeId, item]));
+      const historyEmployees = new Set(histories.map((history: any) => history.employeeId));
+      const unresolved = baselineEmployees.flatMap((original) => {
+        const item: any = batchItemsByEmployee.get(original.employeeId);
+        const user: any = usersById.get(original.employeeId);
         const position: any = user?.positionId ? positionsById.get(user.positionId) : undefined;
+        const currentEmploymentStatus = String(user?.employmentStatus || 'active');
+        const currentRoleId = user?.roleId || null;
+        const currentRoleName = String(user?.role || '').trim() || null;
+        const roleChanged = Boolean(user && (currentRoleId !== (original.roleId || null) || currentRoleName !== (original.roleName || null)));
+        const roleName = String((currentRoleId && roleNamesById.get(currentRoleId)) || currentRoleName || '').trim();
+        const normalizedPositionName = normalizeName(position?.name);
+        const rolePositionSuspected = Boolean(normalizedPositionName && (
+          normalizedPositionName === normalizeName(roleName)
+          || normalizedRoleNames.has(normalizedPositionName)
+        ));
+        const historyMissing = Boolean(item && !historyEmployees.has(original.employeeId));
         const bindingValid = Boolean(
           user
-          && (user.employmentStatus || 'active') === 'active'
+          && currentEmploymentStatus === original.employmentStatus
+          && user.departmentId === (original.departmentId || null)
+          && !roleChanged
+          && !rolePositionSuspected
           && position?.isActive
           && (!position.departmentId || position.departmentId === user.departmentId)
-          && item.applyStatus === 'APPLIED'
-          && item.confirmedPositionId === user.positionId,
+          && (!item || (
+            item.applyStatus === 'APPLIED'
+            && item.confirmedPositionId === user.positionId
+            && !historyMissing
+          )),
         );
         if (bindingValid) return [];
-        let reason = '映射批次尚未完成回填';
+        let reason = baselineAvailable ? '映射批次尚未完成回填' : '历史批次缺少回填前基线快照';
         if (!user) reason = '员工记录不存在';
-        else if ((user.employmentStatus || 'active') !== 'active') reason = '员工已非在职状态';
+        else if (currentEmploymentStatus !== original.employmentStatus) reason = '员工在职状态与回填前不一致';
+        else if (user.departmentId !== (original.departmentId || null)) reason = '员工所属部门与回填前不一致';
+        else if (roleChanged) reason = '员工角色与回填前不一致';
         else if (!user.positionId) reason = '员工尚未绑定正式岗位';
         else if (!position || !position.isActive) reason = '员工绑定的正式岗位不可用';
         else if (position.departmentId && position.departmentId !== user.departmentId) reason = '员工岗位与所属部门不一致';
-        else if (item.confirmedPositionId !== user.positionId) reason = '当前岗位与本批次人工确认结果不一致';
+        else if (rolePositionSuspected) reason = '角色与正式岗位疑似混用';
+        else if (item && item.confirmedPositionId !== user.positionId) reason = '当前岗位与本批次人工确认结果不一致';
+        else if (historyMissing) reason = '岗位回填历史缺失';
         return [{
-          employeeId: item.employeeId,
-          employeeName: user?.name || item.employeeName,
-          departmentId: user?.departmentId || item.originalDepartmentId || undefined,
-          originalPositionName: item.originalPositionName || '',
+          employeeId: original.employeeId,
+          employeeName: user?.name || item?.employeeName || original.employeeId,
+          departmentId: user?.departmentId || item?.originalDepartmentId || undefined,
+          originalPositionName: item?.originalPositionName || '',
           currentPositionId: user?.positionId || undefined,
-          currentPositionName: user?.positionName || position?.name || undefined,
-          applyStatus: item.applyStatus,
+          currentPositionName: position?.name || undefined,
+          applyStatus: item?.applyStatus || 'APPLIED',
           reason,
         }];
       });
-      const coveredCount = batch.items.length - unresolved.length;
-      const totalCount = batch.items.length;
+      const totalCount = baselineEmployees.length;
+      const coveredCount = totalCount - unresolved.length;
       const page = Math.max(1, Number(filters.page) || 1);
       const pageSize = Math.min(100, Math.max(1, Number(filters.pageSize) || 10));
-      const originalDepartments = new Set(batch.items.map((item: any) => item.originalDepartmentId).filter(Boolean));
+      const originalDepartments = new Set(baselineEmployees.map((item) => item.departmentId).filter(Boolean));
       const currentDepartments = new Set(users.map((user: any) => user.departmentId).filter(Boolean));
+      const activeEmployeeCountBefore = baselineEmployees.filter((item) => item.employmentStatus === 'active').length;
+      const activeEmployeeCount = users.filter((user: any) => (user.employmentStatus || 'active') === 'active').length;
+      const employmentStatusChangedCount = baselineEmployees.filter((original) => {
+        const user: any = usersById.get(original.employeeId);
+        return user && String(user.employmentStatus || 'active') !== original.employmentStatus;
+      }).length;
+      const departmentChangedCount = baselineEmployees.filter((original) => {
+        const user: any = usersById.get(original.employeeId);
+        return user && user.departmentId !== (original.departmentId || null);
+      }).length;
+      const roleChangedCount = baselineEmployees.filter((original) => {
+        const user: any = usersById.get(original.employeeId);
+        return user && (
+          (user.roleId || null) !== (original.roleId || null)
+          || (String(user.role || '').trim() || null) !== (original.roleName || null)
+        );
+      }).length;
+      const rolePositionSuspectedCount = users.filter((user: any) => {
+        const position = user.positionId ? positionsById.get(user.positionId) : undefined;
+        const roleName = String((user.roleId && roleNamesById.get(user.roleId)) || user.role || '').trim();
+        const normalizedPositionName = normalizeName(position?.name);
+        return normalizedPositionName && (
+          normalizedPositionName === normalizeName(roleName)
+          || normalizedRoleNames.has(normalizedPositionName)
+        );
+      }).length;
+      const rolePositionSuspectedCountBefore = baselineEmployees.filter((item) => item.rolePositionSuspected).length;
+      const historyCount = histories.length;
+      const migrationTargetCount = batch.items.length;
       return success({
         batchId,
         batchStatus: batch.status,
         summary: {
           totalCount,
+          migrationTargetCount,
+          baselineAvailable,
+          existingEmployeeCountBefore: totalCount,
           existingEmployeeCount: users.length,
-          activeEmployeeCount: users.filter((user: any) => (user.employmentStatus || 'active') === 'active').length,
+          activeEmployeeCountBefore,
+          activeEmployeeCount,
           coveredCount,
           unresolvedCount: unresolved.length,
           historyCount,
           departmentCountBefore: originalDepartments.size,
           departmentCountAfter: currentDepartments.size,
-          coverageRate: totalCount ? Number(((coveredCount / totalCount) * 100).toFixed(2)) : 100,
-          passed: totalCount > 0 && coveredCount === totalCount && historyCount === totalCount,
+          employmentStatusChangedCount,
+          departmentChangedCount,
+          roleChangedCount,
+          rolePositionSuspectedCountBefore,
+          rolePositionSuspectedCount,
+          coverageRate: totalCount ? Number(((coveredCount / totalCount) * 100).toFixed(2)) : 0,
+          passed: baselineAvailable
+            && totalCount > 0
+            && coveredCount === totalCount
+            && historyCount === migrationTargetCount
+            && employmentStatusChangedCount === 0
+            && departmentChangedCount === 0
+            && roleChangedCount === 0
+            && rolePositionSuspectedCount === 0,
         },
         items: unresolved.slice((page - 1) * pageSize, page * pageSize),
         total: unresolved.length,

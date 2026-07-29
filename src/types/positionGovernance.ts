@@ -81,13 +81,22 @@ export interface PositionGovernanceReconciliation {
   batchStatus: PositionMappingBatch['status'];
   summary: {
     totalCount: number;
+    migrationTargetCount: number;
+    baselineAvailable: boolean;
+    existingEmployeeCountBefore: number;
     existingEmployeeCount: number;
+    activeEmployeeCountBefore: number;
     activeEmployeeCount: number;
     coveredCount: number;
     unresolvedCount: number;
     historyCount: number;
     departmentCountBefore: number;
     departmentCountAfter: number;
+    employmentStatusChangedCount: number;
+    departmentChangedCount: number;
+    roleChangedCount: number;
+    rolePositionSuspectedCountBefore: number;
+    rolePositionSuspectedCount: number;
     coverageRate: number;
     passed: boolean;
   };

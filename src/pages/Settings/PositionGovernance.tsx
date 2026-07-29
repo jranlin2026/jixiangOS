@@ -26,6 +26,7 @@ const readinessLabels: Record<PositionGovernanceReadinessStatus, string> = {
 const changeLabels: Record<string, string> = {
   MIGRATION_BIND: '历史回填', POSITION_CHANGE: '调岗', DEPARTMENT_CHANGE: '转部门', POSITION_AND_DEPARTMENT_CHANGE: '调岗并转部门',
 };
+const LAST_GOVERNANCE_BATCH_KEY = 'jixiang-os:last-position-governance-batch';
 
 const PositionGovernance: React.FC = () => {
   const { items: departments, fetchItems: fetchDepartments } = useDepartmentStore();
@@ -52,6 +53,7 @@ const PositionGovernance: React.FC = () => {
   const [historyType, setHistoryType] = useState('');
   const [loading, setLoading] = useState(false);
   const readinessRequestId = useRef(0);
+  const reconciliationRequestId = useRef(0);
   const { alert, confirm, dialog } = useAppFeedback();
 
   useEffect(() => {
@@ -60,6 +62,18 @@ const PositionGovernance: React.FC = () => {
       if (response.code === 0) setPositions(response.data);
     });
   }, [fetchDepartments]);
+
+  useEffect(() => {
+    const batchId = window.localStorage.getItem(LAST_GOVERNANCE_BATCH_KEY);
+    if (!batchId) return;
+    positionGovernanceApi.getBatch(batchId).then((response) => {
+      if (response.code !== 0 || !response.data) return;
+      setBatch(response.data);
+      setSelections(Object.fromEntries(response.data.items
+        .filter((item) => item.confirmedPositionId || item.suggestedPositionId)
+        .map((item) => [item.employeeId, item.confirmedPositionId || item.suggestedPositionId!])));
+    });
+  }, []);
 
   const loadReadiness = async (pageIndex = readinessPage) => {
     const requestId = ++readinessRequestId.current;
@@ -101,6 +115,7 @@ const PositionGovernance: React.FC = () => {
   }, [tab, historyPage, historyRowsPerPage, historyType]);
 
   const generatePreview = async () => {
+    reconciliationRequestId.current += 1;
     setLoading(true);
     const response = await positionGovernanceApi.createPreview({ departmentId: departmentId || undefined, search: search.trim() || undefined, employmentStatus: 'active' });
     setLoading(false);
@@ -109,17 +124,21 @@ const PositionGovernance: React.FC = () => {
       return;
     }
     setBatch(response.data);
+    window.localStorage.setItem(LAST_GOVERNANCE_BATCH_KEY, response.data.id);
     setReconciliation(null);
+    setReconciliationPage(0);
     setPreviewPage(0);
-    setSelections(Object.fromEntries(response.data.items.filter((item) => item.suggestedPositionId).map((item) => [item.employeeId, item.suggestedPositionId!])))
+    setSelections(Object.fromEntries(response.data.items.filter((item) => item.suggestedPositionId).map((item) => [item.employeeId, item.suggestedPositionId!])));
   };
 
-  const loadReconciliation = async (batchId = batch?.id) => {
+  const loadReconciliation = async (batchId = batch?.id, pageIndex = reconciliationPage) => {
     if (!batchId) return;
+    const requestId = ++reconciliationRequestId.current;
     const response = await positionGovernanceApi.getReconciliation(batchId, {
-      page: reconciliationPage + 1,
+      page: pageIndex + 1,
       pageSize: reconciliationRowsPerPage,
     });
+    if (requestId !== reconciliationRequestId.current || batchId !== batch?.id) return;
     if (response.code !== 0) {
       await alert(response.message || '加载岗位治理对账失败', '加载失败');
       return;
@@ -147,6 +166,7 @@ const PositionGovernance: React.FC = () => {
       return;
     }
     setBatch(response.data);
+    window.localStorage.setItem(LAST_GOVERNANCE_BATCH_KEY, response.data.id);
     await alert(`已完成 ${response.data.appliedCount} 名员工的岗位回填。`, '回填完成');
   };
 
@@ -213,14 +233,22 @@ const PositionGovernance: React.FC = () => {
         <TablePagination count={previewItems.length} page={previewPage} rowsPerPage={previewRowsPerPage} onPageChange={(_event, page) => setPreviewPage(page)} onRowsPerPageChange={(event) => { setPreviewRowsPerPage(Number(event.target.value)); setPreviewPage(0); }} sx={{ mt: 2 }} />
         {reconciliation && <Paper elevation={0} sx={{ p: 2, mt: 2, border: `1px solid ${reconciliation.summary.passed ? '#86efac' : '#fbbf24'}` }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>阶段0-C退出对账</Typography>
-          <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5, mb: 1.5 }}>只对账当前人工确认批次，不会再次修改员工数据。</Typography>
+          <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5, mb: 1.5 }}>对账本批次整个试点人员范围，仅读取退出证据，不会再次修改员工数据。</Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: reconciliation.total ? 2 : 0 }}>
             <Chip color={reconciliation.summary.passed ? 'success' : 'warning'} label={reconciliation.summary.passed ? '本地退出验收通过' : '尚未通过'} />
+            {!reconciliation.summary.baselineAvailable && <Chip color="error" label="缺少回填前基线" />}
             <Chip label={`覆盖率 ${reconciliation.summary.coverageRate}%`} />
             <Chip label={`已覆盖 ${reconciliation.summary.coveredCount}/${reconciliation.summary.totalCount}`} />
             <Chip label={`未完成 ${reconciliation.summary.unresolvedCount}`} />
-            <Chip label={`新增历史 ${reconciliation.summary.historyCount}`} />
+            <Chip label={`回填对象 ${reconciliation.summary.migrationTargetCount}`} />
+            <Chip label={`新增历史 ${reconciliation.summary.historyCount}/${reconciliation.summary.migrationTargetCount}`} />
+            <Chip label={`员工数 ${reconciliation.summary.existingEmployeeCountBefore} → ${reconciliation.summary.existingEmployeeCount}`} />
+            <Chip label={`在职数 ${reconciliation.summary.activeEmployeeCountBefore} → ${reconciliation.summary.activeEmployeeCount}`} />
             <Chip label={`部门数 ${reconciliation.summary.departmentCountBefore} → ${reconciliation.summary.departmentCountAfter}`} />
+            <Chip color={reconciliation.summary.employmentStatusChangedCount ? 'error' : 'default'} label={`在职状态变化 ${reconciliation.summary.employmentStatusChangedCount}`} />
+            <Chip color={reconciliation.summary.departmentChangedCount ? 'error' : 'default'} label={`部门变化 ${reconciliation.summary.departmentChangedCount}`} />
+            <Chip color={reconciliation.summary.roleChangedCount ? 'error' : 'default'} label={`角色变化 ${reconciliation.summary.roleChangedCount}`} />
+            <Chip color={reconciliation.summary.rolePositionSuspectedCount ? 'error' : 'default'} label={`角色/岗位混用 ${reconciliation.summary.rolePositionSuspectedCountBefore} → ${reconciliation.summary.rolePositionSuspectedCount}`} />
           </Box>
           {reconciliation.total > 0 && <>
             <TableContainer sx={{ border: '1px solid #e5e7eb', overflowX: 'auto' }}><Table sx={{ minWidth: 760 }}><TableHead><TableRow><TableCell>员工</TableCell><TableCell>原岗位</TableCell><TableCell>当前岗位</TableCell><TableCell>处理状态</TableCell><TableCell>未完成原因</TableCell></TableRow></TableHead><TableBody>{reconciliation.items.map((item) => <TableRow key={item.employeeId} hover><TableCell sx={{ fontWeight: 600 }}>{item.employeeName}</TableCell><TableCell>{item.originalPositionName || '-'}</TableCell><TableCell>{item.currentPositionName || '-'}</TableCell><TableCell>{item.applyStatus === 'APPLIED' ? '已回填' : '待处理'}</TableCell><TableCell>{item.reason}</TableCell></TableRow>)}</TableBody></Table></TableContainer>
