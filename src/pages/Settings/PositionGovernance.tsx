@@ -73,7 +73,7 @@ const PositionGovernance: React.FC = () => {
 
   const applyPreview = async () => {
     if (!batch) return;
-    const selectedItems = batch.items.filter((item) => selections[item.employeeId]);
+    const selectedItems = batch.items.filter((item) => item.applyStatus !== 'APPLIED' && selections[item.employeeId]);
     if (!selectedItems.length) {
       await alert('请至少为一名员工确认正式岗位', '确认回填');
       return;
@@ -120,7 +120,7 @@ const PositionGovernance: React.FC = () => {
         </Box>}
         <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e5e7eb', overflowX: 'auto' }}>
           <Table sx={{ minWidth: 920 }}><TableHead><TableRow><TableCell>员工</TableCell><TableCell>部门</TableCell><TableCell>原自由文本岗位</TableCell><TableCell>匹配结果</TableCell><TableCell sx={{ minWidth: 220 }}>确认正式岗位</TableCell><TableCell>处理状态</TableCell></TableRow></TableHead>
-            <TableBody>{paginatedPreview.map((item) => <TableRow key={item.id} hover><TableCell sx={{ fontWeight: 600 }}>{item.employeeName}</TableCell><TableCell>{item.departmentName || '-'}</TableCell><TableCell>{item.originalPositionName || '-'}</TableCell><TableCell><Chip size="small" label={matchLabels[item.matchStatus]} color={item.matchStatus === 'UNIQUE_MATCH' ? 'success' : 'warning'} /></TableCell><TableCell><TextField select size="small" fullWidth value={selections[item.employeeId] || ''} disabled={batch?.status === 'APPLIED'} onChange={(event) => setSelections((current) => ({ ...current, [item.employeeId]: event.target.value }))}><MenuItem value="">待选择</MenuItem>{availablePositions(item).map((position) => <MenuItem key={position.id} value={position.id}>{position.name}</MenuItem>)}</TextField></TableCell><TableCell>{item.applyStatus === 'APPLIED' ? '已回填' : '待处理'}</TableCell></TableRow>)}</TableBody>
+            <TableBody>{paginatedPreview.map((item) => <TableRow key={item.id} hover><TableCell sx={{ fontWeight: 600 }}>{item.employeeName}</TableCell><TableCell>{item.departmentName || '-'}</TableCell><TableCell>{item.originalPositionName || '-'}</TableCell><TableCell><Chip size="small" label={matchLabels[item.matchStatus]} color={item.matchStatus === 'UNIQUE_MATCH' ? 'success' : 'warning'} /></TableCell><TableCell><TextField select size="small" fullWidth value={selections[item.employeeId] || ''} disabled={item.applyStatus === 'APPLIED'} onChange={(event) => setSelections((current) => ({ ...current, [item.employeeId]: event.target.value }))}><MenuItem value="">待选择</MenuItem>{availablePositions(item).map((position) => <MenuItem key={position.id} value={position.id}>{position.name}</MenuItem>)}</TextField></TableCell><TableCell>{item.applyStatus === 'APPLIED' ? '已回填' : '待处理'}</TableCell></TableRow>)}</TableBody>
           </Table>
         </TableContainer>
         <TablePagination count={previewItems.length} page={previewPage} rowsPerPage={previewRowsPerPage} onPageChange={(_event, page) => setPreviewPage(page)} onRowsPerPageChange={(event) => { setPreviewRowsPerPage(Number(event.target.value)); setPreviewPage(0); }} sx={{ mt: 2 }} />

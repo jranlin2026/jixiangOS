@@ -33,6 +33,14 @@ const storedBatches: any[] = [];
 const storedItems: any[] = [];
 let employeeWriteCount = 0;
 const service = createPositionGovernanceService({
+  $transaction: async (work: (tx: any) => Promise<any>) => work({
+    positionMappingBatch: {
+      create: async ({ data }: any) => { storedBatches.push(data); return data; },
+    },
+    positionMappingItem: {
+      createMany: async ({ data }: any) => { storedItems.push(...data); return { count: data.length }; },
+    },
+  }),
   user: {
     findMany: async () => [{
       id: 'user-preview', name: '预览员工', departmentId: 'dept-sales', positionId: null,
@@ -72,19 +80,41 @@ const applyBatch: any = {
   }],
 };
 const histories: any[] = [];
+const batchUpdatePayloads: any[] = [];
 const applyPrisma: any = {
   positionMappingBatch: {
     findUnique: async () => applyBatch,
-    update: async ({ data }: any) => Object.assign(applyBatch, data),
+    update: async ({ data }: any) => {
+      batchUpdatePayloads.push(data);
+      const nextData = { ...data };
+      if (typeof nextData.appliedCount === 'object' && nextData.appliedCount?.increment) {
+        nextData.appliedCount = applyBatch.appliedCount + nextData.appliedCount.increment;
+      }
+      return Object.assign(applyBatch, nextData);
+    },
   },
   user: {
     findUnique: async () => employee,
-    update: async ({ data }: any) => Object.assign(employee, data),
+    updateMany: async ({ where, data }: any) => {
+      if (employee.id !== where.id || employee.positionId !== where.positionId || employee.updatedAt.getTime() !== where.updatedAt.getTime()) {
+        return { count: 0 };
+      }
+      Object.assign(employee, data);
+      return { count: 1 };
+    },
   },
   position: { findUnique: async () => ({ id: 'position-sales', name: '销售顾问', departmentId: 'dept-sales', isActive: true }) },
   department: { findUnique: async () => ({ id: 'dept-sales', name: '销售部' }) },
   employeePositionHistory: { create: async ({ data }: any) => { histories.push(data); return data; } },
-  positionMappingItem: { update: async ({ data }: any) => Object.assign(applyBatch.items[0], data) },
+  positionMappingItem: {
+    findUnique: async () => applyBatch.items[0],
+    updateMany: async ({ where, data }: any) => {
+      if (applyBatch.items[0].id !== where.id || applyBatch.items[0].applyStatus !== where.applyStatus) return { count: 0 };
+      Object.assign(applyBatch.items[0], data);
+      return { count: 1 };
+    },
+    update: async ({ data }: any) => Object.assign(applyBatch.items[0], data),
+  },
 };
 applyPrisma.$transaction = async (work: (tx: any) => Promise<void>) => work(applyPrisma);
 const applyService = createPositionGovernanceService(applyPrisma);
@@ -98,6 +128,7 @@ const applied = await applyService.applyBatch('batch-apply', [{ employeeId: empl
 assert.equal(applied.code, 0);
 assert.equal(employee.positionId, 'position-sales');
 assert.equal(histories.length, 1);
+assert.deepEqual(batchUpdatePayloads[0].appliedCount, { increment: 1 }, '批次进度必须原子累加');
 const replayed = await applyService.applyBatch('batch-apply', [{ employeeId: employee.id, positionId: 'position-sales' }], { id: 'admin', name: '管理员' });
 assert.equal(replayed.code, 0);
 assert.equal(histories.length, 1, '重复确认不得重复写入变更历史');

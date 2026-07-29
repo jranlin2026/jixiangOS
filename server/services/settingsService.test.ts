@@ -194,6 +194,16 @@ function createModel<T extends { id: string }>(items: T[]) {
       items[idx] = { ...items[idx], ...definedData };
       return items[idx];
     },
+    updateMany: async ({ where, data }: any) => {
+      const idx = items.findIndex((item: any) => (
+        item.id === where.id
+        && (where.updatedAt === undefined || item.updatedAt.getTime() === where.updatedAt.getTime())
+      ));
+      if (idx < 0) return { count: 0 };
+      const definedData = Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined));
+      items[idx] = { ...items[idx], ...definedData };
+      return { count: 1 };
+    },
     deleteMany: async ({ where }: any) => {
       const before = items.length;
       for (let index = items.length - 1; index >= 0; index -= 1) {

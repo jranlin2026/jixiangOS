@@ -75,6 +75,8 @@ export function buildPositionMappingPreview(input: {
 
 type GovernanceActor = { id: string; name: string };
 
+class GovernanceConflictError extends Error {}
+
 function compactId(prefix: string): string {
   return `${prefix}-${randomUUID().slice(0, 8)}`;
 }
@@ -120,22 +122,6 @@ export function createPositionGovernanceService(prisma: any) {
       const batchId = compactId('position-map');
       const matchedCount = preview.filter((item) => item.matchStatus === 'UNIQUE_MATCH').length;
       const conflictCount = preview.length - matchedCount;
-      const batch = await prisma.positionMappingBatch.create({
-        data: {
-          id: batchId,
-          status: 'PREVIEW',
-          scope: filters,
-          totalCount: preview.length,
-          matchedCount,
-          conflictCount,
-          appliedCount: 0,
-          failedCount: 0,
-          createdById: actor.id,
-          createdByName: actor.name,
-          createdAt: now,
-          updatedAt: now,
-        },
-      });
       const usersById = new Map<string, any>(users.map((user: any) => [user.id, user]));
       const itemRows = preview.map((item) => ({
         id: compactId('position-map-item'),
@@ -155,7 +141,24 @@ export function createPositionGovernanceService(prisma: any) {
         createdAt: now,
         updatedAt: now,
       }));
-      if (itemRows.length) await prisma.positionMappingItem.createMany({ data: itemRows });
+      const batch = await prisma.$transaction(async (tx: any) => {
+        const createdBatch = await tx.positionMappingBatch.create({ data: {
+          id: batchId,
+          status: 'PREVIEW',
+          scope: filters,
+          totalCount: preview.length,
+          matchedCount,
+          conflictCount,
+          appliedCount: 0,
+          failedCount: 0,
+          createdById: actor.id,
+          createdByName: actor.name,
+          createdAt: now,
+          updatedAt: now,
+        } });
+        if (itemRows.length) await tx.positionMappingItem.createMany({ data: itemRows });
+        return createdBatch;
+      });
       return success({
         id: batch.id,
         status: batch.status,
@@ -206,7 +209,15 @@ export function createPositionGovernanceService(prisma: any) {
           prisma.position.findUnique({ where: { id: selection.positionId } }),
         ]);
         if (!user || !position || !position.isActive) return failure(`员工 ${item.employeeName} 的目标岗位不可用`);
-        if (user.positionId) return failure(`员工 ${item.employeeName} 已绑定岗位，请刷新预览`);
+        if (user.positionId) {
+          const currentItem = await prisma.positionMappingItem.findUnique({ where: { id: item.id } });
+          if (
+            user.positionId === selection.positionId
+            && currentItem?.applyStatus === 'APPLIED'
+            && currentItem.confirmedPositionId === selection.positionId
+          ) continue;
+          return failure(`员工 ${item.employeeName} 已绑定岗位，请刷新预览`);
+        }
         if (iso(user.updatedAt) !== iso(item.employeeUpdatedAtSnapshot)) return failure(`员工 ${item.employeeName} 的资料已变更，请重新生成预览`);
         if (position.departmentId && position.departmentId !== user.departmentId) return failure(`员工 ${item.employeeName} 的岗位与部门不一致`);
         const oldDepartment = user.departmentId
@@ -216,52 +227,82 @@ export function createPositionGovernanceService(prisma: any) {
       }
       if (!prepared.length) return this.getBatch(batchId);
       const now = new Date();
-      const appliedCount = Number(batch.appliedCount || 0) + prepared.length;
-      const status = appliedCount >= batch.totalCount ? 'APPLIED' : 'PARTIAL';
-      await prisma.$transaction(async (tx: any) => {
-        for (const entry of prepared) {
-          await tx.user.update({ where: { id: entry.user.id }, data: {
-            positionId: entry.position.id,
-            positionName: entry.position.name,
-            updatedAt: now,
-          } });
-          await tx.employeePositionHistory.create({ data: {
-            id: compactId('position-history'),
-            employeeId: entry.user.id,
-            employeeName: entry.user.name,
-            changeType: 'MIGRATION_BIND',
-            oldDepartmentId: entry.user.departmentId || null,
-            oldDepartmentName: entry.oldDepartment?.name || null,
-            newDepartmentId: entry.user.departmentId || null,
-            newDepartmentName: entry.oldDepartment?.name || null,
-            oldPositionId: null,
-            oldPositionName: entry.user.positionName || null,
-            newPositionId: entry.position.id,
-            newPositionName: entry.position.name,
-            reason: '历史自由文本岗位人工确认回填',
-            source: 'MIGRATION',
-            changedById: actor.id,
-            changedByName: actor.name,
-            changedAt: now,
-            idempotencyKey: `position-mapping:${batchId}:${entry.user.id}`,
-          } });
-          await tx.positionMappingItem.update({ where: { id: entry.item.id }, data: {
-            confirmedPositionId: entry.position.id,
-            applyStatus: 'APPLIED',
-            appliedAt: now,
-            updatedAt: now,
-          } });
-        }
-        await tx.positionMappingBatch.update({ where: { id: batchId }, data: {
-          status,
-          appliedCount,
-          failedCount: 0,
-          confirmedById: actor.id,
-          confirmedByName: actor.name,
-          confirmedAt: now,
-          updatedAt: now,
-        } });
-      });
+      try {
+        await prisma.$transaction(async (tx: any) => {
+          let appliedInTransaction = 0;
+          for (const entry of prepared) {
+            const claim = await tx.positionMappingItem.updateMany({
+              where: { id: entry.item.id, applyStatus: 'PENDING' },
+              data: { applyStatus: 'APPLYING', updatedAt: now },
+            });
+            if (claim.count !== 1) continue;
+            const employeeUpdate = await tx.user.updateMany({
+              where: {
+                id: entry.user.id,
+                positionId: null,
+                updatedAt: entry.user.updatedAt,
+              },
+              data: {
+                positionId: entry.position.id,
+                positionName: entry.position.name,
+                updatedAt: now,
+              },
+            });
+            if (employeeUpdate.count !== 1) {
+              throw new GovernanceConflictError(`员工 ${entry.user.name} 的资料已变更，请重新生成预览`);
+            }
+            await tx.employeePositionHistory.create({
+              data: {
+                id: compactId('position-history'),
+                employeeId: entry.user.id,
+                employeeName: entry.user.name,
+                changeType: 'MIGRATION_BIND',
+                oldDepartmentId: entry.user.departmentId || null,
+                oldDepartmentName: entry.oldDepartment?.name || null,
+                newDepartmentId: entry.user.departmentId || null,
+                newDepartmentName: entry.oldDepartment?.name || null,
+                oldPositionId: null,
+                oldPositionName: entry.user.positionName || null,
+                newPositionId: entry.position.id,
+                newPositionName: entry.position.name,
+                reason: '历史自由文本岗位人工确认回填',
+                source: 'MIGRATION',
+                changedById: actor.id,
+                changedByName: actor.name,
+                changedAt: now,
+                idempotencyKey: `position-mapping:${batchId}:${entry.user.id}`,
+              },
+            });
+            await tx.positionMappingItem.update({
+              where: { id: entry.item.id },
+              data: {
+                confirmedPositionId: entry.position.id,
+                applyStatus: 'APPLIED',
+                appliedAt: now,
+                updatedAt: now,
+              },
+            });
+            appliedInTransaction += 1;
+          }
+          if (appliedInTransaction > 0) {
+            const updatedBatch = await tx.positionMappingBatch.update({ where: { id: batchId }, data: {
+              appliedCount: { increment: appliedInTransaction },
+              failedCount: 0,
+              confirmedById: actor.id,
+              confirmedByName: actor.name,
+              confirmedAt: now,
+              updatedAt: now,
+            } });
+            const status = updatedBatch.appliedCount >= updatedBatch.totalCount ? 'APPLIED' : 'PARTIAL';
+            if (updatedBatch.status !== status) {
+              await tx.positionMappingBatch.update({ where: { id: batchId }, data: { status, updatedAt: now } });
+            }
+          }
+        });
+      } catch (error) {
+        if (error instanceof GovernanceConflictError) return failure(error.message);
+        throw error;
+      }
       return this.getBatch(batchId);
     },
 
@@ -274,7 +315,12 @@ export function createPositionGovernanceService(prisma: any) {
       };
       const [total, rows] = await Promise.all([
         prisma.employeePositionHistory.count({ where }),
-        prisma.employeePositionHistory.findMany({ where, orderBy: { changedAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }),
+        prisma.employeePositionHistory.findMany({
+          where,
+          orderBy: [{ changedAt: 'desc' }, { id: 'desc' }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
       ]);
       return success({
         items: rows.map((row: any) => ({ ...row, changedAt: iso(row.changedAt) })),

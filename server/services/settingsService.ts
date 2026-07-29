@@ -461,6 +461,7 @@ export function createSettingsService(prisma: SettingsPrisma) {
       if (selectedPosition?.departmentId && selectedPosition.departmentId !== nextDepartmentId) {
         return failure('该岗位不属于所选部门');
       }
+      const nextUpdatedAt = new Date(Math.max(Date.now(), user.updatedAt.getTime() + 1));
       const updateData = {
           name: data.name !== undefined ? String(data.name).trim() : undefined,
           account: nextAccount,
@@ -480,7 +481,7 @@ export function createSettingsService(prisma: SettingsPrisma) {
           employmentStatus: data.employmentStatus,
           leftAt: data.leftAt ? new Date(data.leftAt) : undefined,
           leftBy: data.leftBy,
-          updatedAt: new Date(),
+          updatedAt: nextUpdatedAt,
       };
       const nextPositionId = data.positionId !== undefined ? selectedPosition?.id || null : user.positionId;
       const organizationChanged = nextDepartmentId !== user.departmentId || nextPositionId !== user.positionId;
@@ -488,7 +489,12 @@ export function createSettingsService(prisma: SettingsPrisma) {
         return failure('调岗或转部门必须填写变更原因');
       }
       const persistUser = async (client: Pick<PrismaClient, 'user' | 'department' | 'employeePositionHistory'>) => {
-        const row = await client.user.update({ where: { id }, data: updateData });
+        if (organizationChanged) {
+          const updated = await client.user.updateMany({ where: { id, updatedAt: user.updatedAt }, data: updateData });
+          if (updated.count !== 1) return null;
+        } else {
+          await client.user.update({ where: { id }, data: updateData });
+        }
         if (organizationChanged) {
           const [oldDepartment, newDepartment] = await Promise.all([
             user.departmentId ? client.department.findUnique({ where: { id: user.departmentId } }) : null,
@@ -519,11 +525,12 @@ export function createSettingsService(prisma: SettingsPrisma) {
             idempotencyKey: `position-change:${user.id}:${updateData.updatedAt.getTime()}:${randomUUID().slice(0, 8)}`,
           } });
         }
-        return row;
+        return client.user.findUnique({ where: { id } });
       };
       const row = organizationChanged
         ? await (prisma as PrismaClient).$transaction((tx) => persistUser(tx))
         : await persistUser(prisma);
+      if (!row) return failure('员工资料已被其他操作更新，请刷新后重试');
       return success(mapPrismaUser(row));
     },
 
