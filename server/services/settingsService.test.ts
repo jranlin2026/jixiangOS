@@ -102,6 +102,19 @@ const departments: any[] = [
     createdAt: now,
     updatedAt: now,
   },
+  {
+    id: 'dept-sales-one',
+    name: 'Sales Team One',
+    code: 'SALES_ONE',
+    description: null,
+    parentId: 'dept-sales',
+    managerId: null,
+    memberCount: 0,
+    sortOrder: 3,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  },
 ];
 
 const positions: any[] = [
@@ -110,6 +123,7 @@ const positions: any[] = [
     name: 'Sales Consultant',
     code: 'sales_consultant',
     departmentId: 'dept-sales',
+    departmentScope: 'DEPARTMENT_TREE',
     description: null,
     sortOrder: 1,
     isActive: true,
@@ -265,6 +279,22 @@ const mismatchedPositionUser = await service.createUser({
 } as any);
 assert.notEqual(mismatchedPositionUser.code, 0);
 assert.match(mismatchedPositionUser.message || '', /不属于所选部门/);
+
+const inheritedPositionUser = await service.createUser({
+  name: 'Inherited Position User',
+  account: 'inherited_position_user',
+  email: 'inherited_position_user@company.com',
+  phone: '13000000008',
+  role: 'Sales',
+  roleId: 'role-sales',
+  departmentId: 'dept-sales-one',
+  positionId: 'pos-sales-consultant',
+  isActive: true,
+  password: 'Secret123',
+} as any);
+assert.equal(inheritedPositionUser.code, 0);
+assert.equal((inheritedPositionUser.data as any).departmentId, 'dept-sales-one');
+assert.equal((inheritedPositionUser.data as any).positionId, 'pos-sales-consultant');
 
 const createdUser = await service.createUser({
   name: 'Created User',

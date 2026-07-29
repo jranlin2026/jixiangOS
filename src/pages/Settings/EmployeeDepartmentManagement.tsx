@@ -54,6 +54,7 @@ import {
 } from '../../shared/utils/organizationConfig';
 import { DEFAULT_USER_ROLE, normalizeUserRoleName } from '../../shared/utils/roles';
 import { formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
+import { isPositionApplicableToDepartment } from '../../shared/utils/positionApplicability';
 
 type UserForm = {
   name: string;
@@ -182,7 +183,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const roleOptions = roles.length ? roles : [{ id: 'fallback-role', name: DEFAULT_USER_ROLE }] as Role[];
   const availablePositions = positions.filter((position) => (
     (position.isActive || position.id === userForm.positionId)
-    && (!userForm.departmentId || !position.departmentId || position.departmentId === userForm.departmentId)
+    && (!userForm.departmentId || isPositionApplicableToDepartment(position, userForm.departmentId, departments))
   ));
   const selectedScopeIds = useMemo(() => (
     selectedDepartment
@@ -537,7 +538,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
     }
     const incompatibleUserIds = new Set(selectedUsers.filter((user) => {
       const position = positions.find((item) => item.id === user.positionId);
-      return Boolean(position?.departmentId && position.departmentId !== moveDepartmentId);
+      return Boolean(position && !isPositionApplicableToDepartment(position, moveDepartmentId, departments));
     }).map((user) => user.id));
     if (incompatibleUserIds.size > 0 && !await confirm(
       `有 ${incompatibleUserIds.size} 名员工的原岗位不属于目标部门，转移后将清空这些员工的岗位，是否继续？`,
@@ -571,7 +572,9 @@ const EmployeeDepartmentManagement: React.FC = () => {
     setUserForm({
       ...userForm,
       departmentId,
-      positionId: selectedPosition?.departmentId && selectedPosition.departmentId !== departmentId ? '' : userForm.positionId,
+      positionId: selectedPosition && !isPositionApplicableToDepartment(selectedPosition, departmentId, departments)
+        ? ''
+        : userForm.positionId,
     });
   };
 

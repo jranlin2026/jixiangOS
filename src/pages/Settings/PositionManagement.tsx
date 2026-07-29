@@ -38,6 +38,7 @@ const emptyForm: PositionForm = {
   name: '',
   code: '',
   departmentId: '',
+  departmentScope: 'DEPARTMENT_ONLY',
   description: '',
   sortOrder: 100,
   isActive: true,
@@ -68,6 +69,9 @@ const PositionManagement: React.FC = () => {
 
   const activeDepartments = departments.filter((item) => item.isActive);
   const departmentName = (id?: string) => departments.find((item) => item.id === id)?.name || '未归属';
+  const scopeName = (position: Position) => !position.departmentId
+    ? '全公司'
+    : position.departmentScope === 'DEPARTMENT_TREE' ? '本部门及下级部门' : '仅本部门';
   const filteredPositions = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     return positions.filter((position) => {
@@ -94,6 +98,7 @@ const PositionManagement: React.FC = () => {
       name: position.name,
       code: position.code,
       departmentId: position.departmentId || '',
+      departmentScope: position.departmentScope || 'DEPARTMENT_ONLY',
       description: position.description || '',
       sortOrder: position.sortOrder,
       isActive: position.isActive,
@@ -166,7 +171,7 @@ const PositionManagement: React.FC = () => {
       <Paper elevation={0} sx={{ p: 2, mb: 2, border: '1px solid #e5e7eb' }}>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(220px, 1fr) 220px 160px' }, gap: 1.5 }}>
           <TextField size="small" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索岗位名称、编码或说明" InputProps={{ startAdornment: <SearchIcon sx={{ mr: 1, color: '#94a3b8' }} /> }} />
-          <TextField select size="small" label="所属部门" value={departmentId} onChange={(event) => setDepartmentId(event.target.value)}>
+          <TextField select size="small" label="归属部门" value={departmentId} onChange={(event) => setDepartmentId(event.target.value)}>
             <MenuItem value="">全部部门</MenuItem>
             {departments.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
           </TextField>
@@ -180,14 +185,14 @@ const PositionManagement: React.FC = () => {
 
       <TableContainer component={Paper} elevation={0} sx={{ display: { xs: 'none', md: 'block' }, border: '1px solid #e5e7eb' }}>
         <Table>
-          <TableHead><TableRow><TableCell>岗位名称</TableCell><TableCell>岗位编码</TableCell><TableCell>所属部门</TableCell><TableCell>说明</TableCell><TableCell>排序</TableCell><TableCell>状态</TableCell><TableCell align="right">操作</TableCell></TableRow></TableHead>
+          <TableHead><TableRow><TableCell>岗位名称</TableCell><TableCell>岗位编码</TableCell><TableCell>归属部门</TableCell><TableCell>适用范围</TableCell><TableCell>说明</TableCell><TableCell>排序</TableCell><TableCell>状态</TableCell><TableCell align="right">操作</TableCell></TableRow></TableHead>
           <TableBody>
             {paginatedPositions.map((position) => (
               <TableRow key={position.id} hover>
-                <TableCell sx={{ fontWeight: 600 }}>{position.name}</TableCell><TableCell>{position.code}</TableCell><TableCell>{departmentName(position.departmentId)}</TableCell><TableCell>{position.description || '-'}</TableCell><TableCell>{position.sortOrder}</TableCell><TableCell><Chip size="small" label={position.isActive ? '启用' : '停用'} color={position.isActive ? 'success' : 'default'} /></TableCell><TableCell align="right">{renderActions(position)}</TableCell>
+                <TableCell sx={{ fontWeight: 600 }}>{position.name}</TableCell><TableCell>{position.code}</TableCell><TableCell>{departmentName(position.departmentId)}</TableCell><TableCell>{scopeName(position)}</TableCell><TableCell>{position.description || '-'}</TableCell><TableCell>{position.sortOrder}</TableCell><TableCell><Chip size="small" label={position.isActive ? '启用' : '停用'} color={position.isActive ? 'success' : 'default'} /></TableCell><TableCell align="right">{renderActions(position)}</TableCell>
               </TableRow>
             ))}
-            {!paginatedPositions.length && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5, color: '#94a3b8' }}>暂无岗位数据</TableCell></TableRow>}
+            {!paginatedPositions.length && <TableRow><TableCell colSpan={8} align="center" sx={{ py: 5, color: '#94a3b8' }}>暂无岗位数据</TableCell></TableRow>}
           </TableBody>
         </Table>
       </TableContainer>
@@ -196,7 +201,7 @@ const PositionManagement: React.FC = () => {
         {paginatedPositions.map((position) => (
           <Paper key={position.id} elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb' }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}><Typography sx={{ fontWeight: 700 }}>{position.name}</Typography><Chip size="small" label={position.isActive ? '启用' : '停用'} color={position.isActive ? 'success' : 'default'} /></Box>
-            <Typography variant="body2" sx={{ color: '#64748b', mt: 1 }}>{position.code} · {departmentName(position.departmentId)}</Typography>
+            <Typography variant="body2" sx={{ color: '#64748b', mt: 1 }}>{position.code} · {departmentName(position.departmentId)} · {scopeName(position)}</Typography>
             <Typography variant="body2" sx={{ mt: 1 }}>{position.description || '暂无说明'}</Typography>
             <Box sx={{ mt: 1 }}>{renderActions(position)}</Box>
           </Paper>
@@ -211,7 +216,18 @@ const PositionManagement: React.FC = () => {
         <DialogContent><Box sx={{ display: 'grid', gap: 2, mt: 1 }}>
           <TextField required label="岗位名称" value={form.name} onChange={(event) => updateForm('name', event.target.value)} />
           <TextField required label="岗位编码" value={form.code} onChange={(event) => updateForm('code', event.target.value)} helperText="编码保存后作为系统稳定标识" />
-          <TextField select label="所属部门" value={form.departmentId || ''} onChange={(event) => updateForm('departmentId', event.target.value)}><MenuItem value="">未归属</MenuItem>{activeDepartments.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}</TextField>
+          <TextField select label="归属部门" value={form.departmentId || ''} onChange={(event) => updateForm('departmentId', event.target.value)}><MenuItem value="">未归属</MenuItem>{activeDepartments.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}</TextField>
+          <TextField
+            select
+            label="适用范围"
+            value={form.departmentScope}
+            disabled={!form.departmentId}
+            onChange={(event) => updateForm('departmentScope', event.target.value as PositionForm['departmentScope'])}
+            helperText={form.departmentId ? '选择是否允许下级部门员工使用该岗位' : '未归属部门的岗位默认全公司适用'}
+          >
+            <MenuItem value="DEPARTMENT_ONLY">仅本部门</MenuItem>
+            <MenuItem value="DEPARTMENT_TREE">本部门及下级部门</MenuItem>
+          </TextField>
           <TextField label="岗位说明" value={form.description || ''} onChange={(event) => updateForm('description', event.target.value)} multiline minRows={3} />
           <TextField type="number" label="排序" value={form.sortOrder} onChange={(event) => updateForm('sortOrder', Number(event.target.value))} />
           <FormControlLabel control={<Switch checked={form.isActive} onChange={(event) => updateForm('isActive', event.target.checked)} />} label={form.isActive ? '启用' : '停用'} />

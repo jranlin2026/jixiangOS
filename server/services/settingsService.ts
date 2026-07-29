@@ -15,6 +15,11 @@ import {
 } from '../../src/shared/utils/auth';
 import { LIFECYCLE_STATUS_CODES, STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { mergeRoleWithDefaultAccess, normalizeRoleDataScopes } from '../../src/shared/utils/organizationConfig';
+import {
+  isPositionApplicableToDepartment,
+  normalizePositionDepartmentScope,
+  POSITION_DEPARTMENT_SCOPES,
+} from '../../src/shared/utils/positionApplicability';
 import { normalizeRoleNameForComparison } from '../../src/shared/utils/roles';
 
 type SettingsPrisma = Pick<PrismaClient, 'user' | 'role' | 'department' | 'position' | 'authSession' | 'businessRecord' | 'leadRecord' | 'knowledgeVisibility' | 'employeePositionHistory'>;
@@ -40,6 +45,11 @@ function compactId(prefix: string): string {
 function nullableText(value: unknown): string | null {
   const text = String(value || '').trim();
   return text || null;
+}
+
+function resolveDepartmentScope(value: unknown) {
+  const scope = normalizePositionDepartmentScope(value);
+  return POSITION_DEPARTMENT_SCOPES.includes(scope) ? scope : 'DEPARTMENT_ONLY';
 }
 
 function isUserReferenceKey(key: string): boolean {
@@ -296,7 +306,7 @@ export function createSettingsService(prisma: SettingsPrisma) {
       }
       if (data.departmentId) {
         const department = await prisma.department.findUnique({ where: { id: data.departmentId } });
-        if (!department || !department.isActive) return failure('所属部门不存在或已停用');
+        if (!department || !department.isActive) return failure('归属部门不存在或已停用');
       }
       const row = await prisma.position.create({
         data: {
@@ -304,6 +314,7 @@ export function createSettingsService(prisma: SettingsPrisma) {
           name,
           code,
           departmentId: data.departmentId || null,
+          departmentScope: resolveDepartmentScope(data.departmentScope),
           description: data.description || null,
           sortOrder: Number(data.sortOrder || positions.length + 1),
           isActive: data.isActive ?? true,
@@ -327,11 +338,16 @@ export function createSettingsService(prisma: SettingsPrisma) {
       }
       if (data.departmentId) {
         const department = await prisma.department.findUnique({ where: { id: data.departmentId } });
-        if (!department || !department.isActive) return failure('所属部门不存在或已停用');
+        if (!department || !department.isActive) return failure('归属部门不存在或已停用');
       }
       const nextDepartmentId = data.departmentId !== undefined ? nullableText(data.departmentId) : position.departmentId;
+      const nextDepartmentScope = data.departmentScope !== undefined
+        ? resolveDepartmentScope(data.departmentScope)
+        : normalizePositionDepartmentScope(position.departmentScope);
       const boundUsers = (await prisma.user.findMany()).filter((user) => user.positionId === id);
-      if (nextDepartmentId && nextDepartmentId !== position.departmentId && boundUsers.some((user) => user.departmentId !== nextDepartmentId)) {
+      const departments = await prisma.department.findMany();
+      const nextPosition = { departmentId: nextDepartmentId, departmentScope: nextDepartmentScope };
+      if (boundUsers.some((user) => !isPositionApplicableToDepartment(nextPosition, user.departmentId, departments))) {
         return failure('已有员工使用该岗位，请先调整员工部门或岗位');
       }
       const persistPosition = async (client: Pick<PrismaClient, 'position' | 'user'>) => {
@@ -341,6 +357,7 @@ export function createSettingsService(prisma: SettingsPrisma) {
             name,
             code,
             departmentId: data.departmentId !== undefined ? data.departmentId || null : undefined,
+            departmentScope: data.departmentScope !== undefined ? nextDepartmentScope : undefined,
             description: data.description !== undefined ? data.description || null : undefined,
             sortOrder: data.sortOrder !== undefined ? Number(data.sortOrder) : undefined,
             isActive: data.isActive,
@@ -404,7 +421,8 @@ export function createSettingsService(prisma: SettingsPrisma) {
       const positionResult = await resolveActivePosition(data.positionId);
       if (positionResult.code !== 0) return failure(positionResult.message || '岗位不可用');
       const selectedPosition = positionResult.data;
-      if (selectedPosition?.departmentId && selectedPosition.departmentId !== nullableText(data.departmentId)) {
+      const departments = selectedPosition ? await prisma.department.findMany() : [];
+      if (selectedPosition && !isPositionApplicableToDepartment(selectedPosition, nullableText(data.departmentId), departments)) {
         return failure('该岗位不属于所选部门');
       }
       const now = new Date();
@@ -458,7 +476,8 @@ export function createSettingsService(prisma: SettingsPrisma) {
           : user.positionId ? await prisma.position.findUnique({ where: { id: user.positionId } }) : null
         : user.positionId ? await prisma.position.findUnique({ where: { id: user.positionId } }) : null;
       const nextDepartmentId = data.departmentId !== undefined ? nullableText(data.departmentId) : user.departmentId;
-      if (selectedPosition?.departmentId && selectedPosition.departmentId !== nextDepartmentId) {
+      const departments = selectedPosition ? await prisma.department.findMany() : [];
+      if (selectedPosition && !isPositionApplicableToDepartment(selectedPosition, nextDepartmentId, departments)) {
         return failure('该岗位不属于所选部门');
       }
       const nextUpdatedAt = new Date(Math.max(Date.now(), user.updatedAt.getTime() + 1));

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { failure, success } from '../api/response';
+import { isPositionApplicableToDepartment } from '../../src/shared/utils/positionApplicability';
 
 export type PositionMappingMatchStatus = 'UNIQUE_MATCH' | 'MULTIPLE_MATCHES' | 'DEPARTMENT_CONFLICT' | 'NO_MATCH';
 
@@ -18,10 +19,11 @@ type PreviewPosition = {
   id: string;
   name: string;
   departmentId?: string | null;
+  departmentScope?: string | null;
   isActive: boolean;
 };
 
-type PreviewDepartment = { id: string; name: string };
+type PreviewDepartment = { id: string; name: string; parentId?: string | null };
 type PreviewRole = { id: string; name: string };
 
 type ReconciliationBaselineEmployee = {
@@ -112,7 +114,7 @@ export function buildPositionGovernanceReadiness(input: {
     };
     if (user.positionId) {
       const position = positionsById.get(user.positionId);
-      const bindingValid = Boolean(position?.isActive && (!position.departmentId || position.departmentId === user.departmentId));
+      const bindingValid = Boolean(position?.isActive && isPositionApplicableToDepartment(position, user.departmentId, input.departments));
       return {
         ...base,
         boundPositionName: position?.name,
@@ -157,7 +159,7 @@ export function buildPositionMappingPreview(input: {
       ? input.positions.filter((position) => position.isActive && normalizeName(position.name) === normalizeName(originalPositionName))
       : [];
     const compatibleMatches = nameMatches.filter((position) => (
-      !position.departmentId || position.departmentId === user.departmentId
+      isPositionApplicableToDepartment(position, user.departmentId, input.departments)
     ));
     const candidatePositionIds = (compatibleMatches.length ? compatibleMatches : nameMatches).map((position) => position.id);
     let matchStatus: PositionMappingMatchStatus = 'NO_MATCH';
@@ -234,8 +236,8 @@ export function createPositionGovernanceService(prisma: any) {
           where: userWhere,
           select: { id: true, name: true, departmentId: true, positionId: true, positionName: true, roleId: true, role: true, employmentStatus: true },
         }),
-        prisma.position.findMany({ select: { id: true, name: true, departmentId: true, isActive: true } }),
-        prisma.department.findMany({ select: { id: true, name: true } }),
+        prisma.position.findMany({ select: { id: true, name: true, departmentId: true, departmentScope: true, isActive: true } }),
+        prisma.department.findMany({ select: { id: true, name: true, parentId: true } }),
         prisma.role.findMany({ select: { id: true, name: true } }),
       ]);
       const keyword = String(filters.search || '').trim().toLowerCase();
@@ -385,6 +387,7 @@ export function createPositionGovernanceService(prisma: any) {
       if (!['PREVIEW', 'PARTIAL'].includes(batch.status)) return failure('当前批次状态不允许执行');
       const itemByEmployee = new Map(batch.items.map((item: any) => [item.employeeId, item]));
       const prepared: Array<{ item: any; user: any; position: any; oldDepartment: any }> = [];
+      const departments = await prisma.department.findMany({ select: { id: true, parentId: true } });
       for (const selection of selections) {
         const item: any = itemByEmployee.get(selection.employeeId);
         if (!item) return failure(`员工 ${selection.employeeId} 不属于当前预览批次`);
@@ -404,7 +407,7 @@ export function createPositionGovernanceService(prisma: any) {
           return failure(`员工 ${item.employeeName} 已绑定岗位，请刷新预览`);
         }
         if (iso(user.updatedAt) !== iso(item.employeeUpdatedAtSnapshot)) return failure(`员工 ${item.employeeName} 的资料已变更，请重新生成预览`);
-        if (position.departmentId && position.departmentId !== user.departmentId) return failure(`员工 ${item.employeeName} 的岗位与部门不一致`);
+        if (!isPositionApplicableToDepartment(position, user.departmentId, departments)) return failure(`员工 ${item.employeeName} 的岗位与部门不一致`);
         const oldDepartment = user.departmentId
           ? await prisma.department.findUnique({ where: { id: user.departmentId } })
           : null;
@@ -506,12 +509,13 @@ export function createPositionGovernanceService(prisma: any) {
         }));
       const employeeIds = baselineEmployees.map((item) => item.employeeId);
       const historyKeys = batch.items.map((item: any) => `position-mapping:${batchId}:${item.employeeId}`);
-      const [users, positions, roles, histories] = await Promise.all([
+      const [users, positions, departments, roles, histories] = await Promise.all([
         prisma.user.findMany({
           where: { id: { in: employeeIds } },
           select: { id: true, name: true, departmentId: true, employmentStatus: true, positionId: true, positionName: true, roleId: true, role: true },
         }),
-        prisma.position.findMany({ select: { id: true, name: true, departmentId: true, isActive: true } }),
+        prisma.position.findMany({ select: { id: true, name: true, departmentId: true, departmentScope: true, isActive: true } }),
+        prisma.department.findMany({ select: { id: true, parentId: true } }),
         prisma.role.findMany({ select: { id: true, name: true } }),
         prisma.employeePositionHistory.findMany({
           where: { idempotencyKey: { in: historyKeys } },
@@ -546,7 +550,7 @@ export function createPositionGovernanceService(prisma: any) {
           && !roleChanged
           && !rolePositionSuspected
           && position?.isActive
-          && (!position.departmentId || position.departmentId === user.departmentId)
+          && isPositionApplicableToDepartment(position, user.departmentId, departments)
           && (!item || (
             item.applyStatus === 'APPLIED'
             && item.confirmedPositionId === user.positionId
@@ -561,7 +565,7 @@ export function createPositionGovernanceService(prisma: any) {
         else if (roleChanged) reason = '员工角色与回填前不一致';
         else if (!user.positionId) reason = '员工尚未绑定正式岗位';
         else if (!position || !position.isActive) reason = '员工绑定的正式岗位不可用';
-        else if (position.departmentId && position.departmentId !== user.departmentId) reason = '员工岗位与所属部门不一致';
+        else if (!isPositionApplicableToDepartment(position, user.departmentId, departments)) reason = '员工岗位与所属部门不一致';
         else if (rolePositionSuspected) reason = '角色与正式岗位疑似混用';
         else if (item && item.confirmedPositionId !== user.positionId) reason = '当前岗位与本批次人工确认结果不一致';
         else if (historyMissing) reason = '岗位回填历史缺失';

@@ -18,6 +18,7 @@ import { DEFAULT_USER_ROLE } from '../shared/utils/roles';
 import { getCurrentOperatorName } from '../shared/utils/currentOperator';
 import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { assetApi } from './assetApi';
+import { isPositionApplicableToDepartment, normalizePositionDepartmentScope } from '../shared/utils/positionApplicability';
 
 function ensureInit(): void {
   initializeMockData();
@@ -93,10 +94,11 @@ function withResolvedUserOrganization<T extends Partial<User>>(data: T): T {
 
 function validateUserPositionAssignment(positionId?: string, departmentId?: string, requireActive = true): ApiResponse<null> {
   if (!positionId) return createSuccessResponse(null);
-  const position = ensureOrganizationConfigData().positions.find((item) => item.id === positionId);
+  const organization = ensureOrganizationConfigData();
+  const position = organization.positions.find((item) => item.id === positionId);
   if (!position) return createErrorResponse('岗位不存在，请刷新岗位列表后重试');
   if (requireActive && !position.isActive) return createErrorResponse('该岗位已停用，请选择其他岗位');
-  if (position.departmentId && position.departmentId !== departmentId) {
+  if (!isPositionApplicableToDepartment(position, departmentId, organization.departments)) {
     return createErrorResponse('该岗位不属于所选部门');
   }
   return createSuccessResponse(null);
@@ -480,14 +482,14 @@ async function fetchPositions(filters?: PositionFilters): Promise<ApiResponse<Po
   return createSuccessResponse(positions);
 }
 
-type PositionInput = Omit<Position, 'id' | 'createdAt' | 'updatedAt'>;
+type PositionInput = Omit<Position, 'id' | 'createdAt' | 'updatedAt' | 'departmentScope'> & Pick<Partial<Position>, 'departmentScope'>;
 
 function validatePositionDepartment(departmentId?: string): ApiResponse<null> {
   if (!departmentId) return createSuccessResponse(null);
   const department = ensureOrganizationConfigData().departments.find((item) => item.id === departmentId);
   return department?.isActive
     ? createSuccessResponse(null)
-    : createErrorResponse('所属部门不存在或已停用');
+    : createErrorResponse('归属部门不存在或已停用');
 }
 
 async function createPosition(data: PositionInput): Promise<ApiResponse<Position | null>> {
@@ -509,13 +511,14 @@ async function createPosition(data: PositionInput): Promise<ApiResponse<Position
     return createErrorResponse('岗位编码已存在');
   }
   const departmentResult = validatePositionDepartment(data.departmentId);
-  if (departmentResult.code !== 0) return createErrorResponse(departmentResult.message || '所属部门不可用');
+  if (departmentResult.code !== 0) return createErrorResponse(departmentResult.message || '归属部门不可用');
   const now = new Date().toISOString();
   const position: Position = {
     ...data,
     id: `position-${uuidv4().slice(0, 8)}`,
     name,
     code,
+    departmentScope: normalizePositionDepartmentScope(data.departmentScope),
     sortOrder: Number(data.sortOrder || organization.positions.length + 1),
     isActive: data.isActive ?? true,
     createdAt: now,
@@ -547,10 +550,14 @@ async function updatePosition(id: string, data: Partial<PositionInput>): Promise
     return createErrorResponse('岗位编码已存在');
   }
   const departmentId = data.departmentId !== undefined ? data.departmentId || undefined : current.departmentId;
+  const departmentScope = data.departmentScope !== undefined
+    ? normalizePositionDepartmentScope(data.departmentScope)
+    : normalizePositionDepartmentScope(current.departmentScope);
   const departmentResult = validatePositionDepartment(departmentId);
-  if (departmentResult.code !== 0) return createErrorResponse(departmentResult.message || '所属部门不可用');
+  if (departmentResult.code !== 0) return createErrorResponse(departmentResult.message || '归属部门不可用');
   const boundUsers = ensureUsersWithAuth().filter((user) => user.positionId === id);
-  if (departmentId && departmentId !== current.departmentId && boundUsers.some((user) => user.departmentId !== departmentId)) {
+  const nextPositionScope = { departmentId, departmentScope };
+  if (boundUsers.some((user) => !isPositionApplicableToDepartment(nextPositionScope, user.departmentId, organization.departments))) {
     return createErrorResponse('已有员工使用该岗位，请先调整员工部门或岗位');
   }
   const nextPosition: Position = {
@@ -559,6 +566,7 @@ async function updatePosition(id: string, data: Partial<PositionInput>): Promise
     name,
     code,
     departmentId,
+    departmentScope,
     sortOrder: data.sortOrder !== undefined ? Number(data.sortOrder) : current.sortOrder,
     updatedAt: new Date().toISOString(),
   };

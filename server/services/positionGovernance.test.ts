@@ -39,30 +39,33 @@ assert.equal(readiness[0].employmentStatus, 'active');
 const preview = buildPositionMappingPreview({
   users: [
     { id: 'user-unique', name: '张三', departmentId: 'dept-sales', positionName: '销售顾问', positionId: null },
+    { id: 'user-inherited', name: '孙七', departmentId: 'dept-sales-one', positionName: '销售顾问', positionId: null },
     { id: 'user-conflict', name: '李四', departmentId: 'dept-customer', positionName: '销售顾问', positionId: null },
     { id: 'user-multiple', name: '王五', departmentId: 'dept-sales', positionName: '销售主管', positionId: null },
     { id: 'user-missing', name: '赵六', departmentId: 'dept-sales', positionName: '未知岗位', positionId: null },
     { id: 'user-bound', name: '已绑定', departmentId: 'dept-sales', positionName: '销售顾问', positionId: 'position-sales' },
   ],
   positions: [
-    { id: 'position-sales', name: '销售顾问', departmentId: 'dept-sales', isActive: true },
+    { id: 'position-sales', name: '销售顾问', departmentId: 'dept-sales', departmentScope: 'DEPARTMENT_TREE', isActive: true },
     { id: 'position-manager-a', name: '销售主管', departmentId: 'dept-sales', isActive: true },
     { id: 'position-manager-b', name: '销售主管', departmentId: 'dept-sales', isActive: true },
   ],
   departments: [
     { id: 'dept-sales', name: '销售部' },
+    { id: 'dept-sales-one', name: '销售一部', parentId: 'dept-sales' },
     { id: 'dept-customer', name: '客户成功部' },
   ],
 });
 
-assert.equal(preview.length, 4);
+assert.equal(preview.length, 5);
 assert.deepEqual(preview.map((item) => [item.employeeId, item.matchStatus, item.suggestedPositionId]), [
   ['user-unique', 'UNIQUE_MATCH', 'position-sales'],
+  ['user-inherited', 'UNIQUE_MATCH', 'position-sales'],
   ['user-conflict', 'DEPARTMENT_CONFLICT', undefined],
   ['user-multiple', 'MULTIPLE_MATCHES', undefined],
   ['user-missing', 'NO_MATCH', undefined],
 ]);
-assert.deepEqual(preview[2].candidatePositionIds, ['position-manager-a', 'position-manager-b']);
+assert.deepEqual(preview[3].candidatePositionIds, ['position-manager-a', 'position-manager-b']);
 
 const storedBatches: any[] = [];
 const storedItems: any[] = [];
@@ -149,7 +152,10 @@ const applyPrisma: any = {
     },
   },
   position: { findUnique: async () => ({ id: 'position-sales', name: '销售顾问', departmentId: 'dept-sales', isActive: true }) },
-  department: { findUnique: async () => ({ id: 'dept-sales', name: '销售部' }) },
+  department: {
+    findMany: async () => [{ id: 'dept-sales', name: '销售部', parentId: null }],
+    findUnique: async () => ({ id: 'dept-sales', name: '销售部' }),
+  },
   employeePositionHistory: { create: async ({ data }: any) => { histories.push(data); return data; } },
   positionMappingItem: {
     findUnique: async () => applyBatch.items[0],

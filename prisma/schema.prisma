@@ -26,15 +26,16 @@ model Department {
 }
 
 model Position {
-  id           String   @id @db.VarChar(64)
-  name         String   @db.VarChar(100)
-  code         String   @unique @db.VarChar(64)
-  departmentId String?  @db.VarChar(64)
-  description  String?  @db.VarChar(500)
-  sortOrder    Int      @default(0)
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              String   @id @db.VarChar(64)
+  name            String   @db.VarChar(100)
+  code            String   @unique @db.VarChar(64)
+  departmentId    String?  @db.VarChar(64)
+  departmentScope String   @default("DEPARTMENT_ONLY") @db.VarChar(24)
+  description     String?  @db.VarChar(500)
+  sortOrder       Int      @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@index([departmentId])
   @@map("positions")

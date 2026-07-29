@@ -29,10 +29,11 @@ storage.clear();
 storage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
 storage.setItem(STORAGE_KEYS.DEPARTMENTS, JSON.stringify([
   { id: 'dept-custom', name: 'Custom Department', code: 'CUSTOM', memberCount: 0, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'dept-custom-child', name: 'Custom Child Department', code: 'CUSTOM_CHILD', parentId: 'dept-custom', memberCount: 0, isActive: true, createdAt: now, updatedAt: now },
   { id: 'dept-position-only', name: 'Position Only Department', code: 'POSITION_ONLY', memberCount: 0, isActive: true, createdAt: now, updatedAt: now },
 ]));
 storage.setItem(STORAGE_KEYS.POSITIONS, JSON.stringify([
-  { id: 'pos-legacy', name: 'Legacy Position', code: 'legacy_position', departmentId: 'dept-custom', sortOrder: 1, isActive: true, createdAt: now, updatedAt: now },
+  { id: 'pos-legacy', name: 'Legacy Position', code: 'legacy_position', departmentId: 'dept-custom', departmentScope: 'DEPARTMENT_TREE', sortOrder: 1, isActive: true, createdAt: now, updatedAt: now },
   { id: 'pos-hidden-reference', name: 'Hidden Reference', code: 'hidden_reference', departmentId: 'dept-position-only', sortOrder: 2, isActive: true, createdAt: now, updatedAt: now },
 ]));
 storage.setItem(STORAGE_KEYS.ROLES, JSON.stringify([
@@ -83,6 +84,21 @@ const mismatchedUser = await settingsApi.createUser({
 });
 assert.notEqual(mismatchedUser.code, 0);
 assert.match(mismatchedUser.message || '', /不属于所选部门/);
+
+const inheritedPositionUser = await settingsApi.createUser({
+  name: 'Inherited Position User',
+  account: 'inherited_position_user',
+  email: 'inherited_position_user@example.com',
+  phone: '13900001113',
+  role: 'Sales Consultant',
+  roleId: 'role-sales-consultant',
+  departmentId: 'dept-custom-child',
+  positionId: 'pos-legacy',
+  isActive: true,
+  password: DEFAULT_USER_PASSWORD,
+});
+assert.equal(inheritedPositionUser.code, 0);
+assert.equal(inheritedPositionUser.data?.positionId, 'pos-legacy');
 
 const createdUser = await settingsApi.createUser({
   name: 'Canonical Position User',

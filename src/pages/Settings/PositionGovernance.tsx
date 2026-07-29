@@ -11,6 +11,7 @@ import type { EmployeePositionHistory, PositionGovernanceReadiness, PositionGove
 import useDepartmentStore from '../../store/useDepartmentStore';
 import TablePagination from '../../shared/components/TablePagination';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
+import { isPositionApplicableToDepartment } from '../../shared/utils/positionApplicability';
 
 const matchLabels: Record<string, string> = {
   UNIQUE_MATCH: '唯一匹配', MULTIPLE_MATCHES: '多个候选', DEPARTMENT_CONFLICT: '部门冲突', NO_MATCH: '未匹配',
@@ -181,7 +182,7 @@ const PositionGovernance: React.FC = () => {
   const previewItems = useMemo(() => batch?.items || [], [batch]);
   const paginatedPreview = previewItems.slice(previewPage * previewRowsPerPage, previewPage * previewRowsPerPage + previewRowsPerPage);
   const availablePositions = (item: PositionMappingBatch['items'][number]) => positions.filter((position) => (
-    position.isActive && (!position.departmentId || position.departmentId === item.departmentId)
+    position.isActive && isPositionApplicableToDepartment(position, item.departmentId, departments)
   ));
 
   return (
