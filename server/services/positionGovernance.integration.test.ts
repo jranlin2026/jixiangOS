@@ -17,6 +17,11 @@ if (!process.env.DATABASE_URL) {
 
   const prisma = new PrismaClient();
   const runId = randomUUID();
+  const nameSuffix = runId.slice(0, 8);
+  const consultantName = `销售顾问-${nameSuffix}`;
+  const managerName = `销售主管-${nameSuffix}`;
+  const missingName = `未知岗位-${nameSuffix}`;
+  const actorId = `qa-admin-${runId}`;
   const departmentIds = [`qa-preview-sales-${runId}`, `qa-preview-service-${runId}`];
   const positionIds = [
     `qa-preview-consultant-${runId}`,
@@ -29,7 +34,6 @@ if (!process.env.DATABASE_URL) {
     `qa-preview-multiple-${runId}`,
     `qa-preview-missing-${runId}`,
   ];
-  let batchId: string | undefined;
 
   try {
     await prisma.department.createMany({ data: [
@@ -37,41 +41,40 @@ if (!process.env.DATABASE_URL) {
       { id: departmentIds[1], name: '客户成功部', code: `qa_service_${runId}` },
     ] });
     await prisma.position.createMany({ data: [
-      { id: positionIds[0], name: '销售顾问', code: `qa_consultant_${runId}`, departmentId: departmentIds[0] },
-      { id: positionIds[1], name: '销售主管', code: `qa_manager_a_${runId}`, departmentId: departmentIds[0] },
-      { id: positionIds[2], name: '销售主管', code: `qa_manager_b_${runId}`, departmentId: departmentIds[0] },
+      { id: positionIds[0], name: consultantName, code: `qa_consultant_${runId}`, departmentId: departmentIds[0] },
+      { id: positionIds[1], name: managerName, code: `qa_manager_a_${runId}`, departmentId: departmentIds[0] },
+      { id: positionIds[2], name: managerName, code: `qa_manager_b_${runId}`, departmentId: departmentIds[0] },
     ] });
     await prisma.user.createMany({ data: [
-      { id: userIds[0], name: `预览唯一-${runId}`, email: `${userIds[0]}@example.test`, phone: '', role: '销售', departmentId: departmentIds[0], positionName: '销售顾问' },
-      { id: userIds[1], name: `预览冲突-${runId}`, email: `${userIds[1]}@example.test`, phone: '', role: '客服', departmentId: departmentIds[1], positionName: '销售顾问' },
-      { id: userIds[2], name: `预览多选-${runId}`, email: `${userIds[2]}@example.test`, phone: '', role: '销售', departmentId: departmentIds[0], positionName: '销售主管' },
-      { id: userIds[3], name: `预览缺失-${runId}`, email: `${userIds[3]}@example.test`, phone: '', role: '销售', departmentId: departmentIds[0], positionName: '未知岗位' },
+      { id: userIds[0], name: `预览唯一-${runId}`, email: `${userIds[0]}@example.test`, phone: '', role: '销售', departmentId: departmentIds[0], positionName: consultantName },
+      { id: userIds[1], name: `预览冲突-${runId}`, email: `${userIds[1]}@example.test`, phone: '', role: '客服', departmentId: departmentIds[1], positionName: consultantName },
+      { id: userIds[2], name: `预览多选-${runId}`, email: `${userIds[2]}@example.test`, phone: '', role: '销售', departmentId: departmentIds[0], positionName: managerName },
+      { id: userIds[3], name: `预览缺失-${runId}`, email: `${userIds[3]}@example.test`, phone: '', role: '销售', departmentId: departmentIds[0], positionName: missingName },
     ] });
+    const beforeUsers = await prisma.user.findMany({ where: { id: { in: userIds } }, orderBy: { id: 'asc' } });
 
     const service = createPositionGovernanceService(prisma);
     const preview = await service.createPreview(
       { search: runId, employmentStatus: 'active' },
-      { id: 'qa-admin', name: '集成测试管理员' },
+      { id: actorId, name: '集成测试管理员' },
     );
     assert.equal(preview.code, 0);
     assert.ok(preview.data);
-    batchId = preview.data.id;
     assert.equal(preview.data.totalCount, 4);
     assert.deepEqual(
       preview.data.items.map((item: any) => item.matchStatus).sort(),
       ['DEPARTMENT_CONFLICT', 'MULTIPLE_MATCHES', 'NO_MATCH', 'UNIQUE_MATCH'].sort(),
     );
 
-    const [unchangedUsers, historyCount] = await Promise.all([
-      prisma.user.findMany({ where: { id: { in: userIds } }, select: { positionId: true } }),
+    const [afterUsers, historyCount] = await Promise.all([
+      prisma.user.findMany({ where: { id: { in: userIds } }, orderBy: { id: 'asc' } }),
       prisma.employeePositionHistory.count({ where: { employeeId: { in: userIds } } }),
     ]);
-    assert.equal(unchangedUsers.length, 4);
-    assert.ok(unchangedUsers.every((user) => user.positionId === null), '生成预览不得回填员工岗位');
+    assert.deepEqual(afterUsers, beforeUsers, '生成预览不得修改员工表中的任何字段');
     assert.equal(historyCount, 0, '生成预览不得写入岗位历史');
     console.log('position governance preview integration: ok');
   } finally {
-    if (batchId) await prisma.positionMappingBatch.deleteMany({ where: { id: batchId } });
+    await prisma.positionMappingBatch.deleteMany({ where: { createdById: actorId } });
     await prisma.employeePositionHistory.deleteMany({ where: { employeeId: { in: userIds } } });
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
     await prisma.position.deleteMany({ where: { id: { in: positionIds } } });
