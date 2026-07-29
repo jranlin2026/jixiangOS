@@ -722,6 +722,62 @@ assert.match(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-
 assert.match(tieredSales.commissions.find((item: any) => item.id === 'tier-comm-a').formulaText || '', /10%/);
 
 seed();
+storage.setItem(STORAGE_KEYS.COMMISSIONS, JSON.stringify([
+  baseCommission({
+    id: 'recovery-history-v1', orderId: 'recovery-one', orderNo: 'RCV-ONE',
+    sourceBusinessType: 'after_sales_recovery', sourceRecoveryOrderId: 'recovery-one',
+    settlementVersion: 1, status: zh.withdrawn, commissionAmount: 40,
+  }),
+  baseCommission({
+    id: 'recovery-current-v2', orderId: 'recovery-one', orderNo: 'RCV-ONE',
+    sourceBusinessType: 'after_sales_recovery', sourceRecoveryOrderId: 'recovery-one',
+    settlementVersion: 2, status: zh.pendingPay, commissionAmount: 20,
+  }),
+  baseCommission({
+    id: 'recovery-withdrawn-same-v2', orderId: 'recovery-one', orderNo: 'RCV-ONE',
+    sourceBusinessType: 'after_sales_recovery', sourceRecoveryOrderId: 'recovery-one',
+    settlementVersion: 2, status: zh.withdrawn, commissionAmount: 50,
+  }),
+  baseCommission({
+    id: 'recovery-current-other', orderId: 'recovery-two', orderNo: 'RCV-TWO',
+    sourceBusinessType: 'after_sales_recovery', sourceRecoveryOrderId: 'recovery-two',
+    settlementVersion: 1, status: zh.pendingPay, commissionAmount: 80,
+  }),
+]));
+const recoveryRoundPayouts = await (commissionApi as any).fetchMonthlyCommissionPayouts('2026-05');
+const recoveryRoundSales = recoveryRoundPayouts.data.find((item: any) => item.ownerId === 'user-sales');
+assert.equal(recoveryRoundSales.orderCount, 2);
+assert.deepEqual(
+  recoveryRoundSales.commissions.map((item: Commission) => item.id).sort(),
+  ['recovery-current-other', 'recovery-current-v2'],
+  '员工月报只能统计每个售后挽回订单的最新分账轮次',
+);
+assert.equal(recoveryRoundSales.pendingPayAmount, 100);
+
+seed();
+storage.setItem(STORAGE_KEYS.COMMISSIONS, JSON.stringify([
+  baseCommission({
+    id: 'formal-history-v1', orderId: 'formal-one', orderNo: 'ORD-FORMAL-ONE',
+    sourceBusinessType: 'formal_order', settlementVersion: 1,
+    status: zh.withdrawn, commissionAmount: 100,
+  }),
+  baseCommission({
+    id: 'formal-current-v2', orderId: 'formal-one', orderNo: 'ORD-FORMAL-ONE',
+    sourceBusinessType: 'formal_order', settlementVersion: 2,
+    status: zh.pendingPay, commissionAmount: 60,
+  }),
+]));
+const formalRoundPayouts = await (commissionApi as any).fetchMonthlyCommissionPayouts('2026-05');
+const formalRoundSales = formalRoundPayouts.data.find((item: any) => item.ownerId === 'user-sales');
+assert.equal(formalRoundSales.orderCount, 1);
+assert.deepEqual(
+  formalRoundSales.commissions.map((item: Commission) => item.id),
+  ['formal-current-v2'],
+  '员工月报也必须排除正式订单的历史撤回轮次',
+);
+assert.equal(formalRoundSales.pendingPayAmount, 60);
+
+seed();
 const firstSplitBeforeWithdraw = await (commissionApi as any).saveOrderCommissionAdjustments('order-d', [{
   orderId: 'order-d',
   role: zh.salesRole,

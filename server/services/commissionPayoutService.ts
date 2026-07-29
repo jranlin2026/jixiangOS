@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { failure, success } from '../api/response';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
+import {
+  getCommissionTierBucketKey,
+  selectCurrentCommissionRounds,
+} from '../../src/shared/utils/commissionConfiguration';
 import { isSuperAdmin } from '../../src/shared/utils/permissions';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type {
@@ -24,6 +28,7 @@ export interface CommissionPayoutServiceOptions {
 
 const FINAL_COMMISSION_STATUSES = new Set<Commission['status']>(['已发放', '已取消', '已撤回', '已冲销']);
 const INCLUDED_WORKSPACE_STATUSES = new Set<Commission['status']>(['待确认', '待发放', '已发放']);
+const INACTIVE_COMMISSION_STATUSES = new Set<Commission['status']>(['已取消', '已撤回', '待冲销', '已冲销']);
 
 const asObject = (value: unknown): Record<string, unknown> => (
   value && typeof value === 'object' && !Array.isArray(value)
@@ -42,6 +47,53 @@ function normalizeCommissionRound(value: unknown): Commission {
     ...commission,
     settlementVersion: Number.isInteger(version) && version > 0 ? version : 1,
   };
+}
+
+function resolveTieredPayoutAmounts(commissions: Commission[]): Commission[] {
+  const currentRounds = selectCurrentCommissionRounds(commissions);
+  const monthlyBaseByBucket = new Map<string, number>();
+  currentRounds.forEach((commission) => {
+    if (commission.ruleCalculationType !== 'tiered_percentage' || INACTIVE_COMMISSION_STATUSES.has(commission.status)) return;
+    const key = `${periodOf(commission)}::${getCommissionTierBucketKey(commission)}`;
+    monthlyBaseByBucket.set(key, roundMoney(
+      (monthlyBaseByBucket.get(key) || 0) + Number(commission.performanceAmount || commission.orderAmount || 0),
+    ));
+  });
+
+  return currentRounds.map((commission) => {
+    if (commission.ruleCalculationType !== 'tiered_percentage'
+      || commission.status === '已发放'
+      || INACTIVE_COMMISSION_STATUSES.has(commission.status)) return commission;
+    const key = `${periodOf(commission)}::${getCommissionTierBucketKey(commission)}`;
+    const baseAmount = monthlyBaseByBucket.get(key) || 0;
+    const tiers = (commission.payoutPlanSnapshot?.tiers || commission.tierSnapshot?.tiers || [])
+      .slice()
+      .sort((left, right) => left.minAmount - right.minAmount);
+    const currentTier = tiers.find((tier) => (
+      baseAmount >= tier.minAmount
+      && (tier.maxAmount === undefined || baseAmount < tier.maxAmount)
+    ));
+    if (!currentTier) return commission;
+    const nextTier = tiers.find((tier) => tier.minAmount > baseAmount);
+    const performanceAmount = Number(commission.performanceAmount || commission.orderAmount || 0);
+    const commissionAmount = roundMoney(performanceAmount * currentTier.rate / 100);
+    const tierRange = currentTier.maxAmount === undefined
+      ? `${currentTier.minAmount} 元以上`
+      : `${currentTier.minAmount}-${currentTier.maxAmount} 元`;
+    return {
+      ...commission,
+      commissionRate: currentTier.rate / 100,
+      commissionAmount,
+      tierSnapshot: {
+        tiers,
+        currentTier,
+        nextTier,
+        baseAmount,
+        gapToNext: nextTier ? roundMoney(nextTier.minAmount - baseAmount) : 0,
+      },
+      formulaText: `${commission.role} · ${commission.payoutPlanSnapshot?.name || commission.payoutPlanName || '月度累计阶梯提成'}：本月累计业绩 ${baseAmount} 元，命中 ${tierRange} × ${currentTier.rate}%；本笔业绩 ${performanceAmount} × ${currentTier.rate}% = ${commissionAmount} 元`,
+    };
+  });
 }
 
 function normalizePayoutRecord(value: unknown): CommissionPayoutRecord | null {
@@ -246,8 +298,8 @@ export function createCommissionPayoutService(prisma: PayoutPrisma, options: Com
       prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSIONS } }),
       listRecords(period),
     ]);
-    const commissions = commissionRows
-      .map((row) => normalizeCommissionRound(row.data))
+    const commissions = resolveTieredPayoutAmounts(commissionRows
+      .map((row) => normalizeCommissionRound(row.data)))
       .filter((item) => periodOf(item) === period && INCLUDED_WORKSPACE_STATUSES.has(item.status));
     const employees = employeeRows(commissions);
     return success<CommissionPayoutWorkspace>({
@@ -265,11 +317,9 @@ export function createCommissionPayoutService(prisma: PayoutPrisma, options: Com
   };
 
   const getPendingWorkspace = async () => {
-    const commissionRows = await prisma.businessRecord.findMany({
-      where: { domain: STORAGE_KEYS.COMMISSIONS, status: { in: ['待确认', '待发放'] } },
-    });
-    const commissions = commissionRows
-      .map((row) => normalizeCommissionRound(row.data))
+    const commissionRows = await prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSIONS } });
+    const commissions = resolveTieredPayoutAmounts(commissionRows
+      .map((row) => normalizeCommissionRound(row.data)))
       .filter((item) => item.status === '待确认' || item.status === '待发放');
     const employees = employeeRows(commissions);
     return success<CommissionPayoutWorkspace>({
@@ -313,13 +363,13 @@ export function createCommissionPayoutService(prisma: PayoutPrisma, options: Com
     return prisma.$transaction(async (tx) => {
       await lockCommissionRows(tx);
       const rows = await tx.businessRecord.findMany({
-        where: { domain: STORAGE_KEYS.COMMISSIONS, status: '待发放' },
+        where: { domain: STORAGE_KEYS.COMMISSIONS },
         orderBy: [{ eventAt: 'asc' }, { createdAt: 'asc' }],
       });
       const requested = new Set(requestedOwnerIds);
-      const eligible = rows
-        .map((row) => normalizeCommissionRound(row.data))
-        .filter((item) => requested.has(ownerKey(item)));
+      const eligible = resolveTieredPayoutAmounts(rows
+        .map((row) => normalizeCommissionRound(row.data)))
+        .filter((item) => item.status === '待发放' && requested.has(ownerKey(item)));
       const foundOwners = new Set(eligible.map(ownerKey));
       if (requestedOwnerIds.some((id) => !foundOwners.has(id))) {
         return failure<CommissionPayoutRecord>('部分员工的待发放金额已经变化，请刷新后重试', 409);

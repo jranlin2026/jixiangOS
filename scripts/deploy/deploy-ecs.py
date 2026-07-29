@@ -532,6 +532,7 @@ def main() -> int:
                 "VITE_AI_API_BASE": "/api",
                 "JIXIANG_DEFAULT_ADMIN_PASSWORD": "",
                 "JIXIANG_DEFAULT_USER_PASSWORD": "",
+                "JIXIANG_SKIP_BUSINESS_RECYCLE_PURGE_INTEGRATION": "YES",
             }
             npm = "npm.cmd" if os.name == "nt" else "npm"
             run_local([npm, "test"], env=test_env)

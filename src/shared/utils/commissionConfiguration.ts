@@ -30,6 +30,49 @@ export function getCommissionTierBucketKey(commission: Commission): string {
   return `${ownerKey}::${commission.role}::${planKey}::v${version}`;
 }
 
+const INACTIVE_COMMISSION_STATUSES = new Set<Commission['status']>([
+  '已撤回',
+  '已取消',
+  '待冲销',
+  '已冲销',
+]);
+
+export function isRecoveryCommission(commission: Commission): boolean {
+  return commission.sourceBusinessType === 'after_sales_recovery'
+    || commission.sourceBusinessType === 'refund_recovery'
+    || Boolean(commission.sourceRecoveryOrderId)
+    || String(commission.orderNo || '').startsWith('RCV-');
+}
+
+/**
+ * 正式订单和售后挽回重新分账都会保留旧轮次用于审计，当前月报和发放工作台只读取最新轮次。
+ * 同一轮次既有活动明细又有历史撤回明细时，以活动明细为准。
+ */
+export function selectCurrentCommissionRounds(commissions: Commission[]): Commission[] {
+  const businessGroups = new Map<string, Commission[]>();
+  commissions.forEach((commission) => {
+    const businessType = isRecoveryCommission(commission) ? 'recovery' : 'formal';
+    const businessId = commission.sourceRecoveryOrderId || commission.orderId || commission.orderNo;
+    const key = `${businessType}:${businessId}`;
+    businessGroups.set(key, [...(businessGroups.get(key) || []), commission]);
+  });
+
+  const selectedIds = new Set<string>();
+  businessGroups.forEach((rows) => {
+    const latestVersion = Math.max(...rows.map((row) => Math.max(1, Number(row.settlementVersion || 1))));
+    const recovery = rows.some(isRecoveryCommission);
+    if (!recovery && latestVersion === 1) {
+      rows.forEach((row) => selectedIds.add(row.id));
+      return;
+    }
+    const latest = rows.filter((row) => Math.max(1, Number(row.settlementVersion || 1)) === latestVersion);
+    const active = latest.filter((row) => !INACTIVE_COMMISSION_STATUSES.has(row.status));
+    (active.length ? active : latest).forEach((row) => selectedIds.add(row.id));
+  });
+
+  return commissions.filter((commission) => selectedIds.has(commission.id));
+}
+
 export function resolveCommissionTierSnapshotSource(
   commission: Commission,
   plans: CommissionPayoutPlan[],

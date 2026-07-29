@@ -37,6 +37,11 @@ assert.match(deploySource, /VITE_USE_BACKEND_API[^\n]*true/);
 assert.match(deploySource, /VITE_AI_API_BASE[^\n]*\/api/);
 assert.match(deploySource, /test_env = \{[\s\S]*?"NODE_ENV": "test"[\s\S]*?"VITE_USE_BACKEND_API": "false"/);
 assert.match(deploySource, /test_env = \{[\s\S]*?"JIXIANG_DEFAULT_ADMIN_PASSWORD": ""[\s\S]*?"JIXIANG_DEFAULT_USER_PASSWORD": ""/);
+assert.match(
+  deploySource,
+  /test_env = \{[\s\S]*?"JIXIANG_SKIP_BUSINESS_RECYCLE_PURGE_INTEGRATION": "YES"/,
+  '发布前本地测试必须隔离破坏性回收站集成测试，避免读取项目生产数据库配置',
+);
 const archiveExcludes = deploySource.slice(deploySource.indexOf('EXCLUDE_DIRS'), deploySource.indexOf('EXCLUDE_FILES'));
 assert.match(archiveExcludes, /"uploads"/);
 assert.match(archiveExcludes, /"private_uploads"/);

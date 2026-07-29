@@ -74,6 +74,50 @@ assert.equal(data.summary.tierPerformanceAmount, 0, '售后挽回不得进入正
 assert.equal(data.summary.effectiveCommissionAmount, 180);
 assert.equal(data.employeeRows.filter((row) => row.orderPaidAmount === 1000).length, 2, '员工可各自查看关联订单实付');
 
+const recoveryRoundData = buildCommissionMonthlyReportData({
+  period: '2026-07', reason: '售后挽回轮次核对', scope: 'all', includeWithdrawn: true,
+  generatedAt: '2026-07-31T10:00:00.000Z', actor: { id: 'finance-1', name: '财务甲' },
+  commissions: [
+    baseCommission({
+      id: 'recovery-v1', orderId: 'recovery-round', orderNo: 'RCV-ROUND',
+      sourceBusinessType: 'after_sales_recovery', sourceRecoveryOrderId: 'recovery-round',
+      settlementVersion: 1, status: '已撤回', commissionAmount: 40,
+    }),
+    baseCommission({
+      id: 'recovery-v2', orderId: 'recovery-round', orderNo: 'RCV-ROUND',
+      sourceBusinessType: 'after_sales_recovery', sourceRecoveryOrderId: 'recovery-round',
+      settlementVersion: 2, status: '待发放', commissionAmount: 20,
+    }),
+  ],
+  payoutRecords: [], orders: [],
+});
+assert.equal(recoveryRoundData.summary.recoveryOrderCount, 1);
+assert.equal(recoveryRoundData.summary.recoveryCommissionAmount, 20, '月度报告不能把售后挽回历史撤回轮次重复计入');
+assert.equal(recoveryRoundData.sheets.find((sheet) => sheet.name === '逐笔提成明细')?.rows.length, 1);
+
+const formalRoundData = buildCommissionMonthlyReportData({
+  period: '2026-07', reason: '正式订单重新分账轮次核对', scope: 'all', includeWithdrawn: true,
+  generatedAt: '2026-07-31T10:00:00.000Z', actor: { id: 'finance-1', name: '财务甲' },
+  commissions: [
+    baseCommission({
+      id: 'formal-v1', orderId: 'formal-round', orderNo: 'ORD-ROUND',
+      settlementVersion: 1, status: '已撤回', commissionAmount: 100,
+    }),
+    baseCommission({
+      id: 'formal-v2', orderId: 'formal-round', orderNo: 'ORD-ROUND',
+      settlementVersion: 2, status: '待发放', commissionAmount: 60,
+    }),
+  ],
+  payoutRecords: [], orders: [],
+});
+assert.equal(formalRoundData.summary.formalOrderCount, 1);
+assert.equal(formalRoundData.summary.ordinaryCommissionAmount, 60, '正式订单重新分账后只能统计最新轮次');
+assert.deepEqual(
+  formalRoundData.sheets.find((sheet) => sheet.name === '逐笔提成明细')?.rows.map((row) => row.commissionId),
+  ['formal-v2'],
+  '正式订单历史撤回轮次不得重复出现在当前月报明细',
+);
+
 const tiers = [
   { minAmount: 0, maxAmount: 30_000, rate: 8 },
   { minAmount: 30_000, maxAmount: 50_000, rate: 10 },

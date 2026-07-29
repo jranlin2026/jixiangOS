@@ -166,6 +166,45 @@ function fakePrisma(seed: any[]) {
 }
 
 {
+  const tiers = [
+    { minAmount: 0, maxAmount: 30_000, rate: 8 },
+    { minAmount: 30_000, maxAmount: 50_000, rate: 10 },
+    { minAmount: 50_000, rate: 15 },
+  ];
+  const tiered = (id: string, orderId: string, performanceAmount: number) => commission(id, '待发放', {
+    orderId,
+    orderNo: `ORD-${orderId}`,
+    paymentDate: '2026-06-20T08:00:00.000Z',
+    performanceAmount,
+    orderAmount: performanceAmount,
+    commissionAmount: 0,
+    commissionRate: 0,
+    ruleCalculationType: 'tiered_percentage',
+    payoutPlanId: 'tier-plan',
+    payoutPlanName: '销售月度阶梯',
+    payoutPlanVersion: 1,
+    payoutPlanSnapshot: {
+      id: 'tier-plan', name: '销售月度阶梯', commissionType: 'tiered_percentage',
+      commissionValue: 0, version: 1, tiers,
+    },
+  });
+  const db = fakePrisma([
+    record(STORAGE_KEYS.COMMISSIONS, tiered('tier-payout-a', 'tier-a', 10_000) as unknown as Record<string, unknown>),
+    record(STORAGE_KEYS.COMMISSIONS, tiered('tier-payout-b', 'tier-b', 20_000) as unknown as Record<string, unknown>),
+  ]);
+  const service = createCommissionPayoutService(db.prisma, { now: () => new Date(NOW), id: () => 'tier-payout' });
+  const workspace = await service.getPendingWorkspace();
+  const employee = workspace.data?.employees.find((row) => row.ownerId === 'sales-1');
+  assert.equal(employee?.pendingPayAmount, 3_000, '待办提成必须按当月累计业绩重算阶梯金额，不能展示为 0');
+  assert.deepEqual(employee?.commissions.map((item) => item.commissionAmount), [1_000, 2_000]);
+  const issued = await service.issue({ ownerIds: ['sales-1'], issuedAt: NOW, paymentMethod: '银行转账' }, finance);
+  assert.equal(issued.code, 0, issued.message);
+  assert.equal(issued.data?.totalAmount, 3_000, '发放时必须使用已重算的月度阶梯金额');
+  assert.equal((db.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'tier-payout-a'))?.data as Commission).commissionAmount, 1_000);
+  assert.equal((db.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'tier-payout-b'))?.data as Commission).commissionAmount, 2_000);
+}
+
+{
   const pendingA = commission('commission-a', '待发放');
   const pendingPriorMonth = commission('commission-prior-month', '待发放', {
     paymentDate: '2026-06-10T08:00:00.000Z', commissionAmount: 50,
@@ -298,6 +337,26 @@ function fakePrisma(seed: any[]) {
   assert.equal(updated.settlementPaidAt, NOW);
   assert.equal(updated.changeHistory?.[0]?.action, 'settlement');
   assert.match(updated.changeHistory?.[0]?.summary || '', /已发放/);
+}
+
+{
+  const historical = commission('formal-history-v1', '已撤回', {
+    orderId: 'formal-round', orderNo: 'ORD-FORMAL-ROUND', settlementVersion: 1, commissionAmount: 100,
+  });
+  const current = commission('formal-current-v2', '待发放', {
+    orderId: 'formal-round', orderNo: 'ORD-FORMAL-ROUND', settlementVersion: 2, commissionAmount: 60,
+  });
+  const db = fakePrisma([
+    record(STORAGE_KEYS.COMMISSIONS, historical as unknown as Record<string, unknown>),
+    record(STORAGE_KEYS.COMMISSIONS, current as unknown as Record<string, unknown>),
+  ]);
+  const service = createCommissionPayoutService(db.prisma, { now: () => new Date(NOW) });
+  const workspace = await service.getPeriodWorkspace('2026-07');
+  assert.deepEqual(
+    workspace.data?.employees.flatMap((employee) => employee.commissions.map((item) => item.id)),
+    ['formal-current-v2'],
+    '服务端发放工作台不得返回正式订单历史撤回轮次',
+  );
 }
 
 console.log('commission payout service tests passed');

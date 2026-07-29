@@ -24,6 +24,7 @@ import {
   buildCommissionPayoutPlanSnapshot,
   getCommissionTierBucketKey,
   resolveCommissionTierSnapshotSource,
+  selectCurrentCommissionRounds,
 } from '../shared/utils/commissionConfiguration';
 import { deriveOrderSettlementProgress } from '../shared/utils/orderSettlementProgress';
 import type { Order, OrderApplication } from '../types/order';
@@ -1601,7 +1602,9 @@ async function paySettlementBatch(batchId: string): Promise<ApiResponse<Commissi
 }
 
 function getMonthlyPayoutCommissions(period: string, sourceCommissions?: Commission[]): Commission[] {
-  const commissions = sourceCommissions || applyMonthlyTieredCommissions(period, getAllCommissions());
+  const commissions = selectCurrentCommissionRounds(
+    sourceCommissions || applyMonthlyTieredCommissions(period, getAllCommissions()),
+  );
   return commissions.filter((commission) => {
     const paymentDate = commission.paymentDate || commission.createdAt;
     return paymentDate.startsWith(period)
@@ -1731,6 +1734,7 @@ function buildMonthlyPayouts(period: string): MonthlyCommissionPayout[] {
 
 async function fetchMonthlyCommissionPayouts(period: string): Promise<ApiResponse<MonthlyCommissionPayout[]>> {
   ensureInit();
+  await syncBackendStorageScopeFromServer('commissions', 0);
   await delay(160);
   if (!period) return createErrorResponse('请选择结算月份');
   return createSuccessResponse(buildMonthlyPayouts(period));

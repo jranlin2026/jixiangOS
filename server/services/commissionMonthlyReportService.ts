@@ -2,6 +2,7 @@ import ExcelJS from 'exceljs';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { failure, success } from '../api/response';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
+import { selectCurrentCommissionRounds } from '../../src/shared/utils/commissionConfiguration';
 import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type {
@@ -225,7 +226,8 @@ function reportColumns(): Record<ReportSheet['name'], ReportColumn[]> {
 }
 
 export function buildCommissionMonthlyReportData(input: CommissionMonthlyReportBuildInput): CommissionMonthlyReportData {
-  const scoped = input.commissions.filter((commission) => periodOf(commission) === input.period)
+  const scoped = selectCurrentCommissionRounds(input.commissions)
+    .filter((commission) => periodOf(commission) === input.period)
     .filter((commission) => input.includeWithdrawn !== false || !isWithdrawn(commission))
     .filter((commission) => input.scope !== 'department' || commission.departmentId === input.departmentId || commission.department === input.departmentId)
     .filter((commission) => input.scope !== 'employee' || commission.ownerId === input.ownerId || commission.owner === input.ownerId);
