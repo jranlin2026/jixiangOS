@@ -476,6 +476,8 @@ export interface CommissionPayoutWorkspace {
     /** 当前月份售后挽回按挽回单 ID 全局去重后的成交额。 */
     recoveryBusinessAmount: number;
     pendingHandlingCount: number;
+    pendingConfirmCount: number;
+    pendingPayCount: number;
     withdrawnAmount: number;
     totalCommissionAmount: number;
     formalOrderCount: number;

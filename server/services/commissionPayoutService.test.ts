@@ -479,6 +479,8 @@ function fakePrisma(seed: any[]) {
   assert.equal(employee?.withdrawnAmount, 50);
   assert.equal(employee?.totalAmount, 85, '本月提成总额只包含待确认、待发放和已发放');
   assert.equal(workspace.data?.summary.pendingHandlingCount, 1);
+  assert.equal(workspace.data?.summary.pendingConfirmCount, 1, '顶部待确认必须同时提供笔数');
+  assert.equal(workspace.data?.summary.pendingPayCount, 1, '顶部待发放必须同时提供笔数');
 }
 
 console.log('commission payout service tests passed');

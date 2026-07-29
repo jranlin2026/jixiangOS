@@ -13,6 +13,13 @@ assert.doesNotMatch(commissionSource, /生成发放单|确认本月已发放|确
 assert.match(commissionSource, /导出财务提成月度核对表/);
 
 assert.match(payoutSource, /待发放/);
+assert.doesNotMatch(payoutSource, /<TableCell align="right">订单 \/ 提成<\/TableCell>/, '待发放主表不得再把订单与提成混成一列');
+assert.match(payoutSource, /<TableCell[^>]*>业务单数<\/TableCell>/);
+assert.match(payoutSource, /<TableCell[^>]*>待处理<\/TableCell>/);
+assert.match(payoutSource, /buildPendingEmployeePresentation\(row\)/, '桌面表格和移动卡片必须复用同一展示模型');
+assert.match(payoutSource, /pendingConfirmCount/);
+assert.match(payoutSource, /pendingPayCount/);
+assert.match(payoutSource, /filterPendingEmployeeCommissions/, '员工待办明细必须支持五态口径下的状态筛选');
 assert.match(payoutSource, /发放记录/);
 assert.match(payoutSource, /label="月度报告"/);
 assert.match(payoutSource, /确认发放/);

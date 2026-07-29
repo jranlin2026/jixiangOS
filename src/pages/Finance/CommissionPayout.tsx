@@ -46,6 +46,12 @@ import type {
 } from '../../types/commission';
 import Commission from '../Commission';
 import OperationFeedbackDialog, { type OperationFeedbackSeverity } from '../../shared/components/OperationFeedbackDialog';
+import {
+  buildPendingEmployeePresentation,
+  filterPendingEmployeeCommissions,
+  pendingCommissionStatusLabel,
+  type PendingCommissionFilter,
+} from './commissionPayoutPresentation';
 
 type PayoutView = 'pending' | 'records' | 'summary';
 
@@ -80,7 +86,7 @@ const employeeMonthLabel = (row: CommissionPayoutEmployeeRow) => {
 };
 
 const metricCard = (label: string, value: string, hint: string, color = '#0f172a') => (
-  <Paper variant="outlined" sx={{ p: 2, minWidth: 210, flex: 1 }}>
+  <Paper variant="outlined" sx={{ p: 2, minWidth: 0 }}>
     <Typography variant="body2" color="text.secondary">{label}</Typography>
     <Typography variant="h5" sx={{ mt: 0.5, fontWeight: 800, color }}>{value}</Typography>
     <Typography variant="caption" color="text.secondary">{hint}</Typography>
@@ -109,6 +115,7 @@ const CommissionPayout: React.FC = () => {
   const [recordRowsPerPage, setRecordRowsPerPage] = useState(10);
   const [employeeDetailPage, setEmployeeDetailPage] = useState(0);
   const [employeeDetailRowsPerPage, setEmployeeDetailRowsPerPage] = useState(10);
+  const [employeeDetailFilter, setEmployeeDetailFilter] = useState<PendingCommissionFilter>('全部');
   const [recordOwnerPage, setRecordOwnerPage] = useState(0);
   const [recordOwnerRowsPerPage, setRecordOwnerRowsPerPage] = useState(10);
   const [recordCommissionPage, setRecordCommissionPage] = useState(0);
@@ -141,7 +148,11 @@ const CommissionPayout: React.FC = () => {
   }, [view]);
   useEffect(() => {
     setEmployeeDetailPage(0);
+    setEmployeeDetailFilter('全部');
   }, [detailEmployee?.ownerId]);
+  useEffect(() => {
+    setEmployeeDetailPage(0);
+  }, [employeeDetailFilter]);
   useEffect(() => {
     setRecordOwnerPage(0);
     setRecordCommissionPage(0);
@@ -172,7 +183,13 @@ const CommissionPayout: React.FC = () => {
     currentRecordPage * recordRowsPerPage,
     (currentRecordPage + 1) * recordRowsPerPage,
   );
-  const employeeDetailRows = detailEmployee?.commissions || [];
+  const employeeDetailRows = filterPendingEmployeeCommissions(
+    detailEmployee?.commissions || [],
+    employeeDetailFilter,
+  );
+  const detailEmployeePresentation = detailEmployee
+    ? buildPendingEmployeePresentation(detailEmployee)
+    : null;
   const employeeDetailTotalPages = Math.max(1, Math.ceil(employeeDetailRows.length / employeeDetailRowsPerPage));
   const currentEmployeeDetailPage = Math.min(employeeDetailPage, employeeDetailTotalPages - 1);
   const visibleEmployeeDetailRows = employeeDetailRows.slice(
@@ -240,16 +257,17 @@ const CommissionPayout: React.FC = () => {
 
   const renderPending = () => (
     <Stack spacing={2}>
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 1.5 }}>
         {metricCard('待发放员工', `${workspace?.summary.pendingEmployeeCount || 0} 人`, '全部月份中有提成尚未发放')}
-        {metricCard('待发放金额', formatCurrency(workspace?.summary.pendingPayAmount || 0), '全部可执行发放', '#d97706')}
-        {metricCard('待确认金额', formatCurrency(workspace?.summary.pendingConfirmAmount || 0), '确认后才进入待发放')}
-      </Stack>
+        {metricCard('待处理', `${workspace?.summary.pendingHandlingCount || 0} 笔`, '需补齐人员、规则或依据', '#64748b')}
+        {metricCard('待确认', formatCurrency(workspace?.summary.pendingConfirmAmount || 0), `${workspace?.summary.pendingConfirmCount || 0} 笔 · 确认后进入待发放`)}
+        {metricCard('待发放', formatCurrency(workspace?.summary.pendingPayAmount || 0), `${workspace?.summary.pendingPayCount || 0} 笔 · 全部可执行发放`, '#d97706')}
+      </Box>
       <Paper variant="outlined">
         <Box sx={{ p: 2, display: 'flex', gap: 1.5, justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
           <Box>
-            <Typography variant="h6" fontWeight={800}>全部员工待发放清单</Typography>
-            <Typography variant="body2" color="text.secondary">跨月汇总全部待确认、待发放提成；发放后系统自动生成不可覆盖的发放记录。</Typography>
+            <Typography variant="h6" fontWeight={800}>全部员工提成待办清单</Typography>
+            <Typography variant="body2" color="text.secondary">跨月汇总待处理、待确认和待发放提成；只有待发放金额可执行发放。</Typography>
           </Box>
           {canManage && (
             <Button
@@ -265,12 +283,13 @@ const CommissionPayout: React.FC = () => {
         </Box>
         <Divider />
         <Box sx={{ display: { xs: 'block', md: 'none' } }}>
-          {visiblePendingRows.map((row) => (
-            <Box key={row.ownerId} sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+          {visiblePendingRows.map((row) => {
+            const presentation = buildPendingEmployeePresentation(row);
+            return <Box key={row.ownerId} sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Stack direction="row" alignItems="center" spacing={1.25}>
                 {canManage && (
                   <Checkbox
-                    disabled={row.pendingPayAmount <= 0}
+                    disabled={!presentation.canIssue}
                     checked={selectedIds.includes(row.ownerId)}
                     onChange={() => toggleOne(row.ownerId)}
                     sx={{ p: 0.5 }}
@@ -279,56 +298,77 @@ const CommissionPayout: React.FC = () => {
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   <Typography fontWeight={800}>{row.owner}</Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {row.department || '-'} · {row.orderCount} 个订单 / {row.commissionCount} 笔提成 · {employeeMonthLabel(row)}
+                    {row.department || '-'} · {employeeMonthLabel(row)}
                   </Typography>
                 </Box>
-                {row.pendingPayAmount > 0 && <Chip size="small" color="warning" label="待发放" />}
+                <Stack direction="row" spacing={0.5}>
+                  {presentation.pendingHandling.count > 0 && <Chip size="small" color="default" label={`待处理 ${presentation.pendingHandling.count}笔`} />}
+                  {presentation.canIssue && <Chip size="small" color="warning" label="待发放" />}
+                </Stack>
               </Stack>
-              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1, mt: 2 }}>
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 1, mt: 2 }}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">业务单数</Typography>
+                  <Typography fontWeight={800}>{presentation.business.total} 单</Typography>
+                  <Typography variant="caption" color="text.secondary">正式{presentation.business.formal} · 挽回{presentation.business.recovery}</Typography>
+                </Box>
                 <Box>
                   <Typography variant="caption" color="text.secondary">待确认</Typography>
-                  <Typography fontWeight={700}>{formatCurrency(row.pendingConfirmAmount)}</Typography>
+                  <Typography fontWeight={700}>{formatCurrency(presentation.pendingConfirm.amount)}</Typography>
+                  <Typography variant="caption" color="text.secondary">{presentation.pendingConfirm.count} 笔</Typography>
                 </Box>
                 <Box>
                   <Typography variant="caption" color="text.secondary">待发放</Typography>
-                  <Typography fontWeight={900} color="warning.main">{formatCurrency(row.pendingPayAmount)}</Typography>
+                  <Typography fontWeight={900} color="warning.main">{formatCurrency(presentation.pendingPay.amount)}</Typography>
+                  <Typography variant="caption" color="text.secondary">{presentation.pendingPay.count} 笔</Typography>
                 </Box>
               </Box>
               <Button fullWidth size="small" variant="outlined" startIcon={<VisibilityOutlinedIcon />} sx={{ mt: 2 }} onClick={() => setDetailEmployee(row)}>
                 查看提成明细
               </Button>
-            </Box>
-          ))}
-          {!pendingRows.length && <Box sx={{ py: 7, textAlign: 'center', color: 'text.secondary' }}>暂无待确认或待发放提成</Box>}
+            </Box>;
+          })}
+          {!pendingRows.length && <Box sx={{ py: 7, textAlign: 'center', color: 'text.secondary' }}>暂无待处理、待确认或待发放提成</Box>}
         </Box>
         <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}>
-          <Table size="small" sx={moduleTableSx}>
+          <Table size="small" sx={[moduleTableSx, { minWidth: 1040 }]}>
             <TableHead><TableRow>
               <TableCell sx={{ minWidth: 150 }}>
                 <Stack direction="row" alignItems="center" spacing={1}>
                   {canManage && <Checkbox size="small" checked={allSelected} indeterminate={selectedIds.length > 0 && !allSelected} onChange={toggleAll} sx={{ p: 0 }} />}
                   <Typography component="span" variant="body2" fontWeight={700}>员工</Typography>
                 </Stack>
-              </TableCell><TableCell>部门</TableCell><TableCell align="right">订单 / 提成</TableCell>
-              <TableCell align="right">待确认</TableCell><TableCell align="right">待发放</TableCell><TableCell align="center">操作</TableCell>
+              </TableCell><TableCell sx={{ minWidth: 120 }}>部门</TableCell><TableCell sx={{ minWidth: 150 }}>业务单数</TableCell><TableCell align="right" sx={{ minWidth: 100 }}>待处理</TableCell>
+              <TableCell align="right" sx={{ minWidth: 130 }}>待确认</TableCell><TableCell align="right" sx={{ minWidth: 130 }}>待发放</TableCell><TableCell align="center" sx={{ minWidth: 120 }}>操作</TableCell>
             </TableRow></TableHead>
             <TableBody>
-              {visiblePendingRows.map((row) => (
-                <TableRow key={row.ownerId} hover>
+              {visiblePendingRows.map((row) => {
+                const presentation = buildPendingEmployeePresentation(row);
+                return <TableRow key={row.ownerId} hover>
                   <TableCell>
                     <Stack direction="row" alignItems="center" spacing={1}>
-                      {canManage && <Checkbox size="small" disabled={row.pendingPayAmount <= 0} checked={selectedIds.includes(row.ownerId)} onChange={() => toggleOne(row.ownerId)} sx={{ p: 0 }} />}
+                      {canManage && <Checkbox size="small" disabled={!presentation.canIssue} checked={selectedIds.includes(row.ownerId)} onChange={() => toggleOne(row.ownerId)} sx={{ p: 0 }} />}
                       <Typography fontWeight={700}>{row.owner}</Typography>
                     </Stack>
                   </TableCell>
                   <TableCell>{row.department || '-'}</TableCell>
-                  <TableCell align="right">{row.orderCount} / {row.commissionCount}</TableCell>
-                  <TableCell align="right">{formatCurrency(row.pendingConfirmAmount)}</TableCell>
-                  <TableCell align="right"><Typography fontWeight={800} color="warning.main">{formatCurrency(row.pendingPayAmount)}</Typography></TableCell>
-                  <TableCell align="center"><Button size="small" startIcon={<VisibilityOutlinedIcon />} onClick={() => setDetailEmployee(row)}>查看明细</Button></TableCell>
-                </TableRow>
-              ))}
-              {!pendingRows.length && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 7, color: 'text.secondary' }}>暂无待确认或待发放提成</TableCell></TableRow>}
+                  <TableCell>
+                    <Typography fontWeight={800}>{presentation.business.total} 单</Typography>
+                    <Typography variant="caption" color="text.secondary">正式 {presentation.business.formal} · 挽回 {presentation.business.recovery}</Typography>
+                  </TableCell>
+                  <TableCell align="right">{presentation.pendingHandling.count > 0 ? `${presentation.pendingHandling.count} 笔` : '—'}</TableCell>
+                  <TableCell align="right">
+                    <Typography>{formatCurrency(presentation.pendingConfirm.amount)}</Typography>
+                    <Typography variant="caption" color="text.secondary">{presentation.pendingConfirm.count} 笔</Typography>
+                  </TableCell>
+                  <TableCell align="right">
+                    <Typography fontWeight={800} color="warning.main">{formatCurrency(presentation.pendingPay.amount)}</Typography>
+                    <Typography variant="caption" color="text.secondary">{presentation.pendingPay.count} 笔</Typography>
+                  </TableCell>
+                  <TableCell align="center"><Button size="small" startIcon={<VisibilityOutlinedIcon />} sx={{ whiteSpace: 'nowrap' }} onClick={() => setDetailEmployee(row)}>查看明细</Button></TableCell>
+                </TableRow>;
+              })}
+              {!pendingRows.length && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 7, color: 'text.secondary' }}>暂无待处理、待确认或待发放提成</TableCell></TableRow>}
             </TableBody>
           </Table>
         </TableContainer>
@@ -446,6 +486,18 @@ const CommissionPayout: React.FC = () => {
     <Dialog open={Boolean(detailEmployee)} onClose={() => setDetailEmployee(null)} fullWidth maxWidth="lg">
       <DialogTitle>{detailEmployee?.owner} · 全部待办提成明细</DialogTitle>
       <DialogContent dividers>
+        <Tabs
+          value={employeeDetailFilter}
+          onChange={(_event, value: PendingCommissionFilter) => setEmployeeDetailFilter(value)}
+          variant="scrollable"
+          scrollButtons="auto"
+          sx={{ mb: 1.5, minHeight: 40 }}
+        >
+          <Tab value="全部" label={`全部 ${detailEmployee?.commissionCount || 0}`} />
+          <Tab value="待处理" label={`待处理 ${detailEmployeePresentation?.pendingHandling.count || 0}`} />
+          <Tab value="待确认" label={`待确认 ${detailEmployeePresentation?.pendingConfirm.count || 0}`} />
+          <Tab value="待发放" label={`待发放 ${detailEmployeePresentation?.pendingPay.count || 0}`} />
+        </Tabs>
         <Stack divider={<Divider flexItem />} sx={{ display: { xs: 'flex', md: 'none' } }}>
           {visibleEmployeeDetailRows.map((row) => (
             <Box key={row.id} sx={{ py: 1.5 }}>
@@ -455,7 +507,7 @@ const CommissionPayout: React.FC = () => {
                   <Typography fontWeight={800}>{row.customerName || '未命名客户'}</Typography>
                   <Typography variant="caption" color="text.secondary" display="block" sx={{ wordBreak: 'break-all' }}>{row.orderNo}</Typography>
                 </Box>
-                <Chip size="small" label={row.status} />
+                <Chip size="small" label={pendingCommissionStatusLabel(row)} />
               </Stack>
               <Typography sx={{ mt: 1 }} variant="h6" fontWeight={900}>{formatCurrency(row.commissionAmount)}</Typography>
               <Box sx={{ mt: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
@@ -465,14 +517,14 @@ const CommissionPayout: React.FC = () => {
               <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1, overflowWrap: 'anywhere' }}>{commissionCalculationText(row)}</Typography>
             </Box>
           ))}
-          {!employeeDetailRows.length && <Box sx={{ py: 6, textAlign: 'center', color: 'text.secondary' }}>暂无待办提成明细</Box>}
+          {!employeeDetailRows.length && <Box sx={{ py: 6, textAlign: 'center', color: 'text.secondary' }}>当前筛选下暂无提成明细</Box>}
         </Stack>
         <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { display: { xs: 'none', md: 'block' }, borderRadius: '6px 6px 0 0', overflowX: 'auto' }]}>
           <Table size="small" sx={[moduleTableSx, { minWidth: 1180 }]}>
             <TableHead><TableRow><TableCell>提成类型</TableCell><TableCell>客户</TableCell><TableCell>订单号</TableCell><TableCell>角色</TableCell><TableCell align="right">业绩金额</TableCell><TableCell>计算方案</TableCell><TableCell align="right">提成金额</TableCell><TableCell>归属月份 / 时间</TableCell><TableCell>状态</TableCell></TableRow></TableHead>
             <TableBody>
-              {visibleEmployeeDetailRows.map((row) => <TableRow key={row.id} hover><TableCell>{commissionTypeLabel(row)}</TableCell><TableCell>{row.customerName || '未命名客户'}</TableCell><TableCell><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{row.orderNo}</Typography></TableCell><TableCell>{row.role}</TableCell><TableCell align="right">{formatCurrency(Number(row.performanceAmount || row.orderAmount || 0))}</TableCell><TableCell sx={{ maxWidth: 260 }}><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{commissionCalculationText(row)}</Typography></TableCell><TableCell align="right"><Typography fontWeight={900}>{formatCurrency(row.commissionAmount)}</Typography></TableCell><TableCell>{commissionMonth(row)} · {formatDateTime(row.paymentDate || row.createdAt)}</TableCell><TableCell><Chip size="small" label={row.status} /></TableCell></TableRow>)}
-              {!employeeDetailRows.length && <TableRow><TableCell colSpan={9} align="center" sx={{ py: 6, color: 'text.secondary' }}>暂无待办提成明细</TableCell></TableRow>}
+              {visibleEmployeeDetailRows.map((row) => <TableRow key={row.id} hover><TableCell>{commissionTypeLabel(row)}</TableCell><TableCell>{row.customerName || '未命名客户'}</TableCell><TableCell><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{row.orderNo}</Typography></TableCell><TableCell>{row.role}</TableCell><TableCell align="right">{formatCurrency(Number(row.performanceAmount || row.orderAmount || 0))}</TableCell><TableCell sx={{ maxWidth: 260 }}><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{commissionCalculationText(row)}</Typography></TableCell><TableCell align="right"><Typography fontWeight={900}>{formatCurrency(row.commissionAmount)}</Typography></TableCell><TableCell>{commissionMonth(row)} · {formatDateTime(row.paymentDate || row.createdAt)}</TableCell><TableCell><Chip size="small" label={pendingCommissionStatusLabel(row)} /></TableCell></TableRow>)}
+              {!employeeDetailRows.length && <TableRow><TableCell colSpan={9} align="center" sx={{ py: 6, color: 'text.secondary' }}>当前筛选下暂无提成明细</TableCell></TableRow>}
             </TableBody>
           </Table>
         </TableContainer>
