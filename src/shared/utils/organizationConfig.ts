@@ -19,7 +19,7 @@ import { getStorageData, setStorageData } from '../../api/mock/storage';
 import { normalizePositionDepartmentScope } from './positionApplicability';
 
 const now = '2026-06-01T00:00:00.000Z';
-const ORGANIZATION_SCHEMA_VERSION = 12;
+const ORGANIZATION_SCHEMA_VERSION = 13;
 const NON_CUSTOMER_DATA_SCOPE_DOMAINS: NonCustomerDataScopeDomain[] = [
   'leads',
   'orders',
@@ -109,6 +109,16 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.ORDER_HISTORY, actions: ['read'] },
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
       { module: PERMISSION_KEYS.DASHBOARD, actions: ['read'] },
+      { module: PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE, actions: ['read'] },
+      { module: PERMISSION_KEYS.STANDARD_READ, actions: ['read'] },
+      { module: PERMISSION_KEYS.TASK_SELF, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.TASK_TEAM, actions: ['read'] },
+      { module: PERMISSION_KEYS.TASK_ASSIGN, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.TASK_CONFIRM, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.REVIEW_SELF, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.REVIEW_TEAM, actions: ['read'] },
+      { module: PERMISSION_KEYS.AI_POSITION_ASSISTANT, actions: ['read'] },
+      { module: PERMISSION_KEYS.BRAIN_DASHBOARD, actions: ['read'] },
       CO_CREATION_EMPLOYEE_PERMISSION,
       { module: PERMISSION_KEYS.CO_CREATION_SUPERVISE, actions: ['read', 'write'] },
       ...ASSET_SELF_SERVICE_PERMISSIONS,
@@ -136,6 +146,11 @@ export const DEFAULT_ROLES: Role[] = [
       { module: PERMISSION_KEYS.ORDER_CREATE, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.ORDER_EDIT, actions: ['read', 'write'] },
       { module: PERMISSION_KEYS.FINANCE_MY_COMMISSION, actions: ['read'] },
+      { module: PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE, actions: ['read'] },
+      { module: PERMISSION_KEYS.STANDARD_READ, actions: ['read'] },
+      { module: PERMISSION_KEYS.TASK_SELF, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.REVIEW_SELF, actions: ['read', 'write'] },
+      { module: PERMISSION_KEYS.AI_POSITION_ASSISTANT, actions: ['read'] },
       CO_CREATION_EMPLOYEE_PERMISSION,
       ...ASSET_SELF_SERVICE_PERMISSIONS,
     ],

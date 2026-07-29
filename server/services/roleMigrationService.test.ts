@@ -13,6 +13,7 @@ import {
   createCustomerPermissionMigrationManifestAuthenticatorFromEnv,
   migrateCustomerPermissionAndScopeBaseline,
   migrateDefaultRoleAccess,
+  mergeEnterpriseBrainRoleBaseline,
   toSafeCustomerPermissionMigrationErrorCode,
   validateCustomerPermissionMigrationManifest,
 } from './roleMigrationService';
@@ -88,6 +89,23 @@ assert.deepEqual(
   ['read', 'write'],
   '现有默认销售角色必须一次性恢复新建线索所需的显式写权限',
 );
+assert.ok(
+  updates[0].data.permissions.some((permission: any) => permission.module === PERMISSION_KEYS.AI_POSITION_ASSISTANT),
+  '销售顾问权限基线必须包含AI岗位助手',
+);
+assert.ok(
+  updates[0].data.permissions.some((permission: any) => permission.module === PERMISSION_KEYS.ENABLEMENT_KNOWLEDGE),
+  '销售顾问必须能读取AI回答所依赖的可见公司知识',
+);
+const salesDirectorBrainRole = mergeEnterpriseBrainRoleBaseline({
+  ...legacyRole,
+  id: 'role-local-sales-director',
+  name: '销售总监',
+  code: 'role-custom-code',
+  permissions: [],
+} as any);
+assert.ok(roleHasPermission(salesDirectorBrainRole, PERMISSION_KEYS.BRAIN_DASHBOARD));
+assert.ok(roleHasPermission(salesDirectorBrainRole, PERMISSION_KEYS.TASK_ASSIGN, 'write'));
 
 const idempotentCount = await migrateDefaultRoleAccess({
   role: {

@@ -89,6 +89,15 @@ import { createKnowledgeFileStore } from './services/enablement/knowledgeFileSto
 import { createPrismaKnowledgeRepository } from './services/enablement/prismaKnowledgeRepository';
 import { createKeywordKnowledgeSearchProvider } from './services/enablement/knowledgeSearchProvider';
 import { createEnablementKnowledgeRouter } from './routes/enablementKnowledgeRoutes';
+import { createEnterpriseBrainRouter } from './routes/enterpriseBrainRoutes';
+import { createPositionStandardService } from './services/enterpriseBrain/positionStandardService';
+import { createPrismaPositionStandardRepository } from './services/enterpriseBrain/prismaPositionStandardRepository';
+import { createEnterpriseTaskService } from './services/enterpriseBrain/taskService';
+import { createPrismaEnterpriseTaskRepository } from './services/enterpriseBrain/prismaTaskRepository';
+import { createEnterpriseAiAssistantService } from './services/enterpriseBrain/aiAssistantService';
+import { createPrismaEnterpriseAiRepository } from './services/enterpriseBrain/prismaAiRepository';
+import { createEnterpriseCockpitService } from './services/enterpriseBrain/cockpitService';
+import { createPrismaEnterpriseCockpitRepository } from './services/enterpriseBrain/prismaCockpitRepository';
 import { createCoCreationRouter } from './routes/coCreationRoutes';
 import { createRuntimeStorageGetHandler } from './routes/runtimeStorageRoutes';
 import { createDisabledCrmCustomerImportHandler } from './routes/crmMigrationRoutes';
@@ -266,6 +275,32 @@ const knowledgeService = createKnowledgeService({
   fileStore: knowledgeFileStore,
   searchProvider: createKeywordKnowledgeSearchProvider(),
 });
+const positionStandardService = createPositionStandardService({
+  repository: createPrismaPositionStandardRepository(prisma as any),
+});
+const enterpriseTaskService = createEnterpriseTaskService({
+  repository: createPrismaEnterpriseTaskRepository(prisma as any),
+  summarizeReview: (input) => aiChatClient.complete([
+    {
+      role: 'system',
+      content: '你是企业复盘分析助手。只根据员工提交的原始复盘，简洁输出：1.新增经验；2.话术或执行建议；3.SOP优化建议；4.待负责人验证的问题。不得编造事实，不得直接修改公司标准。',
+    },
+    { role: 'user', content: JSON.stringify(input) },
+  ], { temperature: 0.1 }),
+});
+const enterpriseAiService = createEnterpriseAiAssistantService({
+  repository: createPrismaEnterpriseAiRepository(prisma as any),
+  searchKnowledge: async (question, actor) => {
+    const result = await knowledgeService.searchCurrent(question, actor);
+    return result.code === 0 ? result.data : [];
+  },
+  complete: (messages) => aiChatClient.complete(messages, { temperature: 0.1 }),
+});
+const enterpriseCockpitService = createEnterpriseCockpitService({
+  repository: createPrismaEnterpriseCockpitRepository(prisma as any),
+  rolloutPositionIds: ['pos-sales-consultant', 'pos-sales-manager', 'pos-sales-director'],
+  rolloutLabel: '销售体系试运行范围',
+});
 const requireOrganizationReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS);
 const requireOrganizationWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS, 'write');
 const requireOrganizationDeleteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS, 'delete');
@@ -425,6 +460,13 @@ app.use('/api/enablement/knowledge', createEnablementKnowledgeRouter({
   requireRead: requireEnablementRead,
   requireReview: requireEnablementReview,
   requirePublish: requireEnablementPublish,
+}));
+app.use('/api/enterprise-brain', createEnterpriseBrainRouter({
+  requireAuth: requireStorageAccess,
+  standards: positionStandardService,
+  tasks: enterpriseTaskService,
+  ai: enterpriseAiService,
+  cockpit: enterpriseCockpitService,
 }));
 app.use('/api/co-creation', createCoCreationRouter({ service: coCreationService, requireAuth: requireCoCreationAccess }));
 

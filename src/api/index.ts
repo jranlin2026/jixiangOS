@@ -35,6 +35,7 @@ export { businessAttachmentApi } from './businessAttachmentApi';
 export { businessExportApi } from './businessExportApi';
 export { systemSetupApi } from './systemSetupApi';
 export { enablementApi } from './enablementApi';
+export { enterpriseBrainApi } from './enterpriseBrainApi';
 export type { LeadBulkImportResult, LeadBulkImportRowResult } from './leadBulkImportApi';
 export { initializeMockData, resetMockData } from './mock';
 export type { ApiResponse, PaginatedResponse } from './types';

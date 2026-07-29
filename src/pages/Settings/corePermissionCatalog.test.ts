@@ -22,6 +22,7 @@ assert.deepEqual(coreLabels, [
   '交付',
   '售后服务',
   '财务中心',
+  '企业AI大脑',
   '系统设置',
 ]);
 
@@ -36,6 +37,10 @@ assert.deepEqual(coreLabels, [
   PERMISSION_KEYS.SETTINGS_CUSTOMER_TAGS,
   PERMISSION_KEYS.FINANCE_PAYOUT_REPORT_EXPORT,
   PERMISSION_KEYS.FINANCE_FLOW_EXPORT,
+  PERMISSION_KEYS.STANDARD_READ,
+  PERMISSION_KEYS.TASK_SELF,
+  PERMISSION_KEYS.AI_POSITION_ASSISTANT,
+  PERMISSION_KEYS.BRAIN_DASHBOARD,
 ].forEach((permissionKey) => {
   assert.equal(coreLeafKeys.has(permissionKey), true, `${permissionKey} 必须出现在正式模块权限树中`);
 });

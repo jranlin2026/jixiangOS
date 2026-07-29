@@ -125,6 +125,43 @@ const CORE_ROLE_PERMISSION_TREE: RolePermissionNode[] = [
     ],
   },
   {
+    label: '企业AI大脑',
+    children: [
+      {
+        label: '标准中心',
+        children: [
+          { label: '读取岗位标准', key: PERMISSION_KEYS.STANDARD_READ },
+          { label: '维护岗位标准', key: PERMISSION_KEYS.STANDARD_MAINTAIN },
+          { label: '发布岗位标准', key: PERMISSION_KEYS.STANDARD_PUBLISH },
+        ],
+      },
+      {
+        label: '任务中心',
+        children: [
+          { label: '本人任务', key: PERMISSION_KEYS.TASK_SELF },
+          { label: '团队任务', key: PERMISSION_KEYS.TASK_TEAM },
+          { label: '指派任务', key: PERMISSION_KEYS.TASK_ASSIGN },
+          { label: '确认任务', key: PERMISSION_KEYS.TASK_CONFIRM },
+        ],
+      },
+      {
+        label: '复盘中心',
+        children: [
+          { label: '本人复盘', key: PERMISSION_KEYS.REVIEW_SELF },
+          { label: '团队复盘', key: PERMISSION_KEYS.REVIEW_TEAM },
+        ],
+      },
+      {
+        label: 'AI助手与驾驶舱',
+        children: [
+          { label: '岗位AI问答', key: PERMISSION_KEYS.AI_POSITION_ASSISTANT },
+          { label: '查看AI问答审计', key: PERMISSION_KEYS.AI_AUDIT },
+          { label: '老板驾驶舱', key: PERMISSION_KEYS.BRAIN_DASHBOARD },
+        ],
+      },
+    ],
+  },
+  {
     label: '系统设置',
     children: [
       {
