@@ -33,6 +33,10 @@ for (const [method, route] of [
   ['post', '/api/settings/positions'],
   ['put', '/api/settings/positions/:id'],
   ['delete', '/api/settings/positions/:id'],
+  ['post', '/api/settings/position-governance/previews'],
+  ['get', '/api/settings/position-governance/batches/:id'],
+  ['post', '/api/settings/position-governance/batches/:id/apply'],
+  ['get', '/api/settings/position-history'],
   ['get', '/api/ai/config'],
   ['put', '/api/ai/config'],
   ['post', '/api/ai/config/test'],
@@ -194,6 +198,10 @@ assert.match(source, /app\.get\('\/api\/settings\/positions', requireOrganizatio
 assert.match(source, /app\.post\('\/api\/settings\/positions', requireOrganizationWriteAccess,/);
 assert.match(source, /app\.put\('\/api\/settings\/positions\/:id', requireOrganizationWriteAccess,/);
 assert.match(source, /app\.delete\('\/api\/settings\/positions\/:id', requireOrganizationDeleteAccess,/);
+assert.match(source, /app\.post\('\/api\/settings\/position-governance\/previews', requireOrganizationWriteAccess,/);
+assert.match(source, /app\.get\('\/api\/settings\/position-governance\/batches\/:id', requireOrganizationReadAccess,/);
+assert.match(source, /app\.post\('\/api\/settings\/position-governance\/batches\/:id\/apply', requireOrganizationWriteAccess,/);
+assert.match(source, /app\.get\('\/api\/settings\/position-history', requireOrganizationReadAccess,/);
 
 assert.match(source, /app\.get\('\/api\/ai\/config', requireAiConfigReadAccess,/);
 assert.match(source, /app\.put\('\/api\/ai\/config', requireAiConfigWriteAccess,/);

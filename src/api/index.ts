@@ -14,6 +14,7 @@ export { aiApi } from './aiApi';
 export { aiConfigApi } from './aiConfigApi';
 export { dashboardApi } from './dashboardApi';
 export { settingsApi } from './settingsApi';
+export { positionGovernanceApi } from './positionGovernanceApi';
 export { authApi } from './authApi';
 export { departmentApi } from './departmentApi';
 export { roleApi } from './roleApi';

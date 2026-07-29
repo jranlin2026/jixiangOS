@@ -17,7 +17,7 @@ import { LIFECYCLE_STATUS_CODES, STORAGE_KEYS } from '../../src/shared/utils/con
 import { mergeRoleWithDefaultAccess, normalizeRoleDataScopes } from '../../src/shared/utils/organizationConfig';
 import { normalizeRoleNameForComparison } from '../../src/shared/utils/roles';
 
-type SettingsPrisma = Pick<PrismaClient, 'user' | 'role' | 'department' | 'position' | 'authSession' | 'businessRecord' | 'leadRecord' | 'knowledgeVisibility'>;
+type SettingsPrisma = Pick<PrismaClient, 'user' | 'role' | 'department' | 'position' | 'authSession' | 'businessRecord' | 'leadRecord' | 'knowledgeVisibility' | 'employeePositionHistory'>;
 
 type LeaveUserCustomerHandoff = {
   customerAction?: 'transfer' | 'public_pool';
@@ -439,7 +439,7 @@ export function createSettingsService(prisma: SettingsPrisma) {
       return success(mapPrismaUser(row));
     },
 
-    async updateUser(id: string, data: Record<string, any>) {
+    async updateUser(id: string, data: Record<string, any>, actor: { id: string; name: string } = { id: 'system', name: '系统' }) {
       const user = await prisma.user.findUnique({ where: { id } });
       if (!user) return success(null);
       const nextAccount = data.account !== undefined ? normalizeAccount(data.account) : user.account;
@@ -461,9 +461,7 @@ export function createSettingsService(prisma: SettingsPrisma) {
       if (selectedPosition?.departmentId && selectedPosition.departmentId !== nextDepartmentId) {
         return failure('该岗位不属于所选部门');
       }
-      const row = await prisma.user.update({
-        where: { id },
-        data: {
+      const updateData = {
           name: data.name !== undefined ? String(data.name).trim() : undefined,
           account: nextAccount,
           email: data.email !== undefined ? String(data.email).trim() : undefined,
@@ -483,8 +481,49 @@ export function createSettingsService(prisma: SettingsPrisma) {
           leftAt: data.leftAt ? new Date(data.leftAt) : undefined,
           leftBy: data.leftBy,
           updatedAt: new Date(),
-        },
-      });
+      };
+      const nextPositionId = data.positionId !== undefined ? selectedPosition?.id || null : user.positionId;
+      const organizationChanged = nextDepartmentId !== user.departmentId || nextPositionId !== user.positionId;
+      if (organizationChanged && !nullableText(data.reason)) {
+        return failure('调岗或转部门必须填写变更原因');
+      }
+      const persistUser = async (client: Pick<PrismaClient, 'user' | 'department' | 'employeePositionHistory'>) => {
+        const row = await client.user.update({ where: { id }, data: updateData });
+        if (organizationChanged) {
+          const [oldDepartment, newDepartment] = await Promise.all([
+            user.departmentId ? client.department.findUnique({ where: { id: user.departmentId } }) : null,
+            nextDepartmentId ? client.department.findUnique({ where: { id: nextDepartmentId } }) : null,
+          ]);
+          const departmentChanged = nextDepartmentId !== user.departmentId;
+          const positionChangedForHistory = nextPositionId !== user.positionId;
+          await client.employeePositionHistory.create({ data: {
+            id: compactId('position-history'),
+            employeeId: user.id,
+            employeeName: updateData.name || user.name,
+            changeType: departmentChanged && positionChangedForHistory
+              ? 'POSITION_AND_DEPARTMENT_CHANGE'
+              : departmentChanged ? 'DEPARTMENT_CHANGE' : 'POSITION_CHANGE',
+            oldDepartmentId: user.departmentId || null,
+            oldDepartmentName: oldDepartment?.name || null,
+            newDepartmentId: nextDepartmentId || null,
+            newDepartmentName: newDepartment?.name || null,
+            oldPositionId: user.positionId || null,
+            oldPositionName: user.positionName || null,
+            newPositionId: nextPositionId || null,
+            newPositionName: selectedPosition?.name || (nextPositionId ? user.positionName : null),
+            reason: nullableText(data.reason),
+            source: 'MANUAL',
+            changedById: actor.id,
+            changedByName: actor.name,
+            changedAt: updateData.updatedAt,
+            idempotencyKey: `position-change:${user.id}:${updateData.updatedAt.getTime()}:${randomUUID().slice(0, 8)}`,
+          } });
+        }
+        return row;
+      };
+      const row = organizationChanged
+        ? await (prisma as PrismaClient).$transaction((tx) => persistUser(tx))
+        : await persistUser(prisma);
       return success(mapPrismaUser(row));
     },
 

@@ -65,6 +65,7 @@ type UserForm = {
   departmentId: string;
   isActive: boolean;
   password: string;
+  changeReason: string;
 };
 
 type DepartmentForm = {
@@ -84,6 +85,7 @@ const emptyUserForm: UserForm = {
   departmentId: '',
   isActive: true,
   password: '',
+  changeReason: '',
 };
 
 const emptyDepartmentForm: DepartmentForm = {
@@ -129,6 +131,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
   const [companyNameDraft, setCompanyNameDraft] = useState('');
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveDepartmentId, setMoveDepartmentId] = useState('');
+  const [moveReason, setMoveReason] = useState('');
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
   const [leaveTargets, setLeaveTargets] = useState<User[]>([]);
   const [leaveOwnedCustomerCount, setLeaveOwnedCustomerCount] = useState(0);
@@ -309,6 +312,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
       departmentId: user.departmentId || '',
       isActive: user.isActive,
       password: '',
+      changeReason: '',
     });
     setUserFormOpen(true);
   };
@@ -323,6 +327,14 @@ const EmployeeDepartmentManagement: React.FC = () => {
       await alert('初始密码至少 6 位', dialogTitle);
       return;
     }
+    const organizationChanged = Boolean(editingUser) && (
+      (userForm.positionId || '') !== (editingUser?.positionId || '')
+      || (userForm.departmentId || '') !== (editingUser?.departmentId || '')
+    );
+    if (organizationChanged && !userForm.changeReason.trim()) {
+      await alert('调岗或转部门必须填写变更原因', dialogTitle);
+      return;
+    }
     const payload = {
       name: userForm.name.trim(),
       account: userForm.account.trim(),
@@ -334,6 +346,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
       departmentId: userForm.departmentId || undefined,
       isActive: userForm.isActive,
       password: userForm.password,
+      reason: userForm.changeReason.trim() || undefined,
     };
     const res = editingUser
       ? await settingsApi.updateUser(editingUser.id, payload)
@@ -512,11 +525,16 @@ const EmployeeDepartmentManagement: React.FC = () => {
 
   const handleOpenMove = () => {
     setMoveDepartmentId(selectedDepartment?.id || activeDepartments[0]?.id || '');
+    setMoveReason('');
     setMoveOpen(true);
   };
 
   const handleMoveUsers = async () => {
     if (!moveDepartmentId) return;
+    if (!moveReason.trim()) {
+      await alert('请填写本次批量转部门的原因', '批量转部门');
+      return;
+    }
     const incompatibleUserIds = new Set(selectedUsers.filter((user) => {
       const position = positions.find((item) => item.id === user.positionId);
       return Boolean(position?.departmentId && position.departmentId !== moveDepartmentId);
@@ -528,6 +546,7 @@ const EmployeeDepartmentManagement: React.FC = () => {
     const results = await Promise.all(selectedUsers.map((user) => settingsApi.updateUser(user.id, {
       departmentId: moveDepartmentId,
       ...(incompatibleUserIds.has(user.id) ? { positionId: '' } : {}),
+      reason: moveReason.trim(),
     })));
     const failed = results.map((result, index) => ({ result, user: selectedUsers[index] }))
       .filter(({ result }) => result.code !== 0);
@@ -1022,6 +1041,15 @@ const EmployeeDepartmentManagement: React.FC = () => {
                 <MenuItem key={position.id} value={position.id}>{position.name}</MenuItem>
               ))}
             </TextField>
+            {editingUser && (
+              <TextField
+                label="岗位/部门变更原因"
+                value={userForm.changeReason}
+                onChange={(event) => setUserForm({ ...userForm, changeReason: event.target.value })}
+                placeholder="仅在调岗或转部门时记录"
+                fullWidth
+              />
+            )}
             <TextField select label="角色权限" value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value as UserRole })} fullWidth>
               {roleOptions.map((role) => <MenuItem key={role.id} value={role.name}>{role.name}</MenuItem>)}
             </TextField>
@@ -1083,9 +1111,20 @@ const EmployeeDepartmentManagement: React.FC = () => {
           <TextField select label="目标部门" value={moveDepartmentId} onChange={(event) => setMoveDepartmentId(event.target.value)} fullWidth>
             {activeDepartments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
           </TextField>
+          <TextField
+            label="变更原因"
+            value={moveReason}
+            onChange={(event) => setMoveReason(event.target.value)}
+            placeholder="例如：销售团队组织调整"
+            required
+            multiline
+            minRows={2}
+            fullWidth
+            sx={{ mt: 2 }}
+          />
         </DialogContent>
         <DialogActions>
-          <Button variant="contained" onClick={handleMoveUsers} disabled={!moveDepartmentId}>确认移动</Button>
+          <Button variant="contained" onClick={handleMoveUsers} disabled={!moveDepartmentId || !moveReason.trim()}>确认移动</Button>
         </DialogActions>
       </Dialog>
 

@@ -61,6 +61,7 @@ import { createPrismaSystemSetupRepository } from './services/systemSetupReposit
 import { createSystemSetupService } from './services/systemSetupService';
 import { ensureSystemLifecycleDefaults } from './services/systemConfigMigrationService';
 import { createSettingsService } from './services/settingsService';
+import { createPositionGovernanceService } from './services/positionGovernance';
 import { createOrderTypeConfigCommandService } from './services/orderTypeConfigCommandService';
 import { createStorageService } from './services/storageService';
 import { createBusinessAttachmentService, createPrismaBusinessAttachmentRepository } from './services/businessAttachmentService';
@@ -207,6 +208,7 @@ const customerTagMigrationService = createCustomerTagMigrationService(prisma as 
 const leadListService = createLeadListService(prisma);
 const businessRecycleBinService = createBusinessRecycleBinService(createPrismaBusinessRecycleBinRepository(prisma));
 const settingsService = createSettingsService(prisma);
+const positionGovernanceService = createPositionGovernanceService(prisma);
 const orderTypeConfigCommandService = createOrderTypeConfigCommandService(prisma);
 const storageService = createStorageService(prisma);
 const businessAttachmentService = createBusinessAttachmentService({
@@ -1497,8 +1499,8 @@ app.post('/api/settings/users', requireOrganizationWriteAccess, async (req, res)
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
-app.put('/api/settings/users/:id', requireOrganizationWriteAccess, async (req, res) => {
-  const result = await settingsService.updateUser(routeParam(req.params.id), req.body || {});
+app.put('/api/settings/users/:id', requireOrganizationWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await settingsService.updateUser(routeParam(req.params.id), req.body || {}, req.currentUser!);
   res.status(result.code === 0 ? 200 : 400).json(result);
 });
 
@@ -1577,6 +1579,33 @@ app.put('/api/settings/positions/:id', requireOrganizationWriteAccess, async (re
 app.delete('/api/settings/positions/:id', requireOrganizationDeleteAccess, async (req, res) => {
   const result = await settingsService.deletePosition(routeParam(req.params.id));
   res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.post('/api/settings/position-governance/previews', requireOrganizationWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await positionGovernanceService.createPreview(req.body || {}, req.currentUser!);
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.get('/api/settings/position-governance/batches/:id', requireOrganizationReadAccess, async (req, res) => {
+  res.json(await positionGovernanceService.getBatch(routeParam(req.params.id)));
+});
+
+app.post('/api/settings/position-governance/batches/:id/apply', requireOrganizationWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await positionGovernanceService.applyBatch(
+    routeParam(req.params.id),
+    Array.isArray(req.body?.selections) ? req.body.selections : [],
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : 400).json(result);
+});
+
+app.get('/api/settings/position-history', requireOrganizationReadAccess, async (req, res) => {
+  res.json(await positionGovernanceService.listHistory({
+    employeeId: queryParam(req.query.employeeId),
+    changeType: queryParam(req.query.changeType),
+    page: Number(queryParam(req.query.page) || 1),
+    pageSize: Number(queryParam(req.query.pageSize) || 10),
+  }));
 });
 
 app.get('/api/ai/config', requireAiConfigReadAccess, async (_req, res) => {

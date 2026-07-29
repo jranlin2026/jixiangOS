@@ -105,6 +105,83 @@ model AuthSession {
   @@map("auth_sessions")
 }
 
+model PositionMappingBatch {
+  id             String    @id @db.VarChar(64)
+  status         String    @default("PREVIEW") @db.VarChar(24)
+  scope          Json?
+  totalCount     Int       @default(0)
+  matchedCount   Int       @default(0)
+  conflictCount  Int       @default(0)
+  appliedCount   Int       @default(0)
+  failedCount    Int       @default(0)
+  createdById    String    @db.VarChar(64)
+  createdByName  String    @db.VarChar(100)
+  confirmedById  String?   @db.VarChar(64)
+  confirmedByName String?  @db.VarChar(100)
+  confirmedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  items PositionMappingItem[]
+
+  @@index([status, createdAt])
+  @@index([createdById, createdAt])
+  @@map("position_mapping_batches")
+}
+
+model PositionMappingItem {
+  id                       String   @id @db.VarChar(64)
+  batchId                  String   @db.VarChar(64)
+  employeeId               String   @db.VarChar(64)
+  employeeName             String   @db.VarChar(100)
+  originalDepartmentId     String?  @db.VarChar(64)
+  originalDepartmentName   String?  @db.VarChar(100)
+  originalPositionName     String?  @db.VarChar(100)
+  employeeUpdatedAtSnapshot DateTime
+  suggestedPositionId      String?  @db.VarChar(64)
+  candidatePositionIds     Json
+  confirmedPositionId      String?  @db.VarChar(64)
+  matchStatus              String   @db.VarChar(32)
+  applyStatus              String   @default("PENDING") @db.VarChar(24)
+  failureReason            String?  @db.VarChar(500)
+  appliedAt                DateTime?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  batch PositionMappingBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, employeeId])
+  @@index([employeeId, createdAt])
+  @@index([matchStatus, applyStatus])
+  @@map("position_mapping_items")
+}
+
+model EmployeePositionHistory {
+  id                String   @id @db.VarChar(64)
+  employeeId        String   @db.VarChar(64)
+  employeeName      String   @db.VarChar(100)
+  changeType        String   @db.VarChar(32)
+  oldDepartmentId   String?  @db.VarChar(64)
+  oldDepartmentName String?  @db.VarChar(100)
+  newDepartmentId   String?  @db.VarChar(64)
+  newDepartmentName String?  @db.VarChar(100)
+  oldPositionId     String?  @db.VarChar(64)
+  oldPositionName   String?  @db.VarChar(100)
+  newPositionId     String?  @db.VarChar(64)
+  newPositionName   String?  @db.VarChar(100)
+  reason            String?  @db.VarChar(500)
+  source            String   @db.VarChar(24)
+  changedById       String   @db.VarChar(64)
+  changedByName     String   @db.VarChar(100)
+  changedAt         DateTime @default(now())
+  idempotencyKey    String   @unique @db.VarChar(191)
+
+  @@index([employeeId, changedAt])
+  @@index([changeType, changedAt])
+  @@index([changedById, changedAt])
+  @@map("employee_position_histories")
+}
+
 model AppStorage {
   key       String   @id @db.VarChar(120)
   value     Json

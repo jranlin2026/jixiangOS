@@ -119,6 +119,7 @@ const positions: any[] = [
 ];
 
 const knowledgeVisibilities: any[] = [];
+const positionHistories: any[] = [];
 
 const roles: any[] = [
   {
@@ -213,6 +214,7 @@ const prisma = {
   department: createModel(departments),
   position: createModel(positions),
   knowledgeVisibility: createModel(knowledgeVisibilities),
+  employeePositionHistory: createModel(positionHistories),
   customerTodo: {
     findFirst: async () => normalizedReferenceUserId ? { id: 'todo-user-reference' } : null,
   },
@@ -482,9 +484,22 @@ const clearedPositionDepartment = await service.updatePosition(createdPositionDa
 assert.equal(clearedPositionDepartment.code, 0);
 assert.equal((clearedPositionDepartment.data as any).departmentId, undefined);
 
-const boundSalesUser = await service.updateUser('user-sales', { positionId: 'pos-sales-consultant' });
+const missingPositionChangeReason = await service.updateUser(
+  'user-sales',
+  { positionId: 'pos-sales-consultant' },
+  { id: 'user-admin', name: 'Admin' },
+);
+assert.notEqual(missingPositionChangeReason.code, 0);
+assert.match(missingPositionChangeReason.message || '', /原因/);
+assert.equal(positionHistories.length, 0);
+
+const boundSalesUser = await service.updateUser('user-sales', { positionId: 'pos-sales-consultant', reason: '调整销售岗位' }, { id: 'user-admin', name: 'Admin' });
 assert.equal(boundSalesUser.code, 0);
 assert.equal((boundSalesUser.data as any).positionName, 'Sales Consultant');
+assert.equal(positionHistories.length, 1);
+assert.equal(positionHistories[0].oldPositionId, null);
+assert.equal(positionHistories[0].newPositionId, 'pos-sales-consultant');
+assert.equal(positionHistories[0].changedById, 'user-admin');
 
 const movedBoundPosition = await service.updatePosition('pos-sales-consultant', { departmentId: 'dept-general' });
 assert.notEqual(movedBoundPosition.code, 0);

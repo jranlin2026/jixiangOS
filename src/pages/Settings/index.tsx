@@ -5,6 +5,7 @@ import RolePermission from './RolePermission';
 import ProductConfigPage from './ProductConfig';
 import EmployeeDepartmentManagement from './EmployeeDepartmentManagement';
 import PositionManagement from './PositionManagement';
+import PositionGovernance from './PositionGovernance';
 import AccountRecycleBin from './AccountRecycleBin';
 import BusinessRecycleBin from './BusinessRecycleBin';
 import CustomerLevelConfigPage from './CustomerLevelConfig';
@@ -70,6 +71,11 @@ const Settings: React.FC = () => {
           label: '岗位管理',
           permissionKey: PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS,
           component: <PositionManagement />,
+        },
+        {
+          label: '历史岗位治理',
+          permissionKey: PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS,
+          component: <PositionGovernance />,
         },
         { label: '角色权限', permissionKey: PERMISSION_KEYS.SETTINGS_ROLES, component: <RolePermission /> },
         { label: '账号回收站', permissionKey: PERMISSION_KEYS.SETTINGS_ACCOUNT_RECYCLE, component: <AccountRecycleBin /> },

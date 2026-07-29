@@ -626,7 +626,7 @@ async function createUser(data: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'p
   return createSuccessResponse(newUser);
 }
 
-async function updateUser(id: string, data: Partial<User>): Promise<ApiResponse<User | null>> {
+async function updateUser(id: string, data: Partial<User> & { reason?: string }): Promise<ApiResponse<User | null>> {
   if (shouldUseBackendApi()) {
     return backendRequest<User | null>(`/settings/users/${encodeURIComponent(id)}`, {
       method: 'PUT',
