@@ -154,6 +154,10 @@ async function fetchExpenses(filters?: FinanceFilters): Promise<ApiResponse<Fina
 const financeQuery = (filters: FinanceTransactionFilters = {}) => {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      if (value.length) params.set(key, value.join(','));
+      return;
+    }
     if (value !== undefined && value !== '') params.set(key, String(value));
   });
   return params.toString();

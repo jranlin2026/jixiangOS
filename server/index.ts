@@ -73,6 +73,7 @@ import {
 } from './services/orderApprovalEffectsService';
 import { createOrderCommandService } from './services/orderCommandService';
 import { createOrderQueryService } from './services/orderQueryService';
+import { createBusinessCockpitService } from './services/businessCockpitService';
 import { createBusinessExportService } from './services/businessExportService';
 import { createDeliveryCommandService } from './services/deliveryCommandService';
 import { createDeliveryQueryService } from './services/deliveryQueryService';
@@ -105,6 +106,7 @@ import { createCustomerMergeService } from './services/customerMergeService';
 import { createPrismaCustomerDataExchangeService } from './services/customerDataExchangeAdapter';
 import { createCustomerDataExchangeRouter } from './routes/customerDataExchangeRoutes';
 import { createBusinessImportRouter } from './routes/businessImportRoutes';
+import { createBusinessCockpitRouter } from './routes/businessCockpitRoutes';
 import { createPrismaBusinessImportService } from './services/businessImportAdapter';
 import { createBusinessImportWorker } from './services/businessImportExecution';
 import { createPrismaBusinessImportRowExecutor } from './services/businessImportExecutionAdapter';
@@ -132,7 +134,7 @@ import {
 } from './services/roleMigrationService';
 import { mapPrismaRole, mapPrismaUser } from './db/prismaMappers';
 import { mergeRoleWithDefaultAccess } from '../src/shared/utils/organizationConfig';
-import { PERMISSION_KEYS, hasPermission } from '../src/shared/utils/permissions';
+import { PERMISSION_KEYS, hasPermission, isSuperAdmin } from '../src/shared/utils/permissions';
 import { STORAGE_KEYS } from '../src/shared/utils/constants';
 import type { OrderApplicationFilters } from '../src/types/order';
 import type { RecoveryOrderFilters } from '../src/types/recoveryOrder';
@@ -232,6 +234,7 @@ const orderCommandService = createOrderCommandService(prisma, {
   previewCommissions: buildOrderCommissionRecords,
 });
 const orderQueryService = createOrderQueryService(prisma);
+const businessCockpitService = createBusinessCockpitService(prisma);
 const businessExportService = createBusinessExportService(prisma as any);
 const deliveryCommandService = createDeliveryCommandService(prisma, { assigner: deliveryAssignmentService });
 const deliveryQueryService = createDeliveryQueryService(prisma);
@@ -270,6 +273,7 @@ const knowledgeService = createKnowledgeService({
   searchProvider: createKeywordKnowledgeSearchProvider(),
 });
 const requireOrganizationReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS);
+const requireDashboardAccess = createRequireAuth(authService, PERMISSION_KEYS.DASHBOARD);
 const requireOrganizationWriteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS, 'write');
 const requireOrganizationDeleteAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_EMPLOYEES_DEPARTMENTS, 'delete');
 const requireRoleReadAccess = createRequireAuth(authService, PERMISSION_KEYS.SETTINGS_ROLES);
@@ -520,6 +524,10 @@ app.get('/api/ready', async (_req, res) => {
   const payload = await healthPayload();
   res.status(payload.database ? 200 : 503).json(payload);
 });
+app.use('/api/dashboard', createBusinessCockpitRouter({
+  service: businessCockpitService,
+  requireAuth: requireDashboardAccess,
+}));
 app.use('/api/customer-tags', createCustomerTagMigrationRouter({
   service: customerTagMigrationService,
   requireAuth: requireDataMaintenanceWriteAccess,
@@ -1427,16 +1435,18 @@ app.post('/api/commission-payout-records/:id/reverse', requireFinancePayoutWrite
 app.get('/api/finance-transactions', requireFinanceFlowReadAccess, async (req: AuthenticatedRequest, res) => {
   const result = await financeTransactionService.list({
     search: queryParam(req.query.search), type: queryParam(req.query.type),
+    orderIds: queryParams(req.query.orderIds).flatMap((value) => value.split(',')).map((value) => value.trim()).filter(Boolean).slice(0, 100),
     direction: queryParam(req.query.direction) as any, status: queryParam(req.query.status),
     startDate: queryParam(req.query.startDate), endDate: queryParam(req.query.endDate),
     page: Number(queryParam(req.query.page) || 1), pageSize: Number(queryParam(req.query.pageSize) || 10),
-  });
+  }, { includeOrderDetails: isSuperAdmin(req.currentUser) });
   res.json(result);
 });
 
 app.get('/api/finance-transactions/export', requireFinanceFlowExportAccess, async (req: AuthenticatedRequest, res) => {
   const result = await financeTransactionService.exportCsv({
     search: queryParam(req.query.search), type: queryParam(req.query.type), direction: queryParam(req.query.direction) as any,
+    orderIds: queryParams(req.query.orderIds).flatMap((value) => value.split(',')).map((value) => value.trim()).filter(Boolean).slice(0, 100),
     startDate: queryParam(req.query.startDate), endDate: queryParam(req.query.endDate),
   });
   res.json(result);

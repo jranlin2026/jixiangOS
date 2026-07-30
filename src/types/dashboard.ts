@@ -71,16 +71,84 @@ export interface CockpitRiskItem {
   count: number;
   path: string;
   tone: HomeTaskItem['tone'];
+  amount?: number;
+  description?: string;
+}
+
+export interface CockpitSummary {
+  formalReceiptAmount: number;
+  recoveryAmount: number;
+  operatingAmount: number;
+  formalOrderCount: number;
+  recoveryOrderCount: number;
+  newLeadCount: number;
+  newCustomerCount: number;
+}
+
+export interface CockpitTrendPoint {
+  date: string;
+  label: string;
+  formalReceiptAmount: number;
+  recoveryAmount: number;
+}
+
+export interface CockpitPerformanceRankingItem {
+  userId: string;
+  name: string;
+  department?: string;
+  amount: number;
+  count: number;
+  averageAmount: number;
+  assistCount?: number;
+  identityStatus?: 'resolved' | 'legacy' | 'unresolved';
+}
+
+export interface CockpitCustomerHealth {
+  newLeadCount: number;
+  followedLeadCount: number;
+  leadFollowRate: number;
+  newCustomerCount: number;
+  followingCustomerCount: number;
+  followedCustomerCount: number;
+  overdueTodoCount: number;
+}
+
+export interface CockpitOrderHealth {
+  formalOrderCount: number;
+  recoveryOrderCount: number;
+  pendingReviewCount: number;
+  returnedApplicationCount: number;
+  refundingOrderCount: number;
+  refundedOrderCount: number;
+  refundAmount: number;
+}
+
+export interface CockpitFinanceHealth {
+  formalGrossReceiptAmount: number;
+  formalAdjustmentAmount: number;
+  formalNetReceiptAmount: number;
+  reconciliationIssueCount: number;
+  reconciliationAmountIssueCount: number;
+  reconciliationBusinessTimeIssueCount: number;
+  reconciliationDifferenceAmount: number;
+  reconciliationOrderIds: string[];
+  reconciliationDetailsRestricted: boolean;
+  pendingHandlingCommissionCount: number;
+  pendingConfirmCommissionAmount: number;
+  pendingPayCommissionAmount: number;
+  paidCommissionAmount: number;
 }
 
 export interface BusinessCockpitData {
   rangeLabel: string;
   scopeLabel: string;
-  kpis: CockpitKpi[];
-  funnel: CockpitFunnelItem[];
-  salesRanking: CockpitRankingItem[];
-  contributorRanking: CockpitRankingItem[];
-  sourceConversion: CockpitRankingItem[];
-  productRevenue: CockpitRankingItem[];
+  updatedAt: Timestamp;
+  summary: CockpitSummary;
+  trend: CockpitTrendPoint[];
+  salesRanking: CockpitPerformanceRankingItem[];
+  recoveryRanking: CockpitPerformanceRankingItem[];
+  customerHealth: CockpitCustomerHealth;
+  orderHealth: CockpitOrderHealth;
+  financeHealth: CockpitFinanceHealth;
   riskTasks: CockpitRiskItem[];
 }

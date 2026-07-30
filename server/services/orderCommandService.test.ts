@@ -152,7 +152,11 @@ function key(domain: string, recordId: string): string {
 }
 
 function clone<T>(value: T): T {
-  return structuredClone(value);
+  try {
+    return structuredClone(value);
+  } catch {
+    return structuredClone(JSON.parse(JSON.stringify(value)));
+  }
 }
 
 class FakePrisma {
@@ -377,6 +381,39 @@ class FakePrisma {
   }
 }
 
+function seedOrderPaymentFlow(prisma: FakePrisma, sourceOrder: Order, paymentId: string, amount: number, paidAt: string) {
+  const sourceEventId = `${sourceOrder.id}:${paymentId}`;
+  const recordId = `order_payment:${sourceEventId}`;
+  prisma.rows.set(key(STORAGE_KEYS.FINANCE_TRANSACTIONS, recordId), {
+    id: `${STORAGE_KEYS.FINANCE_TRANSACTIONS}:${recordId}`,
+    domain: STORAGE_KEYS.FINANCE_TRANSACTIONS,
+    recordId,
+    title: `FT-${paymentId}`,
+    status: '已确认',
+    orderId: sourceOrder.id,
+    amount,
+    eventAt: new Date(paidAt),
+    data: {
+      id: recordId,
+      transactionNo: `FT-${paymentId}`,
+      type: '订单实收',
+      direction: 'income',
+      sourceType: 'order_payment',
+      sourceDomain: STORAGE_KEYS.ORDERS,
+      sourceId: sourceOrder.id,
+      sourceEventId,
+      sourceModule: '订单',
+      amount,
+      status: '已确认',
+      relatedBusiness: sourceOrder.orderNo,
+      orderId: sourceOrder.id,
+      orderNo: sourceOrder.orderNo,
+      occurredAt: paidAt,
+      createdAt: paidAt,
+    },
+  });
+}
+
 {
   const prisma = new FakePrisma({ commissionStatus: '待确认' });
   const correctedPayment = {
@@ -402,6 +439,151 @@ class FakePrisma {
   assert.equal(result.data?.payments[0].paymentOrderNo, 'PAY-CORRECTED');
   assert.equal(result.data?.changeHistory?.[0].action, 'correct');
   assert.match(result.data?.changeHistory?.[0].summary || '', /录入金额错误/);
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '待确认' });
+  const service = createOrderCommandService(prisma as any, {
+    now: () => new Date(NOW),
+    rebuildPendingCommissions: async () => undefined,
+  });
+  const blankId = await service.correct('order-1', {
+    reason: '验证空白付款标识',
+    data: {
+      actualAmount: 100,
+      payments: [{ id: '   ', amount: 100, paymentMethod: '对公转账', paidAt: NOW }],
+    },
+  }, superAdmin);
+  const result = await service.correct('order-1', {
+    reason: '验证重复付款标识',
+    data: {
+      actualAmount: 100,
+      payments: [
+        { id: 'duplicate-payment', amount: 60, paymentMethod: '对公转账', paidAt: NOW },
+        { id: 'duplicate-payment', amount: 40, paymentMethod: '对公转账', paidAt: NOW },
+      ],
+    },
+  }, superAdmin);
+
+  assert.equal(blankId.code, 400);
+  assert.match(blankId.message, /缺少唯一标识/);
+  assert.equal(result.code, 400);
+  assert.match(result.message, /付款标识重复/);
+  assert.equal(prisma.orderData().actualAmount, 899, '重复付款标识被拒绝时不得写入半成品订单');
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '待确认' });
+  const result = await createOrderCommandService(prisma as any, {
+    now: () => new Date(NOW),
+    rebuildPendingCommissions: async () => undefined,
+  }).correct('order-1', {
+    reason: '验证对象付款标识',
+    data: {
+      actualAmount: 100,
+      payments: [{ id: {} as any, amount: 100, paymentMethod: '对公转账', paidAt: NOW }],
+    },
+  }, superAdmin);
+
+  assert.equal(result.code, 400);
+  assert.equal(prisma.orderData().actualAmount, 899);
+}
+
+{
+  const existingPayment = { id: 'stable-payment', amount: 100, paymentMethod: '对公转账' as const, paidAt: NOW };
+  const cases = [
+    {
+      label: '替换付款ID',
+      data: { actualAmount: 100, payments: [{ ...existingPayment, id: 'replacement-payment' }] },
+      message: /不能删除或更换标识/,
+    },
+    {
+      label: '调高旧付款',
+      data: { actualAmount: 120, payments: [{ ...existingPayment, amount: 120 }] },
+      message: /不能直接调高/,
+    },
+    {
+      label: '修改旧付款时间',
+      data: { actualAmount: 100, payments: [{ ...existingPayment, paidAt: '2026-07-31T00:00:00.000Z' }] },
+      message: /付款时间属于不可变资金记录/,
+    },
+  ];
+  for (const testCase of cases) {
+    const sourceOrder = order({ actualAmount: 100, amount: 100, payments: [existingPayment] });
+    const prisma = new FakePrisma({ sourceOrder, commissionStatus: '待确认' });
+    seedOrderPaymentFlow(prisma, sourceOrder, existingPayment.id, existingPayment.amount, existingPayment.paidAt);
+    const result = await createOrderCommandService(prisma as any, {
+      now: () => new Date(NOW),
+      rebuildPendingCommissions: async () => undefined,
+    }).correct(sourceOrder.id, { reason: testCase.label, data: testCase.data }, superAdmin);
+    assert.equal(result.code, 409, testCase.label);
+    assert.match(result.message, testCase.message);
+  }
+}
+
+{
+  const sourceOrder = order({
+    actualAmount: 100,
+    amount: 100,
+    payments: [{ id: 'payment-1', amount: 100, paymentMethod: '对公转账', paidAt: NOW }],
+  });
+  const prisma = new FakePrisma({ sourceOrder, commissionStatus: '待确认' });
+  seedOrderPaymentFlow(prisma, sourceOrder, 'payment-1', 100, NOW);
+  let correctionNow = new Date(NOW);
+  const service = createOrderCommandService(prisma as any, {
+    now: () => correctionNow,
+    rebuildPendingCommissions: async () => undefined,
+  });
+  const increased = await service.correct(sourceOrder.id, {
+    reason: '新增一笔收款',
+    data: {
+      actualAmount: 120,
+      payments: [
+        sourceOrder.payments![0],
+        { id: 'payment-2', amount: 20, paymentMethod: '对公转账', paidAt: NOW },
+      ],
+    },
+  }, superAdmin);
+  assert.equal(increased.code, 0, increased.message);
+  assert.equal(prisma.rows.has(key(STORAGE_KEYS.FINANCE_TRANSACTIONS, 'order_payment:order-1:payment-2')), true,
+    '新增付款必须与订单更正在同一事务写入原实收流水');
+
+  correctionNow = new Date(new Date(NOW).getTime() + 1_000);
+  const decreased = await service.correct(sourceOrder.id, {
+    reason: '下调原付款',
+    data: {
+      actualAmount: 100,
+      payments: [
+        { ...sourceOrder.payments![0], amount: 80 },
+        { id: 'payment-2', amount: 20, paymentMethod: '对公转账', paidAt: NOW },
+      ],
+    },
+  }, superAdmin);
+  assert.equal(decreased.code, 0, decreased.message);
+  assert.equal(prisma.rows.has(key(
+    STORAGE_KEYS.FINANCE_TRANSACTIONS,
+    'order_payment_adjustment:order-1:payment-1:80',
+  )), true, '旧付款下调必须与订单更正在同一事务写入规范冲正');
+}
+
+{
+  const sourceOrder = order({
+    actualAmount: 100,
+    amount: 100,
+    payments: [{ id: 'missing-original', amount: 100, paymentMethod: '对公转账', paidAt: NOW }],
+  });
+  const prisma = new FakePrisma({ sourceOrder, commissionStatus: '待确认' });
+  const result = await createOrderCommandService(prisma as any, {
+    now: () => new Date(NOW),
+    rebuildPendingCommissions: async () => undefined,
+  }).correct(sourceOrder.id, {
+    reason: '下调缺失原流水的付款',
+    data: { actualAmount: 80, payments: [{ ...sourceOrder.payments![0], amount: 80 }] },
+  }, superAdmin);
+
+  assert.equal(result.code, 409, '缺失原流水时订单更正必须返回可处理冲突，不能抛500');
+  assert.match(result.message, /原实收流水不存在/);
+  assert.equal(prisma.orderData().actualAmount, 100, '资金链修复失败时订单更正必须整单回滚');
 }
 
 {
@@ -783,7 +965,10 @@ class FakePrisma {
     reason: '更正未发放订单业绩',
     data: {
       actualAmount: 15_000,
-      payments: [{ id: 'tier-source-payment-next', amount: 15_000, paymentMethod: '对公转账' as const, paidAt: NOW }],
+      payments: [
+        { id: 'tier-source-payment', amount: 5_000, paymentMethod: '对公转账' as const, paidAt: NOW },
+        { id: 'tier-source-payment-next', amount: 10_000, paymentMethod: '对公转账' as const, paidAt: NOW },
+      ],
     },
   };
   const missingPreview = await service.correct(sourceOrder.id, correctionInput, superAdmin);
@@ -1518,6 +1703,25 @@ class FakePrisma {
   assert.equal(result.code, 0, result.message);
   assert.equal(result.data?.payments[0].paymentOrderNo, 'PAY-LEGACY');
   assert.equal(result.data?.proofStatus, '已上传');
+  assert.equal(prisma.rows.has(key(
+    STORAGE_KEYS.FINANCE_TRANSACTIONS,
+    'order_payment:order-1:legacy-payment-1',
+  )), true, '历史订单补首笔付款时必须同事务写入原实收流水');
+}
+
+{
+  const prisma = new FakePrisma({ sourceOrder: order({ payments: [], proofStatus: '待补充' }) });
+  const result = await createOrderCommandService(prisma as any, { now: () => new Date(NOW) }).update('order-1', {
+    payments: [{
+      id: {} as any,
+      amount: 899,
+      paymentMethod: '对公转账',
+      paidAt: '2026-07-12T10:00:00.000Z',
+    }],
+  }, sales);
+
+  assert.equal(result.code, 409, '普通资料编辑也不得把对象付款ID持久化');
+  assert.equal(prisma.orderData().payments?.length, 0);
 }
 
 {

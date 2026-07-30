@@ -7,7 +7,6 @@ import type { Commission } from '../types/commission';
 import type { Role } from '../types/role';
 import type {
   BusinessCockpitData,
-  CockpitRankingItem,
   DashboardDateRange,
   HomeActivityItem,
   HomeQuickAction,
@@ -32,7 +31,7 @@ import {
 } from '../shared/utils/dataVisibility';
 import { hasPermission, PERMISSION_KEYS, resolveUserPermissions } from '../shared/utils/permissions';
 import { formatCurrency } from '../shared/utils/formatters';
-import { shouldUseBackendApi } from './backendClient';
+import { backendRequest, shouldUseBackendApi } from './backendClient';
 import { customerTodoApi } from './customerTodoApi';
 
 function ensureInit(): void {
@@ -41,45 +40,6 @@ function ensureInit(): void {
 
 function readArray<T>(key: string): T[] {
   return getStorageData<T[]>(key) || [];
-}
-
-function dayStart(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
-function toIso(date: Date): string {
-  return date.toISOString();
-}
-
-function getRange(range?: DashboardDateRange): { start: string; end: string; label: string } {
-  const now = new Date();
-  const preset = range?.preset || 'month';
-  if (preset === 'today') {
-    const start = dayStart(now);
-    return { start: toIso(start), end: toIso(now), label: '今日' };
-  }
-  if (preset === 'week') {
-    const start = dayStart(new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000));
-    return { start: toIso(start), end: toIso(now), label: '近7天' };
-  }
-  if (preset === 'custom' && range?.startDate && range?.endDate) {
-    return {
-      start: `${range.startDate}T00:00:00.000Z`,
-      end: `${range.endDate}T23:59:59.999Z`,
-      label: `${range.startDate} 至 ${range.endDate}`,
-    };
-  }
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  return { start: toIso(start), end: toIso(now), label: '本月' };
-}
-
-function inRange(value: string | undefined, start: string, end: string): boolean {
-  if (!value) return false;
-  return value >= start && value <= end;
-}
-
-function orderPaymentDate(order: Order): string {
-  return order.payments?.[0]?.paidAt || order.createdAt;
 }
 
 function scopeLabel(): string {
@@ -268,66 +228,14 @@ async function fetchHomeWorkbench(): Promise<ApiResponse<HomeWorkbenchData>> {
   });
 }
 
-function rankByName(items: Array<{ name?: string; amount?: number }>): CockpitRankingItem[] {
-  const map = new Map<string, CockpitRankingItem>();
-  items.forEach((item) => {
-    const name = item.name || '未填写';
-    const current = map.get(name) || { name, count: 0, amount: 0 };
-    current.count += 1;
-    current.amount += item.amount || 0;
-    map.set(name, current);
-  });
-  return Array.from(map.values()).sort((a, b) => b.amount - a.amount || b.count - a.count).slice(0, 5);
-}
-
 async function fetchBusinessCockpit(range?: DashboardDateRange): Promise<ApiResponse<BusinessCockpitData>> {
-  ensureInit();
-  await delay(120);
-  const { start, end, label } = getRange(range);
-  const leads = filterVisibleLeads(readArray<Lead>(STORAGE_KEYS.LEADS)).filter((item) => inRange(item.createdAt, start, end));
-  const customers = filterVisibleCustomers(readArray<Customer>(STORAGE_KEYS.CUSTOMERS)).filter((item) => inRange(item.createdAt, start, end));
-  const applications = currentUserHasPermission(PERMISSION_KEYS.ORDER_REVIEW_LIST)
-    ? filterApplications(readArray<OrderApplication>(STORAGE_KEYS.ORDER_APPLICATIONS)).filter((item) => inRange(item.submittedAt, start, end))
-    : [];
-  const orders = filterVisibleOrders(readArray<Order>(STORAGE_KEYS.ORDERS)).filter((item) => inRange(orderPaymentDate(item), start, end));
-  const recoveryOrders = filterRecoveryOrders(readArray<RecoveryOrder>(STORAGE_KEYS.RECOVERY_ORDERS)).filter((item) => inRange(item.createdAt, start, end));
-  const commissions = filterCommissions(readArray<Commission>(STORAGE_KEYS.COMMISSIONS)).filter((item) => inRange(item.paymentDate || item.createdAt, start, end));
-
-  const orderAmount = orders.reduce((sum, item) => sum + (item.actualAmount || item.amount || 0), 0);
-  const recoveryAmount = recoveryOrders.reduce((sum, item) => sum + (item.recoveryAmount || 0), 0);
-  const reviewedOrders = applications.filter((item) => item.status === '已入库').length;
-  const pendingApplications = applications.filter((item) => item.status === '待财务审核').length;
-  const pendingCommissions = commissions.filter((item) => item.status === '待确认' || item.owner === '待分配' || !item.ownerId).length;
-  const paidCommissions = commissions.filter((item) => item.status === '已发放').length;
-
-  return createSuccessResponse({
-    rangeLabel: label,
-    scopeLabel: scopeLabel(),
-    kpis: [
-      { id: 'amount', label: '成交金额', value: formatCurrency(orderAmount), subValue: `${orders.length} 笔正式订单`, tone: 'primary' },
-      { id: 'lead', label: '新增线索', value: String(leads.length), subValue: `${customers.length} 个新增客户`, tone: 'info' },
-      { id: 'recovery', label: '挽回金额', value: formatCurrency(recoveryAmount), subValue: `${recoveryOrders.length} 笔售后挽回`, tone: 'success' },
-      { id: 'review', label: '待审核订单', value: String(pendingApplications), subValue: '订单审核台待处理', tone: 'warning' },
-      { id: 'commission', label: '待确认分账', value: String(pendingCommissions), subValue: `${paidCommissions} 条已发放`, tone: 'success' },
-    ],
-    funnel: [
-      { id: 'lead', label: '线索入库', count: leads.length },
-      { id: 'customer', label: '客户沉淀', count: customers.length },
-      { id: 'application', label: '订单申请', count: applications.length },
-      { id: 'order', label: '财务入库', count: reviewedOrders || orders.length, amount: orderAmount },
-      { id: 'commission', label: '分账确认', count: commissions.filter((item) => item.status === '待发放' || item.status === '已发放').length },
-    ],
-    salesRanking: rankByName(orders.map((item) => ({ name: item.salesName || item.owner, amount: item.actualAmount || item.amount }))),
-    contributorRanking: rankByName(orders.map((item) => ({ name: item.leadContributorName, amount: item.actualAmount || item.amount }))).filter((item) => item.name !== '未填写'),
-    sourceConversion: rankByName(orders.map((item) => ({ name: item.leadSource || item.sourceType, amount: item.actualAmount || item.amount }))),
-    productRevenue: rankByName(orders.map((item) => ({ name: item.productLevel, amount: item.actualAmount || item.amount }))),
-    riskTasks: [
-      { id: 'review', title: '待审核订单', count: pendingApplications, path: `${ROUTES.ORDERS}?tab=review`, tone: 'warning' },
-      { id: 'commission', title: '待处理分账', count: pendingCommissions, path: `${ROUTES.FINANCE}?tab=settlement`, tone: 'info' },
-      { id: 'recovery', title: '售后挽回待处理', count: recoveryOrders.filter((item) => item.status === '待审核' || item.status === '待分账').length, path: ROUTES.AFTER_SALES, tone: 'warning' },
-      { id: 'returned', title: '退回订单申请', count: applications.filter((item) => item.status === '退回修改').length, path: `${ROUTES.ORDERS}?tab=review`, tone: 'error' },
-    ],
-  });
+  if (!shouldUseBackendApi()) {
+    return createErrorResponse('经营驾驶舱需要连接业务服务器后才能展示可信数据', 503);
+  }
+  const query = new URLSearchParams({ preset: range?.preset || 'month' });
+  if (range?.startDate) query.set('startDate', range.startDate);
+  if (range?.endDate) query.set('endDate', range.endDate);
+  return backendRequest<BusinessCockpitData>(`/dashboard/business-cockpit?${query.toString()}`);
 }
 
 export const dashboardApi = {

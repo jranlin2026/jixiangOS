@@ -34,6 +34,7 @@ import {
 import { buildCommissionCorrectionImpact, findOverlappingFinancialCorrection } from './commissionCorrectionImpactService';
 import { persistCommissionCorrection } from './commissionCorrectionService';
 import { lockCommissionLedger } from './commissionLedgerLock';
+import { createFinanceTransactionService } from './financeTransactionService';
 
 type OrderCommandPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$transaction'>;
 
@@ -297,14 +298,16 @@ function assertPaymentMetadataOnly(order: Order, patch: Partial<Order>): void {
   const currentPayments = order.payments || [];
   if (!currentPayments.length && patch.payments.length === 1) {
     const payment = patch.payments[0];
+    const paymentId = typeof payment?.id === 'string' ? payment.id.trim() : '';
     if (
-      !payment?.id
+      !paymentId
       || !sameValue(payment.amount, order.actualAmount)
       || !sameValue(payment.paymentMethod, order.paymentMethod)
       || !sameValue(payment.paidAt, order.createdAt)
     ) {
       throw new OrderCommandError(409, '历史订单补充首笔付款资料时，金额、方式和时间必须保持订单原值');
     }
+    patch.payments = [{ ...payment, id: paymentId }];
     return;
   }
   if (patch.payments.length !== currentPayments.length) {
@@ -628,6 +631,7 @@ async function buildCorrectedOrder(
     throw new OrderCommandError(400, '实付金额必须大于0');
   }
   next.actualAmount = Math.round(Number(next.actualAmount) * 100) / 100;
+  if (next.actualAmount <= 0) throw new OrderCommandError(400, '实付金额必须至少为0.01元');
   const paymentsChanged = Object.prototype.hasOwnProperty.call(patch, 'payments');
   const amountChanged = !sameValue(order.actualAmount, next.actualAmount);
   if (amountChanged) {
@@ -639,23 +643,58 @@ async function buildCorrectedOrder(
     next.dealScene = dealSceneFromOrderType(next.orderType);
   }
   if (paymentsChanged || amountChanged) {
+    if (order.payments !== undefined && (
+      !Array.isArray(order.payments)
+      || order.payments.some((payment) => !payment || typeof payment !== 'object' || Array.isArray(payment))
+    )) {
+      throw new OrderCommandError(409, '历史付款数据异常，请先修复付款记录');
+    }
     if (!Array.isArray(next.payments) || !next.payments.length) {
       throw new OrderCommandError(400, '更正实付金额时必须提供付款记录');
     }
+    const paymentIds = new Set<string>();
     next.payments = next.payments.map((payment, index) => {
       const amount = Math.round(Number(payment?.amount) * 100) / 100;
-      if (!payment?.id || !Number.isFinite(amount) || amount <= 0) {
+      if (typeof payment?.id !== 'string' || !Number.isFinite(amount) || amount <= 0) {
         throw new OrderCommandError(400, `第 ${index + 1} 笔付款数据无效`);
       }
-      if (!payment.paidAt || Number.isNaN(new Date(payment.paidAt).getTime())) {
+      const paymentId = payment.id.trim();
+      if (!paymentId) {
+        throw new OrderCommandError(400, `第 ${index + 1} 笔付款缺少唯一标识`);
+      }
+      if (paymentIds.has(paymentId)) {
+        throw new OrderCommandError(400, `第 ${index + 1} 笔付款标识重复`);
+      }
+      paymentIds.add(paymentId);
+      if (typeof payment.paidAt !== 'string'
+        || !payment.paidAt.trim()
+        || Number.isNaN(new Date(payment.paidAt.trim()).getTime())) {
         throw new OrderCommandError(400, `第 ${index + 1} 笔付款时间无效`);
       }
       return {
         ...payment,
+        id: paymentId,
         amount,
+        paidAt: payment.paidAt.trim(),
         paymentMethod: next.paymentMethod,
       };
     });
+    const correctedPaymentsById = new Map(next.payments.map((payment) => [payment.id, payment]));
+    for (const existingPayment of Array.isArray(order.payments) ? order.payments : []) {
+      if (typeof existingPayment.id !== 'string' || !existingPayment.id.trim() || existingPayment.id !== existingPayment.id.trim()) {
+        throw new OrderCommandError(409, '历史付款记录标识异常，请先修复付款数据');
+      }
+      const correctedPayment = correctedPaymentsById.get(existingPayment.id);
+      if (!correctedPayment) {
+        throw new OrderCommandError(409, '已有付款记录不能删除或更换标识；新增收款请保留原付款并新增一笔付款记录');
+      }
+      if (Math.round(correctedPayment.amount * 100) > Math.round(Number(existingPayment.amount) * 100)) {
+        throw new OrderCommandError(409, '已有付款金额不能直接调高；请保留原金额并将增加部分新增为一笔付款记录');
+      }
+      if (correctedPayment.paidAt !== existingPayment.paidAt) {
+        throw new OrderCommandError(409, '已有付款时间属于不可变资金记录，不能直接修改；请通过财务异常处理流程更正');
+      }
+    }
     const paymentTotalInCents = next.payments.reduce((sum, payment) => sum + Math.round(payment.amount * 100), 0);
     if (paymentTotalInCents !== Math.round(next.actualAmount * 100)) {
       throw new OrderCommandError(400, '分笔付款合计必须等于实付金额');
@@ -1425,6 +1464,7 @@ export function createOrderCommandService(
   options: OrderCommandServiceOptions = {},
 ) {
   const now = options.now || (() => new Date());
+  const financeTransactions = createFinanceTransactionService(prisma as unknown as Parameters<typeof createFinanceTransactionService>[0]);
 
   return {
     async precheckCorrection(
@@ -1648,6 +1688,15 @@ export function createOrderCommandService(
                 data: jsonValue(saved),
               },
             });
+            if ((!Array.isArray(order.payments) || order.payments.length === 0)
+              && Array.isArray(saved.payments)
+              && saved.payments.length > 0) {
+              try {
+                await financeTransactions.recordOrderPayments(transaction, saved, actor, changedAt);
+              } catch (error) {
+                throw new OrderCommandError(409, String((error as Error)?.message || '首笔付款资金流水写入失败'));
+              }
+            }
             return saved;
           }, {
             isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
@@ -1871,6 +1920,38 @@ export function createOrderCommandService(
               data: jsonValue(next),
             },
           });
+          const previousPayments = Array.isArray(order.payments) ? order.payments : [];
+          const correctedPayments = Array.isArray(next.payments) ? next.payments : [];
+          const previousPaymentIds = new Set(previousPayments.map((payment) => payment.id));
+          const newPayments = correctedPayments.filter((payment) => !previousPaymentIds.has(payment.id));
+          const previousPaymentsById = new Map(previousPayments.map((payment) => [payment.id, payment]));
+          const decreasedPayments = correctedPayments.filter((payment) => {
+            const previous = previousPaymentsById.get(payment.id);
+            return previous && Math.round(payment.amount * 100) < Math.round(Number(previous.amount) * 100);
+          });
+          try {
+            if (newPayments.length) {
+              await financeTransactions.recordOrderPayments(
+                transaction,
+                { ...next, payments: newPayments },
+                actor,
+                changedAt,
+              );
+            }
+            for (const [index, payment] of decreasedPayments.entries()) {
+              await financeTransactions.recordOrderPaymentAdjustment(transaction, {
+                order: next,
+                paymentId: payment.id,
+                actor,
+                reason: `订单更正：${reason}`,
+                occurredAt: changedAt,
+                createdAt: changedAt,
+                deferFinalReconciliation: index < decreasedPayments.length - 1,
+              });
+            }
+          } catch (error) {
+            throw new OrderCommandError(409, String((error as Error)?.message || '付款资金链更正失败，请先处理财务异常'));
+          }
           if (order.customerId !== next.customerId) {
             await recalculateCustomerProjection(transaction, order.customerId, changedAt);
           }

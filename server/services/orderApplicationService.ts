@@ -137,18 +137,33 @@ function validateOrderPayments(paymentsInput: unknown, paidAmount: number): asse
     throw new OrderApprovalError(400, '请至少填写一笔付款记录');
   }
   let paymentTotalInCents = 0;
+  const paymentIds = new Set<string>();
   paymentsInput.forEach((payment, index) => {
     if (!payment || typeof payment !== 'object' || Array.isArray(payment)) {
       throw new OrderApprovalError(400, `第 ${index + 1} 笔付款记录无效`);
     }
+    const rawPaymentId = (payment as { id?: unknown }).id;
+    if (typeof rawPaymentId !== 'string') {
+      throw new OrderApprovalError(400, `第 ${index + 1} 笔付款缺少唯一标识`);
+    }
+    const paymentId = rawPaymentId.trim();
+    if (!paymentId) throw new OrderApprovalError(400, `第 ${index + 1} 笔付款缺少唯一标识`);
+    if (paymentIds.has(paymentId)) throw new OrderApprovalError(400, `第 ${index + 1} 笔付款标识重复`);
+    paymentIds.add(paymentId);
+    (payment as { id: string }).id = paymentId;
     const amount = finiteAmount((payment as { amount?: unknown }).amount);
-    if (amount === null || amount <= 0) {
+    if (amount === null || Math.round(amount * 100) <= 0) {
       throw new OrderApprovalError(400, `第 ${index + 1} 笔付款金额必须大于0`);
     }
-    const paidAt = String((payment as { paidAt?: unknown }).paidAt || '').trim();
+    const rawPaidAt = (payment as { paidAt?: unknown }).paidAt;
+    if (typeof rawPaidAt !== 'string') {
+      throw new OrderApprovalError(400, `第 ${index + 1} 笔付款时间无效`);
+    }
+    const paidAt = rawPaidAt.trim();
     if (!paidAt || Number.isNaN(Date.parse(paidAt))) {
       throw new OrderApprovalError(400, `第 ${index + 1} 笔付款时间无效`);
     }
+    (payment as { paidAt: string }).paidAt = paidAt;
     paymentTotalInCents += Math.round(amount * 100);
   });
   const paidAmountInCents = Math.round(paidAmount * 100);
@@ -386,7 +401,7 @@ async function canonicalizeOrderApplicationInput(
     throw new OrderApprovalError(400, '订单金额必须大于0');
   }
   const paidAmount = finiteAmount(input.actualAmount ?? input.amount);
-  if (paidAmount === null || paidAmount <= 0) throw new OrderApprovalError(400, '订单实付金额必须大于0');
+  if (paidAmount === null || Math.round(paidAmount * 100) <= 0) throw new OrderApprovalError(400, '订单实付金额必须大于0');
   validateOrderPayments(input.payments, paidAmount);
   input.payments.forEach((payment) => validateAttachmentList(payment.attachments, {
     label: '付款截图', max: 1, category: 'order-payment-proof',
@@ -539,7 +554,7 @@ async function validateStoredApplicationSnapshot(
   }
   const listedAmount = finiteAmount(application.orderData.amount);
   const paidAmount = finiteAmount(application.orderData.actualAmount);
-  if (listedAmount === null || listedAmount <= 0 || paidAmount === null || paidAmount <= 0) {
+  if (listedAmount === null || listedAmount <= 0 || paidAmount === null || Math.round(paidAmount * 100) <= 0) {
     throw new OrderApprovalError(409, '待审申请金额无效，请退回销售处理');
   }
 }

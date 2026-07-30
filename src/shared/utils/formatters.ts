@@ -8,7 +8,7 @@ import { zhCN } from 'date-fns/locale';
  * @returns 格式化后的金额字符串
  */
 export const formatCurrency = (amount: number, prefix: string = '¥'): string => {
-  if (amount == null || isNaN(amount)) return `${prefix}0.00`;
+  if (amount == null || !Number.isFinite(Number(amount))) return `${prefix}0.00`;
   const formatted = Math.abs(amount).toLocaleString('zh-CN', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -24,14 +24,21 @@ export const formatCurrency = (amount: number, prefix: string = '¥'): string =>
  * @returns 格式化后的日期字符串
  */
 export const formatDate = (
-  dateStr: string | Date,
+  dateStr: unknown,
   pattern: string = 'yyyy-MM-dd',
 ): string => {
   try {
-    const date = typeof dateStr === 'string' ? parseISO(dateStr) : dateStr;
+    const date = typeof dateStr === 'string'
+      ? parseISO(dateStr)
+      : dateStr instanceof Date
+        ? dateStr
+        : typeof dateStr === 'number' && Number.isFinite(dateStr)
+          ? new Date(dateStr)
+          : null;
+    if (!date || !Number.isFinite(date.getTime())) throw new Error('invalid date');
     return format(date, pattern, { locale: zhCN });
   } catch {
-    return typeof dateStr === 'string' ? dateStr : dateStr.toISOString();
+    return typeof dateStr === 'string' ? dateStr : '-';
   }
 };
 
@@ -40,7 +47,7 @@ export const formatDate = (
  * @param dateStr ISO 8601 日期字符串或 Date 对象
  * @returns 格式化后的日期时间字符串
  */
-export const formatDateTime = (dateStr: string | Date): string => {
+export const formatDateTime = (dateStr: unknown): string => {
   return formatDate(dateStr, 'yyyy-MM-dd HH:mm');
 };
 
@@ -49,12 +56,19 @@ export const formatDateTime = (dateStr: string | Date): string => {
  * @param dateStr ISO 8601 日期字符串或 Date 对象
  * @returns 相对时间字符串（如"3小时前"）
  */
-export const formatRelativeTime = (dateStr: string | Date): string => {
+export const formatRelativeTime = (dateStr: unknown): string => {
   try {
-    const date = typeof dateStr === 'string' ? parseISO(dateStr) : dateStr;
+    const date = typeof dateStr === 'string'
+      ? parseISO(dateStr)
+      : dateStr instanceof Date
+        ? dateStr
+        : typeof dateStr === 'number' && Number.isFinite(dateStr)
+          ? new Date(dateStr)
+          : null;
+    if (!date || !Number.isFinite(date.getTime())) throw new Error('invalid date');
     return formatDistanceToNow(date, { addSuffix: true, locale: zhCN });
   } catch {
-    return typeof dateStr === 'string' ? dateStr : dateStr.toISOString();
+    return typeof dateStr === 'string' ? dateStr : '-';
   }
 };
 

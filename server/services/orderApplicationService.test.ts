@@ -748,6 +748,14 @@ const deferredEffects: OrderApprovalEffectState = {
     productId: 'product-1',
     payments: [{ id: 'payment-1', amount: 899, paymentMethod: '对公转账', paidAt: 'not-a-date' }],
   }, salesApplicant);
+  const duplicatePaymentIds = await service.submit({
+    ...application().orderData,
+    productId: 'product-1',
+    payments: [
+      { id: 'duplicate-payment', amount: 400, paymentMethod: '对公转账', paidAt: NOW },
+      { id: 'duplicate-payment', amount: 499, paymentMethod: '对公转账', paidAt: NOW },
+    ],
+  }, salesApplicant);
 
   assert.equal(emptyPayments.code, 400);
   assert.match(emptyPayments.message, /至少填写一笔付款/);
@@ -755,6 +763,8 @@ const deferredEffects: OrderApprovalEffectState = {
   assert.match(mismatchedPayments.message, /合计必须等于.*实付金额/);
   assert.equal(invalidPaymentDate.code, 400);
   assert.match(invalidPaymentDate.message, /付款时间无效/);
+  assert.equal(duplicatePaymentIds.code, 400);
+  assert.match(duplicatePaymentIds.message, /付款标识重复/);
 }
 
 {
@@ -1058,5 +1068,23 @@ for (const action of [
     .approve(dirtyCustomer.id, reviewer);
 
   assert.equal(result.code, 409, '历史待审申请的客户名称与稳定 ID 不一致时必须拒绝入库');
+  assert.equal(prisma.domainRows(STORAGE_KEYS.ORDERS).length, 0);
+}
+
+{
+  const dirtyPaymentId = application({
+    orderData: {
+      ...application().orderData,
+      payments: [{
+        ...application().orderData.payments[0],
+        id: {} as any,
+      }],
+    },
+  });
+  const prisma = new FakePrisma({ application: dirtyPaymentId });
+  const result = await createOrderApplicationService(prisma as any, { now: () => new Date(NOW) })
+    .approve(dirtyPaymentId.id, reviewer);
+
+  assert.equal(result.code, 409, '历史待审快照含对象型付款 ID 时必须拒绝入库并要求修复');
   assert.equal(prisma.domainRows(STORAGE_KEYS.ORDERS).length, 0);
 }

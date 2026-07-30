@@ -88,6 +88,7 @@ export interface FinanceTransaction {
 
 export interface FinanceTransactionFilters {
   search?: string;
+  orderIds?: ID[];
   type?: string;
   direction?: FinanceTransactionDirection | '';
   status?: string;
@@ -104,10 +105,61 @@ export interface FinanceTransactionSummary {
   transactionCount: number;
 }
 
+export type FinancePaymentEvidenceIssueCode =
+  | 'invalid_payment'
+  | 'missing_original'
+  | 'duplicate_original'
+  | 'invalid_original'
+  | 'invalid_adjustment'
+  | 'amount_mismatch'
+  | 'business_time_mismatch';
+
+export interface FinancePaymentEvidence {
+  paymentId: ID;
+  paymentReference?: string;
+  paidAt: Timestamp;
+  expectedAmount: number;
+  ledgerAmount: number;
+  differenceAmount: number;
+  issues: FinancePaymentEvidenceIssueCode[];
+}
+
+export interface FinanceOrderEvidenceIssue {
+  orderId: ID;
+  orderNo: string;
+  customerName: string;
+  paymentCount: number;
+  expectedPaymentAmount: number;
+  ledgerNetAmount: number;
+  differenceAmount: number;
+  issueCount: number;
+  orderIssues: string[];
+  paymentEvidence: FinancePaymentEvidence[];
+}
+
+export interface FinanceTransactionFilterCoverage {
+  requestedOrderCount: number;
+  matchedOrderIds: ID[];
+  missingOrderCount: number;
+  orderDetailsRestricted: boolean;
+  missingOrders: Array<{
+    orderId: ID;
+    orderNo: string;
+    customerName: string;
+    paymentCount: number;
+    paymentAmount: number;
+  }>;
+  evidenceIssueOrderCount: number;
+  evidenceIssuePaymentCount: number;
+  evidenceDetailsRestricted: boolean;
+  evidenceIssueOrders: FinanceOrderEvidenceIssue[];
+}
+
 export interface FinanceTransactionPage {
   items: FinanceTransaction[];
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
   summary: FinanceTransactionSummary;
+  filterCoverage?: FinanceTransactionFilterCoverage;
 }
 
 /** 财务统计 */

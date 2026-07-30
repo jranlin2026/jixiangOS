@@ -17,12 +17,13 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 }) as typeof fetch;
 
 const { financeApi } = await import('./financeApi');
-const list = await financeApi.fetchFinanceTransactions({ search: '客户A', direction: 'income', page: 1, pageSize: 20 });
+const list = await financeApi.fetchFinanceTransactions({ search: '客户A', orderIds: ['order-1', 'order-2'], direction: 'income', page: 1, pageSize: 20 });
 assert.equal(list.code, 0);
 assert.deepEqual(list.data.summary, { incomeAmount: 0, expenseAmount: 0, netAmount: 0, transactionCount: 0 });
 assert.match(requests[0], /\/finance-transactions\?/);
 assert.match(requests[0], /search=%E5%AE%A2%E6%88%B7A/);
 assert.match(requests[0], /direction=income/);
+assert.match(requests[0], /orderIds=order-1%2Corder-2/);
 
 const detail = await financeApi.fetchFinanceTransactionById('order_payment:order-1:payment-1');
 assert.equal(detail.code, 0);
