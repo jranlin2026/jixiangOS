@@ -21,6 +21,8 @@ assert.match(
 );
 assert.match(pageSource, /编辑售后挽回订单资料/);
 assert.match(pageSource, /售后挽回订单更正/);
+assert.match(pageSource, /已发放售后挽回订单更正/);
+assert.match(pageSource, /原发放单、提成人员、提成金额及实际发放时间永久保留/);
 assert.match(pageSource, /售后挽回订单修改记录/);
 assert.match(pageSource, /前往财务处理/);
 assert.match(pageSource, /\/finance\?tab=recovery-settlement&search=/);

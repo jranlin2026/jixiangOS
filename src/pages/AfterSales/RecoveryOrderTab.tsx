@@ -157,6 +157,8 @@ interface RecoveryOrderTabProps {
   importBatchId?: string;
   refreshSignal?: number;
   onImportBatchClear?: () => void;
+  correctionTargetId?: string;
+  onCorrectionTargetClear?: () => void;
   createSignal?: number;
   viewSettingsSignal?: number;
   exportSignal?: number;
@@ -298,6 +300,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
   importBatchId = '',
   refreshSignal = 0,
   onImportBatchClear,
+  correctionTargetId = '',
+  onCorrectionTargetClear,
   createSignal = 0,
   viewSettingsSignal = 0,
   exportSignal = 0,
@@ -358,6 +362,7 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
   const [exportOpen, setExportOpen] = useState(false);
   const loadRequestIdRef = React.useRef(0);
   const handledCreateSignalRef = React.useRef(createSignal);
+  const handledCorrectionTargetRef = React.useRef('');
   const handledViewSettingsSignalRef = React.useRef(viewSettingsSignal);
   const handledExportSignalRef = React.useRef(exportSignal);
   const reviewSubmittingRef = React.useRef(false);
@@ -621,6 +626,25 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
     setOpen(true);
   };
 
+  useEffect(() => {
+    if (mode !== 'list' || !correctionTargetId || handledCorrectionTargetRef.current === correctionTargetId) return;
+    handledCorrectionTargetRef.current = correctionTargetId;
+    void (async () => {
+      try {
+        const response = await recoveryOrderApi.fetchRecoveryOrderById(correctionTargetId, 'recoveryOrders');
+        if (response.code !== 0 || !response.data) {
+          showErrorDialog(response.message || '找不到需要更正的售后挽回订单');
+          return;
+        }
+        await openEdit(response.data, 'correction');
+      } finally {
+        onCorrectionTargetClear?.();
+      }
+    })();
+    // openEdit intentionally resolves the latest server state for this one-shot URL target.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [correctionTargetId, mode]);
+
   const handleProductChange = (productName: string) => {
     const product = productOptions.find((item) => item.name === productName);
     setForm((prev) => ({
@@ -679,6 +703,9 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
       createdBy: currentUser.id,
       createdByName: currentUser.name,
     };
+    const wasPostPayoutCorrection = formMode === 'correction'
+      && Boolean(editingOrder)
+      && getRecoveryOrderBusinessStatus(editingOrder!) === '已发放';
     const res = editingOrder
       ? formMode === 'metadata'
         ? await recoveryOrderApi.editRecoveryOrderMetadata(editingOrder.id, {
@@ -715,7 +742,9 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
         text: formMode === 'metadata'
           ? '售后挽回订单补充资料已保存，不影响现有审核和分账状态'
           : formMode === 'correction'
-            ? '售后挽回订单已更正，未发放分账已回退为待处理'
+            ? wasPostPayoutCorrection
+              ? '已完成发放后更正，业务资料和月报归属已更新，原发放记录、人员和金额保持不变'
+              : '售后挽回订单已更正，未发放分账已回退为待处理'
             : editingOrder
               ? '已修改售后挽回订单，并重新提交审核'
               : '已提交售后挽回订单，待财务审核通过后进入售后挽回订单列表',
@@ -1060,13 +1089,16 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
   const recoveryErrorCount = validateFullForm
     ? Number(Number(form.recoveryAmount) <= 0) + Number(!form.recoveryAt) + Number(!form.recoveryUserId)
     : 0;
+  const postPayoutCorrection = formMode === 'correction'
+    && Boolean(editingOrder)
+    && getRecoveryOrderBusinessStatus(editingOrder!) === '已发放';
   const recoveryFormTitle = formMode === 'correction'
-    ? '售后挽回订单更正'
+    ? postPayoutCorrection ? '已发放售后挽回订单更正' : '售后挽回订单更正'
     : formMode === 'metadata'
       ? '编辑售后挽回订单资料'
       : editingOrder ? '修改售后挽回订单申请' : '新建售后挽回订单';
   const recoveryFormAction = formMode === 'correction'
-    ? '确认更正并回退分账'
+    ? postPayoutCorrection ? '确认更正并保留原发放' : '确认更正并回退分账'
     : formMode === 'metadata'
       ? '保存资料'
       : editingOrder ? '保存并提交审核' : '提交审核';
@@ -1314,9 +1346,15 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
           ) : null}
           {formMode === 'correction' ? (
             <Stack spacing={1.5} sx={{ mb: 2 }}>
-              <Alert severity="warning">
-                更正会撤回未发放分账，并将该挽回单回退到财务“待处理”。已发放提成不能直接覆盖。
-              </Alert>
+              {postPayoutCorrection ? (
+                <Alert severity="warning">
+                  本次为超级管理员发放后更正。业务单资料、提成业务快照和月报归属会同步更新；原发放单、提成人员、提成金额及实际发放时间永久保留。
+                </Alert>
+              ) : (
+                <Alert severity="warning">
+                  更正会撤回未发放分账，并将该挽回单回退到财务“待处理”。
+                </Alert>
+              )}
               <TextField
                 label="更正原因"
                 value={correctionReason}

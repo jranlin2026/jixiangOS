@@ -631,6 +631,7 @@ function appendRecoveryChange(
 function inspectRecoveryCorrection(
   order: RecoveryOrder,
   commissionRows: Array<{ status?: string | null; data: unknown }>,
+  allowPaidCorrection = false,
 ): RecoveryOrderCorrectionPrecheck {
   const commissions = commissionRows.map((row) => parseObject<Commission>(row.data, '售后挽回分账'));
   const statuses = Array.from(new Set(commissionRows.map((row, index) => (
@@ -652,7 +653,18 @@ function inspectRecoveryCorrection(
   if (!['审核通过', '待分账', '已分账'].includes(order.status)) {
     return blocked('not_approved', '该记录尚未审核通过，请在审核台修改并重新提交');
   }
-  if (statuses.some((status) => ['已发放', '待冲销', '已冲销'].includes(status)) || settlementStatus === '已发放') {
+  const payoutStarted = statuses.some((status) => ['已发放', '待冲销', '已冲销'].includes(status))
+    || settlementStatus === '已发放';
+  if (payoutStarted && allowPaidCorrection && !statuses.some((status) => ['待冲销', '已冲销'].includes(status))) {
+    return {
+      allowed: true,
+      message: '该挽回单提成已发放；超级管理员可更正业务资料，原发放记录、人员和金额保持不变',
+      commissionCount: commissions.length,
+      commissionStatuses: statuses,
+      settlementStatus,
+    };
+  }
+  if (payoutStarted) {
     return blocked('payout_started', '该挽回单已有提成进入发放或冲销流程，请先完成财务冲正');
   }
   if (statuses.some((status) => !['待确认', '待发放', '已撤回'].includes(status))) {
@@ -1119,7 +1131,7 @@ export function createRecoveryOrderCommandService(
         const current = await lockRecoveryOrder(transaction, id);
         if (!recoveryWritable(current, scope)) throw new RecoveryCommandError(403, '无权更正该售后挽回订单');
         const commissionRows = await lockRecoveryCommissionRows(transaction, current);
-        return inspectRecoveryCorrection(current, commissionRows);
+        return inspectRecoveryCorrection(current, commissionRows, isSuperAdmin(actor));
       }, {
         isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
         maxWait: 5_000,
@@ -1211,8 +1223,37 @@ export function createRecoveryOrderCommandService(
         const current = await lockRecoveryOrder(transaction, cleanText(orderId));
         if (!recoveryWritable(current, scope)) throw new RecoveryCommandError(403, '无权更正该售后挽回订单');
         const commissionRows = await lockRecoveryCommissionRows(transaction, current);
-        const eligibility = inspectRecoveryCorrection(current, commissionRows);
+        const eligibility = inspectRecoveryCorrection(current, commissionRows, isSuperAdmin(actor));
         if (!eligibility.allowed) throw new RecoveryCommandError(409, eligibility.message);
+        const commissionSnapshots = commissionRows.map((row) => ({
+          row,
+          commission: parseObject<Commission>(row.data, '售后挽回分账'),
+        }));
+        const postPayoutCorrection = recoverySettlementStatus(current) === '已发放'
+          || commissionSnapshots.some(({ row, commission }) => (
+            (cleanText(row.status) || commission.status) === '已发放'
+          ));
+        const activeCommissionSnapshots = commissionSnapshots.filter(({ row, commission }) => (
+          !isInactiveRecoveryCommissionStatus(cleanText(row.status) || commission.status)
+        ));
+        const activeCommissionStatuses = activeCommissionSnapshots.map(({ row, commission }) => (
+          cleanText(row.status) || commission.status
+        ));
+        const postPayoutSettlementStatus = activeCommissionStatuses.includes('待确认')
+          ? '待确认'
+          : activeCommissionStatuses.includes('待发放')
+            ? '待发放'
+            : activeCommissionStatuses.length > 0 && activeCommissionStatuses.every((status) => status === '已发放')
+              ? '已发放'
+              : recoverySettlementStatus(current);
+        const postPayoutPaidAt = postPayoutSettlementStatus === '已发放'
+          ? [current.settlementPaidAt, ...activeCommissionSnapshots.map(({ commission }) => commission.paidAt)]
+            .filter((value): value is string => typeof value === 'string' && Number.isFinite(new Date(value).getTime()))
+            .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0]
+          : undefined;
+        if (postPayoutCorrection && !isSuperAdmin(actor)) {
+          throw new RecoveryCommandError(403, '只有超级管理员可以更正已发放的售后挽回订单');
+        }
         const data = input?.data;
         const validated = validateInput(data, actor, directory, scope);
         const recoveryAttachments = resolveRecoveryAttachments(data);
@@ -1253,16 +1294,22 @@ export function createRecoveryOrderCommandService(
           assistUserName: validated.assistUser?.name,
           remark: cleanText(data.remark) || undefined,
           status: '审核通过',
-          settlementStatus: '待处理',
-          settlementHandledBy: undefined,
-          settlementHandledAt: undefined,
-          settlementConfirmedBy: undefined,
-          settlementConfirmedAt: undefined,
-          settlementPaidAt: undefined,
-          settlementWithdrawnBy: commissionRows.length ? actor.name : undefined,
-          settlementWithdrawnAt: commissionRows.length ? changedAt : undefined,
-          settlementWithdrawReason: commissionRows.length ? `挽回单更正：${reason}` : undefined,
-          commissionIds: [],
+          settlementStatus: postPayoutCorrection ? postPayoutSettlementStatus as RecoveryOrder['settlementStatus'] : '待处理',
+          settlementHandledBy: postPayoutCorrection ? current.settlementHandledBy : undefined,
+          settlementHandledAt: postPayoutCorrection ? current.settlementHandledAt : undefined,
+          settlementConfirmedBy: postPayoutCorrection ? current.settlementConfirmedBy : undefined,
+          settlementConfirmedAt: postPayoutCorrection ? current.settlementConfirmedAt : undefined,
+          settlementPaidAt: postPayoutCorrection ? postPayoutPaidAt : undefined,
+          settlementWithdrawnBy: postPayoutCorrection
+            ? current.settlementWithdrawnBy
+            : commissionRows.length ? actor.name : undefined,
+          settlementWithdrawnAt: postPayoutCorrection
+            ? current.settlementWithdrawnAt
+            : commissionRows.length ? changedAt : undefined,
+          settlementWithdrawReason: postPayoutCorrection
+            ? current.settlementWithdrawReason
+            : commissionRows.length ? `挽回单更正：${reason}` : undefined,
+          commissionIds: postPayoutCorrection ? current.commissionIds : [],
           updatedAt: changedAt,
         };
         if (options.crmBridge) next = { ...next, ...crmPatch(await options.crmBridge.resolve(transaction, next)) };
@@ -1271,6 +1318,43 @@ export function createRecoveryOrderCommandService(
         if (!changes.length) throw new RecoveryCommandError(400, '没有需要更正的字段');
         for (const row of commissionRows) {
           const commission = parseObject<Commission>(row.data, '售后挽回分账');
+          if (postPayoutCorrection) {
+            if (isInactiveRecoveryCommissionStatus(cleanText(row.status) || commission.status)) continue;
+            const performanceFollowsRecoveryAmount = Number(commission.performanceAmount ?? commission.orderAmount)
+              === Number(current.recoveryAmount);
+            const corrected: Commission = {
+              ...commission,
+              customerName: next.customerName,
+              productLevel: next.originalProductLevel || next.originalProduct,
+              orderAmount: next.recoveryAmount,
+              performanceAmount: performanceFollowsRecoveryAmount
+                ? next.recoveryAmount
+                : commission.performanceAmount,
+              paymentDate: next.recoveryAt || commission.paymentDate,
+              proofStatus: next.recoveryAttachments?.length || next.paymentAttachments?.length
+                || next.chatAttachments?.length || next.paymentVoucher || next.paymentVoucherName
+                || next.chatEvidence || next.chatEvidenceName ? '已上传' : '待补充',
+              auditReason: `超级管理员发放后更正业务资料：${reason}`,
+              isManualAdjusted: true,
+              adjustReason: reason,
+              adjustedBy: actor.name,
+              adjustedAt: changedAt,
+              updatedAt: changedAt,
+            };
+            await transaction.businessRecord.update({
+              where: { domain_recordId: { domain: STORAGE_KEYS.COMMISSIONS, recordId: row.recordId } },
+              data: {
+                status: corrected.status,
+                owner: corrected.owner,
+                customerId: next.customerId || null,
+                orderId: next.id,
+                amount: corrected.commissionAmount,
+                eventAt: new Date(corrected.paymentDate || changedAt),
+                data: jsonValue(corrected),
+              },
+            });
+            continue;
+          }
           if (commission.status === '已撤回') continue;
           const withdrawn: Commission = {
             ...commission,
@@ -1285,7 +1369,17 @@ export function createRecoveryOrderCommandService(
             data: { status: withdrawn.status, amount: withdrawn.commissionAmount, data: jsonValue(withdrawn) },
           });
         }
-        next.changeHistory = appendRecoveryChange(current, actor, changedAt, 'correct', '更正售后挽回订单并将分账回退为待处理', reason, changes);
+        next.changeHistory = appendRecoveryChange(
+          current,
+          actor,
+          changedAt,
+          'correct',
+          postPayoutCorrection
+            ? '超级管理员更正已发放售后挽回订单（保留原发放记录）'
+            : '更正售后挽回订单并将分账回退为待处理',
+          reason,
+          changes,
+        );
         await writeRecoveryOrder(transaction, next);
         return publicRecoveryOrder(next, actor);
       }, {

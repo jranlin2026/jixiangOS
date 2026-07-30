@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import { PERMISSION_KEYS } from '../../src/shared/utils/permissions';
 import type { AuthenticatedUser } from '../../src/types/auth';
+import type { Commission } from '../../src/types/commission';
 import type { RecoveryOrder, RecoveryOrderInput } from '../../src/types/recoveryOrder';
 import { createRecoveryOrderCommandService } from './recoveryOrderCommandService';
 
@@ -274,6 +275,165 @@ class FakePrisma {
 
 const prisma = new FakePrisma();
 const service = createRecoveryOrderCommandService(prisma as any, { now: () => new Date(NOW) });
+
+const paidPrisma = new FakePrisma();
+const paidOrder: RecoveryOrder = {
+  ...oldRecord,
+  id: 'recovery-paid-correction',
+  recoveryNo: 'RCV-PAID-CORRECTION',
+  thirdPartyOrderNo: 'TP-PAID-CORRECTION',
+  customerName: '更正前客户',
+  originalProduct: '更正前产品',
+  originalProductLevel: 'AI产品',
+  recoveryAmount: 599,
+  recoveryAt: '2026-07-24T12:42:00.000Z',
+  status: '审核通过',
+  settlementStatus: '待发放',
+  settlementPaidAt: undefined,
+  commissionIds: ['commission-paid-correction', 'commission-paid-correction-later'],
+};
+const paidCommission: Commission & { payoutRecordId: string } = {
+  id: 'commission-paid-correction',
+  orderId: paidOrder.id,
+  orderNo: paidOrder.recoveryNo,
+  customerName: paidOrder.customerName,
+  productLevel: 'AI产品',
+  orderAmount: 599,
+  performanceAmount: 599,
+  commissionRate: 0,
+  commissionAmount: 60,
+  role: '挽回人员',
+  owner: finance.name,
+  ownerId: finance.id,
+  department: '财务部',
+  departmentId: 'dept-finance',
+  paymentDate: paidOrder.recoveryAt,
+  status: '已发放',
+  commissionType: 'recovery',
+  sourceRecoveryOrderId: paidOrder.id,
+  sourceBusinessType: 'after_sales_recovery',
+  isRecoveryBonus: true,
+  batchId: 'payout-paid-correction',
+  payoutRecordId: 'payout-paid-correction',
+  paidAt: '2026-07-30T01:44:00.000Z',
+  createdAt: '2026-07-24T12:45:00.000Z',
+  updatedAt: '2026-07-30T01:44:00.000Z',
+};
+const laterPaidCommission: Commission & { payoutRecordId: string } = {
+  ...paidCommission,
+  id: 'commission-paid-correction-later',
+  role: '协助人员',
+  paidAt: '2026-07-30T03:44:00.000Z',
+  payoutRecordId: 'payout-paid-correction-later',
+};
+paidPrisma.rows.set(key(STORAGE_KEYS.RECOVERY_ORDERS, paidOrder.id), {
+  id: `${STORAGE_KEYS.RECOVERY_ORDERS}:${paidOrder.id}`,
+  domain: STORAGE_KEYS.RECOVERY_ORDERS,
+  recordId: paidOrder.id,
+  status: paidOrder.status,
+  orderId: paidOrder.id,
+  eventAt: new Date(paidOrder.recoveryAt!),
+  data: clone(paidOrder),
+});
+paidPrisma.rows.set(key(STORAGE_KEYS.COMMISSIONS, paidCommission.id), {
+  id: `${STORAGE_KEYS.COMMISSIONS}:${paidCommission.id}`,
+  domain: STORAGE_KEYS.COMMISSIONS,
+  recordId: paidCommission.id,
+  status: paidCommission.status,
+  owner: paidCommission.owner,
+  orderId: paidOrder.id,
+  amount: paidCommission.commissionAmount,
+  eventAt: new Date(paidCommission.paymentDate!),
+  data: clone(paidCommission),
+});
+paidPrisma.rows.set(key(STORAGE_KEYS.COMMISSIONS, laterPaidCommission.id), {
+  id: `${STORAGE_KEYS.COMMISSIONS}:${laterPaidCommission.id}`,
+  domain: STORAGE_KEYS.COMMISSIONS,
+  recordId: laterPaidCommission.id,
+  status: laterPaidCommission.status,
+  owner: laterPaidCommission.owner,
+  orderId: paidOrder.id,
+  amount: laterPaidCommission.commissionAmount,
+  eventAt: new Date(laterPaidCommission.paymentDate!),
+  data: clone(laterPaidCommission),
+});
+const paidService = createRecoveryOrderCommandService(paidPrisma as any, { now: () => new Date(NOW) });
+const reviewerPaidPrecheck = await paidService.precheckCorrection(paidOrder.id, reviewer);
+assert.equal(reviewerPaidPrecheck.data?.allowed, false, '非超级管理员不得更正已发放售后挽回订单');
+const adminPaidPrecheck = await paidService.precheckCorrection(paidOrder.id, superAdmin);
+assert.equal(adminPaidPrecheck.data?.allowed, true, adminPaidPrecheck.message);
+const correctedPaidOrder = await paidService.correct(paidOrder.id, {
+  reason: '原挽回成交时间和业务资料录入错误',
+  data: input({
+    customerName: '更正后客户',
+    thirdPartyOrderNo: paidOrder.thirdPartyOrderNo,
+    originalProduct: '更正后产品',
+    originalProductLevel: '软件服务',
+    originalAmount: 899,
+    recoveryAmount: 699,
+    recoveryAt: '2026-06-05T06:51:00.000Z',
+    recoveryUserId: creator.id,
+  }),
+}, superAdmin);
+assert.equal(correctedPaidOrder.code, 0, correctedPaidOrder.message);
+assert.equal(correctedPaidOrder.data?.settlementStatus, '已发放', '发放后业务更正不得回退发放状态');
+assert.equal(correctedPaidOrder.data?.settlementPaidAt, laterPaidCommission.paidAt, '历史结算状态滞后时应取最后一笔实际发放时间');
+assert.equal(correctedPaidOrder.data?.recoveryAt, '2026-06-05T06:51:00.000Z');
+assert.match(correctedPaidOrder.data?.changeHistory?.[0]?.summary || '', /保留原发放记录/);
+const correctedPaidCommission = paidPrisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, paidCommission.id))?.data as Commission & { payoutRecordId?: string };
+assert.equal(correctedPaidCommission.status, '已发放');
+assert.equal(correctedPaidCommission.commissionAmount, 60, '发放后业务资料更正不得覆盖原发放金额');
+assert.equal(correctedPaidCommission.ownerId, finance.id, '发放后业务资料更正不得覆盖原提成人员');
+assert.equal(correctedPaidCommission.paidAt, paidCommission.paidAt);
+assert.equal(correctedPaidCommission.payoutRecordId, paidCommission.payoutRecordId);
+assert.equal(correctedPaidCommission.customerName, '更正后客户');
+assert.equal(correctedPaidCommission.productLevel, '软件服务');
+assert.equal(correctedPaidCommission.orderAmount, 699);
+assert.equal(correctedPaidCommission.performanceAmount, 699);
+assert.equal(correctedPaidCommission.paymentDate, '2026-06-05T06:51:00.000Z', '员工月报归属时间必须同步到更正后的挽回成交时间');
+assert.equal(
+  paidPrisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, paidCommission.id))?.eventAt?.toISOString(),
+  '2026-06-05T06:51:00.000Z',
+  '数据库事件时间必须同步更新，避免筛选和月报口径不一致',
+);
+const pendingCommission: Commission = {
+  ...paidCommission,
+  id: 'commission-pending-correction',
+  role: '协助人员',
+  status: '待发放',
+  batchId: undefined,
+  paidAt: undefined,
+};
+paidPrisma.rows.set(key(STORAGE_KEYS.COMMISSIONS, pendingCommission.id), {
+  id: `${STORAGE_KEYS.COMMISSIONS}:${pendingCommission.id}`,
+  domain: STORAGE_KEYS.COMMISSIONS,
+  recordId: pendingCommission.id,
+  status: pendingCommission.status,
+  owner: pendingCommission.owner,
+  orderId: paidOrder.id,
+  amount: pendingCommission.commissionAmount,
+  eventAt: new Date(pendingCommission.paymentDate!),
+  data: clone(pendingCommission),
+});
+const mixedCorrection = await paidService.correct(paidOrder.id, {
+  reason: '分批发放期间继续更正业务时间',
+  data: input({
+    customerName: '更正后客户',
+    thirdPartyOrderNo: paidOrder.thirdPartyOrderNo,
+    originalProduct: '更正后产品',
+    originalProductLevel: '软件服务',
+    originalAmount: 899,
+    recoveryAmount: 699,
+    recoveryAt: '2026-06-06T06:51:00.000Z',
+    recoveryUserId: creator.id,
+  }),
+}, superAdmin);
+assert.equal(mixedCorrection.code, 0, mixedCorrection.message);
+assert.equal(mixedCorrection.data?.settlementStatus, '待发放', '已发放和待发放混合时不得把整单误标为全部已发放');
+assert.equal(mixedCorrection.data?.settlementPaidAt, undefined, '分批发放未完成时不得伪造整单发放完成时间');
+const correctedPendingCommission = paidPrisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, pendingCommission.id))?.data as Commission;
+assert.equal(correctedPendingCommission.status, '待发放', '未发放提成应保留原状态');
+assert.equal(correctedPendingCommission.paymentDate, '2026-06-06T06:51:00.000Z', '未发放提成的月报归属也必须同步');
 
 const realtimeSettlementOrder: RecoveryOrder = {
   ...oldRecord,

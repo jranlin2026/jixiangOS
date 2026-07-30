@@ -103,6 +103,12 @@ const AfterSales: React.FC = () => {
       {activeTab === 'recovery-list' && (
         <RecoveryOrderTab
           mode="list"
+          correctionTargetId={searchParams.get('correctRecoveryId') || ''}
+          onCorrectionTargetClear={() => {
+            const nextParams = new URLSearchParams(searchParams);
+            nextParams.delete('correctRecoveryId');
+            setSearchParams(nextParams, { replace: true });
+          }}
           createSignal={createSignal}
           viewSettingsSignal={viewSettingsSignal}
           exportSignal={exportSignal}

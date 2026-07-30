@@ -30,12 +30,15 @@ import {
   Typography,
 } from '@mui/material';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import PaymentsOutlinedIcon from '@mui/icons-material/PaymentsOutlined';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
+import { useNavigate } from 'react-router-dom';
 import { commissionPayoutApi } from '../../api/commissionPayoutApi';
 import useAuthStore from '../../store/useAuthStore';
-import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { formatCurrency, formatDateTime, formatPaginationRows } from '../../shared/utils/formatters';
+import { ROUTES } from '../../shared/utils/constants';
 import TablePagination from '../../shared/components/TablePagination';
 import { moduleTablePaperSx, moduleTableSx } from '../../shared/components/ModuleShell';
 import { subscribePageRefresh } from '../../shared/utils/pageRefresh';
@@ -94,8 +97,10 @@ const metricCard = (label: string, value: string, hint: string, color = '#0f172a
 );
 
 const CommissionPayout: React.FC = () => {
+  const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.currentUser);
   const canManage = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_PAYOUT, 'write');
+  const canCorrectPaidRecovery = isSuperAdmin(currentUser);
   const [view, setView] = useState<PayoutView>('pending');
   const [workspace, setWorkspace] = useState<CommissionPayoutWorkspace | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -204,6 +209,7 @@ const CommissionPayout: React.FC = () => {
     (currentRecordOwnerPage + 1) * recordOwnerRowsPerPage,
   );
   const recordCommissionRows = detailRecord?.commissionSnapshots || [];
+  const canCorrectCurrentPaidRecovery = canCorrectPaidRecovery && detailRecord?.status === '已发放';
   const recordCommissionTotalPages = Math.max(1, Math.ceil(recordCommissionRows.length / recordCommissionRowsPerPage));
   const currentRecordCommissionPage = Math.min(recordCommissionPage, recordCommissionTotalPages - 1);
   const visibleRecordCommissionRows = recordCommissionRows.slice(
@@ -253,6 +259,14 @@ const CommissionPayout: React.FC = () => {
     anchor.download = `${record.payoutNo}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
+  };
+
+  const openPaidRecoveryCorrection = (commission: NonNullable<CommissionPayoutRecord['commissionSnapshots']>[number]) => {
+    const recoveryOrderId = commission.sourceRecoveryOrderId
+      || (commission.sourceBusinessType === 'after_sales_recovery' ? commission.orderId : '');
+    if (!recoveryOrderId) return;
+    setDetailRecord(null);
+    navigate(`${ROUTES.AFTER_SALES}?tab=recovery-list&correctRecoveryId=${encodeURIComponent(recoveryOrderId)}`);
   };
 
   const renderPending = () => (
@@ -391,7 +405,7 @@ const CommissionPayout: React.FC = () => {
     <Paper variant="outlined">
       <Box sx={{ p: 2 }}>
         <Typography variant="h6" fontWeight={800}>发放记录</Typography>
-        <Typography variant="body2" color="text.secondary">每次确认发放自动生成记录；已发放为系统终态，如需调整请在线下处理。</Typography>
+        <Typography variant="body2" color="text.secondary">每次确认发放自动生成记录；原发放事实永久保留，超级管理员可对单笔已发放售后业务资料执行留痕更正。</Typography>
       </Box>
       <Divider />
       <Box sx={{ display: { xs: 'block', md: 'none' } }}>
@@ -458,7 +472,7 @@ const CommissionPayout: React.FC = () => {
     <Paper variant="outlined" sx={{ p: 2 }}>
       <Box>
         <Typography variant="h5" fontWeight={900}>提成发放</Typography>
-        <Typography variant="body2" color="text.secondary">核对员工应发提成、执行发放，并保留完整发放记录。已发放为系统终态，数据会自动保持更新。</Typography>
+        <Typography variant="body2" color="text.secondary">核对员工应发提成、执行发放，并保留完整发放记录。发放后业务资料更正不会覆盖原发放事实。</Typography>
       </Box>
       <Tabs value={view} onChange={(_: React.SyntheticEvent, value: PayoutView) => setView(value)} sx={{ mt: 1.5 }}>
         <Tab value="pending" label="待发放" /><Tab value="records" label="发放记录" /><Tab value="summary" label="月度报告" />
@@ -571,9 +585,18 @@ const CommissionPayout: React.FC = () => {
         {detailRecord?.commissionSnapshots?.length ? (
           <Box>
             <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 1.5 }}>逐笔提成明细</Typography>
-            <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { borderRadius: '6px 6px 0 0', overflowX: 'auto' }]}><Table size="small" sx={[moduleTableSx, { minWidth: 980 }]}>
-              <TableHead><TableRow><TableCell>提成类型</TableCell><TableCell>员工</TableCell><TableCell>客户</TableCell><TableCell>订单号</TableCell><TableCell>角色</TableCell><TableCell align="right">业绩金额</TableCell><TableCell align="right">发放金额</TableCell><TableCell>归属月份</TableCell></TableRow></TableHead>
-              <TableBody>{visibleRecordCommissionRows.map((row) => <TableRow key={row.id} hover><TableCell>{commissionTypeLabel(row)}</TableCell><TableCell>{row.owner}</TableCell><TableCell>{row.customerName || '未命名客户'}</TableCell><TableCell><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{row.orderNo}</Typography></TableCell><TableCell>{row.role}</TableCell><TableCell align="right">{formatCurrency(Number(row.performanceAmount || row.orderAmount || 0))}</TableCell><TableCell align="right"><Typography fontWeight={900}>{formatCurrency(row.commissionAmount)}</Typography></TableCell><TableCell>{commissionMonth(row)}</TableCell></TableRow>)}</TableBody>
+            <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { borderRadius: '6px 6px 0 0', overflowX: 'auto' }]}><Table size="small" sx={[moduleTableSx, { minWidth: canCorrectCurrentPaidRecovery ? 1120 : 980 }]}>
+              <TableHead><TableRow><TableCell>提成类型</TableCell><TableCell>员工</TableCell><TableCell>客户</TableCell><TableCell>订单号</TableCell><TableCell>角色</TableCell><TableCell align="right">业绩金额</TableCell><TableCell align="right">发放金额</TableCell><TableCell>归属月份</TableCell>{canCorrectCurrentPaidRecovery && <TableCell align="center">操作</TableCell>}</TableRow></TableHead>
+              <TableBody>{visibleRecordCommissionRows.map((row) => {
+                const recoveryOrderId = row.sourceRecoveryOrderId
+                  || (row.sourceBusinessType === 'after_sales_recovery' ? row.orderId : '');
+                return (
+                  <TableRow key={row.id} hover>
+                    <TableCell>{commissionTypeLabel(row)}</TableCell><TableCell>{row.owner}</TableCell><TableCell>{row.customerName || '未命名客户'}</TableCell><TableCell><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{row.orderNo}</Typography></TableCell><TableCell>{row.role}</TableCell><TableCell align="right">{formatCurrency(Number(row.performanceAmount || row.orderAmount || 0))}</TableCell><TableCell align="right"><Typography fontWeight={900}>{formatCurrency(row.commissionAmount)}</Typography></TableCell><TableCell>{commissionMonth(row)}</TableCell>
+                    {canCorrectCurrentPaidRecovery && <TableCell align="center">{recoveryOrderId ? <Button size="small" startIcon={<EditOutlinedIcon />} onClick={() => openPaidRecoveryCorrection(row)}>发放后更正</Button> : <Typography variant="caption" color="text.secondary">暂不支持</Typography>}</TableCell>}
+                  </TableRow>
+                );
+              })}</TableBody>
             </Table></TableContainer>
             <TablePagination
               count={recordCommissionRows.length}
