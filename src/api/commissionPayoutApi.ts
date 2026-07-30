@@ -1,4 +1,7 @@
 import type {
+  CommissionCorrectionHandlingMethod,
+  CommissionCorrectionPage,
+  CommissionCorrectionRecord,
   CommissionPayoutRecord,
   CommissionPayoutWorkspace,
   IssueCommissionPayoutInput,
@@ -22,6 +25,19 @@ export interface CommissionMonthlyReportExportInput {
   includeWithdrawn: boolean;
 }
 
+export interface CommissionCorrectionQuery {
+  search?: string;
+  status?: '全部' | '无差额' | '待处理' | '已处理';
+  page: number;
+  pageSize: number;
+}
+
+export interface CompleteCommissionCorrectionLegInput {
+  method: Exclude<CommissionCorrectionHandlingMethod, '提成补发'>;
+  amount: number;
+  note: string;
+}
+
 async function requireBackend<T>(request: () => Promise<ApiResponse<T>>): Promise<ApiResponse<T>> {
   if (!shouldUseBackendApi()) return createErrorResponse('提成发放需要连接服务器后使用', 503);
   return request();
@@ -39,6 +55,29 @@ async function fetchPeriodWorkspace(period: string): Promise<ApiResponse<Commiss
   return requireBackend(() => backendRequest<CommissionPayoutWorkspace>(
     `/commission-payout-workspace?period=${encodeURIComponent(period)}`,
   ));
+}
+
+async function fetchCorrections(input: CommissionCorrectionQuery): Promise<ApiResponse<CommissionCorrectionPage>> {
+  const search = new URLSearchParams({
+    page: String(input.page),
+    pageSize: String(input.pageSize),
+  });
+  if (input.search?.trim()) search.set('search', input.search.trim());
+  if (input.status && input.status !== '全部') search.set('status', input.status);
+  return requireBackend(() => backendRequest<CommissionCorrectionPage>(`/commission-corrections?${search.toString()}`));
+}
+
+async function completeCorrectionLeg(
+  correctionId: string,
+  legId: string,
+  input: CompleteCommissionCorrectionLegInput,
+): Promise<ApiResponse<CommissionCorrectionRecord>> {
+  const response = await requireBackend(() => backendRequest<CommissionCorrectionRecord>(
+    `/commission-corrections/${encodeURIComponent(correctionId)}/legs/${encodeURIComponent(legId)}/complete`,
+    { method: 'POST', body: JSON.stringify(input) },
+  ));
+  if (response.code === 0) await syncBackendStorageScopeFromServer('commissions', 0);
+  return response;
 }
 
 async function issue(input: IssueCommissionPayoutInput): Promise<ApiResponse<CommissionPayoutRecord>> {
@@ -96,6 +135,8 @@ export const commissionPayoutApi = {
   fetchPendingWorkspace,
   fetchRecordsWorkspace,
   fetchPeriodWorkspace,
+  fetchCorrections,
+  completeCorrectionLeg,
   issue,
   reverse,
   downloadMonthlyReport,

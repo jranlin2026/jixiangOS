@@ -18,6 +18,7 @@ import { isSuperAdmin } from '../../src/shared/utils/permissions';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type {
   Commission,
+  CommissionCorrectionRecord,
   CommissionPayoutEmployeeRow,
   CommissionPayoutRecord,
   CommissionPayoutWorkspace,
@@ -25,6 +26,8 @@ import type {
 } from '../../src/types/commission';
 import type { RecoveryOrder } from '../../src/types/recoveryOrder';
 import type { Order } from '../../src/types/order';
+import { resolveCommissionCorrectionStatuses } from './commissionCorrectionService';
+import { selectLatestCommissionCorrections } from './commissionCorrectionRecordSelection';
 
 type PayoutPrisma = Pick<PrismaClient, 'businessRecord' | '$transaction'>;
 type PayoutTransaction = Prisma.TransactionClient;
@@ -50,6 +53,12 @@ const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100)
 const periodOf = (commission: Commission) => String(commission.paymentDate || commission.createdAt || '').slice(0, 7);
 const ownerKey = (commission: Commission) => commission.ownerId || `name:${commission.owner}`;
 const recordData = (value: Commission | CommissionPayoutRecord | RecoveryOrder) => value as unknown as Prisma.InputJsonValue;
+
+function parseCorrectionRecord(value: unknown): CommissionCorrectionRecord | null {
+  const data = asObject(value);
+  if (!data.id || !Array.isArray(data.impacts) || !Array.isArray(data.legs)) return null;
+  return data as unknown as CommissionCorrectionRecord;
+}
 
 function normalizeCommissionRound(value: unknown): Commission {
   const commission = asObject(value) as unknown as Commission;
@@ -303,6 +312,101 @@ function employeeRows(
     .sort((left, right) => right.pendingPayAmount - left.pendingPayAmount || left.owner.localeCompare(right.owner, 'zh-CN'));
 }
 
+type CorrectionAmounts = Pick<CommissionPayoutEmployeeRow,
+  | 'correctionOriginalPaidAmount'
+  | 'correctionEntitlementAmount'
+  | 'correctionSupplementAmount'
+  | 'correctionRecoverAmount'
+  | 'pendingCorrectionSupplementAmount'
+  | 'pendingCorrectionRecoverAmount'> & {
+    ownerId: string;
+    owner: string;
+    departmentId?: string;
+    department: string;
+  };
+
+function employeeRowsWithCorrectionMetrics(
+  rows: CommissionPayoutEmployeeRow[],
+  corrections: CommissionCorrectionRecord[],
+  period: string,
+): CommissionPayoutEmployeeRow[] {
+  const metrics = new Map<string, CorrectionAmounts>();
+  const ensure = (ownerId: string | undefined, owner: string, departmentId?: string, department = '') => {
+    const key = ownerId || `name:${owner}`;
+    const current = metrics.get(key) || {
+      ownerId: key,
+      owner,
+      departmentId,
+      department,
+      correctionOriginalPaidAmount: 0,
+      correctionEntitlementAmount: 0,
+      correctionSupplementAmount: 0,
+      correctionRecoverAmount: 0,
+      pendingCorrectionSupplementAmount: 0,
+      pendingCorrectionRecoverAmount: 0,
+    };
+    metrics.set(key, current);
+    return current;
+  };
+  // 原已发/更正后应得是当前业务口径，同一源单只看最新一次更正；
+  // 补发/追回是已经产生的差额流水，必须保留所有历史更正里的真实处理记录。
+  selectLatestCommissionCorrections(corrections).forEach((correction) => {
+    correction.impacts.forEach((impact) => {
+      if (impact.originalPeriod === period) {
+        const row = ensure(impact.originalOwnerId, impact.originalOwner);
+        row.correctionOriginalPaidAmount = roundMoney(Number(row.correctionOriginalPaidAmount || 0) + impact.originalPaidAmount);
+      }
+      if (impact.correctedPeriod === period) {
+        const row = ensure(impact.correctedOwnerId, impact.correctedOwner);
+        row.correctionEntitlementAmount = roundMoney(Number(row.correctionEntitlementAmount || 0) + impact.correctedEntitlementAmount);
+      }
+    });
+  });
+  corrections.forEach((correction) => {
+    correction.legs.filter((leg) => leg.period === period).forEach((leg) => {
+      const row = ensure(leg.ownerId, leg.owner, leg.departmentId, leg.department || '');
+      if (leg.kind === '补发') {
+        row.correctionSupplementAmount = roundMoney(Number(row.correctionSupplementAmount || 0) + leg.amount);
+        if (!['已处理', '已取消'].includes(leg.status)) {
+          row.pendingCorrectionSupplementAmount = roundMoney(Number(row.pendingCorrectionSupplementAmount || 0) + leg.amount);
+        }
+      } else {
+        row.correctionRecoverAmount = roundMoney(Number(row.correctionRecoverAmount || 0) + leg.amount);
+        if (leg.status === '待处理') {
+          row.pendingCorrectionRecoverAmount = roundMoney(Number(row.pendingCorrectionRecoverAmount || 0) + leg.amount);
+        }
+      }
+    });
+  });
+  const byOwner = new Map(rows.map((row) => [row.ownerId || `name:${row.owner}`, { ...row }]));
+  metrics.forEach((amounts, key) => {
+    const existing = byOwner.get(key);
+    if (existing) {
+      byOwner.set(key, { ...existing, ...amounts, ownerId: existing.ownerId, owner: existing.owner, department: existing.department });
+      return;
+    }
+    byOwner.set(key, {
+      ...amounts,
+      orderCount: 0,
+      commissionCount: 0,
+      formalOrderCount: 0,
+      recoveryOrderCount: 0,
+      formalOrderPaidAmount: 0,
+      recoveryBusinessAmount: 0,
+      statusCounts: { pendingHandling: 0, pendingConfirm: 0, pendingPay: 0, paid: 0, withdrawn: 0 },
+      pendingConfirmAmount: 0,
+      pendingPayAmount: 0,
+      paidAmount: 0,
+      withdrawnAmount: 0,
+      totalAmount: 0,
+      commissions: [],
+    });
+  });
+  return [...byOwner.values()].sort((left, right) => (
+    right.pendingPayAmount - left.pendingPayAmount || left.owner.localeCompare(right.owner, 'zh-CN')
+  ));
+}
+
 export function createCommissionPayoutService(prisma: PayoutPrisma, options: CommissionPayoutServiceOptions = {}) {
   const now = options.now || (() => new Date());
   const createId = options.id || randomUUID;
@@ -320,16 +424,28 @@ export function createCommissionPayoutService(prisma: PayoutPrisma, options: Com
 
   const getPeriodWorkspace = async (period: string) => {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) return failure<CommissionPayoutWorkspace>('请选择正确的提成月份', 400);
-    const [commissionRows, recoveryRows, orderRows, recordResult] = await Promise.all([
+    const [commissionRows, recoveryRows, orderRows, correctionRows, recordResult] = await Promise.all([
       prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSIONS } }),
       prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } }),
       prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDERS } }),
+      prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSION_CORRECTIONS } }),
       listRecords(),
     ]);
     const recoveryOrders = recoveryRows.map((row) => asObject(row.data) as unknown as RecoveryOrder);
     const orders = orderRows.map((row) => asObject(row.data) as unknown as Order);
+    const allCommissions = commissionRows.map((row) => {
+      const commission = normalizeCommissionRound(row.data);
+      return { ...commission, status: (String(row.status || commission.status) || commission.status) as Commission['status'] };
+    });
+    const commissionStatusById = new Map(allCommissions.map((commission) => [commission.id, commission.status]));
+    const corrections = resolveCommissionCorrectionStatuses(
+      correctionRows
+        .map((row) => parseCorrectionRecord(row.data))
+        .filter((row): row is CommissionCorrectionRecord => Boolean(row)),
+      commissionStatusById,
+    );
     const commissions = resolveTieredPayoutAmounts(applyRecoveryCommissionBusinessTimes(
-      commissionRows.map((row) => normalizeCommissionRound(row.data)),
+      allCommissions,
       recoveryOrders,
     ))
       .filter((item) => periodOf(item) === period && INCLUDED_PERIOD_WORKSPACE_STATUSES.has(item.status));
@@ -355,7 +471,11 @@ export function createCommissionPayoutService(prisma: PayoutPrisma, options: Com
       ?? commission.commissionAmount
       ?? 0,
     );
-    const employees = employeeRows(displayCommissions, orders, recoveryOrders, amountFor);
+    const employees = employeeRowsWithCorrectionMetrics(
+      employeeRows(displayCommissions, orders, recoveryOrders, amountFor),
+      corrections,
+      period,
+    );
     const businessMetrics = calculateCommissionBusinessMetrics(displayCommissions, orders, recoveryOrders);
     return success<CommissionPayoutWorkspace>({
       period,
@@ -374,6 +494,12 @@ export function createCommissionPayoutService(prisma: PayoutPrisma, options: Com
         totalCommissionAmount: roundMoney(employees.reduce((sum, row) => sum + row.totalAmount, 0)),
         formalOrderCount: businessMetrics.formalOrderCount,
         recoveryOrderCount: businessMetrics.recoveryOrderCount,
+        correctionOriginalPaidAmount: roundMoney(employees.reduce((sum, row) => sum + Number(row.correctionOriginalPaidAmount || 0), 0)),
+        correctionEntitlementAmount: roundMoney(employees.reduce((sum, row) => sum + Number(row.correctionEntitlementAmount || 0), 0)),
+        correctionSupplementAmount: roundMoney(employees.reduce((sum, row) => sum + Number(row.correctionSupplementAmount || 0), 0)),
+        correctionRecoverAmount: roundMoney(employees.reduce((sum, row) => sum + Number(row.correctionRecoverAmount || 0), 0)),
+        pendingCorrectionSupplementAmount: roundMoney(employees.reduce((sum, row) => sum + Number(row.pendingCorrectionSupplementAmount || 0), 0)),
+        pendingCorrectionRecoverAmount: roundMoney(employees.reduce((sum, row) => sum + Number(row.pendingCorrectionRecoverAmount || 0), 0)),
       },
       employees,
       records: (recordResult.data || []).filter((record) => record.period === period),

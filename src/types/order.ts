@@ -70,6 +70,8 @@ export interface OrderChangeLog {
 export interface OrderCorrectionInput {
   reason: string;
   data: Partial<Order>;
+  /** 已发放后更正必须提交与最新预览一致的影响哈希。 */
+  expectedImpactHash?: string;
 }
 
 export type OrderCorrectionBlockReason =
@@ -88,6 +90,8 @@ export interface OrderCorrectionPrecheck {
   commissionCount: number;
   manualCommissionCount: number;
   commissionStatuses: string[];
+  mode: 'standard' | 'post_payout';
+  requiresImpactPreview: boolean;
 }
 
 export type OrderApplicationStatus = '待财务审核' | '退回修改' | '已入库' | '已驳回';

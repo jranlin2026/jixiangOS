@@ -25,10 +25,21 @@ assert.match(payoutSource, /label="月度报告"/);
 assert.match(payoutSource, /确认发放/);
 assert.doesNotMatch(payoutSource, /aria-label="撤销发放"|>确认撤销</);
 assert.match(payoutSource, /原发放事实永久保留/);
-assert.match(payoutSource, /发放后更正/);
+assert.match(payoutSource, /发放后处理/);
 assert.match(payoutSource, /correctRecoveryId/);
-assert.match(payoutSource, /isSuperAdmin\(currentUser\)/, '发放后更正入口必须仅对超级管理员开放');
-assert.match(payoutSource, /detailRecord\?\.status === '已发放'/, '已撤销发放单不得显示发放后更正入口');
+assert.match(payoutSource, /correctOrderId/);
+assert.match(payoutSource, /ROUTES\.ORDERS/);
+assert.match(payoutSource, /源单不可用/);
+assert.match(payoutSource, /sourceBusinessType === 'after_sales_recovery'/, '只有标准售后挽回来源可进入售后更正页');
+assert.match(payoutSource, /!isRecoveryCommission\(commission\)/, '退款挽回等未支持来源不得误跳正式订单更正页');
+assert.doesNotMatch(
+  payoutSource,
+  /navigate\(isRecoveryCommission\(commission\)/,
+  'refund_recovery 不得沿用售后挽回更正路由',
+);
+assert.doesNotMatch(payoutSource, />暂不支持</, '正式订单不得再显示暂不支持');
+assert.match(payoutSource, /isSuperAdmin\(currentUser\)/, '发放后处理入口必须仅对超级管理员开放');
+assert.match(payoutSource, /detailRecord\?\.status === '已发放'/, '已撤销发放单不得显示发放后处理入口');
 assert.match(payoutSource, /付款流水号/);
 assert.match(payoutSource, /fetchRecordsWorkspace/);
 assert.match(payoutSource, /subscribePageRefresh/);

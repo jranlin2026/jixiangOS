@@ -317,6 +317,12 @@ export interface Commission {
   sourceBusinessType?: 'formal_order' | 'after_sales_recovery' | 'refund_recovery';
   isRecoveryBonus?: boolean;
   paidAt?: Timestamp;
+  /** 已发放提成所属的不可变发放单。 */
+  payoutRecordId?: ID;
+  /** 发放后更正产生的补发提成关联。 */
+  correctionCaseId?: ID;
+  correctionImpactId?: ID;
+  correctionDeltaType?: '补发';
   chargebackMethod?: CommissionChargebackMethod;
   chargebackAmount?: number;
   chargebackReason?: string;
@@ -324,6 +330,97 @@ export interface Commission {
   chargebackHandledAt?: Timestamp;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+}
+
+export type CommissionCorrectionSourceType = 'formal_order' | 'after_sales_recovery';
+export type CommissionCorrectionImpactAction = '无需差额' | '补发' | '追回' | '人员调整';
+export type CommissionCorrectionLegKind = '补发' | '追回';
+export type CommissionCorrectionLegStatus = '待处理' | '待发放' | '已处理' | '已取消';
+export type CommissionCorrectionHandlingMethod = '提成补发' | '线下追回' | '下月提成抵扣' | '财务确认无需追回';
+
+export interface CommissionCorrectionImpact {
+  id: ID;
+  sourceCommissionId?: ID;
+  role: CommissionRole;
+  originalOwnerId?: ID;
+  originalOwner: string;
+  originalDepartmentId?: ID;
+  originalDepartment?: string;
+  correctedOwnerId?: ID;
+  correctedOwner: string;
+  correctedDepartmentId?: ID;
+  correctedDepartment?: string;
+  originalPeriod: string;
+  correctedPeriod: string;
+  originalPaidAmount: number;
+  correctedEntitlementAmount: number;
+  deltaAmount: number;
+  action: CommissionCorrectionImpactAction;
+  payoutRecordIds: ID[];
+  tierAffected?: boolean;
+}
+
+export interface CommissionCorrectionLeg {
+  id: ID;
+  impactId: ID;
+  kind: CommissionCorrectionLegKind;
+  ownerId?: ID;
+  owner: string;
+  departmentId?: ID;
+  department?: string;
+  role: CommissionRole;
+  period: string;
+  amount: number;
+  sourceCommissionIds: ID[];
+  status: CommissionCorrectionLegStatus;
+  linkedCommissionId?: ID;
+  handlingMethod?: CommissionCorrectionHandlingMethod;
+  handledAmount?: number;
+  handledById?: ID;
+  handledBy?: string;
+  handledAt?: Timestamp;
+  handlingNote?: string;
+}
+
+export interface CommissionCorrectionPreview {
+  sourceBusinessType: CommissionCorrectionSourceType;
+  sourceBusinessId: ID;
+  sourceBusinessNo: string;
+  beforeBusinessSnapshot: Record<string, unknown>;
+  afterBusinessSnapshot: Record<string, unknown>;
+  affectedPeriods: string[];
+  affectedEmployeeCount: number;
+  affectedCommissionCount: number;
+  originalPaidAmount: number;
+  correctedEntitlementAmount: number;
+  supplementAmount: number;
+  recoverAmount: number;
+  impacts: CommissionCorrectionImpact[];
+  legs: CommissionCorrectionLeg[];
+  impactHash: string;
+  sourceRevision: string;
+}
+
+export interface CommissionCorrectionRecord extends CommissionCorrectionPreview {
+  id: ID;
+  correctionNo: string;
+  reason: string;
+  status: '无差额' | '待处理' | '已处理';
+  createdById: ID;
+  createdByName: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface CommissionCorrectionPage {
+  items: CommissionCorrectionRecord[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+  summary: {
+    correctionCount: number;
+    pendingSupplementAmount: number;
+    pendingRecoverAmount: number;
+    handledAmount: number;
+  };
 }
 
 export type CommissionChargebackMethod = '线下追回' | '下月提成抵扣' | '财务确认无需追回';
@@ -460,6 +557,14 @@ export interface CommissionPayoutEmployeeRow {
   paidAmount: number;
   withdrawnAmount: number;
   totalAmount: number;
+  /** 当月更正影响中，该员工原发放快照金额。 */
+  correctionOriginalPaidAmount?: number;
+  /** 当月更正影响中，该员工更正后的应得金额。 */
+  correctionEntitlementAmount?: number;
+  correctionSupplementAmount?: number;
+  correctionRecoverAmount?: number;
+  pendingCorrectionSupplementAmount?: number;
+  pendingCorrectionRecoverAmount?: number;
   commissions: Commission[];
 }
 
@@ -482,6 +587,12 @@ export interface CommissionPayoutWorkspace {
     totalCommissionAmount: number;
     formalOrderCount: number;
     recoveryOrderCount: number;
+    correctionOriginalPaidAmount?: number;
+    correctionEntitlementAmount?: number;
+    correctionSupplementAmount?: number;
+    correctionRecoverAmount?: number;
+    pendingCorrectionSupplementAmount?: number;
+    pendingCorrectionRecoverAmount?: number;
   };
   employees: CommissionPayoutEmployeeRow[];
   records: CommissionPayoutRecord[];
@@ -606,6 +717,12 @@ export interface MonthlyCommissionPayout {
   withdrawnAmount: number;
   chargebackAmount: number;
   totalAmount: number;
+  correctionOriginalPaidAmount?: number;
+  correctionEntitlementAmount?: number;
+  correctionSupplementAmount?: number;
+  correctionRecoverAmount?: number;
+  pendingCorrectionSupplementAmount?: number;
+  pendingCorrectionRecoverAmount?: number;
   status: '待确认' | '待发放' | '已发放' | '无应发';
   commissions: Commission[];
   roleSummaries?: MonthlyCommissionRoleSummary[];

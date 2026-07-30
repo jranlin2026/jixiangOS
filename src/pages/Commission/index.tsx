@@ -946,6 +946,12 @@ const Commission: React.FC<CommissionProps> = ({
             withdrawnAmount: employee.withdrawnAmount,
             chargebackAmount: 0,
             totalAmount: employee.totalAmount,
+            correctionOriginalPaidAmount: employee.correctionOriginalPaidAmount,
+            correctionEntitlementAmount: employee.correctionEntitlementAmount,
+            correctionSupplementAmount: employee.correctionSupplementAmount,
+            correctionRecoverAmount: employee.correctionRecoverAmount,
+            pendingCorrectionSupplementAmount: employee.pendingCorrectionSupplementAmount,
+            pendingCorrectionRecoverAmount: employee.pendingCorrectionRecoverAmount,
             status: employee.pendingConfirmAmount > 0
               ? '待确认'
               : employee.pendingPayAmount > 0
@@ -3666,6 +3672,8 @@ const Commission: React.FC<CommissionProps> = ({
               { label: '待确认', display: formatCurrency(financePeriodSummary?.pendingConfirmAmount || 0), color: '#2563eb' },
               { label: '待发放', display: formatCurrency(financePeriodSummary?.pendingPayAmount || 0), color: '#d97706' },
               { label: '已发放', display: formatCurrency(financePeriodSummary?.paidAmount || 0), color: '#16a34a' },
+              { label: '待补发差额', display: formatCurrency(financePeriodSummary?.pendingCorrectionSupplementAmount || 0), color: '#7c3aed' },
+              { label: '待追回差额', display: formatCurrency(financePeriodSummary?.pendingCorrectionRecoverAmount || 0), color: '#dc2626' },
               { label: '已撤回', display: formatCurrency(financePeriodSummary?.withdrawnAmount || 0), color: '#6b7280' },
             ] : [
               { label: '阶梯核算业绩', display: formatCurrency(monthlyPayoutSummary.monthlyPaidAmount), color: '#0f766e' },
@@ -3708,6 +3716,9 @@ const Commission: React.FC<CommissionProps> = ({
                       <Box><Typography variant="caption" color="text.secondary">待确认</Typography><Typography fontWeight={900} color="info.main">{formatCurrency(row.pendingConfirmAmount)}</Typography></Box>
                       <Box><Typography variant="caption" color="text.secondary">待发放</Typography><Typography fontWeight={900} color="warning.main">{formatCurrency(row.pendingPayAmount)}</Typography></Box>
                       <Box><Typography variant="caption" color="text.secondary">已发放</Typography><Typography fontWeight={900} color="success.main">{formatCurrency(row.paidAmount)}</Typography></Box>
+                      <Box><Typography variant="caption" color="text.secondary">更正原已发</Typography><Typography fontWeight={900}>{formatCurrency(row.correctionOriginalPaidAmount || 0)}</Typography></Box>
+                      <Box><Typography variant="caption" color="text.secondary">更正后应得</Typography><Typography fontWeight={900}>{formatCurrency(row.correctionEntitlementAmount || 0)}</Typography></Box>
+                      <Box><Typography variant="caption" color="text.secondary">补发 / 追回</Typography><Typography fontWeight={900} color="secondary.main">{formatCurrency(row.correctionSupplementAmount || 0)} / {formatCurrency(row.correctionRecoverAmount || 0)}</Typography></Box>
                     </Box>
                     <Stack direction="row" spacing={0.6} sx={{ mt: 1.1, flexWrap: 'wrap', rowGap: 0.6 }}>
                       {monthlyPayoutStatusDistribution(row).map((item) => (
@@ -3722,11 +3733,12 @@ const Commission: React.FC<CommissionProps> = ({
               })}
             </Box>
             <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}>
-              <Table size="small" sx={[moduleTableSx, { minWidth: 1540 }]}>
+              <Table size="small" sx={[moduleTableSx, { minWidth: 1920 }]}>
                 <TableHead><TableRow>
                   <TableCell>员工</TableCell><TableCell>部门</TableCell><TableCell>业务构成</TableCell>
                   <TableCell align="right">正式订单实付</TableCell><TableCell align="right">挽回成交额</TableCell><TableCell align="right">本月提成总额</TableCell>
                   <TableCell align="right">待确认</TableCell><TableCell align="right">待发放</TableCell><TableCell align="right">已发放</TableCell>
+                  <TableCell align="right">更正原已发</TableCell><TableCell align="right">更正后应得</TableCell><TableCell align="right">补发 / 追回</TableCell>
                   <TableCell>状态分布</TableCell><TableCell align="center">操作</TableCell>
                 </TableRow></TableHead>
                 <TableBody>
@@ -3747,6 +3759,9 @@ const Commission: React.FC<CommissionProps> = ({
                         <TableCell align="right"><Typography fontWeight={row.pendingConfirmAmount > 0 ? 900 : 500} color={row.pendingConfirmAmount > 0 ? 'info.main' : 'text.primary'}>{formatCurrency(row.pendingConfirmAmount)}</Typography></TableCell>
                         <TableCell align="right"><Typography fontWeight={row.pendingPayAmount > 0 ? 900 : 500} color={row.pendingPayAmount > 0 ? 'warning.main' : 'text.primary'}>{formatCurrency(row.pendingPayAmount)}</Typography></TableCell>
                         <TableCell align="right"><Typography fontWeight={row.paidAmount > 0 ? 900 : 500} color={row.paidAmount > 0 ? 'success.main' : 'text.primary'}>{formatCurrency(row.paidAmount)}</Typography></TableCell>
+                        <TableCell align="right">{formatCurrency(row.correctionOriginalPaidAmount || 0)}</TableCell>
+                        <TableCell align="right"><Typography fontWeight={(row.correctionEntitlementAmount || 0) > 0 ? 900 : 500}>{formatCurrency(row.correctionEntitlementAmount || 0)}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" color="secondary.main">{formatCurrency(row.correctionSupplementAmount || 0)} / {formatCurrency(row.correctionRecoverAmount || 0)}</Typography></TableCell>
                         <TableCell>
                           <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, maxWidth: 280 }}>
                             {monthlyPayoutStatusDistribution(row).map((item) => (
@@ -3758,7 +3773,7 @@ const Commission: React.FC<CommissionProps> = ({
                       </TableRow>
                     );
                   })}
-                  {!payoutRows.length && <TableRow><TableCell colSpan={11} align="center" sx={{ py: 5, color: 'text.secondary' }}>{payoutLoading ? '加载中...' : '暂无员工提成月报数据'}</TableCell></TableRow>}
+                  {!payoutRows.length && <TableRow><TableCell colSpan={14} align="center" sx={{ py: 5, color: 'text.secondary' }}>{payoutLoading ? '加载中...' : '暂无员工提成月报数据'}</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </TableContainer>
@@ -3802,6 +3817,9 @@ const Commission: React.FC<CommissionProps> = ({
                     { label: '待确认', value: formatCurrency(selectedFinancePayoutRow.pendingConfirmAmount), color: '#2563eb' },
                     { label: '待发放', value: formatCurrency(selectedFinancePayoutRow.pendingPayAmount), color: '#d97706' },
                     { label: '已发放', value: formatCurrency(selectedFinancePayoutRow.paidAmount), color: '#16a34a' },
+                    { label: '更正原已发', value: formatCurrency(selectedFinancePayoutRow.correctionOriginalPaidAmount || 0), color: '#475569' },
+                    { label: '更正后应得', value: formatCurrency(selectedFinancePayoutRow.correctionEntitlementAmount || 0), color: '#7c3aed' },
+                    { label: '待补发 / 待追回', value: `${formatCurrency(selectedFinancePayoutRow.pendingCorrectionSupplementAmount || 0)} / ${formatCurrency(selectedFinancePayoutRow.pendingCorrectionRecoverAmount || 0)}`, color: '#dc2626' },
                   ].map((item) => (
                     <Box key={item.label} sx={{ border: '1px solid #e5e7eb', borderRadius: 1, px: 1.1, py: 0.9, bgcolor: '#f8fafc' }}>
                       <Typography variant="caption" color="text.secondary">{item.label}</Typography>

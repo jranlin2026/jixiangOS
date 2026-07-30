@@ -249,7 +249,16 @@ async function commissionRules(transaction: Prisma.TransactionClient): Promise<C
   return Array.isArray(stored) ? (stored as CommissionRule[]).map(normalizeRule) : [];
 }
 
-async function createCommissionRecords(transaction: Prisma.TransactionClient, order: Order, approvedAt: string): Promise<void> {
+interface OrderCommissionBuildPlan {
+  commissions: Commission[];
+  matchedRules: CommissionRule[];
+}
+
+async function buildOrderCommissionPlan(
+  transaction: Prisma.TransactionClient,
+  order: Order,
+  approvedAt: string,
+): Promise<OrderCommissionBuildPlan> {
   const [rules, roleConfigs, userRows, departmentRows] = await Promise.all([
     commissionRules(transaction),
     readStorageArray<CommissionRoleConfig>(transaction, STORAGE_KEYS.COMMISSION_ROLE_CONFIGS),
@@ -284,15 +293,11 @@ async function createCommissionRecords(transaction: Prisma.TransactionClient, or
   ].sort((left, right) => Number(left.rule?.priority || 0) - Number(right.rule?.priority || 0));
   if (!scopes.length) scopes.push({ rule: null, scopedOrder: order, scopeId: 'unmatched' });
   const matched = scopes.flatMap((scope) => scope.rule ? [scope.rule] : []);
+  const commissions: Commission[] = [];
 
   for (const { rule, scopedOrder, scopeId } of scopes) {
     const role = rule?.role || '销售';
     const recordId = `commission-${shortHash(`${order.id}:${scopeId}:${rule?.id || 'unmatched'}:${role}`)}`;
-    const existing = await transaction.businessRecord.findUnique({
-      where: { domain_recordId: { domain: STORAGE_KEYS.COMMISSIONS, recordId } },
-    });
-    if (existing) continue;
-
     const baseAmount = roundMoney(amount(scopedOrder.performanceBaseAmount ?? scopedOrder.actualAmount ?? scopedOrder.amount) * ((rule?.performanceRate ?? 100) / 100));
     const commissionAmount = !rule || rule.commissionType === 'tiered_percentage'
       ? 0
@@ -346,12 +351,37 @@ async function createCommissionRecords(transaction: Prisma.TransactionClient, or
       createdAt: approvedAt,
       updatedAt: approvedAt,
     };
+    commissions.push(commission);
+  }
+
+  return { commissions, matchedRules: matched };
+}
+
+/**
+ * Builds the deterministic commission snapshots used by order approval without
+ * persisting them. Paid-order correction previews use this calculation seam.
+ */
+export async function buildOrderCommissionRecords(
+  transaction: Prisma.TransactionClient,
+  order: Order,
+  approvedAt: string,
+): Promise<Commission[]> {
+  return (await buildOrderCommissionPlan(transaction, order, approvedAt)).commissions;
+}
+
+async function createCommissionRecords(transaction: Prisma.TransactionClient, order: Order, approvedAt: string): Promise<void> {
+  const { commissions, matchedRules } = await buildOrderCommissionPlan(transaction, order, approvedAt);
+  for (const commission of commissions) {
+    const existing = await transaction.businessRecord.findUnique({
+      where: { domain_recordId: { domain: STORAGE_KEYS.COMMISSIONS, recordId: commission.id } },
+    });
+    if (existing) continue;
     await transaction.businessRecord.create({
       data: {
-        id: `${STORAGE_KEYS.COMMISSIONS}:${recordId}`,
+        id: `${STORAGE_KEYS.COMMISSIONS}:${commission.id}`,
         domain: STORAGE_KEYS.COMMISSIONS,
-        recordId,
-        title: `${order.orderNo}-${role}`,
+        recordId: commission.id,
+        title: `${order.orderNo}-${commission.role}`,
         status: commission.status,
         owner: commission.owner,
         customerId: order.customerId,
@@ -363,7 +393,7 @@ async function createCommissionRecords(transaction: Prisma.TransactionClient, or
     });
   }
 
-  if (order.originalOrderId && matched.some((rule) => rule.clawbackBaseCommission)) {
+  if (order.originalOrderId && matchedRules.some((rule) => rule.clawbackBaseCommission)) {
     const previous = await transaction.businessRecord.findMany({
       where: { domain: STORAGE_KEYS.COMMISSIONS, orderId: order.originalOrderId },
     });

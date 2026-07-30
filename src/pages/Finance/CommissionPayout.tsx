@@ -42,7 +42,12 @@ import { ROUTES } from '../../shared/utils/constants';
 import TablePagination from '../../shared/components/TablePagination';
 import { moduleTablePaperSx, moduleTableSx } from '../../shared/components/ModuleShell';
 import { subscribePageRefresh } from '../../shared/utils/pageRefresh';
+import { isRecoveryCommission } from '../../shared/utils/commissionConfiguration';
 import type {
+  CommissionCorrectionHandlingMethod,
+  CommissionCorrectionLeg,
+  CommissionCorrectionPage,
+  CommissionCorrectionRecord,
   CommissionPayoutEmployeeRow,
   CommissionPayoutRecord,
   CommissionPayoutWorkspace,
@@ -56,7 +61,16 @@ import {
   type PendingCommissionFilter,
 } from './commissionPayoutPresentation';
 
-type PayoutView = 'pending' | 'records' | 'summary';
+type PayoutView = 'pending' | 'records' | 'corrections' | 'summary';
+type CorrectionStatusFilter = '全部' | '无差额' | '待处理' | '已处理';
+type RecoverHandlingMethod = Exclude<CommissionCorrectionHandlingMethod, '提成补发'>;
+
+interface CorrectionHandlingTarget {
+  recordId: string;
+  correctionNo: string;
+  sourceBusinessNo: string;
+  leg: CommissionCorrectionLeg;
+}
 
 const todayInput = () => {
   const now = new Date();
@@ -68,11 +82,25 @@ const commissionMonth = (value: { paymentDate?: string; createdAt: string }) => 
   String(value.paymentDate || value.createdAt).slice(0, 7)
 );
 
-const commissionTypeLabel = (commission: CommissionPayoutEmployeeRow['commissions'][number]) => {
-  const isRecovery = commission.sourceBusinessType === 'after_sales_recovery'
-    || commission.sourceBusinessType === 'refund_recovery'
-    || Boolean(commission.sourceRecoveryOrderId);
-  if (isRecovery) return '售后挽回提成';
+type PayoutCommission = CommissionPayoutEmployeeRow['commissions'][number];
+
+const isAfterSalesRecoveryCorrectionSource = (commission: PayoutCommission) => (
+  commission.sourceBusinessType === 'after_sales_recovery'
+);
+
+const supportsPostPayoutCorrection = (commission: PayoutCommission) => (
+  isAfterSalesRecoveryCorrectionSource(commission)
+  || (!isRecoveryCommission(commission) && Boolean(commission.orderId))
+);
+
+const commissionSourceId = (commission: PayoutCommission) => (
+  isAfterSalesRecoveryCorrectionSource(commission)
+    ? commission.sourceRecoveryOrderId || commission.orderId || ''
+    : supportsPostPayoutCorrection(commission) ? commission.orderId || '' : ''
+);
+
+const commissionTypeLabel = (commission: PayoutCommission) => {
+  if (isRecoveryCommission(commission)) return '售后挽回提成';
   if (commission.ruleCalculationType === 'tiered_percentage') return '月度阶梯提成';
   return '普通订单提成';
 };
@@ -80,6 +108,16 @@ const commissionTypeLabel = (commission: CommissionPayoutEmployeeRow['commission
 const commissionCalculationText = (commission: CommissionPayoutEmployeeRow['commissions'][number]) => (
   commission.formulaText || commission.calculationNote || commission.payoutPlanName || '-'
 );
+
+const correctionSourceLabel = (record: CommissionCorrectionRecord) => (
+  record.sourceBusinessType === 'after_sales_recovery' ? '售后挽回' : '正式订单'
+);
+
+const correctionStatusColor = (status: CommissionCorrectionRecord['status']) => {
+  if (status === '已处理') return 'success' as const;
+  if (status === '待处理') return 'warning' as const;
+  return 'default' as const;
+};
 
 const employeeMonthLabel = (row: CommissionPayoutEmployeeRow) => {
   const months = [...new Set(row.commissions.map(commissionMonth))].sort();
@@ -100,9 +138,10 @@ const CommissionPayout: React.FC = () => {
   const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.currentUser);
   const canManage = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_PAYOUT, 'write');
-  const canCorrectPaidRecovery = isSuperAdmin(currentUser);
+  const canProcessPaidCommission = isSuperAdmin(currentUser);
   const [view, setView] = useState<PayoutView>('pending');
   const [workspace, setWorkspace] = useState<CommissionPayoutWorkspace | null>(null);
+  const [correctionData, setCorrectionData] = useState<CommissionCorrectionPage | null>(null);
   const [loadError, setLoadError] = useState('');
   const [feedback, setFeedback] = useState<{ severity: OperationFeedbackSeverity; message: string } | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -125,16 +164,42 @@ const CommissionPayout: React.FC = () => {
   const [recordOwnerRowsPerPage, setRecordOwnerRowsPerPage] = useState(10);
   const [recordCommissionPage, setRecordCommissionPage] = useState(0);
   const [recordCommissionRowsPerPage, setRecordCommissionRowsPerPage] = useState(10);
+  const [correctionPage, setCorrectionPage] = useState(0);
+  const [correctionRowsPerPage, setCorrectionRowsPerPage] = useState(10);
+  const [correctionSearchInput, setCorrectionSearchInput] = useState('');
+  const [correctionSearch, setCorrectionSearch] = useState('');
+  const [correctionStatus, setCorrectionStatus] = useState<CorrectionStatusFilter>('全部');
+  const [correctionHandlingTarget, setCorrectionHandlingTarget] = useState<CorrectionHandlingTarget | null>(null);
+  const [correctionHandlingMethod, setCorrectionHandlingMethod] = useState<RecoverHandlingMethod>('线下追回');
+  const [correctionHandlingAmount, setCorrectionHandlingAmount] = useState('');
+  const [correctionHandlingNote, setCorrectionHandlingNote] = useState('');
+  const [correctionSubmitting, setCorrectionSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     if (view === 'summary') return;
     setLoadError('');
+    if (view === 'corrections') {
+      const response = await commissionPayoutApi.fetchCorrections({
+        search: correctionSearch,
+        status: correctionStatus,
+        page: correctionPage + 1,
+        pageSize: correctionRowsPerPage,
+      });
+      if (response.code === 0 && response.data) {
+        setCorrectionData(response.data);
+        const resolvedPage = Math.max(0, response.data.pagination.page - 1);
+        if (resolvedPage !== correctionPage) setCorrectionPage(resolvedPage);
+      } else {
+        setLoadError(response.message || '更正与差额数据加载失败');
+      }
+      return;
+    }
     const response = view === 'pending'
       ? await commissionPayoutApi.fetchPendingWorkspace()
       : await commissionPayoutApi.fetchRecordsWorkspace();
     if (response.code === 0 && response.data) setWorkspace(response.data);
     else setLoadError(response.message || '提成发放数据加载失败');
-  }, [view]);
+  }, [correctionPage, correctionRowsPerPage, correctionSearch, correctionStatus, view]);
 
   useEffect(() => {
     void load();
@@ -209,13 +274,14 @@ const CommissionPayout: React.FC = () => {
     (currentRecordOwnerPage + 1) * recordOwnerRowsPerPage,
   );
   const recordCommissionRows = detailRecord?.commissionSnapshots || [];
-  const canCorrectCurrentPaidRecovery = canCorrectPaidRecovery && detailRecord?.status === '已发放';
+  const canProcessCurrentPayout = canProcessPaidCommission && detailRecord?.status === '已发放';
   const recordCommissionTotalPages = Math.max(1, Math.ceil(recordCommissionRows.length / recordCommissionRowsPerPage));
   const currentRecordCommissionPage = Math.min(recordCommissionPage, recordCommissionTotalPages - 1);
   const visibleRecordCommissionRows = recordCommissionRows.slice(
     currentRecordCommissionPage * recordCommissionRowsPerPage,
     (currentRecordCommissionPage + 1) * recordCommissionRowsPerPage,
   );
+  const visibleCorrectionRows = correctionData?.items || [];
 
   const toggleAll = () => setSelectedIds(allSelected ? [] : selectable.map((item) => item.ownerId));
   const toggleOne = (ownerId: string) => setSelectedIds((current) => (
@@ -261,12 +327,110 @@ const CommissionPayout: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const openPaidRecoveryCorrection = (commission: NonNullable<CommissionPayoutRecord['commissionSnapshots']>[number]) => {
-    const recoveryOrderId = commission.sourceRecoveryOrderId
-      || (commission.sourceBusinessType === 'after_sales_recovery' ? commission.orderId : '');
-    if (!recoveryOrderId) return;
+  const openPostPayoutProcessing = (commission: NonNullable<CommissionPayoutRecord['commissionSnapshots']>[number]) => {
+    const sourceId = commissionSourceId(commission);
+    if (!sourceId) return;
     setDetailRecord(null);
-    navigate(`${ROUTES.AFTER_SALES}?tab=recovery-list&correctRecoveryId=${encodeURIComponent(recoveryOrderId)}`);
+    navigate(isAfterSalesRecoveryCorrectionSource(commission)
+      ? `${ROUTES.AFTER_SALES}?tab=recovery-list&correctRecoveryId=${encodeURIComponent(sourceId)}`
+      : `${ROUTES.ORDERS}?tab=list&correctOrderId=${encodeURIComponent(sourceId)}`);
+  };
+
+  const applyCorrectionSearch = () => {
+    setCorrectionPage(0);
+    setCorrectionSearch(correctionSearchInput.trim());
+  };
+
+  const openRecoverHandling = (record: CommissionCorrectionRecord, leg: CommissionCorrectionLeg) => {
+    if (!canProcessPaidCommission || leg.kind !== '追回' || leg.status !== '待处理') return;
+    setCorrectionHandlingTarget({
+      recordId: record.id,
+      correctionNo: record.correctionNo,
+      sourceBusinessNo: record.sourceBusinessNo,
+      leg,
+    });
+    setCorrectionHandlingMethod('线下追回');
+    setCorrectionHandlingAmount(String(leg.amount));
+    setCorrectionHandlingNote('');
+  };
+
+  const changeRecoverHandlingMethod = (method: RecoverHandlingMethod) => {
+    setCorrectionHandlingMethod(method);
+    setCorrectionHandlingAmount(method === '财务确认无需追回'
+      ? '0'
+      : String(correctionHandlingTarget?.leg.amount || ''));
+  };
+
+  const completeRecoverHandling = async () => {
+    if (!canProcessPaidCommission || !correctionHandlingTarget) return;
+    const amount = correctionHandlingMethod === '财务确认无需追回'
+      ? 0
+      : Number(correctionHandlingAmount);
+    const expectedAmount = correctionHandlingMethod === '财务确认无需追回'
+      ? 0
+      : correctionHandlingTarget.leg.amount;
+    if (!Number.isFinite(amount) || Math.abs(amount - expectedAmount) >= 0.01) {
+      setFeedback({ severity: 'error', message: '线下追回和下月抵扣必须全额处理；确认无需追回时金额为0' });
+      return;
+    }
+    if (!correctionHandlingNote.trim()) {
+      setFeedback({ severity: 'error', message: '请填写差额处理说明' });
+      return;
+    }
+    setCorrectionSubmitting(true);
+    const response = await commissionPayoutApi.completeCorrectionLeg(
+      correctionHandlingTarget.recordId,
+      correctionHandlingTarget.leg.id,
+      { method: correctionHandlingMethod, amount, note: correctionHandlingNote.trim() },
+    );
+    setCorrectionSubmitting(false);
+    if (response.code !== 0) {
+      setFeedback({ severity: 'error', message: response.message || '追回差额处理失败' });
+      return;
+    }
+    setCorrectionHandlingTarget(null);
+    await load();
+    setFeedback({ severity: 'success', message: '差额处理已记录，原发放事实保持不变' });
+  };
+
+  const renderCorrectionOutcome = (record: CommissionCorrectionRecord) => {
+    const supplementLegs = record.legs.filter((leg) => leg.kind === '补发');
+    const recoverLegs = record.legs.filter((leg) => leg.kind === '追回');
+    if (!supplementLegs.length && !recoverLegs.length) {
+      return <Typography variant="body2" color="text.secondary">无金额差额</Typography>;
+    }
+    return <Stack spacing={1} alignItems="flex-start">
+      {supplementLegs.map((leg) => (
+        <Box key={leg.id}>
+          <Chip
+            size="small"
+            color={leg.status === '已处理' ? 'success' : leg.status === '已取消' ? 'default' : 'info'}
+            label={`补发提成·${leg.status}`}
+          />
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.25 }}>
+            {leg.owner || '未指定员工'} · {formatCurrency(leg.amount)}
+          </Typography>
+        </Box>
+      ))}
+      {recoverLegs.map((leg) => (
+        <Box key={leg.id}>
+          <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Chip
+              size="small"
+              color={leg.status === '已处理' ? 'success' : leg.status === '待处理' ? 'warning' : 'default'}
+              label={`追回差额·${leg.status}`}
+            />
+            {leg.status === '待处理' && canProcessPaidCommission && (
+              <Button size="small" variant="outlined" onClick={() => openRecoverHandling(record, leg)}>处理追回</Button>
+            )}
+          </Stack>
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.25 }}>
+            {leg.owner || '未指定员工'} · {formatCurrency(leg.amount)}
+            {leg.handlingMethod ? ` · ${leg.handlingMethod}` : ''}
+          </Typography>
+        </Box>
+      ))}
+    </Stack>;
   };
 
   const renderPending = () => (
@@ -405,7 +569,7 @@ const CommissionPayout: React.FC = () => {
     <Paper variant="outlined">
       <Box sx={{ p: 2 }}>
         <Typography variant="h6" fontWeight={800}>发放记录</Typography>
-        <Typography variant="body2" color="text.secondary">每次确认发放自动生成记录；原发放事实永久保留，超级管理员可对单笔已发放售后业务资料执行留痕更正。</Typography>
+        <Typography variant="body2" color="text.secondary">每次确认发放自动生成记录；原发放事实永久保留，超级管理员可对逐笔提成发起留痕的发放后处理。</Typography>
       </Box>
       <Divider />
       <Box sx={{ display: { xs: 'block', md: 'none' } }}>
@@ -468,6 +632,131 @@ const CommissionPayout: React.FC = () => {
     </Paper>
   );
 
+  const renderCorrections = () => (
+    <Stack spacing={2}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 1.5 }}>
+        {metricCard('更正记录', `${correctionData?.summary.correctionCount || 0} 单`, '发放后业务更正全部留痕')}
+        {metricCard('待补发', formatCurrency(correctionData?.summary.pendingSupplementAmount || 0), '已生成补发提成，按原流程确认与发放', '#2563eb')}
+        {metricCard('待追回', formatCurrency(correctionData?.summary.pendingRecoverAmount || 0), '需超级管理员记录线下处理结果', '#d97706')}
+        {metricCard('已处理差额', formatCurrency(correctionData?.summary.handledAmount || 0), '包含已补发与已确认追回金额', '#15803d')}
+      </Box>
+
+      <Paper variant="outlined">
+        <Box sx={{ p: 2, display: 'flex', gap: 1.5, justifyContent: 'space-between', alignItems: { xs: 'stretch', md: 'center' }, flexDirection: { xs: 'column', md: 'row' } }}>
+          <Box>
+            <Typography variant="h6" fontWeight={800}>更正与差额</Typography>
+            <Typography variant="body2" color="text.secondary">原发放记录永久保留；业务更正产生的补发或追回作为独立差额处理。</Typography>
+          </Box>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ minWidth: { md: 520 } }}>
+            <TextField
+              size="small"
+              label="搜索更正单/源单/原因"
+              value={correctionSearchInput}
+              onChange={(event) => setCorrectionSearchInput(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter') applyCorrectionSearch(); }}
+              sx={{ flex: 1 }}
+            />
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel>状态</InputLabel>
+              <Select
+                label="状态"
+                value={correctionStatus}
+                onChange={(event) => { setCorrectionStatus(event.target.value as CorrectionStatusFilter); setCorrectionPage(0); }}
+              >
+                <MenuItem value="全部">全部</MenuItem>
+                <MenuItem value="待处理">待处理</MenuItem>
+                <MenuItem value="已处理">已处理</MenuItem>
+                <MenuItem value="无差额">无差额</MenuItem>
+              </Select>
+            </FormControl>
+            <Button variant="outlined" onClick={applyCorrectionSearch}>查询</Button>
+          </Stack>
+        </Box>
+        <Divider />
+
+        <Box sx={{ display: { xs: 'block', md: 'none' } }}>
+          {visibleCorrectionRows.map((record) => (
+            <Box key={record.id} sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="flex-start">
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography fontWeight={800} sx={{ overflowWrap: 'anywhere' }}>{record.correctionNo}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {correctionSourceLabel(record)} · {formatDateTime(record.createdAt)}
+                  </Typography>
+                </Box>
+                <Chip size="small" color={correctionStatusColor(record.status)} label={record.status} />
+              </Stack>
+              <Typography variant="body2" fontWeight={700} sx={{ mt: 1.5, overflowWrap: 'anywhere' }}>源单号：{record.sourceBusinessNo}</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>更正原因：{record.reason || '-'}</Typography>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>受影响月份：{record.affectedPeriods.join('、') || '-'}</Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1, mt: 1.5 }}>
+                <Box><Typography variant="caption" color="text.secondary">原已发</Typography><Typography fontWeight={800}>{formatCurrency(record.originalPaidAmount)}</Typography></Box>
+                <Box><Typography variant="caption" color="text.secondary">更正后应得</Typography><Typography fontWeight={800}>{formatCurrency(record.correctedEntitlementAmount)}</Typography></Box>
+                <Box><Typography variant="caption" color="text.secondary">补发</Typography><Typography fontWeight={800} color="primary.main">{formatCurrency(record.supplementAmount)}</Typography></Box>
+                <Box><Typography variant="caption" color="text.secondary">追回</Typography><Typography fontWeight={800} color="warning.main">{formatCurrency(record.recoverAmount)}</Typography></Box>
+              </Box>
+              <Box sx={{ mt: 1.5 }}>{renderCorrectionOutcome(record)}</Box>
+            </Box>
+          ))}
+          {!visibleCorrectionRows.length && <Box sx={{ py: 7, textAlign: 'center', color: 'text.secondary' }}>暂无更正与差额记录</Box>}
+        </Box>
+
+        <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}>
+          <Table size="small" sx={[moduleTableSx, { minWidth: 1560 }]}>
+            <TableHead><TableRow>
+              <TableCell sx={{ minWidth: 180 }}>更正单号</TableCell>
+              <TableCell sx={{ minWidth: 110 }}>业务来源</TableCell>
+              <TableCell sx={{ minWidth: 210 }}>源单号</TableCell>
+              <TableCell sx={{ minWidth: 220 }}>更正原因</TableCell>
+              <TableCell sx={{ minWidth: 150 }}>受影响月份</TableCell>
+              <TableCell align="right" sx={{ minWidth: 110 }}>原已发</TableCell>
+              <TableCell align="right" sx={{ minWidth: 130 }}>更正后应得</TableCell>
+              <TableCell align="right" sx={{ minWidth: 100 }}>补发</TableCell>
+              <TableCell align="right" sx={{ minWidth: 100 }}>追回</TableCell>
+              <TableCell sx={{ minWidth: 105 }}>状态</TableCell>
+              <TableCell sx={{ minWidth: 220 }}>差额进度</TableCell>
+            </TableRow></TableHead>
+            <TableBody>
+              {visibleCorrectionRows.map((record) => (
+                <TableRow key={record.id} hover>
+                  <TableCell>
+                    <Typography fontWeight={700}>{record.correctionNo}</Typography>
+                    <Typography variant="caption" color="text.secondary">{formatDateTime(record.createdAt)}</Typography>
+                  </TableCell>
+                  <TableCell>{correctionSourceLabel(record)}</TableCell>
+                  <TableCell><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{record.sourceBusinessNo}</Typography></TableCell>
+                  <TableCell>
+                    <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{record.reason || '-'}</Typography>
+                    <Typography variant="caption" color="text.secondary">{record.createdByName || '-'}</Typography>
+                  </TableCell>
+                  <TableCell>{record.affectedPeriods.join('、') || '-'}</TableCell>
+                  <TableCell align="right">{formatCurrency(record.originalPaidAmount)}</TableCell>
+                  <TableCell align="right"><Typography fontWeight={800}>{formatCurrency(record.correctedEntitlementAmount)}</Typography></TableCell>
+                  <TableCell align="right"><Typography fontWeight={800} color="primary.main">{formatCurrency(record.supplementAmount)}</Typography></TableCell>
+                  <TableCell align="right"><Typography fontWeight={800} color="warning.main">{formatCurrency(record.recoverAmount)}</Typography></TableCell>
+                  <TableCell><Chip size="small" color={correctionStatusColor(record.status)} label={record.status} /></TableCell>
+                  <TableCell>{renderCorrectionOutcome(record)}</TableCell>
+                </TableRow>
+              ))}
+              {!visibleCorrectionRows.length && <TableRow><TableCell colSpan={11} align="center" sx={{ py: 7, color: 'text.secondary' }}>暂无更正与差额记录</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        <TablePagination
+          count={correctionData?.pagination.total || 0}
+          page={correctionPage}
+          rowsPerPage={correctionRowsPerPage}
+          rowsPerPageOptions={[10, 20, 50]}
+          onPageChange={(_, nextPage) => setCorrectionPage(nextPage)}
+          onRowsPerPageChange={(event) => { setCorrectionRowsPerPage(Number(event.target.value)); setCorrectionPage(0); }}
+          labelRowsPerPage="每页条数"
+          labelDisplayedRows={formatPaginationRows}
+          sx={{ borderTop: '1px solid', borderColor: 'divider', bgcolor: '#fff' }}
+        />
+      </Paper>
+    </Stack>
+  );
+
   return <Stack spacing={2}>
     <Paper variant="outlined" sx={{ p: 2 }}>
       <Box>
@@ -475,12 +764,13 @@ const CommissionPayout: React.FC = () => {
         <Typography variant="body2" color="text.secondary">核对员工应发提成、执行发放，并保留完整发放记录。发放后业务资料更正不会覆盖原发放事实。</Typography>
       </Box>
       <Tabs value={view} onChange={(_: React.SyntheticEvent, value: PayoutView) => setView(value)} sx={{ mt: 1.5 }}>
-        <Tab value="pending" label="待发放" /><Tab value="records" label="发放记录" /><Tab value="summary" label="月度报告" />
+        <Tab value="pending" label="待发放" /><Tab value="records" label="发放记录" /><Tab value="corrections" label="更正与差额" /><Tab value="summary" label="月度报告" />
       </Tabs>
     </Paper>
     {loadError && <Alert severity="error" onClose={() => setLoadError('')}>{loadError}</Alert>}
     {view === 'pending' && renderPending()}
     {view === 'records' && renderRecords()}
+    {view === 'corrections' && renderCorrections()}
     {view === 'summary' && <Commission key="payout-summary" embedded initialTab={1} payoutMode="finance" />}
 
     <Dialog open={issueOpen} onClose={() => !submitting && setIssueOpen(false)} fullWidth maxWidth="sm">
@@ -495,6 +785,70 @@ const CommissionPayout: React.FC = () => {
         <TextField label="备注（选填）" value={note} onChange={(event) => setNote(event.target.value)} multiline minRows={2} />
       </Stack></DialogContent>
       <DialogActions><Button onClick={() => setIssueOpen(false)} disabled={submitting}>取消</Button><Button variant="contained" onClick={() => void submitIssue()} disabled={submitting || !issueAt || !paymentMethod}>确认发放</Button></DialogActions>
+    </Dialog>
+
+    <Dialog
+      open={Boolean(correctionHandlingTarget)}
+      onClose={() => !correctionSubmitting && setCorrectionHandlingTarget(null)}
+      fullWidth
+      maxWidth="sm"
+    >
+      <DialogTitle>处理追回差额</DialogTitle>
+      <DialogContent dividers>
+        <Stack spacing={2}>
+          <Alert severity="info">
+            此操作只记录差额的线下处理结果，不会修改或删除原发放记录。
+          </Alert>
+          <Paper variant="outlined" sx={{ p: 1.5 }}>
+            <Typography variant="body2">更正单号：{correctionHandlingTarget?.correctionNo || '-'}</Typography>
+            <Typography variant="body2">源单号：{correctionHandlingTarget?.sourceBusinessNo || '-'}</Typography>
+            <Typography variant="body2">待追回员工：{correctionHandlingTarget?.leg.owner || '-'}</Typography>
+            <Typography variant="body2">待追回金额：{formatCurrency(correctionHandlingTarget?.leg.amount || 0)}</Typography>
+          </Paper>
+          <FormControl fullWidth>
+            <InputLabel>处理方式</InputLabel>
+            <Select
+              label="处理方式"
+              value={correctionHandlingMethod}
+              onChange={(event) => changeRecoverHandlingMethod(event.target.value as RecoverHandlingMethod)}
+            >
+              <MenuItem value="线下追回">线下追回</MenuItem>
+              <MenuItem value="下月提成抵扣">下月提成抵扣</MenuItem>
+              <MenuItem value="财务确认无需追回">财务确认无需追回</MenuItem>
+            </Select>
+          </FormControl>
+          <TextField
+            fullWidth
+            type="number"
+            label="已处理金额"
+            value={correctionHandlingAmount}
+            disabled
+            onChange={(event) => setCorrectionHandlingAmount(event.target.value)}
+            slotProps={{ htmlInput: { min: 0, max: correctionHandlingTarget?.leg.amount || 0, step: 0.01 } }}
+            helperText={correctionHandlingMethod === '财务确认无需追回'
+              ? '无需追回时处理金额记为0元'
+              : '当前按全额追回或全额抵扣留痕'}
+          />
+          <TextField
+            fullWidth
+            required
+            multiline
+            minRows={3}
+            label="差额处理说明"
+            value={correctionHandlingNote}
+            onChange={(event) => setCorrectionHandlingNote(event.target.value)}
+            placeholder="请说明实际追回、下月抵扣依据，或无需追回的审批原因"
+          />
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setCorrectionHandlingTarget(null)} disabled={correctionSubmitting}>取消</Button>
+        <Button
+          variant="contained"
+          onClick={() => void completeRecoverHandling()}
+          disabled={correctionSubmitting || !correctionHandlingNote.trim()}
+        >确认留痕</Button>
+      </DialogActions>
     </Dialog>
 
     <Dialog open={Boolean(detailEmployee)} onClose={() => setDetailEmployee(null)} fullWidth maxWidth="lg">
@@ -585,15 +939,14 @@ const CommissionPayout: React.FC = () => {
         {detailRecord?.commissionSnapshots?.length ? (
           <Box>
             <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 1.5 }}>逐笔提成明细</Typography>
-            <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { borderRadius: '6px 6px 0 0', overflowX: 'auto' }]}><Table size="small" sx={[moduleTableSx, { minWidth: canCorrectCurrentPaidRecovery ? 1120 : 980 }]}>
-              <TableHead><TableRow><TableCell>提成类型</TableCell><TableCell>员工</TableCell><TableCell>客户</TableCell><TableCell>订单号</TableCell><TableCell>角色</TableCell><TableCell align="right">业绩金额</TableCell><TableCell align="right">发放金额</TableCell><TableCell>归属月份</TableCell>{canCorrectCurrentPaidRecovery && <TableCell align="center">操作</TableCell>}</TableRow></TableHead>
+            <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { borderRadius: '6px 6px 0 0', overflowX: 'auto' }]}><Table size="small" sx={[moduleTableSx, { minWidth: canProcessCurrentPayout ? 1120 : 980 }]}>
+              <TableHead><TableRow><TableCell>提成类型</TableCell><TableCell>员工</TableCell><TableCell>客户</TableCell><TableCell>订单号</TableCell><TableCell>角色</TableCell><TableCell align="right">业绩金额</TableCell><TableCell align="right">发放金额</TableCell><TableCell>归属月份</TableCell>{canProcessCurrentPayout && <TableCell align="center">操作</TableCell>}</TableRow></TableHead>
               <TableBody>{visibleRecordCommissionRows.map((row) => {
-                const recoveryOrderId = row.sourceRecoveryOrderId
-                  || (row.sourceBusinessType === 'after_sales_recovery' ? row.orderId : '');
+                const sourceId = commissionSourceId(row);
                 return (
                   <TableRow key={row.id} hover>
                     <TableCell>{commissionTypeLabel(row)}</TableCell><TableCell>{row.owner}</TableCell><TableCell>{row.customerName || '未命名客户'}</TableCell><TableCell><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{row.orderNo}</Typography></TableCell><TableCell>{row.role}</TableCell><TableCell align="right">{formatCurrency(Number(row.performanceAmount || row.orderAmount || 0))}</TableCell><TableCell align="right"><Typography fontWeight={900}>{formatCurrency(row.commissionAmount)}</Typography></TableCell><TableCell>{commissionMonth(row)}</TableCell>
-                    {canCorrectCurrentPaidRecovery && <TableCell align="center">{recoveryOrderId ? <Button size="small" startIcon={<EditOutlinedIcon />} onClick={() => openPaidRecoveryCorrection(row)}>发放后更正</Button> : <Typography variant="caption" color="text.secondary">暂不支持</Typography>}</TableCell>}
+                    {canProcessCurrentPayout && <TableCell align="center">{sourceId ? <Button size="small" startIcon={<EditOutlinedIcon />} onClick={() => openPostPayoutProcessing(row)}>发放后处理</Button> : <Typography variant="caption" color="text.secondary">源单不可用</Typography>}</TableCell>}
                   </TableRow>
                 );
               })}</TableBody>

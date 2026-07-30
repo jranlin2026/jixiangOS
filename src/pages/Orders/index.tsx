@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Box,
   Button,
@@ -220,7 +220,9 @@ const Orders: React.FC = () => {
     ? requestedTab
     : visibleTabs[0]?.value || false;
   const orderIdParam = searchParams.get('orderId');
+  const correctionTargetId = searchParams.get('correctOrderId') || '';
   const importBatchId = searchParams.get('importBatchId') || '';
+  const handledCorrectionTargetRef = useRef('');
   const [detailOpen, setDetailOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
@@ -245,6 +247,14 @@ const Orders: React.FC = () => {
   const [orderLookupMessage, setOrderLookupMessage] = useState('');
   const [submittedOrderApplication, setSubmittedOrderApplication] = useState<OrderApplication | null>(null);
   const { alert, confirm, dialog: feedbackDialog } = useAppFeedback();
+
+  const clearCorrectionTarget = () => {
+    handledCorrectionTargetRef.current = '';
+    if (!searchParams.has('correctOrderId')) return;
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('correctOrderId');
+    setSearchParams(nextParams, { replace: true });
+  };
 
   const navigateToImportedOrderReview = (job: BusinessImportJobResult) => {
     if (!job.batchId) return;
@@ -320,6 +330,7 @@ const Orders: React.FC = () => {
     if (value === 'review') {
       nextParams.set('tab', 'review');
       nextParams.delete('orderId');
+      nextParams.delete('correctOrderId');
     } else if (nextParams.has('orderId')) {
       nextParams.set('tab', 'list');
     } else {
@@ -369,28 +380,61 @@ const Orders: React.FC = () => {
     'unsupported_commission_status',
   ].includes(correctionBlocker.precheck.reasonCode || ''));
 
-  const handleEditOrder = async (order: Order, mode: 'edit' | 'correction' = 'edit') => {
+  const handleEditOrder = async (order: Order, mode: 'edit' | 'correction' = 'edit'): Promise<boolean> => {
     if (mode === 'correction') {
       const precheck = await orderApi.precheckOrderCorrection(order.id);
       if (precheck.code !== 0 || !precheck.data) {
         await alert(precheck.message || '订单更正预检失败，请稍后重试');
-        return;
+        return false;
       }
       if (!precheck.data.allowed) {
         setCorrectionBlocker({ order, precheck: precheck.data });
         setDetailOpen(false);
-        return;
+        return false;
       }
     }
     const res = await orderApi.fetchOrderById(order.id);
     if (res.code !== 0 || !res.data) {
       await alert(res.message || '订单详情加载失败，暂时不能编辑');
-      return;
+      return false;
     }
     setEditingOrder(res.data);
     setOrderFormMode(mode);
     setDetailOpen(false);
     setFormOpen(true);
+    return true;
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'list' || !correctionTargetId) return undefined;
+    if (handledCorrectionTargetRef.current === correctionTargetId) return undefined;
+    handledCorrectionTargetRef.current = correctionTargetId;
+    let active = true;
+
+    void (async () => {
+      const response = await orderApi.fetchOrderById(correctionTargetId);
+      if (!active) return;
+      if (response.code !== 0 || !response.data) {
+        setOrderLookupMessage(response.message || '未找到需要进行发放后处理的正式订单。');
+        clearCorrectionTarget();
+        return;
+      }
+      const opened = await handleEditOrder(response.data, 'correction');
+      if (active && !opened) clearCorrectionTarget();
+    })();
+
+    return () => {
+      active = false;
+    };
+    // URL 参数是一次性指令；表单关闭时才清理，避免页面刷新后丢失当前更正上下文。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, correctionTargetId]);
+
+  const handleCloseOrderForm = () => {
+    setFormOpen(false);
+    setEditingOrder(null);
+    setOrderFormMode('edit');
+    if (correctionTargetId) clearCorrectionTarget();
   };
 
   const handleDeleteOrder = async (order: Order) => {
@@ -1009,7 +1053,7 @@ const Orders: React.FC = () => {
         order={editingOrder}
         initialMode={orderFormMode}
         customer={orderCustomer}
-        onClose={() => { setFormOpen(false); setEditingOrder(null); setOrderFormMode('edit'); }}
+        onClose={handleCloseOrderForm}
         onSuccess={(application) => {
           fetchItems({ ...filters, paymentMethod: undefined });
           setOrderCustomer(null);

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import type { AuthenticatedUser } from '../../src/types/auth';
-import type { Commission } from '../../src/types/commission';
+import type { Commission, CommissionCorrectionRecord } from '../../src/types/commission';
 import { createCommissionPayoutService } from './commissionPayoutService';
 
 const NOW = '2026-07-26T10:00:00.000Z';
@@ -429,6 +429,117 @@ function fakePrisma(seed: any[]) {
   assert.equal(employee?.formalOrderCount, 1);
   assert.equal(employee?.recoveryOrderCount, 0);
   assert.equal(workspace.data?.summary.formalOrderPaidAmount, 899, '顶部正式订单实付必须来自业务订单而不是阶梯业绩');
+}
+
+{
+  const paid = commission('correction-caliber-paid', '已发放', {
+    orderId: 'correction-caliber-order',
+    orderNo: 'ORD-CORRECTION-CALIBER',
+    commissionAmount: 100,
+    paidAt: '2026-07-20T08:00:00.000Z',
+  });
+  const zeroDifferenceCorrection = (
+    id: string,
+    correctionNo: string,
+    createdAt: string,
+  ): CommissionCorrectionRecord => ({
+    id,
+    correctionNo,
+    sourceBusinessType: 'formal_order',
+    sourceBusinessId: paid.orderId,
+    sourceBusinessNo: paid.orderNo,
+    sourceRevision: `revision-${id}`,
+    beforeBusinessSnapshot: {},
+    afterBusinessSnapshot: {},
+    affectedPeriods: ['2026-07'],
+    affectedEmployeeCount: 1,
+    affectedCommissionCount: 1,
+    originalPaidAmount: 100,
+    correctedEntitlementAmount: 100,
+    supplementAmount: 0,
+    recoverAmount: 0,
+    impacts: [{
+      id: `impact-${id}`,
+      sourceCommissionId: paid.id,
+      role: paid.role,
+      originalOwnerId: paid.ownerId,
+      originalOwner: paid.owner,
+      correctedOwnerId: paid.ownerId,
+      correctedOwner: paid.owner,
+      originalPeriod: '2026-07',
+      correctedPeriod: '2026-07',
+      originalPaidAmount: 100,
+      correctedEntitlementAmount: 100,
+      deltaAmount: 0,
+      action: '无需差额',
+      payoutRecordIds: [],
+    }],
+    legs: [],
+    impactHash: `hash-${id}`,
+    reason: '同源业务资料连续更正',
+    status: '无差额',
+    createdById: superAdmin.id,
+    createdByName: superAdmin.name,
+    createdAt,
+    updatedAt: createdAt,
+  });
+  const firstFinancialCorrection: CommissionCorrectionRecord = {
+    ...zeroDifferenceCorrection(
+      'correction-caliber-1', 'COR-202607-000020', '2026-07-30T09:00:00.000Z',
+    ),
+    correctedEntitlementAmount: 120,
+    supplementAmount: 20,
+    impacts: [{
+      ...zeroDifferenceCorrection('unused', 'unused', NOW).impacts[0],
+      id: 'impact-correction-caliber-1',
+      correctedEntitlementAmount: 120,
+      deltaAmount: 20,
+      action: '补发',
+    }],
+    legs: [{
+      id: 'leg-correction-caliber-1',
+      impactId: 'impact-correction-caliber-1',
+      kind: '补发',
+      ownerId: paid.ownerId,
+      owner: paid.owner,
+      departmentId: paid.departmentId,
+      department: paid.department,
+      role: paid.role,
+      period: '2026-07',
+      amount: 20,
+      sourceCommissionIds: [paid.id],
+      status: '待发放',
+    }],
+    status: '待处理',
+  };
+  const latestMetadataCorrection: CommissionCorrectionRecord = {
+    ...zeroDifferenceCorrection(
+      'correction-caliber-2', 'COR-202607-000021', '2026-07-30T10:00:00.000Z',
+    ),
+    correctedEntitlementAmount: 120,
+    impacts: [{
+      ...zeroDifferenceCorrection('unused-latest', 'unused-latest', NOW).impacts[0],
+      id: 'impact-correction-caliber-2',
+      correctedEntitlementAmount: 120,
+      deltaAmount: 0,
+      action: '无需差额',
+    }],
+  };
+  const db = fakePrisma([
+    record(STORAGE_KEYS.COMMISSIONS, paid as unknown as Record<string, unknown>),
+    record(STORAGE_KEYS.COMMISSION_CORRECTIONS, firstFinancialCorrection as unknown as Record<string, unknown>),
+    record(STORAGE_KEYS.COMMISSION_CORRECTIONS, latestMetadataCorrection as unknown as Record<string, unknown>),
+  ]);
+  const workspace = await createCommissionPayoutService(db.prisma, { now: () => new Date(NOW) })
+    .getPeriodWorkspace('2026-07');
+  const employee = workspace.data?.employees.find((row) => row.ownerId === paid.ownerId);
+  assert.equal(employee?.correctionOriginalPaidAmount, 100, '员工汇总必须只采用同源最新更正口径');
+  assert.equal(employee?.correctionEntitlementAmount, 120);
+  assert.equal(employee?.correctionSupplementAmount, 20, '员工汇总必须保留更早已生成的补发流水');
+  assert.equal(employee?.pendingCorrectionSupplementAmount, 20);
+  assert.equal(workspace.data?.summary.correctionOriginalPaidAmount, 100);
+  assert.equal(workspace.data?.summary.correctionEntitlementAmount, 120);
+  assert.equal(workspace.data?.summary.correctionSupplementAmount, 20);
 }
 
 {

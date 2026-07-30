@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import type { AuthenticatedUser } from '../../src/types/auth';
+import type { Commission, CommissionPayoutRecord } from '../../src/types/commission';
 import type { Order } from '../../src/types/order';
 import { createOrderCommandService } from './orderCommandService';
 
@@ -237,18 +238,47 @@ class FakePrisma {
       },
     });
     if (options.commissionStatus) {
+      const sourceCommission: Commission = {
+        id: 'commission-1', orderId: sourceOrder.id, orderNo: sourceOrder.orderNo,
+        customerName: sourceOrder.customerName, productLevel: sourceOrder.productLevel,
+        orderAmount: sourceOrder.actualAmount, performanceAmount: sourceOrder.actualAmount,
+        commissionRate: 0, commissionAmount: 100, role: '销售', ownerId: sourceOrder.salesId,
+        owner: sourceOrder.salesName || sourceOrder.owner, departmentId: 'dept-sales', department: '销售部',
+        paymentDate: sourceOrder.payments?.[0]?.paidAt || sourceOrder.createdAt,
+        status: options.commissionStatus as Commission['status'],
+        sourceType: options.commissionManual ? '人工新增' : '自动规则',
+        sourceBusinessType: 'formal_order', isManualAdjusted: options.commissionManual || undefined,
+        paidAt: options.commissionStatus === '已发放' ? NOW : undefined,
+        payoutRecordId: options.commissionStatus === '已发放' ? 'payout-1' : undefined,
+        createdAt: sourceOrder.createdAt, updatedAt: NOW,
+      };
       this.rows.set(key(STORAGE_KEYS.COMMISSIONS, 'commission-1'), {
         id: `${STORAGE_KEYS.COMMISSIONS}:commission-1`,
         domain: STORAGE_KEYS.COMMISSIONS,
         recordId: 'commission-1',
         orderId: sourceOrder.id,
         status: options.commissionStatus,
-        data: {
-          id: 'commission-1', orderId: sourceOrder.id, status: options.commissionStatus,
-          sourceType: options.commissionManual ? '人工新增' : '自动规则',
-          isManualAdjusted: options.commissionManual || undefined,
-        },
+        owner: sourceCommission.owner,
+        amount: sourceCommission.commissionAmount,
+        data: sourceCommission,
       });
+      if (options.commissionStatus === '已发放') {
+        const payout: CommissionPayoutRecord = {
+          id: 'payout-1', payoutNo: 'FF-202607-000001', period: '2026-07', status: '已发放',
+          totalCount: 1, totalAmount: sourceCommission.commissionAmount, commissionIds: [sourceCommission.id],
+          commissionSnapshots: [clone(sourceCommission)], byOwner: [], createdAt: NOW,
+          createdById: superAdmin.id, createdByName: superAdmin.name, issuedAt: NOW,
+          issuedById: superAdmin.id, issuedByName: superAdmin.name,
+        };
+        this.rows.set(key(STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES, payout.id), {
+          id: `${STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES}:${payout.id}`,
+          domain: STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES,
+          recordId: payout.id,
+          status: payout.status,
+          amount: payout.totalAmount,
+          data: payout,
+        });
+      }
     }
     if (options.deliveryStatus) {
       this.rows.set(key(STORAGE_KEYS.DELIVERIES, 'delivery-1'), {
@@ -585,17 +615,228 @@ class FakePrisma {
 
 {
   const prisma = new FakePrisma({ commissionStatus: '已发放' });
-  const result = await createOrderCommandService(prisma as any, {
+  let correctionNowCall = 0;
+  const previewCommissions = async (_transaction: any, nextOrder: Order): Promise<Commission[]> => [{
+    ...(prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'commission-1'))!.data as Commission),
+    customerName: nextOrder.customerName,
+    productLevel: nextOrder.productLevel,
+    orderAmount: nextOrder.actualAmount,
+    performanceAmount: nextOrder.actualAmount,
+    commissionAmount: 120,
+    paymentDate: nextOrder.payments?.[0]?.paidAt || nextOrder.createdAt,
+    status: '待确认',
+    paidAt: undefined,
+    payoutRecordId: undefined,
+    updatedAt: NOW,
+  }];
+  const service = createOrderCommandService(prisma as any, {
+    // 预览和正式提交是两次独立请求，实际执行时间必然不同。
+    now: () => new Date(correctionNowCall++ === 0 ? NOW : '2026-07-12T13:05:00.000Z'),
     rebuildPendingCommissions: async () => undefined,
-  }).correct('order-1', {
+    previewCommissions,
+  });
+  const preview = await service.previewCorrection('order-1', {
     reason: '已发放后尝试覆盖金额',
-    data: { actualAmount: 999 },
+    data: { actualAmount: 999, payments: [{ id: 'paid-correction', amount: 999, paymentMethod: '对公转账', paidAt: NOW }] },
+  }, superAdmin);
+  assert.equal(preview.code, 0, preview.message);
+  assert.equal(preview.data?.supplementAmount, 20);
+
+  const result = await service.correct('order-1', {
+    reason: '已发放后尝试覆盖金额',
+    data: { actualAmount: 999, payments: [{ id: 'paid-correction', amount: 999, paymentMethod: '对公转账', paidAt: NOW }] },
+    expectedImpactHash: preview.data!.impactHash,
   }, superAdmin);
 
-  assert.equal(result.code, 409);
-  assert.match(result.message, /冲正/);
+  assert.equal(result.code, 0, result.message);
+  assert.equal(prisma.orderData().actualAmount, 999);
+  const preserved = prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'commission-1'))!.data as Commission;
+  assert.equal(preserved.status, '已发放');
+  assert.equal(preserved.commissionAmount, 100, '原已发放金额必须保留');
+  assert.equal(preserved.payoutRecordId, 'payout-1');
+  assert.equal(prisma.rows.has(key(STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES, 'payout-1')), true);
+  assert.equal(Array.from(prisma.rows.values()).some((row) => row.domain === STORAGE_KEYS.COMMISSION_CORRECTIONS), true);
+  assert.equal(Array.from(prisma.rows.values()).some((row) => row.domain === STORAGE_KEYS.COMMISSIONS && row.data.correctionDeltaType === '补发'), true);
+  const repeated = await service.previewCorrection('order-1', {
+    reason: '再次修改金额',
+    data: { actualAmount: 1099, payments: [{ id: 'paid-correction-2', amount: 1099, paymentMethod: '对公转账', paidAt: NOW }] },
+  }, superAdmin);
+  assert.equal(repeated.code, 409);
+  assert.match(repeated.message, /差额更正|叠加更正/);
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '已发放' });
+  const commissionRow = prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'commission-1'))!;
+  commissionRow.data = { ...commissionRow.data, status: '待发放' };
+  const previewCommissions = async (_transaction: any, nextOrder: Order): Promise<Commission[]> => [{
+    ...(commissionRow.data as Commission),
+    orderAmount: nextOrder.actualAmount,
+    performanceAmount: nextOrder.actualAmount,
+    commissionAmount: 120,
+    status: '待确认',
+    paidAt: undefined,
+    payoutRecordId: undefined,
+  }];
+  const service = createOrderCommandService(prisma as any, {
+    now: () => new Date(NOW),
+    rebuildPendingCommissions: async () => undefined,
+    previewCommissions,
+  });
+  const input = {
+    reason: '兼容历史状态索引与JSON不一致',
+    data: { actualAmount: 999, payments: [{ id: 'paid-stale-json', amount: 999, paymentMethod: '对公转账' as const, paidAt: NOW }] },
+  };
+  const preview = await service.previewCorrection('order-1', input, superAdmin);
+  assert.equal(preview.code, 0, preview.message);
+  const corrected = await service.correct('order-1', { ...input, expectedImpactHash: preview.data!.impactHash }, superAdmin);
+  assert.equal(corrected.code, 0, corrected.message);
+  const preserved = prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'commission-1'))!.data as Commission;
+  assert.equal(preserved.status, '已发放', '历史JSON状态滞后时仍必须以锁定的数据库状态保护原发放事实');
+  assert.equal(preserved.commissionAmount, 100);
+  assert.equal(preserved.payoutRecordId, 'payout-1');
+  assert.equal(Array.from(prisma.rows.values()).some((row) => row.domain === STORAGE_KEYS.COMMISSION_CORRECTIONS), true);
+}
+
+{
+  const sourceOrder = order({
+    amount: 5_000,
+    actualAmount: 5_000,
+    payments: [{ id: 'tier-source-payment', amount: 5_000, paymentMethod: '对公转账', paidAt: NOW }],
+  });
+  const prisma = new FakePrisma({ sourceOrder, commissionStatus: '待确认' });
+  const tiers = [{ minAmount: 0, maxAmount: 30_000, rate: 8 }, { minAmount: 30_000, rate: 10 }];
+  const sourceRow = prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'commission-1'))!;
+  const sourceTierCommission: Commission = {
+    ...(sourceRow.data as Commission),
+    orderAmount: 5_000,
+    performanceAmount: 5_000,
+    commissionAmount: 400,
+    commissionRate: 0.08,
+    ruleCalculationType: 'tiered_percentage',
+    payoutPlanId: 'monthly-tier-plan',
+    payoutPlanName: '月度阶梯',
+    payoutPlanVersion: 1,
+    payoutPlanSnapshot: {
+      id: 'monthly-tier-plan', name: '月度阶梯', version: 1,
+      commissionType: 'tiered_percentage', commissionValue: 0, tiers,
+    },
+  };
+  sourceRow.data = sourceTierCommission;
+  sourceRow.amount = sourceTierCommission.commissionAmount;
+  const linkedPaidCommission: Commission = {
+    ...sourceTierCommission,
+    id: 'commission-linked-paid-tier',
+    orderId: 'order-linked-paid',
+    orderNo: 'ORD-LINKED-PAID',
+    orderAmount: 20_000,
+    performanceAmount: 20_000,
+    commissionAmount: 1_600,
+    status: '已发放',
+    paidAt: NOW,
+    payoutRecordId: 'payout-linked-paid-tier',
+  };
+  prisma.rows.set(key(STORAGE_KEYS.COMMISSIONS, linkedPaidCommission.id), {
+    id: `${STORAGE_KEYS.COMMISSIONS}:${linkedPaidCommission.id}`,
+    domain: STORAGE_KEYS.COMMISSIONS,
+    recordId: linkedPaidCommission.id,
+    orderId: linkedPaidCommission.orderId,
+    status: linkedPaidCommission.status,
+    owner: linkedPaidCommission.owner,
+    amount: linkedPaidCommission.commissionAmount,
+    data: clone(linkedPaidCommission),
+  });
+  const linkedPayout: CommissionPayoutRecord = {
+    id: 'payout-linked-paid-tier', payoutNo: 'FF-LINKED-TIER', period: '2026-07', status: '已发放',
+    totalCount: 1, totalAmount: 1_600, commissionIds: [linkedPaidCommission.id],
+    commissionSnapshots: [clone(linkedPaidCommission)], byOwner: [], createdAt: NOW,
+    createdById: superAdmin.id, createdByName: superAdmin.name, issuedAt: NOW,
+    issuedById: superAdmin.id, issuedByName: superAdmin.name,
+  };
+  prisma.rows.set(key(STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES, linkedPayout.id), {
+    id: `${STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES}:${linkedPayout.id}`,
+    domain: STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES,
+    recordId: linkedPayout.id,
+    status: linkedPayout.status,
+    amount: linkedPayout.totalAmount,
+    data: linkedPayout,
+  });
+  const previewCommissions = async (_transaction: any, nextOrder: Order): Promise<Commission[]> => [{
+    ...sourceTierCommission,
+    orderAmount: nextOrder.actualAmount,
+    performanceAmount: nextOrder.actualAmount,
+    commissionAmount: 0,
+    status: '待确认',
+    updatedAt: NOW,
+  }];
+  const service = createOrderCommandService(prisma as any, {
+    now: () => new Date(NOW),
+    rebuildPendingCommissions: async () => undefined,
+    previewCommissions,
+  });
+  const precheck = await service.precheckCorrection(sourceOrder.id, superAdmin);
+  assert.equal(precheck.data?.requiresImpactPreview, true, '超管正式更正应统一预览跨订单阶梯联动');
+  const correctionInput = {
+    reason: '更正未发放订单业绩',
+    data: {
+      actualAmount: 15_000,
+      payments: [{ id: 'tier-source-payment-next', amount: 15_000, paymentMethod: '对公转账' as const, paidAt: NOW }],
+    },
+  };
+  const missingPreview = await service.correct(sourceOrder.id, correctionInput, superAdmin);
+  assert.equal(missingPreview.code, 409, '源单本身未发放，但联动其他已发阶梯时仍必须先预览');
+  const preview = await service.previewCorrection(sourceOrder.id, correctionInput, superAdmin);
+  assert.equal(preview.code, 0, preview.message);
+  assert.equal(preview.data?.supplementAmount, 400, '未发放A单跨档后，已发B单应补阶梯差额400元');
+  assert.equal(preview.data?.impacts.some((impact) => impact.sourceCommissionId === linkedPaidCommission.id), true);
+  const corrected = await service.correct(sourceOrder.id, { ...correctionInput, expectedImpactHash: preview.data!.impactHash }, superAdmin);
+  assert.equal(corrected.code, 0, corrected.message);
+  assert.equal((prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, linkedPaidCommission.id))!.data as Commission).commissionAmount, 1_600, '被联动的原已发记录不得改写');
+  assert.equal(Array.from(prisma.rows.values()).some((row) => row.domain === STORAGE_KEYS.COMMISSIONS && row.data?.correctionDeltaType === '补发' && row.data?.commissionAmount === 400), true);
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '已发放' });
+  const previewCommissions = async (_transaction: any, nextOrder: Order): Promise<Commission[]> => [{
+    ...(prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'commission-1'))!.data as Commission),
+    orderAmount: nextOrder.actualAmount, performanceAmount: nextOrder.actualAmount,
+    commissionAmount: 120, status: '待确认', paidAt: undefined, payoutRecordId: undefined,
+  }];
+  const service = createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+    previewCommissions,
+  });
+  const precheck = await service.precheckCorrection('order-1', scopedCorrector);
+  assert.equal(precheck.code, 0, precheck.message);
+  assert.equal(precheck.data?.allowed, false);
+  assert.equal(precheck.data?.reasonCode, 'payout_started');
+  const result = await service.correct('order-1', {
+    reason: '非超管尝试已发放更正',
+    data: { actualAmount: 999, payments: [{ id: 'paid-correction', amount: 999, paymentMethod: '对公转账', paidAt: NOW }] },
+    expectedImpactHash: 'invalid',
+  }, scopedCorrector);
+  assert.equal(result.code, 403);
   assert.equal(prisma.orderData().actualAmount, 899);
-  assert.equal(prisma.rows.has(key(STORAGE_KEYS.COMMISSIONS, 'commission-1')), true);
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '已发放' });
+  const service = createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+    previewCommissions: async (_transaction, nextOrder) => [{
+      ...(prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'commission-1'))!.data as Commission),
+      orderAmount: nextOrder.actualAmount, performanceAmount: nextOrder.actualAmount,
+      commissionAmount: 120, status: '待确认', paidAt: undefined, payoutRecordId: undefined,
+    }],
+  });
+  const stale = await service.correct('order-1', {
+    reason: '并发校验',
+    data: { actualAmount: 999, payments: [{ id: 'paid-correction', amount: 999, paymentMethod: '对公转账', paidAt: NOW }] },
+    expectedImpactHash: 'stale-hash',
+  }, superAdmin);
+  assert.equal(stale.code, 409);
+  assert.match(stale.message, /重新预览/);
+  assert.equal(prisma.orderData().actualAmount, 899);
 }
 
 {

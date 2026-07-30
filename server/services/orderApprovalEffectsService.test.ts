@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { STORAGE_KEYS } from '../../src/shared/utils/constants';
 import type { Order, OrderApplication } from '../../src/types/order';
-import { createOrderApprovalDownstreamEffects } from './orderApprovalEffectsService';
+import {
+  buildOrderCommissionRecords,
+  createOrderApprovalDownstreamEffects,
+} from './orderApprovalEffectsService';
 
 const now = '2026-07-12T10:00:00.000Z';
 const order: Order = {
@@ -205,6 +208,20 @@ function fakeTransaction(options: {
     },
   };
   return { tx, rows, get customerLockQueries() { return customerLockQueries; } };
+}
+
+{
+  const { tx, rows } = fakeTransaction();
+  const preview = await buildOrderCommissionRecords(tx, order, now);
+
+  assert.equal(preview.length, 1);
+  assert.equal(preview[0].commissionAmount, 100);
+  assert.equal(preview[0].ownerId, order.salesId);
+  assert.equal(
+    Array.from(rows.values()).filter((row) => row.domain === STORAGE_KEYS.COMMISSIONS).length,
+    0,
+    '预览构建提成时不得持久化任何提成记录',
+  );
 }
 
 {

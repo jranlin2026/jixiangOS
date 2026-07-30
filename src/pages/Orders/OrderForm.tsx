@@ -33,12 +33,13 @@ import {
 import { customerApi, orderApi, orderReviewApi, productApi, settingsApi } from '../../api';
 import type { OrderType, PaymentMethod, ProductLevel } from '../../types/common';
 import type {
+  CommissionCorrectionPreview,
   CommissionScene,
   OfficialPaymentChannel,
   ResourceOwnership,
 } from '../../types/commission';
 import type { Customer } from '../../types/customer';
-import type { Order, OrderApplication, OrderItemInput } from '../../types/order';
+import type { Order, OrderApplication, OrderCorrectionInput, OrderItemInput } from '../../types/order';
 import type { Product } from '../../types/product';
 import type { OrderTypeConfig, User } from '../../types/settings';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
@@ -53,6 +54,7 @@ import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { canonicalizeOrderItems } from '../../shared/utils/orderItems';
 import useAppFeedback from '../../shared/hooks/useAppFeedback';
 import BusinessFormSection from '../../shared/components/BusinessFormSection';
+import CommissionCorrectionImpactDialog from '../../shared/components/CommissionCorrectionImpactDialog';
 
 interface OrderFormProps {
   open: boolean;
@@ -204,6 +206,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   const [correctionReason, setCorrectionReason] = useState('');
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [correctionPreview, setCorrectionPreview] = useState<CommissionCorrectionPreview | null>(null);
+  const [pendingCorrectionInput, setPendingCorrectionInput] = useState<OrderCorrectionInput | null>(null);
   const [orderItems, setOrderItems] = useState<OrderItemInput[]>([]);
   const [productItemsEdited, setProductItemsEdited] = useState(false);
   const canCorrectFormalOrder = Boolean(order && hasPermission(currentUser, PERMISSION_KEYS.ORDER_CORRECT, 'write'));
@@ -239,6 +243,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     if (!open) return;
     setCorrectionMode(Boolean(order && initialMode === 'correction' && canCorrectFormalOrder));
     setCorrectionReason('');
+    setCorrectionPreview(null);
+    setPendingCorrectionInput(null);
     setSubmitAttempted(false);
     setProductItemsEdited(false);
 
@@ -687,7 +693,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     try {
       let submittedApplication: OrderApplication | undefined;
       if (order && correctionMode) {
-        const res = await orderApi.correctOrder(order.id, {
+        const correctionInput: OrderCorrectionInput = {
           reason: correctionReason.trim(),
           data: {
             customerId: form.customerId,
@@ -708,7 +714,22 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
             dealEvidencePreview: dealEvidencePreview || undefined,
             dealEvidenceAttachments,
           },
-        });
+        };
+        const precheck = await orderApi.precheckOrderCorrection(order.id);
+        if (precheck.code !== 0 || !precheck.data) {
+          throw new Error(precheck.message || '订单更正预检失败');
+        }
+        if (!precheck.data.allowed) throw new Error(precheck.data.message || '当前订单暂不能更正');
+        if (precheck.data.requiresImpactPreview) {
+          const previewRes = await orderApi.previewOrderCorrection(order.id, correctionInput);
+          if (previewRes.code !== 0 || !previewRes.data) {
+            throw new Error(previewRes.message || '订单更正影响预览生成失败');
+          }
+          setPendingCorrectionInput(correctionInput);
+          setCorrectionPreview(previewRes.data);
+          return;
+        }
+        const res = await orderApi.correctOrder(order.id, correctionInput);
         if (res.code !== 0 || !res.data) throw new Error(res.message || '订单更正失败');
       } else if (order) {
         await update(order.id, {
@@ -737,6 +758,30 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     }
   };
 
+  const handleConfirmCorrectionImpact = async () => {
+    if (!order || !pendingCorrectionInput || !correctionPreview) return;
+    setSubmitting(true);
+    try {
+      const res = await orderApi.correctOrder(order.id, {
+        ...pendingCorrectionInput,
+        expectedImpactHash: correctionPreview.impactHash,
+      });
+      if (res.code !== 0 || !res.data) {
+        setCorrectionPreview(null);
+        setPendingCorrectionInput(null);
+        throw new Error(res.message || '订单更正失败');
+      }
+      setCorrectionPreview(null);
+      setPendingCorrectionInput(null);
+      onSuccess?.();
+      onClose();
+    } catch (error) {
+      await showFormIssue(error instanceof Error ? error.message : '订单更正失败');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const formalFieldLocked = Boolean(order && !correctionMode);
   const customerLocked = Boolean(application || customer || formalFieldLocked);
   const customerErrorCount = submitAttempted ? Number(!form.customerId || !form.customerName) + Number(!form.salesId) : 0;
@@ -749,7 +794,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
   const actionText = correctionMode ? '确认更正并重算' : order ? '保存资料' : application ? '重新提交审核' : '提交审核';
   const applicationDate = toDateTimeInputValue(new Date(application?.createdAt || order?.createdAt || Date.now())).slice(0, 10);
   const dialogSubtitle = correctionMode
-    ? '更正后将重新计算订单分账，并完整保留修改记录。'
+    ? '提交时将按最新分账状态处理，并完整保留修改和影响记录。'
     : order
       ? '补充和更新订单资料，不改变已生成的订单业务结果。'
       : '提交后进入订单审核台，财务审核通过后生成正式订单、提成和交付记录。';
@@ -758,12 +803,12 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
     <>
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={submitting ? undefined : onClose}
       maxWidth="md"
       fullWidth
       PaperProps={{ sx: { maxHeight: '94vh', bgcolor: '#f8fafc' } }}
     >
-      <DialogCloseTitle onClose={onClose} sx={{ px: { xs: 2, sm: 3 }, py: 2.25, bgcolor: '#fff' }}>
+      <DialogCloseTitle onClose={onClose} closeDisabled={submitting} sx={{ px: { xs: 2, sm: 3 }, py: 2.25, bgcolor: '#fff' }}>
         <Box sx={{ minWidth: 0 }}>
           <Typography variant="h6" sx={{ color: '#0f172a', fontWeight: 850 }}>{formTitle}</Typography>
           <Typography variant="body2" sx={{ mt: 0.35, color: '#64748b' }}>{dialogSubtitle}</Typography>
@@ -812,7 +857,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
         )}
         {order && correctionMode && (
           <Alert severity="info" sx={{ mb: 2 }}>
-            更正后系统会自动撤回未发放分账、按新订单重算，并同步客户和未开始交付资料。已发放提成不能覆盖，需走订单冲正流程。
+            提交时会再次检查最新分账状态。未发放分账按新订单重算；如已有提成发放，系统会先展示受影响员工、月份和补发/追回差额，确认后保留原发放事实。
           </Alert>
         )}
         {correctionMode && (
@@ -1108,6 +1153,16 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
         </Button>
       </DialogActions>
     </Dialog>
+    <CommissionCorrectionImpactDialog
+      open={Boolean(correctionPreview)}
+      preview={correctionPreview}
+      confirming={submitting}
+      onClose={() => {
+        setCorrectionPreview(null);
+        setPendingCorrectionInput(null);
+      }}
+      onConfirm={() => void handleConfirmCorrectionImpact()}
+    />
     {feedbackDialog}
     </>
   );

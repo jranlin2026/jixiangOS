@@ -38,6 +38,8 @@ export interface RecoveryOrderCorrectionPrecheck {
   commissionCount: number;
   commissionStatuses: string[];
   settlementStatus: RecoveryOrderSettlementStatus;
+  mode: 'standard' | 'post_payout';
+  requiresImpactPreview: boolean;
 }
 
 export interface RecoveryOrder extends Partial<BusinessImportMetadata> {
@@ -147,6 +149,8 @@ export interface RecoveryOrderMetadataEditInput {
 export interface RecoveryOrderCorrectionInput {
   reason: string;
   data: RecoveryOrderInput;
+  /** 已发放后更正必须提交与最新预览一致的影响哈希。 */
+  expectedImpactHash?: string;
 }
 
 export interface RecoveryOrderInput {

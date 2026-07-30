@@ -17,12 +17,15 @@ import { hasPermission, PERMISSION_KEYS } from '../../src/shared/utils/permissio
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type {
   Commission,
+  CommissionCorrectionRecord,
   CommissionPayoutRecord,
   CommissionTier,
   CommissionTierSnapshot,
 } from '../../src/types/commission';
 import type { Order } from '../../src/types/order';
 import type { RecoveryOrder } from '../../src/types/recoveryOrder';
+import { resolveCommissionCorrectionStatuses } from './commissionCorrectionService';
+import { selectLatestCommissionCorrections } from './commissionCorrectionRecordSelection';
 
 type ReportPrisma = Pick<PrismaClient, 'businessRecord' | 'businessExportAudit'>;
 type ReportScope = 'all' | 'department' | 'employee';
@@ -62,6 +65,7 @@ export interface CommissionMonthlyReportBuildInput extends CommissionMonthlyRepo
   payoutRecords: CommissionPayoutRecord[];
   orders: Order[];
   recoveryOrders?: RecoveryOrder[];
+  corrections?: CommissionCorrectionRecord[];
 }
 
 export interface CommissionMonthlyReportSummary {
@@ -82,6 +86,10 @@ export interface CommissionMonthlyReportSummary {
   recoveryBusinessAmount: number;
   pendingHandlingCount: number;
   exceptionCount: number;
+  correctionOriginalPaidAmount: number;
+  correctionEntitlementAmount: number;
+  correctionSupplementAmount: number;
+  correctionRecoverAmount: number;
 }
 
 export interface CommissionMonthlyEmployeeRow extends Record<string, CellValue> {
@@ -223,6 +231,16 @@ function reportColumns(): Record<ReportSheet['name'], ReportColumn[]> {
       { key: 'crossPeriod', label: '是否跨月' }, { key: 'reversedAt', label: '撤销时间', type: 'date' }, { key: 'reversedBy', label: '撤销人' },
       { key: 'reverseReason', label: '撤销原因' }, { key: 'fundRecoveryStatus', label: '资金追回状态' }, { key: 'note', label: '备注' },
     ],
+    '更正与差额': [
+      { key: 'correctionNo', label: '更正单号', width: 24 }, { key: 'sourceType', label: '业务类型' }, { key: 'sourceBusinessNo', label: '源单号', width: 28 },
+      { key: 'reason', label: '更正原因', width: 36 }, { key: 'affectedPeriods', label: '受影响月份' }, { key: 'role', label: '提成角色' },
+      { key: 'originalOwner', label: '原发放员工' }, { key: 'correctedOwner', label: '更正后员工' },
+      { key: 'originalPeriod', label: '原归属月份' }, { key: 'correctedPeriod', label: '更正后月份' },
+      { key: 'originalPaidAmount', label: '原已发', type: 'currency' }, { key: 'correctedEntitlementAmount', label: '更正后应得', type: 'currency' },
+      { key: 'supplementAmount', label: '补发', type: 'currency' }, { key: 'recoverAmount', label: '追回', type: 'currency' },
+      { key: 'action', label: '差额类型' }, { key: 'handlingStatus', label: '处理状态' }, { key: 'handlingNote', label: '处理说明', width: 36 },
+      { key: 'createdBy', label: '更正人' }, { key: 'createdAt', label: '更正时间', type: 'date' },
+    ],
     '异常与口径说明': [
       { key: 'kind', label: '类型' }, { key: 'level', label: '级别' }, { key: 'employee', label: '员工' }, { key: 'orderNo', label: '订单号' },
       { key: 'commissionId', label: '提成ID' }, { key: 'issue', label: '异常/口径', width: 42 }, { key: 'suggestion', label: '处理建议', width: 48 },
@@ -236,6 +254,52 @@ export function buildCommissionMonthlyReportData(input: CommissionMonthlyReportB
     .filter((commission) => input.includeWithdrawn !== false || !isWithdrawn(commission))
     .filter((commission) => input.scope !== 'department' || commission.departmentId === input.departmentId || commission.department === input.departmentId)
     .filter((commission) => input.scope !== 'employee' || commission.ownerId === input.ownerId || commission.owner === input.ownerId);
+  type CorrectionImpact = CommissionCorrectionRecord['impacts'][number];
+  type CorrectionLeg = CommissionCorrectionRecord['legs'][number];
+  const employeeMatches = (id: string | undefined, name: string | undefined) => (
+    id === input.ownerId || name === input.ownerId
+  );
+  const departmentMatches = (id: string | undefined, name: string | undefined) => (
+    id === input.departmentId || name === input.departmentId
+  );
+  const originalImpactInScope = (impact: CorrectionImpact, record: CommissionCorrectionRecord) => (
+    input.scope === 'all'
+    || input.scope === 'employee' && employeeMatches(impact.originalOwnerId, impact.originalOwner)
+    || input.scope === 'department' && (
+      departmentMatches(impact.originalDepartmentId, impact.originalDepartment)
+      || record.legs.some((leg) => leg.impactId === impact.id && leg.kind === '追回' && departmentMatches(leg.departmentId, leg.department))
+    )
+  );
+  const correctedImpactInScope = (impact: CorrectionImpact, record: CommissionCorrectionRecord) => (
+    input.scope === 'all'
+    || input.scope === 'employee' && employeeMatches(impact.correctedOwnerId, impact.correctedOwner)
+    || input.scope === 'department' && (
+      departmentMatches(impact.correctedDepartmentId, impact.correctedDepartment)
+      || record.legs.some((leg) => leg.impactId === impact.id && leg.kind === '补发' && departmentMatches(leg.departmentId, leg.department))
+    )
+  );
+  const legInScope = (leg: CorrectionLeg) => (
+    input.scope === 'all'
+    || input.scope === 'employee' && employeeMatches(leg.ownerId, leg.owner)
+    || input.scope === 'department' && departmentMatches(leg.departmentId, leg.department)
+  );
+  const latestCorrectionIds = new Set(
+    selectLatestCommissionCorrections(input.corrections || []).map((record) => record.id),
+  );
+  const corrections = (input.corrections || [])
+    .filter((record) => record.affectedPeriods.includes(input.period) || record.legs.some((leg) => leg.period === input.period))
+    .map((record) => {
+      const scopedLegs = record.legs.filter(legInScope);
+      const scopedLegImpactIds = new Set(scopedLegs.map((leg) => leg.impactId));
+      const scopedImpacts = record.impacts.filter((impact) => (
+        originalImpactInScope(impact, record)
+        || correctedImpactInScope(impact, record)
+        || scopedLegImpactIds.has(impact.id)
+      ));
+      return { ...record, impacts: scopedImpacts, legs: scopedLegs };
+    })
+    .filter((record) => record.impacts.length > 0 || record.legs.length > 0);
+  const currentCorrections = corrections.filter((record) => latestCorrectionIds.has(record.id));
   const ordersById = new Map(input.orders.map((order) => [order.id, order]));
   const recoveryOrders = input.recoveryOrders || [];
   const recoveryOrdersById = new Map(recoveryOrders.map((order) => [order.id, order]));
@@ -392,6 +456,37 @@ export function buildCommissionMonthlyReportData(input: CommissionMonthlyReportB
     }));
   });
 
+  const correctionRows = corrections.flatMap((record) => record.impacts
+    .filter((impact) => impact.originalPeriod === input.period || impact.correctedPeriod === input.period)
+    .map((impact) => {
+      const legs = record.legs.filter((leg) => leg.impactId === impact.id && leg.period === input.period);
+      const supplementAmount = roundMoney(legs.filter((leg) => leg.kind === '补发').reduce((sum, leg) => sum + leg.amount, 0));
+      const recoverAmount = roundMoney(legs.filter((leg) => leg.kind === '追回').reduce((sum, leg) => sum + leg.amount, 0));
+      const notes = legs.map((leg) => leg.handlingNote).filter(Boolean);
+      const statuses = [...new Set(legs.map((leg) => leg.status))];
+      return {
+        correctionNo: record.correctionNo,
+        sourceType: record.sourceBusinessType === 'formal_order' ? '正式订单' : '售后挽回',
+        sourceBusinessNo: record.sourceBusinessNo,
+        reason: record.reason,
+        affectedPeriods: record.affectedPeriods.join('、'),
+        role: impact.role,
+        originalOwner: impact.originalOwner,
+        correctedOwner: impact.correctedOwner,
+        originalPeriod: impact.originalPeriod,
+        correctedPeriod: impact.correctedPeriod,
+        originalPaidAmount: impact.originalPaidAmount,
+        correctedEntitlementAmount: impact.correctedEntitlementAmount,
+        supplementAmount,
+        recoverAmount,
+        action: impact.action,
+        handlingStatus: statuses.join('、') || '无差额',
+        handlingNote: notes.join('；'),
+        createdBy: record.createdByName,
+        createdAt: record.createdAt,
+      };
+    }));
+
   input.payoutRecords.filter((record) => record.commissionIds.some((id) => scopedIds.has(id))).forEach((record) => {
     if (!record.commissionSnapshots?.length) addException(undefined, `发放单 ${record.payoutNo} 缺少逐笔提成快照`, '历史发放单只能核对汇总，不能证明逐笔金额');
     if (new Set(record.commissionIds).size !== record.commissionIds.length) addException(undefined, `发放单 ${record.payoutNo} 内存在重复提成ID`, '停止对账并核对发放单快照', '阻断');
@@ -408,6 +503,23 @@ export function buildCommissionMonthlyReportData(input: CommissionMonthlyReportB
 
   const businessMetrics = calculateCommissionBusinessMetrics(scoped, input.orders, recoveryOrders);
   const statusMetrics = calculateCommissionStatusMetrics(scoped, amountFor);
+  const correctionOriginalPaidAmount = roundMoney(currentCorrections.reduce((sum, record) => (
+    sum + record.impacts
+      .filter((impact) => impact.originalPeriod === input.period && originalImpactInScope(impact, record))
+      .reduce((impactSum, impact) => impactSum + impact.originalPaidAmount, 0)
+  ), 0));
+  const correctionEntitlementAmount = roundMoney(currentCorrections.reduce((sum, record) => (
+    sum + record.impacts
+      .filter((impact) => impact.correctedPeriod === input.period && correctedImpactInScope(impact, record))
+      .reduce((impactSum, impact) => impactSum + impact.correctedEntitlementAmount, 0)
+  ), 0));
+  // 补发/追回是实际生成的差额流水；后续无差额资料更正不能让历史流水从月报消失。
+  const correctionSupplementAmount = roundMoney(corrections.flatMap((record) => record.legs)
+    .filter((leg) => leg.period === input.period && leg.kind === '补发')
+    .reduce((sum, leg) => sum + leg.amount, 0));
+  const correctionRecoverAmount = roundMoney(corrections.flatMap((record) => record.legs)
+    .filter((leg) => leg.period === input.period && leg.kind === '追回')
+    .reduce((sum, leg) => sum + leg.amount, 0));
   const summary: CommissionMonthlyReportSummary = {
     employeeCount: new Set(scoped.map(ownerKey)).size,
     formalOrderCount: businessMetrics.formalOrderCount,
@@ -423,6 +535,10 @@ export function buildCommissionMonthlyReportData(input: CommissionMonthlyReportB
     tierPerformanceAmount: roundMoney([...tierSnapshots.values()].reduce((sum, snapshot) => sum + Number(snapshot?.baseAmount || 0), 0)),
     tierCommissionAmount: roundMoney(effective.filter(isTiered).reduce((sum, item) => sum + amountFor(item), 0)),
     recoveryCommissionAmount: roundMoney(effective.filter(isRecovery).reduce((sum, item) => sum + amountFor(item), 0)), exceptionCount: 0,
+    correctionOriginalPaidAmount,
+    correctionEntitlementAmount,
+    correctionSupplementAmount,
+    correctionRecoverAmount,
   };
   const statusIdentity = roundMoney(summary.pendingConfirmAmount + summary.pendingPayAmount + summary.paidAmount);
   const typeIdentity = roundMoney(summary.ordinaryCommissionAmount + summary.tierCommissionAmount + summary.recoveryCommissionAmount);
@@ -440,6 +556,10 @@ export function buildCommissionMonthlyReportData(input: CommissionMonthlyReportB
     ['待处理笔数', summary.pendingHandlingCount, '尚未形成可确认金额，不计入本月提成总额'],
     ['待确认', summary.pendingConfirmAmount, '未进入实际发放'], ['待发放', summary.pendingPayAmount, '已确认、尚未实际发放'], ['已发放', summary.paidAmount, '按归属本月的提成统计'],
     ['已撤回', summary.withdrawnAmount, '不计入有效应发，保留历史'], ['普通订单提成', summary.ordinaryCommissionAmount, '不含阶梯和售后挽回'],
+    ['更正影响原已发', summary.correctionOriginalPaidAmount, '仅统计有发放后更正的受影响明细'],
+    ['更正后应得', summary.correctionEntitlementAmount, '按更正后业务归属月份统计'],
+    ['应补发差额', summary.correctionSupplementAmount, '不覆盖原发放，通过新提成进入发放流程'],
+    ['应追回差额', summary.correctionRecoverAmount, '通过线下追回、下月抵扣或无需追回留痕处理'],
     ['正式订单阶梯业绩', summary.tierPerformanceAmount, '仅纳入正式订单有效阶梯明细'], ['正式订单阶梯提成', summary.tierCommissionAmount, '按方案快照复算'],
     ['售后挽回提成', summary.recoveryCommissionAmount, '不参与正式订单阶梯'], ['异常数量', summary.exceptionCount, summary.exceptionCount ? '请查看“异常与口径说明”' : '无异常'],
     ['核对结果', statusIdentity !== summary.effectiveCommissionAmount || typeIdentity !== summary.effectiveCommissionAmount ? '存在差异' : summary.exceptionCount ? '有异常待处理' : '一致', '员工汇总、状态汇总、类型汇总均应与逐笔有效明细一致'],
@@ -449,6 +569,7 @@ export function buildCommissionMonthlyReportData(input: CommissionMonthlyReportB
     ['口径', '说明', '月报按提成归属月份统计，不等同于当月实际现金支出。'], ['口径', '说明', '正式订单实付总额按订单ID去重，员工汇总中的关联实付不可跨员工求和。'],
     ['口径', '说明', '售后挽回不参与正式订单月度阶梯累计。'], ['口径', '说明', '已撤回不计入有效应发，但必须保留历史金额和原因。'],
     ['口径', '说明', '已发放是系统终态；历史撤销记录只读保留，新的异常发放请线下处理并保留说明。'],
+    ['口径', '说明', '发放后更正永久保留原发放快照；应得变化仅通过补发或追回差额反映。'],
   ].map(([kind, level, issue]) => ({ kind, level, employee: '-', orderNo: '-', commissionId: '-', issue, suggestion: '依此口径完成月度核对' }));
   const columns = reportColumns();
   const sheets: ReportSheet[] = [
@@ -457,6 +578,7 @@ export function buildCommissionMonthlyReportData(input: CommissionMonthlyReportB
     { name: '逐笔提成明细', columns: columns['逐笔提成明细'], rows: detailRows },
     { name: '正式订单阶梯核对', columns: columns['正式订单阶梯核对'], rows: tierRows },
     { name: '发放与撤销记录', columns: columns['发放与撤销记录'], rows: payoutRows },
+    { name: '更正与差额', columns: columns['更正与差额'], rows: correctionRows },
     { name: '异常与口径说明', columns: columns['异常与口径说明'], rows: [...exceptionRows, ...policyRows] },
   ];
   const timeToken = input.generatedAt.replace(/[-:TZ.]/g, '').slice(0, 14);
@@ -525,19 +647,30 @@ export function createCommissionMonthlyReportService(prisma: ReportPrisma, optio
     try {
       const request = validateRequest(input);
       if (!hasPermission(actor, PERMISSION_KEYS.FINANCE_PAYOUT_REPORT_EXPORT, 'read')) throw new CommissionMonthlyReportError(403, '无权导出提成月度报告');
-      const [commissionRows, payoutRows, orderRows, recoveryRows] = await Promise.all([
+      const [commissionRows, payoutRows, orderRows, recoveryRows, correctionRows] = await Promise.all([
         prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSIONS } }),
         prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES } }),
         prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.ORDERS } }),
         prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.RECOVERY_ORDERS } }),
+        prisma.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSION_CORRECTIONS } }),
       ]);
       const recoveryOrders = recoveryRows.map((row) => asObject(row.data) as unknown as RecoveryOrder);
+      const commissionStatusById = new Map<string, string>();
       const commissions = applyRecoveryCommissionBusinessTimes(
-        commissionRows.map((row) => asObject(row.data) as unknown as Commission),
+        commissionRows.map((row) => {
+          const commission = asObject(row.data) as unknown as Commission;
+          const status = String(row.status || commission.status || '') || commission.status;
+          commissionStatusById.set(commission.id, status);
+          return { ...commission, status: status as Commission['status'] };
+        }),
         recoveryOrders,
       );
       const payoutRecords = payoutRows.map((row) => normalizePayoutRecord(row.data)).filter((row): row is CommissionPayoutRecord => Boolean(row));
       const orders = orderRows.map((row) => asObject(row.data) as unknown as Order);
+      const corrections = resolveCommissionCorrectionStatuses(
+        correctionRows.map((row) => asObject(row.data) as unknown as CommissionCorrectionRecord),
+        commissionStatusById,
+      );
       const generatedAt = now().toISOString();
       const report = buildCommissionMonthlyReportData({
         ...request,
@@ -547,8 +680,11 @@ export function createCommissionMonthlyReportService(prisma: ReportPrisma, optio
         payoutRecords,
         orders,
         recoveryOrders,
+        corrections,
       });
-      if (!report.sheets[2].rows.length) throw new CommissionMonthlyReportError(400, '当前筛选范围没有可导出的提成数据');
+      if (!report.sheets[2].rows.length && !report.sheets.find((sheet) => sheet.name === '更正与差额')?.rows.length) {
+        throw new CommissionMonthlyReportError(400, '当前筛选范围没有可导出的提成或更正数据');
+      }
       if (report.sheets[2].rows.length > 50_000) throw new CommissionMonthlyReportError(400, '提成明细超过50000行，请按部门或员工分批导出');
       const buffer = Buffer.from(await createCommissionMonthlyReportWorkbook(report));
       await prisma.businessExportAudit.create({ data: {

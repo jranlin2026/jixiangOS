@@ -1,6 +1,6 @@
 import type { Order, OrderApplication, OrderCorrectionInput, OrderCorrectionPrecheck, OrderFilters, OrderStats } from '../types/order';
 import type { Customer } from '../types/customer';
-import type { Commission, CommissionRole } from '../types/commission';
+import type { Commission, CommissionCorrectionPreview, CommissionRole } from '../types/commission';
 import type { Product } from '../types/product';
 import type { User } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
@@ -700,6 +700,23 @@ async function correctOrder(id: string, input: OrderCorrectionInput): Promise<Ap
   return createSuccessResponse(cacheBackendOrder(response.data));
 }
 
+async function previewOrderCorrection(
+  id: string,
+  input: OrderCorrectionInput,
+): Promise<ApiResponse<CommissionCorrectionPreview | null>> {
+  if (!shouldUseBackendApi()) {
+    return createErrorResponse('订单更正影响预览仅支持服务端模式，请启动本地接口服务', 503);
+  }
+  const response = await backendRequest<CommissionCorrectionPreview>(`/orders/${encodeURIComponent(id)}/correction-preview`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  if (response.code !== 0 || !response.data) {
+    return createErrorResponse(response.message || '服务端未返回订单更正影响预览', response.code || -1);
+  }
+  return createSuccessResponse(response.data, response.message);
+}
+
 async function precheckOrderCorrection(id: string): Promise<ApiResponse<OrderCorrectionPrecheck | null>> {
   if (!shouldUseBackendApi()) {
     return createErrorResponse('订单更正预检仅支持服务端模式，请启动本地接口服务', 503);
@@ -768,6 +785,7 @@ export const orderApi = {
   createOrder,
   updateOrder,
   precheckOrderCorrection,
+  previewOrderCorrection,
   correctOrder,
   deleteOrder,
 };

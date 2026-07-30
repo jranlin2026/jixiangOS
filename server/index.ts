@@ -67,6 +67,7 @@ import { createBusinessAttachmentService, createPrismaBusinessAttachmentReposito
 import { createAssetListService, isAssetListKind } from './services/assetListService';
 import { createOrderApplicationService } from './services/orderApplicationService';
 import {
+  buildOrderCommissionRecords,
   createOrderApprovalDownstreamEffects,
   rebuildPendingOrderCommissions,
 } from './services/orderApprovalEffectsService';
@@ -81,6 +82,7 @@ import { createOrderSettlementCommandService } from './services/orderSettlementC
 import { createRecoveryCrmBridge } from './services/recoveryCrmBridge';
 import { createCommissionPayoutService } from './services/commissionPayoutService';
 import { createCommissionMonthlyReportService } from './services/commissionMonthlyReportService';
+import { createCommissionCorrectionService } from './services/commissionCorrectionService';
 import { enrichCommissionStorageScope } from './services/commissionBusinessTimeService';
 import { createFinanceTransactionService } from './services/financeTransactionService';
 import { collectLeadSourcePairs, ensureLeadSourceConfigsInTransaction } from './services/leadSourceConfigSyncService';
@@ -227,6 +229,7 @@ const orderApplicationService = createOrderApplicationService(prisma, {
 });
 const orderCommandService = createOrderCommandService(prisma, {
   rebuildPendingCommissions: rebuildPendingOrderCommissions,
+  previewCommissions: buildOrderCommissionRecords,
 });
 const orderQueryService = createOrderQueryService(prisma);
 const businessExportService = createBusinessExportService(prisma as any);
@@ -244,6 +247,7 @@ const commissionPayoutService = createCommissionPayoutService(prisma, {
   recordFinanceTransaction: (transaction, payout) => financeTransactionService.recordCommissionPayout(transaction, payout),
 });
 const commissionMonthlyReportService = createCommissionMonthlyReportService(prisma);
+const commissionCorrectionService = createCommissionCorrectionService(prisma);
 const businessImportReadService = createBusinessImportReadRepository(prisma);
 const businessImportReviewService = createBusinessImportReviewService({
   selectImportedRecords: createBusinessImportReviewSelector(prisma),
@@ -944,12 +948,25 @@ app.get('/api/orders/:id/correction-precheck', requireOrderCorrectWriteAccess, a
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
+app.post('/api/orders/:id/correction-preview', requireOrderCorrectWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await orderCommandService.previewCorrection(
+    routeParam(req.params.id),
+    {
+      reason: String(req.body?.reason || ''),
+      data: req.body?.data || {},
+    },
+    req.currentUser!,
+  );
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
 app.post('/api/orders/:id/correct', requireOrderCorrectWriteAccess, async (req: AuthenticatedRequest, res) => {
   const result = await orderCommandService.correct(
     routeParam(req.params.id),
     {
       reason: String(req.body?.reason || ''),
       data: req.body?.data || {},
+      expectedImpactHash: String(req.body?.expectedImpactHash || ''),
     },
     req.currentUser!,
   );
@@ -1171,10 +1188,19 @@ app.get('/api/recovery-orders/:id/correction-precheck', requireRecoveryCorrectAc
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
+app.post('/api/recovery-orders/:id/correction-preview', requireRecoveryCorrectAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await recoveryOrderCommandService.previewCorrection(routeParam(req.params.id), {
+    reason: String(req.body?.reason || ''),
+    data: req.body?.data || {},
+  }, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
 app.post('/api/recovery-orders/:id/correct', requireRecoveryCorrectAccess, async (req: AuthenticatedRequest, res) => {
   const result = await recoveryOrderCommandService.correct(routeParam(req.params.id), {
     reason: String(req.body?.reason || ''),
     data: req.body?.data || {},
+    expectedImpactHash: String(req.body?.expectedImpactHash || ''),
   }, req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
@@ -1321,6 +1347,30 @@ app.get('/api/commission-payout-workspace', requireFinancePayoutReadAccess, asyn
     : scope === 'records'
       ? await commissionPayoutService.getRecordsWorkspace()
       : await commissionPayoutService.getPeriodWorkspace(queryParam(req.query.period));
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.get('/api/commission-corrections', requireFinancePayoutReadAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await commissionCorrectionService.list({
+    search: queryParam(req.query.search),
+    status: queryParam(req.query.status),
+    page: Number(queryParam(req.query.page) || 1),
+    pageSize: Number(queryParam(req.query.pageSize) || 10),
+  }, req.currentUser!);
+  res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
+});
+
+app.post('/api/commission-corrections/:id/legs/:legId/complete', requireFinancePayoutWriteAccess, async (req: AuthenticatedRequest, res) => {
+  const result = await commissionCorrectionService.completeLeg(
+    routeParam(req.params.id),
+    routeParam(req.params.legId),
+    {
+      method: req.body?.method,
+      amount: Number(req.body?.amount),
+      note: String(req.body?.note || ''),
+    },
+    req.currentUser!,
+  );
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 

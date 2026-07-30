@@ -16,7 +16,7 @@ import {
   isRecoveryOrderDeletionLocked,
 } from '../shared/utils/recoveryOrderDeletion';
 import type { AuthSession } from '../types/auth';
-import type { Commission, CommissionPayoutPlan } from '../types/commission';
+import type { Commission, CommissionCorrectionPreview, CommissionPayoutPlan } from '../types/commission';
 import { buildCommissionPayoutPlanSnapshot } from '../shared/utils/commissionConfiguration';
 import type { Department } from '../types/department';
 import type { Role } from '../types/role';
@@ -644,6 +644,21 @@ async function correctRecoveryOrder(
   });
   if (response.code !== 0) return createErrorResponse(response.message, response.code);
   return createSuccessResponse(response.data ? cacheBackendRecoveryOrder(response.data) : null, response.message);
+}
+
+async function previewRecoveryOrderCorrection(
+  id: string,
+  input: RecoveryOrderCorrectionInput,
+): Promise<ApiResponse<CommissionCorrectionPreview | null>> {
+  if (!shouldUseBackendApi()) return createErrorResponse('售后挽回订单更正影响预览仅支持服务端模式', 503);
+  const response = await backendRequest<CommissionCorrectionPreview | null>(`/recovery-orders/${encodeURIComponent(id)}/correction-preview`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  if (response.code !== 0 || !response.data) {
+    return createErrorResponse(response.message || '服务端未返回售后挽回更正影响预览', response.code || -1);
+  }
+  return createSuccessResponse(response.data, response.message);
 }
 
 async function deleteRecoveryOrder(id: string): Promise<ApiResponse<boolean>> {
@@ -1274,6 +1289,7 @@ export const recoveryOrderApi = {
   updateRecoveryOrder,
   editRecoveryOrderMetadata,
   precheckRecoveryOrderCorrection,
+  previewRecoveryOrderCorrection,
   correctRecoveryOrder,
   deleteRecoveryOrder,
   cleanupDeletedRecoveryOrderReview,

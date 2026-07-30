@@ -130,7 +130,10 @@ export function applyRecoveryCommissionBusinessTimes(
  */
 export function selectCurrentCommissionRounds(commissions: Commission[]): Commission[] {
   const businessGroups = new Map<string, Commission[]>();
-  commissions.forEach((commission) => {
+  const correctionIds = new Set(commissions
+    .filter((commission) => Boolean(commission.correctionCaseId))
+    .map((commission) => commission.id));
+  commissions.filter((commission) => !commission.correctionCaseId).forEach((commission) => {
     const businessType = isRecoveryCommission(commission) ? 'recovery' : 'formal';
     const businessId = commission.sourceRecoveryOrderId || commission.orderId || commission.orderNo;
     const key = `${businessType}:${businessId}`;
@@ -158,7 +161,7 @@ export function selectCurrentCommissionRounds(commissions: Commission[]): Commis
       .forEach((row) => selectedIds.add(row.id));
   });
 
-  return commissions.filter((commission) => selectedIds.has(commission.id));
+  return commissions.filter((commission) => selectedIds.has(commission.id) || correctionIds.has(commission.id));
 }
 
 export function resolveCommissionTierSnapshotSource(

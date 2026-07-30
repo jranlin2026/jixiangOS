@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import ExcelJS from 'exceljs';
 import { buildCommissionMonthlyReportData, createCommissionMonthlyReportService, createCommissionMonthlyReportWorkbook } from './commissionMonthlyReportService';
-import type { Commission, CommissionPayoutRecord } from '../../src/types/commission';
+import type { Commission, CommissionCorrectionRecord, CommissionPayoutRecord } from '../../src/types/commission';
 import type { Order } from '../../src/types/order';
 import type { RecoveryOrder } from '../../src/types/recoveryOrder';
 import type { AuthenticatedUser } from '../../src/types/auth';
@@ -54,6 +54,25 @@ const commissions: Commission[] = [
   }),
 ];
 
+const correction: CommissionCorrectionRecord = {
+  id: 'correction-1', correctionNo: 'COR-202607-000001', sourceBusinessType: 'formal_order',
+  sourceBusinessId: 'order-1', sourceBusinessNo: 'ORD-001', sourceRevision: 'revision-1',
+  beforeBusinessSnapshot: { actualAmount: 900 }, afterBusinessSnapshot: { actualAmount: 1100 },
+  affectedPeriods: ['2026-07'], affectedEmployeeCount: 1, affectedCommissionCount: 1,
+  originalPaidAmount: 100, correctedEntitlementAmount: 120, supplementAmount: 20, recoverAmount: 0,
+  impacts: [{
+    id: 'impact-1', sourceCommissionId: 'sales', role: '销售', originalOwnerId: 'user-a', originalOwner: '员工A',
+    correctedOwnerId: 'user-a', correctedOwner: '员工A', originalPeriod: '2026-07', correctedPeriod: '2026-07',
+    originalPaidAmount: 100, correctedEntitlementAmount: 120, deltaAmount: 20, action: '补发', payoutRecordIds: ['payout-1'],
+  }],
+  legs: [{
+    id: 'leg-1', impactId: 'impact-1', kind: '补发', ownerId: 'user-a', owner: '员工A', departmentId: 'dept-sales',
+    department: '销售部', role: '销售', period: '2026-07', amount: 20, sourceCommissionIds: ['sales'], status: '待发放',
+  }],
+  impactHash: 'hash-1', reason: '实付金额录入错误', status: '待处理', createdById: 'admin', createdByName: '超级管理员',
+  createdAt: '2026-07-31T09:00:00.000Z', updatedAt: '2026-07-31T09:00:00.000Z',
+};
+
 const data = buildCommissionMonthlyReportData({
   period: '2026-07',
   reason: '月度财务核对',
@@ -65,16 +84,21 @@ const data = buildCommissionMonthlyReportData({
   payoutRecords: [] as CommissionPayoutRecord[],
   orders: [order],
   recoveryOrders: [{ id: 'recovery-1', recoveryAmount: 699 } as RecoveryOrder],
+  corrections: [correction],
 });
 
 assert.deepEqual(data.sheets.map((sheet) => sheet.name), [
-  '月度核对总览', '员工提成汇总', '逐笔提成明细', '正式订单阶梯核对', '发放与撤销记录', '异常与口径说明',
+  '月度核对总览', '员工提成汇总', '逐笔提成明细', '正式订单阶梯核对', '发放与撤销记录', '更正与差额', '异常与口径说明',
 ]);
 assert.equal(data.summary.formalOrderPaidAmount, 900, '月度总览必须按订单去重实付');
 assert.equal(data.summary.recoveryCommissionAmount, 50);
 assert.equal(data.summary.recoveryBusinessAmount, 699, '导出总览必须单独展示售后挽回成交额');
 assert.equal(data.summary.tierPerformanceAmount, 0, '售后挽回不得进入正式订单阶梯业绩');
 assert.equal(data.summary.effectiveCommissionAmount, 180);
+assert.equal(data.summary.correctionOriginalPaidAmount, 100);
+assert.equal(data.summary.correctionEntitlementAmount, 120);
+assert.equal(data.summary.correctionSupplementAmount, 20);
+assert.equal(data.sheets.find((sheet) => sheet.name === '更正与差额')?.rows[0]?.correctionNo, correction.correctionNo);
 assert.equal(data.employeeRows.filter((row) => row.orderPaidAmount === 900).length, 2, '员工可各自查看关联订单实付');
 assert.equal(data.employeeRows.length, 2, '员工汇总必须每人一行，不得按角色拆行');
 assert.equal(data.employeeRows.find((row) => row.employee === '员工A')?.role, '销售、售后挽回');
@@ -87,6 +111,127 @@ assert.equal(
   true,
   '没有付款明细时可回退展示实付，但必须保留财务异常提示',
 );
+
+const firstZeroDifferenceCorrection: CommissionCorrectionRecord = {
+  ...correction,
+  id: 'correction-zero-1',
+  correctionNo: 'COR-202607-000010',
+  sourceRevision: 'revision-zero-1',
+  correctedEntitlementAmount: 100,
+  supplementAmount: 0,
+  impacts: [{
+    ...correction.impacts[0],
+    id: 'impact-zero-1',
+    correctedEntitlementAmount: 100,
+    deltaAmount: 0,
+    action: '无需差额',
+  }],
+  legs: [],
+  status: '无差额',
+  createdAt: '2026-07-31T09:10:00.000Z',
+  updatedAt: '2026-07-31T09:10:00.000Z',
+};
+const secondZeroDifferenceCorrection: CommissionCorrectionRecord = {
+  ...firstZeroDifferenceCorrection,
+  id: 'correction-zero-2',
+  correctionNo: 'COR-202607-000011',
+  sourceRevision: 'revision-zero-2',
+  impacts: [{ ...firstZeroDifferenceCorrection.impacts[0], id: 'impact-zero-2' }],
+  createdAt: '2026-07-31T09:20:00.000Z',
+  updatedAt: '2026-07-31T09:20:00.000Z',
+};
+const repeatedZeroDifferenceData = buildCommissionMonthlyReportData({
+  period: '2026-07', reason: '同源连续更正口径核对', scope: 'all', includeWithdrawn: true,
+  generatedAt: '2026-07-31T10:00:00.000Z', actor: { id: 'finance-1', name: '财务甲' },
+  commissions, payoutRecords: [], orders: [order],
+  corrections: [firstZeroDifferenceCorrection, secondZeroDifferenceCorrection],
+});
+assert.equal(
+  repeatedZeroDifferenceData.summary.correctionOriginalPaidAmount,
+  100,
+  '同一源单的历史更正不得重复累计原已发',
+);
+assert.equal(repeatedZeroDifferenceData.summary.correctionEntitlementAmount, 100);
+assert.deepEqual(
+  repeatedZeroDifferenceData.sheets.find((sheet) => sheet.name === '更正与差额')?.rows.map((row) => row.correctionNo),
+  [firstZeroDifferenceCorrection.correctionNo, secondZeroDifferenceCorrection.correctionNo],
+  '更正审计表必须保留同源单的全部历史',
+);
+
+const laterMetadataCorrection: CommissionCorrectionRecord = {
+  ...correction,
+  id: 'correction-after-financial',
+  correctionNo: 'COR-202607-000012',
+  sourceRevision: 'revision-after-financial',
+  supplementAmount: 0,
+  impacts: [{
+    ...correction.impacts[0],
+    id: 'impact-after-financial',
+    deltaAmount: 0,
+    action: '无需差额',
+  }],
+  legs: [],
+  status: '无差额',
+  createdAt: '2026-07-31T09:30:00.000Z',
+  updatedAt: '2026-07-31T09:30:00.000Z',
+};
+const financialThenMetadataData = buildCommissionMonthlyReportData({
+  period: '2026-07', reason: '差额流水保留核对', scope: 'all', includeWithdrawn: true,
+  generatedAt: '2026-07-31T10:00:00.000Z', actor: { id: 'finance-1', name: '财务甲' },
+  commissions, payoutRecords: [], orders: [order],
+  corrections: [correction, laterMetadataCorrection],
+});
+assert.equal(financialThenMetadataData.summary.correctionOriginalPaidAmount, 100, '当前更正口径只取同源最新记录');
+assert.equal(financialThenMetadataData.summary.correctionEntitlementAmount, 120);
+assert.equal(financialThenMetadataData.summary.correctionSupplementAmount, 20, '后续无差额更正不得抹掉已生成的补发流水');
+assert.equal(financialThenMetadataData.sheets.find((sheet) => sheet.name === '更正与差额')?.rows.length, 2);
+
+const multiEmployeeCorrection: CommissionCorrectionRecord = {
+  ...correction,
+  affectedEmployeeCount: 2,
+  affectedCommissionCount: 2,
+  originalPaidAmount: 300,
+  correctedEntitlementAmount: 350,
+  supplementAmount: 50,
+  impacts: [
+    {
+      ...correction.impacts[0],
+      originalDepartmentId: 'dept-sales', originalDepartment: '销售部',
+      correctedDepartmentId: 'dept-sales', correctedDepartment: '销售部',
+    },
+    {
+      ...correction.impacts[0], id: 'impact-2', sourceCommissionId: 'manager', role: '销售主管',
+      originalOwnerId: 'user-b', originalOwner: '经理B', correctedOwnerId: 'user-b', correctedOwner: '经理B',
+      originalDepartmentId: 'dept-management', originalDepartment: '管理部',
+      correctedDepartmentId: 'dept-management', correctedDepartment: '管理部',
+      originalPaidAmount: 200, correctedEntitlementAmount: 230, deltaAmount: 30,
+    },
+  ],
+  legs: [
+    correction.legs[0],
+    {
+      ...correction.legs[0], id: 'leg-2', impactId: 'impact-2', ownerId: 'user-b', owner: '经理B',
+      departmentId: 'dept-management', department: '管理部', role: '销售主管', amount: 30,
+      sourceCommissionIds: ['manager'],
+    },
+  ],
+};
+const employeeScopedCorrectionData = buildCommissionMonthlyReportData({
+  period: '2026-07', reason: '员工更正范围核对', scope: 'employee', ownerId: 'user-a', includeWithdrawn: true,
+  generatedAt: '2026-07-31T10:00:00.000Z', actor: { id: 'finance-1', name: '财务甲' },
+  commissions, payoutRecords: [], orders: [order], corrections: [multiEmployeeCorrection],
+});
+assert.equal(employeeScopedCorrectionData.summary.correctionOriginalPaidAmount, 100, '员工范围不得混入同更正单其他员工的原已发');
+assert.equal(employeeScopedCorrectionData.summary.correctionEntitlementAmount, 120);
+assert.equal(employeeScopedCorrectionData.summary.correctionSupplementAmount, 20);
+assert.equal(employeeScopedCorrectionData.sheets.find((sheet) => sheet.name === '更正与差额')?.rows.length, 1, '员工范围只展开与该员工相关的影响明细');
+const departmentScopedCorrectionData = buildCommissionMonthlyReportData({
+  period: '2026-07', reason: '部门更正范围核对', scope: 'department', departmentId: 'dept-sales', includeWithdrawn: true,
+  generatedAt: '2026-07-31T10:00:00.000Z', actor: { id: 'finance-1', name: '财务甲' },
+  commissions, payoutRecords: [], orders: [order], corrections: [multiEmployeeCorrection],
+});
+assert.equal(departmentScopedCorrectionData.summary.correctionSupplementAmount, 20, '部门范围不得混入其他部门差额');
+assert.equal(departmentScopedCorrectionData.sheets.find((sheet) => sheet.name === '更正与差额')?.rows.length, 1);
 
 const recoveryRoundData = buildCommissionMonthlyReportData({
   period: '2026-07', reason: '售后挽回轮次核对', scope: 'all', includeWithdrawn: true,
