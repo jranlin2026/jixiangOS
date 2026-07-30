@@ -17,6 +17,7 @@ import type {
   CommissionCorrectionPreview,
   CommissionCorrectionRecord,
   CommissionOperationLog,
+  CommissionPayoutCorrectionContext,
   CommissionPayoutRecord,
   OfficialPaymentChannel,
 } from '../../src/types/commission';
@@ -29,6 +30,7 @@ import {
 } from './customerBusinessRecordRepository';
 import { buildCommissionCorrectionImpact, findOverlappingFinancialCorrection } from './commissionCorrectionImpactService';
 import { persistCommissionCorrection } from './commissionCorrectionService';
+import { lockCommissionLedger } from './commissionLedgerLock';
 
 type OrderCommandPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$transaction'>;
 
@@ -358,11 +360,14 @@ async function replacePendingCommissions(
   if (current.originalOrderId) {
     throw new OrderCommandError(409, '该订单关联历史订单冲销，收款渠道请走财务更正流程');
   }
-  const rows = await transaction.$queryRaw<Array<{ status: string | null; data: unknown }>>(Prisma.sql`
+  const rows = await transaction.$queryRaw<Array<{ recordId: string; status: string | null; data: unknown }>>(Prisma.sql`
     SELECT id, recordId, status, data
     FROM business_records
     WHERE domain = ${STORAGE_KEYS.COMMISSIONS}
-      AND orderId = ${current.id}
+      AND (
+        orderId = ${current.id}
+        OR JSON_UNQUOTE(JSON_EXTRACT(data, '$.orderId')) = ${current.id}
+      )
     ORDER BY recordId ASC
     FOR UPDATE
   `);
@@ -374,7 +379,7 @@ async function replacePendingCommissions(
   }
   if (!rebuild) throw new OrderCommandError(503, '提成重算服务不可用，暂不能修改官方收款渠道');
   await transaction.businessRecord.deleteMany({
-    where: { domain: STORAGE_KEYS.COMMISSIONS, orderId: current.id },
+    where: { domain: STORAGE_KEYS.COMMISSIONS, recordId: { in: rows.map((row) => row.recordId) } },
   });
   await rebuild(transaction, next, changedAt);
   const rebuiltRows = await transaction.businessRecord.findMany({
@@ -673,7 +678,10 @@ async function lockOrderCommissions(
     SELECT id, recordId, status, data
     FROM business_records
     WHERE domain = ${STORAGE_KEYS.COMMISSIONS}
-      AND orderId = ${orderId}
+      AND (
+        orderId = ${orderId}
+        OR JSON_UNQUOTE(JSON_EXTRACT(data, '$.orderId')) = ${orderId}
+      )
     ORDER BY recordId ASC
     FOR UPDATE
   `);
@@ -688,12 +696,16 @@ function orderHasActiveRefundOrReversal(order: Order): boolean {
   );
 }
 
+const INACTIVE_COMMISSION_STATUSES = new Set<Commission['status']>(['已撤回', '已取消', '待冲销', '已冲销']);
+
 function inspectCorrectionEligibility(
   order: Order,
   lockedCommissions: Array<{ row: { status: string | null }; commission: Commission }>,
   rebuildAvailable: boolean,
   postPayoutPreviewAvailable = false,
   allowPostPayout = false,
+  hasProtectedPayoutContext = false,
+  payoutHistoryIssue?: string,
 ): OrderCorrectionPrecheck {
   const allCommissions = lockedCommissions.map(({ commission }) => commission);
   const currentIds = new Set(selectCurrentCommissionRounds(allCommissions).map((commission) => commission.id));
@@ -701,10 +713,14 @@ function inspectCorrectionEligibility(
   const commissions = currentRows.map(({ commission }) => commission);
   const statuses = currentRows.map(({ row, commission }) => String(row.status || commission.status || ''));
   const uniqueStatuses = Array.from(new Set(statuses.filter(Boolean)));
-  const manualCommissionCount = commissions.filter((commission) => (
-    commission.isManualAdjusted || commission.sourceType === '人工新增'
-  )).length;
-  const hasPaid = statuses.includes('已发放');
+  const manualCommissionCount = currentRows.filter(({ row, commission }) => {
+    const status = (String(row.status || commission.status || '') || commission.status) as Commission['status'];
+    return !INACTIVE_COMMISSION_STATUSES.has(status)
+      && !commission.correctionCaseId
+      && !isRecoveryCommission(commission)
+      && (commission.isManualAdjusted || commission.sourceType === '人工新增');
+  }).length;
+  const hasPaid = statuses.includes('已发放') || hasProtectedPayoutContext;
   const blocked = (
     reasonCode: NonNullable<OrderCorrectionPrecheck['reasonCode']>,
     message: string,
@@ -722,8 +738,14 @@ function inspectCorrectionEligibility(
   if (orderHasActiveRefundOrReversal(order)) {
     return blocked('refund_in_progress', '该订单已进入退款或冲正链路，请走订单冲正流程');
   }
-  if (manualCommissionCount > 0 && !hasPaid) {
+  if (payoutHistoryIssue) {
+    return blocked('payout_started', payoutHistoryIssue);
+  }
+  if (manualCommissionCount > 0) {
     return blocked('manual_commission', `该订单存在 ${manualCommissionCount} 条人工新增或人工调整的分账，请先到财务中心处理`);
+  }
+  if (hasProtectedPayoutContext && statuses.some((status) => ['待确认', '待发放'].includes(status))) {
+    return blocked('payout_started', '当前仍有待确认或待发放分账，请先在财务撤回相关分账后再更正');
   }
   if (statuses.some((status) => ['待冲销', '已冲销'].includes(status))) {
     return blocked('payout_started', '该订单提成正在冲销或已冲销，请先完成冲销流程');
@@ -768,6 +790,8 @@ function assertCorrectableCommissions(
   rebuildAvailable: boolean,
   postPayoutPreviewAvailable = false,
   allowPostPayout = false,
+  hasProtectedPayoutContext = false,
+  payoutHistoryIssue?: string,
 ): Commission[] {
   const eligibility = inspectCorrectionEligibility(
     order,
@@ -775,12 +799,12 @@ function assertCorrectableCommissions(
     rebuildAvailable,
     postPayoutPreviewAvailable,
     allowPostPayout,
+    hasProtectedPayoutContext,
+    payoutHistoryIssue,
   );
   if (!eligibility.allowed) throw new OrderCommandError(409, eligibility.message);
   return selectCurrentCommissionRounds(lockedCommissions.map(({ commission }) => commission));
 }
-
-const INACTIVE_COMMISSION_STATUSES = new Set<Commission['status']>(['已撤回', '已取消', '待冲销', '已冲销']);
 
 function isFormalOrderCommission(commission: Commission, orderId: string): boolean {
   return commission.orderId === orderId && !isRecoveryCommission(commission) && !commission.correctionCaseId;
@@ -788,6 +812,68 @@ function isFormalOrderCommission(commission: Commission, orderId: string): boole
 
 function parsePayoutRecord(value: unknown): CommissionPayoutRecord {
   return parseObject<CommissionPayoutRecord>(value, '提成发放记录');
+}
+
+async function hasValidFormalOrderPayoutContext(
+  transaction: Prisma.TransactionClient,
+  orderId: string,
+  context?: CommissionPayoutCorrectionContext,
+): Promise<boolean> {
+  if (!context?.payoutRecordId || !context.commissionId) return false;
+  const row = await transaction.businessRecord.findUnique({
+    where: {
+      domain_recordId: {
+        domain: STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES,
+        recordId: context.payoutRecordId,
+      },
+    },
+  });
+  if (!row) return false;
+  const payout = parsePayoutRecord(row.data);
+  if (String(row.status || payout.status || '') !== '已发放') return false;
+  if (!payout.commissionIds.includes(context.commissionId)) return false;
+  const snapshot = payout.commissionSnapshots?.find((commission) => commission.id === context.commissionId);
+  return Boolean(
+    snapshot
+    && snapshot.orderId === orderId
+    && !isRecoveryCommission(snapshot),
+  );
+}
+
+async function inspectFormalOrderPayoutHistory(
+  transaction: Prisma.TransactionClient,
+  orderId: string,
+  knownCommissions: Commission[],
+): Promise<{ snapshots: Commission[]; issue?: string }> {
+  const rows = await transaction.businessRecord.findMany({
+    where: { domain: STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES },
+  });
+  const snapshots = new Map<string, Commission>();
+  const knownById = new Map(knownCommissions.map((commission) => [commission.id, commission]));
+  let issue: string | undefined;
+  for (const row of rows) {
+    const payout = parsePayoutRecord(row.data);
+    if (String(row.status || payout.status || '') !== '已发放') continue;
+    const includedIds = new Set(payout.commissionIds || []);
+    const validSnapshotIds = new Set<string>();
+    for (const snapshot of payout.commissionSnapshots || []) {
+      if (!includedIds.has(snapshot.id) || !isFormalOrderCommission(snapshot, orderId)) continue;
+      validSnapshotIds.add(snapshot.id);
+      if (snapshots.has(snapshot.id)) {
+        issue ||= `提成 ${snapshot.id} 同时出现在多个有效发放单，请先由财务核对历史发放记录`;
+        continue;
+      }
+      snapshots.set(snapshot.id, snapshot);
+    }
+    for (const commissionId of includedIds) {
+      if (validSnapshotIds.has(commissionId)) continue;
+      const known = knownById.get(commissionId);
+      if (known && isFormalOrderCommission(known, orderId)) {
+        issue ||= `历史已发提成 ${commissionId} 缺少逐笔发放快照，无法安全更正，请先由财务核对历史发放记录`;
+      }
+    }
+  }
+  return { snapshots: Array.from(snapshots.values()), issue };
 }
 
 function cloneOrderCorrectionSnapshot(value: Order): Record<string, unknown> {
@@ -886,19 +972,33 @@ async function applyPaidOrderCommissionProjection(
   lockedCommissionRows: Array<{ row: { status: string | null }; commission: Commission }>,
   expectedTarget: Commission[],
   changedAt: string,
+  protectedPaidSnapshots: Commission[] = [],
 ): Promise<{ preservedPaid: number; rebuiltPending: number }> {
   const currentIds = new Set(selectCurrentCommissionRounds(lockedCommissionRows.map(({ commission }) => commission)).map((item) => item.id));
   const claimedExpectedIds = new Set<string>();
+  const protectedExpectedByCommissionId = new Map<string, Commission>();
   const existingIds = new Set(lockedCommissionRows.map(({ commission }) => commission.id));
   let preservedPaid = 0;
   let rebuiltPending = 0;
+
+  // 历史发放快照可能已不在当前提成表中，但它仍代表已实际发放的应得额度。
+  // 先用快照占住对应的新规则结果，避免后续再次生成一笔整额待确认提成。
+  for (const snapshot of protectedPaidSnapshots.sort((left, right) => left.id.localeCompare(right.id))) {
+    const expected = closestExpectedCommission(snapshot, expectedTarget, claimedExpectedIds);
+    if (!expected) continue;
+    claimedExpectedIds.add(expected.id);
+    protectedExpectedByCommissionId.set(snapshot.id, expected);
+  }
 
   for (const { row, commission } of lockedCommissionRows) {
     if (!currentIds.has(commission.id) || !isFormalOrderCommission(commission, order.id)) continue;
     const currentStatus = (String(row.status || commission.status || '') || commission.status) as Commission['status'];
     const isManual = commission.isManualAdjusted || commission.sourceType === '人工新增';
-    const expected = isManual ? undefined : closestExpectedCommission(commission, expectedTarget, claimedExpectedIds);
-    if (expected) claimedExpectedIds.add(expected.id);
+    const protectedExpected = protectedExpectedByCommissionId.get(commission.id);
+    const expected = isManual
+      ? undefined
+      : protectedExpected || closestExpectedCommission(commission, expectedTarget, claimedExpectedIds);
+    if (expected && !protectedExpected) claimedExpectedIds.add(expected.id);
 
     if (currentStatus === '已发放') {
       const projected: Commission = {
@@ -1147,6 +1247,7 @@ export function createOrderCommandService(
     async precheckCorrection(
       orderId: string,
       actor: AuthenticatedUser,
+      payoutContext?: CommissionPayoutCorrectionContext,
     ): Promise<ApiResponse<OrderCorrectionPrecheck | null>> {
       const cleanOrderId = String(orderId || '').trim();
       if (!cleanOrderId) return failure<OrderCorrectionPrecheck>('订单ID不能为空', 400);
@@ -1160,12 +1261,27 @@ export function createOrderCommandService(
           const order = await lockOrder(transaction, cleanOrderId);
           if (!orderIsVisible(order, scope)) throw new OrderCommandError(403, '无权更正该订单');
           const lockedCommissionRows = await lockOrderCommissions(transaction, order.id);
+          const hasProtectedPayoutContext = await hasValidFormalOrderPayoutContext(
+            transaction,
+            order.id,
+            payoutContext,
+          );
+          const payoutHistory = await inspectFormalOrderPayoutHistory(
+            transaction,
+            order.id,
+            lockedCommissionRows.map(({ commission }) => commission),
+          );
+          const hasProtectedPayout = hasProtectedPayoutContext
+            || payoutHistory.snapshots.length > 0
+            || Boolean(payoutHistory.issue);
           const eligibility = inspectCorrectionEligibility(
             order,
             lockedCommissionRows,
             Boolean(options.rebuildPendingCommissions),
             Boolean(options.previewCommissions),
             isSuperAdmin(actor),
+            hasProtectedPayout,
+            payoutHistory.issue,
           );
           return eligibility.allowed && isSuperAdmin(actor) && options.previewCommissions
             ? {
@@ -1218,12 +1334,27 @@ export function createOrderCommandService(
           if (unsupported) throw new OrderCommandError(400, `字段 ${unsupported} 不支持订单更正`);
           if (!changed.length) throw new OrderCommandError(400, '未检测到需要更正的内容');
           const lockedCommissionRows = await lockOrderCommissions(transaction, order.id);
+          const hasProtectedPayoutContext = await hasValidFormalOrderPayoutContext(
+            transaction,
+            order.id,
+            input.payoutContext,
+          );
+          const payoutHistory = await inspectFormalOrderPayoutHistory(
+            transaction,
+            order.id,
+            lockedCommissionRows.map(({ commission }) => commission),
+          );
+          const hasProtectedPayout = hasProtectedPayoutContext
+            || payoutHistory.snapshots.length > 0
+            || Boolean(payoutHistory.issue);
           const eligibility = inspectCorrectionEligibility(
             order,
             lockedCommissionRows,
             Boolean(options.rebuildPendingCommissions),
             true,
             true,
+            hasProtectedPayout,
+            payoutHistory.issue,
           );
           if (!eligibility.allowed) throw new OrderCommandError(409, eligibility.message);
           const changedAt = now().toISOString();
@@ -1351,6 +1482,7 @@ export function createOrderCommandService(
       for (let attempt = 1; attempt <= MAX_TRANSACTION_ATTEMPTS; attempt += 1) {
         try {
           const corrected = await prisma.$transaction(async (transaction) => {
+          await lockCommissionLedger(transaction);
           const order = await lockOrder(transaction, cleanOrderId);
           if (!orderIsVisible(order, scope)) throw new OrderCommandError(403, '无权更正该订单');
           await validateStableOrderRelations(transaction, order, directory);
@@ -1367,7 +1499,20 @@ export function createOrderCommandService(
           const currentCommissionIds = new Set(selectCurrentCommissionRounds(
             lockedCommissionRows.map(({ commission }) => commission),
           ).map((commission) => commission.id));
-          const hasPaidCommission = lockedCommissionRows.some(({ row, commission }) => (
+          const hasProtectedPayoutContext = await hasValidFormalOrderPayoutContext(
+            transaction,
+            order.id,
+            input.payoutContext,
+          );
+          const payoutHistory = await inspectFormalOrderPayoutHistory(
+            transaction,
+            order.id,
+            lockedCommissionRows.map(({ commission }) => commission),
+          );
+          const hasProtectedPayout = hasProtectedPayoutContext
+            || payoutHistory.snapshots.length > 0
+            || Boolean(payoutHistory.issue);
+          const hasPaidCommission = hasProtectedPayout || lockedCommissionRows.some(({ row, commission }) => (
             currentCommissionIds.has(commission.id)
             && String(row.status || commission.status || '') === '已发放'
           ));
@@ -1380,6 +1525,8 @@ export function createOrderCommandService(
             Boolean(rebuildPendingCommissions),
             Boolean(options.previewCommissions),
             isSuperAdmin(actor),
+            hasProtectedPayout,
+            payoutHistory.issue,
           );
 
           const changedAt = now().toISOString();
@@ -1426,6 +1573,7 @@ export function createOrderCommandService(
               lockedCommissionRows,
               previewExpectedTarget || [],
               changedAt,
+              payoutHistory.snapshots,
             );
             const correction = await persistCommissionCorrection(transaction, preview, reason, actor, { now: changedAt });
             const rebuiltRows = await transaction.businessRecord.findMany({
@@ -1435,9 +1583,15 @@ export function createOrderCommandService(
             commissionSummary = `保留 ${projection.preservedPaid} 条原已发放记录，重算 ${projection.rebuiltPending} 条未发放分账；更正单 ${correction.correctionNo}，补发 ¥${preview.supplementAmount.toFixed(2)}，追回 ¥${preview.recoverAmount.toFixed(2)}`;
           } else {
             await syncCorrectedDelivery(transaction, order, next, changedAt);
-            await transaction.businessRecord.deleteMany({
-              where: { domain: STORAGE_KEYS.COMMISSIONS, orderId: order.id },
-            });
+            const commissionRecordIds = lockedCommissionRows
+              .map(({ commission }) => commission)
+              .filter((commission) => isFormalOrderCommission(commission, order.id))
+              .map((commission) => commission.id);
+            if (commissionRecordIds.length) {
+              await transaction.businessRecord.deleteMany({
+                where: { domain: STORAGE_KEYS.COMMISSIONS, recordId: { in: commissionRecordIds } },
+              });
+            }
             await rebuildPendingCommissions!(transaction, next, changedAt);
             const rebuiltRows = await transaction.businessRecord.findMany({
               where: { domain: STORAGE_KEYS.COMMISSIONS, orderId: order.id },

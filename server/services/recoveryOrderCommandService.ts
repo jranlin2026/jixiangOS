@@ -10,6 +10,7 @@ import type {
   Commission,
   CommissionCorrectionPreview,
   CommissionCorrectionRecord,
+  CommissionPayoutCorrectionContext,
   CommissionPayoutRecord,
   OfficialPaymentChannel,
 } from '../../src/types/commission';
@@ -41,6 +42,8 @@ import { getPhoneNumberError } from '../../src/shared/utils/phoneNumber';
 import { buildCommissionCorrectionImpact, findOverlappingFinancialCorrection } from './commissionCorrectionImpactService';
 import { persistCommissionCorrection } from './commissionCorrectionService';
 import { resolveCommissionEntitlements } from '../../src/shared/utils/commissionEntitlement';
+import { isAfterSalesRecoveryCommission } from '../../src/shared/utils/commissionConfiguration';
+import { lockCommissionLedger } from './commissionLedgerLock';
 
 type RecoveryCommandPrisma = Pick<PrismaClient, 'businessRecord' | 'user' | 'role' | 'department' | '$transaction' | '$queryRaw'>;
 type Directory = { users: User[]; roles: Role[]; departments: Department[] };
@@ -587,6 +590,69 @@ async function lockRecoveryCommissionRows(
   return locked;
 }
 
+async function hasValidRecoveryPayoutContext(
+  transaction: Prisma.TransactionClient,
+  order: RecoveryOrder,
+  context?: CommissionPayoutCorrectionContext,
+): Promise<boolean> {
+  if (!context?.payoutRecordId || !context.commissionId) return false;
+  const row = await transaction.businessRecord.findUnique({
+    where: {
+      domain_recordId: {
+        domain: STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES,
+        recordId: context.payoutRecordId,
+      },
+    },
+  });
+  if (!row) return false;
+  const payout = parseObject<CommissionPayoutRecord>(row.data, '提成发放记录');
+  if (String(row.status || payout.status || '') !== '已发放') return false;
+  const snapshot = payout.commissionSnapshots?.find((commission) => commission.id === context.commissionId);
+  return Boolean(
+    snapshot
+    && (payout.commissionIds || []).includes(context.commissionId)
+    && isAfterSalesRecoveryCommission(snapshot)
+    && relatedRecoveryCommission(order, snapshot),
+  );
+}
+
+async function inspectRecoveryPayoutHistory(
+  transaction: Prisma.TransactionClient,
+  order: RecoveryOrder,
+  commissionRows: Array<{ recordId: string; status: string | null; data: unknown }>,
+): Promise<{ hasPaidSnapshot: boolean; missingSnapshotCommissionId?: string }> {
+  const knownCommissions = new Map(commissionRows.map((row) => [
+    row.recordId,
+    parseObject<Commission>(row.data, '售后挽回分账'),
+  ]));
+  const rows = await transaction.businessRecord.findMany({
+    where: { domain: STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES },
+  });
+  let hasPaidSnapshot = false;
+  let missingSnapshotCommissionId: string | undefined;
+  for (const row of rows) {
+    const payout = parseObject<CommissionPayoutRecord>(row.data, '提成发放记录');
+    if (String(row.status || payout.status || '') !== '已发放') continue;
+    const includedIds = new Set(payout.commissionIds || []);
+    const validSnapshotIds = new Set<string>();
+    for (const snapshot of payout.commissionSnapshots || []) {
+      if (!includedIds.has(snapshot.id)) continue;
+      validSnapshotIds.add(snapshot.id);
+      if (isAfterSalesRecoveryCommission(snapshot) && relatedRecoveryCommission(order, snapshot)) {
+        hasPaidSnapshot = true;
+      }
+    }
+    for (const commissionId of includedIds) {
+      if (validSnapshotIds.has(commissionId)) continue;
+      const known = knownCommissions.get(commissionId);
+      if (known && isAfterSalesRecoveryCommission(known) && relatedRecoveryCommission(order, known)) {
+        missingSnapshotCommissionId ||= commissionId;
+      }
+    }
+  }
+  return { hasPaidSnapshot, missingSnapshotCommissionId };
+}
+
 const RECOVERY_CORRECTION_LABELS: Record<keyof RecoveryOrderInput, string> = {
   customerName: '客户姓名', customerPhone: '客户手机号', customerWechat: '客户微信',
   thirdPartyOrderNo: '第三方平台订单号', sourcePlatform: '来源平台', sourcePlatformId: '来源平台ID',
@@ -641,6 +707,8 @@ function inspectRecoveryCorrection(
   order: RecoveryOrder,
   commissionRows: Array<{ status?: string | null; data: unknown }>,
   allowPaidCorrection = false,
+  hasProtectedPayoutContext = false,
+  missingSnapshotCommissionId?: string,
 ): RecoveryOrderCorrectionPrecheck {
   const commissions = commissionRows.map((row) => parseObject<Commission>(row.data, '售后挽回分账'));
   const statuses = Array.from(new Set(commissionRows.map((row, index) => (
@@ -665,8 +733,23 @@ function inspectRecoveryCorrection(
   if (!['审核通过', '待分账', '已分账'].includes(order.status)) {
     return blocked('not_approved', '该记录尚未审核通过，请在审核台修改并重新提交');
   }
+  if (missingSnapshotCommissionId) {
+    return blocked(
+      'payout_started',
+      `历史已发提成 ${missingSnapshotCommissionId} 缺少逐笔发放快照，无法安全更正，请先由财务核对历史发放记录`,
+      'post_payout',
+    );
+  }
   const payoutStarted = statuses.some((status) => ['已发放', '待冲销', '已冲销'].includes(status))
-    || settlementStatus === '已发放';
+    || settlementStatus === '已发放'
+    || hasProtectedPayoutContext;
+  if (hasProtectedPayoutContext && statuses.some((status) => ['待确认', '待发放'].includes(status))) {
+    return blocked(
+      'settlement_processing',
+      '当前仍有待确认或待发放分账，请先在财务撤回相关分账后再更正',
+      'post_payout',
+    );
+  }
   if (payoutStarted && allowPaidCorrection && !statuses.some((status) => ['待冲销', '已冲销'].includes(status))) {
     return {
       allowed: true,
@@ -1004,11 +1087,27 @@ export function createRecoveryOrderCommandService(
       row,
       commission: parseObject<Commission>(row.data, '售后挽回分账'),
     }));
-    const payoutState = recoveryPostPayoutState(current, commissionSnapshots);
+    const hasProtectedPayoutContext = await hasValidRecoveryPayoutContext(
+      transaction,
+      current,
+      input.payoutContext,
+    );
+    const payoutHistory = await inspectRecoveryPayoutHistory(transaction, current, commissionRows);
+    const hasProtectedPayout = hasProtectedPayoutContext || payoutHistory.hasPaidSnapshot;
+    const detectedPayoutState = recoveryPostPayoutState(current, commissionSnapshots);
+    const payoutState = hasProtectedPayout || payoutHistory.missingSnapshotCommissionId
+      ? { ...detectedPayoutState, postPayoutCorrection: true }
+      : detectedPayoutState;
     if (payoutState.postPayoutCorrection && !isSuperAdmin(actor)) {
       throw new RecoveryCommandError(403, '只有超级管理员可以更正已发放的售后挽回订单');
     }
-    const eligibility = inspectRecoveryCorrection(current, commissionRows, isSuperAdmin(actor));
+    const eligibility = inspectRecoveryCorrection(
+      current,
+      commissionRows,
+      isSuperAdmin(actor),
+      hasProtectedPayout,
+      payoutHistory.missingSnapshotCommissionId,
+    );
     if (!eligibility.allowed) throw new RecoveryCommandError(409, eligibility.message);
     const data = input?.data;
     const validated = validateInput(data, actor, directory, scope);
@@ -1437,6 +1536,7 @@ export function createRecoveryOrderCommandService(
     async precheckCorrection(
       orderId: string,
       actor: AuthenticatedUser,
+      payoutContext?: CommissionPayoutCorrectionContext,
     ): Promise<ApiResponse<RecoveryOrderCorrectionPrecheck | null>> {
       if (!hasPermission(actor, PERMISSION_KEYS.AFTER_SALES_RECOVERY_CORRECT, 'write')) {
         return failure<RecoveryOrderCorrectionPrecheck>('无售后挽回订单更正权限', 403);
@@ -1446,10 +1546,23 @@ export function createRecoveryOrderCommandService(
       const directory = await loadDirectory(prisma);
       const scope = recoveryScope(directory, actor);
       return run(() => prisma.$transaction(async (transaction) => {
+        await lockCommissionLedger(transaction);
         const current = await lockRecoveryOrder(transaction, id);
         if (!recoveryWritable(current, scope)) throw new RecoveryCommandError(403, '无权更正该售后挽回订单');
         const commissionRows = await lockRecoveryCommissionRows(transaction, current);
-        const eligibility = inspectRecoveryCorrection(current, commissionRows, isSuperAdmin(actor));
+        const hasProtectedPayoutContext = await hasValidRecoveryPayoutContext(
+          transaction,
+          current,
+          payoutContext,
+        );
+        const payoutHistory = await inspectRecoveryPayoutHistory(transaction, current, commissionRows);
+        const eligibility = inspectRecoveryCorrection(
+          current,
+          commissionRows,
+          isSuperAdmin(actor),
+          hasProtectedPayoutContext || payoutHistory.hasPaidSnapshot,
+          payoutHistory.missingSnapshotCommissionId,
+        );
         if (eligibility.allowed && isSuperAdmin(actor) && !eligibility.requiresImpactPreview) {
           return {
             ...eligibility,
@@ -1480,6 +1593,7 @@ export function createRecoveryOrderCommandService(
       const directory = await loadDirectory(prisma);
       const scope = recoveryScope(directory, actor);
       return run(() => prisma.$transaction(async (transaction) => {
+        await lockCommissionLedger(transaction);
         const prepared = await prepareCorrection(transaction, orderId, input, actor, directory, scope);
         return prepared.preview;
       }, {
@@ -1570,6 +1684,7 @@ export function createRecoveryOrderCommandService(
       const directory = await loadDirectory(prisma);
       const scope = recoveryScope(directory, actor);
       return run(() => prisma.$transaction(async (transaction) => {
+        await lockCommissionLedger(transaction);
         const prepared = await prepareCorrection(transaction, orderId, input, actor, directory, scope);
         const {
           current,
@@ -1817,6 +1932,7 @@ export function createRecoveryOrderCommandService(
       if (!Array.isArray(rows) || !rows.length) return failure('至少添加一条分账记录', 400);
       const directory = await loadDirectory(prisma);
       return run(() => prisma.$transaction(async (transaction) => {
+        await lockCommissionLedger(transaction);
         const current = await lockRecoveryOrder(transaction, orderId);
         if (current.deletedAt) throw new RecoveryCommandError(409, '源售后挽回订单已删除，不能处理分账');
         if (!['审核通过', '待分账'].includes(current.status)) throw new RecoveryCommandError(409, '只有审核通过的售后挽回订单才能分账');
@@ -2211,6 +2327,7 @@ export function createRecoveryOrderCommandService(
     actor: AuthenticatedUser,
   ): Promise<ApiResponse<RecoveryOrder | null>> {
     return run(() => prisma.$transaction(async (transaction) => {
+      await lockCommissionLedger(transaction);
       const current = await lockRecoveryOrder(transaction, orderId);
       if (current.deletedAt) throw new RecoveryCommandError(409, '源售后挽回订单已删除，分账仅保留只读留痕');
       const currentStatus = recoverySettlementStatus(current);

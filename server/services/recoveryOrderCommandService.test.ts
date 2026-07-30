@@ -497,24 +497,11 @@ const mixedCorrectionInput = {
   }),
 };
 const mixedPreview = await paidService.previewCorrection(paidOrder.id, mixedCorrectionInput, superAdmin);
-assert.equal(mixedPreview.code, 0, mixedPreview.message);
-const mixedCorrection = await paidService.correct(paidOrder.id, {
-  ...mixedCorrectionInput,
-  expectedImpactHash: mixedPreview.data!.impactHash,
-}, superAdmin);
-assert.equal(mixedCorrection.code, 0, mixedCorrection.message);
-assert.equal(mixedCorrection.data?.settlementStatus, '待发放', '已发放和待发放混合时不得把整单误标为全部已发放');
-assert.equal(mixedCorrection.data?.settlementPaidAt, undefined, '分批发放未完成时不得伪造整单发放完成时间');
-const correctedPendingCommission = paidPrisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, pendingCommission.id))?.data as Commission;
-assert.equal(correctedPendingCommission.status, '待发放', '未发放提成应保留原状态');
-assert.equal(correctedPendingCommission.paymentDate, '2026-06-06T06:51:00.000Z', '未发放提成的月报归属也必须同步');
-assert.equal(correctedPendingCommission.performanceAmount, 799, '未发放提成应按更正后业务金额重算业绩');
-assert.equal(correctedPendingCommission.commissionAmount, 79.9, '未发放的百分比提成应按新金额重算');
-assert.equal(
-  paidPrisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, pendingCommission.id))?.amount,
-  79.9,
-  '分账索引金额也必须与重算后的未发放提成一致',
-);
+assert.equal(mixedPreview.code, 409, '历史已发与当前待发并存时必须先由财务撤回，不得在业务更正中改写待发金额');
+assert.match(mixedPreview.message, /财务.*撤回/);
+const pendingRow = paidPrisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, pendingCommission.id))!;
+pendingRow.status = '已撤回';
+pendingRow.data = { ...pendingCommission, status: '已撤回' };
 const ownerTransferInput = {
   ...mixedCorrectionInput,
   reason: '更正实际挽回人员',
@@ -550,7 +537,7 @@ const stackedCorrectionPreview = await paidService.previewCorrection(paidOrder.i
   data: { ...ownerTransferInput.data, recoveryAt: '2026-06-07T06:51:00.000Z' },
 }, superAdmin);
 assert.equal(stackedCorrectionPreview.code, 409, '同源已有差额时必须阻断叠加更正，避免重复补发或追回');
-assert.match(stackedCorrectionPreview.message, /当前已有差额更正/);
+assert.match(stackedCorrectionPreview.message, /当前已有差额更正|财务.*撤回/);
 
 const deltaPrisma = new FakePrisma();
 const deltaOrder: RecoveryOrder = {
@@ -654,6 +641,12 @@ const removePendingAssistInput = {
     remark: '已核实本单没有协助人员',
   }),
 };
+const blockedPendingAssistPreview = await deltaService.previewCorrection(deltaOrder.id, removePendingAssistInput, superAdmin);
+assert.equal(blockedPendingAssistPreview.code, 409, '历史已发订单的待发协助提成必须先由财务撤回');
+assert.match(blockedPendingAssistPreview.message, /财务.*撤回/);
+const pendingAssistRow = deltaPrisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, deltaPendingAssist.id))!;
+pendingAssistRow.status = '已撤回';
+pendingAssistRow.data = { ...deltaPendingAssist, status: '已撤回' };
 const removePendingAssistPreview = await deltaService.previewCorrection(deltaOrder.id, removePendingAssistInput, superAdmin);
 assert.equal(removePendingAssistPreview.code, 0, removePendingAssistPreview.message);
 assert.equal(removePendingAssistPreview.data?.supplementAmount, 0);
@@ -1756,4 +1749,160 @@ assert.notEqual(
   (await service.get(returnedSource.data!.id, reviewer, 'recoveryOrders')).code,
   0,
   'soft-deleted recovery evidence must stay hidden from the formal business list',
+);
+
+const payoutContextPrisma = new FakePrisma();
+const payoutContextOrder: RecoveryOrder = {
+  ...oldRecord,
+  id: 'recovery-payout-context',
+  recoveryNo: 'RCV-PAYOUT-CONTEXT',
+  thirdPartyOrderNo: 'TP-PAYOUT-CONTEXT',
+  status: '审核通过',
+  settlementStatus: '已撤回',
+  commissionIds: [],
+  recoveryUserId: finance.id,
+  recoveryUserName: finance.name,
+};
+const payoutContextCommission: Commission = {
+  ...paidCommission,
+  id: 'commission-payout-context',
+  orderId: payoutContextOrder.id,
+  orderNo: payoutContextOrder.recoveryNo,
+  sourceRecoveryOrderId: payoutContextOrder.id,
+  payoutRecordId: 'payout-context-record',
+};
+const payoutContextRecord = paidPayoutRecord(payoutContextCommission);
+const activePayoutContextCommission: Commission = {
+  ...payoutContextCommission,
+  id: 'commission-payout-context-active',
+  status: '待发放',
+  payoutRecordId: undefined,
+  paidAt: undefined,
+};
+payoutContextPrisma.rows.set(key(STORAGE_KEYS.RECOVERY_ORDERS, payoutContextOrder.id), {
+  id: `${STORAGE_KEYS.RECOVERY_ORDERS}:${payoutContextOrder.id}`,
+  domain: STORAGE_KEYS.RECOVERY_ORDERS,
+  recordId: payoutContextOrder.id,
+  status: payoutContextOrder.status,
+  orderId: payoutContextOrder.id,
+  eventAt: new Date(payoutContextOrder.recoveryAt!),
+  data: clone(payoutContextOrder),
+});
+payoutContextPrisma.rows.set(key(STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES, payoutContextRecord.id), {
+  id: `${STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES}:${payoutContextRecord.id}`,
+  domain: STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES,
+  recordId: payoutContextRecord.id,
+  status: payoutContextRecord.status,
+  orderId: payoutContextOrder.id,
+  eventAt: new Date(payoutContextRecord.issuedAt),
+  data: clone(payoutContextRecord),
+});
+payoutContextPrisma.rows.set(key(STORAGE_KEYS.COMMISSIONS, activePayoutContextCommission.id), {
+  id: `${STORAGE_KEYS.COMMISSIONS}:${activePayoutContextCommission.id}`,
+  domain: STORAGE_KEYS.COMMISSIONS,
+  recordId: activePayoutContextCommission.id,
+  status: activePayoutContextCommission.status,
+  orderId: payoutContextOrder.id,
+  owner: activePayoutContextCommission.owner,
+  amount: activePayoutContextCommission.commissionAmount,
+  eventAt: new Date(activePayoutContextCommission.paymentDate!),
+  data: clone(activePayoutContextCommission),
+});
+const payoutContextService = createRecoveryOrderCommandService(payoutContextPrisma as any, { now: () => new Date(NOW) });
+const validPayoutContext = {
+  payoutRecordId: payoutContextRecord.id,
+  commissionId: payoutContextCommission.id,
+};
+const ordinaryPayoutHistoryPrecheck = await payoutContextService.precheckCorrection(
+  payoutContextOrder.id,
+  superAdmin,
+);
+assert.equal(
+  ordinaryPayoutHistoryPrecheck.data?.allowed,
+  false,
+  '普通更正入口也必须自动识别历史发放，不能靠 payoutContext 才阻止重复支付',
+);
+assert.equal(ordinaryPayoutHistoryPrecheck.data?.mode, 'post_payout');
+assert.match(ordinaryPayoutHistoryPrecheck.data?.message || '', /财务.*撤回/);
+const payoutContextPrecheck = await payoutContextService.precheckCorrection(
+  payoutContextOrder.id,
+  superAdmin,
+  validPayoutContext,
+);
+assert.equal(payoutContextPrecheck.data?.allowed, false, '当前仍有待发放分账时不得通过历史发放上下文重复付款');
+assert.equal(payoutContextPrecheck.data?.mode, 'post_payout');
+assert.match(payoutContextPrecheck.data?.message || '', /财务.*撤回/);
+const activePayoutContextRow = payoutContextPrisma.rows.get(
+  key(STORAGE_KEYS.COMMISSIONS, activePayoutContextCommission.id),
+);
+assert.ok(activePayoutContextRow);
+activePayoutContextRow.status = '已撤回';
+activePayoutContextRow.data = { ...activePayoutContextRow.data, status: '已撤回' };
+const withdrawnPayoutContextPrecheck = await payoutContextService.precheckCorrection(
+  payoutContextOrder.id,
+  superAdmin,
+  validPayoutContext,
+);
+assert.equal(withdrawnPayoutContextPrecheck.code, 0, withdrawnPayoutContextPrecheck.message);
+assert.equal(withdrawnPayoutContextPrecheck.data?.allowed, true);
+assert.equal(withdrawnPayoutContextPrecheck.data?.mode, 'post_payout', '当前分账撤回后应恢复已发放更正模式');
+assert.equal(withdrawnPayoutContextPrecheck.data?.requiresImpactPreview, true);
+payoutContextPrisma.rows.delete(key(STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES, payoutContextRecord.id));
+const invalidPayoutContextPrecheck = await payoutContextService.precheckCorrection(
+  payoutContextOrder.id,
+  superAdmin,
+  { ...validPayoutContext, commissionId: 'missing-commission' },
+);
+assert.equal(invalidPayoutContextPrecheck.data?.mode, 'standard', '无效发放快照不得触发已发放更正模式');
+const snapshotOnlyRecord: CommissionPayoutRecord = {
+  ...payoutContextRecord,
+  id: 'payout-context-snapshot-only',
+  commissionIds: [],
+};
+payoutContextPrisma.rows.set(key(STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES, snapshotOnlyRecord.id), {
+  id: `${STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES}:${snapshotOnlyRecord.id}`,
+  domain: STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES,
+  recordId: snapshotOnlyRecord.id,
+  status: snapshotOnlyRecord.status,
+  orderId: payoutContextOrder.id,
+  eventAt: new Date(snapshotOnlyRecord.issuedAt),
+  data: clone(snapshotOnlyRecord),
+});
+const snapshotOnlyPrecheck = await payoutContextService.precheckCorrection(
+  payoutContextOrder.id,
+  superAdmin,
+  { payoutRecordId: snapshotOnlyRecord.id, commissionId: payoutContextCommission.id },
+);
+assert.equal(
+  snapshotOnlyPrecheck.data?.mode,
+  'standard',
+  '仅 commissionSnapshots 存在但不在 payout.commissionIds 中的记录不得解锁已发放更正',
+);
+const legacyPayoutContextCommission: Commission = {
+  ...payoutContextCommission,
+  id: 'commission-payout-context-legacy',
+  sourceBusinessType: undefined,
+};
+const legacyPayoutContextRecord = paidPayoutRecord(legacyPayoutContextCommission);
+payoutContextPrisma.rows.set(key(STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES, legacyPayoutContextRecord.id), {
+  id: `${STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES}:${legacyPayoutContextRecord.id}`,
+  domain: STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES,
+  recordId: legacyPayoutContextRecord.id,
+  status: legacyPayoutContextRecord.status,
+  orderId: payoutContextOrder.id,
+  eventAt: new Date(legacyPayoutContextRecord.issuedAt),
+  data: clone(legacyPayoutContextRecord),
+});
+const legacyPayoutContextPrecheck = await payoutContextService.precheckCorrection(
+  payoutContextOrder.id,
+  superAdmin,
+  {
+    payoutRecordId: legacyPayoutContextRecord.id,
+    commissionId: legacyPayoutContextCommission.id,
+  },
+);
+assert.equal(
+  legacyPayoutContextPrecheck.data?.mode,
+  'post_payout',
+  '已经关联源挽回单的历史发放快照必须支持售后挽回更正',
 );

@@ -38,11 +38,25 @@ const INACTIVE_COMMISSION_STATUSES = new Set<Commission['status']>([
   '已冲销',
 ]);
 
-export function isRecoveryCommission(commission: Commission): boolean {
-  return commission.sourceBusinessType === 'after_sales_recovery'
-    || commission.sourceBusinessType === 'refund_recovery'
-    || Boolean(commission.sourceRecoveryOrderId)
+export function isAfterSalesRecoveryCommission(commission: Commission): boolean {
+  if (commission.sourceBusinessType === 'after_sales_recovery') return true;
+  if (commission.sourceBusinessType === 'formal_order' || commission.sourceBusinessType === 'refund_recovery') return false;
+  // 历史退款挽回只关联退款单，不得借用售后挽回更正入口。
+  if (commission.sourceRefundId && !commission.sourceRecoveryOrderId) return false;
+  return Boolean(commission.sourceRecoveryOrderId)
     || String(commission.orderNo || '').startsWith('RCV-');
+}
+
+export function isRefundRecoveryCommission(commission: Commission): boolean {
+  if (commission.sourceBusinessType === 'refund_recovery') return true;
+  if (commission.sourceBusinessType === 'formal_order' || commission.sourceBusinessType === 'after_sales_recovery') return false;
+  return Boolean(commission.sourceRefundId && !commission.sourceRecoveryOrderId);
+}
+
+export function isRecoveryCommission(commission: Commission): boolean {
+  return isAfterSalesRecoveryCommission(commission)
+    || isRefundRecoveryCommission(commission)
+    || Boolean(commission.isRecoveryBonus);
 }
 
 export function isCommissionPendingAssignment(commission: Commission): boolean {

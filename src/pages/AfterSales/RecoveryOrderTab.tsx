@@ -51,8 +51,6 @@ import { canReviewRecoveryOrders, hasPermission, PERMISSION_KEYS } from '../../s
 import { isSuperAdmin } from '../../shared/utils/permissions';
 import type {
   RecoveryOrder,
-  RecoveryOrderCorrectionInput,
-  RecoveryOrderCorrectionPrecheck,
   RecoveryOrderFilters,
   RecoveryOrderInput,
   RecoveryOrderStatus,
@@ -83,13 +81,13 @@ import {
 } from '../../shared/utils/businessImportReviewModel';
 import BusinessStatusChip from '../../shared/components/BusinessStatusChip';
 import SettlementStatusChip from '../../shared/components/SettlementStatusChip';
-import type { CommissionCorrectionPreview, SettlementStatus } from '../../types/commission';
+import type { SettlementStatus } from '../../types/commission';
 import { SETTLEMENT_STATUSES, normalizeSettlementStatus } from '../../shared/utils/settlementStatus';
 import BusinessExportDialog, { type BusinessExportDialogRequest } from '../../shared/components/BusinessExportDialog';
 import { buildBusinessExportBrowserRequest, unwrapBusinessExportResponse } from '../../shared/utils/businessExportPageRequest';
 import BusinessSummaryGrid from '../../shared/components/BusinessSummaryGrid';
 import BusinessSubmissionResultDialog from '../../shared/components/BusinessSubmissionResultDialog';
-import CommissionCorrectionImpactDialog from '../../shared/components/CommissionCorrectionImpactDialog';
+import RecoveryOrderCorrectionDialog from './RecoveryOrderCorrectionDialog';
 
 const shell = {
   ink: '#0f172a',
@@ -150,7 +148,8 @@ const emptyForm = {
 };
 
 type RecoveryOrderForm = typeof emptyForm;
-type RecoveryFormMode = 'create' | 'review-edit' | 'metadata' | 'correction';
+type RecoveryFormMode = 'create' | 'review-edit' | 'metadata';
+type RecoveryEditMode = Exclude<RecoveryFormMode, 'create'> | 'correction';
 
 function getRecoveryOrderBusinessStatus(order: RecoveryOrder): SettlementStatus {
   return normalizeSettlementStatus(order.settlementStatus, '待处理');
@@ -346,14 +345,9 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<RecoveryOrderForm>(emptyForm);
   const [editingOrder, setEditingOrder] = useState<RecoveryOrder | null>(null);
+  const [correctionOrderId, setCorrectionOrderId] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<RecoveryFormMode>('create');
-  const [correctionReason, setCorrectionReason] = useState('');
-  const [correctionRequiresImpactPreview, setCorrectionRequiresImpactPreview] = useState(false);
-  const [correctionPreview, setCorrectionPreview] = useState<CommissionCorrectionPreview | null>(null);
-  const [pendingCorrectionInput, setPendingCorrectionInput] = useState<RecoveryOrderCorrectionInput | null>(null);
-  const [correctionSubmitting, setCorrectionSubmitting] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
-  const [correctionBlocker, setCorrectionBlocker] = useState<{ order: RecoveryOrder; precheck: RecoveryOrderCorrectionPrecheck } | null>(null);
   const [message, setMessage] = useState<{ type: 'success'; text: string } | null>(null);
   const [submittedRecoveryOrder, setSubmittedRecoveryOrder] = useState<RecoveryOrder | null>(null);
   const [errorDialog, setErrorDialog] = useState<{ title: string; text: string } | null>(null);
@@ -551,7 +545,6 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
     setMessage(null);
     setEditingOrder(null);
     setFormMode('create');
-    setCorrectionReason('');
     setSubmitAttempted(false);
     const self = currentUser
       ? activeUsers.find((user) => user.id === currentUser.id)
@@ -580,21 +573,13 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
     setDetailOrder((current) => current?.id === row.id ? detail : current);
   };
 
-  const openEdit = async (row: RecoveryOrder, nextMode: Exclude<RecoveryFormMode, 'create'> = mode === 'review' ? 'review-edit' : 'metadata') => {
+  const openEdit = async (row: RecoveryOrder, nextMode: RecoveryEditMode = mode === 'review' ? 'review-edit' : 'metadata') => {
     if (nextMode === 'correction') {
-      const precheck = await recoveryOrderApi.precheckRecoveryOrderCorrection(row.id);
-      if (precheck.code !== 0 || !precheck.data) {
-        showErrorDialog(precheck.message || '售后挽回订单更正预检失败');
-        return;
-      }
-      if (!precheck.data.allowed) {
-        setDetailOrder(null);
-        setCorrectionBlocker({ order: row, precheck: precheck.data });
-        return;
-      }
-      setCorrectionRequiresImpactPreview(precheck.data.requiresImpactPreview);
+      setMessage(null);
+      setDetailOrder(null);
+      setCorrectionOrderId(row.id);
+      return;
     } else if (nextMode === 'review-edit') {
-      setCorrectionRequiresImpactPreview(false);
       if (row.status !== '退回修改') {
         showErrorDialog(row.status === '审核驳回'
           ? '审核驳回的售后挽回订单已终止，不能修改或重新提交；如需重新办理请新建申请'
@@ -605,17 +590,12 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
         showErrorDialog('已进入分账链路的售后挽回订单不能从审核台修改');
         return;
       }
-    } else {
-      setCorrectionRequiresImpactPreview(false);
     }
     setMessage(null);
     const detail = await loadRecoveryDetail(row);
     if (!detail) return;
     setEditingOrder(detail);
     setFormMode(nextMode);
-    setCorrectionReason('');
-    setCorrectionPreview(null);
-    setPendingCorrectionInput(null);
     setSubmitAttempted(false);
     setForm({
       customerName: detail.customerName || '',
@@ -647,20 +627,8 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
   useEffect(() => {
     if (mode !== 'list' || !correctionTargetId || handledCorrectionTargetRef.current === correctionTargetId) return;
     handledCorrectionTargetRef.current = correctionTargetId;
-    void (async () => {
-      try {
-        const response = await recoveryOrderApi.fetchRecoveryOrderById(correctionTargetId, 'recoveryOrders');
-        if (response.code !== 0 || !response.data) {
-          showErrorDialog(response.message || '找不到需要更正的售后挽回订单');
-          return;
-        }
-        await openEdit(response.data, 'correction');
-      } finally {
-        onCorrectionTargetClear?.();
-      }
-    })();
-    // openEdit intentionally resolves the latest server state for this one-shot URL target.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setCorrectionOrderId(correctionTargetId);
+    onCorrectionTargetClear?.();
   }, [correctionTargetId, mode]);
 
   const handleProductChange = (productName: string) => {
@@ -721,47 +689,9 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
       createdBy: currentUser.id,
       createdByName: currentUser.name,
     };
-    let wasPostPayoutCorrection = formMode === 'correction' && correctionRequiresImpactPreview;
-    let res;
-    if (editingOrder && formMode === 'correction') {
-      const correctionInput: RecoveryOrderCorrectionInput = {
-        reason: correctionReason.trim(),
-        data: input,
-      };
-      setCorrectionSubmitting(true);
-      try {
-        const precheck = await recoveryOrderApi.precheckRecoveryOrderCorrection(editingOrder.id);
-        if (precheck.code !== 0 || !precheck.data) {
-          showErrorDialog(precheck.message || '售后挽回订单更正预检失败');
-          return;
-        }
-        if (!precheck.data.allowed) {
-          showErrorDialog(precheck.data.message || '当前售后挽回订单暂不能更正');
-          return;
-        }
-        wasPostPayoutCorrection = precheck.data.requiresImpactPreview;
-        setCorrectionRequiresImpactPreview(precheck.data.requiresImpactPreview);
-        if (precheck.data.requiresImpactPreview) {
-          const preview = await recoveryOrderApi.previewRecoveryOrderCorrection(editingOrder.id, correctionInput);
-          if (preview.code !== 0 || !preview.data) {
-            showErrorDialog(preview.message || '售后挽回订单更正影响预览生成失败');
-            return;
-          }
-          setPendingCorrectionInput(correctionInput);
-          setCorrectionPreview(preview.data);
-          return;
-        }
-        res = await recoveryOrderApi.correctRecoveryOrder(editingOrder.id, correctionInput);
-      } catch (error) {
-        showErrorDialog(error instanceof Error ? error.message : '售后挽回订单更正失败');
-        return;
-      } finally {
-        setCorrectionSubmitting(false);
-      }
-    } else {
-      res = editingOrder
-        ? formMode === 'metadata'
-          ? await recoveryOrderApi.editRecoveryOrderMetadata(editingOrder.id, {
+    const res = editingOrder
+      ? formMode === 'metadata'
+        ? await recoveryOrderApi.editRecoveryOrderMetadata(editingOrder.id, {
           sourcePlatform: input.sourcePlatform,
           sourcePlatformId: input.sourcePlatformId,
           sourcePlatformName: input.sourcePlatformName,
@@ -771,14 +701,11 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
           recoveryAttachments: input.recoveryAttachments,
           remark: input.remark,
         })
-          : await recoveryOrderApi.updateRecoveryOrder(editingOrder.id, input)
-        : await recoveryOrderApi.createRecoveryOrder(input);
-    }
+        : await recoveryOrderApi.updateRecoveryOrder(editingOrder.id, input)
+      : await recoveryOrderApi.createRecoveryOrder(input);
     if (res.code !== 0) {
       showErrorDialog(
-        res.message || (formMode === 'correction'
-          ? '售后挽回订单更正失败'
-          : editingOrder ? '修改售后挽回订单失败' : '新建售后挽回订单失败'),
+        res.message || (editingOrder ? '修改售后挽回订单失败' : '新建售后挽回订单失败'),
         '无法提交',
       );
       return;
@@ -793,48 +720,12 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
         type: 'success',
         text: formMode === 'metadata'
           ? '售后挽回订单补充资料已保存，不影响现有审核和分账状态'
-          : formMode === 'correction'
-            ? wasPostPayoutCorrection
-              ? '已完成超级管理员更正并记录影响；原发放事实永久保留，如有差额已进入后续处理'
-              : '售后挽回订单已更正，未发放分账已回退为待处理'
-            : editingOrder
-              ? '已修改售后挽回订单，并重新提交审核'
-              : '已提交售后挽回订单，待财务审核通过后进入售后挽回订单列表',
+          : editingOrder
+            ? '已修改售后挽回订单，并重新提交审核'
+            : '已提交售后挽回订单，待财务审核通过后进入售后挽回订单列表',
       });
     }
     await load();
-  };
-
-  const handleConfirmRecoveryCorrectionImpact = async () => {
-    if (!editingOrder || !pendingCorrectionInput || !correctionPreview) return;
-    setCorrectionSubmitting(true);
-    try {
-      const res = await recoveryOrderApi.correctRecoveryOrder(editingOrder.id, {
-        ...pendingCorrectionInput,
-        expectedImpactHash: correctionPreview.impactHash,
-      });
-      if (res.code !== 0 || !res.data) {
-        setCorrectionPreview(null);
-        setPendingCorrectionInput(null);
-        showErrorDialog(res.message || '售后挽回订单更正失败');
-        return;
-      }
-      setCorrectionPreview(null);
-      setPendingCorrectionInput(null);
-      setOpen(false);
-      setEditingOrder(null);
-      setMessage({
-        type: 'success',
-        text: '已完成超级管理员更正并记录影响；原发放事实永久保留，如有差额已进入后续处理',
-      });
-      await load();
-    } catch (error) {
-      setCorrectionPreview(null);
-      setPendingCorrectionInput(null);
-      showErrorDialog(error instanceof Error ? error.message : '售后挽回订单更正失败');
-    } finally {
-      setCorrectionSubmitting(false);
-    }
   };
 
   const handleDelete = async (row: RecoveryOrder) => {
@@ -1173,19 +1064,12 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
   const recoveryErrorCount = validateFullForm
     ? Number(Number(form.recoveryAmount) <= 0) + Number(!form.recoveryAt) + Number(!form.recoveryUserId)
     : 0;
-  const postPayoutCorrection = formMode === 'correction'
-    && Boolean(editingOrder)
-    && correctionRequiresImpactPreview;
-  const recoveryFormTitle = formMode === 'correction'
-    ? postPayoutCorrection ? '售后挽回订单更正（影响预览）' : '售后挽回订单更正'
-    : formMode === 'metadata'
-      ? '编辑售后挽回订单资料'
-      : editingOrder ? '修改售后挽回订单申请' : '新建售后挽回订单';
-  const recoveryFormAction = formMode === 'correction'
-    ? postPayoutCorrection ? '查看更正影响' : '确认更正并回退分账'
-    : formMode === 'metadata'
-      ? '保存资料'
-      : editingOrder ? '保存并提交审核' : '提交审核';
+  const recoveryFormTitle = formMode === 'metadata'
+    ? '编辑售后挽回订单资料'
+    : editingOrder ? '修改售后挽回订单申请' : '新建售后挽回订单';
+  const recoveryFormAction = formMode === 'metadata'
+    ? '保存资料'
+    : editingOrder ? '保存并提交审核' : '提交审核';
 
   return (
     <Box sx={{ display: 'grid', gap: 1.5 }}>
@@ -1395,13 +1279,13 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
 
       <Dialog
         open={open}
-        onClose={correctionSubmitting ? undefined : () => { setOpen(false); setEditingOrder(null); }}
+        onClose={() => { setOpen(false); setEditingOrder(null); }}
         maxWidth="md"
         fullWidth
         fullScreen={mobileFullScreen}
         PaperProps={{ sx: { maxHeight: { xs: '100dvh', sm: '94vh' }, bgcolor: '#f8fafc' } }}
       >
-        <DialogCloseTitle onClose={() => { setOpen(false); setEditingOrder(null); }} closeDisabled={correctionSubmitting} sx={{ px: { xs: 2, sm: 3 }, py: 2.25, bgcolor: '#fff' }}>
+        <DialogCloseTitle onClose={() => { setOpen(false); setEditingOrder(null); }} sx={{ px: { xs: 2, sm: 3 }, py: 2.25, bgcolor: '#fff' }}>
           <Box sx={{ minWidth: 0 }}>
             <Typography variant="h6" sx={{ color: '#0f172a', fontWeight: 850 }}>{recoveryFormTitle}</Typography>
             <Typography variant="body2" sx={{ mt: 0.35, color: '#64748b' }}>
@@ -1427,28 +1311,6 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
             <Alert severity="info" sx={{ mb: 2 }}>
               资料编辑仅保存来源、付款订单号、挽回凭证和备注，不改变审核与分账状态。
             </Alert>
-          ) : null}
-          {formMode === 'correction' ? (
-            <Stack spacing={1.5} sx={{ mb: 2 }}>
-              {postPayoutCorrection ? (
-                <Alert severity="warning">
-                  本次为超级管理员更正。提交后会先预览本单及同月阶梯联动影响；已有发放单、提成人员、提成金额及实际发放时间永久保留。
-                </Alert>
-              ) : (
-                <Alert severity="warning">
-                  更正会撤回未发放分账，并将该挽回单回退到财务“待处理”。
-                </Alert>
-              )}
-              <TextField
-                label="更正原因"
-                value={correctionReason}
-                onChange={(event) => setCorrectionReason(event.target.value)}
-                required
-                multiline
-                minRows={2}
-                placeholder="请说明录入错误、更正依据和需要调整的内容"
-              />
-            </Stack>
           ) : null}
           <BusinessFormSection
             step={1}
@@ -1570,12 +1432,11 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
               </Typography>
             </Box>
           </Box>
-          <Button onClick={() => { setOpen(false); setEditingOrder(null); }} disabled={correctionSubmitting}>取消</Button>
+          <Button onClick={() => { setOpen(false); setEditingOrder(null); }}>取消</Button>
           <Button
             variant="contained"
             size="large"
             onClick={handleCreate}
-            disabled={correctionSubmitting || (formMode === 'correction' && !correctionReason.trim())}
             sx={{ minWidth: { xs: 104, sm: 132 }, fontWeight: 800 }}
           >
             {recoveryFormAction}
@@ -1878,43 +1739,6 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
         </DialogActions>
       </Dialog>
 
-      <Dialog open={Boolean(correctionBlocker)} onClose={() => setCorrectionBlocker(null)} maxWidth="sm" fullWidth>
-        <DialogCloseTitle onClose={() => setCorrectionBlocker(null)}>暂不能更正售后挽回订单</DialogCloseTitle>
-        <DialogContent dividers>
-          {correctionBlocker ? (
-            <Stack spacing={1.5}>
-              <Alert severity="warning">{correctionBlocker.precheck.message}</Alert>
-              <Box sx={{ border: `1px solid ${shell.line}`, borderRadius: 1.5, p: 1.5, bgcolor: shell.soft }}>
-                <Typography variant="body2">挽回订单：{correctionBlocker.order.recoveryNo}</Typography>
-                <Typography variant="body2">当前分账状态：{correctionBlocker.precheck.settlementStatus}</Typography>
-                <Typography variant="body2">关联提成：{correctionBlocker.precheck.commissionCount} 条</Typography>
-                {correctionBlocker.precheck.commissionStatuses.length ? (
-                  <Typography variant="body2">提成状态：{correctionBlocker.precheck.commissionStatuses.join('、')}</Typography>
-                ) : null}
-              </Box>
-              {['payout_started', 'settlement_processing', 'unsupported_settlement_status'].includes(correctionBlocker.precheck.reasonCode || '') ? (
-                <Alert severity="info">请先由财务人员处理或撤回相关分账，再返回售后挽回订单执行更正。</Alert>
-              ) : null}
-            </Stack>
-          ) : null}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCorrectionBlocker(null)}>关闭</Button>
-          {correctionBlocker && hasPermission(currentUser, PERMISSION_KEYS.FINANCE_RECOVERY_SETTLEMENT, 'write') ? (
-            <Button
-              variant="contained"
-              onClick={() => {
-                const recoveryNo = correctionBlocker.order.recoveryNo;
-                setCorrectionBlocker(null);
-                navigate(`/finance?tab=recovery-settlement&search=${encodeURIComponent(recoveryNo)}`);
-              }}
-            >
-              前往财务处理
-            </Button>
-          ) : null}
-        </DialogActions>
-      </Dialog>
-
       <Dialog
         open={Boolean(reviewAction)}
         onClose={reviewSubmitting ? undefined : closeReviewDialog}
@@ -2103,15 +1927,20 @@ const RecoveryOrderTab: React.FC<RecoveryOrderTabProps> = ({
         </DialogActions>
       </Dialog>
 
-      <CommissionCorrectionImpactDialog
-        open={Boolean(correctionPreview)}
-        preview={correctionPreview}
-        confirming={correctionSubmitting}
-        onClose={() => {
-          setCorrectionPreview(null);
-          setPendingCorrectionInput(null);
+      <RecoveryOrderCorrectionDialog
+        open={Boolean(correctionOrderId)}
+        orderId={correctionOrderId}
+        onClose={() => setCorrectionOrderId(null)}
+        onSuccess={async (_order, meta) => {
+          setCorrectionOrderId(null);
+          setMessage({
+            type: 'success',
+            text: meta.requiredImpactPreview
+              ? '已完成超级管理员更正并记录影响；原发放事实永久保留，如有差额已进入后续处理'
+              : '售后挽回订单已更正，未发放分账已回退为待处理',
+          });
+          await load();
         }}
-        onConfirm={() => void handleConfirmRecoveryCorrectionImpact()}
       />
 
       <Dialog open={Boolean(errorDialog)} onClose={() => setErrorDialog(null)} maxWidth="xs" fullWidth>

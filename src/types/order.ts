@@ -1,5 +1,12 @@
 import type { ID, Timestamp, ProductLevel, OrderType, PaymentMethod, RefundStatus } from './common';
-import type { CommissionScene, OfficialPaymentChannel, ProofStatus, ResourceOwnership, SettlementStatus } from './commission';
+import type {
+  CommissionPayoutCorrectionContext,
+  CommissionScene,
+  OfficialPaymentChannel,
+  ProofStatus,
+  ResourceOwnership,
+  SettlementStatus,
+} from './commission';
 import type { BusinessAttachment } from './businessAttachment';
 import type { BusinessImportMetadata } from './businessImport';
 
@@ -72,6 +79,8 @@ export interface OrderCorrectionInput {
   data: Partial<Order>;
   /** 已发放后更正必须提交与最新预览一致的影响哈希。 */
   expectedImpactHash?: string;
+  /** 从发放记录进入时携带，用于锁定不可变的原发快照。 */
+  payoutContext?: CommissionPayoutCorrectionContext;
 }
 
 export type OrderCorrectionBlockReason =

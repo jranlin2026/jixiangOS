@@ -1,6 +1,6 @@
 import type { Order, OrderApplication, OrderCorrectionInput, OrderCorrectionPrecheck, OrderFilters, OrderStats } from '../types/order';
 import type { Customer } from '../types/customer';
-import type { Commission, CommissionCorrectionPreview, CommissionRole } from '../types/commission';
+import type { Commission, CommissionCorrectionPreview, CommissionPayoutCorrectionContext, CommissionRole } from '../types/commission';
 import type { Product } from '../types/product';
 import type { User } from '../types/settings';
 import type { ApiResponse, PaginatedResponse } from './types';
@@ -717,11 +717,18 @@ async function previewOrderCorrection(
   return createSuccessResponse(response.data, response.message);
 }
 
-async function precheckOrderCorrection(id: string): Promise<ApiResponse<OrderCorrectionPrecheck | null>> {
+async function precheckOrderCorrection(
+  id: string,
+  payoutContext?: CommissionPayoutCorrectionContext,
+): Promise<ApiResponse<OrderCorrectionPrecheck | null>> {
   if (!shouldUseBackendApi()) {
     return createErrorResponse('订单更正预检仅支持服务端模式，请启动本地接口服务', 503);
   }
-  const response = await backendRequest<OrderCorrectionPrecheck>(`/orders/${encodeURIComponent(id)}/correction-precheck`);
+  const params = new URLSearchParams();
+  if (payoutContext?.payoutRecordId) params.set('payoutRecordId', payoutContext.payoutRecordId);
+  if (payoutContext?.commissionId) params.set('commissionId', payoutContext.commissionId);
+  const query = params.size ? `?${params.toString()}` : '';
+  const response = await backendRequest<OrderCorrectionPrecheck>(`/orders/${encodeURIComponent(id)}/correction-precheck${query}`);
   if (response.code !== 0 || !response.data) {
     return createErrorResponse(response.message || '服务端未返回订单更正预检结果', response.code || -1);
   }

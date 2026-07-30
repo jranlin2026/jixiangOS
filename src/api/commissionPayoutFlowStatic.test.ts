@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 
 const financeSource = readFileSync(new URL('../pages/Finance/index.tsx', import.meta.url), 'utf8');
 const payoutSource = readFileSync(new URL('../pages/Finance/CommissionPayout.tsx', import.meta.url), 'utf8');
+const postPayoutCorrectionSource = readFileSync(new URL('../pages/Finance/PostPayoutCommissionCorrection.tsx', import.meta.url), 'utf8');
 const commissionSource = readFileSync(new URL('../pages/Commission/index.tsx', import.meta.url), 'utf8');
 const serverSource = readFileSync(new URL('../../server/index.ts', import.meta.url), 'utf8');
 const serviceSource = readFileSync(new URL('../../server/services/commissionPayoutService.ts', import.meta.url), 'utf8');
@@ -26,16 +27,20 @@ assert.match(payoutSource, /确认发放/);
 assert.doesNotMatch(payoutSource, /aria-label="撤销发放"|>确认撤销</);
 assert.match(payoutSource, /原发放事实永久保留/);
 assert.match(payoutSource, /发放后处理/);
-assert.match(payoutSource, /correctRecoveryId/);
-assert.match(payoutSource, /correctOrderId/);
-assert.match(payoutSource, /ROUTES\.ORDERS/);
-assert.match(payoutSource, /源单不可用/);
-assert.match(payoutSource, /sourceBusinessType === 'after_sales_recovery'/, '只有标准售后挽回来源可进入售后更正页');
-assert.match(payoutSource, /!isRecoveryCommission\(commission\)/, '退款挽回等未支持来源不得误跳正式订单更正页');
+assert.match(payoutSource, /PostPayoutCommissionCorrection/);
+assert.match(payoutSource, /buildPostPayoutProcessingContext/);
 assert.doesNotMatch(
   payoutSource,
-  /navigate\(isRecoveryCommission\(commission\)/,
-  'refund_recovery 不得沿用售后挽回更正路由',
+  /const openPostPayoutProcessing[\s\S]{0,500}navigate\(/,
+  '发放后处理必须保留在财务上下文，不得直接跳到订单或售后页',
+);
+assert.match(payoutSource, /源单不可用/);
+assert.match(payoutSource, /processingContext/);
+assert.match(postPayoutCorrectionSource, /setPrecheckAllowed\(precheck\.data\.allowed\)/, '当前源业务不可更正时也必须显示状态与原因');
+assert.doesNotMatch(
+  postPayoutCorrectionSource,
+  /if \(!precheck\.data\.allowed\) throw new Error/,
+  '预检不通过不得吞掉已加载的当前源业务状态',
 );
 assert.doesNotMatch(payoutSource, />暂不支持</, '正式订单不得再显示暂不支持');
 assert.match(payoutSource, /isSuperAdmin\(currentUser\)/, '发放后处理入口必须仅对超级管理员开放');

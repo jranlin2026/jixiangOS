@@ -33,12 +33,10 @@ import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import PaymentsOutlinedIcon from '@mui/icons-material/PaymentsOutlined';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
-import { useNavigate } from 'react-router-dom';
 import { commissionPayoutApi } from '../../api/commissionPayoutApi';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { formatCurrency, formatDateTime, formatPaginationRows } from '../../shared/utils/formatters';
-import { ROUTES } from '../../shared/utils/constants';
 import TablePagination from '../../shared/components/TablePagination';
 import { moduleTablePaperSx, moduleTableSx } from '../../shared/components/ModuleShell';
 import { subscribePageRefresh } from '../../shared/utils/pageRefresh';
@@ -60,6 +58,11 @@ import {
   pendingCommissionStatusLabel,
   type PendingCommissionFilter,
 } from './commissionPayoutPresentation';
+import PostPayoutCommissionCorrection from './PostPayoutCommissionCorrection';
+import {
+  buildPostPayoutProcessingContext,
+  type PostPayoutProcessingContext,
+} from './postPayoutProcessing';
 
 type PayoutView = 'pending' | 'records' | 'corrections' | 'summary';
 type CorrectionStatusFilter = '全部' | '无差额' | '待处理' | '已处理';
@@ -83,21 +86,6 @@ const commissionMonth = (value: { paymentDate?: string; createdAt: string }) => 
 );
 
 type PayoutCommission = CommissionPayoutEmployeeRow['commissions'][number];
-
-const isAfterSalesRecoveryCorrectionSource = (commission: PayoutCommission) => (
-  commission.sourceBusinessType === 'after_sales_recovery'
-);
-
-const supportsPostPayoutCorrection = (commission: PayoutCommission) => (
-  isAfterSalesRecoveryCorrectionSource(commission)
-  || (!isRecoveryCommission(commission) && Boolean(commission.orderId))
-);
-
-const commissionSourceId = (commission: PayoutCommission) => (
-  isAfterSalesRecoveryCorrectionSource(commission)
-    ? commission.sourceRecoveryOrderId || commission.orderId || ''
-    : supportsPostPayoutCorrection(commission) ? commission.orderId || '' : ''
-);
 
 const commissionTypeLabel = (commission: PayoutCommission) => {
   if (isRecoveryCommission(commission)) return '售后挽回提成';
@@ -135,7 +123,6 @@ const metricCard = (label: string, value: string, hint: string, color = '#0f172a
 );
 
 const CommissionPayout: React.FC = () => {
-  const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.currentUser);
   const canManage = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_PAYOUT, 'write');
   const canProcessPaidCommission = isSuperAdmin(currentUser);
@@ -147,6 +134,7 @@ const CommissionPayout: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [detailEmployee, setDetailEmployee] = useState<CommissionPayoutEmployeeRow | null>(null);
   const [detailRecord, setDetailRecord] = useState<CommissionPayoutRecord | null>(null);
+  const [processingContext, setProcessingContext] = useState<PostPayoutProcessingContext | null>(null);
   const [issueOpen, setIssueOpen] = useState(false);
   const [issueAt, setIssueAt] = useState(todayInput);
   const [paymentMethod, setPaymentMethod] = useState('银行转账');
@@ -328,12 +316,13 @@ const CommissionPayout: React.FC = () => {
   };
 
   const openPostPayoutProcessing = (commission: NonNullable<CommissionPayoutRecord['commissionSnapshots']>[number]) => {
-    const sourceId = commissionSourceId(commission);
-    if (!sourceId) return;
-    setDetailRecord(null);
-    navigate(isAfterSalesRecoveryCorrectionSource(commission)
-      ? `${ROUTES.AFTER_SALES}?tab=recovery-list&correctRecoveryId=${encodeURIComponent(sourceId)}`
-      : `${ROUTES.ORDERS}?tab=list&correctOrderId=${encodeURIComponent(sourceId)}`);
+    if (!detailRecord) return;
+    const context = buildPostPayoutProcessingContext(detailRecord, commission);
+    if (!context) {
+      setFeedback({ severity: 'warning', message: '该历史提成缺少可验证的源业务关联，暂不能发起发放后更正' });
+      return;
+    }
+    setProcessingContext(context);
   };
 
   const applyCorrectionSearch = () => {
@@ -910,7 +899,7 @@ const CommissionPayout: React.FC = () => {
       </DialogContent><DialogActions><Button onClick={() => setDetailEmployee(null)}>关闭</Button></DialogActions>
     </Dialog>
 
-    <Dialog open={Boolean(detailRecord)} onClose={() => setDetailRecord(null)} fullWidth maxWidth="lg">
+    <Dialog open={Boolean(detailRecord) && !processingContext} onClose={() => setDetailRecord(null)} fullWidth maxWidth="lg">
       <DialogTitle>发放记录详情</DialogTitle><DialogContent dividers><Stack spacing={1.5}>
         <Typography>发放单号：{detailRecord?.payoutNo}</Typography><Typography>发放月份：{detailRecord?.period}</Typography><Typography>发放时间：{detailRecord ? formatDateTime(detailRecord.issuedAt) : '-'}</Typography>
         <Typography>发放金额：{formatCurrency(detailRecord?.totalAmount || 0)}</Typography><Typography>发放方式：{detailRecord?.paymentMethod || '-'}</Typography><Typography>付款流水号：{detailRecord?.paymentReference || '-'}</Typography>
@@ -942,11 +931,13 @@ const CommissionPayout: React.FC = () => {
             <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { borderRadius: '6px 6px 0 0', overflowX: 'auto' }]}><Table size="small" sx={[moduleTableSx, { minWidth: canProcessCurrentPayout ? 1120 : 980 }]}>
               <TableHead><TableRow><TableCell>提成类型</TableCell><TableCell>员工</TableCell><TableCell>客户</TableCell><TableCell>订单号</TableCell><TableCell>角色</TableCell><TableCell align="right">业绩金额</TableCell><TableCell align="right">发放金额</TableCell><TableCell>归属月份</TableCell>{canProcessCurrentPayout && <TableCell align="center">操作</TableCell>}</TableRow></TableHead>
               <TableBody>{visibleRecordCommissionRows.map((row) => {
-                const sourceId = commissionSourceId(row);
+                const correctionContext = detailRecord
+                  ? buildPostPayoutProcessingContext(detailRecord, row)
+                  : null;
                 return (
                   <TableRow key={row.id} hover>
                     <TableCell>{commissionTypeLabel(row)}</TableCell><TableCell>{row.owner}</TableCell><TableCell>{row.customerName || '未命名客户'}</TableCell><TableCell><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{row.orderNo}</Typography></TableCell><TableCell>{row.role}</TableCell><TableCell align="right">{formatCurrency(Number(row.performanceAmount || row.orderAmount || 0))}</TableCell><TableCell align="right"><Typography fontWeight={900}>{formatCurrency(row.commissionAmount)}</Typography></TableCell><TableCell>{commissionMonth(row)}</TableCell>
-                    {canProcessCurrentPayout && <TableCell align="center">{sourceId ? <Button size="small" startIcon={<EditOutlinedIcon />} onClick={() => openPostPayoutProcessing(row)}>发放后处理</Button> : <Typography variant="caption" color="text.secondary">源单不可用</Typography>}</TableCell>}
+                    {canProcessCurrentPayout && <TableCell align="center">{correctionContext ? <Button size="small" startIcon={<EditOutlinedIcon />} onClick={() => openPostPayoutProcessing(row)}>发放后处理</Button> : <Typography variant="caption" color="text.secondary">源单不可用</Typography>}</TableCell>}
                   </TableRow>
                 );
               })}</TableBody>
@@ -968,6 +959,19 @@ const CommissionPayout: React.FC = () => {
         ) : null}
       </Stack></DialogContent><DialogActions><Button onClick={() => setDetailRecord(null)}>关闭</Button></DialogActions>
     </Dialog>
+
+    <PostPayoutCommissionCorrection
+      context={processingContext}
+      onClose={() => setProcessingContext(null)}
+      onSuccess={async () => {
+        setProcessingContext(null);
+        await load();
+        setFeedback({
+          severity: 'success',
+          message: '发放后更正已留痕完成；原发放事实保持不变，差额已进入后续处理',
+        });
+      }}
+    />
 
     <OperationFeedbackDialog open={Boolean(feedback)} severity={feedback?.severity} message={feedback?.message || ''} onClose={() => setFeedback(null)} />
 

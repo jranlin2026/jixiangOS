@@ -16,7 +16,12 @@ import {
   isRecoveryOrderDeletionLocked,
 } from '../shared/utils/recoveryOrderDeletion';
 import type { AuthSession } from '../types/auth';
-import type { Commission, CommissionCorrectionPreview, CommissionPayoutPlan } from '../types/commission';
+import type {
+  Commission,
+  CommissionCorrectionPreview,
+  CommissionPayoutCorrectionContext,
+  CommissionPayoutPlan,
+} from '../types/commission';
 import { buildCommissionPayoutPlanSnapshot } from '../shared/utils/commissionConfiguration';
 import type { Department } from '../types/department';
 import type { Role } from '../types/role';
@@ -628,9 +633,14 @@ async function editRecoveryOrderMetadata(
 
 async function precheckRecoveryOrderCorrection(
   id: string,
+  payoutContext?: CommissionPayoutCorrectionContext,
 ): Promise<ApiResponse<RecoveryOrderCorrectionPrecheck | null>> {
   if (!shouldUseBackendApi()) return createErrorResponse('售后挽回订单更正预检仅支持服务端模式', 503);
-  return backendRequest<RecoveryOrderCorrectionPrecheck>(`/recovery-orders/${encodeURIComponent(id)}/correction-precheck`);
+  const params = new URLSearchParams();
+  if (payoutContext?.payoutRecordId) params.set('payoutRecordId', payoutContext.payoutRecordId);
+  if (payoutContext?.commissionId) params.set('commissionId', payoutContext.commissionId);
+  const query = params.size ? `?${params.toString()}` : '';
+  return backendRequest<RecoveryOrderCorrectionPrecheck>(`/recovery-orders/${encodeURIComponent(id)}/correction-precheck${query}`);
 }
 
 async function correctRecoveryOrder(

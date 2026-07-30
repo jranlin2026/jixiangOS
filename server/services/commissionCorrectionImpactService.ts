@@ -23,6 +23,11 @@ const sourceMatches = (commission: Commission, sourceType: CommissionCorrectionS
     ? (commission.sourceRecoveryOrderId || commission.orderId) === sourceId || isRecoveryCommission(commission) && commission.orderId === sourceId
     : !isRecoveryCommission(commission) && commission.orderId === sourceId
 );
+const sourceKey = (commission: Commission) => (
+  isRecoveryCommission(commission)
+    ? `recovery:${commission.sourceRecoveryOrderId || commission.orderId || commission.orderNo}`
+    : `formal:${commission.orderId || commission.orderNo}`
+);
 const snapshot = (value: Record<string, unknown>) => JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
@@ -68,17 +73,25 @@ export function findOverlappingFinancialCorrection(
   });
 }
 
-function payoutSnapshotMap(records: CommissionPayoutRecord[]) {
+function payoutSnapshotIndex(records: CommissionPayoutRecord[]) {
   const snapshots = new Map<string, { commission: Commission; payoutRecordId: string }>();
+  const missingSnapshotPayouts = new Map<string, string>();
   records.filter((record) => record.status === '已发放').forEach((record) => {
-    (record.commissionSnapshots || []).forEach((commission) => {
+    const commissionIds = new Set(record.commissionIds || []);
+    const validSnapshots = (record.commissionSnapshots || [])
+      .filter((commission) => commissionIds.has(commission.id));
+    const snapshotIds = new Set(validSnapshots.map((commission) => commission.id));
+    validSnapshots.forEach((commission) => {
       if (snapshots.has(commission.id)) {
         throw new Error(`提成 ${commission.id} 同时出现在多个有效发放单，请先清理重复发放记录`);
       }
       snapshots.set(commission.id, { commission, payoutRecordId: record.id });
     });
+    commissionIds.forEach((commissionId) => {
+      if (!snapshotIds.has(commissionId)) missingSnapshotPayouts.set(commissionId, record.id);
+    });
   });
-  return snapshots;
+  return { snapshots, missingSnapshotPayouts };
 }
 
 function leg(
@@ -107,48 +120,126 @@ function leg(
 export function buildCommissionCorrectionImpact(
   input: BuildCommissionCorrectionImpactInput,
 ): CommissionCorrectionPreview {
-  const beforeRows = resolveCommissionEntitlements(selectCurrentCommissionRounds(input.beforeCommissions));
+  const { snapshots: payoutSnapshots, missingSnapshotPayouts } = payoutSnapshotIndex(input.payoutRecords);
+  const currentBeforeRows = resolveCommissionEntitlements(selectCurrentCommissionRounds(input.beforeCommissions));
+  const currentBeforeIds = new Set(currentBeforeRows.map((commission) => commission.id));
+  // 发放快照是差额的不可变基准。当源单后续又产生了新轮次或人工分账时，
+  // 旧的已发放提成可能已不在“当前轮次”中，但仍必须参与影响比较。
+  // 快照不再进入阶梯重算，避免与当前轮次重复累计业绩。
+  const beforeRows = [
+    ...currentBeforeRows,
+    ...[...payoutSnapshots.values()]
+      .map((entry) => entry.commission)
+      .filter((commission) => !currentBeforeIds.has(commission.id)),
+  ];
   const afterRows = resolveCommissionEntitlements(selectCurrentCommissionRounds(input.afterCommissions));
   const beforeById = new Map(beforeRows.map((commission) => [commission.id, commission]));
   const afterById = new Map(afterRows.map((commission) => [commission.id, commission]));
-  const payoutSnapshots = payoutSnapshotMap(input.payoutRecords);
   const targetBefore = beforeRows.filter((commission) => sourceMatches(commission, input.sourceBusinessType, input.sourceBusinessId));
   const targetAfter = afterRows.filter((commission) => sourceMatches(commission, input.sourceBusinessType, input.sourceBusinessId));
+  const affectedBuckets = new Set([...targetBefore, ...targetAfter].map(bucketKey).filter(Boolean));
+  const chargebackConflict = input.beforeCommissions.find((commission) => (
+    payoutSnapshots.has(commission.id)
+    && ['待冲销', '已冲销'].includes(commission.status)
+    && (sourceMatches(commission, input.sourceBusinessType, input.sourceBusinessId)
+      || affectedBuckets.has(bucketKey(commission)))
+  ));
+  if (chargebackConflict) {
+    throw new Error(`提成 ${chargebackConflict.id} 正在冲销或已冲销，无法安全叠加发放后更正`);
+  }
+  const paidWithoutSnapshot = input.beforeCommissions.find((commission) => (
+    commission.status === '已发放'
+    && !payoutSnapshots.has(commission.id)
+    && (sourceMatches(commission, input.sourceBusinessType, input.sourceBusinessId)
+      || affectedBuckets.has(bucketKey(commission)))
+  ));
+  if (paidWithoutSnapshot) {
+    throw new Error(`已发放提成 ${paidWithoutSnapshot.id} 缺少逐笔发放快照，无法安全计算更正差额`);
+  }
+  const missingSnapshot = input.beforeCommissions.find((commission) => (
+    missingSnapshotPayouts.has(commission.id)
+    && (sourceMatches(commission, input.sourceBusinessType, input.sourceBusinessId)
+      || affectedBuckets.has(bucketKey(commission)))
+  ));
+  if (missingSnapshot) {
+    throw new Error(`已发放提成 ${missingSnapshot.id} 缺少逐笔发放快照，无法安全计算更正差额`);
+  }
   const pairedAfterByBeforeId = new Map<string, Commission>();
   const claimedAfterIds = new Set<string>();
-  targetBefore
-    .filter((commission) => (payoutSnapshots.has(commission.id) || commission.status === '已发放') && !afterById.has(commission.id))
+  beforeRows.forEach((before) => {
+    if ((payoutSnapshots.has(before.id) || before.status === '已发放') && afterById.has(before.id)) {
+      claimedAfterIds.add(before.id);
+    }
+  });
+  const paidRowsNeedingPair = beforeRows
+    .filter((commission) => (
+      (payoutSnapshots.has(commission.id) || commission.status === '已发放')
+      && !afterById.has(commission.id)
+      && (sourceMatches(commission, input.sourceBusinessType, input.sourceBusinessId)
+        || affectedBuckets.has(bucketKey(commission)))
+    ));
+  const unmatchedGroups = new Map<string, Commission[]>();
+  paidRowsNeedingPair.forEach((commission) => {
+    const key = `${sourceKey(commission)}::${commission.role}`;
+    unmatchedGroups.set(key, [...(unmatchedGroups.get(key) || []), commission]);
+  });
+  unmatchedGroups.forEach((paidRows, key) => {
+    const [source, role] = key.split('::');
+    const compatibleAfterCount = afterRows.filter((after) => (
+      !after.correctionCaseId
+      && sourceKey(after) === source
+      && after.role === role
+      && !claimedAfterIds.has(after.id)
+    )).length;
+    if (compatibleAfterCount > 1 || (paidRows.length > 1 && compatibleAfterCount > 0)) {
+      throw new Error(`源业务 ${paidRows[0].orderNo} 的角色“${paidRows[0].role}”历史发放与当前应得存在一对多或多对一，缺少稳定拆分键，无法安全匹配`);
+    }
+  });
+  paidRowsNeedingPair
     .sort((left, right) => left.id.localeCompare(right.id))
     .forEach((before) => {
-      const candidates = targetAfter
-        .filter((after) => !beforeById.has(after.id) && !claimedAfterIds.has(after.id) && after.role === before.role)
+      const candidateScore = (after: Commission) => (
+        (ownerKey(after) === ownerKey(before) ? 8 : 0)
+        + (after.commissionRuleId && after.commissionRuleId === before.commissionRuleId ? 4 : 0)
+        + (after.productLevel === before.productLevel ? 2 : 0)
+        + (after.payoutPlanId && after.payoutPlanId === before.payoutPlanId ? 1 : 0)
+      );
+      const compatibleCandidates = afterRows
+        .filter((after) => (
+          !after.correctionCaseId
+          && sourceKey(after) === sourceKey(before)
+          && after.role === before.role
+        ))
         .sort((left, right) => {
-          const score = (after: Commission) => (
-            (ownerKey(after) === ownerKey(before) ? 8 : 0)
-            + (after.commissionRuleId && after.commissionRuleId === before.commissionRuleId ? 4 : 0)
-            + (after.productLevel === before.productLevel ? 2 : 0)
-            + (after.payoutPlanId && after.payoutPlanId === before.payoutPlanId ? 1 : 0)
-          );
-          return score(right) - score(left) || left.id.localeCompare(right.id);
+          return candidateScore(right) - candidateScore(left) || left.id.localeCompare(right.id);
         });
+      const candidates = compatibleCandidates.filter((after) => !claimedAfterIds.has(after.id));
+      if (candidates.length > 1 && candidateScore(candidates[0]) === candidateScore(candidates[1])) {
+        throw new Error(`源业务 ${before.orderNo} 的角色“${before.role}”存在多笔同分匹配，无法安全匹配历史发放与当前应得，请先由财务核对`);
+      }
       const paired = candidates[0];
-      if (!paired) return;
+      if (!paired) {
+        if (compatibleCandidates.length) {
+          throw new Error(`源业务 ${before.orderNo} 的角色“${before.role}”存在多笔已发提成，无法安全匹配当前应得，请先由财务核对历史发放记录`);
+        }
+        return;
+      }
       pairedAfterByBeforeId.set(before.id, paired);
       claimedAfterIds.add(paired.id);
     });
-  const affectedBuckets = new Set([...targetBefore, ...targetAfter].map(bucketKey).filter(Boolean));
+  const pairedAfterIds = new Set([...pairedAfterByBeforeId.values()].map((commission) => commission.id));
   const candidateIds = new Set<string>();
   const shouldComparePaidSnapshot = (commissionId: string) => (
     payoutSnapshots.has(commissionId) || beforeById.get(commissionId)?.status === '已发放'
   );
   [...targetBefore, ...targetAfter].forEach((commission) => {
-    if (!claimedAfterIds.has(commission.id) && shouldComparePaidSnapshot(commission.id)) candidateIds.add(commission.id);
+    if (!pairedAfterIds.has(commission.id) && shouldComparePaidSnapshot(commission.id)) candidateIds.add(commission.id);
   });
   beforeRows.forEach((commission) => {
     if (affectedBuckets.has(bucketKey(commission)) && shouldComparePaidSnapshot(commission.id)) candidateIds.add(commission.id);
   });
   afterRows.forEach((commission) => {
-    if (!claimedAfterIds.has(commission.id) && affectedBuckets.has(bucketKey(commission)) && shouldComparePaidSnapshot(commission.id)) candidateIds.add(commission.id);
+    if (!pairedAfterIds.has(commission.id) && affectedBuckets.has(bucketKey(commission)) && shouldComparePaidSnapshot(commission.id)) candidateIds.add(commission.id);
   });
 
   const impacts: CommissionCorrectionImpact[] = [];

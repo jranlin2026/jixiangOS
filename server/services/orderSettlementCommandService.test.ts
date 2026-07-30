@@ -62,6 +62,7 @@ class FakePrisma {
       return row;
     },
   };
+  $queryRaw = async () => [];
   $transaction = async (task: (transaction: any) => Promise<any>) => task(this);
 }
 

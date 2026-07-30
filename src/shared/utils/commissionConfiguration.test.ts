@@ -3,6 +3,8 @@ import type { Commission, CommissionPayoutPlan } from '../../types/commission';
 import {
   buildCommissionPayoutPlanSnapshot,
   getCommissionTierBucketKey,
+  isAfterSalesRecoveryCommission,
+  isRecoveryCommission,
   resolveCommissionTierSnapshotSource,
 } from './commissionConfiguration';
 
@@ -54,3 +56,24 @@ assert.equal(
   2,
   '历史提成缺少快照时应能按方案 ID 补齐档位',
 );
+
+const legacyAfterSalesRecovery = {
+  ...commission,
+  orderId: 'recovery-legacy-1',
+  orderNo: 'RCV-LEGACY-1',
+  sourceRecoveryOrderId: 'recovery-legacy-1',
+  sourceBusinessType: undefined,
+} as Commission;
+assert.equal(isAfterSalesRecoveryCommission(legacyAfterSalesRecovery), true);
+assert.equal(isRecoveryCommission(legacyAfterSalesRecovery), true);
+
+const legacyRefundRecovery = {
+  ...commission,
+  orderId: 'formal-order-1',
+  orderNo: 'ORD-LEGACY-1',
+  sourceRefundId: 'refund-legacy-1',
+  sourceBusinessType: undefined,
+  isRecoveryBonus: true,
+} as Commission;
+assert.equal(isAfterSalesRecoveryCommission(legacyRefundRecovery), false);
+assert.equal(isRecoveryCommission(legacyRefundRecovery), true, '历史退款挽回不得误判为正式订单');

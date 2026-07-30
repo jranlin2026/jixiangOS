@@ -70,6 +70,7 @@ function record(domain: string, data: Record<string, unknown>) {
 function matches(row: any, where: any): boolean {
   if (!where) return true;
   if (where.domain !== undefined && row.domain !== where.domain) return false;
+  if (where.orderId !== undefined && row.orderId !== where.orderId) return false;
   if (where.recordId !== undefined) {
     if (typeof where.recordId === 'string' && row.recordId !== where.recordId) return false;
     if (where.recordId.in && !where.recordId.in.includes(row.recordId)) return false;
@@ -78,6 +79,11 @@ function matches(row: any, where: any): boolean {
     if (typeof where.status === 'string' && row.status !== where.status) return false;
     if (where.status.in && !where.status.in.includes(row.status)) return false;
   }
+  if (where.data?.path) {
+    const field = String(where.data.path).replace(/^\$\./, '');
+    if (row.data?.[field] !== where.data.equals) return false;
+  }
+  if (where.OR && !where.OR.some((condition: any) => matches(row, condition))) return false;
   return true;
 }
 
@@ -114,7 +120,15 @@ function fakePrisma(seed: any[]) {
     $transaction: async (callback: (tx: any) => Promise<unknown>) => {
       const snapshot = new Map([...rows.entries()].map(([id, value]) => [id, clone(value)]));
       try {
-        return await callback({ businessRecord });
+        return await callback({
+          businessRecord,
+          $queryRaw: async (query: { values?: unknown[] }) => {
+            const values = Array.isArray(query?.values) ? query.values : [];
+            if (values[0] !== STORAGE_KEYS.RECOVERY_ORDERS) return [];
+            const row = rows.get(key(String(values[0]), String(values[1])));
+            return row ? [clone(row)] : [];
+          },
+        });
       } catch (error) {
         rows.clear();
         snapshot.forEach((value, id) => rows.set(id, value));
@@ -339,6 +353,50 @@ function fakePrisma(seed: any[]) {
   assert.equal(updated.settlementPaidAt, NOW);
   assert.equal(updated.changeHistory?.[0]?.action, 'settlement');
   assert.match(updated.changeHistory?.[0]?.summary || '', /已发放/);
+}
+
+{
+  const recoveryId = 'recovery-json-linked-sibling';
+  const issuedCommission = commission('recovery-issued-member', '待发放', {
+    orderId: recoveryId,
+    orderNo: 'RCV-JSON-LINKED',
+    sourceRecoveryOrderId: recoveryId,
+    sourceBusinessType: 'after_sales_recovery',
+  });
+  const siblingCommission = commission('recovery-json-only-sibling', '待发放', {
+    orderId: recoveryId,
+    orderNo: 'RCV-JSON-LINKED',
+    ownerId: 'sales-2',
+    owner: '销售B',
+    sourceRecoveryOrderId: recoveryId,
+    sourceBusinessType: 'after_sales_recovery',
+  });
+  const siblingRecord = record(STORAGE_KEYS.COMMISSIONS, siblingCommission as unknown as Record<string, unknown>);
+  siblingRecord.orderId = null;
+  const recovery = {
+    id: recoveryId,
+    recoveryNo: 'RCV-JSON-LINKED',
+    status: '已分账',
+    settlementStatus: '待发放',
+    commissionIds: [issuedCommission.id, siblingCommission.id],
+    recoveryUserName: issuedCommission.owner,
+    recoveryAmount: 1_798,
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
+  const db = fakePrisma([
+    record(STORAGE_KEYS.COMMISSIONS, issuedCommission as unknown as Record<string, unknown>),
+    siblingRecord,
+    record(STORAGE_KEYS.RECOVERY_ORDERS, recovery),
+  ]);
+  const service = createCommissionPayoutService(db.prisma, { now: () => new Date(NOW), id: () => 'payout-json-linked' });
+  const issued = await service.issue({ ownerIds: [issuedCommission.ownerId!], issuedAt: NOW, paymentMethod: '银行转账' }, finance);
+  assert.equal(issued.code, 0, issued.message);
+  assert.equal(
+    (db.rows.get(key(STORAGE_KEYS.RECOVERY_ORDERS, recoveryId))?.data as any).settlementStatus,
+    '待发放',
+    '同一挽回单仍有仅 JSON 关联的待发放提成时，源单不能误标为已发放',
+  );
 }
 
 {

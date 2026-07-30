@@ -1,7 +1,7 @@
 import type { ID, Timestamp } from './common';
 import type { DataScopeDomain } from './role';
 import type { BusinessAttachment } from './businessAttachment';
-import type { OfficialPaymentChannel, SettlementStatus } from './commission';
+import type { CommissionPayoutCorrectionContext, OfficialPaymentChannel, SettlementStatus } from './commission';
 import type { BusinessImportMetadata } from './businessImport';
 
 /** 新单审核通过后统一写“审核通过”；“待分账/已分账”仅兼容历史存储。 */
@@ -151,6 +151,8 @@ export interface RecoveryOrderCorrectionInput {
   data: RecoveryOrderInput;
   /** 已发放后更正必须提交与最新预览一致的影响哈希。 */
   expectedImpactHash?: string;
+  /** 从发放记录进入时携带，用于锁定不可变的原发快照。 */
+  payoutContext?: CommissionPayoutCorrectionContext;
 }
 
 export interface RecoveryOrderInput {

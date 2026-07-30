@@ -33,7 +33,7 @@ assert.match(financePageSource, /orderSplitInitialSearch=\{searchParams\.get\('s
 assert.match(commissionPageSource, /search: orderSplitInitialSearch/);
 assert.match(
   orderFormSource,
-  /precheckOrderCorrection\(order\.id\)[\s\S]*requiresImpactPreview[\s\S]*previewOrderCorrection/,
+  /precheckOrderCorrection\(order\.id(?:,\s*payoutContext)?\)[\s\S]*requiresImpactPreview[\s\S]*previewOrderCorrection/,
   '已发放正式订单更正提交前必须按最新预检结果获取影响预览',
 );
 assert.match(orderFormSource, /expectedImpactHash:\s*correctionPreview\.impactHash/);

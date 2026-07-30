@@ -6,6 +6,7 @@ import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../src/shared/u
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type { Commission, CommissionAdjustmentInput, CommissionOperationLog } from '../../src/types/commission';
 import type { Order } from '../../src/types/order';
+import { lockCommissionLedger } from './commissionLedgerLock';
 
 type OrderSettlementPrisma = Pick<PrismaClient, 'businessRecord' | '$transaction'>;
 type Transaction = Prisma.TransactionClient;
@@ -232,6 +233,7 @@ export function createOrderSettlementCommandService(
       const cleanReason = cleanText(reason) || '财务确认';
       if (!id) return failure('订单ID不能为空', 400);
       return run(() => prisma.$transaction(async (transaction) => {
+        await lockCommissionLedger(transaction);
         requireSettlementWrite(actor);
         const order = await readOrder(transaction, id);
         if (!order || order.deletedAt) throw new OrderSettlementCommandError(409, '源订单不存在，不能确认分账');
@@ -268,6 +270,7 @@ export function createOrderSettlementCommandService(
       if (!id) return failure('订单ID不能为空', 400);
       if (!cleanReason) return failure('重置订单分账必须填写原因', 400);
       return run(() => prisma.$transaction(async (transaction) => {
+        await lockCommissionLedger(transaction);
         requireSettlementWrite(actor);
         const order = await readOrder(transaction, id);
         if (!order || order.deletedAt) throw new OrderSettlementCommandError(409, '源订单不存在，不能重置分账');
@@ -295,6 +298,7 @@ export function createOrderSettlementCommandService(
       if (!id) return failure('订单ID不能为空', 400);
       if (!cleanReason) return failure('撤回提成必须填写原因', 400);
       return run(() => prisma.$transaction(async (transaction) => {
+        await lockCommissionLedger(transaction);
         requireSettlementWrite(actor);
         const order = await readOrder(transaction, id);
         if (!order || order.deletedAt) throw new OrderSettlementCommandError(409, '源订单不存在，不能撤回分账');
@@ -332,6 +336,7 @@ export function createOrderSettlementCommandService(
       if (!id) return failure('订单ID不能为空', 400);
       if (!cleanReason) return failure('重新分账必须填写原因', 400);
       return run(() => prisma.$transaction(async (transaction) => {
+        await lockCommissionLedger(transaction);
         requireSettlementWrite(actor);
         const order = await readOrder(transaction, id);
         if (!order || order.deletedAt) throw new OrderSettlementCommandError(409, '源订单不存在，不能重新分账');
@@ -370,6 +375,7 @@ export function createOrderSettlementCommandService(
       if (!cleanReason) return failure('调整分账必须填写原因', 400);
       if (!Array.isArray(rows) || !rows.length) return failure('至少保留一条分账记录', 400);
       return run(() => prisma.$transaction(async (transaction) => {
+        await lockCommissionLedger(transaction);
         requireSettlementWrite(actor);
         const order = await readOrder(transaction, id);
         if (!order || order.deletedAt) throw new OrderSettlementCommandError(409, '源订单不存在，不能保存分账');
@@ -439,6 +445,7 @@ export function createOrderSettlementCommandService(
       if (!cleanReason) return failure('清理废弃分账必须填写原因', 400);
       if (!isSuperAdmin(actor)) return failure('仅超级管理员可以清理废弃订单分账', 403);
       return run(() => prisma.$transaction(async (transaction) => {
+        await lockCommissionLedger(transaction);
         const order = await readOrder(transaction, id);
         if (order && !order.deletedAt) throw new OrderSettlementCommandError(409, '源订单仍存在，不能清理废弃记录');
         const commissions = await readCommissions(transaction, id);

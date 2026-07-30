@@ -530,6 +530,15 @@ export interface CommissionPayoutRecord {
   note?: string;
 }
 
+/**
+ * 从不可变发放记录发起更正时的上下文。
+ * 服务端必须验证发放单、提成快照与源业务单三者的关联。
+ */
+export interface CommissionPayoutCorrectionContext {
+  payoutRecordId: ID;
+  commissionId: ID;
+}
+
 export interface CommissionPayoutStatusCounts {
   pendingHandling: number;
   pendingConfirm: number;

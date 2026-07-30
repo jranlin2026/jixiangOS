@@ -34,6 +34,7 @@ import { customerApi, orderApi, orderReviewApi, productApi, settingsApi } from '
 import type { OrderType, PaymentMethod, ProductLevel } from '../../types/common';
 import type {
   CommissionCorrectionPreview,
+  CommissionPayoutCorrectionContext,
   CommissionScene,
   OfficialPaymentChannel,
   ResourceOwnership,
@@ -64,6 +65,7 @@ interface OrderFormProps {
   application?: OrderApplication | null;
   customer?: Customer | null;
   initialMode?: 'edit' | 'correction';
+  payoutContext?: CommissionPayoutCorrectionContext;
 }
 
 function toDateTimeInputValue(value: Date): string {
@@ -181,7 +183,16 @@ function getCustomerOptionLabel(customer: Customer): string {
   ].filter(Boolean))).join(' · ');
 }
 
-const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, application, customer, initialMode = 'edit' }) => {
+const OrderForm: React.FC<OrderFormProps> = ({
+  open,
+  onClose,
+  onSuccess,
+  order,
+  application,
+  customer,
+  initialMode = 'edit',
+  payoutContext,
+}) => {
   const { update } = useOrderStore();
   const { alert, dialog: feedbackDialog } = useAppFeedback();
   const currentUser = useAuthStore((state) => state.currentUser);
@@ -695,6 +706,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
       if (order && correctionMode) {
         const correctionInput: OrderCorrectionInput = {
           reason: correctionReason.trim(),
+          payoutContext,
           data: {
             customerId: form.customerId,
             ...(productItemsEdited ? {
@@ -715,7 +727,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ open, onClose, onSuccess, order, 
             dealEvidenceAttachments,
           },
         };
-        const precheck = await orderApi.precheckOrderCorrection(order.id);
+        const precheck = await orderApi.precheckOrderCorrection(order.id, payoutContext);
         if (precheck.code !== 0 || !precheck.data) {
           throw new Error(precheck.message || '订单更正预检失败');
         }

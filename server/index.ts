@@ -435,6 +435,13 @@ function routeParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] || '' : value || '';
 }
 
+function payoutCorrectionContext(value: unknown) {
+  const input = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const payoutRecordId = String(input.payoutRecordId || '').trim();
+  const commissionId = String(input.commissionId || '').trim();
+  return payoutRecordId && commissionId ? { payoutRecordId, commissionId } : undefined;
+}
+
 function queryParam(value: unknown): string {
   if (Array.isArray(value)) return queryParam(value[0]);
   return typeof value === 'string' ? value : '';
@@ -944,7 +951,11 @@ app.put('/api/orders/:id', requireOrderEditWriteAccess, async (req: Authenticate
 });
 
 app.get('/api/orders/:id/correction-precheck', requireOrderCorrectWriteAccess, async (req: AuthenticatedRequest, res) => {
-  const result = await orderCommandService.precheckCorrection(routeParam(req.params.id), req.currentUser!);
+  const result = await orderCommandService.precheckCorrection(
+    routeParam(req.params.id),
+    req.currentUser!,
+    payoutCorrectionContext(req.query),
+  );
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
@@ -954,6 +965,7 @@ app.post('/api/orders/:id/correction-preview', requireOrderCorrectWriteAccess, a
     {
       reason: String(req.body?.reason || ''),
       data: req.body?.data || {},
+      payoutContext: payoutCorrectionContext(req.body?.payoutContext),
     },
     req.currentUser!,
   );
@@ -967,6 +979,7 @@ app.post('/api/orders/:id/correct', requireOrderCorrectWriteAccess, async (req: 
       reason: String(req.body?.reason || ''),
       data: req.body?.data || {},
       expectedImpactHash: String(req.body?.expectedImpactHash || ''),
+      payoutContext: payoutCorrectionContext(req.body?.payoutContext),
     },
     req.currentUser!,
   );
@@ -1184,7 +1197,11 @@ app.patch('/api/recovery-orders/:id/metadata', requireRecoveryEditAccess, async 
 });
 
 app.get('/api/recovery-orders/:id/correction-precheck', requireRecoveryCorrectAccess, async (req: AuthenticatedRequest, res) => {
-  const result = await recoveryOrderCommandService.precheckCorrection(routeParam(req.params.id), req.currentUser!);
+  const result = await recoveryOrderCommandService.precheckCorrection(
+    routeParam(req.params.id),
+    req.currentUser!,
+    payoutCorrectionContext(req.query),
+  );
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
 
@@ -1192,6 +1209,7 @@ app.post('/api/recovery-orders/:id/correction-preview', requireRecoveryCorrectAc
   const result = await recoveryOrderCommandService.previewCorrection(routeParam(req.params.id), {
     reason: String(req.body?.reason || ''),
     data: req.body?.data || {},
+    payoutContext: payoutCorrectionContext(req.body?.payoutContext),
   }, req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });
@@ -1201,6 +1219,7 @@ app.post('/api/recovery-orders/:id/correct', requireRecoveryCorrectAccess, async
     reason: String(req.body?.reason || ''),
     data: req.body?.data || {},
     expectedImpactHash: String(req.body?.expectedImpactHash || ''),
+    payoutContext: payoutCorrectionContext(req.body?.payoutContext),
   }, req.currentUser!);
   res.status(result.code === 0 ? 200 : result.code >= 400 && result.code < 500 ? result.code : 500).json(result);
 });

@@ -15,6 +15,7 @@ import {
   resolveRecoveryBusinessAmount,
 } from '../../src/shared/utils/commissionMonthlyMetrics';
 import { isSuperAdmin } from '../../src/shared/utils/permissions';
+import { isRecoveryCommissionRelatedToOrder } from '../../src/shared/utils/recoveryOrderDeletion';
 import type { AuthenticatedUser } from '../../src/types/auth';
 import type {
   Commission,
@@ -28,6 +29,7 @@ import type { RecoveryOrder } from '../../src/types/recoveryOrder';
 import type { Order } from '../../src/types/order';
 import { resolveCommissionCorrectionStatuses } from './commissionCorrectionService';
 import { selectLatestCommissionCorrections } from './commissionCorrectionRecordSelection';
+import { lockCommissionLedger } from './commissionLedgerLock';
 
 type PayoutPrisma = Pick<PrismaClient, 'businessRecord' | '$transaction'>;
 type PayoutTransaction = Prisma.TransactionClient;
@@ -218,14 +220,42 @@ async function syncRecoverySettlementStatuses(
   reason?: string,
 ): Promise<void> {
   for (const recoveryId of recoveryIds) {
-    const [recoveryRow, relatedRows] = await Promise.all([
-      tx.businessRecord.findUnique({
-        where: { domain_recordId: { domain: STORAGE_KEYS.RECOVERY_ORDERS, recordId: recoveryId } },
-      }),
-      tx.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSIONS, orderId: recoveryId } }),
-    ]);
+    const lockedRecoveryRows = await tx.$queryRaw<Array<{ data: unknown }>>(Prisma.sql`
+      SELECT data
+      FROM business_records
+      WHERE domain = ${STORAGE_KEYS.RECOVERY_ORDERS}
+        AND recordId = ${recoveryId}
+      LIMIT 1
+      FOR UPDATE
+    `);
+    const recoveryRow = lockedRecoveryRows[0];
     if (!recoveryRow) continue;
-    const related = relatedRows.map((row) => normalizeCommissionRound(row.data));
+    const recovery = asObject(recoveryRow.data) as unknown as RecoveryOrder;
+    const commissionIds = Array.from(new Set(recovery.commissionIds || []));
+    const relatedRows = await tx.businessRecord.findMany({
+      where: {
+        domain: STORAGE_KEYS.COMMISSIONS,
+        OR: [
+          { orderId: recoveryId },
+          { data: { path: '$.sourceRecoveryOrderId', equals: recoveryId } },
+          ...(commissionIds.length ? [{ recordId: { in: commissionIds } }] : []),
+        ],
+      },
+    });
+    const related = relatedRows
+      .map((row) => {
+        const commission = normalizeCommissionRound(row.data);
+        return {
+          ...commission,
+          id: row.recordId || commission.id,
+          orderId: row.orderId || commission.orderId,
+        };
+      })
+      .filter((commission) => isRecoveryCommissionRelatedToOrder(
+        recoveryId,
+        new Set(commissionIds),
+        commission,
+      ));
     const active = related.filter((item) => !['已取消', '已撤回', '已冲销'].includes(item.status));
     const settlementStatus = active.some((item) => item.status === '待确认')
       ? '待确认'
@@ -234,7 +264,6 @@ async function syncRecoverySettlementStatuses(
         : active.length > 0 && active.every((item) => FINAL_COMMISSION_STATUSES.has(item.status))
           ? '已发放'
           : '待处理';
-    const recovery = asObject(recoveryRow.data) as unknown as RecoveryOrder;
     const changedAtIso = changedAt.toISOString();
     const summary = settlementStatus === '已发放'
       ? '售后挽回订单提成已发放'
@@ -575,6 +604,7 @@ export function createCommissionPayoutService(prisma: PayoutPrisma, options: Com
     const period = issuedAt.slice(0, 7);
 
     return prisma.$transaction(async (tx) => {
+      await lockCommissionLedger(tx);
       await lockCommissionRows(tx);
       const [rows, recoveryRows] = await Promise.all([
         tx.businessRecord.findMany({

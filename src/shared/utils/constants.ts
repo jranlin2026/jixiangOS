@@ -313,6 +313,7 @@ export const STORAGE_KEYS = {
   COMMISSION_SETTLEMENT_BATCHES: `${STORAGE_PREFIX}commission_settlement_batches`,
   COMMISSION_PAYOUT_BATCHES: `${STORAGE_PREFIX}commission_payout_batches`,
   COMMISSION_CORRECTIONS: `${STORAGE_PREFIX}commission_corrections`,
+  COMMISSION_LEDGER_LOCKS: `${STORAGE_PREFIX}commission_ledger_locks`,
   FINANCE_TRANSACTIONS: `${STORAGE_PREFIX}finance_transactions`,
   ECOMMERCE_SETTLEMENT_RECORDS: `${STORAGE_PREFIX}ecommerce_settlement_records`,
   ECOMMERCE_SETTLEMENT_CONFIG: `${STORAGE_PREFIX}ecommerce_settlement_config`,

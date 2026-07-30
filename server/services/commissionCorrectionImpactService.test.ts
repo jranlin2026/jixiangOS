@@ -141,4 +141,188 @@ const payout = (snapshots: Commission[]): CommissionPayoutRecord => ({
   assert.equal(findOverlappingFinancialCorrection({ ...preview, legs: [] }, [prior]), undefined);
 }
 
+{
+  const targetPaid = commission({
+    id: 'commission-target-paid-history',
+    orderId: 'order-target',
+    orderNo: 'ORD-TARGET',
+    payoutPlanId: 'plan-shared',
+  });
+  const peerPaid = commission({
+    id: 'commission-peer-paid-history',
+    orderId: 'order-peer',
+    orderNo: 'ORD-PEER',
+    payoutPlanId: 'plan-shared',
+  });
+  const targetCurrent = {
+    ...targetPaid,
+    id: 'commission-target-current',
+    status: '待确认' as const,
+    paidAt: undefined,
+    payoutRecordId: undefined,
+  };
+  const peerCurrent = {
+    ...peerPaid,
+    id: 'commission-peer-current',
+    status: '待确认' as const,
+    paidAt: undefined,
+    payoutRecordId: undefined,
+  };
+  const preview = buildCommissionCorrectionImpact({
+    sourceBusinessType: 'formal_order',
+    sourceBusinessId: targetCurrent.orderId,
+    sourceBusinessNo: targetCurrent.orderNo,
+    sourceRevision: targetCurrent.updatedAt,
+    beforeBusinessSnapshot: { actualAmount: 1000 },
+    afterBusinessSnapshot: { actualAmount: 1200 },
+    beforeCommissions: [targetCurrent, peerCurrent],
+    afterCommissions: [{
+      ...targetCurrent,
+      commissionAmount: 120,
+      orderAmount: 1200,
+      performanceAmount: 1200,
+    }, peerCurrent],
+    payoutRecords: [payout([targetPaid, peerPaid])],
+  });
+  assert.equal(preview.supplementAmount, 20, '历史已发快照应与同源单当前应得配对');
+  assert.equal(preview.recoverAmount, 0, '同月其他订单的旧快照不得因缺少同 ID 新轮次被整笔追回');
+  assert.equal(
+    preview.impacts.some((impact) => impact.sourceCommissionId === peerPaid.id && impact.action === '追回'),
+    false,
+  );
+}
+
+{
+  const firstPaid = commission({ id: 'commission-paid-first', commissionAmount: 100 });
+  const secondPaid = commission({ id: 'commission-paid-second', commissionAmount: 20 });
+  const after = { ...secondPaid, commissionAmount: 120, status: '待确认' as const };
+  assert.throws(() => buildCommissionCorrectionImpact({
+    sourceBusinessType: 'formal_order',
+    sourceBusinessId: firstPaid.orderId,
+    sourceBusinessNo: firstPaid.orderNo,
+    sourceRevision: firstPaid.updatedAt,
+    beforeBusinessSnapshot: { actualAmount: 1000 },
+    afterBusinessSnapshot: { actualAmount: 1200 },
+    beforeCommissions: [secondPaid],
+    afterCommissions: [after],
+    payoutRecords: [
+      { ...payout([firstPaid]), id: 'payout-first' },
+      { ...payout([secondPaid]), id: 'payout-second' },
+    ],
+  }), /多笔.*已发|无法安全匹配/, '多笔历史实付不能各自与同一笔当前应得重复比较');
+}
+
+{
+  const pending = commission({ id: 'commission-pending', status: '待确认' });
+  const after = { ...pending, commissionAmount: 120 };
+  const ghostPayout = {
+    ...payout([{ ...pending, id: 'commission-ghost', status: '已发放' }]),
+    commissionIds: [],
+  };
+  const preview = buildCommissionCorrectionImpact({
+    sourceBusinessType: 'formal_order', sourceBusinessId: pending.orderId, sourceBusinessNo: pending.orderNo,
+    sourceRevision: pending.updatedAt, beforeBusinessSnapshot: {}, afterBusinessSnapshot: {},
+    beforeCommissions: [pending], afterCommissions: [after], payoutRecords: [ghostPayout],
+  });
+  assert.equal(preview.supplementAmount, 0, '未列入 commissionIds 的快照不得作为已发事实');
+  assert.equal(preview.impacts.length, 0);
+}
+
+{
+  const pending = commission({ id: 'commission-paid-without-snapshot', status: '待确认' });
+  const missingSnapshotPayout = {
+    ...payout([]),
+    commissionIds: [pending.id],
+    totalCount: 1,
+    totalAmount: pending.commissionAmount,
+  };
+  assert.throws(() => buildCommissionCorrectionImpact({
+    sourceBusinessType: 'formal_order', sourceBusinessId: pending.orderId, sourceBusinessNo: pending.orderNo,
+    sourceRevision: pending.updatedAt, beforeBusinessSnapshot: {}, afterBusinessSnapshot: {},
+    beforeCommissions: [pending], afterCommissions: [{ ...pending, commissionAmount: 120 }],
+    payoutRecords: [missingSnapshotPayout],
+  }), /缺少逐笔发放快照/, '发放单命中源提成但缺少快照时必须停止更正');
+}
+
+{
+  const oldPaid = commission({
+    id: 'commission-old-round-without-snapshot',
+    status: '已发放',
+    settlementVersion: 1,
+    settlementRoundId: 'round-1',
+  });
+  const current = commission({
+    id: 'commission-current-round',
+    status: '待确认',
+    settlementVersion: 2,
+    settlementRoundId: 'round-2',
+  });
+  const missingOldSnapshotPayout = {
+    ...payout([]),
+    commissionIds: [oldPaid.id],
+    totalCount: 1,
+    totalAmount: oldPaid.commissionAmount,
+  };
+  assert.throws(() => buildCommissionCorrectionImpact({
+    sourceBusinessType: 'formal_order', sourceBusinessId: current.orderId, sourceBusinessNo: current.orderNo,
+    sourceRevision: current.updatedAt, beforeBusinessSnapshot: {}, afterBusinessSnapshot: {},
+    beforeCommissions: [oldPaid, current], afterCommissions: [{ ...current, commissionAmount: 120 }],
+    payoutRecords: [missingOldSnapshotPayout],
+  }), /缺少逐笔发放快照/, '旧轮次发放单缺快照时不得因当前轮次筛选而漏检');
+}
+
+{
+  const oldPaid = commission({
+    id: 'commission-old-round-without-payout', status: '已发放', settlementVersion: 1, settlementRoundId: 'round-1',
+  });
+  const current = commission({
+    id: 'commission-current-after-old-paid', status: '待确认', settlementVersion: 2, settlementRoundId: 'round-2',
+  });
+  assert.throws(() => buildCommissionCorrectionImpact({
+    sourceBusinessType: 'formal_order', sourceBusinessId: current.orderId, sourceBusinessNo: current.orderNo,
+    sourceRevision: current.updatedAt, beforeBusinessSnapshot: {}, afterBusinessSnapshot: {},
+    beforeCommissions: [oldPaid, current], afterCommissions: [{ ...current, commissionAmount: 120 }], payoutRecords: [],
+  }), /缺少逐笔发放快照/, '旧轮次标记已发但无发放单时必须停止更正');
+}
+
+{
+  const firstPaid = commission({ id: 'commission-ambiguous-old-a', commissionAmount: 100 });
+  const secondPaid = commission({ id: 'commission-ambiguous-old-b', commissionAmount: 20 });
+  const firstAfter = commission({ id: 'commission-ambiguous-new-a', commissionAmount: 20, status: '待确认', commissionRuleId: 'rule-old' });
+  const secondAfter = commission({ id: 'commission-ambiguous-new-b', commissionAmount: 100, status: '待确认', commissionRuleId: 'rule-new' });
+  assert.throws(() => buildCommissionCorrectionImpact({
+    sourceBusinessType: 'formal_order', sourceBusinessId: firstPaid.orderId, sourceBusinessNo: firstPaid.orderNo,
+    sourceRevision: firstPaid.updatedAt, beforeBusinessSnapshot: {}, afterBusinessSnapshot: {},
+    beforeCommissions: [], afterCommissions: [firstAfter, secondAfter],
+    payoutRecords: [
+      { ...payout([firstPaid]), id: 'payout-ambiguous-a' },
+      { ...payout([secondPaid]), id: 'payout-ambiguous-b' },
+    ],
+  }), /无法安全匹配|匹配不唯一/, '没有稳定拆分键时不得按 ID 猜测多笔历史发放与当前应得的对应关系');
+}
+
+{
+  const paid = commission({ id: 'commission-split-old', commissionAmount: 100, commissionRuleId: 'rule-old' });
+  const firstAfter = commission({ id: 'commission-split-new-a', commissionAmount: 20, status: '待确认', commissionRuleId: 'rule-old' });
+  const secondAfter = commission({ id: 'commission-split-new-b', commissionAmount: 100, status: '待确认', commissionRuleId: 'rule-new' });
+  assert.throws(() => buildCommissionCorrectionImpact({
+    sourceBusinessType: 'formal_order', sourceBusinessId: paid.orderId, sourceBusinessNo: paid.orderNo,
+    sourceRevision: paid.updatedAt, beforeBusinessSnapshot: {}, afterBusinessSnapshot: {},
+    beforeCommissions: [], afterCommissions: [firstAfter, secondAfter], payoutRecords: [payout([paid])],
+  }), /无法安全匹配|稳定拆分键/, '一笔历史发放拆成多笔当前应得时不得局部配对后遗漏剩余应得');
+}
+
+{
+  const target = commission({ id: 'commission-chargeback-target', orderId: 'order-target', orderNo: 'ORD-TARGET', payoutPlanId: 'tier-plan' });
+  const peer = commission({
+    id: 'commission-chargeback-peer', orderId: 'order-peer', orderNo: 'ORD-PEER', payoutPlanId: 'tier-plan', status: '已冲销',
+  });
+  assert.throws(() => buildCommissionCorrectionImpact({
+    sourceBusinessType: 'formal_order', sourceBusinessId: target.orderId, sourceBusinessNo: target.orderNo,
+    sourceRevision: target.updatedAt, beforeBusinessSnapshot: {}, afterBusinessSnapshot: { notes: '仅改备注' },
+    beforeCommissions: [target, peer], afterCommissions: [target, peer],
+    payoutRecords: [payout([target, { ...peer, status: '已发放' }])],
+  }), /冲销/, '同一影响桶存在冲销中或已冲销提成时不得再次生成追回差额');
+}
+
 console.log('commission correction impact service tests passed');
