@@ -908,7 +908,11 @@ function expandPermissionRequests(module: string): string[] {
 function getSanitizedPermissionModules(module: string): string[] {
   const normalized = normalizePermissionKey(module);
   if (normalized === ALL_PERMISSION_KEY) return [ALL_PERMISSION_KEY];
-  return PERMISSION_GRANTS_BY_NORMALIZED.get(normalized) || [];
+  const grants = PERMISSION_GRANTS_BY_NORMALIZED.get(normalized) || [];
+  if (normalized === normalizePermissionKey(PERMISSION_KEYS.LEADS_LIST)) {
+    return [PERMISSION_KEYS.LEADS_LIST, ...grants];
+  }
+  return grants;
 }
 
 function isReadOnlyPermissionActions(actions: string[] = []): boolean {

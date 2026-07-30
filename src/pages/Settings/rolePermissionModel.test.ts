@@ -130,3 +130,60 @@ assert.deepEqual(
   undefined,
   '领取公海权不得在角色编辑器中隐式扩张为普通客户列表权',
 );
+
+const allLeadPermissions = buildRoleEditorPermissions([
+  PERMISSION_KEYS.LEADS_LIST,
+  PERMISSION_KEYS.LEADS_DETAIL,
+  PERMISSION_KEYS.LEADS_CREATE,
+  PERMISSION_KEYS.LEADS_EDIT,
+  PERMISSION_KEYS.LEADS_FOLLOW,
+  PERMISSION_KEYS.LEADS_FLOW_CONFIG,
+  PERMISSION_KEYS.LEADS_INTAKE_STATUS,
+]);
+const reloadedAllLeadRole = mergeRoleWithDefaultAccess({
+  id: 'role-all-leads',
+  name: '线索全权限角色',
+  code: 'all_leads',
+  permissions: allLeadPermissions,
+  memberCount: 0,
+  isActive: true,
+  createdAt: '2026-07-30T00:00:00.000Z',
+  updatedAt: '2026-07-30T00:00:00.000Z',
+} satisfies Role);
+assert.equal(
+  reloadedAllLeadRole.permissions.some((permission) => permission.module === PERMISSION_KEYS.LEADS_LIST),
+  true,
+  '线索功能全选后保存并重新加载，查看线索列表必须保持勾选',
+);
+assert.deepEqual(
+  reloadedAllLeadRole.permissions.find((permission) => permission.module === PERMISSION_KEYS.LEADS_LIST)?.actions,
+  ['read'],
+  '补回查看线索列表不得把只读权限扩大成写权限',
+);
+assert.equal(
+  reloadedAllLeadRole.permissions.some((permission) => permission.module === PERMISSION_KEYS.LEADS_DETAIL),
+  true,
+  '线索功能全选保存不得丢失其他线索权限',
+);
+
+const reloadedLegacyReadOnlyLeadRole = mergeRoleWithDefaultAccess({
+  id: 'role-legacy-read-only-leads',
+  name: '历史线索只读角色',
+  code: 'legacy_read_only_leads',
+  permissions: [
+    PERMISSION_KEYS.LEADS_DETAIL,
+    PERMISSION_KEYS.LEADS_CREATE,
+    PERMISSION_KEYS.LEADS_EDIT,
+    PERMISSION_KEYS.LEADS_FOLLOW,
+    PERMISSION_KEYS.LEADS_FLOW_CONFIG,
+  ].map((module) => ({ module, actions: ['read'] })),
+  memberCount: 0,
+  isActive: true,
+  createdAt: '2026-07-01T00:00:00.000Z',
+  updatedAt: '2026-07-01T00:00:00.000Z',
+} satisfies Role);
+assert.deepEqual(
+  reloadedLegacyReadOnlyLeadRole.permissions.find((permission) => permission.module === PERMISSION_KEYS.LEADS_EDIT)?.actions,
+  ['read'],
+  '修复列表勾选不得把历史线索只读角色升级为可编辑',
+);
