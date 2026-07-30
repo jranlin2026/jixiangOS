@@ -33,6 +33,7 @@ import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import PaymentsOutlinedIcon from '@mui/icons-material/PaymentsOutlined';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
+import ViewColumnOutlinedIcon from '@mui/icons-material/ViewColumnOutlined';
 import { commissionPayoutApi } from '../../api/commissionPayoutApi';
 import useAuthStore from '../../store/useAuthStore';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
@@ -74,6 +75,24 @@ interface CorrectionHandlingTarget {
   sourceBusinessNo: string;
   leg: CommissionCorrectionLeg;
 }
+
+const payoutStickyActionHeaderSx = {
+  position: 'sticky' as const,
+  right: 0,
+  zIndex: 5,
+  bgcolor: '#f8fafc',
+  boxShadow: '-1px 0 0 #e5e7eb',
+  whiteSpace: 'nowrap' as const,
+};
+
+const payoutStickyActionCellSx = {
+  position: 'sticky' as const,
+  right: 0,
+  zIndex: 4,
+  bgcolor: '#fff',
+  boxShadow: '-1px 0 0 #e5e7eb',
+  whiteSpace: 'nowrap' as const,
+};
 
 const todayInput = () => {
   const now = new Date();
@@ -127,6 +146,7 @@ const CommissionPayout: React.FC = () => {
   const canManage = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_PAYOUT, 'write');
   const canProcessPaidCommission = isSuperAdmin(currentUser);
   const [view, setView] = useState<PayoutView>('pending');
+  const [monthlyViewTrigger, setMonthlyViewTrigger] = useState(0);
   const [workspace, setWorkspace] = useState<CommissionPayoutWorkspace | null>(null);
   const [correctionData, setCorrectionData] = useState<CommissionCorrectionPage | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -506,7 +526,7 @@ const CommissionPayout: React.FC = () => {
                   <Typography component="span" variant="body2" fontWeight={700}>员工</Typography>
                 </Stack>
               </TableCell><TableCell sx={{ minWidth: 120 }}>部门</TableCell><TableCell sx={{ minWidth: 150 }}>业务单数</TableCell><TableCell align="right" sx={{ minWidth: 100 }}>待处理</TableCell>
-              <TableCell align="right" sx={{ minWidth: 130 }}>待确认</TableCell><TableCell align="right" sx={{ minWidth: 130 }}>待发放</TableCell><TableCell align="center" sx={{ minWidth: 120 }}>操作</TableCell>
+              <TableCell align="right" sx={{ minWidth: 130 }}>待确认</TableCell><TableCell align="right" sx={{ minWidth: 130 }}>待发放</TableCell><TableCell align="center" sx={{ ...payoutStickyActionHeaderSx, minWidth: 120 }}>操作</TableCell>
             </TableRow></TableHead>
             <TableBody>
               {visiblePendingRows.map((row) => {
@@ -532,7 +552,7 @@ const CommissionPayout: React.FC = () => {
                     <Typography fontWeight={800} color="warning.main">{formatCurrency(presentation.pendingPay.amount)}</Typography>
                     <Typography variant="caption" color="text.secondary">{presentation.pendingPay.count} 笔</Typography>
                   </TableCell>
-                  <TableCell align="center"><Button size="small" startIcon={<VisibilityOutlinedIcon />} sx={{ whiteSpace: 'nowrap' }} onClick={() => setDetailEmployee(row)}>查看明细</Button></TableCell>
+                  <TableCell align="center" sx={payoutStickyActionCellSx}><Button size="small" startIcon={<VisibilityOutlinedIcon />} sx={{ whiteSpace: 'nowrap' }} onClick={() => setDetailEmployee(row)}>查看明细</Button></TableCell>
                 </TableRow>;
               })}
               {!pendingRows.length && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 7, color: 'text.secondary' }}>暂无待处理、待确认或待发放提成</TableCell></TableRow>}
@@ -589,7 +609,7 @@ const CommissionPayout: React.FC = () => {
       <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}><Table size="small" sx={moduleTableSx}>
         <TableHead><TableRow>
           <TableCell sx={{ minWidth: 180 }}>发放单号</TableCell><TableCell sx={{ minWidth: 145 }}>发放时间</TableCell><TableCell align="center" sx={{ minWidth: 100 }}>员工 / 提成</TableCell>
-          <TableCell align="right" sx={{ minWidth: 110 }}>发放金额</TableCell><TableCell sx={{ minWidth: 140 }}>发放信息</TableCell><TableCell sx={{ minWidth: 90 }}>状态</TableCell><TableCell align="center" sx={{ width: 132, minWidth: 132 }}>操作</TableCell>
+          <TableCell align="right" sx={{ minWidth: 110 }}>发放金额</TableCell><TableCell sx={{ minWidth: 140 }}>发放信息</TableCell><TableCell sx={{ minWidth: 90 }}>状态</TableCell><TableCell align="center" sx={{ ...payoutStickyActionHeaderSx, width: 132, minWidth: 132 }}>操作</TableCell>
         </TableRow></TableHead>
         <TableBody>
           {visibleRecordRows.map((record) => <TableRow key={record.id} hover>
@@ -599,7 +619,7 @@ const CommissionPayout: React.FC = () => {
             <TableCell align="right"><Typography fontWeight={800}>{formatCurrency(record.totalAmount)}</Typography></TableCell>
             <TableCell><Typography variant="body2">{record.issuedByName || '-'}</Typography><Typography variant="caption" color="text.secondary">{record.paymentMethod || '-'}</Typography></TableCell>
             <TableCell><Chip size="small" label={record.status} color={record.status === '已发放' ? 'success' : 'default'} /></TableCell>
-            <TableCell align="center"><Stack direction="row" spacing={0.5} justifyContent="center">
+            <TableCell align="center" sx={payoutStickyActionCellSx}><Stack direction="row" spacing={0.5} justifyContent="center">
               <Tooltip title="查看详情"><IconButton size="small" color="primary" aria-label="查看发放详情" onClick={() => setDetailRecord(record)}><VisibilityOutlinedIcon fontSize="small" /></IconButton></Tooltip>
               <Tooltip title="导出发放单"><IconButton size="small" color="primary" aria-label="导出发放单" onClick={() => exportRecord(record)}><FileDownloadOutlinedIcon fontSize="small" /></IconButton></Tooltip>
             </Stack></TableCell>
@@ -703,7 +723,7 @@ const CommissionPayout: React.FC = () => {
               <TableCell align="right" sx={{ minWidth: 100 }}>补发</TableCell>
               <TableCell align="right" sx={{ minWidth: 100 }}>追回</TableCell>
               <TableCell sx={{ minWidth: 105 }}>状态</TableCell>
-              <TableCell sx={{ minWidth: 220 }}>差额进度</TableCell>
+              <TableCell sx={{ ...payoutStickyActionHeaderSx, minWidth: 220 }}>差额进度</TableCell>
             </TableRow></TableHead>
             <TableBody>
               {visibleCorrectionRows.map((record) => (
@@ -724,7 +744,7 @@ const CommissionPayout: React.FC = () => {
                   <TableCell align="right"><Typography fontWeight={800} color="primary.main">{formatCurrency(record.supplementAmount)}</Typography></TableCell>
                   <TableCell align="right"><Typography fontWeight={800} color="warning.main">{formatCurrency(record.recoverAmount)}</Typography></TableCell>
                   <TableCell><Chip size="small" color={correctionStatusColor(record.status)} label={record.status} /></TableCell>
-                  <TableCell>{renderCorrectionOutcome(record)}</TableCell>
+                  <TableCell sx={payoutStickyActionCellSx}>{renderCorrectionOutcome(record)}</TableCell>
                 </TableRow>
               ))}
               {!visibleCorrectionRows.length && <TableRow><TableCell colSpan={11} align="center" sx={{ py: 7, color: 'text.secondary' }}>暂无更正与差额记录</TableCell></TableRow>}
@@ -748,10 +768,17 @@ const CommissionPayout: React.FC = () => {
 
   return <Stack spacing={2}>
     <Paper variant="outlined" sx={{ p: 2 }}>
-      <Box>
-        <Typography variant="h5" fontWeight={900}>提成发放</Typography>
-        <Typography variant="body2" color="text.secondary">核对员工应发提成、执行发放，并保留完整发放记录。发放后业务资料更正不会覆盖原发放事实。</Typography>
-      </Box>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'flex-start' }}>
+        <Box>
+          <Typography variant="h5" fontWeight={900}>提成发放</Typography>
+          <Typography variant="body2" color="text.secondary">核对员工应发提成、执行发放，并保留完整发放记录。发放后业务资料更正不会覆盖原发放事实。</Typography>
+        </Box>
+        {view === 'summary' && (
+          <Button variant="outlined" startIcon={<ViewColumnOutlinedIcon />} onClick={() => setMonthlyViewTrigger((value) => value + 1)} sx={{ whiteSpace: 'nowrap', alignSelf: { xs: 'flex-start', sm: 'center' } }}>
+            视图设置
+          </Button>
+        )}
+      </Stack>
       <Tabs value={view} onChange={(_: React.SyntheticEvent, value: PayoutView) => setView(value)} sx={{ mt: 1.5 }}>
         <Tab value="pending" label="待发放" /><Tab value="records" label="发放记录" /><Tab value="corrections" label="更正与差额" /><Tab value="summary" label="月度报告" />
       </Tabs>
@@ -760,7 +787,16 @@ const CommissionPayout: React.FC = () => {
     {view === 'pending' && renderPending()}
     {view === 'records' && renderRecords()}
     {view === 'corrections' && renderCorrections()}
-    {view === 'summary' && <Commission key="payout-summary" embedded initialTab={1} payoutMode="finance" />}
+    {view === 'summary' && (
+      <Commission
+        key="payout-summary"
+        embedded
+        initialTab={1}
+        payoutMode="finance"
+        hideEmbeddedFinanceMonthlyViewButton
+        financeMonthlyViewTrigger={monthlyViewTrigger}
+      />
+    )}
 
     <Dialog open={issueOpen} onClose={() => !submitting && setIssueOpen(false)} fullWidth maxWidth="sm">
       <DialogTitle>确认发放提成</DialogTitle>
@@ -929,7 +965,7 @@ const CommissionPayout: React.FC = () => {
           <Box>
             <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 1.5 }}>逐笔提成明细</Typography>
             <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { borderRadius: '6px 6px 0 0', overflowX: 'auto' }]}><Table size="small" sx={[moduleTableSx, { minWidth: canProcessCurrentPayout ? 1120 : 980 }]}>
-              <TableHead><TableRow><TableCell>提成类型</TableCell><TableCell>员工</TableCell><TableCell>客户</TableCell><TableCell>订单号</TableCell><TableCell>角色</TableCell><TableCell align="right">业绩金额</TableCell><TableCell align="right">发放金额</TableCell><TableCell>归属月份</TableCell>{canProcessCurrentPayout && <TableCell align="center">操作</TableCell>}</TableRow></TableHead>
+              <TableHead><TableRow><TableCell>提成类型</TableCell><TableCell>员工</TableCell><TableCell>客户</TableCell><TableCell>订单号</TableCell><TableCell>角色</TableCell><TableCell align="right">业绩金额</TableCell><TableCell align="right">发放金额</TableCell><TableCell>归属月份</TableCell>{canProcessCurrentPayout && <TableCell align="center" sx={payoutStickyActionHeaderSx}>操作</TableCell>}</TableRow></TableHead>
               <TableBody>{visibleRecordCommissionRows.map((row) => {
                 const correctionContext = detailRecord
                   ? buildPostPayoutProcessingContext(detailRecord, row)
@@ -937,7 +973,7 @@ const CommissionPayout: React.FC = () => {
                 return (
                   <TableRow key={row.id} hover>
                     <TableCell>{commissionTypeLabel(row)}</TableCell><TableCell>{row.owner}</TableCell><TableCell>{row.customerName || '未命名客户'}</TableCell><TableCell><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{row.orderNo}</Typography></TableCell><TableCell>{row.role}</TableCell><TableCell align="right">{formatCurrency(Number(row.performanceAmount || row.orderAmount || 0))}</TableCell><TableCell align="right"><Typography fontWeight={900}>{formatCurrency(row.commissionAmount)}</Typography></TableCell><TableCell>{commissionMonth(row)}</TableCell>
-                    {canProcessCurrentPayout && <TableCell align="center">{correctionContext ? <Button size="small" startIcon={<EditOutlinedIcon />} onClick={() => openPostPayoutProcessing(row)}>发放后处理</Button> : <Typography variant="caption" color="text.secondary">源单不可用</Typography>}</TableCell>}
+                    {canProcessCurrentPayout && <TableCell align="center" sx={payoutStickyActionCellSx}>{correctionContext ? <Button size="small" startIcon={<EditOutlinedIcon />} sx={{ whiteSpace: 'nowrap' }} onClick={() => openPostPayoutProcessing(row)}>发放后处理</Button> : <Typography variant="caption" color="text.secondary">源单不可用</Typography>}</TableCell>}
                   </TableRow>
                 );
               })}</TableBody>

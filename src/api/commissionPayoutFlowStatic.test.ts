@@ -83,6 +83,14 @@ assert.match(payoutSource, /page=\{currentRecordCommissionPage\}/, '发放单逐
 assert.ok((payoutSource.match(/moduleTableSx/g) || []).length >= 5, '提成发放主列表和详情表格必须统一复用系统表格样式');
 assert.match(commissionSource, /visibleFinancePayoutRows\.map/, '财务员工月度报告必须按页渲染');
 assert.match(commissionSource, /count=\{payoutRows\.length\}[\s\S]{0,160}page=\{currentFinanceMonthlyPage\}/, '财务员工月度报告必须显示统一分页');
+assert.match(commissionSource, /月度报告视图设置/, '财务月度报告必须提供字段显示设置');
+assert.match(payoutSource, /view === 'summary'[\s\S]{0,260}>\s*视图设置\s*</, '月度报告视图设置入口必须位于提成发放头部右侧');
+assert.match(payoutSource, /financeMonthlyViewTrigger=\{monthlyViewTrigger\}/, '提成发放头部入口必须打开月度报告字段设置');
+assert.match(commissionSource, /FINANCE_MONTHLY_REPORT_VIEW_STORAGE_KEY/, '月度报告视图设置必须保存在当前浏览器');
+assert.match(commissionSource, /financeMonthlyVisibleColumnIds\.includes/, '桌面表格和移动卡片必须复用同一字段显示配置');
+assert.match(commissionSource, /data-testid="finance-monthly-sticky-action"[\s\S]{0,220}position:\s*'sticky'[\s\S]{0,120}right:\s*0/, '财务月报操作列必须固定在右侧');
+assert.match(payoutSource, /const payoutStickyActionHeaderSx/, '提成发放列表必须复用固定操作列表头样式');
+assert.match(payoutSource, /const payoutStickyActionCellSx/, '提成发放列表必须复用固定操作列单元格样式');
 assert.match(commissionSource, /Table size="small" sx=\{\[moduleTableSx, \{ minWidth: 1240 \}\]\}/, '提成明细桌面表格必须复用系统统一样式');
 assert.match(commissionSource, /visibleMineCalculationDetailRows\.map/, '参与计算明细必须按页渲染');
 assert.match(commissionSource, /count=\{mineCalculationDetailRows\.length\}[\s\S]{0,160}page=\{currentMineCalculationDetailPage\}/, '参与计算明细必须显示统一分页');

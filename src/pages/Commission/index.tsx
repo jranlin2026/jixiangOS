@@ -125,6 +125,59 @@ const DEFAULT_ORDER_STATUS_COUNTS: CommissionOrderSummaryStatusCounts = {
   已撤回: 0,
 };
 
+type FinanceMonthlyReportColumnId =
+  | 'department'
+  | 'businessComposition'
+  | 'formalOrderPaidAmount'
+  | 'recoveryBusinessAmount'
+  | 'totalAmount'
+  | 'pendingConfirmAmount'
+  | 'pendingPayAmount'
+  | 'paidAmount'
+  | 'correctionOriginalPaidAmount'
+  | 'correctionEntitlementAmount'
+  | 'correctionDelta'
+  | 'statusDistribution';
+
+type FinanceMonthlyReportColumnMeta = {
+  id: FinanceMonthlyReportColumnId;
+  label: string;
+  width: number;
+  align?: 'left' | 'right' | 'center';
+  group: '业务数据' | '提成状态' | '更正与差额';
+};
+
+const FINANCE_MONTHLY_REPORT_VIEW_STORAGE_KEY = 'aaos_finance_monthly_report_view_v1';
+const FINANCE_MONTHLY_REPORT_COLUMNS: FinanceMonthlyReportColumnMeta[] = [
+  { id: 'department', label: '部门', width: 130, group: '业务数据' },
+  { id: 'businessComposition', label: '业务构成', width: 150, group: '业务数据' },
+  { id: 'formalOrderPaidAmount', label: '正式订单实付', width: 150, align: 'right', group: '业务数据' },
+  { id: 'recoveryBusinessAmount', label: '挽回成交额', width: 140, align: 'right', group: '业务数据' },
+  { id: 'totalAmount', label: '本月提成总额', width: 150, align: 'right', group: '提成状态' },
+  { id: 'pendingConfirmAmount', label: '待确认', width: 120, align: 'right', group: '提成状态' },
+  { id: 'pendingPayAmount', label: '待发放', width: 120, align: 'right', group: '提成状态' },
+  { id: 'paidAmount', label: '已发放', width: 120, align: 'right', group: '提成状态' },
+  { id: 'correctionOriginalPaidAmount', label: '更正原已发', width: 140, align: 'right', group: '更正与差额' },
+  { id: 'correctionEntitlementAmount', label: '更正后应得', width: 140, align: 'right', group: '更正与差额' },
+  { id: 'correctionDelta', label: '补发 / 追回', width: 160, align: 'right', group: '更正与差额' },
+  { id: 'statusDistribution', label: '状态分布', width: 280, group: '提成状态' },
+];
+const DEFAULT_FINANCE_MONTHLY_REPORT_VISIBLE_COLUMNS = FINANCE_MONTHLY_REPORT_COLUMNS.map((column) => column.id);
+
+function readFinanceMonthlyReportView(): FinanceMonthlyReportColumnId[] {
+  try {
+    const raw = localStorage.getItem(FINANCE_MONTHLY_REPORT_VIEW_STORAGE_KEY);
+    if (!raw) return [...DEFAULT_FINANCE_MONTHLY_REPORT_VISIBLE_COLUMNS];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [...DEFAULT_FINANCE_MONTHLY_REPORT_VISIBLE_COLUMNS];
+    const validIds = new Set(DEFAULT_FINANCE_MONTHLY_REPORT_VISIBLE_COLUMNS);
+    const normalized = parsed.filter((id): id is FinanceMonthlyReportColumnId => typeof id === 'string' && validIds.has(id as FinanceMonthlyReportColumnId));
+    return normalized.length ? normalized : [...DEFAULT_FINANCE_MONTHLY_REPORT_VISIBLE_COLUMNS];
+  } catch {
+    return [...DEFAULT_FINANCE_MONTHLY_REPORT_VISIBLE_COLUMNS];
+  }
+}
+
 type OrderSplitColumnId =
   | 'orderNo'
   | 'status'
@@ -373,6 +426,8 @@ interface CommissionProps {
   orderSplitCreateTrigger?: number;
   orderSplitExportTrigger?: number;
   orderSplitInitialSearch?: string;
+  hideEmbeddedFinanceMonthlyViewButton?: boolean;
+  financeMonthlyViewTrigger?: number;
 }
 
 function OrderPaymentEvidence({ order }: { order: Order }) {
@@ -512,6 +567,8 @@ const Commission: React.FC<CommissionProps> = ({
   orderSplitCreateTrigger = 0,
   orderSplitExportTrigger = 0,
   orderSplitInitialSearch = '',
+  hideEmbeddedFinanceMonthlyViewButton = false,
+  financeMonthlyViewTrigger = 0,
 }) => {
   const currentUser = useAuthStore((state) => state.currentUser);
   const canManageOrderSettlement = hasPermission(currentUser, PERMISSION_KEYS.FINANCE_SETTLEMENT, 'write');
@@ -521,6 +578,7 @@ const Commission: React.FC<CommissionProps> = ({
   const lastOrderSplitViewTriggerRef = useRef(orderSplitViewTrigger);
   const lastOrderSplitCreateTriggerRef = useRef(orderSplitCreateTrigger);
   const lastOrderSplitExportTriggerRef = useRef(orderSplitExportTrigger);
+  const lastFinanceMonthlyViewTriggerRef = useRef(financeMonthlyViewTrigger);
   const [orderRows, setOrderRows] = useState<CommissionOrderSummary[]>([]);
   const [orderLoading, setOrderLoading] = useState(false);
   const [orderPagination, setOrderPagination] = useState({ page: 1, pageSize: 10, total: 0 });
@@ -558,6 +616,8 @@ const Commission: React.FC<CommissionProps> = ({
   const [mineDetailPageSize, setMineDetailPageSize] = useState(10);
   const [financeMonthlyPage, setFinanceMonthlyPage] = useState(0);
   const [financeMonthlyPageSize, setFinanceMonthlyPageSize] = useState(10);
+  const [financeMonthlyViewOpen, setFinanceMonthlyViewOpen] = useState(false);
+  const [financeMonthlyVisibleColumnIds, setFinanceMonthlyVisibleColumnIds] = useState<FinanceMonthlyReportColumnId[]>(() => readFinanceMonthlyReportView());
   const [mineCalculationDetailPage, setMineCalculationDetailPage] = useState(0);
   const [mineCalculationDetailPageSize, setMineCalculationDetailPageSize] = useState(10);
   const [mineDetailRow, setMineDetailRow] = useState<MineCommissionDisplayRow | null>(null);
@@ -641,6 +701,27 @@ const Commission: React.FC<CommissionProps> = ({
     currentFinanceMonthlyPage * financeMonthlyPageSize,
     (currentFinanceMonthlyPage + 1) * financeMonthlyPageSize,
   );
+  const visibleFinanceMonthlyColumns = FINANCE_MONTHLY_REPORT_COLUMNS.filter((column) => (
+    financeMonthlyVisibleColumnIds.includes(column.id)
+  ));
+  const financeMonthlyTableMinWidth = 180 + 132 + visibleFinanceMonthlyColumns.reduce((sum, column) => sum + column.width, 0);
+
+  const toggleFinanceMonthlyColumn = (columnId: FinanceMonthlyReportColumnId) => {
+    setFinanceMonthlyVisibleColumnIds((current) => {
+      const next = current.includes(columnId)
+        ? current.filter((id) => id !== columnId)
+        : [...current, columnId];
+      const normalized = next.length ? next : [columnId];
+      localStorage.setItem(FINANCE_MONTHLY_REPORT_VIEW_STORAGE_KEY, JSON.stringify(normalized));
+      return normalized;
+    });
+  };
+
+  const resetFinanceMonthlyView = () => {
+    const next = [...DEFAULT_FINANCE_MONTHLY_REPORT_VISIBLE_COLUMNS];
+    localStorage.setItem(FINANCE_MONTHLY_REPORT_VIEW_STORAGE_KEY, JSON.stringify(next));
+    setFinanceMonthlyVisibleColumnIds(next);
+  };
 
   useEffect(() => {
     setFinanceMonthlyPage(0);
@@ -1037,6 +1118,13 @@ const Commission: React.FC<CommissionProps> = ({
     lastOrderSplitExportTriggerRef.current = orderSplitExportTrigger;
     setOrderSplitExportOpen(true);
   }, [orderSplitExportTrigger]);
+
+  useEffect(() => {
+    if (financeMonthlyViewTrigger <= 0) return;
+    if (lastFinanceMonthlyViewTriggerRef.current === financeMonthlyViewTrigger) return;
+    lastFinanceMonthlyViewTriggerRef.current = financeMonthlyViewTrigger;
+    setFinanceMonthlyViewOpen(true);
+  }, [financeMonthlyViewTrigger]);
 
   const handleExportOrderSettlements = async (request: BusinessExportDialogRequest) => {
     const response = await businessExportApi.exportOrderSettlements(buildBusinessExportBrowserRequest(
@@ -3626,30 +3714,79 @@ const Commission: React.FC<CommissionProps> = ({
     return <Typography variant="body2" sx={{ color: '#64748b' }}>当前状态无需处理。</Typography>;
   };
 
+  const renderFinanceMonthlyCell = (row: MonthlyCommissionPayout, columnId: FinanceMonthlyReportColumnId) => {
+    switch (columnId) {
+      case 'department':
+        return row.department || '-';
+      case 'businessComposition':
+        return (
+          <>
+            <Typography variant="body2">正式 {row.formalOrderCount || 0} 笔</Typography>
+            <Typography variant="caption" color="text.secondary">挽回 {row.recoveryOrderCount || 0} 笔</Typography>
+          </>
+        );
+      case 'formalOrderPaidAmount':
+        return formatCurrency(row.formalOrderPaidAmount || 0);
+      case 'recoveryBusinessAmount':
+        return formatCurrency(row.recoveryBusinessAmount || 0);
+      case 'totalAmount':
+        return <Typography fontWeight={900}>{formatCurrency(row.totalAmount)}</Typography>;
+      case 'pendingConfirmAmount':
+        return <Typography fontWeight={row.pendingConfirmAmount > 0 ? 900 : 500} color={row.pendingConfirmAmount > 0 ? 'info.main' : 'text.primary'}>{formatCurrency(row.pendingConfirmAmount)}</Typography>;
+      case 'pendingPayAmount':
+        return <Typography fontWeight={row.pendingPayAmount > 0 ? 900 : 500} color={row.pendingPayAmount > 0 ? 'warning.main' : 'text.primary'}>{formatCurrency(row.pendingPayAmount)}</Typography>;
+      case 'paidAmount':
+        return <Typography fontWeight={row.paidAmount > 0 ? 900 : 500} color={row.paidAmount > 0 ? 'success.main' : 'text.primary'}>{formatCurrency(row.paidAmount)}</Typography>;
+      case 'correctionOriginalPaidAmount':
+        return formatCurrency(row.correctionOriginalPaidAmount || 0);
+      case 'correctionEntitlementAmount':
+        return <Typography fontWeight={(row.correctionEntitlementAmount || 0) > 0 ? 900 : 500}>{formatCurrency(row.correctionEntitlementAmount || 0)}</Typography>;
+      case 'correctionDelta':
+        return <Typography variant="body2" color="secondary.main">{formatCurrency(row.correctionSupplementAmount || 0)} / {formatCurrency(row.correctionRecoverAmount || 0)}</Typography>;
+      case 'statusDistribution':
+        return (
+          <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, maxWidth: 280 }}>
+            {monthlyPayoutStatusDistribution(row).map((item) => (
+              <Chip key={item.label} label={`${item.label} ${item.count}`} size="small" color={item.color} variant={item.label === '已撤回' ? 'outlined' : 'filled'} />
+            ))}
+          </Stack>
+        );
+      default:
+        return '-';
+    }
+  };
+
   const renderMonthlyPayout = () => (
     <>
-      <Stack direction="row" spacing={1.25} sx={{ mb: 2, alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
-        <TextField
-          label={payoutMode === 'mine' ? '我的提成月份' : '统计月份'}
-          type="month"
-          value={payoutPeriod}
-          onChange={(event) => setPayoutPeriod(event.target.value)}
-          size="small"
-          InputLabelProps={{ shrink: true }}
-        />
-        {(payoutMode === 'mine' || canExportFinanceMonthlyReport) && (
-          <Tooltip title={payoutRows.length ? (payoutMode === 'mine' ? '导出当前月份的提成汇总与逐笔明细' : '导出六张工作表的财务提成核对包') : '暂无可导出的提成数据'}>
-            <span>
-              <Button
-                variant="outlined"
-                startIcon={<FileDownloadIcon />}
-                disabled={!payoutRows.length || mineExporting}
-                onClick={() => void exportMonthlyStatement()}
-              >
-                {payoutMode === 'mine' ? (mineExporting ? '导出中...' : '导出提成明细') : '导出财务核对表'}
-              </Button>
-            </span>
-          </Tooltip>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} sx={{ mb: 2, alignItems: { xs: 'stretch', sm: 'center' }, justifyContent: 'space-between' }}>
+        <Stack direction="row" spacing={1.25} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
+          <TextField
+            label={payoutMode === 'mine' ? '我的提成月份' : '统计月份'}
+            type="month"
+            value={payoutPeriod}
+            onChange={(event) => setPayoutPeriod(event.target.value)}
+            size="small"
+            InputLabelProps={{ shrink: true }}
+          />
+          {(payoutMode === 'mine' || canExportFinanceMonthlyReport) && (
+            <Tooltip title={payoutRows.length ? (payoutMode === 'mine' ? '导出当前月份的提成汇总与逐笔明细' : '导出六张工作表的财务提成核对包') : '暂无可导出的提成数据'}>
+              <span>
+                <Button
+                  variant="outlined"
+                  startIcon={<FileDownloadIcon />}
+                  disabled={!payoutRows.length || mineExporting}
+                  onClick={() => void exportMonthlyStatement()}
+                >
+                  {payoutMode === 'mine' ? (mineExporting ? '导出中...' : '导出提成明细') : '导出财务核对表'}
+                </Button>
+              </span>
+            </Tooltip>
+          )}
+        </Stack>
+        {payoutMode === 'finance' && !hideEmbeddedFinanceMonthlyViewButton && (
+          <Button variant="outlined" startIcon={<ViewColumnIcon />} onClick={() => setFinanceMonthlyViewOpen(true)} sx={{ alignSelf: { xs: 'flex-start', sm: 'center' }, whiteSpace: 'nowrap' }}>
+            视图设置
+          </Button>
         )}
       </Stack>
 
@@ -3705,26 +3842,18 @@ const Commission: React.FC<CommissionProps> = ({
                     <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="flex-start">
                       <Box sx={{ minWidth: 0 }}>
                         <Typography fontWeight={900}>{formatOwnerDisplayName(row.ownerId, row.owner)}</Typography>
-                        <Typography variant="caption" color="text.secondary">{row.department || '-'} · {row.orderCount} 个订单</Typography>
+                        <Typography variant="caption" color="text.secondary">{row.orderCount} 个订单</Typography>
                       </Box>
                       <Typography variant="caption" color="text.secondary">{row.orderCount} 笔业务</Typography>
                     </Stack>
                     <Box sx={{ mt: 1.25, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
-                      <Box><Typography variant="caption" color="text.secondary">正式订单实付</Typography><Typography fontWeight={900}>{formatCurrency(row.formalOrderPaidAmount || 0)}</Typography></Box>
-                      <Box><Typography variant="caption" color="text.secondary">挽回成交额</Typography><Typography fontWeight={900}>{formatCurrency(row.recoveryBusinessAmount || 0)}</Typography></Box>
-                      <Box><Typography variant="caption" color="text.secondary">本月提成总额</Typography><Typography fontWeight={900}>{formatCurrency(row.totalAmount)}</Typography></Box>
-                      <Box><Typography variant="caption" color="text.secondary">待确认</Typography><Typography fontWeight={900} color="info.main">{formatCurrency(row.pendingConfirmAmount)}</Typography></Box>
-                      <Box><Typography variant="caption" color="text.secondary">待发放</Typography><Typography fontWeight={900} color="warning.main">{formatCurrency(row.pendingPayAmount)}</Typography></Box>
-                      <Box><Typography variant="caption" color="text.secondary">已发放</Typography><Typography fontWeight={900} color="success.main">{formatCurrency(row.paidAmount)}</Typography></Box>
-                      <Box><Typography variant="caption" color="text.secondary">更正原已发</Typography><Typography fontWeight={900}>{formatCurrency(row.correctionOriginalPaidAmount || 0)}</Typography></Box>
-                      <Box><Typography variant="caption" color="text.secondary">更正后应得</Typography><Typography fontWeight={900}>{formatCurrency(row.correctionEntitlementAmount || 0)}</Typography></Box>
-                      <Box><Typography variant="caption" color="text.secondary">补发 / 追回</Typography><Typography fontWeight={900} color="secondary.main">{formatCurrency(row.correctionSupplementAmount || 0)} / {formatCurrency(row.correctionRecoverAmount || 0)}</Typography></Box>
-                    </Box>
-                    <Stack direction="row" spacing={0.6} sx={{ mt: 1.1, flexWrap: 'wrap', rowGap: 0.6 }}>
-                      {monthlyPayoutStatusDistribution(row).map((item) => (
-                        <Chip key={item.label} label={`${item.label} ${item.count}笔`} size="small" color={item.color} variant={item.label === '已撤回' ? 'outlined' : 'filled'} />
+                      {FINANCE_MONTHLY_REPORT_COLUMNS.filter((column) => financeMonthlyVisibleColumnIds.includes(column.id)).map((column) => (
+                        <Box key={column.id} sx={{ minWidth: 0, gridColumn: column.id === 'statusDistribution' ? '1 / -1' : 'auto' }}>
+                          <Typography variant="caption" color="text.secondary">{column.label}</Typography>
+                          <Box sx={{ mt: 0.2 }}>{renderFinanceMonthlyCell(row, column.id)}</Box>
+                        </Box>
                       ))}
-                    </Stack>
+                    </Box>
                     <Button fullWidth size="small" variant={selected ? 'contained' : 'outlined'} startIcon={<VisibilityIcon />} sx={{ mt: 1.25 }} onClick={() => setSelectedFinancePayoutOwnerKey(ownerKey)}>
                       {selected ? '正在查看' : '查看月报'}
                     </Button>
@@ -3733,13 +3862,17 @@ const Commission: React.FC<CommissionProps> = ({
               })}
             </Box>
             <TableContainer sx={{ display: { xs: 'none', md: 'block' } }}>
-              <Table size="small" sx={[moduleTableSx, { minWidth: 1920 }]}>
+              <Table size="small" sx={[moduleTableSx, { minWidth: Math.max(720, financeMonthlyTableMinWidth), tableLayout: 'fixed' }]}>
                 <TableHead><TableRow>
-                  <TableCell>员工</TableCell><TableCell>部门</TableCell><TableCell>业务构成</TableCell>
-                  <TableCell align="right">正式订单实付</TableCell><TableCell align="right">挽回成交额</TableCell><TableCell align="right">本月提成总额</TableCell>
-                  <TableCell align="right">待确认</TableCell><TableCell align="right">待发放</TableCell><TableCell align="right">已发放</TableCell>
-                  <TableCell align="right">更正原已发</TableCell><TableCell align="right">更正后应得</TableCell><TableCell align="right">补发 / 追回</TableCell>
-                  <TableCell>状态分布</TableCell><TableCell align="center">操作</TableCell>
+                  <TableCell sx={{ position: 'sticky', left: 0, zIndex: 5, width: 180, minWidth: 180, bgcolor: '#f8fafc', boxShadow: '1px 0 0 #e5e7eb', whiteSpace: 'nowrap' }}>员工</TableCell>
+                  {visibleFinanceMonthlyColumns.map((column) => (
+                    <TableCell key={column.id} align={column.align} sx={{ width: column.width, minWidth: column.width, whiteSpace: 'nowrap' }}>{column.label}</TableCell>
+                  ))}
+                  <TableCell
+                    data-testid="finance-monthly-sticky-action"
+                    align="center"
+                    sx={{ position: 'sticky', right: 0, zIndex: 5, width: 132, minWidth: 132, bgcolor: '#f8fafc', boxShadow: '-1px 0 0 #e5e7eb', whiteSpace: 'nowrap' }}
+                  >操作</TableCell>
                 </TableRow></TableHead>
                 <TableBody>
                   {visibleFinancePayoutRows.map((row) => {
@@ -3747,33 +3880,17 @@ const Commission: React.FC<CommissionProps> = ({
                     const selected = monthlyPayoutOwnerKey(selectedFinancePayoutRow || row) === ownerKey;
                     return (
                       <TableRow key={ownerKey} hover selected={selected} sx={{ '& td:first-of-type': { borderLeft: selected ? '4px solid #2563eb' : '4px solid transparent' } }}>
-                        <TableCell><Typography fontWeight={900}>{formatOwnerDisplayName(row.ownerId, row.owner)}</Typography></TableCell>
-                        <TableCell>{row.department || '-'}</TableCell>
-                        <TableCell>
-                          <Typography variant="body2">正式 {row.formalOrderCount || 0} 笔</Typography>
-                          <Typography variant="caption" color="text.secondary">挽回 {row.recoveryOrderCount || 0} 笔</Typography>
-                        </TableCell>
-                        <TableCell align="right">{formatCurrency(row.formalOrderPaidAmount || 0)}</TableCell>
-                        <TableCell align="right">{formatCurrency(row.recoveryBusinessAmount || 0)}</TableCell>
-                        <TableCell align="right"><Typography fontWeight={900}>{formatCurrency(row.totalAmount)}</Typography></TableCell>
-                        <TableCell align="right"><Typography fontWeight={row.pendingConfirmAmount > 0 ? 900 : 500} color={row.pendingConfirmAmount > 0 ? 'info.main' : 'text.primary'}>{formatCurrency(row.pendingConfirmAmount)}</Typography></TableCell>
-                        <TableCell align="right"><Typography fontWeight={row.pendingPayAmount > 0 ? 900 : 500} color={row.pendingPayAmount > 0 ? 'warning.main' : 'text.primary'}>{formatCurrency(row.pendingPayAmount)}</Typography></TableCell>
-                        <TableCell align="right"><Typography fontWeight={row.paidAmount > 0 ? 900 : 500} color={row.paidAmount > 0 ? 'success.main' : 'text.primary'}>{formatCurrency(row.paidAmount)}</Typography></TableCell>
-                        <TableCell align="right">{formatCurrency(row.correctionOriginalPaidAmount || 0)}</TableCell>
-                        <TableCell align="right"><Typography fontWeight={(row.correctionEntitlementAmount || 0) > 0 ? 900 : 500}>{formatCurrency(row.correctionEntitlementAmount || 0)}</Typography></TableCell>
-                        <TableCell align="right"><Typography variant="body2" color="secondary.main">{formatCurrency(row.correctionSupplementAmount || 0)} / {formatCurrency(row.correctionRecoverAmount || 0)}</Typography></TableCell>
-                        <TableCell>
-                          <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, maxWidth: 280 }}>
-                            {monthlyPayoutStatusDistribution(row).map((item) => (
-                              <Chip key={item.label} label={`${item.label} ${item.count}`} size="small" color={item.color} variant={item.label === '已撤回' ? 'outlined' : 'filled'} />
-                            ))}
-                          </Stack>
-                        </TableCell>
-                        <TableCell align="center"><Button size="small" startIcon={<VisibilityIcon />} onClick={() => setSelectedFinancePayoutOwnerKey(ownerKey)}>{selected ? '正在查看' : '查看月报'}</Button></TableCell>
+                        <TableCell sx={{ position: 'sticky', left: 0, zIndex: 4, width: 180, minWidth: 180, bgcolor: selected ? '#eff6ff' : '#fff', boxShadow: '1px 0 0 #e5e7eb', whiteSpace: 'nowrap' }}><Typography fontWeight={900} noWrap>{formatOwnerDisplayName(row.ownerId, row.owner)}</Typography></TableCell>
+                        {visibleFinanceMonthlyColumns.map((column) => (
+                          <TableCell key={column.id} align={column.align} sx={{ width: column.width, minWidth: column.width, overflow: 'hidden' }}>
+                            {renderFinanceMonthlyCell(row, column.id)}
+                          </TableCell>
+                        ))}
+                        <TableCell align="center" sx={{ position: 'sticky', right: 0, zIndex: 4, width: 132, minWidth: 132, bgcolor: selected ? '#eff6ff' : '#fff', boxShadow: '-1px 0 0 #e5e7eb', whiteSpace: 'nowrap' }}><Button size="small" startIcon={<VisibilityIcon />} sx={{ whiteSpace: 'nowrap' }} onClick={() => setSelectedFinancePayoutOwnerKey(ownerKey)}>{selected ? '正在查看' : '查看月报'}</Button></TableCell>
                       </TableRow>
                     );
                   })}
-                  {!payoutRows.length && <TableRow><TableCell colSpan={14} align="center" sx={{ py: 5, color: 'text.secondary' }}>{payoutLoading ? '加载中...' : '暂无员工提成月报数据'}</TableCell></TableRow>}
+                  {!payoutRows.length && <TableRow><TableCell colSpan={visibleFinanceMonthlyColumns.length + 2} align="center" sx={{ py: 5, color: 'text.secondary' }}>{payoutLoading ? '加载中...' : '暂无员工提成月报数据'}</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </TableContainer>
@@ -4441,6 +4558,34 @@ const Commission: React.FC<CommissionProps> = ({
             </Stack>
           )}
         </DialogContent>
+      </Dialog>
+
+      <Dialog open={financeMonthlyViewOpen} onClose={() => setFinanceMonthlyViewOpen(false)} maxWidth="xs" fullWidth>
+        <DialogCloseTitle onClose={() => setFinanceMonthlyViewOpen(false)}>月度报告视图设置</DialogCloseTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <Typography variant="body2" sx={{ color: '#64748b' }}>
+              员工和操作始终固定显示。勾选中间需要核对的字段，设置会保存在当前浏览器，并同步用于移动端卡片。
+            </Typography>
+            {(['业务数据', '提成状态', '更正与差额'] as const).map((group) => (
+              <Box key={group}>
+                <Typography variant="subtitle2" sx={{ mb: 0.75, color: '#334155', fontWeight: 900 }}>{group}</Typography>
+                <Box sx={{ border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
+                  {FINANCE_MONTHLY_REPORT_COLUMNS.filter((column) => column.group === group).map((column, index) => (
+                    <Box key={column.id} sx={{ display: 'flex', alignItems: 'center', minHeight: 46, px: 1, borderTop: index ? '1px solid #eef2f7' : 0 }}>
+                      <Checkbox checked={financeMonthlyVisibleColumnIds.includes(column.id)} onChange={() => toggleFinanceMonthlyColumn(column.id)} sx={{ p: 0.75, mr: 0.5 }} />
+                      <Typography variant="body2">{column.label}</Typography>
+                    </Box>
+                  ))}
+                </Box>
+              </Box>
+            ))}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={resetFinanceMonthlyView}>恢复默认</Button>
+          <Button variant="contained" onClick={() => setFinanceMonthlyViewOpen(false)}>完成</Button>
+        </DialogActions>
       </Dialog>
 
       <Dialog open={orderSplitViewOpen} onClose={() => setOrderSplitViewOpen(false)} maxWidth="xs" fullWidth>
