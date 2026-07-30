@@ -965,6 +965,8 @@ app.post('/api/orders/:id/correction-preview', requireOrderCorrectWriteAccess, a
     {
       reason: String(req.body?.reason || ''),
       data: req.body?.data || {},
+      entitlementStrategy: req.body?.entitlementStrategy,
+      manualEntitlements: req.body?.manualEntitlements,
       payoutContext: payoutCorrectionContext(req.body?.payoutContext),
     },
     req.currentUser!,
@@ -978,6 +980,8 @@ app.post('/api/orders/:id/correct', requireOrderCorrectWriteAccess, async (req: 
     {
       reason: String(req.body?.reason || ''),
       data: req.body?.data || {},
+      entitlementStrategy: req.body?.entitlementStrategy,
+      manualEntitlements: req.body?.manualEntitlements,
       expectedImpactHash: String(req.body?.expectedImpactHash || ''),
       payoutContext: payoutCorrectionContext(req.body?.payoutContext),
     },

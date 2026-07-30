@@ -42,6 +42,8 @@ import CustomerDetail from '../Customers/CustomerDetail';
 import OrderDetail from './OrderDetail';
 import OrderForm from './OrderForm';
 import OrderReview from '../OrderReview';
+import PostPayoutCommissionCorrection from '../Finance/PostPayoutCommissionCorrection';
+import type { PostPayoutProcessingContext } from '../Finance/postPayoutProcessing';
 import type { Customer } from '../../types/customer';
 import type { Order, OrderApplication, OrderCorrectionPrecheck, OrderSettlementProgress } from '../../types/order';
 import type { OrderTypeConfig, User } from '../../types/settings';
@@ -49,7 +51,7 @@ import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
 import OperationFeedbackDialog from '../../shared/components/OperationFeedbackDialog';
 import TableViewSettingsDialog from '../../shared/components/TableViewSettingsDialog';
 import PermissionGate from '../../shared/auth/PermissionGate';
-import { hasPermission, PERMISSION_KEYS } from '../../shared/utils/permissions';
+import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../shared/utils/permissions';
 import { filterUsersByCurrentDataScope } from '../../shared/utils/dataVisibility';
 import useAuthStore from '../../store/useAuthStore';
 import ResizableHeaderCell, {
@@ -230,6 +232,7 @@ const Orders: React.FC = () => {
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [orderFormMode, setOrderFormMode] = useState<'edit' | 'correction'>('edit');
   const [correctionBlocker, setCorrectionBlocker] = useState<{ order: Order; precheck: OrderCorrectionPrecheck } | null>(null);
+  const [postPayoutContext, setPostPayoutContext] = useState<PostPayoutProcessingContext | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [orderCustomer, setOrderCustomer] = useState<Customer | null>(null);
   const [customerOrdersOpen, setCustomerOrdersOpen] = useState(false);
@@ -357,9 +360,13 @@ const Orders: React.FC = () => {
   const correctionBlockerGuidance = correctionBlocker ? (() => {
     switch (correctionBlocker.precheck.reasonCode) {
       case 'manual_commission':
-        return '请先在财务中心撤回或清理相关人工分账，再返回订单管理重新发起订单更正。';
+        return correctionBlocker.precheck.mode === 'post_payout'
+          ? '系统未找到可安全关联的原发放快照，请由超级管理员在“财务中心－提成发放－发放记录”核对原发放单；不要直接修改或删除历史提成。'
+          : '请先在财务中心处理尚未发放的人工分账，再返回订单管理重新发起订单更正。';
       case 'payout_started':
-        return '该订单已有提成进入发放或冲销流程，请先在财务中心完成提成冲正，再重新发起订单更正。';
+        return correctionBlocker.precheck.mode === 'post_payout'
+          ? '系统无法建立安全的原发放快照上下文，请由超级管理员核对发放记录与逐笔快照后再处理。'
+          : '该订单已有提成进入发放或冲销流程，请先在财务中心完成提成处理，再重新发起订单更正。';
       case 'commission_withdrawn':
       case 'unsupported_commission_status':
         return '当前分账状态不支持自动重算，请先到财务中心完成处理，再重新发起订单更正。';
@@ -373,12 +380,13 @@ const Orders: React.FC = () => {
         return '请根据上方原因处理后，再重新发起订单更正。';
     }
   })() : '';
-  const correctionBlockerHasFinanceResolution = Boolean(correctionBlocker && [
+  const correctionBlockerHasFinanceResolution = Boolean(correctionBlocker
+    && correctionBlocker.precheck.mode !== 'post_payout'
+    && [
     'manual_commission',
-    'payout_started',
     'commission_withdrawn',
     'unsupported_commission_status',
-  ].includes(correctionBlocker.precheck.reasonCode || ''));
+    ].includes(correctionBlocker.precheck.reasonCode || ''));
 
   const handleEditOrder = async (order: Order, mode: 'edit' | 'correction' = 'edit'): Promise<boolean> => {
     if (mode === 'correction') {
@@ -386,6 +394,11 @@ const Orders: React.FC = () => {
       if (precheck.code !== 0 || !precheck.data) {
         await alert(precheck.message || '订单更正预检失败，请稍后重试');
         return false;
+      }
+      if (precheck.data.postPayoutContext && isSuperAdmin(currentUser)) {
+        setPostPayoutContext(precheck.data.postPayoutContext);
+        setDetailOpen(false);
+        return true;
       }
       if (!precheck.data.allowed) {
         setCorrectionBlocker({ order, precheck: precheck.data });
@@ -1058,6 +1071,18 @@ const Orders: React.FC = () => {
           fetchItems({ ...filters, paymentMethod: undefined });
           setOrderCustomer(null);
           if (application) setSubmittedOrderApplication(application);
+        }}
+      />
+      <PostPayoutCommissionCorrection
+        context={postPayoutContext}
+        onClose={() => {
+          setPostPayoutContext(null);
+          if (correctionTargetId) clearCorrectionTarget();
+        }}
+        onSuccess={async () => {
+          setPostPayoutContext(null);
+          if (correctionTargetId) clearCorrectionTarget();
+          await fetchItems({ ...filters, paymentMethod: undefined });
         }}
       />
       <BusinessSubmissionResultDialog

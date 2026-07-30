@@ -333,6 +333,20 @@ export interface Commission {
 }
 
 export type CommissionCorrectionSourceType = 'formal_order' | 'after_sales_recovery';
+export type PostPayoutEntitlementStrategy = 'preserve_manual' | 'recalculate_rules' | 'manual_correct';
+
+export interface CommissionManualEntitlementDraft {
+  sourceCommissionId: ID;
+  role: CommissionRole;
+  ownerId: ID;
+  owner: string;
+  departmentId?: ID;
+  department?: string;
+  performanceAmount: number;
+  commissionAmount: number;
+  calculationNote?: string;
+}
+
 export type CommissionCorrectionImpactAction = '无需差额' | '补发' | '追回' | '人员调整';
 export type CommissionCorrectionLegKind = '补发' | '追回';
 export type CommissionCorrectionLegStatus = '待处理' | '待发放' | '已处理' | '已取消';
@@ -386,6 +400,7 @@ export interface CommissionCorrectionPreview {
   sourceBusinessType: CommissionCorrectionSourceType;
   sourceBusinessId: ID;
   sourceBusinessNo: string;
+  entitlementStrategy?: PostPayoutEntitlementStrategy;
   beforeBusinessSnapshot: Record<string, unknown>;
   afterBusinessSnapshot: Record<string, unknown>;
   affectedPeriods: string[];
@@ -537,6 +552,18 @@ export interface CommissionPayoutRecord {
 export interface CommissionPayoutCorrectionContext {
   payoutRecordId: ID;
   commissionId: ID;
+}
+
+/** 正式订单与售后挽回共用的“发放后更正”入口上下文。 */
+export interface CommissionPostPayoutEntryContext extends CommissionPayoutCorrectionContext {
+  payoutNo: string;
+  sourceType: CommissionCorrectionSourceType;
+  sourceId: ID;
+  sourceBusinessNo: string;
+  employee: string;
+  role: CommissionRole;
+  originalPaidAmount: number;
+  attributedPeriod: string;
 }
 
 export interface CommissionPayoutStatusCounts {

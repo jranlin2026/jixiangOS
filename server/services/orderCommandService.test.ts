@@ -881,6 +881,225 @@ class FakePrisma {
 }
 
 {
+  const prisma = new FakePrisma({ commissionStatus: '已发放', commissionManual: true });
+  const precheck = await createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+    previewCommissions: async () => [],
+  }).precheckCorrection('order-1', superAdmin, {
+    payoutRecordId: 'payout-1',
+    commissionId: 'commission-1',
+  });
+
+  assert.equal(precheck.code, 0, precheck.message);
+  assert.equal(precheck.data?.allowed, true, '从有效发放记录进入时，已发放人工分账必须可以进入统一更正流程');
+  assert.equal(precheck.data?.mode, 'post_payout');
+  assert.equal(precheck.data?.requiresImpactPreview, true);
+  assert.deepEqual(precheck.data?.manualCommissions, [{
+    sourceCommissionId: 'commission-1',
+    role: '销售',
+    ownerId: sales.id,
+    owner: sales.name,
+    departmentId: 'dept-sales',
+    department: '销售部',
+    performanceAmount: 899,
+    commissionAmount: 100,
+    calculationNote: undefined,
+  }]);
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '已发放', commissionManual: true });
+  const service = createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+    previewCommissions: async () => [],
+  });
+  const invalidStrategy = await service.previewCorrection('order-1', {
+    reason: '非法策略不得进入影响测算',
+    entitlementStrategy: 'unknown_strategy',
+    data: { notes: '不会执行' },
+  } as any, superAdmin);
+  assert.equal(invalidStrategy.code, 400);
+  const missingManualDrafts = await service.correct('order-1', {
+    reason: '人工修正必须提交完整结果',
+    entitlementStrategy: 'manual_correct',
+    data: {},
+  }, superAdmin);
+  assert.equal(missingManualDrafts.code, 400);
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '已发放', commissionManual: true });
+  const current = prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'commission-1'))!.data as Commission;
+  const service = createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+    previewCommissions: async (_transaction, nextOrder) => [{
+      ...current,
+      id: 'commission-rule-rebuilt',
+      customerName: nextOrder.customerName,
+      orderAmount: nextOrder.actualAmount,
+      performanceAmount: nextOrder.actualAmount,
+      commissionAmount: 120,
+      status: '待确认',
+      sourceType: '自动规则',
+      isManualAdjusted: undefined,
+      updatedAt: NOW,
+    }],
+  });
+  const correctionInput = {
+    reason: '更正业务时间并保留原人工提成结果',
+    entitlementStrategy: 'preserve_manual' as const,
+    data: {
+      notes: '更正后的备注',
+      payments: [{
+        id: 'payment-corrected-month',
+        amount: 899,
+        paymentMethod: '对公转账' as const,
+        paidAt: '2026-06-30T10:00:00.000Z',
+      }],
+    },
+    payoutContext: { payoutRecordId: 'payout-1', commissionId: 'commission-1' },
+  };
+
+  const preview = await service.previewCorrection('order-1', correctionInput, superAdmin);
+  assert.equal(preview.code, 0, preview.message);
+  assert.equal(preview.data?.entitlementStrategy, 'preserve_manual');
+  assert.equal(preview.data?.originalPaidAmount, 100);
+  assert.equal(preview.data?.correctedEntitlementAmount, 100);
+  assert.equal(preview.data?.supplementAmount, 0);
+  assert.equal(preview.data?.recoverAmount, 0);
+  assert.deepEqual(preview.data?.affectedPeriods, ['2026-06', '2026-07'], '跨月更正必须同时刷新原月与目标月归属');
+
+  const corrected = await service.correct('order-1', {
+    ...correctionInput,
+    expectedImpactHash: preview.data!.impactHash,
+  }, superAdmin);
+  assert.equal(corrected.code, 0, corrected.message);
+  assert.equal(corrected.data?.notes, '更正后的备注');
+  assert.equal(corrected.data?.payments?.[0]?.paidAt, '2026-06-30T10:00:00.000Z', '更正后的业务时间必须写回源订单');
+  assert.equal(Array.from(prisma.rows.values()).some((row) => (
+    row.domain === STORAGE_KEYS.COMMISSIONS
+    && row.recordId !== 'commission-1'
+    && ['待确认', '待发放'].includes(String(row.status || row.data?.status || ''))
+  )), false, '保留原人工结果时不得额外生成一笔自动规则全额提成');
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '已发放', commissionManual: true });
+  const current = prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'commission-1'))!.data as Commission;
+  const service = createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+    previewCommissions: async (_transaction, nextOrder) => [{
+      ...current,
+      id: 'commission-rule-rebuilt',
+      customerName: nextOrder.customerName,
+      orderAmount: nextOrder.actualAmount,
+      performanceAmount: nextOrder.actualAmount,
+      commissionAmount: 120,
+      status: '待确认',
+      sourceType: '自动规则',
+      isManualAdjusted: undefined,
+      updatedAt: NOW,
+    }],
+  });
+  const correctionInput = {
+    reason: '取消原人工口径，改按当前规则重算',
+    entitlementStrategy: 'recalculate_rules' as const,
+    data: { notes: '已改为规则重算' },
+    payoutContext: { payoutRecordId: 'payout-1', commissionId: 'commission-1' },
+  };
+
+  const preview = await service.previewCorrection('order-1', correctionInput, superAdmin);
+  assert.equal(preview.code, 0, preview.message);
+  assert.equal(preview.data?.correctedEntitlementAmount, 120);
+  assert.equal(preview.data?.supplementAmount, 20);
+  const corrected = await service.correct('order-1', {
+    ...correctionInput,
+    expectedImpactHash: preview.data!.impactHash,
+  }, superAdmin);
+  assert.equal(corrected.code, 0, corrected.message);
+  const pending = Array.from(prisma.rows.values()).filter((row) => (
+    row.domain === STORAGE_KEYS.COMMISSIONS
+    && row.recordId !== 'commission-1'
+    && ['待确认', '待发放'].includes(String(row.status || row.data?.status || ''))
+  ));
+  assert.equal(pending.length, 1, '规则重算只应生成一笔差额提成');
+  assert.equal(pending[0].data?.correctionDeltaType, '补发');
+  assert.equal(pending[0].data?.commissionAmount, 20);
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '已发放', commissionManual: true });
+  const current = prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'commission-1'))!.data as Commission;
+  const service = createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+    previewCommissions: async () => [{ ...current, status: '待确认' }],
+  });
+  const correctionInput = {
+    reason: '原人工提成金额录入错误',
+    entitlementStrategy: 'manual_correct' as const,
+    data: {},
+    manualEntitlements: [{
+      sourceCommissionId: 'commission-1',
+      role: '销售',
+      ownerId: sales.id,
+      owner: sales.name,
+      departmentId: 'dept-sales',
+      department: '销售部',
+      performanceAmount: 799,
+      commissionAmount: 80,
+      calculationNote: '人工更正应得提成为80元',
+    }],
+    payoutContext: { payoutRecordId: 'payout-1', commissionId: 'commission-1' },
+  };
+
+  const preview = await service.previewCorrection('order-1', correctionInput, superAdmin);
+  assert.equal(preview.code, 0, preview.message);
+  assert.equal(preview.data?.correctedEntitlementAmount, 80);
+  assert.equal(preview.data?.recoverAmount, 20);
+  const corrected = await service.correct('order-1', {
+    ...correctionInput,
+    expectedImpactHash: preview.data!.impactHash,
+  }, superAdmin);
+  assert.equal(corrected.code, 0, corrected.message);
+  assert.equal(Array.from(prisma.rows.values()).some((row) => (
+    row.domain === STORAGE_KEYS.COMMISSION_CORRECTIONS
+    && row.data?.entitlementStrategy === 'manual_correct'
+    && row.data?.recoverAmount === 20
+  )), true, '仅修正应得结果时也必须生成留痕更正单');
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '已发放', commissionManual: true });
+  const current = prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'commission-1'))!.data as Commission;
+  const service = createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+    previewCommissions: async () => [{ ...current, status: '待确认' }],
+  });
+  const preview = await service.previewCorrection('order-1', {
+    reason: '原提成员工录入错误',
+    entitlementStrategy: 'manual_correct',
+    data: {},
+    manualEntitlements: [{
+      sourceCommissionId: 'commission-1',
+      role: '销售',
+      ownerId: otherSales.id,
+      owner: otherSales.name,
+      departmentId: 'dept-sales',
+      department: '销售部',
+      performanceAmount: 899,
+      commissionAmount: 100,
+    }],
+    payoutContext: { payoutRecordId: 'payout-1', commissionId: 'commission-1' },
+  }, superAdmin);
+  assert.equal(preview.code, 0, preview.message);
+  assert.equal(preview.data?.impacts[0]?.action, '人员调整');
+  assert.deepEqual(preview.data?.legs.map((item) => ({ kind: item.kind, ownerId: item.ownerId, amount: item.amount })), [
+    { kind: '追回', ownerId: sales.id, amount: 100 },
+    { kind: '补发', ownerId: otherSales.id, amount: 100 },
+  ], '跨员工更正必须分别向原员工追回、向新员工补发，不得净额抵消');
+}
+
+{
   const prisma = new FakePrisma({ commissionStatus: '待确认', commissionManual: true });
   const current = prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'commission-1'))!.data as Commission;
   const historicalPaid: Commission = {
@@ -926,6 +1145,18 @@ class FakePrisma {
 
   const ordinary = await service.precheckCorrection('order-1', superAdmin);
   assert.equal(ordinary.data?.reasonCode, 'manual_commission', '无发放快照上下文时仍不得覆盖人工分账');
+  assert.deepEqual(ordinary.data?.postPayoutContext, {
+    payoutRecordId: payout.id,
+    payoutNo: payout.payoutNo,
+    commissionId: historicalPaid.id,
+    sourceType: 'formal_order',
+    sourceId: 'order-1',
+    sourceBusinessNo: historicalPaid.orderNo,
+    employee: historicalPaid.owner,
+    role: historicalPaid.role,
+    originalPaidAmount: historicalPaid.commissionAmount,
+    attributedPeriod: String(historicalPaid.paymentDate || historicalPaid.createdAt).slice(0, 7),
+  }, '普通订单入口应返回可直接打开统一发放后更正的上下文');
 
   const incompletePayout = { ...payout, id: 'payout-incomplete', commissionIds: [] };
   prisma.rows.set(key(STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES, incompletePayout.id), {
@@ -947,8 +1178,8 @@ class FakePrisma {
     payoutRecordId: payout.id,
     commissionId: historicalPaid.id,
   });
-  assert.equal(activeManualFromPayout.data?.allowed, false, '历史发放上下文不得绕过当前活动人工分账保护');
-  assert.equal(activeManualFromPayout.data?.reasonCode, 'manual_commission');
+  assert.equal(activeManualFromPayout.data?.allowed, true, '有效原发放上下文应进入统一人工分账更正策略');
+  assert.equal(activeManualFromPayout.data?.manualCommissionCount, 1);
 
   const currentManualRow = prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, current.id))!;
   currentManualRow.status = '待发放';
@@ -962,13 +1193,12 @@ class FakePrisma {
     payoutRecordId: payout.id,
     commissionId: historicalPaid.id,
   });
-  assert.equal(activePendingFromPayout.data?.allowed, false, '历史已发与当前待发分账并存时必须先由财务清理');
+  assert.equal(activePendingFromPayout.data?.allowed, true, '统一更正应同时接管历史已发与当前待发分账');
   assert.equal(activePendingFromPayout.data?.mode, 'post_payout');
-  assert.match(activePendingFromPayout.data?.message || '', /财务.*撤回/);
   const activePendingFromOrdinaryEntry = await service.precheckCorrection('order-1', superAdmin);
   assert.equal(activePendingFromOrdinaryEntry.data?.allowed, false, '普通订单更正入口也必须自动识别历史发放');
   assert.equal(activePendingFromOrdinaryEntry.data?.mode, 'post_payout');
-  assert.match(activePendingFromOrdinaryEntry.data?.message || '', /财务.*撤回/);
+  assert.ok(activePendingFromOrdinaryEntry.data?.postPayoutContext, '普通入口应提供统一发放后更正上下文');
 
   currentManualRow.status = '已撤回';
   currentManualRow.data = {
@@ -1027,6 +1257,115 @@ class FakePrisma {
     && !row.data?.correctionDeltaType
     && ['待确认', '待发放'].includes(String(row.status || row.data?.status || ''))
   )), false, '历史已发应得只能生成差额，不得再生成一笔全额待发');
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '待确认' });
+  const current = prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'commission-1'))!.data as Commission;
+  const historicalManual: Commission = {
+    ...current,
+    id: 'commission-historical-manual',
+    status: '已发放',
+    isManualAdjusted: true,
+    sourceType: '人工新增',
+    paidAt: NOW,
+    payoutRecordId: 'payout-historical-manual',
+  };
+  const payout: CommissionPayoutRecord = {
+    id: 'payout-historical-manual', payoutNo: 'FF-202607-HISTORICAL-MANUAL', period: '2026-07', status: '已发放',
+    totalCount: 1, totalAmount: historicalManual.commissionAmount, commissionIds: [historicalManual.id],
+    commissionSnapshots: [clone(historicalManual)], byOwner: [], createdAt: NOW,
+    createdById: superAdmin.id, createdByName: superAdmin.name, issuedAt: NOW,
+    issuedById: superAdmin.id, issuedByName: superAdmin.name,
+  };
+  prisma.rows.set(key(STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES, payout.id), {
+    id: `${STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES}:${payout.id}`,
+    domain: STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES,
+    recordId: payout.id,
+    status: payout.status,
+    amount: payout.totalAmount,
+    data: payout,
+  });
+  const service = createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+    previewCommissions: async () => [{ ...current, status: '待确认' }],
+  });
+  const ordinary = await service.precheckCorrection('order-1', superAdmin);
+  assert.equal(ordinary.data?.manualCommissionCount, 1, '历史发放快照中的人工提成也必须触发三策略选择');
+  assert.equal(ordinary.data?.manualCommissions?.[0]?.sourceCommissionId, historicalManual.id);
+  assert.ok(ordinary.data?.postPayoutContext);
+  const fromPayout = await service.precheckCorrection('order-1', superAdmin, {
+    payoutRecordId: payout.id,
+    commissionId: historicalManual.id,
+  });
+  assert.equal(fromPayout.data?.allowed, true);
+  assert.equal(fromPayout.data?.manualCommissionCount, 1);
+  const nonSuper = await service.precheckCorrection('order-1', scopedCorrector);
+  assert.equal(nonSuper.data?.postPayoutContext, undefined, '非超级管理员不得取得原发放处理上下文');
+  assert.equal(nonSuper.data?.manualCommissions, undefined, '非超级管理员不得取得逐笔人工薪酬草稿');
+}
+
+{
+  const prisma = new FakePrisma({ commissionStatus: '待发放', commissionManual: true });
+  const current = prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, 'commission-1'))!.data as Commission;
+  const historicalPaid: Commission = {
+    ...current,
+    id: 'commission-paid-before-manual-adjustment',
+    status: '已发放',
+    isManualAdjusted: undefined,
+    sourceType: '自动规则',
+    paidAt: NOW,
+    payoutRecordId: 'payout-before-manual-adjustment',
+    createdAt: '2026-06-01T10:00:00.000Z',
+  };
+  const payout: CommissionPayoutRecord = {
+    id: 'payout-before-manual-adjustment', payoutNo: 'FF-202607-MANUAL-PENDING', period: '2026-07', status: '已发放',
+    totalCount: 1, totalAmount: 100, commissionIds: [historicalPaid.id],
+    commissionSnapshots: [clone(historicalPaid)], byOwner: [], createdAt: NOW,
+    createdById: superAdmin.id, createdByName: superAdmin.name, issuedAt: NOW,
+    issuedById: superAdmin.id, issuedByName: superAdmin.name,
+  };
+  prisma.rows.set(key(STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES, payout.id), {
+    id: `${STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES}:${payout.id}`,
+    domain: STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES,
+    recordId: payout.id,
+    status: payout.status,
+    amount: payout.totalAmount,
+    data: payout,
+  });
+  const service = createOrderCommandService(prisma as any, {
+    rebuildPendingCommissions: async () => undefined,
+    previewCommissions: async () => [{ ...current, status: '待确认' }],
+  });
+  const correctionInput = {
+    reason: '统一处理历史已发和当前待发人工调整',
+    entitlementStrategy: 'manual_correct' as const,
+    data: { notes: '待发人工调整已纳入本次更正' },
+    manualEntitlements: [{
+      sourceCommissionId: current.id,
+      role: current.role,
+      ownerId: current.ownerId || sales.id,
+      owner: current.owner,
+      departmentId: current.departmentId,
+      department: current.department,
+      performanceAmount: 799,
+      commissionAmount: 80,
+    }],
+    payoutContext: { payoutRecordId: payout.id, commissionId: historicalPaid.id },
+  };
+  const preview = await service.previewCorrection('order-1', correctionInput, superAdmin);
+  assert.equal(preview.code, 0, preview.message);
+  assert.equal(preview.data?.recoverAmount, 20);
+  const corrected = await service.correct('order-1', {
+    ...correctionInput,
+    expectedImpactHash: preview.data!.impactHash,
+  }, superAdmin);
+  assert.equal(corrected.code, 0, corrected.message);
+  const projectedPending = prisma.rows.get(key(STORAGE_KEYS.COMMISSIONS, current.id))!;
+  assert.equal(projectedPending.status, '已撤回', '当前待发人工分账不得在更正后以旧金额继续保留');
+  assert.equal(Array.from(prisma.rows.values()).some((row) => (
+    row.domain === STORAGE_KEYS.COMMISSION_CORRECTIONS && row.data?.recoverAmount === 20
+  )), true, '历史已发与当前待发必须形成同一份可审计差额结果');
 }
 
 {

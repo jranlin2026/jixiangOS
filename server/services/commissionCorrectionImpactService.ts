@@ -9,6 +9,7 @@ import type {
   CommissionCorrectionRecord,
   CommissionCorrectionSourceType,
   CommissionPayoutRecord,
+  PostPayoutEntitlementStrategy,
 } from '../../src/types/commission';
 
 const INACTIVE_STATUSES = new Set<Commission['status']>(['已撤回', '已取消', '待冲销', '已冲销']);
@@ -41,6 +42,7 @@ export interface BuildCommissionCorrectionImpactInput {
   beforeCommissions: Commission[];
   afterCommissions: Commission[];
   payoutRecords: CommissionPayoutRecord[];
+  entitlementStrategy?: PostPayoutEntitlementStrategy;
 }
 
 /**
@@ -323,6 +325,7 @@ export function buildCommissionCorrectionImpact(
     sourceBusinessType: input.sourceBusinessType,
     sourceBusinessId: input.sourceBusinessId,
     sourceBusinessNo: input.sourceBusinessNo,
+    entitlementStrategy: input.entitlementStrategy,
     sourceRevision: input.sourceRevision,
     beforeBusinessSnapshot: snapshot(input.beforeBusinessSnapshot),
     afterBusinessSnapshot: snapshot(input.afterBusinessSnapshot),

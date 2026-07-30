@@ -9,16 +9,33 @@ import {
   DialogActions,
   DialogContent,
   Divider,
+  FormControlLabel,
+  MenuItem,
   Paper,
+  Radio,
+  RadioGroup,
   Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
   Typography,
 } from '@mui/material';
-import type { CommissionPayoutCorrectionContext } from '../../types/commission';
-import type { Order } from '../../types/order';
+import type {
+  CommissionManualEntitlementDraft,
+  CommissionPayoutCorrectionContext,
+  PostPayoutEntitlementStrategy,
+} from '../../types/commission';
+import type { Order, OrderCorrectionPrecheck } from '../../types/order';
 import type { RecoveryOrder } from '../../types/recoveryOrder';
-import { orderApi, recoveryOrderApi } from '../../api';
-import { formatCurrency } from '../../shared/utils/formatters';
+import type { User } from '../../types/settings';
+import { orderApi, recoveryOrderApi, settingsApi } from '../../api';
+import { formatCurrency, formatEmployeeNameWithPosition } from '../../shared/utils/formatters';
 import DialogCloseTitle from '../../shared/components/DialogCloseTitle';
+import { moduleTablePaperSx, moduleTableSx } from '../../shared/components/ModuleShell';
 import OrderForm from '../Orders/OrderForm';
 import RecoveryOrderCorrectionDialog from '../AfterSales/RecoveryOrderCorrectionDialog';
 import type { PostPayoutProcessingContext } from './postPayoutProcessing';
@@ -51,6 +68,10 @@ const PostPayoutCommissionCorrection: React.FC<PostPayoutCommissionCorrectionPro
   const [precheckMessage, setPrecheckMessage] = useState('');
   const [sourceSummary, setSourceSummary] = useState<SourceSummary | null>(null);
   const [formalOrder, setFormalOrder] = useState<Order | null>(null);
+  const [formalPrecheck, setFormalPrecheck] = useState<OrderCorrectionPrecheck | null>(null);
+  const [entitlementStrategy, setEntitlementStrategy] = useState<PostPayoutEntitlementStrategy | null>(null);
+  const [manualEntitlements, setManualEntitlements] = useState<CommissionManualEntitlementDraft[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [editorOpen, setEditorOpen] = useState(false);
 
   const payoutContext = useMemo<CommissionPayoutCorrectionContext | undefined>(() => (
@@ -63,6 +84,10 @@ const PostPayoutCommissionCorrection: React.FC<PostPayoutCommissionCorrectionPro
   useEffect(() => {
     setEditorOpen(false);
     setFormalOrder(null);
+    setFormalPrecheck(null);
+    setEntitlementStrategy(null);
+    setManualEntitlements([]);
+    setUsers([]);
     setSourceSummary(null);
     setPrecheckAllowed(false);
     setPrecheckMessage('');
@@ -74,14 +99,20 @@ const PostPayoutCommissionCorrection: React.FC<PostPayoutCommissionCorrectionPro
     void (async () => {
       try {
         if (context.sourceType === 'formal_order') {
-          const [detail, precheck] = await Promise.all([
+          const [detail, precheck, usersResponse] = await Promise.all([
             orderApi.fetchOrderById(context.sourceId),
             orderApi.precheckOrderCorrection(context.sourceId, payoutContext),
+            settingsApi.fetchAssignableUsers(),
           ]);
           if (!active) return;
           if (detail.code !== 0 || !detail.data) throw new Error(detail.message || '源订单资料加载失败');
           if (precheck.code !== 0 || !precheck.data) throw new Error(precheck.message || '发放后更正预检失败');
           setFormalOrder(detail.data);
+          setFormalPrecheck(precheck.data);
+          const currentManualEntitlements = precheck.data.manualCommissions || [];
+          setManualEntitlements(currentManualEntitlements);
+          setEntitlementStrategy(currentManualEntitlements.length ? null : 'recalculate_rules');
+          if (usersResponse.code === 0) setUsers(usersResponse.data || []);
           setSourceSummary({
             customer: detail.data.customerName,
             businessNo: detail.data.orderNo,
@@ -128,9 +159,38 @@ const PostPayoutCommissionCorrection: React.FC<PostPayoutCommissionCorrectionPro
     await onSuccess();
   };
 
+  const updateManualEntitlement = (
+    sourceCommissionId: string,
+    patch: Partial<CommissionManualEntitlementDraft>,
+  ) => {
+    setManualEntitlements((current) => current.map((item) => (
+      item.sourceCommissionId === sourceCommissionId ? { ...item, ...patch } : item
+    )));
+  };
+
+  const changeManualOwner = (sourceCommissionId: string, ownerId: string) => {
+    const selected = users.find((user) => user.id === ownerId);
+    updateManualEntitlement(sourceCommissionId, {
+      ownerId,
+      owner: selected?.name || '',
+      departmentId: selected?.departmentId,
+    });
+  };
+
+  const hasManualCommissions = Boolean(formalPrecheck?.manualCommissions?.length);
+  const manualDraftValid = manualEntitlements.every((item) => (
+    Boolean(item.role.trim() && item.ownerId)
+    && Number.isFinite(Number(item.performanceAmount))
+    && Number(item.performanceAmount) >= 0
+    && Number.isFinite(Number(item.commissionAmount))
+    && Number(item.commissionAmount) >= 0
+  ));
+  const strategyReady = !hasManualCommissions || Boolean(entitlementStrategy)
+    && (entitlementStrategy !== 'manual_correct' || manualDraftValid);
+
   return (
     <>
-      <Dialog open={!editorOpen} onClose={loading ? undefined : onClose} maxWidth="sm" fullWidth>
+      <Dialog open={!editorOpen} onClose={loading ? undefined : onClose} maxWidth="lg" fullWidth>
         <DialogCloseTitle onClose={onClose} closeDisabled={loading}>发放后更正</DialogCloseTitle>
         <DialogContent dividers>
           <Stack spacing={2}>
@@ -170,6 +230,69 @@ const PostPayoutCommissionCorrection: React.FC<PostPayoutCommissionCorrectionPro
                 </Stack>
               ) : null}
             </Box>
+
+            {context.sourceType === 'formal_order' && hasManualCommissions && !loading && !error ? (
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 850, mb: 1 }}>人工分账处理方式</Typography>
+                <Alert severity="warning" sx={{ mb: 1.5 }}>
+                  该提成包含人工调整，请选择本次更正如何处理原人工分账。
+                </Alert>
+                <RadioGroup
+                  value={entitlementStrategy || ''}
+                  onChange={(event) => setEntitlementStrategy(event.target.value as PostPayoutEntitlementStrategy)}
+                >
+                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' }, gap: 1 }}>
+                    {[
+                      ['preserve_manual', '保留原提成结果', '只更正业务资料，原发人员、业绩口径和金额不变'],
+                      ['recalculate_rules', '按系统规则重算', '取消原人工口径，按更正后资料和当前规则重算'],
+                      ['manual_correct', '人工修正应得', '由超级管理员填写正确人员、业绩及应得金额'],
+                    ].map(([value, label, description]) => (
+                      <Paper key={value} variant="outlined" sx={{ p: 1.25, borderColor: entitlementStrategy === value ? 'primary.main' : 'divider' }}>
+                        <FormControlLabel value={value} control={<Radio />} label={<Box><Typography fontWeight={800}>{label}</Typography><Typography variant="caption" color="text.secondary">{description}</Typography></Box>} />
+                      </Paper>
+                    ))}
+                  </Box>
+                </RadioGroup>
+
+                {entitlementStrategy === 'manual_correct' ? (
+                  <Box sx={{ mt: 1.5 }}>
+                    <TableContainer component={Paper} elevation={0} sx={[moduleTablePaperSx, { display: { xs: 'none', md: 'block' }, overflowX: 'auto' }]}>
+                      <Table size="small" sx={[moduleTableSx, { minWidth: 920 }]}>
+                        <TableHead><TableRow><TableCell>角色</TableCell><TableCell>员工</TableCell><TableCell align="right">业绩金额</TableCell><TableCell align="right">更正后应得</TableCell><TableCell>说明</TableCell></TableRow></TableHead>
+                        <TableBody>{manualEntitlements.map((item) => (
+                          <TableRow key={item.sourceCommissionId}>
+                            <TableCell><TextField size="small" value={item.role} onChange={(event) => updateManualEntitlement(item.sourceCommissionId, { role: event.target.value })} /></TableCell>
+                            <TableCell><TextField select size="small" value={item.ownerId} onChange={(event) => changeManualOwner(item.sourceCommissionId, event.target.value)} sx={{ minWidth: 180 }}>
+                              {!users.some((user) => user.id === item.ownerId) ? <MenuItem value={item.ownerId}>{item.owner}（历史员工）</MenuItem> : null}
+                              {users.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
+                            </TextField></TableCell>
+                            <TableCell><TextField size="small" type="number" value={item.performanceAmount} onChange={(event) => updateManualEntitlement(item.sourceCommissionId, { performanceAmount: Number(event.target.value) })} inputProps={{ min: 0, step: 0.01 }} /></TableCell>
+                            <TableCell><TextField size="small" type="number" value={item.commissionAmount} onChange={(event) => updateManualEntitlement(item.sourceCommissionId, { commissionAmount: Number(event.target.value) })} inputProps={{ min: 0, step: 0.01 }} /></TableCell>
+                            <TableCell><TextField size="small" value={item.calculationNote || ''} onChange={(event) => updateManualEntitlement(item.sourceCommissionId, { calculationNote: event.target.value })} /></TableCell>
+                          </TableRow>
+                        ))}</TableBody>
+                      </Table>
+                    </TableContainer>
+                    <Stack spacing={1} sx={{ display: { xs: 'flex', md: 'none' } }}>
+                      {manualEntitlements.map((item) => (
+                        <Paper key={item.sourceCommissionId} variant="outlined" sx={{ p: 1.5 }}>
+                          <Stack spacing={1}>
+                            <TextField label="角色" size="small" value={item.role} onChange={(event) => updateManualEntitlement(item.sourceCommissionId, { role: event.target.value })} />
+                            <TextField select label="员工" size="small" value={item.ownerId} onChange={(event) => changeManualOwner(item.sourceCommissionId, event.target.value)}>
+                              {!users.some((user) => user.id === item.ownerId) ? <MenuItem value={item.ownerId}>{item.owner}（历史员工）</MenuItem> : null}
+                              {users.map((user) => <MenuItem key={user.id} value={user.id}>{formatEmployeeNameWithPosition(user)}</MenuItem>)}
+                            </TextField>
+                            <TextField label="业绩金额" size="small" type="number" value={item.performanceAmount} onChange={(event) => updateManualEntitlement(item.sourceCommissionId, { performanceAmount: Number(event.target.value) })} />
+                            <TextField label="更正后应得" size="small" type="number" value={item.commissionAmount} onChange={(event) => updateManualEntitlement(item.sourceCommissionId, { commissionAmount: Number(event.target.value) })} />
+                            <TextField label="说明" size="small" value={item.calculationNote || ''} onChange={(event) => updateManualEntitlement(item.sourceCommissionId, { calculationNote: event.target.value })} />
+                          </Stack>
+                        </Paper>
+                      ))}
+                    </Stack>
+                  </Box>
+                ) : null}
+              </Box>
+            ) : null}
           </Stack>
         </DialogContent>
         <DialogActions>
@@ -177,9 +300,9 @@ const PostPayoutCommissionCorrection: React.FC<PostPayoutCommissionCorrectionPro
           <Button
             variant="contained"
             onClick={() => setEditorOpen(true)}
-            disabled={loading || Boolean(error) || !precheckAllowed || !sourceSummary || (context.sourceType === 'formal_order' && !formalOrder)}
+            disabled={loading || Boolean(error) || !precheckAllowed || !sourceSummary || !strategyReady || (context.sourceType === 'formal_order' && !formalOrder)}
           >
-            开始更正业务资料
+            开始更正
           </Button>
         </DialogActions>
       </Dialog>
@@ -190,6 +313,8 @@ const PostPayoutCommissionCorrection: React.FC<PostPayoutCommissionCorrectionPro
           order={formalOrder}
           initialMode="correction"
           payoutContext={payoutContext}
+          entitlementStrategy={entitlementStrategy || 'recalculate_rules'}
+          manualEntitlements={manualEntitlements}
           onClose={() => setEditorOpen(false)}
           onSuccess={() => void handleSuccess()}
         />

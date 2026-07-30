@@ -8,8 +8,6 @@ const orderFormSource = readFileSync(join(process.cwd(), 'src/pages/Orders/Order
 const impactDialogSource = readFileSync(join(process.cwd(), 'src/shared/components/CommissionCorrectionImpactDialog.tsx'), 'utf8');
 const orderCorrectionUiSource = `${orderFormSource}\n${impactDialogSource}`;
 const serverSource = readFileSync(join(process.cwd(), 'server/index.ts'), 'utf8');
-const financePageSource = readFileSync(join(process.cwd(), 'src/pages/Finance/index.tsx'), 'utf8');
-const commissionPageSource = readFileSync(join(process.cwd(), 'src/pages/Commission/index.tsx'), 'utf8');
 
 assert.match(orderApiSource, /precheckOrderCorrection[\s\S]*correction-precheck/);
 assert.match(orderApiSource, /previewOrderCorrection[\s\S]*correction-preview/);
@@ -27,10 +25,9 @@ assert.match(
   '一次性更正目标必须加载服务端最新订单并复用订单更正预检',
 );
 assert.match(ordersPageSource, /nextParams\.delete\('correctOrderId'\)/, '取消或完成订单更正后必须清理一次性目标参数');
-assert.match(ordersPageSource, /前往订单分账处理/);
-assert.match(ordersPageSource, /\/finance\?tab=settlement&search=/);
-assert.match(financePageSource, /orderSplitInitialSearch=\{searchParams\.get\('search'\) \|\| ''\}/);
-assert.match(commissionPageSource, /search: orderSplitInitialSearch/);
+assert.match(ordersPageSource, /precheck\.data\.postPayoutContext[\s\S]*setPostPayoutContext/,
+  '订单页识别到原发放快照后必须直接打开统一发放后更正，不能再跳转到无操作入口');
+assert.match(ordersPageSource, /<PostPayoutCommissionCorrection/);
 assert.match(
   orderFormSource,
   /precheckOrderCorrection\(order\.id(?:,\s*payoutContext)?\)[\s\S]*requiresImpactPreview[\s\S]*previewOrderCorrection/,

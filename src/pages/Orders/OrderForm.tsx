@@ -33,10 +33,12 @@ import {
 import { customerApi, orderApi, orderReviewApi, productApi, settingsApi } from '../../api';
 import type { OrderType, PaymentMethod, ProductLevel } from '../../types/common';
 import type {
+  CommissionManualEntitlementDraft,
   CommissionCorrectionPreview,
   CommissionPayoutCorrectionContext,
   CommissionScene,
   OfficialPaymentChannel,
+  PostPayoutEntitlementStrategy,
   ResourceOwnership,
 } from '../../types/commission';
 import type { Customer } from '../../types/customer';
@@ -66,6 +68,8 @@ interface OrderFormProps {
   customer?: Customer | null;
   initialMode?: 'edit' | 'correction';
   payoutContext?: CommissionPayoutCorrectionContext;
+  entitlementStrategy?: PostPayoutEntitlementStrategy;
+  manualEntitlements?: CommissionManualEntitlementDraft[];
 }
 
 function toDateTimeInputValue(value: Date): string {
@@ -192,6 +196,8 @@ const OrderForm: React.FC<OrderFormProps> = ({
   customer,
   initialMode = 'edit',
   payoutContext,
+  entitlementStrategy,
+  manualEntitlements,
 }) => {
   const { update } = useOrderStore();
   const { alert, dialog: feedbackDialog } = useAppFeedback();
@@ -707,6 +713,8 @@ const OrderForm: React.FC<OrderFormProps> = ({
         const correctionInput: OrderCorrectionInput = {
           reason: correctionReason.trim(),
           payoutContext,
+          entitlementStrategy,
+          manualEntitlements: entitlementStrategy === 'manual_correct' ? manualEntitlements : undefined,
           data: {
             customerId: form.customerId,
             ...(productItemsEdited ? {

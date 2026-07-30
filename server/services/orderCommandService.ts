@@ -16,10 +16,13 @@ import type {
   Commission,
   CommissionCorrectionPreview,
   CommissionCorrectionRecord,
+  CommissionManualEntitlementDraft,
   CommissionOperationLog,
+  CommissionPostPayoutEntryContext,
   CommissionPayoutCorrectionContext,
   CommissionPayoutRecord,
   OfficialPaymentChannel,
+  PostPayoutEntitlementStrategy,
 } from '../../src/types/commission';
 import { mapPrismaRole, mapPrismaUser } from '../db/prismaMappers';
 import { hasPermission, isSuperAdmin, PERMISSION_KEYS } from '../../src/shared/utils/permissions';
@@ -698,6 +701,32 @@ function orderHasActiveRefundOrReversal(order: Order): boolean {
 
 const INACTIVE_COMMISSION_STATUSES = new Set<Commission['status']>(['已撤回', '已取消', '待冲销', '已冲销']);
 
+function isManualFormalCommission(commission: Commission): boolean {
+  return !commission.correctionCaseId
+    && !isRecoveryCommission(commission)
+    && Boolean(commission.isManualAdjusted || commission.sourceType === '人工新增');
+}
+
+const POST_PAYOUT_ENTITLEMENT_STRATEGIES = new Set<PostPayoutEntitlementStrategy>([
+  'preserve_manual',
+  'recalculate_rules',
+  'manual_correct',
+]);
+
+function validateEntitlementStrategyInput(input: OrderCorrectionInput): string | undefined {
+  const strategy = input.entitlementStrategy;
+  if (strategy && !POST_PAYOUT_ENTITLEMENT_STRATEGIES.has(strategy)) {
+    return '发放后更正处理方式无效，请重新选择';
+  }
+  if (strategy === 'manual_correct' && !input.manualEntitlements?.length) {
+    return '人工修正应得必须完整填写更正后的分账结果';
+  }
+  if (strategy !== 'manual_correct' && input.manualEntitlements?.length) {
+    return '仅“人工修正应得”可以提交人工分账结果';
+  }
+  return undefined;
+}
+
 function inspectCorrectionEligibility(
   order: Order,
   lockedCommissions: Array<{ row: { status: string | null }; commission: Commission }>,
@@ -706,6 +735,8 @@ function inspectCorrectionEligibility(
   allowPostPayout = false,
   hasProtectedPayoutContext = false,
   payoutHistoryIssue?: string,
+  allowManualPostPayout = false,
+  protectedPaidSnapshots: Commission[] = [],
 ): OrderCorrectionPrecheck {
   const allCommissions = lockedCommissions.map(({ commission }) => commission);
   const currentIds = new Set(selectCurrentCommissionRounds(allCommissions).map((commission) => commission.id));
@@ -713,13 +744,34 @@ function inspectCorrectionEligibility(
   const commissions = currentRows.map(({ commission }) => commission);
   const statuses = currentRows.map(({ row, commission }) => String(row.status || commission.status || ''));
   const uniqueStatuses = Array.from(new Set(statuses.filter(Boolean)));
-  const manualCommissionCount = currentRows.filter(({ row, commission }) => {
+  const currentManualRows = currentRows.filter(({ row, commission }) => {
     const status = (String(row.status || commission.status || '') || commission.status) as Commission['status'];
     return !INACTIVE_COMMISSION_STATUSES.has(status)
-      && !commission.correctionCaseId
-      && !isRecoveryCommission(commission)
-      && (commission.isManualAdjusted || commission.sourceType === '人工新增');
-  }).length;
+      && isManualFormalCommission(commission);
+  });
+  const currentManualRoles = new Set(currentManualRows.map(({ commission }) => commission.role));
+  const protectedManualRows = protectedPaidSnapshots
+    .filter((commission) => isManualFormalCommission(commission) && !currentManualRoles.has(commission.role))
+    .map((commission) => ({ commission, status: '已发放' }));
+  const manualSources = [
+    ...currentManualRows.map(({ row, commission }) => ({
+      commission,
+      status: String(row.status || commission.status || ''),
+    })),
+    ...protectedManualRows,
+  ];
+  const manualCommissionCount = manualSources.length;
+  const manualCommissions: CommissionManualEntitlementDraft[] = manualSources.map(({ commission }) => ({
+    sourceCommissionId: commission.id,
+    role: commission.role,
+    ownerId: commission.ownerId || '',
+    owner: commission.owner,
+    departmentId: commission.departmentId,
+    department: commission.department,
+    performanceAmount: Number(commission.performanceAmount ?? commission.orderAmount ?? 0),
+    commissionAmount: Number(commission.commissionAmount || 0),
+    calculationNote: commission.calculationNote,
+  }));
   const hasPaid = statuses.includes('已发放') || hasProtectedPayoutContext;
   const blocked = (
     reasonCode: NonNullable<OrderCorrectionPrecheck['reasonCode']>,
@@ -733,6 +785,7 @@ function inspectCorrectionEligibility(
     commissionCount: commissions.length,
     manualCommissionCount,
     commissionStatuses: uniqueStatuses,
+    manualCommissions,
   });
   if (order.deletedAt) return blocked('order_deleted', '已删除订单不能更正');
   if (orderHasActiveRefundOrReversal(order)) {
@@ -741,10 +794,15 @@ function inspectCorrectionEligibility(
   if (payoutHistoryIssue) {
     return blocked('payout_started', payoutHistoryIssue);
   }
-  if (manualCommissionCount > 0) {
-    return blocked('manual_commission', `该订单存在 ${manualCommissionCount} 条人工新增或人工调整的分账，请先到财务中心处理`);
+  const manualRowsAreSupported = manualSources.every(({ status }) => (
+    ['待确认', '待发放', '已发放'].includes(status)
+  ));
+  if (manualCommissionCount > 0 && !(allowManualPostPayout && manualRowsAreSupported)) {
+    return blocked('manual_commission', `该订单存在 ${manualCommissionCount} 条人工新增或人工调整的分账，请从原发放记录进入“发放后更正”处理`);
   }
-  if (hasProtectedPayoutContext && statuses.some((status) => ['待确认', '待发放'].includes(status))) {
+  if (hasProtectedPayoutContext
+    && !allowManualPostPayout
+    && statuses.some((status) => ['待确认', '待发放'].includes(status))) {
     return blocked('payout_started', '当前仍有待确认或待发放分账，请先在财务撤回相关分账后再更正');
   }
   if (statuses.some((status) => ['待冲销', '已冲销'].includes(status))) {
@@ -765,6 +823,7 @@ function inspectCorrectionEligibility(
       commissionCount: commissions.length,
       manualCommissionCount,
       commissionStatuses: uniqueStatuses,
+      manualCommissions,
     };
   }
   if (statuses.some((status) => ['已撤回', '已取消'].includes(status))) {
@@ -781,6 +840,7 @@ function inspectCorrectionEligibility(
     commissionCount: commissions.length,
     manualCommissionCount,
     commissionStatuses: uniqueStatuses,
+    manualCommissions,
   };
 }
 
@@ -792,6 +852,8 @@ function assertCorrectableCommissions(
   allowPostPayout = false,
   hasProtectedPayoutContext = false,
   payoutHistoryIssue?: string,
+  allowManualPostPayout = false,
+  protectedPaidSnapshots: Commission[] = [],
 ): Commission[] {
   const eligibility = inspectCorrectionEligibility(
     order,
@@ -801,6 +863,8 @@ function assertCorrectableCommissions(
     allowPostPayout,
     hasProtectedPayoutContext,
     payoutHistoryIssue,
+    allowManualPostPayout,
+    protectedPaidSnapshots,
   );
   if (!eligibility.allowed) throw new OrderCommandError(409, eligibility.message);
   return selectCurrentCommissionRounds(lockedCommissions.map(({ commission }) => commission));
@@ -844,11 +908,19 @@ async function inspectFormalOrderPayoutHistory(
   transaction: Prisma.TransactionClient,
   orderId: string,
   knownCommissions: Commission[],
-): Promise<{ snapshots: Commission[]; issue?: string }> {
+): Promise<{
+  snapshots: Commission[];
+  postPayoutContext?: CommissionPostPayoutEntryContext;
+  issue?: string;
+}> {
   const rows = await transaction.businessRecord.findMany({
     where: { domain: STORAGE_KEYS.COMMISSION_PAYOUT_BATCHES },
   });
   const snapshots = new Map<string, Commission>();
+  const entryCandidates: Array<{
+    issuedAt: string;
+    context: CommissionPostPayoutEntryContext;
+  }> = [];
   const knownById = new Map(knownCommissions.map((commission) => [commission.id, commission]));
   let issue: string | undefined;
   for (const row of rows) {
@@ -864,6 +936,21 @@ async function inspectFormalOrderPayoutHistory(
         continue;
       }
       snapshots.set(snapshot.id, snapshot);
+      entryCandidates.push({
+        issuedAt: String(payout.issuedAt || snapshot.paymentDate || snapshot.createdAt || ''),
+        context: {
+          payoutRecordId: payout.id,
+          payoutNo: payout.payoutNo,
+          commissionId: snapshot.id,
+          sourceType: 'formal_order',
+          sourceId: orderId,
+          sourceBusinessNo: snapshot.orderNo,
+          employee: snapshot.owner,
+          role: snapshot.role,
+          originalPaidAmount: Number(snapshot.commissionAmount || 0),
+          attributedPeriod: String(snapshot.paymentDate || snapshot.createdAt).slice(0, 7),
+        },
+      });
     }
     for (const commissionId of includedIds) {
       if (validSnapshotIds.has(commissionId)) continue;
@@ -873,7 +960,15 @@ async function inspectFormalOrderPayoutHistory(
       }
     }
   }
-  return { snapshots: Array.from(snapshots.values()), issue };
+  entryCandidates.sort((left, right) => (
+    right.issuedAt.localeCompare(left.issuedAt)
+    || right.context.commissionId.localeCompare(left.context.commissionId)
+  ));
+  return {
+    snapshots: Array.from(snapshots.values()),
+    postPayoutContext: issue ? undefined : entryCandidates[0]?.context,
+    issue,
+  };
 }
 
 function cloneOrderCorrectionSnapshot(value: Order): Record<string, unknown> {
@@ -891,6 +986,9 @@ async function buildPaidOrderCorrectionPreview(
   next: Order,
   changedAt: string,
   previewCommissions: NonNullable<OrderCommandServiceOptions['previewCommissions']>,
+  entitlementStrategy: PostPayoutEntitlementStrategy = 'recalculate_rules',
+  manualEntitlements: CommissionManualEntitlementDraft[] = [],
+  directory?: Directory,
 ): Promise<{ preview: CommissionCorrectionPreview; expectedTarget: Commission[] }> {
   const [commissionRows, payoutRows, correctionRows, expectedTarget] = await Promise.all([
     transaction.businessRecord.findMany({ where: { domain: STORAGE_KEYS.COMMISSIONS } }),
@@ -900,6 +998,7 @@ async function buildPaidOrderCorrectionPreview(
   ]);
   const previousCorrections = correctionRows
     .map((row) => parseObject<CommissionCorrectionRecord>(row.data, '提成更正记录'));
+  const payoutRecords = payoutRows.map((row) => parsePayoutRecord(row.data));
   const beforeCommissions = commissionRows.map((row) => {
     const commission = parseObject<Commission>(row.data, '提成');
     return {
@@ -909,12 +1008,22 @@ async function buildPaidOrderCorrectionPreview(
   });
   const currentTarget = selectCurrentCommissionRounds(beforeCommissions)
     .filter((commission) => isFormalOrderCommission(commission, order.id));
-  const expectedById = new Map(expectedTarget.map((commission) => [commission.id, commission]));
-  const retainedManual = currentTarget
-    .filter((commission) => (
-      commission.isManualAdjusted
-      || commission.sourceType === '人工新增'
-    ) && !expectedById.has(commission.id))
+  const currentManual = currentTarget.filter(isManualFormalCommission);
+  const currentManualRoles = new Set(currentManual.map((commission) => commission.role));
+  const protectedManualById = new Map<string, Commission>();
+  payoutRecords.forEach((payout) => {
+    if (payout.status !== '已发放') return;
+    const includedIds = new Set(payout.commissionIds || []);
+    (payout.commissionSnapshots || []).forEach((snapshot) => {
+      if (!includedIds.has(snapshot.id)
+        || !isFormalOrderCommission(snapshot, order.id)
+        || !isManualFormalCommission(snapshot)
+        || currentManualRoles.has(snapshot.role)) return;
+      protectedManualById.set(snapshot.id, snapshot);
+    });
+  });
+  const manualSources = [...currentManual, ...protectedManualById.values()];
+  const retainedManual = manualSources
     .map((commission) => ({
       ...commission,
       customerName: next.customerName,
@@ -923,10 +1032,26 @@ async function buildPaidOrderCorrectionPreview(
       paymentDate: next.payments?.[0]?.paidAt || commission.paymentDate,
       updatedAt: changedAt,
     }));
+  const correctedManual = entitlementStrategy === 'manual_correct'
+    ? buildManualEntitlementTarget(manualSources, manualEntitlements, next, directory, changedAt)
+    : [];
+  const manualTarget = entitlementStrategy === 'manual_correct' ? correctedManual : retainedManual;
+  const claimedExpectedIds = new Set<string>();
+  if (entitlementStrategy === 'preserve_manual' || entitlementStrategy === 'manual_correct') {
+    manualTarget.forEach((commission) => {
+      const matched = closestExpectedCommission(commission, expectedTarget, claimedExpectedIds);
+      if (matched) claimedExpectedIds.add(matched.id);
+    });
+  }
+  const effectiveExpectedTarget = entitlementStrategy === 'preserve_manual' || entitlementStrategy === 'manual_correct'
+    ? [
+      ...expectedTarget.filter((commission) => !claimedExpectedIds.has(commission.id)),
+      ...manualTarget,
+    ]
+    : expectedTarget;
   const afterCommissions = [
     ...beforeCommissions.filter((commission) => !isFormalOrderCommission(commission, order.id)),
-    ...expectedTarget,
-    ...retainedManual,
+    ...effectiveExpectedTarget,
   ];
   const preview = buildCommissionCorrectionImpact({
     sourceBusinessType: 'formal_order',
@@ -937,13 +1062,90 @@ async function buildPaidOrderCorrectionPreview(
     afterBusinessSnapshot: cloneOrderCorrectionSnapshot(next),
     beforeCommissions,
     afterCommissions,
-    payoutRecords: payoutRows.map((row) => parsePayoutRecord(row.data)),
+    payoutRecords,
+    entitlementStrategy,
   });
   const overlapping = findOverlappingFinancialCorrection(preview, previousCorrections);
   if (overlapping) {
     throw new Error(`当前已有差额更正 ${overlapping.correctionNo} 涉及同一已发放提成，为避免阶梯联动或跨源单重复补发、追回，当前不支持叠加更正`);
   }
-  return { preview, expectedTarget };
+  return { preview, expectedTarget: effectiveExpectedTarget };
+}
+
+function buildManualEntitlementTarget(
+  currentTarget: Commission[],
+  drafts: CommissionManualEntitlementDraft[],
+  next: Order,
+  directory: Directory | undefined,
+  changedAt: string,
+): Commission[] {
+  if (!directory) throw new OrderCommandError(503, '员工目录不可用，暂不能人工修正应得');
+  const manualCurrent = currentTarget.filter((commission) => (
+    commission.isManualAdjusted || commission.sourceType === '人工新增'
+  ));
+  const draftById = new Map(drafts.map((draft) => [draft.sourceCommissionId, draft]));
+  if (draftById.size !== drafts.length || manualCurrent.some((commission) => !draftById.has(commission.id))) {
+    throw new OrderCommandError(400, '请完整填写每一条人工分账的更正结果');
+  }
+  if (drafts.some((draft) => !manualCurrent.some((commission) => commission.id === draft.sourceCommissionId))) {
+    throw new OrderCommandError(400, '人工更正中包含不属于当前订单的分账');
+  }
+  return manualCurrent.map((commission) => {
+    const draft = draftById.get(commission.id)!;
+    const role = String(draft.role || '').trim();
+    const performanceAmount = Math.round(Number(draft.performanceAmount) * 100) / 100;
+    const commissionAmount = Math.round(Number(draft.commissionAmount) * 100) / 100;
+    if (!role || !draft.ownerId) throw new OrderCommandError(400, '人工更正必须填写提成角色和员工');
+    if (!Number.isFinite(performanceAmount) || performanceAmount < 0) {
+      throw new OrderCommandError(400, '人工更正的业绩金额不能小于0');
+    }
+    if (!Number.isFinite(commissionAmount) || commissionAmount < 0) {
+      throw new OrderCommandError(400, '人工更正的提成金额不能小于0');
+    }
+    const selectedUser = directory.users.find((user) => user.id === draft.ownerId);
+    const keepingHistoricalOwner = draft.ownerId === commission.ownerId;
+    if (!selectedUser && !keepingHistoricalOwner) throw new OrderCommandError(409, '更正后的提成员工不存在');
+    if (selectedUser && !keepingHistoricalOwner && (
+      !selectedUser.isActive || (selectedUser.employmentStatus || 'active') !== 'active'
+    )) {
+      throw new OrderCommandError(409, '不能将更正后的提成分配给已停用或已离职员工');
+    }
+    const departmentId = selectedUser?.departmentId || draft.departmentId || commission.departmentId;
+    const department = directory.departments.find((item) => item.id === departmentId)?.name
+      || draft.department
+      || commission.department;
+    const owner = selectedUser?.name || commission.owner;
+    return {
+      ...commission,
+      customerName: next.customerName,
+      productLevel: next.productLevel,
+      orderAmount: next.actualAmount,
+      performanceAmount,
+      commissionRate: 0,
+      commissionAmount,
+      scene: next.dealScene,
+      resourceOwnership: next.resourceOwnership,
+      proofStatus: next.proofStatus,
+      paymentDate: next.payments?.[0]?.paidAt || commission.paymentDate,
+      role,
+      ownerId: draft.ownerId,
+      owner,
+      departmentId,
+      department,
+      payoutPlanId: undefined,
+      payoutPlanName: undefined,
+      payoutPlanVersion: undefined,
+      payoutPlanSnapshot: undefined,
+      tierSnapshot: undefined,
+      commissionRuleId: undefined,
+      ruleCalculationType: 'fixed',
+      sourceType: '人工新增',
+      isManualAdjusted: true,
+      calculationNote: String(draft.calculationNote || '').trim() || `发放后人工更正应得 ${commissionAmount} 元`,
+      formulaText: `发放后人工更正应得 ${commissionAmount} 元`,
+      updatedAt: changedAt,
+    };
+  });
 }
 
 function closestExpectedCommission(
@@ -993,11 +1195,8 @@ async function applyPaidOrderCommissionProjection(
   for (const { row, commission } of lockedCommissionRows) {
     if (!currentIds.has(commission.id) || !isFormalOrderCommission(commission, order.id)) continue;
     const currentStatus = (String(row.status || commission.status || '') || commission.status) as Commission['status'];
-    const isManual = commission.isManualAdjusted || commission.sourceType === '人工新增';
     const protectedExpected = protectedExpectedByCommissionId.get(commission.id);
-    const expected = isManual
-      ? undefined
-      : protectedExpected || closestExpectedCommission(commission, expectedTarget, claimedExpectedIds);
+    const expected = protectedExpected || closestExpectedCommission(commission, expectedTarget, claimedExpectedIds);
     if (expected && !protectedExpected) claimedExpectedIds.add(expected.id);
 
     if (currentStatus === '已发放') {
@@ -1041,22 +1240,6 @@ async function applyPaidOrderCommissionProjection(
     }
 
     if (INACTIVE_COMMISSION_STATUSES.has(currentStatus)) continue;
-    if (isManual) {
-      const projected = {
-        ...commission,
-        customerName: next.customerName,
-        orderNo: next.orderNo,
-        productLevel: next.productLevel,
-        orderAmount: next.actualAmount,
-        paymentDate: next.payments?.[0]?.paidAt || commission.paymentDate,
-        updatedAt: changedAt,
-      };
-      await transaction.businessRecord.update({
-        where: { domain_recordId: { domain: STORAGE_KEYS.COMMISSIONS, recordId: commission.id } },
-        data: { customerId: next.customerId, eventAt: new Date(projected.paymentDate || changedAt), data: jsonValue(projected) },
-      });
-      continue;
-    }
     if (expected) {
       const rebuilt: Commission = { ...expected, id: commission.id, status: '待确认', updatedAt: changedAt };
       await transaction.businessRecord.update({
@@ -1282,16 +1465,23 @@ export function createOrderCommandService(
             isSuperAdmin(actor),
             hasProtectedPayout,
             payoutHistory.issue,
+            hasProtectedPayoutContext,
+            payoutHistory.snapshots,
           );
-          return eligibility.allowed && isSuperAdmin(actor) && options.previewCommissions
+          const withEntryContext = {
+            ...eligibility,
+            manualCommissions: isSuperAdmin(actor) ? eligibility.manualCommissions : undefined,
+            postPayoutContext: isSuperAdmin(actor) ? payoutHistory.postPayoutContext : undefined,
+          };
+          return withEntryContext.allowed && isSuperAdmin(actor) && options.previewCommissions
             ? {
-              ...eligibility,
+              ...withEntryContext,
               requiresImpactPreview: true,
-              message: eligibility.mode === 'post_payout'
-                ? eligibility.message
+              message: withEntryContext.mode === 'post_payout'
+                ? withEntryContext.message
                 : '保存前将统一预览对已发放提成及月度阶梯的联动影响',
             }
-            : eligibility;
+            : withEntryContext;
         }, {
           isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
           maxWait: 5_000,
@@ -1313,6 +1503,8 @@ export function createOrderCommandService(
       const reason = String(input?.reason || '').trim();
       if (!cleanOrderId) return failure<CommissionCorrectionPreview>('订单ID不能为空', 400);
       if (!reason) return failure<CommissionCorrectionPreview>('订单更正必须填写原因', 400);
+      const strategyError = validateEntitlementStrategyInput(input);
+      if (strategyError) return failure<CommissionCorrectionPreview>(strategyError, 400);
       if (!hasPermission(actor, PERMISSION_KEYS.ORDER_CORRECT, 'write') || !isSuperAdmin(actor)) {
         return failure<CommissionCorrectionPreview>('仅超级管理员可测算已发放订单的更正影响', 403);
       }
@@ -1332,7 +1524,11 @@ export function createOrderCommandService(
           if (serverField) throw new OrderCommandError(400, `字段 ${serverField} 由服务端维护，不能更正`);
           const unsupported = changed.find((field) => !CORRECTION_INPUT_FIELDS.has(field));
           if (unsupported) throw new OrderCommandError(400, `字段 ${unsupported} 不支持订单更正`);
-          if (!changed.length) throw new OrderCommandError(400, '未检测到需要更正的内容');
+          const hasManualEntitlementCorrection = input.entitlementStrategy === 'manual_correct'
+            && Boolean(input.manualEntitlements?.length);
+          if (!changed.length && !hasManualEntitlementCorrection) {
+            throw new OrderCommandError(400, '未检测到需要更正的内容');
+          }
           const lockedCommissionRows = await lockOrderCommissions(transaction, order.id);
           const hasProtectedPayoutContext = await hasValidFormalOrderPayoutContext(
             transaction,
@@ -1355,6 +1551,8 @@ export function createOrderCommandService(
             true,
             hasProtectedPayout,
             payoutHistory.issue,
+            Boolean(hasProtectedPayoutContext && input.entitlementStrategy),
+            payoutHistory.snapshots,
           );
           if (!eligibility.allowed) throw new OrderCommandError(409, eligibility.message);
           const changedAt = now().toISOString();
@@ -1365,6 +1563,9 @@ export function createOrderCommandService(
             next,
             changedAt,
             options.previewCommissions!,
+            input.entitlementStrategy || 'recalculate_rules',
+            input.manualEntitlements,
+            directory,
           );
           return result.preview;
         }, {
@@ -1473,6 +1674,8 @@ export function createOrderCommandService(
       const reason = String(input?.reason || '').trim();
       if (!cleanOrderId) return failure<Order>('订单ID不能为空', 400);
       if (!reason) return failure<Order>('订单更正必须填写原因', 400);
+      const strategyError = validateEntitlementStrategyInput(input);
+      if (strategyError) return failure<Order>(strategyError, 400);
       const directory = await loadDirectory(prisma);
       if (!hasPermission(actor, PERMISSION_KEYS.ORDER_CORRECT, 'write')) {
         return failure<Order>('无订单更正权限', 403);
@@ -1492,7 +1695,9 @@ export function createOrderCommandService(
           if (serverField) throw new OrderCommandError(400, `字段 ${serverField} 由服务端维护，不能更正`);
           const unsupported = changed.find((field) => !CORRECTION_INPUT_FIELDS.has(field));
           if (unsupported) throw new OrderCommandError(400, `字段 ${unsupported} 不支持订单更正`);
-          if (!changed.length) return order;
+          const hasManualEntitlementCorrection = input.entitlementStrategy === 'manual_correct'
+            && Boolean(input.manualEntitlements?.length);
+          if (!changed.length && !hasManualEntitlementCorrection) return order;
 
           const lockedCommissionRows = await lockOrderCommissions(transaction, order.id);
           const rebuildPendingCommissions = options.rebuildPendingCommissions;
@@ -1527,6 +1732,8 @@ export function createOrderCommandService(
             isSuperAdmin(actor),
             hasProtectedPayout,
             payoutHistory.issue,
+            Boolean(hasProtectedPayoutContext && input.entitlementStrategy),
+            payoutHistory.snapshots,
           );
 
           const changedAt = now().toISOString();
@@ -1545,6 +1752,9 @@ export function createOrderCommandService(
                 next,
                 changedAt,
                 options.previewCommissions,
+                input.entitlementStrategy || 'recalculate_rules',
+                input.manualEntitlements,
+                directory,
               );
               preview = result.preview;
               previewExpectedTarget = result.expectedTarget;

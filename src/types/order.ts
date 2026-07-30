@@ -1,8 +1,11 @@
 import type { ID, Timestamp, ProductLevel, OrderType, PaymentMethod, RefundStatus } from './common';
 import type {
+  CommissionManualEntitlementDraft,
+  CommissionPostPayoutEntryContext,
   CommissionPayoutCorrectionContext,
   CommissionScene,
   OfficialPaymentChannel,
+  PostPayoutEntitlementStrategy,
   ProofStatus,
   ResourceOwnership,
   SettlementStatus,
@@ -77,6 +80,10 @@ export interface OrderChangeLog {
 export interface OrderCorrectionInput {
   reason: string;
   data: Partial<Order>;
+  /** 已发放且存在人工分账时，明确本次如何形成新的应得结果。 */
+  entitlementStrategy?: PostPayoutEntitlementStrategy;
+  /** “人工修正应得”时提交的完整人工分账结果。 */
+  manualEntitlements?: CommissionManualEntitlementDraft[];
   /** 已发放后更正必须提交与最新预览一致的影响哈希。 */
   expectedImpactHash?: string;
   /** 从发放记录进入时携带，用于锁定不可变的原发快照。 */
@@ -101,6 +108,9 @@ export interface OrderCorrectionPrecheck {
   commissionStatuses: string[];
   mode: 'standard' | 'post_payout';
   requiresImpactPreview: boolean;
+  manualCommissions?: CommissionManualEntitlementDraft[];
+  /** 普通订单入口识别到历史发放后，直接打开统一更正流程，避免跳转到无操作页面。 */
+  postPayoutContext?: CommissionPostPayoutEntryContext;
 }
 
 export type OrderApplicationStatus = '待财务审核' | '退回修改' | '已入库' | '已驳回';

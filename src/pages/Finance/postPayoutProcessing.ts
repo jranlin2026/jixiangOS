@@ -1,23 +1,15 @@
-import type { Commission, CommissionPayoutRecord } from '../../types/commission';
+import type {
+  Commission,
+  CommissionPostPayoutEntryContext,
+  CommissionPayoutRecord,
+} from '../../types/commission';
 import {
   isAfterSalesRecoveryCommission,
   isRecoveryCommission,
 } from '../../shared/utils/commissionConfiguration';
 
 export type PostPayoutProcessingSourceType = 'formal_order' | 'after_sales_recovery';
-
-export interface PostPayoutProcessingContext {
-  payoutRecordId: string;
-  payoutNo: string;
-  commissionId: string;
-  sourceType: PostPayoutProcessingSourceType;
-  sourceId: string;
-  sourceBusinessNo: string;
-  employee: string;
-  role: string;
-  originalPaidAmount: number;
-  attributedPeriod: string;
-}
+export type PostPayoutProcessingContext = CommissionPostPayoutEntryContext;
 
 export function buildPostPayoutProcessingContext(
   payoutRecord: CommissionPayoutRecord,

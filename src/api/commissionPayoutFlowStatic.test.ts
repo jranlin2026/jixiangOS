@@ -42,6 +42,16 @@ assert.doesNotMatch(
   /if \(!precheck\.data\.allowed\) throw new Error/,
   '预检不通过不得吞掉已加载的当前源业务状态',
 );
+for (const strategyLabel of ['保留原提成结果', '按系统规则重算', '人工修正应得']) {
+  assert.match(postPayoutCorrectionSource, new RegExp(strategyLabel), `已发放人工分账必须提供“${strategyLabel}”策略`);
+}
+assert.match(postPayoutCorrectionSource, /manualEntitlements/);
+assert.match(postPayoutCorrectionSource, /entitlementStrategy/);
+assert.match(serverSource, /correction-preview[\s\S]{0,700}entitlementStrategy:\s*req\.body\?\.entitlementStrategy[\s\S]{0,200}manualEntitlements:\s*req\.body\?\.manualEntitlements/,
+  '预览接口必须把人工分账策略完整传到服务层');
+assert.match(serverSource, /\/api\/orders\/:id\/correct[\s\S]{0,700}entitlementStrategy:\s*req\.body\?\.entitlementStrategy[\s\S]{0,200}manualEntitlements:\s*req\.body\?\.manualEntitlements/,
+  '正式更正接口必须把人工分账策略完整传到服务层');
+assert.match(postPayoutCorrectionSource, /该提成包含人工调整，请选择本次更正如何处理原人工分账/);
 assert.doesNotMatch(payoutSource, />暂不支持</, '正式订单不得再显示暂不支持');
 assert.match(payoutSource, /isSuperAdmin\(currentUser\)/, '发放后处理入口必须仅对超级管理员开放');
 assert.match(payoutSource, /detailRecord\?\.status === '已发放'/, '已撤销发放单不得显示发放后处理入口');
