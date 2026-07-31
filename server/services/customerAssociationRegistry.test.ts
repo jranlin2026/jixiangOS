@@ -368,6 +368,80 @@ const unconvertedLeadAudit = await auditHistoricalCustomerAssociationIds({
 assert.equal(unconvertedLeadAudit.backfillCandidates, 0, '未转客户线索不得仅凭姓名生成客户关联回填');
 assert.deepEqual(unconvertedLeadAudit.repairRows, [], '未转客户线索缺少 customerId 是正常状态');
 
+const cascadeDeletedLeadAudit = await auditHistoricalCustomerAssociationIds({
+  businessRecord: {
+    findMany: async () => [{
+      id: 'customer-cascade-deleted',
+      domain: STORAGE_KEYS.CUSTOMERS,
+      recordId: 'customer-cascade-deleted',
+      customerId: 'customer-cascade-deleted',
+      updatedAt: AUDIT_AT,
+      data: {
+        ...customer,
+        id: 'customer-cascade-deleted',
+        deletedAt: AUDIT_AT.toISOString(),
+        deletionCascadeId: 'delete-cascade-regression',
+        cascadeDeletedLeadIds: ['lead-cascade-deleted'],
+      },
+    }],
+  },
+  leadRecord: {
+    findMany: async () => [{
+      id: 'lead-cascade-deleted',
+      data: {
+        id: 'lead-cascade-deleted',
+        customerId: 'customer-cascade-deleted',
+        deletedAt: AUDIT_AT.toISOString(),
+        deletionCascadeId: 'delete-cascade-regression',
+      },
+      updatedAt: AUDIT_AT,
+    }],
+  },
+  customerTodo: { findMany: async () => [] },
+  appStorage: { findUnique: async () => null },
+} as any, { apply: false });
+assert.deepEqual(
+  cascadeDeletedLeadAudit.repairRows,
+  [],
+  '客户与线索同步软删除后必须保留历史 customerId，不得误报为活跃脏关联',
+);
+
+const legacyIsDeletedFlagLeadAudit = await auditHistoricalCustomerAssociationIds({
+  businessRecord: {
+    findMany: async () => [{
+      id: 'customer-deleted-for-active-lead',
+      domain: STORAGE_KEYS.CUSTOMERS,
+      recordId: 'customer-deleted-for-active-lead',
+      customerId: 'customer-deleted-for-active-lead',
+      updatedAt: AUDIT_AT,
+      data: {
+        ...customer,
+        id: 'customer-deleted-for-active-lead',
+        deletedAt: AUDIT_AT.toISOString(),
+      },
+    }],
+  },
+  leadRecord: {
+    findMany: async () => [{
+      id: 'lead-with-unsupported-delete-flag',
+      data: {
+        id: 'lead-with-unsupported-delete-flag',
+        customerId: 'customer-deleted-for-active-lead',
+        isDeleted: true,
+      },
+      updatedAt: AUDIT_AT,
+    }],
+  },
+  customerTodo: { findMany: async () => [] },
+  appStorage: { findUnique: async () => null },
+} as any, { apply: false });
+assert.deepEqual(legacyIsDeletedFlagLeadAudit.repairRows, [{
+  storageDomain: 'lead_records',
+  pathKey: 'data.customerId',
+  recordId: 'lead-with-unsupported-delete-flag',
+  reason: 'CUSTOMER_REFERENCE_DELETED',
+}], '线索仅有非正式 isDeleted 标志时仍必须参与关联审计');
+
 const convertedLeadMissingReferenceAudit = await auditHistoricalCustomerAssociationIds({
   businessRecord: {
     findMany: async () => [{

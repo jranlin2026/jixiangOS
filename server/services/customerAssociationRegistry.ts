@@ -628,6 +628,7 @@ export async function auditHistoricalCustomerAssociationIds(
   }
   for (const row of leadRows) {
     const data = readObject(row.data);
+    if (data.deletedAt) continue;
     validateReference('lead_records', 'data.customerId', String(row.id), data.customerId);
     if (!String(data.customerId || '').trim()) {
       const historicalCustomerIds = Array.from(new Set(
