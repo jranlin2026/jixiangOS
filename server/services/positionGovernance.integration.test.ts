@@ -3,7 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { createPositionGovernanceService } from './positionGovernance';
 
-if (!process.env.DATABASE_URL) {
+if (process.env.JIXIANG_SKIP_POSITION_GOVERNANCE_INTEGRATION === 'YES') {
+  console.log('position governance integration skipped by explicit deployment gate');
+} else if (!process.env.DATABASE_URL) {
   console.log('position governance integration skipped: DATABASE_URL is not set');
 } else {
   let databaseUrl: URL;

@@ -393,7 +393,7 @@ if [ "$SYSTEM_SETUP_STATE" != "ACTIVE" ] && [ "$SYSTEM_SETUP_STATE" != "UNINITIA
   echo "Unrecognized system setup state: $SYSTEM_SETUP_STATE" >&2
   false
 fi
-NODE_ENV=test VITE_USE_BACKEND_API=false VITE_AI_API_BASE=/api JIXIANG_DEFAULT_ADMIN_PASSWORD= JIXIANG_DEFAULT_USER_PASSWORD= JIXIANG_SKIP_BUSINESS_RECYCLE_PURGE_INTEGRATION=YES npm test
+NODE_ENV=test VITE_USE_BACKEND_API=false VITE_AI_API_BASE=/api JIXIANG_DEFAULT_ADMIN_PASSWORD= JIXIANG_DEFAULT_USER_PASSWORD= JIXIANG_SKIP_BUSINESS_RECYCLE_PURGE_INTEGRATION=YES JIXIANG_SKIP_POSITION_GOVERNANCE_INTEGRATION=YES npm test
 if [ "$SYSTEM_SETUP_STATE" = "ACTIVE" ]; then
   echo "Repairing legacy business records (idempotent)..."
   npm run business-records:repair -- --apply --confirm-production
@@ -533,6 +533,7 @@ def main() -> int:
                 "JIXIANG_DEFAULT_ADMIN_PASSWORD": "",
                 "JIXIANG_DEFAULT_USER_PASSWORD": "",
                 "JIXIANG_SKIP_BUSINESS_RECYCLE_PURGE_INTEGRATION": "YES",
+                "JIXIANG_SKIP_POSITION_GOVERNANCE_INTEGRATION": "YES",
             }
             npm = "npm.cmd" if os.name == "nt" else "npm"
             run_local([npm, "test"], env=test_env)

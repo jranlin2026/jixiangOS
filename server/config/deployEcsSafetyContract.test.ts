@@ -8,6 +8,10 @@ const deploySource = readFileSync(join(process.cwd(), 'scripts', 'deploy', 'depl
 const legacyDeployPath = join(process.cwd(), 'scripts', 'deploy', 'deploy-linux.sh');
 const legacyDeploySource = readFileSync(legacyDeployPath, 'utf8');
 const backupSource = readFileSync(join(process.cwd(), 'scripts', 'mysql', 'backup-linux.sh'), 'utf8');
+const positionGovernanceIntegrationSource = readFileSync(
+  join(process.cwd(), 'server', 'services', 'positionGovernance.integration.test.ts'),
+  'utf8',
+);
 assert.match(backupSource, /JIXIANG_BACKUP_PRUNE/);
 assert.match(backupSource, /if \[\[ "\$PRUNE_BACKUPS" == "YES" \]\]/);
 assert.match(backupSource, /TABLE_COUNT/);
@@ -49,6 +53,16 @@ assert.match(
   deploySource,
   /test_env = \{[\s\S]*?"JIXIANG_SKIP_BUSINESS_RECYCLE_PURGE_INTEGRATION": "YES"/,
   '发布前本地测试必须隔离破坏性回收站集成测试，避免读取项目生产数据库配置',
+);
+assert.match(
+  deploySource,
+  /test_env = \{[\s\S]*?"JIXIANG_SKIP_POSITION_GOVERNANCE_INTEGRATION": "YES"/,
+  '发布前本地测试必须隔离岗位治理专用数据库集成测试',
+);
+assert.match(
+  positionGovernanceIntegrationSource,
+  /JIXIANG_SKIP_POSITION_GOVERNANCE_INTEGRATION[^\n]*YES/,
+  '岗位治理集成测试必须支持发布阶段显式隔离',
 );
 const archiveExcludes = deploySource.slice(deploySource.indexOf('EXCLUDE_DIRS'), deploySource.indexOf('EXCLUDE_FILES'));
 assert.match(archiveExcludes, /"uploads"/);
@@ -111,7 +125,7 @@ assert.match(remote, /Skipping legacy production data gates for an uninitialized
 assert.match(remote, /npm test/);
 assert.match(
   remote,
-  /NODE_ENV=test VITE_USE_BACKEND_API=false VITE_AI_API_BASE=\/api JIXIANG_DEFAULT_ADMIN_PASSWORD= JIXIANG_DEFAULT_USER_PASSWORD= JIXIANG_SKIP_BUSINESS_RECYCLE_PURGE_INTEGRATION=YES npm test/,
+  /NODE_ENV=test VITE_USE_BACKEND_API=false VITE_AI_API_BASE=\/api JIXIANG_DEFAULT_ADMIN_PASSWORD= JIXIANG_DEFAULT_USER_PASSWORD= JIXIANG_SKIP_BUSINESS_RECYCLE_PURGE_INTEGRATION=YES JIXIANG_SKIP_POSITION_GOVERNANCE_INTEGRATION=YES npm test/,
   '发布测试必须隔离浏览器后端配置与生产默认密码，避免生产环境污染测试夹具',
 );
 assertBefore('customer:demo-fixture-cleanup', 'npm run customer:association-audit', '已知演示数据必须先备份清理再做关联审计');
