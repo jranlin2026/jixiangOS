@@ -645,7 +645,7 @@ model PositionStandardResource {
   standardVersion  PositionStandardVersion @relation(fields: [standardVersionId], references: [id], onDelete: Cascade)
   knowledgeVersion KnowledgeVersion        @relation(fields: [knowledgeVersionId], references: [id], onDelete: Restrict)
 
-  @@unique([standardVersionId, knowledgeVersionId])
+  @@unique([standardVersionId, knowledgeVersionId], map: "position_standard_resources_version_knowledge_key")
   @@index([knowledgeVersionId])
   @@map("position_standard_resources")
 }
@@ -712,9 +712,9 @@ model EmployeeTask {
   template TaskTemplate?  @relation(fields: [templateId], references: [id], onDelete: SetNull)
   evidence TaskEvidence[]
 
-  @@unique([templateId, employeeId, workDate])
-  @@index([employeeId, workDate, status])
-  @@index([departmentIdSnapshot, workDate, status])
+  @@unique([templateId, employeeId, workDate], map: "employee_tasks_template_employee_workDate_key")
+  @@index([employeeId, workDate, status], map: "employee_tasks_employee_workDate_status_idx")
+  @@index([departmentIdSnapshot, workDate, status], map: "employee_tasks_department_workDate_status_idx")
   @@index([dueAt, status])
   @@map("employee_tasks")
 }
@@ -752,7 +752,7 @@ model DailyReview {
   updatedAt            DateTime @updatedAt
 
   @@unique([employeeId, workDate])
-  @@index([departmentIdSnapshot, workDate])
+  @@index([departmentIdSnapshot, workDate], map: "daily_reviews_departmentId_workDate_idx")
   @@map("daily_reviews")
 }
 
